@@ -13,7 +13,7 @@ use scenarium::{SPECIAL_NODES, SpecialNode};
 
 use crate::core::document::PortRef;
 use crate::core::edit::intent::sink::Intents;
-use crate::core::edit::intent::types::Intent;
+use crate::core::edit::intent::types::GraphIntent;
 use crate::gui::app::AppContext;
 use crate::gui::canvas::anchored_menu::AnchoredMenu;
 use crate::gui::canvas::{CanvasGesture, outer_canvas_widget_id, to_world};
@@ -238,8 +238,8 @@ fn palette_body(
     search: &mut Search,
     scroll_cap: f32,
     focus: bool,
-) -> Option<Intent> {
-    let mut chosen: Option<Intent> = None;
+) -> Option<GraphIntent> {
+    let mut chosen: Option<GraphIntent> = None;
 
     let search_id = search_field_wid();
     TextEdit::new(&mut search.text)
@@ -347,7 +347,7 @@ impl<'a> Palette<'a> {
 
 impl PaletteColumn<'_> {
     /// Record this column: its category name above its rows.
-    fn show(self, ui: &mut Ui, popup: &PopupHandle, palette: &Palette<'_>) -> Option<Intent> {
+    fn show(self, ui: &mut Ui, popup: &PopupHandle, palette: &Palette<'_>) -> Option<GraphIntent> {
         let category = self.category;
         let mut chosen = None;
         Panel::vstack()
@@ -416,7 +416,7 @@ impl PaletteEntry<'_> {
     /// resolve: a library graph brings the localized copy, one of this
     /// graph's own definitions is named by id, and neither builds bindings
     /// here — `build_step` seeds them off the definition it resolves.
-    fn show(self, ui: &mut Ui, popup: &PopupHandle, palette: &Palette<'_>) -> Option<Intent> {
+    fn show(self, ui: &mut Ui, popup: &PopupHandle, palette: &Palette<'_>) -> Option<GraphIntent> {
         let pos = palette.pos;
         match self {
             PaletteEntry::Func(func) => add_from_func(ui, popup, pos, func, || func.into()),
@@ -449,10 +449,10 @@ fn add_from_func(
     pos: Vec2,
     func: &Func,
     node: impl FnOnce() -> Node,
-) -> Option<Intent> {
+) -> Option<GraphIntent> {
     menu_row(ui, popup, func).then(|| {
         let node_id = NodeId::unique();
-        Intent::AddNode {
+        GraphIntent::AddNode {
             pos,
             node_id,
             node: node(),

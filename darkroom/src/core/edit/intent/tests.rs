@@ -10,7 +10,7 @@ use crate::core::document::{Document, Viewport};
 use crate::core::edit::intent::apply::{apply_step, commit_intent, revert_step};
 use crate::core::edit::intent::duplicate::internals::duplicate_offset;
 use crate::core::edit::intent::duplicate::{build_duplicate_intent, build_duplicate_intent_for};
-use crate::core::edit::intent::types::{Intent, NodeProperty, Refusal, UndoStep};
+use crate::core::edit::intent::types::{GraphIntent, NodeProperty, Refusal, UndoStep};
 
 /// Add a bare `Func`-kind node to `doc`'s root graph + main view at
 /// `pos`, returning its id.
@@ -19,54 +19,6 @@ fn add_node_at(doc: &mut Document, pos: Vec2) -> NodeId {
     let id = doc.graph.add(node);
     doc.main_view.item_placements.insert(id, pos);
     id
-}
-
-/// Pane arrangement is not undoable, so the dirty verdict rides
-/// `commit_dock_op`'s return rather than a step predicate. The split is the
-/// same one the exit prompt cares about: a tab moved or split into its own
-/// pane is invested work, while focus and closes are navigation.
-#[test]
-fn dock_ops_report_only_arrangement_as_savable_work() {
-    use crate::core::document::TabRef;
-    use crate::core::document::dock::{DockDrop, DockOp, SplitSide};
-    use crate::core::edit::intent::apply::commit_dock_op;
-
-    let mut doc = Document::default();
-    let primary = doc.layout.primary().id;
-    doc.layout.find_or_insert(TabRef::Preferences, primary);
-
-    assert!(
-        !commit_dock_op(
-            DockOp::ActivateTab {
-                tab: TabRef::Preferences
-            },
-            &mut doc
-        ),
-        "activating a tab is focus, not arrangement work"
-    );
-    assert!(
-        commit_dock_op(
-            DockOp::MoveTab {
-                tab: TabRef::Preferences,
-                to: DockDrop::Split {
-                    group: primary,
-                    side: SplitSide::Right,
-                },
-            },
-            &mut doc
-        ),
-        "splitting a tab into its own pane is work the exit prompt protects"
-    );
-    assert!(
-        !commit_dock_op(
-            DockOp::CloseTab {
-                tab: TabRef::Preferences
-            },
-            &mut doc
-        ),
-        "closing is navigation"
-    );
-    doc.validate().expect("every op left the layout valid");
 }
 
 #[test]
@@ -238,7 +190,7 @@ fn invalid_viewports_are_dropped_before_mutation() {
     ];
     for to in invalid {
         assert!(
-            commit_intent(Intent::SetViewport { to }, &mut doc).is_err(),
+            commit_intent(GraphIntent::SetViewport { to }, &mut doc).is_err(),
             "invalid viewport {to:?} must be dropped"
         );
         assert_eq!(
@@ -252,7 +204,7 @@ fn invalid_viewports_are_dropped_before_mutation() {
         zoom: 2.0,
     };
     assert!(
-        commit_intent(Intent::SetViewport { to: valid }, &mut doc).is_ok(),
+        commit_intent(GraphIntent::SetViewport { to: valid }, &mut doc).is_ok(),
         "a finite positive viewport must commit"
     );
     assert_eq!(doc.main_view.viewport, valid);
@@ -264,7 +216,7 @@ fn subscribe_unsubscribe_commit_and_undo() {
     let mut doc = Document::default();
     let emitter = add_node_at(&mut doc, Vec2::ZERO);
     let subscriber = add_node_at(&mut doc, Vec2::new(100.0, 0.0));
-    let set_sub = |e, i, s, subscribe| Intent::SetSubscription {
+    let set_sub = |e, i, s, subscribe| GraphIntent::SetSubscription {
         emitter: e,
         event_idx: i,
         subscriber: s,
@@ -325,7 +277,7 @@ fn duplicate_intent_drops_or_keeps_external_by_flag() {
     let node_ids: BTreeSet<NodeId> = [a, b].into_iter().collect();
     doc.main_view.selected = node_ids.iter().copied().collect();
 
-    let Some(Intent::DuplicateNodes {
+    let Some(GraphIntent::DuplicateNodes {
         nodes,
         bindings,
         subscriptions,
@@ -382,7 +334,7 @@ fn duplicate_intent_drops_or_keeps_external_by_flag() {
     // With `include_incoming`, the same selection keeps the external
     // c -> b edge, the clone's input still pointing at the original c.
     // (Fresh build → fresh clone ids, so re-find b's clone by position.)
-    let Some(Intent::DuplicateNodes {
+    let Some(GraphIntent::DuplicateNodes {
         nodes: incoming_nodes,
         bindings: incoming,
         ..
@@ -436,7 +388,7 @@ fn set_node_property_commits_and_reverts() {
         NodeProperty::Disabled(true),
     ];
     for to in cases {
-        let step = commit_intent(Intent::SetNodeProperty { node_id: id, to }, &mut doc)
+        let step = commit_intent(GraphIntent::SetNodeProperty { node_id: id, to }, &mut doc)
             .unwrap_or_else(|_| panic!("{to:?} is a real change, not a no-op"));
         let node = doc.graph.find(id).unwrap();
         match to {
@@ -463,7 +415,7 @@ fn set_node_property_commits_and_reverts() {
         NodeProperty::Disabled(false),
     ] {
         assert!(
-            commit_intent(Intent::SetNodeProperty { node_id: id, to }, &mut doc,).is_err(),
+            commit_intent(GraphIntent::SetNodeProperty { node_id: id, to }, &mut doc,).is_err(),
             "{to:?} equals the current value → writes nothing"
         );
     }
@@ -483,7 +435,7 @@ fn commit_intent_rejects_cycle_forming_bind() {
     // rejected, nothing written, the existing edge untouched.
     assert!(
         commit_intent(
-            Intent::SetInput {
+            GraphIntent::SetInput {
                 input: InputPort::new(a, 0),
                 to: Some(Binding::bind(b, 0)),
             },
@@ -507,7 +459,7 @@ fn commit_intent_rejects_cycle_forming_bind() {
     // output extends the chain into a → b → c.
     assert!(
         commit_intent(
-            Intent::SetInput {
+            GraphIntent::SetInput {
                 input: InputPort::new(c, 0),
                 to: Some(Binding::bind(b, 0)),
             },
@@ -522,7 +474,7 @@ fn commit_intent_rejects_cycle_forming_bind() {
     );
 }
 
-fn assert_invalid(doc: &mut Document, intent: Intent, what: &str) {
+fn assert_invalid(doc: &mut Document, intent: GraphIntent, what: &str) {
     let nodes = doc.graph.len();
     match commit_intent(intent, doc) {
         Err(Refusal::Invalid(_)) => {}
@@ -539,7 +491,7 @@ fn assert_invalid(doc: &mut Document, intent: Intent, what: &str) {
 
 /// Commit `intent` expecting a quiet refusal — the drop widgets rely on.
 #[track_caller]
-fn assert_quiet(doc: &mut Document, intent: Intent, what: &str) {
+fn assert_quiet(doc: &mut Document, intent: GraphIntent, what: &str) {
     match commit_intent(intent, doc) {
         Err(Refusal::Quiet) => {}
         other => panic!("{what}: expected a quiet refusal, got {other:?}"),
@@ -550,8 +502,8 @@ fn func_node() -> Node {
     Node::new(NodeKind::Func(FuncId::unique()))
 }
 
-fn add_node(pos: Vec2, node_id: NodeId, node: Node) -> Intent {
-    Intent::AddNode {
+fn add_node(pos: Vec2, node_id: NodeId, node: Node) -> GraphIntent {
+    GraphIntent::AddNode {
         pos,
         node_id,
         node,
@@ -580,7 +532,7 @@ fn insertions_reusing_an_identity_are_refused_instead_of_panicking() {
         ),
         (
             "DuplicateNodes over a live id",
-            Intent::DuplicateNodes {
+            GraphIntent::DuplicateNodes {
                 nodes: vec![(Vec2::ZERO, live, func_node())],
                 bindings: vec![],
                 subscriptions: vec![],
@@ -588,7 +540,7 @@ fn insertions_reusing_an_identity_are_refused_instead_of_panicking() {
         ),
         (
             "DuplicateNodes repeating one id within the batch",
-            Intent::DuplicateNodes {
+            GraphIntent::DuplicateNodes {
                 nodes: vec![
                     (Vec2::ZERO, repeated, func_node()),
                     (Vec2::ONE, repeated, func_node()),
@@ -627,7 +579,7 @@ fn malformed_payloads_are_refused_before_they_can_invalidate_the_document() {
         ),
         (
             "AddNode seeding a binding from a producer that isn't there",
-            Intent::AddNode {
+            GraphIntent::AddNode {
                 pos: Vec2::ZERO,
                 node_id: NodeId::unique(),
                 node: func_node(),
@@ -636,7 +588,7 @@ fn malformed_payloads_are_refused_before_they_can_invalidate_the_document() {
         ),
         (
             "DuplicateNodes subscribing a node that isn't there",
-            Intent::DuplicateNodes {
+            GraphIntent::DuplicateNodes {
                 nodes: vec![(Vec2::ZERO, NodeId::unique(), func_node())],
                 bindings: vec![],
                 subscriptions: vec![Subscription {
@@ -648,14 +600,14 @@ fn malformed_payloads_are_refused_before_they_can_invalidate_the_document() {
         ),
         (
             "MoveSelection to a non-finite position",
-            Intent::MoveSelection {
+            GraphIntent::MoveSelection {
                 grabbed: live,
                 moves: vec![(live, nan)],
             },
         ),
         (
             "SetSubscription carrying a nil id",
-            Intent::SetSubscription {
+            GraphIntent::SetSubscription {
                 emitter: NodeId::nil(),
                 event_idx: 0,
                 subscriber: live,
@@ -680,25 +632,25 @@ fn stale_references_still_refuse_quietly() {
     let gone = NodeId::unique();
 
     let cases = [
-        ("RemoveNode", Intent::RemoveNode { node_id: gone }),
+        ("RemoveNode", GraphIntent::RemoveNode { node_id: gone }),
         (
             "RenameNode",
-            Intent::RenameNode {
+            GraphIntent::RenameNode {
                 node_id: gone,
                 to: "x".into(),
             },
         ),
         (
             "SetNodeProperty",
-            Intent::SetNodeProperty {
+            GraphIntent::SetNodeProperty {
                 node_id: gone,
                 to: NodeProperty::Disabled(true),
             },
         ),
-        ("Raise", Intent::Raise { key: gone }),
+        ("Raise", GraphIntent::Raise { key: gone }),
         (
             "SetInput onto a vanished node",
-            Intent::SetInput {
+            GraphIntent::SetInput {
                 input: InputPort::new(gone, 0),
                 to: None,
             },
@@ -707,7 +659,7 @@ fn stale_references_still_refuse_quietly() {
             // The held-wire case: the producer was removed after the drag
             // began, so committing would leave a dangling edge.
             "SetInput from a vanished producer",
-            Intent::SetInput {
+            GraphIntent::SetInput {
                 input: InputPort::new(live, 0),
                 to: Some(Binding::bind(gone, 0)),
             },
@@ -716,7 +668,7 @@ fn stale_references_still_refuse_quietly() {
             // An event wire dropped on a node that's since gone: dropped
             // rather than recorded as a dangling subscription.
             "SetSubscription onto a vanished subscriber",
-            Intent::SetSubscription {
+            GraphIntent::SetSubscription {
                 emitter: live,
                 event_idx: 0,
                 subscriber: gone,
@@ -727,7 +679,7 @@ fn stale_references_still_refuse_quietly() {
             // A drag outliving its target: every member is filtered out, and
             // the empty batch is a no-op, not an error.
             "MoveSelection of an item whose node vanished",
-            Intent::MoveSelection {
+            GraphIntent::MoveSelection {
                 grabbed: gone,
                 moves: vec![(gone, Vec2::ZERO)],
             },
@@ -752,7 +704,7 @@ fn selection_and_move_drop_members_whose_widget_is_gone() {
     let gone = NodeId::unique();
 
     let step = commit_intent(
-        Intent::SetSelection {
+        GraphIntent::SetSelection {
             to: [live, gone].into_iter().collect(),
         },
         &mut doc,
@@ -769,7 +721,7 @@ fn selection_and_move_drop_members_whose_widget_is_gone() {
     assert_eq!(doc.main_view.selected, *to);
 
     let step = commit_intent(
-        Intent::MoveSelection {
+        GraphIntent::MoveSelection {
             grabbed: live,
             moves: vec![(live, Vec2::new(5.0, 6.0)), (gone, Vec2::new(7.0, 8.0))],
         },

@@ -5,7 +5,7 @@
 
 use scenarium::Binding;
 
-use crate::core::edit::intent::types::{DockStep, GestureKey, GraphStep, UndoStep};
+use crate::core::edit::intent::types::{GestureKey, UndoStep};
 
 /// 1e-4 is the threshold below which two pan/scale samples are
 /// considered the same gesture — keeps idle pan/zoom from polluting
@@ -18,8 +18,24 @@ impl UndoStep {
     /// the same node, dragging zero pixels) don't pollute the undo stack.
     pub(crate) fn is_noop(&self) -> bool {
         match self {
-            UndoStep::Graph(g) => g.is_noop(),
-            UndoStep::Dock(d) => d.is_noop(),
+            UndoStep::AddNode { .. } | UndoStep::RemoveNode { .. } => false,
+            UndoStep::DuplicateNodes { nodes, .. } => nodes.is_empty(),
+            UndoStep::MoveSelection { moves, .. } => moves.iter().all(|(_, from, to)| from == to),
+            UndoStep::RenameNode { from, to, .. } => from == to,
+            UndoStep::SetInput { from, to, .. } => from == to,
+            UndoStep::SetSelection { from, to } => from == to,
+            // Already on top (its slot is the last one) → nothing to raise.
+            UndoStep::Raise {
+                from_index,
+                to_index,
+                ..
+            } => from_index == to_index,
+            UndoStep::SetNodeProperty { from, to, .. } => from == to,
+            UndoStep::SetViewport { from, to } => {
+                (from.pan - to.pan).length_squared() < VIEWPORT_EPS * VIEWPORT_EPS
+                    && (from.zoom - to.zoom).abs() < VIEWPORT_EPS
+            }
+            UndoStep::SetSubscription { from, to, .. } => from == to,
         }
     }
 
@@ -43,34 +59,24 @@ impl UndoStep {
     /// strands the cache.
     pub(crate) fn invalidates_cached_geometry(&self) -> bool {
         match self {
-            // A dock op reshapes panes, never a node: pane extent is not an
-            // input to node measure, so every cached offset survives. A ratio
-            // nudge is even less than that — `Splitter` lays out at the live
-            // pointer ratio and writes back only the arranged one, so Pass A
-            // already drew what this step is persisting. A dock op that
-            // reveals the canvas is covered by `GraphUI::sync_visibility`,
-            // which handles the never-yet-recorded canvas the cache can't
-            // have entries for.
-            UndoStep::Dock(_) => false,
-            UndoStep::Graph(g) => match g {
             // A fresh node has no cached port offsets, so its wires have
             // nothing to anchor to until it has recorded once. Removal is
             // true for its *revert*, which puts that node back.
-            GraphStep::AddNode { .. }
-            | GraphStep::DuplicateNodes { .. }
-            | GraphStep::RemoveNode { .. }
+            UndoStep::AddNode { .. }
+            | UndoStep::DuplicateNodes { .. }
+            | UndoStep::RemoveNode { .. }
             // A title width change remeasures the header, shifting every
             // port row below it.
-            | GraphStep::RenameNode { .. } => true,
+            | UndoStep::RenameNode { .. } => true,
             // Nothing remeasures: every member keeps its size and its
             // cached intra-node offsets, and `CanvasGeometry` recomputes
             // centers from this frame's `pos`. The drag also drains
             // pre-record, so Pass A already arranges at the cursor.
-            GraphStep::MoveSelection { .. } => false,
+            UndoStep::MoveSelection { .. } => false,
             // Viewport is the inner-canvas `TranslateScale`, applied at
             // paint; children arrange in pre-transform space, so a pan/zoom
             // changes nothing the layout engine reads — no Pass B needed.
-            GraphStep::SetViewport { .. } => false,
+            UndoStep::SetViewport { .. } => false,
             // The inline const-value editor is recorded only when the
             // binding is `Const(_)`. Flipping Const presence (None ⇄ Const,
             // Bind ⇄ Const) toggles the editor in the widget tree, so the
@@ -78,20 +84,19 @@ impl UndoStep {
             // re-sample their endpoints. Typing inside an existing `Const`
             // keeps the editor present at its `Fixed` size, so the
             // value-only edit (Const → Const) doesn't need a relayout.
-            GraphStep::SetInput { from, to, .. } => {
+            UndoStep::SetInput { from, to, .. } => {
                 matches!(from, Some(Binding::Const(_)))
                     != matches!(to, Some(Binding::Const(_)))
             }
-            GraphStep::SetSelection { .. }
+            UndoStep::SetSelection { .. }
             // Raising only reorders the paint stack — no node remeasures.
-            | GraphStep::Raise { .. }
+            | UndoStep::Raise { .. }
             // A node property (disable dims the body, a cache toggle flips a
             // badge fill) keeps the same rect — no remeasure.
-            | GraphStep::SetNodeProperty { .. }
+            | UndoStep::SetNodeProperty { .. }
             // Event wiring paints a wire between existing glyphs — no
             // node remeasure.
-            | GraphStep::SetSubscription { .. } => false,
-        },
+            | UndoStep::SetSubscription { .. } => false,
         }
     }
 
@@ -103,30 +108,22 @@ impl UndoStep {
     /// silently defaulting.
     pub(crate) fn dirties_document(&self) -> bool {
         match self {
-            // A structural dock op (a tab moved or split into its own
-            // pane) is invested arrangement work worth the exit prompt;
-            // activations, closes, and ratio nudges stay navigation.
-            UndoStep::Dock(step) => step.structural,
             // Navigation only — panning, zooming, selecting, or
             // restacking is view state the user doesn't "save".
             // Stacking order rides in `item_placements` and still writes on any
             // save (like selection), but a bare restack shouldn't nag on exit.
-            UndoStep::Graph(
-                GraphStep::SetSelection { .. }
-                | GraphStep::Raise { .. }
-                | GraphStep::SetViewport { .. },
-            ) => false,
+            UndoStep::SetSelection { .. }
+            | UndoStep::Raise { .. }
+            | UndoStep::SetViewport { .. } => false,
             // Graph data + node layout — real edits worth persisting.
-            UndoStep::Graph(
-                GraphStep::AddNode { .. }
-                | GraphStep::DuplicateNodes { .. }
-                | GraphStep::RemoveNode { .. }
-                | GraphStep::MoveSelection { .. }
-                | GraphStep::RenameNode { .. }
-                | GraphStep::SetInput { .. }
-                | GraphStep::SetNodeProperty { .. }
-                | GraphStep::SetSubscription { .. },
-            ) => true,
+            UndoStep::AddNode { .. }
+            | UndoStep::DuplicateNodes { .. }
+            | UndoStep::RemoveNode { .. }
+            | UndoStep::MoveSelection { .. }
+            | UndoStep::RenameNode { .. }
+            | UndoStep::SetInput { .. }
+            | UndoStep::SetNodeProperty { .. }
+            | UndoStep::SetSubscription { .. } => true,
         }
     }
 
@@ -136,26 +133,18 @@ impl UndoStep {
     /// two `MoveSelection`s of the *same* grabbed item coalesce.
     pub(crate) fn gesture_key(&self) -> Option<GestureKey> {
         match self {
-            UndoStep::Graph(GraphStep::SetViewport { .. }) => Some(GestureKey::Viewport),
-            UndoStep::Graph(GraphStep::MoveSelection { grabbed, .. }) => {
-                Some(GestureKey::SelectionDrag(*grabbed))
-            }
-            // The key was derived from the dock intent at build time:
-            // tab-switch bursts and one divider's drag frames collapse
-            // into single entries; a close or move never coalesces.
-            UndoStep::Dock(step) => step.key,
+            UndoStep::SetViewport { .. } => Some(GestureKey::Viewport),
+            UndoStep::MoveSelection { grabbed, .. } => Some(GestureKey::SelectionDrag(*grabbed)),
             // Everything else is its own undo entry.
-            UndoStep::Graph(
-                GraphStep::AddNode { .. }
-                | GraphStep::DuplicateNodes { .. }
-                | GraphStep::RemoveNode { .. }
-                | GraphStep::RenameNode { .. }
-                | GraphStep::SetInput { .. }
-                | GraphStep::SetSelection { .. }
-                | GraphStep::Raise { .. }
-                | GraphStep::SetNodeProperty { .. }
-                | GraphStep::SetSubscription { .. },
-            ) => None,
+            UndoStep::AddNode { .. }
+            | UndoStep::DuplicateNodes { .. }
+            | UndoStep::RemoveNode { .. }
+            | UndoStep::RenameNode { .. }
+            | UndoStep::SetInput { .. }
+            | UndoStep::SetSelection { .. }
+            | UndoStep::Raise { .. }
+            | UndoStep::SetNodeProperty { .. }
+            | UndoStep::SetSubscription { .. } => None,
         }
     }
 
@@ -170,21 +159,20 @@ impl UndoStep {
     /// `gesture_key`.
     pub(crate) fn coalesce(&self, next: &UndoStep) -> Option<UndoStep> {
         match (self, next) {
+            (UndoStep::SetViewport { from, .. }, UndoStep::SetViewport { to, .. }) => {
+                Some(UndoStep::SetViewport {
+                    from: *from,
+                    to: *to,
+                })
+            }
             (
-                UndoStep::Graph(GraphStep::SetViewport { from, .. }),
-                UndoStep::Graph(GraphStep::SetViewport { to, .. }),
-            ) => Some(UndoStep::Graph(GraphStep::SetViewport {
-                from: *from,
-                to: *to,
-            })),
-            (
-                UndoStep::Graph(GraphStep::MoveSelection {
+                UndoStep::MoveSelection {
                     grabbed,
                     moves: prev_moves,
-                }),
-                UndoStep::Graph(GraphStep::MoveSelection {
+                },
+                UndoStep::MoveSelection {
                     moves: next_moves, ..
-                }),
+                },
             ) => {
                 // Same gesture (matched `SelectionDrag` key) ⇒ same group;
                 // keep each member's original `from`, adopt its latest `to`.
@@ -199,59 +187,12 @@ impl UndoStep {
                         (*key, *from, to)
                     })
                     .collect();
-                Some(UndoStep::Graph(GraphStep::MoveSelection {
+                Some(UndoStep::MoveSelection {
                     grabbed: *grabbed,
                     moves,
-                }))
+                })
             }
-            (UndoStep::Dock(first), UndoStep::Dock(next)) => Some(UndoStep::Dock(DockStep {
-                from: first.from.clone(),
-                to: next.to.clone(),
-                key: first.key,
-                // Only non-structural ops carry a gesture key, so a
-                // coalesced run can't smuggle a move past the flag.
-                structural: first.structural,
-            })),
             _ => None,
         }
-    }
-}
-
-impl GraphStep {
-    /// Generic from/to equality; viewport uses an epsilon to absorb idle
-    /// jitter. `AddNode` / `RemoveNode` are never no-ops (the existence
-    /// flip is the change).
-    fn is_noop(&self) -> bool {
-        match self {
-            GraphStep::AddNode { .. } | GraphStep::RemoveNode { .. } => false,
-            GraphStep::DuplicateNodes { nodes, .. } => nodes.is_empty(),
-            GraphStep::MoveSelection { moves, .. } => moves.iter().all(|(_, from, to)| from == to),
-            GraphStep::RenameNode { from, to, .. } => from == to,
-            GraphStep::SetInput { from, to, .. } => from == to,
-            GraphStep::SetSelection { from, to } => from == to,
-            // Already on top (its slot is the last one) → nothing to raise.
-            GraphStep::Raise {
-                from_index,
-                to_index,
-                ..
-            } => from_index == to_index,
-            GraphStep::SetNodeProperty { from, to, .. } => from == to,
-            GraphStep::SetViewport { from, to } => {
-                (from.pan - to.pan).length_squared() < VIEWPORT_EPS * VIEWPORT_EPS
-                    && (from.zoom - to.zoom).abs() < VIEWPORT_EPS
-            }
-            GraphStep::SetSubscription { from, to, .. } => from == to,
-        }
-    }
-}
-
-impl DockStep {
-    /// `pub(super)` for `commit_dock_op`, which filters a step it never wraps
-    /// in an [`UndoStep`] until it survives.
-    ///
-    /// Covers every degenerate dock op in one comparison: same-tab activation,
-    /// a refused close/move, an unchanged ratio.
-    pub(super) fn is_noop(&self) -> bool {
-        self.from == self.to
     }
 }

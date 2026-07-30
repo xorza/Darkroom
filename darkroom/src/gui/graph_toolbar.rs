@@ -7,7 +7,7 @@
 //! node under it; the buttons are opaque chips raised off the pill. All carry
 //! hover tooltips; the toggles paint "toggled" while their action is in flight
 //! and map to an [`AppCommand`], while the framing buttons emit an
-//! `Intent::SetViewport` directly.
+//! `GraphIntent::SetViewport` directly.
 
 use glam::Vec2;
 use palantir::{
@@ -49,7 +49,7 @@ fn show_selected_wid() -> WidgetId {
 /// Draw the toolbar over the graph view's top-left corner. Returns the
 /// [`AppCommand`] a run/events click implies — always `None` off the main
 /// pane, which draws no run pill; view-framing clicks push an
-/// `Intent::SetViewport` onto `out` instead. It hit-tests above the canvas
+/// `GraphIntent::SetViewport` onto `out` instead. It hit-tests above the canvas
 /// (drawn after it), so a click on a button never starts a pan.
 pub(crate) fn show(
     ui: &mut Ui,

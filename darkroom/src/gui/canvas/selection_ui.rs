@@ -5,7 +5,7 @@ use glam::Vec2;
 use palantir::{Rect, Shape, Stroke, Ui};
 
 use crate::core::edit::intent::sink::Intents;
-use crate::core::edit::intent::types::Intent;
+use crate::core::edit::intent::types::GraphIntent;
 use crate::gui::app::AppContext;
 use crate::gui::canvas::geometry::CanvasGeometry;
 use crate::gui::canvas::gesture_slot::GestureSlot;
@@ -163,7 +163,7 @@ impl SelectionUI {
         // it paints the final selection; the `SetSelection` drains
         // post-record, and next frame — band now `None` — the early return
         // above clears the preview and draw falls back to the committed set.
-        out.push(Intent::SetSelection { to: swept.clone() });
+        out.push(GraphIntent::SetSelection { to: swept.clone() });
         self.preview.latch(());
     }
 

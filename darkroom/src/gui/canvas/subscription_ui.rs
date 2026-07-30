@@ -3,7 +3,7 @@ use palantir::{CurveBrush, Ui};
 use scenarium::NodeId;
 
 use crate::core::edit::intent::sink::Intents;
-use crate::core::edit::intent::types::Intent;
+use crate::core::edit::intent::types::GraphIntent;
 use crate::gui::EventRef;
 use crate::gui::app::AppContext;
 use crate::gui::canvas::geometry::CanvasGeometry;
@@ -137,7 +137,7 @@ impl SubscriptionUI {
             | InFlight::FromSubscriber(GlyphDrag {
                 from: subscriber,
                 snap: Some(emitter),
-            }) => out.push(Intent::SetSubscription {
+            }) => out.push(GraphIntent::SetSubscription {
                 emitter: emitter.node_id,
                 event_idx: emitter.event_idx,
                 subscriber,

@@ -1,5 +1,5 @@
 //! Read pre-mutation state from a [`Document`] and fold it with an
-//! [`Intent`] (or a [`DockOp`]) into a complete step — the
+//! [`GraphIntent`] into a complete step — the
 //! diff-capture half of the intent pipeline. Pure: never writes to the
 //! graph.
 
@@ -8,10 +8,7 @@ use std::collections::HashSet;
 use scenarium::Binding;
 
 use crate::core::document::Document;
-use crate::core::document::dock::DockOp;
-use crate::core::edit::intent::types::{
-    DockStep, GestureKey, GraphStep, Intent, NodeProperty, Refusal, UndoStep,
-};
+use crate::core::edit::intent::types::{GraphIntent, NodeProperty, Refusal, UndoStep};
 use crate::core::edit::intent::validate;
 
 /// Read pre-mutation state from `doc` and fold it with `intent` into a
@@ -29,10 +26,10 @@ use crate::core::edit::intent::validate;
 /// [`Refusal::Invalid`] means the payload could never have applied.
 /// (`MoveSelection` and `SetSelection` instead drop vanished members
 /// individually rather than refusing the whole intent.)
-pub(crate) fn build_step(intent: Intent, doc: &Document) -> Result<UndoStep, Refusal> {
+pub(crate) fn build_step(intent: GraphIntent, doc: &Document) -> Result<UndoStep, Refusal> {
     let (graph, view) = (&doc.graph, &doc.main_view);
     let step = match intent {
-        Intent::AddNode {
+        GraphIntent::AddNode {
             pos,
             node_id,
             node,
@@ -43,14 +40,14 @@ pub(crate) fn build_step(intent: Intent, doc: &Document) -> Result<UndoStep, Ref
             validate::finite_position(pos, "AddNode")?;
             validate::insertable_kind(graph, &node)?;
             validate::insertable_bindings(graph, &added, &bindings)?;
-            GraphStep::AddNode {
+            UndoStep::AddNode {
                 pos,
                 node_id,
                 node,
                 bindings,
             }
         }
-        Intent::DuplicateNodes {
+        GraphIntent::DuplicateNodes {
             nodes,
             bindings,
             subscriptions,
@@ -77,7 +74,7 @@ pub(crate) fn build_step(intent: Intent, doc: &Document) -> Result<UndoStep, Ref
                 )?;
             }
             let to_selection = nodes.iter().map(|(_, node_id, _)| *node_id).collect();
-            GraphStep::DuplicateNodes {
+            UndoStep::DuplicateNodes {
                 nodes,
                 bindings,
                 subscriptions,
@@ -85,7 +82,7 @@ pub(crate) fn build_step(intent: Intent, doc: &Document) -> Result<UndoStep, Ref
                 to_selection,
             }
         }
-        Intent::RemoveNode { node_id } => {
+        GraphIntent::RemoveNode { node_id } => {
             validate::live_node(graph, node_id, "RemoveNode")?;
             let detached = graph.snapshot_node(node_id).ok_or(Refusal::Quiet)?;
             // The node's own item with its paint-stack slot — ascending by
@@ -103,13 +100,13 @@ pub(crate) fn build_step(intent: Intent, doc: &Document) -> Result<UndoStep, Ref
                 .filter(|key| **key == node_id)
                 .copied()
                 .collect();
-            GraphStep::RemoveNode {
+            UndoStep::RemoveNode {
                 detached,
                 item_placements,
                 selected,
             }
         }
-        Intent::MoveSelection { grabbed, moves } => {
+        GraphIntent::MoveSelection { grabbed, moves } => {
             let mut placed = Vec::with_capacity(moves.len());
             for (key, to) in moves {
                 validate::finite_position(to, "MoveSelection")?;
@@ -120,19 +117,19 @@ pub(crate) fn build_step(intent: Intent, doc: &Document) -> Result<UndoStep, Ref
                 };
                 placed.push((key, from, to));
             }
-            GraphStep::MoveSelection {
+            UndoStep::MoveSelection {
                 grabbed,
                 moves: placed,
             }
         }
-        Intent::RenameNode { node_id, to } => GraphStep::RenameNode {
+        GraphIntent::RenameNode { node_id, to } => UndoStep::RenameNode {
             from: validate::live_node(graph, node_id, "RenameNode")?
                 .name
                 .clone(),
             node_id,
             to,
         },
-        Intent::SetInput { input, to } => {
+        GraphIntent::SetInput { input, to } => {
             validate::live_node(graph, input.node_id, "SetInput destination")?;
             if let Some(Binding::Bind(src)) = &to {
                 // A wire held across frames can outlive its producer, and
@@ -147,13 +144,13 @@ pub(crate) fn build_step(intent: Intent, doc: &Document) -> Result<UndoStep, Ref
                     return Err(Refusal::Quiet);
                 }
             }
-            GraphStep::SetInput {
+            UndoStep::SetInput {
                 from: graph.bindings.get(&input).cloned(),
                 input,
                 to,
             }
         }
-        Intent::SetSelection { to } => GraphStep::SetSelection {
+        GraphIntent::SetSelection { to } => UndoStep::SetSelection {
             from: view.selected.clone(),
             // The rubber band snapshots identities when the drag starts, so
             // an interleaved undo can remove one before release. Keep the
@@ -164,40 +161,40 @@ pub(crate) fn build_step(intent: Intent, doc: &Document) -> Result<UndoStep, Ref
                 .filter(|key| view.item_placements.contains_key(key))
                 .collect(),
         },
-        Intent::Raise { key } => {
+        GraphIntent::Raise { key } => {
             let from_index = view
                 .item_placements
                 .get_index_of(&key)
                 .ok_or(Refusal::Quiet)?;
             // Top of the stack is the last slot — painted last, drawn in front.
             let to_index = view.item_placements.len() - 1;
-            GraphStep::Raise {
+            UndoStep::Raise {
                 key,
                 from_index,
                 to_index,
             }
         }
-        Intent::SetNodeProperty { node_id, to } => {
+        GraphIntent::SetNodeProperty { node_id, to } => {
             let node = validate::live_node(graph, node_id, "SetNodeProperty")?;
             // Capture the *same* property's current value as `from` for revert.
             let from = match to {
                 NodeProperty::Disabled(_) => NodeProperty::Disabled(node.disabled),
                 NodeProperty::RuntimeCache(_) => NodeProperty::RuntimeCache(node.cache),
             };
-            GraphStep::SetNodeProperty { node_id, from, to }
+            UndoStep::SetNodeProperty { node_id, from, to }
         }
-        Intent::SetViewport { to } => {
+        GraphIntent::SetViewport { to } => {
             if !to.is_valid() {
                 return Err(Refusal::Invalid(
                     "viewport needs finite pan and positive finite zoom".to_owned(),
                 ));
             }
-            GraphStep::SetViewport {
+            UndoStep::SetViewport {
                 from: view.viewport,
                 to,
             }
         }
-        Intent::SetSubscription {
+        GraphIntent::SetSubscription {
             emitter,
             event_idx,
             subscriber,
@@ -216,7 +213,7 @@ pub(crate) fn build_step(intent: Intent, doc: &Document) -> Result<UndoStep, Ref
                 validate::live_node(graph, emitter, "SetSubscription emitter")?;
                 validate::live_node(graph, subscriber, "SetSubscription subscriber")?;
             }
-            GraphStep::SetSubscription {
+            UndoStep::SetSubscription {
                 from: graph.is_subscribed(emitter, event_idx, subscriber),
                 to: subscribe,
                 emitter,
@@ -225,32 +222,5 @@ pub(crate) fn build_step(intent: Intent, doc: &Document) -> Result<UndoStep, Ref
             }
         }
     };
-    Ok(UndoStep::Graph(step))
-}
-
-/// The [`build_step`] counterpart for the layout: fold `op` with the layout it
-/// overwrites into a complete [`DockStep`]. Takes no target, because there is
-/// none to take.
-///
-/// Same gate contract as `build_step` — an `Ok` is a proof that applying
-/// the step is sound — but the preconditions are thinner: the op is applied to
-/// a *copy* of the layout here and recorded as the before/after pair, so an op
-/// the layout refuses simply lands as `from == to` and drops out through the
-/// no-op filter.
-pub(crate) fn build_dock_step(op: DockOp, doc: &Document) -> Result<DockStep, Refusal> {
-    let key = match op {
-        DockOp::ActivateTab { .. } => Some(GestureKey::TabSwitch),
-        DockOp::SetRatio { split, .. } => Some(GestureKey::DockResize(split)),
-        DockOp::CloseTab { .. } | DockOp::MoveTab { .. } => None,
-    };
-    let structural = matches!(op, DockOp::MoveTab { .. });
-    let from = doc.layout.clone();
-    let mut to = from.clone();
-    to.apply(op);
-    Ok(DockStep {
-        from,
-        to,
-        key,
-        structural,
-    })
+    Ok(step)
 }

@@ -1,6 +1,6 @@
 //! Keyboard input → intent/command mapping. A child module of `editor`:
 //! these read palantir's key state and translate chords into queued
-//! `Intent`s (canvas edits) or a `AppCommand` (file ops). Being a child
+//! `GraphIntent`s (canvas edits) or a `AppCommand` (file ops). Being a child
 //! lets them drive the pipeline through `Editor`'s private fields without
 //! widening visibility; they never touch the frame orchestration.
 

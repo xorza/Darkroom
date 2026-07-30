@@ -5,7 +5,7 @@ use scenarium::{Binding, InputPort};
 
 use crate::core::document::{PortKind, PortRef};
 use crate::core::edit::intent::sink::Intents;
-use crate::core::edit::intent::types::Intent;
+use crate::core::edit::intent::types::GraphIntent;
 use crate::gui::app::AppContext;
 use crate::gui::canvas::geometry::CanvasGeometry;
 use crate::gui::canvas::gesture_slot::GestureSlot;
@@ -436,7 +436,7 @@ fn const_drop(
     graph: Pane<'_>,
     geometry: &CanvasGeometry,
     start: PortRef,
-) -> Option<Intent> {
+) -> Option<GraphIntent> {
     if start.kind != PortKind::Input {
         return None;
     }
@@ -483,7 +483,7 @@ fn port_data_type(graph: Pane<'_>, port: PortRef) -> Option<DataType> {
 
 /// Convert a snapped `(start, end)` PortRef pair (one `Input`, one
 /// `Output` — caller-guaranteed by [`scan_snap_target`]) into an
-/// `Intent::SetInput` binding. A cycle-forming pair never reaches here —
+/// `GraphIntent::SetInput` binding. A cycle-forming pair never reaches here —
 /// [`scan_snap_target`] refuses to snap one, and `build_step` rejects any
 /// cycle-forming bind that slips through (the planner is the final backstop,
 /// `Error::CycleDetected`). Re-typing a wildcard output (passthrough / reroute)
@@ -500,7 +500,7 @@ fn commit_connection(start: PortRef, end: PortRef, out: &mut Intents) {
         // that just doesn't land.
         (a, b) => unreachable!("a wire committed a {a:?} → {b:?} pair"),
     };
-    out.push(Intent::SetInput {
+    out.push(GraphIntent::SetInput {
         input: InputPort::new(input.node_id, input.port_idx),
         to: Some(Binding::bind(output.node_id, output.port_idx)),
     });

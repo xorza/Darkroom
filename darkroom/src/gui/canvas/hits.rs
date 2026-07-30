@@ -49,7 +49,7 @@ use crate::gui::node::header::{cache_eviction_badge_wid, play_badge_wid};
 use crate::gui::node::port_row::{const_editor_wid, input_cell_wid};
 use crate::gui::node::preview_row::preview_image_wid;
 use crate::gui::node::{drag_handles, node_widget_id};
-use crate::gui::scene::{Frame, Pane, SceneNode};
+use crate::gui::scene::{Pane, SceneNode};
 
 /// A left-clickable chip on a node, named by what it does rather than by
 /// the widget it lives in. One enum instead of a slot per chip: they are
@@ -144,9 +144,9 @@ impl CanvasHits {
     /// responses, across every visible pane. Run once per frame, in the
     /// navigation phase — see the module docs for why there, what it
     /// costs, and which pass fills the port half.
-    pub(crate) fn scan(&mut self, ui: &Ui, frame: Frame<'_>) {
+    pub(crate) fn scan(&mut self, ui: &Ui, pane: Option<Pane<'_>>) {
         *self = Self::default();
-        let Some(graph) = frame.pane() else {
+        let Some(graph) = pane else {
             return;
         };
         for node in graph.nodes() {

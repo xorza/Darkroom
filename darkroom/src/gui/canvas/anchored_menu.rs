@@ -95,7 +95,7 @@ impl AnchoredMenu {
 /// opened on, which the open latched frames before the pick that needs it.
 ///
 /// What the caller still owns is the items and where a pick goes — an
-/// `AppCommand`, an `Intent`, or a stash for the `Editor` to resolve. Which
+/// `AppCommand`, a `GraphIntent`, or a stash for the `Editor` to resolve. Which
 /// nodes offer the menu at all is settled by [`CanvasHits::scan`].
 #[derive(Default, Debug)]
 pub(super) struct NodeContextMenu {

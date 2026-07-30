@@ -5,12 +5,12 @@ use super::*;
 use crate::core::document::Document;
 use crate::core::edit::intent::apply::apply_step;
 use crate::core::edit::intent::build::build_step;
-use crate::core::edit::intent::types::Intent;
+use crate::core::edit::intent::types::GraphIntent;
 use scenarium::testing::test_graph;
 
 /// Push one graph edit through the real build/apply path, as `drain_intents`
 /// does — the shape every coalescing test below repeats.
-fn push_edit(stack: &mut ActionStack, doc: &mut Document, intent: Intent) {
+fn push_edit(stack: &mut ActionStack, doc: &mut Document, intent: GraphIntent) {
     let step = build_step(intent, doc).unwrap();
     apply_step(&step, doc);
     stack.push_current(&[step]);
@@ -29,7 +29,7 @@ fn consecutive_moves_coalesce_keeping_first_from() {
         push_edit(
             stack,
             doc,
-            Intent::MoveSelection {
+            GraphIntent::MoveSelection {
                 grabbed: key,
                 moves: vec![(key, to)],
             },
@@ -67,7 +67,7 @@ fn moves_of_different_nodes_do_not_coalesce() {
         push_edit(
             &mut stack,
             &mut doc,
-            Intent::MoveSelection {
+            GraphIntent::MoveSelection {
                 grabbed: key,
                 moves: vec![(key, to)],
             },
@@ -98,7 +98,7 @@ fn group_drag_moves_all_and_undoes_as_one() {
         push_edit(
             stack,
             doc,
-            Intent::MoveSelection {
+            GraphIntent::MoveSelection {
                 grabbed: ka,
                 moves: vec![(ka, a0 + off), (kb, b0 + off)],
             },
@@ -141,7 +141,7 @@ fn deleting_selection_restores_nodes_and_edge_in_one_undo() {
     let mut stack = ActionStack::new(1 << 20);
     let mut batch = Vec::new();
     for node_id in [a, b] {
-        let step = build_step(Intent::RemoveNode { node_id }, &doc).unwrap();
+        let step = build_step(GraphIntent::RemoveNode { node_id }, &doc).unwrap();
         apply_step(&step, &mut doc);
         batch.push(step);
     }
@@ -170,11 +170,11 @@ fn new_edit_discards_the_redo_tail() {
     let mut stack = ActionStack::new(1 << 20);
 
     let one: BTreeSet<_> = [node].into_iter().collect();
-    push_edit(&mut stack, &mut doc, Intent::SetSelection { to: one }); // A: {} -> {node}
+    push_edit(&mut stack, &mut doc, GraphIntent::SetSelection { to: one }); // A: {} -> {node}
     push_edit(
         &mut stack,
         &mut doc,
-        Intent::SetSelection {
+        GraphIntent::SetSelection {
             to: BTreeSet::new(),
         },
     ); // B: {node} -> {}
@@ -185,7 +185,7 @@ fn new_edit_discards_the_redo_tail() {
     push_edit(
         &mut stack,
         &mut doc,
-        Intent::SetSelection {
+        GraphIntent::SetSelection {
             to: BTreeSet::new(),
         },
     ); // C: {node} -> {}
@@ -210,7 +210,7 @@ fn history_bounded_by_byte_budget() {
         } else {
             BTreeSet::new()
         };
-        push_edit(&mut stack, &mut doc, Intent::SetSelection { to });
+        push_edit(&mut stack, &mut doc, GraphIntent::SetSelection { to });
         // The *live* region stays within budget (entries are far
         // smaller than 256 B, so no single-entry overflow)...
         let live = stack.actions.len() - stack.head;

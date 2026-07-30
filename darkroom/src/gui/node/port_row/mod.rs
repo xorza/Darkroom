@@ -22,7 +22,7 @@ use scenarium::{DataType, FsPathMode, Func};
 
 use crate::core::document::{PortKind, PortRef};
 use crate::core::edit::intent::sink::Intents;
-use crate::core::edit::intent::types::Intent;
+use crate::core::edit::intent::types::GraphIntent;
 use crate::core::preview;
 use crate::gui::EventRef;
 use crate::gui::node::port_color::{event_color, port_color};
@@ -471,15 +471,15 @@ pub(crate) fn add_preview_intents(
     port: PortRef,
     pos: Vec2,
     node_id: NodeId,
-) -> [Intent; 2] {
+) -> [GraphIntent; 2] {
     [
-        Intent::AddNode {
+        GraphIntent::AddNode {
             pos,
             node_id,
             node: func.into(),
             bindings: func.ports().default_bindings(node_id).collect(),
         },
-        Intent::SetInput {
+        GraphIntent::SetInput {
             input: InputPort::new(node_id, 0),
             to: Some(Binding::bind(port.node_id, port.port_idx)),
         },
@@ -599,7 +599,7 @@ mod tests {
         let node_id = NodeId::unique();
         let [add, bind] = add_preview_intents(&func, port, center + PREVIEW_SPAWN_OFFSET, node_id);
 
-        let Intent::AddNode {
+        let GraphIntent::AddNode {
             pos, node_id, node, ..
         } = add
         else {
@@ -609,7 +609,7 @@ mod tests {
         assert_eq!(node.kind, NodeKind::Func(func.id));
         assert!(matches!(
             bind,
-            Intent::SetInput { input, to: Some(Binding::Bind(src)) }
+            GraphIntent::SetInput { input, to: Some(Binding::Bind(src)) }
                 if input == InputPort::new(node_id, 0)
                     && src == OutputPort::new(producer, 2)
         ));

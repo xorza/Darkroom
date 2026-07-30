@@ -15,7 +15,7 @@ use palantir::{Key, Shortcut, Ui};
 use crate::core::document::{Document, Viewport};
 use crate::core::edit::intent::duplicate::build_duplicate_intent;
 use crate::core::edit::intent::sink::Intents;
-use crate::core::edit::intent::types::Intent;
+use crate::core::edit::intent::types::GraphIntent;
 
 const RESET_ZOOM_SHORTCUT: Shortcut = Shortcut::ctrl('0');
 const DUPLICATE_SHORTCUT: Shortcut = Shortcut::ctrl('D');
@@ -37,12 +37,12 @@ pub(super) fn emit(ui: &mut Ui, doc: &Document, out: &mut Intents) {
         ui.key_pressed(Shortcut::key(Key::Delete)) || ui.key_pressed(Shortcut::key(Key::Backspace));
     let view = &doc.main_view;
     if escape && !view.selected.is_empty() {
-        out.push(Intent::SetSelection {
+        out.push(GraphIntent::SetSelection {
             to: BTreeSet::new(),
         });
     }
     if reset_zoom {
-        out.push(Intent::SetViewport {
+        out.push(GraphIntent::SetViewport {
             to: Viewport {
                 pan: view.viewport.pan,
                 zoom: 1.0,

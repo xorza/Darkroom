@@ -1,5 +1,5 @@
 //! The group drag: whichever selected node the pointer latched drags its
-//! whole group alongside it, as one coalesced `Intent::MoveSelection` per
+//! whole group alongside it, as one coalesced `GraphIntent::MoveSelection` per
 //! frame.
 //!
 //! The caller owns the hit-testing that decides *what* got grabbed — a node
@@ -11,7 +11,7 @@ use palantir::{Ui, WidgetId};
 use scenarium::NodeId;
 
 use crate::core::edit::intent::sink::Intents;
-use crate::core::edit::intent::types::Intent;
+use crate::core::edit::intent::types::GraphIntent;
 use std::collections::BTreeSet;
 
 use crate::gui::scene::{Pane, Scene};
@@ -82,7 +82,7 @@ impl GroupDrag {
         }
     }
 
-    /// Advance one frame, pushing this frame's `Intent::MoveSelection` when
+    /// Advance one frame, pushing this frame's `GraphIntent::MoveSelection` when
     /// the drag is still held, and reporting whether it is. A caller that
     /// also latches fresh drags skips its own scan while this returns
     /// `true` — the gesture already owns the frame.
@@ -122,10 +122,10 @@ impl GroupDrag {
 }
 
 impl Anchor {
-    /// This frame's `Intent::MoveSelection`: every member's latch-time start
+    /// This frame's `GraphIntent::MoveSelection`: every member's latch-time start
     /// plus Palantir's pre-transform drag `offset`.
-    fn resolve(&self, offset: Vec2) -> Intent {
-        Intent::MoveSelection {
+    fn resolve(&self, offset: Vec2) -> GraphIntent {
+        GraphIntent::MoveSelection {
             grabbed: self.grabbed,
             moves: self
                 .start_positions

@@ -1,7 +1,7 @@
 //! Canvas viewport gesture: middle-drag pan, wheel/pinch zoom-about-
 //! cursor, and the zoom-factor math. Split out of `canvas` so the
 //! orchestration there isn't tangled with the (independently testable)
-//! viewport algebra. The gesture emits `Intent::SetViewport`, so pan/zoom
+//! viewport algebra. The gesture emits `GraphIntent::SetViewport`, so pan/zoom
 //! rides the same undo path as every other edit.
 
 use common::FloatExt;
@@ -10,7 +10,7 @@ use palantir::{Rect, ResponseState, Size, Ui};
 
 use crate::core::document::Viewport;
 use crate::core::edit::intent::sink::Intents;
-use crate::core::edit::intent::types::Intent;
+use crate::core::edit::intent::types::GraphIntent;
 use crate::gui::canvas::geometry::CanvasGeometry;
 use crate::gui::canvas::gesture_slot::GestureSlot;
 use crate::gui::canvas::{CanvasGesture, outer_canvas_widget_id};
@@ -98,7 +98,7 @@ const CANVAS_MAX_ZOOM: f32 = 5.0;
 const SCROLL_ZOOM_BASE: f32 = 1.0025;
 
 /// Read the outer canvas's current-frame response, compute the
-/// target viewport, and emit an `Intent::SetViewport` when it
+/// target viewport, and emit an `GraphIntent::SetViewport` when it
 /// changed. The intent (not a direct write) is the only thing that
 /// mutates the document's viewport — so pan/zoom rides the same
 /// undo path as every other edit, and the undo stack coalesces a
@@ -143,7 +143,7 @@ pub(super) fn emit_pan_zoom(
     // idle frames.
     let unchanged = v.pan.approximately_eq(viewport.pan) && v.zoom.approximately_eq(viewport.zoom);
     if !unchanged {
-        out.push(Intent::SetViewport { to: v });
+        out.push(GraphIntent::SetViewport { to: v });
     }
 }
 
@@ -189,7 +189,7 @@ pub(crate) fn scroll_to_zoom_factor(delta_y: f32) -> f32 {
 const FIT_MARGIN: f32 = 40.0;
 
 /// A one-shot viewport-framing request from the graph toolbar. Each
-/// resolves to an `Intent::SetViewport`, so a reframe rides the same
+/// resolves to an `GraphIntent::SetViewport`, so a reframe rides the same
 /// undo path as a manual pan/zoom (and coalesces with it).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum ViewAction {
@@ -212,7 +212,7 @@ pub(crate) fn view_action_intent(
     geometry: &CanvasGeometry,
     graph: Pane<'_>,
     action: ViewAction,
-) -> Option<Intent> {
+) -> Option<GraphIntent> {
     let vp = ui.response_for(outer_canvas_widget_id()).layout_rect?.size;
     let pane = Vec2::new(vp.w, vp.h);
     let to = match action {
@@ -225,7 +225,7 @@ pub(crate) fn view_action_intent(
             fit_target(node_bounds(geometry, graph, true)?, pane)
         }
     };
-    Some(Intent::SetViewport { to })
+    Some(GraphIntent::SetViewport { to })
 }
 
 /// 1:1 zoom, centered on all content (world origin when the graph is empty).
