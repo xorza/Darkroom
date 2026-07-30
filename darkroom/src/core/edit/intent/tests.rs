@@ -9,7 +9,7 @@ use scenarium::{Binding, CacheMode, InputPort, Node, NodeId, NodeKind};
 use crate::core::document::dock::DockOp;
 use crate::core::document::{Document, Viewport};
 use crate::core::edit::intent::apply::{apply_step, commit_dock_op, commit_intent, revert_step};
-use crate::core::edit::intent::build::{build_dock_step, build_step};
+use crate::core::edit::intent::build::build_dock_step;
 use crate::core::edit::intent::duplicate::internals::duplicate_offset;
 use crate::core::edit::intent::duplicate::{build_duplicate_intent, build_duplicate_intent_for};
 use crate::core::edit::intent::types::{GraphStep, Intent, NodeProperty, Refusal, UndoStep};
