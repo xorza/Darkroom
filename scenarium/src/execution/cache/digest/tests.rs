@@ -4,28 +4,27 @@ use super::*;
 use crate::StaticValue;
 use crate::execution::cache::runtime::RuntimeCache;
 use crate::execution::cache::slot::OutputSnapshot;
-use crate::execution::compiled::internals::TestCompiledGraph;
+use crate::execution::compiled::{
+    CompiledGraph, ExecutionBinding, ExecutionInput, ExecutionNode, ExecutionOutput,
+};
 use crate::execution::identity::ExecutionNodeId;
 use crate::execution::identity::{NodeIdx, OutputAddr};
-use crate::execution::program::{
-    ExecutionBinding, ExecutionInput, ExecutionNode, ExecutionOutput, Program,
-};
 use crate::graph::func::FuncBehavior;
 
-/// Minimal hand-built `Program` for digest tests. Node ids are
+/// Minimal hand-built `CompiledGraph` for digest tests. Node ids are
 /// `from_u128(idx + 1)`; `bind`'s target id must match that scheme. Output types
 /// go straight into the packed output metadata — each output defaults to `Int`,
 /// overridable via [`Prog::add_typed`] to exercise the output-signature folding.
 #[derive(Debug, Default)]
 struct Prog {
     /// A real outer compiled artifact around the hand-built program.
-    program: TestCompiledGraph,
+    program: CompiledGraph,
 }
 
 impl Prog {
     /// The program while the fixture is still the artifact's sole holder.
-    fn building(&mut self) -> &mut Program {
-        self.program.program_mut()
+    fn building(&mut self) -> &mut CompiledGraph {
+        &mut self.program
     }
 
     /// Add a `Pure` (content-cacheable) node; outputs default to `Int`.
@@ -59,9 +58,9 @@ impl Prog {
     }
 
     /// Mark input `input_idx` of node `idx` as a declared filesystem-path input.
-    fn stamp_fs_path_input(&mut self, idx: usize, input_idx: usize) {
-        let pool = self.program.by_id(e_node_id(idx)).inputs.start as usize + input_idx;
-        self.building().inputs[pool].stamps_fs_path = true;
+    fn stamp_fs_path_input(&mut self, idx: usize, input_idx: u32) {
+        let input = self.program.by_id(e_node_id(idx)).inputs.nth(input_idx);
+        self.building().inputs[input].stamps_fs_path = true;
     }
 
     fn add_with(
@@ -132,18 +131,18 @@ struct DigestPair {
 /// in fixture index order, each node reading its
 /// producers' just-stamped `current_digest` — stopping after `through`. The cache
 /// identifies its own paths each call. Returns it, holding every computed digest.
-fn digested_cache(program: &TestCompiledGraph, through: usize) -> RuntimeCache {
+fn digested_cache(program: &CompiledGraph, through: usize) -> RuntimeCache {
     let mut cache = RuntimeCache::default();
-    cache.reconcile_for_test(program);
+    cache.install_for_test(program);
     for idx in 0..=through {
-        cache.prepare_node_blocking(node_idx(idx));
-        cache.stamp_digest(node_idx(idx));
+        cache.prepare_node_blocking(program, node_idx(idx));
+        cache.stamp_digest(program, node_idx(idx));
     }
     cache
 }
 
 /// One node's content digest, computing only the producer-first prefix it needs.
-fn digest_at(program: &TestCompiledGraph, idx: usize) -> Option<Digest> {
+fn digest_at(program: &CompiledGraph, idx: usize) -> Option<Digest> {
     digested_cache(program, idx)[node_idx(idx)].current_digest
 }
 
@@ -173,19 +172,19 @@ fn deterministic_and_per_function_distinct() {
     assert_ne!(first[1], first[2]);
     assert_ne!(first[0], first[2]);
 
-    p.building().by_id_mut(e_node_id(0)).version = 1;
-    let versioned = digests(&p);
+    p.building().by_id_mut(e_node_id(0)).func_id = FuncId::from_u128(11);
+    let refunced = digests(&p);
     assert_ne!(
-        first[0], versioned[0],
-        "a function version re-keys its node"
+        first[0], refunced[0],
+        "a function identity re-keys its node"
     );
     assert_ne!(
-        first[1], versioned[1],
-        "a function version propagates downstream"
+        first[1], refunced[1],
+        "a function identity propagates downstream"
     );
     assert_eq!(
-        first[2], versioned[2],
-        "an independent node ignores another function's version"
+        first[2], refunced[2],
+        "an independent node ignores another function's identity"
     );
 }
 
@@ -311,9 +310,9 @@ fn fs_path_folds_file_identity_and_path() {
         let mut p = Prog::default();
         p.add(10, 1, &[konst(value)]);
         let mut cache = RuntimeCache::default();
-        cache.reconcile_for_test(&p.program);
+        cache.install_for_test(&p.program);
         cache.stamp_file(path, 4, 7);
-        cache.node_digest(node_idx(0))
+        cache.node_digest(&p.program, node_idx(0))
     };
     let here = "definitely-missing-elsewhere";
     let there = "definitely-missing-somewhere";
@@ -335,8 +334,8 @@ fn fs_path_folds_file_identity_and_path() {
     assert_eq!(
         d_here,
         Some(Digest([
-            128, 125, 192, 230, 35, 129, 82, 24, 7, 16, 107, 127, 38, 16, 185, 174, 95, 246, 112,
-            199, 104, 177, 218, 96, 191, 140, 142, 182, 57, 112, 38, 97,
+            20, 55, 162, 139, 252, 245, 8, 67, 80, 113, 23, 85, 78, 225, 77, 88, 157, 24, 172, 160,
+            26, 161, 188, 173, 231, 38, 251, 148, 76, 195, 254, 125,
         ])),
         "the single-path digest encoding must remain stable"
     );
@@ -370,17 +369,17 @@ fn bound_fs_path_folds_delivered_file_identity() {
     // slot empty — an unreadable value), then fold both consumers.
     let digests_with = |value: Option<DynamicValue>| {
         let mut cache = RuntimeCache::default();
-        cache.reconcile_for_test(&p.program);
-        let producer = cache.node_digest(node_idx(0)).unwrap();
+        cache.install_for_test(&p.program);
+        let producer = cache.node_digest(&p.program, node_idx(0)).unwrap();
         cache[node_idx(0)].current_digest = Some(producer);
         if let Some(value) = value {
             cache.hydrate(node_idx(0), OutputSnapshot::new(vec![value]), producer);
         }
-        cache.prepare_node_blocking(node_idx(1));
-        cache.prepare_node_blocking(node_idx(2));
+        cache.prepare_node_blocking(&p.program, node_idx(1));
+        cache.prepare_node_blocking(&p.program, node_idx(2));
         DigestPair {
-            typed: cache.node_digest(node_idx(1)),
-            plain: cache.node_digest(node_idx(2)),
+            typed: cache.node_digest(&p.program, node_idx(1)),
+            plain: cache.node_digest(&p.program, node_idx(2)),
         }
     };
     let fs_path = || Some(DynamicValue::Static(StaticValue::FsPath(path.clone())));
@@ -467,8 +466,8 @@ fn bound_fs_path_folds_delivered_file_identity() {
     );
 
     let mut cache = RuntimeCache::default();
-    cache.reconcile_for_test(&p.program);
-    let producer = cache.node_digest(node_idx(0)).unwrap();
+    cache.install_for_test(&p.program);
+    let producer = cache.node_digest(&p.program, node_idx(0)).unwrap();
     cache[node_idx(0)].current_digest = Some(producer);
     cache.hydrate(
         node_idx(0),
@@ -476,9 +475,9 @@ fn bound_fs_path_folds_delivered_file_identity() {
         producer,
     );
     cache[node_idx(0)].current_digest = Some(Digest([9; 32]));
-    cache.prepare_node_blocking(node_idx(1));
+    cache.prepare_node_blocking(&p.program, node_idx(1));
     assert_eq!(
-        cache.node_digest(node_idx(1)),
+        cache.node_digest(&p.program, node_idx(1)),
         None,
         "a path value produced under an old producer digest is unreadable"
     );

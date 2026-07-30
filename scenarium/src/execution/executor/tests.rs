@@ -6,12 +6,15 @@ use crate::async_lambda;
 use crate::common::column::{Column, Idx};
 use crate::execution::cache::runtime::RuntimeCache;
 use crate::execution::cache::slot::OutputSnapshot;
-use crate::execution::compiled::internals::TestCompiledGraph;
+use crate::execution::compiled::{
+    ExecutionBinding, ExecutionInput, ExecutionNode, ExecutionOutput,
+};
 use crate::execution::identity::ExecutionNodeId;
 use crate::execution::identity::{NodeIdx, OutputAddr, OutputIdx};
-use crate::execution::program::{ExecutionBinding, ExecutionInput, ExecutionNode, ExecutionOutput};
 use crate::execution::report::internals::DiscardedReports;
-use crate::execution::schedule::{NodeState, Resolved, ResolvedOutputs, RunSchedule, Scheduled};
+use crate::execution::schedule::{
+    NodeState, Resolved, ResolvedOutputs, RootFlags, RunSchedule, Scheduled,
+};
 use crate::graph::func::FuncBehavior;
 use crate::graph::func::lambda::Invocation;
 use crate::graph::func::lambda::internals;
@@ -21,16 +24,16 @@ use crate::{DynamicValue, StaticValue};
 
 /// Hand-built program with real lambdas. Inputs are all optional here (the
 /// planner gates required ones; these tests drive the executor directly).
-#[derive(Default)]
+#[derive(Debug, Default)]
 struct Prog {
     /// A real outer compiled artifact around the hand-built program.
-    program: TestCompiledGraph,
+    program: CompiledGraph,
 }
 
 impl Prog {
     /// The program while the fixture is still the artifact's sole holder.
-    fn building(&mut self) -> &mut Program {
-        self.program.program_mut()
+    fn building(&mut self) -> &mut CompiledGraph {
+        &mut self.program
     }
 
     fn node(
@@ -86,7 +89,7 @@ impl Prog {
 /// index, so its length is `n_outputs`), instead of the all-`1` default. Lets a test claim
 /// more consumers than actually read (to prove the release waits for the full count) or none
 /// (a sink, released the instant it runs).
-fn run_with_readers(program: &Program, readers: Vec<u32>) -> RunSchedule {
+fn run_with_readers(program: &CompiledGraph, readers: Vec<u32>) -> RunSchedule {
     assert_eq!(readers.len(), program.outputs.len());
     let demand: Vec<OutputDemand> = readers
         .iter()
@@ -110,36 +113,36 @@ fn run_with_readers(program: &Program, readers: Vec<u32>) -> RunSchedule {
     schedule
 }
 
-fn demand_output(program: &Program, run: &mut RunSchedule, address: OutputAddr) {
+fn demand_output(program: &CompiledGraph, run: &mut RunSchedule, address: OutputAddr) {
     let output_idx = program.output_idx(address);
     run.outputs.demand[output_idx] = OutputDemand::Produce;
 }
 
 /// These tests name nodes by their stable id; the program owns the id ↔ index
 /// mapping the production paths carry directly.
-fn nx(program: &Program, e_node_id: ExecutionNodeId) -> NodeIdx {
+fn nx(program: &CompiledGraph, e_node_id: ExecutionNodeId) -> NodeIdx {
     program.e_node_index[&e_node_id]
 }
 
-fn output(program: &Program, e_node_id: ExecutionNodeId, port_idx: usize) -> OutputAddr {
+fn output(program: &CompiledGraph, e_node_id: ExecutionNodeId, port_idx: usize) -> OutputAddr {
     OutputAddr {
         node_idx: nx(program, e_node_id),
         port_idx: port_idx as u32,
     }
 }
 
-fn bind(program: &Program, e_node_id: ExecutionNodeId, port: usize) -> ExecutionBinding {
+fn bind(program: &CompiledGraph, e_node_id: ExecutionNodeId, port: usize) -> ExecutionBinding {
     ExecutionBinding::Bind(output(program, e_node_id, port))
 }
 
 /// A resolved run that runs every node in index order, each output marked needed. These tests
 /// drive the run loop directly with an all-`needed` mask (the reuse/cut logic is
 /// unit-tested in `resolve.rs`), so `roots` is irrelevant here.
-fn straight_run(program: &Program) -> RunSchedule {
+fn straight_run(program: &CompiledGraph) -> RunSchedule {
     run_with_readers(program, vec![1; program.outputs.len()])
 }
 
-fn structural_plan(program: &Program) -> RunSchedule {
+fn structural_plan(program: &CompiledGraph) -> RunSchedule {
     let mut schedule = RunSchedule::default();
     schedule.reset_for_program(program);
     schedule
@@ -148,8 +151,8 @@ fn structural_plan(program: &Program) -> RunSchedule {
     // `Cut` is the planner's positive verdict: every node runnable, none
     // claimed yet.
     schedule.states.reset(program.e_nodes.len(), NodeState::Cut);
-    for &node_idx in &schedule.process_order {
-        schedule.roots.insert(node_idx);
+    for node_idx in (0..program.e_nodes.len()).map(|idx| NodeIdx(idx as u32)) {
+        schedule.add_root(node_idx, RootFlags::PLAIN);
     }
     schedule
 }
@@ -190,7 +193,7 @@ fn debug_assertions_reject_invalid_output_indexes_and_reader_counts() {
 /// fills the RAM column — is not part of it.
 fn collect(
     executor: &Executor,
-    program: &Program,
+    program: &CompiledGraph,
     schedule: &RunSchedule,
     outcome: &mut ExecutionOutcome,
 ) {
@@ -199,10 +202,10 @@ fn collect(
     executor.collect_outcome(Resolved::assume(program, schedule), &node_ram, outcome);
 }
 
-async fn run(program: &TestCompiledGraph, run: &RunSchedule) -> (RuntimeCache, ExecutionOutcome) {
+async fn run(program: &CompiledGraph, run: &RunSchedule) -> (RuntimeCache, ExecutionOutcome) {
     // `RuntimeCache::default()` has a memory-only `DiskStore`, so no disk cache is in play.
     let mut cache = RuntimeCache::default();
-    cache.reconcile_for_test(program);
+    cache.install_for_test(program);
     let mut executor = Executor::default();
     let mut stats = ExecutionOutcome::default();
     executor
@@ -223,7 +226,7 @@ async fn run(program: &TestCompiledGraph, run: &RunSchedule) -> (RuntimeCache, E
 /// Like [`run`] but over a caller-owned cache, for multi-run tests (a reuse hit
 /// needs the prior run's stamped digests and resident values).
 async fn run_with(
-    program: &Program,
+    program: &CompiledGraph,
     schedule: &mut RunSchedule,
     cache: &mut RuntimeCache,
 ) -> ExecutionOutcome {
@@ -353,7 +356,7 @@ async fn cancellation_retires_reads_owned_by_the_unreached_tail() {
 
     let run = run_with_readers(&p.program, vec![1]);
     let mut cache = RuntimeCache::default();
-    cache.reconcile_for_test(&p.program);
+    cache.install_for_test(&p.program);
     let mut executor = Executor::default();
     let mut stats = ExecutionOutcome::default();
     executor
@@ -531,7 +534,7 @@ async fn a_node_seed_demands_its_output_without_retaining_it() {
 
     let mut plan = run_with_readers(&p.program, vec![0]);
     demand_output(&p.program, &mut plan, output(&p.program, a, 0));
-    plan.seeded.insert(nx(&p.program, a));
+    plan.add_root(nx(&p.program, a), RootFlags::SEEDED);
     let (cache, _stats) = run(&p.program, &plan).await;
     assert_eq!(*seen.lock().unwrap(), Some(OutputDemand::Produce));
     assert!(
@@ -559,8 +562,8 @@ async fn a_reused_output_with_no_consumers_is_reclaimed_immediately() {
     run.states[nx(&p.program, a)] = NodeState::Reuse;
 
     let mut cache = RuntimeCache::default();
-    cache.reconcile_for_test(&p.program);
-    cache.stamp_digest(nx(&p.program, a));
+    cache.install_for_test(&p.program);
+    cache.stamp_digest(&p.program, nx(&p.program, a));
     let produced_under = cache[nx(&p.program, a)].current_digest;
     cache[nx(&p.program, a)].load_output(
         OutputSnapshot::new(vec![DynamicValue::Static(StaticValue::Int(7))]),
@@ -644,7 +647,7 @@ async fn reused_consumer_does_not_delay_last_read_reclamation() {
 
     let mut plan = structural_plan(&p.program);
     let mut cache = RuntimeCache::default();
-    cache.reconcile_for_test(&p.program);
+    cache.install_for_test(&p.program);
     let first = run_with(&p.program, &mut plan, &mut cache).await;
     assert_eq!(first.ran_node_count, 3);
 
@@ -717,10 +720,10 @@ async fn missing_lambda_reports_error_and_skips_consumers() {
     let downstream = p.node(&[bind(&p.program, missing, 0)], 1, consumer);
 
     let mut plan = structural_plan(&p.program);
-    plan.roots.reset(p.program.e_nodes.len());
-    plan.roots.insert(nx(&p.program, downstream));
+    plan.clear_roots();
+    plan.add_root(nx(&p.program, downstream), RootFlags::PLAIN);
     let mut cache = RuntimeCache::default();
-    cache.reconcile_for_test(&p.program);
+    cache.install_for_test(&p.program);
     cache[nx(&p.program, missing)].load_output(
         OutputSnapshot::new(vec![DynamicValue::Static(StaticValue::Int(9))]),
         None,
@@ -794,7 +797,7 @@ async fn reuse_survives_failed_upstream_rerun() {
     // run 2 (residency is what the reuse check trusts), masking the skip under test.
     let mut plan = run_with_readers(&p.program, vec![2, 1, 0]);
     let mut cache = RuntimeCache::default();
-    cache.reconcile_for_test(&p.program);
+    cache.install_for_test(&p.program);
 
     // Run 1: A=5, B=C=6, everything computes.
     let stats1 = run_with(&p.program, &mut plan, &mut cache).await;

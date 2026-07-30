@@ -1,23 +1,16 @@
 use super::*;
 use crate::execution::compile::error::CompiledGraphValidationError;
-use crate::execution::compile::flat::internals::FlatGraphBuilder;
+use crate::execution::compiled::{CompiledGraph, ExecutionBinding};
 use crate::execution::error::ExecutionIdentityError;
+use crate::execution::flatten::flat::internals::FlatGraphBuilder;
 use crate::execution::identity::ExecutionNodeId;
 use crate::execution::identity::NodeIdx;
 use crate::execution::identity::OutputAddr;
-use crate::execution::program::{ExecutionBinding, Program};
-use crate::graph::NodeSearch;
-use crate::graph::definition::{GraphDef, GraphLink};
+use crate::graph::Binding;
 use crate::graph::func::Func;
 use crate::graph::func::event::EventLambda;
-use crate::graph::identity::{FuncId, GraphId, NodeId};
+use crate::graph::identity::{FuncId, InputPort, NodeId};
 use crate::testing::{self, TestFuncHooks, test_func_lib, test_graph};
-
-/// The program of a freshly compiled artifact, which nothing else holds yet —
-/// the corruption these tests inject before asking `validate` to catch it.
-fn program_mut(compiled: &mut CompiledGraph) -> &mut Program {
-    &mut compiled.program
-}
 
 /// Event edges get the same treatment as bind fixups: an endpoint flatten
 /// never emitted is a flatten bug, so wiring panics instead of dropping the
@@ -37,18 +30,18 @@ fn subscription_wiring_rejects_an_endpoint_outside_the_program() {
     graph.subscribe(emitter, 0, subscriber);
 
     let mut compiled = Compiler::default().compile(&graph, &library).unwrap();
-    let emitter_idx = compiled.program.e_node_index[&ExecutionNodeId::from_authoring(&[emitter])];
-    let events = compiled.program[emitter_idx].events;
+    let emitter_idx = compiled.e_node_index[&ExecutionNodeId::from_node(emitter)];
+    let events = compiled[emitter_idx].events;
     assert_eq!(
-        compiled.program.events[events][0].subscribers.len(),
+        compiled.events[events][0].subscribers.len(),
         1,
         "the authored subscription wired one flat subscriber"
     );
 
     // The artifact check catches a subscriber index that names no node.
     // (Wiring one the walk never emitted panics at link — covered there.)
-    let past_the_end = NodeIdx(compiled.program.e_nodes.len() as u32);
-    program_mut(&mut compiled).events[events][0].subscribers[0] = past_the_end;
+    let past_the_end = NodeIdx(compiled.e_nodes.len() as u32);
+    compiled.events[events][0].subscribers[0] = past_the_end;
     assert!(
         matches!(
             validate::validate(&compiled, &library),
@@ -72,21 +65,19 @@ fn validation_rejects_a_binding_that_does_not_name_a_real_output() {
             .unwrap()
     };
     let bound_input = |compiled: &CompiledGraph| {
-        (0..compiled.program.inputs.len())
-            .find(|i| {
-                matches!(
-                    compiled.program.inputs[*i].binding,
-                    ExecutionBinding::Bind(_)
-                )
-            })
+        compiled
+            .inputs
+            .iter_indexed()
+            .find(|(_, input)| matches!(input.binding, ExecutionBinding::Bind(_)))
+            .map(|(input_idx, _)| input_idx)
             .expect("the test graph wires bindings")
     };
 
     // One past the last node: the address names no node at all.
     let mut compiled = compile();
-    let past_the_end = NodeIdx(compiled.program.e_nodes.len() as u32);
+    let past_the_end = NodeIdx(compiled.e_nodes.len() as u32);
     let input = bound_input(&compiled);
-    program_mut(&mut compiled).inputs[input].binding = ExecutionBinding::Bind(OutputAddr {
+    compiled.inputs[input].binding = ExecutionBinding::Bind(OutputAddr {
         node_idx: past_the_end,
         port_idx: 0,
     });
@@ -102,11 +93,11 @@ fn validation_rejects_a_binding_that_does_not_name_a_real_output() {
     // A real node, one past its last output port.
     let mut compiled = compile();
     let input = bound_input(&compiled);
-    let ExecutionBinding::Bind(address) = compiled.program.inputs[input].binding else {
+    let ExecutionBinding::Bind(address) = compiled.inputs[input].binding else {
         unreachable!("bound_input selected a bind")
     };
-    let port_idx = compiled.program[address.node_idx].outputs.len;
-    program_mut(&mut compiled).inputs[input].binding = ExecutionBinding::Bind(OutputAddr {
+    let port_idx = compiled[address.node_idx].outputs.len;
+    compiled.inputs[input].binding = ExecutionBinding::Bind(OutputAddr {
         node_idx: address.node_idx,
         port_idx,
     });
@@ -118,293 +109,6 @@ fn validation_rejects_a_binding_that_does_not_name_a_real_output() {
         ),
         "a bind past the producer's last port is out of range"
     );
-}
-
-#[test]
-fn compilation_retains_a_disabled_composite_interior_as_disabled() {
-    let library = test_func_lib(TestFuncHooks::default());
-    let mut nested = GraphDef::new("Nested");
-    let interior_id = nested.body.add(library.by_name("Print").unwrap().into());
-    let nested_id = GraphId::unique();
-
-    let mut graph = Graph::default();
-    let instance_id = graph.add_graph_node(&nested, GraphLink::Local(nested_id));
-    graph
-        .find_mut(instance_id, NodeSearch::TopLevel)
-        .unwrap()
-        .disabled = true;
-    graph.insert_graph(nested_id, nested);
-
-    let compiled = Compiler::default().compile(&graph, &library).unwrap();
-    let e_node_id = ExecutionNodeId::from_authoring(&[instance_id, interior_id]);
-    assert!(
-        compiled.program.by_id(e_node_id).disabled,
-        "the disabled instance marks its compiled interior effectively disabled"
-    );
-}
-
-#[test]
-fn data_consumer_closure_targets_one_instance_or_every_shared_definition_occurrence() {
-    let library = test_func_lib(TestFuncHooks::default());
-    let mut nested = GraphDef::new("Nested");
-    let interior_id = nested.body.add(library.by_name("get_b").unwrap().into());
-    let nested_id = GraphId::unique();
-
-    let mut graph = Graph::default();
-    let first_instance = graph.add_graph_node(&nested, GraphLink::Local(nested_id));
-    let second_instance = graph.add_graph_node(&nested, GraphLink::Local(nested_id));
-    graph.insert_graph(nested_id, nested);
-    let first = ExecutionNodeId::from_authoring(&[first_instance, interior_id]);
-    let second = ExecutionNodeId::from_authoring(&[second_instance, interior_id]);
-    let compiled = Compiler::default().compile(&graph, &library).unwrap();
-
-    assert_eq!(
-        compiled.data_consumer_closure(&[first_instance]),
-        vec![first],
-        "an instance evicts only its own flattened interior"
-    );
-    let mut both = vec![first, second];
-    both.sort_unstable();
-    assert_eq!(
-        compiled.data_consumer_closure(&[interior_id]),
-        both,
-        "editing a shared definition evicts every flattened occurrence"
-    );
-}
-
-/// A composite whose interior distinguishes all three run-target cases:
-/// `relay` backs the instance's one output, `printer` is an interior
-/// sink, and `source` feeds only the other two.
-struct NestedFixture {
-    library: Library,
-    graph: Graph,
-    nested_id: GraphId,
-    instance: NodeId,
-    boundary: NodeId,
-    source: NodeId,
-    relay: NodeId,
-    printer: NodeId,
-    consumer: NodeId,
-}
-
-fn nested_fixture() -> NestedFixture {
-    use crate::data::type_system::DataType;
-    use crate::graph::Binding;
-    use crate::graph::func::FuncOutput;
-    use crate::graph::identity::InputPort;
-    use crate::graph::node::{Node, NodeKind};
-
-    let library = test_func_lib(TestFuncHooks::default());
-    let mut nested = GraphDef::new("Nested").output(FuncOutput::new("out", DataType::Int));
-    let boundary = nested.body.add(Node::new(NodeKind::GraphOutput));
-    let source = nested.body.add(library.by_name("get_b").unwrap().into());
-    let relay = nested.body.add(library.by_name("sum").unwrap().into());
-    let printer = nested.body.add(library.by_name("Print").unwrap().into());
-    nested
-        .body
-        .set_input_binding(InputPort::new(relay, 0), Binding::bind(source, 0));
-    nested
-        .body
-        .set_input_binding(InputPort::new(printer, 0), Binding::bind(source, 0));
-    nested
-        .body
-        .set_input_binding(InputPort::new(boundary, 0), Binding::bind(relay, 0));
-
-    let nested_id = GraphId::unique();
-    let mut graph = Graph::default();
-    let instance = graph.add_graph_node(&nested, GraphLink::Local(nested_id));
-    let consumer = graph.add(library.by_name("Print").unwrap().into());
-    graph.set_input_binding(InputPort::new(consumer, 0), Binding::bind(instance, 0));
-    graph.insert_graph(nested_id, nested);
-
-    NestedFixture {
-        library,
-        graph,
-        nested_id,
-        instance,
-        boundary,
-        source,
-        relay,
-        printer,
-        consumer,
-    }
-}
-
-#[test]
-fn an_authored_nodes_footprint_covers_a_leaf_or_a_whole_interior() {
-    let f = nested_fixture();
-    let compiled = Compiler::default().compile(&f.graph, &f.library).unwrap();
-    let interior = |node_id| ExecutionNodeId::from_authoring(&[f.instance, node_id]);
-
-    // A leaf in the entry graph covers exactly itself, and its execution
-    // id is the authored one.
-    assert_eq!(
-        compiled.occurrences(f.consumer),
-        vec![ExecutionNodeId::from_authoring(&[f.consumer])]
-    );
-    // A leaf inside the definition covers its one occurrence.
-    assert_eq!(compiled.occurrences(f.relay), vec![interior(f.relay)]);
-
-    // The instance covers its whole interior — and nothing outside it.
-    let mut whole_interior = vec![interior(f.source), interior(f.relay), interior(f.printer)];
-    whole_interior.sort_unstable();
-    assert_eq!(compiled.occurrences(f.instance), whole_interior);
-
-    // Boundary nodes are wiring: flatten resolves through them and emits
-    // nothing, so they cover no execution work at all. Same for a node
-    // this program never saw.
-    assert!(compiled.occurrences(f.boundary).is_empty());
-    assert!(compiled.occurrences(NodeId::unique()).is_empty());
-}
-
-#[test]
-fn run_targets_seed_what_a_node_exposes_plus_the_sinks_it_contains() {
-    let f = nested_fixture();
-    let compiled = Compiler::default().compile(&f.graph, &f.library).unwrap();
-    let interior = |node_id| ExecutionNodeId::from_authoring(&[f.instance, node_id]);
-
-    // A leaf seeds itself, whether its value leaves (`consumer` reads the
-    // instance) or it is a sink with no value at all.
-    assert_eq!(
-        compiled.run_targets(f.consumer),
-        vec![ExecutionNodeId::from_authoring(&[f.consumer])]
-    );
-    assert_eq!(compiled.run_targets(f.relay), vec![interior(f.relay)]);
-    assert_eq!(compiled.run_targets(f.source), vec![interior(f.source)]);
-
-    // The instance seeds the producer behind its output port plus its
-    // interior sink — but not `source`, whose value never leaves the
-    // footprint. It still runs, as their upstream cone.
-    let mut exposed = vec![interior(f.relay), interior(f.printer)];
-    exposed.sort_unstable();
-    assert_eq!(compiled.run_targets(f.instance), exposed);
-    assert!(
-        !compiled
-            .run_targets(f.instance)
-            .contains(&interior(f.source)),
-        "a purely interior producer is a dependency, not a target"
-    );
-
-    // Nothing to seed for a node with no footprint.
-    assert!(compiled.run_targets(f.boundary).is_empty());
-}
-
-/// An exposed producer that an interior node *also* reads is still a
-/// target.
-///
-/// Inferring "its value leaves the footprint" from the flattened program
-/// cannot see this case: flattening dissolves the `GraphOutput` edge, so
-/// the only consumers left are interior and the producer reads as
-/// ordinary plumbing. Meanwhile a dead interior terminal — no readers at
-/// all, not a sink — qualified. A run-to-instance request therefore
-/// seeded the wrong cone: it demanded the dead branch and skipped the
-/// one output the instance exists to produce, which then surfaced only
-/// as a preview that never filled in.
-///
-/// The fixture above cannot catch this: nothing reads its exposed
-/// producer internally, so `readers.is_empty()` carried it regardless.
-#[test]
-fn run_targets_seed_an_exposed_producer_that_an_interior_node_also_reads() {
-    use crate::data::type_system::DataType;
-    use crate::graph::Binding;
-    use crate::graph::func::FuncOutput;
-    use crate::graph::identity::InputPort;
-    use crate::graph::node::{Node, NodeKind};
-
-    let library = test_func_lib(TestFuncHooks::default());
-    let mut nested = GraphDef::new("Nested").output(FuncOutput::new("out", DataType::Int));
-    let boundary = nested.body.add(Node::new(NodeKind::GraphOutput));
-    let source = nested.body.add(library.by_name("get_b").unwrap().into());
-    let exposed = nested.body.add(library.by_name("sum").unwrap().into());
-    // Reads `exposed` and is read by nothing; not a sink, so it qualifies
-    // only through the "nothing consumes it" arm.
-    let dead = nested.body.add(library.by_name("sum").unwrap().into());
-    nested
-        .body
-        .set_input_binding(InputPort::new(exposed, 0), Binding::bind(source, 0));
-    nested
-        .body
-        .set_input_binding(InputPort::new(dead, 0), Binding::bind(exposed, 0));
-    nested
-        .body
-        .set_input_binding(InputPort::new(boundary, 0), Binding::bind(exposed, 0));
-
-    let nested_id = GraphId::unique();
-    let mut graph = Graph::default();
-    let instance = graph.add_graph_node(&nested, GraphLink::Local(nested_id));
-    graph.insert_graph(nested_id, nested);
-
-    let compiled = Compiler::default().compile(&graph, &library).unwrap();
-    let interior = |node_id| ExecutionNodeId::from_authoring(&[instance, node_id]);
-    let targets = compiled.run_targets(instance);
-
-    assert!(
-        targets.contains(&interior(exposed)),
-        "the producer behind the instance's output port must be seeded",
-    );
-    // The dead terminal keeps qualifying — "nothing consumes it" is a
-    // deliberate arm, and this is about what was *missing* alongside it.
-    assert!(targets.contains(&interior(dead)));
-    assert!(
-        !targets.contains(&interior(source)),
-        "a purely interior producer is still a dependency, not a target",
-    );
-}
-
-#[test]
-fn per_node_facts_fold_over_a_footprint_rather_than_a_composites_own_shape() {
-    let f = nested_fixture();
-    let compiled = Compiler::default().compile(&f.graph, &f.library).unwrap();
-
-    // A func answers from its own declaration. `Print` is a sink and, like
-    // every func that doesn't declare `.pure()`, impure; `sum` is neither.
-    assert_eq!(compiled.is_sink(f.consumer), Some(true));
-    assert_eq!(compiled.is_impure(f.consumer), Some(true));
-    assert_eq!(compiled.is_sink(f.relay), Some(false));
-    assert_eq!(compiled.is_impure(f.relay), Some(false));
-
-    // The instance exposes an output *and* wraps `Print`. Nothing about its
-    // own shape says either fact: port arity says "not a sink", and it has no
-    // declaration at all to be impure by. Its interior says both — and the
-    // interior is what a sinks run reaches, what disabling it suppresses, and
-    // what stops its result being reusable.
-    assert!(
-        !f.graph.find_graph(f.nested_id).unwrap().outputs.is_empty(),
-        "the fixture instance exposes an output, or this proves nothing"
-    );
-    assert_eq!(compiled.is_sink(f.instance), Some(true));
-    assert_eq!(compiled.is_impure(f.instance), Some(true));
-
-    // Nothing to fold: boundary nodes emit no work, and neither does a node
-    // this program never saw. The caller keeps its own reading.
-    assert_eq!(compiled.is_sink(f.boundary), None);
-    assert_eq!(compiled.is_impure(f.boundary), None);
-    assert_eq!(compiled.is_sink(NodeId::unique()), None);
-    assert_eq!(compiled.is_impure(NodeId::unique()), None);
-
-    // A composite wrapping neither is neither — the fold reports what is
-    // there, it doesn't assume composites are special.
-    let plain = {
-        use crate::data::type_system::DataType;
-        use crate::graph::Binding;
-        use crate::graph::func::FuncOutput;
-        use crate::graph::identity::InputPort;
-        use crate::graph::node::{Node, NodeKind};
-
-        let mut nested = GraphDef::new("Plain").output(FuncOutput::new("out", DataType::Int));
-        let boundary = nested.body.add(Node::new(NodeKind::GraphOutput));
-        let source = nested.body.add(f.library.by_name("get_b").unwrap().into());
-        nested
-            .body
-            .set_input_binding(InputPort::new(boundary, 0), Binding::bind(source, 0));
-        let nested_id = GraphId::unique();
-        let mut graph = Graph::default();
-        let instance = graph.add_graph_node(&nested, GraphLink::Local(nested_id));
-        graph.insert_graph(nested_id, nested);
-        let compiled = Compiler::default().compile(&graph, &f.library).unwrap();
-        (compiled.is_sink(instance), compiled.is_impure(instance))
-    };
-    assert_eq!(plain, (Some(false), Some(false)));
 }
 
 /// One sort settles two outputs: the program's dense node order, and the leaf
@@ -421,31 +125,31 @@ fn dense_order_is_id_order_with_attribution_aligned_to_it() {
 
     let compiled = Compiler::default().compile(&graph, &library).unwrap();
 
-    let e_node_ids: Vec<_> = compiled.program.e_node_ids.iter().copied().collect();
+    let e_node_ids: Vec<_> = compiled.e_node_ids.iter().copied().collect();
     assert_eq!(e_node_ids.len(), authored.len());
     assert!(e_node_ids.is_sorted(), "nodes are adopted in id order");
     for node_id in authored {
         assert_eq!(
             compiled
-                .attribution(ExecutionNodeId::from_authoring(&[node_id]))
-                .unwrap()
-                .collect::<Vec<_>>(),
-            vec![node_id],
-            "a top-level node's leaf names the node itself"
+                .attribution(ExecutionNodeId::from_node(node_id))
+                .unwrap(),
+            node_id,
+            "an execution node attributes to the node it came from"
         );
     }
 }
 
 #[test]
 fn validation_returns_compiled_mismatches() {
-    let e_node_id = ExecutionNodeId::unique();
-    let interior = NodeId::unique();
+    let node_id = NodeId::unique();
+    let e_node_id = ExecutionNodeId::from_node(node_id);
     let missing_func = FuncId::unique();
     let mut builder = FlatGraphBuilder::default();
-    builder.insert_leaf(e_node_id, [], interior);
+    builder.insert_node(e_node_id);
     let mut flat = builder.build();
-    flat.nodes[0].func_id = missing_func;
-    let compiled = link::link(flat);
+    flat.e_nodes[0].func_id = missing_func;
+    let mut compiled = CompiledGraph::default();
+    link::Linker::default().link(&flat, &Library::default(), &mut compiled);
 
     assert_eq!(
         validate::validate(&compiled, &Library::default())
@@ -453,14 +157,186 @@ fn validation_returns_compiled_mismatches() {
             .to_string(),
         format!("execution node {e_node_id:?} references missing func {missing_func:?}")
     );
-    assert_eq!(
-        compiled.attribution(e_node_id).unwrap().collect::<Vec<_>>(),
-        vec![interior]
-    );
+    assert_eq!(compiled.attribution(e_node_id).unwrap(), node_id);
 
     let missing_node = ExecutionNodeId::unique();
     assert!(matches!(
         compiled.attribution(missing_node),
         Err(ExecutionIdentityError::NodeNotFound { e_node_id }) if e_node_id == missing_node
     ));
+}
+
+/// Everything one compile observably produced, in a deterministic order and in
+/// the **stable id space** — bind targets and subscribers by id rather than
+/// index, so two artifacts can't match by an index coincidence.
+fn summary(compiled: &CompiledGraph, authored: &[NodeId]) -> Vec<String> {
+    let program = &compiled;
+    let mut out = Vec::new();
+    for (node_idx, e_node) in program.e_nodes.iter_indexed() {
+        let e_node_id = program.e_node_ids[node_idx];
+        out.push(format!(
+            "node {e_node_id:?} func={:?} sink={} disabled={} cache={:?} special={:?}",
+            e_node.func_id, e_node.sink, e_node.disabled, e_node.cache, e_node.special,
+        ));
+        for input in &program.inputs[e_node.inputs] {
+            let binding = match &input.binding {
+                ExecutionBinding::None => "none".to_string(),
+                ExecutionBinding::Const(value) => format!("const {value:?}"),
+                ExecutionBinding::Bind(address) => format!(
+                    "bind {:?}#{}",
+                    program.e_node_ids[address.node_idx], address.port_idx
+                ),
+            };
+            out.push(format!(
+                "  in required={} fs_path={} {binding}",
+                input.required, input.stamps_fs_path
+            ));
+        }
+        for output in &program.outputs[e_node.outputs] {
+            out.push(format!("  out {:?}", output.data_type));
+        }
+        for event in &program.events[e_node.events] {
+            let subscribers: Vec<_> = event
+                .subscribers
+                .iter()
+                .map(|&idx| program.e_node_ids[idx])
+                .collect();
+            out.push(format!("  event subscribers={subscribers:?}"));
+        }
+        let attribution = compiled.attribution(e_node_id).unwrap();
+        out.push(format!("  from {attribution:?}"));
+    }
+    // The host-facing indices, which are built from their own scratch.
+    for &node_id in authored {
+        out.push(format!(
+            "authored {node_id:?} run_target={:?} sink={:?} impure={:?}",
+            compiled.run_target(node_id),
+            compiled.is_sink(node_id),
+            compiled.is_impure(node_id),
+        ));
+    }
+    out
+}
+
+/// A sink reading a source, plus an unwired node — enough for every question
+/// the artifact answers about an authored node to have a distinct answer.
+struct Fixture {
+    library: Library,
+    graph: Graph,
+    source: NodeId,
+    sink: NodeId,
+    loose: NodeId,
+}
+
+fn fixture() -> Fixture {
+    let library = test_func_lib(TestFuncHooks::default());
+    let mut graph = Graph::default();
+    let source = graph.add_func_node(library.by_name("get_a").unwrap());
+    let sink = graph.add_func_node(library.by_name("Print").unwrap());
+    let loose = graph.add_func_node(library.by_name("get_b").unwrap());
+    graph.set_input_binding(InputPort::new(sink, 0), Binding::bind(source, 0));
+    Fixture {
+        library,
+        graph,
+        source,
+        sink,
+        loose,
+    }
+}
+
+/// Each of the four questions a host asks about an authored node, over a graph
+/// where every one has a different answer. An id the program never held answers
+/// "nothing" to all of them — the one case they must agree on.
+#[test]
+fn the_artifact_answers_for_each_authored_node() {
+    let f = fixture();
+    let compiled = Compiler::default().compile(&f.graph, &f.library).unwrap();
+
+    for (node_id, sink) in [(f.source, false), (f.sink, true), (f.loose, false)] {
+        let e_node_id = ExecutionNodeId::from_node(node_id);
+        assert_eq!(compiled.run_target(node_id), Some(e_node_id));
+        assert_eq!(compiled.is_sink(node_id), Some(sink));
+        assert_eq!(compiled.attribution(e_node_id).unwrap(), node_id);
+    }
+
+    let absent = NodeId::unique();
+    assert_eq!(compiled.run_target(absent), None);
+    assert_eq!(compiled.is_sink(absent), None);
+    assert_eq!(compiled.is_impure(absent), None);
+}
+
+/// Evicting a node reaches everything downstream of it, reflexively — and stops
+/// at a node nothing connects to.
+#[test]
+fn the_consumer_closure_reaches_downstream_and_stops() {
+    let f = fixture();
+    let compiled = Compiler::default().compile(&f.graph, &f.library).unwrap();
+
+    let mut from_source = compiled.data_consumer_closure(&[f.source]);
+    from_source.sort();
+    let mut expected = vec![
+        ExecutionNodeId::from_node(f.source),
+        ExecutionNodeId::from_node(f.sink),
+    ];
+    expected.sort();
+    assert_eq!(from_source, expected, "the source reaches its reader");
+
+    assert_eq!(
+        compiled.data_consumer_closure(&[f.sink]),
+        vec![ExecutionNodeId::from_node(f.sink)],
+        "a terminal node reaches only itself"
+    );
+    assert_eq!(
+        compiled.data_consumer_closure(&[f.loose]),
+        vec![ExecutionNodeId::from_node(f.loose)],
+        "an unwired node reaches only itself"
+    );
+    assert!(
+        compiled
+            .data_consumer_closure(&[NodeId::unique()])
+            .is_empty()
+    );
+}
+
+/// Every buffer a compile fills is owned by the `Compiler` and reused, so the
+/// hazard the reuse introduces is one compile's leftovers reaching the next.
+/// Compiling two graphs that share no node must leave the second artifact
+/// identical to what a `Compiler` that had never run produces for it.
+#[test]
+fn a_reused_compiler_produces_what_a_fresh_one_does() {
+    let first = fixture();
+    let second = fixture();
+    let authored = [second.source, second.sink, second.loose];
+
+    let mut reused = Compiler::default();
+    reused.compile(&first.graph, &first.library).unwrap();
+    let after_reuse = reused.compile(&second.graph, &second.library).unwrap();
+    let fresh = Compiler::default()
+        .compile(&second.graph, &second.library)
+        .unwrap();
+
+    assert_eq!(
+        summary(&after_reuse, &authored),
+        summary(&fresh, &authored),
+        "a compile carried something over from the one before it"
+    );
+    // The summary is only worth comparing if it saw the whole artifact.
+    assert_eq!(after_reuse.e_nodes.len(), 3);
+}
+
+/// The same graph twice through one `Compiler`: the reused buffers must not
+/// accumulate, which a growing pool would show as duplicated ports or nodes.
+#[test]
+fn recompiling_one_graph_does_not_accumulate_in_the_reused_buffers() {
+    let f = fixture();
+    let authored = [f.source, f.sink, f.loose];
+    let mut compiler = Compiler::default();
+
+    let first = compiler.compile(&f.graph, &f.library).unwrap();
+    let first_summary = summary(&first, &authored);
+    let second = compiler.compile(&f.graph, &f.library).unwrap();
+
+    assert_eq!(summary(&second, &authored), first_summary);
+    assert_eq!(second.inputs.len(), first.inputs.len());
+    assert_eq!(second.outputs.len(), first.outputs.len());
 }

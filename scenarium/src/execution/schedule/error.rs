@@ -39,8 +39,4 @@ pub(crate) enum RunScheduleValidationError {
         e_node_id: ExecutionNodeId,
         state: NodeState,
     },
-    #[error("seeded node {e_node_id:?} is not an execution root")]
-    SeededNodeNotRoot { e_node_id: ExecutionNodeId },
-    #[error("event source {e_node_id:?} is not an execution root")]
-    EventSourceNotRoot { e_node_id: ExecutionNodeId },
 }
