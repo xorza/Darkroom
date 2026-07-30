@@ -19,10 +19,9 @@ use crate::gui::canvas::anchored_menu::AnchoredMenu;
 use crate::gui::canvas::{CanvasGesture, outer_canvas_widget_id, to_world};
 use crate::gui::scene::Pane;
 
-/// One row of a category's palette list: a library `Func`, a built-in special
-/// node, a library graph, or one of the open graph's own local definitions.
-/// Collecting them into one type lets a category's rows be sorted by name
-/// into a single alphabetical list.
+/// One row of a category's palette list: a library `Func` or a built-in
+/// special node. Collecting them into one type lets a category's rows be
+/// sorted by name into a single alphabetical list.
 #[derive(Debug)]
 enum PaletteEntry<'a> {
     Func(&'a Func),
@@ -48,14 +47,11 @@ impl<'a> PaletteEntry<'a> {
     }
 }
 
-/// One local definition of the graph the palette was opened over, with its
-/// [`InternedStr`](palantir::InternedStr) name and category read out once
-/// per open frame. The scene holds arena handles behind a `RefCell` the same
 /// Right-click or double-click on empty canvas → popup that lists every
-/// `Func` in `AppContext::library`, plus the open graph's own local
-/// definitions, grouped by category. Clicking an entry emits the intent that
-/// adds it at the click's world position (inner-canvas pre-transform).
-/// Outside-click and Esc dismiss.
+/// `Func` in `AppContext::library` plus the built-in specials, grouped by
+/// category. Clicking an entry emits the intent that adds it at the click's
+/// world position (inner-canvas pre-transform). Outside-click and Esc
+/// dismiss.
 #[derive(Default, Debug)]
 pub(super) struct NewNodeUi {
     menu: AnchoredMenu,
@@ -394,7 +390,7 @@ fn lowercase_cmp(a: &str, b: &str) -> Ordering {
 ///
 /// ASCII names — every built-in one — compare in place; a name carrying
 /// non-ASCII falls back to a folded copy, so the match stays Unicode-correct
-/// for a graph the user named in their own script.
+/// for a graph the user named themselves.
 fn name_matches(name: &str, query_lc: &str) -> bool {
     if query_lc.is_empty() {
         return true;
