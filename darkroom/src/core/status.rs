@@ -1,6 +1,6 @@
 //! The user-facing outcome log shared by every frontend, owned by the
 //! [`RuntimeHost`](crate::core::runtime_host::RuntimeHost): a bounded rolling history (the
-//! TUI's `status` command renders it) plus the last failure as a sticky slot
+//! recorded for the log) plus the last failure as a sticky slot
 //! (the GUI's status bar renders it, until a subsequent success clears it).
 //! Every entry is also emitted through `tracing`, so the structured log stays
 //! the complete record regardless of frontend.
@@ -13,7 +13,7 @@ const STATUS_LOG_CAP: usize = 200;
 
 #[derive(Debug, Default)]
 pub(crate) struct StatusLog {
-    /// Rolling history (worker summaries, script `print`s, failures).
+    /// Rolling history of failures, for the record.
     /// Private so every append goes through the cap in [`Self::push`];
     /// read via [`Self::lines`].
     lines: VecDeque<String>,
@@ -23,22 +23,12 @@ pub(crate) struct StatusLog {
 }
 
 impl StatusLog {
-    /// Record a routine outcome: appended to the history and info-logged.
-    pub(crate) fn info(&mut self, line: String) {
-        tracing::info!(target: "darkroom::status", "{line}");
-        self.push(line);
-    }
-
     /// Record a failure: appended to the history, error-logged, and parked
     /// in the sticky [`error`](Self::error) slot.
     pub(crate) fn error(&mut self, line: String) {
         tracing::error!(target: "darkroom::status", "{line}");
         self.error = Some(line.clone());
         self.push(line);
-    }
-
-    pub(crate) fn lines(&self) -> impl Iterator<Item = &str> {
-        self.lines.iter().map(String::as_str)
     }
 
     fn push(&mut self, line: String) {
@@ -50,6 +40,21 @@ impl StatusLog {
 }
 
 #[cfg(test)]
+pub(crate) mod internals {
+    use crate::core::status::StatusLog;
+
+    impl StatusLog {
+        /// The recorded history, oldest first. Test-only: the status bar
+        /// shows the sticky [`error`](StatusLog::error) slot alone, so the
+        /// history is written for the record and read only by the tests that
+        /// pin *which* failures a path reports.
+        pub(crate) fn lines(&self) -> impl Iterator<Item = &str> {
+            self.lines.iter().map(String::as_str)
+        }
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -57,8 +62,6 @@ mod tests {
     fn error_slot_tracks_last_failure_and_history_keeps_both() {
         let mut log = StatusLog::default();
 
-        // Routine lines never touch the sticky slot.
-        log.info("run finished".into());
         assert_eq!(log.error, None);
 
         // A failure lands in both the slot and the history; a later failure
@@ -68,13 +71,13 @@ mod tests {
         assert_eq!(log.error.as_deref(), Some("compile failed: b"));
         assert_eq!(
             log.lines().collect::<Vec<_>>(),
-            ["run finished", "save failed: a", "compile failed: b"]
+            ["save failed: a", "compile failed: b"]
         );
 
         // Clearing the slot (a subsequent success) leaves the history intact.
         log.error = None;
         assert_eq!(log.error, None);
-        assert_eq!(log.lines().count(), 3);
+        assert_eq!(log.lines().count(), 2);
     }
 
     #[test]
@@ -82,7 +85,7 @@ mod tests {
         let mut log = StatusLog::default();
         // One over the cap: line "0" is evicted, "1"..=CAP remain.
         for i in 0..=STATUS_LOG_CAP {
-            log.info(format!("{i}"));
+            log.error(format!("{i}"));
         }
         assert_eq!(log.lines().count(), STATUS_LOG_CAP);
         assert_eq!(log.lines().next(), Some("1"));

@@ -1,8 +1,8 @@
 //! Shared RAII helper for a dedicated background tokio runtime.
 //!
-//! `WorkerBridge` and `ScriptHost` each spin up their own dedicated
+//! `WorkerBridge` spins up its own dedicated
 //! multi-thread runtime, `enter()` it just long enough to construct their
-//! tokio-spawning inner value (`Worker`, `ScriptExecutor`), then hold the
+//! tokio-spawning inner value (`Worker`), then hold the
 //! `Runtime` only for its `Drop` — dropping it shuts down the threads the
 //! inner value's tasks run on. [`BackgroundRuntime`] captures that pattern
 //! once so both owners just build one, `enter` it to construct their inner

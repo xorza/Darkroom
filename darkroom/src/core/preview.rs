@@ -3,8 +3,8 @@
 //!
 //! Declared here rather than in `gui/` because every frontend shares
 //! [`RuntimeLibrary`](crate::core::runtime_library::RuntimeLibrary) — a document
-//! holding a preview node must still compile headless, under the TUI, and for
-//! the script host, or opening it would fail with a missing func.
+//! holding a preview node must still compile, or opening it would fail with a
+//! missing func.
 //!
 //! The value crosses threads through [`PreviewSink`], which the closure
 //! captures at library-composition time. Scenarium knows nothing about any of

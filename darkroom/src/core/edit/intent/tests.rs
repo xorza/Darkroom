@@ -573,9 +573,10 @@ fn add_node(pos: Vec2, node_id: NodeId, node: Node) -> Intent {
 
 #[test]
 fn insertions_reusing_an_identity_are_refused_instead_of_panicking() {
-    // Both of these used to abort the process on a payload a script can
-    // hand `apply()`: `AddNode` tripped the absence assert in `apply_graph`,
-    // `DuplicateNodes` tripped `Graph::insert`'s own duplicate-id panic.
+    // Both of these would otherwise abort the process inside `apply()`:
+    // `AddNode` trips the absence assert in `apply_graph`, `DuplicateNodes`
+    // trips `Graph::insert`'s own duplicate-id panic. Refusing at the gate
+    // is what turns a would-be process abort into a stated precondition.
     let mut doc = Document::default();
     let live = add_node_at(&mut doc, Vec2::ZERO);
     let repeated = NodeId::unique();

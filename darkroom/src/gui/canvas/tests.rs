@@ -425,7 +425,7 @@ fn escape_cancels_a_rubber_band_and_leaves_no_residue() {
 /// painted.
 ///
 /// Both rects are one frame apart whenever something moves a node out from
-/// under a live gesture — an undo, a scripted edit — because `SceneNode::pos`
+/// under a live gesture — an undo, say — because `SceneNode::pos`
 /// is mirrored pre-record while the body's own arranged rect is still last
 /// frame's. Driving that here: scribble over empty canvas, move the node onto
 /// the scribble mid-gesture, release. The cut has to land, which it only does

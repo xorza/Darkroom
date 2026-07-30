@@ -2,15 +2,14 @@
 //! establishes before it will fold an [`Intent`](crate::core::edit::intent::types::Intent)
 //! into a step.
 //!
-//! Every frontend commits through that one entry, so these are the whole
-//! trust boundary: a widget reads the identities it emits out of the live
-//! document and at worst goes stale, but a script's payload is deserialized
-//! straight into an `Intent` and can name anything. Each check answers one
-//! question — is this id resolvable, fresh, non-nil; is this position
-//! finite; is this kind insertable here — and refuses with the
-//! [`Refusal`] that fits: [`Refusal::Quiet`] for a reference that merely
-//! went stale, [`Refusal::Invalid`] for a payload that could never have
-//! applied.
+//! Everything commits through that one entry, so these are the whole
+//! precondition set. Each check answers one question — is this id
+//! resolvable, fresh, non-nil; is this position finite; is this kind
+//! insertable here — and refuses with the [`Refusal`] that fits:
+//! [`Refusal::Quiet`] for a reference that merely went stale, which a
+//! gesture spanning frames produces normally, and [`Refusal::Invalid`] for a
+//! payload that could never have applied, which is a bug in whatever raised
+//! it.
 //!
 //! Two failure modes motivate the split. Some of these guard *panics*:
 //! `Graph::find` asserts on a nil id, `Graph::insert` panics on a
