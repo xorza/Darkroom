@@ -6,13 +6,11 @@ use scenarium::StaticValue;
 use scenarium::Subscription;
 use scenarium::{Binding, CacheMode, InputPort, Node, NodeId, NodeKind};
 
-use crate::core::document::dock::DockOp;
 use crate::core::document::{Document, Viewport};
-use crate::core::edit::intent::apply::{apply_step, commit_dock_op, commit_intent, revert_step};
-use crate::core::edit::intent::build::build_dock_step;
+use crate::core::edit::intent::apply::{apply_step, commit_intent, revert_step};
 use crate::core::edit::intent::duplicate::internals::duplicate_offset;
 use crate::core::edit::intent::duplicate::{build_duplicate_intent, build_duplicate_intent_for};
-use crate::core::edit::intent::types::{GraphStep, Intent, NodeProperty, Refusal, UndoStep};
+use crate::core::edit::intent::types::{UndoStep, Intent, NodeProperty, Refusal, UndoStep};
 
 /// Add a bare `Func`-kind node to `doc`'s root graph + main view at
 /// `pos`, returning its id.
@@ -23,27 +21,64 @@ fn add_node_at(doc: &mut Document, pos: Vec2) -> NodeId {
     id
 }
 
+/// Pane arrangement is not undoable, so the dirty verdict rides
+/// `commit_dock_op`'s return rather than a step predicate. The split is the
+/// same one the exit prompt cares about: a tab moved or split into its own
+/// pane is invested work, while focus and closes are navigation.
+#[test]
+fn dock_ops_report_only_arrangement_as_savable_work() {
+    use crate::core::document::TabRef;
+    use crate::core::document::dock::{DockDrop, DockOp, SplitSide};
+    use crate::core::edit::intent::apply::commit_dock_op;
+
+    let mut doc = Document::default();
+    let primary = doc.layout.primary().id;
+    doc.layout.find_or_insert(TabRef::Preferences, primary);
+
+    assert!(
+        !commit_dock_op(
+            DockOp::ActivateTab {
+                tab: TabRef::Preferences
+            },
+            &mut doc
+        ),
+        "activating a tab is focus, not arrangement work"
+    );
+    assert!(
+        commit_dock_op(
+            DockOp::MoveTab {
+                tab: TabRef::Preferences,
+                to: DockDrop::Split {
+                    group: primary,
+                    side: SplitSide::Right,
+                },
+            },
+            &mut doc
+        ),
+        "splitting a tab into its own pane is work the exit prompt protects"
+    );
+    assert!(
+        !commit_dock_op(
+            DockOp::CloseTab {
+                tab: TabRef::Preferences
+            },
+            &mut doc
+        ),
+        "closing is navigation"
+    );
+    doc.validate().expect("every op left the layout valid");
+}
+
 #[test]
 fn dirties_document_splits_edits_from_navigation() {
-    use crate::core::document::TabRef;
-    use crate::core::document::dock::{DockDrop, SplitSide};
-
-    // A doc with a movable Preferences tab, for the dock steps below
-    // (both built through the real `build_step` pipeline so the
-    // `structural` derivation is what's under test).
-    let mut dock_doc = Document::default();
-    let primary = dock_doc.layout.primary().id;
-    dock_doc.layout.find_or_insert(TabRef::Preferences, primary);
-    let dock_step = |op: DockOp| build_dock_step(op, &dock_doc).map(UndoStep::Dock);
-
     // Navigation-only steps: camera, selection, tab focus — the user
     // doesn't "save" these, so they must not flip the unsaved flag.
     let navigation = [
-        UndoStep::Graph(GraphStep::SetSelection {
+        UndoStep::SetSelection {
             from: BTreeSet::new(),
             to: BTreeSet::from([NodeId::unique()]),
         }),
-        UndoStep::Graph(GraphStep::SetViewport {
+        UndoStep::SetViewport {
             from: Viewport {
                 pan: Vec2::ZERO,
                 zoom: 1.0,
@@ -53,11 +88,6 @@ fn dirties_document_splits_edits_from_navigation() {
                 zoom: 2.0,
             },
         }),
-        // Activating a tab is focus, not arrangement work.
-        dock_step(DockOp::ActivateTab {
-            tab: TabRef::Preferences,
-        })
-        .unwrap(),
     ];
     for step in &navigation {
         assert!(
@@ -68,22 +98,12 @@ fn dirties_document_splits_edits_from_navigation() {
 
     // Content steps: graph data + node layout — real, savable work.
     let content = [
-        UndoStep::Graph(GraphStep::RenameNode {
+        UndoStep::RenameNode {
             node_id: NodeId::unique(),
             from: "a".into(),
             to: "b".into(),
         }),
-        // Splitting a tab into its own pane is invested arrangement
-        // work — the exit prompt should protect it.
-        dock_step(DockOp::MoveTab {
-            tab: TabRef::Preferences,
-            to: DockDrop::Split {
-                group: primary,
-                side: SplitSide::Right,
-            },
-        })
-        .unwrap(),
-        UndoStep::Graph(GraphStep::MoveSelection {
+        UndoStep::MoveSelection {
             grabbed: NodeId::unique(),
             moves: vec![(NodeId::unique(), Vec2::ZERO, Vec2::new(5.0, 5.0))],
         }),
@@ -100,29 +120,8 @@ fn dirties_document_splits_edits_from_navigation() {
 /// size, or introduces a node with no cached port offsets, may return true.
 #[test]
 fn invalidates_cached_geometry_splits_resizes_from_moves() {
-    use crate::core::document::TabRef;
-    use crate::core::document::dock::{DockDrop, DockPath, SplitSide};
     use scenarium::StaticValue;
 
-    let mut dock_doc = Document::default();
-    let primary = dock_doc.layout.primary().id;
-    dock_doc.layout.find_or_insert(TabRef::Preferences, primary);
-    // Split Preferences into its own pane, then keep the step: it is both a
-    // structural dock op for the table below and what gives `SetRatio` a
-    // real divider to name instead of a refused no-op.
-    let split = commit_dock_op(
-        DockOp::MoveTab {
-            tab: TabRef::Preferences,
-            to: DockDrop::Split {
-                group: primary,
-                side: SplitSide::Right,
-            },
-        },
-        &mut dock_doc,
-    )
-    .expect("splitting a second tab off the primary group");
-    let dock_step =
-        |op: DockOp| UndoStep::Dock(build_dock_step(op, &dock_doc).expect("a real dock op"));
     let node_id = NodeId::unique();
     let port = InputPort::new(node_id, 0);
     let cst = |v: f64| Some(Binding::Const(StaticValue::Float(v)));
@@ -132,11 +131,11 @@ fn invalidates_cached_geometry_splits_resizes_from_moves() {
     let moves = [
         // The node drag. Emits one step per gesture frame, drains
         // pre-record, and Pass A already arranges at the cursor.
-        UndoStep::Graph(GraphStep::MoveSelection {
+        UndoStep::MoveSelection {
             grabbed: node_id,
             moves: vec![(node_id, Vec2::ZERO, Vec2::new(5.0, 5.0))],
         }),
-        UndoStep::Graph(GraphStep::SetViewport {
+        UndoStep::SetViewport {
             from: Viewport {
                 pan: Vec2::ZERO,
                 zoom: 1.0,
@@ -146,23 +145,12 @@ fn invalidates_cached_geometry_splits_resizes_from_moves() {
                 zoom: 2.0,
             },
         }),
-        UndoStep::Graph(GraphStep::SetSelection {
+        UndoStep::SetSelection {
             from: BTreeSet::new(),
             to: BTreeSet::from([node_id]),
         }),
-        // The divider drag: `Splitter` lays out at the live pointer ratio,
-        // so Pass A already drew what this step persists.
-        dock_step(DockOp::SetRatio {
-            split: DockPath::ROOT,
-            ratio: 0.7,
-        }),
-        // Panes reshape; no node's content does.
-        split,
-        // Focus back to the other pane — Preferences is the focused one
-        // after the split, so activating it again would be a no-op.
-        dock_step(DockOp::ActivateTab { tab: TabRef::Graph }),
         // Value-only: the editor stays present at its `Fixed` size.
-        UndoStep::Graph(GraphStep::SetInput {
+        UndoStep::SetInput {
             input: port,
             from: cst(1.0),
             to: cst(2.0),
@@ -182,21 +170,21 @@ fn invalidates_cached_geometry_splits_resizes_from_moves() {
     // Each of these changes a measured size, or brings in a node that has
     // never recorded — so the cached offsets wires anchor to are stale.
     let resizes = [
-        UndoStep::Graph(GraphStep::RenameNode {
+        UndoStep::RenameNode {
             node_id,
             from: "a".into(),
             to: "a-much-longer-title".into(),
         }),
         // Adding the inline const editor resizes the node and shifts every
         // port row below it.
-        UndoStep::Graph(GraphStep::SetInput {
+        UndoStep::SetInput {
             input: port,
             from: None,
             to: cst(1.0),
         }),
         // ...and removing it is the connection commit, the case Pass B has
         // always existed for.
-        UndoStep::Graph(GraphStep::SetInput {
+        UndoStep::SetInput {
             input: port,
             from: cst(1.0),
             to: None,
@@ -770,7 +758,7 @@ fn selection_and_move_drop_members_whose_widget_is_gone() {
         &mut doc,
     )
     .expect("a selection with one live member commits");
-    let UndoStep::Graph(GraphStep::SetSelection { to, .. }) = &step else {
+    let UndoStep::SetSelection { to, .. }) = &step else {
         panic!("expected a SetSelection step, got {step:?}");
     };
     assert_eq!(
@@ -788,7 +776,7 @@ fn selection_and_move_drop_members_whose_widget_is_gone() {
         &mut doc,
     )
     .expect("a move with one live member commits");
-    let UndoStep::Graph(GraphStep::MoveSelection { moves, .. }) = &step else {
+    let UndoStep::MoveSelection { moves, .. }) = &step else {
         panic!("expected a MoveSelection step, got {step:?}");
     };
     assert_eq!(
