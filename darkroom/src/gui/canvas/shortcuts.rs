@@ -53,6 +53,6 @@ pub(super) fn emit(ui: &mut Ui, doc: &Document, out: &mut Intents) {
         out.push(intent);
     }
     if delete {
-        out.push_node_removals(&view.selected);
+        out.push_node_removals(view.selected.iter().copied());
     }
 }
