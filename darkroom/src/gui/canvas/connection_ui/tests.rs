@@ -19,11 +19,10 @@ struct Fixture {
 }
 
 impl Fixture {
-    fn frame(&self) -> Frame<'_> {
-        Frame {
-            scene: &self.scene,
-            doc: &self.doc,
-        }
+    fn pane(&self) -> Pane<'_> {
+        self.scene
+            .pane(&self.doc)
+            .expect("the fixture projects the graph")
     }
 }
 
@@ -90,7 +89,7 @@ fn prepass_with_wire_from(fixture: &Fixture, start: PortRef) -> Option<InFlight>
     let mut out = Intents::default();
     connections.apply(
         arena.ui(),
-        fixture.frame(),
+        fixture.pane(),
         &CanvasGeometry::default(),
         None,
         false,

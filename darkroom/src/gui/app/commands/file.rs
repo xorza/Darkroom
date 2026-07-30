@@ -53,13 +53,9 @@ impl App {
     /// empty undo history (restoring the old doc via Cmd-Z would replay
     /// nodes from intent history that no longer matches the live tree),
     /// dropped gesture state, forced scene rebuild, and cleared run results —
-    /// preview textures included. The explicit reconcile request is the
-    /// belt: the store's release pass is gated on being asked, so a future
-    /// `Editor` that survives the swap would otherwise keep the previous
-    /// document's textures alive, keyed by node ids that no longer exist.
+    /// preview textures included.
     fn adopt_document(&mut self, open: OpenDocument) {
         self.editor = Editor::new();
-        self.editor.run_state.previews.request_reconcile();
         self.workspace.replace_document(open);
         self.remember_document_path();
     }

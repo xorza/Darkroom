@@ -95,38 +95,6 @@ impl UndoStep {
         }
     }
 
-    /// Whether replaying this step can move the set of preview nodes whose
-    /// published values the UI must keep alive — a preview node appearing or
-    /// vanishing, or a viewer tab opening, closing, or moving.
-    ///
-    /// When true, `Editor::frame` runs the preview store's reconcile pass,
-    /// which releases the textures nothing presents any more and uploads the
-    /// full-resolution one a freshly-shown viewer needs; when no step in the
-    /// frame asks for it, the pass is skipped. Exhaustive on purpose — a new
-    /// variant must declare whether it moves that set.
-    pub(crate) fn requires_reconcile(&self) -> bool {
-        match self {
-            // The whole layout is swapped by assignment, so any dock op can
-            // open, close, or relocate a viewer tab.
-            UndoStep::Dock(_) => true,
-            UndoStep::Graph(g) => match g {
-                // Any step that adds or removes nodes can add or remove a
-                // preview among them — including undo, which puts one back.
-                GraphStep::AddNode { .. }
-                | GraphStep::DuplicateNodes { .. }
-                | GraphStep::RemoveNode { .. } => true,
-                GraphStep::MoveSelection { .. }
-                | GraphStep::RenameNode { .. }
-                | GraphStep::SetInput { .. }
-                | GraphStep::SetSelection { .. }
-                | GraphStep::Raise { .. }
-                | GraphStep::SetNodeProperty { .. }
-                | GraphStep::SetSubscription { .. }
-                | GraphStep::SetViewport { .. } => false,
-            },
-        }
-    }
-
     /// Whether applying or reverting this step changes *saved* document
     /// content — graph data or node layout — as opposed to pure
     /// navigation (camera, selection, tab focus), which isn't worth
