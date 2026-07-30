@@ -2,18 +2,11 @@ use scenarium::NodeId;
 use std::collections::BTreeSet;
 
 use super::*;
-use crate::core::document::dock::DockOp;
-use crate::core::document::{Document, TabRef};
-use crate::core::edit::intent::apply::{apply_step, commit_dock_op};
+use crate::core::document::Document;
+use crate::core::edit::intent::apply::apply_step;
 use crate::core::edit::intent::build::build_step;
 use crate::core::edit::intent::types::Intent;
 use scenarium::testing::test_graph;
-
-
-
-
-
-
 
 /// Push one graph edit through the real build/apply path, as `drain_intents`
 /// does — the shape every coalescing test below repeats.
@@ -22,15 +15,6 @@ fn push_edit(stack: &mut ActionStack, doc: &mut Document, intent: Intent) {
     apply_step(&step, doc);
     stack.push_current(&[step]);
 }
-
-
-
-
-
-
-
-
-
 
 #[test]
 fn consecutive_moves_coalesce_keeping_first_from() {
