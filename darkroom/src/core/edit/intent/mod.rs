@@ -3,7 +3,7 @@
 //! on [`types`].
 //!
 //! Split by responsibility:
-//!   - [`types`] — the `Intent` / `UndoStep` / `GraphStep` / `DockStep` /
+//!   - [`types`] — the `Intent` / `UndoStep` / `UndoStep` / `DockStep` /
 //!     `GestureKey` model.
 //!   - [`build`] — `build_step` / `build_doc_step`: read the pre-mutation
 //!     snapshot from `&Document`, fold with the incoming intent, return a
