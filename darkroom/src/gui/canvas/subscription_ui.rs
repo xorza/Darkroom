@@ -7,7 +7,7 @@ use crate::core::edit::intent::types::Intent;
 use crate::gui::EventRef;
 use crate::gui::app::AppContext;
 use crate::gui::canvas::geometry::CanvasGeometry;
-use crate::gui::canvas::pane::GestureSlot;
+use crate::gui::canvas::gesture_slot::GestureSlot;
 use crate::gui::canvas::wire::{GlyphDrag, Wire, WirePass, WireTint};
 use crate::gui::node::port_color::event_color;
 use crate::gui::scene::{Frame, Pane, SceneNode};
