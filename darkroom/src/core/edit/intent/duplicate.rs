@@ -1,4 +1,4 @@
-//! Editor-side [`Intent::DuplicateNodes`] construction from a selection. Kept
+//! Editor-side [`GraphIntent::DuplicateNodes`] construction from a selection. Kept
 //! here rather than on `Document` — that's the persisted model; intent
 //! construction is editing machinery.
 
@@ -8,7 +8,7 @@ use glam::Vec2;
 use scenarium::{Binding, InputPort, NodeId, Subscription};
 
 use crate::core::document::{Document, GraphView};
-use crate::core::edit::intent::types::Intent;
+use crate::core::edit::intent::types::GraphIntent;
 
 /// World-space offset applied to duplicated nodes so the copies don't
 /// land exactly on top of their originals.
@@ -21,10 +21,10 @@ pub(crate) fn selected_node_ids(view: &GraphView) -> BTreeSet<NodeId> {
     view.selected.iter().copied().collect()
 }
 
-/// Build an [`Intent::DuplicateNodes`] for `target`'s current selection.
+/// Build an [`GraphIntent::DuplicateNodes`] for `target`'s current selection.
 /// Thin wrapper over [`build_duplicate_intent_for`] with the selected node
 /// bodies and incoming (external) wires dropped — the Ctrl+D path.
-pub(crate) fn build_duplicate_intent(doc: &Document) -> Option<Intent> {
+pub(crate) fn build_duplicate_intent(doc: &Document) -> Option<GraphIntent> {
     let view = &doc.main_view;
     let node_ids = selected_node_ids(view);
     if node_ids.is_empty() {
@@ -33,7 +33,7 @@ pub(crate) fn build_duplicate_intent(doc: &Document) -> Option<Intent> {
     build_duplicate_intent_for(doc, &node_ids, false)
 }
 
-/// Build an [`Intent::DuplicateNodes`] cloning `node_ids`: each
+/// Build an [`GraphIntent::DuplicateNodes`] cloning `node_ids`: each
 /// node gets a fresh id and an offset position, const-value bindings copy
 /// verbatim, and the data + event connections *among* `node_ids` are
 /// recreated against the clones. A `Bind` whose source is *outside* the set
@@ -46,7 +46,7 @@ pub(crate) fn build_duplicate_intent_for(
     doc: &Document,
     node_ids: &BTreeSet<NodeId>,
     include_incoming: bool,
-) -> Option<Intent> {
+) -> Option<GraphIntent> {
     let (graph, view) = (&doc.graph, &doc.main_view);
     if node_ids.is_empty() {
         return None;
@@ -116,7 +116,7 @@ pub(crate) fn build_duplicate_intent_for(
         }
     }
 
-    Some(Intent::DuplicateNodes {
+    Some(GraphIntent::DuplicateNodes {
         nodes,
         bindings,
         subscriptions,

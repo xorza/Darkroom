@@ -4,7 +4,7 @@ use scenarium::NodeId;
 use scenarium::{InputPort, Subscription};
 
 use crate::core::edit::intent::sink::Intents;
-use crate::core::edit::intent::types::Intent;
+use crate::core::edit::intent::types::GraphIntent;
 use crate::gui::app::AppContext;
 use crate::gui::canvas::gesture_slot::GestureSlot;
 use crate::gui::canvas::wire::Wire;
@@ -96,7 +96,7 @@ const BEZIER_SAMPLES: usize = 16;
 ///
 /// The three `broken_*` collections below are each filled by one render
 /// pass's hit-test (via `BreakerProbe::mark_broken_*`) and drained by
-/// `BreakerUI::apply` on release into the matching severing `Intent`. All
+/// `BreakerUI::apply` on release into the matching severing `GraphIntent`. All
 /// three are cleared together at the start of every frame's probing
 /// (`begin_frame`, called from `BreakerUI::probe`) rather than each
 /// renderer clearing its own — every render pass visits its own targets at
@@ -111,10 +111,10 @@ pub(super) struct BreakerState {
     /// breaker must keep reading the Left button, not Right.
     button: PointerButton,
     /// Target input ports whose data binding the breaker intersects this
-    /// frame, drained on release into an unbound `Intent::SetInput`.
+    /// frame, drained on release into an unbound `GraphIntent::SetInput`.
     broken: Vec<InputPort>,
     /// Nodes whose body rect the breaker crosses this frame, drained on
-    /// release into `Intent::RemoveNode`.
+    /// release into `GraphIntent::RemoveNode`.
     broken_nodes: Vec<NodeId>,
     /// Event subscriptions whose wire the breaker intersects this frame,
     /// drained on release into `SetSubscription { subscribe: false }`.
@@ -257,7 +257,7 @@ pub(super) struct BreakerUI {
 impl BreakerUI {
     /// Drive the gesture from the outer canvas response: start, extend,
     /// release. On release, drains all three `broken_*` collections into
-    /// their matching severing `Intent` (`RemoveNode`, `SetInput { to: None
+    /// their matching severing `GraphIntent` (`RemoveNode`, `SetInput { to: None
     /// }`, `SetSubscription { subscribe: false }`).
     /// `RemoveNode` supersedes any per-edge severing on
     /// the same target — the undo step already detaches every incoming
@@ -303,7 +303,7 @@ impl BreakerUI {
                     if doomed_nodes.contains(&addr.node_id) {
                         continue;
                     }
-                    out.push(Intent::SetInput {
+                    out.push(GraphIntent::SetInput {
                         input: addr,
                         to: None,
                     });
@@ -316,7 +316,7 @@ impl BreakerUI {
                     if doomed_nodes.contains(&s.emitter) || doomed_nodes.contains(&s.subscriber) {
                         continue;
                     }
-                    out.push(Intent::SetSubscription {
+                    out.push(GraphIntent::SetSubscription {
                         emitter: s.emitter,
                         event_idx: s.event_idx,
                         subscriber: s.subscriber,

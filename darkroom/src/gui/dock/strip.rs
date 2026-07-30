@@ -4,7 +4,7 @@
 //! [`DockUi::scan`](super::DockUi::scan) during prepass through the
 //! deterministic widget ids exported here. The right-click split menu
 //! is the one record-time emitter (its picks are this-frame values,
-//! pushed as `Intent`s directly). Pure view state; never touches the
+//! pushed as `GraphIntent`s directly). Pure view state; never touches the
 //! document.
 
 use palantir::{

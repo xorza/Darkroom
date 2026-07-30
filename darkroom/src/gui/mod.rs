@@ -37,7 +37,7 @@ pub(crate) type HostHandle = palantir::HostHandle<App>;
 
 /// A navigation request surfaced from last frame's responses (tab/chip
 /// clicks, a released tab drag) and applied by `App` in the navigation
-/// phase. Decoupled from `Intent` so the UI layer doesn't need to know
+/// phase. Decoupled from `GraphIntent` so the UI layer doesn't need to know
 /// which requests are undoable: the editor wraps `Dock` ops into the
 /// undoable `DockOp`. `OpenGraph` adds the tab to a strip directly
 /// (that part isn't undoable) but focuses it through the same recorded

@@ -10,7 +10,7 @@ use scenarium::NodeKind;
 use scenarium::{DetachedNode, Graph as CoreGraph, NodeId};
 use std::collections::BTreeSet;
 
-use crate::core::document::dock::DockLayout;
+use crate::core::document::dock::{DockLayout, DockOp};
 use crate::core::preview;
 
 /// Whether a port consumes a binding (`Input`) or produces a value
@@ -105,7 +105,7 @@ impl Default for Viewport {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub(crate) struct GraphView {
     /// Every node body's position, in the canvas's **paint stack** order:
-    /// later items draw in front, and `Intent::Raise` lifts one to the top.
+    /// later items draw in front, and `GraphIntent::Raise` lifts one to the top.
     /// Exactly one entry per graph node — enforced by [`Self::validate`].
     #[serde(with = "crate::core::document::serde")]
     pub(crate) item_placements: IndexMap<NodeId, Vec2>,
@@ -183,6 +183,20 @@ fn tab_alive(graph: &CoreGraph, tab: TabRef) -> bool {
 }
 
 impl Document {
+    /// Apply a dock op to the layout.
+    ///
+    /// Pane arrangement is navigation, not content: it neither records an
+    /// undo step — dragging a tab back is the undo — nor flips the unsaved
+    /// flag, so Ctrl+Z walks past it to the last graph edit and quitting
+    /// after a rearrangement doesn't prompt. The layout still *persists*
+    /// with the document; it just isn't work the exit prompt guards.
+    ///
+    /// No no-op filter either: an op the layout refuses (a tab that closed
+    /// under the gesture, an unchanged ratio) leaves it untouched on its own.
+    pub(crate) fn apply_dock_op(&mut self, op: DockOp) {
+        self.layout.apply(op);
+    }
+
     /// Drop a node from both the graph and the view (its placement and any
     /// selection membership) — the one edit that has to touch both to leave
     /// the document consistent.

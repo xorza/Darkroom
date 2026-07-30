@@ -1,22 +1,22 @@
-//! The frame's pending mutations, each tagged with the graph it commits
-//! against.
+//! The frame's pending mutations: graph edits and layout ops, in the order
+//! they were raised.
 
 use scenarium::NodeId;
 
 use crate::core::document::dock::DockOp;
-use crate::core::edit::intent::types::Intent;
+use crate::core::edit::intent::types::GraphIntent;
 
-/// One queued mutation: an [`Intent`] against the graph, or a [`DockOp`]
+/// One queued mutation: a [`GraphIntent`] against the graph, or a [`DockOp`]
 /// against the layout around it.
 #[derive(Debug)]
 pub(crate) enum Queued {
-    Scoped(Intent),
+    Graph(GraphIntent),
     Dock(DockOp),
 }
 
 /// A frame's queued mutations, in the order they were raised.
 ///
-/// A mutation of the graph is an [`Intent`]; one of the layout is a
+/// A mutation of the graph is a [`GraphIntent`]; one of the layout is a
 /// [`DockOp`], and [`Self::push_dock`] is the only door it fits through.
 #[derive(Debug, Default)]
 pub(crate) struct Intents {
@@ -25,17 +25,17 @@ pub(crate) struct Intents {
 
 impl Intents {
     /// Queue `intent` against the graph.
-    pub(crate) fn push(&mut self, intent: Intent) {
-        self.items.push(Queued::Scoped(intent));
+    pub(crate) fn push(&mut self, intent: GraphIntent) {
+        self.items.push(Queued::Graph(intent));
     }
 
     /// Queue every intent `iter` yields.
-    pub(crate) fn extend(&mut self, iter: impl IntoIterator<Item = Intent>) {
-        self.items.extend(iter.into_iter().map(Queued::Scoped));
+    pub(crate) fn extend(&mut self, iter: impl IntoIterator<Item = GraphIntent>) {
+        self.items.extend(iter.into_iter().map(Queued::Graph));
     }
 
     /// Queue the removal of every node `nodes` yields — one
-    /// [`Intent::RemoveNode`] each, which `drain_intents` batches into a
+    /// [`GraphIntent::RemoveNode`] each, which `drain_intents` batches into a
     /// single undo entry. Shared by the Delete/Backspace chord, the node
     /// context menu's "Remove", and the breaker's multi-delete.
     ///
@@ -46,7 +46,7 @@ impl Intents {
         self.extend(
             nodes
                 .into_iter()
-                .map(|node_id| Intent::RemoveNode { node_id }),
+                .map(|node_id| GraphIntent::RemoveNode { node_id }),
         );
     }
 
@@ -75,10 +75,10 @@ impl Intents {
 mod tests {
     use super::*;
     use crate::core::document::dock::DockOp;
-    use crate::core::edit::intent::types::Intent;
+    use crate::core::edit::intent::types::GraphIntent;
 
-    fn raise() -> Intent {
-        Intent::RemoveNode {
+    fn raise() -> GraphIntent {
+        GraphIntent::RemoveNode {
             node_id: scenarium::NodeId::unique(),
         }
     }
@@ -97,7 +97,7 @@ mod tests {
 
         let kinds: Vec<bool> = out
             .drain()
-            .map(|item| matches!(item, Queued::Scoped(_)))
+            .map(|item| matches!(item, Queued::Graph(_)))
             .collect();
         assert_eq!(kinds, [true, true, true, false, true]);
         assert!(out.is_empty(), "draining empties the buffer");

@@ -6,7 +6,7 @@ use scenarium::Binding;
 use scenarium::FsPathMode;
 use scenarium::StaticValue;
 
-use crate::core::edit::intent::types::Intent;
+use crate::core::edit::intent::types::GraphIntent;
 use crate::gui::app::App;
 use crate::gui::dialogs;
 use crate::gui::node::prepass::PathPickRequest;
@@ -56,7 +56,7 @@ impl App {
         };
         self.editor.apply_edit(
             &mut self.workspace.open,
-            Intent::SetInput {
+            GraphIntent::SetInput {
                 input: req.port,
                 to: Some(Binding::Const(value)),
             },

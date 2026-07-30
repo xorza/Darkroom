@@ -19,7 +19,7 @@ use palantir::{
 use scenarium::{CacheMode, NodeId};
 
 use crate::core::edit::intent::sink::Intents;
-use crate::core::edit::intent::types::{Intent, NodeProperty};
+use crate::core::edit::intent::types::{GraphIntent, NodeProperty};
 use crate::gui::canvas::inspector::{InspectMode, inspect_badge_wid};
 use crate::gui::format::fmt_elapsed;
 use crate::gui::node::port_color::event_color;
@@ -353,7 +353,7 @@ fn property_chip(
     )
     .show(ui)
     {
-        out.push(Intent::SetNodeProperty {
+        out.push(GraphIntent::SetNodeProperty {
             node_id: node.id,
             to: chip.to,
         });
@@ -402,7 +402,7 @@ fn draw_play_triangle(ui: &mut Ui, color: Color) {
 }
 
 /// The node title: an inline-renamable label. Double-click swaps it for
-/// a `TextEdit`; commit emits [`Intent::RenameNode`], single-click
+/// a `TextEdit`; commit emits [`GraphIntent::RenameNode`], single-click
 /// selects (the label would otherwise swallow the body's click).
 fn title(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Intents) {
     let shift = ui.modifiers().shift;
@@ -418,7 +418,7 @@ fn title(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Intents) {
         click_intents(shift, rcx.graph, node.id, out);
     }
     if let Some(to) = ev.committed {
-        out.push(Intent::RenameNode {
+        out.push(GraphIntent::RenameNode {
             node_id: node.id,
             to,
         });

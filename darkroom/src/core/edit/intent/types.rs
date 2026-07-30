@@ -1,18 +1,18 @@
-//! The [`Intent`] / [`UndoStep`] / [`GraphStep`] / [`DockStep`] /
-//! [`GestureKey`] type model, plus the
+//! The [`GraphIntent`] / [`UndoStep`] / [`UndoStep`] / [`GestureKey`] type
+//! model, plus the
 //! [`Refusal`] a commit answers with when no step comes out of it.
 //!
-//! An [`Intent`] is "what the caller wants the graph to look like
+//! An [`GraphIntent`] is "what the caller wants the graph to look like
 //! after"; it carries no history. To make the change reversible, we
 //! pair the intent with a snapshot of the slot it overwrites. Rather
 //! than carrying that snapshot in a sibling enum, [`UndoStep`] folds
 //! both halves into one variant per kind: every variant has both the
 //! "from" payload (for revert) and the "to" payload (for forward
 //! apply). Type-level enforcement means an `UndoStep` can never be
-//! constructed inconsistently — there's no `(Intent::A, Snapshot::B)`
+//! constructed inconsistently — there's no `(GraphIntent::A, Snapshot::B)`
 //! mismatch to worry about at runtime.
 //!
-//! The same split runs the other way, by *scope*: an [`Intent`] edits the
+//! The same split runs the other way, by *scope*: a [`GraphIntent`] edits the
 //! graph, while a [`DockOp`](crate::core::document::dock::DockOp) edits the
 //! layout around it. Neither can be mistaken for the other, so no code path has
 //! to carry state it will not read.
@@ -25,10 +25,9 @@ use scenarium::{Binding, CacheMode, InputPort, Node, NodeId, Subscription};
 use serde::{Deserialize, Serialize};
 
 use crate::core::document::Viewport;
-use crate::core::document::dock::{DockLayout, DockPath};
 
 /// One scalar node property an editor can toggle — the payload of
-/// [`Intent::SetNodeProperty`]. Both variants are geometry-neutral (changing
+/// [`GraphIntent::SetNodeProperty`]. Both variants are geometry-neutral (changing
 /// one never remeasures the node or reshapes a graph interface) and dirty
 /// the document, so they share one intent / step rather than a variant each.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -67,14 +66,14 @@ pub(crate) enum Refusal {
 /// [`build_step`](crate::core::edit::intent::build::build_step).
 ///
 /// Every variant here edits the graph, and travels the frame's queue as
-/// [`Queued::Scoped`](crate::core::edit::intent::sink::Queued). A mutation of
+/// [`Queued::Graph`](crate::core::edit::intent::sink::Queued). A mutation of
 /// the layout instead of the graph is a
 /// [`DockOp`](crate::core::document::dock::DockOp), queued as
 /// [`Queued::Dock`](crate::core::edit::intent::sink::Queued).
 ///
 /// **Adding a variant** — touch these spots:
-///   1. add the variant here on `Intent`,
-///   2. add the matching variant on [`GraphStep`], edited through the
+///   1. add the variant here on `GraphIntent`,
+///   2. add the matching variant on [`UndoStep`], edited through the
 ///      target's `EditScope`, carrying both the forward "to" and backward
 ///      "from" payloads (or just forward fields for pure-creation intents),
 ///   3. add an arm to
@@ -93,7 +92,7 @@ pub(crate) enum Refusal {
 ///      [`crate::core::edit::intent::query`]) if the variant coalesces in
 ///      undo history.
 #[derive(Debug, Serialize, Deserialize)]
-pub(crate) enum Intent {
+pub(crate) enum GraphIntent {
     /// Add one node that links state the document already resolves: a func in
     /// the library, or a built-in special.
     AddNode {
@@ -175,7 +174,7 @@ pub(crate) enum Intent {
     /// `subscriber` ← `emitter`'s event `event_idx`. An event wire dropped on,
     /// or severed from, a subscription pin. Idempotent — a no-op when the
     /// subscription already matches. Lowers to the single reversible
-    /// [`GraphStep::SetSubscription`], subscribe and unsubscribe being exact
+    /// [`UndoStep::SetSubscription`], subscribe and unsubscribe being exact
     /// inverses.
     SetSubscription {
         emitter: NodeId,
@@ -188,24 +187,18 @@ pub(crate) enum Intent {
 /// Self-contained undo-stack entry. Each leaf variant carries both
 /// halves: the forward "to" payload (read by `apply_step`) and the
 /// backward "from" payload (read by `revert_step`). Built from an
-/// [`Intent`] via `build_step`, which captures the pre-mutation state
+/// [`GraphIntent`] via `build_step`, which captures the pre-mutation state
 /// from `&Document` at commit time.
 ///
-/// Split by scope so apply/revert dispatch on the type: a [`GraphStep`]
-/// is resolved against a `(graph, view)` `EditScope`, while a [`DockStep`]
-/// mutates the layout, which sits outside the graph. The graph path
-/// therefore can't even *name* a layout variant — no convention-only
-/// `unreachable!` arms.
-#[derive(Debug, Serialize, Deserialize)]
-pub(crate) enum UndoStep {
-    Graph(GraphStep),
-    Dock(DockStep),
-}
-
 /// Steps applied through an `EditScope` — the document's graph and the view
 /// metadata beside it.
+///
+/// Only graph edits are undoable: pane arrangement applies straight to the
+/// layout and records nothing, so Ctrl+Z walks past a tab switch to the last
+/// edit that changed the graph. That is why this is the whole step
+/// vocabulary rather than one arm of a wider one.
 #[derive(Debug, Serialize, Deserialize)]
-pub(crate) enum GraphStep {
+pub(crate) enum UndoStep {
     /// Pure creation: the "from" state is "node absent", which is
     /// implicit — undo removes the node by id.
     AddNode {
@@ -270,7 +263,7 @@ pub(crate) enum GraphStep {
     },
     /// Set a scalar node property (disable flag or cache mode). One step backs
     /// both, since they're geometry-neutral and apply/revert identically —
-    /// write the [`NodeProperty`] into its field. See [`Intent::SetNodeProperty`].
+    /// write the [`NodeProperty`] into its field. See [`GraphIntent::SetNodeProperty`].
     SetNodeProperty {
         node_id: NodeId,
         from: NodeProperty,
@@ -293,37 +286,12 @@ pub(crate) enum GraphStep {
     },
 }
 
-/// Whole-layout snapshot around one [`DockOp`](crate::core::document::dock::DockOp)
-/// (activate/close/move/resize).
-/// The layout tree is a handful of nodes, so both halves ride the step and
-/// apply/revert are plain assignments — which is why one step type covers every
-/// dock op instead of one per op.
-///
-/// It mutates the layout rather than the graph, so it bypasses the `EditScope`
-/// resolution entirely.
-///
-/// `key` is the gesture this op coalesces under (a switch burst, one divider's
-/// drag); `structural` marks a `DockOp::MoveTab` (a split or a move —
-/// invested arrangement work, so it dirties the document, unlike
-/// activations/closes/ratio nudges). Both derived from the op at build time.
-#[derive(Debug, Serialize, Deserialize)]
-pub(crate) struct DockStep {
-    pub(crate) from: DockLayout,
-    pub(crate) to: DockLayout,
-    pub(crate) key: Option<GestureKey>,
-    pub(crate) structural: bool,
-}
-
-/// Serde because [`DockStep`] stores its key on the step (the undo stack packs
-/// steps with bitcode).
+/// Serde because a step stores its key (the undo stack packs steps with
+/// bitcode).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) enum GestureKey {
     Viewport,
     /// A group drag, keyed by whichever node the pointer latched, so two
     /// different grabbed nodes never coalesce.
     SelectionDrag(NodeId),
-    TabSwitch,
-    /// One divider's drag, keyed by the split's packed root path, so
-    /// two different dividers never coalesce.
-    DockResize(DockPath),
 }

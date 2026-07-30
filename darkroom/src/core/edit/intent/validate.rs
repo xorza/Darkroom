@@ -1,5 +1,5 @@
 //! The preconditions [`build_step`](crate::core::edit::intent::build::build_step)
-//! establishes before it will fold an [`Intent`](crate::core::edit::intent::types::Intent)
+//! establishes before it will fold a [`GraphIntent`](crate::core::edit::intent::types::GraphIntent)
 //! into a step.
 //!
 //! Everything commits through that one entry, so these are the whole

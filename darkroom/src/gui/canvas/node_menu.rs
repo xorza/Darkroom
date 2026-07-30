@@ -3,7 +3,7 @@ use std::collections::BTreeSet;
 use palantir::{MenuItem, Ui};
 
 use crate::core::edit::intent::sink::Intents;
-use crate::core::edit::intent::types::Intent;
+use crate::core::edit::intent::types::GraphIntent;
 use crate::gui::app::commands::AppCommand;
 use crate::gui::app::commands::run::RunCommand;
 use crate::gui::canvas::anchored_menu::NodeContextMenu;
@@ -62,7 +62,7 @@ impl NodeMenuUi {
         // the selection, so the chosen action always targets a coherent set
         // ("select then act").
         if let Some(node_id) = opened.filter(|&id| !graph.is_selected(id)) {
-            out.push(Intent::SetSelection {
+            out.push(GraphIntent::SetSelection {
                 to: BTreeSet::from([node_id]),
             });
         }
