@@ -53,7 +53,7 @@ impl Editor {
         } else if redo {
             self.action_stack.redo(&mut open.document, &mut on_step);
         }
-        self.absorb_signals(signals);
+        self.absorb_signals(open, signals);
     }
 
     /// Map Ctrl+N / Ctrl+O / Ctrl+S / Ctrl+Shift+S / Ctrl+R to a `AppCommand`.

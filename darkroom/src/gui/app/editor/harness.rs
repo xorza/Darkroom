@@ -59,6 +59,7 @@ impl EditorHarness {
             open: OpenDocument {
                 document,
                 path: None,
+                dirty: false,
             },
             library: Library::default(),
             theme: Theme::default(),

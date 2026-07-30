@@ -7,7 +7,7 @@ use scenarium::{
 
 use crate::core::document::{Document, GraphView, PortKind, PortRef};
 use crate::core::edit::intent::sink::{Intents, Queued};
-use crate::core::edit::intent::types::Intent;
+use crate::core::edit::intent::types::GraphIntent;
 use crate::gui::app::AppContext;
 use crate::gui::canvas::GraphUI;
 use crate::gui::node::node_widget_id;
@@ -39,11 +39,11 @@ fn spread(view: &mut GraphView) {
 
 /// The graph intent behind each queued item. The assertion belongs to every
 /// canvas test: none of these widgets can reach the dock.
-fn graph_intents(queued: &[Queued]) -> Vec<&Intent> {
+fn graph_intents(queued: &[Queued]) -> Vec<&GraphIntent> {
     queued
         .iter()
         .map(|item| match item {
-            Queued::Scoped(intent) => intent,
+            Queued::Graph(intent) => intent,
             Queued::Dock(intent) => panic!("a canvas widget raised {intent:?}"),
         })
         .collect()
@@ -414,7 +414,7 @@ fn escape_cancels_a_rubber_band_and_leaves_no_residue() {
     assert!(
         matches!(
             intents[..],
-            [Intent::SetSelection { to }] if to.len() == 1 && to.contains(&a),
+            [GraphIntent::SetSelection { to }] if to.len() == 1 && to.contains(&a),
         ),
         "the next band selects only what it swept, with no residue from the \
          cancelled one: {intents:?} (b = {b:?})"
@@ -515,7 +515,7 @@ fn the_breaker_cuts_a_node_at_its_current_position_not_its_last_painted_one() {
     // the scribble ran on.
     let released = graph_intents(&released);
     assert!(
-        matches!(released[..], [Intent::RemoveNode { node_id }] if *node_id == node),
+        matches!(released[..], [GraphIntent::RemoveNode { node_id }] if *node_id == node),
         "the release cuts the node the scribble now crosses: {released:?}"
     );
 }
@@ -583,7 +583,7 @@ fn a_node_body_right_click_selects_the_node_it_landed_on() {
     assert!(
         matches!(
             intents[..],
-            [Intent::SetSelection { to }] if to.len() == 1 && to.contains(&func),
+            [GraphIntent::SetSelection { to }] if to.len() == 1 && to.contains(&func),
         ),
         "the right-click selects exactly the node it opened on: {intents:?}"
     );
@@ -660,7 +660,7 @@ fn a_body_drag_moves_the_node_by_the_pointers_travel() {
     let moves = intents
         .iter()
         .find_map(|intent| match intent {
-            Intent::MoveSelection { grabbed, moves } => Some((*grabbed, moves)),
+            GraphIntent::MoveSelection { grabbed, moves } => Some((*grabbed, moves)),
             _ => None,
         })
         .unwrap_or_else(|| panic!("a body drag must emit a MoveSelection: {intents:?}"));
@@ -771,7 +771,7 @@ fn a_port_drag_released_over_a_compatible_port_commits_the_binding() {
     assert!(
         matches!(
             released[..],
-            [Intent::SetInput { input, to: Some(Binding::Bind(src)) }]
+            [GraphIntent::SetInput { input, to: Some(Binding::Bind(src)) }]
                 if *input == InputPort::new(consumer, 0)
                     && src.node_id == producer
                     && src.port_idx == 0
@@ -829,7 +829,7 @@ fn ctrl_drag_off_an_output_spawns_a_preview_wired_to_it() {
     use palantir::{Modifiers, PointerButton};
 
     use crate::core::document::{PortKind, PortRef};
-    use crate::core::edit::intent::types::Intent;
+    use crate::core::edit::intent::types::GraphIntent;
     use crate::core::preview::{PreviewSink, preview_func};
 
     let mut library = one_func_library();
@@ -910,10 +910,10 @@ fn ctrl_drag_off_an_output_spawns_a_preview_wired_to_it() {
     let spawned = graph_intents(&spawned);
     let adds: Vec<_> = spawned
         .iter()
-        .filter(|intent| matches!(intent, Intent::AddNode { .. }))
+        .filter(|intent| matches!(intent, GraphIntent::AddNode { .. }))
         .collect();
     assert_eq!(adds.len(), 1, "one preview spawned: {spawned:?}");
-    let Intent::AddNode { node_id, node, .. } = adds[0] else {
+    let GraphIntent::AddNode { node_id, node, .. } = adds[0] else {
         unreachable!("filtered to AddNode");
     };
     assert!(
@@ -923,7 +923,7 @@ fn ctrl_drag_off_an_output_spawns_a_preview_wired_to_it() {
     assert!(
         spawned.iter().any(|intent| matches!(
             intent,
-            Intent::SetInput { input, to: Some(Binding::Bind(src)) }
+            GraphIntent::SetInput { input, to: Some(Binding::Bind(src)) }
                 if input.node_id == *node_id
                     && src.node_id == producer
                     && src.port_idx == 0
