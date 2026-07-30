@@ -8,12 +8,11 @@ use crate::core::edit::intent::sink::Intents;
 use crate::core::edit::intent::types::Intent;
 use crate::gui::app::AppContext;
 use crate::gui::canvas::geometry::CanvasGeometry;
-use crate::gui::canvas::pane::GestureSlot;
+use crate::gui::canvas::gesture_slot::GestureSlot;
 use crate::gui::canvas::wire::{GlyphDrag, Wire, WirePass, WireTint};
 use crate::gui::canvas::{outer_canvas_widget_id, preview_drag_modifier};
 use crate::gui::node::port_color::port_color;
 use crate::gui::node::set_input;
-use crate::gui::scene::Frame;
 use crate::gui::scene::{InputBindingView, Pane, Scene};
 use crate::gui::theme::Theme;
 
@@ -82,19 +81,22 @@ impl ConnectionUI {
     pub(super) fn apply(
         &mut self,
         ui: &mut Ui,
-        frame: Frame<'_>,
+        pane: Pane<'_>,
         geometry: &CanvasGeometry,
         resume: Option<PortRef>,
         cancelled: bool,
         out: &mut Intents,
     ) {
-        let scene = frame.scene;
         self.ended_on_secondary = false;
 
-        // A just-spawned node hands its dropped wire back to float, but only
-        // while the node it starts from is still on screen.
+        // A dropped wire whose palette pick spawned a node resumes floating.
+        // `resume` names the wire's *source* port — the node it was dragged
+        // from, latched a frame earlier — and the pick lands in the draw phase
+        // while `apply_undo_redo` runs ahead of this prepass, so a Ctrl+Z in
+        // between can have removed it. Not latching is how the wire drops,
+        // the same answer the re-latch below gives for the same window.
         if let Some(start) = resume
-            && frame.projects(start.node_id)
+            && pane.contains(start.node_id)
         {
             self.state.latch(InFlight {
                 drag: GlyphDrag::new(start),
@@ -102,10 +104,10 @@ impl ConnectionUI {
             });
         }
         // Latch a fresh port drag only when idle.
-        let candidates = drag_candidates(scene, preview_drag_modifier(ui));
+        let candidates = drag_candidates(pane.scene(), preview_drag_modifier(ui));
         if self.state.is_idle()
             && let Some(drag) = GlyphDrag::latch(&geometry.ports, candidates)
-            && frame.projects(drag.node())
+            && pane.contains(drag.node())
         {
             self.state.latch(InFlight {
                 drag,
@@ -125,9 +127,10 @@ impl ConnectionUI {
         // silently, and `port_data_type` would meanwhile report the start
         // as untyped (which `scan_snap_target` reads as "compatible with
         // anything").
-        let Some(graph) = frame.pane().filter(|pane| pane.contains(state.drag.node())) else {
+        if !pane.contains(state.drag.node()) {
             return;
-        };
+        }
+        let graph = pane;
 
         // Refresh the compatible port under the pointer for both modes.
         state.drag.snap = scan_snap_target(geometry, ui, graph, state.drag.from);
@@ -442,10 +445,6 @@ fn const_drop(
         return None;
     }
     let node = graph.node(start.node_id)?;
-    // Boundary ports route the interface, not literal values.
-    if false {
-        return None;
-    }
     // Don't overwrite an existing const value.
     let input = graph.inputs(node.inputs).get(start.port_idx)?;
     if matches!(input.binding, InputBindingView::Const(_)) {
