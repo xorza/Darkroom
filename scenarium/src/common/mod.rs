@@ -2,5 +2,4 @@
 //! authoring and execution sides both build on.
 
 pub(crate) mod column;
-pub(crate) mod pool;
 pub(crate) mod set;

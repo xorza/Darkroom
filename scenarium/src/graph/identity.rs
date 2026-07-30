@@ -12,9 +12,9 @@
 use ::common::id_type;
 use ::serde::{Deserialize, Serialize};
 
-// `NodeId` and `GraphId` are unique across a whole document — nested graphs
-// included — so a bare one is an unambiguous address. `FuncId` names a
-// declaration in the library rather than anything in a document.
+// `NodeId` and `GraphId` are unique across a whole document, so a bare one is
+// an unambiguous address. `FuncId` names a declaration in the library rather
+// than anything in a document.
 id_type!(NodeId);
 id_type!(GraphId);
 id_type!(FuncId);

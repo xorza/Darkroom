@@ -1,18 +1,25 @@
+use crate::EventLambda;
 use crate::graph::Graph;
-use crate::graph::NodeSearch;
-use crate::graph::definition::{GraphDef, GraphEvent, GraphLink};
 use crate::graph::error::{GraphDeserializeError, GraphValidationError};
-use crate::graph::func::event::EventLambda;
 use crate::graph::func::{Func, FuncInput, FuncOutput};
-use crate::graph::identity::{FuncId, GraphId};
+use crate::graph::identity::FuncId;
 use crate::graph::node::{CacheMode, Node, NodeKind};
-use crate::graph::{Binding, BindingEntry, InputPort, NodeId, OutputPort};
+use crate::graph::output_types::OutputTypes;
+use crate::graph::{Binding, InputPort, NodeId, OutputPort};
 use crate::library::Library;
 use crate::testing::{self, TestFuncHooks, test_func_lib, test_graph};
 use crate::{DataType, DetachedNode, StaticValue};
 use ::common::{SerdeFormat, deserialize, serialize};
 
 type TestResult<T = ()> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
+
+/// The effective type at one output port, through a table covering just this
+/// graph — the shape a host uses, narrowed to a single question.
+fn output_type(graph: &Graph, library: &Library, port: OutputPort) -> DataType {
+    let mut types = OutputTypes::default();
+    types.update(graph, library);
+    types.get(port).cloned().unwrap_or_default()
+}
 
 /// A passthrough func — one `Any` input, one wildcard output mirroring it. The
 /// generic hop for testing wildcard type resolution through a node.
@@ -25,231 +32,8 @@ fn passthrough_func() -> Func {
 }
 
 #[test]
-fn roundtrip_serialization() -> TestResult {
-    let graph = test_graph();
-
-    for format in SerdeFormat::all_formats_for_testing() {
-        let serialized = graph.serialize(format)?;
-        let deserialized = Graph::deserialize(&serialized, format)?;
-        assert_eq!(graph, deserialized);
-    }
-
-    let entry_json = serde_json::to_value(&graph)?;
-    assert!(
-        entry_json.get("name").is_none(),
-        "an entry graph exposes nothing, so it serializes none of it"
-    );
-
-    // A definition serializes what it exposes flat, beside its body — the
-    // two halves of one value, not a nested one.
-    let subgraph = GraphDef::new("Reusable")
-        .category("Test")
-        .input(FuncInput::optional("value", DataType::Int))
-        .output(FuncOutput::new("result", DataType::Int));
-    let subgraph_json = serde_json::to_value(&subgraph)?;
-    assert_eq!(subgraph_json["name"], "Reusable");
-    assert_eq!(subgraph_json["category"], "Test");
-    assert_eq!(subgraph_json["inputs"].as_array().unwrap().len(), 1);
-    assert_eq!(subgraph_json["outputs"].as_array().unwrap().len(), 1);
-    assert!(subgraph_json.get("body").is_some());
-
-    for format in SerdeFormat::all_formats_for_testing() {
-        let bytes = serialize(&subgraph, format)?;
-        let back: GraphDef = deserialize(&bytes, format)?;
-        assert_eq!(subgraph, back, "{format:?} round-trips a definition whole");
-    }
-
-    Ok(())
-}
-
-#[test]
-fn validate_rejects_node_ids_reused_across_graph_levels() {
-    let node = Node::new(NodeKind::Func(FuncId::unique()));
-    let node_id = NodeId::unique();
-    let mut interior = GraphDef::new("duplicate id");
-    interior.body.insert(node_id, node.clone());
-    let graph_id = GraphId::unique();
-
-    let mut graph = Graph::default();
-    graph.insert(node_id, node);
-    graph.insert_graph(graph_id, interior);
-
-    let error = graph.validate().unwrap_err().to_string();
-    assert!(error.contains("occurs in more than one authoring graph"));
-}
-
-#[test]
-fn validate_rejects_graph_ids_reused_across_parents() {
-    // The same def id planted under two parents — unreachable through
-    // `clone_mapped` (it remaps graph ids at every copy boundary), so it's
-    // corrupt input validation refuses: a bare graph id must be an
-    // unambiguous document-wide address.
-    let graph_id = GraphId::unique();
-    let mut parent_a = GraphDef::new("parent a");
-    parent_a.body.insert_graph(graph_id, GraphDef::new("dup"));
-    let mut graph = Graph::default();
-    graph.insert_graph(graph_id, GraphDef::new("dup"));
-    graph.insert_graph(GraphId::unique(), parent_a);
-
-    let error = graph.validate().unwrap_err().to_string();
-    assert!(
-        error.contains("occurs in more than one parent graph"),
-        "{error}"
-    );
-}
-
-#[test]
-fn insert_graph_replaces_existing_graph() {
-    let graph_id = GraphId::unique();
-    let mut graph = Graph::default();
-    graph.insert_graph(graph_id, GraphDef::new("original"));
-    graph.insert_graph(graph_id, GraphDef::new("replacement"));
-    assert_eq!(&graph.graphs[&graph_id].name, "replacement");
-}
-
-#[test]
 fn validate_passes_for_valid_graph() {
     assert!(test_graph().validate().is_ok());
-}
-
-#[test]
-fn validation_distinguishes_entry_graphs_from_subgraph_definitions() {
-    // "A definition carries an interface, an entry graph doesn't" is a type
-    // fact (`GraphDef` vs `Graph`), so only the *boundary-node* half of the
-    // distinction is still checkable at runtime.
-    let entry = Graph::default();
-    assert!(entry.validate_with(&Library::default()).is_ok());
-
-    let mut def = GraphDef::new("reusable")
-        .input(FuncInput::optional("value", DataType::Int))
-        .output(FuncOutput::new("result", DataType::Int));
-    def.body.add(Node::new(NodeKind::GraphInput));
-    def.body.add(Node::new(NodeKind::GraphOutput));
-    assert_eq!(def.name, "reusable");
-    assert_eq!(def.inputs.len(), 1);
-    assert_eq!(def.outputs.len(), 1);
-    assert!(def.body.validate().is_ok());
-
-    // The boundary nodes that make it a definition are exactly what an
-    // execution entry may not contain.
-    let error = def.body.validate_with(&Default::default()).unwrap_err();
-    assert!(matches!(error, GraphValidationError::EntryBoundaryNodes));
-}
-
-#[test]
-fn validate_for_execution_validates_shared_graph_structure_and_recursion() {
-    let graph_id = GraphId::unique();
-    let mut shared = GraphDef::new("recursive");
-    shared
-        .body
-        .add(Node::new(NodeKind::Graph(GraphLink::Shared(graph_id))));
-
-    let mut library = Library::default();
-    library.register_graph(graph_id, shared);
-
-    let mut graph = Graph::default();
-    graph.add(Node::new(NodeKind::Graph(GraphLink::Shared(graph_id))));
-
-    let error = graph.validate_with(&library).unwrap_err().to_string();
-    assert!(error.contains("recursive"));
-
-    let graph_id = GraphId::unique();
-    let mut shared = GraphDef::new("structurally invalid");
-    shared.body.add(Node::new(NodeKind::GraphInput));
-    shared.body.add(Node::new(NodeKind::GraphInput));
-
-    let mut library = Library::default();
-    library.register_graph(graph_id, shared);
-
-    let mut graph = Graph::default();
-    graph.add(Node::new(NodeKind::Graph(GraphLink::Shared(graph_id))));
-
-    let error = graph.validate_with(&library).unwrap_err().to_string();
-    assert!(error.contains("at most one GraphInput"));
-}
-
-/// An `entry_only` func is legal at the top level and nowhere below it: a
-/// definition instanced twice runs its body twice, which is exactly what such a
-/// func declares it cannot survive. Local and shared bodies are both rejected,
-/// and `GraphDef::validate` rejects a body on its own — a definition is never an
-/// entry however it is reached.
-#[test]
-fn entry_only_funcs_are_rejected_inside_every_definition_body() {
-    let entry_only = testing::with_stub_lambda(
-        Func::new(FuncId::unique(), "watcher")
-            .entry_only()
-            .input(FuncInput::optional("v", DataType::Any)),
-    );
-    let ordinary = testing::with_stub_lambda(Func::new(FuncId::unique(), "plain"));
-    let mut library = Library::default();
-    library.add(entry_only.clone());
-    library.add(ordinary.clone());
-
-    // At the top level it validates like any other func.
-    let mut graph = Graph::default();
-    graph.add_func_node(&entry_only);
-    assert!(graph.validate_with(&library).is_ok());
-
-    // Inside a local definition — rejected, naming the offending node and func.
-    let local_id = GraphId::unique();
-    let mut local = GraphDef::new("local");
-    let inner = local.body.add_func_node(&entry_only);
-    let mut graph = Graph::default();
-    graph.add_graph_node(&local, GraphLink::Local(local_id));
-    graph.insert_graph(local_id, local);
-    let error = graph.validate_with(&library).unwrap_err();
-    let GraphValidationError::LocalGraph { name, source } = &error else {
-        panic!("a local body reports through LocalGraph: {error:?}");
-    };
-    assert_eq!(name, "local");
-    assert!(
-        matches!(
-            **source,
-            GraphValidationError::EntryOnlyFunc { node_id, func_id }
-                if node_id == inner && func_id == entry_only.id
-        ),
-        "it names the offending node and func: {source:?}"
-    );
-
-    // Inside a shared definition — same verdict through the other descent.
-    let shared_id = GraphId::unique();
-    let mut shared = GraphDef::new("shared");
-    let inner = shared.body.add_func_node(&entry_only);
-    let mut graph = Graph::default();
-    graph.add_graph_node(&shared, GraphLink::Shared(shared_id));
-    let mut library = library;
-    library.register_graph(shared_id, shared);
-    let error = graph.validate_with(&library).unwrap_err();
-    let GraphValidationError::SharedGraph { name, source } = &error else {
-        panic!("a shared body reports through SharedGraph: {error:?}");
-    };
-    assert_eq!(name, "shared");
-    assert!(
-        matches!(
-            **source,
-            GraphValidationError::EntryOnlyFunc { node_id, func_id }
-                if node_id == inner && func_id == entry_only.id
-        ),
-        "the other descent reaches the same verdict: {source:?}"
-    );
-
-    // Library-gated, like `MissingFunc` and the const-only binding check: a
-    // library-less validate cannot resolve the func, so it cannot see the flag.
-    // Compilation always validates against one, so the invariant still holds
-    // wherever a graph can actually run.
-    let mut standalone = GraphDef::new("standalone");
-    standalone.body.add_func_node(&entry_only);
-    assert!(standalone.validate().is_ok());
-
-    // An ordinary func in the same slot is fine, so the rule is the flag's
-    // doing rather than "definitions reject funcs".
-    let plain_id = GraphId::unique();
-    let mut local = GraphDef::new("plain");
-    local.body.add_func_node(&ordinary);
-    let mut graph = Graph::default();
-    graph.add_graph_node(&local, GraphLink::Local(plain_id));
-    graph.insert_graph(plain_id, local);
-    assert!(graph.validate_with(&library).is_ok());
 }
 
 #[test]
@@ -295,9 +79,7 @@ fn cache_mode_round_trips() {
             let bytes = graph.serialize(format).unwrap();
             let back = Graph::deserialize(&bytes, format).unwrap();
             assert_eq!(
-                back.find_by_name("get_a", NodeSearch::TopLevel)
-                    .unwrap()
-                    .cache,
+                back.find_by_name("get_a").unwrap().cache,
                 mode,
                 "{mode:?} via {format:?}"
             );
@@ -326,10 +108,7 @@ fn new_func_node_copies_its_func_default_cache_mode() {
     // constructor propagates it too.
     let mut graph = Graph::default();
     let id = graph.add_func_node(&hot);
-    assert_eq!(
-        graph.find(id, NodeSearch::TopLevel).unwrap().cache,
-        CacheMode::Both
-    );
+    assert_eq!(graph.find(id).unwrap().cache, CacheMode::Both);
 
     // The func-less constructors have no func to copy from and seed `None`.
     assert_eq!(
@@ -341,7 +120,7 @@ fn new_func_node_copies_its_func_default_cache_mode() {
 #[test]
 fn validate_rejects_dangling_binding() {
     let mut graph = test_graph();
-    let sum_id = graph.find_by_name("sum", NodeSearch::TopLevel).unwrap().id;
+    let sum_id = graph.find_by_name("sum").unwrap().id;
     // Repoint sum's input at a node that doesn't exist.
     graph.set_input_binding(
         InputPort::new(sum_id, 0),
@@ -393,8 +172,8 @@ fn const_only_input_rejects_bind_but_a_normal_input_accepts_it() {
 #[test]
 fn type_mismatches_degrade_at_flatten_not_at_validation() {
     use crate::execution::compile::Compiler;
+    use crate::execution::compiled::ExecutionBinding;
     use crate::execution::identity::ExecutionNodeId;
-    use crate::execution::program::ExecutionBinding;
     use crate::library::Library;
     use crate::{FsPathConfig, FsPathMode};
     use std::sync::Arc;
@@ -442,11 +221,8 @@ fn type_mismatches_degrade_at_flatten_not_at_validation() {
     let flat_input = |g: &Graph, node: NodeId| {
         assert!(g.validate_with(&library).is_ok());
         let compiled = Compiler::default().compile(g, &library).unwrap();
-        let e_node = &compiled.program
-            [compiled.program.e_node_index[&ExecutionNodeId::from_authoring(&[node])]];
-        compiled.program.inputs[e_node.inputs.start as usize]
-            .binding
-            .clone()
+        let e_node = &compiled[compiled.e_node_index[&ExecutionNodeId::from_node(node)]];
+        compiled.inputs[e_node.inputs.nth(0)].binding.clone()
     };
 
     // Wires: Int -> String degrades, Int -> Int binds.
@@ -497,82 +273,6 @@ fn type_mismatches_degrade_at_flatten_not_at_validation() {
 }
 
 #[test]
-fn validate_for_execution_tolerates_library_range_drift() {
-    use crate::library::Library;
-
-    let func = testing::with_stub_lambda(
-        Func::new(FuncId::unique(), "one_out").output(FuncOutput::new("o", DataType::Int)),
-    );
-    let mut library = Library::default();
-    library.add(func.clone());
-
-    let mut graph = Graph::default();
-    let id = graph.add_func_node(&func);
-    assert!(graph.validate_with(&library).is_ok());
-
-    // Wiring the current library can't resolve — a binding, subscription, and
-    // exposed event past the declared ranges — stays valid: drift is tolerated
-    // (it degrades to unbound at flatten/plan time), never a compile error. See
-    // `engine::tests::dangling_wiring_compiles_and_reports_missing_input`.
-    graph.set_input_binding(InputPort::new(id, 5), Binding::bind(id, 7));
-    graph.subscribe(id, 3, id);
-    let mut child = GraphDef::new("child");
-    let interior = child.body.add_func_node(&func);
-    child.events.push(GraphEvent {
-        name: "drifted".into(),
-        emitter: interior,
-        emitter_event_idx: 9,
-    });
-    graph.insert_graph(GraphId::unique(), child);
-    assert!(graph.validate_with(&library).is_ok());
-
-    // `Null` consts ("explicitly unset") are tolerated on both sides:
-    // meaningful on an optional input, degrading to a missing input on a
-    // required one at flatten (see `const_satisfies`).
-    let nullable = testing::with_stub_lambda(
-        Func::new(FuncId::unique(), "nullable")
-            .input(FuncInput::optional("opt", DataType::Int))
-            .input(FuncInput::required("req", DataType::Int))
-            .output(FuncOutput::new("o", DataType::Int)),
-    );
-    library.add(nullable.clone());
-    let node = graph.add_func_node(&nullable);
-    graph.set_input_binding(InputPort::new(node, 0), Binding::Const(StaticValue::Null));
-    graph.set_input_binding(InputPort::new(node, 1), Binding::Const(StaticValue::Null));
-    assert!(graph.validate_with(&library).is_ok());
-}
-
-#[test]
-fn validate_caps_graph_nesting_depth() {
-    use crate::graph::MAX_NESTING_DEPTH;
-
-    let nest = |levels: usize| {
-        let mut graph = GraphDef::new("leaf");
-        for _ in 0..levels {
-            let mut parent = GraphDef::new("level");
-            parent.body.insert_graph(GraphId::unique(), graph);
-            graph = parent;
-        }
-        let mut root = Graph::default();
-        root.insert_graph(GraphId::unique(), graph);
-        root
-    };
-
-    // `nest(k)` puts the leaf definition at depth `k + 1`; the cap is the
-    // parameter deciding, not the walk giving up.
-    assert!(nest(MAX_NESTING_DEPTH - 2).validate().is_ok());
-    let error = nest(MAX_NESTING_DEPTH).validate().unwrap_err();
-    let mut source: &dyn std::error::Error = &error;
-    while let Some(next) = source.source() {
-        source = next;
-    }
-    assert_eq!(
-        source.to_string(),
-        format!("graph nesting exceeds {MAX_NESTING_DEPTH} levels")
-    );
-}
-
-#[test]
 fn resolve_output_type_follows_passthrough_chain() {
     use crate::library::Library;
     use crate::{DataType, StaticValue};
@@ -596,16 +296,16 @@ fn resolve_output_type_follows_passthrough_chain() {
 
     // The producer reports its own declared type.
     assert_eq!(
-        graph.resolve_output_type(&library, OutputPort::new(src, 0)),
+        output_type(&graph, &library, OutputPort::new(src, 0)),
         DataType::Int
     );
     // Each passthrough mirrors what flows through, transitively.
     assert_eq!(
-        graph.resolve_output_type(&library, OutputPort::new(p1, 0)),
+        output_type(&graph, &library, OutputPort::new(p1, 0)),
         DataType::Int
     );
     assert_eq!(
-        graph.resolve_output_type(&library, OutputPort::new(p2, 0)),
+        output_type(&graph, &library, OutputPort::new(p2, 0)),
         DataType::Int
     );
 
@@ -613,12 +313,12 @@ fn resolve_output_type_follows_passthrough_chain() {
     // so its output accepts any consumer again.
     graph.set_input_binding(InputPort::new(p1, 0), None);
     assert_eq!(
-        graph.resolve_output_type(&library, OutputPort::new(p1, 0)),
+        output_type(&graph, &library, OutputPort::new(p1, 0)),
         DataType::Any
     );
     // The taint flows downstream: pass2 now reads pass1's `Any`.
     assert_eq!(
-        graph.resolve_output_type(&library, OutputPort::new(p2, 0)),
+        output_type(&graph, &library, OutputPort::new(p2, 0)),
         DataType::Any
     );
 
@@ -629,11 +329,11 @@ fn resolve_output_type_follows_passthrough_chain() {
         Binding::Const(StaticValue::Bool(true)),
     );
     assert_eq!(
-        graph.resolve_output_type(&library, OutputPort::new(p1, 0)),
+        output_type(&graph, &library, OutputPort::new(p1, 0)),
         DataType::Bool
     );
     assert_eq!(
-        graph.resolve_output_type(&library, OutputPort::new(p2, 0)),
+        output_type(&graph, &library, OutputPort::new(p2, 0)),
         DataType::Bool,
         "the const's type propagates through the second passthrough too"
     );
@@ -646,7 +346,7 @@ fn resolve_output_type_follows_passthrough_chain() {
         Binding::Const(StaticValue::Enum("X".into())),
     );
     assert_eq!(
-        graph.resolve_output_type(&library, OutputPort::new(p1, 0)),
+        output_type(&graph, &library, OutputPort::new(p1, 0)),
         DataType::Any
     );
 }
@@ -684,12 +384,9 @@ fn resolve_output_type_uses_declared_type_for_typed_const_input() {
         InputPort::new(n, 1),
         Binding::Const(StaticValue::Enum("A".into())),
     );
+    assert_eq!(output_type(&graph, &library, OutputPort::new(n, 0)), fs_ty);
     assert_eq!(
-        graph.resolve_output_type(&library, OutputPort::new(n, 0)),
-        fs_ty
-    );
-    assert_eq!(
-        graph.resolve_output_type(&library, OutputPort::new(n, 1)),
+        output_type(&graph, &library, OutputPort::new(n, 1)),
         enum_ty
     );
 }
@@ -698,8 +395,8 @@ fn resolve_output_type_uses_declared_type_for_typed_const_input() {
 fn type_mismatched_wiring_flattens_as_unbound_through_wildcard_chains() {
     use crate::DataType;
     use crate::execution::compile::Compiler;
+    use crate::execution::compiled::ExecutionBinding;
     use crate::execution::identity::ExecutionNodeId;
-    use crate::execution::program::ExecutionBinding;
     use crate::library::Library;
 
     let float_src = testing::with_stub_lambda(
@@ -745,12 +442,9 @@ fn type_mismatched_wiring_flattens_as_unbound_through_wildcard_chains() {
     let sink_binding = |g: &Graph| {
         let mut compiler = Compiler::default();
         let compiled = compiler.compile(g, &library).expect("mismatches compile");
-        let e_node = &compiled.program
-            [compiled.program.e_node_index[&ExecutionNodeId::from_authoring(&[sink])]];
-        match &compiled.program.inputs[e_node.inputs.start as usize].binding {
-            ExecutionBinding::Bind(addr) => {
-                FlatSink::Bound(compiled.program.e_node_ids[addr.node_idx])
-            }
+        let e_node = &compiled[compiled.e_node_index[&ExecutionNodeId::from_node(sink)]];
+        match &compiled.inputs[e_node.inputs.nth(0)].binding {
+            ExecutionBinding::Bind(addr) => FlatSink::Bound(compiled.e_node_ids[addr.node_idx]),
             ExecutionBinding::Const(_) => FlatSink::Const,
             ExecutionBinding::None => FlatSink::Unbound,
         }
@@ -760,7 +454,7 @@ fn type_mismatched_wiring_flattens_as_unbound_through_wildcard_chains() {
     // (passthroughs are real func nodes — only boundaries short-circuit).
     assert_eq!(
         sink_binding(&g),
-        FlatSink::Bound(ExecutionNodeId::from_authoring(&[p2])),
+        FlatSink::Bound(ExecutionNodeId::from_node(p2)),
         "a well-typed chain flattens as bound"
     );
 
@@ -803,92 +497,8 @@ fn resolve_output_type_breaks_a_binding_cycle() {
     graph.set_input_binding(InputPort::new(id, 0), Binding::bind(id, 0));
 
     assert_eq!(
-        graph.resolve_output_type(&library, OutputPort::new(id, 0)),
+        output_type(&graph, &library, OutputPort::new(id, 0)),
         DataType::Any
-    );
-}
-
-#[test]
-fn input_type_resolves_declared_types_and_skips_boundaries() {
-    use crate::DataType;
-    use crate::library::Library;
-
-    let consumer = testing::with_stub_lambda(
-        Func::new(FuncId::unique(), "dst")
-            .input(FuncInput::required("x", DataType::Float))
-            .output(FuncOutput::new("out", DataType::Float)),
-    );
-    let mut library = Library::default();
-    library.add(consumer.clone());
-
-    let mut graph = Graph::default();
-    let dst = graph.add_func_node(&consumer);
-    assert_eq!(
-        graph.input_type(&library, InputPort::new(dst, 0)),
-        Some(DataType::Float)
-    );
-    // Out-of-range port → None.
-    assert_eq!(graph.input_type(&library, InputPort::new(dst, 9)), None);
-
-    // A boundary node carries no per-port type here → None (caller's Null).
-    let boundary = Node::new(NodeKind::GraphInput);
-    let b = graph.add(boundary);
-    assert_eq!(graph.input_type(&library, InputPort::new(b, 0)), None);
-}
-
-#[test]
-fn deserialize_rejects_corrupt_graph() {
-    let mut graph = test_graph();
-    let sum_id = graph.find_by_name("sum", NodeSearch::TopLevel).unwrap().id;
-    graph.set_input_binding(
-        InputPort::new(sum_id, 0),
-        Binding::bind(NodeId::unique(), 0),
-    );
-
-    // serialize doesn't validate; deserialize must reject the dangling bind
-    // (the release-path structural guard, not a debug-only assert).
-    let bytes = graph.serialize(SerdeFormat::Bitcode).unwrap();
-    assert!(matches!(
-        Graph::deserialize(&bytes, SerdeFormat::Bitcode),
-        Err(GraphDeserializeError::InvalidGraph(_))
-    ));
-
-    let mut nil_key = Graph::default();
-    nil_key
-        .nodes
-        .insert(NodeId::nil(), Node::new(NodeKind::Func(FuncId::unique())));
-    let bytes = nil_key.serialize(SerdeFormat::Bitcode).unwrap();
-    assert!(matches!(
-        Graph::deserialize(&bytes, SerdeFormat::Bitcode),
-        Err(GraphDeserializeError::InvalidGraph(_))
-    ));
-
-    // A definition's lineage is checked through its parent, since a def is
-    // only ever decoded as part of the graph holding it.
-    let mut nil_origin = Graph::default();
-    nil_origin.insert_graph(
-        GraphId::unique(),
-        GraphDef::new("nil origin").origin(GraphId::nil()),
-    );
-    let bytes = nil_origin.serialize(SerdeFormat::Bitcode).unwrap();
-    let error = Graph::deserialize(&bytes, SerdeFormat::Bitcode)
-        .unwrap_err()
-        .to_string();
-    assert!(error.contains("graph has a nil origin"), "{error}");
-
-    let mut duplicate_bindings = serde_json::to_value(test_graph()).unwrap();
-    let bindings = duplicate_bindings["bindings"].as_array_mut().unwrap();
-    bindings.push(bindings[0].clone());
-    let bytes = serde_json::to_vec(&duplicate_bindings).unwrap();
-    let decode_error = Graph::deserialize(&bytes, SerdeFormat::Json).unwrap_err();
-    assert!(matches!(
-        &decode_error,
-        GraphDeserializeError::Deserialize(_)
-    ));
-    let error = decode_error.to_string();
-    assert!(
-        error.contains("duplicate binding for input port"),
-        "{error}"
     );
 }
 
@@ -896,15 +506,9 @@ fn deserialize_rejects_corrupt_graph() {
 fn node_remove_test() -> TestResult {
     let mut graph = test_graph();
 
-    let node_id = graph.find_by_name("sum", NodeSearch::TopLevel).unwrap().id;
-    graph.find_mut(node_id, NodeSearch::TopLevel).unwrap().cache = CacheMode::Ram;
-    assert_eq!(
-        graph
-            .find_by_name("sum", NodeSearch::TopLevel)
-            .unwrap()
-            .cache,
-        CacheMode::Ram
-    );
+    let node_id = graph.find_by_name("sum").unwrap().id;
+    graph.find_mut(node_id).unwrap().cache = CacheMode::Ram;
+    assert_eq!(graph.find_by_name("sum").unwrap().cache, CacheMode::Ram);
     for node in graph.nodes.values_mut() {
         node.disabled = true;
     }
@@ -912,7 +516,7 @@ fn node_remove_test() -> TestResult {
 
     graph.detach_node(node_id);
 
-    assert!(graph.find_by_name("sum", NodeSearch::TopLevel).is_none());
+    assert!(graph.find_by_name("sum").is_none());
     assert_eq!(graph.len(), 4);
 
     // No surviving edge references the removed node (as consumer or producer).
@@ -959,15 +563,6 @@ fn produces_cycle_detects_direct_and_transitive_loops() {
 }
 
 #[test]
-fn only_boundary_kinds_are_boundaries() {
-    let func_id = "432b9bf1-f478-476c-a9c9-9a6e190124fc".into();
-    assert!(!NodeKind::Func(func_id).is_boundary());
-    assert!(!NodeKind::Graph(GraphLink::Local(GraphId::unique())).is_boundary());
-    assert!(NodeKind::GraphInput.is_boundary());
-    assert!(NodeKind::GraphOutput.is_boundary());
-}
-
-#[test]
 fn typed_id_from_str_preserves_uuid_error() {
     let input = "not-a-uuid";
     let error: uuid::Error = input.parse::<FuncId>().unwrap_err();
@@ -991,15 +586,9 @@ fn binding_conversions() {
 #[test]
 fn input_bindings_are_sparse_and_none_removes_an_entry() {
     let mut graph = test_graph();
-    let sum_id = graph.find_by_name("sum", NodeSearch::TopLevel).unwrap().id;
-    let get_a_id = graph
-        .find_by_name("get_a", NodeSearch::TopLevel)
-        .unwrap()
-        .id;
-    let get_b_id = graph
-        .find_by_name("get_b", NodeSearch::TopLevel)
-        .unwrap()
-        .id;
+    let sum_id = graph.find_by_name("sum").unwrap().id;
+    let get_a_id = graph.find_by_name("get_a").unwrap().id;
+    let get_b_id = graph.find_by_name("get_b").unwrap().id;
 
     let first = InputPort::new(sum_id, 0);
     let second = InputPort::new(sum_id, 1);
@@ -1023,11 +612,8 @@ fn input_bindings_are_sparse_and_none_removes_an_entry() {
 #[test]
 fn subscribe_unsubscribe_is_subscribed() {
     let graph = test_graph();
-    let emitter = graph
-        .find_by_name("get_a", NodeSearch::TopLevel)
-        .unwrap()
-        .id;
-    let sub = graph.find_by_name("sum", NodeSearch::TopLevel).unwrap().id;
+    let emitter = graph.find_by_name("get_a").unwrap().id;
+    let sub = graph.find_by_name("sum").unwrap().id;
     let mut graph = graph;
 
     assert!(!graph.is_subscribed(emitter, 0, sub));
@@ -1049,16 +635,10 @@ fn subscribe_unsubscribe_is_subscribed() {
 #[test]
 fn subscribers_ranges_one_emitter_event() {
     let mut graph = test_graph();
-    let emitter = graph
-        .find_by_name("get_a", NodeSearch::TopLevel)
-        .unwrap()
-        .id;
-    let s1 = graph.find_by_name("sum", NodeSearch::TopLevel).unwrap().id;
-    let s2 = graph.find_by_name("mult", NodeSearch::TopLevel).unwrap().id;
-    let other = graph
-        .find_by_name("Print", NodeSearch::TopLevel)
-        .unwrap()
-        .id;
+    let emitter = graph.find_by_name("get_a").unwrap().id;
+    let s1 = graph.find_by_name("sum").unwrap().id;
+    let s2 = graph.find_by_name("mult").unwrap().id;
+    let other = graph.find_by_name("Print").unwrap().id;
 
     graph.subscribe(emitter, 0, s1);
     graph.subscribe(emitter, 0, s2);
@@ -1080,11 +660,8 @@ fn subscribers_ranges_one_emitter_event() {
 #[test]
 fn wiring_snapshot_round_trips_through_serde_and_restore() -> TestResult {
     let mut graph = test_graph();
-    let sum_id = graph.find_by_name("sum", NodeSearch::TopLevel).unwrap().id;
-    let get_a_id = graph
-        .find_by_name("get_a", NodeSearch::TopLevel)
-        .unwrap()
-        .id;
+    let sum_id = graph.find_by_name("sum").unwrap().id;
+    let get_a_id = graph.find_by_name("get_a").unwrap().id;
     // Add a subscription that touches `sum` so both arms are exercised.
     graph.subscribe(get_a_id, 0, sum_id);
 
@@ -1135,10 +712,7 @@ fn add_func_node_seeds_default_const_binding() {
     let mut graph = Graph::default();
     let id = graph.add_func_node(&func);
 
-    assert_eq!(
-        graph.find(id, NodeSearch::TopLevel).unwrap().kind,
-        NodeKind::Func(func.id)
-    );
+    assert_eq!(graph.find(id).unwrap().kind, NodeKind::Func(func.id));
     assert_eq!(
         graph.bindings.get(&InputPort::new(id, 0)),
         Some(&Binding::Const(7i64.into()))
@@ -1157,169 +731,128 @@ fn add_func_node_leaves_defaultless_inputs_unbound() {
 }
 
 #[test]
-fn add_graph_node_seeds_default_const_binding() {
-    // Defaults are seeded at their *declared* port index, so gaps in the
-    // interface don't shift the bindings that follow them.
-    let graph_id = GraphId::unique();
-    let def = GraphDef::new("Def").category("Test").inputs([
-        FuncInput::optional("A", DataType::Int),
-        FuncInput::optional("B", DataType::Int).default(3i64),
-        FuncInput::optional("C", DataType::Int),
-        FuncInput::optional("D", DataType::Int).default(5i64),
-    ]);
-
-    let mut graph = Graph::default();
-    let id = graph.add_graph_node(&def, GraphLink::Local(graph_id));
-
-    assert_eq!(
-        graph.bindings.get(&InputPort::new(id, 1)),
-        Some(&Binding::Const(3i64.into()))
-    );
-    assert_eq!(
-        graph.bindings.get(&InputPort::new(id, 3)),
-        Some(&Binding::Const(5i64.into()))
-    );
-    assert!(!graph.bindings.contains_key(&InputPort::new(id, 0)));
-    assert!(!graph.bindings.contains_key(&InputPort::new(id, 2)));
+fn serialization_round_trips_a_graph_through_every_format() -> TestResult {
+    let graph = test_graph();
+    for format in SerdeFormat::all_formats_for_testing() {
+        let serialized = graph.serialize(format)?;
+        let deserialized = Graph::deserialize(&serialized, format)?;
+        assert_eq!(graph, deserialized, "{format:?} round-trips a graph whole");
+    }
+    Ok(())
 }
 
+/// Deserialization is the release-path structural guard on an untrusted
+/// document: `serialize` doesn't validate, so every structural invariant the
+/// graph's own mutations assert on has to be *checked* on the way back in.
 #[test]
-fn node_search_scope_gates_graph_interiors() {
-    // A top-level node plus one two-levels-deep: a local graph whose
-    // interior holds another local graph with the target node inside.
-    let mut inner_graph = GraphDef::new("Inner");
-    let mut deep = Node::new(NodeKind::Func(FuncId::unique()));
-    deep.name = "deep".to_owned();
-    let deep_id = inner_graph.body.add(deep);
-    let inner_id = GraphId::unique();
-
-    let mut outer_graph = GraphDef::new("Outer");
-    outer_graph.body.insert_graph(inner_id, inner_graph);
-    let outer_id = GraphId::unique();
-
-    let mut graph = Graph::default();
-    let mut top = Node::new(NodeKind::Func(FuncId::unique()));
-    top.name = "top".to_owned();
-    let top_id = graph.add(top);
-    graph.insert_graph(outer_id, outer_graph);
-
-    // Top-level node: found either way.
-    assert!(graph.find(top_id, NodeSearch::TopLevel).is_some());
-    assert!(graph.find(top_id, NodeSearch::Recursive).is_some());
-    assert_eq!(
-        graph.find_by_name("top", NodeSearch::TopLevel).unwrap().id,
-        top_id
+fn deserialize_rejects_corrupt_graph() {
+    let mut graph = test_graph();
+    let sum_id = graph.find_by_name("sum").unwrap().id;
+    graph.set_input_binding(
+        InputPort::new(sum_id, 0),
+        Binding::bind(NodeId::unique(), 0),
     );
-    assert_eq!(
-        graph.find_by_name("top", NodeSearch::Recursive).unwrap().id,
-        top_id
-    );
-    // Interior node: invisible to TopLevel, found two levels down by
-    // Recursive; an unknown id misses both ways.
-    assert!(graph.find(deep_id, NodeSearch::TopLevel).is_none());
-    assert!(graph.find(deep_id, NodeSearch::Recursive).is_some());
-    assert!(graph.find_by_name("deep", NodeSearch::TopLevel).is_none());
-    assert_eq!(
-        graph
-            .find_by_name("deep", NodeSearch::Recursive)
-            .unwrap()
-            .id,
-        deep_id
-    );
+    let bytes = graph.serialize(SerdeFormat::Bitcode).unwrap();
     assert!(
-        graph
-            .find(NodeId::unique(), NodeSearch::Recursive)
-            .is_none()
+        matches!(
+            Graph::deserialize(&bytes, SerdeFormat::Bitcode),
+            Err(GraphDeserializeError::InvalidGraph(
+                GraphValidationError::BindingMissingProducer { .. }
+            ))
+        ),
+        "a binding naming a node the document doesn't hold is rejected"
     );
+
+    let mut nil_key = Graph::default();
+    nil_key
+        .nodes
+        .insert(NodeId::nil(), Node::new(NodeKind::Func(FuncId::unique())));
+    let bytes = nil_key.serialize(SerdeFormat::Bitcode).unwrap();
+    assert!(matches!(
+        Graph::deserialize(&bytes, SerdeFormat::Bitcode),
+        Err(GraphDeserializeError::InvalidGraph(
+            GraphValidationError::NilNodeId
+        ))
+    ));
+
+    // Bindings decode from a sequence into a map, so a repeated input port is
+    // caught during decode rather than by validation after it.
+    let mut duplicate_bindings = serde_json::to_value(test_graph()).unwrap();
+    let bindings = duplicate_bindings["bindings"].as_array_mut().unwrap();
+    bindings.push(bindings[0].clone());
+    let bytes = serde_json::to_vec(&duplicate_bindings).unwrap();
+    let error = Graph::deserialize(&bytes, SerdeFormat::Json).unwrap_err();
+    assert!(matches!(&error, GraphDeserializeError::Deserialize(_)));
     assert!(
-        graph
-            .find_by_name("missing", NodeSearch::Recursive)
-            .is_none()
+        error
+            .to_string()
+            .contains("duplicate binding for input port"),
+        "{error}"
     );
-
-    graph.find_mut(deep_id, NodeSearch::Recursive).unwrap().name = "top".to_owned();
-    assert_eq!(
-        graph.find_by_name("top", NodeSearch::Recursive).unwrap().id,
-        top_id
-    );
-
-    // The mutable lookup resolves identically and its edit lands on the
-    // nested node.
-    graph.find_mut(deep_id, NodeSearch::Recursive).unwrap().name = "renamed".to_owned();
-    assert_eq!(
-        graph.find(deep_id, NodeSearch::Recursive).unwrap().name,
-        "renamed"
-    );
-    assert!(graph.find_by_name("deep", NodeSearch::Recursive).is_none());
-    assert_eq!(
-        graph
-            .find_by_name("renamed", NodeSearch::Recursive)
-            .unwrap()
-            .id,
-        deep_id
-    );
-    assert!(graph.find_mut(deep_id, NodeSearch::TopLevel).is_none());
 }
 
+/// Wiring the current library can't resolve is tolerated, never a validation
+/// error: it degrades to unbound at flatten time and revives if the library
+/// grows the ports back. The counterpart to
+/// [`type_mismatches_degrade_at_flatten_not_at_validation`].
 #[test]
-fn node_ports_resolve_every_kind_to_its_declaration() {
-    // `Some(ports)` is an authoritative arity a caller may range-check
-    // against; `None` means "unknowable here" and must *not* read as an empty
-    // port list — the drift guards do `is_some_and(|p| idx >= p.len())`, so
-    // the two decide opposite ways.
+fn validate_tolerates_library_range_drift() {
+    let func = testing::with_stub_lambda(
+        Func::new(FuncId::unique(), "one_out").output(FuncOutput::new("o", DataType::Int)),
+    );
+    let mut library = Library::default();
+    library.add(func.clone());
+
+    let mut graph = Graph::default();
+    let id = graph.add_func_node(&func);
+    assert!(graph.validate_with(&library).is_ok());
+
+    // Input 5, output 7, and event 3 are all past what `one_out` declares.
+    graph.set_input_binding(InputPort::new(id, 5), Binding::bind(id, 7));
+    graph.subscribe(id, 3, id);
+    assert!(graph.validate_with(&library).is_ok());
+
+    // `Null` consts ("explicitly unset") are tolerated on both sides:
+    // meaningful on an optional input, degrading to a missing input on a
+    // required one at flatten (see `const_satisfies`).
+    let nullable = testing::with_stub_lambda(
+        Func::new(FuncId::unique(), "nullable")
+            .input(FuncInput::optional("opt", DataType::Int))
+            .input(FuncInput::required("req", DataType::Int))
+            .output(FuncOutput::new("o", DataType::Int)),
+    );
+    library.add(nullable.clone());
+    let node = graph.add_func_node(&nullable);
+    graph.set_input_binding(InputPort::new(node, 0), Binding::Const(StaticValue::Null));
+    graph.set_input_binding(InputPort::new(node, 1), Binding::Const(StaticValue::Null));
+    assert!(graph.validate_with(&library).is_ok());
+}
+
+/// `Some(ports)` is an authoritative arity a caller may range-check against;
+/// `None` means "unknowable here" and must *not* read as an empty port list —
+/// the drift guards do `is_some_and(|p| idx >= p.len())`, so the two decide
+/// opposite ways.
+#[test]
+fn node_ports_resolve_to_a_declaration_or_to_unknown() {
     let library = test_func_lib(TestFuncHooks::default());
-    let mut def = GraphDef::new("S")
-        .inputs([
-            FuncInput::optional("a", DataType::Int),
-            FuncInput::optional("b", DataType::Int),
-        ])
-        .output(FuncOutput::new("r", DataType::Int));
-    let input = def.body.add(Node::new(NodeKind::GraphInput));
-    let output = def.body.add(Node::new(NodeKind::GraphOutput));
-    let body = &def.body;
-    let node = |id: NodeId| body.find(id, NodeSearch::TopLevel).unwrap();
+    let mut graph = Graph::default();
 
-    // Both boundary nodes mirror the enclosing interface, which a bare body
-    // doesn't carry — unknowable from here.
-    assert!(body.node_ports(node(input), &library).is_none());
-    assert!(body.node_ports(node(output), &library).is_none());
-
-    // A graph *instance* reads its target's interface, even though the
-    // instance's own body isn't involved.
-    let mut root = Graph::default();
-    let def_id = GraphId::unique();
-    let instance_id = root.add_graph_node(&def, GraphLink::Local(def_id));
-    root.insert_graph(def_id, def);
-    let instance = root.find(instance_id, NodeSearch::TopLevel).unwrap();
-    let ports = root.node_ports(instance, &library).unwrap();
-    assert_eq!(ports.name, "S");
-    assert_eq!(ports.inputs.len(), 2);
-    assert_eq!(ports.outputs.len(), 1);
-    assert_eq!(ports.events.len(), 0);
-    assert!(
-        ports.func.is_none(),
-        "a composite has no func declaration to read flags from"
-    );
-    // …so the flags answer from the interface instead: this one relays an
-    // output, and the two policy flags stay off until a compiled program can
-    // speak for the interior.
-    assert!(!ports.sink(), "a composite exposing an output is no sink");
-    assert!(!ports.uncacheable());
-    assert!(!ports.impure());
-
-    // A func node resolves through the library to its own declaration.
     let sum = library.by_name("sum").unwrap();
-    let sum_id = root.add_func_node(sum);
-    let sum_node = root.find(sum_id, NodeSearch::TopLevel).unwrap();
-    let ports = root.node_ports(sum_node, &library).unwrap();
+    let sum_id = graph.add_func_node(sum);
+    let sum_node = graph.find(sum_id).unwrap();
+    let ports = graph.node_ports(sum_node, &library).unwrap();
     assert_eq!(ports.name, "sum");
     assert_eq!(ports.inputs.len(), sum.inputs.len());
-    assert_eq!(ports.func.map(|func| func.id), Some(sum.id));
+    assert_eq!(ports.func.id, sum.id);
 
-    // A func's flags come off its declaration verbatim — the same three
-    // questions, answered from the other source. Each is set on one of the
-    // two funcs below and clear on the other, so a flag wired to the wrong
-    // field can't pass.
+    // Library drift is unknown, not empty — otherwise every port on a node
+    // whose func went missing would read as out of range.
+    let missing_func = Node::new(NodeKind::Func(FuncId::unique()));
+    assert!(graph.node_ports(&missing_func, &library).is_none());
+
+    // The three policy flags come off the declaration verbatim. Each is set
+    // on one of the two funcs and clear on the other, so a flag wired to the
+    // wrong field can't pass.
     let plain = testing::with_stub_lambda(
         Func::new(FuncId::unique(), "plain")
             .pure()
@@ -1341,23 +874,29 @@ fn node_ports_resolve_every_kind_to_its_declaration() {
         flagged.impure(),
         "`Func::new` leaves a func Impure until `pure()` says otherwise"
     );
-
-    // A composite with no outputs reads as a sink — the stand-in an editor
-    // paints before the first compile.
-    assert!(GraphDef::new("silent").ports().sink());
-
-    // An unresolvable link is unknown, not empty — library drift must not
-    // silently report every port out of range.
-    let dangling = Node::new(NodeKind::Graph(GraphLink::Local(GraphId::unique())));
-    assert!(root.node_ports(&dangling, &library).is_none());
-    let missing_func = Node::new(NodeKind::Func(FuncId::unique()));
-    assert!(root.node_ports(&missing_func, &library).is_none());
 }
 
 #[test]
-fn node_events_expose_names_and_arity_for_both_declarations() {
-    // `FuncEvent` and `GraphEvent` are different types; `NodeEvents` is the
-    // common ground, so both spell arity and names the same way.
+fn input_type_resolves_declared_types_and_rejects_out_of_range() {
+    let consumer = testing::with_stub_lambda(
+        Func::new(FuncId::unique(), "dst")
+            .input(FuncInput::required("x", DataType::Float))
+            .output(FuncOutput::new("out", DataType::Float)),
+    );
+    let mut library = Library::default();
+    library.add(consumer.clone());
+
+    let mut graph = Graph::default();
+    let dst = graph.add_func_node(&consumer);
+    assert_eq!(
+        graph.input_type(&library, InputPort::new(dst, 0)),
+        Some(DataType::Float)
+    );
+    assert_eq!(graph.input_type(&library, InputPort::new(dst, 9)), None);
+}
+
+#[test]
+fn node_events_expose_names_and_arity() {
     let emitter = testing::with_stub_lambda(
         Func::new(FuncId::unique(), "ticker")
             .event("tick", EventLambda::default())
@@ -1365,526 +904,9 @@ fn node_events_expose_names_and_arity_for_both_declarations() {
     );
     let ports = emitter.ports();
     assert_eq!(ports.events.len(), 2);
-    assert_eq!(ports.events.names().collect::<Vec<_>>(), ["tick", "tock"]);
+    let names: Vec<&str> = ports.events.iter().map(|e| e.name.as_str()).collect();
+    assert_eq!(names, ["tick", "tock"]);
 
-    let mut def = GraphDef::new("D");
-    let interior = def.body.add(Node::new(NodeKind::Func(emitter.id)));
-    let def = def.event(GraphEvent {
-        name: "exposed".into(),
-        emitter: interior,
-        emitter_event_idx: 0,
-    });
-    let ports = def.ports();
-    assert_eq!(ports.events.len(), 1);
-    assert_eq!(ports.events.names().collect::<Vec<_>>(), ["exposed"]);
-
-    assert!(GraphDef::new("empty").ports().events.is_empty());
-}
-
-#[test]
-fn resolve_graph_picks_local_or_linked_source() {
-    let mut library = test_func_lib(TestFuncHooks::default());
-
-    let linked_id = GraphId::unique();
-    library.register_graph(linked_id, GraphDef::new("Linked").category("Test"));
-
-    let mut graph = Graph::default();
-    let local_id = GraphId::unique();
-    graph.insert_graph(local_id, GraphDef::new("Local").category("Test"));
-
-    assert_eq!(
-        graph
-            .resolve_graph(GraphLink::Local(local_id), &library)
-            .unwrap()
-            .name,
-        "Local"
-    );
-    assert_eq!(
-        graph
-            .resolve_graph(GraphLink::Shared(linked_id), &library)
-            .unwrap()
-            .name,
-        "Linked"
-    );
-    // A local ref whose id only exists in the library does not resolve.
-    assert!(
-        graph
-            .resolve_graph(GraphLink::Local(linked_id), &library)
-            .is_none()
-    );
-
-    // `resolve_graph` is parent-scoped by design; the recursive queries
-    // reach any depth. Nest a def two levels down and address it bare.
-    let deep_id = GraphId::unique();
-    graph
-        .graphs
-        .get_mut(&local_id)
-        .unwrap()
-        .body
-        .insert_graph(deep_id, GraphDef::new("Deep").category("Test"));
-    assert!(
-        graph
-            .resolve_graph(GraphLink::Local(deep_id), &library)
-            .is_none(),
-        "parent-scoped resolution does not see nested defs"
-    );
-    assert_eq!(
-        graph.find_graph(deep_id).unwrap().name,
-        "Deep",
-        "find_graph reaches a depth-2 def by bare id"
-    );
-    assert!(
-        std::ptr::eq(
-            graph.find_graph_parent(deep_id).unwrap(),
-            &graph.find_graph(local_id).unwrap().body
-        ),
-        "the parent of the deep def is the mid-level graph's body"
-    );
-    assert!(
-        std::ptr::eq(graph.find_graph_parent(local_id).unwrap(), &graph),
-        "a top-level def's parent is the root itself"
-    );
-    graph.find_graph_mut(deep_id).unwrap().name = "Renamed".into();
-    assert_eq!(
-        graph.find_graph(deep_id).unwrap().name,
-        "Renamed",
-        "find_graph_mut writes through to the nested def"
-    );
-    assert!(graph.find_graph(GraphId::unique()).is_none());
-}
-
-// Subgraph-interface port edits below: `Graph::{detach,attach}_graph_{input,
-// output}` and the renumbering they share. Each pair is an exact inverse, so
-// the round-trip tests are the load-bearing ones.
-
-fn int_input(name: &str) -> FuncInput {
-    FuncInput::optional(name, DataType::Int)
-}
-
-fn int_output(name: &str) -> FuncOutput {
-    FuncOutput::new(name, DataType::Int)
-}
-
-fn func_node() -> Node {
-    Node::new(NodeKind::Func(FuncId::unique()))
-}
-
-fn const_int(value: i64) -> Binding {
-    Binding::Const(StaticValue::Int(value))
-}
-
-#[derive(Debug)]
-struct InputFixture {
-    graph: Graph,
-    graph_id: GraphId,
-    boundary: NodeId,
-    consumer: NodeId,
-    instance_a: NodeId,
-    instance_b: NodeId,
-}
-
-/// Child interface `[A, B, C]`; interior consumer reads all three boundary
-/// outputs; pins on boundary outputs 1 and 2; instance A bound on all three
-/// slots (10/11/12), instance B only on slot 1.
-fn input_fixture() -> InputFixture {
-    let mut child = GraphDef::new("child").inputs([int_input("A"), int_input("B"), int_input("C")]);
-    let boundary = child.body.add(Node::new(NodeKind::GraphInput));
-    let consumer = child.body.add(func_node());
-    for idx in 0..3 {
-        child
-            .body
-            .set_input_binding(InputPort::new(consumer, idx), Binding::bind(boundary, idx));
-    }
-    let graph_id = GraphId::unique();
-    let mut graph = Graph::default();
-    let instance_a = graph.add(Node::graph_instance(&child, GraphLink::Local(graph_id)));
-    let instance_b = graph.add(Node::graph_instance(&child, GraphLink::Local(graph_id)));
-    graph.insert_graph(graph_id, child);
-    for (idx, value) in [10, 11, 12].into_iter().enumerate() {
-        graph.set_input_binding(InputPort::new(instance_a, idx), const_int(value));
-    }
-    graph.set_input_binding(InputPort::new(instance_b, 1), const_int(21));
-    InputFixture {
-        graph,
-        graph_id,
-        boundary,
-        consumer,
-        instance_a,
-        instance_b,
-    }
-}
-
-#[test]
-fn detach_and_attach_graph_input_round_trip() {
-    let InputFixture {
-        mut graph,
-        graph_id,
-        boundary,
-        consumer,
-        instance_a,
-        instance_b,
-    } = input_fixture();
-    let original = graph.clone_verbatim();
-
-    let snapshot = graph.snapshot_graph_input(graph_id, 1).unwrap();
-    let detached = graph.detach_graph_input(graph_id, 1);
-    assert_eq!(
-        snapshot, detached,
-        "snapshot is exactly what detach removes"
-    );
-
-    assert_eq!(detached.spec.name, "B");
-    assert_eq!(
-        detached.interior,
-        vec![BindingEntry {
-            port: InputPort::new(consumer, 1),
-            binding: Binding::bind(boundary, 1),
-        }]
-    );
-    // Both instances lose their slot-1 binding: A's 11 and B's 21.
-    assert_eq!(detached.parent.len(), 2);
-    assert!(
-        detached
-            .parent
-            .iter()
-            .any(|entry| entry.port == InputPort::new(instance_a, 1)
-                && entry.binding == const_int(11))
-    );
-    assert!(
-        detached
-            .parent
-            .iter()
-            .any(|entry| entry.port == InputPort::new(instance_b, 1)
-                && entry.binding == const_int(21))
-    );
-
-    // Interface compacts [A, B, C] -> [A, C].
-    let child = graph.graphs.get(&graph_id).unwrap();
-    let names: Vec<&str> = child
-        .inputs
-        .iter()
-        .map(|input| input.name.as_str())
-        .collect();
-    assert_eq!(names, ["A", "C"]);
-    // Interior: in0 keeps slot 0, in1's edge was severed, in2's source
-    // shifted 2 -> 1.
-    assert_eq!(
-        child.body.bindings.get(&InputPort::new(consumer, 0)),
-        Some(&Binding::bind(boundary, 0))
-    );
-    assert_eq!(child.body.bindings.get(&InputPort::new(consumer, 1)), None);
-    assert_eq!(
-        child.body.bindings.get(&InputPort::new(consumer, 2)),
-        Some(&Binding::bind(boundary, 1))
-    );
-    // Instance A: 0 stays 10, old 2 (12) shifted to 1, slot 2 cleared;
-    // instance B: fully unbound.
-    assert_eq!(
-        graph.bindings.get(&InputPort::new(instance_a, 0)),
-        Some(&const_int(10))
-    );
-    assert_eq!(
-        graph.bindings.get(&InputPort::new(instance_a, 1)),
-        Some(&const_int(12))
-    );
-    assert_eq!(graph.bindings.get(&InputPort::new(instance_a, 2)), None);
-    assert!(
-        !graph.bindings.keys().any(|port| port.node_id == instance_b),
-        "instance B's only binding was on the removed slot"
-    );
-
-    graph.attach_graph_input(graph_id, detached);
-    assert_eq!(
-        graph, original,
-        "attach restores the exact pre-detach graph"
-    );
-}
-
-#[test]
-fn detach_graph_input_at_each_index_severs_that_slot() {
-    // Parameterized: removing slot 0 vs slot 2 must produce different
-    // interfaces and remaps.
-    for (idx, expect_names, expect_a) in [
-        (0usize, ["B", "C"], [11, 12]),
-        (2usize, ["A", "B"], [10, 11]),
-    ] {
-        let fixture = input_fixture();
-        let mut graph = fixture.graph;
-        graph.detach_graph_input(fixture.graph_id, idx);
-        let child = graph.graphs.get(&fixture.graph_id).unwrap();
-        let names: Vec<&str> = child
-            .inputs
-            .iter()
-            .map(|input| input.name.as_str())
-            .collect();
-        assert_eq!(names, expect_names, "detach idx {idx}");
-        for (slot, value) in expect_a.into_iter().enumerate() {
-            assert_eq!(
-                graph
-                    .bindings
-                    .get(&InputPort::new(fixture.instance_a, slot)),
-                Some(&const_int(value)),
-                "detach idx {idx}, instance slot {slot}"
-            );
-        }
-        assert_eq!(
-            graph.bindings.get(&InputPort::new(fixture.instance_a, 2)),
-            None,
-            "detach idx {idx} leaves two instance bindings"
-        );
-    }
-}
-
-#[derive(Debug)]
-struct OutputFixture {
-    graph: Graph,
-    graph_id: GraphId,
-    boundary: NodeId,
-    producer: NodeId,
-    instance: NodeId,
-    consumer_a: NodeId,
-    consumer_b: NodeId,
-}
-
-/// Child interface outputs `[X, Y, Z]` fed by an interior producer; parent
-/// consumers read instance outputs 1 and 2, with pins on both.
-fn output_fixture() -> OutputFixture {
-    let mut child =
-        GraphDef::new("child").outputs([int_output("X"), int_output("Y"), int_output("Z")]);
-    let boundary = child.body.add(Node::new(NodeKind::GraphOutput));
-    let producer = child.body.add(func_node());
-    child
-        .body
-        .set_input_binding(InputPort::new(boundary, 0), Binding::bind(producer, 0));
-    child
-        .body
-        .set_input_binding(InputPort::new(boundary, 1), Binding::bind(producer, 0));
-    child
-        .body
-        .set_input_binding(InputPort::new(boundary, 2), Binding::bind(producer, 1));
-
-    let graph_id = GraphId::unique();
-    let mut graph = Graph::default();
-    let instance = graph.add(Node::graph_instance(&child, GraphLink::Local(graph_id)));
-    let consumer_a = graph.add(func_node());
-    let consumer_b = graph.add(func_node());
-    graph.insert_graph(graph_id, child);
-    graph.set_input_binding(InputPort::new(consumer_a, 0), Binding::bind(instance, 1));
-    graph.set_input_binding(InputPort::new(consumer_b, 0), Binding::bind(instance, 2));
-    OutputFixture {
-        graph,
-        graph_id,
-        boundary,
-        producer,
-        instance,
-        consumer_a,
-        consumer_b,
-    }
-}
-
-#[test]
-fn detach_and_attach_graph_output_round_trip() {
-    let OutputFixture {
-        mut graph,
-        graph_id,
-        boundary,
-        producer,
-        instance,
-        consumer_a,
-        consumer_b,
-    } = output_fixture();
-    let original = graph.clone_verbatim();
-
-    let snapshot = graph.snapshot_graph_output(graph_id, 1).unwrap();
-    let detached = graph.detach_graph_output(graph_id, 1);
-    assert_eq!(
-        snapshot, detached,
-        "snapshot is exactly what detach removes"
-    );
-
-    assert_eq!(detached.spec.name, "Y");
-    assert_eq!(
-        detached.interior,
-        vec![BindingEntry {
-            port: InputPort::new(boundary, 1),
-            binding: Binding::bind(producer, 0),
-        }]
-    );
-    assert_eq!(
-        detached.parent,
-        vec![BindingEntry {
-            port: InputPort::new(consumer_a, 0),
-            binding: Binding::bind(instance, 1),
-        }]
-    );
-
-    // Interface [X, Y, Z] -> [X, Z].
-    let child = graph.graphs.get(&graph_id).unwrap();
-    let names: Vec<&str> = child
-        .outputs
-        .iter()
-        .map(|output| output.name.as_str())
-        .collect();
-    assert_eq!(names, ["X", "Z"]);
-    // Interior: slot 1's binding removed, slot 2's rekeyed to 1.
-    assert_eq!(
-        child.body.bindings.get(&InputPort::new(boundary, 0)),
-        Some(&Binding::bind(producer, 0))
-    );
-    assert_eq!(
-        child.body.bindings.get(&InputPort::new(boundary, 1)),
-        Some(&Binding::bind(producer, 1))
-    );
-    assert_eq!(child.body.bindings.get(&InputPort::new(boundary, 2)), None);
-    // Parent: consumer A severed, consumer B's source shifted 2 -> 1,
-    // pin 1 dropped and pin 2 shifted to 1.
-    assert_eq!(graph.bindings.get(&InputPort::new(consumer_a, 0)), None);
-    assert_eq!(
-        graph.bindings.get(&InputPort::new(consumer_b, 0)),
-        Some(&Binding::bind(instance, 1))
-    );
-    graph.attach_graph_output(graph_id, detached);
-    assert_eq!(
-        graph, original,
-        "attach restores the exact pre-detach graph"
-    );
-}
-
-#[test]
-#[should_panic(expected = "does not sit on the detached input slot")]
-fn attach_rejects_an_instance_binding_off_its_slot() {
-    let fixture = input_fixture();
-    let mut graph = fixture.graph;
-    let mut detached = graph.detach_graph_input(fixture.graph_id, 1);
-    detached.parent[0].port.port_idx = 0;
-    graph.attach_graph_input(fixture.graph_id, detached);
-}
-
-#[test]
-fn a_rejected_attach_leaves_the_graph_untouched() {
-    // Every record check runs before the first mutation, so a malformed
-    // record can't half-apply and strand the interface mid-shift.
-    let fixture = input_fixture();
-    let mut graph = fixture.graph;
-    let mut detached = graph.detach_graph_input(fixture.graph_id, 1);
-    let after_detach = graph.clone_verbatim();
-    detached.parent[0].port.port_idx = 0;
-
-    let refused = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        graph.attach_graph_input(fixture.graph_id, detached);
-    }));
-    assert!(refused.is_err(), "a malformed record must be refused");
-    assert_eq!(graph, after_detach, "refused before touching the graph");
-}
-
-/// The severed interior edge's port was re-bound in the meantime; the
-/// shift can't vacate it (it renumbers boundary-fed *values*, not this
-/// consumer-keyed port), so restoring would destroy an authored wire.
-///
-/// **Refusing is only half the contract — the newer wire has to survive
-/// it.** Restoring first and asserting afterwards meant the overwrite had
-/// already happened when the panic fired: the `Const(99)` authored after
-/// detachment was gone, the entries restored ahead of it stayed applied,
-/// and the parent-side slots had already shifted. A caller that caught
-/// the panic — the editor's undo replay does exactly this — kept a graph
-/// that had been half-attached and had silently lost a binding.
-#[test]
-fn attach_refusing_an_overlapping_binding_leaves_the_graph_untouched() {
-    let fixture = input_fixture();
-    let mut graph = fixture.graph;
-    let detached = graph.detach_graph_input(fixture.graph_id, 1);
-    let child = graph.graphs.get_mut(&fixture.graph_id).unwrap();
-    let overlapping = InputPort::new(fixture.consumer, 1);
-    child.body.set_input_binding(overlapping, const_int(99));
-    let before_attach = graph.clone_verbatim();
-
-    let refused = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        graph.attach_graph_input(fixture.graph_id, detached);
-    }));
-    let message = *refused
-        .expect_err("an overlapping binding must be refused")
-        .downcast::<String>()
-        .expect("assert! panics carry a String");
-    assert!(
-        message.contains("created after detachment"),
-        "unexpected panic: {message}",
-    );
-
-    assert_eq!(
-        graph.graphs[&fixture.graph_id]
-            .body
-            .bindings
-            .get(&overlapping),
-        Some(&const_int(99)),
-        "the binding authored after detachment must survive the refusal",
-    );
-    assert_eq!(
-        graph, before_attach,
-        "a refused attach must not shift slots or restore any entry",
-    );
-}
-
-#[test]
-#[should_panic(expected = "does not read the detached output slot")]
-fn attach_rejects_a_consumer_binding_off_its_slot() {
-    let fixture = output_fixture();
-    let mut graph = fixture.graph;
-    let mut detached = graph.detach_graph_output(fixture.graph_id, 1);
-    detached.parent[0].binding = Binding::bind(fixture.instance, 0);
-    graph.attach_graph_output(fixture.graph_id, detached);
-}
-
-#[test]
-fn snapshot_returns_none_for_missing_graph_or_slot() {
-    let fixture = input_fixture();
-    assert!(
-        fixture
-            .graph
-            .snapshot_graph_input(GraphId::unique(), 0)
-            .is_none(),
-        "unknown graph id"
-    );
-    assert!(
-        fixture
-            .graph
-            .snapshot_graph_input(fixture.graph_id, 3)
-            .is_none(),
-        "index past the interface"
-    );
-    assert!(
-        fixture
-            .graph
-            .snapshot_graph_output(fixture.graph_id, 0)
-            .is_none(),
-        "no authored outputs on the input fixture"
-    );
-}
-
-#[test]
-fn detach_without_boundary_node_still_removes_spec_and_instance_bindings() {
-    // A child that declares an interface but has no GraphInput node —
-    // detach drops the spec and the instance wiring; there is no interior
-    // to touch.
-    let child = GraphDef::new("bare").inputs([int_input("A"), int_input("B")]);
-    let graph_id = GraphId::unique();
-    let mut graph = Graph::default();
-    let instance = graph.add(Node::graph_instance(&child, GraphLink::Local(graph_id)));
-    graph.insert_graph(graph_id, child);
-    graph.set_input_binding(InputPort::new(instance, 0), const_int(1));
-    graph.set_input_binding(InputPort::new(instance, 1), const_int(2));
-    let original = graph.clone_verbatim();
-
-    let detached = graph.detach_graph_input(graph_id, 0);
-    assert!(detached.interior.is_empty());
-    assert_eq!(detached.parent.len(), 1);
-    let child = graph.graphs.get(&graph_id).unwrap();
-    assert_eq!(child.inputs[0].name, "B");
-    assert_eq!(
-        graph.bindings.get(&InputPort::new(instance, 0)),
-        Some(&const_int(2)),
-        "slot 1 shifted down"
-    );
-
-    graph.attach_graph_input(graph_id, detached);
-    assert_eq!(graph, original);
+    let silent = testing::with_stub_lambda(Func::new(FuncId::unique(), "silent"));
+    assert!(silent.ports().events.is_empty());
 }

@@ -39,7 +39,7 @@ impl Default for TestFuncHooks {
 }
 
 pub fn with_stub_lambda(func: Func) -> Func {
-    func.lambda(crate::async_lambda!(|_| { Ok(()) }))
+    func.lambda(async_lambda!(|_| { Ok(()) }))
 }
 
 pub fn test_func_lib(hooks: TestFuncHooks) -> Library {

@@ -16,6 +16,7 @@
 
 use std::sync::OnceLock;
 
+use crate::async_lambda;
 use crate::graph::func::Func;
 
 /// Stable `FuncId` standing in for the run-sinks node in the flattened
@@ -42,7 +43,7 @@ fn build_func() -> Func {
              node — re-evaluating the whole graph. Has no inputs or outputs; \
              wire an event (e.g. a Frame Event) into it to drive periodic runs.",
         )
-        .lambda(crate::async_lambda!(|_| { Ok(()) }))
+        .lambda(async_lambda!(|_| { Ok(()) }))
 }
 
 #[cfg(test)]

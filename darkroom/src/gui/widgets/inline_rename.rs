@@ -89,14 +89,6 @@ impl<'a> InlineRename<'a> {
         self
     }
 
-    /// Pick which side of the min-width box the text hugs. Default
-    /// `HAlign::Left`; pass `HAlign::Right` for labels that live in a
-    /// right-aligned column (e.g. boundary input ports).
-    pub(crate) fn halign(mut self, halign: HAlign) -> Self {
-        self.halign = halign;
-        self
-    }
-
     pub(crate) fn show(self, ui: &mut Ui) -> RenameEvent {
         let Self {
             id,

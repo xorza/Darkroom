@@ -92,7 +92,7 @@ pub struct NodeStatus {
 pub(crate) struct ExecutionOutcome {
     pub(crate) elapsed_secs: f64,
     /// One row per node with something to report — a status, retained RAM, or both.
-    /// Program order, so a node cannot appear twice.
+    /// CompiledGraph order, so a node cannot appear twice.
     pub(crate) nodes: Vec<NodeStatus>,
     /// How many nodes invoked their lambda, successes and failures alike. Counted while
     /// the rows are built rather than derived from them, since a failed node's row no
