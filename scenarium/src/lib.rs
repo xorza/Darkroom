@@ -10,6 +10,8 @@ pub mod testing;
 mod worker;
 
 pub use ::common::CancelToken;
+pub use data::codec::CustomValueCodec;
+pub use data::codec::error::CodecError;
 pub use data::dynamic_value::{CustomValue, DynamicValue, RamUsage};
 pub use data::static_value::StaticValue;
 pub use data::type_system::{DataType, EnumVariants, FsPathConfig, FsPathMode, TypeId};
@@ -17,7 +19,6 @@ pub use elements::math_library::math_library;
 pub use elements::system_library::system_library;
 pub use elements::worker_events_library::{FRAME_EVENT_FUNC_ID, worker_events_library};
 pub use execution::cache::disk_store::DiskStore;
-pub use execution::codec::{CodecError, CustomValueCodec};
 pub use execution::compile::Compiler;
 pub use execution::compile::error::CompileError;
 #[cfg(any(test, feature = "internals"))]
@@ -32,9 +33,9 @@ pub use execution::seeds::RunSeeds;
 pub use graph::Binding;
 pub use graph::BindingEntry;
 pub use graph::Graph;
+pub use graph::NodeRef;
 pub use graph::Subscription;
-pub use graph::definition::{GraphDef, GraphEvent, GraphLink};
-pub use graph::detached::{DetachedGraphInput, DetachedGraphOutput, DetachedNode};
+pub use graph::detached::DetachedNode;
 pub use graph::error::{GraphDeserializeError, GraphValidationError};
 pub use graph::func::error::{FuncValidationError, InvokeError, InvokeResult};
 pub use graph::func::event::{AsyncEvent, AsyncEventFn, EventLambda};
@@ -43,10 +44,10 @@ pub use graph::func::{
     Func, FuncBehavior, FuncEvent, FuncInput, FuncOutput, OutputType, ValueVariant,
 };
 pub use graph::identity::{FuncId, GraphId, InputPort, NodeId, OutputPort};
-pub use graph::interface::{NodeEvents, NodePorts};
+pub use graph::interface::NodePorts;
 pub use graph::node::special::{SPECIAL_NODES, SpecialNode};
 pub use graph::node::{CacheMode, Node, NodeKind};
-pub use graph::{NodeRef, NodeSearch};
+pub use graph::output_types::OutputTypes;
 pub use library::{Library, TypeEntry};
 pub use runtime::any_state::AnyState;
 pub use runtime::context::{ContextManager, ContextStore, ContextType};

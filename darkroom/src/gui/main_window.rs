@@ -17,7 +17,6 @@ use crate::gui::dock::{DockContext, DockUi};
 use crate::gui::graph_toolbar;
 use crate::gui::image_viewer::{self, ImageViewer};
 use crate::gui::menu_bar;
-use crate::gui::node::prepass::emit_graph_opens;
 use crate::gui::preferences_view;
 use crate::gui::scene::Frame;
 use crate::gui::status_bar;
@@ -89,7 +88,6 @@ impl MainWindow {
         if let Some(node) = hits.chip(Chip::PreviewImage) {
             actions.push(UiAction::OpenImageViewer(node));
         }
-        emit_graph_opens(hits, frame, actions);
     }
 
     /// Edit-phase prepass: input-derived graph mutations for the
@@ -160,11 +158,11 @@ impl MainWindow {
                         command = menu_bar::show(ui);
                     });
                 dock.render(ui, dock_cx, out, |ui, tab, out| match tab {
-                    TabRef::Graph(target) => {
+                    TabRef::Graph => {
                         // A graph tab whose projection is missing means the
                         // pane's graph died this frame; `reconcile_with_graph`
                         // prunes the tab before the next one.
-                        let Some(graph) = frame.pane(target) else {
+                        let Some(graph) = frame.pane() else {
                             return;
                         };
                         // Overlay the run/cancel toggle on the canvas's
@@ -173,7 +171,7 @@ impl MainWindow {
                         // below is salted by `target`, so two graph panes
                         // side by side never record the same widget twice.
                         Panel::zstack()
-                            .id_salt(("graph_overlay", target))
+                            .id_salt("graph_overlay")
                             .size((Sizing::FILL, Sizing::FILL))
                             .show(ui, |ui| {
                                 claim(&mut command, || graph_ui.draw(ui, ctx, graph, out));

@@ -20,7 +20,6 @@ pub(crate) mod scene;
 pub(crate) mod status_bar;
 pub(crate) mod theme;
 
-use crate::core::document::GraphRef;
 use crate::core::document::dock::{DockOp, TabGroupId};
 use crate::gui::app::App;
 use palantir::WindowToken;
@@ -40,19 +39,14 @@ pub(crate) type HostHandle = palantir::HostHandle<App>;
 /// clicks, a released tab drag) and applied by `App` in the navigation
 /// phase. Decoupled from `Intent` so the UI layer doesn't need to know
 /// which requests are undoable: the editor wraps `Dock` ops into the
-/// undoable `DocIntent::Dock`. `OpenGraph` adds the tab to a strip directly
+/// undoable `DockOp`. `OpenGraph` adds the tab to a strip directly
 /// (that part isn't undoable) but focuses it through the same recorded
 /// activation, so undo faithfully reverses focus.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum UiAction {
-    /// Open `target` in a tab (or focus its existing tab).
-    OpenGraph(GraphRef),
     /// Record a dock-layout mutation — a tab activation or close from a
     /// strip, or a finished drag's move/split.
     Dock(DockOp),
-    /// Create a fresh empty graph and open it in a new tab (the "+"
-    /// chip at the end of the strip).
-    NewGraph,
     /// Show this preview node's full runtime image in its viewer tab.
     OpenImageViewer(NodeId),
     /// Move dock focus onto this pane, because a press landed inside it.

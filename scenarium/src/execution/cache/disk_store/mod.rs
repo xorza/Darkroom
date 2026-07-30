@@ -9,12 +9,12 @@ use ::common::file_utils::{AtomicFile, PublicationMode};
 use tokio::io::{AsyncWriteExt as _, BufWriter};
 
 use crate::DynamicValue;
+use crate::data::codec;
+use crate::data::codec::Codecs;
 use crate::execution::cache::digest::Digest;
 use crate::execution::cache::slot::OutputSnapshot;
-use crate::execution::codec;
-use crate::execution::codec::Codecs;
+use crate::execution::compiled::ExecutionNode;
 use crate::execution::identity::ExecutionNodeId;
-use crate::execution::program::ExecutionNode;
 use crate::graph::func::lambda::OutputDemand;
 use crate::library::Library;
 use crate::runtime::context::ContextStore;

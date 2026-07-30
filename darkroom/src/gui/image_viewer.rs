@@ -21,7 +21,6 @@ use palantir::{
     Align, Background, Color, Configure, HAlign, ImageFilter, ImageFit, ImageHandle, Panel, Rect,
     Sense, Shape, Size, Sizing, Spacing, Text, TextInput, Ui, VAlign, WidgetId,
 };
-use scenarium::NodeSearch;
 
 use crate::core::document::{Document, Viewport};
 use crate::core::io::preferences::{ViewerBackground, ViewerPreferences};
@@ -422,7 +421,7 @@ impl ImageViewer {
 /// resolve it once per tab per frame rather than once per reader.
 pub(crate) fn node_label(doc: &Document, node_id: NodeId) -> String {
     doc.graph
-        .find(node_id, NodeSearch::Recursive)
+        .find(node_id)
         .map(|n| n.name.as_str())
         .filter(|n| !n.is_empty())
         .unwrap_or("image")
@@ -638,45 +637,11 @@ mod tests {
     use super::*;
     use palantir::Image as AptImage;
     use scenarium::NodeId;
-    use scenarium::{FuncId, GraphDef, GraphId, Node, NodeKind};
 
     fn viewer_node() -> NodeId {
         NodeId::from_u128(1)
     }
 
-    /// A `Func` node called `name` (empty for an unnamed one).
-    fn named_node(name: &str) -> Node {
-        let mut node = Node::new(NodeKind::Func(FuncId::unique()));
-        node.name = name.to_owned();
-        node
-    }
-
-    #[test]
-    fn node_label_names_the_preview_node_at_any_depth() {
-        let mut doc = Document::default();
-        let stack = doc.graph.add(named_node("stack"));
-        let unnamed = doc.graph.add(named_node(""));
-
-        // A node in a nested definition resolves too, so a stale tab from
-        // before the entry-only rule still labels rather than blanking.
-        let def_id = GraphId::unique();
-        let mut def = GraphDef::new("S");
-        let interior = def.body.add(named_node("blur"));
-        doc.graph.insert_graph(def_id, def);
-
-        assert_eq!(node_label(&doc, stack), "stack");
-        assert_eq!(node_label(&doc, interior), "blur");
-        assert_eq!(
-            node_label(&doc, unnamed),
-            "image",
-            "an unnamed node falls back rather than showing a blank chip"
-        );
-        assert_eq!(
-            node_label(&doc, NodeId::unique()),
-            "image",
-            "a node that no longer exists still labels"
-        );
-    }
     #[test]
     fn fit_viewport_centers_and_scales_like_contain() {
         // 400×200 texture in an 800×800 pane: width binds at zoom 2 —

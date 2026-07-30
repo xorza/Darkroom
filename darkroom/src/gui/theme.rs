@@ -634,7 +634,8 @@ palette_struct! {
     /// bare label; the active tab uses `canvas_bg` + a `selection_rect`
     /// accent top-line instead.
     tab_inactive: Color => TAB_INACTIVE,
-    /// Graph (composite instance) chip — accent cyan.
+    /// Accent cyan: the inspect chip, the pinned-inspector outline, and the
+    /// VRAM half of a memory readout.
     badge_graph: Color => BADGE_GRAPH,
     /// Sink chip — error red.
     badge_sink: Color => BADGE_SINK,

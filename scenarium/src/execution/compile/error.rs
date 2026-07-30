@@ -15,7 +15,6 @@ use thiserror::Error;
 
 use crate::execution::identity::ExecutionNodeId;
 use crate::execution::identity::{NodeIdx, OutputAddr};
-use crate::execution::source_map::AttributionValidationError;
 use crate::graph::identity::FuncId;
 
 /// The graph won't compile against the library: a document can be stale
@@ -35,8 +34,6 @@ pub struct CompileError {
 /// while tests can inspect exact validation errors.
 #[derive(Debug, Error)]
 pub(crate) enum CompiledGraphValidationError {
-    #[error(transparent)]
-    Attribution(#[from] AttributionValidationError),
     #[error("execution node {e_node_id:?} has a nil func id")]
     NilFuncId { e_node_id: ExecutionNodeId },
     #[error("execution node {e_node_id:?} references missing func {func_id:?}")]

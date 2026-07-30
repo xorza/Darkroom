@@ -8,12 +8,12 @@ use std::task::{Context, Poll};
 
 use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncSeek, AsyncWrite, AsyncWriteExt as _, ReadBuf};
 
+use crate::data::codec;
 use crate::execution::cache::digest::Digest;
 use crate::execution::cache::disk_store::format::{
     BODY_LEN_OFFSET, DESCRIPTOR_LEN, FIXED_LEN, FORMAT_VERSION, MAGIC, PAYLOAD_LEN_OFFSET,
     covers_outputs, header_len, read, write,
 };
-use crate::execution::codec;
 use crate::graph::func::lambda::OutputDemand;
 use crate::library::{Library, TypeEntry};
 use crate::runtime::context::ContextStore;

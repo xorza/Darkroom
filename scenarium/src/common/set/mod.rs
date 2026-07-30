@@ -32,12 +32,6 @@ impl<I> Default for IdxSet<I> {
 }
 
 impl<I> IdxSet<I> {
-    /// The index space the set spans — the bound every [`contains`](Self::contains)
-    /// and [`insert`](Self::insert) is checked against.
-    pub(crate) fn len(&self) -> usize {
-        self.len
-    }
-
     pub(crate) fn reset(&mut self, len: usize) {
         self.words.clear();
         self.words.resize(len.div_ceil(u64::BITS as usize), 0);

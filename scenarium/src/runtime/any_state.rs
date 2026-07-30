@@ -67,8 +67,8 @@ impl AnyState {
     /// # Panics
     ///
     /// If the slot holds some other type. A populated slot of the wrong
-    /// type is not an empty slot: state is keyed by its owning function
-    /// and version, so a mismatch means two owners are reading one slot
+    /// type is not an empty slot: state is keyed by its owning function,
+    /// so a mismatch means two owners are reading one slot
     /// — a wiring bug in the caller, not a runtime condition. Treating
     /// it as empty would drop whatever the other owner put there (an
     /// RAII watcher guard, an open handle, accumulated progress) and
