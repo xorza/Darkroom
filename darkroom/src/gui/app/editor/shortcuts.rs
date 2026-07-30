@@ -4,14 +4,10 @@
 //! lets them drive the pipeline through `Editor`'s private fields without
 //! widening visibility; they never touch the frame orchestration.
 
-use std::collections::BTreeSet;
+use palantir::{Shortcut, Ui};
 
-use palantir::{Key, Shortcut, Ui};
-
-use crate::core::document::Viewport;
 use crate::core::document::open_document::OpenDocument;
-use crate::core::edit::intent::duplicate::{build_duplicate_intent, remove_selection_intents};
-use crate::core::edit::intent::types::{Intent, UndoStep};
+use crate::core::edit::intent::types::UndoStep;
 use crate::gui::app::commands::AppCommand;
 use crate::gui::app::commands::file::FileCommand;
 use crate::gui::app::commands::run::RunCommand;
@@ -24,8 +20,6 @@ const NEW_SHORTCUT: Shortcut = Shortcut::ctrl('N');
 const OPEN_SHORTCUT: Shortcut = Shortcut::ctrl('O');
 const SAVE_SHORTCUT: Shortcut = Shortcut::ctrl('S');
 const SAVE_AS_SHORTCUT: Shortcut = Shortcut::ctrl_shift('S');
-const RESET_ZOOM_SHORTCUT: Shortcut = Shortcut::ctrl('0');
-const DUPLICATE_SHORTCUT: Shortcut = Shortcut::ctrl('D');
 const RUN_SHORTCUT: Shortcut = Shortcut::ctrl('R');
 /// ⌘Q on macOS, Ctrl+Q elsewhere. Routes through `AppCommand::Shell(ShellCommand::Quit)` →
 /// `App::request_quit`, so it prompts to save when the document is dirty
@@ -60,50 +54,6 @@ impl Editor {
             self.action_stack.redo(&mut open.document, &mut on_step);
         }
         self.absorb_signals(signals);
-    }
-
-    /// Esc-deselect, Ctrl+0 reset-zoom, Ctrl+D duplicate, and
-    /// Delete/Backspace. A keyboard chord has no pane under a pointer to
-    /// name, so it acts on the **focused** graph — the same rule every
-    /// other off-canvas edit follows. Routed through the intent stack (not
-    /// a direct doc write) so they land in the undo history; the `is_noop`
-    /// filter in `drain_intents` drops them when they'd change nothing.
-    /// Chords are sampled unconditionally (see `apply_undo_redo`); the
-    /// `Edit`- and `Escape`-class ones stand down on their own while a
-    /// text field holds focus, and Ctrl+0 / Ctrl+D are `Accel` so they
-    /// keep firing mid-edit. Pushes intents only — their relayout is
-    /// decided by the post-record drain, so this returns nothing.
-    pub(super) fn apply_canvas_shortcuts(&mut self, ui: &mut Ui, open: &OpenDocument) {
-        let reset_zoom = ui.key_pressed(RESET_ZOOM_SHORTCUT);
-        let escape = ui.escape_pressed();
-        let duplicate = ui.key_pressed(DUPLICATE_SHORTCUT);
-        let delete = ui.key_pressed(Shortcut::key(Key::Delete))
-            || ui.key_pressed(Shortcut::key(Key::Backspace));
-        let view = &open.document.main_view;
-        let has_selection = !view.selected.is_empty();
-        let pan = view.viewport.pan;
-        let document = &open.document;
-        let out = &mut self.intents;
-        if escape && has_selection {
-            out.push(Intent::SetSelection {
-                to: BTreeSet::new(),
-            });
-        }
-        if reset_zoom {
-            out.push(Intent::SetViewport {
-                to: Viewport { pan, zoom: 1.0 },
-            });
-        }
-        if duplicate && let Some(intent) = build_duplicate_intent(document) {
-            out.push(intent);
-        }
-        // Delete/Backspace removes the whole selection — one
-        // `RemoveNode` each. `drain_intents` batches a frame's intents into a single
-        // undo entry, so it's one Cmd-Z (mirrors the breaker's
-        // multi-delete).
-        if delete {
-            out.extend(remove_selection_intents(&view.selected));
-        }
     }
 
     /// Map Ctrl+N / Ctrl+O / Ctrl+S / Ctrl+Shift+S / Ctrl+R to a `AppCommand`.
