@@ -40,6 +40,8 @@ mod tests {
     use crate::graph::identity::NodeId;
     use ::common::{SerdeFormat, deserialize, serialize};
 
+    use super::deserialize as deserialize_bindings;
+
     #[derive(Debug, Serialize)]
     #[serde(transparent)]
     struct RawBindings(Vec<(InputPort, Binding)>);
@@ -49,7 +51,7 @@ mod tests {
 
     impl<'de> Deserialize<'de> for CheckedBindings {
         fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-            let _: BTreeMap<InputPort, Binding> = crate::graph::serde::deserialize(deserializer)?;
+            let _: BTreeMap<InputPort, Binding> = deserialize_bindings(deserializer)?;
             Ok(Self)
         }
     }

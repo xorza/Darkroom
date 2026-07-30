@@ -4,21 +4,18 @@ use super::*;
 use crate::execution::compile::Compiler;
 use crate::execution::compile::error::CompileError;
 use crate::execution::error::{Error, RunError};
-use crate::execution::identity::ExecutionEventPort;
 use crate::execution::identity::ExecutionNodeId;
-use crate::execution::program::ExecutionBinding;
 use crate::execution::report::internals::DiscardedReports;
 use crate::graph::Binding;
 use crate::graph::Graph;
-use crate::graph::NodeSearch;
-use crate::graph::definition::GraphDef;
 use crate::graph::func::error::InvokeError;
 use crate::graph::func::lambda::Invocation;
 use crate::graph::func::lambda::OutputDemand;
 use crate::graph::func::lambda::internals;
 use crate::graph::func::{Func, FuncBehavior};
-use crate::graph::identity::{FuncId, GraphId, InputPort, NodeId, OutputPort};
-use crate::graph::node::{CacheMode, Node, NodeKind};
+use crate::graph::identity::{FuncId, InputPort, NodeId, OutputPort};
+use crate::graph::node::{CacheMode, Node};
+use crate::graph::output_types::OutputTypes;
 use crate::library::Library;
 use crate::testing::{self, TestFuncHooks, test_func_lib, test_graph};
 use crate::{DataType, DynamicValue, StaticValue};
@@ -28,31 +25,20 @@ use tokio::sync::Mutex;
 type TestResult<T = ()> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
 fn root_execution_node(node_id: NodeId) -> ExecutionNodeId {
-    ExecutionNodeId::from_authoring(&[node_id])
+    ExecutionNodeId::from_node(node_id)
 }
 
 fn execution_node_name<'a>(
     execution_graph: &ExecutionEngine,
     graph: &'a Graph,
-    library: &'a Library,
+    _library: &'a Library,
     e_node_id: ExecutionNodeId,
 ) -> &'a str {
-    let mut attribution = execution_graph
-        .installed
+    let node_id = execution_graph
         .compiled()
         .attribution(e_node_id)
-        .unwrap();
-    let node_id = attribution.next().unwrap();
-    let instances = attribution.collect::<Vec<_>>();
-    let mut current = graph;
-    for instance in instances.iter().rev() {
-        let node = current.find(*instance, NodeSearch::TopLevel).unwrap();
-        let NodeKind::Graph(link) = node.kind else {
-            panic!("an attributed instance is always a graph node");
-        };
-        current = &current.resolve_graph(link, library).unwrap().body;
-    }
-    &current.find(node_id, NodeSearch::TopLevel).unwrap().name
+        .expect("attribution names the authored node");
+    &graph.find(node_id).unwrap().name
 }
 
 fn execution_node_id(
@@ -62,32 +48,11 @@ fn execution_node_id(
     name: &str,
 ) -> Option<ExecutionNodeId> {
     execution_graph
-        .installed
         .compiled()
-        .program
         .e_node_ids
         .iter()
         .copied()
         .find(|&e_node_id| execution_node_name(execution_graph, graph, library, e_node_id) == name)
-}
-
-fn execution_node_ids(
-    execution_graph: &ExecutionEngine,
-    graph: &Graph,
-    library: &Library,
-    name: &str,
-) -> Vec<ExecutionNodeId> {
-    execution_graph
-        .installed
-        .compiled()
-        .program
-        .e_node_ids
-        .iter()
-        .copied()
-        .filter(|&e_node_id| {
-            execution_node_name(execution_graph, graph, library, e_node_id) == name
-        })
-        .collect()
 }
 
 /// Names of the nodes that actually recomputed in the last run, in schedule order.
@@ -105,12 +70,12 @@ fn execution_node_names_in_order(
         .process_order
         .iter()
         .filter(|&&node_idx| {
-            let e_node_id = execution_graph.installed.compiled().program.e_node_ids[node_idx];
+            let e_node_id = execution_graph.compiled().e_node_ids[node_idx];
             execution_graph.schedule.states[node_idx].is_runnable()
                 && execution_graph.node_ran(e_node_id)
         })
         .map(|&node_idx| {
-            let e_node_id = execution_graph.installed.compiled().program.e_node_ids[node_idx];
+            let e_node_id = execution_graph.compiled().e_node_ids[node_idx];
             execution_node_name(execution_graph, graph, library, e_node_id).to_owned()
         })
         .collect()
@@ -138,20 +103,15 @@ fn node(library: &Library, func_name: &str) -> Node {
 
 /// Set input `idx` of the named node's binding in the source graph.
 fn bind(graph: &mut Graph, node_name: &str, idx: usize, binding: impl Into<Option<Binding>>) {
-    let id = graph
-        .find_by_name(node_name, NodeSearch::TopLevel)
-        .unwrap()
-        .id;
+    let id = graph.find_by_name(node_name).unwrap().id;
     graph.set_input_binding(InputPort::new(id, idx), binding);
 }
 
 mod cache_persistence {
     use super::*;
-    use crate::async_lambda;
     use crate::execution::cache::disk_store::DiskStore;
     use crate::execution::report::internals::CollectingReporter;
     use crate::execution::schedule::NodeState;
-    use crate::graph::func::FuncOutput;
     use std::collections::HashSet;
     use std::path::PathBuf;
     use std::sync::Arc;
@@ -159,6 +119,7 @@ mod cache_persistence {
     use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 
     /// A unique temp directory removed on drop, so tests don't collide or leak.
+    #[derive(Debug)]
     struct TempDir(PathBuf);
 
     impl TempDir {
@@ -187,159 +148,9 @@ mod cache_persistence {
         use crate::library::Library;
         let mut engine = ExecutionEngine::default();
         engine
-            .installed
             .cache
             .set_disk_store(DiskStore::new(&Library::default(), Some(dir.0.clone())));
         engine
-    }
-
-    #[tokio::test]
-    async fn function_version_invalidates_ram_and_disk_without_changing_identity() {
-        let dir = TempDir::new("func-version");
-        let calls = Arc::new(AtomicUsize::new(0));
-        let printed = Arc::new(StdMutex::new(Vec::new()));
-        let generator_func_id = FuncId::unique();
-        let make_lib = |result: i64, version: u32| {
-            let invocation_calls = calls.clone();
-            let printed_values = printed.clone();
-            let mut library = test_func_lib(TestFuncHooks {
-                print: Arc::new(move |value| printed_values.lock().unwrap().push(value)),
-                ..default_hooks()
-            });
-            let mut generator = Func::new(generator_func_id, "generate")
-                .category("Test")
-                .pure()
-                .output(FuncOutput::new("V", DataType::Int))
-                .lambda(async_lambda!(move |Invocation { state, outputs, .. }| {
-                    invocation_calls = invocation_calls.clone()
-                } => {
-                    invocation_calls.fetch_add(1, Ordering::SeqCst);
-                    state.set(result);
-                    outputs[0] = StaticValue::Int(result).into();
-                    Ok(())
-                }));
-            generator.version = version;
-            library.add(generator);
-            library
-        };
-
-        let library_v0 = make_lib(1, 0);
-        let mut graph = Graph::default();
-        let mut generator = node(&library_v0, "generate");
-        generator.cache = CacheMode::Both;
-        let generator_id = graph.add(generator);
-        let print_id = graph.add(node(&library_v0, "Print"));
-        graph.set_input_binding(InputPort::new(print_id, 0), Binding::bind(generator_id, 0));
-        let e_node_id = root_execution_node(generator_id);
-
-        let mut engine = disk_engine(&dir);
-        engine.update(&graph, &library_v0).unwrap();
-        let first = engine.execute_sinks().await.unwrap();
-        assert!(first.ran(e_node_id));
-        assert_eq!(
-            engine
-                .installed
-                .cache
-                .disk_store()
-                .store_io
-                .coverage_probes
-                .load(Ordering::Relaxed),
-            0,
-            "a successful invocation publishes after a known reuse miss"
-        );
-        assert_eq!(
-            engine
-                .installed
-                .cache
-                .disk_store()
-                .store_io
-                .publication_attempts
-                .load(Ordering::Relaxed),
-            1
-        );
-
-        engine.store_resident_caches().await;
-        assert_eq!(
-            engine
-                .installed
-                .cache
-                .disk_store()
-                .store_io
-                .coverage_probes
-                .load(Ordering::Relaxed),
-            1,
-            "a maintenance flush probes because it has no reuse verdict"
-        );
-        assert_eq!(
-            engine
-                .installed
-                .cache
-                .disk_store()
-                .store_io
-                .publication_attempts
-                .load(Ordering::Relaxed),
-            1,
-            "the covering blob prevents a redundant maintenance publication"
-        );
-
-        assert_eq!(engine.slot(e_node_id).state.get::<i64>(), Some(&1));
-        engine.update(&graph, &library_v0).unwrap();
-        assert_eq!(
-            engine.slot(e_node_id).state.get::<i64>(),
-            Some(&1),
-            "a same-version reinstall keeps node state"
-        );
-
-        let library_v1 = make_lib(2, 1);
-        engine.update(&graph, &library_v1).unwrap();
-        assert!(
-            engine.slot(e_node_id).state.is_none(),
-            "a version bump drops the predecessor's state"
-        );
-        let changed = engine.execute_sinks().await.unwrap();
-        assert!(
-            changed.ran(e_node_id),
-            "a version change must reject both the resident value and old disk blob"
-        );
-        assert_eq!(calls.load(Ordering::SeqCst), 2);
-        assert_eq!(*printed.lock().unwrap(), vec![1, 2]);
-        assert_eq!(
-            engine.slot(e_node_id).state.get::<i64>(),
-            Some(&2),
-            "the new implementation owns freshly written state"
-        );
-        assert_eq!(
-            engine
-                .installed
-                .cache
-                .disk_store()
-                .store_io
-                .coverage_probes
-                .load(Ordering::Relaxed),
-            1,
-            "the executor does not add a store probe after the changed digest misses"
-        );
-        assert_eq!(
-            engine
-                .installed
-                .cache
-                .disk_store()
-                .store_io
-                .publication_attempts
-                .load(Ordering::Relaxed),
-            2
-        );
-        drop(engine);
-
-        let mut reopened = disk_engine(&dir);
-        reopened.update(&graph, &library_v1).unwrap();
-        let reused = reopened.execute_sinks().await.unwrap();
-        assert!(
-            !reused.ran(e_node_id),
-            "the replacement version must be reusable from disk"
-        );
-        assert_eq!(calls.load(Ordering::SeqCst), 2);
-        assert_eq!(*printed.lock().unwrap(), vec![1, 2, 2]);
     }
 
     #[tokio::test]
@@ -370,17 +181,11 @@ mod cache_persistence {
         });
         let mut graph = test_graph();
         for name in ["get_a", "get_b", "sum", "mult"] {
-            let node_id = graph.find_by_name(name, NodeSearch::TopLevel).unwrap().id;
-            graph.find_mut(node_id, NodeSearch::TopLevel).unwrap().cache = CacheMode::Both;
+            let node_id = graph.find_by_name(name).unwrap().id;
+            graph.find_mut(node_id).unwrap().cache = CacheMode::Both;
         }
-        let get_a_id = graph
-            .find_by_name("get_a", NodeSearch::TopLevel)
-            .unwrap()
-            .id;
-        let get_b_id = graph
-            .find_by_name("get_b", NodeSearch::TopLevel)
-            .unwrap()
-            .id;
+        let get_a_id = graph.find_by_name("get_a").unwrap().id;
+        let get_b_id = graph.find_by_name("get_b").unwrap().id;
         let expected_names = ["get_a", "sum", "mult", "Print"];
 
         let mut engine = disk_engine(&dir);
@@ -449,10 +254,7 @@ mod cache_persistence {
                 .message
                 .starts_with(&format!("failed to remove {}:", blocked_path.display()))
         );
-        let mut expected_successes = reopened
-            .installed
-            .compiled()
-            .data_consumer_closure(&[get_a_id]);
+        let mut expected_successes = reopened.compiled().data_consumer_closure(&[get_a_id]);
         expected_successes.retain(|e_node_id| *e_node_id != blocked_eid);
         assert!(
             reopened.slot(blocked_eid).output_values().is_some(),
@@ -494,11 +296,8 @@ mod cache_persistence {
         mult.cache = CacheMode::Disk;
         graph.add(mult);
         graph.add(node(&lib, "Print"));
-        let get_a_id = graph
-            .find_by_name("get_a", NodeSearch::TopLevel)
-            .unwrap()
-            .id;
-        let mult_id = graph.find_by_name("mult", NodeSearch::TopLevel).unwrap().id;
+        let get_a_id = graph.find_by_name("get_a").unwrap().id;
+        let mult_id = graph.find_by_name("mult").unwrap().id;
         bind(&mut graph, "mult", 0, Binding::bind(get_a_id, 0));
         bind(&mut graph, "mult", 1, Binding::bind(get_a_id, 0));
         bind(&mut graph, "Print", 0, Binding::bind(mult_id, 0));
@@ -632,11 +431,8 @@ mod cache_persistence {
         graph.insert(print_mult_id, node(&lib, "Print"));
         let print_direct_id = NodeId::unique();
         graph.insert(print_direct_id, node(&lib, "Print"));
-        let get_a_id = graph
-            .find_by_name("get_a", NodeSearch::TopLevel)
-            .unwrap()
-            .id;
-        let mult_id = graph.find_by_name("mult", NodeSearch::TopLevel).unwrap().id;
+        let get_a_id = graph.find_by_name("get_a").unwrap().id;
+        let mult_id = graph.find_by_name("mult").unwrap().id;
         graph.set_input_binding(InputPort::new(mult_id, 0), Binding::bind(get_a_id, 0));
         graph.set_input_binding(InputPort::new(mult_id, 1), Binding::bind(get_a_id, 0));
         graph.set_input_binding(InputPort::new(print_mult_id, 0), Binding::bind(mult_id, 0));
@@ -704,12 +500,9 @@ mod cache_persistence {
         mult.cache = CacheMode::Both;
         graph.add(mult);
         graph.add(node(&lib, "Print"));
-        let get_a_id = graph
-            .find_by_name("get_a", NodeSearch::TopLevel)
-            .unwrap()
-            .id;
-        let sum_id = graph.find_by_name("sum", NodeSearch::TopLevel).unwrap().id;
-        let mult_id = graph.find_by_name("mult", NodeSearch::TopLevel).unwrap().id;
+        let get_a_id = graph.find_by_name("get_a").unwrap().id;
+        let sum_id = graph.find_by_name("sum").unwrap().id;
+        let mult_id = graph.find_by_name("mult").unwrap().id;
         bind(&mut graph, "sum", 0, Binding::bind(get_a_id, 0));
         bind(&mut graph, "sum", 1, Binding::bind(get_a_id, 0));
         bind(&mut graph, "mult", 0, Binding::bind(sum_id, 0));
@@ -783,7 +576,7 @@ mod cache_persistence {
         );
 
         let empty_dir = TempDir::new("chain-empty");
-        engine.installed.cache.set_disk_store(DiskStore::new(
+        engine.cache.set_disk_store(DiskStore::new(
             &Library::default(),
             Some(empty_dir.0.clone()),
         ));
@@ -837,15 +630,9 @@ mod cache_persistence {
         mult.cache = CacheMode::Disk;
         graph.add(mult);
         graph.add(node(&lib, "Print"));
-        let get_a_id = graph
-            .find_by_name("get_a", NodeSearch::TopLevel)
-            .unwrap()
-            .id;
-        let mult_id = graph.find_by_name("mult", NodeSearch::TopLevel).unwrap().id;
-        let print_id = graph
-            .find_by_name("Print", NodeSearch::TopLevel)
-            .unwrap()
-            .id;
+        let get_a_id = graph.find_by_name("get_a").unwrap().id;
+        let mult_id = graph.find_by_name("mult").unwrap().id;
+        let print_id = graph.find_by_name("Print").unwrap().id;
         bind(&mut graph, "mult", 0, Binding::bind(get_a_id, 0));
         bind(&mut graph, "mult", 1, Binding::bind(get_a_id, 0));
         bind(&mut graph, "Print", 0, Binding::bind(mult_id, 0));
@@ -860,7 +647,6 @@ mod cache_persistence {
         let mut engine = disk_engine(&dir);
         engine.update(&graph, &make_lib()).unwrap();
         engine
-            .installed
             .cache
             .disk_store()
             .corrupt_payload(root_execution_node(mult_id), 1);
@@ -916,12 +702,9 @@ mod cache_persistence {
         mult.cache = CacheMode::Both;
         graph.add(mult);
         graph.add(node(&lib, "Print"));
-        let get_a_id = graph
-            .find_by_name("get_a", NodeSearch::TopLevel)
-            .unwrap()
-            .id;
-        let sum_id = graph.find_by_name("sum", NodeSearch::TopLevel).unwrap().id;
-        let mult_id = graph.find_by_name("mult", NodeSearch::TopLevel).unwrap().id;
+        let get_a_id = graph.find_by_name("get_a").unwrap().id;
+        let sum_id = graph.find_by_name("sum").unwrap().id;
+        let mult_id = graph.find_by_name("mult").unwrap().id;
         bind(&mut graph, "sum", 0, Binding::bind(get_a_id, 0));
         bind(&mut graph, "sum", 1, Binding::bind(get_a_id, 0));
         bind(&mut graph, "mult", 0, Binding::bind(sum_id, 0));
@@ -970,7 +753,7 @@ mod cache_persistence {
 
         // An empty replacement store proves the later hit comes from retained RAM, not disk.
         let empty_dir = TempDir::new("both-retained-empty");
-        engine.installed.cache.set_disk_store(DiskStore::new(
+        engine.cache.set_disk_store(DiskStore::new(
             &Library::default(),
             Some(empty_dir.0.clone()),
         ));
@@ -1020,11 +803,8 @@ mod cache_persistence {
         mult.cache = mode;
         graph.add(mult);
         graph.add(node(&lib, "Print"));
-        let get_a_id = graph
-            .find_by_name("get_a", NodeSearch::TopLevel)
-            .unwrap()
-            .id;
-        let mult_id = graph.find_by_name("mult", NodeSearch::TopLevel).unwrap().id;
+        let get_a_id = graph.find_by_name("get_a").unwrap().id;
+        let mult_id = graph.find_by_name("mult").unwrap().id;
         bind(&mut graph, "mult", 0, Binding::bind(get_a_id, 0));
         bind(&mut graph, "mult", 1, Binding::bind(get_a_id, 0));
         bind(&mut graph, "Print", 0, Binding::bind(mult_id, 0));
@@ -1146,12 +926,9 @@ mod cache_persistence {
         b.cache = CacheMode::Disk;
         graph.add(b);
         graph.add(node(&lib, "Print"));
-        let get_a_id = graph
-            .find_by_name("get_a", NodeSearch::TopLevel)
-            .unwrap()
-            .id;
-        let a_id = graph.find_by_name("sum", NodeSearch::TopLevel).unwrap().id;
-        let b_id = graph.find_by_name("mult", NodeSearch::TopLevel).unwrap().id;
+        let get_a_id = graph.find_by_name("get_a").unwrap().id;
+        let a_id = graph.find_by_name("sum").unwrap().id;
+        let b_id = graph.find_by_name("mult").unwrap().id;
         bind(&mut graph, "sum", 0, Binding::bind(get_a_id, 0));
         bind(&mut graph, "sum", 1, Binding::bind(get_a_id, 0));
         bind(&mut graph, "mult", 0, Binding::bind(a_id, 0));
@@ -1212,7 +989,7 @@ mod cache_persistence {
             mult.cache = mode;
             graph.insert(NodeId::from_u128(1), mult);
             graph.insert(NodeId::from_u128(2), node(&lib, "Print"));
-            let mult_id = graph.find_by_name("mult", NodeSearch::TopLevel).unwrap().id;
+            let mult_id = graph.find_by_name("mult").unwrap().id;
             bind(&mut graph, "mult", 0, Binding::Const(StaticValue::Int(a)));
             bind(&mut graph, "mult", 1, Binding::Const(StaticValue::Int(b)));
             bind(&mut graph, "Print", 0, Binding::bind(mult_id, 0));
@@ -1290,7 +1067,7 @@ mod cache_persistence {
         mult.cache = CacheMode::Disk;
         graph.add(mult);
         graph.add(node(&lib, "Print"));
-        let mult_id = graph.find_by_name("mult", NodeSearch::TopLevel).unwrap().id;
+        let mult_id = graph.find_by_name("mult").unwrap().id;
         bind(&mut graph, "mult", 0, Binding::Const(StaticValue::Int(2)));
         bind(&mut graph, "mult", 1, Binding::Const(StaticValue::Int(3)));
         bind(&mut graph, "Print", 0, Binding::bind(mult_id, 0));
@@ -1317,7 +1094,7 @@ mod cache_persistence {
             mult.cache = mode;
             graph.insert(NodeId::from_u128(1), mult);
             graph.insert(NodeId::from_u128(2), node(&lib, "Print"));
-            let mult_id = graph.find_by_name("mult", NodeSearch::TopLevel).unwrap().id;
+            let mult_id = graph.find_by_name("mult").unwrap().id;
             bind(&mut graph, "mult", 0, Binding::Const(StaticValue::Int(2)));
             bind(&mut graph, "mult", 1, Binding::Const(StaticValue::Int(3)));
             bind(&mut graph, "Print", 0, Binding::bind(mult_id, 0));
@@ -1359,7 +1136,7 @@ mod cache_persistence {
             mult.cache = CacheMode::Disk;
             graph.insert(NodeId::from_u128(1), mult);
             graph.insert(NodeId::from_u128(2), node(&lib, "Print"));
-            let mult_id = graph.find_by_name("mult", NodeSearch::TopLevel).unwrap().id;
+            let mult_id = graph.find_by_name("mult").unwrap().id;
             bind(&mut graph, "mult", 0, Binding::Const(StaticValue::Int(a)));
             bind(&mut graph, "mult", 1, Binding::Const(StaticValue::Int(b)));
             bind(&mut graph, "Print", 0, Binding::bind(mult_id, 0));
@@ -1422,16 +1199,13 @@ mod cache_persistence {
         mult.cache = CacheMode::Disk;
         graph.insert(NodeId::from_u128(2), mult);
         graph.insert(NodeId::from_u128(3), node(&lib, "Print"));
-        let get_a_id = graph
-            .find_by_name("get_a", NodeSearch::TopLevel)
-            .unwrap()
-            .id;
-        let mult_id = graph.find_by_name("mult", NodeSearch::TopLevel).unwrap().id;
+        let get_a_id = graph.find_by_name("get_a").unwrap().id;
+        let mult_id = graph.find_by_name("mult").unwrap().id;
         bind(&mut graph, "mult", 0, Binding::bind(get_a_id, 0));
         bind(&mut graph, "mult", 1, Binding::bind(get_a_id, 0));
         bind(&mut graph, "Print", 0, Binding::bind(mult_id, 0));
 
-        let mult_id = graph.find_by_name("mult", NodeSearch::TopLevel).unwrap().id;
+        let mult_id = graph.find_by_name("mult").unwrap().id;
         let ran = |s: &ExecutionOutcome, id: NodeId| s.ran(root_execution_node(id));
 
         // Cold run: mult computes and stores its blob.
@@ -1519,11 +1293,8 @@ mod cache_persistence {
         sum.cache = CacheMode::Disk;
         graph.add(sum);
         graph.add(node(&lib, "Print"));
-        let get_a_id = graph
-            .find_by_name("get_a", NodeSearch::TopLevel)
-            .unwrap()
-            .id;
-        let sum_id = graph.find_by_name("sum", NodeSearch::TopLevel).unwrap().id;
+        let get_a_id = graph.find_by_name("get_a").unwrap().id;
+        let sum_id = graph.find_by_name("sum").unwrap().id;
         bind(&mut graph, "sum", 0, Binding::bind(get_a_id, 0));
         bind(&mut graph, "sum", 1, Binding::bind(get_a_id, 0));
         bind(&mut graph, "Print", 0, Binding::bind(sum_id, 0));
@@ -1630,8 +1401,7 @@ mod cache_persistence {
 
         let engine_with = |lib: Library| {
             let mut eg = ExecutionEngine::default();
-            eg.installed
-                .cache
+            eg.cache
                 .set_disk_store(DiskStore::new(&lib, Some(dir.0.clone())));
             eg
         };
@@ -1687,11 +1457,8 @@ mod cache_persistence {
         mult.cache = CacheMode::Disk;
         graph.add(mult);
         graph.add(node(&library, "Print"));
-        let get_b_id = graph
-            .find_by_name("get_b", NodeSearch::TopLevel)
-            .unwrap()
-            .id;
-        let mult_id = graph.find_by_name("mult", NodeSearch::TopLevel).unwrap().id;
+        let get_b_id = graph.find_by_name("get_b").unwrap().id;
+        let mult_id = graph.find_by_name("mult").unwrap().id;
         bind(&mut graph, "mult", 0, Binding::bind(get_b_id, 0));
         bind(&mut graph, "mult", 1, Binding::bind(get_b_id, 0));
         bind(&mut graph, "Print", 0, Binding::bind(mult_id, 0));
@@ -1726,11 +1493,8 @@ mod cache_persistence {
         graph.add(node(&library, "get_a"));
         graph.add(node(&library, "mult"));
         graph.add(node(&library, "Print"));
-        let get_a_id = graph
-            .find_by_name("get_a", NodeSearch::TopLevel)
-            .unwrap()
-            .id;
-        let mult_id = graph.find_by_name("mult", NodeSearch::TopLevel).unwrap().id;
+        let get_a_id = graph.find_by_name("get_a").unwrap().id;
+        let mult_id = graph.find_by_name("mult").unwrap().id;
         bind(&mut graph, "mult", 0, Binding::bind(get_a_id, 0));
         bind(&mut graph, "mult", 1, Binding::bind(get_a_id, 0));
         bind(&mut graph, "Print", 0, Binding::bind(mult_id, 0));
@@ -1765,14 +1529,12 @@ mod cache_persistence {
         use async_trait::async_trait;
         use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
 
-        use crate::CustomValueCodec;
         use crate::async_lambda;
+        use crate::data::codec::error::CodecError;
         use crate::graph::func::{Func, FuncOutput};
         use crate::library::{Library, TypeEntry};
         use crate::runtime::context::{ContextStore, ContextType};
-        use crate::{CustomValue, TypeId};
-
-        type CodecError = Box<dyn std::error::Error + Send + Sync>;
+        use crate::{CustomValue, CustomValueCodec, TypeId};
 
         /// Decode-side context resource: proves a codec can reach the runtime
         /// store while reconstructing a value read from disk.
@@ -1867,7 +1629,6 @@ mod cache_persistence {
         let disk_engine_with_lib = |dir: &TempDir, library: Library| {
             let mut engine = ExecutionEngine::default();
             engine
-                .installed
                 .cache
                 .set_disk_store(DiskStore::new(&library, Some(dir.0.clone())));
             engine
@@ -1954,6 +1715,7 @@ mod resource_binds {
     const CAPTURE: &str = "1a9629a9-dfbe-4665-b2b9-6f0d5c21f290";
 
     /// A temp file path removed on drop.
+    #[derive(Debug)]
     struct TempFile(PathBuf);
     impl Drop for TempFile {
         fn drop(&mut self) {
@@ -1970,6 +1732,7 @@ mod resource_binds {
     }
 
     /// A unique temp directory removed on drop (the disk store root for the reopen test).
+    #[derive(Debug)]
     struct TempDir(PathBuf);
     impl TempDir {
         fn new(tag: &str) -> Self {
@@ -1993,7 +1756,6 @@ mod resource_binds {
         use crate::execution::cache::disk_store::DiskStore;
         let mut engine = ExecutionEngine::default();
         engine
-            .installed
             .cache
             .set_disk_store(DiskStore::new(&Library::default(), Some(dir.0.clone())));
         engine
@@ -2084,6 +1846,7 @@ mod resource_binds {
         lib
     }
 
+    #[derive(Debug)]
     struct PathFixture {
         graph: Graph,
         make_id: NodeId,
@@ -2106,18 +1869,9 @@ mod resource_binds {
         annotate.cache = mode;
         graph.insert(NodeId::from_u128(4), annotate);
         graph.insert(NodeId::from_u128(3), node(lib, "capture"));
-        let make_id = graph
-            .find_by_name("make_path", NodeSearch::TopLevel)
-            .unwrap()
-            .id;
-        let load_id = graph
-            .find_by_name("load_text", NodeSearch::TopLevel)
-            .unwrap()
-            .id;
-        let annotate_id = graph
-            .find_by_name("annotate", NodeSearch::TopLevel)
-            .unwrap()
-            .id;
+        let make_id = graph.find_by_name("make_path").unwrap().id;
+        let load_id = graph.find_by_name("load_text").unwrap().id;
+        let annotate_id = graph.find_by_name("annotate").unwrap().id;
         bind(
             &mut graph,
             "make_path",
@@ -2381,18 +2135,13 @@ mod graph_structure {
             ["sum", "mult", "Print"]
         );
 
-        assert_eq!(
-            execution_graph.installed.compiled().program.e_nodes.len(),
-            5
-        );
+        assert_eq!(execution_graph.compiled().e_nodes.len(), 5);
         assert_eq!(execution_graph.schedule.process_order.len(), 5);
+        assert!((0..execution_graph.compiled().e_nodes.len()).all(|i| {
+            !execution_graph.schedule.states[NodeIdx(i as u32)].missing_required_inputs()
+        }));
         assert!(
-            (0..execution_graph.installed.compiled().program.e_nodes.len())
-                .all(|i| !execution_graph.schedule.states[NodeIdx(i as u32)]
-                    .missing_required_inputs())
-        );
-        assert!(
-            (0..execution_graph.installed.compiled().program.e_nodes.len())
+            (0..execution_graph.compiled().e_nodes.len())
                 .all(|i| execution_graph.schedule.states[NodeIdx(i as u32)].is_runnable())
         );
 
@@ -2424,14 +2173,7 @@ mod graph_structure {
         assert_eq!(execution_graph.node_output_readers(sum), &[1]);
         assert_eq!(execution_graph.node_output_readers(mult), &[1]);
 
-        assert!(
-            execution_graph
-                .installed
-                .compiled()
-                .program
-                .by_id(print)
-                .sink
-        );
+        assert!(execution_graph.compiled().by_id(print).sink);
 
         Ok(())
     }
@@ -2445,20 +2187,8 @@ mod graph_structure {
         execution_graph.update(&graph, &library).unwrap();
 
         // Rewire mult to get_a and get_b directly (bypassing sum)
-        let binding1 = Binding::bind(
-            graph
-                .find_by_name("get_a", NodeSearch::TopLevel)
-                .unwrap()
-                .id,
-            0,
-        );
-        let binding2 = Binding::bind(
-            graph
-                .find_by_name("get_b", NodeSearch::TopLevel)
-                .unwrap()
-                .id,
-            0,
-        );
+        let binding1 = Binding::bind(graph.find_by_name("get_a").unwrap().id, 0);
+        let binding2 = Binding::bind(graph.find_by_name("get_b").unwrap().id, 0);
         bind(&mut graph, "mult", 0, binding1);
         bind(&mut graph, "mult", 1, binding2);
 
@@ -2502,10 +2232,7 @@ mod graph_structure {
 
         // A good compile establishes a program.
         execution_graph.update(&graph, &library).unwrap();
-        assert_eq!(
-            execution_graph.installed.compiled().program.e_nodes.len(),
-            5
-        );
+        assert_eq!(execution_graph.compiled().e_nodes.len(), 5);
 
         // Re-compiling the same graph against a library that defines none of
         // its funcs is rejected with a message naming a missing func.
@@ -2519,10 +2246,7 @@ mod graph_structure {
 
         // The rejection happens before any mutation, so the prior program is
         // left intact rather than torn down.
-        assert_eq!(
-            execution_graph.installed.compiled().program.e_nodes.len(),
-            5
-        );
+        assert_eq!(execution_graph.compiled().e_nodes.len(), 5);
     }
 }
 
@@ -2548,21 +2272,18 @@ mod missing_inputs {
 
         // get_b has no missing inputs (no inputs at all)
         assert!(
-            !execution_graph.schedule.states
-                [execution_graph.installed.compiled().program.e_node_index[&get_b]]
+            !execution_graph.schedule.states[execution_graph.compiled().e_node_index[&get_b]]
                 .missing_required_inputs()
         );
         // sum is missing input[0], propagates to downstream mult and print — so none of
         // them is runnable (get_b, a source with satisfied inputs, still is).
         for gated in [sum, mult, print] {
             assert!(
-                execution_graph.schedule.states
-                    [execution_graph.installed.compiled().program.e_node_index[&gated]]
+                execution_graph.schedule.states[execution_graph.compiled().e_node_index[&gated]]
                     .missing_required_inputs()
             );
             assert!(
-                !execution_graph.schedule.states
-                    [execution_graph.installed.compiled().program.e_node_index[&gated]]
+                !execution_graph.schedule.states[execution_graph.compiled().e_node_index[&gated]]
                     .is_runnable()
             );
         }
@@ -2598,13 +2319,11 @@ mod missing_inputs {
         // the gated chain isn't runnable (its sources still are).
         for gated in [sum, mult, print] {
             assert!(
-                execution_graph.schedule.states
-                    [execution_graph.installed.compiled().program.e_node_index[&gated]]
+                execution_graph.schedule.states[execution_graph.compiled().e_node_index[&gated]]
                     .missing_required_inputs()
             );
             assert!(
-                !execution_graph.schedule.states
-                    [execution_graph.installed.compiled().program.e_node_index[&gated]]
+                !execution_graph.schedule.states[execution_graph.compiled().e_node_index[&gated]]
                     .is_runnable()
             );
         }
@@ -2634,13 +2353,11 @@ mod missing_inputs {
         let print = execution_node_id(&execution_graph, &graph, &library, "Print").unwrap();
 
         assert!(
-            !execution_graph.schedule.states
-                [execution_graph.installed.compiled().program.e_node_index[&mult]]
+            !execution_graph.schedule.states[execution_graph.compiled().e_node_index[&mult]]
                 .missing_required_inputs()
         );
         assert!(
-            !execution_graph.schedule.states
-                [execution_graph.installed.compiled().program.e_node_index[&print]]
+            !execution_graph.schedule.states[execution_graph.compiled().e_node_index[&print]]
                 .missing_required_inputs()
         );
         assert!(
@@ -2660,11 +2377,8 @@ mod missing_inputs {
         let mut graph = test_graph();
         let mut library = test_func_lib(default_hooks());
 
-        let get_b_id = graph
-            .find_by_name("get_b", NodeSearch::TopLevel)
-            .unwrap()
-            .id;
-        let sum_id = graph.find_by_name("sum", NodeSearch::TopLevel).unwrap().id;
+        let get_b_id = graph.find_by_name("get_b").unwrap().id;
+        let sum_id = graph.find_by_name("sum").unwrap().id;
 
         // sum's required input[0] unbound → sum missing-required → gated.
         bind(&mut graph, "sum", 0, None);
@@ -2686,8 +2400,7 @@ mod missing_inputs {
         // never runs, so it never reads that value.
         let mult = execution_node_id(&execution_graph, &graph, &library, "mult").unwrap();
         assert!(
-            execution_graph.schedule.states
-                [execution_graph.installed.compiled().program.e_node_index[&mult]]
+            execution_graph.schedule.states[execution_graph.compiled().e_node_index[&mult]]
                 .missing_required_inputs()
         );
         assert!(
@@ -2711,11 +2424,8 @@ mod disabled_nodes {
         let mut graph = test_graph();
         let library = test_func_lib(TestFuncHooks::default());
 
-        let sum_id = graph.find_by_name("sum", NodeSearch::TopLevel).unwrap().id;
-        graph
-            .find_mut(sum_id, NodeSearch::TopLevel)
-            .unwrap()
-            .disabled = true;
+        let sum_id = graph.find_by_name("sum").unwrap().id;
+        graph.find_mut(sum_id).unwrap().disabled = true;
 
         let mut execution_graph = ExecutionEngine::default();
         execution_graph.update(&graph, &library).unwrap();
@@ -2723,21 +2433,15 @@ mod disabled_nodes {
 
         let sum = execution_node_id(&execution_graph, &graph, &library, "sum").unwrap();
         assert!(
-            execution_graph
-                .installed
-                .compiled()
-                .program
-                .by_id(sum)
-                .disabled,
+            execution_graph.compiled().by_id(sum).disabled,
             "the compiled node retains its authored disabled state"
         );
         assert!(
             !execution_graph
                 .schedule
                 .process_order
-                .contains(&execution_graph.installed.compiled().program.e_node_index[&sum])
-                && execution_graph.schedule.states
-                    [execution_graph.installed.compiled().program.e_node_index[&sum]]
+                .contains(&execution_graph.compiled().e_node_index[&sum])
+                && execution_graph.schedule.states[execution_graph.compiled().e_node_index[&sum]]
                     == NodeState::Disabled,
             "an unseeded disabled node stays structural but outside execution order"
         );
@@ -2748,18 +2452,15 @@ mod disabled_nodes {
         let mult = execution_node_id(&execution_graph, &graph, &library, "mult").unwrap();
         let print = execution_node_id(&execution_graph, &graph, &library, "Print").unwrap();
         assert!(
-            !execution_graph.schedule.states
-                [execution_graph.installed.compiled().program.e_node_index[&get_b]]
+            !execution_graph.schedule.states[execution_graph.compiled().e_node_index[&get_b]]
                 .missing_required_inputs()
         );
         assert!(
-            execution_graph.schedule.states
-                [execution_graph.installed.compiled().program.e_node_index[&mult]]
+            execution_graph.schedule.states[execution_graph.compiled().e_node_index[&mult]]
                 .missing_required_inputs()
         );
         assert!(
-            execution_graph.schedule.states
-                [execution_graph.installed.compiled().program.e_node_index[&print]]
+            execution_graph.schedule.states[execution_graph.compiled().e_node_index[&print]]
                 .missing_required_inputs()
         );
 
@@ -2775,11 +2476,8 @@ mod disabled_nodes {
         let mut graph = test_graph();
         let mut library = test_func_lib(TestFuncHooks::default());
 
-        let sum_id = graph.find_by_name("sum", NodeSearch::TopLevel).unwrap().id;
-        graph
-            .find_mut(sum_id, NodeSearch::TopLevel)
-            .unwrap()
-            .disabled = true;
+        let sum_id = graph.find_by_name("sum").unwrap().id;
+        graph.find_mut(sum_id).unwrap().disabled = true;
         mutate_func(&mut library, "mult", |func| {
             func.inputs[0].required = false;
         });
@@ -2825,16 +2523,13 @@ mod disabled_nodes {
         });
 
         let mut graph = test_graph();
-        let id = |name: &str| graph.find_by_name(name, NodeSearch::TopLevel).unwrap().id;
+        let id = |name: &str| graph.find_by_name(name).unwrap().id;
         let (get_a_id, sum_id, mult_id) = (id("get_a"), id("sum"), id("mult"));
         // A (required) from a live producer, B (optional) from the one
         // about to be disabled.
         graph.set_input_binding(InputPort::new(mult_id, 0), Binding::bind(get_a_id, 0));
         graph.set_input_binding(InputPort::new(mult_id, 1), Binding::bind(sum_id, 0));
-        graph
-            .find_mut(sum_id, NodeSearch::TopLevel)
-            .unwrap()
-            .disabled = true;
+        graph.find_mut(sum_id).unwrap().disabled = true;
 
         let mut execution_graph = ExecutionEngine::default();
         execution_graph.update(&graph, &library).unwrap();
@@ -2992,10 +2687,7 @@ mod const_bindings {
         let mut graph = test_graph();
         let mut execution_graph = ExecutionEngine::default();
 
-        let get_b_id = graph
-            .find_by_name("get_b", NodeSearch::TopLevel)
-            .unwrap()
-            .id;
+        let get_b_id = graph.find_by_name("get_b").unwrap().id;
         bind(&mut graph, "sum", 0, Binding::Const(33.into()));
 
         execution_graph.update(&graph, &library).unwrap();
@@ -3109,7 +2801,7 @@ mod behavior {
 
         // Cached mult must still hold the correct product, not a stale value:
         // sum = get_a(1) + get_b(11) = 12; mult = 12 * get_b(11) = 132
-        let mult_id = graph.find_by_name("mult", NodeSearch::TopLevel).unwrap().id;
+        let mult_id = graph.find_by_name("mult").unwrap().id;
         let vals = execution_graph.get_argument_values(&mult_id).unwrap();
         assert!(matches!(
             vals.outputs[0],
@@ -3153,9 +2845,7 @@ mod behavior {
                 .iter()
                 .map(|n| {
                     (
-                        root_execution_node(
-                            graph.find_by_name(n, NodeSearch::TopLevel).unwrap().id,
-                        ),
+                        root_execution_node(graph.find_by_name(n).unwrap().id),
                         n.to_string(),
                     )
                 })
@@ -3439,291 +3129,6 @@ mod behavior {
     }
 }
 
-mod composite_behavior {
-    use super::*;
-    use crate::graph::Graph;
-    use crate::graph::definition::GraphLink;
-    use crate::graph::func::FuncOutput;
-    use crate::graph::node::NodeKind;
-
-    fn func_node(library: &Library, func_name: &str, node_name: &str) -> Node {
-        let id = library.by_name(func_name).unwrap().id;
-        let mut n = Node::new(NodeKind::Func(id));
-        n.name = node_name.to_string();
-        n
-    }
-
-    fn int_output(name: &str) -> FuncOutput {
-        FuncOutput::new(name, DataType::Int)
-    }
-
-    /// A graph with no inputs and one output, whose interior is the
-    /// impure `get_b` (named `inner_name`) feeding `GraphOutput[0]`.
-    fn impure_output_def(library: &Library, name: &str, inner_name: &str) -> GraphDef {
-        let inner = func_node(library, "get_b", inner_name);
-        let so = Node::new(NodeKind::GraphOutput);
-        let mut graph = GraphDef::new(name).output(int_output("Out"));
-        let inner_id = graph.body.add(inner);
-        let so_id = graph.body.add(so);
-        graph
-            .body
-            .set_input_binding(InputPort::new(so_id, 0), Binding::bind(inner_id, 0));
-        graph
-    }
-
-    /// Main graph: one instance of `def` whose output feeds a sink `print`.
-    fn main_with(library: &Library, def: GraphDef) -> Graph {
-        main_with_id(library, GraphId::unique(), def)
-    }
-
-    fn main_with_id(library: &Library, def_id: GraphId, def: GraphDef) -> Graph {
-        let mut graph = Graph::default();
-        graph.insert_graph(def_id, def.clone_verbatim());
-        let inst = graph.add_graph_node(&def, GraphLink::Local(def_id));
-        let p = func_node(library, "Print", "p");
-        let p_id = graph.add(p);
-        graph.set_input_binding(InputPort::new(p_id, 0), Binding::bind(inst, 0));
-        graph
-    }
-
-    /// `(name in execute_order)` after a second prepare, with a cached
-    /// output already present for that node — i.e. "would it re-run?".
-    async fn reruns_with_cache(graph: &Graph, library: &Library, name: &str) -> bool {
-        let mut eg = ExecutionEngine::default();
-        eg.update(graph, library).unwrap();
-        eg.prepare_execution(true, false, &[]).await.unwrap();
-        assert!(
-            execution_node_names_in_order(&eg, graph, library).contains(&name.to_string()),
-            "{name} should run on the first prepare"
-        );
-        let e_node_id = execution_node_id(&eg, graph, library, name).unwrap();
-        eg.set_output_values(e_node_id, vec![DynamicValue::Static(StaticValue::Int(11))]);
-        eg.update(graph, library).unwrap();
-        eg.prepare_execution(true, false, &[]).await.unwrap();
-        execution_node_names_in_order(&eg, graph, library).contains(&name.to_string())
-    }
-
-    #[tokio::test]
-    async fn composite_reruns_impure_interior() {
-        // An impure interior recomputes across a composite boundary like any
-        // impure node — flattening must preserve its impurity.
-        let mut library = test_func_lib(TestFuncHooks::default());
-        mutate_func(&mut library, "get_b", |func| {
-            func.behavior = FuncBehavior::Impure;
-        });
-        let def = impure_output_def(&library, "S", "inner");
-        let graph = main_with(&library, def);
-        assert!(
-            reruns_with_cache(&graph, &library, "inner").await,
-            "impure interior recomputes through a composite"
-        );
-    }
-
-    #[test]
-    fn update_rejects_func_missing_inside_graph() {
-        // The check descends composites: a func only the *interior*
-        // references, absent from the lib, is still caught.
-        let mut library = test_func_lib(TestFuncHooks::default());
-        let def = impure_output_def(&library, "S", "inner");
-        let graph = main_with(&library, def);
-        let get_b = library.by_name("get_b").unwrap().id;
-        library.remove(get_b).unwrap();
-
-        // A `Local` def resolves from the graph itself, so validation reaches
-        // its interior while every top-level func remains resolvable.
-        let mut eg = ExecutionEngine::default();
-        let CompileError { message } = eg.update(&graph, &library).unwrap_err();
-        assert!(
-            message.contains(&format!("{get_b:?}")),
-            "message should name the interior's missing func, got: {message}"
-        );
-    }
-
-    /// A composite's interface is a type contract, and crossing it must
-    /// be gated like any other wire.
-    ///
-    /// The exterior gate checks the consumer against the interface's
-    /// *declared* output type and passes — correctly, the declaration
-    /// says `Int`. Following the hop then ignored that declaration and
-    /// resolved the interior binding raw, so a `String` producer wired to
-    /// a `GraphOutput` port declared `Int` compiled a direct `Bind` into
-    /// the `Int` consumer. Nothing downstream could catch it: the edge
-    /// that would show the mismatch is precisely the one flattening
-    /// dissolves, so the consumer saw an ordinary bound input and the run
-    /// delivered a `String` to a port that declared `Int`.
-    ///
-    /// Degrading to unbound is the documented drift behaviour — a
-    /// required input then surfaces as a missing-input verdict, which is
-    /// visible, rather than a type violation that is not.
-    #[test]
-    fn a_composite_output_bound_to_a_mismatched_interior_flattens_unbound() {
-        let library = test_func_lib(TestFuncHooks::default());
-        let mut string_lib = library;
-        string_lib.add(testing::with_stub_lambda(
-            Func::new("6a5c9a1e-64e7-4d63-9b2f-3a0e1c7d8b45", "make_str")
-                .category("Test")
-                .output(FuncOutput::new("V", DataType::String)),
-        ));
-
-        // The definition declares `Int` out, but wires `make_str` to it.
-        let inner = func_node(&string_lib, "make_str", "producer");
-        let mut def = GraphDef::new("Drifted").output(int_output("Out"));
-        let inner_id = def.body.add(inner);
-        let so_id = def.body.add(Node::new(NodeKind::GraphOutput));
-        def.body
-            .set_input_binding(InputPort::new(so_id, 0), Binding::bind(inner_id, 0));
-
-        // `main_with` binds the instance's output 0 into `Print`'s input.
-        let graph = main_with(&string_lib, def);
-        let compiled = Compiler::default().compile(&graph, &string_lib).unwrap();
-
-        let print_id = graph.find_by_name("p", NodeSearch::TopLevel).unwrap().id;
-        let print = compiled
-            .program
-            .by_id(ExecutionNodeId::from_authoring(&[print_id]));
-        assert!(
-            matches!(
-                compiled.program.inputs[print.inputs][0].binding,
-                ExecutionBinding::None,
-            ),
-            "a boundary wire whose interior type contradicts the declared \
-             port must degrade to unbound, not bind straight through",
-        );
-    }
-
-    #[tokio::test]
-    async fn nested_impure_interior_reruns_through_two_composite_levels() {
-        // A doubly-nested impure node recomputes — flattening preserves its
-        // impurity through two composite levels. (Graph ids are unique
-        // across the tree — validation rejects a repeated map-local id —
-        // so each level carries its own.)
-        let mut library = test_func_lib(TestFuncHooks::default());
-        mutate_func(&mut library, "get_b", |func| {
-            func.behavior = FuncBehavior::Impure;
-        });
-        let inner_def = impure_output_def(&library, "Inner", "deep");
-        let deep_id = inner_def
-            .body
-            .iter()
-            .find(|node| node.name == "deep")
-            .unwrap()
-            .id;
-        let inner_def_id = GraphId::unique();
-        let mut outer_interior = GraphDef::new("Outer").output(int_output("Out"));
-        outer_interior
-            .body
-            .insert_graph(inner_def_id, inner_def.clone_verbatim());
-        let inner_inst = outer_interior
-            .body
-            .add_graph_node(&inner_def, GraphLink::Local(inner_def_id));
-        let so = Node::new(NodeKind::GraphOutput);
-        let so_id = outer_interior.body.add(so);
-        outer_interior
-            .body
-            .set_input_binding(InputPort::new(so_id, 0), Binding::bind(inner_inst, 0));
-        let graph = main_with_id(&library, GraphId::unique(), outer_interior);
-        let outer_inst = graph
-            .iter()
-            .find(|node| matches!(node.kind, NodeKind::Graph(_)))
-            .unwrap()
-            .id;
-        let compiled = Compiler::default().compile(&graph, &library).unwrap();
-        let e_node_id = ExecutionNodeId::from_authoring(&[outer_inst, inner_inst, deep_id]);
-        assert!(compiled.program.e_node_index.contains_key(&e_node_id));
-        assert_eq!(
-            compiled.attribution(e_node_id).unwrap().collect::<Vec<_>>(),
-            vec![deep_id, inner_inst, outer_inst]
-        );
-        assert!(
-            reruns_with_cache(&graph, &library, "deep").await,
-            "doubly-nested impure interior recomputes"
-        );
-    }
-
-    /// An exact execution seed selects one repeated definition occurrence, overrides
-    /// that occurrence's disabled flag for the run, and delivers its addressed value.
-    #[tokio::test]
-    async fn seeding_a_disabled_definition_node_runs_one_exact_instance() {
-        use crate::execution::report::internals::CollectingReporter;
-        use std::sync::atomic::{AtomicUsize, Ordering};
-
-        let get_b_calls = Arc::new(AtomicUsize::new(0));
-        let library = test_func_lib(TestFuncHooks {
-            get_b: Arc::new({
-                let calls = Arc::clone(&get_b_calls);
-                move || {
-                    calls.fetch_add(1, Ordering::Relaxed);
-                    11
-                }
-            }),
-            ..Default::default()
-        });
-
-        // `impure_output_def`'s interior by hand, keeping the interior node's id.
-        let mut inner = func_node(&library, "get_b", "inner");
-        inner.disabled = true;
-        let so = Node::new(NodeKind::GraphOutput);
-        let mut interior = GraphDef::new("S").output(int_output("Out"));
-        let inner_id = interior.body.add(inner);
-        let so_id = interior.body.add(so);
-        interior
-            .body
-            .set_input_binding(InputPort::new(so_id, 0), Binding::bind(inner_id, 0));
-        let graph_id = GraphId::unique();
-        let mut graph = Graph::default();
-        graph.insert_graph(graph_id, interior.clone_verbatim());
-        let first_instance = graph.add_graph_node(&interior, GraphLink::Local(graph_id));
-        let second_instance = graph.add_graph_node(&interior, GraphLink::Local(graph_id));
-        for instance_id in [first_instance, second_instance] {
-            graph
-                .find_mut(instance_id, NodeSearch::TopLevel)
-                .unwrap()
-                .disabled = true;
-        }
-
-        let mut eg = ExecutionEngine::default();
-        eg.update(&graph, &library).unwrap();
-        let first_e_node_id = ExecutionNodeId::from_authoring(&[first_instance, inner_id]);
-        let second_e_node_id = ExecutionNodeId::from_authoring(&[second_instance, inner_id]);
-
-        let mut reporter = CollectingReporter::default();
-        let mut stats = ExecutionOutcome::default();
-        eg.execute(
-            RunSeeds {
-                e_node_ids: vec![first_e_node_id],
-                ..Default::default()
-            },
-            &mut reporter,
-            CancelToken::never(),
-            &mut stats,
-        )
-        .await
-        .unwrap();
-        assert_eq!(get_b_calls.load(Ordering::Relaxed), 1);
-        assert_eq!(stats.ran_node_count, 1);
-
-        assert!(
-            graph
-                .find(inner_id, NodeSearch::Recursive)
-                .unwrap()
-                .disabled,
-            "execution leaves the nested authoring node disabled"
-        );
-        assert!(
-            eg.get_argument_values_at(first_e_node_id)
-                .unwrap()
-                .outputs
-                .is_empty()
-        );
-        assert!(
-            eg.get_argument_values_at(second_e_node_id)
-                .unwrap()
-                .outputs
-                .is_empty()
-        );
-    }
-}
-
 mod cycle_detection {
     use super::*;
 
@@ -3733,7 +3138,7 @@ mod cycle_detection {
         let library = test_func_lib(TestFuncHooks::default());
 
         // Create cycle: sum[0] ← mult (mult already depends on sum)
-        let mult_node_id = graph.find_by_name("mult", NodeSearch::TopLevel).unwrap().id;
+        let mult_node_id = graph.find_by_name("mult").unwrap().id;
         bind(&mut graph, "sum", 0, Binding::bind(mult_node_id, 0));
 
         let mut execution_graph = ExecutionEngine::default();
@@ -3752,6 +3157,66 @@ mod cycle_detection {
     }
 }
 
+mod installation {
+    use super::*;
+    use crate::execution::compile::internals::CompiledGraphBuilder;
+
+    #[test]
+    fn install_holds_one_canonical_artifact_for_the_engine_and_its_cache() {
+        let mut builder = CompiledGraphBuilder::new();
+        builder.insert_node(ExecutionNodeId::unique().node_id());
+        let compiled = builder.build();
+        let mut engine = ExecutionEngine::default();
+
+        engine.install(Arc::clone(&compiled));
+
+        assert!(Arc::ptr_eq(engine.compiled.as_ref().unwrap(), &compiled));
+        engine.validate().unwrap();
+    }
+
+    /// A reinstall re-pairs the slots by stable id against the program being
+    /// left, which the engine supplies — so a node that survives the recompile
+    /// keeps its slot even when its dense index moves.
+    #[test]
+    fn install_carries_slots_across_a_shifted_index_space() {
+        let surviving = ExecutionNodeId::from_u128(2);
+        let build = |ids: &[ExecutionNodeId]| {
+            let mut builder = CompiledGraphBuilder::new();
+            for &id in ids {
+                builder.insert_node(id.node_id());
+            }
+            builder.build()
+        };
+
+        let mut engine = ExecutionEngine::default();
+        engine.install(build(&[ExecutionNodeId::from_u128(1), surviving]));
+        // Index 1 before the recompile: ids place in ascending order.
+        engine.cache[NodeIdx(1)].state.set(17_u32);
+
+        // Node 1 is dropped, so the survivor slides to index 0.
+        engine.install(build(&[surviving, ExecutionNodeId::from_u128(3)]));
+
+        assert_eq!(engine.cache[NodeIdx(0)].state.get::<u32>(), Some(&17));
+        assert!(engine.cache[NodeIdx(1)].state.is_none());
+        engine.validate().unwrap();
+    }
+
+    #[test]
+    fn validation_rejects_a_cache_with_the_wrong_node_count() {
+        let mut builder = CompiledGraphBuilder::new();
+        builder.insert_node(ExecutionNodeId::unique().node_id());
+        let engine = ExecutionEngine {
+            compiled: Some(builder.build()),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            engine.validate().unwrap_err().to_string(),
+            "runtime cache spans 0 nodes, not the compiled program's 1"
+        );
+    }
+}
+
 mod invalidation {
     use super::*;
 
@@ -3764,20 +3229,13 @@ mod invalidation {
         execution_graph.update(&graph, &library).unwrap();
         execution_graph.execute_sinks().await?;
 
-        assert!(
-            !execution_graph
-                .installed
-                .compiled()
-                .program
-                .e_nodes
-                .is_empty()
-        );
+        assert!(!execution_graph.compiled().e_nodes.is_empty());
 
         execution_graph.clear();
 
-        assert!(execution_graph.installed.compiled.is_none());
+        assert!(execution_graph.compiled.is_none());
         assert!(execution_graph.schedule.process_order.is_empty());
-        assert_eq!(execution_graph.installed.cache.slot_count(), 0);
+        assert_eq!(execution_graph.cache.slot_count(), 0);
 
         Ok(())
     }
@@ -3867,8 +3325,7 @@ mod execution {
         // sum should be marked as missing required inputs
         let sum = execution_node_id(&execution_graph, &graph, &library, "sum").unwrap();
         assert!(
-            execution_graph.schedule.states
-                [execution_graph.installed.compiled().program.e_node_index[&sum]]
+            execution_graph.schedule.states[execution_graph.compiled().e_node_index[&sum]]
                 .missing_required_inputs()
         );
 
@@ -3897,7 +3354,7 @@ mod execution {
         assert_ne!(run1, run2);
 
         // The cached product stays correct every run: sum(1+11=12) * get_b(11) = 132.
-        let mult_id = graph.find_by_name("mult", NodeSearch::TopLevel).unwrap().id;
+        let mult_id = graph.find_by_name("mult").unwrap().id;
         let vals = eg.get_argument_values(&mult_id).unwrap();
         assert!(matches!(
             vals.outputs[0],
@@ -3930,10 +3387,7 @@ mod execution {
         );
 
         // Switch back to bind from cached get_b — mult re-executes with cached upstream
-        let get_b_id = graph
-            .find_by_name("get_b", NodeSearch::TopLevel)
-            .unwrap()
-            .id;
+        let get_b_id = graph.find_by_name("get_b").unwrap().id;
         bind(&mut graph, "mult", 0, Binding::bind(get_b_id, 0));
 
         execution_graph.update(&graph, &library).unwrap();
@@ -3956,17 +3410,19 @@ mod execution {
 
         use crate::async_lambda;
         use crate::graph::Graph;
-        use crate::graph::func::{Func, FuncOutput};
+        use crate::graph::func::{Func, FuncInput, FuncOutput};
         use crate::library::Library;
 
         let invocations = Arc::new(AtomicUsize::new(0));
-        let mut library: Library = [Func::new(
+        let library: Library = [Func::new(
             "4df6d99f-cb0c-479c-9b94-6549c406d9ab",
             "partial_writer",
         )
         .category("Debug")
         .pure()
         .sink()
+        // Const-bound below; changing the const is what re-keys the digest between runs.
+        .input(FuncInput::optional("seed", DataType::Int))
         .output(FuncOutput::new("a", DataType::Int))
         .output(FuncOutput::new("b", DataType::Int))
         .lambda(async_lambda!(
@@ -3987,7 +3443,12 @@ mod execution {
         // Retain the output buffer across runs so the in-place reuse is observable;
         // nodes now default to `CacheMode::None`.
         node.cache = CacheMode::Ram;
-        graph.insert("0b35e5e4-be30-4733-a5a2-9d474000de10".into(), node);
+        let node_id: NodeId = "0b35e5e4-be30-4733-a5a2-9d474000de10".into();
+        graph.insert(node_id, node);
+        graph.set_input_binding(
+            InputPort::new(node_id, 0),
+            Binding::Const(StaticValue::Int(0)),
+        );
         graph.validate_debug();
 
         let mut eg = ExecutionEngine::default();
@@ -4010,9 +3471,10 @@ mod execution {
 
         // Invalidate the pure node while keeping its resident buffer available for the next
         // invocation. Run 2 writes only port 0, so port 1 must not retain run 1's value.
-        mutate_func(&mut library, "partial_writer", |func| {
-            func.version += 1;
-        });
+        graph.set_input_binding(
+            InputPort::new(node_id, 0),
+            Binding::Const(StaticValue::Int(1)),
+        );
         eg.update(&graph, &library).unwrap();
         let stats = eg.execute_sinks().await?;
         assert!(stats.errored_nodes().count() == 0);
@@ -4061,7 +3523,7 @@ mod node_seeds {
         let mut eg = ExecutionEngine::default();
         eg.update(&graph, &library).unwrap();
 
-        let sum_id = graph.find_by_name("sum", NodeSearch::TopLevel).unwrap().id;
+        let sum_id = graph.find_by_name("sum").unwrap().id;
         let stats = eg
             .execute_nodes([root_execution_node(sum_id)])
             .await
@@ -4078,10 +3540,7 @@ mod node_seeds {
             "the targeted output is produced but not retained"
         );
 
-        let get_a_id = graph
-            .find_by_name("get_a", NodeSearch::TopLevel)
-            .unwrap()
-            .id;
+        let get_a_id = graph.find_by_name("get_a").unwrap().id;
         assert!(
             eg.get_argument_values(&get_a_id)
                 .unwrap()
@@ -4117,7 +3576,7 @@ mod node_seeds {
         let mut eg = ExecutionEngine::default();
         eg.update(&graph, &library).unwrap();
 
-        let sum_id = graph.find_by_name("sum", NodeSearch::TopLevel).unwrap().id;
+        let sum_id = graph.find_by_name("sum").unwrap().id;
         eg.execute_nodes([root_execution_node(sum_id)])
             .await
             .unwrap();
@@ -4148,11 +3607,8 @@ mod node_seeds {
             }),
         });
         let mut graph = uncached_test_graph();
-        let sum_id = graph.find_by_name("sum", NodeSearch::TopLevel).unwrap().id;
-        graph
-            .find_mut(sum_id, NodeSearch::TopLevel)
-            .unwrap()
-            .disabled = true;
+        let sum_id = graph.find_by_name("sum").unwrap().id;
+        graph.find_mut(sum_id).unwrap().disabled = true;
         let mut eg = ExecutionEngine::default();
         eg.update(&graph, &library).unwrap();
 
@@ -4182,7 +3638,7 @@ mod node_seeds {
             eg.get_argument_values(&sum_id).unwrap().outputs.is_empty(),
             "the targeted value is released after its real consumer"
         );
-        let mult_id = graph.find_by_name("mult", NodeSearch::TopLevel).unwrap().id;
+        let mult_id = graph.find_by_name("mult").unwrap().id;
         assert!(
             eg.get_argument_values(&mult_id).unwrap().outputs.is_empty(),
             "the None-cache downstream is drained by its consumer"
@@ -4238,7 +3694,7 @@ mod argument_values {
 
         bind(&mut graph, "mult", 0, Binding::Const(StaticValue::Int(3)));
         bind(&mut graph, "mult", 1, Binding::Const(StaticValue::Int(5)));
-        let mult_id = graph.find_by_name("mult", NodeSearch::TopLevel).unwrap().id;
+        let mult_id = graph.find_by_name("mult").unwrap().id;
 
         execution_graph.update(&graph, &library).unwrap();
         execution_graph.execute_sinks().await?;
@@ -4280,7 +3736,7 @@ mod argument_values {
         execution_graph.execute_sinks().await?;
 
         // sum: inputs are get_a(2.0) and get_b(5.0), output is 2+5=7
-        let sum_id = graph.find_by_name("sum", NodeSearch::TopLevel).unwrap().id;
+        let sum_id = graph.find_by_name("sum").unwrap().id;
         let values = execution_graph.get_argument_values(&sum_id).unwrap();
 
         assert_eq!(values.inputs.len(), 2);
@@ -4297,7 +3753,7 @@ mod argument_values {
         ));
 
         // mult: inputs are sum(7) and get_b(5.0), output is 7*5=35
-        let mult_id = graph.find_by_name("mult", NodeSearch::TopLevel).unwrap().id;
+        let mult_id = graph.find_by_name("mult").unwrap().id;
         let values = execution_graph.get_argument_values(&mult_id).unwrap();
 
         assert_eq!(values.inputs.len(), 2);
@@ -4315,10 +3771,7 @@ mod argument_values {
         ));
 
         // print: input is mult(35), no outputs
-        let print_id = graph
-            .find_by_name("Print", NodeSearch::TopLevel)
-            .unwrap()
-            .id;
+        let print_id = graph.find_by_name("Print").unwrap().id;
         let values = execution_graph.get_argument_values(&print_id).unwrap();
 
         assert_eq!(values.inputs.len(), 1);
@@ -4342,7 +3795,7 @@ mod argument_values {
             func.inputs[1].required = false;
         });
         bind(&mut graph, "mult", 1, None);
-        let mult_id = graph.find_by_name("mult", NodeSearch::TopLevel).unwrap().id;
+        let mult_id = graph.find_by_name("mult").unwrap().id;
 
         execution_graph.update(&graph, &library).unwrap();
         execution_graph.execute_sinks().await?;
@@ -4365,7 +3818,7 @@ mod argument_values {
 
         execution_graph.update(&graph, &library).unwrap();
 
-        let sum_id = graph.find_by_name("sum", NodeSearch::TopLevel).unwrap().id;
+        let sum_id = graph.find_by_name("sum").unwrap().id;
         let values = execution_graph.get_argument_values(&sum_id).unwrap();
 
         // Before execution: all inputs are None (no upstream values yet)
@@ -4464,7 +3917,7 @@ mod stats {
 
         // sum's port 0 is the only unfed one — port 1 is still bound, so the run names
         // exactly the port that failed rather than flagging the node as a whole.
-        let sum_id = graph.find_by_name("sum", NodeSearch::TopLevel).unwrap().id;
+        let sum_id = graph.find_by_name("sum").unwrap().id;
         assert_eq!(
             stats.missing_input_ports(root_execution_node(sum_id)),
             [0],
@@ -4483,11 +3936,8 @@ mod stats {
     async fn dangling_wiring_compiles_and_reports_missing_input() -> TestResult {
         let mut graph = test_graph();
         let library = test_func_lib(default_hooks());
-        let get_a_id = graph
-            .find_by_name("get_a", NodeSearch::TopLevel)
-            .unwrap()
-            .id;
-        let sum_id = graph.find_by_name("sum", NodeSearch::TopLevel).unwrap().id;
+        let get_a_id = graph.find_by_name("get_a").unwrap().id;
+        let sum_id = graph.find_by_name("sum").unwrap().id;
 
         // sum's required input 0 bound to an output get_a doesn't have,
         // plus a subscription to an event it doesn't emit — the drift a changed
@@ -4536,11 +3986,8 @@ mod stats {
         }
 
         // Verify specific node IDs are present
-        let sum_id = graph.find_by_name("sum", NodeSearch::TopLevel).unwrap().id;
-        let print_id = graph
-            .find_by_name("Print", NodeSearch::TopLevel)
-            .unwrap()
-            .id;
+        let sum_id = graph.find_by_name("sum").unwrap().id;
+        let print_id = graph.find_by_name("Print").unwrap().id;
         assert!(stats.ran(root_execution_node(sum_id)));
         assert!(stats.ran(root_execution_node(print_id)));
 
@@ -4562,6 +4009,7 @@ mod events {
     const EMIT_FUNC: FuncId = FuncId::from_u128(0xE311);
     const RECV_FUNC: FuncId = FuncId::from_u128(0xE322);
 
+    #[derive(Debug)]
     struct EventFixture {
         library: Library,
         graph: Graph,
@@ -4692,10 +4140,7 @@ mod events {
         mutate_func(&mut f.library, "emit", |func| {
             func.behavior = FuncBehavior::Pure;
         });
-        f.graph
-            .find_mut(f.emit_id, NodeSearch::TopLevel)
-            .unwrap()
-            .cache = CacheMode::Ram;
+        f.graph.find_mut(f.emit_id).unwrap().cache = CacheMode::Ram;
         let mut eg = ExecutionEngine::default();
         eg.update(&f.graph, &f.library).unwrap();
 
@@ -4729,11 +4174,7 @@ mod events {
         let mut f = build();
         // Drop the subscriber but keep emit reachable by making it a sink.
         let emit_id = f.emit_id;
-        let recv_id = f
-            .graph
-            .find_by_name("recv", NodeSearch::TopLevel)
-            .unwrap()
-            .id;
+        let recv_id = f.graph.find_by_name("recv").unwrap().id;
         f.graph.unsubscribe(emit_id, 0, recv_id);
         mutate_func(&mut f.library, "emit", |func| {
             func.sink = true;
@@ -4888,9 +4329,9 @@ mod events {
         // alongside the promoted sinks — never seeded as a plain subscriber cone.
         assert!(ran.contains(&"trigger".to_string()), "ran = {ran:?}");
         assert!(
-            eg.schedule.process_order.contains(
-                &eg.installed.compiled().program.e_node_index[&root_execution_node(trigger_id)]
-            ),
+            eg.schedule
+                .process_order
+                .contains(&eg.compiled().e_node_index[&root_execution_node(trigger_id)]),
             "the RunSinks sink runs as a sink"
         );
 
@@ -5098,19 +4539,16 @@ mod topology {
         let mut graph = test_graph();
         let mut eg = ExecutionEngine::default();
         eg.update(&graph, &library).unwrap();
-        assert_eq!(eg.installed.compiled().program.e_nodes.len(), 5);
+        assert_eq!(eg.compiled().e_nodes.len(), 5);
 
         // Remove get_b — a middle node feeding sum[1] and mult[1] (both optional).
         // The surviving direct-ID bindings remain valid.
-        let get_b_id = graph
-            .find_by_name("get_b", NodeSearch::TopLevel)
-            .unwrap()
-            .id;
+        let get_b_id = graph.find_by_name("get_b").unwrap().id;
         graph.detach_node(get_b_id);
         graph.validate_debug();
 
         eg.update(&graph, &library).unwrap();
-        assert_eq!(eg.installed.compiled().program.e_nodes.len(), 4);
+        assert_eq!(eg.compiled().e_nodes.len(), 4);
         assert!(execution_node_id(&eg, &graph, &library, "get_b").is_none());
 
         eg.execute_sinks().await?;
@@ -5119,7 +4557,7 @@ mod topology {
         assert_eq!(*printed.lock().await, 2);
 
         // sum's Bind to get_a still resolves after the index remap.
-        let sum_id = graph.find_by_name("sum", NodeSearch::TopLevel).unwrap().id;
+        let sum_id = graph.find_by_name("sum").unwrap().id;
         let vals = eg.get_argument_values(&sum_id).unwrap();
         assert!(
             matches!(vals.inputs[0], Some(DynamicValue::Static(StaticValue::Float(v))) if v.approximately_eq(2.0))
@@ -5289,11 +4727,7 @@ mod topology {
             graph.set_input_binding(InputPort::new(pb, 0), Binding::bind(gb, 0));
             graph.validate_debug();
             eg.update(&graph, &library).unwrap();
-            assert_eq!(
-                eg.installed.compiled().program.e_nodes.len(),
-                4,
-                "round {round} grow"
-            );
+            assert_eq!(eg.compiled().e_nodes.len(), 4, "round {round} grow");
             printed.lock().await.clear();
             eg.execute_sinks().await?;
             let mut got = printed.lock().await.clone();
@@ -5305,11 +4739,7 @@ mod topology {
             graph.detach_node(pb);
             graph.validate_debug();
             eg.update(&graph, &library).unwrap();
-            assert_eq!(
-                eg.installed.compiled().program.e_nodes.len(),
-                2,
-                "round {round} shrink"
-            );
+            assert_eq!(eg.compiled().e_nodes.len(), 2, "round {round} shrink");
             printed.lock().await.clear();
             eg.execute_sinks().await?;
             assert_eq!(
@@ -5325,220 +4755,6 @@ mod topology {
 
 mod graph {
     use super::*;
-    use crate::graph::Graph;
-    use crate::graph::definition::{GraphEvent, GraphLink};
-    use crate::graph::func::event::EventLambda;
-    use crate::graph::func::{Func, FuncInput, FuncOutput};
-    use crate::graph::node::NodeKind;
-    use std::sync::Mutex as StdMutex;
-
-    fn fnode(library: &Library, name: &str) -> Node {
-        library.by_name(name).unwrap().into()
-    }
-
-    fn int_out(name: &str) -> FuncOutput {
-        FuncOutput::new(name, DataType::Int)
-    }
-
-    /// `in(A,B) -> sum -> out(Sum)`.
-    fn wrap_sum_def(library: &Library) -> GraphDef {
-        let in_node = Node::new(NodeKind::GraphInput);
-        let sum = fnode(library, "sum");
-        let out = Node::new(NodeKind::GraphOutput);
-
-        let mut graph = GraphDef::new("WrapSum")
-            .category("Test")
-            .input(FuncInput::required("A", DataType::Int))
-            .input(FuncInput::optional("B", DataType::Int))
-            .output(int_out("Sum"));
-        let in_id = graph.body.add(in_node);
-        let sum_id = graph.body.add(sum);
-        let out_id = graph.body.add(out);
-        graph
-            .body
-            .set_input_binding(InputPort::new(sum_id, 0), Binding::bind(in_id, 0));
-        graph
-            .body
-            .set_input_binding(InputPort::new(sum_id, 1), Binding::bind(in_id, 1));
-        graph
-            .body
-            .set_input_binding(InputPort::new(out_id, 0), Binding::bind(sum_id, 0));
-
-        graph
-    }
-
-    fn local_instance(parent: &mut Graph, graph: GraphDef) -> Node {
-        let graph_id = GraphId::unique();
-        let node = Node::graph_instance(&graph, GraphLink::Local(graph_id));
-        parent.insert_graph(graph_id, graph);
-        node
-    }
-
-    /// A composite computes through the flattened interior end to end.
-    #[tokio::test(flavor = "multi_thread")]
-    async fn composite_computes_via_flattening() -> TestResult {
-        let captured = Arc::new(StdMutex::new(Vec::<i64>::new()));
-        let hooks = TestFuncHooks {
-            get_a: Arc::new(|| Ok(2)),
-            get_b: Arc::new(|| 4),
-            print: {
-                let c = captured.clone();
-                Arc::new(move |v| c.lock().unwrap().push(v))
-            },
-        };
-        let library = test_func_lib(hooks);
-        let def = wrap_sum_def(&library);
-
-        let get_a = fnode(&library, "get_a");
-        let get_b = fnode(&library, "get_b");
-        let print = fnode(&library, "Print");
-
-        let mut graph = Graph::default();
-        let c = local_instance(&mut graph, def);
-        let a_id = graph.add(get_a);
-        let b_id = graph.add(get_b);
-        let c_id = graph.add(c);
-        let print_id = graph.add(print);
-        graph.set_input_binding(InputPort::new(c_id, 0), Binding::bind(a_id, 0));
-        graph.set_input_binding(InputPort::new(c_id, 1), Binding::bind(b_id, 0));
-        graph.set_input_binding(InputPort::new(print_id, 0), Binding::bind(c_id, 0));
-
-        let mut eg = ExecutionEngine::default();
-        eg.update(&graph, &library).unwrap();
-        eg.execute_sinks().await?;
-
-        assert_eq!(*captured.lock().unwrap(), vec![6]); // 2 + 4
-        Ok(())
-    }
-
-    /// An interior branch feeding an unconsumed composite output is pruned —
-    /// its source func never runs (its hook would panic if it did).
-    #[tokio::test(flavor = "multi_thread")]
-    async fn dead_interior_branch_is_pruned() -> TestResult {
-        let captured = Arc::new(StdMutex::new(Vec::<i64>::new()));
-        let hooks = TestFuncHooks {
-            get_a: Arc::new(|| Ok(7)),
-            get_b: Arc::new(|| panic!("get_b feeds an unconsumed output and must be pruned")),
-            print: {
-                let c = captured.clone();
-                Arc::new(move |v| c.lock().unwrap().push(v))
-            },
-        };
-        let library = test_func_lib(hooks);
-
-        // def TwoSources: get_a -> out0, get_b -> out1 (no inputs).
-        let src_a = fnode(&library, "get_a");
-        let src_b = fnode(&library, "get_b");
-        let out = Node::new(NodeKind::GraphOutput);
-        let mut def_graph = GraphDef::new("TwoSources")
-            .category("Test")
-            .outputs([int_out("O0"), int_out("O1")]);
-        let sa = def_graph.body.add(src_a);
-        let sb = def_graph.body.add(src_b);
-        let out_id = def_graph.body.add(out);
-        def_graph
-            .body
-            .set_input_binding(InputPort::new(out_id, 0), Binding::bind(sa, 0));
-        def_graph
-            .body
-            .set_input_binding(InputPort::new(out_id, 1), Binding::bind(sb, 0));
-        // parent: C, print <- C.out0 (out1 unused).
-        let print = fnode(&library, "Print");
-
-        let mut graph = Graph::default();
-        let c = local_instance(&mut graph, def_graph);
-        let c_id = graph.add(c);
-        let print_id = graph.add(print);
-        graph.set_input_binding(InputPort::new(print_id, 0), Binding::bind(c_id, 0));
-
-        let mut eg = ExecutionEngine::default();
-        eg.update(&graph, &library).unwrap();
-        eg.execute_sinks().await?;
-
-        assert_eq!(*captured.lock().unwrap(), vec![7]); // get_a only; get_b pruned
-        Ok(())
-    }
-
-    /// A data cycle that runs through a composite boundary is caught by the
-    /// existing cycle detector once flattened.
-    #[tokio::test(flavor = "multi_thread")]
-    async fn cross_boundary_cycle_detected() {
-        let library = test_func_lib(default_hooks());
-        let def = wrap_sum_def(&library);
-
-        // C.in0 <- C.out0 (self-cycle through the composite); print <- C.out0
-        // so the cyclic node is reachable from a sink.
-        let print = fnode(&library, "Print");
-
-        let mut graph = Graph::default();
-        let c = local_instance(&mut graph, def);
-        let c_id = graph.add(c);
-        let print_id = graph.add(print);
-        graph.set_input_binding(InputPort::new(c_id, 0), Binding::bind(c_id, 0));
-        graph.set_input_binding(InputPort::new(print_id, 0), Binding::bind(c_id, 0));
-
-        let mut eg = ExecutionEngine::default();
-        eg.update(&graph, &library).unwrap();
-        let result = eg.execute_sinks().await;
-
-        assert!(
-            matches!(result, Err(Error::CycleDetected { .. })),
-            "expected CycleDetected, got {result:?}"
-        );
-    }
-
-    fn bind_target(
-        eg: &ExecutionEngine,
-        e_node_id: ExecutionNodeId,
-        input_idx: usize,
-    ) -> ExecutionNodeId {
-        match &eg.node_inputs(e_node_id)[input_idx].binding {
-            ExecutionBinding::Bind(addr) => {
-                eg.installed.compiled().program.e_node_ids[addr.node_idx]
-            }
-            other => panic!("expected Bind, got {other:?}"),
-        }
-    }
-
-    /// A composite dissolves: only its interior func leaves remain, wired
-    /// directly to the parent's producers/consumers.
-    #[test]
-    fn composite_dissolves_into_leaf_edges() {
-        // get_a, get_b -> C(WrapSum) -> print.
-        let library = test_func_lib(TestFuncHooks::default());
-        let def = wrap_sum_def(&library);
-
-        let get_a = fnode(&library, "get_a");
-        let get_b = fnode(&library, "get_b");
-        let print = fnode(&library, "Print");
-
-        let mut graph = Graph::default();
-        let c = local_instance(&mut graph, def);
-        let a_id = graph.add(get_a);
-        let b_id = graph.add(get_b);
-        let c_id = graph.add(c);
-        let print_id = graph.add(print);
-        graph.set_input_binding(InputPort::new(c_id, 0), Binding::bind(a_id, 0));
-        graph.set_input_binding(InputPort::new(c_id, 1), Binding::bind(b_id, 0));
-        graph.set_input_binding(InputPort::new(print_id, 0), Binding::bind(c_id, 0));
-
-        let mut eg = ExecutionEngine::default();
-        eg.update(&graph, &library).unwrap();
-
-        // get_a, get_b, sum (interior), print — no composite/boundary nodes.
-        assert_eq!(eg.installed.compiled().program.e_nodes.len(), 4);
-        let sum = execution_node_id(&eg, &graph, &library, "sum").unwrap();
-        assert_eq!(bind_target(&eg, sum, 0), root_execution_node(a_id));
-        assert_eq!(bind_target(&eg, sum, 1), root_execution_node(b_id));
-        assert_eq!(
-            bind_target(
-                &eg,
-                execution_node_id(&eg, &graph, &library, "Print").unwrap(),
-                0,
-            ),
-            sum
-        );
-    }
 
     /// A func-only graph builds with the node ids unchanged (caches survive).
     #[test]
@@ -5548,340 +4764,21 @@ mod graph {
         let mut eg = ExecutionEngine::default();
         eg.update(&graph, &library).unwrap();
 
-        assert_eq!(eg.installed.compiled().program.e_nodes.len(), graph.len());
+        assert_eq!(eg.compiled().e_nodes.len(), graph.len());
         for node in graph.iter() {
             assert!(
-                eg.installed
-                    .compiled()
-                    .program
+                eg.compiled()
                     .e_node_index
                     .contains_key(&root_execution_node(node.id)),
                 "id preserved"
             );
             assert_eq!(
-                eg.installed
-                    .compiled()
+                eg.compiled()
                     .attribution(root_execution_node(node.id))
-                    .unwrap()
-                    .collect::<Vec<_>>(),
-                vec![node.id]
+                    .unwrap(),
+                node.id
             );
         }
-    }
-
-    /// Two instances of one def produce two distinct interior leaves.
-    #[test]
-    fn two_instances_get_distinct_leaf_ids() {
-        let mut library = test_func_lib(TestFuncHooks::default());
-        let def = wrap_sum_def(&library);
-        let def_id = GraphId::unique();
-        library.register_graph(def_id, def);
-
-        let mut graph = Graph::default();
-        let def_ref = library.graph_by_id(def_id).unwrap();
-        graph.add(Node::graph_instance(def_ref, GraphLink::Shared(def_id)));
-        graph.add(Node::graph_instance(def_ref, GraphLink::Shared(def_id)));
-
-        let mut eg = ExecutionEngine::default();
-        eg.update(&graph, &library).unwrap();
-
-        let sums = execution_node_ids(&eg, &graph, &library, "sum");
-        assert_eq!(sums.len(), 2);
-        assert_ne!(sums[0], sums[1]);
-    }
-
-    /// Attribution maps a flattened interior node back to the editor's
-    /// authoring ids: it yields the node's own id inside the def's graph,
-    /// then each enclosing composite instance. This is what lets the editor
-    /// show per-node stats inside a graph and accumulate them onto the
-    /// instance node.
-    #[test]
-    fn attribution_maps_interior_nodes_to_authoring_ids() {
-        let library = test_func_lib(TestFuncHooks::default());
-        let def = wrap_sum_def(&library);
-        // The id the editor knows the interior node by (in the def graph).
-        let interior_sum_id = def.body.iter().find(|n| n.name == "sum").unwrap().id;
-
-        let get_a = fnode(&library, "get_a");
-
-        let mut graph = Graph::default();
-        let c = local_instance(&mut graph, def);
-        let a_id = graph.add(get_a);
-        let c_id = graph.add(c);
-        graph.set_input_binding(InputPort::new(c_id, 0), Binding::bind(a_id, 0));
-
-        let compiled = Arc::new(Compiler::default().compile(&graph, &library).unwrap());
-        let retained_compiled = Arc::clone(&compiled);
-        let retained_e_node_id = ExecutionNodeId::from_authoring(&[c_id, interior_sum_id]);
-        let mut eg = ExecutionEngine::default();
-        eg.install(compiled);
-
-        // Interior node: flattened id is remapped, but attribution points
-        // back to the authoring interior id then the enclosing instance.
-        let sum_e_node_id = execution_node_id(&eg, &graph, &library, "sum").unwrap();
-        assert_eq!(sum_e_node_id, retained_e_node_id);
-        assert_ne!(
-            sum_e_node_id,
-            root_execution_node(interior_sum_id),
-            "flattened id is remapped"
-        );
-        let attr: Vec<_> = retained_compiled
-            .attribution(sum_e_node_id)
-            .unwrap()
-            .collect();
-        assert_eq!(attr, vec![interior_sum_id, c_id]);
-
-        // Top-level node: id unchanged, attribution is just itself.
-        let a_attr: Vec<_> = eg
-            .installed
-            .compiled()
-            .attribution(root_execution_node(a_id))
-            .unwrap()
-            .collect();
-        assert_eq!(a_attr, vec![a_id]);
-    }
-
-    /// Add a `ticker` func (one event, no I/O) usable as an interior or parent
-    /// emitter; instantiate it by name with `fnode`.
-    fn add_ticker(library: &mut Library) {
-        library.add(testing::with_stub_lambda(
-            Func::new(FuncId::unique(), "ticker")
-                .category("Test")
-                .sink()
-                .event("tick", EventLambda::default()),
-        ));
-    }
-
-    fn func_lib_with_ticker() -> Library {
-        let mut library = test_func_lib(default_hooks());
-        add_ticker(&mut library);
-        library
-    }
-
-    fn subscriber_ids(
-        eg: &ExecutionEngine,
-        e_node_id: ExecutionNodeId,
-        event_idx: usize,
-    ) -> Vec<ExecutionNodeId> {
-        eg.node_events(e_node_id)[event_idx]
-            .subscribers
-            .iter()
-            .map(|&node_idx| eg.installed.compiled().program.e_node_ids[node_idx])
-            .collect()
-    }
-
-    /// A parent subscriber of a composite's exposed event is rewired onto the
-    /// flattened interior emitter.
-    #[test]
-    fn exposed_event_rewires_parent_subscriber_to_interior_emitter() {
-        let library = func_lib_with_ticker();
-
-        // def: a single `ticker`, its `tick` event exposed as the composite's
-        // event 0.
-        let emitter = fnode(&library, "ticker");
-        let mut def_graph = GraphDef::new("Exposer").category("Test");
-        let emitter_id = def_graph.body.add(emitter);
-        def_graph.events.push(GraphEvent {
-            name: "tick".into(),
-            emitter: emitter_id,
-            emitter_event_idx: 0,
-        });
-
-        // parent: composite C, and `listener` subscribing to C's event 0.
-        let listener = fnode(&library, "Print");
-
-        let mut graph = Graph::default();
-        let c = local_instance(&mut graph, def_graph);
-        let c_id = graph.add(c);
-        let listener_id = graph.add(listener);
-        graph.subscribe(c_id, 0, listener_id);
-
-        let mut eg = ExecutionEngine::default();
-        eg.update(&graph, &library).unwrap();
-
-        // The flattened interior `ticker` carries the rewired subscriber.
-        let ticker_node = execution_node_id(&eg, &graph, &library, "ticker").unwrap();
-        assert_eq!(
-            subscriber_ids(&eg, ticker_node, 0),
-            vec![root_execution_node(listener_id)]
-        );
-    }
-
-    /// Triggering a composite (as a subscriber) reaches the interior nodes
-    /// wired to its `GraphInput` trigger.
-    #[test]
-    fn triggering_composite_reaches_interior_subscribers() {
-        let library = func_lib_with_ticker();
-
-        // def: GraphInput trigger → interior `print` subscribes to it.
-        let si = Node::new(NodeKind::GraphInput);
-        let reactor = fnode(&library, "Print");
-        let mut def_graph = GraphDef::new("Reactor").category("Test");
-        let si_id = def_graph.body.add(si);
-        let reactor_id = def_graph.body.add(reactor);
-        def_graph.body.subscribe(si_id, 0, reactor_id);
-        // parent: `ticker` emits; composite C subscribes to it.
-        let emitter = fnode(&library, "ticker");
-
-        let mut graph = Graph::default();
-        let c = local_instance(&mut graph, def_graph);
-        let emitter_id = graph.add(emitter);
-        let c_id = graph.add(c);
-        graph.subscribe(emitter_id, 0, c_id);
-
-        let mut eg = ExecutionEngine::default();
-        eg.update(&graph, &library).unwrap();
-
-        // The interior `print` flat id is the one wired onto `ticker`'s event.
-        let reactor_e_node_id = execution_node_id(&eg, &graph, &library, "Print").unwrap();
-        assert_eq!(
-            subscriber_ids(&eg, root_execution_node(emitter_id), 0),
-            vec![reactor_e_node_id]
-        );
-    }
-
-    /// Editing a shared (linked) def re-inlines every instance on the next
-    /// update, and the interior leaves keep their flat ids (so caches persist).
-    #[tokio::test(flavor = "multi_thread")]
-    async fn editing_linked_def_propagates_to_all_instances() -> TestResult {
-        let captured = Arc::new(StdMutex::new(Vec::<i64>::new()));
-        let hooks = TestFuncHooks {
-            get_a: Arc::new(|| Ok(0)),
-            get_b: Arc::new(|| 0),
-            print: {
-                let c = captured.clone();
-                Arc::new(move |v| c.lock().unwrap().push(v))
-            },
-        };
-        let mut library = test_func_lib(hooks);
-        let def = wrap_sum_def(&library);
-        let def_id = GraphId::unique();
-        library.register_graph(def_id, def);
-
-        // Two linked instances with const inputs, each feeding a print.
-        let def_ref = library.graph_by_id(def_id).unwrap();
-        let c1 = Node::graph_instance(def_ref, GraphLink::Shared(def_id));
-        let c2 = Node::graph_instance(def_ref, GraphLink::Shared(def_id));
-        let p1 = fnode(&library, "Print");
-        let p2 = fnode(&library, "Print");
-
-        let mut graph = Graph::default();
-        let c1_id = graph.add(c1);
-        let c2_id = graph.add(c2);
-        let p1_id = graph.add(p1);
-        let p2_id = graph.add(p2);
-        graph.set_input_binding(InputPort::new(c1_id, 0), Binding::from(StaticValue::Int(1)));
-        graph.set_input_binding(InputPort::new(c1_id, 1), Binding::from(StaticValue::Int(2)));
-        graph.set_input_binding(
-            InputPort::new(c2_id, 0),
-            Binding::from(StaticValue::Int(10)),
-        );
-        graph.set_input_binding(
-            InputPort::new(c2_id, 1),
-            Binding::from(StaticValue::Int(20)),
-        );
-        graph.set_input_binding(InputPort::new(p1_id, 0), Binding::bind(c1_id, 0));
-        graph.set_input_binding(InputPort::new(p2_id, 0), Binding::bind(c2_id, 0));
-
-        let mut eg = ExecutionEngine::default();
-        eg.update(&graph, &library).unwrap();
-        eg.execute_sinks().await?;
-
-        let mut got = captured.lock().unwrap().clone();
-        got.sort();
-        assert_eq!(got, vec![3, 30]); // sums: 1+2, 10+20
-        captured.lock().unwrap().clear();
-
-        // Interior `sum` flat ids (sorted) — for the cache-stability check.
-        let sum_ids = |eg: &ExecutionEngine, graph: &Graph, library: &Library| {
-            let mut ids = execution_node_ids(eg, graph, library, "sum");
-            ids.sort();
-            ids
-        };
-        let sum_ids_before = sum_ids(&eg, &graph, &library);
-        assert_eq!(sum_ids_before.len(), 2);
-
-        // Edit the linked def: route the exposed output straight from input A
-        // (passthrough) instead of `sum`. Affects both instances.
-        {
-            let graph = library.graphs.get_mut(&def_id).unwrap();
-            let si = graph
-                .body
-                .iter()
-                .find(|n| matches!(n.kind, NodeKind::GraphInput))
-                .unwrap()
-                .id;
-            let so = graph
-                .body
-                .iter()
-                .find(|n| matches!(n.kind, NodeKind::GraphOutput))
-                .unwrap()
-                .id;
-            graph
-                .body
-                .set_input_binding(InputPort::new(so, 0), Binding::bind(si, 0));
-        }
-
-        eg.update(&graph, &library).unwrap();
-        eg.execute_sinks().await?;
-
-        let mut got = captured.lock().unwrap().clone();
-        got.sort();
-        assert_eq!(got, vec![1, 10]); // now passthrough of input A
-
-        // Same interior `sum` leaves, same ids → caches were preserved, not
-        // rebuilt under fresh keys.
-        assert_eq!(sum_ids_before, sum_ids(&eg, &graph, &library));
-        Ok(())
-    }
-
-    /// An event fired at a parent emitter reaches, through the real execution
-    /// path, the interior nodes wired to a subscribed composite's trigger.
-    #[tokio::test(flavor = "multi_thread")]
-    async fn event_through_composite_triggers_interior_node() -> TestResult {
-        let ran = Arc::new(StdMutex::new(0i64));
-        let hooks = TestFuncHooks {
-            get_a: {
-                let r = ran.clone();
-                Arc::new(move || {
-                    *r.lock().unwrap() += 1;
-                    Ok(1)
-                })
-            },
-            get_b: Arc::new(|| 0),
-            print: Arc::new(|_| {}),
-        };
-        let mut library = test_func_lib(hooks);
-        add_ticker(&mut library);
-
-        // def Reactor: GraphInput trigger → interior `get_a` subscribes.
-        let si = Node::new(NodeKind::GraphInput);
-        let reactor = fnode(&library, "get_a");
-        let mut def_graph = GraphDef::new("Reactor").category("Test");
-        let si_id = def_graph.body.add(si);
-        let reactor_id = def_graph.body.add(reactor);
-        def_graph.body.subscribe(si_id, 0, reactor_id);
-        // parent: `ticker` E; composite C subscribes to E's event.
-        let emitter = fnode(&library, "ticker");
-
-        let mut graph = Graph::default();
-        let c = local_instance(&mut graph, def_graph);
-        let emitter_id = graph.add(emitter);
-        let c_id = graph.add(c);
-        graph.subscribe(emitter_id, 0, c_id);
-
-        let mut eg = ExecutionEngine::default();
-        eg.update(&graph, &library).unwrap();
-
-        // Fire E's event (as the worker does) — the interior `get_a` runs.
-        eg.execute_events([ExecutionEventPort {
-            e_node_id: root_execution_node(emitter_id),
-            event_idx: 0,
-        }])
-        .await?;
-
-        assert_eq!(*ran.lock().unwrap(), 1);
-        Ok(())
     }
 }
 
@@ -6071,6 +4968,7 @@ mod mid_run_release {
     }
 
     /// Each probe's ownership observation, in invocation order, plus what stayed live.
+    #[derive(Debug)]
     struct ProbeRun {
         unique_reads: Vec<bool>,
         live_after: usize,
@@ -6140,9 +5038,8 @@ mod compile_regressions {
     use super::*;
     use crate::async_lambda;
     use crate::graph::Graph;
-    use crate::graph::definition::GraphLink;
     use crate::graph::func::{Func, FuncInput, FuncOutput};
-    use crate::graph::node::NodeKind;
+
     use crate::{FsPathConfig, FsPathMode};
     use std::sync::Mutex as StdMutex;
 
@@ -6184,11 +5081,8 @@ mod compile_regressions {
         graph.add(node(&library, "sink"));
         graph.add(node(&library, "make_int"));
         graph.add(node(&library, "make_str"));
-        let sink_id = graph.find_by_name("sink", NodeSearch::TopLevel).unwrap().id;
-        let str_id = graph
-            .find_by_name("make_str", NodeSearch::TopLevel)
-            .unwrap()
-            .id;
+        let sink_id = graph.find_by_name("sink").unwrap().id;
+        let str_id = graph.find_by_name("make_str").unwrap().id;
         graph.set_input_binding(InputPort::new(sink_id, 0), Binding::bind(str_id, 0));
 
         let mut engine = ExecutionEngine::default();
@@ -6197,19 +5091,23 @@ mod compile_regressions {
         let make_int = execution_node_id(&engine, &graph, &library, "make_int").unwrap();
         let make_str = execution_node_id(&engine, &graph, &library, "make_str").unwrap();
         assert_eq!(
-            engine.installed.compiled().program.outputs
-                [engine.installed.compiled().program.by_id(make_int).outputs][0]
-                .data_type,
+            engine.compiled().outputs[engine.compiled().by_id(make_int).outputs][0].data_type,
             DataType::Int,
             "make_int reads its own type, not its neighbor's"
         );
         assert_eq!(
-            engine.installed.compiled().program.outputs
-                [engine.installed.compiled().program.by_id(make_str).outputs][0]
-                .data_type,
+            engine.compiled().outputs[engine.compiled().by_id(make_str).outputs][0].data_type,
             DataType::String,
             "make_str reads its own type, not its neighbor's"
         );
+    }
+
+    /// The authoring-side type at one output port, for the tests that compare
+    /// what the editor would paint against what the compiled program carries.
+    fn authoring_output_type(graph: &Graph, library: &Library, port: OutputPort) -> DataType {
+        let mut types = OutputTypes::default();
+        types.update(graph, library);
+        types.get(port).cloned().unwrap_or_default()
     }
 
     #[test]
@@ -6261,7 +5159,7 @@ mod compile_regressions {
 
         let mut engine = ExecutionEngine::default();
         engine.update(&graph, &library).unwrap();
-        let program = &engine.installed.compiled().program;
+        let program = &engine.compiled();
         let cases = [
             (fixed_id, DataType::Int),
             (long_chain_id, DataType::Int),
@@ -6272,7 +5170,7 @@ mod compile_regressions {
         ];
         for (node_id, expected) in cases {
             assert_eq!(
-                graph.resolve_output_type(&library, OutputPort::new(node_id, 0)),
+                authoring_output_type(&graph, &library, OutputPort::new(node_id, 0)),
                 expected,
                 "authoring resolution for {node_id}"
             );
@@ -6297,18 +5195,15 @@ mod compile_regressions {
         let node_id = graph.add_func_node(&passthrough);
         graph.set_input_binding(InputPort::new(node_id, 0), Binding::bind(node_id, 0));
         assert_eq!(
-            graph.resolve_output_type(&library, OutputPort::new(node_id, 0)),
+            authoring_output_type(&graph, &library, OutputPort::new(node_id, 0)),
             DataType::Any
         );
 
         // The same wire, compiled: linking resolves the wildcard through the
         // binding it just interned, and the cycle closes on `Any` there too.
         let compiled = Compiler::default().compile(&graph, &library).unwrap();
-        let e_node = compiled.program.by_id(root_execution_node(node_id));
-        assert_eq!(
-            compiled.program.outputs[e_node.outputs][0].data_type,
-            DataType::Any
-        );
+        let e_node = compiled.by_id(root_execution_node(node_id));
+        assert_eq!(compiled.outputs[e_node.outputs][0].data_type, DataType::Any);
     }
 
     /// An `Update` may carry an evolved library: changed inputs and lambdas must
@@ -6343,14 +5238,8 @@ mod compile_regressions {
         let mut graph = Graph::default();
         graph.add(node(&lib_v1, "generate"));
         graph.add(node(&lib_v1, "Print"));
-        let generate_id = graph
-            .find_by_name("generate", NodeSearch::TopLevel)
-            .unwrap()
-            .id;
-        let print_id = graph
-            .find_by_name("Print", NodeSearch::TopLevel)
-            .unwrap()
-            .id;
+        let generate_id = graph.find_by_name("generate").unwrap().id;
+        let print_id = graph.find_by_name("Print").unwrap().id;
         graph.set_input_binding(InputPort::new(print_id, 0), Binding::bind(generate_id, 0));
 
         let mut engine = ExecutionEngine::default();
@@ -6378,8 +5267,8 @@ mod compile_regressions {
     /// shorter snapshot resident.
     ///
     /// The grown-input case above re-keys the digest, which is what
-    /// retires the old value. Growing an output need not: the id and
-    /// version are unchanged, so `reown` sees no owner change, and the
+    /// retires the old value. Growing an output need not: the id is
+    /// unchanged, so `reown` sees no owner change, and the
     /// stale `produced_under` still equals the stale `current_digest`, so
     /// the RAM-retention check keeps a snapshot that is now one value
     /// short of the port list. Debug builds caught it at install as an
@@ -6416,92 +5305,17 @@ mod compile_regressions {
         generator.cache = CacheMode::Ram;
         graph.add(generator);
         graph.add(node(&lib_v1, "Print"));
-        let generate_id = graph
-            .find_by_name("generate", NodeSearch::TopLevel)
-            .unwrap()
-            .id;
-        let print_id = graph
-            .find_by_name("Print", NodeSearch::TopLevel)
-            .unwrap()
-            .id;
+        let generate_id = graph.find_by_name("generate").unwrap().id;
+        let print_id = graph.find_by_name("Print").unwrap().id;
         graph.set_input_binding(InputPort::new(print_id, 0), Binding::bind(generate_id, 0));
 
         let mut engine = ExecutionEngine::default();
         engine.update(&graph, &lib_v1).unwrap();
         engine.execute_sinks().await.unwrap();
 
-        // v2: same FuncId and version, one more output. `update` installs
+        // v2: same FuncId, one more output. `update` installs
         // it, which is where the retained snapshot had to be retired.
         engine.update(&graph, &make_lib(true)).unwrap();
         engine.execute_sinks().await.unwrap();
-    }
-
-    /// Inspecting a node *inside* a graph requires its complete authoring path,
-    /// because the execution id is hashed from that path.
-    #[tokio::test(flavor = "multi_thread")]
-    async fn interior_node_inspection_derives_execution_id_from_authoring_path() {
-        let library = test_func_lib(TestFuncHooks {
-            get_a: Arc::new(|| Ok(2)),
-            get_b: Arc::new(|| 4),
-            print: Arc::new(|_| {}),
-        });
-
-        // def: in(A,B) -> sum -> out
-        let in_node = Node::new(NodeKind::GraphInput);
-        let sum: Node = library.by_name("sum").unwrap().into();
-        let out = Node::new(NodeKind::GraphOutput);
-        let mut def_graph = GraphDef::new("WrapSum")
-            .category("Test")
-            .input(FuncInput::required("A", DataType::Int))
-            .input(FuncInput::optional("B", DataType::Int))
-            .output(FuncOutput::new("Sum", DataType::Int));
-        let in_id = def_graph.body.add(in_node);
-        let sum_interior_id = def_graph.body.add(sum);
-        let out_id = def_graph.body.add(out);
-        def_graph
-            .body
-            .set_input_binding(InputPort::new(sum_interior_id, 0), Binding::bind(in_id, 0));
-        def_graph
-            .body
-            .set_input_binding(InputPort::new(sum_interior_id, 1), Binding::bind(in_id, 1));
-        def_graph
-            .body
-            .set_input_binding(InputPort::new(out_id, 0), Binding::bind(sum_interior_id, 0));
-        let get_a: Node = library.by_name("get_a").unwrap().into();
-        let get_b: Node = library.by_name("get_b").unwrap().into();
-        let graph_id = GraphId::unique();
-        let inst = Node::graph_instance(&def_graph, GraphLink::Local(graph_id));
-        let print: Node = library.by_name("Print").unwrap().into();
-
-        let mut graph = Graph::default();
-        graph.insert_graph(graph_id, def_graph);
-        let a_id = graph.add(get_a);
-        let b_id = graph.add(get_b);
-        let inst_id = graph.add(inst);
-        let print_id = graph.add(print);
-        graph.set_input_binding(InputPort::new(inst_id, 0), Binding::bind(a_id, 0));
-        graph.set_input_binding(InputPort::new(inst_id, 1), Binding::bind(b_id, 0));
-        graph.set_input_binding(InputPort::new(print_id, 0), Binding::bind(inst_id, 0));
-
-        let mut eg = ExecutionEngine::default();
-        eg.update(&graph, &library).unwrap();
-        eg.execute_sinks().await.unwrap();
-
-        assert!(
-            !eg.installed
-                .compiled()
-                .program
-                .e_node_index
-                .contains_key(&root_execution_node(sum_interior_id)),
-            "interior ids are remapped at flatten — the key lookup alone must miss"
-        );
-        let values = eg
-            .get_argument_values_at(ExecutionNodeId::from_authoring(&[inst_id, sum_interior_id]))
-            .expect("the interior execution node exists");
-        assert_eq!(
-            values.outputs[0].as_i64(),
-            Some(6),
-            "2 + 4 computed inside the composite"
-        );
     }
 }

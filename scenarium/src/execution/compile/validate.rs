@@ -10,7 +10,7 @@ use ::common::is_debug;
 use crate::common::column::Idx;
 use crate::execution::compile::error::CompiledGraphValidationError;
 use crate::execution::compiled::CompiledGraph;
-use crate::execution::program::ExecutionBinding;
+use crate::execution::compiled::ExecutionBinding;
 use crate::library::Library;
 
 /// Self-consistency of a freshly linked artifact against the library it was
@@ -21,8 +21,7 @@ pub(super) fn validate(
     compiled: &CompiledGraph,
     library: &Library,
 ) -> Result<(), CompiledGraphValidationError> {
-    compiled.validate_attribution()?;
-    let program = &compiled.program;
+    let program = &compiled;
     for (e_node_id, e_node) in program.e_node_ids.iter().zip(program.e_nodes.iter()) {
         if e_node.func_id.is_nil() {
             return Err(CompiledGraphValidationError::NilFuncId {
@@ -55,17 +54,17 @@ pub(super) fn validate(
                 e_node_id: *e_node_id,
             });
         }
-        let inputs = program.inputs.get(e_node.inputs.range()).ok_or(
+        let inputs = program.inputs.get_span(e_node.inputs).ok_or(
             CompiledGraphValidationError::InputRange {
                 e_node_id: *e_node_id,
             },
         )?;
-        if program.outputs.get(e_node.outputs.range()).is_none() {
+        if program.outputs.get_span(e_node.outputs).is_none() {
             return Err(CompiledGraphValidationError::OutputRange {
                 e_node_id: *e_node_id,
             });
         }
-        let events = program.events.get(e_node.events.range()).ok_or(
+        let events = program.events.get_span(e_node.events).ok_or(
             CompiledGraphValidationError::EventRange {
                 e_node_id: *e_node_id,
             },

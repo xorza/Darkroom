@@ -3,14 +3,15 @@
 //! primed cache for the sweep that reads one.
 
 mod planning {
+    use crate::execution::compiled::{
+        CompiledGraph, ExecutionBinding, ExecutionEvent, ExecutionInput, ExecutionNode,
+        ExecutionOutput,
+    };
     use crate::execution::error::Error;
     use crate::execution::identity::{ExecutionEventPort, ExecutionNodeId};
     use crate::execution::identity::{NodeIdx, OutputAddr, OutputIdx};
-    use crate::execution::program::{
-        ExecutionBinding, ExecutionEvent, ExecutionInput, ExecutionNode, ExecutionOutput, Program,
-    };
     use crate::execution::schedule::planner::Planner;
-    use crate::execution::schedule::{NodeState, ResolvedOutputs, RunSchedule};
+    use crate::execution::schedule::{NodeState, ResolvedOutputs, RootFlags, RunSchedule};
     use crate::execution::seeds::RunSeeds;
     use crate::graph::func::lambda::OutputDemand;
     use crate::graph::identity::FuncId;
@@ -18,9 +19,9 @@ mod planning {
     /// Hand-built program for planner tests — scheduling is structural, so it
     /// needs no compile artifact and no authoring attribution. Inputs are
     /// `(required, binding)`.
-    #[derive(Default)]
+    #[derive(Debug, Default)]
     struct Fix {
-        program: Program,
+        program: CompiledGraph,
     }
 
     impl Fix {
@@ -192,7 +193,7 @@ mod planning {
         // The validator reports corruption rather than faulting on it: a binding
         // target past the last node used to index `seen_in_order` out of range.
         let past_the_end = NodeIdx(f.program.e_nodes.len() as u32);
-        let b_input = f.program[nx(b)].inputs.start as usize;
+        let b_input = f.program[nx(b)].inputs.nth(0);
         f.program.inputs[b_input].binding = ExecutionBinding::Bind(OutputAddr {
             node_idx: past_the_end,
             port_idx: 0,
@@ -204,10 +205,10 @@ mod planning {
 
         // Likewise for a set that no longer spans the program.
         f.program.inputs[b_input].binding = bind(a, 0);
-        p.seeded.reset(0);
+        p.root_flags_mut().reset(0, RootFlags::default());
         assert_eq!(
             p.validate(&f.program).unwrap_err().to_string(),
-            "schedule seeded spans 0 entries, not the program's 3"
+            "schedule root flags spans 0 entries, not the program's 3"
         );
     }
 
@@ -322,16 +323,16 @@ mod planning {
         };
         planner.plan(&f.program, &seeds, &mut p).expect("no cycle");
 
-        assert_eq!(p.seeded.iter().collect::<Vec<_>>(), vec![nx(a)]);
-        assert_eq!(p.roots.iter().collect::<Vec<_>>(), vec![nx(a)]);
+        assert_eq!(p.seeded_roots(), vec![nx(a)]);
+        assert_eq!(p.roots(), [nx(a)]);
 
         let seeds = RunSeeds {
             e_node_ids: vec![a, a],
             ..Default::default()
         };
         planner.plan(&f.program, &seeds, &mut p).expect("no cycle");
-        assert_eq!(p.seeded.iter().collect::<Vec<_>>(), vec![nx(a)]);
-        assert_eq!(p.roots.iter().collect::<Vec<_>>(), vec![nx(a)]);
+        assert_eq!(p.seeded_roots(), vec![nx(a)]);
+        assert_eq!(p.roots(), [nx(a)], "a repeated seed is one root");
     }
 
     #[test]
@@ -371,8 +372,8 @@ mod planning {
         planner.plan(&f.program, &seeds, &mut p).expect("no cycle");
 
         assert_eq!(p.process_order, [a, b].map(nx), "only B's cone, deps first");
-        assert_eq!(p.roots.iter().collect::<Vec<_>>(), vec![nx(b)]);
-        assert_eq!(p.seeded.iter().collect::<Vec<_>>(), vec![nx(b)]);
+        assert_eq!(p.roots(), [nx(b)]);
+        assert_eq!(p.seeded_roots(), vec![nx(b)]);
         assert!(p.states[nx(a)].is_runnable());
         assert!(p.states[nx(b)].is_runnable());
         assert_eq!(
@@ -390,7 +391,24 @@ mod planning {
         };
         planner.plan(&f.program, &seeds, &mut p).expect("no cycle");
         assert_eq!(p.process_order, [a, b, c].map(nx));
-        assert_eq!(p.seeded.iter().collect::<Vec<_>>(), vec![nx(b)]);
+        assert_eq!(p.seeded_roots(), vec![nx(b)]);
+
+        // Seeding the sink itself is the case two root passes reach one node: the
+        // seed pass marks C seeded, then the sinks sweep marks it a root again.
+        // The second visit must *add* to what the first left — it is one root
+        // carrying both facts, so C is listed once and stays seeded.
+        let seeds = RunSeeds {
+            sinks: true,
+            e_node_ids: vec![c],
+            ..Default::default()
+        };
+        planner.plan(&f.program, &seeds, &mut p).expect("no cycle");
+        assert_eq!(p.roots(), [nx(c)], "reached twice, listed once");
+        assert_eq!(
+            p.seeded_roots(),
+            vec![nx(c)],
+            "the sinks sweep must not drop the seed the node already carried"
+        );
 
         // A seed id absent from the program is inconsistent caller state — a hard failure,
         // not a silent skip.
@@ -430,9 +448,9 @@ mod planning {
                 &mut plan,
             )
             .unwrap();
-        assert_eq!(plan.roots.iter().collect::<Vec<_>>(), vec![nx(subscriber)]);
+        assert_eq!(plan.roots(), [nx(subscriber)]);
         assert_eq!(plan.process_order, [subscriber].map(nx));
-        assert!(plan.event_sources.iter().next().is_none());
+        assert!(plan.event_source_roots().is_empty());
 
         planner
             .plan(
@@ -444,12 +462,26 @@ mod planning {
                 &mut plan,
             )
             .unwrap();
-        assert_eq!(plan.roots.iter().collect::<Vec<_>>(), vec![nx(emitter)]);
-        assert_eq!(
-            plan.event_sources.iter().collect::<Vec<_>>(),
-            vec![nx(emitter)]
-        );
+        assert_eq!(plan.roots(), [nx(emitter)]);
+        assert_eq!(plan.event_source_roots(), vec![nx(emitter)]);
         assert_eq!(plan.process_order, [emitter].map(nx));
+
+        // Seeded *and* an event source: the two properties are independent, so a
+        // node reached as both keeps both — one root carrying two facts.
+        planner
+            .plan(
+                &f.program,
+                &RunSeeds {
+                    event_sources: true,
+                    e_node_ids: vec![emitter],
+                    ..Default::default()
+                },
+                &mut plan,
+            )
+            .unwrap();
+        assert_eq!(plan.roots(), [nx(emitter)]);
+        assert_eq!(plan.seeded_roots(), vec![nx(emitter)]);
+        assert_eq!(plan.event_source_roots(), vec![nx(emitter)]);
 
         let invalid = [
             ExecutionEventPort {
@@ -483,13 +515,12 @@ mod planning {
 mod resolving {
     use crate::execution::cache::runtime::RuntimeCache;
     use crate::execution::cache::slot::OutputSnapshot;
-    use crate::execution::compiled::internals::TestCompiledGraph;
+    use crate::execution::compiled::{
+        CompiledGraph, ExecutionBinding, ExecutionInput, ExecutionNode, ExecutionOutput,
+    };
     use crate::execution::identity::ExecutionNodeId;
     use crate::execution::identity::{NodeIdx, OutputAddr};
-    use crate::execution::program::{
-        ExecutionBinding, ExecutionInput, ExecutionNode, ExecutionOutput, Program,
-    };
-    use crate::execution::schedule::{NodeState, RunSchedule, Scheduled};
+    use crate::execution::schedule::{NodeState, RootFlags, RunSchedule, Scheduled};
     use crate::graph::func::FuncBehavior;
     use crate::graph::func::lambda::{FuncLambda, OutputDemand};
     use crate::graph::identity::FuncId;
@@ -501,17 +532,17 @@ mod resolving {
         values: Vec<DynamicValue>,
     }
 
-    #[derive(Default)]
+    #[derive(Debug, Default)]
     struct Fix {
         /// A real outer compiled artifact around the hand-built program.
-        program: TestCompiledGraph,
+        program: CompiledGraph,
         order: Vec<ExecutionNodeId>,
     }
 
     impl Fix {
         /// The program while the fixture is still the artifact's sole holder.
-        fn building(&mut self) -> &mut Program {
-            self.program.program_mut()
+        fn building(&mut self) -> &mut CompiledGraph {
+            &mut self.program
         }
 
         fn node(&mut self, inputs: &[(bool, ExecutionBinding)], outputs: u32) -> ExecutionNodeId {
@@ -566,14 +597,14 @@ mod resolving {
                 schedule.states[nx(*e_node_id)] = NodeState::MissingInputs;
             }
             for root in roots {
-                schedule.roots.insert(nx(*root));
+                schedule.add_root(nx(*root), RootFlags::PLAIN);
             }
             for seed in seeded {
-                schedule.seeded.insert(nx(*seed));
+                schedule.add_root(nx(*seed), RootFlags::SEEDED);
             }
             let mut cache = RuntimeCache::default();
-            cache.reconcile_for_test(&self.program);
-            cache.stamp_digests(schedule.executing());
+            cache.install_for_test(&self.program);
+            cache.stamp_digests(&self.program, schedule.executing());
             for cached in cached {
                 let digest = cache[nx(cached.e_node_id)].current_digest.unwrap();
                 cache[nx(cached.e_node_id)]
@@ -626,9 +657,7 @@ mod resolving {
         assert_eq!(run.states[nx(cached)], NodeState::Reuse);
         assert_eq!(run.states[nx(sink)], NodeState::Run);
         assert_eq!(
-            run.outputs
-                .readers
-                .slice(fix.program.by_id(source).outputs.range()),
+            &run.outputs.readers[fix.program.by_id(source).outputs],
             &[0]
         );
     }
@@ -664,15 +693,11 @@ mod resolving {
         assert_eq!(run.states[nx(live)], NodeState::Run);
         assert_eq!(run.states[nx(sink)], NodeState::Run);
         assert_eq!(
-            run.outputs
-                .demand
-                .slice(fix.program.by_id(source).outputs.range()),
+            &run.outputs.demand[fix.program.by_id(source).outputs],
             &[OutputDemand::Produce, OutputDemand::Skip]
         );
         assert_eq!(
-            run.outputs
-                .readers
-                .slice(fix.program.by_id(source).outputs.range()),
+            &run.outputs.readers[fix.program.by_id(source).outputs],
             &[1, 0]
         );
     }
@@ -696,15 +721,11 @@ mod resolving {
              runnable nodes, so the reason it did not run survives to the outcome"
         );
         assert_eq!(
-            run.outputs
-                .demand
-                .slice(fix.program.by_id(source).outputs.range()),
+            &run.outputs.demand[fix.program.by_id(source).outputs],
             &[OutputDemand::Skip]
         );
         assert_eq!(
-            run.outputs
-                .readers
-                .slice(fix.program.by_id(source).outputs.range()),
+            &run.outputs.readers[fix.program.by_id(source).outputs],
             &[0]
         );
     }
@@ -737,21 +758,15 @@ mod resolving {
         );
         assert_eq!(run.states[nx(sink)], NodeState::Run);
         assert_eq!(
-            run.outputs
-                .demand
-                .slice(fix.program.by_id(source).outputs.range()),
+            &run.outputs.demand[fix.program.by_id(source).outputs],
             &[OutputDemand::Skip]
         );
         assert_eq!(
-            run.outputs
-                .readers
-                .slice(fix.program.by_id(source).outputs.range()),
+            &run.outputs.readers[fix.program.by_id(source).outputs],
             &[0]
         );
         assert_eq!(
-            run.outputs
-                .readers
-                .slice(fix.program.by_id(missing).outputs.range()),
+            &run.outputs.readers[fix.program.by_id(missing).outputs],
             &[1],
             "the downstream skip still owns one read to retire"
         );
@@ -771,16 +786,12 @@ mod resolving {
             .await;
 
         assert_eq!(
-            run.outputs
-                .demand
-                .slice(fix.program.by_id(unseeded).outputs.range()),
+            &run.outputs.demand[fix.program.by_id(unseeded).outputs],
             &[OutputDemand::Skip, OutputDemand::Skip],
             "a root nobody reads and nobody seeded produces nothing"
         );
         assert_eq!(
-            run.outputs
-                .demand
-                .slice(fix.program.by_id(seeded).outputs.range()),
+            &run.outputs.demand[fix.program.by_id(seeded).outputs],
             &[OutputDemand::Produce, OutputDemand::Produce]
         );
         assert!(run.outputs.readers.iter().all(|readers| *readers == 0));

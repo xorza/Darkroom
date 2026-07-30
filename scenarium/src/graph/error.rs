@@ -12,7 +12,6 @@ use thiserror::Error;
 pub(crate) type ValidationResult<T> = Result<T, GraphValidationError>;
 
 use crate::graph::identity::FuncId;
-use crate::graph::identity::GraphId;
 use crate::graph::identity::NodeId;
 use crate::graph::identity::{InputPort, OutputPort};
 
@@ -26,26 +25,14 @@ pub enum GraphDeserializeError {
 
 #[derive(Debug, Error)]
 pub enum GraphValidationError {
-    #[error("graph has a nil origin")]
-    NilOrigin,
     #[error("graph contains a node with a nil id")]
     NilNodeId,
-    #[error("node id {node_id:?} occurs in more than one authoring graph")]
+    #[error("node id {node_id:?} occurs more than once")]
     DuplicateNodeId { node_id: NodeId },
     #[error("node {node_id:?} has a nil func_id")]
     NilFuncId { node_id: NodeId },
     #[error("node {node_id:?} references func {func_id:?}, absent from the library")]
     MissingFunc { node_id: NodeId, func_id: FuncId },
-    #[error("node {node_id:?} has a nil graph id")]
-    NilGraphId { node_id: NodeId },
-    #[error("node {node_id:?} references missing local graph {graph_id:?}")]
-    MissingLocalGraph { node_id: NodeId, graph_id: GraphId },
-    #[error("node {node_id:?} references a missing graph")]
-    MissingGraph { node_id: NodeId },
-    #[error("a graph holds at most one GraphInput, found {count}")]
-    MultipleGraphInputs { count: usize },
-    #[error("a graph holds at most one GraphOutput, found {count}")]
-    MultipleGraphOutputs { count: usize },
     #[error("binding on missing node {node_id:?}")]
     BindingMissingNode { node_id: NodeId },
     #[error(
@@ -72,30 +59,4 @@ pub enum GraphValidationError {
         event_idx: usize,
         subscriber: NodeId,
     },
-    #[error("exposed event {name:?} names missing emitter {emitter:?}")]
-    ExposedEventMissingEmitter { name: String, emitter: NodeId },
-    #[error("local graph has a nil id")]
-    NilLocalGraphId,
-    #[error("graph id {graph_id:?} occurs in more than one parent graph")]
-    DuplicateGraphId { graph_id: GraphId },
-    #[error("graph nesting exceeds {max} levels")]
-    NestingTooDeep { max: usize },
-    #[error("graph {name:?} is recursive (contains itself)")]
-    RecursiveGraph { name: String },
-    #[error("in local graph {name:?}: {source}")]
-    LocalGraph {
-        name: String,
-        #[source]
-        source: Box<GraphValidationError>,
-    },
-    #[error("in shared graph {name:?}: {source}")]
-    SharedGraph {
-        name: String,
-        #[source]
-        source: Box<GraphValidationError>,
-    },
-    #[error("entry graph cannot contain interface boundary nodes")]
-    EntryBoundaryNodes,
-    #[error("node {node_id:?} uses entry-only func {func_id:?} inside a graph definition")]
-    EntryOnlyFunc { node_id: NodeId, func_id: FuncId },
 }

@@ -15,8 +15,6 @@ use crate::execution::report::{ExecutionOutcome, NodeExecutionStatus, NodeStatus
 use crate::execution::seeds::RunSeeds;
 use crate::graph::Binding;
 use crate::graph::Graph;
-use crate::graph::NodeSearch;
-use crate::graph::definition::GraphDef;
 use crate::graph::func::error::InvokeError;
 use crate::graph::func::event::EventLambda;
 use crate::graph::func::lambda::FuncLambda;
@@ -43,7 +41,7 @@ use crate::worker::status::{
 type TestResult<T = ()> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
 fn root_execution_node(node_id: NodeId) -> ExecutionNodeId {
-    ExecutionNodeId::from_authoring(&[node_id])
+    ExecutionNodeId::from_node(node_id)
 }
 
 fn batch_intent(msgs: impl IntoIterator<Item = WorkerMessage>) -> BatchIntent {
@@ -64,6 +62,7 @@ fn messages(stats: &ExecutionOutcome) -> Vec<String> {
 /// results into an mpsc; exposes helpers for the two messages used
 /// most often (`Update` with the fixture graph; a frame-event
 /// `ExecutionEventPort`).
+#[derive(Debug)]
 struct FrameHarness {
     worker: Worker,
     library: Arc<Library>,
@@ -82,10 +81,7 @@ impl FrameHarness {
         library.merge(worker_events_library());
 
         let graph = log_frame_no_graph(&library);
-        let frame_event_node_id = graph
-            .find_by_name("Frame Event", NodeSearch::TopLevel)
-            .unwrap()
-            .id;
+        let frame_event_node_id = graph.find_by_name("Frame Event").unwrap().id;
         let library = Arc::new(library);
 
         let (worker, compute_rx) = completed_worker(cap);
@@ -303,6 +299,7 @@ async fn sync_after(worker: &Worker, msgs: impl IntoIterator<Item = WorkerMessag
 /// A unique temp dir removed on drop, so tests don't collide or leak.
 /// `prefix` disambiguates directories from different tests sharing the
 /// process-wide temp dir.
+#[derive(Debug)]
 struct TempDir(std::path::PathBuf);
 
 impl Drop for TempDir {
@@ -713,13 +710,7 @@ async fn worker_streams_node_patches_before_completion() {
                         root_execution_node(print_node_id),
                         "status maps to the node"
                     );
-                    assert_eq!(
-                        compiled
-                            .attribution(node.e_node_id)
-                            .unwrap()
-                            .collect::<Vec<_>>(),
-                        vec![print_node_id],
-                    );
+                    assert_eq!(compiled.attribution(node.e_node_id).unwrap(), print_node_id,);
                     match node.status {
                         Some(NodeExecutionStatus::Running { .. }) => started += 1,
                         Some(NodeExecutionStatus::Executed { .. }) => node_finished += 1,
@@ -840,78 +831,6 @@ async fn live_patches_reach_the_host_before_downstream_nodes_run() {
         3,
         "the first node's Started and Finished patches, and the second's own Started, must \
          reach the host before the second node's lambda runs"
-    );
-}
-
-#[tokio::test]
-async fn installed_program_distinguishes_repeated_definition_instances() {
-    use std::collections::HashSet;
-
-    use crate::DataType;
-    use crate::graph::definition::GraphLink;
-    use crate::graph::func::FuncOutput;
-    use crate::graph::identity::GraphId;
-    use crate::graph::node::NodeKind;
-    use crate::testing::{TestFuncHooks, test_func_lib};
-
-    let library = test_func_lib(TestFuncHooks {
-        get_a: Arc::new(|| Ok(1)),
-        get_b: Arc::new(|| 7),
-        print: Arc::new(|_| {}),
-    });
-    let mut definition = GraphDef::new("Repeated").output(FuncOutput::new("Out", DataType::Int));
-    let interior = definition
-        .body
-        .add(library.by_name("get_b").unwrap().into());
-    let output = definition.body.add(Node::new(NodeKind::GraphOutput));
-    definition
-        .body
-        .set_input_binding(InputPort::new(output, 0), Binding::bind(interior, 0));
-
-    let definition_id = GraphId::unique();
-    let mut graph = Graph::default();
-    graph.insert_graph(definition_id, definition.clone_verbatim());
-    let instance_a = graph.add_graph_node(&definition, GraphLink::Local(definition_id));
-    let instance_b = graph.add_graph_node(&definition, GraphLink::Local(definition_id));
-    for instance in [instance_a, instance_b] {
-        let print = graph.add(library.by_name("Print").unwrap().into());
-        graph.set_input_binding(InputPort::new(print, 0), Binding::bind(instance, 0));
-    }
-
-    let (tx, mut rx) = mpsc::channel::<WorkerReport>(32);
-    let worker = Worker::new(move |report| {
-        tx.try_send(report).unwrap();
-    });
-    worker
-        .send_many([
-            WorkerMessage::Update {
-                compiled: Compiler::default()
-                    .compile(&graph, &library)
-                    .unwrap()
-                    .into(),
-            },
-            WorkerMessage::Run {
-                seeds: RunSeeds::sinks(),
-            },
-        ])
-        .unwrap();
-
-    let finished = next_completed_run(&mut rx).await;
-    let stats = finished.result.unwrap();
-    let attributions: HashSet<_> = stats
-        .ran_nodes()
-        .map(|e_node_id| {
-            finished
-                .compiled
-                .attribution(e_node_id)
-                .unwrap()
-                .collect::<Vec<_>>()
-        })
-        .filter(|attribution| attribution.first() == Some(&interior))
-        .collect();
-    assert_eq!(
-        attributions,
-        HashSet::from([vec![interior, instance_a], vec![interior, instance_b],])
     );
 }
 
@@ -1036,14 +955,8 @@ async fn one_event_task_panic_stops_loop_while_another_task_is_alive() {
     library.remove(frame_event.id).unwrap();
     library.add(frame_event);
     let mut graph = log_frame_no_graph(&library);
-    let frame_event_node_id = graph
-        .find_by_name("Frame Event", NodeSearch::TopLevel)
-        .unwrap()
-        .id;
-    let print_node_id = graph
-        .find_by_name("Print", NodeSearch::TopLevel)
-        .unwrap()
-        .id;
+    let frame_event_node_id = graph.find_by_name("Frame Event").unwrap().id;
+    let print_node_id = graph.find_by_name("Print").unwrap().id;
     graph.subscribe(frame_event_node_id, 1, print_node_id);
     let expected_e_node_id = root_execution_node(frame_event_node_id);
     let compiled = Compiler::default()
@@ -1113,19 +1026,10 @@ async fn execute_nodes_overrides_disabled_seed_and_runs_only_its_cone() {
     for node in graph.nodes.values_mut() {
         node.cache = CacheMode::None;
     }
-    let sum_id = graph.find_by_name("sum", NodeSearch::TopLevel).unwrap().id;
-    graph
-        .find_mut(sum_id, NodeSearch::TopLevel)
-        .unwrap()
-        .disabled = true;
-    let get_a_id = graph
-        .find_by_name("get_a", NodeSearch::TopLevel)
-        .unwrap()
-        .id;
-    let get_b_id = graph
-        .find_by_name("get_b", NodeSearch::TopLevel)
-        .unwrap()
-        .id;
+    let sum_id = graph.find_by_name("sum").unwrap().id;
+    graph.find_mut(sum_id).unwrap().disabled = true;
+    let get_a_id = graph.find_by_name("get_a").unwrap().id;
+    let get_b_id = graph.find_by_name("get_b").unwrap().id;
 
     let (worker, mut rx) = completed_worker(8);
     worker
@@ -1157,7 +1061,7 @@ async fn execute_nodes_overrides_disabled_seed_and_runs_only_its_cone() {
     expected.sort();
     assert_eq!(executed, expected, "only the disabled sum's cone ran");
     assert!(
-        graph.find(sum_id, NodeSearch::TopLevel).unwrap().disabled,
+        graph.find(sum_id).unwrap().disabled,
         "execution does not mutate the authoring graph"
     );
 }
@@ -1170,14 +1074,8 @@ async fn disabled_sink_stays_out_of_sink_runs() {
 
     let library = test_func_lib(TestFuncHooks::default());
     let mut graph = test_graph();
-    let print_id = graph
-        .find_by_name("Print", NodeSearch::TopLevel)
-        .unwrap()
-        .id;
-    graph
-        .find_mut(print_id, NodeSearch::TopLevel)
-        .unwrap()
-        .disabled = true;
+    let print_id = graph.find_by_name("Print").unwrap().id;
+    graph.find_mut(print_id).unwrap().disabled = true;
 
     let (worker, mut rx) = completed_worker(8);
     worker
@@ -1457,9 +1355,8 @@ async fn queued_messages_ready_at_the_same_wake_reduce_together() {
         completed
             .compiled
             .attribution(root_execution_node(print_b))
-            .unwrap()
-            .collect::<Vec<_>>(),
-        vec![print_b],
+            .unwrap(),
+        print_b,
     );
     assert_eq!(messages(&completed.result.unwrap()), ["second"]);
     assert!(
@@ -1582,17 +1479,15 @@ async fn replacement_queued_during_a_run_is_reported_after_the_running_program()
         finished
             .compiled
             .attribution(root_execution_node(source))
-            .unwrap()
-            .collect::<Vec<_>>(),
-        vec![source],
+            .unwrap(),
+        source,
     );
     assert_eq!(
         finished
             .compiled
             .attribution(root_execution_node(sink))
-            .unwrap()
-            .collect::<Vec<_>>(),
-        vec![sink],
+            .unwrap(),
+        sink,
     );
     let replacement_e_node_id = root_execution_node(replacement_node);
     assert!(matches!(
@@ -1764,10 +1659,7 @@ async fn successful_cache_eviction_is_fire_and_forget_before_batch_acknowledgeme
 
     let library = test_func_lib(TestFuncHooks::default());
     let graph = test_graph();
-    let get_a_id = graph
-        .find_by_name("get_a", NodeSearch::TopLevel)
-        .unwrap()
-        .id;
+    let get_a_id = graph.find_by_name("get_a").unwrap().id;
     let compiled = Arc::new(Compiler::default().compile(&graph, &library).unwrap());
     let (report_tx, mut report_rx) = mpsc::unbounded_channel();
     let worker = Worker::new(move |report| {
@@ -1806,10 +1698,7 @@ async fn cache_eviction_failure_uses_general_worker_error_report() {
     let dir = temp_dir("eviction-error");
     let library = test_func_lib(TestFuncHooks::default());
     let graph = test_graph();
-    let get_a_id = graph
-        .find_by_name("get_a", NodeSearch::TopLevel)
-        .unwrap()
-        .id;
+    let get_a_id = graph.find_by_name("get_a").unwrap().id;
     let blocked_e_node_id = root_execution_node(get_a_id);
     let blocked_path = dir.0.join(blocked_e_node_id.as_uuid().simple().to_string());
     std::fs::create_dir(&blocked_path).unwrap();
@@ -2297,16 +2186,10 @@ async fn disk_cache_persists_node_across_worker_restart() {
         let node: Node = lib.by_name(name).unwrap().into();
         graph.add(node);
     }
-    let get_a_id = graph
-        .find_by_name("get_a", NodeSearch::TopLevel)
-        .unwrap()
-        .id;
-    let mult_id = graph.find_by_name("mult", NodeSearch::TopLevel).unwrap().id;
-    let print_id = graph
-        .find_by_name("Print", NodeSearch::TopLevel)
-        .unwrap()
-        .id;
-    graph.find_mut(mult_id, NodeSearch::TopLevel).unwrap().cache = CacheMode::Disk;
+    let get_a_id = graph.find_by_name("get_a").unwrap().id;
+    let mult_id = graph.find_by_name("mult").unwrap().id;
+    let print_id = graph.find_by_name("Print").unwrap().id;
+    graph.find_mut(mult_id).unwrap().cache = CacheMode::Disk;
     graph.set_input_binding(InputPort::new(mult_id, 0), Binding::bind(get_a_id, 0));
     graph.set_input_binding(InputPort::new(mult_id, 1), Binding::bind(get_a_id, 0));
     graph.set_input_binding(InputPort::new(print_id, 0), Binding::bind(mult_id, 0));
@@ -2387,16 +2270,10 @@ async fn set_disk_store_flushes_resident_disk_backed_values() {
         let node: Node = lib.by_name(name).unwrap().into();
         graph.add(node);
     }
-    let get_a_id = graph
-        .find_by_name("get_a", NodeSearch::TopLevel)
-        .unwrap()
-        .id;
-    let mult_id = graph.find_by_name("mult", NodeSearch::TopLevel).unwrap().id;
-    let print_id = graph
-        .find_by_name("Print", NodeSearch::TopLevel)
-        .unwrap()
-        .id;
-    graph.find_mut(mult_id, NodeSearch::TopLevel).unwrap().cache = CacheMode::Both;
+    let get_a_id = graph.find_by_name("get_a").unwrap().id;
+    let mult_id = graph.find_by_name("mult").unwrap().id;
+    let print_id = graph.find_by_name("Print").unwrap().id;
+    graph.find_mut(mult_id).unwrap().cache = CacheMode::Both;
     graph.set_input_binding(InputPort::new(mult_id, 0), Binding::bind(get_a_id, 0));
     graph.set_input_binding(InputPort::new(print_id, 0), Binding::bind(mult_id, 0));
 
