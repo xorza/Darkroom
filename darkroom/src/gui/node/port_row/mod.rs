@@ -3,8 +3,7 @@
 //! lines up regardless of label width), a fill spacer (col 2), and the
 //! output port+label (col 3, right-aligned against the node edge). Row `i`
 //! holds input `i` and output `i`, so the two sides align. Drawn below the
-//! header by [`crate::gui::node::NodeUI`]; the boundary-port rename
-//! affordance lives in [`crate::gui::node::port_rename`]. The low-level
+//! header by [`crate::gui::node::NodeUI`]. The low-level
 //! glyph primitives (circle, event triangle, hit-box growth) this grid
 //! renders each cell with live in the sibling [`glyph`] module.
 
@@ -12,8 +11,8 @@ pub(super) mod glyph;
 
 use glam::Vec2;
 use palantir::{
-    Align, Configure, ContextMenu, Grid, HAlign, MenuItem, Panel, PopupHandle, Sense, Sizing,
-    Spacing, Text, TextStyle, Track, Ui, VAlign, WidgetId,
+    Align, Configure, ContextMenu, Grid, HAlign, InternedStr, MenuItem, Panel, PopupHandle, Sense,
+    Sizing, Spacing, Text, TextStyle, Tooltip, Track, Ui, VAlign, WidgetId,
 };
 use scenarium::Binding;
 use scenarium::InputPort;
@@ -21,14 +20,12 @@ use scenarium::Library;
 use scenarium::NodeId;
 use scenarium::{DataType, FsPathMode, Func};
 
-use crate::core::document::BoundarySide;
-use crate::core::document::{GraphRef, PortKind, PortRef};
+use crate::core::document::{PortKind, PortRef};
 use crate::core::edit::intent::sink::Intents;
 use crate::core::edit::intent::types::Intent;
 use crate::core::preview;
 use crate::gui::EventRef;
 use crate::gui::node::port_color::{event_color, port_color};
-use crate::gui::node::port_rename::port_label;
 use crate::gui::node::port_row::glyph::{circle_frame, event_glyph, port_diameter};
 use crate::gui::node::value_editor;
 use crate::gui::node::{RecordCtx, node_hovered, port_wid, set_input};
@@ -125,10 +122,6 @@ pub(super) fn ports_row(
 /// The per-cell decisions [`ports_row`] settles once for the whole node.
 #[derive(Clone, Copy, Debug)]
 struct CellOpts {
-    /// Which interface side this port renames, when it is a renameable
-    /// boundary port — `None` for an ordinary port and for the trailing "+"
-    /// placeholder.
-    rename: Option<BoundarySide>,
     /// Build the hover tooltip. Only the node under the pointer does.
     tips: bool,
 }
@@ -144,6 +137,28 @@ fn tip_for(rcx: RecordCtx<'_>, wanted: bool, description: &str, ty: &DataType) -
     port_tip(description, type_label(rcx.library, ty))
 }
 
+/// Render `name` as a port's label, with `tip` (the port's data type) as its
+/// hover tooltip; empty means no tooltip, as [`tip_for`] returns off the
+/// hovered node.
+///
+/// Opts into [`Sense::HOVER`] rather than capturing clicks: the label needs a
+/// trigger anchor for the tooltip, but the node body below it owns selection
+/// and drag, so the press has to fall through. Muted ink — the value column is
+/// each row's strong element, not the label.
+fn port_label(ui: &mut Ui, rcx: RecordCtx<'_>, name: InternedStr, tip: &str) {
+    let snapshot = Text::new(name)
+        .style(&TextStyle {
+            color: rcx.theme.colors.port_label,
+            ..ui.theme.text.clone()
+        })
+        .sense(Sense::HOVER)
+        .show(ui)
+        .snapshot();
+    if !tip.is_empty() {
+        Tooltip::on(&snapshot).text(tip).show(ui);
+    }
+}
+
 fn input_cells(
     ui: &mut Ui,
     rcx: RecordCtx<'_>,
@@ -153,25 +168,15 @@ fn input_cells(
     out: &mut Intents,
 ) {
     let inputs = rcx.graph.inputs(node.inputs);
-    // Boundary (`GraphInput`/`GraphOutput`) ports route the
-    // interface, not literal values — no const affordance.
-    let allow_const = !node.boundary;
     for (i, input) in inputs.iter().enumerate() {
         let port = PortRef {
             node_id: node.id,
             kind: PortKind::Input,
             port_idx: i,
         };
-        // A `GraphOutput` boundary node's input ports are the graph's
-        // *outputs* — renameable, except the trailing "+" placeholder.
-        let opts = CellOpts {
-            rename: (node.boundary && i + 1 < inputs.len()).then_some(BoundarySide::Output),
-            tips,
-        };
+        let opts = CellOpts { tips };
         input_label_cell(ui, rcx, port, node, input, opts, out);
-        if allow_const {
-            value_cell(ui, rcx, sve, port, input, out);
-        }
+        value_cell(ui, rcx, sve, port, input, out);
     }
 }
 
@@ -183,12 +188,7 @@ fn output_cells(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, tips: bool, o
             kind: PortKind::Output,
             port_idx: i,
         };
-        // A `GraphInput` boundary node's output ports are the graph's
-        // *inputs* — renameable, except the trailing "+" placeholder.
-        let opts = CellOpts {
-            rename: (node.boundary && i + 1 < outputs.len()).then_some(BoundarySide::Input),
-            tips,
-        };
+        let opts = CellOpts { tips };
         output_cell(ui, rcx, port, output, opts, out);
     }
     // Events emit from the same (right) side; list them in the rows directly
@@ -239,30 +239,6 @@ fn open_port_context_menu(ui: &mut Ui, menu_id: WidgetId, cell_secondary: bool, 
     }
 }
 
-/// The "Remove port" item both cells end their menu with: interface ports
-/// are authored, so removal is this explicit action, never a side effect of
-/// unwiring. Renders nothing on a port that isn't a renameable boundary one.
-fn remove_port_item(
-    ui: &mut Ui,
-    popup: &PopupHandle,
-    target: GraphRef,
-    port: PortRef,
-    rename: Option<BoundarySide>,
-    out: &mut Intents,
-) {
-    if let Some(side) = rename
-        && MenuItem::new("Remove port").show(ui, popup).left.clicked()
-    {
-        out.push(
-            target,
-            Intent::RemoveBoundaryPort {
-                side,
-                idx: port.port_idx,
-            },
-        );
-    }
-}
-
 /// Column 0: the input port circle + label, plus the right-click binding
 /// menu (anchored here, so right-clicking the circle or label opens it).
 /// The circle's `WidgetId` is the deterministic `port_circle_wid(port)`, so
@@ -277,7 +253,6 @@ fn input_label_cell(
     out: &mut Intents,
 ) {
     let theme = rcx.theme;
-    let allow_const = !node.boundary;
     let tip = tip_for(rcx, opts.tips, &input.description.borrow_str(), &input.ty);
     // Flag a port only once a run actually failed on it — not on every unbound edit — so
     // the port keeps its data-type color while editing instead of flipping as you
@@ -324,7 +299,7 @@ fn input_label_cell(
             if !input.const_only {
                 circle_frame(ui, wid, diameter, fill, outline, margin, &tip);
             }
-            port_label(ui, rcx, port, input.name.clone(), &tip, opts.rename, out);
+            port_label(ui, rcx, input.name.clone(), &tip);
         });
     // Open on right-click anywhere on the cell — circle or label.
     let (menu_id, cell_secondary) = (cell.response.id, cell.response.right.clicked());
@@ -336,9 +311,8 @@ fn input_label_cell(
     ContextMenu::for_id(menu_id)
         .size((Sizing::HUG, Sizing::HUG))
         .show(ui, |ui, popup| {
-            let can_set = allow_const
-                && !matches!(input.binding, InputBindingView::Const(_))
-                && input.default.is_some();
+            let can_set =
+                !matches!(input.binding, InputBindingView::Const(_)) && input.default.is_some();
             if MenuItem::new("Set constant")
                 .enabled(can_set)
                 .show(ui, popup)
@@ -346,7 +320,7 @@ fn input_label_cell(
                 .clicked()
                 && let Some(value) = input.default.clone()
             {
-                out.push(rcx.graph.target(), set_input(port, Binding::Const(value)));
+                out.push(set_input(port, Binding::Const(value)));
             }
             if MenuItem::new("Clear binding")
                 .enabled(!matches!(input.binding, InputBindingView::None))
@@ -354,9 +328,8 @@ fn input_label_cell(
                 .left
                 .clicked()
             {
-                out.push(rcx.graph.target(), set_input(port, None));
+                out.push(set_input(port, None));
             }
-            remove_port_item(ui, popup, rcx.graph.target(), port, opts.rename, out);
         });
 }
 
@@ -398,10 +371,7 @@ fn value_cell(
             )
         });
     if let Some(new_value) = edited.inner {
-        out.push(
-            rcx.graph.target(),
-            set_input(port, Binding::Const(new_value)),
-        );
+        out.push(set_input(port, Binding::Const(new_value)));
     }
 }
 
@@ -436,7 +406,7 @@ fn output_cell(
         .gap(4.0)
         .child_align(Align::v(VAlign::Center))
         .show(ui, |ui| {
-            port_label(ui, rcx, port, output.name.clone(), &tip, opts.rename, out);
+            port_label(ui, rcx, output.name.clone(), &tip);
             circle_frame(
                 ui,
                 wid,
@@ -458,7 +428,6 @@ fn output_cell(
         .size((Sizing::HUG, Sizing::HUG))
         .show(ui, |ui, popup| {
             add_preview_item(ui, popup, rcx, port, out);
-            remove_port_item(ui, popup, rcx.graph.target(), port, opts.rename, out);
         });
 }
 
@@ -470,8 +439,7 @@ const PREVIEW_SPAWN_OFFSET: Vec2 = Vec2::new(80.0, -60.0);
 /// replacement for the old pin toggle: same affordance, but what it creates is
 /// an ordinary node the user can move, delete, and undo like any other.
 ///
-/// Hidden when the library has no preview func, and in a definition pane, where
-/// [`Func::entry_only`] makes the node a compile error.
+/// Hidden when the library has no preview func.
 fn add_preview_item(
     ui: &mut Ui,
     popup: &PopupHandle,
@@ -479,9 +447,6 @@ fn add_preview_item(
     port: PortRef,
     out: &mut Intents,
 ) {
-    if rcx.graph.target() != GraphRef::Main {
-        return;
-    }
     let Some(func) = preview::registered(rcx.library) else {
         return;
     };
@@ -495,10 +460,7 @@ fn add_preview_item(
         .ports
         .center(port)
         .map_or(Vec2::ZERO, |center| center + PREVIEW_SPAWN_OFFSET);
-    out.extend(
-        rcx.graph.target(),
-        add_preview_intents(func, port, pos, NodeId::unique()),
-    );
+    out.extend(add_preview_intents(func, port, pos, NodeId::unique()));
 }
 
 /// The two intents that spawn a preview already reading `port`. Emitted
