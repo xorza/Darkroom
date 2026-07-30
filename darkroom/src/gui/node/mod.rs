@@ -8,7 +8,7 @@ mod value_editor;
 
 use crate::core::document::PortRef;
 use crate::core::edit::intent::sink::Intents;
-use crate::core::edit::intent::types::Intent;
+use crate::core::edit::intent::types::GraphIntent;
 use crate::gui::canvas::breaker::BreakerProbe;
 use crate::gui::canvas::cull::CullRegion;
 use crate::gui::canvas::drag_anchor::GroupDrag;
@@ -118,7 +118,7 @@ impl NodeUI {
     /// for body clicks and latches the drag anchor for a body/title drag
     /// (port circles capture their own presses via `Sense::CLICK`, so
     /// drags don't latch off the port grabs); `prepass` converts the
-    /// anchor into `Intent::MoveSelection` on later frames.
+    /// anchor into `GraphIntent::MoveSelection` on later frames.
     pub(super) fn draw_all(
         &mut self,
         ui: &mut Ui,
@@ -130,7 +130,7 @@ impl NodeUI {
         // Paint in `scene.z_order` (mirrored from `item_placements`) — later
         // draws sit on top, so the last item in the list is frontmost. The
         // order is persisted view state, so a raised item stays raised across
-        // save/load and tab switches; `Intent::Raise` moves a clicked item
+        // save/load and tab switches; `GraphIntent::Raise` moves a clicked item
         // to the end. `RecordCtx` is `Copy`, so the `&scene` borrows held
         // by the loop coexist with copying `rcx` into the draw calls.
         //
@@ -295,7 +295,7 @@ impl NodeUI {
     }
 
     /// Pre-record pass: peek palantir's input state for any widgets
-    /// this `NodeUI` owns and push the corresponding `Intent`s into
+    /// this `NodeUI` owns and push the corresponding `GraphIntent`s into
     /// `out`. Runs before `Scene::rebuild` in `App::record`, so any
     /// state mutation applied from these intents (notably drag-driven
     /// `MoveSelection`) lands in `Document` before recording — Pass A's
@@ -403,8 +403,8 @@ fn node_rename_wid(node_id: NodeId) -> WidgetId {
     node_wid("title_rename", node_id)
 }
 
-pub(super) fn set_input(port: PortRef, to: impl Into<Option<Binding>>) -> Intent {
-    Intent::SetInput {
+pub(super) fn set_input(port: PortRef, to: impl Into<Option<Binding>>) -> GraphIntent {
+    GraphIntent::SetInput {
         input: InputPort::new(port.node_id, port.port_idx),
         to: to.into(),
     }
@@ -421,14 +421,14 @@ pub(super) fn click_intents(shift: bool, graph: Pane<'_>, key: NodeId, out: &mut
     out.push(select_intent(shift, graph, key));
     let deselecting = shift && graph.is_selected(key);
     if !deselecting {
-        out.push(Intent::Raise { key });
+        out.push(GraphIntent::Raise { key });
     }
 }
 
 /// The `SetSelection` a click on `key` produces: plain click selects only
 /// it, Shift-click toggles its membership. `UndoStep::is_noop` drops the
 /// entry when nothing changed.
-fn select_intent(shift: bool, graph: Pane<'_>, key: NodeId) -> Intent {
+fn select_intent(shift: bool, graph: Pane<'_>, key: NodeId) -> GraphIntent {
     let mut to = if shift {
         graph.selected().clone()
     } else {
@@ -439,7 +439,7 @@ fn select_intent(shift: bool, graph: Pane<'_>, key: NodeId) -> Intent {
     } else {
         to.insert(key);
     }
-    Intent::SetSelection { to }
+    GraphIntent::SetSelection { to }
 }
 
 #[cfg(test)]
@@ -462,14 +462,14 @@ mod tests {
         .with_selection(ids.iter().copied())
     }
 
-    fn click(shift: bool, scene: &SceneFixture, id: NodeId) -> Vec<Intent> {
+    fn click(shift: bool, scene: &SceneFixture, id: NodeId) -> Vec<GraphIntent> {
         use crate::core::edit::intent::sink::Queued;
 
         let mut out = Intents::default();
         click_intents(shift, scene.only_pane(), id, &mut out);
         out.drain()
             .map(|queued| match queued {
-                Queued::Scoped(intent) => intent,
+                Queued::Graph(intent) => intent,
                 Queued::Dock(intent) => panic!("a node click raises nothing global: {intent:?}"),
             })
             .collect()
@@ -483,14 +483,14 @@ mod tests {
         // Plain click on an unselected node: select it, then raise it.
         let out = click(false, &scene_with_selection([]), a);
         assert_eq!(out.len(), 2);
-        assert!(matches!(out[0], Intent::SetSelection { .. }));
-        assert!(matches!(out[1], Intent::Raise { key } if key == a));
+        assert!(matches!(out[0], GraphIntent::SetSelection { .. }));
+        assert!(matches!(out[1], GraphIntent::Raise { key } if key == a));
 
         // Plain click on an already-selected node still raises it.
         let out = click(false, &scene_with_selection([a]), a);
         assert!(
             out.iter()
-                .any(|i| matches!(i, Intent::Raise { key } if *key == a)),
+                .any(|i| matches!(i, GraphIntent::Raise { key } if *key == a)),
             "a plain click always lifts its node to the front"
         );
 
@@ -498,7 +498,7 @@ mod tests {
         let out = click(true, &scene_with_selection([a]), b);
         assert!(
             out.iter()
-                .any(|i| matches!(i, Intent::Raise { key } if *key == b)),
+                .any(|i| matches!(i, GraphIntent::Raise { key } if *key == b)),
             "shift-adding a node raises it"
         );
 
@@ -506,6 +506,6 @@ mod tests {
         // deselected shouldn't jump to the front.
         let out = click(true, &scene_with_selection([a, b]), b);
         assert_eq!(out.len(), 1, "shift-deselect suppresses the raise");
-        assert!(matches!(out[0], Intent::SetSelection { .. }));
+        assert!(matches!(out[0], GraphIntent::SetSelection { .. }));
     }
 }
