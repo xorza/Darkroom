@@ -27,6 +27,38 @@ pub(crate) trait Idx: Copy {
     fn from_idx(i: usize) -> Self;
 }
 
+/// Declare one dense index space: a `u32` newtype and its [`Idx`] impl.
+///
+/// Every space is the same newtype over the same primitive with the same two
+/// conversions; `$what` names the space in the bound check, and is the only
+/// thing that differs between them. Doc comments pass through, so what a space
+/// *means* still lives at the declaration.
+///
+/// Sibling of [`id_type!`](::common::id_type), which does this for the uuid
+/// identities on the authoring side.
+macro_rules! idx_type {
+    ($(#[$meta:meta])* $vis:vis struct $name:ident, $what:literal) => {
+        $(#[$meta])*
+        #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
+        $vis struct $name($vis u32);
+
+        impl $crate::common::column::Idx for $name {
+            fn idx(self) -> usize {
+                self.0 as usize
+            }
+
+            fn from_idx(i: usize) -> Self {
+                debug_assert!(
+                    u32::try_from(i).is_ok(),
+                    concat!($what, " must fit in u32"),
+                );
+                $name(i as u32)
+            }
+        }
+    };
+}
+pub(crate) use idx_type;
+
 /// A contiguous run of one dense space — one owner's slice of a [`Column`],
 /// held by the owner while the entries stay packed in the column.
 ///
