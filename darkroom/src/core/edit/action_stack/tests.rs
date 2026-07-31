@@ -6,7 +6,13 @@ use crate::core::document::Document;
 use crate::core::edit::intent::apply::apply_step;
 use crate::core::edit::intent::build::build_step;
 use crate::core::edit::intent::types::GraphIntent;
-use scenarium::testing::test_graph;
+use scenarium::testing::graph::TestGraph;
+
+/// A document over the stock multi-node graph. Nothing below cares which node
+/// is which, only that there are several with placements to drag.
+fn doc() -> Document {
+    TestGraph::sample().graph.into()
+}
 
 /// Push one graph edit through the real build/apply path, as `drain_intents`
 /// does — the shape every coalescing test below repeats.
@@ -20,7 +26,7 @@ fn push_edit(stack: &mut ActionStack, doc: &mut Document, intent: GraphIntent) {
 fn consecutive_moves_coalesce_keeping_first_from() {
     use glam::Vec2;
 
-    let mut doc: Document = test_graph().into();
+    let mut doc = doc();
     let key = doc.graph.iter().next().unwrap().id;
     let start = *doc.main_view.item_placements.get(&key).unwrap();
     let mut stack = ActionStack::new(1 << 20);
@@ -58,7 +64,7 @@ fn consecutive_moves_coalesce_keeping_first_from() {
 fn moves_of_different_nodes_do_not_coalesce() {
     use glam::Vec2;
 
-    let mut doc: Document = test_graph().into();
+    let mut doc = doc();
     let a = doc.graph.iter().next().unwrap().id;
     let b = doc.graph.iter().nth(1).unwrap().id;
     let mut stack = ActionStack::new(1 << 20);
@@ -85,7 +91,7 @@ fn moves_of_different_nodes_do_not_coalesce() {
 fn group_drag_moves_all_and_undoes_as_one() {
     use glam::Vec2;
 
-    let mut doc: Document = test_graph().into();
+    let mut doc = doc();
     let ka = doc.graph.iter().next().unwrap().id;
     let kb = doc.graph.iter().nth(1).unwrap().id;
     let a0 = doc.main_view.item_placements[&ka];
@@ -126,7 +132,7 @@ fn group_drag_moves_all_and_undoes_as_one() {
 fn deleting_selection_restores_nodes_and_edge_in_one_undo() {
     use scenarium::{Binding, InputPort};
 
-    let mut doc: Document = test_graph().into();
+    let mut doc = doc();
     let a = doc.graph.iter().next().unwrap().id;
     let b = doc.graph.iter().nth(1).unwrap().id;
     // Edge a -> b, then select both for deletion.
@@ -165,7 +171,7 @@ fn deleting_selection_restores_nodes_and_edge_in_one_undo() {
 
 #[test]
 fn new_edit_discards_the_redo_tail() {
-    let mut doc: Document = test_graph().into();
+    let mut doc = doc();
     let node = doc.graph.iter().next().unwrap().id;
     let mut stack = ActionStack::new(1 << 20);
 
@@ -197,7 +203,7 @@ fn new_edit_discards_the_redo_tail() {
 
 #[test]
 fn history_bounded_by_byte_budget() {
-    let mut doc: Document = test_graph().into();
+    let mut doc = doc();
     let node = doc.graph.iter().next().unwrap().id;
     // Tiny budget so a handful of small entries overflow it.
     let mut stack = ActionStack::new(256);

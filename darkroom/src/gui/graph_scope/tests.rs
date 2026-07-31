@@ -1,4 +1,5 @@
 use scenarium::testing;
+use scenarium::testing::graph::TestGraph;
 use scenarium::{CacheMode, DataType, FuncOutput, Graph, Library, Node, NodeKind};
 
 use crate::core::document::{Document, PortKind};
@@ -18,11 +19,11 @@ fn only_runnable_sinks_expose_the_disable_toggle() {
         Func::new(FuncId::unique(), "sink_func").sink(),
     ));
 
-    let mut graph = Graph::default();
-    let plain = graph.add_func_node(library.by_name("plain").unwrap());
-    let sink = graph.add_func_node(library.by_name("sink_func").unwrap());
-    let ghost = graph.add(Node::new(NodeKind::Func(FuncId::unique())));
-    let mut fixture = ScopeFixture::over(Document::from(graph), library);
+    let mut g = TestGraph::over(library);
+    let plain = g.add_declared("plain");
+    let sink = g.add_declared("sink_func");
+    let ghost = g.graph.add(Node::new(NodeKind::Func(FuncId::unique())));
+    let mut fixture = ScopeFixture::over(Document::from(g.graph), g.library);
     let graph_scope = fixture.scope();
 
     assert!(
@@ -199,12 +200,12 @@ fn impure_flag_reads_from_func_behavior() {
             .output(FuncOutput::new("out", DataType::Int)),
     ));
 
-    let mut graph = Graph::default();
-    let pure_id = graph.add_func_node(library.by_name("pure_src").unwrap());
-    let impure_id = graph.add_func_node(library.by_name("impure_src").unwrap());
-    let self_cached_id = graph.add_func_node(library.by_name("self_cached").unwrap());
+    let mut g = TestGraph::over(library);
+    let pure_id = g.add_declared("pure_src");
+    let impure_id = g.add_declared("impure_src");
+    let self_cached_id = g.add_declared("self_cached");
 
-    let mut fixture = ScopeFixture::over(Document::from(graph), library);
+    let mut fixture = ScopeFixture::over(Document::from(g.graph), g.library);
     let graph_scope = fixture.scope();
 
     let pure = graph_scope.node(pure_id).unwrap();
@@ -237,7 +238,7 @@ fn impure_flag_reads_from_func_behavior() {
 
 #[test]
 fn a_wildcard_output_resolves_through_the_wire_it_mirrors() {
-    use scenarium::{Binding, Func, FuncId, FuncInput, InputPort, OutputType};
+    use scenarium::{Func, FuncId, FuncInput, OutputType};
 
     // A passthrough mirroring input 0, and an Int source. `Graph` and
     // `Library` aren't `Clone`, so each half builds its own — the wiring is
@@ -259,13 +260,16 @@ fn a_wildcard_output_resolves_through_the_wire_it_mirrors() {
                 .output(FuncOutput::new("out", DataType::Int)),
         ));
 
-        let mut graph = Graph::default();
-        let consumer = graph.add_func_node(library.by_name("passthrough").unwrap());
-        let producer = graph.add_func_node(library.by_name("int_src").unwrap());
+        let mut g = TestGraph::over(library);
+        let consumer = g.add_declared("passthrough");
+        g.add_declared("int_src");
         if wired {
-            graph.set_input_binding(InputPort::new(consumer, 0), Binding::bind(producer, 0));
+            g.wire("int_src", 0, "passthrough", 0);
         }
-        (ScopeFixture::over(Document::from(graph), library), consumer)
+        (
+            ScopeFixture::over(Document::from(g.graph), g.library),
+            consumer,
+        )
     }
 
     // Unwired the passthrough's output is polymorphic; wired it reports what

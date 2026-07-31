@@ -10,9 +10,9 @@
 //! **One func per node.** Two nodes never share a declaration unless a test
 //! asks with [`instance`](TestGraph::instance), so
 //! [`edit_func`](TestGraph::edit_func) changes what one node declares rather
-//! than what every user of a shared fixture declares. That is the difference
-//! from the older `test_func_lib`, whose five funcs are edited in place by
-//! whichever test needs a different shape.
+//! than what every user of a shared fixture declares — including inside
+//! [`sample`](TestGraph::sample), where a test can retarget one body without
+//! reaching every other node built from the same shape.
 
 use std::sync::Arc;
 
@@ -30,7 +30,6 @@ use crate::graph::node::{CacheMode, Node, NodeKind};
 use crate::graph::{Binding, Graph};
 use crate::library::Library;
 use crate::testing::calls::Calls;
-use crate::testing::{TestFuncHooks, test_func_lib, test_graph};
 use crate::{DataType, DynamicValue, StaticValue};
 
 /// A graph, the library it resolves against, and the names its nodes answer to.
@@ -135,41 +134,46 @@ impl TestGraph {
         self.graph.detach_node(node_id)
     }
 
-    /// Adopt a graph and library built elsewhere, taking each node's name from
-    /// the node itself. Nodes sharing a name resolve to an arbitrary one of
-    /// them — the same rule the old `Graph::find_by_name` followed.
-    pub fn adopt(graph: Graph, library: Library) -> Self {
-        let ids = graph
-            .iter()
-            .map(|node| (node.name.clone(), node.id))
-            .collect();
-        Self {
-            graph,
-            library,
-            ids,
-            next_id: 0,
-        }
-    }
-
-    /// The legacy five-node fixture — `get_a`/`get_b` → `sum` → `mult` → `Print`
-    /// — with hooks that answer instead of panicking.
+    /// The stock five-node fixture — the graph most tests about *the engine*
+    /// rather than about a topology are written over.
     ///
-    /// A bridge, not an example: it delegates to `test_graph`/`test_func_lib`
-    /// so node ids (and therefore the dense order a compile assigns) stay
-    /// exactly what they were, and tests can migrate one at a time.
+    /// `get_a`/`get_b` → `sum`, then `sum` and `get_b` → `mult`, then `mult` →
+    /// the `Print` sink. Everything retains in RAM, so a second run exercises
+    /// cross-run reuse; only `Print` is impure, so it is the one node a second
+    /// run re-executes.
     pub fn sample() -> Self {
-        Self::sample_with(TestFuncHooks {
-            get_a: Arc::new(|| Ok(1)),
-            get_b: Arc::new(|| 11),
-            print: Arc::new(|_| {}),
-        })
+        Self::sample_values(1, 11)
     }
 
-    /// [`sample`](Self::sample) with the legacy fixture's hooks named — for a
-    /// test whose subject is what one of those bodies *does* (fails, counts its
-    /// calls, records what it was handed).
-    pub fn sample_with(hooks: TestFuncHooks) -> Self {
-        Self::adopt(test_graph(), test_func_lib(hooks))
+    /// [`sample`](Self::sample) with the two sources' values named.
+    pub fn sample_values(a: i64, b: i64) -> Self {
+        // The sources declare `Int` and emit `Float`: an `Int`-declared
+        // consumer reading them goes through the scalar coercion class, which
+        // is a path this fixture is meant to cover.
+        let source = |value: i64| {
+            move |n: NodeSpec| {
+                n.pure()
+                    .cache(CacheMode::Ram)
+                    .output(DataType::Int)
+                    .compute(move |_| StaticValue::Float(value as f64))
+            }
+        };
+
+        let mut g = Self::new();
+        g.add("get_a", source(a));
+        g.add("get_b", source(b));
+        g.add("sum", |n| n.sum().cache(CacheMode::Ram));
+        g.add("mult", |n| n.mult().cache(CacheMode::Ram));
+        g.add("Print", |n| n.records().cache(CacheMode::Ram));
+        g.wire("get_a", 0, "sum", 0);
+        g.wire("get_b", 0, "sum", 1);
+        g.wire("sum", 0, "mult", 0);
+        g.wire("get_b", 0, "mult", 1);
+        g.wire("mult", 0, "Print", 0);
+        g.graph
+            .validate()
+            .expect("the fixture graph is well formed");
+        g
     }
 
     pub fn id(&self, name: &str) -> NodeId {
@@ -251,6 +255,28 @@ impl TestGraph {
     /// spec itself.
     pub fn fails(&mut self, name: &str, message: &'static str) {
         self.edit_func(name, |func| func.lambda = failing_lambda(message));
+    }
+
+    /// Replace what `name` declares with a body that panics if a run reaches
+    /// it.
+    ///
+    /// How a fixture states "this must be pruned" as something the run has to
+    /// honour, rather than as an assertion made after the fact about what the
+    /// outcome listed.
+    pub fn never(&mut self, name: &str) {
+        let reason = format!("{name} must not run in this fixture");
+        self.edit_func(name, move |func| {
+            func.lambda = async_lambda!(
+                move |_| { reason = reason.clone() } => { panic!("{reason}") }
+            );
+        });
+    }
+
+    /// [`never`](Self::never) on every node — "nothing here runs at all".
+    pub fn never_all(&mut self) {
+        for name in self.ids.keys().cloned().collect::<Vec<_>>() {
+            self.never(&name);
+        }
     }
 
     fn func_id(&self, name: &str) -> FuncId {
@@ -718,24 +744,62 @@ mod tests {
         assert!(!g.graph.bindings.contains_key(&port));
     }
 
-    /// `sample()` is the legacy fixture unchanged — same nodes under the same
-    /// ids, which is what lets a test migrate to the harness without its
-    /// assertions about schedule order moving.
+    /// The sample fixture wires what its doc claims, and its nodes carry ids
+    /// ascending with declaration order — which is what makes the schedule
+    /// order every engine test names reproducible.
     #[test]
-    fn sample_preserves_the_legacy_fixtures_identities() {
+    fn sample_wires_five_nodes_in_declaration_order() {
         let g = TestGraph::sample();
-        let legacy = test_graph();
+        assert_eq!(g.graph.len(), 5);
 
-        assert_eq!(g.graph.len(), legacy.len());
-        for node in legacy.iter() {
+        for (consumer, input, producer) in [
+            ("sum", 0, "get_a"),
+            ("sum", 1, "get_b"),
+            ("mult", 0, "sum"),
+            ("mult", 1, "get_b"),
+            ("Print", 0, "mult"),
+        ] {
             assert_eq!(
-                g.id(&node.name),
-                node.id,
-                "{} keeps the id the legacy fixture gave it",
-                node.name
+                g.graph.bindings[&InputPort::new(g.id(consumer), input)],
+                Binding::bind(g.id(producer), 0),
+                "{producer} feeds {consumer}[{input}]"
             );
         }
-        assert_eq!(g.graph, legacy, "and the wiring is identical");
+
+        let ids: Vec<NodeId> = ["get_a", "get_b", "sum", "mult", "Print"]
+            .into_iter()
+            .map(|name| g.id(name))
+            .collect();
+        let mut sorted = ids.clone();
+        sorted.sort();
+        assert_eq!(ids, sorted, "ids ascend with declaration order");
+    }
+
+    /// `sample_values` moves what the sources emit, all the way to the sink:
+    /// the defaults compute `(1 + 11) * 11 = 132`, and 2/5 computes
+    /// `(2 + 5) * 5 = 35`.
+    #[tokio::test]
+    async fn sample_values_reach_the_sink() {
+        use crate::testing::engine::TestEngine;
+
+        let mut default = TestEngine::over(TestGraph::sample());
+        assert_eq!(default.run_sinks().await.logs(), ["132"]);
+
+        let mut moved = TestEngine::over(TestGraph::sample_values(2, 5));
+        assert_eq!(moved.run_sinks().await.logs(), ["35"]);
+    }
+
+    /// `never` makes "this must not run" something the run has to honour: the
+    /// node it names panics if reached, while the rest of the fixture is
+    /// untouched.
+    #[tokio::test]
+    #[should_panic(expected = "get_a must not run in this fixture")]
+    async fn never_panics_when_the_run_reaches_the_node() {
+        use crate::testing::engine::TestEngine;
+
+        let mut g = TestGraph::sample();
+        g.never("get_a");
+        TestEngine::over(g).run_sinks().await;
     }
 
     /// The spec's flags land on the declaration rather than being remembered

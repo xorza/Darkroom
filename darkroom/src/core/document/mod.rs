@@ -300,7 +300,7 @@ mod tests {
     use super::*;
     use crate::core::document::dock::DockOp;
 
-    use scenarium::testing::test_graph as core_test_graph;
+    use scenarium::testing::graph::TestGraph;
     use scenarium::{FuncId, Node, NodeKind};
 
     /// Add a bare `Func`-kind node to `doc`'s root graph + main view at
@@ -356,7 +356,7 @@ mod tests {
     fn dock_layout_round_trips_as_json() {
         use crate::core::document::dock::{DockDrop, SplitSide};
 
-        let mut doc: Document = core_test_graph().into();
+        let mut doc = build_test_doc();
         let node_id = doc.graph.iter().next().unwrap().id;
         let primary = doc.layout.primary().id;
         doc.layout.find_or_insert(TabRef::Preferences, primary);
@@ -392,7 +392,9 @@ mod tests {
         GraphView::default().move_item_to_index(&NodeId::unique(), 0);
     }
 
+    /// A document over a real multi-node graph — the fixture the layout and
+    /// validation tests need something with nodes in it for.
     fn build_test_doc() -> Document {
-        core_test_graph().into()
+        TestGraph::sample().graph.into()
     }
 }

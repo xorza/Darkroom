@@ -14,7 +14,6 @@ use crate::graph::func::event::EventLambda;
 use crate::graph::func::lambda::{FuncLambda, Invocation};
 use crate::graph::identity::{EventPort, NodeId};
 use crate::graph::node::CacheMode;
-use crate::testing::TestFuncHooks;
 use crate::testing::calls::Calls;
 use crate::testing::graph::TestGraph;
 use crate::testing::worker::TestWorker;
@@ -75,11 +74,9 @@ mod runs {
     /// the worker runs only its cone — the sink `Print` panics if reached.
     #[tokio::test]
     async fn node_seeds_override_a_disabled_node_and_run_only_its_cone() {
-        let mut graph = TestGraph::sample_with(TestFuncHooks {
-            get_a: Arc::new(|| Ok(1)),
-            get_b: Arc::new(|| 11),
-            ..Default::default()
-        });
+        let mut graph = TestGraph::sample();
+        graph.never("mult");
+        graph.never("Print");
         graph.cache_all(CacheMode::None);
         graph.disable("sum");
         let mut w = TestWorker::over(graph);
@@ -105,10 +102,11 @@ mod runs {
     }
 
     /// A compiled disabled sink must not participate in an ordinary sink run.
-    /// The default hooks panic if any node executes.
+    /// Every body panics if it executes.
     #[tokio::test]
     async fn a_disabled_sink_stays_out_of_sink_runs() {
-        let mut graph = TestGraph::sample_with(TestFuncHooks::default());
+        let mut graph = TestGraph::sample();
+        graph.never_all();
         graph.disable("Print");
         let mut w = TestWorker::over(graph);
 
@@ -764,7 +762,7 @@ mod cache {
     /// acknowledgement, and reports nothing when it succeeds.
     #[tokio::test]
     async fn a_successful_eviction_reports_nothing() {
-        let mut w = TestWorker::over(TestGraph::sample_with(TestFuncHooks::default()));
+        let mut w = TestWorker::over(TestGraph::sample());
         let compiled = w.compile();
         let get_a = w.id("get_a");
 
@@ -786,7 +784,7 @@ mod cache {
     #[tokio::test]
     async fn an_eviction_failure_uses_the_general_worker_error_report() {
         let dir = TempDir::new("eviction-error");
-        let mut w = TestWorker::over(TestGraph::sample_with(TestFuncHooks::default()));
+        let mut w = TestWorker::over(TestGraph::sample());
         let blocked = w.id("get_a");
         // A directory where the blob file belongs: removal fails on it.
         let blocked_path = dir.join(blocked.as_uuid().simple().to_string());

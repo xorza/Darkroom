@@ -344,13 +344,15 @@ mod tests {
 
     use crate::FuncOutput;
     use crate::graph::func::error::InvokeError;
+    use crate::graph::func::lambda::Invocation;
     use crate::graph::func::{Func, FuncInput};
     use crate::library::{Library, TypeEntry};
     use crate::runtime::context::ContextStore;
+    use crate::testing;
     use crate::testing::func_invoker::FuncInvoker;
-    use crate::testing::{self, TestFuncHooks, test_func_lib};
     use crate::{
         CodecError, CustomValue, CustomValueCodec, DataType, DynamicValue, StaticValue, TypeId,
+        async_lambda,
     };
 
     #[derive(Debug)]
@@ -589,7 +591,27 @@ mod tests {
     /// the way it does between two runs of one node.
     #[tokio::test]
     async fn invoke_by_id_and_index() -> Result<(), InvokeError> {
-        let library = test_func_lib(TestFuncHooks::default());
+        // The body stashes what it computed in the node's own state, which is
+        // what the second call below reads back.
+        let mut library = Library::default();
+        library.add(
+            Func::new(FuncId::unique(), "sum")
+                .pure()
+                .input(FuncInput::required("A", DataType::Int))
+                .input(FuncInput::required("B", DataType::Int))
+                .output(FuncOutput::new("Sum", DataType::Int))
+                .lambda(async_lambda!(|Invocation {
+                                           state,
+                                           inputs,
+                                           outputs,
+                                           ..
+                                       }| {
+                    let total = inputs[0].as_i64().unwrap() + inputs[1].as_i64().unwrap();
+                    state.set(total);
+                    outputs[0] = StaticValue::Int(total).into();
+                    Ok(())
+                })),
+        );
         let sum = library.by_name("sum").unwrap().id;
         let sum = library.by_id(sum).unwrap();
         let int = |value: i64| DynamicValue::Static(StaticValue::Int(value));
