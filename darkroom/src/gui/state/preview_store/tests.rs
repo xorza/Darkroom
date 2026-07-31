@@ -5,7 +5,6 @@ use imaginarium::{Image as RawImage, ImageBuffer, ImageDesc};
 use scenarium::{Node, NodeKind, SpecialNode, StaticValue};
 
 use crate::core::document::TabRef;
-use crate::core::document::dock::DockOp;
 use crate::core::document::harness::DocFixture;
 use crate::core::preview::preview_func;
 
@@ -16,16 +15,22 @@ fn image_value(width: usize, height: usize, format: ColorFormat) -> DynamicValue
     DynamicValue::from_custom(LensImage::from(ImageBuffer::from_cpu(raw)))
 }
 
-/// A document holding one preview node, optionally with its viewer tab
-/// open and active — only a group's visible tab draws, so only that one
+/// A document holding one preview node at `node`, optionally with its viewer
+/// tab open and active — only a group's visible tab draws, so only that one
 /// materializes a full-resolution texture.
-fn document_with_preview(viewer: bool) -> (Document, NodeId) {
+///
+/// The id is the caller's so the two shapes can name the same node: a store
+/// reconciled against both has to see one preview gaining and losing a viewer,
+/// not two unrelated ones.
+fn document_with_preview(node: NodeId, viewer: bool) -> Document {
     let mut fixture = DocFixture::default();
-    let node = fixture.add(&preview_func(Default::default()));
+    let func = preview_func(Default::default());
+    fixture.library.add(func.clone());
+    fixture.doc.graph.insert(node, Node::from(&func));
     if viewer {
         fixture = fixture.with_tab(TabRef::ImageViewer(node));
     }
-    (fixture.doc, node)
+    fixture.doc
 }
 
 #[test]
@@ -79,7 +84,8 @@ fn image_preparation_converts_pixels_and_reports_native_metadata() {
 fn image_source_lives_only_until_the_full_texture_is_registered() {
     let mut arena = UiHarness::arena();
     let mut store = PreviewStore::default();
-    let (card_only, node) = document_with_preview(false);
+    let node = NodeId::unique();
+    let card_only = document_with_preview(node, false);
 
     store.ingest_preview(
         arena.ui(),
@@ -95,16 +101,7 @@ fn image_source_lives_only_until_the_full_texture_is_registered() {
     assert_eq!(image.source_bytes, 512 * 256 * 4);
     assert!(matches!(image.full, FullImage::Deferred(_)));
 
-    let mut viewer = Document::default();
-    viewer.graph.insert(
-        node,
-        Node::new(NodeKind::Func(preview_func(Default::default()).id)),
-    );
-    let primary = viewer.layout.primary().id;
-    let tab = TabRef::ImageViewer(node);
-    viewer.layout.find_or_insert(tab, primary);
-    viewer.layout.apply(DockOp::ActivateTab { tab });
-    store.reconcile(arena.ui(), &viewer);
+    store.reconcile(arena.ui(), &document_with_preview(node, true));
     let StoredContent::Image(image) = &store.entries[&node] else {
         panic!("viewer demand must retain the image resource");
     };
@@ -130,7 +127,8 @@ fn image_source_lives_only_until_the_full_texture_is_registered() {
 fn a_previews_value_lives_exactly_as_long_as_its_node() {
     let mut arena = UiHarness::arena();
     let mut store = PreviewStore::default();
-    let (mut document, node) = document_with_preview(false);
+    let node = NodeId::unique();
+    let mut document = document_with_preview(node, false);
     let other = document
         .graph
         .add(Node::new(NodeKind::Special(SpecialNode::RunSinks)));

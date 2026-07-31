@@ -1,32 +1,21 @@
-use scenarium::testing;
 use scenarium::testing::graph::TestGraph;
-use scenarium::{
-    Binding, CacheMode, DataType, FuncOutput, Graph, InputPort, Library, Node, NodeKind,
-};
+use scenarium::{Binding, CacheMode, DataType, Graph, InputPort, Node, NodeKind};
 
 use crate::core::document::PortKind;
-use crate::core::document::harness::{DocFixture, wildcard_library};
+use crate::core::document::harness::DocFixture;
 use crate::gui::graph_ctx::harness::GraphCtxFixture;
 
 #[test]
 fn only_runnable_sinks_expose_the_disable_toggle() {
-    use scenarium::{Func, FuncId};
+    use scenarium::FuncId;
 
     // The two axes `can_disable` reads: sink or not, and resolvable or not.
     // The third node names a func the library has never held.
-    let mut library = Library::default();
-    library.add(testing::with_stub_lambda(
-        Func::new(FuncId::unique(), "plain").output(FuncOutput::new("out", DataType::Int)),
-    ));
-    library.add(testing::with_stub_lambda(
-        Func::new(FuncId::unique(), "sink_func").sink(),
-    ));
-
-    let mut g = TestGraph::over(library);
-    let plain = g.add_declared("plain");
-    let sink = g.add_declared("sink_func");
+    let mut g = TestGraph::new();
+    let plain = g.add("plain", |n| n.output(DataType::Int));
+    let sink = g.add("sink_func", |n| n.sink());
     let ghost = g.graph.add(Node::new(NodeKind::Func(FuncId::unique())));
-    let mut fixture = GraphCtxFixture::over(DocFixture::over(g));
+    let mut fixture = GraphCtxFixture::over(g);
     let graph_ctx = fixture.graph_ctx();
 
     assert!(
@@ -181,34 +170,17 @@ fn cache_mode_reads_verbatim_per_node() {
 
 #[test]
 fn impure_flag_reads_from_func_behavior() {
-    use scenarium::{Func, FuncId};
-
     // Three funcs differing only in the flags the header gate reads: a `Pure`
     // one (offers the storage toggles), an `Impure` one (no content digest,
     // so the toggles are hidden), and a self-caching one.
-    let mut library = Library::default();
-    library.add(testing::with_stub_lambda(
-        Func::new("bbebd119-82d8-45cc-a710-cdaa45426521", "pure_src")
-            .pure()
-            .output(FuncOutput::new("out", DataType::Int)),
-    ));
-    library.add(testing::with_stub_lambda(
-        Func::new("9a97bb06-2c2e-443a-a836-6a11e29cbea7", "impure_src")
-            .output(FuncOutput::new("out", DataType::Int)),
-    ));
-    library.add(testing::with_stub_lambda(
-        Func::new(FuncId::unique(), "self_cached")
-            .pure()
-            .uncacheable()
-            .output(FuncOutput::new("out", DataType::Int)),
-    ));
+    let mut g = TestGraph::new();
+    let pure_id = g.add("pure_src", |n| n.pure().output(DataType::Int));
+    let impure_id = g.add("impure_src", |n| n.output(DataType::Int));
+    let self_cached_id = g.add("self_cached", |n| {
+        n.pure().uncacheable().output(DataType::Int)
+    });
 
-    let mut g = TestGraph::over(library);
-    let pure_id = g.add_declared("pure_src");
-    let impure_id = g.add_declared("impure_src");
-    let self_cached_id = g.add_declared("self_cached");
-
-    let mut fixture = GraphCtxFixture::over(DocFixture::over(g));
+    let mut fixture = GraphCtxFixture::over(g);
     let graph_ctx = fixture.graph_ctx();
 
     let pure = graph_ctx.node(pure_id).unwrap();
@@ -239,90 +211,25 @@ fn impure_flag_reads_from_func_behavior() {
     assert!(!pure.sink() && !impure.sink());
 }
 
-#[test]
-fn a_wildcard_output_resolves_through_the_wire_it_mirrors() {
-    use scenarium::{Func, FuncId, FuncInput, OutputType};
-
-    // A passthrough mirroring input 0, and an Int source. `Graph` and
-    // `Library` aren't `Clone`, so each half builds its own — the wiring is
-    // the only difference between them.
-    fn fixture(wired: bool) -> (GraphCtxFixture, scenarium::NodeId) {
-        let mut library = Library::default();
-        let mut passthrough = Func::new(FuncId::unique(), "passthrough")
-            .pure()
-            .input(FuncInput::optional("in", DataType::Any));
-        passthrough.outputs.push(FuncOutput {
-            name: "out".to_owned(),
-            description: None,
-            ty: OutputType::Wildcard { mirrors: 0 },
-        });
-        library.add(testing::with_stub_lambda(passthrough));
-        library.add(testing::with_stub_lambda(
-            Func::new(FuncId::unique(), "int_src")
-                .pure()
-                .output(FuncOutput::new("out", DataType::Int)),
-        ));
-
-        let mut g = TestGraph::over(library);
-        let consumer = g.add_declared("passthrough");
-        g.add_declared("int_src");
-        if wired {
-            g.wire("int_src", 0, "passthrough", 0);
-        }
-        (GraphCtxFixture::over(DocFixture::over(g)), consumer)
-    }
-
-    // Unwired the passthrough's output is polymorphic; wired it reports what
-    // reached it — the one reading that cannot come off the declaration
-    // alone, and the reason the context carries a resolved table at all.
-    let (mut unwired, consumer) = fixture(false);
-    assert_eq!(
-        unwired
-            .graph_ctx()
-            .node(consumer)
-            .unwrap()
-            .output(0)
-            .unwrap()
-            .ty(),
-        DataType::Any,
-        "an unwired passthrough has nothing to mirror"
-    );
-
-    let (mut wired, consumer) = fixture(true);
-    assert_eq!(
-        wired
-            .graph_ctx()
-            .node(consumer)
-            .unwrap()
-            .output(0)
-            .unwrap()
-            .ty(),
-        DataType::Int,
-        "the wildcard follows the wire to the Int source"
-    );
-}
-
-/// A graph edit reaches the very next read, with nothing announced.
+/// A wildcard output reports what the *graph* wired into the input it
+/// mirrors — the one reading that cannot come off the declaration alone, and
+/// the reason the context carries a resolved table at all.
 ///
-/// The canvas holds no derived state about the graph, so there is no
-/// invalidation step between wiring a port and the canvas reporting its new
-/// type — which is the whole reason the wildcard resolution is safe to do per
-/// read. Wired through the same context the record passes build.
+/// And the edit reaches the very next read with nothing announced: the canvas
+/// holds no derived state about the graph, so there is no invalidation step
+/// between wiring a port and the canvas reporting its new type — which is the
+/// whole reason resolving per read is safe. Wired through the same context the
+/// record passes build.
 #[test]
-fn a_wire_edit_reaches_the_next_read_with_nothing_announced() {
-    let library = wildcard_library();
-    let probe = library.by_name("probe").expect("just added").clone();
-    let passthrough = library.by_name("passthrough").expect("just added").clone();
-
+fn a_wildcard_output_follows_the_wire_it_mirrors_from_the_next_read_on() {
     // `probe` declares a fixed `Int` output; the passthrough mirrors whatever
     // reaches its input, so unwired it resolves to `Any`.
-    let mut doc_fixture = DocFixture {
-        library,
-        ..DocFixture::default()
-    };
-    let producer = doc_fixture.add(&probe);
-    let consumer = doc_fixture.add(&passthrough);
-    let mut fixture = GraphCtxFixture::over(doc_fixture);
+    let mut g = TestGraph::new();
+    let producer = g.add("probe", |n| n.pure().output(DataType::Int));
+    let consumer = g.add("passthrough", |n| {
+        n.pure().optional(DataType::Any).wildcard(0)
+    });
+    let mut fixture = GraphCtxFixture::over(g);
 
     // A fresh context per read, resolving its own output-type table — the
     // same thing each record pass composes.

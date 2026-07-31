@@ -169,7 +169,7 @@ pub(crate) fn port_circle_wid(port: PortRef) -> WidgetId {
 /// An input port's inline const editor (text field, checkbox, or file-pick
 /// button).
 pub(crate) fn const_editor_wid(input: InputPort) -> WidgetId {
-    port_wid("const_editor", input_ref(input))
+    port_wid("const_editor", input.into())
 }
 
 /// An input port's cell (circle + label). The prepass polls it for a
@@ -177,14 +177,6 @@ pub(crate) fn const_editor_wid(input: InputPort) -> WidgetId {
 /// [`port_circle_wid`] and consumes hits over its own rect.
 pub(crate) fn input_cell_wid(port: PortRef) -> WidgetId {
     port_wid("input_cell", port)
-}
-
-fn input_ref(input: InputPort) -> PortRef {
-    PortRef {
-        node_id: input.node_id,
-        kind: PortKind::Input,
-        port_idx: input.port_idx,
-    }
 }
 
 /// Open `menu_id`'s context menu when the cell or its port circle was
@@ -532,11 +524,7 @@ mod tests {
     fn add_preview_spawns_a_node_already_wired_to_the_port() {
         let func = preview_func(Default::default());
         let producer = NodeId::unique();
-        let port = PortRef {
-            node_id: producer,
-            kind: PortKind::Output,
-            port_idx: 2,
-        };
+        let port = PortRef::output(producer, 2);
         let center = Vec2::new(100.0, 40.0);
 
         let node_id = NodeId::unique();

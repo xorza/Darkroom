@@ -2,7 +2,7 @@
 
 use scenarium::{Binding, DataType, FuncInput, InputPort, Library, StaticValue, ValueVariant};
 
-use crate::core::document::{PortKind, PortRef};
+use crate::core::document::PortRef;
 use crate::gui::graph_ctx::node_scope::NodeScope;
 
 /// One input port: what the func declares for it, and what the graph has
@@ -30,11 +30,7 @@ impl<'a> InputScope<'a> {
 
     /// This port's address in the canvas's glyph domains.
     pub(crate) fn port_ref(self) -> PortRef {
-        PortRef {
-            node_id: self.node.id,
-            kind: PortKind::Input,
-            port_idx: self.port_idx,
-        }
+        PortRef::input(self.node.id, self.port_idx)
     }
 
     pub(crate) fn name(self) -> &'a str {

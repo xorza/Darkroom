@@ -141,30 +141,27 @@ fn build_tile(theme: &Theme) -> Image {
 mod tests {
     use super::*;
 
+    /// Both halves of the multiplier's contract, on one sweep: it is always a
+    /// power of two, so a zoom change re-tiles onto the same lattice rather
+    /// than sliding the grid under the nodes; and zoom·m lands in
+    /// `[MIN_WRAP, MAX_WRAP]`, so the on-screen tile is spacing·[1, 2] px.
     #[test]
-    fn wrap_multiplier_identity_at_scale_1() {
+    fn wrap_multiplier_is_a_power_of_two_holding_screen_spacing_in_band() {
         // zoom 1 → want zoom·m ∈ [1, 2]; m = 1 (k = 0).
         assert_eq!(wrap_multiplier(1.0), 1.0);
-    }
 
-    #[test]
-    fn wrap_multiplier_keeps_screen_spacing_in_band() {
-        // For any zoom, zoom·m must land in [MIN_WRAP, MAX_WRAP] so the
-        // on-screen tile is spacing·[1, 2] px.
-        for &zoom in &[0.1, 0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 5.0] {
-            let normalized = zoom * wrap_multiplier(zoom);
+        for zoom in [0.1, 0.25, 0.3, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 5.0] {
+            let m = wrap_multiplier(zoom);
+            assert_eq!(
+                m.log2().fract().abs(),
+                0.0,
+                "zoom={zoom}: m={m} is not a power of two"
+            );
+            let normalized = zoom * m;
             assert!(
                 (MIN_WRAP..=MAX_WRAP).contains(&normalized),
                 "zoom={zoom} normalized={normalized} out of band",
             );
-        }
-    }
-
-    #[test]
-    fn wrap_multiplier_is_power_of_two() {
-        for &zoom in &[0.1, 0.3, 1.0, 2.0, 5.0] {
-            let m = wrap_multiplier(zoom);
-            assert_eq!(m.log2().fract().abs(), 0.0, "m={m} not a power of two");
         }
     }
 }
