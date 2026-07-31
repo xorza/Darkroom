@@ -209,10 +209,8 @@ fn summary(compiled: &CompiledGraph, authored: &[NodeId]) -> Vec<String> {
     // The host-facing indices, which are built from their own scratch.
     for &node_id in authored {
         out.push(format!(
-            "authored {node_id:?} run_target={:?} sink={:?} impure={:?}",
+            "authored {node_id:?} run_target={:?}",
             compiled.run_target(node_id),
-            compiled.is_sink(node_id),
-            compiled.is_impure(node_id),
         ));
     }
     out
@@ -244,25 +242,23 @@ fn fixture() -> Fixture {
     }
 }
 
-/// Each of the four questions a host asks about an authored node, over a graph
-/// where every one has a different answer. An id the program never held answers
-/// "nothing" to all of them — the one case they must agree on.
+/// Each question a host asks about an authored node, over a graph where the
+/// nodes differ in role. An id the program never held answers "nothing" to
+/// all of them — the one case they must agree on.
 #[test]
 fn the_artifact_answers_for_each_authored_node() {
     let f = fixture();
     let compiled = Compiler::default().compile(&f.graph, &f.library).unwrap();
 
-    for (node_id, sink) in [(f.source, false), (f.sink, true), (f.loose, false)] {
+    for node_id in [f.source, f.sink, f.loose] {
         let e_node_id = ExecutionNodeId::from_node(node_id);
         assert_eq!(compiled.run_target(node_id), Some(e_node_id));
-        assert_eq!(compiled.is_sink(node_id), Some(sink));
         assert_eq!(compiled.attribution(e_node_id).unwrap(), node_id);
     }
 
     let absent = NodeId::unique();
     assert_eq!(compiled.run_target(absent), None);
-    assert_eq!(compiled.is_sink(absent), None);
-    assert_eq!(compiled.is_impure(absent), None);
+    assert_eq!(compiled.attribution(ExecutionNodeId::from_node(absent)), None);
 }
 
 /// Evicting a node reaches everything downstream of it, reflexively — and stops

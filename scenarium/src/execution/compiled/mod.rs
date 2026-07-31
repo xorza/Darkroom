@@ -159,26 +159,6 @@ impl CompiledGraph {
         Ok(e_node_id.node_id())
     }
 
-    /// Whether an authored node performs sink work — runs for its effect rather
-    /// than for a value some consumer reads.
-    ///
-    /// `None` where the node covers no compiled work: one the program dropped,
-    /// or a program not built yet. There is nothing to answer from, so the
-    /// caller keeps whatever the authoring graph alone tells it.
-    pub fn is_sink(&self, node_id: NodeId) -> Option<bool> {
-        self.node(node_id)
-            .map(|node_idx| self.e_nodes[node_idx].sink)
-    }
-
-    /// Whether an authored node holds work that recomputes every run, and so
-    /// has no content digest for a cache to key on.
-    ///
-    /// `None` on a node with no compiled work, as in [`Self::is_sink`].
-    pub fn is_impure(&self, node_id: NodeId) -> Option<bool> {
-        self.node(node_id)
-            .map(|node_idx| self.e_nodes[node_idx].behavior == FuncBehavior::Impure)
-    }
-
     /// The execution node a "run this node" seeds — the node itself, when the
     /// artifact holds it.
     ///
