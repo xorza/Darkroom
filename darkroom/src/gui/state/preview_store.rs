@@ -223,6 +223,7 @@ mod tests {
 
     use crate::core::document::TabRef;
     use crate::core::document::dock::DockOp;
+    use crate::core::document::harness::DocFixture;
     use crate::core::preview::preview_func;
 
     fn image_value(width: usize, height: usize, format: ColorFormat) -> DynamicValue {
@@ -236,17 +237,12 @@ mod tests {
     /// open and active — only a group's visible tab draws, so only that one
     /// materializes a full-resolution texture.
     fn document_with_preview(viewer: bool) -> (Document, NodeId) {
-        let mut document = Document::default();
-        let node = document
-            .graph
-            .add_func_node(&preview_func(Default::default()));
+        let mut fixture = DocFixture::default();
+        let node = fixture.add(&preview_func(Default::default()));
         if viewer {
-            let primary = document.layout.primary().id;
-            let tab = TabRef::ImageViewer(node);
-            document.layout.find_or_insert(tab, primary);
-            document.layout.apply(DockOp::ActivateTab { tab });
+            fixture = fixture.with_tab(TabRef::ImageViewer(node));
         }
-        (document, node)
+        (fixture.doc, node)
     }
 
     #[test]
