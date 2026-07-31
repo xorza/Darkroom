@@ -1,20 +1,14 @@
-use glam::UVec2;
 use palantir::internals::UiHarness;
-use palantir::{Configure, Panel, Sizing, Ui};
+use scenarium::NodeId;
 use scenarium::testing::graph::TestGraph;
-use scenarium::{NodeId, OutputTypes};
 
 use super::*;
-use crate::core::document::harness::{DocFixture, one_func_library, spread};
-use crate::core::document::{Document, GraphView};
+use crate::core::document::harness::DocFixture;
 use crate::core::edit::intent::sink::Intents;
 use crate::gui::graph_ctx::harness::GraphCtxFixture;
-use crate::gui::pane::graph::GraphUI;
 use crate::gui::pane::graph::frame::hits::CanvasHits;
-use crate::gui::pane::graph::harness::*;
+use crate::gui::pane::graph::harness::CanvasHarness;
 use crate::gui::pane::graph::node::port_row::port_circle_wid;
-use crate::gui::state::run_state::RunState;
-use crate::gui::theme::Theme;
 
 /// Two two-in/one-out nodes wired producer → consumer — enough graph for a
 /// wire to be in flight over, and enough wiring for the snap filter to have a
@@ -126,47 +120,13 @@ fn a_wire_drops_when_its_start_node_leaves_the_scene() {
 fn a_port_drag_released_over_a_compatible_port_commits_the_binding() {
     use palantir::PointerButton;
 
-    let library = one_func_library();
-    let probe = library.by_name("probe").expect("just added").clone();
-
     // Two unwired nodes, so the drag has a producer to leave and a consumer
     // to land on and nothing to trip the cycle check.
-    let mut doc = Document::default();
-    let producer = doc.graph.add_func_node(&probe);
-    let consumer = doc.graph.add_func_node(&probe);
-    doc.main_view = GraphView::for_graph(&doc.graph);
-    spread(&mut doc.main_view);
-
-    let theme = Theme::default();
-    let run_state = RunState::default();
-    let mut harness = UiHarness::new(UVec2::new(1200, 800));
-    let mut graph_ui = GraphUI::default();
-
-    // `doc` is a parameter, not a capture, so the graph can gain the edge the
-    // first drag commits before the second one runs against it.
-    let draw = |ui: &mut Ui, graph_ui: &mut GraphUI, doc: &Document| {
-        let ctx = app(&theme, &library, &run_state);
-        let mut intents = Intents::default();
-        let mut types = OutputTypes::default();
-        let graph_ctx = graph_ctx_for(ctx, doc, &mut types);
-        graph_ui.prepass(ui, graph_ctx, &mut intents);
-        Panel::vstack()
-            .id_salt("pane")
-            .size((Sizing::FILL, Sizing::FILL))
-            .show(ui, |ui| {
-                graph_ui.draw(ui, graph_ctx, &mut intents);
-            });
-        intents.drain().collect::<Vec<_>>()
-    };
-
+    let mut h = CanvasHarness::new(DocFixture::probes(2));
+    let (producer, consumer) = (h.node(0), h.node(1));
     // Two frames to record both nodes, so their port circles have widget ids
     // and `CanvasGeometry` measured centers to hit-test against.
-    harness.frame(|ui| {
-        draw(ui, &mut graph_ui, &doc);
-    });
-    harness.frame(|ui| {
-        draw(ui, &mut graph_ui, &doc);
-    });
+    h.prime(2);
 
     let source = port_circle_wid(PortRef {
         node_id: producer,
@@ -179,30 +139,26 @@ fn a_port_drag_released_over_a_compatible_port_commits_the_binding() {
         port_idx: 0,
     });
     // The snap scan tests the post-transform rect, so aim at that one.
-    let drop_at = harness.center_of(sink);
+    let drop_at = h.ui.center_of(sink);
 
-    harness.press_on(source);
-    harness.frame(|ui| {
-        draw(ui, &mut graph_ui, &doc);
-    });
-    harness.drag_to(drop_at);
-    let held = harness.frame_value(|ui| draw(ui, &mut graph_ui, &doc));
+    h.ui.press_on(source);
+    h.frame();
+    h.ui.drag_to(drop_at);
+    let held = h.frame();
     assert!(
         held.is_empty(),
         "a wire still held commits nothing: {held:?}"
     );
 
-    harness.release_button(PointerButton::Left);
-    let released = harness.frame_value(|ui| draw(ui, &mut graph_ui, &doc));
-
-    // The helper carries the pane assertion: a wire commits against the pane
+    h.ui.release_button(PointerButton::Left);
+    // The harness carries the pane assertion: a wire commits against the pane
     // holding its start node, never the focused one.
-    let released = graph_intents(&released);
+    let released = h.frame();
     assert!(
         matches!(
             released[..],
             [GraphIntent::SetInput { input, to: Some(Binding::Bind(src)) }]
-                if *input == InputPort::new(consumer, 0)
+                if input == InputPort::new(consumer, 0)
                     && src.node_id == producer
                     && src.port_idx == 0
         ),
@@ -215,7 +171,8 @@ fn a_port_drag_released_over_a_compatible_port_commits_the_binding() {
     // The filter answers that off `Document::graph_for` — a prepass handed the
     // wrong graph would go on snapping cycles with every other assertion here
     // still green.
-    doc.graph
+    h.doc_mut()
+        .graph
         .set_input_binding(InputPort::new(consumer, 0), Binding::bind(producer, 0));
     let back_source = port_circle_wid(PortRef {
         node_id: consumer,
@@ -227,20 +184,14 @@ fn a_port_drag_released_over_a_compatible_port_commits_the_binding() {
         kind: PortKind::Input,
         port_idx: 0,
     });
-    let back_drop_at = harness.center_of(back_sink);
-    harness.advance_past_double_click(|ui| {
-        draw(ui, &mut graph_ui, &doc);
-    });
-    harness.press_on(back_source);
-    harness.frame(|ui| {
-        draw(ui, &mut graph_ui, &doc);
-    });
-    harness.drag_to(back_drop_at);
-    harness.frame(|ui| {
-        draw(ui, &mut graph_ui, &doc);
-    });
-    harness.release_button(PointerButton::Left);
-    let refused = harness.frame_value(|ui| draw(ui, &mut graph_ui, &doc));
+    let back_drop_at = h.ui.center_of(back_sink);
+    h.advance_past_double_click();
+    h.ui.press_on(back_source);
+    h.frame();
+    h.ui.drag_to(back_drop_at);
+    h.frame();
+    h.ui.release_button(PointerButton::Left);
+    let refused = h.frame();
     assert!(
         refused.is_empty(),
         "a drop that would close a cycle never snaps, so it binds nothing: {refused:?}"

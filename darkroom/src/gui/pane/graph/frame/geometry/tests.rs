@@ -1,15 +1,9 @@
-use glam::{UVec2, Vec2};
-use palantir::internals::UiHarness;
-use palantir::{Configure, Panel, Sizing, Ui};
-use scenarium::{Binding, InputPort, OutputTypes};
+use glam::Vec2;
+use scenarium::{Binding, InputPort};
 
-use crate::core::document::harness::{one_func_library, spread};
-use crate::core::document::{Document, GraphView, PortKind, PortRef};
-use crate::core::edit::intent::sink::Intents;
-use crate::gui::pane::graph::GraphUI;
-use crate::gui::pane::graph::harness::*;
-use crate::gui::state::run_state::RunState;
-use crate::gui::theme::Theme;
+use crate::core::document::harness::DocFixture;
+use crate::core::document::{PortKind, PortRef};
+use crate::gui::pane::graph::harness::CanvasHarness;
 
 /// A node scrolled off-screen keeps resolvable port centers — and loses them
 /// once the *document* stops holding it.
@@ -23,48 +17,24 @@ use crate::gui::theme::Theme;
 /// node.
 #[test]
 fn a_culled_nodes_ports_stay_anchored_until_its_node_leaves_the_document() {
-    let library = one_func_library();
-    let probe = library.by_name("probe").expect("just added").clone();
-
-    let mut doc = Document::default();
-    let stays = doc.graph.add_func_node(&probe);
-    let leaves = doc.graph.add_func_node(&probe);
-    doc.graph
+    let mut fixture = DocFixture::probes(2);
+    let (stays, leaves) = (fixture.node(0), fixture.node(1));
+    fixture
+        .doc
+        .graph
         .set_input_binding(InputPort::new(leaves, 0), Binding::bind(stays, 0));
-    doc.main_view = GraphView::for_graph(&doc.graph);
-    spread(&mut doc.main_view);
-
-    let theme = Theme::default();
-    let run_state = RunState::default();
-    let mut harness = UiHarness::new(UVec2::new(1200, 800));
-    let mut graph_ui = GraphUI::default();
-
-    let draw = |ui: &mut Ui, graph_ui: &mut GraphUI, doc: &Document| {
-        let ctx = app(&theme, &library, &run_state);
-        let mut intents = Intents::default();
-        let mut types = OutputTypes::default();
-        let graph_ctx = graph_ctx_for(ctx, doc, &mut types);
-        graph_ui.prepass(ui, graph_ctx, &mut intents);
-        Panel::vstack()
-            .id_salt("pane")
-            .size((Sizing::FILL, Sizing::FILL))
-            .show(ui, |ui| {
-                graph_ui.draw(ui, graph_ctx, &mut intents);
-            });
-    };
-    let frame = |harness: &mut UiHarness, graph_ui: &mut GraphUI, doc: &_| {
-        harness.frame(|ui| draw(ui, graph_ui, doc));
-    };
 
     // Both on screen and recorded, so every glyph has a fresh offset cached.
-    frame(&mut harness, &mut graph_ui, &doc);
-    frame(&mut harness, &mut graph_ui, &doc);
+    let mut h = CanvasHarness::new(fixture);
+    h.prime(2);
+
     let out_port = PortRef {
         node_id: leaves,
         kind: PortKind::Output,
         port_idx: 0,
     };
-    let anchored = graph_ui
+    let anchored = h
+        .graph_ui
         .geometry
         .ports
         .center(out_port)
@@ -72,13 +42,13 @@ fn a_culled_nodes_ports_stay_anchored_until_its_node_leaves_the_document() {
 
     // Scroll it far past the viewport. Two frames: the first still reads the
     // on-screen record, the second is the culled one that has to reconstruct.
-    let before = doc.main_view.item_placements[&leaves];
+    let before = h.doc().main_view.item_placements[&leaves];
     let shift = Vec2::new(6000.0, 4000.0);
-    doc.main_view.item_placements[&leaves] = before + shift;
-    frame(&mut harness, &mut graph_ui, &doc);
-    frame(&mut harness, &mut graph_ui, &doc);
+    h.doc_mut().main_view.item_placements[&leaves] = before + shift;
+    h.prime(2);
 
-    let culled = graph_ui
+    let culled = h
+        .graph_ui
         .geometry
         .ports
         .center(out_port)
@@ -93,8 +63,8 @@ fn a_culled_nodes_ports_stay_anchored_until_its_node_leaves_the_document() {
 
     // The node the document keeps holds its cached size; the other one is
     // still cached too, because being off-screen is not being deleted.
-    let mut live_types = OutputTypes::default();
-    let live = graph_ctx_for(app(&theme, &library, &run_state), &doc, &mut live_types);
+    let CanvasHarness { graph_ui, ctx, .. } = &mut h;
+    let live = ctx.graph_ctx();
     for id in [stays, leaves] {
         assert!(
             graph_ui
@@ -123,9 +93,9 @@ fn a_culled_nodes_ports_stay_anchored_until_its_node_leaves_the_document() {
     );
     // The port offsets went with it, so the next culled rebuild has nothing
     // left to reconstruct from.
-    frame(&mut harness, &mut graph_ui, &doc);
+    h.prime(1);
     assert_eq!(
-        graph_ui.geometry.ports.center(out_port),
+        h.graph_ui.geometry.ports.center(out_port),
         None,
         "an evicted node's ports stop resolving",
     );
