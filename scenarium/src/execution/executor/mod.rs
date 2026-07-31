@@ -1,14 +1,13 @@
 //! The run loop and its transient state. The `Executor` owns the shared
 //! `ctx_manager` and the invoke scratch; the per-node cross-run cache lives in
-//! the [`RuntimeCache`]. Given a
-//! [`Resolved`] run — the program and the schedule
-//! swept against it — plus that `RuntimeCache`,
-//! [`Executor::run`] invokes each scheduled node's lambda and gathers outcomes.
-//! Each node's per-run result is one [`NodeOutcome`] in the per-run outcome map.
+//! the [`RuntimeCache`]. Given a program, the [`RunSchedule`] planned and resolved
+//! against it, and that `RuntimeCache`, [`Executor::run`] invokes each scheduled node's
+//! lambda and gathers outcomes. Each node's per-run result is one [`NodeOutcome`] in the
+//! per-run outcome map.
 //!
-//! **Pre-run resolution.** The loop cannot be entered any other way: `Resolved` is minted
-//! only by [`resolve`](crate::execution::schedule::Scheduled::resolve), so the disposition,
-//! output demand,
+//! **Pre-run resolution.** The loop reads a schedule
+//! [`resolve`](crate::execution::schedule::RunSchedule::resolve) has already swept, so
+//! the disposition, output demand,
 //! and reader counts it reads were derived together and are authoritative for the whole run. A
 //! [`NodeState::Reuse`] is never re-derived after its producers may have been cut. A cut
 //! node (its cone feeds only cache hits, so a disk-cached node's stale upstream isn't
@@ -41,7 +40,7 @@ use crate::execution::cache::disk_store::StorePolicy;
 use crate::execution::cache::runtime::RuntimeCache;
 use crate::execution::compile::compiled_graph::{CompiledGraph, ExecutionBinding};
 use crate::execution::error::RunError;
-use crate::execution::schedule::{NodeState, Resolved, RunSchedule};
+use crate::execution::schedule::{NodeState, RunSchedule};
 
 /// What became of a node this run — the single per-node result map, so the run-time
 /// facts can't contradict (a node can't be `Reused` yet carry a run time, or `Ran` yet
@@ -96,12 +95,13 @@ pub(crate) struct Executor {
 /// [`ExecutionFrame`].
 #[derive(Debug)]
 pub(crate) struct RunRequest<'a, 'r> {
-    /// The run, resolved: the program, the schedule planned against it, and the
-    /// dispositions, demand, and reader counts one sweep derived from both. One value
-    /// because only [`Scheduled::resolve`](crate::execution::schedule::Scheduled::resolve)
-    /// mints it — the loop cannot be handed a schedule nothing resolved, or one resolved
-    /// against a different program.
-    pub(crate) run: Resolved<'a>,
+    pub(crate) program: &'a CompiledGraph,
+    /// The schedule, planned against `program` and then resolved: dispositions, demand,
+    /// and reader counts a sweep derived from both. Resolving it is
+    /// [`ExecutionEngine::execute`](crate::execution::engine)'s job, and the debug
+    /// [`validate`](RunSchedule::validate) after that pass is what catches a schedule
+    /// spanning some other program.
+    pub(crate) schedule: &'a RunSchedule,
     pub(crate) cache: &'a mut RuntimeCache,
     /// Live per-node feedback, published ahead of the final outcome.
     pub(crate) reporter: &'a mut (dyn RunReporter + 'r),
@@ -151,14 +151,12 @@ impl Executor {
         outcome: &mut ExecutionOutcome,
     ) {
         let RunRequest {
-            run,
+            program,
+            schedule,
             cache,
             reporter,
             cancel,
         } = request;
-        // The handle's job is done the moment the loop has it: it proved these two
-        // belong together, and every step below reads them as the pair it vouched for.
-        let (program, schedule) = (run.program(), run.schedule());
 
         outcome.clear();
         let start = Instant::now();
@@ -213,20 +211,19 @@ impl Executor {
     /// value: the cancelled run's tail, a node the planner excluded, a pruned cut.
     ///
     /// Separate from [`run`](Self::run) because `node_ram` can only be measured once the
-    /// engine has released what the run left dead — but taking the same [`Resolved`] the
-    /// loop walked, so the outcome can only be collected against the program and schedule
-    /// that produced it.
+    /// engine has released what the run left dead — over the same program and schedule
+    /// the loop walked.
     ///
     /// Every column here spans the whole program, so this walks the program rather than
     /// `process_order`: a node the run never scheduled can still hold RAM from an earlier
     /// one, and that is the only thing it has to report.
     pub(crate) fn collect_outcome(
         &self,
-        run: Resolved<'_>,
+        program: &CompiledGraph,
+        schedule: &RunSchedule,
         node_ram: &Column<NodeIdx, RamUsage>,
         outcome: &mut ExecutionOutcome,
     ) {
-        let (program, schedule) = (run.program(), run.schedule());
         for (node_idx, node_outcome) in self.outcomes.iter_indexed() {
             let status = match node_outcome {
                 // A reuse hit, or a node the cut pruned that still holds a resident value, are
@@ -331,7 +328,7 @@ struct ExecutionFrame<'a, 'r> {
 impl ExecutionFrame<'_, '_> {
     /// One node's turn. The resolved disposition decides which of the four things happens,
     /// and it is authoritative — a [`NodeState::Reuse`] is never re-derived here, since its
-    /// producers may already be pruned (see [`resolve`](crate::execution::schedule::Scheduled::resolve)).
+    /// producers may already be pruned (see [`resolve`](crate::execution::schedule::RunSchedule::resolve)).
     async fn run_node(&mut self, node_idx: NodeIdx) {
         let e_node = &self.program[node_idx];
         let demand = &self.schedule.outputs.demand[e_node.outputs];

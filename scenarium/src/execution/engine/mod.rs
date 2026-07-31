@@ -119,24 +119,25 @@ impl ExecutionEngine {
         // reachability + topological order + missing-input verdicts + walk roots, no
         // cache/digest state. Node seeds already identify exact compiled roots.
         //
-        // Each phase below consumes the previous one's handle, so the order these three
-        // run in is the only order that type-checks.
+        // This function is the one place the three passes below run, and they must run
+        // in this order over the one buffer; each asserts `RunSchedule::validate` in
+        // debug, which is what catches a schedule spanning some other program.
         let compiled = self
             .compiled
             .as_deref()
             .expect("execution requires an installed compiled graph");
-        let scheduled = self.planner.plan(compiled, &seeds, &mut self.schedule)?;
+        self.planner.plan(compiled, &seeds, &mut self.schedule)?;
 
         // Phase 2a: prepare filesystem identities away from the async worker. The stamps are
         // reused for repeated paths and any late bound-path restamp this run.
         self.cache
-            .prepare(compiled, scheduled.executing(), cancel.clone())
+            .prepare(compiled, self.schedule.executing(), cancel.clone())
             .await;
 
         // Phase 2b: cache-aware refinement, into the same buffer. Stamp digests, then derive
         // disposition, exact output demand, and live readers together. The resolved run is
         // authoritative: a cache-hit or blocked consumer contributes no upstream demand.
-        let resolved = scheduled.resolve(&mut self.cache).await;
+        self.schedule.resolve(compiled, &mut self.cache).await;
 
         // Phase 3: run the surviving schedule. Each node's disk cache is written the moment it
         // finishes (inside the run loop), not batched here — so a long run's earlier
@@ -144,7 +145,8 @@ impl ExecutionEngine {
         self.executor
             .run(
                 RunRequest {
-                    run: resolved,
+                    program: compiled,
+                    schedule: &self.schedule,
                     cache: &mut self.cache,
                     reporter,
                     cancel,
@@ -153,18 +155,16 @@ impl ExecutionEngine {
             )
             .await;
 
-        self.cache.release_dead_outputs(resolved.program());
+        self.cache.release_dead_outputs(compiled);
 
         // The resident set is now final (post-eviction), so this is the true
         // cache footprint the run leaves behind — total and per-node.
         outcome.cache_ram = self.cache.resident_ram_stats(&mut self.node_ram);
 
         // Phase 4: reduce the run to one status row per node. Last, because a node's row
-        // carries the RAM it ended up holding — which the two steps above just settled —
-        // alongside what it did. `resolved` still names the pair the loop walked, so the
-        // reduction cannot be taken against a different program or schedule.
+        // carries the RAM it ended up holding — which the two steps above just settled.
         self.executor
-            .collect_outcome(resolved, &self.node_ram, outcome);
+            .collect_outcome(compiled, &self.schedule, &self.node_ram, outcome);
 
         outcome.triggered_events.append(&mut seeds.events);
 
@@ -200,7 +200,7 @@ impl ExecutionEngine {
 
     /// Self-consistency of the installed artifact and the cache aligned to it.
     fn validate(&self) -> std::result::Result<(), InstallValidationError> {
-        let program = &self
+        let program = self
             .compiled
             .as_deref()
             .expect("validation requires an installed compiled graph");
@@ -302,10 +302,8 @@ pub(crate) mod internals {
                 .compiled
                 .as_deref()
                 .expect("execution preparation requires an installed compiled graph");
-            self.planner
-                .plan(compiled, &seeds, &mut self.schedule)?
-                .resolve(&mut self.cache)
-                .await;
+            self.planner.plan(compiled, &seeds, &mut self.schedule)?;
+            self.schedule.resolve(compiled, &mut self.cache).await;
             Ok(())
         }
 
@@ -342,7 +340,7 @@ pub(crate) mod internals {
         }
 
         pub(crate) fn node_inputs(&self, node_id: NodeId) -> &[ExecutionInput] {
-            let program = &self.compiled();
+            let program = self.compiled();
             &program.inputs[program.by_id(node_id).inputs]
         }
 
