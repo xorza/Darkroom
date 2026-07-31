@@ -1,7 +1,7 @@
 //! The runtime services behind the editor: the function library and the
-//! evaluation worker. `App` reaches one through a `Workspace` and adds the
-//! frontend orchestration on top, so worker construction and the drain/run
-//! primitives live here rather than in the shell.
+//! evaluation worker. `App` owns one and adds the frontend orchestration on
+//! top, so worker construction and the drain/run primitives live here rather
+//! than in the shell.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -41,7 +41,7 @@ pub(crate) struct RuntimeHost {
 impl RuntimeHost {
     /// Assemble the func library and spin up the evaluation worker, which is
     /// woken through `wake`.
-    pub(crate) fn new(wake: Wake, preferences: &Preferences, status: StatusLog) -> Self {
+    pub(crate) fn new(wake: Wake, preferences: &Preferences) -> Self {
         let model_paths = (&preferences.ml_models).into();
         let library = RuntimeLibrary::new(&model_paths);
         let worker = WorkerBridge::new(wake);
@@ -50,7 +50,7 @@ impl RuntimeHost {
             worker,
             disk_root: None,
             compiler: Compiler::default(),
-            status,
+            status: StatusLog::default(),
         };
         // Install the store up front (memory-only until a document has a
         // path); `set_document_cache` repoints the root as documents open.
@@ -214,12 +214,105 @@ impl RuntimeHost {
 }
 
 #[cfg(test)]
-pub(crate) mod internals {
-    use std::path::PathBuf;
+mod tests {
+    use std::sync::Arc;
 
+    use common::internals::test_output_path;
+    use scenarium::{Binding, Graph, InputPort, NodeId, StaticValue};
+
+    use crate::core::io::cache::document_cache_root;
+    use crate::core::io::preferences::{MlModelPreferences, Preferences};
     use crate::core::runtime_host::RuntimeHost;
 
-    pub(crate) fn disk_root(host: &RuntimeHost) -> Option<PathBuf> {
-        host.disk_root.clone()
+    /// The default value seeded into `func`'s model-path input (index 1),
+    /// read back through the published library.
+    fn ml_model_default(host: &RuntimeHost, func: &str) -> Option<StaticValue> {
+        host.library.published.load().by_name(func).unwrap().inputs[1]
+            .default_value
+            .clone()
+    }
+
+    #[test]
+    fn stale_wiring_survives_compilation_and_still_runs() {
+        let mut host = RuntimeHost::new(Arc::new(|| {}), &Preferences::default());
+
+        // Library drift: a wire into an output the func doesn't declare.
+        // Nothing prunes it — the authored wiring stays (it revives if the
+        // library gets the port back) and compilation tolerates it as an
+        // unbound input.
+        let library = host.library.published.load();
+        let func = library.by_name("ML Denoise").expect("built-in present");
+        let mut graph = Graph::default();
+        let producer = graph.add_func_node(func);
+        let consumer = graph.add_func_node(func);
+        let dangling = InputPort::new(consumer, 0);
+        graph.set_input_binding(dangling, Binding::bind(producer, 99));
+        drop(library);
+
+        assert!(
+            host.run_once(&graph),
+            "the drifted graph compiles and is queued"
+        );
+        assert!(
+            host.evict_cache(&graph, NodeId::unique()),
+            "the drifted graph compiles and queues an eviction"
+        );
+        assert_eq!(host.status.error, None, "no compile failure was reported");
+        assert_eq!(
+            graph.bindings.get(&dangling),
+            Some(&Binding::bind(producer, 99)),
+            "the dangling wire is preserved, not pruned"
+        );
+    }
+
+    #[test]
+    fn ml_defaults_follow_preferences_and_the_cache_root_follows_the_document() {
+        let denoise_path = "/models/host-denoise.onnx";
+        let star_removal_path = "/models/host-stars.onnx";
+        let mut preferences = Preferences {
+            ml_models: MlModelPreferences {
+                denoise: denoise_path.into(),
+                star_removal: star_removal_path.into(),
+            },
+            ..Preferences::default()
+        };
+        let mut host = RuntimeHost::new(Arc::new(|| {}), &preferences);
+
+        // Startup seeds the ML nodes' path inputs from the preferences.
+        assert_eq!(
+            ml_model_default(&host, "ML Denoise"),
+            Some(StaticValue::FsPath(denoise_path.to_owned()))
+        );
+        assert_eq!(
+            ml_model_default(&host, "ML Star Removal"),
+            Some(StaticValue::FsPath(star_removal_path.to_owned()))
+        );
+
+        // A later preferences edit republishes the library with the new paths.
+        let updated_denoise_path = "/models/updated-denoise.onnx";
+        let updated_star_removal_path = "/models/updated-stars.onnx";
+        preferences.ml_models.denoise = updated_denoise_path.into();
+        preferences.ml_models.star_removal = updated_star_removal_path.into();
+        host.configure_ml_model_defaults(&preferences);
+        assert_eq!(
+            ml_model_default(&host, "ML Denoise"),
+            Some(StaticValue::FsPath(updated_denoise_path.to_owned()))
+        );
+        assert_eq!(
+            ml_model_default(&host, "ML Star Removal"),
+            Some(StaticValue::FsPath(updated_star_removal_path.to_owned()))
+        );
+
+        // The disk cache is memory-only until a document has a path, then
+        // repoints as documents open and again when the path goes away.
+        let first_path = test_output_path("darkroom_runtime_host/first.darkroom");
+        let second_path = test_output_path("darkroom_runtime_host/second.darkroom");
+        assert_eq!(host.disk_root, None);
+        host.set_document_cache(Some(&first_path));
+        assert_eq!(host.disk_root, Some(document_cache_root(&first_path)));
+        host.set_document_cache(Some(&second_path));
+        assert_eq!(host.disk_root, Some(document_cache_root(&second_path)));
+        host.set_document_cache(None);
+        assert_eq!(host.disk_root, None);
     }
 }

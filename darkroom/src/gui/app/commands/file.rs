@@ -38,7 +38,7 @@ impl App {
     /// body: the picker runs here, *after* the guard cleared, so cancelling
     /// the unsaved-changes prompt never costs the user a file choice.
     pub(crate) fn load_picked_document(&mut self) {
-        if let Some(path) = dialogs::pick_project_open_path(self.workspace.open.path.as_deref()) {
+        if let Some(path) = dialogs::pick_project_open_path(self.open.path.as_deref()) {
             self.load_document(&path);
         }
     }
@@ -53,10 +53,13 @@ impl App {
     /// empty undo history (restoring the old doc via Cmd-Z would replay
     /// nodes from intent history that no longer matches the live tree),
     /// dropped gesture state, forced scene rebuild, and cleared run results —
-    /// preview textures included.
+    /// preview textures included. The worker's disk cache repoints too, so
+    /// disk-backed nodes read the new document's store rather than the old
+    /// one's.
     fn adopt_document(&mut self, open: OpenDocument) {
         self.editor = Editor::new();
-        self.workspace.replace_document(open);
+        self.open = open;
+        self.runtime.set_document_cache(self.open.path.as_deref());
         self.remember_document_path();
     }
 
@@ -66,21 +69,18 @@ impl App {
         let open = match OpenDocument::load(path.to_path_buf()) {
             Ok(open) => open,
             Err(err) => {
-                self.workspace
-                    .runtime
-                    .status
-                    .error(format!("load failed: {err:#}"));
+                self.runtime.status.error(format!("load failed: {err:#}"));
                 return;
             }
         };
         self.adopt_document(open);
-        self.workspace.runtime.status.error = None;
+        self.runtime.status.error = None;
     }
 
     /// Cmd+S: overwrite the current file if there is one, else fall
     /// back to Save As (first save of a fresh document).
     pub(crate) fn save_current(&mut self) {
-        match self.workspace.open.path.clone() {
+        match self.open.path.clone() {
             Some(path) => self.save_document(&path),
             None => self.save_document_as(),
         }
@@ -88,29 +88,29 @@ impl App {
 
     /// Cmd+Shift+S / "Save As…": always prompt for a destination.
     fn save_document_as(&mut self) {
-        if let Some(path) = dialogs::pick_project_save_path(self.workspace.open.path.as_deref()) {
+        if let Some(path) = dialogs::pick_project_save_path(self.open.path.as_deref()) {
             self.save_document(&path);
         }
     }
 
+    /// Write the document to `path` and adopt it as the save target. Save-As
+    /// moves the document, so the worker's disk cache repoints to the new
+    /// location's store — the old one stays where it is.
     fn save_document(&mut self, path: &Path) {
-        match self.workspace.save_to(path) {
+        match self.open.save_to(path) {
             Ok(()) => {
+                self.runtime.set_document_cache(self.open.path.as_deref());
                 self.remember_document_path();
-                self.workspace.runtime.status.error = None;
+                self.runtime.status.error = None;
             }
-            Err(err) => self
-                .workspace
-                .runtime
-                .status
-                .error(format!("save failed: {err:#}")),
+            Err(err) => self.runtime.status.error(format!("save failed: {err:#}")),
         }
     }
 
-    /// Mirror the workspace's active path into persisted preferences after a
-    /// successful document lifecycle transition.
+    /// Mirror the open document's active path into persisted preferences
+    /// after a successful document lifecycle transition.
     fn remember_document_path(&mut self) {
-        self.preferences.document_path = self.workspace.open.path.clone();
+        self.preferences.document_path = self.open.path.clone();
         self.save_preferences();
     }
 }

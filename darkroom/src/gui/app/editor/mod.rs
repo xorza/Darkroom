@@ -2,9 +2,8 @@
 //!
 //! `Editor` owns undo history and the run projections, the GUI tree, and
 //! transient gesture state. The canvas's own projection of the graph lives
-//! with the canvas that draws it. [`App`] lends it the workspace's document
-//! for each operation, keeping document/runtime ownership on the workspace
-//! rather than in the GUI.
+//! with the canvas that draws it. [`App`] lends it the open document for
+//! each operation, keeping document and runtime ownership on the shell.
 //!
 //! [`App`]: crate::gui::app::App
 

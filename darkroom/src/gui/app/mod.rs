@@ -4,9 +4,10 @@ use std::time::{Duration, Instant};
 use palantir::Ui;
 use scenarium::{Library, WorkerError, WorkerReport, WorkerStatusKind};
 
+use crate::core::document::open_document::OpenDocument;
 use crate::core::io::preferences::{Preferences, WindowState};
+use crate::core::runtime_host::RuntimeHost;
 use crate::core::wake::Wake;
-use crate::core::workspace::Workspace;
 use crate::gui::HostHandle;
 use crate::gui::MAIN_WINDOW;
 use crate::gui::app::discard_dialog::{DiscardChoice, DiscardOutcome};
@@ -50,15 +51,20 @@ pub(crate) struct StatusInputs<'a> {
     pub(crate) process_memory: u64,
 }
 
-/// GUI policy around the shared [`Workspace`] and the [`Editor`] that borrows
-/// its open document. `App` owns preferences, dialogs, theme, and exit policy;
-/// document/runtime coordination remains frontend-independent.
+/// The editor shell: it owns the open document and the runtime services
+/// evaluating it, and lends the document to the [`Editor`] that authors each
+/// frame. `App` also owns preferences, dialogs, theme, and exit policy.
 /// `update` drains external queues once, while replayable `record` runs
 /// `Editor::frame` and handles actions only in the pass that receives input.
 #[derive(Debug)]
 pub(crate) struct App {
     editor: Editor,
-    workspace: Workspace,
+    /// The document being edited, with the path it saves to and whether it
+    /// has diverged from what is on disk.
+    open: OpenDocument,
+    /// The func library, the evaluation worker, and the status log they
+    /// report into — everything the document is executed against.
+    runtime: RuntimeHost,
     theme: Theme,
     host_handle: HostHandle,
     /// Persisted session state (active theme name + last document).
@@ -115,9 +121,13 @@ impl App {
         };
         // `preferences` is loaded in `run_gui` before the window exists, so
         // its saved geometry can size the window at creation.
+        let mut runtime = RuntimeHost::new(wake, &preferences);
+        let open = OpenDocument::load_preferred(&mut preferences, &mut runtime.status);
+        runtime.set_document_cache(open.path.as_deref());
         let mut app = Self {
             editor: Editor::new(),
-            workspace: Workspace::new(wake, &mut preferences),
+            open,
+            runtime,
             theme: Theme::default(),
             host_handle: handle,
             preferences,
@@ -144,8 +154,8 @@ impl App {
     /// editor's scene rebuild so they reflect the latest run.
     fn drain_worker_events(&mut self, ui: &Ui) {
         // Owned, so the channel borrow is gone before the status writes
-        // below (both live on `self.workspace.runtime`).
-        let events = self.workspace.runtime.drain_worker();
+        // below (both live on `self.runtime`).
+        let events = self.runtime.drain_worker();
         for report in events {
             match report {
                 WorkerReport::Installed(compiled) => {
@@ -159,7 +169,7 @@ impl App {
                     if matches!(&error, WorkerError::Execution { .. }) {
                         self.editor.run_state.clear();
                     }
-                    self.workspace.runtime.status.error(error.to_string());
+                    self.runtime.status.error(error.to_string());
                 }
                 WorkerReport::Status(status) => {
                     if let WorkerStatusKind::Completed {
@@ -173,7 +183,7 @@ impl App {
                         }
                         // A completed run supersedes any lingering failure message
                         // from an earlier event-loop tick.
-                        self.workspace.runtime.status.error = None;
+                        self.runtime.status.error = None;
                     }
                     self.editor.run_state.apply_worker_status(&status);
                 }
@@ -181,7 +191,7 @@ impl App {
         }
         // After the reports, so a value published during this run lands against
         // the compile the stream just acknowledged rather than the previous one.
-        let previews = self.workspace.runtime.drain_previews();
+        let previews = self.runtime.drain_previews();
         self.editor.run_state.ingest_previews(ui, previews);
     }
 
@@ -225,7 +235,7 @@ impl App {
     /// unsaved changes and the confirm preference both hold. The single
     /// predicate behind every path that replaces or discards the document.
     fn needs_discard_confirmation(&self) -> bool {
-        self.workspace.open.dirty && self.preferences.confirm_unsaved_changes
+        self.open.dirty && self.preferences.confirm_unsaved_changes
     }
 
     /// Carry out `action`, or raise the unsaved-changes prompt first when
@@ -277,7 +287,7 @@ impl App {
         if outcome.choice == DiscardChoice::Save {
             self.save_current();
         }
-        let resolution = outcome.resolve(self.workspace.open.dirty);
+        let resolution = outcome.resolve(self.open.dirty);
         if resolution.silence_prompt {
             self.set_confirm_unsaved(false);
         }
@@ -294,7 +304,6 @@ impl App {
             ui.keep_open();
         }
         let file_name = self
-            .workspace
             .open
             .path
             .as_deref()
@@ -331,15 +340,15 @@ impl palantir::App for App {
 
         // One library snapshot for this record pass (a cheap Arc clone).
         // A command that publishes below is visible to pass B or the next frame.
-        let library = self.workspace.runtime.library.published.load();
+        let library = self.runtime.library.published.load();
         let command = self.editor.frame(
-            &mut self.workspace.open,
+            &mut self.open,
             ui,
             &library,
             &self.theme,
             &mut self.preferences,
             StatusInputs {
-                error: self.workspace.runtime.status.error.as_deref(),
+                error: self.runtime.status.error.as_deref(),
                 process_memory: self.process_memory.sample(Instant::now()),
             },
         );

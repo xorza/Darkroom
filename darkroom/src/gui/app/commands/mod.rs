@@ -5,8 +5,9 @@
 //! [`App::handle_command`] is a thin dispatcher — each top-level command group
 //! resolves to one submodule's `impl App` block (`file`, `graph`, `run`,
 //! `prefs`, `edit`, `shell`). The commands are cross-subsystem coordination
-//! (they bridge `Workspace` / `Editor` / `Preferences` / dialogs), which is why
-//! they live on `App` rather than any one owner; the split is by concern.
+//! (they bridge the open document / `RuntimeHost` / `Editor` / `Preferences` /
+//! dialogs), which is why they live on `App` rather than any one owner; the
+//! split is by concern.
 
 use palantir::Ui;
 
@@ -26,7 +27,7 @@ use shell::ShellCommand;
 
 /// A command a UI surface (the menu bar, the graph toolbar, the Preferences
 /// tab, a node's G-badge, an inline path-picker) hands to [`App`]. The producing
-/// UI never touches `Workspace` / `Theme` / runtime services directly.
+/// UI never touches the document / `Theme` / runtime services directly.
 #[derive(Clone, Debug)]
 pub(crate) enum AppCommand {
     /// Document file lifecycle — [`file`](mod@file).
