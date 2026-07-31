@@ -14,7 +14,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Deref;
 
-use ::common::{SerdeFormat, SerializeError, deserialize, is_debug, serialize};
 use ::serde::{Deserialize, Serialize};
 use hashbrown::hash_map::Entry;
 use hashbrown::{HashMap, HashSet};
@@ -22,8 +21,8 @@ use hashbrown::{HashMap, HashSet};
 use crate::DataType;
 use crate::StaticValue;
 use crate::graph::detached::DetachedNode;
+use crate::graph::error::GraphValidationError;
 use crate::graph::error::ValidationResult;
-use crate::graph::error::{GraphDeserializeError, GraphValidationError};
 use crate::graph::func::{Func, FuncInput, FuncOutput, OutputType};
 use crate::graph::identity::NodeId;
 use crate::graph::identity::{InputPort, OutputPort};
@@ -48,7 +47,7 @@ pub enum Binding {
 }
 
 // A node is pure authored data. Identity is its key in `Graph::nodes`; port/event
-// arity comes from the func or graph interface, and wiring lives in side tables.
+// arity comes from the func it resolves to, and wiring lives in side tables.
 /// Deliberately not `Clone`: node ids are unique across a whole document, so
 /// duplicating a graph is never a neutral act — a copy either mints fresh ids
 /// for what it took (an editor's duplicate) or is the only one of its identity
@@ -58,9 +57,8 @@ pub enum Binding {
 /// are: `bindings` is a plain map a caller keys into directly, so it is public
 /// rather than fronted by trivial accessors; `nodes` stays `pub(crate)` for
 /// cross-module test call sites that force every node's cache mode directly,
-/// while `subscriptions` is reached only through methods (fresh-id insertion,
-/// a range query) — `pub(super)` so the wiring and validation passes beside
-/// this file can walk it, and no wider.
+/// while `subscriptions` is reached only through methods — `pub(super)` so the
+/// wiring and validation passes beside this file can walk it, and no wider.
 #[derive(Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Graph {
     pub(crate) nodes: HashMap<NodeId, Node>,
@@ -74,15 +72,16 @@ pub struct Graph {
     pub bindings: BTreeMap<InputPort, Binding>,
 
     /// Event wiring: every (emitter event → subscriber) edge, flat. A
-    /// `BTreeSet` dedups, keeps serialization deterministic, and ranges over
-    /// one emitter-event's subscribers contiguously.
+    /// `BTreeSet` dedups and keeps both serialization and the order a compile
+    /// reads them in deterministic.
     #[serde(default)]
     pub(super) subscriptions: BTreeSet<Subscription>,
 }
 
 /// One event-subscription edge: `subscriber` fires when `emitter`'s event
-/// `event_idx` triggers. Ordered (emitter, event_idx, subscriber) so a
-/// `BTreeSet` ranges over one emitter-event's subscribers contiguously.
+/// `event_idx` triggers. Ordered (emitter, event_idx, subscriber) so the
+/// `BTreeSet` holding these dedups and iterates deterministically — which is
+/// what lets a compile wire each emitter's subscriber lists in a fixed order.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Subscription {
     pub emitter: NodeId,
@@ -111,8 +110,7 @@ pub struct BindingEntry {
 }
 
 /// A [`Node`] with the id the lookup found it by re-attached — what
-/// [`Graph::iter`] and [`Graph::find_by_name`] hand out, since a node stores
-/// no id of its own.
+/// [`Graph::iter`] hands out, since a node stores no id of its own.
 #[derive(Clone, Copy, Debug)]
 pub struct NodeRef<'a> {
     pub id: NodeId,
@@ -147,18 +145,6 @@ impl Graph {
     pub fn find(&self, id: NodeId) -> Option<&Node> {
         assert!(!id.is_nil());
         self.nodes.get(&id)
-    }
-    /// A node named `name`. Names are not unique, so this returns an
-    /// arbitrary match.
-    pub fn find_by_name(&self, name: &str) -> Option<NodeRef<'_>> {
-        assert!(!name.is_empty());
-        self.nodes
-            .iter()
-            .find(|(_, node)| node.name == name)
-            .map(|(id, node)| NodeRef { id: *id, node })
-    }
-    pub fn serialize(&self, format: SerdeFormat) -> Result<Vec<u8>, SerializeError> {
-        serialize(self, format)
     }
     /// The declaration a node instantiates — a library entry, or a special
     /// node's hardcoded spec. `None` for a `Func` kind the library no longer
@@ -304,25 +290,6 @@ impl Graph {
     pub fn subscriptions(&self) -> impl Iterator<Item = Subscription> + '_ {
         self.subscriptions.iter().copied()
     }
-    pub fn subscribers(
-        &self,
-        emitter: NodeId,
-        event_idx: usize,
-    ) -> impl Iterator<Item = NodeId> + '_ {
-        let lower = Subscription {
-            emitter,
-            event_idx,
-            subscriber: NodeId::nil(),
-        };
-        let upper = Subscription {
-            emitter,
-            event_idx: event_idx + 1,
-            subscriber: NodeId::nil(),
-        };
-        self.subscriptions
-            .range(lower..upper)
-            .map(|subscription| subscription.subscriber)
-    }
 
     pub fn add(&mut self, node: Node) -> NodeId {
         let node_id = NodeId::unique();
@@ -346,15 +313,6 @@ impl Graph {
     pub fn find_mut(&mut self, id: NodeId) -> Option<&mut Node> {
         assert!(!id.is_nil());
         self.nodes.get_mut(&id)
-    }
-
-    pub fn deserialize(
-        serialized: &[u8],
-        format: SerdeFormat,
-    ) -> Result<Graph, GraphDeserializeError> {
-        let graph: Self = deserialize(serialized, format)?;
-        graph.validate()?;
-        Ok(graph)
     }
 
     /// Add a func instance and seed its inputs' default const bindings.
@@ -438,19 +396,11 @@ impl Graph {
     }
 
     /// Validate this graph structurally: everything a document must satisfy to
-    /// *be* a graph, answerable without a library. This is what deserialization
-    /// checks, where no library exists yet.
+    /// *be* a graph, answerable without a library. What a host runs on a
+    /// freshly decoded document, where no library exists yet — decoding does
+    /// not validate on its own.
     pub fn validate(&self) -> ValidationResult<()> {
         self.validate_shape(&mut HashSet::new())
-    }
-
-    /// Debug-only assert form of [`Self::validate`].
-    pub fn validate_debug(&self) {
-        if !is_debug() {
-            return;
-        }
-        self.validate()
-            .expect("graph structural invariant violated");
     }
 
     /// Validate this graph as an execution entry against `library`: structurally
@@ -468,22 +418,12 @@ impl Graph {
         self.validate_references(library)
     }
 
-    /// Debug-only assert form of [`Self::validate_with`].
-    pub fn validate_with_debug(&self, library: &Library) {
-        if !is_debug() {
-            return;
-        }
-        self.validate_with(library)
-            .expect("graph execution invariant violated");
-    }
-
-    /// The structural walk. `node_ids` and `graph_ids` accumulate across the
     /// Structural validation of this graph's nodes and wiring.
     ///
-    /// `node_ids` accumulates every id seen so duplicates are caught across the
-    /// whole document — an id must be unique document-wide, so a bare id is an
-    /// unambiguous address.
-    pub(super) fn validate_shape(&self, node_ids: &mut HashSet<NodeId>) -> ValidationResult<()> {
+    /// `node_ids` accumulates every id seen, so duplicates are caught across
+    /// everything the walk covers — an id must be unique document-wide, which
+    /// is what makes a bare id an unambiguous address.
+    fn validate_shape(&self, node_ids: &mut HashSet<NodeId>) -> ValidationResult<()> {
         for (node_id, node) in &self.nodes {
             if node_id.is_nil() {
                 return Err(GraphValidationError::NilNodeId);
@@ -602,9 +542,24 @@ impl From<StaticValue> for Binding {
 
 #[cfg(test)]
 pub(crate) mod internals {
-    use crate::graph::Graph;
+    use crate::graph::{Graph, NodeRef};
 
     impl Graph {
+        /// A node named `name`, or `None` if this graph holds none. Names are
+        /// not unique, so this returns an arbitrary match.
+        ///
+        /// Test-only: a fixture knows its nodes by the names its library gave
+        /// them, while production carries the `NodeId` it minted. A host
+        /// searching by name would be searching for something the model does
+        /// not promise is there or unique.
+        pub(crate) fn find_by_name(&self, name: &str) -> Option<NodeRef<'_>> {
+            assert!(!name.is_empty());
+            self.nodes
+                .iter()
+                .find(|(_, node)| node.name == name)
+                .map(|(id, node)| NodeRef { id: *id, node })
+        }
+
         /// Clone keeping every node id exactly as it is — the reason `Graph`
         /// isn't `Clone`, since preserving identities is only sound where the
         /// original is *not* concurrently present in the same document.

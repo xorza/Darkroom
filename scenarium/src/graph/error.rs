@@ -1,11 +1,10 @@
-//! What an authoring graph rejects: a document that will not deserialize into
-//! one, and a graph that will not pass [`validate`](crate::graph::Graph::validate).
+//! What an authoring graph rejects: everything
+//! [`validate`](crate::graph::Graph::validate) refuses to call a graph.
 //!
-//! Both are *recoverable* — a stale document or an edit a user can undo — so
-//! they are `Result`s rather than panics. Logic errors inside the graph's own
-//! mutations assert instead.
+//! *Recoverable* — a stale document or an edit a user can undo — so it is a
+//! `Result` rather than a panic. Logic errors inside the graph's own mutations
+//! assert instead.
 
-use ::common::DeserializeError;
 use thiserror::Error;
 
 /// Every graph validation returns this.
@@ -14,14 +13,6 @@ pub(crate) type ValidationResult<T> = Result<T, GraphValidationError>;
 use crate::graph::identity::FuncId;
 use crate::graph::identity::NodeId;
 use crate::graph::identity::{InputPort, OutputPort};
-
-#[derive(Debug, Error)]
-pub enum GraphDeserializeError {
-    #[error(transparent)]
-    Deserialize(#[from] DeserializeError),
-    #[error(transparent)]
-    InvalidGraph(#[from] GraphValidationError),
-}
 
 #[derive(Debug, Error)]
 pub enum GraphValidationError {

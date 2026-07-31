@@ -26,7 +26,7 @@
 //! of the install — no later pass fills a field in — so each step below produces
 //! its part complete rather than reserving space for it.
 //!
-//! See `README.md` Part A §5.
+//! This is phase 1 of the three [`execution`](crate::execution) describes.
 
 pub(crate) mod compiled_graph;
 pub(crate) mod error;

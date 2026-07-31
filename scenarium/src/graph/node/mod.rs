@@ -37,7 +37,8 @@ use ::serde::{Deserialize, Serialize};
 /// impure node anywhere upstream has no digest, so its output is released after the run
 /// and never risks serving a stale value, whatever its mode. The on-disk backend is wired
 /// only once a caller attaches a `DiskStore` with a disk root; until
-/// then `Disk`/`Both` degrade to memory-only. See `execution/README.md` Part B.
+/// then `Disk`/`Both` degrade to memory-only. See
+/// [`cache`](crate::execution::cache) for how the two tiers are keyed.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
 pub enum CacheMode {
     #[default]

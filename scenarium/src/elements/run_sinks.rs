@@ -9,7 +9,7 @@
 //! `collect_roots` seeds runs from them). A normal sink subscriber runs its
 //! own upstream cone when its event fires; this one has no cone, so the planner
 //! promotes its firing into a full sink run instead (see
-//! `execution::plan::collect_roots`). Its lambda is a no-op — the node is a
+//! `execution::schedule::RunSchedule::collect_roots`). Its lambda is a no-op — the node is a
 //! pure trigger — but it still exists so the scheduled node runs cleanly and
 //! lights up in the editor like any other sink. Wire, say, a `Frame Event` into
 //! it to re-evaluate the graph every frame.

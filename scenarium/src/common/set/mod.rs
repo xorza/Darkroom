@@ -6,7 +6,8 @@ use std::marker::PhantomData;
 
 use crate::common::column::Idx;
 
-/// A dense bitset over the space `I` indexes — the plan's root and seed sets.
+/// A dense bitset over the space `I` indexes — a visited mark for a walk over
+/// it (the schedule validator's, the eviction cone's).
 ///
 /// `I` is carried, not stored, for the same reason [`Column`](super::column::Column)
 /// carries it: one space's index cannot probe another's set. `len` is kept

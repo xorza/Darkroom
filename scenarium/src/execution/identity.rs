@@ -1,6 +1,7 @@
 //! The install-local **dense index space**: `NodeIdx`, `OutputIdx`,
-//! `OutputAddr`, the [`IdxSet<NodeIdx>`] over them, and the `…Idx` positions
-//! in the packed port columns.
+//! `OutputAddr`, and the `…Idx` positions in the packed port columns. The
+//! containers keyed by them are [`Column`](crate::common::column::Column) and
+//! [`IdxSet`](crate::common::set::IdxSet).
 //!
 //! There is no second *identity* space to hold. A graph is flat, so a node in
 //! a compiled program is the authored node, named by the same
