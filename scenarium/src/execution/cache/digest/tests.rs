@@ -1,118 +1,50 @@
-use crate::graph::identity::{FuncId, NodeId};
-
 use super::*;
 use crate::StaticValue;
 use crate::execution::cache::runtime::RuntimeCache;
 use crate::execution::cache::slot::OutputSnapshot;
-use crate::execution::compile::compiled_graph::{
-    CompiledGraph, ExecutionBinding, ExecutionInput, ExecutionNode,
-};
+use crate::execution::compile::compiled_graph::ExecutionBinding;
 use crate::execution::identity::{NodeIdx, OutputAddr};
-use crate::graph::func::FuncBehavior;
+use crate::graph::identity::FuncId;
+use crate::testing::program::{NodeBuilder, Placed, ProgramBuilder};
 
-/// Minimal hand-built `CompiledGraph` for digest tests. Node ids are
-/// `from_u128(idx + 1)`; `bind`'s target id must match that scheme. Output types
-/// go straight into the packed output metadata — each output defaults to `Int`,
-/// overridable via [`Prog::add_typed`] to exercise the output-signature folding.
-#[derive(Debug, Default)]
-struct Prog {
-    /// A real outer compiled artifact around the hand-built program.
-    program: CompiledGraph,
+/// A content-cacheable node of func `func`, declaring `count` `Int` outputs.
+///
+/// `Int` rather than the builder's polymorphic default because the output
+/// signature folds into the digest, and one case below pins the resulting bytes.
+fn pure(prog: &mut ProgramBuilder, func: u128, count: usize) -> NodeBuilder<'_> {
+    typed(prog, func, &vec![DataType::Int; count])
 }
 
-impl Prog {
-    /// The program while the fixture is still the artifact's sole holder.
-    fn building(&mut self) -> &mut CompiledGraph {
-        &mut self.program
-    }
-
-    /// Add a `Pure` (content-cacheable) node; outputs default to `Int`.
-    fn add(&mut self, func: u128, outputs: u32, bindings: &[ExecutionBinding]) -> usize {
-        self.add_with(
-            FuncBehavior::Pure,
-            func,
-            &vec![DataType::Int; outputs as usize],
-            bindings,
-        )
-    }
-
-    /// Add a `Pure` node with explicit output types (the digest folds them).
-    fn add_typed(
-        &mut self,
-        func: u128,
-        types: &[DataType],
-        bindings: &[ExecutionBinding],
-    ) -> usize {
-        self.add_with(FuncBehavior::Pure, func, types, bindings)
-    }
-
-    /// Add an `Impure` node — its `node_digest` is always `None`.
-    fn add_impure(&mut self, func: u128, outputs: u32, bindings: &[ExecutionBinding]) -> usize {
-        self.add_with(
-            FuncBehavior::Impure,
-            func,
-            &vec![DataType::Int; outputs as usize],
-            bindings,
-        )
-    }
-
-    /// Mark input `input_idx` of node `idx` as a declared filesystem-path input.
-    fn stamp_fs_path_input(&mut self, idx: usize, input_idx: u32) {
-        let input = self.program.by_id(node_id(idx)).inputs.nth(input_idx);
-        self.building().inputs[input].stamps_fs_path = true;
-    }
-
-    fn add_with(
-        &mut self,
-        behavior: FuncBehavior,
-        func: u128,
-        types: &[DataType],
-        bindings: &[ExecutionBinding],
-    ) -> usize {
-        let inputs = self
-            .building()
-            .inputs
-            .append(bindings.iter().map(|binding| ExecutionInput {
-                required: false,
-                stamps_fs_path: false,
-                binding: binding.clone(),
-            }));
-        let idx = self.program.e_nodes.len();
-        let outputs = self.building().outputs.append(types.iter().cloned());
-        let node_id = node_id(idx);
-        self.building().push(
-            node_id,
-            ExecutionNode {
-                behavior,
-                func_id: FuncId::from_u128(func),
-                inputs,
-                outputs,
-                ..Default::default()
-            },
-        );
-        idx
-    }
+/// [`pure`] with explicit output types, for the signature-folding cases.
+fn typed<'a>(prog: &'a mut ProgramBuilder, func: u128, types: &[DataType]) -> NodeBuilder<'a> {
+    prog.node()
+        .pure()
+        .func(FuncId::from_u128(func))
+        .output_types(types.iter().cloned())
 }
 
-fn bind(idx: usize, port: usize) -> ExecutionBinding {
-    ExecutionBinding::Bind(OutputAddr {
-        node_idx: node_idx(idx),
-        port_idx: port as u32,
-    })
-}
+/// Every node's content digest, folded producer-first the way the executor does
+/// — each node reading its producers' just-stamped `current_digest`, over a
+/// cache that identifies its own filesystem paths afresh.
+#[derive(Debug)]
+struct Digests(RuntimeCache);
 
-fn node_id(idx: usize) -> NodeId {
-    NodeId::from_u128(idx as u128 + 1)
-}
+impl Digests {
+    fn of(prog: &ProgramBuilder) -> Self {
+        let program = prog.program();
+        let mut cache = RuntimeCache::default();
+        cache.install_for_test(program);
+        for idx in 0..program.e_nodes.len() {
+            let node_idx = NodeIdx(idx as u32);
+            cache.prepare_node_blocking(program, node_idx);
+            cache.stamp_digest(program, node_idx);
+        }
+        Self(cache)
+    }
 
-/// The fixture pushes nodes in index order, so the dense index equals the
-/// fixture index.
-fn node_idx(idx: usize) -> NodeIdx {
-    NodeIdx(idx as u32)
-}
-
-fn konst(value: StaticValue) -> ExecutionBinding {
-    ExecutionBinding::Const(value)
+    fn at(&self, node: Placed) -> Option<Digest> {
+        self.0[node.node_idx].current_digest
+    }
 }
 
 #[derive(Debug)]
@@ -121,63 +53,44 @@ struct DigestPair {
     plain: Option<Digest>,
 }
 
-/// Fold node digests into a fresh cache the way the executor does — producer-first
-/// in fixture index order, each node reading its
-/// producers' just-stamped `current_digest` — stopping after `through`. The cache
-/// identifies its own paths each call. Returns it, holding every computed digest.
-fn digested_cache(program: &CompiledGraph, through: usize) -> RuntimeCache {
-    let mut cache = RuntimeCache::default();
-    cache.install_for_test(program);
-    for idx in 0..=through {
-        cache.prepare_node_blocking(program, node_idx(idx));
-        cache.stamp_digest(program, node_idx(idx));
-    }
-    cache
-}
-
-/// One node's content digest, computing only the producer-first prefix it needs.
-fn digest_at(program: &CompiledGraph, idx: usize) -> Option<Digest> {
-    digested_cache(program, idx)[node_idx(idx)].current_digest
-}
-
-/// Every node's content digest, indexed by position.
-fn digests(prog: &Prog) -> Vec<Option<Digest>> {
-    let last = prog.program.e_nodes.len().saturating_sub(1);
-    let cache = digested_cache(&prog.program, last);
-    (0..prog.program.e_nodes.len())
-        .map(|idx| cache[node_idx(idx)].current_digest)
-        .collect()
-}
-
 #[test]
 fn deterministic_and_per_function_distinct() {
     // A → B (B binds A.0), plus an independent C with a const input.
-    let mut p = Prog::default();
-    p.add(10, 1, &[]); // A
-    p.add(20, 1, &[bind(0, 0)]); // B
-    p.add(30, 1, &[konst(StaticValue::Int(5))]); // C
+    let mut p = ProgramBuilder::default();
+    let a = pure(&mut p, 10, 1).add();
+    let b = pure(&mut p, 20, 1).input(a.out(0)).add();
+    let c = pure(&mut p, 30, 1).const_input(StaticValue::Int(5)).add();
 
-    let first = digests(&p);
-    let second = digests(&p); // same engine inputs → identical digests
-    assert_eq!(first, second, "digest must be deterministic");
+    let first = Digests::of(&p);
+    let second = Digests::of(&p); // same engine inputs → identical digests
+    for node in [a, b, c] {
+        assert_eq!(
+            first.at(node),
+            second.at(node),
+            "digest must be deterministic"
+        );
+    }
 
     // Distinct functions ⇒ distinct digests (no accidental collisions).
-    assert_ne!(first[0], first[1]);
-    assert_ne!(first[1], first[2]);
-    assert_ne!(first[0], first[2]);
+    assert_ne!(first.at(a), first.at(b));
+    assert_ne!(first.at(b), first.at(c));
+    assert_ne!(first.at(a), first.at(c));
 
-    p.building().by_id_mut(node_id(0)).func_id = FuncId::from_u128(11);
-    let refunced = digests(&p);
+    p.program_mut().by_id_mut(a.node_id).func_id = FuncId::from_u128(11);
+    let refunced = Digests::of(&p);
     assert_ne!(
-        first[0], refunced[0],
+        first.at(a),
+        refunced.at(a),
         "a function identity re-keys its node"
     );
     assert_ne!(
-        first[1], refunced[1],
+        first.at(b),
+        refunced.at(b),
         "a function identity propagates downstream"
     );
     assert_eq!(
-        first[2], refunced[2],
+        first.at(c),
+        refunced.at(c),
         "an independent node ignores another function's identity"
     );
 }
@@ -185,38 +98,44 @@ fn deterministic_and_per_function_distinct() {
 #[test]
 fn const_change_propagates_downstream_only() {
     let build = |a_const: i64| {
-        let mut p = Prog::default();
-        p.add(10, 1, &[konst(StaticValue::Int(a_const))]); // A
-        p.add(20, 1, &[bind(0, 0)]); // B binds A
-        p.add(30, 1, &[konst(StaticValue::Int(9))]); // C, independent
-        p
+        let mut p = ProgramBuilder::default();
+        let a = pure(&mut p, 10, 1)
+            .const_input(StaticValue::Int(a_const))
+            .add();
+        let b = pure(&mut p, 20, 1).input(a.out(0)).add();
+        let c = pure(&mut p, 30, 1).const_input(StaticValue::Int(9)).add();
+        (Digests::of(&p), a, b, c)
     };
-    let base = digests(&build(1));
-    let changed = digests(&build(2));
+    let (base, a, b, c) = build(1);
+    let (changed, ..) = build(2);
 
-    assert_ne!(base[0], changed[0], "A's own digest tracks its const");
-    assert_ne!(base[1], changed[1], "B downstream of A must change too");
-    assert_eq!(base[2], changed[2], "independent C is unaffected");
+    assert_ne!(base.at(a), changed.at(a), "A's own digest tracks its const");
+    assert_ne!(
+        base.at(b),
+        changed.at(b),
+        "B downstream of A must change too"
+    );
+    assert_eq!(base.at(c), changed.at(c), "independent C is unaffected");
 }
 
 #[test]
 fn structurally_identical_nodes_share_digest() {
     // Two nodes, same func, same (input-identical) bindings ⇒ equal
     // node digests — the property that lets the store dedup repeated work.
-    let mut p = Prog::default();
-    p.add(10, 1, &[konst(StaticValue::Int(7))]);
-    p.add(10, 1, &[konst(StaticValue::Int(7))]);
-    let d = digests(&p);
-    assert_eq!(d[0], d[1]);
+    let mut p = ProgramBuilder::default();
+    let first = pure(&mut p, 10, 1).const_input(StaticValue::Int(7)).add();
+    let second = pure(&mut p, 10, 1).const_input(StaticValue::Int(7)).add();
+    let d = Digests::of(&p);
+    assert_eq!(d.at(first), d.at(second));
 
     // Differ in func or const ⇒ digests diverge.
-    let mut q = Prog::default();
-    q.add(10, 1, &[konst(StaticValue::Int(7))]);
-    q.add(11, 1, &[konst(StaticValue::Int(7))]); // different func
-    q.add(10, 1, &[konst(StaticValue::Int(8))]); // different const
-    let dq = digests(&q);
-    assert_ne!(dq[0], dq[1]);
-    assert_ne!(dq[0], dq[2]);
+    let mut q = ProgramBuilder::default();
+    let base = pure(&mut q, 10, 1).const_input(StaticValue::Int(7)).add();
+    let other_func = pure(&mut q, 11, 1).const_input(StaticValue::Int(7)).add();
+    let other_const = pure(&mut q, 10, 1).const_input(StaticValue::Int(8)).add();
+    let dq = Digests::of(&q);
+    assert_ne!(dq.at(base), dq.at(other_func));
+    assert_ne!(dq.at(base), dq.at(other_const));
 }
 
 #[test]
@@ -224,21 +143,21 @@ fn fs_path_folds_file_identity_and_path() {
     // An `FsPath` const folds its resolved file identity (len, mtime — see
     // `fs_file_id`) on top of the path string, so a file change re-keys: this is
     // what stops machine B serving A's result for B's files. The resolver is the
-    // real filesystem, so exercise it with a temp file. `digest_at` re-stats it on
-    // each call (a fresh engine).
+    // real filesystem, so exercise it with a temp file. `Digests::of` re-stats it
+    // on each call (a fresh engine).
     let file = std::env::temp_dir().join("scenarium_digest_fs_path_test.bin");
     let path = file.to_string_lossy().into_owned();
-    let prog_for = |path: &str| {
-        let mut p = Prog::default();
-        p.add(10, 1, &[konst(StaticValue::FsPath(path.into()))]);
-        p
+    let path_node = |paths: StaticValue| {
+        let mut p = ProgramBuilder::default();
+        let node = pure(&mut p, 10, 1).const_input(paths).add();
+        (p, node)
     };
 
-    let p = prog_for(&path);
+    let (p, single) = path_node(StaticValue::FsPath(path.clone()));
     std::fs::write(&file, b"x").unwrap(); // len 1
-    let d_len1 = digest_at(&p.program, 0);
+    let d_len1 = Digests::of(&p).at(single);
     std::fs::write(&file, b"xyz").unwrap(); // len 3 — file identity changed
-    let d_len3 = digest_at(&p.program, 0);
+    let d_len3 = Digests::of(&p).at(single);
     assert_ne!(
         d_len1, d_len3,
         "a file content change must re-key the digest"
@@ -247,41 +166,29 @@ fn fs_path_folds_file_identity_and_path() {
     let unselected = file.with_file_name("scenarium_digest_unselected.bin");
     std::fs::write(&unselected, b"not selected").unwrap();
     assert_eq!(
-        digest_at(&p.program, 0),
+        Digests::of(&p).at(single),
         d_len3,
         "an unselected sibling file must not affect a single-path digest"
     );
 
     let second = file.with_file_name("scenarium_digest_selected_second.bin");
     std::fs::write(&second, b"second").unwrap();
-    let mut selected = Prog::default();
-    selected.add(
-        10,
-        1,
-        &[konst(StaticValue::FsPaths(vec![
-            path.clone(),
-            second.to_string_lossy().into_owned(),
-        ]))],
-    );
-    let two_files = digest_at(&selected.program, 0);
+    let second_path = second.to_string_lossy().into_owned();
+    let (selected, both) = path_node(StaticValue::FsPaths(vec![
+        path.clone(),
+        second_path.clone(),
+    ]));
+    let two_files = Digests::of(&selected).at(both);
     std::fs::write(&second, b"second changed").unwrap();
-    let second_edited = digest_at(&selected.program, 0);
+    let second_edited = Digests::of(&selected).at(both);
     assert_ne!(
         two_files, second_edited,
         "editing any selected file must re-key the list"
     );
 
-    let mut reversed = Prog::default();
-    reversed.add(
-        10,
-        1,
-        &[konst(StaticValue::FsPaths(vec![
-            second.to_string_lossy().into_owned(),
-            path.clone(),
-        ]))],
-    );
+    let (reversed, swapped) = path_node(StaticValue::FsPaths(vec![second_path, path.clone()]));
     assert_ne!(
-        digest_at(&reversed.program, 0),
+        Digests::of(&reversed).at(swapped),
         second_edited,
         "path-list order is part of the authored input"
     );
@@ -291,7 +198,7 @@ fn fs_path_folds_file_identity_and_path() {
     // rather than keying it on an absence.
     std::fs::remove_file(&file).unwrap();
     assert_eq!(
-        digest_at(&p.program, 0),
+        Digests::of(&p).at(single),
         None,
         "a missing file leaves its node with no digest"
     );
@@ -301,12 +208,11 @@ fn fs_path_folds_file_identity_and_path() {
     // identities rather than real files: a constant is what makes the
     // encoding pinnable, and no test controls a real file's mtime.
     let planted = |value: StaticValue, path: &str| {
-        let mut p = Prog::default();
-        p.add(10, 1, &[konst(value)]);
+        let (p, node) = path_node(value);
         let mut cache = RuntimeCache::default();
-        cache.install_for_test(&p.program);
+        cache.install_for_test(p.program());
         cache.stamp_file(path, 4, 7);
-        cache.node_digest(&p.program, node_idx(0))
+        cache.node_digest(p.program(), node.node_idx)
     };
     let here = "definitely-missing-elsewhere";
     let there = "definitely-missing-somewhere";
@@ -351,29 +257,29 @@ fn bound_fs_path_folds_delivered_file_identity() {
     ));
     let path = file.to_string_lossy().into_owned();
 
-    // producer (0) → consumer (1) with its input declared `FsPath`; a control consumer (2)
-    // reads the same port through an undeclared input — no fold.
-    let mut p = Prog::default();
-    p.add(10, 1, &[]);
-    p.add(20, 1, &[bind(0, 0)]);
-    p.add(20, 1, &[bind(0, 0)]);
-    p.stamp_fs_path_input(1, 0);
+    // A producer, a consumer whose input is `FsPath`-declared, and a control
+    // consumer reading the same port through an undeclared input — no fold.
+    let mut p = ProgramBuilder::default();
+    let producer = pure(&mut p, 10, 1).add();
+    let declared = pure(&mut p, 20, 1).fs_path_input(producer.out(0)).add();
+    let control = pure(&mut p, 20, 1).input(producer.out(0)).add();
 
     // Stamp the producer and install `value` as its delivered output (`None` leaves the
     // slot empty — an unreadable value), then fold both consumers.
     let digests_with = |value: Option<DynamicValue>| {
+        let program = p.program();
         let mut cache = RuntimeCache::default();
-        cache.install_for_test(&p.program);
-        let producer = cache.node_digest(&p.program, node_idx(0)).unwrap();
-        cache[node_idx(0)].current_digest = Some(producer);
+        cache.install_for_test(program);
+        let stamped = cache.node_digest(program, producer.node_idx).unwrap();
+        cache[producer.node_idx].current_digest = Some(stamped);
         if let Some(value) = value {
-            cache.hydrate(node_idx(0), OutputSnapshot::new(vec![value]), producer);
+            cache.hydrate(producer.node_idx, OutputSnapshot::new(vec![value]), stamped);
         }
-        cache.prepare_node_blocking(&p.program, node_idx(1));
-        cache.prepare_node_blocking(&p.program, node_idx(2));
+        cache.prepare_node_blocking(program, declared.node_idx);
+        cache.prepare_node_blocking(program, control.node_idx);
         DigestPair {
-            typed: cache.node_digest(&p.program, node_idx(1)),
-            plain: cache.node_digest(&p.program, node_idx(2)),
+            typed: cache.node_digest(program, declared.node_idx),
+            plain: cache.node_digest(program, control.node_idx),
         }
     };
     let fs_path = || Some(DynamicValue::Static(StaticValue::FsPath(path.clone())));
@@ -459,19 +365,20 @@ fn bound_fs_path_folds_delivered_file_identity() {
         "the undeclared consumer never reads the value, so it still folds"
     );
 
+    let program = p.program();
     let mut cache = RuntimeCache::default();
-    cache.install_for_test(&p.program);
-    let producer = cache.node_digest(&p.program, node_idx(0)).unwrap();
-    cache[node_idx(0)].current_digest = Some(producer);
+    cache.install_for_test(program);
+    let stamped = cache.node_digest(program, producer.node_idx).unwrap();
+    cache[producer.node_idx].current_digest = Some(stamped);
     cache.hydrate(
-        node_idx(0),
+        producer.node_idx,
         OutputSnapshot::new(vec![DynamicValue::Static(StaticValue::FsPath(path))]),
-        producer,
+        stamped,
     );
-    cache[node_idx(0)].current_digest = Some(Digest([9; 32]));
-    cache.prepare_node_blocking(&p.program, node_idx(1));
+    cache[producer.node_idx].current_digest = Some(Digest([9; 32]));
+    cache.prepare_node_blocking(program, declared.node_idx);
     assert_eq!(
-        cache.node_digest(&p.program, node_idx(1)),
+        cache.node_digest(program, declared.node_idx),
         None,
         "a path value produced under an old producer digest is unreadable"
     );
@@ -480,14 +387,15 @@ fn bound_fs_path_folds_delivered_file_identity() {
 #[test]
 fn output_ports_are_disambiguated() {
     // One producer with two outputs; consumers on different ports differ.
-    let mut p = Prog::default();
-    p.add(10, 2, &[]); // A, two outputs
-    p.add(20, 1, &[bind(0, 0)]); // B binds A.0
-    p.add(20, 1, &[bind(0, 1)]); // C binds A.1 (same func as B)
+    let mut p = ProgramBuilder::default();
+    let a = pure(&mut p, 10, 2).add();
+    let on_first = pure(&mut p, 20, 1).input(a.out(0)).add();
+    let on_second = pure(&mut p, 20, 1).input(a.out(1)).add();
 
-    let d = digests(&p);
+    let d = Digests::of(&p);
     assert_ne!(
-        d[1], d[2],
+        d.at(on_first),
+        d.at(on_second),
         "consumers reading different ports of one producer must key apart"
     );
 }
@@ -500,42 +408,48 @@ fn output_ports_are_disambiguated() {
 fn output_signature_folds_into_digest_and_propagates() {
     use crate::TypeId;
 
-    // A flipped output type re-keys.
-    let mut flip = Prog::default();
-    flip.add_typed(10, &[DataType::Int], &[]);
-    flip.add_typed(10, &[DataType::Float], &[]);
-    let d = digests(&flip);
-    assert_ne!(d[0], d[1], "a flipped output type re-keys the node");
+    // One func declaring two different signatures: the digests must diverge on
+    // the type, on the arity, and on a custom type's identity.
+    let signature_pair = |left: &[DataType], right: &[DataType]| {
+        let mut p = ProgramBuilder::default();
+        let a = typed(&mut p, 10, left).add();
+        let b = typed(&mut p, 10, right).add();
+        let d = Digests::of(&p);
+        (d.at(a), d.at(b))
+    };
+    let (int_out, float_out) = signature_pair(&[DataType::Int], &[DataType::Float]);
+    assert_ne!(int_out, float_out, "a flipped output type re-keys the node");
 
-    // An added output port re-keys (arity is folded).
-    let mut arity = Prog::default();
-    arity.add_typed(10, &[DataType::Int], &[]);
-    arity.add_typed(10, &[DataType::Int, DataType::Int], &[]);
-    let d = digests(&arity);
-    assert_ne!(d[0], d[1], "an added output port re-keys the node");
+    let (one_port, two_ports) = signature_pair(&[DataType::Int], &[DataType::Int, DataType::Int]);
+    assert_ne!(one_port, two_ports, "an added output port re-keys the node");
 
-    // Distinct custom types fold their type id — no collision.
-    let mut custom = Prog::default();
-    custom.add_typed(10, &[DataType::Custom(TypeId::from_u128(1))], &[]);
-    custom.add_typed(10, &[DataType::Custom(TypeId::from_u128(2))], &[]);
-    let d = digests(&custom);
-    assert_ne!(d[0], d[1], "distinct custom output types re-key");
+    let (custom_one, custom_two) = signature_pair(
+        &[DataType::Custom(TypeId::from_u128(1))],
+        &[DataType::Custom(TypeId::from_u128(2))],
+    );
+    assert_ne!(
+        custom_one, custom_two,
+        "distinct custom output types re-key"
+    );
 
     // A producer's output-type change propagates to its consumer downstream.
-    let build = |producer: DataType| {
-        let mut g = Prog::default();
-        g.add_typed(10, &[producer], &[]); // 0: producer
-        g.add_typed(20, &[DataType::Int], &[bind(0, 0)]); // 1: consumes 0.0
-        digests(&g)
+    let build = |producer_type: DataType| {
+        let mut p = ProgramBuilder::default();
+        let producer = typed(&mut p, 10, &[producer_type]).add();
+        let consumer = typed(&mut p, 20, &[DataType::Int])
+            .input(producer.out(0))
+            .add();
+        let d = Digests::of(&p);
+        (d.at(producer), d.at(consumer))
     };
-    let base = build(DataType::Int);
-    let changed = build(DataType::Float);
+    let (base_producer, base_consumer) = build(DataType::Int);
+    let (changed_producer, changed_consumer) = build(DataType::Float);
     assert_ne!(
-        base[0], changed[0],
+        base_producer, changed_producer,
         "producer's digest tracks its output type"
     );
     assert_ne!(
-        base[1], changed[1],
+        base_consumer, changed_consumer,
         "and the change propagates to the consumer"
     );
 }
@@ -544,27 +458,42 @@ fn output_signature_folds_into_digest_and_propagates() {
 fn cycle_yields_none() {
     // A binds B.0, B binds A.0 — a malformed program (the planner rejects it
     // separately); the digest pass must break the recursion, not loop.
-    let mut p = Prog::default();
-    p.add(10, 1, &[bind(1, 0)]); // A binds B (idx 1)
-    p.add(20, 1, &[bind(0, 0)]); // B binds A (idx 0)
-    assert_eq!(digest_at(&p.program, 0), None);
+    //
+    // The forward reference is spelled as a raw address, since the node it names
+    // does not exist until the line after.
+    let mut p = ProgramBuilder::default();
+    let forward = ExecutionBinding::Bind(OutputAddr {
+        node_idx: NodeIdx(1),
+        port_idx: 0,
+    });
+    let a = pure(&mut p, 10, 1).input(forward).add();
+    pure(&mut p, 20, 1).input(a.out(0)).add();
+
+    assert_eq!(Digests::of(&p).at(a), None);
 }
 
 #[test]
 fn impure_node_and_its_dependents_are_none() {
     // src (impure) → mid (pure) → sink (pure). The impure source taints the
     // whole downstream chain; an independent pure node stays `Some`.
-    let mut p = Prog::default();
-    p.add_impure(10, 1, &[]); // 0: impure source
-    p.add(20, 1, &[bind(0, 0)]); // 1: pure, binds impure
-    p.add(30, 1, &[bind(1, 0)]); // 2: pure, binds tainted
-    p.add(40, 1, &[konst(StaticValue::Int(5))]); // 3: independent pure
+    let mut p = ProgramBuilder::default();
+    let src = p
+        .node()
+        .func(FuncId::from_u128(10))
+        .output_types([DataType::Int])
+        .add();
+    let mid = pure(&mut p, 20, 1).input(src.out(0)).add();
+    let sink = pure(&mut p, 30, 1).input(mid.out(0)).add();
+    let independent = pure(&mut p, 40, 1).const_input(StaticValue::Int(5)).add();
 
-    let d = digests(&p);
-    assert_eq!(d[0], None, "impure node ⇒ None");
-    assert_eq!(d[1], None, "pure node under impure ⇒ None");
-    assert_eq!(d[2], None, "taint flows the whole way up");
-    assert!(d[3].is_some(), "independent pure node is unaffected");
+    let d = Digests::of(&p);
+    assert_eq!(d.at(src), None, "impure node ⇒ None");
+    assert_eq!(d.at(mid), None, "pure node under impure ⇒ None");
+    assert_eq!(d.at(sink), None, "taint flows the whole way up");
+    assert!(
+        d.at(independent).is_some(),
+        "independent pure node is unaffected"
+    );
 }
 
 /// The [`DigestHasher`] builder is deterministic, encodes PODs little-endian and

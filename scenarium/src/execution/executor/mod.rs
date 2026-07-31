@@ -701,9 +701,18 @@ impl ExecutionFrame<'_, '_> {
 pub(crate) mod internals {
     use crate::execution::compile::compiled_graph::CompiledGraph;
     use crate::execution::executor::{Executor, NodeOutcome};
+    use crate::execution::identity::OutputIdx;
     use crate::graph::identity::NodeId;
 
     impl Executor {
+        /// How many planned reads of one output the last run left uncompleted —
+        /// zero once every consumer has read it or had its read retired. The
+        /// mid-run release bookkeeping, which nothing outside the loop observes
+        /// in production.
+        pub(crate) fn remaining_reads(&self, output_idx: OutputIdx) -> u32 {
+            self.remaining_reads.counts[output_idx]
+        }
+
         /// Whether `node_id` actually recomputed its lambda in the last run — i.e.
         /// wasn't reused from RAM/disk. Before any run (empty outcomes) every node
         /// reads as "ran", so plan-only introspection still sees the full schedule;

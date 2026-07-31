@@ -1,4 +1,3 @@
-use crate::graph::identity::{FuncId, NodeId};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use ::common::CancelToken;
@@ -6,12 +5,8 @@ use ::common::CancelToken;
 use crate::execution::cache::digest::{Digest, DigestHasher};
 use crate::execution::cache::resource::{FileId, FsPathId, StampJob, epoch_offset_ns};
 use crate::execution::cache::runtime::RuntimeCache;
-use crate::execution::compile::compiled_graph::{
-    CompiledGraph, ExecutionBinding, ExecutionInput, ExecutionNode,
-};
-use crate::execution::identity::NodeIdx;
-use crate::execution::schedule::{NodeState, RootFlags, RunSchedule};
-use crate::graph::func::FuncBehavior;
+use crate::graph::identity::FuncId;
+use crate::testing::program::ProgramBuilder;
 use crate::{DataType, StaticValue};
 
 #[derive(Debug)]
@@ -270,110 +265,52 @@ fn file_identity_separates_pre_epoch_mtimes() {
     }
 }
 
-#[derive(Debug)]
-struct ConstPathFixture {
-    /// A real outer compiled artifact around the hand-built program.
-    program: CompiledGraph,
-    schedule: RunSchedule,
-    first: NodeId,
-    second: NodeId,
-}
-
-fn const_path_fixture(path: &str) -> ConstPathFixture {
-    let first = NodeId::from_u128(1);
-    let second = NodeId::from_u128(2);
-    let mut program = CompiledGraph::default();
-    let input_ranges = [
-        program.inputs.append([ExecutionInput {
-            binding: ExecutionBinding::Const(StaticValue::FsPath(path.to_string())),
-            ..Default::default()
-        }]),
-        program.inputs.append([ExecutionInput {
-            binding: ExecutionBinding::Const(StaticValue::FsPath(path.to_string())),
-            ..Default::default()
-        }]),
-    ];
-    let output_ranges = [
-        program.outputs.append([DataType::Int]),
-        program.outputs.append([DataType::Int]),
-    ];
-    for ((node_id, inputs), outputs) in [first, second]
-        .into_iter()
-        .zip(input_ranges)
-        .zip(output_ranges)
-    {
-        program.push(
-            node_id,
-            ExecutionNode {
-                behavior: FuncBehavior::Pure,
-                func_id: FuncId::from_u128(10),
-                inputs,
-                outputs,
-                ..Default::default()
-            },
-        );
-    }
-    let mut schedule = RunSchedule::default();
-    schedule.reset_for_program(&program);
-    schedule.process_order.extend([NodeIdx(0), NodeIdx(1)]);
-    schedule.states.reset(program.e_nodes.len(), NodeState::Cut);
-    schedule.add_root(NodeIdx(0), RootFlags::PLAIN);
-    schedule.add_root(NodeIdx(1), RootFlags::PLAIN);
-    ConstPathFixture {
-        program,
-        schedule,
-        first,
-        second,
-    }
-}
-
+/// Two content-cacheable nodes of one func, each declaring the *same* const
+/// path — the pair whose digests must agree within a run and move between them.
 #[tokio::test]
 async fn same_path_uses_one_identity_until_the_next_run() {
     let dir = TempDir::new("snapshot");
     let file = dir.0.join("data.bin");
     std::fs::write(&file, b"x").unwrap();
-    let fixture = const_path_fixture(&file.to_string_lossy());
+    let path = StaticValue::FsPath(file.to_string_lossy().into_owned());
+
+    let mut prog = ProgramBuilder::default();
+    let shared_func = FuncId::from_u128(10);
+    let const_path_node = |prog: &mut ProgramBuilder| {
+        prog.node()
+            .pure()
+            .func(shared_func)
+            .const_input(path.clone())
+            .output_types([DataType::Int])
+            .add()
+    };
+    let first = const_path_node(&mut prog);
+    let second = const_path_node(&mut prog);
+    let schedule = prog.planned();
+    let program = prog.program();
+
     let mut cache = RuntimeCache::default();
-    cache.install_for_test(&fixture.program);
+    cache.install_for_test(program);
 
     cache
-        .prepare(
-            &fixture.program,
-            fixture.schedule.executing(),
-            CancelToken::never(),
-        )
+        .prepare(program, schedule.executing(), CancelToken::never())
         .await;
-    cache.stamp_digest(
-        &fixture.program,
-        fixture.program.node(fixture.first).unwrap(),
-    );
+    cache.stamp_digest(program, first.node_idx);
 
     std::fs::write(&file, b"longer").unwrap();
-    cache.stamp_digest(
-        &fixture.program,
-        fixture.program.node(fixture.second).unwrap(),
-    );
+    cache.stamp_digest(program, second.node_idx);
     assert_eq!(
-        cache[fixture.program.node(fixture.first).unwrap()].current_digest,
-        cache[fixture.program.node(fixture.second).unwrap()].current_digest,
+        cache[first.node_idx].current_digest, cache[second.node_idx].current_digest,
         "both consumers fold the run's one coherent resource identity"
     );
 
-    let first_run = cache[fixture.program.node(fixture.first).unwrap()].current_digest;
+    let first_run = cache[first.node_idx].current_digest;
     cache
-        .prepare(
-            &fixture.program,
-            fixture.schedule.executing(),
-            CancelToken::never(),
-        )
+        .prepare(program, schedule.executing(), CancelToken::never())
         .await;
-    cache.stamp_digest(
-        &fixture.program,
-        fixture.program.node(fixture.first).unwrap(),
-    );
+    cache.stamp_digest(program, first.node_idx);
     assert_ne!(
-        cache[fixture.program.node(fixture.first).unwrap()].current_digest,
-        first_run,
+        cache[first.node_idx].current_digest, first_run,
         "the next run refreshes resource identity"
     );
 }
