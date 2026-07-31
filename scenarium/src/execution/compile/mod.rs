@@ -32,13 +32,12 @@ pub(crate) mod error;
 mod validate;
 
 use crate::DataType;
-use crate::common::column::{Column, Span};
+use crate::common::column::Column;
 use crate::execution::compile::error::CompileError;
 use crate::execution::compiled::{
     CompiledGraph, ExecutionBinding, ExecutionEvent, ExecutionInput, ExecutionNode,
 };
 use crate::execution::identity::{EventIdx, NodeIdx, OutputAddr};
-use crate::graph::func::event::EventLambda;
 use crate::graph::func::{Func, FuncInput};
 use crate::graph::identity::{InputPort, NodeId, OutputPort};
 use crate::graph::node::NodeKind;
@@ -107,19 +106,6 @@ struct Scratch {
     /// output counts outlive the sort: a binding is range-checked against them
     /// all through the walk.
     placed: Vec<Placed>,
-    /// One node's resolved inputs, refilled per node. They are resolved before
-    /// the ports are appended, so an [`ExecutionInput`] is whole the moment it
-    /// exists.
-    node_inputs: Vec<ExecutionInput>,
-    /// Each event port's lambda, in pool order, collected as the walk passes the
-    /// node that declares it — the one place both the pool position and the
-    /// declaration are in hand at once.
-    event_lambdas: Vec<EventLambda>,
-    /// Each event's subscribers, grouped before the events are built. Only the
-    /// outer vector is reused: the inner ones move into the events, so they are
-    /// the one allocation here that escapes — and only for an event something
-    /// actually subscribes to, since an empty `Vec` holds no buffer.
-    subscribers: Vec<Vec<NodeIdx>>,
     /// Every output type of the graph, filled before the walk. Held here
     /// because the type gate runs once per bound input, and resolving one port
     /// at a time cost a walk per edge.
@@ -186,8 +172,7 @@ impl Compiler {
         let mut e_nodes = Column::with_capacity(placement.node_ids.len());
         let mut inputs = Column::with_capacity(placement.totals.inputs);
         let mut outputs = Column::with_capacity(placement.totals.outputs);
-        self.scratch.event_lambdas.clear();
-        self.scratch.event_lambdas.reserve(placement.totals.events);
+        let mut events = Column::with_capacity(placement.totals.events);
 
         for position in 0..placement.node_ids.len() {
             let node_id = placement.node_ids[NodeIdx(position as u32)];
@@ -213,21 +198,20 @@ impl Compiler {
             // a changed `required` flag, a grown input list, a retyped output —
             // and this is where that lands.
             //
-            // Bindings are resolved *before* the ports are appended, so each
-            // input is whole when it enters the pool rather than being revisited
-            // by index afterwards.
-            self.scratch.node_inputs.clear();
-            for (port_idx, func_input) in func.inputs.iter().enumerate() {
-                let port = InputPort::new(node_id, port_idx);
-                let binding =
-                    self.typed_binding(library, &placement, func_input, root.bindings.get(&port));
-                self.scratch.node_inputs.push(ExecutionInput {
+            // Each input is resolved as it is appended, so it is whole the moment
+            // it enters the pool rather than being revisited by index afterwards.
+            let node_inputs = inputs.append(func.inputs.iter().enumerate().map(
+                |(port_idx, func_input)| ExecutionInput {
                     required: func_input.required,
                     stamps_fs_path: matches!(&func_input.data_type, DataType::FsPath(_)),
-                    binding,
-                });
-            }
-            let node_inputs = inputs.append(self.scratch.node_inputs.drain(..));
+                    binding: self.typed_binding(
+                        library,
+                        &placement,
+                        func_input,
+                        root.bindings.get(&InputPort::new(node_id, port_idx)),
+                    ),
+                },
+            ));
 
             // The effective type of each output, straight off the table filled
             // above — the same answer the editor paints, so the program and the
@@ -242,18 +226,14 @@ impl Compiler {
                     .unwrap_or_default()
             }));
 
-            // The event pool is claimed here and filled by `wire_subscriptions`
-            // below: a subscriber's slot belongs to the *emitter*, which the
-            // walk may not have reached yet. The lambda is the one half the
-            // declaration answers for, so it rides along now.
-            let events = Span::new(
-                u32::try_from(self.scratch.event_lambdas.len())
-                    .expect("a program's port count fits in u32"),
-                u32::try_from(func.events.len()).expect("a node's port count fits in u32"),
-            );
-            self.scratch
-                .event_lambdas
-                .extend(func.events.iter().map(|event| event.event_lambda.clone()));
+            // Each event port lands with the half its own declaration answers
+            // for. The other half — who subscribes — belongs to the *emitter*,
+            // which the id order may put after the subscriber, so
+            // `wire_subscriptions` fills those lists once every node is placed.
+            let node_events = events.append(func.events.iter().map(|event| ExecutionEvent {
+                subscribers: Vec::new(),
+                lambda: event.event_lambda.clone(),
+            }));
 
             e_nodes.push(ExecutionNode {
                 sink: func.sink,
@@ -263,13 +243,13 @@ impl Compiler {
                 special,
                 inputs: node_inputs,
                 outputs: node_outputs,
-                events,
+                events: node_events,
                 func_id: func.id,
                 lambda: func.lambda.clone(),
             });
         }
 
-        let events = self.wire_subscriptions(root, &e_nodes, &placement);
+        Self::wire_subscriptions(root, &e_nodes, &placement, &mut events);
 
         // The placement counted these from the same declarations the walk read,
         // so a mismatch is the two disagreeing about the library — and every
@@ -393,30 +373,28 @@ impl Compiler {
         })
     }
 
-    /// Build the event pool: each port's declared lambda, plus the subscribers
-    /// this graph wires to it.
+    /// Give each placed event port the subscribers this graph wires to it.
     ///
-    /// Run after the walk because a subscriber's slot belongs to the emitter,
-    /// whose run the walk may not have claimed yet. Subscribers are grouped
-    /// before the events are built, so each one is whole when it enters the pool
-    /// — an empty subscriber list then means "nothing subscribes" rather than
-    /// "not wired yet".
+    /// Run after the walk because a subscriber's slot belongs to the *emitter*,
+    /// which the id order may put after the subscriber. Nothing outside this
+    /// call can see the column part-wired: it is still a local of
+    /// [`Self::walk`], and every list is complete before it moves into the
+    /// artifact.
     ///
     /// A disabled node fires no events and receives none, and a subscription
     /// past the emitter's run — an event the func has since dropped — wires
     /// nothing: the same drift tolerance the type gate applies to data edges.
     /// The run is read off the placed node rather than the declaration, so the
     /// bound is the one the walk actually claimed.
+    ///
+    /// Takes no compiler state: the placement answers for identity and the two
+    /// columns are the walk's own.
     fn wire_subscriptions(
-        &mut self,
         graph: &Graph,
         e_nodes: &Column<NodeIdx, ExecutionNode>,
         placement: &Placement,
-    ) -> Column<EventIdx, ExecutionEvent> {
-        self.scratch.subscribers.clear();
-        self.scratch
-            .subscribers
-            .resize_with(self.scratch.event_lambdas.len(), Vec::new);
+        events: &mut Column<EventIdx, ExecutionEvent>,
+    ) {
         for sub in graph.subscriptions() {
             let emitter = graph
                 .find(sub.emitter)
@@ -427,26 +405,14 @@ impl Compiler {
             if emitter.disabled || subscriber.disabled {
                 continue;
             }
-            let events = e_nodes[placement.idx(sub.emitter)].events;
-            if sub.event_idx >= events.len as usize {
+            let run = e_nodes[placement.idx(sub.emitter)].events;
+            if sub.event_idx >= run.len as usize {
                 continue;
             }
-            self.scratch.subscribers[events.start as usize + sub.event_idx]
+            events[run.nth(sub.event_idx as u32)]
+                .subscribers
                 .push(placement.idx(sub.subscriber));
         }
-
-        let mut events = Column::with_capacity(self.scratch.event_lambdas.len());
-        events.append(
-            self.scratch
-                .subscribers
-                .drain(..)
-                .zip(self.scratch.event_lambdas.drain(..))
-                .map(|(subscribers, lambda)| ExecutionEvent {
-                    subscribers,
-                    lambda,
-                }),
-        );
-        events
     }
 }
 
