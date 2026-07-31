@@ -61,6 +61,12 @@ pub enum Binding {
 /// wiring and validation passes beside this file can walk it, and no wider.
 #[derive(Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Graph {
+    /// Every node, keyed by the id that reaches it — so an id is unique here
+    /// by construction, and [`insert`](Self::insert) panics rather than
+    /// replacing. Decoding is the one way in that could hold a repeated id, and
+    /// [`serde::deserialize_nodes`](crate::graph::serde) refuses one instead of
+    /// letting the map absorb it.
+    #[serde(deserialize_with = "crate::graph::serde::deserialize_nodes")]
     pub(crate) nodes: HashMap<NodeId, Node>,
 
     /// Data wiring, keyed by consumer input port. Sparse: only bound ports
@@ -68,7 +74,11 @@ pub struct Graph {
     /// serialization deterministic and lets a node's ports range contiguously.
     /// Serialized as a sequence of `(port, binding)` pairs — struct keys aren't
     /// valid map keys in string-keyed formats (JSON/TOML).
-    #[serde(default, with = "crate::graph::serde")]
+    #[serde(
+        default,
+        serialize_with = "crate::graph::serde::serialize_bindings",
+        deserialize_with = "crate::graph::serde::deserialize_bindings"
+    )]
     pub bindings: BTreeMap<InputPort, Binding>,
 
     /// Event wiring: every (emitter event → subscriber) edge, flat. A
@@ -397,39 +407,19 @@ impl Graph {
 
     /// Validate this graph structurally: everything a document must satisfy to
     /// *be* a graph, answerable without a library. What a host runs on a
-    /// freshly decoded document, where no library exists yet — decoding does
-    /// not validate on its own.
+    /// freshly decoded document, where no library exists yet — decoding checks
+    /// only what it alone can see (a repeated key, which no decoded value could
+    /// still show), never the wiring below.
+    ///
+    /// Id *uniqueness* is therefore not among the checks: `nodes` is keyed by
+    /// id, so a duplicate cannot survive to be found here — the two ways one
+    /// could arrive are [`insert`](Self::insert), which panics, and decoding,
+    /// which refuses. Re-deriving it from the map's own keys would only ever
+    /// confirm that a map is a map.
     pub fn validate(&self) -> ValidationResult<()> {
-        self.validate_shape(&mut HashSet::new())
-    }
-
-    /// Validate this graph as an execution entry against `library`: structurally
-    /// first, then every reference it makes.
-    ///
-    /// Two passes rather than one interleaved walk, because they answer
-    /// different questions and only one of them can always be asked. Structure
-    /// is what the document must satisfy to be a graph at all; this adds what it
-    /// takes to compile one against a *particular* library, which the same
-    /// document may pass today and fail tomorrow. Running structure first also
-    /// lets the second pass assume it: every id it reads names a node that is
-    /// there.
-    pub fn validate_with(&self, library: &Library) -> ValidationResult<()> {
-        self.validate()?;
-        self.validate_references(library)
-    }
-
-    /// Structural validation of this graph's nodes and wiring.
-    ///
-    /// `node_ids` accumulates every id seen, so duplicates are caught across
-    /// everything the walk covers — an id must be unique document-wide, which
-    /// is what makes a bare id an unambiguous address.
-    fn validate_shape(&self, node_ids: &mut HashSet<NodeId>) -> ValidationResult<()> {
         for (node_id, node) in &self.nodes {
             if node_id.is_nil() {
                 return Err(GraphValidationError::NilNodeId);
-            }
-            if !node_ids.insert(*node_id) {
-                return Err(GraphValidationError::DuplicateNodeId { node_id: *node_id });
             }
             match &node.kind {
                 NodeKind::Func(func_id) => {
@@ -482,9 +472,24 @@ impl Graph {
         Ok(())
     }
 
+    /// Validate this graph as an execution entry against `library`: structurally
+    /// first, then every reference it makes.
+    ///
+    /// Two passes rather than one interleaved walk, because they answer
+    /// different questions and only one of them can always be asked. Structure
+    /// is what the document must satisfy to be a graph at all; this adds what it
+    /// takes to compile one against a *particular* library, which the same
+    /// document may pass today and fail tomorrow. Running structure first also
+    /// lets the second pass assume it: every id it reads names a node that is
+    /// there.
+    pub fn validate_with(&self, library: &Library) -> ValidationResult<()> {
+        self.validate()?;
+        self.validate_references(library)
+    }
+
     /// Everything in this graph that names a declaration: every func resolves,
     /// and a `Bind` does not sit on a `const_only` input.
-    pub(super) fn validate_references(&self, library: &Library) -> ValidationResult<()> {
+    fn validate_references(&self, library: &Library) -> ValidationResult<()> {
         for (node_id, node) in &self.nodes {
             match &node.kind {
                 NodeKind::Func(func_id) => {
