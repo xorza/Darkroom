@@ -44,6 +44,6 @@ pub(crate) enum Refusal { - remove
 
 fn drain_intents(&mut self, open: &mut OpenDocument) { - ugly
 
-bake output types into wildcard outputs
+reuse outputtypes in darkroom
 
 refactor consumers
