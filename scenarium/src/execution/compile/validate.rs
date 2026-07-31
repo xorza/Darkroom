@@ -1,6 +1,6 @@
 //! Compile-owned validation of the finished artifact.
 //!
-//! Linking constructs the artifact, then this stage checks it while the
+//! The walk constructs the artifact, then this stage checks it while the
 //! authoring [`Library`] is still in hand. Keeping that dependency here means
 //! the installed [`CompiledGraph`] knows neither the compiler nor the library;
 //! it owns runtime data and queries only.

@@ -5106,7 +5106,7 @@ mod compile_regressions {
             DataType::Any
         );
 
-        // The same wire, compiled: linking resolves the wildcard through the
+        // The same wire, compiled: the walk resolves the wildcard through the
         // binding it just interned, and the cycle closes on `Any` there too.
         let compiled = Compiler::default().compile(&graph, &library).unwrap();
         let e_node = compiled.by_id(node_id);

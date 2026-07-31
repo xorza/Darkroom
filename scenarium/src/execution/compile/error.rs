@@ -7,7 +7,7 @@
 //! than the library. It is recoverable, and never enters the worker.
 //!
 //! The crate-private errors are *self-consistency* verdicts from the validation
-//! stage after linking. Nothing but a bug in this crate can raise one, so they
+//! stage that follows the walk. Nothing but a bug in this crate can raise one, so they
 //! surface only through its `is_debug()`-gated wrapper — as values rather than
 //! panics, so a test can assert on exactly which invariant broke.
 

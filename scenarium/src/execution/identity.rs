@@ -13,7 +13,8 @@
 //!
 //! Everything below is the opposite: indices shift between compiles, so none
 //! of them may enter a digest, a persisted byte, or a host-facing report.
-//! They are assigned by linking and never leave the execution internals.
+//! They are assigned by the compiler's walk and never leave the execution
+//! internals.
 
 use crate::common::column::Idx;
 
@@ -36,7 +37,7 @@ impl Idx for NodeIdx {
 
 /// An [`OutputPort`](crate::graph::identity::OutputPort)
 /// interned into the installed program's dense index space — the hash-free form
-/// every per-run edge walk uses, resolved once by the compile link stage.
+/// every per-run edge walk uses, resolved once at compile.
 /// Install-local like [`NodeIdx`]: it must never enter a digest, a persisted
 /// byte, or a host-facing report.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -68,9 +69,8 @@ impl Idx for OutputIdx {
 /// another. A node owns a [`Span<InputIdx>`](crate::common::column::Span); this
 /// names one port inside it.
 ///
-/// The space spans both compile stages: linking rebuilds lowering's input column
-/// into the program's slot for slot, so a position means the same port in
-/// either.
+/// Positions are handed out as the walk appends, one node's run after another,
+/// so a node owns exactly the run its own declaration claimed.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) struct InputIdx(pub(crate) u32);
 
