@@ -16,11 +16,12 @@ use crate::gui::canvas::drag_anchor::selected_group_positions;
 use crate::gui::canvas::geometry::CanvasGeometry;
 use crate::gui::canvas::hits::CanvasHits;
 use crate::gui::canvas::inspector::Inspectors;
+use crate::gui::graph_scope::GraphScope;
+use crate::gui::graph_scope::node_scope::NodeScope;
 use crate::gui::node::header::{header, status_row, subscription_pin};
 use crate::gui::node::memory_row::memory_row;
 use crate::gui::node::port_row::ports_row;
-use crate::gui::run_state::{ExecStatus, RunState};
-use crate::gui::scene::{Pane, Scene, SceneNode};
+use crate::gui::run_state::ExecStatus;
 use crate::gui::theme::Theme;
 use glam::Vec2;
 use palantir::{
@@ -29,7 +30,6 @@ use palantir::{
 };
 use scenarium::Binding;
 use scenarium::InputPort;
-use scenarium::Library;
 use scenarium::NodeId;
 use std::collections::BTreeSet;
 
@@ -47,17 +47,18 @@ use std::collections::BTreeSet;
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct RecordCtx<'a> {
     pub(crate) theme: &'a Theme,
-    /// The runtime library, for resolving a port's registered type metadata
-    /// (display name, enum variants) — `DataType` carries only the id.
-    pub(crate) library: &'a Library,
     /// The one graph this record pass is drawing. Every other pane on
     /// screen gets its own `RecordCtx`, so nothing here can reach across.
-    pub(crate) graph: Pane<'a>,
-    /// Effective selection to paint: the pane's committed set
-    /// (`Pane::selected`) or, mid-rubber-band, the live swept preview owned
-    /// by `SelectionUI` — one type, so the draw substitutes them without
-    /// caring which it got, and the gesture never writes its preview into
-    /// the document.
+    ///
+    /// Also how the pass reaches the library and the last run's results:
+    /// the scope already borrows both to answer for its nodes, so carrying
+    /// them again beside it would be two paths to one ref.
+    pub(crate) graph_scope: GraphScope<'a>,
+    /// Effective selection to paint: the graph's committed set
+    /// ([`GraphScope::selected`]) or, mid-rubber-band, the live swept
+    /// preview owned by `SelectionUI` — one type, so the draw substitutes
+    /// them without caring which it got, and the gesture never writes its
+    /// preview into the document.
     pub(crate) selected: &'a BTreeSet<NodeId>,
     pub(crate) geometry: &'a CanvasGeometry,
     /// This frame's swept node interactions — the node body reads its
@@ -66,9 +67,6 @@ pub(crate) struct RecordCtx<'a> {
     /// Open inspection panels, so the header chip can render its
     /// open/pinned state.
     pub(crate) inspectors: &'a Inspectors,
-    /// Live run results — a preview node's body reads the value it is
-    /// showing from here.
-    pub(crate) run_state: &'a RunState,
 }
 
 impl RecordCtx<'_> {
@@ -127,12 +125,11 @@ impl NodeUI {
         probe: &mut BreakerProbe<'_>,
         out: &mut Intents,
     ) {
-        // Paint in `scene.z_order` (mirrored from `item_placements`) — later
-        // draws sit on top, so the last item in the list is frontmost. The
-        // order is persisted view state, so a raised item stays raised across
-        // save/load and tab switches; `GraphIntent::Raise` moves a clicked item
-        // to the end. `RecordCtx` is `Copy`, so the `&scene` borrows held
-        // by the loop coexist with copying `rcx` into the draw calls.
+        // Paint in the scope's node order (the view's `item_placements`) —
+        // later draws sit on top, so the last item is frontmost. The order is
+        // persisted view state, so a raised item stays raised across
+        // save/load and tab switches; `GraphIntent::Raise` moves a clicked
+        // item to the end.
         //
         // Culled nodes are skipped entirely — no measure, arrange, or
         // paint. Every widget id in a node's subtree derives from its
@@ -147,11 +144,7 @@ impl NodeUI {
         // and that first post-blur record is where the edit's pending draft
         // commits.
         let mut focus_kept = None;
-        for key in rcx.graph.z_order() {
-            let id = *key;
-            let Some(n) = rcx.graph.node(id) else {
-                continue;
-            };
+        for n in rcx.graph_scope.nodes() {
             let keeps_focus = ui.focus_within(node_widget_id(n.id));
             if keeps_focus {
                 focus_kept = Some(n.id);
@@ -167,14 +160,14 @@ impl NodeUI {
         self.focus_kept_last = focus_kept;
         // Belt-and-braces against a node deleted mid-drag; `prepass` makes
         // the same check before it can emit anything against it.
-        self.drag.drop_if_owner_gone(rcx.graph.scene());
+        self.drag.drop_if_owner_gone(rcx.graph_scope);
     }
 
     fn draw_one(
         &mut self,
         ui: &mut Ui,
         rcx: RecordCtx<'_>,
-        node: &SceneNode,
+        node: NodeScope<'_>,
         probe: &mut BreakerProbe<'_>,
         out: &mut Intents,
     ) {
@@ -203,7 +196,7 @@ impl NodeUI {
         // `Theme::card_border`'s own broken/selected/resting 3-tier (broken
         // can't recur here since it's already handled, but the helper still
         let border_width = theme.card_border_width();
-        let border = if node.missing && !broken {
+        let border = if node.missing() && !broken {
             // A stub for a node whose func is gone from the library: paint it
             // in the error color so it reads as broken-but-deletable.
             theme.colors.exec_errored_glow
@@ -215,12 +208,12 @@ impl NodeUI {
         let shift_click = ui.modifiers().shift;
         // Status glow when the node ran, else the ambient elevation shadow —
         // one slot, and live status outranks depth.
-        let shadow = node_shadow(theme, node.exec_status);
+        let shadow = node_shadow(theme, node.exec_status());
 
         // The subscription pin records just before the body so it peeks out
         // from behind this node's corner while riding the same cull decision
         // and stack position as the node itself.
-        if node.sink {
+        if node.sink() {
             subscription_pin(ui, theme, node, rcx.geometry.subs.is_hovered(node.id));
         }
 
@@ -232,7 +225,7 @@ impl NodeUI {
             .position(node.pos)
             // A preview needs room for a thumbnail; every other node keeps the
             // theme's own floor.
-            .min_size(if node.preview {
+            .min_size(if node.preview() {
                 (preview_row::PREVIEW_MIN_WIDTH, theme.node_min_height)
             } else {
                 (theme.node_min_width, theme.node_min_height)
@@ -253,7 +246,7 @@ impl NodeUI {
                 ports_row(ui, rcx, node, row_tracks, out);
                 // A preview has no output, so it has no cached value for the
                 // memory readout to report — its value takes that slot instead.
-                if node.preview {
+                if node.preview() {
                     preview_row::preview_row(ui, rcx, node);
                 } else {
                     memory_row(ui, rcx, node);
@@ -270,24 +263,24 @@ impl NodeUI {
         // selection. `UndoStep::is_noop` filters a click that doesn't
         // change the set (e.g. clicking the sole selected node).
         if body_clicked {
-            click_intents(shift_click, rcx.graph, node.id, out);
+            click_intents(shift_click, rcx.graph_scope, node.id, out);
         }
 
         // Latch the anchor on the press-frame edge, off whichever handle
         // caught the press (resolved by this frame's sweep, which walks the
         // same curated `drag_handles` list); subsequent frames' `prepass`
         // peeks `response_for(widget_id)` before record runs and converts
-        // `drag_delta` into a `MoveSelection` applied to `Document`
-        // upstream of `Scene::rebuild`.
+        // `drag_delta` into a `MoveSelection` applied to `Document` before
+        // the record reads it back.
         if let Some(handle) = rcx.hits.latched_on(node.id) {
             // Grabbing a node already in the selection drags the whole
             // group together;
             // grabbing an unselected node selects only it and drags it
             // alone.
             let start_positions = if selected {
-                selected_group_positions(rcx.graph, rcx.selected)
+                selected_group_positions(rcx.graph_scope, rcx.selected)
             } else {
-                click_intents(false, rcx.graph, node.id, out);
+                click_intents(false, rcx.graph_scope, node.id, out);
                 vec![(node.id, node.pos)]
             };
             self.drag.latch(node.id, start_positions, handle);
@@ -296,12 +289,12 @@ impl NodeUI {
 
     /// Pre-record pass: peek palantir's input state for any widgets
     /// this `NodeUI` owns and push the corresponding `GraphIntent`s into
-    /// `out`. Runs before `Scene::rebuild` in `App::record`, so any
-    /// state mutation applied from these intents (notably drag-driven
-    /// `MoveSelection`) lands in `Document` before recording — Pass A's
-    /// arrange already reflects the cursor; no Pass B relayout retry.
-    pub(super) fn prepass(&mut self, ui: &Ui, scene: &Scene, out: &mut Intents) {
-        self.drag.advance(ui, scene, out);
+    /// `out`. Runs in the pre-record pass, so any state mutation applied
+    /// from these intents (notably drag-driven `MoveSelection`) lands in
+    /// `Document` before recording — Pass A's arrange already reflects the
+    /// cursor; no Pass B relayout retry.
+    pub(super) fn prepass(&mut self, ui: &Ui, graph_scope: GraphScope<'_>, out: &mut Intents) {
+        self.drag.advance(ui, graph_scope, out);
     }
 }
 
@@ -417,9 +410,14 @@ pub(super) fn set_input(port: PortRef, to: impl Into<Option<Binding>>) -> GraphI
 /// deselected shouldn't jump forward. Shared by the node body, header
 /// title, and port labels so clicking any of them behaves like clicking the
 /// body.
-pub(super) fn click_intents(shift: bool, graph: Pane<'_>, key: NodeId, out: &mut Intents) {
-    out.push(select_intent(shift, graph, key));
-    let deselecting = shift && graph.is_selected(key);
+pub(super) fn click_intents(
+    shift: bool,
+    graph_scope: GraphScope<'_>,
+    key: NodeId,
+    out: &mut Intents,
+) {
+    out.push(select_intent(shift, graph_scope, key));
+    let deselecting = shift && graph_scope.is_selected(key);
     if !deselecting {
         out.push(GraphIntent::Raise { key });
     }
@@ -428,13 +426,13 @@ pub(super) fn click_intents(shift: bool, graph: Pane<'_>, key: NodeId, out: &mut
 /// The `SetSelection` a click on `key` produces: plain click selects only
 /// it, Shift-click toggles its membership. `UndoStep::is_noop` drops the
 /// entry when nothing changed.
-fn select_intent(shift: bool, graph: Pane<'_>, key: NodeId) -> GraphIntent {
+fn select_intent(shift: bool, graph_scope: GraphScope<'_>, key: NodeId) -> GraphIntent {
     let mut to = if shift {
-        graph.selected().clone()
+        graph_scope.selected().clone()
     } else {
         BTreeSet::new()
     };
-    if shift && graph.is_selected(key) {
+    if shift && graph_scope.is_selected(key) {
         to.remove(&key);
     } else {
         to.insert(key);
@@ -446,27 +444,22 @@ fn select_intent(shift: bool, graph: Pane<'_>, key: NodeId) -> GraphIntent {
 mod tests {
     use super::*;
 
-    use crate::gui::scene::internals::{SceneFixture, scene_node_stub};
-    use palantir::internals::UiHarness;
+    use crate::gui::graph_scope::internals::ScopeFixture;
 
-    /// A one-pane scene holding `selected` as both its node set and its
-    /// committed selection — enough for the click-intent rules, which read
-    /// nothing else.
-    fn scene_with_selection(selected: impl IntoIterator<Item = NodeId>) -> SceneFixture {
-        let mut arena = UiHarness::arena();
+    /// A graph holding `selected` as both its node set and its committed
+    /// selection — enough for the click-intent rules, which read nothing
+    /// else.
+    fn scene_with_selection(selected: impl IntoIterator<Item = NodeId>) -> ScopeFixture {
         let ids: Vec<NodeId> = selected.into_iter().collect();
-        SceneFixture::with_nodes(
-            ids.iter()
-                .map(|id| scene_node_stub(arena.ui(), *id, Vec2::ZERO)),
-        )
-        .with_selection(ids.iter().copied())
+        ScopeFixture::with_nodes(ids.iter().map(|id| (*id, Vec2::ZERO)))
+            .with_selection(ids.iter().copied())
     }
 
-    fn click(shift: bool, scene: &SceneFixture, id: NodeId) -> Vec<GraphIntent> {
+    fn click(shift: bool, scene: &ScopeFixture, id: NodeId) -> Vec<GraphIntent> {
         use crate::core::edit::intent::sink::Queued;
 
         let mut out = Intents::default();
-        click_intents(shift, scene.only_pane(), id, &mut out);
+        click_intents(shift, scene.scope(), id, &mut out);
         out.drain()
             .map(|queued| match queued {
                 Queued::Graph(intent) => intent,
