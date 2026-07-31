@@ -879,19 +879,40 @@ mod tests {
     assert_not_impl_any!(StaticValueEditorTheme: Copy);
     assert_not_impl_any!(InlineRenameTheme: Copy);
 
-    /// Keep the checked-in `assets/ayu-graphite.toml` in sync with the
-    /// const-defined [`Theme::default`]: serialize the default and rewrite
-    /// the file. The asset is a generated artifact (a reference theme
-    /// users can copy / the Theme → Load-Export format), not a source of
-    /// truth — running the suite regenerates it, so any change to the
-    /// consts (or palantir's defaults) surfaces as an asset diff to commit.
-    /// Writing is idempotent when already in sync, so it's a no-op on a
-    /// clean tree.
+    /// The checked-in `assets/ayu-graphite.toml` is a generated artifact — a
+    /// reference theme users can copy, in the Theme → Load/Export format — so
+    /// it has to track [`Theme::default`]. This *reads* it: any change to the
+    /// consts (or to palantir's defaults) fails here rather than silently
+    /// rewriting a tracked file mid-suite, which is what it used to do and why
+    /// it could never fail.
     #[test]
     fn ayu_graphite_asset_in_sync() {
-        let bytes =
-            common::serialize(&Theme::default(), SerdeFormat::Toml).expect("serialize theme");
-        std::fs::write("assets/ayu-graphite.toml", bytes).expect("write toml asset");
+        let expected = serialized_default_theme();
+        let on_disk = std::fs::read(ayu_graphite_path()).expect("the asset is checked in");
+        assert!(
+            on_disk == expected,
+            "assets/ayu-graphite.toml no longer matches Theme::default — regenerate it with \
+             `cargo test -p darkroom --all-features regenerate_ayu_graphite_asset -- --ignored`",
+        );
+    }
+
+    /// Rewrite the asset from the current defaults. Ignored by default: it is
+    /// the generator behind [`ayu_graphite_asset_in_sync`], not a check, and a
+    /// suite that regenerates its own fixtures cannot detect a drift.
+    #[test]
+    #[ignore = "regenerates a tracked asset; run explicitly after changing the theme consts"]
+    fn regenerate_ayu_graphite_asset() {
+        std::fs::write(ayu_graphite_path(), serialized_default_theme()).expect("write toml asset");
+    }
+
+    fn serialized_default_theme() -> Vec<u8> {
+        common::serialize(&Theme::default(), SerdeFormat::Toml).expect("serialize theme")
+    }
+
+    /// Anchored at the manifest rather than the working directory, so the two
+    /// halves above agree regardless of where the runner was invoked.
+    fn ayu_graphite_path() -> std::path::PathBuf {
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/ayu-graphite.toml")
     }
 
     /// The whole bundle — darkroom's own fields *and* the nested

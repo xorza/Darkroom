@@ -45,7 +45,7 @@ fn ensure_gitignore(root: &Path) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::{AtomicU64, Ordering};
+    use common::TempDir;
 
     #[test]
     fn cache_root_is_named_after_stem_beside_the_file() {
@@ -73,12 +73,7 @@ mod tests {
 
     #[test]
     fn build_creates_dir_and_self_ignoring_gitignore() {
-        static COUNTER: AtomicU64 = AtomicU64::new(0);
-        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-        let dir =
-            std::env::temp_dir().join(format!("darkroom-cache-test-{}-{n}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = TempDir::new("darkroom-cache");
         let doc_path = dir.join("scene.darkroom");
 
         let root = prepare_document_cache_root(&doc_path);
@@ -91,7 +86,5 @@ mod tests {
             "*\n",
             "the cache folder ignores its own contents"
         );
-
-        std::fs::remove_dir_all(&dir).unwrap();
     }
 }
