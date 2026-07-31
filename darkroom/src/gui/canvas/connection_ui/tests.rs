@@ -1,6 +1,6 @@
 use palantir::internals::UiHarness;
 use scenarium::testing::{TestFuncHooks, test_func_lib};
-use scenarium::{Binding, InputPort, Library, Node, NodeId, NodeKind};
+use scenarium::{Binding, InputPort, Library, Node, NodeId, NodeKind, OutputTypes};
 
 use super::*;
 use crate::core::document::Document;
@@ -8,20 +8,27 @@ use crate::gui::run_state::RunState;
 
 #[derive(Debug)]
 struct Fixture {
-    /// The three sources a scope composes. The snap filter reads the
+    /// The four sources a scope composes. The snap filter reads the
     /// authoring graph out of the document to answer its cycle question,
-    /// and each node's ports out of the library.
+    /// each node's ports out of the library, and a port's resolved type off
+    /// the table — which composing the scope fills.
     doc: Document,
     library: Library,
     run_state: RunState,
+    output_types: OutputTypes,
     producer: NodeId,
     consumer: NodeId,
 }
 
 impl Fixture {
-    fn graph_scope(&self) -> GraphScope<'_> {
-        GraphScope::for_document(&self.doc, &self.library, &self.run_state)
-            .expect("the fixture's document shows the graph")
+    fn graph_scope(&mut self) -> GraphScope<'_> {
+        GraphScope::for_document(
+            &self.doc,
+            &self.library,
+            &self.run_state,
+            &mut self.output_types,
+        )
+        .expect("the fixture's document shows the graph")
     }
 }
 
@@ -40,6 +47,7 @@ fn fixture() -> Fixture {
         doc: Document::from(graph),
         library,
         run_state: RunState::default(),
+        output_types: OutputTypes::default(),
         producer,
         consumer,
     }
@@ -75,7 +83,7 @@ fn committing_a_same_kind_pair_is_a_broken_invariant_not_a_silent_drop() {
 /// the port geometry, which a bare fixture has none of) — and the more exposed
 /// one, since no button is held, so it can sit across an arbitrary number of
 /// undos.
-fn prepass_with_wire_from(fixture: &Fixture, start: PortRef) -> Option<InFlight> {
+fn prepass_with_wire_from(fixture: &mut Fixture, start: PortRef) -> Option<InFlight> {
     let mut arena = UiHarness::arena();
     let mut connections = ConnectionUI::default();
     connections.state.latch(InFlight {
@@ -104,10 +112,10 @@ fn a_wire_drops_when_its_start_node_leaves_the_scene() {
     // untyped, which `scan_snap_target` reads as "compatible with
     // anything" — so a stranded wire would snap onto ports it should
     // never accept.
-    let f = fixture();
+    let mut f = fixture();
     let live = port(f.producer, PortKind::Output, 0);
     assert!(
-        prepass_with_wire_from(&f, live).is_some(),
+        prepass_with_wire_from(&mut f, live).is_some(),
         "a wire from a node still in the scene stays in flight"
     );
 
@@ -116,7 +124,7 @@ fn a_wire_drops_when_its_start_node_leaves_the_scene() {
         ..live
     };
     assert!(
-        prepass_with_wire_from(&f, gone).is_none(),
+        prepass_with_wire_from(&mut f, gone).is_none(),
         "a wire from a vanished node drops"
     );
 }

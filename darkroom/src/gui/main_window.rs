@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use palantir::{Align, Background, Configure, KeyFilter, Panel, Sizing, Ui, VAlign, WidgetId};
-use scenarium::{Library, NodeId};
+use scenarium::{Library, NodeId, OutputTypes};
 
 use crate::core::document::{Document, TabRef};
 use crate::core::edit::intent::sink::Intents;
@@ -61,6 +61,14 @@ fn claim(slot: &mut Option<AppCommand>, produce: impl FnOnce() -> Option<AppComm
 /// the time the caller reaches it, so the construction point and the call
 /// are the same instant. Keeping it here rather than in `Editor` means the
 /// editor shell never has to name the canvas subsystem's view type.
+///
+/// That is also why the resolved-output table lives here rather than on
+/// `Editor`: it is the scope's fourth input, and
+/// [`GraphScope::for_document`] resolves it against whichever document the
+/// entry point was handed. So each of the three below pays one resolve, over a
+/// document settled at that instant — the editor drains queued intents
+/// *between* them, and a table built once at frame top would be an edit behind
+/// by the record pass.
 #[derive(Default, Debug)]
 pub(crate) struct MainWindow {
     pub(crate) graph_ui: GraphUI,
@@ -69,6 +77,11 @@ pub(crate) struct MainWindow {
     /// centralized in the preview store.
     pub(crate) image_viewers: HashMap<NodeId, ImageViewer>,
     dock: DockUi,
+    /// The allocation behind the [`GraphScope`]s below, and nothing more: each
+    /// composition refills it, so it carries no state across frames and is a
+    /// field only so a refresh reuses its capacity rather than building a map
+    /// per pass.
+    output_types: OutputTypes,
 }
 
 impl MainWindow {
@@ -92,8 +105,15 @@ impl MainWindow {
         // two chip opens below are why it has to happen this early. Runs
         // ahead of the tab dispatch, so the scope stays an `Option` — with
         // no graph pane up there is nothing to sweep.
-        self.graph_ui
-            .scan_hits(ui, GraphScope::for_document(doc, library, run_state));
+        let MainWindow {
+            graph_ui,
+            output_types,
+            ..
+        } = self;
+        graph_ui.scan_hits(
+            ui,
+            GraphScope::for_document(doc, library, run_state, output_types),
+        );
         let hits = &self.graph_ui.hits;
         if let Some(node) = hits.chip(Chip::PreviewImage) {
             actions.push(UiAction::OpenImageViewer(node));
@@ -110,14 +130,19 @@ impl MainWindow {
         run_state: &RunState,
         out: &mut Intents,
     ) {
+        let MainWindow {
+            graph_ui,
+            output_types,
+            ..
+        } = self;
         for tab in doc.layout.active_tabs() {
             match tab {
                 // `Document::shows_graph` — which the scope gates on — is
                 // this same predicate over the same groups, so matching the
                 // arm *is* the proof that it resolves.
-                TabRef::Graph => self.graph_ui.prepass(
+                TabRef::Graph => graph_ui.prepass(
                     ui,
-                    GraphScope::for_document(doc, library, run_state)
+                    GraphScope::for_document(doc, library, run_state, output_types)
                         .expect("a Graph tab is active, so the scope resolves"),
                     out,
                 ),
@@ -145,6 +170,7 @@ impl MainWindow {
             graph_ui,
             image_viewers,
             dock,
+            output_types,
         } = self;
         // One recursive node search + one `String` per viewer tab for the
         // whole frame. Both readers — the strip chip and the pane header —
@@ -195,9 +221,13 @@ impl MainWindow {
                                 // `ctx` carries both halves this needs beside
                                 // the document; see `Self::prepass` for why
                                 // matching the arm proves it resolves.
-                                let graph_scope =
-                                    GraphScope::for_document(doc, ctx.library, ctx.run_state)
-                                        .expect("a Graph tab is active, so the scope resolves");
+                                let graph_scope = GraphScope::for_document(
+                                    doc,
+                                    ctx.library,
+                                    ctx.run_state,
+                                    output_types,
+                                )
+                                .expect("a Graph tab is active, so the scope resolves");
                                 claim(&mut command, || graph_ui.draw(ui, ctx, graph_scope, out));
                                 claim(&mut command, || {
                                     graph_ui.draw_toolbar(ui, ctx, graph_scope, out)

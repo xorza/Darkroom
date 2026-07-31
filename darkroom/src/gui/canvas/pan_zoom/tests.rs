@@ -13,7 +13,7 @@ fn node_bounds_uses_cached_sizes_and_falls_back_to_points() {
     //   b: (1000,500) 200×100 — culled, but its size is still cached
     //   c: (-50,300) never measured — contributes a point
     let (a, b, c) = (NodeId::unique(), NodeId::unique(), NodeId::unique());
-    let scene = ScopeFixture::with_nodes([
+    let mut scene = ScopeFixture::with_nodes([
         (a, Vec2::new(0.0, 0.0)),
         (b, Vec2::new(1000.0, 500.0)),
         (c, Vec2::new(-50.0, 300.0)),
@@ -31,13 +31,13 @@ fn node_bounds_uses_cached_sizes_and_falls_back_to_points() {
     assert_eq!(all.size, Size::new(1250.0, 600.0));
 
     // selected_only filters to exactly the selected node's rect.
-    let scene = scene.with_selection([b]);
+    let mut scene = scene.with_selection([b]);
     let sel = node_bounds(&geometry, scene.scope(), true).unwrap();
     assert_eq!(sel.min, Vec2::new(1000.0, 500.0));
     assert_eq!(sel.size, Size::new(200.0, 100.0));
 
     // Empty graph → nothing to frame.
-    let empty = ScopeFixture::with_nodes([]);
+    let mut empty = ScopeFixture::with_nodes([]);
     assert!(node_bounds(&geometry, empty.scope(), false).is_none());
 }
 

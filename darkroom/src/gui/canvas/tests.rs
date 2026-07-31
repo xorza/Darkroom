@@ -3,7 +3,7 @@ use palantir::internals::UiHarness;
 use palantir::{Configure, Panel, Sizing, Ui};
 use scenarium::{
     Binding, DataType, Func, FuncId, FuncInput, FuncOutput, InputPort, Library, NodeKind,
-    OutputType, testing,
+    OutputType, OutputTypes, testing,
 };
 
 use crate::core::document::{Document, GraphView, PortKind, PortRef};
@@ -50,8 +50,17 @@ fn wildcard_library() -> Library {
 
 /// The scope a test reads a canvas back through, over the same document the
 /// canvas drew.
-fn scope<'a>(doc: &'a Document, library: &'a Library, run_state: &'a RunState) -> GraphScope<'a> {
-    GraphScope::for_document(doc, library, run_state)
+///
+/// `output_types` is scratch the composition fills — a fresh one per call is
+/// correct, since several tests below edit their document between frames and
+/// the scope resolves against whichever one it is handed.
+fn scope<'a>(
+    doc: &'a Document,
+    library: &'a Library,
+    run_state: &'a RunState,
+    output_types: &'a mut OutputTypes,
+) -> GraphScope<'a> {
+    GraphScope::for_document(doc, library, run_state, output_types)
         .expect("the fixture's document shows the graph")
 }
 
@@ -112,7 +121,8 @@ fn a_culled_nodes_ports_stay_anchored_until_its_node_leaves_the_document() {
             process_memory: 0,
         };
         let mut intents = Intents::default();
-        let graph_scope = scope(doc, &library, &run_state);
+        let mut types = OutputTypes::default();
+        let graph_scope = scope(doc, &library, &run_state, &mut types);
         graph_ui.prepass(ui, graph_scope, &mut intents);
         Panel::vstack()
             .id_salt("pane")
@@ -162,7 +172,8 @@ fn a_culled_nodes_ports_stay_anchored_until_its_node_leaves_the_document() {
 
     // The node the document keeps holds its cached size; the other one is
     // still cached too, because being off-screen is not being deleted.
-    let live = scope(&doc, &library, &run_state);
+    let mut live_types = OutputTypes::default();
+    let live = scope(&doc, &library, &run_state, &mut live_types);
     for id in [stays, leaves] {
         assert!(
             graph_ui
@@ -242,7 +253,8 @@ fn the_palette_sizes_its_results_area_from_the_search_row_it_actually_has() {
                 process_memory: 0,
             };
             let mut intents = Intents::default();
-            let graph_scope = scope(&doc, &library, &run_state);
+            let mut types = OutputTypes::default();
+            let graph_scope = scope(&doc, &library, &run_state, &mut types);
             graph_ui.prepass(ui, graph_scope, &mut intents);
             Panel::vstack()
                 .id_salt("pane")
@@ -377,7 +389,8 @@ fn escape_cancels_a_rubber_band_and_leaves_no_residue() {
             process_memory: 0,
         };
         let mut intents = Intents::default();
-        let graph_scope = scope(&doc, &library, &run_state);
+        let mut types = OutputTypes::default();
+        let graph_scope = scope(&doc, &library, &run_state, &mut types);
         graph_ui.scan_hits(ui, Some(graph_scope));
         graph_ui.prepass(ui, graph_scope, &mut intents);
         Panel::vstack()
@@ -489,7 +502,8 @@ fn the_breaker_cuts_a_node_at_its_current_position_not_its_last_painted_one() {
             process_memory: 0,
         };
         let mut intents = Intents::default();
-        let graph_scope = scope(doc, &library, &run_state);
+        let mut types = OutputTypes::default();
+        let graph_scope = scope(doc, &library, &run_state, &mut types);
         graph_ui.prepass(ui, graph_scope, &mut intents);
         Panel::vstack()
             .id_salt("pane")
@@ -577,7 +591,8 @@ fn a_node_body_right_click_selects_the_node_it_landed_on() {
         };
         let mut intents = Intents::default();
         // Navigation phase first — the sweep runs before the tab set settles.
-        let graph_scope = scope(&doc, &library, &run_state);
+        let mut types = OutputTypes::default();
+        let graph_scope = scope(&doc, &library, &run_state, &mut types);
         graph_ui.scan_hits(ui, Some(graph_scope));
         graph_ui.prepass(ui, graph_scope, &mut intents);
         Panel::vstack()
@@ -645,7 +660,8 @@ fn a_body_drag_moves_the_node_by_the_pointers_travel() {
             process_memory: 0,
         };
         let mut intents = Intents::default();
-        let graph_scope = scope(&doc, &library, &run_state);
+        let mut types = OutputTypes::default();
+        let graph_scope = scope(&doc, &library, &run_state, &mut types);
         graph_ui.scan_hits(ui, Some(graph_scope));
         graph_ui.prepass(ui, graph_scope, &mut intents);
         Panel::vstack()
@@ -740,7 +756,8 @@ fn a_port_drag_released_over_a_compatible_port_commits_the_binding() {
             process_memory: 0,
         };
         let mut intents = Intents::default();
-        let graph_scope = scope(doc, &library, &run_state);
+        let mut types = OutputTypes::default();
+        let graph_scope = scope(doc, &library, &run_state, &mut types);
         graph_ui.prepass(ui, graph_scope, &mut intents);
         Panel::vstack()
             .id_salt("pane")
@@ -885,7 +902,8 @@ fn ctrl_drag_off_an_output_spawns_a_preview_wired_to_it() {
             process_memory: 0,
         };
         let mut intents = Intents::default();
-        let graph_scope = scope(&doc, &library, &run_state);
+        let mut types = OutputTypes::default();
+        let graph_scope = scope(&doc, &library, &run_state, &mut types);
         graph_ui.prepass(ui, graph_scope, &mut intents);
         Panel::vstack()
             .id_salt("pane")
@@ -975,7 +993,8 @@ fn a_wire_edit_reaches_the_next_read_with_nothing_announced() {
 
     let run_state = RunState::default();
     let resolved_output = |doc: &Document| {
-        scope(doc, &library, &run_state)
+        let mut types = OutputTypes::default();
+        scope(doc, &library, &run_state, &mut types)
             .node(consumer)
             .expect("the passthrough resolves")
             .output(0)

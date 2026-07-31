@@ -50,19 +50,33 @@ impl<'a> OutputScope<'a> {
     /// wildcard one (passthrough / reroute) reports the type followed through
     /// the wire it mirrors — `Any` until something is wired in.
     ///
-    /// Resolved on read rather than from a table this scope carries: only a
-    /// wildcard costs anything, the walk is its own chain rather than the
-    /// graph, and a per-read answer cannot be a graph edit behind. Owned
-    /// because a wildcard's answer is followed for, not stored anywhere to
-    /// point at; [`DataType`] is a small enum, so the fixed case copies a
-    /// discriminant.
+    /// A lookup, not a walk: the scope carries the whole graph's resolved
+    /// types, refreshed wherever it is composed, so a chain several ports read
+    /// is followed once per frame rather than once per read — and reading one
+    /// obeys the scope's rule that no accessor traverses the graph.
+    ///
+    /// Owned because a wildcard's answer is followed for, not stored anywhere
+    /// the caller may keep; [`DataType`] is a small enum, so the fixed case
+    /// copies a discriminant.
     ///
     /// Re-validating downstream wires when an input changes is handled at
     /// edit time, not from here.
+    ///
+    /// # Panics
+    ///
+    /// If the table does not cover this port. That is not drift and not an
+    /// unresolvable chain — both of those are *present* and `Any`. It means
+    /// the table was resolved against a different graph or library than the
+    /// scope carries, since a port only reaches here off a func the same
+    /// `node_func` lookup resolved, at an index that func declares. Degrading
+    /// to `Any` would paint a stale port a plausible colour and let a scope
+    /// composed without a refresh go unnoticed.
     pub(crate) fn ty(self) -> DataType {
         self.node
             .graph_scope
-            .body()
-            .output_type(self.node.graph_scope.library(), self.port())
+            .output_types()
+            .get(self.port())
+            .expect("the scope's table is resolved against the graph it carries")
+            .clone()
     }
 }

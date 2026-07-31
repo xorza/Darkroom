@@ -455,7 +455,7 @@ mod tests {
             .with_selection(ids.iter().copied())
     }
 
-    fn click(shift: bool, scene: &ScopeFixture, id: NodeId) -> Vec<GraphIntent> {
+    fn click(shift: bool, scene: &mut ScopeFixture, id: NodeId) -> Vec<GraphIntent> {
         use crate::core::edit::intent::sink::Queued;
 
         let mut out = Intents::default();
@@ -474,13 +474,13 @@ mod tests {
         let b = NodeId::unique();
 
         // Plain click on an unselected node: select it, then raise it.
-        let out = click(false, &scene_with_selection([]), a);
+        let out = click(false, &mut scene_with_selection([]), a);
         assert_eq!(out.len(), 2);
         assert!(matches!(out[0], GraphIntent::SetSelection { .. }));
         assert!(matches!(out[1], GraphIntent::Raise { key } if key == a));
 
         // Plain click on an already-selected node still raises it.
-        let out = click(false, &scene_with_selection([a]), a);
+        let out = click(false, &mut scene_with_selection([a]), a);
         assert!(
             out.iter()
                 .any(|i| matches!(i, GraphIntent::Raise { key } if *key == a)),
@@ -488,7 +488,7 @@ mod tests {
         );
 
         // Shift-click adding a fresh node to the selection raises it.
-        let out = click(true, &scene_with_selection([a]), b);
+        let out = click(true, &mut scene_with_selection([a]), b);
         assert!(
             out.iter()
                 .any(|i| matches!(i, GraphIntent::Raise { key } if *key == b)),
@@ -497,7 +497,7 @@ mod tests {
 
         // Shift-click removing a node does NOT raise it — a node you just
         // deselected shouldn't jump to the front.
-        let out = click(true, &scene_with_selection([a, b]), b);
+        let out = click(true, &mut scene_with_selection([a, b]), b);
         assert_eq!(out.len(), 1, "shift-deselect suppresses the raise");
         assert!(matches!(out[0], GraphIntent::SetSelection { .. }));
     }
