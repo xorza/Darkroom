@@ -17,14 +17,14 @@
 //! action (clicking a node / bare canvas, panning, zooming); `Pinned`
 //! ones persist. State lives on `GraphUI` (not the resettable gesture
 //! group) so pinned panels survive tab switches — panels only render for
-//! nodes present in the current `Scene`, so off-tab ones disappear.
+//! nodes the current `GraphScope` holds, so off-tab ones disappear.
 
 use std::collections::BTreeMap;
 
 use glam::Vec2;
 use palantir::{
-    Background, Color, Configure, Corners, FontWeight, InternedStr, Panel, Sense, Shadow, Sizing,
-    Spacing, Stroke, Text, TextInput, TextStyle, TextWrap, Ui, WidgetId,
+    Background, Color, Configure, Corners, FontWeight, Panel, Sense, Shadow, Sizing, Spacing,
+    Stroke, Text, TextInput, TextStyle, TextWrap, Ui, WidgetId,
 };
 use scenarium::DataType;
 use scenarium::Library;
@@ -34,11 +34,13 @@ use scenarium::NodeId;
 use crate::gui::canvas::hits::{CanvasHits, Chip};
 use crate::gui::canvas::outer_canvas_widget_id;
 use crate::gui::format::fmt_elapsed;
+use crate::gui::graph_scope::GraphScope;
+use crate::gui::graph_scope::node_scope::NodeScope;
 use crate::gui::node::{RecordCtx, exec_color};
 use crate::gui::run_state::ExecStatus;
-use crate::gui::scene::{InputBindingView, Pane, SceneNode};
 use crate::gui::theme::Theme;
 use crate::gui::widgets::support::{colored_text, sized_text};
+use scenarium::Binding;
 
 /// Open state of a single node's inspector. Absence from
 /// [`Inspectors::modes`] is the third, `Closed`, state.
@@ -94,7 +96,7 @@ impl Inspectors {
     /// Reads everything off last-frame responses (same timing as the
     /// chip toggle), so a chip click never reads as its own outside
     /// action — the click lands on the chip, not the canvas or a body.
-    pub(super) fn apply(&mut self, ui: &Ui, hits: &CanvasHits, pane: Pane<'_>) {
+    pub(super) fn apply(&mut self, ui: &Ui, hits: &CanvasHits, graph_scope: GraphScope<'_>) {
         if let Some(node) = hits.chip(Chip::Inspect) {
             match cycle(self.modes.get(&node).copied()) {
                 Some(m) => {
@@ -109,7 +111,7 @@ impl Inspectors {
             self.close_unpinned();
         }
         // A panel outlives its node only until the next sweep.
-        self.modes.retain(|id, _| pane.contains(*id));
+        self.modes.retain(|id, _| graph_scope.contains(*id));
     }
 
     /// Record a panel for every open inspector, positioned just right of
@@ -119,9 +121,9 @@ impl Inspectors {
     /// two overlapping panels keep a stable front-to-back relationship
     /// instead of trading places between frames.
     pub(super) fn draw_panels(&self, ui: &mut Ui, rcx: RecordCtx<'_>) {
-        let (theme, graph, geometry) = (rcx.theme, rcx.graph, rcx.geometry);
+        let (theme, graph_scope, geometry) = (rcx.theme, rcx.graph_scope, rcx.geometry);
         for (&id, &mode) in &self.modes {
-            let Some(node) = graph.node(id) else {
+            let Some(node) = graph_scope.node(id) else {
                 continue;
             };
             // The cached body width places the panel just past the node's
@@ -142,14 +144,13 @@ impl Inspectors {
         &self,
         ui: &mut Ui,
         rcx: RecordCtx<'_>,
-        node: &SceneNode,
+        node: NodeScope<'_>,
         mode: InspectMode,
         pos: Vec2,
     ) {
         let theme = rcx.theme;
-        let graph = rcx.graph;
-        let logs = rcx.run_state.logs(node.id);
-        let error = rcx.run_state.error(node.id);
+        let logs = rcx.graph_scope.run_state().logs(node.id);
+        let error = rcx.graph_scope.run_state().error(node.id);
         // The outline is the *pinned* signal, in the same accent the header's
         // `i` chip uses for its open/pinned states — one color means
         // "inspector held open" on both ends. A transient panel rides on its
@@ -179,30 +180,24 @@ impl Inspectors {
             .gap(3.0)
             .background(chrome)
             .show(ui, |ui| {
-                let repeated_kind = {
-                    let kind = node.kind_label.borrow_str();
-                    if node.name.is_empty() {
-                        kind.eq_ignore_ascii_case("(unnamed)")
-                    } else {
-                        kind.eq_ignore_ascii_case(&node.name.borrow_str())
-                    }
-                };
-                if node.name.is_empty() {
-                    line(ui, "(unnamed)", title_style(ui));
+                let title = if node.name().is_empty() {
+                    "(unnamed)"
                 } else {
-                    line(ui, node.name.clone(), title_style(ui));
-                }
+                    node.name()
+                };
+                let repeated_kind = node.kind_label().eq_ignore_ascii_case(title);
+                line(ui, title, title_style(ui));
                 // The kind line earns its row only when it says something the
                 // title doesn't — an unrenamed node repeats its func name.
                 if !repeated_kind {
-                    line(ui, node.kind_label.clone(), muted_style(theme, ui));
+                    line(ui, node.kind_label(), muted_style(theme, ui));
                 }
 
                 // Status right under the title — the most-glanceable fact.
                 // The colored line is self-labeling; no section header.
                 let status_color =
-                    exec_color(theme, node.exec_status).unwrap_or(ui.theme.text.color);
-                let status = status_text(ui, node.exec_status);
+                    exec_color(theme, node.exec_status()).unwrap_or(ui.theme.text.color);
+                let status = status_text(ui, node.exec_status());
                 line(
                     ui,
                     status,
@@ -224,27 +219,26 @@ impl Inspectors {
                         },
                     );
                 }
-                if node.sink {
+                if node.sink() {
                     line(ui, "sink", muted_style(theme, ui));
                 }
-                if !node.description.is_empty() {
-                    line(ui, node.description.clone(), muted_style(theme, ui));
+                if !node.description().is_empty() {
+                    line(ui, node.description(), muted_style(theme, ui));
                 }
 
-                let inputs = graph.inputs(node.inputs);
-                if !inputs.is_empty() {
+                let library = rcx.graph_scope.library();
+                if node.inputs().len() > 0 {
                     section(ui, theme, "Inputs");
-                    for input in inputs {
-                        let val = value_str(ui, &input.binding);
-                        port_row(ui, theme, rcx.library, &input.name, &input.ty, Some(val));
+                    for input in node.inputs() {
+                        let val = value_str(ui, input.binding());
+                        port_row(ui, theme, library, input.name(), input.ty(), Some(val));
                     }
                 }
 
-                let outputs = graph.outputs(node.outputs);
-                if !outputs.is_empty() {
+                if node.outputs().len() > 0 {
                     section(ui, theme, "Outputs");
-                    for output in outputs {
-                        port_row(ui, theme, rcx.library, &output.name, &output.ty, None);
+                    for output in node.outputs() {
+                        port_row(ui, theme, library, output.name(), &output.ty(), None);
                     }
                 }
 
@@ -325,7 +319,7 @@ fn port_row(
     ui: &mut Ui,
     theme: &Theme,
     library: &Library,
-    name: &InternedStr,
+    name: &str,
     ty: &DataType,
     val: Option<TextInput<'static>>,
 ) {
@@ -340,20 +334,15 @@ fn port_row(
 /// name (`Image · Image`, the dominant case; `Path · path` likewise) —
 /// otherwise `name · type`, so even a valueless port announces its type.
 ///
-/// The dominant case hands back the scene's own handle, which is already
-/// in this pass's text arena — so the common port row costs no string at
-/// all. Only the differing case builds one, and it cannot be interned
-/// here: `borrow_str` holds a shared borrow of the arena that
-/// [`Ui::fmt`](palantir::Ui::fmt) would need mutably, and the two
-/// overlap for exactly as long as the format call.
-fn port_label(library: &Library, name: &InternedStr, ty: &DataType) -> TextInput<'static> {
+/// The dominant case hands back the declaration's own `&str`, copied into
+/// the text arena only when the row is actually shown — so the common port
+/// row costs no string at all. Only the differing case builds one.
+fn port_label<'a>(library: &Library, name: &'a str, ty: &DataType) -> TextInput<'a> {
     let ty_name = library.type_name(ty);
-    let text = name.borrow_str();
-    if ty_name.eq_ignore_ascii_case(&text) {
-        drop(text);
-        return TextInput::Interned(name.clone());
+    if ty_name.eq_ignore_ascii_case(name) {
+        return TextInput::Borrowed(name);
     }
-    TextInput::Owned(format!("{text} \u{b7} {ty_name}"))
+    TextInput::Owned(format!("{name} \u{b7} {ty_name}"))
 }
 
 fn title_style(ui: &Ui) -> TextStyle {
@@ -376,14 +365,14 @@ fn body_style(ui: &Ui) -> TextStyle {
 /// The two fixed answers stay borrowed and the formatted one goes
 /// straight into the text arena, so an open panel builds no owned string
 /// per input per frame.
-fn value_str(ui: &mut Ui, b: &InputBindingView) -> TextInput<'static> {
-    match b {
-        InputBindingView::None => TextInput::Borrowed("—"),
-        InputBindingView::Bind => TextInput::Borrowed("linked"),
+fn value_str(ui: &mut Ui, binding: Option<&Binding>) -> TextInput<'static> {
+    match binding {
+        None => TextInput::Borrowed("—"),
+        Some(Binding::Bind(_)) => TextInput::Borrowed("linked"),
         // `StaticValue::Display` — the same formatter a preview node's
         // value goes through via `DynamicValue::Display`, so a static
         // binding and a live one can't render one float two ways.
-        InputBindingView::Const(v) => TextInput::Interned(ui.fmt(format_args!("{v}"))),
+        Some(Binding::Const(v)) => TextInput::Interned(ui.fmt(format_args!("{v}"))),
     }
 }
 
@@ -428,13 +417,10 @@ mod tests {
 
     #[test]
     fn port_label_dedups_the_type_and_reuses_the_scenes_own_handle() {
-        use palantir::internals::UiHarness;
         use scenarium::FsPathConfig;
         use std::sync::Arc;
 
         let lib = Library::default();
-        let mut arena = UiHarness::arena();
-        let ui = arena.ui();
         let path_ty = DataType::FsPath(Arc::new(FsPathConfig::default()));
 
         // Type repeats the name (case-insensitively) → the name alone, no
@@ -448,19 +434,18 @@ mod tests {
             ("Output", &path_ty, "Output \u{b7} path"),
         ];
         for (name, ty, expected) in cases {
-            let interned = ui.intern(name);
-            let label = port_label(&lib, &interned, ty);
+            let label = port_label(&lib, name, ty);
             assert_eq!(shown(&label), expected, "label for {name}");
-            // The deduped case is the dominant one, and it must hand back
-            // the scene's existing handle rather than build a string: that
-            // is the whole reason an open panel costs no allocation per
-            // port row per frame. Only the differing case owns anything.
+            // The deduped case is the dominant one, and it must hand back the
+            // declaration's own `&str` rather than build a string: that is the
+            // whole reason an open panel costs no allocation per port row per
+            // frame. Only the differing case owns anything.
             let deduped = expected == name;
             assert_eq!(
-                matches!(label, TextInput::Interned(_)),
+                matches!(label, TextInput::Borrowed(_)),
                 deduped,
-                "{name}: a deduped label reuses the interned handle, a \
-                 combined one does not",
+                "{name}: a deduped label borrows the declared name, a \
+                 combined one owns its string",
             );
         }
     }

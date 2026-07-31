@@ -45,11 +45,12 @@ use scenarium::{InputPort, NodeId};
 
 use crate::core::document::{PortKind, PortRef};
 use crate::gui::canvas::inspector::inspect_badge_wid;
+use crate::gui::graph_scope::GraphScope;
+use crate::gui::graph_scope::node_scope::NodeScope;
 use crate::gui::node::header::{cache_eviction_badge_wid, play_badge_wid};
 use crate::gui::node::port_row::{const_editor_wid, input_cell_wid};
 use crate::gui::node::preview_row::preview_image_wid;
 use crate::gui::node::{drag_handles, node_widget_id};
-use crate::gui::scene::{Pane, SceneNode};
 
 /// A left-clickable chip on a node, named by what it does rather than by
 /// the widget it lives in. One enum instead of a slot per chip: they are
@@ -144,17 +145,17 @@ impl CanvasHits {
     /// responses, across every visible pane. Run once per frame, in the
     /// navigation phase — see the module docs for why there, what it
     /// costs, and which pass fills the port half.
-    pub(crate) fn scan(&mut self, ui: &Ui, pane: Option<Pane<'_>>) {
+    pub(crate) fn scan(&mut self, ui: &Ui, graph: Option<GraphScope<'_>>) {
         *self = Self::default();
-        let Some(graph) = pane else {
+        let Some(graph) = graph else {
             return;
         };
         for node in graph.nodes() {
-            self.scan_node(ui, graph, node);
+            self.scan_node(ui, node);
         }
     }
 
-    fn scan_node(&mut self, ui: &Ui, graph: Pane<'_>, node: &SceneNode) {
+    fn scan_node(&mut self, ui: &Ui, node: NodeScope<'_>) {
         let body = ui.response_for(node_widget_id(node.id));
         if body.left.clicked() || body.left.drag.started() {
             self.body_acted.get_or_insert(node.id);
@@ -177,7 +178,7 @@ impl CanvasHits {
                 handle,
             });
         }
-        self.scan_chips(ui, graph, node);
+        self.scan_chips(ui, node);
     }
 
     /// The header/body chips, each guarded by the same condition that
@@ -185,16 +186,20 @@ impl CanvasHits {
     /// `gui::node::preview_row`) — so a stale response can't act on a node
     /// that has stopped offering the affordance, and that rule lives in
     /// one place per chip rather than in the chip's draw and its scan.
-    fn scan_chips(&mut self, ui: &Ui, graph: Pane<'_>, node: &SceneNode) {
+    fn scan_chips(&mut self, ui: &Ui, node: NodeScope<'_>) {
         let candidates = [
-            (Chip::Play, graph.runnable(node), play_badge_wid(node.id)),
+            (Chip::Play, node.runnable(), play_badge_wid(node.id)),
             (
                 Chip::EvictCache,
-                node.can_evict_cache,
+                node.can_evict_cache(),
                 cache_eviction_badge_wid(node.id),
             ),
             (Chip::Inspect, true, inspect_badge_wid(node.id)),
-            (Chip::PreviewImage, node.preview, preview_image_wid(node.id)),
+            (
+                Chip::PreviewImage,
+                node.preview(),
+                preview_image_wid(node.id),
+            ),
         ];
         for (chip, drawn, wid) in candidates {
             if !drawn {

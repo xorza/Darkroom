@@ -38,7 +38,7 @@ pub(crate) fn build_step(intent: GraphIntent, doc: &Document) -> Result<UndoStep
             let mut added = HashSet::new();
             validate::fresh_node_id(doc, node_id, &mut added)?;
             validate::finite_position(pos, "AddNode")?;
-            validate::insertable_kind(graph, &node)?;
+            validate::insertable_kind(&node)?;
             validate::insertable_bindings(graph, &added, &bindings)?;
             UndoStep::AddNode {
                 pos,
@@ -56,7 +56,7 @@ pub(crate) fn build_step(intent: GraphIntent, doc: &Document) -> Result<UndoStep
             for (pos, node_id, node) in &nodes {
                 validate::fresh_node_id(doc, *node_id, &mut added)?;
                 validate::finite_position(*pos, "DuplicateNodes")?;
-                validate::insertable_kind(graph, node)?;
+                validate::insertable_kind(node)?;
             }
             validate::insertable_bindings(graph, &added, &bindings)?;
             for subscription in &subscriptions {

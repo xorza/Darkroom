@@ -58,6 +58,7 @@ impl RuntimeHost {
         host
     }
 
+    /// Re-seed the ML nodes' model-path defaults from `preferences`.
     pub(crate) fn configure_ml_model_defaults(&mut self, preferences: &Preferences) {
         let model_paths = (&preferences.ml_models).into();
         if self.library.update_ml_model_paths(&model_paths) {

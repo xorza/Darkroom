@@ -4,7 +4,7 @@ use scenarium::NodeId;
 
 use crate::gui::canvas::gesture_slot::GestureSlot;
 use crate::gui::canvas::hits::CanvasHits;
-use crate::gui::scene::Pane;
+use crate::gui::graph_scope::GraphScope;
 
 /// Shared open/close lifecycle + chrome for the canvas's anchored context
 /// popups (the node menu, graph-badge menu, and new-node palette). Owns
@@ -112,14 +112,14 @@ impl NodeContextMenu {
     ///
     /// The hit comes from this frame's sweep, which already applied the trigger
     /// widget's draw guard; all that is left here is confirming the node still
-    /// belongs to `graph` — the sweep ran against last frame's projection.
+    /// belongs to `graph_scope` — the sweep ran against last frame's projection.
     pub(super) fn latch(
         &mut self,
         ui: &mut Ui,
         hits: &CanvasHits,
-        graph: Pane<'_>,
+        graph_scope: GraphScope<'_>,
     ) -> Option<NodeId> {
-        let clicked = hits.menu().filter(|&id| graph.contains(id))?;
+        let clicked = hits.menu().filter(|&id| graph_scope.contains(id))?;
         // A press that opened the menu has a pointer position by construction;
         // the `?` is only for the frames where the pointer left the window
         // between the click and this read.

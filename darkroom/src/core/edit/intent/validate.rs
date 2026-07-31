@@ -67,7 +67,7 @@ pub(super) fn fresh_node_id(
 
 /// A newly inserted node's kind has to name state the document already holds:
 /// a func the library resolves, or a built-in special.
-pub(super) fn insertable_kind(_graph: &Graph, node: &Node) -> Result<(), Refusal> {
+pub(super) fn insertable_kind(node: &Node) -> Result<(), Refusal> {
     match &node.kind {
         NodeKind::Func(func_id) => {
             if func_id.is_nil() {
