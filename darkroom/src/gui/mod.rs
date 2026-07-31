@@ -1,6 +1,7 @@
 pub(crate) mod canvas;
 pub(crate) mod dialogs;
 pub(crate) mod dock;
+pub(crate) mod graph_scope;
 pub(crate) mod graph_toolbar;
 pub(crate) mod image_viewer;
 pub(crate) mod main_window;
@@ -16,7 +17,6 @@ pub(crate) mod color;
 pub(crate) mod format;
 pub(crate) mod process_memory;
 pub(crate) mod run_state;
-pub(crate) mod scene;
 pub(crate) mod status_bar;
 pub(crate) mod theme;
 

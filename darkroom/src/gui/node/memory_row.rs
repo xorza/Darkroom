@@ -11,17 +11,17 @@ use crate::gui::widgets::support::{
 use scenarium::RamUsage;
 
 use crate::gui::format::fmt_bytes;
+use crate::gui::graph_scope::node_scope::NodeScope;
 use crate::gui::node::RecordCtx;
-use crate::gui::scene::SceneNode;
 use crate::gui::theme::Theme;
 
 const DOT: f32 = 6.0;
 const BAR_H: f32 = 3.0;
 
-/// Draw the node's memory footer, or nothing when it holds no RAM. `node.ram`
+/// Draw the node's memory footer, or nothing when it holds no RAM. `node.ram()`
 /// is mirrored from the run cache; each pool shows only when non-zero.
-pub(super) fn memory_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode) {
-    let ram = node.ram;
+pub(super) fn memory_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: NodeScope<'_>) {
+    let ram = node.ram();
     if ram.total() == 0 {
         return;
     }

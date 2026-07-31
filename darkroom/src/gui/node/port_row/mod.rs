@@ -11,10 +11,11 @@ pub(super) mod glyph;
 
 use glam::Vec2;
 use palantir::{
-    Align, Configure, ContextMenu, Grid, HAlign, InternedStr, MenuItem, Panel, PopupHandle, Sense,
-    Sizing, Spacing, Text, TextStyle, Tooltip, Track, Ui, VAlign, WidgetId,
+    Align, Configure, ContextMenu, Grid, HAlign, MenuItem, Panel, PopupHandle, Sense, Sizing,
+    Spacing, Text, TextStyle, Tooltip, Track, Ui, VAlign, WidgetId,
 };
 use scenarium::Binding;
+use scenarium::FuncEvent;
 use scenarium::InputPort;
 use scenarium::Library;
 use scenarium::NodeId;
@@ -25,12 +26,14 @@ use crate::core::edit::intent::sink::Intents;
 use crate::core::edit::intent::types::GraphIntent;
 use crate::core::preview;
 use crate::gui::EventRef;
+use crate::gui::graph_scope::input_scope::InputScope;
+use crate::gui::graph_scope::node_scope::NodeScope;
+use crate::gui::graph_scope::output_scope::OutputScope;
 use crate::gui::node::port_color::{event_color, port_color};
 use crate::gui::node::port_row::glyph::{circle_frame, event_glyph, port_diameter};
 use crate::gui::node::value_editor;
 use crate::gui::node::{RecordCtx, node_hovered, port_wid, set_input};
 use crate::gui::run_state::ExecStatus;
-use crate::gui::scene::{InputBindingView, SceneEvent, SceneInput, SceneNode, SceneOutput};
 use crate::gui::theme::StaticValueEditorTheme;
 
 /// Grid columns: inputs (hug), input values (hug, capped at `max_width` — so
@@ -61,15 +64,16 @@ const PORT_ROW_HEIGHT_EM: f32 = 2.0;
 pub(super) fn ports_row(
     ui: &mut Ui,
     rcx: RecordCtx<'_>,
-    node: &SceneNode,
+    node: NodeScope<'_>,
     row_tracks: &mut Vec<Track>,
     out: &mut Intents,
 ) {
     let theme = rcx.theme;
     // Events list under the outputs in the same column, so the output side
     // needs a row per output *and* per event.
-    let n_rows =
-        (node.inputs.len as usize).max(node.outputs.len as usize + node.events.len as usize);
+    let n_rows = node
+        .port_count(PortKind::Input)
+        .max(node.port_count(PortKind::Output) + node.events().len());
     if n_rows == 0 {
         return;
     }
@@ -134,7 +138,7 @@ fn tip_for(rcx: RecordCtx<'_>, wanted: bool, description: &str, ty: &DataType) -
     if !wanted {
         return String::new();
     }
-    port_tip(description, type_label(rcx.library, ty))
+    port_tip(description, type_label(rcx.graph_scope.library(), ty))
 }
 
 /// Render `name` as a port's label, with `tip` (the port's data type) as its
@@ -145,7 +149,7 @@ fn tip_for(rcx: RecordCtx<'_>, wanted: bool, description: &str, ty: &DataType) -
 /// trigger anchor for the tooltip, but the node body below it owns selection
 /// and drag, so the press has to fall through. Muted ink — the value column is
 /// each row's strong element, not the label.
-fn port_label(ui: &mut Ui, rcx: RecordCtx<'_>, name: InternedStr, tip: &str) {
+fn port_label(ui: &mut Ui, rcx: RecordCtx<'_>, name: &str, tip: &str) {
     let snapshot = Text::new(name)
         .style(&TextStyle {
             color: rcx.theme.colors.port_label,
@@ -162,39 +166,34 @@ fn port_label(ui: &mut Ui, rcx: RecordCtx<'_>, name: InternedStr, tip: &str) {
 fn input_cells(
     ui: &mut Ui,
     rcx: RecordCtx<'_>,
-    node: &SceneNode,
+    node: NodeScope<'_>,
     sve: &StaticValueEditorTheme,
     tips: bool,
     out: &mut Intents,
 ) {
-    let inputs = rcx.graph.inputs(node.inputs);
-    for (i, input) in inputs.iter().enumerate() {
-        let port = PortRef {
-            node_id: node.id,
-            kind: PortKind::Input,
-            port_idx: i,
-        };
+    for input in node.inputs() {
         let opts = CellOpts { tips };
-        input_label_cell(ui, rcx, port, node, input, opts, out);
-        value_cell(ui, rcx, sve, port, input, out);
+        input_label_cell(ui, rcx, node, input, opts, out);
+        value_cell(ui, rcx, sve, input, out);
     }
 }
 
-fn output_cells(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, tips: bool, out: &mut Intents) {
-    let outputs = rcx.graph.outputs(node.outputs);
-    for (i, output) in outputs.iter().enumerate() {
-        let port = PortRef {
-            node_id: node.id,
-            kind: PortKind::Output,
-            port_idx: i,
-        };
+fn output_cells(
+    ui: &mut Ui,
+    rcx: RecordCtx<'_>,
+    node: NodeScope<'_>,
+    tips: bool,
+    out: &mut Intents,
+) {
+    let output_count = node.port_count(PortKind::Output);
+    for output in node.outputs() {
         let opts = CellOpts { tips };
-        output_cell(ui, rcx, port, output, opts, out);
+        output_cell(ui, rcx, output, opts, out);
     }
     // Events emit from the same (right) side; list them in the rows directly
     // below the data outputs.
-    for (i, event) in rcx.graph.events(node.events).iter().enumerate() {
-        event_cell(ui, rcx, node.id, i, outputs.len() + i, event, tips);
+    for (i, event) in node.events().iter().enumerate() {
+        event_cell(ui, rcx, node.id, i, output_count + i, event, tips);
     }
 }
 
@@ -246,26 +245,26 @@ fn open_port_context_menu(ui: &mut Ui, menu_id: WidgetId, cell_secondary: bool, 
 fn input_label_cell(
     ui: &mut Ui,
     rcx: RecordCtx<'_>,
-    port: PortRef,
-    node: &SceneNode,
-    input: &SceneInput,
+    node: NodeScope<'_>,
+    input: InputScope<'_>,
     opts: CellOpts,
     out: &mut Intents,
 ) {
     let theme = rcx.theme;
-    let tip = tip_for(rcx, opts.tips, &input.description.borrow_str(), &input.ty);
+    let port = input.port_ref();
+    let tip = tip_for(rcx, opts.tips, input.description(), input.ty());
     // Flag a port only once a run actually failed on it — not on every unbound edit — so
     // the port keeps its data-type color while editing instead of flipping as you
     // bind/unbind. The run named the exact ports it could not feed, so only those light
     // up; the node-level check is what stops a live re-run's stale verdict from lingering
     // once the node reaches a new status.
-    let missing = matches!(node.exec_status, ExecStatus::MissingInputs) && input.missing;
+    let missing = matches!(node.exec_status(), ExecStatus::MissingInputs) && input.missing();
     let fill = if missing {
         theme.colors.exec_missing_glow
     } else {
         port_color(
             theme,
-            &input.ty,
+            input.ty(),
             PortKind::Input,
             rcx.geometry.ports.is_hovered(port),
         )
@@ -275,10 +274,10 @@ fn input_label_cell(
     // same visual weight on either side. An optional input instead gets a
     // muted outline, so "not required" reads at a glance without needing
     // the bigger required-input footprint.
-    let diameter = port_diameter(theme.port_size, input.required);
+    let diameter = port_diameter(theme.port_size, input.required());
     // Matches the node body itself — the ring reads as the node's own surface
     // wrapping around the port, rather than a separate accent.
-    let outline = (!input.required).then_some(theme.colors.node_fill);
+    let outline = (!input.required()).then_some(theme.colors.node_fill);
     let radius = diameter * 0.5;
     let overhang = theme.port_overhang_for(radius);
     let margin = Spacing::new(-overhang, 0.0, 0.0, 0.0);
@@ -296,10 +295,10 @@ fn input_label_cell(
         .show(ui, |ui| {
             // A const-only input can't be wired, so it has no connection anchor
             // — render just the label (+ its inline const editor).
-            if !input.const_only {
+            if !input.const_only() {
                 circle_frame(ui, wid, diameter, fill, outline, margin, &tip);
             }
-            port_label(ui, rcx, input.name.clone(), &tip);
+            port_label(ui, rcx, input.name(), &tip);
         });
     // Open on right-click anywhere on the cell — circle or label.
     let (menu_id, cell_secondary) = (cell.response.id, cell.response.right.clicked());
@@ -311,19 +310,21 @@ fn input_label_cell(
     ContextMenu::for_id(menu_id)
         .size((Sizing::HUG, Sizing::HUG))
         .show(ui, |ui, popup| {
-            let can_set =
-                !matches!(input.binding, InputBindingView::Const(_)) && input.default.is_some();
+            // Resolved once for both the enable test and the value the pick
+            // pushes — the fallback literal is built on read, not stored.
+            let default = input.default();
+            let can_set = !matches!(input.binding(), Some(Binding::Const(_))) && default.is_some();
             if MenuItem::new("Set constant")
                 .enabled(can_set)
                 .show(ui, popup)
                 .left
                 .clicked()
-                && let Some(value) = input.default.clone()
+                && let Some(value) = default
             {
                 out.push(set_input(port, Binding::Const(value)));
             }
             if MenuItem::new("Clear binding")
-                .enabled(!matches!(input.binding, InputBindingView::None))
+                .enabled(input.binding().is_some())
                 .show(ui, popup)
                 .left
                 .clicked()
@@ -339,18 +340,18 @@ fn value_cell(
     ui: &mut Ui,
     rcx: RecordCtx<'_>,
     sve: &StaticValueEditorTheme,
-    port: PortRef,
-    input: &SceneInput,
+    input: InputScope<'_>,
     out: &mut Intents,
 ) {
     // The one owner of the "only Const bindings get an inline editor"
     // filter — wired and unbound inputs render no value cell.
-    let InputBindingView::Const(value) = &input.binding else {
+    let Some(Binding::Const(value)) = input.binding() else {
         return;
     };
-    let data_type = &input.ty;
-    let value_variants = rcx.graph.value_variants(input.value_variants);
-    let editor_id = const_editor_wid(InputPort::new(port.node_id, port.port_idx));
+    let port = input.port_ref();
+    let data_type = input.ty();
+    let value_variants = input.value_variants();
+    let editor_id = const_editor_wid(input.port());
     // Fill the value column so every editor is the same width (the column
     // hugs to the widest editor's content). `min_size` on the editors keeps
     // a sensible floor; the editor fills this cell, this cell fills the col.
@@ -363,7 +364,7 @@ fn value_cell(
             value_editor::show(
                 ui,
                 sve,
-                rcx.library,
+                rcx.graph_scope.library(),
                 editor_id,
                 value,
                 data_type,
@@ -382,19 +383,22 @@ fn value_cell(
 fn output_cell(
     ui: &mut Ui,
     rcx: RecordCtx<'_>,
-    port: PortRef,
-    output: &SceneOutput,
+    output: OutputScope<'_>,
     opts: CellOpts,
     out: &mut Intents,
 ) {
     let theme = rcx.theme;
+    let port = output.port_ref();
+    // Resolved once for the fill and the tooltip: a wildcard output follows
+    // its mirror chain on every read, so the cell asks once.
+    let ty = output.ty();
     let fill = port_color(
         theme,
-        &output.ty,
+        &ty,
         PortKind::Output,
         rcx.geometry.ports.is_hovered(port),
     );
-    let tip = tip_for(rcx, opts.tips, &output.description.borrow_str(), &output.ty);
+    let tip = tip_for(rcx, opts.tips, output.description(), &ty);
     let wid = port_circle_wid(port);
     let overhang = theme.port_overhang();
     let cell = Panel::hstack()
@@ -406,7 +410,7 @@ fn output_cell(
         .gap(4.0)
         .child_align(Align::v(VAlign::Center))
         .show(ui, |ui| {
-            port_label(ui, rcx, output.name.clone(), &tip);
+            port_label(ui, rcx, output.name(), &tip);
             circle_frame(
                 ui,
                 wid,
@@ -447,7 +451,7 @@ fn add_preview_item(
     port: PortRef,
     out: &mut Intents,
 ) {
-    let Some(func) = preview::registered(rcx.library) else {
+    let Some(func) = preview::registered(rcx.graph_scope.library()) else {
         return;
     };
     if !MenuItem::new("Add preview").show(ui, popup).left.clicked() {
@@ -496,7 +500,7 @@ fn event_cell(
     node_id: NodeId,
     event_idx: usize,
     row: usize,
-    event: &SceneEvent,
+    event: &FuncEvent,
     tips: bool,
 ) {
     let theme = rcx.theme;
@@ -505,7 +509,7 @@ fn event_cell(
     let ev = EventRef { node_id, event_idx };
     let fill = event_color(theme, rcx.geometry.events.is_hovered(ev));
     let tip = if tips {
-        format!("event: {}", &*event.name.borrow_str())
+        format!("event: {}", event.name)
     } else {
         String::new()
     };
@@ -518,7 +522,7 @@ fn event_cell(
         .child_align(Align::v(VAlign::Center))
         .show(ui, |ui| {
             // Muted like the data-port labels (see `port_label`).
-            Text::new(event.name.clone())
+            Text::new(event.name.as_str())
                 .style(&TextStyle {
                     color: theme.colors.port_label,
                     ..ui.theme.text.clone()
@@ -543,7 +547,7 @@ pub(crate) fn event_glyph_wid(node_id: NodeId, event_idx: usize) -> WidgetId {
 
 /// A port's hover tooltip: its `description` (when the func declares one) above a
 /// dimmer type line, else just the type. `description` is the resolved
-/// [`crate::gui::scene::SceneInput::description`] text (empty = none).
+/// [`InputScope::description`] text (empty = none).
 fn port_tip(description: &str, type_label: String) -> String {
     if description.is_empty() {
         type_label

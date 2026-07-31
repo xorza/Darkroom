@@ -19,8 +19,8 @@ use crate::core::preview;
 use crate::gui::canvas::drag_anchor::GroupDrag;
 use crate::gui::canvas::geometry::CanvasGeometry;
 use crate::gui::canvas::preview_drag_modifier;
+use crate::gui::graph_scope::GraphScope;
 use crate::gui::node::port_row::{add_preview_intents, port_circle_wid};
-use crate::gui::scene::{Pane, Scene};
 
 /// The in-flight spawn-and-place drag, or none.
 #[derive(Default, Debug)]
@@ -35,20 +35,20 @@ impl PreviewDrag {
     pub(super) fn apply(
         &mut self,
         ui: &mut Ui,
-        pane: Pane<'_>,
+        graph_scope: GraphScope<'_>,
         geometry: &CanvasGeometry,
         library: &Library,
         out: &mut Intents,
     ) {
         // A live drag owns the frame; only once it ends does the latch scan
         // below get a look at this frame's presses.
-        if self.drag.advance(ui, pane.scene(), out) || !preview_drag_modifier(ui) {
+        if self.drag.advance(ui, graph_scope, out) || !preview_drag_modifier(ui) {
             return;
         }
-        let Some(port) = scan_output_drag_start(geometry, pane.scene()) else {
+        let Some(port) = scan_output_drag_start(geometry, graph_scope) else {
             return;
         };
-        if !pane.contains(port.node_id) {
+        if !graph_scope.contains(port.node_id) {
             return;
         }
         let Some(func) = preview::registered(library) else {
@@ -78,10 +78,12 @@ impl PreviewDrag {
 /// First output port whose circle began a drag this frame. Unfiltered by pane:
 /// only one press exists, so the caller resolves the winner's pane once rather
 /// than paying a lookup per candidate node.
-fn scan_output_drag_start(geometry: &CanvasGeometry, scene: &Scene) -> Option<PortRef> {
-    let keys = scene
-        .nodes
-        .values()
+fn scan_output_drag_start(
+    geometry: &CanvasGeometry,
+    graph_scope: GraphScope<'_>,
+) -> Option<PortRef> {
+    let keys = graph_scope
+        .nodes()
         .flat_map(|node| node.ports(PortKind::Output));
     geometry.ports.first_drag_started(keys)
 }

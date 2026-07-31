@@ -12,10 +12,11 @@ use std::collections::BTreeSet;
 
 use palantir::{Key, Shortcut, Ui};
 
-use crate::core::document::{Document, Viewport};
+use crate::core::document::Viewport;
 use crate::core::edit::intent::duplicate::build_duplicate_intent;
 use crate::core::edit::intent::sink::Intents;
 use crate::core::edit::intent::types::GraphIntent;
+use crate::gui::graph_scope::GraphScope;
 
 const RESET_ZOOM_SHORTCUT: Shortcut = Shortcut::ctrl('0');
 const DUPLICATE_SHORTCUT: Shortcut = Shortcut::ctrl('D');
@@ -29,13 +30,13 @@ const DUPLICATE_SHORTCUT: Shortcut = Shortcut::ctrl('D');
 /// palantir's wake gate. The `Edit`- and `Escape`-class ones stand down on
 /// their own while a text field holds focus, and Ctrl+0 / Ctrl+D are `Accel`
 /// so they keep firing mid-edit.
-pub(super) fn emit(ui: &mut Ui, doc: &Document, out: &mut Intents) {
+pub(super) fn emit(ui: &mut Ui, graph_scope: GraphScope<'_>, out: &mut Intents) {
     let reset_zoom = ui.key_pressed(RESET_ZOOM_SHORTCUT);
     let escape = ui.escape_pressed();
     let duplicate = ui.key_pressed(DUPLICATE_SHORTCUT);
     let delete =
         ui.key_pressed(Shortcut::key(Key::Delete)) || ui.key_pressed(Shortcut::key(Key::Backspace));
-    let view = &doc.main_view;
+    let view = graph_scope.view();
     if escape && !view.selected.is_empty() {
         out.push(GraphIntent::SetSelection {
             to: BTreeSet::new(),
@@ -49,7 +50,7 @@ pub(super) fn emit(ui: &mut Ui, doc: &Document, out: &mut Intents) {
             },
         });
     }
-    if duplicate && let Some(intent) = build_duplicate_intent(doc) {
+    if duplicate && let Some(intent) = build_duplicate_intent(graph_scope.document()) {
         out.push(intent);
     }
     if delete {

@@ -20,7 +20,7 @@ use crate::gui::app::commands::AppCommand;
 use crate::gui::app::commands::run::RunCommand;
 use crate::gui::canvas::geometry::CanvasGeometry;
 use crate::gui::canvas::pan_zoom::{self, ViewAction};
-use crate::gui::scene::Pane;
+use crate::gui::graph_scope::GraphScope;
 use crate::gui::widgets::support::{dot, filled_rect, frame, stroked_rect};
 use crate::gui::widgets::toolbar::{BUTTON_GAP, Chip, TOOLBAR_MARGIN, pill};
 
@@ -54,7 +54,7 @@ fn show_selected_wid() -> WidgetId {
 pub(crate) fn show(
     ui: &mut Ui,
     ctx: &AppContext<'_>,
-    graph: Pane<'_>,
+    graph_scope: GraphScope<'_>,
     geometry: &CanvasGeometry,
     out: &mut Intents,
 ) -> Option<AppCommand> {
@@ -127,7 +127,7 @@ pub(crate) fn show(
                     out.extend(pan_zoom::view_action_intent(
                         ui,
                         geometry,
-                        graph,
+                        graph_scope,
                         ViewAction::Reset,
                     ));
                 }
@@ -135,7 +135,7 @@ pub(crate) fn show(
                     out.extend(pan_zoom::view_action_intent(
                         ui,
                         geometry,
-                        graph,
+                        graph_scope,
                         ViewAction::ShowAll,
                     ));
                 }
@@ -147,7 +147,7 @@ pub(crate) fn show(
                     out.extend(pan_zoom::view_action_intent(
                         ui,
                         geometry,
-                        graph,
+                        graph_scope,
                         ViewAction::ShowSelected,
                     ));
                 }
