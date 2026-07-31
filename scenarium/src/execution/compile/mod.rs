@@ -49,6 +49,18 @@ use crate::graph::output_types::OutputTypes;
 use crate::graph::{Binding, Graph};
 use crate::library::Library;
 
+/// One node's place in the dense space, settled before the walk so a reference
+/// naming it resolves on the spot — including a reference the walk meets before
+/// it reaches the node itself.
+#[derive(Debug)]
+struct Placed {
+    node_id: NodeId,
+    /// The node's declared output count. A binding is range-checked against it,
+    /// and the producer's own `outputs` run does not exist until the walk emits
+    /// that node — which may be after the consumer naming it.
+    outputs: u32,
+}
+
 /// The compile entry point, owning every buffer the walk would otherwise
 /// allocate. Only the walk's own scratch lives here; everything it *produces*
 /// goes into the columns that become the artifact, so no part of one compile
@@ -62,9 +74,9 @@ use crate::library::Library;
 /// the worker in an [`Arc`](std::sync::Arc).
 #[derive(Debug, Default)]
 pub struct Compiler {
-    /// Every node id, sorted — the dense index space, settled before the walk
-    /// so an id-named reference resolves on the spot.
-    order: Vec<NodeId>,
+    /// Every node, in id order — the dense index space. A node's `NodeIdx` is
+    /// its position here.
+    placed: Vec<Placed>,
     /// One node's resolved inputs, refilled per node. They are resolved before
     /// the ports are appended, so an [`ExecutionInput`] is whole the moment it
     /// exists.
@@ -120,7 +132,7 @@ impl Compiler {
     /// self-contained.
     fn walk(&mut self, root: &Graph, library: &Library) -> CompiledGraph {
         self.output_types.update(root, library);
-        let node_index = self.place_nodes(root);
+        let node_index = self.place_nodes(root, library);
 
         let mut node_ids = Column::default();
         let mut e_nodes = Column::default();
@@ -128,11 +140,11 @@ impl Compiler {
         let mut outputs = Column::default();
         self.event_lambdas.clear();
 
-        for position in 0..self.order.len() {
-            let node_id = self.order[position];
+        for position in 0..self.placed.len() {
+            let node_id = self.placed[position].node_id;
             let node = root
                 .find(node_id)
-                .expect("the sort names this graph's nodes");
+                .expect("the placement names this graph's nodes");
 
             // A func and a special node both resolve to a `&Func` spec and emit
             // one node — the spec is the only difference (`library` vs. the
@@ -158,13 +170,8 @@ impl Compiler {
             self.node_inputs.clear();
             for (port_idx, func_input) in func.inputs.iter().enumerate() {
                 let port = InputPort::new(node_id, port_idx);
-                let binding = self.typed_binding(
-                    root,
-                    library,
-                    &node_index,
-                    func_input,
-                    root.bindings.get(&port),
-                );
+                let binding =
+                    self.typed_binding(library, &node_index, func_input, root.bindings.get(&port));
                 self.node_inputs.push(ExecutionInput {
                     required: func_input.required,
                     stamps_fs_path: matches!(&func_input.data_type, DataType::FsPath(_)),
@@ -229,24 +236,38 @@ impl Compiler {
         }
     }
 
-    /// Settle the dense index space: every node id, sorted, and the reverse map
-    /// the walk resolves references against.
+    /// Settle the dense index space: every node in id order, its declared output
+    /// count beside it, and the reverse map the walk resolves references
+    /// against.
     ///
     /// Id order rather than `Graph::iter`'s, so the artifact is deterministic
     /// however the walk happens to reach the nodes. Ids come from a map keyed by
     /// them, so the sort cannot produce a duplicate.
-    fn place_nodes(&mut self, root: &Graph) -> HashMap<NodeId, NodeIdx> {
-        self.order.clear();
-        self.order.extend(root.iter().map(|node| node.id));
+    ///
+    /// The output counts are taken here rather than during the walk because a
+    /// wire is range-checked against its *producer*, which the id order may put
+    /// after the consumer that names it.
+    fn place_nodes(&mut self, root: &Graph, library: &Library) -> HashMap<NodeId, NodeIdx> {
+        self.placed.clear();
+        self.placed.extend(root.iter().map(|node| {
+            Placed {
+                node_id: node.id,
+                outputs: root
+                    .node_func(&node, library)
+                    .expect("func resolved by validate_with")
+                    .outputs
+                    .len() as u32,
+            }
+        }));
         assert!(
-            u32::try_from(self.order.len()).is_ok(),
+            u32::try_from(self.placed.len()).is_ok(),
             "program node count must fit in u32"
         );
-        self.order.sort_unstable();
+        self.placed.sort_unstable_by_key(|placed| placed.node_id);
 
-        let mut node_index = HashMap::with_capacity(self.order.len());
-        for (position, &node_id) in self.order.iter().enumerate() {
-            node_index.insert(node_id, NodeIdx(position as u32));
+        let mut node_index = HashMap::with_capacity(self.placed.len());
+        for (position, placed) in self.placed.iter().enumerate() {
+            node_index.insert(placed.node_id, NodeIdx(position as u32));
         }
         node_index
     }
@@ -258,31 +279,31 @@ impl Compiler {
     /// is severed, so the wiring revives when the types line up again.
     fn typed_binding(
         &self,
-        graph: &Graph,
         library: &Library,
         node_index: &HashMap<NodeId, NodeIdx>,
         input: &FuncInput,
         binding: Option<&Binding>,
     ) -> ExecutionBinding {
-        let mismatched = match binding {
-            Some(Binding::Bind(src)) => {
-                // A miss is library drift — a binding naming an output the func
-                // no longer declares — and `Any` is what that resolved to before
-                // the table existed: the gate passes, and `resolve` below
-                // degrades the edge to unbound.
-                let resolved = self.output_types.get(*src).cloned().unwrap_or_default();
-                !input.data_type.compatible_with(&resolved)
-            }
-            Some(Binding::Const(value)) => !library.const_satisfies(input, value),
-            None => false,
-        };
-        if mismatched {
-            return ExecutionBinding::None;
-        }
         match binding {
             None => ExecutionBinding::None,
-            Some(Binding::Const(value)) => ExecutionBinding::Const(value.clone()),
-            Some(Binding::Bind(output)) => Self::resolve(graph, library, node_index, *output),
+            Some(Binding::Const(value)) if library.const_satisfies(input, value) => {
+                ExecutionBinding::Const(value.clone())
+            }
+            Some(Binding::Const(_)) => ExecutionBinding::None,
+            Some(Binding::Bind(src)) => {
+                // A port the table missed is one no chain reached *and* no
+                // declaration names, and `Any` is what that resolved to before
+                // the table existed: the gate passes and `resolve` unbinds it on
+                // the range check. A port the table *did* stamp still has to
+                // pass that check — a wildcard chain records every port it walks
+                // through, out-of-range ones included, as `Any`.
+                let resolved = self.output_types.get(*src).cloned().unwrap_or_default();
+                if input.data_type.compatible_with(&resolved) {
+                    self.resolve(node_index, *src)
+                } else {
+                    ExecutionBinding::None
+                }
+            }
         }
     }
 
@@ -292,24 +313,19 @@ impl Compiler {
     ///
     /// Library drift can leave a binding to an output the func no longer
     /// declares — degrade to unbound rather than addressing a vanished slot
-    /// (the planner reports the consumer's missing input). The *node* is never
-    /// missing: the placement covers every node the graph holds.
-    fn resolve(
-        graph: &Graph,
-        library: &Library,
-        node_index: &HashMap<NodeId, NodeIdx>,
-        port: OutputPort,
-    ) -> ExecutionBinding {
+    /// (the planner reports the consumer's missing input). The count comes off
+    /// the placement rather than the producer's emitted node, which the id order
+    /// may not have reached yet. The *node* is never missing:
+    /// `Graph::validate_shape` rejects a binding naming a producer the graph
+    /// does not hold, and the placement covers every node it does.
+    fn resolve(&self, node_index: &HashMap<NodeId, NodeIdx>, port: OutputPort) -> ExecutionBinding {
         let OutputPort { node_id, port_idx } = port;
-        let node = graph.find(node_id).expect("binding to a missing node");
-        if graph
-            .node_func(node, library)
-            .is_some_and(|func| port_idx >= func.outputs.len())
-        {
+        let node_idx = node_index[&node_id];
+        if port_idx >= self.placed[node_idx.0 as usize].outputs as usize {
             return ExecutionBinding::None;
         }
         ExecutionBinding::Bind(OutputAddr {
-            node_idx: node_index[&node_id],
+            node_idx,
             port_idx: port_idx as u32,
         })
     }
