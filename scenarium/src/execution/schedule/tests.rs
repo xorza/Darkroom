@@ -294,7 +294,7 @@ mod planning {
 
     #[test]
     fn node_seed_schedules_only_its_cone_and_pins_it() {
-        // A → B → C (C sink). Seeding node B (by authoring id — top-level ids resolve
+        // A → B → C (C sink). Seeding node B (by authoring id, which resolves
         // straight against the program) schedules only [A, B] — C is upstream of nothing
         // seeded — and records B as both a root and a seeded node. B's output has no
         // scheduled consumer.

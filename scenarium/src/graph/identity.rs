@@ -7,8 +7,7 @@
 //! the execution side can speak about nodes and ports without reaching into
 //! the model behind them — [`error`](crate::graph::error) reports the ports a
 //! fault touched, and a compiled program names its nodes and ports with these
-//! same types: a graph is flat, so there is no second identity space to
-//! derive.
+//! same types.
 
 use ::common::id_type;
 use ::serde::{Deserialize, Serialize};
@@ -40,8 +39,8 @@ impl OutputPort {
 /// event fires from rather than where a value comes out.
 ///
 /// Lives here rather than in the execution internals because it names the
-/// same thing on both sides — a graph is flat, so a node in a compiled
-/// program is the authored node, and its event ports are the func's.
+/// same thing on both sides: a node in a compiled program *is* the authored
+/// node, and its event ports are the func's.
 #[derive(
     Debug, Clone, Copy, Default, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize,
 )]
