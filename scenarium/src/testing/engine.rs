@@ -15,16 +15,18 @@ use hashbrown::HashMap;
 
 use ::common::CancelToken;
 
-use crate::DynamicValue;
 use crate::execution::compile::error::CompileError;
 use crate::execution::engine::ExecutionEngine;
 use crate::execution::error::{Result, RunError};
-use crate::execution::report::internals::DiscardedReports;
+use crate::execution::report::RunPhase;
+use crate::execution::report::internals::{CollectingReporter, DiscardedReports};
 use crate::execution::report::{ExecutionOutcome, NodeExecutionStatus, NodeStatus};
 use crate::execution::schedule::NodeState;
 use crate::execution::seeds::RunSeeds;
-use crate::graph::identity::NodeId;
+use crate::graph::func::lambda::OutputDemand;
+use crate::graph::identity::{EventPort, NodeId};
 use crate::testing::graph::TestGraph;
+use crate::{DynamicValue, RamUsage};
 
 /// A [`TestGraph`] with a live engine over it.
 ///
@@ -70,6 +72,46 @@ impl TestEngine {
         self.graph.id(name)
     }
 
+    /// Run to these exact nodes — the "run to this node" / preview trigger.
+    pub(crate) async fn run_nodes<'n>(
+        &mut self,
+        names: impl IntoIterator<Item = &'n str>,
+    ) -> RunOutcome {
+        let node_ids = names.into_iter().map(|name| self.id(name)).collect();
+        self.run(RunSeeds::nodes(node_ids))
+            .await
+            .expect("the run completes")
+    }
+
+    /// Fire these events, running whatever subscribes to them.
+    pub(crate) async fn run_events(
+        &mut self,
+        events: impl IntoIterator<Item = EventPort>,
+    ) -> RunOutcome {
+        self.run(RunSeeds::events(events.into_iter().collect()))
+            .await
+            .expect("the run completes")
+    }
+
+    /// Initialize every node owning a subscribed event — the event loop's
+    /// bootstrap run.
+    pub(crate) async fn run_event_sources(&mut self) -> RunOutcome {
+        self.run(RunSeeds {
+            event_sources: true,
+            ..Default::default()
+        })
+        .await
+        .expect("the run completes")
+    }
+
+    /// An event port on a named node.
+    pub(crate) fn event(&self, name: &str, event_idx: usize) -> EventPort {
+        EventPort {
+            node_id: self.id(name),
+            event_idx,
+        }
+    }
+
     pub(crate) async fn run_sinks(&mut self) -> RunOutcome {
         self.run(RunSeeds::sinks())
             .await
@@ -80,6 +122,44 @@ impl TestEngine {
     /// raises.
     pub(crate) async fn run(&mut self, seeds: RunSeeds) -> Result<RunOutcome> {
         self.run_cancellable(seeds, CancelToken::never()).await
+    }
+
+    /// Run every sink, also handing back the live progress the run published
+    /// — each event named, in the order the executor emitted it.
+    pub(crate) async fn run_sinks_reporting(&mut self) -> (RunOutcome, Vec<(String, RunPhase)>) {
+        let TestEngine {
+            graph,
+            engine,
+            outcome,
+        } = self;
+        let mut reporter = CollectingReporter::default();
+        engine
+            .execute(
+                RunSeeds::sinks(),
+                &mut reporter,
+                CancelToken::never(),
+                outcome,
+            )
+            .await
+            .expect("the run completes");
+        let names = NameMap::of(graph);
+        let progress = reporter
+            .progress
+            .iter()
+            .map(|event| (names.name(event.node_id), event.phase))
+            .collect();
+        (RunOutcome::snapshot(graph, engine, outcome), progress)
+    }
+
+    /// Seed a node's cached output, as a prior run would have left it.
+    pub(crate) fn set_output(&mut self, name: &str, values: Vec<DynamicValue>) {
+        let id = self.id(name);
+        self.engine.set_output_values(id, values);
+    }
+
+    /// Whether this node currently holds a resident value.
+    pub(crate) fn holds_output(&self, name: &str) -> bool {
+        self.engine.slot(self.id(name)).output_values().is_some()
     }
 
     pub(crate) async fn run_cancellable(
@@ -111,6 +191,29 @@ impl TestEngine {
         Ok(PlanOutcome::snapshot(&self.graph, &self.engine))
     }
 
+    /// What the last plan or run demands of this node's outputs, and how many
+    /// live readers each has.
+    ///
+    /// Engine state rather than run output: both are settled by the sweep, and
+    /// they read the same after `plan_*` as after `run_*`.
+    pub(crate) fn demand(&self, name: &str) -> &[OutputDemand] {
+        self.engine.node_output_demand(self.id(name))
+    }
+
+    pub(crate) fn readers(&self, name: &str) -> &[u32] {
+        self.engine.node_output_readers(self.id(name))
+    }
+
+    /// This node's inputs as the run delivered them — `None` for a port
+    /// nothing fed.
+    pub(crate) fn inputs(&self, name: &str) -> Vec<Option<DynamicValue>> {
+        let id = self.id(name);
+        self.engine
+            .get_argument_values(&id)
+            .expect("the named node is installed")
+            .inputs
+    }
+
     /// This node's produced outputs, as the cache currently holds them —
     /// empty when the run released or never wrote them.
     pub(crate) fn outputs(&self, name: &str) -> Vec<DynamicValue> {
@@ -123,6 +226,16 @@ impl TestEngine {
 
     pub(crate) fn output(&self, name: &str, port: usize) -> Option<DynamicValue> {
         self.outputs(name).get(port).cloned()
+    }
+
+    /// This node's input `port` read as an integer — `None` for a port
+    /// nothing fed, and for a value no scalar coercion reaches.
+    pub(crate) fn input_i64(&self, name: &str, port: usize) -> Option<i64> {
+        self.inputs(name)
+            .get(port)
+            .cloned()
+            .flatten()
+            .and_then(|value| value.as_i64())
     }
 
     /// This node's output `port` read as an integer.
@@ -145,6 +258,12 @@ pub(crate) struct RunOutcome {
     rows: Vec<(String, NodeStatus)>,
     logs: Vec<String>,
     pub(crate) ran_node_count: usize,
+    pub(crate) cancelled: bool,
+    /// The events this run was seeded with, echoed back.
+    pub(crate) triggered_events: Vec<EventPort>,
+    /// The events a successful event source armed for the loop to spawn.
+    pub(crate) armed_events: Vec<EventPort>,
+    pub(crate) cache_ram: RamUsage,
 }
 
 impl RunOutcome {
@@ -167,6 +286,14 @@ impl RunOutcome {
                 .map(|entry| entry.message.clone())
                 .collect(),
             ran_node_count: outcome.ran_node_count,
+            cancelled: outcome.cancelled,
+            triggered_events: outcome.triggered_events.clone(),
+            armed_events: outcome
+                .event_triggers
+                .iter()
+                .map(|trigger| trigger.event)
+                .collect(),
+            cache_ram: outcome.cache_ram,
         }
     }
 
@@ -193,6 +320,18 @@ impl RunOutcome {
 
     /// Log lines the run emitted, in order — how a `records` node reports what
     /// it saw.
+    /// Names still holding RAM after the run, sorted.
+    pub(crate) fn holding_ram(&self) -> Vec<&str> {
+        let mut names: Vec<&str> = self
+            .rows
+            .iter()
+            .filter(|(_, row)| row.ram.total() > 0)
+            .map(|(name, _)| name.as_str())
+            .collect();
+        names.sort_unstable();
+        names
+    }
+
     pub(crate) fn logs(&self) -> Vec<&str> {
         self.logs.iter().map(String::as_str).collect()
     }

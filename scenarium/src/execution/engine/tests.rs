@@ -1,10 +1,8 @@
 use std::sync::Arc;
 
 use super::*;
-use crate::execution::compile::Compiler;
 use crate::execution::compile::error::CompileError;
 use crate::execution::error::{Error, RunError};
-use crate::execution::report::internals::DiscardedReports;
 use crate::graph::Binding;
 use crate::graph::Graph;
 use crate::graph::func::error::InvokeError;
@@ -12,13 +10,12 @@ use crate::graph::func::lambda::Invocation;
 use crate::graph::func::lambda::OutputDemand;
 use crate::graph::func::lambda::internals;
 use crate::graph::func::{Func, FuncBehavior};
-use crate::graph::identity::{FuncId, InputPort, NodeId, OutputPort};
+use crate::graph::identity::{InputPort, NodeId, OutputPort};
 use crate::graph::node::{CacheMode, Node};
-use crate::graph::output_types::OutputTypes;
 use crate::library::Library;
 use crate::testing::engine::TestEngine;
-use crate::testing::graph::TestGraph;
-use crate::testing::{self, TestFuncHooks, test_func_lib, test_graph};
+use crate::testing::graph::{NodeSpec, TestGraph};
+use crate::testing::{TestFuncHooks, test_func_lib, test_graph};
 use crate::{DataType, DynamicValue, StaticValue};
 use ::common::FloatExt;
 use tokio::sync::Mutex;
@@ -50,32 +47,6 @@ fn execution_node_id(
         .iter()
         .copied()
         .find(|&node_id| execution_node_name(execution_graph, graph, library, node_id) == name)
-}
-
-/// Names of the nodes that actually recomputed in the last run, in schedule order.
-/// `process_order` schedules every reachable runnable node while leaving unseeded
-/// disabled dependencies outside. This keeps only the `wants_execute` nodes that
-/// actually ran (not a reused cache). Before any run `node_ran` is `true` for all, so it
-/// reads as "the runnable schedule" for plan-only (`prepare_execution`) tests.
-fn execution_node_names_in_order(
-    execution_graph: &ExecutionEngine,
-    graph: &Graph,
-    library: &Library,
-) -> Vec<String> {
-    execution_graph
-        .schedule
-        .process_order
-        .iter()
-        .filter(|&&node_idx| {
-            let node_id = execution_graph.compiled().node_ids[node_idx];
-            execution_graph.schedule.states[node_idx].is_runnable()
-                && execution_graph.node_ran(node_id)
-        })
-        .map(|&node_idx| {
-            let node_id = execution_graph.compiled().node_ids[node_idx];
-            execution_node_name(execution_graph, graph, library, node_id).to_owned()
-        })
-        .collect()
 }
 
 fn default_hooks() -> TestFuncHooks {
@@ -2068,122 +2039,64 @@ mod graph_structure {
 
     #[tokio::test]
     async fn basic_run() -> TestResult {
-        let graph = test_graph();
-        let library = test_func_lib(TestFuncHooks::default());
+        let mut e = TestEngine::over(TestGraph::sample());
 
-        let mut execution_graph = ExecutionEngine::default();
-        execution_graph.update(&graph, &library).unwrap();
-        execution_graph.prepare_execution(true, false, &[]).await?;
+        let plan = e.plan_sinks().await?;
 
+        assert_eq!(plan.scheduled(), ["get_b", "get_a", "sum", "mult", "Print"]);
         assert_eq!(
-            execution_node_names_in_order(&execution_graph, &graph, &library)[2..],
-            ["sum", "mult", "Print"]
+            plan.runnable(),
+            ["Print", "get_a", "get_b", "mult", "sum"],
+            "an unedited fixture blocks nothing"
         );
+        assert!(plan.missing_inputs().is_empty());
 
-        assert_eq!(execution_graph.compiled().e_nodes.len(), 5);
-        assert_eq!(execution_graph.schedule.process_order.len(), 5);
-        assert!((0..execution_graph.compiled().e_nodes.len()).all(|i| {
-            !execution_graph.schedule.states[NodeIdx(i as u32)].missing_required_inputs()
-        }));
-        assert!(
-            (0..execution_graph.compiled().e_nodes.len())
-                .all(|i| execution_graph.schedule.states[NodeIdx(i as u32)].is_runnable())
-        );
+        // get_a→sum[0], get_b→sum[1]+mult[1], sum→mult[0], mult→print[0].
+        for name in ["get_a", "get_b", "sum", "mult"] {
+            assert_eq!(e.demand(name), [OutputDemand::Produce], "{name} demand");
+        }
+        assert_eq!(e.readers("get_a"), [1]);
+        assert_eq!(e.readers("get_b"), [2], "feeds both sum[1] and mult[1]");
+        assert_eq!(e.readers("sum"), [1]);
+        assert_eq!(e.readers("mult"), [1]);
 
-        let get_a = execution_node_id(&execution_graph, &graph, &library, "get_a").unwrap();
-        let get_b = execution_node_id(&execution_graph, &graph, &library, "get_b").unwrap();
-        let sum = execution_node_id(&execution_graph, &graph, &library, "sum").unwrap();
-        let mult = execution_node_id(&execution_graph, &graph, &library, "mult").unwrap();
-        let print = execution_node_id(&execution_graph, &graph, &library, "Print").unwrap();
-
-        // get_a→sum[0], get_b→sum[1]+mult[1], sum→mult[0], mult→print[0]
-        assert_eq!(
-            execution_graph.node_output_demand(get_a)[0],
-            OutputDemand::Produce
-        );
-        assert_eq!(
-            execution_graph.node_output_demand(get_b)[0],
-            OutputDemand::Produce
-        );
-        assert_eq!(
-            execution_graph.node_output_demand(sum)[0],
-            OutputDemand::Produce
-        );
-        assert_eq!(
-            execution_graph.node_output_demand(mult)[0],
-            OutputDemand::Produce
-        );
-        assert_eq!(execution_graph.node_output_readers(get_a), &[1]);
-        assert_eq!(execution_graph.node_output_readers(get_b), &[2]);
-        assert_eq!(execution_graph.node_output_readers(sum), &[1]);
-        assert_eq!(execution_graph.node_output_readers(mult), &[1]);
-
-        assert!(execution_graph.compiled().by_id(print).sink);
-
+        assert!(e.engine.compiled().by_id(e.id("Print")).sink);
         Ok(())
     }
 
     #[tokio::test]
     async fn updates_after_graph_change() -> TestResult {
-        let mut graph = test_graph();
-        let library = test_func_lib(TestFuncHooks::default());
-        let mut execution_graph = ExecutionEngine::default();
+        let mut e = TestEngine::over(TestGraph::sample());
+        // Rewire mult to the sources directly, bypassing sum.
+        e.edit(|g| {
+            g.wire("get_a", 0, "mult", 0);
+            g.wire("get_b", 0, "mult", 1);
+        });
 
-        execution_graph.update(&graph, &library).unwrap();
+        let plan = e.plan_sinks().await?;
 
-        // Rewire mult to get_a and get_b directly (bypassing sum)
-        let binding1 = Binding::bind(graph.find_by_name("get_a").unwrap().id, 0);
-        let binding2 = Binding::bind(graph.find_by_name("get_b").unwrap().id, 0);
-        bind(&mut graph, "mult", 0, binding1);
-        bind(&mut graph, "mult", 1, binding2);
-
-        execution_graph.update(&graph, &library).unwrap();
-        execution_graph.prepare_execution(true, false, &[]).await?;
-
-        let get_a = execution_node_id(&execution_graph, &graph, &library, "get_a").unwrap();
-        let get_b = execution_node_id(&execution_graph, &graph, &library, "get_b").unwrap();
-        let mult = execution_node_id(&execution_graph, &graph, &library, "mult").unwrap();
-        let print = execution_node_id(&execution_graph, &graph, &library, "Print").unwrap();
-
-        assert_eq!(execution_graph.node_output_demand(get_a).len(), 1);
-        assert_eq!(execution_graph.node_output_demand(get_b).len(), 1);
-        assert_eq!(execution_graph.node_output_demand(mult).len(), 1);
-        assert!(execution_graph.node_output_demand(print).is_empty());
-        // Now each source has exactly 1 consumer (sum is no longer in the path)
         assert_eq!(
-            execution_graph.node_output_demand(get_a)[0],
-            OutputDemand::Produce
+            plan.scheduled(),
+            ["get_b", "get_a", "mult", "Print"],
+            "sum is no longer in any sink's cone"
         );
-        assert_eq!(
-            execution_graph.node_output_demand(get_b)[0],
-            OutputDemand::Produce
-        );
-        assert_eq!(
-            execution_graph.node_output_demand(mult)[0],
-            OutputDemand::Produce
-        );
-        assert_eq!(execution_graph.node_output_readers(get_a), &[1]);
-        assert_eq!(execution_graph.node_output_readers(get_b), &[1]);
-        assert_eq!(execution_graph.node_output_readers(mult), &[1]);
-
+        for name in ["get_a", "get_b", "mult"] {
+            assert_eq!(e.demand(name), [OutputDemand::Produce], "{name} demand");
+            assert_eq!(e.readers(name), [1], "{name} now has exactly one consumer");
+        }
+        assert!(e.demand("Print").is_empty());
         Ok(())
     }
 
     #[test]
     fn update_rejects_func_missing_from_lib_and_keeps_prior_program() {
-        let graph = test_graph();
-        let library = test_func_lib(TestFuncHooks::default());
-        let mut execution_graph = ExecutionEngine::default();
+        let mut e = TestEngine::over(TestGraph::sample());
+        assert_eq!(e.engine.compiled().e_nodes.len(), 5);
 
-        // A good compile establishes a program.
-        execution_graph.update(&graph, &library).unwrap();
-        assert_eq!(execution_graph.compiled().e_nodes.len(), 5);
-
-        // Re-compiling the same graph against a library that defines none of
-        // its funcs is rejected with a message naming a missing func.
-        let CompileError { message } = execution_graph
-            .update(&graph, &Library::default())
-            .unwrap_err();
+        // Recompiling the same graph against a library that defines none of its
+        // funcs is rejected with a message naming a missing func.
+        e.graph.library = Library::default();
+        let CompileError { message } = e.try_reinstall().unwrap_err();
         assert!(
             message.contains("absent from the library"),
             "message should explain the missing func, got: {message}"
@@ -2191,7 +2104,7 @@ mod graph_structure {
 
         // The rejection happens before any mutation, so the prior program is
         // left intact rather than torn down.
-        assert_eq!(execution_graph.compiled().e_nodes.len(), 5);
+        assert_eq!(e.engine.compiled().e_nodes.len(), 5);
     }
 }
 
@@ -2407,372 +2320,193 @@ mod const_bindings {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn const_binding_tracks_changes() -> TestResult {
-        let mut graph = test_graph();
-        let library = test_func_lib(default_hooks());
-        let mut execution_graph = ExecutionEngine::default();
+        let mut e = TestEngine::over(TestGraph::sample());
+        e.edit(|g| {
+            g.constant("mult", 0, 3i64);
+            g.constant("mult", 1, 5i64);
+        });
 
-        bind(&mut graph, "mult", 0, Binding::Const(StaticValue::Int(3)));
-        bind(&mut graph, "mult", 1, Binding::Const(StaticValue::Int(5)));
+        // The const binds detach mult from its upstream, so get_a/get_b/sum are
+        // pruned out of the run entirely.
+        let run = e.run_sinks().await;
+        assert_eq!(run.ran(), ["mult", "Print"]);
 
-        execution_graph.update(&graph, &library).unwrap();
-        execution_graph.execute_sinks().await?;
-
-        // Only mult and print execute — the const binds detach mult from its
-        // upstream, so get_a/get_b/sum are pruned.
-        assert_eq!(
-            execution_node_names_in_order(&execution_graph, &graph, &library),
-            ["mult", "Print"]
-        );
-
-        let mult_id = execution_node_id(&execution_graph, &graph, &library, "mult").unwrap();
-        let print_id = execution_node_id(&execution_graph, &graph, &library, "Print").unwrap();
-        let ran = |stats: &ExecutionOutcome, id| stats.ran(id);
-
-        // Re-run with the same bindings: mult's digest is unchanged, so it's reused
-        // (cache hit); only print (impure sink) actually recomputes.
-        execution_graph.update(&graph, &library).unwrap();
-        let stats = execution_graph.execute_sinks().await?;
-        assert!(stats.cached(mult_id), "mult reused");
-        assert!(!ran(&stats, mult_id), "mult did not recompute");
-        assert!(ran(&stats, print_id), "print recomputes");
+        // Re-run with the same bindings: mult's digest is unchanged, so it is
+        // reused; only print (an impure sink) recomputes.
+        let run = e.run_sinks().await;
+        assert_eq!(run.ran(), ["Print"], "mult did not recompute");
+        assert!(run.cached().contains(&"mult"), "mult reused");
 
         // Change one const: mult's digest changes ⇒ cache miss ⇒ it re-executes.
-        bind(&mut graph, "mult", 0, Binding::Const(StaticValue::Int(4)));
-        execution_graph.update(&graph, &library).unwrap();
-        let stats = execution_graph.execute_sinks().await?;
-        assert!(ran(&stats, mult_id), "a const change recomputes mult");
-        assert!(ran(&stats, print_id));
-
+        e.edit(|g| g.constant("mult", 0, 4i64));
+        let run = e.run_sinks().await;
+        assert_eq!(run.ran(), ["mult", "Print"]);
         Ok(())
     }
 
+    /// The same const value must not re-key the node, and a different one must
+    /// — checked across four consecutive runs, with the sources wired to
+    /// `unreachable!` so any walk past the consts fails loudly.
     #[tokio::test(flavor = "multi_thread")]
     async fn const_binding_invokes_only_once() -> TestResult {
-        let library = test_func_lib(TestFuncHooks {
-            get_a: Arc::new(move || unreachable!()),
-            get_b: Arc::new(move || unreachable!()),
-            print: Arc::new(move |_| {}),
+        let mut e = TestEngine::over(TestGraph::sample_with(TestFuncHooks {
+            get_a: Arc::new(|| unreachable!("a const-fed graph never reaches its sources")),
+            get_b: Arc::new(|| unreachable!("a const-fed graph never reaches its sources")),
+            print: Arc::new(|_| {}),
+        }));
+        e.edit(|g| {
+            g.constant("mult", 0, 3i64);
+            g.constant("mult", 1, 5i64);
         });
 
-        let mut graph = test_graph();
-        let mut execution_graph = ExecutionEngine::default();
+        assert_eq!(e.run_sinks().await.ran(), ["mult", "Print"]);
 
-        bind(&mut graph, "mult", 0, Binding::Const(StaticValue::Int(3)));
-        bind(&mut graph, "mult", 1, Binding::Const(StaticValue::Int(5)));
+        // Same const value: no re-execution of mult.
+        e.edit(|g| g.constant("mult", 0, 3i64));
+        assert_eq!(e.run_sinks().await.ran(), ["Print"]);
 
-        execution_graph.update(&graph, &library).unwrap();
-        execution_graph.execute_sinks().await?;
+        // Different const value: mult re-executes.
+        e.edit(|g| g.constant("mult", 0, 4i64));
+        assert_eq!(e.run_sinks().await.ran(), ["mult", "Print"]);
 
-        assert_eq!(
-            execution_node_names_in_order(&execution_graph, &graph, &library),
-            ["mult", "Print"]
-        );
-
-        // Same const value: no re-execution of mult
-        bind(&mut graph, "mult", 0, Binding::Const(StaticValue::Int(3)));
-        execution_graph.update(&graph, &library).unwrap();
-        execution_graph.execute_sinks().await?;
-
-        assert_eq!(
-            execution_node_names_in_order(&execution_graph, &graph, &library),
-            ["Print"]
-        );
-
-        // Different const value: mult re-executes
-        bind(&mut graph, "mult", 0, Binding::Const(StaticValue::Int(4)));
-        execution_graph.update(&graph, &library).unwrap();
-        execution_graph.execute_sinks().await?;
-
-        assert_eq!(
-            execution_node_names_in_order(&execution_graph, &graph, &library),
-            ["mult", "Print"]
-        );
-
-        // Stable again
-        execution_graph.update(&graph, &library).unwrap();
-        execution_graph.execute_sinks().await?;
-
-        assert_eq!(
-            execution_node_names_in_order(&execution_graph, &graph, &library),
-            ["Print"]
-        );
-
+        // Stable again.
+        assert_eq!(e.run_sinks().await.ran(), ["Print"]);
         Ok(())
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn const_excludes_upstream_node() -> TestResult {
-        let library = test_func_lib(default_hooks());
+        let mut e = TestEngine::over(TestGraph::sample());
+        // Replace sum[0] (get_a) with a const — get_a is no longer needed.
+        e.edit(|g| g.constant("sum", 0, 33i64));
 
-        let mut graph = test_graph();
-        let mut execution_graph = ExecutionEngine::default();
+        assert_eq!(e.run_sinks().await.ran(), ["get_b", "sum", "mult", "Print"]);
 
-        // Replace sum[0] (get_a) with a const — get_a is no longer needed
-        bind(&mut graph, "sum", 0, Binding::Const(33.into()));
+        // Also unbind sum[1]: sum now has all const/none inputs, so no upstream
+        // is needed at all.
+        e.edit(|g| g.unbind("sum", 1));
 
-        execution_graph.update(&graph, &library).unwrap();
-        execution_graph.execute_sinks().await?;
-
-        assert_eq!(
-            execution_node_names_in_order(&execution_graph, &graph, &library),
-            ["get_b", "sum", "mult", "Print"]
-        );
-
-        // Also unbind sum[1] — now sum has all const/none inputs, no upstream needed
-        bind(&mut graph, "sum", 1, None);
-
-        execution_graph.update(&graph, &library).unwrap();
-        execution_graph.execute_sinks().await?;
-
-        assert_eq!(
-            execution_node_names_in_order(&execution_graph, &graph, &library),
-            ["sum", "mult", "Print"]
-        );
-
+        assert_eq!(e.run_sinks().await.ran(), ["sum", "mult", "Print"]);
         Ok(())
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn change_from_const_to_bind_recomputes() -> TestResult {
-        let library = test_func_lib(default_hooks());
+        let mut e = TestEngine::over(TestGraph::sample());
+        e.edit(|g| g.constant("sum", 0, 33i64));
 
-        let mut graph = test_graph();
-        let mut execution_graph = ExecutionEngine::default();
+        assert_eq!(e.run_sinks().await.ran(), ["get_b", "sum", "mult", "Print"]);
 
-        let get_b_id = graph.find_by_name("get_b").unwrap().id;
-        bind(&mut graph, "sum", 0, Binding::Const(33.into()));
+        // Switch from const back to a bind — sum must re-execute.
+        e.edit(|g| g.wire("get_b", 0, "sum", 0));
 
-        execution_graph.update(&graph, &library).unwrap();
-        execution_graph.execute_sinks().await?;
-
-        assert_eq!(
-            execution_node_names_in_order(&execution_graph, &graph, &library),
-            ["get_b", "sum", "mult", "Print"]
-        );
-
-        // Switch from const back to bind — sum must re-execute
-        bind(&mut graph, "sum", 0, Binding::bind(get_b_id, 0));
-
-        execution_graph.update(&graph, &library).unwrap();
-        execution_graph.execute_sinks().await?;
-
-        assert_eq!(
-            execution_node_names_in_order(&execution_graph, &graph, &library),
-            ["sum", "mult", "Print"]
-        );
-
+        assert_eq!(e.run_sinks().await.ran(), ["sum", "mult", "Print"]);
         Ok(())
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn optional_input_binding_change_recomputes() -> TestResult {
-        let library = test_func_lib(default_hooks());
+        let mut e = TestEngine::over(TestGraph::sample());
+        e.run_sinks().await;
 
-        let mut graph = test_graph();
-        let mut execution_graph = ExecutionEngine::default();
+        // Switch mult's inputs to const/none.
+        e.edit(|g| {
+            g.constant("mult", 0, 2i64);
+            g.unbind("mult", 1);
+        });
+        assert_eq!(e.run_sinks().await.ran(), ["mult", "Print"]);
 
-        execution_graph.update(&graph, &library).unwrap();
-        execution_graph.execute_sinks().await?;
-
-        // Switch mult inputs to const/none
-        bind(&mut graph, "mult", 0, Binding::Const(2.into()));
-        bind(&mut graph, "mult", 1, None);
-
-        execution_graph.update(&graph, &library).unwrap();
-        execution_graph.execute_sinks().await?;
-
-        assert_eq!(
-            execution_node_names_in_order(&execution_graph, &graph, &library),
-            ["mult", "Print"]
-        );
-
-        // Stable on rerun
-        execution_graph.update(&graph, &library).unwrap();
-        execution_graph.execute_sinks().await?;
-
-        assert_eq!(
-            execution_node_names_in_order(&execution_graph, &graph, &library),
-            ["Print"]
-        );
-
+        // Stable on rerun.
+        assert_eq!(e.run_sinks().await.ran(), ["Print"]);
         Ok(())
     }
 }
 
 mod behavior {
     use super::*;
+    use std::sync::atomic::{AtomicBool, Ordering};
 
     #[tokio::test(flavor = "multi_thread")]
     async fn pure_node_skips_on_rerun() -> TestResult {
-        // `get_b` is a pure source in the fixture, so once its output is cached its
-        // digest is unchanged on a re-run and it reuses that value rather than running.
-        let graph = test_graph();
-        let library = test_func_lib(default_hooks());
+        // `get_b` is a pure source, so once its output is cached its digest is
+        // unchanged on a re-run and it reuses that value rather than running.
+        let mut e = TestEngine::over(TestGraph::sample());
 
-        let mut execution_graph = ExecutionEngine::default();
-        execution_graph.update(&graph, &library).unwrap();
-
-        // First run: get_b (pure source) executes.
-        execution_graph.execute_sinks().await?;
-        assert!(
-            execution_node_names_in_order(&execution_graph, &graph, &library)
-                .contains(&"get_b".to_string())
-        );
-
-        // Re-run: get_b's digest is unchanged, so it reuses its RAM output — skipped.
-        execution_graph.execute_sinks().await?;
-        assert!(
-            !execution_node_names_in_order(&execution_graph, &graph, &library)
-                .contains(&"get_b".to_string())
-        );
-
+        assert!(e.run_sinks().await.ran().contains(&"get_b"));
+        assert!(!e.run_sinks().await.ran().contains(&"get_b"));
         Ok(())
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn default_node_skips_on_rerun() -> TestResult {
-        let graph = test_graph();
-        let library = test_func_lib(default_hooks());
-        let mut execution_graph = ExecutionEngine::default();
+        let mut e = TestEngine::over(TestGraph::sample());
 
-        execution_graph.update(&graph, &library).unwrap();
-        execution_graph.execute_sinks().await?;
+        let first = e.run_sinks().await;
+        assert_eq!(first.ran(), ["get_b", "get_a", "sum", "mult", "Print"]);
 
-        assert_eq!(
-            execution_node_names_in_order(&execution_graph, &graph, &library)[2..],
-            ["sum", "mult", "Print"]
-        );
+        // Second run: only print (an impure sink) re-executes.
+        let second = e.run_sinks().await;
+        assert_eq!(second.ran(), ["Print"]);
+        assert_eq!(second.cached(), ["get_a", "get_b", "mult", "sum"]);
 
-        // Second run: only print (impure sink) re-executes, others cached
-        let exe_stats = execution_graph.execute_sinks().await?;
-        assert_eq!(
-            execution_node_names_in_order(&execution_graph, &graph, &library),
-            ["Print"]
-        );
-        assert_eq!(exe_stats.cached_nodes().count(), 4);
-
-        // Cached mult must still hold the correct product, not a stale value:
-        // sum = get_a(1) + get_b(11) = 12; mult = 12 * get_b(11) = 132
-        let mult_id = graph.find_by_name("mult").unwrap().id;
-        let vals = execution_graph.get_argument_values(&mult_id).unwrap();
-        assert!(matches!(
-            vals.outputs[0],
-            DynamicValue::Static(StaticValue::Int(132))
-        ));
-
+        // The cached mult must still hold the correct product, not a stale
+        // value: sum = get_a(1) + get_b(11) = 12; mult = 12 * get_b(11) = 132.
+        assert_eq!(e.output_i64("mult", 0), Some(132));
         Ok(())
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn execute_emits_started_then_finished_progress_per_node() -> TestResult {
         use crate::execution::report::RunPhase;
-        use crate::execution::report::internals::CollectingReporter;
 
-        let graph = test_graph();
-        let library = test_func_lib(default_hooks());
-        let mut eg = ExecutionEngine::default();
-        eg.update(&graph, &library).unwrap();
+        let mut e = TestEngine::over(TestGraph::sample());
+        let (run, progress) = e.run_sinks_reporting().await;
 
-        let mut reporter = CollectingReporter::default();
-        let mut stats = ExecutionOutcome::default();
-        eg.execute(
-            RunSeeds {
-                sinks: true,
-                ..Default::default()
-            },
-            &mut reporter,
-            CancelToken::never(),
-            &mut stats,
-        )
-        .await?;
-
-        let events: Vec<(NodeId, RunPhase)> = reporter
-            .progress
-            .iter()
-            .map(|progress| (progress.node_id, progress.phase))
-            .collect();
-
-        let name_of: std::collections::HashMap<NodeId, String> =
-            ["get_a", "get_b", "sum", "mult", "Print"]
-                .iter()
-                .map(|n| (graph.find_by_name(n).unwrap().id, n.to_string()))
-                .collect();
-
-        // Events come in Started→Finished pairs for the *same* node (the
-        // executor is sequential, so each node brackets before the next starts).
-        assert_eq!(events.len() % 2, 0, "paired events");
-        let mut started_order: Vec<String> = Vec::new();
-        for pair in events.chunks_exact(2) {
-            let (sid, sphase) = pair[0];
-            let (fid, fphase) = pair[1];
+        // Events come in Started→Finished pairs for the *same* node: the
+        // executor is sequential, so each node brackets before the next starts.
+        assert_eq!(progress.len() % 2, 0, "paired events");
+        let mut started: Vec<&str> = Vec::new();
+        for pair in progress.chunks_exact(2) {
+            let (started_name, started_phase) = &pair[0];
+            let (finished_name, finished_phase) = &pair[1];
             assert!(
-                matches!(sphase, RunPhase::Started { .. }),
+                matches!(started_phase, RunPhase::Started { .. }),
                 "first of pair is Started",
             );
-            assert_eq!(sid, fid, "Started/Finished are the same node");
+            assert_eq!(started_name, finished_name, "one node brackets itself");
             assert!(
-                matches!(fphase, RunPhase::Finished { elapsed_secs } if elapsed_secs >= 0.0),
+                matches!(finished_phase, RunPhase::Finished { elapsed_secs } if *elapsed_secs >= 0.0),
                 "second of pair is Finished with non-negative elapsed",
             );
-            started_order.push(name_of[&sid].clone());
+            started.push(started_name);
         }
 
-        // The progressed order equals the executor's recorded run order, and
-        // covers exactly the finally-executed nodes.
-        assert_eq!(
-            started_order,
-            execution_node_names_in_order(&eg, &graph, &library)
-        );
-        assert_eq!(started_order.len(), stats.ran_node_count);
-
+        // The progressed order equals the run's own order, and covers exactly
+        // the nodes that finally executed.
+        assert_eq!(started, run.ran());
+        assert_eq!(started.len(), run.ran_node_count);
         Ok(())
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn execute_honors_cancel_flag_and_marks_cancelled() -> TestResult {
-        use ::common::CancelToken;
-
-        let graph = test_graph();
-        let library = test_func_lib(default_hooks());
-        let mut eg = ExecutionEngine::default();
-        eg.update(&graph, &library).unwrap();
+        let mut e = TestEngine::over(TestGraph::sample());
 
         // Pre-tripped: the executor breaks at the first loop-top check, so no
         // node runs and the run is flagged cancelled.
         let tripped = CancelToken::new();
         tripped.cancel();
-        let mut stats = ExecutionOutcome::default();
-        eg.execute(
-            RunSeeds {
-                sinks: true,
-                ..Default::default()
-            },
-            &mut DiscardedReports,
-            tripped,
-            &mut stats,
-        )
-        .await?;
-        assert!(stats.cancelled, "pre-tripped run is cancelled");
-        assert!(
-            stats.ran_node_count == 0,
-            "no node runs when cancel is already set"
-        );
+        let run = e.run_cancellable(RunSeeds::sinks(), tripped).await?;
+        assert!(run.cancelled, "pre-tripped run is cancelled");
+        assert_eq!(run.ran_node_count, 0, "no node runs when cancel is set");
 
-        // A fresh, un-cancelled token runs the whole graph (nothing cached from
-        // the aborted run above).
-        eg.execute(
-            RunSeeds {
-                sinks: true,
-                ..Default::default()
-            },
-            &mut DiscardedReports,
-            CancelToken::new(),
-            &mut stats,
-        )
-        .await?;
-        assert!(!stats.cancelled);
-        assert_eq!(stats.ran_node_count, 5, "all nodes run when not cancelled");
-
+        // A fresh token runs the whole graph — nothing was cached by the run
+        // that aborted above.
+        let run = e
+            .run_cancellable(RunSeeds::sinks(), CancelToken::new())
+            .await?;
+        assert!(!run.cancelled);
+        assert_eq!(run.ran_node_count, 5, "all nodes run when not cancelled");
         Ok(())
     }
 
@@ -2783,92 +2517,54 @@ mod behavior {
     /// but its result is bogus.
     #[tokio::test(flavor = "multi_thread")]
     async fn cancel_mid_invoke_drops_in_flight_node_and_reruns() -> TestResult {
-        use std::sync::atomic::{AtomicBool, Ordering};
-
-        use ::common::CancelToken;
-
         use crate::async_lambda;
-        use crate::graph::Graph;
-        use crate::graph::func::{Func, FuncOutput};
-        use crate::graph::identity::NodeId;
-        use crate::library::Library;
 
         // Trips the cancel on its first invoke only, so the re-run completes.
         let cancel_first = Arc::new(AtomicBool::new(true));
-        let library: Library = [Func::new("8400cb3a-a5d2-4fcd-a9d8-0ab4880c710f", "self_cancel")
-            .category("Debug")
-            .pure()
-            .sink()
-            .output(FuncOutput::new("out", DataType::Int))
-            .lambda(async_lambda!(
-                move |Invocation { ctx, outputs, .. }| { cancel_first = Arc::clone(&cancel_first) } => {
+        let mut g = TestGraph::new();
+        g.add("self_cancel", |n| {
+            let cancel_first = cancel_first.clone();
+            n.pure().sink().output(DataType::Int).lambda(async_lambda!(
+                move |Invocation { ctx, outputs, .. }| { cancel_first = cancel_first.clone() } => {
                     if cancel_first.swap(false, Ordering::Relaxed) {
-                        // Stand in for the user hitting Cancel while this node runs.
+                        // Stand in for the user hitting Cancel while this runs.
                         ctx.cancel_flag().cancel();
                     }
-                    outputs[0] = DynamicValue::Static(StaticValue::Int(7));
+                    outputs[0] = StaticValue::Int(7).into();
                     Ok(())
                 }
-            ))]
-        .into();
+            ))
+        });
+        let mut e = TestEngine::over(g);
 
-        let mut graph = Graph::default();
-        let node_id: NodeId = "acb11422-9951-4fc6-9696-53b1a6699120".into();
-        let node: Node = library.by_name("self_cancel").unwrap().into();
-        graph.insert(node_id, node);
-        graph.validate().unwrap();
-
-        let mut eg = ExecutionEngine::default();
-        eg.update(&graph, &library).unwrap();
-
-        // Run 1: the node trips the cancel mid-invoke — it must not appear as
-        // executed (it didn't complete), and the run is flagged cancelled.
-        let mut stats = ExecutionOutcome::default();
-        eg.execute(
-            RunSeeds {
-                sinks: true,
-                ..Default::default()
-            },
-            &mut DiscardedReports,
-            CancelToken::new(),
-            &mut stats,
-        )
-        .await?;
-        assert!(stats.cancelled, "the node cancelled the run mid-invoke");
-        assert!(
-            stats.ran_node_count == 0,
+        let run = e
+            .run_cancellable(RunSeeds::sinks(), CancelToken::new())
+            .await?;
+        assert!(run.cancelled, "the node cancelled the run mid-invoke");
+        assert_eq!(
+            run.ran_node_count, 0,
             "an in-flight cancelled node is not reported executed (no green glow)"
         );
         assert!(
-            stats.status(node_id).is_none(),
+            run.status("self_cancel").is_none(),
             "a node the cancel caught mid-invoke reports nothing at all — neither a run \
-             nor a failure of its own; the run-level `cancelled` flag above is what says \
-             why: {:?}",
-            stats.nodes
+             nor a failure of its own; the run-level `cancelled` flag is what says why"
         );
 
-        // Run 2: a fresh token. The node's partial output was dropped, so it
+        // A fresh token: the partial output was dropped, so the node
         // re-executes rather than being served from a bogus cache.
-        eg.execute(
-            RunSeeds {
-                sinks: true,
-                ..Default::default()
-            },
-            &mut DiscardedReports,
-            CancelToken::new(),
-            &mut stats,
-        )
-        .await?;
-        assert!(!stats.cancelled);
+        let run = e
+            .run_cancellable(RunSeeds::sinks(), CancelToken::new())
+            .await?;
+        assert!(!run.cancelled);
         assert_eq!(
-            stats.ran_node_count, 1,
-            "the cancelled node re-runs next time (its output was not cached)"
+            run.ran_node_count, 1,
+            "it re-runs; its output was not cached"
         );
         assert!(
-            stats.cached_nodes().count() == 0,
+            run.cached().is_empty(),
             "a cancelled node must not be served from cache on the next run"
         );
-
         Ok(())
     }
 
@@ -2880,98 +2576,54 @@ mod behavior {
     #[tokio::test(flavor = "multi_thread")]
     async fn lambda_cancelled_error_maps_to_error_cancelled() -> TestResult {
         use crate::async_lambda;
-        use crate::graph::Graph;
-        use crate::graph::func::{Func, FuncOutput};
-        use crate::graph::identity::NodeId;
-        use crate::library::Library;
-        let library: Library = [
-            Func::new("8003e30b-0417-474d-a77f-1d3ea71ac6b3", "always_cancel")
-                .category("Debug")
-                .pure()
+
+        let mut g = TestGraph::new();
+        g.add("always_cancel", |n| {
+            n.pure()
                 .sink()
-                .output(FuncOutput::new("out", DataType::Int))
-                .lambda(async_lambda!(move |_| { Err(InvokeError::Cancelled) })),
-        ]
-        .into();
+                .output(DataType::Int)
+                .lambda(async_lambda!(move |_| { Err(InvokeError::Cancelled) }))
+        });
+        let mut e = TestEngine::over(g);
 
-        let mut graph = Graph::default();
-        let node_id: NodeId = "c791f8aa-3bf9-435d-8530-f3904b4b6a28".into();
-        let node: Node = library.by_name("always_cancel").unwrap().into();
-        graph.insert(node_id, node);
-        graph.validate().unwrap();
+        let run = e.run_sinks().await;
 
-        let mut eg = ExecutionEngine::default();
-        eg.update(&graph, &library).unwrap();
-        let mut stats = ExecutionOutcome::default();
-        eg.execute(
-            RunSeeds {
-                sinks: true,
-                ..Default::default()
-            },
-            &mut DiscardedReports,
-            common::CancelToken::new(),
-            &mut stats,
-        )
-        .await?;
-
-        assert!(
-            stats.ran_node_count == 0,
+        assert_eq!(
+            run.ran_node_count, 0,
             "a cancelled lambda is not reported executed"
         );
         assert!(
-            stats.status(node_id).is_none(),
+            run.status("always_cancel").is_none(),
             "InvokeError::Cancelled maps to RunError::Cancelled, which reports nothing — \
-             had it mapped to Invoke the node would carry an `Errored` row here: {:?}",
-            stats.nodes
+             had it mapped to Invoke the node would carry an `Errored` row here"
         );
-
         Ok(())
     }
 
     #[tokio::test]
     async fn impure_node_always_invoked() -> TestResult {
-        let graph = test_graph();
-        let mut library = test_func_lib(TestFuncHooks::default());
+        let mut e = TestEngine::over(TestGraph::sample_with(TestFuncHooks::default()));
+        e.edit(|g| g.edit_func("get_b", |func| func.behavior = FuncBehavior::Impure));
 
-        mutate_func(&mut library, "get_b", |func| {
-            func.behavior = FuncBehavior::Impure;
-        });
+        // Even holding a cached output, an impure node still wants to execute.
+        e.set_output("get_b", vec![StaticValue::Int(7).into()]);
+        let plan = e.plan_sinks().await?;
 
-        let mut execution_graph = ExecutionEngine::default();
-        execution_graph.update(&graph, &library).unwrap();
-
-        // Even with cached output, impure node still wants to execute
-        let get_b = execution_node_id(&execution_graph, &graph, &library, "get_b").unwrap();
-        execution_graph.set_output_values(get_b, vec![DynamicValue::Static(StaticValue::Int(7))]);
-        execution_graph.update(&graph, &library).unwrap();
-        execution_graph.prepare_execution(true, false, &[]).await?;
-
-        assert_eq!(
-            execution_node_names_in_order(&execution_graph, &graph, &library)[2..],
-            ["sum", "mult", "Print"]
-        );
-
+        assert_eq!(plan.scheduled(), ["get_b", "get_a", "sum", "mult", "Print"]);
         Ok(())
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn impure_output_is_released_after_run() -> TestResult {
-        let graph = test_graph();
-        let mut library = test_func_lib(default_hooks());
-        mutate_func(&mut library, "get_b", |func| {
-            func.behavior = FuncBehavior::Impure;
-        });
+        let mut e = TestEngine::over(TestGraph::sample());
+        e.edit(|g| g.edit_func("get_b", |func| func.behavior = FuncBehavior::Impure));
 
-        let mut execution_graph = ExecutionEngine::default();
-        execution_graph.update(&graph, &library).unwrap();
-        execution_graph.execute_sinks().await?;
+        e.run_sinks().await;
 
-        let get_b = execution_node_id(&execution_graph, &graph, &library, "get_b").unwrap();
         assert!(
-            execution_graph.slot(get_b).output_values().is_none(),
+            !e.holds_output("get_b"),
             "an impure value cannot hit on a future run, so the end sweep releases it"
         );
-
         Ok(())
     }
 }
@@ -2999,13 +2651,21 @@ mod cycle_detection {
 
 mod installation {
     use super::*;
-    use crate::execution::compile::internals::CompiledGraphBuilder;
+    use crate::testing::program::ProgramBuilder;
+
+    /// A program of `ids`, nothing but identities — enough for the pairing the
+    /// engine establishes at install.
+    fn program(ids: &[NodeId]) -> Arc<CompiledGraph> {
+        let mut prog = ProgramBuilder::default();
+        for &node_id in ids {
+            prog.node().id(node_id).add();
+        }
+        Arc::new(prog.into_program())
+    }
 
     #[test]
     fn install_holds_one_canonical_artifact_for_the_engine_and_its_cache() {
-        let mut builder = CompiledGraphBuilder::new();
-        builder.insert_node(NodeId::unique());
-        let compiled = builder.build();
+        let compiled = program(&[NodeId::from_u128(1)]);
         let mut engine = ExecutionEngine::default();
 
         engine.install(Arc::clone(&compiled));
@@ -3020,21 +2680,14 @@ mod installation {
     #[test]
     fn install_carries_slots_across_a_shifted_index_space() {
         let surviving = NodeId::from_u128(2);
-        let build = |ids: &[NodeId]| {
-            let mut builder = CompiledGraphBuilder::new();
-            for &id in ids {
-                builder.insert_node(id);
-            }
-            builder.build()
-        };
 
         let mut engine = ExecutionEngine::default();
-        engine.install(build(&[NodeId::from_u128(1), surviving]));
+        engine.install(program(&[NodeId::from_u128(1), surviving]));
         // Index 1 before the recompile: ids place in ascending order.
         engine.cache[NodeIdx(1)].state.set(17_u32);
 
         // Node 1 is dropped, so the survivor slides to index 0.
-        engine.install(build(&[surviving, NodeId::from_u128(3)]));
+        engine.install(program(&[surviving, NodeId::from_u128(3)]));
 
         assert_eq!(engine.cache[NodeIdx(0)].state.get::<u32>(), Some(&17));
         assert!(engine.cache[NodeIdx(1)].state.is_none());
@@ -3043,10 +2696,8 @@ mod installation {
 
     #[test]
     fn validation_rejects_a_cache_with_the_wrong_node_count() {
-        let mut builder = CompiledGraphBuilder::new();
-        builder.insert_node(NodeId::unique());
         let engine = ExecutionEngine {
-            compiled: Some(builder.build()),
+            compiled: Some(program(&[NodeId::from_u128(1)])),
             ..Default::default()
         };
 
@@ -3077,92 +2728,80 @@ mod invalidation {
 
 mod execution {
     use super::*;
+    use std::sync::atomic::{AtomicI64, AtomicUsize, Ordering};
 
-    #[derive(Debug)]
-    struct TestValues {
-        a: i64,
-        b: i64,
-        result: i64,
+    /// A pure source whose value a test can move under it — the point being
+    /// that a *pure* node's digest does not notice, so the cached value stands
+    /// until something re-keys it.
+    fn shifting_source(cell: Arc<AtomicI64>) -> impl FnOnce(NodeSpec) -> NodeSpec {
+        move |n: NodeSpec| {
+            n.pure()
+                .cache(CacheMode::Ram)
+                .output(DataType::Int)
+                .compute(move |_| cell.load(Ordering::Relaxed).into())
+        }
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn simple_compute() -> TestResult {
-        let test_values = Arc::new(Mutex::new(TestValues {
-            a: 2,
-            b: 5,
-            result: 0,
-        }));
-
-        let test_values_a = test_values.clone();
-        let test_values_b = test_values.clone();
-        let test_values_result = test_values.clone();
-        let mut library = test_func_lib(TestFuncHooks {
-            get_a: Arc::new(move || Ok(test_values_a.try_lock().unwrap().a)),
-            get_b: Arc::new(move || test_values_b.try_lock().unwrap().b),
-            print: Arc::new(move |result| {
-                test_values_result.try_lock().unwrap().result = result;
-            }),
+        let b = Arc::new(AtomicI64::new(5));
+        let mut g = TestGraph::new();
+        g.add("a", shifting_source(Arc::new(AtomicI64::new(2))));
+        g.add("b", shifting_source(b.clone()));
+        g.add("sum", |n| {
+            n.pure()
+                .cache(CacheMode::Ram)
+                .input(DataType::Int)
+                .input(DataType::Int)
+                .output(DataType::Int)
+                .compute(|i| (i[0].as_i64().unwrap() + i[1].as_i64().unwrap()).into())
         });
+        g.add("mult", |n| {
+            n.pure()
+                .cache(CacheMode::Ram)
+                .input(DataType::Int)
+                .input(DataType::Int)
+                .output(DataType::Int)
+                .compute(|i| (i[0].as_i64().unwrap() * i[1].as_i64().unwrap()).into())
+        });
+        g.add("print", |n| n.records());
+        g.wire("a", 0, "sum", 0);
+        g.wire("b", 0, "sum", 1);
+        g.wire("sum", 0, "mult", 0);
+        g.wire("b", 0, "mult", 1);
+        g.wire("mult", 0, "print", 0);
 
-        let graph = test_graph();
+        let mut e = TestEngine::over(g);
+        let run = e.run_sinks().await;
+        assert_eq!(run.logs(), ["35"], "sum = 2 + 5 = 7, mult = 7 * 5 = 35");
 
-        let mut execution_graph = ExecutionEngine::default();
-        execution_graph.update(&graph, &library).unwrap();
-        execution_graph.execute_sinks().await?;
-        // sum = get_a + get_b = 2 + 5 = 7, mult = sum * get_b = 7 * 5 = 35
-        assert_eq!(test_values.try_lock()?.result, 35);
-
-        // Changing external state doesn't recompute: get_b is pure, so its digest
+        // Moving external state does not recompute: `b` is pure, so its digest
         // is stable and the cached value stands.
-        test_values.try_lock()?.b = 7;
+        b.store(7, Ordering::Relaxed);
+        let run = e.run_sinks().await;
+        assert_eq!(run.logs(), ["35"], "a pure node does not re-read the world");
 
-        execution_graph.update(&graph, &library).unwrap();
-        execution_graph.execute_sinks().await?;
-        assert_eq!(test_values.try_lock()?.result, 35);
-
-        // Make get_b Impure: now it re-reads the value
-        mutate_func(&mut library, "get_b", |func| {
-            func.behavior = FuncBehavior::Impure;
-        });
-
-        let mut execution_graph = ExecutionEngine::default();
-        execution_graph.update(&graph, &library).unwrap();
-        execution_graph.execute_sinks().await?;
-        // sum = 2 + 7 = 9, mult = 9 * 7 = 63
-        assert_eq!(test_values.try_lock()?.result, 63);
-
+        // Declaring `b` impure re-keys it: now it re-reads on every run.
+        e.edit(|g| g.edit_func("b", |func| func.behavior = FuncBehavior::Impure));
+        let run = e.run_sinks().await;
+        assert_eq!(run.logs(), ["63"], "sum = 2 + 7 = 9, mult = 9 * 7 = 63");
         Ok(())
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn required_none_binding_is_stable() -> TestResult {
-        let library = test_func_lib(default_hooks());
+        let mut e = TestEngine::over(TestGraph::sample());
+        // sum's first input unbound (required) — sum and downstream can't run.
+        e.edit(|g| g.unbind("sum", 0));
 
-        let mut graph = test_graph();
-        let mut execution_graph = ExecutionEngine::default();
+        let first = e.run_sinks().await;
+        let second = e.run_sinks().await;
 
-        // Make sum's first input None (required) — sum and downstream shouldn't execute
-        bind(&mut graph, "sum", 0, None);
-
-        execution_graph.update(&graph, &library).unwrap();
-
-        execution_graph.execute_sinks().await?;
-        let order1 = execution_graph.schedule.process_order.clone();
-
-        execution_graph.execute_sinks().await?;
-        let order2 = execution_graph.schedule.process_order.clone();
-
-        // The schedule is deterministic — stable across runs (what actually *runs* can
-        // differ as Pure nodes start reusing their cache, but the order can't flap).
-        assert_eq!(order1, order2);
-
-        // sum should be marked as missing required inputs
-        let sum = execution_node_id(&execution_graph, &graph, &library, "sum").unwrap();
-        assert!(
-            execution_graph.schedule.states[execution_graph.compiled().node(sum).unwrap()]
-                .missing_required_inputs()
-        );
-
+        // The schedule is deterministic across runs. What actually *runs* can
+        // differ as pure nodes start reusing their cache, but the order cannot
+        // flap.
+        assert_eq!(first.missing_inputs(), second.missing_inputs());
+        assert_eq!(first.missing_inputs(), ["Print", "mult", "sum"]);
         Ok(())
     }
 
@@ -3195,183 +2834,122 @@ mod execution {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn cached_upstream_output_reused_after_rebinding() -> TestResult {
-        let library = test_func_lib(default_hooks());
+        let mut e = TestEngine::over(TestGraph::sample());
+        e.run_sinks().await;
 
-        let mut graph = test_graph();
-        let mut execution_graph = ExecutionEngine::default();
+        // Switch mult to const inputs: its upstream leaves the run.
+        e.edit(|g| {
+            g.constant("mult", 0, 2i64);
+            g.constant("mult", 1, 21i64);
+        });
+        assert_eq!(e.run_sinks().await.ran(), ["mult", "Print"]);
 
-        execution_graph.update(&graph, &library).unwrap();
-        execution_graph.execute_sinks().await?;
-
-        // Switch mult to const inputs
-        bind(&mut graph, "mult", 0, Binding::Const(2.into()));
-        bind(&mut graph, "mult", 1, Binding::Const(21.into()));
-
-        execution_graph.update(&graph, &library).unwrap();
-        execution_graph.execute_sinks().await?;
-
-        assert_eq!(
-            execution_node_names_in_order(&execution_graph, &graph, &library),
-            ["mult", "Print"]
-        );
-
-        // Switch back to bind from cached get_b — mult re-executes with cached upstream
-        let get_b_id = graph.find_by_name("get_b").unwrap().id;
-        bind(&mut graph, "mult", 0, Binding::bind(get_b_id, 0));
-
-        execution_graph.update(&graph, &library).unwrap();
-        execution_graph.execute_sinks().await?;
-
-        assert_eq!(
-            execution_node_names_in_order(&execution_graph, &graph, &library),
-            ["mult", "Print"]
-        );
-
+        // Switch one back to a bind from the *cached* get_b — mult re-executes,
+        // but its producer is served from cache rather than re-run.
+        e.edit(|g| g.wire("get_b", 0, "mult", 0));
+        assert_eq!(e.run_sinks().await.ran(), ["mult", "Print"]);
         Ok(())
     }
 
-    /// Output buffers are wiped before a re-running node is invoked, so an unwritten
-    /// output cannot retain a prior run's value. This sink has no demanded outputs,
-    /// therefore leaving one port `Unbound` is valid.
+    /// Output buffers are wiped before a re-running node is invoked, so an
+    /// unwritten output cannot retain a prior run's value. This sink has no
+    /// demanded outputs, so leaving one port `Unbound` is valid.
     #[tokio::test(flavor = "multi_thread")]
     async fn unwritten_output_port_is_cleared_before_reexecution() -> TestResult {
-        use std::sync::atomic::{AtomicUsize, Ordering};
-
         use crate::async_lambda;
-        use crate::graph::Graph;
-        use crate::graph::func::{Func, FuncInput, FuncOutput};
-        use crate::library::Library;
 
         let invocations = Arc::new(AtomicUsize::new(0));
-        let library: Library = [Func::new(
-            "4df6d99f-cb0c-479c-9b94-6549c406d9ab",
-            "partial_writer",
-        )
-        .category("Debug")
-        .pure()
-        .sink()
-        // Const-bound below; changing the const is what re-keys the digest between runs.
-        .input(FuncInput::optional("seed", DataType::Int))
-        .output(FuncOutput::new("a", DataType::Int))
-        .output(FuncOutput::new("b", DataType::Int))
-        .lambda(async_lambda!(
-            move |Invocation { outputs, .. }| { invocations = Arc::clone(&invocations) } => {
-                let run = invocations.fetch_add(1, Ordering::Relaxed);
-                outputs[0] = DynamicValue::Static(StaticValue::Int(100 + run as i64));
-                if run == 0 {
-                    // Only the first run writes the second port.
-                    outputs[1] = DynamicValue::Static(StaticValue::Int(20));
-                }
-                Ok(())
-            }
-        ))]
-        .into();
+        let mut g = TestGraph::new();
+        g.add("partial_writer", |n| {
+            let invocations = invocations.clone();
+            n.pure()
+                .sink()
+                // Const-bound below; changing that const is what re-keys the
+                // digest between runs.
+                .optional(DataType::Int)
+                .output(DataType::Int)
+                .output(DataType::Int)
+                // Retained so the in-place buffer reuse is observable at all.
+                .cache(CacheMode::Ram)
+                .lambda(async_lambda!(
+                    move |Invocation { outputs, .. }| { invocations = invocations.clone() } => {
+                        let run = invocations.fetch_add(1, Ordering::Relaxed);
+                        outputs[0] = StaticValue::Int(100 + run as i64).into();
+                        if run == 0 {
+                            // Only the first run writes the second port.
+                            outputs[1] = StaticValue::Int(20).into();
+                        }
+                        Ok(())
+                    }
+                ))
+        });
+        g.constant("partial_writer", 0, 0i64);
 
-        let mut graph = Graph::default();
-        let mut node: Node = library.by_name("partial_writer").unwrap().into();
-        // Retain the output buffer across runs so the in-place reuse is observable;
-        // nodes now default to `CacheMode::None`.
-        node.cache = CacheMode::Ram;
-        let node_id: NodeId = "0b35e5e4-be30-4733-a5a2-9d474000de10".into();
-        graph.insert(node_id, node);
-        graph.set_input_binding(
-            InputPort::new(node_id, 0),
-            Binding::Const(StaticValue::Int(0)),
-        );
-        graph.validate().unwrap();
+        let mut e = TestEngine::over(g);
 
-        let mut eg = ExecutionEngine::default();
-        eg.update(&graph, &library).unwrap();
-
-        // Run 1: both ports written.
-        let stats = eg.execute_sinks().await?;
-        assert!(stats.errored_nodes().count() == 0);
-        let node_id = execution_node_id(&eg, &graph, &library, "partial_writer").unwrap();
-        let outputs = eg
-            .slot(node_id)
-            .output_values()
-            .map(<[_]>::to_vec)
-            .expect("the node ran, so it holds outputs");
-        assert!(
-            matches!(outputs[0], DynamicValue::Static(StaticValue::Int(100)))
-                && matches!(outputs[1], DynamicValue::Static(StaticValue::Int(20))),
-            "run 1 writes both ports: {outputs:?}"
+        let run = e.run_sinks().await;
+        assert!(run.errored().is_empty());
+        assert_eq!(e.output_i64("partial_writer", 0), Some(100));
+        assert_eq!(
+            e.output_i64("partial_writer", 1),
+            Some(20),
+            "run 1 writes both"
         );
 
-        // Invalidate the pure node while keeping its resident buffer available for the next
-        // invocation. Run 2 writes only port 0, so port 1 must not retain run 1's value.
-        graph.set_input_binding(
-            InputPort::new(node_id, 0),
-            Binding::Const(StaticValue::Int(1)),
-        );
-        eg.update(&graph, &library).unwrap();
-        let stats = eg.execute_sinks().await?;
-        assert!(stats.errored_nodes().count() == 0);
-        let outputs = eg
-            .slot(node_id)
-            .output_values()
-            .map(<[_]>::to_vec)
-            .expect("the invalidated pure node re-ran");
-        assert!(
-            matches!(outputs[0], DynamicValue::Static(StaticValue::Int(101))),
-            "run 2 rewrites port 0: {outputs:?}"
+        // Invalidate the pure node while keeping its resident buffer available
+        // for the next invocation. Run 2 writes only port 0, so port 1 must not
+        // retain run 1's value.
+        e.edit(|g| g.constant("partial_writer", 0, 1i64));
+        let run = e.run_sinks().await;
+
+        assert!(run.errored().is_empty());
+        assert_eq!(
+            e.output_i64("partial_writer", 0),
+            Some(101),
+            "port 0 rewritten"
         );
         assert!(
-            matches!(outputs[1], DynamicValue::Unbound),
-            "the unwritten port is cleared before invoke: {outputs:?}"
+            matches!(e.output("partial_writer", 1), Some(DynamicValue::Unbound)),
+            "the unwritten port is cleared before invoke, not left holding 20"
         );
-
         Ok(())
     }
 }
 
 mod node_seeds {
     use super::*;
-    use std::sync::Mutex as StdMutex;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    /// `test_graph` with every node's cache mode forced to `None`.
-    fn uncached_test_graph() -> Graph {
-        let mut graph = test_graph();
-        for node in graph.nodes.values_mut() {
-            node.cache = CacheMode::None;
-        }
-        graph
+    /// The sample fixture with nothing retained — every node on
+    /// `CacheMode::None`, which is what these tests are about.
+    fn uncached(hooks: TestFuncHooks) -> TestGraph {
+        let mut g = TestGraph::sample_with(hooks);
+        g.cache_all(CacheMode::None);
+        g
     }
 
-    /// Seeding `sum` runs exactly its cone (`get_a`, `get_b`, `sum`) without overriding
-    /// any node's `CacheMode::None` retention policy.
+    /// Seeding `sum` runs exactly its cone (`get_a`, `get_b`, `sum`) without
+    /// overriding any node's `CacheMode::None` retention policy.
     #[tokio::test]
     async fn seeded_run_executes_only_the_cone_without_retaining_outputs() {
-        let library = test_func_lib(TestFuncHooks {
+        let mut e = TestEngine::over(uncached(TestFuncHooks {
             get_a: Arc::new(|| Ok(1)),
             get_b: Arc::new(|| 11),
             ..Default::default()
-        });
-        let graph = uncached_test_graph();
-        let mut eg = ExecutionEngine::default();
-        eg.update(&graph, &library).unwrap();
+        }));
 
-        let sum_id = graph.find_by_name("sum").unwrap().id;
-        let stats = eg.execute_nodes([sum_id]).await.unwrap();
-        assert_eq!(stats.ran_node_count, 3);
+        let run = e.run_nodes(["sum"]).await;
 
-        let mut ran = execution_node_names_in_order(&eg, &graph, &library);
-        ran.sort();
-        assert_eq!(ran, ["get_a", "get_b", "sum"], "only sum's cone runs");
-        assert!(stats.ram_holding_nodes().count() == 0);
-        assert_eq!(stats.cache_ram.total(), 0);
+        assert_eq!(run.ran(), ["get_b", "get_a", "sum"], "only sum's cone runs");
+        assert_eq!(run.ran_node_count, 3);
+        assert!(run.holding_ram().is_empty());
+        assert_eq!(run.cache_ram.total(), 0);
         assert!(
-            eg.get_argument_values(&sum_id).unwrap().outputs.is_empty(),
+            e.outputs("sum").is_empty(),
             "the targeted output is produced but not retained"
         );
-
-        let get_a_id = graph.find_by_name("get_a").unwrap().id;
         assert!(
-            eg.get_argument_values(&get_a_id)
-                .unwrap()
-                .outputs
-                .is_empty(),
+            e.outputs("get_a").is_empty(),
             "unpinned None-cache upstream is drained as usual"
         );
     }
@@ -3379,107 +2957,92 @@ mod node_seeds {
     /// A second seeded run obeys `CacheMode::None` and recomputes the cone.
     #[tokio::test]
     async fn second_seeded_run_obeys_none_cache_mode() {
-        let get_a_calls = Arc::new(AtomicUsize::new(0));
-        let get_b_calls = Arc::new(AtomicUsize::new(0));
-        let library = test_func_lib(TestFuncHooks {
-            get_a: Arc::new({
-                let calls = Arc::clone(&get_a_calls);
-                move || {
-                    calls.fetch_add(1, Ordering::Relaxed);
-                    Ok(1)
-                }
+        let calls = Arc::new(AtomicUsize::new(0));
+        let counted = |calls: Arc<AtomicUsize>| {
+            move || {
+                calls.fetch_add(1, Ordering::Relaxed);
+            }
+        };
+        let (a, b) = (calls.clone(), calls.clone());
+        let mut e = TestEngine::over(uncached(TestFuncHooks {
+            get_a: Arc::new(move || {
+                counted(a.clone())();
+                Ok(1)
             }),
-            get_b: Arc::new({
-                let calls = Arc::clone(&get_b_calls);
-                move || {
-                    calls.fetch_add(1, Ordering::Relaxed);
-                    11
-                }
+            get_b: Arc::new(move || {
+                counted(b.clone())();
+                11
             }),
             ..Default::default()
-        });
-        let graph = uncached_test_graph();
-        let mut eg = ExecutionEngine::default();
-        eg.update(&graph, &library).unwrap();
+        }));
 
-        let sum_id = graph.find_by_name("sum").unwrap().id;
-        eg.execute_nodes([sum_id]).await.unwrap();
-        assert_eq!(get_a_calls.load(Ordering::Relaxed), 1);
-        assert_eq!(get_b_calls.load(Ordering::Relaxed), 1);
+        e.run_nodes(["sum"]).await;
+        assert_eq!(calls.load(Ordering::Relaxed), 2, "one call to each source");
 
-        let stats = eg.execute_nodes([sum_id]).await.unwrap();
-        assert_eq!(get_a_calls.load(Ordering::Relaxed), 2);
-        assert_eq!(get_b_calls.load(Ordering::Relaxed), 2);
-        assert_eq!(stats.ran_node_count, 3);
-        assert!(!stats.cached(sum_id));
-        assert!(stats.ram_holding_nodes().count() == 0);
+        let run = e.run_nodes(["sum"]).await;
+
+        assert_eq!(
+            calls.load(Ordering::Relaxed),
+            4,
+            "nothing was retained, so both sources ran again"
+        );
+        assert_eq!(run.ran_node_count, 3);
+        assert!(!run.cached().contains(&"sum"));
+        assert!(run.holding_ram().is_empty());
     }
 
-    /// Node seeds combine with a sink run without retaining `CacheMode::None` values.
+    /// Node seeds combine with a sink run without retaining `CacheMode::None`
+    /// values — and the seed overrides `disabled` for that run.
     #[tokio::test]
     async fn node_seed_combines_with_a_sink_run_without_retaining() {
-        let printed: Arc<StdMutex<Vec<i64>>> = Arc::new(StdMutex::new(Vec::new()));
-        let library = test_func_lib(TestFuncHooks {
+        let mut e = TestEngine::over(uncached(TestFuncHooks {
             get_a: Arc::new(|| Ok(1)),
             get_b: Arc::new(|| 11),
-            print: Arc::new({
-                let printed = Arc::clone(&printed);
-                move |v| printed.lock().unwrap().push(v)
-            }),
-        });
-        let mut graph = uncached_test_graph();
-        let sum_id = graph.find_by_name("sum").unwrap().id;
-        graph.find_mut(sum_id).unwrap().disabled = true;
-        let mut eg = ExecutionEngine::default();
-        eg.update(&graph, &library).unwrap();
+            print: Arc::new(|_| {}),
+        }));
+        e.edit(|g| g.disable("sum"));
 
-        let mut stats = ExecutionOutcome::default();
-        eg.execute(
-            RunSeeds {
+        let run = e
+            .run(RunSeeds {
                 sinks: true,
-                node_ids: vec![sum_id],
+                node_ids: vec![e.id("sum")],
                 ..Default::default()
-            },
-            &mut DiscardedReports,
-            CancelToken::never(),
-            &mut stats,
-        )
-        .await
-        .unwrap();
+            })
+            .await
+            .expect("the run completes");
 
-        assert_eq!(*printed.lock().unwrap(), [132], "(1 + 11) * 11");
-        let mut ran = execution_node_names_in_order(&eg, &graph, &library);
-        ran.sort();
         assert_eq!(
-            ran,
-            ["Print", "get_a", "get_b", "mult", "sum"],
+            run.ran(),
+            ["get_b", "get_a", "sum", "mult", "Print"],
             "the explicit override feeds the ordinary sink during this run"
         );
+        assert_eq!(e.output_i64("mult", 0), None, "(1 + 11) * 11, not retained");
         assert!(
-            eg.get_argument_values(&sum_id).unwrap().outputs.is_empty(),
+            e.outputs("sum").is_empty(),
             "the targeted value is released after its real consumer"
         );
-        let mult_id = graph.find_by_name("mult").unwrap().id;
         assert!(
-            eg.get_argument_values(&mult_id).unwrap().outputs.is_empty(),
+            e.outputs("mult").is_empty(),
             "the None-cache downstream is drained by its consumer"
         );
-        assert!(stats.ram_holding_nodes().count() == 0);
+        assert!(run.holding_ram().is_empty());
     }
 
-    /// A seed that doesn't resolve against the compiled program (deleted or stale node)
-    /// fails the run because the miss is inconsistent caller state, not something to
-    /// silently skip. The panicking default hooks prove no lambda fires.
+    /// A seed that doesn't resolve against the compiled program (deleted or
+    /// stale node) fails the run because the miss is inconsistent caller state,
+    /// not something to silently skip. The panicking default hooks prove no
+    /// lambda fires.
     #[tokio::test]
     async fn unresolvable_node_seed_fails_the_run() {
-        let library = test_func_lib(TestFuncHooks::default());
-        let graph = test_graph();
-        let mut eg = ExecutionEngine::default();
-        eg.update(&graph, &library).unwrap();
+        let mut e = TestEngine::over(TestGraph::sample_with(TestFuncHooks::default()));
 
         let bogus = NodeId::from_u128(0xdead_beef);
-        let err = eg.execute_nodes([bogus]).await.unwrap_err();
-        assert!(matches!(err, Error::NodeSeedNotFound { node_id } if node_id == bogus));
+        let error = e
+            .run(RunSeeds::nodes(vec![bogus]))
+            .await
+            .expect_err("a stale seed fails the run");
+
+        assert!(matches!(error, Error::NodeSeedNotFound { node_id } if node_id == bogus));
     }
 }
 
@@ -3488,166 +3051,94 @@ mod argument_values {
 
     #[test]
     fn nonexistent_node_returns_none() {
-        let graph = test_graph();
-        let library = test_func_lib(TestFuncHooks::default());
-        let mut execution_graph = ExecutionEngine::default();
+        let e = TestEngine::over(TestGraph::sample());
 
-        execution_graph.update(&graph, &library).unwrap();
-
-        let nonexistent_id: NodeId = "00000000-0000-0000-0000-000000000000".into();
-        assert!(
-            execution_graph
-                .get_argument_values(&nonexistent_id)
-                .is_none()
-        );
+        let nonexistent: NodeId = "00000000-0000-0000-0000-000000000000".into();
+        assert!(e.engine.get_argument_values(&nonexistent).is_none());
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn with_const_bindings() -> TestResult {
-        let library = test_func_lib(TestFuncHooks {
-            get_a: Arc::new(move || unreachable!()),
-            get_b: Arc::new(move || unreachable!()),
-            print: Arc::new(move |_| {}),
+        let mut e = TestEngine::over(TestGraph::sample_with(TestFuncHooks {
+            get_a: Arc::new(|| unreachable!("const-fed: the sources are never reached")),
+            get_b: Arc::new(|| unreachable!("const-fed: the sources are never reached")),
+            print: Arc::new(|_| {}),
+        }));
+        e.edit(|g| {
+            g.constant("mult", 0, 3i64);
+            g.constant("mult", 1, 5i64);
         });
 
-        let mut graph = test_graph();
-        let mut execution_graph = ExecutionEngine::default();
+        e.run_sinks().await;
 
-        bind(&mut graph, "mult", 0, Binding::Const(StaticValue::Int(3)));
-        bind(&mut graph, "mult", 1, Binding::Const(StaticValue::Int(5)));
-        let mult_id = graph.find_by_name("mult").unwrap().id;
-
-        execution_graph.update(&graph, &library).unwrap();
-        execution_graph.execute_sinks().await?;
-
-        let values = execution_graph.get_argument_values(&mult_id).unwrap();
-
-        assert_eq!(values.inputs.len(), 2);
-        assert!(matches!(
-            values.inputs[0],
-            Some(DynamicValue::Static(StaticValue::Int(3)))
-        ));
-        assert!(matches!(
-            values.inputs[1],
-            Some(DynamicValue::Static(StaticValue::Int(5)))
-        ));
-
-        // 3 * 5 = 15
-        assert_eq!(values.outputs.len(), 1);
-        assert!(matches!(
-            values.outputs[0],
-            DynamicValue::Static(StaticValue::Int(15))
-        ));
-
+        assert_eq!(e.input_i64("mult", 0), Some(3));
+        assert_eq!(e.input_i64("mult", 1), Some(5));
+        assert_eq!(e.outputs("mult").len(), 1);
+        assert_eq!(e.output_i64("mult", 0), Some(15), "3 * 5");
         Ok(())
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn with_bound_outputs() -> TestResult {
-        let library = test_func_lib(TestFuncHooks {
-            get_a: Arc::new(move || Ok(2)),
-            get_b: Arc::new(move || 5),
-            print: Arc::new(move |_| {}),
-        });
+        let mut e = TestEngine::over(TestGraph::sample_with(TestFuncHooks {
+            get_a: Arc::new(|| Ok(2)),
+            get_b: Arc::new(|| 5),
+            print: Arc::new(|_| {}),
+        }));
 
-        let graph = test_graph();
-        let mut execution_graph = ExecutionEngine::default();
+        e.run_sinks().await;
 
-        execution_graph.update(&graph, &library).unwrap();
-        execution_graph.execute_sinks().await?;
-
-        // sum: inputs are get_a(2.0) and get_b(5.0), output is 2+5=7
-        let sum_id = graph.find_by_name("sum").unwrap().id;
-        let values = execution_graph.get_argument_values(&sum_id).unwrap();
-
-        assert_eq!(values.inputs.len(), 2);
-        assert!(
-            matches!(values.inputs[0], Some(DynamicValue::Static(StaticValue::Float(v))) if v.approximately_eq(2.0))
-        );
-        assert!(
-            matches!(values.inputs[1], Some(DynamicValue::Static(StaticValue::Float(v))) if v.approximately_eq(5.0))
-        );
-        assert_eq!(values.outputs.len(), 1);
+        // The two sources emit `Float` (their lambdas cast through `f64`), which
+        // the `Int`-declared consumers read through the scalar coercion class —
+        // so the variant is worth pinning, not just the number.
         assert!(matches!(
-            values.outputs[0],
-            DynamicValue::Static(StaticValue::Int(7))
+            e.inputs("sum")[0],
+            Some(DynamicValue::Static(StaticValue::Float(v))) if v.approximately_eq(2.0)
         ));
-
-        // mult: inputs are sum(7) and get_b(5.0), output is 7*5=35
-        let mult_id = graph.find_by_name("mult").unwrap().id;
-        let values = execution_graph.get_argument_values(&mult_id).unwrap();
-
-        assert_eq!(values.inputs.len(), 2);
         assert!(matches!(
-            values.inputs[0],
-            Some(DynamicValue::Static(StaticValue::Int(7)))
+            e.inputs("sum")[1],
+            Some(DynamicValue::Static(StaticValue::Float(v))) if v.approximately_eq(5.0)
         ));
-        assert!(
-            matches!(values.inputs[1], Some(DynamicValue::Static(StaticValue::Float(v))) if v.approximately_eq(5.0))
-        );
-        assert_eq!(values.outputs.len(), 1);
+        assert_eq!(e.output_i64("sum", 0), Some(7), "2 + 5");
+
+        assert_eq!(e.input_i64("mult", 0), Some(7));
         assert!(matches!(
-            values.outputs[0],
-            DynamicValue::Static(StaticValue::Int(35))
+            e.inputs("mult")[1],
+            Some(DynamicValue::Static(StaticValue::Float(v))) if v.approximately_eq(5.0)
         ));
+        assert_eq!(e.output_i64("mult", 0), Some(35), "7 * 5");
 
-        // print: input is mult(35), no outputs
-        let print_id = graph.find_by_name("Print").unwrap().id;
-        let values = execution_graph.get_argument_values(&print_id).unwrap();
-
-        assert_eq!(values.inputs.len(), 1);
-        assert!(matches!(
-            values.inputs[0],
-            Some(DynamicValue::Static(StaticValue::Int(35)))
-        ));
-        assert!(values.outputs.is_empty());
-
+        assert_eq!(e.input_i64("Print", 0), Some(35));
+        assert!(e.outputs("Print").is_empty());
         Ok(())
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn with_none_binding() -> TestResult {
-        let mut library = test_func_lib(default_hooks());
-
-        let mut graph = test_graph();
-        let mut execution_graph = ExecutionEngine::default();
-
-        mutate_func(&mut library, "mult", |func| {
-            func.inputs[1].required = false;
+        let mut e = TestEngine::over(TestGraph::sample());
+        e.edit(|g| {
+            g.edit_func("mult", |func| func.inputs[1].required = false);
+            g.unbind("mult", 1);
         });
-        bind(&mut graph, "mult", 1, None);
-        let mult_id = graph.find_by_name("mult").unwrap().id;
 
-        execution_graph.update(&graph, &library).unwrap();
-        execution_graph.execute_sinks().await?;
+        e.run_sinks().await;
 
-        let values = execution_graph.get_argument_values(&mult_id).unwrap();
-
-        assert_eq!(values.inputs.len(), 2);
-        assert!(values.inputs[0].is_some());
-        // None binding returns None value
-        assert!(values.inputs[1].is_none());
-
+        let inputs = e.inputs("mult");
+        assert_eq!(inputs.len(), 2);
+        assert!(inputs[0].is_some());
+        assert!(inputs[1].is_none(), "an unbound port delivers no value");
         Ok(())
     }
 
     #[test]
     fn before_execution() -> TestResult {
-        let graph = test_graph();
-        let library = test_func_lib(TestFuncHooks::default());
-        let mut execution_graph = ExecutionEngine::default();
+        let e = TestEngine::over(TestGraph::sample());
 
-        execution_graph.update(&graph, &library).unwrap();
-
-        let sum_id = graph.find_by_name("sum").unwrap().id;
-        let values = execution_graph.get_argument_values(&sum_id).unwrap();
-
-        // Before execution: all inputs are None (no upstream values yet)
-        assert_eq!(values.inputs.len(), 2);
-        assert!(values.inputs[0].is_none());
-        assert!(values.inputs[1].is_none());
-        assert!(values.outputs.is_empty());
-
+        // Before execution: all inputs are None (no upstream values yet).
+        let inputs = e.inputs("sum");
+        assert_eq!(inputs.len(), 2);
+        assert!(inputs.iter().all(Option::is_none));
+        assert!(e.outputs("sum").is_empty());
         Ok(())
     }
 }
@@ -3762,385 +3253,187 @@ mod events {
     use super::*;
     use crate::async_lambda;
     use crate::graph::func::event::EventLambda;
-    use crate::graph::func::{Func, FuncInput, FuncOutput};
-    use crate::graph::identity::EventPort;
+    use crate::graph::node::special::SpecialNode;
 
-    const EMIT_FUNC: FuncId = FuncId::from_u128(0xE311);
-    const RECV_FUNC: FuncId = FuncId::from_u128(0xE322);
+    /// A counter every fixture body below increments, so "how often did this
+    /// run" is one shared shape.
+    type Calls = Arc<Mutex<i64>>;
 
-    #[derive(Debug)]
-    struct EventFixture {
-        library: Library,
-        graph: Graph,
-        emit_id: NodeId,
-        emit_calls: Arc<Mutex<i64>>,
-        recv_values: Arc<Mutex<Vec<i64>>>,
-    }
-
-    // `emit`: impure source with output 0 and one event ("tick") subscribed to
-    // by `recv`. `recv`: impure sink bound to emit's output. Neither is a
-    // sink, so only event-driven execution reaches them.
-    fn build() -> EventFixture {
-        let emit_calls = Arc::new(Mutex::new(0));
-        let recv_values = Arc::new(Mutex::new(Vec::new()));
-        let emit_calls_l = emit_calls.clone();
-        let recv_values_l = recv_values.clone();
-
-        // Both funcs are Impure non-sinks (the `Func::new` default).
-        let mut library = Library::default();
-        library.add(
-            Func::new(EMIT_FUNC, "emit")
-                .output(FuncOutput::new("out", DataType::Int))
+    /// An impure source carrying a `tick` event and emitting its own call count.
+    fn emitter(calls: Calls) -> impl FnOnce(NodeSpec) -> NodeSpec {
+        move |n: NodeSpec| {
+            n.output(DataType::Int)
                 .event("tick", EventLambda::new(|_state| Box::pin(async move {})))
                 .lambda(async_lambda!(
-                    move |Invocation { outputs, .. }| { calls = emit_calls_l.clone() } => {
+                    move |Invocation { outputs, .. }| { calls = calls.clone() } => {
                         let mut n = calls.lock().await;
                         *n += 1;
-                        outputs[0] = DynamicValue::Static(StaticValue::Int(*n));
+                        outputs[0] = StaticValue::Int(*n).into();
                         Ok(())
                     }
-                )),
-        );
-        library.add(
-            Func::new(RECV_FUNC, "recv")
-                .input(FuncInput::required("in", DataType::Int))
-                .lambda(async_lambda!(
-                    move |Invocation { inputs, .. }| { values = recv_values_l.clone() } => {
-                        values.lock().await.push(inputs[0].as_i64().unwrap());
-                        Ok(())
-                    }
-                )),
-        );
-
-        let emit_id = NodeId::unique();
-        let recv_id = NodeId::unique();
-
-        let mut graph = Graph::default();
-        graph.insert(emit_id, node(&library, "emit"));
-        graph.insert(recv_id, node(&library, "recv"));
-        graph.subscribe(emit_id, 0, recv_id);
-        graph.set_input_binding(InputPort::new(recv_id, 0), Binding::bind(emit_id, 0));
-        graph.validate().unwrap();
-
-        EventFixture {
-            library,
-            graph,
-            emit_id,
-            emit_calls,
-            recv_values,
+                ))
         }
+    }
+
+    /// `emit`: impure source with an output and one `tick` event, subscribed to
+    /// by `recv`. `recv`: impure consumer bound to emit's output. Neither is a
+    /// sink, so only event-driven execution reaches them.
+    fn event_pair() -> (TestGraph, Calls) {
+        let calls = Arc::new(Mutex::new(0));
+        let mut g = TestGraph::new();
+        g.add("emit", emitter(calls.clone()));
+        g.add("recv", |n| n.records());
+        g.subscribe("emit", 0, "recv");
+        g.wire("emit", 0, "recv", 0);
+        (g, calls)
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn execute_events_runs_subscribers() -> TestResult {
-        let f = build();
-        let mut eg = ExecutionEngine::default();
-        eg.update(&f.graph, &f.library).unwrap();
+        let (g, calls) = event_pair();
+        let mut e = TestEngine::over(g);
 
-        let stats = eg
-            .execute_events([EventPort {
-                node_id: f.emit_id,
-                event_idx: 0,
-            }])
-            .await?;
+        let tick = e.event("emit", 0);
+        let run = e.run_events([tick]).await;
 
-        // recv subscribes to emit's tick → recv is the root, emit runs as its dep
+        // recv subscribes to emit's tick, so recv is the root and emit runs as
+        // its dependency.
+        assert_eq!(run.ran(), ["emit", "recv"]);
+        assert_eq!(*calls.lock().await, 1);
+        assert_eq!(run.logs(), ["1"]);
         assert_eq!(
-            execution_node_names_in_order(&eg, &f.graph, &f.library),
-            ["emit", "recv"]
+            run.triggered_events,
+            [tick],
+            "the triggering event is echoed back"
         );
-        assert_eq!(*f.emit_calls.lock().await, 1);
-        assert_eq!(*f.recv_values.lock().await, vec![1]);
-
-        // The triggering event is echoed back in the stats
-        assert_eq!(stats.triggered_events.len(), 1);
-        assert_eq!(stats.triggered_events[0].node_id, f.emit_id);
-        assert_eq!(stats.triggered_events[0].event_idx, 0);
-
         Ok(())
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn event_sources_collects_nodes_with_subscribers() -> TestResult {
-        let f = build();
-        let mut eg = ExecutionEngine::default();
-        eg.update(&f.graph, &f.library).unwrap();
+        let (g, calls) = event_pair();
+        let mut e = TestEngine::over(g);
 
-        // sinks=false, event_sources=true → emit (owns a subscribed event)
-        // becomes a root; recv is downstream of emit, not a root.
-        let mut outcome = ExecutionOutcome::default();
-        eg.execute(
-            RunSeeds {
-                event_sources: true,
-                ..Default::default()
-            },
-            &mut DiscardedReports,
-            CancelToken::never(),
-            &mut outcome,
-        )
-        .await?;
+        // sinks=false, event_sources=true → emit (which owns a subscribed
+        // event) becomes a root; recv is downstream of emit, not a root.
+        let run = e.run_event_sources().await;
 
-        assert_eq!(
-            execution_node_names_in_order(&eg, &f.graph, &f.library),
-            ["emit"]
-        );
-        assert_eq!(*f.emit_calls.lock().await, 1);
-        assert!(f.recv_values.lock().await.is_empty());
-
+        assert_eq!(run.ran(), ["emit"]);
+        assert_eq!(*calls.lock().await, 1);
+        assert!(run.logs().is_empty(), "recv is not reached");
         Ok(())
     }
 
+    /// The bootstrap run re-initializes its event sources every time, bypassing
+    /// the cache — the shared state its event lambdas read has to be freshly
+    /// built even when the node's digest is unchanged.
     #[tokio::test(flavor = "multi_thread")]
     async fn bootstrap_prepares_events_and_bypasses_source_cache() -> TestResult {
-        let mut f = build();
-        mutate_func(&mut f.library, "emit", |func| {
-            func.behavior = FuncBehavior::Pure;
-        });
-        f.graph.find_mut(f.emit_id).unwrap().cache = CacheMode::Ram;
-        let mut eg = ExecutionEngine::default();
-        eg.update(&f.graph, &f.library).unwrap();
+        let (mut g, calls) = event_pair();
+        g.edit_func("emit", |func| func.behavior = FuncBehavior::Pure);
+        g.cache("emit", CacheMode::Ram);
+        let mut e = TestEngine::over(g);
 
-        let mut outcome = ExecutionOutcome::default();
-        for expected_calls in [1, 2] {
-            eg.execute(
-                RunSeeds {
-                    event_sources: true,
-                    ..Default::default()
-                },
-                &mut DiscardedReports,
-                CancelToken::never(),
-                &mut outcome,
-            )
-            .await?;
-
-            assert_eq!(*f.emit_calls.lock().await, expected_calls);
-            assert_eq!(outcome.event_triggers.len(), 1);
-            assert_eq!(outcome.event_triggers[0].event.node_id, f.emit_id);
-            assert_eq!(outcome.event_triggers[0].event.event_idx, 0);
+        let tick = e.event("emit", 0);
+        for expected in [1, 2] {
+            let run = e.run_event_sources().await;
+            assert_eq!(
+                *calls.lock().await,
+                expected,
+                "a pure, cached source re-runs"
+            );
+            assert_eq!(run.armed_events, [tick]);
         }
-
         Ok(())
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn bootstrap_prepares_no_events_without_subscribers() -> TestResult {
-        let mut f = build();
+        let (mut g, _) = event_pair();
         // Drop the subscriber but keep emit reachable by making it a sink.
-        let emit_id = f.emit_id;
-        let recv_id = f.graph.find_by_name("recv").unwrap().id;
-        f.graph.unsubscribe(emit_id, 0, recv_id);
-        mutate_func(&mut f.library, "emit", |func| {
-            func.sink = true;
-        });
+        g.unsubscribe("emit", 0, "recv");
+        g.edit_func("emit", |func| func.sink = true);
+        let mut e = TestEngine::over(g);
 
-        let mut eg = ExecutionEngine::default();
-        eg.update(&f.graph, &f.library).unwrap();
-        let mut outcome = ExecutionOutcome::default();
-        eg.execute(
-            RunSeeds::sinks(),
-            &mut DiscardedReports,
-            CancelToken::never(),
-            &mut outcome,
-        )
-        .await?;
+        let run = e.run_sinks().await;
 
-        // emit ran, but its event has no subscribers → no live triggers.
-        assert!(outcome.ran(f.emit_id));
-        assert!(outcome.event_triggers.is_empty());
-
+        assert!(run.ran().contains(&"emit"));
+        assert!(
+            run.armed_events.is_empty(),
+            "emit's event has no subscribers, so nothing is armed"
+        );
         Ok(())
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn failed_event_source_prepares_no_trigger() -> TestResult {
-        let mut f = build();
-        mutate_func(&mut f.library, "emit", |func| {
+        let (mut g, _) = event_pair();
+        g.edit_func("emit", |func| {
             func.lambda = async_lambda!(|_| {
                 Err(InvokeError::external(std::io::Error::other(
                     "bootstrap failed",
                 )))
-            });
+            })
         });
-        let mut eg = ExecutionEngine::default();
-        eg.update(&f.graph, &f.library).unwrap();
+        let mut e = TestEngine::over(g);
 
-        let mut outcome = ExecutionOutcome::default();
-        eg.execute(
-            RunSeeds {
-                event_sources: true,
-                ..Default::default()
-            },
-            &mut DiscardedReports,
-            CancelToken::never(),
-            &mut outcome,
-        )
-        .await?;
+        let run = e.run_event_sources().await;
 
-        assert_eq!(outcome.errored_nodes().collect::<Vec<_>>(), [f.emit_id]);
-        assert!(outcome.event_triggers.is_empty());
-
+        assert_eq!(run.errored(), ["emit"]);
+        assert!(run.armed_events.is_empty());
         Ok(())
     }
-
-    const SOURCE_FUNC: FuncId = FuncId::from_u128(0xE401);
-    const SINK_FUNC: FuncId = FuncId::from_u128(0xE402);
 
     /// A `RunSinks` special node subscribed to an event fires no cone of its own
-    /// (it has no ports) — instead firing that event runs *every* sink, exactly as
-    /// pressing "Run" would. Here `emit`'s tick reaches only the `RunSinks` sink, yet
-    /// the independent `source → sink` cone runs, while `emit` (not a sink,
-    /// not in that cone) does not.
+    /// (it has no ports) — instead firing that event runs *every* sink, exactly
+    /// as pressing "Run" would. Here `emit`'s tick reaches only the `RunSinks`
+    /// sink, yet the independent `source → sink` cone runs, while `emit`
+    /// (neither a sink nor in that cone) does not.
     #[tokio::test(flavor = "multi_thread")]
     async fn run_sinks_node_runs_all_sinks_on_event() -> TestResult {
-        use crate::graph::node::NodeKind;
-        use crate::graph::node::special::SpecialNode;
-
         let source_calls = Arc::new(Mutex::new(0i64));
-        let sink_values = Arc::new(Mutex::new(Vec::<i64>::new()));
-        let source_l = source_calls.clone();
-        let sink_l = sink_values.clone();
 
-        let mut library = Library::default();
-        // An impure emitter carrying a "tick" event but no data wiring of its own.
-        library.add(
-            Func::new(EMIT_FUNC, "emit")
-                .output(FuncOutput::new("out", DataType::Int))
-                .event("tick", EventLambda::new(|_state| Box::pin(async move {})))
-                .lambda(async_lambda!(move |Invocation { outputs, .. }| {
-                    outputs[0] = DynamicValue::Static(StaticValue::Int(0));
-                    Ok(())
-                })),
-        );
-        // An impure source feeding the sink — proves the sink's whole cone runs.
-        library.add(
-            Func::new(SOURCE_FUNC, "source")
-                .output(FuncOutput::new("out", DataType::Int))
-                .lambda(async_lambda!(
-                    move |Invocation { outputs, .. }| { calls = source_l.clone() } => {
-                        let mut n = calls.lock().await;
-                        *n += 1;
-                        outputs[0] = DynamicValue::Static(StaticValue::Int(*n));
-                        Ok(())
-                    }
-                )),
-        );
-        // An impure sink recording each value it receives.
-        library.add(
-            Func::new(SINK_FUNC, "sink")
-                .sink()
-                .input(FuncInput::required("in", DataType::Int))
-                .lambda(async_lambda!(
-                    move |Invocation { inputs, .. }| { values = sink_l.clone() } => {
-                        values.lock().await.push(inputs[0].as_i64().unwrap());
-                        Ok(())
-                    }
-                )),
-        );
-
-        let emit_id = NodeId::unique();
-        let source_id = NodeId::unique();
-        let sink_id = NodeId::unique();
-        let trigger_id = NodeId::unique();
-
-        let mut graph = Graph::default();
-        graph.insert(emit_id, node(&library, "emit"));
-        graph.insert(source_id, node(&library, "source"));
-        graph.insert(sink_id, node(&library, "sink"));
-        // The RunSinks sink — no ports; subscribes to emit's tick.
-        let mut trigger = Node::new(NodeKind::Special(SpecialNode::RunSinks));
-        trigger.name = "trigger".to_string();
-        graph.insert(trigger_id, trigger);
-
+        let mut g = TestGraph::new();
+        g.add("emit", emitter(Arc::new(Mutex::new(0))));
+        g.add("source", emitter(source_calls.clone()));
+        g.add("sink", |n| n.records());
+        g.add_special("trigger", SpecialNode::RunSinks);
         // The sink's cone (source → sink) is wholly independent of emit.
-        graph.set_input_binding(InputPort::new(sink_id, 0), Binding::bind(source_id, 0));
-        graph.subscribe(emit_id, 0, trigger_id);
-        graph.validate_with(&library).unwrap();
+        g.wire("source", 0, "sink", 0);
+        g.subscribe("emit", 0, "trigger");
 
-        let mut eg = ExecutionEngine::default();
-        eg.update(&graph, &library)?;
+        let mut e = TestEngine::over(g);
+        let run = e.run_events([e.event("emit", 0)]).await;
 
-        let stats = eg
-            .execute_events([EventPort {
-                node_id: emit_id,
-                event_idx: 0,
-            }])
-            .await?;
-
-        // The sink cone ran; emit (neither a sink nor in that cone) did not.
-        let ran = execution_node_names_in_order(&eg, &graph, &library);
-        assert!(ran.contains(&"source".to_string()), "ran = {ran:?}");
-        assert!(ran.contains(&"sink".to_string()), "ran = {ran:?}");
-        assert!(!ran.contains(&"emit".to_string()), "ran = {ran:?}");
+        // The sink cone ran; emit is neither a sink nor in that cone, so it did
+        // not. The `RunSinks` node is itself a sink, so it runs its no-op lambda
+        // alongside the promoted sinks rather than seeding a cone of its own.
+        // The stack pops the later-declared root first, so the portless
+        // trigger settles before the cone it promoted.
+        assert_eq!(run.ran(), ["trigger", "source", "sink"]);
         assert_eq!(*source_calls.lock().await, 1);
-        assert_eq!(*sink_values.lock().await, vec![1]);
-        assert_eq!(stats.triggered_events.len(), 1);
-
-        // The RunSinks sink is itself a sink, so it runs (its no-op lambda)
-        // alongside the promoted sinks — never seeded as a plain subscriber cone.
-        assert!(ran.contains(&"trigger".to_string()), "ran = {ran:?}");
-        assert!(
-            eg.schedule
-                .process_order
-                .contains(&eg.compiled().node(trigger_id).unwrap()),
-            "the RunSinks sink runs as a sink"
-        );
-
+        assert_eq!(run.logs(), ["1"]);
+        assert_eq!(run.triggered_events.len(), 1);
         Ok(())
     }
 
-    /// Without the `RunSinks` sink, firing `emit`'s tick reaches no subscriber, so
-    /// the same sink cone is left untouched — isolating the sink as the cause.
+    /// Without the `RunSinks` sink, firing `emit`'s tick reaches no subscriber,
+    /// so the same sink cone is left untouched — isolating the sink as the cause.
     #[tokio::test(flavor = "multi_thread")]
     async fn event_without_run_sinks_sink_runs_nothing() -> TestResult {
         let source_calls = Arc::new(Mutex::new(0i64));
-        let source_l = source_calls.clone();
 
-        let mut library = Library::default();
-        library.add(
-            Func::new(EMIT_FUNC, "emit")
-                .event("tick", EventLambda::new(|_state| Box::pin(async move {})))
-                .lambda(async_lambda!(move |_| { Ok(()) })),
-        );
-        library.add(
-            Func::new(SOURCE_FUNC, "source")
-                .output(FuncOutput::new("out", DataType::Int))
-                .lambda(async_lambda!(
-                    move |Invocation { outputs, .. }| { calls = source_l.clone() } => {
-                        *calls.lock().await += 1;
-                        outputs[0] = DynamicValue::Static(StaticValue::Int(1));
-                        Ok(())
-                    }
-                )),
-        );
-        library.add(
-            Func::new(SINK_FUNC, "sink")
-                .sink()
-                .input(FuncInput::required("in", DataType::Int))
-                .lambda(async_lambda!(move |_| { Ok(()) })),
-        );
+        let mut g = TestGraph::new();
+        g.add("emit", emitter(Arc::new(Mutex::new(0))));
+        g.add("source", emitter(source_calls.clone()));
+        g.add("sink", |n| n.sink().input(DataType::Int));
+        g.wire("source", 0, "sink", 0);
 
-        let emit_id = NodeId::unique();
-        let source_id = NodeId::unique();
-        let sink_id = NodeId::unique();
+        let mut e = TestEngine::over(g);
+        let run = e.run_events([e.event("emit", 0)]).await;
 
-        let mut graph = Graph::default();
-        graph.insert(emit_id, node(&library, "emit"));
-        graph.insert(source_id, node(&library, "source"));
-        graph.insert(sink_id, node(&library, "sink"));
-        graph.set_input_binding(InputPort::new(sink_id, 0), Binding::bind(source_id, 0));
-        graph.validate_with(&library).unwrap();
-
-        let mut eg = ExecutionEngine::default();
-        eg.update(&graph, &library)?;
-        eg.execute_events([EventPort {
-            node_id: emit_id,
-            event_idx: 0,
-        }])
-        .await?;
-
-        assert!(execution_node_names_in_order(&eg, &graph, &library).is_empty());
+        assert!(run.ran().is_empty());
         assert_eq!(*source_calls.lock().await, 0);
-
         Ok(())
     }
 }
@@ -4149,79 +3442,59 @@ mod output_demand {
     use super::*;
     use crate::async_lambda;
     use crate::graph::func::lambda::OutputDemand;
-    use crate::graph::func::{Func, FuncInput, FuncOutput};
-
-    const SPLIT_FUNC: FuncId = FuncId::from_u128(0x5911);
-    const SINK_FUNC: FuncId = FuncId::from_u128(0x5922);
 
     #[tokio::test(flavor = "multi_thread")]
     async fn unused_output_marked_skip() -> TestResult {
-        let seen_demand: Arc<Mutex<Vec<OutputDemand>>> = Arc::new(Mutex::new(Vec::new()));
-        let seen_demand_l = seen_demand.clone();
+        let seen: Arc<Mutex<Vec<OutputDemand>>> = Arc::new(Mutex::new(Vec::new()));
 
-        let mut library = Library::default();
-        library.add(
-            Func::new(SPLIT_FUNC, "split")
-                .output(FuncOutput::new("a", DataType::Int))
-                .output(FuncOutput::new("b", DataType::Int))
+        let mut g = TestGraph::new();
+        g.add("split", |n| {
+            let seen = seen.clone();
+            n.output(DataType::Int)
+                .output(DataType::Int)
                 .lambda(async_lambda!(
-                    move |Invocation { demand, outputs, .. }| { seen = seen_demand_l.clone() } => {
+                    move |Invocation { demand, outputs, .. }| { seen = seen.clone() } => {
                         seen.lock().await.extend_from_slice(demand);
-                        outputs[0] = DynamicValue::Static(StaticValue::Int(1));
-                        outputs[1] = DynamicValue::Static(StaticValue::Int(2));
+                        outputs[0] = StaticValue::Int(1).into();
+                        outputs[1] = StaticValue::Int(2).into();
                         Ok(())
                     }
-                )),
-        );
-        library.add(
-            Func::new(SINK_FUNC, "sink")
-                .sink()
-                .input(FuncInput::required("in", DataType::Int))
-                .lambda(async_lambda!(|_| { Ok(()) })),
-        );
-
-        let split_id = NodeId::unique();
-        let sink_id = NodeId::unique();
-        let mut graph = Graph::default();
-        graph.insert(split_id, node(&library, "split"));
-        graph.insert(sink_id, node(&library, "sink"));
+                ))
+        });
+        g.add("sink", |n| n.sink().input(DataType::Int));
         // Consume only output 0; output 1 has no consumer.
-        graph.set_input_binding(InputPort::new(sink_id, 0), Binding::bind(split_id, 0));
-        graph.validate().unwrap();
+        g.wire("split", 0, "sink", 0);
 
-        let mut eg = ExecutionEngine::default();
-        eg.update(&graph, &library).unwrap();
-        eg.execute_sinks().await?;
+        let mut e = TestEngine::over(g);
+        e.run_sinks().await;
 
-        let split = execution_node_id(&eg, &graph, &library, "split").unwrap();
-        assert_eq!(eg.node_output_demand(split)[0], OutputDemand::Produce);
-        assert_eq!(eg.node_output_demand(split)[1], OutputDemand::Skip);
-        assert_eq!(eg.node_output_readers(split), &[1, 0]);
-
-        // The lambda observed Produce for the consumed output, Skip for the other.
         assert_eq!(
-            *seen_demand.lock().await,
-            vec![OutputDemand::Produce, OutputDemand::Skip]
+            e.demand("split"),
+            [OutputDemand::Produce, OutputDemand::Skip]
         );
-
+        assert_eq!(e.readers("split"), [1, 0]);
+        assert_eq!(
+            *seen.lock().await,
+            [OutputDemand::Produce, OutputDemand::Skip],
+            "the lambda saw the same demand the sweep resolved"
+        );
         Ok(())
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn cached_node_reruns_when_a_previously_skipped_output_becomes_needed() -> TestResult {
-        let split_calls = Arc::new(Mutex::new(0));
+        let calls = Arc::new(Mutex::new(0));
         let received = Arc::new(Mutex::new(Vec::new()));
-        let split_calls_l = split_calls.clone();
-        let received_l = received.clone();
 
-        let mut library = Library::default();
-        library.add(
-            Func::new(SPLIT_FUNC, "split")
-                .pure()
-                .output(FuncOutput::new("a", DataType::Int))
-                .output(FuncOutput::new("b", DataType::Int))
+        let mut g = TestGraph::new();
+        g.add("split", |n| {
+            let calls = calls.clone();
+            n.pure()
+                .cache(CacheMode::Ram)
+                .output(DataType::Int)
+                .output(DataType::Int)
                 .lambda(async_lambda!(
-                    move |Invocation { demand, outputs, .. }| { calls = split_calls_l.clone() } => {
+                    move |Invocation { demand, outputs, .. }| { calls = calls.clone() } => {
                         *calls.lock().await += 1;
                         if !demand[0].is_skip() {
                             outputs[0] = StaticValue::Int(10).into();
@@ -4231,43 +3504,36 @@ mod output_demand {
                         }
                         Ok(())
                     }
-                )),
-        );
-        library.add(
-            Func::new(SINK_FUNC, "sink")
-                .sink()
-                .input(FuncInput::required("in", DataType::Int))
-                .lambda(async_lambda!(
-                    move |Invocation { inputs, .. }| { received = received_l.clone() } => {
+                ))
+        });
+        let sink = |received: Arc<Mutex<Vec<i64>>>| {
+            move |n: crate::testing::graph::NodeSpec| {
+                n.sink().input(DataType::Int).lambda(async_lambda!(
+                    move |Invocation { inputs, .. }| { received = received.clone() } => {
                         received.lock().await.push(inputs[0].as_i64().unwrap());
                         Ok(())
                     }
-                )),
-        );
+                ))
+            }
+        };
+        g.add("sink_a", sink(received.clone()));
+        g.wire("split", 0, "sink_a", 0);
 
-        let split_id = NodeId::unique();
-        let sink_a_id = NodeId::unique();
-        let sink_b_id = NodeId::unique();
-        let mut split = node(&library, "split");
-        split.cache = CacheMode::Ram;
-        let mut graph = Graph::default();
-        graph.insert(split_id, split);
-        graph.insert(sink_a_id, node(&library, "sink"));
-        graph.set_input_binding(InputPort::new(sink_a_id, 0), Binding::bind(split_id, 0));
+        let mut e = TestEngine::over(g);
+        e.run_sinks().await;
 
-        let mut engine = ExecutionEngine::default();
-        engine.update(&graph, &library)?;
-        engine.execute_sinks().await?;
+        // A second consumer arrives on the output the first run skipped: the
+        // cached value does not cover the new demand, so `split` must re-run.
+        e.edit(|g| {
+            g.add("sink_b", sink(received.clone()));
+            g.wire("split", 1, "sink_b", 0);
+        });
+        e.run_sinks().await;
 
-        graph.insert(sink_b_id, node(&library, "sink"));
-        graph.set_input_binding(InputPort::new(sink_b_id, 0), Binding::bind(split_id, 1));
-        engine.update(&graph, &library)?;
-        engine.execute_sinks().await?;
-
-        assert_eq!(*split_calls.lock().await, 2);
+        assert_eq!(*calls.lock().await, 2);
         let mut received = received.lock().await.clone();
         received.sort_unstable();
-        assert_eq!(received, vec![10, 10, 20]);
+        assert_eq!(received, [10, 10, 20]);
         Ok(())
     }
 }
@@ -4275,230 +3541,152 @@ mod output_demand {
 mod topology {
     use super::*;
     use ::common::FloatExt;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    /// A source emitting `value` and counting how often it was asked.
+    fn counted_source(value: i64, calls: Arc<AtomicUsize>) -> impl FnOnce(NodeSpec) -> NodeSpec {
+        move |n: NodeSpec| {
+            n.pure()
+                .cache(CacheMode::Ram)
+                .output(DataType::Int)
+                .compute(move |_| {
+                    calls.fetch_add(1, Ordering::Relaxed);
+                    value.into()
+                })
+        }
+    }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn removing_node_rebuilds_id_keyed_edges() -> TestResult {
-        let printed = Arc::new(Mutex::new(0i64));
-        let printed_l = printed.clone();
-        let library = test_func_lib(TestFuncHooks {
+        let mut e = TestEngine::over(TestGraph::sample_with(TestFuncHooks {
             get_a: Arc::new(|| Ok(2)),
             get_b: Arc::new(|| 5),
-            print: Arc::new(move |v| *printed_l.try_lock().unwrap() = v),
+            print: Arc::new(|_| {}),
+        }));
+        assert_eq!(e.engine.compiled().e_nodes.len(), 5);
+
+        // Remove get_b — a middle node feeding sum[1] and mult[1], both optional.
+        // The surviving id-keyed bindings must remain valid across the remap.
+        e.edit(|g| {
+            g.remove("get_b");
         });
+        assert_eq!(e.engine.compiled().e_nodes.len(), 4);
 
-        let mut graph = test_graph();
-        let mut eg = ExecutionEngine::default();
-        eg.update(&graph, &library).unwrap();
-        assert_eq!(eg.compiled().e_nodes.len(), 5);
+        e.run_sinks().await;
 
-        // Remove get_b — a middle node feeding sum[1] and mult[1] (both optional).
-        // The surviving direct-ID bindings remain valid.
-        let get_b_id = graph.find_by_name("get_b").unwrap().id;
-        graph.detach_node(get_b_id);
-        graph.validate().unwrap();
-
-        eg.update(&graph, &library).unwrap();
-        assert_eq!(eg.compiled().e_nodes.len(), 4);
-        assert!(execution_node_id(&eg, &graph, &library, "get_b").is_none());
-
-        eg.execute_sinks().await?;
-
-        // sum = get_a(2) + none(0) = 2; mult = sum(2) * none(default 1) = 2
-        assert_eq!(*printed.lock().await, 2);
-
-        // sum's Bind to get_a still resolves after the index remap.
-        let sum_id = graph.find_by_name("sum").unwrap().id;
-        let vals = eg.get_argument_values(&sum_id).unwrap();
-        assert!(
-            matches!(vals.inputs[0], Some(DynamicValue::Static(StaticValue::Float(v))) if v.approximately_eq(2.0))
-        );
-        assert!(vals.inputs[1].is_none());
+        // sum = get_a(2) + none(0) = 2; mult = sum(2) * none(default 1) = 2.
         assert!(matches!(
-            vals.outputs[0],
-            DynamicValue::Static(StaticValue::Int(2))
+            e.inputs("sum")[0],
+            Some(DynamicValue::Static(StaticValue::Float(v))) if v.approximately_eq(2.0)
         ));
-
+        assert!(e.inputs("sum")[1].is_none());
+        assert_eq!(e.output_i64("sum", 0), Some(2));
+        assert_eq!(e.output_i64("mult", 0), Some(2));
         Ok(())
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn empty_graph_executes_cleanly() -> TestResult {
-        let graph = Graph::default();
-        let library = Library::default();
+        let mut e = TestEngine::over(TestGraph::new());
+        assert!(e.engine.is_empty());
 
-        let mut eg = ExecutionEngine::default();
-        eg.update(&graph, &library).unwrap();
+        let run = e.run_sinks().await;
 
-        assert!(eg.is_empty());
-
-        let stats = eg.execute_sinks().await?;
-        assert!(stats.ran_node_count == 0);
-        assert!(stats.errored_nodes().count() == 0);
-        assert!(stats.missing_input_nodes().count() == 0);
-
+        assert_eq!(run.ran_node_count, 0);
+        assert!(run.ran().is_empty());
+        assert!(run.errored().is_empty());
+        assert!(run.missing_inputs().is_empty());
         Ok(())
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn multiple_sinks_all_execute() -> TestResult {
-        let printed = Arc::new(Mutex::new(Vec::<i64>::new()));
-        let printed_l = printed.clone();
-        let library = test_func_lib(TestFuncHooks {
-            get_a: Arc::new(|| Ok(2)),
-            get_b: Arc::new(|| 5),
-            print: Arc::new(move |v| printed_l.try_lock().unwrap().push(v)),
-        });
+        // Two independent chains: a → print_a, b → print_b.
+        let mut g = TestGraph::new();
+        g.add("a", |n| n.returns(2i64));
+        g.add("b", |n| n.returns(5i64));
+        g.add("print_a", |n| n.records());
+        g.instance("print_b", "print_a");
+        g.wire("a", 0, "print_a", 0);
+        g.wire("b", 0, "print_b", 0);
 
-        // Two independent sink chains: get_a→print1, get_b→print2.
-        let get_a_id = NodeId::unique();
-        let get_b_id = NodeId::unique();
-        let print1_id = NodeId::unique();
-        let print2_id = NodeId::unique();
+        let mut e = TestEngine::over(g);
+        let run = e.run_sinks().await;
 
-        let mut graph = Graph::default();
-        graph.insert(get_a_id, node(&library, "get_a"));
-        graph.insert(get_b_id, node(&library, "get_b"));
-        graph.insert(print1_id, node(&library, "Print"));
-        graph.insert(print2_id, node(&library, "Print"));
-        graph.set_input_binding(InputPort::new(print1_id, 0), Binding::bind(get_a_id, 0));
-        graph.set_input_binding(InputPort::new(print2_id, 0), Binding::bind(get_b_id, 0));
-        graph.validate().unwrap();
-
-        let mut eg = ExecutionEngine::default();
-        eg.update(&graph, &library).unwrap();
-        let stats = eg.execute_sinks().await?;
-
-        // Both sinks plus both sources execute exactly once.
-        assert_eq!(stats.ran_node_count, 4);
-        let mut got = printed.lock().await.clone();
-        got.sort();
-        assert_eq!(got, vec![2, 5]);
-
+        assert_eq!(run.ran_node_count, 4, "both sinks and both sources");
+        let mut logged = run.logs();
+        logged.sort_unstable();
+        assert_eq!(logged, ["2", "5"]);
         Ok(())
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn cached_output_survives_node_removal() -> TestResult {
         // Both sources are Pure, so their outputs are cached across runs.
-        // Removing one chain must preserve the survivor's ID-keyed slot.
-        let calls_a = Arc::new(Mutex::new(0));
-        let calls_a_l = calls_a.clone();
-        let calls_b = Arc::new(Mutex::new(0));
-        let calls_b_l = calls_b.clone();
-        let library = test_func_lib(TestFuncHooks {
-            get_a: Arc::new(move || {
-                *calls_a_l.try_lock().unwrap() += 1;
-                Ok(2)
-            }),
-            get_b: Arc::new(move || {
-                *calls_b_l.try_lock().unwrap() += 1;
-                5
-            }),
-            print: Arc::new(|_| {}),
+        // Removing one chain must preserve the survivor's id-keyed slot.
+        let (calls_a, calls_b) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicUsize::new(0)));
+        let mut g = TestGraph::new();
+        g.add("a", counted_source(2, calls_a.clone()));
+        g.add("b", counted_source(5, calls_b.clone()));
+        g.add("print_a", |n| n.records());
+        g.instance("print_b", "print_a");
+        g.wire("a", 0, "print_a", 0);
+        g.wire("b", 0, "print_b", 0);
+
+        let mut e = TestEngine::over(g);
+        e.run_sinks().await;
+        assert_eq!(calls_a.load(Ordering::Relaxed), 1);
+        assert_eq!(calls_b.load(Ordering::Relaxed), 1);
+
+        e.edit(|g| {
+            g.remove("b");
+            g.remove("print_b");
         });
-
-        let get_b_id = NodeId::unique();
-        let print_b_id = NodeId::unique();
-        let get_a_id = NodeId::unique();
-        let print_a_id = NodeId::unique();
-
-        let mut graph = Graph::default();
-        graph.insert(get_b_id, node(&library, "get_b"));
-        graph.insert(print_b_id, node(&library, "Print"));
-        graph.insert(get_a_id, node(&library, "get_a"));
-        graph.insert(print_a_id, node(&library, "Print"));
-        graph.set_input_binding(InputPort::new(print_b_id, 0), Binding::bind(get_b_id, 0));
-        graph.set_input_binding(InputPort::new(print_a_id, 0), Binding::bind(get_a_id, 0));
-        graph.validate().unwrap();
-
-        let mut eg = ExecutionEngine::default();
-        eg.update(&graph, &library).unwrap();
-        eg.execute_sinks().await?;
-        assert_eq!(*calls_a.lock().await, 1);
-        assert_eq!(*calls_b.lock().await, 1);
-
-        let survivor_id = get_a_id;
-        let expected_value = 2.0;
-        let survivor_calls = &calls_a;
-
-        graph.detach_node(get_b_id);
-        graph.detach_node(print_b_id);
-        graph.validate().unwrap();
-
-        eg.update(&graph, &library).unwrap();
-
-        let stats = eg.execute_sinks().await?;
+        let run = e.run_sinks().await;
 
         assert_eq!(
-            *survivor_calls.lock().await,
+            calls_a.load(Ordering::Relaxed),
             1,
-            "survivor recomputed after unrelated node removal"
+            "the survivor must not recompute after an unrelated node's removal"
         );
-        assert!(stats.cached(survivor_id));
-        let vals = eg.get_argument_values(&survivor_id).unwrap();
-        assert!(
-            matches!(vals.outputs[0], DynamicValue::Static(StaticValue::Float(v)) if v.approximately_eq(expected_value))
-        );
-
+        assert!(run.cached().contains(&"a"));
+        assert_eq!(e.output_i64("a", 0), Some(2));
         Ok(())
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn repeated_structural_churn_stays_correct() -> TestResult {
-        // Grow→shrink the graph repeatedly on ONE ExecutionEngine, re-executing
-        // each step. Stresses the packed pools and ID-keyed node-map rebuild across many
+        // Grow→shrink the graph repeatedly on ONE engine, re-executing each
+        // step. Stresses the packed pools and the id-keyed rebuild across many
         // updates (pools grow 2→4 then shrink 4→2 each round).
-        let printed = Arc::new(Mutex::new(Vec::<i64>::new()));
-        let p = printed.clone();
-        let library = test_func_lib(TestFuncHooks {
-            get_a: Arc::new(|| Ok(2)),
-            get_b: Arc::new(|| 5),
-            print: Arc::new(move |v| p.try_lock().unwrap().push(v)),
-        });
+        let mut g = TestGraph::new();
+        g.add("a", |n| n.returns(2i64));
+        g.add("print_a", |n| n.records());
+        g.wire("a", 0, "print_a", 0);
 
-        let get_a_id = NodeId::unique();
-        let print_a_id = NodeId::unique();
-        let mut graph = Graph::default();
-        graph.insert(get_a_id, node(&library, "get_a"));
-        graph.insert(print_a_id, node(&library, "Print"));
-        graph.set_input_binding(InputPort::new(print_a_id, 0), Binding::bind(get_a_id, 0));
-        graph.validate().unwrap();
-
-        let mut eg = ExecutionEngine::default();
-        eg.update(&graph, &library).unwrap();
-        eg.execute_sinks().await?;
+        let mut e = TestEngine::over(g);
+        e.run_sinks().await;
 
         for round in 0..3 {
-            // Add a get_b → print chain.
-            let gb = NodeId::unique();
-            let pb = NodeId::unique();
-            graph.insert(gb, node(&library, "get_b"));
-            graph.insert(pb, node(&library, "Print"));
-            graph.set_input_binding(InputPort::new(pb, 0), Binding::bind(gb, 0));
-            graph.validate().unwrap();
-            eg.update(&graph, &library).unwrap();
-            assert_eq!(eg.compiled().e_nodes.len(), 4, "round {round} grow");
-            printed.lock().await.clear();
-            eg.execute_sinks().await?;
-            let mut got = printed.lock().await.clone();
-            got.sort();
-            assert_eq!(got, vec![2, 5], "round {round} grow values");
+            e.edit(|g| {
+                g.add("b", |n| n.returns(5i64));
+                g.instance("print_b", "print_a");
+                g.wire("b", 0, "print_b", 0);
+            });
+            assert_eq!(e.engine.compiled().e_nodes.len(), 4, "round {round} grow");
+            let run = e.run_sinks().await;
+            let mut logged = run.logs();
+            logged.sort_unstable();
+            assert_eq!(logged, ["2", "5"], "round {round} grow values");
 
-            // Remove it again.
-            graph.detach_node(gb);
-            graph.detach_node(pb);
-            graph.validate().unwrap();
-            eg.update(&graph, &library).unwrap();
-            assert_eq!(eg.compiled().e_nodes.len(), 2, "round {round} shrink");
-            printed.lock().await.clear();
-            eg.execute_sinks().await?;
-            assert_eq!(
-                *printed.lock().await,
-                vec![2],
-                "round {round} shrink values"
-            );
+            e.edit(|g| {
+                g.remove("b");
+                g.remove("print_b");
+            });
+            assert_eq!(e.engine.compiled().e_nodes.len(), 2, "round {round} shrink");
+            let run = e.run_sinks().await;
+            assert_eq!(run.logs(), ["2"], "round {round} shrink values");
         }
-
         Ok(())
     }
 }
@@ -4528,13 +3716,10 @@ mod mid_run_release {
 
     use super::*;
     use crate::async_lambda;
-    use crate::graph::func::{Func, FuncInput, FuncOutput};
-    use crate::library::{Library, TypeEntry};
+    use crate::library::TypeEntry;
     use crate::{CustomValue, TypeId};
 
     const TRACKED_TYPE: &str = "7266406a-8083-4e46-b661-de4308bcec96";
-    const RELAY_FUNC: &str = "2b16e013-11fb-49cf-89b1-a9cb54c06be3";
-    const SINK_FUNC: &str = "ec454492-e235-4b49-b3ef-ae0b2b85bf5f";
 
     /// Live/peak count of [`Tracked`] values resident at once during a run.
     #[derive(Debug, Default)]
@@ -4587,69 +3772,59 @@ mod mid_run_release {
         }
     }
 
-    /// A `relay` (pure, custom→custom, emits a fresh `Tracked`) + a `sink` that
-    /// consumes one, over the shared `tracker`.
-    fn relay_library(tracker: Arc<StdMutex<LiveTracker>>) -> Library {
-        let mut library = Library::default();
-        library.register_type(TRACKED_TYPE, TypeEntry::custom("Tracked"));
-        let tracker_l = tracker.clone();
-        library.add(
-            Func::new(RELAY_FUNC, "relay")
-                .category("Test")
-                .pure()
-                .input(FuncInput::optional(
-                    "in",
-                    DataType::Custom(TRACKED_TYPE.into()),
-                ))
-                .output(FuncOutput::new(
-                    "out",
-                    DataType::Custom(TRACKED_TYPE.into()),
-                ))
+    fn tracked() -> DataType {
+        DataType::Custom(TRACKED_TYPE.into())
+    }
+
+    /// A pure custom→custom node emitting a fresh [`Tracked`] on every call.
+    fn relay(
+        tracker: Arc<StdMutex<LiveTracker>>,
+        mode: CacheMode,
+    ) -> impl FnOnce(NodeSpec) -> NodeSpec {
+        move |n: NodeSpec| {
+            n.pure()
+                .cache(mode)
+                .optional(tracked())
+                .output(tracked())
                 .lambda(async_lambda!(
-                    move |Invocation { outputs, .. }| { tracker = tracker_l.clone() } => {
+                    move |Invocation { outputs, .. }| { tracker = tracker.clone() } => {
                         outputs[0] = DynamicValue::Custom(Arc::new(Tracked::new(tracker.clone())));
                         Ok(())
                     }
-                )),
-        );
-        library.add(
-            Func::new(SINK_FUNC, "sink")
-                .category("Test")
-                .sink()
-                .input(FuncInput::required(
-                    "in",
-                    DataType::Custom(TRACKED_TYPE.into()),
                 ))
-                .lambda(async_lambda!(|_| { Ok(()) })),
-        );
-        library
+        }
     }
 
-    /// Run a 4-stage relay chain into a sink with every relay set to `relay_mode`, and return
-    /// the peak number of tracked outputs resident at once.
+    /// A graph with `TRACKED_TYPE` registered, ready for the nodes above.
+    fn tracked_graph() -> TestGraph {
+        let mut g = TestGraph::new();
+        g.library
+            .register_type(TRACKED_TYPE, TypeEntry::custom("Tracked"));
+        g
+    }
+
+    /// Run a 4-stage relay chain into a sink with every relay set to
+    /// `relay_mode`, and return the peak number of tracked outputs resident at
+    /// once.
     async fn chain_peak(relay_mode: CacheMode) -> usize {
         let tracker = Arc::new(StdMutex::new(LiveTracker::default()));
-        let library = relay_library(tracker.clone());
-
-        let relays: Vec<NodeId> = (0..4).map(|_| NodeId::unique()).collect();
-        let sink_id = NodeId::unique();
-        let mut graph = Graph::default();
-        for &id in &relays {
-            let mut n = node(&library, "relay");
-            n.cache = relay_mode;
-            graph.insert(id, n);
+        let mut g = tracked_graph();
+        for stage in 0..4 {
+            g.add(&format!("relay{stage}"), relay(tracker.clone(), relay_mode));
         }
-        graph.insert(sink_id, node(&library, "sink"));
-        for pair in relays.windows(2) {
-            graph.set_input_binding(InputPort::new(pair[1], 0), Binding::bind(pair[0], 0));
+        g.add("sink", |n| n.sink().input(tracked()));
+        for stage in 1..4 {
+            g.wire(
+                &format!("relay{}", stage - 1),
+                0,
+                &format!("relay{stage}"),
+                0,
+            );
         }
-        graph.set_input_binding(InputPort::new(sink_id, 0), Binding::bind(relays[3], 0));
-        graph.validate().unwrap();
+        g.wire("relay3", 0, "sink", 0);
 
-        let mut engine = ExecutionEngine::default();
-        engine.update(&graph, &library).unwrap();
-        engine.execute_sinks().await.unwrap();
-
+        let mut e = TestEngine::over(g);
+        e.run_sinks().await;
         tracker.lock().unwrap().peak
     }
 
@@ -4671,38 +3846,6 @@ mod mid_run_release {
         );
     }
 
-    const PROBE_FUNC: &str = "a19f251a-465c-4a05-b9e3-f4a4c2389733";
-
-    /// [`relay_library`] plus a `probe` sink that takes its input value out of the
-    /// invoke buffer and records whether it was uniquely owned (`into_custom` succeeded)
-    /// — the observable contract of the executor's move-on-last-use.
-    fn probe_library(
-        tracker: Arc<StdMutex<LiveTracker>>,
-        unique_reads: Arc<StdMutex<Vec<bool>>>,
-    ) -> Library {
-        let mut library = relay_library(tracker);
-        library.add(
-            Func::new(PROBE_FUNC, "probe")
-                .category("Test")
-                .sink()
-                .input(FuncInput::required(
-                    "in",
-                    DataType::Custom(TRACKED_TYPE.into()),
-                ))
-                .lambda(async_lambda!(
-                    move |Invocation { inputs, .. }| { reads = unique_reads.clone() } => {
-                        let value = std::mem::take(&mut inputs[0]);
-                        reads
-                            .lock()
-                            .unwrap()
-                            .push(value.into_custom::<Tracked>().is_ok());
-                        Ok(())
-                    }
-                )),
-        );
-        library
-    }
-
     /// Each probe's ownership observation, in invocation order, plus what stayed live.
     #[derive(Debug)]
     struct ProbeRun {
@@ -4711,30 +3854,39 @@ mod mid_run_release {
     }
 
     /// Run `relay → n_probes × probe` with the relay in `relay_mode`.
-    async fn probe_run(relay_mode: CacheMode, n_probes: usize) -> ProbeRun {
+    ///
+    /// A probe takes its input value out of the invoke buffer and records
+    /// whether it was uniquely owned (`into_custom` succeeded) — the observable
+    /// contract of the executor's move-on-last-use.
+    async fn probe_run(relay_mode: CacheMode, probes: usize) -> ProbeRun {
         let tracker = Arc::new(StdMutex::new(LiveTracker::default()));
-        let unique_reads = Arc::new(StdMutex::new(Vec::new()));
-        let library = probe_library(tracker.clone(), unique_reads.clone());
+        let reads = Arc::new(StdMutex::new(Vec::new()));
 
-        let relay_id = NodeId::unique();
-        let mut graph = Graph::default();
-        let mut relay = node(&library, "relay");
-        relay.cache = relay_mode;
-        graph.insert(relay_id, relay);
-        for _ in 0..n_probes {
-            let probe_id = NodeId::unique();
-            graph.insert(probe_id, node(&library, "probe"));
-            graph.set_input_binding(InputPort::new(probe_id, 0), Binding::bind(relay_id, 0));
+        let mut g = tracked_graph();
+        g.add("relay", relay(tracker.clone(), relay_mode));
+        for probe in 0..probes {
+            let reads = reads.clone();
+            g.add(&format!("probe{probe}"), move |n: NodeSpec| {
+                n.sink().input(tracked()).lambda(async_lambda!(
+                    move |Invocation { inputs, .. }| { reads = reads.clone() } => {
+                        let value = std::mem::take(&mut inputs[0]);
+                        reads.lock().unwrap().push(value.into_custom::<Tracked>().is_ok());
+                        Ok(())
+                    }
+                ))
+            });
+            g.wire("relay", 0, &format!("probe{probe}"), 0);
         }
-        graph.validate().unwrap();
 
-        let mut engine = ExecutionEngine::default();
-        engine.update(&graph, &library).unwrap();
-        engine.execute_sinks().await.unwrap();
-
+        // The engine stays bound: dropping it drops its cache, which would
+        // release exactly the retained value `live_after` is here to observe.
+        let mut e = TestEngine::over(g);
+        e.run_sinks().await;
+        let unique_reads = reads.lock().unwrap().clone();
+        let live_after = tracker.lock().unwrap().current;
         ProbeRun {
-            unique_reads: unique_reads.lock().unwrap().clone(),
-            live_after: tracker.lock().unwrap().current,
+            unique_reads,
+            live_after,
         }
     }
 
@@ -4772,286 +3924,201 @@ mod mid_run_release {
 
 mod compile_regressions {
     use super::*;
-    use crate::async_lambda;
-    use crate::graph::Graph;
-    use crate::graph::func::{Func, FuncInput, FuncOutput};
-
+    use crate::graph::output_types::OutputTypes;
     use crate::{FsPathConfig, FsPathMode};
-    use std::sync::Mutex as StdMutex;
 
     /// The output pool is range-addressed: when a consumer precedes its producer
-    /// in insertion order, lowering's `set_input` claims the producer's *index* early
-    /// while output ranges are assigned in emit order — an index-order sequential fill
+    /// in insertion order, lowering claims the producer's *index* early while
+    /// output ranges are assigned in emit order — an index-order sequential fill
     /// would hand the two producers each other's types.
     #[test]
     fn output_metadata_follows_ranges_when_consumer_precedes_producer() {
-        let library: Library = [
-            Func::new("7ab6d0c9-8c35-4364-b2e3-62ab1ba5a888", "make_int")
-                .category("Test")
-                .pure()
-                .output(FuncOutput::new("V", DataType::Int))
-                .lambda(async_lambda!(|Invocation { outputs, .. }| {
-                    outputs[0] = StaticValue::Int(1).into();
-                    Ok(())
-                })),
-            Func::new("cbac49ae-bbb0-48d7-a586-086815a487a6", "make_str")
-                .category("Test")
-                .pure()
-                .output(FuncOutput::new("V", DataType::String))
-                .lambda(async_lambda!(|Invocation { outputs, .. }| {
-                    outputs[0] = StaticValue::String("s".into()).into();
-                    Ok(())
-                })),
-            Func::new("001fccec-5732-41c6-b448-379d4cf40dc3", "sink")
-                .category("Test")
-                .sink()
-                .input(FuncInput::required("In", DataType::Any))
-                .lambda(async_lambda!(|_| { Ok(()) })),
-        ]
-        .into();
+        // Declared consumer-first, then the *other* producer, then the one it
+        // binds — so `make_str` claims its index before its range is assigned.
+        let mut g = TestGraph::new();
+        g.add("sink", |n| n.sink().input(DataType::Any));
+        g.add("make_int", |n| n.returns(1i64));
+        g.add("make_str", |n| n.returns("s"));
+        g.wire("make_str", 0, "sink", 0);
 
-        // Insertion order: the consumer first, then the *other* producer, then the
-        // producer it binds — so `make_str` claims lowered index 1 while its output range
-        // is assigned last.
-        let mut graph = Graph::default();
-        graph.add(node(&library, "sink"));
-        graph.add(node(&library, "make_int"));
-        graph.add(node(&library, "make_str"));
-        let sink_id = graph.find_by_name("sink").unwrap().id;
-        let str_id = graph.find_by_name("make_str").unwrap().id;
-        graph.set_input_binding(InputPort::new(sink_id, 0), Binding::bind(str_id, 0));
+        let e = TestEngine::over(g);
+        let program = e.engine.compiled();
 
-        let mut engine = ExecutionEngine::default();
-        engine.update(&graph, &library).unwrap();
-
-        let make_int = execution_node_id(&engine, &graph, &library, "make_int").unwrap();
-        let make_str = execution_node_id(&engine, &graph, &library, "make_str").unwrap();
-        assert_eq!(
-            engine.compiled().outputs[engine.compiled().by_id(make_int).outputs][0],
-            DataType::Int,
-            "make_int reads its own type, not its neighbor's"
-        );
-        assert_eq!(
-            engine.compiled().outputs[engine.compiled().by_id(make_str).outputs][0],
-            DataType::String,
-            "make_str reads its own type, not its neighbor's"
-        );
+        for (name, expected) in [("make_int", DataType::Int), ("make_str", DataType::String)] {
+            assert_eq!(
+                program.outputs[program.by_id(e.id(name)).outputs][0],
+                expected,
+                "{name} reads its own type, not its neighbour's"
+            );
+        }
     }
 
     /// The authoring-side type at one output port, for the tests that compare
     /// what the editor would paint against what the compiled program carries.
-    fn authoring_output_type(graph: &Graph, library: &Library, port: OutputPort) -> DataType {
+    fn authoring_output_type(g: &TestGraph, name: &str) -> DataType {
         let mut types = OutputTypes::default();
-        types.update(graph, library);
-        types.get(port).cloned().unwrap_or_default()
+        types.update(&g.graph, &g.library);
+        types
+            .get(OutputPort::new(g.id(name), 0))
+            .cloned()
+            .unwrap_or_default()
     }
 
     #[test]
     fn compiled_output_types_match_authoring_resolution() {
-        let fixed = testing::with_stub_lambda(
-            Func::new(FuncId::unique(), "fixed").output(FuncOutput::new("Value", DataType::Int)),
-        );
-        let passthrough = testing::with_stub_lambda(
-            Func::new(FuncId::unique(), "passthrough")
-                .input(FuncInput::required("Value", DataType::Any))
-                .wildcard_output("Value", 0),
-        );
         let path_type = DataType::FsPath(Arc::new(FsPathConfig::new(FsPathMode::ExistingFile)));
-        let typed_path = testing::with_stub_lambda(
-            Func::new(FuncId::unique(), "typed_path")
-                .input(FuncInput::required("Value", path_type.clone()))
-                .wildcard_output("Value", 0),
-        );
-        let mut library = Library::default();
-        library.add(fixed.clone());
-        library.add(passthrough.clone());
-        library.add(typed_path.clone());
+        let passthrough = |n: NodeSpec| n.input(DataType::Any).wildcard(0);
 
-        let mut graph = Graph::default();
-        let fixed_id = graph.add_func_node(&fixed);
-        let mut long_chain_id = fixed_id;
-        for _ in 0..70 {
-            let next = graph.add_func_node(&passthrough);
-            graph.set_input_binding(InputPort::new(next, 0), Binding::bind(long_chain_id, 0));
-            long_chain_id = next;
+        let mut g = TestGraph::new();
+        g.add("fixed", |n| n.output(DataType::Int));
+        // A reroute run long enough that a recursive resolver would blow the
+        // stack: the walk must be iterative on both sides.
+        let mut previous = "fixed".to_string();
+        for hop in 0..70 {
+            let name = format!("hop{hop}");
+            g.add(&name, passthrough);
+            g.wire(&previous, 0, &name, 0);
+            previous = name;
         }
+        g.add("scalar_const", passthrough);
+        g.constant("scalar_const", 0, true);
+        g.add("ambiguous_const", passthrough);
+        g.constant("ambiguous_const", 0, StaticValue::Enum("A".into()));
+        g.add("typed_const", |n| n.input(path_type.clone()).wildcard(0));
+        g.constant("typed_const", 0, StaticValue::FsPath("input.fit".into()));
+        g.add("unbound", passthrough);
 
-        let scalar_const_id = graph.add_func_node(&passthrough);
-        graph.set_input_binding(
-            InputPort::new(scalar_const_id, 0),
-            Binding::Const(StaticValue::Bool(true)),
-        );
-        let ambiguous_const_id = graph.add_func_node(&passthrough);
-        graph.set_input_binding(
-            InputPort::new(ambiguous_const_id, 0),
-            Binding::Const(StaticValue::Enum("A".into())),
-        );
-        let typed_const_id = graph.add_func_node(&typed_path);
-        graph.set_input_binding(
-            InputPort::new(typed_const_id, 0),
-            Binding::Const(StaticValue::FsPath("input.fit".into())),
-        );
-        let unbound_id = graph.add_func_node(&passthrough);
-
-        let mut engine = ExecutionEngine::default();
-        engine.update(&graph, &library).unwrap();
-        let program = &engine.compiled();
         let cases = [
-            (fixed_id, DataType::Int),
-            (long_chain_id, DataType::Int),
-            (scalar_const_id, DataType::Bool),
-            (ambiguous_const_id, DataType::Any),
-            (typed_const_id, path_type),
-            (unbound_id, DataType::Any),
+            ("fixed", DataType::Int),
+            ("hop69", DataType::Int),
+            ("scalar_const", DataType::Bool),
+            ("ambiguous_const", DataType::Any),
+            ("typed_const", path_type),
+            ("unbound", DataType::Any),
         ];
-        for (node_id, expected) in cases {
+        let authored: Vec<DataType> = cases
+            .iter()
+            .map(|(name, _)| authoring_output_type(&g, name))
+            .collect();
+
+        let e = TestEngine::over(g);
+        let program = e.engine.compiled();
+        for ((name, expected), authored) in cases.iter().zip(authored) {
+            assert_eq!(&authored, expected, "authoring resolution for {name}");
             assert_eq!(
-                authoring_output_type(&graph, &library, OutputPort::new(node_id, 0)),
+                &program.outputs[program.by_id(e.id(name)).outputs][0],
                 expected,
-                "authoring resolution for {node_id}"
-            );
-            assert_eq!(
-                program.outputs[program.by_id(node_id).outputs][0],
-                expected,
-                "compiled resolution for {node_id}"
+                "compiled resolution for {name}"
             );
         }
     }
 
     #[test]
     fn authoring_and_compiled_output_resolution_break_cycles_as_any() {
-        let passthrough = testing::with_stub_lambda(
-            Func::new(FuncId::unique(), "passthrough")
-                .input(FuncInput::required("Value", DataType::Any))
-                .wildcard_output("Value", 0),
-        );
-        let mut library = Library::default();
-        library.add(passthrough.clone());
-        let mut graph = Graph::default();
-        let node_id = graph.add_func_node(&passthrough);
-        graph.set_input_binding(InputPort::new(node_id, 0), Binding::bind(node_id, 0));
-        assert_eq!(
-            authoring_output_type(&graph, &library, OutputPort::new(node_id, 0)),
-            DataType::Any
-        );
+        let mut g = TestGraph::new();
+        g.add("passthrough", |n| n.input(DataType::Any).wildcard(0));
+        g.wire("passthrough", 0, "passthrough", 0);
+        assert_eq!(authoring_output_type(&g, "passthrough"), DataType::Any);
 
         // The same wire, compiled: the walk resolves the wildcard through the
         // binding it just interned, and the cycle closes on `Any` there too.
-        let compiled = Compiler::default().compile(&graph, &library).unwrap();
-        let e_node = compiled.by_id(node_id);
-        assert_eq!(compiled.outputs[e_node.outputs][0], DataType::Any);
+        let e = TestEngine::over(g);
+        let program = e.engine.compiled();
+        assert_eq!(
+            program.outputs[program.by_id(e.id("passthrough")).outputs][0],
+            DataType::Any
+        );
     }
 
-    /// An `Update` may carry an evolved library: changed inputs and lambdas must
+    /// An install may carry an evolved library: changed inputs and lambdas must
     /// replace their prior compiled forms under the reused lowered node.
     #[tokio::test]
     async fn update_with_evolved_func_recompiles_and_runs_new_lambda() {
-        let printed = Arc::new(StdMutex::new(Vec::<i64>::new()));
-        let make_lib = |result: i64, extra_input: bool| {
-            let mut lib = test_func_lib(TestFuncHooks {
-                print: {
-                    let p = printed.clone();
-                    Arc::new(move |v| p.lock().unwrap().push(v))
-                },
-                ..default_hooks()
-            });
-            let mut generator = Func::new("3cb06374-2a86-45e1-91db-fec227538a97", "generate")
-                .category("Test")
-                .pure()
-                .output(FuncOutput::new("V", DataType::Int))
-                .lambda(async_lambda!(move |Invocation { outputs, .. }| {
-                    outputs[0] = StaticValue::Int(result).into();
+        use crate::async_lambda;
+
+        let mut g = TestGraph::new();
+        g.add("generate", |n| n.pure().output(DataType::Int).returns(1i64));
+        g.add("print", |n| n.records());
+        g.wire("generate", 0, "print", 0);
+
+        let mut e = TestEngine::over(g);
+        let run = e.run_sinks().await;
+        assert_eq!(run.logs(), ["1"], "v1 lambda ran");
+
+        // v2: the same declaration gains an input and a different body.
+        e.edit(|g| {
+            g.edit_func("generate", |func| {
+                func.inputs.push(crate::graph::func::FuncInput::optional(
+                    "Extra",
+                    DataType::Int,
+                ));
+                func.lambda = async_lambda!(move |Invocation { outputs, .. }| {
+                    outputs[0] = StaticValue::Int(2).into();
                     Ok(())
-                }));
-            if extra_input {
-                generator = generator.input(FuncInput::optional("Extra", DataType::Int));
-            }
-            lib.add(generator);
-            lib
-        };
+                });
+            })
+        });
 
-        let lib_v1 = make_lib(1, false);
-        let mut graph = Graph::default();
-        graph.add(node(&lib_v1, "generate"));
-        graph.add(node(&lib_v1, "Print"));
-        let generate_id = graph.find_by_name("generate").unwrap().id;
-        let print_id = graph.find_by_name("Print").unwrap().id;
-        graph.set_input_binding(InputPort::new(print_id, 0), Binding::bind(generate_id, 0));
-
-        let mut engine = ExecutionEngine::default();
-        engine.update(&graph, &lib_v1).unwrap();
-        engine.execute_sinks().await.unwrap();
-        assert_eq!(*printed.lock().unwrap(), vec![1], "v1 lambda ran");
-
-        // v2: same FuncId, one more input, different lambda.
-        let lib_v2 = make_lib(2, true);
-        engine.update(&graph, &lib_v2).unwrap();
         assert_eq!(
-            engine.node_inputs(generate_id).len(),
+            e.engine.node_inputs(e.id("generate")).len(),
             1,
             "the reused lowered node picked up the grown input list"
         );
-        engine.execute_sinks().await.unwrap();
+        let run = e.run_sinks().await;
         assert_eq!(
-            *printed.lock().unwrap(),
-            vec![1, 2],
+            run.logs(),
+            ["2"],
             "the input-shape change re-keyed the digest and the new lambda ran"
         );
     }
 
-    /// A func that grows an **output** must not leave its previous,
-    /// shorter snapshot resident.
+    /// A func that grows an **output** must not leave its previous, shorter
+    /// snapshot resident.
     ///
-    /// The grown-input case above re-keys the digest, which is what
-    /// retires the old value. Growing an output need not: the id is
-    /// unchanged, so `reown` sees no owner change, and the
-    /// stale `produced_under` still equals the stale `current_digest`, so
-    /// the RAM-retention check keeps a snapshot that is now one value
-    /// short of the port list. Debug builds caught it at install as an
-    /// `OutputArity` invariant violation; release builds carried the
-    /// mismatched snapshot into the run.
+    /// The grown-input case above re-keys the digest, which is what retires the
+    /// old value. Growing an output need not: the id is unchanged, so `reown`
+    /// sees no owner change, and the stale `produced_under` still equals the
+    /// stale `current_digest`, so the RAM-retention check keeps a snapshot that
+    /// is now one value short of the port list. Debug builds caught it at
+    /// install as an `OutputArity` invariant violation; release builds carried
+    /// the mismatched snapshot into the run.
     #[tokio::test]
     async fn update_with_a_grown_output_list_retires_the_shorter_snapshot() {
-        let make_lib = |extra_output: bool| {
-            let mut lib = test_func_lib(default_hooks());
-            let mut generator = Func::new("1f4b4a0f-0d0e-4a6e-8f7f-2c9a4a0b6f21", "generate")
-                .category("Test")
-                .pure()
-                .output(FuncOutput::new("V", DataType::Int));
-            if extra_output {
-                generator = generator.output(FuncOutput::new("W", DataType::Int));
-            }
-            lib.add(
-                generator.lambda(async_lambda!(move |Invocation { outputs, .. }| {
-                    outputs[0] = StaticValue::Int(1).into();
-                    if outputs.len() > 1 {
-                        outputs[1] = StaticValue::Int(2).into();
-                    }
-                    Ok(())
-                })),
-            );
-            lib
+        use crate::async_lambda;
+
+        let body = || {
+            async_lambda!(move |Invocation { outputs, .. }| {
+                outputs[0] = StaticValue::Int(1).into();
+                if outputs.len() > 1 {
+                    outputs[1] = StaticValue::Int(2).into();
+                }
+                Ok(())
+            })
         };
 
-        let lib_v1 = make_lib(false);
-        let mut graph = Graph::default();
-        // RAM-cached, so the snapshot is *meant* to survive an install —
-        // which is what makes the stale one survive too.
-        let mut generator = node(&lib_v1, "generate");
-        generator.cache = CacheMode::Ram;
-        graph.add(generator);
-        graph.add(node(&lib_v1, "Print"));
-        let generate_id = graph.find_by_name("generate").unwrap().id;
-        let print_id = graph.find_by_name("Print").unwrap().id;
-        graph.set_input_binding(InputPort::new(print_id, 0), Binding::bind(generate_id, 0));
+        let mut g = TestGraph::new();
+        // RAM-cached, so the snapshot is *meant* to survive an install — which
+        // is what makes the stale one survive too.
+        g.add("generate", |n| {
+            n.pure()
+                .cache(CacheMode::Ram)
+                .output(DataType::Int)
+                .lambda(body())
+        });
+        g.add("print", |n| n.records());
+        g.wire("generate", 0, "print", 0);
 
-        let mut engine = ExecutionEngine::default();
-        engine.update(&graph, &lib_v1).unwrap();
-        engine.execute_sinks().await.unwrap();
+        let mut e = TestEngine::over(g);
+        e.run_sinks().await;
 
-        // v2: same FuncId, one more output. `update` installs
-        // it, which is where the retained snapshot had to be retired.
-        engine.update(&graph, &make_lib(true)).unwrap();
-        engine.execute_sinks().await.unwrap();
+        // The same declaration gains an output. Installing that is where the
+        // retained snapshot had to be retired.
+        e.edit(|g| {
+            g.edit_func("generate", |func| {
+                func.outputs
+                    .push(crate::graph::func::FuncOutput::new("W", DataType::Int));
+            })
+        });
+        e.run_sinks().await;
     }
 }

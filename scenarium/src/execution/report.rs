@@ -178,14 +178,6 @@ pub(crate) mod internals {
             matches!(self.status(node_id), Some(NodeExecutionStatus::Cached))
         }
 
-        /// Every node served from a cache rather than recomputed.
-        pub(crate) fn cached_nodes(&self) -> impl Iterator<Item = NodeId> + '_ {
-            self.nodes
-                .iter()
-                .filter(|node| matches!(node.status, Some(NodeExecutionStatus::Cached)))
-                .map(|node| node.node_id)
-        }
-
         /// This node's failure, or `None` when it did not fail.
         pub(crate) fn error(&self, node_id: NodeId) -> Option<&RunError> {
             match self.status(node_id)? {
@@ -219,14 +211,6 @@ pub(crate) mod internals {
                 .find(|node| node.node_id == node_id)
                 .map(|node| node.ram)
                 .unwrap_or_default()
-        }
-
-        /// Every node still holding RAM after the run.
-        pub(crate) fn ram_holding_nodes(&self) -> impl Iterator<Item = NodeId> + '_ {
-            self.nodes
-                .iter()
-                .filter(|node| node.ram.total() > 0)
-                .map(|node| node.node_id)
         }
     }
 

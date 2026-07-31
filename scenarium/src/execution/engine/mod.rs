@@ -303,42 +303,6 @@ pub(crate) mod internals {
             Ok(outcome)
         }
 
-        pub(crate) async fn execute_events<T: IntoIterator<Item = EventPort>>(
-            &mut self,
-            events: T,
-        ) -> Result<ExecutionOutcome> {
-            let mut outcome = ExecutionOutcome::default();
-            self.execute(
-                RunSeeds {
-                    events: events.into_iter().collect(),
-                    ..Default::default()
-                },
-                &mut DiscardedReports,
-                CancelToken::never(),
-                &mut outcome,
-            )
-            .await?;
-            Ok(outcome)
-        }
-
-        pub(crate) async fn execute_nodes<T: IntoIterator<Item = NodeId>>(
-            &mut self,
-            nodes: T,
-        ) -> Result<ExecutionOutcome> {
-            let mut outcome = ExecutionOutcome::default();
-            self.execute(
-                RunSeeds {
-                    node_ids: nodes.into_iter().collect(),
-                    ..Default::default()
-                },
-                &mut DiscardedReports,
-                CancelToken::never(),
-                &mut outcome,
-            )
-            .await?;
-            Ok(outcome)
-        }
-
         /// Prepare the structural plan and cache-aware resolved run without invoking lambdas.
         pub(crate) async fn prepare_execution(
             &mut self,
