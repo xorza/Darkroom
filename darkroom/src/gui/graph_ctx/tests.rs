@@ -5,6 +5,7 @@ use scenarium::{
     OutputTypes,
 };
 
+use crate::core::document::harness::wildcard_library;
 use crate::core::document::{Document, GraphView, PortKind};
 use crate::gui::graph_ctx::internals::GraphCtxFixture;
 use crate::gui::pane::graph::harness::*;

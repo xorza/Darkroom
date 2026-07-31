@@ -6,20 +6,12 @@ use scenarium::StaticValue;
 use scenarium::Subscription;
 use scenarium::{Binding, CacheMode, InputPort, Node, NodeId, NodeKind};
 
+use crate::core::document::harness::DocFixture;
 use crate::core::document::{Document, Viewport};
 use crate::core::edit::intent::apply::{apply_step, commit_intent, revert_step};
 use crate::core::edit::intent::duplicate::internals::duplicate_offset;
 use crate::core::edit::intent::duplicate::{build_duplicate_intent, build_duplicate_intent_for};
 use crate::core::edit::intent::types::{GraphIntent, NodeProperty, Refusal, UndoStep};
-
-/// Add a bare `Func`-kind node to `doc`'s root graph + main view at
-/// `pos`, returning its id.
-fn add_node_at(doc: &mut Document, pos: Vec2) -> NodeId {
-    let node = Node::new(NodeKind::Func(FuncId::unique()));
-    let id = doc.graph.add(node);
-    doc.main_view.item_placements.insert(id, pos);
-    id
-}
 
 #[test]
 fn dirties_document_splits_edits_from_navigation() {
@@ -213,9 +205,10 @@ fn invalid_viewports_are_dropped_before_mutation() {
 
 #[test]
 fn subscribe_unsubscribe_commit_and_undo() {
-    let mut doc = Document::default();
-    let emitter = add_node_at(&mut doc, Vec2::ZERO);
-    let subscriber = add_node_at(&mut doc, Vec2::new(100.0, 0.0));
+    let mut fixture = DocFixture::default();
+    let emitter = fixture.stub_at(Vec2::ZERO);
+    let subscriber = fixture.stub_at(Vec2::new(100.0, 0.0));
+    let mut doc = fixture.doc;
     let set_sub = |e, i, s, subscribe| GraphIntent::SetSubscription {
         emitter: e,
         event_idx: i,
@@ -262,10 +255,11 @@ fn duplicate_intent_drops_or_keeps_external_by_flag() {
     // a -> b (internal edge, both selected); c -> b (external, c not
     // selected). b also has a Const on input 1. Selecting {a, b} must
     // duplicate a' and b', keep a'->b' and the Const, drop c->b.
-    let mut doc = Document::default();
-    let a = add_node_at(&mut doc, Vec2::new(0.0, 0.0));
-    let b = add_node_at(&mut doc, Vec2::new(100.0, 0.0));
-    let c = add_node_at(&mut doc, Vec2::new(0.0, 100.0));
+    let mut fixture = DocFixture::default();
+    let a = fixture.stub_at(Vec2::new(0.0, 0.0));
+    let b = fixture.stub_at(Vec2::new(100.0, 0.0));
+    let c = fixture.stub_at(Vec2::new(0.0, 100.0));
+    let mut doc = fixture.doc;
     doc.graph
         .set_input_binding(InputPort::new(b, 0), Binding::bind(a, 0));
     doc.graph.set_input_binding(
@@ -364,15 +358,16 @@ fn duplicate_intent_drops_or_keeps_external_by_flag() {
 
 #[test]
 fn duplicate_intent_none_without_selection() {
-    let mut doc = Document::default();
-    add_node_at(&mut doc, Vec2::ZERO);
-    assert!(build_duplicate_intent(&doc).is_none());
+    let mut fixture = DocFixture::default();
+    fixture.stub_at(Vec2::ZERO);
+    assert!(build_duplicate_intent(&fixture.doc).is_none());
 }
 
 #[test]
 fn set_node_property_commits_and_reverts() {
-    let mut doc = Document::default();
-    let id = add_node_at(&mut doc, Vec2::ZERO);
+    let mut fixture = DocFixture::default();
+    let id = fixture.stub_at(Vec2::ZERO);
+    let mut doc = fixture.doc;
     // Fresh nodes default to no caching (None) and enabled.
     assert_eq!(doc.graph.find(id).unwrap().cache, CacheMode::None);
     assert!(!doc.graph.find(id).unwrap().disabled);
@@ -424,10 +419,11 @@ fn set_node_property_commits_and_reverts() {
 #[test]
 fn commit_intent_rejects_cycle_forming_bind() {
     // a → b (b's input 0 bound to a's output 0).
-    let mut doc = Document::default();
-    let a = add_node_at(&mut doc, Vec2::ZERO);
-    let b = add_node_at(&mut doc, Vec2::new(100.0, 0.0));
-    let c = add_node_at(&mut doc, Vec2::new(0.0, 100.0));
+    let mut fixture = DocFixture::default();
+    let a = fixture.stub_at(Vec2::ZERO);
+    let b = fixture.stub_at(Vec2::new(100.0, 0.0));
+    let c = fixture.stub_at(Vec2::new(0.0, 100.0));
+    let mut doc = fixture.doc;
     doc.graph
         .set_input_binding(InputPort::new(b, 0), Binding::bind(a, 0));
 
@@ -517,8 +513,9 @@ fn insertions_reusing_an_identity_are_refused_instead_of_panicking() {
     // `AddNode` trips the absence assert in `apply_graph`, `DuplicateNodes`
     // trips `Graph::insert`'s own duplicate-id panic. Refusing at the gate
     // is what turns a would-be process abort into a stated precondition.
-    let mut doc = Document::default();
-    let live = add_node_at(&mut doc, Vec2::ZERO);
+    let mut fixture = DocFixture::default();
+    let live = fixture.stub_at(Vec2::ZERO);
+    let mut doc = fixture.doc;
     let repeated = NodeId::unique();
 
     let cases = [
@@ -560,8 +557,9 @@ fn malformed_payloads_are_refused_before_they_can_invalidate_the_document() {
     // Every case here would apply cleanly and leave a document that
     // `Document::validate` rejects — which, because saving only validates
     // in debug builds, means a project that writes fine and won't reopen.
-    let mut doc = Document::default();
-    let live = add_node_at(&mut doc, Vec2::ZERO);
+    let mut fixture = DocFixture::default();
+    let live = fixture.stub_at(Vec2::ZERO);
+    let mut doc = fixture.doc;
     let ghost = NodeId::unique();
     let nan = Vec2::new(f32::NAN, 0.0);
 
@@ -627,8 +625,9 @@ fn stale_references_still_refuse_quietly() {
     // the gesture starting and the intent draining. Those stay silent;
     // turning them into reported failures would spam the status bar on
     // ordinary use.
-    let mut doc = Document::default();
-    let live = add_node_at(&mut doc, Vec2::ZERO);
+    let mut fixture = DocFixture::default();
+    let live = fixture.stub_at(Vec2::ZERO);
+    let mut doc = fixture.doc;
     let gone = NodeId::unique();
 
     let cases = [
@@ -699,8 +698,9 @@ fn selection_and_move_drop_members_whose_widget_is_gone() {
     // member can disappear mid-gesture. Recording it verbatim would leave
     // `selected` naming an item the view can't render, which is exactly
     // `GraphViewValidationError::MissingSelectedItem`.
-    let mut doc = Document::default();
-    let live = add_node_at(&mut doc, Vec2::ZERO);
+    let mut fixture = DocFixture::default();
+    let live = fixture.stub_at(Vec2::ZERO);
+    let mut doc = fixture.doc;
     let gone = NodeId::unique();
 
     let step = commit_intent(

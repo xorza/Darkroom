@@ -5,6 +5,7 @@ use scenarium::testing::graph::TestGraph;
 use scenarium::{Library, NodeId, OutputTypes};
 
 use super::*;
+use crate::core::document::harness::{one_func_library, spread};
 use crate::core::document::{Document, GraphView};
 use crate::core::edit::intent::sink::Intents;
 use crate::gui::app::ctx::{AppCtx, StatusInputs};

@@ -296,28 +296,21 @@ impl From<CoreGraph> for Document {
 }
 
 #[cfg(test)]
+pub(crate) mod harness;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::core::document::dock::DockOp;
-
-    use scenarium::testing::graph::TestGraph;
-    use scenarium::{FuncId, Node, NodeKind};
-
-    /// Add a bare `Func`-kind node to `doc`'s root graph + main view at
-    /// `pos`, returning its id.
-    fn add_node_at(doc: &mut Document, pos: Vec2) -> NodeId {
-        let node = Node::new(NodeKind::Func(FuncId::unique()));
-        let id = doc.graph.add(node);
-        doc.main_view.item_placements.insert(id, pos);
-        id
-    }
+    use crate::core::document::harness::DocFixture;
 
     /// A viewer tab retains its node's value while open, and only the pane's
     /// *visible* tab is owed a full-resolution texture.
     #[test]
     fn viewer_tabs_retain_their_node_and_only_the_visible_one_draws() {
-        let mut doc = Document::default();
-        let root_node = add_node_at(&mut doc, Vec2::ZERO);
+        let mut fixture = DocFixture::default();
+        let root_node = fixture.stub_at(Vec2::ZERO);
+        let doc = &mut fixture.doc;
         assert_eq!(doc.viewer_nodes().count(), 0);
 
         let primary = doc.layout.primary().id;
@@ -356,7 +349,7 @@ mod tests {
     fn dock_layout_round_trips_as_json() {
         use crate::core::document::dock::{DockDrop, SplitSide};
 
-        let mut doc = build_test_doc();
+        let mut doc = DocFixture::sample().doc;
         let node_id = doc.graph.iter().next().unwrap().id;
         let primary = doc.layout.primary().id;
         doc.layout.find_or_insert(TabRef::Preferences, primary);
@@ -382,19 +375,12 @@ mod tests {
 
     #[test]
     fn document_passes_validation() {
-        let doc = build_test_doc();
-        doc.validate().unwrap();
+        DocFixture::sample().doc.validate().unwrap();
     }
 
     #[test]
     #[should_panic(expected = "view item to move must exist")]
     fn moving_missing_view_item_panics() {
         GraphView::default().move_item_to_index(&NodeId::unique(), 0);
-    }
-
-    /// A document over a real multi-node graph — the fixture the layout and
-    /// validation tests need something with nodes in it for.
-    fn build_test_doc() -> Document {
-        TestGraph::sample().graph.into()
     }
 }

@@ -4,6 +4,7 @@ use palantir::{Configure, Panel, Sizing, Ui};
 use scenarium::{InputPort, OutputTypes};
 
 use crate::core::document::Document;
+use crate::core::document::harness::{one_func_library, spread};
 use crate::core::edit::intent::sink::Intents;
 use crate::core::edit::intent::types::GraphIntent;
 use crate::gui::pane::graph::GraphUI;

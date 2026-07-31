@@ -3,6 +3,7 @@ use palantir::internals::UiHarness;
 use palantir::{Configure, Modifiers, Panel, Sizing, Ui};
 use scenarium::OutputTypes;
 
+use crate::core::document::harness::one_func_library;
 use crate::core::document::{Document, GraphView};
 use crate::core::edit::intent::sink::Intents;
 use crate::core::edit::intent::types::GraphIntent;
