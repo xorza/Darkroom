@@ -51,10 +51,10 @@ pub enum InvokeError {
         actual: String,
     },
     /// The lambda bailed because the run was cancelled. The executor maps this
-    /// to `execution::Error::Cancelled` (a cancel is not a failure): the node's
-    /// output is dropped so it re-runs, and it's reported as cancelled, not
-    /// errored. A lambda doing heavy cancellable work returns this when it
-    /// observes the cancel token set.
+    /// to [`RunError::Cancelled`](crate::RunError) (a cancel is not a failure):
+    /// the node's output is dropped so it re-runs, and the run as a whole is
+    /// reported cancelled rather than the node errored. A lambda doing heavy
+    /// cancellable work returns this when it observes the cancel token set.
     #[error("cancelled")]
     Cancelled,
 }

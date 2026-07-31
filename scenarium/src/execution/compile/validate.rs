@@ -75,9 +75,9 @@ pub(super) fn validate(
 
         for e_input in inputs {
             if let ExecutionBinding::Bind(e_addr) = &e_input.binding {
-                // Unreachable while `intern_bindings` mints every address from
-                // a successful id lookup — kept as the backstop if that stops
-                // holding.
+                // Unreachable while `Compiler::resolve` mints every address
+                // from a successful placement lookup — kept as the backstop if
+                // that stops holding.
                 let target_e_node = program.e_nodes.get(e_addr.node_idx).ok_or(
                     CompiledGraphValidationError::MissingBindingTarget {
                         node_id: *node_id,

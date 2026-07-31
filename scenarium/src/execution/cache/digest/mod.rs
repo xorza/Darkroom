@@ -15,7 +15,7 @@
 //! keeping this fold I/O-free.
 //! Equal digests ⇒ identical computation, so the digest is at once the cache key
 //! and the invalidation signal: change anything upstream and every downstream digest
-//! changes — on this machine or any other. See `README.md` Part B.
+//! changes — on this machine or any other.
 //!
 //! **Trust boundary (what is *not* folded).** The digest is only as honest as these
 //! assumptions; violating one is a *false hit* (a stale value served):

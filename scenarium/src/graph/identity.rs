@@ -1,5 +1,5 @@
 //! How an authored graph names things: the uuid identities ([`NodeId`],
-//! [`GraphId`], [`FuncId`]) and the addresses that pair one with a port index
+//! [`FuncId`]) and the addresses that pair one with a port index
 //! ([`InputPort`], [`OutputPort`], [`EventPort`]).
 //!
 //! Gathered here rather than each sitting with the type it names, so "what
@@ -13,11 +13,10 @@
 use ::common::id_type;
 use ::serde::{Deserialize, Serialize};
 
-// `NodeId` and `GraphId` are unique across a whole document, so a bare one is
-// an unambiguous address. `FuncId` names a declaration in the library rather
-// than anything in a document.
+// A `NodeId` is unique across a whole document, so a bare one is an
+// unambiguous address. `FuncId` names a declaration in the library rather than
+// anything in a document.
 id_type!(NodeId);
-id_type!(GraphId);
 id_type!(FuncId);
 
 /// Address of a producer node's output port — the source side of a data

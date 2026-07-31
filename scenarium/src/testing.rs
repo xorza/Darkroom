@@ -195,7 +195,7 @@ pub fn test_graph() -> Graph {
         Binding::bind(mult_node_id, 0),
     );
 
-    graph.validate_debug();
+    graph.validate().expect("the fixture graph is well formed");
 
     graph
 }

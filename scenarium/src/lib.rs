@@ -34,14 +34,14 @@ pub use graph::Graph;
 pub use graph::NodeRef;
 pub use graph::Subscription;
 pub use graph::detached::DetachedNode;
-pub use graph::error::{GraphDeserializeError, GraphValidationError};
+pub use graph::error::GraphValidationError;
 pub use graph::func::error::{FuncValidationError, InvokeError, InvokeResult};
 pub use graph::func::event::{AsyncEvent, AsyncEventFn, EventLambda};
 pub use graph::func::lambda::{AsyncLambda, AsyncLambdaFn, FuncLambda, Invocation, OutputDemand};
 pub use graph::func::{
     Func, FuncBehavior, FuncEvent, FuncInput, FuncOutput, OutputType, ValueVariant,
 };
-pub use graph::identity::{EventPort, FuncId, GraphId, InputPort, NodeId, OutputPort};
+pub use graph::identity::{EventPort, FuncId, InputPort, NodeId, OutputPort};
 pub use graph::node::special::{SPECIAL_NODES, SpecialNode};
 pub use graph::node::{CacheMode, Node, NodeKind};
 pub use graph::output_types::OutputTypes;

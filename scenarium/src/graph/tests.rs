@@ -1,11 +1,11 @@
 use crate::EventLambda;
 use crate::graph::Graph;
-use crate::graph::error::{GraphDeserializeError, GraphValidationError};
+use crate::graph::error::GraphValidationError;
 use crate::graph::func::{Func, FuncInput, FuncOutput};
 use crate::graph::identity::FuncId;
 use crate::graph::node::{CacheMode, Node, NodeKind};
 use crate::graph::output_types::OutputTypes;
-use crate::graph::{Binding, InputPort, NodeId, OutputPort};
+use crate::graph::{Binding, InputPort, NodeId, OutputPort, Subscription};
 use crate::library::Library;
 use crate::testing::{self, TestFuncHooks, test_func_lib, test_graph};
 use crate::{DataType, DetachedNode, StaticValue};
@@ -82,8 +82,8 @@ fn cache_mode_round_trips() {
         graph.add(node);
 
         for format in [SerdeFormat::Json, SerdeFormat::Bitcode] {
-            let bytes = graph.serialize(format).unwrap();
-            let back = Graph::deserialize(&bytes, format).unwrap();
+            let bytes = serialize(&graph, format).unwrap();
+            let back: Graph = deserialize(&bytes, format).unwrap();
             assert_eq!(
                 back.find_by_name("get_a").unwrap().cache,
                 mode,
@@ -631,34 +631,49 @@ fn subscribe_unsubscribe_is_subscribed() {
     graph.subscribe(emitter, 0, sub);
     assert_eq!(graph.subscriptions().count(), 1);
 
+    // One event carries several subscribers, and a second event off the same
+    // emitter is its own edge — so the three coexist rather than overwriting.
+    let sub2 = graph.find_by_name("mult").unwrap().id;
+    let other = graph.find_by_name("Print").unwrap().id;
+    graph.subscribe(emitter, 0, sub2);
+    graph.subscribe(emitter, 1, other);
+    assert!(graph.is_subscribed(emitter, 0, sub));
+    assert!(graph.is_subscribed(emitter, 0, sub2));
+    assert!(graph.is_subscribed(emitter, 1, other));
+    assert!(!graph.is_subscribed(emitter, 1, sub));
+
+    // `subscriptions` yields them in (emitter, event_idx, subscriber) order,
+    // whatever order they were authored in — the determinism a compile's
+    // subscriber lists inherit.
+    let mut expected = vec![
+        Subscription {
+            emitter,
+            event_idx: 0,
+            subscriber: sub,
+        },
+        Subscription {
+            emitter,
+            event_idx: 0,
+            subscriber: sub2,
+        },
+        Subscription {
+            emitter,
+            event_idx: 1,
+            subscriber: other,
+        },
+    ];
+    expected.sort();
+    assert_eq!(graph.subscriptions().collect::<Vec<_>>(), expected);
+
+    // Dropping one edge leaves its siblings alone.
     graph.unsubscribe(emitter, 0, sub);
     assert!(!graph.is_subscribed(emitter, 0, sub));
+    assert!(graph.is_subscribed(emitter, 0, sub2));
+    assert!(graph.is_subscribed(emitter, 1, other));
+
+    graph.unsubscribe(emitter, 0, sub2);
+    graph.unsubscribe(emitter, 1, other);
     assert_eq!(graph.subscriptions().count(), 0);
-}
-
-#[test]
-fn subscribers_ranges_one_emitter_event() {
-    let mut graph = test_graph();
-    let emitter = graph.find_by_name("get_a").unwrap().id;
-    let s1 = graph.find_by_name("sum").unwrap().id;
-    let s2 = graph.find_by_name("mult").unwrap().id;
-    let other = graph.find_by_name("Print").unwrap().id;
-
-    graph.subscribe(emitter, 0, s1);
-    graph.subscribe(emitter, 0, s2);
-    graph.subscribe(emitter, 1, other); // different event: must not leak in
-
-    let mut got: Vec<NodeId> = graph.subscribers(emitter, 0).collect();
-    got.sort();
-    let mut want = vec![s1, s2];
-    want.sort();
-    assert_eq!(got, want);
-
-    assert_eq!(
-        graph.subscribers(emitter, 1).collect::<Vec<_>>(),
-        vec![other]
-    );
-    assert_eq!(graph.subscribers(emitter, 2).count(), 0);
 }
 
 #[test]
@@ -738,31 +753,32 @@ fn add_func_node_leaves_defaultless_inputs_unbound() {
 fn serialization_round_trips_a_graph_through_every_format() -> TestResult {
     let graph = test_graph();
     for format in SerdeFormat::all_formats_for_testing() {
-        let serialized = graph.serialize(format)?;
-        let deserialized = Graph::deserialize(&serialized, format)?;
+        let serialized = serialize(&graph, format)?;
+        let deserialized: Graph = deserialize(&serialized, format)?;
         assert_eq!(graph, deserialized, "{format:?} round-trips a graph whole");
     }
     Ok(())
 }
 
-/// Deserialization is the release-path structural guard on an untrusted
-/// document: `serialize` doesn't validate, so every structural invariant the
-/// graph's own mutations assert on has to be *checked* on the way back in.
+/// The release-path structural guard on an untrusted document. Decoding does
+/// not validate — a host loads with `deserialize` followed by
+/// [`Graph::validate`], which is the only place every structural invariant the
+/// graph's own mutations *assert* gets **checked** instead.
 #[test]
-fn deserialize_rejects_corrupt_graph() {
+fn loading_rejects_a_corrupt_graph() {
     let mut graph = test_graph();
     let sum_id = graph.find_by_name("sum").unwrap().id;
     graph.set_input_binding(
         InputPort::new(sum_id, 0),
         Binding::bind(NodeId::unique(), 0),
     );
-    let bytes = graph.serialize(SerdeFormat::Bitcode).unwrap();
+    let bytes = serialize(&graph, SerdeFormat::Bitcode).unwrap();
+    let decoded: Graph = deserialize(&bytes, SerdeFormat::Bitcode)
+        .expect("a structurally broken graph still decodes; validation is what rejects it");
     assert!(
         matches!(
-            Graph::deserialize(&bytes, SerdeFormat::Bitcode),
-            Err(GraphDeserializeError::InvalidGraph(
-                GraphValidationError::BindingMissingProducer { .. }
-            ))
+            decoded.validate(),
+            Err(GraphValidationError::BindingMissingProducer { .. })
         ),
         "a binding naming a node the document doesn't hold is rejected"
     );
@@ -771,12 +787,11 @@ fn deserialize_rejects_corrupt_graph() {
     nil_key
         .nodes
         .insert(NodeId::nil(), Node::new(NodeKind::Func(FuncId::unique())));
-    let bytes = nil_key.serialize(SerdeFormat::Bitcode).unwrap();
+    let bytes = serialize(&nil_key, SerdeFormat::Bitcode).unwrap();
+    let decoded: Graph = deserialize(&bytes, SerdeFormat::Bitcode).unwrap();
     assert!(matches!(
-        Graph::deserialize(&bytes, SerdeFormat::Bitcode),
-        Err(GraphDeserializeError::InvalidGraph(
-            GraphValidationError::NilNodeId
-        ))
+        decoded.validate(),
+        Err(GraphValidationError::NilNodeId)
     ));
 
     // Bindings decode from a sequence into a map, so a repeated input port is
@@ -785,8 +800,8 @@ fn deserialize_rejects_corrupt_graph() {
     let bindings = duplicate_bindings["bindings"].as_array_mut().unwrap();
     bindings.push(bindings[0].clone());
     let bytes = serde_json::to_vec(&duplicate_bindings).unwrap();
-    let error = Graph::deserialize(&bytes, SerdeFormat::Json).unwrap_err();
-    assert!(matches!(&error, GraphDeserializeError::Deserialize(_)));
+    let error = deserialize::<Graph>(&bytes, SerdeFormat::Json)
+        .expect_err("a duplicate input port cannot decode into the binding map");
     assert!(
         error
             .to_string()

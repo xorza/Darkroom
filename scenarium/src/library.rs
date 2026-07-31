@@ -140,6 +140,9 @@ impl Library {
         self.funcs.insert(func.id, func);
     }
 
+    /// Drop a func declaration, handing back what was registered under `id` —
+    /// how a host assembles a library that omits an entry a shared builder
+    /// added (lens drops its ML nodes when their backend is unavailable).
     pub fn remove(&mut self, id: FuncId) -> Option<Func> {
         self.funcs.remove(&id)
     }
