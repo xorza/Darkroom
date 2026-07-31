@@ -4,11 +4,12 @@
 //! which lives only in the key that reaches it, so a node can be moved or
 //! remapped without carrying a stale identity. What it *is* is [`NodeKind`]: a
 //! func instance or a built-in special. What it does with its result is
-//! [`CacheMode`]. Iterating a graph yields a [`NodeRef`], pairing a node with
+//! [`CacheMode`]. Iterating a graph yields a [`NodeRef`](crate::graph::NodeRef),
+//! pairing a node with
 //! the id it was found under; the lookups that *take* an id return the node
 //! alone.
 //!
-//! What a func node instantiates — the [`Func`](crate::graph::func::Func)
+//! What a func node instantiates — the [`Func`]
 //! declaration and the ABIs it runs through — is
 //! [`func`](crate::graph::func)'s. The module below owns the built-in
 //! [`special`] nodes.
@@ -38,8 +39,7 @@ use ::serde::{Deserialize, Serialize};
 /// impure node anywhere upstream has no digest, so its output is released after the run
 /// and never risks serving a stale value, whatever its mode. The on-disk backend is wired
 /// only once a caller attaches a `DiskStore` with a disk root; until
-/// then `Disk`/`Both` degrade to memory-only. See
-/// [`cache`](crate::execution::cache) for how the two tiers are keyed.
+/// then `Disk`/`Both` degrade to memory-only.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
 pub enum CacheMode {
     #[default]

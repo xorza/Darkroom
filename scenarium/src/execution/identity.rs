@@ -21,7 +21,8 @@ use crate::common::column::Idx;
 
 /// A node's position in the installed program's dense node vector. Install-local:
 /// indices shift between compiles, so a `NodeIdx` must never enter a digest, a
-/// persisted byte, or any host-facing report — those stay on [`NodeId`].
+/// persisted byte, or any host-facing report — those stay on
+/// [`NodeId`](crate::graph::identity::NodeId).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) struct NodeIdx(pub(crate) u32);
 
