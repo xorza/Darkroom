@@ -55,7 +55,7 @@ impl App {
             return;
         };
         self.editor.apply_edit(
-            &mut self.workspace.open,
+            &mut self.open,
             GraphIntent::SetInput {
                 input: req.port,
                 to: Some(Binding::Const(value)),

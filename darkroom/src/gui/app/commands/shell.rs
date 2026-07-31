@@ -17,7 +17,7 @@ impl App {
     pub(super) fn handle_shell(&mut self, command: ShellCommand) {
         match command {
             ShellCommand::OpenPreferences => {
-                self.editor.open_preferences(&mut self.workspace.open);
+                self.editor.open_preferences(&mut self.open);
             }
             ShellCommand::Quit => self.guard_discard(PendingAction::Quit),
         }
