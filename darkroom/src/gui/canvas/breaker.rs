@@ -264,7 +264,7 @@ impl BreakerUI {
     /// The context's Esc — resolved once by the canvas — drops the
     /// scribble without emitting.
     pub(super) fn apply(&mut self, ui: &mut Ui, cx: CanvasCtx<'_>, out: &mut Intents) {
-        let graph_scope = cx.graph_scope();
+        let graph_ctx = cx.graph_ctx();
         let resp = ui.response_for(outer_canvas_widget_id());
         // The classifier resolves RMB-drag vs Ctrl+LMB-drag and hands back
         // the latching button, which the gesture polls for continuation.
@@ -273,7 +273,7 @@ impl BreakerUI {
             && let Some(p) = resp.pointer_local
         {
             self.state.latch(BreakerState::start(
-                to_world(p, &graph_scope.viewport()),
+                to_world(p, &graph_ctx.viewport()),
                 button,
             ));
         }
@@ -288,7 +288,7 @@ impl BreakerUI {
         ) {
             (Some(b), Some(_)) => {
                 if let Some(p) = resp.pointer_local {
-                    b.add_point(to_world(p, &graph_scope.viewport()));
+                    b.add_point(to_world(p, &graph_ctx.viewport()));
                 }
             }
             (Some(b), None) => {

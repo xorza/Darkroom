@@ -48,8 +48,8 @@ add opendocument into appcontext
 
 runstate into runtimehost
 
-        self.run_state.ingest_previews(ui, previews);
-        self.run_state.previews.reconcile(ui, &self.open.document); -merge into one call
+self.run_state.ingest_previews(ui, previews);
+self.run_state.previews.reconcile(ui, &self.open.document); -merge into one call
 
 graphscope :from_doc -> option !
 
@@ -57,6 +57,6 @@ darkroom test harness
 
 move ctx to own files
 
- state: GestureSlot<BreakerState>, = allocates
+state: GestureSlot<BreakerState>, = allocates
 
 graphscope - graphctx

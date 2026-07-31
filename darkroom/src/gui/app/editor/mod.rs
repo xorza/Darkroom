@@ -3,7 +3,7 @@
 //! `Editor` owns the undo history, the GUI tree, and transient gesture
 //! state. The canvas's own projection of the graph lives with the canvas
 //! that draws it. [`App`] lends it the open document for each operation and
-//! the frame's [`AppContext`] to read the rest through, keeping document,
+//! the frame's [`AppCtx`] to read the rest through, keeping document,
 //! runtime and run-state ownership on the shell.
 //!
 //! [`App`]: crate::gui::app::App
@@ -28,7 +28,7 @@ use crate::gui::app::commands::shell::ShellCommand;
 use crate::gui::canvas::node_menu::NodeMenuAction;
 use crate::gui::main_window::MainWindow;
 
-use crate::gui::app::AppContext;
+use crate::gui::app::AppCtx;
 
 #[cfg(test)]
 pub(crate) mod harness;
@@ -183,7 +183,7 @@ impl Editor {
         &mut self,
         ui: &mut Ui,
         open: &mut OpenDocument,
-        ctx: AppContext<'_>,
+        ctx: AppCtx<'_>,
         preferences: &mut Preferences,
     ) -> Option<AppCommand> {
         self.intents.clear();
@@ -280,7 +280,7 @@ impl Editor {
     ///
     /// Done up front so the edit pipeline runs against a settled document
     /// and a switched-to tab records in the same present's Pass A.
-    fn navigate(&mut self, ui: &mut Ui, open: &mut OpenDocument, ctx: AppContext<'_>) {
+    fn navigate(&mut self, ui: &mut Ui, open: &mut OpenDocument, ctx: AppCtx<'_>) {
         self.apply_undo_redo(ui, open);
         // Surface tab clicks from last frame's responses. Those responses are
         // last frame's; the document they resolve against is this frame's,

@@ -16,7 +16,7 @@ use crate::core::edit::intent::sink::Intents;
 use crate::core::edit::intent::types::GraphIntent;
 use crate::gui::canvas::anchored_menu::AnchoredMenu;
 use crate::gui::canvas::{CanvasCtx, CanvasGesture, outer_canvas_widget_id, to_world};
-use crate::gui::graph_scope::GraphScope;
+use crate::gui::graph_ctx::GraphCtx;
 
 /// One row of a category's palette list: a library `Func` or a built-in
 /// special node. Collecting them into one type lets a category's rows be
@@ -47,7 +47,7 @@ impl<'a> PaletteEntry<'a> {
 }
 
 /// Right-click or double-click on empty canvas → popup that lists every
-/// `Func` the scope's library holds plus the built-in specials, grouped by
+/// `Func` the context's library holds plus the built-in specials, grouped by
 /// category. Clicking an entry emits the intent that adds it at the click's
 /// world position (inner-canvas pre-transform). Outside-click and Esc
 /// dismiss.
@@ -100,7 +100,7 @@ impl NewNodeUi {
         pending_source: Option<PortRef>,
         out: &mut Intents,
     ) {
-        let graph_scope = cx.graph_scope();
+        let graph_ctx = cx.graph_ctx();
         let resp = ui.response_for(outer_canvas_widget_id());
         // Open the palette either from a bare RMB / double-click (`NewNode`
         // gesture) or from a connection dropped on empty canvas
@@ -109,7 +109,7 @@ impl NewNodeUi {
         if (pending_source.is_some() || cx.gesture() == Some(CanvasGesture::NewNode))
             && let (Some(local), Some(rect)) = (resp.pointer_local, resp.rect)
         {
-            self.world_pos = to_world(local, &graph_scope.viewport());
+            self.world_pos = to_world(local, &graph_ctx.viewport());
             self.source = pending_source;
             self.menu.open_at(rect.min + local);
             // Fresh open: empty the filter, read the graph's own
@@ -134,7 +134,7 @@ impl NewNodeUi {
         // (`max_height` minus the chrome above it) keeps it from eating the
         // header's space — a `Hug` scroll otherwise claims the full cap.
         let surface = ui.display().logical_rect();
-        let max_height = graph_scope
+        let max_height = graph_ctx
             .theme()
             .new_node_popup_max_height
             .min(surface.size.h - 16.0)
@@ -149,7 +149,7 @@ impl NewNodeUi {
         let chosen = self
             .menu
             .show(ui, "new_node_popup", Some(max_height), |ui, popup| {
-                let palette = Palette { graph_scope, pos };
+                let palette = Palette { graph_ctx, pos };
                 palette_body(ui, popup, &palette, search, scroll_cap, just_opened)
             });
 
@@ -247,7 +247,7 @@ fn palette_body(
         // the user can type into.
         .escape_falls_through()
         .placeholder("Search…")
-        .style(&palette.graph_scope.theme().inline_rename.text_edit)
+        .style(&palette.graph_ctx.theme().inline_rename.text_edit)
         .size((Sizing::fill(1.0), Sizing::HUG))
         .min_size((200.0, 0.0))
         .margin(Spacing::new(0.0, 0.0, 0.0, SEARCH_ROW_GAP))
@@ -283,7 +283,7 @@ fn palette_body(
 /// take one borrow rather than four threaded parameters.
 #[derive(Debug)]
 struct Palette<'a> {
-    graph_scope: GraphScope<'a>,
+    graph_ctx: GraphCtx<'a>,
     /// World position the open captured — every intent a row raises places
     /// its node here.
     pos: Vec2,
@@ -300,7 +300,7 @@ impl<'a> Palette<'a> {
     /// Every row the palette can list, in no particular order: the library's
     /// funcs, then the built-in specials.
     fn entries(&'a self) -> impl Iterator<Item = PaletteEntry<'a>> {
-        self.graph_scope
+        self.graph_ctx
             .library()
             .funcs()
             .map(PaletteEntry::Func)

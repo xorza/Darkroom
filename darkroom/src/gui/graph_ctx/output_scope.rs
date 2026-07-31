@@ -3,7 +3,7 @@
 use scenarium::{DataType, FuncOutput, OutputPort};
 
 use crate::core::document::{PortKind, PortRef};
-use crate::gui::graph_scope::node_scope::NodeScope;
+use crate::gui::graph_ctx::node_scope::NodeScope;
 
 /// One output port: what the func declares for it, and — for a wildcard —
 /// the type the graph resolves it to.
@@ -73,7 +73,7 @@ impl<'a> OutputScope<'a> {
     /// composed without a refresh go unnoticed.
     pub(crate) fn ty(self) -> DataType {
         self.node
-            .graph_scope
+            .graph_ctx
             .output_types()
             .get(self.port())
             .expect("the scope's table is resolved against the graph it carries")

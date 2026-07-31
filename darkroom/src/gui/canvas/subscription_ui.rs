@@ -9,8 +9,8 @@ use crate::gui::canvas::CanvasCtx;
 use crate::gui::canvas::geometry::CanvasGeometry;
 use crate::gui::canvas::gesture_slot::GestureSlot;
 use crate::gui::canvas::wire::{GlyphDrag, Wire, WirePass, WireTint};
-use crate::gui::graph_scope::GraphScope;
-use crate::gui::graph_scope::node_scope::NodeScope;
+use crate::gui::graph_ctx::GraphCtx;
+use crate::gui::graph_ctx::node_scope::NodeScope;
 use crate::gui::node::port_color::event_color;
 
 /// Owns the in-flight subscription wire — an emitter *or* subscriber drag.
@@ -74,20 +74,20 @@ impl SubscriptionUI {
     /// but the snap scans and the commit run against the pane holding the
     /// drag's fixed end, so a subscription can't span two graphs.
     pub(super) fn apply(&mut self, ui: &mut Ui, cx: CanvasCtx<'_>, out: &mut Intents) {
-        let (graph_scope, geometry) = (cx.graph_scope(), cx.geometry());
+        let (graph_ctx, geometry) = (cx.graph_ctx(), cx.geometry());
         // Latch a fresh drag only when idle. An emitter and a pin can't both
         // start one this frame (distinct widget-id spaces, one press), so
         // trying the emitter scan first is arbitrary, not a conflict.
         if self.state.is_idle() {
-            let emitters = graph_scope.nodes().flat_map(NodeScope::event_refs);
+            let emitters = graph_ctx.nodes().flat_map(NodeScope::event_refs);
             // Only sink nodes render a pin, so only they can start a reverse
             // event drag.
-            let pins = graph_scope.nodes().filter(|n| n.sink()).map(|n| n.id);
+            let pins = graph_ctx.nodes().filter(|n| n.sink()).map(|n| n.id);
             let latched = GlyphDrag::latch(&geometry.events, emitters)
                 .map(InFlight::FromEmitter)
                 .or_else(|| GlyphDrag::latch(&geometry.subs, pins).map(InFlight::FromSubscriber));
             if let Some(latched) = latched
-                && graph_scope.contains(latched.node())
+                && graph_ctx.contains(latched.node())
             {
                 self.state.latch(latched);
             }
@@ -100,7 +100,7 @@ impl SubscriptionUI {
         };
         // A pane closed mid-drag, or a fixed end deleted under it, drops
         // the wire — not re-latching is how.
-        if !graph_scope.contains(state.node()) {
+        if !graph_ctx.contains(state.node()) {
             return;
         }
         // Refresh the snapped opposite end, then read the source glyph's drag
@@ -108,11 +108,11 @@ impl SubscriptionUI {
         // release edge.
         let released = match &mut state {
             InFlight::FromEmitter(drag) => {
-                drag.snap = scan_sub_target(geometry, ui, graph_scope, drag.from);
+                drag.snap = scan_sub_target(geometry, ui, graph_ctx, drag.from);
                 !drag.held(&geometry.events)
             }
             InFlight::FromSubscriber(drag) => {
-                drag.snap = scan_emitter_target(geometry, ui, graph_scope, drag.from);
+                drag.snap = scan_emitter_target(geometry, ui, graph_ctx, drag.from);
                 !drag.held(&geometry.subs)
             }
         };
@@ -169,7 +169,7 @@ impl SubscriptionUI {
     /// glyph (when set) or the pointer. The emitter is always `p0` so the
     /// preview keeps a committed wire's shape regardless of drag direction.
     pub(super) fn draw_in_flight(&self, ui: &mut Ui, cx: CanvasCtx<'_>, canvas_origin: Vec2) {
-        let (graph_scope, geometry) = (cx.graph_scope(), cx.geometry());
+        let (graph_ctx, geometry) = (cx.graph_ctx(), cx.geometry());
         // Scoped to the pane holding the drag's fixed end — see
         // `ConnectionUI::draw_in_flight` for what an unscoped preview
         // paints on the neighbouring canvases.
@@ -179,7 +179,7 @@ impl SubscriptionUI {
                 let Some(p0) = geometry.events.center(drag.from) else {
                     return;
                 };
-                let Some(p3) = drag.free_end(ui, graph_scope, canvas_origin, &geometry.subs) else {
+                let Some(p3) = drag.free_end(ui, graph_ctx, canvas_origin, &geometry.subs) else {
                     return;
                 };
                 (p0, p3)
@@ -188,14 +188,13 @@ impl SubscriptionUI {
                 let Some(p3) = geometry.subs.center(drag.from) else {
                     return;
                 };
-                let Some(p0) = drag.free_end(ui, graph_scope, canvas_origin, &geometry.events)
-                else {
+                let Some(p0) = drag.free_end(ui, graph_ctx, canvas_origin, &geometry.events) else {
                     return;
                 };
                 (p0, p3)
             }
         };
-        let theme = graph_scope.theme();
+        let theme = graph_ctx.theme();
         Wire::event(p0, p3).add(
             ui,
             theme.connection_width,
@@ -212,12 +211,9 @@ impl SubscriptionUI {
 /// [`crate::gui::canvas::connection_ui::draw`] — it belongs to the module
 /// rather than [`SubscriptionUI`].
 pub(super) fn draw(ui: &mut Ui, pass: &mut WirePass<'_, '_>) {
-    let (theme, graph_scope, geometry) = (
-        pass.rcx.theme(),
-        pass.rcx.graph_scope(),
-        pass.rcx.geometry(),
-    );
-    for s in graph_scope.subscriptions() {
+    let (theme, graph_ctx, geometry) =
+        (pass.dcx.theme(), pass.dcx.graph_ctx(), pass.dcx.geometry());
+    for s in graph_ctx.subscriptions() {
         let emitter = EventRef {
             node_id: s.emitter,
             event_idx: s.event_idx,
@@ -247,11 +243,11 @@ pub(super) fn draw(ui: &mut Ui, pass: &mut WirePass<'_, '_>) {
 fn scan_sub_target(
     geometry: &CanvasGeometry,
     ui: &mut Ui,
-    graph_scope: GraphScope<'_>,
+    graph_ctx: GraphCtx<'_>,
     emitter: EventRef,
 ) -> Option<NodeId> {
     let pointer = ui.pointer_pos()?;
-    let candidates = graph_scope
+    let candidates = graph_ctx
         .nodes()
         .filter(|n| n.id != emitter.node_id && n.sink())
         .map(|n| n.id);
@@ -265,11 +261,11 @@ fn scan_sub_target(
 fn scan_emitter_target(
     geometry: &CanvasGeometry,
     ui: &mut Ui,
-    graph_scope: GraphScope<'_>,
+    graph_ctx: GraphCtx<'_>,
     subscriber: NodeId,
 ) -> Option<EventRef> {
     let pointer = ui.pointer_pos()?;
-    let candidates = graph_scope
+    let candidates = graph_ctx
         .nodes()
         .filter(|n| n.id != subscriber)
         .flat_map(NodeScope::event_refs);

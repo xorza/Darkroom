@@ -25,8 +25,8 @@ use crate::gui::canvas::breaker::BreakerProbe;
 use crate::gui::canvas::geometry::{GlyphKey, PortLayer};
 use crate::gui::canvas::pointer_world;
 use crate::gui::color::toward;
-use crate::gui::graph_scope::GraphScope;
-use crate::gui::node::RecordCtx;
+use crate::gui::graph_ctx::GraphCtx;
+use crate::gui::node::DrawCtx;
 
 /// Minimum length of a wire's bezier control handles, so a short or backward
 /// link still bows out into a readable curve.
@@ -180,13 +180,13 @@ impl<A: GlyphKey, B: GlyphKey> GlyphDrag<A, B> {
     pub(super) fn free_end(
         self,
         ui: &mut Ui,
-        graph_scope: GraphScope<'_>,
+        graph_ctx: GraphCtx<'_>,
         canvas_origin: Vec2,
         layer: &PortLayer<B>,
     ) -> Option<Vec2> {
         match self.snap {
             Some(key) => layer.center(key),
-            None => pointer_world(ui, graph_scope, canvas_origin),
+            None => pointer_world(ui, graph_ctx, canvas_origin),
         }
     }
 }
@@ -196,16 +196,16 @@ impl<A: GlyphKey, B: GlyphKey> GlyphDrag<A, B> {
 /// [`crate::gui::canvas::GraphUI::record_canvas`] and passed by `&mut`, so the
 /// breaker probe reborrows into each renderer in turn.
 ///
-/// The pane-wide half is [`RecordCtx`] itself, not a re-declaration of its
+/// The pane-wide half is [`DrawCtx`] itself, not a re-declaration of its
 /// fields: the wires record in the same pass as the node bodies they run
 /// between, off the same theme, pane, geometry and cull, and `WirePass` was
-/// built two lines from a live `RecordCtx`. What's left here is what only a
+/// built two lines from a live `DrawCtx`. What's left here is what only a
 /// wire pass has — the breaker probe it marks hits against, and this frame's
 /// emphasis tier.
 #[derive(Debug)]
 pub(super) struct WirePass<'a, 'p> {
     /// Shared with the node-body draws — `Copy`, so it rides along by value.
-    pub(super) rcx: RecordCtx<'a>,
+    pub(super) dcx: DrawCtx<'a>,
     pub(super) probe: &'a mut BreakerProbe<'p>,
     pub(super) emphasis: &'a WireEmphasis,
 }
@@ -231,17 +231,17 @@ impl WirePass<'_, '_> {
         endpoint_hover: bool,
         tint: impl FnOnce() -> WireTint,
     ) -> bool {
-        if !self.rcx.cull().keeps_wire(wire) {
+        if !self.dcx.cull().keeps_wire(wire) {
             return false;
         }
         let broken = self.probe.crosses_wire(wire);
         let stroke =
             self.emphasis
-                .stroke(self.rcx.theme().connection_width, broken, endpoint_hover);
+                .stroke(self.dcx.theme().connection_width, broken, endpoint_hover);
         // A broken wire paints flat so the alarm read isn't diluted by the
         // family's own gradient, and it outranks the hover tint outright.
         let brush = if broken {
-            CurveBrush::Solid(self.rcx.theme().colors.connection_broken)
+            CurveBrush::Solid(self.dcx.theme().colors.connection_broken)
         } else {
             self.emphasis.brush(tint(), stroke.hovered)
         };

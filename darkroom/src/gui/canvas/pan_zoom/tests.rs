@@ -1,7 +1,7 @@
 use scenarium::NodeId;
 
 use super::*;
-use crate::gui::graph_scope::internals::ScopeFixture;
+use crate::gui::graph_ctx::internals::GraphCtxFixture;
 
 #[test]
 fn node_bounds_uses_cached_sizes_and_falls_back_to_points() {
@@ -13,7 +13,7 @@ fn node_bounds_uses_cached_sizes_and_falls_back_to_points() {
     //   b: (1000,500) 200×100 — culled, but its size is still cached
     //   c: (-50,300) never measured — contributes a point
     let (a, b, c) = (NodeId::unique(), NodeId::unique(), NodeId::unique());
-    let mut scene = ScopeFixture::with_nodes([
+    let mut scene = GraphCtxFixture::with_nodes([
         (a, Vec2::new(0.0, 0.0)),
         (b, Vec2::new(1000.0, 500.0)),
         (c, Vec2::new(-50.0, 300.0)),
@@ -26,19 +26,19 @@ fn node_bounds_uses_cached_sizes_and_falls_back_to_points() {
     // (1000+200, 500+100) = (1200, 600) → size (1250, 600). Without
     // the cache, b would count as a point and max.x would be 1000 —
     // its whole 200×100 body left outside the fit.
-    let all = node_bounds(&geometry, scene.scope(), false).unwrap();
+    let all = node_bounds(&geometry, scene.graph_ctx(), false).unwrap();
     assert_eq!(all.min, Vec2::new(-50.0, 0.0));
     assert_eq!(all.size, Size::new(1250.0, 600.0));
 
     // selected_only filters to exactly the selected node's rect.
     let mut scene = scene.with_selection([b]);
-    let sel = node_bounds(&geometry, scene.scope(), true).unwrap();
+    let sel = node_bounds(&geometry, scene.graph_ctx(), true).unwrap();
     assert_eq!(sel.min, Vec2::new(1000.0, 500.0));
     assert_eq!(sel.size, Size::new(200.0, 100.0));
 
     // Empty graph → nothing to frame.
-    let mut empty = ScopeFixture::with_nodes([]);
-    assert!(node_bounds(&geometry, empty.scope(), false).is_none());
+    let mut empty = GraphCtxFixture::with_nodes([]);
+    assert!(node_bounds(&geometry, empty.graph_ctx(), false).is_none());
 }
 
 #[test]

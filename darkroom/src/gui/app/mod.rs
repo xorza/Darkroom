@@ -28,7 +28,7 @@ use editor::Editor;
 ///
 /// **The root of the context chain.** Every level below derives its own
 /// context from the one above rather than restating its refs:
-/// [`GraphScope::for_document`](crate::gui::graph_scope::GraphScope::for_document)
+/// [`GraphCtx::for_document`](crate::gui::graph_ctx::GraphCtx::for_document)
 /// resolves this against a document to make the
 /// graph pane's context, and everything under the canvas reads the theme, the
 /// library and the run back off *that* — which is why nothing below
@@ -38,7 +38,7 @@ use editor::Editor;
 /// `Ui`, the intent buffer, the preferences — stay explicit parameters, so a
 /// context can never be the thing two call sites fight over.
 #[derive(Copy, Clone, Debug)]
-pub(crate) struct AppContext<'a> {
+pub(crate) struct AppCtx<'a> {
     theme: &'a Theme,
     library: &'a Library,
     /// Last run's centralized runtime state: per-node status/logs and the
@@ -47,7 +47,7 @@ pub(crate) struct AppContext<'a> {
     status: StatusInputs<'a>,
 }
 
-impl<'a> AppContext<'a> {
+impl<'a> AppCtx<'a> {
     pub(crate) fn new(
         theme: &'a Theme,
         library: &'a Library,
@@ -115,7 +115,7 @@ pub(crate) struct App {
     /// `NodeId`s: execution status (the glow + header time), log lines, and
     /// the values preview cards and viewers read. Owned here because `App` is
     /// its only writer — it fills as the worker is drained — and lent to the
-    /// frame through [`AppContext`]. Off the serialized state.
+    /// frame through [`AppCtx`]. Off the serialized state.
     run_state: RunState,
     theme: Theme,
     host_handle: HostHandle,
@@ -406,7 +406,7 @@ impl palantir::App for App {
         // The frame's read-only world, composed once here: everything below
         // derives its own context from this one rather than taking the refs
         // again.
-        let ctx = AppContext::new(
+        let ctx = AppCtx::new(
             &self.theme,
             &library,
             &self.run_state,

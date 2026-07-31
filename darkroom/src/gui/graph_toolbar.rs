@@ -50,8 +50,8 @@ fn show_selected_wid() -> WidgetId {
 /// `GraphIntent::SetViewport` onto `out` instead. It hit-tests above the canvas
 /// (drawn after it), so a click on a button never starts a pan.
 pub(super) fn show(ui: &mut Ui, cx: CanvasCtx<'_>, out: &mut Intents) -> Option<AppCommand> {
-    let (theme, graph_scope, geometry) = (cx.theme(), cx.graph_scope(), cx.geometry());
-    let run_state = graph_scope.run_state();
+    let (theme, graph_ctx, geometry) = (cx.theme(), cx.graph_ctx(), cx.geometry());
+    let run_state = graph_ctx.run_state();
     let mut command = None;
     Panel::vstack()
         .id_salt("graph_toolbar")
@@ -121,7 +121,7 @@ pub(super) fn show(ui: &mut Ui, cx: CanvasCtx<'_>, out: &mut Intents) -> Option<
                     out.extend(pan_zoom::view_action_intent(
                         ui,
                         geometry,
-                        graph_scope,
+                        graph_ctx,
                         ViewAction::Reset,
                     ));
                 }
@@ -129,7 +129,7 @@ pub(super) fn show(ui: &mut Ui, cx: CanvasCtx<'_>, out: &mut Intents) -> Option<
                     out.extend(pan_zoom::view_action_intent(
                         ui,
                         geometry,
-                        graph_scope,
+                        graph_ctx,
                         ViewAction::ShowAll,
                     ));
                 }
@@ -141,7 +141,7 @@ pub(super) fn show(ui: &mut Ui, cx: CanvasCtx<'_>, out: &mut Intents) -> Option<
                     out.extend(pan_zoom::view_action_intent(
                         ui,
                         geometry,
-                        graph_scope,
+                        graph_ctx,
                         ViewAction::ShowSelected,
                     ));
                 }

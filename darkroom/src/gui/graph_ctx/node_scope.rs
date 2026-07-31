@@ -6,9 +6,9 @@ use scenarium::{CacheMode, Func, FuncEvent, Node, NodeId, NodeKind, RamUsage};
 use crate::core::document::{PortKind, PortRef};
 use crate::core::preview;
 use crate::gui::EventRef;
-use crate::gui::graph_scope::GraphScope;
-use crate::gui::graph_scope::input_scope::InputScope;
-use crate::gui::graph_scope::output_scope::OutputScope;
+use crate::gui::graph_ctx::GraphCtx;
+use crate::gui::graph_ctx::input_scope::InputScope;
+use crate::gui::graph_ctx::output_scope::OutputScope;
 use crate::gui::run_state::ExecStatus;
 
 /// The `kind_label` a node reports when the library holds no func for it —
@@ -23,7 +23,7 @@ const MISSING_FUNC_LABEL: &str = "missing func";
 /// the node, not one per field it reads.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct NodeScope<'a> {
-    pub(crate) graph_scope: GraphScope<'a>,
+    pub(crate) graph_ctx: GraphCtx<'a>,
     pub(crate) id: NodeId,
     /// Where the node's body sits, from the view's placements. A field rather
     /// than an accessor: the paint stack is walked by position, and every
@@ -54,19 +54,19 @@ pub(crate) struct NodeScope<'a> {
 impl<'a> NodeScope<'a> {
     /// Resolve `node_id` against the graph, or `None` when the graph does not
     /// hold it — a placement left behind by a delete.
-    pub(super) fn resolve(graph_scope: GraphScope<'a>, node_id: NodeId, pos: Vec2) -> Option<Self> {
-        let node = graph_scope.body().find(node_id)?;
+    pub(super) fn resolve(graph_ctx: GraphCtx<'a>, node_id: NodeId, pos: Vec2) -> Option<Self> {
+        let node = graph_ctx.body().find(node_id)?;
         // `None` has exactly one meaning: a `NodeKind::Func` whose id the
         // library no longer holds. A special node's declaration is hardcoded,
         // so `Graph::node_func` resolves it unconditionally.
-        let func = graph_scope.body().node_func(node, graph_scope.library());
+        let func = graph_ctx.body().node_func(node, graph_ctx.library());
         Some(Self {
-            graph_scope,
+            graph_ctx,
             id: node_id,
             pos,
             node,
             func,
-            missing_inputs: graph_scope.run_state().missing_inputs(node_id),
+            missing_inputs: graph_ctx.run_state().missing_inputs(node_id),
         })
     }
 
@@ -176,14 +176,14 @@ impl<'a> NodeScope<'a> {
     /// Outcome of the last graph run. Drives the node's status-glow shadow
     /// and (for `Executed`) the header time label.
     pub(crate) fn exec_status(self) -> ExecStatus {
-        self.graph_scope.run_state().status(self.id)
+        self.graph_ctx.run_state().status(self.id)
     }
 
     /// RAM this node's cached output currently holds (system vs GPU).
     /// Non-zero only for nodes that retain a value; drives the node body's
     /// memory readout, hidden when zero.
     pub(crate) fn ram(self) -> RamUsage {
-        self.graph_scope.run_state().ram(self.id)
+        self.graph_ctx.run_state().ram(self.id)
     }
 
     /// This node's input ports, in declaration order. Empty for a stub, which

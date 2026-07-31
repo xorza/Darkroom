@@ -52,7 +52,7 @@ impl NodeMenuUi {
         cx: CanvasCtx<'_>,
         out: &mut Intents,
     ) -> Option<AppCommand> {
-        let graph_scope = cx.graph_scope();
+        let graph_ctx = cx.graph_ctx();
         // Boundary interface nodes carry no structural identity to
         // duplicate/remove — the sweep applies that guard, so a boundary
         // node never surfaces here.
@@ -60,7 +60,7 @@ impl NodeMenuUi {
         // Right-click selects the clicked node when it isn't already part of
         // the selection, so the chosen action always targets a coherent set
         // ("select then act").
-        if let Some(node_id) = opened.filter(|&id| !graph_scope.is_selected(id)) {
+        if let Some(node_id) = opened.filter(|&id| !graph_ctx.is_selected(id)) {
             out.push(GraphIntent::SetSelection {
                 to: BTreeSet::from([node_id]),
             });
@@ -71,7 +71,7 @@ impl NodeMenuUi {
             // "Run to this node" shows only when the clicked node can be a
             // run seed (same rule as the header play chip). The body only
             // runs while the menu is open.
-            if graph_scope.node(node_id).is_some_and(|n| n.runnable()) {
+            if graph_ctx.node(node_id).is_some_and(|n| n.runnable()) {
                 if MenuItem::new("Run to this node")
                     .show(ui, popup)
                     .left

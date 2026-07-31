@@ -14,7 +14,7 @@ use palantir::{
 };
 use scenarium::RamUsage;
 
-use crate::gui::app::AppContext;
+use crate::gui::app::AppCtx;
 use crate::gui::format::fmt_bytes;
 use crate::gui::widgets::support::{colored_text, hspacer, muted_text};
 
@@ -29,7 +29,7 @@ pub(crate) fn status_bar_id() -> WidgetId {
 }
 
 /// Draw the bottom status bar.
-pub(crate) fn show(ui: &mut Ui, ctx: AppContext<'_>) {
+pub(crate) fn show(ui: &mut Ui, ctx: AppCtx<'_>) {
     let ram = memory_label(ctx.process_memory(), ctx.run_state().cache_ram);
     let colors = &ctx.theme().colors;
     Panel::hstack()

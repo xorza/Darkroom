@@ -9,8 +9,8 @@ use scenarium::NodeId;
 use crate::core::document::{PortKind, PortRef};
 use crate::gui::EventRef;
 use crate::gui::canvas::hits::CanvasHits;
-use crate::gui::graph_scope::GraphScope;
-use crate::gui::graph_scope::node_scope::NodeScope;
+use crate::gui::graph_ctx::GraphCtx;
+use crate::gui::graph_ctx::node_scope::NodeScope;
 use crate::gui::node::header::subscription_glyph_wid;
 use crate::gui::node::node_widget_id;
 use crate::gui::node::port_row::{event_glyph_wid, port_circle_wid};
@@ -83,7 +83,7 @@ pub(crate) struct CanvasGeometry {
 
 /// A glyph key that names the node its glyph hangs off — how a [`PortLayer`]
 /// evicts a deleted node's entries, and how a wire drag resolves the pane it
-/// belongs to (`GraphScope::contains`) and notices the node disappearing
+/// belongs to (`GraphCtx::contains`) and notices the node disappearing
 /// under it.
 /// Every glyph domain the canvas keys on has one: a data port and an emitter
 /// event belong to their node, and a subscription pin *is* its node (a
@@ -304,12 +304,12 @@ impl CanvasGeometry {
     /// [`crate::gui::canvas::GraphUI::prepass`], after
     /// [`CanvasHits::scan`] has cleared the digest in the navigation
     /// phase, so the two writers never race for a slot.
-    pub(super) fn rebuild(&mut self, ui: &Ui, graph_scope: GraphScope<'_>, hits: &mut CanvasHits) {
+    pub(super) fn rebuild(&mut self, ui: &Ui, graph_ctx: GraphCtx<'_>, hits: &mut CanvasHits) {
         self.ports.live.clear();
         self.events.live.clear();
         self.subs.live.clear();
         self.node_screen.clear();
-        for n in graph_scope.nodes() {
+        for n in graph_ctx.nodes() {
             // Port offsets within a node are stable; the node's
             // canvas-local position changes when the user drags. Take
             // `port_offset = port_rect.center - node_rect.min` from

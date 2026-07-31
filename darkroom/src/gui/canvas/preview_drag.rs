@@ -19,7 +19,7 @@ use crate::core::preview;
 use crate::gui::canvas::drag_anchor::GroupDrag;
 use crate::gui::canvas::geometry::CanvasGeometry;
 use crate::gui::canvas::{CanvasCtx, preview_drag_modifier};
-use crate::gui::graph_scope::GraphScope;
+use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::node::port_row::{add_preview_intents, port_circle_wid};
 
 /// The in-flight spawn-and-place drag, or none.
@@ -33,19 +33,19 @@ impl PreviewDrag {
     /// in flight, and `PortRef` is document-unique, so the pane comes from the
     /// port's own node rather than from the caller.
     pub(super) fn apply(&mut self, ui: &mut Ui, cx: CanvasCtx<'_>, out: &mut Intents) {
-        let (graph_scope, geometry) = (cx.graph_scope(), cx.geometry());
+        let (graph_ctx, geometry) = (cx.graph_ctx(), cx.geometry());
         // A live drag owns the frame; only once it ends does the latch scan
         // below get a look at this frame's presses.
-        if self.drag.advance(ui, graph_scope, out) || !preview_drag_modifier(ui) {
+        if self.drag.advance(ui, graph_ctx, out) || !preview_drag_modifier(ui) {
             return;
         }
-        let Some(port) = scan_output_drag_start(geometry, graph_scope) else {
+        let Some(port) = scan_output_drag_start(geometry, graph_ctx) else {
             return;
         };
-        if !graph_scope.contains(port.node_id) {
+        if !graph_ctx.contains(port.node_id) {
             return;
         }
-        let Some(func) = preview::registered(graph_scope.library()) else {
+        let Some(func) = preview::registered(graph_ctx.library()) else {
             return;
         };
         // One lookup gating the whole spawn: a port that hasn't measured has no
@@ -72,11 +72,8 @@ impl PreviewDrag {
 /// First output port whose circle began a drag this frame. Unfiltered by pane:
 /// only one press exists, so the caller resolves the winner's pane once rather
 /// than paying a lookup per candidate node.
-fn scan_output_drag_start(
-    geometry: &CanvasGeometry,
-    graph_scope: GraphScope<'_>,
-) -> Option<PortRef> {
-    let keys = graph_scope
+fn scan_output_drag_start(geometry: &CanvasGeometry, graph_ctx: GraphCtx<'_>) -> Option<PortRef> {
+    let keys = graph_ctx
         .nodes()
         .flat_map(|node| node.ports(PortKind::Output));
     geometry.ports.first_drag_started(keys)

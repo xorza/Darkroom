@@ -17,7 +17,7 @@
 //! action (clicking a node / bare canvas, panning, zooming); `Pinned`
 //! ones persist. State lives on `GraphUI` (not the resettable gesture
 //! group) so pinned panels survive tab switches — panels only render for
-//! nodes the current `GraphScope` holds, so off-tab ones disappear.
+//! nodes the current `GraphCtx` holds, so off-tab ones disappear.
 
 use std::collections::BTreeMap;
 
@@ -34,7 +34,7 @@ use scenarium::NodeId;
 use crate::gui::canvas::hits::{CanvasHits, Chip};
 use crate::gui::canvas::{CanvasCtx, outer_canvas_widget_id};
 use crate::gui::format::fmt_elapsed;
-use crate::gui::node::{NodeCtx, RecordCtx, exec_color};
+use crate::gui::node::{DrawCtx, NodeCtx, exec_color};
 use crate::gui::run_state::ExecStatus;
 use crate::gui::theme::Theme;
 use crate::gui::widgets::support::{colored_text, sized_text};
@@ -110,7 +110,7 @@ impl Inspectors {
             self.close_unpinned();
         }
         // A panel outlives its node only until the next sweep.
-        self.modes.retain(|id, _| cx.graph_scope().contains(*id));
+        self.modes.retain(|id, _| cx.graph_ctx().contains(*id));
     }
 
     /// Record a panel for every open inspector, positioned just right of
@@ -119,10 +119,10 @@ impl Inspectors {
     /// hit-tests over the nodes beneath. Walks `modes` in node-id order, so
     /// two overlapping panels keep a stable front-to-back relationship
     /// instead of trading places between frames.
-    pub(super) fn draw_panels(&self, ui: &mut Ui, rcx: RecordCtx<'_>) {
-        let (theme, graph_scope, geometry) = (rcx.theme(), rcx.graph_scope(), rcx.geometry());
+    pub(super) fn draw_panels(&self, ui: &mut Ui, dcx: DrawCtx<'_>) {
+        let (theme, graph_ctx, geometry) = (dcx.theme(), dcx.graph_ctx(), dcx.geometry());
         for (&id, &mode) in &self.modes {
-            let Some(node) = graph_scope.node(id) else {
+            let Some(node) = graph_ctx.node(id) else {
                 continue;
             };
             // The cached body width places the panel just past the node's
@@ -135,14 +135,14 @@ impl Inspectors {
                 .map(|r| r.size.w)
                 .unwrap_or(theme.node_min_width);
             let pos = node.pos + Vec2::new(node_w + theme.floating_widget_gap, 0.0);
-            self.draw_one(ui, rcx.node(ui, node), mode, pos);
+            self.draw_one(ui, dcx.node(ui, node), mode, pos);
         }
     }
 
     fn draw_one(&self, ui: &mut Ui, ncx: NodeCtx<'_>, mode: InspectMode, pos: Vec2) {
         let (theme, node) = (ncx.theme(), ncx.node());
-        let logs = ncx.graph_scope().run_state().logs(node.id);
-        let error = ncx.graph_scope().run_state().error(node.id);
+        let logs = ncx.graph_ctx().run_state().logs(node.id);
+        let error = ncx.graph_ctx().run_state().error(node.id);
         // The outline is the *pinned* signal, in the same accent the header's
         // `i` chip uses for its open/pinned states — one color means
         // "inspector held open" on both ends. A transient panel rides on its
@@ -218,7 +218,7 @@ impl Inspectors {
                     line(ui, node.description(), muted_style(theme, ui));
                 }
 
-                let library = ncx.graph_scope().library();
+                let library = ncx.graph_ctx().library();
                 if node.inputs().len() > 0 {
                     section(ui, theme, "Inputs");
                     for input in node.inputs() {

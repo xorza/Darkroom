@@ -1,7 +1,7 @@
 //! Low-level glyph-drawing primitives for a port row: the circle a data
 //! port paints as, the triangle an emitter event paints as, and the shared
 //! hit-box-growth math both ride on. None of these take any domain context
-//! (`RecordCtx`/`GraphScope`) — they're pure "draw this shape in this box"
+//! (`DrawCtx`/`GraphCtx`) — they're pure "draw this shape in this box"
 //! helpers, unlike [`super`], which is grid orchestration and per-cell
 //! rendering.
 
