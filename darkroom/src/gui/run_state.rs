@@ -107,19 +107,6 @@ impl RunState {
         self.nodes.get(&id).map(|n| n.status).unwrap_or_default()
     }
 
-    /// Whether `id` performs sink work, per the installed program. `None`
-    /// before the first compile, or when the node covers no compiled work —
-    /// see [`CompiledGraph::is_sink`].
-    pub(crate) fn is_sink(&self, id: NodeId) -> Option<bool> {
-        self.compiled.as_ref()?.is_sink(id)
-    }
-
-    /// Whether `id` holds work that recomputes every run, per the installed
-    /// program. `None` on the same terms as [`Self::is_sink`].
-    pub(crate) fn is_impure(&self, id: NodeId) -> Option<bool> {
-        self.compiled.as_ref()?.is_impure(id)
-    }
-
     pub(crate) fn logs(&self, id: NodeId) -> &[NodeLog] {
         self.nodes
             .get(&id)
