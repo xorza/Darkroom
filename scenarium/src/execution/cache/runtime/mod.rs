@@ -9,7 +9,7 @@
 //! back — so RAM eviction lives here, on the cache that owns both stores.
 //! Per-run results (errors, timings) are *not* here — they belong to a single run, not the cache.
 
-mod consumers;
+mod consumer_cone;
 pub(crate) mod error;
 
 use std::collections::HashSet;
@@ -25,7 +25,7 @@ use crate::execution::cache::digest::{DOMAIN, Digest, DigestHasher, InputTag};
 use crate::execution::cache::disk_store::{BlobTarget, DiskStore, StorePolicy};
 use crate::execution::cache::resource::error::StampError;
 use crate::execution::cache::resource::{FsPathId, StampJob};
-use crate::execution::cache::runtime::consumers::Consumers;
+use crate::execution::cache::runtime::consumer_cone::ConsumerCone;
 use crate::execution::cache::runtime::error::CacheEvictionFailure;
 use crate::execution::cache::slot::RuntimeSlot;
 use crate::execution::compile::compiled_graph::{CompiledGraph, ExecutionBinding};
@@ -76,6 +76,10 @@ pub(crate) struct RuntimeCache {
     /// The off-thread walk that fills `fs_paths`: queue, then pass. It owns
     /// only what crosses to the blocking pool.
     stamp_job: StampJob,
+    /// The buffers an eviction's downstream walk runs in. Held rather than
+    /// built per call: what it derives is a pure function of the program and is
+    /// refilled every time, but the allocations behind it need not be.
+    cone: ConsumerCone,
     ram_seen: HashSet<usize>,
 }
 
@@ -150,10 +154,12 @@ impl RuntimeCache {
         program: &CompiledGraph,
         seeds: &[NodeId],
     ) -> Vec<CacheEvictionFailure> {
-        let cone = Consumers::reverse(program)
-            .closure(seeds.iter().filter_map(|node_id| program.node(*node_id)));
+        let downstream = self.cone.of(
+            program,
+            seeds.iter().filter_map(|node_id| program.node(*node_id)),
+        );
         let mut failures = Vec::new();
-        for node_idx in cone.iter() {
+        for node_idx in downstream.iter() {
             let node_id = program.node_ids[node_idx];
             match self.disk_store.remove_node(node_id).await {
                 Ok(()) => self.slots[node_idx].clear_output(),
