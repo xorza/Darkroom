@@ -112,12 +112,13 @@ fn a_culled_nodes_ports_stay_anchored_until_its_node_leaves_the_document() {
             process_memory: 0,
         };
         let mut intents = Intents::default();
-        graph_ui.prepass(ui, doc, &library, &run_state, &mut intents);
+        let graph_scope = scope(doc, &library, &run_state);
+        graph_ui.prepass(ui, graph_scope, &mut intents);
         Panel::vstack()
             .id_salt("pane")
             .size((Sizing::FILL, Sizing::FILL))
             .show(ui, |ui| {
-                graph_ui.draw(ui, &ctx, doc, &mut intents);
+                graph_ui.draw(ui, &ctx, graph_scope, &mut intents);
             });
     };
     let frame = |harness: &mut UiHarness, graph_ui: &mut GraphUI, doc: &_| {
@@ -241,12 +242,13 @@ fn the_palette_sizes_its_results_area_from_the_search_row_it_actually_has() {
                 process_memory: 0,
             };
             let mut intents = Intents::default();
-            graph_ui.prepass(ui, &doc, &library, &run_state, &mut intents);
+            let graph_scope = scope(&doc, &library, &run_state);
+            graph_ui.prepass(ui, graph_scope, &mut intents);
             Panel::vstack()
                 .id_salt("pane")
                 .size((Sizing::FILL, Sizing::FILL))
                 .show(ui, |ui| {
-                    graph_ui.draw(ui, &ctx, &doc, &mut intents);
+                    graph_ui.draw(ui, &ctx, graph_scope, &mut intents);
                 });
         };
 
@@ -375,13 +377,14 @@ fn escape_cancels_a_rubber_band_and_leaves_no_residue() {
             process_memory: 0,
         };
         let mut intents = Intents::default();
-        graph_ui.scan_hits(ui, &doc, &library, &run_state);
-        graph_ui.prepass(ui, &doc, &library, &run_state, &mut intents);
+        let graph_scope = scope(&doc, &library, &run_state);
+        graph_ui.scan_hits(ui, Some(graph_scope));
+        graph_ui.prepass(ui, graph_scope, &mut intents);
         Panel::vstack()
             .id_salt("pane")
             .size((Sizing::FILL, Sizing::FILL))
             .show(ui, |ui| {
-                graph_ui.draw(ui, &ctx, &doc, &mut intents);
+                graph_ui.draw(ui, &ctx, graph_scope, &mut intents);
             });
         intents.drain().collect::<Vec<_>>()
     };
@@ -486,12 +489,13 @@ fn the_breaker_cuts_a_node_at_its_current_position_not_its_last_painted_one() {
             process_memory: 0,
         };
         let mut intents = Intents::default();
-        graph_ui.prepass(ui, doc, &library, &run_state, &mut intents);
+        let graph_scope = scope(doc, &library, &run_state);
+        graph_ui.prepass(ui, graph_scope, &mut intents);
         Panel::vstack()
             .id_salt("pane")
             .size((Sizing::FILL, Sizing::FILL))
             .show(ui, |ui| {
-                graph_ui.draw(ui, &ctx, doc, &mut intents);
+                graph_ui.draw(ui, &ctx, graph_scope, &mut intents);
             });
         intents.drain().collect::<Vec<_>>()
     };
@@ -573,13 +577,14 @@ fn a_node_body_right_click_selects_the_node_it_landed_on() {
         };
         let mut intents = Intents::default();
         // Navigation phase first — the sweep runs before the tab set settles.
-        graph_ui.scan_hits(ui, &doc, &library, &run_state);
-        graph_ui.prepass(ui, &doc, &library, &run_state, &mut intents);
+        let graph_scope = scope(&doc, &library, &run_state);
+        graph_ui.scan_hits(ui, Some(graph_scope));
+        graph_ui.prepass(ui, graph_scope, &mut intents);
         Panel::vstack()
             .id_salt("pane")
             .size((Sizing::FILL, Sizing::FILL))
             .show(ui, |ui| {
-                graph_ui.draw(ui, &ctx, &doc, &mut intents);
+                graph_ui.draw(ui, &ctx, graph_scope, &mut intents);
             });
         intents.drain().collect::<Vec<_>>()
     };
@@ -640,13 +645,14 @@ fn a_body_drag_moves_the_node_by_the_pointers_travel() {
             process_memory: 0,
         };
         let mut intents = Intents::default();
-        graph_ui.scan_hits(ui, &doc, &library, &run_state);
-        graph_ui.prepass(ui, &doc, &library, &run_state, &mut intents);
+        let graph_scope = scope(&doc, &library, &run_state);
+        graph_ui.scan_hits(ui, Some(graph_scope));
+        graph_ui.prepass(ui, graph_scope, &mut intents);
         Panel::vstack()
             .id_salt("pane")
             .size((Sizing::FILL, Sizing::FILL))
             .show(ui, |ui| {
-                graph_ui.draw(ui, &ctx, &doc, &mut intents);
+                graph_ui.draw(ui, &ctx, graph_scope, &mut intents);
             });
         intents.drain().collect::<Vec<_>>()
     };
@@ -734,12 +740,13 @@ fn a_port_drag_released_over_a_compatible_port_commits_the_binding() {
             process_memory: 0,
         };
         let mut intents = Intents::default();
-        graph_ui.prepass(ui, doc, &library, &run_state, &mut intents);
+        let graph_scope = scope(doc, &library, &run_state);
+        graph_ui.prepass(ui, graph_scope, &mut intents);
         Panel::vstack()
             .id_salt("pane")
             .size((Sizing::FILL, Sizing::FILL))
             .show(ui, |ui| {
-                graph_ui.draw(ui, &ctx, doc, &mut intents);
+                graph_ui.draw(ui, &ctx, graph_scope, &mut intents);
             });
         intents.drain().collect::<Vec<_>>()
     };
@@ -878,12 +885,13 @@ fn ctrl_drag_off_an_output_spawns_a_preview_wired_to_it() {
             process_memory: 0,
         };
         let mut intents = Intents::default();
-        graph_ui.prepass(ui, &doc, &library, &run_state, &mut intents);
+        let graph_scope = scope(&doc, &library, &run_state);
+        graph_ui.prepass(ui, graph_scope, &mut intents);
         Panel::vstack()
             .id_salt("pane")
             .size((Sizing::FILL, Sizing::FILL))
             .show(ui, |ui| {
-                graph_ui.draw(ui, &ctx, &doc, &mut intents);
+                graph_ui.draw(ui, &ctx, graph_scope, &mut intents);
             });
         intents.drain().collect::<Vec<_>>()
     };

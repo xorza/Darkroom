@@ -10,7 +10,7 @@ use crate::gui::app::AppContext;
 use crate::gui::canvas::geometry::CanvasGeometry;
 use crate::gui::canvas::gesture_slot::GestureSlot;
 use crate::gui::canvas::{CanvasGesture, outer_canvas_widget_id, to_world};
-use crate::gui::scene::Pane;
+use crate::gui::graph_scope::GraphScope;
 
 /// Rubber-band multi-selection. A plain left-drag on empty canvas
 /// sweeps a rectangle; intersecting nodes highlight live as it moves and
@@ -69,7 +69,7 @@ impl RubberBand {
 }
 
 impl SelectionUI {
-    /// The live swept set while a band is in flight over `graph`'s pane,
+    /// The live swept set while a band is in flight over `graph_scope`'s pane,
     /// for node/pin draw to paint against; `None` for every other pane and
     /// when no band is active (the caller falls back to the pane's
     /// committed selection).
@@ -93,7 +93,7 @@ impl SelectionUI {
     pub(super) fn apply(
         &mut self,
         ui: &mut Ui,
-        graph: Pane<'_>,
+        graph_scope: GraphScope<'_>,
         geometry: &CanvasGeometry,
         gesture: Option<CanvasGesture>,
         cancelled: bool,
@@ -104,7 +104,7 @@ impl SelectionUI {
             && gesture == Some(CanvasGesture::Select)
             && let Some(p) = resp.pointer_local
         {
-            let w = to_world(p, &graph.viewport());
+            let w = to_world(p, &graph_scope.viewport());
             let band = RubberBand {
                 start: w,
                 current: w,
@@ -113,7 +113,7 @@ impl SelectionUI {
                 // Captured once, so the per-frame union never re-reads the
                 // document.
                 base: if ui.modifiers().shift {
-                    graph.selected().clone()
+                    graph_scope.selected().clone()
                 } else {
                     BTreeSet::new()
                 },
@@ -131,7 +131,7 @@ impl SelectionUI {
             return;
         };
         if let Some(p) = resp.pointer_local {
-            band.current = to_world(p, &graph.viewport());
+            band.current = to_world(p, &graph_scope.viewport());
         }
         let rect = band.rect();
         // Swept into the reused preview buffer: refilled from scratch every
@@ -139,7 +139,7 @@ impl SelectionUI {
         let swept = &mut self.swept;
         swept.clear();
         swept.extend(band.base.iter().copied());
-        for n in graph.nodes() {
+        for n in graph_scope.nodes() {
             // The cached-size world rect, so nodes the viewport cull
             // skipped this frame still sweep. Never-measured nodes
             // (first frame) can't be hit yet — skip.
@@ -169,7 +169,7 @@ impl SelectionUI {
 
     /// Paint the in-progress rectangle. Drawn inside the inner canvas so
     /// its world coords ride the same pan/zoom transform as the nodes.
-    /// No-op when no gesture is active on `graph`'s pane or the rect has
+    /// No-op when no gesture is active on `graph_scope`'s pane or the rect has
     /// no area yet.
     pub(super) fn draw(&self, ui: &mut Ui, ctx: &AppContext<'_>) {
         let Some(band) = self.band.get() else {

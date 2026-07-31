@@ -17,7 +17,7 @@ use crate::core::edit::intent::types::GraphIntent;
 use crate::gui::app::AppContext;
 use crate::gui::canvas::anchored_menu::AnchoredMenu;
 use crate::gui::canvas::{CanvasGesture, outer_canvas_widget_id, to_world};
-use crate::gui::scene::Pane;
+use crate::gui::graph_scope::GraphScope;
 
 /// One row of a category's palette list: a library `Func` or a built-in
 /// special node. Collecting them into one type lets a category's rows be
@@ -98,7 +98,7 @@ impl NewNodeUi {
         &mut self,
         ui: &mut Ui,
         ctx: &AppContext<'_>,
-        graph: Pane<'_>,
+        graph_scope: GraphScope<'_>,
         gesture: Option<CanvasGesture>,
         pending_source: Option<PortRef>,
         out: &mut Intents,
@@ -111,7 +111,7 @@ impl NewNodeUi {
         if (pending_source.is_some() || gesture == Some(CanvasGesture::NewNode))
             && let (Some(local), Some(rect)) = (resp.pointer_local, resp.rect)
         {
-            self.world_pos = to_world(local, &graph.viewport());
+            self.world_pos = to_world(local, &graph_scope.viewport());
             self.source = pending_source;
             self.menu.open_at(rect.min + local);
             // Fresh open: empty the filter, read the graph's own

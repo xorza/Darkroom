@@ -8,7 +8,7 @@ use crate::gui::app::commands::AppCommand;
 use crate::gui::app::commands::run::RunCommand;
 use crate::gui::canvas::anchored_menu::NodeContextMenu;
 use crate::gui::canvas::hits::CanvasHits;
-use crate::gui::scene::Pane;
+use crate::gui::graph_scope::GraphScope;
 
 /// Right-click on a node body → a small popup with actions on the node.
 /// The trigger scan, the per-open node latch, and the popup lifecycle are all
@@ -51,17 +51,17 @@ impl NodeMenuUi {
         &mut self,
         ui: &mut Ui,
         hits: &CanvasHits,
-        graph: Pane<'_>,
+        graph_scope: GraphScope<'_>,
         out: &mut Intents,
     ) -> Option<AppCommand> {
         // Boundary interface nodes carry no structural identity to
         // duplicate/remove — the sweep applies that guard, so a boundary
         // node never surfaces here.
-        let opened = self.menu.latch(ui, hits, graph);
+        let opened = self.menu.latch(ui, hits, graph_scope);
         // Right-click selects the clicked node when it isn't already part of
         // the selection, so the chosen action always targets a coherent set
         // ("select then act").
-        if let Some(node_id) = opened.filter(|&id| !graph.is_selected(id)) {
+        if let Some(node_id) = opened.filter(|&id| !graph_scope.is_selected(id)) {
             out.push(GraphIntent::SetSelection {
                 to: BTreeSet::from([node_id]),
             });
@@ -72,7 +72,7 @@ impl NodeMenuUi {
             // "Run to this node" shows only when the clicked node can be a
             // run seed (same rule as the header play chip). The body only
             // runs while the menu is open.
-            if graph.node(node_id).is_some_and(|n| graph.runnable(n)) {
+            if graph_scope.node(node_id).is_some_and(|n| n.runnable()) {
                 if MenuItem::new("Run to this node")
                     .show(ui, popup)
                     .left

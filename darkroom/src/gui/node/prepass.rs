@@ -20,8 +20,8 @@ use scenarium::{DataType, FsPathConfig, StaticValue};
 use crate::core::document::{PortKind, PortRef};
 use crate::core::edit::intent::sink::Intents;
 use crate::gui::canvas::hits::CanvasHits;
+use crate::gui::graph_scope::GraphScope;
 use crate::gui::node::set_input;
-use crate::gui::scene::{InputBindingView, Pane};
 
 /// A click on an `FsPath` input's inline pick button, surfaced for the
 /// caller to translate into a file-dialog command. The node UI
@@ -44,17 +44,21 @@ pub(crate) struct PathPickRequest {
 /// path* is a question about the port's type, and answering it needs the
 /// scene. An editor on any other type has no button to click and falls
 /// out here.
-pub(crate) fn emit_path_picks(hits: &CanvasHits, graph: Pane<'_>) -> Option<PathPickRequest> {
+pub(crate) fn emit_path_picks(
+    hits: &CanvasHits,
+    graph_scope: GraphScope<'_>,
+) -> Option<PathPickRequest> {
     let port = hits.clicked_const_editor()?;
-    let node = graph.node(port.node_id)?;
-    let input = graph.inputs(node.inputs).get(port.port_idx)?;
+    let input = graph_scope.node(port.node_id)?.input(port.port_idx)?;
     if !matches!(
-        &input.binding,
-        InputBindingView::Const(StaticValue::FsPath(_) | StaticValue::FsPaths(_))
+        input.binding(),
+        Some(Binding::Const(
+            StaticValue::FsPath(_) | StaticValue::FsPaths(_)
+        ))
     ) {
         return None;
     }
-    let DataType::FsPath(config) = &input.ty else {
+    let DataType::FsPath(config) = input.ty() else {
         return None;
     };
     Some(PathPickRequest {
@@ -72,36 +76,40 @@ pub(crate) fn emit_path_picks(hits: &CanvasHits, graph: Pane<'_>) -> Option<Path
 /// a `Const` input's inline editor resizes the node — doing it before Pass A
 /// lets the node arrange at its settled size and the wires re-anchor the same
 /// frame, instead of floating until the relayout pass.
-pub(crate) fn emit_port_dblclicks(hits: &CanvasHits, graph: Pane<'_>, out: &mut Intents) {
+pub(crate) fn emit_port_dblclicks(
+    hits: &CanvasHits,
+    graph_scope: GraphScope<'_>,
+    out: &mut Intents,
+) {
     let Some(port) = hits.double_clicked_port() else {
         return;
     };
-    let Some(node) = graph.node(port.node_id) else {
+    let Some(node) = graph_scope.node(port.node_id) else {
         return;
     };
     match port.kind {
         PortKind::Input => {
-            let Some(input) = graph.inputs(node.inputs).get(port.port_idx) else {
+            let Some(input) = node.input(port.port_idx) else {
                 return;
             };
-            match &input.binding {
+            match input.binding() {
                 // Unbound → seed the default literal (or first enum / value-
-                // option variant, both already folded into `SceneInput::default`).
+                // option variant, both resolved by `InputScope::default`).
                 // Boundary ports route the interface — no const affordance, so
                 // an unbound one has nothing to seed (its label double-click
                 // renames).
-                InputBindingView::None => {
-                    if true && let Some(default) = &input.default {
-                        out.push(set_input(port, Binding::Const(default.clone())));
+                None => {
+                    if let Some(default) = input.default() {
+                        out.push(set_input(port, Binding::Const(default)));
                     }
                 }
                 // Already bound → clear it.
-                _ => out.push(set_input(port, None)),
+                Some(_) => out.push(set_input(port, None)),
             }
         }
         // An output may feed many inputs — clear each consumer.
         PortKind::Output => {
-            for (consumer, producer) in graph.connections() {
+            for (consumer, producer) in graph_scope.connections() {
                 if producer.node_id == port.node_id && producer.port_idx == port.port_idx {
                     out.push(set_input(
                         PortRef {

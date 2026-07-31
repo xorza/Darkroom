@@ -22,11 +22,11 @@ use crate::core::edit::intent::sink::Intents;
 use crate::core::edit::intent::types::{GraphIntent, NodeProperty};
 use crate::gui::canvas::inspector::{InspectMode, inspect_badge_wid};
 use crate::gui::format::fmt_elapsed;
+use crate::gui::graph_scope::node_scope::NodeScope;
 use crate::gui::node::port_color::event_color;
 use crate::gui::node::port_row::glyph::{EVENT_TRIANGLE_RADIUS, PORT_HIT_SCALE};
 use crate::gui::node::{RecordCtx, click_intents, exec_color, node_rename_wid, node_wid};
 use crate::gui::run_state::ExecStatus;
-use crate::gui::scene::SceneNode;
 use crate::gui::theme::Theme;
 use crate::gui::widgets::badge::{BADGE_FONT, BADGE_SIZE, Badge};
 use crate::gui::widgets::inline_rename::InlineRename;
@@ -68,7 +68,7 @@ const RUN_TIME_MIN_WIDTH: f32 = 52.0;
 /// node (the body records after, so it hit-tests on top), while
 /// drop-snapping (rect-based) still accepts the whole box. `hovered` (set
 /// while a drag snaps to it) tints the triangle as drop feedback.
-pub(super) fn subscription_pin(ui: &mut Ui, theme: &Theme, node: &SceneNode, hovered: bool) {
+pub(super) fn subscription_pin(ui: &mut Ui, theme: &Theme, node: NodeScope<'_>, hovered: bool) {
     let port = theme.port_size;
     let hit = port * PORT_HIT_SCALE;
     let inset = (hit - port) * 0.5;
@@ -121,7 +121,7 @@ pub(crate) fn subscription_glyph_wid(node_id: NodeId) -> WidgetId {
 /// controls ride in [`status_row`] below). The sink nodes' event-
 /// subscription pin is *not* drawn here — it records at canvas level, before the
 /// node bodies, so it peeks out from behind the node's corner.
-pub(super) fn header(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Intents) {
+pub(super) fn header(ui: &mut Ui, rcx: RecordCtx<'_>, node: NodeScope<'_>, out: &mut Intents) {
     let theme = rcx.theme;
     // The header sits inside the body's border stroke (the layout folds
     // the stroke width into the body's padding), so it must round to the
@@ -140,7 +140,7 @@ pub(super) fn header(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mu
             // one control that *does* something with the node's output
             // rather than configuring it. Only on nodes that resolve as a
             // run seed.
-            if rcx.graph.runnable(node) {
+            if node.runnable() {
                 play_chip(ui, theme, node);
             }
             title(ui, rcx, node, out);
@@ -150,7 +150,7 @@ pub(super) fn header(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mu
             // Read-only markers — what the node *is* (flat tinted pills, not
             // interactive, so they read as labels). They ride here beside the
             // title; the interactive controls stay in `status_row` below.
-            if node.sink {
+            if node.sink() {
                 Badge::marker(
                     "badge_sink",
                     "■",
@@ -159,7 +159,7 @@ pub(super) fn header(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mu
                 )
                 .show(ui);
             }
-            if node.impure {
+            if node.impure() {
                 Badge::marker(
                     "badge_impure",
                     "~",
@@ -194,7 +194,7 @@ pub(super) fn header(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mu
 /// sink-disable, `↻` evict, and `R`/`↓` cache. The controls group apart from the title's
 /// identity (header above); the run-time reads as the row's status
 /// counterweight.
-pub(super) fn status_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Intents) {
+pub(super) fn status_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: NodeScope<'_>, out: &mut Intents) {
     let theme = rcx.theme;
     Panel::hstack()
         .id_salt("status_row")
@@ -209,16 +209,16 @@ pub(super) fn status_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out:
             // the final time once executed, or live elapsed-so-far while
             // running (`App::record` repaints so it ticks). Mono/tabular so it
             // holds a column across a stack of nodes.
-            let elapsed = match node.exec_status {
+            let elapsed = match node.exec_status() {
                 ExecStatus::Executed(secs) => Some(secs),
                 ExecStatus::Running(at) => Some(at.elapsed().as_secs_f64()),
                 _ => None,
             };
             if let Some(secs) = elapsed {
-                let color = exec_color(theme, node.exec_status).unwrap_or(ui.theme.text.color);
+                let color = exec_color(theme, node.exec_status()).unwrap_or(ui.theme.text.color);
                 // A comet spinner while computing, just left of the live time,
                 // so glow + spin + ticking time read as one "running" cue.
-                if matches!(node.exec_status, ExecStatus::Running(_)) {
+                if matches!(node.exec_status(), ExecStatus::Running(_)) {
                     Spinner::new()
                         .diameter(BADGE_FONT)
                         .color(color)
@@ -253,15 +253,15 @@ pub(super) fn status_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out:
                         // Never takes an accent: disabling is a suppression,
                         // not a stored value the way a cache bit is.
                         on_color: theme.colors.text_muted,
-                        on: node.disabled,
+                        on: node.disabled(),
                         tag: "disable_badge",
                         tip: "Disable — exclude this sink from graph runs",
-                        to: NodeProperty::Disabled(!node.disabled),
+                        to: NodeProperty::Disabled(!node.disabled()),
                     },
                     out,
                 );
             }
-            if node.can_evict_cache {
+            if node.can_evict_cache() {
                 Badge::control(
                     "↻",
                     theme.colors.badge_cache,
@@ -284,9 +284,9 @@ pub(super) fn status_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out:
             // Shown only where direct storage controls can apply — see
             // `SceneNode::cache_controls`.
             // (An impure node still paints the `~` marker below to say why.)
-            if node.cache_controls {
-                let ram = node.cache.caches_in_ram();
-                let disk = node.cache.persists_to_disk();
+            if node.cache_controls() {
+                let ram = node.cache().caches_in_ram();
+                let disk = node.cache().persists_to_disk();
                 // The two bits are the same chip twice — only which one the
                 // click flips differs.
                 for chip in [
@@ -335,7 +335,7 @@ struct PropertyChip {
 fn property_chip(
     ui: &mut Ui,
     theme: &Theme,
-    node: &SceneNode,
+    node: NodeScope<'_>,
     chip: PropertyChip,
     out: &mut Intents,
 ) {
@@ -371,8 +371,8 @@ fn property_chip(
 /// click delivers. The click is read at canvas level via
 /// [`play_badge_wid`] and translated into the run command there (node
 /// code never names `AppCommand`).
-fn play_chip(ui: &mut Ui, theme: &Theme, node: &SceneNode) {
-    let tooltip = if node.disabled {
+fn play_chip(ui: &mut Ui, theme: &Theme, node: NodeScope<'_>) {
+    let tooltip = if node.disabled() {
         "Run to this node once — temporarily override its disabled flag"
     } else {
         "Run to this node — execute its upstream cone and keep the output for preview"
@@ -404,10 +404,14 @@ fn draw_play_triangle(ui: &mut Ui, color: Color) {
 /// The node title: an inline-renamable label. Double-click swaps it for
 /// a `TextEdit`; commit emits [`GraphIntent::RenameNode`], single-click
 /// selects (the label would otherwise swallow the body's click).
-fn title(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Intents) {
+fn title(ui: &mut Ui, rcx: RecordCtx<'_>, node: NodeScope<'_>, out: &mut Intents) {
     let shift = ui.modifiers().shift;
     let id = node_rename_wid(node.id);
-    let ev = InlineRename::new(id, node.name.clone(), &rcx.theme.inline_rename)
+    // Interned here rather than carried on the node: the widget holds the
+    // handle across the label⇄editor swap, and this is the one place the
+    // name is drawn.
+    let name = ui.intern(node.name());
+    let ev = InlineRename::new(id, name, &rcx.theme.inline_rename)
         .max_chars(NODE_NAME_MAX_CHARS)
         .style(&TextStyle {
             weight: FontWeight::Bold,
@@ -415,7 +419,7 @@ fn title(ui: &mut Ui, rcx: RecordCtx<'_>, node: &SceneNode, out: &mut Intents) {
         })
         .show(ui);
     if ev.clicked {
-        click_intents(shift, rcx.graph, node.id, out);
+        click_intents(shift, rcx.graph_scope, node.id, out);
     }
     if let Some(to) = ev.committed {
         out.push(GraphIntent::RenameNode {

@@ -1,8 +1,7 @@
-use scenarium::Library;
 use std::collections::HashMap;
 
 use palantir::{Align, Background, Configure, KeyFilter, Panel, Sizing, Ui, VAlign, WidgetId};
-use scenarium::NodeId;
+use scenarium::{Library, NodeId};
 
 use crate::core::document::{Document, TabRef};
 use crate::core::edit::intent::sink::Intents;
@@ -14,7 +13,7 @@ use crate::gui::app::commands::prefs::PrefsCommand;
 use crate::gui::canvas::GraphUI;
 use crate::gui::canvas::hits::Chip;
 use crate::gui::dock::{DockContext, DockUi};
-use crate::gui::graph_toolbar;
+use crate::gui::graph_scope::GraphScope;
 use crate::gui::image_viewer::{self, ImageViewer};
 use crate::gui::menu_bar;
 use crate::gui::preferences_view;
@@ -56,6 +55,12 @@ fn claim(slot: &mut Option<AppCommand>, produce: impl FnOnce() -> Option<AppComm
 /// [`DockUi`]'s; this file only says what
 /// each tab kind looks like (the `content` closure in [`Self::frame`]).
 /// Adding a new pane *kind* is a new arm there.
+///
+/// **Where the graph scope is composed.** Each entry point below builds its
+/// own [`GraphScope`] from the document it is handed — which is settled by
+/// the time the caller reaches it, so the construction point and the call
+/// are the same instant. Keeping it here rather than in `Editor` means the
+/// editor shell never has to name the canvas subsystem's view type.
 #[derive(Default, Debug)]
 pub(crate) struct MainWindow {
     pub(crate) graph_ui: GraphUI,
@@ -77,13 +82,18 @@ impl MainWindow {
         &mut self,
         ui: &mut Ui,
         doc: &Document,
+        library: &Library,
+        run_state: &RunState,
         actions: &mut Vec<UiAction>,
     ) {
         self.dock.scan(ui, doc, actions);
         // One sweep of last frame's node responses, before anything reads
         // one: the canvas's own passes read it later in the frame, and the
-        // two chip opens below are why it has to happen this early.
-        self.graph_ui.scan_hits(ui, doc);
+        // two chip opens below are why it has to happen this early. Runs
+        // ahead of the tab dispatch, so the scope stays an `Option` — with
+        // no graph pane up there is nothing to sweep.
+        self.graph_ui
+            .scan_hits(ui, GraphScope::for_document(doc, library, run_state));
         let hits = &self.graph_ui.hits;
         if let Some(node) = hits.chip(Chip::PreviewImage) {
             actions.push(UiAction::OpenImageViewer(node));
@@ -100,20 +110,17 @@ impl MainWindow {
         run_state: &RunState,
         out: &mut Intents,
     ) {
-        // Rebuild the canvas's projection for this frame, before anything
-        // reads it. Unconditional, and outside the loop below: it must run
-        // even with no graph pane up, because the projection's names are
-        // handles into *this* record pass's text arena and rebuilding is what
-        // lets the previous pass's be recycled (see `Scene::rebuild`).
-        //
-        // Placed here rather than gated on the dirty flag because undo/redo
-        // replays steps onto the document during the caller's navigation
-        // phase; prepass and `CanvasGeometry` would otherwise read last
-        // frame's graph.
-        self.graph_ui.rebuild_scene(ui, library, run_state, doc);
         for tab in doc.layout.active_tabs() {
             match tab {
-                TabRef::Graph => self.graph_ui.prepass(ui, doc, library, out),
+                // `Document::shows_graph` — which the scope gates on — is
+                // this same predicate over the same groups, so matching the
+                // arm *is* the proof that it resolves.
+                TabRef::Graph => self.graph_ui.prepass(
+                    ui,
+                    GraphScope::for_document(doc, library, run_state)
+                        .expect("a Graph tab is active, so the scope resolves"),
+                    out,
+                ),
                 // Neither derives a document mutation from input: preferences
                 // edits go through their own widgets, and a viewer only
                 // navigates its own texture.
@@ -185,10 +192,15 @@ impl MainWindow {
                             .id_salt("graph_overlay")
                             .size((Sizing::FILL, Sizing::FILL))
                             .show(ui, |ui| {
-                                claim(&mut command, || graph_ui.draw(ui, ctx, doc, out));
+                                // `ctx` carries both halves this needs beside
+                                // the document; see `Self::prepass` for why
+                                // matching the arm proves it resolves.
+                                let graph_scope =
+                                    GraphScope::for_document(doc, ctx.library, ctx.run_state)
+                                        .expect("a Graph tab is active, so the scope resolves");
+                                claim(&mut command, || graph_ui.draw(ui, ctx, graph_scope, out));
                                 claim(&mut command, || {
-                                    let graph = graph_ui.pane(doc);
-                                    graph_toolbar::show(ui, ctx, graph, &graph_ui.geometry, out)
+                                    graph_ui.draw_toolbar(ui, ctx, graph_scope, out)
                                 });
                             });
                     }

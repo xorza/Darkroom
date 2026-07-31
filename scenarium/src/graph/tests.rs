@@ -13,12 +13,23 @@ use ::common::{SerdeFormat, deserialize, serialize};
 
 type TestResult<T = ()> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
-/// The effective type at one output port, through a table covering just this
-/// graph — the shape a host uses, narrowed to a single question.
+/// The effective type at one output port, asserted identical through **both**
+/// resolvers: the whole-graph table a compile fills, and the single-port walk
+/// a host reads per port.
+///
+/// They answer the same question by different routes — one memoizes every
+/// chain in the graph, the other walks one chain and remembers nothing — so
+/// every case below pins the pair rather than whichever it happened to call.
 fn output_type(graph: &Graph, library: &Library, port: OutputPort) -> DataType {
     let mut types = OutputTypes::default();
     types.update(graph, library);
-    types.get(port).cloned().unwrap_or_default()
+    let tabled = types.get(port).cloned().unwrap_or_default();
+    let walked = graph.output_type(library, port);
+    assert_eq!(
+        tabled, walked,
+        "the table and the single-port walk disagree about {port:?}"
+    );
+    walked
 }
 
 /// A passthrough func — one `Any` input, one wildcard output mirroring it. The
