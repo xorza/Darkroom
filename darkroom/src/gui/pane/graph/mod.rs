@@ -29,7 +29,7 @@ use crate::gui::app::commands::edit::EditCommand;
 use crate::gui::app::commands::run::RunCommand;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::pane::graph::background::CanvasBackground;
-use crate::gui::pane::graph::ctx::{CanvasCtx, DrawCtx};
+use crate::gui::pane::graph::ctx::{CanvasCtx, DrawCtx, Selection};
 use crate::gui::pane::graph::frame::cull::CullRegion;
 use crate::gui::pane::graph::frame::geometry::CanvasGeometry;
 use crate::gui::pane::graph::frame::hits::{CanvasHits, Chip};
@@ -451,7 +451,9 @@ impl GraphUI {
         // a band is in flight over *this* pane, else its committed set.
         // The preview is kept out of the document, so a band in flight
         // changes what paints without recording an edit.
-        let selected = selection_ui.preview().unwrap_or(graph_ctx.selected());
+        let selected = selection_ui
+            .preview()
+            .map_or(Selection::Committed(graph_ctx.selected()), Selection::swept);
 
         // Outer canvas: covers the whole pane, paints the canvas
         // background, owns the input routing for empty-canvas

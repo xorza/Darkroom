@@ -1,6 +1,6 @@
 use glam::{UVec2, Vec2};
 use palantir::internals::UiHarness;
-use palantir::{Configure, Panel, Sizing, Ui};
+use palantir::{Configure, Modifiers, Panel, Sizing, Ui};
 use scenarium::OutputTypes;
 
 use crate::core::document::{Document, GraphView};
@@ -112,5 +112,90 @@ fn escape_cancels_a_rubber_band_and_leaves_no_residue() {
         ),
         "the next band selects only what it swept, with no residue from the \
          cancelled one: {intents:?} (b = {b:?})"
+    );
+}
+
+/// A Shift-band commits the union of what it swept and what was already
+/// selected, counting a node in both exactly once.
+///
+/// The overlap is the case that pins the sweep's shape: `base` arrives sorted
+/// off the document's `BTreeSet`, the sweep appends in paint order, and a node
+/// in both lands twice. `Selection::swept` binary-searches, so a sweep left
+/// unsorted or undeduplicated answers *wrong* about what paints selected —
+/// its debug assertion fires on every frame of this drag.
+#[test]
+fn a_shift_band_unions_with_the_committed_selection_counting_overlap_once() {
+    let library = one_func_library();
+    let probe = library.by_name("probe").expect("just added").clone();
+    let mut doc = Document::default();
+    let a = doc.graph.add_func_node(&probe);
+    let b = doc.graph.add_func_node(&probe);
+    doc.main_view = GraphView::for_graph(&doc.graph);
+    doc.main_view
+        .item_placements
+        .insert(a, Vec2::new(40.0, 40.0));
+    doc.main_view
+        .item_placements
+        .insert(b, Vec2::new(260.0, 40.0));
+    // `a` is already selected, and the band below sweeps *both* — so `a`
+    // reaches the swept buffer twice, once from the base and once from the
+    // sweep.
+    doc.main_view.selected.insert(a);
+
+    let theme = Theme::default();
+    let run_state = RunState::default();
+    let mut harness = UiHarness::new(UVec2::new(1200, 800));
+    let mut graph_ui = GraphUI::default();
+    let draw = |ui: &mut Ui, graph_ui: &mut GraphUI| {
+        let mut intents = Intents::default();
+        let mut types = OutputTypes::default();
+        let graph_ctx = graph_ctx_for(app(&theme, &library, &run_state), &doc, &mut types);
+        graph_ui.prepass(ui, graph_ctx, &mut intents);
+        Panel::vstack()
+            .id_salt("pane")
+            .size((Sizing::FILL, Sizing::FILL))
+            .show(ui, |ui| {
+                graph_ui.draw(ui, graph_ctx, &mut intents);
+            });
+        intents.drain().collect::<Vec<_>>()
+    };
+    for _ in 0..2 {
+        harness.frame(|ui| {
+            draw(ui, &mut graph_ui);
+        });
+    }
+
+    harness.set_modifiers(Modifiers {
+        shift: true,
+        ..Modifiers::default()
+    });
+    harness.press_at(Vec2::new(20.0, 400.0));
+    harness.frame(|ui| {
+        draw(ui, &mut graph_ui);
+    });
+    // Two steps, not one: the band anchors where `drag.started()` first
+    // fires, so a single jump would latch and finish at the same point and
+    // sweep a zero-area rect.
+    harness.drag_to(Vec2::new(20.0, 390.0));
+    harness.frame(|ui| {
+        draw(ui, &mut graph_ui);
+    });
+    harness.drag_to(Vec2::new(700.0, 60.0));
+    harness.frame(|ui| {
+        draw(ui, &mut graph_ui);
+    });
+    harness.release_button(palantir::PointerButton::Left);
+    let emitted = harness.frame_value(|ui| draw(ui, &mut graph_ui));
+
+    let intents = graph_intents(&emitted);
+    // Both nodes, each once. `SetSelection` carries a `BTreeSet`, so the
+    // count is what says the duplicate was folded before it got there.
+    assert!(
+        matches!(
+            intents[..],
+            [GraphIntent::SetSelection { to }]
+                if to.len() == 2 && to.contains(&a) && to.contains(&b),
+        ),
+        "the shift band commits both nodes exactly once: {intents:?} (a = {a:?}, b = {b:?})"
     );
 }

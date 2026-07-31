@@ -12,9 +12,9 @@ use scenarium::NodeId;
 
 use crate::core::edit::intent::sink::Intents;
 use crate::core::edit::intent::types::GraphIntent;
-use std::collections::BTreeSet;
 
 use crate::gui::graph_ctx::GraphCtx;
+use crate::gui::pane::graph::ctx::DrawCtx;
 
 /// One in-flight group drag, or none.
 ///
@@ -140,17 +140,12 @@ impl Anchor {
 /// `start_positions` for a drag that grabbed an already-selected member —
 /// shared by both callers, so the group moves the same way regardless of
 /// which kind of member's press started it.
-pub(crate) fn selected_group_positions(
-    graph_ctx: GraphCtx<'_>,
-    selected: &BTreeSet<NodeId>,
-) -> Vec<(NodeId, Vec2)> {
-    let holds = |key: NodeId| selected.contains(&key);
-    let positions: Vec<(NodeId, Vec2)> = graph_ctx
+pub(crate) fn selected_group_positions(dcx: DrawCtx<'_>) -> Vec<(NodeId, Vec2)> {
+    dcx.graph_ctx()
         .nodes()
-        .filter(|n| holds(n.id))
+        .filter(|n| dcx.is_selected(n.id))
         .map(|n| (n.id, n.pos))
-        .collect();
-    positions
+        .collect()
 }
 
 #[cfg(test)]
