@@ -384,8 +384,12 @@ impl Compiler {
     /// A disabled node fires no events and receives none, and a subscription
     /// past the emitter's run — an event the func has since dropped — wires
     /// nothing: the same drift tolerance the type gate applies to data edges.
-    /// The run is read off the placed node rather than the declaration, so the
-    /// bound is the one the walk actually claimed.
+    ///
+    /// Both verdicts come off the *placed* node rather than the authoring one.
+    /// The walk copied `disabled` onto every node it emitted and claimed the run
+    /// there too, so `graph` is read for the subscriptions alone — one placement
+    /// lookup per endpoint answers everything else, where going back to the
+    /// graph would hash each id a second time for a flag already in hand.
     ///
     /// Takes no compiler state: the placement answers for identity and the two
     /// columns are the walk's own.
@@ -396,22 +400,18 @@ impl Compiler {
         events: &mut Column<EventIdx, ExecutionEvent>,
     ) {
         for sub in graph.subscriptions() {
-            let emitter = graph
-                .find(sub.emitter)
-                .expect("subscription emitter resolved by validate_with");
-            let subscriber = graph
-                .find(sub.subscriber)
-                .expect("subscriber resolved by validate_with");
-            if emitter.disabled || subscriber.disabled {
+            let emitter = &e_nodes[placement.idx(sub.emitter)];
+            let subscriber_idx = placement.idx(sub.subscriber);
+            if emitter.disabled || e_nodes[subscriber_idx].disabled {
                 continue;
             }
-            let run = e_nodes[placement.idx(sub.emitter)].events;
+            let run = emitter.events;
             if sub.event_idx >= run.len as usize {
                 continue;
             }
             events[run.nth(sub.event_idx as u32)]
                 .subscribers
-                .push(placement.idx(sub.subscriber));
+                .push(subscriber_idx);
         }
     }
 }

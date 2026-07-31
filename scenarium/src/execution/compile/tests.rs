@@ -562,7 +562,14 @@ fn drops_subscriptions_that_cannot_fire() {
         }
         testing::with_stub_lambda(func)
     };
-    let build = |events: usize, disable: bool| {
+    /// Which end of the edge, if either, the document disabled.
+    #[derive(Clone, Copy, Debug)]
+    enum Disabled {
+        Neither,
+        Emitter,
+        Subscriber,
+    }
+    let build = |events: usize, disabled: Disabled| {
         let mut library = Library::default();
         library.add(emitter_func(events));
         library.add(testing::with_stub_lambda(Func::new(
@@ -575,8 +582,10 @@ fn drops_subscriptions_that_cannot_fire() {
         // Authored against a two-event declaration; `events == 1` is the library
         // having since dropped the port this names.
         graph.subscribe(emitter, 1, subscriber);
-        if disable {
-            graph.find_mut(subscriber).unwrap().disabled = true;
+        match disabled {
+            Disabled::Neither => {}
+            Disabled::Emitter => graph.find_mut(emitter).unwrap().disabled = true,
+            Disabled::Subscriber => graph.find_mut(subscriber).unwrap().disabled = true,
         }
         let program = lower(&graph, &library);
         let events = program.by_id(emitter).events;
@@ -586,10 +595,23 @@ fn drops_subscriptions_that_cannot_fire() {
             .sum::<usize>()
     };
 
-    assert_eq!(build(2, false), 1, "the live subscription wires");
-    assert_eq!(build(2, true), 0, "a disabled subscriber receives nothing");
     assert_eq!(
-        build(1, false),
+        build(2, Disabled::Neither),
+        1,
+        "the live subscription wires"
+    );
+    assert_eq!(
+        build(2, Disabled::Emitter),
+        0,
+        "a disabled emitter fires nothing"
+    );
+    assert_eq!(
+        build(2, Disabled::Subscriber),
+        0,
+        "a disabled subscriber receives nothing"
+    );
+    assert_eq!(
+        build(1, Disabled::Neither),
         0,
         "an event the func dropped wires nothing"
     );
