@@ -437,38 +437,13 @@ mod tests {
     use glam::Vec2;
     use scenarium::{Func, FuncId, Node, NodeId, NodeKind, testing};
 
+    use crate::core::document::TabRef;
     use crate::core::document::dock::DockOp;
-    use crate::core::document::open_document::OpenDocument;
-    use crate::core::document::{Document, TabRef};
+    use crate::core::document::harness::DocFixture;
     use crate::core::edit::intent::types::GraphIntent;
     use crate::gui::UiAction;
-    use crate::gui::app::editor::Editor;
+    use crate::gui::app::editor::harness::EditorHarness;
     use crate::gui::pane::viewer::ImageViewer;
-
-    #[derive(Debug)]
-    struct TestEditor {
-        editor: Editor,
-        open: OpenDocument,
-    }
-
-    impl TestEditor {
-        fn new(document: Document) -> Self {
-            Self {
-                editor: Editor::new(),
-                open: OpenDocument {
-                    document,
-                    path: None,
-                    dirty: false,
-                },
-            }
-        }
-
-        fn undo(&mut self) -> bool {
-            self.editor
-                .action_stack
-                .undo(&mut self.open.document, &mut |_| {})
-        }
-    }
 
     fn func_node() -> Node {
         let func = testing::with_stub_lambda(Func::new(FuncId::unique(), "probe"));
@@ -491,35 +466,29 @@ mod tests {
     #[test]
     #[should_panic(expected = "a widget built a malformed intent")]
     fn a_widget_built_malformed_intent_is_a_bug_not_a_refusal() {
-        let mut test = TestEditor::new(Document::default());
-        test.editor.apply_edit(
-            &mut test.open,
-            GraphIntent::AddNode {
-                pos: Vec2::ZERO,
-                node_id: NodeId::nil(),
-                node: Node::new(NodeKind::Func(FuncId::unique())),
-                bindings: vec![],
-            },
-        );
+        let mut test = EditorHarness::new(DocFixture::default());
+        test.apply(GraphIntent::AddNode {
+            pos: Vec2::ZERO,
+            node_id: NodeId::nil(),
+            node: Node::new(NodeKind::Func(FuncId::unique())),
+            bindings: vec![],
+        });
     }
 
     /// The exit prompt's signal: content edits flip `dirty`, navigation
     /// doesn't.
     #[test]
     fn dirty_flag_tracks_content_edits_not_navigation() {
-        let mut test = TestEditor::new(Document::default());
+        let mut test = EditorHarness::new(DocFixture::default());
         let node_id = NodeId::unique();
 
-        test.editor.apply_edit(&mut test.open, add(node_id));
+        test.apply(add(node_id));
         assert!(test.open.dirty, "adding a node is savable work");
 
         test.open.dirty = false;
-        test.editor.apply_edit(
-            &mut test.open,
-            GraphIntent::SetSelection {
-                to: [node_id].into_iter().collect(),
-            },
-        );
+        test.apply(GraphIntent::SetSelection {
+            to: [node_id].into_iter().collect(),
+        });
         assert!(!test.open.dirty, "selecting is navigation");
     }
 
@@ -529,15 +498,15 @@ mod tests {
     /// rearrangement doesn't prompt.
     #[test]
     fn dock_ops_apply_without_entering_the_undo_history_or_dirtying() {
-        let mut test = TestEditor::new(Document::default());
+        let mut test = EditorHarness::new(DocFixture::default());
         let node_id = NodeId::unique();
-        test.editor.apply_edit(&mut test.open, add(node_id));
+        test.apply(add(node_id));
 
         let tab = TabRef::ImageViewer(node_id);
         test.open.dirty = false;
         test.editor.actions.push(UiAction::OpenImageViewer(node_id));
         test.editor.apply_view_actions(&mut test.open);
-        test.editor.drain_intents(&mut test.open);
+        test.drain();
         assert!(
             test.open.document.layout.all_tabs().any(|t| t == tab),
             "the viewer tab opened"
@@ -561,13 +530,13 @@ mod tests {
     /// once the tab closes.
     #[test]
     fn image_viewer_tabs_dedupe_per_node_and_prune_state_on_close() {
-        let mut test = TestEditor::new(Document::default());
+        let mut test = EditorHarness::new(DocFixture::default());
         let node_id = NodeId::unique();
         let tab = TabRef::ImageViewer(node_id);
 
         test.editor.open_image_viewer(&mut test.open, node_id);
         test.editor.open_image_viewer(&mut test.open, node_id);
-        test.editor.drain_intents(&mut test.open);
+        test.drain();
         assert_eq!(
             test.open
                 .document
