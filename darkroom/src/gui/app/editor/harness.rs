@@ -2,11 +2,11 @@
 //! [`UiHarness`], so a test can feed a real pointer event and assert on
 //! what the editor did with it.
 //!
-//! This is the level above `TestEditor`, which calls `apply_edit` /
-//! `drain_intents` directly and never records. Everything between a
-//! pointer event and an intent — hit-testing, response routing, pane
-//! scoping — is only exercised by driving frames, and that is what this
-//! type is for.
+//! Two levels, one type. [`EditorHarness::apply`] / [`EditorHarness::drain`]
+//! reach the edit path directly and record nothing — enough for the tests
+//! about what an intent does to a document. [`EditorHarness::frame`] drives a
+//! real record pass, which is the only way to exercise what sits between a
+//! pointer event and an intent: hit-testing, response routing, pane scoping.
 //!
 //! **The record closure runs once per record pass, not once per frame.**
 //! `Editor::frame` is called from `App::record`, so on a frame with
@@ -21,8 +21,9 @@ use palantir::Ui;
 use palantir::internals::UiHarness;
 use scenarium::Library;
 
-use crate::core::document::Document;
+use crate::core::document::harness::DocFixture;
 use crate::core::document::open_document::OpenDocument;
+use crate::core::edit::intent::types::GraphIntent;
 use crate::core::io::preferences::Preferences;
 use crate::gui::app::commands::AppCommand;
 use crate::gui::app::ctx::{AppCtx, StatusInputs};
@@ -56,21 +57,39 @@ pub(crate) struct EditorHarness {
 impl EditorHarness {
     /// Real text shaping — the dock strip and node headers size to their
     /// labels, so mono metrics would put every chip in the wrong place.
-    pub(crate) fn new(document: Document) -> Self {
+    pub(crate) fn new(fixture: DocFixture) -> Self {
         Self {
             ui: UiHarness::with_text(SURFACE),
             editor: Editor::new(),
             open: OpenDocument {
-                document,
+                document: fixture.doc,
                 path: None,
                 dirty: false,
             },
-            library: Library::default(),
+            library: fixture.library,
             theme: Theme::default(),
             run_state: RunState::default(),
             preferences: Preferences::default(),
             process_memory: 0,
         }
+    }
+
+    /// Push one intent through the real edit path, as a widget's does.
+    pub(crate) fn apply(&mut self, intent: GraphIntent) {
+        self.editor.apply_edit(&mut self.open, intent);
+    }
+
+    /// Drain the queued intents into the document, as the frame's edit phase
+    /// does.
+    pub(crate) fn drain(&mut self) {
+        self.editor.drain_intents(&mut self.open);
+    }
+
+    /// Take back the last undoable entry. Reports whether there was one.
+    pub(crate) fn undo(&mut self) -> bool {
+        self.editor
+            .action_stack
+            .undo(&mut self.open.document, &mut |_| {})
     }
 
     /// One editor frame. Returns the command the **first** record pass
@@ -116,7 +135,7 @@ mod tests {
 
     use super::EditorHarness;
 
-    use crate::core::document::Document;
+    use crate::core::document::harness::DocFixture;
 
     use crate::gui::window::status_bar::status_bar_id;
 
@@ -126,7 +145,7 @@ mod tests {
     /// available, rather than reappearing as the figure lands.
     #[test]
     fn status_bar_is_recorded_on_an_idle_document_with_or_without_a_reading() {
-        let mut h = EditorHarness::new(Document::default());
+        let mut h = EditorHarness::new(DocFixture::default());
         h.prime(2);
         let without =
             h.ui.rect(status_bar_id())
