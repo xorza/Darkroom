@@ -9,10 +9,11 @@ use scenarium::NodeId;
 use crate::core::document::{PortKind, PortRef};
 use crate::gui::EventRef;
 use crate::gui::canvas::hits::CanvasHits;
+use crate::gui::graph_scope::GraphScope;
+use crate::gui::graph_scope::node_scope::NodeScope;
 use crate::gui::node::header::subscription_glyph_wid;
 use crate::gui::node::node_widget_id;
 use crate::gui::node::port_row::{event_glyph_wid, port_circle_wid};
-use crate::gui::scene::{Scene, SceneNode};
 
 /// The canvas's response-derived geometry: a per-frame snapshot of every
 /// port-ish glyph plus the cross-frame node-size cache, all filled by one
@@ -82,7 +83,8 @@ pub(crate) struct CanvasGeometry {
 
 /// A glyph key that names the node its glyph hangs off — how a [`PortLayer`]
 /// evicts a deleted node's entries, and how a wire drag resolves the pane it
-/// belongs to (`Scene::owner`) and notices the node disappearing under it.
+/// belongs to (`GraphScope::contains`) and notices the node disappearing
+/// under it.
 /// Every glyph domain the canvas keys on has one: a data port and an emitter
 /// event belong to their node, and a subscription pin *is* its node (a
 /// subscription is whole-node, so its layer is keyed by `NodeId` directly).
@@ -256,7 +258,7 @@ impl CanvasGeometry {
     /// size — so a node the document moved under a live gesture (a drag, an
     /// undo) culls, band-hits, and breaker-hits where it is today, not where
     /// it last recorded. `None` until the node's first record.
-    pub(crate) fn node_world_rect(&self, node: &SceneNode) -> Option<Rect> {
+    pub(crate) fn node_world_rect(&self, node: NodeScope<'_>) -> Option<Rect> {
         let size = *self.node_sizes.get(&node.id)?;
         Some(Rect {
             min: node.pos,
@@ -302,12 +304,12 @@ impl CanvasGeometry {
     /// [`crate::gui::canvas::GraphUI::prepass`], after
     /// [`CanvasHits::scan`] has cleared the digest in the navigation
     /// phase, so the two writers never race for a slot.
-    pub(super) fn rebuild(&mut self, ui: &Ui, scene: &Scene, hits: &mut CanvasHits) {
+    pub(super) fn rebuild(&mut self, ui: &Ui, graph_scope: GraphScope<'_>, hits: &mut CanvasHits) {
         self.ports.live.clear();
         self.events.live.clear();
         self.subs.live.clear();
         self.node_screen.clear();
-        for n in scene.nodes.values() {
+        for n in graph_scope.nodes() {
             // Port offsets within a node are stable; the node's
             // canvas-local position changes when the user drags. Take
             // `port_offset = port_rect.center - node_rect.min` from
@@ -342,13 +344,13 @@ impl CanvasGeometry {
                 }
             }
             // Emitter event glyphs, drag sources for subscription wires.
-            for ev in n.events() {
+            for ev in n.event_refs() {
                 let r = ui.response_for(event_glyph_wid(n.id, ev.event_idx));
                 self.events.record(ev, r, Some(node_min), n.pos);
             }
             // The subscription pin only exists on sink nodes (only they
             // render one — see `header::subscription_glyph`).
-            if n.sink {
+            if n.sink() {
                 let r = ui.response_for(subscription_glyph_wid(n.id));
                 self.subs.record(n.id, r, Some(node_min), n.pos);
             }
@@ -360,16 +362,16 @@ impl CanvasGeometry {
     /// frame's `n.pos`, so a wire leaving the viewport stays anchored to the
     /// off-screen port it runs to; every interaction flag is false, which is
     /// the truth for a widget that isn't on screen to interact with.
-    fn replay_cached(&mut self, n: &SceneNode) {
+    fn replay_cached(&mut self, n: NodeScope<'_>) {
         for kind in [PortKind::Input, PortKind::Output] {
             for port in n.ports(kind) {
                 self.ports.replay(port, n.pos);
             }
         }
-        for ev in n.events() {
+        for ev in n.event_refs() {
             self.events.replay(ev, n.pos);
         }
-        if n.sink {
+        if n.sink() {
             self.subs.replay(n.id, n.pos);
         }
     }

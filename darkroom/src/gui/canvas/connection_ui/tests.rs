@@ -1,34 +1,33 @@
 use palantir::internals::UiHarness;
 use scenarium::testing::{TestFuncHooks, test_func_lib};
-use scenarium::{Binding, InputPort, Node, NodeId, NodeKind};
+use scenarium::{Binding, InputPort, Library, Node, NodeId, NodeKind};
 
 use super::*;
 use crate::core::document::Document;
 use crate::gui::run_state::RunState;
-use crate::gui::scene::Scene;
 
 #[derive(Debug)]
 struct Fixture {
-    scene: Scene,
-    /// The document the scene was projected from — the prepass resolves the
-    /// pane's authoring graph out of it to answer the snap filter's cycle
-    /// question.
+    /// The three sources a scope composes. The snap filter reads the
+    /// authoring graph out of the document to answer its cycle question,
+    /// and each node's ports out of the library.
     doc: Document,
+    library: Library,
+    run_state: RunState,
     producer: NodeId,
     consumer: NodeId,
 }
 
 impl Fixture {
-    fn pane(&self) -> Pane<'_> {
-        self.scene
-            .pane(&self.doc)
-            .expect("the fixture projects the graph")
+    fn graph_scope(&self) -> GraphScope<'_> {
+        GraphScope::for_document(&self.doc, &self.library, &self.run_state)
+            .expect("the fixture's document shows the graph")
     }
 }
 
-/// Two `mult` nodes wired producer → consumer, projected — enough scene for a
-/// wire to be in flight over, and enough wiring for the snap filter to have a
-/// cycle question to answer.
+/// Two `mult` nodes wired producer → consumer — enough graph for a wire to be
+/// in flight over, and enough wiring for the snap filter to have a cycle
+/// question to answer.
 fn fixture() -> Fixture {
     let library = test_func_lib(TestFuncHooks::default());
     let mult_id = library.by_name("mult").unwrap().id;
@@ -37,13 +36,10 @@ fn fixture() -> Fixture {
     let consumer = graph.add(Node::new(NodeKind::Func(mult_id)));
     graph.set_input_binding(InputPort::new(consumer, 0), Binding::bind(producer, 0));
 
-    let doc = Document::from(graph);
-    let mut scene = Scene::default();
-    let mut arena = UiHarness::arena();
-    scene.rebuild(arena.ui(), &library, &RunState::default(), &doc);
     Fixture {
-        scene,
-        doc,
+        doc: Document::from(graph),
+        library,
+        run_state: RunState::default(),
         producer,
         consumer,
     }
@@ -89,7 +85,7 @@ fn prepass_with_wire_from(fixture: &Fixture, start: PortRef) -> Option<InFlight>
     let mut out = Intents::default();
     connections.apply(
         arena.ui(),
-        fixture.pane(),
+        fixture.graph_scope(),
         &CanvasGeometry::default(),
         None,
         false,

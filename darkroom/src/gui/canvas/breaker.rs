@@ -9,7 +9,7 @@ use crate::gui::app::AppContext;
 use crate::gui::canvas::gesture_slot::GestureSlot;
 use crate::gui::canvas::wire::Wire;
 use crate::gui::canvas::{CanvasGesture, outer_canvas_widget_id, to_world};
-use crate::gui::scene::Pane;
+use crate::gui::graph_scope::GraphScope;
 
 /// The active gesture, threaded through node and wire rendering so
 /// intersection tests run inline with the draw that knows the geometry.
@@ -267,7 +267,7 @@ impl BreakerUI {
     pub(super) fn apply(
         &mut self,
         ui: &mut Ui,
-        graph: Pane<'_>,
+        graph_scope: GraphScope<'_>,
         gesture: Option<CanvasGesture>,
         cancelled: bool,
         out: &mut Intents,
@@ -279,8 +279,10 @@ impl BreakerUI {
             && self.state.is_idle()
             && let Some(p) = resp.pointer_local
         {
-            self.state
-                .latch(BreakerState::start(to_world(p, &graph.viewport()), button));
+            self.state.latch(BreakerState::start(
+                to_world(p, &graph_scope.viewport()),
+                button,
+            ));
         }
         if cancelled {
             self.state.clear();
@@ -293,7 +295,7 @@ impl BreakerUI {
         ) {
             (Some(b), Some(_)) => {
                 if let Some(p) = resp.pointer_local {
-                    b.add_point(to_world(p, &graph.viewport()));
+                    b.add_point(to_world(p, &graph_scope.viewport()));
                 }
             }
             (Some(b), None) => {
@@ -329,7 +331,7 @@ impl BreakerUI {
         }
     }
 
-    /// Hand the active state to `graph`'s inline intersection consumers
+    /// Hand the active state to `graph_scope`'s inline intersection consumers
     /// (the node body and both wire hit-tests), or an inert probe when the
     /// scribble belongs to another pane.
     ///

@@ -14,7 +14,7 @@ use crate::core::edit::intent::sink::Intents;
 use crate::core::edit::intent::types::GraphIntent;
 use std::collections::BTreeSet;
 
-use crate::gui::scene::{Pane, Scene};
+use crate::gui::graph_scope::GraphScope;
 
 /// One in-flight group drag, or none.
 ///
@@ -72,11 +72,11 @@ impl GroupDrag {
     /// anchor would emit a `MoveSelection` against a missing node, which
     /// panics in `build_step`, and could fire again if a fresh node reused
     /// the id.
-    pub(crate) fn drop_if_owner_gone(&mut self, scene: &Scene) {
+    pub(crate) fn drop_if_owner_gone(&mut self, graph_scope: GraphScope<'_>) {
         let gone = self
             .anchor
             .as_ref()
-            .is_some_and(|a| !scene.nodes.contains_key(&a.grabbed));
+            .is_some_and(|a| !graph_scope.contains(a.grabbed));
         if gone {
             self.anchor = None;
         }
@@ -87,11 +87,16 @@ impl GroupDrag {
     /// also latches fresh drags skips its own scan while this returns
     /// `true` — the gesture already owns the frame.
     ///
-    /// Runs pre-record, so the move lands in `Document` (and is mirrored
-    /// into `Scene`) before the pass that draws the moved items: they paint
-    /// at the cursor in Pass A with no relayout retry.
-    pub(crate) fn advance(&mut self, ui: &Ui, scene: &Scene, out: &mut Intents) -> bool {
-        self.drop_if_owner_gone(scene);
+    /// Runs pre-record, so the move lands in `Document` before the pass that
+    /// draws the moved items: they paint at the cursor in Pass A with no
+    /// relayout retry.
+    pub(crate) fn advance(
+        &mut self,
+        ui: &Ui,
+        graph_scope: GraphScope<'_>,
+        out: &mut Intents,
+    ) -> bool {
+        self.drop_if_owner_gone(graph_scope);
         // Copy the ids out and drop the borrow, so the branches below can
         // clear the slot without cloning `start_positions` — only the
         // success path reads it, and that path never clears.
@@ -141,11 +146,11 @@ impl Anchor {
 /// shared by both callers, so the group moves the same way regardless of
 /// which kind of member's press started it.
 pub(crate) fn selected_group_positions(
-    graph: Pane<'_>,
+    graph_scope: GraphScope<'_>,
     selected: &BTreeSet<NodeId>,
 ) -> Vec<(NodeId, Vec2)> {
     let holds = |key: NodeId| selected.contains(&key);
-    let positions: Vec<(NodeId, Vec2)> = graph
+    let positions: Vec<(NodeId, Vec2)> = graph_scope
         .nodes()
         .filter(|n| holds(n.id))
         .map(|n| (n.id, n.pos))

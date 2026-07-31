@@ -63,17 +63,12 @@ const QUIT_SHORTCUT: Shortcut = Shortcut::ctrl('Q');
 struct StepSignals {
     geometry_stale: bool,
     dirtied: bool,
-    /// Whether any step landed at all — the projection is built from the
-    /// graph, so a step moving it leaves the projection stale. Not a
-    /// per-step predicate like the two above: every applied step sets it.
-    graph_moved: bool,
 }
 
 impl StepSignals {
     fn fold(&mut self, step: &UndoStep) {
         self.geometry_stale |= step.invalidates_cached_geometry();
         self.dirtied |= step.dirties_document();
-        self.graph_moved = true;
     }
 }
 
@@ -168,8 +163,6 @@ impl Editor {
             };
             signals.fold(&step);
             batch.push(step);
-
-            self.main_window.graph_ui.mark_scene_dirty();
         }
         self.action_stack.push_current(&batch);
         batch.clear();
@@ -212,7 +205,7 @@ impl Editor {
         // undo/redo + last-frame click responses). `navigate` reads *last*
         // frame's projection to resolve tab/chip clicks, so it must run
         // before this frame's rebuild. After it, the active tab is fixed.
-        self.navigate(ui, open);
+        self.navigate(ui, open, library);
 
         // Tabs are settled: drop viewer state for closed tabs.
         self.sync_image_viewers(open);
@@ -310,13 +303,18 @@ impl Editor {
     ///
     /// Done up front so the edit pipeline runs against a settled document
     /// and a switched-to tab records in the same present's Pass A.
-    fn navigate(&mut self, ui: &mut Ui, open: &mut OpenDocument) {
+    fn navigate(&mut self, ui: &mut Ui, open: &mut OpenDocument, library: &Library) {
         self.apply_undo_redo(ui, open);
-        // Surface tab clicks from last frame's responses. The projection
-        // still holds the last-rendered graph here — exactly the one whose
-        // chips were clicked.
-        self.main_window
-            .scan_navigation(ui, &open.document, &mut self.actions);
+        // Surface tab clicks from last frame's responses. Those responses are
+        // last frame's; the document they resolve against is this frame's,
+        // so a hit on a node the undo above removed simply finds nothing.
+        let Self {
+            main_window,
+            run_state,
+            actions,
+            ..
+        } = self;
+        main_window.scan_navigation(ui, &open.document, library, run_state, actions);
         // Queued dock ops apply straight to the layout — drain them.
         self.apply_view_actions(open);
         self.drain_intents(open);

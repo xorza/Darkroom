@@ -2,7 +2,8 @@ use glam::{UVec2, Vec2};
 use palantir::internals::UiHarness;
 use palantir::{Configure, Panel, Sizing, Ui};
 use scenarium::{
-    Binding, DataType, Func, FuncId, FuncInput, FuncOutput, InputPort, Library, NodeKind, testing,
+    Binding, DataType, Func, FuncId, FuncInput, FuncOutput, InputPort, Library, NodeKind,
+    OutputType, testing,
 };
 
 use crate::core::document::{Document, GraphView, PortKind, PortRef};
@@ -10,6 +11,7 @@ use crate::core::edit::intent::sink::{Intents, Queued};
 use crate::core::edit::intent::types::GraphIntent;
 use crate::gui::app::AppContext;
 use crate::gui::canvas::GraphUI;
+use crate::gui::graph_scope::GraphScope;
 use crate::gui::node::node_widget_id;
 use crate::gui::node::port_row::port_circle_wid;
 use crate::gui::run_state::RunState;
@@ -27,6 +29,30 @@ fn one_func_library() -> Library {
             .output(FuncOutput::new("out", DataType::Int)),
     ));
     library
+}
+
+/// [`one_func_library`] plus a passthrough: one input and one wildcard output
+/// mirroring it, so the projected type of its output is whatever the *graph*
+/// wires in rather than anything its declaration states.
+fn wildcard_library() -> Library {
+    let mut library = one_func_library();
+    let mut passthrough = Func::new(FuncId::unique(), "passthrough")
+        .pure()
+        .input(FuncInput::optional("in", DataType::Any));
+    passthrough.outputs.push(FuncOutput {
+        name: "out".to_owned(),
+        description: None,
+        ty: OutputType::Wildcard { mirrors: 0 },
+    });
+    library.add(testing::with_stub_lambda(passthrough));
+    library
+}
+
+/// The scope a test reads a canvas back through, over the same document the
+/// canvas drew.
+fn scope<'a>(doc: &'a Document, library: &'a Library, run_state: &'a RunState) -> GraphScope<'a> {
+    GraphScope::for_document(doc, library, run_state)
+        .expect("the fixture's document shows the graph")
 }
 
 /// Spread the placements so no node lands off-viewport and gets culled —
@@ -86,8 +112,7 @@ fn a_culled_nodes_ports_stay_anchored_until_its_node_leaves_the_document() {
             process_memory: 0,
         };
         let mut intents = Intents::default();
-        graph_ui.rebuild_scene(ui, &library, &run_state, doc);
-        graph_ui.prepass(ui, doc, &library, &mut intents);
+        graph_ui.prepass(ui, doc, &library, &run_state, &mut intents);
         Panel::vstack()
             .id_salt("pane")
             .size((Sizing::FILL, Sizing::FILL))
@@ -136,33 +161,30 @@ fn a_culled_nodes_ports_stay_anchored_until_its_node_leaves_the_document() {
 
     // The node the document keeps holds its cached size; the other one is
     // still cached too, because being off-screen is not being deleted.
+    let live = scope(&doc, &library, &run_state);
     for id in [stays, leaves] {
-        let live = graph_ui.pane(&doc);
         assert!(
             graph_ui
                 .geometry
-                .node_world_rect(live.node(id).expect("in scene"))
+                .node_world_rect(live.node(id).expect("in the graph"))
                 .is_some(),
             "an off-screen node is not a deleted one",
         );
     }
 
     // Now say the document dropped it. Its entries go; its neighbour's stay.
-    // The pane is re-derived after the eviction: it borrows the projection the
-    // canvas owns, so it cannot be held across a `&mut` call on one.
     graph_ui.retain_nodes(|id| id == stays);
-    let live = graph_ui.pane(&doc);
     assert!(
         graph_ui
             .geometry
-            .node_world_rect(live.node(leaves).expect("in scene"))
+            .node_world_rect(live.node(leaves).expect("in the graph"))
             .is_none(),
         "a node the document stopped holding releases its cached size",
     );
     assert!(
         graph_ui
             .geometry
-            .node_world_rect(live.node(stays).expect("in scene"))
+            .node_world_rect(live.node(stays).expect("in the graph"))
             .is_some(),
         "and its neighbour keeps its own",
     );
@@ -219,8 +241,7 @@ fn the_palette_sizes_its_results_area_from_the_search_row_it_actually_has() {
                 process_memory: 0,
             };
             let mut intents = Intents::default();
-            graph_ui.rebuild_scene(ui, &library, &run_state, &doc);
-            graph_ui.prepass(ui, &doc, &library, &mut intents);
+            graph_ui.prepass(ui, &doc, &library, &run_state, &mut intents);
             Panel::vstack()
                 .id_salt("pane")
                 .size((Sizing::FILL, Sizing::FILL))
@@ -354,9 +375,8 @@ fn escape_cancels_a_rubber_band_and_leaves_no_residue() {
             process_memory: 0,
         };
         let mut intents = Intents::default();
-        graph_ui.scan_hits(ui, &doc);
-        graph_ui.rebuild_scene(ui, &library, &run_state, &doc);
-        graph_ui.prepass(ui, &doc, &library, &mut intents);
+        graph_ui.scan_hits(ui, &doc, &library, &run_state);
+        graph_ui.prepass(ui, &doc, &library, &run_state, &mut intents);
         Panel::vstack()
             .id_salt("pane")
             .size((Sizing::FILL, Sizing::FILL))
@@ -466,8 +486,7 @@ fn the_breaker_cuts_a_node_at_its_current_position_not_its_last_painted_one() {
             process_memory: 0,
         };
         let mut intents = Intents::default();
-        graph_ui.rebuild_scene(ui, &library, &run_state, doc);
-        graph_ui.prepass(ui, doc, &library, &mut intents);
+        graph_ui.prepass(ui, doc, &library, &run_state, &mut intents);
         Panel::vstack()
             .id_salt("pane")
             .size((Sizing::FILL, Sizing::FILL))
@@ -553,11 +572,9 @@ fn a_node_body_right_click_selects_the_node_it_landed_on() {
             process_memory: 0,
         };
         let mut intents = Intents::default();
-        // Navigation phase first — see the two-pane test for why the sweep
-        // reads the pre-rebuild scene.
-        graph_ui.scan_hits(ui, &doc);
-        graph_ui.rebuild_scene(ui, &library, &run_state, &doc);
-        graph_ui.prepass(ui, &doc, &library, &mut intents);
+        // Navigation phase first — the sweep runs before the tab set settles.
+        graph_ui.scan_hits(ui, &doc, &library, &run_state);
+        graph_ui.prepass(ui, &doc, &library, &run_state, &mut intents);
         Panel::vstack()
             .id_salt("pane")
             .size((Sizing::FILL, Sizing::FILL))
@@ -623,9 +640,8 @@ fn a_body_drag_moves_the_node_by_the_pointers_travel() {
             process_memory: 0,
         };
         let mut intents = Intents::default();
-        graph_ui.scan_hits(ui, &doc);
-        graph_ui.rebuild_scene(ui, &library, &run_state, &doc);
-        graph_ui.prepass(ui, &doc, &library, &mut intents);
+        graph_ui.scan_hits(ui, &doc, &library, &run_state);
+        graph_ui.prepass(ui, &doc, &library, &run_state, &mut intents);
         Panel::vstack()
             .id_salt("pane")
             .size((Sizing::FILL, Sizing::FILL))
@@ -718,8 +734,7 @@ fn a_port_drag_released_over_a_compatible_port_commits_the_binding() {
             process_memory: 0,
         };
         let mut intents = Intents::default();
-        graph_ui.rebuild_scene(ui, &library, &run_state, doc);
-        graph_ui.prepass(ui, doc, &library, &mut intents);
+        graph_ui.prepass(ui, doc, &library, &run_state, &mut intents);
         Panel::vstack()
             .id_salt("pane")
             .size((Sizing::FILL, Sizing::FILL))
@@ -863,8 +878,7 @@ fn ctrl_drag_off_an_output_spawns_a_preview_wired_to_it() {
             process_memory: 0,
         };
         let mut intents = Intents::default();
-        graph_ui.rebuild_scene(ui, &library, &run_state, &doc);
-        graph_ui.prepass(ui, &doc, &library, &mut intents);
+        graph_ui.prepass(ui, &doc, &library, &run_state, &mut intents);
         Panel::vstack()
             .id_salt("pane")
             .size((Sizing::FILL, Sizing::FILL))
@@ -929,5 +943,49 @@ fn ctrl_drag_off_an_output_spawns_a_preview_wired_to_it() {
                     && src.port_idx == 0
         )),
         "and it is already reading the port the drag came off: {spawned:?}"
+    );
+}
+
+/// A graph edit reaches the very next read, with nothing announced.
+///
+/// The canvas holds no derived state about the graph, so there is no
+/// invalidation step between wiring a port and the canvas reporting its new
+/// type — which is the whole reason the wildcard resolution is safe to do per
+/// read. Wired through the same `scope` the record passes build.
+#[test]
+fn a_wire_edit_reaches_the_next_read_with_nothing_announced() {
+    let library = wildcard_library();
+    let probe = library.by_name("probe").expect("just added").clone();
+    let passthrough = library.by_name("passthrough").expect("just added").clone();
+
+    let mut doc = Document::default();
+    // `probe` declares a fixed `Int` output; the passthrough mirrors whatever
+    // reaches its input, so unwired it resolves to `Any`.
+    let producer = doc.graph.add_func_node(&probe);
+    let consumer = doc.graph.add_func_node(&passthrough);
+    doc.main_view = GraphView::for_graph(&doc.graph);
+
+    let run_state = RunState::default();
+    let resolved_output = |doc: &Document| {
+        scope(doc, &library, &run_state)
+            .node(consumer)
+            .expect("the passthrough resolves")
+            .output(0)
+            .expect("it declares one output")
+            .ty()
+    };
+
+    assert_eq!(
+        resolved_output(&doc),
+        DataType::Any,
+        "an unwired passthrough has nothing to mirror"
+    );
+
+    doc.graph
+        .set_input_binding(InputPort::new(consumer, 0), Binding::bind(producer, 0));
+    assert_eq!(
+        resolved_output(&doc),
+        DataType::Int,
+        "the next read follows the new wire — nothing was invalidated in between"
     );
 }
