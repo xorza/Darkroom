@@ -179,7 +179,7 @@ impl Flattener {
         let OutputPort { node_id, port_idx } = port;
         let node = graph.find(node_id).expect("binding to a missing node");
         if graph
-            .node_ports(node, library)
+            .node_func(node, library)
             .is_some_and(|ports| port_idx >= ports.outputs.len())
         {
             return FlatBinding::None;
@@ -206,7 +206,7 @@ impl Flattener {
             // Drift tolerance: a subscription to an event the func no longer
             // declares wires nothing.
             if graph
-                .node_ports(emitter, library)
+                .node_func(emitter, library)
                 .is_some_and(|ports| sub.event_idx >= ports.events.len())
             {
                 continue;

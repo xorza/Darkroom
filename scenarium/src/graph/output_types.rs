@@ -70,7 +70,7 @@ impl OutputTypes {
         self.resolved.clear();
         self.path.clear();
         for node in graph.iter() {
-            let Some(ports) = graph.node_ports(&node, library) else {
+            let Some(ports) = graph.node_func(&node, library) else {
                 continue;
             };
             for port_idx in 0..ports.outputs.len() {

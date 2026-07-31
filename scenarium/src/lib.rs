@@ -44,7 +44,6 @@ pub use graph::func::{
     Func, FuncBehavior, FuncEvent, FuncInput, FuncOutput, OutputType, ValueVariant,
 };
 pub use graph::identity::{FuncId, GraphId, InputPort, NodeId, OutputPort};
-pub use graph::interface::NodePorts;
 pub use graph::node::special::{SPECIAL_NODES, SpecialNode};
 pub use graph::node::{CacheMode, Node, NodeKind};
 pub use graph::output_types::OutputTypes;

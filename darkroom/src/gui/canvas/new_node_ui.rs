@@ -456,7 +456,7 @@ fn add_from_func(
             pos,
             node_id,
             node: node(),
-            bindings: func.ports().default_bindings(node_id).collect(),
+            bindings: func.default_bindings(node_id).collect(),
         }
     })
 }

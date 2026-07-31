@@ -5,7 +5,7 @@
 //!
 //! The modules beside it keep what those methods work *with*: [`identity`]
 //! how a node or port is named, [`detached`] the reversible-removal records,
-//! [`error`] what validation rejects, [`interface`] the ports a node declares.
+//! [`error`] what validation rejects.
 //!
 //! A graph is flat: every node is a leaf that resolves to a
 //! [`Func`](crate::graph::func::Func) declaration, so there is no tree to
@@ -27,7 +27,6 @@ use crate::graph::error::{GraphDeserializeError, GraphValidationError};
 use crate::graph::func::{Func, FuncInput, FuncOutput, OutputType};
 use crate::graph::identity::NodeId;
 use crate::graph::identity::{InputPort, OutputPort};
-use crate::graph::interface::NodePorts;
 use crate::graph::node::{Node, NodeKind};
 use crate::graph::output_types::OutputTypeSource;
 use crate::library::Library;
@@ -36,7 +35,6 @@ pub(crate) mod detached;
 pub(crate) mod error;
 pub(crate) mod func;
 pub(crate) mod identity;
-pub(crate) mod interface;
 pub(crate) mod node;
 pub(crate) mod output_types;
 mod serde;
@@ -162,12 +160,16 @@ impl Graph {
     pub fn serialize(&self, format: SerdeFormat) -> Result<Vec<u8>, SerializeError> {
         serialize(self, format)
     }
-    /// The ports `node` declares, or `None` for an unresolved func reference.
-    /// The one place a node kind is mapped to its declaration.
-    pub fn node_ports<'a>(&'a self, node: &'a Node, library: &'a Library) -> Option<NodePorts<'a>> {
+    /// The declaration a node instantiates — a library entry, or a special
+    /// node's hardcoded spec. `None` for a `Func` kind the library no longer
+    /// holds: the caller decides whether that is drift to tolerate (the
+    /// editor renders a stub) or a node to skip (flatten).
+    ///
+    /// The one place the per-kind lookup happens, so no caller repeats it.
+    pub fn node_func<'a>(&'a self, node: &'a Node, library: &'a Library) -> Option<&'a Func> {
         match &node.kind {
-            NodeKind::Func(func_id) => Some(library.by_id(*func_id)?.ports()),
-            NodeKind::Special(special) => Some(special.func().ports()),
+            NodeKind::Func(func_id) => library.by_id(*func_id),
+            NodeKind::Special(special) => Some(special.func()),
         }
     }
     /// The declared type of input `port`, or `None` when it can't be resolved
@@ -185,7 +187,7 @@ impl Graph {
         port: InputPort,
     ) -> Option<&'a FuncInput> {
         let node = self.find(port.node_id)?;
-        self.node_ports(node, library)?.inputs.get(port.port_idx)
+        self.node_func(node, library)?.inputs.get(port.port_idx)
     }
     /// The effective type at one output port.
     ///
@@ -247,7 +249,7 @@ impl Graph {
     /// of [`Self::input_spec`].
     fn output_spec<'a>(&'a self, library: &'a Library, port: OutputPort) -> Option<&'a FuncOutput> {
         let node = self.find(port.node_id)?;
-        self.node_ports(node, library)?.outputs.get(port.port_idx)
+        self.node_func(node, library)?.outputs.get(port.port_idx)
     }
     /// Every data edge as (consumer input ← producer output). Const bindings
     /// are not edges and are skipped.
@@ -388,7 +390,7 @@ impl Graph {
     /// Returns the new node id.
     pub fn add_func_node(&mut self, func: &Func) -> NodeId {
         let node_id = self.add(Node::from(func));
-        self.bindings.extend(func.ports().default_bindings(node_id));
+        self.bindings.extend(func.default_bindings(node_id));
         node_id
     }
 
