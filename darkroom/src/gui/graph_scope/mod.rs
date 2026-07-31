@@ -11,10 +11,10 @@
 //!
 //! **The one rule.** No accessor may walk the graph. Everything below is a
 //! field read, a hash lookup, or a slice index, so a per-widget call costs
-//! what the projection this replaced used to charge per frame. The single
-//! answer needing a traversal — a wildcard output's resolved type — walks
-//! *its own mirror chain*, which is a reroute run rather than the graph, and
-//! only a wildcard port pays it (see
+//! what the projection this replaced used to charge per frame. The one answer
+//! that cannot come off a declaration — a wildcard output's resolved type —
+//! is read out of the [`OutputTypes`] table the scope carries, resolved once
+//! by [`GraphScope::for_document`] rather than per read (see
 //! [`OutputScope::ty`](output_scope::OutputScope::ty)).
 
 pub(crate) mod input_scope;
@@ -23,7 +23,7 @@ pub(crate) mod output_scope;
 
 use std::collections::BTreeSet;
 
-use scenarium::{Graph, InputPort, Library, NodeId, OutputPort, Subscription};
+use scenarium::{Graph, InputPort, Library, NodeId, OutputPort, OutputTypes, Subscription};
 
 use crate::core::document::{Document, GraphView, Viewport};
 use crate::gui::graph_scope::node_scope::NodeScope;
@@ -32,7 +32,7 @@ use crate::gui::run_state::RunState;
 #[cfg(test)]
 mod tests;
 
-/// The graph pane for this frame. `Copy` (three shared refs), so it threads
+/// The graph pane for this frame. `Copy` (four shared refs), so it threads
 /// through the draw chain like `RecordCtx`.
 ///
 /// Holding one is the proof that a pane *is* showing the graph:
@@ -49,6 +49,14 @@ pub(crate) struct GraphScope<'a> {
     /// Last run's per-node verdicts: status, retained RAM, unfed inputs, and
     /// the compiled program's word on what is a sink.
     run_state: &'a RunState,
+    /// Every output port's *resolved* type — the wildcard chains followed
+    /// once for the whole graph, so reading one is a lookup rather than a
+    /// walk. See [`OutputScope::ty`](output_scope::OutputScope::ty).
+    ///
+    /// Resolved by [`Self::for_document`] against the `doc` beside it, and
+    /// exclusively borrowed for as long as this scope lives — so it cannot be
+    /// a graph edit behind, and nothing can move it out from under a reader.
+    output_types: &'a OutputTypes,
 }
 
 impl<'a> GraphScope<'a> {
@@ -58,15 +66,29 @@ impl<'a> GraphScope<'a> {
     /// legitimate pane, and one that answered "no nodes, so no pane" would
     /// leave a fresh document with no canvas to place its first node on.
     ///
+    /// **Resolves `output_types` against `doc` on the way in**, which is why
+    /// it arrives `&mut` and leaves shared. A scope's readers answer a
+    /// wildcard port off that table, so its freshness is not a contract for
+    /// callers to keep — composing a scope *is* the refresh, and the borrow
+    /// then lasts as long as the scope, so nothing can edit the graph out from
+    /// under it. Darkroom edits between passes and composes a scope per pass,
+    /// so each pass pays one resolve over the document it was handed.
+    ///
+    /// The table is threaded in rather than owned because the scope is `Copy`:
+    /// the caller keeps the allocation across frames, and a refresh reuses its
+    /// capacity instead of building a map per pass.
     pub(crate) fn for_document(
         doc: &'a Document,
         library: &'a Library,
         run_state: &'a RunState,
+        output_types: &'a mut OutputTypes,
     ) -> Option<Self> {
+        output_types.update(&doc.graph, library);
         doc.shows_graph().then_some(Self {
             doc,
             library,
             run_state,
+            output_types,
         })
     }
 
@@ -106,6 +128,13 @@ impl<'a> GraphScope<'a> {
     /// a preview published.
     pub(crate) fn run_state(self) -> &'a RunState {
         self.run_state
+    }
+
+    /// This graph's resolved output types. `pub(super)` because the one
+    /// reader is [`OutputScope::ty`](output_scope::OutputScope::ty) — a widget
+    /// asks a port for its type, never the table for a port.
+    pub(super) fn output_types(self) -> &'a OutputTypes {
+        self.output_types
     }
 
     /// This graph's nodes, in paint order: later entries draw in front, and
@@ -156,19 +185,24 @@ impl<'a> GraphScope<'a> {
 #[cfg(test)]
 pub(crate) mod internals {
     use glam::Vec2;
-    use scenarium::{FuncId, Library, Node, NodeId, NodeKind};
+    use scenarium::{FuncId, Library, Node, NodeId, NodeKind, OutputTypes};
 
     use crate::core::document::Document;
     use crate::gui::graph_scope::GraphScope;
     use crate::gui::run_state::RunState;
 
-    /// The three sources a [`GraphScope`] composes, owned together so a test
+    /// The four sources a [`GraphScope`] composes, owned together so a test
     /// can hand one out. Every canvas test that needs a scope builds on this.
-    #[derive(Debug)]
+    ///
+    /// The output-type table starts empty: [`Self::scope`] resolves it, the
+    /// same way composing a scope does anywhere else — which is why that
+    /// method takes `&mut self`.
+    #[derive(Debug, Default)]
     pub(crate) struct ScopeFixture {
         pub(crate) doc: Document,
         pub(crate) library: Library,
         pub(crate) run_state: RunState,
+        output_types: OutputTypes,
     }
 
     impl ScopeFixture {
@@ -176,7 +210,7 @@ pub(crate) mod internals {
             Self {
                 doc,
                 library,
-                run_state: RunState::default(),
+                ..Self::default()
             }
         }
 
@@ -199,9 +233,14 @@ pub(crate) mod internals {
             self
         }
 
-        pub(crate) fn scope(&self) -> GraphScope<'_> {
-            GraphScope::for_document(&self.doc, &self.library, &self.run_state)
-                .expect("the fixture's document shows the graph")
+        pub(crate) fn scope(&mut self) -> GraphScope<'_> {
+            GraphScope::for_document(
+                &self.doc,
+                &self.library,
+                &self.run_state,
+                &mut self.output_types,
+            )
+            .expect("the fixture's document shows the graph")
         }
     }
 }

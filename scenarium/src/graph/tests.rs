@@ -13,23 +13,18 @@ use ::common::{SerdeFormat, deserialize, serialize};
 
 type TestResult<T = ()> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
-/// The effective type at one output port, asserted identical through **both**
-/// resolvers: the whole-graph table a compile fills, and the single-port walk
-/// a host reads per port.
+/// The effective type at one output port, through the graph's one resolver.
 ///
-/// They answer the same question by different routes — one memoizes every
-/// chain in the graph, the other walks one chain and remembers nothing — so
-/// every case below pins the pair rather than whichever it happened to call.
+/// Every case below names a port a resolvable node declares, so the table
+/// covers it. A miss is the fixture naming a port that is not there — not an
+/// `Any` to assert on, which is what an unresolvable *chain* gives.
 fn output_type(graph: &Graph, library: &Library, port: OutputPort) -> DataType {
     let mut types = OutputTypes::default();
     types.update(graph, library);
-    let tabled = types.get(port).cloned().unwrap_or_default();
-    let walked = graph.output_type(library, port);
-    assert_eq!(
-        tabled, walked,
-        "the table and the single-port walk disagree about {port:?}"
-    );
-    walked
+    types
+        .get(port)
+        .expect("the fixture names a declared output port")
+        .clone()
 }
 
 /// A passthrough func — one `Any` input, one wildcard output mirroring it. The

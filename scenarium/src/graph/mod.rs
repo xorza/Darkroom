@@ -189,44 +189,15 @@ impl Graph {
         let node = self.find(port.node_id)?;
         self.node_func(node, library)?.inputs.get(port.port_idx)
     }
-    /// The effective type at one output port.
+    /// What settles one output port's type, one hop at a time: its own
+    /// declaration, or — for a *wildcard* (a reroute or passthrough) — the
+    /// input it mirrors, which is a hop to whatever feeds that.
     ///
-    /// A fixed output answers from its own declaration; a *wildcard* one — a
-    /// reroute or passthrough — reports the type of whatever feeds the input
-    /// it mirrors, which means following that chain up. A chain that
-    /// dead-ends or closes on itself resolves [`Any`](DataType::Any), as does
-    /// a port whose node or func no longer resolves.
-    ///
-    /// For a caller wanting *one* port: the walk costs the chain's length and
-    /// remembers nothing, so a host can ask per read without keeping a table
-    /// in step with the graph. A caller resolving a whole graph wants
-    /// [`OutputTypes`](crate::OutputTypes) instead, whose memo makes that one
-    /// walk per chain rather than one per port.
-    ///
-    /// Iterative, not recursive: the chain length is a user-authored reroute
-    /// count, which must not decide the stack depth.
-    pub fn output_type(&self, library: &Library, port: OutputPort) -> DataType {
-        // The chain walked so far, so a cycle terminates instead of hanging.
-        // A `Vec` scan rather than a set: the chain is a reroute run, and it
-        // is shorter than the hash of its own first element.
-        let mut walked = Vec::new();
-        let mut current = port;
-        loop {
-            if walked.contains(&current) {
-                return DataType::Any;
-            }
-            walked.push(current);
-            match self.output_source(library, current) {
-                OutputTypeSource::Fixed(data_type) => return data_type,
-                OutputTypeSource::Bind(producer) => current = producer,
-                OutputTypeSource::Const { declared, value } => {
-                    return declared.or_const_type(&value);
-                }
-                OutputTypeSource::Unresolved => return DataType::Any,
-            }
-        }
-    }
-
+    /// The reading of a declaration, and no more. Following the hops is
+    /// [`OutputTypes`](crate::OutputTypes)'s, which is the only thing that
+    /// walks them: it memoizes every port on a chain as it goes, so covering
+    /// a graph costs one walk per chain rather than one per port, and a
+    /// caller wanting a single port reads the table rather than re-walking.
     fn output_source(&self, library: &Library, port: OutputPort) -> OutputTypeSource {
         let Some(out) = self.output_spec(library, port) else {
             return OutputTypeSource::Unresolved;
