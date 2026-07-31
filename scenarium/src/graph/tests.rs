@@ -1,45 +1,42 @@
 use crate::EventLambda;
+use crate::execution::compile::compiled_graph::ExecutionBinding;
 use crate::graph::Graph;
 use crate::graph::error::GraphValidationError;
-use crate::graph::func::{Func, FuncInput, FuncOutput};
+use crate::graph::func::Func;
 use crate::graph::identity::FuncId;
 use crate::graph::node::{CacheMode, Node, NodeKind};
 use crate::graph::output_types::OutputTypes;
 use crate::graph::{Binding, InputPort, NodeId, OutputPort, Subscription};
-use crate::library::Library;
-use crate::testing::{self, TestFuncHooks, test_func_lib, test_graph};
+use crate::testing::graph::{NodeSpec, TestGraph};
 use crate::{DataType, DetachedNode, StaticValue};
 use ::common::{SerdeFormat, deserialize, serialize};
 
 type TestResult<T = ()> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
-/// The effective type at one output port, through the graph's one resolver.
+/// The effective type at one of `name`'s output ports, through the graph's one
+/// resolver.
 ///
 /// Every case below names a port a resolvable node declares, so the table
 /// covers it. A miss is the fixture naming a port that is not there — not an
 /// `Any` to assert on, which is what an unresolvable *chain* gives.
-fn output_type(graph: &Graph, library: &Library, port: OutputPort) -> DataType {
+fn output_type(g: &TestGraph, name: &str, port: usize) -> DataType {
     let mut types = OutputTypes::default();
-    types.update(graph, library);
+    types.update(&g.graph, &g.library);
     types
-        .get(port)
+        .get(OutputPort::new(g.id(name), port))
         .expect("the fixture names a declared output port")
         .clone()
 }
 
-/// A passthrough func — one `Any` input, one wildcard output mirroring it. The
+/// A passthrough node — one `Any` input, one wildcard output mirroring it. The
 /// generic hop for testing wildcard type resolution through a node.
-fn passthrough_func() -> Func {
-    testing::with_stub_lambda(
-        Func::new(FuncId::unique(), "pass")
-            .input(FuncInput::required("x", DataType::Any))
-            .wildcard_output("o", 0),
-    )
+fn passthrough(n: NodeSpec) -> NodeSpec {
+    n.input(DataType::Any).wildcard(0)
 }
 
 #[test]
 fn validate_passes_for_valid_graph() {
-    assert!(test_graph().validate().is_ok());
+    assert!(TestGraph::sample().graph.validate().is_ok());
 }
 
 #[test]
@@ -69,23 +66,21 @@ fn cache_mode_bits_and_from_bits_round_trip() {
 fn cache_mode_round_trips() {
     assert_eq!(CacheMode::default(), CacheMode::None);
 
-    let library = test_func_lib(TestFuncHooks::default());
     for mode in [
         CacheMode::None,
         CacheMode::Ram,
         CacheMode::Disk,
         CacheMode::Both,
     ] {
-        let mut graph = Graph::default();
-        let mut node: Node = library.by_name("get_a").unwrap().into();
-        node.cache = mode;
-        graph.add(node);
+        let mut g = TestGraph::new();
+        g.add("src", |n| n.pure().output(DataType::Int));
+        g.cache("src", mode);
 
         for format in [SerdeFormat::Json, SerdeFormat::Bitcode] {
-            let bytes = serialize(&graph, format).unwrap();
+            let bytes = serialize(&g.graph, format).unwrap();
             let back: Graph = deserialize(&bytes, format).unwrap();
             assert_eq!(
-                back.find_by_name("get_a").unwrap().cache,
+                back.find_by_name("src").unwrap().cache,
                 mode,
                 "{mode:?} via {format:?}"
             );
@@ -125,15 +120,15 @@ fn new_func_node_copies_its_func_default_cache_mode() {
 
 #[test]
 fn validate_rejects_dangling_binding() {
-    let mut graph = test_graph();
-    let sum_id = graph.find_by_name("sum").unwrap().id;
+    let mut g = TestGraph::sample();
     // Repoint sum's input at a node that doesn't exist.
-    graph.set_input_binding(
-        InputPort::new(sum_id, 0),
+    g.graph.set_input_binding(
+        InputPort::new(g.id("sum"), 0),
         Binding::bind(NodeId::unique(), 0),
     );
 
-    let err = graph
+    let err = g
+        .graph
         .validate()
         .expect_err("dangling binding must fail validation");
     assert!(err.to_string().contains("binds to missing node"));
@@ -141,27 +136,19 @@ fn validate_rejects_dangling_binding() {
 
 #[test]
 fn const_only_input_rejects_bind_but_a_normal_input_accepts_it() {
-    use crate::graph::identity::FuncId;
-    use crate::library::Library;
-
-    // One Int-in / Int-out func, so a wire between two instances is otherwise
-    // valid — only the `const_only` flag decides whether validation accepts it.
+    // One Int-in / Int-out func, so a wire between two of its instances is
+    // otherwise valid — only the `const_only` flag decides whether validation
+    // accepts it.
     let validate = |const_only: bool| -> Result<(), GraphValidationError> {
-        let port = FuncInput::required("locked", DataType::Int);
-        let port = if const_only { port.const_only() } else { port };
-        let func = testing::with_stub_lambda(
-            Func::new(FuncId::unique(), "f")
-                .input(port)
-                .output(FuncOutput::new("out", DataType::Int)),
-        );
-        let mut library = Library::default();
-        library.add(func.clone());
-
-        let mut graph = Graph::default();
-        let producer = graph.add_func_node(&func);
-        let consumer = graph.add_func_node(&func);
-        graph.set_input_binding(InputPort::new(consumer, 0), Binding::bind(producer, 0));
-        graph.validate_with(&library)
+        let mut g = TestGraph::new();
+        g.add("f", |n| {
+            let n = n.pure().input(DataType::Int);
+            let n = if const_only { n.const_only() } else { n };
+            n.output(DataType::Int)
+        });
+        g.instance("consumer", "f");
+        g.wire("f", 0, "consumer", 0);
+        g.graph.validate_with(&g.library)
     };
 
     assert!(
@@ -177,288 +164,151 @@ fn const_only_input_rejects_bind_but_a_normal_input_accepts_it() {
 
 #[test]
 fn type_mismatches_degrade_at_lowering_not_at_validation() {
-    use crate::execution::compile::Compiler;
-    use crate::execution::compile::compiled_graph::ExecutionBinding;
-    use crate::library::Library;
     use crate::{FsPathConfig, FsPathMode};
     use std::sync::Arc;
 
     // Int and String never coerce (numerics coerce among themselves, but a
     // string is a distinct kind), so this pair exercises a real mismatch.
-    let int_src = testing::with_stub_lambda(
-        Func::new(FuncId::unique(), "int_src").output(FuncOutput::new("o", DataType::Int)),
-    );
-    let str_sink = testing::with_stub_lambda(
-        Func::new(FuncId::unique(), "str_sink")
-            .input(FuncInput::required("x", DataType::String))
-            .output(FuncOutput::new("o", DataType::String)),
-    );
-    let int_sink = testing::with_stub_lambda(
-        Func::new(FuncId::unique(), "int_sink")
-            .input(FuncInput::required("x", DataType::Int))
-            .output(FuncOutput::new("o", DataType::Int)),
-    );
-    let single_path = testing::with_stub_lambda(
-        Func::new(FuncId::unique(), "single_path")
-            .input(FuncInput::required(
-                "path",
-                DataType::FsPath(Arc::new(FsPathConfig::new(FsPathMode::ExistingFile))),
-            ))
-            .output(FuncOutput::new("o", DataType::Int)),
-    );
-    let path_list = testing::with_stub_lambda(
-        Func::new(FuncId::unique(), "path_list")
-            .input(FuncInput::required(
-                "paths",
-                DataType::FsPath(Arc::new(FsPathConfig::new(FsPathMode::ExistingFiles))),
-            ))
-            .output(FuncOutput::new("o", DataType::Int)),
-    );
-    let mut library = Library::default();
-    library.add(int_src.clone());
-    library.add(str_sink.clone());
-    library.add(int_sink.clone());
-    library.add(single_path.clone());
-    library.add(path_list.clone());
-
     // Validation always accepts; the compiled program's lowered input shows
     // whether the binding survived the type gate or degraded to unbound.
-    let flat_input = |g: &Graph, node: NodeId| {
-        assert!(g.validate_with(&library).is_ok());
-        let compiled = Compiler::default().compile(g, &library).unwrap();
-        let e_node = &compiled[compiled.node(node).unwrap()];
-        compiled.inputs[e_node.inputs.nth(0)].binding.clone()
-    };
+    let mut g = TestGraph::new();
+    g.add("int_src", |n| n.pure().output(DataType::Int));
+    g.add("str_sink", |n| n.sink().input(DataType::String));
+    g.add("int_sink", |n| n.sink().input(DataType::Int));
+    g.wire("int_src", 0, "str_sink", 0);
+    g.wire("int_src", 0, "int_sink", 0);
 
-    // Wires: Int -> String degrades, Int -> Int binds.
-    let mut g = Graph::default();
-    let s = g.add_func_node(&int_src);
-    let f = g.add_func_node(&str_sink);
-    let i = g.add_func_node(&int_sink);
-    g.set_input_binding(InputPort::new(f, 0), Binding::bind(s, 0));
-    g.set_input_binding(InputPort::new(i, 0), Binding::bind(s, 0));
+    assert!(g.graph.validate_with(&g.library).is_ok());
+    let compiled = g.compile();
     assert!(
-        matches!(flat_input(&g, f), ExecutionBinding::None),
+        matches!(compiled.binding("str_sink", 0), ExecutionBinding::None),
         "Int into a String input lowers as unbound"
     );
     assert!(
-        matches!(flat_input(&g, i), ExecutionBinding::Bind(_)),
+        matches!(compiled.binding("int_sink", 0), ExecutionBinding::Bind(_)),
         "Int into an Int input binds"
     );
 
     // Constants: a String literal can't satisfy an Int input, a numeric one
     // can (scalar coercion), and the two FsPath shapes only satisfy their
     // matching picker mode.
+    let path_type = |mode| DataType::FsPath(Arc::new(FsPathConfig::new(mode)));
+    let satisfies = |declared: DataType, value: StaticValue| {
+        let mut g = TestGraph::new();
+        g.add("sink", |n| n.sink().input(declared));
+        g.constant("sink", 0, value);
+        assert!(g.graph.validate_with(&g.library).is_ok());
+        matches!(g.compile().binding("sink", 0), ExecutionBinding::Const(_))
+    };
     let cases = [
-        (&int_sink, StaticValue::String("x".into()), false),
-        (&int_sink, StaticValue::Float(2.5), true),
+        (DataType::Int, StaticValue::String("x".into()), false),
+        (DataType::Int, StaticValue::Float(2.5), true),
         (
-            &single_path,
+            path_type(FsPathMode::ExistingFile),
             StaticValue::FsPaths(vec!["a.fit".into(), "b.fit".into()]),
             false,
         ),
-        (&path_list, StaticValue::FsPath("a.fit".into()), false),
         (
-            &path_list,
+            path_type(FsPathMode::ExistingFiles),
+            StaticValue::FsPath("a.fit".into()),
+            false,
+        ),
+        (
+            path_type(FsPathMode::ExistingFiles),
             StaticValue::FsPaths(vec!["a.fit".into(), "b.fit".into()]),
             true,
         ),
     ];
-    for (func, value, satisfied) in cases {
-        let mut g = Graph::default();
-        let node = g.add_func_node(func);
-        g.set_input_binding(InputPort::new(node, 0), Binding::Const(value.clone()));
+    for (declared, value, expected) in cases {
         assert_eq!(
-            matches!(flat_input(&g, node), ExecutionBinding::Const(_)),
-            satisfied,
-            "const {value:?} on {:?}",
-            func.name
+            satisfies(declared.clone(), value.clone()),
+            expected,
+            "const {value:?} on {declared:?}"
         );
     }
 }
 
 #[test]
 fn resolve_output_type_follows_passthrough_chain() {
-    use crate::library::Library;
-    use crate::{DataType, StaticValue};
-
-    // Int-out producer → pass1 → pass2. Both passthroughs declare a `Any`
+    // Int-out producer → pass1 → pass2. Both passthroughs declare an `Any`
     // (wildcard) output, but the resolved type must be the producer's `Int`.
-    let producer = testing::with_stub_lambda(
-        Func::new(FuncId::unique(), "src").output(FuncOutput::new("out", DataType::Int)),
-    );
-    let pass_func = passthrough_func();
-    let mut library = Library::default();
-    library.add(producer.clone());
-    library.add(pass_func.clone());
-
-    let mut graph = Graph::default();
-    let src = graph.add_func_node(&producer);
-    let p1 = graph.add_func_node(&pass_func);
-    let p2 = graph.add_func_node(&pass_func);
-    graph.set_input_binding(InputPort::new(p1, 0), Binding::bind(src, 0));
-    graph.set_input_binding(InputPort::new(p2, 0), Binding::bind(p1, 0));
+    let mut g = TestGraph::new();
+    g.add("src", |n| n.pure().output(DataType::Int));
+    g.add("pass1", passthrough);
+    g.instance("pass2", "pass1");
+    g.wire("src", 0, "pass1", 0);
+    g.wire("pass1", 0, "pass2", 0);
 
     // The producer reports its own declared type.
-    assert_eq!(
-        output_type(&graph, &library, OutputPort::new(src, 0)),
-        DataType::Int
-    );
+    assert_eq!(output_type(&g, "src", 0), DataType::Int);
     // Each passthrough mirrors what flows through, transitively.
-    assert_eq!(
-        output_type(&graph, &library, OutputPort::new(p1, 0)),
-        DataType::Int
-    );
-    assert_eq!(
-        output_type(&graph, &library, OutputPort::new(p2, 0)),
-        DataType::Int
-    );
+    assert_eq!(output_type(&g, "pass1", 0), DataType::Int);
+    assert_eq!(output_type(&g, "pass2", 0), DataType::Int);
 
     // An unbound value input leaves the passthrough polymorphic (`Any`),
     // so its output accepts any consumer again.
-    graph.set_input_binding(InputPort::new(p1, 0), None);
-    assert_eq!(
-        output_type(&graph, &library, OutputPort::new(p1, 0)),
-        DataType::Any
-    );
+    g.unbind("pass1", 0);
+    assert_eq!(output_type(&g, "pass1", 0), DataType::Any);
     // The taint flows downstream: pass2 now reads pass1's `Any`.
-    assert_eq!(
-        output_type(&graph, &library, OutputPort::new(p2, 0)),
-        DataType::Any
-    );
+    assert_eq!(output_type(&g, "pass2", 0), DataType::Any);
 
     // A scalar const carries its type, so the output resolves to it (and
     // propagates downstream) — a const isn't "no type".
-    graph.set_input_binding(
-        InputPort::new(p1, 0),
-        Binding::Const(StaticValue::Bool(true)),
-    );
+    g.constant("pass1", 0, StaticValue::Bool(true));
+    assert_eq!(output_type(&g, "pass1", 0), DataType::Bool);
     assert_eq!(
-        output_type(&graph, &library, OutputPort::new(p1, 0)),
-        DataType::Bool
-    );
-    assert_eq!(
-        output_type(&graph, &library, OutputPort::new(p2, 0)),
+        output_type(&g, "pass2", 0),
         DataType::Bool,
         "the const's type propagates through the second passthrough too"
     );
 
     // A const whose type can't be reconstructed from the value alone — an
-    // enum literal on a `Any` (wildcard) input — stays polymorphic rather
+    // enum literal on an `Any` (wildcard) input — stays polymorphic rather
     // than panicking. (The passthrough's value input is `Any`-declared.)
-    graph.set_input_binding(
-        InputPort::new(p1, 0),
-        Binding::Const(StaticValue::Enum("X".into())),
-    );
-    assert_eq!(
-        output_type(&graph, &library, OutputPort::new(p1, 0)),
-        DataType::Any
-    );
+    g.constant("pass1", 0, StaticValue::Enum("X".into()));
+    assert_eq!(output_type(&g, "pass1", 0), DataType::Any);
 }
 
 #[test]
 fn resolve_output_type_uses_declared_type_for_typed_const_input() {
-    use crate::library::Library;
-    use crate::{DataType, FsPathConfig, FsPathMode, StaticValue, TypeId};
+    use crate::{FsPathConfig, FsPathMode, TypeId};
     use std::sync::Arc;
 
-    // A reroute func with *typed* inputs, each mirrored by a wildcard output.
+    // A reroute node with *typed* inputs, each mirrored by a wildcard output.
     let fs_ty = DataType::FsPath(Arc::new(FsPathConfig::new(FsPathMode::ExistingFile)));
     let enum_ty = DataType::Enum(TypeId::from_u128(0x5e));
-    let func = testing::with_stub_lambda(
-        Func::new(FuncId::unique(), "reroute")
-            .input(FuncInput::required("path", fs_ty.clone()))
-            .input(FuncInput::required("mode", enum_ty.clone()))
-            .wildcard_output("path_out", 0)
-            .wildcard_output("mode_out", 1),
-    );
-    let mut library = Library::default();
-    library.add(func.clone());
-
-    let mut graph = Graph::default();
-    let n = graph.add_func_node(&func);
+    let mut g = TestGraph::new();
+    let (path_ty, mode_ty) = (fs_ty.clone(), enum_ty.clone());
+    g.add("reroute", move |n| {
+        n.input(path_ty).input(mode_ty).wildcard(0).wildcard(1)
+    });
 
     // A const FsPath / Enum on a typed input resolves to that input's
     // *declared* type — which carries the full `FsPathConfig` / `Enum` id the
-    // bare `StaticValue` lacks (this is the case that used to be unimplemented).
-    graph.set_input_binding(
-        InputPort::new(n, 0),
-        Binding::Const(StaticValue::FsPath("/tmp/x".into())),
-    );
-    graph.set_input_binding(
-        InputPort::new(n, 1),
-        Binding::Const(StaticValue::Enum("A".into())),
-    );
-    assert_eq!(output_type(&graph, &library, OutputPort::new(n, 0)), fs_ty);
-    assert_eq!(
-        output_type(&graph, &library, OutputPort::new(n, 1)),
-        enum_ty
-    );
+    // bare `StaticValue` lacks.
+    g.constant("reroute", 0, StaticValue::FsPath("/tmp/x".into()));
+    g.constant("reroute", 1, StaticValue::Enum("A".into()));
+    assert_eq!(output_type(&g, "reroute", 0), fs_ty);
+    assert_eq!(output_type(&g, "reroute", 1), enum_ty);
 }
 
 #[test]
 fn type_mismatched_wiring_lowers_as_unbound_through_wildcard_chains() {
-    use crate::DataType;
-    use crate::execution::compile::Compiler;
-    use crate::execution::compile::compiled_graph::ExecutionBinding;
-    use crate::library::Library;
-
-    let float_src = testing::with_stub_lambda(
-        Func::new(FuncId::unique(), "fsrc").output(FuncOutput::new("o", DataType::Float)),
-    );
-    let str_src = testing::with_stub_lambda(
-        Func::new(FuncId::unique(), "ssrc").output(FuncOutput::new("o", DataType::String)),
-    );
-    let float_sink = testing::with_stub_lambda(
-        Func::new(FuncId::unique(), "fsink")
-            .input(FuncInput::required("x", DataType::Float))
-            .output(FuncOutput::new("o", DataType::Float)),
-    );
-    let pass_func = passthrough_func();
-    let mut library = Library::default();
-    library.add(float_src.clone());
-    library.add(str_src.clone());
-    library.add(float_sink.clone());
-    library.add(pass_func.clone());
-
-    let add_pass = |g: &mut Graph| g.add_func_node(&pass_func);
-
-    // Float producer → pass1 → pass2 → Float sink: a valid chain.
-    let mut g = Graph::default();
-    let fp = g.add_func_node(&float_src);
-    let sp = g.add_func_node(&str_src);
-    let p1 = add_pass(&mut g);
-    let p2 = add_pass(&mut g);
-    let sink = g.add_func_node(&float_sink);
-    g.set_input_binding(InputPort::new(p1, 0), Binding::bind(fp, 0));
-    g.set_input_binding(InputPort::new(p2, 0), Binding::bind(p1, 0));
-    g.set_input_binding(InputPort::new(sink, 0), Binding::bind(p2, 0));
-
-    // The sink's lowered input in the compiled program: the type gate rules on
-    // the authored wire, never on the document (nothing is severed). A `Bind`
-    // is mapped back to its producer's id so assertions stay id-based.
-    #[derive(Debug, PartialEq)]
-    enum LoweredSink {
-        Unbound,
-        Const,
-        Bound(NodeId),
-    }
-    let sink_binding = |g: &Graph| {
-        let mut compiler = Compiler::default();
-        let compiled = compiler.compile(g, &library).expect("mismatches compile");
-        let e_node = &compiled[compiled.node(sink).unwrap()];
-        match &compiled.inputs[e_node.inputs.nth(0)].binding {
-            ExecutionBinding::Bind(addr) => LoweredSink::Bound(compiled.node_ids[addr.node_idx]),
-            ExecutionBinding::Const(_) => LoweredSink::Const,
-            ExecutionBinding::None => LoweredSink::Unbound,
-        }
-    };
+    let mut g = TestGraph::new();
+    g.add("float_src", |n| n.pure().output(DataType::Float));
+    g.add("str_src", |n| n.pure().output(DataType::String));
+    g.add("pass1", passthrough);
+    g.instance("pass2", "pass1");
+    g.add("sink", |n| n.sink().input(DataType::Float));
+    g.wire("float_src", 0, "pass1", 0);
+    g.wire("pass1", 0, "pass2", 0);
+    g.wire("pass2", 0, "sink", 0);
 
     // The valid Float chain binds the sink to its passthrough producer
     // (passthroughs are real func nodes — only boundaries short-circuit).
     assert_eq!(
-        sink_binding(&g),
-        LoweredSink::Bound(p2),
+        g.compile().producer("sink", 0),
+        Some("pass2"),
         "a well-typed chain lowers as bound"
     );
 
@@ -466,67 +316,59 @@ fn type_mismatched_wiring_lowers_as_unbound_through_wildcard_chains() {
     // pass2.out both retype to String, so the *two-hops-down* sink edge is
     // the one now incompatible — it lowers as unbound while the authored
     // wire survives in the document.
-    g.set_input_binding(InputPort::new(p1, 0), Binding::bind(sp, 0));
-    assert_eq!(sink_binding(&g), LoweredSink::Unbound);
+    g.wire("str_src", 0, "pass1", 0);
+    assert_eq!(g.compile().producer("sink", 0), None);
     assert_eq!(
-        g.bindings.get(&InputPort::new(sink, 0)),
-        Some(&Binding::bind(p2, 0)),
+        g.graph.bindings.get(&InputPort::new(g.id("sink"), 0)),
+        Some(&Binding::bind(g.id("pass2"), 0)),
         "the mismatched wire stays authored"
     );
 
     // A const that doesn't satisfy its port degrades the same way.
-    g.set_input_binding(
-        InputPort::new(sink, 0),
-        Binding::Const(StaticValue::String("nope".into())),
-    );
-    assert_eq!(sink_binding(&g), LoweredSink::Unbound);
-    g.set_input_binding(
-        InputPort::new(sink, 0),
-        Binding::Const(StaticValue::Float(1.0)),
-    );
-    assert_eq!(sink_binding(&g), LoweredSink::Const);
+    g.constant("sink", 0, StaticValue::String("nope".into()));
+    assert!(matches!(
+        g.compile().binding("sink", 0),
+        ExecutionBinding::None
+    ));
+    g.constant("sink", 0, StaticValue::Float(1.0));
+    assert!(matches!(
+        g.compile().binding("sink", 0),
+        ExecutionBinding::Const(_)
+    ));
 }
 
 #[test]
 fn resolve_output_type_breaks_a_binding_cycle() {
-    use crate::DataType;
-    use crate::library::Library;
     // A passthrough whose value input binds to its own output — a cycle the
     // editor can momentarily hold. Resolution must terminate as `Any`.
-    let pass_func = passthrough_func();
-    let mut library = Library::default();
-    library.add(pass_func.clone());
-    let mut graph = Graph::default();
-    let id = graph.add_func_node(&pass_func);
-    graph.set_input_binding(InputPort::new(id, 0), Binding::bind(id, 0));
+    let mut g = TestGraph::new();
+    g.add("pass", passthrough);
+    g.wire("pass", 0, "pass", 0);
 
-    assert_eq!(
-        output_type(&graph, &library, OutputPort::new(id, 0)),
-        DataType::Any
-    );
+    assert_eq!(output_type(&g, "pass", 0), DataType::Any);
 }
 
 #[test]
 fn node_remove_test() -> TestResult {
-    let mut graph = test_graph();
+    let mut g = TestGraph::sample();
 
-    let node_id = graph.find_by_name("sum").unwrap().id;
-    graph.find_mut(node_id).unwrap().cache = CacheMode::Ram;
-    assert_eq!(graph.find_by_name("sum").unwrap().cache, CacheMode::Ram);
-    for node in graph.nodes.values_mut() {
+    let sum = g.id("sum");
+    g.cache("sum", CacheMode::Ram);
+    assert_eq!(g.graph.find_by_name("sum").unwrap().cache, CacheMode::Ram);
+    for node in g.graph.nodes.values_mut() {
         node.disabled = true;
     }
-    assert!(graph.iter().all(|node| node.disabled));
+    assert!(g.graph.iter().all(|node| node.disabled));
 
-    graph.detach_node(node_id);
+    g.remove("sum");
 
-    assert!(graph.find_by_name("sum").is_none());
-    assert_eq!(graph.len(), 4);
+    assert!(g.graph.find_by_name("sum").is_none());
+    assert_eq!(g.graph.len(), 4);
 
     // No surviving edge references the removed node (as consumer or producer).
-    for (dst, src) in graph.edges() {
-        assert_ne!(dst.node_id, node_id);
-        assert_ne!(src.node_id, node_id);
+    for (dst, src) in g.graph.edges() {
+        assert_ne!(dst.node_id, sum);
+        assert_ne!(src.node_id, sum);
     }
 
     Ok(())
@@ -540,30 +382,24 @@ fn node_remove_test() -> TestResult {
 fn produces_cycle_detects_direct_and_transitive_loops() {
     // A passthrough is both consumer and producer, so it can chain:
     // a → b → c, with d left unconnected.
-    let relay = passthrough_func();
-    let mut graph = Graph::default();
-    let a = graph.add_func_node(&relay);
-    let b = graph.add_func_node(&relay);
-    let c = graph.add_func_node(&relay);
-    let d = graph.add_func_node(&relay);
-    graph.set_input_binding(InputPort::new(b, 0), Binding::bind(a, 0));
-    graph.set_input_binding(InputPort::new(c, 0), Binding::bind(b, 0));
+    let mut g = TestGraph::new();
+    g.add("a", passthrough);
+    g.instance("b", "a");
+    g.instance("c", "a");
+    g.instance("d", "a");
+    g.wire("a", 0, "b", 0);
+    g.wire("b", 0, "c", 0);
 
-    assert!(graph.produces_cycle(b, a), "b → a closes a → b");
-    assert!(
-        graph.produces_cycle(c, a),
-        "c → a closes a → b → c transitively"
-    );
-    assert!(graph.produces_cycle(a, a), "a node wired to itself");
+    let closes = |from: &str, to: &str| g.graph.produces_cycle(g.id(from), g.id(to));
+    assert!(closes("b", "a"), "b → a closes a → b");
+    assert!(closes("c", "a"), "c → a closes a → b → c transitively");
+    assert!(closes("a", "a"), "a node wired to itself");
 
     // Forward and sideways edges are fine: a second a → c path is a DAG
     // diamond, and an unconnected node is reachable from nothing.
-    assert!(
-        !graph.produces_cycle(a, c),
-        "a → c is a second forward path"
-    );
-    assert!(!graph.produces_cycle(c, d), "d reads from nothing");
-    assert!(!graph.produces_cycle(a, d), "d reads from nothing");
+    assert!(!closes("a", "c"), "a → c is a second forward path");
+    assert!(!closes("c", "d"), "d reads from nothing");
+    assert!(!closes("a", "d"), "d reads from nothing");
 }
 
 #[test]
@@ -589,58 +425,52 @@ fn binding_conversions() {
 
 #[test]
 fn input_bindings_are_sparse_and_none_removes_an_entry() {
-    let mut graph = test_graph();
-    let sum_id = graph.find_by_name("sum").unwrap().id;
-    let get_a_id = graph.find_by_name("get_a").unwrap().id;
-    let get_b_id = graph.find_by_name("get_b").unwrap().id;
+    let mut g = TestGraph::sample();
 
-    let first = InputPort::new(sum_id, 0);
-    let second = InputPort::new(sum_id, 1);
-    let absent = InputPort::new(sum_id, 2);
+    let first = InputPort::new(g.id("sum"), 0);
+    let second = InputPort::new(g.id("sum"), 1);
+    let absent = InputPort::new(g.id("sum"), 2);
     assert_eq!(
-        graph.bindings.get(&first),
-        Some(&Binding::bind(get_a_id, 0))
+        g.graph.bindings.get(&first),
+        Some(&Binding::bind(g.id("get_a"), 0))
     );
     assert_eq!(
-        graph.bindings.get(&second),
-        Some(&Binding::bind(get_b_id, 0))
+        g.graph.bindings.get(&second),
+        Some(&Binding::bind(g.id("get_b"), 0))
     );
-    assert!(!graph.bindings.contains_key(&absent));
+    assert!(!g.graph.bindings.contains_key(&absent));
 
-    let binding_count = graph.bindings.len();
-    graph.set_input_binding(first, None);
-    assert!(!graph.bindings.contains_key(&first));
-    assert_eq!(graph.bindings.len(), binding_count - 1);
+    let binding_count = g.graph.bindings.len();
+    g.unbind("sum", 0);
+    assert!(!g.graph.bindings.contains_key(&first));
+    assert_eq!(g.graph.bindings.len(), binding_count - 1);
 }
 
 #[test]
 fn subscribe_unsubscribe_is_subscribed() {
-    let graph = test_graph();
-    let emitter = graph.find_by_name("get_a").unwrap().id;
-    let sub = graph.find_by_name("sum").unwrap().id;
-    let mut graph = graph;
+    let mut g = TestGraph::sample();
+    let (emitter, sub) = (g.id("get_a"), g.id("sum"));
 
-    assert!(!graph.is_subscribed(emitter, 0, sub));
-    graph.subscribe(emitter, 0, sub);
-    assert!(graph.is_subscribed(emitter, 0, sub));
+    assert!(!g.graph.is_subscribed(emitter, 0, sub));
+    g.subscribe("get_a", 0, "sum");
+    assert!(g.graph.is_subscribed(emitter, 0, sub));
 
     // Distinct event_idx is a distinct edge.
-    assert!(!graph.is_subscribed(emitter, 1, sub));
+    assert!(!g.graph.is_subscribed(emitter, 1, sub));
 
     // Re-subscribing is idempotent (BTreeSet dedups).
-    graph.subscribe(emitter, 0, sub);
-    assert_eq!(graph.subscriptions().count(), 1);
+    g.subscribe("get_a", 0, "sum");
+    assert_eq!(g.graph.subscriptions().count(), 1);
 
     // One event carries several subscribers, and a second event off the same
     // emitter is its own edge — so the three coexist rather than overwriting.
-    let sub2 = graph.find_by_name("mult").unwrap().id;
-    let other = graph.find_by_name("Print").unwrap().id;
-    graph.subscribe(emitter, 0, sub2);
-    graph.subscribe(emitter, 1, other);
-    assert!(graph.is_subscribed(emitter, 0, sub));
-    assert!(graph.is_subscribed(emitter, 0, sub2));
-    assert!(graph.is_subscribed(emitter, 1, other));
-    assert!(!graph.is_subscribed(emitter, 1, sub));
+    let (sub2, other) = (g.id("mult"), g.id("Print"));
+    g.subscribe("get_a", 0, "mult");
+    g.subscribe("get_a", 1, "Print");
+    assert!(g.graph.is_subscribed(emitter, 0, sub));
+    assert!(g.graph.is_subscribed(emitter, 0, sub2));
+    assert!(g.graph.is_subscribed(emitter, 1, other));
+    assert!(!g.graph.is_subscribed(emitter, 1, sub));
 
     // `subscriptions` yields them in (emitter, event_idx, subscriber) order,
     // whatever order they were authored in — the determinism a compile's
@@ -663,36 +493,35 @@ fn subscribe_unsubscribe_is_subscribed() {
         },
     ];
     expected.sort();
-    assert_eq!(graph.subscriptions().collect::<Vec<_>>(), expected);
+    assert_eq!(g.graph.subscriptions().collect::<Vec<_>>(), expected);
 
     // Dropping one edge leaves its siblings alone.
-    graph.unsubscribe(emitter, 0, sub);
-    assert!(!graph.is_subscribed(emitter, 0, sub));
-    assert!(graph.is_subscribed(emitter, 0, sub2));
-    assert!(graph.is_subscribed(emitter, 1, other));
+    g.unsubscribe("get_a", 0, "sum");
+    assert!(!g.graph.is_subscribed(emitter, 0, sub));
+    assert!(g.graph.is_subscribed(emitter, 0, sub2));
+    assert!(g.graph.is_subscribed(emitter, 1, other));
 
-    graph.unsubscribe(emitter, 0, sub2);
-    graph.unsubscribe(emitter, 1, other);
-    assert_eq!(graph.subscriptions().count(), 0);
+    g.unsubscribe("get_a", 0, "mult");
+    g.unsubscribe("get_a", 1, "Print");
+    assert_eq!(g.graph.subscriptions().count(), 0);
 }
 
 #[test]
 fn wiring_snapshot_round_trips_through_serde_and_restore() -> TestResult {
-    let mut graph = test_graph();
-    let sum_id = graph.find_by_name("sum").unwrap().id;
-    let get_a_id = graph.find_by_name("get_a").unwrap().id;
+    let mut g = TestGraph::sample();
+    let sum = g.id("sum");
     // Add a subscription that touches `sum` so both arms are exercised.
-    graph.subscribe(get_a_id, 0, sum_id);
+    g.subscribe("get_a", 0, "sum");
+    let get_a = g.id("get_a");
 
-    let bindings = graph.bindings_touching(sum_id);
-
+    let bindings = g.graph.bindings_touching(sum);
     assert_eq!(bindings.len(), 3);
 
-    let before = graph.clone_verbatim();
-    let edges_before = graph.edges().count();
-    let detached = graph.detach_node(sum_id);
-    assert_eq!(graph.edges().count(), edges_before - 3);
-    assert!(!graph.is_subscribed(get_a_id, 0, sum_id));
+    let before = g.graph.clone_verbatim();
+    let edges_before = g.graph.edges().count();
+    let detached = g.remove("sum");
+    assert_eq!(g.graph.edges().count(), edges_before - 3);
+    assert!(!g.graph.is_subscribed(get_a, 0, sum));
 
     let serialized = serialize(&detached, SerdeFormat::Bitcode)?;
     let decoded: DetachedNode = deserialize(&serialized, SerdeFormat::Bitcode)?;
@@ -705,53 +534,62 @@ fn wiring_snapshot_round_trips_through_serde_and_restore() -> TestResult {
     for invalid in [nil_id, mismatched] {
         let serialized = serialize(&invalid, SerdeFormat::Json)?;
         let decoded_invalid: DetachedNode = deserialize(&serialized, SerdeFormat::Json)?;
-        let detached_graph = graph.clone_verbatim();
+        let detached_graph = g.graph.clone_verbatim();
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            graph.attach_node(decoded_invalid);
+            g.graph.attach_node(decoded_invalid);
         }));
         assert!(result.is_err());
-        assert_eq!(graph, detached_graph, "failed attachment mutated the graph");
+        assert_eq!(
+            g.graph, detached_graph,
+            "failed attachment mutated the graph"
+        );
     }
 
-    graph.attach_node(decoded);
+    g.graph.attach_node(decoded);
 
-    assert_eq!(graph, before);
+    assert_eq!(g.graph, before);
 
     Ok(())
 }
 
-fn func_with_default(default: i64) -> Func {
-    Func::new(FuncId::unique(), "withdefault")
-        .input(FuncInput::optional("x", DataType::Int).default(default))
-}
-
 #[test]
 fn add_func_node_seeds_default_const_binding() {
-    let func = func_with_default(7);
-    let mut graph = Graph::default();
-    let id = graph.add_func_node(&func);
+    let mut g = TestGraph::new();
+    g.add("withdefault", |n| {
+        n.pure()
+            .defaulted(DataType::Int, 7i64)
+            .output(DataType::Int)
+    });
+    let id = g.id("withdefault");
 
-    assert_eq!(graph.find(id).unwrap().kind, NodeKind::Func(func.id));
     assert_eq!(
-        graph.bindings.get(&InputPort::new(id, 0)),
+        g.graph.find(id).unwrap().kind,
+        NodeKind::Func(g.library.by_name("withdefault").unwrap().id)
+    );
+    assert_eq!(
+        g.graph.bindings.get(&InputPort::new(id, 0)),
         Some(&Binding::Const(7i64.into()))
     );
 }
 
 #[test]
 fn add_func_node_leaves_defaultless_inputs_unbound() {
-    let library = test_func_lib(TestFuncHooks::default());
-    let sum = library.by_name("sum").unwrap(); // inputs have no defaults
-    let mut graph = Graph::default();
-    let id = graph.add_func_node(sum);
+    let mut g = TestGraph::new();
+    g.add("sum", |n| {
+        n.pure()
+            .input(DataType::Int)
+            .optional(DataType::Int)
+            .output(DataType::Int)
+    });
+    let id = g.id("sum");
 
-    assert!(!graph.bindings.contains_key(&InputPort::new(id, 0)));
-    assert!(!graph.bindings.contains_key(&InputPort::new(id, 1)));
+    assert!(!g.graph.bindings.contains_key(&InputPort::new(id, 0)));
+    assert!(!g.graph.bindings.contains_key(&InputPort::new(id, 1)));
 }
 
 #[test]
 fn serialization_round_trips_a_graph_through_every_format() -> TestResult {
-    let graph = test_graph();
+    let graph = TestGraph::sample().graph;
     for format in SerdeFormat::all_formats_for_testing() {
         let serialized = serialize(&graph, format)?;
         let deserialized: Graph = deserialize(&serialized, format)?;
@@ -766,13 +604,12 @@ fn serialization_round_trips_a_graph_through_every_format() -> TestResult {
 /// graph's own mutations *assert* gets **checked** instead.
 #[test]
 fn loading_rejects_a_corrupt_graph() {
-    let mut graph = test_graph();
-    let sum_id = graph.find_by_name("sum").unwrap().id;
-    graph.set_input_binding(
-        InputPort::new(sum_id, 0),
+    let mut g = TestGraph::sample();
+    g.graph.set_input_binding(
+        InputPort::new(g.id("sum"), 0),
         Binding::bind(NodeId::unique(), 0),
     );
-    let bytes = serialize(&graph, SerdeFormat::Bitcode).unwrap();
+    let bytes = serialize(&g.graph, SerdeFormat::Bitcode).unwrap();
     let decoded: Graph = deserialize(&bytes, SerdeFormat::Bitcode)
         .expect("a structurally broken graph still decodes; validation is what rejects it");
     assert!(
@@ -796,7 +633,7 @@ fn loading_rejects_a_corrupt_graph() {
 
     // Bindings decode from a sequence into a map, so a repeated input port is
     // caught during decode rather than by validation after it.
-    let mut duplicate_bindings = serde_json::to_value(test_graph()).unwrap();
+    let mut duplicate_bindings = serde_json::to_value(TestGraph::sample().graph).unwrap();
     let bindings = duplicate_bindings["bindings"].as_array_mut().unwrap();
     bindings.push(bindings[0].clone());
     let bytes = serde_json::to_vec(&duplicate_bindings).unwrap();
@@ -816,35 +653,29 @@ fn loading_rejects_a_corrupt_graph() {
 /// [`type_mismatches_degrade_at_lowering_not_at_validation`].
 #[test]
 fn validate_tolerates_library_range_drift() {
-    let func = testing::with_stub_lambda(
-        Func::new(FuncId::unique(), "one_out").output(FuncOutput::new("o", DataType::Int)),
-    );
-    let mut library = Library::default();
-    library.add(func.clone());
-
-    let mut graph = Graph::default();
-    let id = graph.add_func_node(&func);
-    assert!(graph.validate_with(&library).is_ok());
+    let mut g = TestGraph::new();
+    g.add("one_out", |n| n.pure().output(DataType::Int));
+    assert!(g.graph.validate_with(&g.library).is_ok());
 
     // Input 5, output 7, and event 3 are all past what `one_out` declares.
-    graph.set_input_binding(InputPort::new(id, 5), Binding::bind(id, 7));
-    graph.subscribe(id, 3, id);
-    assert!(graph.validate_with(&library).is_ok());
+    let one_out = g.id("one_out");
+    g.graph
+        .set_input_binding(InputPort::new(one_out, 5), Binding::bind(one_out, 7));
+    g.graph.subscribe(one_out, 3, one_out);
+    assert!(g.graph.validate_with(&g.library).is_ok());
 
     // `Null` consts ("explicitly unset") are tolerated on both sides:
     // meaningful on an optional input, degrading to a missing input on a
     // required one at lowering (see `const_satisfies`).
-    let nullable = testing::with_stub_lambda(
-        Func::new(FuncId::unique(), "nullable")
-            .input(FuncInput::optional("opt", DataType::Int))
-            .input(FuncInput::required("req", DataType::Int))
-            .output(FuncOutput::new("o", DataType::Int)),
-    );
-    library.add(nullable.clone());
-    let node = graph.add_func_node(&nullable);
-    graph.set_input_binding(InputPort::new(node, 0), Binding::Const(StaticValue::Null));
-    graph.set_input_binding(InputPort::new(node, 1), Binding::Const(StaticValue::Null));
-    assert!(graph.validate_with(&library).is_ok());
+    g.add("nullable", |n| {
+        n.pure()
+            .optional(DataType::Int)
+            .input(DataType::Int)
+            .output(DataType::Int)
+    });
+    g.constant("nullable", 0, StaticValue::Null);
+    g.constant("nullable", 1, StaticValue::Null);
+    assert!(g.graph.validate_with(&g.library).is_ok());
 }
 
 /// `Some(ports)` is an authoritative arity a caller may range-check against;
@@ -853,76 +684,73 @@ fn validate_tolerates_library_range_drift() {
 /// opposite ways.
 #[test]
 fn node_func_resolves_to_a_declaration_or_to_unknown() {
-    let library = test_func_lib(TestFuncHooks::default());
-    let mut graph = Graph::default();
+    let mut g = TestGraph::new();
+    g.add("sum", |n| {
+        n.pure()
+            .input(DataType::Int)
+            .optional(DataType::Int)
+            .output(DataType::Int)
+    });
 
-    let sum = library.by_name("sum").unwrap();
-    let sum_id = graph.add_func_node(sum);
-    let sum_node = graph.find(sum_id).unwrap();
-    let ports = graph.node_func(sum_node, &library).unwrap();
+    let declared = g.library.by_name("sum").unwrap().clone();
+    let node = g.graph.find(g.id("sum")).unwrap();
+    let ports = g.graph.node_func(node, &g.library).unwrap();
     assert_eq!(ports.name, "sum");
-    assert_eq!(ports.inputs.len(), sum.inputs.len());
-    assert_eq!(ports.id, sum.id);
+    assert_eq!(ports.inputs.len(), declared.inputs.len());
+    assert_eq!(ports.id, declared.id);
 
     // Library drift is unknown, not empty — otherwise every port on a node
     // whose func went missing would read as out of range.
     let missing_func = Node::new(NodeKind::Func(FuncId::unique()));
-    assert!(graph.node_func(&missing_func, &library).is_none());
+    assert!(g.graph.node_func(&missing_func, &g.library).is_none());
 
     // The three policy flags come off the declaration verbatim. Each is set
     // on one of the two funcs and clear on the other, so a flag wired to the
     // wrong field can't pass.
-    let plain = testing::with_stub_lambda(
-        Func::new(FuncId::unique(), "plain")
-            .pure()
-            .output(FuncOutput::new("o", DataType::Int)),
-    );
+    g.add("plain", |n| n.pure().output(DataType::Int));
+    g.add("flagged", |n| {
+        n.sink().uncacheable().optional(DataType::Int)
+    });
+    let func = |g: &TestGraph, name: &str| g.library.by_name(name).unwrap().clone();
+
+    let plain = func(&g, "plain");
     assert!(!plain.sink);
     assert!(!plain.uncacheable);
     assert!(!plain.impure(), "declared `pure` is not impure");
 
-    let flagged = Func::new(FuncId::unique(), "flagged")
-        .sink()
-        .uncacheable()
-        .input(FuncInput::optional("v", DataType::Int));
+    let flagged = func(&g, "flagged");
     assert!(flagged.sink);
     assert!(flagged.uncacheable);
     assert!(
         flagged.impure(),
-        "`Func::new` leaves a func Impure until `pure()` says otherwise"
+        "a func is Impure until `pure()` says otherwise"
     );
 }
 
 #[test]
 fn input_type_resolves_declared_types_and_rejects_out_of_range() {
-    let consumer = testing::with_stub_lambda(
-        Func::new(FuncId::unique(), "dst")
-            .input(FuncInput::required("x", DataType::Float))
-            .output(FuncOutput::new("out", DataType::Float)),
-    );
-    let mut library = Library::default();
-    library.add(consumer.clone());
+    let mut g = TestGraph::new();
+    g.add("dst", |n| {
+        n.pure().input(DataType::Float).output(DataType::Float)
+    });
+    let dst = g.id("dst");
 
-    let mut graph = Graph::default();
-    let dst = graph.add_func_node(&consumer);
     assert_eq!(
-        graph.input_type(&library, InputPort::new(dst, 0)),
+        g.graph.input_type(&g.library, InputPort::new(dst, 0)),
         Some(DataType::Float)
     );
-    assert_eq!(graph.input_type(&library, InputPort::new(dst, 9)), None);
+    assert_eq!(g.graph.input_type(&g.library, InputPort::new(dst, 9)), None);
 }
 
 #[test]
 fn node_events_expose_names_and_arity() {
-    let emitter = testing::with_stub_lambda(
-        Func::new(FuncId::unique(), "ticker")
-            .event("tick", EventLambda::default())
-            .event("tock", EventLambda::default()),
-    );
+    let emitter = Func::new(FuncId::unique(), "ticker")
+        .event("tick", EventLambda::default())
+        .event("tock", EventLambda::default());
     assert_eq!(emitter.events.len(), 2);
     let names: Vec<&str> = emitter.events.iter().map(|e| e.name.as_str()).collect();
     assert_eq!(names, ["tick", "tock"]);
 
-    let silent = testing::with_stub_lambda(Func::new(FuncId::unique(), "silent"));
+    let silent = Func::new(FuncId::unique(), "silent");
     assert!(silent.events.is_empty());
 }

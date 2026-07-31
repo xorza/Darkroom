@@ -129,56 +129,29 @@ impl OutputTypes {
 
 #[cfg(test)]
 mod tests {
-    use crate::graph::func::{FuncInput, FuncOutput};
-    use crate::graph::identity::{FuncId, InputPort, NodeId, OutputPort};
+    use crate::DataType;
+    use crate::graph::Graph;
+    use crate::graph::identity::OutputPort;
     use crate::graph::output_types::OutputTypes;
-    use crate::graph::{Binding, Graph};
-    use crate::library::Library;
-    use crate::{DataType, Func, testing};
+    use crate::testing::graph::TestGraph;
 
     /// `src` (declared `Int`) → `p1` → `p2`, both passthroughs declaring a
-    /// wildcard output over an `Any` input.
-    #[derive(Debug)]
-    struct Chain {
-        library: Library,
-        graph: Graph,
-        src: NodeId,
-        p1: NodeId,
-        p2: NodeId,
-        /// A second producer, wired to nothing — its fixed output lies on no
-        /// wildcard chain.
-        isolated: NodeId,
+    /// wildcard output over an `Any` input, plus a second producer wired to
+    /// nothing — a fixed output lying on no wildcard chain.
+    fn chain() -> TestGraph {
+        let mut g = TestGraph::new();
+        g.add("src", |n| n.pure().output(DataType::Int));
+        g.add("p1", |n| n.input(DataType::Any).wildcard(0));
+        g.instance("p2", "p1");
+        g.instance("isolated", "src");
+        g.wire("src", 0, "p1", 0);
+        g.wire("p1", 0, "p2", 0);
+        g
     }
 
-    fn chain() -> Chain {
-        let producer = testing::with_stub_lambda(
-            Func::new(FuncId::unique(), "src").output(FuncOutput::new("out", DataType::Int)),
-        );
-        let pass = testing::with_stub_lambda(
-            Func::new(FuncId::unique(), "pass")
-                .input(FuncInput::required("i", DataType::Any))
-                .wildcard_output("o", 0),
-        );
-        let mut library = Library::default();
-        library.add(producer.clone());
-        library.add(pass.clone());
-
-        let mut graph = Graph::default();
-        let src = graph.add_func_node(&producer);
-        let p1 = graph.add_func_node(&pass);
-        let p2 = graph.add_func_node(&pass);
-        let isolated = graph.add_func_node(&producer);
-        graph.set_input_binding(InputPort::new(p1, 0), Binding::bind(src, 0));
-        graph.set_input_binding(InputPort::new(p2, 0), Binding::bind(p1, 0));
-
-        Chain {
-            library,
-            graph,
-            src,
-            p1,
-            p2,
-            isolated,
-        }
+    /// The port `port` of the node the fixture named `name`.
+    fn port(g: &TestGraph, name: &str, port: usize) -> OutputPort {
+        OutputPort::new(g.id(name), port)
     }
 
     /// Every declared output port is in the table, whichever kind it is: a
@@ -193,27 +166,27 @@ mod tests {
         types.update(&c.graph, &c.library);
 
         assert_eq!(
-            types.get(OutputPort::new(c.p1, 0)),
+            types.get(port(&c, "p1", 0)),
             Some(&DataType::Int),
             "the passthrough mirrors the producer it reads"
         );
         assert_eq!(
-            types.get(OutputPort::new(c.p2, 0)),
+            types.get(port(&c, "p2", 0)),
             Some(&DataType::Int),
             "transitively, through the chain"
         );
         assert_eq!(
-            types.get(OutputPort::new(c.src, 0)),
+            types.get(port(&c, "src", 0)),
             Some(&DataType::Int),
             "the fixed producer answers from its own declaration"
         );
         assert_eq!(
-            types.get(OutputPort::new(c.isolated, 0)),
+            types.get(port(&c, "isolated", 0)),
             Some(&DataType::Int),
             "including one no wildcard chain reaches"
         );
         assert_eq!(
-            types.get(OutputPort::new(c.p1, 7)),
+            types.get(port(&c, "p1", 7)),
             None,
             "a port that does not exist is not declared, so not in the table"
         );
@@ -227,19 +200,19 @@ mod tests {
         let mut c = chain();
         let mut types = OutputTypes::default();
         types.update(&c.graph, &c.library);
-        assert_eq!(types.get(OutputPort::new(c.p1, 0)), Some(&DataType::Int));
+        assert_eq!(types.get(port(&c, "p1", 0)), Some(&DataType::Int));
 
         // Same nodes, binding severed: the passthrough goes polymorphic.
-        c.graph.set_input_binding(InputPort::new(c.p1, 0), None);
+        c.unbind("p1", 0);
         types.update(&c.graph, &c.library);
 
         assert_eq!(
-            types.get(OutputPort::new(c.p1, 0)),
+            types.get(port(&c, "p1", 0)),
             Some(&DataType::Any),
             "the severed input leaves it polymorphic, not `Int` from last time"
         );
         assert_eq!(
-            types.get(OutputPort::new(c.p2, 0)),
+            types.get(port(&c, "p2", 0)),
             Some(&DataType::Any),
             "and the taint reaches downstream"
         );
@@ -247,7 +220,7 @@ mod tests {
         // A graph with none of those nodes leaves the table empty rather than
         // answering for ids it no longer contains.
         types.update(&Graph::default(), &c.library);
-        assert_eq!(types.get(OutputPort::new(c.p1, 0)), None);
+        assert_eq!(types.get(port(&c, "p1", 0)), None);
     }
 
     /// A binding cycle is *present* and `Any` — distinguishable from a port the
@@ -256,13 +229,12 @@ mod tests {
     fn a_cycle_resolves_to_any_rather_than_being_absent() {
         let mut c = chain();
         // p1 ← p2 ← p1: the chain now closes on itself.
-        c.graph
-            .set_input_binding(InputPort::new(c.p1, 0), Binding::bind(c.p2, 0));
+        c.wire("p2", 0, "p1", 0);
         let mut types = OutputTypes::default();
 
         types.update(&c.graph, &c.library);
 
-        assert_eq!(types.get(OutputPort::new(c.p1, 0)), Some(&DataType::Any));
-        assert_eq!(types.get(OutputPort::new(c.p2, 0)), Some(&DataType::Any));
+        assert_eq!(types.get(port(&c, "p1", 0)), Some(&DataType::Any));
+        assert_eq!(types.get(port(&c, "p2", 0)), Some(&DataType::Any));
     }
 }

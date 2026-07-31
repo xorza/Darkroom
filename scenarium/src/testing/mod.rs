@@ -2,10 +2,15 @@
 //! `internals` dev feature.
 //!
 //! [`graph`] is the harness: a graph and its library built together and
-//! addressed by name. What is left in this file is the older fixture pair —
-//! a five-func library and the graph wiring it — which
-//! [`TestGraph::sample`](graph::TestGraph::sample) wraps so tests can move
-//! across one at a time.
+//! addressed by name, which is what an in-crate fixture reaches for.
+//!
+//! What is left in this file is the **published** pair — a five-func library
+//! and the graph wiring it, plus [`with_stub_lambda`] for a declaration a
+//! caller states itself. These are what a downstream editor's tests build on,
+//! since [`TestGraph`](graph::TestGraph)'s own compile bridge answers in
+//! crate-private types and cannot leave the crate.
+//! [`TestGraph::sample`](graph::TestGraph::sample) wraps the pair so an
+//! in-crate test gets the same five nodes addressed by name.
 
 #[cfg(test)]
 pub(crate) mod engine;
