@@ -1,4 +1,6 @@
 use super::*;
+use ::common::TempFile;
+
 use crate::StaticValue;
 use crate::execution::cache::runtime::RuntimeCache;
 use crate::execution::cache::slot::OutputSnapshot;
@@ -145,8 +147,9 @@ fn fs_path_folds_file_identity_and_path() {
     // what stops machine B serving A's result for B's files. The resolver is the
     // real filesystem, so exercise it with a temp file. `Digests::of` re-stats it
     // on each call (a fresh engine).
-    let file = std::env::temp_dir().join("scenarium_digest_fs_path_test.bin");
-    let path = file.to_string_lossy().into_owned();
+    let selected = TempFile::with_extension("scenarium-digest-fs-path", "bin");
+    let file = selected.path();
+    let path = selected.to_str();
     let path_node = |paths: StaticValue| {
         let mut p = ProgramBuilder::default();
         let node = pure(&mut p, 10, 1).const_input(paths).add();
@@ -154,33 +157,33 @@ fn fs_path_folds_file_identity_and_path() {
     };
 
     let (p, single) = path_node(StaticValue::FsPath(path.clone()));
-    std::fs::write(&file, b"x").unwrap(); // len 1
+    std::fs::write(file, b"x").unwrap(); // len 1
     let d_len1 = Digests::of(&p).at(single);
-    std::fs::write(&file, b"xyz").unwrap(); // len 3 — file identity changed
+    std::fs::write(file, b"xyz").unwrap(); // len 3 — file identity changed
     let d_len3 = Digests::of(&p).at(single);
     assert_ne!(
         d_len1, d_len3,
         "a file content change must re-key the digest"
     );
 
-    let unselected = file.with_file_name("scenarium_digest_unselected.bin");
-    std::fs::write(&unselected, b"not selected").unwrap();
+    let unselected = TempFile::with_extension("scenarium-digest-unselected", "bin");
+    std::fs::write(unselected.path(), b"not selected").unwrap();
     assert_eq!(
         Digests::of(&p).at(single),
         d_len3,
         "an unselected sibling file must not affect a single-path digest"
     );
 
-    let second = file.with_file_name("scenarium_digest_selected_second.bin");
-    std::fs::write(&second, b"second").unwrap();
-    let second_path = second.to_string_lossy().into_owned();
-    let (selected, both) = path_node(StaticValue::FsPaths(vec![
+    let second = TempFile::with_extension("scenarium-digest-second", "bin");
+    std::fs::write(second.path(), b"second").unwrap();
+    let second_path = second.to_str();
+    let (two_file_prog, both) = path_node(StaticValue::FsPaths(vec![
         path.clone(),
         second_path.clone(),
     ]));
-    let two_files = Digests::of(&selected).at(both);
-    std::fs::write(&second, b"second changed").unwrap();
-    let second_edited = Digests::of(&selected).at(both);
+    let two_files = Digests::of(&two_file_prog).at(both);
+    std::fs::write(second.path(), b"second changed").unwrap();
+    let second_edited = Digests::of(&two_file_prog).at(both);
     assert_ne!(
         two_files, second_edited,
         "editing any selected file must re-key the list"
@@ -196,7 +199,7 @@ fn fs_path_folds_file_identity_and_path() {
     // A path that is not there has no identity to fold at all: the node
     // is left without a digest, and the executor fails it at its turn
     // rather than keying it on an absence.
-    std::fs::remove_file(&file).unwrap();
+    std::fs::remove_file(file).unwrap();
     assert_eq!(
         Digests::of(&p).at(single),
         None,
@@ -239,8 +242,6 @@ fn fs_path_folds_file_identity_and_path() {
         ])),
         "the single-path digest encoding must remain stable"
     );
-    std::fs::remove_file(unselected).unwrap();
-    std::fs::remove_file(second).unwrap();
 }
 
 /// A **Bind-delivered** path re-keys its consumer like a const one: the fold reads the
@@ -251,11 +252,9 @@ fn fs_path_folds_file_identity_and_path() {
 fn bound_fs_path_folds_delivered_file_identity() {
     use crate::DynamicValue;
 
-    let file = std::env::temp_dir().join(format!(
-        "scenarium-digest-bound-fs-{}.bin",
-        std::process::id()
-    ));
-    let path = file.to_string_lossy().into_owned();
+    let delivered = TempFile::with_extension("scenarium-digest-bound-fs", "bin");
+    let file = delivered.path();
+    let path = delivered.to_str();
 
     // A producer, a consumer whose input is `FsPath`-declared, and a control
     // consumer reading the same port through an undeclared input — no fold.
@@ -284,7 +283,7 @@ fn bound_fs_path_folds_delivered_file_identity() {
     };
     let fs_path = || Some(DynamicValue::Static(StaticValue::FsPath(path.clone())));
 
-    std::fs::write(&file, b"x").unwrap(); // len 1
+    std::fs::write(file, b"x").unwrap(); // len 1
     let DigestPair {
         typed: typed_len1,
         plain: plain_len1,
@@ -296,7 +295,7 @@ fn bound_fs_path_folds_delivered_file_identity() {
         "an unchanged file folds identically"
     );
 
-    std::fs::write(&file, b"xyz").unwrap(); // len 3 — the file identity changed
+    std::fs::write(file, b"xyz").unwrap(); // len 3 — the file identity changed
     let DigestPair {
         typed: typed_len3,
         plain: plain_len3,
@@ -310,27 +309,24 @@ fn bound_fs_path_folds_delivered_file_identity() {
         "an undeclared input folds no file identity — structural digest only"
     );
 
-    let second = file.with_file_name(format!(
-        "scenarium-digest-bound-fs-second-{}.bin",
-        std::process::id()
-    ));
-    std::fs::write(&second, b"second").unwrap();
+    let second = TempFile::with_extension("scenarium-digest-bound-fs-second", "bin");
+    std::fs::write(second.path(), b"second").unwrap();
     let fs_paths = || {
         Some(DynamicValue::Static(StaticValue::FsPaths(vec![
             path.clone(),
-            second.to_string_lossy().into_owned(),
+            second.to_str(),
         ])))
     };
     let typed_list = digests_with(fs_paths()).typed;
-    std::fs::write(&second, b"second changed").unwrap();
+    std::fs::write(second.path(), b"second changed").unwrap();
     assert_ne!(
         digests_with(fs_paths()).typed,
         typed_list,
         "a wired path list re-keys when any selected file changes"
     );
-    std::fs::remove_file(second).unwrap();
+    std::fs::remove_file(second.path()).unwrap();
 
-    std::fs::remove_file(&file).unwrap();
+    std::fs::remove_file(file).unwrap();
     let DigestPair {
         typed: typed_missing,
         plain: plain_missing,

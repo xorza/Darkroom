@@ -44,14 +44,7 @@ mod planning {
         schedule.outputs.add_reader(OutputIdx(0));
 
         planner
-            .plan(
-                prog.program(),
-                &RunSeeds {
-                    sinks: true,
-                    ..Default::default()
-                },
-                &mut schedule,
-            )
+            .plan(prog.program(), &RunSeeds::sinks(), &mut schedule)
             .expect("no cycle");
 
         assert_eq!(
@@ -229,14 +222,7 @@ mod planning {
         let mut planner = Planner::default();
         let mut plan = RunSchedule::default();
         planner
-            .plan(
-                prog.program(),
-                &RunSeeds {
-                    sinks: true,
-                    ..Default::default()
-                },
-                &mut plan,
-            )
+            .plan(prog.program(), &RunSeeds::sinks(), &mut plan)
             .unwrap();
         assert_eq!(plan.states[producer.node_idx], NodeState::Disabled);
         assert_eq!(plan.states[required.node_idx], NodeState::MissingInputs);
@@ -246,9 +232,8 @@ mod planning {
             .plan(
                 prog.program(),
                 &RunSeeds {
-                    sinks: true,
                     node_ids: vec![producer.node_id],
-                    ..Default::default()
+                    ..RunSeeds::sinks()
                 },
                 &mut plan,
             )
@@ -269,10 +254,7 @@ mod planning {
 
         let mut planner = Planner::default();
         let mut p = RunSchedule::default();
-        let seeds = RunSeeds {
-            node_ids: vec![a.node_id],
-            ..Default::default()
-        };
+        let seeds = RunSeeds::nodes(vec![a.node_id]);
         planner
             .plan(prog.program(), &seeds, &mut p)
             .expect("no cycle");
@@ -280,10 +262,7 @@ mod planning {
         assert_eq!(p.seeded_roots(), vec![a.node_idx]);
         assert_eq!(p.roots(), [a.node_idx]);
 
-        let seeds = RunSeeds {
-            node_ids: vec![a.node_id, a.node_id],
-            ..Default::default()
-        };
+        let seeds = RunSeeds::nodes(vec![a.node_id, a.node_id]);
         planner
             .plan(prog.program(), &seeds, &mut p)
             .expect("no cycle");
@@ -308,10 +287,7 @@ mod planning {
 
         let mut planner = Planner::default();
         let mut plan = RunSchedule::default();
-        let seeds = RunSeeds {
-            sinks: true,
-            ..Default::default()
-        };
+        let seeds = RunSeeds::sinks();
         let result = planner.plan(prog.program(), &seeds, &mut plan);
         assert!(matches!(result, Err(Error::CycleDetected { .. })));
     }
@@ -329,10 +305,7 @@ mod planning {
 
         let mut planner = Planner::default();
         let mut p = RunSchedule::default();
-        let seeds = RunSeeds {
-            node_ids: vec![b.node_id],
-            ..Default::default()
-        };
+        let seeds = RunSeeds::nodes(vec![b.node_id]);
         planner
             .plan(prog.program(), &seeds, &mut p)
             .expect("no cycle");
@@ -355,9 +328,8 @@ mod planning {
         // Node seeds combine with sinks: the same seed plus `sinks` schedules
         // everything, and B stays seeded.
         let seeds = RunSeeds {
-            sinks: true,
             node_ids: vec![b.node_id],
-            ..Default::default()
+            ..RunSeeds::sinks()
         };
         planner
             .plan(prog.program(), &seeds, &mut p)
@@ -370,9 +342,8 @@ mod planning {
         // The second visit must *add* to what the first left — it is one root
         // carrying both facts, so C is listed once and stays seeded.
         let seeds = RunSeeds {
-            sinks: true,
             node_ids: vec![c.node_id],
-            ..Default::default()
+            ..RunSeeds::sinks()
         };
         planner
             .plan(prog.program(), &seeds, &mut p)
@@ -387,10 +358,7 @@ mod planning {
         // A seed id absent from the program is inconsistent caller state — a hard failure,
         // not a silent skip.
         let bogus = NodeId::from_u128(0xdead_beef);
-        let seeds = RunSeeds {
-            node_ids: vec![bogus],
-            ..Default::default()
-        };
+        let seeds = RunSeeds::nodes(vec![bogus]);
         let err = planner.plan(prog.program(), &seeds, &mut p).unwrap_err();
         assert!(matches!(err, Error::NodeSeedNotFound { node_id } if node_id == bogus));
     }
@@ -413,14 +381,7 @@ mod planning {
         let mut planner = Planner::default();
         let mut plan = RunSchedule::default();
         planner
-            .plan(
-                prog.program(),
-                &RunSeeds {
-                    events: vec![event],
-                    ..Default::default()
-                },
-                &mut plan,
-            )
+            .plan(prog.program(), &RunSeeds::events(vec![event]), &mut plan)
             .unwrap();
         assert_eq!(plan.roots(), [subscriber.node_idx]);
         assert_eq!(plan.process_order, [subscriber].map(|node| node.node_idx));
@@ -469,14 +430,7 @@ mod planning {
         ];
         for event in invalid {
             let error = planner
-                .plan(
-                    prog.program(),
-                    &RunSeeds {
-                        events: vec![event],
-                        ..Default::default()
-                    },
-                    &mut plan,
-                )
+                .plan(prog.program(), &RunSeeds::events(vec![event]), &mut plan)
                 .unwrap_err();
             assert!(
                 matches!(error, Error::EventSeedNotFound { event: actual } if actual == event),
@@ -500,21 +454,9 @@ mod resolving {
     #[tokio::test]
     async fn reuse_hit_prunes_its_whole_upstream_cone() {
         let mut prog = ProgramBuilder::default();
-        let source = prog.node().pure().stub().outputs(1).add();
-        let cached = prog
-            .node()
-            .pure()
-            .stub()
-            .input(source.out(0))
-            .outputs(1)
-            .add();
-        let sink = prog
-            .node()
-            .pure()
-            .stub()
-            .input(cached.out(0))
-            .outputs(0)
-            .add();
+        let source = prog.node().reusable().outputs(1).add();
+        let cached = prog.node().reusable().input(source.out(0)).outputs(1).add();
+        let sink = prog.node().reusable().input(cached.out(0)).outputs(0).add();
 
         let run = prog
             .sweep()
@@ -532,25 +474,12 @@ mod resolving {
     #[tokio::test]
     async fn exact_demand_accepts_narrow_producer_cache_and_ignores_reused_reader() {
         let mut prog = ProgramBuilder::default();
-        let source = prog.node().pure().stub().outputs(2).add();
-        let cached = prog
-            .node()
-            .pure()
-            .stub()
-            .input(source.out(1))
-            .outputs(1)
-            .add();
-        let live = prog
-            .node()
-            .pure()
-            .stub()
-            .input(source.out(0))
-            .outputs(1)
-            .add();
+        let source = prog.node().reusable().outputs(2).add();
+        let cached = prog.node().reusable().input(source.out(1)).outputs(1).add();
+        let live = prog.node().reusable().input(source.out(0)).outputs(1).add();
         let sink = prog
             .node()
-            .pure()
-            .stub()
+            .reusable()
             .input(cached.out(0))
             .input(live.out(0))
             .outputs(0)
@@ -578,11 +507,10 @@ mod resolving {
     #[tokio::test]
     async fn missing_input_stops_liveness_before_its_producer() {
         let mut prog = ProgramBuilder::default();
-        let source = prog.node().pure().stub().outputs(1).add();
+        let source = prog.node().reusable().outputs(1).add();
         let blocked = prog
             .node()
-            .pure()
-            .stub()
+            .reusable()
             .input(source.out(0))
             .required(ExecutionBinding::None)
             .outputs(0)
@@ -604,19 +532,12 @@ mod resolving {
     #[tokio::test]
     async fn missing_lambda_stops_liveness_before_its_producer() {
         let mut prog = ProgramBuilder::default();
-        let source = prog.node().pure().stub().outputs(1).add();
-        let missing = prog
-            .node()
-            .pure()
-            .stub()
-            .input(source.out(0))
-            .outputs(1)
-            .add();
+        let source = prog.node().reusable().outputs(1).add();
+        let missing = prog.node().reusable().input(source.out(0)).outputs(1).add();
         prog.program_mut().by_id_mut(missing.node_id).lambda = FuncLambda::None;
         let sink = prog
             .node()
-            .pure()
-            .stub()
+            .reusable()
             .input(missing.out(0))
             .outputs(0)
             .add();
@@ -650,8 +571,8 @@ mod resolving {
     #[tokio::test]
     async fn a_node_seed_demands_every_output_without_readers() {
         let mut prog = ProgramBuilder::default();
-        let unseeded = prog.node().pure().stub().outputs(2).add();
-        let seeded = prog.node().pure().stub().outputs(2).add();
+        let unseeded = prog.node().reusable().outputs(2).add();
+        let seeded = prog.node().reusable().outputs(2).add();
 
         let run = prog
             .sweep()
@@ -682,28 +603,10 @@ mod resolving {
     #[tokio::test]
     async fn cone_reachable_only_through_a_reuse_hit_is_fully_pruned() {
         let mut prog = ProgramBuilder::default();
-        let deep = prog.node().pure().stub().outputs(1).add();
-        let source = prog
-            .node()
-            .pure()
-            .stub()
-            .input(deep.out(0))
-            .outputs(1)
-            .add();
-        let cached = prog
-            .node()
-            .pure()
-            .stub()
-            .input(source.out(0))
-            .outputs(1)
-            .add();
-        let sink = prog
-            .node()
-            .pure()
-            .stub()
-            .input(cached.out(0))
-            .outputs(0)
-            .add();
+        let deep = prog.node().reusable().outputs(1).add();
+        let source = prog.node().reusable().input(deep.out(0)).outputs(1).add();
+        let cached = prog.node().reusable().input(source.out(0)).outputs(1).add();
+        let sink = prog.node().reusable().input(cached.out(0)).outputs(0).add();
 
         let run = prog
             .sweep()

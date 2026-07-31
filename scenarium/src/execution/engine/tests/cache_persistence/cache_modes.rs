@@ -5,13 +5,13 @@ use super::*;
 #[tokio::test]
 async fn both_value_stays_resident_outside_the_active_frontier() {
     let dir = TempDir::new("both-retained");
-    let calls = Arc::new(AtomicUsize::new(0));
+    let calls = Calls::default();
 
     // src(1) → sum(Both) = 2 → mult(Both) = 2 → print.
     let mut g = TestGraph::new();
     // `src` retains in RAM but never persists — the "non-reloadable value"
     // the last assertion is about.
-    g.add("src", |n| source(1, calls.clone())(n).cache(CacheMode::Ram));
+    g.add("src", |n| source(1, &calls)(n).cache(CacheMode::Ram));
     g.add("sum", sum(CacheMode::Both));
     g.add("mult", mult(CacheMode::Both));
     g.add("print", |n| n.records());
@@ -47,7 +47,7 @@ async fn both_value_stays_resident_outside_the_active_frontier() {
     // An empty replacement store proves the later hit comes from retained
     // RAM, not from disk.
     let empty = TempDir::new("both-retained-empty");
-    e.attach_disk_store(empty.0.clone());
+    e.attach_disk_store(empty.path());
     e.edit(|g| g.constant("mult", 1, 3i64));
     let run = e.run_sinks().await;
     assert!(
@@ -72,9 +72,9 @@ async fn both_value_stays_resident_outside_the_active_frontier() {
 /// reuse, RAM retention after the run, and disk persistence.
 async fn assert_mode_behavior(mode: CacheMode) {
     let dir = TempDir::new(&format!("mode-{mode:?}"));
-    let calls = Arc::new(AtomicUsize::new(0));
+    let calls = Calls::default();
 
-    let mut e = disk_engine(&dir, source_mult_print(mode, 1, calls.clone()));
+    let mut e = disk_engine(&dir, source_mult_print(mode, 1, &calls));
     let run1 = e.run_sinks().await;
     assert!(
         run1.ran().contains(&"mult"),
@@ -118,14 +118,14 @@ async fn assert_mode_behavior(mode: CacheMode) {
 
     // A blob exists iff the mode persists to disk.
     assert_eq!(
-        blob_count(&dir) > 0,
+        dir.entry_count() > 0,
         mode.persists_to_disk(),
         "{mode:?}: a blob exists iff persists_to_disk()"
     );
 
     // Reopen with empty RAM over the same store: only a disk-backed mode
     // survives.
-    let mut e = disk_engine(&dir, source_mult_print(mode, 1, calls.clone()));
+    let mut e = disk_engine(&dir, source_mult_print(mode, 1, &calls));
     let reopen = e.run_sinks().await;
     if mode.persists_to_disk() {
         assert!(
@@ -171,12 +171,12 @@ async fn cache_mode_matrix() {
 #[tokio::test]
 async fn none_upstream_does_not_disable_downstream_disk_cache() {
     let dir = TempDir::new("none-orthogonal");
-    let calls = Arc::new(AtomicUsize::new(0));
+    let calls = Calls::default();
 
     // src(1) → a = sum(None) = 2 → b = mult(Disk) = 4 → print.
-    let build = |calls: &Arc<AtomicUsize>| {
+    let build = |calls: &Calls| {
         let mut g = TestGraph::new();
-        g.add("src", source(1, calls.clone()));
+        g.add("src", source(1, calls));
         g.add("a", sum(CacheMode::None));
         g.add("b", mult(CacheMode::Disk));
         g.add("print", |n| n.records());
@@ -195,7 +195,7 @@ async fn none_upstream_does_not_disable_downstream_disk_cache() {
         "the cold run computes A and B"
     );
     assert!(
-        blob_count(&dir) > 0,
+        dir.entry_count() > 0,
         "B(Disk) persists despite its None upstream"
     );
 
@@ -245,9 +245,9 @@ async fn disabling_ram_retention_releases_resident_value_on_install() {
 #[tokio::test]
 async fn impure_cone_persist_node_is_not_disk_cached() {
     let dir = TempDir::new("impure-cone");
-    let calls = Arc::new(AtomicUsize::new(0));
-    let build = |calls: &Arc<AtomicUsize>| {
-        let mut g = source_mult_print(CacheMode::Disk, 11, calls.clone());
+    let calls = Calls::default();
+    let build = |calls: &Calls| {
+        let mut g = source_mult_print(CacheMode::Disk, 11, calls);
         g.edit_func("src", |func| func.behavior = FuncBehavior::Impure);
         g
     };
@@ -271,8 +271,8 @@ async fn impure_cone_persist_node_is_not_disk_cached() {
 #[tokio::test]
 async fn memory_persistence_node_is_not_disk_cached() {
     let dir = TempDir::new("memory-persist");
-    let calls = Arc::new(AtomicUsize::new(0));
-    let build = |calls: &Arc<AtomicUsize>| source_mult_print(CacheMode::Ram, 1, calls.clone());
+    let calls = Calls::default();
+    let build = |calls: &Calls| source_mult_print(CacheMode::Ram, 1, calls);
 
     let mut e = disk_engine(&dir, build(&calls));
     e.run_sinks().await;
@@ -370,7 +370,7 @@ async fn missing_codec_skips_disk_cache_instead_of_panicking() {
     // A pure, disk-persisted sink emitting a custom `Blob`. The type's codec
     // is registered only when `with_codec` — and the store takes its codecs
     // from this same library, so that one flag decides both.
-    let build = |with_codec: bool, recompute: &Arc<AtomicUsize>| {
+    let build = |with_codec: bool, recompute: &Calls| {
         let recompute = recompute.clone();
         let mut g = TestGraph::new();
         g.library.register_type(
@@ -381,6 +381,9 @@ async fn missing_codec_skips_disk_cache_instead_of_panicking() {
                 TypeEntry::custom("Blob")
             },
         );
+        // A `Custom` value has no `compute` shape — that writes a
+        // `StaticValue` — so this body counts itself.
+        let recompute = recompute.clone();
         g.add("make_blob", move |n: NodeSpec| {
             n.pure()
                 .sink()
@@ -388,7 +391,7 @@ async fn missing_codec_skips_disk_cache_instead_of_panicking() {
                 .output(DataType::Custom(BLOB_TYPE.into()))
                 .lambda(crate::async_lambda!(
                     move |Invocation { outputs, .. }| { counter = recompute.clone() } => {
-                        counter.fetch_add(1, Ordering::SeqCst);
+                        counter.bump();
                         outputs[0] = DynamicValue::Custom(Arc::new(Blob(vec![9, 9, 9])));
                         Ok(())
                     }
@@ -398,22 +401,18 @@ async fn missing_codec_skips_disk_cache_instead_of_panicking() {
     };
 
     let dir = TempDir::new("missing-codec");
-    let recompute = Arc::new(AtomicUsize::new(0));
+    let recompute = Calls::default();
 
     // Run 1 (codec present): computes and writes the Blob to disk.
     let mut e = disk_engine(&dir, build(true, &recompute));
     e.run_sinks().await;
-    assert_eq!(recompute.load(Ordering::SeqCst), 1, "the cold run computes");
+    assert_eq!(recompute.count(), 1, "the cold run computes");
 
     // Reopen with the codec: served from disk, and the hydration decode
     // reaches the engine's own runtime context store.
     let mut e = disk_engine(&dir, build(true, &recompute));
     let run = e.run_sinks().await;
-    assert_eq!(
-        recompute.load(Ordering::SeqCst),
-        1,
-        "codec present ⇒ served from disk"
-    );
+    assert_eq!(recompute.count(), 1, "codec present ⇒ served from disk");
     assert!(run.cached().contains(&"make_blob"));
     assert_eq!(
         e.engine
@@ -430,11 +429,7 @@ async fn missing_codec_skips_disk_cache_instead_of_panicking() {
     // is not flagged available — recompute, no panic.
     let mut e = disk_engine(&dir, build(false, &recompute));
     let run = e.run_sinks().await;
-    assert_eq!(
-        recompute.load(Ordering::SeqCst),
-        2,
-        "a missing codec ⇒ recompute"
-    );
+    assert_eq!(recompute.count(), 2, "a missing codec ⇒ recompute");
     assert!(
         !run.cached().contains(&"make_blob"),
         "an undecodable blob is not a cache hit"

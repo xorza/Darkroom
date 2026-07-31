@@ -356,29 +356,13 @@ fn divide_func() -> Func {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::graph::func::lambda::OutputDemand;
-    use crate::runtime::any_state::AnyState;
-    use crate::runtime::context::ContextManager;
-    use crate::runtime::shared_any_state::SharedAnyState;
+    use crate::testing::func_invoker::FuncInvoker;
     use crate::{DynamicValue, StaticValue};
 
     async fn invoke(name: &str, values: &[DynamicValue]) -> Result<Vec<DynamicValue>, InvokeError> {
         let library = math_library();
         let func = library.by_name(name).unwrap();
-        let mut inputs = values.to_vec();
-        let demand = vec![OutputDemand::Produce; func.outputs.len()];
-        let mut outputs = vec![DynamicValue::Unbound; func.outputs.len()];
-        func.lambda
-            .invoke(Invocation {
-                ctx: &mut ContextManager::default(),
-                state: &mut AnyState::default(),
-                event_state: &SharedAnyState::default(),
-                inputs: &mut inputs,
-                demand: &demand,
-                outputs: &mut outputs,
-            })
-            .await?;
-        Ok(outputs)
+        FuncInvoker::default().call(func, values.to_vec()).await
     }
 
     fn float(value: f64) -> DynamicValue {

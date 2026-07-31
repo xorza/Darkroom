@@ -88,33 +88,17 @@ pub fn system_library() -> Library {
 mod tests {
     use super::*;
     use crate::DynamicValue;
-    use crate::graph::func::lambda::OutputDemand;
-    use crate::runtime::any_state::AnyState;
-    use crate::runtime::context::ContextManager;
-    use crate::runtime::shared_any_state::SharedAnyState;
+    use crate::testing::func_invoker::FuncInvoker;
 
     /// Invoke the `Concat` node's lambda with two runtime values and return its
     /// text output.
     async fn run_concat(a: DynamicValue, b: DynamicValue) -> String {
         let library = system_library();
         let concat = library.by_name("Concat").unwrap();
-        let mut ctx = ContextManager::default();
-        let mut state = AnyState::default();
-        let event_state = SharedAnyState::default();
-        let mut inputs = [a, b];
-        let mut outputs = [DynamicValue::Unbound];
-        concat
-            .lambda
-            .invoke(Invocation {
-                ctx: &mut ctx,
-                state: &mut state,
-                event_state: &event_state,
-                inputs: &mut inputs,
-                demand: &[OutputDemand::Produce],
-                outputs: &mut outputs,
-            })
+        let outputs = FuncInvoker::default()
+            .call(concat, [a, b])
             .await
-            .unwrap();
+            .expect("Concat stringifies whatever it is handed");
         outputs[0].as_string().unwrap().to_owned()
     }
 

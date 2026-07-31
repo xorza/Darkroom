@@ -1,6 +1,6 @@
 use super::*;
 
-use std::sync::atomic::{AtomicUsize, Ordering};
+use crate::testing::calls::Calls;
 
 /// The sample fixture with nothing retained — every node on
 /// `CacheMode::None`, which is what these tests are about.
@@ -39,32 +39,29 @@ async fn seeded_run_executes_only_the_cone_without_retaining_outputs() {
 /// A second seeded run obeys `CacheMode::None` and recomputes the cone.
 #[tokio::test]
 async fn second_seeded_run_obeys_none_cache_mode() {
-    let calls = Arc::new(AtomicUsize::new(0));
-    let counted = |calls: Arc<AtomicUsize>| {
-        move || {
-            calls.fetch_add(1, Ordering::Relaxed);
-        }
-    };
+    // One counter behind both sources, so it reads as "how many source
+    // invocations did this run cost".
+    let calls = Calls::default();
     let (a, b) = (calls.clone(), calls.clone());
     let mut e = TestEngine::over(uncached(TestFuncHooks {
         get_a: Arc::new(move || {
-            counted(a.clone())();
+            a.bump();
             Ok(1)
         }),
         get_b: Arc::new(move || {
-            counted(b.clone())();
+            b.bump();
             11
         }),
         ..Default::default()
     }));
 
     e.run_nodes(["sum"]).await;
-    assert_eq!(calls.load(Ordering::Relaxed), 2, "one call to each source");
+    assert_eq!(calls.count(), 2, "one call to each source");
 
     let run = e.run_nodes(["sum"]).await;
 
     assert_eq!(
-        calls.load(Ordering::Relaxed),
+        calls.count(),
         4,
         "nothing was retained, so both sources ran again"
     );

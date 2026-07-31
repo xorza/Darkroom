@@ -3,17 +3,13 @@ use super::*;
 #[tokio::test]
 async fn explicit_cache_eviction_removes_the_downstream_ram_and_disk_cone() {
     let dir = TempDir::new("explicit-eviction");
-    let (a_calls, b_calls) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicUsize::new(0)));
+    let (a_calls, b_calls) = (Calls::default(), Calls::default());
 
     // src_a → sum → mult → print, with src_b feeding sum's second input —
     // an upstream sibling *outside* src_a's consumer cone.
     let mut g = TestGraph::new();
-    g.add("src_a", |n| {
-        source(1, a_calls.clone())(n).cache(CacheMode::Both)
-    });
-    g.add("src_b", |n| {
-        source(11, b_calls.clone())(n).cache(CacheMode::Both)
-    });
+    g.add("src_a", |n| source(1, &a_calls)(n).cache(CacheMode::Both));
+    g.add("src_b", |n| source(11, &b_calls)(n).cache(CacheMode::Both));
     g.add("sum", sum(CacheMode::Both));
     g.add("mult", mult(CacheMode::Both));
     g.add("print", |n| n.records());
@@ -26,10 +22,10 @@ async fn explicit_cache_eviction_removes_the_downstream_ram_and_disk_cone() {
     let mut e = disk_engine(&dir, g);
     e.run_sinks().await;
     let run = e.run_sinks().await;
-    assert_eq!(a_calls.load(Ordering::SeqCst), 1);
-    assert_eq!(b_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(a_calls.count(), 1);
+    assert_eq!(b_calls.count(), 1);
     assert_eq!(run.logs(), ["132"], "(1 + 11) * 11");
-    assert_eq!(blob_count(&dir), 4);
+    assert_eq!(dir.entry_count(), 4);
 
     // Evicting the source takes its whole consumer cone with it — evicting
     // one node alone would free a slot and change nothing a later run does,
@@ -49,15 +45,15 @@ async fn explicit_cache_eviction_removes_the_downstream_ram_and_disk_cone() {
         e.holds_output("src_b"),
         "an upstream sibling outside the consumer cone stays resident"
     );
-    assert_eq!(blob_count(&dir), 1, "only src_b's disk blob remains");
+    assert_eq!(dir.entry_count(), 1, "only src_b's disk blob remains");
 
     // Reopening recomputes exactly what was evicted; the retained sibling
     // is still served from its blob.
     drop(e);
     let mut e = disk_engine(&dir, source_cone(&a_calls, &b_calls));
     let run = e.run_sinks().await;
-    assert_eq!(a_calls.load(Ordering::SeqCst), 2);
-    assert_eq!(b_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(a_calls.count(), 2);
+    assert_eq!(b_calls.count(), 1);
     assert_eq!(run.logs(), ["132"]);
     for name in evicted {
         assert!(
@@ -72,7 +68,7 @@ async fn explicit_cache_eviction_removes_the_downstream_ram_and_disk_cone() {
 
     // A blob that cannot be deleted is reported, and the rest of the cone
     // still evicts — one failure is not a reason to abandon the sweep.
-    let blocked = dir.0.join(e.id("src_a").as_uuid().simple().to_string());
+    let blocked = dir.join(e.id("src_a").as_uuid().simple().to_string());
     std::fs::remove_file(&blocked).unwrap();
     std::fs::create_dir(&blocked).unwrap();
 
@@ -106,12 +102,12 @@ async fn explicit_cache_eviction_removes_the_downstream_ram_and_disk_cone() {
 #[tokio::test]
 async fn shared_producer_read_by_a_running_consumer_is_not_cut() {
     let dir = TempDir::new("fanout");
-    let calls = Arc::new(AtomicUsize::new(0));
+    let calls = Calls::default();
 
     // src → mult(Disk) → print_mult ;  src → print_direct.
-    let build = |calls: &Arc<AtomicUsize>| {
+    let build = |calls: &Calls| {
         let mut g = TestGraph::new();
-        g.add("src", source(7, calls.clone()));
+        g.add("src", source(7, calls));
         g.add("mult", mult(CacheMode::Disk));
         g.add("print_mult", |n| n.records());
         g.instance("print_direct", "print_mult");
@@ -124,14 +120,14 @@ async fn shared_producer_read_by_a_running_consumer_is_not_cut() {
 
     let mut e = disk_engine(&dir, build(&calls));
     e.run_sinks().await;
-    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert_eq!(calls.count(), 1);
 
     // Reopen: mult reuses from disk, so the src→mult edge is cut — but
     // print_direct still reads src, so the union keeps src alive.
     let mut e = disk_engine(&dir, build(&calls));
     let run = e.run_sinks().await;
     assert_eq!(
-        calls.load(Ordering::SeqCst),
+        calls.count(),
         2,
         "src is still read by print_direct, so the cut must keep it"
     );
@@ -152,14 +148,14 @@ async fn shared_producer_read_by_a_running_consumer_is_not_cut() {
 #[tokio::test]
 async fn chained_disk_cache_hydrates_only_the_live_frontier() {
     let dir = TempDir::new("chain-frontier");
-    let calls = Arc::new(AtomicUsize::new(0));
+    let calls = Calls::default();
 
     // src(7) → sum(Both) = 14 → mult(Both) = 98 → print. `Both` (RAM + disk)
     // so the frontier the run reads is kept resident — that retention is
     // what this test asserts; pure `Disk` would drop its RAM copy.
-    let build = |calls: &Arc<AtomicUsize>| {
+    let build = |calls: &Calls| {
         let mut g = TestGraph::new();
-        g.add("src", source(7, calls.clone()));
+        g.add("src", source(7, calls));
         g.add("sum", sum(CacheMode::Both));
         g.add("mult", mult(CacheMode::Both));
         g.add("print", |n| n.records());
@@ -173,7 +169,7 @@ async fn chained_disk_cache_hydrates_only_the_live_frontier() {
 
     let mut e = disk_engine(&dir, build(&calls));
     e.run_sinks().await;
-    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert_eq!(calls.count(), 1);
 
     // Reopen with fresh RAM. Resolution alone settles `mult` as a reuse —
     // its blob header covers the demand — without decoding the body: the
@@ -191,7 +187,7 @@ async fn chained_disk_cache_hydrates_only_the_live_frontier() {
     let run = e.run_sinks().await;
 
     assert_eq!(
-        calls.load(Ordering::SeqCst),
+        calls.count(),
         1,
         "the cut prunes the memory-only source feeding only disk hits"
     );
@@ -210,7 +206,7 @@ async fn chained_disk_cache_hydrates_only_the_live_frontier() {
     // Swap in an empty store: the resident frontier survives, but the deeper
     // value now has nothing to load from and must recompute when demanded.
     let empty = TempDir::new("chain-empty");
-    e.attach_disk_store(empty.0.clone());
+    e.attach_disk_store(empty.path());
     assert!(
         e.holds_output("mult"),
         "switching stores preserves resident values"
@@ -223,7 +219,7 @@ async fn chained_disk_cache_hydrates_only_the_live_frontier() {
         "a value absent from the new store recomputes when needed"
     );
     assert_eq!(
-        calls.load(Ordering::SeqCst),
+        calls.count(),
         2,
         "recomputing sum also restores its pruned memory-only input"
     );
@@ -306,7 +302,7 @@ async fn stale_ram_value_does_not_mask_a_valid_disk_blob() -> TestResult {
 #[tokio::test(flavor = "multi_thread")]
 async fn persist_node_lands_on_disk_before_its_consumer_runs() {
     let dir = TempDir::new("per_node_store");
-    let root = dir.0.clone();
+    let root = dir.path().to_path_buf();
     let blob_present = Arc::new(AtomicBool::new(false));
 
     // mult(const 2, const 3) = 6, Disk → sink. Const binds detach mult from
@@ -355,8 +351,8 @@ async fn flush_skips_a_value_stale_for_the_current_digest() {
     // Config A: mult runs and is stored, stamped with its digest D_A.
     let mut e = disk_engine(&dir, g);
     e.run_sinks().await;
-    assert_eq!(blob_count(&dir), 1, "config A's blob is stored");
-    let blob_path = std::fs::read_dir(&dir.0)
+    assert_eq!(dir.entry_count(), 1, "config A's blob is stored");
+    let blob_path = std::fs::read_dir(dir.path())
         .unwrap()
         .flatten()
         .next()

@@ -1,5 +1,7 @@
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+
+use ::common::TempDir;
 
 use tokio::sync::{Notify, mpsc, oneshot};
 use tokio::time::{Duration, timeout};
@@ -13,6 +15,7 @@ use crate::graph::func::lambda::{FuncLambda, Invocation};
 use crate::graph::identity::{EventPort, NodeId};
 use crate::graph::node::CacheMode;
 use crate::testing::TestFuncHooks;
+use crate::testing::calls::Calls;
 use crate::testing::graph::TestGraph;
 use crate::testing::worker::TestWorker;
 use crate::worker::Worker;
@@ -23,29 +26,6 @@ use crate::{DataType, StaticValue, async_lambda};
 
 /// How long a "nothing happens" claim watches for before it is believed.
 const QUIET: Duration = Duration::from_millis(100);
-
-/// A unique temp dir removed on drop, so tests don't collide or leak.
-/// `prefix` disambiguates directories from different tests sharing the
-/// process-wide temp dir.
-#[derive(Debug)]
-struct TempDir(std::path::PathBuf);
-
-impl Drop for TempDir {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
-
-fn temp_dir(prefix: &str) -> TempDir {
-    static COUNTER: AtomicU64 = AtomicU64::new(0);
-    let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-    let p = std::env::temp_dir().join(format!(
-        "scenarium-worker-{prefix}-{}-{n}",
-        std::process::id()
-    ));
-    std::fs::create_dir_all(&p).unwrap();
-    TempDir(p)
-}
 
 mod runs {
     use super::*;
@@ -582,10 +562,8 @@ mod event_loop {
     /// `source_a` ticked.
     #[tokio::test]
     async fn a_fired_event_does_not_reinitialize_the_event_sources() {
-        let calls = |name: &str| (name.to_owned(), Arc::new(AtomicUsize::new(0)));
-        let (_, a_calls) = calls("source_a");
-        let (_, b_calls) = calls("source_b");
-        let (_, subscriber_calls) = calls("subscriber");
+        let (a_calls, b_calls, subscriber_calls) =
+            (Calls::default(), Calls::default(), Calls::default());
         let a_notify = Arc::new(Notify::new());
         let b_notify = Arc::new(Notify::new());
 
@@ -595,7 +573,7 @@ mod event_loop {
             ("source_b", &b_notify, &b_calls),
         ] {
             let notify = Arc::clone(notify);
-            let counter = Arc::clone(counter);
+            let counter = counter.clone();
             graph.add(name, move |node| {
                 node.event(
                     "tick",
@@ -604,22 +582,18 @@ mod event_loop {
                         Box::pin(async move { notify.notified().await })
                     }),
                 )
-                .lambda(
-                    async_lambda!(move |_| { counter = Arc::clone(&counter) } => {
-                        counter.fetch_add(1, Ordering::SeqCst);
-                        Ok(())
-                    }),
-                )
+                .lambda(async_lambda!(move |_| { counter = counter.clone() } => {
+                    counter.bump();
+                    Ok(())
+                }))
             });
         }
-        let counter = Arc::clone(&subscriber_calls);
+        let counter = subscriber_calls.clone();
         graph.add("subscriber", move |node| {
-            node.lambda(
-                async_lambda!(move |_| { counter = Arc::clone(&counter) } => {
-                    counter.fetch_add(1, Ordering::SeqCst);
-                    Ok(())
-                }),
-            )
+            node.lambda(async_lambda!(move |_| { counter = counter.clone() } => {
+                counter.bump();
+                Ok(())
+            }))
         });
         graph.subscribe("source_a", 0, "subscriber");
         graph.subscribe("source_b", 0, "subscriber");
@@ -629,14 +603,14 @@ mod event_loop {
 
         let bootstrap = w.run().await;
         assert_eq!(bootstrap.ran(), ["source_a", "source_b"]);
-        assert_eq!(subscriber_calls.load(Ordering::SeqCst), 0);
+        assert_eq!(subscriber_calls.count(), 0);
 
         a_notify.notify_one();
         let fired = w.run().await;
         assert_eq!(fired.ran(), ["subscriber"], "only the subscriber re-ran");
-        assert_eq!(a_calls.load(Ordering::SeqCst), 1);
-        assert_eq!(b_calls.load(Ordering::SeqCst), 1);
-        assert_eq!(subscriber_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(a_calls.count(), 1);
+        assert_eq!(b_calls.count(), 1);
+        assert_eq!(subscriber_calls.count(), 1);
 
         w.settle([WorkerMessage::StopEventLoop]).await;
     }
@@ -811,15 +785,15 @@ mod cache {
 
     #[tokio::test]
     async fn an_eviction_failure_uses_the_general_worker_error_report() {
-        let dir = temp_dir("eviction-error");
+        let dir = TempDir::new("eviction-error");
         let mut w = TestWorker::over(TestGraph::sample_with(TestFuncHooks::default()));
         let blocked = w.id("get_a");
         // A directory where the blob file belongs: removal fails on it.
-        let blocked_path = dir.0.join(blocked.as_uuid().simple().to_string());
+        let blocked_path = dir.join(blocked.as_uuid().simple().to_string());
         std::fs::create_dir(&blocked_path).unwrap();
 
         w.settle([
-            w.disk_store(dir.0.clone()),
+            w.disk_store(dir.path()),
             w.update(),
             WorkerMessage::EvictCache {
                 nodes: vec![blocked],
@@ -842,17 +816,14 @@ mod cache {
     }
 
     /// `source` (pure, RAM) → `square` (pure, Disk) → `print` (sink).
-    fn disk_cached_graph(calls: &Arc<AtomicUsize>) -> TestGraph {
+    fn disk_cached_graph(calls: &Calls) -> TestGraph {
         let mut graph = TestGraph::new();
-        let calls = Arc::clone(calls);
+        let source = calls.returning(7i64);
         graph.add("source", move |node| {
             node.pure()
                 .cache(CacheMode::Ram)
                 .output(DataType::Int)
-                .compute(move |_| {
-                    calls.fetch_add(1, Ordering::SeqCst);
-                    StaticValue::Int(7)
-                })
+                .compute(source)
         });
         graph.add("square", |node| {
             node.pure()
@@ -877,28 +848,28 @@ mod cache {
     /// applied before the install hydrates.
     #[tokio::test]
     async fn a_disk_cached_node_survives_a_worker_restart() {
-        let dir = temp_dir("diskcache");
-        let calls = Arc::new(AtomicUsize::new(0));
+        let dir = TempDir::new("diskcache");
+        let calls = Calls::default();
 
         let mut w = TestWorker::over(disk_cached_graph(&calls));
-        w.send_many([w.disk_store(dir.0.clone()), w.update(), TestWorker::sinks()]);
+        w.send_many([w.disk_store(dir.path()), w.update(), TestWorker::sinks()]);
         let cold = w.run().await;
         assert_eq!(
             cold.ran(),
             ["print", "source", "square"],
             "a cold run computes every node"
         );
-        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert_eq!(calls.count(), 1);
         assert_eq!(cold.logs(), ["49"]);
 
         // Reopen on a fresh worker over the same store: `square` loads from
         // disk and is reused. Its input `source` feeds only the reused
         // `square`, which never reads it, so the pre-run cut prunes it.
         let mut w = w.restart();
-        w.send_many([w.disk_store(dir.0.clone()), w.update(), TestWorker::sinks()]);
+        w.send_many([w.disk_store(dir.path()), w.update(), TestWorker::sinks()]);
         let warm = w.run().await;
         assert_eq!(
-            calls.load(Ordering::SeqCst),
+            calls.count(),
             1,
             "the cut prunes the Ram input feeding only a disk-cache hit"
         );
@@ -917,8 +888,8 @@ mod cache {
     /// which never stores — and silently recompute on reopen.
     #[tokio::test]
     async fn attaching_a_store_flushes_resident_disk_backed_values() {
-        let dir = temp_dir("storeswap");
-        let calls = Arc::new(AtomicUsize::new(0));
+        let dir = TempDir::new("storeswap");
+        let calls = Calls::default();
         let mut graph = disk_cached_graph(&calls);
         graph.cache("square", CacheMode::Both);
 
@@ -926,12 +897,12 @@ mod cache {
         let mut w = TestWorker::over(graph);
         w.send_many([w.update(), TestWorker::sinks()]);
         w.run().await;
-        assert_eq!(std::fs::read_dir(&dir.0).unwrap().count(), 0);
+        assert_eq!(dir.entry_count(), 0);
 
-        w.settle([w.disk_store(dir.0.clone())]).await;
+        w.settle([w.disk_store(dir.path())]).await;
 
         assert_eq!(
-            std::fs::read_dir(&dir.0).unwrap().count(),
+            dir.entry_count(),
             1,
             "the resident Both-mode value was flushed into the new store"
         );
@@ -1037,22 +1008,20 @@ mod shutdown {
     /// raw worker.
     #[tokio::test]
     async fn drop_without_exit_shuts_down_cleanly() {
-        let counter = Arc::new(AtomicUsize::new(0));
+        let reports = Calls::default();
         {
-            let counter = Arc::clone(&counter);
-            let worker = Worker::new(move |_| {
-                counter.fetch_add(1, Ordering::SeqCst);
-            });
+            let counter = reports.clone();
+            let worker = Worker::new(move |_| counter.bump());
             let (reply, ack) = oneshot::channel();
             worker.send(WorkerMessage::Sync { reply }).unwrap();
             ack.await.unwrap();
         }
 
-        let before = counter.load(Ordering::SeqCst);
+        let before = reports.count();
         tokio::time::sleep(Duration::from_millis(50)).await;
         assert_eq!(
             before,
-            counter.load(Ordering::SeqCst),
+            reports.count(),
             "no callback must fire after the Worker is dropped"
         );
     }

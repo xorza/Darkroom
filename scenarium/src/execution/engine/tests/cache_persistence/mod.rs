@@ -1,55 +1,25 @@
 use super::*;
 
+use ::common::TempDir;
+
 use crate::execution::schedule::NodeState;
-use std::path::PathBuf;
+use crate::testing::calls::Calls;
 use std::sync::Mutex as StdMutex;
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-
-/// A unique temp directory removed on drop, so tests don't collide or leak.
-#[derive(Debug)]
-struct TempDir(PathBuf);
-
-impl TempDir {
-    fn new(tag: &str) -> Self {
-        static COUNTER: AtomicU64 = AtomicU64::new(0);
-        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-        let dir = std::env::temp_dir().join(format!(
-            "scenarium-engine-diskcache-{tag}-{}-{n}",
-            std::process::id()
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
-        TempDir(dir)
-    }
-}
-
-impl Drop for TempDir {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
-
-/// Count of blobs in the store — one per persisted node.
-fn blob_count(dir: &TempDir) -> usize {
-    std::fs::read_dir(&dir.0).unwrap().flatten().count()
-}
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// An engine over `graph` backed by the store at `dir`. Calling it twice
 /// against one dir is a reopen: fresh RAM, same blobs.
 fn disk_engine(dir: &TempDir, graph: TestGraph) -> TestEngine {
     let mut e = TestEngine::over(graph);
-    e.attach_disk_store(dir.0.clone());
+    e.attach_disk_store(dir.path());
     e
 }
 
 /// A pure source emitting `value` and counting how often it was asked —
 /// the recompute counter every test below reads.
-fn source(value: i64, calls: Arc<AtomicUsize>) -> impl FnOnce(NodeSpec) -> NodeSpec {
-    move |n: NodeSpec| {
-        n.pure().output(DataType::Int).compute(move |_| {
-            calls.fetch_add(1, Ordering::SeqCst);
-            value.into()
-        })
-    }
+fn source(value: i64, calls: &Calls) -> impl FnOnce(NodeSpec) -> NodeSpec {
+    let body = calls.returning(value);
+    move |n: NodeSpec| n.pure().output(DataType::Int).compute(body)
 }
 
 /// A pure two-input arithmetic node on `mode`. The second input is
@@ -84,7 +54,7 @@ fn sum(mode: CacheMode) -> impl FnOnce(NodeSpec) -> NodeSpec {
 
 /// `src → mult(mode) → print`, both of mult's inputs fed by the source.
 /// The sink is impure, so `mult` is demanded every run.
-fn source_mult_print(mode: CacheMode, value: i64, calls: Arc<AtomicUsize>) -> TestGraph {
+fn source_mult_print(mode: CacheMode, value: i64, calls: &Calls) -> TestGraph {
     let mut g = TestGraph::new();
     g.add("src", source(value, calls));
     g.add("mult", mult(mode));
@@ -97,14 +67,10 @@ fn source_mult_print(mode: CacheMode, value: i64, calls: Arc<AtomicUsize>) -> Te
 
 /// The eviction fixture's graph, rebuilt for a reopened engine. Declaration
 /// order fixes the ids, so the new engine addresses the same slots.
-fn source_cone(a_calls: &Arc<AtomicUsize>, b_calls: &Arc<AtomicUsize>) -> TestGraph {
+fn source_cone(a_calls: &Calls, b_calls: &Calls) -> TestGraph {
     let mut g = TestGraph::new();
-    g.add("src_a", |n| {
-        source(1, a_calls.clone())(n).cache(CacheMode::Both)
-    });
-    g.add("src_b", |n| {
-        source(11, b_calls.clone())(n).cache(CacheMode::Both)
-    });
+    g.add("src_a", |n| source(1, a_calls)(n).cache(CacheMode::Both));
+    g.add("src_b", |n| source(11, b_calls)(n).cache(CacheMode::Both));
     g.add("sum", sum(CacheMode::Both));
     g.add("mult", mult(CacheMode::Both));
     g.add("print", |n| n.records());

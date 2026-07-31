@@ -396,8 +396,6 @@ impl RunOutcome {
         self.with_status(|status| matches!(status, NodeExecutionStatus::MissingInputs { .. }))
     }
 
-    /// Log lines the run emitted, in order — how a `records` node reports what
-    /// it saw.
     /// Names still holding RAM after the run, sorted.
     pub(crate) fn holding_ram(&self) -> Vec<&str> {
         let mut names: Vec<&str> = self
@@ -410,6 +408,8 @@ impl RunOutcome {
         names
     }
 
+    /// Log lines the run emitted, in order — how a `records` node reports what
+    /// it saw.
     pub(crate) fn logs(&self) -> Vec<&str> {
         self.logs.iter().map(String::as_str).collect()
     }

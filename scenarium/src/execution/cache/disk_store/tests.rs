@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use ::common::internals;
+use ::common::TempFile;
 use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
 
 use crate::execution::cache::digest::Digest;
@@ -14,26 +14,6 @@ use crate::graph::func::lambda::OutputDemand;
 use crate::library::{Library, TypeEntry};
 use crate::runtime::context::ContextStore;
 use crate::{CodecError, CustomValue, CustomValueCodec, DynamicValue, StaticValue, TypeId};
-
-#[derive(Debug)]
-struct TempFile(PathBuf);
-
-impl Drop for TempFile {
-    fn drop(&mut self) {
-        if std::fs::remove_file(&self.0).is_err() {
-            let _ = std::fs::remove_dir_all(&self.0);
-        }
-    }
-}
-
-fn temp_file(tag: &str) -> TempFile {
-    static COUNTER: AtomicU64 = AtomicU64::new(0);
-    let sequence = COUNTER.fetch_add(1, Ordering::Relaxed);
-    TempFile(internals::test_output_path(&format!(
-        "scenarium/disk-store/{tag}-{}-{sequence}.bin",
-        std::process::id()
-    )))
-}
 
 fn target(path: &Path, digest: Digest) -> BlobTarget {
     BlobTarget {
@@ -155,12 +135,12 @@ fn versioned_store(version: u32, decode_calls: Arc<AtomicU64>) -> DiskStore {
 
 #[tokio::test]
 async fn store_read_header_check_and_digest_replacement_round_trip() {
-    let file = temp_file("roundtrip");
+    let file = TempFile::new("roundtrip");
     let store = DiskStore::default();
     let first_digest = Digest([7; 32]);
     let second_digest = Digest([8; 32]);
-    let first_target = target(&file.0, first_digest);
-    let second_target = target(&file.0, second_digest);
+    let first_target = target(file.path(), first_digest);
+    let second_target = target(file.path(), second_digest);
     let first = OutputSnapshot::new(vec![
         DynamicValue::Unbound,
         DynamicValue::Static(StaticValue::Int(7)),
@@ -214,10 +194,10 @@ async fn store_read_header_check_and_digest_replacement_round_trip() {
 
 #[tokio::test]
 async fn broader_same_digest_blob_is_preserved() {
-    let file = temp_file("coverage");
+    let file = TempFile::new("coverage");
     let decode_calls = Arc::new(AtomicU64::new(0));
     let store = versioned_store(1, decode_calls.clone());
-    let target = target(&file.0, Digest([11; 32]));
+    let target = target(file.path(), Digest([11; 32]));
     let partial = OutputSnapshot::new(vec![
         DynamicValue::Static(StaticValue::Int(7)),
         DynamicValue::Unbound,
@@ -242,10 +222,7 @@ async fn broader_same_digest_blob_is_preserved() {
             .await
             .is_none()
     );
-    assert!(
-        file.0.exists(),
-        "an insufficient but valid blob is retained"
-    );
+    assert!(file.exists(), "an insufficient but valid blob is retained");
 
     let complete = OutputSnapshot::new(vec![
         DynamicValue::Static(StaticValue::Int(7)),
@@ -264,7 +241,7 @@ async fn broader_same_digest_blob_is_preserved() {
         store.store_io.publication_attempts.load(Ordering::Relaxed),
         2
     );
-    let complete_bytes = std::fs::read(&file.0).unwrap();
+    let complete_bytes = std::fs::read(file.path()).unwrap();
 
     store
         .store(
@@ -279,7 +256,7 @@ async fn broader_same_digest_blob_is_preserved() {
         store.store_io.publication_attempts.load(Ordering::Relaxed),
         2
     );
-    assert_eq!(std::fs::read(&file.0).unwrap(), complete_bytes);
+    assert_eq!(std::fs::read(file.path()).unwrap(), complete_bytes);
     assert!(store.covers(&target, complete.values()).await);
     assert!(store.covers(&target, partial.values()).await);
     let restored = read_snapshot(&store, &target, 2).await.unwrap();
@@ -293,8 +270,8 @@ async fn broader_same_digest_blob_is_preserved() {
 
 #[tokio::test]
 async fn missing_and_changed_codecs_miss_before_decode() {
-    let file = temp_file("codec-version");
-    let target = target(&file.0, Digest([12; 32]));
+    let file = TempFile::new("codec-version");
+    let target = target(file.path(), Digest([12; 32]));
     let snapshot = OutputSnapshot::new(vec![DynamicValue::from_custom(Blob(vec![9]))]);
     let old_calls = Arc::new(AtomicU64::new(0));
     let old_store = versioned_store(1, old_calls.clone());
@@ -340,25 +317,25 @@ async fn missing_and_changed_codecs_miss_before_decode() {
 
 #[tokio::test]
 async fn unregistered_custom_value_is_not_written() {
-    let file = temp_file("unregistered");
+    let file = TempFile::new("unregistered");
     let snapshot = OutputSnapshot::new(vec![DynamicValue::from_custom(Blob(vec![1]))]);
     DiskStore::default()
         .store(
-            &target(&file.0, Digest([1; 32])),
+            &target(file.path(), Digest([1; 32])),
             &snapshot,
             StorePolicy::KnownMiss,
             &mut ContextStore::default(),
         )
         .await;
-    assert!(!file.0.exists());
+    assert!(!file.exists());
 }
 
 #[tokio::test]
 async fn failed_streaming_encode_preserves_previous_blob() {
-    let file = temp_file("encode-failure");
+    let file = TempFile::new("encode-failure");
     let calls = Arc::new(AtomicU64::new(0));
     let good_store = versioned_store(1, calls.clone());
-    let original_target = target(&file.0, Digest([4; 32]));
+    let original_target = target(file.path(), Digest([4; 32]));
     good_store
         .store(
             &original_target,
@@ -367,7 +344,7 @@ async fn failed_streaming_encode_preserves_previous_blob() {
             &mut ContextStore::default(),
         )
         .await;
-    let original = std::fs::read(&file.0).unwrap();
+    let original = std::fs::read(file.path()).unwrap();
 
     let failing_store = DiskStore::new(
         &versioned_library(1, Arc::new(AtomicU64::new(0)), true),
@@ -375,14 +352,14 @@ async fn failed_streaming_encode_preserves_previous_blob() {
     );
     failing_store
         .store(
-            &target(&file.0, Digest([5; 32])),
+            &target(file.path(), Digest([5; 32])),
             &OutputSnapshot::new(vec![DynamicValue::from_custom(Blob(vec![8; 1024]))]),
             StorePolicy::KnownMiss,
             &mut ContextStore::default(),
         )
         .await;
-    assert_eq!(std::fs::read(&file.0).unwrap(), original);
-    assert!(publication_temp_files(&file.0).is_empty());
+    assert_eq!(std::fs::read(file.path()).unwrap(), original);
+    assert!(publication_temp_files(file.path()).is_empty());
     assert!(
         read_snapshot(&good_store, &original_target, 1)
             .await
@@ -392,14 +369,14 @@ async fn failed_streaming_encode_preserves_previous_blob() {
 
 #[tokio::test]
 async fn failed_publication_does_not_repeat_coverage_probe() {
-    let file = temp_file("publication-failure");
-    std::fs::create_dir_all(&file.0).unwrap();
-    let survivor = file.0.join("survivor");
+    let file = TempFile::new("publication-failure");
+    std::fs::create_dir_all(file.path()).unwrap();
+    let survivor = file.path().join("survivor");
     std::fs::write(&survivor, b"old").unwrap();
     let store = DiskStore::default();
     store
         .store(
-            &target(&file.0, Digest([9; 32])),
+            &target(file.path(), Digest([9; 32])),
             &OutputSnapshot::new(vec![DynamicValue::Static(StaticValue::Int(9))]),
             StorePolicy::PreserveCovering,
             &mut ContextStore::default(),
@@ -412,14 +389,14 @@ async fn failed_publication_does_not_repeat_coverage_probe() {
         1
     );
     assert_eq!(std::fs::read(survivor).unwrap(), b"old");
-    assert!(publication_temp_files(&file.0).is_empty());
+    assert!(publication_temp_files(file.path()).is_empty());
 }
 
 #[tokio::test]
 async fn truncated_blob_is_rejected_by_header_check_and_read() {
-    let file = temp_file("truncated");
+    let file = TempFile::new("truncated");
     let store = DiskStore::default();
-    let target = target(&file.0, Digest([6; 32]));
+    let target = target(file.path(), Digest([6; 32]));
     store
         .store(
             &target,
@@ -430,11 +407,11 @@ async fn truncated_blob_is_rejected_by_header_check_and_read() {
             &mut ContextStore::default(),
         )
         .await;
-    let mut bytes = std::fs::read(&file.0).unwrap();
+    let mut bytes = std::fs::read(file.path()).unwrap();
     bytes.pop();
-    std::fs::write(&file.0, bytes).unwrap();
+    std::fs::write(file.path(), bytes).unwrap();
     let expected = [DynamicValue::Static(StaticValue::String("payload".into()))];
     assert!(!store.covers(&target, &expected).await);
     assert!(read_snapshot(&store, &target, 1).await.is_none());
-    assert!(!file.0.exists(), "a corrupt cache blob is removed");
+    assert!(!file.exists(), "a corrupt cache blob is removed");
 }

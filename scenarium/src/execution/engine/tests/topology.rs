@@ -1,18 +1,17 @@
 use super::*;
 
 use ::common::FloatExt;
-use std::sync::atomic::{AtomicUsize, Ordering};
+
+use crate::testing::calls::Calls;
 
 /// A source emitting `value` and counting how often it was asked.
-fn counted_source(value: i64, calls: Arc<AtomicUsize>) -> impl FnOnce(NodeSpec) -> NodeSpec {
+fn counted_source(value: i64, calls: &Calls) -> impl FnOnce(NodeSpec) -> NodeSpec {
+    let body = calls.returning(value);
     move |n: NodeSpec| {
         n.pure()
             .cache(CacheMode::Ram)
             .output(DataType::Int)
-            .compute(move |_| {
-                calls.fetch_add(1, Ordering::Relaxed);
-                value.into()
-            })
+            .compute(body)
     }
 }
 
@@ -84,10 +83,10 @@ async fn multiple_sinks_all_execute() -> TestResult {
 async fn cached_output_survives_node_removal() -> TestResult {
     // Both sources are Pure, so their outputs are cached across runs.
     // Removing one chain must preserve the survivor's id-keyed slot.
-    let (calls_a, calls_b) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicUsize::new(0)));
+    let (calls_a, calls_b) = (Calls::default(), Calls::default());
     let mut g = TestGraph::new();
-    g.add("a", counted_source(2, calls_a.clone()));
-    g.add("b", counted_source(5, calls_b.clone()));
+    g.add("a", counted_source(2, &calls_a));
+    g.add("b", counted_source(5, &calls_b));
     g.add("print_a", |n| n.records());
     g.instance("print_b", "print_a");
     g.wire("a", 0, "print_a", 0);
@@ -95,8 +94,8 @@ async fn cached_output_survives_node_removal() -> TestResult {
 
     let mut e = TestEngine::over(g);
     e.run_sinks().await;
-    assert_eq!(calls_a.load(Ordering::Relaxed), 1);
-    assert_eq!(calls_b.load(Ordering::Relaxed), 1);
+    assert_eq!(calls_a.count(), 1);
+    assert_eq!(calls_b.count(), 1);
 
     e.edit(|g| {
         g.remove("b");
@@ -105,7 +104,7 @@ async fn cached_output_survives_node_removal() -> TestResult {
     let run = e.run_sinks().await;
 
     assert_eq!(
-        calls_a.load(Ordering::Relaxed),
+        calls_a.count(),
         1,
         "the survivor must not recompute after an unrelated node's removal"
     );

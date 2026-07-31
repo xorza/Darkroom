@@ -1,5 +1,12 @@
+//! Test-only helpers, reachable from downstream crates' test targets under the
+//! `internals` feature without entering the released surface.
+
+pub(crate) mod temp_dir;
+pub(crate) mod temp_file;
+
 use std::path::PathBuf;
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Returns the workspace root directory.
 /// Works by finding the directory containing Cargo.lock.
@@ -26,4 +33,16 @@ pub fn test_output_path(name: &str) -> PathBuf {
         std::fs::create_dir_all(parent).expect("Failed to create test output subdirectory");
     }
     path
+}
+
+/// A path under the OS temp directory nothing else will pick: `tag` says which
+/// fixture wants it, the process id separates concurrent test binaries, and the
+/// counter separates repeated calls within one.
+///
+/// Shared by [`TempDir`](temp_dir::TempDir) and [`TempFile`](temp_file::TempFile),
+/// so the two cannot collide with each other either.
+fn unique_temp_path(tag: &str) -> PathBuf {
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let sequence = COUNTER.fetch_add(1, Ordering::Relaxed);
+    std::env::temp_dir().join(format!("{tag}-{}-{sequence}", std::process::id()))
 }

@@ -343,14 +343,11 @@ mod tests {
     use tokio::io::{AsyncRead, AsyncWrite};
 
     use crate::FuncOutput;
-    use crate::Invocation;
     use crate::graph::func::error::InvokeError;
-    use crate::graph::func::lambda::OutputDemand;
     use crate::graph::func::{Func, FuncInput};
     use crate::library::{Library, TypeEntry};
-    use crate::runtime::any_state::AnyState;
-    use crate::runtime::context::{ContextManager, ContextStore};
-    use crate::runtime::shared_any_state::SharedAnyState;
+    use crate::runtime::context::ContextStore;
+    use crate::testing::func_invoker::FuncInvoker;
     use crate::testing::{self, TestFuncHooks, test_func_lib};
     use crate::{
         CodecError, CustomValue, CustomValueCodec, DataType, DynamicValue, StaticValue, TypeId,
@@ -588,56 +585,31 @@ mod tests {
         assert!(library.codecs().get(enum_id).is_none());
     }
 
+    /// A func reached by id computes, and its node state carries between calls
+    /// the way it does between two runs of one node.
     #[tokio::test]
     async fn invoke_by_id_and_index() -> Result<(), InvokeError> {
         let library = test_func_lib(TestFuncHooks::default());
-        let sum_id = library.by_name("sum").unwrap().id;
+        let sum = library.by_name("sum").unwrap().id;
+        let sum = library.by_id(sum).unwrap();
+        let int = |value: i64| DynamicValue::Static(StaticValue::Int(value));
+        let mut node = FuncInvoker::default();
 
-        let mut ctx_manager = ContextManager::default();
-        let mut node_state = AnyState::default();
-        let mut inputs = vec![
-            DynamicValue::Static(StaticValue::Int(2)),
-            DynamicValue::Static(StaticValue::Int(4)),
-        ];
-        let mut outputs = vec![DynamicValue::Unbound];
-        let output_demand = vec![OutputDemand::Produce; outputs.len()];
-        let event_state = SharedAnyState::default();
-        library
-            .by_id(sum_id)
-            .unwrap()
-            .lambda
-            .invoke(Invocation {
-                ctx: &mut ctx_manager,
-                state: &mut node_state,
-                event_state: &event_state,
-                inputs: &mut inputs,
-                demand: &output_demand,
-                outputs: &mut outputs,
-            })
-            .await?;
+        let outputs = node.call(sum, [int(2), int(4)]).await?;
         assert_eq!(outputs[0].as_i64().unwrap(), 6);
-        let cached = *node_state
-            .get::<i64>()
-            .expect("InvokeCache should contain the sum value");
-        assert_eq!(cached, 6);
+        assert_eq!(
+            node.state::<i64>(),
+            Some(&6),
+            "the body stashed its result in the node's own state"
+        );
 
-        inputs[0] = DynamicValue::Static(StaticValue::Int(3));
-        inputs[1] = DynamicValue::Static(StaticValue::Int(5));
-        outputs[0] = DynamicValue::Unbound;
-        library
-            .by_id(sum_id)
-            .unwrap()
-            .lambda
-            .invoke(Invocation {
-                ctx: &mut ctx_manager,
-                state: &mut node_state,
-                event_state: &event_state,
-                inputs: &mut inputs,
-                demand: &output_demand,
-                outputs: &mut outputs,
-            })
-            .await?;
+        let outputs = node.call(sum, [int(3), int(5)]).await?;
         assert_eq!(outputs[0].as_i64().unwrap(), 8);
+        assert_eq!(
+            node.state::<i64>(),
+            Some(&8),
+            "and the second call replaced it"
+        );
 
         Ok(())
     }
