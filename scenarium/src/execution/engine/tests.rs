@@ -2215,18 +2215,18 @@ mod missing_inputs {
 
         // get_b has no missing inputs (no inputs at all)
         assert!(
-            !execution_graph.schedule.states[execution_graph.compiled().node_index[&get_b]]
+            !execution_graph.schedule.states[execution_graph.compiled().node(get_b).unwrap()]
                 .missing_required_inputs()
         );
         // sum is missing input[0], propagates to downstream mult and print — so none of
         // them is runnable (get_b, a source with satisfied inputs, still is).
         for gated in [sum, mult, print] {
             assert!(
-                execution_graph.schedule.states[execution_graph.compiled().node_index[&gated]]
+                execution_graph.schedule.states[execution_graph.compiled().node(gated).unwrap()]
                     .missing_required_inputs()
             );
             assert!(
-                !execution_graph.schedule.states[execution_graph.compiled().node_index[&gated]]
+                !execution_graph.schedule.states[execution_graph.compiled().node(gated).unwrap()]
                     .is_runnable()
             );
         }
@@ -2262,11 +2262,11 @@ mod missing_inputs {
         // the gated chain isn't runnable (its sources still are).
         for gated in [sum, mult, print] {
             assert!(
-                execution_graph.schedule.states[execution_graph.compiled().node_index[&gated]]
+                execution_graph.schedule.states[execution_graph.compiled().node(gated).unwrap()]
                     .missing_required_inputs()
             );
             assert!(
-                !execution_graph.schedule.states[execution_graph.compiled().node_index[&gated]]
+                !execution_graph.schedule.states[execution_graph.compiled().node(gated).unwrap()]
                     .is_runnable()
             );
         }
@@ -2296,11 +2296,11 @@ mod missing_inputs {
         let print = execution_node_id(&execution_graph, &graph, &library, "Print").unwrap();
 
         assert!(
-            !execution_graph.schedule.states[execution_graph.compiled().node_index[&mult]]
+            !execution_graph.schedule.states[execution_graph.compiled().node(mult).unwrap()]
                 .missing_required_inputs()
         );
         assert!(
-            !execution_graph.schedule.states[execution_graph.compiled().node_index[&print]]
+            !execution_graph.schedule.states[execution_graph.compiled().node(print).unwrap()]
                 .missing_required_inputs()
         );
         assert!(
@@ -2343,7 +2343,7 @@ mod missing_inputs {
         // never runs, so it never reads that value.
         let mult = execution_node_id(&execution_graph, &graph, &library, "mult").unwrap();
         assert!(
-            execution_graph.schedule.states[execution_graph.compiled().node_index[&mult]]
+            execution_graph.schedule.states[execution_graph.compiled().node(mult).unwrap()]
                 .missing_required_inputs()
         );
         assert!(
@@ -2383,8 +2383,8 @@ mod disabled_nodes {
             !execution_graph
                 .schedule
                 .process_order
-                .contains(&execution_graph.compiled().node_index[&sum])
-                && execution_graph.schedule.states[execution_graph.compiled().node_index[&sum]]
+                .contains(&execution_graph.compiled().node(sum).unwrap())
+                && execution_graph.schedule.states[execution_graph.compiled().node(sum).unwrap()]
                     == NodeState::Disabled,
             "an unseeded disabled node stays structural but outside execution order"
         );
@@ -2395,15 +2395,15 @@ mod disabled_nodes {
         let mult = execution_node_id(&execution_graph, &graph, &library, "mult").unwrap();
         let print = execution_node_id(&execution_graph, &graph, &library, "Print").unwrap();
         assert!(
-            !execution_graph.schedule.states[execution_graph.compiled().node_index[&get_b]]
+            !execution_graph.schedule.states[execution_graph.compiled().node(get_b).unwrap()]
                 .missing_required_inputs()
         );
         assert!(
-            execution_graph.schedule.states[execution_graph.compiled().node_index[&mult]]
+            execution_graph.schedule.states[execution_graph.compiled().node(mult).unwrap()]
                 .missing_required_inputs()
         );
         assert!(
-            execution_graph.schedule.states[execution_graph.compiled().node_index[&print]]
+            execution_graph.schedule.states[execution_graph.compiled().node(print).unwrap()]
                 .missing_required_inputs()
         );
 
@@ -3263,7 +3263,7 @@ mod execution {
         // sum should be marked as missing required inputs
         let sum = execution_node_id(&execution_graph, &graph, &library, "sum").unwrap();
         assert!(
-            execution_graph.schedule.states[execution_graph.compiled().node_index[&sum]]
+            execution_graph.schedule.states[execution_graph.compiled().node(sum).unwrap()]
                 .missing_required_inputs()
         );
 
@@ -4252,7 +4252,7 @@ mod events {
         assert!(
             eg.schedule
                 .process_order
-                .contains(&eg.compiled().node_index[&trigger_id]),
+                .contains(&eg.compiled().node(trigger_id).unwrap()),
             "the RunSinks sink runs as a sink"
         );
 

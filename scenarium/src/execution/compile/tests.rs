@@ -31,7 +31,7 @@ fn subscription_wiring_rejects_an_endpoint_outside_the_program() {
     graph.subscribe(emitter, 0, subscriber);
 
     let mut compiled = Compiler::default().compile(&graph, &library).unwrap();
-    let emitter_idx = compiled.node_index[&emitter];
+    let emitter_idx = compiled.node(emitter).unwrap();
     let events = compiled[emitter_idx].events;
     assert_eq!(
         compiled.events[events][0].subscribers.len(),
@@ -338,7 +338,7 @@ fn places_one_node_per_authored_node_in_id_order() {
         expected
     );
     for (position, node_id) in expected.iter().enumerate() {
-        assert_eq!(program.node_index[node_id], NodeIdx(position as u32));
+        assert_eq!(program.node(*node_id).unwrap(), NodeIdx(position as u32));
     }
 }
 
@@ -390,7 +390,7 @@ fn interns_a_wire_to_the_producers_dense_address() {
     assert_eq!(
         address,
         OutputAddr {
-            node_idx: program.node_index[&producer],
+            node_idx: program.node(producer).unwrap(),
             port_idx: 0,
         },
     );
@@ -545,7 +545,7 @@ fn wires_each_event_with_the_subscribers_resolved_for_it() {
         .collect();
     assert_eq!(
         subscribers,
-        vec![vec![], vec![program.node_index[&subscriber]]],
+        vec![vec![], vec![program.node(subscriber).unwrap()]],
         "only the subscribed port carries a subscriber"
     );
 }

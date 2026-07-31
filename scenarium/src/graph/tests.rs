@@ -231,7 +231,7 @@ fn type_mismatches_degrade_at_lowering_not_at_validation() {
     let flat_input = |g: &Graph, node: NodeId| {
         assert!(g.validate_with(&library).is_ok());
         let compiled = Compiler::default().compile(g, &library).unwrap();
-        let e_node = &compiled[compiled.node_index[&node]];
+        let e_node = &compiled[compiled.node(node).unwrap()];
         compiled.inputs[e_node.inputs.nth(0)].binding.clone()
     };
 
@@ -451,7 +451,7 @@ fn type_mismatched_wiring_lowers_as_unbound_through_wildcard_chains() {
     let sink_binding = |g: &Graph| {
         let mut compiler = Compiler::default();
         let compiled = compiler.compile(g, &library).expect("mismatches compile");
-        let e_node = &compiled[compiled.node_index[&sink]];
+        let e_node = &compiled[compiled.node(sink).unwrap()];
         match &compiled.inputs[e_node.inputs.nth(0)].binding {
             ExecutionBinding::Bind(addr) => LoweredSink::Bound(compiled.node_ids[addr.node_idx]),
             ExecutionBinding::Const(_) => LoweredSink::Const,

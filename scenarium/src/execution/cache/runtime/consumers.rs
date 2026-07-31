@@ -131,11 +131,7 @@ mod tests {
     /// wherever the id sort happened to place them.
     fn reached(f: &Fixture, seeds: &[NodeId]) -> Vec<NodeId> {
         Consumers::reverse(&f.program)
-            .closure(
-                seeds
-                    .iter()
-                    .filter_map(|node_id| f.program.node_index.get(node_id).copied()),
-            )
+            .closure(seeds.iter().filter_map(|node_id| f.program.node(*node_id)))
             .iter()
             .map(|node_idx| f.program.node_ids[node_idx])
             .collect()
