@@ -3,7 +3,7 @@ use scenarium::testing::graph::TestGraph;
 use scenarium::{CacheMode, DataType, FuncOutput, Graph, Library, Node, NodeKind};
 
 use crate::core::document::{Document, PortKind};
-use crate::gui::graph_scope::internals::ScopeFixture;
+use crate::gui::graph_ctx::internals::GraphCtxFixture;
 
 #[test]
 fn only_runnable_sinks_expose_the_disable_toggle() {
@@ -23,19 +23,19 @@ fn only_runnable_sinks_expose_the_disable_toggle() {
     let plain = g.add_declared("plain");
     let sink = g.add_declared("sink_func");
     let ghost = g.graph.add(Node::new(NodeKind::Func(FuncId::unique())));
-    let mut fixture = ScopeFixture::over(Document::from(g.graph), g.library);
-    let graph_scope = fixture.scope();
+    let mut fixture = GraphCtxFixture::over(Document::from(g.graph), g.library);
+    let graph_ctx = fixture.graph_ctx();
 
     assert!(
-        !graph_scope.node(plain).unwrap().can_disable(),
+        !graph_ctx.node(plain).unwrap().can_disable(),
         "a non-sink has no disable toggle"
     );
     assert!(
-        graph_scope.node(sink).unwrap().can_disable(),
+        graph_ctx.node(sink).unwrap().can_disable(),
         "a runnable sink can be disabled"
     );
     assert!(
-        !graph_scope.node(ghost).unwrap().can_disable(),
+        !graph_ctx.node(ghost).unwrap().can_disable(),
         "an unresolved node cannot be disabled because it cannot be run explicitly"
     );
 }
@@ -57,14 +57,14 @@ fn a_missing_func_reads_as_a_deletable_stub() {
     let known_id = graph.add(known);
     let ghost_id = graph.add(ghost);
 
-    let mut fixture = ScopeFixture::over(Document::from(graph), library);
-    let graph_scope = fixture.scope();
+    let mut fixture = GraphCtxFixture::over(Document::from(graph), library);
+    let graph_ctx = fixture.graph_ctx();
 
     // Both nodes resolve, not silently dropped — so the unresolvable one
     // stays selectable and deletable to repair the document.
-    assert_eq!(graph_scope.nodes().count(), 2, "every placed node resolves");
-    let known_node = graph_scope.node(known_id).unwrap();
-    let ghost_node = graph_scope.node(ghost_id).unwrap();
+    assert_eq!(graph_ctx.nodes().count(), 2, "every placed node resolves");
+    let known_node = graph_ctx.node(known_id).unwrap();
+    let ghost_node = graph_ctx.node(ghost_id).unwrap();
 
     // The flag tracks resolution; the label names what's missing.
     assert!(!known_node.missing(), "a resolved func is not a stub");
@@ -100,15 +100,15 @@ fn func_events_read_in_order_alongside_outputs() {
     use scenarium::{FRAME_EVENT_FUNC_ID, worker_events_library};
 
     // The `frame event` func declares two events ("Always", "FPS") and two
-    // data outputs ("Delta", "Frame #"); the scope must surface both
+    // data outputs ("Delta", "Frame #"); the context must surface both
     // independently — events off the declaration, outputs unchanged.
     let library = worker_events_library();
     let mut graph = Graph::default();
     let node: Node = library.by_id(FRAME_EVENT_FUNC_ID).unwrap().into();
     let node_id = graph.add(node);
 
-    let mut fixture = ScopeFixture::over(Document::from(graph), library);
-    let n = fixture.scope().node(node_id).unwrap();
+    let mut fixture = GraphCtxFixture::over(Document::from(graph), library);
+    let n = fixture.graph_ctx().node(node_id).unwrap();
 
     let event_names: Vec<&str> = n.events().iter().map(|e| e.name.as_str()).collect();
     assert_eq!(event_names, ["Always", "FPS"], "events read in order");
@@ -127,7 +127,7 @@ fn subscriptions_read_from_the_graph() {
     use scenarium::{FRAME_EVENT_FUNC_ID, worker_events_library};
 
     // Two frame-event nodes; subscribe the second to the first's "FPS"
-    // event (event_idx 1). The scope must surface that one edge.
+    // event (event_idx 1). The context must surface that one edge.
     let library = worker_events_library();
     let mut graph = Graph::default();
     let emitter: Node = library.by_id(FRAME_EVENT_FUNC_ID).unwrap().into();
@@ -136,8 +136,8 @@ fn subscriptions_read_from_the_graph() {
     let subscriber_id = graph.add(subscriber);
     graph.subscribe(emitter_id, 1, subscriber_id);
 
-    let mut fixture = ScopeFixture::over(Document::from(graph), library);
-    let subs: Vec<_> = fixture.scope().subscriptions().collect();
+    let mut fixture = GraphCtxFixture::over(Document::from(graph), library);
+    let subs: Vec<_> = fixture.graph_ctx().subscriptions().collect();
 
     assert_eq!(subs.len(), 1);
     assert_eq!(subs[0].emitter, emitter_id);
@@ -166,11 +166,11 @@ fn cache_mode_reads_verbatim_per_node() {
         ids.push((node_id, mode));
     }
 
-    let mut fixture = ScopeFixture::over(Document::from(graph), library);
-    let graph_scope = fixture.scope();
+    let mut fixture = GraphCtxFixture::over(Document::from(graph), library);
+    let graph_ctx = fixture.graph_ctx();
 
     for (id, mode) in ids {
-        let node = graph_scope.node(id).unwrap();
+        let node = graph_ctx.node(id).unwrap();
         assert_eq!(node.cache(), mode, "{mode:?} reads verbatim");
         assert!(node.cache_controls());
     }
@@ -205,12 +205,12 @@ fn impure_flag_reads_from_func_behavior() {
     let impure_id = g.add_declared("impure_src");
     let self_cached_id = g.add_declared("self_cached");
 
-    let mut fixture = ScopeFixture::over(Document::from(g.graph), g.library);
-    let graph_scope = fixture.scope();
+    let mut fixture = GraphCtxFixture::over(Document::from(g.graph), g.library);
+    let graph_ctx = fixture.graph_ctx();
 
-    let pure = graph_scope.node(pure_id).unwrap();
-    let impure = graph_scope.node(impure_id).unwrap();
-    let self_cached = graph_scope.node(self_cached_id).unwrap();
+    let pure = graph_ctx.node(pure_id).unwrap();
+    let impure = graph_ctx.node(impure_id).unwrap();
+    let self_cached = graph_ctx.node(self_cached_id).unwrap();
 
     assert!(!pure.impure(), "a Pure func keeps its cache chips");
     assert!(impure.impure(), "an Impure func hides its cache chips");
@@ -243,7 +243,7 @@ fn a_wildcard_output_resolves_through_the_wire_it_mirrors() {
     // A passthrough mirroring input 0, and an Int source. `Graph` and
     // `Library` aren't `Clone`, so each half builds its own — the wiring is
     // the only difference between them.
-    fn fixture(wired: bool) -> (ScopeFixture, scenarium::NodeId) {
+    fn fixture(wired: bool) -> (GraphCtxFixture, scenarium::NodeId) {
         let mut library = Library::default();
         let mut passthrough = Func::new(FuncId::unique(), "passthrough")
             .pure()
@@ -267,18 +267,18 @@ fn a_wildcard_output_resolves_through_the_wire_it_mirrors() {
             g.wire("int_src", 0, "passthrough", 0);
         }
         (
-            ScopeFixture::over(Document::from(g.graph), g.library),
+            GraphCtxFixture::over(Document::from(g.graph), g.library),
             consumer,
         )
     }
 
     // Unwired the passthrough's output is polymorphic; wired it reports what
     // reached it — the one reading that cannot come off the declaration
-    // alone, and the reason the scope carries a resolved table at all.
+    // alone, and the reason the context carries a resolved table at all.
     let (mut unwired, consumer) = fixture(false);
     assert_eq!(
         unwired
-            .scope()
+            .graph_ctx()
             .node(consumer)
             .unwrap()
             .output(0)
@@ -291,7 +291,7 @@ fn a_wildcard_output_resolves_through_the_wire_it_mirrors() {
     let (mut wired, consumer) = fixture(true);
     assert_eq!(
         wired
-            .scope()
+            .graph_ctx()
             .node(consumer)
             .unwrap()
             .output(0)

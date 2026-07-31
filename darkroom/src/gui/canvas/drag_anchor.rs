@@ -14,7 +14,7 @@ use crate::core::edit::intent::sink::Intents;
 use crate::core::edit::intent::types::GraphIntent;
 use std::collections::BTreeSet;
 
-use crate::gui::graph_scope::GraphScope;
+use crate::gui::graph_ctx::GraphCtx;
 
 /// One in-flight group drag, or none.
 ///
@@ -72,11 +72,11 @@ impl GroupDrag {
     /// anchor would emit a `MoveSelection` against a missing node, which
     /// panics in `build_step`, and could fire again if a fresh node reused
     /// the id.
-    pub(crate) fn drop_if_owner_gone(&mut self, graph_scope: GraphScope<'_>) {
+    pub(crate) fn drop_if_owner_gone(&mut self, graph_ctx: GraphCtx<'_>) {
         let gone = self
             .anchor
             .as_ref()
-            .is_some_and(|a| !graph_scope.contains(a.grabbed));
+            .is_some_and(|a| !graph_ctx.contains(a.grabbed));
         if gone {
             self.anchor = None;
         }
@@ -90,13 +90,8 @@ impl GroupDrag {
     /// Runs pre-record, so the move lands in `Document` before the pass that
     /// draws the moved items: they paint at the cursor in Pass A with no
     /// relayout retry.
-    pub(crate) fn advance(
-        &mut self,
-        ui: &Ui,
-        graph_scope: GraphScope<'_>,
-        out: &mut Intents,
-    ) -> bool {
-        self.drop_if_owner_gone(graph_scope);
+    pub(crate) fn advance(&mut self, ui: &Ui, graph_ctx: GraphCtx<'_>, out: &mut Intents) -> bool {
+        self.drop_if_owner_gone(graph_ctx);
         // Copy the ids out and drop the borrow, so the branches below can
         // clear the slot without cloning `start_positions` — only the
         // success path reads it, and that path never clears.
@@ -146,11 +141,11 @@ impl Anchor {
 /// shared by both callers, so the group moves the same way regardless of
 /// which kind of member's press started it.
 pub(crate) fn selected_group_positions(
-    graph_scope: GraphScope<'_>,
+    graph_ctx: GraphCtx<'_>,
     selected: &BTreeSet<NodeId>,
 ) -> Vec<(NodeId, Vec2)> {
     let holds = |key: NodeId| selected.contains(&key);
-    let positions: Vec<(NodeId, Vec2)> = graph_scope
+    let positions: Vec<(NodeId, Vec2)> = graph_ctx
         .nodes()
         .filter(|n| holds(n.id))
         .map(|n| (n.id, n.pos))

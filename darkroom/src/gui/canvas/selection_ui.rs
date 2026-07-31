@@ -88,13 +88,13 @@ impl SelectionUI {
     /// exactly one of them, so every other pane's call returns
     /// immediately rather than advancing the band in its own coordinates.
     pub(super) fn apply(&mut self, ui: &mut Ui, cx: CanvasCtx<'_>, out: &mut Intents) {
-        let graph_scope = cx.graph_scope();
+        let graph_ctx = cx.graph_ctx();
         let resp = ui.response_for(outer_canvas_widget_id());
         if self.band.is_idle()
             && cx.gesture() == Some(CanvasGesture::Select)
             && let Some(p) = resp.pointer_local
         {
-            let w = to_world(p, &graph_scope.viewport());
+            let w = to_world(p, &graph_ctx.viewport());
             let band = RubberBand {
                 start: w,
                 current: w,
@@ -103,7 +103,7 @@ impl SelectionUI {
                 // Captured once, so the per-frame union never re-reads the
                 // document.
                 base: if ui.modifiers().shift {
-                    graph_scope.selected().clone()
+                    graph_ctx.selected().clone()
                 } else {
                     BTreeSet::new()
                 },
@@ -121,7 +121,7 @@ impl SelectionUI {
             return;
         };
         if let Some(p) = resp.pointer_local {
-            band.current = to_world(p, &graph_scope.viewport());
+            band.current = to_world(p, &graph_ctx.viewport());
         }
         let rect = band.rect();
         // Swept into the reused preview buffer: refilled from scratch every
@@ -129,7 +129,7 @@ impl SelectionUI {
         let swept = &mut self.swept;
         swept.clear();
         swept.extend(band.base.iter().copied());
-        for n in graph_scope.nodes() {
+        for n in graph_ctx.nodes() {
             // The cached-size world rect, so nodes the viewport cull
             // skipped this frame still sweep. Never-measured nodes
             // (first frame) can't be hit yet — skip.

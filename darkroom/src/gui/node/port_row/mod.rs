@@ -26,8 +26,8 @@ use crate::core::edit::intent::sink::Intents;
 use crate::core::edit::intent::types::GraphIntent;
 use crate::core::preview;
 use crate::gui::EventRef;
-use crate::gui::graph_scope::input_scope::InputScope;
-use crate::gui::graph_scope::output_scope::OutputScope;
+use crate::gui::graph_ctx::input_scope::InputScope;
+use crate::gui::graph_ctx::output_scope::OutputScope;
 use crate::gui::node::port_color::{event_color, port_color};
 use crate::gui::node::port_row::glyph::{circle_frame, event_glyph, port_diameter};
 use crate::gui::node::value_editor;
@@ -116,7 +116,7 @@ fn tip_for(ncx: NodeCtx<'_>, description: &str, ty: &DataType) -> String {
     if !ncx.tips() {
         return String::new();
     }
-    port_tip(description, type_label(ncx.graph_scope().library(), ty))
+    port_tip(description, type_label(ncx.graph_ctx().library(), ty))
 }
 
 /// Render `name` as a port's label, with `tip` (the port's data type) as its
@@ -315,7 +315,7 @@ fn value_cell(ui: &mut Ui, ncx: NodeCtx<'_>, input: InputScope<'_>, out: &mut In
             value_editor::show(
                 ui,
                 ncx.sve(),
-                ncx.graph_scope().library(),
+                ncx.graph_ctx().library(),
                 editor_id,
                 value,
                 data_type,
@@ -396,7 +396,7 @@ fn add_preview_item(
     port: PortRef,
     out: &mut Intents,
 ) {
-    let Some(func) = preview::registered(ncx.graph_scope().library()) else {
+    let Some(func) = preview::registered(ncx.graph_ctx().library()) else {
         return;
     };
     if !MenuItem::new("Add preview").show(ui, popup).left.clicked() {

@@ -17,8 +17,8 @@ use crate::gui::canvas::drag_anchor::selected_group_positions;
 use crate::gui::canvas::geometry::CanvasGeometry;
 use crate::gui::canvas::hits::CanvasHits;
 use crate::gui::canvas::inspector::Inspectors;
-use crate::gui::graph_scope::GraphScope;
-use crate::gui::graph_scope::node_scope::NodeScope;
+use crate::gui::graph_ctx::GraphCtx;
+use crate::gui::graph_ctx::node_scope::NodeScope;
 use crate::gui::node::header::{header, status_row, subscription_pin};
 use crate::gui::node::memory_row::memory_row;
 use crate::gui::node::port_row::ports_row;
@@ -40,7 +40,7 @@ use std::collections::BTreeSet;
 /// live is fine, which keeps `draw_all`'s node loop borrow-clean. The mutable
 /// sinks (`out`, `actions`) and the breaker `probe` stay separate params.
 ///
-/// The record level of the context chain: derived from the pane's
+/// The draw level of the context chain: derived from the pane's
 /// [`CanvasCtx`], and answering everything that one does — theme, geometry,
 /// hits, the pane itself — so the node subtree names no other context. What
 /// it adds is what only the *paint* pass knows: which nodes read as selected
@@ -49,15 +49,15 @@ use std::collections::BTreeSet;
 /// inspection panels ([`crate::gui::canvas::inspector`]) — take it too,
 /// rather than each growing its own near-identical bundle.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct RecordCtx<'a> {
+pub(crate) struct DrawCtx<'a> {
     /// The one canvas this record pass is drawing, and how the pass reaches
     /// the theme, the geometry, the pane and its library and run: all of it
     /// is already inside, so holding any of it again beside this would be two
-    /// paths to one ref. Every other pane on screen gets its own `RecordCtx`,
+    /// paths to one ref. Every other pane on screen gets its own `DrawCtx`,
     /// so nothing here can reach across.
     canvas: CanvasCtx<'a>,
     /// Effective selection to paint: the graph's committed set
-    /// ([`GraphScope::selected`]) or, mid-rubber-band, the live swept
+    /// ([`GraphCtx::selected`]) or, mid-rubber-band, the live swept
     /// preview owned by `SelectionUI` — one type, so the draw substitutes
     /// them without caring which it got, and the gesture never writes its
     /// preview into the document.
@@ -71,7 +71,7 @@ pub(crate) struct RecordCtx<'a> {
     cull: CullRegion,
 }
 
-impl<'a> RecordCtx<'a> {
+impl<'a> DrawCtx<'a> {
     pub(super) fn new(
         canvas: CanvasCtx<'a>,
         selected: &'a BTreeSet<NodeId>,
@@ -86,13 +86,13 @@ impl<'a> RecordCtx<'a> {
         }
     }
 
-    /// The palette and metrics this pass paints from, off the pane's scope.
+    /// The palette and metrics this pass paints from, off the pane's context.
     pub(crate) fn theme(self) -> &'a Theme {
         self.canvas.theme()
     }
 
-    pub(crate) fn graph_scope(self) -> GraphScope<'a> {
-        self.canvas.graph_scope()
+    pub(crate) fn graph_ctx(self) -> GraphCtx<'a> {
+        self.canvas.graph_ctx()
     }
 
     pub(crate) fn selected(self) -> &'a BTreeSet<NodeId> {
@@ -127,7 +127,7 @@ impl<'a> RecordCtx<'a> {
     /// everything below that asks it.
     pub(super) fn node<'n: 'a>(self, ui: &Ui, node: NodeScope<'n>) -> NodeCtx<'a> {
         NodeCtx {
-            record: self,
+            draw: self,
             node,
             hovered: node_hovered(ui, node.id),
         }
@@ -135,7 +135,7 @@ impl<'a> RecordCtx<'a> {
 }
 
 /// One node of one graph pane, as its own subtree records it: the pane's
-/// [`RecordCtx`] plus the node and whether the pointer is over it.
+/// [`DrawCtx`] plus the node and whether the pointer is over it.
 ///
 /// The leaf level of the context chain, and the one where the *item* is the
 /// level — every function below a node body is about that node, so passing it
@@ -151,7 +151,7 @@ impl<'a> RecordCtx<'a> {
 /// a hover-target comparison, not a rect test, so it is a lookup either way.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct NodeCtx<'a> {
-    record: RecordCtx<'a>,
+    draw: DrawCtx<'a>,
     node: NodeScope<'a>,
     hovered: bool,
 }
@@ -162,35 +162,35 @@ impl<'a> NodeCtx<'a> {
     }
 
     pub(crate) fn theme(self) -> &'a Theme {
-        self.record.theme()
+        self.draw.theme()
     }
 
-    pub(crate) fn graph_scope(self) -> GraphScope<'a> {
-        self.record.graph_scope()
+    pub(crate) fn graph_ctx(self) -> GraphCtx<'a> {
+        self.draw.graph_ctx()
     }
 
     pub(crate) fn geometry(self) -> &'a CanvasGeometry {
-        self.record.geometry()
+        self.draw.geometry()
     }
 
     pub(crate) fn hits(self) -> &'a CanvasHits {
-        self.record.hits()
+        self.draw.hits()
     }
 
     pub(crate) fn inspectors(self) -> &'a Inspectors {
-        self.record.inspectors()
+        self.draw.inspectors()
     }
 
     /// Whether this node paints selected.
     pub(crate) fn is_selected(self) -> bool {
-        self.record.is_selected(self.node.id)
+        self.draw.is_selected(self.node.id)
     }
 
-    /// The pane-wide pass this node belongs to — for the readers that want
+    /// The pane-wide draw this node belongs to — for the readers that want
     /// something about the whole pane rather than this node, like the
     /// effective selection *set* a group drag snapshots.
-    pub(crate) fn record(self) -> RecordCtx<'a> {
-        self.record
+    pub(crate) fn draw_ctx(self) -> DrawCtx<'a> {
+        self.draw
     }
 
     /// Whether the port rows build their hover tooltips: their text is
@@ -258,11 +258,11 @@ impl NodeUI {
     pub(super) fn draw_all(
         &mut self,
         ui: &mut Ui,
-        rcx: RecordCtx<'_>,
+        dcx: DrawCtx<'_>,
         probe: &mut BreakerProbe<'_>,
         out: &mut Intents,
     ) {
-        // Paint in the scope's node order (the view's `item_placements`) —
+        // Paint in the context's node order (the view's `item_placements`) —
         // later draws sit on top, so the last item is frontmost. The order is
         // persisted view state, so a raised item stays raised across
         // save/load and tab switches; `GraphIntent::Raise` moves a clicked
@@ -281,23 +281,23 @@ impl NodeUI {
         // and that first post-blur record is where the edit's pending draft
         // commits.
         let mut focus_kept = None;
-        for n in rcx.graph_scope().nodes() {
+        for n in dcx.graph_ctx().nodes() {
             let keeps_focus = ui.focus_within(node_widget_id(n.id));
             if keeps_focus {
                 focus_kept = Some(n.id);
             }
-            if !rcx.cull().keeps_node(rcx.geometry().node_world_rect(n))
+            if !dcx.cull().keeps_node(dcx.geometry().node_world_rect(n))
                 && !keeps_focus
                 && self.focus_kept_last != Some(n.id)
             {
                 continue;
             }
-            self.draw_one(ui, rcx.node(ui, n), probe, out);
+            self.draw_one(ui, dcx.node(ui, n), probe, out);
         }
         self.focus_kept_last = focus_kept;
         // Belt-and-braces against a node deleted mid-drag; `prepass` makes
         // the same check before it can emit anything against it.
-        self.drag.drop_if_owner_gone(rcx.graph_scope());
+        self.drag.drop_if_owner_gone(dcx.graph_ctx());
     }
 
     fn draw_one(
@@ -399,7 +399,7 @@ impl NodeUI {
         // selection. `UndoStep::is_noop` filters a click that doesn't
         // change the set (e.g. clicking the sole selected node).
         if body_clicked {
-            click_intents(shift_click, ncx.graph_scope(), node.id, out);
+            click_intents(shift_click, ncx.graph_ctx(), node.id, out);
         }
 
         // Latch the anchor on the press-frame edge, off whichever handle
@@ -414,9 +414,9 @@ impl NodeUI {
             // grabbing an unselected node selects only it and drags it
             // alone.
             let start_positions = if selected {
-                selected_group_positions(ncx.graph_scope(), ncx.record().selected())
+                selected_group_positions(ncx.graph_ctx(), ncx.draw_ctx().selected())
             } else {
-                click_intents(false, ncx.graph_scope(), node.id, out);
+                click_intents(false, ncx.graph_ctx(), node.id, out);
                 vec![(node.id, node.pos)]
             };
             self.drag.latch(node.id, start_positions, handle);
@@ -429,8 +429,8 @@ impl NodeUI {
     /// from these intents (notably drag-driven `MoveSelection`) lands in
     /// `Document` before recording — Pass A's arrange already reflects the
     /// cursor; no Pass B relayout retry.
-    pub(super) fn prepass(&mut self, ui: &Ui, graph_scope: GraphScope<'_>, out: &mut Intents) {
-        self.drag.advance(ui, graph_scope, out);
+    pub(super) fn prepass(&mut self, ui: &Ui, graph_ctx: GraphCtx<'_>, out: &mut Intents) {
+        self.drag.advance(ui, graph_ctx, out);
     }
 }
 
@@ -524,7 +524,7 @@ pub(crate) fn drag_handles(node_id: NodeId) -> impl Iterator<Item = WidgetId> {
 ///
 /// Resolved against *last* frame's hover target and cascade, so the answer
 /// doesn't depend on where in this frame's record it is asked — which is what
-/// lets [`RecordCtx::node`] settle it at the node body, before the subtree
+/// lets [`DrawCtx::node`] settle it at the node body, before the subtree
 /// that reads it has recorded.
 fn node_hovered(ui: &Ui, node_id: NodeId) -> bool {
     ui.hover_within(node_widget_id(node_id))
@@ -551,14 +551,9 @@ pub(super) fn set_input(port: PortRef, to: impl Into<Option<Binding>>) -> GraphI
 /// deselected shouldn't jump forward. Shared by the node body, header
 /// title, and port labels so clicking any of them behaves like clicking the
 /// body.
-pub(super) fn click_intents(
-    shift: bool,
-    graph_scope: GraphScope<'_>,
-    key: NodeId,
-    out: &mut Intents,
-) {
-    out.push(select_intent(shift, graph_scope, key));
-    let deselecting = shift && graph_scope.is_selected(key);
+pub(super) fn click_intents(shift: bool, graph_ctx: GraphCtx<'_>, key: NodeId, out: &mut Intents) {
+    out.push(select_intent(shift, graph_ctx, key));
+    let deselecting = shift && graph_ctx.is_selected(key);
     if !deselecting {
         out.push(GraphIntent::Raise { key });
     }
@@ -567,13 +562,13 @@ pub(super) fn click_intents(
 /// The `SetSelection` a click on `key` produces: plain click selects only
 /// it, Shift-click toggles its membership. `UndoStep::is_noop` drops the
 /// entry when nothing changed.
-fn select_intent(shift: bool, graph_scope: GraphScope<'_>, key: NodeId) -> GraphIntent {
+fn select_intent(shift: bool, graph_ctx: GraphCtx<'_>, key: NodeId) -> GraphIntent {
     let mut to = if shift {
-        graph_scope.selected().clone()
+        graph_ctx.selected().clone()
     } else {
         BTreeSet::new()
     };
-    if shift && graph_scope.is_selected(key) {
+    if shift && graph_ctx.is_selected(key) {
         to.remove(&key);
     } else {
         to.insert(key);
@@ -585,22 +580,22 @@ fn select_intent(shift: bool, graph_scope: GraphScope<'_>, key: NodeId) -> Graph
 mod tests {
     use super::*;
 
-    use crate::gui::graph_scope::internals::ScopeFixture;
+    use crate::gui::graph_ctx::internals::GraphCtxFixture;
 
     /// A graph holding `selected` as both its node set and its committed
     /// selection — enough for the click-intent rules, which read nothing
     /// else.
-    fn scene_with_selection(selected: impl IntoIterator<Item = NodeId>) -> ScopeFixture {
+    fn scene_with_selection(selected: impl IntoIterator<Item = NodeId>) -> GraphCtxFixture {
         let ids: Vec<NodeId> = selected.into_iter().collect();
-        ScopeFixture::with_nodes(ids.iter().map(|id| (*id, Vec2::ZERO)))
+        GraphCtxFixture::with_nodes(ids.iter().map(|id| (*id, Vec2::ZERO)))
             .with_selection(ids.iter().copied())
     }
 
-    fn click(shift: bool, scene: &mut ScopeFixture, id: NodeId) -> Vec<GraphIntent> {
+    fn click(shift: bool, scene: &mut GraphCtxFixture, id: NodeId) -> Vec<GraphIntent> {
         use crate::core::edit::intent::sink::Queued;
 
         let mut out = Intents::default();
-        click_intents(shift, scene.scope(), id, &mut out);
+        click_intents(shift, scene.graph_ctx(), id, &mut out);
         out.drain()
             .map(|queued| match queued {
                 Queued::Graph(intent) => intent,

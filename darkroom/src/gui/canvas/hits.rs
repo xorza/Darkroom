@@ -45,8 +45,8 @@ use scenarium::{InputPort, NodeId};
 
 use crate::core::document::{PortKind, PortRef};
 use crate::gui::canvas::inspector::inspect_badge_wid;
-use crate::gui::graph_scope::GraphScope;
-use crate::gui::graph_scope::node_scope::NodeScope;
+use crate::gui::graph_ctx::GraphCtx;
+use crate::gui::graph_ctx::node_scope::NodeScope;
 use crate::gui::node::header::{cache_eviction_badge_wid, play_badge_wid};
 use crate::gui::node::port_row::{const_editor_wid, input_cell_wid};
 use crate::gui::node::preview_row::preview_image_wid;
@@ -145,7 +145,7 @@ impl CanvasHits {
     /// responses, across every visible pane. Run once per frame, in the
     /// navigation phase — see the module docs for why there, what it
     /// costs, and which pass fills the port half.
-    pub(crate) fn scan(&mut self, ui: &Ui, graph: Option<GraphScope<'_>>) {
+    pub(crate) fn scan(&mut self, ui: &Ui, graph: Option<GraphCtx<'_>>) {
         *self = Self::default();
         let Some(graph) = graph else {
             return;

@@ -4,16 +4,16 @@ use scenarium::{Library, NodeId, OutputTypes};
 
 use super::*;
 use crate::core::document::Document;
-use crate::gui::app::{AppContext, StatusInputs};
+use crate::gui::app::{AppCtx, StatusInputs};
 use crate::gui::canvas::hits::CanvasHits;
 use crate::gui::run_state::RunState;
 
 #[derive(Debug)]
 struct Fixture {
-    /// Everything a scope composes. The snap filter reads the authoring
+    /// Everything a context composes. The snap filter reads the authoring
     /// graph out of the document to answer its cycle question, each node's
     /// ports out of the library, and a port's resolved type off the table —
-    /// which composing the scope fills.
+    /// which composing the context fills.
     doc: Document,
     library: Library,
     run_state: RunState,
@@ -33,15 +33,15 @@ impl Fixture {
     /// and no Esc: these tests drive the wire directly rather than through
     /// the bare-canvas classification.
     fn canvas_ctx(&mut self) -> CanvasCtx<'_> {
-        let app = AppContext::new(
+        let app = AppCtx::new(
             &self.theme,
             &self.library,
             &self.run_state,
             StatusInputs::default(),
         );
-        let graph_scope = GraphScope::for_document(app, &self.doc, &mut self.output_types)
+        let graph_ctx = GraphCtx::for_document(app, &self.doc, &mut self.output_types)
             .expect("the fixture's document shows the graph");
-        CanvasCtx::new(graph_scope, &self.geometry, &self.hits, None, false)
+        CanvasCtx::new(graph_ctx, &self.geometry, &self.hits, None, false)
     }
 }
 

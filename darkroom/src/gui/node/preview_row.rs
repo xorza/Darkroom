@@ -49,7 +49,7 @@ pub(crate) fn preview_image_wid(node_id: NodeId) -> WidgetId {
 /// an image to describe.
 pub(super) fn preview_row(ui: &mut Ui, ncx: NodeCtx<'_>) {
     let node = ncx.node();
-    let stored = ncx.graph_scope().run_state().previews.entries.get(&node.id);
+    let stored = ncx.graph_ctx().run_state().previews.entries.get(&node.id);
     let has_image = stored.and_then(StoredContent::image).is_some();
     let content = Panel::vstack()
         .id(preview_image_wid(node.id))

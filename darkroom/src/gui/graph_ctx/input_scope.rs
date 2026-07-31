@@ -3,7 +3,7 @@
 use scenarium::{Binding, DataType, FuncInput, InputPort, Library, StaticValue, ValueVariant};
 
 use crate::core::document::{PortKind, PortRef};
-use crate::gui::graph_scope::node_scope::NodeScope;
+use crate::gui::graph_ctx::node_scope::NodeScope;
 
 /// One input port: what the func declares for it, and what the graph has
 /// bound to it.
@@ -52,7 +52,7 @@ impl<'a> InputScope<'a> {
 
     /// What the graph has bound here, or `None` for an unbound port.
     pub(crate) fn binding(self) -> Option<&'a Binding> {
-        self.node.graph_scope.body().bindings.get(&self.port())
+        self.node.graph_ctx.body().bindings.get(&self.port())
     }
 
     /// Required inputs render with more visual weight than optional ones.
@@ -87,7 +87,7 @@ impl<'a> InputScope<'a> {
     /// Owned rather than borrowed: an enum's and an `Any`'s fallbacks are
     /// built here, not stored anywhere to point at.
     pub(crate) fn default(self) -> Option<StaticValue> {
-        default_static_value(self.node.graph_scope.library(), self.declared)
+        default_static_value(self.node.graph_ctx.library(), self.declared)
     }
 }
 

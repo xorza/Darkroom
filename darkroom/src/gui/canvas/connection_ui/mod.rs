@@ -10,7 +10,7 @@ use crate::gui::canvas::geometry::CanvasGeometry;
 use crate::gui::canvas::gesture_slot::GestureSlot;
 use crate::gui::canvas::wire::{GlyphDrag, Wire, WirePass, WireTint};
 use crate::gui::canvas::{CanvasCtx, outer_canvas_widget_id, preview_drag_modifier};
-use crate::gui::graph_scope::GraphScope;
+use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::node::port_color::port_color;
 use crate::gui::node::set_input;
 use crate::gui::theme::Theme;
@@ -84,7 +84,7 @@ impl ConnectionUI {
         resume: Option<PortRef>,
         out: &mut Intents,
     ) {
-        let (graph_scope, geometry) = (cx.graph_scope(), cx.geometry());
+        let (graph_ctx, geometry) = (cx.graph_ctx(), cx.geometry());
         self.ended_on_secondary = false;
 
         // A dropped wire whose palette pick spawned a node resumes floating.
@@ -94,7 +94,7 @@ impl ConnectionUI {
         // between can have removed it. Not latching is how the wire drops,
         // the same answer the re-latch below gives for the same window.
         if let Some(start) = resume
-            && graph_scope.contains(start.node_id)
+            && graph_ctx.contains(start.node_id)
         {
             self.state.latch(InFlight {
                 drag: GlyphDrag::new(start),
@@ -102,10 +102,10 @@ impl ConnectionUI {
             });
         }
         // Latch a fresh port drag only when idle.
-        let candidates = drag_candidates(graph_scope, preview_drag_modifier(ui));
+        let candidates = drag_candidates(graph_ctx, preview_drag_modifier(ui));
         if self.state.is_idle()
             && let Some(drag) = GlyphDrag::latch(&geometry.ports, candidates)
-            && graph_scope.contains(drag.node())
+            && graph_ctx.contains(drag.node())
         {
             self.state.latch(InFlight {
                 drag,
@@ -125,16 +125,16 @@ impl ConnectionUI {
         // silently, and `port_data_type` would meanwhile report the start
         // as untyped (which `scan_snap_target` reads as "compatible with
         // anything").
-        if !graph_scope.contains(state.drag.node()) {
+        if !graph_ctx.contains(state.drag.node()) {
             return;
         }
 
         // Refresh the compatible port under the pointer for both modes.
-        state.drag.snap = scan_snap_target(geometry, ui, graph_scope, state.drag.from);
+        state.drag.snap = scan_snap_target(geometry, ui, graph_ctx, state.drag.from);
         self.state.latch(state);
 
         match state.mode {
-            DragMode::Held => self.resolve_held(ui, graph_scope, geometry, state.drag, out),
+            DragMode::Held => self.resolve_held(ui, graph_ctx, geometry, state.drag, out),
             DragMode::Floating => self.resolve_floating(ui, state.drag, out),
         }
     }
@@ -164,7 +164,7 @@ impl ConnectionUI {
     fn resolve_held(
         &mut self,
         ui: &mut Ui,
-        graph_scope: GraphScope<'_>,
+        graph_ctx: GraphCtx<'_>,
         geometry: &CanvasGeometry,
         drag: GlyphDrag<PortRef, PortRef>,
         out: &mut Intents,
@@ -174,7 +174,7 @@ impl ConnectionUI {
         }
         if let Some(end) = drag.snap {
             commit_connection(drag.from, end, out);
-        } else if let Some(intent) = const_drop(ui, graph_scope, geometry, drag.from) {
+        } else if let Some(intent) = const_drop(ui, graph_ctx, geometry, drag.from) {
             out.push(intent);
         } else if dropped_on_empty_canvas(ui, geometry) {
             // Open the palette and remember the source; the wire resumes
@@ -240,7 +240,7 @@ impl ConnectionUI {
     /// pointer position. Drawn inside the inner canvas so coordinates
     /// share the pan/zoom transform with permanent connections.
     pub(super) fn draw_in_flight(&self, ui: &mut Ui, cx: CanvasCtx<'_>, canvas_origin: Vec2) {
-        let (graph_scope, geometry) = (cx.graph_scope(), cx.geometry());
+        let (graph_ctx, geometry) = (cx.graph_ctx(), cx.geometry());
         // Scoped: the preview belongs to the pane holding the wire's
         // start node. Unscoped, every *other* pane also drew it — from
         // its own `canvas_origin` and under its own transform, so the
@@ -255,7 +255,7 @@ impl ConnectionUI {
         };
         let Some(end) = state
             .drag
-            .free_end(ui, graph_scope, canvas_origin, &geometry.ports)
+            .free_end(ui, graph_ctx, canvas_origin, &geometry.ports)
         else {
             return;
         };
@@ -268,8 +268,8 @@ impl ConnectionUI {
         };
         // Tint the in-flight wire by the dragged port's data type, so the
         // preview already reads as the type being connected.
-        let theme = graph_scope.theme();
-        let drag_ty = port_data_type(graph_scope, start_port).unwrap_or_default();
+        let theme = graph_ctx.theme();
+        let drag_ty = port_data_type(graph_ctx, start_port).unwrap_or_default();
         let color = port_color(theme, &drag_ty, start_port.kind, false);
         Wire::data(p0, p3).add(ui, theme.connection_width, CurveBrush::Solid(color));
     }
@@ -283,12 +283,9 @@ impl ConnectionUI {
 /// module rather than [`ConnectionUI`] — the in-flight gesture that struct
 /// owns has no bearing on how the standing wires paint.
 pub(super) fn draw(ui: &mut Ui, pass: &mut WirePass<'_, '_>) {
-    let (theme, graph_scope, geometry) = (
-        pass.rcx.theme(),
-        pass.rcx.graph_scope(),
-        pass.rcx.geometry(),
-    );
-    for (consumer, producer) in graph_scope.connections() {
+    let (theme, graph_ctx, geometry) =
+        (pass.dcx.theme(), pass.dcx.graph_ctx(), pass.dcx.geometry());
+    for (consumer, producer) in graph_ctx.connections() {
         let src = PortRef {
             node_id: producer.node_id,
             kind: PortKind::Output,
@@ -304,7 +301,7 @@ pub(super) fn draw(ui: &mut Ui, pass: &mut WirePass<'_, '_>) {
         };
         let hover = geometry.ports.is_hovered(src) || geometry.ports.is_hovered(tgt);
         let wire = Wire::data(p0, p3);
-        if pass.draw_wire(ui, &wire, hover, || data_tint(theme, graph_scope, src, tgt)) {
+        if pass.draw_wire(ui, &wire, hover, || data_tint(theme, graph_ctx, src, tgt)) {
             pass.probe.mark_broken_input(consumer);
         }
     }
@@ -318,9 +315,9 @@ pub(super) fn draw(ui: &mut Ui, pass: &mut WirePass<'_, '_>) {
 /// the missing-input warning color instead. Nothing severs it — it lowers as
 /// unbound (drift tolerance) — so it wears the same warning the run will report
 /// on the port.
-fn data_tint(theme: &Theme, graph_scope: GraphScope<'_>, src: PortRef, tgt: PortRef) -> WireTint {
-    let src_ty = port_data_type(graph_scope, src).unwrap_or_default();
-    let tgt_ty = port_data_type(graph_scope, tgt).unwrap_or_default();
+fn data_tint(theme: &Theme, graph_ctx: GraphCtx<'_>, src: PortRef, tgt: PortRef) -> WireTint {
+    let src_ty = port_data_type(graph_ctx, src).unwrap_or_default();
+    let tgt_ty = port_data_type(graph_ctx, tgt).unwrap_or_default();
     if !tgt_ty.compatible_with(&src_ty) {
         return WireTint::flat(theme.colors.exec_missing_glow);
     }
@@ -338,27 +335,24 @@ fn data_tint(theme: &Theme, graph_scope: GraphScope<'_>, src: PortRef, tgt: Port
 /// iterator doesn't keep `Ui` borrowed): that chord is reserved for the
 /// preview-spawn drag (see `preview_drag.rs`), so the two controllers never
 /// both latch the same press.
-fn drag_candidates(
-    graph_scope: GraphScope<'_>,
-    preview_chord: bool,
-) -> impl Iterator<Item = PortRef> {
+fn drag_candidates(graph_ctx: GraphCtx<'_>, preview_chord: bool) -> impl Iterator<Item = PortRef> {
     let kinds: &'static [PortKind] = if preview_chord {
         &[PortKind::Input]
     } else {
         &[PortKind::Input, PortKind::Output]
     };
-    graph_scope
+    graph_ctx
         .nodes()
         .flat_map(|n| kinds.iter().flat_map(move |&kind| n.ports(kind)))
 }
 
 /// Whether `port` is a const-only input — one that rejects a wired binding, so a
 /// dragged wire must never snap to it or start a bind from it.
-fn input_const_only(graph_scope: GraphScope<'_>, port: PortRef) -> bool {
+fn input_const_only(graph_ctx: GraphCtx<'_>, port: PortRef) -> bool {
     if port.kind != PortKind::Input {
         return false;
     }
-    graph_scope
+    graph_ctx
         .node(port.node_id)
         .and_then(|n| n.input(port.port_idx))
         .is_some_and(|i| i.const_only())
@@ -373,36 +367,36 @@ fn input_const_only(graph_scope: GraphScope<'_>, port: PortRef) -> bool {
 fn scan_snap_target(
     geometry: &CanvasGeometry,
     ui: &mut Ui,
-    graph_scope: GraphScope<'_>,
+    graph_ctx: GraphCtx<'_>,
     start: PortRef,
 ) -> Option<PortRef> {
     let pointer = ui.pointer_pos()?;
     // A const-only input rejects wired bindings: a drag that starts on one never
     // snaps anywhere, so its release falls through to the set-const gesture.
-    if input_const_only(graph_scope, start) {
+    if input_const_only(graph_ctx, start) {
         return None;
     }
-    let candidates = graph_scope
+    let candidates = graph_ctx
         .nodes()
         .filter(|n| n.id != start.node_id)
         .flat_map(|n| n.ports(start.kind.opposite()))
         // A const-only input is never a valid wire target.
-        .filter(|&port| !input_const_only(graph_scope, port));
+        .filter(|&port| !input_const_only(graph_ctx, port));
     // Geometrically only one port sits under the pointer, so a port the
     // pointer is over but that `accepts_wire` rejects falls through to
     // `None` (drop) rather than snapping elsewhere.
     geometry
         .ports
         .first_containing(pointer, candidates)
-        .filter(|&port| accepts_wire(graph_scope, start, port))
+        .filter(|&port| accepts_wire(graph_ctx, start, port))
 }
 
 /// Whether a wire dragged from `start` may land on `port` — the two
 /// rejections that outlive the geometric hit test in [`scan_snap_target`].
-fn accepts_wire(graph_scope: GraphScope<'_>, start: PortRef, port: PortRef) -> bool {
+fn accepts_wire(graph_ctx: GraphCtx<'_>, start: PortRef, port: PortRef) -> bool {
     let compatible = match (
-        port_data_type(graph_scope, start),
-        port_data_type(graph_scope, port),
+        port_data_type(graph_ctx, start),
+        port_data_type(graph_ctx, port),
     ) {
         (Some(a), Some(b)) => a.compatible_with(&b),
         // Missing type info (port not in the scene this frame) — don't
@@ -419,7 +413,7 @@ fn accepts_wire(graph_scope: GraphScope<'_>, start: PortRef, port: PortRef) -> b
         PortKind::Output => (start.node_id, port.node_id),
         PortKind::Input => (port.node_id, start.node_id),
     };
-    compatible && !graph_scope.body().produces_cycle(producer, consumer)
+    compatible && !graph_ctx.body().produces_cycle(producer, consumer)
 }
 
 /// "Set const" gesture: an input-port drag released over its own
@@ -430,7 +424,7 @@ fn accepts_wire(graph_scope: GraphScope<'_>, start: PortRef, port: PortRef) -> b
 /// or the input is already a const (don't clobber the value).
 fn const_drop(
     ui: &mut Ui,
-    graph_scope: GraphScope<'_>,
+    graph_ctx: GraphCtx<'_>,
     geometry: &CanvasGeometry,
     start: PortRef,
 ) -> Option<GraphIntent> {
@@ -442,7 +436,7 @@ fn const_drop(
         return None;
     }
     // Don't overwrite an existing const value.
-    let input = graph_scope.node(start.node_id)?.input(start.port_idx)?;
+    let input = graph_ctx.node(start.node_id)?.input(start.port_idx)?;
     if matches!(input.binding(), Some(Binding::Const(_))) {
         return None;
     }
@@ -468,8 +462,8 @@ fn dropped_on_empty_canvas(ui: &mut Ui, geometry: &CanvasGeometry) -> bool {
 
 /// The declared [`DataType`] of `port` in the current scene, or `None`
 /// if the port isn't present (e.g. mid-rebuild).
-fn port_data_type(graph_scope: GraphScope<'_>, port: PortRef) -> Option<DataType> {
-    let node = graph_scope.node(port.node_id)?;
+fn port_data_type(graph_ctx: GraphCtx<'_>, port: PortRef) -> Option<DataType> {
+    let node = graph_ctx.node(port.node_id)?;
     let ty = match port.kind {
         PortKind::Input => node.input(port.port_idx)?.ty().clone(),
         PortKind::Output => node.output(port.port_idx)?.ty().clone(),

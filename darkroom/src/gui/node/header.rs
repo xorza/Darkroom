@@ -22,7 +22,7 @@ use crate::core::edit::intent::sink::Intents;
 use crate::core::edit::intent::types::{GraphIntent, NodeProperty};
 use crate::gui::canvas::inspector::{InspectMode, inspect_badge_wid};
 use crate::gui::format::fmt_elapsed;
-use crate::gui::graph_scope::node_scope::NodeScope;
+use crate::gui::graph_ctx::node_scope::NodeScope;
 use crate::gui::node::port_color::event_color;
 use crate::gui::node::port_row::glyph::{EVENT_TRIANGLE_RADIUS, PORT_HIT_SCALE};
 use crate::gui::node::{NodeCtx, click_intents, exec_color, node_rename_wid, node_wid};
@@ -420,7 +420,7 @@ fn title(ui: &mut Ui, ncx: NodeCtx<'_>, out: &mut Intents) {
         })
         .show(ui);
     if ev.clicked {
-        click_intents(shift, ncx.graph_scope(), node.id, out);
+        click_intents(shift, ncx.graph_ctx(), node.id, out);
     }
     if let Some(to) = ev.committed {
         out.push(GraphIntent::RenameNode {

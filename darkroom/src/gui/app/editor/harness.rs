@@ -26,7 +26,7 @@ use crate::core::document::open_document::OpenDocument;
 use crate::core::io::preferences::Preferences;
 use crate::gui::app::commands::AppCommand;
 use crate::gui::app::editor::Editor;
-use crate::gui::app::{AppContext, StatusInputs};
+use crate::gui::app::{AppCtx, StatusInputs};
 use crate::gui::run_state::RunState;
 use crate::gui::theme::Theme;
 
@@ -88,7 +88,7 @@ impl EditorHarness {
             preferences,
             process_memory,
         } = self;
-        let ctx = AppContext::new(
+        let ctx = AppCtx::new(
             theme,
             library,
             run_state,

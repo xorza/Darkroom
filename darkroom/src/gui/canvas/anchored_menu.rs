@@ -113,10 +113,7 @@ impl NodeContextMenu {
     /// widget's draw guard; all that is left here is confirming the node still
     /// belongs to `cx`'s pane — the sweep ran against last frame's projection.
     pub(super) fn latch(&mut self, ui: &mut Ui, cx: CanvasCtx<'_>) -> Option<NodeId> {
-        let clicked = cx
-            .hits()
-            .menu()
-            .filter(|&id| cx.graph_scope().contains(id))?;
+        let clicked = cx.hits().menu().filter(|&id| cx.graph_ctx().contains(id))?;
         // A press that opened the menu has a pointer position by construction;
         // the `?` is only for the frames where the pointer left the window
         // between the click and this read.

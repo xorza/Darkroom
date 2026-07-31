@@ -45,7 +45,7 @@ pub(crate) struct PathPickRequest {
 /// out here.
 pub(crate) fn emit_path_picks(cx: CanvasCtx<'_>) -> Option<PathPickRequest> {
     let port = cx.hits().clicked_const_editor()?;
-    let input = cx.graph_scope().node(port.node_id)?.input(port.port_idx)?;
+    let input = cx.graph_ctx().node(port.node_id)?.input(port.port_idx)?;
     if !matches!(
         input.binding(),
         Some(Binding::Const(
@@ -76,7 +76,7 @@ pub(crate) fn emit_port_dblclicks(cx: CanvasCtx<'_>, out: &mut Intents) {
     let Some(port) = cx.hits().double_clicked_port() else {
         return;
     };
-    let Some(node) = cx.graph_scope().node(port.node_id) else {
+    let Some(node) = cx.graph_ctx().node(port.node_id) else {
         return;
     };
     match port.kind {
@@ -101,7 +101,7 @@ pub(crate) fn emit_port_dblclicks(cx: CanvasCtx<'_>, out: &mut Intents) {
         }
         // An output may feed many inputs — clear each consumer.
         PortKind::Output => {
-            for (consumer, producer) in cx.graph_scope().connections() {
+            for (consumer, producer) in cx.graph_ctx().connections() {
                 if producer.node_id == port.node_id && producer.port_idx == port.port_idx {
                     out.push(set_input(
                         PortRef {

@@ -9,9 +9,9 @@ use scenarium::{
 use crate::core::document::{Document, GraphView, PortKind, PortRef};
 use crate::core::edit::intent::sink::{Intents, Queued};
 use crate::core::edit::intent::types::GraphIntent;
-use crate::gui::app::{AppContext, StatusInputs};
+use crate::gui::app::{AppCtx, StatusInputs};
 use crate::gui::canvas::GraphUI;
-use crate::gui::graph_scope::GraphScope;
+use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::node::node_widget_id;
 use crate::gui::node::port_row::port_circle_wid;
 use crate::gui::run_state::RunState;
@@ -48,26 +48,25 @@ fn wildcard_library() -> Library {
     library
 }
 
-/// The chain's root for a canvas test: the theme, library and run a scope
+/// The chain's root for a canvas test: the theme, library and run a context
 /// resolves through, with the status-bar inputs at their empty defaults —
 /// nothing under the canvas reads them.
-fn app<'a>(theme: &'a Theme, library: &'a Library, run_state: &'a RunState) -> AppContext<'a> {
-    AppContext::new(theme, library, run_state, StatusInputs::default())
+fn app<'a>(theme: &'a Theme, library: &'a Library, run_state: &'a RunState) -> AppCtx<'a> {
+    AppCtx::new(theme, library, run_state, StatusInputs::default())
 }
 
-/// The scope a test reads a canvas back through, over the same document the
+/// The context a test reads a canvas back through, over the same document the
 /// canvas drew.
 ///
 /// `output_types` is scratch the composition fills — a fresh one per call is
 /// correct, since several tests below edit their document between frames and
-/// the scope resolves against whichever one it is handed.
-fn scope<'a>(
-    app: AppContext<'a>,
+/// the context resolves against whichever one it is handed.
+fn graph_ctx_for<'a>(
+    app: AppCtx<'a>,
     doc: &'a Document,
     output_types: &'a mut OutputTypes,
-) -> GraphScope<'a> {
-    GraphScope::for_document(app, doc, output_types)
-        .expect("the fixture's document shows the graph")
+) -> GraphCtx<'a> {
+    GraphCtx::for_document(app, doc, output_types).expect("the fixture's document shows the graph")
 }
 
 /// Spread the placements so no node lands off-viewport and gets culled —
@@ -122,13 +121,13 @@ fn a_culled_nodes_ports_stay_anchored_until_its_node_leaves_the_document() {
         let ctx = app(&theme, &library, &run_state);
         let mut intents = Intents::default();
         let mut types = OutputTypes::default();
-        let graph_scope = scope(ctx, doc, &mut types);
-        graph_ui.prepass(ui, graph_scope, &mut intents);
+        let graph_ctx = graph_ctx_for(ctx, doc, &mut types);
+        graph_ui.prepass(ui, graph_ctx, &mut intents);
         Panel::vstack()
             .id_salt("pane")
             .size((Sizing::FILL, Sizing::FILL))
             .show(ui, |ui| {
-                graph_ui.draw(ui, graph_scope, &mut intents);
+                graph_ui.draw(ui, graph_ctx, &mut intents);
             });
     };
     let frame = |harness: &mut UiHarness, graph_ui: &mut GraphUI, doc: &_| {
@@ -173,7 +172,7 @@ fn a_culled_nodes_ports_stay_anchored_until_its_node_leaves_the_document() {
     // The node the document keeps holds its cached size; the other one is
     // still cached too, because being off-screen is not being deleted.
     let mut live_types = OutputTypes::default();
-    let live = scope(app(&theme, &library, &run_state), &doc, &mut live_types);
+    let live = graph_ctx_for(app(&theme, &library, &run_state), &doc, &mut live_types);
     for id in [stays, leaves] {
         assert!(
             graph_ui
@@ -248,13 +247,13 @@ fn the_palette_sizes_its_results_area_from_the_search_row_it_actually_has() {
             let ctx = app(theme, &library, &run_state);
             let mut intents = Intents::default();
             let mut types = OutputTypes::default();
-            let graph_scope = scope(ctx, &doc, &mut types);
-            graph_ui.prepass(ui, graph_scope, &mut intents);
+            let graph_ctx = graph_ctx_for(ctx, &doc, &mut types);
+            graph_ui.prepass(ui, graph_ctx, &mut intents);
             Panel::vstack()
                 .id_salt("pane")
                 .size((Sizing::FILL, Sizing::FILL))
                 .show(ui, |ui| {
-                    graph_ui.draw(ui, graph_scope, &mut intents);
+                    graph_ui.draw(ui, graph_ctx, &mut intents);
                 });
         };
 
@@ -378,14 +377,14 @@ fn escape_cancels_a_rubber_band_and_leaves_no_residue() {
         let ctx = app(&theme, &library, &run_state);
         let mut intents = Intents::default();
         let mut types = OutputTypes::default();
-        let graph_scope = scope(ctx, &doc, &mut types);
-        graph_ui.scan_hits(ui, Some(graph_scope));
-        graph_ui.prepass(ui, graph_scope, &mut intents);
+        let graph_ctx = graph_ctx_for(ctx, &doc, &mut types);
+        graph_ui.scan_hits(ui, Some(graph_ctx));
+        graph_ui.prepass(ui, graph_ctx, &mut intents);
         Panel::vstack()
             .id_salt("pane")
             .size((Sizing::FILL, Sizing::FILL))
             .show(ui, |ui| {
-                graph_ui.draw(ui, graph_scope, &mut intents);
+                graph_ui.draw(ui, graph_ctx, &mut intents);
             });
         intents.drain().collect::<Vec<_>>()
     };
@@ -485,13 +484,13 @@ fn the_breaker_cuts_a_node_at_its_current_position_not_its_last_painted_one() {
         let ctx = app(&theme, &library, &run_state);
         let mut intents = Intents::default();
         let mut types = OutputTypes::default();
-        let graph_scope = scope(ctx, doc, &mut types);
-        graph_ui.prepass(ui, graph_scope, &mut intents);
+        let graph_ctx = graph_ctx_for(ctx, doc, &mut types);
+        graph_ui.prepass(ui, graph_ctx, &mut intents);
         Panel::vstack()
             .id_salt("pane")
             .size((Sizing::FILL, Sizing::FILL))
             .show(ui, |ui| {
-                graph_ui.draw(ui, graph_scope, &mut intents);
+                graph_ui.draw(ui, graph_ctx, &mut intents);
             });
         intents.drain().collect::<Vec<_>>()
     };
@@ -568,14 +567,14 @@ fn a_node_body_right_click_selects_the_node_it_landed_on() {
         let mut intents = Intents::default();
         // Navigation phase first — the sweep runs before the tab set settles.
         let mut types = OutputTypes::default();
-        let graph_scope = scope(ctx, &doc, &mut types);
-        graph_ui.scan_hits(ui, Some(graph_scope));
-        graph_ui.prepass(ui, graph_scope, &mut intents);
+        let graph_ctx = graph_ctx_for(ctx, &doc, &mut types);
+        graph_ui.scan_hits(ui, Some(graph_ctx));
+        graph_ui.prepass(ui, graph_ctx, &mut intents);
         Panel::vstack()
             .id_salt("pane")
             .size((Sizing::FILL, Sizing::FILL))
             .show(ui, |ui| {
-                graph_ui.draw(ui, graph_scope, &mut intents);
+                graph_ui.draw(ui, graph_ctx, &mut intents);
             });
         intents.drain().collect::<Vec<_>>()
     };
@@ -631,14 +630,14 @@ fn a_body_drag_moves_the_node_by_the_pointers_travel() {
         let ctx = app(&theme, &library, &run_state);
         let mut intents = Intents::default();
         let mut types = OutputTypes::default();
-        let graph_scope = scope(ctx, &doc, &mut types);
-        graph_ui.scan_hits(ui, Some(graph_scope));
-        graph_ui.prepass(ui, graph_scope, &mut intents);
+        let graph_ctx = graph_ctx_for(ctx, &doc, &mut types);
+        graph_ui.scan_hits(ui, Some(graph_ctx));
+        graph_ui.prepass(ui, graph_ctx, &mut intents);
         Panel::vstack()
             .id_salt("pane")
             .size((Sizing::FILL, Sizing::FILL))
             .show(ui, |ui| {
-                graph_ui.draw(ui, graph_scope, &mut intents);
+                graph_ui.draw(ui, graph_ctx, &mut intents);
             });
         intents.drain().collect::<Vec<_>>()
     };
@@ -721,13 +720,13 @@ fn a_port_drag_released_over_a_compatible_port_commits_the_binding() {
         let ctx = app(&theme, &library, &run_state);
         let mut intents = Intents::default();
         let mut types = OutputTypes::default();
-        let graph_scope = scope(ctx, doc, &mut types);
-        graph_ui.prepass(ui, graph_scope, &mut intents);
+        let graph_ctx = graph_ctx_for(ctx, doc, &mut types);
+        graph_ui.prepass(ui, graph_ctx, &mut intents);
         Panel::vstack()
             .id_salt("pane")
             .size((Sizing::FILL, Sizing::FILL))
             .show(ui, |ui| {
-                graph_ui.draw(ui, graph_scope, &mut intents);
+                graph_ui.draw(ui, graph_ctx, &mut intents);
             });
         intents.drain().collect::<Vec<_>>()
     };
@@ -861,13 +860,13 @@ fn ctrl_drag_off_an_output_spawns_a_preview_wired_to_it() {
         let ctx = app(&theme, &library, &run_state);
         let mut intents = Intents::default();
         let mut types = OutputTypes::default();
-        let graph_scope = scope(ctx, &doc, &mut types);
-        graph_ui.prepass(ui, graph_scope, &mut intents);
+        let graph_ctx = graph_ctx_for(ctx, &doc, &mut types);
+        graph_ui.prepass(ui, graph_ctx, &mut intents);
         Panel::vstack()
             .id_salt("pane")
             .size((Sizing::FILL, Sizing::FILL))
             .show(ui, |ui| {
-                graph_ui.draw(ui, graph_scope, &mut intents);
+                graph_ui.draw(ui, graph_ctx, &mut intents);
             });
         intents.drain().collect::<Vec<_>>()
     };
@@ -935,7 +934,7 @@ fn ctrl_drag_off_an_output_spawns_a_preview_wired_to_it() {
 /// The canvas holds no derived state about the graph, so there is no
 /// invalidation step between wiring a port and the canvas reporting its new
 /// type — which is the whole reason the wildcard resolution is safe to do per
-/// read. Wired through the same `scope` the record passes build.
+/// read. Wired through the same context the record passes build.
 #[test]
 fn a_wire_edit_reaches_the_next_read_with_nothing_announced() {
     let library = wildcard_library();
@@ -953,7 +952,7 @@ fn a_wire_edit_reaches_the_next_read_with_nothing_announced() {
     let run_state = RunState::default();
     let resolved_output = |doc: &Document| {
         let mut types = OutputTypes::default();
-        scope(app(&theme, &library, &run_state), doc, &mut types)
+        graph_ctx_for(app(&theme, &library, &run_state), doc, &mut types)
             .node(consumer)
             .expect("the passthrough resolves")
             .output(0)
