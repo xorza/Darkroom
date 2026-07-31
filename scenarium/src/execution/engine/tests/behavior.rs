@@ -172,7 +172,7 @@ async fn lambda_cancelled_error_maps_to_error_cancelled() {
 
 #[tokio::test]
 async fn impure_node_always_invoked() {
-    let mut e = TestEngine::over(TestGraph::sample_with(TestFuncHooks::default()));
+    let mut e = TestEngine::over(TestGraph::sample());
     e.edit(|g| g.edit_func("get_b", |func| func.behavior = FuncBehavior::Impure));
 
     // Even holding a cached output, an impure node still wants to execute.

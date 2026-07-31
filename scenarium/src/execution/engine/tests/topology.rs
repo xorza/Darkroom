@@ -4,11 +4,7 @@ use ::common::FloatExt;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn removing_node_rebuilds_id_keyed_edges() {
-    let mut e = TestEngine::over(TestGraph::sample_with(TestFuncHooks {
-        get_a: Arc::new(|| Ok(2)),
-        get_b: Arc::new(|| 5),
-        print: Arc::new(|_| {}),
-    }));
+    let mut e = TestEngine::over(TestGraph::sample_values(2, 5));
     assert_eq!(e.engine.compiled().e_nodes.len(), 5);
 
     // Remove get_b — a middle node feeding sum[1] and mult[1], both optional.

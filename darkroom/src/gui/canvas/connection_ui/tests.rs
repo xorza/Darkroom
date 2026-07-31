@@ -1,6 +1,6 @@
 use palantir::internals::UiHarness;
-use scenarium::testing::{TestFuncHooks, test_func_lib};
-use scenarium::{Binding, InputPort, Library, Node, NodeId, NodeKind, OutputTypes};
+use scenarium::testing::graph::TestGraph;
+use scenarium::{Library, NodeId, OutputTypes};
 
 use super::*;
 use crate::core::document::Document;
@@ -32,20 +32,20 @@ impl Fixture {
     }
 }
 
-/// Two `mult` nodes wired producer → consumer — enough graph for a wire to be
-/// in flight over, and enough wiring for the snap filter to have a cycle
-/// question to answer.
+/// Two two-in/one-out nodes wired producer → consumer — enough graph for a
+/// wire to be in flight over, and enough wiring for the snap filter to have a
+/// cycle question to answer. Both share one declaration, so a port index means
+/// the same thing on either end.
 fn fixture() -> Fixture {
-    let library = test_func_lib(TestFuncHooks::default());
-    let mult_id = library.by_name("mult").unwrap().id;
-    let mut graph = scenarium::Graph::default();
-    let producer = graph.add(Node::new(NodeKind::Func(mult_id)));
-    let consumer = graph.add(Node::new(NodeKind::Func(mult_id)));
-    graph.set_input_binding(InputPort::new(consumer, 0), Binding::bind(producer, 0));
+    let mut g = TestGraph::new();
+    g.add("producer", |n| n.mult());
+    g.instance("consumer", "producer");
+    g.wire("producer", 0, "consumer", 0);
+    let (producer, consumer) = (g.id("producer"), g.id("consumer"));
 
     Fixture {
-        doc: Document::from(graph),
-        library,
+        doc: Document::from(g.graph),
+        library: g.library,
         run_state: RunState::default(),
         output_types: OutputTypes::default(),
         producer,

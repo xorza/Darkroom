@@ -10,11 +10,12 @@ fn nonexistent_node_returns_none() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn with_const_bindings() {
-    let mut e = TestEngine::over(TestGraph::sample_with(TestFuncHooks {
-        get_a: Arc::new(|| unreachable!("const-fed: the sources are never reached")),
-        get_b: Arc::new(|| unreachable!("const-fed: the sources are never reached")),
-        print: Arc::new(|_| {}),
-    }));
+    let mut g = TestGraph::sample();
+    // Const-fed below, so the sources are never reached.
+    g.never("get_a");
+    g.never("get_b");
+
+    let mut e = TestEngine::over(g);
     e.edit(|g| {
         g.constant("mult", 0, 3i64);
         g.constant("mult", 1, 5i64);
@@ -30,11 +31,7 @@ async fn with_const_bindings() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn with_bound_outputs() {
-    let mut e = TestEngine::over(TestGraph::sample_with(TestFuncHooks {
-        get_a: Arc::new(|| Ok(2)),
-        get_b: Arc::new(|| 5),
-        print: Arc::new(|_| {}),
-    }));
+    let mut e = TestEngine::over(TestGraph::sample_values(2, 5));
 
     e.run_sinks().await;
 

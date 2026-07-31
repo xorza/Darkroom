@@ -30,11 +30,12 @@ async fn const_binding_tracks_changes() {
 /// `unreachable!` so any walk past the consts fails loudly.
 #[tokio::test(flavor = "multi_thread")]
 async fn const_binding_invokes_only_once() {
-    let mut e = TestEngine::over(TestGraph::sample_with(TestFuncHooks {
-        get_a: Arc::new(|| unreachable!("a const-fed graph never reaches its sources")),
-        get_b: Arc::new(|| unreachable!("a const-fed graph never reaches its sources")),
-        print: Arc::new(|_| {}),
-    }));
+    let mut g = TestGraph::sample();
+    // A const-fed graph never reaches its sources.
+    g.never("get_a");
+    g.never("get_b");
+
+    let mut e = TestEngine::over(g);
     e.edit(|g| {
         g.constant("mult", 0, 3i64);
         g.constant("mult", 1, 5i64);

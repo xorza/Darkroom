@@ -2,16 +2,14 @@
 //! `internals` dev feature.
 //!
 //! [`graph`] is the harness: a graph and its library built together and
-//! addressed by name, which is what an in-crate fixture reaches for. [`calls`]
-//! is the counter its counted bodies are built on.
+//! addressed by name, which is what a fixture reaches for. [`calls`] is the
+//! counter its counted bodies are built on.
 //!
-//! What is left in this file is the **published** pair — a five-func library
-//! and the graph wiring it, plus [`with_stub_lambda`] for a declaration a
-//! caller states itself. These are what a downstream editor's tests build on,
-//! since [`TestGraph`](graph::TestGraph)'s own compile bridge answers in
-//! crate-private types and cannot leave the crate.
-//! [`TestGraph::sample`](graph::TestGraph::sample) wraps the pair so an
-//! in-crate test gets the same five nodes addressed by name.
+//! What is left in this file is [`with_stub_lambda`], the one thing the
+//! harness deliberately cannot supply: [`NodeSpec`](graph::NodeSpec) names
+//! ports `in0`/`out0` by position, so a test about how an editor *renders* a
+//! port has to state its own [`Func`] — and `Library::add` rejects one with no
+//! implementation.
 
 pub mod calls;
 #[cfg(test)]
@@ -24,213 +22,10 @@ pub(crate) mod program;
 #[cfg(test)]
 pub(crate) mod worker;
 
-use std::sync::Arc;
-
-use crate::DataType;
 use crate::async_lambda;
-use crate::graph::Binding;
-use crate::graph::Graph;
-use crate::graph::func::error::InvokeResult;
-use crate::graph::func::lambda::Invocation;
-use crate::graph::func::{Func, FuncInput, FuncOutput};
-use crate::graph::identity::InputPort;
-use crate::graph::identity::NodeId;
-use crate::graph::node::{CacheMode, Node};
-use crate::library::Library;
+use crate::graph::func::Func;
 
-pub struct TestFuncHooks {
-    pub get_a: Arc<dyn Fn() -> InvokeResult<i64> + Send + Sync + 'static>,
-    pub get_b: Arc<dyn Fn() -> i64 + Send + Sync + 'static>,
-    pub print: Arc<dyn Fn(i64) + Send + Sync + 'static>,
-}
-
-impl std::fmt::Debug for TestFuncHooks {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("TestFuncHooks").finish_non_exhaustive()
-    }
-}
-
-impl Default for TestFuncHooks {
-    fn default() -> Self {
-        Self {
-            get_a: Arc::new(|| panic!("Unexpected call to get_a")),
-            get_b: Arc::new(|| panic!("Unexpected call to get_b")),
-            print: Arc::new(|_| panic!("Unexpected call to print")),
-        }
-    }
-}
-
+/// `func` with a body that does nothing, so a library will hold it.
 pub fn with_stub_lambda(func: Func) -> Func {
     func.lambda(async_lambda!(|_| { Ok(()) }))
-}
-
-pub fn test_func_lib(hooks: TestFuncHooks) -> Library {
-    let TestFuncHooks {
-        get_a,
-        get_b,
-        print,
-    } = hooks;
-
-    // Every fixture func opts into `Ram` caching (the pre-`None`-default behavior)
-    // so the execution tests built on this library exercise cross-run cache reuse;
-    // a plain `Func` now defaults to `CacheMode::None`.
-    [
-        Func::new("432b9bf1-f478-476c-a9c9-9a6e190124fc", "mult")
-            .description("Multiplies two integer values (A * B)")
-            .category("Debug")
-            .default_cache_mode(CacheMode::Ram)
-            .pure()
-            .input(FuncInput::required("A", DataType::Int))
-            .input(FuncInput::optional("B", DataType::Int))
-            .output(FuncOutput::new("Prod", DataType::Int))
-            .lambda(async_lambda!(move |Invocation {
-                                            state,
-                                            inputs,
-                                            outputs,
-                                            ..
-                                        }| {
-                assert_eq!(inputs.len(), 2);
-                assert_eq!(outputs.len(), 1);
-
-                let a: i64 = inputs[0].as_i64().unwrap();
-                let b: i64 = inputs[1].as_i64().unwrap_or(1);
-                outputs[0] = (a * b).into();
-                state.set(a * b);
-
-                Ok(())
-            })),
-        Func::new("d4d27137-5a14-437a-8bb5-b2f7be0941a2", "get_a")
-            .description("Returns the value from test hook A")
-            .category("Debug")
-            .default_cache_mode(CacheMode::Ram)
-            .pure()
-            .output(FuncOutput::new("Int32 Value", DataType::Int))
-            .lambda(async_lambda!(
-                move |Invocation { outputs, .. }| { get_a = Arc::clone(&get_a) } => {
-                    assert_eq!(outputs.len(), 1);
-                    outputs[0] = (get_a()? as f64).into();
-                    Ok(())
-                }
-            )),
-        Func::new("a937baff-822d-48fd-9154-58751539b59b", "get_b")
-            .description("Returns the value from test hook B")
-            .category("Debug")
-            .default_cache_mode(CacheMode::Ram)
-            .pure()
-            .output(FuncOutput::new("Int32 Value", DataType::Int))
-            .lambda(async_lambda!(
-                move |Invocation { outputs, .. }| { get_b = Arc::clone(&get_b) } => {
-                    assert_eq!(outputs.len(), 1);
-                    outputs[0] = (get_b() as f64).into();
-                    Ok(())
-                }
-            )),
-        Func::new("2d3b389d-7b58-44d9-b3d1-a595765b21a5", "sum")
-            .description("Adds two integer values (A + B)")
-            .category("Debug")
-            .default_cache_mode(CacheMode::Ram)
-            .pure()
-            .input(FuncInput::required("A", DataType::Int))
-            .input(FuncInput::optional("B", DataType::Int))
-            .output(FuncOutput::new("Sum", DataType::Int))
-            .lambda(async_lambda!(move |Invocation {
-                                            state,
-                                            inputs,
-                                            outputs,
-                                            ..
-                                        }| {
-                assert_eq!(inputs.len(), 2);
-                assert_eq!(outputs.len(), 1);
-                let a: i64 = inputs[0].as_i64().unwrap();
-                let b: i64 = inputs[1].as_i64().unwrap_or_default();
-                state.set(a + b);
-                outputs[0] = (a + b).into();
-                Ok(())
-            })),
-        Func::new("f22cd316-1cdf-4a80-b86c-1277acd1408a", "Print")
-            .description("Outputs an integer value via the test print hook")
-            .category("Debug")
-            .default_cache_mode(CacheMode::Ram)
-            .sink()
-            .input(FuncInput::required("message", DataType::Int))
-            .lambda(async_lambda!(
-                move |Invocation { inputs, .. }| { print = Arc::clone(&print) } => {
-                    assert_eq!(inputs.len(), 1);
-                    print(inputs[0].as_i64().unwrap());
-                    Ok(())
-                }
-            )),
-    ]
-    .into()
-}
-
-pub fn test_graph() -> Graph {
-    let library = test_func_lib(TestFuncHooks::default());
-
-    let mut graph = Graph::default();
-
-    let mult_node_id: NodeId = "579ae1d6-10a3-4906-8948-135cb7d7508b".into();
-    let get_a_node_id: NodeId = "5f110618-8faa-4629-8f5d-473c236de7d1".into();
-    let get_b_node_id: NodeId = "6fc6b533-c375-451c-ba3a-a14ea217cb30".into();
-    let sum_node_id: NodeId = "999c4d37-e0eb-4856-be3f-ad2090c84d8c".into();
-    let print_node_id: NodeId = "b88ab7e2-17b7-46cb-bc8e-b428bb45141e".into();
-
-    let get_a_func = library.by_name("get_a").unwrap();
-    let get_b_func = library.by_name("get_b").unwrap();
-    let sum_func = library.by_name("sum").unwrap();
-    let mult_func = library.by_name("mult").unwrap();
-    let print_func = library.by_name("Print").unwrap();
-
-    let get_a_node: Node = get_a_func.into();
-    graph.insert(get_a_node_id, get_a_node);
-
-    let get_b_node: Node = get_b_func.into();
-    graph.insert(get_b_node_id, get_b_node);
-
-    let sum_node: Node = sum_func.into();
-    graph.insert(sum_node_id, sum_node);
-
-    let mult_node: Node = mult_func.into();
-    graph.insert(mult_node_id, mult_node);
-
-    let print_node: Node = print_func.into();
-    graph.insert(print_node_id, print_node);
-
-    graph.set_input_binding(
-        InputPort::new(sum_node_id, 0),
-        Binding::bind(get_a_node_id, 0),
-    );
-    graph.set_input_binding(
-        InputPort::new(sum_node_id, 1),
-        Binding::bind(get_b_node_id, 0),
-    );
-    graph.set_input_binding(
-        InputPort::new(mult_node_id, 0),
-        Binding::bind(sum_node_id, 0),
-    );
-    graph.set_input_binding(
-        InputPort::new(mult_node_id, 1),
-        Binding::bind(get_b_node_id, 0),
-    );
-    graph.set_input_binding(
-        InputPort::new(print_node_id, 0),
-        Binding::bind(mult_node_id, 0),
-    );
-
-    graph.validate().expect("the fixture graph is well formed");
-
-    graph
-}
-
-#[cfg(test)]
-mod tests {
-    use super::TestFuncHooks;
-
-    #[test]
-    fn test_func_hooks_debug_omits_opaque_callbacks() {
-        assert_eq!(
-            format!("{:?}", TestFuncHooks::default()),
-            "TestFuncHooks { .. }",
-        );
-    }
 }

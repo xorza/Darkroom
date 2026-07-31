@@ -2,11 +2,9 @@ use super::*;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn node_error_propagates_to_dependents() {
-    let mut e = TestEngine::over(TestGraph::sample_with(TestFuncHooks {
-        get_a: Arc::new(|| Err(internals::failure("Intentional failure in get_a"))),
-        get_b: Arc::new(|| 42),
-        print: Arc::new(|_| {}),
-    }));
+    let mut g = TestGraph::sample_values(1, 42);
+    g.fails("get_a", "Intentional failure in get_a");
+    let mut e = TestEngine::over(g);
 
     let run = e.run_sinks().await;
 
