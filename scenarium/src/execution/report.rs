@@ -176,14 +176,6 @@ pub(crate) mod internals {
                 _ => None,
             }
         }
-
-        /// Every node the run reported a failure for.
-        pub(crate) fn errored_nodes(&self) -> impl Iterator<Item = NodeId> + '_ {
-            self.nodes
-                .iter()
-                .filter(|node| matches!(node.status, Some(NodeExecutionStatus::Errored { .. })))
-                .map(|node| node.node_id)
-        }
     }
 
     use crate::execution::report::{RunProgress, RunReporter};

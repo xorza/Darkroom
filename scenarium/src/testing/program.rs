@@ -12,26 +12,37 @@
 //! `fn nx` copies have to agree on, and a binding is asked of the node it
 //! points at ([`Placed::out`]).
 //!
+//! The two terminals are [`Sweep`] — what the cache-aware pass makes of a
+//! schedule — and [`Runs`], the executor over one. A sweep asks what the
+//! schedule *became*; a run asks what walking it *did*.
+//!
 //! The compiler's own tests keep using the real [`Compiler`](crate::Compiler):
 //! this is for programs a compile *wouldn't* produce — a corrupt artifact a
 //! validator must reject, or a topology that would take a library to express.
 
+use ::common::CancelToken;
+
+use crate::RamUsage;
+use crate::common::column::Column;
 use crate::execution::cache::runtime::RuntimeCache;
 use crate::execution::cache::slot::OutputSnapshot;
 use crate::execution::compile::compiled_graph::{
     CompiledGraph, ExecutionBinding, ExecutionEvent, ExecutionInput, ExecutionNode,
 };
-use crate::execution::error::Result;
+use crate::execution::error::{Result, RunError};
+use crate::execution::executor::{Executor, RunRequest};
 use crate::execution::identity::{NodeIdx, OutputAddr};
+use crate::execution::report::ExecutionOutcome;
+use crate::execution::report::internals::DiscardedReports;
 use crate::execution::schedule::planner::Planner;
-use crate::execution::schedule::{NodeState, RootFlags, RunSchedule};
+use crate::execution::schedule::{NodeState, ResolvedOutputs, RootFlags, RunSchedule};
 use crate::execution::seeds::RunSeeds;
 use crate::graph::func::FuncBehavior;
 use crate::graph::func::event::EventLambda;
 use crate::graph::func::lambda::{FuncLambda, OutputDemand};
 use crate::graph::identity::{FuncId, NodeId};
 use crate::graph::node::CacheMode;
-use crate::{DataType, DynamicValue, async_lambda};
+use crate::{DataType, DynamicValue, StaticValue, async_lambda};
 
 /// Where one node landed: the stable id a host names it by, and the dense
 /// index every per-run column is keyed on.
@@ -47,10 +58,16 @@ pub(crate) struct Placed {
 impl Placed {
     /// A binding reading this node's output `port`.
     pub(crate) fn out(self, port: usize) -> ExecutionBinding {
-        ExecutionBinding::Bind(OutputAddr {
+        ExecutionBinding::Bind(self.addr(port))
+    }
+
+    /// This node's output `port` as the interned address a binding carries —
+    /// for a fixture that *names* a port rather than reads through one.
+    pub(crate) fn addr(self, port: usize) -> OutputAddr {
+        OutputAddr {
             node_idx: self.node_idx,
             port_idx: port as u32,
-        })
+        }
     }
 }
 
@@ -122,6 +139,40 @@ impl ProgramBuilder {
             cached: Vec::new(),
         }
     }
+
+    /// Stand up the executor over this program — see [`Runs`].
+    pub(crate) fn runs(&self) -> Runs<'_> {
+        Runs::new(self)
+    }
+
+    /// The planner's output, stated rather than provoked: every placed node in
+    /// `process_order`, each verdicted `initial`, and no roots yet.
+    ///
+    /// The one place the "a hand-built program's nodes run in placement order"
+    /// convention lives, so the sweep and the run loop cannot disagree about
+    /// what a fixture's schedule looks like.
+    fn staged(&self, initial: NodeState) -> RunSchedule {
+        let mut schedule = RunSchedule::default();
+        schedule.reset_for_program(&self.program);
+        schedule
+            .process_order
+            .extend(self.placed.iter().map(|placed| placed.node_idx));
+        schedule.states.reset(self.program.e_nodes.len(), initial);
+        schedule
+    }
+
+    /// [`staged`](Self::staged) at the planner's positive verdict with every
+    /// node a plain root — the structural plan a whole-program run starts from.
+    ///
+    /// For a fixture driving a pass *below* the planner, where arranging a
+    /// graph that would provoke this plan says nothing the test is about.
+    pub(crate) fn planned(&self) -> RunSchedule {
+        let mut schedule = self.staged(NodeState::Cut);
+        for placed in &self.placed {
+            schedule.add_root(placed.node_idx, RootFlags::PLAIN);
+        }
+        schedule
+    }
 }
 
 /// One node under construction. Ports are accumulated here and packed into the
@@ -184,23 +235,42 @@ impl NodeBuilder<'_> {
     }
 
     /// An optional input reading `binding`.
-    pub(crate) fn input(mut self, binding: ExecutionBinding) -> Self {
-        self.inputs.push(ExecutionInput {
+    pub(crate) fn input(self, binding: ExecutionBinding) -> Self {
+        self.push_input(ExecutionInput {
             required: false,
             stamps_fs_path: false,
             binding,
-        });
-        self
+        })
     }
 
     /// A required input reading `binding` — [`ExecutionBinding::None`] for the
     /// unbound case the planner verdicts `MissingInputs`.
-    pub(crate) fn required(mut self, binding: ExecutionBinding) -> Self {
-        self.inputs.push(ExecutionInput {
+    pub(crate) fn required(self, binding: ExecutionBinding) -> Self {
+        self.push_input(ExecutionInput {
             required: true,
             stamps_fs_path: false,
             binding,
-        });
+        })
+    }
+
+    /// An optional input carrying a literal.
+    pub(crate) fn const_input(self, value: impl Into<StaticValue>) -> Self {
+        self.input(ExecutionBinding::Const(value.into()))
+    }
+
+    /// An input whose delivered value's filesystem referent folds into this
+    /// node's digest — what the compiler writes for an `FsPath`-declared port,
+    /// and the only thing that makes a path re-key its consumer.
+    pub(crate) fn fs_path_input(self, binding: ExecutionBinding) -> Self {
+        self.push_input(ExecutionInput {
+            required: false,
+            stamps_fs_path: true,
+            binding,
+        })
+    }
+
+    fn push_input(mut self, input: ExecutionInput) -> Self {
+        self.inputs.push(input);
         self
     }
 
@@ -307,14 +377,9 @@ impl<'a> Sweep<'a> {
         } = self;
         let program = &owner.program;
 
-        let mut schedule = RunSchedule::default();
-        schedule.reset_for_program(program);
-        schedule
-            .process_order
-            .extend(owner.placed.iter().map(|placed| placed.node_idx));
         // `Cut` is the planner's positive verdict — runnable, nothing claimed
         // it yet — so that is what a swept-from schedule starts at.
-        schedule.states.reset(program.e_nodes.len(), NodeState::Cut);
+        let mut schedule = owner.staged(NodeState::Cut);
         for node in missing {
             schedule.states[node.node_idx] = NodeState::MissingInputs;
         }
@@ -356,5 +421,251 @@ impl Swept<'_> {
 
     pub(crate) fn readers(&self, node: Placed) -> &[u32] {
         &self.schedule.outputs.readers[self.program[node.node_idx].outputs]
+    }
+}
+
+/// The executor over a hand-built program, keeping its cache and run loop
+/// across [`go`](Self::go) — so a second run sees what the first left resident,
+/// which is what a reuse hit is made of.
+///
+/// **The run is stated, not planned.** By default every node runs with one
+/// reader per output, which is what an executor test wants: the verdicts a
+/// sweep would write are [`Sweep`]'s subject, and re-deriving them here would
+/// make every assertion depend on two passes instead of one.
+/// [`resolved`](Self::resolved) opts back into the sweep for the fixtures where
+/// what the *second* run decides is the answer.
+///
+/// Everything reads back by [`Placed`]: what a node's slot holds, and what the
+/// outcome says it did.
+#[derive(Debug)]
+pub(crate) struct Runs<'a> {
+    owner: &'a ProgramBuilder,
+    schedule: RunSchedule,
+    cache: RuntimeCache,
+    executor: Executor,
+    outcome: ExecutionOutcome,
+    resolve: bool,
+    cancel: CancelToken,
+}
+
+impl<'a> Runs<'a> {
+    fn new(owner: &'a ProgramBuilder) -> Self {
+        let mut schedule = owner.staged(NodeState::Run);
+        for placed in &owner.placed {
+            schedule.add_root(placed.node_idx, RootFlags::PLAIN);
+        }
+        let mut cache = RuntimeCache::default();
+        cache.install_for_test(&owner.program);
+        let mut runs = Self {
+            owner,
+            schedule,
+            cache,
+            executor: Executor::default(),
+            outcome: ExecutionOutcome::default(),
+            resolve: false,
+            cancel: CancelToken::never(),
+        };
+        let one_each = vec![1; runs.program().outputs.len()];
+        runs.set_readers(one_each);
+        runs
+    }
+
+    /// Per-output live-reader counts, replacing the default one each. An output
+    /// nothing reads is `Skip`, which is how a fixture spells a sink — released
+    /// the instant it runs — or claims more readers than really read, to prove
+    /// the release waits for the full count.
+    pub(crate) fn readers(mut self, counts: impl IntoIterator<Item = u32>) -> Self {
+        self.set_readers(counts.into_iter().collect());
+        self
+    }
+
+    /// Re-derive dispositions, demand, and reader counts from the cache before
+    /// every run, the way the engine does.
+    ///
+    /// The sweep overwrites whatever [`readers`](Self::readers) stated, so the
+    /// two do not combine.
+    pub(crate) fn resolved(mut self) -> Self {
+        self.resolve = true;
+        self.schedule = self.owner.planned();
+        self
+    }
+
+    /// Override one node's disposition — a `Reuse` the fixture states rather
+    /// than provokes, or a node the planner would have blocked.
+    pub(crate) fn state(mut self, node: Placed, state: NodeState) -> Self {
+        self.schedule.states[node.node_idx] = state;
+        self
+    }
+
+    /// Demand one output no consumer reads — what a node seed does, and the
+    /// only way `Produce` reaches a port with a zero reader count.
+    pub(crate) fn demand(mut self, node: Placed, port: usize) -> Self {
+        let output_idx = self.program().output_idx(OutputAddr {
+            node_idx: node.node_idx,
+            port_idx: port as u32,
+        });
+        self.schedule.outputs.demand[output_idx] = OutputDemand::Produce;
+        self
+    }
+
+    /// Make `node` the run's one root — for a fixture about what a walk
+    /// starting somewhere other than "everything" reaches.
+    pub(crate) fn only_root(mut self, node: Placed) -> Self {
+        self.schedule.clear_roots();
+        self.schedule.add_root(node.node_idx, RootFlags::PLAIN);
+        self
+    }
+
+    /// Mark `node` a node-seeded root: every output demanded, `disabled`
+    /// overridden.
+    pub(crate) fn seeded(mut self, node: Placed) -> Self {
+        self.schedule.add_root(node.node_idx, RootFlags::SEEDED);
+        self
+    }
+
+    /// Prime the cache: `values` resident under the digest this run stamps for
+    /// `node`, so it reads as a hit.
+    pub(crate) fn cached(
+        mut self,
+        node: Placed,
+        values: impl IntoIterator<Item = DynamicValue>,
+    ) -> Self {
+        let Runs {
+            owner,
+            schedule,
+            cache,
+            ..
+        } = &mut self;
+        cache.stamp_digests(&owner.program, schedule.executing());
+        let digest = cache[node.node_idx]
+            .current_digest
+            .expect("a cached fixture node is reproducible, so it has a digest");
+        cache[node.node_idx].load_output(
+            OutputSnapshot::new(values.into_iter().collect()),
+            Some(digest),
+        );
+        self
+    }
+
+    /// Leave `values` in `node`'s slot under **no** digest — a stale value from
+    /// some earlier run, which nothing this run may serve.
+    pub(crate) fn resident(
+        mut self,
+        node: Placed,
+        values: impl IntoIterator<Item = DynamicValue>,
+    ) -> Self {
+        self.cache[node.node_idx]
+            .load_output(OutputSnapshot::new(values.into_iter().collect()), None);
+        self
+    }
+
+    /// Run under `cancel` rather than a token nothing trips.
+    pub(crate) fn cancel(mut self, cancel: CancelToken) -> Self {
+        self.cancel = cancel;
+        self
+    }
+
+    /// Walk the schedule once, keeping the cache for the next call.
+    pub(crate) async fn go(&mut self) {
+        let Runs {
+            owner,
+            schedule,
+            cache,
+            executor,
+            outcome,
+            resolve,
+            cancel,
+        } = self;
+        let program = &owner.program;
+        if *resolve {
+            schedule.resolve(program, cache).await;
+        }
+        executor
+            .run(
+                RunRequest {
+                    program,
+                    schedule,
+                    cache,
+                    reporter: &mut DiscardedReports,
+                    cancel: cancel.clone(),
+                },
+                outcome,
+            )
+            .await;
+        // No RAM is measured: filling that column is the engine's post-run
+        // release sweep, which is not part of the run loop under test.
+        let mut node_ram = Column::default();
+        node_ram.reset(program.e_nodes.len(), RamUsage::default());
+        executor.collect_outcome(program, schedule, &node_ram, outcome);
+    }
+
+    pub(crate) fn program(&self) -> &CompiledGraph {
+        &self.owner.program
+    }
+
+    /// What `node`'s slot holds — `None` once a release has reclaimed it.
+    pub(crate) fn outputs(&self, node: Placed) -> Option<&[DynamicValue]> {
+        self.cache[node.node_idx].output_values()
+    }
+
+    /// `node`'s output `port` read as an integer. `DynamicValue` is not
+    /// `PartialEq`, so a scalar assertion goes through the same coercion a
+    /// consuming lambda would.
+    pub(crate) fn output_i64(&self, node: Placed, port: usize) -> Option<i64> {
+        self.outputs(node)?.get(port)?.as_i64()
+    }
+
+    /// Whether `node` invoked its lambda and succeeded.
+    pub(crate) fn ran(&self, node: Placed) -> bool {
+        self.outcome.ran(node.node_id)
+    }
+
+    /// Whether `node` was served from a cache instead of recomputing.
+    pub(crate) fn reused(&self, node: Placed) -> bool {
+        self.outcome.cached(node.node_id)
+    }
+
+    pub(crate) fn error(&self, node: Placed) -> Option<&RunError> {
+        self.outcome.error(node.node_id)
+    }
+
+    pub(crate) fn ran_count(&self) -> usize {
+        self.outcome.ran_node_count
+    }
+
+    pub(crate) fn cancelled(&self) -> bool {
+        self.outcome.cancelled
+    }
+
+    /// Planned reads of `node`'s output `port` the run has not completed — zero
+    /// once every consumer has read it or had its read retired.
+    pub(crate) fn remaining_reads(&self, node: Placed, port: usize) -> u32 {
+        let output_idx = self.program().output_idx(OutputAddr {
+            node_idx: node.node_idx,
+            port_idx: port as u32,
+        });
+        self.executor.remaining_reads(output_idx)
+    }
+
+    fn set_readers(&mut self, readers: Vec<u32>) {
+        assert_eq!(
+            readers.len(),
+            self.program().outputs.len(),
+            "one reader count per output in the program's pool",
+        );
+        let demand = readers
+            .iter()
+            .map(|count| {
+                if *count == 0 {
+                    OutputDemand::Skip
+                } else {
+                    OutputDemand::Produce
+                }
+            })
+            .collect::<Vec<_>>();
+        self.schedule.outputs = ResolvedOutputs {
+            demand: Column::from(demand),
+            readers: Column::from(readers),
+        };
     }
 }
