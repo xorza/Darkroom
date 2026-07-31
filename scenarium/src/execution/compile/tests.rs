@@ -1,16 +1,16 @@
 use super::*;
 use crate::common::column::Idx;
-use crate::execution::compile::compiled_graph::ExecutionNode;
 use crate::execution::compile::compiled_graph::{CompiledGraph, ExecutionBinding};
 use crate::execution::compile::error::CompiledGraphValidationError;
 use crate::execution::identity::NodeIdx;
 use crate::execution::identity::OutputAddr;
-use crate::graph::Binding;
 use crate::graph::func::event::EventLambda;
-use crate::graph::func::{Func, FuncInput, FuncOutput};
 use crate::graph::identity::{FuncId, InputPort, NodeId, OutputPort};
+use crate::graph::node::Node;
 use crate::graph::output_types::OutputTypes;
-use crate::testing::{self, TestFuncHooks, test_func_lib, test_graph};
+use crate::testing::graph::TestGraph;
+use crate::testing::graph::compiled::Compiled;
+use crate::testing::program::ProgramBuilder;
 use crate::{DataType, StaticValue};
 
 /// The walk wires a subscription to the emitter's own event slot, and the
@@ -18,35 +18,27 @@ use crate::{DataType, StaticValue};
 /// index the walk writes is the one thing a run dereferences without checking.
 #[test]
 fn subscription_wiring_rejects_an_endpoint_outside_the_program() {
-    let mut library = test_func_lib(TestFuncHooks::default());
-    library.add(testing::with_stub_lambda(
-        Func::new(FuncId::unique(), "ticker")
-            .category("Test")
-            .sink()
-            .event("tick", EventLambda::default()),
-    ));
-    let mut graph = Graph::default();
-    let emitter = graph.add(library.by_name("ticker").unwrap().into());
-    let subscriber = graph.add(library.by_name("Print").unwrap().into());
-    graph.subscribe(emitter, 0, subscriber);
+    let mut g = TestGraph::new();
+    g.add("ticker", |n| n.sink().event("tick", EventLambda::default()));
+    g.add("listener", |n| n.sink());
+    g.subscribe("ticker", 0, "listener");
 
-    let mut compiled = Compiler::default().compile(&graph, &library).unwrap();
-    let emitter_idx = compiled.node(emitter).unwrap();
-    let events = compiled[emitter_idx].events;
+    let mut compiled = g.compile();
     assert_eq!(
-        compiled.events[events][0].subscribers.len(),
-        1,
+        compiled.subscribers("ticker", 0),
+        ["listener"],
         "the authored subscription wired one subscriber"
     );
 
     // The artifact check catches a subscriber index that names no node. The
     // walk cannot mint one — every index comes out of the placement, which
     // covers exactly the graph's nodes — so it is corrupted here by hand.
-    let past_the_end = NodeIdx(compiled.e_nodes.len() as u32);
-    compiled.events[events][0].subscribers[0] = past_the_end;
+    let past_the_end = NodeIdx(compiled.program.e_nodes.len() as u32);
+    let events = compiled.node("ticker").events;
+    compiled.program.events[events][0].subscribers[0] = past_the_end;
     assert!(
         matches!(
-            validate::validate(&compiled, &library),
+            validate::validate(&compiled.program, &g.library),
             Err(CompiledGraphValidationError::MissingEventSubscriber { subscriber, .. })
                 if subscriber == past_the_end
         ),
@@ -60,32 +52,27 @@ fn subscription_wiring_rejects_an_endpoint_outside_the_program() {
 /// ways and check both do.
 #[test]
 fn validation_rejects_a_binding_that_does_not_name_a_real_output() {
-    let library = test_func_lib(TestFuncHooks::default());
-    let compile = || {
-        Compiler::default()
-            .compile(&test_graph(), &library)
-            .unwrap()
-    };
-    let bound_input = |compiled: &CompiledGraph| {
-        compiled
-            .inputs
-            .iter_indexed()
-            .find(|(_, input)| matches!(input.binding, ExecutionBinding::Bind(_)))
-            .map(|(input_idx, _)| input_idx)
-            .expect("the test graph wires bindings")
+    let g = wired_pair(DataType::Int, DataType::Int);
+    let bound_input = |compiled: &Compiled| {
+        let e_node = compiled.node("consumer");
+        assert!(
+            matches!(compiled.binding("consumer", 0), ExecutionBinding::Bind(_)),
+            "the fixture wires a binding to corrupt"
+        );
+        e_node.inputs.nth(0)
     };
 
     // One past the last node: the address names no node at all.
-    let mut compiled = compile();
-    let past_the_end = NodeIdx(compiled.e_nodes.len() as u32);
+    let mut compiled = g.compile();
+    let past_the_end = NodeIdx(compiled.program.e_nodes.len() as u32);
     let input = bound_input(&compiled);
-    compiled.inputs[input].binding = ExecutionBinding::Bind(OutputAddr {
+    compiled.program.inputs[input].binding = ExecutionBinding::Bind(OutputAddr {
         node_idx: past_the_end,
         port_idx: 0,
     });
     assert!(
         matches!(
-            validate::validate(&compiled, &library),
+            validate::validate(&compiled.program, &g.library),
             Err(CompiledGraphValidationError::MissingBindingTarget { target, .. })
                 if target.node_idx == past_the_end
         ),
@@ -93,19 +80,19 @@ fn validation_rejects_a_binding_that_does_not_name_a_real_output() {
     );
 
     // A real node, one past its last output port.
-    let mut compiled = compile();
+    let mut compiled = g.compile();
     let input = bound_input(&compiled);
-    let ExecutionBinding::Bind(address) = compiled.inputs[input].binding else {
+    let ExecutionBinding::Bind(address) = compiled.program.inputs[input].binding else {
         unreachable!("bound_input selected a bind")
     };
-    let port_idx = compiled[address.node_idx].outputs.len;
-    compiled.inputs[input].binding = ExecutionBinding::Bind(OutputAddr {
+    let port_idx = compiled.program[address.node_idx].outputs.len;
+    compiled.program.inputs[input].binding = ExecutionBinding::Bind(OutputAddr {
         node_idx: address.node_idx,
         port_idx,
     });
     assert!(
         matches!(
-            validate::validate(&compiled, &library),
+            validate::validate(&compiled.program, &g.library),
             Err(CompiledGraphValidationError::BindingOutputOutOfRange { target, .. })
                 if target.port_idx == port_idx
         ),
@@ -116,19 +103,30 @@ fn validation_rejects_a_binding_that_does_not_name_a_real_output() {
 /// One sort settles the program's dense node order. Ids are uuids, so the order
 /// nodes are authored in says nothing about the order they are adopted in — the
 /// id column is the authored set, sorted, and nothing else.
+///
+/// The one fixture that mints its own ids: `TestGraph` numbers nodes in
+/// declaration order, which would make "sorted" and "authored" the same list
+/// and leave the sort unproven.
 #[test]
 fn dense_order_is_id_order() {
-    let library = test_func_lib(TestFuncHooks::default());
-    let get_b = library.by_name("get_b").unwrap();
-    let mut graph = Graph::default();
-    let authored: Vec<NodeId> = (0..8).map(|_| graph.add(get_b.into())).collect();
+    let mut fixture = TestGraph::new();
+    fixture.add("src", |n| n.pure().output(DataType::Int));
+    let func = fixture.library.by_name("src").unwrap().clone();
 
-    let compiled = Compiler::default().compile(&graph, &library).unwrap();
+    let mut graph = Graph::default();
+    let authored: Vec<NodeId> = (0..8).map(|_| graph.add(Node::from(&func))).collect();
+    let compiled = Compiler::default()
+        .compile(&graph, &fixture.library)
+        .unwrap();
 
     let node_ids: Vec<_> = compiled.node_ids.iter().copied().collect();
     let mut expected = authored.clone();
     expected.sort();
     assert_eq!(node_ids, expected, "nodes are adopted in id order");
+    assert_ne!(
+        node_ids, authored,
+        "eight random uuids do not land in declaration order, so the sort is the reason"
+    );
     for node_id in authored {
         assert!(compiled.contains(node_id));
     }
@@ -136,25 +134,21 @@ fn dense_order_is_id_order() {
 
 #[test]
 fn validation_returns_compiled_mismatches() {
-    let node_id = NodeId::unique();
     let missing_func = FuncId::unique();
-    let mut compiled = CompiledGraph::default();
-    compiled.push(
-        node_id,
-        ExecutionNode {
-            func_id: missing_func,
-            ..Default::default()
-        },
-    );
+    let mut prog = ProgramBuilder::default();
+    let node = prog.node().func(missing_func).add();
 
     assert_eq!(
-        validate::validate(&compiled, &Library::default())
+        validate::validate(prog.program(), &Library::default())
             .unwrap_err()
             .to_string(),
-        format!("execution node {node_id:?} references missing func {missing_func:?}")
+        format!(
+            "execution node {:?} references missing func {missing_func:?}",
+            node.node_id
+        )
     );
-    assert!(compiled.contains(node_id));
-    assert!(!compiled.contains(NodeId::unique()));
+    assert!(prog.program().contains(node.node_id));
+    assert!(!prog.program().contains(NodeId::unique()));
 }
 
 /// Everything one compile observably produced, in a deterministic order and in
@@ -206,28 +200,13 @@ fn summary(compiled: &CompiledGraph, authored: &[NodeId]) -> Vec<String> {
 
 /// A sink reading a source, plus an unwired node — enough for every question
 /// the artifact answers about an authored node to have a distinct answer.
-struct Fixture {
-    library: Library,
-    graph: Graph,
-    source: NodeId,
-    sink: NodeId,
-    loose: NodeId,
-}
-
-fn fixture() -> Fixture {
-    let library = test_func_lib(TestFuncHooks::default());
-    let mut graph = Graph::default();
-    let source = graph.add_func_node(library.by_name("get_a").unwrap());
-    let sink = graph.add_func_node(library.by_name("Print").unwrap());
-    let loose = graph.add_func_node(library.by_name("get_b").unwrap());
-    graph.set_input_binding(InputPort::new(sink, 0), Binding::bind(source, 0));
-    Fixture {
-        library,
-        graph,
-        source,
-        sink,
-        loose,
-    }
+fn fixture() -> TestGraph {
+    let mut g = TestGraph::new();
+    g.add("source", |n| n.pure().output(DataType::Int));
+    g.add("sink", |n| n.records());
+    g.add("loose", |n| n.pure().output(DataType::Int));
+    g.wire("source", 0, "sink", 0);
+    g
 }
 
 /// Every authored node holds compiled work, whatever its role — a source, its
@@ -235,30 +214,48 @@ fn fixture() -> Fixture {
 /// not.
 #[test]
 fn the_artifact_answers_for_each_authored_node() {
-    let f = fixture();
-    let compiled = Compiler::default().compile(&f.graph, &f.library).unwrap();
+    let g = fixture();
+    let compiled = g.compile();
 
-    for node_id in [f.source, f.sink, f.loose] {
-        assert!(compiled.contains(node_id));
+    for name in ["source", "sink", "loose"] {
+        assert!(compiled.program.contains(g.id(name)));
     }
-    assert!(!compiled.contains(NodeId::unique()));
+    assert!(!compiled.program.contains(NodeId::unique()));
 }
 
 /// Every buffer a compile fills is owned by the `Compiler` and reused, so the
 /// hazard the reuse introduces is one compile's leftovers reaching the next.
-/// Compiling two graphs that share no node must leave the second artifact
+/// Compiling a differently shaped graph first must leave the second artifact
 /// identical to what a `Compiler` that had never run produces for it.
 #[test]
 fn a_reused_compiler_produces_what_a_fresh_one_does() {
-    let first = fixture();
-    let second = fixture();
-    let authored = [second.source, second.sink, second.loose];
+    // A wider graph with more ports and an event, so any pool, run length, or
+    // subscriber list carried over would show up as a difference below.
+    let mut warmup = TestGraph::new();
+    warmup.add("emitter", |n| {
+        n.pure()
+            .output(DataType::String)
+            .output(DataType::Float)
+            .event("tick", EventLambda::default())
+    });
+    warmup.add("consumer", |n| {
+        n.sink().input(DataType::String).input(DataType::Float)
+    });
+    warmup.wire("emitter", 0, "consumer", 0);
+    warmup.wire("emitter", 1, "consumer", 1);
+    warmup.subscribe("emitter", 0, "consumer");
+
+    let subject = fixture();
+    let authored: Vec<NodeId> = ["source", "sink", "loose"]
+        .iter()
+        .map(|name| subject.id(name))
+        .collect();
 
     let mut reused = Compiler::default();
-    reused.compile(&first.graph, &first.library).unwrap();
-    let after_reuse = reused.compile(&second.graph, &second.library).unwrap();
+    reused.compile(&warmup.graph, &warmup.library).unwrap();
+    let after_reuse = reused.compile(&subject.graph, &subject.library).unwrap();
     let fresh = Compiler::default()
-        .compile(&second.graph, &second.library)
+        .compile(&subject.graph, &subject.library)
         .unwrap();
 
     assert_eq!(
@@ -274,51 +271,37 @@ fn a_reused_compiler_produces_what_a_fresh_one_does() {
 /// accumulate, which a growing pool would show as duplicated ports or nodes.
 #[test]
 fn recompiling_one_graph_does_not_accumulate_in_the_reused_buffers() {
-    let f = fixture();
-    let authored = [f.source, f.sink, f.loose];
+    let g = fixture();
+    let authored: Vec<NodeId> = ["source", "sink", "loose"]
+        .iter()
+        .map(|name| g.id(name))
+        .collect();
     let mut compiler = Compiler::default();
 
-    let first = compiler.compile(&f.graph, &f.library).unwrap();
+    let first = compiler.compile(&g.graph, &g.library).unwrap();
     let first_summary = summary(&first, &authored);
-    let second = compiler.compile(&f.graph, &f.library).unwrap();
+    let second = compiler.compile(&g.graph, &g.library).unwrap();
 
     assert_eq!(summary(&second, &authored), first_summary);
     assert_eq!(second.inputs.len(), first.inputs.len());
     assert_eq!(second.outputs.len(), first.outputs.len());
 }
 
-const PRODUCER: u128 = 1;
-const CONSUMER: u128 = 2;
-
-/// A producer declaring one output of `out_ty`, and a consumer declaring one
-/// required input of `in_ty`. The two funcs every test below wires together.
-fn library(out_ty: DataType, in_ty: DataType) -> Library {
-    let mut library = Library::default();
-    library.add(testing::with_stub_lambda(
-        Func::new(FuncId::from_u128(PRODUCER), "producer").output(FuncOutput::new("out", out_ty)),
-    ));
-    library.add(testing::with_stub_lambda(
-        Func::new(FuncId::from_u128(CONSUMER), "consumer").input(FuncInput::required("in", in_ty)),
-    ));
-    library
+/// A producer declaring one output of `out_ty` and a consumer declaring one
+/// required input of `in_ty`, unwired. The pair every test below is a question
+/// about — each stating for itself what, if anything, reaches that input.
+fn pair(out_ty: DataType, in_ty: DataType) -> TestGraph {
+    let mut g = TestGraph::new();
+    g.add("producer", |n| n.pure().output(out_ty));
+    g.add("consumer", |n| n.sink().input(in_ty));
+    g
 }
 
-fn lower(graph: &Graph, library: &Library) -> CompiledGraph {
-    Compiler::default()
-        .compile(graph, library)
-        .expect("the walk fixtures compile")
-}
-
-/// A producer and a consumer, optionally wired, lowered. Returns the program
-/// alongside both node ids so a test can name either end.
-fn wired(library: &Library, binding: Option<Binding>) -> (CompiledGraph, NodeId, NodeId) {
-    let mut graph = Graph::default();
-    let producer = graph.add_func_node(library.by_id(FuncId::from_u128(PRODUCER)).unwrap());
-    let consumer = graph.add_func_node(library.by_id(FuncId::from_u128(CONSUMER)).unwrap());
-    if let Some(binding) = binding {
-        graph.set_input_binding(InputPort::new(consumer, 0), binding);
-    }
-    (lower(&graph, library), producer, consumer)
+/// [`pair`] with the producer wired into the consumer.
+fn wired_pair(out_ty: DataType, in_ty: DataType) -> TestGraph {
+    let mut g = pair(out_ty, in_ty);
+    g.wire("producer", 0, "consumer", 0);
+    g
 }
 
 /// Every authored node becomes exactly one execution node carrying its own id,
@@ -326,18 +309,26 @@ fn wired(library: &Library, binding: Option<Binding>) -> (CompiledGraph, NodeId,
 /// the order nodes are reached in must not reach the artifact.
 #[test]
 fn places_one_node_per_authored_node_in_id_order() {
-    let library = library(DataType::Int, DataType::Int);
-    let (program, producer, consumer) = wired(&library, None);
+    let g = pair(DataType::Int, DataType::Int);
+    let compiled = g.compile();
 
-    assert_eq!(program.e_nodes.len(), 2);
-    let mut expected = vec![producer, consumer];
+    assert_eq!(compiled.program.e_nodes.len(), 2);
+    let mut expected = vec![g.id("producer"), g.id("consumer")];
     expected.sort();
     assert_eq!(
-        program.node_ids.iter().copied().collect::<Vec<_>>(),
+        compiled
+            .program
+            .node_ids
+            .iter()
+            .copied()
+            .collect::<Vec<_>>(),
         expected
     );
     for (position, node_id) in expected.iter().enumerate() {
-        assert_eq!(program.node(*node_id).unwrap(), NodeIdx(position as u32));
+        assert_eq!(
+            compiled.program.node(*node_id).unwrap(),
+            NodeIdx(position as u32)
+        );
     }
 }
 
@@ -345,62 +336,51 @@ fn places_one_node_per_authored_node_in_id_order() {
 /// order, so a node owns exactly the run its own declaration claimed.
 #[test]
 fn packs_one_port_run_per_node_from_its_declaration() {
-    let library = library(DataType::Int, DataType::Int);
-    let (program, producer, consumer) = wired(&library, None);
+    let g = pair(DataType::Int, DataType::Int);
+    let compiled = g.compile();
 
-    let producer_node = program.by_id(producer);
-    let consumer_node = program.by_id(consumer);
+    let producer = compiled.node("producer");
+    let consumer = compiled.node("consumer");
+    assert_eq!((producer.outputs.len, producer.inputs.len), (1, 0));
+    assert_eq!((consumer.outputs.len, consumer.inputs.len), (0, 1));
     assert_eq!(
-        (producer_node.outputs.len, producer_node.inputs.len),
-        (1, 0)
-    );
-    assert_eq!(
-        (consumer_node.outputs.len, consumer_node.inputs.len),
-        (0, 1)
-    );
-    assert_eq!(
-        program.outputs.len(),
+        compiled.program.outputs.len(),
         1,
         "one output port across both nodes, typed from the producer's declaration"
     );
-    assert_eq!(program.outputs[producer_node.outputs][0], DataType::Int);
-    assert_eq!(program.inputs.len(), 1);
-    assert_eq!(
-        producer_node.outputs.start, 0,
-        "the only run starts the pool"
-    );
+    assert_eq!(compiled.output_types("producer"), [DataType::Int]);
+    assert_eq!(compiled.program.inputs.len(), 1);
+    assert_eq!(producer.outputs.start, 0, "the only run starts the pool");
 }
 
 /// A wire is interned to the producer's dense address as the walk resolves it —
 /// the right node index and the port index the authored wire named.
 #[test]
 fn interns_a_wire_to_the_producers_dense_address() {
-    let library = library(DataType::Int, DataType::Int);
-    let mut graph = Graph::default();
-    let producer = graph.add_func_node(library.by_id(FuncId::from_u128(PRODUCER)).unwrap());
-    let consumer = graph.add_func_node(library.by_id(FuncId::from_u128(CONSUMER)).unwrap());
-    graph.set_input_binding(InputPort::new(consumer, 0), Binding::bind(producer, 0));
-    let program = lower(&graph, &library);
+    let g = wired_pair(DataType::Int, DataType::Int);
+    let compiled = g.compile();
 
-    let input = &program.inputs[program.by_id(consumer).inputs][0];
-    let ExecutionBinding::Bind(address) = input.binding else {
-        panic!("expected an interned bind, got {:?}", input.binding);
+    let ExecutionBinding::Bind(address) = *compiled.binding("consumer", 0) else {
+        panic!(
+            "expected an interned bind, got {:?}",
+            compiled.binding("consumer", 0)
+        );
     };
     assert_eq!(
         address,
         OutputAddr {
-            node_idx: program.node(producer).unwrap(),
+            node_idx: compiled.idx("producer"),
             port_idx: 0,
         },
     );
     // …and that address resolves into the producer's own output run, wherever
     // the id sort placed it.
     assert_eq!(
-        program.output_idx(address).idx(),
-        program.by_id(producer).outputs.start as usize,
+        compiled.program.output_idx(address).idx(),
+        compiled.node("producer").outputs.start as usize,
     );
     assert!(
-        input.required,
+        compiled.program.inputs[compiled.node("consumer").inputs.nth(0)].required,
         "the declaration's flag travels with the port"
     );
 }
@@ -410,23 +390,17 @@ fn interns_a_wire_to_the_producers_dense_address() {
 /// types line up again.
 #[test]
 fn drops_a_type_mismatched_wire_to_unbound() {
-    let library = library(DataType::String, DataType::Int);
-    let mut graph = Graph::default();
-    let producer = graph.add_func_node(library.by_id(FuncId::from_u128(PRODUCER)).unwrap());
-    let consumer = graph.add_func_node(library.by_id(FuncId::from_u128(CONSUMER)).unwrap());
-    graph.set_input_binding(InputPort::new(consumer, 0), Binding::bind(producer, 0));
-    let program = lower(&graph, &library);
+    let g = wired_pair(DataType::String, DataType::Int);
+    let compiled = g.compile();
 
-    let consumer_node = program.by_id(consumer);
     assert!(
-        matches!(
-            program.inputs[consumer_node.inputs][0].binding,
-            ExecutionBinding::None
-        ),
+        matches!(compiled.binding("consumer", 0), ExecutionBinding::None),
         "a String producer does not satisfy an Int input"
     );
     assert!(
-        graph.bindings.contains_key(&InputPort::new(consumer, 0)),
+        g.graph
+            .bindings
+            .contains_key(&InputPort::new(g.id("consumer"), 0)),
         "the authored wire itself is untouched"
     );
 }
@@ -435,19 +409,19 @@ fn drops_a_type_mismatched_wire_to_unbound() {
 /// lowers unbound, on the same terms as a wire.
 #[test]
 fn keeps_a_satisfying_const_and_drops_a_mismatched_one() {
-    let library = library(DataType::Int, DataType::Int);
     for (value, kept) in [
         (StaticValue::Int(7), true),
         (StaticValue::String("no".to_owned()), false),
     ] {
-        let (program, _, consumer) = wired(&library, Some(Binding::Const(value)));
-        let consumer_node = program.by_id(consumer);
+        let mut g = pair(DataType::Int, DataType::Int);
+        g.constant("consumer", 0, value.clone());
         assert_eq!(
             matches!(
-                program.inputs[consumer_node.inputs][0].binding,
+                g.compile().binding("consumer", 0),
                 ExecutionBinding::Const(_)
             ),
             kept,
+            "const {value:?} on an Int input",
         );
     }
 }
@@ -456,26 +430,24 @@ fn keeps_a_satisfying_const_and_drops_a_mismatched_one() {
 /// walk does not — and the flag rides along for the planner to read.
 #[test]
 fn carries_the_disabled_flag_without_dropping_the_node() {
-    let library = library(DataType::Int, DataType::Int);
-    let mut graph = Graph::default();
-    let producer = graph.add_func_node(library.by_id(FuncId::from_u128(PRODUCER)).unwrap());
-    graph.find_mut(producer).unwrap().disabled = true;
-    let program = lower(&graph, &library);
+    let mut g = TestGraph::new();
+    g.add("producer", |n| n.pure().output(DataType::Int));
+    g.disable("producer");
+    let compiled = g.compile();
 
-    assert_eq!(program.e_nodes.len(), 1);
-    assert!(program.by_id(producer).disabled);
+    assert_eq!(compiled.program.e_nodes.len(), 1);
+    assert!(compiled.node("producer").disabled);
 }
 
 /// The walk keeps only scratch, so one `Compiler` serves every compile and a
 /// second walk cannot observe the first.
 #[test]
 fn a_second_walk_cannot_observe_the_first() {
-    let library = library(DataType::Int, DataType::Int);
-    let mut graph = Graph::default();
-    graph.add_func_node(library.by_id(FuncId::from_u128(PRODUCER)).unwrap());
+    let mut g = TestGraph::new();
+    g.add("producer", |n| n.pure().output(DataType::Int));
     let mut compiler = Compiler::default();
-    compiler.compile(&graph, &library).unwrap();
-    let program = compiler.compile(&graph, &library).unwrap();
+    compiler.compile(&g.graph, &g.library).unwrap();
+    let program = compiler.compile(&g.graph, &g.library).unwrap();
 
     assert_eq!(program.e_nodes.len(), 1);
     assert_eq!(
@@ -491,25 +463,13 @@ fn a_second_walk_cannot_observe_the_first() {
 /// than the `Any` a re-derivation off the declaration alone would produce.
 #[test]
 fn stamps_each_output_with_the_resolved_type() {
-    let mut library = Library::default();
-    library.add(testing::with_stub_lambda(
-        Func::new(FuncId::from_u128(PRODUCER), "producer")
-            .output(FuncOutput::new("out", DataType::String)),
-    ));
-    library.add(testing::with_stub_lambda(
-        Func::new(FuncId::from_u128(CONSUMER), "passthrough")
-            .input(FuncInput::required("mirrored", DataType::Any))
-            .wildcard_output("out", 0),
-    ));
-    let mut graph = Graph::default();
-    let producer = graph.add_func_node(library.by_id(FuncId::from_u128(PRODUCER)).unwrap());
-    let pass = graph.add_func_node(library.by_id(FuncId::from_u128(CONSUMER)).unwrap());
-    graph.set_input_binding(InputPort::new(pass, 0), Binding::bind(producer, 0));
+    let mut g = TestGraph::new();
+    g.add("producer", |n| n.pure().output(DataType::String));
+    g.add("pass", |n| n.pure().input(DataType::Any).wildcard(0));
+    g.wire("producer", 0, "pass", 0);
 
-    let program = lower(&graph, &library);
-    let pass_node = program.by_id(pass);
     assert_eq!(
-        program.outputs[pass_node.outputs],
+        g.compile().output_types("pass"),
         [DataType::String],
         "the wildcard followed its mirror to the producer's String"
     );
@@ -520,33 +480,21 @@ fn stamps_each_output_with_the_resolved_type() {
 /// "not wired yet" — including for an emitter placed after its subscriber.
 #[test]
 fn wires_each_event_with_the_subscribers_resolved_for_it() {
-    let mut library = Library::default();
-    library.add(testing::with_stub_lambda(
-        Func::new(FuncId::from_u128(PRODUCER), "emitter")
-            .event("quiet", EventLambda::default())
-            .event("subscribed", EventLambda::default()),
-    ));
-    library.add(testing::with_stub_lambda(Func::new(
-        FuncId::from_u128(CONSUMER),
-        "listener",
-    )));
-    let mut graph = Graph::default();
-    let emitter = graph.add_func_node(library.by_id(FuncId::from_u128(PRODUCER)).unwrap());
-    let subscriber = graph.add_func_node(library.by_id(FuncId::from_u128(CONSUMER)).unwrap());
-    graph.subscribe(emitter, 1, subscriber);
+    let mut g = TestGraph::new();
+    g.add("emitter", |n| {
+        n.event("quiet", EventLambda::default())
+            .event("subscribed", EventLambda::default())
+    });
+    g.add("listener", |n| n.sink());
+    g.subscribe("emitter", 1, "listener");
 
-    let program = lower(&graph, &library);
-    let emitter_node = program.by_id(emitter);
-    assert_eq!(emitter_node.events.len, 2);
-    let subscribers: Vec<_> = program.events[emitter_node.events]
-        .iter()
-        .map(|event| event.subscribers.clone())
-        .collect();
-    assert_eq!(
-        subscribers,
-        vec![vec![], vec![program.node(subscriber).unwrap()]],
-        "only the subscribed port carries a subscriber"
+    let compiled = g.compile();
+    assert_eq!(compiled.node("emitter").events.len, 2);
+    assert!(
+        compiled.subscribers("emitter", 0).is_empty(),
+        "the unsubscribed port carries no subscriber"
     );
+    assert_eq!(compiled.subscribers("emitter", 1), ["listener"]);
 }
 
 /// A subscription whose emitter or subscriber is disabled wires nothing, and
@@ -554,13 +502,6 @@ fn wires_each_event_with_the_subscribers_resolved_for_it() {
 /// drift tolerance the type gate applies to data edges.
 #[test]
 fn drops_subscriptions_that_cannot_fire() {
-    let emitter_func = |events: usize| {
-        let mut func = Func::new(FuncId::from_u128(PRODUCER), "emitter");
-        for i in 0..events {
-            func = func.event(format!("e{i}"), EventLambda::default());
-        }
-        testing::with_stub_lambda(func)
-    };
     /// Which end of the edge, if either, the document disabled.
     #[derive(Clone, Copy, Debug)]
     enum Disabled {
@@ -569,28 +510,25 @@ fn drops_subscriptions_that_cannot_fire() {
         Subscriber,
     }
     let build = |events: usize, disabled: Disabled| {
-        let mut library = Library::default();
-        library.add(emitter_func(events));
-        library.add(testing::with_stub_lambda(Func::new(
-            FuncId::from_u128(CONSUMER),
-            "listener",
-        )));
-        let mut graph = Graph::default();
-        let emitter = graph.add_func_node(library.by_id(FuncId::from_u128(PRODUCER)).unwrap());
-        let subscriber = graph.add_func_node(library.by_id(FuncId::from_u128(CONSUMER)).unwrap());
+        let mut g = TestGraph::new();
+        g.add("emitter", move |mut n| {
+            for i in 0..events {
+                n = n.event(&format!("e{i}"), EventLambda::default());
+            }
+            n
+        });
+        g.add("listener", |n| n.sink());
         // Authored against a two-event declaration; `events == 1` is the library
         // having since dropped the port this names.
-        graph.subscribe(emitter, 1, subscriber);
+        g.subscribe("emitter", 1, "listener");
         match disabled {
             Disabled::Neither => {}
-            Disabled::Emitter => graph.find_mut(emitter).unwrap().disabled = true,
-            Disabled::Subscriber => graph.find_mut(subscriber).unwrap().disabled = true,
+            Disabled::Emitter => g.disable("emitter"),
+            Disabled::Subscriber => g.disable("listener"),
         }
-        let program = lower(&graph, &library);
-        let events = program.by_id(emitter).events;
-        program.events[events]
-            .iter()
-            .map(|event| event.subscribers.len())
+        let compiled = g.compile();
+        (0..events)
+            .map(|event_idx| compiled.subscribers("emitter", event_idx).len())
             .sum::<usize>()
     };
 
@@ -626,41 +564,29 @@ fn drops_subscriptions_that_cannot_fire() {
 /// pointing past its producer's output run.
 #[test]
 fn a_wildcard_chain_does_not_make_a_dropped_port_bindable() {
-    let mut library = Library::default();
-    library.add(testing::with_stub_lambda(
-        Func::new(FuncId::from_u128(PRODUCER), "producer")
-            .output(FuncOutput::new("out", DataType::Int)),
-    ));
-    library.add(testing::with_stub_lambda(
-        Func::new(FuncId::from_u128(CONSUMER), "passthrough")
-            .input(FuncInput::required("mirrored", DataType::Any))
-            .wildcard_output("out", 0),
-    ));
-    let mut graph = Graph::default();
-    let producer = graph.add_func_node(library.by_id(FuncId::from_u128(PRODUCER)).unwrap());
-    let pass = graph.add_func_node(library.by_id(FuncId::from_u128(CONSUMER)).unwrap());
+    let mut g = TestGraph::new();
+    g.add("producer", |n| n.pure().output(DataType::Int));
+    g.add("pass", |n| n.pure().input(DataType::Any).wildcard(0));
     // Port 99 does not exist: the library shrank under a saved document.
-    let dropped = OutputPort::new(producer, 99);
-    graph.set_input_binding(InputPort::new(pass, 0), Binding::bind(producer, 99));
+    let dropped = OutputPort::new(g.id("producer"), 99);
+    g.wire("producer", 99, "pass", 0);
 
     let mut types = OutputTypes::default();
-    types.update(&graph, &library);
+    types.update(&g.graph, &g.library);
     assert_eq!(
         types.get(dropped),
         Some(&DataType::Any),
         "the chain stamps the port it walked through, declared or not"
     );
 
-    let program = lower(&graph, &library);
     assert!(
-        matches!(
-            program.inputs[program.by_id(pass).inputs][0].binding,
-            ExecutionBinding::None
-        ),
+        matches!(g.compile().binding("pass", 0), ExecutionBinding::None),
         "the range check unbinds a port the producer does not declare"
     );
     assert!(
-        graph.bindings.contains_key(&InputPort::new(pass, 0)),
+        g.graph
+            .bindings
+            .contains_key(&InputPort::new(g.id("pass"), 0)),
         "the authored wire itself is untouched"
     );
 }

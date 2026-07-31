@@ -1,42 +1,35 @@
 use super::*;
-use crate::execution::compile::Compiler;
-use crate::graph::identity::{InputPort, NodeId};
-use crate::graph::{Binding, Graph};
-use crate::testing::{TestFuncHooks, test_func_lib};
+use crate::DataType;
+use crate::graph::identity::NodeId;
+use crate::testing::graph::TestGraph;
+use crate::testing::graph::compiled::Compiled;
 
 /// A sink reading a source, plus an unwired node — the three positions a
 /// seed can occupy relative to a consumer edge.
-struct Fixture {
-    program: CompiledGraph,
-    source: NodeId,
-    sink: NodeId,
-    loose: NodeId,
+fn fixture() -> Compiled {
+    let mut g = TestGraph::new();
+    g.add("source", |n| n.pure().output(DataType::Int));
+    g.add("sink", |n| n.records());
+    g.add("loose", |n| n.pure().output(DataType::Int));
+    g.wire("source", 0, "sink", 0);
+    g.compile()
 }
 
-fn fixture() -> Fixture {
-    let library = test_func_lib(TestFuncHooks::default());
-    let mut graph = Graph::default();
-    let source = graph.add_func_node(library.by_name("get_a").unwrap());
-    let sink = graph.add_func_node(library.by_name("Print").unwrap());
-    let loose = graph.add_func_node(library.by_name("get_b").unwrap());
-    graph.set_input_binding(InputPort::new(sink, 0), Binding::bind(source, 0));
-    Fixture {
-        program: Compiler::default().compile(&graph, &library).unwrap(),
-        source,
-        sink,
-        loose,
-    }
+/// The cone back in the fixture's own names, so an assertion says which nodes
+/// were reached rather than wherever the id sort happened to place them.
+fn reached<'n>(cone: &mut ConsumerCone, f: &'n Compiled, seeds: &[&str]) -> Vec<&'n str> {
+    seeded(cone, f, seeds.iter().map(|name| f.id(name)).collect())
 }
 
-/// The cone back in the id space, so an assertion names nodes rather than
-/// wherever the id sort happened to place them.
-fn reached(cone: &mut ConsumerCone, program: &CompiledGraph, seeds: &[NodeId]) -> Vec<NodeId> {
+/// [`reached`] for the seeds a fixture spells as raw ids — the one case a name
+/// cannot express, since the point is an id the program never held.
+fn seeded<'n>(cone: &mut ConsumerCone, f: &'n Compiled, seeds: Vec<NodeId>) -> Vec<&'n str> {
     cone.of(
-        program,
-        seeds.iter().filter_map(|node_id| program.node(*node_id)),
+        &f.program,
+        seeds.iter().filter_map(|node_id| f.program.node(*node_id)),
     )
     .iter()
-    .map(|node_idx| program.node_ids[node_idx])
+    .map(|node_idx| f.name(node_idx))
     .collect()
 }
 
@@ -46,25 +39,23 @@ fn reached(cone: &mut ConsumerCone, program: &CompiledGraph, seeds: &[NodeId]) -
 fn the_cone_reaches_downstream_and_stops() {
     let f = fixture();
     let cone = &mut ConsumerCone::default();
-    let mut expected = vec![f.source, f.sink];
-    expected.sort();
     assert_eq!(
-        reached(cone, &f.program, &[f.source]),
-        expected,
+        reached(cone, &f, &["source"]),
+        ["source", "sink"],
         "a source reaches its reader"
     );
     assert_eq!(
-        reached(cone, &f.program, &[f.sink]),
-        vec![f.sink],
+        reached(cone, &f, &["sink"]),
+        ["sink"],
         "a terminal node reaches only itself"
     );
     assert_eq!(
-        reached(cone, &f.program, &[f.loose]),
-        vec![f.loose],
+        reached(cone, &f, &["loose"]),
+        ["loose"],
         "an unwired node reaches only itself"
     );
     assert!(
-        reached(cone, &f.program, &[NodeId::unique()]).is_empty(),
+        seeded(cone, &f, vec![NodeId::unique()]).is_empty(),
         "an id the program never held seeds nothing"
     );
 }
@@ -75,10 +66,8 @@ fn the_cone_reaches_downstream_and_stops() {
 fn repeated_and_overlapping_seeds_are_visited_once() {
     let f = fixture();
     let cone = &mut ConsumerCone::default();
-    let mut expected = vec![f.source, f.sink];
-    expected.sort();
-    assert_eq!(reached(cone, &f.program, &[f.source, f.source]), expected);
-    assert_eq!(reached(cone, &f.program, &[f.source, f.sink]), expected);
+    assert_eq!(reached(cone, &f, &["source", "source"]), ["source", "sink"]);
+    assert_eq!(reached(cone, &f, &["source", "sink"]), ["source", "sink"]);
 }
 
 /// Ascending indices out, and the walk assigns them in id order — so the
@@ -86,13 +75,13 @@ fn repeated_and_overlapping_seeds_are_visited_once() {
 #[test]
 fn the_cone_walks_the_dense_space_in_order() {
     let f = fixture();
-    let all = reached(
-        &mut ConsumerCone::default(),
+    let cone = &mut ConsumerCone::default();
+    let all = cone.of(
         &f.program,
-        &[f.source, f.sink, f.loose],
+        ["source", "sink", "loose"].map(|name| f.idx(name)),
     );
-    assert_eq!(all.len(), 3);
-    assert!(all.is_sorted());
+    assert_eq!(all.iter().count(), 3);
+    assert!(all.iter().is_sorted());
 }
 
 /// Reuse is the point of holding one: every buffer is refilled per call, so
@@ -103,20 +92,17 @@ fn a_reused_cone_answers_each_program_from_scratch() {
     let f = fixture();
     let cone = &mut ConsumerCone::default();
 
-    let mut both = vec![f.source, f.sink];
-    both.sort();
-    assert_eq!(reached(cone, &f.program, &[f.source]), both);
+    assert_eq!(reached(cone, &f, &["source"]), ["source", "sink"]);
 
     // A second, *smaller* program with no edge at all — the shrink is the
     // case leftover runs and marks would survive into. The source must now
     // reach only itself.
-    let library = test_func_lib(TestFuncHooks::default());
-    let mut graph = Graph::default();
-    let lone = graph.add_func_node(library.by_name("get_a").unwrap());
-    graph.add_func_node(library.by_name("Print").unwrap());
-    let unwired = Compiler::default().compile(&graph, &library).unwrap();
-    assert_eq!(reached(cone, &unwired, &[lone]), vec![lone]);
+    let mut unwired = TestGraph::new();
+    unwired.add("source", |n| n.pure().output(DataType::Int));
+    unwired.add("sink", |n| n.records());
+    let unwired = unwired.compile();
+    assert_eq!(reached(cone, &unwired, &["source"]), ["source"]);
 
     // And back to the wired one, which must answer as it did the first time.
-    assert_eq!(reached(cone, &f.program, &[f.source]), both);
+    assert_eq!(reached(cone, &f, &["source"]), ["source", "sink"]);
 }
