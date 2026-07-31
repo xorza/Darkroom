@@ -6,9 +6,8 @@ use crate::core::edit::intent::sink::Intents;
 use crate::core::edit::intent::types::GraphIntent;
 use crate::gui::app::commands::AppCommand;
 use crate::gui::app::commands::run::RunCommand;
+use crate::gui::canvas::CanvasCtx;
 use crate::gui::canvas::anchored_menu::NodeContextMenu;
-use crate::gui::canvas::hits::CanvasHits;
-use crate::gui::graph_scope::GraphScope;
 
 /// Right-click on a node body → a small popup with actions on the node.
 /// The trigger scan, the per-open node latch, and the popup lifecycle are all
@@ -50,14 +49,14 @@ impl NodeMenuUi {
     pub(super) fn apply(
         &mut self,
         ui: &mut Ui,
-        hits: &CanvasHits,
-        graph_scope: GraphScope<'_>,
+        cx: CanvasCtx<'_>,
         out: &mut Intents,
     ) -> Option<AppCommand> {
+        let graph_scope = cx.graph_scope();
         // Boundary interface nodes carry no structural identity to
         // duplicate/remove — the sweep applies that guard, so a boundary
         // node never surfaces here.
-        let opened = self.menu.latch(ui, hits, graph_scope);
+        let opened = self.menu.latch(ui, cx);
         // Right-click selects the clicked node when it isn't already part of
         // the selection, so the chosen action always targets a coherent set
         // ("select then act").

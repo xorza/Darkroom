@@ -5,6 +5,7 @@ use scenarium::{Library, NodeId, OutputTypes};
 use super::*;
 use crate::core::document::Document;
 use crate::gui::app::{AppContext, StatusInputs};
+use crate::gui::canvas::hits::CanvasHits;
 use crate::gui::run_state::RunState;
 
 #[derive(Debug)]
@@ -18,20 +19,29 @@ struct Fixture {
     run_state: RunState,
     theme: Theme,
     output_types: OutputTypes,
+    /// The canvas state a context carries beside the pane. Both start
+    /// empty: a bare fixture records nothing, so there are no port centers
+    /// to cache and no responses to sweep.
+    geometry: CanvasGeometry,
+    hits: CanvasHits,
     producer: NodeId,
     consumer: NodeId,
 }
 
 impl Fixture {
-    fn graph_scope(&mut self) -> GraphScope<'_> {
+    /// The canvas context a controller is driven through. No gesture latched
+    /// and no Esc: these tests drive the wire directly rather than through
+    /// the bare-canvas classification.
+    fn canvas_ctx(&mut self) -> CanvasCtx<'_> {
         let app = AppContext::new(
             &self.theme,
             &self.library,
             &self.run_state,
             StatusInputs::default(),
         );
-        GraphScope::for_document(app, &self.doc, &mut self.output_types)
-            .expect("the fixture's document shows the graph")
+        let graph_scope = GraphScope::for_document(app, &self.doc, &mut self.output_types)
+            .expect("the fixture's document shows the graph");
+        CanvasCtx::new(graph_scope, &self.geometry, &self.hits, None, false)
     }
 }
 
@@ -52,6 +62,8 @@ fn fixture() -> Fixture {
         run_state: RunState::default(),
         theme: Theme::default(),
         output_types: OutputTypes::default(),
+        geometry: CanvasGeometry::default(),
+        hits: CanvasHits::default(),
         producer,
         consumer,
     }
@@ -95,14 +107,7 @@ fn prepass_with_wire_from(fixture: &mut Fixture, start: PortRef) -> Option<InFli
         mode: DragMode::Floating,
     });
     let mut out = Intents::default();
-    connections.apply(
-        arena.ui(),
-        fixture.graph_scope(),
-        &CanvasGeometry::default(),
-        None,
-        false,
-        &mut out,
-    );
+    connections.apply(arena.ui(), fixture.canvas_ctx(), None, &mut out);
     assert!(out.is_empty(), "an untouched prepass emits nothing");
     connections.state.get().copied()
 }

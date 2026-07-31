@@ -32,9 +32,8 @@ use scenarium::LogLevel;
 use scenarium::NodeId;
 
 use crate::gui::canvas::hits::{CanvasHits, Chip};
-use crate::gui::canvas::outer_canvas_widget_id;
+use crate::gui::canvas::{CanvasCtx, outer_canvas_widget_id};
 use crate::gui::format::fmt_elapsed;
-use crate::gui::graph_scope::GraphScope;
 use crate::gui::graph_scope::node_scope::NodeScope;
 use crate::gui::node::{RecordCtx, exec_color};
 use crate::gui::run_state::ExecStatus;
@@ -96,7 +95,8 @@ impl Inspectors {
     /// Reads everything off last-frame responses (same timing as the
     /// chip toggle), so a chip click never reads as its own outside
     /// action — the click lands on the chip, not the canvas or a body.
-    pub(super) fn apply(&mut self, ui: &Ui, hits: &CanvasHits, graph_scope: GraphScope<'_>) {
+    pub(super) fn apply(&mut self, ui: &Ui, cx: CanvasCtx<'_>) {
+        let hits = cx.hits();
         if let Some(node) = hits.chip(Chip::Inspect) {
             match cycle(self.modes.get(&node).copied()) {
                 Some(m) => {
@@ -111,7 +111,7 @@ impl Inspectors {
             self.close_unpinned();
         }
         // A panel outlives its node only until the next sweep.
-        self.modes.retain(|id, _| graph_scope.contains(*id));
+        self.modes.retain(|id, _| cx.graph_scope().contains(*id));
     }
 
     /// Record a panel for every open inspector, positioned just right of

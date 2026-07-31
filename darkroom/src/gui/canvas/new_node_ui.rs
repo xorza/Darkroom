@@ -15,7 +15,7 @@ use crate::core::document::PortRef;
 use crate::core::edit::intent::sink::Intents;
 use crate::core::edit::intent::types::GraphIntent;
 use crate::gui::canvas::anchored_menu::AnchoredMenu;
-use crate::gui::canvas::{CanvasGesture, outer_canvas_widget_id, to_world};
+use crate::gui::canvas::{CanvasCtx, CanvasGesture, outer_canvas_widget_id, to_world};
 use crate::gui::graph_scope::GraphScope;
 
 /// One row of a category's palette list: a library `Func` or a built-in
@@ -96,17 +96,17 @@ impl NewNodeUi {
     pub(super) fn apply(
         &mut self,
         ui: &mut Ui,
-        graph_scope: GraphScope<'_>,
-        gesture: Option<CanvasGesture>,
+        cx: CanvasCtx<'_>,
         pending_source: Option<PortRef>,
         out: &mut Intents,
     ) {
+        let graph_scope = cx.graph_scope();
         let resp = ui.response_for(outer_canvas_widget_id());
         // Open the palette either from a bare RMB / double-click (`NewNode`
         // gesture) or from a connection dropped on empty canvas
         // (`pending_source`). Placement is the same — under the pointer.
         let mut just_opened = false;
-        if (pending_source.is_some() || gesture == Some(CanvasGesture::NewNode))
+        if (pending_source.is_some() || cx.gesture() == Some(CanvasGesture::NewNode))
             && let (Some(local), Some(rect)) = (resp.pointer_local, resp.rect)
         {
             self.world_pos = to_world(local, &graph_scope.viewport());

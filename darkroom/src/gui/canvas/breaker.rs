@@ -7,8 +7,7 @@ use crate::core::edit::intent::sink::Intents;
 use crate::core::edit::intent::types::GraphIntent;
 use crate::gui::canvas::gesture_slot::GestureSlot;
 use crate::gui::canvas::wire::Wire;
-use crate::gui::canvas::{CanvasGesture, outer_canvas_widget_id, to_world};
-use crate::gui::graph_scope::GraphScope;
+use crate::gui::canvas::{CanvasCtx, CanvasGesture, outer_canvas_widget_id, to_world};
 use crate::gui::theme::Theme;
 
 /// The active gesture, threaded through node and wire rendering so
@@ -262,20 +261,14 @@ impl BreakerUI {
     /// `RemoveNode` supersedes any per-edge severing on
     /// the same target — the undo step already detaches every incoming
     /// edge and pin, so emitting both would log a redundant history entry.
-    /// `cancelled` — the frame's Esc, resolved once by the canvas —
-    /// drops the scribble without emitting.
-    pub(super) fn apply(
-        &mut self,
-        ui: &mut Ui,
-        graph_scope: GraphScope<'_>,
-        gesture: Option<CanvasGesture>,
-        cancelled: bool,
-        out: &mut Intents,
-    ) {
+    /// The context's Esc — resolved once by the canvas — drops the
+    /// scribble without emitting.
+    pub(super) fn apply(&mut self, ui: &mut Ui, cx: CanvasCtx<'_>, out: &mut Intents) {
+        let graph_scope = cx.graph_scope();
         let resp = ui.response_for(outer_canvas_widget_id());
         // The classifier resolves RMB-drag vs Ctrl+LMB-drag and hands back
         // the latching button, which the gesture polls for continuation.
-        if let Some(CanvasGesture::Breaker(button)) = gesture
+        if let Some(CanvasGesture::Breaker(button)) = cx.gesture()
             && self.state.is_idle()
             && let Some(p) = resp.pointer_local
         {
@@ -284,7 +277,7 @@ impl BreakerUI {
                 button,
             ));
         }
-        if cancelled {
+        if cx.cancelled() {
             self.state.clear();
             return;
         }
@@ -331,7 +324,7 @@ impl BreakerUI {
         }
     }
 
-    /// Hand the active state to `graph_scope`'s inline intersection consumers
+    /// Hand the active state to this pane's inline intersection consumers
     /// (the node body and both wire hit-tests), or an inert probe when the
     /// scribble belongs to another pane.
     ///

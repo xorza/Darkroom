@@ -17,9 +17,8 @@ use palantir::{
 use crate::core::edit::intent::sink::Intents;
 use crate::gui::app::commands::AppCommand;
 use crate::gui::app::commands::run::RunCommand;
-use crate::gui::canvas::geometry::CanvasGeometry;
+use crate::gui::canvas::CanvasCtx;
 use crate::gui::canvas::pan_zoom::{self, ViewAction};
-use crate::gui::graph_scope::GraphScope;
 use crate::gui::widgets::support::{dot, filled_rect, frame, stroked_rect};
 use crate::gui::widgets::toolbar::{BUTTON_GAP, Chip, TOOLBAR_MARGIN, pill};
 
@@ -50,13 +49,8 @@ fn show_selected_wid() -> WidgetId {
 /// pane, which draws no run pill; view-framing clicks push an
 /// `GraphIntent::SetViewport` onto `out` instead. It hit-tests above the canvas
 /// (drawn after it), so a click on a button never starts a pan.
-pub(crate) fn show(
-    ui: &mut Ui,
-    graph_scope: GraphScope<'_>,
-    geometry: &CanvasGeometry,
-    out: &mut Intents,
-) -> Option<AppCommand> {
-    let theme = graph_scope.theme();
+pub(super) fn show(ui: &mut Ui, cx: CanvasCtx<'_>, out: &mut Intents) -> Option<AppCommand> {
+    let (theme, graph_scope, geometry) = (cx.theme(), cx.graph_scope(), cx.geometry());
     let run_state = graph_scope.run_state();
     let mut command = None;
     Panel::vstack()

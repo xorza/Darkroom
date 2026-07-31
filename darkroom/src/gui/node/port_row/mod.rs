@@ -451,7 +451,7 @@ fn add_preview_item(
     // Positioned off the port when its center is known (it is, after the first
     // frame); otherwise the node lands at the origin and the user drags it.
     let pos = rcx
-        .geometry
+        .geometry()
         .ports
         .center(port)
         .map_or(Vec2::ZERO, |center| center + PREVIEW_SPAWN_OFFSET);

@@ -5,6 +5,7 @@ use scenarium::NodeId;
 use crate::core::edit::intent::sink::Intents;
 use crate::core::edit::intent::types::GraphIntent;
 use crate::gui::EventRef;
+use crate::gui::canvas::CanvasCtx;
 use crate::gui::canvas::geometry::CanvasGeometry;
 use crate::gui::canvas::gesture_slot::GestureSlot;
 use crate::gui::canvas::wire::{GlyphDrag, Wire, WirePass, WireTint};
@@ -66,20 +67,14 @@ impl SubscriptionUI {
     /// Drive the in-flight subscription wire: latch a fresh drag from either
     /// an emitter glyph or a subscription pin, track the snapped opposite
     /// end, and commit a `SetSubscription { subscribe: true }` on release over
-    /// a valid target. `cancelled` — the frame's Esc, resolved once by
-    /// the canvas — drops the wire.
+    /// a valid target. The context's Esc — resolved once by the canvas —
+    /// drops the wire.
     ///
     /// Swept over the whole scene once per frame — one press, one wire —
     /// but the snap scans and the commit run against the pane holding the
     /// drag's fixed end, so a subscription can't span two graphs.
-    pub(super) fn apply(
-        &mut self,
-        ui: &mut Ui,
-        graph_scope: GraphScope<'_>,
-        geometry: &CanvasGeometry,
-        cancelled: bool,
-        out: &mut Intents,
-    ) {
+    pub(super) fn apply(&mut self, ui: &mut Ui, cx: CanvasCtx<'_>, out: &mut Intents) {
+        let (graph_scope, geometry) = (cx.graph_scope(), cx.geometry());
         // Latch a fresh drag only when idle. An emitter and a pin can't both
         // start one this frame (distinct widget-id spaces, one press), so
         // trying the emitter scan first is arbitrary, not a conflict.
@@ -97,7 +92,7 @@ impl SubscriptionUI {
                 self.state.latch(latched);
             }
         }
-        if cancelled {
+        if cx.cancelled() {
             self.state.clear();
         }
         let Some(mut state) = self.state.take() else {
@@ -173,13 +168,8 @@ impl SubscriptionUI {
     /// from is fixed to its glyph; the free end follows the snapped opposite
     /// glyph (when set) or the pointer. The emitter is always `p0` so the
     /// preview keeps a committed wire's shape regardless of drag direction.
-    pub(super) fn draw_in_flight(
-        &self,
-        ui: &mut Ui,
-        graph_scope: GraphScope<'_>,
-        geometry: &CanvasGeometry,
-        canvas_origin: Vec2,
-    ) {
+    pub(super) fn draw_in_flight(&self, ui: &mut Ui, cx: CanvasCtx<'_>, canvas_origin: Vec2) {
+        let (graph_scope, geometry) = (cx.graph_scope(), cx.geometry());
         // Scoped to the pane holding the drag's fixed end — see
         // `ConnectionUI::draw_in_flight` for what an unscoped preview
         // paints on the neighbouring canvases.
