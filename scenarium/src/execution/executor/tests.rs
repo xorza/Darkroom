@@ -114,7 +114,7 @@ fn demand_output(program: &CompiledGraph, run: &mut RunSchedule, address: Output
 /// These tests name nodes by their stable id; the program owns the id ↔ index
 /// mapping the production paths carry directly.
 fn nx(program: &CompiledGraph, node_id: NodeId) -> NodeIdx {
-    program.node_index[&node_id]
+    program.node(node_id).unwrap()
 }
 
 fn output(program: &CompiledGraph, node_id: NodeId, port_idx: usize) -> OutputAddr {

@@ -150,11 +150,8 @@ impl RuntimeCache {
         program: &CompiledGraph,
         seeds: &[NodeId],
     ) -> Vec<CacheEvictionFailure> {
-        let cone = Consumers::reverse(program).closure(
-            seeds
-                .iter()
-                .filter_map(|node_id| program.node_index.get(node_id).copied()),
-        );
+        let cone = Consumers::reverse(program)
+            .closure(seeds.iter().filter_map(|node_id| program.node(*node_id)));
         let mut failures = Vec::new();
         for node_idx in cone.iter() {
             let node_id = program.node_ids[node_idx];

@@ -345,7 +345,7 @@ impl RunSchedule {
         // every output is computed and its `disabled` flag is overridden for this run. An
         // id absent from the installed program is inconsistent caller state.
         for &node_id in &seeds.node_ids {
-            let Some(&node_idx) = program.node_index.get(&node_id) else {
+            let Some(node_idx) = program.node(node_id) else {
                 return Err(Error::NodeSeedNotFound { node_id });
             };
             self.add_root(node_idx, RootFlags::SEEDED);
@@ -355,7 +355,7 @@ impl RunSchedule {
         // promotes this run to run all sinks (below), so it's skipped as a root here.
         let mut run_sinks = seeds.sinks;
         for &event in &seeds.events {
-            let Some(&owner_idx) = program.node_index.get(&event.node_id) else {
+            let Some(owner_idx) = program.node(event.node_id) else {
                 return Err(Error::EventSeedNotFound { event });
             };
             let Some(e_event) = program.events[program[owner_idx].events].get(event.event_idx)

@@ -240,6 +240,7 @@ impl ExecutionEngine {
 
 #[cfg(test)]
 mod internals {
+    use crate::execution::identity::NodeIdx;
     use ::common::CancelToken;
 
     use crate::DynamicValue;
@@ -362,9 +363,18 @@ mod internals {
             Ok(())
         }
 
+        /// Where a stable id sits in the installed program — the one lookup the
+        /// introspection below shares, so a test naming a node the install does
+        /// not hold fails here rather than indexing something else.
+        fn node_idx(&self, node_id: NodeId) -> NodeIdx {
+            self.compiled()
+                .node(node_id)
+                .expect("introspection names a node of the installed program")
+        }
+
         /// The resolved state for a stable id — test introspection.
         pub(super) fn node_state(&self, node_id: NodeId) -> NodeState {
-            self.schedule.states[self.compiled().node_index[&node_id]]
+            self.schedule.states[self.node_idx(node_id)]
         }
 
         pub(super) fn node_inputs(&self, node_id: NodeId) -> &[ExecutionInput] {
@@ -392,7 +402,7 @@ mod internals {
         }
 
         pub(super) fn get_argument_values_at(&self, node_id: NodeId) -> Option<ArgumentValues> {
-            self.compiled().node_index.get(&node_id)?;
+            self.compiled().node(node_id)?;
             Some(self.argument_values_at(node_id))
         }
 
@@ -411,7 +421,7 @@ mod internals {
                 })
                 .collect();
 
-            let outputs = self.cache[self.compiled().node_index[&node_id]]
+            let outputs = self.cache[self.node_idx(node_id)]
                 .output_values()
                 .map(|outputs| outputs.to_vec())
                 .unwrap_or_default();
@@ -421,13 +431,13 @@ mod internals {
 
         /// The runtime slot for a stable id — test introspection.
         pub(super) fn slot(&self, node_id: NodeId) -> &RuntimeSlot {
-            &self.cache[self.compiled().node_index[&node_id]]
+            &self.cache[self.node_idx(node_id)]
         }
 
         /// Seed a node's cached output (simulating a prior run): set the value and
         /// stamp `produced_under` from the current digest, so the planner sees a hit.
         pub(super) fn set_output_values(&mut self, node_id: NodeId, values: Vec<DynamicValue>) {
-            let node_idx = self.compiled().node_index[&node_id];
+            let node_idx = self.node_idx(node_id);
             let slot = &mut self.cache[node_idx];
             let produced_under = slot.current_digest;
             slot.load_output(OutputSnapshot::new(values), produced_under);

@@ -17,7 +17,6 @@
 //! and one lookup in the artifact's own id index.
 
 use crate::graph::identity::FuncId;
-use hashbrown::HashMap;
 
 use crate::common::column::{Column, Span};
 use crate::execution::identity::{EventIdx, InputIdx, NodeIdx, OutputAddr, OutputIdx};
@@ -107,11 +106,9 @@ pub struct CompiledGraph {
     /// deterministic however the authoring graph was walked.
     pub(crate) e_nodes: Column<NodeIdx, ExecutionNode>,
     /// `NodeIdx` → authoring-derived id, for the host boundary (reports,
-    /// seeds, eviction, cache slots).
+    /// seeds, eviction, cache slots) — **sorted**, which is what lets it answer
+    /// the reverse direction too. See [`node`](Self::node).
     pub(crate) node_ids: Column<NodeIdx, NodeId>,
-    /// Id → `NodeIdx`, for resolving host-supplied identities once per use;
-    /// nothing per-run iterates or rebuilds it.
-    pub(crate) node_index: HashMap<NodeId, NodeIdx>,
     pub(crate) inputs: Column<InputIdx, ExecutionInput>,
     pub(crate) events: Column<EventIdx, ExecutionEvent>,
     /// Each node's resolved declared output types (wildcards followed), packed
@@ -132,13 +129,25 @@ impl std::ops::Index<NodeIdx> for CompiledGraph {
 }
 
 impl CompiledGraph {
+    /// Where an authored node landed, or `None` if this artifact holds no
+    /// compiled work for it.
+    ///
+    /// The one place the authoring space crosses into the dense one. A binary
+    /// search rather than a side index: the compile places nodes in id order, so
+    /// `node_ids` is *already* arranged for this lookup — a map beside it would
+    /// be a second copy of that arrangement, allocated per compile and carried
+    /// for the life of every installed artifact.
+    pub(crate) fn node(&self, node_id: NodeId) -> Option<NodeIdx> {
+        self.node_ids.search_sorted(&node_id)
+    }
+
     /// Whether this artifact holds compiled work for an authored node.
     ///
     /// The one question the authoring space can ask of a program without
     /// entering the dense space: it answers both "can this node seed a run"
     /// and "does a report naming this node belong to this install".
     pub fn contains(&self, node_id: NodeId) -> bool {
-        self.node_index.contains_key(&node_id)
+        self.node(node_id).is_some()
     }
 
     pub(crate) fn output_idx(&self, address: OutputAddr) -> OutputIdx {
@@ -154,13 +163,18 @@ pub(crate) mod internals {
 
     impl CompiledGraph {
         /// Append one node, assigning the next dense index — the fixture form
-        /// of the placement lowering performs as it walks. Production programs
-        /// come only from a lowering, which walks in id order; a fixture that
-        /// wants that layout pushes in id order too.
+        /// of the placement a compile performs before it walks.
+        ///
+        /// Ascending ids, because [`node`](CompiledGraph::node) binary-searches
+        /// `node_ids`: a fixture that pushed out of order would build a program
+        /// whose own nodes it cannot find. That also makes the ids unique, which
+        /// the map this replaced used to check.
         pub(crate) fn push(&mut self, id: NodeId, e_node: ExecutionNode) -> NodeIdx {
+            assert!(
+                self.node_ids.iter().last().is_none_or(|last| *last < id),
+                "a program's nodes are placed in ascending id order"
+            );
             let node_idx = NodeIdx(self.e_nodes.len() as u32);
-            let previous = self.node_index.insert(id, node_idx);
-            assert!(previous.is_none(), "a program's node ids must be unique");
             self.node_ids.push(id);
             self.e_nodes.push(e_node);
             node_idx
@@ -175,14 +189,14 @@ mod id_lookups {
 
     /// Id lookups for a unit test that stood a program up by hand and knows its
     /// nodes by the ids it gave them. Production paths carry `NodeIdx`, so
-    /// nothing outside a test pays the hash.
+    /// nothing outside a test pays the search.
     impl CompiledGraph {
         pub(crate) fn by_id(&self, id: NodeId) -> &ExecutionNode {
-            &self[self.node_index[&id]]
+            &self[self.node(id).expect("the fixture placed this node")]
         }
 
         pub(crate) fn by_id_mut(&mut self, id: NodeId) -> &mut ExecutionNode {
-            let node_idx = self.node_index[&id];
+            let node_idx = self.node(id).expect("the fixture placed this node");
             &mut self.e_nodes[node_idx]
         }
     }

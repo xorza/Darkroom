@@ -712,7 +712,9 @@ pub(crate) mod internals {
         /// reads as "ran", so plan-only introspection still sees the full schedule;
         /// an id absent from the installed program is a caller bug and panics.
         pub(crate) fn ran(&self, program: &CompiledGraph, node_id: NodeId) -> bool {
-            let node_idx = program.node_index[&node_id];
+            let node_idx = program
+                .node(node_id)
+                .expect("an id absent from the installed program is a caller bug");
             self.outcomes.get(node_idx).is_none_or(|outcome| {
                 matches!(
                     outcome,

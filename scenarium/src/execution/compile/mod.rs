@@ -31,8 +31,6 @@
 pub(crate) mod error;
 mod validate;
 
-use hashbrown::HashMap;
-
 use crate::DataType;
 use crate::common::column::{Column, Span};
 use crate::execution::compile::error::CompileError;
@@ -49,33 +47,65 @@ use crate::graph::output_types::OutputTypes;
 use crate::graph::{Binding, Graph};
 use crate::library::Library;
 
-/// One node's place in the dense space, settled before the walk so a reference
-/// naming it resolves on the spot — including a reference the walk meets before
-/// it reaches the node itself.
+/// One node awaiting placement: its id, which the sort keys on, and the one
+/// fact about it a *consumer* may need before the walk reaches the node itself.
 #[derive(Debug)]
 struct Placed {
     node_id: NodeId,
     /// The node's declared output count. A binding is range-checked against it,
     /// and the producer's own `outputs` run does not exist until the walk emits
-    /// that node — which may be after the consumer naming it.
+    /// that node — which the id order may put after the consumer naming it.
     outputs: u32,
 }
 
-/// The compile entry point, owning every buffer the walk would otherwise
-/// allocate. Only the walk's own scratch lives here; everything it *produces*
-/// goes into the columns that become the artifact, so no part of one compile
-/// survives into the next.
+/// How many ports the program will hold, totalled by the placement from the
+/// same declarations the walk is about to read.
 ///
-/// Hosts keep one per compile site (e.g. darkroom's `Engine`), so an editor that
-/// recompiles per edit pays for the artifact and nothing else. The produced
-/// [`CompiledGraph`] is the one thing here that cannot be reused, since the
-/// engine, its runtime cache, and the GUI all hold handles to the previous one
-/// while the next compile runs — so it is always fresh and can be shared with
-/// the worker in an [`Arc`](std::sync::Arc).
+/// Every pool the walk fills is variable-length, so without these each one
+/// doubles its way to a size the placement already knew: a thousand-node graph
+/// pays a dozen reallocations and copies per column for a number that was one
+/// addition away.
+#[derive(Debug, Default, Clone, Copy)]
+struct PortTotals {
+    inputs: usize,
+    outputs: usize,
+    events: usize,
+}
+
+/// The dense index space, settled before anything is emitted.
+///
+/// The column is the artifact's own — the walk adds no identity of its own, it
+/// only reads this one back, so there is no second ordering for the two to
+/// disagree about. Being sorted, it answers both directions:
+/// [`idx`](Self::idx) searches it, and it ships as-is.
+#[derive(Debug)]
+struct Placement {
+    node_ids: Column<NodeIdx, NodeId>,
+    totals: PortTotals,
+}
+
+impl Placement {
+    /// Where `node_id` landed. Every id the walk resolves came out of the graph
+    /// this placement covers, so a miss is a compile bug.
+    fn idx(&self, node_id: NodeId) -> NodeIdx {
+        self.node_ids
+            .search_sorted(&node_id)
+            .expect("the placement covers every node the graph holds")
+    }
+}
+
+/// Everything a compile fills and empties.
+///
+/// Kept between compiles for the capacity alone: each buffer is cleared where it
+/// is first written, so a compile can observe nothing of the last one. That is
+/// what lets a host recompiling per edit pay for the artifact and nothing else —
+/// and it is the whole reason [`Compiler`] is a value a caller holds rather than
+/// a function it calls.
 #[derive(Debug, Default)]
-pub struct Compiler {
-    /// Every node, in id order — the dense index space. A node's `NodeIdx` is
-    /// its position here.
+struct Scratch {
+    /// Every node awaiting placement, sorted into the dense index space. Its
+    /// output counts outlive the sort: a binding is range-checked against them
+    /// all through the walk.
     placed: Vec<Placed>,
     /// One node's resolved inputs, refilled per node. They are resolved before
     /// the ports are appended, so an [`ExecutionInput`] is whole the moment it
@@ -86,12 +116,29 @@ pub struct Compiler {
     /// declaration are in hand at once.
     event_lambdas: Vec<EventLambda>,
     /// Each event's subscribers, grouped before the events are built. Only the
-    /// outer vector is reused: the inner ones move into the events.
+    /// outer vector is reused: the inner ones move into the events, so they are
+    /// the one allocation here that escapes — and only for an event something
+    /// actually subscribes to, since an empty `Vec` holds no buffer.
     subscribers: Vec<Vec<NodeIdx>>,
     /// Every output type of the graph, filled before the walk. Held here
     /// because the type gate runs once per bound input, and resolving one port
     /// at a time cost a walk per edge.
     output_types: OutputTypes,
+}
+
+/// The compile entry point, owning every buffer the walk would otherwise
+/// allocate per compile.
+///
+/// Hosts keep one per compile site (e.g. darkroom's `Engine`). What a compile
+/// allocates is then exactly the artifact: five columns, each sized from the
+/// placement and filled once. The [`CompiledGraph`] is the one
+/// thing here that cannot be reused, since the engine, its runtime cache, and
+/// the GUI all hold handles to the previous one while the next compile runs —
+/// so it is always fresh and can be shared with the worker in an
+/// [`Arc`](std::sync::Arc).
+#[derive(Debug, Default)]
+pub struct Compiler {
+    scratch: Scratch,
 }
 
 impl Compiler {
@@ -131,17 +178,19 @@ impl Compiler {
     /// so a copy is a refcount bump), which is what leaves the artifact
     /// self-contained.
     fn walk(&mut self, root: &Graph, library: &Library) -> CompiledGraph {
-        self.output_types.update(root, library);
-        let node_index = self.place_nodes(root, library);
+        self.scratch.output_types.update(root, library);
+        let placement = self.place_nodes(root, library);
 
-        let mut node_ids = Column::default();
-        let mut e_nodes = Column::default();
-        let mut inputs = Column::default();
-        let mut outputs = Column::default();
-        self.event_lambdas.clear();
+        // Sized from the placement, so each of these allocates once and every
+        // `append` below is a copy into space it already owns.
+        let mut e_nodes = Column::with_capacity(placement.node_ids.len());
+        let mut inputs = Column::with_capacity(placement.totals.inputs);
+        let mut outputs = Column::with_capacity(placement.totals.outputs);
+        self.scratch.event_lambdas.clear();
+        self.scratch.event_lambdas.reserve(placement.totals.events);
 
-        for position in 0..self.placed.len() {
-            let node_id = self.placed[position].node_id;
+        for position in 0..placement.node_ids.len() {
+            let node_id = placement.node_ids[NodeIdx(position as u32)];
             let node = root
                 .find(node_id)
                 .expect("the placement names this graph's nodes");
@@ -167,18 +216,18 @@ impl Compiler {
             // Bindings are resolved *before* the ports are appended, so each
             // input is whole when it enters the pool rather than being revisited
             // by index afterwards.
-            self.node_inputs.clear();
+            self.scratch.node_inputs.clear();
             for (port_idx, func_input) in func.inputs.iter().enumerate() {
                 let port = InputPort::new(node_id, port_idx);
                 let binding =
-                    self.typed_binding(library, &node_index, func_input, root.bindings.get(&port));
-                self.node_inputs.push(ExecutionInput {
+                    self.typed_binding(library, &placement, func_input, root.bindings.get(&port));
+                self.scratch.node_inputs.push(ExecutionInput {
                     required: func_input.required,
                     stamps_fs_path: matches!(&func_input.data_type, DataType::FsPath(_)),
                     binding,
                 });
             }
-            let node_inputs = inputs.append(self.node_inputs.drain(..));
+            let node_inputs = inputs.append(self.scratch.node_inputs.drain(..));
 
             // The effective type of each output, straight off the table filled
             // above — the same answer the editor paints, so the program and the
@@ -186,7 +235,8 @@ impl Compiler {
             // walks happening to match. A port the table missed is library
             // drift, and `Any` is what that resolved to before it existed.
             let node_outputs = outputs.append((0..func.outputs.len()).map(|port_idx| {
-                self.output_types
+                self.scratch
+                    .output_types
                     .get(OutputPort::new(node_id, port_idx))
                     .cloned()
                     .unwrap_or_default()
@@ -197,14 +247,14 @@ impl Compiler {
             // walk may not have reached yet. The lambda is the one half the
             // declaration answers for, so it rides along now.
             let events = Span::new(
-                u32::try_from(self.event_lambdas.len())
+                u32::try_from(self.scratch.event_lambdas.len())
                     .expect("a program's port count fits in u32"),
                 u32::try_from(func.events.len()).expect("a node's port count fits in u32"),
             );
-            self.event_lambdas
+            self.scratch
+                .event_lambdas
                 .extend(func.events.iter().map(|event| event.event_lambda.clone()));
 
-            node_ids.push(node_id);
             e_nodes.push(ExecutionNode {
                 sink: func.sink,
                 disabled: node.disabled,
@@ -217,59 +267,67 @@ impl Compiler {
                 func_id: func.id,
                 lambda: func.lambda.clone(),
             });
-            debug_assert_eq!(
-                node_index[&node_id],
-                NodeIdx(position as u32),
-                "the walk emits in the order the placement assigned"
-            );
         }
 
-        let events = self.wire_subscriptions(root, &e_nodes, &node_index);
+        let events = self.wire_subscriptions(root, &e_nodes, &placement);
+
+        // The placement counted these from the same declarations the walk read,
+        // so a mismatch is the two disagreeing about the library — and every
+        // column above would have silently regrown to cover it.
+        debug_assert_eq!(inputs.len(), placement.totals.inputs);
+        debug_assert_eq!(outputs.len(), placement.totals.outputs);
+        debug_assert_eq!(events.len(), placement.totals.events);
 
         CompiledGraph {
             e_nodes,
-            node_ids,
-            node_index,
+            node_ids: placement.node_ids,
             inputs,
             outputs,
             events,
         }
     }
 
-    /// Settle the dense index space: every node in id order, its declared output
-    /// count beside it, and the reverse map the walk resolves references
-    /// against.
+    /// Settle the dense index space: the artifact's id column and the reverse
+    /// map, plus the output count the walk range-checks bindings against.
     ///
     /// Id order rather than `Graph::iter`'s, so the artifact is deterministic
     /// however the walk happens to reach the nodes. Ids come from a map keyed by
     /// them, so the sort cannot produce a duplicate.
     ///
-    /// The output counts are taken here rather than during the walk because a
-    /// wire is range-checked against its *producer*, which the id order may put
-    /// after the consumer that names it.
-    fn place_nodes(&mut self, root: &Graph, library: &Library) -> HashMap<NodeId, NodeIdx> {
-        self.placed.clear();
-        self.placed.extend(root.iter().map(|node| {
-            Placed {
+    /// The per-node output count is taken here rather than during the walk
+    /// because a wire is range-checked against its *producer*, which the id
+    /// order may put after the consumer that names it. It stays on the compiler
+    /// while the two id columns leave with the artifact.
+    ///
+    /// The pool totals ride along for free: this pass already holds every
+    /// declaration the walk is about to read, so counting the ports here is what
+    /// lets each column be allocated once at its final size.
+    fn place_nodes(&mut self, root: &Graph, library: &Library) -> Placement {
+        let placed = &mut self.scratch.placed;
+        placed.clear();
+        placed.reserve(root.len());
+        let mut totals = PortTotals::default();
+        for node in root.iter() {
+            let func = root
+                .node_func(&node, library)
+                .expect("func resolved by validate_with");
+            totals.inputs += func.inputs.len();
+            totals.outputs += func.outputs.len();
+            totals.events += func.events.len();
+            placed.push(Placed {
                 node_id: node.id,
-                outputs: root
-                    .node_func(&node, library)
-                    .expect("func resolved by validate_with")
-                    .outputs
-                    .len() as u32,
-            }
-        }));
+                outputs: func.outputs.len() as u32,
+            });
+        }
         assert!(
-            u32::try_from(self.placed.len()).is_ok(),
+            u32::try_from(placed.len()).is_ok(),
             "program node count must fit in u32"
         );
-        self.placed.sort_unstable_by_key(|placed| placed.node_id);
+        placed.sort_unstable_by_key(|placed| placed.node_id);
 
-        let mut node_index = HashMap::with_capacity(self.placed.len());
-        for (position, placed) in self.placed.iter().enumerate() {
-            node_index.insert(placed.node_id, NodeIdx(position as u32));
-        }
-        node_index
+        let mut node_ids = Column::with_capacity(placed.len());
+        node_ids.append(placed.iter().map(|placed| placed.node_id));
+        Placement { node_ids, totals }
     }
 
     /// [`Self::resolve`] behind the type gate: a wire whose resolved source type
@@ -280,7 +338,7 @@ impl Compiler {
     fn typed_binding(
         &self,
         library: &Library,
-        node_index: &HashMap<NodeId, NodeIdx>,
+        placement: &Placement,
         input: &FuncInput,
         binding: Option<&Binding>,
     ) -> ExecutionBinding {
@@ -297,9 +355,14 @@ impl Compiler {
                 // the range check. A port the table *did* stamp still has to
                 // pass that check — a wildcard chain records every port it walks
                 // through, out-of-range ones included, as `Any`.
-                let resolved = self.output_types.get(*src).cloned().unwrap_or_default();
+                let resolved = self
+                    .scratch
+                    .output_types
+                    .get(*src)
+                    .cloned()
+                    .unwrap_or_default();
                 if input.data_type.compatible_with(&resolved) {
-                    self.resolve(node_index, *src)
+                    self.resolve(placement, *src)
                 } else {
                     ExecutionBinding::None
                 }
@@ -318,10 +381,10 @@ impl Compiler {
     /// may not have reached yet. The *node* is never missing:
     /// `Graph::validate_shape` rejects a binding naming a producer the graph
     /// does not hold, and the placement covers every node it does.
-    fn resolve(&self, node_index: &HashMap<NodeId, NodeIdx>, port: OutputPort) -> ExecutionBinding {
+    fn resolve(&self, placement: &Placement, port: OutputPort) -> ExecutionBinding {
         let OutputPort { node_id, port_idx } = port;
-        let node_idx = node_index[&node_id];
-        if port_idx >= self.placed[node_idx.0 as usize].outputs as usize {
+        let node_idx = placement.idx(node_id);
+        if port_idx >= self.scratch.placed[node_idx.0 as usize].outputs as usize {
             return ExecutionBinding::None;
         }
         ExecutionBinding::Bind(OutputAddr {
@@ -348,11 +411,12 @@ impl Compiler {
         &mut self,
         graph: &Graph,
         e_nodes: &Column<NodeIdx, ExecutionNode>,
-        node_index: &HashMap<NodeId, NodeIdx>,
+        placement: &Placement,
     ) -> Column<EventIdx, ExecutionEvent> {
-        self.subscribers.clear();
-        self.subscribers
-            .resize_with(self.event_lambdas.len(), Vec::new);
+        self.scratch.subscribers.clear();
+        self.scratch
+            .subscribers
+            .resize_with(self.scratch.event_lambdas.len(), Vec::new);
         for sub in graph.subscriptions() {
             let emitter = graph
                 .find(sub.emitter)
@@ -363,19 +427,20 @@ impl Compiler {
             if emitter.disabled || subscriber.disabled {
                 continue;
             }
-            let events = e_nodes[node_index[&sub.emitter]].events;
+            let events = e_nodes[placement.idx(sub.emitter)].events;
             if sub.event_idx >= events.len as usize {
                 continue;
             }
-            self.subscribers[events.start as usize + sub.event_idx]
-                .push(node_index[&sub.subscriber]);
+            self.scratch.subscribers[events.start as usize + sub.event_idx]
+                .push(placement.idx(sub.subscriber));
         }
 
-        let mut events = Column::default();
+        let mut events = Column::with_capacity(self.scratch.event_lambdas.len());
         events.append(
-            self.subscribers
+            self.scratch
+                .subscribers
                 .drain(..)
-                .zip(self.event_lambdas.drain(..))
+                .zip(self.scratch.event_lambdas.drain(..))
                 .map(|(subscribers, lambda)| ExecutionEvent {
                     subscribers,
                     lambda,

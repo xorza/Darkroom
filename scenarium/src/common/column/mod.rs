@@ -141,6 +141,16 @@ impl<I, T: Clone> Column<I, T> {
 }
 
 impl<I, T> Column<I, T> {
+    /// An empty column that will hold `capacity` entries without growing —
+    /// for a builder that counted its entries before filling them, so the
+    /// column allocates once instead of doubling its way to the same size.
+    pub(crate) fn with_capacity(capacity: usize) -> Self {
+        Self {
+            values: Vec::with_capacity(capacity),
+            space: PhantomData,
+        }
+    }
+
     /// The index space the column spans — what a validator checks before
     /// reading it by index.
     pub(crate) fn len(&self) -> usize {
@@ -193,6 +203,20 @@ impl<I: Idx, T> Column<I, T> {
         self.values.extend(values);
         let end = u32::try_from(self.values.len()).expect("column length exceeds u32");
         Span::new(start, end - start)
+    }
+
+    /// The index holding `value`, or `None` — a binary search, so the column
+    /// must be sorted. Sortedness is the filler's invariant; nothing here
+    /// maintains it.
+    ///
+    /// What lets a column that is *already* ordered by its entries serve as its
+    /// own lookup, instead of a side map allocated per build over the same
+    /// arrangement.
+    pub(crate) fn search_sorted(&self, value: &T) -> Option<I>
+    where
+        T: Ord,
+    {
+        self.values.binary_search(value).ok().map(I::from_idx)
     }
 
     /// Entries paired with the index they sit at, so a walk that needs both

@@ -341,20 +341,23 @@ async fn same_path_uses_one_identity_until_the_next_run() {
             CancelToken::never(),
         )
         .await;
-    cache.stamp_digest(&fixture.program, fixture.program.node_index[&fixture.first]);
+    cache.stamp_digest(
+        &fixture.program,
+        fixture.program.node(fixture.first).unwrap(),
+    );
 
     std::fs::write(&file, b"longer").unwrap();
     cache.stamp_digest(
         &fixture.program,
-        fixture.program.node_index[&fixture.second],
+        fixture.program.node(fixture.second).unwrap(),
     );
     assert_eq!(
-        cache[fixture.program.node_index[&fixture.first]].current_digest,
-        cache[fixture.program.node_index[&fixture.second]].current_digest,
+        cache[fixture.program.node(fixture.first).unwrap()].current_digest,
+        cache[fixture.program.node(fixture.second).unwrap()].current_digest,
         "both consumers fold the run's one coherent resource identity"
     );
 
-    let first_run = cache[fixture.program.node_index[&fixture.first]].current_digest;
+    let first_run = cache[fixture.program.node(fixture.first).unwrap()].current_digest;
     cache
         .prepare(
             &fixture.program,
@@ -362,9 +365,13 @@ async fn same_path_uses_one_identity_until_the_next_run() {
             CancelToken::never(),
         )
         .await;
-    cache.stamp_digest(&fixture.program, fixture.program.node_index[&fixture.first]);
+    cache.stamp_digest(
+        &fixture.program,
+        fixture.program.node(fixture.first).unwrap(),
+    );
     assert_ne!(
-        cache[fixture.program.node_index[&fixture.first]].current_digest, first_run,
+        cache[fixture.program.node(fixture.first).unwrap()].current_digest,
+        first_run,
         "the next run refreshes resource identity"
     );
 }
