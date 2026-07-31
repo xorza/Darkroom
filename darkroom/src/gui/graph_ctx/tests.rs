@@ -5,9 +5,9 @@ use scenarium::{
     OutputTypes,
 };
 
-use crate::core::document::harness::wildcard_library;
+use crate::core::document::harness::{DocFixture, wildcard_library};
 use crate::core::document::{Document, GraphView, PortKind};
-use crate::gui::graph_ctx::internals::GraphCtxFixture;
+use crate::gui::graph_ctx::harness::GraphCtxFixture;
 use crate::gui::pane::graph::harness::*;
 use crate::gui::state::run_state::RunState;
 use crate::gui::theme::Theme;
@@ -30,7 +30,7 @@ fn only_runnable_sinks_expose_the_disable_toggle() {
     let plain = g.add_declared("plain");
     let sink = g.add_declared("sink_func");
     let ghost = g.graph.add(Node::new(NodeKind::Func(FuncId::unique())));
-    let mut fixture = GraphCtxFixture::over(Document::from(g.graph), g.library);
+    let mut fixture = GraphCtxFixture::over(DocFixture::over(g));
     let graph_ctx = fixture.graph_ctx();
 
     assert!(
@@ -64,7 +64,7 @@ fn a_missing_func_reads_as_a_deletable_stub() {
     let known_id = graph.add(known);
     let ghost_id = graph.add(ghost);
 
-    let mut fixture = GraphCtxFixture::over(Document::from(graph), library);
+    let mut fixture = GraphCtxFixture::over(DocFixture::with_library(graph, library));
     let graph_ctx = fixture.graph_ctx();
 
     // Both nodes resolve, not silently dropped — so the unresolvable one
@@ -114,7 +114,7 @@ fn func_events_read_in_order_alongside_outputs() {
     let node: Node = library.by_id(FRAME_EVENT_FUNC_ID).unwrap().into();
     let node_id = graph.add(node);
 
-    let mut fixture = GraphCtxFixture::over(Document::from(graph), library);
+    let mut fixture = GraphCtxFixture::over(DocFixture::with_library(graph, library));
     let n = fixture.graph_ctx().node(node_id).unwrap();
 
     let event_names: Vec<&str> = n.events().iter().map(|e| e.name.as_str()).collect();
@@ -143,7 +143,7 @@ fn subscriptions_read_from_the_graph() {
     let subscriber_id = graph.add(subscriber);
     graph.subscribe(emitter_id, 1, subscriber_id);
 
-    let mut fixture = GraphCtxFixture::over(Document::from(graph), library);
+    let mut fixture = GraphCtxFixture::over(DocFixture::with_library(graph, library));
     let subs: Vec<_> = fixture.graph_ctx().subscriptions().collect();
 
     assert_eq!(subs.len(), 1);
@@ -173,7 +173,7 @@ fn cache_mode_reads_verbatim_per_node() {
         ids.push((node_id, mode));
     }
 
-    let mut fixture = GraphCtxFixture::over(Document::from(graph), library);
+    let mut fixture = GraphCtxFixture::over(DocFixture::with_library(graph, library));
     let graph_ctx = fixture.graph_ctx();
 
     for (id, mode) in ids {
@@ -212,7 +212,7 @@ fn impure_flag_reads_from_func_behavior() {
     let impure_id = g.add_declared("impure_src");
     let self_cached_id = g.add_declared("self_cached");
 
-    let mut fixture = GraphCtxFixture::over(Document::from(g.graph), g.library);
+    let mut fixture = GraphCtxFixture::over(DocFixture::over(g));
     let graph_ctx = fixture.graph_ctx();
 
     let pure = graph_ctx.node(pure_id).unwrap();
@@ -273,10 +273,7 @@ fn a_wildcard_output_resolves_through_the_wire_it_mirrors() {
         if wired {
             g.wire("int_src", 0, "passthrough", 0);
         }
-        (
-            GraphCtxFixture::over(Document::from(g.graph), g.library),
-            consumer,
-        )
+        (GraphCtxFixture::over(DocFixture::over(g)), consumer)
     }
 
     // Unwired the passthrough's output is polymorphic; wired it reports what
