@@ -38,11 +38,6 @@ impl<S> GestureSlot<S> {
         self.held.as_ref()
     }
 
-    /// Same, to advance it in place.
-    pub(crate) fn get_mut(&mut self) -> Option<&mut S> {
-        self.held.as_mut()
-    }
-
     /// Take the held gesture out. The shape a state machine wants: take,
     /// advance, [`Self::latch`] it back — and simply not re-latching is how
     /// it ends.

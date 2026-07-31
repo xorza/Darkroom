@@ -22,32 +22,36 @@ use crate::gui::theme::Theme;
 /// rect — so the probe converts nothing.
 #[derive(Debug)]
 pub(crate) struct BreakerProbe<'a> {
-    state: Option<&'a mut BreakerState>,
+    /// The live scribble, or `None` when no gesture is in flight on this
+    /// pane. The `Option` is the liveness: [`BreakerUI::probe`] hands out the
+    /// buffers only while its slot is latched, so a stale scribble left over
+    /// from the last gesture is unreachable rather than merely ignored.
+    live: Option<&'a mut Scribble>,
 }
 
 impl BreakerProbe<'_> {
     /// True if a breaker gesture is live this frame. Wire-fade emphasis and
-    /// similar ambient state read this instead of reaching into `state`
+    /// similar ambient state read this instead of reaching into the scribble
     /// directly.
     pub(crate) fn is_active(&self) -> bool {
-        self.state.is_some()
+        self.live.is_some()
     }
 
     /// True if the active breaker polyline crosses `wire`. A no-op (false)
     /// when no breaker gesture is live, so wire renderers can call it
     /// unconditionally before deciding whether to record a cut.
     pub(crate) fn crosses_wire(&self, wire: &Wire) -> bool {
-        self.state
+        self.live
             .as_deref()
-            .is_some_and(|b| b.intersects_cubic(wire.p0, wire.p1, wire.p2, wire.p3))
+            .is_some_and(|s| s.intersects_cubic(wire.p0, wire.p1, wire.p2, wire.p3))
     }
 
     /// True if the active breaker polyline crosses `rect`. A no-op (false)
     /// when no breaker gesture is live.
     pub(crate) fn crosses_rect(&self, rect: Rect) -> bool {
-        self.state
+        self.live
             .as_deref()
-            .is_some_and(|b| b.intersects_rect(rect))
+            .is_some_and(|s| s.intersects_rect(rect))
     }
 
     /// Record `addr`'s input binding as targeted by the breaker this frame.
@@ -56,21 +60,21 @@ impl BreakerProbe<'_> {
     /// place that invariant is spelled out, instead of a copy-pasted
     /// `unwrap` at each of the three call sites.
     pub(super) fn mark_broken_input(&mut self, addr: InputPort) {
-        self.live_state().broken.push(addr);
+        self.live_scribble().broken.push(addr);
     }
 
     /// Record `id`'s node body as targeted by the breaker this frame.
     pub(crate) fn mark_broken_node(&mut self, id: NodeId) {
-        self.live_state().broken_nodes.push(id);
+        self.live_scribble().broken_nodes.push(id);
     }
 
     /// Record `s`'s event wire as targeted by the breaker this frame.
     pub(super) fn mark_broken_subscription(&mut self, s: Subscription) {
-        self.live_state().broken_subscriptions.push(s);
+        self.live_scribble().broken_subscriptions.push(s);
     }
 
-    fn live_state(&mut self) -> &mut BreakerState {
-        self.state
+    fn live_scribble(&mut self) -> &mut Scribble {
+        self.live
             .as_deref_mut()
             .expect("mark_broken_* called with no live breaker gesture")
     }
@@ -89,27 +93,32 @@ const MAX_BREAKER_LENGTH: f32 = 2000.0;
 /// cheap enough to redo every frame for every visible connection.
 const BEZIER_SAMPLES: usize = 16;
 
-/// Active connection-breaker gesture. Lives in inner-canvas world
-/// (pre-transform) coords so render inside the inner canvas can use
-/// the points verbatim and intersection tests share the same frame
-/// as the cubic bezier endpoints.
+/// The breaker scribble: its samples, how far they run, and the three target
+/// sets a frame's probing marks against them. Lives in inner-canvas world
+/// (pre-transform) coords so render inside the inner canvas can use the points
+/// verbatim and intersection tests share the same frame as the cubic bezier
+/// endpoints.
 ///
-/// The three `broken_*` collections below are each filled by one render
-/// pass's hit-test (via `BreakerProbe::mark_broken_*`) and drained by
+/// **Buffers, not gesture state.** This sits beside [`BreakerUI`]'s slot
+/// rather than inside it, so a gesture that ends returns four allocations to
+/// the *next* one instead of to the allocator — the same bargain
+/// `SelectionUI::swept` and `NodeUI::row_tracks` already make. What makes that
+/// safe is the slot: [`BreakerUI::probe`] only hands these out while it is
+/// latched, so between gestures the leftovers are unreachable rather than
+/// merely stale. [`Self::restart`] is where a fresh gesture claims them.
+///
+/// The three `broken_*` collections are each filled by one render pass's
+/// hit-test (via `BreakerProbe::mark_broken_*`) and drained by
 /// `BreakerUI::apply` on release into the matching severing `GraphIntent`. All
 /// three are cleared together at the start of every frame's probing
 /// (`begin_frame`, called from `BreakerUI::probe`) rather than each
 /// renderer clearing its own — every render pass visits its own targets at
 /// most once per frame, so within-frame duplicates aren't possible either
 /// way.
-#[derive(Debug)]
-pub(super) struct BreakerState {
+#[derive(Default, Debug)]
+pub(super) struct Scribble {
     points: Vec<Vec2>,
     length: f32,
-    /// Mouse button that latched this gesture. The release-detection
-    /// check polls `drag_delta_by(button)`, so a Ctrl+LMB-launched
-    /// breaker must keep reading the Left button, not Right.
-    button: PointerButton,
     /// Target input ports whose data binding the breaker intersects this
     /// frame, drained on release into an unbound `GraphIntent::SetInput`.
     broken: Vec<InputPort>,
@@ -121,16 +130,15 @@ pub(super) struct BreakerState {
     broken_subscriptions: Vec<Subscription>,
 }
 
-impl BreakerState {
-    pub(crate) fn start(p: Vec2, button: PointerButton) -> Self {
-        Self {
-            points: vec![p],
-            length: 0.0,
-            button,
-            broken: Vec::new(),
-            broken_nodes: Vec::new(),
-            broken_subscriptions: Vec::new(),
-        }
+impl Scribble {
+    /// Begin a fresh scribble at `p`, keeping every buffer's capacity. The
+    /// one place a gesture's leftovers are dropped, so nothing downstream has
+    /// to ask whether what it is reading belongs to this gesture or the last.
+    pub(super) fn restart(&mut self, p: Vec2) {
+        self.points.clear();
+        self.points.push(p);
+        self.length = 0.0;
+        self.begin_frame();
     }
 
     /// Clear every `broken_*` collection at the start of a frame's probing.
@@ -244,14 +252,22 @@ fn orient(p: Vec2, q: Vec2, r: Vec2) -> f32 {
 }
 
 /// Owns the active connection-breaker gesture (RMB / Ctrl+LMB drag on
-/// the outer canvas). The state is `Option<BreakerState>` rather than
-/// flat fields so the absence of a gesture is one variant and the
-/// gesture can be cancelled by a single assignment. Hands out a
-/// `BreakerProbe` to the canvas record so node and connection draws
-/// can flag intersections inline.
+/// the outer canvas). Hands out a `BreakerProbe` to the canvas record so node
+/// and connection draws can flag intersections inline.
+///
+/// Split in two by what each half *is*, not by when it lives: the slot holds
+/// the gesture — present or absent, cancelled by a single `clear` — while the
+/// buffers it fills stay put and are reclaimed by the next scribble. Nothing
+/// in the slot allocates, which is what lets it stay the same plain
+/// [`GestureSlot`] every other controller uses.
 #[derive(Default, Debug)]
 pub(crate) struct BreakerUI {
-    state: GestureSlot<BreakerState>,
+    /// The button that latched the live gesture — the whole of its identity,
+    /// and what the release check polls: a Ctrl+LMB-launched breaker must
+    /// keep reading Left, not Right. Empty when no scribble is in flight,
+    /// which is also what makes [`Self::scribble`]'s contents meaningless.
+    latched: GestureSlot<PointerButton>,
+    scribble: Scribble,
 }
 
 impl BreakerUI {
@@ -270,59 +286,69 @@ impl BreakerUI {
         // The classifier resolves RMB-drag vs Ctrl+LMB-drag and hands back
         // the latching button, which the gesture polls for continuation.
         if let Some(CanvasGesture::Breaker(button)) = cx.gesture()
-            && self.state.is_idle()
+            && self.latched.is_idle()
             && let Some(p) = resp.pointer_local
         {
-            self.state.latch(BreakerState::start(
-                to_world(p, &graph_ctx.viewport()),
-                button,
-            ));
+            self.latched.latch(button);
+            self.scribble.restart(to_world(p, &graph_ctx.viewport()));
         }
         if cx.cancelled() {
-            self.state.clear();
+            self.latched.clear();
             return;
         }
-        let button = self.state.get().map(|b| b.button);
-        match (
-            self.state.get_mut(),
-            button.and_then(|b| resp.button(b).drag.delta()),
-        ) {
-            (Some(b), Some(_)) => {
-                if let Some(p) = resp.pointer_local {
-                    b.add_point(to_world(p, &graph_ctx.viewport()));
-                }
+        // Copied out, so the slot's borrow ends before the scribble below is
+        // touched. No gesture latched is the whole of the "nothing to do"
+        // case, which is why it returns here rather than falling through a
+        // catch-all arm.
+        let Some(button) = self.latched.get().copied() else {
+            return;
+        };
+        // Past that guard the scribble *is* this gesture's, so it needs no
+        // liveness check of its own.
+        let scribble = &mut self.scribble;
+        if resp.button(button).drag.delta().is_some() {
+            if let Some(p) = resp.pointer_local {
+                scribble.add_point(to_world(p, &graph_ctx.viewport()));
             }
-            (Some(b), None) => {
-                let doomed_nodes = std::mem::take(&mut b.broken_nodes);
-                out.push_node_removals(doomed_nodes.iter().copied());
-                for addr in b.broken.drain(..) {
-                    if doomed_nodes.contains(&addr.node_id) {
-                        continue;
-                    }
-                    out.push(GraphIntent::SetInput {
-                        input: addr,
-                        to: None,
-                    });
-                }
-                // A removed node already drops its subscriptions
-                // (RemoveNode's undo step captures every edge touching
-                // it), so skip any whose emitter or subscriber is doomed
-                // to avoid redundant history.
-                for s in b.broken_subscriptions.drain(..) {
-                    if doomed_nodes.contains(&s.emitter) || doomed_nodes.contains(&s.subscriber) {
-                        continue;
-                    }
-                    out.push(GraphIntent::SetSubscription {
-                        emitter: s.emitter,
-                        event_idx: s.event_idx,
-                        subscriber: s.subscriber,
-                        subscribe: false,
-                    });
-                }
-                self.state.clear();
-            }
-            _ => {}
+            return;
         }
+        // Released: drain each target set into its severing intent. Drained
+        // rather than moved out — `broken_nodes` is read while the other two
+        // drain, and taking it would hand its allocation to the intent
+        // instead of to the next gesture.
+        let Scribble {
+            broken,
+            broken_nodes,
+            broken_subscriptions,
+            ..
+        } = scribble;
+        out.push_node_removals(broken_nodes.iter().copied());
+        for addr in broken.drain(..) {
+            if broken_nodes.contains(&addr.node_id) {
+                continue;
+            }
+            out.push(GraphIntent::SetInput {
+                input: addr,
+                to: None,
+            });
+        }
+        // A removed node already drops its subscriptions
+        // (RemoveNode's undo step captures every edge touching
+        // it), so skip any whose emitter or subscriber is doomed
+        // to avoid redundant history.
+        for s in broken_subscriptions.drain(..) {
+            if broken_nodes.contains(&s.emitter) || broken_nodes.contains(&s.subscriber) {
+                continue;
+            }
+            out.push(GraphIntent::SetSubscription {
+                emitter: s.emitter,
+                event_idx: s.event_idx,
+                subscriber: s.subscriber,
+                subscribe: false,
+            });
+        }
+        broken_nodes.clear();
+        self.latched.clear();
     }
 
     /// Hand the active state to this pane's inline intersection consumers
@@ -338,25 +364,24 @@ impl BreakerUI {
     /// visible pane, and a second call would clear the marks the owning
     /// pane just recorded.
     pub(crate) fn probe(&mut self) -> BreakerProbe<'_> {
-        let mut state = self.state.get_mut();
-        if let Some(b) = state.as_deref_mut() {
-            b.begin_frame();
+        if self.latched.is_idle() {
+            return BreakerProbe { live: None };
         }
-        BreakerProbe { state }
+        self.scribble.begin_frame();
+        BreakerProbe {
+            live: Some(&mut self.scribble),
+        }
     }
 
     /// Paint the polyline. No-op when no gesture is active or the
-    /// polyline has < 2 samples (a `start` with no `add_point`).
+    /// polyline has < 2 samples (a `restart` with no `add_point`).
     pub(crate) fn draw(&self, ui: &mut Ui, theme: &Theme) {
-        let Some(b) = self.state.get() else {
-            return;
-        };
-        if b.points.len() < 2 {
+        if self.latched.is_idle() || self.scribble.points.len() < 2 {
             return;
         }
         ui.add_shape(
             Shape::polyline(
-                &b.points,
+                &self.scribble.points,
                 PolylineColors::Single(theme.colors.breaker_stroke),
                 theme.breaker_stroke_width,
             )
