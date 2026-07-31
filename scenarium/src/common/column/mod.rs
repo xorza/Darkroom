@@ -31,9 +31,9 @@ pub(crate) trait Idx: Copy {
 /// held by the owner while the entries stay packed in the column.
 ///
 /// The span carries the *space*, not the element type, which is what lets one
-/// span address two columns over the same space: linking rebuilds each of
-/// lowering's columns into the program's slot for slot, so the run of ports a
-/// flat node owns is the run the placed node owns, with nothing to convert.
+/// span address every column over that space: a node's output run names its
+/// slots in the type column and in each per-run column aligned to it, with
+/// nothing to convert between them.
 #[derive(Debug)]
 pub(crate) struct Span<I> {
     pub(crate) start: u32,

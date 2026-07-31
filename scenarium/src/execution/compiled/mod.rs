@@ -1,13 +1,14 @@
 //! The compile artifact: the lowered graph — topology + code — plus every
 //! question a host asks of one.
 //!
-//! Built once by the compiler's link stage — there are no mutators here, and
-//! no pass that fills a field in afterwards — then installed as runtime state;
-//! it is deliberately not a persistence format. Mutable state is split between
-//! the per-run schedule/executor and the cross-run runtime cache.
+//! Built once by the [`Compiler`](crate::execution::compile::Compiler)'s walk —
+//! there are no mutators here, and no pass that fills a field in afterwards —
+//! then installed as runtime state; it is deliberately not a persistence format.
+//! Mutable state is split between the per-run schedule/executor and the
+//! cross-run runtime cache.
 //!
 //! Self-contained: everything a run needs was copied out of the [`Library`](crate::library::Library)
-//! at lowering, so nothing here refers to one.
+//! at compile, so nothing here refers to one.
 //!
 //! A graph is flat, so an authored node becomes exactly one execution node and
 //! the two identity spaces differ only in type. That collapses what used to be
@@ -58,10 +59,10 @@ pub(crate) struct ExecutionEvent {
 /// state lives in `NodeIdx`-aligned columns, and cross-run cache slots are
 /// keyed by the node's stable id.
 ///
-/// Built whole by the lowering walk, in emit order, and copied into the dense
-/// index space by linking's id sort — which is what `Clone` is for. Everything
-/// here is `Copy` but the lambda, and that is an `Arc`, so a copy is a refcount
-/// bump and the lowered graph stays readable behind it.
+/// Built whole by the compiler's walk, straight into the dense index space the
+/// id sort settled before it. Everything here is `Copy` but the lambda, and that
+/// is an `Arc`, so taking one off a declaration is a refcount bump and the
+/// library stays readable behind it — which is what `Clone` is for.
 #[derive(Default, Debug, Clone)]
 pub(crate) struct ExecutionNode {
     pub sink: bool,
@@ -101,14 +102,13 @@ pub(crate) struct ExecutionNode {
 /// output types, and bound-path stamping metadata. Self-contained: executing it
 /// needs neither the authoring graph nor the library.
 ///
-/// [`Default`] is the empty artifact, which is what a caller hands the
-/// compiler's link stage to fill and what an engine holds before anything is
-/// installed.
+/// [`Default`] is the empty artifact, which is what an engine holds before
+/// anything is installed.
 #[derive(Debug, Default)]
 pub struct CompiledGraph {
     /// The dense node column — every per-run column and set aligns to it.
-    /// Ordered by `NodeId` during linking so compiled artifacts and
-    /// program walks are deterministic.
+    /// Ordered by `NodeId`, so compiled artifacts and program walks are
+    /// deterministic however the authoring graph was walked.
     pub(crate) e_nodes: Column<NodeIdx, ExecutionNode>,
     /// `NodeIdx` → authoring-derived id, for the host boundary (reports,
     /// seeds, eviction, cache slots).
@@ -195,28 +195,37 @@ impl CompiledGraph {
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "internals"))]
 pub(crate) mod internals {
     use crate::execution::compiled::{CompiledGraph, ExecutionNode};
     use crate::execution::identity::NodeIdx;
     use crate::graph::identity::NodeId;
 
-    /// Test-facing id lookups: tests and engine introspection address nodes by
-    /// their stable id; production paths carry `NodeIdx` instead.
     impl CompiledGraph {
         /// Append one node, assigning the next dense index — the fixture form
-        /// of the placement linking performs in one pass. Production programs
-        /// are built only by linking a lowered graph; this exists so a cache or
-        /// digest test can stand one up without one.
+        /// of the placement lowering performs as it walks. Production programs
+        /// come only from a lowering, which walks in id order; a fixture that
+        /// wants that layout pushes in id order too.
         pub(crate) fn push(&mut self, id: NodeId, e_node: ExecutionNode) -> NodeIdx {
             let node_idx = NodeIdx(self.e_nodes.len() as u32);
             let previous = self.node_index.insert(id, node_idx);
-            assert!(previous.is_none(), "lowered node ids must be unique");
+            assert!(previous.is_none(), "a program's node ids must be unique");
             self.node_ids.push(id);
             self.e_nodes.push(e_node);
             node_idx
         }
+    }
+}
 
+#[cfg(test)]
+mod id_lookups {
+    use crate::execution::compiled::{CompiledGraph, ExecutionNode};
+    use crate::graph::identity::NodeId;
+
+    /// Id lookups for a unit test that stood a program up by hand and knows its
+    /// nodes by the ids it gave them. Production paths carry `NodeIdx`, so
+    /// nothing outside a test pays the hash.
+    impl CompiledGraph {
         pub(crate) fn by_id(&self, id: NodeId) -> &ExecutionNode {
             &self[self.node_index[&id]]
         }
