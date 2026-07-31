@@ -9,6 +9,7 @@ mod value_editor;
 use crate::core::document::PortRef;
 use crate::core::edit::intent::sink::Intents;
 use crate::core::edit::intent::types::GraphIntent;
+use crate::gui::canvas::CanvasCtx;
 use crate::gui::canvas::breaker::BreakerProbe;
 use crate::gui::canvas::cull::CullRegion;
 use crate::gui::canvas::drag_anchor::GroupDrag;
@@ -34,67 +35,64 @@ use scenarium::NodeId;
 use std::collections::BTreeSet;
 
 /// Read-only context threaded top to bottom through everything one graph
-/// pane records: the pane being rendered, last frame's port geometry, and
-/// what the paint pass substitutes for the committed state. `Copy` (all
-/// shared refs), so it's passed by value — copying it while a borrow of the
-/// scene's node pool is live is fine, which keeps `draw_all`'s node loop
-/// borrow-clean. The mutable sinks (`out`, `actions`) and the breaker `probe`
-/// stay separate params.
+/// pane records. `Copy` (a canvas context plus three shared refs), so it's
+/// passed by value — copying it while a borrow of the scene's node pool is
+/// live is fine, which keeps `draw_all`'s node loop borrow-clean. The mutable
+/// sinks (`out`, `actions`) and the breaker `probe` stay separate params.
 ///
-/// The record level of the context chain: it is derived from the pane's
-/// [`GraphScope`] and answers everything that one does — theme, library, last
-/// run — so the node subtree names no other context. The canvas-level draws
-/// that sit in the same pass and want the same refs — the inspection panels
-/// ([`crate::gui::canvas::inspector`]) — take it too, rather than each
-/// growing its own near-identical bundle.
+/// The record level of the context chain: derived from the pane's
+/// [`CanvasCtx`], and answering everything that one does — theme, geometry,
+/// hits, the pane itself — so the node subtree names no other context. What
+/// it adds is what only the *paint* pass knows: which nodes read as selected
+/// this frame, which panels are open, and what the viewport keeps. The
+/// canvas-level draws that sit in the same pass and want the same refs — the
+/// inspection panels ([`crate::gui::canvas::inspector`]) — take it too,
+/// rather than each growing its own near-identical bundle.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct RecordCtx<'a> {
-    /// The one graph this record pass is drawing. Every other pane on
-    /// screen gets its own `RecordCtx`, so nothing here can reach across.
-    ///
-    /// Also how the pass reaches the theme, the library and the last run's
-    /// results: the scope already carries all three to answer for its nodes,
-    /// so holding any of them again beside it would be two paths to one ref.
-    graph_scope: GraphScope<'a>,
+    /// The one canvas this record pass is drawing, and how the pass reaches
+    /// the theme, the geometry, the pane and its library and run: all of it
+    /// is already inside, so holding any of it again beside this would be two
+    /// paths to one ref. Every other pane on screen gets its own `RecordCtx`,
+    /// so nothing here can reach across.
+    canvas: CanvasCtx<'a>,
     /// Effective selection to paint: the graph's committed set
     /// ([`GraphScope::selected`]) or, mid-rubber-band, the live swept
     /// preview owned by `SelectionUI` — one type, so the draw substitutes
     /// them without caring which it got, and the gesture never writes its
     /// preview into the document.
     selected: &'a BTreeSet<NodeId>,
-    geometry: &'a CanvasGeometry,
-    /// This frame's swept node interactions — the node body reads its
-    /// drag latch from here rather than re-polling its own handles.
-    hits: &'a CanvasHits,
     /// Open inspection panels, so the header chip can render its
     /// open/pinned state.
     inspectors: &'a Inspectors,
+    /// What this pane's viewport keeps. Carried here rather than passed
+    /// beside the context because every reader of one is a reader of the
+    /// other: a pass that records nodes decides per node whether to.
+    cull: CullRegion,
 }
 
 impl<'a> RecordCtx<'a> {
-    pub(crate) fn new(
-        graph_scope: GraphScope<'a>,
+    pub(super) fn new(
+        canvas: CanvasCtx<'a>,
         selected: &'a BTreeSet<NodeId>,
-        geometry: &'a CanvasGeometry,
-        hits: &'a CanvasHits,
         inspectors: &'a Inspectors,
+        cull: CullRegion,
     ) -> Self {
         Self {
-            graph_scope,
+            canvas,
             selected,
-            geometry,
-            hits,
             inspectors,
+            cull,
         }
     }
 
     /// The palette and metrics this pass paints from, off the pane's scope.
     pub(crate) fn theme(self) -> &'a Theme {
-        self.graph_scope.theme()
+        self.canvas.theme()
     }
 
     pub(crate) fn graph_scope(self) -> GraphScope<'a> {
-        self.graph_scope
+        self.canvas.graph_scope()
     }
 
     pub(crate) fn selected(self) -> &'a BTreeSet<NodeId> {
@@ -102,15 +100,21 @@ impl<'a> RecordCtx<'a> {
     }
 
     pub(crate) fn geometry(self) -> &'a CanvasGeometry {
-        self.geometry
+        self.canvas.geometry()
     }
 
+    /// This frame's swept node interactions — the node body reads its
+    /// drag latch from here rather than re-polling its own handles.
     pub(crate) fn hits(self) -> &'a CanvasHits {
-        self.hits
+        self.canvas.hits()
     }
 
     pub(crate) fn inspectors(self) -> &'a Inspectors {
         self.inspectors
+    }
+
+    pub(crate) fn cull(self) -> CullRegion {
+        self.cull
     }
 
     /// Whether `key` paints selected this pass.
@@ -164,7 +168,6 @@ impl NodeUI {
         &mut self,
         ui: &mut Ui,
         rcx: RecordCtx<'_>,
-        cull: CullRegion,
         probe: &mut BreakerProbe<'_>,
         out: &mut Intents,
     ) {
@@ -192,7 +195,7 @@ impl NodeUI {
             if keeps_focus {
                 focus_kept = Some(n.id);
             }
-            if !cull.keeps_node(rcx.geometry().node_world_rect(n))
+            if !rcx.cull().keeps_node(rcx.geometry().node_world_rect(n))
                 && !keeps_focus
                 && self.focus_kept_last != Some(n.id)
             {
@@ -225,7 +228,7 @@ impl NodeUI {
         // recorded has no size yet, so the breaker can't catch it until next
         // frame: acceptable, since the user can't aim at something unpainted.
         let broken = rcx
-            .geometry
+            .geometry()
             .node_world_rect(node)
             .is_some_and(|r| probe.crosses_rect(r));
         if broken {

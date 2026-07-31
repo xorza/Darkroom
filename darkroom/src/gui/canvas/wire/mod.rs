@@ -22,7 +22,6 @@ use palantir::{Color, CurveBrush, LineCap, LinearGradient, Rect, Shape, Size, St
 use scenarium::NodeId;
 
 use crate::gui::canvas::breaker::BreakerProbe;
-use crate::gui::canvas::cull::CullRegion;
 use crate::gui::canvas::geometry::{GlyphKey, PortLayer};
 use crate::gui::canvas::pointer_world;
 use crate::gui::color::toward;
@@ -199,15 +198,14 @@ impl<A: GlyphKey, B: GlyphKey> GlyphDrag<A, B> {
 ///
 /// The pane-wide half is [`RecordCtx`] itself, not a re-declaration of its
 /// fields: the wires record in the same pass as the node bodies they run
-/// between, off the same theme, pane, and geometry, and `WirePass` was built
-/// two lines from a live `RecordCtx`. What's left here is what only a wire
-/// pass has — the cull region, the breaker probe it marks hits against, and
-/// this frame's emphasis tier.
+/// between, off the same theme, pane, geometry and cull, and `WirePass` was
+/// built two lines from a live `RecordCtx`. What's left here is what only a
+/// wire pass has — the breaker probe it marks hits against, and this frame's
+/// emphasis tier.
 #[derive(Debug)]
 pub(super) struct WirePass<'a, 'p> {
     /// Shared with the node-body draws — `Copy`, so it rides along by value.
     pub(super) rcx: RecordCtx<'a>,
-    pub(super) cull: CullRegion,
     pub(super) probe: &'a mut BreakerProbe<'p>,
     pub(super) emphasis: &'a WireEmphasis,
 }
@@ -233,7 +231,7 @@ impl WirePass<'_, '_> {
         endpoint_hover: bool,
         tint: impl FnOnce() -> WireTint,
     ) -> bool {
-        if !self.cull.keeps_wire(wire) {
+        if !self.rcx.cull().keeps_wire(wire) {
             return false;
         }
         let broken = self.probe.crosses_wire(wire);

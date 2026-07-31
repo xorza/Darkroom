@@ -6,10 +6,8 @@ use palantir::{Rect, Shape, Stroke, Ui};
 
 use crate::core::edit::intent::sink::Intents;
 use crate::core::edit::intent::types::GraphIntent;
-use crate::gui::canvas::geometry::CanvasGeometry;
 use crate::gui::canvas::gesture_slot::GestureSlot;
-use crate::gui::canvas::{CanvasGesture, outer_canvas_widget_id, to_world};
-use crate::gui::graph_scope::GraphScope;
+use crate::gui::canvas::{CanvasCtx, CanvasGesture, outer_canvas_widget_id, to_world};
 use crate::gui::theme::Theme;
 
 /// Rubber-band multi-selection. A plain left-drag on empty canvas
@@ -69,7 +67,7 @@ impl RubberBand {
 }
 
 impl SelectionUI {
-    /// The live swept set while a band is in flight over `graph_scope`'s pane,
+    /// The live swept set while a band is in flight over this pane,
     /// for node/pin draw to paint against; `None` for every other pane and
     /// when no band is active (the caller falls back to the pane's
     /// committed selection).
@@ -83,25 +81,17 @@ impl SelectionUI {
     /// the swept set every frame. The set is stashed in `self.preview` so
     /// nodes highlight *live* as the rectangle moves (read back via
     /// [`Self::preview`]); `Document`/undo are only touched once, by the
-    /// committing `SetSelection` emitted on release. `cancelled` — the
-    /// frame's Esc, resolved once by the canvas — drops the band without
-    /// emitting.
+    /// committing `SetSelection` emitted on release. The context's Esc —
+    /// resolved once by the canvas — drops the band without emitting.
     ///
     /// Called once per visible graph pane; a band in flight belongs to
     /// exactly one of them, so every other pane's call returns
     /// immediately rather than advancing the band in its own coordinates.
-    pub(super) fn apply(
-        &mut self,
-        ui: &mut Ui,
-        graph_scope: GraphScope<'_>,
-        geometry: &CanvasGeometry,
-        gesture: Option<CanvasGesture>,
-        cancelled: bool,
-        out: &mut Intents,
-    ) {
+    pub(super) fn apply(&mut self, ui: &mut Ui, cx: CanvasCtx<'_>, out: &mut Intents) {
+        let graph_scope = cx.graph_scope();
         let resp = ui.response_for(outer_canvas_widget_id());
         if self.band.is_idle()
-            && gesture == Some(CanvasGesture::Select)
+            && cx.gesture() == Some(CanvasGesture::Select)
             && let Some(p) = resp.pointer_local
         {
             let w = to_world(p, &graph_scope.viewport());
@@ -120,7 +110,7 @@ impl SelectionUI {
             };
             self.band.latch(band);
         }
-        if cancelled {
+        if cx.cancelled() {
             self.band.clear();
         }
         let Some(mut band) = self.band.take() else {
@@ -143,7 +133,7 @@ impl SelectionUI {
             // The cached-size world rect, so nodes the viewport cull
             // skipped this frame still sweep. Never-measured nodes
             // (first frame) can't be hit yet — skip.
-            let Some(body) = geometry.node_world_rect(n) else {
+            let Some(body) = cx.geometry().node_world_rect(n) else {
                 continue;
             };
             if rect.intersects(body) {
@@ -169,7 +159,7 @@ impl SelectionUI {
 
     /// Paint the in-progress rectangle. Drawn inside the inner canvas so
     /// its world coords ride the same pan/zoom transform as the nodes.
-    /// No-op when no gesture is active on `graph_scope`'s pane or the rect has
+    /// No-op when no gesture is active on this pane or the rect has
     /// no area yet.
     pub(super) fn draw(&self, ui: &mut Ui, theme: &Theme) {
         let Some(band) = self.band.get() else {

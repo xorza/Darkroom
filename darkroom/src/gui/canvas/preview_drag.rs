@@ -18,7 +18,7 @@ use crate::core::edit::intent::sink::Intents;
 use crate::core::preview;
 use crate::gui::canvas::drag_anchor::GroupDrag;
 use crate::gui::canvas::geometry::CanvasGeometry;
-use crate::gui::canvas::preview_drag_modifier;
+use crate::gui::canvas::{CanvasCtx, preview_drag_modifier};
 use crate::gui::graph_scope::GraphScope;
 use crate::gui::node::port_row::{add_preview_intents, port_circle_wid};
 
@@ -32,13 +32,8 @@ impl PreviewDrag {
     /// Swept once per frame over the whole scene: only one pointer drag can be
     /// in flight, and `PortRef` is document-unique, so the pane comes from the
     /// port's own node rather than from the caller.
-    pub(super) fn apply(
-        &mut self,
-        ui: &mut Ui,
-        graph_scope: GraphScope<'_>,
-        geometry: &CanvasGeometry,
-        out: &mut Intents,
-    ) {
+    pub(super) fn apply(&mut self, ui: &mut Ui, cx: CanvasCtx<'_>, out: &mut Intents) {
+        let (graph_scope, geometry) = (cx.graph_scope(), cx.geometry());
         // A live drag owns the frame; only once it ends does the latch scan
         // below get a look at this frame's presses.
         if self.drag.advance(ui, graph_scope, out) || !preview_drag_modifier(ui) {

@@ -19,8 +19,7 @@ use scenarium::{DataType, FsPathConfig, StaticValue};
 
 use crate::core::document::{PortKind, PortRef};
 use crate::core::edit::intent::sink::Intents;
-use crate::gui::canvas::hits::CanvasHits;
-use crate::gui::graph_scope::GraphScope;
+use crate::gui::canvas::CanvasCtx;
 use crate::gui::node::set_input;
 
 /// A click on an `FsPath` input's inline pick button, surfaced for the
@@ -44,12 +43,9 @@ pub(crate) struct PathPickRequest {
 /// path* is a question about the port's type, and answering it needs the
 /// scene. An editor on any other type has no button to click and falls
 /// out here.
-pub(crate) fn emit_path_picks(
-    hits: &CanvasHits,
-    graph_scope: GraphScope<'_>,
-) -> Option<PathPickRequest> {
-    let port = hits.clicked_const_editor()?;
-    let input = graph_scope.node(port.node_id)?.input(port.port_idx)?;
+pub(crate) fn emit_path_picks(cx: CanvasCtx<'_>) -> Option<PathPickRequest> {
+    let port = cx.hits().clicked_const_editor()?;
+    let input = cx.graph_scope().node(port.node_id)?.input(port.port_idx)?;
     if !matches!(
         input.binding(),
         Some(Binding::Const(
@@ -76,15 +72,11 @@ pub(crate) fn emit_path_picks(
 /// a `Const` input's inline editor resizes the node — doing it before Pass A
 /// lets the node arrange at its settled size and the wires re-anchor the same
 /// frame, instead of floating until the relayout pass.
-pub(crate) fn emit_port_dblclicks(
-    hits: &CanvasHits,
-    graph_scope: GraphScope<'_>,
-    out: &mut Intents,
-) {
-    let Some(port) = hits.double_clicked_port() else {
+pub(crate) fn emit_port_dblclicks(cx: CanvasCtx<'_>, out: &mut Intents) {
+    let Some(port) = cx.hits().double_clicked_port() else {
         return;
     };
-    let Some(node) = graph_scope.node(port.node_id) else {
+    let Some(node) = cx.graph_scope().node(port.node_id) else {
         return;
     };
     match port.kind {
@@ -109,7 +101,7 @@ pub(crate) fn emit_port_dblclicks(
         }
         // An output may feed many inputs — clear each consumer.
         PortKind::Output => {
-            for (consumer, producer) in graph_scope.connections() {
+            for (consumer, producer) in cx.graph_scope().connections() {
                 if producer.node_id == port.node_id && producer.port_idx == port.port_idx {
                     out.push(set_input(
                         PortRef {

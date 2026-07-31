@@ -9,7 +9,7 @@ use crate::core::edit::intent::types::GraphIntent;
 use crate::gui::canvas::geometry::CanvasGeometry;
 use crate::gui::canvas::gesture_slot::GestureSlot;
 use crate::gui::canvas::wire::{GlyphDrag, Wire, WirePass, WireTint};
-use crate::gui::canvas::{outer_canvas_widget_id, preview_drag_modifier};
+use crate::gui::canvas::{CanvasCtx, outer_canvas_widget_id, preview_drag_modifier};
 use crate::gui::graph_scope::GraphScope;
 use crate::gui::node::port_color::port_color;
 use crate::gui::node::set_input;
@@ -69,8 +69,8 @@ impl ConnectionUI {
     /// empty canvas opens the new-node palette instead of dropping, and
     /// `resume` (the source of such a wire, after its node was picked)
     /// re-enters [`DragMode::Floating`] so the user clicks the exact port
-    /// to land it. `cancelled` — the frame's Esc, resolved once by the
-    /// canvas — drops either mode without emitting anything.
+    /// to land it. The context's Esc — resolved once by the canvas — drops
+    /// either mode without emitting anything.
     ///
     /// Swept over the whole scene once per frame. The latch scan spans
     /// every pane (only one press exists), but everything after it runs
@@ -80,12 +80,11 @@ impl ConnectionUI {
     pub(super) fn apply(
         &mut self,
         ui: &mut Ui,
-        graph_scope: GraphScope<'_>,
-        geometry: &CanvasGeometry,
+        cx: CanvasCtx<'_>,
         resume: Option<PortRef>,
-        cancelled: bool,
         out: &mut Intents,
     ) {
+        let (graph_scope, geometry) = (cx.graph_scope(), cx.geometry());
         self.ended_on_secondary = false;
 
         // A dropped wire whose palette pick spawned a node resumes floating.
@@ -113,7 +112,7 @@ impl ConnectionUI {
                 mode: DragMode::Held,
             });
         }
-        if cancelled {
+        if cx.cancelled() {
             self.state.clear();
         }
         let Some(mut state) = self.state.take() else {
@@ -240,13 +239,8 @@ impl ConnectionUI {
     /// center to either the snapped target's center (when set) or the
     /// pointer position. Drawn inside the inner canvas so coordinates
     /// share the pan/zoom transform with permanent connections.
-    pub(super) fn draw_in_flight(
-        &self,
-        ui: &mut Ui,
-        graph_scope: GraphScope<'_>,
-        geometry: &CanvasGeometry,
-        canvas_origin: Vec2,
-    ) {
+    pub(super) fn draw_in_flight(&self, ui: &mut Ui, cx: CanvasCtx<'_>, canvas_origin: Vec2) {
+        let (graph_scope, geometry) = (cx.graph_scope(), cx.geometry());
         // Scoped: the preview belongs to the pane holding the wire's
         // start node. Unscoped, every *other* pane also drew it — from
         // its own `canvas_origin` and under its own transform, so the

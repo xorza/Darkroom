@@ -2,9 +2,8 @@ use glam::Vec2;
 use palantir::{ClickOutside, Configure, Popup, PopupHandle, Sizing, Ui};
 use scenarium::NodeId;
 
+use crate::gui::canvas::CanvasCtx;
 use crate::gui::canvas::gesture_slot::GestureSlot;
-use crate::gui::canvas::hits::CanvasHits;
-use crate::gui::graph_scope::GraphScope;
 
 /// Shared open/close lifecycle + chrome for the canvas's anchored context
 /// popups (the node menu, graph-badge menu, and new-node palette). Owns
@@ -96,7 +95,7 @@ impl AnchoredMenu {
 ///
 /// What the caller still owns is the items and where a pick goes — an
 /// `AppCommand`, a `GraphIntent`, or a stash for the `Editor` to resolve. Which
-/// nodes offer the menu at all is settled by [`CanvasHits::scan`].
+/// nodes offer the menu at all is settled by [`CanvasHits::scan`](crate::gui::canvas::hits::CanvasHits::scan).
 #[derive(Default, Debug)]
 pub(super) struct NodeContextMenu {
     menu: AnchoredMenu,
@@ -112,14 +111,12 @@ impl NodeContextMenu {
     ///
     /// The hit comes from this frame's sweep, which already applied the trigger
     /// widget's draw guard; all that is left here is confirming the node still
-    /// belongs to `graph_scope` — the sweep ran against last frame's projection.
-    pub(super) fn latch(
-        &mut self,
-        ui: &mut Ui,
-        hits: &CanvasHits,
-        graph_scope: GraphScope<'_>,
-    ) -> Option<NodeId> {
-        let clicked = hits.menu().filter(|&id| graph_scope.contains(id))?;
+    /// belongs to `cx`'s pane — the sweep ran against last frame's projection.
+    pub(super) fn latch(&mut self, ui: &mut Ui, cx: CanvasCtx<'_>) -> Option<NodeId> {
+        let clicked = cx
+            .hits()
+            .menu()
+            .filter(|&id| cx.graph_scope().contains(id))?;
         // A press that opened the menu has a pointer position by construction;
         // the `?` is only for the frames where the pointer left the window
         // between the click and this read.
