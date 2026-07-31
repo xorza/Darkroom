@@ -11,7 +11,7 @@ use crate::gui::widgets::support::{
 use scenarium::RamUsage;
 
 use crate::gui::format::fmt_bytes;
-use crate::gui::node::NodeCtx;
+use crate::gui::node::ctx::NodeCtx;
 use crate::gui::theme::Theme;
 
 const DOT: f32 = 6.0;

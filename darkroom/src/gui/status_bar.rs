@@ -14,7 +14,7 @@ use palantir::{
 };
 use scenarium::RamUsage;
 
-use crate::gui::app::AppCtx;
+use crate::gui::app::ctx::AppCtx;
 use crate::gui::format::fmt_bytes;
 use crate::gui::widgets::support::{colored_text, hspacer, muted_text};
 

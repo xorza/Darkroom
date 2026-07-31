@@ -2,6 +2,7 @@ mod anchored_menu;
 mod background;
 pub(crate) mod breaker;
 mod connection_ui;
+pub(crate) mod ctx;
 pub(crate) mod cull;
 pub(crate) mod drag_anchor;
 pub(crate) mod geometry;
@@ -33,6 +34,7 @@ use crate::gui::app::commands::run::RunCommand;
 use crate::gui::canvas::background::CanvasBackground;
 use crate::gui::canvas::breaker::BreakerUI;
 use crate::gui::canvas::connection_ui::ConnectionUI;
+use crate::gui::canvas::ctx::{CanvasCtx, DrawCtx};
 use crate::gui::canvas::cull::CullRegion;
 use crate::gui::canvas::geometry::CanvasGeometry;
 use crate::gui::canvas::gesture_slot::GestureSlot;
@@ -46,9 +48,8 @@ use crate::gui::canvas::subscription_ui::SubscriptionUI;
 use crate::gui::canvas::wire::{WireEmphasis, WirePass};
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::graph_toolbar;
+use crate::gui::node::NodeUI;
 use crate::gui::node::prepass::{emit_path_picks, emit_port_dblclicks};
-use crate::gui::node::{DrawCtx, NodeUI};
-use crate::gui::theme::Theme;
 
 /// Canvas-level UI state, shared by **every** graph pane on screen: the
 /// port-widget-id cache, the `NodeUI` that renders graph nodes, the
@@ -128,92 +129,6 @@ pub(crate) struct GraphUI {
     /// (`background`, `geometry`) sitting beside this field survive by
     /// construction.
     gestures: Gestures,
-}
-
-/// One graph pane's canvas for this frame: the pane itself, plus the four
-/// facts [`GraphUI::prepass`] resolves once and every controller then reads —
-/// last frame's port geometry, this frame's swept node hits, the bare-canvas
-/// gesture that latched, and whether Esc cancelled it.
-///
-/// The canvas level of the context chain, derived from the pane's
-/// [`GraphCtx`] and answering everything that one does. Before it, each
-/// controller took those four as parameters and the compiler had no way to
-/// say they all described the same frame.
-///
-/// **It exists only once the geometry is settled.** The table is borrowed
-/// shared for the context's whole life, so the two prepass steps that run
-/// *before* [`CanvasGeometry::rebuild`] — pan/zoom and the node-drag advance —
-/// take the graph context directly, and `bake_snap_hover` (which needs the table
-/// `&mut` again) ends it. That ordering is the point rather than an
-/// inconvenience: a controller holding one of these cannot be reading a
-/// geometry someone is still writing.
-#[derive(Clone, Copy, Debug)]
-pub(super) struct CanvasCtx<'a> {
-    graph_ctx: GraphCtx<'a>,
-    geometry: &'a CanvasGeometry,
-    hits: &'a CanvasHits,
-    gesture: Option<CanvasGesture>,
-    cancelled: bool,
-}
-
-impl<'a> CanvasCtx<'a> {
-    fn new(
-        graph_ctx: GraphCtx<'a>,
-        geometry: &'a CanvasGeometry,
-        hits: &'a CanvasHits,
-        gesture: Option<CanvasGesture>,
-        cancelled: bool,
-    ) -> Self {
-        Self {
-            graph_ctx,
-            geometry,
-            hits,
-            gesture,
-            cancelled,
-        }
-    }
-
-    pub(super) fn graph_ctx(self) -> GraphCtx<'a> {
-        self.graph_ctx
-    }
-
-    pub(super) fn theme(self) -> &'a Theme {
-        self.graph_ctx.theme()
-    }
-
-    /// Last frame's port centers and node rects.
-    pub(super) fn geometry(self) -> &'a CanvasGeometry {
-        self.geometry
-    }
-
-    /// This frame's swept node interactions.
-    pub(super) fn hits(self) -> &'a CanvasHits {
-        self.hits
-    }
-
-    /// Which bare-canvas gesture latched this frame, if any. Canvas-private:
-    /// the classification is this module's arbitration, and no reader outside
-    /// it has a use for the answer.
-    fn gesture(self) -> Option<CanvasGesture> {
-        self.gesture
-    }
-
-    /// Whether this frame's Esc cancels whatever gesture is in flight.
-    fn cancelled(self) -> bool {
-        self.cancelled
-    }
-
-    /// The same canvas with no gesture latched — for the one reader that has
-    /// to be told this frame's gesture is not for it (a right-click that just
-    /// ended a floating wire must not also open the palette). A derived
-    /// context rather than a `gesture` parameter beside this one, so there is
-    /// still exactly one answer in scope at the call site.
-    fn without_gesture(self) -> Self {
-        Self {
-            gesture: None,
-            ..self
-        }
-    }
 }
 
 /// The resettable, one-gesture-lifetime controllers. Everything here is

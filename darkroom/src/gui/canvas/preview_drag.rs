@@ -16,9 +16,10 @@ use scenarium::NodeId;
 use crate::core::document::{PortKind, PortRef};
 use crate::core::edit::intent::sink::Intents;
 use crate::core::preview;
+use crate::gui::canvas::ctx::CanvasCtx;
 use crate::gui::canvas::drag_anchor::GroupDrag;
 use crate::gui::canvas::geometry::CanvasGeometry;
-use crate::gui::canvas::{CanvasCtx, preview_drag_modifier};
+use crate::gui::canvas::preview_drag_modifier;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::node::port_row::{add_preview_intents, port_circle_wid};
 

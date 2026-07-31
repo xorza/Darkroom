@@ -313,7 +313,7 @@ impl ThemeChoice {
 }
 
 /// Visual palette + layout dimensions for darkroom's UI. Owned by `App`,
-/// handed to every UI subtree through [`crate::gui::app::AppCtx`] and the
+/// handed to every UI subtree through [`crate::gui::app::ctx::AppCtx`] and the
 /// contexts derived from it, so call sites read off a single source
 /// instead of hard-coded constants. Layout fields live here too —
 /// node ports, value editors, etc. — so a theme swap can restyle

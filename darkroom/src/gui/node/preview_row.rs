@@ -16,7 +16,7 @@ use palantir::{
 use scenarium::NodeId;
 
 use crate::gui::format::fmt_bytes;
-use crate::gui::node::NodeCtx;
+use crate::gui::node::ctx::NodeCtx;
 use crate::gui::preview_store::{PreviewImage, StoredContent};
 use crate::gui::theme::Theme;
 use crate::gui::widgets::support::{

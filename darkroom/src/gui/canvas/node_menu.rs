@@ -6,8 +6,8 @@ use crate::core::edit::intent::sink::Intents;
 use crate::core::edit::intent::types::GraphIntent;
 use crate::gui::app::commands::AppCommand;
 use crate::gui::app::commands::run::RunCommand;
-use crate::gui::canvas::CanvasCtx;
 use crate::gui::canvas::anchored_menu::NodeContextMenu;
+use crate::gui::canvas::ctx::CanvasCtx;
 
 /// Right-click on a node body → a small popup with actions on the node.
 /// The trigger scan, the per-open node latch, and the popup lifecycle are all

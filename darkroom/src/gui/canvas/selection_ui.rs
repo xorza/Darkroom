@@ -6,8 +6,9 @@ use palantir::{Rect, Shape, Stroke, Ui};
 
 use crate::core::edit::intent::sink::Intents;
 use crate::core::edit::intent::types::GraphIntent;
+use crate::gui::canvas::ctx::CanvasCtx;
 use crate::gui::canvas::gesture_slot::GestureSlot;
-use crate::gui::canvas::{CanvasCtx, CanvasGesture, outer_canvas_widget_id, to_world};
+use crate::gui::canvas::{CanvasGesture, outer_canvas_widget_id, to_world};
 use crate::gui::theme::Theme;
 
 /// Rubber-band multi-selection. A plain left-drag on empty canvas

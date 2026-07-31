@@ -5,7 +5,7 @@ use scenarium::NodeId;
 use crate::core::edit::intent::sink::Intents;
 use crate::core::edit::intent::types::GraphIntent;
 use crate::gui::EventRef;
-use crate::gui::canvas::CanvasCtx;
+use crate::gui::canvas::ctx::CanvasCtx;
 use crate::gui::canvas::geometry::CanvasGeometry;
 use crate::gui::canvas::gesture_slot::GestureSlot;
 use crate::gui::canvas::wire::{GlyphDrag, Wire, WirePass, WireTint};

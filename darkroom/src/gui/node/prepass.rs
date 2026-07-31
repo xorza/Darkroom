@@ -19,7 +19,7 @@ use scenarium::{DataType, FsPathConfig, StaticValue};
 
 use crate::core::document::{PortKind, PortRef};
 use crate::core::edit::intent::sink::Intents;
-use crate::gui::canvas::CanvasCtx;
+use crate::gui::canvas::ctx::CanvasCtx;
 use crate::gui::node::set_input;
 
 /// A click on an `FsPath` input's inline pick button, surfaced for the
