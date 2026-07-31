@@ -58,6 +58,18 @@ impl TestGraph {
         Self::default()
     }
 
+    /// A fixture over a library built elsewhere, holding no nodes yet.
+    ///
+    /// For the production libraries — `system_library` and friends — whose
+    /// funcs a test cannot state with [`NodeSpec`] because their bodies *are*
+    /// the subject.
+    pub fn over(library: Library) -> Self {
+        Self {
+            library,
+            ..Default::default()
+        }
+    }
+
     /// Declare a func and instantiate one node of it under `name`.
     ///
     /// The node is seeded with its declaration's default const bindings, the
@@ -81,6 +93,22 @@ impl TestGraph {
             .clone();
         let node_id = self.place(func_node(&func), &func);
         self.bind_name(name, node_id);
+        node_id
+    }
+
+    /// Instantiate one node of the declaration `func_name`, which the library
+    /// already holds, under that same name.
+    ///
+    /// The counterpart to [`add`](Self::add) for a func the fixture did not
+    /// write — see [`over`](Self::over).
+    pub fn add_declared(&mut self, func_name: &str) -> NodeId {
+        let func = self
+            .library
+            .by_name(func_name)
+            .unwrap_or_else(|| panic!("the library declares no func named {func_name:?}"))
+            .clone();
+        let node_id = self.place(func_node(&func), &func);
+        self.bind_name(func_name, node_id);
         node_id
     }
 
