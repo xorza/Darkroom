@@ -19,12 +19,14 @@ use std::sync::Arc;
 use hashbrown::HashMap;
 
 use crate::async_lambda;
+use crate::graph::detached::DetachedNode;
 use crate::graph::func::error::InvokeError;
 use crate::graph::func::event::EventLambda;
 use crate::graph::func::lambda::{FuncLambda, Invocation};
 use crate::graph::func::{Func, FuncInput, FuncOutput};
 use crate::graph::identity::{FuncId, InputPort, NodeId};
-use crate::graph::node::{CacheMode, NodeKind};
+use crate::graph::node::special::SpecialNode;
+use crate::graph::node::{CacheMode, Node, NodeKind};
 use crate::graph::{Binding, Graph};
 use crate::library::Library;
 use crate::testing::{TestFuncHooks, test_func_lib, test_graph};
@@ -41,6 +43,14 @@ pub struct TestGraph {
     pub graph: Graph,
     pub library: Library,
     ids: HashMap<String, NodeId>,
+    /// The next identity to mint. Ids **ascend with declaration order**, which
+    /// a compile then places in — so a fixture's nodes land in the order the
+    /// test wrote them, and an assertion about schedule order is reproducible.
+    ///
+    /// Minting `NodeId::unique()` here instead would make the dense index space
+    /// depend on how four random uuids happened to sort, and any test naming a
+    /// run order would pass or fail per process.
+    next_id: u128,
 }
 
 impl TestGraph {
@@ -53,9 +63,9 @@ impl TestGraph {
     /// The node is seeded with its declaration's default const bindings, the
     /// way `Graph::add_func_node` does for an editor.
     pub fn add(&mut self, name: &str, spec: impl FnOnce(NodeSpec) -> NodeSpec) -> NodeId {
-        let func = spec(NodeSpec::new(name)).func;
+        let func = spec(NodeSpec::new(name, FuncId::from_u128(self.mint()))).func;
         self.library.add(func.clone());
-        let node_id = self.graph.add_func_node(&func);
+        let node_id = self.place(func_node(&func), &func);
         self.bind_name(name, node_id);
         node_id
     }
@@ -69,9 +79,31 @@ impl TestGraph {
             .by_id(self.func_id(of))
             .expect("the named node's func is registered")
             .clone();
-        let node_id = self.graph.add_func_node(&func);
+        let node_id = self.place(func_node(&func), &func);
         self.bind_name(name, node_id);
         node_id
+    }
+
+    /// Place a built-in [`SpecialNode`], whose declaration is hardcoded rather
+    /// than registered.
+    pub fn add_special(&mut self, name: &str, special: SpecialNode) -> NodeId {
+        let mut node = Node::new(NodeKind::Special(special));
+        node.name = name.to_owned();
+        let node_id = NodeId::from_u128(self.mint());
+        self.graph.insert(node_id, node);
+        self.bind_name(name, node_id);
+        node_id
+    }
+
+    /// Remove a node and every edge that touched it, freeing its name.
+    ///
+    /// The declaration stays registered: a library outliving the nodes that
+    /// used it is the ordinary case, and re-adding under the same name would
+    /// otherwise collide on the func id.
+    pub fn remove(&mut self, name: &str) -> DetachedNode {
+        let node_id = self.id(name);
+        self.ids.remove(name);
+        self.graph.detach_node(node_id)
     }
 
     /// Adopt a graph and library built elsewhere, taking each node's name from
@@ -86,6 +118,7 @@ impl TestGraph {
             graph,
             library,
             ids,
+            next_id: 0,
         }
     }
 
@@ -143,12 +176,28 @@ impl TestGraph {
         self.graph.subscribe(emitter, event_idx, subscriber);
     }
 
+    pub fn unsubscribe(&mut self, emitter: &str, event_idx: usize, subscriber: &str) {
+        let (emitter, subscriber) = (self.id(emitter), self.id(subscriber));
+        self.graph.unsubscribe(emitter, event_idx, subscriber);
+    }
+
     pub fn disable(&mut self, name: &str) {
         self.node_mut(name).disabled = true;
     }
 
     pub fn cache(&mut self, name: &str, mode: CacheMode) {
         self.node_mut(name).cache = mode;
+    }
+
+    /// Put every node on one cache mode — how a test states "nothing is
+    /// retained here" without listing the graph.
+    pub fn cache_all(&mut self, mode: CacheMode) {
+        for node_id in self.ids.values().copied().collect::<Vec<_>>() {
+            self.graph
+                .find_mut(node_id)
+                .expect("a named node is in the graph")
+                .cache = mode;
+        }
     }
 
     /// Edit the declaration `name` instantiates, in place.
@@ -190,10 +239,29 @@ impl TestGraph {
             .expect("a named node is in the graph")
     }
 
+    /// Place `node` under the next ascending id, seeding its declared const
+    /// defaults the way `Graph::add_func_node` does for an editor.
+    fn place(&mut self, node: Node, func: &Func) -> NodeId {
+        let node_id = NodeId::from_u128(self.mint());
+        self.graph.insert(node_id, node);
+        self.graph.bindings.extend(func.default_bindings(node_id));
+        node_id
+    }
+
+    fn mint(&mut self) -> u128 {
+        self.next_id += 1;
+        self.next_id
+    }
+
     fn bind_name(&mut self, name: &str, node_id: NodeId) {
         let previous = self.ids.insert(name.to_owned(), node_id);
         assert!(previous.is_none(), "a fixture reused the name {name:?}");
     }
+}
+
+/// A bare node of `func`, before its id is chosen.
+fn func_node(func: &Func) -> Node {
+    Node::from(func)
 }
 
 /// One node's declaration under construction — [`Func`]'s builders, plus the
@@ -207,11 +275,11 @@ pub struct NodeSpec {
 }
 
 impl NodeSpec {
-    fn new(name: &str) -> Self {
+    fn new(name: &str, func_id: FuncId) -> Self {
         // A stub body by default, because `Library::add` rejects a func with
         // no implementation and most fixtures never invoke one.
         Self {
-            func: Func::new(FuncId::unique(), name).lambda(async_lambda!(|_| { Ok(()) })),
+            func: Func::new(func_id, name).lambda(async_lambda!(|_| { Ok(()) })),
         }
     }
 
@@ -320,6 +388,10 @@ impl NodeSpec {
     /// A sink that logs whatever reaches it, readable back off the run's
     /// [`logs`](crate::execution::report::ExecutionOutcome) — how a fixture
     /// observes that a node ran *and* what it saw, without a shared hook.
+    ///
+    /// **Declares its own port**: one required `Any` input, which is the one it
+    /// logs. Adding another input before this leaves that port unfed, which
+    /// blocks the node rather than logging anything.
     pub fn records(self) -> Self {
         self.sink().input(DataType::Any).lambda(async_lambda!(
             move |Invocation { ctx, inputs, .. }| {
