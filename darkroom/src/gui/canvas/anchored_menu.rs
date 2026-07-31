@@ -2,7 +2,7 @@ use glam::Vec2;
 use palantir::{ClickOutside, Configure, Popup, PopupHandle, Sizing, Ui};
 use scenarium::NodeId;
 
-use crate::gui::canvas::CanvasCtx;
+use crate::gui::canvas::ctx::CanvasCtx;
 use crate::gui::canvas::gesture_slot::GestureSlot;
 
 /// Shared open/close lifecycle + chrome for the canvas's anchored context

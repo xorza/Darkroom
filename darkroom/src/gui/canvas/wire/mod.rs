@@ -22,11 +22,11 @@ use palantir::{Color, CurveBrush, LineCap, LinearGradient, Rect, Shape, Size, St
 use scenarium::NodeId;
 
 use crate::gui::canvas::breaker::BreakerProbe;
+use crate::gui::canvas::ctx::DrawCtx;
 use crate::gui::canvas::geometry::{GlyphKey, PortLayer};
 use crate::gui::canvas::pointer_world;
 use crate::gui::color::toward;
 use crate::gui::graph_ctx::GraphCtx;
-use crate::gui::node::DrawCtx;
 
 /// Minimum length of a wire's bezier control handles, so a short or backward
 /// link still bows out into a readable curve.

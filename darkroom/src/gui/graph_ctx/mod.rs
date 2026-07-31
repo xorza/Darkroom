@@ -27,7 +27,7 @@ use std::collections::BTreeSet;
 use scenarium::{Graph, InputPort, Library, NodeId, OutputPort, OutputTypes, Subscription};
 
 use crate::core::document::{Document, GraphView, Viewport};
-use crate::gui::app::AppCtx;
+use crate::gui::app::ctx::AppCtx;
 use crate::gui::graph_ctx::node_scope::NodeScope;
 use crate::gui::run_state::RunState;
 use crate::gui::theme::Theme;
@@ -201,7 +201,7 @@ pub(crate) mod internals {
     use scenarium::{FuncId, Library, Node, NodeId, NodeKind, OutputTypes};
 
     use crate::core::document::Document;
-    use crate::gui::app::{AppCtx, StatusInputs};
+    use crate::gui::app::ctx::{AppCtx, StatusInputs};
     use crate::gui::graph_ctx::GraphCtx;
     use crate::gui::run_state::RunState;
     use crate::gui::theme::Theme;

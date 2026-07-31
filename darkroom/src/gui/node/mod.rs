@@ -1,3 +1,4 @@
+pub(crate) mod ctx;
 pub(super) mod header;
 mod memory_row;
 pub(super) mod port_color;
@@ -9,21 +10,17 @@ mod value_editor;
 use crate::core::document::PortRef;
 use crate::core::edit::intent::sink::Intents;
 use crate::core::edit::intent::types::GraphIntent;
-use crate::gui::canvas::CanvasCtx;
 use crate::gui::canvas::breaker::BreakerProbe;
-use crate::gui::canvas::cull::CullRegion;
+use crate::gui::canvas::ctx::DrawCtx;
 use crate::gui::canvas::drag_anchor::GroupDrag;
 use crate::gui::canvas::drag_anchor::selected_group_positions;
-use crate::gui::canvas::geometry::CanvasGeometry;
-use crate::gui::canvas::hits::CanvasHits;
-use crate::gui::canvas::inspector::Inspectors;
 use crate::gui::graph_ctx::GraphCtx;
-use crate::gui::graph_ctx::node_scope::NodeScope;
+use crate::gui::node::ctx::NodeCtx;
 use crate::gui::node::header::{header, status_row, subscription_pin};
 use crate::gui::node::memory_row::memory_row;
 use crate::gui::node::port_row::ports_row;
 use crate::gui::run_state::ExecStatus;
-use crate::gui::theme::{StaticValueEditorTheme, Theme};
+use crate::gui::theme::Theme;
 use glam::Vec2;
 use palantir::{
     Background, Color, Configure, Corners, Panel, Sense, Shadow, Sizing, Stroke, Track, Ui,
@@ -33,186 +30,6 @@ use scenarium::Binding;
 use scenarium::InputPort;
 use scenarium::NodeId;
 use std::collections::BTreeSet;
-
-/// Read-only context threaded top to bottom through everything one graph
-/// pane records. `Copy` (a canvas context plus three shared refs), so it's
-/// passed by value — copying it while a borrow of the scene's node pool is
-/// live is fine, which keeps `draw_all`'s node loop borrow-clean. The mutable
-/// sinks (`out`, `actions`) and the breaker `probe` stay separate params.
-///
-/// The draw level of the context chain: derived from the pane's
-/// [`CanvasCtx`], and answering everything that one does — theme, geometry,
-/// hits, the pane itself — so the node subtree names no other context. What
-/// it adds is what only the *paint* pass knows: which nodes read as selected
-/// this frame, which panels are open, and what the viewport keeps. The
-/// canvas-level draws that sit in the same pass and want the same refs — the
-/// inspection panels ([`crate::gui::canvas::inspector`]) — take it too,
-/// rather than each growing its own near-identical bundle.
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct DrawCtx<'a> {
-    /// The one canvas this record pass is drawing, and how the pass reaches
-    /// the theme, the geometry, the pane and its library and run: all of it
-    /// is already inside, so holding any of it again beside this would be two
-    /// paths to one ref. Every other pane on screen gets its own `DrawCtx`,
-    /// so nothing here can reach across.
-    canvas: CanvasCtx<'a>,
-    /// Effective selection to paint: the graph's committed set
-    /// ([`GraphCtx::selected`]) or, mid-rubber-band, the live swept
-    /// preview owned by `SelectionUI` — one type, so the draw substitutes
-    /// them without caring which it got, and the gesture never writes its
-    /// preview into the document.
-    selected: &'a BTreeSet<NodeId>,
-    /// Open inspection panels, so the header chip can render its
-    /// open/pinned state.
-    inspectors: &'a Inspectors,
-    /// What this pane's viewport keeps. Carried here rather than passed
-    /// beside the context because every reader of one is a reader of the
-    /// other: a pass that records nodes decides per node whether to.
-    cull: CullRegion,
-}
-
-impl<'a> DrawCtx<'a> {
-    pub(super) fn new(
-        canvas: CanvasCtx<'a>,
-        selected: &'a BTreeSet<NodeId>,
-        inspectors: &'a Inspectors,
-        cull: CullRegion,
-    ) -> Self {
-        Self {
-            canvas,
-            selected,
-            inspectors,
-            cull,
-        }
-    }
-
-    /// The palette and metrics this pass paints from, off the pane's context.
-    pub(crate) fn theme(self) -> &'a Theme {
-        self.canvas.theme()
-    }
-
-    pub(crate) fn graph_ctx(self) -> GraphCtx<'a> {
-        self.canvas.graph_ctx()
-    }
-
-    pub(crate) fn selected(self) -> &'a BTreeSet<NodeId> {
-        self.selected
-    }
-
-    pub(crate) fn geometry(self) -> &'a CanvasGeometry {
-        self.canvas.geometry()
-    }
-
-    /// This frame's swept node interactions — the node body reads its
-    /// drag latch from here rather than re-polling its own handles.
-    pub(crate) fn hits(self) -> &'a CanvasHits {
-        self.canvas.hits()
-    }
-
-    pub(crate) fn inspectors(self) -> &'a Inspectors {
-        self.inspectors
-    }
-
-    pub(crate) fn cull(self) -> CullRegion {
-        self.cull
-    }
-
-    /// Whether `key` paints selected this pass.
-    pub(crate) fn is_selected(self, key: NodeId) -> bool {
-        self.selected.contains(&key)
-    }
-
-    /// Narrow this pass to one node — the context its own subtree records
-    /// against. Resolves the pointer-over-node question here, once, for
-    /// everything below that asks it.
-    pub(super) fn node<'n: 'a>(self, ui: &Ui, node: NodeScope<'n>) -> NodeCtx<'a> {
-        NodeCtx {
-            draw: self,
-            node,
-            hovered: node_hovered(ui, node.id),
-        }
-    }
-}
-
-/// One node of one graph pane, as its own subtree records it: the pane's
-/// [`DrawCtx`] plus the node and whether the pointer is over it.
-///
-/// The leaf level of the context chain, and the one where the *item* is the
-/// level — every function below a node body is about that node, so passing it
-/// beside the context would be the same argument twice.
-///
-/// **Why the hover lives here.** Two things hang off it — the const editors'
-/// hover-revealed chips ([`Self::sve`]) and whether the port rows build their
-/// tooltips at all ([`Self::tips`]) — and both used to be resolved in
-/// `ports_row` and threaded down as a `&StaticValueEditorTheme` and a `bool`
-/// that no signature said were the same fact. Resolving it at the node body
-/// instead costs one extra [`hover_within`](palantir::Ui::hover_within) for a
-/// node with no ports (which returns before it would have asked); that read is
-/// a hover-target comparison, not a rect test, so it is a lookup either way.
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct NodeCtx<'a> {
-    draw: DrawCtx<'a>,
-    node: NodeScope<'a>,
-    hovered: bool,
-}
-
-impl<'a> NodeCtx<'a> {
-    pub(crate) fn node(self) -> NodeScope<'a> {
-        self.node
-    }
-
-    pub(crate) fn theme(self) -> &'a Theme {
-        self.draw.theme()
-    }
-
-    pub(crate) fn graph_ctx(self) -> GraphCtx<'a> {
-        self.draw.graph_ctx()
-    }
-
-    pub(crate) fn geometry(self) -> &'a CanvasGeometry {
-        self.draw.geometry()
-    }
-
-    pub(crate) fn hits(self) -> &'a CanvasHits {
-        self.draw.hits()
-    }
-
-    pub(crate) fn inspectors(self) -> &'a Inspectors {
-        self.draw.inspectors()
-    }
-
-    /// Whether this node paints selected.
-    pub(crate) fn is_selected(self) -> bool {
-        self.draw.is_selected(self.node.id)
-    }
-
-    /// The pane-wide draw this node belongs to — for the readers that want
-    /// something about the whole pane rather than this node, like the
-    /// effective selection *set* a group drag snapshots.
-    pub(crate) fn draw_ctx(self) -> DrawCtx<'a> {
-        self.draw
-    }
-
-    /// Whether the port rows build their hover tooltips: their text is
-    /// composed per port per frame, and no port can be showing one while the
-    /// pointer is elsewhere, so only the node under it pays.
-    pub(crate) fn tips(self) -> bool {
-        self.hovered
-    }
-
-    /// The const-editor styling this node's value cells paint with. Pointer
-    /// over the node surfaces the (otherwise invisible) chips at half
-    /// strength — the edit affordance appears exactly when the pointer is in
-    /// the neighborhood, and geometry never changes.
-    pub(crate) fn sve(self) -> &'a StaticValueEditorTheme {
-        let theme = self.theme();
-        if self.hovered {
-            &theme.static_value_editor_revealed
-        } else {
-            &theme.static_value_editor
-        }
-    }
-}
 
 /// Owns rendering of every graph node plus the single active drag
 /// anchor — the press-frame positions are snapshotted here so each
@@ -292,7 +109,7 @@ impl NodeUI {
             {
                 continue;
             }
-            self.draw_one(ui, dcx.node(ui, n), probe, out);
+            self.draw_one(ui, NodeCtx::for_node(dcx, ui, n), probe, out);
         }
         self.focus_kept_last = focus_kept;
         // Belt-and-braces against a node deleted mid-drag; `prepass` makes
@@ -524,9 +341,10 @@ pub(crate) fn drag_handles(node_id: NodeId) -> impl Iterator<Item = WidgetId> {
 ///
 /// Resolved against *last* frame's hover target and cascade, so the answer
 /// doesn't depend on where in this frame's record it is asked — which is what
-/// lets [`DrawCtx::node`] settle it at the node body, before the subtree
+/// lets [`NodeCtx::for_node`](crate::gui::node::ctx::NodeCtx::for_node) settle
+/// it at the node body, before the subtree
 /// that reads it has recorded.
-fn node_hovered(ui: &Ui, node_id: NodeId) -> bool {
+pub(super) fn node_hovered(ui: &Ui, node_id: NodeId) -> bool {
     ui.hover_within(node_widget_id(node_id))
 }
 

@@ -4,7 +4,7 @@ use scenarium::{Library, NodeId, OutputTypes};
 
 use super::*;
 use crate::core::document::Document;
-use crate::gui::app::{AppCtx, StatusInputs};
+use crate::gui::app::ctx::{AppCtx, StatusInputs};
 use crate::gui::canvas::hits::CanvasHits;
 use crate::gui::run_state::RunState;
 

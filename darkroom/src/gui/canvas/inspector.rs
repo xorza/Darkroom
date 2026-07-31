@@ -31,10 +31,13 @@ use scenarium::Library;
 use scenarium::LogLevel;
 use scenarium::NodeId;
 
+use crate::gui::canvas::ctx::CanvasCtx;
+use crate::gui::canvas::ctx::DrawCtx;
 use crate::gui::canvas::hits::{CanvasHits, Chip};
-use crate::gui::canvas::{CanvasCtx, outer_canvas_widget_id};
+use crate::gui::canvas::outer_canvas_widget_id;
 use crate::gui::format::fmt_elapsed;
-use crate::gui::node::{DrawCtx, NodeCtx, exec_color};
+use crate::gui::node::ctx::NodeCtx;
+use crate::gui::node::exec_color;
 use crate::gui::run_state::ExecStatus;
 use crate::gui::theme::Theme;
 use crate::gui::widgets::support::{colored_text, sized_text};
@@ -135,7 +138,7 @@ impl Inspectors {
                 .map(|r| r.size.w)
                 .unwrap_or(theme.node_min_width);
             let pos = node.pos + Vec2::new(node_w + theme.floating_widget_gap, 0.0);
-            self.draw_one(ui, dcx.node(ui, node), mode, pos);
+            self.draw_one(ui, NodeCtx::for_node(dcx, ui, node), mode, pos);
         }
     }
 

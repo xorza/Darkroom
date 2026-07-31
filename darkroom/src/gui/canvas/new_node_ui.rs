@@ -15,7 +15,8 @@ use crate::core::document::PortRef;
 use crate::core::edit::intent::sink::Intents;
 use crate::core::edit::intent::types::GraphIntent;
 use crate::gui::canvas::anchored_menu::AnchoredMenu;
-use crate::gui::canvas::{CanvasCtx, CanvasGesture, outer_canvas_widget_id, to_world};
+use crate::gui::canvas::ctx::CanvasCtx;
+use crate::gui::canvas::{CanvasGesture, outer_canvas_widget_id, to_world};
 use crate::gui::graph_ctx::GraphCtx;
 
 /// One row of a category's palette list: a library `Func` or a built-in

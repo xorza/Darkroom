@@ -28,7 +28,7 @@ use crate::gui::app::commands::shell::ShellCommand;
 use crate::gui::canvas::node_menu::NodeMenuAction;
 use crate::gui::main_window::MainWindow;
 
-use crate::gui::app::AppCtx;
+use crate::gui::app::ctx::AppCtx;
 
 #[cfg(test)]
 pub(crate) mod harness;

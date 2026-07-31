@@ -9,7 +9,7 @@ use scenarium::{
 use crate::core::document::{Document, GraphView, PortKind, PortRef};
 use crate::core::edit::intent::sink::{Intents, Queued};
 use crate::core::edit::intent::types::GraphIntent;
-use crate::gui::app::{AppCtx, StatusInputs};
+use crate::gui::app::ctx::{AppCtx, StatusInputs};
 use crate::gui::canvas::GraphUI;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::node::node_widget_id;

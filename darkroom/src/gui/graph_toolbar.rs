@@ -17,7 +17,7 @@ use palantir::{
 use crate::core::edit::intent::sink::Intents;
 use crate::gui::app::commands::AppCommand;
 use crate::gui::app::commands::run::RunCommand;
-use crate::gui::canvas::CanvasCtx;
+use crate::gui::canvas::ctx::CanvasCtx;
 use crate::gui::canvas::pan_zoom::{self, ViewAction};
 use crate::gui::widgets::support::{dot, filled_rect, frame, stroked_rect};
 use crate::gui::widgets::toolbar::{BUTTON_GAP, Chip, TOOLBAR_MARGIN, pill};

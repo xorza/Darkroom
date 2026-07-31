@@ -5,9 +5,10 @@ use scenarium::{InputPort, Subscription};
 
 use crate::core::edit::intent::sink::Intents;
 use crate::core::edit::intent::types::GraphIntent;
+use crate::gui::canvas::ctx::CanvasCtx;
 use crate::gui::canvas::gesture_slot::GestureSlot;
 use crate::gui::canvas::wire::Wire;
-use crate::gui::canvas::{CanvasCtx, CanvasGesture, outer_canvas_widget_id, to_world};
+use crate::gui::canvas::{CanvasGesture, outer_canvas_widget_id, to_world};
 use crate::gui::theme::Theme;
 
 /// The active gesture, threaded through node and wire rendering so

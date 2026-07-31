@@ -28,10 +28,11 @@ use crate::core::preview;
 use crate::gui::EventRef;
 use crate::gui::graph_ctx::input_scope::InputScope;
 use crate::gui::graph_ctx::output_scope::OutputScope;
+use crate::gui::node::ctx::NodeCtx;
 use crate::gui::node::port_color::{event_color, port_color};
 use crate::gui::node::port_row::glyph::{circle_frame, event_glyph, port_diameter};
 use crate::gui::node::value_editor;
-use crate::gui::node::{NodeCtx, port_wid, set_input};
+use crate::gui::node::{port_wid, set_input};
 use crate::gui::run_state::ExecStatus;
 use crate::gui::theme::Theme;
 
