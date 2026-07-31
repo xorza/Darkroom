@@ -25,7 +25,7 @@ pub(super) fn memory_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: NodeScope<'_>) {
     if ram.total() == 0 {
         return;
     }
-    let theme = rcx.theme;
+    let theme = rcx.theme();
     // Same inner radius the header rounds to (`Theme::card_inner_radius`),
     // not the card's raw outer `node_corner_radius` — else this strip's
     // corner leaves a wedge of body fill showing past the border stroke.

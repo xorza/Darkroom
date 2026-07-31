@@ -68,7 +68,7 @@ pub(super) fn ports_row(
     row_tracks: &mut Vec<Track>,
     out: &mut Intents,
 ) {
-    let theme = rcx.theme;
+    let theme = rcx.theme();
     // Events list under the outputs in the same column, so the output side
     // needs a row per output *and* per event.
     let n_rows = node
@@ -131,7 +131,7 @@ fn tip_for(rcx: RecordCtx<'_>, wanted: bool, description: &str, ty: &DataType) -
     if !wanted {
         return String::new();
     }
-    port_tip(description, type_label(rcx.graph_scope.library(), ty))
+    port_tip(description, type_label(rcx.graph_scope().library(), ty))
 }
 
 /// Render `name` as a port's label, with `tip` (the port's data type) as its
@@ -145,7 +145,7 @@ fn tip_for(rcx: RecordCtx<'_>, wanted: bool, description: &str, ty: &DataType) -
 fn port_label(ui: &mut Ui, rcx: RecordCtx<'_>, name: &str, tip: &str) {
     let snapshot = Text::new(name)
         .style(&TextStyle {
-            color: rcx.theme.colors.port_label,
+            color: rcx.theme().colors.port_label,
             ..ui.theme.text.clone()
         })
         .sense(Sense::HOVER)
@@ -241,7 +241,7 @@ fn input_label_cell(
     tips: bool,
     out: &mut Intents,
 ) {
-    let theme = rcx.theme;
+    let theme = rcx.theme();
     let port = input.port_ref();
     let tip = tip_for(rcx, tips, input.description(), input.ty());
     // Flag a port only once a run actually failed on it — not on every unbound edit — so
@@ -257,7 +257,7 @@ fn input_label_cell(
             theme,
             input.ty(),
             PortKind::Input,
-            rcx.geometry.ports.is_hovered(port),
+            rcx.geometry().ports.is_hovered(port),
         )
     };
     // A required input's port reads as bigger — its total footprint matches
@@ -355,7 +355,7 @@ fn value_cell(
             value_editor::show(
                 ui,
                 sve,
-                rcx.graph_scope.library(),
+                rcx.graph_scope().library(),
                 editor_id,
                 value,
                 data_type,
@@ -378,7 +378,7 @@ fn output_cell(
     tips: bool,
     out: &mut Intents,
 ) {
-    let theme = rcx.theme;
+    let theme = rcx.theme();
     let port = output.port_ref();
     // Resolved once for the fill and the tooltip: a wildcard output follows
     // its mirror chain on every read, so the cell asks once.
@@ -387,7 +387,7 @@ fn output_cell(
         theme,
         &ty,
         PortKind::Output,
-        rcx.geometry.ports.is_hovered(port),
+        rcx.geometry().ports.is_hovered(port),
     );
     let tip = tip_for(rcx, tips, output.description(), &ty);
     let wid = port_circle_wid(port);
@@ -442,7 +442,7 @@ fn add_preview_item(
     port: PortRef,
     out: &mut Intents,
 ) {
-    let Some(func) = preview::registered(rcx.graph_scope.library()) else {
+    let Some(func) = preview::registered(rcx.graph_scope().library()) else {
         return;
     };
     if !MenuItem::new("Add preview").show(ui, popup).left.clicked() {
@@ -494,11 +494,11 @@ fn event_cell(
     event: &FuncEvent,
     tips: bool,
 ) {
-    let theme = rcx.theme;
+    let theme = rcx.theme();
     let overhang = theme.port_overhang();
     let wid = event_glyph_wid(node_id, event_idx);
     let ev = EventRef { node_id, event_idx };
-    let fill = event_color(theme, rcx.geometry.events.is_hovered(ev));
+    let fill = event_color(theme, rcx.geometry().events.is_hovered(ev));
     let tip = if tips {
         format!("event: {}", event.name)
     } else {

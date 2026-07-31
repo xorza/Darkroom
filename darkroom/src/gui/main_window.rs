@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use palantir::{Align, Background, Configure, KeyFilter, Panel, Sizing, Ui, VAlign, WidgetId};
-use scenarium::{Library, NodeId, OutputTypes};
+use scenarium::{NodeId, OutputTypes};
 
 use crate::core::document::{Document, TabRef};
 use crate::core::edit::intent::sink::Intents;
@@ -17,7 +17,6 @@ use crate::gui::graph_scope::GraphScope;
 use crate::gui::image_viewer::{self, ImageViewer};
 use crate::gui::menu_bar;
 use crate::gui::preferences_view;
-use crate::gui::run_state::RunState;
 use crate::gui::status_bar;
 
 /// The application root's [`Configure::input_scope`] anchor. A fixed id
@@ -56,14 +55,16 @@ fn claim(slot: &mut Option<AppCommand>, produce: impl FnOnce() -> Option<AppComm
 /// each tab kind looks like (the `content` closure in [`Self::frame`]).
 /// Adding a new pane *kind* is a new arm there.
 ///
-/// **Where the graph scope is composed.** Each entry point below builds its
-/// own [`GraphScope`] from the document it is handed — which is settled by
-/// the time the caller reaches it, so the construction point and the call
-/// are the same instant. Keeping it here rather than in `Editor` means the
-/// editor shell never has to name the canvas subsystem's view type.
+/// **Where the graph scope is composed.** Each entry point below derives its
+/// own [`GraphScope`] from the frame's [`AppContext`] and the document it is
+/// handed — which is settled by the time the caller reaches it, so the
+/// construction point and the call are the same instant. Keeping it here
+/// rather than in `Editor` means the editor shell never has to name the canvas
+/// subsystem's view type, and everything below this file takes the scope alone
+/// rather than the scope *and* the app context it came from.
 ///
 /// That is also why the resolved-output table lives here rather than on
-/// `Editor`: it is the scope's fourth input, and
+/// `Editor`: it is the scope's third input, and
 /// [`GraphScope::for_document`] resolves it against whichever document the
 /// entry point was handed. So each of the three below pays one resolve, over a
 /// document settled at that instant — the editor drains queued intents
@@ -94,9 +95,8 @@ impl MainWindow {
     pub(crate) fn scan_navigation(
         &mut self,
         ui: &mut Ui,
+        ctx: AppContext<'_>,
         doc: &Document,
-        library: &Library,
-        run_state: &RunState,
         actions: &mut Vec<UiAction>,
     ) {
         self.dock.scan(ui, doc, actions);
@@ -110,10 +110,7 @@ impl MainWindow {
             output_types,
             ..
         } = self;
-        graph_ui.scan_hits(
-            ui,
-            GraphScope::for_document(doc, library, run_state, output_types),
-        );
+        graph_ui.scan_hits(ui, GraphScope::for_document(ctx, doc, output_types));
         let hits = &self.graph_ui.hits;
         if let Some(node) = hits.chip(Chip::PreviewImage) {
             actions.push(UiAction::OpenImageViewer(node));
@@ -125,9 +122,8 @@ impl MainWindow {
     pub(crate) fn prepass(
         &mut self,
         ui: &mut Ui,
+        ctx: AppContext<'_>,
         doc: &Document,
-        library: &Library,
-        run_state: &RunState,
         out: &mut Intents,
     ) {
         let MainWindow {
@@ -142,7 +138,7 @@ impl MainWindow {
                 // arm *is* the proof that it resolves.
                 TabRef::Graph => graph_ui.prepass(
                     ui,
-                    GraphScope::for_document(doc, library, run_state, output_types)
+                    GraphScope::for_document(ctx, doc, output_types)
                         .expect("a Graph tab is active, so the scope resolves"),
                     out,
                 ),
@@ -157,7 +153,7 @@ impl MainWindow {
     pub(crate) fn frame(
         &mut self,
         ui: &mut Ui,
-        ctx: &AppContext<'_>,
+        ctx: AppContext<'_>,
         doc: &Document,
         prefs: &mut Preferences,
         out: &mut Intents,
@@ -165,7 +161,7 @@ impl MainWindow {
         let mut command = None;
         // The menu bar rides its own chrome band; the dock fills the
         // space between it and the status bar.
-        let chrome = ctx.theme.colors.chrome_fill;
+        let chrome = ctx.theme().colors.chrome_fill;
         let MainWindow {
             graph_ui,
             image_viewers,
@@ -186,7 +182,7 @@ impl MainWindow {
             .collect();
         let dock_cx = DockContext {
             doc,
-            theme: ctx.theme,
+            theme: ctx.theme(),
             viewer_labels: &viewer_labels,
         };
         Panel::vstack()
@@ -218,25 +214,20 @@ impl MainWindow {
                             .id_salt("graph_overlay")
                             .size((Sizing::FILL, Sizing::FILL))
                             .show(ui, |ui| {
-                                // `ctx` carries both halves this needs beside
-                                // the document; see `Self::prepass` for why
-                                // matching the arm proves it resolves.
-                                let graph_scope = GraphScope::for_document(
-                                    doc,
-                                    ctx.library,
-                                    ctx.run_state,
-                                    output_types,
-                                )
-                                .expect("a Graph tab is active, so the scope resolves");
-                                claim(&mut command, || graph_ui.draw(ui, ctx, graph_scope, out));
-                                claim(&mut command, || {
-                                    graph_ui.draw_toolbar(ui, ctx, graph_scope, out)
-                                });
+                                // The scope carries everything the canvas
+                                // reads — theme and run included, through the
+                                // `ctx` it is composed from; see
+                                // `Self::prepass` for why matching the arm
+                                // proves it resolves.
+                                let graph_scope = GraphScope::for_document(ctx, doc, output_types)
+                                    .expect("a Graph tab is active, so the scope resolves");
+                                claim(&mut command, || graph_ui.draw(ui, graph_scope, out));
+                                claim(&mut command, || graph_ui.draw_toolbar(ui, graph_scope, out));
                             });
                     }
                     TabRef::Preferences => {
                         claim(&mut command, || {
-                            preferences_view::show(ui, ctx.theme, prefs)
+                            preferences_view::show(ui, ctx.theme(), prefs)
                         });
                     }
                     TabRef::ImageViewer(node_id) => {
@@ -244,7 +235,7 @@ impl MainWindow {
                             .get(&node_id)
                             .map(String::as_str)
                             .unwrap_or("image");
-                        let source = ctx.run_state.previews.entries.get(&node_id);
+                        let source = ctx.run_state().previews.entries.get(&node_id);
                         let viewer = image_viewers
                             .entry(node_id)
                             .or_insert_with(|| ImageViewer::new(node_id));
@@ -252,7 +243,7 @@ impl MainWindow {
                         // prefs path as the Preferences tab.
                         claim(&mut command, || {
                             viewer
-                                .show(ui, ctx.theme, &mut prefs.viewer, title, source)
+                                .show(ui, ctx.theme(), &mut prefs.viewer, title, source)
                                 .then_some(AppCommand::Prefs(PrefsCommand::Changed))
                         });
                     }

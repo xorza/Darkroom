@@ -34,44 +34,87 @@ use scenarium::NodeId;
 use std::collections::BTreeSet;
 
 /// Read-only context threaded top to bottom through everything one graph
-/// pane records: the theme, the pane being rendered, last frame's port
-/// geometry, and the run projections. `Copy` (all shared refs), so it's
-/// passed by value — copying it while a borrow of the scene's node pool is
-/// live is fine, which keeps `draw_all`'s node loop borrow-clean. The mutable
-/// sinks (`out`, `actions`) and the breaker `probe` stay separate params.
+/// pane records: the pane being rendered, last frame's port geometry, and
+/// what the paint pass substitutes for the committed state. `Copy` (all
+/// shared refs), so it's passed by value — copying it while a borrow of the
+/// scene's node pool is live is fine, which keeps `draw_all`'s node loop
+/// borrow-clean. The mutable sinks (`out`, `actions`) and the breaker `probe`
+/// stay separate params.
 ///
-/// `pub(crate)` fields: the node body's own subtree is the main reader, but
-/// the canvas-level draws that sit in the same pass and want the same refs —
-/// the inspection panels ([`crate::gui::canvas::inspector`]) — take it too,
-/// rather than each growing its own near-identical bundle.
+/// The record level of the context chain: it is derived from the pane's
+/// [`GraphScope`] and answers everything that one does — theme, library, last
+/// run — so the node subtree names no other context. The canvas-level draws
+/// that sit in the same pass and want the same refs — the inspection panels
+/// ([`crate::gui::canvas::inspector`]) — take it too, rather than each
+/// growing its own near-identical bundle.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct RecordCtx<'a> {
-    pub(crate) theme: &'a Theme,
     /// The one graph this record pass is drawing. Every other pane on
     /// screen gets its own `RecordCtx`, so nothing here can reach across.
     ///
-    /// Also how the pass reaches the library and the last run's results:
-    /// the scope already borrows both to answer for its nodes, so carrying
-    /// them again beside it would be two paths to one ref.
-    pub(crate) graph_scope: GraphScope<'a>,
+    /// Also how the pass reaches the theme, the library and the last run's
+    /// results: the scope already carries all three to answer for its nodes,
+    /// so holding any of them again beside it would be two paths to one ref.
+    graph_scope: GraphScope<'a>,
     /// Effective selection to paint: the graph's committed set
     /// ([`GraphScope::selected`]) or, mid-rubber-band, the live swept
     /// preview owned by `SelectionUI` — one type, so the draw substitutes
     /// them without caring which it got, and the gesture never writes its
     /// preview into the document.
-    pub(crate) selected: &'a BTreeSet<NodeId>,
-    pub(crate) geometry: &'a CanvasGeometry,
+    selected: &'a BTreeSet<NodeId>,
+    geometry: &'a CanvasGeometry,
     /// This frame's swept node interactions — the node body reads its
     /// drag latch from here rather than re-polling its own handles.
-    pub(crate) hits: &'a CanvasHits,
+    hits: &'a CanvasHits,
     /// Open inspection panels, so the header chip can render its
     /// open/pinned state.
-    pub(crate) inspectors: &'a Inspectors,
+    inspectors: &'a Inspectors,
 }
 
-impl RecordCtx<'_> {
+impl<'a> RecordCtx<'a> {
+    pub(crate) fn new(
+        graph_scope: GraphScope<'a>,
+        selected: &'a BTreeSet<NodeId>,
+        geometry: &'a CanvasGeometry,
+        hits: &'a CanvasHits,
+        inspectors: &'a Inspectors,
+    ) -> Self {
+        Self {
+            graph_scope,
+            selected,
+            geometry,
+            hits,
+            inspectors,
+        }
+    }
+
+    /// The palette and metrics this pass paints from, off the pane's scope.
+    pub(crate) fn theme(self) -> &'a Theme {
+        self.graph_scope.theme()
+    }
+
+    pub(crate) fn graph_scope(self) -> GraphScope<'a> {
+        self.graph_scope
+    }
+
+    pub(crate) fn selected(self) -> &'a BTreeSet<NodeId> {
+        self.selected
+    }
+
+    pub(crate) fn geometry(self) -> &'a CanvasGeometry {
+        self.geometry
+    }
+
+    pub(crate) fn hits(self) -> &'a CanvasHits {
+        self.hits
+    }
+
+    pub(crate) fn inspectors(self) -> &'a Inspectors {
+        self.inspectors
+    }
+
     /// Whether `key` paints selected this pass.
-    pub(crate) fn is_selected(&self, key: NodeId) -> bool {
+    pub(crate) fn is_selected(self, key: NodeId) -> bool {
         self.selected.contains(&key)
     }
 }
@@ -144,12 +187,12 @@ impl NodeUI {
         // and that first post-blur record is where the edit's pending draft
         // commits.
         let mut focus_kept = None;
-        for n in rcx.graph_scope.nodes() {
+        for n in rcx.graph_scope().nodes() {
             let keeps_focus = ui.focus_within(node_widget_id(n.id));
             if keeps_focus {
                 focus_kept = Some(n.id);
             }
-            if !cull.keeps_node(rcx.geometry.node_world_rect(n))
+            if !cull.keeps_node(rcx.geometry().node_world_rect(n))
                 && !keeps_focus
                 && self.focus_kept_last != Some(n.id)
             {
@@ -160,7 +203,7 @@ impl NodeUI {
         self.focus_kept_last = focus_kept;
         // Belt-and-braces against a node deleted mid-drag; `prepass` makes
         // the same check before it can emit anything against it.
-        self.drag.drop_if_owner_gone(rcx.graph_scope);
+        self.drag.drop_if_owner_gone(rcx.graph_scope());
     }
 
     fn draw_one(
@@ -171,7 +214,7 @@ impl NodeUI {
         probe: &mut BreakerProbe<'_>,
         out: &mut Intents,
     ) {
-        let theme = rcx.theme;
+        let theme = rcx.theme();
 
         // Probe the body against the breaker polyline. Hit → recolor border
         // red and flag the node for deletion on release. The rect is the same
@@ -214,7 +257,7 @@ impl NodeUI {
         // from behind this node's corner while riding the same cull decision
         // and stack position as the node itself.
         if node.sink() {
-            subscription_pin(ui, theme, node, rcx.geometry.subs.is_hovered(node.id));
+            subscription_pin(ui, theme, node, rcx.geometry().subs.is_hovered(node.id));
         }
 
         // Borrowed off `self` before the body closure so it can't conflict
@@ -263,7 +306,7 @@ impl NodeUI {
         // selection. `UndoStep::is_noop` filters a click that doesn't
         // change the set (e.g. clicking the sole selected node).
         if body_clicked {
-            click_intents(shift_click, rcx.graph_scope, node.id, out);
+            click_intents(shift_click, rcx.graph_scope(), node.id, out);
         }
 
         // Latch the anchor on the press-frame edge, off whichever handle
@@ -272,15 +315,15 @@ impl NodeUI {
         // peeks `response_for(widget_id)` before record runs and converts
         // `drag_delta` into a `MoveSelection` applied to `Document` before
         // the record reads it back.
-        if let Some(handle) = rcx.hits.latched_on(node.id) {
+        if let Some(handle) = rcx.hits().latched_on(node.id) {
             // Grabbing a node already in the selection drags the whole
             // group together;
             // grabbing an unselected node selects only it and drags it
             // alone.
             let start_positions = if selected {
-                selected_group_positions(rcx.graph_scope, rcx.selected)
+                selected_group_positions(rcx.graph_scope(), rcx.selected())
             } else {
-                click_intents(false, rcx.graph_scope, node.id, out);
+                click_intents(false, rcx.graph_scope(), node.id, out);
                 vec![(node.id, node.pos)]
             };
             self.drag.latch(node.id, start_positions, handle);

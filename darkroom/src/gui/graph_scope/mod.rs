@@ -1,8 +1,9 @@
 //! The graph as the UI reads it: the document, resolved against the library
 //! and the last run.
 //!
-//! Nothing here is copied or cached. A [`GraphScope`] is three shared
-//! references; the handles it hands out ([`NodeScope`], [`InputScope`],
+//! Nothing here is copied or cached. A [`GraphScope`] is the frame's
+//! [`AppContext`] plus two shared references; the handles it hands out
+//! ([`NodeScope`], [`InputScope`],
 //! [`OutputScope`]) each resolve one more borrow and answer every question
 //! from the authority that owns it — the node's record off the document, its
 //! ports off the library's declaration, its status off the run. A widget
@@ -26,14 +27,22 @@ use std::collections::BTreeSet;
 use scenarium::{Graph, InputPort, Library, NodeId, OutputPort, OutputTypes, Subscription};
 
 use crate::core::document::{Document, GraphView, Viewport};
+use crate::gui::app::AppContext;
 use crate::gui::graph_scope::node_scope::NodeScope;
 use crate::gui::run_state::RunState;
+use crate::gui::theme::Theme;
 
 #[cfg(test)]
 mod tests;
 
-/// The graph pane for this frame. `Copy` (four shared refs), so it threads
-/// through the draw chain like `RecordCtx`.
+/// The graph pane for this frame. `Copy` (the app context plus two shared
+/// refs), so it threads through the draw chain like `RecordCtx`.
+///
+/// The canvas level of the context chain: it carries the frame's
+/// [`AppContext`] rather than restating the refs inside it, so a widget
+/// reaches the theme, the library and the last run through the same scope it
+/// asks about nodes — one path to each, and nothing under the canvas has to
+/// name the app level at all.
 ///
 /// Holding one is the proof that a pane *is* showing the graph:
 /// [`Self::for_document`] is the only way to obtain one and it checks that
@@ -41,14 +50,14 @@ mod tests;
 /// screen takes `Option<GraphScope>` and says so in its signature.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct GraphScope<'a> {
-    doc: &'a Document,
-    /// Resolves each node's declaration — its ports, their types and
-    /// defaults. A node whose func the library no longer holds reads as a
-    /// [`missing`](NodeScope::missing) stub rather than vanishing.
-    library: &'a Library,
-    /// Last run's per-node verdicts: status, retained RAM, unfed inputs, and
+    /// The frame's read-only world, one level up: the theme every widget
+    /// paints from, the library each node's declaration resolves through (a
+    /// node whose func it no longer holds reads as a
+    /// [`missing`](NodeScope::missing) stub rather than vanishing), and the
+    /// last run's per-node verdicts — status, retained RAM, unfed inputs, and
     /// the compiled program's word on what is a sink.
-    run_state: &'a RunState,
+    app: AppContext<'a>,
+    doc: &'a Document,
     /// Every output port's *resolved* type — the wildcard chains followed
     /// once for the whole graph, so reading one is a lookup rather than a
     /// walk. See [`OutputScope::ty`](output_scope::OutputScope::ty).
@@ -60,7 +69,8 @@ pub(crate) struct GraphScope<'a> {
 }
 
 impl<'a> GraphScope<'a> {
-    /// The scope over `doc`'s graph, or `None` when no pane is showing it.
+    /// Derive the graph pane's context from the frame's `app` context and the
+    /// document it is showing — or `None` when no pane is showing one.
     ///
     /// Asked of the *document*: a graph with no nodes on an active tab is a
     /// legitimate pane, and one that answered "no nodes, so no pane" would
@@ -78,16 +88,14 @@ impl<'a> GraphScope<'a> {
     /// the caller keeps the allocation across frames, and a refresh reuses its
     /// capacity instead of building a map per pass.
     pub(crate) fn for_document(
+        app: AppContext<'a>,
         doc: &'a Document,
-        library: &'a Library,
-        run_state: &'a RunState,
         output_types: &'a mut OutputTypes,
     ) -> Option<Self> {
-        output_types.update(&doc.graph, library);
+        output_types.update(&doc.graph, app.library());
         doc.shows_graph().then_some(Self {
+            app,
             doc,
-            library,
-            run_state,
             output_types,
         })
     }
@@ -116,18 +124,23 @@ impl<'a> GraphScope<'a> {
         self.doc.main_view.viewport
     }
 
+    /// The palette and metrics every widget in this pane paints from.
+    pub(crate) fn theme(self) -> &'a Theme {
+        self.app.theme()
+    }
+
     /// The library every node's declaration is resolved through — for the
     /// readers that need type metadata a port doesn't carry (an enum's
     /// registered variants, a type's display name).
     pub(crate) fn library(self) -> &'a Library {
-        self.library
+        self.app.library()
     }
 
     /// The last run's results, for the readers that want more of a node than
     /// its [`NodeScope`] surfaces — its logs, its failure message, the value
     /// a preview published.
     pub(crate) fn run_state(self) -> &'a RunState {
-        self.run_state
+        self.app.run_state()
     }
 
     /// This graph's resolved output types. `pub(super)` because the one
@@ -188,11 +201,13 @@ pub(crate) mod internals {
     use scenarium::{FuncId, Library, Node, NodeId, NodeKind, OutputTypes};
 
     use crate::core::document::Document;
+    use crate::gui::app::{AppContext, StatusInputs};
     use crate::gui::graph_scope::GraphScope;
     use crate::gui::run_state::RunState;
+    use crate::gui::theme::Theme;
 
-    /// The four sources a [`GraphScope`] composes, owned together so a test
-    /// can hand one out. Every canvas test that needs a scope builds on this.
+    /// Everything a [`GraphScope`] composes, owned together so a test can
+    /// hand one out. Every canvas test that needs a scope builds on this.
     ///
     /// The output-type table starts empty: [`Self::scope`] resolves it, the
     /// same way composing a scope does anywhere else — which is why that
@@ -202,6 +217,7 @@ pub(crate) mod internals {
         pub(crate) doc: Document,
         pub(crate) library: Library,
         pub(crate) run_state: RunState,
+        pub(crate) theme: Theme,
         output_types: OutputTypes,
     }
 
@@ -233,14 +249,20 @@ pub(crate) mod internals {
             self
         }
 
+        /// The scope over this fixture, derived from an [`AppContext`] whose
+        /// status-bar inputs sit at their empty defaults — no canvas reader
+        /// sees them.
         pub(crate) fn scope(&mut self) -> GraphScope<'_> {
-            GraphScope::for_document(
-                &self.doc,
-                &self.library,
-                &self.run_state,
-                &mut self.output_types,
-            )
-            .expect("the fixture's document shows the graph")
+            let Self {
+                doc,
+                library,
+                run_state,
+                theme,
+                output_types,
+            } = self;
+            let app = AppContext::new(theme, library, run_state, StatusInputs::default());
+            GraphScope::for_document(app, doc, output_types)
+                .expect("the fixture's document shows the graph")
         }
     }
 }

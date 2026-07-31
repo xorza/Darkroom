@@ -122,7 +122,7 @@ pub(crate) fn subscription_glyph_wid(node_id: NodeId) -> WidgetId {
 /// subscription pin is *not* drawn here — it records at canvas level, before the
 /// node bodies, so it peeks out from behind the node's corner.
 pub(super) fn header(ui: &mut Ui, rcx: RecordCtx<'_>, node: NodeScope<'_>, out: &mut Intents) {
-    let theme = rcx.theme;
+    let theme = rcx.theme();
     // The header sits inside the body's border stroke (the layout folds
     // the stroke width into the body's padding), so it must round to the
     // stroke's *inner* radius, not the card's outer `node_corner_radius` —
@@ -172,7 +172,7 @@ pub(super) fn header(ui: &mut Ui, rcx: RecordCtx<'_>, node: NodeScope<'_>, out: 
             // when open, muted-grey outline (`text_muted`) when closed. The
             // click is consumed in `Inspectors::apply` via this chip's
             // deterministic id, so the returned flag is ignored here.
-            let mode = rcx.inspectors.mode(node.id);
+            let mode = rcx.inspectors().mode(node.id);
             let color = if mode.is_some() {
                 theme.colors.badge_graph
             } else {
@@ -195,7 +195,7 @@ pub(super) fn header(ui: &mut Ui, rcx: RecordCtx<'_>, node: NodeScope<'_>, out: 
 /// identity (header above); the run-time reads as the row's status
 /// counterweight.
 pub(super) fn status_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: NodeScope<'_>, out: &mut Intents) {
-    let theme = rcx.theme;
+    let theme = rcx.theme();
     Panel::hstack()
         .id_salt("status_row")
         .size((Sizing::FILL, Sizing::HUG))
@@ -411,7 +411,7 @@ fn title(ui: &mut Ui, rcx: RecordCtx<'_>, node: NodeScope<'_>, out: &mut Intents
     // handle across the label⇄editor swap, and this is the one place the
     // name is drawn.
     let name = ui.intern(node.name());
-    let ev = InlineRename::new(id, name, &rcx.theme.inline_rename)
+    let ev = InlineRename::new(id, name, &rcx.theme().inline_rename)
         .max_chars(NODE_NAME_MAX_CHARS)
         .style(&TextStyle {
             weight: FontWeight::Bold,
@@ -419,7 +419,7 @@ fn title(ui: &mut Ui, rcx: RecordCtx<'_>, node: NodeScope<'_>, out: &mut Intents
         })
         .show(ui);
     if ev.clicked {
-        click_intents(shift, rcx.graph_scope, node.id, out);
+        click_intents(shift, rcx.graph_scope(), node.id, out);
     }
     if let Some(to) = ev.committed {
         out.push(GraphIntent::RenameNode {

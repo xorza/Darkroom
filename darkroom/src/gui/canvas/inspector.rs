@@ -121,7 +121,7 @@ impl Inspectors {
     /// two overlapping panels keep a stable front-to-back relationship
     /// instead of trading places between frames.
     pub(super) fn draw_panels(&self, ui: &mut Ui, rcx: RecordCtx<'_>) {
-        let (theme, graph_scope, geometry) = (rcx.theme, rcx.graph_scope, rcx.geometry);
+        let (theme, graph_scope, geometry) = (rcx.theme(), rcx.graph_scope(), rcx.geometry());
         for (&id, &mode) in &self.modes {
             let Some(node) = graph_scope.node(id) else {
                 continue;
@@ -148,9 +148,9 @@ impl Inspectors {
         mode: InspectMode,
         pos: Vec2,
     ) {
-        let theme = rcx.theme;
-        let logs = rcx.graph_scope.run_state().logs(node.id);
-        let error = rcx.graph_scope.run_state().error(node.id);
+        let theme = rcx.theme();
+        let logs = rcx.graph_scope().run_state().logs(node.id);
+        let error = rcx.graph_scope().run_state().error(node.id);
         // The outline is the *pinned* signal, in the same accent the header's
         // `i` chip uses for its open/pinned states — one color means
         // "inspector held open" on both ends. A transient panel rides on its
@@ -226,7 +226,7 @@ impl Inspectors {
                     line(ui, node.description(), muted_style(theme, ui));
                 }
 
-                let library = rcx.graph_scope.library();
+                let library = rcx.graph_scope().library();
                 if node.inputs().len() > 0 {
                     section(ui, theme, "Inputs");
                     for input in node.inputs() {

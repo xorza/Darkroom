@@ -4,17 +4,19 @@ use scenarium::{Library, NodeId, OutputTypes};
 
 use super::*;
 use crate::core::document::Document;
+use crate::gui::app::{AppContext, StatusInputs};
 use crate::gui::run_state::RunState;
 
 #[derive(Debug)]
 struct Fixture {
-    /// The four sources a scope composes. The snap filter reads the
-    /// authoring graph out of the document to answer its cycle question,
-    /// each node's ports out of the library, and a port's resolved type off
-    /// the table — which composing the scope fills.
+    /// Everything a scope composes. The snap filter reads the authoring
+    /// graph out of the document to answer its cycle question, each node's
+    /// ports out of the library, and a port's resolved type off the table —
+    /// which composing the scope fills.
     doc: Document,
     library: Library,
     run_state: RunState,
+    theme: Theme,
     output_types: OutputTypes,
     producer: NodeId,
     consumer: NodeId,
@@ -22,13 +24,14 @@ struct Fixture {
 
 impl Fixture {
     fn graph_scope(&mut self) -> GraphScope<'_> {
-        GraphScope::for_document(
-            &self.doc,
+        let app = AppContext::new(
+            &self.theme,
             &self.library,
             &self.run_state,
-            &mut self.output_types,
-        )
-        .expect("the fixture's document shows the graph")
+            StatusInputs::default(),
+        );
+        GraphScope::for_document(app, &self.doc, &mut self.output_types)
+            .expect("the fixture's document shows the graph")
     }
 }
 
@@ -47,6 +50,7 @@ fn fixture() -> Fixture {
         doc: Document::from(g.graph),
         library: g.library,
         run_state: RunState::default(),
+        theme: Theme::default(),
         output_types: OutputTypes::default(),
         producer,
         consumer,

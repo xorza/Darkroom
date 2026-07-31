@@ -6,11 +6,11 @@ use palantir::{Rect, Shape, Stroke, Ui};
 
 use crate::core::edit::intent::sink::Intents;
 use crate::core::edit::intent::types::GraphIntent;
-use crate::gui::app::AppContext;
 use crate::gui::canvas::geometry::CanvasGeometry;
 use crate::gui::canvas::gesture_slot::GestureSlot;
 use crate::gui::canvas::{CanvasGesture, outer_canvas_widget_id, to_world};
 use crate::gui::graph_scope::GraphScope;
+use crate::gui::theme::Theme;
 
 /// Rubber-band multi-selection. A plain left-drag on empty canvas
 /// sweeps a rectangle; intersecting nodes highlight live as it moves and
@@ -171,7 +171,7 @@ impl SelectionUI {
     /// its world coords ride the same pan/zoom transform as the nodes.
     /// No-op when no gesture is active on `graph_scope`'s pane or the rect has
     /// no area yet.
-    pub(super) fn draw(&self, ui: &mut Ui, ctx: &AppContext<'_>) {
+    pub(super) fn draw(&self, ui: &mut Ui, theme: &Theme) {
         let Some(band) = self.band.get() else {
             return;
         };
@@ -181,8 +181,8 @@ impl SelectionUI {
         }
         ui.add_shape(
             Shape::rect(rect)
-                .fill(ctx.theme.colors.selection_fill())
-                .stroke(Stroke::solid(ctx.theme.colors.selection_border(), 1.0)),
+                .fill(theme.colors.selection_fill())
+                .stroke(Stroke::solid(theme.colors.selection_border(), 1.0)),
         );
     }
 }

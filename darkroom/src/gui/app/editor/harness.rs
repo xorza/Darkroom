@@ -24,9 +24,10 @@ use scenarium::Library;
 use crate::core::document::Document;
 use crate::core::document::open_document::OpenDocument;
 use crate::core::io::preferences::Preferences;
-use crate::gui::app::StatusInputs;
 use crate::gui::app::commands::AppCommand;
 use crate::gui::app::editor::Editor;
+use crate::gui::app::{AppContext, StatusInputs};
+use crate::gui::run_state::RunState;
 use crate::gui::theme::Theme;
 
 /// Surface every editor test frames at unless it resizes. Wide enough
@@ -42,6 +43,9 @@ pub(crate) struct EditorHarness {
     pub(crate) open: OpenDocument,
     pub(crate) library: Library,
     pub(crate) theme: Theme,
+    /// The run projections the frame reads — `App`'s in production, so a
+    /// test that wants a node to look executed writes it here.
+    pub(crate) run_state: RunState,
     pub(crate) preferences: Preferences,
     /// Footprint handed to the status bar. `0` — the default — is the
     /// no-reading path, so a test asserting on geometry isn't reading a
@@ -63,6 +67,7 @@ impl EditorHarness {
             },
             library: Library::default(),
             theme: Theme::default(),
+            run_state: RunState::default(),
             preferences: Preferences::default(),
             process_memory: 0,
         }
@@ -79,24 +84,20 @@ impl EditorHarness {
             open,
             library,
             theme,
+            run_state,
             preferences,
             process_memory,
         } = self;
-        let theme = &*theme;
-        let process_memory = *process_memory;
-        ui.frame_value(|recorder: &mut Ui| {
-            editor.frame(
-                open,
-                recorder,
-                library,
-                theme,
-                preferences,
-                StatusInputs {
-                    error: None,
-                    process_memory,
-                },
-            )
-        })
+        let ctx = AppContext::new(
+            theme,
+            library,
+            run_state,
+            StatusInputs {
+                error: None,
+                process_memory: *process_memory,
+            },
+        );
+        ui.frame_value(|recorder: &mut Ui| editor.frame(recorder, open, ctx, preferences))
     }
 
     /// `n` frames whose commands are discarded — the editor equivalent of

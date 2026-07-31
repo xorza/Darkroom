@@ -1,14 +1,14 @@
 //! The per-frame GUI edit pipeline over a borrowed [`OpenDocument`].
 //!
-//! `Editor` owns undo history and the run projections, the GUI tree, and
-//! transient gesture state. The canvas's own projection of the graph lives
-//! with the canvas that draws it. [`App`] lends it the open document for
-//! each operation, keeping document and runtime ownership on the shell.
+//! `Editor` owns the undo history, the GUI tree, and transient gesture
+//! state. The canvas's own projection of the graph lives with the canvas
+//! that draws it. [`App`] lends it the open document for each operation and
+//! the frame's [`AppContext`] to read the rest through, keeping document,
+//! runtime and run-state ownership on the shell.
 //!
 //! [`App`]: crate::gui::app::App
 
 use palantir::{Shortcut, Ui};
-use scenarium::Library;
 use scenarium::NodeId;
 
 use crate::core::document::TabRef;
@@ -27,10 +27,8 @@ use crate::gui::app::commands::run::RunCommand;
 use crate::gui::app::commands::shell::ShellCommand;
 use crate::gui::canvas::node_menu::NodeMenuAction;
 use crate::gui::main_window::MainWindow;
-use crate::gui::run_state::RunState;
-use crate::gui::theme::Theme;
 
-use crate::gui::app::{AppContext, StatusInputs};
+use crate::gui::app::AppContext;
 
 #[cfg(test)]
 pub(crate) mod harness;
@@ -95,12 +93,6 @@ pub(crate) struct Editor {
     /// frame; carries no cross-frame state — kept only to reuse the
     /// allocation.
     actions: Vec<UiAction>,
-    /// The last completed run's per-node state, keyed by the document's
-    /// `NodeId`s: execution status (the glow + header time, projected into
-    /// each `SceneNode::exec_status` at rebuild) and log lines. `App` drives
-    /// it as it drains the worker (`RunState::apply_worker_status` /
-    /// `clear`). Off the serialized state.
-    pub(super) run_state: RunState,
 }
 
 impl Editor {
@@ -112,7 +104,6 @@ impl Editor {
             needs_relayout: false,
             intents: Intents::default(),
             actions: Vec::new(),
-            run_state: RunState::default(),
         }
     }
 
@@ -180,9 +171,9 @@ impl Editor {
         open.dirty |= signals.dirtied;
     }
 
-    /// Run one frame of the edit pipeline against the borrowed runtime
-    /// context (`library`, `theme`, `host`), returning the [`AppCommand`]
-    /// the frame surfaced (if any) for the next `App::update` to execute.
+    /// Run one frame of the edit pipeline against `ctx` — the frame's
+    /// read-only world — returning the [`AppCommand`] the frame surfaced (if
+    /// any) for the next `App::update` to execute.
     ///
     /// The frame splits into a **navigation phase** (settle which tab is
     /// active, from frame-top inputs) and an **edit phase** (mutate the
@@ -190,12 +181,10 @@ impl Editor {
     /// click responses and must resolve before anything edits or records.
     pub(crate) fn frame(
         &mut self,
-        open: &mut OpenDocument,
         ui: &mut Ui,
-        library: &Library,
-        theme: &Theme,
+        open: &mut OpenDocument,
+        ctx: AppContext<'_>,
         preferences: &mut Preferences,
-        status: StatusInputs<'_>,
     ) -> Option<AppCommand> {
         self.intents.clear();
         self.actions.clear();
@@ -205,18 +194,18 @@ impl Editor {
         // undo/redo + last-frame click responses). `navigate` reads *last*
         // frame's projection to resolve tab/chip clicks, so it must run
         // before this frame's rebuild. After it, the active tab is fixed.
-        self.navigate(ui, open, library);
+        self.navigate(ui, open, ctx);
 
         // Tabs are settled: drop viewer state for closed tabs.
         self.sync_image_viewers(open);
-        // Both `NodeId`-keyed caches outlive the scene on purpose, so only the
-        // document can say when an entry's node is gone rather than merely
-        // off-screen. Run unconditionally: each is idempotent and costs a
-        // lookup per cached entry, which is noise beside the projection
-        // rebuild that re-projects every node and port anyway — cheaper than
-        // the bookkeeping that had every edit path declare whether it owed a
-        // pass.
-        self.run_state.previews.reconcile(ui, &open.document);
+        // The canvas's `NodeId`-keyed geometry cache outlives the scene on
+        // purpose, so only the document can say when an entry's node is gone
+        // rather than merely off-screen (the preview store's counterpart runs
+        // on `App`, which owns it). Run unconditionally: it is idempotent and
+        // costs a lookup per cached entry, which is noise beside the
+        // projection rebuild that re-projects every node and port anyway —
+        // cheaper than the bookkeeping that had every edit path declare
+        // whether it owed a pass.
         self.main_window.reconcile(&open.document);
         // A canvas that just appeared or disappeared drops its tab-local
         // gesture state and needs a relayout — it may never have recorded,
@@ -228,27 +217,15 @@ impl Editor {
         // the record so Pass A sees the settled doc. Driven by the panes on
         // screen, like the record pass below — a pane kind that grows input
         // handling gets an arm there rather than another question here.
-        let Self {
-            main_window,
-            run_state,
-            intents,
-            ..
-        } = self;
-        main_window.prepass(ui, &open.document, library, run_state, intents);
+        self.main_window
+            .prepass(ui, ctx, &open.document, &mut self.intents);
         self.drain_intents(open);
 
         let command_from_shortcut = self.menu_shortcut(ui);
 
-        let ctx = AppContext {
-            theme,
-            library,
-            run_state: &self.run_state,
-            status_error: status.error,
-            process_memory: status.process_memory,
-        };
         let command = self
             .main_window
-            .frame(ui, &ctx, &open.document, preferences, &mut self.intents)
+            .frame(ui, ctx, &open.document, preferences, &mut self.intents)
             .or(command_from_shortcut);
 
         // A node context-menu pick resolves here, where the Document is
@@ -303,18 +280,13 @@ impl Editor {
     ///
     /// Done up front so the edit pipeline runs against a settled document
     /// and a switched-to tab records in the same present's Pass A.
-    fn navigate(&mut self, ui: &mut Ui, open: &mut OpenDocument, library: &Library) {
+    fn navigate(&mut self, ui: &mut Ui, open: &mut OpenDocument, ctx: AppContext<'_>) {
         self.apply_undo_redo(ui, open);
         // Surface tab clicks from last frame's responses. Those responses are
         // last frame's; the document they resolve against is this frame's,
         // so a hit on a node the undo above removed simply finds nothing.
-        let Self {
-            main_window,
-            run_state,
-            actions,
-            ..
-        } = self;
-        main_window.scan_navigation(ui, &open.document, library, run_state, actions);
+        self.main_window
+            .scan_navigation(ui, ctx, &open.document, &mut self.actions);
         // Queued dock ops apply straight to the layout — drain them.
         self.apply_view_actions(open);
         self.drain_intents(open);

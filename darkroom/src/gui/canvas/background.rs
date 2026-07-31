@@ -1,8 +1,8 @@
 use glam::Vec2;
 use palantir::{ColorU8, Image, ImageFit, ImageHandle, Shape, Ui};
 
-use crate::gui::app::AppContext;
 use crate::gui::canvas::outer_canvas_widget_id;
+use crate::gui::theme::Theme;
 
 /// Target on-screen tile spacing range, as a multiple of the theme's
 /// base spacing. A power-of-2 multiplier wraps the world spacing into
@@ -44,11 +44,11 @@ struct DotKey {
 }
 
 impl DotKey {
-    fn from_theme(ctx: &AppContext<'_>) -> Self {
+    fn from_theme(theme: &Theme) -> Self {
         Self {
-            color: ctx.theme.colors.canvas_dot.to_srgb_u8(),
-            radius_bits: ctx.theme.canvas_dot_radius.to_bits(),
-            spacing_bits: ctx.theme.canvas_dot_spacing.to_bits(),
+            color: theme.colors.canvas_dot.to_srgb_u8(),
+            radius_bits: theme.canvas_dot_radius.to_bits(),
+            spacing_bits: theme.canvas_dot_spacing.to_bits(),
         }
     }
 }
@@ -59,8 +59,8 @@ impl CanvasBackground {
     /// it sits beneath every connection and node. `pan`/`zoom` are the
     /// live viewport; a screen point `s` maps to grid coord
     /// `(s - pan) / tile_px`, which is exactly the tile UV.
-    pub(super) fn draw(&mut self, ui: &mut Ui, ctx: &AppContext<'_>, pan: Vec2, zoom: f32) {
-        let spacing = ctx.theme.canvas_dot_spacing;
+    pub(super) fn draw(&mut self, ui: &mut Ui, theme: &Theme, pan: Vec2, zoom: f32) {
+        let spacing = theme.canvas_dot_spacing;
         if zoom <= f32::EPSILON || spacing <= f32::EPSILON {
             return;
         }
@@ -77,15 +77,15 @@ impl CanvasBackground {
         if tile_px <= f32::EPSILON {
             return;
         }
-        let handle = self.tile_handle(ui, ctx);
+        let handle = self.tile_handle(ui, theme);
         ui.add_shape(Shape::image(handle).fit(ImageFit::Tile {
             offset: -pan / tile_px,
             scale: Vec2::new(size.w, size.h) / tile_px,
         }));
     }
 
-    fn tile_handle(&mut self, ui: &Ui, ctx: &AppContext<'_>) -> ImageHandle {
-        let key = DotKey::from_theme(ctx);
+    fn tile_handle(&mut self, ui: &Ui, theme: &Theme) -> ImageHandle {
+        let key = DotKey::from_theme(theme);
         if let Some((cached, handle)) = &self.tile
             && *cached == key
         {
@@ -94,7 +94,7 @@ impl CanvasBackground {
         // A changed `key` means a theme swap: register a fresh tile and
         // drop the old handle, freeing the previous tile's GPU texture.
         let handle = ui
-            .register_image(build_tile(ctx))
+            .register_image(build_tile(theme))
             .expect("canvas tile fits every supported GPU");
         self.tile = Some((key, handle.clone()));
         handle
@@ -116,10 +116,10 @@ fn wrap_multiplier(zoom: f32) -> f32 {
 /// one centered filled dot in the theme's dot color. The dot's texel
 /// radius is scaled so that at the base zoom (tile = `spacing` px) its
 /// on-screen radius matches `canvas_dot_radius`.
-fn build_tile(ctx: &AppContext<'_>) -> Image {
+fn build_tile(theme: &Theme) -> Image {
     let n = TILE_PX;
-    let radius = (ctx.theme.canvas_dot_radius * n as f32 / ctx.theme.canvas_dot_spacing).max(0.5);
-    let c = ctx.theme.colors.canvas_dot.to_srgb_u8();
+    let radius = (theme.canvas_dot_radius * n as f32 / theme.canvas_dot_spacing).max(0.5);
+    let c = theme.colors.canvas_dot.to_srgb_u8();
     let center = n as f32 * 0.5;
     let r2 = radius * radius;
     let mut pixels = Vec::with_capacity((n * n * 4) as usize);

@@ -5,7 +5,6 @@ use scenarium::NodeId;
 use crate::core::edit::intent::sink::Intents;
 use crate::core::edit::intent::types::GraphIntent;
 use crate::gui::EventRef;
-use crate::gui::app::AppContext;
 use crate::gui::canvas::geometry::CanvasGeometry;
 use crate::gui::canvas::gesture_slot::GestureSlot;
 use crate::gui::canvas::wire::{GlyphDrag, Wire, WirePass, WireTint};
@@ -177,7 +176,6 @@ impl SubscriptionUI {
     pub(super) fn draw_in_flight(
         &self,
         ui: &mut Ui,
-        ctx: &AppContext<'_>,
         graph_scope: GraphScope<'_>,
         geometry: &CanvasGeometry,
         canvas_origin: Vec2,
@@ -207,10 +205,11 @@ impl SubscriptionUI {
                 (p0, p3)
             }
         };
+        let theme = graph_scope.theme();
         Wire::event(p0, p3).add(
             ui,
-            ctx.theme.connection_width,
-            CurveBrush::Solid(event_color(ctx.theme, false)),
+            theme.connection_width,
+            CurveBrush::Solid(event_color(theme, false)),
         );
     }
 }
@@ -223,7 +222,11 @@ impl SubscriptionUI {
 /// [`crate::gui::canvas::connection_ui::draw`] — it belongs to the module
 /// rather than [`SubscriptionUI`].
 pub(super) fn draw(ui: &mut Ui, pass: &mut WirePass<'_, '_>) {
-    let (theme, graph_scope, geometry) = (pass.rcx.theme, pass.rcx.graph_scope, pass.rcx.geometry);
+    let (theme, graph_scope, geometry) = (
+        pass.rcx.theme(),
+        pass.rcx.graph_scope(),
+        pass.rcx.geometry(),
+    );
     for s in graph_scope.subscriptions() {
         let emitter = EventRef {
             node_id: s.emitter,
