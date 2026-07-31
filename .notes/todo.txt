@@ -54,5 +54,3 @@ self.run_state.previews.reconcile(ui, &self.open.document); -merge into one call
 graphscope :from_doc -> option !
 
 darkroom test harness
-
-state: GestureSlot<BreakerState>, = allocates
