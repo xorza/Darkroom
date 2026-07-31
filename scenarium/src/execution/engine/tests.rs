@@ -249,8 +249,11 @@ mod cache_persistence {
                 .message
                 .starts_with(&format!("failed to remove {}:", blocked_path.display()))
         );
-        let mut expected_successes = reopened.compiled().data_consumer_closure(&[get_a_id]);
-        expected_successes.retain(|node_id| *node_id != blocked_eid);
+        // The same cone as above, less the seed whose blob cannot be removed.
+        let expected_successes: Vec<_> = ["sum", "mult", "Print"]
+            .iter()
+            .map(|name| execution_node_id(&reopened, &graph, &library, name).unwrap())
+            .collect();
         assert!(
             reopened.slot(blocked_eid).output_values().is_some(),
             "a failed disk deletion must leave the matching RAM value resident"

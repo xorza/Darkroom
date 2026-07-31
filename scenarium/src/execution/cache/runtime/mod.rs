@@ -9,6 +9,7 @@
 //! back — so RAM eviction lives here, on the cache that owns both stores.
 //! Per-run results (errors, timings) are *not* here — they belong to a single run, not the cache.
 
+mod consumers;
 pub(crate) mod error;
 
 use std::collections::HashSet;
@@ -24,6 +25,7 @@ use crate::execution::cache::digest::{DOMAIN, Digest, DigestHasher, InputTag};
 use crate::execution::cache::disk_store::{BlobTarget, DiskStore, StorePolicy};
 use crate::execution::cache::resource::error::StampError;
 use crate::execution::cache::resource::{FsPathId, StampJob};
+use crate::execution::cache::runtime::consumers::Consumers;
 use crate::execution::cache::runtime::error::CacheEvictionFailure;
 use crate::execution::cache::slot::RuntimeSlot;
 use crate::execution::compiled::{CompiledGraph, ExecutionBinding};
@@ -136,21 +138,30 @@ impl RuntimeCache {
         self.stamp_job.clear_queue();
     }
 
+    /// Drop `seeds` and everything downstream of them from RAM and disk.
+    ///
+    /// The cone, not the seeds alone: a consumer whose own value survives reuses
+    /// it, and reuse prunes its producers — so evicting one node in isolation
+    /// would free its slot and change nothing a later run does. A seed absent
+    /// from the program is skipped; the host names authored nodes and the
+    /// installed program need not still hold every one.
     pub(crate) async fn evict(
         &mut self,
         program: &CompiledGraph,
-        node_ids: &[NodeId],
+        seeds: &[NodeId],
     ) -> Vec<CacheEvictionFailure> {
+        let cone = Consumers::reverse(program).closure(
+            seeds
+                .iter()
+                .filter_map(|node_id| program.node_index.get(node_id).copied()),
+        );
         let mut failures = Vec::new();
-        for node_id in node_ids {
-            let node_idx = *program
-                .node_index
-                .get(node_id)
-                .expect("an eviction target belongs to the installed program");
-            match self.disk_store.remove_node(*node_id).await {
+        for node_idx in cone.iter() {
+            let node_id = program.node_ids[node_idx];
+            match self.disk_store.remove_node(node_id).await {
                 Ok(()) => self.slots[node_idx].clear_output(),
                 Err(error) => failures.push(CacheEvictionFailure {
-                    node_id: *node_id,
+                    node_id,
                     message: error.to_string(),
                 }),
             }

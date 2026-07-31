@@ -30,26 +30,20 @@ A Pure node with an unset path input now errors per run. DataType::FsPath's defa
 
 fn hash_bound_fs_path(&self, hasher: &mut DigestHasher, addr: &OutputAddr) -> Option<()> - what is option
 
-remove scene?
-
 staticvalue -> constvalue
 
-    scene_shown: false,
+GestureSlot - remove?
 
-    GestureSlot - remove?
+StepSignals
 
-    StepSignals
+hits - remove?
 
-    better name for pane
+remove Gestures
 
-    remove executionnodeid
+pub(crate) enum Refusal { - remove
 
-    hits - remove?
-
-    remove Gestures
-
-    pub(crate) enum Refusal { - remove
-
-    fn drain_intents(&mut self, open: &mut OpenDocument) { - ugly
+fn drain_intents(&mut self, open: &mut OpenDocument) { - ugly
 
 bake output types into wildcard outputs
+
+refactor consumers
