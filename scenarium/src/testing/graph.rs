@@ -353,6 +353,7 @@ impl NodeSpec {
     ///
     /// Declare the ports first — this supplies only the implementation, and
     /// panics at run time if the node declares no output to write.
+    /// [`observes`](Self::observes) is the form for a node with none.
     pub fn compute(
         self,
         body: impl Fn(&[DynamicValue]) -> StaticValue + Send + Sync + 'static,
@@ -361,6 +362,21 @@ impl NodeSpec {
         self.lambda(async_lambda!(
             move |Invocation { inputs, outputs, .. }| { body = Arc::clone(&body) } => {
                 outputs[0] = DynamicValue::Static(body(inputs));
+                Ok(())
+            }
+        ))
+    }
+
+    /// A body that only *looks* at its inputs, writing nothing.
+    ///
+    /// For a sink whose effect is recorded outside the graph. Unlike
+    /// [`compute`](Self::compute) it declares and writes no output, so it fits
+    /// a node that has none.
+    pub fn observes(self, body: impl Fn(&[DynamicValue]) + Send + Sync + 'static) -> Self {
+        let body = Arc::new(body);
+        self.lambda(async_lambda!(
+            move |Invocation { inputs, .. }| { body = Arc::clone(&body) } => {
+                body(inputs);
                 Ok(())
             }
         ))

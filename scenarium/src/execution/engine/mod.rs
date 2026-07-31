@@ -241,7 +241,6 @@ impl ExecutionEngine {
 #[cfg(test)]
 pub(crate) mod internals {
     use crate::execution::identity::NodeIdx;
-    use ::common::CancelToken;
 
     use crate::DynamicValue;
     use crate::execution::cache::slot::{OutputSnapshot, RuntimeSlot};
@@ -250,8 +249,6 @@ pub(crate) mod internals {
     use crate::execution::compile::compiled_graph::{CompiledGraph, ExecutionInput};
     use crate::execution::engine::ExecutionEngine;
     use crate::execution::error::Result;
-    use crate::execution::report::ExecutionOutcome;
-    use crate::execution::report::internals::DiscardedReports;
     use crate::execution::schedule::NodeState;
     use crate::execution::seeds::RunSeeds;
     use crate::graph::Graph;
@@ -286,21 +283,6 @@ pub(crate) mod internals {
         ) -> std::result::Result<(), compile::error::CompileError> {
             self.install(compile::Compiler::default().compile(graph, library)?.into());
             Ok(())
-        }
-
-        pub(crate) async fn execute_sinks(&mut self) -> Result<ExecutionOutcome> {
-            let mut outcome = ExecutionOutcome::default();
-            self.execute(
-                RunSeeds {
-                    sinks: true,
-                    ..Default::default()
-                },
-                &mut DiscardedReports,
-                CancelToken::never(),
-                &mut outcome,
-            )
-            .await?;
-            Ok(outcome)
         }
 
         /// Prepare the structural plan and cache-aware resolved run without invoking lambdas.

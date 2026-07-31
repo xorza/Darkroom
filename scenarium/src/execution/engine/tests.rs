@@ -3,86 +3,26 @@ use std::sync::Arc;
 use super::*;
 use crate::execution::compile::error::CompileError;
 use crate::execution::error::{Error, RunError};
-use crate::graph::Binding;
-use crate::graph::Graph;
+use crate::execution::seeds::RunSeeds;
+use crate::graph::func::FuncBehavior;
 use crate::graph::func::error::InvokeError;
-use crate::graph::func::lambda::Invocation;
-use crate::graph::func::lambda::OutputDemand;
-use crate::graph::func::lambda::internals;
-use crate::graph::func::{Func, FuncBehavior};
-use crate::graph::identity::{InputPort, NodeId, OutputPort};
-use crate::graph::node::{CacheMode, Node};
+use crate::graph::func::lambda::{Invocation, OutputDemand, internals};
+use crate::graph::identity::{NodeId, OutputPort};
+use crate::graph::node::CacheMode;
 use crate::library::Library;
-use crate::testing::engine::TestEngine;
+use crate::testing::TestFuncHooks;
+use crate::testing::engine::{RunOutcome, TestEngine};
 use crate::testing::graph::{NodeSpec, TestGraph};
-use crate::testing::{TestFuncHooks, test_func_lib, test_graph};
 use crate::{DataType, DynamicValue, StaticValue};
-use ::common::FloatExt;
+use ::common::{CancelToken, FloatExt};
 use tokio::sync::Mutex;
 
 type TestResult<T = ()> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
-fn execution_node_name<'a>(
-    execution_graph: &ExecutionEngine,
-    graph: &'a Graph,
-    _library: &'a Library,
-    node_id: NodeId,
-) -> &'a str {
-    assert!(
-        execution_graph.compiled().contains(node_id),
-        "the node belongs to the installed program"
-    );
-    &graph.find(node_id).unwrap().name
-}
-
-fn execution_node_id(
-    execution_graph: &ExecutionEngine,
-    graph: &Graph,
-    library: &Library,
-    name: &str,
-) -> Option<NodeId> {
-    execution_graph
-        .compiled()
-        .node_ids
-        .iter()
-        .copied()
-        .find(|&node_id| execution_node_name(execution_graph, graph, library, node_id) == name)
-}
-
-fn default_hooks() -> TestFuncHooks {
-    TestFuncHooks {
-        get_a: Arc::new(move || Ok(1)),
-        get_b: Arc::new(move || 11),
-        print: Arc::new(move |_| {}),
-    }
-}
-
-fn mutate_func(library: &mut Library, name: &str, mutate: impl FnOnce(&mut Func)) {
-    let mut func = library.by_name(name).unwrap().clone();
-    mutate(&mut func);
-    library.remove(func.id).unwrap();
-    library.add(func);
-}
-
-/// Instantiate a `Node` for `func_name` with a fixed id; caller wires bindings.
-fn node(library: &Library, func_name: &str) -> Node {
-    library.by_name(func_name).unwrap().into()
-}
-
-/// Set input `idx` of the named node's binding in the source graph.
-fn bind(graph: &mut Graph, node_name: &str, idx: usize, binding: impl Into<Option<Binding>>) {
-    let id = graph.find_by_name(node_name).unwrap().id;
-    graph.set_input_binding(InputPort::new(id, idx), binding);
-}
-
 mod cache_persistence {
     use super::*;
-    use crate::execution::cache::disk_store::DiskStore;
-    use crate::execution::report::internals::CollectingReporter;
     use crate::execution::schedule::NodeState;
-    use std::collections::HashSet;
     use std::path::PathBuf;
-    use std::sync::Arc;
     use std::sync::Mutex as StdMutex;
     use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 
@@ -109,248 +49,246 @@ mod cache_persistence {
         }
     }
 
-    /// A fresh engine backed by a disk store rooted at `dir`
-    /// (simulating a reopen when called twice against the same dir). The default
-    /// empty library is fine — these tests cache plain values.
-    fn disk_engine(dir: &TempDir) -> ExecutionEngine {
-        use crate::library::Library;
-        let mut engine = ExecutionEngine::default();
-        engine
-            .cache
-            .set_disk_store(DiskStore::new(&Library::default(), Some(dir.0.clone())));
-        engine
+    /// Count of blobs in the store — one per persisted node.
+    fn blob_count(dir: &TempDir) -> usize {
+        std::fs::read_dir(&dir.0).unwrap().flatten().count()
+    }
+
+    /// An engine over `graph` backed by the store at `dir`. Calling it twice
+    /// against one dir is a reopen: fresh RAM, same blobs.
+    fn disk_engine(dir: &TempDir, graph: TestGraph) -> TestEngine {
+        let mut e = TestEngine::over(graph);
+        e.attach_disk_store(dir.0.clone());
+        e
+    }
+
+    /// A pure source emitting `value` and counting how often it was asked —
+    /// the recompute counter every test below reads.
+    fn source(value: i64, calls: Arc<AtomicUsize>) -> impl FnOnce(NodeSpec) -> NodeSpec {
+        move |n: NodeSpec| {
+            n.pure().output(DataType::Int).compute(move |_| {
+                calls.fetch_add(1, Ordering::SeqCst);
+                value.into()
+            })
+        }
+    }
+
+    /// A pure two-input arithmetic node on `mode`. The second input is
+    /// optional, defaulting to the operation's identity, so a fixture may leave
+    /// it unbound.
+    fn binop(
+        mode: CacheMode,
+        identity: i64,
+        op: fn(i64, i64) -> i64,
+    ) -> impl FnOnce(NodeSpec) -> NodeSpec {
+        move |n: NodeSpec| {
+            n.pure()
+                .cache(mode)
+                .input(DataType::Int)
+                .optional(DataType::Int)
+                .output(DataType::Int)
+                .compute(move |inputs| {
+                    let a = inputs[0].as_i64().unwrap();
+                    let b = inputs[1].as_i64().unwrap_or(identity);
+                    op(a, b).into()
+                })
+        }
+    }
+
+    fn mult(mode: CacheMode) -> impl FnOnce(NodeSpec) -> NodeSpec {
+        binop(mode, 1, |a, b| a * b)
+    }
+
+    fn sum(mode: CacheMode) -> impl FnOnce(NodeSpec) -> NodeSpec {
+        binop(mode, 0, |a, b| a + b)
+    }
+
+    /// `src → mult(mode) → print`, both of mult's inputs fed by the source.
+    /// The sink is impure, so `mult` is demanded every run.
+    fn source_mult_print(mode: CacheMode, value: i64, calls: Arc<AtomicUsize>) -> TestGraph {
+        let mut g = TestGraph::new();
+        g.add("src", source(value, calls));
+        g.add("mult", mult(mode));
+        g.add("print", |n| n.records());
+        g.wire("src", 0, "mult", 0);
+        g.wire("src", 0, "mult", 1);
+        g.wire("mult", 0, "print", 0);
+        g
     }
 
     #[tokio::test]
     async fn explicit_cache_eviction_removes_the_downstream_ram_and_disk_cone() {
         let dir = TempDir::new("explicit-eviction");
-        let get_a_calls = Arc::new(AtomicUsize::new(0));
-        let get_b_calls = Arc::new(AtomicUsize::new(0));
-        let printed = Arc::new(StdMutex::new(Vec::new()));
-        let library = test_func_lib(TestFuncHooks {
-            get_a: {
-                let calls = get_a_calls.clone();
-                Arc::new(move || {
-                    calls.fetch_add(1, Ordering::SeqCst);
-                    Ok(1)
-                })
-            },
-            get_b: {
-                let calls = get_b_calls.clone();
-                Arc::new(move || {
-                    calls.fetch_add(1, Ordering::SeqCst);
-                    11
-                })
-            },
-            print: {
-                let values = printed.clone();
-                Arc::new(move |value| values.lock().unwrap().push(value))
-            },
-        });
-        let mut graph = test_graph();
-        for name in ["get_a", "get_b", "sum", "mult"] {
-            let node_id = graph.find_by_name(name).unwrap().id;
-            graph.find_mut(node_id).unwrap().cache = CacheMode::Both;
-        }
-        let get_a_id = graph.find_by_name("get_a").unwrap().id;
-        let get_b_id = graph.find_by_name("get_b").unwrap().id;
-        let expected_names = ["get_a", "sum", "mult", "Print"];
+        let (a_calls, b_calls) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicUsize::new(0)));
 
-        let mut engine = disk_engine(&dir);
-        engine.update(&graph, &library).unwrap();
-        engine.execute_sinks().await.unwrap();
-        engine.execute_sinks().await.unwrap();
-        assert_eq!(get_a_calls.load(Ordering::SeqCst), 1);
-        assert_eq!(get_b_calls.load(Ordering::SeqCst), 1);
-        assert_eq!(*printed.lock().unwrap(), vec![132, 132]);
+        // src_a → sum → mult → print, with src_b feeding sum's second input —
+        // an upstream sibling *outside* src_a's consumer cone.
+        let mut g = TestGraph::new();
+        g.add("src_a", |n| {
+            source(1, a_calls.clone())(n).cache(CacheMode::Both)
+        });
+        g.add("src_b", |n| {
+            source(11, b_calls.clone())(n).cache(CacheMode::Both)
+        });
+        g.add("sum", sum(CacheMode::Both));
+        g.add("mult", mult(CacheMode::Both));
+        g.add("print", |n| n.records());
+        g.wire("src_a", 0, "sum", 0);
+        g.wire("src_b", 0, "sum", 1);
+        g.wire("sum", 0, "mult", 0);
+        g.wire("src_b", 0, "mult", 1);
+        g.wire("mult", 0, "print", 0);
+
+        let mut e = disk_engine(&dir, g);
+        e.run_sinks().await;
+        let run = e.run_sinks().await;
+        assert_eq!(a_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(b_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(run.logs(), ["132"], "(1 + 11) * 11");
         assert_eq!(blob_count(&dir), 4);
 
-        let failures = engine.evict_cache(&[get_a_id]).await;
-        let mut expected: Vec<_> = expected_names
-            .iter()
-            .map(|name| execution_node_id(&engine, &graph, &library, name).unwrap())
-            .collect();
-        expected.sort_unstable();
+        // Evicting the source takes its whole consumer cone with it — evicting
+        // one node alone would free a slot and change nothing a later run does,
+        // since a surviving consumer would just reuse and prune it again.
+        let evicted = ["src_a", "sum", "mult", "print"];
         assert!(
-            failures.is_empty(),
+            e.evict(["src_a"]).await.is_empty(),
             "the selected source and its data consumers must all evict"
         );
-        for node_id in &expected {
+        for name in evicted {
             assert!(
-                engine.slot(*node_id).output_values().is_none(),
-                "{node_id:?} must release its resident output"
+                !e.holds_output(name),
+                "{name} must release its resident output"
             );
         }
-        let get_b_eid = get_b_id;
         assert!(
-            engine.slot(get_b_eid).output_values().is_some(),
+            e.holds_output("src_b"),
             "an upstream sibling outside the consumer cone stays resident"
         );
-        assert_eq!(blob_count(&dir), 1, "only get_b's disk blob remains");
+        assert_eq!(blob_count(&dir), 1, "only src_b's disk blob remains");
 
-        drop(engine);
-        let mut reopened = disk_engine(&dir);
-        reopened.update(&graph, &library).unwrap();
-        let rerun = reopened.execute_sinks().await.unwrap();
-        assert_eq!(get_a_calls.load(Ordering::SeqCst), 2);
-        assert_eq!(get_b_calls.load(Ordering::SeqCst), 1);
-        assert_eq!(*printed.lock().unwrap(), vec![132, 132, 132]);
-        let reran: HashSet<_> = rerun.ran_nodes().collect();
-        for node_id in expected {
+        // Reopening recomputes exactly what was evicted; the retained sibling
+        // is still served from its blob.
+        drop(e);
+        let mut e = disk_engine(&dir, source_cone(&a_calls, &b_calls));
+        let run = e.run_sinks().await;
+        assert_eq!(a_calls.load(Ordering::SeqCst), 2);
+        assert_eq!(b_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(run.logs(), ["132"]);
+        for name in evicted {
             assert!(
-                reran.contains(&node_id),
-                "every evicted node must recompute after reopening"
+                run.ran().contains(&name),
+                "{name} must recompute after reopening"
             );
         }
         assert!(
-            !reran.contains(&get_b_eid),
+            !run.ran().contains(&"src_b"),
             "the retained sibling blob must still be reusable after reopening"
         );
 
-        let blocked_eid = get_a_id;
-        let blocked_path = dir.0.join(blocked_eid.as_uuid().simple().to_string());
-        std::fs::remove_file(&blocked_path).unwrap();
-        std::fs::create_dir(&blocked_path).unwrap();
+        // A blob that cannot be deleted is reported, and the rest of the cone
+        // still evicts — one failure is not a reason to abandon the sweep.
+        let blocked = dir.0.join(e.id("src_a").as_uuid().simple().to_string());
+        std::fs::remove_file(&blocked).unwrap();
+        std::fs::create_dir(&blocked).unwrap();
 
-        let partial_failures = reopened.evict_cache(&[get_a_id]).await;
-        let [failure] = partial_failures.as_slice() else {
-            panic!("the undeletable get_a path must be the only eviction failure");
+        let failures = e.evict(["src_a"]).await;
+        let [failure] = failures.as_slice() else {
+            panic!("the undeletable src_a path must be the only eviction failure");
         };
-        assert_eq!(failure.node_id, blocked_eid);
+        assert_eq!(failure.node_id, e.id("src_a"));
         assert!(
             failure
                 .message
-                .starts_with(&format!("failed to remove {}:", blocked_path.display()))
+                .starts_with(&format!("failed to remove {}:", blocked.display()))
         );
-        // The same cone as above, less the seed whose blob cannot be removed.
-        let expected_successes: Vec<_> = ["sum", "mult", "Print"]
-            .iter()
-            .map(|name| execution_node_id(&reopened, &graph, &library, name).unwrap())
-            .collect();
         assert!(
-            reopened.slot(blocked_eid).output_values().is_some(),
+            e.holds_output("src_a"),
             "a failed disk deletion must leave the matching RAM value resident"
         );
-        for node_id in &expected_successes {
+        for name in ["sum", "mult", "print"] {
             assert!(
-                reopened.slot(*node_id).output_values().is_none(),
-                "{node_id:?} must still evict when another target fails"
+                !e.holds_output(name),
+                "{name} must still evict when another target fails"
             );
         }
     }
 
-    /// A `persist` node's output survives a fresh engine (reopen), its sole-consumer
-    /// upstream is pruned on the hit, and an input change invalidates it —
-    /// *overwriting* the node's one blob rather than orphaning it beside a new one.
+    /// The eviction fixture's graph, rebuilt for a reopened engine. Declaration
+    /// order fixes the ids, so the new engine addresses the same slots.
+    fn source_cone(a_calls: &Arc<AtomicUsize>, b_calls: &Arc<AtomicUsize>) -> TestGraph {
+        let mut g = TestGraph::new();
+        g.add("src_a", |n| {
+            source(1, a_calls.clone())(n).cache(CacheMode::Both)
+        });
+        g.add("src_b", |n| {
+            source(11, b_calls.clone())(n).cache(CacheMode::Both)
+        });
+        g.add("sum", sum(CacheMode::Both));
+        g.add("mult", mult(CacheMode::Both));
+        g.add("print", |n| n.records());
+        g.wire("src_a", 0, "sum", 0);
+        g.wire("src_b", 0, "sum", 1);
+        g.wire("sum", 0, "mult", 0);
+        g.wire("src_b", 0, "mult", 1);
+        g.wire("mult", 0, "print", 0);
+        g
+    }
+
+    /// A disk-persisted node's output survives a fresh engine (reopen), its
+    /// sole-consumer upstream is pruned on the hit, and an input change
+    /// invalidates it — *overwriting* the node's one blob rather than orphaning
+    /// it beside a new one.
     #[tokio::test]
     async fn persist_output_survives_reopen_and_invalidates_on_digest_change() {
         let dir = TempDir::new("e2e");
-
-        // `get_a` recompute counter, shared across every engine via the hook.
-        let get_a_calls = Arc::new(AtomicUsize::new(0));
-        let make_lib = || {
-            let calls = get_a_calls.clone();
-            test_func_lib(TestFuncHooks {
-                get_a: Arc::new(move || {
-                    calls.fetch_add(1, Ordering::SeqCst);
-                    Ok(7)
-                }),
-                ..default_hooks()
-            })
-        };
-
-        // get_a (pure source) → mult (pure, persist Disk) → print (sink).
-        let lib = make_lib();
-        let mut graph = Graph::default();
-        graph.add(node(&lib, "get_a"));
-        let mut mult = node(&lib, "mult");
-        mult.cache = CacheMode::Disk;
-        graph.add(mult);
-        graph.add(node(&lib, "Print"));
-        let get_a_id = graph.find_by_name("get_a").unwrap().id;
-        let mult_id = graph.find_by_name("mult").unwrap().id;
-        bind(&mut graph, "mult", 0, Binding::bind(get_a_id, 0));
-        bind(&mut graph, "mult", 1, Binding::bind(get_a_id, 0));
-        bind(&mut graph, "Print", 0, Binding::bind(mult_id, 0));
+        let calls = Arc::new(AtomicUsize::new(0));
+        let build = |calls: &Arc<AtomicUsize>| source_mult_print(CacheMode::Disk, 7, calls.clone());
 
         // First run: everything computes; `mult` is stored to disk.
-        let mut engine = disk_engine(&dir);
-        engine.update(&graph, &make_lib()).unwrap();
-        engine.execute_sinks().await.unwrap();
-        assert_eq!(get_a_calls.load(Ordering::SeqCst), 1);
+        let mut e = disk_engine(&dir, build(&calls));
+        e.run_sinks().await;
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
 
-        // Reopen: a fresh engine over the same store. `mult` loads from disk (reused). Its
-        // only consumer of `get_a` is the reused `mult`, which never reads it, so the pre-run
-        // cut prunes `get_a` — a `Memory` source with no cross-session cache is *not*
-        // recomputed on reopen (the win the removed plan-time pass used to give).
-        let mut engine = disk_engine(&dir);
-        engine.update(&graph, &make_lib()).unwrap();
-        let mut reporter = CollectingReporter::default();
-        let mut stats = ExecutionOutcome::default();
-        engine
-            .execute(
-                RunSeeds {
-                    sinks: true,
-                    ..Default::default()
-                },
-                &mut reporter,
-                CancelToken::never(),
-                &mut stats,
-            )
-            .await
-            .unwrap();
+        // Reopen: `mult` loads from disk. Its only consumer of `src` is the
+        // reused `mult`, which never reads it, so the pre-run cut prunes `src`
+        // — a RAM-only source with no cross-session cache is *not* recomputed.
+        let mut e = disk_engine(&dir, build(&calls));
+        let run = e.run_sinks().await;
         assert_eq!(
-            get_a_calls.load(Ordering::SeqCst),
+            calls.load(Ordering::SeqCst),
             1,
-            "the cut prunes the Memory source upstream of a disk-cache hit on reopen"
+            "the cut prunes the memory-only source upstream of a disk hit"
         );
-        assert!(!stats.ran(get_a_id), "get_a was cut, not executed");
-        assert!(stats.cached(mult_id), "mult reused from disk");
-        assert!(!stats.ran(mult_id), "mult did not recompute");
+        assert!(!run.ran().contains(&"src"), "src was cut, not executed");
+        assert!(run.cached().contains(&"mult"), "mult reused from disk");
+        assert!(!run.ran().contains(&"mult"), "mult did not recompute");
         assert!(
-            !stats.node_ram(mult_id).total() > 0,
-            "a full run does not retain the Disk node after the run"
+            !e.holds_output("mult"),
+            "a full run does not retain a Disk node after the run"
         );
-        let executed_allocation = stats.nodes.as_ptr();
-        let executed_capacity = stats.nodes.capacity();
-        assert!(executed_capacity > 0);
 
         // A targeted run on `mult` hydrates the disk hit, but targeting must not
         // turn it into an implicit RAM cache.
-        let mut reporter = CollectingReporter::default();
-        engine
-            .execute(
-                RunSeeds {
-                    node_ids: vec![mult_id],
-                    ..Default::default()
-                },
-                &mut reporter,
-                CancelToken::never(),
-                &mut stats,
-            )
-            .await
-            .unwrap();
-        assert!(stats.cached(mult_id));
+        let run = e.run_nodes(["mult"]).await;
+        assert!(run.cached().contains(&"mult"));
         assert!(
-            !stats.node_ram(mult_id).total() > 0,
+            !e.holds_output("mult"),
             "a targeted run releases the hydrated Disk value"
         );
-        assert_eq!(stats.nodes.as_ptr(), executed_allocation);
-        assert_eq!(stats.nodes.capacity(), executed_capacity);
 
         // Changing one input to a const makes `mult` miss, while its other input
-        // still needs `get_a`, so the cut keeps the source alive and it runs.
-        bind(&mut graph, "mult", 1, Binding::Const(StaticValue::Int(3)));
-        let mut engine = disk_engine(&dir);
-        engine.update(&graph, &make_lib()).unwrap();
-        let stats = engine.execute_sinks().await.unwrap();
+        // still needs `src`, so the cut keeps the source alive and it runs.
+        let mut e = disk_engine(&dir, build(&calls));
+        e.edit(|g| g.constant("mult", 1, 3i64));
+        let run = e.run_sinks().await;
         assert_eq!(
-            get_a_calls.load(Ordering::SeqCst),
+            calls.load(Ordering::SeqCst),
             2,
-            "input change makes mult miss and recompute from get_a"
+            "an input change makes mult miss and recompute from src"
         );
         assert!(
-            !stats.cached(mult_id),
+            !run.cached().contains(&"mult"),
             "mult should not be cached after a digest change"
         );
         // The blob is keyed by node id, so the recompute replaced the superseded
@@ -362,257 +300,178 @@ mod cache_persistence {
         );
     }
 
-    /// Fan-out: a producer feeding both a reuse hit *and* a running consumer must survive
-    /// the cut — the running consumer still reads it. Proves the cut is a backward union
-    /// over consumers, not a forward "all consumers reused" filter (which would wrongly
-    /// prune the shared producer and starve the executing branch).
+    /// Fan-out: a producer feeding both a reuse hit *and* a running consumer
+    /// must survive the cut — the running consumer still reads it. Proves the
+    /// cut is a backward union over consumers, not a forward "all consumers
+    /// reused" filter (which would wrongly prune the shared producer and starve
+    /// the executing branch).
     #[tokio::test]
     async fn shared_producer_read_by_a_running_consumer_is_not_cut() {
         let dir = TempDir::new("fanout");
+        let calls = Arc::new(AtomicUsize::new(0));
 
-        let get_a_calls = Arc::new(AtomicUsize::new(0));
-        let make_lib = || {
-            let calls = get_a_calls.clone();
-            test_func_lib(TestFuncHooks {
-                get_a: Arc::new(move || {
-                    calls.fetch_add(1, Ordering::SeqCst);
-                    Ok(7)
-                }),
-                ..default_hooks()
-            })
+        // src → mult(Disk) → print_mult ;  src → print_direct.
+        let build = |calls: &Arc<AtomicUsize>| {
+            let mut g = TestGraph::new();
+            g.add("src", source(7, calls.clone()));
+            g.add("mult", mult(CacheMode::Disk));
+            g.add("print_mult", |n| n.records());
+            g.instance("print_direct", "print_mult");
+            g.wire("src", 0, "mult", 0);
+            g.wire("src", 0, "mult", 1);
+            g.wire("mult", 0, "print_mult", 0);
+            g.wire("src", 0, "print_direct", 0);
+            g
         };
 
-        // get_a → mult(persist Disk) → print_mult ;  get_a → print_direct.
-        let lib = make_lib();
-        let mut graph = Graph::default();
-        graph.add(node(&lib, "get_a"));
-        let mut mult = node(&lib, "mult");
-        mult.cache = CacheMode::Disk;
-        graph.add(mult);
-        let print_mult_id = NodeId::unique();
-        graph.insert(print_mult_id, node(&lib, "Print"));
-        let print_direct_id = NodeId::unique();
-        graph.insert(print_direct_id, node(&lib, "Print"));
-        let get_a_id = graph.find_by_name("get_a").unwrap().id;
-        let mult_id = graph.find_by_name("mult").unwrap().id;
-        graph.set_input_binding(InputPort::new(mult_id, 0), Binding::bind(get_a_id, 0));
-        graph.set_input_binding(InputPort::new(mult_id, 1), Binding::bind(get_a_id, 0));
-        graph.set_input_binding(InputPort::new(print_mult_id, 0), Binding::bind(mult_id, 0));
-        graph.set_input_binding(
-            InputPort::new(print_direct_id, 0),
-            Binding::bind(get_a_id, 0),
-        );
+        let mut e = disk_engine(&dir, build(&calls));
+        e.run_sinks().await;
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
 
-        // Cold run: everything computes; mult is stored to disk.
-        let mut engine = disk_engine(&dir);
-        engine.update(&graph, &make_lib()).unwrap();
-        engine.execute_sinks().await.unwrap();
-        assert_eq!(get_a_calls.load(Ordering::SeqCst), 1);
-
-        // Reopen: mult reuses from disk, so the get_a→mult edge is cut — but print_direct
-        // still reads get_a, so the union keeps get_a alive and it recomputes.
-        let mut engine = disk_engine(&dir);
-        engine.update(&graph, &make_lib()).unwrap();
-        let stats = engine.execute_sinks().await.unwrap();
+        // Reopen: mult reuses from disk, so the src→mult edge is cut — but
+        // print_direct still reads src, so the union keeps src alive.
+        let mut e = disk_engine(&dir, build(&calls));
+        let run = e.run_sinks().await;
         assert_eq!(
-            get_a_calls.load(Ordering::SeqCst),
+            calls.load(Ordering::SeqCst),
             2,
-            "get_a is still read by print_direct, so the cut must keep it"
+            "src is still read by print_direct, so the cut must keep it"
         );
         assert!(
-            stats.ran(get_a_id),
+            run.ran().contains(&"src"),
             "the shared producer runs for its executing consumer"
         );
-        assert!(stats.cached(mult_id), "mult still reuses from disk");
+        assert!(
+            run.cached().contains(&"mult"),
+            "mult still reuses from disk"
+        );
     }
 
-    /// Two disk-cached nodes chained (`sum` → `mult`) under an executing sink
-    /// (`print`). On reopen only the frontier `mult` — the cached value `print`
-    /// actually reads — is deserialized into RAM; the deeper `sum`, whose sole
-    /// consumer `mult` is itself reused-from-disk, is never hydrated.
+    /// Two disk-cached nodes chained (`sum` → `mult`) under an executing sink.
+    /// On reopen only the frontier `mult` — the cached value the sink actually
+    /// reads — is deserialized into RAM; the deeper `sum`, whose sole consumer
+    /// is itself reused-from-disk, is never hydrated.
     #[tokio::test]
     async fn chained_disk_cache_hydrates_only_the_live_frontier() {
         let dir = TempDir::new("chain-frontier");
+        let calls = Arc::new(AtomicUsize::new(0));
 
-        let get_a_calls = Arc::new(AtomicUsize::new(0));
-        let make_lib = || {
-            let calls = get_a_calls.clone();
-            test_func_lib(TestFuncHooks {
-                get_a: Arc::new(move || {
-                    calls.fetch_add(1, Ordering::SeqCst);
-                    Ok(7)
-                }),
-                ..default_hooks()
-            })
+        // src(7) → sum(Both) = 14 → mult(Both) = 98 → print. `Both` (RAM + disk)
+        // so the frontier the run reads is kept resident — that retention is
+        // what this test asserts; pure `Disk` would drop its RAM copy.
+        let build = |calls: &Arc<AtomicUsize>| {
+            let mut g = TestGraph::new();
+            g.add("src", source(7, calls.clone()));
+            g.add("sum", sum(CacheMode::Both));
+            g.add("mult", mult(CacheMode::Both));
+            g.add("print", |n| n.records());
+            g.wire("src", 0, "sum", 0);
+            g.wire("src", 0, "sum", 1);
+            g.wire("sum", 0, "mult", 0);
+            g.wire("src", 0, "mult", 1);
+            g.wire("mult", 0, "print", 0);
+            g
         };
 
-        // get_a(7) → sum(Both) = 7+7 = 14 → mult(Both) = 14*7 = 98 → print. `Both`
-        // (RAM + disk) so the frontier the run reads is kept resident — that retention
-        // is what this test asserts (pure `Disk` would drop its RAM copy).
-        let lib = make_lib();
-        let mut graph = Graph::default();
-        graph.add(node(&lib, "get_a"));
-        let mut sum = node(&lib, "sum");
-        sum.cache = CacheMode::Both;
-        graph.add(sum);
-        let mut mult = node(&lib, "mult");
-        mult.cache = CacheMode::Both;
-        graph.add(mult);
-        graph.add(node(&lib, "Print"));
-        let get_a_id = graph.find_by_name("get_a").unwrap().id;
-        let sum_id = graph.find_by_name("sum").unwrap().id;
-        let mult_id = graph.find_by_name("mult").unwrap().id;
-        bind(&mut graph, "sum", 0, Binding::bind(get_a_id, 0));
-        bind(&mut graph, "sum", 1, Binding::bind(get_a_id, 0));
-        bind(&mut graph, "mult", 0, Binding::bind(sum_id, 0));
-        bind(&mut graph, "mult", 1, Binding::bind(get_a_id, 0));
-        bind(&mut graph, "Print", 0, Binding::bind(mult_id, 0));
+        let mut e = disk_engine(&dir, build(&calls));
+        e.run_sinks().await;
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
 
-        // First run: everything computes; sum (14) and mult (98) stored to disk.
-        let mut engine = disk_engine(&dir);
-        engine.update(&graph, &make_lib()).unwrap();
-        engine.execute_sinks().await.unwrap();
-        assert_eq!(get_a_calls.load(Ordering::SeqCst), 1);
-
-        // Reopen over the same store with fresh RAM. Resolution alone settles `mult` as a
-        // reuse — its blob header covers the demand — without decoding the body: the value
-        // only enters RAM when the run loop reaches the node, so a run's reusable frontier
-        // never accumulates ahead of the first lambda.
-        let mut engine = disk_engine(&dir);
-        engine.update(&graph, &make_lib()).unwrap();
-        engine.prepare_execution(true, false, &[]).await.unwrap();
+        // Reopen with fresh RAM. Resolution alone settles `mult` as a reuse —
+        // its blob header covers the demand — without decoding the body: the
+        // value only enters RAM when the run loop reaches the node, so a run's
+        // reusable frontier never accumulates ahead of the first lambda.
+        let mut e = disk_engine(&dir, build(&calls));
+        e.plan_sinks().await.unwrap();
         assert_eq!(
-            engine.node_state(mult_id),
+            e.state("mult"),
             NodeState::Reuse,
             "the frontier blob is verified from its header during resolution"
         );
-        assert!(
-            engine.slot(mult_id).output_values().is_none(),
-            "...and is not decoded there"
-        );
+        assert!(!e.holds_output("mult"), "...and is not decoded there");
 
-        let stats = engine.execute_sinks().await.unwrap();
+        let run = e.run_sinks().await;
 
-        // Only frontier `mult` is verified and reused. `sum` and `get_a` are behind that
-        // hit, so neither is hydrated or recomputed.
         assert_eq!(
-            get_a_calls.load(Ordering::SeqCst),
+            calls.load(Ordering::SeqCst),
             1,
-            "the cut prunes the Memory source feeding only disk-cache hits"
+            "the cut prunes the memory-only source feeding only disk hits"
         );
-        assert!(
-            !stats.cached(sum_id) && stats.cached(mult_id),
+        assert_eq!(
+            run.cached(),
+            ["mult"],
             "only the live frontier cache is hydrated and reported"
         );
-
-        // The frontier `mult` (read by the executing `print`) is in RAM...
-        let mult_resident = engine.slot(mult_id).output_values().is_some();
-        assert!(mult_resident, "frontier cache is loaded into RAM");
-        // ...but the deeper `sum` is not even flagged: the blob stays in the store,
-        // outside the runtime slot, until a later run actually needs it.
-        let sum_resident = engine.slot(sum_id).output_values().is_some();
-        let sum_empty = engine.slot(sum_id).output_values().is_none();
+        assert!(e.holds_output("mult"), "frontier cache is loaded into RAM");
         assert!(
-            !sum_resident,
-            "an unneeded upstream disk cache is not hydrated"
-        );
-        assert!(
-            sum_empty,
-            "the deeper cache is not probed before exact demand reaches it"
+            !e.holds_output("sum"),
+            "an unneeded upstream disk cache is never hydrated — the blob stays \
+             in the store until a later run's exact demand reaches it"
         );
 
-        let empty_dir = TempDir::new("chain-empty");
-        engine.cache.set_disk_store(DiskStore::new(
-            &Library::default(),
-            Some(empty_dir.0.clone()),
-        ));
+        // Swap in an empty store: the resident frontier survives, but the deeper
+        // value now has nothing to load from and must recompute when demanded.
+        let empty = TempDir::new("chain-empty");
+        e.attach_disk_store(empty.0.clone());
         assert!(
-            engine.slot(mult_id).output_values().is_some(),
+            e.holds_output("mult"),
             "switching stores preserves resident values"
         );
 
-        bind(&mut graph, "mult", 1, Binding::Const(StaticValue::Int(3)));
-        engine.update(&graph, &make_lib()).unwrap();
-        let stats = engine.execute_sinks().await.unwrap();
+        e.edit(|g| g.constant("mult", 1, 3i64));
+        let run = e.run_sinks().await;
         assert!(
-            stats.ran(sum_id),
+            run.ran().contains(&"sum"),
             "a value absent from the new store recomputes when needed"
         );
         assert_eq!(
-            get_a_calls.load(Ordering::SeqCst),
+            calls.load(Ordering::SeqCst),
             2,
             "recomputing sum also restores its pruned memory-only input"
         );
     }
 
-    /// A blob that satisfies the resolver's header probe but fails to decode when the run
-    /// loop reaches it. The reuse verdict already cut the node's producers, so the run
-    /// cannot fall back to recomputing: the node fails, its consumers skip as
-    /// errored-upstream, and the undecodable blob is dropped so the next run recomputes.
+    /// A blob that satisfies the resolver's header probe but fails to decode
+    /// when the run loop reaches it. The reuse verdict already cut the node's
+    /// producers, so the run cannot fall back to recomputing: the node fails,
+    /// its consumers skip as errored-upstream, and the undecodable blob is
+    /// dropped so the next run recomputes.
     #[tokio::test]
     async fn a_probed_blob_that_stops_decoding_fails_its_node_and_self_heals() {
         let dir = TempDir::new("corrupt-frontier");
+        let calls = Arc::new(AtomicUsize::new(0));
+        let build = |calls: &Arc<AtomicUsize>| source_mult_print(CacheMode::Disk, 7, calls.clone());
 
-        let get_a_calls = Arc::new(AtomicUsize::new(0));
-        let make_lib = || {
-            let calls = get_a_calls.clone();
-            test_func_lib(TestFuncHooks {
-                get_a: Arc::new(move || {
-                    calls.fetch_add(1, Ordering::SeqCst);
-                    Ok(7)
-                }),
-                ..default_hooks()
-            })
-        };
+        let mut e = disk_engine(&dir, build(&calls));
+        e.run_sinks().await;
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
 
-        // get_a(7) → mult(Disk) = 49 → print.
-        let lib = make_lib();
-        let mut graph = Graph::default();
-        graph.add(node(&lib, "get_a"));
-        let mut mult = node(&lib, "mult");
-        mult.cache = CacheMode::Disk;
-        graph.add(mult);
-        graph.add(node(&lib, "Print"));
-        let get_a_id = graph.find_by_name("get_a").unwrap().id;
-        let mult_id = graph.find_by_name("mult").unwrap().id;
-        let print_id = graph.find_by_name("Print").unwrap().id;
-        bind(&mut graph, "mult", 0, Binding::bind(get_a_id, 0));
-        bind(&mut graph, "mult", 1, Binding::bind(get_a_id, 0));
-        bind(&mut graph, "Print", 0, Binding::bind(mult_id, 0));
-
-        let mut engine = disk_engine(&dir);
-        engine.update(&graph, &make_lib()).unwrap();
-        engine.execute_sinks().await.unwrap();
-        assert_eq!(get_a_calls.load(Ordering::SeqCst), 1);
-
-        // Reopen, then corrupt the stored value while leaving the header that the probe
-        // reads — digest, arity, and per-output coverage — untouched.
-        let mut engine = disk_engine(&dir);
-        engine.update(&graph, &make_lib()).unwrap();
-        engine.cache.disk_store().corrupt_payload(mult_id, 1);
-        engine.prepare_execution(true, false, &[]).await.unwrap();
+        // Reopen, then corrupt the stored value while leaving the header the
+        // probe reads — digest, arity, per-output coverage — untouched.
+        let mut e = disk_engine(&dir, build(&calls));
+        e.engine.cache.disk_store().corrupt_payload(e.id("mult"), 1);
+        e.plan_sinks().await.unwrap();
         assert_eq!(
-            engine.node_state(mult_id),
+            e.state("mult"),
             NodeState::Reuse,
             "a header-only probe cannot see a corrupt payload"
         );
 
-        let stats = engine.execute_sinks().await.unwrap();
+        let run = e.run_sinks().await;
         assert_eq!(
-            get_a_calls.load(Ordering::SeqCst),
+            calls.load(Ordering::SeqCst),
             1,
             "the reuse verdict already pruned the producer, so nothing recomputes"
         );
-        let error_for = |node_id| stats.error(node_id).cloned();
         assert!(
-            matches!(error_for(mult_id), Some(RunError::CacheLoadFailed { .. })),
+            matches!(run.error("mult"), Some(RunError::CacheLoadFailed { .. })),
             "the node whose cache stopped loading fails, rather than serving nothing"
         );
         assert!(
-            matches!(error_for(print_id), Some(RunError::SkippedUpstream { .. })),
+            matches!(run.error("print"), Some(RunError::SkippedUpstream { .. })),
             "its consumer skips as errored-upstream"
         );
-        assert!(!stats.cached(mult_id));
+        assert!(!run.cached().contains(&"mult"));
         assert_eq!(
             blob_count(&dir),
             0,
@@ -620,173 +479,126 @@ mod cache_persistence {
         );
 
         // Nothing left to reuse: the whole cone recomputes and republishes.
-        let stats = engine.execute_sinks().await.unwrap();
-        assert!(stats.errored_nodes().count() == 0, "the next run is clean");
-        assert_eq!(get_a_calls.load(Ordering::SeqCst), 2);
+        let run = e.run_sinks().await;
+        assert!(run.errored().is_empty(), "the next run is clean");
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
         assert_eq!(blob_count(&dir), 1);
     }
 
-    /// A `Both` value remains resident even when a later run neither executes nor reads it.
+    /// A `Both` value remains resident even when a later run neither executes
+    /// nor reads it.
     #[tokio::test]
     async fn both_value_stays_resident_outside_the_active_frontier() {
         let dir = TempDir::new("both-retained");
-        let lib = test_func_lib(default_hooks());
+        let calls = Arc::new(AtomicUsize::new(0));
 
-        // get_a(1) → sum(Both) = 2 → mult(Both) = 2 → print.
-        let mut graph = Graph::default();
-        graph.add(node(&lib, "get_a"));
-        let mut sum = node(&lib, "sum");
-        sum.cache = CacheMode::Both;
-        graph.add(sum);
-        let mut mult = node(&lib, "mult");
-        mult.cache = CacheMode::Both;
-        graph.add(mult);
-        graph.add(node(&lib, "Print"));
-        let get_a_id = graph.find_by_name("get_a").unwrap().id;
-        let sum_id = graph.find_by_name("sum").unwrap().id;
-        let mult_id = graph.find_by_name("mult").unwrap().id;
-        bind(&mut graph, "sum", 0, Binding::bind(get_a_id, 0));
-        bind(&mut graph, "sum", 1, Binding::bind(get_a_id, 0));
-        bind(&mut graph, "mult", 0, Binding::bind(sum_id, 0));
-        bind(&mut graph, "mult", 1, Binding::bind(get_a_id, 0));
-        bind(&mut graph, "Print", 0, Binding::bind(mult_id, 0));
+        // src(1) → sum(Both) = 2 → mult(Both) = 2 → print.
+        let mut g = TestGraph::new();
+        // `src` retains in RAM but never persists — the "non-reloadable value"
+        // the last assertion is about.
+        g.add("src", |n| source(1, calls.clone())(n).cache(CacheMode::Ram));
+        g.add("sum", sum(CacheMode::Both));
+        g.add("mult", mult(CacheMode::Both));
+        g.add("print", |n| n.records());
+        g.wire("src", 0, "sum", 0);
+        g.wire("src", 0, "sum", 1);
+        g.wire("sum", 0, "mult", 0);
+        g.wire("src", 0, "mult", 1);
+        g.wire("mult", 0, "print", 0);
 
-        let mut engine = disk_engine(&dir);
-        engine.update(&graph, &lib).unwrap();
-
-        engine.execute_sinks().await.unwrap();
+        let mut e = disk_engine(&dir, g);
+        e.run_sinks().await;
         assert!(
-            engine.slot(sum_id).output_values().is_some(),
+            e.holds_output("sum"),
             "sum is resident after the run that computed it"
         );
 
-        let stats = engine.execute_sinks().await.unwrap();
-        assert_eq!(stats.ran_node_count, 1, "only print runs the second time");
-
-        let sum_slot = &engine.slot(sum_id);
-        let mult_resident = engine.slot(mult_id).output_values().is_some();
-        let get_a_resident = engine.slot(get_a_id).output_values().is_some();
-        assert!(
-            matches!(
-                sum_slot.output_values().map(|values| &values[0]),
-                Some(DynamicValue::Static(StaticValue::Int(2)))
-            ),
-            "Both keeps the exact prior-run value resident outside the active frontier"
+        let run = e.run_sinks().await;
+        assert_eq!(run.ran_node_count, 1, "only print runs the second time");
+        assert_eq!(
+            e.output_i64("sum", 0),
+            Some(2),
+            "Both keeps the exact prior-run value resident outside the frontier"
         );
         assert!(
-            mult_resident,
+            e.holds_output("mult"),
             "the frontier value the run read is kept resident"
         );
         assert!(
-            get_a_resident,
-            "a non-reloadable (Memory) value is kept, never force-recomputed"
+            e.holds_output("src"),
+            "a non-reloadable memory-only value is kept, never force-recomputed"
         );
 
-        // An empty replacement store proves the later hit comes from retained RAM, not disk.
-        let empty_dir = TempDir::new("both-retained-empty");
-        engine.cache.set_disk_store(DiskStore::new(
-            &Library::default(),
-            Some(empty_dir.0.clone()),
-        ));
-        bind(&mut graph, "mult", 1, Binding::Const(StaticValue::Int(3)));
-        engine.update(&graph, &lib).unwrap();
-        let stats = engine.execute_sinks().await.unwrap();
-        assert!(cached(&stats, sum_id), "sum is reused from retained RAM");
-        assert!(!ran(&stats, sum_id), "sum does not recompute");
+        // An empty replacement store proves the later hit comes from retained
+        // RAM, not from disk.
+        let empty = TempDir::new("both-retained-empty");
+        e.attach_disk_store(empty.0.clone());
+        e.edit(|g| g.constant("mult", 1, 3i64));
+        let run = e.run_sinks().await;
         assert!(
-            ran(&stats, mult_id),
-            "the changed downstream node recomputes"
+            run.cached().contains(&"sum"),
+            "sum is reused from retained RAM"
+        );
+        assert!(!run.ran().contains(&"sum"), "sum does not recompute");
+        assert!(
+            run.ran().contains(&"mult"),
+            "the changed downstream recomputes"
         );
         assert!(
-            engine.slot(sum_id).output_values().is_some(),
+            e.holds_output("sum"),
             "the reused Both value remains resident"
         );
     }
 
-    /// A top-level node recomputed (rather than reused) in the last run.
-    fn ran(stats: &ExecutionOutcome, id: NodeId) -> bool {
-        stats.ran(id)
-    }
-    /// A top-level node reused a cache or remained resident behind a cut last run.
-    fn cached(stats: &ExecutionOutcome, id: NodeId) -> bool {
-        stats.cached(id)
-    }
-    /// Count of blobs in the store — one per persisted node.
-    fn blob_count(dir: &TempDir) -> usize {
-        std::fs::read_dir(&dir.0).unwrap().flatten().count()
-    }
-
-    /// One row of the cache-mode matrix. Over a fresh store, build `get_a → mult(mode) →
-    /// print` (an impure sink, so `mult` is needed every run), run twice on one engine,
-    /// then reopen with empty RAM. Asserts the four modes' *distinct* outcomes on the axes
-    /// they differ on: cross-run reuse, RAM retention after the run, and disk persistence.
+    /// One row of the cache-mode matrix. Over a fresh store, build
+    /// `src → mult(mode) → print` (an impure sink, so `mult` is needed every
+    /// run), run twice on one engine, then reopen with empty RAM. Asserts the
+    /// four modes' *distinct* outcomes on the axes they differ on: cross-run
+    /// reuse, RAM retention after the run, and disk persistence.
     async fn assert_mode_behavior(mode: CacheMode) {
         let dir = TempDir::new(&format!("mode-{mode:?}"));
-        let lib = test_func_lib(default_hooks());
+        let calls = Arc::new(AtomicUsize::new(0));
 
-        // get_a(1) → mult(mode) = 1*1 = 1 → print.
-        let mut graph = Graph::default();
-        graph.add(node(&lib, "get_a"));
-        let mut mult = node(&lib, "mult");
-        mult.cache = mode;
-        graph.add(mult);
-        graph.add(node(&lib, "Print"));
-        let get_a_id = graph.find_by_name("get_a").unwrap().id;
-        let mult_id = graph.find_by_name("mult").unwrap().id;
-        bind(&mut graph, "mult", 0, Binding::bind(get_a_id, 0));
-        bind(&mut graph, "mult", 1, Binding::bind(get_a_id, 0));
-        bind(&mut graph, "Print", 0, Binding::bind(mult_id, 0));
-
-        // Two runs on one engine: run 1 is cold; run 2 reveals cross-run reuse.
-        let mut engine = disk_engine(&dir);
-        engine.update(&graph, &lib).unwrap();
-        let run1 = engine.execute_sinks().await.unwrap();
+        let mut e = disk_engine(&dir, source_mult_print(mode, 1, calls.clone()));
+        let run1 = e.run_sinks().await;
         assert!(
-            ran(&run1, mult_id),
+            run1.ran().contains(&"mult"),
             "{mode:?}: mult computes on the cold run"
         );
 
-        let run2 = engine.execute_sinks().await.unwrap();
+        let run2 = e.run_sinks().await;
         if mode == CacheMode::None {
             assert!(
-                ran(&run2, mult_id),
+                run2.ran().contains(&"mult"),
                 "None recomputes every run its value is needed"
             );
-            assert!(!cached(&run2, mult_id), "None is never reported cached");
+            assert!(
+                !run2.cached().contains(&"mult"),
+                "None is never reported cached"
+            );
         } else {
             assert!(
-                cached(&run2, mult_id),
+                run2.cached().contains(&"mult"),
                 "{mode:?} reuses its cached output on run 2"
             );
-            assert!(!ran(&run2, mult_id), "{mode:?} does not recompute on run 2");
+            assert!(
+                !run2.ran().contains(&"mult"),
+                "{mode:?} does not recompute on run 2"
+            );
         }
 
         // Slot retention after run 2: RAM-resident iff the mode keeps RAM.
-        let slot = &engine.slot(mult_id);
         assert_eq!(
-            slot.output_values().is_some(),
+            e.holds_output("mult"),
             mode.caches_in_ram(),
             "{mode:?}: RAM retention must equal caches_in_ram()"
         );
-        match mode {
-            CacheMode::None => assert!(
-                slot.output_values().is_none(),
-                "None drops its value after the run: {:?}",
-                slot.output_values()
-            ),
-            CacheMode::Disk => assert!(
-                slot.output_values().is_none(),
-                "Disk drops its RAM copy after the run: {:?}",
-                slot.output_values()
-            ),
-            CacheMode::Ram | CacheMode::Both => assert!(
-                matches!(
-                    slot.output_values().map(|v| &v[0]),
-                    Some(DynamicValue::Static(StaticValue::Int(1)))
-                ),
-                "Ram/Both keep the resident value (1*1=1): {:?}",
-                slot.output_values()
-            ),
+        if mode.caches_in_ram() {
+            assert_eq!(
+                e.output_i64("mult", 0),
+                Some(1),
+                "{mode:?} keeps the resident value (1 * 1 = 1)"
+            );
         }
 
         // A blob exists iff the mode persists to disk.
@@ -796,33 +608,34 @@ mod cache_persistence {
             "{mode:?}: a blob exists iff persists_to_disk()"
         );
 
-        // Reopen with empty RAM over the same store: only a disk-backed mode survives.
-        let mut engine = disk_engine(&dir);
-        engine.update(&graph, &lib).unwrap();
-        let reopen = engine.execute_sinks().await.unwrap();
+        // Reopen with empty RAM over the same store: only a disk-backed mode
+        // survives.
+        let mut e = disk_engine(&dir, source_mult_print(mode, 1, calls.clone()));
+        let reopen = e.run_sinks().await;
         if mode.persists_to_disk() {
             assert!(
-                cached(&reopen, mult_id),
+                reopen.cached().contains(&"mult"),
                 "{mode:?} reloads mult from disk on reopen"
             );
             assert!(
-                !ran(&reopen, get_a_id),
-                "{mode:?}: the cut prunes get_a behind the disk hit"
+                !reopen.ran().contains(&"src"),
+                "{mode:?}: the cut prunes src behind the disk hit"
             );
         } else {
             assert!(
-                ran(&reopen, mult_id),
+                reopen.ran().contains(&"mult"),
                 "{mode:?} has no disk blob, so mult recomputes on reopen"
             );
             assert!(
-                ran(&reopen, get_a_id),
-                "{mode:?}: get_a recomputes to feed mult"
+                reopen.ran().contains(&"src"),
+                "{mode:?}: src recomputes to feed mult"
             );
         }
     }
 
-    /// The four cache modes produce four distinct reuse / retention / persistence
-    /// behaviors — the parameterized proof that the mode actually drives the engine.
+    /// The four cache modes produce four distinct reuse / retention /
+    /// persistence behaviors — the parameterized proof that the mode actually
+    /// drives the engine.
     #[tokio::test]
     async fn cache_mode_matrix() {
         for mode in [
@@ -835,247 +648,209 @@ mod cache_persistence {
         }
     }
 
-    /// `None` is storage-only: it never taints downstream reproducibility. `A(None) →
-    /// B(Disk)` — B still has a content digest, so it persists and, on reopen, is served
-    /// from disk with A cut (not recomputed), exactly as if A were an ordinary cached node.
-    /// Contrast an `Impure` A, which *would* strip B of its digest and force both to rerun.
+    /// `None` is storage-only: it never taints downstream reproducibility.
+    /// `A(None) → B(Disk)` — B still has a content digest, so it persists and,
+    /// on reopen, is served from disk with A cut (not recomputed), exactly as if
+    /// A were an ordinary cached node. Contrast an `Impure` A, which *would*
+    /// strip B of its digest and force both to rerun.
     #[tokio::test]
     async fn none_upstream_does_not_disable_downstream_disk_cache() {
         let dir = TempDir::new("none-orthogonal");
-        let lib = test_func_lib(default_hooks());
+        let calls = Arc::new(AtomicUsize::new(0));
 
-        // get_a(1) → A = sum(None) = 1+1 = 2 → B = mult(Disk) = 2*2 = 4 → print.
-        let mut graph = Graph::default();
-        graph.add(node(&lib, "get_a"));
-        let mut a = node(&lib, "sum");
-        a.cache = CacheMode::None;
-        graph.add(a);
-        let mut b = node(&lib, "mult");
-        b.cache = CacheMode::Disk;
-        graph.add(b);
-        graph.add(node(&lib, "Print"));
-        let get_a_id = graph.find_by_name("get_a").unwrap().id;
-        let a_id = graph.find_by_name("sum").unwrap().id;
-        let b_id = graph.find_by_name("mult").unwrap().id;
-        bind(&mut graph, "sum", 0, Binding::bind(get_a_id, 0));
-        bind(&mut graph, "sum", 1, Binding::bind(get_a_id, 0));
-        bind(&mut graph, "mult", 0, Binding::bind(a_id, 0));
-        bind(&mut graph, "mult", 1, Binding::bind(a_id, 0));
-        bind(&mut graph, "Print", 0, Binding::bind(b_id, 0));
+        // src(1) → a = sum(None) = 2 → b = mult(Disk) = 4 → print.
+        let build = |calls: &Arc<AtomicUsize>| {
+            let mut g = TestGraph::new();
+            g.add("src", source(1, calls.clone()));
+            g.add("a", sum(CacheMode::None));
+            g.add("b", mult(CacheMode::Disk));
+            g.add("print", |n| n.records());
+            g.wire("src", 0, "a", 0);
+            g.wire("src", 0, "a", 1);
+            g.wire("a", 0, "b", 0);
+            g.wire("a", 0, "b", 1);
+            g.wire("b", 0, "print", 0);
+            g
+        };
 
-        // Cold run computes A and B; B(Disk) persists — proving A(None) left B a digest.
-        let mut engine = disk_engine(&dir);
-        engine.update(&graph, &lib).unwrap();
-        let cold = engine.execute_sinks().await.unwrap();
+        let mut e = disk_engine(&dir, build(&calls));
+        let cold = e.run_sinks().await;
         assert!(
-            ran(&cold, a_id) && ran(&cold, b_id),
-            "cold run computes A and B"
+            cold.ran().contains(&"a") && cold.ran().contains(&"b"),
+            "the cold run computes A and B"
         );
         assert!(
             blob_count(&dir) > 0,
             "B(Disk) persists despite its None upstream"
         );
 
-        // Reopen: B is a disk hit, so A(None) — read only by the reused B — is cut, not
-        // recomputed. Setting A to None disabled neither B's cache nor A's own reuse-cut.
-        let mut engine = disk_engine(&dir);
-        engine.update(&graph, &lib).unwrap();
-        let reopen = engine.execute_sinks().await.unwrap();
-        assert!(cached(&reopen, b_id), "B reloads from disk on reopen");
+        // Reopen: B is a disk hit, so A(None) — read only by the reused B — is
+        // cut, not recomputed. Setting A to None disabled neither B's cache nor
+        // A's own reuse-cut.
+        let mut e = disk_engine(&dir, build(&calls));
+        let reopen = e.run_sinks().await;
         assert!(
-            !ran(&reopen, a_id),
+            reopen.cached().contains(&"b"),
+            "B reloads from disk on reopen"
+        );
+        assert!(
+            !reopen.ran().contains(&"a"),
             "A(None) is cut behind the disk hit, not recomputed"
         );
-        assert!(!ran(&reopen, get_a_id), "get_a is cut behind A too");
+        assert!(!reopen.ran().contains(&"src"), "src is cut behind A too");
     }
 
-    /// A valid disk blob for a node's *current* digest must be served even when the
-    /// slot still holds a RAM value produced under a superseded digest — the stale
-    /// resident value must not mask the fresh blob. Disk reuse must load the current
-    /// blob before deciding that an older resident value is reusable.
+    /// A valid disk blob for a node's *current* digest must be served even when
+    /// the slot still holds a RAM value produced under a superseded digest — the
+    /// stale resident value must not mask the fresh blob. Disk reuse must load
+    /// the current blob before deciding an older resident value is reusable.
     ///
     /// The intervening run uses `Ram` mode so it can't overwrite the node's one
     /// disk blob (a `Disk`-mode run would — the blob is keyed by node id).
     #[tokio::test(flavor = "multi_thread")]
     async fn stale_ram_value_does_not_mask_a_valid_disk_blob() -> TestResult {
         let dir = TempDir::new("flip_back");
-        let printed = Arc::new(Mutex::new(Vec::new()));
-        let printed_for_hook = printed.clone();
-        let lib = test_func_lib(TestFuncHooks {
-            print: Arc::new(move |value| {
-                printed_for_hook.try_lock().unwrap().push(value);
-            }),
-            ..default_hooks()
-        });
 
-        // mult read by print. Const binds detach mult from any upstream, so its
-        // digest is a pure function of the two consts. Fixed node ids so the slot
-        // (and its resident value) survives each `update`.
+        // Const binds detach mult from any upstream, so its digest is a pure
+        // function of the two consts.
         let build = |a: i64, b: i64, mode: CacheMode| {
-            let mut graph = Graph::default();
-            let mut mult = node(&lib, "mult");
-            mult.cache = mode;
-            graph.insert(NodeId::from_u128(1), mult);
-            graph.insert(NodeId::from_u128(2), node(&lib, "Print"));
-            let mult_id = graph.find_by_name("mult").unwrap().id;
-            bind(&mut graph, "mult", 0, Binding::Const(StaticValue::Int(a)));
-            bind(&mut graph, "mult", 1, Binding::Const(StaticValue::Int(b)));
-            bind(&mut graph, "Print", 0, Binding::bind(mult_id, 0));
-            graph
+            let mut g = TestGraph::new();
+            g.add("mult", mult(mode));
+            g.add("print", |n| n.records());
+            g.constant("mult", 0, a);
+            g.constant("mult", 1, b);
+            g.wire("mult", 0, "print", 0);
+            g
         };
-        let mult_id = NodeId::from_u128(1);
 
-        let mut engine = disk_engine(&dir);
+        // Config A (Disk): mult = 2 * 3 = 6 → the blob (digest D_A) on disk.
+        let mut e = disk_engine(&dir, build(2, 3, CacheMode::Disk));
+        let first = e.run_sinks().await;
+        assert_eq!(first.logs(), ["6"]);
 
-        // Config A (Disk): mult = 2 * 3 = 6 → the blob (digest D_A) stored on disk.
-        engine.update(&build(2, 3, CacheMode::Disk), &lib)?;
-        engine.execute_sinks().await?;
+        // Config B (Ram): mult = 5 * 7 = 35 → the slot is now resident with 35
+        // under B's digest; the disk blob still carries D_A, since Ram never
+        // writes. The same engine keeps the slot across the reinstall.
+        e.edit(|g| {
+            g.constant("mult", 0, 5i64);
+            g.constant("mult", 1, 7i64);
+            g.cache("mult", CacheMode::Ram);
+        });
+        let second = e.run_sinks().await;
+        assert_eq!(second.logs(), ["35"]);
 
-        // Config B (Ram): mult = 5 * 7 = 35 → slot now resident with 35 under B's
-        // digest; the disk blob still carries D_A (Ram mode never writes).
-        engine.update(&build(5, 7, CacheMode::Ram), &lib)?;
-        engine.execute_sinks().await?;
-
-        // Flip back to A with Both so install preserves the current B snapshot in RAM.
-        // Resolution then stamps A's digest, making 35 superseded before disk reuse probes
-        // the matching A blob — it must serve 6 from disk, not the stale 35.
-        engine.update(&build(2, 3, CacheMode::Both), &lib)?;
+        // Flip back to A with Both, so the install preserves the current B
+        // snapshot in RAM. Resolution then stamps A's digest, making 35
+        // superseded before disk reuse probes the matching A blob — it must
+        // serve 6 from disk, not the stale 35.
+        e.edit(|g| {
+            g.constant("mult", 0, 2i64);
+            g.constant("mult", 1, 3i64);
+            g.cache("mult", CacheMode::Both);
+        });
         assert_eq!(
-            engine
-                .slot(mult_id)
-                .output_values()
-                .and_then(|values| values[0].as_i64()),
+            e.output_i64("mult", 0),
             Some(35),
             "the stale B snapshot remains resident when the flip-back run begins"
         );
-        let stats = engine.execute_sinks().await?;
 
-        // mult is served from its disk blob, not recomputed — without this, a recompute
-        // would yield 6 regardless and the stale-RAM path would go untested.
+        let run = e.run_sinks().await;
         assert!(
-            !stats.ran(mult_id),
-            "mult is a disk cache hit on flip-back, not recomputed: {:?}",
-            stats.nodes
+            !run.ran().contains(&"mult"),
+            "mult is a disk cache hit on flip-back, not recomputed — without \
+             this a recompute would yield 6 regardless and the stale-RAM path \
+             would go untested"
         );
-
         assert_eq!(
-            printed.lock().await.as_slice(),
-            &[6, 35, 6],
+            run.logs(),
+            ["6"],
             "flip-back serves the disk blob (6), not the stale RAM value (35)"
         );
         Ok(())
     }
 
-    /// A `persist` node is written to disk the moment *it* finishes, not in a batch at
-    /// the end of the run — so its blob is already on disk by the time a downstream
-    /// node executes. The sink `print` hook checks the store dir is non-empty when
-    /// it runs; that holds only because `mult` was persisted right after it finished,
-    /// before `print` started. (Batched-at-the-end storing would leave the dir empty
-    /// here.)
+    /// A persisted node is written to disk the moment *it* finishes, not in a
+    /// batch at the end of the run — so its blob is already on disk by the time
+    /// a downstream node executes. The sink checks the store dir is non-empty
+    /// when it runs; that holds only because `mult` was persisted right after it
+    /// finished. Batched-at-the-end storing would leave the dir empty here.
     #[tokio::test(flavor = "multi_thread")]
     async fn persist_node_lands_on_disk_before_its_consumer_runs() {
         let dir = TempDir::new("per_node_store");
         let root = dir.0.clone();
-        let blob_present_when_print_ran = Arc::new(AtomicBool::new(false));
-        let flag = blob_present_when_print_ran.clone();
-        let lib = test_func_lib(TestFuncHooks {
-            print: Arc::new(move |_v| {
+        let blob_present = Arc::new(AtomicBool::new(false));
+
+        // mult(const 2, const 3) = 6, Disk → sink. Const binds detach mult from
+        // any upstream, so only mult and the sink run.
+        let mut g = TestGraph::new();
+        g.add("mult", mult(CacheMode::Disk));
+        g.add("watch", |n| {
+            let (root, flag) = (root.clone(), blob_present.clone());
+            n.sink().input(DataType::Int).observes(move |_| {
                 let non_empty = std::fs::read_dir(&root)
                     .map(|mut entries| entries.next().is_some())
                     .unwrap_or(false);
                 flag.store(non_empty, Ordering::SeqCst);
-            }),
-            ..default_hooks()
+            })
         });
+        g.constant("mult", 0, 2i64);
+        g.constant("mult", 1, 3i64);
+        g.wire("mult", 0, "watch", 0);
 
-        // mult(const 2, const 3) = 6, persist=Disk → print. Const binds detach mult
-        // from any upstream, so only mult + print run.
-        let mut graph = Graph::default();
-        let mut mult = node(&lib, "mult");
-        mult.cache = CacheMode::Disk;
-        graph.add(mult);
-        graph.add(node(&lib, "Print"));
-        let mult_id = graph.find_by_name("mult").unwrap().id;
-        bind(&mut graph, "mult", 0, Binding::Const(StaticValue::Int(2)));
-        bind(&mut graph, "mult", 1, Binding::Const(StaticValue::Int(3)));
-        bind(&mut graph, "Print", 0, Binding::bind(mult_id, 0));
-
-        let mut engine = disk_engine(&dir);
-        engine.update(&graph, &lib).unwrap();
-        engine.execute_sinks().await.unwrap();
+        let mut e = disk_engine(&dir, g);
+        e.run_sinks().await;
 
         assert!(
-            blob_present_when_print_ran.load(Ordering::SeqCst),
-            "mult's disk blob must exist when print runs (persisted per-node, not batched)"
+            blob_present.load(Ordering::SeqCst),
+            "mult's disk blob must exist when its consumer runs (persisted \
+             per-node, not batched at the end of the run)"
         );
     }
 
-    /// Disabling RAM retention releases a surviving slot during install rather than waiting
-    /// for the end of a later run.
+    /// Disabling RAM retention releases a surviving slot during install rather
+    /// than waiting for the end of a later run.
     #[tokio::test]
     async fn disabling_ram_retention_releases_resident_value_on_install() {
-        let lib = test_func_lib(default_hooks());
-
-        let build = |mode: CacheMode| {
-            let mut graph = Graph::default();
-            let mut mult = node(&lib, "mult");
-            mult.cache = mode;
-            graph.insert(NodeId::from_u128(1), mult);
-            graph.insert(NodeId::from_u128(2), node(&lib, "Print"));
-            let mult_id = graph.find_by_name("mult").unwrap().id;
-            bind(&mut graph, "mult", 0, Binding::Const(StaticValue::Int(2)));
-            bind(&mut graph, "mult", 1, Binding::Const(StaticValue::Int(3)));
-            bind(&mut graph, "Print", 0, Binding::bind(mult_id, 0));
-            graph
-        };
-        let mult_id = NodeId::from_u128(1);
-
         for mode in [CacheMode::None, CacheMode::Disk] {
             let dir = TempDir::new(&format!("ram-downgrade-{mode:?}"));
-            let mut engine = disk_engine(&dir);
-            engine.update(&build(CacheMode::Ram), &lib).unwrap();
-            engine.execute_sinks().await.unwrap();
-            assert!(
-                engine.slot(mult_id).output_values().is_some(),
-                "Ram retains the current pure value"
-            );
+            let mut g = TestGraph::new();
+            g.add("mult", mult(CacheMode::Ram));
+            g.add("print", |n| n.records());
+            g.constant("mult", 0, 2i64);
+            g.constant("mult", 1, 3i64);
+            g.wire("mult", 0, "print", 0);
 
-            engine.update(&build(mode), &lib).unwrap();
+            let mut e = disk_engine(&dir, g);
+            e.run_sinks().await;
+            assert!(e.holds_output("mult"), "Ram retains the current pure value");
+
+            e.edit(|g| g.cache("mult", mode));
             assert!(
-                engine.slot(mult_id).output_values().is_none(),
+                !e.holds_output("mult"),
                 "{mode:?} releases the old RAM value during install"
             );
         }
     }
 
-    /// `store_resident_caches` must not write a value under a digest it wasn't produced
-    /// under. After an input change recompiles the program, a node's resident value is
-    /// stale w.r.t. its new digest; flushing it stamped with D_B would overwrite the
-    /// node's blob with bytes a later run at D_B would load as a false hit.
+    /// `store_resident_caches` must not write a value under a digest it wasn't
+    /// produced under. After an input change recompiles the program, a node's
+    /// resident value is stale w.r.t. its new digest; flushing it stamped with
+    /// D_B would overwrite the node's blob with bytes a later run at D_B would
+    /// load as a false hit.
     #[tokio::test]
     async fn flush_skips_a_value_stale_for_the_current_digest() {
         let dir = TempDir::new("stale_flush");
-        let lib = test_func_lib(default_hooks());
 
-        // mult(persist=Disk) with const inputs → print; the consts drive mult's digest.
-        let build = |a: i64, b: i64| {
-            let mut graph = Graph::default();
-            let mut mult = node(&lib, "mult");
-            mult.cache = CacheMode::Disk;
-            graph.insert(NodeId::from_u128(1), mult);
-            graph.insert(NodeId::from_u128(2), node(&lib, "Print"));
-            let mult_id = graph.find_by_name("mult").unwrap().id;
-            bind(&mut graph, "mult", 0, Binding::Const(StaticValue::Int(a)));
-            bind(&mut graph, "mult", 1, Binding::Const(StaticValue::Int(b)));
-            bind(&mut graph, "Print", 0, Binding::bind(mult_id, 0));
-            graph
-        };
+        let mut g = TestGraph::new();
+        g.add("mult", mult(CacheMode::Disk));
+        g.add("print", |n| n.records());
+        g.constant("mult", 0, 2i64);
+        g.constant("mult", 1, 3i64);
+        g.wire("mult", 0, "print", 0);
 
-        let mut engine = disk_engine(&dir);
-
-        // Config A: mult runs and is stored, stamped with its digest D_A (one blob).
-        engine.update(&build(2, 3), &lib).unwrap();
-        engine.execute_sinks().await.unwrap();
+        // Config A: mult runs and is stored, stamped with its digest D_A.
+        let mut e = disk_engine(&dir, g);
+        e.run_sinks().await;
         assert_eq!(blob_count(&dir), 1, "config A's blob is stored");
         let blob_path = std::fs::read_dir(&dir.0)
             .unwrap()
@@ -1085,12 +860,15 @@ mod cache_persistence {
             .path();
         let blob_a = std::fs::read(&blob_path).unwrap();
 
-        // Config B: mult's inputs change ⇒ its *current* digest is now D_B, but the
-        // resident value (6) was produced under D_A. Recompile (update), no re-run, then
-        // flush — the stale value must not be re-stamped D_B (the blob is keyed by node
-        // id, so a bad flush would show as an overwrite, not a second file).
-        engine.update(&build(5, 7), &lib).unwrap();
-        engine.store_resident_caches().await;
+        // Config B: mult's inputs change ⇒ its *current* digest is now D_B, but
+        // the resident value was produced under D_A. Recompile, do not re-run,
+        // then flush — the stale value must not be re-stamped D_B. The blob is
+        // keyed by node id, so a bad flush shows as an overwrite.
+        e.edit(|g| {
+            g.constant("mult", 0, 5i64);
+            g.constant("mult", 1, 7i64);
+        });
+        e.engine.store_resident_caches().await;
         assert_eq!(
             std::fs::read(&blob_path).unwrap(),
             blob_a,
@@ -1098,57 +876,30 @@ mod cache_persistence {
         );
     }
 
-    /// A corrupt / incompatible cache blob must be *deleted* on a failed load so the
-    /// same run recomputes and writes a fresh one. Without the delete, `store_node`'s
-    /// skip-if-exists keeps the broken file and the node recomputes on *every* run
-    /// (the regression: an old-format blob rejected by the outer format version was never
-    /// replaced). Each "session" is a fresh engine, so the disk cache is the only source.
+    /// A corrupt / incompatible cache blob must be *deleted* on a failed load so
+    /// the same run recomputes and writes a fresh one. Without the delete,
+    /// `store_node`'s skip-if-exists keeps the broken file and the node
+    /// recomputes on *every* run — the regression being an old-format blob
+    /// rejected by the outer format version and never replaced. Each session is
+    /// a fresh engine, so the disk cache is the only source.
     #[tokio::test]
     async fn corrupt_blob_recomputes_and_is_replaced_in_the_same_run() {
         let dir = TempDir::new("corrupt_replace");
-        let get_a_calls = Arc::new(AtomicUsize::new(0));
-        let lib = {
-            let calls = get_a_calls.clone();
-            test_func_lib(TestFuncHooks {
-                get_a: Arc::new(move || {
-                    calls.fetch_add(1, Ordering::SeqCst);
-                    Ok(1)
-                }),
-                print: Arc::new(|_| {}),
-                ..default_hooks()
-            })
-        };
-
-        // get_a → mult(persist=Disk) → print. mult reads get_a, so a mult cache hit
-        // prunes get_a — its call count tracks whether mult actually recomputed.
-        let mut graph = Graph::default();
-        graph.insert(NodeId::from_u128(1), node(&lib, "get_a"));
-        let mut mult = node(&lib, "mult");
-        mult.cache = CacheMode::Disk;
-        graph.insert(NodeId::from_u128(2), mult);
-        graph.insert(NodeId::from_u128(3), node(&lib, "Print"));
-        let get_a_id = graph.find_by_name("get_a").unwrap().id;
-        let mult_id = graph.find_by_name("mult").unwrap().id;
-        bind(&mut graph, "mult", 0, Binding::bind(get_a_id, 0));
-        bind(&mut graph, "mult", 1, Binding::bind(get_a_id, 0));
-        bind(&mut graph, "Print", 0, Binding::bind(mult_id, 0));
-
-        let mult_id = graph.find_by_name("mult").unwrap().id;
-        let ran = |s: &ExecutionOutcome, id: NodeId| s.ran(id);
+        let calls = Arc::new(AtomicUsize::new(0));
+        let build = |calls: &Arc<AtomicUsize>| source_mult_print(CacheMode::Disk, 1, calls.clone());
 
         // Cold run: mult computes and stores its blob.
         {
-            let mut engine = disk_engine(&dir);
-            engine.update(&graph, &lib).unwrap();
-            let stats = engine.execute_sinks().await.unwrap();
-            assert!(ran(&stats, mult_id), "cold run computes mult");
+            let mut e = disk_engine(&dir, build(&calls));
+            let run = e.run_sinks().await;
+            assert!(run.ran().contains(&"mult"), "the cold run computes mult");
         }
-        assert_eq!(get_a_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
 
-        // Corrupt mult's blob *body* (a torn write / an old, version-mismatched format)
-        // while keeping the leading 32-byte digest header intact — a garbled header
-        // would already fail the presence probe and never reach body verification
-        // this test is about.
+        // Corrupt mult's blob *body* — a torn write, or an old
+        // version-mismatched format — while keeping the leading 32-byte digest
+        // header intact: a garbled header would already fail the presence probe
+        // and never reach the body verification this test is about.
         let blob = std::fs::read_dir(&dir.0)
             .unwrap()
             .next()
@@ -1161,20 +912,19 @@ mod cache_persistence {
         bytes.extend_from_slice(b"garbage");
         std::fs::write(&blob, &bytes).unwrap();
 
-        // Reopen: the corrupt blob still carries the current digest in its header. Body
-        // verification fails before the resolver cuts the producer cone, so the blob is
-        // deleted and mult recomputes successfully in this same run.
+        // Reopen: the corrupt blob still carries the current digest in its
+        // header. Body verification fails before the resolver cuts the producer
+        // cone, so the blob is deleted and mult recomputes in this same run.
         {
-            let mut engine = disk_engine(&dir);
-            engine.update(&graph, &lib).unwrap();
-            let stats = engine.execute_sinks().await.unwrap();
-            assert!(ran(&stats, mult_id), "the corrupt cache is a same-run miss");
+            let mut e = disk_engine(&dir, build(&calls));
+            let run = e.run_sinks().await;
             assert!(
-                stats.errored_nodes().count() == 0,
-                "the recomputed run succeeds"
+                run.ran().contains(&"mult"),
+                "the corrupt cache is a same-run miss"
             );
+            assert!(run.errored().is_empty(), "the recomputed run succeeds");
         }
-        assert_eq!(get_a_calls.load(Ordering::SeqCst), 2);
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
         assert!(
             blob.exists(),
             "the corrupt blob is replaced by the same run"
@@ -1182,179 +932,123 @@ mod cache_persistence {
 
         // Reopen: mult's fresh blob is a clean hit → reused, not recomputed.
         {
-            let mut engine = disk_engine(&dir);
-            engine.update(&graph, &lib).unwrap();
-            let stats = engine.execute_sinks().await.unwrap();
-            assert!(!ran(&stats, mult_id), "the replaced blob is a clean hit");
+            let mut e = disk_engine(&dir, build(&calls));
+            let run = e.run_sinks().await;
+            assert!(
+                !run.ran().contains(&"mult"),
+                "the replaced blob is a clean hit"
+            );
         }
         assert_eq!(
-            get_a_calls.load(Ordering::SeqCst),
+            calls.load(Ordering::SeqCst),
             2,
             "the clean replacement prunes its producer"
         );
     }
 
-    /// A `persist` node whose disk blob is gone by the time the run reaches it must
-    /// recompute, not panic. A missing blob simply misses, so the node runs and rewrites
-    /// it — never pruned behind an absent value.
+    /// A persisted node whose disk blob is gone by the time the run reaches it
+    /// must recompute, not panic. A missing blob simply misses, so the node runs
+    /// and rewrites it — never pruned behind an absent value.
     #[tokio::test]
     async fn vanished_frontier_blob_recomputes_instead_of_panicking() {
         let dir = TempDir::new("vanish");
-        let recompute = Arc::new(AtomicUsize::new(0));
-        let make_lib = || {
-            let calls = recompute.clone();
-            test_func_lib(TestFuncHooks {
-                get_a: Arc::new(move || {
-                    calls.fetch_add(1, Ordering::SeqCst);
-                    Ok(7)
-                }),
-                ..default_hooks()
-            })
+        let calls = Arc::new(AtomicUsize::new(0));
+
+        // src → sum(Disk) → print. print reads sum, so sum is the frontier the
+        // run must load.
+        let build = |calls: &Arc<AtomicUsize>| {
+            let mut g = TestGraph::new();
+            g.add("src", source(7, calls.clone()));
+            g.add("sum", sum(CacheMode::Disk));
+            g.add("print", |n| n.records());
+            g.wire("src", 0, "sum", 0);
+            g.wire("src", 0, "sum", 1);
+            g.wire("sum", 0, "print", 0);
+            g
         };
 
-        // get_a → sum(persist) → print(sink). print reads sum, so sum is the
-        // frontier the run must load.
-        let lib = make_lib();
-        let mut graph = Graph::default();
-        graph.add(node(&lib, "get_a"));
-        let mut sum = node(&lib, "sum");
-        sum.cache = CacheMode::Disk;
-        graph.add(sum);
-        graph.add(node(&lib, "Print"));
-        let get_a_id = graph.find_by_name("get_a").unwrap().id;
-        let sum_id = graph.find_by_name("sum").unwrap().id;
-        bind(&mut graph, "sum", 0, Binding::bind(get_a_id, 0));
-        bind(&mut graph, "sum", 1, Binding::bind(get_a_id, 0));
-        bind(&mut graph, "Print", 0, Binding::bind(sum_id, 0));
-
-        // Run 1: writes sum's blob to disk.
-        let mut engine = disk_engine(&dir);
-        engine.update(&graph, &make_lib()).unwrap();
-        engine.execute_sinks().await.unwrap();
-        let after_run1 = recompute.load(Ordering::SeqCst);
+        let mut e = disk_engine(&dir, build(&calls));
+        e.run_sinks().await;
+        let after_run1 = calls.load(Ordering::SeqCst);
 
         // Reopen, then remove sum's blob before the run reaches it.
-        let mut engine = disk_engine(&dir);
-        engine.update(&graph, &make_lib()).unwrap();
+        let mut e = disk_engine(&dir, build(&calls));
         for entry in std::fs::read_dir(&dir.0).unwrap() {
             std::fs::remove_file(entry.unwrap().path()).unwrap();
         }
-        let stats = engine.execute_sinks().await.unwrap();
+        let run = e.run_sinks().await;
 
-        // The run completes (no panic): the missing blob just misses, so sum recomputes.
-        assert!(stats.ran(sum_id), "sum recomputes when its blob is gone");
+        // The run completes — no panic: the missing blob just misses.
         assert!(
-            !stats.cached(sum_id),
+            run.ran().contains(&"sum"),
+            "sum recomputes when its blob is gone"
+        );
+        assert!(
+            !run.cached().contains(&"sum"),
             "a vanished blob is not served as a cache hit"
         );
         assert!(
-            recompute.load(Ordering::SeqCst) > after_run1,
-            "get_a re-ran to feed sum's recompute"
+            calls.load(Ordering::SeqCst) > after_run1,
+            "src re-ran to feed sum's recompute"
         );
     }
 
-    /// A redefined output type can't serve a stale blob: `produce`'s func is changed
-    /// `Int → Float` with the same id, but the output signature is folded into the
-    /// content digest, so the Float node re-keys away from the Int blob and recomputes
-    /// — the consumer sees the correct `Float`, never the stale `Int`.
+    /// A redefined output type can't serve a stale blob: `produce`'s func is
+    /// changed `Int → Float` with the same id, but the output signature is
+    /// folded into the content digest, so the Float node re-keys away from the
+    /// Int blob and recomputes — the consumer sees the correct `Float`, never
+    /// the stale `Int`.
     #[tokio::test]
     async fn redefined_output_type_rekeys_and_recomputes() {
-        use std::sync::Mutex;
-
-        use crate::async_lambda;
-        use crate::graph::func::{Func, FuncInput, FuncOutput};
-        use crate::library::Library;
-
-        const PRODUCE: &str = "63b7a83c-d7fc-46f4-805a-4bf2695e3763";
-        const CONSUME: &str = "39bbd6b3-b919-4095-b3d0-79a4515de75e";
-
         let dir = TempDir::new("wrong-type");
-        let produce_runs = Arc::new(AtomicUsize::new(0));
-        let received = Arc::new(Mutex::new(f64::NAN));
+        let runs = Arc::new(AtomicUsize::new(0));
+        let received = Arc::new(StdMutex::new(f64::NAN));
 
-        // `produce` is a pure, Disk-persisted source; its declared output type and
-        // value are `Int` when `as_float` is false, `Float` when true. The func id and
-        // inputs stay unchanged, isolating output-signature invalidation. `consume`
-        // (sink) reads it and records the value as f64.
-        let build_lib = |as_float: bool| -> Library {
-            let mut lib = Library::default();
-            let produce = Func::new(PRODUCE, "produce")
-                .category("Test")
-                .pure()
-                .output(FuncOutput::new(
-                    "out",
-                    if as_float {
-                        DataType::Float
-                    } else {
-                        DataType::Int
-                    },
-                ));
-            let runs = produce_runs.clone();
-            let produce = if as_float {
-                produce.lambda(
-                    async_lambda!(move |Invocation { outputs, .. }| { runs = runs.clone() } => {
+        // `produce` is a pure, Disk-persisted source whose declared output type
+        // and value are `Int` or `Float`. Its id and inputs stay unchanged,
+        // isolating output-signature invalidation.
+        let build = |as_float: bool, runs: &Arc<AtomicUsize>, received: &Arc<StdMutex<f64>>| {
+            let (runs, received) = (runs.clone(), received.clone());
+            let mut g = TestGraph::new();
+            g.add("produce", move |n: NodeSpec| {
+                let ty = if as_float {
+                    DataType::Float
+                } else {
+                    DataType::Int
+                };
+                n.pure()
+                    .cache(CacheMode::Disk)
+                    .output(ty)
+                    .compute(move |_| {
                         runs.fetch_add(1, Ordering::SeqCst);
-                        outputs[0] = DynamicValue::Static(StaticValue::Float(1.5));
-                        Ok(())
-                    }),
-                )
-            } else {
-                produce.lambda(
-                    async_lambda!(move |Invocation { outputs, .. }| { runs = runs.clone() } => {
-                        runs.fetch_add(1, Ordering::SeqCst);
-                        outputs[0] = DynamicValue::Static(StaticValue::Int(7));
-                        Ok(())
-                    }),
-                )
-            };
-            lib.add(produce);
-            let recv = received.clone();
-            lib.add(
-                Func::new(CONSUME, "consume")
-                    .category("Test")
-                    .sink()
-                    .input(FuncInput::required("in", DataType::Any))
-                    .lambda(
-                        async_lambda!(move |Invocation { inputs, .. }| { recv = recv.clone() } => {
-                            *recv.lock().unwrap() = inputs[0].as_f64().unwrap_or(f64::NAN);
-                            Ok(())
-                        }),
-                    ),
-            );
-            lib
+                        if as_float {
+                            StaticValue::Float(1.5)
+                        } else {
+                            StaticValue::Int(7)
+                        }
+                    })
+            });
+            g.add("consume", move |n: NodeSpec| {
+                n.sink().input(DataType::Any).observes(move |inputs| {
+                    *received.lock().unwrap() = inputs[0].as_f64().unwrap_or(f64::NAN);
+                })
+            });
+            g.wire("produce", 0, "consume", 0);
+            g
         };
 
-        let engine_with = |lib: Library| {
-            let mut eg = ExecutionEngine::default();
-            eg.cache
-                .set_disk_store(DiskStore::new(&lib, Some(dir.0.clone())));
-            eg
-        };
-
-        // produce(persist) → consume(sink).
-        let int_lib = build_lib(false);
-        let mut graph = Graph::default();
-        let mut produce_node = node(&int_lib, "produce");
-        produce_node.cache = CacheMode::Disk;
-        let produce_id = graph.add(produce_node);
-        graph.add(node(&int_lib, "consume"));
-        bind(&mut graph, "consume", 0, Binding::bind(produce_id, 0));
-
-        // Run 1 (Int): produce runs, stores its Int blob; consume sees 7.
-        let mut engine = engine_with(build_lib(false));
-        engine.update(&graph, &int_lib).unwrap();
-        engine.execute_sinks().await.unwrap();
-        assert_eq!(produce_runs.load(Ordering::SeqCst), 1);
+        // Run 1 (Int): produce runs and stores its Int blob; consume sees 7.
+        let mut e = disk_engine(&dir, build(false, &runs, &received));
+        e.run_sinks().await;
+        assert_eq!(runs.load(Ordering::SeqCst), 1);
         assert_eq!(*received.lock().unwrap(), 7.0);
 
-        // Run 2 (Float): the Float output re-keys produce's digest away from the Int
-        // blob's key, so it isn't found — produce recomputes as Float.
-        let float_lib = build_lib(true);
-        let mut engine = engine_with(build_lib(true));
-        engine.update(&graph, &float_lib).unwrap();
-        engine.execute_sinks().await.unwrap();
+        // Run 2 (Float): the Float output re-keys produce's digest away from the
+        // Int blob's key, so it isn't found — produce recomputes as Float.
+        let mut e = disk_engine(&dir, build(true, &runs, &received));
+        e.run_sinks().await;
         assert_eq!(
-            produce_runs.load(Ordering::SeqCst),
+            runs.load(Ordering::SeqCst),
             2,
             "the Float output re-keys away from the stale Int blob, so produce recomputes"
         );
@@ -1365,81 +1059,58 @@ mod cache_persistence {
         );
     }
 
-    /// A `persist` node whose cone contains an impure node has digest `None`, so
-    /// it's never disk-cached even with `persist=Disk` — on reopen it recomputes.
+    /// A persisted node whose cone contains an impure node has digest `None`, so
+    /// it's never disk-cached even with `Disk` — on reopen it recomputes.
     #[tokio::test]
     async fn impure_cone_persist_node_is_not_disk_cached() {
         let dir = TempDir::new("impure-cone");
-        let mut library = test_func_lib(default_hooks());
-        mutate_func(&mut library, "get_b", |func| {
-            func.behavior = FuncBehavior::Impure;
-        });
+        let calls = Arc::new(AtomicUsize::new(0));
+        let build = |calls: &Arc<AtomicUsize>| {
+            let mut g = source_mult_print(CacheMode::Disk, 11, calls.clone());
+            g.edit_func("src", |func| func.behavior = FuncBehavior::Impure);
+            g
+        };
 
-        // get_b (impure) → mult (persist) → print. mult's cone is impure.
-        let mut graph = Graph::default();
-        graph.add(node(&library, "get_b"));
-        let mut mult = node(&library, "mult");
-        mult.cache = CacheMode::Disk;
-        graph.add(mult);
-        graph.add(node(&library, "Print"));
-        let get_b_id = graph.find_by_name("get_b").unwrap().id;
-        let mult_id = graph.find_by_name("mult").unwrap().id;
-        bind(&mut graph, "mult", 0, Binding::bind(get_b_id, 0));
-        bind(&mut graph, "mult", 1, Binding::bind(get_b_id, 0));
-        bind(&mut graph, "Print", 0, Binding::bind(mult_id, 0));
+        let mut e = disk_engine(&dir, build(&calls));
+        e.run_sinks().await;
 
-        let mut engine = disk_engine(&dir);
-        engine.update(&graph, &library).unwrap();
-        engine.execute_sinks().await.unwrap();
-
-        // Reopen: mult must recompute — an impure cone has no digest, so it never caches to disk.
-        let mut engine = disk_engine(&dir);
-        engine.update(&graph, &library).unwrap();
-        let stats = engine.execute_sinks().await.unwrap();
+        // Reopen: mult must recompute — an impure cone has no digest, so it
+        // never caches to disk.
+        let mut e = disk_engine(&dir, build(&calls));
+        let run = e.run_sinks().await;
         assert!(
-            !stats.cached(mult_id),
-            "impure-cone node must not be disk-cached"
+            !run.cached().contains(&"mult"),
+            "an impure-cone node must not be disk-cached"
         );
-        assert!(stats.ran(mult_id), "mult recomputes on reopen");
+        assert!(run.ran().contains(&"mult"), "mult recomputes on reopen");
     }
 
-    /// A `persist = Memory` node (the default) is never written to disk even though
-    /// its cone is reproducible — only `Disk` opts in — so on reopen it recomputes.
+    /// A RAM-only node (the default) is never written to disk even though its
+    /// cone is reproducible — only `Disk` opts in — so on reopen it recomputes.
     #[tokio::test]
     async fn memory_persistence_node_is_not_disk_cached() {
         let dir = TempDir::new("memory-persist");
-        let library = test_func_lib(default_hooks());
+        let calls = Arc::new(AtomicUsize::new(0));
+        let build = |calls: &Arc<AtomicUsize>| source_mult_print(CacheMode::Ram, 1, calls.clone());
 
-        // get_a (pure) → mult (Memory, the default) → print.
-        let mut graph = Graph::default();
-        graph.add(node(&library, "get_a"));
-        graph.add(node(&library, "mult"));
-        graph.add(node(&library, "Print"));
-        let get_a_id = graph.find_by_name("get_a").unwrap().id;
-        let mult_id = graph.find_by_name("mult").unwrap().id;
-        bind(&mut graph, "mult", 0, Binding::bind(get_a_id, 0));
-        bind(&mut graph, "mult", 1, Binding::bind(get_a_id, 0));
-        bind(&mut graph, "Print", 0, Binding::bind(mult_id, 0));
-
-        let mut engine = disk_engine(&dir);
-        engine.update(&graph, &library).unwrap();
-        engine.execute_sinks().await.unwrap();
+        let mut e = disk_engine(&dir, build(&calls));
+        e.run_sinks().await;
 
         // Reopen: fresh RAM, nothing on disk for mult ⇒ it recomputes.
-        let mut engine = disk_engine(&dir);
-        engine.update(&graph, &library).unwrap();
-        let stats = engine.execute_sinks().await.unwrap();
+        let mut e = disk_engine(&dir, build(&calls));
+        let run = e.run_sinks().await;
         assert!(
-            !stats.cached(mult_id),
-            "a Memory-persistence node must not be disk-cached"
+            !run.cached().contains(&"mult"),
+            "a RAM-only node must not be disk-cached"
         );
-        assert!(stats.ran(mult_id), "mult recomputes on reopen");
+        assert!(run.ran().contains(&"mult"), "mult recomputes on reopen");
     }
 
-    /// A `persist` node whose blob is on disk but whose custom output type has *no
-    /// registered codec* (a value written by a build that had the codec, reopened by one
-    /// that doesn't) is not reused from disk. It recomputes rather than panicking during
-    /// loading; with the codec it is served from disk instead.
+    /// A persisted node whose blob is on disk but whose custom output type has
+    /// *no registered codec* — a value written by a build that had the codec,
+    /// reopened by one that doesn't — is not reused from disk. It recomputes
+    /// rather than panicking during loading; with the codec it is served from
+    /// disk instead.
     #[tokio::test]
     async fn missing_codec_skips_disk_cache_instead_of_panicking() {
         use std::any::Any;
@@ -1448,10 +1119,8 @@ mod cache_persistence {
         use async_trait::async_trait;
         use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
 
-        use crate::async_lambda;
         use crate::data::codec::error::CodecError;
-        use crate::graph::func::{Func, FuncOutput};
-        use crate::library::{Library, TypeEntry};
+        use crate::library::TypeEntry;
         use crate::runtime::context::{ContextStore, ContextType};
         use crate::{CustomValue, CustomValueCodec, TypeId};
 
@@ -1464,7 +1133,6 @@ mod cache_persistence {
         const DECODE_PROBE: ContextType<DecodeProbe> = ContextType::new(DecodeProbe::default);
 
         const BLOB_TYPE: &str = "50be7976-6d55-4567-8389-13107b1698ba";
-        const FUNC_ID: &str = "b1ddc0bf-5f92-4e0c-9481-23e48c65004b";
 
         #[derive(Debug)]
         struct Blob(Vec<u8>);
@@ -1484,6 +1152,7 @@ mod cache_persistence {
                 self
             }
         }
+
         #[derive(Debug)]
         struct BlobCodec;
         #[async_trait]
@@ -1503,6 +1172,7 @@ mod cache_persistence {
                     .await?;
                 Ok(())
             }
+
             async fn decode(
                 &self,
                 reader: &mut (dyn AsyncRead + Unpin + Send),
@@ -1516,11 +1186,13 @@ mod cache_persistence {
             }
         }
 
-        // A pure, sink, disk-persisted func emitting a custom `Blob`. The type's
-        // codec is present only when `with_codec`.
-        let blob_lib = |with_codec: bool, recompute: Arc<AtomicUsize>| -> Library {
-            let mut library = Library::default();
-            library.register_type(
+        // A pure, disk-persisted sink emitting a custom `Blob`. The type's codec
+        // is registered only when `with_codec` — and the store takes its codecs
+        // from this same library, so that one flag decides both.
+        let build = |with_codec: bool, recompute: &Arc<AtomicUsize>| {
+            let recompute = recompute.clone();
+            let mut g = TestGraph::new();
+            g.library.register_type(
                 BLOB_TYPE,
                 if with_codec {
                     TypeEntry::custom_with_codec("Blob", Arc::new(BlobCodec))
@@ -1528,61 +1200,42 @@ mod cache_persistence {
                     TypeEntry::custom("Blob")
                 },
             );
-            library.add(
-                Func::new(FUNC_ID, "make_blob")
-                    .category("Test")
-                    .pure()
+            g.add("make_blob", move |n: NodeSpec| {
+                n.pure()
                     .sink()
-                    .output(FuncOutput::new("out", DataType::Custom(BLOB_TYPE.into())))
-                    .lambda(async_lambda!(
+                    .cache(CacheMode::Disk)
+                    .output(DataType::Custom(BLOB_TYPE.into()))
+                    .lambda(crate::async_lambda!(
                         move |Invocation { outputs, .. }| { counter = recompute.clone() } => {
                             counter.fetch_add(1, Ordering::SeqCst);
                             outputs[0] = DynamicValue::Custom(Arc::new(Blob(vec![9, 9, 9])));
                             Ok(())
                         }
-                    )),
-            );
-            library
-        };
-
-        let disk_engine_with_lib = |dir: &TempDir, library: Library| {
-            let mut engine = ExecutionEngine::default();
-            engine
-                .cache
-                .set_disk_store(DiskStore::new(&library, Some(dir.0.clone())));
-            engine
+                    ))
+            });
+            g
         };
 
         let dir = TempDir::new("missing-codec");
         let recompute = Arc::new(AtomicUsize::new(0));
 
-        let mut graph = Graph::default();
-        let mut blob_node = node(&blob_lib(true, recompute.clone()), "make_blob");
-        blob_node.cache = CacheMode::Disk;
-        let blob_id = graph.add(blob_node);
+        // Run 1 (codec present): computes and writes the Blob to disk.
+        let mut e = disk_engine(&dir, build(true, &recompute));
+        e.run_sinks().await;
+        assert_eq!(recompute.load(Ordering::SeqCst), 1, "the cold run computes");
 
-        // Run 1 (codec present): computes + writes the Blob to disk.
-        let mut engine = disk_engine_with_lib(&dir, blob_lib(true, recompute.clone()));
-        engine
-            .update(&graph, &blob_lib(true, recompute.clone()))
-            .unwrap();
-        engine.execute_sinks().await.unwrap();
-        assert_eq!(recompute.load(Ordering::SeqCst), 1, "cold run computes");
-
-        // Reopen with codec: served from disk (no recompute); inspection decodes it.
-        let mut engine = disk_engine_with_lib(&dir, blob_lib(true, recompute.clone()));
-        engine
-            .update(&graph, &blob_lib(true, recompute.clone()))
-            .unwrap();
-        let stats = engine.execute_sinks().await.unwrap();
+        // Reopen with the codec: served from disk, and the hydration decode
+        // reaches the engine's own runtime context store.
+        let mut e = disk_engine(&dir, build(true, &recompute));
+        let run = e.run_sinks().await;
         assert_eq!(
             recompute.load(Ordering::SeqCst),
             1,
-            "codec present ⇒ served"
+            "codec present ⇒ served from disk"
         );
-        assert!(stats.cached(blob_id), "blob node disk-cached");
+        assert!(run.cached().contains(&"make_blob"));
         assert_eq!(
-            engine
+            e.engine
                 .executor
                 .ctx_manager
                 .contexts
@@ -1592,24 +1245,21 @@ mod cache_persistence {
             "the hydration decode reached the engine's runtime context store"
         );
 
-        // Reopen WITHOUT codec: blob present but undecodable ⇒ not flagged available
-        // ⇒ recompute, no panic.
-        let mut engine = disk_engine_with_lib(&dir, blob_lib(false, recompute.clone()));
-        engine
-            .update(&graph, &blob_lib(false, recompute.clone()))
-            .unwrap();
-        let stats = engine.execute_sinks().await.unwrap();
+        // Reopen WITHOUT the codec: the blob is present but undecodable, so it
+        // is not flagged available — recompute, no panic.
+        let mut e = disk_engine(&dir, build(false, &recompute));
+        let run = e.run_sinks().await;
         assert_eq!(
             recompute.load(Ordering::SeqCst),
             2,
-            "missing codec ⇒ recompute"
+            "a missing codec ⇒ recompute"
         );
         assert!(
-            !stats.cached(blob_id),
+            !run.cached().contains(&"make_blob"),
             "an undecodable blob is not a cache hit"
         );
         assert!(
-            stats.ran(blob_id),
+            run.ran().contains(&"make_blob"),
             "the node recomputes instead of tripping a failed frontier load"
         );
     }
@@ -1622,13 +1272,7 @@ mod resource_binds {
 
     use super::*;
     use crate::async_lambda;
-    use crate::graph::func::{Func, FuncInput, FuncOutput};
     use crate::{FsPathConfig, FsPathMode};
-
-    const MAKE_PATH: &str = "be2c3976-3a4f-4ed3-bfe6-8eafb35f084a";
-    const LOAD_TEXT: &str = "5abcd2e7-f023-4122-8215-f6305c8b4a7e";
-    const ANNOTATE: &str = "b8d6cc90-3c6e-4bdc-aaed-30b6740a9d5d";
-    const CAPTURE: &str = "1a9629a9-dfbe-4665-b2b9-6f0d5c21f290";
 
     /// A temp file path removed on drop.
     #[derive(Debug)]
@@ -1647,7 +1291,7 @@ mod resource_binds {
         )))
     }
 
-    /// A unique temp directory removed on drop (the disk store root for the reopen test).
+    /// A unique temp directory removed on drop (the disk store root).
     #[derive(Debug)]
     struct TempDir(PathBuf);
     impl TempDir {
@@ -1668,151 +1312,103 @@ mod resource_binds {
         }
     }
 
-    fn disk_engine(dir: &TempDir) -> ExecutionEngine {
-        use crate::execution::cache::disk_store::DiskStore;
-        let mut engine = ExecutionEngine::default();
-        engine
-            .cache
-            .set_disk_store(DiskStore::new(&Library::default(), Some(dir.0.clone())));
-        engine
-    }
-
-    /// The sink both fixtures share: records the received value's text.
-    fn capture_func(captured: Arc<StdMutex<String>>) -> Func {
-        Func::new(CAPTURE, "capture")
-            .category("Test")
-            .sink()
-            .input(FuncInput::required("Value", DataType::Any))
-            .lambda(async_lambda!(
-                move |Invocation { inputs, .. }| { captured = captured.clone() } => {
-                    *captured.lock().unwrap() =
-                        inputs[0].as_string().unwrap_or_default().to_string();
-                    Ok(())
-                }
-            ))
-    }
-
-    /// `make_path` (pure: `String` const in → `FsPath` value out — a producer whose own
-    /// digest does *not* track the file, like any path-computing node) → `load_text`
-    /// (pure: declared-`FsPath` input, reads the file, counts invocations) → `annotate`
-    /// (pure, *downstream* of the late-stamped loader: brackets the text, counts
-    /// invocations — proves the reach-time re-stamp cascades so downstream caches still
-    /// hit) → `capture`.
-    fn path_lib(
+    /// How often each counted node ran, and what the sink last saw.
+    #[derive(Debug, Default, Clone)]
+    struct Observed {
         loads: Arc<AtomicUsize>,
         annotates: Arc<AtomicUsize>,
         captured: Arc<StdMutex<String>>,
-    ) -> Library {
-        let mut lib = Library::default();
-        lib.add(
-            Func::new(MAKE_PATH, "make_path")
-                .category("Test")
-                .pure()
-                .input(FuncInput::required("Name", DataType::String))
-                .output(FuncOutput::new(
-                    "Path",
-                    DataType::FsPath(Arc::new(FsPathConfig::default())),
-                ))
-                .lambda(async_lambda!(
-                    move |Invocation {
-                              inputs, outputs, ..
-                          }| {
-                        let path = inputs[0].as_string().unwrap().to_string();
-                        outputs[0] = StaticValue::FsPath(path).into();
-                        Ok(())
-                    }
-                )),
-        );
-        lib.add(
-            Func::new(LOAD_TEXT, "load_text")
-                .category("Test")
-                .pure()
-                .input(FuncInput::required(
-                    "Path",
-                    DataType::FsPath(Arc::new(FsPathConfig::new(FsPathMode::ExistingFile))),
-                ))
-                .output(FuncOutput::new("Text", DataType::String))
-                .lambda(async_lambda!(
-                    move |Invocation { inputs, outputs, .. }| { loads = loads.clone() } => {
-                        loads.fetch_add(1, Ordering::SeqCst);
-                        let path = inputs[0].as_fs_path().unwrap().to_string();
-                        let text =
-                            std::fs::read_to_string(&path).map_err(InvokeError::external)?;
-                        outputs[0] = StaticValue::String(text).into();
-                        Ok(())
-                    }
-                )),
-        );
-        lib.add(
-            Func::new(ANNOTATE, "annotate")
-                .category("Test")
-                .pure()
-                .input(FuncInput::required("Text", DataType::String))
-                .output(FuncOutput::new("Text", DataType::String))
-                .lambda(async_lambda!(
-                    move |Invocation { inputs, outputs, .. }| { annotates = annotates.clone() } => {
-                        annotates.fetch_add(1, Ordering::SeqCst);
-                        let text = inputs[0].as_string().unwrap();
-                        outputs[0] = StaticValue::String(format!("[{text}]")).into();
-                        Ok(())
-                    }
-                )),
-        );
-        lib.add(capture_func(captured));
-        lib
     }
 
-    #[derive(Debug)]
-    struct PathFixture {
-        graph: Graph,
-        make_id: NodeId,
-        load_id: NodeId,
-        annotate_id: NodeId,
-    }
-
-    /// `make_path(const name = data path) → load_text → annotate → capture`, the three
-    /// pure nodes on the given cache mode. Fixed node ids so reopened engines address the
-    /// same slots.
-    fn path_graph(lib: &Library, data_path: &str, mode: CacheMode) -> PathFixture {
-        let mut graph = Graph::default();
-        let mut make = node(lib, "make_path");
-        make.cache = mode;
-        graph.insert(NodeId::from_u128(1), make);
-        let mut load = node(lib, "load_text");
-        load.cache = mode;
-        graph.insert(NodeId::from_u128(2), load);
-        let mut annotate = node(lib, "annotate");
-        annotate.cache = mode;
-        graph.insert(NodeId::from_u128(4), annotate);
-        graph.insert(NodeId::from_u128(3), node(lib, "capture"));
-        let make_id = graph.find_by_name("make_path").unwrap().id;
-        let load_id = graph.find_by_name("load_text").unwrap().id;
-        let annotate_id = graph.find_by_name("annotate").unwrap().id;
-        bind(
-            &mut graph,
-            "make_path",
-            0,
-            Binding::Const(StaticValue::String(data_path.to_string())),
-        );
-        bind(&mut graph, "load_text", 0, Binding::bind(make_id, 0));
-        bind(&mut graph, "annotate", 0, Binding::bind(load_id, 0));
-        bind(&mut graph, "capture", 0, Binding::bind(annotate_id, 0));
-        PathFixture {
-            graph,
-            make_id,
-            load_id,
-            annotate_id,
+    impl Observed {
+        fn loads(&self) -> usize {
+            self.loads.load(Ordering::SeqCst)
+        }
+        fn annotates(&self) -> usize {
+            self.annotates.load(Ordering::SeqCst)
+        }
+        fn captured(&self) -> String {
+            self.captured.lock().unwrap().clone()
         }
     }
 
-    fn ran(stats: &ExecutionOutcome, id: NodeId) -> bool {
-        stats.ran(id)
+    fn any_path() -> DataType {
+        DataType::FsPath(Arc::new(FsPathConfig::default()))
     }
 
-    /// The core regression: a path arriving over a **Bind** edge keys the loader on the
-    /// file behind the *delivered value*. Editing the file re-keys and recomputes the
-    /// loader (pre-fix the chain's digests never changed, so the stale decode was served
-    /// forever), while an unchanged file still reuses the cache — the reach-time re-stamp
+    fn existing_file() -> DataType {
+        DataType::FsPath(Arc::new(FsPathConfig::new(FsPathMode::ExistingFile)))
+    }
+
+    /// Reads the file its declared-`FsPath` input names, counting invocations.
+    fn loader(observed: Observed) -> impl FnOnce(NodeSpec) -> NodeSpec {
+        move |n: NodeSpec| {
+            n.pure()
+                .input(existing_file())
+                .output(DataType::String)
+                .lambda(async_lambda!(
+                    move |Invocation { inputs, outputs, .. }| { loads = observed.loads.clone() } => {
+                        loads.fetch_add(1, Ordering::SeqCst);
+                        let path = inputs[0].as_fs_path().unwrap().to_string();
+                        let text = std::fs::read_to_string(&path).map_err(InvokeError::external)?;
+                        outputs[0] = StaticValue::String(text).into();
+                        Ok(())
+                    }
+                ))
+        }
+    }
+
+    /// The sink both fixtures share: records the received value's text.
+    fn capture(observed: Observed) -> impl FnOnce(NodeSpec) -> NodeSpec {
+        move |n: NodeSpec| {
+            n.sink().input(DataType::Any).lambda(async_lambda!(
+                move |Invocation { inputs, .. }| { captured = observed.captured.clone() } => {
+                    *captured.lock().unwrap() = inputs[0].as_string().unwrap_or_default().to_string();
+                    Ok(())
+                }
+            ))
+        }
+    }
+
+    /// `make_path(const name) → load_text → annotate → capture`, the three pure
+    /// nodes on `mode`.
+    ///
+    /// `make_path` is pure `String → FsPath`: a producer whose *own* digest does
+    /// not track the file, like any path-computing node. `annotate` sits
+    /// downstream of the late-stamped loader, so it proves the reach-time
+    /// re-stamp cascades and downstream caches still hit.
+    ///
+    /// Declaration order fixes the node ids, so a reopened engine addresses the
+    /// same slots.
+    fn path_graph(data_path: &str, mode: CacheMode, observed: Observed) -> TestGraph {
+        let mut g = TestGraph::new();
+        g.add("make_path", |n| {
+            n.pure()
+                .cache(mode)
+                .input(DataType::String)
+                .output(any_path())
+                .compute(|inputs| StaticValue::FsPath(inputs[0].as_string().unwrap().to_string()))
+        });
+        g.add("load_text", |n| loader(observed.clone())(n).cache(mode));
+        g.add("annotate", |n| {
+            let annotates = observed.annotates.clone();
+            n.pure()
+                .cache(mode)
+                .input(DataType::String)
+                .output(DataType::String)
+                .compute(move |inputs| {
+                    annotates.fetch_add(1, Ordering::SeqCst);
+                    StaticValue::String(format!("[{}]", inputs[0].as_string().unwrap()))
+                })
+        });
+        g.add("capture", capture(observed));
+        g.constant("make_path", 0, data_path);
+        g.wire("make_path", 0, "load_text", 0);
+        g.wire("load_text", 0, "annotate", 0);
+        g.wire("annotate", 0, "capture", 0);
+        g
+    }
+
     /// A declared path with no determinate identity fails **the node that
     /// declares it**, and its dependents skip as errored-upstream.
     ///
@@ -1835,200 +1431,195 @@ mod resource_binds {
         std::fs::write(&data, "v1").unwrap();
         let data_path = data.to_string_lossy().into_owned();
         let lock = |mode| std::fs::set_permissions(&dir.0, Permissions::from_mode(mode)).unwrap();
-        let path_library = || {
-            path_lib(
-                Arc::new(AtomicUsize::new(0)),
-                Arc::new(AtomicUsize::new(0)),
-                Arc::new(StdMutex::new(String::new())),
-            )
-        };
-        // `loader` failed for want of a path identity, `dependent` was
-        // skipped for reading it, and the run itself still succeeded.
-        let assert_unavailable = |run: Result<ExecutionOutcome>, loader, dependent| {
-            let stats = run.expect("a per-node failure must not abort the run");
-            let error_for = |node_id| stats.error(node_id).cloned();
+
+        // `loader` failed for want of a path identity, `dependent` was skipped
+        // for reading it, and the run itself still succeeded.
+        let assert_unavailable = |run: &RunOutcome, loader: &str, dependent: &str| {
             assert!(
                 matches!(
-                    error_for(loader),
+                    run.error(loader),
                     Some(RunError::ResourceUnavailable { .. })
                 ),
                 "the node declaring the path must fail: {:?}",
-                error_for(loader),
+                run.error(loader),
             );
             assert!(
-                matches!(error_for(dependent), Some(RunError::SkippedUpstream { .. })),
+                matches!(run.error(dependent), Some(RunError::SkippedUpstream { .. })),
                 "its dependent must skip as errored-upstream: {:?}",
-                error_for(dependent),
+                run.error(dependent),
             );
         };
 
-        // A const path, known before the run: the sweep cannot stamp it,
-        // so the node reaches its turn with no digest and re-stamps there.
-        let lib = path_library();
-        let mut graph = Graph::default();
-        let load_id = NodeId::from_u128(2);
-        graph.insert(load_id, node(&lib, "load_text"));
-        let capture_id = NodeId::from_u128(4);
-        graph.insert(capture_id, node(&lib, "capture"));
-        graph.set_input_binding(
-            InputPort::new(load_id, 0),
-            Binding::Const(StaticValue::FsPath(data_path.clone())),
+        // A const path, known before the run: the sweep cannot stamp it, so the
+        // node reaches its turn with no digest and re-stamps there.
+        let mut g = TestGraph::new();
+        g.add("load_text", loader(Observed::default()));
+        g.add("capture", capture(Observed::default()));
+        g.constant("load_text", 0, StaticValue::FsPath(data_path.clone()));
+        g.wire("load_text", 0, "capture", 0);
+        let mut e = TestEngine::over(g);
+
+        lock(0o000);
+        let run = e.run(RunSeeds::sinks()).await;
+        lock(0o755);
+        assert_unavailable(
+            &run.expect("a per-node failure must not abort the run"),
+            "load_text",
+            "capture",
         );
-        graph.set_input_binding(InputPort::new(capture_id, 0), Binding::bind(load_id, 0));
 
-        let mut engine = ExecutionEngine::default();
-        engine.update(&graph, &lib).unwrap();
+        // The same file reached through a producer's value, known only at the
+        // node's turn. Same outcome, same route.
+        let mut e = TestEngine::over(path_graph(&data_path, CacheMode::None, Observed::default()));
         lock(0o000);
-        let run = engine.execute_sinks().await;
+        let run = e.run(RunSeeds::sinks()).await;
         lock(0o755);
-        assert_unavailable(run, load_id, capture_id);
-
-        // The same file reached through a producer's value, known only at
-        // the node's turn. Same outcome, same route.
-        let lib = path_library();
-        let fx = path_graph(&lib, &data_path, CacheMode::None);
-        let mut engine = ExecutionEngine::default();
-        engine.update(&fx.graph, &lib).unwrap();
-        lock(0o000);
-        let run = engine.execute_sinks().await;
-        lock(0o755);
-        assert_unavailable(run, fx.load_id, fx.annotate_id);
+        assert_unavailable(
+            &run.expect("a per-node failure must not abort the run"),
+            "load_text",
+            "annotate",
+        );
     }
 
-    /// keeps wired-path loaders cacheable instead of tainting them uncacheable.
+    /// The core regression: a path arriving over a **Bind** edge keys the loader
+    /// on the file behind the *delivered value*. Editing the file re-keys and
+    /// recomputes the loader (pre-fix the chain's digests never changed, so the
+    /// stale decode was served forever), while an unchanged file still reuses
+    /// the cache — the reach-time re-stamp keeps wired-path loaders cacheable
+    /// instead of tainting them uncacheable.
     #[tokio::test]
     async fn wired_path_rekeys_loader_on_file_change() {
         let data = temp_file("ram");
         std::fs::write(&data.0, "v1").unwrap();
-        let loads = Arc::new(AtomicUsize::new(0));
-        let annotates = Arc::new(AtomicUsize::new(0));
-        let captured = Arc::new(StdMutex::new(String::new()));
-        let lib = path_lib(loads.clone(), annotates.clone(), captured.clone());
-        let fx = path_graph(&lib, &data.0.to_string_lossy(), CacheMode::Ram);
+        let observed = Observed::default();
+        let mut e = TestEngine::over(path_graph(
+            &data.0.to_string_lossy(),
+            CacheMode::Ram,
+            observed.clone(),
+        ));
 
-        let mut engine = ExecutionEngine::default();
-        engine.update(&fx.graph, &lib).unwrap();
+        // Cold run: everything computes. The loader's pre-run digest is `None`
+        // — the delivered value does not exist yet — so it re-stamps at reach
+        // time and runs.
+        e.run_sinks().await;
+        assert_eq!((observed.loads(), observed.annotates()), (1, 1));
+        assert_eq!(observed.captured(), "[v1]");
 
-        // Cold run: everything computes (the loader's pre-run digest is None — the
-        // delivered value doesn't exist yet — so it re-stamps at reach time and runs).
-        engine.execute_sinks().await.unwrap();
-        assert_eq!(loads.load(Ordering::SeqCst), 1);
-        assert_eq!(annotates.load(Ordering::SeqCst), 1);
-        assert_eq!(*captured.lock().unwrap(), "[v1]");
-
-        // Unchanged file: the loader reuses its RAM value under the full digest (producer
-        // port + live file identity), and its *downstream* — whose digest folds the
-        // loader's — skips too.
-        let stats = engine.execute_sinks().await.unwrap();
+        // Unchanged file: the loader reuses its RAM value under the full digest
+        // (producer port + live file identity), and its *downstream* — whose
+        // digest folds the loader's — skips too.
+        let run = e.run_sinks().await;
         assert_eq!(
-            loads.load(Ordering::SeqCst),
+            observed.loads(),
             1,
-            "unchanged file ⇒ the wired-path loader stays cached"
+            "unchanged file ⇒ the loader stays cached"
         );
-        assert!(stats.cached(fx.load_id));
         assert_eq!(
-            annotates.load(Ordering::SeqCst),
+            observed.annotates(),
             1,
             "downstream of the late-stamped loader skips compute on its hit"
         );
-        assert!(stats.cached(fx.annotate_id));
+        assert_eq!(run.cached(), ["annotate", "load_text", "make_path"]);
 
-        // Edit the file (different length ⇒ unambiguous identity change). The loader
-        // re-keys off the delivered value's file identity and the change propagates to its
-        // downstream — while the structural upstream (make_path) stays a RAM hit.
+        // Edit the file (different length ⇒ unambiguous identity change). The
+        // loader re-keys off the delivered value's file identity and the change
+        // propagates downstream — while the structural upstream stays a hit.
         std::fs::write(&data.0, "v2-longer").unwrap();
-        let stats = engine.execute_sinks().await.unwrap();
+        let run = e.run_sinks().await;
         assert_eq!(
-            loads.load(Ordering::SeqCst),
+            observed.loads(),
             2,
             "a file edit re-keys the loader through the wired path"
         );
         assert_eq!(
-            annotates.load(Ordering::SeqCst),
+            observed.annotates(),
             2,
             "the loader's new digest invalidates its downstream"
         );
         assert_eq!(
-            *captured.lock().unwrap(),
+            observed.captured(),
             "[v2-longer]",
-            "the fresh content flows downstream"
+            "fresh content flows down"
         );
-        assert!(
-            !ran(&stats, fx.make_id),
+        assert_eq!(
+            run.ran(),
+            ["load_text", "annotate", "capture"],
             "the path producer itself stays cached — nothing structural changed"
         );
-        assert!(ran(&stats, fx.load_id));
     }
 
-    /// Disk persistence across a reopen with a wired path: the loader's blob is keyed
-    /// under the delivered path's live identity, so a fresh engine reuses it while the
-    /// file is unchanged — hydrating the on-disk path producer just to stamp — and
-    /// recomputes once the file changes, while the producer itself stays a disk hit. The
-    /// downstream `annotate` proves the re-stamp *cascade*: on reopen its own pre-run
-    /// digest is `None` too (it folds the loader's), and its reach-time re-stamp lands on
-    /// its blob — the whole tainted cone skips compute, not just the loader.
+    /// Disk persistence across a reopen with a wired path: the loader's blob is
+    /// keyed under the delivered path's live identity, so a fresh engine reuses
+    /// it while the file is unchanged — hydrating the on-disk path producer just
+    /// to stamp — and recomputes once the file changes, while the producer
+    /// itself stays a disk hit. The downstream `annotate` proves the re-stamp
+    /// *cascade*: on reopen its own pre-run digest is `None` too (it folds the
+    /// loader's), and its reach-time re-stamp lands on its blob — the whole
+    /// tainted cone skips compute, not just the loader.
     #[tokio::test]
     async fn wired_path_disk_reuse_survives_reopen_until_file_changes() {
         let dir = TempDir::new("disk");
         let data = temp_file("disk-data");
         std::fs::write(&data.0, "v1").unwrap();
-        let loads = Arc::new(AtomicUsize::new(0));
-        let annotates = Arc::new(AtomicUsize::new(0));
-        let captured = Arc::new(StdMutex::new(String::new()));
-        let lib = path_lib(loads.clone(), annotates.clone(), captured.clone());
-        let fx = path_graph(&lib, &data.0.to_string_lossy(), CacheMode::Disk);
+        let observed = Observed::default();
+        let path = data.0.to_string_lossy().into_owned();
+
+        // A fresh engine over an identically-declared graph: `TestGraph` mints
+        // ids in declaration order, so the reopened engine addresses the very
+        // slots the blobs were written under.
+        let reopen = |observed: Observed| {
+            let mut e = TestEngine::over(path_graph(&path, CacheMode::Disk, observed));
+            e.attach_disk_store(dir.0.clone());
+            e
+        };
 
         // Cold run: computes and stores the blobs.
-        let mut engine = disk_engine(&dir);
-        engine.update(&fx.graph, &lib).unwrap();
-        engine.execute_sinks().await.unwrap();
-        assert_eq!(loads.load(Ordering::SeqCst), 1);
-        assert_eq!(annotates.load(Ordering::SeqCst), 1);
+        let mut e = reopen(observed.clone());
+        e.run_sinks().await;
+        assert_eq!((observed.loads(), observed.annotates()), (1, 1));
 
-        // Reopen, unchanged file: the loader is a disk hit under the re-stamped digest,
-        // and so is its downstream — each re-stamped at reach time, producer-first.
-        let mut engine = disk_engine(&dir);
-        engine.update(&fx.graph, &lib).unwrap();
-        let stats = engine.execute_sinks().await.unwrap();
+        // Reopen, unchanged file: the loader is a disk hit under the re-stamped
+        // digest, and so is its downstream — each re-stamped at reach time,
+        // producer-first.
+        let mut e = reopen(observed.clone());
+        let run = e.run_sinks().await;
         assert_eq!(
-            loads.load(Ordering::SeqCst),
+            observed.loads(),
             1,
             "reopen with an unchanged file serves the loader from disk"
         );
-        assert!(stats.cached(fx.load_id));
-        assert!(!ran(&stats, fx.load_id));
         assert_eq!(
-            annotates.load(Ordering::SeqCst),
+            observed.annotates(),
             1,
             "downstream of the late-stamped loader is a disk hit too"
         );
-        assert!(stats.cached(fx.annotate_id));
+        assert_eq!(run.cached(), ["annotate", "load_text", "make_path"]);
         assert_eq!(
-            *captured.lock().unwrap(),
+            observed.captured(),
             "[v1]",
             "the sink reads the hydrated disk value"
         );
 
-        // Reopen after an edit: the loader's key moved ⇒ recompute, propagating to its
-        // downstream; the path producer's own digest is unchanged, so it stays a disk hit
-        // feeding the recompute.
+        // Reopen after an edit: the loader's key moved ⇒ recompute, propagating
+        // downstream; the path producer's own digest is unchanged, so it stays a
+        // disk hit feeding the recompute.
         std::fs::write(&data.0, "v2-longer").unwrap();
-        let mut engine = disk_engine(&dir);
-        engine.update(&fx.graph, &lib).unwrap();
-        let stats = engine.execute_sinks().await.unwrap();
+        let mut e = reopen(observed.clone());
+        let run = e.run_sinks().await;
         assert_eq!(
-            loads.load(Ordering::SeqCst),
+            observed.loads(),
             2,
             "reopen after a file edit recomputes the loader"
         );
         assert_eq!(
-            annotates.load(Ordering::SeqCst),
+            observed.annotates(),
             2,
             "the loader's new digest invalidates its downstream"
         );
-        assert_eq!(*captured.lock().unwrap(), "[v2-longer]");
-        assert!(
-            !ran(&stats, fx.make_id),
+        assert_eq!(observed.captured(), "[v2-longer]");
+        assert_eq!(
+            run.ran(),
+            ["load_text", "annotate", "capture"],
             "the path producer is served from its blob, not recomputed"
         );
     }
