@@ -7,9 +7,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use scenarium::DiskStore;
-use scenarium::{
-    CompiledGraph, Compiler, DynamicValue, ExecutionNodeId, WorkerExited, WorkerReport,
-};
+use scenarium::{CompiledGraph, Compiler, DynamicValue, WorkerExited, WorkerReport};
 use scenarium::{Graph, NodeId};
 
 use crate::core::io::cache::prepare_document_cache_root;
@@ -28,7 +26,7 @@ pub(crate) struct RuntimeHost {
     /// [`DiskStore`] — which carries a library snapshot — without the caller
     /// re-supplying the document path.
     disk_root: Option<PathBuf>,
-    /// Long-lived so the flatten scratch is reused across compiles instead of
+    /// Long-lived so the lowering scratch is reused across compiles instead of
     /// reallocated per run.
     compiler: Compiler,
     /// The shared user-facing outcome log: compile failures report here
@@ -128,20 +126,20 @@ impl RuntimeHost {
         let Some(compiled) = self.compile(graph) else {
             return false;
         };
-        let Some(target) = compiled.run_target(node_id) else {
+        if !compiled.contains(node_id) {
             self.status
                 .error("nothing to run: this node has no compiled work".to_owned());
             return false;
-        };
+        }
         self.dispatch(|worker| {
             worker.install(compiled)?;
-            worker.run_nodes(vec![target])
+            worker.run_nodes(vec![node_id])
         });
         true
     }
 
     /// Compile the current graph and atomically install it with a runtime-cache
-    /// eviction for `node_id` and its flattened downstream cone.
+    /// eviction for `node_id` and its compiled downstream cone.
     pub(crate) fn evict_cache(&mut self, graph: &Graph, node_id: NodeId) -> bool {
         let Some(compiled) = self.compile(graph) else {
             return false;
@@ -209,7 +207,7 @@ impl RuntimeHost {
     /// report stream: a preview node's lambda writes it directly. Ordering
     /// against the reports does not matter — a value is only ever the *latest*
     /// for its node, never a step in a sequence.
-    pub(crate) fn drain_previews(&self) -> Vec<(ExecutionNodeId, DynamicValue)> {
+    pub(crate) fn drain_previews(&self) -> Vec<(NodeId, DynamicValue)> {
         self.library.previews.drain()
     }
 }

@@ -1,4 +1,4 @@
-use crate::execution::identity::{ExecutionEventPort, ExecutionNodeId};
+use crate::graph::identity::{EventPort, NodeId};
 
 /// What seeds a run's schedule — the roots the planner walks back from. The four
 /// are independent and combine: a run can target sink nodes, the event loop's
@@ -13,12 +13,12 @@ pub struct RunSeeds {
     /// Run the subscribers of these specific fired events. An event absent from the
     /// installed program fails with
     /// [`Error::EventSeedNotFound`](crate::execution::error::Error::EventSeedNotFound).
-    pub events: Vec<ExecutionEventPort>,
+    pub events: Vec<EventPort>,
     /// Run these exact compiled nodes and deliver every output — the on-demand "run to
     /// this node" / preview trigger. An explicitly seeded disabled node is enabled for
     /// this run; an identity absent from the installed program fails with
     /// [`Error::NodeSeedNotFound`](crate::execution::error::Error::NodeSeedNotFound).
-    pub e_node_ids: Vec<ExecutionNodeId>,
+    pub node_ids: Vec<NodeId>,
 }
 
 impl RunSeeds {
@@ -29,14 +29,14 @@ impl RunSeeds {
         }
     }
 
-    pub fn nodes(e_node_ids: Vec<ExecutionNodeId>) -> Self {
+    pub fn nodes(node_ids: Vec<NodeId>) -> Self {
         Self {
-            e_node_ids,
+            node_ids,
             ..Self::default()
         }
     }
 
-    pub fn events(events: Vec<ExecutionEventPort>) -> Self {
+    pub fn events(events: Vec<EventPort>) -> Self {
         Self {
             events,
             ..Self::default()

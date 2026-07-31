@@ -21,7 +21,7 @@
 //!     `commit_intent` entries the live frontends drive their
 //!     per-intent loop through: build → no-op-filter → apply. Uniform
 //!     across variants — a wildcard-output retype severs nothing
-//!     (mismatched wires are tolerated and flatten as unbound).
+//!     (mismatched wires are tolerated and lower as unbound).
 //!   - [`query`] — the five exhaustive per-step predicates (`is_noop`,
 //!     `invalidates_cached_geometry`, `dirties_document`, `gesture_key`,
 //!     `coalesce`) that drive the undo stack and the per-frame pipeline.

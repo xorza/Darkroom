@@ -15,7 +15,7 @@ use crate::core::edit::intent::types::{GraphIntent, NodeProperty, Refusal, UndoS
 /// Build, no-op-filter, and apply one `intent` against `target` in a single
 /// call — the entry every frontend drives its per-intent loop through. A
 /// `SetInput` that retypes wildcard outputs severs nothing: type mismatches
-/// are tolerated (the wire draws as mismatched and flattens as unbound —
+/// are tolerated (the wire draws as mismatched and lowers as unbound —
 /// see scenarium's `typed_binding`), so the edit stays a single step.
 ///
 /// Returns the committed [`UndoStep`] (the caller records it and reads its

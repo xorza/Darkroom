@@ -1,12 +1,11 @@
-use crate::graph::identity::FuncId;
+use crate::graph::identity::{FuncId, NodeId};
 use std::sync::Arc;
 
 use crate::common::column::{Column, Span};
 use crate::execution::cache::digest::Digest;
 use crate::execution::cache::runtime::RuntimeCache;
 use crate::execution::cache::slot::{OutputSnapshot, RuntimeSlot};
-use crate::execution::compiled::{CompiledGraph, ExecutionNode, ExecutionOutput};
-use crate::execution::identity::ExecutionNodeId;
+use crate::execution::compiled::{CompiledGraph, ExecutionNode};
 use crate::execution::identity::{NodeIdx, OutputAddr, OutputIdx};
 use crate::graph::func::FuncBehavior;
 use crate::graph::func::lambda::OutputDemand;
@@ -24,9 +23,7 @@ fn out() -> Vec<DynamicValue> {
 /// the node's declared port count, so a fixture node declaring none while
 /// holding a value is not a shape any real program produces.
 fn one_output(program: &mut CompiledGraph) -> Span<OutputIdx> {
-    program.outputs.append([ExecutionOutput {
-        data_type: DataType::Int,
-    }])
+    program.outputs.append([DataType::Int])
 }
 
 const DEMANDED: &[OutputDemand] = &[OutputDemand::Produce];
@@ -62,7 +59,7 @@ fn program_of(nodes: impl IntoIterator<Item = ExecutionNode>) -> CompiledGraph {
     let mut program = CompiledGraph::default();
     for (index, mut e_node) in nodes.into_iter().enumerate() {
         e_node.outputs = one_output(&mut program);
-        program.push(ExecutionNodeId::from_u128(index as u128 + 1), e_node);
+        program.push(NodeId::from_u128(index as u128 + 1), e_node);
     }
     program
 }
@@ -115,8 +112,8 @@ async fn eviction_clears_only_the_output_cache() {
     let node_idx = NodeIdx(0);
     let program = program_of([ram_node()]);
     install(&mut cache, &program, [slot]);
-    let e_node_id = ExecutionNodeId::from_u128(1);
-    let failures = cache.evict(&program, &[e_node_id]).await;
+    let node_id = NodeId::from_u128(1);
+    let failures = cache.evict(&program, &[node_id]).await;
 
     assert!(failures.is_empty());
     assert!(cache.slots[node_idx].output_values().is_none());
@@ -271,7 +268,7 @@ fn reconcile_applies_ram_mode_downgrades_without_waiting_for_a_run() {
         for (index, mode) in modes.into_iter().enumerate() {
             let outputs = one_output(&mut program);
             program.push(
-                ExecutionNodeId::from_u128(index as u128 + 1),
+                NodeId::from_u128(index as u128 + 1),
                 ExecutionNode {
                     cache: mode,
                     behavior: FuncBehavior::Pure,
@@ -306,14 +303,14 @@ fn reconcile_applies_ram_mode_downgrades_without_waiting_for_a_run() {
 #[tokio::test]
 async fn reconcile_drops_state_only_when_the_owning_implementation_changes() {
     let func_id = FuncId::from_u128(77);
-    let e_node_id = ExecutionNodeId::from_u128(1);
+    let node_id = NodeId::from_u128(1);
     // Each install is its own program — the owner change under test is what a
     // recompile does to the node, not an edit to the program already installed.
     let build = move |func_id| {
         let mut program = CompiledGraph::default();
         let outputs = one_output(&mut program);
         program.push(
-            e_node_id,
+            node_id,
             ExecutionNode {
                 func_id,
                 cache: CacheMode::Ram,
@@ -368,7 +365,7 @@ fn reconcile_follows_ids_when_the_index_space_shifts() {
         let mut program = CompiledGraph::default();
         for id in ids {
             program.push(
-                ExecutionNodeId::from_u128(*id),
+                NodeId::from_u128(*id),
                 ExecutionNode {
                     cache: CacheMode::Ram,
                     behavior: FuncBehavior::Pure,
@@ -497,9 +494,9 @@ fn debug_assertions_reject_invalid_cache_arities_and_ports() {
     let mut program = CompiledGraph::default();
     let outputs = program
         .outputs
-        .append([ExecutionOutput::default(), ExecutionOutput::default()]);
+        .append([DataType::default(), DataType::default()]);
     program.push(
-        ExecutionNodeId::from_u128(1),
+        NodeId::from_u128(1),
         ExecutionNode {
             outputs,
             ..Default::default()

@@ -1,13 +1,10 @@
-use crate::graph::identity::FuncId;
+use crate::graph::identity::{FuncId, NodeId};
 
 use super::*;
 use crate::StaticValue;
 use crate::execution::cache::runtime::RuntimeCache;
 use crate::execution::cache::slot::OutputSnapshot;
-use crate::execution::compiled::{
-    CompiledGraph, ExecutionBinding, ExecutionInput, ExecutionNode, ExecutionOutput,
-};
-use crate::execution::identity::ExecutionNodeId;
+use crate::execution::compiled::{CompiledGraph, ExecutionBinding, ExecutionInput, ExecutionNode};
 use crate::execution::identity::{NodeIdx, OutputAddr};
 use crate::graph::func::FuncBehavior;
 
@@ -59,7 +56,7 @@ impl Prog {
 
     /// Mark input `input_idx` of node `idx` as a declared filesystem-path input.
     fn stamp_fs_path_input(&mut self, idx: usize, input_idx: u32) {
-        let input = self.program.by_id(e_node_id(idx)).inputs.nth(input_idx);
+        let input = self.program.by_id(node_id(idx)).inputs.nth(input_idx);
         self.building().inputs[input].stamps_fs_path = true;
     }
 
@@ -79,15 +76,10 @@ impl Prog {
                 binding: binding.clone(),
             }));
         let idx = self.program.e_nodes.len();
-        let outputs = self.building().outputs.append(
-            types
-                .iter()
-                .cloned()
-                .map(|data_type| ExecutionOutput { data_type }),
-        );
-        let e_node_id = e_node_id(idx);
+        let outputs = self.building().outputs.append(types.iter().cloned());
+        let node_id = node_id(idx);
         self.building().push(
-            e_node_id,
+            node_id,
             ExecutionNode {
                 behavior,
                 func_id: FuncId::from_u128(func),
@@ -107,8 +99,8 @@ fn bind(idx: usize, port: usize) -> ExecutionBinding {
     })
 }
 
-fn e_node_id(idx: usize) -> ExecutionNodeId {
-    ExecutionNodeId::from_u128(idx as u128 + 1)
+fn node_id(idx: usize) -> NodeId {
+    NodeId::from_u128(idx as u128 + 1)
 }
 
 /// The fixture pushes nodes in index order, so the dense index equals the
@@ -172,7 +164,7 @@ fn deterministic_and_per_function_distinct() {
     assert_ne!(first[1], first[2]);
     assert_ne!(first[0], first[2]);
 
-    p.building().by_id_mut(e_node_id(0)).func_id = FuncId::from_u128(11);
+    p.building().by_id_mut(node_id(0)).func_id = FuncId::from_u128(11);
     let refunced = digests(&p);
     assert_ne!(
         first[0], refunced[0],

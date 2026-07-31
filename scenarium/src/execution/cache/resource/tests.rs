@@ -1,4 +1,4 @@
-use crate::graph::identity::FuncId;
+use crate::graph::identity::{FuncId, NodeId};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use ::common::CancelToken;
@@ -6,10 +6,7 @@ use ::common::CancelToken;
 use crate::execution::cache::digest::{Digest, DigestHasher};
 use crate::execution::cache::resource::{FileId, FsPathId, StampJob, epoch_offset_ns};
 use crate::execution::cache::runtime::RuntimeCache;
-use crate::execution::compiled::{
-    CompiledGraph, ExecutionBinding, ExecutionInput, ExecutionNode, ExecutionOutput,
-};
-use crate::execution::identity::ExecutionNodeId;
+use crate::execution::compiled::{CompiledGraph, ExecutionBinding, ExecutionInput, ExecutionNode};
 use crate::execution::identity::NodeIdx;
 use crate::execution::schedule::{NodeState, RootFlags, RunSchedule};
 use crate::graph::func::FuncBehavior;
@@ -276,13 +273,13 @@ struct ConstPathFixture {
     /// A real outer compiled artifact around the hand-built program.
     program: CompiledGraph,
     schedule: RunSchedule,
-    first: ExecutionNodeId,
-    second: ExecutionNodeId,
+    first: NodeId,
+    second: NodeId,
 }
 
 fn const_path_fixture(path: &str) -> ConstPathFixture {
-    let first = ExecutionNodeId::from_u128(1);
-    let second = ExecutionNodeId::from_u128(2);
+    let first = NodeId::from_u128(1);
+    let second = NodeId::from_u128(2);
     let mut program = CompiledGraph::default();
     let input_ranges = [
         program.inputs.append([ExecutionInput {
@@ -295,20 +292,16 @@ fn const_path_fixture(path: &str) -> ConstPathFixture {
         }]),
     ];
     let output_ranges = [
-        program.outputs.append([ExecutionOutput {
-            data_type: DataType::Int,
-        }]),
-        program.outputs.append([ExecutionOutput {
-            data_type: DataType::Int,
-        }]),
+        program.outputs.append([DataType::Int]),
+        program.outputs.append([DataType::Int]),
     ];
-    for ((e_node_id, inputs), outputs) in [first, second]
+    for ((node_id, inputs), outputs) in [first, second]
         .into_iter()
         .zip(input_ranges)
         .zip(output_ranges)
     {
         program.push(
-            e_node_id,
+            node_id,
             ExecutionNode {
                 behavior: FuncBehavior::Pure,
                 func_id: FuncId::from_u128(10),
@@ -348,23 +341,20 @@ async fn same_path_uses_one_identity_until_the_next_run() {
             CancelToken::never(),
         )
         .await;
-    cache.stamp_digest(
-        &fixture.program,
-        fixture.program.e_node_index[&fixture.first],
-    );
+    cache.stamp_digest(&fixture.program, fixture.program.node_index[&fixture.first]);
 
     std::fs::write(&file, b"longer").unwrap();
     cache.stamp_digest(
         &fixture.program,
-        fixture.program.e_node_index[&fixture.second],
+        fixture.program.node_index[&fixture.second],
     );
     assert_eq!(
-        cache[fixture.program.e_node_index[&fixture.first]].current_digest,
-        cache[fixture.program.e_node_index[&fixture.second]].current_digest,
+        cache[fixture.program.node_index[&fixture.first]].current_digest,
+        cache[fixture.program.node_index[&fixture.second]].current_digest,
         "both consumers fold the run's one coherent resource identity"
     );
 
-    let first_run = cache[fixture.program.e_node_index[&fixture.first]].current_digest;
+    let first_run = cache[fixture.program.node_index[&fixture.first]].current_digest;
     cache
         .prepare(
             &fixture.program,
@@ -372,12 +362,9 @@ async fn same_path_uses_one_identity_until_the_next_run() {
             CancelToken::never(),
         )
         .await;
-    cache.stamp_digest(
-        &fixture.program,
-        fixture.program.e_node_index[&fixture.first],
-    );
+    cache.stamp_digest(&fixture.program, fixture.program.node_index[&fixture.first]);
     assert_ne!(
-        cache[fixture.program.e_node_index[&fixture.first]].current_digest, first_run,
+        cache[fixture.program.node_index[&fixture.first]].current_digest, first_run,
         "the next run refreshes resource identity"
     );
 }

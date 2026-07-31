@@ -13,9 +13,8 @@
 
 use thiserror::Error;
 
-use crate::execution::identity::ExecutionNodeId;
 use crate::execution::identity::{NodeIdx, OutputAddr};
-use crate::graph::identity::FuncId;
+use crate::graph::identity::{FuncId, NodeId};
 
 /// The graph won't compile against the library: a document can be stale
 /// against an evolved library (a dropped func, a shrunk port list, a
@@ -34,40 +33,31 @@ pub struct CompileError {
 /// while tests can inspect exact validation errors.
 #[derive(Debug, Error)]
 pub(crate) enum CompiledGraphValidationError {
-    #[error("execution node {e_node_id:?} has a nil func id")]
-    NilFuncId { e_node_id: ExecutionNodeId },
-    #[error("execution node {e_node_id:?} references missing func {func_id:?}")]
-    MissingFunc {
-        e_node_id: ExecutionNodeId,
-        func_id: FuncId,
-    },
-    #[error("execution node {e_node_id:?} input arity does not match its function")]
-    InputArity { e_node_id: ExecutionNodeId },
-    #[error("execution node {e_node_id:?} output arity does not match its function")]
-    OutputArity { e_node_id: ExecutionNodeId },
-    #[error("execution node {e_node_id:?} event arity does not match its function")]
-    EventArity { e_node_id: ExecutionNodeId },
-    #[error("execution node {e_node_id:?} input range is out of bounds")]
-    InputRange { e_node_id: ExecutionNodeId },
-    #[error("execution node {e_node_id:?} output range is out of bounds")]
-    OutputRange { e_node_id: ExecutionNodeId },
-    #[error("execution node {e_node_id:?} event range is out of bounds")]
-    EventRange { e_node_id: ExecutionNodeId },
+    #[error("execution node {node_id:?} has a nil func id")]
+    NilFuncId { node_id: NodeId },
+    #[error("execution node {node_id:?} references missing func {func_id:?}")]
+    MissingFunc { node_id: NodeId, func_id: FuncId },
+    #[error("execution node {node_id:?} input arity does not match its function")]
+    InputArity { node_id: NodeId },
+    #[error("execution node {node_id:?} output arity does not match its function")]
+    OutputArity { node_id: NodeId },
+    #[error("execution node {node_id:?} event arity does not match its function")]
+    EventArity { node_id: NodeId },
+    #[error("execution node {node_id:?} input range is out of bounds")]
+    InputRange { node_id: NodeId },
+    #[error("execution node {node_id:?} output range is out of bounds")]
+    OutputRange { node_id: NodeId },
+    #[error("execution node {node_id:?} event range is out of bounds")]
+    EventRange { node_id: NodeId },
     #[error(
-        "execution node {e_node_id:?} has an event subscriber outside the program: {subscriber:?}"
+        "execution node {node_id:?} has an event subscriber outside the program: {subscriber:?}"
     )]
     MissingEventSubscriber {
-        e_node_id: ExecutionNodeId,
+        node_id: NodeId,
         subscriber: NodeIdx,
     },
-    #[error("execution node {e_node_id:?} binds to missing output {target:?}")]
-    MissingBindingTarget {
-        e_node_id: ExecutionNodeId,
-        target: OutputAddr,
-    },
-    #[error("execution node {e_node_id:?} binds to out-of-range output {target:?}")]
-    BindingOutputOutOfRange {
-        e_node_id: ExecutionNodeId,
-        target: OutputAddr,
-    },
+    #[error("execution node {node_id:?} binds to missing output {target:?}")]
+    MissingBindingTarget { node_id: NodeId, target: OutputAddr },
+    #[error("execution node {node_id:?} binds to out-of-range output {target:?}")]
+    BindingOutputOutOfRange { node_id: NodeId, target: OutputAddr },
 }

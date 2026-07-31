@@ -19,7 +19,7 @@ use std::sync::OnceLock;
 use crate::async_lambda;
 use crate::graph::func::Func;
 
-/// Stable `FuncId` standing in for the run-sinks node in the flattened
+/// Stable `FuncId` standing in for the run-sinks node in the lowered
 /// program (outcome attribution). Not registered in any `Library`.
 const RUN_SINKS_FUNC_ID: &str = "edec890e-5c23-49fb-a131-aaef3844d7c7";
 

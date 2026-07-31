@@ -3,18 +3,18 @@
 //! primed cache for the sweep that reads one.
 
 mod planning {
+    use crate::DataType;
     use crate::execution::compiled::{
         CompiledGraph, ExecutionBinding, ExecutionEvent, ExecutionInput, ExecutionNode,
-        ExecutionOutput,
     };
     use crate::execution::error::Error;
-    use crate::execution::identity::{ExecutionEventPort, ExecutionNodeId};
     use crate::execution::identity::{NodeIdx, OutputAddr, OutputIdx};
     use crate::execution::schedule::planner::Planner;
     use crate::execution::schedule::{NodeState, ResolvedOutputs, RootFlags, RunSchedule};
     use crate::execution::seeds::RunSeeds;
     use crate::graph::func::lambda::OutputDemand;
     use crate::graph::identity::FuncId;
+    use crate::graph::identity::{EventPort, NodeId};
 
     /// Hand-built program for planner tests — scheduling is structural, so it
     /// needs no compile artifact and no authoring attribution. Inputs are
@@ -30,7 +30,7 @@ mod planning {
             sink: bool,
             inputs: &[(bool, ExecutionBinding)],
             outputs: u32,
-        ) -> ExecutionNodeId {
+        ) -> NodeId {
             let program = &mut self.program;
             let inputs = program
                 .inputs
@@ -41,9 +41,9 @@ mod planning {
                 }));
             let outputs = program
                 .outputs
-                .append((0..outputs).map(|_| ExecutionOutput::default()));
+                .append((0..outputs).map(|_| DataType::default()));
             let idx = program.e_nodes.len();
-            let id = ExecutionNodeId::from_u128(idx as u128 + 1);
+            let id = NodeId::from_u128(idx as u128 + 1);
             program.push(
                 id,
                 ExecutionNode {
@@ -60,13 +60,13 @@ mod planning {
 
     /// The fixture's id ↔ index invariant: ids are assigned `from_u128(idx + 1)`
     /// in push order, so a node's dense index is recoverable from its id.
-    fn nx(e_node_id: ExecutionNodeId) -> NodeIdx {
-        NodeIdx(e_node_id.as_uuid().as_u128() as u32 - 1)
+    fn nx(node_id: NodeId) -> NodeIdx {
+        NodeIdx(node_id.as_uuid().as_u128() as u32 - 1)
     }
 
-    fn bind(e_node_id: ExecutionNodeId, port: usize) -> ExecutionBinding {
+    fn bind(node_id: NodeId, port: usize) -> ExecutionBinding {
         ExecutionBinding::Bind(OutputAddr {
-            node_idx: nx(e_node_id),
+            node_idx: nx(node_id),
             port_idx: port as u32,
         })
     }
@@ -295,15 +295,15 @@ mod planning {
                 &f.program,
                 &RunSeeds {
                     sinks: true,
-                    e_node_ids: vec![producer],
+                    node_ids: vec![producer],
                     ..Default::default()
                 },
                 &mut plan,
             )
             .unwrap();
-        for e_node_id in [producer, required, optional] {
+        for node_id in [producer, required, optional] {
             assert_eq!(
-                plan.states[nx(e_node_id)],
+                plan.states[nx(node_id)],
                 NodeState::Cut,
                 "the explicit producer seed makes every consumer runnable"
             );
@@ -318,7 +318,7 @@ mod planning {
         let mut planner = Planner::default();
         let mut p = RunSchedule::default();
         let seeds = RunSeeds {
-            e_node_ids: vec![a],
+            node_ids: vec![a],
             ..Default::default()
         };
         planner.plan(&f.program, &seeds, &mut p).expect("no cycle");
@@ -327,7 +327,7 @@ mod planning {
         assert_eq!(p.roots(), [nx(a)]);
 
         let seeds = RunSeeds {
-            e_node_ids: vec![a, a],
+            node_ids: vec![a, a],
             ..Default::default()
         };
         planner.plan(&f.program, &seeds, &mut p).expect("no cycle");
@@ -339,8 +339,8 @@ mod planning {
     fn dependency_cycle_is_rejected() {
         // A binds B, B binds A (A sink) — the planner must error, not loop.
         let mut f = Fix::default();
-        f.node(true, &[(false, bind(ExecutionNodeId::from_u128(2), 0))], 1);
-        f.node(false, &[(false, bind(ExecutionNodeId::from_u128(1), 0))], 1);
+        f.node(true, &[(false, bind(NodeId::from_u128(2), 0))], 1);
+        f.node(false, &[(false, bind(NodeId::from_u128(1), 0))], 1);
 
         let mut planner = Planner::default();
         let mut plan = RunSchedule::default();
@@ -366,7 +366,7 @@ mod planning {
         let mut planner = Planner::default();
         let mut p = RunSchedule::default();
         let seeds = RunSeeds {
-            e_node_ids: vec![b],
+            node_ids: vec![b],
             ..Default::default()
         };
         planner.plan(&f.program, &seeds, &mut p).expect("no cycle");
@@ -386,7 +386,7 @@ mod planning {
         // everything, and B stays seeded.
         let seeds = RunSeeds {
             sinks: true,
-            e_node_ids: vec![b],
+            node_ids: vec![b],
             ..Default::default()
         };
         planner.plan(&f.program, &seeds, &mut p).expect("no cycle");
@@ -399,7 +399,7 @@ mod planning {
         // carrying both facts, so C is listed once and stays seeded.
         let seeds = RunSeeds {
             sinks: true,
-            e_node_ids: vec![c],
+            node_ids: vec![c],
             ..Default::default()
         };
         planner.plan(&f.program, &seeds, &mut p).expect("no cycle");
@@ -412,13 +412,13 @@ mod planning {
 
         // A seed id absent from the program is inconsistent caller state — a hard failure,
         // not a silent skip.
-        let bogus = ExecutionNodeId::from_u128(0xdead_beef);
+        let bogus = NodeId::from_u128(0xdead_beef);
         let seeds = RunSeeds {
-            e_node_ids: vec![bogus],
+            node_ids: vec![bogus],
             ..Default::default()
         };
         let err = planner.plan(&f.program, &seeds, &mut p).unwrap_err();
-        assert!(matches!(err, Error::NodeSeedNotFound { e_node_id } if e_node_id == bogus));
+        assert!(matches!(err, Error::NodeSeedNotFound { node_id } if node_id == bogus));
     }
 
     #[test]
@@ -432,8 +432,8 @@ mod planning {
         }]);
         f.program.by_id_mut(emitter).events = events;
 
-        let event = ExecutionEventPort {
-            e_node_id: emitter,
+        let event = EventPort {
+            node_id: emitter,
             event_idx: 0,
         };
         let mut planner = Planner::default();
@@ -473,7 +473,7 @@ mod planning {
                 &f.program,
                 &RunSeeds {
                     event_sources: true,
-                    e_node_ids: vec![emitter],
+                    node_ids: vec![emitter],
                     ..Default::default()
                 },
                 &mut plan,
@@ -484,12 +484,12 @@ mod planning {
         assert_eq!(plan.event_source_roots(), vec![nx(emitter)]);
 
         let invalid = [
-            ExecutionEventPort {
-                e_node_id: ExecutionNodeId::from_u128(0xdead_beef),
+            EventPort {
+                node_id: NodeId::from_u128(0xdead_beef),
                 event_idx: 0,
             },
-            ExecutionEventPort {
-                e_node_id: emitter,
+            EventPort {
+                node_id: emitter,
                 event_idx: 1,
             },
         ];
@@ -513,22 +513,23 @@ mod planning {
 }
 
 mod resolving {
+    use crate::DataType;
     use crate::execution::cache::runtime::RuntimeCache;
     use crate::execution::cache::slot::OutputSnapshot;
     use crate::execution::compiled::{
-        CompiledGraph, ExecutionBinding, ExecutionInput, ExecutionNode, ExecutionOutput,
+        CompiledGraph, ExecutionBinding, ExecutionInput, ExecutionNode,
     };
-    use crate::execution::identity::ExecutionNodeId;
     use crate::execution::identity::{NodeIdx, OutputAddr};
     use crate::execution::schedule::{NodeState, RootFlags, RunSchedule, Scheduled};
     use crate::graph::func::FuncBehavior;
     use crate::graph::func::lambda::{FuncLambda, OutputDemand};
     use crate::graph::identity::FuncId;
+    use crate::graph::identity::NodeId;
     use crate::{DynamicValue, StaticValue, async_lambda};
 
     #[derive(Debug)]
     struct CachedNode {
-        e_node_id: ExecutionNodeId,
+        node_id: NodeId,
         values: Vec<DynamicValue>,
     }
 
@@ -536,7 +537,7 @@ mod resolving {
     struct Fix {
         /// A real outer compiled artifact around the hand-built program.
         program: CompiledGraph,
-        order: Vec<ExecutionNodeId>,
+        order: Vec<NodeId>,
     }
 
     impl Fix {
@@ -545,7 +546,7 @@ mod resolving {
             &mut self.program
         }
 
-        fn node(&mut self, inputs: &[(bool, ExecutionBinding)], outputs: u32) -> ExecutionNodeId {
+        fn node(&mut self, inputs: &[(bool, ExecutionBinding)], outputs: u32) -> NodeId {
             let inputs = self
                 .building()
                 .inputs
@@ -557,12 +558,12 @@ mod resolving {
             let outputs = self
                 .building()
                 .outputs
-                .append((0..outputs).map(|_| ExecutionOutput::default()));
+                .append((0..outputs).map(|_| DataType::default()));
             let idx = self.program.e_nodes.len();
-            let e_node_id = ExecutionNodeId::from_u128(idx as u128 + 1);
-            self.order.push(e_node_id);
+            let node_id = NodeId::from_u128(idx as u128 + 1);
+            self.order.push(node_id);
             self.building().push(
-                e_node_id,
+                node_id,
                 ExecutionNode {
                     behavior: FuncBehavior::Pure,
                     func_id: FuncId::from_u128(idx as u128 + 1),
@@ -572,16 +573,16 @@ mod resolving {
                     ..Default::default()
                 },
             );
-            e_node_id
+            node_id
         }
 
         /// The schedule as it arrives at the sweep — what the planner would have left
         /// behind — swept to the one resolved run the executor reads.
         async fn resolve(
             &self,
-            roots: &[ExecutionNodeId],
-            seeded: &[ExecutionNodeId],
-            missing: &[ExecutionNodeId],
+            roots: &[NodeId],
+            seeded: &[NodeId],
+            missing: &[NodeId],
             cached: Vec<CachedNode>,
         ) -> RunSchedule {
             let mut schedule = RunSchedule::default();
@@ -593,8 +594,8 @@ mod resolving {
             schedule
                 .states
                 .reset(self.program.e_nodes.len(), NodeState::Cut);
-            for e_node_id in missing {
-                schedule.states[nx(*e_node_id)] = NodeState::MissingInputs;
+            for node_id in missing {
+                schedule.states[nx(*node_id)] = NodeState::MissingInputs;
             }
             for root in roots {
                 schedule.add_root(nx(*root), RootFlags::PLAIN);
@@ -606,8 +607,8 @@ mod resolving {
             cache.install_for_test(&self.program);
             cache.stamp_digests(&self.program, schedule.executing());
             for cached in cached {
-                let digest = cache[nx(cached.e_node_id)].current_digest.unwrap();
-                cache[nx(cached.e_node_id)]
+                let digest = cache[nx(cached.node_id)].current_digest.unwrap();
+                cache[nx(cached.node_id)]
                     .load_output(OutputSnapshot::new(cached.values), Some(digest));
             }
             Scheduled::assume(&self.program, &mut schedule)
@@ -619,13 +620,13 @@ mod resolving {
 
     /// The fixture's id ↔ index invariant: ids are assigned `from_u128(idx + 1)`
     /// in push order, so a node's dense index is recoverable from its id.
-    fn nx(e_node_id: ExecutionNodeId) -> NodeIdx {
-        NodeIdx(e_node_id.as_uuid().as_u128() as u32 - 1)
+    fn nx(node_id: NodeId) -> NodeIdx {
+        NodeIdx(node_id.as_uuid().as_u128() as u32 - 1)
     }
 
-    fn bind(e_node_id: ExecutionNodeId, port_idx: usize) -> ExecutionBinding {
+    fn bind(node_id: NodeId, port_idx: usize) -> ExecutionBinding {
         ExecutionBinding::Bind(OutputAddr {
-            node_idx: nx(e_node_id),
+            node_idx: nx(node_id),
             port_idx: port_idx as u32,
         })
     }
@@ -647,7 +648,7 @@ mod resolving {
                 &[],
                 &[],
                 vec![CachedNode {
-                    e_node_id: cached,
+                    node_id: cached,
                     values: vec![value(1)],
                 }],
             )
@@ -677,11 +678,11 @@ mod resolving {
                 &[],
                 vec![
                     CachedNode {
-                        e_node_id: source,
+                        node_id: source,
                         values: vec![value(7), DynamicValue::Unbound],
                     },
                     CachedNode {
-                        e_node_id: cached,
+                        node_id: cached,
                         values: vec![value(8)],
                     },
                 ],
@@ -744,7 +745,7 @@ mod resolving {
                 &[],
                 &[],
                 vec![CachedNode {
-                    e_node_id: missing,
+                    node_id: missing,
                     values: vec![value(9)],
                 }],
             )
@@ -811,7 +812,7 @@ mod resolving {
                 &[],
                 &[],
                 vec![CachedNode {
-                    e_node_id: cached,
+                    node_id: cached,
                     values: vec![value(1)],
                 }],
             )

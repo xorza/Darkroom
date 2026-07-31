@@ -113,7 +113,7 @@ impl Planner {
             match self.color[node_idx] {
                 Color::Gray => {
                     return Err(Error::CycleDetected {
-                        e_node_id: program.e_node_ids[node_idx],
+                        node_id: program.node_ids[node_idx],
                     });
                 }
                 Color::Black => continue,

@@ -15,8 +15,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use scenarium::{
-    DataType, DynamicValue, ExecutionNodeId, Func, FuncId, FuncInput, Invocation, Library,
-    async_lambda,
+    DataType, DynamicValue, Func, FuncId, FuncInput, Invocation, Library, NodeId, async_lambda,
 };
 
 /// Stable `FuncId` for the preview node. Persisted in every document that holds
@@ -33,19 +32,19 @@ const PREVIEW_FUNC_ID: &str = "7d08e8c7-fd22-46d4-bb86-c0bd3c9e76fe";
 /// the values are full-resolution images.
 #[derive(Debug, Default)]
 pub(crate) struct PreviewSink {
-    latest: Mutex<HashMap<ExecutionNodeId, DynamicValue>>,
+    latest: Mutex<HashMap<NodeId, DynamicValue>>,
 }
 
 impl PreviewSink {
-    /// Worker side: publish `value` as `e_node_id`'s current one, dropping
+    /// Worker side: publish `value` as `node_id`'s current one, dropping
     /// whatever it was showing before.
-    fn publish(&self, e_node_id: ExecutionNodeId, value: DynamicValue) {
-        self.latest.lock().unwrap().insert(e_node_id, value);
+    fn publish(&self, node_id: NodeId, value: DynamicValue) {
+        self.latest.lock().unwrap().insert(node_id, value);
     }
 
     /// GUI side: take everything published since the last drain. Empty on an
     /// idle frame, which is the common case.
-    pub(crate) fn drain(&self) -> Vec<(ExecutionNodeId, DynamicValue)> {
+    pub(crate) fn drain(&self) -> Vec<(NodeId, DynamicValue)> {
         let mut latest = self.latest.lock().unwrap();
         latest.drain().collect()
     }
@@ -127,7 +126,7 @@ mod tests {
     async fn invoking_publishes_the_latest_value_per_node() {
         let sink = Arc::new(PreviewSink::default());
         let func = preview_func(Arc::clone(&sink));
-        let first = ExecutionNodeId::default();
+        let first = NodeId::default();
 
         let invoke = async |value: i64| {
             let mut ctx = ContextManager::default();

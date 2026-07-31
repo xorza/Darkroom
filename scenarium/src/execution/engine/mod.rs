@@ -97,8 +97,8 @@ impl ExecutionEngine {
         let Some(compiled) = self.compiled.as_deref() else {
             return Vec::new();
         };
-        let e_node_ids = compiled.data_consumer_closure(node_ids);
-        self.cache.evict(compiled, &e_node_ids).await
+        let node_ids = compiled.data_consumer_closure(node_ids);
+        self.cache.evict(compiled, &node_ids).await
     }
 
     /// `reporter` receives live feedback ahead of the final outcome: progress before and
@@ -212,8 +212,8 @@ impl ExecutionEngine {
             });
         }
 
-        for ((e_node_id, e_node), slot) in program
-            .e_node_ids
+        for ((node_id, e_node), slot) in program
+            .node_ids
             .iter()
             .zip(program.e_nodes.iter())
             .zip(self.cache.slots())
@@ -221,14 +221,10 @@ impl ExecutionEngine {
             if let Some(output_values) = slot.output_values()
                 && output_values.len() != e_node.outputs.len as usize
             {
-                return Err(InstallValidationError::OutputArity {
-                    e_node_id: *e_node_id,
-                });
+                return Err(InstallValidationError::OutputArity { node_id: *node_id });
             }
             if slot.owner != e_node.func_id {
-                return Err(InstallValidationError::StateOwner {
-                    e_node_id: *e_node_id,
-                });
+                return Err(InstallValidationError::StateOwner { node_id: *node_id });
             }
         }
         Ok(())
@@ -254,15 +250,13 @@ mod internals {
     use crate::execution::compiled::{CompiledGraph, ExecutionInput};
     use crate::execution::engine::ExecutionEngine;
     use crate::execution::error::Result;
-    use crate::execution::identity::ExecutionEventPort;
-    use crate::execution::identity::ExecutionNodeId;
     use crate::execution::report::ExecutionOutcome;
     use crate::execution::report::internals::DiscardedReports;
     use crate::execution::schedule::NodeState;
     use crate::execution::seeds::RunSeeds;
     use crate::graph::Graph;
     use crate::graph::func::lambda::OutputDemand;
-    use crate::graph::identity::NodeId;
+    use crate::graph::identity::{EventPort, NodeId};
     use crate::library::Library;
 
     #[derive(Debug, Default)]
@@ -309,7 +303,7 @@ mod internals {
             Ok(outcome)
         }
 
-        pub(super) async fn execute_events<T: IntoIterator<Item = ExecutionEventPort>>(
+        pub(super) async fn execute_events<T: IntoIterator<Item = EventPort>>(
             &mut self,
             events: T,
         ) -> Result<ExecutionOutcome> {
@@ -327,14 +321,14 @@ mod internals {
             Ok(outcome)
         }
 
-        pub(super) async fn execute_nodes<T: IntoIterator<Item = ExecutionNodeId>>(
+        pub(super) async fn execute_nodes<T: IntoIterator<Item = NodeId>>(
             &mut self,
             nodes: T,
         ) -> Result<ExecutionOutcome> {
             let mut outcome = ExecutionOutcome::default();
             self.execute(
                 RunSeeds {
-                    e_node_ids: nodes.into_iter().collect(),
+                    node_ids: nodes.into_iter().collect(),
                     ..Default::default()
                 },
                 &mut DiscardedReports,
@@ -350,13 +344,13 @@ mod internals {
             &mut self,
             sinks: bool,
             event_sources: bool,
-            events: &[ExecutionEventPort],
+            events: &[EventPort],
         ) -> Result<()> {
             let seeds = RunSeeds {
                 sinks,
                 event_sources,
                 events: events.to_vec(),
-                e_node_ids: Vec::new(),
+                node_ids: Vec::new(),
             };
             let compiled = self
                 .compiled
@@ -370,44 +364,41 @@ mod internals {
         }
 
         /// The resolved state for a stable id — test introspection.
-        pub(super) fn node_state(&self, e_node_id: ExecutionNodeId) -> NodeState {
-            self.schedule.states[self.compiled().e_node_index[&e_node_id]]
+        pub(super) fn node_state(&self, node_id: NodeId) -> NodeState {
+            self.schedule.states[self.compiled().node_index[&node_id]]
         }
 
-        pub(super) fn node_inputs(&self, e_node_id: ExecutionNodeId) -> &[ExecutionInput] {
+        pub(super) fn node_inputs(&self, node_id: NodeId) -> &[ExecutionInput] {
             let program = &self.compiled();
-            &program.inputs[program.by_id(e_node_id).inputs]
+            &program.inputs[program.by_id(node_id).inputs]
         }
 
-        pub(super) fn node_output_demand(&self, e_node_id: ExecutionNodeId) -> &[OutputDemand] {
-            &self.schedule.outputs.demand[self.compiled().by_id(e_node_id).outputs]
+        pub(super) fn node_output_demand(&self, node_id: NodeId) -> &[OutputDemand] {
+            &self.schedule.outputs.demand[self.compiled().by_id(node_id).outputs]
         }
 
-        pub(super) fn node_output_readers(&self, e_node_id: ExecutionNodeId) -> &[u32] {
-            &self.schedule.outputs.readers[self.compiled().by_id(e_node_id).outputs]
+        pub(super) fn node_output_readers(&self, node_id: NodeId) -> &[u32] {
+            &self.schedule.outputs.readers[self.compiled().by_id(node_id).outputs]
         }
 
-        /// Whether `e_node_id` recomputed (rather than reused a cache) in the last run.
-        pub(super) fn node_ran(&self, e_node_id: ExecutionNodeId) -> bool {
-            self.executor.ran(self.compiled(), e_node_id)
+        /// Whether `node_id` recomputed (rather than reused a cache) in the last run.
+        pub(super) fn node_ran(&self, node_id: NodeId) -> bool {
+            self.executor.ran(self.compiled(), node_id)
         }
 
         /// Resident-only argument values, test inspection only: reads whatever is
         /// in RAM, so a disk-only (not-yet-hydrated) node reads back empty.
         pub(super) fn get_argument_values(&self, node_id: &NodeId) -> Option<ArgumentValues> {
-            self.get_argument_values_at(ExecutionNodeId::from_node(*node_id))
+            self.get_argument_values_at(*node_id)
         }
 
-        pub(super) fn get_argument_values_at(
-            &self,
-            e_node_id: ExecutionNodeId,
-        ) -> Option<ArgumentValues> {
-            self.compiled().e_node_index.get(&e_node_id)?;
-            Some(self.argument_values_at(e_node_id))
+        pub(super) fn get_argument_values_at(&self, node_id: NodeId) -> Option<ArgumentValues> {
+            self.compiled().node_index.get(&node_id)?;
+            Some(self.argument_values_at(node_id))
         }
 
-        fn argument_values_at(&self, e_node_id: ExecutionNodeId) -> ArgumentValues {
-            let e_node = &self.compiled().by_id(e_node_id);
+        fn argument_values_at(&self, node_id: NodeId) -> ArgumentValues {
+            let e_node = &self.compiled().by_id(node_id);
 
             let inputs = self.compiled().inputs[e_node.inputs]
                 .iter()
@@ -421,7 +412,7 @@ mod internals {
                 })
                 .collect();
 
-            let outputs = self.cache[self.compiled().e_node_index[&e_node_id]]
+            let outputs = self.cache[self.compiled().node_index[&node_id]]
                 .output_values()
                 .map(|outputs| outputs.to_vec())
                 .unwrap_or_default();
@@ -430,18 +421,14 @@ mod internals {
         }
 
         /// The runtime slot for a stable id — test introspection.
-        pub(super) fn slot(&self, e_node_id: ExecutionNodeId) -> &RuntimeSlot {
-            &self.cache[self.compiled().e_node_index[&e_node_id]]
+        pub(super) fn slot(&self, node_id: NodeId) -> &RuntimeSlot {
+            &self.cache[self.compiled().node_index[&node_id]]
         }
 
         /// Seed a node's cached output (simulating a prior run): set the value and
         /// stamp `produced_under` from the current digest, so the planner sees a hit.
-        pub(super) fn set_output_values(
-            &mut self,
-            e_node_id: ExecutionNodeId,
-            values: Vec<DynamicValue>,
-        ) {
-            let node_idx = self.compiled().e_node_index[&e_node_id];
+        pub(super) fn set_output_values(&mut self, node_id: NodeId, values: Vec<DynamicValue>) {
+            let node_idx = self.compiled().node_index[&node_id];
             let slot = &mut self.cache[node_idx];
             let produced_under = slot.current_digest;
             slot.load_output(OutputSnapshot::new(values), produced_under);
