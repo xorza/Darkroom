@@ -1,7 +1,7 @@
 //! Reusable inline-rename label. Renders plain text that swaps to a
 //! fixed-width `TextEdit` on double-click; Enter / focus-loss commits the
 //! edited string, Esc cancels. Used by the node-header title
-//! ([`crate::gui::node::header`]) and the graph boundary-port names
+//! (the graph pane's node header) and the graph boundary-port names
 //! (`gui::node::port_rename`); each maps the returned
 //! [`RenameEvent`] onto its own intent. Mirrors the per-widget split of
 //! `gui::node::value_editor`; both share the blur-edge /

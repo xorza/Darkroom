@@ -1,24 +1,14 @@
-pub(crate) mod canvas;
+pub(crate) mod app;
 pub(crate) mod dialogs;
 pub(crate) mod dock;
 pub(crate) mod graph_ctx;
-pub(crate) mod graph_toolbar;
-pub(crate) mod image_viewer;
-pub(crate) mod main_window;
-pub(crate) mod menu_bar;
-pub(crate) mod node;
-pub(crate) mod preferences_view;
-pub(crate) mod preview_store;
-pub(crate) mod widgets;
-use scenarium::NodeId;
-
-pub(crate) mod app;
-pub(crate) mod color;
-pub(crate) mod format;
-pub(crate) mod process_memory;
-pub(crate) mod run_state;
-pub(crate) mod status_bar;
+pub(crate) mod pane;
+pub(crate) mod state;
 pub(crate) mod theme;
+pub(crate) mod widgets;
+pub(crate) mod window;
+
+use scenarium::NodeId;
 
 use crate::core::document::dock::{DockOp, TabGroupId};
 use crate::gui::app::App;

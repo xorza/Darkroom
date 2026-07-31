@@ -41,7 +41,7 @@ use crate::core::edit::intent::sink::Intents;
 use crate::gui::UiAction;
 use crate::gui::dock::drag::{DropTarget, PaneGeometry, TabDrag, classify_drop};
 use crate::gui::dock::strip::TabLabel;
-use crate::gui::image_viewer;
+use crate::gui::pane::viewer;
 use crate::gui::theme::Theme;
 use crate::gui::widgets::support::sized_text;
 
@@ -72,7 +72,7 @@ fn drag_ghost_wid() -> WidgetId {
 /// What the render walk needs from outside the layout: the document, plus
 /// this frame's viewer-tab labels resolved once by the caller.
 ///
-/// [`image_viewer::node_label`] runs a recursive whole-document node search
+/// [`viewer::node_label`] runs a recursive whole-document node search
 /// and allocates a `String`, and a visible viewer tab is labelled twice a
 /// frame — once for its strip chip, once for its pane header — so resolving
 /// it at each call site repeated that walk. Carried alongside `doc` rather
@@ -380,7 +380,7 @@ fn tab_labels(ui: &mut Ui, cx: DockContext<'_>, group: &TabGroup) -> Vec<TabLabe
 }
 
 /// Per-frame label for a strip chip. Viewer tabs read the caller's
-/// resolved map instead of re-running [`image_viewer::node_label`]'s
+/// resolved map instead of re-running [`viewer::node_label`]'s
 /// recursive node search; every other kind is cheap and formats inline.
 fn viewer_aware_text<'a>(cx: DockContext<'a>, tab: TabRef) -> Cow<'a, str> {
     match tab {
@@ -401,6 +401,6 @@ fn tab_text(doc: &Document, tab: TabRef) -> Cow<'_, str> {
     match tab {
         TabRef::Graph => Cow::Borrowed("main"),
         TabRef::Preferences => Cow::Borrowed("preferences"),
-        TabRef::ImageViewer(node_id) => image_viewer::node_label(doc, node_id).into(),
+        TabRef::ImageViewer(node_id) => viewer::node_label(doc, node_id).into(),
     }
 }

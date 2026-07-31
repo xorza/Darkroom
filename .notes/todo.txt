@@ -55,8 +55,4 @@ graphscope :from_doc -> option !
 
 darkroom test harness
 
-move ctx to own files
-
 state: GestureSlot<BreakerState>, = allocates
-
-graphscope - graphctx

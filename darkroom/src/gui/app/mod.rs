@@ -12,8 +12,8 @@ use crate::gui::HostHandle;
 use crate::gui::MAIN_WINDOW;
 use crate::gui::app::ctx::{AppCtx, StatusInputs};
 use crate::gui::app::discard_dialog::{DiscardChoice, DiscardOutcome};
-use crate::gui::process_memory::ProcessMemory;
-use crate::gui::run_state::RunState;
+use crate::gui::state::process_memory::ProcessMemory;
+use crate::gui::state::run_state::RunState;
 use crate::gui::theme::Theme;
 
 pub(crate) mod commands;

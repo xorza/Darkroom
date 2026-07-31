@@ -25,8 +25,8 @@ use crate::gui::app::commands::AppCommand;
 use crate::gui::app::commands::file::FileCommand;
 use crate::gui::app::commands::run::RunCommand;
 use crate::gui::app::commands::shell::ShellCommand;
-use crate::gui::canvas::node_menu::NodeMenuAction;
-use crate::gui::main_window::MainWindow;
+use crate::gui::pane::graph::gesture::node_menu::NodeMenuAction;
+use crate::gui::window::MainWindow;
 
 use crate::gui::app::ctx::AppCtx;
 
@@ -443,7 +443,7 @@ mod tests {
     use crate::core::edit::intent::types::GraphIntent;
     use crate::gui::UiAction;
     use crate::gui::app::editor::Editor;
-    use crate::gui::image_viewer::ImageViewer;
+    use crate::gui::pane::viewer::ImageViewer;
 
     #[derive(Debug)]
     struct TestEditor {
