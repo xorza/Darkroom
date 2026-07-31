@@ -43,5 +43,3 @@ remove Gestures
 pub(crate) enum Refusal { - remove
 
 fn drain_intents(&mut self, open: &mut OpenDocument) { - ugly
-
-refactor consumers
