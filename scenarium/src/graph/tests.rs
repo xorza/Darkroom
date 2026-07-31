@@ -844,22 +844,22 @@ fn validate_tolerates_library_range_drift() {
 /// the drift guards do `is_some_and(|p| idx >= p.len())`, so the two decide
 /// opposite ways.
 #[test]
-fn node_ports_resolve_to_a_declaration_or_to_unknown() {
+fn node_func_resolves_to_a_declaration_or_to_unknown() {
     let library = test_func_lib(TestFuncHooks::default());
     let mut graph = Graph::default();
 
     let sum = library.by_name("sum").unwrap();
     let sum_id = graph.add_func_node(sum);
     let sum_node = graph.find(sum_id).unwrap();
-    let ports = graph.node_ports(sum_node, &library).unwrap();
+    let ports = graph.node_func(sum_node, &library).unwrap();
     assert_eq!(ports.name, "sum");
     assert_eq!(ports.inputs.len(), sum.inputs.len());
-    assert_eq!(ports.func.id, sum.id);
+    assert_eq!(ports.id, sum.id);
 
     // Library drift is unknown, not empty — otherwise every port on a node
     // whose func went missing would read as out of range.
     let missing_func = Node::new(NodeKind::Func(FuncId::unique()));
-    assert!(graph.node_ports(&missing_func, &library).is_none());
+    assert!(graph.node_func(&missing_func, &library).is_none());
 
     // The three policy flags come off the declaration verbatim. Each is set
     // on one of the two funcs and clear on the other, so a flag wired to the
@@ -869,18 +869,16 @@ fn node_ports_resolve_to_a_declaration_or_to_unknown() {
             .pure()
             .output(FuncOutput::new("o", DataType::Int)),
     );
-    let plain = plain.ports();
-    assert!(!plain.sink());
-    assert!(!plain.uncacheable());
+    assert!(!plain.sink);
+    assert!(!plain.uncacheable);
     assert!(!plain.impure(), "declared `pure` is not impure");
 
     let flagged = Func::new(FuncId::unique(), "flagged")
         .sink()
         .uncacheable()
         .input(FuncInput::optional("v", DataType::Int));
-    let flagged = flagged.ports();
-    assert!(flagged.sink());
-    assert!(flagged.uncacheable());
+    assert!(flagged.sink);
+    assert!(flagged.uncacheable);
     assert!(
         flagged.impure(),
         "`Func::new` leaves a func Impure until `pure()` says otherwise"
@@ -913,11 +911,10 @@ fn node_events_expose_names_and_arity() {
             .event("tick", EventLambda::default())
             .event("tock", EventLambda::default()),
     );
-    let ports = emitter.ports();
-    assert_eq!(ports.events.len(), 2);
-    let names: Vec<&str> = ports.events.iter().map(|e| e.name.as_str()).collect();
+    assert_eq!(emitter.events.len(), 2);
+    let names: Vec<&str> = emitter.events.iter().map(|e| e.name.as_str()).collect();
     assert_eq!(names, ["tick", "tock"]);
 
     let silent = testing::with_stub_lambda(Func::new(FuncId::unique(), "silent"));
-    assert!(silent.ports().events.is_empty());
+    assert!(silent.events.is_empty());
 }

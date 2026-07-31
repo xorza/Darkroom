@@ -1,5 +1,6 @@
+use crate::graph::Binding;
 use crate::graph::identity::FuncId;
-use crate::graph::interface::NodePorts;
+use crate::graph::identity::{InputPort, NodeId};
 pub(crate) mod error;
 pub(crate) mod event;
 pub(crate) mod lambda;
@@ -337,18 +338,26 @@ impl Func {
         self
     }
 
-    /// What this func declares, as instance ports — what a node
-    /// instantiating it declares. The leaf counterpart of
-    /// caller asks either declaration the same question.
-    pub fn ports(&self) -> NodePorts<'_> {
-        NodePorts {
-            name: &self.name,
-            description: self.description.as_deref(),
-            inputs: &self.inputs,
-            outputs: &self.outputs,
-            events: &self.events,
-            func: self,
-        }
+    /// Whether this func recomputes every run — it has no content digest, so
+    /// no cache mode is honored on a node instantiating it.
+    ///
+    /// A method rather than a field like [`sink`](Self::sink) and
+    /// [`uncacheable`](Self::uncacheable) because it reads off
+    /// [`behavior`](Self::behavior), which names more than this one question.
+    pub fn impure(&self) -> bool {
+        self.behavior == FuncBehavior::Impure
+    }
+
+    /// The const bindings a fresh instance starts with: one per input that
+    /// declares a default, at that input's port index.
+    pub fn default_bindings(&self, node_id: NodeId) -> impl Iterator<Item = (InputPort, Binding)> {
+        self.inputs
+            .iter()
+            .enumerate()
+            .filter_map(move |(port_idx, input)| {
+                let default = input.default_value.clone()?;
+                Some((InputPort::new(node_id, port_idx), Binding::Const(default)))
+            })
     }
 
     /// Validates this function declaration independently of a graph.

@@ -1,7 +1,7 @@
 //! One node of the graph, with its declaration resolved.
 
 use glam::Vec2;
-use scenarium::{CacheMode, FuncEvent, Node, NodeId, NodeKind, NodePorts, RamUsage};
+use scenarium::{CacheMode, Func, FuncEvent, Node, NodeId, NodeKind, RamUsage};
 
 use crate::core::document::{PortKind, PortRef};
 use crate::core::preview;
@@ -35,7 +35,7 @@ pub(crate) struct NodeScope<'a> {
     /// longer holds: it reads as a portless [`missing`](Self::missing) stub
     /// rather than vanishing, so the user can still select and delete it
     /// instead of the document silently losing a node.
-    ports: Option<NodePorts<'a>>,
+    func: Option<&'a Func>,
     /// The input ports the last run could not feed, by index — one lookup
     /// per node rather than one per port.
     missing_inputs: &'a [usize],
@@ -46,9 +46,9 @@ impl<'a> NodeScope<'a> {
     /// hold it — a placement left behind by a delete.
     pub(super) fn resolve(graph_scope: GraphScope<'a>, node_id: NodeId, pos: Vec2) -> Option<Self> {
         let node = graph_scope.body().find(node_id)?;
-        let ports = graph_scope.body().node_ports(node, graph_scope.library());
+        let func = graph_scope.body().node_func(node, graph_scope.library());
         debug_assert!(
-            ports.is_some() || matches!(node.kind, NodeKind::Func(_)),
+            func.is_some() || matches!(node.kind, NodeKind::Func(_)),
             "a special node's interface always resolves"
         );
         Some(Self {
@@ -56,7 +56,7 @@ impl<'a> NodeScope<'a> {
             id: node_id,
             pos,
             node,
-            ports,
+            func,
             missing_inputs: graph_scope.run_state().missing_inputs(node_id),
         })
     }
@@ -69,13 +69,15 @@ impl<'a> NodeScope<'a> {
     /// Human-readable type identity: the func's name, or "missing func" for a
     /// stub. Shown by the inspection panel.
     pub(crate) fn kind_label(self) -> &'a str {
-        self.ports.map_or(MISSING_FUNC_LABEL, |p| p.name)
+        self.func.map_or(MISSING_FUNC_LABEL, |f| f.name.as_str())
     }
 
     /// The func's description, empty for a stub or a func that declares none.
     /// Shown by the inspection panel and the new-node palette tooltip.
     pub(crate) fn description(self) -> &'a str {
-        self.ports.and_then(|p| p.description).unwrap_or_default()
+        self.func
+            .and_then(|f| f.description.as_deref())
+            .unwrap_or_default()
     }
 
     /// The node's func is absent from the library (e.g. a document saved
@@ -83,7 +85,7 @@ impl<'a> NodeScope<'a> {
     /// Rendered as a portless error stub the user can still select and
     /// delete — never silently dropped.
     pub(crate) fn missing(self) -> bool {
-        self.ports.is_none()
+        self.func.is_none()
     }
 
     /// Excluded from execution (`Node::disabled`). Sink headers expose the
@@ -107,14 +109,14 @@ impl<'a> NodeScope<'a> {
     /// lets the affordances it gates — the disable toggle, the subscription
     /// pin — render before the first compile.
     pub(crate) fn sink(self) -> bool {
-        self.ports.is_some_and(|p| p.sink())
+        self.func.is_some_and(|f| f.sink)
     }
 
     /// The node holds work that recomputes every run. An impure node has no
     /// content digest, so no cache mode is ever honored; the header paints
     /// the `~` marker off this. Declared, like [`Self::sink`].
     pub(crate) fn impure(self) -> bool {
-        self.ports.is_some_and(|p| p.impure())
+        self.func.is_some_and(|f| f.impure())
     }
 
     /// A preview node: its body shows the value wired into it instead of the
@@ -122,7 +124,7 @@ impl<'a> NodeScope<'a> {
     /// document whose library lost the func degrades to an ordinary missing
     /// stub rather than an empty card.
     pub(crate) fn preview(self) -> bool {
-        self.ports.is_some()
+        self.func.is_some()
             && matches!(self.node.kind, NodeKind::Func(func_id) if preview::is_preview(func_id))
     }
 
@@ -131,15 +133,15 @@ impl<'a> NodeScope<'a> {
     /// itself uncacheable or exposes no outputs has nothing to store — a
     /// `missing` stub for both reasons at once.
     pub(crate) fn cache_controls(self) -> bool {
-        self.ports
-            .is_some_and(|p| !p.uncacheable() && !p.outputs.is_empty() && !p.impure())
+        self.func
+            .is_some_and(|f| !f.uncacheable && !f.outputs.is_empty() && !f.impure())
     }
 
     /// Whether the header offers runtime cache eviction — it needs a
     /// reproducible output, which an impure or portless node has not.
     pub(crate) fn can_evict_cache(self) -> bool {
-        self.ports
-            .is_some_and(|p| !p.outputs.is_empty() && !p.impure())
+        self.func
+            .is_some_and(|f| !f.outputs.is_empty() && !f.impure())
     }
 
     /// Whether Darkroom exposes the disable toggle. Limiting it to runnable
@@ -178,7 +180,7 @@ impl<'a> NodeScope<'a> {
     /// This node's input ports, in declaration order. Empty for a stub, which
     /// declares nothing.
     pub(crate) fn inputs(self) -> impl ExactSizeIterator<Item = InputScope<'a>> {
-        let declared = self.ports.map_or(&[][..], |p| p.inputs);
+        let declared = self.func.map_or(&[][..], |f| f.inputs.as_slice());
         declared
             .iter()
             .enumerate()
@@ -187,13 +189,13 @@ impl<'a> NodeScope<'a> {
 
     /// One input port by index.
     pub(crate) fn input(self, port_idx: usize) -> Option<InputScope<'a>> {
-        let declared = self.ports?.inputs.get(port_idx)?;
+        let declared = self.func?.inputs.get(port_idx)?;
         Some(InputScope::new(self, port_idx, declared))
     }
 
     /// This node's output ports, in declaration order.
     pub(crate) fn outputs(self) -> impl ExactSizeIterator<Item = OutputScope<'a>> {
-        let declared = self.ports.map_or(&[][..], |p| p.outputs);
+        let declared = self.func.map_or(&[][..], |f| f.outputs.as_slice());
         declared
             .iter()
             .enumerate()
@@ -202,7 +204,7 @@ impl<'a> NodeScope<'a> {
 
     /// One output port by index.
     pub(crate) fn output(self, port_idx: usize) -> Option<OutputScope<'a>> {
-        let declared = self.ports?.outputs.get(port_idx)?;
+        let declared = self.func?.outputs.get(port_idx)?;
         Some(OutputScope::new(self, port_idx, declared))
     }
 
@@ -210,14 +212,14 @@ impl<'a> NodeScope<'a> {
     /// are pure triggers — so the declaration is all the UI needs, and the
     /// output column lists them under the data outputs.
     pub(crate) fn events(self) -> &'a [FuncEvent] {
-        self.ports.map_or(&[][..], |p| p.events)
+        self.func.map_or(&[][..], |f| f.events.as_slice())
     }
 
     /// How many ports this node declares on `kind`'s side.
     pub(crate) fn port_count(self, kind: PortKind) -> usize {
         match kind {
-            PortKind::Input => self.ports.map_or(0, |p| p.inputs.len()),
-            PortKind::Output => self.ports.map_or(0, |p| p.outputs.len()),
+            PortKind::Input => self.func.map_or(0, |f| f.inputs.len()),
+            PortKind::Output => self.func.map_or(0, |f| f.outputs.len()),
         }
     }
 

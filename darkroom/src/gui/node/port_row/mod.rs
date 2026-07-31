@@ -481,7 +481,7 @@ pub(crate) fn add_preview_intents(
             pos,
             node_id,
             node: func.into(),
-            bindings: func.ports().default_bindings(node_id).collect(),
+            bindings: func.default_bindings(node_id).collect(),
         },
         GraphIntent::SetInput {
             input: InputPort::new(node_id, 0),
