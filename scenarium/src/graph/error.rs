@@ -18,8 +18,6 @@ use crate::graph::identity::{InputPort, OutputPort};
 pub enum GraphValidationError {
     #[error("graph contains a node with a nil id")]
     NilNodeId,
-    #[error("node id {node_id:?} occurs more than once")]
-    DuplicateNodeId { node_id: NodeId },
     #[error("node {node_id:?} has a nil func_id")]
     NilFuncId { node_id: NodeId },
     #[error("node {node_id:?} references func {func_id:?}, absent from the library")]
