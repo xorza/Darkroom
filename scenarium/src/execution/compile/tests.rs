@@ -258,7 +258,11 @@ fn the_artifact_answers_for_each_authored_node() {
 
     let absent = NodeId::unique();
     assert_eq!(compiled.run_target(absent), None);
-    assert_eq!(compiled.attribution(ExecutionNodeId::from_node(absent)), None);
+    assert!(
+        compiled
+            .attribution(ExecutionNodeId::from_node(absent))
+            .is_err()
+    );
 }
 
 /// Evicting a node reaches everything downstream of it, reflexively — and stops
