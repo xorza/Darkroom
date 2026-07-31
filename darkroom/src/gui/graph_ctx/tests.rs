@@ -2,15 +2,11 @@ use scenarium::testing;
 use scenarium::testing::graph::TestGraph;
 use scenarium::{
     Binding, CacheMode, DataType, FuncOutput, Graph, InputPort, Library, Node, NodeKind,
-    OutputTypes,
 };
 
+use crate::core::document::PortKind;
 use crate::core::document::harness::{DocFixture, wildcard_library};
-use crate::core::document::{Document, GraphView, PortKind};
 use crate::gui::graph_ctx::harness::GraphCtxFixture;
-use crate::gui::pane::graph::harness::*;
-use crate::gui::state::run_state::RunState;
-use crate::gui::theme::Theme;
 
 #[test]
 fn only_runnable_sinks_expose_the_disable_toggle() {
@@ -318,18 +314,21 @@ fn a_wire_edit_reaches_the_next_read_with_nothing_announced() {
     let probe = library.by_name("probe").expect("just added").clone();
     let passthrough = library.by_name("passthrough").expect("just added").clone();
 
-    let mut doc = Document::default();
     // `probe` declares a fixed `Int` output; the passthrough mirrors whatever
     // reaches its input, so unwired it resolves to `Any`.
-    let producer = doc.graph.add_func_node(&probe);
-    let consumer = doc.graph.add_func_node(&passthrough);
-    doc.main_view = GraphView::for_graph(&doc.graph);
+    let mut doc_fixture = DocFixture {
+        library,
+        ..DocFixture::default()
+    };
+    let producer = doc_fixture.add(&probe);
+    let consumer = doc_fixture.add(&passthrough);
+    let mut fixture = GraphCtxFixture::over(doc_fixture);
 
-    let theme = Theme::default();
-    let run_state = RunState::default();
-    let resolved_output = |doc: &Document| {
-        let mut types = OutputTypes::default();
-        graph_ctx_for(app(&theme, &library, &run_state), doc, &mut types)
+    // A fresh context per read, resolving its own output-type table — the
+    // same thing each record pass composes.
+    let resolved_output = |fixture: &mut GraphCtxFixture| {
+        fixture
+            .graph_ctx()
             .node(consumer)
             .expect("the passthrough resolves")
             .output(0)
@@ -338,15 +337,18 @@ fn a_wire_edit_reaches_the_next_read_with_nothing_announced() {
     };
 
     assert_eq!(
-        resolved_output(&doc),
+        resolved_output(&mut fixture),
         DataType::Any,
         "an unwired passthrough has nothing to mirror"
     );
 
-    doc.graph
+    fixture
+        .fixture
+        .doc
+        .graph
         .set_input_binding(InputPort::new(consumer, 0), Binding::bind(producer, 0));
     assert_eq!(
-        resolved_output(&doc),
+        resolved_output(&mut fixture),
         DataType::Int,
         "the next read follows the new wire — nothing was invalidated in between"
     );

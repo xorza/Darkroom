@@ -1,14 +1,8 @@
 use glam::{UVec2, Vec2};
-use palantir::internals::UiHarness;
-use palantir::{Configure, Panel, Sizing, Ui};
-use scenarium::{Func, FuncId, Library, OutputTypes, testing};
+use scenarium::{Func, FuncId, Graph, Library, testing};
 
-use crate::core::document::Document;
-use crate::core::edit::intent::sink::Intents;
-use crate::gui::pane::graph::GraphUI;
-use crate::gui::pane::graph::harness::*;
-use crate::gui::state::run_state::RunState;
-use crate::gui::theme::Theme;
+use crate::core::document::harness::DocFixture;
+use crate::gui::pane::graph::harness::CanvasHarness;
 
 /// The new-node palette keeps its search field and its results inside the
 /// height cap, at whatever height the field actually measures.
@@ -26,53 +20,47 @@ fn the_palette_sizes_its_results_area_from_the_search_row_it_actually_has() {
 
     use crate::gui::pane::graph::gesture::new_node::{results_wid, search_field_wid};
 
+    /// The surface the palette opens against — 900 px tall, which is what the
+    /// cap below is resolved from.
+    const SURFACE: UVec2 = UVec2::new(1200, 900);
+
     /// Records one palette open, with `restyle` applied to the live
     /// `Ui::theme` first, and returns the two rects the height cap divides
     /// between plus the cap itself.
-    fn open_palette(theme: &Theme, restyle: impl Fn(&mut palantir::Theme)) -> (Rect, Rect, f32) {
+    fn open_palette(restyle: impl Fn(&mut palantir::Theme)) -> (Rect, Rect, f32) {
         // Enough rows in one category to overflow any sane cap, so the scroll
-        // is genuinely competing for the popup's height.
+        // is genuinely competing for the popup's height. No nodes placed: the
+        // palette is what spawns them.
         let mut library = Library::default();
         for i in 0..60 {
             library.add(testing::with_stub_lambda(
                 Func::new(FuncId::unique(), format!("func{i:02}")).category("Bulk"),
             ));
         }
-        let doc = Document::default();
-        let run_state = RunState::default();
-        let mut harness = UiHarness::with_text(UVec2::new(1200, 900));
-        restyle(&mut harness.ui().theme);
-        let mut graph_ui = GraphUI::default();
+        // Real shaping: the search field sizes to its text, which is the
+        // measurement the cap has to divide around.
+        let mut h = CanvasHarness::shaping_text(
+            DocFixture::with_library(Graph::default(), library),
+            SURFACE,
+        );
+        restyle(&mut h.ui.ui().theme);
 
-        let draw = |ui: &mut Ui, graph_ui: &mut GraphUI| {
-            let ctx = app(theme, &library, &run_state);
-            let mut intents = Intents::default();
-            let mut types = OutputTypes::default();
-            let graph_ctx = graph_ctx_for(ctx, &doc, &mut types);
-            graph_ui.prepass(ui, graph_ctx, &mut intents);
-            Panel::vstack()
-                .id_salt("pane")
-                .size((Sizing::FILL, Sizing::FILL))
-                .show(ui, |ui| {
-                    graph_ui.draw(ui, graph_ctx, &mut intents);
-                });
-        };
-
-        harness.frame(|ui| draw(ui, &mut graph_ui));
+        h.frame();
         // Right-click on empty canvas opens the palette; give it two frames so
         // the search field has measured and the cap reads its real height.
-        harness.right_click_at(Vec2::new(500.0, 400.0));
-        harness.frame(|ui| draw(ui, &mut graph_ui));
-        harness.frame(|ui| draw(ui, &mut graph_ui));
+        h.ui.right_click_at(Vec2::new(500.0, 400.0));
+        h.prime(2);
 
         // The same cap `NewNodeUi::apply` resolves, against this harness's
         // 900 px surface.
-        let cap = theme
+        let cap = h
+            .ctx
+            .theme
             .new_node_popup_max_height
-            .clamp(120.0, (900.0f32 - 16.0).max(120.0));
+            .clamp(120.0, (SURFACE.y as f32 - 16.0).max(120.0));
         (
-            harness.rect(search_field_wid()).expect("field recorded"),
-            harness.rect(results_wid()).expect("results recorded"),
+            h.ui.rect(search_field_wid()).expect("field recorded"),
+            h.ui.rect(results_wid()).expect("results recorded"),
             cap,
         )
     }
@@ -108,9 +96,8 @@ fn the_palette_sizes_its_results_area_from_the_search_row_it_actually_has() {
         );
     }
 
-    let theme = Theme::default();
     let plain = palantir::Theme::default();
-    let small = open_palette(&theme, |_| {});
+    let small = open_palette(|_| {});
     assert_fits(small, &plain.context_menu, "default theme");
 
     // Now restyle both terms the retired 48 px constant could never have
@@ -120,7 +107,7 @@ fn the_palette_sizes_its_results_area_from_the_search_row_it_actually_has() {
     restyled.text.font_size_px *= 3.0;
     restyled.context_menu.padding = Spacing::all(24.0);
     restyled.context_menu.gap = 12.0;
-    let big = open_palette(&theme, |t| {
+    let big = open_palette(|t| {
         t.text.font_size_px *= 3.0;
         t.context_menu.padding = Spacing::all(24.0);
         t.context_menu.gap = 12.0;

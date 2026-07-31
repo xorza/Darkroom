@@ -93,6 +93,22 @@ impl DocFixture {
         Self::over(TestGraph::sample())
     }
 
+    /// `n` nodes projected from [`one_func_library`]'s `probe`, laid out along
+    /// the row. One declaration for all of them, so a port index means the same
+    /// thing on every node.
+    pub(crate) fn probes(n: usize) -> Self {
+        let library = one_func_library();
+        let probe = library.by_name("probe").expect("just added").clone();
+        let mut fixture = Self {
+            doc: Document::default(),
+            library,
+        };
+        for _ in 0..n {
+            fixture.add(&probe);
+        }
+        fixture
+    }
+
     /// Nodes at caller-chosen ids and exact positions, each from a func no
     /// library holds — so they resolve as portless stubs. Enough for the tests
     /// that read only a node's identity and where it sits, and that need to
@@ -135,6 +151,26 @@ impl DocFixture {
             .add(Node::new(NodeKind::Func(FuncId::unique())));
         self.doc.main_view.item_placements.insert(node_id, pos);
         node_id
+    }
+
+    /// The `i`th node in placement order — the order the constructors add in,
+    /// and the canvas's paint stack.
+    pub(crate) fn node(&self, i: usize) -> NodeId {
+        *self
+            .doc
+            .main_view
+            .item_placements
+            .get_index(i)
+            .expect("the fixture placed that many nodes")
+            .0
+    }
+
+    /// Move `id` to exactly `at`, overriding the row — for the tests that care
+    /// *which* node a gesture reaches rather than merely that all of them are
+    /// on screen.
+    pub(crate) fn placed(mut self, id: NodeId, at: Vec2) -> Self {
+        self.doc.main_view.item_placements.insert(id, at);
+        self
     }
 
     /// Open `tab` in the primary group and make it that group's active one —

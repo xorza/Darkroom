@@ -1,17 +1,10 @@
-use glam::{UVec2, Vec2};
-use palantir::internals::UiHarness;
-use palantir::{Configure, Panel, Sizing, Ui};
-use scenarium::{InputPort, OutputTypes};
+use glam::Vec2;
+use scenarium::InputPort;
 
-use crate::core::document::Document;
-use crate::core::document::harness::{one_func_library, spread};
-use crate::core::edit::intent::sink::Intents;
+use crate::core::document::harness::DocFixture;
 use crate::core::edit::intent::types::GraphIntent;
-use crate::gui::pane::graph::GraphUI;
-use crate::gui::pane::graph::harness::*;
+use crate::gui::pane::graph::harness::CanvasHarness;
 use crate::gui::pane::graph::node::node_widget_id;
-use crate::gui::state::run_state::RunState;
-use crate::gui::theme::Theme;
 
 /// The breaker cuts a node where the *document* says it is, not where it last
 /// painted.
@@ -27,52 +20,18 @@ use crate::gui::theme::Theme;
 fn the_breaker_cuts_a_node_at_its_current_position_not_its_last_painted_one() {
     use palantir::PointerButton;
 
-    use crate::core::document::GraphView;
-
     // Where the scribble runs: a short vertical stroke over empty canvas, well
     // clear of where the node starts.
     const SCRIBBLE_FROM: Vec2 = Vec2::new(600.0, 600.0);
     const SCRIBBLE_TO: Vec2 = Vec2::new(600.0, 420.0);
 
-    let library = one_func_library();
-    let probe = library.by_name("probe").expect("just added").clone();
+    let mut h = CanvasHarness::new(DocFixture::probes(1));
+    let node = h.node(0);
+    h.prime(2);
 
-    let mut doc = Document::default();
-    let node = doc.graph.add_func_node(&probe);
-    doc.main_view = GraphView::for_graph(&doc.graph);
-    spread(&mut doc.main_view);
-
-    let theme = Theme::default();
-    let run_state = RunState::default();
-    let mut harness = UiHarness::new(UVec2::new(1200, 800));
-    let mut graph_ui = GraphUI::default();
-
-    // `doc` is a parameter, not a capture, so it can be edited between frames
-    // the way an undo would edit the document under a running gesture.
-    let draw = |ui: &mut Ui, graph_ui: &mut GraphUI, doc: &Document| {
-        let ctx = app(&theme, &library, &run_state);
-        let mut intents = Intents::default();
-        let mut types = OutputTypes::default();
-        let graph_ctx = graph_ctx_for(ctx, doc, &mut types);
-        graph_ui.prepass(ui, graph_ctx, &mut intents);
-        Panel::vstack()
-            .id_salt("pane")
-            .size((Sizing::FILL, Sizing::FILL))
-            .show(ui, |ui| {
-                graph_ui.draw(ui, graph_ctx, &mut intents);
-            });
-        intents.drain().collect::<Vec<_>>()
-    };
-
-    harness.frame(|ui| {
-        draw(ui, &mut graph_ui, &doc);
-    });
-    harness.frame(|ui| {
-        draw(ui, &mut graph_ui, &doc);
-    });
-    let body = harness
-        .rect(node_widget_id(node))
-        .expect("the node recorded a body");
+    let body =
+        h.ui.rect(node_widget_id(node))
+            .expect("the node recorded a body");
     assert!(
         !body.contains(SCRIBBLE_TO),
         "the scribble must start out clear of the node, else the move proves nothing"
@@ -80,9 +39,9 @@ fn the_breaker_cuts_a_node_at_its_current_position_not_its_last_painted_one() {
 
     // Right-drag over empty canvas: the gesture latches and paints a polyline
     // nowhere near the node, so nothing is marked.
-    harness.press_button_at(PointerButton::Right, SCRIBBLE_FROM);
-    harness.drag_to(SCRIBBLE_TO);
-    let scribbling = harness.frame_value(|ui| draw(ui, &mut graph_ui, &doc));
+    h.ui.press_button_at(PointerButton::Right, SCRIBBLE_FROM);
+    h.ui.drag_to(SCRIBBLE_TO);
+    let scribbling = h.frame();
     assert!(
         scribbling.is_empty(),
         "a scribble in flight severs nothing until release: {scribbling:?}"
@@ -91,18 +50,16 @@ fn the_breaker_cuts_a_node_at_its_current_position_not_its_last_painted_one() {
     // Now move the node onto the scribble, centred on its far end. This frame
     // the document says the node is here while its arranged rect still says it
     // is back there — the divergence the probe has to resolve the new way.
-    doc.main_view.item_placements[&node] = SCRIBBLE_TO - Vec2::new(body.size.w, body.size.h) * 0.5;
-    harness.frame(|ui| {
-        draw(ui, &mut graph_ui, &doc);
-    });
+    h.doc_mut().main_view.item_placements[&node] =
+        SCRIBBLE_TO - Vec2::new(body.size.w, body.size.h) * 0.5;
+    h.frame();
 
-    harness.release_button(PointerButton::Right);
-    let released = harness.frame_value(|ui| draw(ui, &mut graph_ui, &doc));
-    // The helper carries the pane assertion: a cut commits against the pane
+    h.ui.release_button(PointerButton::Right);
+    // The harness carries the pane assertion: a cut commits against the pane
     // the scribble ran on.
-    let released = graph_intents(&released);
+    let released = h.frame();
     assert!(
-        matches!(released[..], [GraphIntent::RemoveNode { node_id }] if *node_id == node),
+        matches!(released[..], [GraphIntent::RemoveNode { node_id }] if node_id == node),
         "the release cuts the node the scribble now crosses: {released:?}"
     );
 }

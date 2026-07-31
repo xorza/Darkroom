@@ -1,17 +1,9 @@
-use glam::{UVec2, Vec2};
-use palantir::internals::UiHarness;
-use palantir::{Configure, Panel, Sizing, Ui};
-use scenarium::OutputTypes;
+use glam::Vec2;
 
-use crate::core::document::harness::{one_func_library, spread};
-use crate::core::document::{Document, GraphView};
-use crate::core::edit::intent::sink::Intents;
+use crate::core::document::harness::DocFixture;
 use crate::core::edit::intent::types::GraphIntent;
-use crate::gui::pane::graph::GraphUI;
-use crate::gui::pane::graph::harness::*;
+use crate::gui::pane::graph::harness::CanvasHarness;
 use crate::gui::pane::graph::node::node_widget_id;
-use crate::gui::state::run_state::RunState;
-use crate::gui::theme::Theme;
 
 /// A drag on a node body moves that node, by the pointer's travel.
 ///
@@ -23,59 +15,22 @@ use crate::gui::theme::Theme;
 /// leave every node unmovable with the whole rest of the canvas green.
 #[test]
 fn a_body_drag_moves_the_node_by_the_pointers_travel() {
-    let library = one_func_library();
-    let probe = library.by_name("probe").expect("just added").clone();
-
-    let mut doc = Document::default();
-    let dragged = doc.graph.add_func_node(&probe);
-    let bystander = doc.graph.add_func_node(&probe);
-    doc.main_view = GraphView::for_graph(&doc.graph);
-    spread(&mut doc.main_view);
-    let start = doc.main_view.item_placements[&dragged];
-
-    let theme = Theme::default();
-    let run_state = RunState::default();
-    let mut harness = UiHarness::new(UVec2::new(1200, 800));
-    let mut graph_ui = GraphUI::default();
-
-    let draw = |ui: &mut Ui, graph_ui: &mut GraphUI| {
-        let ctx = app(&theme, &library, &run_state);
-        let mut intents = Intents::default();
-        let mut types = OutputTypes::default();
-        let graph_ctx = graph_ctx_for(ctx, &doc, &mut types);
-        graph_ui.scan_hits(ui, Some(graph_ctx));
-        graph_ui.prepass(ui, graph_ctx, &mut intents);
-        Panel::vstack()
-            .id_salt("pane")
-            .size((Sizing::FILL, Sizing::FILL))
-            .show(ui, |ui| {
-                graph_ui.draw(ui, graph_ctx, &mut intents);
-            });
-        intents.drain().collect::<Vec<_>>()
-    };
-
-    for _ in 0..2 {
-        harness.frame(|ui| {
-            draw(ui, &mut graph_ui);
-        });
-    }
+    let mut h = CanvasHarness::new(DocFixture::probes(2));
+    let (dragged, bystander) = (h.node(0), h.node(1));
+    let start = h.doc().main_view.item_placements[&dragged];
+    h.prime(2);
 
     // Press the body, then travel past the drag threshold. The sweep sees
     // the latch on the frame after the travel; the record consumes it.
-    let grab = harness.center_of(node_widget_id(dragged));
-    harness.press_at(grab);
-    harness.frame(|ui| {
-        draw(ui, &mut graph_ui);
-    });
+    let grab = h.ui.center_of(node_widget_id(dragged));
+    h.ui.press_at(grab);
+    h.frame();
     let travel = Vec2::new(37.0, -21.0);
-    harness.drag_to(grab + travel);
-    harness.frame(|ui| {
-        draw(ui, &mut graph_ui);
-    });
+    h.ui.drag_to(grab + travel);
+    h.frame();
 
     // Next frame, `NodeUI::prepass` advances the anchor the record latched.
-    let emitted = harness.frame_value(|ui| draw(ui, &mut graph_ui));
-    let intents = graph_intents(&emitted);
+    let intents = h.frame();
     let moves = intents
         .iter()
         .find_map(|intent| match intent {
