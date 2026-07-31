@@ -10,9 +10,7 @@ use crate::execution::cache::slot::OutputSnapshot;
 use crate::execution::compile::compiled_graph::{ExecutionBinding, ExecutionInput, ExecutionNode};
 use crate::execution::identity::{NodeIdx, OutputAddr, OutputIdx};
 use crate::execution::report::internals::DiscardedReports;
-use crate::execution::schedule::{
-    NodeState, Resolved, ResolvedOutputs, RootFlags, RunSchedule, Scheduled,
-};
+use crate::execution::schedule::{NodeState, ResolvedOutputs, RootFlags, RunSchedule};
 use crate::graph::func::FuncBehavior;
 use crate::graph::func::lambda::Invocation;
 use crate::graph::func::lambda::internals;
@@ -192,7 +190,7 @@ fn collect(
 ) {
     let mut node_ram = Column::default();
     node_ram.reset(program.e_nodes.len(), RamUsage::default());
-    executor.collect_outcome(Resolved::assume(program, schedule), &node_ram, outcome);
+    executor.collect_outcome(program, schedule, &node_ram, outcome);
 }
 
 async fn run(program: &CompiledGraph, run: &RunSchedule) -> (RuntimeCache, ExecutionOutcome) {
@@ -204,7 +202,8 @@ async fn run(program: &CompiledGraph, run: &RunSchedule) -> (RuntimeCache, Execu
     executor
         .run(
             RunRequest {
-                run: Resolved::assume(program, run),
+                program,
+                schedule: run,
                 cache: &mut cache,
                 reporter: &mut DiscardedReports,
                 cancel: CancelToken::never(),
@@ -226,12 +225,13 @@ async fn run_with(
     let mut executor = Executor::default();
     // Refine the schedule like the engine does. `straight_run` roots every node, so
     // the cut prunes nothing here — the cut itself is unit-tested in the sweep tests.
-    let resolved = Scheduled::assume(program, schedule).resolve(cache).await;
+    schedule.resolve(program, cache).await;
     let mut outcome = ExecutionOutcome::default();
     executor
         .run(
             RunRequest {
-                run: resolved,
+                program,
+                schedule,
                 cache,
                 reporter: &mut DiscardedReports,
                 cancel: CancelToken::never(),
@@ -355,7 +355,8 @@ async fn cancellation_retires_reads_owned_by_the_unreached_tail() {
     executor
         .run(
             RunRequest {
-                run: Resolved::assume(&p.program, &run),
+                program: &p.program,
+                schedule: &run,
                 cache: &mut cache,
                 reporter: &mut DiscardedReports,
                 cancel: CancelToken::new(),
@@ -567,7 +568,8 @@ async fn a_reused_output_with_no_consumers_is_reclaimed_immediately() {
     executor
         .run(
             RunRequest {
-                run: Resolved::assume(&p.program, &run),
+                program: &p.program,
+                schedule: &run,
                 cache: &mut cache,
                 reporter: &mut DiscardedReports,
                 cancel: CancelToken::never(),

@@ -10,7 +10,7 @@
 //!    [`RunSchedule`](schedule::RunSchedule). Purely structural —
 //!    reachability + topological order + missing-input verdicts, no cache/digest state.
 //! 3. **execute** — the [`RuntimeCache`](cache::runtime::RuntimeCache) prepares filesystem
-//!    identities on the blocking pool; [`resolve`](schedule::Scheduled::resolve) stamps
+//!    identities on the blocking pool; [`resolve`](schedule::RunSchedule::resolve) stamps
 //!    content digests, then derives cache-aware liveness, exact output demand, and reader
 //!    counts in one consumer-first sweep, refining that same schedule. The
 //!    [`Executor`](executor::Executor) walks the surviving schedule producer-first.

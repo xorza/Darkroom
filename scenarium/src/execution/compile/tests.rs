@@ -161,21 +161,20 @@ fn validation_returns_compiled_mismatches() {
 /// the **stable id space** — bind targets and subscribers by id rather than
 /// index, so two artifacts can't match by an index coincidence.
 fn summary(compiled: &CompiledGraph, authored: &[NodeId]) -> Vec<String> {
-    let program = &compiled;
     let mut out = Vec::new();
-    for (node_idx, e_node) in program.e_nodes.iter_indexed() {
-        let node_id = program.node_ids[node_idx];
+    for (node_idx, e_node) in compiled.e_nodes.iter_indexed() {
+        let node_id = compiled.node_ids[node_idx];
         out.push(format!(
             "node {node_id:?} func={:?} sink={} disabled={} cache={:?} special={:?}",
             e_node.func_id, e_node.sink, e_node.disabled, e_node.cache, e_node.special,
         ));
-        for input in &program.inputs[e_node.inputs] {
+        for input in &compiled.inputs[e_node.inputs] {
             let binding = match &input.binding {
                 ExecutionBinding::None => "none".to_string(),
                 ExecutionBinding::Const(value) => format!("const {value:?}"),
                 ExecutionBinding::Bind(address) => format!(
                     "bind {:?}#{}",
-                    program.node_ids[address.node_idx], address.port_idx
+                    compiled.node_ids[address.node_idx], address.port_idx
                 ),
             };
             out.push(format!(
@@ -183,14 +182,14 @@ fn summary(compiled: &CompiledGraph, authored: &[NodeId]) -> Vec<String> {
                 input.required, input.stamps_fs_path
             ));
         }
-        for output in &program.outputs[e_node.outputs] {
+        for output in &compiled.outputs[e_node.outputs] {
             out.push(format!("  out {output:?}"));
         }
-        for event in &program.events[e_node.events] {
+        for event in &compiled.events[e_node.events] {
             let subscribers: Vec<_> = event
                 .subscribers
                 .iter()
-                .map(|&idx| program.node_ids[idx])
+                .map(|&idx| compiled.node_ids[idx])
                 .collect();
             out.push(format!("  event subscribers={subscribers:?}"));
         }

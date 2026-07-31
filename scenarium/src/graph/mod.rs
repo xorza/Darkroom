@@ -57,8 +57,8 @@ pub enum Binding {
 /// are: `bindings` is a plain map a caller keys into directly, so it is public
 /// rather than fronted by trivial accessors; `nodes` stays `pub(crate)` for
 /// cross-module test call sites that force every node's cache mode directly,
-/// while `subscriptions` is reached only through methods — `pub(super)` so the
-/// wiring and validation passes beside this file can walk it, and no wider.
+/// while `subscriptions` is reached only through the methods below and so is
+/// private.
 #[derive(Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Graph {
     /// Every node, keyed by the id that reaches it — so an id is unique here
@@ -85,7 +85,7 @@ pub struct Graph {
     /// `BTreeSet` dedups and keeps both serialization and the order a compile
     /// reads them in deterministic.
     #[serde(default)]
-    pub(super) subscriptions: BTreeSet<Subscription>,
+    subscriptions: BTreeSet<Subscription>,
 }
 
 /// One event-subscription edge: `subscriber` fires when `emitter`'s event
@@ -119,8 +119,13 @@ pub struct BindingEntry {
     pub binding: Binding,
 }
 
-/// A [`Node`] with the id the lookup found it by re-attached — what
-/// [`Graph::iter`] hands out, since a node stores no id of its own.
+/// A [`Node`] with its id attached — the item [`Graph::iter`] yields.
+///
+/// Iteration is the one lookup whose caller does not already hold the id, so it
+/// is the one that has to hand one back; a node stores no id of its own, so
+/// there would otherwise be nothing to read it from. [`Graph::find`] and
+/// [`Graph::find_mut`] are *given* the id and return the node alone. That is
+/// the whole rule — not an inconsistency to reconcile.
 #[derive(Clone, Copy, Debug)]
 pub struct NodeRef<'a> {
     pub id: NodeId,
@@ -152,6 +157,9 @@ impl Graph {
     }
 
     /// The node with `id`, or `None` if this graph has none.
+    ///
+    /// A bare `&Node` rather than a [`NodeRef`]: the caller supplied the id, so
+    /// there is nothing to attach.
     pub fn find(&self, id: NodeId) -> Option<&Node> {
         assert!(!id.is_nil());
         self.nodes.get(&id)
@@ -171,17 +179,13 @@ impl Graph {
     /// The declared type of input `port`, or `None` when it can't be resolved
     /// — a missing node or an unresolved func. The caller treats `None` as the
     /// polymorphic `Any`.
-    pub(super) fn input_type(&self, library: &Library, port: InputPort) -> Option<DataType> {
+    fn input_type(&self, library: &Library, port: InputPort) -> Option<DataType> {
         self.input_spec(library, port).map(|i| i.data_type.clone())
     }
     /// The declared [`FuncInput`] of input `port` — its full spec (type +
     /// `value_variants` + flags), or `None` for an unresolved node. Resolution
     /// mirrors [`Self::input_type`].
-    pub(super) fn input_spec<'a>(
-        &'a self,
-        library: &'a Library,
-        port: InputPort,
-    ) -> Option<&'a FuncInput> {
+    fn input_spec<'a>(&'a self, library: &'a Library, port: InputPort) -> Option<&'a FuncInput> {
         let node = self.find(port.node_id)?;
         self.node_func(node, library)?.inputs.get(port.port_idx)
     }

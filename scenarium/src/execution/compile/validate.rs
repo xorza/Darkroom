@@ -21,8 +21,7 @@ pub(super) fn validate(
     compiled: &CompiledGraph,
     library: &Library,
 ) -> Result<(), CompiledGraphValidationError> {
-    let program = &compiled;
-    for (node_id, e_node) in program.node_ids.iter().zip(program.e_nodes.iter()) {
+    for (node_id, e_node) in compiled.node_ids.iter().zip(compiled.e_nodes.iter()) {
         if e_node.func_id.is_nil() {
             return Err(CompiledGraphValidationError::NilFuncId { node_id: *node_id });
         }
@@ -46,14 +45,14 @@ pub(super) fn validate(
         if e_node.events.len as usize != func.events.len() {
             return Err(CompiledGraphValidationError::EventArity { node_id: *node_id });
         }
-        let inputs = program
+        let inputs = compiled
             .inputs
             .get_span(e_node.inputs)
             .ok_or(CompiledGraphValidationError::InputRange { node_id: *node_id })?;
-        if program.outputs.get_span(e_node.outputs).is_none() {
+        if compiled.outputs.get_span(e_node.outputs).is_none() {
             return Err(CompiledGraphValidationError::OutputRange { node_id: *node_id });
         }
-        let events = program
+        let events = compiled
             .events
             .get_span(e_node.events)
             .ok_or(CompiledGraphValidationError::EventRange { node_id: *node_id })?;
@@ -64,7 +63,7 @@ pub(super) fn validate(
             if let Some(&subscriber) = e_event
                 .subscribers
                 .iter()
-                .find(|s| s.idx() >= program.e_nodes.len())
+                .find(|s| s.idx() >= compiled.e_nodes.len())
             {
                 return Err(CompiledGraphValidationError::MissingEventSubscriber {
                     node_id: *node_id,
@@ -78,7 +77,7 @@ pub(super) fn validate(
                 // Unreachable while `Compiler::resolve` mints every address
                 // from a successful placement lookup — kept as the backstop if
                 // that stops holding.
-                let target_e_node = program.e_nodes.get(e_addr.node_idx).ok_or(
+                let target_e_node = compiled.e_nodes.get(e_addr.node_idx).ok_or(
                     CompiledGraphValidationError::MissingBindingTarget {
                         node_id: *node_id,
                         target: *e_addr,

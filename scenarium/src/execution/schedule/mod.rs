@@ -6,7 +6,7 @@
 //! event reaches a [`RunSinks`](crate::graph::node::special::SpecialNode::RunSinks) sink),
 //! producing `process_order` (deps before consumers) and each node's [`NodeState`]
 //! (runnable, disabled, or blocked on inputs) — purely structural, no cache/digest
-//! state. [`Scheduled::resolve`] then refines that same column against the
+//! state. [`RunSchedule::resolve`] then refines that same column against the
 //! cache and fills the schedule's per-output half, and the executor reads both.
 //!
 //! Two passes rather than two pieces of state: this is the split a build system draws
@@ -15,27 +15,27 @@
 //! liveness cache-dependent, and every run redoes both. So the refinement happens in the
 //! columns the planner opened rather than in a second buffer shadowing them.
 //!
-//! **The phase is in the type.** One buffer written by two passes needs the passes to
-//! happen in order, and *that* the buffer cannot say: a `RunSchedule` looks the same
-//! planned, resolved, or left over from last run. So neither pass hands back the buffer.
-//! [`plan`](planner::Planner::plan) issues a [`Scheduled`], [`resolve`](Scheduled::resolve)
-//! consumes it and issues a [`Resolved`], and the executor takes only that:
+//! **The order is the caller's to keep.** One buffer written by two passes has to be
+//! written in order, and the buffer itself cannot say which pass has run: a
+//! `RunSchedule` looks the same planned, resolved, or left over from last run. The
+//! sequence has one production call site —
+//! [`ExecutionEngine::execute`](crate::execution::engine) — where the three steps are
+//! consecutive statements:
 //!
 //! ```text
-//! &mut RunSchedule ──plan──▶ Scheduled ──resolve──▶ Resolved ──▶ Executor::run
+//! Planner::plan ──▶ RunSchedule::resolve ──▶ Executor::run
 //! ```
 //!
-//! Each handle carries the `CompiledGraph` its columns are `NodeIdx`-aligned to, so the pair
-//! travels as one value instead of two arguments that could disagree. Executing an
-//! unresolved plan, resolving one twice, and resolving against a different program than
-//! you execute against all stop being mistakes the sequencing has to avoid and start
-//! being programs that do not compile.
+//! Every step names the `CompiledGraph` its `NodeIdx` columns are aligned to, and
+//! [`validate`](RunSchedule::validate) — asserted in debug after each pass — is what
+//! catches a schedule spanning a different program than the one it is being read
+//! against.
 //!
 //! Every method that reads or writes the schedule lives on it, here; the DFS scratch
 //! the structural pass walks with is the one thing that isn't part of the answer, so it
 //! is its own type in [`planner`]. The schedule is reused via a buffer on the engine and
 //! the planner keeps its scratch across runs, so a repeated plan on an unchanged graph
-//! allocates nothing — the handles borrow that buffer, they do not own a copy of it.
+//! allocates nothing.
 
 use crate::execution::schedule::error::RunScheduleValidationError;
 use ::common::is_debug;
@@ -57,7 +57,7 @@ pub(crate) mod planner;
 ///
 /// The planner establishes the structural three: `Disabled`, `MissingInputs`,
 /// and `Cut`, its positive verdict. The cache-aware sweep
-/// ([`Scheduled::resolve`])
+/// ([`RunSchedule::resolve`])
 /// then refines only the runnable ones, promoting what a running consumer
 /// reads to `Run`, `Reuse`, or `MissingLambda` and leaving the rest where the
 /// planner put them. That is why "the planner cleared it" and "the cut pruned
@@ -169,9 +169,8 @@ impl ResolvedOutputs {
 /// counts resolved against a different one — states the single
 /// [`reset_for_program`](Self::reset_for_program) rules out.
 ///
-/// The buffer alone still cannot say *which* pass has run over it, so nothing outside
-/// this module is handed one: a run reaches it through [`Scheduled`] and [`Resolved`],
-/// which can only be minted in phase order.
+/// The buffer alone cannot say *which* pass has run over it; what stands in for that is
+/// [`validate`](Self::validate), asserted in debug after each pass.
 #[derive(Debug, Default)]
 pub(crate) struct RunSchedule {
     /// The schedule: post-order DFS over the dependency graph (deps before consumers),
@@ -185,7 +184,7 @@ pub(crate) struct RunSchedule {
     /// The nodes the backward walk started from — sinks, event subscribers,
     /// event-trigger owners, and node seeds — ascending. The schedule's "must be
     /// available" set: the sweep seeds liveness from these and prunes any cone
-    /// reachable only through cache-hit consumers (see [`Scheduled::resolve`]).
+    /// reachable only through cache-hit consumers (see [`resolve`](Self::resolve)).
     ///
     /// A list, because both readers walk it and neither asks whether a given
     /// node is in it; what a root *is* is the column below.
@@ -510,48 +509,6 @@ impl RunSchedule {
         self.validate(program)
             .expect("run schedule invariant violated");
     }
-}
-
-/// A schedule the planner has filled, paired with the program it was planned against —
-/// the only thing [`resolve`](Self::resolve) accepts, and the only thing `plan` hands
-/// back.
-///
-/// The pair is the point. `NodeIdx` columns mean nothing without the program they are
-/// aligned to, and a schedule means nothing before the sweep has run over it; holding
-/// the two apart let a caller resolve against one program and execute against another,
-/// or hand the executor a plan nothing had resolved — sequencing the engine got right
-/// by hand and the types did not police at all.
-#[derive(Debug)]
-pub(crate) struct Scheduled<'a> {
-    program: &'a CompiledGraph,
-    schedule: &'a mut RunSchedule,
-}
-
-/// One resolved run: dispositions, demand, and reader counts derived together, over the
-/// program they were derived from. Only [`Scheduled::resolve`] mints one, so holding it
-/// *is* the proof that this schedule was planned and swept against this program.
-///
-/// `Copy` because that proof is the whole value: both halves are shared borrows, so a copy
-/// vouches for exactly what the original did. The run loop takes one to walk the schedule,
-/// and the engine keeps one to name the same pair when it closes the run out.
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct Resolved<'a> {
-    program: &'a CompiledGraph,
-    schedule: &'a RunSchedule,
-}
-
-impl<'a> Scheduled<'a> {
-    /// Issued by [`plan`](planner::Planner::plan) once it has filled `schedule` for
-    /// `program`.
-    fn new(program: &'a CompiledGraph, schedule: &'a mut RunSchedule) -> Self {
-        Scheduled { program, schedule }
-    }
-
-    /// The scheduled nodes that will actually run — what the filesystem prefetch walks
-    /// between the two passes.
-    pub(crate) fn executing(&self) -> impl Iterator<Item = NodeIdx> + '_ {
-        self.schedule.executing()
-    }
 
     /// Stamp the planned schedule, then sweep it in reverse for exact liveness and
     /// cache reuse, writing the result into that same buffer: the [`NodeState`] column
@@ -559,10 +516,6 @@ impl<'a> Scheduled<'a> {
     /// "up-to-date check" between [`plan`](planner::Planner::plan) and
     /// [`execute`](crate::execution::executor) — the planner's answer is *what could
     /// run*, this one is *what will*.
-    ///
-    /// Takes the schedule **by value**, so the pass cannot run twice over one plan
-    /// (which would count every reader again) and the only way back to a `Scheduled`
-    /// is to plan afresh.
     ///
     /// **Mutates `cache`** only to stamp each runnable node's `current_digest`: a live
     /// disk-cache frontier is *probed* from its blob header here and decoded later, by the
@@ -580,8 +533,8 @@ impl<'a> Scheduled<'a> {
     /// can't read yet: that folds to `None` here — "uncacheable, must run", which keeps
     /// the node's cone alive — and the run loop prepares the identity and re-stamps at
     /// reach time once its producers have settled, possibly improving `Run` to a reuse.
-    pub(crate) async fn resolve(self, cache: &mut RuntimeCache) -> Resolved<'a> {
-        let Scheduled { program, schedule } = self;
+    pub(crate) async fn resolve(&mut self, program: &CompiledGraph, cache: &mut RuntimeCache) {
+        let schedule = self;
         // The cache holds no program of its own, so every question below names
         // the one this schedule was planned against — the handle's whole point.
         cache.stamp_digests(program, schedule.executing());
@@ -662,17 +615,7 @@ impl<'a> Scheduled<'a> {
             }
         }
 
-        Resolved { program, schedule }
-    }
-}
-
-impl<'a> Resolved<'a> {
-    pub(crate) fn program(&self) -> &'a CompiledGraph {
-        self.program
-    }
-
-    pub(crate) fn schedule(&self) -> &'a RunSchedule {
-        self.schedule
+        schedule.validate_debug(program);
     }
 }
 
@@ -714,25 +657,6 @@ pub(crate) mod internals {
         /// under the program it is supposed to span.
         pub(crate) fn root_flags_mut(&mut self) -> &mut Column<NodeIdx, RootFlags> {
             &mut self.root_flags
-        }
-    }
-
-    /// The one way to mint a phase handle without the pass that would normally issue
-    /// it, for fixtures that hand-build the columns a pass would have written — a
-    /// sweep test starting from a schedule no planner produced, a run-loop test
-    /// starting from dispositions no sweep produced.
-    ///
-    /// Test-only on purpose: the pairing each handle stands for is *asserted* here
-    /// rather than established, which is exactly what production must never do.
-    impl<'a> Scheduled<'a> {
-        pub(crate) fn assume(program: &'a CompiledGraph, schedule: &'a mut RunSchedule) -> Self {
-            Scheduled { program, schedule }
-        }
-    }
-
-    impl<'a> Resolved<'a> {
-        pub(crate) fn assume(program: &'a CompiledGraph, schedule: &'a RunSchedule) -> Self {
-            Resolved { program, schedule }
         }
     }
 }

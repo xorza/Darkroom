@@ -24,7 +24,7 @@ use crate::execution::compile::compiled_graph::{
 use crate::execution::error::Result;
 use crate::execution::identity::{NodeIdx, OutputAddr};
 use crate::execution::schedule::planner::Planner;
-use crate::execution::schedule::{NodeState, RootFlags, RunSchedule, Scheduled};
+use crate::execution::schedule::{NodeState, RootFlags, RunSchedule};
 use crate::execution::seeds::RunSeeds;
 use crate::graph::func::FuncBehavior;
 use crate::graph::func::event::EventLambda;
@@ -332,9 +332,7 @@ impl<'a> Sweep<'a> {
             cache[node.node_idx].load_output(OutputSnapshot::new(values), Some(digest));
         }
 
-        Scheduled::assume(program, &mut schedule)
-            .resolve(&mut cache)
-            .await;
+        schedule.resolve(program, &mut cache).await;
         Swept { program, schedule }
     }
 }

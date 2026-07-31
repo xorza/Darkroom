@@ -4,8 +4,9 @@
 //! which lives only in the key that reaches it, so a node can be moved or
 //! remapped without carrying a stale identity. What it *is* is [`NodeKind`]: a
 //! func instance or a built-in special. What it does with its result is
-//! [`CacheMode`]. What comes back from a lookup is a [`NodeRef`], which
-//! re-attaches the id the lookup found it by.
+//! [`CacheMode`]. Iterating a graph yields a [`NodeRef`], pairing a node with
+//! the id it was found under; the lookups that *take* an id return the node
+//! alone.
 //!
 //! What a func node instantiates — the [`Func`](crate::graph::func::Func)
 //! declaration and the ABIs it runs through — is

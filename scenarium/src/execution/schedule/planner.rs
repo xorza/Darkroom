@@ -7,7 +7,7 @@ use crate::common::column::Column;
 use crate::execution::compile::compiled_graph::{CompiledGraph, ExecutionBinding};
 use crate::execution::error::{Error, Result};
 use crate::execution::identity::NodeIdx;
-use crate::execution::schedule::{NodeState, RunSchedule, Scheduled};
+use crate::execution::schedule::{NodeState, RunSchedule};
 use crate::execution::seeds::RunSeeds;
 
 /// DFS coloring for the backward pass. White = unvisited, Gray = on
@@ -46,16 +46,15 @@ impl Planner {
     /// `seeds` (the roots to walk back from). Exact execution-node seeds are roots
     /// directly. Errors on a dependency cycle or a node/event seed absent from the program.
     ///
-    /// The [`Scheduled`] handed back is the only way to reach
-    /// [`resolve`](Scheduled::resolve), and it borrows `schedule` for as long as it
-    /// lives — so nothing can read a half-filled buffer, and the program the columns
-    /// are aligned to travels with them rather than being passed again downstream.
-    pub(crate) fn plan<'a>(
+    /// Leaves `schedule` structurally complete and cache-blind:
+    /// [`RunSchedule::resolve`] is the pass that refines it, and running the two out
+    /// of order is what [`RunSchedule::validate`] catches.
+    pub(crate) fn plan(
         &mut self,
-        program: &'a CompiledGraph,
+        program: &CompiledGraph,
         seeds: &RunSeeds,
-        schedule: &'a mut RunSchedule,
-    ) -> Result<Scheduled<'a>> {
+        schedule: &mut RunSchedule,
+    ) -> Result<()> {
         schedule.reset_for_program(program);
         self.reset_for_program(program);
 
@@ -65,7 +64,7 @@ impl Planner {
 
         self.walk_backward_collect_order(program, schedule)?;
         schedule.validate_debug(program);
-        Ok(Scheduled::new(program, schedule))
+        Ok(())
     }
 
     /// Backward post-order DFS from the roots: builds `process_order` (deps before
