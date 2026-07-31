@@ -2,7 +2,7 @@
 name = "scenarium"
 version.workspace = true
 edition.workspace = true
-description = "A graph library for Scenarium"
+description = "A graph library for Darkroom"
 exclude = ["AGENTS.md", "CLAUDE.md"]
 
 [lints]
