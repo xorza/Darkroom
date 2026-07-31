@@ -19,14 +19,6 @@ resolver = "2"
 version = "0.1.0"
 edition = "2024"
 
-[workspace.lints.rust]
-missing_debug_implementations = "deny"
-unreachable_pub = "deny"
-
-[workspace.lints.clippy]
-items_after_test_module = "deny"
-
-
 [workspace.dependencies]
 common = { path = "common" }
 quickbench = { path = "quickbench" }
@@ -97,14 +89,6 @@ clap = { version = "4.6", features = ["derive"] }
 ort = { version = "2.0.0-rc.13" }
 
 
-[profile.bench]
-debug = true
-opt-level = 3
-strip = "none"
-split-debuginfo = "off"
-lto = "fat"
-codegen-units = 1
-
 [profile.release]
 debug = true
 opt-level = 3
@@ -120,6 +104,9 @@ panic = "abort"
 strip = "symbols"
 debug = false
 incremental = false
+
+[profile.bench]
+inherits = "release-max"
 
 
 # debug=2 (the dev default) bloated target/ into ~1.6M DWARF .o files, starving builds on I/O
@@ -183,3 +170,11 @@ opt-level = 3
 opt-level = 3
 [profile.dev.package.skrifa]
 opt-level = 3
+
+
+[workspace.lints.rust]
+missing_debug_implementations = "deny"
+unreachable_pub = "deny"
+
+[workspace.lints.clippy]
+items_after_test_module = "deny"
