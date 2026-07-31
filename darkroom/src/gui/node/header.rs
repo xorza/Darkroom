@@ -25,7 +25,7 @@ use crate::gui::format::fmt_elapsed;
 use crate::gui::graph_scope::node_scope::NodeScope;
 use crate::gui::node::port_color::event_color;
 use crate::gui::node::port_row::glyph::{EVENT_TRIANGLE_RADIUS, PORT_HIT_SCALE};
-use crate::gui::node::{RecordCtx, click_intents, exec_color, node_rename_wid, node_wid};
+use crate::gui::node::{NodeCtx, click_intents, exec_color, node_rename_wid, node_wid};
 use crate::gui::run_state::ExecStatus;
 use crate::gui::theme::Theme;
 use crate::gui::widgets::badge::{BADGE_FONT, BADGE_SIZE, Badge};
@@ -121,8 +121,8 @@ pub(crate) fn subscription_glyph_wid(node_id: NodeId) -> WidgetId {
 /// controls ride in [`status_row`] below). The sink nodes' event-
 /// subscription pin is *not* drawn here — it records at canvas level, before the
 /// node bodies, so it peeks out from behind the node's corner.
-pub(super) fn header(ui: &mut Ui, rcx: RecordCtx<'_>, node: NodeScope<'_>, out: &mut Intents) {
-    let theme = rcx.theme();
+pub(super) fn header(ui: &mut Ui, ncx: NodeCtx<'_>, out: &mut Intents) {
+    let (theme, node) = (ncx.theme(), ncx.node());
     // The header sits inside the body's border stroke (the layout folds
     // the stroke width into the body's padding), so it must round to the
     // stroke's *inner* radius, not the card's outer `node_corner_radius` —
@@ -143,7 +143,7 @@ pub(super) fn header(ui: &mut Ui, rcx: RecordCtx<'_>, node: NodeScope<'_>, out: 
             if node.runnable() {
                 play_chip(ui, theme, node);
             }
-            title(ui, rcx, node, out);
+            title(ui, ncx, out);
             // Splits the title (left) from the descriptive cluster
             // (right): the markers, then inspect.
             hspacer(ui, "header_spacer");
@@ -172,7 +172,7 @@ pub(super) fn header(ui: &mut Ui, rcx: RecordCtx<'_>, node: NodeScope<'_>, out: 
             // when open, muted-grey outline (`text_muted`) when closed. The
             // click is consumed in `Inspectors::apply` via this chip's
             // deterministic id, so the returned flag is ignored here.
-            let mode = rcx.inspectors().mode(node.id);
+            let mode = ncx.inspectors().mode(node.id);
             let color = if mode.is_some() {
                 theme.colors.badge_graph
             } else {
@@ -194,8 +194,8 @@ pub(super) fn header(ui: &mut Ui, rcx: RecordCtx<'_>, node: NodeScope<'_>, out: 
 /// sink-disable, `↻` evict, and `R`/`↓` cache. The controls group apart from the title's
 /// identity (header above); the run-time reads as the row's status
 /// counterweight.
-pub(super) fn status_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: NodeScope<'_>, out: &mut Intents) {
-    let theme = rcx.theme();
+pub(super) fn status_row(ui: &mut Ui, ncx: NodeCtx<'_>, out: &mut Intents) {
+    let (theme, node) = (ncx.theme(), ncx.node());
     Panel::hstack()
         .id_salt("status_row")
         .size((Sizing::FILL, Sizing::HUG))
@@ -404,14 +404,15 @@ fn draw_play_triangle(ui: &mut Ui, color: Color) {
 /// The node title: an inline-renamable label. Double-click swaps it for
 /// a `TextEdit`; commit emits [`GraphIntent::RenameNode`], single-click
 /// selects (the label would otherwise swallow the body's click).
-fn title(ui: &mut Ui, rcx: RecordCtx<'_>, node: NodeScope<'_>, out: &mut Intents) {
+fn title(ui: &mut Ui, ncx: NodeCtx<'_>, out: &mut Intents) {
+    let node = ncx.node();
     let shift = ui.modifiers().shift;
     let id = node_rename_wid(node.id);
     // Interned here rather than carried on the node: the widget holds the
     // handle across the label⇄editor swap, and this is the one place the
     // name is drawn.
     let name = ui.intern(node.name());
-    let ev = InlineRename::new(id, name, &rcx.theme().inline_rename)
+    let ev = InlineRename::new(id, name, &ncx.theme().inline_rename)
         .max_chars(NODE_NAME_MAX_CHARS)
         .style(&TextStyle {
             weight: FontWeight::Bold,
@@ -419,7 +420,7 @@ fn title(ui: &mut Ui, rcx: RecordCtx<'_>, node: NodeScope<'_>, out: &mut Intents
         })
         .show(ui);
     if ev.clicked {
-        click_intents(shift, rcx.graph_scope(), node.id, out);
+        click_intents(shift, ncx.graph_scope(), node.id, out);
     }
     if let Some(to) = ev.committed {
         out.push(GraphIntent::RenameNode {

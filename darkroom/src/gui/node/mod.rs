@@ -23,7 +23,7 @@ use crate::gui::node::header::{header, status_row, subscription_pin};
 use crate::gui::node::memory_row::memory_row;
 use crate::gui::node::port_row::ports_row;
 use crate::gui::run_state::ExecStatus;
-use crate::gui::theme::Theme;
+use crate::gui::theme::{StaticValueEditorTheme, Theme};
 use glam::Vec2;
 use palantir::{
     Background, Color, Configure, Corners, Panel, Sense, Shadow, Sizing, Stroke, Track, Ui,
@@ -121,6 +121,97 @@ impl<'a> RecordCtx<'a> {
     pub(crate) fn is_selected(self, key: NodeId) -> bool {
         self.selected.contains(&key)
     }
+
+    /// Narrow this pass to one node — the context its own subtree records
+    /// against. Resolves the pointer-over-node question here, once, for
+    /// everything below that asks it.
+    pub(super) fn node<'n: 'a>(self, ui: &Ui, node: NodeScope<'n>) -> NodeCtx<'a> {
+        NodeCtx {
+            record: self,
+            node,
+            hovered: node_hovered(ui, node.id),
+        }
+    }
+}
+
+/// One node of one graph pane, as its own subtree records it: the pane's
+/// [`RecordCtx`] plus the node and whether the pointer is over it.
+///
+/// The leaf level of the context chain, and the one where the *item* is the
+/// level — every function below a node body is about that node, so passing it
+/// beside the context would be the same argument twice.
+///
+/// **Why the hover lives here.** Two things hang off it — the const editors'
+/// hover-revealed chips ([`Self::sve`]) and whether the port rows build their
+/// tooltips at all ([`Self::tips`]) — and both used to be resolved in
+/// `ports_row` and threaded down as a `&StaticValueEditorTheme` and a `bool`
+/// that no signature said were the same fact. Resolving it at the node body
+/// instead costs one extra [`hover_within`](palantir::Ui::hover_within) for a
+/// node with no ports (which returns before it would have asked); that read is
+/// a hover-target comparison, not a rect test, so it is a lookup either way.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct NodeCtx<'a> {
+    record: RecordCtx<'a>,
+    node: NodeScope<'a>,
+    hovered: bool,
+}
+
+impl<'a> NodeCtx<'a> {
+    pub(crate) fn node(self) -> NodeScope<'a> {
+        self.node
+    }
+
+    pub(crate) fn theme(self) -> &'a Theme {
+        self.record.theme()
+    }
+
+    pub(crate) fn graph_scope(self) -> GraphScope<'a> {
+        self.record.graph_scope()
+    }
+
+    pub(crate) fn geometry(self) -> &'a CanvasGeometry {
+        self.record.geometry()
+    }
+
+    pub(crate) fn hits(self) -> &'a CanvasHits {
+        self.record.hits()
+    }
+
+    pub(crate) fn inspectors(self) -> &'a Inspectors {
+        self.record.inspectors()
+    }
+
+    /// Whether this node paints selected.
+    pub(crate) fn is_selected(self) -> bool {
+        self.record.is_selected(self.node.id)
+    }
+
+    /// The pane-wide pass this node belongs to — for the readers that want
+    /// something about the whole pane rather than this node, like the
+    /// effective selection *set* a group drag snapshots.
+    pub(crate) fn record(self) -> RecordCtx<'a> {
+        self.record
+    }
+
+    /// Whether the port rows build their hover tooltips: their text is
+    /// composed per port per frame, and no port can be showing one while the
+    /// pointer is elsewhere, so only the node under it pays.
+    pub(crate) fn tips(self) -> bool {
+        self.hovered
+    }
+
+    /// The const-editor styling this node's value cells paint with. Pointer
+    /// over the node surfaces the (otherwise invisible) chips at half
+    /// strength — the edit affordance appears exactly when the pointer is in
+    /// the neighborhood, and geometry never changes.
+    pub(crate) fn sve(self) -> &'a StaticValueEditorTheme {
+        let theme = self.theme();
+        if self.hovered {
+            &theme.static_value_editor_revealed
+        } else {
+            &theme.static_value_editor
+        }
+    }
 }
 
 /// Owns rendering of every graph node plus the single active drag
@@ -201,7 +292,7 @@ impl NodeUI {
             {
                 continue;
             }
-            self.draw_one(ui, rcx, n, probe, out);
+            self.draw_one(ui, rcx.node(ui, n), probe, out);
         }
         self.focus_kept_last = focus_kept;
         // Belt-and-braces against a node deleted mid-drag; `prepass` makes
@@ -212,12 +303,11 @@ impl NodeUI {
     fn draw_one(
         &mut self,
         ui: &mut Ui,
-        rcx: RecordCtx<'_>,
-        node: NodeScope<'_>,
+        ncx: NodeCtx<'_>,
         probe: &mut BreakerProbe<'_>,
         out: &mut Intents,
     ) {
-        let theme = rcx.theme();
+        let (theme, node) = (ncx.theme(), ncx.node());
 
         // Probe the body against the breaker polyline. Hit → recolor border
         // red and flag the node for deletion on release. The rect is the same
@@ -227,14 +317,14 @@ impl NodeUI {
         // a live gesture (an undo, say). A node that has never
         // recorded has no size yet, so the breaker can't catch it until next
         // frame: acceptable, since the user can't aim at something unpainted.
-        let broken = rcx
+        let broken = ncx
             .geometry()
             .node_world_rect(node)
             .is_some_and(|r| probe.crosses_rect(r));
         if broken {
             probe.mark_broken_node(node.id);
         }
-        let selected = rcx.is_selected(node.id);
+        let selected = ncx.is_selected();
         // The border width is *always* the selection width so selecting a
         // node never resizes it (stroke folds into padding — width-gated,
         // not color-gated). Only the color changes, a 4-tier decision: the
@@ -260,7 +350,7 @@ impl NodeUI {
         // from behind this node's corner while riding the same cull decision
         // and stack position as the node itself.
         if node.sink() {
-            subscription_pin(ui, theme, node, rcx.geometry().subs.is_hovered(node.id));
+            subscription_pin(ui, theme, node, ncx.geometry().subs.is_hovered(node.id));
         }
 
         // Borrowed off `self` before the body closure so it can't conflict
@@ -287,15 +377,15 @@ impl NodeUI {
                 .with_shadow(shadow),
             )
             .show(ui, |ui| {
-                header(ui, rcx, node, out);
-                status_row(ui, rcx, node, out);
-                ports_row(ui, rcx, node, row_tracks, out);
+                header(ui, ncx, out);
+                status_row(ui, ncx, out);
+                ports_row(ui, ncx, row_tracks, out);
                 // A preview has no output, so it has no cached value for the
                 // memory readout to report — its value takes that slot instead.
                 if node.preview() {
-                    preview_row::preview_row(ui, rcx, node);
+                    preview_row::preview_row(ui, ncx);
                 } else {
-                    memory_row(ui, rcx, node);
+                    memory_row(ui, ncx);
                 }
             });
         // Pull the body response's click flag into a local so its `&Ui`
@@ -309,7 +399,7 @@ impl NodeUI {
         // selection. `UndoStep::is_noop` filters a click that doesn't
         // change the set (e.g. clicking the sole selected node).
         if body_clicked {
-            click_intents(shift_click, rcx.graph_scope(), node.id, out);
+            click_intents(shift_click, ncx.graph_scope(), node.id, out);
         }
 
         // Latch the anchor on the press-frame edge, off whichever handle
@@ -318,15 +408,15 @@ impl NodeUI {
         // peeks `response_for(widget_id)` before record runs and converts
         // `drag_delta` into a `MoveSelection` applied to `Document` before
         // the record reads it back.
-        if let Some(handle) = rcx.hits().latched_on(node.id) {
+        if let Some(handle) = ncx.hits().latched_on(node.id) {
             // Grabbing a node already in the selection drags the whole
             // group together;
             // grabbing an unselected node selects only it and drags it
             // alone.
             let start_positions = if selected {
-                selected_group_positions(rcx.graph_scope(), rcx.selected())
+                selected_group_positions(ncx.graph_scope(), ncx.record().selected())
             } else {
-                click_intents(false, rcx.graph_scope(), node.id, out);
+                click_intents(false, ncx.graph_scope(), node.id, out);
                 vec![(node.id, node.pos)]
             };
             self.drag.latch(node.id, start_positions, handle);
@@ -431,6 +521,11 @@ pub(crate) fn drag_handles(node_id: NodeId) -> impl Iterator<Item = WidgetId> {
 /// a repaint is already scheduled — no `MOVE` subscription needed — and
 /// it's occlusion-aware (a panel stacked over the node wins the
 /// pointer).
+///
+/// Resolved against *last* frame's hover target and cascade, so the answer
+/// doesn't depend on where in this frame's record it is asked — which is what
+/// lets [`RecordCtx::node`] settle it at the node body, before the subtree
+/// that reads it has recorded.
 fn node_hovered(ui: &Ui, node_id: NodeId) -> bool {
     ui.hover_within(node_widget_id(node_id))
 }

@@ -27,14 +27,13 @@ use crate::core::edit::intent::types::GraphIntent;
 use crate::core::preview;
 use crate::gui::EventRef;
 use crate::gui::graph_scope::input_scope::InputScope;
-use crate::gui::graph_scope::node_scope::NodeScope;
 use crate::gui::graph_scope::output_scope::OutputScope;
 use crate::gui::node::port_color::{event_color, port_color};
 use crate::gui::node::port_row::glyph::{circle_frame, event_glyph, port_diameter};
 use crate::gui::node::value_editor;
-use crate::gui::node::{RecordCtx, node_hovered, port_wid, set_input};
+use crate::gui::node::{NodeCtx, port_wid, set_input};
 use crate::gui::run_state::ExecStatus;
-use crate::gui::theme::StaticValueEditorTheme;
+use crate::gui::theme::Theme;
 
 /// Grid columns: inputs (hug), input values (hug, capped at `max_width` — so
 /// wide editors fit but a very long one ellipsizes; the numeric `DragValue`
@@ -63,12 +62,11 @@ const PORT_ROW_HEIGHT_EM: f32 = 2.0;
 /// buffer — see its doc for why the grid's rows aren't built fresh here.
 pub(super) fn ports_row(
     ui: &mut Ui,
-    rcx: RecordCtx<'_>,
-    node: NodeScope<'_>,
+    ncx: NodeCtx<'_>,
     row_tracks: &mut Vec<Track>,
     out: &mut Intents,
 ) {
-    let theme = rcx.theme();
+    let (theme, node) = (ncx.theme(), ncx.node());
     // Events list under the outputs in the same column, so the output side
     // needs a row per output *and* per event.
     let n_rows = node
@@ -77,19 +75,6 @@ pub(super) fn ports_row(
     if n_rows == 0 {
         return;
     }
-    // Pointer-over-node surfaces the (otherwise invisible) const-editor
-    // chips at half strength — the edit affordance appears exactly when the
-    // pointer is in the neighborhood, and geometry never changes.
-    //
-    // It also gates the port tooltips: their text is built per port per
-    // frame, and no port can be showing one while the pointer is elsewhere,
-    // so only the node under it pays for them.
-    let hovered = node_hovered(ui, node.id);
-    let sve = if hovered {
-        &theme.static_value_editor_revealed
-    } else {
-        &theme.static_value_editor
-    };
     // Fixed-height rows (font-relative) so a node's ports stay uniform whether
     // or not an input carries an inline editor (hug makes editor rows taller).
     // Every row of every node gets the same track, so the buffer is rebuilt
@@ -118,8 +103,8 @@ pub(super) fn ports_row(
             theme.port_col_pad_top,
         ))
         .show(ui, |ui| {
-            input_cells(ui, rcx, node, sve, hovered, out);
-            output_cells(ui, rcx, node, hovered, out);
+            input_cells(ui, ncx, out);
+            output_cells(ui, ncx, out);
         });
 }
 
@@ -127,11 +112,11 @@ pub(super) fn ports_row(
 /// see [`ports_row`]. Empty otherwise, which
 /// [`tooltip_after`](crate::gui::widgets::support::tooltip_after) and
 /// [`port_label`] both treat as "no tooltip".
-fn tip_for(rcx: RecordCtx<'_>, wanted: bool, description: &str, ty: &DataType) -> String {
-    if !wanted {
+fn tip_for(ncx: NodeCtx<'_>, description: &str, ty: &DataType) -> String {
+    if !ncx.tips() {
         return String::new();
     }
-    port_tip(description, type_label(rcx.graph_scope().library(), ty))
+    port_tip(description, type_label(ncx.graph_scope().library(), ty))
 }
 
 /// Render `name` as a port's label, with `tip` (the port's data type) as its
@@ -142,10 +127,10 @@ fn tip_for(rcx: RecordCtx<'_>, wanted: bool, description: &str, ty: &DataType) -
 /// trigger anchor for the tooltip, but the node body below it owns selection
 /// and drag, so the press has to fall through. Muted ink — the value column is
 /// each row's strong element, not the label.
-fn port_label(ui: &mut Ui, rcx: RecordCtx<'_>, name: &str, tip: &str) {
+fn port_label(ui: &mut Ui, theme: &Theme, name: &str, tip: &str) {
     let snapshot = Text::new(name)
         .style(&TextStyle {
-            color: rcx.theme().colors.port_label,
+            color: theme.colors.port_label,
             ..ui.theme.text.clone()
         })
         .sense(Sense::HOVER)
@@ -156,35 +141,23 @@ fn port_label(ui: &mut Ui, rcx: RecordCtx<'_>, name: &str, tip: &str) {
     }
 }
 
-fn input_cells(
-    ui: &mut Ui,
-    rcx: RecordCtx<'_>,
-    node: NodeScope<'_>,
-    sve: &StaticValueEditorTheme,
-    tips: bool,
-    out: &mut Intents,
-) {
-    for input in node.inputs() {
-        input_label_cell(ui, rcx, node, input, tips, out);
-        value_cell(ui, rcx, sve, input, out);
+fn input_cells(ui: &mut Ui, ncx: NodeCtx<'_>, out: &mut Intents) {
+    for input in ncx.node().inputs() {
+        input_label_cell(ui, ncx, input, out);
+        value_cell(ui, ncx, input, out);
     }
 }
 
-fn output_cells(
-    ui: &mut Ui,
-    rcx: RecordCtx<'_>,
-    node: NodeScope<'_>,
-    tips: bool,
-    out: &mut Intents,
-) {
+fn output_cells(ui: &mut Ui, ncx: NodeCtx<'_>, out: &mut Intents) {
+    let node = ncx.node();
     let output_count = node.port_count(PortKind::Output);
     for output in node.outputs() {
-        output_cell(ui, rcx, output, tips, out);
+        output_cell(ui, ncx, output, out);
     }
     // Events emit from the same (right) side; list them in the rows directly
     // below the data outputs.
     for (i, event) in node.events().iter().enumerate() {
-        event_cell(ui, rcx, node.id, i, output_count + i, event, tips);
+        event_cell(ui, ncx, i, output_count + i, event);
     }
 }
 
@@ -233,17 +206,10 @@ fn open_port_context_menu(ui: &mut Ui, menu_id: WidgetId, cell_secondary: bool, 
 /// menu (anchored here, so right-clicking the circle or label opens it).
 /// The circle's `WidgetId` is the deterministic `port_circle_wid(port)`, so
 /// `CanvasGeometry`/snap/draw reconstruct it from domain coords.
-fn input_label_cell(
-    ui: &mut Ui,
-    rcx: RecordCtx<'_>,
-    node: NodeScope<'_>,
-    input: InputScope<'_>,
-    tips: bool,
-    out: &mut Intents,
-) {
-    let theme = rcx.theme();
+fn input_label_cell(ui: &mut Ui, ncx: NodeCtx<'_>, input: InputScope<'_>, out: &mut Intents) {
+    let (theme, node) = (ncx.theme(), ncx.node());
     let port = input.port_ref();
-    let tip = tip_for(rcx, tips, input.description(), input.ty());
+    let tip = tip_for(ncx, input.description(), input.ty());
     // Flag a port only once a run actually failed on it — not on every unbound edit — so
     // the port keeps its data-type color while editing instead of flipping as you
     // bind/unbind. The run named the exact ports it could not feed, so only those light
@@ -257,7 +223,7 @@ fn input_label_cell(
             theme,
             input.ty(),
             PortKind::Input,
-            rcx.geometry().ports.is_hovered(port),
+            ncx.geometry().ports.is_hovered(port),
         )
     };
     // A required input's port reads as bigger — its total footprint matches
@@ -289,7 +255,7 @@ fn input_label_cell(
             if !input.const_only() {
                 circle_frame(ui, wid, diameter, fill, outline, margin, &tip);
             }
-            port_label(ui, rcx, input.name(), &tip);
+            port_label(ui, theme, input.name(), &tip);
         });
     // Open on right-click anywhere on the cell — circle or label.
     let (menu_id, cell_secondary) = (cell.response.id, cell.response.right.clicked());
@@ -327,13 +293,7 @@ fn input_label_cell(
 
 /// Column 1: the inline const editor for an input bound to a `Const`. A
 /// hug-sized column, so every editor starts at the same x.
-fn value_cell(
-    ui: &mut Ui,
-    rcx: RecordCtx<'_>,
-    sve: &StaticValueEditorTheme,
-    input: InputScope<'_>,
-    out: &mut Intents,
-) {
+fn value_cell(ui: &mut Ui, ncx: NodeCtx<'_>, input: InputScope<'_>, out: &mut Intents) {
     // The one owner of the "only Const bindings get an inline editor"
     // filter — wired and unbound inputs render no value cell.
     let Some(Binding::Const(value)) = input.binding() else {
@@ -354,8 +314,8 @@ fn value_cell(
         .show(ui, |ui| {
             value_editor::show(
                 ui,
-                sve,
-                rcx.graph_scope().library(),
+                ncx.sve(),
+                ncx.graph_scope().library(),
                 editor_id,
                 value,
                 data_type,
@@ -371,14 +331,8 @@ fn value_cell(
 /// pins it to the node's right edge); the circle overhangs that edge. (A dragged
 /// satellite can end up anywhere on the canvas, not just overhanging this
 /// node).
-fn output_cell(
-    ui: &mut Ui,
-    rcx: RecordCtx<'_>,
-    output: OutputScope<'_>,
-    tips: bool,
-    out: &mut Intents,
-) {
-    let theme = rcx.theme();
+fn output_cell(ui: &mut Ui, ncx: NodeCtx<'_>, output: OutputScope<'_>, out: &mut Intents) {
+    let theme = ncx.theme();
     let port = output.port_ref();
     // Resolved once for the fill and the tooltip: a wildcard output follows
     // its mirror chain on every read, so the cell asks once.
@@ -387,9 +341,9 @@ fn output_cell(
         theme,
         &ty,
         PortKind::Output,
-        rcx.geometry().ports.is_hovered(port),
+        ncx.geometry().ports.is_hovered(port),
     );
-    let tip = tip_for(rcx, tips, output.description(), &ty);
+    let tip = tip_for(ncx, output.description(), &ty);
     let wid = port_circle_wid(port);
     let overhang = theme.port_overhang();
     let cell = Panel::hstack()
@@ -401,7 +355,7 @@ fn output_cell(
         .gap(4.0)
         .child_align(Align::v(VAlign::Center))
         .show(ui, |ui| {
-            port_label(ui, rcx, output.name(), &tip);
+            port_label(ui, theme, output.name(), &tip);
             circle_frame(
                 ui,
                 wid,
@@ -422,7 +376,7 @@ fn output_cell(
     ContextMenu::for_id(menu_id)
         .size((Sizing::HUG, Sizing::HUG))
         .show(ui, |ui, popup| {
-            add_preview_item(ui, popup, rcx, port, out);
+            add_preview_item(ui, popup, ncx, port, out);
         });
 }
 
@@ -438,11 +392,11 @@ const PREVIEW_SPAWN_OFFSET: Vec2 = Vec2::new(80.0, -60.0);
 fn add_preview_item(
     ui: &mut Ui,
     popup: &PopupHandle,
-    rcx: RecordCtx<'_>,
+    ncx: NodeCtx<'_>,
     port: PortRef,
     out: &mut Intents,
 ) {
-    let Some(func) = preview::registered(rcx.graph_scope().library()) else {
+    let Some(func) = preview::registered(ncx.graph_scope().library()) else {
         return;
     };
     if !MenuItem::new("Add preview").show(ui, popup).left.clicked() {
@@ -450,7 +404,7 @@ fn add_preview_item(
     }
     // Positioned off the port when its center is known (it is, after the first
     // frame); otherwise the node lands at the origin and the user drags it.
-    let pos = rcx
+    let pos = ncx
         .geometry()
         .ports
         .center(port)
@@ -485,21 +439,14 @@ pub(crate) fn add_preview_intents(
 /// glyph, right-aligned and overhanging the node edge like a data output. Sits in
 /// `COL_OUTPUT` at `row` (below the data outputs). The glyph senses drags so a
 /// wire can be pulled from it to a subscriber pin (see `SubscriptionUI`).
-fn event_cell(
-    ui: &mut Ui,
-    rcx: RecordCtx<'_>,
-    node_id: NodeId,
-    event_idx: usize,
-    row: usize,
-    event: &FuncEvent,
-    tips: bool,
-) {
-    let theme = rcx.theme();
+fn event_cell(ui: &mut Ui, ncx: NodeCtx<'_>, event_idx: usize, row: usize, event: &FuncEvent) {
+    let theme = ncx.theme();
+    let node_id = ncx.node().id;
     let overhang = theme.port_overhang();
     let wid = event_glyph_wid(node_id, event_idx);
     let ev = EventRef { node_id, event_idx };
-    let fill = event_color(theme, rcx.geometry().events.is_hovered(ev));
-    let tip = if tips {
+    let fill = event_color(theme, ncx.geometry().events.is_hovered(ev));
+    let tip = if ncx.tips() {
         format!("event: {}", event.name)
     } else {
         String::new()
