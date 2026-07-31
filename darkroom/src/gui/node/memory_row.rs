@@ -11,8 +11,7 @@ use crate::gui::widgets::support::{
 use scenarium::RamUsage;
 
 use crate::gui::format::fmt_bytes;
-use crate::gui::graph_scope::node_scope::NodeScope;
-use crate::gui::node::RecordCtx;
+use crate::gui::node::NodeCtx;
 use crate::gui::theme::Theme;
 
 const DOT: f32 = 6.0;
@@ -20,12 +19,13 @@ const BAR_H: f32 = 3.0;
 
 /// Draw the node's memory footer, or nothing when it holds no RAM. `node.ram()`
 /// is mirrored from the run cache; each pool shows only when non-zero.
-pub(super) fn memory_row(ui: &mut Ui, rcx: RecordCtx<'_>, node: NodeScope<'_>) {
+pub(super) fn memory_row(ui: &mut Ui, ncx: NodeCtx<'_>) {
+    let node = ncx.node();
     let ram = node.ram();
     if ram.total() == 0 {
         return;
     }
-    let theme = rcx.theme();
+    let theme = ncx.theme();
     // Same inner radius the header rounds to (`Theme::card_inner_radius`),
     // not the card's raw outer `node_corner_radius` — else this strip's
     // corner leaves a wedge of body fill showing past the border stroke.

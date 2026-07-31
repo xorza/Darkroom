@@ -34,8 +34,7 @@ use scenarium::NodeId;
 use crate::gui::canvas::hits::{CanvasHits, Chip};
 use crate::gui::canvas::{CanvasCtx, outer_canvas_widget_id};
 use crate::gui::format::fmt_elapsed;
-use crate::gui::graph_scope::node_scope::NodeScope;
-use crate::gui::node::{RecordCtx, exec_color};
+use crate::gui::node::{NodeCtx, RecordCtx, exec_color};
 use crate::gui::run_state::ExecStatus;
 use crate::gui::theme::Theme;
 use crate::gui::widgets::support::{colored_text, sized_text};
@@ -136,21 +135,14 @@ impl Inspectors {
                 .map(|r| r.size.w)
                 .unwrap_or(theme.node_min_width);
             let pos = node.pos + Vec2::new(node_w + theme.floating_widget_gap, 0.0);
-            self.draw_one(ui, rcx, node, mode, pos);
+            self.draw_one(ui, rcx.node(ui, node), mode, pos);
         }
     }
 
-    fn draw_one(
-        &self,
-        ui: &mut Ui,
-        rcx: RecordCtx<'_>,
-        node: NodeScope<'_>,
-        mode: InspectMode,
-        pos: Vec2,
-    ) {
-        let theme = rcx.theme();
-        let logs = rcx.graph_scope().run_state().logs(node.id);
-        let error = rcx.graph_scope().run_state().error(node.id);
+    fn draw_one(&self, ui: &mut Ui, ncx: NodeCtx<'_>, mode: InspectMode, pos: Vec2) {
+        let (theme, node) = (ncx.theme(), ncx.node());
+        let logs = ncx.graph_scope().run_state().logs(node.id);
+        let error = ncx.graph_scope().run_state().error(node.id);
         // The outline is the *pinned* signal, in the same accent the header's
         // `i` chip uses for its open/pinned states — one color means
         // "inspector held open" on both ends. A transient panel rides on its
@@ -226,7 +218,7 @@ impl Inspectors {
                     line(ui, node.description(), muted_style(theme, ui));
                 }
 
-                let library = rcx.graph_scope().library();
+                let library = ncx.graph_scope().library();
                 if node.inputs().len() > 0 {
                     section(ui, theme, "Inputs");
                     for input in node.inputs() {
