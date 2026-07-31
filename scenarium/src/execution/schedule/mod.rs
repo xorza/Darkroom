@@ -126,6 +126,20 @@ impl NodeState {
     pub(crate) fn missing_required_inputs(self) -> bool {
         self == NodeState::MissingInputs
     }
+
+    /// Clear this node to run, reporting whether it was this call that did it.
+    ///
+    /// The only way `Run` is written, and the gate is the point: promoting a
+    /// `Disabled` or `MissingInputs` node would overwrite the verdict the run's
+    /// outcome reports it by, and — for a disabled producer feeding an optional
+    /// input — claim a node `process_order` does not even contain.
+    fn promote_to_run(&mut self) -> bool {
+        let cleared = self.is_runnable();
+        if cleared {
+            *self = NodeState::Run;
+        }
+        cleared
+    }
 }
 
 /// The per-output half of one resolved run, filled by the same reverse sweep that
@@ -552,20 +566,20 @@ impl RunSchedule {
             outputs,
         } = &mut *self;
 
+        // Liveness starts at what the run was asked for.
         for &node_idx in roots.iter() {
-            // Only a root the planner cleared. Promoting a `Disabled` or
-            // `MissingInputs` root would overwrite the verdict the run's
-            // outcome reports it by — and claim a node the schedule may not
-            // even contain.
-            if states[node_idx].is_runnable() {
-                states[node_idx] = NodeState::Run;
-            }
+            states[node_idx].promote_to_run();
         }
 
+        // Reverse process order, so every consumer of a node has contributed
+        // its demand before the node is classified: a producer is promoted and
+        // read-counted by each live consumer on the way past, and only then
+        // asked whether a cache covers what was actually demanded. That also
+        // means a promotion can only overwrite the planner's `Cut` or an
+        // earlier consumer's `Run`, never a `Reuse` this sweep settled.
         for &node_idx in process_order.iter().rev() {
-            // `Run` is written only through an `is_runnable` gate — here and
-            // at the producer promotion below — so reaching this body already
-            // means the planner cleared the node. There is no second check.
+            // Reaching this body means the planner cleared the node and some
+            // consumer (or a root) promoted it — `Run` is written no other way.
             if states[node_idx] != NodeState::Run {
                 continue;
             }
@@ -574,41 +588,34 @@ impl RunSchedule {
                 states[node_idx] = NodeState::MissingLambda;
                 continue;
             }
-            let output_range = e_node.outputs;
+
+            let flags = root_flags[node_idx];
+            let demand = &mut outputs.demand[e_node.outputs];
             // A node seed ("run to this node") demands every output the node has:
             // the host asked for the node itself, not for what a consumer reads.
-            if root_flags[node_idx].is_seeded() {
-                outputs.demand[output_range].fill(OutputDemand::Produce);
+            if flags.is_seeded() {
+                demand.fill(OutputDemand::Produce);
             }
-            let demand = &outputs.demand[output_range];
-            if !root_flags[node_idx].is_event_source()
-                && cache.probe_reuse(program, node_idx, demand).await
-            {
+            if !flags.is_event_source() && cache.probe_reuse(program, node_idx, demand).await {
                 states[node_idx] = NodeState::Reuse;
                 continue;
             }
+
             for input in &program.inputs[e_node.inputs] {
-                if let ExecutionBinding::Bind(addr) = &input.binding {
-                    // Only a producer the plan will actually run can deliver
-                    // a value. A **disabled** producer feeding an *optional*
-                    // input leaves the consumer perfectly schedulable —
-                    // `input_missing` treats an optional port fed by a
-                    // disabled producer as satisfied — but the producer
-                    // itself never enters `process_order`. Marking it live
-                    // here put a node the schedule does not contain into the
-                    // run, and the consumer's read then demanded an output
-                    // nothing would ever produce: a panic on a cold cache,
-                    // and on a warm one the value from before it was
-                    // disabled, served as if it were this run's.
-                    //
-                    // Reverse order also means a producer is promoted before
-                    // it is classified, so this only ever overwrites the
-                    // planner's `Cut` or an earlier consumer's `Run` — never
-                    // a `Reuse` this sweep already settled.
-                    if !states[addr.node_idx].is_runnable() {
-                        continue;
-                    }
-                    states[addr.node_idx] = NodeState::Run;
+                let ExecutionBinding::Bind(addr) = &input.binding else {
+                    continue;
+                };
+                // Only a producer the plan will actually run can deliver a
+                // value. A **disabled** producer feeding an *optional* input
+                // leaves the consumer perfectly schedulable — `input_missing`
+                // treats an optional port fed by a disabled producer as
+                // satisfied — but the producer itself never enters
+                // `process_order`. Marking it live here put a node the schedule
+                // does not contain into the run, and the consumer's read then
+                // demanded an output nothing would ever produce: a panic on a
+                // cold cache, and on a warm one the value from before it was
+                // disabled, served as if it were this run's.
+                if states[addr.node_idx].promote_to_run() {
                     outputs.add_reader(program.output_idx(*addr));
                 }
             }
