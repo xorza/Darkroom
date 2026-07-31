@@ -9,7 +9,7 @@ use crate::gui::EventRef;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::graph_ctx::input_scope::InputScope;
 use crate::gui::graph_ctx::output_scope::OutputScope;
-use crate::gui::run_state::ExecStatus;
+use crate::gui::state::run_state::ExecStatus;
 
 /// The `kind_label` a node reports when the library holds no func for it —
 /// see [`NodeScope::missing`].

@@ -27,7 +27,7 @@ use crate::core::io::preferences::Preferences;
 use crate::gui::app::commands::AppCommand;
 use crate::gui::app::ctx::{AppCtx, StatusInputs};
 use crate::gui::app::editor::Editor;
-use crate::gui::run_state::RunState;
+use crate::gui::state::run_state::RunState;
 use crate::gui::theme::Theme;
 
 /// Surface every editor test frames at unless it resizes. Wide enough
@@ -118,7 +118,7 @@ mod tests {
 
     use crate::core::document::Document;
 
-    use crate::gui::status_bar::status_bar_id;
+    use crate::gui::window::status_bar::status_bar_id;
 
     /// The bar used to collapse when it had nothing to say; the process
     /// footprint gives it something on every frame, so it is recorded on

@@ -2,7 +2,7 @@
 
 use scenarium::Library;
 
-use crate::gui::run_state::RunState;
+use crate::gui::state::run_state::RunState;
 use crate::gui::theme::Theme;
 
 /// The frame's read-only world, threaded down the UI tree: the theme, the
@@ -16,7 +16,7 @@ use crate::gui::theme::Theme;
 /// resolves this against a document to make the
 /// graph pane's context, and everything under the canvas reads the theme, the
 /// library and the run back off *that* — which is why nothing below
-/// [`MainWindow`](crate::gui::main_window::MainWindow) names this type.
+/// [`MainWindow`](crate::gui::window::MainWindow) names this type.
 ///
 /// Only shared state belongs here. The mutable sinks a frame writes through —
 /// `Ui`, the intent buffer, the preferences — stay explicit parameters, so a
@@ -67,7 +67,7 @@ impl<'a> AppCtx<'a> {
     }
 
     /// This process's resident bytes (see
-    /// [`ProcessMemory`](crate::gui::process_memory::ProcessMemory)), rendered as the
+    /// [`ProcessMemory`](crate::gui::state::process_memory::ProcessMemory)), rendered as the
     /// status bar's `MEM` clause.
     pub(crate) fn process_memory(self) -> u64 {
         self.status.process_memory

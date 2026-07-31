@@ -41,7 +41,7 @@ impl UndoStep {
 
     /// Whether replaying this step — in either direction, since the same
     /// predicate serves apply and revert — strands
-    /// [`CanvasGeometry`](crate::gui::canvas::geometry::CanvasGeometry)'s
+    /// [`CanvasGeometry`](crate::gui::pane::graph::frame::geometry::CanvasGeometry)'s
     /// cross-frame caches: a widget whose *measured size* changed, or a
     /// node with no cached port offsets at all. Those caches are what
     /// wires anchor to, so a true arm costs one `ui.request_relayout()` at

@@ -9,7 +9,7 @@ use scenarium::StaticValue;
 use crate::core::edit::intent::types::GraphIntent;
 use crate::gui::app::App;
 use crate::gui::dialogs;
-use crate::gui::node::prepass::PathPickRequest;
+use crate::gui::pane::graph::frame::prepass::PathPickRequest;
 
 /// Node edits that need a dialog before applying. Handled by
 /// [`App::handle_edit`].

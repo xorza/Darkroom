@@ -33,7 +33,7 @@ impl PortKind {
 }
 
 /// One port's identity in the graph. Domain-keyed so UI passes can derive
-/// its `WidgetId` (see `crate::gui::node::port_row::port_circle_wid`)
+/// its `WidgetId` (see `crate::gui::pane::graph::node::port_row::port_circle_wid`)
 /// without threading a cache, and serializable so a persisted tab
 /// ([`TabRef::ImageViewer`]) can bind to it. Node ids are unique across
 /// the whole document, so no graph ref is needed alongside — enforced by
@@ -58,7 +58,7 @@ pub(crate) enum TabRef {
     Preferences,
     /// A full-resolution viewer of one port's runtime image — one tab per
     /// port, deduped on open. Content is runtime-only
-    /// (`crate::gui::image_viewer`): a restored tab pulls any current value
+    /// (`crate::gui::pane::viewer`): a restored tab pulls any current value
     /// from `RunState` when drawn. Pruned when its node is deleted.
     ///
     /// Keyed by the preview node whose value it shows — the same identity the

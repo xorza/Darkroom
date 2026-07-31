@@ -1,9 +1,15 @@
 use scenarium::testing;
 use scenarium::testing::graph::TestGraph;
-use scenarium::{CacheMode, DataType, FuncOutput, Graph, Library, Node, NodeKind};
+use scenarium::{
+    Binding, CacheMode, DataType, FuncOutput, Graph, InputPort, Library, Node, NodeKind,
+    OutputTypes,
+};
 
-use crate::core::document::{Document, PortKind};
+use crate::core::document::{Document, GraphView, PortKind};
 use crate::gui::graph_ctx::internals::GraphCtxFixture;
+use crate::gui::pane::graph::harness::*;
+use crate::gui::state::run_state::RunState;
+use crate::gui::theme::Theme;
 
 #[test]
 fn only_runnable_sinks_expose_the_disable_toggle() {
@@ -299,5 +305,51 @@ fn a_wildcard_output_resolves_through_the_wire_it_mirrors() {
             .ty(),
         DataType::Int,
         "the wildcard follows the wire to the Int source"
+    );
+}
+
+/// A graph edit reaches the very next read, with nothing announced.
+///
+/// The canvas holds no derived state about the graph, so there is no
+/// invalidation step between wiring a port and the canvas reporting its new
+/// type — which is the whole reason the wildcard resolution is safe to do per
+/// read. Wired through the same context the record passes build.
+#[test]
+fn a_wire_edit_reaches_the_next_read_with_nothing_announced() {
+    let library = wildcard_library();
+    let probe = library.by_name("probe").expect("just added").clone();
+    let passthrough = library.by_name("passthrough").expect("just added").clone();
+
+    let mut doc = Document::default();
+    // `probe` declares a fixed `Int` output; the passthrough mirrors whatever
+    // reaches its input, so unwired it resolves to `Any`.
+    let producer = doc.graph.add_func_node(&probe);
+    let consumer = doc.graph.add_func_node(&passthrough);
+    doc.main_view = GraphView::for_graph(&doc.graph);
+
+    let theme = Theme::default();
+    let run_state = RunState::default();
+    let resolved_output = |doc: &Document| {
+        let mut types = OutputTypes::default();
+        graph_ctx_for(app(&theme, &library, &run_state), doc, &mut types)
+            .node(consumer)
+            .expect("the passthrough resolves")
+            .output(0)
+            .expect("it declares one output")
+            .ty()
+    };
+
+    assert_eq!(
+        resolved_output(&doc),
+        DataType::Any,
+        "an unwired passthrough has nothing to mirror"
+    );
+
+    doc.graph
+        .set_input_binding(InputPort::new(consumer, 0), Binding::bind(producer, 0));
+    assert_eq!(
+        resolved_output(&doc),
+        DataType::Int,
+        "the next read follows the new wire — nothing was invalidated in between"
     );
 }

@@ -134,7 +134,7 @@ fn hover_bg(hovered: bool, theme: &Theme, corners: Corners) -> Background {
 }
 
 /// One strip's shared draw state, threaded through its chips (the
-/// [`crate::gui::canvas::ctx::DrawCtx`] pattern, strip-scoped).
+/// [`crate::gui::pane::graph::ctx::DrawCtx`] pattern, strip-scoped).
 #[derive(Debug)]
 struct StripCtx<'a> {
     theme: &'a Theme,

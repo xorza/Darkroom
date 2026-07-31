@@ -29,7 +29,7 @@ use scenarium::{Graph, InputPort, Library, NodeId, OutputPort, OutputTypes, Subs
 use crate::core::document::{Document, GraphView, Viewport};
 use crate::gui::app::ctx::AppCtx;
 use crate::gui::graph_ctx::node_scope::NodeScope;
-use crate::gui::run_state::RunState;
+use crate::gui::state::run_state::RunState;
 use crate::gui::theme::Theme;
 
 #[cfg(test)]
@@ -203,7 +203,7 @@ pub(crate) mod internals {
     use crate::core::document::Document;
     use crate::gui::app::ctx::{AppCtx, StatusInputs};
     use crate::gui::graph_ctx::GraphCtx;
-    use crate::gui::run_state::RunState;
+    use crate::gui::state::run_state::RunState;
     use crate::gui::theme::Theme;
 
     /// Everything a [`GraphCtx`] composes, owned together so a test can
