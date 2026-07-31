@@ -1,29 +1,20 @@
 use crate::graph::identity::{FuncId, NodeId};
 use std::sync::Arc;
 
-use crate::common::column::{Column, Span};
+use crate::common::column::Column;
 use crate::execution::cache::digest::Digest;
 use crate::execution::cache::runtime::RuntimeCache;
 use crate::execution::cache::slot::{OutputSnapshot, RuntimeSlot};
-use crate::execution::compile::compiled_graph::{CompiledGraph, ExecutionNode};
-use crate::execution::identity::{NodeIdx, OutputAddr, OutputIdx};
+use crate::execution::compile::compiled_graph::CompiledGraph;
+use crate::execution::identity::{NodeIdx, OutputAddr};
 use crate::graph::func::FuncBehavior;
 use crate::graph::func::lambda::OutputDemand;
 use crate::graph::node::CacheMode;
+use crate::testing::program::ProgramBuilder;
 use crate::{DataType, DynamicValue, RamUsage, StaticValue};
 
 fn out() -> Vec<DynamicValue> {
     vec![DynamicValue::Static(StaticValue::Int(1))]
-}
-
-/// Declare one output on `program`, matching the single-value snapshots
-/// [`out`] builds.
-///
-/// `release_dead_outputs` compares a resident snapshot's length against
-/// the node's declared port count, so a fixture node declaring none while
-/// holding a value is not a shape any real program produces.
-fn one_output(program: &mut CompiledGraph) -> Span<OutputIdx> {
-    program.outputs.append([DataType::Int])
 }
 
 const DEMANDED: &[OutputDemand] = &[OutputDemand::Produce];
@@ -53,24 +44,27 @@ fn keyed_slot(current_digest: Option<Digest>) -> RuntimeSlot {
     slot
 }
 
-/// A program of `nodes`, ids `from_u128(idx + 1)` in order, one `Int` output
-/// each — the shape the slot fixtures above hold values for.
-fn program_of(nodes: impl IntoIterator<Item = ExecutionNode>) -> CompiledGraph {
-    let mut program = CompiledGraph::default();
-    for (index, mut e_node) in nodes.into_iter().enumerate() {
-        e_node.outputs = one_output(&mut program);
-        program.push(NodeId::from_u128(index as u128 + 1), e_node);
+/// One node per `(cache, behavior)` pair, each declaring a single `Int` output.
+///
+/// The output matters: `release_dead_outputs` compares a resident snapshot's
+/// length against the node's declared port count, so a fixture node declaring
+/// none while holding a value is not a shape any real program produces.
+fn program_of(nodes: impl IntoIterator<Item = (CacheMode, FuncBehavior)>) -> CompiledGraph {
+    let mut prog = ProgramBuilder::default();
+    for (cache, behavior) in nodes {
+        let node = prog.node().cache(cache).output_types([DataType::Int]);
+        let node = match behavior {
+            FuncBehavior::Pure => node.pure(),
+            FuncBehavior::Impure => node,
+        };
+        node.add();
     }
-    program
+    prog.into_program()
 }
 
-/// A `Pure` node retained in RAM — the default the residency fixtures assume.
-fn ram_node() -> ExecutionNode {
-    ExecutionNode {
-        cache: CacheMode::Ram,
-        behavior: FuncBehavior::Pure,
-        ..Default::default()
-    }
+/// `count` `Pure` nodes retained in RAM — what the residency fixtures assume.
+fn ram_program(count: usize) -> CompiledGraph {
+    program_of((0..count).map(|_| (CacheMode::Ram, FuncBehavior::Pure)))
 }
 
 /// Install `program` and fill the slots it opens, in index order. The only way
@@ -110,7 +104,7 @@ async fn eviction_clears_only_the_output_cache() {
 
     let mut cache = RuntimeCache::default();
     let node_idx = NodeIdx(0);
-    let program = program_of([ram_node()]);
+    let program = ram_program(1);
     install(&mut cache, &program, [slot]);
     let node_id = NodeId::from_u128(1);
     let failures = cache.evict(&program, &[node_id]).await;
@@ -133,7 +127,7 @@ fn is_hit_requires_current_digest_values_and_matching_node_digest() {
     let (impure, empty, stale, current) = (NodeIdx(0), NodeIdx(1), NodeIdx(2), NodeIdx(3));
     install(
         &mut cache,
-        &program_of([ram_node(), ram_node(), ram_node(), ram_node()]),
+        &ram_program(4),
         [
             // 0: impure cone (no current digest) — never hits, even holding values.
             resident_slot(None, Some(d), out()),
@@ -227,11 +221,7 @@ fn releases_every_resident_value_that_cannot_be_a_future_ram_hit() {
         ),
     ];
     let mut cache = RuntimeCache::default();
-    let program = program_of(cases.map(|(_, mode, behavior, ..)| ExecutionNode {
-        cache: mode,
-        behavior,
-        ..Default::default()
-    }));
+    let program = program_of(cases.map(|(_, mode, behavior, ..)| (mode, behavior)));
     install(
         &mut cache,
         &program,
@@ -263,22 +253,7 @@ fn reconcile_applies_ram_mode_downgrades_without_waiting_for_a_run() {
     // One program per install: the values are produced under the first, where
     // every node retains in RAM, and the second is the recompile that downgrades
     // each node to its case's mode.
-    let build = |modes: [CacheMode; 4]| {
-        let mut program = CompiledGraph::default();
-        for (index, mode) in modes.into_iter().enumerate() {
-            let outputs = one_output(&mut program);
-            program.push(
-                NodeId::from_u128(index as u128 + 1),
-                ExecutionNode {
-                    cache: mode,
-                    behavior: FuncBehavior::Pure,
-                    outputs,
-                    ..Default::default()
-                },
-            );
-        }
-        program
-    };
+    let build = |modes: [CacheMode; 4]| program_of(modes.map(|mode| (mode, FuncBehavior::Pure)));
 
     let mut cache = RuntimeCache::default();
     let retaining = build([CacheMode::Ram; 4]);
@@ -307,19 +282,15 @@ async fn reconcile_drops_state_only_when_the_owning_implementation_changes() {
     // Each install is its own program — the owner change under test is what a
     // recompile does to the node, not an edit to the program already installed.
     let build = move |func_id| {
-        let mut program = CompiledGraph::default();
-        let outputs = one_output(&mut program);
-        program.push(
-            node_id,
-            ExecutionNode {
-                func_id,
-                cache: CacheMode::Ram,
-                behavior: FuncBehavior::Pure,
-                outputs,
-                ..Default::default()
-            },
-        );
-        program
+        let mut prog = ProgramBuilder::default();
+        prog.node()
+            .id(node_id)
+            .func(func_id)
+            .pure()
+            .cache(CacheMode::Ram)
+            .output_types([DataType::Int])
+            .add();
+        prog.into_program()
     };
 
     let mut cache = RuntimeCache::default();
@@ -362,18 +333,15 @@ async fn reconcile_drops_state_only_when_the_owning_implementation_changes() {
 #[test]
 fn reconcile_follows_ids_when_the_index_space_shifts() {
     let build = |ids: &[u128]| {
-        let mut program = CompiledGraph::default();
+        let mut prog = ProgramBuilder::default();
         for id in ids {
-            program.push(
-                NodeId::from_u128(*id),
-                ExecutionNode {
-                    cache: CacheMode::Ram,
-                    behavior: FuncBehavior::Pure,
-                    ..Default::default()
-                },
-            );
+            prog.node()
+                .id(NodeId::from_u128(*id))
+                .pure()
+                .cache(CacheMode::Ram)
+                .add();
         }
-        program
+        prog.into_program()
     };
     let digest = |id: u128| Digest([id as u8; 32]);
 
@@ -419,7 +387,7 @@ fn hydrate_turns_a_miss_into_a_hit() {
     let d = Digest([3u8; 32]);
     let mut cache = RuntimeCache::default();
     let node_idx = NodeIdx(0);
-    install(&mut cache, &program_of([ram_node()]), [keyed_slot(Some(d))]);
+    install(&mut cache, &ram_program(1), [keyed_slot(Some(d))]);
     assert!(
         !cache.is_resident_hit(node_idx, DEMANDED),
         "empty slot misses"
@@ -447,7 +415,7 @@ fn resident_hit_derives_coverage_from_values() {
     slot.invoke_slot(2).outputs[0] = StaticValue::Int(10).into();
     slot.stamp_produced();
     let node_idx = NodeIdx(0);
-    install(&mut cache, &program_of([ram_node()]), [slot]);
+    install(&mut cache, &ram_program(1), [slot]);
 
     let values = cache.slots[node_idx]
         .output_values()
@@ -491,17 +459,9 @@ fn debug_assertions_reject_invalid_cache_arities_and_ports() {
     );
 
     // Two declared outputs, one resident value: the arity check must fire.
-    let mut program = CompiledGraph::default();
-    let outputs = program
-        .outputs
-        .append([DataType::default(), DataType::default()]);
-    program.push(
-        NodeId::from_u128(1),
-        ExecutionNode {
-            outputs,
-            ..Default::default()
-        },
-    );
+    let mut prog = ProgramBuilder::default();
+    prog.node().outputs(2).add();
+    let program = prog.into_program();
     let mut cache = RuntimeCache::default();
     install(
         &mut cache,
@@ -583,7 +543,7 @@ fn resident_ram_stats_accounts_each_owner_once_and_dedups_the_total() {
     // Slot A: the shared value + a distinct 5/0 value + a scalar (weightless).
     install(
         &mut cache,
-        &program_of([ram_node(), ram_node(), ram_node()]),
+        &ram_program(3),
         [
             resident_slot(
                 Some(d),

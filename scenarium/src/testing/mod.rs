@@ -1,6 +1,15 @@
-//! Shared test fixtures: a 5-func sample library and a small graph that
-//! wires it together. This module is available only for in-tree tests or the
-//! downstream `internals` dev feature.
+//! Test fixtures, available only to in-tree tests and the downstream
+//! `internals` dev feature.
+//!
+//! [`graph`] is the harness: a graph and its library built together and
+//! addressed by name. What is left in this file is the older fixture pair —
+//! a five-func library and the graph wiring it — which
+//! [`TestGraph::sample`](graph::TestGraph::sample) wraps so tests can move
+//! across one at a time.
+
+pub mod graph;
+#[cfg(test)]
+pub(crate) mod program;
 
 use std::sync::Arc;
 
