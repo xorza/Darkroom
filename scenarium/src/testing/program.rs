@@ -234,6 +234,15 @@ impl NodeBuilder<'_> {
         self.lambda(async_lambda!(|_| { Ok(()) }))
     }
 
+    /// A node a cache could serve: content-cacheable, so it earns a digest, and
+    /// implemented, so the sweep does not verdict it `MissingLambda` first.
+    ///
+    /// The two together are what "could this be reused" takes, which is why
+    /// every sweep fixture states them.
+    pub(crate) fn reusable(self) -> Self {
+        self.pure().stub()
+    }
+
     /// An optional input reading `binding`.
     pub(crate) fn input(self, binding: ExecutionBinding) -> Self {
         self.push_input(ExecutionInput {

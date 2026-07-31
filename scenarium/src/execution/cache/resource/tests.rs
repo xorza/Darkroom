@@ -1,6 +1,4 @@
-use std::sync::atomic::{AtomicU64, Ordering};
-
-use ::common::CancelToken;
+use ::common::{CancelToken, TempDir};
 
 use crate::execution::cache::digest::{Digest, DigestHasher};
 use crate::execution::cache::resource::{FileId, FsPathId, StampJob, epoch_offset_ns};
@@ -8,28 +6,6 @@ use crate::execution::cache::runtime::RuntimeCache;
 use crate::graph::identity::FuncId;
 use crate::testing::program::ProgramBuilder;
 use crate::{DataType, StaticValue};
-
-#[derive(Debug)]
-struct TempDir(std::path::PathBuf);
-
-impl TempDir {
-    fn new(tag: &str) -> Self {
-        static COUNTER: AtomicU64 = AtomicU64::new(0);
-        let path = std::env::temp_dir().join(format!(
-            "scenarium-resource-{tag}-{}-{}",
-            std::process::id(),
-            COUNTER.fetch_add(1, Ordering::Relaxed)
-        ));
-        std::fs::create_dir_all(&path).unwrap();
-        Self(path)
-    }
-}
-
-impl Drop for TempDir {
-    fn drop(&mut self) {
-        std::fs::remove_dir_all(&self.0).ok();
-    }
-}
 
 fn fingerprint_with(job: &mut StampJob, path: &str) -> Digest {
     let Ok(identity) = job.stamp(path, &CancelToken::never()) else {
@@ -47,7 +23,7 @@ fn fingerprint(path: &str) -> Digest {
 #[test]
 fn directory_identity_tracks_entry_changes() {
     let dir = TempDir::new("dir");
-    let path = dir.0.to_string_lossy().into_owned();
+    let path = dir.path().to_string_lossy().into_owned();
 
     #[cfg(unix)]
     {
@@ -60,7 +36,7 @@ fn directory_identity_tracks_entry_changes() {
         // the contents it cannot see changed underneath it.
         let empty = fingerprint(&path);
         let permissions = |mode: u32| Permissions::from_mode(mode);
-        std::fs::set_permissions(&dir.0, permissions(0o000)).unwrap();
+        std::fs::set_permissions(dir.path(), permissions(0o000)).unwrap();
         let unreadable = StampJob::default().stamp(&path, &CancelToken::never());
         // The whole pass fails with it, rather than dropping the path and
         // leaving the node silently uncached forever.
@@ -68,7 +44,7 @@ fn directory_identity_tracks_entry_changes() {
         job.request(&path);
         job.request("never-queued-twice");
         let resolved = job.run(&CancelToken::never());
-        std::fs::set_permissions(&dir.0, permissions(0o755)).unwrap();
+        std::fs::set_permissions(dir.path(), permissions(0o755)).unwrap();
 
         assert!(
             unreadable.is_err(),
@@ -95,19 +71,19 @@ fn directory_identity_tracks_entry_changes() {
         );
     }
 
-    std::fs::write(dir.0.join("a.fits"), b"one").unwrap();
+    std::fs::write(dir.join("a.fits"), b"one").unwrap();
     let base = fingerprint(&path);
     assert_eq!(fingerprint(&path), base);
 
-    std::fs::write(dir.0.join("b.fits"), b"two").unwrap();
+    std::fs::write(dir.join("b.fits"), b"two").unwrap();
     let after_add = fingerprint(&path);
     assert_ne!(after_add, base);
 
-    std::fs::write(dir.0.join("a.fits"), b"one-plus-more").unwrap();
+    std::fs::write(dir.join("a.fits"), b"one-plus-more").unwrap();
     let after_edit = fingerprint(&path);
     assert_ne!(after_edit, after_add);
 
-    std::fs::remove_file(dir.0.join("b.fits")).unwrap();
+    std::fs::remove_file(dir.join("b.fits")).unwrap();
     assert_ne!(fingerprint(&path), after_edit);
 }
 
@@ -118,8 +94,8 @@ fn directory_identity_tracks_entry_changes() {
 #[test]
 fn directory_identity_tracks_nested_changes() {
     let dir = TempDir::new("nested");
-    let path = dir.0.to_string_lossy().into_owned();
-    let sub = dir.0.join("sub");
+    let path = dir.path().to_string_lossy().into_owned();
+    let sub = dir.join("sub");
     std::fs::create_dir_all(sub.join("deeper")).unwrap();
     std::fs::write(sub.join("file.bin"), b"one").unwrap();
     let base = fingerprint(&path);
@@ -156,8 +132,8 @@ fn directory_identity_tracks_nested_changes() {
 #[test]
 fn a_reused_stamper_stamps_like_a_fresh_one() {
     let dir = TempDir::new("reuse");
-    let deep = dir.0.join("deep");
-    let shallow = dir.0.join("shallow");
+    let deep = dir.join("deep");
+    let shallow = dir.join("shallow");
     std::fs::create_dir_all(deep.join("nested")).unwrap();
     std::fs::create_dir(&shallow).unwrap();
     std::fs::write(deep.join("nested").join("a.bin"), b"one").unwrap();
@@ -196,10 +172,10 @@ fn directory_identity_separates_non_utf8_names() {
     use std::os::unix::ffi::OsStrExt;
 
     let dir = TempDir::new("bytes");
-    let path = dir.0.to_string_lossy().into_owned();
+    let path = dir.path().to_string_lossy().into_owned();
     // Both lossy-convert to the same U+FFFD replacement character.
-    let first = dir.0.join(OsStr::from_bytes(b"\xff"));
-    let second = dir.0.join(OsStr::from_bytes(b"\xfe"));
+    let first = dir.join(OsStr::from_bytes(b"\xff"));
+    let second = dir.join(OsStr::from_bytes(b"\xfe"));
 
     // APFS refuses a name that is not valid UTF-8 (`EILSEQ`), so on macOS the
     // input this test is about cannot be created at all — leave it to the
@@ -270,7 +246,7 @@ fn file_identity_separates_pre_epoch_mtimes() {
 #[tokio::test]
 async fn same_path_uses_one_identity_until_the_next_run() {
     let dir = TempDir::new("snapshot");
-    let file = dir.0.join("data.bin");
+    let file = dir.join("data.bin");
     std::fs::write(&file, b"x").unwrap();
     let path = StaticValue::FsPath(file.to_string_lossy().into_owned());
 

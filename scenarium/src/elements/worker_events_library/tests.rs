@@ -1,15 +1,9 @@
 use std::time::Duration;
 
-use crate::DynamicValue;
-use crate::Invocation;
 use crate::elements::worker_events_library::{FRAME_EVENT_FUNC_ID, worker_events_library};
 use crate::graph::func::Func;
-use crate::graph::func::error::InvokeError;
-use crate::graph::func::error::InvokeResult;
-use crate::graph::func::lambda::OutputDemand;
-use crate::runtime::any_state::AnyState;
-use crate::runtime::context::ContextManager;
-use crate::runtime::shared_any_state::SharedAnyState;
+use crate::graph::func::error::{InvokeError, InvokeResult};
+use crate::testing::func_invoker::FuncInvoker;
 
 #[derive(Debug)]
 struct FrameOutputs {
@@ -17,56 +11,54 @@ struct FrameOutputs {
     frame_no: i64,
 }
 
-async fn invoke_frame(
-    func: &Func,
-    frequency: f64,
-    event_state: &SharedAnyState,
-) -> InvokeResult<FrameOutputs> {
-    let mut context = ContextManager::default();
-    let mut state = AnyState::default();
-    let mut inputs = [frequency.into()];
-    let demand = [OutputDemand::Produce; 2];
-    let mut outputs = [DynamicValue::Unbound, DynamicValue::Unbound];
-
-    func.lambda
-        .invoke(Invocation {
-            ctx: &mut context,
-            state: &mut state,
-            event_state,
-            inputs: &mut inputs,
-            demand: &demand,
-            outputs: &mut outputs,
-        })
-        .await?;
-
-    Ok(FrameOutputs {
-        delta: outputs[0].as_f64().expect("Delta must be a float"),
-        frame_no: outputs[1].as_i64().expect("Frame # must be an integer"),
-    })
+/// The frame source, and the invoker holding the event state its FPS event
+/// reads. One per test, since a frame counter that restarted between calls
+/// would be a different node.
+#[derive(Debug)]
+struct FrameSource {
+    func: Func,
+    node: FuncInvoker,
 }
 
-fn frame_func() -> Func {
-    worker_events_library()
-        .by_id(FRAME_EVENT_FUNC_ID)
-        .expect("worker events library must contain Frame Event")
-        .clone()
+impl FrameSource {
+    fn new() -> Self {
+        Self {
+            func: worker_events_library()
+                .by_id(FRAME_EVENT_FUNC_ID)
+                .expect("worker events library must contain Frame Event")
+                .clone(),
+            node: FuncInvoker::default(),
+        }
+    }
+
+    /// Execute the source once at `frequency` Hz.
+    async fn tick(&mut self, frequency: f64) -> InvokeResult<FrameOutputs> {
+        let outputs = self.node.call(&self.func, [frequency.into()]).await?;
+        Ok(FrameOutputs {
+            delta: outputs[0].as_f64().expect("Delta must be a float"),
+            frame_no: outputs[1].as_i64().expect("Frame # must be an integer"),
+        })
+    }
+
+    /// A task awaiting the FPS event, over the state this source's executions
+    /// write.
+    fn fps_event(&self) -> tokio::task::JoinHandle<()> {
+        let event = self.func.events[1].event_lambda.clone();
+        let state = self.node.event_state();
+        tokio::spawn(async move { event.invoke(state).await })
+    }
 }
 
 #[tokio::test(start_paused = true)]
 async fn fps_event_throttles_without_source_reexecution_and_preserves_delta_clock() {
-    let func = frame_func();
-    assert!(func.inputs[0].const_only);
-    let event_state = SharedAnyState::default();
-    let initial = invoke_frame(&func, 2.0, &event_state).await.unwrap();
+    let mut source = FrameSource::new();
+    assert!(source.func.inputs[0].const_only);
+    let initial = source.tick(2.0).await.unwrap();
     assert_eq!(initial.delta, 0.5);
     assert_eq!(initial.frame_no, 1);
 
     for _ in 0..2 {
-        let event = func.events[1].event_lambda.clone();
-        let tick_state = event_state.clone();
-        let tick = tokio::spawn(async move {
-            event.invoke(tick_state).await;
-        });
+        let tick = source.fps_event();
         tokio::task::yield_now().await;
         assert!(!tick.is_finished());
 
@@ -78,7 +70,7 @@ async fn fps_event_throttles_without_source_reexecution_and_preserves_delta_cloc
         tick.await.unwrap();
     }
 
-    let next = invoke_frame(&func, 2.0, &event_state).await.unwrap();
+    let next = source.tick(2.0).await.unwrap();
     assert_eq!(next.delta, 1.0);
     assert_eq!(next.frame_no, 2);
 }
@@ -97,22 +89,17 @@ async fn fps_event_throttles_without_source_reexecution_and_preserves_delta_cloc
 /// at its original t=500 rather than being pushed out to 750 and 900.
 #[tokio::test(start_paused = true)]
 async fn source_reexecution_does_not_postpone_a_waiting_fps_event() {
-    let func = frame_func();
-    let event_state = SharedAnyState::default();
-    invoke_frame(&func, 2.0, &event_state).await.unwrap();
+    let mut source = FrameSource::new();
+    source.tick(2.0).await.unwrap();
 
-    let event = func.events[1].event_lambda.clone();
-    let tick_state = event_state.clone();
-    let tick = tokio::spawn(async move {
-        event.invoke(tick_state).await;
-    });
+    let tick = source.fps_event();
     tokio::task::yield_now().await;
     assert!(!tick.is_finished());
 
     // Re-execute the source twice while the event is still waiting.
     for (step, at) in [(250u64, 250u64), (150, 400)] {
         tokio::time::advance(Duration::from_millis(step)).await;
-        invoke_frame(&func, 2.0, &event_state).await.unwrap();
+        source.tick(2.0).await.unwrap();
         tokio::task::yield_now().await;
         assert!(!tick.is_finished(), "the event is not due yet at t={at}ms");
     }
@@ -136,16 +123,12 @@ async fn source_reexecution_does_not_postpone_a_waiting_fps_event() {
 
 #[tokio::test(start_paused = true)]
 async fn zero_frequency_disables_fps_event_and_starts_with_zero_delta() {
-    let func = frame_func();
-    let event_state = SharedAnyState::default();
-    let initial = invoke_frame(&func, 0.0, &event_state).await.unwrap();
+    let mut source = FrameSource::new();
+    let initial = source.tick(0.0).await.unwrap();
     assert_eq!(initial.delta, 0.0);
     assert_eq!(initial.frame_no, 1);
 
-    let event = func.events[1].event_lambda.clone();
-    let tick = tokio::spawn(async move {
-        event.invoke(event_state).await;
-    });
+    let tick = source.fps_event();
     tokio::task::yield_now().await;
     tokio::time::advance(Duration::from_secs(1)).await;
     tokio::task::yield_now().await;
@@ -157,8 +140,6 @@ async fn zero_frequency_disables_fps_event_and_starts_with_zero_delta() {
 
 #[tokio::test]
 async fn frame_event_rejects_invalid_frequencies() {
-    let func = frame_func();
-
     for frequency in [
         -1.0,
         f64::NAN,
@@ -167,9 +148,8 @@ async fn frame_event_rejects_invalid_frequencies() {
         f64::MAX,
         f64::MIN_POSITIVE,
     ] {
-        let error = invoke_frame(&func, frequency, &SharedAnyState::default())
-            .await
-            .unwrap_err();
+        // A fresh source each time: the refusal must not depend on history.
+        let error = FrameSource::new().tick(frequency).await.unwrap_err();
         assert!(
             matches!(error, InvokeError::InvalidInput { index: 0, .. }),
             "unexpected error for {frequency:?}: {error:?}"

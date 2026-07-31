@@ -27,6 +27,10 @@ pub use constants::EPSILON;
 pub use debug::is_debug;
 pub use file_format::{FileExtensionError, FileFormatResult, SerdeFormat};
 pub use float_ext::FloatExt;
+#[cfg(any(test, feature = "internals"))]
+pub use internals::temp_dir::TempDir;
+#[cfg(any(test, feature = "internals"))]
+pub use internals::temp_file::TempFile;
 pub use introspect::{
     FieldDesc, FieldKind, FieldValue, FloatKind, IntegerKind, IntegerValue, Introspect,
     IntrospectEnum, IntrospectError, IntrospectFloat, IntrospectInteger,

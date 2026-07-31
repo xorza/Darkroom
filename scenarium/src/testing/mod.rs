@@ -13,7 +13,11 @@
 //! in-crate test gets the same five nodes addressed by name.
 
 #[cfg(test)]
+pub(crate) mod calls;
+#[cfg(test)]
 pub(crate) mod engine;
+#[cfg(test)]
+pub(crate) mod func_invoker;
 pub mod graph;
 #[cfg(test)]
 pub(crate) mod program;

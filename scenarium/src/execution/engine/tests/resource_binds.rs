@@ -1,64 +1,28 @@
 use super::*;
 
-use std::path::PathBuf;
 use std::sync::Mutex as StdMutex;
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+
+use ::common::{TempDir, TempFile};
+
+use crate::testing::calls::Calls;
 
 use crate::async_lambda;
 use crate::{FsPathConfig, FsPathMode};
 
-/// A temp file path removed on drop.
-#[derive(Debug)]
-struct TempFile(PathBuf);
-impl Drop for TempFile {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.0);
-    }
-}
-fn temp_file(tag: &str) -> TempFile {
-    static C: AtomicU64 = AtomicU64::new(0);
-    let n = C.fetch_add(1, Ordering::Relaxed);
-    TempFile(std::env::temp_dir().join(format!(
-        "scenarium-resbind-{tag}-{}-{n}.bin",
-        std::process::id()
-    )))
-}
-
-/// A unique temp directory removed on drop (the disk store root).
-#[derive(Debug)]
-struct TempDir(PathBuf);
-impl TempDir {
-    fn new(tag: &str) -> Self {
-        static C: AtomicU64 = AtomicU64::new(0);
-        let n = C.fetch_add(1, Ordering::Relaxed);
-        let dir = std::env::temp_dir().join(format!(
-            "scenarium-resbind-{tag}-{}-{n}",
-            std::process::id()
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
-        TempDir(dir)
-    }
-}
-impl Drop for TempDir {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
-
 /// How often each counted node ran, and what the sink last saw.
 #[derive(Debug, Default, Clone)]
 struct Observed {
-    loads: Arc<AtomicUsize>,
-    annotates: Arc<AtomicUsize>,
+    loads: Calls,
+    annotates: Calls,
     captured: Arc<StdMutex<String>>,
 }
 
 impl Observed {
     fn loads(&self) -> usize {
-        self.loads.load(Ordering::SeqCst)
+        self.loads.count()
     }
     fn annotates(&self) -> usize {
-        self.annotates.load(Ordering::SeqCst)
+        self.annotates.count()
     }
     fn captured(&self) -> String {
         self.captured.lock().unwrap().clone()
@@ -81,7 +45,7 @@ fn loader(observed: Observed) -> impl FnOnce(NodeSpec) -> NodeSpec {
             .output(DataType::String)
             .lambda(async_lambda!(
                 move |Invocation { inputs, outputs, .. }| { loads = observed.loads.clone() } => {
-                    loads.fetch_add(1, Ordering::SeqCst);
+                    loads.bump();
                     let path = inputs[0].as_fs_path().unwrap().to_string();
                     let text = std::fs::read_to_string(&path).map_err(InvokeError::external)?;
                     outputs[0] = StaticValue::String(text).into();
@@ -124,15 +88,14 @@ fn path_graph(data_path: &str, mode: CacheMode, observed: Observed) -> TestGraph
     });
     g.add("load_text", |n| loader(observed.clone())(n).cache(mode));
     g.add("annotate", |n| {
-        let annotates = observed.annotates.clone();
+        let annotate = observed.annotates.counting(|inputs| {
+            StaticValue::String(format!("[{}]", inputs[0].as_string().unwrap()))
+        });
         n.pure()
             .cache(mode)
             .input(DataType::String)
             .output(DataType::String)
-            .compute(move |inputs| {
-                annotates.fetch_add(1, Ordering::SeqCst);
-                StaticValue::String(format!("[{}]", inputs[0].as_string().unwrap()))
-            })
+            .compute(annotate)
     });
     g.add("capture", capture(observed));
     g.constant("make_path", 0, data_path);
@@ -160,10 +123,10 @@ async fn an_unidentifiable_path_fails_only_the_node_declaring_it() {
     use std::os::unix::fs::PermissionsExt;
 
     let dir = TempDir::new("locked");
-    let data = dir.0.join("data.txt");
+    let data = dir.join("data.txt");
     std::fs::write(&data, "v1").unwrap();
     let data_path = data.to_string_lossy().into_owned();
-    let lock = |mode| std::fs::set_permissions(&dir.0, Permissions::from_mode(mode)).unwrap();
+    let lock = |mode| std::fs::set_permissions(dir.path(), Permissions::from_mode(mode)).unwrap();
 
     // `loader` failed for want of a path identity, `dependent` was skipped
     // for reading it, and the run itself still succeeded.
@@ -222,14 +185,10 @@ async fn an_unidentifiable_path_fails_only_the_node_declaring_it() {
 /// instead of tainting them uncacheable.
 #[tokio::test]
 async fn wired_path_rekeys_loader_on_file_change() {
-    let data = temp_file("ram");
-    std::fs::write(&data.0, "v1").unwrap();
+    let data = TempFile::new("ram");
+    std::fs::write(data.path(), "v1").unwrap();
     let observed = Observed::default();
-    let mut e = TestEngine::over(path_graph(
-        &data.0.to_string_lossy(),
-        CacheMode::Ram,
-        observed.clone(),
-    ));
+    let mut e = TestEngine::over(path_graph(&data.to_str(), CacheMode::Ram, observed.clone()));
 
     // Cold run: everything computes. The loader's pre-run digest is `None`
     // — the delivered value does not exist yet — so it re-stamps at reach
@@ -257,7 +216,7 @@ async fn wired_path_rekeys_loader_on_file_change() {
     // Edit the file (different length ⇒ unambiguous identity change). The
     // loader re-keys off the delivered value's file identity and the change
     // propagates downstream — while the structural upstream stays a hit.
-    std::fs::write(&data.0, "v2-longer").unwrap();
+    std::fs::write(data.path(), "v2-longer").unwrap();
     let run = e.run_sinks().await;
     assert_eq!(
         observed.loads(),
@@ -292,17 +251,17 @@ async fn wired_path_rekeys_loader_on_file_change() {
 #[tokio::test]
 async fn wired_path_disk_reuse_survives_reopen_until_file_changes() {
     let dir = TempDir::new("disk");
-    let data = temp_file("disk-data");
-    std::fs::write(&data.0, "v1").unwrap();
+    let data = TempFile::new("disk-data");
+    std::fs::write(data.path(), "v1").unwrap();
     let observed = Observed::default();
-    let path = data.0.to_string_lossy().into_owned();
+    let path = data.to_str();
 
     // A fresh engine over an identically-declared graph: `TestGraph` mints
     // ids in declaration order, so the reopened engine addresses the very
     // slots the blobs were written under.
     let reopen = |observed: Observed| {
         let mut e = TestEngine::over(path_graph(&path, CacheMode::Disk, observed));
-        e.attach_disk_store(dir.0.clone());
+        e.attach_disk_store(dir.path());
         e
     };
 
@@ -336,7 +295,7 @@ async fn wired_path_disk_reuse_survives_reopen_until_file_changes() {
     // Reopen after an edit: the loader's key moved ⇒ recompute, propagating
     // downstream; the path producer's own digest is unchanged, so it stays a
     // disk hit feeding the recompute.
-    std::fs::write(&data.0, "v2-longer").unwrap();
+    std::fs::write(data.path(), "v2-longer").unwrap();
     let mut e = reopen(observed.clone());
     let run = e.run_sinks().await;
     assert_eq!(

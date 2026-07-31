@@ -3,24 +3,16 @@ use super::*;
 use crate::async_lambda;
 use crate::graph::func::event::EventLambda;
 use crate::graph::node::special::SpecialNode;
+use crate::testing::calls::Calls;
 
-/// A counter every fixture body below increments, so "how often did this
-/// run" is one shared shape.
-type Calls = Arc<Mutex<i64>>;
-
-/// An impure source carrying a `tick` event and emitting its own call count.
-fn emitter(calls: Calls) -> impl FnOnce(NodeSpec) -> NodeSpec {
+/// An impure source carrying a `tick` event and emitting its own call count —
+/// so one logged value says both that it ran and how many times it has.
+fn emitter(calls: &Calls) -> impl FnOnce(NodeSpec) -> NodeSpec {
+    let body = calls.tally();
     move |n: NodeSpec| {
         n.output(DataType::Int)
             .event("tick", EventLambda::new(|_state| Box::pin(async move {})))
-            .lambda(async_lambda!(
-                move |Invocation { outputs, .. }| { calls = calls.clone() } => {
-                    let mut n = calls.lock().await;
-                    *n += 1;
-                    outputs[0] = StaticValue::Int(*n).into();
-                    Ok(())
-                }
-            ))
+            .compute(body)
     }
 }
 
@@ -28,9 +20,9 @@ fn emitter(calls: Calls) -> impl FnOnce(NodeSpec) -> NodeSpec {
 /// by `recv`. `recv`: impure consumer bound to emit's output. Neither is a
 /// sink, so only event-driven execution reaches them.
 fn event_pair() -> (TestGraph, Calls) {
-    let calls = Arc::new(Mutex::new(0));
+    let calls = Calls::default();
     let mut g = TestGraph::new();
-    g.add("emit", emitter(calls.clone()));
+    g.add("emit", emitter(&calls));
     g.add("recv", |n| n.records());
     g.subscribe("emit", 0, "recv");
     g.wire("emit", 0, "recv", 0);
@@ -48,7 +40,7 @@ async fn execute_events_runs_subscribers() -> TestResult {
     // recv subscribes to emit's tick, so recv is the root and emit runs as
     // its dependency.
     assert_eq!(run.ran(), ["emit", "recv"]);
-    assert_eq!(*calls.lock().await, 1);
+    assert_eq!(calls.count(), 1);
     assert_eq!(run.logs(), ["1"]);
     assert_eq!(
         run.triggered_events,
@@ -68,7 +60,7 @@ async fn event_sources_collects_nodes_with_subscribers() -> TestResult {
     let run = e.run_event_sources().await;
 
     assert_eq!(run.ran(), ["emit"]);
-    assert_eq!(*calls.lock().await, 1);
+    assert_eq!(calls.count(), 1);
     assert!(run.logs().is_empty(), "recv is not reached");
     Ok(())
 }
@@ -86,11 +78,7 @@ async fn bootstrap_prepares_events_and_bypasses_source_cache() -> TestResult {
     let tick = e.event("emit", 0);
     for expected in [1, 2] {
         let run = e.run_event_sources().await;
-        assert_eq!(
-            *calls.lock().await,
-            expected,
-            "a pure, cached source re-runs"
-        );
+        assert_eq!(calls.count(), expected, "a pure, cached source re-runs");
         assert_eq!(run.armed_events, [tick]);
     }
     Ok(())
@@ -140,11 +128,11 @@ async fn failed_event_source_prepares_no_trigger() -> TestResult {
 /// (neither a sink nor in that cone) does not.
 #[tokio::test(flavor = "multi_thread")]
 async fn run_sinks_node_runs_all_sinks_on_event() -> TestResult {
-    let source_calls = Arc::new(Mutex::new(0i64));
+    let source_calls = Calls::default();
 
     let mut g = TestGraph::new();
-    g.add("emit", emitter(Arc::new(Mutex::new(0))));
-    g.add("source", emitter(source_calls.clone()));
+    g.add("emit", emitter(&Calls::default()));
+    g.add("source", emitter(&source_calls));
     g.add("sink", |n| n.records());
     g.add_special("trigger", SpecialNode::RunSinks);
     // The sink's cone (source → sink) is wholly independent of emit.
@@ -160,7 +148,7 @@ async fn run_sinks_node_runs_all_sinks_on_event() -> TestResult {
     // The stack pops the later-declared root first, so the portless
     // trigger settles before the cone it promoted.
     assert_eq!(run.ran(), ["trigger", "source", "sink"]);
-    assert_eq!(*source_calls.lock().await, 1);
+    assert_eq!(source_calls.count(), 1);
     assert_eq!(run.logs(), ["1"]);
     assert_eq!(run.triggered_events.len(), 1);
     Ok(())
@@ -170,11 +158,11 @@ async fn run_sinks_node_runs_all_sinks_on_event() -> TestResult {
 /// so the same sink cone is left untouched — isolating the sink as the cause.
 #[tokio::test(flavor = "multi_thread")]
 async fn event_without_run_sinks_sink_runs_nothing() -> TestResult {
-    let source_calls = Arc::new(Mutex::new(0i64));
+    let source_calls = Calls::default();
 
     let mut g = TestGraph::new();
-    g.add("emit", emitter(Arc::new(Mutex::new(0))));
-    g.add("source", emitter(source_calls.clone()));
+    g.add("emit", emitter(&Calls::default()));
+    g.add("source", emitter(&source_calls));
     g.add("sink", |n| n.sink().input(DataType::Int));
     g.wire("source", 0, "sink", 0);
 
@@ -182,6 +170,6 @@ async fn event_without_run_sinks_sink_runs_nothing() -> TestResult {
     let run = e.run_events([e.event("emit", 0)]).await;
 
     assert!(run.ran().is_empty());
-    assert_eq!(*source_calls.lock().await, 0);
+    assert_eq!(source_calls.count(), 0);
     Ok(())
 }
