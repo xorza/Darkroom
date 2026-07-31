@@ -6,11 +6,12 @@ pub(crate) mod event;
 pub(crate) mod lambda;
 mod macros;
 
+use crate::data::type_system::Strictness;
 use crate::graph::func::error::FuncValidationError;
 use crate::graph::func::event::EventLambda;
 use crate::graph::func::lambda::FuncLambda;
 use crate::graph::node::CacheMode;
-use crate::{DataType, FsPathMode, StaticValue};
+use crate::{DataType, StaticValue, TypeId};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
@@ -126,36 +127,36 @@ impl FuncInput {
         self
     }
 
-    /// Whether `value` is a well-formed *declared default* for this input:
-    /// one of the picker variants when the input offers them, else a literal
-    /// of exactly the declared kind (`Null` doubles as "explicitly unset" on
-    /// an optional input). Declaration-time strictness on purpose — the
-    /// looser runtime scalar coercion (see `DataType::compatible_with`) is
-    /// for document consts, not specs. The compile-time const check
-    /// (`const_satisfies` in graph validation) is the coercive twin; keep
-    /// their variant and `Null` rules in lockstep.
-    fn default_fits(&self, value: &StaticValue) -> bool {
+    /// Whether `value` may sit on this input as a `Const` — the whole const
+    /// gate, both times it is asked.
+    ///
+    /// The two things a *port* contributes, ahead of the type table in
+    /// [`DataType::accepts_const`], are the same at declaration time and at
+    /// compile time, which is why they are written once here:
+    ///
+    /// - a **picker** port (one carrying `value_variants`) takes exactly one
+    ///   of the values it offers and nothing else, whatever its declared type
+    ///   says — that is what makes it a picker;
+    /// - `Null` is "explicitly unset", so it fits an optional port and no
+    ///   required one. (lens's config machinery authors it on `Option`-field
+    ///   inputs and reads it back as `None`.)
+    ///
+    /// `strictness` and `enum_variant` are the caller's — see
+    /// [`Strictness`].
+    pub(crate) fn accepts_const(
+        &self,
+        value: &StaticValue,
+        strictness: Strictness,
+        enum_variant: impl FnOnce(TypeId, &str) -> bool,
+    ) -> bool {
         if !self.value_variants.is_empty() {
             return self.value_variants.iter().any(|v| v.value == *value);
         }
         if matches!(value, StaticValue::Null) {
             return !self.required;
         }
-        match &self.data_type {
-            DataType::Any => true,
-            DataType::Float => matches!(value, StaticValue::Float(_)),
-            DataType::Int => matches!(value, StaticValue::Int(_)),
-            DataType::Bool => matches!(value, StaticValue::Bool(_)),
-            DataType::String => matches!(value, StaticValue::String(_)),
-            DataType::FsPath(config) => match config.mode {
-                FsPathMode::ExistingFiles => matches!(value, StaticValue::FsPaths(_)),
-                FsPathMode::ExistingFile | FsPathMode::NewFile | FsPathMode::Directory => {
-                    matches!(value, StaticValue::FsPath(_))
-                }
-            },
-            DataType::Enum(_) => matches!(value, StaticValue::Enum(_)),
-            DataType::Custom(_) => false,
-        }
+        self.data_type
+            .accepts_const(value, strictness, enum_variant)
     }
 }
 
@@ -377,8 +378,13 @@ impl Func {
                     input_idx,
                 });
             }
+            // A declaration is checked without a registry — no `Library`
+            // exists yet, and one may register this func before the enum types
+            // it names. So an enum default need only *be* an enum literal
+            // here; `Library::register_type` checks the name against the
+            // variants once that type arrives, from whichever side is second.
             if let Some(default) = &input.default_value
-                && !input.default_fits(default)
+                && !input.accepts_const(default, Strictness::Declared, |_, _| true)
             {
                 return Err(FuncValidationError::InvalidDefault {
                     func_id: self.id,

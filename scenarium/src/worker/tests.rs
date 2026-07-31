@@ -1520,20 +1520,20 @@ fn batch_intent_accumulates_simple_flags() {
 
     assert!(matches!(intent.graph_state, Some(GraphOp::Clear)));
     assert!(matches!(intent.loop_request, Some(LoopCommand::Start)));
-    assert!(intent.execute_sinks);
-    assert_eq!(intent.events.len(), 1);
-    assert!(intent.events.contains(&event));
+    assert!(intent.seeds.sinks);
+    assert_eq!(intent.seeds.events.len(), 1);
+    assert!(intent.seeds.events.contains(&event));
     assert_eq!(
-        intent.execute_nodes.len(),
+        intent.seeds.node_ids.len(),
         1,
         "duplicate node seeds union to one"
     );
-    assert!(intent.execute_nodes.contains(&node_id));
+    assert!(intent.seeds.node_ids.contains(&node_id));
     assert!(intent.evict_cache.contains(&node_id));
     assert_eq!(intent.syncs.len(), 1);
 
-    let event_capacity = intent.events.capacity();
-    let node_capacity = intent.execute_nodes.capacity();
+    let event_capacity = intent.seeds.events.capacity();
+    let node_capacity = intent.seeds.node_ids.capacity();
     let eviction_capacity = intent.evict_cache.capacity();
     let sync_capacity = intent.syncs.capacity();
 
@@ -1541,14 +1541,14 @@ fn batch_intent_accumulates_simple_flags() {
 
     assert!(intent.graph_state.is_none());
     assert!(matches!(intent.loop_request, Some(LoopCommand::Stop)));
-    assert!(!intent.execute_sinks);
-    assert!(!intent.execute_event_sources);
-    assert!(intent.events.is_empty());
-    assert!(intent.execute_nodes.is_empty());
+    assert!(!intent.seeds.sinks);
+    assert!(!intent.seeds.event_sources);
+    assert!(intent.seeds.events.is_empty());
+    assert!(intent.seeds.node_ids.is_empty());
     assert!(intent.evict_cache.is_empty());
     assert!(intent.syncs.is_empty());
-    assert_eq!(intent.events.capacity(), event_capacity);
-    assert_eq!(intent.execute_nodes.capacity(), node_capacity);
+    assert_eq!(intent.seeds.events.capacity(), event_capacity);
+    assert_eq!(intent.seeds.node_ids.capacity(), node_capacity);
     assert_eq!(intent.evict_cache.capacity(), eviction_capacity);
     assert_eq!(intent.syncs.capacity(), sync_capacity);
 }
@@ -1578,7 +1578,7 @@ fn batch_intent_deduplicates_events() {
     );
 
     assert_eq!(
-        intent.events.len(),
+        intent.seeds.events.len(),
         1,
         "duplicate events must collapse to one"
     );

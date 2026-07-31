@@ -26,11 +26,15 @@ pub(crate) struct BatchIntent {
     pub(crate) graph_state: Option<GraphOp>,
     pub(crate) disk_store: Option<DiskStore>,
     pub(crate) loop_request: Option<LoopCommand>,
-    pub(crate) execute_sinks: bool,
-    pub(crate) execute_event_sources: bool,
-    pub(crate) execute_nodes: IndexSet<NodeId>,
+    /// What this batch's `Run` messages ask for, coalesced — plus the events
+    /// the running loop fired, which arrive outside any message.
+    ///
+    /// The seeds themselves rather than a second spelling of their four
+    /// fields: combining is [`RunSeeds::merge`]'s, and what leaves here is the
+    /// same value the engine is handed, so nothing has to be taken apart and
+    /// put back together across the worker boundary.
+    pub(crate) seeds: RunSeeds,
     pub(crate) evict_cache: IndexSet<NodeId>,
-    pub(crate) events: IndexSet<EventPort>,
     pub(crate) syncs: Vec<oneshot::Sender<()>>,
 }
 
@@ -49,35 +53,21 @@ impl BatchIntent {
                 WorkerMessage::Clear => self.graph_state = Some(GraphOp::Clear),
                 WorkerMessage::EvictCache { nodes } => self.evict_cache.extend(nodes),
                 WorkerMessage::SetDiskStore(cache) => self.disk_store = Some(cache),
-                WorkerMessage::Run { seeds } => {
-                    let RunSeeds {
-                        sinks,
-                        event_sources,
-                        events,
-                        node_ids,
-                    } = seeds;
-                    self.execute_sinks |= sinks;
-                    self.execute_event_sources |= event_sources;
-                    self.events.extend(events);
-                    self.execute_nodes.extend(node_ids);
-                }
+                WorkerMessage::Run { seeds } => self.seeds.merge(seeds),
                 WorkerMessage::StartEventLoop => self.loop_request = Some(LoopCommand::Start),
                 WorkerMessage::StopEventLoop => self.loop_request = Some(LoopCommand::Stop),
                 WorkerMessage::Sync { reply } => self.syncs.push(reply),
             }
         }
-        self.events.extend(events);
+        self.seeds.add_events(events);
     }
 
     fn clear(&mut self) {
         self.graph_state = None;
         self.disk_store = None;
         self.loop_request = None;
-        self.execute_sinks = false;
-        self.execute_event_sources = false;
-        self.execute_nodes.clear();
+        self.seeds.clear();
         self.evict_cache.clear();
-        self.events.clear();
         self.syncs.clear();
     }
 }
