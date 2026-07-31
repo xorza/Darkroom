@@ -48,22 +48,19 @@ struct PendingRun {
 impl PendingRun {
     fn take(intent: &mut BatchIntent, transition: EventLoopTransition) -> Option<Self> {
         let start_event_loop = matches!(transition, EventLoopTransition::Rebuild);
-        let has_run = intent.execute_sinks
-            || intent.execute_event_sources
-            || !intent.execute_nodes.is_empty()
-            || !intent.events.is_empty()
-            || start_event_loop;
-        if !has_run {
+        if intent.seeds.is_empty() && !start_event_loop {
             return None;
         }
 
+        // Moved out rather than copied field by field: the batch's seeds *are*
+        // the run's, and taking them leaves the intent empty for whatever the
+        // rest of this batch still does.
+        let mut seeds = std::mem::take(&mut intent.seeds);
+        // Rebuilding the loop means re-initializing every event source, so the
+        // bootstrap run demands them whether or not a message asked.
+        seeds.event_sources |= start_event_loop;
         Some(Self {
-            seeds: RunSeeds {
-                sinks: intent.execute_sinks,
-                event_sources: start_event_loop || intent.execute_event_sources,
-                events: intent.events.drain(..).collect(),
-                node_ids: intent.execute_nodes.drain(..).collect(),
-            },
+            seeds,
             start_event_loop,
         })
     }
@@ -402,10 +399,7 @@ mod tests {
         {
             let intent = task.next_intent().await.unwrap();
             assert!(matches!(intent.graph_state, Some(GraphOp::Clear)));
-            assert_eq!(
-                intent.execute_nodes.iter().copied().collect::<Vec<_>>(),
-                [node_id]
-            );
+            assert_eq!(intent.seeds.node_ids, [node_id]);
         }
         assert!(task.messages.is_empty());
         let capacity = task.messages.capacity();

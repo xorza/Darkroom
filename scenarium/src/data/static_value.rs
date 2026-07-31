@@ -36,6 +36,19 @@ impl PartialEq for StaticValue {
 impl Eq for StaticValue {}
 
 impl StaticValue {
+    /// The scalar coercion class, value side: the three kinds
+    /// [`as_f64`](Self::as_f64)/[`as_i64`](Self::as_i64)/[`as_bool`](Self::as_bool)
+    /// convert freely between. `DataType::is_numeric_scalar` is the same class
+    /// on the type side, and
+    /// [`DataType::accepts_const`](crate::DataType) reads this one to hold a
+    /// literal to exactly what a runtime read of it would accept.
+    pub(crate) fn is_numeric_scalar(&self) -> bool {
+        matches!(
+            self,
+            StaticValue::Float(_) | StaticValue::Int(_) | StaticValue::Bool(_)
+        )
+    }
+
     pub fn as_f64(&self) -> Option<f64> {
         match self {
             StaticValue::Float(value) => Some(*value),

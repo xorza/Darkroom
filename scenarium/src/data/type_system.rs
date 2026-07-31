@@ -123,17 +123,15 @@ impl DataType {
         })
     }
 
-    /// Whether a value of type `source` may feed a port of type `self`.
+    /// Whether a value of type `source` may feed a port of type `self` — the
+    /// **wire** half of the compile-boundary gate.
     ///
     /// Deliberately looser than type equality: `Any` accepts everything, and
-    /// the three scalar kinds (`Float`/`Int`/`Bool`) form one coercion class
-    /// because runtime reads coerce freely between them
-    /// (`StaticValue::as_f64`/`as_i64`/`as_bool` — `Bool` reads as `0`/`1`,
-    /// `Float` truncates to int, any nonzero reads as `true`). The const
-    /// half of the compile-boundary check (`const_satisfies`) mirrors the
-    /// same class, so wiring and literals are exactly as permissive as what
-    /// executes. Declared *defaults* are the one place held to exact kinds
-    /// (`Func::validate`), catching authoring mistakes at registration.
+    /// the three scalar kinds form one coercion class
+    /// ([`is_numeric_scalar`](Self::is_numeric_scalar)). The **literal** half
+    /// is [`accepts_const`](Self::accepts_const), which reads the same class
+    /// off the value side — so wiring and constants are exactly as permissive
+    /// as what executes.
     pub fn compatible_with(&self, source: &DataType) -> bool {
         if matches!(self, DataType::Any) || matches!(source, DataType::Any) {
             return true;
@@ -144,10 +142,80 @@ impl DataType {
         self == source
     }
 
-    /// One coercion class: see [`Self::compatible_with`].
+    /// The scalar coercion class, type side: `Float`/`Int`/`Bool` are one kind
+    /// to a runtime read, since
+    /// [`as_f64`](StaticValue::as_f64)/[`as_i64`](StaticValue::as_i64)/[`as_bool`](StaticValue::as_bool)
+    /// convert freely between them — `Bool` reads as `0`/`1`, `Float`
+    /// truncates to int, any nonzero reads as `true`.
+    /// [`StaticValue::is_numeric_scalar`] is the same class on the value side.
     fn is_numeric_scalar(&self) -> bool {
         matches!(self, DataType::Float | DataType::Int | DataType::Bool)
     }
+
+    /// Whether `value` is a well-formed literal for a port declared `self` —
+    /// **the** table, read by both const gates.
+    ///
+    /// The two differ in exactly the two arms below, and nowhere else, which
+    /// is why they are one function with a knob rather than two matches to
+    /// keep in step:
+    ///
+    /// - **Scalars.** [`Strictness::Authored`] takes the whole coercion class,
+    ///   so a document's literal is as permissive as the runtime read that
+    ///   consumes it. [`Strictness::Declared`] demands the exact kind, so a
+    ///   `Bool` default on an `Int` port is an authoring slip caught at
+    ///   registration rather than a coercion nobody chose.
+    /// - **Enums.** A literal is a variant *name*; whether that name is
+    ///   registered is a question only a [`Library`](crate::Library) can
+    ///   answer, so the caller supplies `enum_variant`. Declaration time has
+    ///   no registry yet and passes `|_, _| true` — `Library::register_type`
+    ///   re-checks declared defaults once the type arrives.
+    ///
+    /// A `Custom` port has no literal form at all, and `Any` takes anything.
+    pub(crate) fn accepts_const(
+        &self,
+        value: &StaticValue,
+        strictness: Strictness,
+        enum_variant: impl FnOnce(TypeId, &str) -> bool,
+    ) -> bool {
+        match self {
+            DataType::Any => true,
+            DataType::Float | DataType::Int | DataType::Bool => match strictness {
+                Strictness::Authored => value.is_numeric_scalar(),
+                Strictness::Declared => matches!(
+                    (self, value),
+                    (DataType::Float, StaticValue::Float(_))
+                        | (DataType::Int, StaticValue::Int(_))
+                        | (DataType::Bool, StaticValue::Bool(_))
+                ),
+            },
+            DataType::String => matches!(value, StaticValue::String(_)),
+            DataType::FsPath(config) => match config.mode {
+                FsPathMode::ExistingFiles => matches!(value, StaticValue::FsPaths(_)),
+                FsPathMode::ExistingFile | FsPathMode::NewFile | FsPathMode::Directory => {
+                    matches!(value, StaticValue::FsPath(_))
+                }
+            },
+            DataType::Enum(type_id) => {
+                matches!(value, StaticValue::Enum(name) if enum_variant(*type_id, name))
+            }
+            DataType::Custom(_) => false,
+        }
+    }
+}
+
+/// Which const gate is asking [`DataType::accepts_const`] — the whole of what
+/// separates the two.
+///
+/// They are not the same question asked twice: one polices a *declaration* a
+/// programmer wrote, before any document exists; the other polices a *literal*
+/// a user authored, against the same library a run will use. Held apart so the
+/// looser one cannot be applied where the stricter was meant.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Strictness {
+    /// A `Func`'s own declared default, at registration.
+    Declared,
+    /// A document's authored `Const`, at compile.
+    Authored,
 }
 
 impl FromStr for DataType {
@@ -223,5 +291,101 @@ mod tests {
         );
         assert_eq!(custom(1).default_value(), None);
         assert_eq!(DataType::Enum(TypeId::from_u128(2)).default_value(), None);
+    }
+
+    /// The two strictnesses must actually diverge, and only in the two arms
+    /// they are documented to: scalars and enums. Every other arm has to agree,
+    /// which is the property that lets one table serve both gates.
+    #[test]
+    fn strictness_changes_the_scalar_and_enum_arms_and_nothing_else() {
+        let mode = TypeId::from_u128(0x5ca1ab1e);
+        let known = |_: TypeId, name: &str| name == "fast";
+        let declared =
+            |ty: &DataType, v: &StaticValue| ty.accepts_const(v, Strictness::Declared, |_, _| true);
+        let authored =
+            |ty: &DataType, v: &StaticValue| ty.accepts_const(v, Strictness::Authored, known);
+
+        // Scalars: a `Bool` literal on an `Int` port is a coercion the runtime
+        // performs (`as_i64` reads `true` as 1), so a document may author it —
+        // and a *declaration* may not, because nobody chose it there.
+        let int = DataType::Int;
+        let boolean = StaticValue::Bool(true);
+        assert!(
+            authored(&int, &boolean),
+            "the runtime reads this, so a document may write it"
+        );
+        assert!(
+            !declared(&int, &boolean),
+            "but a declared default is held to its own kind"
+        );
+        assert_ne!(declared(&int, &boolean), authored(&int, &boolean));
+
+        // …and the exact kind satisfies both, so `Declared` is narrower rather
+        // than merely different.
+        for (ty, value) in [
+            (DataType::Int, StaticValue::Int(1)),
+            (DataType::Float, StaticValue::Float(1.0)),
+            (DataType::Bool, StaticValue::Bool(false)),
+        ] {
+            assert!(
+                declared(&ty, &value) && authored(&ty, &value),
+                "{ty:?} takes its own kind either way"
+            );
+        }
+
+        // Enums: membership is the registry's answer, so only the authored gate
+        // asks it. Both still require an *enum* literal.
+        let enum_ty = DataType::Enum(mode);
+        let unregistered = StaticValue::Enum("slothful".into());
+        let registered = StaticValue::Enum("fast".into());
+        assert!(
+            declared(&enum_ty, &unregistered),
+            "no registry exists at declaration time"
+        );
+        assert!(
+            !authored(&enum_ty, &unregistered),
+            "an authored literal must name a variant"
+        );
+        assert_ne!(
+            declared(&enum_ty, &unregistered),
+            authored(&enum_ty, &unregistered)
+        );
+        assert!(declared(&enum_ty, &registered) && authored(&enum_ty, &registered));
+        assert!(
+            !declared(&enum_ty, &StaticValue::Int(0)),
+            "an enum port takes enum literals only"
+        );
+
+        // Every other arm agrees, whichever gate asks.
+        let path = DataType::FsPath(Arc::new(FsPathConfig::new(FsPathMode::ExistingFiles)));
+        let cases = [
+            (DataType::Any, StaticValue::Enum("anything".into()), true),
+            (DataType::String, StaticValue::String("s".into()), true),
+            (DataType::String, StaticValue::Int(1), false),
+            (path.clone(), StaticValue::FsPaths(vec!["a".into()]), true),
+            (path, StaticValue::FsPath("a".into()), false),
+            (
+                DataType::FsPath(Arc::new(FsPathConfig::default())),
+                StaticValue::FsPath("a".into()),
+                true,
+            ),
+            (
+                DataType::Custom(mode),
+                StaticValue::String("s".into()),
+                false,
+            ),
+        ];
+        for (ty, value, expected) in cases {
+            assert_eq!(
+                declared(&ty, &value),
+                expected,
+                "declared {ty:?} / {value:?}"
+            );
+            assert_eq!(
+                authored(&ty, &value),
+                expected,
+                "authored {ty:?} / {value:?}"
+            );
+        }
     }
 }
