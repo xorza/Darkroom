@@ -1,5 +1,5 @@
 //! The authoring graph: the [`Graph`] type, the satellite types it owns
-//! ([`Node`], [`Binding`], [`CacheMode`], …), and **every method a `Graph`
+//! ([`Node`], [`Binding`], [`CacheMode`](node::CacheMode), …), and **every method a `Graph`
 //! has**, in one impl — reads and mutations alike, so the whole surface is one
 //! file to read rather than six.
 //!
@@ -8,7 +8,7 @@
 //! [`error`] what validation rejects.
 //!
 //! A graph is flat: every node is a leaf that resolves to a
-//! [`Func`](crate::graph::func::Func) declaration, so there is no tree to
+//! [`Func`] declaration, so there is no tree to
 //! descend and no identity but a node's own.
 
 use std::collections::{BTreeMap, BTreeSet};

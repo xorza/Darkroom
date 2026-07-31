@@ -128,8 +128,8 @@ impl DataType {
     ///
     /// Deliberately looser than type equality: `Any` accepts everything, and
     /// the three scalar kinds form one coercion class
-    /// ([`is_numeric_scalar`](Self::is_numeric_scalar)). The **literal** half
-    /// is [`accepts_const`](Self::accepts_const), which reads the same class
+    /// (`is_numeric_scalar`). The **literal** half
+    /// is `accepts_const`, which reads the same class
     /// off the value side — so wiring and constants are exactly as permissive
     /// as what executes.
     pub fn compatible_with(&self, source: &DataType) -> bool {

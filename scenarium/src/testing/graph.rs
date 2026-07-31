@@ -429,9 +429,9 @@ impl NodeSpec {
         }))
     }
 
-    /// A sink that logs whatever reaches it, readable back off the run's
-    /// [`logs`](crate::execution::report::ExecutionOutcome) — how a fixture
-    /// observes that a node ran *and* what it saw, without a shared hook.
+    /// A sink that logs whatever reaches it, readable back off the run's log
+    /// lines — how a fixture observes that a node ran *and* what it saw,
+    /// without a shared hook.
     ///
     /// **Declares its own port**: one required `Any` input, which is the one it
     /// logs. Adding another input before this leaves that port unfed, which

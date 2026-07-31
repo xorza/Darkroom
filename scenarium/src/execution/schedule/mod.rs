@@ -534,13 +534,12 @@ impl RunSchedule {
     /// the node's cone alive — and the run loop prepares the identity and re-stamps at
     /// reach time once its producers have settled, possibly improving `Run` to a reuse.
     pub(crate) async fn resolve(&mut self, program: &CompiledGraph, cache: &mut RuntimeCache) {
-        let schedule = self;
         // The cache holds no program of its own, so every question below names
-        // the one this schedule was planned against — the handle's whole point.
-        cache.stamp_digests(program, schedule.executing());
+        // the one `program` this schedule was planned against.
+        cache.stamp_digests(program, self.executing());
         // The sweep *accumulates* demand and readers, so it starts from zero of
         // its own accord rather than trusting whoever opened the schedule.
-        schedule.outputs.reset(program.outputs.len());
+        self.outputs.reset(program.outputs.len());
 
         // Destructured so the sweep can read the schedule and the seed sets
         // while writing the state and output columns — disjoint fields of the
@@ -551,7 +550,7 @@ impl RunSchedule {
             roots,
             root_flags,
             outputs,
-        } = &mut *schedule;
+        } = &mut *self;
 
         for &node_idx in roots.iter() {
             // Only a root the planner cleared. Promoting a `Disabled` or
@@ -615,7 +614,7 @@ impl RunSchedule {
             }
         }
 
-        schedule.validate_debug(program);
+        self.validate_debug(program);
     }
 }
 

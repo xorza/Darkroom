@@ -61,7 +61,7 @@ pub(crate) struct RuntimeCache {
     /// invariant [`reconcile`](Self::reconcile) establishes, so nothing outside
     /// may push, drain, or resize it. Individual slots are reached by
     /// [`Index<NodeIdx>`], the same way a node is reached on
-    /// [`CompiledGraph`](crate::execution::compile::compiled_graph::CompiledGraph).
+    /// [`CompiledGraph`].
     slots: Column<NodeIdx, RuntimeSlot>,
     /// Private for the same reason as the slots: the worker replaces it
     /// wholesale between runs, and going through

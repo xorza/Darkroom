@@ -28,10 +28,10 @@ use crate::graph::identity::NodeId;
 /// The run-side pipeline container. Shares the installed program and its
 /// execution-attribution map, the reusable `schedule` buffer, the `planner`
 /// (scheduling scratch), the cross-run `cache` (per-node outputs + state, plus its
-/// owned [`DiskStore`](crate::execution::cache::disk_store::DiskStore) file persistence and the caching policy), and the `executor`
+/// owned [`DiskStore`] file persistence and the caching policy), and the `executor`
 /// (run loop + context). Compilation happens on the host ([`Compiler`](crate::execution::compile::Compiler));
 /// the engine only ever receives ready [`CompiledGraph`]s. Not serializable — the
-/// persistent form is the [`CompiledGraph`](crate::execution::compile::compiled_graph::CompiledGraph) alone.
+/// persistent form is the [`CompiledGraph`] alone.
 #[derive(Debug, Default)]
 pub(crate) struct ExecutionEngine {
     /// The installed immutable artifact. Replaced only by [`Self::install`],
@@ -173,7 +173,7 @@ impl ExecutionEngine {
 
     /// Persist any resident **disk-backed** (`persists_to_disk`, i.e. `Disk`/`Both`)
     /// values when the worker attaches a new
-    /// [`DiskStore`](crate::execution::cache::disk_store::DiskStore). This makes values computed
+    /// [`DiskStore`]. This makes values computed
     /// while the store was memory-only durable once a document receives a cache root.
     ///
     /// The attached store has no reuse verdict for these values, so each current resident
