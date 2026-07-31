@@ -8,7 +8,8 @@ use crate::execution::identity::OutputAddr;
 use crate::graph::Binding;
 use crate::graph::func::event::EventLambda;
 use crate::graph::func::{Func, FuncInput, FuncOutput};
-use crate::graph::identity::{FuncId, InputPort, NodeId};
+use crate::graph::identity::{FuncId, InputPort, NodeId, OutputPort};
+use crate::graph::output_types::OutputTypes;
 use crate::testing::{self, TestFuncHooks, test_func_lib, test_graph};
 use crate::{DataType, StaticValue};
 
@@ -591,5 +592,54 @@ fn drops_subscriptions_that_cannot_fire() {
         build(1, false),
         0,
         "an event the func dropped wires nothing"
+    );
+}
+
+/// A wire naming a port the producer no longer declares lowers as unbound, and
+/// the resolved-type table is *not* the thing that decides it.
+///
+/// A wildcard chain records every port it walks through — out-of-range ones
+/// included — as `Any`, so the consumer here reads `Some(Any)` for a port that
+/// does not exist. Only the range check against the producer's declared count
+/// unbinds it. Take that check out and the artifact carries an `OutputAddr`
+/// pointing past its producer's output run.
+#[test]
+fn a_wildcard_chain_does_not_make_a_dropped_port_bindable() {
+    let mut library = Library::default();
+    library.add(testing::with_stub_lambda(
+        Func::new(FuncId::from_u128(PRODUCER), "producer")
+            .output(FuncOutput::new("out", DataType::Int)),
+    ));
+    library.add(testing::with_stub_lambda(
+        Func::new(FuncId::from_u128(CONSUMER), "passthrough")
+            .input(FuncInput::required("mirrored", DataType::Any))
+            .wildcard_output("out", 0),
+    ));
+    let mut graph = Graph::default();
+    let producer = graph.add_func_node(library.by_id(FuncId::from_u128(PRODUCER)).unwrap());
+    let pass = graph.add_func_node(library.by_id(FuncId::from_u128(CONSUMER)).unwrap());
+    // Port 99 does not exist: the library shrank under a saved document.
+    let dropped = OutputPort::new(producer, 99);
+    graph.set_input_binding(InputPort::new(pass, 0), Binding::bind(producer, 99));
+
+    let mut types = OutputTypes::default();
+    types.update(&graph, &library);
+    assert_eq!(
+        types.get(dropped),
+        Some(&DataType::Any),
+        "the chain stamps the port it walked through, declared or not"
+    );
+
+    let program = lower(&graph, &library);
+    assert!(
+        matches!(
+            program.inputs[program.by_id(pass).inputs][0].binding,
+            ExecutionBinding::None
+        ),
+        "the range check unbinds a port the producer does not declare"
+    );
+    assert!(
+        graph.bindings.contains_key(&InputPort::new(pass, 0)),
+        "the authored wire itself is untouched"
     );
 }
