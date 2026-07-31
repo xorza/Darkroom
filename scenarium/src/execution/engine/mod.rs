@@ -243,6 +243,7 @@ pub(crate) mod internals {
     use crate::execution::identity::NodeIdx;
 
     use crate::DynamicValue;
+    use crate::execution::cache::disk_store::DiskStore;
     use crate::execution::cache::slot::{OutputSnapshot, RuntimeSlot};
     use crate::execution::compile;
     use crate::execution::compile::compiled_graph::ExecutionBinding;
@@ -394,6 +395,12 @@ pub(crate) mod internals {
         /// The runtime slot for a stable id — test introspection.
         pub(crate) fn slot(&self, node_id: NodeId) -> &RuntimeSlot {
             &self.cache[self.node_idx(node_id)]
+        }
+
+        /// The attached store, for the tests that name a blob's path or corrupt
+        /// one behind the cache's back.
+        pub(crate) fn disk_store(&self) -> &DiskStore {
+            self.cache.disk_store()
         }
 
         /// Seed a node's cached output (simulating a prior run): set the value and

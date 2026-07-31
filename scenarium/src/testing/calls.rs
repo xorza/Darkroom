@@ -16,11 +16,11 @@ use crate::{DynamicValue, StaticValue};
 /// Cheap to clone — the count is shared, not copied — so a fixture hands the
 /// same `Calls` to the graph and keeps one to assert on.
 #[derive(Clone, Debug, Default)]
-pub(crate) struct Calls(Arc<AtomicUsize>);
+pub struct Calls(Arc<AtomicUsize>);
 
 impl Calls {
     /// How many times a body of this counter has run.
-    pub(crate) fn count(&self) -> usize {
+    pub fn count(&self) -> usize {
         self.0.load(Ordering::SeqCst)
     }
 
@@ -28,12 +28,12 @@ impl Calls {
     /// for — a lambda writing a `Custom` value, which [`compute`] cannot.
     ///
     /// [`compute`]: crate::testing::graph::NodeSpec::compute
-    pub(crate) fn bump(&self) {
+    pub fn bump(&self) {
         self.0.fetch_add(1, Ordering::SeqCst);
     }
 
     /// `body`, counted.
-    pub(crate) fn counting(
+    pub fn counting(
         &self,
         body: impl Fn(&[DynamicValue]) -> StaticValue + Send + Sync + 'static,
     ) -> impl Fn(&[DynamicValue]) -> StaticValue + Send + Sync + 'static {
@@ -46,7 +46,11 @@ impl Calls {
 
     /// A counted body ignoring its inputs and emitting `value` — the source
     /// every "did the upstream recompute" fixture is built on.
-    pub(crate) fn returning(
+    ///
+    /// [`NodeSpec::counted`] is this plus the declaration that carries it.
+    ///
+    /// [`NodeSpec::counted`]: crate::testing::graph::NodeSpec::counted
+    pub fn returning(
         &self,
         value: impl Into<StaticValue>,
     ) -> impl Fn(&[DynamicValue]) -> StaticValue + Send + Sync + 'static {
@@ -56,7 +60,7 @@ impl Calls {
 
     /// A counted body emitting *its own count*, this call included — so one
     /// output says both that the node ran and how many times it has.
-    pub(crate) fn tally(&self) -> impl Fn(&[DynamicValue]) -> StaticValue + Send + Sync + 'static {
+    pub fn tally(&self) -> impl Fn(&[DynamicValue]) -> StaticValue + Send + Sync + 'static {
         let calls = self.clone();
         move |_| StaticValue::Int(calls.0.fetch_add(1, Ordering::SeqCst) as i64 + 1)
     }

@@ -11,9 +11,9 @@ async fn both_value_stays_resident_outside_the_active_frontier() {
     let mut g = TestGraph::new();
     // `src` retains in RAM but never persists — the "non-reloadable value"
     // the last assertion is about.
-    g.add("src", |n| source(1, &calls)(n).cache(CacheMode::Ram));
-    g.add("sum", sum(CacheMode::Both));
-    g.add("mult", mult(CacheMode::Both));
+    g.add("src", |n| n.counted(1i64, &calls).cache(CacheMode::Ram));
+    g.add("sum", |n| n.sum().cache(CacheMode::Both));
+    g.add("mult", |n| n.mult().cache(CacheMode::Both));
     g.add("print", |n| n.records());
     g.wire("src", 0, "sum", 0);
     g.wire("src", 0, "sum", 1);
@@ -21,7 +21,7 @@ async fn both_value_stays_resident_outside_the_active_frontier() {
     g.wire("src", 0, "mult", 1);
     g.wire("mult", 0, "print", 0);
 
-    let mut e = disk_engine(&dir, g);
+    let mut e = TestEngine::over(g).with_disk_store(dir.path());
     e.run_sinks().await;
     assert!(
         e.holds_output("sum"),
@@ -74,7 +74,7 @@ async fn assert_mode_behavior(mode: CacheMode) {
     let dir = TempDir::new(&format!("mode-{mode:?}"));
     let calls = Calls::default();
 
-    let mut e = disk_engine(&dir, source_mult_print(mode, 1, &calls));
+    let mut e = TestEngine::over(source_mult_print(mode, 1, &calls)).with_disk_store(dir.path());
     let run1 = e.run_sinks().await;
     assert!(
         run1.ran().contains(&"mult"),
@@ -125,7 +125,7 @@ async fn assert_mode_behavior(mode: CacheMode) {
 
     // Reopen with empty RAM over the same store: only a disk-backed mode
     // survives.
-    let mut e = disk_engine(&dir, source_mult_print(mode, 1, &calls));
+    let mut e = e.reopen();
     let reopen = e.run_sinks().await;
     if mode.persists_to_disk() {
         assert!(
@@ -174,21 +174,18 @@ async fn none_upstream_does_not_disable_downstream_disk_cache() {
     let calls = Calls::default();
 
     // src(1) → a = sum(None) = 2 → b = mult(Disk) = 4 → print.
-    let build = |calls: &Calls| {
-        let mut g = TestGraph::new();
-        g.add("src", source(1, calls));
-        g.add("a", sum(CacheMode::None));
-        g.add("b", mult(CacheMode::Disk));
-        g.add("print", |n| n.records());
-        g.wire("src", 0, "a", 0);
-        g.wire("src", 0, "a", 1);
-        g.wire("a", 0, "b", 0);
-        g.wire("a", 0, "b", 1);
-        g.wire("b", 0, "print", 0);
-        g
-    };
+    let mut g = TestGraph::new();
+    g.add("src", |n| n.counted(1i64, &calls));
+    g.add("a", |n| n.sum().cache(CacheMode::None));
+    g.add("b", |n| n.mult().cache(CacheMode::Disk));
+    g.add("print", |n| n.records());
+    g.wire("src", 0, "a", 0);
+    g.wire("src", 0, "a", 1);
+    g.wire("a", 0, "b", 0);
+    g.wire("a", 0, "b", 1);
+    g.wire("b", 0, "print", 0);
 
-    let mut e = disk_engine(&dir, build(&calls));
+    let mut e = TestEngine::over(g).with_disk_store(dir.path());
     let cold = e.run_sinks().await;
     assert!(
         cold.ran().contains(&"a") && cold.ran().contains(&"b"),
@@ -202,7 +199,7 @@ async fn none_upstream_does_not_disable_downstream_disk_cache() {
     // Reopen: B is a disk hit, so A(None) — read only by the reused B — is
     // cut, not recomputed. Setting A to None disabled neither B's cache nor
     // A's own reuse-cut.
-    let mut e = disk_engine(&dir, build(&calls));
+    let mut e = e.reopen();
     let reopen = e.run_sinks().await;
     assert!(
         reopen.cached().contains(&"b"),
@@ -222,13 +219,13 @@ async fn disabling_ram_retention_releases_resident_value_on_install() {
     for mode in [CacheMode::None, CacheMode::Disk] {
         let dir = TempDir::new(&format!("ram-downgrade-{mode:?}"));
         let mut g = TestGraph::new();
-        g.add("mult", mult(CacheMode::Ram));
+        g.add("mult", |n| n.mult().cache(CacheMode::Ram));
         g.add("print", |n| n.records());
         g.constant("mult", 0, 2i64);
         g.constant("mult", 1, 3i64);
         g.wire("mult", 0, "print", 0);
 
-        let mut e = disk_engine(&dir, g);
+        let mut e = TestEngine::over(g).with_disk_store(dir.path());
         e.run_sinks().await;
         assert!(e.holds_output("mult"), "Ram retains the current pure value");
 
@@ -246,18 +243,15 @@ async fn disabling_ram_retention_releases_resident_value_on_install() {
 async fn impure_cone_persist_node_is_not_disk_cached() {
     let dir = TempDir::new("impure-cone");
     let calls = Calls::default();
-    let build = |calls: &Calls| {
-        let mut g = source_mult_print(CacheMode::Disk, 11, calls);
-        g.edit_func("src", |func| func.behavior = FuncBehavior::Impure);
-        g
-    };
+    let mut g = source_mult_print(CacheMode::Disk, 11, &calls);
+    g.edit_func("src", |func| func.behavior = FuncBehavior::Impure);
 
-    let mut e = disk_engine(&dir, build(&calls));
+    let mut e = TestEngine::over(g).with_disk_store(dir.path());
     e.run_sinks().await;
 
     // Reopen: mult must recompute — an impure cone has no digest, so it
     // never caches to disk.
-    let mut e = disk_engine(&dir, build(&calls));
+    let mut e = e.reopen();
     let run = e.run_sinks().await;
     assert!(
         !run.cached().contains(&"mult"),
@@ -272,13 +266,13 @@ async fn impure_cone_persist_node_is_not_disk_cached() {
 async fn memory_persistence_node_is_not_disk_cached() {
     let dir = TempDir::new("memory-persist");
     let calls = Calls::default();
-    let build = |calls: &Calls| source_mult_print(CacheMode::Ram, 1, calls);
 
-    let mut e = disk_engine(&dir, build(&calls));
+    let mut e =
+        TestEngine::over(source_mult_print(CacheMode::Ram, 1, &calls)).with_disk_store(dir.path());
     e.run_sinks().await;
 
     // Reopen: fresh RAM, nothing on disk for mult ⇒ it recomputes.
-    let mut e = disk_engine(&dir, build(&calls));
+    let mut e = e.reopen();
     let run = e.run_sinks().await;
     assert!(
         !run.cached().contains(&"mult"),
@@ -383,7 +377,6 @@ async fn missing_codec_skips_disk_cache_instead_of_panicking() {
         );
         // A `Custom` value has no `compute` shape — that writes a
         // `StaticValue` — so this body counts itself.
-        let recompute = recompute.clone();
         g.add("make_blob", move |n: NodeSpec| {
             n.pure()
                 .sink()
@@ -404,13 +397,13 @@ async fn missing_codec_skips_disk_cache_instead_of_panicking() {
     let recompute = Calls::default();
 
     // Run 1 (codec present): computes and writes the Blob to disk.
-    let mut e = disk_engine(&dir, build(true, &recompute));
+    let mut e = TestEngine::over(build(true, &recompute)).with_disk_store(dir.path());
     e.run_sinks().await;
     assert_eq!(recompute.count(), 1, "the cold run computes");
 
     // Reopen with the codec: served from disk, and the hydration decode
     // reaches the engine's own runtime context store.
-    let mut e = disk_engine(&dir, build(true, &recompute));
+    let mut e = e.reopen();
     let run = e.run_sinks().await;
     assert_eq!(recompute.count(), 1, "codec present ⇒ served from disk");
     assert!(run.cached().contains(&"make_blob"));
@@ -427,7 +420,7 @@ async fn missing_codec_skips_disk_cache_instead_of_panicking() {
 
     // Reopen WITHOUT the codec: the blob is present but undecodable, so it
     // is not flagged available — recompute, no panic.
-    let mut e = disk_engine(&dir, build(false, &recompute));
+    let mut e = TestEngine::over(build(false, &recompute)).with_disk_store(dir.path());
     let run = e.run_sinks().await;
     assert_eq!(recompute.count(), 2, "a missing codec ⇒ recompute");
     assert!(

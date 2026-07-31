@@ -29,6 +29,7 @@ use crate::graph::node::special::SpecialNode;
 use crate::graph::node::{CacheMode, Node, NodeKind};
 use crate::graph::{Binding, Graph};
 use crate::library::Library;
+use crate::testing::calls::Calls;
 use crate::testing::{TestFuncHooks, test_func_lib, test_graph};
 use crate::{DataType, DynamicValue, StaticValue};
 
@@ -77,7 +78,7 @@ impl TestGraph {
     pub fn add(&mut self, name: &str, spec: impl FnOnce(NodeSpec) -> NodeSpec) -> NodeId {
         let func = spec(NodeSpec::new(name, FuncId::from_u128(self.mint()))).func;
         self.library.add(func.clone());
-        let node_id = self.place(func_node(&func), &func);
+        let node_id = self.place(&func);
         self.bind_name(name, node_id);
         node_id
     }
@@ -91,7 +92,7 @@ impl TestGraph {
             .by_id(self.func_id(of))
             .expect("the named node's func is registered")
             .clone();
-        let node_id = self.place(func_node(&func), &func);
+        let node_id = self.place(&func);
         self.bind_name(name, node_id);
         node_id
     }
@@ -107,7 +108,7 @@ impl TestGraph {
             .by_name(func_name)
             .unwrap_or_else(|| panic!("the library declares no func named {func_name:?}"))
             .clone();
-        let node_id = self.place(func_node(&func), &func);
+        let node_id = self.place(&func);
         self.bind_name(func_name, node_id);
         node_id
     }
@@ -245,6 +246,13 @@ impl TestGraph {
         self.library.add(func);
     }
 
+    /// Replace what `name` declares with a body that always fails — the
+    /// edit-time form of [`NodeSpec::fails`], for a node the fixture did not
+    /// spec itself.
+    pub fn fails(&mut self, name: &str, message: &'static str) {
+        self.edit_func(name, |func| func.lambda = failing_lambda(message));
+    }
+
     fn func_id(&self, name: &str) -> FuncId {
         match self.node(name).kind {
             NodeKind::Func(func_id) => func_id,
@@ -254,24 +262,25 @@ impl TestGraph {
         }
     }
 
-    fn node(&self, name: &str) -> &crate::graph::node::Node {
+    fn node(&self, name: &str) -> &Node {
         self.graph
             .find(self.id(name))
             .expect("a named node is in the graph")
     }
 
-    fn node_mut(&mut self, name: &str) -> &mut crate::graph::node::Node {
+    fn node_mut(&mut self, name: &str) -> &mut Node {
         let node_id = self.id(name);
         self.graph
             .find_mut(node_id)
             .expect("a named node is in the graph")
     }
 
-    /// Place `node` under the next ascending id, seeding its declared const
-    /// defaults the way `Graph::add_func_node` does for an editor.
-    fn place(&mut self, node: Node, func: &Func) -> NodeId {
+    /// Place one node of `func` under the next ascending id, seeding its
+    /// declared const defaults the way `Graph::add_func_node` does for an
+    /// editor.
+    fn place(&mut self, func: &Func) -> NodeId {
         let node_id = NodeId::from_u128(self.mint());
-        self.graph.insert(node_id, node);
+        self.graph.insert(node_id, Node::from(func));
         self.graph.bindings.extend(func.default_bindings(node_id));
         node_id
     }
@@ -287,9 +296,9 @@ impl TestGraph {
     }
 }
 
-/// A bare node of `func`, before its id is chosen.
-fn func_node(func: &Func) -> Node {
-    Node::from(func)
+/// The body both `fails` methods install, so the two cannot drift.
+fn failing_lambda(message: &'static str) -> FuncLambda {
+    async_lambda!(move |_| { Err(InvokeError::external(std::io::Error::other(message))) })
 }
 
 /// One node's declaration under construction — [`Func`]'s builders, plus the
@@ -433,12 +442,52 @@ impl NodeSpec {
             .compute(move |_| value.clone())
     }
 
+    /// [`returns`](Self::returns), counting each call — the source every "did
+    /// the upstream recompute" fixture is built on, since `calls` says both
+    /// whether the node ran and how often.
+    pub fn counted(self, value: impl Into<StaticValue>, calls: &Calls) -> Self {
+        let value = value.into();
+        let data_type = DataType::Any.or_const_type(&value);
+        self.pure()
+            .output(data_type)
+            .compute(calls.returning(value))
+    }
+
+    /// A pure two-input arithmetic node: `in0 op in1`, both `Int`, one `Int`
+    /// output.
+    ///
+    /// The second input is **optional and defaults to `identity`**, so a
+    /// fixture may leave it unbound or const-bind it to move the node's digest
+    /// without touching its producers.
+    pub fn arith(self, identity: i64, op: fn(i64, i64) -> i64) -> Self {
+        self.pure()
+            .input(DataType::Int)
+            .optional(DataType::Int)
+            .output(DataType::Int)
+            .compute(move |inputs| {
+                let a = inputs[0].as_i64().unwrap();
+                let b = inputs[1].as_i64().unwrap_or(identity);
+                op(a, b).into()
+            })
+    }
+
+    /// [`arith`](Self::arith) adding its inputs, identity `0`.
+    pub fn sum(self) -> Self {
+        self.arith(0, |a, b| a + b)
+    }
+
+    /// [`arith`](Self::arith) multiplying its inputs, identity `1`.
+    pub fn mult(self) -> Self {
+        self.arith(1, |a, b| a * b)
+    }
+
     /// A body that always fails, for the error-propagation paths — the
     /// consumer cascade is what such a node exists to provoke.
+    ///
+    /// [`TestGraph::fails`] is the same body installed on a declaration the
+    /// fixture did not spec itself.
     pub fn fails(self, message: &'static str) -> Self {
-        self.lambda(async_lambda!(move |_| {
-            Err(InvokeError::external(std::io::Error::other(message)))
-        }))
+        self.lambda(failing_lambda(message))
     }
 
     /// A sink that logs whatever reaches it, readable back off the run's log

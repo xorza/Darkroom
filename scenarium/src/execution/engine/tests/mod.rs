@@ -11,13 +11,12 @@ use crate::graph::identity::{NodeId, OutputPort};
 use crate::graph::node::CacheMode;
 use crate::library::Library;
 use crate::testing::TestFuncHooks;
-use crate::testing::engine::{RunOutcome, TestEngine};
+use crate::testing::calls::Calls;
+use crate::testing::engine::{ReportedRun, RunOutcome, TestEngine};
 use crate::testing::graph::{NodeSpec, TestGraph};
 use crate::{DataType, DynamicValue, StaticValue};
 use ::common::{CancelToken, FloatExt};
 use tokio::sync::Mutex;
-
-type TestResult<T = ()> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
 mod argument_values;
 mod behavior;

@@ -42,20 +42,43 @@ pub(crate) struct TestEngine {
     pub(crate) graph: TestGraph,
     pub(crate) engine: ExecutionEngine,
     outcome: ExecutionOutcome,
+    /// Where [`attach_disk_store`](Self::attach_disk_store) pointed the cache's
+    /// disk tier, so [`reopen`](Self::reopen) can point a fresh engine at the
+    /// same blobs.
+    disk_root: Option<PathBuf>,
 }
 
 impl TestEngine {
     /// Compile `graph` and install it. Panics on a compile error — a fixture
-    /// that does not compile is a broken fixture; [`try_over`](Self::try_over)
-    /// is for the tests where the refusal *is* the subject.
+    /// that does not compile is a broken fixture;
+    /// [`try_reinstall`](Self::try_reinstall) is for the tests where the
+    /// refusal *is* the subject.
     pub(crate) fn over(graph: TestGraph) -> Self {
         let mut engine = Self {
             graph,
             engine: ExecutionEngine::default(),
             outcome: ExecutionOutcome::default(),
+            disk_root: None,
         };
         engine.reinstall();
         engine
+    }
+
+    /// A fresh engine over the same graph and the same store — the **reopen**
+    /// every persistence test is about: the blobs survive, RAM does not.
+    ///
+    /// The graph moves across rather than being rebuilt, so the new engine
+    /// addresses the very slots the blobs were written under without a fixture
+    /// having to restate its topology (and keep the two statements in step).
+    pub(crate) fn reopen(self) -> Self {
+        let TestEngine {
+            graph, disk_root, ..
+        } = self;
+        let mut reopened = Self::over(graph);
+        if let Some(root) = disk_root {
+            reopened.attach_disk_store(root);
+        }
+        reopened
     }
 
     /// Edit the graph and reinstall what it became — the ordinary shape of a
@@ -78,12 +101,38 @@ impl TestEngine {
     /// Between runs, like a document gaining a cache directory — every reuse
     /// verdict already given was answered from the previous store.
     pub(crate) fn attach_disk_store(&mut self, root: impl Into<PathBuf>) {
-        let store = DiskStore::new(&self.graph.library, Some(root.into()));
+        let root = root.into();
+        let store = DiskStore::new(&self.graph.library, Some(root.clone()));
         self.engine.set_disk_store(store);
+        self.disk_root = Some(root);
+    }
+
+    /// [`attach_disk_store`](Self::attach_disk_store) at construction, so a
+    /// disk-backed fixture is one expression.
+    pub(crate) fn with_disk_store(mut self, root: impl Into<PathBuf>) -> Self {
+        self.attach_disk_store(root);
+        self
     }
 
     pub(crate) fn id(&self, name: &str) -> NodeId {
         self.graph.id(name)
+    }
+
+    /// Where the attached store keeps `name`'s blob — the path itself, whether
+    /// or not a run has written one there yet.
+    ///
+    /// The store names blobs by node id, which is not something a test should
+    /// have to re-derive (or go hunting for with `read_dir`) to corrupt, read
+    /// back, or delete one.
+    pub(crate) fn blob_path(&self, name: &str) -> PathBuf {
+        self.engine.disk_store().blob_path(self.id(name))
+    }
+
+    /// The bytes of `name`'s blob. Panics if the store holds none.
+    pub(crate) fn blob(&self, name: &str) -> Vec<u8> {
+        let path = self.blob_path(name);
+        std::fs::read(&path)
+            .unwrap_or_else(|error| panic!("no blob at {}: {error}", path.display()))
     }
 
     /// Run to these exact nodes — the "run to this node" / preview trigger.
@@ -92,9 +141,7 @@ impl TestEngine {
         names: impl IntoIterator<Item = &'n str>,
     ) -> RunOutcome {
         let node_ids = names.into_iter().map(|name| self.id(name)).collect();
-        self.run(RunSeeds::nodes(node_ids))
-            .await
-            .expect("the run completes")
+        self.run(RunSeeds::nodes(node_ids)).await
     }
 
     /// Fire these events, running whatever subscribes to them.
@@ -104,7 +151,6 @@ impl TestEngine {
     ) -> RunOutcome {
         self.run(RunSeeds::events(events.into_iter().collect()))
             .await
-            .expect("the run completes")
     }
 
     /// Initialize every node owning a subscribed event — the event loop's
@@ -115,7 +161,6 @@ impl TestEngine {
             ..Default::default()
         })
         .await
-        .expect("the run completes")
     }
 
     /// An event port on a named node.
@@ -127,24 +172,28 @@ impl TestEngine {
     }
 
     pub(crate) async fn run_sinks(&mut self) -> RunOutcome {
-        self.run(RunSeeds::sinks())
-            .await
-            .expect("the run completes")
+        self.run(RunSeeds::sinks()).await
     }
 
-    /// The general form, surfacing the operation-level refusal a bad seed
-    /// raises.
-    pub(crate) async fn run(&mut self, seeds: RunSeeds) -> Result<RunOutcome> {
-        self.run_cancellable(seeds, CancelToken::never()).await
+    /// The general form. Panics if the operation itself is refused — a seed
+    /// naming no node, a cycle — since for all but a handful of fixtures that
+    /// is a precondition rather than the subject; [`try_run`](Self::try_run) is
+    /// for the rest.
+    pub(crate) async fn run(&mut self, seeds: RunSeeds) -> RunOutcome {
+        self.try_run(seeds).await.expect("the run completes")
     }
 
-    /// Run every sink, also handing back the live progress the run published
-    /// — each event named, in the order the executor emitted it.
-    pub(crate) async fn run_sinks_reporting(&mut self) -> (RunOutcome, Vec<(String, RunPhase)>) {
+    pub(crate) async fn try_run(&mut self, seeds: RunSeeds) -> Result<RunOutcome> {
+        self.try_run_cancellable(seeds, CancelToken::never()).await
+    }
+
+    /// Run every sink, also handing back the live progress the run published.
+    pub(crate) async fn run_sinks_reporting(&mut self) -> ReportedRun {
         let TestEngine {
             graph,
             engine,
             outcome,
+            ..
         } = self;
         let mut reporter = CollectingReporter::default();
         engine
@@ -157,12 +206,14 @@ impl TestEngine {
             .await
             .expect("the run completes");
         let names = NameMap::of(graph);
-        let progress = reporter
-            .progress
-            .iter()
-            .map(|event| (names.name(event.node_id), event.phase))
-            .collect();
-        (RunOutcome::snapshot(graph, engine, outcome), progress)
+        ReportedRun {
+            progress: reporter
+                .progress
+                .iter()
+                .map(|event| (names.name(event.node_id), event.phase))
+                .collect(),
+            run: RunOutcome::snapshot(graph, engine, outcome),
+        }
     }
 
     /// Seed a node's cached output, as a prior run would have left it.
@@ -191,7 +242,18 @@ impl TestEngine {
         self.engine.slot(self.id(name)).output_values().is_some()
     }
 
+    /// Run under `cancel` rather than a token nothing trips.
     pub(crate) async fn run_cancellable(
+        &mut self,
+        seeds: RunSeeds,
+        cancel: CancelToken,
+    ) -> RunOutcome {
+        self.try_run_cancellable(seeds, cancel)
+            .await
+            .expect("the run completes")
+    }
+
+    pub(crate) async fn try_run_cancellable(
         &mut self,
         seeds: RunSeeds,
         cancel: CancelToken,
@@ -200,6 +262,7 @@ impl TestEngine {
             graph,
             engine,
             outcome,
+            ..
         } = self;
         engine
             .execute(seeds, &mut DiscardedReports, cancel, outcome)
@@ -209,11 +272,17 @@ impl TestEngine {
 
     /// Plan and resolve without invoking any lambda — what the schedule looks
     /// like before anything runs.
-    pub(crate) async fn plan_sinks(&mut self) -> Result<PlanOutcome> {
+    pub(crate) async fn plan_sinks(&mut self) -> PlanOutcome {
         self.plan(RunSeeds::sinks()).await
     }
 
-    pub(crate) async fn plan(&mut self, seeds: RunSeeds) -> Result<PlanOutcome> {
+    pub(crate) async fn plan(&mut self, seeds: RunSeeds) -> PlanOutcome {
+        self.try_plan(seeds).await.expect("the fixture graph plans")
+    }
+
+    /// [`plan`](Self::plan), surfacing the refusal a cycle or a bad seed
+    /// raises.
+    pub(crate) async fn try_plan(&mut self, seeds: RunSeeds) -> Result<PlanOutcome> {
         self.engine
             .prepare_execution(seeds.sinks, seeds.event_sources, &seeds.events)
             .await?;
@@ -275,6 +344,14 @@ impl TestEngine {
     pub(crate) fn output_i64(&self, name: &str, port: usize) -> Option<i64> {
         self.output(name, port).and_then(|value| value.as_i64())
     }
+}
+
+/// A finished run plus the live progress it published on the way — each event
+/// named, in the order the executor emitted it.
+#[derive(Debug)]
+pub(crate) struct ReportedRun {
+    pub(crate) run: RunOutcome,
+    pub(crate) progress: Vec<(String, RunPhase)>,
 }
 
 /// The per-node facts of one finished run, keyed by name.

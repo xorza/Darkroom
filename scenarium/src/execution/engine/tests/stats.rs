@@ -3,7 +3,7 @@ use super::*;
 use crate::execution::report::NodeExecutionStatus;
 
 #[tokio::test(flavor = "multi_thread")]
-async fn missing_inputs_reported() -> TestResult {
+async fn missing_inputs_reported() {
     let mut e = TestEngine::over(TestGraph::sample());
     e.edit(|g| g.unbind("sum", 0));
 
@@ -12,7 +12,6 @@ async fn missing_inputs_reported() -> TestResult {
     // Port 1 is still bound, so the run names exactly the port that failed
     // rather than flagging the node as a whole.
     assert_eq!(run.missing_ports("sum"), [0]);
-    Ok(())
 }
 
 /// Library drift: wiring that references ports/events the library no
@@ -20,7 +19,7 @@ async fn missing_inputs_reported() -> TestResult {
 /// to unbound (a required input reports missing), a dangling
 /// subscription and pin wire nothing.
 #[tokio::test(flavor = "multi_thread")]
-async fn dangling_wiring_compiles_and_reports_missing_input() -> TestResult {
+async fn dangling_wiring_compiles_and_reports_missing_input() {
     let mut e = TestEngine::over(TestGraph::sample());
     // sum's required input 0 bound to an output `get_a` doesn't have, plus a
     // subscription to an event it doesn't emit — the drift a changed library
@@ -37,11 +36,10 @@ async fn dangling_wiring_compiles_and_reports_missing_input() -> TestResult {
         [0],
         "the dangling binding degrades to a missing input on that exact port"
     );
-    Ok(())
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn executed_nodes_reported() -> TestResult {
+async fn executed_nodes_reported() {
     let mut e = TestEngine::over(TestGraph::sample());
 
     let run = e.run_sinks().await;
@@ -57,5 +55,4 @@ async fn executed_nodes_reported() -> TestResult {
         };
         assert!(*elapsed_secs >= 0.0, "{name} has negative elapsed_secs");
     }
-    Ok(())
 }

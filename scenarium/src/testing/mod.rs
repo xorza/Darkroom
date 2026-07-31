@@ -2,7 +2,8 @@
 //! `internals` dev feature.
 //!
 //! [`graph`] is the harness: a graph and its library built together and
-//! addressed by name, which is what an in-crate fixture reaches for.
+//! addressed by name, which is what an in-crate fixture reaches for. [`calls`]
+//! is the counter its counted bodies are built on.
 //!
 //! What is left in this file is the **published** pair — a five-func library
 //! and the graph wiring it, plus [`with_stub_lambda`] for a declaration a
@@ -12,8 +13,7 @@
 //! [`TestGraph::sample`](graph::TestGraph::sample) wraps the pair so an
 //! in-crate test gets the same five nodes addressed by name.
 
-#[cfg(test)]
-pub(crate) mod calls;
+pub mod calls;
 #[cfg(test)]
 pub(crate) mod engine;
 #[cfg(test)]

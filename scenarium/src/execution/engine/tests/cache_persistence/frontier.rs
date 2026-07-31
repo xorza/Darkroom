@@ -8,10 +8,14 @@ async fn explicit_cache_eviction_removes_the_downstream_ram_and_disk_cone() {
     // src_a → sum → mult → print, with src_b feeding sum's second input —
     // an upstream sibling *outside* src_a's consumer cone.
     let mut g = TestGraph::new();
-    g.add("src_a", |n| source(1, &a_calls)(n).cache(CacheMode::Both));
-    g.add("src_b", |n| source(11, &b_calls)(n).cache(CacheMode::Both));
-    g.add("sum", sum(CacheMode::Both));
-    g.add("mult", mult(CacheMode::Both));
+    g.add("src_a", |n| {
+        n.counted(1i64, &a_calls).cache(CacheMode::Both)
+    });
+    g.add("src_b", |n| {
+        n.counted(11i64, &b_calls).cache(CacheMode::Both)
+    });
+    g.add("sum", |n| n.sum().cache(CacheMode::Both));
+    g.add("mult", |n| n.mult().cache(CacheMode::Both));
     g.add("print", |n| n.records());
     g.wire("src_a", 0, "sum", 0);
     g.wire("src_b", 0, "sum", 1);
@@ -19,7 +23,7 @@ async fn explicit_cache_eviction_removes_the_downstream_ram_and_disk_cone() {
     g.wire("src_b", 0, "mult", 1);
     g.wire("mult", 0, "print", 0);
 
-    let mut e = disk_engine(&dir, g);
+    let mut e = TestEngine::over(g).with_disk_store(dir.path());
     e.run_sinks().await;
     let run = e.run_sinks().await;
     assert_eq!(a_calls.count(), 1);
@@ -49,8 +53,7 @@ async fn explicit_cache_eviction_removes_the_downstream_ram_and_disk_cone() {
 
     // Reopening recomputes exactly what was evicted; the retained sibling
     // is still served from its blob.
-    drop(e);
-    let mut e = disk_engine(&dir, source_cone(&a_calls, &b_calls));
+    let mut e = e.reopen();
     let run = e.run_sinks().await;
     assert_eq!(a_calls.count(), 2);
     assert_eq!(b_calls.count(), 1);
@@ -68,7 +71,7 @@ async fn explicit_cache_eviction_removes_the_downstream_ram_and_disk_cone() {
 
     // A blob that cannot be deleted is reported, and the rest of the cone
     // still evicts — one failure is not a reason to abandon the sweep.
-    let blocked = dir.join(e.id("src_a").as_uuid().simple().to_string());
+    let blocked = e.blob_path("src_a");
     std::fs::remove_file(&blocked).unwrap();
     std::fs::create_dir(&blocked).unwrap();
 
@@ -105,26 +108,23 @@ async fn shared_producer_read_by_a_running_consumer_is_not_cut() {
     let calls = Calls::default();
 
     // src → mult(Disk) → print_mult ;  src → print_direct.
-    let build = |calls: &Calls| {
-        let mut g = TestGraph::new();
-        g.add("src", source(7, calls));
-        g.add("mult", mult(CacheMode::Disk));
-        g.add("print_mult", |n| n.records());
-        g.instance("print_direct", "print_mult");
-        g.wire("src", 0, "mult", 0);
-        g.wire("src", 0, "mult", 1);
-        g.wire("mult", 0, "print_mult", 0);
-        g.wire("src", 0, "print_direct", 0);
-        g
-    };
+    let mut g = TestGraph::new();
+    g.add("src", |n| n.counted(7i64, &calls));
+    g.add("mult", |n| n.mult().cache(CacheMode::Disk));
+    g.add("print_mult", |n| n.records());
+    g.instance("print_direct", "print_mult");
+    g.wire("src", 0, "mult", 0);
+    g.wire("src", 0, "mult", 1);
+    g.wire("mult", 0, "print_mult", 0);
+    g.wire("src", 0, "print_direct", 0);
 
-    let mut e = disk_engine(&dir, build(&calls));
+    let mut e = TestEngine::over(g).with_disk_store(dir.path());
     e.run_sinks().await;
     assert_eq!(calls.count(), 1);
 
     // Reopen: mult reuses from disk, so the src→mult edge is cut — but
     // print_direct still reads src, so the union keeps src alive.
-    let mut e = disk_engine(&dir, build(&calls));
+    let mut e = e.reopen();
     let run = e.run_sinks().await;
     assert_eq!(
         calls.count(),
@@ -153,21 +153,18 @@ async fn chained_disk_cache_hydrates_only_the_live_frontier() {
     // src(7) → sum(Both) = 14 → mult(Both) = 98 → print. `Both` (RAM + disk)
     // so the frontier the run reads is kept resident — that retention is
     // what this test asserts; pure `Disk` would drop its RAM copy.
-    let build = |calls: &Calls| {
-        let mut g = TestGraph::new();
-        g.add("src", source(7, calls));
-        g.add("sum", sum(CacheMode::Both));
-        g.add("mult", mult(CacheMode::Both));
-        g.add("print", |n| n.records());
-        g.wire("src", 0, "sum", 0);
-        g.wire("src", 0, "sum", 1);
-        g.wire("sum", 0, "mult", 0);
-        g.wire("src", 0, "mult", 1);
-        g.wire("mult", 0, "print", 0);
-        g
-    };
+    let mut g = TestGraph::new();
+    g.add("src", |n| n.counted(7i64, &calls));
+    g.add("sum", |n| n.sum().cache(CacheMode::Both));
+    g.add("mult", |n| n.mult().cache(CacheMode::Both));
+    g.add("print", |n| n.records());
+    g.wire("src", 0, "sum", 0);
+    g.wire("src", 0, "sum", 1);
+    g.wire("sum", 0, "mult", 0);
+    g.wire("src", 0, "mult", 1);
+    g.wire("mult", 0, "print", 0);
 
-    let mut e = disk_engine(&dir, build(&calls));
+    let mut e = TestEngine::over(g).with_disk_store(dir.path());
     e.run_sinks().await;
     assert_eq!(calls.count(), 1);
 
@@ -175,8 +172,8 @@ async fn chained_disk_cache_hydrates_only_the_live_frontier() {
     // its blob header covers the demand — without decoding the body: the
     // value only enters RAM when the run loop reaches the node, so a run's
     // reusable frontier never accumulates ahead of the first lambda.
-    let mut e = disk_engine(&dir, build(&calls));
-    e.plan_sinks().await.unwrap();
+    let mut e = e.reopen();
+    e.plan_sinks().await;
     assert_eq!(
         e.state("mult"),
         NodeState::Reuse,
@@ -233,23 +230,20 @@ async fn chained_disk_cache_hydrates_only_the_live_frontier() {
 /// The intervening run uses `Ram` mode so it can't overwrite the node's one
 /// disk blob (a `Disk`-mode run would — the blob is keyed by node id).
 #[tokio::test(flavor = "multi_thread")]
-async fn stale_ram_value_does_not_mask_a_valid_disk_blob() -> TestResult {
+async fn stale_ram_value_does_not_mask_a_valid_disk_blob() {
     let dir = TempDir::new("flip_back");
 
+    // Config A (Disk): mult = 2 * 3 = 6 → the blob (digest D_A) on disk.
     // Const binds detach mult from any upstream, so its digest is a pure
     // function of the two consts.
-    let build = |a: i64, b: i64, mode: CacheMode| {
-        let mut g = TestGraph::new();
-        g.add("mult", mult(mode));
-        g.add("print", |n| n.records());
-        g.constant("mult", 0, a);
-        g.constant("mult", 1, b);
-        g.wire("mult", 0, "print", 0);
-        g
-    };
+    let mut g = TestGraph::new();
+    g.add("mult", |n| n.mult().cache(CacheMode::Disk));
+    g.add("print", |n| n.records());
+    g.constant("mult", 0, 2i64);
+    g.constant("mult", 1, 3i64);
+    g.wire("mult", 0, "print", 0);
 
-    // Config A (Disk): mult = 2 * 3 = 6 → the blob (digest D_A) on disk.
-    let mut e = disk_engine(&dir, build(2, 3, CacheMode::Disk));
+    let mut e = TestEngine::over(g).with_disk_store(dir.path());
     let first = e.run_sinks().await;
     assert_eq!(first.logs(), ["6"]);
 
@@ -291,7 +285,6 @@ async fn stale_ram_value_does_not_mask_a_valid_disk_blob() -> TestResult {
         ["6"],
         "flip-back serves the disk blob (6), not the stale RAM value (35)"
     );
-    Ok(())
 }
 
 /// A persisted node is written to disk the moment *it* finishes, not in a
@@ -308,7 +301,7 @@ async fn persist_node_lands_on_disk_before_its_consumer_runs() {
     // mult(const 2, const 3) = 6, Disk → sink. Const binds detach mult from
     // any upstream, so only mult and the sink run.
     let mut g = TestGraph::new();
-    g.add("mult", mult(CacheMode::Disk));
+    g.add("mult", |n| n.mult().cache(CacheMode::Disk));
     g.add("watch", |n| {
         let (root, flag) = (root.clone(), blob_present.clone());
         n.sink().input(DataType::Int).observes(move |_| {
@@ -322,7 +315,7 @@ async fn persist_node_lands_on_disk_before_its_consumer_runs() {
     g.constant("mult", 1, 3i64);
     g.wire("mult", 0, "watch", 0);
 
-    let mut e = disk_engine(&dir, g);
+    let mut e = TestEngine::over(g).with_disk_store(dir.path());
     e.run_sinks().await;
 
     assert!(
@@ -342,23 +335,17 @@ async fn flush_skips_a_value_stale_for_the_current_digest() {
     let dir = TempDir::new("stale_flush");
 
     let mut g = TestGraph::new();
-    g.add("mult", mult(CacheMode::Disk));
+    g.add("mult", |n| n.mult().cache(CacheMode::Disk));
     g.add("print", |n| n.records());
     g.constant("mult", 0, 2i64);
     g.constant("mult", 1, 3i64);
     g.wire("mult", 0, "print", 0);
 
     // Config A: mult runs and is stored, stamped with its digest D_A.
-    let mut e = disk_engine(&dir, g);
+    let mut e = TestEngine::over(g).with_disk_store(dir.path());
     e.run_sinks().await;
     assert_eq!(dir.entry_count(), 1, "config A's blob is stored");
-    let blob_path = std::fs::read_dir(dir.path())
-        .unwrap()
-        .flatten()
-        .next()
-        .unwrap()
-        .path();
-    let blob_a = std::fs::read(&blob_path).unwrap();
+    let blob_a = e.blob("mult");
 
     // Config B: mult's inputs change ⇒ its *current* digest is now D_B, but
     // the resident value was produced under D_A. Recompile, do not re-run,
@@ -370,7 +357,7 @@ async fn flush_skips_a_value_stale_for_the_current_digest() {
     });
     e.engine.store_resident_caches().await;
     assert_eq!(
-        std::fs::read(&blob_path).unwrap(),
+        e.blob("mult"),
         blob_a,
         "a value stale for the current digest is not flushed (blob untouched)"
     );

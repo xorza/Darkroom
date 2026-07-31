@@ -2,21 +2,8 @@ use super::*;
 
 use ::common::FloatExt;
 
-use crate::testing::calls::Calls;
-
-/// A source emitting `value` and counting how often it was asked.
-fn counted_source(value: i64, calls: &Calls) -> impl FnOnce(NodeSpec) -> NodeSpec {
-    let body = calls.returning(value);
-    move |n: NodeSpec| {
-        n.pure()
-            .cache(CacheMode::Ram)
-            .output(DataType::Int)
-            .compute(body)
-    }
-}
-
 #[tokio::test(flavor = "multi_thread")]
-async fn removing_node_rebuilds_id_keyed_edges() -> TestResult {
+async fn removing_node_rebuilds_id_keyed_edges() {
     let mut e = TestEngine::over(TestGraph::sample_with(TestFuncHooks {
         get_a: Arc::new(|| Ok(2)),
         get_b: Arc::new(|| 5),
@@ -41,11 +28,10 @@ async fn removing_node_rebuilds_id_keyed_edges() -> TestResult {
     assert!(e.inputs("sum")[1].is_none());
     assert_eq!(e.output_i64("sum", 0), Some(2));
     assert_eq!(e.output_i64("mult", 0), Some(2));
-    Ok(())
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn empty_graph_executes_cleanly() -> TestResult {
+async fn empty_graph_executes_cleanly() {
     let mut e = TestEngine::over(TestGraph::new());
     assert!(e.engine.is_empty());
 
@@ -55,11 +41,10 @@ async fn empty_graph_executes_cleanly() -> TestResult {
     assert!(run.ran().is_empty());
     assert!(run.errored().is_empty());
     assert!(run.missing_inputs().is_empty());
-    Ok(())
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn multiple_sinks_all_execute() -> TestResult {
+async fn multiple_sinks_all_execute() {
     // Two independent chains: a → print_a, b → print_b.
     let mut g = TestGraph::new();
     g.add("a", |n| n.returns(2i64));
@@ -76,17 +61,16 @@ async fn multiple_sinks_all_execute() -> TestResult {
     let mut logged = run.logs();
     logged.sort_unstable();
     assert_eq!(logged, ["2", "5"]);
-    Ok(())
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn cached_output_survives_node_removal() -> TestResult {
+async fn cached_output_survives_node_removal() {
     // Both sources are Pure, so their outputs are cached across runs.
     // Removing one chain must preserve the survivor's id-keyed slot.
     let (calls_a, calls_b) = (Calls::default(), Calls::default());
     let mut g = TestGraph::new();
-    g.add("a", counted_source(2, &calls_a));
-    g.add("b", counted_source(5, &calls_b));
+    g.add("a", |n| n.counted(2i64, &calls_a).cache(CacheMode::Ram));
+    g.add("b", |n| n.counted(5i64, &calls_b).cache(CacheMode::Ram));
     g.add("print_a", |n| n.records());
     g.instance("print_b", "print_a");
     g.wire("a", 0, "print_a", 0);
@@ -110,11 +94,10 @@ async fn cached_output_survives_node_removal() -> TestResult {
     );
     assert!(run.cached().contains(&"a"));
     assert_eq!(e.output_i64("a", 0), Some(2));
-    Ok(())
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn repeated_structural_churn_stays_correct() -> TestResult {
+async fn repeated_structural_churn_stays_correct() {
     // Grow→shrink the graph repeatedly on ONE engine, re-executing each
     // step. Stresses the packed pools and the id-keyed rebuild across many
     // updates (pools grow 2→4 then shrink 4→2 each round).
@@ -146,7 +129,6 @@ async fn repeated_structural_churn_stays_correct() -> TestResult {
         let run = e.run_sinks().await;
         assert_eq!(run.logs(), ["2"], "round {round} shrink values");
     }
-    Ok(())
 }
 
 #[tokio::test]
@@ -156,7 +138,7 @@ async fn planning_a_cycle_names_the_node_that_closes_it() {
     e.edit(|g| g.wire("mult", 0, "sum", 0));
 
     let error = e
-        .plan_sinks()
+        .try_plan(RunSeeds::sinks())
         .await
         .expect_err("a cyclic graph cannot be planned");
 

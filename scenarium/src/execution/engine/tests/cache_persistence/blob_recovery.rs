@@ -8,17 +8,17 @@ use super::*;
 async fn persist_output_survives_reopen_and_invalidates_on_digest_change() {
     let dir = TempDir::new("e2e");
     let calls = Calls::default();
-    let build = |calls: &Calls| source_mult_print(CacheMode::Disk, 7, calls);
 
     // First run: everything computes; `mult` is stored to disk.
-    let mut e = disk_engine(&dir, build(&calls));
+    let mut e =
+        TestEngine::over(source_mult_print(CacheMode::Disk, 7, &calls)).with_disk_store(dir.path());
     e.run_sinks().await;
     assert_eq!(calls.count(), 1);
 
     // Reopen: `mult` loads from disk. Its only consumer of `src` is the
     // reused `mult`, which never reads it, so the pre-run cut prunes `src`
     // — a RAM-only source with no cross-session cache is *not* recomputed.
-    let mut e = disk_engine(&dir, build(&calls));
+    let mut e = e.reopen();
     let run = e.run_sinks().await;
     assert_eq!(
         calls.count(),
@@ -44,7 +44,7 @@ async fn persist_output_survives_reopen_and_invalidates_on_digest_change() {
 
     // Changing one input to a const makes `mult` miss, while its other input
     // still needs `src`, so the cut keeps the source alive and it runs.
-    let mut e = disk_engine(&dir, build(&calls));
+    let mut e = e.reopen();
     e.edit(|g| g.constant("mult", 1, 3i64));
     let run = e.run_sinks().await;
     assert_eq!(
@@ -74,17 +74,17 @@ async fn persist_output_survives_reopen_and_invalidates_on_digest_change() {
 async fn a_probed_blob_that_stops_decoding_fails_its_node_and_self_heals() {
     let dir = TempDir::new("corrupt-frontier");
     let calls = Calls::default();
-    let build = |calls: &Calls| source_mult_print(CacheMode::Disk, 7, calls);
 
-    let mut e = disk_engine(&dir, build(&calls));
+    let mut e =
+        TestEngine::over(source_mult_print(CacheMode::Disk, 7, &calls)).with_disk_store(dir.path());
     e.run_sinks().await;
     assert_eq!(calls.count(), 1);
 
     // Reopen, then corrupt the stored value while leaving the header the
     // probe reads — digest, arity, per-output coverage — untouched.
-    let mut e = disk_engine(&dir, build(&calls));
-    e.engine.cache.disk_store().corrupt_payload(e.id("mult"), 1);
-    e.plan_sinks().await.unwrap();
+    let mut e = e.reopen();
+    e.engine.disk_store().corrupt_payload(e.id("mult"), 1);
+    e.plan_sinks().await;
     assert_eq!(
         e.state("mult"),
         NodeState::Reuse,
@@ -129,27 +129,20 @@ async fn a_probed_blob_that_stops_decoding_fails_its_node_and_self_heals() {
 async fn corrupt_blob_recomputes_and_is_replaced_in_the_same_run() {
     let dir = TempDir::new("corrupt_replace");
     let calls = Calls::default();
-    let build = |calls: &Calls| source_mult_print(CacheMode::Disk, 1, calls);
 
     // Cold run: mult computes and stores its blob.
-    {
-        let mut e = disk_engine(&dir, build(&calls));
-        let run = e.run_sinks().await;
-        assert!(run.ran().contains(&"mult"), "the cold run computes mult");
-    }
+    let mut e =
+        TestEngine::over(source_mult_print(CacheMode::Disk, 1, &calls)).with_disk_store(dir.path());
+    let run = e.run_sinks().await;
+    assert!(run.ran().contains(&"mult"), "the cold run computes mult");
     assert_eq!(calls.count(), 1);
 
     // Corrupt mult's blob *body* — a torn write, or an old
     // version-mismatched format — while keeping the leading 32-byte digest
     // header intact: a garbled header would already fail the presence probe
     // and never reach the body verification this test is about.
-    let blob = std::fs::read_dir(dir.path())
-        .unwrap()
-        .next()
-        .unwrap()
-        .unwrap()
-        .path();
-    let mut bytes = std::fs::read(&blob).unwrap();
+    let blob = e.blob_path("mult");
+    let mut bytes = e.blob("mult");
     let output_count = u32::from_le_bytes(bytes[36..40].try_into().unwrap()) as usize;
     bytes.truncate(40 + output_count);
     bytes.extend_from_slice(b"garbage");
@@ -158,15 +151,13 @@ async fn corrupt_blob_recomputes_and_is_replaced_in_the_same_run() {
     // Reopen: the corrupt blob still carries the current digest in its
     // header. Body verification fails before the resolver cuts the producer
     // cone, so the blob is deleted and mult recomputes in this same run.
-    {
-        let mut e = disk_engine(&dir, build(&calls));
-        let run = e.run_sinks().await;
-        assert!(
-            run.ran().contains(&"mult"),
-            "the corrupt cache is a same-run miss"
-        );
-        assert!(run.errored().is_empty(), "the recomputed run succeeds");
-    }
+    let mut e = e.reopen();
+    let run = e.run_sinks().await;
+    assert!(
+        run.ran().contains(&"mult"),
+        "the corrupt cache is a same-run miss"
+    );
+    assert!(run.errored().is_empty(), "the recomputed run succeeds");
     assert_eq!(calls.count(), 2);
     assert!(
         blob.exists(),
@@ -174,14 +165,12 @@ async fn corrupt_blob_recomputes_and_is_replaced_in_the_same_run() {
     );
 
     // Reopen: mult's fresh blob is a clean hit → reused, not recomputed.
-    {
-        let mut e = disk_engine(&dir, build(&calls));
-        let run = e.run_sinks().await;
-        assert!(
-            !run.ran().contains(&"mult"),
-            "the replaced blob is a clean hit"
-        );
-    }
+    let mut e = e.reopen();
+    let run = e.run_sinks().await;
+    assert!(
+        !run.ran().contains(&"mult"),
+        "the replaced blob is a clean hit"
+    );
     assert_eq!(
         calls.count(),
         2,
@@ -199,26 +188,21 @@ async fn vanished_frontier_blob_recomputes_instead_of_panicking() {
 
     // src → sum(Disk) → print. print reads sum, so sum is the frontier the
     // run must load.
-    let build = |calls: &Calls| {
-        let mut g = TestGraph::new();
-        g.add("src", source(7, calls));
-        g.add("sum", sum(CacheMode::Disk));
-        g.add("print", |n| n.records());
-        g.wire("src", 0, "sum", 0);
-        g.wire("src", 0, "sum", 1);
-        g.wire("sum", 0, "print", 0);
-        g
-    };
+    let mut g = TestGraph::new();
+    g.add("src", |n| n.counted(7i64, &calls));
+    g.add("sum", |n| n.sum().cache(CacheMode::Disk));
+    g.add("print", |n| n.records());
+    g.wire("src", 0, "sum", 0);
+    g.wire("src", 0, "sum", 1);
+    g.wire("sum", 0, "print", 0);
 
-    let mut e = disk_engine(&dir, build(&calls));
+    let mut e = TestEngine::over(g).with_disk_store(dir.path());
     e.run_sinks().await;
     let after_run1 = calls.count();
 
     // Reopen, then remove sum's blob before the run reaches it.
-    let mut e = disk_engine(&dir, build(&calls));
-    for entry in std::fs::read_dir(dir.path()).unwrap() {
-        std::fs::remove_file(entry.unwrap().path()).unwrap();
-    }
+    let mut e = e.reopen();
+    std::fs::remove_file(e.blob_path("sum")).unwrap();
     let run = e.run_sinks().await;
 
     // The run completes — no panic: the missing blob just misses.
@@ -252,15 +236,15 @@ async fn redefined_output_type_rekeys_and_recomputes() {
     // isolating output-signature invalidation.
     let build = |as_float: bool, runs: &Calls, received: &Arc<StdMutex<f64>>| {
         let received = received.clone();
-        let (ty, value) = if as_float {
-            (DataType::Float, StaticValue::Float(1.5))
+        let value = if as_float {
+            StaticValue::Float(1.5)
         } else {
-            (DataType::Int, StaticValue::Int(7))
+            StaticValue::Int(7)
         };
-        let produce = runs.returning(value);
+        let produce = runs.clone();
         let mut g = TestGraph::new();
         g.add("produce", move |n: NodeSpec| {
-            n.pure().cache(CacheMode::Disk).output(ty).compute(produce)
+            n.counted(value, &produce).cache(CacheMode::Disk)
         });
         g.add("consume", move |n: NodeSpec| {
             n.sink().input(DataType::Any).observes(move |inputs| {
@@ -272,14 +256,14 @@ async fn redefined_output_type_rekeys_and_recomputes() {
     };
 
     // Run 1 (Int): produce runs and stores its Int blob; consume sees 7.
-    let mut e = disk_engine(&dir, build(false, &runs, &received));
+    let mut e = TestEngine::over(build(false, &runs, &received)).with_disk_store(dir.path());
     e.run_sinks().await;
     assert_eq!(runs.count(), 1);
     assert_eq!(*received.lock().unwrap(), 7.0);
 
     // Run 2 (Float): the Float output re-keys produce's digest away from the
     // Int blob's key, so it isn't found — produce recomputes as Float.
-    let mut e = disk_engine(&dir, build(true, &runs, &received));
+    let mut e = TestEngine::over(build(true, &runs, &received)).with_disk_store(dir.path());
     e.run_sinks().await;
     assert_eq!(
         runs.count(),

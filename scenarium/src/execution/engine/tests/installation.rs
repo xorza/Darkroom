@@ -68,7 +68,7 @@ fn top_level_func_nodes_keep_identity() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn clear_resets_graph() -> TestResult {
+async fn clear_resets_graph() {
     let mut e = TestEngine::over(TestGraph::sample());
     e.run_sinks().await;
     assert!(!e.engine.compiled().e_nodes.is_empty());
@@ -78,5 +78,4 @@ async fn clear_resets_graph() -> TestResult {
     assert!(e.engine.compiled.is_none());
     assert!(e.engine.schedule.process_order.is_empty());
     assert_eq!(e.engine.cache.slot_count(), 0);
-    Ok(())
 }

@@ -1,7 +1,5 @@
 use super::*;
 
-use crate::testing::calls::Calls;
-
 /// The sample fixture with nothing retained — every node on
 /// `CacheMode::None`, which is what these tests are about.
 fn uncached(hooks: TestFuncHooks) -> TestGraph {
@@ -87,8 +85,7 @@ async fn node_seed_combines_with_a_sink_run_without_retaining() {
             node_ids: vec![e.id("sum")],
             ..Default::default()
         })
-        .await
-        .expect("the run completes");
+        .await;
 
     assert_eq!(
         run.ran(),
@@ -117,7 +114,7 @@ async fn unresolvable_node_seed_fails_the_run() {
 
     let bogus = NodeId::from_u128(0xdead_beef);
     let error = e
-        .run(RunSeeds::nodes(vec![bogus]))
+        .try_run(RunSeeds::nodes(vec![bogus]))
         .await
         .expect_err("a stale seed fails the run");
 

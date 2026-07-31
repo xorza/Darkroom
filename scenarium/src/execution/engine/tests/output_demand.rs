@@ -4,7 +4,7 @@ use crate::async_lambda;
 use crate::graph::func::lambda::OutputDemand;
 
 #[tokio::test(flavor = "multi_thread")]
-async fn unused_output_marked_skip() -> TestResult {
+async fn unused_output_marked_skip() {
     let seen: Arc<Mutex<Vec<OutputDemand>>> = Arc::new(Mutex::new(Vec::new()));
 
     let mut g = TestGraph::new();
@@ -38,11 +38,10 @@ async fn unused_output_marked_skip() -> TestResult {
         [OutputDemand::Produce, OutputDemand::Skip],
         "the lambda saw the same demand the sweep resolved"
     );
-    Ok(())
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn cached_node_reruns_when_a_previously_skipped_output_becomes_needed() -> TestResult {
+async fn cached_node_reruns_when_a_previously_skipped_output_becomes_needed() {
     let calls = Arc::new(Mutex::new(0));
     let received = Arc::new(Mutex::new(Vec::new()));
 
@@ -67,7 +66,7 @@ async fn cached_node_reruns_when_a_previously_skipped_output_becomes_needed() ->
             ))
     });
     let sink = |received: Arc<Mutex<Vec<i64>>>| {
-        move |n: crate::testing::graph::NodeSpec| {
+        move |n: NodeSpec| {
             n.sink().input(DataType::Int).lambda(async_lambda!(
                 move |Invocation { inputs, .. }| { received = received.clone() } => {
                     received.lock().await.push(inputs[0].as_i64().unwrap());
@@ -94,5 +93,4 @@ async fn cached_node_reruns_when_a_previously_skipped_output_becomes_needed() ->
     let mut received = received.lock().await.clone();
     received.sort_unstable();
     assert_eq!(received, [10, 10, 20]);
-    Ok(())
 }
