@@ -37,7 +37,7 @@ use crate::execution::compile::error::CompileError;
 use crate::execution::compiled::{
     CompiledGraph, ExecutionBinding, ExecutionEvent, ExecutionInput, ExecutionNode,
 };
-use crate::execution::identity::{EventIdx, NodeIdx, OutputAddr};
+use crate::execution::identity::{NodeIdx, OutputAddr};
 use crate::graph::func::{Func, FuncInput};
 use crate::graph::identity::{InputPort, NodeId, OutputPort};
 use crate::graph::node::NodeKind;
@@ -71,40 +71,27 @@ struct PortTotals {
     events: usize,
 }
 
-/// The dense index space, settled before anything is emitted.
+/// The compile entry point, owning every buffer the walk would otherwise
+/// allocate per compile.
 ///
-/// The column is the artifact's own — the walk adds no identity of its own, it
-/// only reads this one back, so there is no second ordering for the two to
-/// disagree about. Being sorted, it answers both directions:
-/// [`idx`](Self::idx) searches it, and it ships as-is.
-#[derive(Debug)]
-struct Placement {
-    node_ids: Column<NodeIdx, NodeId>,
-    totals: PortTotals,
-}
-
-impl Placement {
-    /// Where `node_id` landed. Every id the walk resolves came out of the graph
-    /// this placement covers, so a miss is a compile bug.
-    fn idx(&self, node_id: NodeId) -> NodeIdx {
-        self.node_ids
-            .search_sorted(&node_id)
-            .expect("the placement covers every node the graph holds")
-    }
-}
-
-/// Everything a compile fills and empties.
+/// The fields below are kept between compiles for their capacity alone: each is
+/// refilled where it is first written, so a compile can observe nothing of the
+/// last one. That is the whole reason this is a value a caller holds rather than
+/// a function it calls — hosts keep one per compile site (e.g. darkroom's
+/// `Engine`), and what a compile then allocates is exactly the artifact: five
+/// columns, each sized from the placement and filled once.
 ///
-/// Kept between compiles for the capacity alone: each buffer is cleared where it
-/// is first written, so a compile can observe nothing of the last one. That is
-/// what lets a host recompiling per edit pay for the artifact and nothing else —
-/// and it is the whole reason [`Compiler`] is a value a caller holds rather than
-/// a function it calls.
+/// The [`CompiledGraph`] is the one thing here that cannot be reused, since the
+/// engine, its runtime cache, and the GUI all hold handles to the previous one
+/// while the next compile runs — so it is always fresh and can be shared with
+/// the worker in an [`Arc`](std::sync::Arc).
 #[derive(Debug, Default)]
-struct Scratch {
-    /// Every node awaiting placement, sorted into the dense index space. Its
-    /// output counts outlive the sort: a binding is range-checked against them
-    /// all through the walk.
+pub struct Compiler {
+    /// Every node, sorted into the dense index space — *the* placement, which
+    /// the walk reads for both directions. A node's `NodeIdx` is its position
+    /// here, and being sorted by id it answers the reverse too
+    /// ([`idx`](Self::idx)). The artifact's own id column is a projection of
+    /// this, not a second copy anything looks things up in.
     placed: Vec<Placed>,
     /// Every output type of the graph, filled before the walk. Held here
     /// because the type gate runs once per bound input, and resolving one port
@@ -112,26 +99,17 @@ struct Scratch {
     output_types: OutputTypes,
 }
 
-/// The compile entry point, owning every buffer the walk would otherwise
-/// allocate per compile.
-///
-/// Hosts keep one per compile site (e.g. darkroom's `Engine`). What a compile
-/// allocates is then exactly the artifact: five columns, each sized from the
-/// placement and filled once. The [`CompiledGraph`] is the one
-/// thing here that cannot be reused, since the engine, its runtime cache, and
-/// the GUI all hold handles to the previous one while the next compile runs —
-/// so it is always fresh and can be shared with the worker in an
-/// [`Arc`](std::sync::Arc).
-#[derive(Debug, Default)]
-pub struct Compiler {
-    scratch: Scratch,
-}
-
 impl Compiler {
     /// Compile `graph` against `library`: validate, then walk into a func-only
     /// program with its output-type pool resolved. Pure CPU on the caller's
     /// thread; the result is installed into an engine
     /// (`ExecutionEngine::install`), typically across the worker channel.
+    ///
+    /// A rejection is returned, not logged. It is an ordinary outcome of editing
+    /// against an evolving library, and the caller is the one that knows whether
+    /// this compile was a user action to surface or a speculative one to
+    /// swallow — darkroom, for instance, puts the same message on its status
+    /// bar.
     pub fn compile(
         &mut self,
         graph: &Graph,
@@ -141,7 +119,6 @@ impl Compiler {
         // input, and a passing check lets the walk below resolve every reference
         // infallibly.
         if let Err(e) = graph.validate_with(library) {
-            tracing::error!(error = %e, "compile rejected: invalid graph");
             return Err(CompileError {
                 message: e.to_string(),
             });
@@ -154,28 +131,36 @@ impl Compiler {
 
     /// The walk itself, over a graph [`Self::compile`] has already validated.
     ///
-    /// The columns built below are locals rather than fields: they do not
-    /// survive the call as buffers — they *become* the program, assembled in one
-    /// move at the end, so nothing ever observes a half-built [`CompiledGraph`].
-    /// Only what stays behind belongs on the compiler.
+    /// The artifact is stood up empty at its final size and written in place —
+    /// no column is staged beside it and moved in afterwards, so a field is
+    /// named once, where its capacity is settled. It is a local until it is
+    /// returned, so nothing outside this call can observe it part-built.
     ///
     /// `library` is a compile-time input like the graph beside it: every port,
     /// lambda, and flag a node needs is copied out here (the lambdas are `Arc`s,
     /// so a copy is a refcount bump), which is what leaves the artifact
     /// self-contained.
     fn walk(&mut self, root: &Graph, library: &Library) -> CompiledGraph {
-        self.scratch.output_types.update(root, library);
-        let placement = self.place_nodes(root, library);
+        self.output_types.update(root, library);
+        let totals = self.place_nodes(root, library);
 
-        // Sized from the placement, so each of these allocates once and every
-        // `append` below is a copy into space it already owns.
-        let mut e_nodes = Column::with_capacity(placement.node_ids.len());
-        let mut inputs = Column::with_capacity(placement.totals.inputs);
-        let mut outputs = Column::with_capacity(placement.totals.outputs);
-        let mut events = Column::with_capacity(placement.totals.events);
+        // Sized from the placement, so each column allocates once and every
+        // `append` below is a copy into space the artifact already owns.
+        let mut compiled = CompiledGraph {
+            node_ids: Column::with_capacity(self.placed.len()),
+            e_nodes: Column::with_capacity(self.placed.len()),
+            inputs: Column::with_capacity(totals.inputs),
+            outputs: Column::with_capacity(totals.outputs),
+            events: Column::with_capacity(totals.events),
+        };
+        // The id column is a projection of the placement, written once and never
+        // read back — the walk resolves ids against `placed` itself.
+        compiled
+            .node_ids
+            .append(self.placed.iter().map(|placed| placed.node_id));
 
-        for position in 0..placement.node_ids.len() {
-            let node_id = placement.node_ids[NodeIdx(position as u32)];
+        for position in 0..self.placed.len() {
+            let node_id = self.placed[position].node_id;
             let node = root
                 .find(node_id)
                 .expect("the placement names this graph's nodes");
@@ -200,13 +185,12 @@ impl Compiler {
             //
             // Each input is resolved as it is appended, so it is whole the moment
             // it enters the pool rather than being revisited by index afterwards.
-            let node_inputs = inputs.append(func.inputs.iter().enumerate().map(
+            let node_inputs = compiled.inputs.append(func.inputs.iter().enumerate().map(
                 |(port_idx, func_input)| ExecutionInput {
                     required: func_input.required,
                     stamps_fs_path: matches!(&func_input.data_type, DataType::FsPath(_)),
                     binding: self.typed_binding(
                         library,
-                        &placement,
                         func_input,
                         root.bindings.get(&InputPort::new(node_id, port_idx)),
                     ),
@@ -218,24 +202,28 @@ impl Compiler {
             // canvas agree about a wildcard by construction rather than by two
             // walks happening to match. A port the table missed is library
             // drift, and `Any` is what that resolved to before it existed.
-            let node_outputs = outputs.append((0..func.outputs.len()).map(|port_idx| {
-                self.scratch
-                    .output_types
-                    .get(OutputPort::new(node_id, port_idx))
-                    .cloned()
-                    .unwrap_or_default()
-            }));
+            let node_outputs = compiled
+                .outputs
+                .append((0..func.outputs.len()).map(|port_idx| {
+                    self.output_types
+                        .get(OutputPort::new(node_id, port_idx))
+                        .cloned()
+                        .unwrap_or_default()
+                }));
 
             // Each event port lands with the half its own declaration answers
             // for. The other half — who subscribes — belongs to the *emitter*,
             // which the id order may put after the subscriber, so
             // `wire_subscriptions` fills those lists once every node is placed.
-            let node_events = events.append(func.events.iter().map(|event| ExecutionEvent {
-                subscribers: Vec::new(),
-                lambda: event.event_lambda.clone(),
-            }));
+            let node_events =
+                compiled
+                    .events
+                    .append(func.events.iter().map(|event| ExecutionEvent {
+                        subscribers: Vec::new(),
+                        lambda: event.event_lambda.clone(),
+                    }));
 
-            e_nodes.push(ExecutionNode {
+            compiled.e_nodes.push(ExecutionNode {
                 sink: func.sink,
                 disabled: node.disabled,
                 behavior: func.behavior,
@@ -249,22 +237,16 @@ impl Compiler {
             });
         }
 
-        Self::wire_subscriptions(root, &e_nodes, &placement, &mut events);
+        self.wire_subscriptions(root, &mut compiled);
 
         // The placement counted these from the same declarations the walk read,
         // so a mismatch is the two disagreeing about the library — and every
         // column above would have silently regrown to cover it.
-        debug_assert_eq!(inputs.len(), placement.totals.inputs);
-        debug_assert_eq!(outputs.len(), placement.totals.outputs);
-        debug_assert_eq!(events.len(), placement.totals.events);
+        debug_assert_eq!(compiled.inputs.len(), totals.inputs);
+        debug_assert_eq!(compiled.outputs.len(), totals.outputs);
+        debug_assert_eq!(compiled.events.len(), totals.events);
 
-        CompiledGraph {
-            e_nodes,
-            node_ids: placement.node_ids,
-            inputs,
-            outputs,
-            events,
-        }
+        compiled
     }
 
     /// Settle the dense index space: the artifact's id column and the reverse
@@ -276,14 +258,13 @@ impl Compiler {
     ///
     /// The per-node output count is taken here rather than during the walk
     /// because a wire is range-checked against its *producer*, which the id
-    /// order may put after the consumer that names it. It stays on the compiler
-    /// while the two id columns leave with the artifact.
+    /// order may put after the consumer that names it.
     ///
-    /// The pool totals ride along for free: this pass already holds every
-    /// declaration the walk is about to read, so counting the ports here is what
-    /// lets each column be allocated once at its final size.
-    fn place_nodes(&mut self, root: &Graph, library: &Library) -> Placement {
-        let placed = &mut self.scratch.placed;
+    /// The returned pool totals ride along for free: this pass already holds
+    /// every declaration the walk is about to read, so counting the ports here
+    /// is what lets each column be allocated once at its final size.
+    fn place_nodes(&mut self, root: &Graph, library: &Library) -> PortTotals {
+        let placed = &mut self.placed;
         placed.clear();
         placed.reserve(root.len());
         let mut totals = PortTotals::default();
@@ -304,10 +285,21 @@ impl Compiler {
             "program node count must fit in u32"
         );
         placed.sort_unstable_by_key(|placed| placed.node_id);
+        totals
+    }
 
-        let mut node_ids = Column::with_capacity(placed.len());
-        node_ids.append(placed.iter().map(|placed| placed.node_id));
-        Placement { node_ids, totals }
+    /// Where `node_id` landed in the dense index space.
+    ///
+    /// A binary search of the placement rather than a map beside it: the sort
+    /// that assigned the indices left `placed` ordered by id, so the ordering
+    /// already *is* the lookup. Every id the walk resolves came out of the graph
+    /// the placement covers, so a miss is a compile bug.
+    fn idx(&self, node_id: NodeId) -> NodeIdx {
+        let position = self
+            .placed
+            .binary_search_by_key(&node_id, |placed| placed.node_id)
+            .expect("the placement covers every node the graph holds");
+        NodeIdx(position as u32)
     }
 
     /// [`Self::resolve`] behind the type gate: a wire whose resolved source type
@@ -318,7 +310,6 @@ impl Compiler {
     fn typed_binding(
         &self,
         library: &Library,
-        placement: &Placement,
         input: &FuncInput,
         binding: Option<&Binding>,
     ) -> ExecutionBinding {
@@ -335,14 +326,9 @@ impl Compiler {
                 // the range check. A port the table *did* stamp still has to
                 // pass that check — a wildcard chain records every port it walks
                 // through, out-of-range ones included, as `Any`.
-                let resolved = self
-                    .scratch
-                    .output_types
-                    .get(*src)
-                    .cloned()
-                    .unwrap_or_default();
+                let resolved = self.output_types.get(*src).cloned().unwrap_or_default();
                 if input.data_type.compatible_with(&resolved) {
-                    self.resolve(placement, *src)
+                    self.resolve(*src)
                 } else {
                     ExecutionBinding::None
                 }
@@ -361,10 +347,10 @@ impl Compiler {
     /// may not have reached yet. The *node* is never missing:
     /// `Graph::validate_shape` rejects a binding naming a producer the graph
     /// does not hold, and the placement covers every node it does.
-    fn resolve(&self, placement: &Placement, port: OutputPort) -> ExecutionBinding {
+    fn resolve(&self, port: OutputPort) -> ExecutionBinding {
         let OutputPort { node_id, port_idx } = port;
-        let node_idx = placement.idx(node_id);
-        if port_idx >= self.scratch.placed[node_idx.0 as usize].outputs as usize {
+        let node_idx = self.idx(node_id);
+        if port_idx >= self.placed[node_idx.0 as usize].outputs as usize {
             return ExecutionBinding::None;
         }
         ExecutionBinding::Bind(OutputAddr {
@@ -393,23 +379,18 @@ impl Compiler {
     ///
     /// Takes no compiler state: the placement answers for identity and the two
     /// columns are the walk's own.
-    fn wire_subscriptions(
-        graph: &Graph,
-        e_nodes: &Column<NodeIdx, ExecutionNode>,
-        placement: &Placement,
-        events: &mut Column<EventIdx, ExecutionEvent>,
-    ) {
+    fn wire_subscriptions(&self, graph: &Graph, compiled: &mut CompiledGraph) {
         for sub in graph.subscriptions() {
-            let emitter = &e_nodes[placement.idx(sub.emitter)];
-            let subscriber_idx = placement.idx(sub.subscriber);
-            if emitter.disabled || e_nodes[subscriber_idx].disabled {
+            let emitter_idx = self.idx(sub.emitter);
+            let subscriber_idx = self.idx(sub.subscriber);
+            if compiled.e_nodes[emitter_idx].disabled || compiled.e_nodes[subscriber_idx].disabled {
                 continue;
             }
-            let run = emitter.events;
+            let run = compiled.e_nodes[emitter_idx].events;
             if sub.event_idx >= run.len as usize {
                 continue;
             }
-            events[run.nth(sub.event_idx as u32)]
+            compiled.events[run.nth(sub.event_idx as u32)]
                 .subscribers
                 .push(subscriber_idx);
         }
