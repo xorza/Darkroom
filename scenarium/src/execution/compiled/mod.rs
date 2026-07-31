@@ -16,14 +16,10 @@
 //! nodes it dissolved into — to a pair of conversions on [`NodeId`]
 //! and one lookup in the artifact's own id index.
 
-pub(crate) mod consumers;
-
 use crate::graph::identity::FuncId;
 use hashbrown::HashMap;
 
 use crate::common::column::{Column, Span};
-use crate::common::set::IdxSet;
-use crate::execution::compiled::consumers::Consumers;
 use crate::execution::identity::{EventIdx, InputIdx, NodeIdx, OutputAddr, OutputIdx};
 use crate::graph::func::FuncBehavior;
 use crate::graph::func::event::EventLambda;
@@ -145,53 +141,8 @@ impl CompiledGraph {
         self.node_index.contains_key(&node_id)
     }
 
-    /// Resolve authored nodes to their execution nodes, then return their
-    /// reflexive transitive closure over data-consumer edges.
-    pub(crate) fn data_consumer_closure(&self, authored_node_ids: &[NodeId]) -> Vec<NodeId> {
-        let mut in_closure = IdxSet::default();
-        in_closure.reset(self.e_nodes.len());
-        let mut pending: Vec<NodeIdx> = authored_node_ids
-            .iter()
-            .filter_map(|node_id| self.node(*node_id))
-            .filter(|&node_idx| {
-                // The seeds dedup: a caller may name the same node twice.
-                let fresh = !in_closure.contains(node_idx);
-                in_closure.insert(node_idx);
-                fresh
-            })
-            .collect();
-        let consumers = Consumers::reverse(self);
-        while let Some(node_idx) = pending.pop() {
-            for &consumer_idx in consumers.of(node_idx) {
-                if !in_closure.contains(consumer_idx) {
-                    in_closure.insert(consumer_idx);
-                    pending.push(consumer_idx);
-                }
-            }
-        }
-
-        let closure: Vec<NodeId> = in_closure
-            .iter()
-            .map(|node_idx| self.node_ids[node_idx])
-            .collect();
-        debug_assert!(
-            closure.is_sorted(),
-            "dense indices are assigned in id order, so an ascending index walk yields ascending ids"
-        );
-        closure
-    }
-
     pub(crate) fn output_idx(&self, address: OutputAddr) -> OutputIdx {
         self[address.node_idx].outputs.nth(address.port_idx)
-    }
-
-    /// Where an authored node landed in the artifact, or `None` if it holds no
-    /// compiled work.
-    ///
-    /// The one place the authoring space crosses into the dense one, so every
-    /// question above answers for the same set of nodes.
-    fn node(&self, node_id: NodeId) -> Option<NodeIdx> {
-        self.node_index.get(&node_id).copied()
     }
 }
 

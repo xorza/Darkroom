@@ -244,36 +244,6 @@ fn the_artifact_answers_for_each_authored_node() {
     assert!(!compiled.contains(NodeId::unique()));
 }
 
-/// Evicting a node reaches everything downstream of it, reflexively — and stops
-/// at a node nothing connects to.
-#[test]
-fn the_consumer_closure_reaches_downstream_and_stops() {
-    let f = fixture();
-    let compiled = Compiler::default().compile(&f.graph, &f.library).unwrap();
-
-    let mut from_source = compiled.data_consumer_closure(&[f.source]);
-    from_source.sort();
-    let mut expected = vec![f.source, f.sink];
-    expected.sort();
-    assert_eq!(from_source, expected, "the source reaches its reader");
-
-    assert_eq!(
-        compiled.data_consumer_closure(&[f.sink]),
-        vec![f.sink],
-        "a terminal node reaches only itself"
-    );
-    assert_eq!(
-        compiled.data_consumer_closure(&[f.loose]),
-        vec![f.loose],
-        "an unwired node reaches only itself"
-    );
-    assert!(
-        compiled
-            .data_consumer_closure(&[NodeId::unique()])
-            .is_empty()
-    );
-}
-
 /// Every buffer a compile fills is owned by the `Compiler` and reused, so the
 /// hazard the reuse introduces is one compile's leftovers reaching the next.
 /// Compiling two graphs that share no node must leave the second artifact

@@ -97,8 +97,7 @@ impl ExecutionEngine {
         let Some(compiled) = self.compiled.as_deref() else {
             return Vec::new();
         };
-        let node_ids = compiled.data_consumer_closure(node_ids);
-        self.cache.evict(compiled, &node_ids).await
+        self.cache.evict(compiled, node_ids).await
     }
 
     /// `reporter` receives live feedback ahead of the final outcome: progress before and
