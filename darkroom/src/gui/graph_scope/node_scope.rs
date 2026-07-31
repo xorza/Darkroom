@@ -31,10 +31,20 @@ pub(crate) struct NodeScope<'a> {
     pub(crate) pos: Vec2,
     node: &'a Node,
     /// The declaration scenarium resolves — a library func or a special
-    /// node's hardcoded spec. `None` is a node whose func the library no
-    /// longer holds: it reads as a portless [`missing`](Self::missing) stub
-    /// rather than vanishing, so the user can still select and delete it
-    /// instead of the document silently losing a node.
+    /// node's hardcoded spec.
+    ///
+    /// `None` is **library drift**, not a failure to look something up: a
+    /// document loads against whatever library is present, and
+    /// `Graph::validate` (the structural walk the load path runs) tolerates a
+    /// func id the current library lacks so the authored wiring survives the
+    /// library coming back. It reads as a portless
+    /// [`missing`](Self::missing) stub the user can still select and delete,
+    /// and a run refuses it loudly — `validate_with` rejects `MissingFunc` at
+    /// compile, which the status bar shows.
+    ///
+    /// Every accessor below degrades it to "declares nothing" rather than
+    /// guessing; that is the stub, and it is what a new accessor here must
+    /// keep doing.
     func: Option<&'a Func>,
     /// The input ports the last run could not feed, by index — one lookup
     /// per node rather than one per port.
@@ -46,11 +56,10 @@ impl<'a> NodeScope<'a> {
     /// hold it — a placement left behind by a delete.
     pub(super) fn resolve(graph_scope: GraphScope<'a>, node_id: NodeId, pos: Vec2) -> Option<Self> {
         let node = graph_scope.body().find(node_id)?;
+        // `None` has exactly one meaning: a `NodeKind::Func` whose id the
+        // library no longer holds. A special node's declaration is hardcoded,
+        // so `Graph::node_func` resolves it unconditionally.
         let func = graph_scope.body().node_func(node, graph_scope.library());
-        debug_assert!(
-            func.is_some() || matches!(node.kind, NodeKind::Func(_)),
-            "a special node's interface always resolves"
-        );
         Some(Self {
             graph_scope,
             id: node_id,
