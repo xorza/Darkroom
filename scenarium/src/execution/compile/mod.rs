@@ -28,15 +28,16 @@
 //!
 //! See `README.md` Part A §5.
 
+pub(crate) mod compiled_graph;
 pub(crate) mod error;
 mod validate;
 
 use crate::DataType;
 use crate::common::column::Column;
-use crate::execution::compile::error::CompileError;
-use crate::execution::compiled::{
+use crate::execution::compile::compiled_graph::{
     CompiledGraph, ExecutionBinding, ExecutionEvent, ExecutionInput, ExecutionNode,
 };
+use crate::execution::compile::error::CompileError;
 use crate::execution::identity::{NodeIdx, OutputAddr};
 use crate::graph::func::{Func, FuncInput};
 use crate::graph::identity::{InputPort, NodeId, OutputPort};
@@ -401,7 +402,7 @@ impl Compiler {
 pub(crate) mod internals {
     use std::sync::Arc;
 
-    use crate::execution::compiled::{CompiledGraph, ExecutionNode};
+    use crate::execution::compile::compiled_graph::{CompiledGraph, ExecutionNode};
     use crate::graph::identity::NodeId;
 
     /// A [`CompiledGraph`] of bare nodes, for a host test that only has to

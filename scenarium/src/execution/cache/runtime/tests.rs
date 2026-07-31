@@ -5,7 +5,7 @@ use crate::common::column::{Column, Span};
 use crate::execution::cache::digest::Digest;
 use crate::execution::cache::runtime::RuntimeCache;
 use crate::execution::cache::slot::{OutputSnapshot, RuntimeSlot};
-use crate::execution::compiled::{CompiledGraph, ExecutionNode};
+use crate::execution::compile::compiled_graph::{CompiledGraph, ExecutionNode};
 use crate::execution::identity::{NodeIdx, OutputAddr, OutputIdx};
 use crate::graph::func::FuncBehavior;
 use crate::graph::func::lambda::OutputDemand;

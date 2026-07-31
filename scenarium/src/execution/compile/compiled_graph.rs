@@ -10,11 +10,10 @@
 //! Self-contained: everything a run needs was copied out of the [`Library`](crate::library::Library)
 //! at compile, so nothing here refers to one.
 //!
-//! A graph is flat, so an authored node becomes exactly one execution node and
-//! the two identity spaces differ only in type. That collapses what used to be
-//! a whole side structure — the map from an authored node to the execution
-//! nodes it dissolved into — to a pair of conversions on [`NodeId`]
-//! and one lookup in the artifact's own id index.
+//! A graph is flat, so an authored node becomes exactly one execution node,
+//! named by the same [`NodeId`]. That collapses what used to be a whole side
+//! structure — the map from an authored node to the execution nodes it
+//! dissolved into — to a search of the id column the artifact already carries.
 
 use crate::graph::identity::FuncId;
 
@@ -157,7 +156,7 @@ impl CompiledGraph {
 
 #[cfg(any(test, feature = "internals"))]
 pub(crate) mod internals {
-    use crate::execution::compiled::{CompiledGraph, ExecutionNode};
+    use crate::execution::compile::compiled_graph::{CompiledGraph, ExecutionNode};
     use crate::execution::identity::NodeIdx;
     use crate::graph::identity::NodeId;
 
@@ -184,7 +183,7 @@ pub(crate) mod internals {
 
 #[cfg(test)]
 mod id_lookups {
-    use crate::execution::compiled::{CompiledGraph, ExecutionNode};
+    use crate::execution::compile::compiled_graph::{CompiledGraph, ExecutionNode};
     use crate::graph::identity::NodeId;
 
     /// Id lookups for a unit test that stood a program up by hand and knows its

@@ -13,7 +13,7 @@ use crate::common::column::Column;
 use crate::execution::cache::disk_store::{DiskStore, StorePolicy};
 use crate::execution::cache::runtime::RuntimeCache;
 use crate::execution::cache::runtime::error::CacheEvictionFailure;
-use crate::execution::compiled::CompiledGraph;
+use crate::execution::compile::compiled_graph::CompiledGraph;
 use crate::execution::engine::error::InstallValidationError;
 use crate::execution::error::Result;
 use crate::execution::executor::{Executor, RunRequest};
@@ -31,7 +31,7 @@ use crate::graph::identity::NodeId;
 /// owned [`DiskStore`](crate::execution::cache::disk_store::DiskStore) file persistence and the caching policy), and the `executor`
 /// (run loop + context). Compilation happens on the host ([`Compiler`](crate::execution::compile::Compiler));
 /// the engine only ever receives ready [`CompiledGraph`]s. Not serializable — the
-/// persistent form is the [`CompiledGraph`](crate::execution::compiled::CompiledGraph) alone.
+/// persistent form is the [`CompiledGraph`](crate::execution::compile::compiled_graph::CompiledGraph) alone.
 #[derive(Debug, Default)]
 pub(crate) struct ExecutionEngine {
     /// The installed immutable artifact. Replaced only by [`Self::install`],
@@ -246,8 +246,8 @@ mod internals {
     use crate::DynamicValue;
     use crate::execution::cache::slot::{OutputSnapshot, RuntimeSlot};
     use crate::execution::compile;
-    use crate::execution::compiled::ExecutionBinding;
-    use crate::execution::compiled::{CompiledGraph, ExecutionInput};
+    use crate::execution::compile::compiled_graph::ExecutionBinding;
+    use crate::execution::compile::compiled_graph::{CompiledGraph, ExecutionInput};
     use crate::execution::engine::ExecutionEngine;
     use crate::execution::error::Result;
     use crate::execution::report::ExecutionOutcome;

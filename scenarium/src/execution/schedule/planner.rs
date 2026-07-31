@@ -4,7 +4,7 @@
 //! across runs, so a repeated plan on an unchanged graph allocates nothing.
 
 use crate::common::column::Column;
-use crate::execution::compiled::{CompiledGraph, ExecutionBinding};
+use crate::execution::compile::compiled_graph::{CompiledGraph, ExecutionBinding};
 use crate::execution::error::{Error, Result};
 use crate::execution::identity::NodeIdx;
 use crate::execution::schedule::{NodeState, RunSchedule, Scheduled};

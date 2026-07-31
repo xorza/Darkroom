@@ -7,7 +7,7 @@ use crate::async_lambda;
 use crate::common::column::{Column, Idx};
 use crate::execution::cache::runtime::RuntimeCache;
 use crate::execution::cache::slot::OutputSnapshot;
-use crate::execution::compiled::{ExecutionBinding, ExecutionInput, ExecutionNode};
+use crate::execution::compile::compiled_graph::{ExecutionBinding, ExecutionInput, ExecutionNode};
 use crate::execution::identity::{NodeIdx, OutputAddr, OutputIdx};
 use crate::execution::report::internals::DiscardedReports;
 use crate::execution::schedule::{

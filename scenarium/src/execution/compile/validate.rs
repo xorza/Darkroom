@@ -8,9 +8,9 @@
 use ::common::is_debug;
 
 use crate::common::column::Idx;
+use crate::execution::compile::compiled_graph::CompiledGraph;
+use crate::execution::compile::compiled_graph::ExecutionBinding;
 use crate::execution::compile::error::CompiledGraphValidationError;
-use crate::execution::compiled::CompiledGraph;
-use crate::execution::compiled::ExecutionBinding;
 use crate::library::Library;
 
 /// Self-consistency of a freshly linked artifact against the library it was

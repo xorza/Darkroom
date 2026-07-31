@@ -183,7 +183,7 @@ fn const_only_input_rejects_bind_but_a_normal_input_accepts_it() {
 #[test]
 fn type_mismatches_degrade_at_lowering_not_at_validation() {
     use crate::execution::compile::Compiler;
-    use crate::execution::compiled::ExecutionBinding;
+    use crate::execution::compile::compiled_graph::ExecutionBinding;
     use crate::library::Library;
     use crate::{FsPathConfig, FsPathMode};
     use std::sync::Arc;
@@ -405,7 +405,7 @@ fn resolve_output_type_uses_declared_type_for_typed_const_input() {
 fn type_mismatched_wiring_lowers_as_unbound_through_wildcard_chains() {
     use crate::DataType;
     use crate::execution::compile::Compiler;
-    use crate::execution::compiled::ExecutionBinding;
+    use crate::execution::compile::compiled_graph::ExecutionBinding;
     use crate::library::Library;
 
     let float_src = testing::with_stub_lambda(

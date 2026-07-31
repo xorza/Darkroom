@@ -2,9 +2,10 @@
 //!
 //! 1. **compile** — the [`Compiler`](compile::Compiler) walks the authoring
 //!    `Graph` straight into an immutable
-//!    [`CompiledGraph`](compiled::CompiledGraph). Runs on the *host's* thread
-//!    (compile errors are synchronous); the artifact is installed into the
-//!    engine via [`engine::ExecutionEngine::install`], which cannot fail.
+//!    [`CompiledGraph`](compile::compiled_graph::CompiledGraph), which lives
+//!    beside it. Runs on the *host's* thread (compile errors are synchronous);
+//!    the artifact is installed into the engine via
+//!    [`engine::ExecutionEngine::install`], which cannot fail.
 //! 2. **plan** — the [`Planner`](schedule::planner::Planner) turns the program into a
 //!    [`RunSchedule`](schedule::RunSchedule). Purely structural —
 //!    reachability + topological order + missing-input verdicts, no cache/digest state.
@@ -16,7 +17,6 @@
 
 pub(crate) mod cache;
 pub(crate) mod compile;
-pub(crate) mod compiled;
 pub(crate) mod engine;
 pub(crate) mod error;
 pub(crate) mod executor;

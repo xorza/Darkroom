@@ -43,7 +43,7 @@ use ::common::is_debug;
 use crate::common::column::{Column, Idx};
 use crate::common::set::IdxSet;
 use crate::execution::cache::runtime::RuntimeCache;
-use crate::execution::compiled::{CompiledGraph, ExecutionBinding, ExecutionInput};
+use crate::execution::compile::compiled_graph::{CompiledGraph, ExecutionBinding, ExecutionInput};
 use crate::execution::error::{Error, Result};
 use crate::execution::identity::{NodeIdx, OutputIdx};
 use crate::execution::seeds::RunSeeds;
