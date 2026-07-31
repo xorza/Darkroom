@@ -1,0 +1,204 @@
+use super::*;
+
+use std::sync::atomic::{AtomicBool, Ordering};
+
+#[tokio::test(flavor = "multi_thread")]
+async fn pure_node_skips_on_rerun() -> TestResult {
+    // `get_b` is a pure source, so once its output is cached its digest is
+    // unchanged on a re-run and it reuses that value rather than running.
+    let mut e = TestEngine::over(TestGraph::sample());
+
+    assert!(e.run_sinks().await.ran().contains(&"get_b"));
+    assert!(!e.run_sinks().await.ran().contains(&"get_b"));
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn default_node_skips_on_rerun() -> TestResult {
+    let mut e = TestEngine::over(TestGraph::sample());
+
+    let first = e.run_sinks().await;
+    assert_eq!(first.ran(), ["get_b", "get_a", "sum", "mult", "Print"]);
+
+    // Second run: only print (an impure sink) re-executes.
+    let second = e.run_sinks().await;
+    assert_eq!(second.ran(), ["Print"]);
+    assert_eq!(second.cached(), ["get_a", "get_b", "mult", "sum"]);
+
+    // The cached mult must still hold the correct product, not a stale
+    // value: sum = get_a(1) + get_b(11) = 12; mult = 12 * get_b(11) = 132.
+    assert_eq!(e.output_i64("mult", 0), Some(132));
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn execute_emits_started_then_finished_progress_per_node() -> TestResult {
+    use crate::execution::report::RunPhase;
+
+    let mut e = TestEngine::over(TestGraph::sample());
+    let (run, progress) = e.run_sinks_reporting().await;
+
+    // Events come in Started→Finished pairs for the *same* node: the
+    // executor is sequential, so each node brackets before the next starts.
+    assert_eq!(progress.len() % 2, 0, "paired events");
+    let mut started: Vec<&str> = Vec::new();
+    for pair in progress.chunks_exact(2) {
+        let (started_name, started_phase) = &pair[0];
+        let (finished_name, finished_phase) = &pair[1];
+        assert!(
+            matches!(started_phase, RunPhase::Started { .. }),
+            "first of pair is Started",
+        );
+        assert_eq!(started_name, finished_name, "one node brackets itself");
+        assert!(
+            matches!(finished_phase, RunPhase::Finished { elapsed_secs } if *elapsed_secs >= 0.0),
+            "second of pair is Finished with non-negative elapsed",
+        );
+        started.push(started_name);
+    }
+
+    // The progressed order equals the run's own order, and covers exactly
+    // the nodes that finally executed.
+    assert_eq!(started, run.ran());
+    assert_eq!(started.len(), run.ran_node_count);
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn execute_honors_cancel_flag_and_marks_cancelled() -> TestResult {
+    let mut e = TestEngine::over(TestGraph::sample());
+
+    // Pre-tripped: the executor breaks at the first loop-top check, so no
+    // node runs and the run is flagged cancelled.
+    let tripped = CancelToken::new();
+    tripped.cancel();
+    let run = e.run_cancellable(RunSeeds::sinks(), tripped).await?;
+    assert!(run.cancelled, "pre-tripped run is cancelled");
+    assert_eq!(run.ran_node_count, 0, "no node runs when cancel is set");
+
+    // A fresh token runs the whole graph — nothing was cached by the run
+    // that aborted above.
+    let run = e
+        .run_cancellable(RunSeeds::sinks(), CancelToken::new())
+        .await?;
+    assert!(!run.cancelled);
+    assert_eq!(run.ran_node_count, 5, "all nodes run when not cancelled");
+    Ok(())
+}
+
+/// A node cancelled *mid-invoke* (the run is cancelled while its lambda
+/// runs) must not be reported executed and must not cache its partial
+/// output — otherwise the next run treats it as already computed. Models
+/// "start a run, immediately cancel it": the in-flight node bails with `Ok`
+/// but its result is bogus.
+#[tokio::test(flavor = "multi_thread")]
+async fn cancel_mid_invoke_drops_in_flight_node_and_reruns() -> TestResult {
+    use crate::async_lambda;
+
+    // Trips the cancel on its first invoke only, so the re-run completes.
+    let cancel_first = Arc::new(AtomicBool::new(true));
+    let mut g = TestGraph::new();
+    g.add("self_cancel", |n| {
+        let cancel_first = cancel_first.clone();
+        n.pure().sink().output(DataType::Int).lambda(async_lambda!(
+            move |Invocation { ctx, outputs, .. }| { cancel_first = cancel_first.clone() } => {
+                if cancel_first.swap(false, Ordering::Relaxed) {
+                    // Stand in for the user hitting Cancel while this runs.
+                    ctx.cancel_flag().cancel();
+                }
+                outputs[0] = StaticValue::Int(7).into();
+                Ok(())
+            }
+        ))
+    });
+    let mut e = TestEngine::over(g);
+
+    let run = e
+        .run_cancellable(RunSeeds::sinks(), CancelToken::new())
+        .await?;
+    assert!(run.cancelled, "the node cancelled the run mid-invoke");
+    assert_eq!(
+        run.ran_node_count, 0,
+        "an in-flight cancelled node is not reported executed (no green glow)"
+    );
+    assert!(
+        run.status("self_cancel").is_none(),
+        "a node the cancel caught mid-invoke reports nothing at all — neither a run \
+         nor a failure of its own; the run-level `cancelled` flag is what says why"
+    );
+
+    // A fresh token: the partial output was dropped, so the node
+    // re-executes rather than being served from a bogus cache.
+    let run = e
+        .run_cancellable(RunSeeds::sinks(), CancelToken::new())
+        .await?;
+    assert!(!run.cancelled);
+    assert_eq!(
+        run.ran_node_count, 1,
+        "it re-runs; its output was not cached"
+    );
+    assert!(
+        run.cached().is_empty(),
+        "a cancelled node must not be served from cache on the next run"
+    );
+    Ok(())
+}
+
+/// A lambda that bails by returning `InvokeError::Cancelled` is reported as
+/// `RunError::Cancelled` (not a generic `Invoke` error) and dropped from the
+/// executed set — the truthful lambda-level signal, distinct from the
+/// executor's flag-check fallback covered above (asserted here without
+/// touching the flag, so only the error mapping can produce the verdict).
+#[tokio::test(flavor = "multi_thread")]
+async fn lambda_cancelled_error_maps_to_error_cancelled() -> TestResult {
+    use crate::async_lambda;
+
+    let mut g = TestGraph::new();
+    g.add("always_cancel", |n| {
+        n.pure()
+            .sink()
+            .output(DataType::Int)
+            .lambda(async_lambda!(move |_| { Err(InvokeError::Cancelled) }))
+    });
+    let mut e = TestEngine::over(g);
+
+    let run = e.run_sinks().await;
+
+    assert_eq!(
+        run.ran_node_count, 0,
+        "a cancelled lambda is not reported executed"
+    );
+    assert!(
+        run.status("always_cancel").is_none(),
+        "InvokeError::Cancelled maps to RunError::Cancelled, which reports nothing — \
+         had it mapped to Invoke the node would carry an `Errored` row here"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn impure_node_always_invoked() -> TestResult {
+    let mut e = TestEngine::over(TestGraph::sample_with(TestFuncHooks::default()));
+    e.edit(|g| g.edit_func("get_b", |func| func.behavior = FuncBehavior::Impure));
+
+    // Even holding a cached output, an impure node still wants to execute.
+    e.set_output("get_b", vec![StaticValue::Int(7).into()]);
+    let plan = e.plan_sinks().await?;
+
+    assert_eq!(plan.scheduled(), ["get_b", "get_a", "sum", "mult", "Print"]);
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn impure_output_is_released_after_run() -> TestResult {
+    let mut e = TestEngine::over(TestGraph::sample());
+    e.edit(|g| g.edit_func("get_b", |func| func.behavior = FuncBehavior::Impure));
+
+    e.run_sinks().await;
+
+    assert!(
+        !e.holds_output("get_b"),
+        "an impure value cannot hit on a future run, so the end sweep releases it"
+    );
+    Ok(())
+}

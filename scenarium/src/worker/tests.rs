@@ -1,294 +1,28 @@
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 
 use tokio::sync::{Notify, mpsc, oneshot};
 use tokio::time::{Duration, timeout};
 
-use crate::elements::system_library::system_library;
-use crate::elements::worker_events_library::worker_events_library;
-use crate::execution::compile::Compiler;
-use crate::execution::compile::compiled_graph::CompiledGraph;
-use crate::execution::error::{Error, Result as ExecResult, RunError};
-use crate::execution::report::{ExecutionOutcome, NodeExecutionStatus, NodeStatus};
+use crate::execution::error::Error;
+use crate::execution::report::NodeExecutionStatus;
 use crate::execution::seeds::RunSeeds;
-use crate::graph::Binding;
-use crate::graph::Graph;
 use crate::graph::func::error::InvokeError;
 use crate::graph::func::event::EventLambda;
-use crate::graph::func::lambda::FuncLambda;
-use crate::graph::identity::InputPort;
-use crate::graph::identity::NodeId;
-use crate::graph::node::Node;
-use crate::library::Library;
-use crate::runtime::shared_any_state::SharedAnyState;
-use crate::{Func, FuncId, LogEntry, LogLevel, RamUsage, StaticValue, async_lambda};
-
-use crate::execution::report::EventTrigger;
-use crate::graph::func::lambda::Invocation;
-use crate::graph::identity::EventPort;
+use crate::graph::func::lambda::{FuncLambda, Invocation};
+use crate::graph::identity::{EventPort, NodeId};
+use crate::graph::node::CacheMode;
+use crate::testing::TestFuncHooks;
+use crate::testing::graph::TestGraph;
+use crate::testing::worker::TestWorker;
 use crate::worker::Worker;
-use crate::worker::batch::{BatchIntent, GraphOp, LoopCommand};
 use crate::worker::error::WorkerError;
-use crate::worker::event_loop::{ActiveEventLoop, EventLoopWake};
-use crate::worker::pause_gate::PauseGate;
 use crate::worker::protocol::{WorkerMessage, WorkerReport};
-use crate::worker::status::{
-    WorkerActivity, WorkerStatus, WorkerStatusKind, WorkerStatusPublisher,
-};
+use crate::worker::status::{WorkerActivity, WorkerStatusKind};
+use crate::{DataType, StaticValue, async_lambda};
 
-type TestResult<T = ()> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
-
-fn batch_intent(msgs: impl IntoIterator<Item = WorkerMessage>) -> BatchIntent {
-    let mut intent = BatchIntent::default();
-    intent.reset(msgs, []);
-    intent
-}
-
-/// Print messages a run logged, in order — `print` now logs via
-/// `ContextManager::info`, surfaced in `ExecutionOutcome.logs`.
-fn messages(stats: &ExecutionOutcome) -> Vec<String> {
-    stats.logs.iter().map(|e| e.message.clone()).collect()
-}
-
-/// End-to-end fixture for Worker tests that run a graph with a
-/// `frame event` source and a sink `print`. Builds the func lib,
-/// the standard 3-node graph, and a worker whose callback forwards
-/// results into an mpsc; exposes helpers for the two messages used
-/// most often (`Update` with the fixture graph; a frame-event
-/// `EventPort`).
-#[derive(Debug)]
-struct FrameHarness {
-    worker: Worker,
-    library: Arc<Library>,
-    graph: Graph,
-    frame_event_node_id: NodeId,
-    compute_rx: mpsc::Receiver<ExecResult<ExecutionOutcome>>,
-}
-
-impl FrameHarness {
-    async fn new() -> Self {
-        Self::with_callback_capacity(8).await
-    }
-
-    async fn with_callback_capacity(cap: usize) -> Self {
-        let mut library = system_library();
-        library.merge(worker_events_library());
-
-        let graph = log_frame_no_graph(&library);
-        let frame_event_node_id = graph.find_by_name("Frame Event").unwrap().id;
-        let library = Arc::new(library);
-
-        let (worker, compute_rx) = completed_worker(cap);
-
-        Self {
-            worker,
-            library,
-            graph,
-            frame_event_node_id,
-            compute_rx,
-        }
-    }
-
-    fn update_msg(&self) -> WorkerMessage {
-        WorkerMessage::Update {
-            compiled: Compiler::default()
-                .compile(&self.graph, &self.library)
-                .unwrap()
-                .into(),
-        }
-    }
-
-    fn frame_event(&self) -> EventPort {
-        EventPort {
-            node_id: self.frame_event_node_id,
-            event_idx: 0,
-        }
-    }
-
-    fn run_frame_event(&self) -> WorkerMessage {
-        WorkerMessage::Run {
-            seeds: RunSeeds::events(vec![self.frame_event()]),
-        }
-    }
-}
-
-fn log_frame_no_graph(library: &Library) -> Graph {
-    let mut graph = Graph::default();
-
-    let frame_event_node_id: NodeId = "e69c3f32-ac66-4447-a3f6-9e8528c5d830".into();
-    let to_string_node_id: NodeId = "eb6590aa-229d-4874-abba-37c56f5b97fa".into();
-    let print_node_id: NodeId = "8be72298-dece-4a5f-8a1d-d2dee1e791d3".into();
-
-    let frame_event_func = library.by_name("Frame Event").unwrap();
-    let to_string_func = library.by_name("To String").unwrap();
-    let print_func = library.by_name("Print").unwrap();
-
-    let frame_event_node: Node = frame_event_func.into();
-    graph.insert(frame_event_node_id, frame_event_node);
-
-    let to_string_node: Node = to_string_func.into();
-    graph.insert(to_string_node_id, to_string_node);
-
-    let print_node: Node = print_func.into();
-    graph.insert(print_node_id, print_node);
-
-    graph.set_input_binding(
-        InputPort::new(frame_event_node_id, 0),
-        Binding::from(StaticValue::Int(1)),
-    );
-    graph.subscribe(frame_event_node_id, 0, print_node_id);
-    graph.set_input_binding(
-        InputPort::new(to_string_node_id, 0),
-        Binding::bind(frame_event_node_id, 1),
-    );
-    graph.set_input_binding(
-        InputPort::new(print_node_id, 0),
-        Binding::bind(to_string_node_id, 0),
-    );
-
-    graph
-}
-
-/// A single `Print` sink node bound to a literal string — the minimal graph
-/// several tests use when they only care about the run completing and its
-/// log line, not the graph's shape.
-fn print_literal_graph(library: &Library, message: &str) -> (Graph, NodeId) {
-    let mut graph = Graph::default();
-    let print_node: Node = library.by_name("Print").unwrap().into();
-    let print_node_id = graph.add(print_node);
-    graph.set_input_binding(
-        InputPort::new(print_node_id, 0),
-        Binding::from(StaticValue::String(message.to_string())),
-    );
-    (graph, print_node_id)
-}
-
-/// Start an event loop with a single lambda as its only trigger, on a fresh
-/// `NodeId` — the shape most `start_event_loop` tests want when they only
-/// care about one lambda's behavior.
-async fn start_single_event_loop(
-    lambda: EventLambda,
-    pause_gate: PauseGate,
-) -> (ActiveEventLoop, NodeId) {
-    let node_id = NodeId::unique();
-    let active = ActiveEventLoop::start(
-        vec![EventTrigger {
-            event: EventPort {
-                node_id,
-                event_idx: 0,
-            },
-            lambda,
-            state: SharedAnyState::default(),
-        }],
-        pause_gate,
-    )
-    .await;
-    (active, node_id)
-}
-
-/// Recover the outcome a completed status was published from. The status *is* the
-/// outcome's rows, so this only unpacks the whole-run facts the kind carries.
-fn execution_outcome(status: &WorkerStatus) -> ExecutionOutcome {
-    let WorkerStatusKind::Completed {
-        elapsed_secs,
-        executed_node_count,
-        cancelled,
-    } = status.kind
-    else {
-        panic!("only completed statuses have an execution outcome");
-    };
-    assert!(
-        !status
-            .nodes
-            .iter()
-            .any(|node| matches!(node.status, Some(NodeExecutionStatus::Running { .. }))),
-        "completed status contains a running node"
-    );
-    ExecutionOutcome {
-        elapsed_secs,
-        nodes: status.nodes.clone(),
-        ran_node_count: executed_node_count,
-        triggered_events: Vec::new(),
-        event_triggers: Vec::new(),
-        logs: status.logs.clone(),
-        cancelled,
-        cache_ram: status.cache_ram,
-    }
-}
-
-/// A worker whose callback forwards only completed statuses into a fresh
-/// mpsc of capacity `cap` — the shape most tests want when they don't care
-/// about live progress. Works with or without a graph loaded.
-fn completed_worker(cap: usize) -> (Worker, mpsc::Receiver<ExecResult<ExecutionOutcome>>) {
-    let (tx, rx) = mpsc::channel(cap);
-    let worker = Worker::new(move |report| {
-        let result = match report {
-            WorkerReport::Status(status)
-                if matches!(status.kind, WorkerStatusKind::Completed { .. }) =>
-            {
-                Some(Ok(execution_outcome(&status)))
-            }
-            WorkerReport::Error(WorkerError::Execution { error }) => Some(Err(error)),
-            WorkerReport::Installed(_)
-            | WorkerReport::Cleared
-            | WorkerReport::Error(WorkerError::CacheEviction { .. })
-            | WorkerReport::Status(_) => None,
-        };
-        if let Some(result) = result {
-            tx.try_send(result).ok();
-        }
-    });
-    (worker, rx)
-}
-
-#[derive(Debug)]
-struct CompletedRun {
-    compiled: Arc<CompiledGraph>,
-    result: ExecResult<ExecutionOutcome>,
-}
-
-async fn next_completed_run(rx: &mut mpsc::Receiver<WorkerReport>) -> CompletedRun {
-    let mut compiled = None;
-    loop {
-        let report = timeout(Duration::from_secs(5), rx.recv())
-            .await
-            .expect("worker timed out")
-            .expect("worker channel closed");
-        match report {
-            WorkerReport::Installed(installed) => compiled = Some(installed),
-            WorkerReport::Cleared => compiled = None,
-            WorkerReport::Status(status)
-                if matches!(status.kind, WorkerStatusKind::Completed { .. }) =>
-            {
-                return CompletedRun {
-                    compiled: compiled.expect("completion arrived before installation"),
-                    result: Ok(execution_outcome(&status)),
-                };
-            }
-            WorkerReport::Error(WorkerError::Execution { error }) => {
-                return CompletedRun {
-                    compiled: compiled.expect("Error arrived before Installed"),
-                    result: Err(error),
-                };
-            }
-            WorkerReport::Error(WorkerError::CacheEviction { .. }) | WorkerReport::Status(_) => {}
-        }
-    }
-}
-
-/// Send `msgs` plus a trailing `Sync`, and block until the batch has fully
-/// committed. Panics on timeout or a dropped reply — every call site here
-/// expects the worker to still be alive and processing.
-async fn sync_after(worker: &Worker, msgs: impl IntoIterator<Item = WorkerMessage>) {
-    let (reply, rx) = oneshot::channel();
-    worker
-        .send_many(msgs.into_iter().chain([WorkerMessage::Sync { reply }]))
-        .unwrap();
-    timeout(Duration::from_millis(500), rx)
-        .await
-        .expect("sync timed out")
-        .expect("sync sender dropped");
-}
+/// How long a "nothing happens" claim watches for before it is believed.
+const QUIET: Duration = Duration::from_millis(100);
 
 /// A unique temp dir removed on drop, so tests don't collide or leak.
 /// `prefix` disambiguates directories from different tests sharing the
@@ -313,1946 +47,1013 @@ fn temp_dir(prefix: &str) -> TempDir {
     TempDir(p)
 }
 
-#[tokio::test]
-async fn test_worker() -> TestResult {
-    let mut h = FrameHarness::new().await;
+mod runs {
+    use super::*;
 
-    h.worker
-        .send_many([h.update_msg(), h.run_frame_event()])
-        .unwrap();
+    /// The frame counter advances once per firing, and every firing runs the
+    /// whole subscribed cone.
+    #[tokio::test]
+    async fn each_frame_event_runs_the_subscribed_cone() {
+        let mut w = TestWorker::frames();
+        w.send_many([w.update(), w.fire("Frame Event", 0)]);
 
-    for expected in ["1", "2", "3"] {
-        if expected != "1" {
-            h.worker.send(h.run_frame_event()).unwrap();
-        }
-        let executed = h
-            .compute_rx
-            .recv()
-            .await
-            .expect("Missing compute completion")
-            .expect("Unsuccessful compute");
-        assert_eq!(executed.ran_node_count, 3);
-        assert_eq!(messages(&executed), [expected]);
-    }
-
-    Ok(())
-}
-
-#[tokio::test]
-async fn start_event_loop_forwards_events() {
-    let event_lambda = EventLambda::new(|_state| Box::pin(async move {}));
-    let (mut active, node_id) = start_single_event_loop(event_lambda, PauseGate::default()).await;
-
-    let event = active
-        .recv_event()
-        .await
-        .expect("Expected event loop event");
-    assert_eq!(
-        event,
-        EventPort {
-            node_id,
-            event_idx: 0
-        }
-    );
-
-    active.stop().await;
-}
-
-#[tokio::test]
-async fn start_event_loop_waits_for_callback() {
-    let notify = Arc::new(Notify::new());
-    let notify_for_event = Arc::clone(&notify);
-    let event_lambda = EventLambda::new(move |_state| {
-        let notify = Arc::clone(&notify_for_event);
-        Box::pin(async move {
-            notify.notified().await;
-        })
-    });
-
-    let notify_for_callback = Arc::clone(&notify);
-
-    let (mut active, node_id) = start_single_event_loop(event_lambda, PauseGate::default()).await;
-
-    notify_for_callback.notify_waiters();
-
-    let event = timeout(Duration::from_millis(200), active.recv_event())
-        .await
-        .expect("Expected event")
-        .expect("Event channel closed");
-    assert_eq!(
-        event,
-        EventPort {
-            node_id,
-            event_idx: 0
-        }
-    );
-
-    active.stop().await;
-}
-
-#[tokio::test]
-async fn pause_gate_blocks_event_loop_iterations() {
-    use std::sync::atomic::{AtomicUsize, Ordering};
-
-    let invoke_count = Arc::new(AtomicUsize::new(0));
-    let invoke_count_clone = Arc::clone(&invoke_count);
-
-    let event_lambda = EventLambda::new(move |_state| {
-        let invoke_count = Arc::clone(&invoke_count_clone);
-        Box::pin(async move {
-            invoke_count.fetch_add(1, Ordering::SeqCst);
-        })
-    });
-
-    let pause_gate = PauseGate::default();
-
-    let (mut active, _node_id) = start_single_event_loop(event_lambda, pause_gate.clone()).await;
-
-    // Wait for first event to arrive
-    let _ = timeout(Duration::from_millis(100), active.recv_event())
-        .await
-        .expect("Expected first event");
-
-    // Close the gate - event loop should pause
-    let _guard = pause_gate.close();
-
-    // Record count after closing gate
-    tokio::time::sleep(Duration::from_millis(20)).await;
-    let count_at_close = invoke_count.load(Ordering::SeqCst);
-
-    // Wait and verify no new invocations while gate is closed
-    tokio::time::sleep(Duration::from_millis(100)).await;
-    let count_while_closed = invoke_count.load(Ordering::SeqCst);
-
-    // At most one more invocation might have slipped through
-    assert!(
-        count_while_closed <= count_at_close + 1,
-        "Event loop should pause when gate is closed. Count at close: {}, count while closed: {}",
-        count_at_close,
-        count_while_closed
-    );
-
-    // Drop guard to reopen gate
-    drop(_guard);
-
-    // Wait for more events to flow
-    tokio::time::sleep(Duration::from_millis(100)).await;
-    let count_after_reopen = invoke_count.load(Ordering::SeqCst);
-
-    assert!(
-        count_after_reopen > count_while_closed,
-        "Event loop should resume after gate reopens. Count while closed: {}, count after reopen: {}",
-        count_while_closed,
-        count_after_reopen
-    );
-
-    active.stop().await;
-}
-
-#[tokio::test]
-async fn lambda_panic_is_captured_not_unwound() {
-    let event_lambda = EventLambda::new(|_state| Box::pin(async { panic!("boom in lambda") }));
-    let (mut active, node_id) = start_single_event_loop(event_lambda, PauseGate::default()).await;
-    let mut events = Vec::new();
-
-    let wake = active.recv(&mut events).await;
-    let EventLoopWake::TaskPanicked(panic) = wake else {
-        panic!("panicking lambda must wake the event loop");
-    };
-    assert!(events.is_empty());
-    assert_eq!(panic.node_id, node_id, "panic attributed to its node");
-    assert!(
-        panic.message.contains("boom in lambda"),
-        "panic message preserved: {}",
-        panic.message
-    );
-    assert!(active.stop().await.is_empty());
-}
-
-/// Publishing a completed run is a move, not a reduction: the rows the run produced
-/// reach the GUI in the order and shape the run gave them, and the only thing the
-/// publisher adds is the whole-run header.
-#[test]
-fn completed_status_publishes_the_runs_rows_verbatim() {
-    let executed = NodeId::unique();
-    let missing = NodeId::unique();
-    let failed = NodeId::unique();
-    let resident = NodeId::unique();
-    let rows = vec![
-        NodeStatus {
-            node_id: executed,
-            status: Some(NodeExecutionStatus::Executed { elapsed_secs: 0.5 }),
-            ram: RamUsage { cpu: 3, gpu: 0 },
-        },
-        NodeStatus {
-            node_id: missing,
-            status: Some(NodeExecutionStatus::MissingInputs { ports: vec![1, 3] }),
-            ram: RamUsage::default(),
-        },
-        NodeStatus {
-            node_id: failed,
-            status: Some(NodeExecutionStatus::Errored {
-                elapsed_secs: Some(0.25),
-                error: RunError::Invoke {
-                    func_id: FuncId::unique(),
-                    message: "failed".into(),
-                },
-            }),
-            ram: RamUsage::default(),
-        },
-        NodeStatus {
-            node_id: resident,
-            status: None,
-            ram: RamUsage { cpu: 5, gpu: 7 },
-        },
-    ];
-    let mut outcome = ExecutionOutcome {
-        elapsed_secs: 1.25,
-        nodes: rows.clone(),
-        ran_node_count: 2,
-        triggered_events: Vec::new(),
-        event_triggers: Vec::new(),
-        logs: vec![LogEntry {
-            node_id: executed,
-            level: LogLevel::Warn,
-            message: "warning".into(),
-        }],
-        cancelled: true,
-        cache_ram: RamUsage { cpu: 13, gpu: 17 },
-    };
-    let mut publisher = WorkerStatusPublisher::default();
-    let status = publisher.completed(WorkerActivity::EventLoop, &mut outcome);
-
-    assert_eq!(status.activity, WorkerActivity::EventLoop);
-    assert_eq!(
-        status.kind,
-        WorkerStatusKind::Completed {
-            elapsed_secs: 1.25,
-            executed_node_count: 2,
-            cancelled: true,
-        }
-    );
-    assert_eq!(status.cache_ram, RamUsage { cpu: 13, gpu: 17 });
-    assert_eq!(status.logs.len(), 1);
-    assert_eq!(status.logs[0].message, "warning");
-
-    assert_eq!(status.nodes.len(), rows.len());
-    for (published, produced) in status.nodes.iter().zip(&rows) {
-        assert_eq!(published.node_id, produced.node_id);
-        assert_eq!(published.ram, produced.ram);
-        match (&published.status, &produced.status) {
-            (
-                Some(NodeExecutionStatus::Executed { elapsed_secs: a }),
-                Some(NodeExecutionStatus::Executed { elapsed_secs: b }),
-            ) => assert_eq!(a, b),
-            (
-                Some(NodeExecutionStatus::MissingInputs { ports: a }),
-                Some(NodeExecutionStatus::MissingInputs { ports: b }),
-            ) => assert_eq!(a, b, "the exact unfed ports survive publication"),
-            (
-                Some(NodeExecutionStatus::Errored {
-                    elapsed_secs: a,
-                    error: ea,
-                }),
-                Some(NodeExecutionStatus::Errored {
-                    elapsed_secs: b,
-                    error: eb,
-                }),
-            ) => {
-                assert_eq!(a, b, "a failure keeps the time its attempt cost");
-                assert_eq!(ea.to_string(), eb.to_string());
+        for expected in ["1", "2", "3"] {
+            if expected != "1" {
+                w.send(w.fire("Frame Event", 0));
             }
-            (None, None) => {}
-            (published, produced) => panic!("row changed shape: {produced:?} → {published:?}"),
+            let run = w.run().await;
+            assert_eq!(run.ran_node_count, 3);
+            assert_eq!(run.logs(), [expected]);
         }
     }
-    assert!(
-        outcome.nodes.is_empty(),
-        "the rows moved out of the outcome rather than being copied"
-    );
-}
 
-#[tokio::test]
-async fn clear_resets_execution_graph() {
-    let mut h = FrameHarness::new().await;
+    #[tokio::test]
+    async fn events_are_deduplicated() {
+        let mut w = TestWorker::frames();
+        w.send(w.update());
 
-    h.worker
-        .send_many([h.update_msg(), h.run_frame_event()])
-        .unwrap();
-    let stats = h.compute_rx.recv().await.unwrap().unwrap();
-    assert_eq!(messages(&stats), ["1"]);
-
-    h.worker.send(WorkerMessage::Clear).unwrap();
-    h.worker.send(h.run_frame_event()).unwrap();
-
-    tokio::time::sleep(Duration::from_millis(50)).await;
-    // After Clear the frame event has no subscribers, so nothing runs /
-    // logs — drain any callbacks and assert no print output.
-    let mut printed = Vec::new();
-    while let Ok(result) = h.compute_rx.try_recv() {
-        if let Ok(stats) = result {
-            printed.extend(messages(&stats));
-        }
-    }
-    assert!(printed.is_empty());
-}
-
-#[tokio::test]
-async fn events_are_deduplicated() {
-    let mut h = FrameHarness::new().await;
-
-    h.worker.send(h.update_msg()).unwrap();
-
-    let event = h.frame_event();
-    h.worker
-        .send(WorkerMessage::Run {
+        let event = w.event("Frame Event", 0);
+        w.send(WorkerMessage::Run {
             seeds: RunSeeds::events(vec![event, event, event]),
-        })
-        .unwrap();
+        });
 
-    let stats = h.compute_rx.recv().await.unwrap().unwrap();
-    assert_eq!(messages(&stats), ["1"]);
+        assert_eq!(w.run().await.logs(), ["1"]);
+    }
+
+    #[tokio::test]
+    async fn sink_seeds_run_the_sink() {
+        let mut w = TestWorker::printing("hello");
+        w.send_many([w.update(), TestWorker::sinks()]);
+
+        let run = w.run().await;
+
+        assert_eq!(run.ran_node_count, 1);
+        assert_eq!(run.logs(), ["hello"]);
+    }
+
+    /// Node seeds end-to-end: the seed overrides a compiled disabled node and
+    /// the worker runs only its cone — the sink `Print` panics if reached.
+    #[tokio::test]
+    async fn node_seeds_override_a_disabled_node_and_run_only_its_cone() {
+        let mut graph = TestGraph::sample_with(TestFuncHooks {
+            get_a: Arc::new(|| Ok(1)),
+            get_b: Arc::new(|| 11),
+            ..Default::default()
+        });
+        graph.cache_all(CacheMode::None);
+        graph.disable("sum");
+        let mut w = TestWorker::over(graph);
+        let sum = w.id("sum");
+
+        w.send_many([
+            w.update(),
+            WorkerMessage::Run {
+                seeds: RunSeeds::nodes(vec![sum]),
+            },
+        ]);
+
+        let run = w.run().await;
+        assert_eq!(
+            run.ran(),
+            ["get_a", "get_b", "sum"],
+            "only the disabled sum's cone ran"
+        );
+        assert!(
+            w.graph.graph.find(sum).unwrap().disabled,
+            "execution does not mutate the authoring graph"
+        );
+    }
+
+    /// A compiled disabled sink must not participate in an ordinary sink run.
+    /// The default hooks panic if any node executes.
+    #[tokio::test]
+    async fn a_disabled_sink_stays_out_of_sink_runs() {
+        let mut graph = TestGraph::sample_with(TestFuncHooks::default());
+        graph.disable("Print");
+        let mut w = TestWorker::over(graph);
+
+        w.send_many([w.update(), TestWorker::sinks()]);
+
+        let run = w.run().await;
+        assert_eq!(run.ran_node_count, 0);
+        assert!(run.missing_inputs().is_empty());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_cancel_with_no_active_run_does_not_reach_the_next_one() {
+        let mut w = TestWorker::printing("hi");
+
+        w.worker.request_cancel();
+        w.send_many([w.update(), TestWorker::sinks()]);
+
+        let run = w.run().await;
+        assert!(!run.cancelled, "an idle cancel affected the next run");
+        assert_eq!(run.ran_node_count, 1, "the run completed in full");
+    }
+
+    #[tokio::test]
+    async fn sync_fires_after_execution() {
+        let mut w = TestWorker::frames();
+
+        w.settle([w.update(), w.fire("Frame Event", 0)]).await;
+
+        w.run().await;
+    }
 }
 
-#[tokio::test]
-async fn execute_sinks_triggers_sink_nodes() {
-    let library = system_library();
-    // Simple single-sink graph — doesn't use FrameHarness' frame-event setup.
-    let (graph, _print_id) = print_literal_graph(&library, "hello");
+mod live_progress {
+    use super::*;
 
-    let (worker, mut completion_rx) = completed_worker(8);
-    worker
-        .send_many([
+    /// A run's progress reaches the host as it happens: the install first, then
+    /// the switch to `Executing`, then one `Running` and one `Executed` patch
+    /// for the node, and only then the completion.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn node_patches_stream_before_completion() {
+        let mut w = TestWorker::printing("hi");
+        let compiled = w.compile();
+        let print = w.id("Print");
+        w.send_many([
             WorkerMessage::Update {
-                compiled: Compiler::default()
-                    .compile(&graph, &library)
-                    .unwrap()
-                    .into(),
+                compiled: Arc::clone(&compiled),
             },
-            WorkerMessage::Run {
-                seeds: RunSeeds::sinks(),
-            },
-        ])
-        .unwrap();
+            TestWorker::sinks(),
+        ]);
 
-    let executed = completion_rx
-        .recv()
-        .await
-        .expect("Missing compute completion")
-        .expect("Unsuccessful compute");
-
-    assert_eq!(executed.ran_node_count, 1);
-    assert_eq!(messages(&executed), ["hello"]);
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn worker_streams_node_patches_before_completion() {
-    let library = system_library();
-    let (graph, print_node_id) = print_literal_graph(&library, "hi");
-
-    // Capture the full status stream, unlike the fixture.
-    let (tx, mut rx) = mpsc::channel::<WorkerReport>(16);
-    let worker = Worker::new(move |report| {
-        tx.try_send(report).ok();
-    });
-    let compiled: Arc<CompiledGraph> = Compiler::default()
-        .compile(&graph, &library)
-        .unwrap()
-        .into();
-    let expected_compiled = Arc::clone(&compiled);
-    worker
-        .send_many([
-            WorkerMessage::Update { compiled },
-            WorkerMessage::Run {
-                seeds: RunSeeds::sinks(),
-            },
-        ])
-        .unwrap();
-
-    let mut started = 0;
-    let mut node_finished = 0;
-    let mut installed = None;
-    let mut execution_started = false;
-    loop {
-        let report = timeout(Duration::from_secs(5), rx.recv())
-            .await
-            .expect("worker timed out")
-            .expect("worker channel closed");
-        match report {
-            WorkerReport::Installed(compiled) => {
-                assert!(installed.is_none(), "one update installed more than once");
-                assert!(Arc::ptr_eq(&compiled, &expected_compiled));
-                installed = Some(compiled);
-            }
-            WorkerReport::Status(status)
-                if status.kind == WorkerStatusKind::Activity
-                    && status.activity == WorkerActivity::Executing =>
-            {
-                assert!(installed.is_some(), "execution started before installation");
-                assert!(!execution_started, "execution started more than once");
-                execution_started = true;
-            }
-            WorkerReport::Status(status) if status.kind == WorkerStatusKind::Patch => {
-                assert!(execution_started, "node patch arrived before execution");
-                let compiled = installed
-                    .as_ref()
-                    .expect("node patch arrived before installation");
-                assert_eq!(status.activity, WorkerActivity::Executing);
-                for node in &status.nodes {
-                    assert_eq!(node.node_id, print_node_id, "status maps to the node");
-                    assert!(compiled.contains(node.node_id));
-                    match node.status {
-                        Some(NodeExecutionStatus::Running { .. }) => started += 1,
-                        Some(NodeExecutionStatus::Executed { .. }) => node_finished += 1,
-                        ref unexpected => panic!("unexpected live node status: {unexpected:?}"),
+        let mut started = 0;
+        let mut node_finished = 0;
+        let mut installed = false;
+        let mut execution_started = false;
+        loop {
+            match w.report().await {
+                WorkerReport::Installed(program) => {
+                    assert!(!installed, "one update installed more than once");
+                    assert!(Arc::ptr_eq(&program, &compiled));
+                    installed = true;
+                }
+                WorkerReport::Status(status)
+                    if status.kind == WorkerStatusKind::Activity
+                        && status.activity == WorkerActivity::Executing =>
+                {
+                    assert!(installed, "execution started before installation");
+                    assert!(!execution_started, "execution started more than once");
+                    execution_started = true;
+                }
+                WorkerReport::Status(status) if status.kind == WorkerStatusKind::Patch => {
+                    assert!(execution_started, "node patch arrived before execution");
+                    assert_eq!(status.activity, WorkerActivity::Executing);
+                    for node in &status.nodes {
+                        assert_eq!(node.node_id, print, "status maps to the node");
+                        assert!(compiled.contains(node.node_id));
+                        match node.status {
+                            Some(NodeExecutionStatus::Running { .. }) => started += 1,
+                            Some(NodeExecutionStatus::Executed { .. }) => node_finished += 1,
+                            ref unexpected => panic!("unexpected live node status: {unexpected:?}"),
+                        }
                     }
                 }
-            }
-            WorkerReport::Status(status)
-                if matches!(status.kind, WorkerStatusKind::Completed { .. }) =>
-            {
-                assert!(
-                    installed.is_some(),
-                    "completion arrived before installation"
-                );
-                assert_eq!(status.activity, WorkerActivity::Idle);
-                assert_eq!(started, 1);
-                assert_eq!(node_finished, 1);
-                assert_eq!(execution_outcome(&status).ran_node_count, 1);
-                break;
-            }
-            WorkerReport::Status(status) => panic!("unexpected worker status: {status:?}"),
-            WorkerReport::Cleared => panic!("unexpected clear"),
-            WorkerReport::Error(error) => panic!("unexpected worker error: {error}"),
-        }
-    }
-    assert_eq!(started, 1, "one running update before completion");
-    assert!(execution_started);
-    assert_eq!(node_finished, 1, "one executed update before completion");
-
-    worker.send(WorkerMessage::Clear).unwrap();
-    let cleared = timeout(Duration::from_secs(5), rx.recv())
-        .await
-        .expect("worker timed out")
-        .expect("worker channel closed");
-    assert!(matches!(cleared, WorkerReport::Cleared));
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn live_patches_reach_the_host_before_downstream_nodes_run() {
-    use std::sync::atomic::AtomicU64;
-
-    use crate::DataType;
-    use crate::graph::func::{FuncInput, FuncOutput};
-
-    // A → B with trivial sync lambdas, which give the run future no suspension point of
-    // their own: nothing but direct reporting can get their progress out mid-run. B records
-    // how many node-status patch entries the host callback has already seen — A's `Started`
-    // and `Finished` *and* B's own `Started` must all have reached the host by the time B's
-    // lambda runs.
-    let patch_entries = Arc::new(AtomicU64::new(0));
-    let seen_by_second = Arc::new(AtomicU64::new(u64::MAX));
-
-    let mut library = Library::default();
-    library.add(
-        Func::new(FuncId::unique(), "first")
-            .output(FuncOutput::new("v", DataType::Int))
-            .lambda(async_lambda!(|Invocation { outputs, .. }| {
-                outputs[0] = StaticValue::Int(1).into();
-                Ok(())
-            })),
-    );
-    let second_seen = seen_by_second.clone();
-    let second_entries = patch_entries.clone();
-    library.add(
-        Func::new(FuncId::unique(), "second")
-            .sink()
-            .input(FuncInput::required("v", DataType::Int))
-            .lambda(async_lambda!(move |_| {
-                seen = second_seen.clone(),
-                entries = second_entries.clone()
-            } => {
-                seen.store(entries.load(Ordering::SeqCst), Ordering::SeqCst);
-                Ok(())
-            })),
-    );
-
-    let mut graph = Graph::default();
-    let first_id = graph.add(library.by_name("first").unwrap().into());
-    let second_id = graph.add(library.by_name("second").unwrap().into());
-    graph.set_input_binding(InputPort::new(second_id, 0), Binding::bind(first_id, 0));
-
-    let entries = patch_entries.clone();
-    let (tx, mut rx) = mpsc::channel::<WorkerReport>(16);
-    let worker = Worker::new(move |report| {
-        if let WorkerReport::Status(status) = &report
-            && status.kind == WorkerStatusKind::Patch
-        {
-            entries.fetch_add(status.nodes.len() as u64, Ordering::SeqCst);
-        }
-        tx.try_send(report).ok();
-    });
-    let compiled: Arc<CompiledGraph> = Compiler::default()
-        .compile(&graph, &library)
-        .unwrap()
-        .into();
-    worker
-        .send_many([
-            WorkerMessage::Update { compiled },
-            WorkerMessage::Run {
-                seeds: RunSeeds::sinks(),
-            },
-        ])
-        .unwrap();
-
-    loop {
-        let report = timeout(Duration::from_secs(5), rx.recv())
-            .await
-            .expect("worker timed out")
-            .expect("worker channel closed");
-        if let WorkerReport::Status(status) = report
-            && matches!(status.kind, WorkerStatusKind::Completed { .. })
-        {
-            break;
-        }
-    }
-    assert_eq!(
-        seen_by_second.load(Ordering::SeqCst),
-        3,
-        "the first node's Started and Finished patches, and the second's own Started, must \
-         reach the host before the second node's lambda runs"
-    );
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn cancel_without_an_active_run_does_not_affect_the_next_run() {
-    let library = system_library();
-    let (graph, _print_node_id) = print_literal_graph(&library, "hi");
-
-    let (worker, mut rx) = completed_worker(8);
-
-    worker.request_cancel();
-    worker
-        .send_many([
-            WorkerMessage::Update {
-                compiled: Compiler::default()
-                    .compile(&graph, &library)
-                    .unwrap()
-                    .into(),
-            },
-            WorkerMessage::Run {
-                seeds: RunSeeds::sinks(),
-            },
-        ])
-        .unwrap();
-
-    let stats = timeout(Duration::from_secs(5), rx.recv())
-        .await
-        .expect("worker timed out")
-        .expect("worker channel closed")
-        .expect("compute ok");
-    assert!(!stats.cancelled, "an idle cancel affected the next run");
-    assert_eq!(stats.ran_node_count, 1, "the run completed in full");
-}
-
-#[tokio::test]
-async fn start_stop_event_loop() {
-    let mut h = FrameHarness::with_callback_capacity(32).await;
-
-    sync_after(&h.worker, [h.update_msg(), WorkerMessage::StartEventLoop]).await;
-
-    let initial = h.compute_rx.recv().await.unwrap().unwrap();
-    assert!(messages(&initial).is_empty());
-    let event = timeout(Duration::from_millis(500), h.compute_rx.recv())
-        .await
-        .expect("event loop did not produce a callback")
-        .expect("callback channel closed")
-        .expect("event loop execution failed");
-    assert_eq!(event.ran_node_count, 3);
-    assert_eq!(event.logs.len(), 1);
-
-    sync_after(&h.worker, [WorkerMessage::StopEventLoop]).await;
-    while h.compute_rx.try_recv().is_ok() {}
-    assert_no_callback_within(&mut h.compute_rx, Duration::from_millis(100)).await;
-}
-
-#[tokio::test]
-async fn worker_reports_absolute_activity_in_order() {
-    let mut library = system_library();
-    library.merge(worker_events_library());
-    let graph = log_frame_no_graph(&library);
-    let compiled = Compiler::default()
-        .compile(&graph, &library)
-        .unwrap()
-        .into();
-    let (report_tx, mut report_rx) = mpsc::unbounded_channel();
-    let worker = Worker::new(move |report| {
-        report_tx.send(report).unwrap();
-    });
-
-    sync_after(
-        &worker,
-        [
-            WorkerMessage::Update { compiled },
-            WorkerMessage::StartEventLoop,
-        ],
-    )
-    .await;
-
-    let mut activities = Vec::new();
-    while activities.last() != Some(&WorkerActivity::EventLoop) {
-        let report = timeout(Duration::from_secs(5), report_rx.recv())
-            .await
-            .expect("worker timed out")
-            .expect("worker channel closed");
-        if let WorkerReport::Status(status) = report
-            && activities.last() != Some(&status.activity)
-        {
-            activities.push(status.activity);
-        }
-    }
-    assert_eq!(
-        activities,
-        [WorkerActivity::Executing, WorkerActivity::EventLoop]
-    );
-
-    sync_after(&worker, [WorkerMessage::StopEventLoop]).await;
-    loop {
-        let report = timeout(Duration::from_secs(5), report_rx.recv())
-            .await
-            .expect("worker timed out")
-            .expect("worker channel closed");
-        if matches!(
-            report,
-            WorkerReport::Status(status)
-                if status.kind == WorkerStatusKind::Activity
-                    && status.activity == WorkerActivity::Idle
-        ) {
-            break;
-        }
-    }
-}
-
-#[tokio::test]
-async fn one_event_task_panic_stops_loop_while_another_task_is_alive() {
-    let mut library = system_library();
-    library.merge(worker_events_library());
-    let mut frame_event = library.by_name("Frame Event").unwrap().clone();
-    frame_event.events[0].event_lambda =
-        EventLambda::new(|_state| Box::pin(async { panic!("event loop stopped") }));
-    frame_event.events[1].event_lambda =
-        EventLambda::new(|_state| Box::pin(std::future::pending()));
-    library.remove(frame_event.id).unwrap();
-    library.add(frame_event);
-    let mut graph = log_frame_no_graph(&library);
-    let frame_event_node_id = graph.find_by_name("Frame Event").unwrap().id;
-    let print_node_id = graph.find_by_name("Print").unwrap().id;
-    graph.subscribe(frame_event_node_id, 1, print_node_id);
-    let expected_node_id = frame_event_node_id;
-    let compiled = Compiler::default()
-        .compile(&graph, &library)
-        .unwrap()
-        .into();
-    let (report_tx, mut report_rx) = mpsc::unbounded_channel();
-    let worker = Worker::new(move |report| {
-        report_tx.send(report).unwrap();
-    });
-    worker
-        .send_many([
-            WorkerMessage::Update { compiled },
-            WorkerMessage::StartEventLoop,
-        ])
-        .unwrap();
-
-    let mut activities = Vec::new();
-    loop {
-        let report = timeout(Duration::from_secs(5), report_rx.recv())
-            .await
-            .expect("worker timed out")
-            .expect("worker channel closed");
-        match report {
-            WorkerReport::Status(status) => {
-                if activities.last() != Some(&status.activity) {
-                    activities.push(status.activity);
+                WorkerReport::Status(status)
+                    if matches!(status.kind, WorkerStatusKind::Completed { .. }) =>
+                {
+                    assert!(installed, "completion arrived before installation");
+                    assert_eq!(status.activity, WorkerActivity::Idle);
+                    assert_eq!(started, 1, "one running update before completion");
+                    assert_eq!(node_finished, 1, "one executed update before completion");
+                    break;
                 }
+                WorkerReport::Status(status) => panic!("unexpected worker status: {status:?}"),
+                WorkerReport::Cleared => panic!("unexpected clear"),
+                WorkerReport::Error(error) => panic!("unexpected worker error: {error}"),
             }
-            WorkerReport::Error(WorkerError::Execution {
-                error: Error::EventLambdaPanic { node_id, message },
-            }) => {
-                assert_eq!(node_id, expected_node_id);
-                assert!(message.contains("event loop stopped"));
+        }
+
+        w.send(WorkerMessage::Clear);
+        assert!(matches!(w.report().await, WorkerReport::Cleared));
+    }
+
+    /// A → B with trivial sync lambdas, which give the run future no suspension
+    /// point of their own: nothing but direct reporting can get their progress
+    /// out mid-run. B records how many node-status patch entries the host
+    /// callback has already seen — A's `Running` and `Executed` *and* B's own
+    /// `Running` must all have reached the host by the time B's lambda runs.
+    ///
+    /// The callback itself is the subject here, so this one wires a raw
+    /// [`Worker`] rather than going through the harness.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn live_patches_reach_the_host_before_downstream_nodes_run() {
+        let patch_entries = Arc::new(AtomicU64::new(0));
+        let seen_by_second = Arc::new(AtomicU64::new(u64::MAX));
+
+        let mut graph = TestGraph::new();
+        graph.add("first", |node| {
+            node.output(DataType::Int).compute(|_| StaticValue::Int(1))
+        });
+        graph.add("second", |node| {
+            let seen = Arc::clone(&seen_by_second);
+            let entries = Arc::clone(&patch_entries);
+            node.sink()
+                .input(DataType::Int)
+                .lambda(async_lambda!(move |_| {
+                    seen = Arc::clone(&seen),
+                    entries = Arc::clone(&entries)
+                } => {
+                    seen.store(entries.load(Ordering::SeqCst), Ordering::SeqCst);
+                    Ok(())
+                }))
+        });
+        graph.wire("first", 0, "second", 0);
+        let compiled = TestWorker::over(graph).compile();
+
+        let entries = Arc::clone(&patch_entries);
+        let (tx, mut rx) = mpsc::unbounded_channel::<WorkerReport>();
+        let worker = Worker::new(move |report| {
+            if let WorkerReport::Status(status) = &report
+                && status.kind == WorkerStatusKind::Patch
+            {
+                entries.fetch_add(status.nodes.len() as u64, Ordering::SeqCst);
+            }
+            tx.send(report).ok();
+        });
+        worker
+            .send_many([WorkerMessage::Update { compiled }, TestWorker::sinks()])
+            .unwrap();
+
+        loop {
+            let report = timeout(Duration::from_secs(5), rx.recv())
+                .await
+                .expect("worker timed out")
+                .expect("worker channel closed");
+            if let WorkerReport::Status(status) = report
+                && matches!(status.kind, WorkerStatusKind::Completed { .. })
+            {
                 break;
             }
-            WorkerReport::Installed(_)
-            | WorkerReport::Cleared
-            | WorkerReport::Error(WorkerError::Execution { .. })
-            | WorkerReport::Error(WorkerError::CacheEviction { .. }) => {}
         }
+        assert_eq!(
+            seen_by_second.load(Ordering::SeqCst),
+            3,
+            "the first node's Running and Executed patches, and the second's own Running, must \
+             reach the host before the second node's lambda runs"
+        );
     }
-    assert_eq!(
-        activities,
-        [
-            WorkerActivity::Executing,
-            WorkerActivity::EventLoop,
-            WorkerActivity::Idle,
-        ]
-    );
-    sync_after(&worker, std::iter::empty()).await;
-}
 
-/// Node seeds end-to-end: the run seed overrides a compiled disabled node and the
-/// worker runs only its cone (the sink `Print` panics if reached).
-#[tokio::test]
-async fn execute_nodes_overrides_disabled_seed_and_runs_only_its_cone() {
-    use crate::graph::node::CacheMode;
-    use crate::testing::{TestFuncHooks, test_func_lib, test_graph};
+    #[tokio::test]
+    async fn activity_is_reported_absolutely_and_in_order() {
+        let mut w = TestWorker::frames();
 
-    let library = test_func_lib(TestFuncHooks {
-        get_a: Arc::new(|| Ok(1)),
-        get_b: Arc::new(|| 11),
-        ..Default::default()
-    });
-    let mut graph = test_graph();
-    for node in graph.nodes.values_mut() {
-        node.cache = CacheMode::None;
-    }
-    let sum_id = graph.find_by_name("sum").unwrap().id;
-    graph.find_mut(sum_id).unwrap().disabled = true;
-    let get_a_id = graph.find_by_name("get_a").unwrap().id;
-    let get_b_id = graph.find_by_name("get_b").unwrap().id;
+        w.settle([w.update(), WorkerMessage::StartEventLoop]).await;
 
-    let (worker, mut rx) = completed_worker(8);
-    worker
-        .send_many([
-            WorkerMessage::Update {
-                compiled: Compiler::default()
-                    .compile(&graph, &library)
-                    .unwrap()
-                    .into(),
-            },
-            WorkerMessage::Run {
-                seeds: RunSeeds::nodes(vec![sum_id]),
-            },
-        ])
-        .unwrap();
+        let mut activities = Vec::new();
+        while activities.last() != Some(&WorkerActivity::EventLoop) {
+            let status = w.status().await;
+            if activities.last() != Some(&status.activity) {
+                activities.push(status.activity);
+            }
+        }
+        assert_eq!(
+            activities,
+            [WorkerActivity::Executing, WorkerActivity::EventLoop]
+        );
 
-    let stats = timeout(Duration::from_secs(5), rx.recv())
-        .await
-        .expect("worker timed out")
-        .expect("worker channel closed")
-        .expect("run ok");
-    let mut executed = stats.ran_nodes().collect::<Vec<_>>();
-    executed.sort();
-    let mut expected = vec![get_a_id, get_b_id, sum_id];
-    expected.sort();
-    assert_eq!(executed, expected, "only the disabled sum's cone ran");
-    assert!(
-        graph.find(sum_id).unwrap().disabled,
-        "execution does not mutate the authoring graph"
-    );
-}
-
-/// A compiled disabled sink must not participate in an ordinary sink run. The default
-/// hooks panic if any node executes.
-#[tokio::test]
-async fn disabled_sink_stays_out_of_sink_runs() {
-    use crate::testing::{TestFuncHooks, test_func_lib, test_graph};
-
-    let library = test_func_lib(TestFuncHooks::default());
-    let mut graph = test_graph();
-    let print_id = graph.find_by_name("Print").unwrap().id;
-    graph.find_mut(print_id).unwrap().disabled = true;
-
-    let (worker, mut rx) = completed_worker(8);
-    worker
-        .send_many([
-            WorkerMessage::Update {
-                compiled: Compiler::default()
-                    .compile(&graph, &library)
-                    .unwrap()
-                    .into(),
-            },
-            WorkerMessage::Run {
-                seeds: RunSeeds::sinks(),
-            },
-        ])
-        .unwrap();
-
-    let stats = timeout(Duration::from_secs(5), rx.recv())
-        .await
-        .expect("worker timed out")
-        .expect("worker channel closed")
-        .expect("run ok");
-    assert!(stats.ran_node_count == 0);
-    assert!(stats.missing_input_nodes().count() == 0);
-}
-
-#[tokio::test]
-async fn sync_fires_after_execution() {
-    let mut h = FrameHarness::new().await;
-
-    sync_after(&h.worker, [h.update_msg(), h.run_frame_event()]).await;
-    let _ = h.compute_rx.recv().await;
-}
-
-#[tokio::test]
-async fn update_restarts_event_loop_if_running() {
-    let mut h = FrameHarness::with_callback_capacity(32).await;
-
-    sync_after(&h.worker, [h.update_msg(), WorkerMessage::StartEventLoop]).await;
-    while h.compute_rx.try_recv().is_ok() {}
-    timeout(Duration::from_millis(500), h.compute_rx.recv())
-        .await
-        .expect("event loop did not produce a callback before update")
-        .expect("callback channel closed")
-        .expect("event loop execution failed");
-
-    sync_after(&h.worker, [h.update_msg()]).await;
-    while h.compute_rx.try_recv().is_ok() {}
-    let event = timeout(Duration::from_millis(500), h.compute_rx.recv())
-        .await
-        .expect("restarted event loop did not produce a callback")
-        .expect("callback channel closed")
-        .expect("event loop execution failed");
-    assert_eq!(event.ran_node_count, 3);
-}
-
-// Stale-event filtering is now structural: each start_event_loop
-// call returns a fresh Receiver; stop_event_loop drops the old
-// pair so any undelivered events die with the channel. This test
-// verifies the structural guarantee by confirming the old
-// Receiver is closed after its sibling handle is stopped.
-#[tokio::test]
-async fn stopped_event_loop_channel_is_closed() {
-    let event_lambda = EventLambda::new(|_state| Box::pin(async move {}));
-    let (mut active, _node_id) = start_single_event_loop(event_lambda, PauseGate::default()).await;
-
-    active.stop().await;
-
-    // After stop, all lambda tasks (the sole senders) are aborted →
-    // the Receiver must observe channel closure. Drain under a
-    // bounded per-recv timeout so a regression that stops closing
-    // the channel fails fast instead of wedging the test.
-    loop {
-        let item = timeout(Duration::from_millis(500), active.recv_event())
-            .await
-            .expect("recv must complete — channel must eventually close after handle.stop()");
-        if item.is_none() {
-            break;
+        w.settle([WorkerMessage::StopEventLoop]).await;
+        loop {
+            let status = w.status().await;
+            if status.kind == WorkerStatusKind::Activity && status.activity == WorkerActivity::Idle
+            {
+                break;
+            }
         }
     }
 }
 
-#[tokio::test]
-async fn send_many_empty_is_noop() {
-    // Empty batch must not panic, hang, or desynchronize the worker.
-    let worker = Worker::new(|_| {});
+mod batching {
+    use super::*;
 
-    worker
-        .send_many(std::iter::empty::<WorkerMessage>())
-        .unwrap();
+    #[tokio::test]
+    async fn clear_resets_the_execution_graph() {
+        let mut w = TestWorker::frames();
+        w.send_many([w.update(), w.fire("Frame Event", 0)]);
+        assert_eq!(w.run().await.logs(), ["1"]);
 
-    // Subsequent Sync still fires → worker is alive.
-    sync_after(&worker, std::iter::empty()).await;
-}
+        w.send_many([WorkerMessage::Clear, w.fire("Frame Event", 0)]);
 
-#[tokio::test]
-async fn stop_event_loop_when_not_running_is_noop() {
-    let worker = Worker::new(|_| {});
+        // After Clear the frame event has no subscribers, so nothing runs.
+        w.nothing_runs_within(QUIET).await;
+    }
 
-    sync_after(&worker, [WorkerMessage::StopEventLoop]).await;
-}
+    /// Scan-then-commit ordering: `Clear` zeroes the execution graph, `Update`
+    /// queues a replacement, and the commit phase applies the update — so the
+    /// event still executes.
+    #[tokio::test]
+    async fn clear_then_update_in_one_batch_applies_the_update() {
+        let mut w = TestWorker::frames();
 
-#[tokio::test]
-async fn multiple_syncs_in_batch_all_run() {
-    let worker = Worker::new(|_| {});
+        w.send_many([WorkerMessage::Clear, w.update(), w.fire("Frame Event", 0)]);
 
-    let (reply_a, rx_a) = oneshot::channel();
-    let (reply_b, rx_b) = oneshot::channel();
+        let run = w.run().await;
+        assert_eq!(run.ran_node_count, 3);
+        assert_eq!(run.logs(), ["1"]);
+    }
 
-    worker
-        .send_many([
+    #[tokio::test]
+    async fn update_then_clear_in_one_batch_leaves_the_graph_cleared() {
+        let mut w = TestWorker::frames();
+
+        w.send_many([w.update(), WorkerMessage::Clear, w.fire("Frame Event", 0)]);
+
+        w.nothing_runs_within(QUIET).await;
+    }
+
+    /// An empty batch must not panic, hang, or desynchronize the worker.
+    #[tokio::test]
+    async fn an_empty_batch_is_a_noop() {
+        let w = TestWorker::over(TestGraph::new());
+
+        w.send_many(std::iter::empty::<WorkerMessage>());
+
+        // A subsequent Sync still fires, so the worker is alive.
+        w.sync().await;
+    }
+
+    #[tokio::test]
+    async fn every_sync_in_a_batch_fires() {
+        let w = TestWorker::over(TestGraph::new());
+        let (reply_a, ack_a) = oneshot::channel();
+        let (reply_b, ack_b) = oneshot::channel();
+
+        w.send_many([
             WorkerMessage::Sync { reply: reply_a },
             WorkerMessage::Sync { reply: reply_b },
-        ])
-        .unwrap();
+        ]);
 
-    timeout(Duration::from_millis(500), rx_a)
-        .await
-        .expect("First Sync should fire")
-        .expect("First sender dropped");
-    timeout(Duration::from_millis(500), rx_b)
-        .await
-        .expect("Second Sync should fire")
-        .expect("Second sender dropped");
+        for (ack, which) in [(ack_a, "first"), (ack_b, "second")] {
+            timeout(Duration::from_millis(500), ack)
+                .await
+                .unwrap_or_else(|_| panic!("the {which} Sync never fired"))
+                .unwrap_or_else(|_| panic!("the {which} sender was dropped"));
+        }
+    }
+
+    /// Messages that become ready at the same wake reduce into one batch, so
+    /// the superseded update never runs.
+    #[tokio::test(flavor = "current_thread")]
+    async fn messages_ready_at_one_wake_reduce_together() {
+        let mut w = TestWorker::printing("first");
+        let first = w.compile();
+        w.send(WorkerMessage::Update {
+            compiled: Arc::clone(&first),
+        });
+        w.send(TestWorker::sinks());
+
+        w.graph = TestWorker::print_graph("second");
+        let second = w.compile();
+        let second_print = w.id("Print");
+        w.send(WorkerMessage::Update {
+            compiled: Arc::clone(&second),
+        });
+        w.send(TestWorker::sinks());
+
+        let run = w.run().await;
+        assert!(!Arc::ptr_eq(w.installed(), &first));
+        assert!(Arc::ptr_eq(w.installed(), &second));
+        assert!(w.installed().contains(second_print));
+        assert_eq!(run.logs(), ["second"]);
+        w.nothing_runs_within(QUIET).await;
+    }
 }
 
-#[tokio::test]
-async fn clear_then_update_in_same_batch_applies_update() {
-    // Scan-then-commit ordering: Clear zeroes execution_graph, Update
-    // queues a replacement, commit phase applies Update and flips
-    // execution_graph_clear back to false. The event must execute.
-    let mut h = FrameHarness::new().await;
+/// Running on a worker holding no graph is an ordinary state, not a failure:
+/// the worker skips execution silently and publishes nothing at all.
+mod empty_graph {
+    use super::*;
 
-    h.worker
-        .send_many([WorkerMessage::Clear, h.update_msg(), h.run_frame_event()])
-        .unwrap();
+    #[tokio::test]
+    async fn sink_seeds_are_a_silent_noop() {
+        let mut w = TestWorker::over(TestGraph::new());
 
-    let executed = h
-        .compute_rx
-        .recv()
-        .await
-        .expect("Missing compute completion")
-        .expect("Unsuccessful compute");
+        w.send(TestWorker::sinks());
 
-    assert_eq!(executed.ran_node_count, 3);
-    assert_eq!(messages(&executed), ["1"]);
-}
+        w.nothing_runs_within(QUIET).await;
+    }
 
-// F5: running execution on an empty graph is a normal state, not a
-// failure — the worker must skip execute silently. No callback fires
-// until a graph is loaded.
+    #[tokio::test]
+    async fn event_seeds_are_a_silent_noop() {
+        let mut w = TestWorker::over(TestGraph::new());
 
-async fn assert_no_callback_within(
-    rx: &mut mpsc::Receiver<ExecResult<ExecutionOutcome>>,
-    d: Duration,
-) {
-    assert!(
-        timeout(d, rx.recv()).await.is_err(),
-        "unexpected worker callback"
-    );
-}
-
-#[tokio::test]
-async fn execute_sinks_on_empty_graph_is_silent_noop() {
-    let (worker, mut rx) = completed_worker(8);
-    worker
-        .send(WorkerMessage::Run {
-            seeds: RunSeeds::sinks(),
-        })
-        .unwrap();
-    assert_no_callback_within(&mut rx, Duration::from_millis(100)).await;
-}
-
-#[tokio::test]
-async fn event_on_empty_graph_is_silent_noop() {
-    let (worker, mut rx) = completed_worker(8);
-    worker
-        .send(WorkerMessage::Run {
+        w.send(WorkerMessage::Run {
             seeds: RunSeeds::events(vec![EventPort {
                 node_id: NodeId::unique(),
                 event_idx: 0,
             }]),
-        })
-        .unwrap();
-    assert_no_callback_within(&mut rx, Duration::from_millis(100)).await;
+        });
+
+        w.nothing_runs_within(QUIET).await;
+    }
+
+    #[tokio::test]
+    async fn starting_the_event_loop_is_a_silent_noop() {
+        let mut w = TestWorker::over(TestGraph::new());
+
+        w.settle([WorkerMessage::StartEventLoop]).await;
+
+        w.nothing_runs_within(QUIET).await;
+    }
+
+    #[tokio::test]
+    async fn sink_seeds_with_start_event_loop_are_a_silent_noop() {
+        let mut w = TestWorker::over(TestGraph::new());
+
+        w.settle([TestWorker::sinks(), WorkerMessage::StartEventLoop])
+            .await;
+
+        w.nothing_runs_within(QUIET).await;
+    }
 }
 
-#[tokio::test]
-async fn start_event_loop_on_empty_graph_is_silent_noop() {
-    let (worker, mut rx) = completed_worker(8);
-    sync_after(&worker, [WorkerMessage::StartEventLoop]).await;
-    assert_no_callback_within(&mut rx, Duration::from_millis(100)).await;
-}
+mod event_loop {
+    use super::*;
 
-// F4 regression: when a batch triggers both an execution
-// (sink or event seeds) and StartEventLoop, the commit
-// phase must run execute() once and fire the callback once — not twice.
+    #[tokio::test]
+    async fn start_then_stop() {
+        let mut w = TestWorker::frames();
 
-#[tokio::test]
-async fn execute_sinks_with_start_event_loop_fires_callback_once() {
-    // A sink-only graph prepares no event triggers, so the loop never
-    // actually starts. This removes lambda-driven
-    // callbacks as a confounding factor while still exercising the
-    // event-loop rebuild transition.
-    let library = system_library();
-    let (graph, _print_node_id) = print_literal_graph(&library, "hi");
+        w.settle([w.update(), WorkerMessage::StartEventLoop]).await;
 
-    let (worker, mut completion_rx) = completed_worker(8);
+        // The bootstrap run initializes the event source and logs nothing; the
+        // loop's first firing then runs the whole cone.
+        assert!(w.run().await.logs().is_empty());
+        let fired = w.run().await;
+        assert_eq!(fired.ran_node_count, 3);
+        assert_eq!(fired.logs().len(), 1);
 
-    worker
-        .send_many([
-            WorkerMessage::Update {
-                compiled: Compiler::default()
-                    .compile(&graph, &library)
-                    .unwrap()
-                    .into(),
-            },
-            WorkerMessage::Run {
-                seeds: RunSeeds::sinks(),
-            },
+        w.settle([WorkerMessage::StopEventLoop]).await;
+        w.drain();
+        w.nothing_runs_within(QUIET).await;
+    }
+
+    #[tokio::test]
+    async fn stopping_a_loop_that_is_not_running_is_a_noop() {
+        let w = TestWorker::over(TestGraph::new());
+
+        w.settle([WorkerMessage::StopEventLoop]).await;
+    }
+
+    /// A batch triggering both an execution and `StartEventLoop` must run
+    /// execute once and publish one completion, not two. A sink-only graph
+    /// prepares no event triggers, so the loop never actually starts — which
+    /// removes lambda-driven runs as a confounding factor while still
+    /// exercising the rebuild transition.
+    #[tokio::test]
+    async fn sink_seeds_with_start_event_loop_complete_once() {
+        let mut w = TestWorker::printing("hi");
+
+        w.send_many([
+            w.update(),
+            TestWorker::sinks(),
             WorkerMessage::StartEventLoop,
-        ])
-        .unwrap();
+        ]);
 
-    let first = timeout(Duration::from_millis(500), completion_rx.recv())
-        .await
-        .expect("batch must fire callback")
-        .expect("callback channel closed");
-    assert!(first.is_ok(), "execute must succeed: {first:?}");
+        assert_eq!(w.run().await.logs(), ["hi"]);
+        w.nothing_runs_within(QUIET).await;
+    }
 
-    assert_no_callback_within(&mut completion_rx, Duration::from_millis(100)).await;
-    assert_eq!(messages(first.as_ref().unwrap()), ["hi"]);
+    /// An `Update` while the loop is running restarts it over the new program.
+    #[tokio::test]
+    async fn update_restarts_a_running_loop() {
+        let mut w = TestWorker::frames();
+
+        w.settle([w.update(), WorkerMessage::StartEventLoop]).await;
+        w.drain();
+        w.run().await;
+
+        w.settle([w.update()]).await;
+        w.drain();
+        assert_eq!(w.run().await.ran_node_count, 3);
+    }
+
+    /// `StartEventLoop` while a loop is already running stops the current one
+    /// before rebuilding it, rather than panicking or leaking it.
+    #[tokio::test]
+    async fn starting_twice_is_idempotent() {
+        let mut w = TestWorker::frames();
+
+        w.settle([w.update(), WorkerMessage::StartEventLoop]).await;
+        w.drain();
+        w.run().await;
+
+        w.settle([WorkerMessage::StartEventLoop]).await;
+        w.drain();
+        w.run().await;
+    }
+
+    /// End-to-end: an event fired by a lambda reaches the worker's execute path
+    /// and produces a completion, over the dedicated bounded channel.
+    #[tokio::test]
+    async fn lambda_events_drive_execution() {
+        let mut w = TestWorker::frames();
+
+        w.send_many([w.update(), WorkerMessage::StartEventLoop]);
+
+        // The first completion is the bootstrap run inside the start path; the
+        // second can only come from the lambda firing.
+        w.run().await;
+        w.run().await;
+    }
+
+    /// The lambda fires as fast as it can; a `StopEventLoop` must still be
+    /// observed within a bounded time rather than being starved by the event
+    /// stream.
+    #[tokio::test]
+    async fn commands_are_not_starved_by_a_fast_loop() {
+        let mut w = TestWorker::frames();
+
+        w.settle([w.update(), WorkerMessage::StartEventLoop]).await;
+        w.run().await;
+        w.run().await;
+        w.drain();
+
+        w.settle([WorkerMessage::StopEventLoop]).await;
+
+        w.drain();
+        w.nothing_runs_within(QUIET).await;
+    }
+
+    /// A firing runs only the subscriber, never re-initializing the event
+    /// sources: `source_b`'s own lambda must not be invoked again because
+    /// `source_a` ticked.
+    #[tokio::test]
+    async fn a_fired_event_does_not_reinitialize_the_event_sources() {
+        let calls = |name: &str| (name.to_owned(), Arc::new(AtomicUsize::new(0)));
+        let (_, a_calls) = calls("source_a");
+        let (_, b_calls) = calls("source_b");
+        let (_, subscriber_calls) = calls("subscriber");
+        let a_notify = Arc::new(Notify::new());
+        let b_notify = Arc::new(Notify::new());
+
+        let mut graph = TestGraph::new();
+        for (name, notify, counter) in [
+            ("source_a", &a_notify, &a_calls),
+            ("source_b", &b_notify, &b_calls),
+        ] {
+            let notify = Arc::clone(notify);
+            let counter = Arc::clone(counter);
+            graph.add(name, move |node| {
+                node.event(
+                    "tick",
+                    EventLambda::new(move |_state| {
+                        let notify = Arc::clone(&notify);
+                        Box::pin(async move { notify.notified().await })
+                    }),
+                )
+                .lambda(
+                    async_lambda!(move |_| { counter = Arc::clone(&counter) } => {
+                        counter.fetch_add(1, Ordering::SeqCst);
+                        Ok(())
+                    }),
+                )
+            });
+        }
+        let counter = Arc::clone(&subscriber_calls);
+        graph.add("subscriber", move |node| {
+            node.lambda(
+                async_lambda!(move |_| { counter = Arc::clone(&counter) } => {
+                    counter.fetch_add(1, Ordering::SeqCst);
+                    Ok(())
+                }),
+            )
+        });
+        graph.subscribe("source_a", 0, "subscriber");
+        graph.subscribe("source_b", 0, "subscriber");
+
+        let mut w = TestWorker::over(graph);
+        w.send_many([w.update(), WorkerMessage::StartEventLoop]);
+
+        let bootstrap = w.run().await;
+        assert_eq!(bootstrap.ran(), ["source_a", "source_b"]);
+        assert_eq!(subscriber_calls.load(Ordering::SeqCst), 0);
+
+        a_notify.notify_one();
+        let fired = w.run().await;
+        assert_eq!(fired.ran(), ["subscriber"], "only the subscriber re-ran");
+        assert_eq!(a_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(b_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(subscriber_calls.load(Ordering::SeqCst), 1);
+
+        w.settle([WorkerMessage::StopEventLoop]).await;
+    }
+
+    /// One event task panicking stops the whole loop and is attributed to its
+    /// node, even while a sibling task is still parked.
+    #[tokio::test]
+    async fn one_task_panicking_stops_the_loop() {
+        let mut w = TestWorker::frames();
+        w.graph.edit_func("Frame Event", |func| {
+            func.events[0].event_lambda =
+                EventLambda::new(|_state| Box::pin(async { panic!("event loop stopped") }));
+            func.events[1].event_lambda =
+                EventLambda::new(|_state| Box::pin(std::future::pending()));
+        });
+        w.graph.subscribe("Frame Event", 1, "Print");
+        let frame_event = w.id("Frame Event");
+
+        w.send_many([w.update(), WorkerMessage::StartEventLoop]);
+
+        let mut activities = Vec::new();
+        loop {
+            match w.report().await {
+                WorkerReport::Status(status) => {
+                    if activities.last() != Some(&status.activity) {
+                        activities.push(status.activity);
+                    }
+                }
+                WorkerReport::Error(WorkerError::Execution {
+                    error: Error::EventLambdaPanic { node_id, message },
+                }) => {
+                    assert_eq!(node_id, frame_event);
+                    assert!(message.contains("event loop stopped"));
+                    break;
+                }
+                WorkerReport::Installed(_)
+                | WorkerReport::Cleared
+                | WorkerReport::Error(WorkerError::Execution { .. })
+                | WorkerReport::Error(WorkerError::CacheEviction { .. }) => {}
+            }
+        }
+        assert_eq!(
+            activities,
+            [
+                WorkerActivity::Executing,
+                WorkerActivity::EventLoop,
+                WorkerActivity::Idle,
+            ]
+        );
+        w.sync().await;
+    }
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn queued_messages_ready_at_the_same_wake_reduce_together() {
-    let library = system_library();
-    let (graph_a, _print_a) = print_literal_graph(&library, "first");
-    let (graph_b, print_b) = print_literal_graph(&library, "second");
-    let (tx, mut rx) = mpsc::channel::<WorkerReport>(16);
-    let worker = Worker::new(move |report| {
-        tx.try_send(report).unwrap();
-    });
-    let compiled_a: Arc<CompiledGraph> = Compiler::default()
-        .compile(&graph_a, &library)
-        .unwrap()
-        .into();
-    let compiled_b: Arc<CompiledGraph> = Compiler::default()
-        .compile(&graph_b, &library)
-        .unwrap()
-        .into();
+mod replacement {
+    use super::*;
 
-    worker
-        .send(WorkerMessage::Update {
-            compiled: Arc::clone(&compiled_a),
-        })
-        .unwrap();
-    worker
-        .send(WorkerMessage::Run {
-            seeds: RunSeeds::sinks(),
-        })
-        .unwrap();
-    worker
-        .send(WorkerMessage::Update {
-            compiled: Arc::clone(&compiled_b),
-        })
-        .unwrap();
-    worker
-        .send(WorkerMessage::Run {
-            seeds: RunSeeds::sinks(),
-        })
-        .unwrap();
+    /// A run seeded with an event the *replacing* program no longer holds is
+    /// refused, and the worker carries on with the new program.
+    #[tokio::test]
+    async fn a_stale_event_seed_is_rejected_without_stopping_the_worker() {
+        let mut w = TestWorker::frames();
+        w.settle([w.update()]).await;
+        let stale = w.event("Frame Event", 0);
 
-    let completed = next_completed_run(&mut rx).await;
-    assert!(!Arc::ptr_eq(&completed.compiled, &compiled_a));
-    assert!(Arc::ptr_eq(&completed.compiled, &compiled_b));
-    assert!(completed.compiled.contains(print_b));
-    assert_eq!(messages(&completed.result.unwrap()), ["second"]);
-    assert!(
-        timeout(Duration::from_millis(100), next_completed_run(&mut rx))
-            .await
-            .is_err(),
-        "ready messages must produce one reduced run"
-    );
-}
-
-#[tokio::test]
-async fn replacement_rejects_stale_event_without_stopping_worker() {
-    let mut h = FrameHarness::new().await;
-    sync_after(&h.worker, [h.update_msg()]).await;
-
-    let stale_event = h.frame_event();
-    let (replacement, _) = print_literal_graph(&h.library, "replacement");
-    let replacement = Compiler::default()
-        .compile(&replacement, &h.library)
-        .unwrap()
-        .into();
-    h.worker
-        .send_many([
-            WorkerMessage::Update {
-                compiled: replacement,
-            },
+        w.graph = TestWorker::print_graph("replacement");
+        w.send_many([
+            w.update(),
             WorkerMessage::Run {
-                seeds: RunSeeds::events(vec![stale_event]),
+                seeds: RunSeeds::events(vec![stale]),
             },
-        ])
-        .unwrap();
+        ]);
 
-    let error = h.compute_rx.recv().await.unwrap().unwrap_err();
-    assert!(
-        matches!(error, Error::EventSeedNotFound { event } if event == stale_event),
-        "unexpected stale-event error: {error:?}"
-    );
+        let error = w.finished().await.expect_err("the stale seed is refused");
+        assert!(
+            matches!(error, Error::EventSeedNotFound { event } if event == stale),
+            "unexpected stale-event error: {error:?}"
+        );
 
-    h.worker
-        .send(WorkerMessage::Run {
-            seeds: RunSeeds::sinks(),
-        })
-        .unwrap();
-    let stats = h.compute_rx.recv().await.unwrap().unwrap();
-    assert_eq!(messages(&stats), ["replacement"]);
-}
+        w.send(TestWorker::sinks());
+        assert_eq!(w.run().await.logs(), ["replacement"]);
+    }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn replacement_queued_during_a_run_is_reported_after_the_running_program() {
-    use std::sync::{Condvar, Mutex};
+    /// An `Update` arriving mid-run is installed only after the running program
+    /// reports — so the completion still describes the program that ran.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_replacement_queued_mid_run_is_installed_after_the_running_program() {
+        use std::sync::{Condvar, Mutex};
 
-    use crate::testing::{TestFuncHooks, test_func_lib};
+        let started = Arc::new(Notify::new());
+        let release = Arc::new((Mutex::new(false), Condvar::new()));
 
-    let started = Arc::new(Notify::new());
-    let release = Arc::new((Mutex::new(false), Condvar::new()));
-    let library = test_func_lib(TestFuncHooks {
-        get_a: {
+        let mut graph = TestGraph::new();
+        graph.add("source", |node| {
             let started = Arc::clone(&started);
             let release = Arc::clone(&release);
-            Arc::new(move || {
+            node.output(DataType::Int).compute(move |_| {
                 started.notify_one();
                 let (lock, wake) = &*release;
-                let released = lock.lock().unwrap();
-                drop(wake.wait_while(released, |released| !*released).unwrap());
-                Ok(7)
+                let held = lock.lock().unwrap();
+                drop(wake.wait_while(held, |released| !*released).unwrap());
+                StaticValue::Int(7)
             })
-        },
-        get_b: Arc::new(|| 11),
-        print: Arc::new(|_| {}),
-    });
-    let mut running_graph = Graph::default();
-    let source = running_graph.add(library.by_name("get_a").unwrap().into());
-    let sink = running_graph.add(library.by_name("Print").unwrap().into());
-    running_graph.set_input_binding(InputPort::new(sink, 0), Binding::bind(source, 0));
-    let (replacement_graph, replacement_node) = print_literal_graph(&system_library(), "next");
+        });
+        graph.add("sink", |node| node.records());
+        graph.wire("source", 0, "sink", 0);
 
-    let (tx, mut rx) = mpsc::channel::<WorkerReport>(16);
-    let worker = Worker::new(move |report| {
-        tx.try_send(report).unwrap();
-    });
-    let running_compiled: Arc<CompiledGraph> = Compiler::default()
-        .compile(&running_graph, &library)
-        .unwrap()
-        .into();
-    worker
-        .send_many([
+        let mut w = TestWorker::over(graph);
+        let source = w.id("source");
+        let sink = w.id("sink");
+        let running = w.compile();
+        w.send_many([
             WorkerMessage::Update {
-                compiled: Arc::clone(&running_compiled),
+                compiled: Arc::clone(&running),
             },
-            WorkerMessage::Run {
-                seeds: RunSeeds::sinks(),
-            },
-        ])
-        .unwrap();
-    timeout(Duration::from_secs(5), started.notified())
-        .await
-        .expect("run did not start");
+            TestWorker::sinks(),
+        ]);
+        timeout(Duration::from_secs(5), started.notified())
+            .await
+            .expect("the run did not start");
 
-    let replacement_library = system_library();
-    let replacement_compiled: Arc<CompiledGraph> = Compiler::default()
-        .compile(&replacement_graph, &replacement_library)
-        .unwrap()
-        .into();
-    worker
-        .send(WorkerMessage::Update {
-            compiled: Arc::clone(&replacement_compiled),
-        })
-        .unwrap();
-    {
-        let (lock, wake) = &*release;
-        *lock.lock().unwrap() = true;
-        wake.notify_one();
+        w.graph = TestWorker::print_graph("next");
+        let replacement = w.compile();
+        let replacement_node = w.id("Print");
+        w.send(WorkerMessage::Update {
+            compiled: Arc::clone(&replacement),
+        });
+        {
+            let (lock, wake) = &*release;
+            *lock.lock().unwrap() = true;
+            wake.notify_one();
+        }
+        w.sync().await;
+
+        w.finished().await.expect("the running program completed");
+        assert!(Arc::ptr_eq(w.installed(), &running));
+        assert!(w.installed().contains(source));
+        assert!(w.installed().contains(sink));
+        assert!(!w.installed().contains(replacement_node));
+
+        let WorkerReport::Installed(installed) = w.report().await else {
+            panic!("the replacement installed before the running program finished");
+        };
+        assert!(Arc::ptr_eq(&installed, &replacement));
     }
-    sync_after(&worker, std::iter::empty()).await;
-
-    let finished = next_completed_run(&mut rx).await;
-    assert!(Arc::ptr_eq(&finished.compiled, &running_compiled));
-    assert!(finished.result.is_ok());
-    assert!(finished.compiled.contains(source));
-    assert!(finished.compiled.contains(sink));
-    assert!(!finished.compiled.contains(replacement_node));
-
-    let installed = timeout(Duration::from_secs(5), rx.recv())
-        .await
-        .expect("worker timed out")
-        .expect("worker channel closed");
-    let WorkerReport::Installed(installed) = installed else {
-        panic!("replacement installed before the running program finished");
-    };
-    assert!(Arc::ptr_eq(&installed, &replacement_compiled));
 }
 
-#[tokio::test]
-async fn execute_sinks_with_start_event_loop_on_empty_graph_is_silent_noop() {
-    // F5 + F4: a batch with sink seeds + StartEventLoop on an
-    // empty graph must fire no callback at all.
-    let (worker, mut rx) = completed_worker(8);
+mod cache {
+    use super::*;
 
-    sync_after(
-        &worker,
-        [
-            WorkerMessage::Run {
-                seeds: RunSeeds::sinks(),
-            },
-            WorkerMessage::StartEventLoop,
-        ],
-    )
-    .await;
-    assert_no_callback_within(&mut rx, Duration::from_millis(100)).await;
-}
+    /// Eviction is fire-and-forget: it happens inside the batch, before the
+    /// acknowledgement, and reports nothing when it succeeds.
+    #[tokio::test]
+    async fn a_successful_eviction_reports_nothing() {
+        let mut w = TestWorker::over(TestGraph::sample_with(TestFuncHooks::default()));
+        let compiled = w.compile();
+        let get_a = w.id("get_a");
 
-#[test]
-fn batch_intent_accumulates_simple_flags() {
-    let (reply_ack, _ack_rx) = oneshot::channel();
-    let node_id = NodeId::from_u128(1);
-    let event = EventPort {
-        node_id: NodeId::unique(),
-        event_idx: 0,
-    };
-
-    let mut intent = batch_intent([
-        WorkerMessage::Clear,
-        WorkerMessage::StartEventLoop,
-        WorkerMessage::EvictCache {
-            nodes: vec![node_id],
-        },
-        WorkerMessage::Run {
-            seeds: RunSeeds::sinks(),
-        },
-        WorkerMessage::Run {
-            seeds: RunSeeds::events(vec![event]),
-        },
-        WorkerMessage::Run {
-            seeds: RunSeeds::nodes(vec![node_id]),
-        },
-        WorkerMessage::Run {
-            seeds: RunSeeds::nodes(vec![node_id]),
-        },
-        WorkerMessage::Sync { reply: reply_ack },
-    ]);
-
-    assert!(matches!(intent.graph_state, Some(GraphOp::Clear)));
-    assert!(matches!(intent.loop_request, Some(LoopCommand::Start)));
-    assert!(intent.seeds.sinks);
-    assert_eq!(intent.seeds.events.len(), 1);
-    assert!(intent.seeds.events.contains(&event));
-    assert_eq!(
-        intent.seeds.node_ids.len(),
-        1,
-        "duplicate node seeds union to one"
-    );
-    assert!(intent.seeds.node_ids.contains(&node_id));
-    assert!(intent.evict_cache.contains(&node_id));
-    assert_eq!(intent.syncs.len(), 1);
-
-    let event_capacity = intent.seeds.events.capacity();
-    let node_capacity = intent.seeds.node_ids.capacity();
-    let eviction_capacity = intent.evict_cache.capacity();
-    let sync_capacity = intent.syncs.capacity();
-
-    intent.reset([WorkerMessage::StopEventLoop], []);
-
-    assert!(intent.graph_state.is_none());
-    assert!(matches!(intent.loop_request, Some(LoopCommand::Stop)));
-    assert!(!intent.seeds.sinks);
-    assert!(!intent.seeds.event_sources);
-    assert!(intent.seeds.events.is_empty());
-    assert!(intent.seeds.node_ids.is_empty());
-    assert!(intent.evict_cache.is_empty());
-    assert!(intent.syncs.is_empty());
-    assert_eq!(intent.seeds.events.capacity(), event_capacity);
-    assert_eq!(intent.seeds.node_ids.capacity(), node_capacity);
-    assert_eq!(intent.evict_cache.capacity(), eviction_capacity);
-    assert_eq!(intent.syncs.capacity(), sync_capacity);
-}
-
-#[test]
-fn batch_intent_deduplicates_events() {
-    let node_id = NodeId::unique();
-    let event = EventPort {
-        node_id,
-        event_idx: 0,
-    };
-
-    let mut intent = BatchIntent::default();
-    intent.reset(
-        [
-            WorkerMessage::Run {
-                seeds: RunSeeds::events(vec![event]),
-            },
-            WorkerMessage::Run {
-                seeds: RunSeeds::events(vec![event]),
-            },
-            WorkerMessage::Run {
-                seeds: RunSeeds::events(vec![event, event]),
-            },
-        ],
-        [event],
-    );
-
-    assert_eq!(
-        intent.seeds.events.len(),
-        1,
-        "duplicate events must collapse to one"
-    );
-}
-
-/// A trivially-valid `Update` payload for batch reduction tests, which only inspect the
-/// reduced intent — the program's content is irrelevant.
-fn empty_compiled() -> Arc<CompiledGraph> {
-    Compiler::default()
-        .compile(&Graph::default(), &Library::default())
-        .unwrap()
-        .into()
-}
-
-#[test]
-fn batch_intent_accumulates_unique_cache_evictions_in_order() {
-    let first = NodeId::from_u128(1);
-    let second = NodeId::from_u128(2);
-    let intent = batch_intent([
-        WorkerMessage::EvictCache {
-            nodes: vec![first, second],
-        },
-        WorkerMessage::EvictCache {
-            nodes: vec![second, first],
-        },
-    ]);
-
-    assert_eq!(
-        intent.evict_cache.into_iter().collect::<Vec<_>>(),
-        vec![first, second]
-    );
-}
-
-#[tokio::test]
-async fn successful_cache_eviction_is_fire_and_forget_before_batch_acknowledgement() {
-    use crate::testing::{TestFuncHooks, test_func_lib, test_graph};
-
-    let library = test_func_lib(TestFuncHooks::default());
-    let graph = test_graph();
-    let get_a_id = graph.find_by_name("get_a").unwrap().id;
-    let compiled = Arc::new(Compiler::default().compile(&graph, &library).unwrap());
-    let (report_tx, mut report_rx) = mpsc::unbounded_channel();
-    let worker = Worker::new(move |report| {
-        report_tx.send(report).unwrap();
-    });
-    let (reply, ack) = oneshot::channel();
-
-    worker
-        .send_many([
+        w.settle([
             WorkerMessage::Update {
                 compiled: Arc::clone(&compiled),
             },
-            WorkerMessage::EvictCache {
-                nodes: vec![get_a_id],
-            },
-            WorkerMessage::Sync { reply },
+            WorkerMessage::EvictCache { nodes: vec![get_a] },
         ])
-        .unwrap();
-    timeout(Duration::from_secs(5), ack)
-        .await
-        .expect("worker timed out")
-        .expect("worker dropped the acknowledgement");
+        .await;
 
-    let WorkerReport::Installed(installed) = report_rx.recv().await.unwrap() else {
-        panic!("installation must be reported before cache eviction");
-    };
-    assert!(Arc::ptr_eq(&installed, &compiled));
-    assert!(report_rx.try_recv().is_err());
-}
+        let WorkerReport::Installed(installed) = w.report().await else {
+            panic!("installation must be reported before cache eviction");
+        };
+        assert!(Arc::ptr_eq(&installed, &compiled));
+        w.quiet();
+    }
 
-#[tokio::test]
-async fn cache_eviction_failure_uses_general_worker_error_report() {
-    use crate::execution::cache::disk_store::DiskStore;
-    use crate::testing::{TestFuncHooks, test_func_lib, test_graph};
+    #[tokio::test]
+    async fn an_eviction_failure_uses_the_general_worker_error_report() {
+        let dir = temp_dir("eviction-error");
+        let mut w = TestWorker::over(TestGraph::sample_with(TestFuncHooks::default()));
+        let blocked = w.id("get_a");
+        // A directory where the blob file belongs: removal fails on it.
+        let blocked_path = dir.0.join(blocked.as_uuid().simple().to_string());
+        std::fs::create_dir(&blocked_path).unwrap();
 
-    let dir = temp_dir("eviction-error");
-    let library = test_func_lib(TestFuncHooks::default());
-    let graph = test_graph();
-    let get_a_id = graph.find_by_name("get_a").unwrap().id;
-    let blocked_node_id = get_a_id;
-    let blocked_path = dir.0.join(blocked_node_id.as_uuid().simple().to_string());
-    std::fs::create_dir(&blocked_path).unwrap();
-    let compiled = Arc::new(Compiler::default().compile(&graph, &library).unwrap());
-    let store = DiskStore::new(&Library::default(), Some(dir.0.clone()));
-    let (report_tx, mut report_rx) = mpsc::unbounded_channel();
-    let worker = Worker::new(move |report| {
-        report_tx.send(report).unwrap();
-    });
-    let (reply, ack) = oneshot::channel();
-
-    worker
-        .send_many([
-            WorkerMessage::SetDiskStore(store),
-            WorkerMessage::Update { compiled },
+        w.settle([
+            w.disk_store(dir.0.clone()),
+            w.update(),
             WorkerMessage::EvictCache {
-                nodes: vec![get_a_id],
+                nodes: vec![blocked],
             },
-            WorkerMessage::Sync { reply },
         ])
-        .unwrap();
-    timeout(Duration::from_secs(5), ack)
-        .await
-        .expect("worker timed out")
-        .expect("worker dropped the acknowledgement");
+        .await;
 
-    assert!(matches!(
-        report_rx.recv().await.unwrap(),
-        WorkerReport::Installed(_)
-    ));
-    let WorkerReport::Error(WorkerError::CacheEviction {
-        failure_count,
-        details,
-    }) = report_rx.recv().await.unwrap()
-    else {
-        panic!("cache deletion failure must use the general worker error report");
-    };
-    assert_eq!(failure_count, 1);
-    assert!(details.contains(&format!("{blocked_node_id:?}")));
-    assert!(details.contains(&format!("failed to remove {}", blocked_path.display())));
-    assert!(report_rx.try_recv().is_err());
-}
+        assert!(matches!(w.report().await, WorkerReport::Installed(_)));
+        let WorkerReport::Error(WorkerError::CacheEviction {
+            failure_count,
+            details,
+        }) = w.report().await
+        else {
+            panic!("a cache deletion failure must use the general worker error report");
+        };
+        assert_eq!(failure_count, 1);
+        assert!(details.contains(&format!("{blocked:?}")));
+        assert!(details.contains(&format!("failed to remove {}", blocked_path.display())));
+        w.quiet();
+    }
 
-#[test]
-fn batch_intent_update_overwrites_earlier_update_in_same_batch() {
-    // Two Updates in one batch: the last one wins. This is
-    // implicit today (Option::replace) but worth pinning since
-    // callers do send [Update(A), Update(B)] during rapid edits.
-    let intent = batch_intent([
-        WorkerMessage::Update {
-            compiled: empty_compiled(),
-        },
-        WorkerMessage::Update {
-            compiled: empty_compiled(),
-        },
-    ]);
+    /// `source` (pure, RAM) → `square` (pure, Disk) → `print` (sink).
+    fn disk_cached_graph(calls: &Arc<AtomicUsize>) -> TestGraph {
+        let mut graph = TestGraph::new();
+        let calls = Arc::clone(calls);
+        graph.add("source", move |node| {
+            node.pure()
+                .cache(CacheMode::Ram)
+                .output(DataType::Int)
+                .compute(move |_| {
+                    calls.fetch_add(1, Ordering::SeqCst);
+                    StaticValue::Int(7)
+                })
+        });
+        graph.add("square", |node| {
+            node.pure()
+                .cache(CacheMode::Disk)
+                .input(DataType::Int)
+                .output(DataType::Int)
+                .compute(|inputs| {
+                    let value = inputs[0].as_i64().unwrap();
+                    StaticValue::Int(value * value)
+                })
+        });
+        graph.add("print", |node| node.records());
+        graph.wire("source", 0, "square", 0);
+        graph.wire("square", 0, "print", 0);
+        graph
+    }
 
-    assert!(matches!(intent.graph_state, Some(GraphOp::Replace(_))));
-}
+    /// The disk cache wires through `SetDiskStore` and persists across worker
+    /// restarts: a `Disk` reproducible node's output, stored on a cold run,
+    /// reloads on a fresh worker over the same store so its upstream never
+    /// recomputes. `SetDiskStore` shares the batch with `Update`, proving it is
+    /// applied before the install hydrates.
+    #[tokio::test]
+    async fn a_disk_cached_node_survives_a_worker_restart() {
+        let dir = temp_dir("diskcache");
+        let calls = Arc::new(AtomicUsize::new(0));
 
-// Slot reduction: last-write-wins for graph_state and loop_request.
+        let mut w = TestWorker::over(disk_cached_graph(&calls));
+        w.send_many([w.disk_store(dir.0.clone()), w.update(), TestWorker::sinks()]);
+        let cold = w.run().await;
+        assert_eq!(
+            cold.ran(),
+            ["print", "source", "square"],
+            "a cold run computes every node"
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert_eq!(cold.logs(), ["49"]);
 
-#[test]
-fn batch_intent_last_write_wins_per_slot() {
-    type Expect = fn(&BatchIntent) -> bool;
-    let cases: [(&str, [WorkerMessage; 2], Expect); 4] = [
-        (
-            "Clear then Update -> last write (Update) wins",
-            [
-                WorkerMessage::Clear,
-                WorkerMessage::Update {
-                    compiled: empty_compiled(),
-                },
-            ],
-            |intent| matches!(intent.graph_state, Some(GraphOp::Replace(_))),
-        ),
-        (
-            "Update then Clear -> last write (Clear) wins",
-            [
-                WorkerMessage::Update {
-                    compiled: empty_compiled(),
-                },
-                WorkerMessage::Clear,
-            ],
-            |intent| matches!(intent.graph_state, Some(GraphOp::Clear)),
-        ),
-        (
-            "Start then Stop -> last write (Stop) wins",
-            [WorkerMessage::StartEventLoop, WorkerMessage::StopEventLoop],
-            |intent| matches!(intent.loop_request, Some(LoopCommand::Stop)),
-        ),
-        (
-            "Stop then Start -> last write (Start) wins",
-            [WorkerMessage::StopEventLoop, WorkerMessage::StartEventLoop],
-            |intent| matches!(intent.loop_request, Some(LoopCommand::Start)),
-        ),
-    ];
+        // Reopen on a fresh worker over the same store: `square` loads from
+        // disk and is reused. Its input `source` feeds only the reused
+        // `square`, which never reads it, so the pre-run cut prunes it.
+        let mut w = w.restart();
+        w.send_many([w.disk_store(dir.0.clone()), w.update(), TestWorker::sinks()]);
+        let warm = w.run().await;
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            1,
+            "the cut prunes the Ram input feeding only a disk-cache hit"
+        );
+        assert_eq!(warm.ran(), ["print"], "only the sink re-ran");
+        assert_eq!(
+            warm.cached(),
+            ["square"],
+            "square is served from the disk cache"
+        );
+        assert_eq!(warm.logs(), ["49"]);
+    }
 
-    for (label, msgs, expected) in cases {
-        let intent = batch_intent(msgs);
-        assert!(expected(&intent), "{label}");
+    /// `SetDiskStore` flushes resident disk-backed values into the just-attached
+    /// store: a `Both`-mode value computed while no store root existed (an
+    /// unsaved document) would otherwise be a RAM hit on every later run —
+    /// which never stores — and silently recompute on reopen.
+    #[tokio::test]
+    async fn attaching_a_store_flushes_resident_disk_backed_values() {
+        let dir = temp_dir("storeswap");
+        let calls = Arc::new(AtomicUsize::new(0));
+        let mut graph = disk_cached_graph(&calls);
+        graph.cache("square", CacheMode::Both);
+
+        // Run with no store root: the Both value stays resident-only.
+        let mut w = TestWorker::over(graph);
+        w.send_many([w.update(), TestWorker::sinks()]);
+        w.run().await;
+        assert_eq!(std::fs::read_dir(&dir.0).unwrap().count(), 0);
+
+        w.settle([w.disk_store(dir.0.clone())]).await;
+
+        assert_eq!(
+            std::fs::read_dir(&dir.0).unwrap().count(),
+            1,
+            "the resident Both-mode value was flushed into the new store"
+        );
     }
 }
 
-// Integration: end-to-end confirmation that Update-then-Clear in
-// one batch leaves the execution graph empty — a subsequent
-// event-seeded run hits the empty-graph silent no-op path (no callback).
-#[tokio::test]
-async fn update_then_clear_in_same_batch_leaves_graph_cleared() {
-    let mut h = FrameHarness::new().await;
+mod shutdown {
+    use super::*;
 
-    h.worker
-        .send_many([h.update_msg(), WorkerMessage::Clear, h.run_frame_event()])
-        .unwrap();
-    assert_no_callback_within(&mut h.compute_rx, Duration::from_millis(100)).await;
-}
+    /// `exit` drains the event tasks — dropping their futures — and publishes
+    /// idle before returning, after which the worker refuses messages.
+    #[tokio::test]
+    async fn exit_waits_for_active_event_cleanup_and_the_idle_report() {
+        #[derive(Debug)]
+        struct EventFutureDrop(Arc<AtomicBool>);
 
-// Lambda fires as fast as it can; a Stop command must be observed
-// and acted on within a bounded time rather than being delayed
-// indefinitely by the event stream. Without `biased;` on the
-// select!, this test would flake — the fair-random polling could
-// sit on the events branch for many iterations.
-#[tokio::test]
-async fn commands_not_starved_by_fast_event_loop() {
-    let mut h = FrameHarness::with_callback_capacity(512).await;
-
-    sync_after(&h.worker, [h.update_msg(), WorkerMessage::StartEventLoop]).await;
-    h.compute_rx.recv().await.unwrap().unwrap();
-    timeout(Duration::from_millis(500), h.compute_rx.recv())
-        .await
-        .expect("event loop did not produce a callback")
-        .expect("callback channel closed")
-        .expect("event loop execution failed");
-
-    // Drain accumulated callbacks so the channel isn't a
-    // confounding factor.
-    while h.compute_rx.try_recv().is_ok() {}
-
-    // Send Stop + Sync. Both must be observed within the budget
-    // even though lambda events are still being produced.
-    sync_after(&h.worker, [WorkerMessage::StopEventLoop]).await;
-
-    while h.compute_rx.try_recv().is_ok() {}
-    assert_no_callback_within(&mut h.compute_rx, Duration::from_millis(100)).await;
-}
-
-// End-to-end: an event fired by a lambda reaches the worker's
-// execute path and produces an execution_callback. Covers the
-// dedicated bounded-channel flow (no forwarder).
-#[tokio::test]
-async fn lambda_events_drive_worker_execution() {
-    let mut h = FrameHarness::with_callback_capacity(32).await;
-
-    h.worker
-        .send_many([h.update_msg(), WorkerMessage::StartEventLoop])
-        .unwrap();
-
-    // First callback is the initial execute() inside the
-    // start_event_loop path.
-    let _ = timeout(Duration::from_millis(500), h.compute_rx.recv())
-        .await
-        .expect("initial execute callback")
-        .expect("callback channel closed");
-
-    // Subsequent callbacks must come from the lambda firing and
-    // the worker draining events from the bounded channel.
-    let second = timeout(Duration::from_millis(500), h.compute_rx.recv())
-        .await
-        .expect("lambda-driven execute callback")
-        .expect("callback channel closed");
-    assert!(
-        second.is_ok(),
-        "lambda-driven execution must succeed: {second:?}"
-    );
-}
-
-#[tokio::test]
-async fn fired_event_does_not_reinitialize_event_sources() {
-    use std::sync::atomic::AtomicUsize;
-
-    let source_a_calls = Arc::new(AtomicUsize::new(0));
-    let source_b_calls = Arc::new(AtomicUsize::new(0));
-    let subscriber_calls = Arc::new(AtomicUsize::new(0));
-    let source_a_notify = Arc::new(Notify::new());
-    let source_b_notify = Arc::new(Notify::new());
-    let source_a_calls_for_lambda = Arc::clone(&source_a_calls);
-    let source_b_calls_for_lambda = Arc::clone(&source_b_calls);
-    let subscriber_calls_for_lambda = Arc::clone(&subscriber_calls);
-
-    let mut library = Library::default();
-    library.add(
-        Func::new(FuncId::unique(), "source_a")
-            .event(
-                "tick",
-                EventLambda::new({
-                    let notify = Arc::clone(&source_a_notify);
-                    move |_state| {
-                        let notify = Arc::clone(&notify);
-                        Box::pin(async move { notify.notified().await })
-                    }
-                }),
-            )
-            .lambda(async_lambda!(
-                move |_| { calls = Arc::clone(&source_a_calls_for_lambda) } => {
-                    calls.fetch_add(1, Ordering::SeqCst);
-                    Ok(())
-                }
-            )),
-    );
-    library.add(
-        Func::new(FuncId::unique(), "source_b")
-            .event(
-                "tick",
-                EventLambda::new({
-                    let notify = Arc::clone(&source_b_notify);
-                    move |_state| {
-                        let notify = Arc::clone(&notify);
-                        Box::pin(async move { notify.notified().await })
-                    }
-                }),
-            )
-            .lambda(async_lambda!(
-                move |_| { calls = Arc::clone(&source_b_calls_for_lambda) } => {
-                    calls.fetch_add(1, Ordering::SeqCst);
-                    Ok(())
-                }
-            )),
-    );
-    library.add(
-        Func::new(FuncId::unique(), "subscriber").lambda(async_lambda!(
-            move |_| { calls = Arc::clone(&subscriber_calls_for_lambda) } => {
-                calls.fetch_add(1, Ordering::SeqCst);
-                Ok(())
+        impl Drop for EventFutureDrop {
+            fn drop(&mut self) {
+                self.0.store(true, Ordering::SeqCst);
             }
-        )),
-    );
-
-    let mut graph = Graph::default();
-    let source_a = graph.add(Node::from(library.by_name("source_a").unwrap()));
-    let source_b = graph.add(Node::from(library.by_name("source_b").unwrap()));
-    let subscriber = graph.add(Node::from(library.by_name("subscriber").unwrap()));
-    graph.subscribe(source_a, 0, subscriber);
-    graph.subscribe(source_b, 0, subscriber);
-
-    let (worker, mut completion_rx) = completed_worker(4);
-    worker
-        .send_many([
-            WorkerMessage::Update {
-                compiled: Compiler::default()
-                    .compile(&graph, &library)
-                    .unwrap()
-                    .into(),
-            },
-            WorkerMessage::StartEventLoop,
-        ])
-        .unwrap();
-
-    let initialized = completion_rx.recv().await.unwrap().unwrap();
-    assert_eq!(initialized.ran_node_count, 2);
-    assert_eq!(source_a_calls.load(Ordering::SeqCst), 1);
-    assert_eq!(source_b_calls.load(Ordering::SeqCst), 1);
-    assert_eq!(subscriber_calls.load(Ordering::SeqCst), 0);
-
-    source_a_notify.notify_one();
-    let fired = timeout(Duration::from_millis(500), completion_rx.recv())
-        .await
-        .expect("notified event did not execute")
-        .expect("worker callback channel closed")
-        .expect("event execution failed");
-    assert_eq!(fired.ran_node_count, 1);
-    assert_eq!(source_a_calls.load(Ordering::SeqCst), 1);
-    assert_eq!(source_b_calls.load(Ordering::SeqCst), 1);
-    assert_eq!(subscriber_calls.load(Ordering::SeqCst), 1);
-
-    sync_after(&worker, [WorkerMessage::StopEventLoop]).await;
-}
-
-// F6: StartEventLoop while a loop is already running must stop the
-// current loop before rebuilding it.
-#[tokio::test]
-async fn start_event_loop_twice_is_idempotent() {
-    let mut h = FrameHarness::with_callback_capacity(64).await;
-
-    sync_after(&h.worker, [h.update_msg(), WorkerMessage::StartEventLoop]).await;
-    while h.compute_rx.try_recv().is_ok() {}
-    timeout(Duration::from_millis(500), h.compute_rx.recv())
-        .await
-        .expect("event loop did not produce a callback before restart")
-        .expect("callback channel closed")
-        .expect("event loop execution failed");
-
-    // Second StartEventLoop — no graph change; must not panic.
-    sync_after(&h.worker, [WorkerMessage::StartEventLoop]).await;
-    while h.compute_rx.try_recv().is_ok() {}
-    timeout(Duration::from_millis(500), h.compute_rx.recv())
-        .await
-        .expect("event loop did not produce a callback after restart")
-        .expect("callback channel closed")
-        .expect("event loop execution failed");
-}
-
-#[tokio::test]
-async fn exit_waits_for_active_event_cleanup_and_idle_report() {
-    #[derive(Debug)]
-    struct EventFutureDrop(Arc<AtomicBool>);
-
-    impl Drop for EventFutureDrop {
-        fn drop(&mut self) {
-            self.0.store(true, Ordering::SeqCst);
         }
-    }
 
-    let entered = Arc::new(Notify::new());
-    let dropped = Arc::new(AtomicBool::new(false));
-    let mut library = system_library();
-    library.merge(worker_events_library());
-    let mut frame_event = library.by_name("Frame Event").unwrap().clone();
-    frame_event.events[0].event_lambda = EventLambda::new({
-        let entered = Arc::clone(&entered);
-        let dropped = Arc::clone(&dropped);
-        move |_state| {
+        let entered = Arc::new(Notify::new());
+        let dropped = Arc::new(AtomicBool::new(false));
+        let mut w = TestWorker::frames();
+        w.graph.edit_func("Frame Event", |func| {
             let entered = Arc::clone(&entered);
             let dropped = Arc::clone(&dropped);
-            Box::pin(async move {
-                let _drop = EventFutureDrop(dropped);
-                entered.notify_one();
-                std::future::pending::<()>().await;
-            })
-        }
-    });
-    library.remove(frame_event.id).unwrap();
-    library.add(frame_event);
-
-    let graph = log_frame_no_graph(&library);
-    let compiled = Compiler::default()
-        .compile(&graph, &library)
-        .unwrap()
-        .into();
-    let (report_tx, mut report_rx) = mpsc::unbounded_channel();
-    let mut worker = Worker::new(move |report| {
-        report_tx.send(report).unwrap();
-    });
-    sync_after(
-        &worker,
-        [
-            WorkerMessage::Update { compiled },
-            WorkerMessage::StartEventLoop,
-        ],
-    )
-    .await;
-    timeout(Duration::from_millis(500), entered.notified())
-        .await
-        .expect("event future did not start");
-
-    worker.exit().await.unwrap();
-
-    assert!(dropped.load(Ordering::SeqCst));
-    let mut saw_idle = false;
-    while let Ok(report) = report_rx.try_recv() {
-        if matches!(
-            report,
-            WorkerReport::Status(status)
-                if status.kind == WorkerStatusKind::Activity
-                    && status.activity == WorkerActivity::Idle
-        ) {
-            saw_idle = true;
-        }
-    }
-    assert!(saw_idle, "exit returned before publishing idle");
-    assert!(worker.send(WorkerMessage::Clear).is_err());
-}
-
-#[tokio::test]
-async fn exit_cancels_active_execution_before_joining() {
-    let entered = Arc::new(Notify::new());
-    let observed_cancel = Arc::new(AtomicBool::new(false));
-    let func = Func::new(FuncId::unique(), "Wait for cancellation")
-        .sink()
-        .lambda(FuncLambda::new({
-            let entered = Arc::clone(&entered);
-            let observed_cancel = Arc::clone(&observed_cancel);
-            move |Invocation { ctx: context, .. }| {
-                let cancel = context.cancel_flag();
+            func.events[0].event_lambda = EventLambda::new(move |_state| {
                 let entered = Arc::clone(&entered);
-                let observed_cancel = Arc::clone(&observed_cancel);
+                let dropped = Arc::clone(&dropped);
                 Box::pin(async move {
+                    let _drop = EventFutureDrop(dropped);
                     entered.notify_one();
-                    loop {
-                        if cancel.is_cancelled() {
-                            observed_cancel.store(true, Ordering::SeqCst);
-                            return Err(InvokeError::Cancelled);
-                        }
-                        tokio::task::yield_now().await;
-                    }
+                    std::future::pending::<()>().await;
                 })
-            }
-        }));
-    let mut library = Library::default();
-    library.add(func.clone());
-    let mut graph = Graph::default();
-    graph.add((&func).into());
-    let compiled = Compiler::default()
-        .compile(&graph, &library)
-        .unwrap()
-        .into();
-    let mut worker = Worker::new(|_| {});
-    worker
-        .send_many([
-            WorkerMessage::Update { compiled },
-            WorkerMessage::Run {
-                seeds: RunSeeds::sinks(),
-            },
-        ])
-        .unwrap();
-    timeout(Duration::from_millis(500), entered.notified())
-        .await
-        .expect("execution did not start");
-
-    timeout(Duration::from_millis(500), worker.exit())
-        .await
-        .expect("worker did not exit")
-        .unwrap();
-
-    assert!(observed_cancel.load(Ordering::SeqCst));
-}
-
-#[tokio::test]
-async fn drop_without_exit_shuts_down_cleanly() {
-    use std::sync::atomic::{AtomicUsize, Ordering};
-
-    let counter = Arc::new(AtomicUsize::new(0));
-    {
-        let counter_cb = Arc::clone(&counter);
-        let worker = Worker::new(move |_| {
-            counter_cb.fetch_add(1, Ordering::SeqCst);
+            });
         });
 
-        sync_after(&worker, std::iter::empty()).await;
-    }
-
-    let before = counter.load(Ordering::SeqCst);
-    tokio::time::sleep(Duration::from_millis(50)).await;
-    let after = counter.load(Ordering::SeqCst);
-    assert_eq!(
-        before, after,
-        "no callbacks must fire after Worker is dropped"
-    );
-}
-
-/// The disk cache wires through both entry points and persists across worker
-/// restarts: a `persist` (Disk-marked) reproducible node's output, stored on a
-/// cold run, reloads on a fresh worker over the same store so its upstream never
-/// recomputes. The cache is set at runtime via a `SetDiskStore` message in the
-/// same batch as `Update` — exercising that it's applied before the compile
-/// hydrates.
-#[tokio::test]
-async fn disk_cache_persists_node_across_worker_restart() {
-    use std::path::Path;
-    use std::sync::atomic::{AtomicUsize, Ordering};
-
-    use crate::execution::cache::disk_store::DiskStore;
-    use crate::graph::node::CacheMode;
-    use crate::testing::{TestFuncHooks, test_func_lib};
-
-    let dir = temp_dir("diskcache");
-
-    // `get_a` recompute counter, shared across both worker incarnations.
-    let get_a_calls = Arc::new(AtomicUsize::new(0));
-    let make_lib = || {
-        let calls = get_a_calls.clone();
-        test_func_lib(TestFuncHooks {
-            get_a: Arc::new(move || {
-                calls.fetch_add(1, Ordering::SeqCst);
-                Ok(7)
-            }),
-            get_b: Arc::new(move || 11),
-            print: Arc::new(move |_| {}),
-        })
-    };
-
-    // get_a (pure source) → mult (pure, persist Disk) → print (sink).
-    let lib = make_lib();
-    let mut graph = Graph::default();
-    for name in ["get_a", "mult", "Print"] {
-        let node: Node = lib.by_name(name).unwrap().into();
-        graph.add(node);
-    }
-    let get_a_id = graph.find_by_name("get_a").unwrap().id;
-    let mult_id = graph.find_by_name("mult").unwrap().id;
-    let print_id = graph.find_by_name("Print").unwrap().id;
-    graph.find_mut(mult_id).unwrap().cache = CacheMode::Disk;
-    graph.set_input_binding(InputPort::new(mult_id, 0), Binding::bind(get_a_id, 0));
-    graph.set_input_binding(InputPort::new(mult_id, 1), Binding::bind(get_a_id, 0));
-    graph.set_input_binding(InputPort::new(print_id, 0), Binding::bind(mult_id, 0));
-
-    async fn run(root: &Path, graph: Graph, library: Arc<Library>) -> ExecutionOutcome {
-        let (worker, mut rx) = completed_worker(4);
-        // SetDiskStore shares the batch with Update, proving it's applied before
-        // the install hydrates.
-        let cache = DiskStore::new(&Library::default(), Some(root.to_path_buf()));
-        worker
-            .send_many([
-                WorkerMessage::SetDiskStore(cache),
-                WorkerMessage::Update {
-                    compiled: Compiler::default()
-                        .compile(&graph, &library)
-                        .unwrap()
-                        .into(),
-                },
-                WorkerMessage::Run {
-                    seeds: RunSeeds::sinks(),
-                },
-            ])
-            .unwrap();
-        rx.recv()
+        w.settle([w.update(), WorkerMessage::StartEventLoop]).await;
+        timeout(Duration::from_millis(500), entered.notified())
             .await
-            .expect("worker reports completion")
-            .expect("run succeeds")
+            .expect("the event future did not start");
+
+        w.worker.exit().await.unwrap();
+
+        assert!(dropped.load(Ordering::SeqCst));
+        let saw_idle = w.drain().into_iter().any(|report| {
+            matches!(
+                report,
+                WorkerReport::Status(status)
+                    if status.kind == WorkerStatusKind::Activity
+                        && status.activity == WorkerActivity::Idle
+            )
+        });
+        assert!(saw_idle, "exit returned before publishing idle");
+        assert!(w.worker.send(WorkerMessage::Clear).is_err());
     }
 
-    // Cold cache: all three nodes compute; mult is stored to disk.
-    let stats = run(&dir.0, graph.clone_verbatim(), Arc::new(make_lib())).await;
-    assert_eq!(stats.ran_node_count, 3, "cold run computes every node");
-    assert_eq!(get_a_calls.load(Ordering::SeqCst), 1);
+    #[tokio::test]
+    async fn exit_cancels_active_execution_before_joining() {
+        let entered = Arc::new(Notify::new());
+        let observed_cancel = Arc::new(AtomicBool::new(false));
 
-    // Reopen on a fresh worker over the same store: mult loads from disk and is reused. Its
-    // input `get_a` feeds only the reused mult, which never reads it, so the pre-run cut
-    // prunes `get_a` — the `Memory` source is not recomputed on reopen.
-    let stats = run(&dir.0, graph.clone_verbatim(), Arc::new(make_lib())).await;
-    assert_eq!(
-        get_a_calls.load(Ordering::SeqCst),
-        1,
-        "the cut prunes the Memory input feeding only a disk-cache hit"
-    );
-    assert!(!stats.ran(get_a_id), "get_a was cut, not recomputed");
-    assert!(stats.cached(mult_id), "mult is served from the disk cache");
-    assert!(!stats.ran(mult_id), "mult itself is not recomputed");
-}
+        let mut graph = TestGraph::new();
+        graph.add("wait for cancellation", |node| {
+            let entered = Arc::clone(&entered);
+            let observed_cancel = Arc::clone(&observed_cancel);
+            node.sink()
+                .lambda(FuncLambda::new(move |Invocation { ctx, .. }| {
+                    let cancel = ctx.cancel_flag();
+                    let entered = Arc::clone(&entered);
+                    let observed_cancel = Arc::clone(&observed_cancel);
+                    Box::pin(async move {
+                        entered.notify_one();
+                        loop {
+                            if cancel.is_cancelled() {
+                                observed_cancel.store(true, Ordering::SeqCst);
+                                return Err(InvokeError::Cancelled);
+                            }
+                            tokio::task::yield_now().await;
+                        }
+                    })
+                }))
+        });
 
-/// `SetDiskStore` flushes resident disk-backed values into the just-attached
-/// store: a `Both`-mode value computed while no store root existed (an unsaved
-/// document) would otherwise be a RAM hit on every later run — which never
-/// stores — and silently recompute on reopen.
-#[tokio::test]
-async fn set_disk_store_flushes_resident_disk_backed_values() {
-    use crate::execution::cache::disk_store::DiskStore;
-    use crate::graph::node::CacheMode;
-    use crate::testing::{TestFuncHooks, test_func_lib};
+        let mut w = TestWorker::over(graph);
+        w.send_many([w.update(), TestWorker::sinks()]);
+        timeout(Duration::from_millis(500), entered.notified())
+            .await
+            .expect("execution did not start");
 
-    let dir = temp_dir("storeswap");
+        timeout(Duration::from_millis(500), w.worker.exit())
+            .await
+            .expect("the worker did not exit")
+            .unwrap();
 
-    let lib = Arc::new(test_func_lib(TestFuncHooks {
-        get_a: Arc::new(|| Ok(7)),
-        get_b: Arc::new(|| 11),
-        print: Arc::new(|_| {}),
-    }));
-    // get_a → mult (Both) → print.
-    let mut graph = Graph::default();
-    for name in ["get_a", "mult", "Print"] {
-        let node: Node = lib.by_name(name).unwrap().into();
-        graph.add(node);
+        assert!(observed_cancel.load(Ordering::SeqCst));
     }
-    let get_a_id = graph.find_by_name("get_a").unwrap().id;
-    let mult_id = graph.find_by_name("mult").unwrap().id;
-    let print_id = graph.find_by_name("Print").unwrap().id;
-    graph.find_mut(mult_id).unwrap().cache = CacheMode::Both;
-    graph.set_input_binding(InputPort::new(mult_id, 0), Binding::bind(get_a_id, 0));
-    graph.set_input_binding(InputPort::new(print_id, 0), Binding::bind(mult_id, 0));
 
-    let (worker, mut rx) = completed_worker(4);
+    /// Dropping a `Worker` without `exit` still shuts it down: no callback
+    /// fires afterwards. The callback itself is the subject, so this wires a
+    /// raw worker.
+    #[tokio::test]
+    async fn drop_without_exit_shuts_down_cleanly() {
+        let counter = Arc::new(AtomicUsize::new(0));
+        {
+            let counter = Arc::clone(&counter);
+            let worker = Worker::new(move |_| {
+                counter.fetch_add(1, Ordering::SeqCst);
+            });
+            let (reply, ack) = oneshot::channel();
+            worker.send(WorkerMessage::Sync { reply }).unwrap();
+            ack.await.unwrap();
+        }
 
-    // Run with NO store root: the Both value stays resident-only.
-    worker
-        .send_many([
-            WorkerMessage::Update {
-                compiled: Compiler::default().compile(&graph, &lib).unwrap().into(),
-            },
-            WorkerMessage::Run {
-                seeds: RunSeeds::sinks(),
-            },
-        ])
-        .unwrap();
-    rx.recv().await.unwrap().unwrap();
-    assert_eq!(std::fs::read_dir(&dir.0).unwrap().count(), 0);
-
-    // Attaching the store must flush the resident Both value as a blob.
-    let store = DiskStore::new(&Library::default(), Some(dir.0.clone()));
-    worker.send(WorkerMessage::SetDiskStore(store)).unwrap();
-    let (sync_tx, sync_rx) = oneshot::channel();
-    worker.send(WorkerMessage::Sync { reply: sync_tx }).unwrap();
-    sync_rx.await.unwrap();
-
-    assert_eq!(
-        std::fs::read_dir(&dir.0).unwrap().count(),
-        1,
-        "the resident Both-mode value was flushed into the new store"
-    );
+        let before = counter.load(Ordering::SeqCst);
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert_eq!(
+            before,
+            counter.load(Ordering::SeqCst),
+            "no callback must fire after the Worker is dropped"
+        );
+    }
 }

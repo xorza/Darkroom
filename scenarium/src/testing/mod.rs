@@ -12,6 +12,8 @@ pub(crate) mod engine;
 pub mod graph;
 #[cfg(test)]
 pub(crate) mod program;
+#[cfg(test)]
+pub(crate) mod worker;
 
 use std::sync::Arc;
 

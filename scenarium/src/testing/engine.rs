@@ -30,6 +30,7 @@ use crate::execution::seeds::RunSeeds;
 use crate::graph::func::lambda::OutputDemand;
 use crate::graph::identity::{EventPort, NodeId};
 use crate::testing::graph::TestGraph;
+use crate::worker::status::{WorkerStatus, WorkerStatusKind};
 use crate::{DynamicValue, RamUsage};
 
 /// A [`TestGraph`] with a live engine over it.
@@ -325,7 +326,56 @@ impl RunOutcome {
         }
     }
 
-    /// Names that invoked their lambda and succeeded, in schedule order.
+    /// The same snapshot taken from a status a [`Worker`] published.
+    ///
+    /// A status carries the run's rows and its whole-run header, and nothing
+    /// else: the worker publishes what the run *produced*, never how the
+    /// schedule walked it. So this fills [`ran`](Self::ran) with the same names
+    /// sorted, and the events — which a status also does not carry — stay
+    /// empty.
+    ///
+    /// [`Worker`]: crate::worker::Worker
+    pub(crate) fn published(graph: &TestGraph, status: &WorkerStatus) -> Self {
+        let WorkerStatusKind::Completed {
+            executed_node_count,
+            cancelled,
+            ..
+        } = status.kind
+        else {
+            panic!("only a completed status carries a run");
+        };
+        let names = NameMap::of(graph);
+        let mut outcome = Self {
+            ran: Vec::new(),
+            rows: status
+                .nodes
+                .iter()
+                .map(|row| (names.name(row.node_id), row.clone()))
+                .collect(),
+            logs: status
+                .logs
+                .iter()
+                .map(|entry| entry.message.clone())
+                .collect(),
+            ran_node_count: executed_node_count,
+            cancelled,
+            triggered_events: Vec::new(),
+            armed_events: Vec::new(),
+            cache_ram: status.cache_ram,
+        };
+        outcome.ran = outcome
+            .with_status(|status| matches!(status, NodeExecutionStatus::Executed { .. }))
+            .into_iter()
+            .map(str::to_owned)
+            .collect();
+        outcome
+    }
+
+    /// Names that invoked their lambda and succeeded.
+    ///
+    /// In schedule order — deps before consumers — for a run this process
+    /// drove. A [`published`](Self::published) outcome has no order to give and
+    /// sorts them by name instead.
     pub(crate) fn ran(&self) -> Vec<&str> {
         self.ran.iter().map(String::as_str).collect()
     }

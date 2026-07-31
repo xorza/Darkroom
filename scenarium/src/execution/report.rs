@@ -164,14 +164,6 @@ pub(crate) mod internals {
             )
         }
 
-        /// Every node that invoked its lambda and succeeded.
-        pub(crate) fn ran_nodes(&self) -> impl Iterator<Item = NodeId> + '_ {
-            self.nodes
-                .iter()
-                .filter(|node| matches!(node.status, Some(NodeExecutionStatus::Executed { .. })))
-                .map(|node| node.node_id)
-        }
-
         /// Whether the node was served from a cache instead of recomputing.
         pub(crate) fn cached(&self, node_id: NodeId) -> bool {
             matches!(self.status(node_id), Some(NodeExecutionStatus::Cached))
@@ -190,16 +182,6 @@ pub(crate) mod internals {
             self.nodes
                 .iter()
                 .filter(|node| matches!(node.status, Some(NodeExecutionStatus::Errored { .. })))
-                .map(|node| node.node_id)
-        }
-
-        /// Every node the run reported a missing input for.
-        pub(crate) fn missing_input_nodes(&self) -> impl Iterator<Item = NodeId> + '_ {
-            self.nodes
-                .iter()
-                .filter(|node| {
-                    matches!(node.status, Some(NodeExecutionStatus::MissingInputs { .. }))
-                })
                 .map(|node| node.node_id)
         }
     }
