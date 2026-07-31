@@ -11,7 +11,8 @@ use crate::library::Library;
 use crate::runtime::shared_any_state::SharedAnyState;
 use tokio::time::Instant;
 
-pub const FRAME_EVENT_FUNC_ID: FuncId = FuncId::from_u128(0x01897c92d6055f5a7a21627ed74824ff);
+pub const FRAME_EVENT_FUNC_ID: FuncId =
+    FuncId::from_u128(0x714dbc9a_ac0a_428b_90ee_eb13c1652c9e);
 
 #[derive(Debug)]
 struct FpsEventState {

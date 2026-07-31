@@ -11,7 +11,7 @@ pub fn system_library() -> Library {
     // print: log the input value to the node log (info level), read
     // back by the editor. Sugar over `ContextManager::log`.
     library.add(
-        Func::new("01896910-0790-AD1B-AA12-3F1437196789", "Print")
+        Func::new("06b169d2-d3d8-43fb-ba80-c566fcffea44", "Print")
             .description("Logs any value to the node log.")
             .category("System")
             .sink()
@@ -27,7 +27,7 @@ pub fn system_library() -> Library {
     );
 
     library.add(
-        Func::new("01896a88-bf15-dead-4a15-5969da5a9e65", "To String")
+        Func::new("9731dfca-061b-421c-a193-4aa9a61d89b5", "To String")
             .description("Converts any value to its string representation.")
             .category("System")
             .pure()
