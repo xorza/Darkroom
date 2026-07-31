@@ -49,8 +49,11 @@ use crate::library::Library;
 
 /// One node awaiting placement: its id, which the sort keys on, and the one
 /// fact about it a *consumer* may need before the walk reaches the node itself.
+///
+/// Not to be confused with the fixture builder's `Placed`, which is where a
+/// node *landed* — this is what the walk knows before it gets there.
 #[derive(Debug)]
-struct Placed {
+struct PendingNode {
     node_id: NodeId,
     /// The node's declared output count. A binding is range-checked against it,
     /// and the producer's own `outputs` run does not exist until the walk emits
@@ -93,7 +96,7 @@ pub struct Compiler {
     /// here, and being sorted by id it answers the reverse too
     /// ([`idx`](Self::idx)). The artifact's own id column is a projection of
     /// this, not a second copy anything looks things up in.
-    placed: Vec<Placed>,
+    placed: Vec<PendingNode>,
     /// Every output type of the graph, filled before the walk. Held here
     /// because the type gate runs once per bound input, and resolving one port
     /// at a time cost a walk per edge.
@@ -276,7 +279,7 @@ impl Compiler {
             totals.inputs += func.inputs.len();
             totals.outputs += func.outputs.len();
             totals.events += func.events.len();
-            placed.push(Placed {
+            placed.push(PendingNode {
                 node_id: node.id,
                 outputs: func.outputs.len() as u32,
             });

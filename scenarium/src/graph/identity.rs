@@ -8,6 +8,12 @@
 //! the model behind them — [`error`](crate::graph::error) reports the ports a
 //! fault touched, and a compiled program names its nodes and ports with these
 //! same types.
+//!
+//! The three port addresses are the same shape on purpose and are written out
+//! rather than generated: a caller reads them from the published API, so
+//! `pub struct InputPort` is worth being greppable. They carry **one derive
+//! list, in one order** — a set that drifted between them would leave a port
+//! type missing a bound its siblings have.
 
 use ::common::id_type;
 use ::serde::{Deserialize, Serialize};
@@ -42,7 +48,7 @@ impl OutputPort {
 /// same thing on both sides: a node in a compiled program *is* the authored
 /// node, and its event ports are the func's.
 #[derive(
-    Debug, Clone, Copy, Default, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize,
+    Clone, Copy, Default, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash,
 )]
 pub struct EventPort {
     pub node_id: NodeId,
