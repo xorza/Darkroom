@@ -202,14 +202,6 @@ pub(crate) mod internals {
                 .map(|node| node.node_id)
         }
 
-        /// The input ports the run could not satisfy on this node, empty when it had none.
-        pub(crate) fn missing_input_ports(&self, node_id: NodeId) -> &[usize] {
-            match self.status(node_id) {
-                Some(NodeExecutionStatus::MissingInputs { ports }) => ports,
-                _ => &[],
-            }
-        }
-
         /// Every node the run reported a missing input for.
         pub(crate) fn missing_input_nodes(&self) -> impl Iterator<Item = NodeId> + '_ {
             self.nodes

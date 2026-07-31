@@ -239,7 +239,7 @@ impl ExecutionEngine {
 }
 
 #[cfg(test)]
-mod internals {
+pub(crate) mod internals {
     use crate::execution::identity::NodeIdx;
     use ::common::CancelToken;
 
@@ -260,9 +260,9 @@ mod internals {
     use crate::library::Library;
 
     #[derive(Debug, Default)]
-    pub(super) struct ArgumentValues {
-        pub(super) inputs: Vec<Option<DynamicValue>>,
-        pub(super) outputs: Vec<DynamicValue>,
+    pub(crate) struct ArgumentValues {
+        pub(crate) inputs: Vec<Option<DynamicValue>>,
+        pub(crate) outputs: Vec<DynamicValue>,
     }
 
     /// Test-only inspection of the last plan's per-run flags and runtime slots.
@@ -270,7 +270,7 @@ mod internals {
         /// The installed artifact itself, for test-only introspection.
         /// Production reaches the artifact and its cache through the methods
         /// above, which is what keeps the two moving together.
-        pub(super) fn compiled(&self) -> &CompiledGraph {
+        pub(crate) fn compiled(&self) -> &CompiledGraph {
             self.compiled
                 .as_deref()
                 .expect("execution requires an installed compiled graph")
@@ -279,7 +279,7 @@ mod internals {
         /// Compile + install in one step — the pre-split `update` shape the
         /// in-tree tests are written against. Production compiles on the host
         /// (a long-lived [`compile::Compiler`]) and sends the artifact to the worker.
-        pub(super) fn update(
+        pub(crate) fn update(
             &mut self,
             graph: &Graph,
             library: &Library,
@@ -288,7 +288,7 @@ mod internals {
             Ok(())
         }
 
-        pub(super) async fn execute_sinks(&mut self) -> Result<ExecutionOutcome> {
+        pub(crate) async fn execute_sinks(&mut self) -> Result<ExecutionOutcome> {
             let mut outcome = ExecutionOutcome::default();
             self.execute(
                 RunSeeds {
@@ -303,7 +303,7 @@ mod internals {
             Ok(outcome)
         }
 
-        pub(super) async fn execute_events<T: IntoIterator<Item = EventPort>>(
+        pub(crate) async fn execute_events<T: IntoIterator<Item = EventPort>>(
             &mut self,
             events: T,
         ) -> Result<ExecutionOutcome> {
@@ -321,7 +321,7 @@ mod internals {
             Ok(outcome)
         }
 
-        pub(super) async fn execute_nodes<T: IntoIterator<Item = NodeId>>(
+        pub(crate) async fn execute_nodes<T: IntoIterator<Item = NodeId>>(
             &mut self,
             nodes: T,
         ) -> Result<ExecutionOutcome> {
@@ -340,7 +340,7 @@ mod internals {
         }
 
         /// Prepare the structural plan and cache-aware resolved run without invoking lambdas.
-        pub(super) async fn prepare_execution(
+        pub(crate) async fn prepare_execution(
             &mut self,
             sinks: bool,
             event_sources: bool,
@@ -372,36 +372,54 @@ mod internals {
                 .expect("introspection names a node of the installed program")
         }
 
+        /// The nodes that recomputed in the last run, in the order the schedule
+        /// reached them — deps before consumers.
+        ///
+        /// `process_order` holds every reachable runnable node; this keeps the
+        /// ones that actually invoked a lambda rather than reusing a cache.
+        /// Before any run `node_ran` answers `true` for all of them, so a
+        /// plan-only test reads it as the runnable schedule.
+        pub(crate) fn ran_in_schedule_order(&self) -> Vec<NodeId> {
+            self.schedule
+                .process_order
+                .iter()
+                .copied()
+                .filter(|&node_idx| self.schedule.states[node_idx].is_runnable())
+                .map(|node_idx| self.compiled().node_ids[node_idx])
+                .filter(|&node_id| self.node_ran(node_id))
+                .collect()
+        }
+
         /// The resolved state for a stable id — test introspection.
-        pub(super) fn node_state(&self, node_id: NodeId) -> NodeState {
+        pub(crate) fn node_state(&self, node_id: NodeId) -> NodeState {
             self.schedule.states[self.node_idx(node_id)]
         }
 
-        pub(super) fn node_inputs(&self, node_id: NodeId) -> &[ExecutionInput] {
+        pub(crate) fn node_inputs(&self, node_id: NodeId) -> &[ExecutionInput] {
             let program = &self.compiled();
             &program.inputs[program.by_id(node_id).inputs]
         }
 
-        pub(super) fn node_output_demand(&self, node_id: NodeId) -> &[OutputDemand] {
+        pub(crate) fn node_output_demand(&self, node_id: NodeId) -> &[OutputDemand] {
             &self.schedule.outputs.demand[self.compiled().by_id(node_id).outputs]
         }
 
-        pub(super) fn node_output_readers(&self, node_id: NodeId) -> &[u32] {
+        pub(crate) fn node_output_readers(&self, node_id: NodeId) -> &[u32] {
             &self.schedule.outputs.readers[self.compiled().by_id(node_id).outputs]
         }
 
         /// Whether `node_id` recomputed (rather than reused a cache) in the last run.
-        pub(super) fn node_ran(&self, node_id: NodeId) -> bool {
+        pub(crate) fn node_ran(&self, node_id: NodeId) -> bool {
             self.executor.ran(self.compiled(), node_id)
         }
 
         /// Resident-only argument values, test inspection only: reads whatever is
         /// in RAM, so a disk-only (not-yet-hydrated) node reads back empty.
-        pub(super) fn get_argument_values(&self, node_id: &NodeId) -> Option<ArgumentValues> {
+        pub(crate) fn get_argument_values(&self, node_id: &NodeId) -> Option<ArgumentValues> {
             self.get_argument_values_at(*node_id)
         }
 
-        pub(super) fn get_argument_values_at(&self, node_id: NodeId) -> Option<ArgumentValues> {
+        pub(crate) fn get_argument_values_at(&self, node_id: NodeId) -> Option<ArgumentValues> {
             self.compiled().node(node_id)?;
             Some(self.argument_values_at(node_id))
         }
@@ -430,13 +448,13 @@ mod internals {
         }
 
         /// The runtime slot for a stable id — test introspection.
-        pub(super) fn slot(&self, node_id: NodeId) -> &RuntimeSlot {
+        pub(crate) fn slot(&self, node_id: NodeId) -> &RuntimeSlot {
             &self.cache[self.node_idx(node_id)]
         }
 
         /// Seed a node's cached output (simulating a prior run): set the value and
         /// stamp `produced_under` from the current digest, so the planner sees a hit.
-        pub(super) fn set_output_values(&mut self, node_id: NodeId, values: Vec<DynamicValue>) {
+        pub(crate) fn set_output_values(&mut self, node_id: NodeId, values: Vec<DynamicValue>) {
             let node_idx = self.node_idx(node_id);
             let slot = &mut self.cache[node_idx];
             let produced_under = slot.current_digest;

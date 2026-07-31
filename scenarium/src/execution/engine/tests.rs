@@ -16,6 +16,8 @@ use crate::graph::identity::{FuncId, InputPort, NodeId, OutputPort};
 use crate::graph::node::{CacheMode, Node};
 use crate::graph::output_types::OutputTypes;
 use crate::library::Library;
+use crate::testing::engine::TestEngine;
+use crate::testing::graph::TestGraph;
 use crate::testing::{self, TestFuncHooks, test_func_lib, test_graph};
 use crate::{DataType, DynamicValue, StaticValue};
 use ::common::FloatExt;
@@ -2196,41 +2198,23 @@ mod graph_structure {
 mod missing_inputs {
     use super::*;
 
+    /// A required input left unbound blocks its node, and the verdict travels
+    /// down every consumer — so the whole tail of the chain is out of the run
+    /// while its sources still stand.
     #[tokio::test]
     async fn required_missing_propagates_downstream() -> TestResult {
-        let mut graph = test_graph();
-        let library = test_func_lib(TestFuncHooks::default());
+        let mut e = TestEngine::over(TestGraph::sample());
+        e.edit(|g| g.unbind("sum", 0));
 
-        // Remove sum's first input binding (required by default)
-        bind(&mut graph, "sum", 0, None);
+        let plan = e.plan_sinks().await?;
 
-        let mut execution_graph = ExecutionEngine::default();
-        execution_graph.update(&graph, &library).unwrap();
-        execution_graph.prepare_execution(true, false, &[]).await?;
-
-        let get_b = execution_node_id(&execution_graph, &graph, &library, "get_b").unwrap();
-        let sum = execution_node_id(&execution_graph, &graph, &library, "sum").unwrap();
-        let mult = execution_node_id(&execution_graph, &graph, &library, "mult").unwrap();
-        let print = execution_node_id(&execution_graph, &graph, &library, "Print").unwrap();
-
-        // get_b has no missing inputs (no inputs at all)
-        assert!(
-            !execution_graph.schedule.states[execution_graph.compiled().node(get_b).unwrap()]
-                .missing_required_inputs()
+        assert_eq!(plan.missing_inputs(), ["Print", "mult", "sum"]);
+        assert_eq!(
+            plan.runnable(),
+            ["get_b"],
+            "the one source still feeding something stands; unbinding sum[0] left \
+             `get_a` reading into nothing, so the backward walk never reaches it"
         );
-        // sum is missing input[0], propagates to downstream mult and print — so none of
-        // them is runnable (get_b, a source with satisfied inputs, still is).
-        for gated in [sum, mult, print] {
-            assert!(
-                execution_graph.schedule.states[execution_graph.compiled().node(gated).unwrap()]
-                    .missing_required_inputs()
-            );
-            assert!(
-                !execution_graph.schedule.states[execution_graph.compiled().node(gated).unwrap()]
-                    .is_runnable()
-            );
-        }
-
         Ok(())
     }
 
@@ -2241,36 +2225,17 @@ mod missing_inputs {
     /// binding to a broken upstream.
     #[tokio::test]
     async fn optional_bind_to_missing_propagates() -> TestResult {
-        let mut graph = test_graph();
-        let mut library = test_func_lib(TestFuncHooks::default());
-        let mut execution_graph = ExecutionEngine::default();
-
-        // sum missing-required; mult[0] stays bound to sum but is made optional.
-        bind(&mut graph, "sum", 0, None);
-        mutate_func(&mut library, "mult", |func| {
-            func.inputs[0].required = false;
+        let mut e = TestEngine::over(TestGraph::sample());
+        e.edit(|g| {
+            // sum missing-required; mult[0] stays bound to sum but goes optional.
+            g.unbind("sum", 0);
+            g.edit_func("mult", |func| func.inputs[0].required = false);
         });
 
-        execution_graph.update(&graph, &library).unwrap();
-        execution_graph.prepare_execution(true, false, &[]).await?;
+        let plan = e.plan_sinks().await?;
 
-        let sum = execution_node_id(&execution_graph, &graph, &library, "sum").unwrap();
-        let mult = execution_node_id(&execution_graph, &graph, &library, "mult").unwrap();
-        let print = execution_node_id(&execution_graph, &graph, &library, "Print").unwrap();
-
-        // The missing flag flows through the optional bind to mult and on to print, so
-        // the gated chain isn't runnable (its sources still are).
-        for gated in [sum, mult, print] {
-            assert!(
-                execution_graph.schedule.states[execution_graph.compiled().node(gated).unwrap()]
-                    .missing_required_inputs()
-            );
-            assert!(
-                !execution_graph.schedule.states[execution_graph.compiled().node(gated).unwrap()]
-                    .is_runnable()
-            );
-        }
-
+        assert_eq!(plan.missing_inputs(), ["Print", "mult", "sum"]);
+        assert_eq!(plan.runnable(), ["get_b"]);
         Ok(())
     }
 
@@ -2279,35 +2244,16 @@ mod missing_inputs {
     /// missing — it runs with its default.
     #[tokio::test]
     async fn optional_unbound_does_not_propagate() -> TestResult {
-        let mut graph = test_graph();
-        let mut library = test_func_lib(TestFuncHooks::default());
-        let mut execution_graph = ExecutionEngine::default();
-
-        // mult[0] unbound + optional (not wired to anything).
-        bind(&mut graph, "mult", 0, None);
-        mutate_func(&mut library, "mult", |func| {
-            func.inputs[0].required = false;
+        let mut e = TestEngine::over(TestGraph::sample());
+        e.edit(|g| {
+            g.unbind("mult", 0);
+            g.edit_func("mult", |func| func.inputs[0].required = false);
         });
 
-        execution_graph.update(&graph, &library).unwrap();
-        execution_graph.prepare_execution(true, false, &[]).await?;
+        let plan = e.plan_sinks().await?;
 
-        let mult = execution_node_id(&execution_graph, &graph, &library, "mult").unwrap();
-        let print = execution_node_id(&execution_graph, &graph, &library, "Print").unwrap();
-
-        assert!(
-            !execution_graph.schedule.states[execution_graph.compiled().node(mult).unwrap()]
-                .missing_required_inputs()
-        );
-        assert!(
-            !execution_graph.schedule.states[execution_graph.compiled().node(print).unwrap()]
-                .missing_required_inputs()
-        );
-        assert!(
-            execution_node_names_in_order(&execution_graph, &graph, &library)
-                .contains(&"mult".to_string())
-        );
-
+        assert!(plan.missing_inputs().is_empty());
+        assert!(plan.runnable().contains(&"mult"));
         Ok(())
     }
 
@@ -2317,40 +2263,28 @@ mod missing_inputs {
     /// the planned-only siblings above can't catch it since they never execute.
     #[tokio::test(flavor = "multi_thread")]
     async fn optional_bind_to_gated_upstream_is_gated() -> TestResult {
-        let mut graph = test_graph();
-        let mut library = test_func_lib(default_hooks());
-
-        let get_b_id = graph.find_by_name("get_b").unwrap().id;
-        let sum_id = graph.find_by_name("sum").unwrap().id;
-
-        // sum's required input[0] unbound → sum missing-required → gated.
-        bind(&mut graph, "sum", 0, None);
-        // mult[0] (required) gets a real value; mult[1] is the only bind to the
-        // gated sum and is *optional* — so this exercises optional-bind
-        // propagation specifically. mult and print end up gated.
-        bind(&mut graph, "mult", 0, Binding::bind(get_b_id, 0));
-        bind(&mut graph, "mult", 1, Binding::bind(sum_id, 0));
-        mutate_func(&mut library, "mult", |func| {
-            func.inputs[1].required = false;
+        let mut e = TestEngine::over(TestGraph::sample());
+        e.edit(|g| {
+            // sum's required input[0] unbound → sum missing-required → gated.
+            g.unbind("sum", 0);
+            // mult[0] (required) gets a real value; mult[1] is the only bind to
+            // the gated sum and is *optional*, so this exercises optional-bind
+            // propagation specifically. mult and print end up gated.
+            g.wire("get_b", 0, "mult", 0);
+            g.wire("sum", 0, "mult", 1);
+            g.edit_func("mult", |func| func.inputs[1].required = false);
         });
 
-        let mut execution_graph = ExecutionEngine::default();
-        execution_graph.update(&graph, &library).unwrap();
         // Pre-fix, this panicked the worker; now the chain is gated and nothing runs.
-        execution_graph.execute_sinks().await?;
+        let run = e.run_sinks().await;
 
-        // The run completes (no panic reading sum's absent output); the gated `mult`
-        // never runs, so it never reads that value.
-        let mult = execution_node_id(&execution_graph, &graph, &library, "mult").unwrap();
-        assert!(
-            execution_graph.schedule.states[execution_graph.compiled().node(mult).unwrap()]
-                .missing_required_inputs()
+        assert_eq!(run.missing_inputs(), ["Print", "mult", "sum"]);
+        assert_eq!(
+            run.ran(),
+            [] as [&str; 0],
+            "the gated chain never runs, so it never reads sum's absent output — \
+             and `get_b`, whose only consumer is gated, is cut with it"
         );
-        assert!(
-            !execution_node_names_in_order(&execution_graph, &graph, &library)
-                .contains(&"mult".to_string())
-        );
-
         Ok(())
     }
 }
@@ -2364,76 +2298,43 @@ mod disabled_nodes {
     /// so the missing-required-input flag propagates downstream.
     #[tokio::test]
     async fn disabled_node_stays_compiled_but_breaks_downstream() -> TestResult {
-        let mut graph = test_graph();
-        let library = test_func_lib(TestFuncHooks::default());
+        let mut e = TestEngine::over(TestGraph::sample());
+        e.edit(|g| g.disable("sum"));
 
-        let sum_id = graph.find_by_name("sum").unwrap().id;
-        graph.find_mut(sum_id).unwrap().disabled = true;
+        let plan = e.plan_sinks().await?;
 
-        let mut execution_graph = ExecutionEngine::default();
-        execution_graph.update(&graph, &library).unwrap();
-        execution_graph.prepare_execution(true, false, &[]).await?;
-
-        let sum = execution_node_id(&execution_graph, &graph, &library, "sum").unwrap();
         assert!(
-            execution_graph.compiled().by_id(sum).disabled,
+            e.engine.compiled().by_id(e.id("sum")).disabled,
             "the compiled node retains its authored disabled state"
         );
-        assert!(
-            !execution_graph
-                .schedule
-                .process_order
-                .contains(&execution_graph.compiled().node(sum).unwrap())
-                && execution_graph.schedule.states[execution_graph.compiled().node(sum).unwrap()]
-                    == NodeState::Disabled,
+        assert_eq!(
+            plan.state("sum"),
+            NodeState::Disabled,
             "an unseeded disabled node stays structural but outside execution order"
         );
-
-        // get_b has no inputs, so it's unaffected; mult/print lost their
-        // (transitive) producer and are flagged missing-required-input.
-        let get_b = execution_node_id(&execution_graph, &graph, &library, "get_b").unwrap();
-        let mult = execution_node_id(&execution_graph, &graph, &library, "mult").unwrap();
-        let print = execution_node_id(&execution_graph, &graph, &library, "Print").unwrap();
-        assert!(
-            !execution_graph.schedule.states[execution_graph.compiled().node(get_b).unwrap()]
-                .missing_required_inputs()
+        assert_eq!(
+            plan.missing_inputs(),
+            ["Print", "mult"],
+            "the consumers lost their transitive producer"
         );
-        assert!(
-            execution_graph.schedule.states[execution_graph.compiled().node(mult).unwrap()]
-                .missing_required_inputs()
-        );
-        assert!(
-            execution_graph.schedule.states[execution_graph.compiled().node(print).unwrap()]
-                .missing_required_inputs()
-        );
-
         Ok(())
     }
 
     /// With `mult`'s sum-fed input made optional, disabling `sum` no longer
     /// breaks the chain: `sum` is skipped but `get_b → mult → print` still
-    /// runs (mirrors `non_required_missing_does_not_propagate`, but via the
+    /// runs (mirrors `optional_unbound_does_not_propagate`, but via the
     /// disable flag rather than a cleared binding).
     #[tokio::test]
     async fn disabled_upstream_with_optional_consumer_still_runs() -> TestResult {
-        let mut graph = test_graph();
-        let mut library = test_func_lib(TestFuncHooks::default());
-
-        let sum_id = graph.find_by_name("sum").unwrap().id;
-        graph.find_mut(sum_id).unwrap().disabled = true;
-        mutate_func(&mut library, "mult", |func| {
-            func.inputs[0].required = false;
+        let mut e = TestEngine::over(TestGraph::sample());
+        e.edit(|g| {
+            g.disable("sum");
+            g.edit_func("mult", |func| func.inputs[0].required = false);
         });
 
-        let mut execution_graph = ExecutionEngine::default();
-        execution_graph.update(&graph, &library).unwrap();
-        execution_graph.prepare_execution(true, false, &[]).await?;
+        let plan = e.plan_sinks().await?;
 
-        assert_eq!(
-            execution_node_names_in_order(&execution_graph, &graph, &library),
-            ["get_b", "mult", "Print"]
-        );
-
+        assert_eq!(plan.scheduled(), ["get_b", "mult", "Print"]);
         Ok(())
     }
 
@@ -2453,42 +2354,50 @@ mod disabled_nodes {
     /// `unwrap_or(1)` is what reads it.
     #[tokio::test]
     async fn a_disabled_producer_on_an_optional_input_delivers_unbound() -> TestResult {
-        use std::sync::Mutex as StdMutex;
-
-        let printed = Arc::new(StdMutex::new(Vec::<i64>::new()));
-        let library = test_func_lib(TestFuncHooks {
-            get_a: Arc::new(|| Ok(7)),
-            print: {
-                let p = printed.clone();
-                Arc::new(move |v| p.lock().unwrap().push(v))
-            },
-            ..default_hooks()
+        let mut g = TestGraph::new();
+        g.add("src", |n| n.returns(7i64));
+        g.add("disabled", |n| {
+            n.pure()
+                .input(DataType::Int)
+                .output(DataType::Int)
+                .compute(|inputs| inputs[0].as_i64().unwrap_or_default().into())
         });
+        // `b` is the optional port, so the disabled producer feeds *that* one;
+        // unbound is what optional means, and the `unwrap_or(1)` below is what
+        // reads it.
+        g.add("mult", |n| {
+            n.pure()
+                .input(DataType::Int)
+                .optional(DataType::Int)
+                .output(DataType::Int)
+                .compute(|inputs| {
+                    let a = inputs[0].as_i64().expect("the required input is fed");
+                    let b = inputs[1].as_i64().unwrap_or(1);
+                    (a * b).into()
+                })
+        });
+        g.add("print", |n| n.records());
+        g.wire("src", 0, "disabled", 0);
+        g.wire("src", 0, "mult", 0);
+        g.wire("disabled", 0, "mult", 1);
+        g.wire("mult", 0, "print", 0);
 
-        let mut graph = test_graph();
-        let id = |name: &str| graph.find_by_name(name).unwrap().id;
-        let (get_a_id, sum_id, mult_id) = (id("get_a"), id("sum"), id("mult"));
-        // A (required) from a live producer, B (optional) from the one
-        // about to be disabled.
-        graph.set_input_binding(InputPort::new(mult_id, 0), Binding::bind(get_a_id, 0));
-        graph.set_input_binding(InputPort::new(mult_id, 1), Binding::bind(sum_id, 0));
-        graph.find_mut(sum_id).unwrap().disabled = true;
+        let mut e = TestEngine::over(g);
+        e.edit(|g| g.disable("disabled"));
 
-        let mut execution_graph = ExecutionEngine::default();
-        execution_graph.update(&graph, &library).unwrap();
-        execution_graph.execute_sinks().await?;
+        let run = e.run_sinks().await;
 
         assert_eq!(
-            execution_node_names_in_order(&execution_graph, &graph, &library),
-            ["get_a", "mult", "Print"],
+            run.ran(),
+            ["src", "mult", "print"],
             "the disabled producer stays out of the run",
         );
         assert_eq!(
-            *printed.lock().unwrap(),
-            vec![7],
-            "the optional input read as unbound, so `mult` used its own default of 1",
+            run.logs(),
+            ["7"],
+            "the optional input read as unbound, so `mult` multiplied by its \
+             own default of 1 rather than reading a value nothing wrote",
         );
-
         Ok(())
     }
 }
@@ -3072,26 +2981,19 @@ mod cycle_detection {
 
     #[tokio::test]
     async fn returns_error_with_node_id() {
-        let mut graph = test_graph();
-        let library = test_func_lib(TestFuncHooks::default());
+        let mut e = TestEngine::over(TestGraph::sample());
+        // Close the loop: sum[0] ← mult, and mult already depends on sum.
+        e.edit(|g| g.wire("mult", 0, "sum", 0));
 
-        // Create cycle: sum[0] ← mult (mult already depends on sum)
-        let mult_node_id = graph.find_by_name("mult").unwrap().id;
-        bind(&mut graph, "sum", 0, Binding::bind(mult_node_id, 0));
-
-        let mut execution_graph = ExecutionEngine::default();
-        execution_graph.update(&graph, &library).unwrap();
-
-        let err = execution_graph
-            .prepare_execution(true, false, &[])
+        let error = e
+            .plan_sinks()
             .await
-            .expect_err("Expected cycle detection error");
-        match err {
-            Error::CycleDetected { node_id } => {
-                assert_eq!(node_id, mult_node_id);
-            }
-            _ => panic!("Unexpected error: {err:?}"),
-        }
+            .expect_err("a cyclic graph cannot be planned");
+
+        assert!(
+            matches!(error, Error::CycleDetected { node_id } if node_id == e.id("mult")),
+            "unexpected error: {error:?}"
+        );
     }
 }
 
@@ -3160,21 +3062,15 @@ mod invalidation {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn clear_resets_graph() -> TestResult {
-        let graph = test_graph();
-        let library = test_func_lib(default_hooks());
+        let mut e = TestEngine::over(TestGraph::sample());
+        e.run_sinks().await;
+        assert!(!e.engine.compiled().e_nodes.is_empty());
 
-        let mut execution_graph = ExecutionEngine::default();
-        execution_graph.update(&graph, &library).unwrap();
-        execution_graph.execute_sinks().await?;
+        e.engine.clear();
 
-        assert!(!execution_graph.compiled().e_nodes.is_empty());
-
-        execution_graph.clear();
-
-        assert!(execution_graph.compiled.is_none());
-        assert!(execution_graph.schedule.process_order.is_empty());
-        assert_eq!(execution_graph.cache.slot_count(), 0);
-
+        assert!(e.engine.compiled.is_none());
+        assert!(e.engine.schedule.process_order.is_empty());
+        assert_eq!(e.engine.cache.slot_count(), 0);
         Ok(())
     }
 }
@@ -3272,33 +3168,28 @@ mod execution {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn schedule_stable_across_repeated_runs() -> TestResult {
-        let library = test_func_lib(default_hooks());
-        let graph = test_graph();
-        let mut eg = ExecutionEngine::default();
-        eg.update(&graph, &library).unwrap();
+        let mut e = TestEngine::over(TestGraph::sample());
 
-        eg.execute_sinks().await?;
-        let run1 = execution_node_names_in_order(&eg, &graph, &library);
-        eg.execute_sinks().await?;
-        let run2 = execution_node_names_in_order(&eg, &graph, &library);
-        eg.execute_sinks().await?;
-        let run3 = execution_node_names_in_order(&eg, &graph, &library);
+        // Three runs held at once — an outcome is a snapshot, so they can be
+        // compared rather than re-derived.
+        let run1 = e.run_sinks().await;
+        let run2 = e.run_sinks().await;
+        let run3 = e.run_sinks().await;
 
-        // First run executes everything; once the pure upstream is cached, runs 2
-        // and 3 must schedule identically — guards the reused `Scratch` buffers
-        // being reset cleanly each run (a missed reset would drift).
-        assert_eq!(run2, ["Print"]);
-        assert_eq!(run2, run3);
-        assert_ne!(run1, run2);
+        // The first run executes everything; once the pure upstream is cached,
+        // runs 2 and 3 must schedule identically — this guards the reused
+        // per-run buffers being reset cleanly, since a missed reset would drift.
+        assert_eq!(run1.ran(), ["get_b", "get_a", "sum", "mult", "Print"]);
+        assert_eq!(run2.ran(), ["Print"]);
+        assert_eq!(run2.ran(), run3.ran());
+        assert_eq!(
+            run2.cached(),
+            ["get_a", "get_b", "mult", "sum"],
+            "everything the second run did not re-run was served from cache"
+        );
 
-        // The cached product stays correct every run: sum(1+11=12) * get_b(11) = 132.
-        let mult_id = graph.find_by_name("mult").unwrap().id;
-        let vals = eg.get_argument_values(&mult_id).unwrap();
-        assert!(matches!(
-            vals.outputs[0],
-            DynamicValue::Static(StaticValue::Int(132))
-        ));
-
+        // The cached product stays correct every run: sum(1 + 11 = 12) * get_b(11) = 132.
+        assert_eq!(e.output_i64("mult", 0), Some(132));
         Ok(())
     }
 
@@ -3766,64 +3657,39 @@ mod error_propagation {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn node_error_propagates_to_dependents() -> TestResult {
-        let graph = test_graph();
-        let library = test_func_lib(TestFuncHooks {
+        let mut e = TestEngine::over(TestGraph::sample_with(TestFuncHooks {
             get_a: Arc::new(|| Err(internals::failure("Intentional failure in get_a"))),
             get_b: Arc::new(|| 42),
             print: Arc::new(|_| {}),
-        });
+        }));
 
-        let mut execution_graph = ExecutionEngine::default();
-        execution_graph.update(&graph, &library).unwrap();
+        let run = e.run_sinks().await;
 
-        let stats = execution_graph.execute_sinks().await?;
-
-        // Errors are reported through the run stats (the per-run channel), not the
-        // cross-run cache; the cache only reflects which outputs survived.
-        let error_for = |name: &str| {
-            let id = execution_node_id(&execution_graph, &graph, &library, name).unwrap();
-            stats.error(id)
-        };
-        let output_values = |name: &str| {
-            execution_graph
-                .slot(execution_node_id(&execution_graph, &graph, &library, name).unwrap())
-                .output_values()
-                .map(<[_]>::to_vec)
-        };
-
-        // get_a fails with error, no outputs.
+        // The failure and the three consumers that inherit it — errors are
+        // reported through the run, not the cross-run cache, which only
+        // reflects which outputs survived.
+        assert_eq!(run.errored(), ["Print", "get_a", "mult", "sum"]);
         assert!(
-            error_for("get_a")
-                .unwrap()
+            run.error("get_a")
+                .expect("the failing node reports its own error")
                 .to_string()
                 .contains("Intentional failure")
         );
-        assert!(output_values("get_a").is_none());
-
-        // get_b succeeds: no error, output present.
-        assert!(error_for("get_b").is_none());
-        let get_b_out = output_values("get_b").unwrap();
-        assert!(get_b_out[0].as_f64().unwrap().approximately_eq(42.0));
-
-        // sum depends on get_a, mult on sum, print on mult — each inherits the
-        // upstream error and drops its output.
         for name in ["sum", "mult", "Print"] {
             assert!(
-                error_for(name)
+                run.error(name)
                     .unwrap_or_else(|| panic!("{name} should carry an upstream error"))
                     .to_string()
                     .contains("upstream"),
                 "{name} should report an upstream error",
             );
-            assert!(
-                output_values(name).is_none(),
-                "{name} should have no output"
-            );
+            assert!(e.outputs(name).is_empty(), "{name} should have no output");
         }
 
-        // 4 errors total: get_a original + 3 upstream-propagated.
-        assert_eq!(stats.errored_nodes().count(), 4);
-
+        // The one node off the failing cone keeps its value.
+        assert!(e.outputs("get_a").is_empty());
+        assert!(run.error("get_b").is_none());
+        assert_eq!(e.output_i64("get_b", 0), Some(42));
         Ok(())
     }
 }
@@ -3835,26 +3701,14 @@ mod stats {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn missing_inputs_reported() -> TestResult {
-        let mut graph = test_graph();
-        let library = test_func_lib(default_hooks());
+        let mut e = TestEngine::over(TestGraph::sample());
+        e.edit(|g| g.unbind("sum", 0));
 
-        // Remove sum's first input (required)
-        bind(&mut graph, "sum", 0, None);
+        let run = e.run_sinks().await;
 
-        let mut execution_graph = ExecutionEngine::default();
-        execution_graph.update(&graph, &library).unwrap();
-        let stats = execution_graph.execute_sinks().await?;
-
-        // sum's port 0 is the only unfed one — port 1 is still bound, so the run names
-        // exactly the port that failed rather than flagging the node as a whole.
-        let sum_id = graph.find_by_name("sum").unwrap().id;
-        assert_eq!(
-            stats.missing_input_ports(sum_id),
-            [0],
-            "expected sum input 0 unfed, got: {:?}",
-            stats.nodes
-        );
-
+        // Port 1 is still bound, so the run names exactly the port that failed
+        // rather than flagging the node as a whole.
+        assert_eq!(run.missing_ports("sum"), [0]);
         Ok(())
     }
 
@@ -3864,67 +3718,42 @@ mod stats {
     /// subscription and pin wire nothing.
     #[tokio::test(flavor = "multi_thread")]
     async fn dangling_wiring_compiles_and_reports_missing_input() -> TestResult {
-        let mut graph = test_graph();
-        let library = test_func_lib(default_hooks());
-        let get_a_id = graph.find_by_name("get_a").unwrap().id;
-        let sum_id = graph.find_by_name("sum").unwrap().id;
+        let mut e = TestEngine::over(TestGraph::sample());
+        // sum's required input 0 bound to an output `get_a` doesn't have, plus a
+        // subscription to an event it doesn't emit — the drift a changed library
+        // leaves behind. Neither may fail the compile.
+        e.edit(|g| {
+            g.wire("get_a", 9, "sum", 0);
+            g.subscribe("get_a", 9, "sum");
+        });
 
-        // sum's required input 0 bound to an output get_a doesn't have,
-        // plus a subscription to an event it doesn't emit — the drift a changed
-        // library leaves behind.
-        graph.set_input_binding(InputPort::new(sum_id, 0), Binding::bind(get_a_id, 9));
-        graph.subscribe(get_a_id, 9, sum_id);
-
-        let mut execution_graph = ExecutionEngine::default();
-        execution_graph
-            .update(&graph, &library)
-            .expect("dangling wiring must not fail compilation");
-        let stats = execution_graph.execute_sinks().await?;
+        let run = e.run_sinks().await;
 
         assert_eq!(
-            stats.missing_input_ports(sum_id),
+            run.missing_ports("sum"),
             [0],
-            "the dangling binding degrades to a missing input on that exact port, got: {:?}",
-            stats.nodes
+            "the dangling binding degrades to a missing input on that exact port"
         );
-
         Ok(())
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn executed_nodes_reported() -> TestResult {
-        let graph = test_graph();
-        let library = test_func_lib(default_hooks());
+        let mut e = TestEngine::over(TestGraph::sample());
 
-        let mut execution_graph = ExecutionEngine::default();
-        execution_graph.update(&graph, &library).unwrap();
-        let stats = execution_graph.execute_sinks().await?;
+        let run = e.run_sinks().await;
 
-        // All 5 nodes should be reported as executed
-        assert_eq!(stats.ran_node_count, 5);
+        assert_eq!(run.ran(), ["get_b", "get_a", "sum", "mult", "Print"]);
+        assert_eq!(run.ran_node_count, 5);
+        assert!(run.errored().is_empty());
+        assert!(run.missing_inputs().is_empty());
 
-        // Each node should have a non-negative elapsed time
-        for node in &stats.nodes {
-            let Some(NodeExecutionStatus::Executed { elapsed_secs }) = node.status else {
-                continue;
+        for name in run.ran() {
+            let Some(NodeExecutionStatus::Executed { elapsed_secs }) = run.status(name) else {
+                panic!("{name} ran, so it reports an elapsed time");
             };
-            assert!(
-                elapsed_secs >= 0.0,
-                "node {:?} has negative elapsed_secs",
-                node.node_id
-            );
+            assert!(*elapsed_secs >= 0.0, "{name} has negative elapsed_secs");
         }
-
-        // Verify specific node IDs are present
-        let sum_id = graph.find_by_name("sum").unwrap().id;
-        let print_id = graph.find_by_name("Print").unwrap().id;
-        assert!(stats.ran(sum_id));
-        assert!(stats.ran(print_id));
-
-        // No errors on first clean run
-        assert!(stats.errored_nodes().count() == 0);
-        assert!(stats.missing_input_nodes().count() == 0);
-
         Ok(())
     }
 }
@@ -4680,14 +4509,11 @@ mod graph {
     /// A func-only graph builds with the node ids unchanged (caches survive).
     #[test]
     fn top_level_func_nodes_keep_identity() {
-        let library = test_func_lib(default_hooks());
-        let graph = test_graph();
-        let mut eg = ExecutionEngine::default();
-        eg.update(&graph, &library).unwrap();
+        let e = TestEngine::over(TestGraph::sample());
 
-        assert_eq!(eg.compiled().e_nodes.len(), graph.len());
-        for node in graph.iter() {
-            assert!(eg.compiled().contains(node.id), "id preserved");
+        assert_eq!(e.engine.compiled().e_nodes.len(), e.graph.graph.len());
+        for node in e.graph.graph.iter() {
+            assert!(e.engine.compiled().contains(node.id), "id preserved");
         }
     }
 }

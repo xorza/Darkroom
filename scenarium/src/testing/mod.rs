@@ -7,6 +7,8 @@
 //! [`TestGraph::sample`](graph::TestGraph::sample) wraps so tests can move
 //! across one at a time.
 
+#[cfg(test)]
+pub(crate) mod engine;
 pub mod graph;
 #[cfg(test)]
 pub(crate) mod program;
