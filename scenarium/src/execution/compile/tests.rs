@@ -1,7 +1,9 @@
+use std::collections::HashSet;
+
 use super::*;
 use crate::common::column::Idx;
 use crate::execution::compile::compiled_graph::{CompiledGraph, ExecutionBinding};
-use crate::execution::compile::error::CompiledGraphValidationError;
+use crate::execution::compile::error::{CompiledGraphValidationError, PortPool};
 use crate::execution::identity::NodeIdx;
 use crate::execution::identity::OutputAddr;
 use crate::graph::func::event::EventLambda;
@@ -149,6 +151,40 @@ fn validation_returns_compiled_mismatches() {
     );
     assert!(prog.program().contains(node.node_id));
     assert!(!prog.program().contains(NodeId::unique()));
+}
+
+/// The arity and range faults carry the pool they found rather than naming one
+/// variant each, so the six messages that used to be six variants have to still
+/// come out six distinct sentences.
+#[test]
+fn a_pool_fault_names_the_pool_it_found() {
+    let node_id = NodeId::from_u128(1);
+    let pools = [PortPool::Input, PortPool::Output, PortPool::Event];
+
+    let arity: Vec<String> = pools
+        .iter()
+        .map(|&pool| CompiledGraphValidationError::Arity { node_id, pool }.to_string())
+        .collect();
+    let range: Vec<String> = pools
+        .iter()
+        .map(|&pool| CompiledGraphValidationError::Range { node_id, pool }.to_string())
+        .collect();
+
+    assert_eq!(
+        arity[0],
+        format!("execution node {node_id:?} input arity does not match its function")
+    );
+    assert_eq!(
+        range[2],
+        format!("execution node {node_id:?} event range is out of bounds")
+    );
+
+    let all: HashSet<&String> = arity.iter().chain(range.iter()).collect();
+    assert_eq!(
+        all.len(),
+        6,
+        "each pool and question reads distinctly: {all:?}"
+    );
 }
 
 /// Everything one compile observably produced, in a deterministic order and in

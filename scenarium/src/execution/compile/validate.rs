@@ -10,7 +10,7 @@ use ::common::is_debug;
 use crate::common::column::Idx;
 use crate::execution::compile::compiled_graph::CompiledGraph;
 use crate::execution::compile::compiled_graph::ExecutionBinding;
-use crate::execution::compile::error::CompiledGraphValidationError;
+use crate::execution::compile::error::{CompiledGraphValidationError, PortPool};
 use crate::library::Library;
 
 /// Self-consistency of a freshly linked artifact against the library it was
@@ -36,26 +36,36 @@ pub(super) fn validate(
                     },
                 )?,
             };
+        // The same two questions asked of each of the three pools, so the pool
+        // is the only thing each call spells out.
+        let arity = |pool| CompiledGraphValidationError::Arity {
+            node_id: *node_id,
+            pool,
+        };
+        let range = |pool| CompiledGraphValidationError::Range {
+            node_id: *node_id,
+            pool,
+        };
         if e_node.inputs.len as usize != func.inputs.len() {
-            return Err(CompiledGraphValidationError::InputArity { node_id: *node_id });
+            return Err(arity(PortPool::Input));
         }
         if e_node.outputs.len as usize != func.outputs.len() {
-            return Err(CompiledGraphValidationError::OutputArity { node_id: *node_id });
+            return Err(arity(PortPool::Output));
         }
         if e_node.events.len as usize != func.events.len() {
-            return Err(CompiledGraphValidationError::EventArity { node_id: *node_id });
+            return Err(arity(PortPool::Event));
         }
         let inputs = compiled
             .inputs
             .get_span(e_node.inputs)
-            .ok_or(CompiledGraphValidationError::InputRange { node_id: *node_id })?;
+            .ok_or_else(|| range(PortPool::Input))?;
         if compiled.outputs.get_span(e_node.outputs).is_none() {
-            return Err(CompiledGraphValidationError::OutputRange { node_id: *node_id });
+            return Err(range(PortPool::Output));
         }
         let events = compiled
             .events
             .get_span(e_node.events)
-            .ok_or(CompiledGraphValidationError::EventRange { node_id: *node_id })?;
+            .ok_or_else(|| range(PortPool::Event))?;
 
         // Unreachable while `wire_subscriptions` mints every subscriber from
         // a successful id lookup — kept as the backstop if that stops holding.
