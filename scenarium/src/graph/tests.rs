@@ -89,7 +89,9 @@ fn cache_mode_round_trips() {
 }
 
 #[test]
-fn new_func_node_copies_its_func_default_cache_mode() {
+fn a_new_node_takes_what_its_declaration_says() {
+    use crate::graph::node::special::SpecialNode;
+
     // A fresh func node inherits its func's `default_cache_mode` — the out-of-box
     // `None`, or whatever the func's builder raised it to.
     let plain = Func::new(FuncId::unique(), "plain");
@@ -111,11 +113,29 @@ fn new_func_node_copies_its_func_default_cache_mode() {
     let id = graph.add_func_node(&hot);
     assert_eq!(graph.find(id).unwrap().cache, CacheMode::Both);
 
-    // The func-less constructors have no func to copy from and seed `None`.
     assert_eq!(
-        Node::new(NodeKind::Func(FuncId::unique())).cache,
-        CacheMode::None
+        Node::from(&hot).name,
+        "hot",
+        "and the func's name, so a placed node is labelled without a second lookup"
     );
+
+    // A special node's declaration is hardcoded, so `Node::new` reaches it and
+    // takes both halves — no caller has to name the node afterwards.
+    let special = SpecialNode::RunSinks;
+    let node = Node::new(NodeKind::Special(special));
+    assert_eq!(node.name, special.func().name);
+    assert!(
+        !node.name.is_empty(),
+        "a hardcoded declaration always names it"
+    );
+    assert_eq!(node.cache, special.func().default_cache_mode);
+
+    // A `Func` kind names only an id, and resolving one takes a library this
+    // constructor does not have. So it starts unnamed and uncached — and an
+    // empty name means exactly that: a node whose func nothing has resolved.
+    let unresolved = Node::new(NodeKind::Func(FuncId::unique()));
+    assert_eq!(unresolved.cache, CacheMode::None);
+    assert!(unresolved.name.is_empty());
 }
 
 #[test]

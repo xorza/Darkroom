@@ -422,16 +422,12 @@ impl PaletteEntry<'_> {
             PaletteEntry::Func(func) => add_from_func(ui, popup, pos, func, || func.into()),
             // A special node's `Func` is hardcoded rather than
             // library-registered, so the node it spawns is a
-            // `NodeKind::Special` named after that func — the only thing
-            // that differs from a library row.
-            PaletteEntry::Special(special) => {
-                let func = special.func();
-                add_from_func(ui, popup, pos, func, || {
-                    let mut node = Node::new(NodeKind::Special(special));
-                    node.name = func.name.clone();
-                    node
-                })
-            }
+            // `NodeKind::Special` — `Node::new` reads the same hardcoded func
+            // for its name and cache mode, which is the only thing that
+            // differs from a library row.
+            PaletteEntry::Special(special) => add_from_func(ui, popup, pos, special.func(), || {
+                Node::new(NodeKind::Special(special))
+            }),
         }
     }
 }

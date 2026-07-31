@@ -106,17 +106,29 @@ pub struct Node {
 
 impl Node {
     /// A fresh node of the given kind with no wiring. Callers fill that in, or
-    /// use `From<&Func>` for a node shaped from its declaration. A `Special`
-    /// node copies its hardcoded func's `default_cache_mode`; a `Func` node
-    /// seeds `None`, since `From<&Func>` is the constructor that reads one.
+    /// use `From<&Func>` for a node shaped from its declaration.
+    ///
+    /// **A node takes what its declaration says, wherever one is reachable.** A
+    /// `Special` node's is hardcoded, so both its name and its cache mode come
+    /// straight off [`SpecialNode::func`]. A `Func` node names only an id, and
+    /// resolving one takes a [`Library`](crate::library::Library) this does not
+    /// have — so it starts unnamed and on `CacheMode::None`, and `From<&Func>`
+    /// is the constructor for when the declaration *is* in hand.
+    ///
+    /// An empty name is therefore exactly one thing: a node whose func nothing
+    /// has resolved. That is a real state — a document saved against a library
+    /// that later dropped the func — and the editor renders it as a stub.
     pub fn new(kind: NodeKind) -> Self {
-        let cache = match &kind {
-            NodeKind::Special(s) => s.func().default_cache_mode,
-            NodeKind::Func(_) => CacheMode::None,
+        let (name, cache) = match &kind {
+            NodeKind::Special(special) => {
+                let func = special.func();
+                (func.name.clone(), func.default_cache_mode)
+            }
+            NodeKind::Func(_) => (String::new(), CacheMode::None),
         };
         Node {
             kind,
-            name: String::new(),
+            name,
             cache,
             disabled: false,
         }

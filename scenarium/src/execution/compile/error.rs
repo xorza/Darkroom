@@ -37,18 +37,10 @@ pub(crate) enum CompiledGraphValidationError {
     NilFuncId { node_id: NodeId },
     #[error("execution node {node_id:?} references missing func {func_id:?}")]
     MissingFunc { node_id: NodeId, func_id: FuncId },
-    #[error("execution node {node_id:?} input arity does not match its function")]
-    InputArity { node_id: NodeId },
-    #[error("execution node {node_id:?} output arity does not match its function")]
-    OutputArity { node_id: NodeId },
-    #[error("execution node {node_id:?} event arity does not match its function")]
-    EventArity { node_id: NodeId },
-    #[error("execution node {node_id:?} input range is out of bounds")]
-    InputRange { node_id: NodeId },
-    #[error("execution node {node_id:?} output range is out of bounds")]
-    OutputRange { node_id: NodeId },
-    #[error("execution node {node_id:?} event range is out of bounds")]
-    EventRange { node_id: NodeId },
+    #[error("execution node {node_id:?} {pool} arity does not match its function")]
+    Arity { node_id: NodeId, pool: PortPool },
+    #[error("execution node {node_id:?} {pool} range is out of bounds")]
+    Range { node_id: NodeId, pool: PortPool },
     #[error(
         "execution node {node_id:?} has an event subscriber outside the program: {subscriber:?}"
     )]
@@ -60,4 +52,26 @@ pub(crate) enum CompiledGraphValidationError {
     MissingBindingTarget { node_id: NodeId, target: OutputAddr },
     #[error("execution node {node_id:?} binds to out-of-range output {target:?}")]
     BindingOutputOutOfRange { node_id: NodeId, target: OutputAddr },
+}
+
+/// Which of a node's three packed port pools a fault names.
+///
+/// The arity and range checks are the same question asked of each pool, so the
+/// pool is a value the two variants carry rather than three variants apiece.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PortPool {
+    Input,
+    Output,
+    Event,
+}
+
+impl std::fmt::Display for PortPool {
+    /// Lowercase, so it reads inside the sentences above.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            PortPool::Input => "input",
+            PortPool::Output => "output",
+            PortPool::Event => "event",
+        })
+    }
 }
