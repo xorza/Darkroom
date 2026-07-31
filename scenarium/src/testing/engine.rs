@@ -11,10 +11,14 @@
 //! the run ends, so a test can hold two runs side by side and compare them, and
 //! nothing it asserts is invalidated by the next `run_*` call.
 
+use std::path::PathBuf;
+
 use hashbrown::HashMap;
 
 use ::common::CancelToken;
 
+use crate::execution::cache::disk_store::DiskStore;
+use crate::execution::cache::runtime::error::CacheEvictionFailure;
 use crate::execution::compile::error::CompileError;
 use crate::execution::engine::ExecutionEngine;
 use crate::execution::error::{Result, RunError};
@@ -66,6 +70,15 @@ impl TestEngine {
 
     pub(crate) fn try_reinstall(&mut self) -> std::result::Result<(), CompileError> {
         self.engine.update(&self.graph.graph, &self.graph.library)
+    }
+
+    /// Point the cache's disk tier at `root`, using this graph's own codecs.
+    ///
+    /// Between runs, like a document gaining a cache directory — every reuse
+    /// verdict already given was answered from the previous store.
+    pub(crate) fn attach_disk_store(&mut self, root: impl Into<PathBuf>) {
+        let store = DiskStore::new(&self.graph.library, Some(root.into()));
+        self.engine.set_disk_store(store);
     }
 
     pub(crate) fn id(&self, name: &str) -> NodeId {
@@ -155,6 +168,21 @@ impl TestEngine {
     pub(crate) fn set_output(&mut self, name: &str, values: Vec<DynamicValue>) {
         let id = self.id(name);
         self.engine.set_output_values(id, values);
+    }
+
+    /// Drop these nodes and everything downstream from RAM and disk, handing
+    /// back whatever could not be removed.
+    pub(crate) async fn evict<'n>(
+        &mut self,
+        names: impl IntoIterator<Item = &'n str>,
+    ) -> Vec<CacheEvictionFailure> {
+        let node_ids: Vec<NodeId> = names.into_iter().map(|name| self.id(name)).collect();
+        self.engine.evict_cache(&node_ids).await
+    }
+
+    /// What the last plan settled for this node.
+    pub(crate) fn state(&self, name: &str) -> NodeState {
+        self.engine.node_state(self.id(name))
     }
 
     /// Whether this node currently holds a resident value.

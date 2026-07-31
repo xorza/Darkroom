@@ -142,7 +142,6 @@ pub(crate) trait RunReporter: Send + std::fmt::Debug {
 
 #[cfg(test)]
 pub(crate) mod internals {
-    use crate::RamUsage;
     use crate::execution::error::RunError;
     use crate::execution::report::{ExecutionOutcome, NodeExecutionStatus};
     use crate::graph::identity::NodeId;
@@ -202,15 +201,6 @@ pub(crate) mod internals {
                     matches!(node.status, Some(NodeExecutionStatus::MissingInputs { .. }))
                 })
                 .map(|node| node.node_id)
-        }
-
-        /// RAM this node's resident output holds after the run.
-        pub(crate) fn node_ram(&self, node_id: NodeId) -> RamUsage {
-            self.nodes
-                .iter()
-                .find(|node| node.node_id == node_id)
-                .map(|node| node.ram)
-                .unwrap_or_default()
         }
     }
 
