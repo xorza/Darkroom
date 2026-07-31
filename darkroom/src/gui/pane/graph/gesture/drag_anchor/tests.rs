@@ -3,7 +3,6 @@ use glam::Vec2;
 use crate::core::document::harness::DocFixture;
 use crate::core::edit::intent::types::GraphIntent;
 use crate::gui::pane::graph::harness::CanvasHarness;
-use crate::gui::pane::graph::node::node_widget_id;
 
 /// A drag on a node body moves that node, by the pointer's travel.
 ///
@@ -22,7 +21,7 @@ fn a_body_drag_moves_the_node_by_the_pointers_travel() {
 
     // Press the body, then travel past the drag threshold. The sweep sees
     // the latch on the frame after the travel; the record consumes it.
-    let grab = h.ui.center_of(node_widget_id(dragged));
+    let grab = h.node_center(dragged);
     h.ui.press_at(grab);
     h.frame();
     let travel = Vec2::new(37.0, -21.0);

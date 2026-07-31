@@ -7,7 +7,7 @@ use ::serde::{Deserialize, Serialize};
 use glam::Vec2;
 use indexmap::IndexMap;
 use scenarium::NodeKind;
-use scenarium::{DetachedNode, Graph as CoreGraph, NodeId};
+use scenarium::{DetachedNode, Graph as CoreGraph, InputPort, NodeId, OutputPort};
 use std::collections::BTreeSet;
 
 use crate::core::document::dock::{DockLayout, DockOp};
@@ -43,6 +43,40 @@ pub(crate) struct PortRef {
     pub(crate) node_id: NodeId,
     pub(crate) kind: PortKind,
     pub(crate) port_idx: usize,
+}
+
+impl PortRef {
+    /// `node_id`'s `port_idx`th input — the left-column counterpart of the
+    /// graph's [`InputPort`].
+    pub(crate) fn input(node_id: NodeId, port_idx: usize) -> Self {
+        Self {
+            node_id,
+            kind: PortKind::Input,
+            port_idx,
+        }
+    }
+
+    /// `node_id`'s `port_idx`th output — the right-column counterpart of the
+    /// graph's [`OutputPort`].
+    pub(crate) fn output(node_id: NodeId, port_idx: usize) -> Self {
+        Self {
+            node_id,
+            kind: PortKind::Output,
+            port_idx,
+        }
+    }
+}
+
+impl From<InputPort> for PortRef {
+    fn from(port: InputPort) -> Self {
+        Self::input(port.node_id, port.port_idx)
+    }
+}
+
+impl From<OutputPort> for PortRef {
+    fn from(port: OutputPort) -> Self {
+        Self::output(port.node_id, port.port_idx)
+    }
 }
 
 /// What an editor tab shows: the document's graph ([`TabRef::Graph`]), or a

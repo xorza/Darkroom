@@ -287,16 +287,7 @@ pub(crate) fn draw(ui: &mut Ui, pass: &mut WirePass<'_, '_>) {
     let (theme, graph_ctx, geometry) =
         (pass.dcx.theme(), pass.dcx.graph_ctx(), pass.dcx.geometry());
     for (consumer, producer) in graph_ctx.connections() {
-        let src = PortRef {
-            node_id: producer.node_id,
-            kind: PortKind::Output,
-            port_idx: producer.port_idx,
-        };
-        let tgt = PortRef {
-            node_id: consumer.node_id,
-            kind: PortKind::Input,
-            port_idx: consumer.port_idx,
-        };
+        let (src, tgt) = (PortRef::from(producer), PortRef::from(consumer));
         let (Some(p0), Some(p3)) = (geometry.ports.center(src), geometry.ports.center(tgt)) else {
             continue;
         };

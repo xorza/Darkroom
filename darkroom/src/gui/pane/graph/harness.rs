@@ -7,17 +7,19 @@
 //! driven through it differs. A test that skipped a phase would be exercising a
 //! frame the app never performs.
 
-use glam::UVec2;
+use glam::{UVec2, Vec2};
 use palantir::internals::UiHarness;
-use palantir::{Configure, Panel, Sizing, Ui};
+use palantir::{Configure, Panel, Rect, Sizing, Ui};
 use scenarium::NodeId;
 
-use crate::core::document::Document;
 use crate::core::document::harness::DocFixture;
+use crate::core::document::{Document, PortRef};
 use crate::core::edit::intent::sink::{Intents, Queued};
 use crate::core::edit::intent::types::GraphIntent;
 use crate::gui::graph_ctx::harness::GraphCtxFixture;
 use crate::gui::pane::graph::GraphUI;
+use crate::gui::pane::graph::node::node_widget_id;
+use crate::gui::pane::graph::node::port_row::port_circle_wid;
 
 /// Surface every canvas test records at unless it is about size. Wide enough
 /// that [`DocFixture`]'s row of nodes lands on screen uncropped.
@@ -38,23 +40,26 @@ pub(crate) struct CanvasHarness {
 impl CanvasHarness {
     /// [`SURFACE`] with mono metrics — what a canvas test wants unless it is
     /// about measured text or about the surface itself.
-    pub(crate) fn new(fixture: DocFixture) -> Self {
+    ///
+    /// Takes a [`DocFixture`] or anything that converts into one — a
+    /// [`TestGraph`](scenarium::testing::graph::TestGraph) goes straight in.
+    pub(crate) fn new(fixture: impl Into<DocFixture>) -> Self {
         Self::over(UiHarness::new(SURFACE), fixture)
     }
 
     /// A different surface, still mono: for the tests whose subject is what
     /// fits on one.
-    pub(crate) fn sized(fixture: DocFixture, surface: UVec2) -> Self {
+    pub(crate) fn sized(fixture: impl Into<DocFixture>, surface: UVec2) -> Self {
         Self::over(UiHarness::new(surface), fixture)
     }
 
     /// Real text shaping: node headers and menu rows size to their labels, so
     /// mono metrics would put every one of them in the wrong place.
-    pub(crate) fn shaping_text(fixture: DocFixture, surface: UVec2) -> Self {
+    pub(crate) fn shaping_text(fixture: impl Into<DocFixture>, surface: UVec2) -> Self {
         Self::over(UiHarness::with_text(surface), fixture)
     }
 
-    fn over(ui: UiHarness, fixture: DocFixture) -> Self {
+    fn over(ui: UiHarness, fixture: impl Into<DocFixture>) -> Self {
         Self {
             ui,
             graph_ui: GraphUI::default(),
@@ -129,5 +134,36 @@ impl CanvasHarness {
     /// The `i`th node in placement order.
     pub(crate) fn node(&self, i: usize) -> NodeId {
         self.ctx.fixture.node(i)
+    }
+
+    /// Where `node_id`'s body last painted — post-transform, so it is the rect
+    /// a pointer aimed at the node has to land in.
+    pub(crate) fn node_rect(&self, node_id: NodeId) -> Rect {
+        self.ui
+            .rect(node_widget_id(node_id))
+            .unwrap_or_else(|| panic!("{node_id:?} recorded no body — was the frame primed?"))
+    }
+
+    /// The point a press grabs `node_id`'s body at.
+    pub(crate) fn node_center(&self, node_id: NodeId) -> Vec2 {
+        self.ui.center_of(node_widget_id(node_id))
+    }
+
+    /// The point a wire drag leaves `port` from, or lands on — the snap scan
+    /// tests the post-transform rect, so this is the one to aim at.
+    pub(crate) fn port_center(&self, port: PortRef) -> Vec2 {
+        self.ui.center_of(port_circle_wid(port))
+    }
+
+    /// The cached world rect wires anchor to and the cull reads, or `None`
+    /// once the node's entry has been evicted. Unlike [`Self::node_rect`] this
+    /// survives the node being culled — that is the whole point of the cache.
+    pub(crate) fn node_world_rect(&mut self, node_id: NodeId) -> Option<Rect> {
+        let Self { graph_ui, ctx, .. } = self;
+        let node = ctx
+            .graph_ctx()
+            .node(node_id)
+            .expect("the document still holds that node");
+        graph_ui.geometry.node_world_rect(node)
     }
 }

@@ -1,6 +1,7 @@
 use glam::{UVec2, Vec2};
 use scenarium::{Func, FuncId, Graph, Library, testing};
 
+use super::*;
 use crate::core::document::harness::DocFixture;
 use crate::gui::pane::graph::harness::CanvasHarness;
 
@@ -17,8 +18,6 @@ use crate::gui::pane::graph::harness::CanvasHarness;
 #[test]
 fn the_palette_sizes_its_results_area_from_the_search_row_it_actually_has() {
     use palantir::{Rect, Spacing};
-
-    use crate::gui::pane::graph::gesture::new_node::{results_wid, search_field_wid};
 
     /// The surface the palette opens against — 900 px tall, which is what the
     /// cap below is resolved from.
@@ -127,8 +126,6 @@ fn the_palette_sizes_its_results_area_from_the_search_row_it_actually_has() {
         big.1.size.h,
     );
 }
-
-use super::*;
 
 #[test]
 fn name_matches_is_case_insensitive_substring_with_empty_query_wildcard() {

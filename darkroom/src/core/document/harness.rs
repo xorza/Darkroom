@@ -1,6 +1,5 @@
-//! Fixtures for building a [`Document`] to test against: the libraries a test
-//! projects its nodes from, and the builder that turns a graph into a placed,
-//! laid-out document.
+//! The fixture that turns a graph into a placed, laid-out [`Document`] and the
+//! library it resolves against.
 //!
 //! Lives with [`Document`] rather than beside any one test because the document
 //! is what every altitude above it composes — a context fixture and a canvas
@@ -9,47 +8,15 @@
 use glam::Vec2;
 use scenarium::testing::graph::TestGraph;
 use scenarium::{
-    DataType, Func, FuncId, FuncInput, FuncOutput, Graph, Library, Node, NodeId, NodeKind,
-    OutputType, testing,
+    DataType, Func, FuncId, FuncInput, FuncOutput, Graph, Library, Node, NodeId, NodeKind, testing,
 };
 
 use crate::core::document::dock::DockOp;
 use crate::core::document::{Document, GraphView, TabRef};
 
-/// One func with an input and an output, so a node projected from it
-/// records the full body: header badges, both port columns, and the
-/// const editor on the unbound input.
-pub(crate) fn one_func_library() -> Library {
-    let mut library = Library::default();
-    library.add(testing::with_stub_lambda(
-        Func::new(FuncId::unique(), "probe")
-            .pure()
-            .input(FuncInput::optional("a", DataType::Int))
-            .output(FuncOutput::new("out", DataType::Int)),
-    ));
-    library
-}
-
-/// [`one_func_library`] plus a passthrough: one input and one wildcard output
-/// mirroring it, so the projected type of its output is whatever the *graph*
-/// wires in rather than anything its declaration states.
-pub(crate) fn wildcard_library() -> Library {
-    let mut library = one_func_library();
-    let mut passthrough = Func::new(FuncId::unique(), "passthrough")
-        .pure()
-        .input(FuncInput::optional("in", DataType::Any));
-    passthrough.outputs.push(FuncOutput {
-        name: "out".to_owned(),
-        description: None,
-        ty: OutputType::Wildcard { mirrors: 0 },
-    });
-    library.add(testing::with_stub_lambda(passthrough));
-    library
-}
-
 /// Lay every placement out along a row so no node lands off-viewport and gets
 /// culled — [`GraphView::for_graph`] seeds every item at the origin.
-pub(crate) fn spread(view: &mut GraphView) {
+fn spread(view: &mut GraphView) {
     for (i, pos) in view.item_placements.values_mut().enumerate() {
         *pos = row_pos(i);
     }
@@ -72,15 +39,9 @@ pub(crate) struct DocFixture {
 }
 
 impl DocFixture {
-    /// A document over `g`'s graph, resolving against the library `g` declared
-    /// its funcs in.
-    pub(crate) fn over(g: TestGraph) -> Self {
-        Self::with_library(g.graph, g.library)
-    }
-
     /// A document over a hand-built `graph` and the library it resolves
-    /// against — [`Self::over`] for the cases [`TestGraph`] can't express, like
-    /// a node naming a func the library was never given.
+    /// against — the [`TestGraph`] conversion for the cases that fixture can't
+    /// express, like a node naming a func the library was never given.
     pub(crate) fn with_library(graph: Graph, library: Library) -> Self {
         let mut doc = Document::from(graph);
         spread(&mut doc.main_view);
@@ -90,19 +51,21 @@ impl DocFixture {
     /// [`TestGraph::sample`]'s stock multi-node graph — what a test wants when
     /// it needs several wired nodes and doesn't care which is which.
     pub(crate) fn sample() -> Self {
-        Self::over(TestGraph::sample())
+        TestGraph::sample().into()
     }
 
-    /// `n` nodes projected from [`one_func_library`]'s `probe`, laid out along
-    /// the row. One declaration for all of them, so a port index means the same
-    /// thing on every node.
+    /// `n` nodes laid out along the row, all projected from one `probe` func
+    /// with an input and an output — so each records the full body (header
+    /// badges, both port columns, the const editor on the unbound input), and
+    /// a port index means the same thing on every one of them.
     pub(crate) fn probes(n: usize) -> Self {
-        let library = one_func_library();
-        let probe = library.by_name("probe").expect("just added").clone();
-        let mut fixture = Self {
-            doc: Document::default(),
-            library,
-        };
+        let probe = testing::with_stub_lambda(
+            Func::new(FuncId::unique(), "probe")
+                .pure()
+                .input(FuncInput::optional("a", DataType::Int))
+                .output(FuncOutput::new("out", DataType::Int)),
+        );
+        let mut fixture = Self::default();
         for _ in 0..n {
             fixture.add(&probe);
         }
@@ -180,5 +143,15 @@ impl DocFixture {
         self.doc.layout.find_or_insert(tab, primary);
         self.doc.layout.apply(DockOp::ActivateTab { tab });
         self
+    }
+}
+
+impl From<TestGraph> for DocFixture {
+    /// A document over `g`'s graph, resolving against the library `g` declared
+    /// its funcs in. Every fixture above this one takes an `impl
+    /// Into<DocFixture>`, so a test can hand its [`TestGraph`] straight to a
+    /// context or a canvas.
+    fn from(g: TestGraph) -> Self {
+        Self::with_library(g.graph, g.library)
     }
 }

@@ -470,6 +470,9 @@ fn commit_intent_rejects_cycle_forming_bind() {
     );
 }
 
+/// Commit `intent` expecting a stated refusal, and check nothing leaked
+/// through it — the gate exists to keep a malformed payload out of `apply`.
+#[track_caller]
 fn assert_invalid(doc: &mut Document, intent: GraphIntent, what: &str) {
     let nodes = doc.graph.len();
     match commit_intent(intent, doc) {

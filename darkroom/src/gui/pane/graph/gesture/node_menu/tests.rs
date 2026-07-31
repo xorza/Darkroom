@@ -3,7 +3,6 @@ use glam::UVec2;
 use crate::core::document::harness::DocFixture;
 use crate::core::edit::intent::types::GraphIntent;
 use crate::gui::pane::graph::harness::CanvasHarness;
-use crate::gui::pane::graph::node::node_widget_id;
 
 /// A node-body right-click selects the node it landed on before the menu
 /// opens, so whatever the user picks next acts on a coherent set.
@@ -21,7 +20,7 @@ fn a_node_body_right_click_selects_the_node_it_landed_on() {
     // rect for the click below.
     h.prime(2);
 
-    let on_func = h.ui.center_of(node_widget_id(func));
+    let on_func = h.node_center(func);
     h.ui.right_click_at(on_func);
     let intents = h.frame();
     assert!(

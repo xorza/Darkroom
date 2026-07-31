@@ -1,10 +1,10 @@
 use glam::Vec2;
 use scenarium::InputPort;
 
+use super::*;
 use crate::core::document::harness::DocFixture;
 use crate::core::edit::intent::types::GraphIntent;
 use crate::gui::pane::graph::harness::CanvasHarness;
-use crate::gui::pane::graph::node::node_widget_id;
 
 /// The breaker cuts a node where the *document* says it is, not where it last
 /// painted.
@@ -29,9 +29,7 @@ fn the_breaker_cuts_a_node_at_its_current_position_not_its_last_painted_one() {
     let node = h.node(0);
     h.prime(2);
 
-    let body =
-        h.ui.rect(node_widget_id(node))
-            .expect("the node recorded a body");
+    let body = h.node_rect(node);
     assert!(
         !body.contains(SCRIBBLE_TO),
         "the scribble must start out clear of the node, else the move proves nothing"
@@ -63,8 +61,6 @@ fn the_breaker_cuts_a_node_at_its_current_position_not_its_last_painted_one() {
         "the release cuts the node the scribble now crosses: {released:?}"
     );
 }
-
-use super::*;
 
 /// A scribble started at `p`, the way [`BreakerUI::apply`] starts one — the
 /// unit under test in everything below, which is about the polyline rather

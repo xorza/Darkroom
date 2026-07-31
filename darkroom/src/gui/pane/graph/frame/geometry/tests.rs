@@ -1,8 +1,8 @@
 use glam::Vec2;
 use scenarium::{Binding, InputPort};
 
+use crate::core::document::PortRef;
 use crate::core::document::harness::DocFixture;
-use crate::core::document::{PortKind, PortRef};
 use crate::gui::pane::graph::harness::CanvasHarness;
 
 /// A node scrolled off-screen keeps resolvable port centers — and loses them
@@ -28,11 +28,7 @@ fn a_culled_nodes_ports_stay_anchored_until_its_node_leaves_the_document() {
     let mut h = CanvasHarness::new(fixture);
     h.prime(2);
 
-    let out_port = PortRef {
-        node_id: leaves,
-        kind: PortKind::Output,
-        port_idx: 0,
-    };
+    let out_port = PortRef::output(leaves, 0);
     let anchored = h
         .graph_ui
         .geometry
@@ -63,32 +59,21 @@ fn a_culled_nodes_ports_stay_anchored_until_its_node_leaves_the_document() {
 
     // The node the document keeps holds its cached size; the other one is
     // still cached too, because being off-screen is not being deleted.
-    let CanvasHarness { graph_ui, ctx, .. } = &mut h;
-    let live = ctx.graph_ctx();
     for id in [stays, leaves] {
         assert!(
-            graph_ui
-                .geometry
-                .node_world_rect(live.node(id).expect("in the graph"))
-                .is_some(),
+            h.node_world_rect(id).is_some(),
             "an off-screen node is not a deleted one",
         );
     }
 
     // Now say the document dropped it. Its entries go; its neighbour's stay.
-    graph_ui.retain_nodes(|id| id == stays);
+    h.graph_ui.retain_nodes(|id| id == stays);
     assert!(
-        graph_ui
-            .geometry
-            .node_world_rect(live.node(leaves).expect("in the graph"))
-            .is_none(),
+        h.node_world_rect(leaves).is_none(),
         "a node the document stopped holding releases its cached size",
     );
     assert!(
-        graph_ui
-            .geometry
-            .node_world_rect(live.node(stays).expect("in the graph"))
-            .is_some(),
+        h.node_world_rect(stays).is_some(),
         "and its neighbour keeps its own",
     );
     // The port offsets went with it, so the next culled rebuild has nothing

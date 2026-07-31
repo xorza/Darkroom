@@ -25,19 +25,7 @@ fn fixture() -> (GraphCtxFixture, NodeId, NodeId) {
     g.wire("producer", 0, "consumer", 0);
     let (producer, consumer) = (g.id("producer"), g.id("consumer"));
 
-    (
-        GraphCtxFixture::over(DocFixture::over(g)),
-        producer,
-        consumer,
-    )
-}
-
-fn port(node_id: NodeId, kind: PortKind, port_idx: usize) -> PortRef {
-    PortRef {
-        node_id,
-        kind,
-        port_idx,
-    }
+    (GraphCtxFixture::over(g), producer, consumer)
 }
 
 #[test]
@@ -50,8 +38,8 @@ fn committing_a_same_kind_pair_is_a_broken_invariant_not_a_silent_drop() {
     let (_fixture, producer, consumer) = fixture();
     let mut out = Intents::default();
     commit_connection(
-        port(consumer, PortKind::Input, 0),
-        port(producer, PortKind::Input, 0),
+        PortRef::input(consumer, 0),
+        PortRef::input(producer, 0),
         &mut out,
     );
 }
@@ -92,16 +80,13 @@ fn a_wire_drops_when_its_start_node_leaves_the_scene() {
     // anything" — so a stranded wire would snap onto ports it should
     // never accept.
     let (mut f, producer, _consumer) = fixture();
-    let live = port(producer, PortKind::Output, 0);
+    let live = PortRef::output(producer, 0);
     assert!(
         prepass_with_wire_from(&mut f, live).is_some(),
         "a wire from a node still in the scene stays in flight"
     );
 
-    let gone = PortRef {
-        node_id: NodeId::unique(),
-        ..live
-    };
+    let gone = PortRef::output(NodeId::unique(), 0);
     assert!(
         prepass_with_wire_from(&mut f, gone).is_none(),
         "a wire from a vanished node drops"
@@ -128,18 +113,8 @@ fn a_port_drag_released_over_a_compatible_port_commits_the_binding() {
     // and `CanvasGeometry` measured centers to hit-test against.
     h.prime(2);
 
-    let source = port_circle_wid(PortRef {
-        node_id: producer,
-        kind: PortKind::Output,
-        port_idx: 0,
-    });
-    let sink = port_circle_wid(PortRef {
-        node_id: consumer,
-        kind: PortKind::Input,
-        port_idx: 0,
-    });
-    // The snap scan tests the post-transform rect, so aim at that one.
-    let drop_at = h.ui.center_of(sink);
+    let source = port_circle_wid(PortRef::output(producer, 0));
+    let drop_at = h.port_center(PortRef::input(consumer, 0));
 
     h.ui.press_on(source);
     h.frame();
@@ -174,17 +149,8 @@ fn a_port_drag_released_over_a_compatible_port_commits_the_binding() {
     h.doc_mut()
         .graph
         .set_input_binding(InputPort::new(consumer, 0), Binding::bind(producer, 0));
-    let back_source = port_circle_wid(PortRef {
-        node_id: consumer,
-        kind: PortKind::Output,
-        port_idx: 0,
-    });
-    let back_sink = port_circle_wid(PortRef {
-        node_id: producer,
-        kind: PortKind::Input,
-        port_idx: 0,
-    });
-    let back_drop_at = h.ui.center_of(back_sink);
+    let back_source = port_circle_wid(PortRef::output(consumer, 0));
+    let back_drop_at = h.port_center(PortRef::input(producer, 0));
     h.advance_past_double_click();
     h.ui.press_on(back_source);
     h.frame();

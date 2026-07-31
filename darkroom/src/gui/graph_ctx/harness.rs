@@ -27,9 +27,11 @@ pub(crate) struct GraphCtxFixture {
 }
 
 impl GraphCtxFixture {
-    pub(crate) fn over(fixture: DocFixture) -> Self {
+    /// Takes a [`DocFixture`] or anything that converts into one — a
+    /// [`TestGraph`](scenarium::testing::graph::TestGraph) goes straight in.
+    pub(crate) fn over(fixture: impl Into<DocFixture>) -> Self {
         Self {
-            fixture,
+            fixture: fixture.into(),
             ..Self::default()
         }
     }

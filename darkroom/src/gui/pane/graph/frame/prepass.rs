@@ -17,7 +17,7 @@ use scenarium::Binding;
 use scenarium::InputPort;
 use scenarium::{DataType, FsPathConfig, StaticValue};
 
-use crate::core::document::{PortKind, PortRef};
+use crate::core::document::PortKind;
 use crate::core::edit::intent::sink::Intents;
 use crate::gui::pane::graph::ctx::CanvasCtx;
 use crate::gui::pane::graph::node::set_input;
@@ -103,14 +103,7 @@ pub(crate) fn emit_port_dblclicks(cx: CanvasCtx<'_>, out: &mut Intents) {
         PortKind::Output => {
             for (consumer, producer) in cx.graph_ctx().connections() {
                 if producer.node_id == port.node_id && producer.port_idx == port.port_idx {
-                    out.push(set_input(
-                        PortRef {
-                            node_id: consumer.node_id,
-                            kind: PortKind::Input,
-                            port_idx: consumer.port_idx,
-                        },
-                        None,
-                    ));
+                    out.push(set_input(consumer.into(), None));
                 }
             }
         }

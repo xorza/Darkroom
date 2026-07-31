@@ -16,7 +16,7 @@ use crate::gui::pane::graph::node::port_row::port_circle_wid;
 fn ctrl_drag_off_an_output_spawns_a_preview_wired_to_it() {
     use palantir::{Modifiers, PointerButton};
 
-    use crate::core::document::{PortKind, PortRef};
+    use crate::core::document::PortRef;
     use crate::core::edit::intent::types::GraphIntent;
     use crate::core::preview::{PreviewSink, preview_func};
 
@@ -27,11 +27,7 @@ fn ctrl_drag_off_an_output_spawns_a_preview_wired_to_it() {
         .library
         .add(preview_func(std::sync::Arc::<PreviewSink>::default()));
     let producer = fixture.node(0);
-    let out_port = PortRef {
-        node_id: producer,
-        kind: PortKind::Output,
-        port_idx: 0,
-    };
+    let out_port = PortRef::output(producer, 0);
 
     // Two frames to record the node so its output circle has a widget id and
     // `CanvasGeometry` a measured center; the gesture refuses an unmeasured
@@ -45,17 +41,11 @@ fn ctrl_drag_off_an_output_spawns_a_preview_wired_to_it() {
         ctrl: true,
         ..Default::default()
     });
-    let circle = port_circle_wid(out_port);
-    h.ui.press_on(circle);
+    let from = h.port_center(out_port);
+    h.ui.press_on(port_circle_wid(out_port));
     h.frame();
     // `first_drag_started` polls the *drag* edge, not the press, so the
     // pointer has to actually move past palantir's threshold.
-    let from =
-        h.ui.ui()
-            .response_for(circle)
-            .layout_rect
-            .expect("recorded")
-            .center();
     h.ui.drag_to(from + Vec2::new(90.0, 40.0));
     let spawned = h.frame();
     h.ui.set_modifiers(Modifiers::default());

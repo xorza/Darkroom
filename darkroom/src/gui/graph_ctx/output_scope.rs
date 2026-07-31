@@ -2,7 +2,7 @@
 
 use scenarium::{DataType, FuncOutput, OutputPort};
 
-use crate::core::document::{PortKind, PortRef};
+use crate::core::document::PortRef;
 use crate::gui::graph_ctx::node_scope::NodeScope;
 
 /// One output port: what the func declares for it, and — for a wildcard —
@@ -30,11 +30,7 @@ impl<'a> OutputScope<'a> {
 
     /// This port's address in the canvas's glyph domains.
     pub(crate) fn port_ref(self) -> PortRef {
-        PortRef {
-            node_id: self.node.id,
-            kind: PortKind::Output,
-            port_idx: self.port_idx,
-        }
+        PortRef::output(self.node.id, self.port_idx)
     }
 
     pub(crate) fn name(self) -> &'a str {

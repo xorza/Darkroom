@@ -6,26 +6,47 @@ fn custom(id: u128) -> DataType {
     DataType::Custom(TypeId::from_u128(id))
 }
 
+/// What a typed port's color varies with — the declared type, the hover flag,
+/// and the preset — and what it must not vary with: the column it sits in.
 #[test]
-fn distinct_builtin_types_get_distinct_colors() {
-    let t = Theme::dark();
-    let f = port_color(&t, &DataType::Float, PortKind::Input, false);
-    let i = port_color(&t, &DataType::Int, PortKind::Input, false);
-    let b = port_color(&t, &DataType::Bool, PortKind::Input, false);
-    let s = port_color(&t, &DataType::String, PortKind::Input, false);
-    assert_ne!(f, i);
-    assert_ne!(i, b);
-    assert_ne!(b, s);
-    assert_ne!(f, s);
-}
+fn a_typed_ports_color_varies_by_type_hover_and_preset_but_not_by_column() {
+    let (dark, light) = (Theme::dark(), Theme::light());
+    let types = [
+        DataType::Float,
+        DataType::Int,
+        DataType::Bool,
+        DataType::String,
+    ];
 
-#[test]
-fn type_color_independent_of_kind() {
-    let t = Theme::dark();
-    assert_eq!(
-        port_color(&t, &DataType::Float, PortKind::Input, false),
-        port_color(&t, &DataType::Float, PortKind::Output, false),
-    );
+    // Pairwise distinct, so no two declared types read as the same wire.
+    for (i, a) in types.iter().enumerate() {
+        for b in &types[i + 1..] {
+            assert_ne!(
+                port_color(&dark, a, PortKind::Input, false),
+                port_color(&dark, b, PortKind::Input, false),
+                "{a:?} and {b:?} share a color",
+            );
+        }
+    }
+
+    for ty in &types {
+        let rest = port_color(&dark, ty, PortKind::Input, false);
+        assert_eq!(
+            rest,
+            port_color(&dark, ty, PortKind::Output, false),
+            "{ty:?} is the type's hue, not the column's",
+        );
+        assert_ne!(
+            rest,
+            port_color(&dark, ty, PortKind::Input, true),
+            "{ty:?} must visibly lift on hover",
+        );
+        assert_ne!(
+            rest,
+            port_color(&light, ty, PortKind::Input, false),
+            "{ty:?} is picked out of the preset's own palette",
+        );
+    }
 }
 
 #[test]
@@ -47,14 +68,6 @@ fn null_falls_back_to_positional_port_color() {
         port_color(&t, &DataType::Any, PortKind::Output, true),
         t.colors.output_port.hover
     );
-}
-
-#[test]
-fn hover_changes_typed_color() {
-    let t = Theme::dark();
-    let base = port_color(&t, &DataType::Float, PortKind::Input, false);
-    let hov = port_color(&t, &DataType::Float, PortKind::Input, true);
-    assert_ne!(base, hov);
 }
 
 #[test]
@@ -100,14 +113,4 @@ fn event_color_is_neutral_and_lifts_on_hover() {
         assert_eq!(hov, t.colors.event_port.hover);
         assert_ne!(rest, hov, "hover must visibly differ from rest");
     }
-}
-
-#[test]
-fn light_and_dark_palettes_differ() {
-    let dark = Theme::dark();
-    let light = Theme::light();
-    assert_ne!(
-        port_color(&dark, &DataType::Float, PortKind::Input, false),
-        port_color(&light, &DataType::Float, PortKind::Input, false),
-    );
 }
