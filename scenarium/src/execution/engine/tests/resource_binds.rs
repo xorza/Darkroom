@@ -4,8 +4,6 @@ use std::sync::Mutex as StdMutex;
 
 use ::common::{TempDir, TempFile};
 
-use crate::testing::calls::Calls;
-
 use crate::async_lambda;
 use crate::{FsPathConfig, FsPathMode};
 
@@ -156,25 +154,17 @@ async fn an_unidentifiable_path_fails_only_the_node_declaring_it() {
     let mut e = TestEngine::over(g);
 
     lock(0o000);
-    let run = e.run(RunSeeds::sinks()).await;
+    let run = e.run_sinks().await;
     lock(0o755);
-    assert_unavailable(
-        &run.expect("a per-node failure must not abort the run"),
-        "load_text",
-        "capture",
-    );
+    assert_unavailable(&run, "load_text", "capture");
 
     // The same file reached through a producer's value, known only at the
     // node's turn. Same outcome, same route.
     let mut e = TestEngine::over(path_graph(&data_path, CacheMode::None, Observed::default()));
     lock(0o000);
-    let run = e.run(RunSeeds::sinks()).await;
+    let run = e.run_sinks().await;
     lock(0o755);
-    assert_unavailable(
-        &run.expect("a per-node failure must not abort the run"),
-        "load_text",
-        "annotate",
-    );
+    assert_unavailable(&run, "load_text", "annotate");
 }
 
 /// The core regression: a path arriving over a **Bind** edge keys the loader
@@ -256,24 +246,16 @@ async fn wired_path_disk_reuse_survives_reopen_until_file_changes() {
     let observed = Observed::default();
     let path = data.to_str();
 
-    // A fresh engine over an identically-declared graph: `TestGraph` mints
-    // ids in declaration order, so the reopened engine addresses the very
-    // slots the blobs were written under.
-    let reopen = |observed: Observed| {
-        let mut e = TestEngine::over(path_graph(&path, CacheMode::Disk, observed));
-        e.attach_disk_store(dir.path());
-        e
-    };
-
     // Cold run: computes and stores the blobs.
-    let mut e = reopen(observed.clone());
+    let mut e = TestEngine::over(path_graph(&path, CacheMode::Disk, observed.clone()))
+        .with_disk_store(dir.path());
     e.run_sinks().await;
     assert_eq!((observed.loads(), observed.annotates()), (1, 1));
 
     // Reopen, unchanged file: the loader is a disk hit under the re-stamped
     // digest, and so is its downstream — each re-stamped at reach time,
     // producer-first.
-    let mut e = reopen(observed.clone());
+    let mut e = e.reopen();
     let run = e.run_sinks().await;
     assert_eq!(
         observed.loads(),
@@ -296,7 +278,7 @@ async fn wired_path_disk_reuse_survives_reopen_until_file_changes() {
     // downstream; the path producer's own digest is unchanged, so it stays a
     // disk hit feeding the recompute.
     std::fs::write(data.path(), "v2-longer").unwrap();
-    let mut e = reopen(observed.clone());
+    let mut e = e.reopen();
     let run = e.run_sinks().await;
     assert_eq!(
         observed.loads(),

@@ -15,27 +15,13 @@ fn shifting_source(cell: Arc<AtomicI64>) -> impl FnOnce(NodeSpec) -> NodeSpec {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn simple_compute() -> TestResult {
+async fn simple_compute() {
     let b = Arc::new(AtomicI64::new(5));
     let mut g = TestGraph::new();
     g.add("a", shifting_source(Arc::new(AtomicI64::new(2))));
     g.add("b", shifting_source(b.clone()));
-    g.add("sum", |n| {
-        n.pure()
-            .cache(CacheMode::Ram)
-            .input(DataType::Int)
-            .input(DataType::Int)
-            .output(DataType::Int)
-            .compute(|i| (i[0].as_i64().unwrap() + i[1].as_i64().unwrap()).into())
-    });
-    g.add("mult", |n| {
-        n.pure()
-            .cache(CacheMode::Ram)
-            .input(DataType::Int)
-            .input(DataType::Int)
-            .output(DataType::Int)
-            .compute(|i| (i[0].as_i64().unwrap() * i[1].as_i64().unwrap()).into())
-    });
+    g.add("sum", |n| n.sum().cache(CacheMode::Ram));
+    g.add("mult", |n| n.mult().cache(CacheMode::Ram));
     g.add("print", |n| n.records());
     g.wire("a", 0, "sum", 0);
     g.wire("b", 0, "sum", 1);
@@ -57,11 +43,10 @@ async fn simple_compute() -> TestResult {
     e.edit(|g| g.edit_func("b", |func| func.behavior = FuncBehavior::Impure));
     let run = e.run_sinks().await;
     assert_eq!(run.logs(), ["63"], "sum = 2 + 7 = 9, mult = 9 * 7 = 63");
-    Ok(())
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn required_none_binding_is_stable() -> TestResult {
+async fn required_none_binding_is_stable() {
     let mut e = TestEngine::over(TestGraph::sample());
     // sum's first input unbound (required) — sum and downstream can't run.
     e.edit(|g| g.unbind("sum", 0));
@@ -74,11 +59,10 @@ async fn required_none_binding_is_stable() -> TestResult {
     // flap.
     assert_eq!(first.missing_inputs(), second.missing_inputs());
     assert_eq!(first.missing_inputs(), ["Print", "mult", "sum"]);
-    Ok(())
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn schedule_stable_across_repeated_runs() -> TestResult {
+async fn schedule_stable_across_repeated_runs() {
     let mut e = TestEngine::over(TestGraph::sample());
 
     // Three runs held at once — an outcome is a snapshot, so they can be
@@ -101,11 +85,10 @@ async fn schedule_stable_across_repeated_runs() -> TestResult {
 
     // The cached product stays correct every run: sum(1 + 11 = 12) * get_b(11) = 132.
     assert_eq!(e.output_i64("mult", 0), Some(132));
-    Ok(())
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn cached_upstream_output_reused_after_rebinding() -> TestResult {
+async fn cached_upstream_output_reused_after_rebinding() {
     let mut e = TestEngine::over(TestGraph::sample());
     e.run_sinks().await;
 
@@ -120,14 +103,13 @@ async fn cached_upstream_output_reused_after_rebinding() -> TestResult {
     // but its producer is served from cache rather than re-run.
     e.edit(|g| g.wire("get_b", 0, "mult", 0));
     assert_eq!(e.run_sinks().await.ran(), ["mult", "Print"]);
-    Ok(())
 }
 
 /// Output buffers are wiped before a re-running node is invoked, so an
 /// unwritten output cannot retain a prior run's value. This sink has no
 /// demanded outputs, so leaving one port `Unbound` is valid.
 #[tokio::test(flavor = "multi_thread")]
-async fn unwritten_output_port_is_cleared_before_reexecution() -> TestResult {
+async fn unwritten_output_port_is_cleared_before_reexecution() {
     use crate::async_lambda;
 
     let invocations = Arc::new(AtomicUsize::new(0));
@@ -184,5 +166,4 @@ async fn unwritten_output_port_is_cleared_before_reexecution() -> TestResult {
         matches!(e.output("partial_writer", 1), Some(DynamicValue::Unbound)),
         "the unwritten port is cleared before invoke, not left holding 20"
     );
-    Ok(())
 }

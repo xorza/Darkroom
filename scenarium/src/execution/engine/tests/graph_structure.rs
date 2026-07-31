@@ -1,10 +1,10 @@
 use super::*;
 
 #[tokio::test]
-async fn basic_run() -> TestResult {
+async fn basic_run() {
     let mut e = TestEngine::over(TestGraph::sample());
 
-    let plan = e.plan_sinks().await?;
+    let plan = e.plan_sinks().await;
 
     assert_eq!(plan.scheduled(), ["get_b", "get_a", "sum", "mult", "Print"]);
     assert_eq!(
@@ -24,11 +24,10 @@ async fn basic_run() -> TestResult {
     assert_eq!(e.readers("mult"), [1]);
 
     assert!(e.engine.compiled().by_id(e.id("Print")).sink);
-    Ok(())
 }
 
 #[tokio::test]
-async fn updates_after_graph_change() -> TestResult {
+async fn updates_after_graph_change() {
     let mut e = TestEngine::over(TestGraph::sample());
     // Rewire mult to the sources directly, bypassing sum.
     e.edit(|g| {
@@ -36,7 +35,7 @@ async fn updates_after_graph_change() -> TestResult {
         g.wire("get_b", 0, "mult", 1);
     });
 
-    let plan = e.plan_sinks().await?;
+    let plan = e.plan_sinks().await;
 
     assert_eq!(
         plan.scheduled(),
@@ -48,7 +47,6 @@ async fn updates_after_graph_change() -> TestResult {
         assert_eq!(e.readers(name), [1], "{name} now has exactly one consumer");
     }
     assert!(e.demand("Print").is_empty());
-    Ok(())
 }
 
 #[test]

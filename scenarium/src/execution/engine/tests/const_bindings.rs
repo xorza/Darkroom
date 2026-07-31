@@ -1,7 +1,7 @@
 use super::*;
 
 #[tokio::test(flavor = "multi_thread")]
-async fn const_binding_tracks_changes() -> TestResult {
+async fn const_binding_tracks_changes() {
     let mut e = TestEngine::over(TestGraph::sample());
     e.edit(|g| {
         g.constant("mult", 0, 3i64);
@@ -23,14 +23,13 @@ async fn const_binding_tracks_changes() -> TestResult {
     e.edit(|g| g.constant("mult", 0, 4i64));
     let run = e.run_sinks().await;
     assert_eq!(run.ran(), ["mult", "Print"]);
-    Ok(())
 }
 
 /// The same const value must not re-key the node, and a different one must
 /// — checked across four consecutive runs, with the sources wired to
 /// `unreachable!` so any walk past the consts fails loudly.
 #[tokio::test(flavor = "multi_thread")]
-async fn const_binding_invokes_only_once() -> TestResult {
+async fn const_binding_invokes_only_once() {
     let mut e = TestEngine::over(TestGraph::sample_with(TestFuncHooks {
         get_a: Arc::new(|| unreachable!("a const-fed graph never reaches its sources")),
         get_b: Arc::new(|| unreachable!("a const-fed graph never reaches its sources")),
@@ -53,11 +52,10 @@ async fn const_binding_invokes_only_once() -> TestResult {
 
     // Stable again.
     assert_eq!(e.run_sinks().await.ran(), ["Print"]);
-    Ok(())
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn const_excludes_upstream_node() -> TestResult {
+async fn const_excludes_upstream_node() {
     let mut e = TestEngine::over(TestGraph::sample());
     // Replace sum[0] (get_a) with a const — get_a is no longer needed.
     e.edit(|g| g.constant("sum", 0, 33i64));
@@ -69,11 +67,10 @@ async fn const_excludes_upstream_node() -> TestResult {
     e.edit(|g| g.unbind("sum", 1));
 
     assert_eq!(e.run_sinks().await.ran(), ["sum", "mult", "Print"]);
-    Ok(())
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn change_from_const_to_bind_recomputes() -> TestResult {
+async fn change_from_const_to_bind_recomputes() {
     let mut e = TestEngine::over(TestGraph::sample());
     e.edit(|g| g.constant("sum", 0, 33i64));
 
@@ -83,11 +80,10 @@ async fn change_from_const_to_bind_recomputes() -> TestResult {
     e.edit(|g| g.wire("get_b", 0, "sum", 0));
 
     assert_eq!(e.run_sinks().await.ran(), ["sum", "mult", "Print"]);
-    Ok(())
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn optional_input_binding_change_recomputes() -> TestResult {
+async fn optional_input_binding_change_recomputes() {
     let mut e = TestEngine::over(TestGraph::sample());
     e.run_sinks().await;
 
@@ -100,5 +96,4 @@ async fn optional_input_binding_change_recomputes() -> TestResult {
 
     // Stable on rerun.
     assert_eq!(e.run_sinks().await.ran(), ["Print"]);
-    Ok(())
 }

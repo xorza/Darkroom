@@ -4,11 +4,11 @@ use super::*;
 /// down every consumer — so the whole tail of the chain is out of the run
 /// while its sources still stand.
 #[tokio::test]
-async fn required_missing_propagates_downstream() -> TestResult {
+async fn required_missing_propagates_downstream() {
     let mut e = TestEngine::over(TestGraph::sample());
     e.edit(|g| g.unbind("sum", 0));
 
-    let plan = e.plan_sinks().await?;
+    let plan = e.plan_sinks().await;
 
     assert_eq!(plan.missing_inputs(), ["Print", "mult", "sum"]);
     assert_eq!(
@@ -17,7 +17,6 @@ async fn required_missing_propagates_downstream() -> TestResult {
         "the one source still feeding something stands; unbinding sum[0] left \
          `get_a` reading into nothing, so the backward walk never reaches it"
     );
-    Ok(())
 }
 
 /// A *binding* to a missing-required producer propagates even through an
@@ -26,7 +25,7 @@ async fn required_missing_propagates_downstream() -> TestResult {
 /// *unbound* input (see `optional_unbound_does_not_propagate`), not a
 /// binding to a broken upstream.
 #[tokio::test]
-async fn optional_bind_to_missing_propagates() -> TestResult {
+async fn optional_bind_to_missing_propagates() {
     let mut e = TestEngine::over(TestGraph::sample());
     e.edit(|g| {
         // sum missing-required; mult[0] stays bound to sum but goes optional.
@@ -34,29 +33,27 @@ async fn optional_bind_to_missing_propagates() -> TestResult {
         g.edit_func("mult", |func| func.inputs[0].required = false);
     });
 
-    let plan = e.plan_sinks().await?;
+    let plan = e.plan_sinks().await;
 
     assert_eq!(plan.missing_inputs(), ["Print", "mult", "sum"]);
     assert_eq!(plan.runnable(), ["get_b"]);
-    Ok(())
 }
 
 /// The contrast to `optional_bind_to_missing_propagates`: an optional input
 /// left **unbound** is a deliberate no-value, so it does not flag the node
 /// missing — it runs with its default.
 #[tokio::test]
-async fn optional_unbound_does_not_propagate() -> TestResult {
+async fn optional_unbound_does_not_propagate() {
     let mut e = TestEngine::over(TestGraph::sample());
     e.edit(|g| {
         g.unbind("mult", 0);
         g.edit_func("mult", |func| func.inputs[0].required = false);
     });
 
-    let plan = e.plan_sinks().await?;
+    let plan = e.plan_sinks().await;
 
     assert!(plan.missing_inputs().is_empty());
     assert!(plan.runnable().contains(&"mult"));
-    Ok(())
 }
 
 /// Executing counterpart: an optional bind to a gated upstream gates the
@@ -64,7 +61,7 @@ async fn optional_unbound_does_not_propagate() -> TestResult {
 /// for the worker panicking in `collect_inputs` ("missing output values") —
 /// the planned-only siblings above can't catch it since they never execute.
 #[tokio::test(flavor = "multi_thread")]
-async fn optional_bind_to_gated_upstream_is_gated() -> TestResult {
+async fn optional_bind_to_gated_upstream_is_gated() {
     let mut e = TestEngine::over(TestGraph::sample());
     e.edit(|g| {
         // sum's required input[0] unbound → sum missing-required → gated.
@@ -87,5 +84,4 @@ async fn optional_bind_to_gated_upstream_is_gated() -> TestResult {
         "the gated chain never runs, so it never reads sum's absent output — \
          and `get_b`, whose only consumer is gated, is cut with it"
     );
-    Ok(())
 }

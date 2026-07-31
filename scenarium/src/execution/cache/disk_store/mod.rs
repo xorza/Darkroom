@@ -253,6 +253,7 @@ impl DiskStore {
 
 #[cfg(test)]
 pub(crate) mod internals {
+    use std::path::PathBuf;
     use std::sync::atomic::AtomicU64;
 
     use crate::execution::cache::disk_store::{DiskStore, format};
@@ -265,6 +266,13 @@ pub(crate) mod internals {
     }
 
     impl DiskStore {
+        /// Where this node's blob lives, so a fixture can corrupt, read back or
+        /// delete one without re-deriving the store's own naming.
+        pub(crate) fn blob_path(&self, node_id: NodeId) -> PathBuf {
+            self.node_path(node_id)
+                .expect("a disk-backed store has a root")
+        }
+
         /// Replace the first output payload's value tag with an unknown one, leaving the
         /// header — and so [`DiskStore::covers_demand`]'s verdict — intact. Models a blob
         /// that passes the resolver's probe and then fails to decode.

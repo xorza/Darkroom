@@ -6,11 +6,11 @@ use crate::execution::schedule::NodeState;
 /// the plan. Its consumer `mult` sees the disabled producer as unavailable,
 /// so the missing-required-input flag propagates downstream.
 #[tokio::test]
-async fn disabled_node_stays_compiled_but_breaks_downstream() -> TestResult {
+async fn disabled_node_stays_compiled_but_breaks_downstream() {
     let mut e = TestEngine::over(TestGraph::sample());
     e.edit(|g| g.disable("sum"));
 
-    let plan = e.plan_sinks().await?;
+    let plan = e.plan_sinks().await;
 
     assert!(
         e.engine.compiled().by_id(e.id("sum")).disabled,
@@ -26,7 +26,6 @@ async fn disabled_node_stays_compiled_but_breaks_downstream() -> TestResult {
         ["Print", "mult"],
         "the consumers lost their transitive producer"
     );
-    Ok(())
 }
 
 /// With `mult`'s sum-fed input made optional, disabling `sum` no longer
@@ -34,17 +33,16 @@ async fn disabled_node_stays_compiled_but_breaks_downstream() -> TestResult {
 /// runs (mirrors `optional_unbound_does_not_propagate`, but via the
 /// disable flag rather than a cleared binding).
 #[tokio::test]
-async fn disabled_upstream_with_optional_consumer_still_runs() -> TestResult {
+async fn disabled_upstream_with_optional_consumer_still_runs() {
     let mut e = TestEngine::over(TestGraph::sample());
     e.edit(|g| {
         g.disable("sum");
         g.edit_func("mult", |func| func.inputs[0].required = false);
     });
 
-    let plan = e.plan_sinks().await?;
+    let plan = e.plan_sinks().await;
 
     assert_eq!(plan.scheduled(), ["get_b", "mult", "Print"]);
-    Ok(())
 }
 
 /// …and the same shape must survive **execution**, not just planning.
@@ -58,11 +56,11 @@ async fn disabled_upstream_with_optional_consumer_still_runs() -> TestResult {
 /// silently served whatever the producer had left in RAM from before
 /// it was disabled, as if it were this run's value.
 ///
-/// `mult`'s `B` is the optional port, so the disabled producer feeds
-/// *that* one; unbound is what optional means, and its lambda's
-/// `unwrap_or(1)` is what reads it.
+/// `mult`'s second port is the optional one, so the disabled producer feeds
+/// *that*; unbound is what optional means, and `arith`'s identity of 1 is
+/// what reads it.
 #[tokio::test]
-async fn a_disabled_producer_on_an_optional_input_delivers_unbound() -> TestResult {
+async fn a_disabled_producer_on_an_optional_input_delivers_unbound() {
     let mut g = TestGraph::new();
     g.add("src", |n| n.returns(7i64));
     g.add("disabled", |n| {
@@ -71,20 +69,7 @@ async fn a_disabled_producer_on_an_optional_input_delivers_unbound() -> TestResu
             .output(DataType::Int)
             .compute(|inputs| inputs[0].as_i64().unwrap_or_default().into())
     });
-    // `b` is the optional port, so the disabled producer feeds *that* one;
-    // unbound is what optional means, and the `unwrap_or(1)` below is what
-    // reads it.
-    g.add("mult", |n| {
-        n.pure()
-            .input(DataType::Int)
-            .optional(DataType::Int)
-            .output(DataType::Int)
-            .compute(|inputs| {
-                let a = inputs[0].as_i64().expect("the required input is fed");
-                let b = inputs[1].as_i64().unwrap_or(1);
-                (a * b).into()
-            })
-    });
+    g.add("mult", |n| n.mult());
     g.add("print", |n| n.records());
     g.wire("src", 0, "disabled", 0);
     g.wire("src", 0, "mult", 0);
@@ -105,7 +90,6 @@ async fn a_disabled_producer_on_an_optional_input_delivers_unbound() -> TestResu
         run.logs(),
         ["7"],
         "the optional input read as unbound, so `mult` multiplied by its \
-         own default of 1 rather than reading a value nothing wrote",
+         own identity of 1 rather than reading a value nothing wrote",
     );
-    Ok(())
 }

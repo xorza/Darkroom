@@ -9,7 +9,7 @@ fn nonexistent_node_returns_none() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn with_const_bindings() -> TestResult {
+async fn with_const_bindings() {
     let mut e = TestEngine::over(TestGraph::sample_with(TestFuncHooks {
         get_a: Arc::new(|| unreachable!("const-fed: the sources are never reached")),
         get_b: Arc::new(|| unreachable!("const-fed: the sources are never reached")),
@@ -26,11 +26,10 @@ async fn with_const_bindings() -> TestResult {
     assert_eq!(e.input_i64("mult", 1), Some(5));
     assert_eq!(e.outputs("mult").len(), 1);
     assert_eq!(e.output_i64("mult", 0), Some(15), "3 * 5");
-    Ok(())
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn with_bound_outputs() -> TestResult {
+async fn with_bound_outputs() {
     let mut e = TestEngine::over(TestGraph::sample_with(TestFuncHooks {
         get_a: Arc::new(|| Ok(2)),
         get_b: Arc::new(|| 5),
@@ -61,11 +60,10 @@ async fn with_bound_outputs() -> TestResult {
 
     assert_eq!(e.input_i64("Print", 0), Some(35));
     assert!(e.outputs("Print").is_empty());
-    Ok(())
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn with_none_binding() -> TestResult {
+async fn with_none_binding() {
     let mut e = TestEngine::over(TestGraph::sample());
     e.edit(|g| {
         g.edit_func("mult", |func| func.inputs[1].required = false);
@@ -78,11 +76,10 @@ async fn with_none_binding() -> TestResult {
     assert_eq!(inputs.len(), 2);
     assert!(inputs[0].is_some());
     assert!(inputs[1].is_none(), "an unbound port delivers no value");
-    Ok(())
 }
 
 #[test]
-fn before_execution() -> TestResult {
+fn before_execution() {
     let e = TestEngine::over(TestGraph::sample());
 
     // Before execution: all inputs are None (no upstream values yet).
@@ -90,5 +87,4 @@ fn before_execution() -> TestResult {
     assert_eq!(inputs.len(), 2);
     assert!(inputs.iter().all(Option::is_none));
     assert!(e.outputs("sum").is_empty());
-    Ok(())
 }

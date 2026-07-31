@@ -1,7 +1,7 @@
 use super::*;
 
 #[tokio::test(flavor = "multi_thread")]
-async fn node_error_propagates_to_dependents() -> TestResult {
+async fn node_error_propagates_to_dependents() {
     let mut e = TestEngine::over(TestGraph::sample_with(TestFuncHooks {
         get_a: Arc::new(|| Err(internals::failure("Intentional failure in get_a"))),
         get_b: Arc::new(|| 42),
@@ -35,5 +35,4 @@ async fn node_error_propagates_to_dependents() -> TestResult {
     assert!(e.outputs("get_a").is_empty());
     assert!(run.error("get_b").is_none());
     assert_eq!(e.output_i64("get_b", 0), Some(42));
-    Ok(())
 }
