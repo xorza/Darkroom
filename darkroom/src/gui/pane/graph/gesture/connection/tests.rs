@@ -2,13 +2,13 @@ use glam::UVec2;
 use palantir::internals::UiHarness;
 use palantir::{Configure, Panel, Sizing, Ui};
 use scenarium::testing::graph::TestGraph;
-use scenarium::{Library, NodeId, OutputTypes};
+use scenarium::{NodeId, OutputTypes};
 
 use super::*;
-use crate::core::document::harness::{one_func_library, spread};
+use crate::core::document::harness::{DocFixture, one_func_library, spread};
 use crate::core::document::{Document, GraphView};
 use crate::core::edit::intent::sink::Intents;
-use crate::gui::app::ctx::{AppCtx, StatusInputs};
+use crate::gui::graph_ctx::harness::GraphCtxFixture;
 use crate::gui::pane::graph::GraphUI;
 use crate::gui::pane::graph::frame::hits::CanvasHits;
 use crate::gui::pane::graph::harness::*;
@@ -16,65 +16,26 @@ use crate::gui::pane::graph::node::port_row::port_circle_wid;
 use crate::gui::state::run_state::RunState;
 use crate::gui::theme::Theme;
 
-#[derive(Debug)]
-struct Fixture {
-    /// Everything a context composes. The snap filter reads the authoring
-    /// graph out of the document to answer its cycle question, each node's
-    /// ports out of the library, and a port's resolved type off the table —
-    /// which composing the context fills.
-    doc: Document,
-    library: Library,
-    run_state: RunState,
-    theme: Theme,
-    output_types: OutputTypes,
-    /// The canvas state a context carries beside the pane. Both start
-    /// empty: a bare fixture records nothing, so there are no port centers
-    /// to cache and no responses to sweep.
-    geometry: CanvasGeometry,
-    hits: CanvasHits,
-    producer: NodeId,
-    consumer: NodeId,
-}
-
-impl Fixture {
-    /// The canvas context a controller is driven through. No gesture latched
-    /// and no Esc: these tests drive the wire directly rather than through
-    /// the bare-canvas classification.
-    fn canvas_ctx(&mut self) -> CanvasCtx<'_> {
-        let app = AppCtx::new(
-            &self.theme,
-            &self.library,
-            &self.run_state,
-            StatusInputs::default(),
-        );
-        let graph_ctx = GraphCtx::for_document(app, &self.doc, &mut self.output_types)
-            .expect("the fixture's document shows the graph");
-        CanvasCtx::new(graph_ctx, &self.geometry, &self.hits, None, false)
-    }
-}
-
 /// Two two-in/one-out nodes wired producer → consumer — enough graph for a
 /// wire to be in flight over, and enough wiring for the snap filter to have a
 /// cycle question to answer. Both share one declaration, so a port index means
 /// the same thing on either end.
-fn fixture() -> Fixture {
+///
+/// Returned beside the fixture rather than looked up out of it: the snap
+/// filter reads the authoring graph to answer its cycle question, so a test
+/// needs to name both ends.
+fn fixture() -> (GraphCtxFixture, NodeId, NodeId) {
     let mut g = TestGraph::new();
     g.add("producer", |n| n.mult());
     g.instance("consumer", "producer");
     g.wire("producer", 0, "consumer", 0);
     let (producer, consumer) = (g.id("producer"), g.id("consumer"));
 
-    Fixture {
-        doc: Document::from(g.graph),
-        library: g.library,
-        run_state: RunState::default(),
-        theme: Theme::default(),
-        output_types: OutputTypes::default(),
-        geometry: CanvasGeometry::default(),
-        hits: CanvasHits::default(),
+    (
+        GraphCtxFixture::over(DocFixture::over(g)),
         producer,
         consumer,
-    }
+    )
 }
 
 fn port(node_id: NodeId, kind: PortKind, port_idx: usize) -> PortRef {
@@ -92,11 +53,11 @@ fn committing_a_same_kind_pair_is_a_broken_invariant_not_a_silent_drop() {
     // same-kind pair reaching the commit means that broke upstream. Dropping
     // it silently would show up as a wire that simply refuses to land, with
     // nothing anywhere saying why.
-    let f = fixture();
+    let (_fixture, producer, consumer) = fixture();
     let mut out = Intents::default();
     commit_connection(
-        port(f.consumer, PortKind::Input, 0),
-        port(f.producer, PortKind::Input, 0),
+        port(consumer, PortKind::Input, 0),
+        port(producer, PortKind::Input, 0),
         &mut out,
     );
 }
@@ -107,7 +68,7 @@ fn committing_a_same_kind_pair_is_a_broken_invariant_not_a_silent_drop() {
 /// the port geometry, which a bare fixture has none of) — and the more exposed
 /// one, since no button is held, so it can sit across an arbitrary number of
 /// undos.
-fn prepass_with_wire_from(fixture: &mut Fixture, start: PortRef) -> Option<InFlight> {
+fn prepass_with_wire_from(fixture: &mut GraphCtxFixture, start: PortRef) -> Option<InFlight> {
     let mut arena = UiHarness::arena();
     let mut connections = ConnectionUI::default();
     connections.state.latch(InFlight {
@@ -115,7 +76,14 @@ fn prepass_with_wire_from(fixture: &mut Fixture, start: PortRef) -> Option<InFli
         mode: DragMode::Floating,
     });
     let mut out = Intents::default();
-    connections.apply(arena.ui(), fixture.canvas_ctx(), None, &mut out);
+    // The canvas state a context carries beside the pane, both empty: a
+    // fixture records nothing, so there are no port centers to cache and no
+    // responses to sweep. No gesture latched and no Esc either — these tests
+    // drive the wire directly rather than through the bare-canvas
+    // classification.
+    let (geometry, hits) = (CanvasGeometry::default(), CanvasHits::default());
+    let ctx = CanvasCtx::new(fixture.graph_ctx(), &geometry, &hits, None, false);
+    connections.apply(arena.ui(), ctx, None, &mut out);
     assert!(out.is_empty(), "an untouched prepass emits nothing");
     connections.state.get().copied()
 }
@@ -129,8 +97,8 @@ fn a_wire_drops_when_its_start_node_leaves_the_scene() {
     // untyped, which `scan_snap_target` reads as "compatible with
     // anything" — so a stranded wire would snap onto ports it should
     // never accept.
-    let mut f = fixture();
-    let live = port(f.producer, PortKind::Output, 0);
+    let (mut f, producer, _consumer) = fixture();
+    let live = port(producer, PortKind::Output, 0);
     assert!(
         prepass_with_wire_from(&mut f, live).is_some(),
         "a wire from a node still in the scene stays in flight"

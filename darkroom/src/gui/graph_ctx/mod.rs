@@ -32,9 +32,6 @@ use crate::gui::graph_ctx::node_scope::NodeScope;
 use crate::gui::state::run_state::RunState;
 use crate::gui::theme::Theme;
 
-#[cfg(test)]
-mod tests;
-
 /// The graph pane for this frame. `Copy` (the app context plus two shared
 /// refs), so it threads through the draw chain like `DrawCtx`.
 ///
@@ -196,73 +193,7 @@ impl<'a> GraphCtx<'a> {
 }
 
 #[cfg(test)]
-pub(crate) mod internals {
-    use glam::Vec2;
-    use scenarium::{FuncId, Library, Node, NodeId, NodeKind, OutputTypes};
+pub(crate) mod harness;
 
-    use crate::core::document::Document;
-    use crate::gui::app::ctx::{AppCtx, StatusInputs};
-    use crate::gui::graph_ctx::GraphCtx;
-    use crate::gui::state::run_state::RunState;
-    use crate::gui::theme::Theme;
-
-    /// Everything a [`GraphCtx`] composes, owned together so a test can
-    /// hand one out. Every canvas test that needs a context builds on this.
-    ///
-    /// The output-type table starts empty: [`Self::graph_ctx`] resolves it,
-    /// the same way composing one does anywhere else — which is why that
-    /// method takes `&mut self`.
-    #[derive(Debug, Default)]
-    pub(crate) struct GraphCtxFixture {
-        pub(crate) doc: Document,
-        pub(crate) library: Library,
-        pub(crate) run_state: RunState,
-        pub(crate) theme: Theme,
-        output_types: OutputTypes,
-    }
-
-    impl GraphCtxFixture {
-        pub(crate) fn over(doc: Document, library: Library) -> Self {
-            Self {
-                doc,
-                library,
-                ..Self::default()
-            }
-        }
-
-        /// Nodes placed at the given positions, each from a func no library
-        /// holds — so they resolve as portless stubs. Enough for the tests
-        /// that read only a node's identity and where it sits.
-        pub(crate) fn with_nodes(nodes: impl IntoIterator<Item = (NodeId, Vec2)>) -> Self {
-            let mut doc = Document::default();
-            for (node_id, pos) in nodes {
-                doc.graph
-                    .insert(node_id, Node::new(NodeKind::Func(FuncId::unique())));
-                doc.main_view.item_placements.insert(node_id, pos);
-            }
-            Self::over(doc, Library::default())
-        }
-
-        /// Give the graph a committed selection.
-        pub(crate) fn with_selection(mut self, selected: impl IntoIterator<Item = NodeId>) -> Self {
-            self.doc.main_view.selected.extend(selected);
-            self
-        }
-
-        /// The context over this fixture, derived from an [`AppCtx`] whose
-        /// status-bar inputs sit at their empty defaults — no canvas reader
-        /// sees them.
-        pub(crate) fn graph_ctx(&mut self) -> GraphCtx<'_> {
-            let Self {
-                doc,
-                library,
-                run_state,
-                theme,
-                output_types,
-            } = self;
-            let app = AppCtx::new(theme, library, run_state, StatusInputs::default());
-            GraphCtx::for_document(app, doc, output_types)
-                .expect("the fixture's document shows the graph")
-        }
-    }
-}
+#[cfg(test)]
+mod tests;

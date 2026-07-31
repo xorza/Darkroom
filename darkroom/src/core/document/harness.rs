@@ -9,8 +9,8 @@
 use glam::Vec2;
 use scenarium::testing::graph::TestGraph;
 use scenarium::{
-    DataType, Func, FuncId, FuncInput, FuncOutput, Library, Node, NodeId, NodeKind, OutputType,
-    testing,
+    DataType, Func, FuncId, FuncInput, FuncOutput, Graph, Library, Node, NodeId, NodeKind,
+    OutputType, testing,
 };
 
 use crate::core::document::dock::DockOp;
@@ -75,18 +75,38 @@ impl DocFixture {
     /// A document over `g`'s graph, resolving against the library `g` declared
     /// its funcs in.
     pub(crate) fn over(g: TestGraph) -> Self {
-        let mut doc = Document::from(g.graph);
+        Self::with_library(g.graph, g.library)
+    }
+
+    /// A document over a hand-built `graph` and the library it resolves
+    /// against — [`Self::over`] for the cases [`TestGraph`] can't express, like
+    /// a node naming a func the library was never given.
+    pub(crate) fn with_library(graph: Graph, library: Library) -> Self {
+        let mut doc = Document::from(graph);
         spread(&mut doc.main_view);
-        Self {
-            doc,
-            library: g.library,
-        }
+        Self { doc, library }
     }
 
     /// [`TestGraph::sample`]'s stock multi-node graph — what a test wants when
     /// it needs several wired nodes and doesn't care which is which.
     pub(crate) fn sample() -> Self {
         Self::over(TestGraph::sample())
+    }
+
+    /// Nodes at caller-chosen ids and exact positions, each from a func no
+    /// library holds — so they resolve as portless stubs. Enough for the tests
+    /// that read only a node's identity and where it sits, and that need to
+    /// name the ids before the document exists.
+    pub(crate) fn stubs(nodes: impl IntoIterator<Item = (NodeId, Vec2)>) -> Self {
+        let mut fixture = Self::default();
+        for (node_id, pos) in nodes {
+            fixture
+                .doc
+                .graph
+                .insert(node_id, Node::new(NodeKind::Func(FuncId::unique())));
+            fixture.doc.main_view.item_placements.insert(node_id, pos);
+        }
+        fixture
     }
 
     /// Add one node projected from `func`, at the next slot in the row, and

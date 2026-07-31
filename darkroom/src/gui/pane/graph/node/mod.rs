@@ -397,14 +397,15 @@ fn select_intent(shift: bool, graph_ctx: GraphCtx<'_>, key: NodeId) -> GraphInte
 mod tests {
     use super::*;
 
-    use crate::gui::graph_ctx::internals::GraphCtxFixture;
+    use crate::core::document::harness::DocFixture;
+    use crate::gui::graph_ctx::harness::GraphCtxFixture;
 
     /// A graph holding `selected` as both its node set and its committed
     /// selection — enough for the click-intent rules, which read nothing
     /// else.
     fn scene_with_selection(selected: impl IntoIterator<Item = NodeId>) -> GraphCtxFixture {
         let ids: Vec<NodeId> = selected.into_iter().collect();
-        GraphCtxFixture::with_nodes(ids.iter().map(|id| (*id, Vec2::ZERO)))
+        GraphCtxFixture::over(DocFixture::stubs(ids.iter().map(|id| (*id, Vec2::ZERO))))
             .with_selection(ids.iter().copied())
     }
 

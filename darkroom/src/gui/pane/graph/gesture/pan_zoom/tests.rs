@@ -1,7 +1,8 @@
 use scenarium::NodeId;
 
 use super::*;
-use crate::gui::graph_ctx::internals::GraphCtxFixture;
+use crate::core::document::harness::DocFixture;
+use crate::gui::graph_ctx::harness::GraphCtxFixture;
 
 #[test]
 fn node_bounds_uses_cached_sizes_and_falls_back_to_points() {
@@ -13,11 +14,11 @@ fn node_bounds_uses_cached_sizes_and_falls_back_to_points() {
     //   b: (1000,500) 200×100 — culled, but its size is still cached
     //   c: (-50,300) never measured — contributes a point
     let (a, b, c) = (NodeId::unique(), NodeId::unique(), NodeId::unique());
-    let mut scene = GraphCtxFixture::with_nodes([
+    let mut scene = GraphCtxFixture::over(DocFixture::stubs([
         (a, Vec2::new(0.0, 0.0)),
         (b, Vec2::new(1000.0, 500.0)),
         (c, Vec2::new(-50.0, 300.0)),
-    ]);
+    ]));
     let mut geometry = CanvasGeometry::default();
     geometry.seed_node_size(a, Size::new(150.0, 80.0));
     geometry.seed_node_size(b, Size::new(200.0, 100.0));
@@ -37,7 +38,7 @@ fn node_bounds_uses_cached_sizes_and_falls_back_to_points() {
     assert_eq!(sel.size, Size::new(200.0, 100.0));
 
     // Empty graph → nothing to frame.
-    let mut empty = GraphCtxFixture::with_nodes([]);
+    let mut empty = GraphCtxFixture::over(DocFixture::stubs([]));
     assert!(node_bounds(&geometry, empty.graph_ctx(), false).is_none());
 }
 
