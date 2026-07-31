@@ -10,10 +10,10 @@
 //! Self-contained: everything a run needs was copied out of the [`Library`](crate::library::Library)
 //! at compile, so nothing here refers to one.
 //!
-//! A graph is flat, so an authored node becomes exactly one execution node,
-//! named by the same [`NodeId`]. That collapses what used to be a whole side
-//! structure — the map from an authored node to the execution nodes it
-//! dissolved into — to a search of the id column the artifact already carries.
+//! **One authored node, one execution node, one [`NodeId`].** Nothing splits or
+//! merges on the way in, so resolving an authored id against the artifact is a
+//! search of the id column it already carries rather than a lookup through a
+//! table beside it.
 
 use crate::graph::identity::FuncId;
 
@@ -166,8 +166,8 @@ pub(crate) mod internals {
         ///
         /// Ascending ids, because [`node`](CompiledGraph::node) binary-searches
         /// `node_ids`: a fixture that pushed out of order would build a program
-        /// whose own nodes it cannot find. That also makes the ids unique, which
-        /// the map this replaced used to check.
+        /// whose own nodes it cannot find. Ascending also means unique, so one
+        /// id cannot name two nodes.
         pub(crate) fn push(&mut self, id: NodeId, e_node: ExecutionNode) -> NodeIdx {
             assert!(
                 self.node_ids.iter().last().is_none_or(|last| *last < id),

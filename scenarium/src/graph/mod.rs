@@ -7,9 +7,8 @@
 //! how a node or port is named, [`detached`] the reversible-removal records,
 //! [`error`] what validation rejects.
 //!
-//! A graph is flat: every node is a leaf that resolves to a
-//! [`Func`] declaration, so there is no tree to
-//! descend and no identity but a node's own.
+//! Every node resolves to a [`Func`] declaration, and a node's own id is the
+//! only name it has.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Deref;

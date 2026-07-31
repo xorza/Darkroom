@@ -3,8 +3,8 @@
 //! containers keyed by them are [`Column`](crate::common::column::Column) and
 //! [`IdxSet`](crate::common::set::IdxSet).
 //!
-//! There is no second *identity* space to hold. A graph is flat, so a node in
-//! a compiled program is the authored node, named by the same
+//! This is an *index* space, not a second identity space. A node in a
+//! compiled program is the authored node, named by the same
 //! [`NodeId`](crate::graph::identity::NodeId) — and its ports by the same
 //! [`InputPort`](crate::graph::identity::InputPort) /
 //! [`OutputPort`](crate::graph::identity::OutputPort) /

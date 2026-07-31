@@ -56,9 +56,10 @@ fn validation_rejects_a_cache_with_the_wrong_node_count() {
     );
 }
 
-/// A func-only graph builds with the node ids unchanged (caches survive).
+/// Every authored node reaches the program under the id it was authored with,
+/// which is what lets its cache slot survive a recompile.
 #[test]
-fn top_level_func_nodes_keep_identity() {
+fn func_nodes_keep_identity() {
     let e = TestEngine::over(TestGraph::sample());
 
     assert_eq!(e.engine.compiled().e_nodes.len(), e.graph.graph.len());

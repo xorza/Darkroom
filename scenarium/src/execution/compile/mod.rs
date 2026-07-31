@@ -5,10 +5,10 @@
 //! doesn't compile is never sent, so the worker's install is infallible and a
 //! running event loop is never disturbed by a bad edit.
 //!
-//! A graph is flat, so the walk is a copy with four jobs it is the only place to
-//! do: resolving each binding to the producer it names, gating it against the
-//! declared types, stamping each output with the effective type the same pass
-//! resolved, and interning every id-named reference into the dense index space.
+//! The walk is a copy with four jobs it is the only place to do: resolving each
+//! binding to the producer it names, gating it against the declared types,
+//! stamping each output with the effective type the same pass resolved, and
+//! interning every id-named reference into the dense index space.
 //! The *type gate* is drift tolerance — a wire whose resolved source type no
 //! longer fits the consumer, or a const that no longer satisfies it, lowers as
 //! unbound rather than severing authored wiring.
@@ -18,8 +18,8 @@
 //! ids *before* emitting anything settles the whole dense index space up front:
 //! a node's `NodeIdx` is its position in that sort, so a binding can name its
 //! producer's index the moment the walk resolves it, and no later pass has to
-//! revisit a column to translate one. This is where the crate's two identity
-//! spaces meet, and it crosses in one direction only — stable
+//! revisit a column to translate one. This is where stable identity meets the
+//! dense index space, and it crosses in one direction only — stable
 //! [`NodeId`]/[`OutputPort`] in, dense `NodeIdx`/`OutputAddr` out.
 //!
 //! Everything the walk produces is final. The program is immutable for the life
@@ -141,9 +141,9 @@ impl Compiler {
     /// lambda, and flag a node needs is copied out here (the lambdas are `Arc`s,
     /// so a copy is a refcount bump), which is what leaves the artifact
     /// self-contained.
-    fn walk(&mut self, root: &Graph, library: &Library) -> CompiledGraph {
-        self.output_types.update(root, library);
-        let totals = self.place_nodes(root, library);
+    fn walk(&mut self, graph: &Graph, library: &Library) -> CompiledGraph {
+        self.output_types.update(graph, library);
+        let totals = self.place_nodes(graph, library);
 
         // Sized from the placement, so each column allocates once and every
         // `append` below is a copy into space the artifact already owns.
@@ -162,7 +162,7 @@ impl Compiler {
 
         for position in 0..self.placed.len() {
             let node_id = self.placed[position].node_id;
-            let node = root
+            let node = graph
                 .find(node_id)
                 .expect("the placement names this graph's nodes");
 
@@ -193,7 +193,7 @@ impl Compiler {
                     binding: self.typed_binding(
                         library,
                         func_input,
-                        root.bindings.get(&InputPort::new(node_id, port_idx)),
+                        graph.bindings.get(&InputPort::new(node_id, port_idx)),
                     ),
                 },
             ));
@@ -202,7 +202,7 @@ impl Compiler {
             // above — the same answer the editor paints, so the program and the
             // canvas agree about a wildcard by construction rather than by two
             // walks happening to match. A port the table missed is library
-            // drift, and `Any` is what that resolved to before it existed.
+            // drift, and `Any` is the right answer for one.
             let node_outputs = compiled
                 .outputs
                 .append((0..func.outputs.len()).map(|port_idx| {
@@ -238,7 +238,7 @@ impl Compiler {
             });
         }
 
-        self.wire_subscriptions(root, &mut compiled);
+        self.wire_subscriptions(graph, &mut compiled);
 
         // The placement counted these from the same declarations the walk read,
         // so a mismatch is the two disagreeing about the library — and every
@@ -264,13 +264,13 @@ impl Compiler {
     /// The returned pool totals ride along for free: this pass already holds
     /// every declaration the walk is about to read, so counting the ports here
     /// is what lets each column be allocated once at its final size.
-    fn place_nodes(&mut self, root: &Graph, library: &Library) -> PortTotals {
+    fn place_nodes(&mut self, graph: &Graph, library: &Library) -> PortTotals {
         let placed = &mut self.placed;
         placed.clear();
-        placed.reserve(root.len());
+        placed.reserve(graph.len());
         let mut totals = PortTotals::default();
-        for node in root.iter() {
-            let func = root
+        for node in graph.iter() {
+            let func = graph
                 .node_func(&node, library)
                 .expect("func resolved by validate_with");
             totals.inputs += func.inputs.len();

@@ -31,7 +31,7 @@ compatibility for now. Change serialized shapes and break APIs freely when that
 simplifies the current design; do not add migrations, compatibility shims,
 legacy deserializers, or legacy-format tests.
 
-**UUIDs / IDs.** Every new UUID literal (a `TypeId`, `FuncId`, `GraphId`, or
+**UUIDs / IDs.** Every new UUID literal (a `NodeId`, `FuncId`, `TypeId`, or
 any other `id_type!`-backed id) must be generated with the real `uuidgen` tool,
 lowercased — `uuidgen | tr 'A-Z' 'a-z'` — never hand-typed or model-invented.
 Hand-made ids look unique but aren't drawn from any entropy source and risk

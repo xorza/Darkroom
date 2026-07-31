@@ -79,8 +79,7 @@ impl CacheMode {
 /// (hardcoded declaration, recognized by the engine).
 ///
 /// Both resolve to a [`Func`] declaration — the only difference is where that
-/// declaration comes from — so every node in a graph is a leaf, and a graph is
-/// exactly the nodes it holds.
+/// declaration comes from.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum NodeKind {
     Func(FuncId),
