@@ -1,7 +1,7 @@
 //! Data edges reversed, derived where they are asked for.
 
 use crate::common::set::IdxSet;
-use crate::execution::compiled::{CompiledGraph, ExecutionBinding};
+use crate::execution::compile::compiled_graph::{CompiledGraph, ExecutionBinding};
 use crate::execution::identity::NodeIdx;
 
 /// Which nodes read each node's outputs — the [`CompiledGraph`]'s data edges, walked

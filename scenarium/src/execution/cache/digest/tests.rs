@@ -4,7 +4,9 @@ use super::*;
 use crate::StaticValue;
 use crate::execution::cache::runtime::RuntimeCache;
 use crate::execution::cache::slot::OutputSnapshot;
-use crate::execution::compiled::{CompiledGraph, ExecutionBinding, ExecutionInput, ExecutionNode};
+use crate::execution::compile::compiled_graph::{
+    CompiledGraph, ExecutionBinding, ExecutionInput, ExecutionNode,
+};
 use crate::execution::identity::{NodeIdx, OutputAddr};
 use crate::graph::func::FuncBehavior;
 

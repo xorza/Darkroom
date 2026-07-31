@@ -20,10 +20,10 @@ pub use elements::system_library::system_library;
 pub use elements::worker_events_library::{FRAME_EVENT_FUNC_ID, worker_events_library};
 pub use execution::cache::disk_store::DiskStore;
 pub use execution::compile::Compiler;
+pub use execution::compile::compiled_graph::CompiledGraph;
 pub use execution::compile::error::CompileError;
 #[cfg(any(test, feature = "internals"))]
 pub use execution::compile::internals::CompiledGraphBuilder;
-pub use execution::compiled::CompiledGraph;
 pub use execution::error::{Error, Result, RunError};
 pub use execution::report::{LogEntry, LogLevel};
 pub use execution::report::{NodeExecutionStatus, NodeStatus};

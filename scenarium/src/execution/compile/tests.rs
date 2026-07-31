@@ -1,8 +1,8 @@
 use super::*;
 use crate::common::column::Idx;
+use crate::execution::compile::compiled_graph::ExecutionNode;
+use crate::execution::compile::compiled_graph::{CompiledGraph, ExecutionBinding};
 use crate::execution::compile::error::CompiledGraphValidationError;
-use crate::execution::compiled::ExecutionNode;
-use crate::execution::compiled::{CompiledGraph, ExecutionBinding};
 use crate::execution::identity::NodeIdx;
 use crate::execution::identity::OutputAddr;
 use crate::graph::Binding;

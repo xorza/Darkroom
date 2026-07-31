@@ -4,7 +4,7 @@
 
 mod planning {
     use crate::DataType;
-    use crate::execution::compiled::{
+    use crate::execution::compile::compiled_graph::{
         CompiledGraph, ExecutionBinding, ExecutionEvent, ExecutionInput, ExecutionNode,
     };
     use crate::execution::error::Error;
@@ -516,7 +516,7 @@ mod resolving {
     use crate::DataType;
     use crate::execution::cache::runtime::RuntimeCache;
     use crate::execution::cache::slot::OutputSnapshot;
-    use crate::execution::compiled::{
+    use crate::execution::compile::compiled_graph::{
         CompiledGraph, ExecutionBinding, ExecutionInput, ExecutionNode,
     };
     use crate::execution::identity::{NodeIdx, OutputAddr};

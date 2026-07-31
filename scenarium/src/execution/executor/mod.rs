@@ -39,7 +39,7 @@ use crate::runtime::shared_any_state::SharedAnyState;
 
 use crate::execution::cache::disk_store::StorePolicy;
 use crate::execution::cache::runtime::RuntimeCache;
-use crate::execution::compiled::{CompiledGraph, ExecutionBinding};
+use crate::execution::compile::compiled_graph::{CompiledGraph, ExecutionBinding};
 use crate::execution::error::RunError;
 use crate::execution::schedule::{NodeState, Resolved, RunSchedule};
 
@@ -702,7 +702,7 @@ impl ExecutionFrame<'_, '_> {
 
 #[cfg(test)]
 pub(crate) mod internals {
-    use crate::execution::compiled::CompiledGraph;
+    use crate::execution::compile::compiled_graph::CompiledGraph;
     use crate::execution::executor::{Executor, NodeOutcome};
     use crate::graph::identity::NodeId;
 

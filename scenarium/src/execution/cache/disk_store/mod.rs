@@ -13,7 +13,7 @@ use crate::data::codec;
 use crate::data::codec::Codecs;
 use crate::execution::cache::digest::Digest;
 use crate::execution::cache::slot::OutputSnapshot;
-use crate::execution::compiled::ExecutionNode;
+use crate::execution::compile::compiled_graph::ExecutionNode;
 use crate::graph::func::lambda::OutputDemand;
 use crate::graph::identity::NodeId;
 use crate::library::Library;

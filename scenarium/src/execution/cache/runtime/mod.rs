@@ -28,7 +28,7 @@ use crate::execution::cache::resource::{FsPathId, StampJob};
 use crate::execution::cache::runtime::consumers::Consumers;
 use crate::execution::cache::runtime::error::CacheEvictionFailure;
 use crate::execution::cache::slot::RuntimeSlot;
-use crate::execution::compiled::{CompiledGraph, ExecutionBinding};
+use crate::execution::compile::compiled_graph::{CompiledGraph, ExecutionBinding};
 use crate::execution::identity::{NodeIdx, OutputAddr};
 use crate::graph::func::FuncBehavior;
 use crate::graph::func::lambda::OutputDemand;
@@ -61,7 +61,7 @@ pub(crate) struct RuntimeCache {
     /// invariant [`reconcile`](Self::reconcile) establishes, so nothing outside
     /// may push, drain, or resize it. Individual slots are reached by
     /// [`Index<NodeIdx>`], the same way a node is reached on
-    /// [`CompiledGraph`](crate::execution::compiled::CompiledGraph).
+    /// [`CompiledGraph`](crate::execution::compile::compiled_graph::CompiledGraph).
     slots: Column<NodeIdx, RuntimeSlot>,
     /// Private for the same reason as the slots: the worker replaces it
     /// wholesale between runs, and going through
@@ -692,7 +692,7 @@ pub(crate) mod internals {
     use crate::execution::cache::resource::error::StampError;
     use crate::execution::cache::runtime::RuntimeCache;
     use crate::execution::cache::slot::OutputSnapshot;
-    use crate::execution::compiled::CompiledGraph;
+    use crate::execution::compile::compiled_graph::CompiledGraph;
     use crate::execution::identity::NodeIdx;
 
     impl RuntimeCache {
