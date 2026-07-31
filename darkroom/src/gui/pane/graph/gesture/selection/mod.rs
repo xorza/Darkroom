@@ -22,16 +22,17 @@ use crate::gui::theme::Theme;
 #[derive(Default, Debug)]
 pub(crate) struct SelectionUI {
     band: GestureSlot<RubberBand>,
-    /// The swept set while a band is active — the same type as the
-    /// committed selection it stands in for (`GraphView::selected`), so the
-    /// draw substitutes one for the other directly. Owned here rather than
+    /// The swept set while a band is active, **sorted and deduplicated** so
+    /// [`Selection::contains`](crate::gui::pane::graph::ctx::Selection::contains) can binary-search it. Owned here rather than
     /// written into the document, which the gesture only touches once, on
     /// release.
     ///
-    /// Refilled from scratch every frame of the drag and kept only to reuse
-    /// its allocation; [`Self::preview`] is what says whether its contents
-    /// mean anything.
-    swept: BTreeSet<NodeId>,
+    /// Refilled from scratch every frame of the drag, which is what makes the
+    /// container choice load-bearing: a `Vec`'s `clear` keeps the allocation
+    /// for the next frame, where the `BTreeSet` this used to be dropped its
+    /// whole tree and rebuilt it every frame of every drag.
+    /// [`Self::preview`] is what says whether the contents mean anything.
+    swept: Vec<NodeId>,
     /// The pane whose draw reads [`Self::swept`]. Empty when no band is
     /// in flight — draw falls back to the committed selection. A slot of
     /// its own, not the band's, because it deliberately outlives the band
@@ -72,7 +73,7 @@ impl SelectionUI {
     /// for node/pin draw to paint against; `None` for every other pane and
     /// when no band is active (the caller falls back to the pane's
     /// committed selection).
-    pub(crate) fn preview(&self) -> Option<&BTreeSet<NodeId>> {
+    pub(crate) fn preview(&self) -> Option<&[NodeId]> {
         self.preview.get()?;
         Some(&self.swept)
     }
@@ -138,9 +139,14 @@ impl SelectionUI {
                 continue;
             };
             if rect.intersects(body) {
-                swept.insert(n.id);
+                swept.push(n.id);
             }
         }
+        // The base arrives sorted (it came off a `BTreeSet`) but the sweep
+        // appends in paint order and can re-add a node the base already held,
+        // so both properties `Selection::Swept` promises are restored here.
+        swept.sort_unstable();
+        swept.dedup();
         // Still dragging → stash the updated corner and leave the preview in
         // place (node draw reads it via `preview()` for live highlight).
         // A `None` delta is the release edge that commits.
@@ -154,7 +160,9 @@ impl SelectionUI {
         // it paints the final selection; the `SetSelection` drains
         // post-record, and next frame — band now `None` — the early return
         // above clears the preview and draw falls back to the committed set.
-        out.push(GraphIntent::SetSelection { to: swept.clone() });
+        out.push(GraphIntent::SetSelection {
+            to: swept.iter().copied().collect(),
+        });
         self.preview.latch(());
     }
 

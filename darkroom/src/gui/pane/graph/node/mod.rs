@@ -230,7 +230,7 @@ impl NodeUI {
             // grabbing an unselected node selects only it and drags it
             // alone.
             let start_positions = if selected {
-                selected_group_positions(ncx.graph_ctx(), ncx.draw_ctx().selected())
+                selected_group_positions(ncx.draw_ctx())
             } else {
                 click_intents(false, ncx.graph_ctx(), node.id, out);
                 vec![(node.id, node.pos)]
