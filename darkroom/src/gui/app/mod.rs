@@ -21,31 +21,77 @@ pub(crate) mod editor;
 
 use editor::Editor;
 
-/// Shared per-frame context threaded down the UI tree. Holds borrows
-/// of state owned higher up so child subtrees don't take a growing
-/// fan-out of `&` parameters.
+/// The frame's read-only world, threaded down the UI tree: the theme, the
+/// func library, the last run's projections, and the status-bar inputs.
+/// `Copy` (shared refs only), so a subtree takes one parameter rather than a
+/// growing fan-out of `&`s.
+///
+/// **The root of the context chain.** Every level below derives its own
+/// context from the one above rather than restating its refs:
+/// [`GraphScope::for_document`](crate::gui::graph_scope::GraphScope::for_document)
+/// resolves this against a document to make the
+/// graph pane's context, and everything under the canvas reads the theme, the
+/// library and the run back off *that* — which is why nothing below
+/// [`MainWindow`](crate::gui::main_window::MainWindow) names this type.
+///
+/// Only shared state belongs here. The mutable sinks a frame writes through —
+/// `Ui`, the intent buffer, the preferences — stay explicit parameters, so a
+/// context can never be the thing two call sites fight over.
 #[derive(Copy, Clone, Debug)]
 pub(crate) struct AppContext<'a> {
-    pub(crate) theme: &'a Theme,
-    pub(crate) library: &'a Library,
+    theme: &'a Theme,
+    library: &'a Library,
     /// Last run's centralized runtime state: per-node status/logs and the
     /// latest published values read by preview cards and viewers.
-    pub(crate) run_state: &'a RunState,
-    /// The last failed action's message (the engine's
-    /// `StatusLog::error` slot), shown in
-    /// the status bar until a subsequent success clears it.
-    pub(crate) status_error: Option<&'a str>,
-    /// This process's resident bytes (see
-    /// [`ProcessMemory`]),
-    /// rendered as the status bar's `MEM` clause.
-    pub(crate) process_memory: u64,
+    run_state: &'a RunState,
+    status: StatusInputs<'a>,
 }
 
-/// The two status-bar inputs `App` owns and `Editor` only forwards into
-/// [`AppContext`]. Bundled so threading a second one doesn't push
-/// [`Editor::frame`](crate::gui::app::editor::Editor::frame) past the
-/// argument count clippy allows.
-#[derive(Clone, Copy, Debug)]
+impl<'a> AppContext<'a> {
+    pub(crate) fn new(
+        theme: &'a Theme,
+        library: &'a Library,
+        run_state: &'a RunState,
+        status: StatusInputs<'a>,
+    ) -> Self {
+        Self {
+            theme,
+            library,
+            run_state,
+            status,
+        }
+    }
+
+    pub(crate) fn theme(self) -> &'a Theme {
+        self.theme
+    }
+
+    /// The library every node's declaration is resolved through.
+    pub(crate) fn library(self) -> &'a Library {
+        self.library
+    }
+
+    /// The last completed run's per-node verdicts and published values.
+    pub(crate) fn run_state(self) -> &'a RunState {
+        self.run_state
+    }
+
+    /// The last failed action's message (the engine's `StatusLog::error`
+    /// slot), shown in the status bar until a subsequent success clears it.
+    pub(crate) fn status_error(self) -> Option<&'a str> {
+        self.status.error
+    }
+
+    /// This process's resident bytes (see [`ProcessMemory`]), rendered as the
+    /// status bar's `MEM` clause.
+    pub(crate) fn process_memory(self) -> u64 {
+        self.status.process_memory
+    }
+}
+
+/// The two status-bar inputs `App` owns, bundled because they travel
+/// together and nothing between here and the bar reads either.
+#[derive(Clone, Copy, Default, Debug)]
 pub(crate) struct StatusInputs<'a> {
     pub(crate) error: Option<&'a str>,
     pub(crate) process_memory: u64,
@@ -65,6 +111,12 @@ pub(crate) struct App {
     /// The func library, the evaluation worker, and the status log they
     /// report into — everything the document is executed against.
     runtime: RuntimeHost,
+    /// The last completed run's per-node state, keyed by the document's
+    /// `NodeId`s: execution status (the glow + header time), log lines, and
+    /// the values preview cards and viewers read. Owned here because `App` is
+    /// its only writer — it fills as the worker is drained — and lent to the
+    /// frame through [`AppContext`]. Off the serialized state.
+    run_state: RunState,
     theme: Theme,
     host_handle: HostHandle,
     /// Persisted session state (active theme name + last document).
@@ -128,6 +180,7 @@ impl App {
             editor: Editor::new(),
             open,
             runtime,
+            run_state: RunState::default(),
             theme: Theme::default(),
             host_handle: handle,
             preferences,
@@ -151,7 +204,9 @@ impl App {
     /// the centralized preview store, which uploads its small thumbnail;
     /// visible cards and viewers read the new value during the frame
     /// already scheduled by the worker's wake callback. Drained before the
-    /// editor's scene rebuild so they reflect the latest run.
+    /// editor's scene rebuild so they reflect the latest run, and followed by
+    /// the store's own reconcile against the open document — the whole of the
+    /// run state's per-frame upkeep, in the one place that owns it.
     fn drain_worker_events(&mut self, ui: &Ui) {
         // Owned, so the channel borrow is gone before the status writes
         // below (both live on `self.runtime`).
@@ -159,15 +214,15 @@ impl App {
         for report in events {
             match report {
                 WorkerReport::Installed(compiled) => {
-                    self.editor.run_state.compiled = Some(compiled);
+                    self.run_state.compiled = Some(compiled);
                 }
                 WorkerReport::Cleared => {
-                    self.editor.run_state.compiled = None;
-                    self.editor.run_state.clear();
+                    self.run_state.compiled = None;
+                    self.run_state.clear();
                 }
                 WorkerReport::Error(error) => {
                     if matches!(&error, WorkerError::Execution { .. }) {
-                        self.editor.run_state.clear();
+                        self.run_state.clear();
                     }
                     self.runtime.status.error(error.to_string());
                 }
@@ -185,14 +240,21 @@ impl App {
                         // from an earlier event-loop tick.
                         self.runtime.status.error = None;
                     }
-                    self.editor.run_state.apply_worker_status(&status);
+                    self.run_state.apply_worker_status(&status);
                 }
             }
         }
         // After the reports, so a value published during this run lands against
         // the compile the stream just acknowledged rather than the previous one.
         let previews = self.runtime.drain_previews();
-        self.editor.run_state.ingest_previews(ui, previews);
+        self.run_state.ingest_previews(ui, previews);
+        // Then drop what the document no longer holds. A `NodeId`-keyed cache
+        // outlives the scene on purpose, so only the document can say when an
+        // entry's node is gone rather than merely off-screen. Idempotent and
+        // proportional to the cached entries, so it runs unconditionally —
+        // beside the ingest above rather than inside the frame, since the store
+        // is `App`'s and a record pass only reads it.
+        self.run_state.previews.reconcile(ui, &self.open.document);
     }
 
     /// Mirror the window's live geometry into the persisted preferences
@@ -334,24 +396,28 @@ impl palantir::App for App {
         // While nodes are computing, keep repainting (~20 fps) so the running
         // node's live elapsed-so-far timer ticks — a single long node emits no
         // progress events between its start and finish.
-        if self.editor.run_state.activity.is_executing() {
+        if self.run_state.activity.is_executing() {
             ui.request_repaint_after(Duration::from_millis(100));
         }
 
         // One library snapshot for this record pass (a cheap Arc clone).
         // A command that publishes below is visible to pass B or the next frame.
         let library = self.runtime.library.published.load();
-        let command = self.editor.frame(
-            &mut self.open,
-            ui,
-            &library,
+        // The frame's read-only world, composed once here: everything below
+        // derives its own context from this one rather than taking the refs
+        // again.
+        let ctx = AppContext::new(
             &self.theme,
-            &mut self.preferences,
+            &library,
+            &self.run_state,
             StatusInputs {
                 error: self.runtime.status.error.as_deref(),
                 process_memory: self.process_memory.sample(Instant::now()),
             },
         );
+        let command = self
+            .editor
+            .frame(ui, &mut self.open, ctx, &mut self.preferences);
 
         if let Some(command) = command {
             self.handle_command(ui, command);

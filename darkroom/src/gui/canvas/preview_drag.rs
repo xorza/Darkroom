@@ -11,7 +11,7 @@
 //! ([`preview_drag_modifier`]), so exactly one controller claims the press.
 
 use palantir::Ui;
-use scenarium::{Library, NodeId};
+use scenarium::NodeId;
 
 use crate::core::document::{PortKind, PortRef};
 use crate::core::edit::intent::sink::Intents;
@@ -37,7 +37,6 @@ impl PreviewDrag {
         ui: &mut Ui,
         graph_scope: GraphScope<'_>,
         geometry: &CanvasGeometry,
-        library: &Library,
         out: &mut Intents,
     ) {
         // A live drag owns the frame; only once it ends does the latch scan
@@ -51,7 +50,7 @@ impl PreviewDrag {
         if !graph_scope.contains(port.node_id) {
             return;
         }
-        let Some(func) = preview::registered(library) else {
+        let Some(func) = preview::registered(graph_scope.library()) else {
             return;
         };
         // One lookup gating the whole spawn: a port that hasn't measured has no

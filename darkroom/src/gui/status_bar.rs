@@ -29,9 +29,9 @@ pub(crate) fn status_bar_id() -> WidgetId {
 }
 
 /// Draw the bottom status bar.
-pub(crate) fn show(ui: &mut Ui, ctx: &AppContext<'_>) {
-    let ram = memory_label(ctx.process_memory, ctx.run_state.cache_ram);
-    let colors = &ctx.theme.colors;
+pub(crate) fn show(ui: &mut Ui, ctx: AppContext<'_>) {
+    let ram = memory_label(ctx.process_memory(), ctx.run_state().cache_ram);
+    let colors = &ctx.theme().colors;
     Panel::hstack()
         .id(status_bar_id())
         .size((Sizing::FILL, Sizing::HUG))
@@ -39,7 +39,7 @@ pub(crate) fn show(ui: &mut Ui, ctx: &AppContext<'_>) {
         .padding(Spacing::xy(PAD_X, PAD_Y))
         .background(Background::fill(colors.chrome_fill))
         .show(ui, |ui| {
-            if let Some(msg) = ctx.status_error {
+            if let Some(msg) = ctx.status_error() {
                 let style = colored_text(ui, colors.exec_errored_glow, FONT);
                 Text::new(msg).style(&style).show(ui);
             }
@@ -47,7 +47,7 @@ pub(crate) fn show(ui: &mut Ui, ctx: &AppContext<'_>) {
             // readout to the right.
             hspacer(ui, "status_spacer");
             if let Some(label) = ram {
-                let style = muted_text(ui, ctx.theme, FONT);
+                let style = muted_text(ui, ctx.theme(), FONT);
                 Text::new(label).style(&style).show(ui);
             }
         });

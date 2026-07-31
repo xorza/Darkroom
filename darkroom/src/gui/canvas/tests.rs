@@ -9,7 +9,7 @@ use scenarium::{
 use crate::core::document::{Document, GraphView, PortKind, PortRef};
 use crate::core::edit::intent::sink::{Intents, Queued};
 use crate::core::edit::intent::types::GraphIntent;
-use crate::gui::app::AppContext;
+use crate::gui::app::{AppContext, StatusInputs};
 use crate::gui::canvas::GraphUI;
 use crate::gui::graph_scope::GraphScope;
 use crate::gui::node::node_widget_id;
@@ -48,6 +48,13 @@ fn wildcard_library() -> Library {
     library
 }
 
+/// The chain's root for a canvas test: the theme, library and run a scope
+/// resolves through, with the status-bar inputs at their empty defaults —
+/// nothing under the canvas reads them.
+fn app<'a>(theme: &'a Theme, library: &'a Library, run_state: &'a RunState) -> AppContext<'a> {
+    AppContext::new(theme, library, run_state, StatusInputs::default())
+}
+
 /// The scope a test reads a canvas back through, over the same document the
 /// canvas drew.
 ///
@@ -55,12 +62,11 @@ fn wildcard_library() -> Library {
 /// correct, since several tests below edit their document between frames and
 /// the scope resolves against whichever one it is handed.
 fn scope<'a>(
+    app: AppContext<'a>,
     doc: &'a Document,
-    library: &'a Library,
-    run_state: &'a RunState,
     output_types: &'a mut OutputTypes,
 ) -> GraphScope<'a> {
-    GraphScope::for_document(doc, library, run_state, output_types)
+    GraphScope::for_document(app, doc, output_types)
         .expect("the fixture's document shows the graph")
 }
 
@@ -113,22 +119,16 @@ fn a_culled_nodes_ports_stay_anchored_until_its_node_leaves_the_document() {
     let mut graph_ui = GraphUI::default();
 
     let draw = |ui: &mut Ui, graph_ui: &mut GraphUI, doc: &Document| {
-        let ctx = AppContext {
-            theme: &theme,
-            library: &library,
-            run_state: &run_state,
-            status_error: None,
-            process_memory: 0,
-        };
+        let ctx = app(&theme, &library, &run_state);
         let mut intents = Intents::default();
         let mut types = OutputTypes::default();
-        let graph_scope = scope(doc, &library, &run_state, &mut types);
+        let graph_scope = scope(ctx, doc, &mut types);
         graph_ui.prepass(ui, graph_scope, &mut intents);
         Panel::vstack()
             .id_salt("pane")
             .size((Sizing::FILL, Sizing::FILL))
             .show(ui, |ui| {
-                graph_ui.draw(ui, &ctx, graph_scope, &mut intents);
+                graph_ui.draw(ui, graph_scope, &mut intents);
             });
     };
     let frame = |harness: &mut UiHarness, graph_ui: &mut GraphUI, doc: &_| {
@@ -173,7 +173,7 @@ fn a_culled_nodes_ports_stay_anchored_until_its_node_leaves_the_document() {
     // The node the document keeps holds its cached size; the other one is
     // still cached too, because being off-screen is not being deleted.
     let mut live_types = OutputTypes::default();
-    let live = scope(&doc, &library, &run_state, &mut live_types);
+    let live = scope(app(&theme, &library, &run_state), &doc, &mut live_types);
     for id in [stays, leaves] {
         assert!(
             graph_ui
@@ -245,22 +245,16 @@ fn the_palette_sizes_its_results_area_from_the_search_row_it_actually_has() {
         let mut graph_ui = GraphUI::default();
 
         let draw = |ui: &mut Ui, graph_ui: &mut GraphUI| {
-            let ctx = AppContext {
-                theme,
-                library: &library,
-                run_state: &run_state,
-                status_error: None,
-                process_memory: 0,
-            };
+            let ctx = app(theme, &library, &run_state);
             let mut intents = Intents::default();
             let mut types = OutputTypes::default();
-            let graph_scope = scope(&doc, &library, &run_state, &mut types);
+            let graph_scope = scope(ctx, &doc, &mut types);
             graph_ui.prepass(ui, graph_scope, &mut intents);
             Panel::vstack()
                 .id_salt("pane")
                 .size((Sizing::FILL, Sizing::FILL))
                 .show(ui, |ui| {
-                    graph_ui.draw(ui, &ctx, graph_scope, &mut intents);
+                    graph_ui.draw(ui, graph_scope, &mut intents);
                 });
         };
 
@@ -381,23 +375,17 @@ fn escape_cancels_a_rubber_band_and_leaves_no_residue() {
     let mut graph_ui = GraphUI::default();
 
     let draw = |ui: &mut Ui, graph_ui: &mut GraphUI| {
-        let ctx = AppContext {
-            theme: &theme,
-            library: &library,
-            run_state: &run_state,
-            status_error: None,
-            process_memory: 0,
-        };
+        let ctx = app(&theme, &library, &run_state);
         let mut intents = Intents::default();
         let mut types = OutputTypes::default();
-        let graph_scope = scope(&doc, &library, &run_state, &mut types);
+        let graph_scope = scope(ctx, &doc, &mut types);
         graph_ui.scan_hits(ui, Some(graph_scope));
         graph_ui.prepass(ui, graph_scope, &mut intents);
         Panel::vstack()
             .id_salt("pane")
             .size((Sizing::FILL, Sizing::FILL))
             .show(ui, |ui| {
-                graph_ui.draw(ui, &ctx, graph_scope, &mut intents);
+                graph_ui.draw(ui, graph_scope, &mut intents);
             });
         intents.drain().collect::<Vec<_>>()
     };
@@ -494,22 +482,16 @@ fn the_breaker_cuts_a_node_at_its_current_position_not_its_last_painted_one() {
     // `doc` is a parameter, not a capture, so it can be edited between frames
     // the way an undo would edit the document under a running gesture.
     let draw = |ui: &mut Ui, graph_ui: &mut GraphUI, doc: &Document| {
-        let ctx = AppContext {
-            theme: &theme,
-            library: &library,
-            run_state: &run_state,
-            status_error: None,
-            process_memory: 0,
-        };
+        let ctx = app(&theme, &library, &run_state);
         let mut intents = Intents::default();
         let mut types = OutputTypes::default();
-        let graph_scope = scope(doc, &library, &run_state, &mut types);
+        let graph_scope = scope(ctx, doc, &mut types);
         graph_ui.prepass(ui, graph_scope, &mut intents);
         Panel::vstack()
             .id_salt("pane")
             .size((Sizing::FILL, Sizing::FILL))
             .show(ui, |ui| {
-                graph_ui.draw(ui, &ctx, graph_scope, &mut intents);
+                graph_ui.draw(ui, graph_scope, &mut intents);
             });
         intents.drain().collect::<Vec<_>>()
     };
@@ -582,24 +564,18 @@ fn a_node_body_right_click_selects_the_node_it_landed_on() {
     let mut graph_ui = GraphUI::default();
 
     let draw = |ui: &mut Ui, graph_ui: &mut GraphUI| {
-        let ctx = AppContext {
-            theme: &theme,
-            library: &library,
-            run_state: &run_state,
-            status_error: None,
-            process_memory: 0,
-        };
+        let ctx = app(&theme, &library, &run_state);
         let mut intents = Intents::default();
         // Navigation phase first — the sweep runs before the tab set settles.
         let mut types = OutputTypes::default();
-        let graph_scope = scope(&doc, &library, &run_state, &mut types);
+        let graph_scope = scope(ctx, &doc, &mut types);
         graph_ui.scan_hits(ui, Some(graph_scope));
         graph_ui.prepass(ui, graph_scope, &mut intents);
         Panel::vstack()
             .id_salt("pane")
             .size((Sizing::FILL, Sizing::FILL))
             .show(ui, |ui| {
-                graph_ui.draw(ui, &ctx, graph_scope, &mut intents);
+                graph_ui.draw(ui, graph_scope, &mut intents);
             });
         intents.drain().collect::<Vec<_>>()
     };
@@ -652,23 +628,17 @@ fn a_body_drag_moves_the_node_by_the_pointers_travel() {
     let mut graph_ui = GraphUI::default();
 
     let draw = |ui: &mut Ui, graph_ui: &mut GraphUI| {
-        let ctx = AppContext {
-            theme: &theme,
-            library: &library,
-            run_state: &run_state,
-            status_error: None,
-            process_memory: 0,
-        };
+        let ctx = app(&theme, &library, &run_state);
         let mut intents = Intents::default();
         let mut types = OutputTypes::default();
-        let graph_scope = scope(&doc, &library, &run_state, &mut types);
+        let graph_scope = scope(ctx, &doc, &mut types);
         graph_ui.scan_hits(ui, Some(graph_scope));
         graph_ui.prepass(ui, graph_scope, &mut intents);
         Panel::vstack()
             .id_salt("pane")
             .size((Sizing::FILL, Sizing::FILL))
             .show(ui, |ui| {
-                graph_ui.draw(ui, &ctx, graph_scope, &mut intents);
+                graph_ui.draw(ui, graph_scope, &mut intents);
             });
         intents.drain().collect::<Vec<_>>()
     };
@@ -748,22 +718,16 @@ fn a_port_drag_released_over_a_compatible_port_commits_the_binding() {
     // `doc` is a parameter, not a capture, so the graph can gain the edge the
     // first drag commits before the second one runs against it.
     let draw = |ui: &mut Ui, graph_ui: &mut GraphUI, doc: &Document| {
-        let ctx = AppContext {
-            theme: &theme,
-            library: &library,
-            run_state: &run_state,
-            status_error: None,
-            process_memory: 0,
-        };
+        let ctx = app(&theme, &library, &run_state);
         let mut intents = Intents::default();
         let mut types = OutputTypes::default();
-        let graph_scope = scope(doc, &library, &run_state, &mut types);
+        let graph_scope = scope(ctx, doc, &mut types);
         graph_ui.prepass(ui, graph_scope, &mut intents);
         Panel::vstack()
             .id_salt("pane")
             .size((Sizing::FILL, Sizing::FILL))
             .show(ui, |ui| {
-                graph_ui.draw(ui, &ctx, graph_scope, &mut intents);
+                graph_ui.draw(ui, graph_scope, &mut intents);
             });
         intents.drain().collect::<Vec<_>>()
     };
@@ -894,22 +858,16 @@ fn ctrl_drag_off_an_output_spawns_a_preview_wired_to_it() {
     // `CanvasGeometry` a measured center; the gesture refuses an unmeasured
     // port outright.
     let draw = |ui: &mut Ui, graph_ui: &mut GraphUI| {
-        let ctx = AppContext {
-            theme: &theme,
-            library: &library,
-            run_state: &run_state,
-            status_error: None,
-            process_memory: 0,
-        };
+        let ctx = app(&theme, &library, &run_state);
         let mut intents = Intents::default();
         let mut types = OutputTypes::default();
-        let graph_scope = scope(&doc, &library, &run_state, &mut types);
+        let graph_scope = scope(ctx, &doc, &mut types);
         graph_ui.prepass(ui, graph_scope, &mut intents);
         Panel::vstack()
             .id_salt("pane")
             .size((Sizing::FILL, Sizing::FILL))
             .show(ui, |ui| {
-                graph_ui.draw(ui, &ctx, graph_scope, &mut intents);
+                graph_ui.draw(ui, graph_scope, &mut intents);
             });
         intents.drain().collect::<Vec<_>>()
     };
@@ -991,10 +949,11 @@ fn a_wire_edit_reaches_the_next_read_with_nothing_announced() {
     let consumer = doc.graph.add_func_node(&passthrough);
     doc.main_view = GraphView::for_graph(&doc.graph);
 
+    let theme = Theme::default();
     let run_state = RunState::default();
     let resolved_output = |doc: &Document| {
         let mut types = OutputTypes::default();
-        scope(doc, &library, &run_state, &mut types)
+        scope(app(&theme, &library, &run_state), doc, &mut types)
             .node(consumer)
             .expect("the passthrough resolves")
             .output(0)

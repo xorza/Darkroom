@@ -14,7 +14,6 @@ use scenarium::{SPECIAL_NODES, SpecialNode};
 use crate::core::document::PortRef;
 use crate::core::edit::intent::sink::Intents;
 use crate::core::edit::intent::types::GraphIntent;
-use crate::gui::app::AppContext;
 use crate::gui::canvas::anchored_menu::AnchoredMenu;
 use crate::gui::canvas::{CanvasGesture, outer_canvas_widget_id, to_world};
 use crate::gui::graph_scope::GraphScope;
@@ -48,7 +47,7 @@ impl<'a> PaletteEntry<'a> {
 }
 
 /// Right-click or double-click on empty canvas → popup that lists every
-/// `Func` in `AppContext::library` plus the built-in specials, grouped by
+/// `Func` the scope's library holds plus the built-in specials, grouped by
 /// category. Clicking an entry emits the intent that adds it at the click's
 /// world position (inner-canvas pre-transform). Outside-click and Esc
 /// dismiss.
@@ -97,7 +96,6 @@ impl NewNodeUi {
     pub(super) fn apply(
         &mut self,
         ui: &mut Ui,
-        ctx: &AppContext<'_>,
         graph_scope: GraphScope<'_>,
         gesture: Option<CanvasGesture>,
         pending_source: Option<PortRef>,
@@ -136,8 +134,8 @@ impl NewNodeUi {
         // (`max_height` minus the chrome above it) keeps it from eating the
         // header's space — a `Hug` scroll otherwise claims the full cap.
         let surface = ui.display().logical_rect();
-        let max_height = ctx
-            .theme
+        let max_height = graph_scope
+            .theme()
             .new_node_popup_max_height
             .min(surface.size.h - 16.0)
             .max(120.0);
@@ -151,7 +149,7 @@ impl NewNodeUi {
         let chosen = self
             .menu
             .show(ui, "new_node_popup", Some(max_height), |ui, popup| {
-                let palette = Palette { ctx, pos };
+                let palette = Palette { graph_scope, pos };
                 palette_body(ui, popup, &palette, search, scroll_cap, just_opened)
             });
 
@@ -249,7 +247,7 @@ fn palette_body(
         // the user can type into.
         .escape_falls_through()
         .placeholder("Search…")
-        .style(&palette.ctx.theme.inline_rename.text_edit)
+        .style(&palette.graph_scope.theme().inline_rename.text_edit)
         .size((Sizing::fill(1.0), Sizing::HUG))
         .min_size((200.0, 0.0))
         .margin(Spacing::new(0.0, 0.0, 0.0, SEARCH_ROW_GAP))
@@ -285,7 +283,7 @@ fn palette_body(
 /// take one borrow rather than four threaded parameters.
 #[derive(Debug)]
 struct Palette<'a> {
-    ctx: &'a AppContext<'a>,
+    graph_scope: GraphScope<'a>,
     /// World position the open captured — every intent a row raises places
     /// its node here.
     pos: Vec2,
@@ -302,8 +300,8 @@ impl<'a> Palette<'a> {
     /// Every row the palette can list, in no particular order: the library's
     /// funcs, then the built-in specials.
     fn entries(&'a self) -> impl Iterator<Item = PaletteEntry<'a>> {
-        self.ctx
-            .library
+        self.graph_scope
+            .library()
             .funcs()
             .map(PaletteEntry::Func)
             .chain(SPECIAL_NODES.iter().copied().map(PaletteEntry::Special))

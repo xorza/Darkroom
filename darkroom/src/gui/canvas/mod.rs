@@ -27,7 +27,6 @@ use std::collections::BTreeSet;
 use crate::core::document::{Document, Viewport};
 use crate::core::edit::intent::sink::Intents;
 use crate::core::edit::intent::types::GraphIntent;
-use crate::gui::app::AppContext;
 use crate::gui::app::commands::AppCommand;
 use crate::gui::app::commands::edit::EditCommand;
 use crate::gui::app::commands::run::RunCommand;
@@ -61,10 +60,11 @@ use crate::gui::node::{NodeUI, RecordCtx};
 /// widget ids, the viewport, the paint stack — comes from the [`GraphScope`]
 /// each entry point is handed.
 ///
-/// Nothing here builds that scope: `Editor` composes one per frame phase and
-/// threads it down, so this type never needs to know a library or a run
-/// state exists, and the "is a graph pane up" question is answered once at
-/// the tab dispatch rather than re-derived by every pass.
+/// Nothing here builds that scope: `MainWindow` composes one per frame phase
+/// and threads it down, so this type never needs to name a theme, a library
+/// or a run state — the scope answers for all three — and the "is a graph
+/// pane up" question is settled once at the tab dispatch rather than
+/// re-derived by every pass.
 ///
 /// The frame splits accordingly:
 /// - [`Self::prepass`] runs **once** over the whole scene, with a small
@@ -158,11 +158,10 @@ impl GraphUI {
     pub(crate) fn draw_toolbar(
         &mut self,
         ui: &mut Ui,
-        ctx: &AppContext<'_>,
         graph_scope: GraphScope<'_>,
         out: &mut Intents,
     ) -> Option<AppCommand> {
-        graph_toolbar::show(ui, ctx, graph_scope, &self.geometry, out)
+        graph_toolbar::show(ui, graph_scope, &self.geometry, out)
     }
 
     /// Sweep last frame's node responses into [`CanvasHits`]. Does nothing
@@ -281,9 +280,7 @@ impl GraphUI {
         // frame's drag edges and centers, and `preview_drag_modifier` keeps
         // them disjoint: the preview spawn takes the output column under the
         // chord, the wire gesture takes it otherwise.
-        gestures
-            .preview_drag
-            .apply(ui, graph_scope, geometry, graph_scope.library(), out);
+        gestures.preview_drag.apply(ui, graph_scope, geometry, out);
         // A node picked from a drop-spawned palette last frame re-floats its
         // wire so the user clicks the exact port to land it.
         let resume = gestures.new_node_ui.take_resume_floating();
@@ -322,7 +319,6 @@ impl GraphUI {
     pub(crate) fn draw(
         &mut self,
         ui: &mut Ui,
-        ctx: &AppContext<'_>,
         graph_scope: GraphScope<'_>,
         out: &mut Intents,
     ) -> Option<AppCommand> {
@@ -331,8 +327,8 @@ impl GraphUI {
         // sees the up-to-date viewport with nothing to re-sync. The gesture
         // was classified in `prepass` too.
         let gesture = self.gesture;
-        let command = self.resolve_gestures(ui, ctx, graph_scope, gesture, out);
-        self.record_canvas(ui, ctx, graph_scope, out);
+        let command = self.resolve_gestures(ui, graph_scope, gesture, out);
+        self.record_canvas(ui, graph_scope, out);
         command
     }
 
@@ -343,7 +339,6 @@ impl GraphUI {
     fn resolve_gestures(
         &mut self,
         ui: &mut Ui,
-        ctx: &AppContext<'_>,
         graph_scope: GraphScope<'_>,
         gesture: Option<CanvasGesture>,
         out: &mut Intents,
@@ -390,7 +385,7 @@ impl GraphUI {
         };
         gestures
             .new_node_ui
-            .apply(ui, ctx, graph_scope, popup_gesture, pending_connection, out);
+            .apply(ui, graph_scope, popup_gesture, pending_connection, out);
         // This pane's own precedence, in the order written: first source to
         // answer wins, and nothing below can overwrite a decision above.
         //
@@ -410,13 +405,7 @@ impl GraphUI {
     /// dotted backdrop, and — under the inner canvas's pan/zoom transform —
     /// the wires, node bodies, inspection panels, and in-flight
     /// gesture previews.
-    fn record_canvas(
-        &mut self,
-        ui: &mut Ui,
-        ctx: &AppContext<'_>,
-        graph_scope: GraphScope<'_>,
-        out: &mut Intents,
-    ) {
+    fn record_canvas(&mut self, ui: &mut Ui, graph_scope: GraphScope<'_>, out: &mut Intents) {
         let Self {
             visible: _,
             background,
@@ -438,6 +427,7 @@ impl GraphUI {
                     pan_anchor: _,
                 },
         } = self;
+        let theme = graph_scope.theme();
         let viewport = graph_scope.viewport();
         let (pan_val, zoom_val) = (viewport.pan, viewport.zoom);
         // Effective selection to paint: the live rubber-band preview while
@@ -471,11 +461,11 @@ impl GraphUI {
             .size((Sizing::FILL, Sizing::FILL))
             .sense(Sense::CLICK | Sense::DRAG | Sense::SCROLL | Sense::PINCH)
             .clip_rect()
-            .background(Background::fill(ctx.theme.colors.canvas_bg))
+            .background(Background::fill(theme.colors.canvas_bg))
             .show(ui, |ui| {
                 // Dotted backdrop in screen space, beneath the inner
                 // (transformed) canvas — so it paints under everything.
-                background.draw(ui, ctx, pan_val, zoom_val);
+                background.draw(ui, theme, pan_val, zoom_val);
                 Panel::canvas()
                     .id(inner_canvas_widget_id())
                     .size((Sizing::FILL, Sizing::FILL))
@@ -500,19 +490,12 @@ impl GraphUI {
                         );
                         // Painted first so it sits beneath the
                         // connections and node bodies.
-                        selection_ui.draw(ui, ctx);
+                        selection_ui.draw(ui, theme);
                         // One bundle for everything this pane records: the
                         // node bodies below, and the inspection
                         // panels after them. Built out here rather than inside
                         // the probe scope so both passes read the same refs.
-                        let rcx = RecordCtx {
-                            theme: ctx.theme,
-                            graph_scope,
-                            selected,
-                            geometry,
-                            hits,
-                            inspectors,
-                        };
+                        let rcx = RecordCtx::new(graph_scope, selected, geometry, hits, inspectors);
                         {
                             let mut probe = breaker_ui.probe();
                             // One emphasis resolution for both wire families:
@@ -524,8 +507,7 @@ impl GraphUI {
                             let fading = connection_ui.is_dragging()
                                 || subscription_ui.is_dragging()
                                 || probe.is_active();
-                            let emphasis =
-                                WireEmphasis::resolve(ctx.theme.colors.canvas_bg, fading);
+                            let emphasis = WireEmphasis::resolve(theme.colors.canvas_bg, fading);
                             // Both wire renderers share these inputs, so
                             // they're bundled once and reborrowed into each.
                             // Subscription wires sit under the node bodies
@@ -550,15 +532,9 @@ impl GraphUI {
                         // beneath; positioned in world coords, so they ride
                         // the inner-canvas transform.
                         inspectors.draw_panels(ui, rcx);
-                        breaker_ui.draw(ui, ctx);
-                        connection_ui.draw_in_flight(ui, ctx, graph_scope, geometry, canvas_origin);
-                        subscription_ui.draw_in_flight(
-                            ui,
-                            ctx,
-                            graph_scope,
-                            geometry,
-                            canvas_origin,
-                        );
+                        breaker_ui.draw(ui, theme);
+                        connection_ui.draw_in_flight(ui, graph_scope, geometry, canvas_origin);
+                        subscription_ui.draw_in_flight(ui, graph_scope, geometry, canvas_origin);
                     });
             });
     }

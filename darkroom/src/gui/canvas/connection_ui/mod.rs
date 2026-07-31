@@ -6,7 +6,6 @@ use scenarium::{Binding, InputPort};
 use crate::core::document::{PortKind, PortRef};
 use crate::core::edit::intent::sink::Intents;
 use crate::core::edit::intent::types::GraphIntent;
-use crate::gui::app::AppContext;
 use crate::gui::canvas::geometry::CanvasGeometry;
 use crate::gui::canvas::gesture_slot::GestureSlot;
 use crate::gui::canvas::wire::{GlyphDrag, Wire, WirePass, WireTint};
@@ -244,7 +243,6 @@ impl ConnectionUI {
     pub(super) fn draw_in_flight(
         &self,
         ui: &mut Ui,
-        ctx: &AppContext<'_>,
         graph_scope: GraphScope<'_>,
         geometry: &CanvasGeometry,
         canvas_origin: Vec2,
@@ -276,9 +274,10 @@ impl ConnectionUI {
         };
         // Tint the in-flight wire by the dragged port's data type, so the
         // preview already reads as the type being connected.
+        let theme = graph_scope.theme();
         let drag_ty = port_data_type(graph_scope, start_port).unwrap_or_default();
-        let color = port_color(ctx.theme, &drag_ty, start_port.kind, false);
-        Wire::data(p0, p3).add(ui, ctx.theme.connection_width, CurveBrush::Solid(color));
+        let color = port_color(theme, &drag_ty, start_port.kind, false);
+        Wire::data(p0, p3).add(ui, theme.connection_width, CurveBrush::Solid(color));
     }
 }
 
@@ -290,7 +289,11 @@ impl ConnectionUI {
 /// module rather than [`ConnectionUI`] — the in-flight gesture that struct
 /// owns has no bearing on how the standing wires paint.
 pub(super) fn draw(ui: &mut Ui, pass: &mut WirePass<'_, '_>) {
-    let (theme, graph_scope, geometry) = (pass.rcx.theme, pass.rcx.graph_scope, pass.rcx.geometry);
+    let (theme, graph_scope, geometry) = (
+        pass.rcx.theme(),
+        pass.rcx.graph_scope(),
+        pass.rcx.geometry(),
+    );
     for (consumer, producer) in graph_scope.connections() {
         let src = PortRef {
             node_id: producer.node_id,

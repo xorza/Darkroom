@@ -15,7 +15,6 @@ use palantir::{
 };
 
 use crate::core::edit::intent::sink::Intents;
-use crate::gui::app::AppContext;
 use crate::gui::app::commands::AppCommand;
 use crate::gui::app::commands::run::RunCommand;
 use crate::gui::canvas::geometry::CanvasGeometry;
@@ -53,11 +52,12 @@ fn show_selected_wid() -> WidgetId {
 /// (drawn after it), so a click on a button never starts a pan.
 pub(crate) fn show(
     ui: &mut Ui,
-    ctx: &AppContext<'_>,
     graph_scope: GraphScope<'_>,
     geometry: &CanvasGeometry,
     out: &mut Intents,
 ) -> Option<AppCommand> {
+    let theme = graph_scope.theme();
+    let run_state = graph_scope.run_state();
     let mut command = None;
     Panel::vstack()
         .id_salt("graph_toolbar")
@@ -71,12 +71,12 @@ pub(crate) fn show(
             // own chrome pill. Both compile and run the whole document.
             pill(
                 ui,
-                ctx.theme,
+                theme,
                 Panel::hstack().id_salt("graph_toolbar_run"),
                 |ui| {
                     // Run / cancel: toggled while a one-shot run is in
                     // flight.
-                    let running = ctx.run_state.activity.is_executing();
+                    let running = run_state.activity.is_executing();
                     let run_tip = if running { "Cancel run" } else { "Run" };
                     // Run is the one primary action in the cluster — it
                     // alone idles with the accent glyph; the event-loop
@@ -84,9 +84,9 @@ pub(crate) fn show(
                     // buttons below.
                     if Chip::new(run_button_wid(), run_tip)
                         .toggled(running)
-                        .idle_glyph(ctx.theme.colors.exec_executed_glow)
-                        .toggled_fill(ctx.theme.colors.exec_running_glow)
-                        .show(ui, ctx.theme, draw_play)
+                        .idle_glyph(theme.colors.exec_executed_glow)
+                        .toggled_fill(theme.colors.exec_running_glow)
+                        .show(ui, theme, draw_play)
                     {
                         command = Some(if running {
                             AppCommand::Run(RunCommand::Cancel)
@@ -95,7 +95,7 @@ pub(crate) fn show(
                         });
                     }
                     // Event loop start / stop: toggled while the loop runs.
-                    let event_loop_active = ctx.run_state.activity.event_loop_active();
+                    let event_loop_active = run_state.activity.event_loop_active();
                     let events_tip = if event_loop_active {
                         "Stop events"
                     } else {
@@ -103,8 +103,8 @@ pub(crate) fn show(
                     };
                     if Chip::new(events_button_wid(), events_tip)
                         .toggled(event_loop_active)
-                        .toggled_fill(ctx.theme.colors.exec_running_glow)
-                        .show(ui, ctx.theme, draw_play_bar)
+                        .toggled_fill(theme.colors.exec_running_glow)
+                        .show(ui, theme, draw_play_bar)
                     {
                         command = Some(if event_loop_active {
                             AppCommand::Run(RunCommand::StopEvents)
@@ -122,8 +122,8 @@ pub(crate) fn show(
             let framing = Panel::vstack()
                 .id_salt("graph_toolbar_framing")
                 .child_align(Align::new(HAlign::Left, VAlign::Top));
-            pill(ui, ctx.theme, framing, |ui| {
-                if Chip::new(reset_view_wid(), "Reset view").show(ui, ctx.theme, draw_reset) {
+            pill(ui, theme, framing, |ui| {
+                if Chip::new(reset_view_wid(), "Reset view").show(ui, theme, draw_reset) {
                     out.extend(pan_zoom::view_action_intent(
                         ui,
                         geometry,
@@ -131,7 +131,7 @@ pub(crate) fn show(
                         ViewAction::Reset,
                     ));
                 }
-                if Chip::new(show_all_wid(), "Show all").show(ui, ctx.theme, draw_show_all) {
+                if Chip::new(show_all_wid(), "Show all").show(ui, theme, draw_show_all) {
                     out.extend(pan_zoom::view_action_intent(
                         ui,
                         geometry,
@@ -141,7 +141,7 @@ pub(crate) fn show(
                 }
                 if Chip::new(show_selected_wid(), "Show selected").show(
                     ui,
-                    ctx.theme,
+                    theme,
                     draw_show_selected,
                 ) {
                     out.extend(pan_zoom::view_action_intent(

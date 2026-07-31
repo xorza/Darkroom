@@ -237,13 +237,13 @@ impl WirePass<'_, '_> {
             return false;
         }
         let broken = self.probe.crosses_wire(wire);
-        let stroke = self
-            .emphasis
-            .stroke(self.rcx.theme.connection_width, broken, endpoint_hover);
+        let stroke =
+            self.emphasis
+                .stroke(self.rcx.theme().connection_width, broken, endpoint_hover);
         // A broken wire paints flat so the alarm read isn't diluted by the
         // family's own gradient, and it outranks the hover tint outright.
         let brush = if broken {
-            CurveBrush::Solid(self.rcx.theme.colors.connection_broken)
+            CurveBrush::Solid(self.rcx.theme().colors.connection_broken)
         } else {
             self.emphasis.brush(tint(), stroke.hovered)
         };

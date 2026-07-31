@@ -5,11 +5,11 @@ use scenarium::{InputPort, Subscription};
 
 use crate::core::edit::intent::sink::Intents;
 use crate::core::edit::intent::types::GraphIntent;
-use crate::gui::app::AppContext;
 use crate::gui::canvas::gesture_slot::GestureSlot;
 use crate::gui::canvas::wire::Wire;
 use crate::gui::canvas::{CanvasGesture, outer_canvas_widget_id, to_world};
 use crate::gui::graph_scope::GraphScope;
+use crate::gui::theme::Theme;
 
 /// The active gesture, threaded through node and wire rendering so
 /// intersection tests run inline with the draw that knows the geometry.
@@ -353,7 +353,7 @@ impl BreakerUI {
 
     /// Paint the polyline. No-op when no gesture is active or the
     /// polyline has < 2 samples (a `start` with no `add_point`).
-    pub(super) fn draw(&self, ui: &mut Ui, ctx: &AppContext<'_>) {
+    pub(super) fn draw(&self, ui: &mut Ui, theme: &Theme) {
         let Some(b) = self.state.get() else {
             return;
         };
@@ -363,8 +363,8 @@ impl BreakerUI {
         ui.add_shape(
             Shape::polyline(
                 &b.points,
-                PolylineColors::Single(ctx.theme.colors.breaker_stroke),
-                ctx.theme.breaker_stroke_width,
+                PolylineColors::Single(theme.colors.breaker_stroke),
+                theme.breaker_stroke_width,
             )
             .cap(LineCap::Round)
             .join(LineJoin::Round),

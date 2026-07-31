@@ -63,7 +63,7 @@ impl App {
 
     fn evict_cache(&mut self, node_id: NodeId) {
         if self.runtime.evict_cache(&self.open.document.graph, node_id) {
-            self.editor.run_state.clear_cache_projections();
+            self.run_state.clear_cache_projections();
         }
     }
 
