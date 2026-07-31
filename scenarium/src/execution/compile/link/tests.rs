@@ -2,15 +2,14 @@ use super::*;
 use crate::DataType;
 use crate::common::column::Idx;
 use crate::execution::compiled::CompiledGraph;
-use crate::execution::flatten::flat::internals::FlatGraphBuilder;
-use crate::execution::identity::{ExecutionEventPort, ExecutionOutputPort};
+use crate::execution::lower::lowered_graph::internals::LoweredGraphBuilder;
 use crate::graph::func::event::EventLambda;
 use crate::graph::func::{FuncInput, FuncOutput};
-use crate::graph::identity::{FuncId, NodeId};
+use crate::graph::identity::{EventPort, FuncId, NodeId, OutputPort};
 use crate::testing;
 
-fn e_node_id(id: u128) -> ExecutionNodeId {
-    ExecutionNodeId::from_u128(id)
+fn node_id(id: u128) -> NodeId {
+    NodeId::from_u128(id)
 }
 
 /// Node `n` carries func id `n`, so the declaration linking reads and the node
@@ -30,39 +29,39 @@ fn library(funcs: impl IntoIterator<Item = Func>) -> Library {
 
 /// Four bare nodes in emit order 3, 1, 2, 4 — ids the walk would have
 /// reached in that order, which is not the order they will be placed in.
-fn emitted(ids: [u128; 4]) -> FlatGraph {
-    let mut builder = FlatGraphBuilder::default();
+fn emitted(ids: [u128; 4]) -> LoweredGraph {
+    let mut builder = LoweredGraphBuilder::default();
     for id in ids {
-        builder.insert_node(e_node_id(id));
+        builder.insert_node(node_id(id));
     }
-    let mut flat = builder.build();
+    let mut lowered = builder.build();
     for (position, id) in ids.iter().enumerate() {
-        flat.e_nodes[position].func_id = FuncId::from_u128(*id);
+        lowered.e_nodes[position].func_id = FuncId::from_u128(*id);
     }
-    flat
+    lowered
 }
 
-fn bound(producer: u128, port_idx: usize) -> FlatInput {
-    FlatInput {
+fn bound(producer: u128, port_idx: usize) -> LoweredInput {
+    LoweredInput {
         required: true,
         stamps_fs_path: false,
-        binding: FlatBinding::Bind(ExecutionOutputPort {
-            e_node_id: e_node_id(producer),
+        binding: LoweredBinding::Bind(OutputPort {
+            node_id: node_id(producer),
             port_idx,
         }),
     }
 }
 
-/// Give the node at `position` the output types flatten would have resolved
-/// for it, appended in emit order — the one part of a flat graph a fixture
+/// Give the node at `position` the output types lowering would have resolved
+/// for it, appended in emit order — the one part of a lowered graph a fixture
 /// built by hand still has to state.
 fn push_outputs(
-    flat: &mut FlatGraph,
+    lowered: &mut LoweredGraph,
     position: usize,
     data_types: impl IntoIterator<Item = DataType>,
 ) {
-    let span = flat.outputs.append(data_types);
-    flat.e_nodes[position].outputs = span;
+    let span = lowered.outputs.append(data_types);
+    lowered.e_nodes[position].outputs = span;
 }
 
 /// Placement is by id, the pools stay in emit order, and every id-named
@@ -71,12 +70,12 @@ fn push_outputs(
 /// each node still answers for the authored node it came from.
 #[test]
 fn links_ids_to_dense_indices_over_emit_ordered_pools() {
-    let mut flat = emitted([3, 1, 2, 4]);
+    let mut lowered = emitted([3, 1, 2, 4]);
     // Three producers with two output ports each, appended as emitted.
     for position in 0..3 {
-        push_outputs(&mut flat, position, [DataType::Int, DataType::Int]);
+        push_outputs(&mut lowered, position, [DataType::Int, DataType::Int]);
     }
-    flat.e_nodes[3].inputs = flat.inputs.append([bound(1, 1), bound(3, 0)]);
+    lowered.e_nodes[3].inputs = lowered.inputs.append([bound(1, 1), bound(3, 0)]);
     let library = library([
         declaring(3),
         declaring(1),
@@ -87,33 +86,32 @@ fn links_ids_to_dense_indices_over_emit_ordered_pools() {
     ]);
 
     let mut compiled = CompiledGraph::default();
-    Linker::default().link(&flat, &library, &mut compiled);
+    Linker::default().link(&lowered, &library, &mut compiled);
 
-    // Linking reads the flat graph and leaves it alone, so the same one links
-    // again to the same answer — the property that makes `flat` shared here.
+    // Linking reads the lowered graph and leaves it alone, so the same one links
+    // again to the same answer — the property that makes `lowered` shared here.
     let mut relinked = CompiledGraph::default();
-    Linker::default().link(&flat, &library, &mut relinked);
+    Linker::default().link(&lowered, &library, &mut relinked);
     assert_eq!(
-        relinked.e_node_ids.iter().collect::<Vec<_>>(),
-        compiled.e_node_ids.iter().collect::<Vec<_>>(),
-        "a second link over the same flat graph places the same nodes"
+        relinked.node_ids.iter().collect::<Vec<_>>(),
+        compiled.node_ids.iter().collect::<Vec<_>>(),
+        "a second link over the same lowered graph places the same nodes"
     );
     let program = &compiled;
 
     assert_eq!(
-        program.e_node_ids.iter().copied().collect::<Vec<_>>(),
-        (1..=4).map(e_node_id).collect::<Vec<_>>(),
+        program.node_ids.iter().copied().collect::<Vec<_>>(),
+        (1..=4).map(node_id).collect::<Vec<_>>(),
         "ids 1..=4 take indices 0..=3 despite id 3 being emitted first"
     );
     for id in 1..=4 {
-        assert_eq!(
-            compiled.attribution(e_node_id(id)).unwrap(),
-            NodeId::from_u128(id),
-            "each leaf followed its node through the sort"
+        assert!(
+            compiled.contains(node_id(id)),
+            "each node followed its id through the sort"
         );
     }
 
-    let consumer = program.by_id(e_node_id(4));
+    let consumer = program.by_id(node_id(4));
     let addresses: Vec<_> = program.inputs[consumer.inputs]
         .iter()
         .map(|input| match input.binding {
@@ -142,13 +140,13 @@ fn links_ids_to_dense_indices_over_emit_ordered_pools() {
 }
 
 /// Linking copies the walk's resolved output types slot for slot rather than
-/// re-deriving them, so what the flat graph says a port produces is what the
+/// re-deriving them, so what the lowered graph says a port produces is what the
 /// program says — including a type no declaration in the library mentions.
 #[test]
 fn copies_the_walks_resolved_output_types() {
-    let mut flat = emitted([3, 1, 2, 4]);
-    push_outputs(&mut flat, 1, [DataType::String]);
-    push_outputs(&mut flat, 3, [DataType::String, DataType::Float]);
+    let mut lowered = emitted([3, 1, 2, 4]);
+    push_outputs(&mut lowered, 1, [DataType::String]);
+    push_outputs(&mut lowered, 3, [DataType::String, DataType::Float]);
     // Declares a *wildcard* pair: were linking still resolving these itself,
     // both would come back `Any` from the unbound mirrors below.
     let library = library([
@@ -161,43 +159,42 @@ fn copies_the_walks_resolved_output_types() {
     ]);
 
     let mut compiled = CompiledGraph::default();
-    Linker::default().link(&flat, &library, &mut compiled);
+    Linker::default().link(&lowered, &library, &mut compiled);
     let program = &compiled;
-    let consumer = program.by_id(e_node_id(4));
-    let types: Vec<_> = program.outputs[consumer.outputs]
-        .iter()
-        .map(|output| output.data_type.clone())
-        .collect();
-    assert_eq!(types, vec![DataType::String, DataType::Float]);
+    let consumer = program.by_id(node_id(4));
+    assert_eq!(
+        program.outputs[consumer.outputs],
+        [DataType::String, DataType::Float]
+    );
 }
 
-/// An endpoint the walk never emitted is a flatten bug, not drift to
+/// An endpoint the walk never emitted is a lowering bug, not drift to
 /// absorb: linking panics rather than dropping an edge the graph asked for.
 #[test]
 fn panics_on_edges_naming_nodes_the_walk_never_emitted() {
-    let mut flat = emitted([3, 1, 2, 4]);
-    flat.e_nodes[3].inputs = flat.inputs.append([bound(9, 0)]);
+    let mut lowered = emitted([3, 1, 2, 4]);
+    lowered.e_nodes[3].inputs = lowered.inputs.append([bound(9, 0)]);
     let empty = Library::default();
     let bind = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        Linker::default().link(&flat, &empty, &mut CompiledGraph::default());
+        Linker::default().link(&lowered, &empty, &mut CompiledGraph::default());
     }));
     assert!(
         bind.is_err(),
         "binding a producer the program never adopted must panic"
     );
 
-    let mut flat = emitted([3, 1, 2, 4]);
-    flat.e_nodes[0].events = flat.reserve_events(1);
-    flat.subscriptions.push(PendingSubscription {
-        event: ExecutionEventPort {
-            e_node_id: e_node_id(3),
+    let mut lowered = emitted([3, 1, 2, 4]);
+    lowered.e_nodes[0].events = lowered.reserve_events(1);
+    lowered.subscriptions.push(PendingSubscription {
+        event: EventPort {
+            node_id: node_id(3),
             event_idx: 0,
         },
-        subscriber: e_node_id(9),
+        subscriber: node_id(9),
     });
     let library = library([declaring(3).event("fired", EventLambda::default())]);
     let subscription = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        Linker::default().link(&flat, &library, &mut CompiledGraph::default());
+        Linker::default().link(&lowered, &library, &mut CompiledGraph::default());
     }));
     assert!(
         subscription.is_err(),
@@ -209,46 +206,46 @@ fn panics_on_edges_naming_nodes_the_walk_never_emitted() {
 /// one means "nothing subscribes" rather than "not wired yet".
 #[test]
 fn wires_each_event_with_the_subscribers_resolved_for_it() {
-    let mut flat = emitted([3, 1, 2, 4]);
-    flat.e_nodes[0].events = flat.reserve_events(2);
-    flat.subscriptions.push(PendingSubscription {
-        event: ExecutionEventPort {
-            e_node_id: e_node_id(3),
+    let mut lowered = emitted([3, 1, 2, 4]);
+    lowered.e_nodes[0].events = lowered.reserve_events(2);
+    lowered.subscriptions.push(PendingSubscription {
+        event: EventPort {
+            node_id: node_id(3),
             event_idx: 1,
         },
-        subscriber: e_node_id(4),
+        subscriber: node_id(4),
     });
     let library = library([declaring(3)
         .event("quiet", EventLambda::default())
         .event("subscribed", EventLambda::default())]);
 
     let mut compiled = CompiledGraph::default();
-    Linker::default().link(&flat, &library, &mut compiled);
+    Linker::default().link(&lowered, &library, &mut compiled);
     let program = &compiled;
-    let emitter = program.by_id(e_node_id(3));
+    let emitter = program.by_id(node_id(3));
     let subscribers: Vec<_> = program.events[emitter.events]
         .iter()
         .map(|event| event.subscribers.clone())
         .collect();
     assert_eq!(
         subscribers,
-        vec![vec![], vec![program.e_node_index[&e_node_id(4)]]],
+        vec![vec![], vec![program.node_index[&node_id(4)]]],
         "only the subscribed port carries a subscriber"
     );
 }
 
 /// One port range means the same run of ports in the program's pool as in the
-/// flat one — the whole reason a single range type spans both stages. Both port
-/// pools are rebuilt slot for slot, so a placed node owns the run its flat self
+/// lowered one — the whole reason a single range type spans both stages. Both port
+/// pools are rebuilt slot for slot, so a placed node owns the run its lowered self
 /// claimed.
 #[test]
 fn port_ranges_survive_the_rebuild() {
-    let mut flat = emitted([3, 1, 2, 4]);
-    flat.e_nodes[1].inputs = flat.inputs.append([bound(3, 0), bound(2, 0)]);
-    push_outputs(&mut flat, 0, [DataType::Bool]);
-    push_outputs(&mut flat, 2, [DataType::Bool]);
-    let expected = flat.e_nodes[1].inputs;
-    let expected_outputs = flat.e_nodes[2].outputs;
+    let mut lowered = emitted([3, 1, 2, 4]);
+    lowered.e_nodes[1].inputs = lowered.inputs.append([bound(3, 0), bound(2, 0)]);
+    push_outputs(&mut lowered, 0, [DataType::Bool]);
+    push_outputs(&mut lowered, 2, [DataType::Bool]);
+    let expected = lowered.e_nodes[1].inputs;
+    let expected_outputs = lowered.e_nodes[2].outputs;
     let library = library([
         declaring(3),
         declaring(2),
@@ -258,16 +255,13 @@ fn port_ranges_survive_the_rebuild() {
     ]);
 
     let mut compiled = CompiledGraph::default();
-    Linker::default().link(&flat, &library, &mut compiled);
+    Linker::default().link(&lowered, &library, &mut compiled);
     let program = &compiled;
-    let placed = program.by_id(e_node_id(1)).inputs;
+    let placed = program.by_id(node_id(1)).inputs;
     assert_eq!(placed, expected);
     assert_eq!(program.inputs[placed].len(), 2);
     // The output run is the run the placed node owns, carrying the type the
     // walk put in it.
-    assert_eq!(program.by_id(e_node_id(2)).outputs, expected_outputs);
-    assert_eq!(
-        program.outputs[expected_outputs][0].data_type,
-        DataType::Bool
-    );
+    assert_eq!(program.by_id(node_id(2)).outputs, expected_outputs);
+    assert_eq!(program.outputs[expected_outputs][0], DataType::Bool);
 }

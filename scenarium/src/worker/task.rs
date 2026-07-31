@@ -8,10 +8,10 @@ use ::common::CancelToken;
 
 use crate::execution::engine::ExecutionEngine;
 use crate::execution::error::Error;
-use crate::execution::identity::ExecutionEventPort;
 use crate::execution::report::ExecutionOutcome;
 use crate::execution::report::{RunProgress, RunReporter};
 use crate::execution::seeds::RunSeeds;
+use crate::graph::identity::EventPort;
 use crate::worker::batch::{BatchIntent, GraphOp, LoopCommand};
 use crate::worker::error::WorkerError;
 use crate::worker::event_loop::{
@@ -62,7 +62,7 @@ impl PendingRun {
                 sinks: intent.execute_sinks,
                 event_sources: start_event_loop || intent.execute_event_sources,
                 events: intent.events.drain(..).collect(),
-                e_node_ids: intent.execute_nodes.drain(..).collect(),
+                node_ids: intent.execute_nodes.drain(..).collect(),
             },
             start_event_loop,
         })
@@ -87,7 +87,7 @@ pub(crate) struct WorkerTask<ExecutionCallback> {
     outcome: ExecutionOutcome,
     intent: BatchIntent,
     messages: Vec<WorkerMessage>,
-    event_buffer: Vec<ExecutionEventPort>,
+    event_buffer: Vec<EventPort>,
     event_loop: Option<ActiveEventLoop>,
     event_loop_pause_gate: PauseGate,
 }
@@ -225,7 +225,7 @@ where
 
         let details = failures
             .iter()
-            .map(|failure| format!("{:?}: {}", failure.e_node_id, failure.message))
+            .map(|failure| format!("{:?}: {}", failure.node_id, failure.message))
             .collect::<Vec<_>>()
             .join("; ");
         (self.callback)(WorkerReport::Error(WorkerError::CacheEviction {
@@ -315,7 +315,7 @@ where
         for panic in panics {
             (self.callback)(WorkerReport::Error(WorkerError::Execution {
                 error: Error::EventLambdaPanic {
-                    e_node_id: panic.e_node_id,
+                    node_id: panic.node_id,
                     message: panic.message,
                 },
             }));
@@ -373,10 +373,10 @@ mod tests {
 
     use ::common::CancelToken;
 
-    use crate::execution::identity::ExecutionNodeId;
     use crate::execution::report::NodeExecutionStatus;
     use crate::execution::report::{RunPhase, RunProgress, RunReporter};
     use crate::execution::seeds::RunSeeds;
+    use crate::graph::identity::NodeId;
     use crate::worker::batch::{BatchIntent, GraphOp, LoopCommand};
     use crate::worker::protocol::{WorkerMessage, WorkerReport};
     use crate::worker::status::{WorkerActivity, WorkerStatusKind, WorkerStatusPublisher};
@@ -385,10 +385,10 @@ mod tests {
     #[tokio::test]
     async fn next_intent_receives_many_messages_into_a_reusable_buffer() {
         let (tx, rx) = mpsc::unbounded_channel();
-        let e_node_id = ExecutionNodeId::unique();
+        let node_id = NodeId::unique();
         tx.send(WorkerMessage::Clear).unwrap();
         tx.send(WorkerMessage::Run {
-            seeds: RunSeeds::nodes(vec![e_node_id]),
+            seeds: RunSeeds::nodes(vec![node_id]),
         })
         .unwrap();
         let shutdown = CancellationToken::new();
@@ -404,7 +404,7 @@ mod tests {
             assert!(matches!(intent.graph_state, Some(GraphOp::Clear)));
             assert_eq!(
                 intent.execute_nodes.iter().copied().collect::<Vec<_>>(),
-                [e_node_id]
+                [node_id]
             );
         }
         assert!(task.messages.is_empty());
@@ -501,28 +501,28 @@ mod tests {
         assert!(run.seeds.event_sources);
         assert!(!run.seeds.sinks);
         assert!(run.seeds.events.is_empty());
-        assert!(run.seeds.e_node_ids.is_empty());
+        assert!(run.seeds.node_ids.is_empty());
 
-        let e_node_id = ExecutionNodeId::unique();
+        let node_id = NodeId::unique();
         let mut explicit = BatchIntent::default();
         explicit.reset(
             [WorkerMessage::Run {
-                seeds: RunSeeds::nodes(vec![e_node_id]),
+                seeds: RunSeeds::nodes(vec![node_id]),
             }],
             [],
         );
         let run = PendingRun::take(&mut explicit, EventLoopTransition::Preserve).unwrap();
         assert!(!run.start_event_loop);
         assert!(!run.seeds.event_sources);
-        assert_eq!(run.seeds.e_node_ids, [e_node_id]);
+        assert_eq!(run.seeds.node_ids, [node_id]);
     }
 
     /// Each reported event publishes its own snapshot the moment it happens, and a snapshot
     /// the host has not drained yet is never mutated by the next one.
     #[test]
     fn worker_reporter_publishes_each_event_and_preserves_published_snapshots() {
-        let first_node = ExecutionNodeId::unique();
-        let second_node = ExecutionNodeId::unique();
+        let first_node = NodeId::unique();
+        let second_node = NodeId::unique();
         let mut status = WorkerStatusPublisher::default();
         drop(status.activity(WorkerActivity::Executing));
         let (tx, mut rx) = mpsc::unbounded_channel();
@@ -533,11 +533,11 @@ mod tests {
         };
 
         reporter.progress(RunProgress {
-            e_node_id: first_node,
+            node_id: first_node,
             phase: RunPhase::Started { at: Instant::now() },
         });
         reporter.progress(RunProgress {
-            e_node_id: second_node,
+            node_id: second_node,
             phase: RunPhase::Finished { elapsed_secs: 0.25 },
         });
 
@@ -551,13 +551,13 @@ mod tests {
         assert_eq!(started.kind, WorkerStatusKind::Patch);
         assert_eq!(started.activity, WorkerActivity::Executing);
         assert_eq!(started.nodes.len(), 1);
-        assert_eq!(started.nodes[0].e_node_id, first_node);
+        assert_eq!(started.nodes[0].node_id, first_node);
         assert!(matches!(
             started.nodes[0].status,
             Some(NodeExecutionStatus::Running { .. })
         ));
         assert_eq!(finished.nodes.len(), 1);
-        assert_eq!(finished.nodes[0].e_node_id, second_node);
+        assert_eq!(finished.nodes[0].node_id, second_node);
         assert!(matches!(
             finished.nodes[0].status,
             Some(NodeExecutionStatus::Executed { elapsed_secs: 0.25 })

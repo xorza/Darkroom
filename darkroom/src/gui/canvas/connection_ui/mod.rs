@@ -318,7 +318,7 @@ pub(super) fn draw(ui: &mut Ui, pass: &mut WirePass<'_, '_>) {
 /// (both ends share it unless one side is the untyped `Any` wildcard).
 ///
 /// A wire an upstream wildcard retype left type-mismatched paints entirely in
-/// the missing-input warning color instead. Nothing severs it — it flattens as
+/// the missing-input warning color instead. Nothing severs it — it lowers as
 /// unbound (drift tolerance) — so it wears the same warning the run will report
 /// on the port.
 fn data_tint(theme: &Theme, graph_scope: GraphScope<'_>, src: PortRef, tgt: PortRef) -> WireTint {
@@ -487,7 +487,7 @@ fn port_data_type(graph_scope: GraphScope<'_>, port: PortRef) -> Option<DataType
 /// cycle-forming bind that slips through (the planner is the final backstop,
 /// `Error::CycleDetected`). Re-typing a wildcard output (passthrough / reroute)
 /// severs nothing downstream: a now-mismatched wire is tolerated, drawn in
-/// the warning color, and flattens as unbound.
+/// the warning color, and lowers as unbound.
 fn commit_connection(start: PortRef, end: PortRef, out: &mut Intents) {
     let (input, output) = match (start.kind, end.kind) {
         (PortKind::Input, PortKind::Output) => (start, end),

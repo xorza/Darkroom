@@ -17,8 +17,8 @@ use std::time::Instant;
 
 use crate::RamUsage;
 use crate::execution::error::RunError;
-use crate::execution::identity::{ExecutionEventPort, ExecutionNodeId};
 use crate::graph::func::event::EventLambda;
+use crate::graph::identity::{EventPort, NodeId};
 use crate::runtime::shared_any_state::SharedAnyState;
 
 /// Where a log record came from and how loud it is.
@@ -35,7 +35,7 @@ pub enum LogLevel {
 /// [`WorkerStatus`](crate::worker::status::WorkerStatus) republishes them.
 #[derive(Debug, Clone)]
 pub struct LogEntry {
-    pub e_node_id: ExecutionNodeId,
+    pub node_id: NodeId,
     pub level: LogLevel,
     pub message: String,
 }
@@ -46,7 +46,7 @@ pub struct LogEntry {
 /// executor produces these without knowing the worker that consumes them.
 #[derive(Debug)]
 pub(crate) struct EventTrigger {
-    pub(crate) event: ExecutionEventPort,
+    pub(crate) event: EventPort,
     pub(crate) lambda: EventLambda,
     pub(crate) state: SharedAnyState,
 }
@@ -83,7 +83,7 @@ pub enum NodeExecutionStatus {
 /// this run neither recomputed nor released.
 #[derive(Clone, Debug)]
 pub struct NodeStatus {
-    pub e_node_id: ExecutionNodeId,
+    pub node_id: NodeId,
     pub status: Option<NodeExecutionStatus>,
     pub ram: RamUsage,
 }
@@ -98,7 +98,7 @@ pub(crate) struct ExecutionOutcome {
     /// the rows are built rather than derived from them, since a failed node's row no
     /// longer says "executed" separately.
     pub(crate) ran_node_count: usize,
-    pub(crate) triggered_events: Vec<ExecutionEventPort>,
+    pub(crate) triggered_events: Vec<EventPort>,
     pub(crate) event_triggers: Vec<EventTrigger>,
     pub(crate) logs: Vec<LogEntry>,
     pub(crate) cancelled: bool,
@@ -126,7 +126,7 @@ pub(crate) enum RunPhase {
 
 #[derive(Debug, Clone)]
 pub(crate) struct RunProgress {
-    pub(crate) e_node_id: ExecutionNodeId,
+    pub(crate) node_id: NodeId,
     pub(crate) phase: RunPhase,
 }
 
@@ -144,97 +144,97 @@ pub(crate) trait RunReporter: Send + std::fmt::Debug {
 pub(crate) mod internals {
     use crate::RamUsage;
     use crate::execution::error::RunError;
-    use crate::execution::identity::ExecutionNodeId;
     use crate::execution::report::{ExecutionOutcome, NodeExecutionStatus};
+    use crate::graph::identity::NodeId;
 
     impl ExecutionOutcome {
         /// This node's row, or `None` when the run reported nothing for it.
-        pub(crate) fn status(&self, e_node_id: ExecutionNodeId) -> Option<&NodeExecutionStatus> {
+        pub(crate) fn status(&self, node_id: NodeId) -> Option<&NodeExecutionStatus> {
             self.nodes
                 .iter()
-                .find(|node| node.e_node_id == e_node_id)?
+                .find(|node| node.node_id == node_id)?
                 .status
                 .as_ref()
         }
 
         /// Whether the node invoked its lambda and succeeded.
-        pub(crate) fn ran(&self, e_node_id: ExecutionNodeId) -> bool {
+        pub(crate) fn ran(&self, node_id: NodeId) -> bool {
             matches!(
-                self.status(e_node_id),
+                self.status(node_id),
                 Some(NodeExecutionStatus::Executed { .. })
             )
         }
 
         /// Every node that invoked its lambda and succeeded.
-        pub(crate) fn ran_nodes(&self) -> impl Iterator<Item = ExecutionNodeId> + '_ {
+        pub(crate) fn ran_nodes(&self) -> impl Iterator<Item = NodeId> + '_ {
             self.nodes
                 .iter()
                 .filter(|node| matches!(node.status, Some(NodeExecutionStatus::Executed { .. })))
-                .map(|node| node.e_node_id)
+                .map(|node| node.node_id)
         }
 
         /// Whether the node was served from a cache instead of recomputing.
-        pub(crate) fn cached(&self, e_node_id: ExecutionNodeId) -> bool {
-            matches!(self.status(e_node_id), Some(NodeExecutionStatus::Cached))
+        pub(crate) fn cached(&self, node_id: NodeId) -> bool {
+            matches!(self.status(node_id), Some(NodeExecutionStatus::Cached))
         }
 
         /// Every node served from a cache rather than recomputed.
-        pub(crate) fn cached_nodes(&self) -> impl Iterator<Item = ExecutionNodeId> + '_ {
+        pub(crate) fn cached_nodes(&self) -> impl Iterator<Item = NodeId> + '_ {
             self.nodes
                 .iter()
                 .filter(|node| matches!(node.status, Some(NodeExecutionStatus::Cached)))
-                .map(|node| node.e_node_id)
+                .map(|node| node.node_id)
         }
 
         /// This node's failure, or `None` when it did not fail.
-        pub(crate) fn error(&self, e_node_id: ExecutionNodeId) -> Option<&RunError> {
-            match self.status(e_node_id)? {
+        pub(crate) fn error(&self, node_id: NodeId) -> Option<&RunError> {
+            match self.status(node_id)? {
                 NodeExecutionStatus::Errored { error, .. } => Some(error),
                 _ => None,
             }
         }
 
         /// Every node the run reported a failure for.
-        pub(crate) fn errored_nodes(&self) -> impl Iterator<Item = ExecutionNodeId> + '_ {
+        pub(crate) fn errored_nodes(&self) -> impl Iterator<Item = NodeId> + '_ {
             self.nodes
                 .iter()
                 .filter(|node| matches!(node.status, Some(NodeExecutionStatus::Errored { .. })))
-                .map(|node| node.e_node_id)
+                .map(|node| node.node_id)
         }
 
         /// The input ports the run could not satisfy on this node, empty when it had none.
-        pub(crate) fn missing_input_ports(&self, e_node_id: ExecutionNodeId) -> &[usize] {
-            match self.status(e_node_id) {
+        pub(crate) fn missing_input_ports(&self, node_id: NodeId) -> &[usize] {
+            match self.status(node_id) {
                 Some(NodeExecutionStatus::MissingInputs { ports }) => ports,
                 _ => &[],
             }
         }
 
         /// Every node the run reported a missing input for.
-        pub(crate) fn missing_input_nodes(&self) -> impl Iterator<Item = ExecutionNodeId> + '_ {
+        pub(crate) fn missing_input_nodes(&self) -> impl Iterator<Item = NodeId> + '_ {
             self.nodes
                 .iter()
                 .filter(|node| {
                     matches!(node.status, Some(NodeExecutionStatus::MissingInputs { .. }))
                 })
-                .map(|node| node.e_node_id)
+                .map(|node| node.node_id)
         }
 
         /// RAM this node's resident output holds after the run.
-        pub(crate) fn node_ram(&self, e_node_id: ExecutionNodeId) -> RamUsage {
+        pub(crate) fn node_ram(&self, node_id: NodeId) -> RamUsage {
             self.nodes
                 .iter()
-                .find(|node| node.e_node_id == e_node_id)
+                .find(|node| node.node_id == node_id)
                 .map(|node| node.ram)
                 .unwrap_or_default()
         }
 
         /// Every node still holding RAM after the run.
-        pub(crate) fn ram_holding_nodes(&self) -> impl Iterator<Item = ExecutionNodeId> + '_ {
+        pub(crate) fn ram_holding_nodes(&self) -> impl Iterator<Item = NodeId> + '_ {
             self.nodes
                 .iter()
                 .filter(|node| node.ram.total() > 0)
-                .map(|node| node.e_node_id)
+                .map(|node| node.node_id)
         }
     }
 

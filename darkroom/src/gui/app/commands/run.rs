@@ -12,7 +12,7 @@ pub(crate) enum RunCommand {
     Once,
     /// Evaluate one node's upstream cone and deliver its outputs.
     Node(NodeId),
-    /// Remove one authored node's flattened runtime-cache cone from RAM and disk.
+    /// Remove one authored node's compiled runtime-cache cone from RAM and disk.
     EvictCache(NodeId),
     /// Request cancellation of the in-flight run.
     Cancel,

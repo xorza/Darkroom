@@ -27,10 +27,10 @@ use crate::execution::cache::resource::{FsPathId, StampJob};
 use crate::execution::cache::runtime::error::CacheEvictionFailure;
 use crate::execution::cache::slot::RuntimeSlot;
 use crate::execution::compiled::{CompiledGraph, ExecutionBinding};
-use crate::execution::identity::ExecutionNodeId;
 use crate::execution::identity::{NodeIdx, OutputAddr};
 use crate::graph::func::FuncBehavior;
 use crate::graph::func::lambda::OutputDemand;
+use crate::graph::identity::NodeId;
 use crate::runtime::context::ContextStore;
 use crate::{DynamicValue, RamUsage};
 
@@ -139,18 +139,18 @@ impl RuntimeCache {
     pub(crate) async fn evict(
         &mut self,
         program: &CompiledGraph,
-        e_node_ids: &[ExecutionNodeId],
+        node_ids: &[NodeId],
     ) -> Vec<CacheEvictionFailure> {
         let mut failures = Vec::new();
-        for e_node_id in e_node_ids {
+        for node_id in node_ids {
             let node_idx = *program
-                .e_node_index
-                .get(e_node_id)
+                .node_index
+                .get(node_id)
                 .expect("an eviction target belongs to the installed program");
-            match self.disk_store.remove_node(*e_node_id).await {
+            match self.disk_store.remove_node(*node_id).await {
                 Ok(()) => self.slots[node_idx].clear_output(),
                 Err(error) => failures.push(CacheEvictionFailure {
-                    e_node_id: *e_node_id,
+                    node_id: *node_id,
                     message: error.to_string(),
                 }),
             }
@@ -212,14 +212,14 @@ impl RuntimeCache {
         // `Column::drain` empties the column when its guard drops, so the slots
         // are released even on the first install, where the left side of the zip
         // yields nothing.
-        let mut retained: HashMap<ExecutionNodeId, RuntimeSlot> = previous
+        let mut retained: HashMap<NodeId, RuntimeSlot> = previous
             .into_iter()
-            .flat_map(|previous| previous.e_node_ids.iter().copied())
+            .flat_map(|previous| previous.node_ids.iter().copied())
             .zip(self.slots.drain())
             .collect();
-        for (e_node_id, e_node) in program.e_node_ids.iter().zip(program.e_nodes.iter()) {
+        for (node_id, e_node) in program.node_ids.iter().zip(program.e_nodes.iter()) {
             let owner = e_node.func_id;
-            let slot = match retained.remove(e_node_id) {
+            let slot = match retained.remove(node_id) {
                 Some(mut slot) => {
                     slot.reown(owner);
                     slot
@@ -327,7 +327,7 @@ impl RuntimeCache {
         let outputs = &program.outputs[e_node.outputs];
         hasher.write_pod(outputs.len() as u64);
         for output in outputs {
-            hasher.write_data_type(&output.data_type);
+            hasher.write_data_type(output);
         }
 
         for input in &program.inputs[e_node.inputs] {
@@ -533,7 +533,7 @@ impl RuntimeCache {
     /// Blobs are named by stable id, so they survive installs that shift indices.
     fn blob_target(&self, program: &CompiledGraph, node_idx: NodeIdx) -> Option<BlobTarget> {
         self.disk_store.blob_target(
-            program.e_node_ids[node_idx],
+            program.node_ids[node_idx],
             &program[node_idx],
             self.slots[node_idx].current_digest,
         )
@@ -609,7 +609,7 @@ impl RuntimeCache {
         true
     }
 
-    /// Write `e_node_id`'s freshly-computed outputs to disk the moment it finishes (the executor
+    /// Write `node_id`'s freshly-computed outputs to disk the moment it finishes (the executor
     /// calls this right after a successful invoke), so a long run's earlier caches are durable
     /// even if a later node errors or the run is cancelled. [`StorePolicy::KnownMiss`] publishes
     /// directly after resolution proved reuse impossible; [`StorePolicy::PreserveCovering`]
@@ -657,7 +657,7 @@ impl RuntimeCache {
             //
             // The digest is the only other thing keeping a snapshot
             // alive, and it does not have to move: a func that grows an
-            // output while keeping its id reuses the flat
+            // output while keeping its id reuses the lowered
             // node, so `reown` sees no owner change and the stale
             // `produced_under` still equals the stale `current_digest`.
             // Both retention checks passed, and the mismatch surfaced

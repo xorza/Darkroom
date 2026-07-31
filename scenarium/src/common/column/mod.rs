@@ -32,7 +32,7 @@ pub(crate) trait Idx: Copy {
 ///
 /// The span carries the *space*, not the element type, which is what lets one
 /// span address two columns over the same space: linking rebuilds each of
-/// flatten's columns into the program's slot for slot, so the run of ports a
+/// lowering's columns into the program's slot for slot, so the run of ports a
 /// flat node owns is the run the placed node owns, with nothing to convert.
 #[derive(Debug)]
 pub(crate) struct Span<I> {

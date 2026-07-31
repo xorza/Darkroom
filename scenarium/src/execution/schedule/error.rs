@@ -9,9 +9,9 @@
 
 use thiserror::Error;
 
-use crate::execution::identity::ExecutionNodeId;
 use crate::execution::identity::NodeIdx;
 use crate::execution::schedule::NodeState;
+use crate::graph::identity::NodeId;
 
 #[derive(Debug, Error)]
 pub(crate) enum RunScheduleValidationError {
@@ -25,18 +25,12 @@ pub(crate) enum RunScheduleValidationError {
     },
     #[error("execution order contains an out-of-range node index: {node_idx:?}")]
     NodeOutOfRange { node_idx: NodeIdx },
-    #[error("execution node {e_node_id:?} input range is out of bounds")]
-    InputRange { e_node_id: ExecutionNodeId },
-    #[error("execution node {e_node_id:?} appears before dependency {dependency:?}")]
-    BeforeDependency {
-        e_node_id: ExecutionNodeId,
-        dependency: ExecutionNodeId,
-    },
-    #[error("execution node {e_node_id:?} appears more than once")]
-    DuplicateNode { e_node_id: ExecutionNodeId },
-    #[error("unscheduled node {e_node_id:?} was decided {state:?}")]
-    UnscheduledNodeDecided {
-        e_node_id: ExecutionNodeId,
-        state: NodeState,
-    },
+    #[error("execution node {node_id:?} input range is out of bounds")]
+    InputRange { node_id: NodeId },
+    #[error("execution node {node_id:?} appears before dependency {dependency:?}")]
+    BeforeDependency { node_id: NodeId, dependency: NodeId },
+    #[error("execution node {node_id:?} appears more than once")]
+    DuplicateNode { node_id: NodeId },
+    #[error("unscheduled node {node_id:?} was decided {state:?}")]
+    UnscheduledNodeDecided { node_id: NodeId, state: NodeState },
 }

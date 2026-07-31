@@ -25,7 +25,6 @@ use std::time::Instant;
 use palantir::Ui;
 use scenarium::CompiledGraph;
 use scenarium::DynamicValue;
-use scenarium::ExecutionNodeId;
 use scenarium::LogLevel;
 use scenarium::NodeExecutionStatus;
 use scenarium::NodeId;
@@ -37,15 +36,14 @@ use scenarium::WorkerStatusKind;
 
 use crate::gui::preview_store::PreviewStore;
 
-/// The authoring node one report row is about.
-///
-/// A report can only name an execution node of the compiled graph the worker
+/// A report row can only name a node of the compiled graph the worker
 /// acknowledged, so a miss is a protocol violation rather than a state to
 /// tolerate.
-fn attributed_node(compiled: &CompiledGraph, e_node_id: ExecutionNodeId) -> NodeId {
-    compiled
-        .attribution(e_node_id)
-        .expect("worker report identity must belong to the acknowledged compiled graph")
+fn assert_reported(compiled: &CompiledGraph, node_id: NodeId) {
+    assert!(
+        compiled.contains(node_id),
+        "worker report identity must belong to the acknowledged compiled graph"
+    );
 }
 
 /// Per-node execution outcome of the last run. `Executed` carries the node's
@@ -93,7 +91,7 @@ pub(crate) struct RunState {
     nodes: HashMap<NodeId, NodeRunState>,
     pub(crate) previews: PreviewStore,
     /// The program acknowledged by the worker's ordered report stream. Every
-    /// subsequent flat progress/result payload belongs to this exact compile.
+    /// subsequent progress/result payload belongs to this exact compile.
     pub(crate) compiled: Option<Arc<CompiledGraph>>,
     pub(crate) activity: WorkerActivity,
     /// RAM held by the worker's runtime cache after its latest run (system RAM
@@ -169,12 +167,12 @@ impl RunState {
                 // arrive with the completed snapshot.
                 NodeExecutionStatus::MissingInputs { .. } => ExecStatus::MissingInputs,
                 NodeExecutionStatus::Errored { error, .. } => {
-                    self.record_error(&compiled, node.e_node_id, error);
+                    self.record_error(&compiled, node.node_id, error);
                     ExecStatus::Errored
                 }
             };
-            let node_id = attributed_node(&compiled, node.e_node_id);
-            self.nodes.entry(node_id).or_default().status = status;
+            assert_reported(&compiled, node.node_id);
+            self.nodes.entry(node.node_id).or_default().status = status;
         }
     }
 
@@ -204,28 +202,32 @@ impl RunState {
                         ExecStatus::Executed(*elapsed_secs)
                     }
                     NodeExecutionStatus::MissingInputs { ports } => {
-                        self.record_missing_inputs(&compiled, node.e_node_id, ports);
+                        self.record_missing_inputs(&compiled, node.node_id, ports);
                         ExecStatus::MissingInputs
                     }
                     NodeExecutionStatus::Errored { error, .. } => {
-                        self.record_error(&compiled, node.e_node_id, error);
+                        self.record_error(&compiled, node.node_id, error);
                         ExecStatus::Errored
                     }
                 };
-                let node_id = attributed_node(&compiled, node.e_node_id);
-                self.nodes.entry(node_id).or_default().status = status;
+                assert_reported(&compiled, node.node_id);
+                self.nodes.entry(node.node_id).or_default().status = status;
             }
             if node.ram.total() > 0 {
-                let node_id = attributed_node(&compiled, node.e_node_id);
-                self.nodes.entry(node_id).or_default().ram = node.ram;
+                assert_reported(&compiled, node.node_id);
+                self.nodes.entry(node.node_id).or_default().ram = node.ram;
             }
         }
         for entry in &update.logs {
-            let node_id = attributed_node(&compiled, entry.e_node_id);
-            self.nodes.entry(node_id).or_default().logs.push(NodeLog {
-                level: entry.level,
-                message: entry.message.clone(),
-            });
+            assert_reported(&compiled, entry.node_id);
+            self.nodes
+                .entry(entry.node_id)
+                .or_default()
+                .logs
+                .push(NodeLog {
+                    level: entry.level,
+                    message: entry.message.clone(),
+                });
         }
         self.drop_empty_nodes();
     }
@@ -260,10 +262,10 @@ impl RunState {
     fn record_missing_inputs(
         &mut self,
         compiled: &CompiledGraph,
-        e_node_id: ExecutionNodeId,
+        node_id: NodeId,
         ports: &[usize],
     ) {
-        let node_id = attributed_node(compiled, e_node_id);
+        assert_reported(compiled, node_id);
         let slot = self.nodes.entry(node_id).or_default();
         slot.missing_inputs.clear();
         slot.missing_inputs.extend_from_slice(ports);
@@ -271,13 +273,8 @@ impl RunState {
 
     /// Record one run error's message against the node that failed, so the
     /// inspector can show the actual cause instead of a bare "errored".
-    fn record_error(
-        &mut self,
-        compiled: &CompiledGraph,
-        e_node_id: ExecutionNodeId,
-        error: &RunError,
-    ) {
-        let node_id = attributed_node(compiled, e_node_id);
+    fn record_error(&mut self, compiled: &CompiledGraph, node_id: NodeId, error: &RunError) {
+        assert_reported(compiled, node_id);
         self.nodes.entry(node_id).or_default().error = Some(error.to_string());
     }
 
@@ -293,21 +290,17 @@ impl RunState {
     /// Stores only. `Editor::frame` runs the store's one reconcile pass, which
     /// is what releases a value whose node is gone and uploads a full-resolution
     /// texture for an open viewer.
-    pub(crate) fn ingest_previews(
-        &mut self,
-        ui: &Ui,
-        published: Vec<(ExecutionNodeId, DynamicValue)>,
-    ) {
+    pub(crate) fn ingest_previews(&mut self, ui: &Ui, published: Vec<(NodeId, DynamicValue)>) {
         if published.is_empty() {
             return;
         }
         let Some(compiled) = self.compiled.clone() else {
             return;
         };
-        for (e_node_id, value) in published {
-            let Ok(node_id) = compiled.attribution(e_node_id) else {
+        for (node_id, value) in published {
+            if !compiled.contains(node_id) {
                 continue;
-            };
+            }
             self.previews.ingest_preview(ui, node_id, value);
         }
     }
@@ -333,24 +326,21 @@ mod tests {
         NodeId::from_u128(n)
     }
 
-    fn eid(n: u128) -> ExecutionNodeId {
-        ExecutionNodeId::from_u128(n)
+    fn eid(n: u128) -> NodeId {
+        NodeId::from_u128(n)
     }
 
-    fn completed_status(
-        executed: &[(ExecutionNodeId, f64)],
-        errored: &[ExecutionNodeId],
-    ) -> WorkerStatus {
+    fn completed_status(executed: &[(NodeId, f64)], errored: &[NodeId]) -> WorkerStatus {
         let mut nodes = executed
             .iter()
-            .map(|&(e_node_id, elapsed_secs)| NodeStatus {
-                e_node_id,
+            .map(|&(node_id, elapsed_secs)| NodeStatus {
+                node_id,
                 status: Some(NodeExecutionStatus::Executed { elapsed_secs }),
                 ram: RamUsage::default(),
             })
             .collect::<Vec<_>>();
-        nodes.extend(errored.iter().map(|&e_node_id| NodeStatus {
-            e_node_id,
+        nodes.extend(errored.iter().map(|&node_id| NodeStatus {
+            node_id,
             status: Some(NodeExecutionStatus::Errored {
                 elapsed_secs: None,
                 error: RunError::Invoke {
@@ -373,14 +363,14 @@ mod tests {
 
     fn node_patch(
         activity: WorkerActivity,
-        e_node_id: ExecutionNodeId,
+        node_id: NodeId,
         status: NodeExecutionStatus,
     ) -> WorkerStatus {
         WorkerStatus {
             activity,
             kind: WorkerStatusKind::Patch,
             nodes: vec![NodeStatus {
-                e_node_id,
+                node_id,
                 status: Some(status),
                 ram: RamUsage::default(),
             }],
@@ -442,19 +432,19 @@ mod tests {
     #[test]
     fn node_patch_marks_the_attributed_node_running_then_executed() {
         let node = nid(1);
-        let e_node_id = eid(1);
+        let node_id = eid(1);
         let mut rs = run_state([node]);
 
         rs.apply_worker_status(&node_patch(
             WorkerActivity::Executing,
-            e_node_id,
+            node_id,
             NodeExecutionStatus::Running { at: Instant::now() },
         ));
         assert!(matches!(rs.status(node), ExecStatus::Running(_)));
 
         rs.apply_worker_status(&node_patch(
             WorkerActivity::Executing,
-            e_node_id,
+            node_id,
             NodeExecutionStatus::Executed { elapsed_secs: 0.5 },
         ));
         assert_eq!(rs.status(node), ExecStatus::Executed(0.5));

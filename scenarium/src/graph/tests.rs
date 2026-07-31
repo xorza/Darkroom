@@ -181,10 +181,9 @@ fn const_only_input_rejects_bind_but_a_normal_input_accepts_it() {
 }
 
 #[test]
-fn type_mismatches_degrade_at_flatten_not_at_validation() {
+fn type_mismatches_degrade_at_lowering_not_at_validation() {
     use crate::execution::compile::Compiler;
     use crate::execution::compiled::ExecutionBinding;
-    use crate::execution::identity::ExecutionNodeId;
     use crate::library::Library;
     use crate::{FsPathConfig, FsPathMode};
     use std::sync::Arc;
@@ -227,12 +226,12 @@ fn type_mismatches_degrade_at_flatten_not_at_validation() {
     library.add(single_path.clone());
     library.add(path_list.clone());
 
-    // Validation always accepts; the compiled program's flat input shows
+    // Validation always accepts; the compiled program's lowered input shows
     // whether the binding survived the type gate or degraded to unbound.
     let flat_input = |g: &Graph, node: NodeId| {
         assert!(g.validate_with(&library).is_ok());
         let compiled = Compiler::default().compile(g, &library).unwrap();
-        let e_node = &compiled[compiled.e_node_index[&ExecutionNodeId::from_node(node)]];
+        let e_node = &compiled[compiled.node_index[&node]];
         compiled.inputs[e_node.inputs.nth(0)].binding.clone()
     };
 
@@ -245,7 +244,7 @@ fn type_mismatches_degrade_at_flatten_not_at_validation() {
     g.set_input_binding(InputPort::new(i, 0), Binding::bind(s, 0));
     assert!(
         matches!(flat_input(&g, f), ExecutionBinding::None),
-        "Int into a String input flattens as unbound"
+        "Int into a String input lowers as unbound"
     );
     assert!(
         matches!(flat_input(&g, i), ExecutionBinding::Bind(_)),
@@ -403,11 +402,10 @@ fn resolve_output_type_uses_declared_type_for_typed_const_input() {
 }
 
 #[test]
-fn type_mismatched_wiring_flattens_as_unbound_through_wildcard_chains() {
+fn type_mismatched_wiring_lowers_as_unbound_through_wildcard_chains() {
     use crate::DataType;
     use crate::execution::compile::Compiler;
     use crate::execution::compiled::ExecutionBinding;
-    use crate::execution::identity::ExecutionNodeId;
     use crate::library::Library;
 
     let float_src = testing::with_stub_lambda(
@@ -441,23 +439,23 @@ fn type_mismatched_wiring_flattens_as_unbound_through_wildcard_chains() {
     g.set_input_binding(InputPort::new(p2, 0), Binding::bind(p1, 0));
     g.set_input_binding(InputPort::new(sink, 0), Binding::bind(p2, 0));
 
-    // The sink's flat input in the compiled program: the type gate rules on
+    // The sink's lowered input in the compiled program: the type gate rules on
     // the authored wire, never on the document (nothing is severed). A `Bind`
     // is mapped back to its producer's id so assertions stay id-based.
     #[derive(Debug, PartialEq)]
-    enum FlatSink {
+    enum LoweredSink {
         Unbound,
         Const,
-        Bound(ExecutionNodeId),
+        Bound(NodeId),
     }
     let sink_binding = |g: &Graph| {
         let mut compiler = Compiler::default();
         let compiled = compiler.compile(g, &library).expect("mismatches compile");
-        let e_node = &compiled[compiled.e_node_index[&ExecutionNodeId::from_node(sink)]];
+        let e_node = &compiled[compiled.node_index[&sink]];
         match &compiled.inputs[e_node.inputs.nth(0)].binding {
-            ExecutionBinding::Bind(addr) => FlatSink::Bound(compiled.e_node_ids[addr.node_idx]),
-            ExecutionBinding::Const(_) => FlatSink::Const,
-            ExecutionBinding::None => FlatSink::Unbound,
+            ExecutionBinding::Bind(addr) => LoweredSink::Bound(compiled.node_ids[addr.node_idx]),
+            ExecutionBinding::Const(_) => LoweredSink::Const,
+            ExecutionBinding::None => LoweredSink::Unbound,
         }
     };
 
@@ -465,16 +463,16 @@ fn type_mismatched_wiring_flattens_as_unbound_through_wildcard_chains() {
     // (passthroughs are real func nodes — only boundaries short-circuit).
     assert_eq!(
         sink_binding(&g),
-        FlatSink::Bound(ExecutionNodeId::from_node(p2)),
-        "a well-typed chain flattens as bound"
+        LoweredSink::Bound(p2),
+        "a well-typed chain lowers as bound"
     );
 
     // Rewire pass1's value input to the String producer: pass1.out and
     // pass2.out both retype to String, so the *two-hops-down* sink edge is
-    // the one now incompatible — it flattens as unbound while the authored
+    // the one now incompatible — it lowers as unbound while the authored
     // wire survives in the document.
     g.set_input_binding(InputPort::new(p1, 0), Binding::bind(sp, 0));
-    assert_eq!(sink_binding(&g), FlatSink::Unbound);
+    assert_eq!(sink_binding(&g), LoweredSink::Unbound);
     assert_eq!(
         g.bindings.get(&InputPort::new(sink, 0)),
         Some(&Binding::bind(p2, 0)),
@@ -486,12 +484,12 @@ fn type_mismatched_wiring_flattens_as_unbound_through_wildcard_chains() {
         InputPort::new(sink, 0),
         Binding::Const(StaticValue::String("nope".into())),
     );
-    assert_eq!(sink_binding(&g), FlatSink::Unbound);
+    assert_eq!(sink_binding(&g), LoweredSink::Unbound);
     g.set_input_binding(
         InputPort::new(sink, 0),
         Binding::Const(StaticValue::Float(1.0)),
     );
-    assert_eq!(sink_binding(&g), FlatSink::Const);
+    assert_eq!(sink_binding(&g), LoweredSink::Const);
 }
 
 #[test]
@@ -803,9 +801,9 @@ fn deserialize_rejects_corrupt_graph() {
 }
 
 /// Wiring the current library can't resolve is tolerated, never a validation
-/// error: it degrades to unbound at flatten time and revives if the library
+/// error: it degrades to unbound at lowering time and revives if the library
 /// grows the ports back. The counterpart to
-/// [`type_mismatches_degrade_at_flatten_not_at_validation`].
+/// [`type_mismatches_degrade_at_lowering_not_at_validation`].
 #[test]
 fn validate_tolerates_library_range_drift() {
     let func = testing::with_stub_lambda(
@@ -825,7 +823,7 @@ fn validate_tolerates_library_range_drift() {
 
     // `Null` consts ("explicitly unset") are tolerated on both sides:
     // meaningful on an optional input, degrading to a missing input on a
-    // required one at flatten (see `const_satisfies`).
+    // required one at lowering (see `const_satisfies`).
     let nullable = testing::with_stub_lambda(
         Func::new(FuncId::unique(), "nullable")
             .input(FuncInput::optional("opt", DataType::Int))

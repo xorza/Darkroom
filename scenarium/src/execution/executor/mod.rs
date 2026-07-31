@@ -27,13 +27,13 @@ use ::common::CancelToken;
 use crate::DynamicValue;
 use crate::RamUsage;
 use crate::common::column::Column;
-use crate::execution::identity::ExecutionEventPort;
 use crate::execution::identity::{NodeIdx, OutputAddr, OutputIdx};
 use crate::execution::report::EventTrigger;
 use crate::execution::report::{ExecutionOutcome, NodeExecutionStatus, NodeStatus};
 use crate::execution::report::{RunPhase, RunProgress, RunReporter};
 use crate::graph::func::error::InvokeError;
 use crate::graph::func::lambda::{Invocation, OutputDemand};
+use crate::graph::identity::EventPort;
 use crate::runtime::context::ContextManager;
 use crate::runtime::shared_any_state::SharedAnyState;
 
@@ -270,7 +270,7 @@ impl Executor {
                 continue;
             }
             outcome.nodes.push(NodeStatus {
-                e_node_id: program.e_node_ids[node_idx],
+                node_id: program.node_ids[node_idx],
                 status,
                 ram,
             });
@@ -466,7 +466,7 @@ impl ExecutionFrame<'_, '_> {
     async fn invoke_node(&mut self, node_idx: NodeIdx, demand: &[OutputDemand]) {
         let program = self.program;
         let e_node = &program[node_idx];
-        let e_node_id = program.e_node_ids[node_idx];
+        let node_id = program.node_ids[node_idx];
         let func_id = e_node.func_id;
         debug_assert!(!e_node.lambda.is_none());
 
@@ -485,10 +485,10 @@ impl ExecutionFrame<'_, '_> {
         debug_assert!(matches!(self.node_outcomes[node_idx], NodeOutcome::Pending));
 
         // Attribute any logs this node emits to it (read by `ContextManager::log`).
-        self.ctx.current_node = Some(e_node_id);
+        self.ctx.current_node = Some(node_id);
         let invoke_start = Instant::now();
         self.reporter.progress(RunProgress {
-            e_node_id,
+            node_id,
             phase: RunPhase::Started { at: invoke_start },
         });
 
@@ -553,7 +553,7 @@ impl ExecutionFrame<'_, '_> {
         // otherwise paint it executed live.
         if !cancelled {
             self.reporter.progress(RunProgress {
-                e_node_id,
+                node_id,
                 phase: RunPhase::Finished {
                     elapsed_secs: run_time,
                 },
@@ -581,7 +581,7 @@ impl ExecutionFrame<'_, '_> {
         self.release_drained_outputs(node_idx);
     }
 
-    /// Drop `e_node_id` from this run: clear any stale cached output so it isn't served as
+    /// Drop `node_id` from this run: clear any stale cached output so it isn't served as
     /// this run's result, and record the outcome under the caller's reason —
     /// [`RunError::SkippedUpstream`] for an errored dependency,
     /// [`RunError::MissingLambda`] for a func with no implementation, or
@@ -606,17 +606,14 @@ impl ExecutionFrame<'_, '_> {
     /// events that have a subscriber and an implementation can fire.
     fn collect_event_triggers(&mut self, node_idx: NodeIdx, event_state: &SharedAnyState) {
         let program = self.program;
-        let e_node_id = program.e_node_ids[node_idx];
+        let node_id = program.node_ids[node_idx];
         self.outcome.event_triggers.extend(
             program.events[program[node_idx].events]
                 .iter()
                 .enumerate()
                 .filter(|(_, event)| !event.subscribers.is_empty() && !event.lambda.is_none())
                 .map(|(event_idx, event)| EventTrigger {
-                    event: ExecutionEventPort {
-                        e_node_id,
-                        event_idx,
-                    },
+                    event: EventPort { node_id, event_idx },
                     lambda: event.lambda.clone(),
                     state: event_state.clone(),
                 }),
@@ -707,15 +704,15 @@ impl ExecutionFrame<'_, '_> {
 pub(crate) mod internals {
     use crate::execution::compiled::CompiledGraph;
     use crate::execution::executor::{Executor, NodeOutcome};
-    use crate::execution::identity::ExecutionNodeId;
+    use crate::graph::identity::NodeId;
 
     impl Executor {
-        /// Whether `e_node_id` actually recomputed its lambda in the last run — i.e.
+        /// Whether `node_id` actually recomputed its lambda in the last run — i.e.
         /// wasn't reused from RAM/disk. Before any run (empty outcomes) every node
         /// reads as "ran", so plan-only introspection still sees the full schedule;
         /// an id absent from the installed program is a caller bug and panics.
-        pub(crate) fn ran(&self, program: &CompiledGraph, e_node_id: ExecutionNodeId) -> bool {
-            let node_idx = program.e_node_index[&e_node_id];
+        pub(crate) fn ran(&self, program: &CompiledGraph, node_id: NodeId) -> bool {
+            let node_idx = program.node_index[&node_id];
             self.outcomes.get(node_idx).is_none_or(|outcome| {
                 matches!(
                     outcome,

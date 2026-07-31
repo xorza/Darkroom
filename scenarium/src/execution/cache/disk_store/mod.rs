@@ -14,8 +14,8 @@ use crate::data::codec::Codecs;
 use crate::execution::cache::digest::Digest;
 use crate::execution::cache::slot::OutputSnapshot;
 use crate::execution::compiled::ExecutionNode;
-use crate::execution::identity::ExecutionNodeId;
 use crate::graph::func::lambda::OutputDemand;
+use crate::graph::identity::NodeId;
 use crate::library::Library;
 use crate::runtime::context::ContextStore;
 
@@ -76,7 +76,7 @@ impl DiskStore {
 
     pub(super) fn blob_target(
         &self,
-        e_node_id: ExecutionNodeId,
+        node_id: NodeId,
         e_node: &ExecutionNode,
         digest: Option<Digest>,
     ) -> Option<BlobTarget> {
@@ -84,18 +84,18 @@ impl DiskStore {
             return None;
         }
         let digest = digest?;
-        let path = self.node_path(e_node_id)?;
+        let path = self.node_path(node_id)?;
         Some(BlobTarget { path, digest })
     }
 
-    fn node_path(&self, e_node_id: ExecutionNodeId) -> Option<PathBuf> {
+    fn node_path(&self, node_id: NodeId) -> Option<PathBuf> {
         let mut buf = [0u8; 32];
-        let name = e_node_id.as_uuid().simple().encode_lower(&mut buf);
+        let name = node_id.as_uuid().simple().encode_lower(&mut buf);
         Some(self.disk_root.as_ref()?.join(name))
     }
 
-    pub(crate) async fn remove_node(&self, e_node_id: ExecutionNodeId) -> io::Result<()> {
-        let Some(path) = self.node_path(e_node_id) else {
+    pub(crate) async fn remove_node(&self, node_id: NodeId) -> io::Result<()> {
+        let Some(path) = self.node_path(node_id) else {
             return Ok(());
         };
         match tokio::fs::remove_file(&path).await {
@@ -256,7 +256,7 @@ pub(crate) mod internals {
     use std::sync::atomic::AtomicU64;
 
     use crate::execution::cache::disk_store::{DiskStore, format};
-    use crate::execution::identity::ExecutionNodeId;
+    use crate::graph::identity::NodeId;
 
     #[derive(Debug, Default)]
     pub(crate) struct StoreIoCounts {
@@ -268,9 +268,9 @@ pub(crate) mod internals {
         /// Replace the first output payload's value tag with an unknown one, leaving the
         /// header — and so [`DiskStore::covers_demand`]'s verdict — intact. Models a blob
         /// that passes the resolver's probe and then fails to decode.
-        pub(crate) fn corrupt_payload(&self, e_node_id: ExecutionNodeId, output_count: usize) {
+        pub(crate) fn corrupt_payload(&self, node_id: NodeId, output_count: usize) {
             let path = self
-                .node_path(e_node_id)
+                .node_path(node_id)
                 .expect("a disk-backed store has a root");
             let mut bytes = std::fs::read(&path).unwrap();
             bytes[format::internals::body_offset(output_count)] = u8::MAX;

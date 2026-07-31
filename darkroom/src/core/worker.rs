@@ -14,7 +14,6 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 
 use scenarium::CompiledGraph;
 use scenarium::DiskStore;
-use scenarium::ExecutionNodeId;
 use scenarium::NodeId;
 use scenarium::{RunSeeds, Worker, WorkerExited, WorkerMessage, WorkerReport};
 
@@ -94,9 +93,9 @@ impl WorkerBridge {
     /// Execute these exact nodes in the installed program and deliver their
     /// outputs. Plural because a run is seeded with a set — a "run to this
     /// node" contributes one.
-    pub(crate) fn run_nodes(&self, e_node_ids: Vec<ExecutionNodeId>) -> Result<(), WorkerExited> {
+    pub(crate) fn run_nodes(&self, node_ids: Vec<NodeId>) -> Result<(), WorkerExited> {
         self.worker.send(WorkerMessage::Run {
-            seeds: RunSeeds::nodes(e_node_ids),
+            seeds: RunSeeds::nodes(node_ids),
         })
     }
 

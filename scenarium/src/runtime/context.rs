@@ -4,8 +4,8 @@ use std::fmt::Debug;
 use ::common::CancelToken;
 use hashbrown::HashMap;
 
-use crate::execution::identity::ExecutionNodeId;
 use crate::execution::report::{LogEntry, LogLevel};
+use crate::graph::identity::NodeId;
 
 /// Typed handle declaring one persistent runtime context. The payload type is
 /// the identity — the store is keyed by `TypeId::of::<T>()` — so a handle can
@@ -62,7 +62,7 @@ pub struct ContextManager {
     pub contexts: ContextStore,
     /// Node currently being invoked, set by the executor before each
     /// lambda call so `log` can attribute lines. `None` outside a run.
-    pub(crate) current_node: Option<ExecutionNodeId>,
+    pub(crate) current_node: Option<NodeId>,
     /// Log lines emitted this run, drained into `ExecutionOutcome` when the
     /// run finishes.
     pub(crate) logs: Vec<LogEntry>,
@@ -103,7 +103,7 @@ impl ContextManager {
     ///
     /// # Panics
     /// Outside a node invoke — on a hand-built manager, or after a run.
-    pub fn current_node(&self) -> ExecutionNodeId {
+    pub fn current_node(&self) -> NodeId {
         self.current_node
             .expect("current_node is only readable inside a lambda invoke")
     }
@@ -113,17 +113,17 @@ impl ContextManager {
     /// still surface output. No-op when called outside a node invoke
     /// (`current_node` unset).
     pub fn log(&mut self, level: LogLevel, msg: impl Into<String>) {
-        let Some(e_node_id) = self.current_node else {
+        let Some(node_id) = self.current_node else {
             return;
         };
         let message = msg.into();
         match level {
-            LogLevel::Info => tracing::info!(?e_node_id, "{message}"),
-            LogLevel::Warn => tracing::warn!(?e_node_id, "{message}"),
-            LogLevel::Error => tracing::error!(?e_node_id, "{message}"),
+            LogLevel::Info => tracing::info!(?node_id, "{message}"),
+            LogLevel::Warn => tracing::warn!(?node_id, "{message}"),
+            LogLevel::Error => tracing::error!(?node_id, "{message}"),
         }
         self.logs.push(LogEntry {
-            e_node_id,
+            node_id,
             level,
             message,
         });
@@ -145,7 +145,7 @@ impl ContextManager {
 pub(crate) mod internals {
     use std::any::{Any, TypeId};
 
-    use crate::execution::identity::ExecutionNodeId;
+    use crate::graph::identity::NodeId;
     use crate::runtime::context::{ContextManager, ContextStore};
 
     impl ContextStore {
@@ -160,8 +160,8 @@ pub(crate) mod internals {
     impl ContextManager {
         /// Stand in for the executor's per-invoke attribution, so a lambda that
         /// reads [`ContextManager::current_node`] can be tested without a run.
-        pub fn set_current_node(&mut self, e_node_id: ExecutionNodeId) {
-            self.current_node = Some(e_node_id);
+        pub fn set_current_node(&mut self, node_id: NodeId) {
+            self.current_node = Some(node_id);
         }
     }
 }

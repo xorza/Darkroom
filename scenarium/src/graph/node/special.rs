@@ -30,7 +30,7 @@ pub enum SpecialNode {
 pub const SPECIAL_NODES: &[SpecialNode] = &[SpecialNode::RunSinks];
 
 impl SpecialNode {
-    /// This node's hardcoded interface + lambda. Used by flatten (ports, lambda,
+    /// This node's hardcoded interface + lambda. Used by lowering (ports, lambda,
     /// behavior), validation (port arity), and the editor (rendering + the node menu).
     pub fn func(self) -> &'static Func {
         match self {

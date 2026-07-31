@@ -1,19 +1,17 @@
 use super::*;
 use crate::execution::compile::error::CompiledGraphValidationError;
 use crate::execution::compiled::{CompiledGraph, ExecutionBinding};
-use crate::execution::error::ExecutionIdentityError;
-use crate::execution::flatten::flat::internals::FlatGraphBuilder;
-use crate::execution::identity::ExecutionNodeId;
 use crate::execution::identity::NodeIdx;
 use crate::execution::identity::OutputAddr;
+use crate::execution::lower::lowered_graph::internals::LoweredGraphBuilder;
 use crate::graph::Binding;
 use crate::graph::func::Func;
 use crate::graph::func::event::EventLambda;
 use crate::graph::identity::{FuncId, InputPort, NodeId};
 use crate::testing::{self, TestFuncHooks, test_func_lib, test_graph};
 
-/// Event edges get the same treatment as bind fixups: an endpoint flatten
-/// never emitted is a flatten bug, so wiring panics instead of dropping the
+/// Event edges get the same treatment as bind fixups: an endpoint lowering
+/// never emitted is a lowering bug, so wiring panics instead of dropping the
 /// edge, and the compiled artifact still carries a range backstop.
 #[test]
 fn subscription_wiring_rejects_an_endpoint_outside_the_program() {
@@ -30,12 +28,12 @@ fn subscription_wiring_rejects_an_endpoint_outside_the_program() {
     graph.subscribe(emitter, 0, subscriber);
 
     let mut compiled = Compiler::default().compile(&graph, &library).unwrap();
-    let emitter_idx = compiled.e_node_index[&ExecutionNodeId::from_node(emitter)];
+    let emitter_idx = compiled.node_index[&emitter];
     let events = compiled[emitter_idx].events;
     assert_eq!(
         compiled.events[events][0].subscribers.len(),
         1,
-        "the authored subscription wired one flat subscriber"
+        "the authored subscription wired one subscriber"
     );
 
     // The artifact check catches a subscriber index that names no node.
@@ -111,13 +109,11 @@ fn validation_rejects_a_binding_that_does_not_name_a_real_output() {
     );
 }
 
-/// One sort settles two outputs: the program's dense node order, and the leaf
-/// column the walk fills beside it. Ids are uuids, so the order nodes are
-/// authored in says nothing about the order they are adopted in — and a column
-/// shifted against the nodes it names would hand a node another node's authored
-/// id, which every leaf answering for itself rules out.
+/// One sort settles the program's dense node order. Ids are uuids, so the order
+/// nodes are authored in says nothing about the order they are adopted in — the
+/// id column is the authored set, sorted, and nothing else.
 #[test]
-fn dense_order_is_id_order_with_attribution_aligned_to_it() {
+fn dense_order_is_id_order() {
     let library = test_func_lib(TestFuncHooks::default());
     let get_b = library.by_name("get_b").unwrap();
     let mut graph = Graph::default();
@@ -125,45 +121,34 @@ fn dense_order_is_id_order_with_attribution_aligned_to_it() {
 
     let compiled = Compiler::default().compile(&graph, &library).unwrap();
 
-    let e_node_ids: Vec<_> = compiled.e_node_ids.iter().copied().collect();
-    assert_eq!(e_node_ids.len(), authored.len());
-    assert!(e_node_ids.is_sorted(), "nodes are adopted in id order");
+    let node_ids: Vec<_> = compiled.node_ids.iter().copied().collect();
+    let mut expected = authored.clone();
+    expected.sort();
+    assert_eq!(node_ids, expected, "nodes are adopted in id order");
     for node_id in authored {
-        assert_eq!(
-            compiled
-                .attribution(ExecutionNodeId::from_node(node_id))
-                .unwrap(),
-            node_id,
-            "an execution node attributes to the node it came from"
-        );
+        assert!(compiled.contains(node_id));
     }
 }
 
 #[test]
 fn validation_returns_compiled_mismatches() {
     let node_id = NodeId::unique();
-    let e_node_id = ExecutionNodeId::from_node(node_id);
     let missing_func = FuncId::unique();
-    let mut builder = FlatGraphBuilder::default();
-    builder.insert_node(e_node_id);
-    let mut flat = builder.build();
-    flat.e_nodes[0].func_id = missing_func;
+    let mut builder = LoweredGraphBuilder::default();
+    builder.insert_node(node_id);
+    let mut lowered = builder.build();
+    lowered.e_nodes[0].func_id = missing_func;
     let mut compiled = CompiledGraph::default();
-    link::Linker::default().link(&flat, &Library::default(), &mut compiled);
+    link::Linker::default().link(&lowered, &Library::default(), &mut compiled);
 
     assert_eq!(
         validate::validate(&compiled, &Library::default())
             .unwrap_err()
             .to_string(),
-        format!("execution node {e_node_id:?} references missing func {missing_func:?}")
+        format!("execution node {node_id:?} references missing func {missing_func:?}")
     );
-    assert_eq!(compiled.attribution(e_node_id).unwrap(), node_id);
-
-    let missing_node = ExecutionNodeId::unique();
-    assert!(matches!(
-        compiled.attribution(missing_node),
-        Err(ExecutionIdentityError::NodeNotFound { e_node_id }) if e_node_id == missing_node
-    ));
+    assert!(compiled.contains(node_id));
+    assert!(!compiled.contains(NodeId::unique()));
 }
 
 /// Everything one compile observably produced, in a deterministic order and in
@@ -173,9 +158,9 @@ fn summary(compiled: &CompiledGraph, authored: &[NodeId]) -> Vec<String> {
     let program = &compiled;
     let mut out = Vec::new();
     for (node_idx, e_node) in program.e_nodes.iter_indexed() {
-        let e_node_id = program.e_node_ids[node_idx];
+        let node_id = program.node_ids[node_idx];
         out.push(format!(
-            "node {e_node_id:?} func={:?} sink={} disabled={} cache={:?} special={:?}",
+            "node {node_id:?} func={:?} sink={} disabled={} cache={:?} special={:?}",
             e_node.func_id, e_node.sink, e_node.disabled, e_node.cache, e_node.special,
         ));
         for input in &program.inputs[e_node.inputs] {
@@ -184,7 +169,7 @@ fn summary(compiled: &CompiledGraph, authored: &[NodeId]) -> Vec<String> {
                 ExecutionBinding::Const(value) => format!("const {value:?}"),
                 ExecutionBinding::Bind(address) => format!(
                     "bind {:?}#{}",
-                    program.e_node_ids[address.node_idx], address.port_idx
+                    program.node_ids[address.node_idx], address.port_idx
                 ),
             };
             out.push(format!(
@@ -193,24 +178,22 @@ fn summary(compiled: &CompiledGraph, authored: &[NodeId]) -> Vec<String> {
             ));
         }
         for output in &program.outputs[e_node.outputs] {
-            out.push(format!("  out {:?}", output.data_type));
+            out.push(format!("  out {output:?}"));
         }
         for event in &program.events[e_node.events] {
             let subscribers: Vec<_> = event
                 .subscribers
                 .iter()
-                .map(|&idx| program.e_node_ids[idx])
+                .map(|&idx| program.node_ids[idx])
                 .collect();
             out.push(format!("  event subscribers={subscribers:?}"));
         }
-        let attribution = compiled.attribution(e_node_id).unwrap();
-        out.push(format!("  from {attribution:?}"));
     }
-    // The host-facing indices, which are built from their own scratch.
+    // The host-facing index, which is built from its own scratch.
     for &node_id in authored {
         out.push(format!(
-            "authored {node_id:?} run_target={:?}",
-            compiled.run_target(node_id),
+            "authored {node_id:?} compiled={}",
+            compiled.contains(node_id),
         ));
     }
     out
@@ -242,27 +225,18 @@ fn fixture() -> Fixture {
     }
 }
 
-/// Each question a host asks about an authored node, over a graph where the
-/// nodes differ in role. An id the program never held answers "nothing" to
-/// all of them — the one case they must agree on.
+/// Every authored node holds compiled work, whatever its role — a source, its
+/// reader, and a node nothing wires to alike. An id the program never held does
+/// not.
 #[test]
 fn the_artifact_answers_for_each_authored_node() {
     let f = fixture();
     let compiled = Compiler::default().compile(&f.graph, &f.library).unwrap();
 
     for node_id in [f.source, f.sink, f.loose] {
-        let e_node_id = ExecutionNodeId::from_node(node_id);
-        assert_eq!(compiled.run_target(node_id), Some(e_node_id));
-        assert_eq!(compiled.attribution(e_node_id).unwrap(), node_id);
+        assert!(compiled.contains(node_id));
     }
-
-    let absent = NodeId::unique();
-    assert_eq!(compiled.run_target(absent), None);
-    assert!(
-        compiled
-            .attribution(ExecutionNodeId::from_node(absent))
-            .is_err()
-    );
+    assert!(!compiled.contains(NodeId::unique()));
 }
 
 /// Evicting a node reaches everything downstream of it, reflexively — and stops
@@ -274,21 +248,18 @@ fn the_consumer_closure_reaches_downstream_and_stops() {
 
     let mut from_source = compiled.data_consumer_closure(&[f.source]);
     from_source.sort();
-    let mut expected = vec![
-        ExecutionNodeId::from_node(f.source),
-        ExecutionNodeId::from_node(f.sink),
-    ];
+    let mut expected = vec![f.source, f.sink];
     expected.sort();
     assert_eq!(from_source, expected, "the source reaches its reader");
 
     assert_eq!(
         compiled.data_consumer_closure(&[f.sink]),
-        vec![ExecutionNodeId::from_node(f.sink)],
+        vec![f.sink],
         "a terminal node reaches only itself"
     );
     assert_eq!(
         compiled.data_consumer_closure(&[f.loose]),
-        vec![ExecutionNodeId::from_node(f.loose)],
+        vec![f.loose],
         "an unwired node reaches only itself"
     );
     assert!(

@@ -1,71 +1,25 @@
-//! Strongly typed identities for one flattened compiled graph.
+//! The install-local **dense index space**: `NodeIdx`, `OutputIdx`,
+//! `OutputAddr`, the [`IdxSet<NodeIdx>`] over them, and the `…Idx` positions
+//! in the packed port columns.
 //!
-//! Minting these is flattening's business, in [`crate::execution::flatten`].
+//! There is no second *identity* space to hold. A graph is flat, so a node in
+//! a compiled program is the authored node, named by the same
+//! [`NodeId`](crate::graph::identity::NodeId) — and its ports by the same
+//! [`InputPort`](crate::graph::identity::InputPort) /
+//! [`OutputPort`](crate::graph::identity::OutputPort) /
+//! [`EventPort`](crate::graph::identity::EventPort). Those are the stable
+//! names: they survive installs, cross the host boundary, and may enter
+//! digests.
 //!
-//! Naming convention: `Execution`-prefixed types are the **stable identity
-//! space** — they survive installs, cross the host boundary, and may enter
-//! digests. `…Id` is a uuid identity; `…Port` pairs one with a port/event
-//! index. The install-local **dense index space** below (`NodeIdx`,
-//! `OutputIdx`, `OutputAddr`, the [`IdxSet<NodeIdx>`] over them, and the
-//! `…Idx` positions in the packed port columns) keeps bare names:
-//! those types never leave the execution internals, indices shift between
-//! compiles, and none of them may enter a digest, a persisted byte, or a
-//! host-facing report.
-
-use serde::{Deserialize, Serialize};
+//! Everything below is the opposite: indices shift between compiles, so none
+//! of them may enter a digest, a persisted byte, or a host-facing report.
+//! They are assigned by linking and never leave the execution internals.
 
 use crate::common::column::Idx;
-use crate::graph::identity::NodeId;
-
-#[derive(
-    Debug, Clone, Copy, Default, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize,
-)]
-#[repr(transparent)]
-/// One node in a flattened compiled graph.
-pub struct ExecutionNodeId(NodeId);
-
-impl ExecutionNodeId {
-    /// The execution identity of one authored node.
-    ///
-    /// A graph is flat, so this is the node's own id: every authored node
-    /// becomes exactly one execution node, and the two spaces differ only in
-    /// type. The distinction survives because they still mean different
-    /// things — an `ExecutionNodeId` names a node in an installed program,
-    /// which a document's id outlives — but nothing is derived any more.
-    pub(crate) fn from_node(node_id: NodeId) -> Self {
-        Self(node_id)
-    }
-
-    /// The authored node this identity names. The inverse of
-    /// [`from_node`](Self::from_node), and the whole of attribution.
-    pub(crate) fn node_id(self) -> NodeId {
-        self.0
-    }
-
-    pub(crate) fn as_uuid(self) -> uuid::Uuid {
-        self.0.as_uuid()
-    }
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
-/// One output port of one flattened execution node.
-pub(crate) struct ExecutionOutputPort {
-    pub(crate) e_node_id: ExecutionNodeId,
-    pub(crate) port_idx: usize,
-}
-
-#[derive(
-    Debug, Clone, Copy, Default, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize,
-)]
-/// One event port of one flattened execution node.
-pub struct ExecutionEventPort {
-    pub e_node_id: ExecutionNodeId,
-    pub event_idx: usize,
-}
 
 /// A node's position in the installed program's dense node vector. Install-local:
 /// indices shift between compiles, so a `NodeIdx` must never enter a digest, a
-/// persisted byte, or any host-facing report — those stay on `ExecutionNodeId`.
+/// persisted byte, or any host-facing report — those stay on [`NodeId`].
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) struct NodeIdx(pub(crate) u32);
 
@@ -80,7 +34,7 @@ impl Idx for NodeIdx {
     }
 }
 
-/// An [`ExecutionOutputPort`](crate::execution::identity::ExecutionOutputPort)
+/// An [`OutputPort`](crate::graph::identity::OutputPort)
 /// interned into the installed program's dense index space — the hash-free form
 /// every per-run edge walk uses, resolved once by the compile link stage.
 /// Install-local like [`NodeIdx`]: it must never enter a digest, a persisted
@@ -114,7 +68,7 @@ impl Idx for OutputIdx {
 /// another. A node owns a [`Span<InputIdx>`](crate::common::column::Span); this
 /// names one port inside it.
 ///
-/// The space spans both compile stages: linking rebuilds flatten's input column
+/// The space spans both compile stages: linking rebuilds lowering's input column
 /// into the program's slot for slot, so a position means the same port in
 /// either.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -150,21 +104,5 @@ impl Idx for EventIdx {
             "event column index must fit in u32"
         );
         EventIdx(i as u32)
-    }
-}
-
-#[cfg(any(test, feature = "internals"))]
-pub(crate) mod internals {
-    use crate::execution::identity::ExecutionNodeId;
-    use crate::graph::identity::NodeId;
-
-    impl ExecutionNodeId {
-        pub fn unique() -> Self {
-            Self(NodeId::unique())
-        }
-
-        pub const fn from_u128(value: u128) -> Self {
-            Self(NodeId::from_u128(value))
-        }
     }
 }

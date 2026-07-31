@@ -1,6 +1,5 @@
-use crate::execution::flatten::Flattener;
-use crate::execution::flatten::flat::{FlatBinding, FlatGraph};
-use crate::execution::identity::ExecutionNodeId;
+use crate::execution::lower::Lowerer;
+use crate::execution::lower::lowered_graph::{LoweredBinding, LoweredGraph};
 use crate::graph::func::{Func, FuncInput, FuncOutput};
 use crate::graph::identity::{FuncId, InputPort, NodeId};
 use crate::graph::{Binding, Graph};
@@ -24,26 +23,27 @@ fn library(out_ty: DataType, in_ty: DataType) -> Library {
     library
 }
 
-/// A producer and a consumer, optionally wired, flattened. Returns the result
+/// A producer and a consumer, optionally wired, lowered. Returns the result
 /// alongside both node ids so a test can name either end.
-fn wired(library: &Library, binding: Option<Binding>) -> (FlatGraph, NodeId, NodeId) {
+fn wired(library: &Library, binding: Option<Binding>) -> (LoweredGraph, NodeId, NodeId) {
     let mut graph = Graph::default();
     let producer = graph.add_func_node(library.by_id(FuncId::from_u128(PRODUCER)).unwrap());
     let consumer = graph.add_func_node(library.by_id(FuncId::from_u128(CONSUMER)).unwrap());
     if let Some(binding) = binding {
         graph.set_input_binding(InputPort::new(consumer, 0), binding);
     }
-    let mut flat = FlatGraph::default();
-    Flattener::default().flatten(&graph, library, &mut flat);
-    (flat, producer, consumer)
+    let mut lowered = LoweredGraph::default();
+    Lowerer::default().lower(&graph, library, &mut lowered);
+    (lowered, producer, consumer)
 }
 
 /// The position a node landed at in emit order. Emit order is `Graph::iter`'s,
 /// which is a `HashMap` walk — so a test names a node by id, never by index.
-fn at(flat: &FlatGraph, node_id: NodeId) -> usize {
-    flat.e_node_ids
+fn at(lowered: &LoweredGraph, node_id: NodeId) -> usize {
+    lowered
+        .node_ids
         .iter()
-        .position(|id| *id == ExecutionNodeId::from_node(node_id))
+        .position(|id| *id == node_id)
         .expect("the walk emits every authored node")
 }
 
@@ -52,10 +52,10 @@ fn at(flat: &FlatGraph, node_id: NodeId) -> usize {
 #[test]
 fn emits_one_execution_node_per_authored_node() {
     let library = library(DataType::Int, DataType::Int);
-    let (flat, producer, consumer) = wired(&library, None);
+    let (lowered, producer, consumer) = wired(&library, None);
 
-    assert_eq!(flat.e_nodes.len(), 2);
-    let mut ids: Vec<NodeId> = flat.e_node_ids.iter().map(|id| id.node_id()).collect();
+    assert_eq!(lowered.e_nodes.len(), 2);
+    let mut ids: Vec<NodeId> = lowered.node_ids.clone();
     ids.sort();
     let mut expected = vec![producer, consumer];
     expected.sort();
@@ -67,10 +67,10 @@ fn emits_one_execution_node_per_authored_node() {
 #[test]
 fn packs_one_port_run_per_node_from_its_declaration() {
     let library = library(DataType::Int, DataType::Int);
-    let (flat, producer, consumer) = wired(&library, None);
+    let (lowered, producer, consumer) = wired(&library, None);
 
-    let producer_node = &flat.e_nodes[at(&flat, producer)];
-    let consumer_node = &flat.e_nodes[at(&flat, consumer)];
+    let producer_node = &lowered.e_nodes[at(&lowered, producer)];
+    let consumer_node = &lowered.e_nodes[at(&lowered, consumer)];
     assert_eq!(
         (producer_node.outputs.len, producer_node.inputs.len),
         (1, 0)
@@ -80,12 +80,12 @@ fn packs_one_port_run_per_node_from_its_declaration() {
         (0, 1)
     );
     assert_eq!(
-        flat.outputs.len(),
+        lowered.outputs.len(),
         1,
         "one output port across both nodes, typed from the producer's declaration"
     );
-    assert_eq!(flat.outputs[producer_node.outputs][0], DataType::Int);
-    assert_eq!(flat.inputs.len(), 1);
+    assert_eq!(lowered.outputs[producer_node.outputs][0], DataType::Int);
+    assert_eq!(lowered.inputs.len(), 1);
     assert_eq!(
         producer_node.outputs.start, 0,
         "the only run starts the pool"
@@ -101,14 +101,14 @@ fn resolves_a_wire_to_the_producer_it_names() {
     let producer = graph.add_func_node(library.by_id(FuncId::from_u128(PRODUCER)).unwrap());
     let consumer = graph.add_func_node(library.by_id(FuncId::from_u128(CONSUMER)).unwrap());
     graph.set_input_binding(InputPort::new(consumer, 0), Binding::bind(producer, 0));
-    let mut flat = FlatGraph::default();
-    Flattener::default().flatten(&graph, &library, &mut flat);
+    let mut lowered = LoweredGraph::default();
+    Lowerer::default().lower(&graph, &library, &mut lowered);
 
-    let consumer_node = &flat.e_nodes[at(&flat, consumer)];
-    let input = &flat.inputs[consumer_node.inputs][0];
+    let consumer_node = &lowered.e_nodes[at(&lowered, consumer)];
+    let input = &lowered.inputs[consumer_node.inputs][0];
     match &input.binding {
-        FlatBinding::Bind(port) => {
-            assert_eq!(port.e_node_id, ExecutionNodeId::from_node(producer));
+        LoweredBinding::Bind(port) => {
+            assert_eq!(port.node_id, producer);
             assert_eq!(port.port_idx, 0);
         }
         other => panic!("expected a bind, got {other:?}"),
@@ -119,7 +119,7 @@ fn resolves_a_wire_to_the_producer_it_names() {
     );
 }
 
-/// The type gate: a wire whose producer no longer fits the consumer flattens as
+/// The type gate: a wire whose producer no longer fits the consumer lowers as
 /// unbound rather than severing the authored wiring, so it revives when the
 /// types line up again.
 #[test]
@@ -129,14 +129,14 @@ fn drops_a_type_mismatched_wire_to_unbound() {
     let producer = graph.add_func_node(library.by_id(FuncId::from_u128(PRODUCER)).unwrap());
     let consumer = graph.add_func_node(library.by_id(FuncId::from_u128(CONSUMER)).unwrap());
     graph.set_input_binding(InputPort::new(consumer, 0), Binding::bind(producer, 0));
-    let mut flat = FlatGraph::default();
-    Flattener::default().flatten(&graph, &library, &mut flat);
+    let mut lowered = LoweredGraph::default();
+    Lowerer::default().lower(&graph, &library, &mut lowered);
 
-    let consumer_node = &flat.e_nodes[at(&flat, consumer)];
+    let consumer_node = &lowered.e_nodes[at(&lowered, consumer)];
     assert!(
         matches!(
-            flat.inputs[consumer_node.inputs][0].binding,
-            FlatBinding::None
+            lowered.inputs[consumer_node.inputs][0].binding,
+            LoweredBinding::None
         ),
         "a String producer does not satisfy an Int input"
     );
@@ -147,7 +147,7 @@ fn drops_a_type_mismatched_wire_to_unbound() {
 }
 
 /// A const that satisfies its input travels through verbatim; a mismatched one
-/// flattens unbound, on the same terms as a wire.
+/// lowers unbound, on the same terms as a wire.
 #[test]
 fn keeps_a_satisfying_const_and_drops_a_mismatched_one() {
     let library = library(DataType::Int, DataType::Int);
@@ -155,12 +155,12 @@ fn keeps_a_satisfying_const_and_drops_a_mismatched_one() {
         (StaticValue::Int(7), true),
         (StaticValue::String("no".to_owned()), false),
     ] {
-        let (flat, _, consumer) = wired(&library, Some(Binding::Const(value)));
-        let consumer_node = &flat.e_nodes[at(&flat, consumer)];
+        let (lowered, _, consumer) = wired(&library, Some(Binding::Const(value)));
+        let consumer_node = &lowered.e_nodes[at(&lowered, consumer)];
         assert_eq!(
             matches!(
-                flat.inputs[consumer_node.inputs][0].binding,
-                FlatBinding::Const(_)
+                lowered.inputs[consumer_node.inputs][0].binding,
+                LoweredBinding::Const(_)
             ),
             kept,
         );
@@ -175,26 +175,30 @@ fn carries_the_disabled_flag_without_dropping_the_node() {
     let mut graph = Graph::default();
     let producer = graph.add_func_node(library.by_id(FuncId::from_u128(PRODUCER)).unwrap());
     graph.find_mut(producer).unwrap().disabled = true;
-    let mut flat = FlatGraph::default();
-    Flattener::default().flatten(&graph, &library, &mut flat);
+    let mut lowered = LoweredGraph::default();
+    Lowerer::default().lower(&graph, &library, &mut lowered);
 
-    assert_eq!(flat.e_nodes.len(), 1);
-    assert!(flat.e_nodes[at(&flat, producer)].disabled);
+    assert_eq!(lowered.e_nodes.len(), 1);
+    assert!(lowered.e_nodes[at(&lowered, producer)].disabled);
 }
 
-/// The walk clears its buffer on entry, so one `FlatGraph` serves every compile
-/// and a second flatten cannot observe the first.
+/// The walk clears its buffer on entry, so one `LoweredGraph` serves every
+/// compile and a second lowering cannot observe the first.
 #[test]
-fn a_second_flatten_cannot_observe_the_first() {
+fn a_second_lowering_cannot_observe_the_first() {
     let library = library(DataType::Int, DataType::Int);
     let mut graph = Graph::default();
     graph.add_func_node(library.by_id(FuncId::from_u128(PRODUCER)).unwrap());
-    let mut flat = FlatGraph::default();
-    let mut flattener = Flattener::default();
-    flattener.flatten(&graph, &library, &mut flat);
-    flattener.flatten(&graph, &library, &mut flat);
+    let mut lowered = LoweredGraph::default();
+    let mut lowerer = Lowerer::default();
+    lowerer.lower(&graph, &library, &mut lowered);
+    lowerer.lower(&graph, &library, &mut lowered);
 
-    assert_eq!(flat.e_nodes.len(), 1);
-    assert_eq!(flat.outputs.len(), 1, "the port pools restart from empty");
-    assert!(flat.subscriptions.is_empty());
+    assert_eq!(lowered.e_nodes.len(), 1);
+    assert_eq!(
+        lowered.outputs.len(),
+        1,
+        "the port pools restart from empty"
+    );
+    assert!(lowered.subscriptions.is_empty());
 }

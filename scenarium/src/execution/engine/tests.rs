@@ -4,7 +4,6 @@ use super::*;
 use crate::execution::compile::Compiler;
 use crate::execution::compile::error::CompileError;
 use crate::execution::error::{Error, RunError};
-use crate::execution::identity::ExecutionNodeId;
 use crate::execution::report::internals::DiscardedReports;
 use crate::graph::Binding;
 use crate::graph::Graph;
@@ -24,20 +23,16 @@ use tokio::sync::Mutex;
 
 type TestResult<T = ()> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
-fn root_execution_node(node_id: NodeId) -> ExecutionNodeId {
-    ExecutionNodeId::from_node(node_id)
-}
-
 fn execution_node_name<'a>(
     execution_graph: &ExecutionEngine,
     graph: &'a Graph,
     _library: &'a Library,
-    e_node_id: ExecutionNodeId,
+    node_id: NodeId,
 ) -> &'a str {
-    let node_id = execution_graph
-        .compiled()
-        .attribution(e_node_id)
-        .expect("attribution names the authored node");
+    assert!(
+        execution_graph.compiled().contains(node_id),
+        "the node belongs to the installed program"
+    );
     &graph.find(node_id).unwrap().name
 }
 
@@ -46,13 +41,13 @@ fn execution_node_id(
     graph: &Graph,
     library: &Library,
     name: &str,
-) -> Option<ExecutionNodeId> {
+) -> Option<NodeId> {
     execution_graph
         .compiled()
-        .e_node_ids
+        .node_ids
         .iter()
         .copied()
-        .find(|&e_node_id| execution_node_name(execution_graph, graph, library, e_node_id) == name)
+        .find(|&node_id| execution_node_name(execution_graph, graph, library, node_id) == name)
 }
 
 /// Names of the nodes that actually recomputed in the last run, in schedule order.
@@ -70,13 +65,13 @@ fn execution_node_names_in_order(
         .process_order
         .iter()
         .filter(|&&node_idx| {
-            let e_node_id = execution_graph.compiled().e_node_ids[node_idx];
+            let node_id = execution_graph.compiled().node_ids[node_idx];
             execution_graph.schedule.states[node_idx].is_runnable()
-                && execution_graph.node_ran(e_node_id)
+                && execution_graph.node_ran(node_id)
         })
         .map(|&node_idx| {
-            let e_node_id = execution_graph.compiled().e_node_ids[node_idx];
-            execution_node_name(execution_graph, graph, library, e_node_id).to_owned()
+            let node_id = execution_graph.compiled().node_ids[node_idx];
+            execution_node_name(execution_graph, graph, library, node_id).to_owned()
         })
         .collect()
 }
@@ -207,13 +202,13 @@ mod cache_persistence {
             failures.is_empty(),
             "the selected source and its data consumers must all evict"
         );
-        for e_node_id in &expected {
+        for node_id in &expected {
             assert!(
-                engine.slot(*e_node_id).output_values().is_none(),
-                "{e_node_id:?} must release its resident output"
+                engine.slot(*node_id).output_values().is_none(),
+                "{node_id:?} must release its resident output"
             );
         }
-        let get_b_eid = root_execution_node(get_b_id);
+        let get_b_eid = get_b_id;
         assert!(
             engine.slot(get_b_eid).output_values().is_some(),
             "an upstream sibling outside the consumer cone stays resident"
@@ -228,9 +223,9 @@ mod cache_persistence {
         assert_eq!(get_b_calls.load(Ordering::SeqCst), 1);
         assert_eq!(*printed.lock().unwrap(), vec![132, 132, 132]);
         let reran: HashSet<_> = rerun.ran_nodes().collect();
-        for e_node_id in expected {
+        for node_id in expected {
             assert!(
-                reran.contains(&e_node_id),
+                reran.contains(&node_id),
                 "every evicted node must recompute after reopening"
             );
         }
@@ -239,7 +234,7 @@ mod cache_persistence {
             "the retained sibling blob must still be reusable after reopening"
         );
 
-        let blocked_eid = root_execution_node(get_a_id);
+        let blocked_eid = get_a_id;
         let blocked_path = dir.0.join(blocked_eid.as_uuid().simple().to_string());
         std::fs::remove_file(&blocked_path).unwrap();
         std::fs::create_dir(&blocked_path).unwrap();
@@ -248,22 +243,22 @@ mod cache_persistence {
         let [failure] = partial_failures.as_slice() else {
             panic!("the undeletable get_a path must be the only eviction failure");
         };
-        assert_eq!(failure.e_node_id, blocked_eid);
+        assert_eq!(failure.node_id, blocked_eid);
         assert!(
             failure
                 .message
                 .starts_with(&format!("failed to remove {}:", blocked_path.display()))
         );
         let mut expected_successes = reopened.compiled().data_consumer_closure(&[get_a_id]);
-        expected_successes.retain(|e_node_id| *e_node_id != blocked_eid);
+        expected_successes.retain(|node_id| *node_id != blocked_eid);
         assert!(
             reopened.slot(blocked_eid).output_values().is_some(),
             "a failed disk deletion must leave the matching RAM value resident"
         );
-        for e_node_id in &expected_successes {
+        for node_id in &expected_successes {
             assert!(
-                reopened.slot(*e_node_id).output_values().is_none(),
-                "{e_node_id:?} must still evict when another target fails"
+                reopened.slot(*node_id).output_values().is_none(),
+                "{node_id:?} must still evict when another target fails"
             );
         }
     }
@@ -333,20 +328,11 @@ mod cache_persistence {
             1,
             "the cut prunes the Memory source upstream of a disk-cache hit on reopen"
         );
+        assert!(!stats.ran(get_a_id), "get_a was cut, not executed");
+        assert!(stats.cached(mult_id), "mult reused from disk");
+        assert!(!stats.ran(mult_id), "mult did not recompute");
         assert!(
-            !stats.ran(root_execution_node(get_a_id)),
-            "get_a was cut, not executed"
-        );
-        assert!(
-            stats.cached(root_execution_node(mult_id)),
-            "mult reused from disk"
-        );
-        assert!(
-            !stats.ran(root_execution_node(mult_id)),
-            "mult did not recompute"
-        );
-        assert!(
-            !stats.node_ram(root_execution_node(mult_id)).total() > 0,
+            !stats.node_ram(mult_id).total() > 0,
             "a full run does not retain the Disk node after the run"
         );
         let executed_allocation = stats.nodes.as_ptr();
@@ -359,7 +345,7 @@ mod cache_persistence {
         engine
             .execute(
                 RunSeeds {
-                    e_node_ids: vec![root_execution_node(mult_id)],
+                    node_ids: vec![mult_id],
                     ..Default::default()
                 },
                 &mut reporter,
@@ -368,9 +354,9 @@ mod cache_persistence {
             )
             .await
             .unwrap();
-        assert!(stats.cached(root_execution_node(mult_id)));
+        assert!(stats.cached(mult_id));
         assert!(
-            !stats.node_ram(root_execution_node(mult_id)).total() > 0,
+            !stats.node_ram(mult_id).total() > 0,
             "a targeted run releases the hydrated Disk value"
         );
         assert_eq!(stats.nodes.as_ptr(), executed_allocation);
@@ -388,7 +374,7 @@ mod cache_persistence {
             "input change makes mult miss and recompute from get_a"
         );
         assert!(
-            !stats.cached(root_execution_node(mult_id)),
+            !stats.cached(mult_id),
             "mult should not be cached after a digest change"
         );
         // The blob is keyed by node id, so the recompute replaced the superseded
@@ -458,13 +444,10 @@ mod cache_persistence {
             "get_a is still read by print_direct, so the cut must keep it"
         );
         assert!(
-            stats.ran(root_execution_node(get_a_id)),
+            stats.ran(get_a_id),
             "the shared producer runs for its executing consumer"
         );
-        assert!(
-            stats.cached(root_execution_node(mult_id)),
-            "mult still reuses from disk"
-        );
+        assert!(stats.cached(mult_id), "mult still reuses from disk");
     }
 
     /// Two disk-cached nodes chained (`sum` → `mult`) under an executing sink
@@ -523,15 +506,12 @@ mod cache_persistence {
         engine.update(&graph, &make_lib()).unwrap();
         engine.prepare_execution(true, false, &[]).await.unwrap();
         assert_eq!(
-            engine.node_state(root_execution_node(mult_id)),
+            engine.node_state(mult_id),
             NodeState::Reuse,
             "the frontier blob is verified from its header during resolution"
         );
         assert!(
-            engine
-                .slot(root_execution_node(mult_id))
-                .output_values()
-                .is_none(),
+            engine.slot(mult_id).output_values().is_none(),
             "...and is not decoded there"
         );
 
@@ -545,27 +525,17 @@ mod cache_persistence {
             "the cut prunes the Memory source feeding only disk-cache hits"
         );
         assert!(
-            !stats.cached(root_execution_node(sum_id))
-                && stats.cached(root_execution_node(mult_id)),
+            !stats.cached(sum_id) && stats.cached(mult_id),
             "only the live frontier cache is hydrated and reported"
         );
 
         // The frontier `mult` (read by the executing `print`) is in RAM...
-        let mult_resident = engine
-            .slot(root_execution_node(mult_id))
-            .output_values()
-            .is_some();
+        let mult_resident = engine.slot(mult_id).output_values().is_some();
         assert!(mult_resident, "frontier cache is loaded into RAM");
         // ...but the deeper `sum` is not even flagged: the blob stays in the store,
         // outside the runtime slot, until a later run actually needs it.
-        let sum_resident = engine
-            .slot(root_execution_node(sum_id))
-            .output_values()
-            .is_some();
-        let sum_empty = engine
-            .slot(root_execution_node(sum_id))
-            .output_values()
-            .is_none();
+        let sum_resident = engine.slot(sum_id).output_values().is_some();
+        let sum_empty = engine.slot(sum_id).output_values().is_none();
         assert!(
             !sum_resident,
             "an unneeded upstream disk cache is not hydrated"
@@ -581,10 +551,7 @@ mod cache_persistence {
             Some(empty_dir.0.clone()),
         ));
         assert!(
-            engine
-                .slot(root_execution_node(mult_id))
-                .output_values()
-                .is_some(),
+            engine.slot(mult_id).output_values().is_some(),
             "switching stores preserves resident values"
         );
 
@@ -592,7 +559,7 @@ mod cache_persistence {
         engine.update(&graph, &make_lib()).unwrap();
         let stats = engine.execute_sinks().await.unwrap();
         assert!(
-            stats.ran(root_execution_node(sum_id)),
+            stats.ran(sum_id),
             "a value absent from the new store recomputes when needed"
         );
         assert_eq!(
@@ -646,13 +613,10 @@ mod cache_persistence {
         // reads — digest, arity, and per-output coverage — untouched.
         let mut engine = disk_engine(&dir);
         engine.update(&graph, &make_lib()).unwrap();
-        engine
-            .cache
-            .disk_store()
-            .corrupt_payload(root_execution_node(mult_id), 1);
+        engine.cache.disk_store().corrupt_payload(mult_id, 1);
         engine.prepare_execution(true, false, &[]).await.unwrap();
         assert_eq!(
-            engine.node_state(root_execution_node(mult_id)),
+            engine.node_state(mult_id),
             NodeState::Reuse,
             "a header-only probe cannot see a corrupt payload"
         );
@@ -663,7 +627,7 @@ mod cache_persistence {
             1,
             "the reuse verdict already pruned the producer, so nothing recomputes"
         );
-        let error_for = |node_id| stats.error(root_execution_node(node_id)).cloned();
+        let error_for = |node_id| stats.error(node_id).cloned();
         assert!(
             matches!(error_for(mult_id), Some(RunError::CacheLoadFailed { .. })),
             "the node whose cache stopped loading fails, rather than serving nothing"
@@ -672,7 +636,7 @@ mod cache_persistence {
             matches!(error_for(print_id), Some(RunError::SkippedUpstream { .. })),
             "its consumer skips as errored-upstream"
         );
-        assert!(!stats.cached(root_execution_node(mult_id)));
+        assert!(!stats.cached(mult_id));
         assert_eq!(
             blob_count(&dir),
             0,
@@ -716,25 +680,16 @@ mod cache_persistence {
 
         engine.execute_sinks().await.unwrap();
         assert!(
-            engine
-                .slot(root_execution_node(sum_id))
-                .output_values()
-                .is_some(),
+            engine.slot(sum_id).output_values().is_some(),
             "sum is resident after the run that computed it"
         );
 
         let stats = engine.execute_sinks().await.unwrap();
         assert_eq!(stats.ran_node_count, 1, "only print runs the second time");
 
-        let sum_slot = &engine.slot(root_execution_node(sum_id));
-        let mult_resident = engine
-            .slot(root_execution_node(mult_id))
-            .output_values()
-            .is_some();
-        let get_a_resident = engine
-            .slot(root_execution_node(get_a_id))
-            .output_values()
-            .is_some();
+        let sum_slot = &engine.slot(sum_id);
+        let mult_resident = engine.slot(mult_id).output_values().is_some();
+        let get_a_resident = engine.slot(get_a_id).output_values().is_some();
         assert!(
             matches!(
                 sum_slot.output_values().map(|values| &values[0]),
@@ -767,21 +722,18 @@ mod cache_persistence {
             "the changed downstream node recomputes"
         );
         assert!(
-            engine
-                .slot(root_execution_node(sum_id))
-                .output_values()
-                .is_some(),
+            engine.slot(sum_id).output_values().is_some(),
             "the reused Both value remains resident"
         );
     }
 
     /// A top-level node recomputed (rather than reused) in the last run.
     fn ran(stats: &ExecutionOutcome, id: NodeId) -> bool {
-        stats.ran(root_execution_node(id))
+        stats.ran(id)
     }
     /// A top-level node reused a cache or remained resident behind a cut last run.
     fn cached(stats: &ExecutionOutcome, id: NodeId) -> bool {
-        stats.cached(root_execution_node(id))
+        stats.cached(id)
     }
     /// Count of blobs in the store — one per persisted node.
     fn blob_count(dir: &TempDir) -> usize {
@@ -834,7 +786,7 @@ mod cache_persistence {
         }
 
         // Slot retention after run 2: RAM-resident iff the mode keeps RAM.
-        let slot = &engine.slot(root_execution_node(mult_id));
+        let slot = &engine.slot(mult_id);
         assert_eq!(
             slot.output_values().is_some(),
             mode.caches_in_ram(),
@@ -1014,7 +966,7 @@ mod cache_persistence {
         engine.update(&build(2, 3, CacheMode::Both), &lib)?;
         assert_eq!(
             engine
-                .slot(root_execution_node(mult_id))
+                .slot(mult_id)
                 .output_values()
                 .and_then(|values| values[0].as_i64()),
             Some(35),
@@ -1025,7 +977,7 @@ mod cache_persistence {
         // mult is served from its disk blob, not recomputed — without this, a recompute
         // would yield 6 regardless and the stale-RAM path would go untested.
         assert!(
-            !stats.ran(root_execution_node(mult_id)),
+            !stats.ran(mult_id),
             "mult is a disk cache hit on flip-back, not recomputed: {:?}",
             stats.nodes
         );
@@ -1100,7 +1052,7 @@ mod cache_persistence {
             bind(&mut graph, "Print", 0, Binding::bind(mult_id, 0));
             graph
         };
-        let mult_id = root_execution_node(NodeId::from_u128(1));
+        let mult_id = NodeId::from_u128(1);
 
         for mode in [CacheMode::None, CacheMode::Disk] {
             let dir = TempDir::new(&format!("ram-downgrade-{mode:?}"));
@@ -1206,7 +1158,7 @@ mod cache_persistence {
         bind(&mut graph, "Print", 0, Binding::bind(mult_id, 0));
 
         let mult_id = graph.find_by_name("mult").unwrap().id;
-        let ran = |s: &ExecutionOutcome, id: NodeId| s.ran(root_execution_node(id));
+        let ran = |s: &ExecutionOutcome, id: NodeId| s.ran(id);
 
         // Cold run: mult computes and stores its blob.
         {
@@ -1314,12 +1266,9 @@ mod cache_persistence {
         let stats = engine.execute_sinks().await.unwrap();
 
         // The run completes (no panic): the missing blob just misses, so sum recomputes.
+        assert!(stats.ran(sum_id), "sum recomputes when its blob is gone");
         assert!(
-            stats.ran(root_execution_node(sum_id)),
-            "sum recomputes when its blob is gone"
-        );
-        assert!(
-            !stats.cached(root_execution_node(sum_id)),
+            !stats.cached(sum_id),
             "a vanished blob is not served as a cache hit"
         );
         assert!(
@@ -1472,13 +1421,10 @@ mod cache_persistence {
         engine.update(&graph, &library).unwrap();
         let stats = engine.execute_sinks().await.unwrap();
         assert!(
-            !stats.cached(root_execution_node(mult_id)),
+            !stats.cached(mult_id),
             "impure-cone node must not be disk-cached"
         );
-        assert!(
-            stats.ran(root_execution_node(mult_id)),
-            "mult recomputes on reopen"
-        );
+        assert!(stats.ran(mult_id), "mult recomputes on reopen");
     }
 
     /// A `persist = Memory` node (the default) is never written to disk even though
@@ -1508,13 +1454,10 @@ mod cache_persistence {
         engine.update(&graph, &library).unwrap();
         let stats = engine.execute_sinks().await.unwrap();
         assert!(
-            !stats.cached(root_execution_node(mult_id)),
+            !stats.cached(mult_id),
             "a Memory-persistence node must not be disk-cached"
         );
-        assert!(
-            stats.ran(root_execution_node(mult_id)),
-            "mult recomputes on reopen"
-        );
+        assert!(stats.ran(mult_id), "mult recomputes on reopen");
     }
 
     /// A `persist` node whose blob is on disk but whose custom output type has *no
@@ -1661,10 +1604,7 @@ mod cache_persistence {
             1,
             "codec present ⇒ served"
         );
-        assert!(
-            stats.cached(root_execution_node(blob_id)),
-            "blob node disk-cached"
-        );
+        assert!(stats.cached(blob_id), "blob node disk-cached");
         assert_eq!(
             engine
                 .executor
@@ -1689,11 +1629,11 @@ mod cache_persistence {
             "missing codec ⇒ recompute"
         );
         assert!(
-            !stats.cached(root_execution_node(blob_id)),
+            !stats.cached(blob_id),
             "an undecodable blob is not a cache hit"
         );
         assert!(
-            stats.ran(root_execution_node(blob_id)),
+            stats.ran(blob_id),
             "the node recomputes instead of tripping a failed frontier load"
         );
     }
@@ -1890,7 +1830,7 @@ mod resource_binds {
     }
 
     fn ran(stats: &ExecutionOutcome, id: NodeId) -> bool {
-        stats.ran(root_execution_node(id))
+        stats.ran(id)
     }
 
     /// The core regression: a path arriving over a **Bind** edge keys the loader on the
@@ -1930,7 +1870,7 @@ mod resource_binds {
         // skipped for reading it, and the run itself still succeeded.
         let assert_unavailable = |run: Result<ExecutionOutcome>, loader, dependent| {
             let stats = run.expect("a per-node failure must not abort the run");
-            let error_for = |node_id| stats.error(root_execution_node(node_id)).cloned();
+            let error_for = |node_id| stats.error(node_id).cloned();
             assert!(
                 matches!(
                     error_for(loader),
@@ -2009,13 +1949,13 @@ mod resource_binds {
             1,
             "unchanged file ⇒ the wired-path loader stays cached"
         );
-        assert!(stats.cached(root_execution_node(fx.load_id)));
+        assert!(stats.cached(fx.load_id));
         assert_eq!(
             annotates.load(Ordering::SeqCst),
             1,
             "downstream of the late-stamped loader skips compute on its hit"
         );
-        assert!(stats.cached(root_execution_node(fx.annotate_id)));
+        assert!(stats.cached(fx.annotate_id));
 
         // Edit the file (different length ⇒ unambiguous identity change). The loader
         // re-keys off the delivered value's file identity and the change propagates to its
@@ -2079,14 +2019,14 @@ mod resource_binds {
             1,
             "reopen with an unchanged file serves the loader from disk"
         );
-        assert!(stats.cached(root_execution_node(fx.load_id)));
+        assert!(stats.cached(fx.load_id));
         assert!(!ran(&stats, fx.load_id));
         assert_eq!(
             annotates.load(Ordering::SeqCst),
             1,
             "downstream of the late-stamped loader is a disk hit too"
         );
-        assert!(stats.cached(root_execution_node(fx.annotate_id)));
+        assert!(stats.cached(fx.annotate_id));
         assert_eq!(
             *captured.lock().unwrap(),
             "[v1]",
@@ -2272,18 +2212,18 @@ mod missing_inputs {
 
         // get_b has no missing inputs (no inputs at all)
         assert!(
-            !execution_graph.schedule.states[execution_graph.compiled().e_node_index[&get_b]]
+            !execution_graph.schedule.states[execution_graph.compiled().node_index[&get_b]]
                 .missing_required_inputs()
         );
         // sum is missing input[0], propagates to downstream mult and print — so none of
         // them is runnable (get_b, a source with satisfied inputs, still is).
         for gated in [sum, mult, print] {
             assert!(
-                execution_graph.schedule.states[execution_graph.compiled().e_node_index[&gated]]
+                execution_graph.schedule.states[execution_graph.compiled().node_index[&gated]]
                     .missing_required_inputs()
             );
             assert!(
-                !execution_graph.schedule.states[execution_graph.compiled().e_node_index[&gated]]
+                !execution_graph.schedule.states[execution_graph.compiled().node_index[&gated]]
                     .is_runnable()
             );
         }
@@ -2319,11 +2259,11 @@ mod missing_inputs {
         // the gated chain isn't runnable (its sources still are).
         for gated in [sum, mult, print] {
             assert!(
-                execution_graph.schedule.states[execution_graph.compiled().e_node_index[&gated]]
+                execution_graph.schedule.states[execution_graph.compiled().node_index[&gated]]
                     .missing_required_inputs()
             );
             assert!(
-                !execution_graph.schedule.states[execution_graph.compiled().e_node_index[&gated]]
+                !execution_graph.schedule.states[execution_graph.compiled().node_index[&gated]]
                     .is_runnable()
             );
         }
@@ -2353,11 +2293,11 @@ mod missing_inputs {
         let print = execution_node_id(&execution_graph, &graph, &library, "Print").unwrap();
 
         assert!(
-            !execution_graph.schedule.states[execution_graph.compiled().e_node_index[&mult]]
+            !execution_graph.schedule.states[execution_graph.compiled().node_index[&mult]]
                 .missing_required_inputs()
         );
         assert!(
-            !execution_graph.schedule.states[execution_graph.compiled().e_node_index[&print]]
+            !execution_graph.schedule.states[execution_graph.compiled().node_index[&print]]
                 .missing_required_inputs()
         );
         assert!(
@@ -2400,7 +2340,7 @@ mod missing_inputs {
         // never runs, so it never reads that value.
         let mult = execution_node_id(&execution_graph, &graph, &library, "mult").unwrap();
         assert!(
-            execution_graph.schedule.states[execution_graph.compiled().e_node_index[&mult]]
+            execution_graph.schedule.states[execution_graph.compiled().node_index[&mult]]
                 .missing_required_inputs()
         );
         assert!(
@@ -2440,8 +2380,8 @@ mod disabled_nodes {
             !execution_graph
                 .schedule
                 .process_order
-                .contains(&execution_graph.compiled().e_node_index[&sum])
-                && execution_graph.schedule.states[execution_graph.compiled().e_node_index[&sum]]
+                .contains(&execution_graph.compiled().node_index[&sum])
+                && execution_graph.schedule.states[execution_graph.compiled().node_index[&sum]]
                     == NodeState::Disabled,
             "an unseeded disabled node stays structural but outside execution order"
         );
@@ -2452,15 +2392,15 @@ mod disabled_nodes {
         let mult = execution_node_id(&execution_graph, &graph, &library, "mult").unwrap();
         let print = execution_node_id(&execution_graph, &graph, &library, "Print").unwrap();
         assert!(
-            !execution_graph.schedule.states[execution_graph.compiled().e_node_index[&get_b]]
+            !execution_graph.schedule.states[execution_graph.compiled().node_index[&get_b]]
                 .missing_required_inputs()
         );
         assert!(
-            execution_graph.schedule.states[execution_graph.compiled().e_node_index[&mult]]
+            execution_graph.schedule.states[execution_graph.compiled().node_index[&mult]]
                 .missing_required_inputs()
         );
         assert!(
-            execution_graph.schedule.states[execution_graph.compiled().e_node_index[&print]]
+            execution_graph.schedule.states[execution_graph.compiled().node_index[&print]]
                 .missing_required_inputs()
         );
 
@@ -2834,21 +2774,16 @@ mod behavior {
         )
         .await?;
 
-        let events: Vec<(ExecutionNodeId, RunPhase)> = reporter
+        let events: Vec<(NodeId, RunPhase)> = reporter
             .progress
             .iter()
-            .map(|progress| (progress.e_node_id, progress.phase))
+            .map(|progress| (progress.node_id, progress.phase))
             .collect();
 
-        let name_of: std::collections::HashMap<ExecutionNodeId, String> =
+        let name_of: std::collections::HashMap<NodeId, String> =
             ["get_a", "get_b", "sum", "mult", "Print"]
                 .iter()
-                .map(|n| {
-                    (
-                        root_execution_node(graph.find_by_name(n).unwrap().id),
-                        n.to_string(),
-                    )
-                })
+                .map(|n| (graph.find_by_name(n).unwrap().id, n.to_string()))
                 .collect();
 
         // Events come in Started→Finished pairs for the *same* node (the
@@ -2993,7 +2928,7 @@ mod behavior {
             "an in-flight cancelled node is not reported executed (no green glow)"
         );
         assert!(
-            stats.status(root_execution_node(node_id)).is_none(),
+            stats.status(node_id).is_none(),
             "a node the cancel caught mid-invoke reports nothing at all — neither a run \
              nor a failure of its own; the run-level `cancelled` flag above is what says \
              why: {:?}",
@@ -3072,7 +3007,7 @@ mod behavior {
             "a cancelled lambda is not reported executed"
         );
         assert!(
-            stats.status(root_execution_node(node_id)).is_none(),
+            stats.status(node_id).is_none(),
             "InvokeError::Cancelled maps to RunError::Cancelled, which reports nothing — \
              had it mapped to Invoke the node would carry an `Errored` row here: {:?}",
             stats.nodes
@@ -3149,8 +3084,8 @@ mod cycle_detection {
             .await
             .expect_err("Expected cycle detection error");
         match err {
-            Error::CycleDetected { e_node_id } => {
-                assert_eq!(e_node_id, root_execution_node(mult_node_id));
+            Error::CycleDetected { node_id } => {
+                assert_eq!(node_id, mult_node_id);
             }
             _ => panic!("Unexpected error: {err:?}"),
         }
@@ -3164,7 +3099,7 @@ mod installation {
     #[test]
     fn install_holds_one_canonical_artifact_for_the_engine_and_its_cache() {
         let mut builder = CompiledGraphBuilder::new();
-        builder.insert_node(ExecutionNodeId::unique().node_id());
+        builder.insert_node(NodeId::unique());
         let compiled = builder.build();
         let mut engine = ExecutionEngine::default();
 
@@ -3179,22 +3114,22 @@ mod installation {
     /// keeps its slot even when its dense index moves.
     #[test]
     fn install_carries_slots_across_a_shifted_index_space() {
-        let surviving = ExecutionNodeId::from_u128(2);
-        let build = |ids: &[ExecutionNodeId]| {
+        let surviving = NodeId::from_u128(2);
+        let build = |ids: &[NodeId]| {
             let mut builder = CompiledGraphBuilder::new();
             for &id in ids {
-                builder.insert_node(id.node_id());
+                builder.insert_node(id);
             }
             builder.build()
         };
 
         let mut engine = ExecutionEngine::default();
-        engine.install(build(&[ExecutionNodeId::from_u128(1), surviving]));
+        engine.install(build(&[NodeId::from_u128(1), surviving]));
         // Index 1 before the recompile: ids place in ascending order.
         engine.cache[NodeIdx(1)].state.set(17_u32);
 
         // Node 1 is dropped, so the survivor slides to index 0.
-        engine.install(build(&[surviving, ExecutionNodeId::from_u128(3)]));
+        engine.install(build(&[surviving, NodeId::from_u128(3)]));
 
         assert_eq!(engine.cache[NodeIdx(0)].state.get::<u32>(), Some(&17));
         assert!(engine.cache[NodeIdx(1)].state.is_none());
@@ -3204,7 +3139,7 @@ mod installation {
     #[test]
     fn validation_rejects_a_cache_with_the_wrong_node_count() {
         let mut builder = CompiledGraphBuilder::new();
-        builder.insert_node(ExecutionNodeId::unique().node_id());
+        builder.insert_node(NodeId::unique());
         let engine = ExecutionEngine {
             compiled: Some(builder.build()),
             ..Default::default()
@@ -3325,7 +3260,7 @@ mod execution {
         // sum should be marked as missing required inputs
         let sum = execution_node_id(&execution_graph, &graph, &library, "sum").unwrap();
         assert!(
-            execution_graph.schedule.states[execution_graph.compiled().e_node_index[&sum]]
+            execution_graph.schedule.states[execution_graph.compiled().node_index[&sum]]
                 .missing_required_inputs()
         );
 
@@ -3457,9 +3392,9 @@ mod execution {
         // Run 1: both ports written.
         let stats = eg.execute_sinks().await?;
         assert!(stats.errored_nodes().count() == 0);
-        let e_node_id = execution_node_id(&eg, &graph, &library, "partial_writer").unwrap();
+        let node_id = execution_node_id(&eg, &graph, &library, "partial_writer").unwrap();
         let outputs = eg
-            .slot(e_node_id)
+            .slot(node_id)
             .output_values()
             .map(<[_]>::to_vec)
             .expect("the node ran, so it holds outputs");
@@ -3479,7 +3414,7 @@ mod execution {
         let stats = eg.execute_sinks().await?;
         assert!(stats.errored_nodes().count() == 0);
         let outputs = eg
-            .slot(e_node_id)
+            .slot(node_id)
             .output_values()
             .map(<[_]>::to_vec)
             .expect("the invalidated pure node re-ran");
@@ -3524,10 +3459,7 @@ mod node_seeds {
         eg.update(&graph, &library).unwrap();
 
         let sum_id = graph.find_by_name("sum").unwrap().id;
-        let stats = eg
-            .execute_nodes([root_execution_node(sum_id)])
-            .await
-            .unwrap();
+        let stats = eg.execute_nodes([sum_id]).await.unwrap();
         assert_eq!(stats.ran_node_count, 3);
 
         let mut ran = execution_node_names_in_order(&eg, &graph, &library);
@@ -3577,20 +3509,15 @@ mod node_seeds {
         eg.update(&graph, &library).unwrap();
 
         let sum_id = graph.find_by_name("sum").unwrap().id;
-        eg.execute_nodes([root_execution_node(sum_id)])
-            .await
-            .unwrap();
+        eg.execute_nodes([sum_id]).await.unwrap();
         assert_eq!(get_a_calls.load(Ordering::Relaxed), 1);
         assert_eq!(get_b_calls.load(Ordering::Relaxed), 1);
 
-        let stats = eg
-            .execute_nodes([root_execution_node(sum_id)])
-            .await
-            .unwrap();
+        let stats = eg.execute_nodes([sum_id]).await.unwrap();
         assert_eq!(get_a_calls.load(Ordering::Relaxed), 2);
         assert_eq!(get_b_calls.load(Ordering::Relaxed), 2);
         assert_eq!(stats.ran_node_count, 3);
-        assert!(!stats.cached(root_execution_node(sum_id)));
+        assert!(!stats.cached(sum_id));
         assert!(stats.ram_holding_nodes().count() == 0);
     }
 
@@ -3616,7 +3543,7 @@ mod node_seeds {
         eg.execute(
             RunSeeds {
                 sinks: true,
-                e_node_ids: vec![root_execution_node(sum_id)],
+                node_ids: vec![sum_id],
                 ..Default::default()
             },
             &mut DiscardedReports,
@@ -3656,9 +3583,9 @@ mod node_seeds {
         let mut eg = ExecutionEngine::default();
         eg.update(&graph, &library).unwrap();
 
-        let bogus = ExecutionNodeId::from_u128(0xdead_beef);
+        let bogus = NodeId::from_u128(0xdead_beef);
         let err = eg.execute_nodes([bogus]).await.unwrap_err();
-        assert!(matches!(err, Error::NodeSeedNotFound { e_node_id } if e_node_id == bogus));
+        assert!(matches!(err, Error::NodeSeedNotFound { node_id } if node_id == bogus));
     }
 }
 
@@ -3919,7 +3846,7 @@ mod stats {
         // exactly the port that failed rather than flagging the node as a whole.
         let sum_id = graph.find_by_name("sum").unwrap().id;
         assert_eq!(
-            stats.missing_input_ports(root_execution_node(sum_id)),
+            stats.missing_input_ports(sum_id),
             [0],
             "expected sum input 0 unfed, got: {:?}",
             stats.nodes
@@ -3952,7 +3879,7 @@ mod stats {
         let stats = execution_graph.execute_sinks().await?;
 
         assert_eq!(
-            stats.missing_input_ports(root_execution_node(sum_id)),
+            stats.missing_input_ports(sum_id),
             [0],
             "the dangling binding degrades to a missing input on that exact port, got: {:?}",
             stats.nodes
@@ -3981,15 +3908,15 @@ mod stats {
             assert!(
                 elapsed_secs >= 0.0,
                 "node {:?} has negative elapsed_secs",
-                node.e_node_id
+                node.node_id
             );
         }
 
         // Verify specific node IDs are present
         let sum_id = graph.find_by_name("sum").unwrap().id;
         let print_id = graph.find_by_name("Print").unwrap().id;
-        assert!(stats.ran(root_execution_node(sum_id)));
-        assert!(stats.ran(root_execution_node(print_id)));
+        assert!(stats.ran(sum_id));
+        assert!(stats.ran(print_id));
 
         // No errors on first clean run
         assert!(stats.errored_nodes().count() == 0);
@@ -4002,9 +3929,9 @@ mod stats {
 mod events {
     use super::*;
     use crate::async_lambda;
-    use crate::execution::identity::ExecutionEventPort;
     use crate::graph::func::event::EventLambda;
     use crate::graph::func::{Func, FuncInput, FuncOutput};
+    use crate::graph::identity::EventPort;
 
     const EMIT_FUNC: FuncId = FuncId::from_u128(0xE311);
     const RECV_FUNC: FuncId = FuncId::from_u128(0xE322);
@@ -4079,8 +4006,8 @@ mod events {
         eg.update(&f.graph, &f.library).unwrap();
 
         let stats = eg
-            .execute_events([ExecutionEventPort {
-                e_node_id: root_execution_node(f.emit_id),
+            .execute_events([EventPort {
+                node_id: f.emit_id,
                 event_idx: 0,
             }])
             .await?;
@@ -4095,10 +4022,7 @@ mod events {
 
         // The triggering event is echoed back in the stats
         assert_eq!(stats.triggered_events.len(), 1);
-        assert_eq!(
-            stats.triggered_events[0].e_node_id,
-            root_execution_node(f.emit_id)
-        );
+        assert_eq!(stats.triggered_events[0].node_id, f.emit_id);
         assert_eq!(stats.triggered_events[0].event_idx, 0);
 
         Ok(())
@@ -4159,10 +4083,7 @@ mod events {
 
             assert_eq!(*f.emit_calls.lock().await, expected_calls);
             assert_eq!(outcome.event_triggers.len(), 1);
-            assert_eq!(
-                outcome.event_triggers[0].event.e_node_id,
-                root_execution_node(f.emit_id)
-            );
+            assert_eq!(outcome.event_triggers[0].event.node_id, f.emit_id);
             assert_eq!(outcome.event_triggers[0].event.event_idx, 0);
         }
 
@@ -4192,7 +4113,7 @@ mod events {
         .await?;
 
         // emit ran, but its event has no subscribers → no live triggers.
-        assert!(outcome.ran(root_execution_node(f.emit_id)));
+        assert!(outcome.ran(f.emit_id));
         assert!(outcome.event_triggers.is_empty());
 
         Ok(())
@@ -4223,10 +4144,7 @@ mod events {
         )
         .await?;
 
-        assert_eq!(
-            outcome.errored_nodes().collect::<Vec<_>>(),
-            [root_execution_node(f.emit_id)]
-        );
+        assert_eq!(outcome.errored_nodes().collect::<Vec<_>>(), [f.emit_id]);
         assert!(outcome.event_triggers.is_empty());
 
         Ok(())
@@ -4310,8 +4228,8 @@ mod events {
         eg.update(&graph, &library)?;
 
         let stats = eg
-            .execute_events([ExecutionEventPort {
-                e_node_id: root_execution_node(emit_id),
+            .execute_events([EventPort {
+                node_id: emit_id,
                 event_idx: 0,
             }])
             .await?;
@@ -4331,7 +4249,7 @@ mod events {
         assert!(
             eg.schedule
                 .process_order
-                .contains(&eg.compiled().e_node_index[&root_execution_node(trigger_id)]),
+                .contains(&eg.compiled().node_index[&trigger_id]),
             "the RunSinks sink runs as a sink"
         );
 
@@ -4382,8 +4300,8 @@ mod events {
 
         let mut eg = ExecutionEngine::default();
         eg.update(&graph, &library)?;
-        eg.execute_events([ExecutionEventPort {
-            e_node_id: root_execution_node(emit_id),
+        eg.execute_events([EventPort {
+            node_id: emit_id,
             event_idx: 0,
         }])
         .await?;
@@ -4684,7 +4602,7 @@ mod topology {
             1,
             "survivor recomputed after unrelated node removal"
         );
-        assert!(stats.cached(root_execution_node(survivor_id)));
+        assert!(stats.cached(survivor_id));
         let vals = eg.get_argument_values(&survivor_id).unwrap();
         assert!(
             matches!(vals.outputs[0], DynamicValue::Static(StaticValue::Float(v)) if v.approximately_eq(expected_value))
@@ -4766,18 +4684,7 @@ mod graph {
 
         assert_eq!(eg.compiled().e_nodes.len(), graph.len());
         for node in graph.iter() {
-            assert!(
-                eg.compiled()
-                    .e_node_index
-                    .contains_key(&root_execution_node(node.id)),
-                "id preserved"
-            );
-            assert_eq!(
-                eg.compiled()
-                    .attribution(root_execution_node(node.id))
-                    .unwrap(),
-                node.id
-            );
+            assert!(eg.compiled().contains(node.id), "id preserved");
         }
     }
 }
@@ -5044,7 +4951,7 @@ mod compile_regressions {
     use std::sync::Mutex as StdMutex;
 
     /// The output pool is range-addressed: when a consumer precedes its producer
-    /// in insertion order, flatten's `set_input` claims the producer's *index* early
+    /// in insertion order, lowering's `set_input` claims the producer's *index* early
     /// while output ranges are assigned in emit order — an index-order sequential fill
     /// would hand the two producers each other's types.
     #[test]
@@ -5075,7 +4982,7 @@ mod compile_regressions {
         .into();
 
         // Insertion order: the consumer first, then the *other* producer, then the
-        // producer it binds — so `make_str` claims flat index 1 while its output range
+        // producer it binds — so `make_str` claims lowered index 1 while its output range
         // is assigned last.
         let mut graph = Graph::default();
         graph.add(node(&library, "sink"));
@@ -5091,12 +4998,12 @@ mod compile_regressions {
         let make_int = execution_node_id(&engine, &graph, &library, "make_int").unwrap();
         let make_str = execution_node_id(&engine, &graph, &library, "make_str").unwrap();
         assert_eq!(
-            engine.compiled().outputs[engine.compiled().by_id(make_int).outputs][0].data_type,
+            engine.compiled().outputs[engine.compiled().by_id(make_int).outputs][0],
             DataType::Int,
             "make_int reads its own type, not its neighbor's"
         );
         assert_eq!(
-            engine.compiled().outputs[engine.compiled().by_id(make_str).outputs][0].data_type,
+            engine.compiled().outputs[engine.compiled().by_id(make_str).outputs][0],
             DataType::String,
             "make_str reads its own type, not its neighbor's"
         );
@@ -5175,7 +5082,7 @@ mod compile_regressions {
                 "authoring resolution for {node_id}"
             );
             assert_eq!(
-                program.outputs[program.by_id(root_execution_node(node_id)).outputs][0].data_type,
+                program.outputs[program.by_id(node_id).outputs][0],
                 expected,
                 "compiled resolution for {node_id}"
             );
@@ -5202,12 +5109,12 @@ mod compile_regressions {
         // The same wire, compiled: linking resolves the wildcard through the
         // binding it just interned, and the cycle closes on `Any` there too.
         let compiled = Compiler::default().compile(&graph, &library).unwrap();
-        let e_node = compiled.by_id(root_execution_node(node_id));
-        assert_eq!(compiled.outputs[e_node.outputs][0].data_type, DataType::Any);
+        let e_node = compiled.by_id(node_id);
+        assert_eq!(compiled.outputs[e_node.outputs][0], DataType::Any);
     }
 
     /// An `Update` may carry an evolved library: changed inputs and lambdas must
-    /// replace their prior compiled forms under the reused flat node.
+    /// replace their prior compiled forms under the reused lowered node.
     #[tokio::test]
     async fn update_with_evolved_func_recompiles_and_runs_new_lambda() {
         let printed = Arc::new(StdMutex::new(Vec::<i64>::new()));
@@ -5251,9 +5158,9 @@ mod compile_regressions {
         let lib_v2 = make_lib(2, true);
         engine.update(&graph, &lib_v2).unwrap();
         assert_eq!(
-            engine.node_inputs(root_execution_node(generate_id)).len(),
+            engine.node_inputs(generate_id).len(),
             1,
-            "the reused flat node picked up the grown input list"
+            "the reused lowered node picked up the grown input list"
         );
         engine.execute_sinks().await.unwrap();
         assert_eq!(

@@ -178,7 +178,7 @@ impl Library {
             // legitimate — so nothing rejected a func that declared this
             // id as an enum, and the mismatch only surfaced much later
             // and much quieter, as an enum const that failed
-            // `const_satisfies` and flattened to unbound.
+            // `const_satisfies` and lowered to unbound.
             None => {
                 for func in self.funcs.values() {
                     assert!(
@@ -252,9 +252,9 @@ impl Library {
     }
 
     /// Whether a `Const` literal `value` may sit on `input` — the `Const` half of
-    /// the flatten-time type degrade (the `Bind` half uses
+    /// the lowering-time type degrade (the `Bind` half uses
     /// [`DataType::compatible_with`]); a literal that doesn't satisfy its port
-    /// flattens as unbound. Matched directly rather than via
+    /// lowers as unbound. Matched directly rather than via
     /// `compatible_with` because a bare `StaticValue` can't be turned back into a
     /// `DataType` (it lacks the `FsPathConfig`, and the enum's variant list lives in
     /// `library`).
@@ -283,7 +283,7 @@ impl Library {
     /// The type half of [`const_satisfies`](Self::const_satisfies), without the
     /// picker list and
     /// optionality only a [`FuncInput`] carries — a graph interface's *output*
-    /// ports declare a bare [`DataType`], and the flattener's boundary gate
+    /// ports declare a bare [`DataType`], and the lowerer's boundary gate
     /// needs the same table rather than a second copy of it.
     pub(crate) fn declared_accepts_const(&self, declared: &DataType, value: &StaticValue) -> bool {
         match declared {
@@ -466,7 +466,7 @@ mod tests {
     /// first legitimate, so nothing could reject the second: the library
     /// accepted the pair, and the contradiction only surfaced later and
     /// far quieter, when the enum const failed `const_satisfies` and the
-    /// input flattened to unbound — indistinguishable from a port the
+    /// input lowered to unbound — indistinguishable from a port the
     /// user simply never wired.
     #[test]
     fn an_enum_declaration_over_a_custom_registration_is_refused_either_order() {

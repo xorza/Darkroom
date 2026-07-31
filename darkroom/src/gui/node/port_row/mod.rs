@@ -123,13 +123,6 @@ pub(super) fn ports_row(
         });
 }
 
-/// The per-cell decisions [`ports_row`] settles once for the whole node.
-#[derive(Clone, Copy, Debug)]
-struct CellOpts {
-    /// Build the hover tooltip. Only the node under the pointer does.
-    tips: bool,
-}
-
 /// A port's hover tooltip, built only for the node under the pointer —
 /// see [`ports_row`]. Empty otherwise, which
 /// [`tooltip_after`](crate::gui::widgets::support::tooltip_after) and
@@ -172,8 +165,7 @@ fn input_cells(
     out: &mut Intents,
 ) {
     for input in node.inputs() {
-        let opts = CellOpts { tips };
-        input_label_cell(ui, rcx, node, input, opts, out);
+        input_label_cell(ui, rcx, node, input, tips, out);
         value_cell(ui, rcx, sve, input, out);
     }
 }
@@ -187,8 +179,7 @@ fn output_cells(
 ) {
     let output_count = node.port_count(PortKind::Output);
     for output in node.outputs() {
-        let opts = CellOpts { tips };
-        output_cell(ui, rcx, output, opts, out);
+        output_cell(ui, rcx, output, tips, out);
     }
     // Events emit from the same (right) side; list them in the rows directly
     // below the data outputs.
@@ -247,12 +238,12 @@ fn input_label_cell(
     rcx: RecordCtx<'_>,
     node: NodeScope<'_>,
     input: InputScope<'_>,
-    opts: CellOpts,
+    tips: bool,
     out: &mut Intents,
 ) {
     let theme = rcx.theme;
     let port = input.port_ref();
-    let tip = tip_for(rcx, opts.tips, input.description(), input.ty());
+    let tip = tip_for(rcx, tips, input.description(), input.ty());
     // Flag a port only once a run actually failed on it — not on every unbound edit — so
     // the port keeps its data-type color while editing instead of flipping as you
     // bind/unbind. The run named the exact ports it could not feed, so only those light
@@ -384,7 +375,7 @@ fn output_cell(
     ui: &mut Ui,
     rcx: RecordCtx<'_>,
     output: OutputScope<'_>,
-    opts: CellOpts,
+    tips: bool,
     out: &mut Intents,
 ) {
     let theme = rcx.theme;
@@ -398,7 +389,7 @@ fn output_cell(
         PortKind::Output,
         rcx.geometry.ports.is_hovered(port),
     );
-    let tip = tip_for(rcx, opts.tips, output.description(), &ty);
+    let tip = tip_for(rcx, tips, output.description(), &ty);
     let wid = port_circle_wid(port);
     let overhang = theme.port_overhang();
     let cell = Panel::hstack()

@@ -163,7 +163,7 @@ impl Graph {
     /// The declaration a node instantiates — a library entry, or a special
     /// node's hardcoded spec. `None` for a `Func` kind the library no longer
     /// holds: the caller decides whether that is drift to tolerate (the
-    /// editor renders a stub) or a node to skip (flatten).
+    /// editor renders a stub) or a node to skip (lowering).
     ///
     /// The one place the per-kind lookup happens, so no caller repeats it.
     pub fn node_func<'a>(&'a self, node: &'a Node, library: &'a Library) -> Option<&'a Func> {
@@ -533,8 +533,8 @@ impl Graph {
         // Drift is tolerated everywhere below: a binding, subscription, or
         // pin referencing a port the current library no longer declares —
         // and a wire or const whose type no longer matches — stays valid
-        // and degrades to unbound at flatten time (a required input
-        // surfaces as a missing-input verdict; see flatten's `typed_binding`).
+        // and degrades to unbound at lowering time (a required input
+        // surfaces as a missing-input verdict; see lowering's `typed_binding`).
         // Deleting or rejecting it would destroy authored wiring that
         // revives when the library or the upstream types come back.
         for (destination, binding) in &self.bindings {

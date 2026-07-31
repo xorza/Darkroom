@@ -344,9 +344,9 @@ impl RunSchedule {
         // Node seeds ("run to this node"): each exact execution node is a root, seeded so
         // every output is computed and its `disabled` flag is overridden for this run. An
         // id absent from the installed program is inconsistent caller state.
-        for &e_node_id in &seeds.e_node_ids {
-            let Some(&node_idx) = program.e_node_index.get(&e_node_id) else {
-                return Err(Error::NodeSeedNotFound { e_node_id });
+        for &node_id in &seeds.node_ids {
+            let Some(&node_idx) = program.node_index.get(&node_id) else {
+                return Err(Error::NodeSeedNotFound { node_id });
             };
             self.add_root(node_idx, RootFlags::SEEDED);
         }
@@ -355,7 +355,7 @@ impl RunSchedule {
         // promotes this run to run all sinks (below), so it's skipped as a root here.
         let mut run_sinks = seeds.sinks;
         for &event in &seeds.events {
-            let Some(&owner_idx) = program.e_node_index.get(&event.e_node_id) else {
+            let Some(&owner_idx) = program.node_index.get(&event.node_id) else {
                 return Err(Error::EventSeedNotFound { event });
             };
             let Some(e_event) = program.events[program[owner_idx].events].get(event.event_idx)
@@ -441,16 +441,16 @@ impl RunSchedule {
                 .e_nodes
                 .get(node_idx)
                 .ok_or(RunScheduleValidationError::NodeOutOfRange { node_idx })?;
-            let e_node_id = program.e_node_ids[node_idx];
+            let node_id = program.node_ids[node_idx];
             let inputs = program
                 .inputs
                 .get_span(e_node.inputs)
-                .ok_or(RunScheduleValidationError::InputRange { e_node_id })?;
+                .ok_or(RunScheduleValidationError::InputRange { node_id })?;
             for input in inputs {
                 if let ExecutionBinding::Bind(addr) = &input.binding {
                     // Resolve the dependency before probing the sets: an
                     // out-of-range target is the corruption to report, not a
-                    // reason to index past `seen_in_order` and `e_node_ids`.
+                    // reason to index past `seen_in_order` and `node_ids`.
                     let dependency = program.e_nodes.get(addr.node_idx).ok_or(
                         RunScheduleValidationError::NodeOutOfRange {
                             node_idx: addr.node_idx,
@@ -460,14 +460,14 @@ impl RunSchedule {
                         dependency.disabled && self.states[addr.node_idx] == NodeState::Disabled;
                     if !seen_in_order.contains(addr.node_idx) && !disabled_dependency {
                         return Err(RunScheduleValidationError::BeforeDependency {
-                            e_node_id,
-                            dependency: program.e_node_ids[addr.node_idx],
+                            node_id,
+                            dependency: program.node_ids[addr.node_idx],
                         });
                     }
                 }
             }
             if seen_in_order.contains(node_idx) {
-                return Err(RunScheduleValidationError::DuplicateNode { e_node_id });
+                return Err(RunScheduleValidationError::DuplicateNode { node_id });
             }
             seen_in_order.insert(node_idx);
         }
@@ -481,7 +481,7 @@ impl RunSchedule {
                 && !matches!(state, NodeState::Unvisited | NodeState::Disabled)
             {
                 return Err(RunScheduleValidationError::UnscheduledNodeDecided {
-                    e_node_id: program.e_node_ids[node_idx],
+                    node_id: program.node_ids[node_idx],
                     state,
                 });
             }

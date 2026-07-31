@@ -5,10 +5,8 @@ use tokio::sync::oneshot;
 
 use crate::execution::cache::disk_store::DiskStore;
 use crate::execution::compiled::CompiledGraph;
-use crate::execution::identity::ExecutionEventPort;
-use crate::execution::identity::ExecutionNodeId;
 use crate::execution::seeds::RunSeeds;
-use crate::graph::identity::NodeId;
+use crate::graph::identity::{EventPort, NodeId};
 use crate::worker::protocol::WorkerMessage;
 
 #[derive(Debug)]
@@ -30,9 +28,9 @@ pub(crate) struct BatchIntent {
     pub(crate) loop_request: Option<LoopCommand>,
     pub(crate) execute_sinks: bool,
     pub(crate) execute_event_sources: bool,
-    pub(crate) execute_nodes: IndexSet<ExecutionNodeId>,
+    pub(crate) execute_nodes: IndexSet<NodeId>,
     pub(crate) evict_cache: IndexSet<NodeId>,
-    pub(crate) events: IndexSet<ExecutionEventPort>,
+    pub(crate) events: IndexSet<EventPort>,
     pub(crate) syncs: Vec<oneshot::Sender<()>>,
 }
 
@@ -40,7 +38,7 @@ impl BatchIntent {
     pub(crate) fn reset(
         &mut self,
         msgs: impl IntoIterator<Item = WorkerMessage>,
-        events: impl IntoIterator<Item = ExecutionEventPort>,
+        events: impl IntoIterator<Item = EventPort>,
     ) {
         self.clear();
         for msg in msgs {
@@ -56,12 +54,12 @@ impl BatchIntent {
                         sinks,
                         event_sources,
                         events,
-                        e_node_ids,
+                        node_ids,
                     } = seeds;
                     self.execute_sinks |= sinks;
                     self.execute_event_sources |= event_sources;
                     self.events.extend(events);
-                    self.execute_nodes.extend(e_node_ids);
+                    self.execute_nodes.extend(node_ids);
                 }
                 WorkerMessage::StartEventLoop => self.loop_request = Some(LoopCommand::Start),
                 WorkerMessage::StopEventLoop => self.loop_request = Some(LoopCommand::Stop),

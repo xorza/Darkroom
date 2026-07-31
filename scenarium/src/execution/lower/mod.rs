@@ -1,17 +1,17 @@
-//! Graph flattening: the pipeline's first stage. Walks the authoring `Graph`
-//! and appends every node straight into the [`FlatGraph`] it fills — no
+//! Lowering: the pipeline's first stage. Walks the authoring `Graph` and
+//! appends every node straight into the [`LoweredGraph`] it fills — no
 //! intermediate `Graph` is materialized and no final
 //! [`CompiledGraph`](crate::execution::compiled::CompiledGraph) is touched.
 //!
-//! A graph is flat, so "flattening" is a copy with three jobs the walk is the
+//! A graph is flat, so lowering is a copy with three jobs the walk is the
 //! only place to do: resolving each binding to the producer it names, gating it
 //! against the declared types, and stamping each output with the effective type
 //! the same pass resolved. The *type gate* is drift tolerance — a wire whose
 //! resolved source type no longer fits the consumer, or a const that no longer
-//! satisfies it, flattens as unbound rather than severing authored wiring.
+//! satisfies it, lowers as unbound rather than severing authored wiring.
 //!
 //! Everything here is in the **stable-id space**: the walk names producers,
-//! subscribers, and emitters by [`ExecutionNodeId`] because a node's dense
+//! subscribers, and emitters by [`NodeId`] because a node's dense
 //! index is its position after the id sort, which is linking's to assign. So
 //! nothing here mentions `NodeIdx` or `OutputAddr`: the walk emits program
 //! [`ExecutionNode`]s directly, but the columns it appends them to stay in emit
@@ -19,14 +19,15 @@
 //!
 //! See `README.md` Part A §5.
 
-pub(crate) mod flat;
+pub(crate) mod lowered_graph;
 
 use crate::DataType;
 use crate::execution::compiled::ExecutionNode;
-use crate::execution::flatten::flat::{FlatBinding, FlatGraph, FlatInput, PendingSubscription};
-use crate::execution::identity::{ExecutionEventPort, ExecutionNodeId, ExecutionOutputPort};
+use crate::execution::lower::lowered_graph::{
+    LoweredBinding, LoweredGraph, LoweredInput, PendingSubscription,
+};
 use crate::graph::func::{Func, FuncInput};
-use crate::graph::identity::{InputPort, OutputPort};
+use crate::graph::identity::{EventPort, InputPort, OutputPort};
 use crate::graph::node::NodeKind;
 use crate::graph::node::special::SpecialNode;
 use crate::graph::output_types::OutputTypes;
@@ -36,19 +37,19 @@ use crate::library::Library;
 /// Reusable traversal scratch owned by the
 /// [`Compiler`](crate::execution::compile::Compiler). Only the walk's own
 /// state lives here; everything it *produces* goes straight into the
-/// [`FlatGraph`] it fills, so no part of one flatten survives into the next.
+/// [`LoweredGraph`] it fills, so no part of one lowering survives into the next.
 #[derive(Debug, Default)]
-pub(crate) struct Flattener {
+pub(crate) struct Lowerer {
     /// One node's resolved inputs, refilled per node. They are resolved before
-    /// the ports are appended, so a [`FlatInput`] is whole the moment it exists.
-    node_inputs: Vec<FlatInput>,
+    /// the ports are appended, so a [`LoweredInput`] is whole the moment it exists.
+    node_inputs: Vec<LoweredInput>,
     /// Every output type of the graph, filled before the walk. Held here
     /// because the type gate runs once per bound input, and resolving one port
     /// at a time cost a walk per edge.
     output_types: OutputTypes,
 }
 
-impl Flattener {
+impl Lowerer {
     /// Lower `root` against `library` into `out`. One step, one value: the walk
     /// appends what it finds, and what `out` holds afterwards is complete — no
     /// field of it is filled in later and no final program or artifact type is
@@ -58,7 +59,7 @@ impl Flattener {
     /// compile pays for the artifact alone. It is cleared on entry instead of
     /// trusted, which is what lets the same buffer serve every compile without
     /// the walk having to know whether the last one was linked.
-    pub(crate) fn flatten(&mut self, root: &Graph, library: &Library, out: &mut FlatGraph) {
+    pub(crate) fn lower(&mut self, root: &Graph, library: &Library, out: &mut LoweredGraph) {
         self.node_inputs.clear();
         out.clear();
         self.output_types.update(root, library);
@@ -90,7 +91,7 @@ impl Flattener {
                 let port = InputPort::new(node.id, port_idx);
                 let binding =
                     self.typed_binding(root, library, func_input, root.bindings.get(&port));
-                self.node_inputs.push(FlatInput {
+                self.node_inputs.push(LoweredInput {
                     required: func_input.required,
                     stamps_fs_path: matches!(&func_input.data_type, DataType::FsPath(_)),
                     binding,
@@ -116,7 +117,7 @@ impl Flattener {
             let events = out.reserve_events(func.events.len());
 
             out.push_node(
-                ExecutionNodeId::from_node(node.id),
+                node.id,
                 ExecutionNode {
                     sink: func.sink,
                     disabled: node.disabled,
@@ -137,7 +138,7 @@ impl Flattener {
 
     /// [`Self::resolve_binding`] behind the type gate: a wire whose resolved
     /// source type is incompatible with the declared input, or a const that
-    /// doesn't satisfy it, flattens as unbound — drift tolerance. The editor
+    /// doesn't satisfy it, lowers as unbound — drift tolerance. The editor
     /// paints such a wire as mismatched; a required input surfaces as a
     /// missing-input verdict. Nothing is severed, so the wiring revives when
     /// the types line up again.
@@ -147,7 +148,7 @@ impl Flattener {
         library: &Library,
         input: &FuncInput,
         binding: Option<&Binding>,
-    ) -> FlatBinding {
+    ) -> LoweredBinding {
         let mismatched = match binding {
             Some(Binding::Bind(src)) => {
                 // A miss is library drift — a binding naming an output the func
@@ -161,38 +162,35 @@ impl Flattener {
             None => false,
         };
         if mismatched {
-            return FlatBinding::None;
+            return LoweredBinding::None;
         }
         match binding {
-            None => FlatBinding::None,
-            Some(Binding::Const(value)) => FlatBinding::Const(value.clone()),
+            None => LoweredBinding::None,
+            Some(Binding::Const(value)) => LoweredBinding::Const(value.clone()),
             Some(Binding::Bind(output)) => Self::resolve(graph, library, *output),
         }
     }
 
-    /// Resolve an output reference to the flat producer it names.
+    /// Resolve an output reference to the lowered producer it names.
     ///
     /// Library drift can leave a binding to an output the func no longer
     /// declares — degrade to unbound rather than addressing a vanished slot
     /// (the planner reports the consumer's missing input).
-    fn resolve(graph: &Graph, library: &Library, port: OutputPort) -> FlatBinding {
+    fn resolve(graph: &Graph, library: &Library, port: OutputPort) -> LoweredBinding {
         let OutputPort { node_id, port_idx } = port;
         let node = graph.find(node_id).expect("binding to a missing node");
         if graph
             .node_func(node, library)
             .is_some_and(|ports| port_idx >= ports.outputs.len())
         {
-            return FlatBinding::None;
+            return LoweredBinding::None;
         }
-        FlatBinding::Bind(ExecutionOutputPort {
-            e_node_id: ExecutionNodeId::from_node(node_id),
-            port_idx,
-        })
+        LoweredBinding::Bind(OutputPort { node_id, port_idx })
     }
 
-    /// Turn this graph's event subscriptions into flat `(emitter event,
+    /// Turn this graph's event subscriptions into lowered `(emitter event,
     /// subscriber)` edges. A disabled node fires no events and receives none.
-    fn collect_subscriptions(&self, graph: &Graph, library: &Library, out: &mut FlatGraph) {
+    fn collect_subscriptions(&self, graph: &Graph, library: &Library, out: &mut LoweredGraph) {
         for sub in graph.subscriptions() {
             let emitter = graph
                 .find(sub.emitter)
@@ -212,11 +210,11 @@ impl Flattener {
                 continue;
             }
             out.subscriptions.push(PendingSubscription {
-                event: ExecutionEventPort {
-                    e_node_id: ExecutionNodeId::from_node(sub.emitter),
+                event: EventPort {
+                    node_id: sub.emitter,
                     event_idx: sub.event_idx,
                 },
-                subscriber: ExecutionNodeId::from_node(sub.subscriber),
+                subscriber: sub.subscriber,
             });
         }
     }

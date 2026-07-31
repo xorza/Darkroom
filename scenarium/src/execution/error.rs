@@ -1,8 +1,7 @@
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::execution::identity::{ExecutionEventPort, ExecutionNodeId};
-use crate::graph::identity::FuncId;
+use crate::graph::identity::{EventPort, FuncId, NodeId};
 
 /// An **operation-level** failure that aborts a whole plan / run: the schedule has a
 /// cycle ([`CycleDetected`](Error::CycleDetected)), a node seed had no occurrence
@@ -18,19 +17,16 @@ use crate::graph::identity::FuncId;
 /// reaches the engine — the phases can't be confused at the type level.
 #[derive(Debug, Error, Clone, Serialize, Deserialize)]
 pub enum Error {
-    #[error("Cycle detected while building execution graph at node {e_node_id:?}")]
-    CycleDetected { e_node_id: ExecutionNodeId },
+    #[error("Cycle detected while building execution graph at node {node_id:?}")]
+    CycleDetected { node_id: NodeId },
     /// An execution-node seed is absent from the installed compiled program. A stale
     /// identity fails the run rather than being silently skipped.
-    #[error("node seed {e_node_id:?} not found in the compiled program")]
-    NodeSeedNotFound { e_node_id: ExecutionNodeId },
+    #[error("node seed {node_id:?} not found in the compiled program")]
+    NodeSeedNotFound { node_id: NodeId },
     #[error("event seed {event:?} not found in the compiled program")]
-    EventSeedNotFound { event: ExecutionEventPort },
-    #[error("event lambda for node {e_node_id:?} panicked: {message}")]
-    EventLambdaPanic {
-        e_node_id: ExecutionNodeId,
-        message: String,
-    },
+    EventSeedNotFound { event: EventPort },
+    #[error("event lambda for node {node_id:?} panicked: {message}")]
+    EventLambdaPanic { node_id: NodeId, message: String },
 }
 
 /// A **single node's** run-time failure, reported in that node's one
@@ -44,7 +40,7 @@ pub enum RunError {
     #[error("{message}")]
     Invoke { func_id: FuncId, message: String },
     // The messages omit `func_id` (kept as machine-readable data): a `RunError`
-    // is already paired with its `ExecutionNodeId` in the node's status row, so these
+    // is already paired with its `NodeId` in the node's status row, so these
     // surface to the editor attributed to the node — a raw id in the text would be noise.
     /// The node's func was registered without an implementation
     /// ([`FuncLambda::None`](crate::graph::func::lambda::FuncLambda)), so the node
@@ -77,10 +73,3 @@ pub enum RunError {
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
-
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-/// A failed lookup from an execution identity to its authoring attribution.
-pub enum ExecutionIdentityError {
-    #[error("execution node {e_node_id:?} has no authoring attribution in this compiled graph")]
-    NodeNotFound { e_node_id: ExecutionNodeId },
-}

@@ -125,7 +125,7 @@ impl WorkerStatusPatch<'_> {
             RunPhase::Finished { elapsed_secs } => NodeExecutionStatus::Executed { elapsed_secs },
         };
         update.nodes.push(NodeStatus {
-            e_node_id: progress.e_node_id,
+            node_id: progress.node_id,
             status: Some(status),
             ram: RamUsage::default(),
         });

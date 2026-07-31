@@ -1,15 +1,13 @@
-use crate::graph::identity::FuncId;
+use crate::graph::identity::{FuncId, NodeId};
 use std::sync::Arc;
 
 use super::*;
+use crate::DataType;
 use crate::async_lambda;
 use crate::common::column::{Column, Idx};
 use crate::execution::cache::runtime::RuntimeCache;
 use crate::execution::cache::slot::OutputSnapshot;
-use crate::execution::compiled::{
-    ExecutionBinding, ExecutionInput, ExecutionNode, ExecutionOutput,
-};
-use crate::execution::identity::ExecutionNodeId;
+use crate::execution::compiled::{ExecutionBinding, ExecutionInput, ExecutionNode};
 use crate::execution::identity::{NodeIdx, OutputAddr, OutputIdx};
 use crate::execution::report::internals::DiscardedReports;
 use crate::execution::schedule::{
@@ -36,12 +34,7 @@ impl Prog {
         &mut self.program
     }
 
-    fn node(
-        &mut self,
-        inputs: &[ExecutionBinding],
-        outputs: u32,
-        lambda: FuncLambda,
-    ) -> ExecutionNodeId {
+    fn node(&mut self, inputs: &[ExecutionBinding], outputs: u32, lambda: FuncLambda) -> NodeId {
         let inputs = self
             .building()
             .inputs
@@ -53,11 +46,11 @@ impl Prog {
         let outputs = self
             .building()
             .outputs
-            .append((0..outputs).map(|_| ExecutionOutput::default()));
+            .append((0..outputs).map(|_| DataType::default()));
         let idx = self.program.e_nodes.len();
-        let e_node_id = ExecutionNodeId::from_u128(idx as u128 + 1);
+        let node_id = NodeId::from_u128(idx as u128 + 1);
         self.building().push(
-            e_node_id,
+            node_id,
             ExecutionNode {
                 func_id: FuncId::from_u128(idx as u128 + 1),
                 inputs,
@@ -69,19 +62,19 @@ impl Prog {
                 ..Default::default()
             },
         );
-        e_node_id
+        node_id
     }
 
     /// Override a node's [`CacheMode`] (nodes default to `Ram`). Drives the mid-run
     /// output-release tests, which turn on the non-RAM modes.
-    fn set_cache(&mut self, e_node_id: ExecutionNodeId, cache: CacheMode) {
-        self.building().by_id_mut(e_node_id).cache = cache;
+    fn set_cache(&mut self, node_id: NodeId, cache: CacheMode) {
+        self.building().by_id_mut(node_id).cache = cache;
     }
 
     /// Override a node's [`FuncBehavior`] (nodes default to `Impure`, which has no digest
     /// and so can never be reused).
-    fn set_behavior(&mut self, e_node_id: ExecutionNodeId, behavior: FuncBehavior) {
-        self.building().by_id_mut(e_node_id).behavior = behavior;
+    fn set_behavior(&mut self, node_id: NodeId, behavior: FuncBehavior) {
+        self.building().by_id_mut(node_id).behavior = behavior;
     }
 }
 
@@ -120,19 +113,19 @@ fn demand_output(program: &CompiledGraph, run: &mut RunSchedule, address: Output
 
 /// These tests name nodes by their stable id; the program owns the id ↔ index
 /// mapping the production paths carry directly.
-fn nx(program: &CompiledGraph, e_node_id: ExecutionNodeId) -> NodeIdx {
-    program.e_node_index[&e_node_id]
+fn nx(program: &CompiledGraph, node_id: NodeId) -> NodeIdx {
+    program.node_index[&node_id]
 }
 
-fn output(program: &CompiledGraph, e_node_id: ExecutionNodeId, port_idx: usize) -> OutputAddr {
+fn output(program: &CompiledGraph, node_id: NodeId, port_idx: usize) -> OutputAddr {
     OutputAddr {
-        node_idx: nx(program, e_node_id),
+        node_idx: nx(program, node_id),
         port_idx: port_idx as u32,
     }
 }
 
-fn bind(program: &CompiledGraph, e_node_id: ExecutionNodeId, port: usize) -> ExecutionBinding {
-    ExecutionBinding::Bind(output(program, e_node_id, port))
+fn bind(program: &CompiledGraph, node_id: NodeId, port: usize) -> ExecutionBinding {
+    ExecutionBinding::Bind(output(program, node_id, port))
 }
 
 /// A resolved run that runs every node in index order, each output marked needed. These tests
@@ -163,10 +156,10 @@ fn debug_assertions_reject_invalid_output_indexes_and_reader_counts() {
     use std::panic::{AssertUnwindSafe, catch_unwind};
 
     let mut p = Prog::default();
-    let e_node_id = p.node(&[], 1, FuncLambda::default());
+    let node_id = p.node(&[], 1, FuncLambda::default());
     assert!(
         catch_unwind(AssertUnwindSafe(|| {
-            p.program.output_idx(output(&p.program, e_node_id, 1))
+            p.program.output_idx(output(&p.program, node_id, 1))
         }))
         .is_err(),
         "a node-local output outside its compiled range must trip in debug"
@@ -332,7 +325,7 @@ async fn upstream_error_retires_skipped_reads_without_harming_live_readers() {
         cache[nx(&p.program, healthy)].output_values().is_none(),
         "the healthy non-RAM producer is reclaimed after the live reader lands"
     );
-    let error_of = |e_node_id: ExecutionNodeId| stats.error(e_node_id).map(RunError::to_string);
+    let error_of = |node_id: NodeId| stats.error(node_id).map(RunError::to_string);
     assert!(error_of(failed).unwrap().contains("boom"));
     assert!(error_of(blocked).unwrap().contains("upstream"));
 }
@@ -400,7 +393,7 @@ async fn unbound_output_errors_only_when_demanded() {
 
     let plan = run_with_readers(&p.program, vec![1, 1, 0]);
     let (cache, stats) = run(&p.program, &plan).await;
-    let error_of = |e_node_id: ExecutionNodeId| stats.error(e_node_id);
+    let error_of = |node_id: NodeId| stats.error(node_id);
 
     assert!(cache[nx(&p.program, a)].output_values().is_none());
     assert!(cache[nx(&p.program, b)].output_values().is_none());
@@ -472,7 +465,7 @@ async fn frees_none_cache_output_once_last_consumer_reads() {
 async fn a_lambda_reads_the_execution_node_it_is_running_as() {
     use std::sync::Mutex;
 
-    let seen: Arc<Mutex<Vec<ExecutionNodeId>>> = Arc::new(Mutex::new(Vec::new()));
+    let seen: Arc<Mutex<Vec<NodeId>>> = Arc::new(Mutex::new(Vec::new()));
     let mut p = Prog::default();
     let probe_seen = Arc::clone(&seen);
     let first = async_lambda!(
@@ -738,7 +731,7 @@ async fn missing_lambda_reports_error_and_skips_consumers() {
         cache[nx(&p.program, missing)].output_values().is_none(),
         "the missing node's stale value is dropped, not served"
     );
-    let error_of = |e_node_id: ExecutionNodeId| stats.error(e_node_id);
+    let error_of = |node_id: NodeId| stats.error(node_id);
     assert!(
         matches!(error_of(missing), Some(RunError::MissingLambda { .. })),
         "the node reports its missing implementation: {:?}",
@@ -783,8 +776,8 @@ async fn reuse_survives_failed_upstream_rerun() {
     let b = p.node(&[bind(&p.program, a, 0)], 1, consumer());
     let c = p.node(&[bind(&p.program, a, 0)], 1, consumer());
     // Content-cacheable (the fixture default is `Impure` = no digest, never a hit).
-    for e_node_id in [a, b, c] {
-        p.building().by_id_mut(e_node_id).behavior = FuncBehavior::Pure;
+    for node_id in [a, b, c] {
+        p.building().by_id_mut(node_id).behavior = FuncBehavior::Pure;
     }
     // A and C recompute every run; only B (the fixture default `Ram`) retains RAM.
     p.set_cache(a, CacheMode::None);
@@ -818,7 +811,7 @@ async fn reuse_survives_failed_upstream_rerun() {
         Some(6),
         "B's valid cached value survives the sibling failure"
     );
-    let errored: Vec<ExecutionNodeId> = stats2.errored_nodes().collect();
+    let errored: Vec<NodeId> = stats2.errored_nodes().collect();
     assert!(errored.contains(&a_id), "A's own failure is reported");
     assert!(
         errored.contains(&c_id),

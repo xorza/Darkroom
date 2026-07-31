@@ -24,9 +24,7 @@ pub use execution::compile::error::CompileError;
 #[cfg(any(test, feature = "internals"))]
 pub use execution::compile::internals::CompiledGraphBuilder;
 pub use execution::compiled::CompiledGraph;
-pub use execution::error::ExecutionIdentityError;
 pub use execution::error::{Error, Result, RunError};
-pub use execution::identity::{ExecutionEventPort, ExecutionNodeId};
 pub use execution::report::{LogEntry, LogLevel};
 pub use execution::report::{NodeExecutionStatus, NodeStatus};
 pub use execution::seeds::RunSeeds;
@@ -43,7 +41,7 @@ pub use graph::func::lambda::{AsyncLambda, AsyncLambdaFn, FuncLambda, Invocation
 pub use graph::func::{
     Func, FuncBehavior, FuncEvent, FuncInput, FuncOutput, OutputType, ValueVariant,
 };
-pub use graph::identity::{FuncId, GraphId, InputPort, NodeId, OutputPort};
+pub use graph::identity::{EventPort, FuncId, GraphId, InputPort, NodeId, OutputPort};
 pub use graph::node::special::{SPECIAL_NODES, SpecialNode};
 pub use graph::node::{CacheMode, Node, NodeKind};
 pub use graph::output_types::OutputTypes;

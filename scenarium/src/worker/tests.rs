@@ -8,9 +8,7 @@ use crate::elements::system_library::system_library;
 use crate::elements::worker_events_library::worker_events_library;
 use crate::execution::compile::Compiler;
 use crate::execution::compiled::CompiledGraph;
-use crate::execution::error::ExecutionIdentityError;
 use crate::execution::error::{Error, Result as ExecResult, RunError};
-use crate::execution::identity::ExecutionNodeId;
 use crate::execution::report::{ExecutionOutcome, NodeExecutionStatus, NodeStatus};
 use crate::execution::seeds::RunSeeds;
 use crate::graph::Binding;
@@ -25,9 +23,9 @@ use crate::library::Library;
 use crate::runtime::shared_any_state::SharedAnyState;
 use crate::{Func, FuncId, LogEntry, LogLevel, RamUsage, StaticValue, async_lambda};
 
-use crate::execution::identity::ExecutionEventPort;
 use crate::execution::report::EventTrigger;
 use crate::graph::func::lambda::Invocation;
+use crate::graph::identity::EventPort;
 use crate::worker::Worker;
 use crate::worker::batch::{BatchIntent, GraphOp, LoopCommand};
 use crate::worker::error::WorkerError;
@@ -39,10 +37,6 @@ use crate::worker::status::{
 };
 
 type TestResult<T = ()> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
-
-fn root_execution_node(node_id: NodeId) -> ExecutionNodeId {
-    ExecutionNodeId::from_node(node_id)
-}
 
 fn batch_intent(msgs: impl IntoIterator<Item = WorkerMessage>) -> BatchIntent {
     let mut intent = BatchIntent::default();
@@ -61,7 +55,7 @@ fn messages(stats: &ExecutionOutcome) -> Vec<String> {
 /// the standard 3-node graph, and a worker whose callback forwards
 /// results into an mpsc; exposes helpers for the two messages used
 /// most often (`Update` with the fixture graph; a frame-event
-/// `ExecutionEventPort`).
+/// `EventPort`).
 #[derive(Debug)]
 struct FrameHarness {
     worker: Worker,
@@ -104,9 +98,9 @@ impl FrameHarness {
         }
     }
 
-    fn frame_event(&self) -> ExecutionEventPort {
-        ExecutionEventPort {
-            e_node_id: root_execution_node(self.frame_event_node_id),
+    fn frame_event(&self) -> EventPort {
+        EventPort {
+            node_id: self.frame_event_node_id,
             event_idx: 0,
         }
     }
@@ -175,12 +169,12 @@ fn print_literal_graph(library: &Library, message: &str) -> (Graph, NodeId) {
 async fn start_single_event_loop(
     lambda: EventLambda,
     pause_gate: PauseGate,
-) -> (ActiveEventLoop, ExecutionNodeId) {
-    let e_node_id = ExecutionNodeId::unique();
+) -> (ActiveEventLoop, NodeId) {
+    let node_id = NodeId::unique();
     let active = ActiveEventLoop::start(
         vec![EventTrigger {
-            event: ExecutionEventPort {
-                e_node_id,
+            event: EventPort {
+                node_id,
                 event_idx: 0,
             },
             lambda,
@@ -189,7 +183,7 @@ async fn start_single_event_loop(
         pause_gate,
     )
     .await;
-    (active, e_node_id)
+    (active, node_id)
 }
 
 /// Recover the outcome a completed status was published from. The status *is* the
@@ -347,7 +341,7 @@ async fn test_worker() -> TestResult {
 #[tokio::test]
 async fn start_event_loop_forwards_events() {
     let event_lambda = EventLambda::new(|_state| Box::pin(async move {}));
-    let (mut active, e_node_id) = start_single_event_loop(event_lambda, PauseGate::default()).await;
+    let (mut active, node_id) = start_single_event_loop(event_lambda, PauseGate::default()).await;
 
     let event = active
         .recv_event()
@@ -355,8 +349,8 @@ async fn start_event_loop_forwards_events() {
         .expect("Expected event loop event");
     assert_eq!(
         event,
-        ExecutionEventPort {
-            e_node_id,
+        EventPort {
+            node_id,
             event_idx: 0
         }
     );
@@ -377,7 +371,7 @@ async fn start_event_loop_waits_for_callback() {
 
     let notify_for_callback = Arc::clone(&notify);
 
-    let (mut active, e_node_id) = start_single_event_loop(event_lambda, PauseGate::default()).await;
+    let (mut active, node_id) = start_single_event_loop(event_lambda, PauseGate::default()).await;
 
     notify_for_callback.notify_waiters();
 
@@ -387,8 +381,8 @@ async fn start_event_loop_waits_for_callback() {
         .expect("Event channel closed");
     assert_eq!(
         event,
-        ExecutionEventPort {
-            e_node_id,
+        EventPort {
+            node_id,
             event_idx: 0
         }
     );
@@ -458,7 +452,7 @@ async fn pause_gate_blocks_event_loop_iterations() {
 #[tokio::test]
 async fn lambda_panic_is_captured_not_unwound() {
     let event_lambda = EventLambda::new(|_state| Box::pin(async { panic!("boom in lambda") }));
-    let (mut active, e_node_id) = start_single_event_loop(event_lambda, PauseGate::default()).await;
+    let (mut active, node_id) = start_single_event_loop(event_lambda, PauseGate::default()).await;
     let mut events = Vec::new();
 
     let wake = active.recv(&mut events).await;
@@ -466,7 +460,7 @@ async fn lambda_panic_is_captured_not_unwound() {
         panic!("panicking lambda must wake the event loop");
     };
     assert!(events.is_empty());
-    assert_eq!(panic.e_node_id, e_node_id, "panic attributed to its node");
+    assert_eq!(panic.node_id, node_id, "panic attributed to its node");
     assert!(
         panic.message.contains("boom in lambda"),
         "panic message preserved: {}",
@@ -480,23 +474,23 @@ async fn lambda_panic_is_captured_not_unwound() {
 /// publisher adds is the whole-run header.
 #[test]
 fn completed_status_publishes_the_runs_rows_verbatim() {
-    let executed = ExecutionNodeId::unique();
-    let missing = ExecutionNodeId::unique();
-    let failed = ExecutionNodeId::unique();
-    let resident = ExecutionNodeId::unique();
+    let executed = NodeId::unique();
+    let missing = NodeId::unique();
+    let failed = NodeId::unique();
+    let resident = NodeId::unique();
     let rows = vec![
         NodeStatus {
-            e_node_id: executed,
+            node_id: executed,
             status: Some(NodeExecutionStatus::Executed { elapsed_secs: 0.5 }),
             ram: RamUsage { cpu: 3, gpu: 0 },
         },
         NodeStatus {
-            e_node_id: missing,
+            node_id: missing,
             status: Some(NodeExecutionStatus::MissingInputs { ports: vec![1, 3] }),
             ram: RamUsage::default(),
         },
         NodeStatus {
-            e_node_id: failed,
+            node_id: failed,
             status: Some(NodeExecutionStatus::Errored {
                 elapsed_secs: Some(0.25),
                 error: RunError::Invoke {
@@ -507,7 +501,7 @@ fn completed_status_publishes_the_runs_rows_verbatim() {
             ram: RamUsage::default(),
         },
         NodeStatus {
-            e_node_id: resident,
+            node_id: resident,
             status: None,
             ram: RamUsage { cpu: 5, gpu: 7 },
         },
@@ -519,7 +513,7 @@ fn completed_status_publishes_the_runs_rows_verbatim() {
         triggered_events: Vec::new(),
         event_triggers: Vec::new(),
         logs: vec![LogEntry {
-            e_node_id: executed,
+            node_id: executed,
             level: LogLevel::Warn,
             message: "warning".into(),
         }],
@@ -544,7 +538,7 @@ fn completed_status_publishes_the_runs_rows_verbatim() {
 
     assert_eq!(status.nodes.len(), rows.len());
     for (published, produced) in status.nodes.iter().zip(&rows) {
-        assert_eq!(published.e_node_id, produced.e_node_id);
+        assert_eq!(published.node_id, produced.node_id);
         assert_eq!(published.ram, produced.ram);
         match (&published.status, &produced.status) {
             (
@@ -705,12 +699,8 @@ async fn worker_streams_node_patches_before_completion() {
                     .expect("node patch arrived before installation");
                 assert_eq!(status.activity, WorkerActivity::Executing);
                 for node in &status.nodes {
-                    assert_eq!(
-                        node.e_node_id,
-                        root_execution_node(print_node_id),
-                        "status maps to the node"
-                    );
-                    assert_eq!(compiled.attribution(node.e_node_id).unwrap(), print_node_id,);
+                    assert_eq!(node.node_id, print_node_id, "status maps to the node");
+                    assert!(compiled.contains(node.node_id));
                     match node.status {
                         Some(NodeExecutionStatus::Running { .. }) => started += 1,
                         Some(NodeExecutionStatus::Executed { .. }) => node_finished += 1,
@@ -958,7 +948,7 @@ async fn one_event_task_panic_stops_loop_while_another_task_is_alive() {
     let frame_event_node_id = graph.find_by_name("Frame Event").unwrap().id;
     let print_node_id = graph.find_by_name("Print").unwrap().id;
     graph.subscribe(frame_event_node_id, 1, print_node_id);
-    let expected_e_node_id = root_execution_node(frame_event_node_id);
+    let expected_node_id = frame_event_node_id;
     let compiled = Compiler::default()
         .compile(&graph, &library)
         .unwrap()
@@ -987,9 +977,9 @@ async fn one_event_task_panic_stops_loop_while_another_task_is_alive() {
                 }
             }
             WorkerReport::Error(WorkerError::Execution {
-                error: Error::EventLambdaPanic { e_node_id, message },
+                error: Error::EventLambdaPanic { node_id, message },
             }) => {
-                assert_eq!(e_node_id, expected_e_node_id);
+                assert_eq!(node_id, expected_node_id);
                 assert!(message.contains("event loop stopped"));
                 break;
             }
@@ -1041,7 +1031,7 @@ async fn execute_nodes_overrides_disabled_seed_and_runs_only_its_cone() {
                     .into(),
             },
             WorkerMessage::Run {
-                seeds: RunSeeds::nodes(vec![root_execution_node(sum_id)]),
+                seeds: RunSeeds::nodes(vec![sum_id]),
             },
         ])
         .unwrap();
@@ -1053,11 +1043,7 @@ async fn execute_nodes_overrides_disabled_seed_and_runs_only_its_cone() {
         .expect("run ok");
     let mut executed = stats.ran_nodes().collect::<Vec<_>>();
     executed.sort();
-    let mut expected = vec![
-        root_execution_node(get_a_id),
-        root_execution_node(get_b_id),
-        root_execution_node(sum_id),
-    ];
+    let mut expected = vec![get_a_id, get_b_id, sum_id];
     expected.sort();
     assert_eq!(executed, expected, "only the disabled sum's cone ran");
     assert!(
@@ -1253,8 +1239,8 @@ async fn event_on_empty_graph_is_silent_noop() {
     let (worker, mut rx) = completed_worker(8);
     worker
         .send(WorkerMessage::Run {
-            seeds: RunSeeds::events(vec![ExecutionEventPort {
-                e_node_id: ExecutionNodeId::unique(),
+            seeds: RunSeeds::events(vec![EventPort {
+                node_id: NodeId::unique(),
                 event_idx: 0,
             }]),
         })
@@ -1351,13 +1337,7 @@ async fn queued_messages_ready_at_the_same_wake_reduce_together() {
     let completed = next_completed_run(&mut rx).await;
     assert!(!Arc::ptr_eq(&completed.compiled, &compiled_a));
     assert!(Arc::ptr_eq(&completed.compiled, &compiled_b));
-    assert_eq!(
-        completed
-            .compiled
-            .attribution(root_execution_node(print_b))
-            .unwrap(),
-        print_b,
-    );
+    assert!(completed.compiled.contains(print_b));
     assert_eq!(messages(&completed.result.unwrap()), ["second"]);
     assert!(
         timeout(Duration::from_millis(100), next_completed_run(&mut rx))
@@ -1475,29 +1455,9 @@ async fn replacement_queued_during_a_run_is_reported_after_the_running_program()
     let finished = next_completed_run(&mut rx).await;
     assert!(Arc::ptr_eq(&finished.compiled, &running_compiled));
     assert!(finished.result.is_ok());
-    assert_eq!(
-        finished
-            .compiled
-            .attribution(root_execution_node(source))
-            .unwrap(),
-        source,
-    );
-    assert_eq!(
-        finished
-            .compiled
-            .attribution(root_execution_node(sink))
-            .unwrap(),
-        sink,
-    );
-    let replacement_e_node_id = root_execution_node(replacement_node);
-    assert!(matches!(
-        finished
-            .compiled
-            .attribution(replacement_e_node_id),
-        Err(ExecutionIdentityError::NodeNotFound {
-            e_node_id,
-        }) if e_node_id == replacement_e_node_id
-    ));
+    assert!(finished.compiled.contains(source));
+    assert!(finished.compiled.contains(sink));
+    assert!(!finished.compiled.contains(replacement_node));
 
     let installed = timeout(Duration::from_secs(5), rx.recv())
         .await
@@ -1531,10 +1491,9 @@ async fn execute_sinks_with_start_event_loop_on_empty_graph_is_silent_noop() {
 #[test]
 fn batch_intent_accumulates_simple_flags() {
     let (reply_ack, _ack_rx) = oneshot::channel();
-    let e_node_id = ExecutionNodeId::unique();
     let node_id = NodeId::from_u128(1);
-    let event = ExecutionEventPort {
-        e_node_id,
+    let event = EventPort {
+        node_id: NodeId::unique(),
         event_idx: 0,
     };
 
@@ -1551,10 +1510,10 @@ fn batch_intent_accumulates_simple_flags() {
             seeds: RunSeeds::events(vec![event]),
         },
         WorkerMessage::Run {
-            seeds: RunSeeds::nodes(vec![e_node_id]),
+            seeds: RunSeeds::nodes(vec![node_id]),
         },
         WorkerMessage::Run {
-            seeds: RunSeeds::nodes(vec![e_node_id]),
+            seeds: RunSeeds::nodes(vec![node_id]),
         },
         WorkerMessage::Sync { reply: reply_ack },
     ]);
@@ -1569,7 +1528,7 @@ fn batch_intent_accumulates_simple_flags() {
         1,
         "duplicate node seeds union to one"
     );
-    assert!(intent.execute_nodes.contains(&e_node_id));
+    assert!(intent.execute_nodes.contains(&node_id));
     assert!(intent.evict_cache.contains(&node_id));
     assert_eq!(intent.syncs.len(), 1);
 
@@ -1596,9 +1555,9 @@ fn batch_intent_accumulates_simple_flags() {
 
 #[test]
 fn batch_intent_deduplicates_events() {
-    let e_node_id = ExecutionNodeId::unique();
-    let event = ExecutionEventPort {
-        e_node_id,
+    let node_id = NodeId::unique();
+    let event = EventPort {
+        node_id,
         event_idx: 0,
     };
 
@@ -1699,8 +1658,8 @@ async fn cache_eviction_failure_uses_general_worker_error_report() {
     let library = test_func_lib(TestFuncHooks::default());
     let graph = test_graph();
     let get_a_id = graph.find_by_name("get_a").unwrap().id;
-    let blocked_e_node_id = root_execution_node(get_a_id);
-    let blocked_path = dir.0.join(blocked_e_node_id.as_uuid().simple().to_string());
+    let blocked_node_id = get_a_id;
+    let blocked_path = dir.0.join(blocked_node_id.as_uuid().simple().to_string());
     std::fs::create_dir(&blocked_path).unwrap();
     let compiled = Arc::new(Compiler::default().compile(&graph, &library).unwrap());
     let store = DiskStore::new(&Library::default(), Some(dir.0.clone()));
@@ -1737,7 +1696,7 @@ async fn cache_eviction_failure_uses_general_worker_error_report() {
         panic!("cache deletion failure must use the general worker error report");
     };
     assert_eq!(failure_count, 1);
-    assert!(details.contains(&format!("{blocked_e_node_id:?}")));
+    assert!(details.contains(&format!("{blocked_node_id:?}")));
     assert!(details.contains(&format!("failed to remove {}", blocked_path.display())));
     assert!(report_rx.try_recv().is_err());
 }
@@ -2233,18 +2192,9 @@ async fn disk_cache_persists_node_across_worker_restart() {
         1,
         "the cut prunes the Memory input feeding only a disk-cache hit"
     );
-    assert!(
-        !stats.ran(root_execution_node(get_a_id)),
-        "get_a was cut, not recomputed"
-    );
-    assert!(
-        stats.cached(root_execution_node(mult_id)),
-        "mult is served from the disk cache"
-    );
-    assert!(
-        !stats.ran(root_execution_node(mult_id)),
-        "mult itself is not recomputed"
-    );
+    assert!(!stats.ran(get_a_id), "get_a was cut, not recomputed");
+    assert!(stats.cached(mult_id), "mult is served from the disk cache");
+    assert!(!stats.ran(mult_id), "mult itself is not recomputed");
 }
 
 /// `SetDiskStore` flushes resident disk-backed values into the just-attached
