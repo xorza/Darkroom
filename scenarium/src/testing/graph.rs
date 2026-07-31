@@ -19,6 +19,7 @@ use std::sync::Arc;
 use hashbrown::HashMap;
 
 use crate::async_lambda;
+use crate::graph::func::error::InvokeError;
 use crate::graph::func::event::EventLambda;
 use crate::graph::func::lambda::{FuncLambda, Invocation};
 use crate::graph::func::{Func, FuncInput, FuncOutput};
@@ -95,14 +96,18 @@ impl TestGraph {
     /// so node ids (and therefore the dense order a compile assigns) stay
     /// exactly what they were, and tests can migrate one at a time.
     pub fn sample() -> Self {
-        Self::adopt(
-            test_graph(),
-            test_func_lib(TestFuncHooks {
-                get_a: Arc::new(|| Ok(1)),
-                get_b: Arc::new(|| 11),
-                print: Arc::new(|_| {}),
-            }),
-        )
+        Self::sample_with(TestFuncHooks {
+            get_a: Arc::new(|| Ok(1)),
+            get_b: Arc::new(|| 11),
+            print: Arc::new(|_| {}),
+        })
+    }
+
+    /// [`sample`](Self::sample) with the legacy fixture's hooks named — for a
+    /// test whose subject is what one of those bodies *does* (fails, counts its
+    /// calls, records what it was handed).
+    pub fn sample_with(hooks: TestFuncHooks) -> Self {
+        Self::adopt(test_graph(), test_func_lib(hooks))
     }
 
     pub fn id(&self, name: &str) -> NodeId {
@@ -302,6 +307,14 @@ impl NodeSpec {
         self.pure()
             .output(data_type)
             .compute(move |_| value.clone())
+    }
+
+    /// A body that always fails, for the error-propagation paths — the
+    /// consumer cascade is what such a node exists to provoke.
+    pub fn fails(self, message: &'static str) -> Self {
+        self.lambda(async_lambda!(move |_| {
+            Err(InvokeError::external(std::io::Error::other(message)))
+        }))
     }
 
     /// A sink that logs whatever reaches it, readable back off the run's
