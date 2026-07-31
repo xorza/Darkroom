@@ -469,11 +469,4 @@ fn menu_row(ui: &mut Ui, popup: &PopupHandle, func: &Func) -> bool {
 }
 
 #[cfg(test)]
-pub(crate) mod internals {
-    use super::*;
-
-    impl NewNodeUi {}
-}
-
-#[cfg(test)]
 mod tests;

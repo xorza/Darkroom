@@ -326,10 +326,6 @@ mod tests {
         NodeId::from_u128(n)
     }
 
-    fn eid(n: u128) -> NodeId {
-        NodeId::from_u128(n)
-    }
-
     fn completed_status(executed: &[(NodeId, f64)], errored: &[NodeId]) -> WorkerStatus {
         let mut nodes = executed
             .iter()
@@ -432,19 +428,18 @@ mod tests {
     #[test]
     fn node_patch_marks_the_attributed_node_running_then_executed() {
         let node = nid(1);
-        let node_id = eid(1);
         let mut rs = run_state([node]);
 
         rs.apply_worker_status(&node_patch(
             WorkerActivity::Executing,
-            node_id,
+            node,
             NodeExecutionStatus::Running { at: Instant::now() },
         ));
         assert!(matches!(rs.status(node), ExecStatus::Running(_)));
 
         rs.apply_worker_status(&node_patch(
             WorkerActivity::Executing,
-            node_id,
+            node,
             NodeExecutionStatus::Executed { elapsed_secs: 0.5 },
         ));
         assert_eq!(rs.status(node), ExecStatus::Executed(0.5));
@@ -463,13 +458,13 @@ mod tests {
         let errored = nid(2);
         let mut rs = run_state([executed, errored]);
 
-        rs.apply_worker_status(&completed_status(&[(eid(1), 1.0), (eid(2), 0.25)], &[]));
+        rs.apply_worker_status(&completed_status(&[(nid(1), 1.0), (nid(2), 0.25)], &[]));
         assert_eq!(rs.status(executed), ExecStatus::Executed(1.0));
         assert_eq!(rs.status(errored), ExecStatus::Executed(0.25));
         assert_eq!(rs.error(errored), None);
 
         // Second run: only `errored` is reported, and it failed.
-        rs.apply_worker_status(&completed_status(&[], &[eid(2)]));
+        rs.apply_worker_status(&completed_status(&[], &[nid(2)]));
         assert_eq!(rs.status(errored), ExecStatus::Errored);
         // The failure message rides along with the status — the inspector
         // shows it instead of a bare "errored".

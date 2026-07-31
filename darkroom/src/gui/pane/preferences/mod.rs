@@ -382,33 +382,27 @@ fn download_hint(ui: &mut Ui, theme: &Theme, link_label: &'static str, url: &'st
 mod tests {
     use super::*;
 
+    use common::{TempDir, TempFile};
+
     #[test]
     fn path_problem_classifies_empty_missing_dir_and_extension() {
         // Empty is the valid resting state (the ML nodes are optional).
         assert_eq!(path_problem(""), None);
         // A directory is distinguished from a truly absent path — pointing
         // at the unzipped folder is the mistake the download hint warns of.
-        let dir = std::env::temp_dir();
+        let dir = TempDir::new("darkroom-path-dir");
         assert_eq!(
-            path_problem(dir.to_str().unwrap()),
+            path_problem(dir.path().to_str().unwrap()),
             Some("Points at a folder \u{2014} pick the .onnx file inside")
         );
-        let missing = dir.join("darkroom-test-definitely-missing.onnx");
-        assert_eq!(
-            path_problem(missing.to_str().unwrap()),
-            Some("File not found")
-        );
+        let missing = TempFile::with_extension("darkroom-path-missing", "onnx");
+        assert_eq!(path_problem(&missing.to_str()), Some("File not found"));
         // Real files: a wrong extension flags; `.onnx` passes in any case.
-        let wrong = dir.join(format!("darkroom-path-test-{}.txt", std::process::id()));
-        std::fs::write(&wrong, b"x").unwrap();
-        assert_eq!(
-            path_problem(wrong.to_str().unwrap()),
-            Some("Not an .onnx file")
-        );
-        let onnx = dir.join(format!("darkroom-path-test-{}.ONNX", std::process::id()));
-        std::fs::write(&onnx, b"x").unwrap();
-        assert_eq!(path_problem(onnx.to_str().unwrap()), None);
-        std::fs::remove_file(wrong).unwrap();
-        std::fs::remove_file(onnx).unwrap();
+        let wrong = TempFile::with_extension("darkroom-path-wrong", "txt");
+        std::fs::write(wrong.path(), b"x").unwrap();
+        assert_eq!(path_problem(&wrong.to_str()), Some("Not an .onnx file"));
+        let onnx = TempFile::with_extension("darkroom-path-upper", "ONNX");
+        std::fs::write(onnx.path(), b"x").unwrap();
+        assert_eq!(path_problem(&onnx.to_str()), None);
     }
 }
