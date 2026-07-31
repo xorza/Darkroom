@@ -52,5 +52,3 @@ self.run_state.ingest_previews(ui, previews);
 self.run_state.previews.reconcile(ui, &self.open.document); -merge into one call
 
 graphscope :from_doc -> option !
-
-darkroom test harness
