@@ -8,7 +8,7 @@ use crate::graph::node::{CacheMode, Node, NodeKind};
 use crate::graph::output_types::OutputTypes;
 use crate::graph::{Binding, InputPort, NodeId, OutputPort, Subscription};
 use crate::testing::graph::{NodeSpec, TestGraph};
-use crate::{DataType, DetachedNode, StaticValue};
+use crate::{ConstValue, DataType, DetachedNode};
 use ::common::{SerdeFormat, deserialize, serialize};
 
 type TestResult<T = ()> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
@@ -197,7 +197,7 @@ fn type_mismatches_degrade_at_lowering_not_at_validation() {
     // can (scalar coercion), and the two FsPath shapes only satisfy their
     // matching picker mode.
     let path_type = |mode| DataType::FsPath(Arc::new(FsPathConfig::new(mode)));
-    let satisfies = |declared: DataType, value: StaticValue| {
+    let satisfies = |declared: DataType, value: ConstValue| {
         let mut g = TestGraph::new();
         g.add("sink", |n| n.sink().input(declared));
         g.constant("sink", 0, value);
@@ -205,21 +205,21 @@ fn type_mismatches_degrade_at_lowering_not_at_validation() {
         matches!(g.compile().binding("sink", 0), ExecutionBinding::Const(_))
     };
     let cases = [
-        (DataType::Int, StaticValue::String("x".into()), false),
-        (DataType::Int, StaticValue::Float(2.5), true),
+        (DataType::Int, ConstValue::String("x".into()), false),
+        (DataType::Int, ConstValue::Float(2.5), true),
         (
             path_type(FsPathMode::ExistingFile),
-            StaticValue::FsPaths(vec!["a.fit".into(), "b.fit".into()]),
+            ConstValue::FsPaths(vec!["a.fit".into(), "b.fit".into()]),
             false,
         ),
         (
             path_type(FsPathMode::ExistingFiles),
-            StaticValue::FsPath("a.fit".into()),
+            ConstValue::FsPath("a.fit".into()),
             false,
         ),
         (
             path_type(FsPathMode::ExistingFiles),
-            StaticValue::FsPaths(vec!["a.fit".into(), "b.fit".into()]),
+            ConstValue::FsPaths(vec!["a.fit".into(), "b.fit".into()]),
             true,
         ),
     ];
@@ -258,7 +258,7 @@ fn resolve_output_type_follows_passthrough_chain() {
 
     // A scalar const carries its type, so the output resolves to it (and
     // propagates downstream) — a const isn't "no type".
-    g.constant("pass1", 0, StaticValue::Bool(true));
+    g.constant("pass1", 0, ConstValue::Bool(true));
     assert_eq!(output_type(&g, "pass1", 0), DataType::Bool);
     assert_eq!(
         output_type(&g, "pass2", 0),
@@ -269,7 +269,7 @@ fn resolve_output_type_follows_passthrough_chain() {
     // A const whose type can't be reconstructed from the value alone — an
     // enum literal on an `Any` (wildcard) input — stays polymorphic rather
     // than panicking. (The passthrough's value input is `Any`-declared.)
-    g.constant("pass1", 0, StaticValue::Enum("X".into()));
+    g.constant("pass1", 0, ConstValue::Enum("X".into()));
     assert_eq!(output_type(&g, "pass1", 0), DataType::Any);
 }
 
@@ -289,9 +289,9 @@ fn resolve_output_type_uses_declared_type_for_typed_const_input() {
 
     // A const FsPath / Enum on a typed input resolves to that input's
     // *declared* type — which carries the full `FsPathConfig` / `Enum` id the
-    // bare `StaticValue` lacks.
-    g.constant("reroute", 0, StaticValue::FsPath("/tmp/x".into()));
-    g.constant("reroute", 1, StaticValue::Enum("A".into()));
+    // bare `ConstValue` lacks.
+    g.constant("reroute", 0, ConstValue::FsPath("/tmp/x".into()));
+    g.constant("reroute", 1, ConstValue::Enum("A".into()));
     assert_eq!(output_type(&g, "reroute", 0), fs_ty);
     assert_eq!(output_type(&g, "reroute", 1), enum_ty);
 }
@@ -400,8 +400,8 @@ fn binding_conversions() {
     assert_eq!(from_port, Binding::bind(nid, 1));
     assert_eq!(from_port, Binding::Bind(OutputPort::new(nid, 1)));
 
-    let from_value: Binding = StaticValue::Int(7).into();
-    assert_eq!(from_value, Binding::Const(StaticValue::Int(7)));
+    let from_value: Binding = ConstValue::Int(7).into();
+    assert_eq!(from_value, Binding::Const(ConstValue::Int(7)));
 }
 
 #[test]
@@ -657,8 +657,8 @@ fn validate_tolerates_library_range_drift() {
             .input(DataType::Int)
             .output(DataType::Int)
     });
-    g.constant("nullable", 0, StaticValue::Null);
-    g.constant("nullable", 1, StaticValue::Null);
+    g.constant("nullable", 0, ConstValue::Null);
+    g.constant("nullable", 1, ConstValue::Null);
     assert!(g.graph.validate_with(&g.library).is_ok());
 }
 

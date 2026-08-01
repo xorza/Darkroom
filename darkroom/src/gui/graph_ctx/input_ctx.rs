@@ -1,6 +1,6 @@
 //! One input port of a node, with its declaration and current binding.
 
-use scenarium::{Binding, DataType, FuncInput, InputPort, Library, StaticValue, ValueVariant};
+use scenarium::{Binding, ConstValue, DataType, FuncInput, InputPort, Library, ValueVariant};
 
 use crate::core::document::PortRef;
 use crate::gui::graph_ctx::node_ctx::NodeCtx;
@@ -77,19 +77,19 @@ impl<'a> InputCtx<'a> {
 
     /// The literal this port falls back to when given a const binding: its
     /// declared default, else the zero value for its data type. `None` for a
-    /// `Custom` type — there is no `StaticValue` for it, so the port can't be
+    /// `Custom` type — there is no `ConstValue` for it, so the port can't be
     /// given an inline const.
     ///
     /// Owned rather than borrowed: an enum's and an `Any`'s fallbacks are
     /// built here, not stored anywhere to point at.
-    pub(crate) fn default(self) -> Option<StaticValue> {
-        default_static_value(self.node.graph_ctx.library(), self.declared)
+    pub(crate) fn default(self) -> Option<ConstValue> {
+        default_const_value(self.node.graph_ctx.library(), self.declared)
     }
 }
 
 /// See [`InputCtx::default`]. A free fn because the enum arm needs the
 /// library rather than anything on the port.
-fn default_static_value(library: &Library, input: &FuncInput) -> Option<StaticValue> {
+fn default_const_value(library: &Library, input: &FuncInput) -> Option<ConstValue> {
     input.default_value.clone().or_else(|| {
         // An enum's first-variant default needs the library's registered variant
         // list — the bare `DataType::Enum(id)` doesn't carry it, so resolve it
@@ -98,11 +98,11 @@ fn default_static_value(library: &Library, input: &FuncInput) -> Option<StaticVa
             DataType::Enum(id) => library
                 .enum_variants(*id)
                 .and_then(|variants| variants.first())
-                .map(|first| StaticValue::Enum(first.clone())),
+                .map(|first| ConstValue::Enum(first.clone())),
             // An untyped (`Any`) port has no concrete kind to seed; start it as
             // an empty string so the smart editor opens blank and infers the
             // kind from whatever the user types (see `value_editor::parse_any`).
-            DataType::Any => Some(StaticValue::String(String::new())),
+            DataType::Any => Some(ConstValue::String(String::new())),
             ty => ty.default_value(),
         }
     })

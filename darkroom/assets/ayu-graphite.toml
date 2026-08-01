@@ -72,39 +72,39 @@ path = "#d4bfff"
 image = "#ff9eb5"
 ramp = ["#ffa759", "#7bd88f", "#5ccfe6", "#e6cd8a"]
 
-[static_value_editor]
+[const_value_editor]
 width = 100.0
 max_width = 240.0
 
-[static_value_editor.drag_value.chip]
+[const_value_editor.drag_value.chip]
 padding = [8.0, 4.0]
 margin = 0.0
 
-[static_value_editor.drag_value.chip.normal.background]
+[const_value_editor.drag_value.chip.normal.background]
 corners = 4.0
 
-[static_value_editor.drag_value.chip.normal.background.fill]
+[const_value_editor.drag_value.chip.normal.background.fill]
 Solid = "#00000000"
 
-[static_value_editor.drag_value.chip.hovered.background]
+[const_value_editor.drag_value.chip.hovered.background]
 corners = 4.0
 
-[static_value_editor.drag_value.chip.hovered.background.fill]
+[const_value_editor.drag_value.chip.hovered.background.fill]
 Solid = "#3e3e3e"
 
-[static_value_editor.drag_value.chip.active.background]
+[const_value_editor.drag_value.chip.active.background]
 corners = 4.0
 
-[static_value_editor.drag_value.chip.active.background.fill]
+[const_value_editor.drag_value.chip.active.background.fill]
 Solid = "#4b4b4b"
 
-[static_value_editor.drag_value.chip.disabled.background]
+[const_value_editor.drag_value.chip.disabled.background]
 corners = 4.0
 
-[static_value_editor.drag_value.chip.disabled.background.fill]
+[const_value_editor.drag_value.chip.disabled.background.fill]
 Solid = "#00000000"
 
-[static_value_editor.drag_value.editor]
+[const_value_editor.drag_value.editor]
 placeholder = "#aaaaa8"
 caret = "#e2dfd3"
 caret_width = 1.5
@@ -112,63 +112,63 @@ selection = "#9adbfb40"
 padding = [8.0, 4.0]
 margin = 0.0
 
-[static_value_editor.drag_value.editor.normal.background]
+[const_value_editor.drag_value.editor.normal.background]
 corners = 4.0
 
-[static_value_editor.drag_value.editor.normal.background.fill]
+[const_value_editor.drag_value.editor.normal.background.fill]
 Solid = "#00000000"
 
-[static_value_editor.drag_value.editor.hovered.background]
+[const_value_editor.drag_value.editor.hovered.background]
 corners = 4.0
 
-[static_value_editor.drag_value.editor.hovered.background.fill]
+[const_value_editor.drag_value.editor.hovered.background.fill]
 Solid = "#3e3e3e"
 
-[static_value_editor.drag_value.editor.active.background]
+[const_value_editor.drag_value.editor.active.background]
 corners = 4.0
 
-[static_value_editor.drag_value.editor.active.background.fill]
+[const_value_editor.drag_value.editor.active.background.fill]
 Solid = "#3e3e3e"
 
-[static_value_editor.drag_value.editor.disabled.background]
+[const_value_editor.drag_value.editor.disabled.background]
 corners = 4.0
 
-[static_value_editor.drag_value.editor.disabled.background.fill]
+[const_value_editor.drag_value.editor.disabled.background.fill]
 Solid = "#00000000"
 
-[static_value_editor_revealed]
+[const_value_editor_revealed]
 width = 100.0
 max_width = 240.0
 
-[static_value_editor_revealed.drag_value.chip]
+[const_value_editor_revealed.drag_value.chip]
 padding = [8.0, 4.0]
 margin = 0.0
 
-[static_value_editor_revealed.drag_value.chip.normal.background]
+[const_value_editor_revealed.drag_value.chip.normal.background]
 corners = 4.0
 
-[static_value_editor_revealed.drag_value.chip.normal.background.fill]
+[const_value_editor_revealed.drag_value.chip.normal.background.fill]
 Solid = "#3e3e3e80"
 
-[static_value_editor_revealed.drag_value.chip.hovered.background]
+[const_value_editor_revealed.drag_value.chip.hovered.background]
 corners = 4.0
 
-[static_value_editor_revealed.drag_value.chip.hovered.background.fill]
+[const_value_editor_revealed.drag_value.chip.hovered.background.fill]
 Solid = "#3e3e3e"
 
-[static_value_editor_revealed.drag_value.chip.active.background]
+[const_value_editor_revealed.drag_value.chip.active.background]
 corners = 4.0
 
-[static_value_editor_revealed.drag_value.chip.active.background.fill]
+[const_value_editor_revealed.drag_value.chip.active.background.fill]
 Solid = "#4b4b4b"
 
-[static_value_editor_revealed.drag_value.chip.disabled.background]
+[const_value_editor_revealed.drag_value.chip.disabled.background]
 corners = 4.0
 
-[static_value_editor_revealed.drag_value.chip.disabled.background.fill]
+[const_value_editor_revealed.drag_value.chip.disabled.background.fill]
 Solid = "#00000000"
 
-[static_value_editor_revealed.drag_value.editor]
+[const_value_editor_revealed.drag_value.editor]
 placeholder = "#aaaaa8"
 caret = "#e2dfd3"
 caret_width = 1.5
@@ -176,28 +176,28 @@ selection = "#9adbfb40"
 padding = [8.0, 4.0]
 margin = 0.0
 
-[static_value_editor_revealed.drag_value.editor.normal.background]
+[const_value_editor_revealed.drag_value.editor.normal.background]
 corners = 4.0
 
-[static_value_editor_revealed.drag_value.editor.normal.background.fill]
+[const_value_editor_revealed.drag_value.editor.normal.background.fill]
 Solid = "#3e3e3e80"
 
-[static_value_editor_revealed.drag_value.editor.hovered.background]
+[const_value_editor_revealed.drag_value.editor.hovered.background]
 corners = 4.0
 
-[static_value_editor_revealed.drag_value.editor.hovered.background.fill]
+[const_value_editor_revealed.drag_value.editor.hovered.background.fill]
 Solid = "#3e3e3e"
 
-[static_value_editor_revealed.drag_value.editor.active.background]
+[const_value_editor_revealed.drag_value.editor.active.background]
 corners = 4.0
 
-[static_value_editor_revealed.drag_value.editor.active.background.fill]
+[const_value_editor_revealed.drag_value.editor.active.background.fill]
 Solid = "#3e3e3e"
 
-[static_value_editor_revealed.drag_value.editor.disabled.background]
+[const_value_editor_revealed.drag_value.editor.disabled.background]
 corners = 4.0
 
-[static_value_editor_revealed.drag_value.editor.disabled.background.fill]
+[const_value_editor_revealed.drag_value.editor.disabled.background.fill]
 Solid = "#00000000"
 
 [inline_rename.text_edit]

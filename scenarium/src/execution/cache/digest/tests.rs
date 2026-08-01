@@ -1,7 +1,7 @@
 use super::*;
 use ::common::TempFile;
 
-use crate::StaticValue;
+use crate::ConstValue;
 use crate::execution::cache::runtime::RuntimeCache;
 use crate::execution::cache::slot::OutputSnapshot;
 use crate::execution::compile::compiled_graph::ExecutionBinding;
@@ -61,7 +61,7 @@ fn deterministic_and_per_function_distinct() {
     let mut p = ProgramBuilder::default();
     let a = pure(&mut p, 10, 1).add();
     let b = pure(&mut p, 20, 1).input(a.out(0)).add();
-    let c = pure(&mut p, 30, 1).const_input(StaticValue::Int(5)).add();
+    let c = pure(&mut p, 30, 1).const_input(ConstValue::Int(5)).add();
 
     let first = Digests::of(&p);
     let second = Digests::of(&p); // same engine inputs → identical digests
@@ -102,10 +102,10 @@ fn const_change_propagates_downstream_only() {
     let build = |a_const: i64| {
         let mut p = ProgramBuilder::default();
         let a = pure(&mut p, 10, 1)
-            .const_input(StaticValue::Int(a_const))
+            .const_input(ConstValue::Int(a_const))
             .add();
         let b = pure(&mut p, 20, 1).input(a.out(0)).add();
-        let c = pure(&mut p, 30, 1).const_input(StaticValue::Int(9)).add();
+        let c = pure(&mut p, 30, 1).const_input(ConstValue::Int(9)).add();
         (Digests::of(&p), a, b, c)
     };
     let (base, a, b, c) = build(1);
@@ -125,16 +125,16 @@ fn structurally_identical_nodes_share_digest() {
     // Two nodes, same func, same (input-identical) bindings ⇒ equal
     // node digests — the property that lets the store dedup repeated work.
     let mut p = ProgramBuilder::default();
-    let first = pure(&mut p, 10, 1).const_input(StaticValue::Int(7)).add();
-    let second = pure(&mut p, 10, 1).const_input(StaticValue::Int(7)).add();
+    let first = pure(&mut p, 10, 1).const_input(ConstValue::Int(7)).add();
+    let second = pure(&mut p, 10, 1).const_input(ConstValue::Int(7)).add();
     let d = Digests::of(&p);
     assert_eq!(d.at(first), d.at(second));
 
     // Differ in func or const ⇒ digests diverge.
     let mut q = ProgramBuilder::default();
-    let base = pure(&mut q, 10, 1).const_input(StaticValue::Int(7)).add();
-    let other_func = pure(&mut q, 11, 1).const_input(StaticValue::Int(7)).add();
-    let other_const = pure(&mut q, 10, 1).const_input(StaticValue::Int(8)).add();
+    let base = pure(&mut q, 10, 1).const_input(ConstValue::Int(7)).add();
+    let other_func = pure(&mut q, 11, 1).const_input(ConstValue::Int(7)).add();
+    let other_const = pure(&mut q, 10, 1).const_input(ConstValue::Int(8)).add();
     let dq = Digests::of(&q);
     assert_ne!(dq.at(base), dq.at(other_func));
     assert_ne!(dq.at(base), dq.at(other_const));
@@ -150,13 +150,13 @@ fn fs_path_folds_file_identity_and_path() {
     let selected = TempFile::with_extension("scenarium-digest-fs-path", "bin");
     let file = selected.path();
     let path = selected.to_str();
-    let path_node = |paths: StaticValue| {
+    let path_node = |paths: ConstValue| {
         let mut p = ProgramBuilder::default();
         let node = pure(&mut p, 10, 1).const_input(paths).add();
         (p, node)
     };
 
-    let (p, single) = path_node(StaticValue::FsPath(path.clone()));
+    let (p, single) = path_node(ConstValue::FsPath(path.clone()));
     std::fs::write(file, b"x").unwrap(); // len 1
     let d_len1 = Digests::of(&p).at(single);
     std::fs::write(file, b"xyz").unwrap(); // len 3 — file identity changed
@@ -177,10 +177,8 @@ fn fs_path_folds_file_identity_and_path() {
     let second = TempFile::with_extension("scenarium-digest-second", "bin");
     std::fs::write(second.path(), b"second").unwrap();
     let second_path = second.to_str();
-    let (two_file_prog, both) = path_node(StaticValue::FsPaths(vec![
-        path.clone(),
-        second_path.clone(),
-    ]));
+    let (two_file_prog, both) =
+        path_node(ConstValue::FsPaths(vec![path.clone(), second_path.clone()]));
     let two_files = Digests::of(&two_file_prog).at(both);
     std::fs::write(second.path(), b"second changed").unwrap();
     let second_edited = Digests::of(&two_file_prog).at(both);
@@ -189,7 +187,7 @@ fn fs_path_folds_file_identity_and_path() {
         "editing any selected file must re-key the list"
     );
 
-    let (reversed, swapped) = path_node(StaticValue::FsPaths(vec![second_path, path.clone()]));
+    let (reversed, swapped) = path_node(ConstValue::FsPaths(vec![second_path, path.clone()]));
     assert_ne!(
         Digests::of(&reversed).at(swapped),
         second_edited,
@@ -210,7 +208,7 @@ fn fs_path_folds_file_identity_and_path() {
     // reading equal files under different names still key apart. Planted
     // identities rather than real files: a constant is what makes the
     // encoding pinnable, and no test controls a real file's mtime.
-    let planted = |value: StaticValue, path: &str| {
+    let planted = |value: ConstValue, path: &str| {
         let (p, node) = path_node(value);
         let mut cache = RuntimeCache::default();
         cache.install_for_test(p.program());
@@ -219,14 +217,14 @@ fn fs_path_folds_file_identity_and_path() {
     };
     let here = "definitely-missing-elsewhere";
     let there = "definitely-missing-somewhere";
-    let d_here = planted(StaticValue::FsPath(here.into()), here);
+    let d_here = planted(ConstValue::FsPath(here.into()), here);
     assert_ne!(
-        planted(StaticValue::FsPath(there.into()), there),
+        planted(ConstValue::FsPath(there.into()), there),
         d_here,
         "same file identity under a different path ⇒ different digest"
     );
     assert_ne!(
-        planted(StaticValue::FsPaths(vec![here.into()]), here),
+        planted(ConstValue::FsPaths(vec![here.into()]), here),
         d_here,
         "single-path and path-list variants must hash apart"
     );
@@ -281,7 +279,7 @@ fn bound_fs_path_folds_delivered_file_identity() {
             plain: cache.node_digest(program, control.node_idx),
         }
     };
-    let fs_path = || Some(DynamicValue::Static(StaticValue::FsPath(path.clone())));
+    let fs_path = || Some(DynamicValue::Static(ConstValue::FsPath(path.clone())));
 
     std::fs::write(file, b"x").unwrap(); // len 1
     let DigestPair {
@@ -312,7 +310,7 @@ fn bound_fs_path_folds_delivered_file_identity() {
     let second = TempFile::with_extension("scenarium-digest-bound-fs-second", "bin");
     std::fs::write(second.path(), b"second").unwrap();
     let fs_paths = || {
-        Some(DynamicValue::Static(StaticValue::FsPaths(vec![
+        Some(DynamicValue::Static(ConstValue::FsPaths(vec![
             path.clone(),
             second.to_str(),
         ])))
@@ -341,7 +339,7 @@ fn bound_fs_path_folds_delivered_file_identity() {
     );
 
     // A delivered non-path value folds a distinct marker — still cacheable.
-    let typed_int = digests_with(Some(DynamicValue::Static(StaticValue::Int(7)))).typed;
+    let typed_int = digests_with(Some(DynamicValue::Static(ConstValue::Int(7)))).typed;
     assert!(
         typed_int.is_some(),
         "a mis-typed wire stays cacheable, unlike an unreadable referent"
@@ -368,7 +366,7 @@ fn bound_fs_path_folds_delivered_file_identity() {
     cache[producer.node_idx].current_digest = Some(stamped);
     cache.hydrate(
         producer.node_idx,
-        OutputSnapshot::new(vec![DynamicValue::Static(StaticValue::FsPath(path))]),
+        OutputSnapshot::new(vec![DynamicValue::Static(ConstValue::FsPath(path))]),
         stamped,
     );
     cache[producer.node_idx].current_digest = Some(Digest([9; 32]));
@@ -480,7 +478,7 @@ fn impure_node_and_its_dependents_are_none() {
         .add();
     let mid = pure(&mut p, 20, 1).input(src.out(0)).add();
     let sink = pure(&mut p, 30, 1).input(mid.out(0)).add();
-    let independent = pure(&mut p, 40, 1).const_input(StaticValue::Int(5)).add();
+    let independent = pure(&mut p, 40, 1).const_input(ConstValue::Int(5)).add();
 
     let d = Digests::of(&p);
     assert_eq!(d.at(src), None, "impure node ⇒ None");

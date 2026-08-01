@@ -6,7 +6,7 @@ use strum::VariantNames;
 
 use ::common::id_type;
 
-use crate::StaticValue;
+use crate::ConstValue;
 
 pub trait EnumVariants {
     fn variant_names() -> Vec<String>;
@@ -83,40 +83,40 @@ impl DataType {
     /// it takes nothing but an authored const on an `Any`-declared input, so it
     /// is ordinary data rather than a broken contract, and the arms below spell
     /// out which literals describe no type of their own and why. The match is
-    /// deliberately exhaustive: a new [`StaticValue`] variant must fail to
+    /// deliberately exhaustive: a new [`ConstValue`] variant must fail to
     /// compile here rather than fall into `Any` unexamined.
-    pub(crate) fn or_const_type(self, value: &StaticValue) -> DataType {
+    pub(crate) fn or_const_type(self, value: &ConstValue) -> DataType {
         if !matches!(self, DataType::Any) {
             return self;
         }
         match value {
-            StaticValue::Float(_) => DataType::Float,
-            StaticValue::Int(_) => DataType::Int,
-            StaticValue::Bool(_) => DataType::Bool,
-            StaticValue::String(_) => DataType::String,
+            ConstValue::Float(_) => DataType::Float,
+            ConstValue::Int(_) => DataType::Int,
+            ConstValue::Bool(_) => DataType::Bool,
+            ConstValue::String(_) => DataType::String,
             // Null is typeless by nature — there is no type it could report.
-            StaticValue::Null => DataType::Any,
+            ConstValue::Null => DataType::Any,
             // A path literal is a bare string; [`DataType::FsPath`] needs the
             // mode and extension list, which only a declaration carries.
-            StaticValue::FsPath(_) | StaticValue::FsPaths(_) => DataType::Any,
+            ConstValue::FsPath(_) | ConstValue::FsPaths(_) => DataType::Any,
             // An enum literal is a variant *name*; [`DataType::Enum`] needs the
             // enum's `TypeId`, which a name cannot supply. The same asymmetry
             // [`Self::default_value`] hits in the other direction.
-            StaticValue::Enum(_) => DataType::Any,
+            ConstValue::Enum(_) => DataType::Any,
         }
     }
 
-    pub fn default_value(&self) -> Option<StaticValue> {
+    pub fn default_value(&self) -> Option<ConstValue> {
         Some(match self {
-            DataType::Any => StaticValue::Null,
-            DataType::Float => StaticValue::Float(0.0),
-            DataType::Int => StaticValue::Int(0),
-            DataType::Bool => StaticValue::Bool(false),
-            DataType::String => StaticValue::String(String::new()),
+            DataType::Any => ConstValue::Null,
+            DataType::Float => ConstValue::Float(0.0),
+            DataType::Int => ConstValue::Int(0),
+            DataType::Bool => ConstValue::Bool(false),
+            DataType::String => ConstValue::String(String::new()),
             DataType::FsPath(config) => match config.mode {
-                FsPathMode::ExistingFiles => StaticValue::FsPaths(Vec::new()),
+                FsPathMode::ExistingFiles => ConstValue::FsPaths(Vec::new()),
                 FsPathMode::ExistingFile | FsPathMode::NewFile | FsPathMode::Directory => {
-                    StaticValue::FsPath(String::new())
+                    ConstValue::FsPath(String::new())
                 }
             },
             DataType::Custom(_) | DataType::Enum(_) => return None,
@@ -144,10 +144,10 @@ impl DataType {
 
     /// The scalar coercion class, type side: `Float`/`Int`/`Bool` are one kind
     /// to a runtime read, since
-    /// [`as_f64`](StaticValue::as_f64)/[`as_i64`](StaticValue::as_i64)/[`as_bool`](StaticValue::as_bool)
+    /// [`as_f64`](ConstValue::as_f64)/[`as_i64`](ConstValue::as_i64)/[`as_bool`](ConstValue::as_bool)
     /// convert freely between them — `Bool` reads as `0`/`1`, `Float`
     /// truncates to int, any nonzero reads as `true`.
-    /// [`StaticValue::is_numeric_scalar`] is the same class on the value side.
+    /// [`ConstValue::is_numeric_scalar`] is the same class on the value side.
     fn is_numeric_scalar(&self) -> bool {
         matches!(self, DataType::Float | DataType::Int | DataType::Bool)
     }
@@ -173,7 +173,7 @@ impl DataType {
     /// A `Custom` port has no literal form at all, and `Any` takes anything.
     pub(crate) fn accepts_const(
         &self,
-        value: &StaticValue,
+        value: &ConstValue,
         strictness: Strictness,
         enum_variant: impl FnOnce(TypeId, &str) -> bool,
     ) -> bool {
@@ -183,20 +183,20 @@ impl DataType {
                 Strictness::Authored => value.is_numeric_scalar(),
                 Strictness::Declared => matches!(
                     (self, value),
-                    (DataType::Float, StaticValue::Float(_))
-                        | (DataType::Int, StaticValue::Int(_))
-                        | (DataType::Bool, StaticValue::Bool(_))
+                    (DataType::Float, ConstValue::Float(_))
+                        | (DataType::Int, ConstValue::Int(_))
+                        | (DataType::Bool, ConstValue::Bool(_))
                 ),
             },
-            DataType::String => matches!(value, StaticValue::String(_)),
+            DataType::String => matches!(value, ConstValue::String(_)),
             DataType::FsPath(config) => match config.mode {
-                FsPathMode::ExistingFiles => matches!(value, StaticValue::FsPaths(_)),
+                FsPathMode::ExistingFiles => matches!(value, ConstValue::FsPaths(_)),
                 FsPathMode::ExistingFile | FsPathMode::NewFile | FsPathMode::Directory => {
-                    matches!(value, StaticValue::FsPath(_))
+                    matches!(value, ConstValue::FsPath(_))
                 }
             },
             DataType::Enum(type_id) => {
-                matches!(value, StaticValue::Enum(name) if enum_variant(*type_id, name))
+                matches!(value, ConstValue::Enum(name) if enum_variant(*type_id, name))
             }
             DataType::Custom(_) => false,
         }
@@ -273,21 +273,21 @@ mod tests {
 
         assert_eq!(
             DataType::Float.default_value(),
-            Some(StaticValue::Float(0.0))
+            Some(ConstValue::Float(0.0))
         );
-        assert_eq!(DataType::Int.default_value(), Some(StaticValue::Int(0)));
+        assert_eq!(DataType::Int.default_value(), Some(ConstValue::Int(0)));
         assert_eq!(
             DataType::Bool.default_value(),
-            Some(StaticValue::Bool(false))
+            Some(ConstValue::Bool(false))
         );
         assert_eq!(
             DataType::FsPath(Arc::new(FsPathConfig::default())).default_value(),
-            Some(StaticValue::FsPath(String::new()))
+            Some(ConstValue::FsPath(String::new()))
         );
         assert_eq!(
             DataType::FsPath(Arc::new(FsPathConfig::new(FsPathMode::ExistingFiles)))
                 .default_value(),
-            Some(StaticValue::FsPaths(Vec::new()))
+            Some(ConstValue::FsPaths(Vec::new()))
         );
         assert_eq!(custom(1).default_value(), None);
         assert_eq!(DataType::Enum(TypeId::from_u128(2)).default_value(), None);
@@ -301,15 +301,15 @@ mod tests {
         let mode = TypeId::from_u128(0x5ca1ab1e);
         let known = |_: TypeId, name: &str| name == "fast";
         let declared =
-            |ty: &DataType, v: &StaticValue| ty.accepts_const(v, Strictness::Declared, |_, _| true);
+            |ty: &DataType, v: &ConstValue| ty.accepts_const(v, Strictness::Declared, |_, _| true);
         let authored =
-            |ty: &DataType, v: &StaticValue| ty.accepts_const(v, Strictness::Authored, known);
+            |ty: &DataType, v: &ConstValue| ty.accepts_const(v, Strictness::Authored, known);
 
         // Scalars: a `Bool` literal on an `Int` port is a coercion the runtime
         // performs (`as_i64` reads `true` as 1), so a document may author it —
         // and a *declaration* may not, because nobody chose it there.
         let int = DataType::Int;
-        let boolean = StaticValue::Bool(true);
+        let boolean = ConstValue::Bool(true);
         assert!(
             authored(&int, &boolean),
             "the runtime reads this, so a document may write it"
@@ -323,9 +323,9 @@ mod tests {
         // …and the exact kind satisfies both, so `Declared` is narrower rather
         // than merely different.
         for (ty, value) in [
-            (DataType::Int, StaticValue::Int(1)),
-            (DataType::Float, StaticValue::Float(1.0)),
-            (DataType::Bool, StaticValue::Bool(false)),
+            (DataType::Int, ConstValue::Int(1)),
+            (DataType::Float, ConstValue::Float(1.0)),
+            (DataType::Bool, ConstValue::Bool(false)),
         ] {
             assert!(
                 declared(&ty, &value) && authored(&ty, &value),
@@ -336,8 +336,8 @@ mod tests {
         // Enums: membership is the registry's answer, so only the authored gate
         // asks it. Both still require an *enum* literal.
         let enum_ty = DataType::Enum(mode);
-        let unregistered = StaticValue::Enum("slothful".into());
-        let registered = StaticValue::Enum("fast".into());
+        let unregistered = ConstValue::Enum("slothful".into());
+        let registered = ConstValue::Enum("fast".into());
         assert!(
             declared(&enum_ty, &unregistered),
             "no registry exists at declaration time"
@@ -352,26 +352,26 @@ mod tests {
         );
         assert!(declared(&enum_ty, &registered) && authored(&enum_ty, &registered));
         assert!(
-            !declared(&enum_ty, &StaticValue::Int(0)),
+            !declared(&enum_ty, &ConstValue::Int(0)),
             "an enum port takes enum literals only"
         );
 
         // Every other arm agrees, whichever gate asks.
         let path = DataType::FsPath(Arc::new(FsPathConfig::new(FsPathMode::ExistingFiles)));
         let cases = [
-            (DataType::Any, StaticValue::Enum("anything".into()), true),
-            (DataType::String, StaticValue::String("s".into()), true),
-            (DataType::String, StaticValue::Int(1), false),
-            (path.clone(), StaticValue::FsPaths(vec!["a".into()]), true),
-            (path, StaticValue::FsPath("a".into()), false),
+            (DataType::Any, ConstValue::Enum("anything".into()), true),
+            (DataType::String, ConstValue::String("s".into()), true),
+            (DataType::String, ConstValue::Int(1), false),
+            (path.clone(), ConstValue::FsPaths(vec!["a".into()]), true),
+            (path, ConstValue::FsPath("a".into()), false),
             (
                 DataType::FsPath(Arc::new(FsPathConfig::default())),
-                StaticValue::FsPath("a".into()),
+                ConstValue::FsPath("a".into()),
                 true,
             ),
             (
                 DataType::Custom(mode),
-                StaticValue::String("s".into()),
+                ConstValue::String("s".into()),
                 false,
             ),
         ];

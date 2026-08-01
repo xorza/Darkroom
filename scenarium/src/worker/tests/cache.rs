@@ -72,7 +72,7 @@ fn disk_cached_graph(calls: &Calls) -> TestGraph {
             .output(DataType::Int)
             .compute(|inputs| {
                 let value = inputs[0].as_i64().unwrap();
-                StaticValue::Int(value * value)
+                ConstValue::Int(value * value)
             })
     });
     graph.add("print", |node| node.records());

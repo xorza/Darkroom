@@ -25,13 +25,13 @@ use crate::graph::func::lambda::FuncLambda;
 use crate::graph::identity::NodeId;
 use crate::graph::node::CacheMode;
 use crate::graph::node::special::SpecialNode;
-use crate::{DataType, StaticValue};
+use crate::{ConstValue, DataType};
 
 #[derive(Clone, Debug, Default)]
 pub(crate) enum ExecutionBinding {
     #[default]
     None,
-    Const(StaticValue),
+    Const(ConstValue),
     Bind(OutputAddr),
 }
 

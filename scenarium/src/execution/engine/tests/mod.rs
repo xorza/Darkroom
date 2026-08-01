@@ -13,7 +13,7 @@ use crate::library::Library;
 use crate::testing::calls::Calls;
 use crate::testing::engine::{ReportedRun, RunOutcome, TestEngine};
 use crate::testing::graph::{NodeSpec, TestGraph};
-use crate::{DataType, DynamicValue, StaticValue};
+use crate::{ConstValue, DataType, DynamicValue};
 use ::common::{CancelToken, FloatExt};
 use tokio::sync::Mutex;
 

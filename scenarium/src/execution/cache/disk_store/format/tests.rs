@@ -17,7 +17,7 @@ use crate::execution::cache::disk_store::format::{
 use crate::graph::func::lambda::OutputDemand;
 use crate::library::{Library, TypeEntry};
 use crate::runtime::context::ContextStore;
-use crate::{CodecError, CustomValue, CustomValueCodec, DynamicValue, StaticValue, TypeId};
+use crate::{CodecError, ConstValue, CustomValue, CustomValueCodec, DynamicValue, TypeId};
 
 static BLOB_TYPE: LazyLock<TypeId> = LazyLock::new(TypeId::unique);
 
@@ -211,20 +211,20 @@ async fn indexed_header_checks_without_body_and_all_values_round_trip() {
         .collect::<Vec<_>>();
     let outputs = vec![
         DynamicValue::Unbound,
-        DynamicValue::Static(StaticValue::Null),
-        DynamicValue::Static(StaticValue::Float(f64::from_bits(0x7ff8_0000_0000_0001))),
-        DynamicValue::Static(StaticValue::Int(-42)),
-        DynamicValue::Static(StaticValue::Bool(true)),
-        DynamicValue::Static(StaticValue::String("hello".into())),
-        DynamicValue::Static(StaticValue::FsPath("frames/reference.fit".into())),
-        DynamicValue::Static(StaticValue::FsPaths(vec![
+        DynamicValue::Static(ConstValue::Null),
+        DynamicValue::Static(ConstValue::Float(f64::from_bits(0x7ff8_0000_0000_0001))),
+        DynamicValue::Static(ConstValue::Int(-42)),
+        DynamicValue::Static(ConstValue::Bool(true)),
+        DynamicValue::Static(ConstValue::String("hello".into())),
+        DynamicValue::Static(ConstValue::FsPath("frames/reference.fit".into())),
+        DynamicValue::Static(ConstValue::FsPaths(vec![
             "frames/light-1.fit".into(),
             "frames/light-2.fit".into(),
         ])),
-        DynamicValue::Static(StaticValue::Enum("Screen".into())),
+        DynamicValue::Static(ConstValue::Enum("Screen".into())),
         DynamicValue::from_custom(Blob(first_blob.clone())),
         DynamicValue::from_custom(Blob(second_blob.clone())),
-        DynamicValue::Static(StaticValue::Int(99)),
+        DynamicValue::Static(ConstValue::Int(99)),
     ];
     let bytes = encoded(digest, &outputs, &library).await;
     let header_len = header_len(outputs.len());
@@ -306,7 +306,7 @@ async fn custom_decoder_is_bounded_and_must_consume_its_payload() {
     let digest = Digest([4; 32]);
     let outputs = vec![
         DynamicValue::from_custom(Blob(vec![10, 11, 12])),
-        DynamicValue::Static(StaticValue::Int(77)),
+        DynamicValue::Static(ConstValue::Int(77)),
     ];
     let calls = Arc::new(AtomicU64::new(0));
     let complete_library = library(1, DecodeBehavior::ReadAll, calls.clone());
@@ -350,7 +350,7 @@ async fn descriptors_selectively_validate_codecs_and_coverage() {
     let calls = Arc::new(AtomicU64::new(0));
     let registered = library(2, DecodeBehavior::ReadAll, calls);
     let outputs = vec![
-        DynamicValue::Static(StaticValue::Int(1)),
+        DynamicValue::Static(ConstValue::Int(1)),
         DynamicValue::from_custom(Blob(vec![2])),
     ];
     let bytes = encoded(digest, &outputs, &registered).await;
@@ -367,7 +367,7 @@ async fn descriptors_selectively_validate_codecs_and_coverage() {
         .unwrap()
     );
     let partial = vec![
-        DynamicValue::Static(StaticValue::Int(1)),
+        DynamicValue::Static(ConstValue::Int(1)),
         DynamicValue::Unbound,
     ];
     assert!(
@@ -414,9 +414,9 @@ async fn descriptors_selectively_validate_codecs_and_coverage() {
 }
 
 #[tokio::test]
-async fn malformed_header_lengths_tags_and_static_values_are_rejected() {
+async fn malformed_header_lengths_tags_and_const_values_are_rejected() {
     let digest = Digest([6; 32]);
-    let outputs = vec![DynamicValue::Static(StaticValue::Bool(true))];
+    let outputs = vec![DynamicValue::Static(ConstValue::Bool(true))];
     let library = Library::default();
     let original = encoded(digest, &outputs, &library).await;
 

@@ -76,7 +76,7 @@ macro_rules! preset_enum {
                     .map(|v| {
                         scenarium::ValueVariant::new(
                             v.label(),
-                            scenarium::StaticValue::Enum(v.label().to_string()),
+                            scenarium::ConstValue::Enum(v.label().to_string()),
                         )
                         .display(v.display_label())
                     })
@@ -136,7 +136,7 @@ mod tests {
     use lumos::{
         BackgroundMode, ExtractBackground, RegistrationConfig, Scnr, Stretch, StretchMethod,
     };
-    use scenarium::{DynamicValue, EnumVariants, StaticValue};
+    use scenarium::{ConstValue, DynamicValue, EnumVariants};
     use strum::IntoEnumIterator;
 
     use crate::astro::config::preset::resolve;
@@ -206,7 +206,7 @@ mod tests {
     #[test]
     fn resolver_accepts_presets_and_wired_configs() {
         let preset = resolve::<StretchConfigDef, StretchPreset>(&DynamicValue::from(
-            StaticValue::Enum("auto_stf".to_string()),
+            ConstValue::Enum("auto_stf".to_string()),
         ));
         assert!(matches!(preset.method, StretchMethod::AutoStf { .. }));
 

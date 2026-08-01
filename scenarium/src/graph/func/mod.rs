@@ -11,7 +11,7 @@ use crate::graph::func::error::FuncValidationError;
 use crate::graph::func::event::EventLambda;
 use crate::graph::func::lambda::FuncLambda;
 use crate::graph::node::CacheMode;
-use crate::{DataType, StaticValue, TypeId};
+use crate::{ConstValue, DataType, TypeId};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
@@ -26,7 +26,7 @@ pub enum FuncBehavior {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ValueVariant {
     pub name: String,
-    pub value: StaticValue,
+    pub value: ConstValue,
     /// Human label shown in the editor's picker dropdown. Display-only — the
     /// value bound on pick is [`ValueVariant::value`], never this. Defaults to
     /// `name` via [`ValueVariant::new`]; override with [`ValueVariant::display`]
@@ -37,7 +37,7 @@ pub struct ValueVariant {
 
 impl ValueVariant {
     /// A picker variant whose dropdown label is its `name`.
-    pub fn new(name: impl Into<String>, value: StaticValue) -> Self {
+    pub fn new(name: impl Into<String>, value: ConstValue) -> Self {
         let name = name.into();
         Self {
             display_name: name.clone(),
@@ -69,7 +69,7 @@ pub struct FuncInput {
     #[serde(default)]
     pub const_only: bool,
     #[serde(default)]
-    pub default_value: Option<StaticValue>,
+    pub default_value: Option<ConstValue>,
     #[serde(default)]
     pub value_variants: Vec<ValueVariant>,
 }
@@ -103,7 +103,7 @@ impl FuncInput {
     }
 
     /// Seed this input's const default value.
-    pub fn default(mut self, value: impl Into<StaticValue>) -> Self {
+    pub fn default(mut self, value: impl Into<ConstValue>) -> Self {
         self.default_value = Some(value.into());
         self
     }
@@ -145,14 +145,14 @@ impl FuncInput {
     /// [`Strictness`].
     pub(crate) fn accepts_const(
         &self,
-        value: &StaticValue,
+        value: &ConstValue,
         strictness: Strictness,
         enum_variant: impl FnOnce(TypeId, &str) -> bool,
     ) -> bool {
         if !self.value_variants.is_empty() {
             return self.value_variants.iter().any(|v| v.value == *value);
         }
-        if matches!(value, StaticValue::Null) {
+        if matches!(value, ConstValue::Null) {
             return !self.required;
         }
         self.data_type
@@ -430,7 +430,7 @@ mod tests {
     use crate::async_lambda;
     use crate::graph::func::{Func, FuncInput, FuncOutput, ValueVariant};
     use crate::graph::node::CacheMode;
-    use crate::{DataType, FsPathConfig, FsPathMode, StaticValue, TypeId};
+    use crate::{ConstValue, DataType, FsPathConfig, FsPathMode, TypeId};
 
     #[test]
     fn validate_rejects_invalid_identities_wildcards_and_defaults() {
@@ -490,18 +490,18 @@ mod tests {
             );
             assert_eq!(func.validate().unwrap_err().to_string(), expected);
         };
-        default_mismatch(FuncInput::optional("v", DataType::Int).default(StaticValue::Bool(true)));
+        default_mismatch(FuncInput::optional("v", DataType::Int).default(ConstValue::Bool(true)));
         default_mismatch(FuncInput::optional("v", DataType::Bool).default(1.0));
         default_mismatch(
             FuncInput::optional("v", DataType::Custom(TypeId::unique()))
-                .default(StaticValue::Enum("preset".into())),
+                .default(ConstValue::Enum("preset".into())),
         );
         // Null means "explicitly unset" — only an optional input may declare it.
-        default_mismatch(FuncInput::required("v", DataType::Int).default(StaticValue::Null));
+        default_mismatch(FuncInput::required("v", DataType::Int).default(ConstValue::Null));
         // With picker variants the default must be one of the offered picks.
         default_mismatch(
             FuncInput::optional("v", DataType::Int)
-                .variants(vec![ValueVariant::new("one", StaticValue::Int(1))])
+                .variants(vec![ValueVariant::new("one", ConstValue::Int(1))])
                 .default(2i64),
         );
         // A single-path literal doesn't satisfy a multi-file picker port.
@@ -510,7 +510,7 @@ mod tests {
                 "v",
                 DataType::FsPath(Arc::new(FsPathConfig::new(FsPathMode::ExistingFiles))),
             )
-            .default(StaticValue::FsPath("a.fits".into())),
+            .default(ConstValue::FsPath("a.fits".into())),
         );
 
         // Well-formed declarations: exact kinds, a variant member, Null on an
@@ -518,10 +518,10 @@ mod tests {
         Func::new(FuncId::unique(), "ok")
             .input(FuncInput::optional("int", DataType::Int).default(2i64))
             .input(FuncInput::optional("any", DataType::Any).default("text"))
-            .input(FuncInput::optional("unset", DataType::Int).default(StaticValue::Null))
+            .input(FuncInput::optional("unset", DataType::Int).default(ConstValue::Null))
             .input(
                 FuncInput::optional("pick", DataType::Int)
-                    .variants(vec![ValueVariant::new("one", StaticValue::Int(1))])
+                    .variants(vec![ValueVariant::new("one", ConstValue::Int(1))])
                     .default(1i64),
             )
             .input(
@@ -529,7 +529,7 @@ mod tests {
                     "paths",
                     DataType::FsPath(Arc::new(FsPathConfig::new(FsPathMode::ExistingFiles))),
                 )
-                .default(StaticValue::FsPaths(vec!["a.fits".into()])),
+                .default(ConstValue::FsPaths(vec!["a.fits".into()])),
             )
             .wildcard_output("value", 0)
             .lambda(async_lambda!(|_| { Ok(()) }))

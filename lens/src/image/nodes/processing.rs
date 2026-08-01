@@ -2,7 +2,7 @@
 
 use imaginarium::{Blend, BlendMode, ContrastBrightness, Transform, Vec2};
 use scenarium::Invocation;
-use scenarium::{DataType, DynamicValue, InvokeError, InvokeResult, StaticValue};
+use scenarium::{ConstValue, DataType, DynamicValue, InvokeError, InvokeResult};
 use scenarium::{Func, FuncInput, FuncLambda, FuncOutput, Library};
 
 use crate::config_node::enum_input;
@@ -86,7 +86,7 @@ fn register_convert(library: &mut Library) {
             )
             .input(
                 enum_input::<ConversionFormat>("Format", &CONVERSION_FORMAT_DATATYPE)
-                    .default(StaticValue::Enum(ConversionFormat::RgbU8.label()))
+                    .default(ConstValue::Enum(ConversionFormat::RgbU8.label()))
                     .description("Target color format."),
             )
             .output(

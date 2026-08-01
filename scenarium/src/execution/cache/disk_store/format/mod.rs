@@ -11,7 +11,7 @@ use crate::data::codec::Codecs;
 use crate::execution::cache::digest::Digest;
 use crate::graph::func::lambda::OutputDemand;
 use crate::runtime::context::ContextStore;
-use crate::{DynamicValue, StaticValue, TypeId};
+use crate::{ConstValue, DynamicValue, TypeId};
 
 const MAGIC: &[u8; 8] = b"SCENBLOB";
 const FORMAT_VERSION: u32 = 9;
@@ -392,23 +392,23 @@ async fn read_descriptor(reader: &mut (impl AsyncRead + Unpin)) -> io::Result<Ou
 
 async fn write_static(
     writer: &mut (impl AsyncWrite + Unpin),
-    value: &StaticValue,
+    value: &ConstValue,
 ) -> io::Result<()> {
     match value {
-        StaticValue::Null => writer.write_all(&[0]).await,
-        StaticValue::Float(value) => {
+        ConstValue::Null => writer.write_all(&[0]).await,
+        ConstValue::Float(value) => {
             writer.write_all(&[1]).await?;
             writer.write_all(&value.to_bits().to_le_bytes()).await
         }
-        StaticValue::Int(value) => {
+        ConstValue::Int(value) => {
             writer.write_all(&[2]).await?;
             writer.write_all(&value.to_le_bytes()).await
         }
-        StaticValue::Bool(value) => writer.write_all(&[3, u8::from(*value)]).await,
-        StaticValue::String(value) => write_string(writer, 4, value).await,
-        StaticValue::FsPath(path) => write_string(writer, 5, path).await,
-        StaticValue::FsPaths(paths) => write_strings(writer, 6, paths).await,
-        StaticValue::Enum(value) => write_string(writer, 7, value).await,
+        ConstValue::Bool(value) => writer.write_all(&[3, u8::from(*value)]).await,
+        ConstValue::String(value) => write_string(writer, 4, value).await,
+        ConstValue::FsPath(path) => write_string(writer, 5, path).await,
+        ConstValue::FsPaths(paths) => write_strings(writer, 6, paths).await,
+        ConstValue::Enum(value) => write_string(writer, 7, value).await,
     }
 }
 
@@ -445,41 +445,41 @@ async fn write_strings(
 async fn read_static(
     reader: &mut (impl AsyncRead + Unpin),
     payload_len: u64,
-) -> codec::error::Result<StaticValue> {
+) -> codec::error::Result<ConstValue> {
     let tag = read_u8(reader).await?;
     match tag {
         0 => {
             require_payload_len(payload_len, 1)?;
-            Ok(StaticValue::Null)
+            Ok(ConstValue::Null)
         }
         1 => {
             require_payload_len(payload_len, 9)?;
-            Ok(StaticValue::Float(f64::from_bits(read_u64(reader).await?)))
+            Ok(ConstValue::Float(f64::from_bits(read_u64(reader).await?)))
         }
         2 => {
             require_payload_len(payload_len, 9)?;
-            Ok(StaticValue::Int(i64::from_le_bytes(
+            Ok(ConstValue::Int(i64::from_le_bytes(
                 read_array(reader).await?,
             )))
         }
         3 => {
             require_payload_len(payload_len, 2)?;
             match read_u8(reader).await? {
-                0 => Ok(StaticValue::Bool(false)),
-                1 => Ok(StaticValue::Bool(true)),
+                0 => Ok(ConstValue::Bool(false)),
+                1 => Ok(ConstValue::Bool(true)),
                 _ => Err(codec::error::Error::Frame(
                     "cached boolean is not encoded as zero or one".into(),
                 )),
             }
         }
-        4 => Ok(StaticValue::String(read_string(reader, payload_len).await?)),
-        5 => Ok(StaticValue::FsPath(read_string(reader, payload_len).await?)),
-        6 => Ok(StaticValue::FsPaths(
+        4 => Ok(ConstValue::String(read_string(reader, payload_len).await?)),
+        5 => Ok(ConstValue::FsPath(read_string(reader, payload_len).await?)),
+        6 => Ok(ConstValue::FsPaths(
             read_strings(reader, payload_len).await?,
         )),
-        7 => Ok(StaticValue::Enum(read_string(reader, payload_len).await?)),
+        7 => Ok(ConstValue::Enum(read_string(reader, payload_len).await?)),
         _ => Err(codec::error::Error::Frame(
-            "cached static value has an unknown variant".into(),
+            "cached const value has an unknown variant".into(),
         )),
     }
 }

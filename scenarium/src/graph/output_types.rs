@@ -6,7 +6,7 @@ use hashbrown::HashMap;
 use crate::graph::Graph;
 use crate::graph::identity::OutputPort;
 use crate::library::Library;
-use crate::{DataType, StaticValue};
+use crate::{ConstValue, DataType};
 
 /// What decides one output port's type, as the graph reports it. The single hop
 /// the walk below takes, named so the reading of a declaration stays a `Graph`
@@ -21,7 +21,7 @@ pub(super) enum OutputTypeSource {
     /// for that input beside it.
     Const {
         declared: DataType,
-        value: StaticValue,
+        value: ConstValue,
     },
     /// Nothing to go on — an unbound mirror, or a missing func.
     Unresolved,

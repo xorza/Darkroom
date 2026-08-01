@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use lumos::{TiledOnnxConfig, ml_denoise, remove_stars, remove_stars_starless_only};
-use scenarium::{DataType, DynamicValue, FsPathConfig, FsPathMode, StaticValue};
+use scenarium::{ConstValue, DataType, DynamicValue, FsPathConfig, FsPathMode};
 use scenarium::{Func, FuncId, FuncInput, FuncLambda, FuncOutput, Library};
 
 use crate::astro::nodes::MlModelPaths;
@@ -134,5 +134,5 @@ fn model_input(name: &str, default: &std::path::Path) -> FuncInput {
         ))),
     )
     .description("ONNX model file. Its file identity participates in the node cache key.")
-    .default(StaticValue::FsPath(default.display().to_string()))
+    .default(ConstValue::FsPath(default.display().to_string()))
 }

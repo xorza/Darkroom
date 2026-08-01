@@ -1,7 +1,7 @@
 use std::io::Read as _;
 
 use common::internals::test_output_path;
-use scenarium::{Binding, InputPort, NodeId, StaticValue};
+use scenarium::{Binding, ConstValue, InputPort, NodeId};
 
 use super::*;
 use crate::core::document::harness::DocFixture;
@@ -80,7 +80,7 @@ fn save_refuses_an_invalid_document_and_leaves_the_file_alone() {
     let mut bad = Document::default();
     bad.graph.bindings.insert(
         InputPort::new(NodeId::unique(), 0),
-        Binding::Const(StaticValue::Int(1)),
+        Binding::Const(ConstValue::Int(1)),
     );
     assert!(
         matches!(
@@ -134,7 +134,7 @@ fn load_rejects_invalid_archives_and_missing_or_invalid_documents() {
     let mut document = Document::default();
     document.graph.bindings.insert(
         InputPort::new(NodeId::unique(), 0),
-        Binding::Const(StaticValue::Int(1)),
+        Binding::Const(ConstValue::Int(1)),
     );
     let json = serde_json::to_vec(&document).unwrap();
     write_test_archive(&invalid, DOCUMENT_ENTRY, &json);

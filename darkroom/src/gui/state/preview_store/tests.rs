@@ -2,7 +2,7 @@ use super::*;
 use palantir::internals::UiHarness;
 
 use imaginarium::{Image as RawImage, ImageBuffer, ImageDesc};
-use scenarium::{Node, NodeKind, SpecialNode, StaticValue};
+use scenarium::{ConstValue, Node, NodeKind, SpecialNode};
 
 use crate::core::document::TabRef;
 use crate::core::document::harness::DocFixture;
@@ -133,14 +133,14 @@ fn a_previews_value_lives_exactly_as_long_as_its_node() {
         .graph
         .add(Node::new(NodeKind::Special(SpecialNode::RunSinks)));
 
-    store.ingest_preview(arena.ui(), node, DynamicValue::Static(StaticValue::Int(7)));
-    store.ingest_preview(arena.ui(), other, DynamicValue::Static(StaticValue::Int(9)));
+    store.ingest_preview(arena.ui(), node, DynamicValue::Static(ConstValue::Int(7)));
+    store.ingest_preview(arena.ui(), other, DynamicValue::Static(ConstValue::Int(9)));
     assert!(
         matches!(&store.entries[&node], StoredContent::Text(t) if t == "7"),
         "the published value is formatted on receipt"
     );
 
-    store.ingest_preview(arena.ui(), node, DynamicValue::Static(StaticValue::Int(8)));
+    store.ingest_preview(arena.ui(), node, DynamicValue::Static(ConstValue::Int(8)));
     assert_eq!(store.entries.len(), 2, "a re-publish replaces in place");
     assert!(matches!(&store.entries[&node], StoredContent::Text(t) if t == "8"));
 

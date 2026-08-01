@@ -75,7 +75,7 @@ async fn cancel_mid_invoke_drops_in_flight_node_and_reruns() {
                     // Stand in for the user hitting Cancel while this runs.
                     ctx.cancel_flag().cancel();
                 }
-                outputs[0] = StaticValue::Int(7).into();
+                outputs[0] = ConstValue::Int(7).into();
                 Ok(())
             }
         ))
@@ -149,7 +149,7 @@ async fn impure_node_always_invoked() {
     e.edit(|g| g.edit_func("get_b", |func| func.behavior = FuncBehavior::Impure));
 
     // Even holding a cached output, an impure node still wants to execute.
-    e.set_output("get_b", vec![StaticValue::Int(7).into()]);
+    e.set_output("get_b", vec![ConstValue::Int(7).into()]);
     let plan = e.plan_sinks().await;
 
     assert_eq!(plan.scheduled(), ["get_b", "get_a", "sum", "mult", "Print"]);

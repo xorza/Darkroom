@@ -44,7 +44,7 @@ async fn a_replacement_queued_mid_run_is_installed_after_the_running_program() {
             let (lock, wake) = &*release;
             let held = lock.lock().unwrap();
             drop(wake.wait_while(held, |released| !*released).unwrap());
-            StaticValue::Int(7)
+            ConstValue::Int(7)
         })
     });
     graph.add("sink", |node| node.records());

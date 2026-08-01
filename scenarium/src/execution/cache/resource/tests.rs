@@ -5,7 +5,7 @@ use crate::execution::cache::resource::{FileId, FsPathId, StampJob, epoch_offset
 use crate::execution::cache::runtime::RuntimeCache;
 use crate::graph::identity::FuncId;
 use crate::testing::program::ProgramBuilder;
-use crate::{DataType, StaticValue};
+use crate::{ConstValue, DataType};
 
 fn fingerprint_with(job: &mut StampJob, path: &str) -> Digest {
     let Ok(identity) = job.stamp(path, &CancelToken::never()) else {
@@ -248,7 +248,7 @@ async fn same_path_uses_one_identity_until_the_next_run() {
     let dir = TempDir::new("snapshot");
     let file = dir.join("data.bin");
     std::fs::write(&file, b"x").unwrap();
-    let path = StaticValue::FsPath(file.to_string_lossy().into_owned());
+    let path = ConstValue::FsPath(file.to_string_lossy().into_owned());
 
     let mut prog = ProgramBuilder::default();
     let shared_func = FuncId::from_u128(10);

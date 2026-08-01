@@ -13,7 +13,7 @@ use crate::graph::output_types::OutputTypes;
 use crate::testing::graph::TestGraph;
 use crate::testing::graph::compiled::Compiled;
 use crate::testing::program::ProgramBuilder;
-use crate::{DataType, StaticValue};
+use crate::{ConstValue, DataType};
 
 /// The walk wires a subscription to the emitter's own event slot, and the
 /// artifact carries a range backstop under it — kept because the subscriber
@@ -421,8 +421,8 @@ fn drops_a_type_mismatched_wire_to_unbound() {
 #[test]
 fn keeps_a_satisfying_const_and_drops_a_mismatched_one() {
     for (value, kept) in [
-        (StaticValue::Int(7), true),
-        (StaticValue::String("no".to_owned()), false),
+        (ConstValue::Int(7), true),
+        (ConstValue::String("no".to_owned()), false),
     ] {
         let mut g = pair(DataType::Int, DataType::Int);
         g.constant("consumer", 0, value.clone());

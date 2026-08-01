@@ -237,9 +237,9 @@ async fn redefined_output_type_rekeys_and_recomputes() {
     let build = |as_float: bool, runs: &Calls, received: &Arc<StdMutex<f64>>| {
         let received = received.clone();
         let value = if as_float {
-            StaticValue::Float(1.5)
+            ConstValue::Float(1.5)
         } else {
-            StaticValue::Int(7)
+            ConstValue::Int(7)
         };
         let produce = runs.clone();
         let mut g = TestGraph::new();

@@ -7,8 +7,8 @@ use std::path::PathBuf;
 use imaginarium::Image as RawImage;
 use lumos::{DEFAULT_SIGMA_THRESHOLD, PREVIEW_IMAGE_EXTENSIONS, RAW_EXTENSIONS};
 use scenarium::{
-    AnyState, ContextManager, DataType, DynamicValue, FsPathMode, Func, FuncBehavior, Library,
-    OutputDemand, SharedAnyState, StaticValue,
+    AnyState, ConstValue, ContextManager, DataType, DynamicValue, FsPathMode, Func, FuncBehavior,
+    Library, OutputDemand, SharedAnyState,
 };
 
 use crate::astro::config::processing::{
@@ -146,11 +146,11 @@ fn build_masters_node_is_registered() {
     assert_eq!(f.inputs[4].data_type, DataType::Float);
     assert_eq!(
         f.inputs[4].default_value,
-        Some(StaticValue::Float(DEFAULT_SIGMA_THRESHOLD as f64)),
+        Some(ConstValue::Float(DEFAULT_SIGMA_THRESHOLD as f64)),
     );
     assert_eq!(f.inputs[5].name, "Cache");
     assert_eq!(f.inputs[5].data_type, DataType::Bool);
-    assert_eq!(f.inputs[5].default_value, Some(StaticValue::Bool(true)));
+    assert_eq!(f.inputs[5].default_value, Some(ConstValue::Bool(true)));
 }
 
 #[test]
@@ -221,7 +221,7 @@ fn stack_lights_node_is_registered() {
     );
     assert_eq!(
         f.inputs[2].default_value,
-        Some(StaticValue::Enum("wide_field".to_string())),
+        Some(ConstValue::Enum("wide_field".to_string())),
     );
     assert_eq!(
         f.inputs[3].data_type,
@@ -232,7 +232,7 @@ fn stack_lights_node_is_registered() {
         config_data_type::<CombineConfigDef>()
     );
     assert_eq!(f.inputs[5].name, "Reference");
-    assert_eq!(f.inputs[5].default_value, Some(StaticValue::Int(-1)));
+    assert_eq!(f.inputs[5].default_value, Some(ConstValue::Int(-1)));
 
     let out_names: Vec<&str> = f.outputs.iter().map(|o| o.name.as_str()).collect();
     assert_eq!(out_names, ["Image", "Coverage", "Weight"]);
@@ -265,7 +265,7 @@ fn auto_stretch_node_is_registered() {
     assert_eq!(methods, ["auto_asinh", "auto_stf"]);
     assert_eq!(
         f.inputs[1].default_value,
-        Some(StaticValue::Enum("auto_asinh".to_string())),
+        Some(ConstValue::Enum("auto_asinh".to_string())),
     );
     assert_eq!(f.outputs.len(), 1);
     assert_eq!(f.outputs[0].ty.declared(), *IMAGE_DATA_TYPE);
@@ -376,7 +376,7 @@ fn preset_nodes_use_value_variant_picks_with_build_overrides() {
         );
         assert_eq!(
             input.default_value,
-            Some(StaticValue::Enum(first_preset.to_string())),
+            Some(ConstValue::Enum(first_preset.to_string())),
             "{node} seeded to first preset"
         );
         // The matching build node exists and emits the same config type.
@@ -433,7 +433,7 @@ async fn build_background_config_reflects_fields_and_rejects_invalid_values() {
         .iter()
         .map(|input| input.default_value.clone().unwrap().into())
         .collect();
-    inputs[0] = StaticValue::Int(-1).into();
+    inputs[0] = ConstValue::Int(-1).into();
     let mut outputs = vec![DynamicValue::Unbound; builder.outputs.len()];
     let error = builder
         .lambda
@@ -469,7 +469,7 @@ fn ml_denoise_node_is_registered() {
     assert_eq!(model.extensions, ["onnx"]);
     assert_eq!(
         f.inputs[1].default_value,
-        Some(StaticValue::FsPath("DeepSNR_weights_v2.onnx".to_string()))
+        Some(ConstValue::FsPath("DeepSNR_weights_v2.onnx".to_string()))
     );
     assert_eq!(f.outputs.len(), 1);
     assert_eq!(f.outputs[0].name, "Image");
@@ -486,7 +486,7 @@ fn remove_stars_node_has_starless_and_stars_outputs() {
     assert_eq!(f.inputs[0].data_type, *IMAGE_DATA_TYPE);
     assert_eq!(
         f.inputs[1].default_value,
-        Some(StaticValue::FsPath("StarNet2_weights.onnx".to_string()))
+        Some(ConstValue::FsPath("StarNet2_weights.onnx".to_string()))
     );
     let out_names: Vec<&str> = f.outputs.iter().map(|o| o.name.as_str()).collect();
     assert_eq!(out_names, ["Starless", "Stars"]);
@@ -507,12 +507,10 @@ fn configured_model_defaults_replace_both_node_definitions() {
     assert_eq!(library.funcs().len(), function_count);
     assert_eq!(
         func(&library, "ML Denoise").inputs[1].default_value,
-        Some(StaticValue::FsPath(paths.denoise.display().to_string()))
+        Some(ConstValue::FsPath(paths.denoise.display().to_string()))
     );
     assert_eq!(
         func(&library, "ML Star Removal").inputs[1].default_value,
-        Some(StaticValue::FsPath(
-            paths.star_removal.display().to_string()
-        ))
+        Some(ConstValue::FsPath(paths.star_removal.display().to_string()))
     );
 }

@@ -1,5 +1,5 @@
 use crate::utility::fs_watch::{WATCH_DIRECTORY_FUNC_ID, WatchState, fs_watch_library};
-use scenarium::StaticValue;
+use scenarium::ConstValue;
 use scenarium::{AnyState, ContextManager, FuncBehavior, FuncLambda};
 use scenarium::{DynamicValue, Invocation, InvokeError, OutputDemand, SharedAnyState};
 use std::sync::Arc;
@@ -24,9 +24,9 @@ async fn try_invoke_watch(
     recursive: bool,
 ) -> Result<DynamicValue, InvokeError> {
     let mut inputs = [
-        StaticValue::FsPath(path.to_string()).into(),
-        StaticValue::Bool(recursive).into(),
-        StaticValue::Int(250).into(),
+        ConstValue::FsPath(path.to_string()).into(),
+        ConstValue::Bool(recursive).into(),
+        ConstValue::Int(250).into(),
     ];
     let demand = [OutputDemand::Produce];
     let mut outputs = [DynamicValue::Unbound];
@@ -73,9 +73,9 @@ fn registers_watch_directory_func() {
     assert_eq!(func.inputs.len(), 3);
     assert_eq!(func.inputs[0].name, "Directory");
     assert_eq!(func.inputs[1].name, "Recursive");
-    assert_eq!(func.inputs[1].default_value, Some(StaticValue::Bool(true)));
+    assert_eq!(func.inputs[1].default_value, Some(ConstValue::Bool(true)));
     assert_eq!(func.inputs[2].name, "Debounce (ms)");
-    assert_eq!(func.inputs[2].default_value, Some(StaticValue::Int(1000)));
+    assert_eq!(func.inputs[2].default_value, Some(ConstValue::Int(1000)));
     assert_eq!(func.outputs.len(), 1);
     assert_eq!(func.outputs[0].name, "Directory");
     assert_eq!(func.events.len(), 1);

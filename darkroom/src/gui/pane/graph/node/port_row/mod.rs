@@ -20,7 +20,7 @@ use scenarium::FuncEvent;
 use scenarium::InputPort;
 use scenarium::Library;
 use scenarium::NodeId;
-use scenarium::{DataType, FsPathConfig, FsPathMode, Func, StaticValue};
+use scenarium::{ConstValue, DataType, FsPathConfig, FsPathMode, Func};
 
 use crate::core::document::{PortKind, PortRef};
 use crate::core::edit::intent::types::GraphIntent;
@@ -96,7 +96,7 @@ pub(super) fn ports_row(
         .size((Sizing::FILL, Sizing::HUG))
         .cols([
             Track::hug(),
-            Track::hug().max(theme.static_value_editor.max_width),
+            Track::hug().max(theme.const_value_editor.max_width),
             Track::fill(),
             Track::hug(),
         ])
@@ -361,7 +361,7 @@ fn value_cell(ui: &mut Ui, ncx: NodeCtx<'_>, input: InputCtx<'_>, out: &mut Requ
     // here costs nothing, because the type is what decided to draw the button
     // in the first place.
     if ui.response_for(editor_id).left.clicked()
-        && matches!(value, StaticValue::FsPath(_) | StaticValue::FsPaths(_))
+        && matches!(value, ConstValue::FsPath(_) | ConstValue::FsPaths(_))
         && let DataType::FsPath(config) = data_type
     {
         out.push_app(AppCommand::Edit(EditCommand::PickInputPath(PathPick {
