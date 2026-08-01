@@ -188,11 +188,12 @@ pub(super) fn scroll_to_zoom_factor(delta_y: f32) -> f32 {
 /// to the viewport, so framed nodes don't butt against the pane edge.
 const FIT_MARGIN: f32 = 40.0;
 
-/// A one-shot viewport-framing request from the graph toolbar. Each
-/// resolves to an `GraphIntent::SetViewport`, so a reframe rides the same
-/// undo path as a manual pan/zoom (and coalesces with it).
+/// One of the graph toolbar's one-shot framings. A descriptor resolved at
+/// its call site into an `GraphIntent::SetViewport`, never queued itself, so
+/// a reframe rides the same undo path as a manual pan/zoom (and coalesces
+/// with it).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum ViewAction {
+pub(crate) enum Framing {
     /// Reset to 1:1 zoom, centered on all nodes (world origin when empty).
     Reset,
     /// Fit every node in the view.
@@ -201,24 +202,24 @@ pub(crate) enum ViewAction {
     ShowSelected,
 }
 
-/// Compute the `SetViewport` intent a [`ViewAction`] implies, or `None`
+/// Compute the `SetViewport` intent a [`Framing`] implies, or `None`
 /// when there's nothing to frame — `ShowSelected` with an empty
 /// selection, no nodes to fit, or the viewport not yet measured. The
 /// pane size comes from the outer canvas's `layout_rect`; node extents
 /// come from `geometry`'s cross-frame size cache, position from
 /// `SceneNode::pos`.
-pub(crate) fn view_action_intent(
+pub(crate) fn framing_intent(
     ui: &Ui,
     geometry: &CanvasGeometry,
     graph_ctx: GraphCtx<'_>,
-    action: ViewAction,
+    framing: Framing,
 ) -> Option<GraphIntent> {
     let vp = ui.response_for(outer_canvas_widget_id()).layout_rect?.size;
     let pane = Vec2::new(vp.w, vp.h);
-    let to = match action {
-        ViewAction::Reset => reset_target(geometry, graph_ctx, pane),
-        ViewAction::ShowAll => fit_target(node_bounds(geometry, graph_ctx, false)?, pane),
-        ViewAction::ShowSelected => {
+    let to = match framing {
+        Framing::Reset => reset_target(geometry, graph_ctx, pane),
+        Framing::ShowAll => fit_target(node_bounds(geometry, graph_ctx, false)?, pane),
+        Framing::ShowSelected => {
             if graph_ctx.selected().is_empty() {
                 return None;
             }

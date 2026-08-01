@@ -6,7 +6,7 @@ use std::path::Path;
 
 use crate::core::document::open_document::OpenDocument;
 use crate::gui::app::editor::Editor;
-use crate::gui::app::{App, PendingAction};
+use crate::gui::app::{App, PendingTransition};
 use crate::gui::dialogs;
 
 /// Document file lifecycle. Handled by [`App::handle_file`].
@@ -27,14 +27,14 @@ impl App {
         match command {
             // Both replace the open document, so they clear the
             // unsaved-changes guard before doing anything.
-            FileCommand::New => self.guard_discard(PendingAction::New),
-            FileCommand::Load => self.guard_discard(PendingAction::Load),
+            FileCommand::New => self.guard_discard(PendingTransition::New),
+            FileCommand::Load => self.guard_discard(PendingTransition::Load),
             FileCommand::Save => self.save_current(),
             FileCommand::SaveAs => self.save_document_as(),
         }
     }
 
-    /// Prompt for a project file and load it. The [`PendingAction::Load`]
+    /// Prompt for a project file and load it. The [`PendingTransition::Load`]
     /// body: the picker runs here, *after* the guard cleared, so cancelling
     /// the unsaved-changes prompt never costs the user a file choice.
     pub(crate) fn load_picked_document(&mut self) {

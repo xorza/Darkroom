@@ -9,23 +9,23 @@ use scenarium::StaticValue;
 use crate::core::edit::intent::types::GraphIntent;
 use crate::gui::app::App;
 use crate::gui::dialogs;
-use crate::gui::pane::graph::frame::prepass::PathPickRequest;
+use crate::gui::pane::graph::frame::prepass::PathPick;
 
 /// Node edits that need a dialog before applying. Handled by
 /// [`App::handle_edit`].
 #[derive(Clone, Debug)]
 pub(crate) enum EditCommand {
-    /// Open a file dialog (filtered by the request's picker config) for a
+    /// Open a file dialog (filtered by the pick's picker config) for a
     /// node's `FsPath` const input, applying the chosen paths as a `SetInput`
     /// edit. Raised by the inline pick button (see `gui::node::prepass::emit_path_picks`,
-    /// which produces the [`PathPickRequest`]).
-    PickInputPath(PathPickRequest),
+    /// which produces the [`PathPick`]).
+    PickInputPath(PathPick),
 }
 
 impl App {
     pub(super) fn handle_edit(&mut self, command: EditCommand) {
         match command {
-            EditCommand::PickInputPath(req) => self.pick_input_path(req),
+            EditCommand::PickInputPath(pick) => self.pick_input_path(pick),
         }
     }
 
@@ -33,9 +33,9 @@ impl App {
     /// user makes a selection, apply the chosen paths as a `SetInput` edit. Runs after
     /// authoring, so it goes through `Editor::apply_edit` rather than the
     /// frame's intent drain.
-    fn pick_input_path(&mut self, req: PathPickRequest) {
-        let extensions: Vec<&str> = req.config.extensions.iter().map(String::as_str).collect();
-        let value = match req.config.mode {
+    fn pick_input_path(&mut self, pick: PathPick) {
+        let extensions: Vec<&str> = pick.config.extensions.iter().map(String::as_str).collect();
+        let value = match pick.config.mode {
             FsPathMode::ExistingFile => dialogs::pick_existing_file(&extensions)
                 .map(|path| StaticValue::FsPath(path.to_string_lossy().into_owned())),
             FsPathMode::ExistingFiles => dialogs::pick_existing_files(&extensions).map(|paths| {
@@ -57,7 +57,7 @@ impl App {
         self.editor.apply_edit(
             &mut self.open,
             GraphIntent::SetInput {
-                input: req.port,
+                input: pick.port,
                 to: Some(Binding::Const(value)),
             },
         );

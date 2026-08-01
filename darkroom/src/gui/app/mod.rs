@@ -52,7 +52,7 @@ pub(crate) struct App {
     /// The document-replacing transition waiting on the unsaved-changes
     /// prompt, and thus whether that prompt is up at all. Raised by
     /// [`Self::guard_discard`]; cleared when the user answers.
-    confirm_discard: Option<PendingAction>,
+    confirm_discard: Option<PendingTransition>,
     /// Throttled sampler behind the status bar's `MEM` clause. Lives on
     /// `App` rather than `Editor` because it measures the process, not the
     /// document. Sampled where it is consumed rather than in `update`:
@@ -65,13 +65,13 @@ pub(crate) struct App {
 /// the unsaved-changes prompt is up, then carried out (or dropped) by the
 /// answer.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum PendingAction {
+enum PendingTransition {
     Quit,
     New,
     Load,
 }
 
-impl PendingAction {
+impl PendingTransition {
     /// How the prompt finishes "Save changes to X before …?".
     fn prompt_tail(self) -> &'static str {
         match self {
@@ -226,27 +226,27 @@ impl App {
         self.open.dirty && self.preferences.confirm_unsaved_changes
     }
 
-    /// Carry out `action`, or raise the unsaved-changes prompt first when
+    /// Carry out `transition`, or raise the unsaved-changes prompt first when
     /// the document holds edits worth protecting. Every path that would
     /// discard the open document routes through here — File ▸ New, File ▸
     /// Open, File ▸ Quit, ⌘Q — so the policy lives in one place instead of
     /// being restated (or forgotten) per caller.
-    fn guard_discard(&mut self, action: PendingAction) {
+    fn guard_discard(&mut self, transition: PendingTransition) {
         if self.needs_discard_confirmation() {
-            self.confirm_discard = Some(action);
+            self.confirm_discard = Some(transition);
         } else {
-            self.perform(action);
+            self.perform(transition);
         }
     }
 
     /// Run a transition the guard cleared. `Load` picks its file here
     /// rather than before the prompt, so a cancelled prompt doesn't leave
     /// the user having chosen a file for nothing.
-    fn perform(&mut self, action: PendingAction) {
-        match action {
-            PendingAction::Quit => self.quit(),
-            PendingAction::New => self.new_document(),
-            PendingAction::Load => self.load_picked_document(),
+    fn perform(&mut self, transition: PendingTransition) {
+        match transition {
+            PendingTransition::Quit => self.quit(),
+            PendingTransition::New => self.new_document(),
+            PendingTransition::Load => self.load_picked_document(),
         }
     }
 
@@ -260,7 +260,7 @@ impl App {
 
         self.save_preferences();
         if self.needs_discard_confirmation() {
-            self.confirm_discard = Some(PendingAction::Quit);
+            self.confirm_discard = Some(PendingTransition::Quit);
         }
     }
 
