@@ -10,7 +10,18 @@
 //! (`Document::visible_viewer_nodes`), so a viewer stacked behind another tab
 //! holds no full-resolution texture until it is activated.
 //!
+//! Split the way the graph pane is, by what each part does rather than by what
+//! it draws: [`camera`] is the affine algebra between texels, logical px and
+//! the pane, [`glyph`] is the drawn vocabulary, and [`controls`] is the
+//! floating chrome the panel stamps out. This file is [`ImageViewer`] and
+//! nothing else — the state one viewer tab keeps across frames, and the record
+//! pass that drives it.
+//!
 //! [`TabRef::ImageViewer`]: crate::core::document::TabRef::ImageViewer
+
+pub(crate) mod camera;
+pub(crate) mod controls;
+pub(crate) mod glyph;
 
 use scenarium::NodeId;
 use std::fmt::Write as _;
@@ -18,38 +29,21 @@ use std::fmt::Write as _;
 use glam::{UVec2, Vec2};
 use imaginarium::ColorFormat;
 use palantir::{
-    Align, Background, Color, Configure, HAlign, ImageFilter, ImageFit, ImageHandle, Panel, Rect,
-    Sense, Shape, Size, Sizing, Spacing, Text, TextInput, Ui, VAlign, WidgetId,
+    Align, Background, Color, Configure, HAlign, ImageFilter, ImageFit, ImageHandle, Panel, Sense,
+    Shape, Sizing, Spacing, Ui, VAlign, WidgetId,
 };
 
 use crate::core::document::{Document, Viewport};
 use crate::core::io::preferences::{ViewerBackground, ViewerPreferences};
-use crate::gui::pane::graph::gesture::pan_zoom::{fold_scroll_zoom, zoom_about};
+use crate::gui::pane::graph::gesture::pan_zoom::fold_scroll_zoom;
+use crate::gui::pane::viewer::camera::{
+    VIEWER_MAX_ZOOM, VIEWER_MIN_ZOOM, draw_rect, fit_viewport, logical_image_size,
+    zoom_about_pane_center,
+};
+use crate::gui::pane::viewer::controls::{BACKDROPS, control_wid, filter_toggle, readout_pill};
 use crate::gui::state::preview_store::{FullImage, StoredContent};
 use crate::gui::theme::Theme;
-use crate::gui::widgets::support::{colored_text, filled_rect, muted_text, stroked_rect};
-
-/// Font size of the one control glyph drawn as text rather than shape ("1:1").
-/// Sized to the button box like its drawn siblings, so it tracks
-/// [`CONTROL_SIDE`] rather than a `TypeScale` tier.
-const GLYPH_PX: f32 = 11.0;
-use crate::gui::widgets::toolbar::{
-    BUTTON_GAP, Chip, TOOLBAR_MARGIN, pill, pill_background, pill_rule,
-};
-
-/// Viewer zoom bounds — far wider than the canvas's
-/// (`pan_zoom::CANVAS_MIN_ZOOM`/`CANVAS_MAX_ZOOM`): out to overview a
-/// texture-capped 8k frame in a small pane, in for pixel peeping. Named apart
-/// from the canvas pair because both are passed into the same shared
-/// `fold_scroll_zoom` / `zoom_about`, where an unqualified `MIN_ZOOM` at the
-/// call site wouldn't say which surface's range is in play.
-const VIEWER_MIN_ZOOM: f32 = 0.02;
-const VIEWER_MAX_ZOOM: f32 = 32.0;
-
-/// On-screen side of one checkerboard square, logical px. Screen-fixed
-/// (doesn't pan/zoom with the image) — it's a transparency reference,
-/// not content.
-const CHECKER_SQUARE_PX: f32 = 8.0;
+use crate::gui::widgets::toolbar::{BUTTON_GAP, Chip, TOOLBAR_MARGIN, pill, pill_rule};
 
 /// One image-viewer tab's state: what it shows and how it's framed.
 /// Lives in the `MainWindow`'s per-node viewer map, keyed by (and
@@ -79,6 +73,8 @@ pub(crate) struct ImageViewer {
     checker: Option<ImageHandle>,
 }
 
+/// The texture a viewer paints this frame, once the store's content has
+/// cleared the viewer's own bar.
 #[derive(Clone, Copy, Debug)]
 struct ShownImage<'a> {
     handle: &'a ImageHandle,
@@ -86,6 +82,74 @@ struct ShownImage<'a> {
     native_size: UVec2,
     /// Source pixel format before the RGBA8 view conversion.
     native_format: ColorFormat,
+}
+
+/// What [`StoredContent`] means to a viewer: at most one of a paintable
+/// texture and a reason there isn't one. Both empty is the legitimate
+/// nothing-yet case, which draws the standing hint rather than a message.
+#[derive(Clone, Copy, Debug)]
+struct ShownSource<'a> {
+    shown: Option<ShownImage<'a>>,
+    message: Option<&'a str>,
+}
+
+impl<'a> ShownSource<'a> {
+    /// Read the store's entry for this viewer's node.
+    ///
+    /// Only the full-resolution upload is worth showing here — the pin card
+    /// is happy with the thumbnail — so a stored image that hasn't finished
+    /// materializing still resolves to a message rather than a texture.
+    fn resolve(source: Option<&'a StoredContent>) -> Self {
+        let Some(value) = source else {
+            return Self {
+                shown: None,
+                message: None,
+            };
+        };
+        let Some(image) = value.image() else {
+            // No image to show. A failure reports its own reason; a
+            // perfectly good non-image value doesn't get one, because
+            // "7" is not what a viewer tab is for — the preview card
+            // renders that.
+            let message = match value {
+                StoredContent::Error(message) => message.as_str(),
+                _ => "this preview has no image value",
+            };
+            return Self {
+                shown: None,
+                message: Some(message),
+            };
+        };
+        match &image.full {
+            FullImage::Resident(handle) => Self {
+                shown: Some(ShownImage {
+                    handle,
+                    native_size: image.native_size,
+                    native_format: image.native_format,
+                }),
+                message: None,
+            },
+            FullImage::Failed(message) => Self {
+                shown: None,
+                message: Some(message.as_str()),
+            },
+            FullImage::Deferred(_) => {
+                // This pane is its group's visible tab, and the reconcile
+                // pass runs every frame ahead of the record, so it covered
+                // this viewer — unless the tab became visible after that
+                // pass, within this same frame.
+                debug_assert!(
+                    false,
+                    "visible image viewer source was not materialized: \
+                     the frame's reconcile pass did not cover it"
+                );
+                Self {
+                    shown: None,
+                    message: Some("image is being prepared"),
+                }
+            }
+        }
+    }
 }
 
 impl ImageViewer {
@@ -135,48 +199,7 @@ impl ImageViewer {
         title: &str,
         source: Option<&StoredContent>,
     ) -> bool {
-        let (shown, message) = match source {
-            // A stored image still has to clear the viewer's own bar: only the
-            // full-resolution upload is worth showing here, where the pin
-            // card is happy with the thumbnail.
-            Some(value) => match value.image() {
-                Some(image) => match &image.full {
-                    FullImage::Resident(handle) => (
-                        Some(ShownImage {
-                            handle,
-                            native_size: image.native_size,
-                            native_format: image.native_format,
-                        }),
-                        None,
-                    ),
-                    FullImage::Failed(message) => (None, Some(message.as_str())),
-                    FullImage::Deferred(_) => {
-                        // This pane is its group's visible tab, and the
-                        // reconcile pass runs every frame ahead of the record,
-                        // so it covered this viewer — unless the tab became
-                        // visible after that pass, within this same frame.
-                        debug_assert!(
-                            false,
-                            "visible image viewer source was not materialized: \
-                             the frame's reconcile pass did not cover it"
-                        );
-                        (None, Some("image is being prepared"))
-                    }
-                },
-                // No image to show. A failure reports its own reason; a
-                // perfectly good non-image value doesn't get one, because
-                // "7" is not what a viewer tab is for — the preview card
-                // renders that.
-                None => (
-                    None,
-                    Some(match value {
-                        StoredContent::Error(message) => message.as_str(),
-                        _ => "this preview has no image value",
-                    }),
-                ),
-            },
-            None => (None, None),
-        };
+        let ShownSource { shown, message } = ShownSource::resolve(source);
         self.sync_source(shown.map(|image| image.handle.size()));
         self.apply_gestures(ui, shown);
 
@@ -250,7 +273,7 @@ impl ImageViewer {
         let handle = self
             .checker
             .get_or_insert_with(|| {
-                ui.register_image(checker_image())
+                ui.register_image(glyph::checker_image())
                     .expect("checker image fits every supported GPU")
             })
             .clone();
@@ -259,7 +282,7 @@ impl ImageViewer {
                 .fit(ImageFit::Tile {
                     offset: Vec2::ZERO,
                     // The 2×2 tile is one checker period = 2 squares across.
-                    scale: pane / (2.0 * CHECKER_SQUARE_PX),
+                    scale: pane / (2.0 * glyph::CHECKER_SQUARE_PX),
                 })
                 .min_filter(ImageFilter::Nearest)
                 .mag_filter(ImageFilter::Nearest),
@@ -333,14 +356,18 @@ impl ImageViewer {
             .show(ui, |ui| {
                 let framing = Panel::hstack().id(control_wid(node_id, "pill_framing"));
                 pill(ui, theme, framing, |ui| {
-                    if Chip::new(control_wid(node_id, "fit"), "Fit to view")
-                        .show(ui, theme, draw_fit)
-                    {
+                    if Chip::new(control_wid(node_id, "fit"), "Fit to view").show(
+                        ui,
+                        theme,
+                        glyph::draw_fit,
+                    ) {
                         self.reset_framing();
                     }
-                    if Chip::new(control_wid(node_id, "100"), "Zoom to 100%")
-                        .show(ui, theme, draw_100)
-                        && let Some(pane) = pane
+                    if Chip::new(control_wid(node_id, "100"), "Zoom to 100%").show(
+                        ui,
+                        theme,
+                        glyph::draw_100,
+                    ) && let Some(pane) = pane
                     {
                         let img =
                             logical_image_size(shown.handle.size(), ui.display().scale_factor);
@@ -353,7 +380,7 @@ impl ImageViewer {
                     for (mode, key, tip) in BACKDROPS {
                         let selected = prefs.background == mode;
                         if Chip::new(control_wid(node_id, key), tip).show(ui, theme, |ui, s, _| {
-                            draw_swatch(ui, s, theme, mode, selected)
+                            glyph::draw_swatch(ui, s, theme, mode, selected)
                         }) && !selected
                         {
                             prefs.background = mode;
@@ -444,240 +471,12 @@ fn pane_wid(node_id: NodeId) -> WidgetId {
     WidgetId::from_hash(("image_viewer.pane", node_id))
 }
 
-/// Stable id for one control-panel widget, keyed by node + role.
-fn control_wid(node_id: NodeId, key: &'static str) -> WidgetId {
-    WidgetId::from_hash(("image_viewer.controls", node_id, key))
-}
-
-/// The backdrop radio roster — mode, widget-id key, tooltip — the one
-/// table behind the controls loop and the swatch ids.
-const BACKDROPS: [(ViewerBackground, &str, &str); 4] = [
-    (ViewerBackground::Theme, "bg_theme", "Theme background"),
-    (ViewerBackground::Black, "bg_black", "Black background"),
-    (ViewerBackground::White, "bg_white", "White background"),
-    (
-        ViewerBackground::Checker,
-        "bg_checker",
-        "Checkerboard background",
-    ),
-];
-
-/// A frosted readout chip — the text sibling of the toolbar pills —
-/// dressing `panel` (caller-configured id + placement) in the shared
-/// chrome around one line of muted text. Used by the header readout and
-/// the empty-pane hint.
-fn readout_pill<'a>(ui: &mut Ui, theme: &Theme, panel: Panel, text: impl Into<TextInput<'a>>) {
-    let text = text.into();
-    panel
-        .size((Sizing::HUG, Sizing::HUG))
-        .padding(Spacing::new(10.0, 6.0, 10.0, 6.0))
-        .background(pill_background(theme))
-        .show(ui, |ui| {
-            let style = muted_text(ui, theme, theme.text.body);
-            Text::new(text).style(&style).show(ui);
-        });
-}
-
-/// The nearest/bilinear magnification toggle: accent-filled while nearest
-/// is active. Flips `filter` on click; returns whether it changed.
-fn filter_toggle(ui: &mut Ui, theme: &Theme, node_id: NodeId, filter: &mut ImageFilter) -> bool {
-    let nearest = *filter == ImageFilter::Nearest;
-    let tip = if nearest {
-        "Zoom-in sampling: nearest — click for bilinear"
-    } else {
-        "Zoom-in sampling: bilinear — click for nearest"
-    };
-    if Chip::new(control_wid(node_id, "filter"), tip)
-        .toggled(nearest)
-        .show(ui, theme, draw_pixels)
-    {
-        *filter = if nearest {
-            ImageFilter::Linear
-        } else {
-            ImageFilter::Nearest
-        };
-        return true;
-    }
-    false
-}
-
-/// Checkerboard grays (sRGB bytes) — shared by the backdrop tile and
-/// its control-panel swatch. Fixed regardless of theme: the checker is
-/// a neutral transparency reference, not chrome.
-const CHECKER_LIGHT_U8: u8 = 77; // #4d4d4d
-const CHECKER_DARK_U8: u8 = 51; // #333333
-
-/// The 2×2 checkerboard tile — one full checker period, stamped across
-/// the pane via `ImageFit::Tile` + `ImageFilter::Nearest`.
-fn checker_image() -> palantir::Image {
-    const L: u8 = CHECKER_LIGHT_U8;
-    const D: u8 = CHECKER_DARK_U8;
-    let px = [
-        [L, L, L, 255],
-        [D, D, D, 255],
-        [D, D, D, 255],
-        [L, L, L, 255],
-    ];
-    palantir::Image::from_rgba8(2, 2, px.into_iter().flatten().collect())
-}
-
-/// The viewport at `zoom` that keeps the texel under the pane center
-/// fixed — the button sibling of the cursor-anchored wheel zoom.
-fn zoom_about_pane_center(mut v: Viewport, zoom: f32, pane: Vec2) -> Viewport {
-    let factor = zoom / v.zoom;
-    zoom_about(
-        &mut v.pan,
-        &mut v.zoom,
-        pane * 0.5,
-        factor,
-        VIEWER_MIN_ZOOM,
-        VIEWER_MAX_ZOOM,
-    );
-    v
-}
-
-/// Four inward corner brackets — "fit the image to the view".
-fn draw_fit(ui: &mut Ui, s: f32, color: Color) {
-    let t = s * 0.07; // bar thickness
-    let len = s * 0.18; // bar length
-    let o = s * 0.26; // inset from the button edge
-    let far = s - o;
-    // An L in each corner: horizontal bar + vertical bar.
-    let bars = [
-        (o, o, len, t),
-        (o, o, t, len),
-        (far - len, o, len, t),
-        (far - t, o, t, len),
-        (o, far - t, len, t),
-        (o, far - len, t, len),
-        (far - len, far - t, len, t),
-        (far - t, far - len, t, len),
-    ];
-    for (x, y, w, h) in bars {
-        filled_rect(ui, Rect::new(x, y, w, h), t * 0.5, color);
-    }
-}
-
-/// "1:1" label — zoom to 100%.
-fn draw_100(ui: &mut Ui, _s: f32, color: Color) {
-    let style = colored_text(ui, color, GLYPH_PX);
-    Text::new("1:1").style(&style).align(Align::CENTER).show(ui);
-}
-
-/// 2×2 grid of hard squares — nearest (pixelated) sampling.
-fn draw_pixels(ui: &mut Ui, s: f32, color: Color) {
-    let cell = s * 0.18;
-    let gap = s * 0.08;
-    let o = (s - (2.0 * cell + gap)) * 0.5;
-    for iy in 0..2 {
-        for ix in 0..2 {
-            let x = o + ix as f32 * (cell + gap);
-            let y = o + iy as f32 * (cell + gap);
-            filled_rect(ui, Rect::new(x, y, cell, cell), 1.0, color);
-        }
-    }
-}
-
-/// A backdrop-mode swatch: an inset square filled with the mode itself
-/// (mini checker for `Checker`), ringed with the selection accent when
-/// active.
-fn draw_swatch(ui: &mut Ui, s: f32, theme: &Theme, mode: ViewerBackground, selected: bool) {
-    let d = s * 0.54;
-    let o = (s - d) * 0.5;
-    let rect = Rect::new(o, o, d, d);
-    // One arm per mode, so the match stays exhaustive over the enum itself
-    // rather than over a flat-fill subset plus a wildcard that has to
-    // re-reject the one mode it already handled.
-    match mode {
-        ViewerBackground::Theme => filled_rect(ui, rect, 2.0, theme.canvas.bg),
-        ViewerBackground::Black => filled_rect(ui, rect, 2.0, Color::BLACK),
-        ViewerBackground::White => filled_rect(ui, rect, 2.0, Color::WHITE),
-        ViewerBackground::Checker => {
-            let light = Color::rgb_u8(CHECKER_LIGHT_U8, CHECKER_LIGHT_U8, CHECKER_LIGHT_U8);
-            let dark = Color::rgb_u8(CHECKER_DARK_U8, CHECKER_DARK_U8, CHECKER_DARK_U8);
-            filled_rect(ui, rect, 2.0, dark);
-            // Two light quads on the diagonal make the 2×2 mini checker.
-            let h = d * 0.5;
-            for cell in [Rect::new(o, o, h, h), Rect::new(o + h, o + h, h, h)] {
-                filled_rect(ui, cell, 0.0, light);
-            }
-        }
-    }
-    // Ring on top so the checker quads can't cover it.
-    let (ring, width) = if selected {
-        (theme.colors.selection_rect, 2.0)
-    } else {
-        (theme.colors.text_muted.with_alpha(0.4), 1.0)
-    };
-    stroked_rect(ui, rect, 2.0, ring, width);
-}
-
-/// A texture's logical footprint when each texel occupies one physical pixel.
-fn logical_image_size(texels: UVec2, display_scale: f32) -> Vec2 {
-    texels.as_vec2() / display_scale
-}
-
-/// The pane-local rect a viewport paints the texture into.
-fn draw_rect(img: Vec2, v: Viewport) -> Rect {
-    Rect {
-        min: v.pan,
-        size: Size::new(img.x * v.zoom, img.y * v.zoom),
-    }
-}
-
-/// Aspect-preserving fit of `img` (its 1:1 logical footprint) in `pane`
-/// (`ImageFit::Contain` semantics, upscaling small images too), as an
-/// explicit viewport so the drawn fit and the gesture math can't drift.
-fn fit_viewport(img: Vec2, pane: Vec2) -> Viewport {
-    let zoom = (pane.x / img.x).min(pane.y / img.y);
-    Viewport {
-        pan: (pane - img * zoom) * 0.5,
-        zoom,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use palantir::Image as AptImage;
-    use scenarium::NodeId;
 
     fn viewer_node() -> NodeId {
         NodeId::from_u128(1)
-    }
-
-    #[test]
-    fn fit_viewport_centers_and_scales_like_contain() {
-        // 400×200 texture in an 800×800 pane: width binds at zoom 2 —
-        // Contain upscales. pan = ((800,800) - (800,400)) / 2 = (0, 200).
-        let v = fit_viewport(Vec2::new(400.0, 200.0), Vec2::new(800.0, 800.0));
-        assert_eq!(v.zoom, 2.0);
-        assert_eq!(v.pan, Vec2::new(0.0, 200.0));
-
-        // 4000×2000 in 1000×1000: zoom 0.25, pan = (0, (1000-500)/2) = (0, 250).
-        let v = fit_viewport(Vec2::new(4000.0, 2000.0), Vec2::new(1000.0, 1000.0));
-        assert_eq!(v.zoom, 0.25);
-        assert_eq!(v.pan, Vec2::new(0.0, 250.0));
-
-        // Height-bound case: 200×400 in 800×400 → zoom 1, pan = (300, 0).
-        let v = fit_viewport(Vec2::new(200.0, 400.0), Vec2::new(800.0, 400.0));
-        assert_eq!(v.zoom, 1.0);
-        assert_eq!(v.pan, Vec2::new(300.0, 0.0));
-
-        // The drawn rect covers exactly pan..pan+img*zoom.
-        let r = draw_rect(Vec2::new(200.0, 400.0), v);
-        assert_eq!(r.min, Vec2::new(300.0, 0.0));
-        assert_eq!(r.size, Size::new(200.0, 400.0));
-
-        // The same 400x200 fit in an 800x800 logical pane on a 2x display
-        // occupies 1600x800 physical px, so its magnification is 4x while
-        // the logical draw rect remains exactly 800x400.
-        let img = logical_image_size(UVec2::new(400, 200), 2.0);
-        assert_eq!(img, Vec2::new(200.0, 100.0));
-        let v = fit_viewport(img, Vec2::new(800.0, 800.0));
-        assert_eq!(v.zoom, 4.0);
-        assert_eq!(v.pan, Vec2::new(0.0, 200.0));
-        assert_eq!(draw_rect(img, v).size, Size::new(800.0, 400.0));
     }
 
     #[test]
@@ -717,46 +516,18 @@ mod tests {
         assert!(viewer.view.is_none(), "removing the source clears framing");
     }
 
+    /// The three ways a store entry fails to yield a texture each carry their
+    /// own reason, and the absent entry carries none — that last case is what
+    /// draws the standing "after the next graph run" hint rather than an
+    /// error, so it must stay distinguishable from a real failure.
     #[test]
-    fn zoom_about_pane_center_keeps_center_texel() {
-        // Start from the fit of 400×200 in an 800×800 pane: zoom 2,
-        // pan (0, 200). The texel under the pane center (400, 400) is
-        // ((400 - 0)/2, (400 - 200)/2) = (200, 100) — the image center.
-        let fit = fit_viewport(Vec2::new(400.0, 200.0), Vec2::new(800.0, 800.0));
-        assert_eq!(fit.zoom, 2.0);
+    fn resolve_separates_no_entry_from_a_reason_there_is_no_image() {
+        let nothing = ShownSource::resolve(None);
+        assert!(nothing.shown.is_none() && nothing.message.is_none());
 
-        // Zoom to 100%: pan' = center - texel·1 = (400-200, 400-100).
-        let pane = Vec2::new(800.0, 800.0);
-        let v = zoom_about_pane_center(fit, 1.0, pane);
-        assert_eq!(v.zoom, 1.0);
-        assert_eq!(v.pan, Vec2::new(200.0, 300.0));
-
-        // The invariant holds for an arbitrary target too: zoom 4 →
-        // pan' = center - texel·4 = (400-800, 400-400) = (-400, 0).
-        let v = zoom_about_pane_center(fit, 4.0, pane);
-        assert_eq!(v.zoom, 4.0);
-        assert_eq!(v.pan, Vec2::new(-400.0, 0.0));
-
-        // At 2x display scale, 1:1 physical magnification draws each texel
-        // into half a logical pixel, which composes back to one physical px.
-        let img_2x = logical_image_size(UVec2::new(400, 200), 2.0);
-        let fit_2x = fit_viewport(img_2x, Vec2::new(800.0, 800.0));
-        let v = zoom_about_pane_center(fit_2x, 1.0, pane);
-        assert_eq!(v.pan, Vec2::new(300.0, 350.0));
-        assert_eq!(draw_rect(img_2x, v).size, Size::new(200.0, 100.0));
-    }
-
-    #[test]
-    fn checker_image_is_one_2x2_period() {
-        let img = checker_image();
-        const L: u8 = CHECKER_LIGHT_U8;
-        const D: u8 = CHECKER_DARK_U8;
-        // Row-major light/dark, dark/light — one full checker period.
-        #[rustfmt::skip]
-        let expected = [
-            L, L, L, 255,  D, D, D, 255,
-            D, D, D, 255,  L, L, L, 255,
-        ];
-        assert_eq!(img, AptImage::from_rgba8(2, 2, expected.to_vec()));
+        let errored = StoredContent::Error("boom".to_owned());
+        let resolved = ShownSource::resolve(Some(&errored));
+        assert!(resolved.shown.is_none());
+        assert_eq!(resolved.message, Some("boom"));
     }
 }
