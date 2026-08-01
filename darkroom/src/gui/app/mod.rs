@@ -155,6 +155,9 @@ impl App {
     /// skips a panel whose node is gone — so the lag costs memory and nothing
     /// else.
     fn reconcile_derived_state(&mut self, ui: &Ui) {
+        // Before the reconcile below, so a value published this frame is in
+        // the store when the sweep decides what to keep and what to upload.
+        self.run_state.ingest_published(&self.runtime, ui);
         self.run_state
             .previews
             .reconcile(ui, &self.session.open.document);
@@ -289,12 +292,14 @@ impl palantir::App for App {
         // captures the latest size / position.
         self.track_window_state(ui);
 
-        // Drain anything the worker posted since last frame, before the
-        // session rebuilds its scene so the status/log projections it
-        // reads reflect the latest run.
-        self.run_state.drain_from(&mut self.runtime, ui);
+        // Fold the worker's reports since last frame, before the session
+        // rebuilds its scene so the status/log projections it reads reflect
+        // the latest run. Reports only — no texture is touched here.
+        self.run_state.drain_from(&mut self.runtime);
 
-        // Then release what the document has stopped holding.
+        // Then everything that allocates: take in the values published against
+        // the compile the reports just acknowledged, and release what the
+        // document has stopped holding.
         self.reconcile_derived_state(ui);
 
         self.handle_close_request(ui);

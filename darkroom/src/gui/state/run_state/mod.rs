@@ -37,7 +37,6 @@ use palantir::Ui;
 
 use crate::core::runtime_host::RuntimeHost;
 use scenarium::CompiledGraph;
-use scenarium::DynamicValue;
 use scenarium::LogLevel;
 use scenarium::NodeExecutionStatus;
 use scenarium::NodeId;
@@ -151,15 +150,19 @@ impl RunState {
     /// scheduled by the worker's wake callback.
     ///
     /// Pulls rather than being pushed to: the worker is headless
-    /// ([`RuntimeHost`] names no GUI type), while this projection registers
-    /// textures and so needs a `Ui`. Reading across the boundary in this
-    /// direction keeps the frame context out of the runtime, and puts the fold
-    /// beside the state it writes — every arm below lands on `self`, and only
-    /// the status line reaches back.
+    /// ([`RuntimeHost`] names no GUI type), so reading across the boundary in
+    /// this direction keeps it that way, and puts the fold beside the state it
+    /// writes — every arm below lands on `self`, and only the status line
+    /// reaches back.
+    ///
+    /// Reports only. A published *value* is taken separately by
+    /// [`Self::ingest_published`], which has to allocate a texture for it and
+    /// so belongs with the frame's other GPU work rather than here — this is a
+    /// pure fold and names no `Ui`.
     ///
     /// Called before the session rebuilds its scene, so the projections it
     /// reads reflect the latest run.
-    pub(crate) fn drain_from(&mut self, runtime: &mut RuntimeHost, ui: &Ui) {
+    pub(crate) fn drain_from(&mut self, runtime: &mut RuntimeHost) {
         // Owned, so the channel borrow is gone before the status writes
         // below — both come off the same `runtime`.
         let events = runtime.drain_worker();
@@ -196,10 +199,6 @@ impl RunState {
                 }
             }
         }
-        // After the reports, so a value published during this run lands against
-        // the compile the stream just acknowledged rather than the previous one.
-        let previews = runtime.drain_previews();
-        self.ingest_previews(ui, previews);
     }
 
     pub(crate) fn status(&self, id: NodeId) -> ExecStatus {
@@ -388,10 +387,15 @@ impl RunState {
     /// compile is dropped — the node it named may not exist any more, and a
     /// preview only ever shows the current run's value anyway.
     ///
-    /// Stores only. `Editor::frame` runs the store's one reconcile pass, which
-    /// is what releases a value whose node is gone and uploads a full-resolution
-    /// texture for an open viewer.
-    pub(crate) fn ingest_previews(&mut self, ui: &Ui, published: Vec<(NodeId, DynamicValue)>) {
+    /// Stores only; the store's own reconcile pass — which runs right after
+    /// this one — is what releases a value whose node is gone and uploads a
+    /// full-resolution texture for an open viewer.
+    ///
+    /// **After [`Self::drain_from`]**, which is what makes `compiled` name the
+    /// compile the report stream just acknowledged. Run before it and a value
+    /// from the new run is gated against the old compile and silently dropped.
+    pub(crate) fn ingest_published(&mut self, runtime: &RuntimeHost, ui: &Ui) {
+        let published = runtime.drain_previews();
         if published.is_empty() {
             return;
         }
