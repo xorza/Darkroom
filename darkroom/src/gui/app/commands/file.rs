@@ -49,15 +49,26 @@ impl App {
     }
 
     /// Swap in `open` and reset every piece of state derived from the
-    /// document it replaces. A fresh [`Editor`] does most of it in one move:
-    /// empty undo history (restoring the old doc via Cmd-Z would replay
-    /// nodes from intent history that no longer matches the live tree),
-    /// dropped gesture state, forced scene rebuild, and cleared run results —
-    /// preview textures included. The worker's disk cache repoints too, so
-    /// disk-backed nodes read the new document's store rather than the old
-    /// one's.
+    /// document it replaces.
+    ///
+    /// A fresh [`Editor`] covers what it owns in one move: empty undo history
+    /// (restoring the old doc via Cmd-Z would replay intents that no longer
+    /// match the live tree), dropped gesture state, forced scene rebuild.
+    ///
+    /// The run projections are `App`'s, so they are cleared here rather than
+    /// falling out of that — and they have to be: node ids are *persisted*, so
+    /// reopening a document would otherwise reattach the previous session's
+    /// statuses, timings, logs and preview images to nodes that have not run.
+    /// [`RunState::clear`] drops exactly the document-derived half and leaves
+    /// the worker-stream half (`compiled`, `activity`, `cache_ram`) standing —
+    /// an in-flight run still reports against the program the worker
+    /// acknowledged, and its cache really does still hold that RAM.
+    ///
+    /// The worker's disk cache repoints too, so disk-backed nodes read the new
+    /// document's store rather than the old one's.
     fn adopt_document(&mut self, open: OpenDocument) {
         self.editor = Editor::new();
+        self.run_state.clear();
         self.open = open;
         self.runtime.set_document_cache(self.open.path.as_deref());
         self.remember_document_path();
