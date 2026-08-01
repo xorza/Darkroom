@@ -40,7 +40,7 @@ impl App {
     /// untouched. Worker status reports acknowledge actual execution and
     /// event-loop transitions.
     pub(crate) fn run_graph(&mut self) {
-        self.runtime.run_once(&self.open.document.graph);
+        self.runtime.run_once(&self.session.open.document.graph);
     }
 
     /// Like [`Self::run_graph`], but seeds the run at one node: only its
@@ -54,15 +54,19 @@ impl App {
         // the *node's* graph, not the focused pane's: with several graph
         // panes open, a root node's chip stays valid while focus sits
         // elsewhere.
-        if self.open.document.graph.find(node_id).is_none() {
+        if self.session.open.document.graph.find(node_id).is_none() {
             debug_assert!(false, "run-node reached for a node outside the root graph");
             return;
         }
-        self.runtime.run_node(&self.open.document.graph, node_id);
+        self.runtime
+            .run_node(&self.session.open.document.graph, node_id);
     }
 
     fn evict_cache(&mut self, node_id: NodeId) {
-        if self.runtime.evict_cache(&self.open.document.graph, node_id) {
+        if self
+            .runtime
+            .evict_cache(&self.session.open.document.graph, node_id)
+        {
             self.run_state.clear_cache_projections();
         }
     }
@@ -72,7 +76,8 @@ impl App {
     /// the engine's status log) leaves the loop's running state as it was —
     /// nothing reached the worker.
     fn start_events(&mut self) {
-        self.runtime.start_event_loop(&self.open.document.graph);
+        self.runtime
+            .start_event_loop(&self.session.open.document.graph);
     }
 
     /// Stop the worker's event loop.

@@ -21,9 +21,9 @@ use crate::gui::theme::Theme;
 pub(crate) mod commands;
 pub(crate) mod ctx;
 mod discard_dialog;
-pub(crate) mod editor;
+pub(crate) mod session;
 
-use editor::Editor;
+use session::Session;
 
 /// The editor shell: it owns the open document and the runtime services
 /// evaluating it, and lends the document to the [`Editor`] that authors each
@@ -32,10 +32,9 @@ use editor::Editor;
 /// `Editor::frame` and handles actions only in the pass that receives input.
 #[derive(Debug)]
 pub(crate) struct App {
-    editor: Editor,
-    /// The document being edited, with the path it saves to and whether it
-    /// has diverged from what is on disk.
-    open: OpenDocument,
+    /// The document being edited and the UI showing it — replaced as a unit
+    /// when a different file is opened, since neither outlives the other.
+    session: Session,
     /// The func library, the evaluation worker, and the status log they
     /// report into — everything the document is executed against.
     runtime: RuntimeHost,
@@ -111,8 +110,7 @@ impl App {
         let open = OpenDocument::load_preferred(&mut preferences, &mut runtime.status);
         runtime.set_document_cache(open.path.as_deref());
         let mut app = Self {
-            editor: Editor::new(),
-            open,
+            session: Session::new(open),
             runtime,
             run_state: RunState::default(),
             theme: Theme::default(),
@@ -211,9 +209,10 @@ impl App {
     /// skips a panel whose node is gone — so the lag costs memory and nothing
     /// else.
     fn reconcile_derived_state(&mut self, ui: &Ui) {
-        let document = &self.open.document;
-        self.run_state.previews.reconcile(ui, document);
-        self.editor.reconcile_caches(document);
+        self.run_state
+            .previews
+            .reconcile(ui, &self.session.open.document);
+        self.session.reconcile_caches();
     }
 
     /// Mirror the window's live geometry into the persisted preferences
@@ -256,7 +255,7 @@ impl App {
     /// unsaved changes and the confirm preference both hold. The single
     /// predicate behind every path that replaces or discards the document.
     fn needs_discard_confirmation(&self) -> bool {
-        self.open.dirty && self.preferences.confirm_unsaved_changes
+        self.session.open.dirty && self.preferences.confirm_unsaved_changes
     }
 
     /// Carry out `transition`, or raise the unsaved-changes prompt first when
@@ -308,7 +307,7 @@ impl App {
         if outcome.choice == DiscardChoice::Save {
             self.save_current();
         }
-        let resolution = outcome.resolve(self.open.dirty);
+        let resolution = outcome.resolve(self.session.open.dirty);
         if resolution.silence_prompt {
             self.set_confirm_unsaved(false);
         }
@@ -325,6 +324,7 @@ impl App {
             ui.keep_open();
         }
         let file_name = self
+            .session
             .open
             .path
             .as_deref()
@@ -377,13 +377,9 @@ impl palantir::App for App {
                 process_memory: self.process_memory.sample(Instant::now()),
             },
         );
-        let mut needs_relayout = self.editor.frame(
-            ui,
-            &mut self.open,
-            ctx,
-            &mut self.preferences,
-            &mut self.requests,
-        );
+        let mut needs_relayout =
+            self.session
+                .frame(ui, ctx, &mut self.preferences, &mut self.requests);
         // What the editor left behind: every command the frame raised, in the
         // order it raised them — a keyboard chord and a click on the same
         // frame both land. Collected first because running one needs all of
