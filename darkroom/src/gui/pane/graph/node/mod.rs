@@ -68,6 +68,21 @@ pub(super) struct NodeUI {
 /// through [`DrawCtx`] so they can paint, the context menu because it is the
 /// canvas's and not a node's. So the clicks are seen here and applied by the
 /// caller once the draw is over and both can be taken `&mut`.
+/// What drawing **one** node reports back: the signals its own widgets
+/// produced but could not act on, in the shape palantir's
+/// `TextEditResponse` uses — the drawer is authoritative about what it did
+/// with this frame's input, so no caller re-polls for it.
+///
+/// Booleans, because this is one node. Which node across the scene is
+/// [`NodeDrawOutcome`]'s question, and folding these into it is the loop's
+/// job rather than the node's.
+#[derive(Default, Debug)]
+pub(super) struct NodeResponse {
+    pub(super) inspect_toggled: bool,
+    pub(super) body_acted: bool,
+    pub(super) menu_opened: bool,
+}
+
 #[derive(Default, Debug)]
 pub(crate) struct NodeDrawOutcome {
     /// The node whose `i` chip was clicked, cycling its inspection panel.
@@ -134,7 +149,14 @@ impl NodeUI {
                 continue;
             }
             let ncx = n.with_hover(node_hovered(ui, n.id));
-            self.draw_one(ui, ncx, dcx, probe, out, &mut outcome);
+            let node = NodeWidget::new(self, ncx).show(ui, dcx, probe, out);
+            if node.inspect_toggled {
+                outcome.inspect_toggled.get_or_insert(n.id);
+            }
+            outcome.body_acted |= node.body_acted;
+            if node.menu_opened {
+                outcome.menu_opened.get_or_insert(n.id);
+            }
         }
         self.focus_kept_last = focus_kept;
         // Belt-and-braces against a node deleted mid-drag; `prepass` makes
@@ -143,15 +165,43 @@ impl NodeUI {
         outcome
     }
 
-    fn draw_one(
-        &mut self,
+    /// Pre-record pass: peek palantir's input state for any widgets
+    /// this `NodeUI` owns and push the corresponding `GraphIntent`s into
+    /// `out`. Runs in the pre-record pass, so any state mutation applied
+    /// from these intents (notably drag-driven `MoveSelection`) lands in
+    /// `Document` before recording — Pass A's arrange already reflects the
+    /// cursor; no Pass B relayout retry.
+    pub(super) fn prepass(&mut self, ui: &Ui, graph_ctx: GraphCtx<'_>, out: &mut Requests) {
+        self.drag.advance(ui, graph_ctx, out);
+    }
+}
+
+/// One node's body, as a widget over the state every node on the canvas
+/// shares.
+///
+/// A builder in palantir's shape — `new(..).show(ui, ..)` — but taking its
+/// state `&mut` rather than keeping it in `ui.state_mut()`, because none of
+/// what [`NodeUI`] holds is per-node: there is one pointer so one drag, and
+/// `row_tracks` is deliberately one buffer the whole frame slices out of.
+/// Per-widget state would reintroduce the allocation it exists to avoid.
+pub(super) struct NodeWidget<'a> {
+    state: &'a mut NodeUI,
+    ncx: NodeCtx<'a>,
+}
+
+impl<'a> NodeWidget<'a> {
+    pub(super) fn new(state: &'a mut NodeUI, ncx: NodeCtx<'a>) -> Self {
+        Self { state, ncx }
+    }
+
+    pub(super) fn show(
+        self,
         ui: &mut Ui,
-        ncx: NodeCtx<'_>,
         dcx: DrawCtx<'_>,
         probe: &mut BreakerProbe<'_>,
         out: &mut Requests,
-        outcome: &mut NodeDrawOutcome,
-    ) {
+    ) -> NodeResponse {
+        let Self { state, ncx } = self;
         let (theme, node) = (ncx.theme(), ncx);
 
         // Probe the body against the breaker polyline. Hit → recolor border
@@ -200,7 +250,7 @@ impl NodeUI {
 
         // Borrowed off `self` before the body closure so it can't conflict
         // with the drag latch below, which reads a different field.
-        let row_tracks = &mut self.row_tracks;
+        let row_tracks = &mut state.row_tracks;
         let panel = Panel::vstack()
             .id(node_widget_id(node.id))
             .position(node.pos)
@@ -219,9 +269,7 @@ impl NodeUI {
                     .with_shadow(shadow),
             )
             .show(ui, |ui| {
-                if header(ui, ncx, dcx, out) {
-                    outcome.inspect_toggled.get_or_insert(node.id);
-                }
+                let inspect_toggled = header(ui, ncx, dcx, out);
                 status_row(ui, ncx, out);
                 ports_row(ui, ncx, dcx, row_tracks, out);
                 // A preview has no output, so it has no cached value for the
@@ -231,19 +279,23 @@ impl NodeUI {
                 } else {
                     memory_row(ui, ncx);
                 }
+                inspect_toggled
             });
-        // Pull the body response's click flag into a local so its `&Ui`
-        // borrow ends before the handle scan below. (`Response` is a lazy
-        // probe over `response_for`, so reading the body through either is
-        // the same last-frame state.)
+        // Pull the body response's flags into locals so its `&Ui` borrow ends
+        // before the handle scan below. (`Response` is a lazy probe over
+        // `response_for`, so reading the body through either is the same
+        // last-frame state.)
+        //
+        // `body_acted` is "the user acted on a node", as opposed to on the
+        // bare canvas — what closes the unpinned inspection panels. The title
+        // is deliberately not folded in: a title drag moves the node but has
+        // never counted.
         let body_clicked = panel.response.left.clicked();
-        // "The user acted on a node", as opposed to on the bare canvas — what
-        // closes the unpinned inspection panels. The title is deliberately not
-        // folded in: a title drag moves the node but has never counted.
-        outcome.body_acted |= body_clicked || panel.response.left.drag.started();
-        if panel.response.right.clicked() {
-            outcome.menu_opened.get_or_insert(node.id);
-        }
+        let response = NodeResponse {
+            inspect_toggled: panel.inner,
+            body_acted: body_clicked || panel.response.left.drag.started(),
+            menu_opened: panel.response.right.clicked(),
+        };
 
         // Click without drag → select. Plain click selects only this
         // node; Shift-click toggles its membership in the current
@@ -272,18 +324,9 @@ impl NodeUI {
                 click_intents(false, ncx.graph_ctx, node.id, out);
                 vec![(node.id, node.pos)]
             };
-            self.drag.latch(node.id, start_positions, handle);
+            state.drag.latch(node.id, start_positions, handle);
         }
-    }
-
-    /// Pre-record pass: peek palantir's input state for any widgets
-    /// this `NodeUI` owns and push the corresponding `GraphIntent`s into
-    /// `out`. Runs in the pre-record pass, so any state mutation applied
-    /// from these intents (notably drag-driven `MoveSelection`) lands in
-    /// `Document` before recording — Pass A's arrange already reflects the
-    /// cursor; no Pass B relayout retry.
-    pub(super) fn prepass(&mut self, ui: &Ui, graph_ctx: GraphCtx<'_>, out: &mut Requests) {
-        self.drag.advance(ui, graph_ctx, out);
+        response
     }
 }
 
