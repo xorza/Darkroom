@@ -264,20 +264,6 @@ impl GraphUI {
             self.reset_gestures();
             self.inspectors.close_unpinned();
         }
-        let Self {
-            geometry,
-            hits,
-            inspectors,
-            gesture: frame_gesture,
-            cancelled,
-            pan_anchor,
-            node_ui,
-            preview_drag,
-            new_node_ui,
-            connection_ui,
-            subscription_ui,
-            ..
-        } = self;
         // Resolve the frame's bare-canvas gesture and park it for `draw` to
         // read back — the classification is one response poll, and both
         // phases must agree on the winner.
@@ -286,15 +272,21 @@ impl GraphUI {
         // flight has nothing to cancel, so each applies this to its own
         // state slot unconditionally and lets its existing "no gesture"
         // path do the rest.
-        *cancelled = ui.escape_pressed();
+        self.cancelled = ui.escape_pressed();
         let gesture = classify_canvas_gesture(ui);
-        *frame_gesture = gesture;
-        pan_zoom::emit_pan_zoom(pan_anchor, ui, graph_ctx, gesture, out);
-        node_ui.prepass(ui, graph_ctx, out);
-        geometry.rebuild(ui, graph_ctx, hits);
+        self.gesture = gesture;
+        pan_zoom::emit_pan_zoom(&mut self.pan_anchor, ui, graph_ctx, gesture, out);
+        self.node_ui.prepass(ui, graph_ctx, out);
+        self.geometry.rebuild(ui, graph_ctx, &mut self.hits);
         // Everything below reads the settled geometry and this frame's swept
         // hits, so from here the canvas has a context of its own.
-        let cx = CanvasCtx::new(graph_ctx, geometry, hits, gesture, *cancelled);
+        let cx = CanvasCtx::new(
+            graph_ctx,
+            &self.geometry,
+            &self.hits,
+            gesture,
+            self.cancelled,
+        );
         // After the rebuild, which is where the port half of `hits` fills:
         // a port double-click rides the same response read as that port's
         // center, so there is nothing to act on before it.
@@ -303,25 +295,25 @@ impl GraphUI {
         // frame's drag edges and centers, and `preview_drag_modifier` keeps
         // them disjoint: the preview spawn takes the output column under the
         // chord, the wire gesture takes it otherwise.
-        preview_drag.apply(ui, cx, out);
+        self.preview_drag.apply(ui, cx, out);
         // A node picked from a drop-spawned palette last frame re-floats its
         // wire so the user clicks the exact port to land it.
-        let resume = new_node_ui.take_resume_floating();
-        connection_ui.apply(ui, cx, resume, out);
+        let resume = self.new_node_ui.take_resume_floating();
+        self.connection_ui.apply(ui, cx, resume, out);
         // Subscription wires (emitter → subscriber) latch/commit here, for
         // the same pre-record reasons as the connection gesture above; an
         // emitter glyph and a data port can't both latch (different widget-id
         // spaces).
-        subscription_ui.apply(ui, cx, out);
+        self.subscription_ui.apply(ui, cx, out);
         // Inspector chip toggles + the close-on-outside-action sweep, both
         // off this frame's swept hits.
-        inspectors.apply(ui, cx);
+        self.inspectors.apply(ui, cx);
         // Last, once: both wire gestures have settled their snap targets
         // above, and the flags this writes are document-unique, so the draw
         // reads finished geometry. Taking the table back `&mut` is what ends
         // `cx` — nothing below may read one.
-        connection_ui.bake_snap_hover(geometry);
-        subscription_ui.bake_snap_hover(geometry);
+        self.connection_ui.bake_snap_hover(&mut self.geometry);
+        self.subscription_ui.bake_snap_hover(&mut self.geometry);
         // The keyboard half of the same phase. Last, so a chord reads the
         // document the pointer gestures above were raised against.
         shortcuts::emit(ui, graph_ctx, out);
@@ -378,19 +370,13 @@ impl GraphUI {
     /// `apply`, then the chip clicks that mean an [`AppCommand`]. Everything
     /// here reads last frame's responses and raises requests; nothing draws.
     fn resolve_gestures(&mut self, ui: &mut Ui, graph_ctx: GraphCtx<'_>, out: &mut Requests) {
-        let Self {
-            geometry,
-            hits,
-            gesture,
-            cancelled,
-            selection_ui,
-            breaker_ui,
-            connection_ui,
-            new_node_ui,
-            node_menu,
-            ..
-        } = self;
-        let cx = CanvasCtx::new(graph_ctx, geometry, hits, *gesture, *cancelled);
+        let cx = CanvasCtx::new(
+            graph_ctx,
+            &self.geometry,
+            &self.hits,
+            self.gesture,
+            self.cancelled,
+        );
         // Click on bare canvas (node panels hit-test first, so this
         // only fires when the click missed every node) clears the
         // selection. Skip when nothing is selected so we don't pollute
@@ -408,26 +394,27 @@ impl GraphUI {
         // graph, and the offset cache fills in port centers for nodes that
         // hadn't recorded yet. `cx` carries that same table; no second
         // rebuild needed.
-        selection_ui.apply(ui, cx, out);
-        breaker_ui.apply(ui, cx, out);
+        self.selection_ui.apply(ui, cx, out);
+        self.breaker_ui.apply(ui, cx, out);
         // A connection released over empty canvas (detected in `prepass`)
         // opens the new-node popup; picking a node re-floats the wire. Only
         // the pane holding the dropped wire's source claims it.
-        let pending_connection = connection_ui.take_pending_connection();
+        let pending_connection = self.connection_ui.take_pending_connection();
         // A right-click that just ended a floating wire shouldn't also open
         // the palette — suppress the `NewNode` gesture for this frame, by
         // handing the popup a context whose gesture slot is empty.
-        let popup_cx = if connection_ui.ended_on_secondary() {
+        let popup_cx = if self.connection_ui.ended_on_secondary() {
             cx.without_gesture()
         } else {
             cx
         };
-        new_node_ui.apply(ui, popup_cx, pending_connection, out);
+        self.new_node_ui
+            .apply(ui, popup_cx, pending_connection, out);
         // The menu records every frame whatever comes of it — its popup owns a
         // lifecycle that depends on it — and everything a pick means goes onto
         // `out`, so there is no precedence to settle here: a frame in which
         // both a menu pick and a chip click landed raises both.
-        node_menu.apply(ui, cx, out);
+        self.node_menu.apply(ui, cx, out);
         // The app-tier tail of the same read: each chip click in the recorded
         // tree — an `FsPath` input's pick button, a node header's play or
         // cache-eviction chip. Each source surfaces only a domain fact (which
@@ -459,22 +446,13 @@ impl GraphUI {
     /// the wires, node bodies, inspection panels, and in-flight
     /// gesture previews.
     fn record_canvas(&mut self, ui: &mut Ui, graph_ctx: GraphCtx<'_>, out: &mut Requests) {
-        let Self {
-            last_prepass_frame: _,
-            background,
-            geometry,
-            hits,
-            cancelled,
-            inspectors,
-            gesture,
-            node_ui,
-            breaker_ui,
-            connection_ui,
-            subscription_ui,
-            selection_ui,
-            ..
-        } = self;
-        let cx = CanvasCtx::new(graph_ctx, geometry, hits, *gesture, *cancelled);
+        let cx = CanvasCtx::new(
+            graph_ctx,
+            &self.geometry,
+            &self.hits,
+            self.gesture,
+            self.cancelled,
+        );
         let theme = cx.theme();
         let viewport = graph_ctx.viewport();
         let (pan_val, zoom_val) = (viewport.pan, viewport.zoom);
@@ -482,7 +460,8 @@ impl GraphUI {
         // a band is in flight over *this* pane, else its committed set.
         // The preview is kept out of the document, so a band in flight
         // changes what paints without recording an edit.
-        let selected = selection_ui
+        let selected = self
+            .selection_ui
             .preview()
             .map_or(Selection::Committed(graph_ctx.selected()), Selection::swept);
 
@@ -515,7 +494,7 @@ impl GraphUI {
             .show(ui, |ui| {
                 // Dotted backdrop in screen space, beneath the inner
                 // (transformed) canvas — so it paints under everything.
-                background.draw(ui, theme, pan_val, zoom_val);
+                self.background.draw(ui, theme, pan_val, zoom_val);
                 Panel::canvas()
                     .id(inner_canvas_widget_id())
                     .size((Sizing::FILL, Sizing::FILL))
@@ -540,22 +519,22 @@ impl GraphUI {
                         );
                         // Painted first so it sits beneath the
                         // connections and node bodies.
-                        selection_ui.draw(ui, theme);
+                        self.selection_ui.draw(ui, theme);
                         // One bundle for everything this pane records: the
                         // node bodies below, and the inspection
                         // panels after them. Built out here rather than inside
                         // the probe scope so both passes read the same refs.
-                        let dcx = DrawCtx::new(cx, selected, inspectors, cull);
+                        let dcx = DrawCtx::new(cx, selected, &self.inspectors, cull);
                         {
-                            let mut probe = breaker_ui.probe();
+                            let mut probe = self.breaker_ui.probe();
                             // One emphasis resolution for both wire families:
                             // any wire gesture — either drag controller or an
                             // active breaker scribble — fades the standing set.
                             // All three are scoped to this pane, so a gesture
                             // running on a neighbouring canvas leaves these
                             // wires at full strength.
-                            let fading = connection_ui.is_dragging()
-                                || subscription_ui.is_dragging()
+                            let fading = self.connection_ui.is_dragging()
+                                || self.subscription_ui.is_dragging()
                                 || probe.is_active();
                             let emphasis = WireEmphasis::resolve(theme.canvas.bg, fading);
                             // Both wire renderers share these inputs, so
@@ -575,16 +554,16 @@ impl GraphUI {
                             // Node bodies paint back-to-front by each
                             // placement's depth (`GraphView::paint_order`), so
                             // a clicked node raises above its neighbours.
-                            node_ui.draw_all(ui, dcx, &mut probe, out);
+                            self.node_ui.draw_all(ui, dcx, &mut probe, out);
                         }
                         // Inspection panels paint after the node bodies so
                         // they sit on top and win clicks over the nodes
                         // beneath; positioned in world coords, so they ride
                         // the inner-canvas transform.
-                        inspectors.draw_panels(ui, dcx);
-                        breaker_ui.draw(ui, theme);
-                        connection_ui.draw_in_flight(ui, cx, canvas_origin);
-                        subscription_ui.draw_in_flight(ui, cx, canvas_origin);
+                        self.inspectors.draw_panels(ui, dcx);
+                        self.breaker_ui.draw(ui, theme);
+                        self.connection_ui.draw_in_flight(ui, cx, canvas_origin);
+                        self.subscription_ui.draw_in_flight(ui, cx, canvas_origin);
                     });
             });
     }
