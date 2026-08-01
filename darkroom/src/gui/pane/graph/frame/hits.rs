@@ -15,41 +15,41 @@
 //! [`WidgetId`] any more, and the widget-id spelling of each affordance is
 //! stated once here instead of in six places.
 //!
-//! **Two writers, one per phase, and they do not overlap.**
-//! [`CanvasHits::scan`] clears the digest and fills the node half in the
-//! navigation phase. `CanvasGeometry::rebuild` fills the port half later,
-//! in the prepass, because it has to walk every visible port anyway — so a
-//! port's double-click rides the same response read as its center instead
-//! of costing a poll of its own.
+//! **One writer.** `CanvasGeometry::rebuild` fills the whole digest as it
+//! walks the scene in the prepass — [`CanvasHits::clear`] first, then
+//! [`CanvasHits::note_node`] and [`CanvasHits::note_port`] per node. It has
+//! to walk every node and every visible port anyway, and it needs the very
+//! same responses: a node's body for its size and screen rect, a port's
+//! circle for its center. Reading them there means an interaction costs no
+//! poll of its own.
 //!
-//! **It culls itself.** A node's chips are its descendants, so a node
-//! whose *body* recorded nothing last frame had nothing under it to
-//! interact with. That takes one response poll to establish — the same
-//! poll whose click and drag edges the sweep already wants — after which
-//! an off-screen node costs nothing further. So the per-frame floor is
-//! one poll per node in the scene, and everything past it is bounded by
-//! what is actually on screen. `rebuild` culls the port half on the same
-//! test, for the same reason.
+//! **It culls itself.** A node's chips and ports are its descendants, so a
+//! node whose *body* recorded nothing last frame had nothing under it to
+//! interact with. That takes one response poll to establish — the same poll
+//! the rebuild already wants — after which an off-screen node costs nothing
+//! further. So the per-frame floor is one poll per node in the scene, and
+//! everything past it is bounded by what is actually on screen.
 //!
-//! **The node half is read against a later scene than it was filled
-//! from.** [`CanvasHits::scan`] runs before `Editor::rebuild_scene`,
-//! because two of its consumers (the graph-open and preview-open chips)
-//! have to resolve before the tab set settles. Its hits are therefore ids
-//! from *last* frame's projection; a consumer confirms the node is still
-//! in the pane it is drawing (`Pane::contains`) before acting, which
-//! is the same check it needed anyway for a hit belonging to another pane.
-//! The port half has no such gap — it fills after the rebuild.
+//! That floor is a consequence of palantir's response API being pull-by-id:
+//! "was this node recorded" is only answerable by asking about its id, and a
+//! [`WidgetId`] cannot be mapped back to the node it names. A palantir-side
+//! accessor for the widget a press or click landed on would remove the walk
+//! rather than shrink it.
+//!
+//! **The digest is read against a later scene than it was filled from.** It
+//! holds ids from *last* frame's projection; a consumer confirms the node is
+//! still in the pane it is drawing before acting, which is the same check it
+//! needed anyway for a hit belonging to another pane.
 
 use palantir::{ResponseState, Ui, WidgetId};
 use scenarium::{InputPort, NodeId};
 
 use crate::core::document::{PortKind, PortRef};
-use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::graph_ctx::node_ctx::NodeCtx;
+use crate::gui::pane::graph::node::drag_handles;
 use crate::gui::pane::graph::node::header::{cache_eviction_badge_wid, play_badge_wid};
 use crate::gui::pane::graph::node::port_row::{const_editor_wid, input_cell_wid};
 use crate::gui::pane::graph::node::preview_row::preview_image_wid;
-use crate::gui::pane::graph::node::{drag_handles, node_widget_id};
 use crate::gui::pane::graph::paint::inspector::inspect_badge_wid;
 
 /// A left-clickable chip on a node, named by what it does rather than by
@@ -81,9 +81,10 @@ struct ChipHit {
     chip: Chip,
 }
 
-/// Last frame's canvas interactions. Every field is rewritten by
-/// [`Self::scan`]; the struct is retained on `GraphUI` only so it has one
-/// owner, not to carry state between frames.
+/// Last frame's canvas interactions. Every field is rewritten each frame by
+/// [`Self::clear`] + [`Self::note_node`] / [`Self::note_port`]; the struct is
+/// retained on `GraphUI` only so it has one owner, not to carry state between
+/// frames.
 ///
 /// Each slot is an `Option` rather than a collection because a pointer
 /// button reaches one widget at a time — two nodes cannot both have had
@@ -141,22 +142,20 @@ impl CanvasHits {
         self.const_editor
     }
 
-    /// Clear the digest and refill its node half from last frame's
-    /// responses, across every visible pane. Run once per frame, in the
-    /// navigation phase — see the module docs for why there, what it
-    /// costs, and which pass fills the port half.
-    pub(crate) fn scan(&mut self, ui: &Ui, graph: GraphCtx<'_>) {
+    /// Empty the digest, ahead of the walk that refills it whole.
+    pub(super) fn clear(&mut self) {
         *self = Self::default();
-        if !graph.is_visible() {
-            return;
-        }
-        for node in graph.nodes() {
-            self.scan_node(ui, node);
-        }
     }
 
-    fn scan_node(&mut self, ui: &Ui, node: NodeCtx<'_>) {
-        let body = ui.response_for(node_widget_id(node.id));
+    /// Fold one node's interactions in, given the body response
+    /// [`CanvasGeometry::rebuild`](super::geometry::CanvasGeometry::rebuild)
+    /// already read for it — so the body is polled once for its size, its
+    /// screen rect and its interactions together, rather than once by each.
+    ///
+    /// That response is also the cull test: `layout_rect` is `None` exactly
+    /// when the node recorded nothing last frame, which is when none of its
+    /// descendants can have been interacted with either.
+    pub(super) fn note_node(&mut self, ui: &Ui, node: NodeCtx<'_>, body: ResponseState) {
         if body.left.clicked() || body.left.drag.started() {
             self.body_acted.get_or_insert(node.id);
         }

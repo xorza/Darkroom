@@ -9,9 +9,9 @@
 //! those needs.
 //!
 //! This file is [`GraphUI`] and nothing else: the state a graph pane keeps
-//! across frames, the three phases that drive it in frame order
-//! ([`GraphUI::scan_navigation`], [`GraphUI::prepass`], [`GraphUI::draw`]),
-//! and the cache sweep ([`GraphUI::retain_nodes`]) that runs outside them.
+//! across frames, the two phases that drive it ([`GraphUI::prepass`] and
+//! [`GraphUI::draw`]), and the cache sweep ([`GraphUI::retain_nodes`]) that
+//! runs outside them.
 
 pub(crate) mod background;
 pub(crate) mod canvas;
@@ -116,16 +116,14 @@ pub(crate) struct GraphUI {
     /// which is the only thing that pairs it with the hits and the gesture it
     /// was settled beside. Tests read it through [`internals::geometry`].
     geometry: CanvasGeometry,
-    /// Last frame's node interactions, swept once at the top of the frame
-    /// and read by every pass below instead of each re-polling the same
-    /// widget ids. Persistent for ownership only — [`CanvasHits::scan`]
-    /// rewrites it whole.
+    /// Last frame's node interactions, swept once and read by every pass
+    /// below instead of each re-polling the same widget ids. Persistent for
+    /// ownership only — the rebuild rewrites it whole.
     ///
-    /// Swept by [`Self::scan_navigation`], *before* the scene is rebuilt,
-    /// because the preview-open chip it collects has to resolve before the tab
-    /// set settles — so it holds ids from last frame's projection, and every
-    /// reader confirms the node is still in the pane it is drawing before
-    /// acting.
+    /// Filled by [`CanvasGeometry::rebuild`] in [`Self::prepass`], off the
+    /// same per-node and per-port responses that pass reads anyway — so it
+    /// holds ids from last frame's projection, and every reader confirms the
+    /// node is still in the pane it is drawing before acting.
     hits: CanvasHits,
     /// Open inspection panels, keyed by node. Outside the gesture group
     /// so pinned panels survive a tab switch; panels only paint for nodes
@@ -169,34 +167,6 @@ pub(crate) struct GraphUI {
 }
 
 impl GraphUI {
-    /// The canvas's navigation-phase pass: sweep last frame's node responses
-    /// into [`Self::hits`], then raise the one request that has to resolve
-    /// before the tab set settles — a click on a preview card's image, which
-    /// opens that node in a viewer tab.
-    ///
-    /// That chip is *why* the sweep runs this early; every other reader of the
-    /// digest is a later phase of the same frame. Does nothing when no pane is
-    /// showing the graph — it runs before the tab set settles, so it cannot
-    /// assume one.
-    ///
-    /// The chip's siblings (play, cache-eviction) are raised in the record
-    /// instead, off the same digest — see [`Self::resolve_gestures`]. They are
-    /// app-tier commands with nothing to settle ahead of, so they wait for the
-    /// pass that reads a settled document.
-    pub(crate) fn scan_navigation(&mut self, ui: &Ui, graph_ctx: GraphCtx<'_>, out: &mut Requests) {
-        self.hits.scan(ui, graph_ctx);
-        // Read off last frame's projection, so the node may be gone already.
-        // No `contains` filter for that — unlike the record-phase chips, this
-        // one resolves before the scene settles. A tab for a dead node is
-        // pruned by `reconcile_with_graph` in the very drain that lands this
-        // op, and `OpenTab` dedupes, so a stale hit costs nothing.
-        if let Some(node) = self.hits.chip(Chip::PreviewImage) {
-            out.push_view(DockOp::OpenTab {
-                tab: TabRef::ImageViewer(node),
-            });
-        }
-    }
-
     /// Evict this canvas's two `NodeId`-keyed caches down to the nodes the
     /// document still holds — the cross-frame geometry and the open inspection
     /// panels.
@@ -314,7 +284,22 @@ impl GraphUI {
         self.gesture = gesture;
         pan_zoom::emit_pan_zoom(&mut self.pan_anchor, ui, graph_ctx, gesture, out);
         self.node_ui.prepass(ui, graph_ctx, out);
+        // One walk, filling the geometry caches and the whole hit digest off
+        // the same per-node and per-port responses.
         self.geometry.rebuild(ui, graph_ctx, &mut self.hits);
+        // A click on a preview card's image opens that node in a viewer tab.
+        // Raised here rather than beside the record's app-tier chips because
+        // it is a *view* request: landing it in this phase's drain puts the tab
+        // on screen for the record below, so it opens on the frame it was asked
+        // for. Read off last frame's projection, so the node may be gone
+        // already — `OpenTab` dedupes and `reconcile_with_graph` prunes a tab
+        // whose node died, both in the very drain that lands this op, so a
+        // stale hit costs nothing.
+        if let Some(node) = self.hits.chip(Chip::PreviewImage) {
+            out.push_view(DockOp::OpenTab {
+                tab: TabRef::ImageViewer(node),
+            });
+        }
         // Everything below reads the settled geometry and this frame's swept
         // hits, so from here the canvas has a context of its own.
         let cx = CanvasCtx::new(
@@ -628,9 +613,60 @@ pub(crate) mod harness;
 
 #[cfg(test)]
 mod tests {
+    use imaginarium::{ColorFormat, Image as RawImage, ImageBuffer, ImageDesc};
+    use lens::Image as LensImage;
+    use scenarium::DynamicValue;
+
     use super::*;
     use crate::core::document::harness::DocFixture;
+    use crate::core::preview::preview_func;
     use crate::gui::pane::graph::harness::CanvasHarness;
+    use crate::gui::pane::graph::node::preview_row::preview_image_wid;
+
+    /// A 2×1 opaque image — the smallest thing a preview card will render, and
+    /// rendering one is what makes the card clickable at all (`Sense::NONE`
+    /// without a value), so the chip only exists once something has published.
+    fn image_value() -> DynamicValue {
+        let desc = ImageDesc::new(2, 1, ColorFormat::RGBA_U8);
+        let raw = RawImage::new_with_data(desc, vec![255; desc.row_bytes()]).unwrap();
+        DynamicValue::from_custom(LensImage::from(ImageBuffer::from_cpu(raw)))
+    }
+
+    /// Clicking a preview card's image asks the dock for that node's viewer
+    /// tab — the canvas's one view-tier request, raised from the prepass off
+    /// the hit digest the geometry rebuild fills.
+    #[test]
+    fn clicking_a_preview_card_asks_for_its_viewer_tab() {
+        let mut fixture = DocFixture::default();
+        let node = fixture.add(&preview_func(Default::default()));
+        let mut h = CanvasHarness::new(fixture);
+        // The run projection `App` would have filled from a completed run:
+        // without a value the card records `Sense::NONE` and swallows the click.
+        h.ctx
+            .run_state
+            .previews
+            .ingest_preview(h.ui.ui(), node, image_value());
+        h.prime(2);
+        assert!(h.view_ops.is_empty(), "nothing asked for before the click");
+
+        h.ui.click_on(preview_image_wid(node));
+        let intents = h.frame();
+
+        assert!(
+            matches!(
+                h.view_ops[..],
+                [DockOp::OpenTab {
+                    tab: TabRef::ImageViewer(clicked)
+                }] if clicked == node
+            ),
+            "expected one OpenTab for {node:?}, got {:?}",
+            h.view_ops
+        );
+        assert!(
+            intents.is_empty(),
+            "opening a viewer is navigation, not a graph edit: {intents:?}"
+        );
+    }
 
     /// The prepass runs once per pane showing the graph, so the frame stamp —
     /// not a visibility flag — is what tells the canvas it was away.
