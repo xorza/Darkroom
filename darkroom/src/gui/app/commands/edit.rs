@@ -10,6 +10,7 @@ use crate::core::edit::intent::types::GraphIntent;
 use crate::gui::app::App;
 use crate::gui::dialogs;
 use crate::gui::pane::graph::frame::prepass::PathPick;
+use crate::gui::relayout::Relayout;
 
 /// Node edits that need a dialog before applying. Handled by
 /// [`App::handle_edit`].
@@ -24,7 +25,7 @@ pub(crate) enum EditCommand {
 
 impl App {
     #[must_use]
-    pub(super) fn handle_edit(&mut self, command: EditCommand) -> bool {
+    pub(super) fn handle_edit(&mut self, command: EditCommand) -> Relayout {
         match command {
             EditCommand::PickInputPath(pick) => self.pick_input_path(pick),
         }
@@ -39,7 +40,7 @@ impl App {
     /// after `Editor::frame` has handed its own back, and `App::frame` spends
     /// both together.
     #[must_use]
-    fn pick_input_path(&mut self, pick: PathPick) -> bool {
+    fn pick_input_path(&mut self, pick: PathPick) -> Relayout {
         let extensions: Vec<&str> = pick.config.extensions.iter().map(String::as_str).collect();
         let value = match pick.config.mode {
             FsPathMode::ExistingFile => dialogs::pick_existing_file(&extensions)
@@ -58,7 +59,7 @@ impl App {
                 .map(|path| StaticValue::FsPath(path.to_string_lossy().into_owned())),
         };
         let Some(value) = value else {
-            return false;
+            return Relayout::NotNeeded;
         };
         self.session.open.apply_edit(GraphIntent::SetInput {
             input: pick.port,

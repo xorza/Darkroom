@@ -20,6 +20,7 @@ use crate::core::io::preferences::Preferences;
 use crate::gui::app::commands::AppCommand;
 use crate::gui::app::commands::file::FileCommand;
 use crate::gui::app::commands::run::RunCommand;
+use crate::gui::relayout::Relayout;
 use crate::gui::requests::Requests;
 use crate::gui::window::MainWindow;
 use palantir::{Shortcut, Ui};
@@ -88,7 +89,7 @@ impl Session {
         ctx: AppCtx<'_>,
         preferences: &mut Preferences,
         requests: &mut Requests,
-    ) -> bool {
+    ) -> Relayout {
         // The frame's relayout accumulator, owned here for exactly as long as
         // the frame it describes. Every pass that can strand
         // `CanvasGeometry`'s cross-frame caches reports upward into it, and it
@@ -158,17 +159,17 @@ impl Session {
     /// holds focus palantir grants it to that field's scope and this
     /// read answers `false` on its own.
     #[must_use]
-    fn apply_undo_redo(&mut self, ui: &mut Ui) -> bool {
+    fn apply_undo_redo(&mut self, ui: &mut Ui) -> Relayout {
         let undo = ui.key_pressed(UNDO_SHORTCUT);
         let redo = ui.key_pressed(REDO_SHORTCUT);
         // The document owns its history and what a replay means; this layer
         // only says which direction the chord asked for.
         if undo {
-            self.open.undo().geometry_stale
+            self.open.undo().relayout
         } else if redo {
-            self.open.redo().geometry_stale
+            self.open.redo().relayout
         } else {
-            false
+            Relayout::NotNeeded
         }
     }
 

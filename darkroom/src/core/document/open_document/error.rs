@@ -1,10 +1,12 @@
 //! The named results [`OpenDocument`](super::OpenDocument)'s methods hand back.
 
+use crate::gui::relayout::Relayout;
+
 /// What one undo/redo replay did.
 ///
 /// Two independent facts, so a caller that only cares about one is not made to
 /// guess from the other: a replay that found no entry still reports
-/// `geometry_stale: false` truthfully, and one that found an entry may or may
+/// `Relayout::NotNeeded` truthfully, and one that found an entry may or may
 /// not have stranded the canvas's caches.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct ReplayOutcome {
@@ -19,6 +21,6 @@ pub(crate) struct ReplayOutcome {
     #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) took: bool,
     /// Whether the replayed steps stranded `CanvasGeometry`'s cross-frame
-    /// caches, so the frame owes a relayout.
-    pub(crate) geometry_stale: bool,
+    /// caches.
+    pub(crate) relayout: Relayout,
 }

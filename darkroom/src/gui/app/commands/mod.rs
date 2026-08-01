@@ -13,6 +13,7 @@
 use palantir::Ui;
 
 use crate::gui::app::App;
+use crate::gui::relayout::Relayout;
 
 pub(crate) mod edit;
 pub(crate) mod file;
@@ -56,24 +57,24 @@ impl App {
     /// but it is reported rather than requested here so that `App::frame`
     /// stays the one place in the app that asks for a relayout.
     #[must_use]
-    pub(super) fn handle_command(&mut self, ui: &mut Ui, command: AppCommand) -> bool {
+    pub(super) fn handle_command(&mut self, ui: &mut Ui, command: AppCommand) -> Relayout {
         match command {
             AppCommand::File(c) => {
                 self.handle_file(c);
-                false
+                Relayout::NotNeeded
             }
             AppCommand::Run(c) => {
                 self.handle_run(c);
-                false
+                Relayout::NotNeeded
             }
             AppCommand::Prefs(c) => {
                 self.handle_prefs(ui, c);
-                false
+                Relayout::NotNeeded
             }
             AppCommand::Edit(c) => self.handle_edit(c),
             AppCommand::Quit => {
                 self.guard_discard(PendingTransition::Quit);
-                false
+                Relayout::NotNeeded
             }
         }
     }
