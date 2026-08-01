@@ -329,7 +329,7 @@ impl Document {
     /// | `Inspectors::modes` | `GraphUI::retain_nodes` |
     /// | `PreviewStore::entries` (through [`Self::holds_preview_node`]) | `PreviewStore::reconcile` |
     ///
-    /// All three run from `App::reconcile_derived_state`, once a frame,
+    /// All three run from `App::update`, once a frame,
     /// alongside `MainWindow::image_viewers` — which is swept in the same pass
     /// but against the *layout*, since a viewer's framing dies with its tab
     /// rather than with its node. A new cache derived from the document

@@ -238,7 +238,7 @@ impl MainWindow {
     /// stopped holding: the canvas's `NodeId`-keyed tables (see
     /// [`GraphUI::retain_nodes`]) and the per-tab viewer state.
     ///
-    /// Driven from `App::reconcile_derived_state`, beside the preview store's
+    /// Driven from `App::update`, beside the preview store's
     /// sweep. Both live here because `MainWindow` owns both, so a new cache
     /// joins them rather than earning its own call site.
     pub(crate) fn reconcile(&mut self, document: &Document) {

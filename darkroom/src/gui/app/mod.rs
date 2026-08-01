@@ -140,37 +140,6 @@ impl App {
         app
     }
 
-    /// Sweep every cache derived from the open document, and upload the
-    /// full-resolution texture each visible viewer needs.
-    ///
-    /// Two owners, so two calls: the preview store filters on the node that
-    /// published, and everything the window caches — canvas geometry, open
-    /// inspectors, per-tab viewer framing — goes through the editor.
-    ///
-    /// **The one place these run.** All of them outlive the scene on purpose —
-    /// a closed tab must resolve its port centers the frame it comes back — so
-    /// none can decide for itself that an entry is dead; only the document
-    /// knows, and a node id is never reused. Enumerated here so a new cache
-    /// gets a line rather than a fourth call site — see
-    /// [`Document::holds_node`](crate::core::document::Document::holds_node),
-    /// which they all ask and which lists them.
-    ///
-    /// Runs from `update`, once a frame: every sweep is idempotent and
-    /// costs a lookup per cached entry, and `record` runs *twice* on a frame
-    /// carrying action input. After the worker drain, so a value published
-    /// this frame is already in the store when its viewer is materialized.
-    ///
-    /// A node deleted later in the same frame's record is swept next frame.
-    /// Nothing reads a dead entry in between — the geometry is reached through
-    /// a `NodeCtx` that only resolves for live nodes, and `draw_panels`
-    /// skips a panel whose node is gone — so the lag costs memory and nothing
-    /// else.
-    fn reconcile_derived_state(&mut self, ui: &Ui) {
-        self.run_state
-            .sync_previews(&self.runtime, ui, &self.session.open.document);
-        self.session.reconcile_caches();
-    }
-
     /// Mirror the window's live geometry into the persisted preferences
     /// (in memory only). Called each frame so any later `preferences.save()`
     /// — on quit — writes the current size / position. Size and position
@@ -305,10 +274,34 @@ impl palantir::App for App {
         self.run_state
             .drain_from(&mut self.runtime, &mut self.status);
 
-        // Then everything that allocates: take in the values published against
-        // the compile the reports just acknowledged, and release what the
-        // document has stopped holding.
-        self.reconcile_derived_state(ui);
+        // Then everything that allocates, and **the one place the
+        // document-derived caches are swept**: take in the values published
+        // against the compile the reports just acknowledged, release what the
+        // document has stopped holding, and upload the full-resolution texture
+        // each visible viewer needs.
+        //
+        // Two owners, so two calls: the preview store filters on the node that
+        // published, and everything the window caches — canvas geometry, open
+        // inspectors, per-tab viewer framing — goes through the session. All
+        // of them outlive the scene on purpose (a closed tab must resolve its
+        // port centers the frame it comes back), so none can decide for itself
+        // that an entry is dead; only the document knows, and a node id is
+        // never reused. A new cache gets a line here rather than a third call
+        // site — see `Document::holds_node`, which they all ask and which
+        // lists them.
+        //
+        // Here in `update` rather than `record`: every sweep is idempotent and
+        // costs a lookup per cached entry, and `record` runs *twice* on a
+        // frame carrying action input.
+        //
+        // A node deleted later in the same frame's record is swept next frame.
+        // Nothing reads a dead entry in between — the geometry is reached
+        // through a `NodeCtx` that only resolves for live nodes, and
+        // `draw_panels` skips a panel whose node is gone — so the lag costs
+        // memory and nothing else.
+        self.run_state
+            .sync_previews(&self.runtime, ui, &self.session.open.document);
+        self.session.reconcile_caches();
 
         self.handle_close_request(ui);
     }
