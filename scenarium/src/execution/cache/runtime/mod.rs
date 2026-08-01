@@ -102,6 +102,25 @@ enum ReuseSource {
     Blob(BlobTarget),
 }
 
+/// What [`hydrate_reuse`](RuntimeCache::hydrate_reuse) left behind — whether the
+/// node's consumers can read a value without it running.
+///
+/// A named pair rather than a `bool` because the two callers read the negative
+/// answer as opposite things. The run loop reaching a `Reuse` node has already
+/// had the cut prune its producers, so a `Missed` there is unrecoverable and
+/// fails the node; the same `Missed` at a re-stamped `Run` node is an ordinary
+/// cache miss, and the lambda simply runs. Neither reading belongs in the
+/// cache, so this says only what happened.
+#[derive(Debug)]
+pub(crate) enum ReuseOutcome {
+    /// A value is resident under the node's current digest and ready to read —
+    /// it was already there, or a blob decoded into the slot.
+    Served,
+    /// Nothing to serve: no usable source, or a blob that stopped decoding
+    /// since the probe.
+    Missed,
+}
+
 impl Index<NodeIdx> for RuntimeCache {
     type Output = RuntimeSlot;
 
@@ -536,13 +555,12 @@ impl RuntimeCache {
     /// chance at reuse, for a node whose digest the pre-run pass could not
     /// fold because a wired path had no value yet.
     ///
-    /// Returns what [`Self::hydrate_reuse`] does, and means it the same
-    /// way: `true` once the value is resident under the new digest and
-    /// ready to serve, `false` when there was nothing to serve and the
-    /// lambda still has to run. Every path here is declared by `node_idx`
-    /// alone, so a stamping failure is that node's — the caller fails it
-    /// and the ordinary errored-upstream cascade takes its dependents,
-    /// rather than a run-wide abort blaming nobody.
+    /// Returns what [`Self::hydrate_reuse`] does, and means it the same way — the
+    /// new digest either landed a value the node's consumers can read, or it did
+    /// not and the lambda still has to run. Every path here is declared by
+    /// `node_idx` alone, so a stamping failure is that node's — the caller fails
+    /// it and the ordinary errored-upstream cascade takes its dependents, rather
+    /// than a run-wide abort blaming nobody.
     pub(crate) async fn restamp_and_hydrate(
         &mut self,
         program: &CompiledGraph,
@@ -550,7 +568,7 @@ impl RuntimeCache {
         demand: &[OutputDemand],
         contexts: &mut ContextStore,
         cancel: CancelToken,
-    ) -> Result<bool, StampError> {
+    ) -> Result<ReuseOutcome, StampError> {
         self.identify(program, std::iter::once(node_idx), cancel)
             .await?;
         self.stamp_digest(program, node_idx);
@@ -616,26 +634,26 @@ impl RuntimeCache {
     /// ahead of the first lambda, and a reused value lives exactly as long as a freshly
     /// computed one — released by the same last-read bookkeeping.
     ///
-    /// `false` when nothing loads: no usable blob, or one that stopped decoding since the
-    /// probe. The decode path deletes an undecodable blob, so the next run misses cleanly
-    /// and recomputes.
+    /// [`ReuseOutcome::Missed`] when nothing loads: no usable blob, or one that stopped
+    /// decoding since the probe. The decode path deletes an undecodable blob, so the next
+    /// run misses cleanly and recomputes.
     pub(crate) async fn hydrate_reuse(
         &mut self,
         program: &CompiledGraph,
         node_idx: NodeIdx,
         demand: &[OutputDemand],
         ctx: &mut ContextStore,
-    ) -> bool {
+    ) -> ReuseOutcome {
         let target = match self.reuse_source(program, node_idx, demand) {
-            None => return false,
-            Some(ReuseSource::Resident) => return true,
+            None => return ReuseOutcome::Missed,
+            Some(ReuseSource::Resident) => return ReuseOutcome::Served,
             Some(ReuseSource::Blob(target)) => target,
         };
         let Some(snapshot) = self.disk_store.read(&target, demand, ctx).await else {
-            return false;
+            return ReuseOutcome::Missed;
         };
         self.slots[node_idx].load_output(snapshot, Some(target.digest));
-        true
+        ReuseOutcome::Served
     }
 
     /// Write `node_id`'s freshly-computed outputs to disk the moment it finishes (the executor
