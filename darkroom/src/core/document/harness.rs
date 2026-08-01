@@ -15,7 +15,7 @@ use crate::core::document::dock::DockOp;
 use crate::core::document::{Document, GraphView, ItemPlacement, TabRef};
 
 /// Lay every placement out along a row so no node lands off-viewport and gets
-/// culled — [`GraphView::for_graph`] seeds every item at the origin.
+/// culled — [`GraphView::new`] seeds every item at the origin.
 fn spread(view: &mut GraphView) {
     for (i, (id, _)) in view.paint_order().into_iter().enumerate() {
         view.item_placements

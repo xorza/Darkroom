@@ -4,10 +4,10 @@ pub(crate) mod validate;
 
 use ::serde::{Deserialize, Serialize};
 use glam::Vec2;
-use scenarium::{DetachedNode, Graph as CoreGraph, InputPort, Node, NodeId, NodeKind, OutputPort};
+use scenarium::{DetachedNode, Graph as CoreGraph, InputPort, NodeId, NodeKind, OutputPort};
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::core::document::dock::{DockLayout, DockOp};
+use crate::core::document::dock::DockLayout;
 use crate::core::preview;
 
 /// Whether a port consumes a binding (`Input`) or produces a value
@@ -190,15 +190,19 @@ pub(crate) struct GraphView {
 }
 
 impl GraphView {
-    /// A fresh view seeded with a zero-positioned item for every node in
-    /// `graph`.
-    pub(crate) fn for_graph(graph: &CoreGraph) -> Self {
+    /// A fresh view over `graph`: one zero-positioned, unraised placement per
+    /// node, the default camera, nothing selected.
+    ///
+    /// The only way a view is built from a graph, so there is nowhere for the
+    /// two to disagree about which nodes are placed — which is exactly what
+    /// [`Self::validate`] checks on the way back in from disk.
+    pub(crate) fn new(graph: &CoreGraph) -> Self {
         Self {
             item_placements: graph
                 .iter()
                 .map(|node| (node.id, ItemPlacement::default()))
                 .collect(),
-            ..Default::default()
+            ..Self::default()
         }
     }
 
@@ -246,65 +250,14 @@ pub(crate) struct Document {
     pub(crate) layout: DockLayout,
 }
 
-/// Whether the graph still holds `node_id`.
-///
-/// **The** liveness question, and the single definition of it. Node ids are
-/// never reused, so a node absent here is gone for good — which is what makes
-/// this the retention rule for every `NodeId`-keyed cache that outlives the
-/// scene: the canvas geometry, the preview values, the open inspectors.
-/// Absence from a *scene* means only that a node is off-screen or on a closed
-/// tab; absence from here is permanent.
-///
-/// Free-standing over the graph rather than a [`Document`] method so
-/// [`Document::reconcile_with_graph`] can ask it while the layout is borrowed
-/// mutably. [`Document::holds_node`] is the `&Document` lift every other
-/// caller takes, and [`tab_alive`] is the same question asked of a tab.
-fn node_alive(graph: &CoreGraph, node_id: NodeId) -> bool {
-    graph.find(node_id).is_some()
-}
-
-/// Whether `node` is a preview node — the narrowing
-/// [`Document::holds_preview_node`] applies on top of [`node_alive`].
-fn is_preview_node(node: &Node) -> bool {
-    match node.kind {
-        NodeKind::Func(func_id) => preview::is_preview(func_id),
-        _ => false,
-    }
-}
-
-/// Whether a tab still resolves against the graph: the graph pane and
-/// `Preferences` always do, and a viewer tab dies with its node. The single
-/// predicate behind [`Document::reconcile_with_graph`]'s fast-path *and* its
-/// prune, so the two can't drift.
-fn tab_alive(graph: &CoreGraph, tab: TabRef) -> bool {
-    match tab {
-        TabRef::Graph | TabRef::Preferences => true,
-        TabRef::ImageViewer(node_id) => node_alive(graph, node_id),
-    }
-}
-
 impl Document {
-    /// Apply a dock op to the layout.
-    ///
-    /// Pane arrangement is navigation, not content: it neither records an
-    /// undo step — dragging a tab back is the undo — nor flips the unsaved
-    /// flag, so Ctrl+Z walks past it to the last graph edit and quitting
-    /// after a rearrangement doesn't prompt. The layout still *persists*
-    /// with the document; it just isn't work the exit prompt guards.
-    ///
-    /// No no-op filter either: an op the layout refuses (a tab that closed
-    /// under the gesture, an unchanged ratio) leaves it untouched on its own.
-    pub(crate) fn apply_dock_op(&mut self, op: DockOp) {
-        self.layout.apply(op);
-    }
-
     /// Drop a node from both the graph and the view (its placement and any
     /// selection membership) — the one edit that has to touch both to leave
     /// the document consistent.
-    pub(crate) fn remove_node(&mut self, node_id: &NodeId) -> DetachedNode {
-        self.main_view.item_placements.remove(node_id);
-        let detached = self.graph.detach_node(*node_id);
-        self.main_view.selected.retain(|k| *k != *node_id);
+    pub(crate) fn remove_node(&mut self, node_id: NodeId) -> DetachedNode {
+        self.main_view.item_placements.remove(&node_id);
+        let detached = self.graph.detach_node(node_id);
+        self.main_view.selected.remove(&node_id);
         detached
     }
 
@@ -312,14 +265,17 @@ impl Document {
     /// graph pane. What the scene projects, and what the canvas prepass gates
     /// on.
     pub(crate) fn shows_graph(&self) -> bool {
-        self.layout
-            .groups()
-            .any(|group| matches!(group.active_tab(), TabRef::Graph))
+        self.layout.active_tabs().any(|tab| tab == TabRef::Graph)
     }
 
-    /// [`node_alive`] asked of the whole document — the form every
-    /// `NodeId`-keyed cache's sweep takes. See there for why this one question
-    /// answers for all of them.
+    /// Whether the graph still holds `node_id`.
+    ///
+    /// **The** liveness question, and the single definition of it. Node ids
+    /// are never reused, so a node absent here is gone for good — which is
+    /// what makes this the retention rule for every `NodeId`-keyed cache that
+    /// outlives the scene: the canvas geometry, the preview values, the open
+    /// inspectors. Absence from a *scene* means only that a node is off-screen
+    /// or on a closed tab; absence from here is permanent.
     ///
     /// **The caches that ask it**, and where each is swept:
     ///
@@ -342,7 +298,18 @@ impl Document {
     /// or a save; and `RunState::nodes` is a record of the last run rather than
     /// a cache derived from the document — see its field doc for the reasoning.
     pub(crate) fn holds_node(&self, node_id: NodeId) -> bool {
-        node_alive(&self.graph, node_id)
+        self.graph.find(node_id).is_some()
+    }
+
+    /// [`Self::holds_node`] asked of a tab: the graph pane and `Preferences`
+    /// always resolve, and a viewer tab dies exactly with its node. The single
+    /// predicate behind [`Self::reconcile_with_graph`]'s fast path, its prune,
+    /// and [`Self::validate`]'s tab check, so the three can't drift.
+    pub(crate) fn holds_tab(&self, tab: TabRef) -> bool {
+        match tab {
+            TabRef::Graph | TabRef::Preferences => true,
+            TabRef::ImageViewer(node_id) => self.holds_node(node_id),
+        }
     }
 
     /// [`node_alive`] narrowed to preview nodes — what retains the value one
@@ -355,7 +322,12 @@ impl Document {
     /// node's own lifetime. One node backs one on-screen card, so the node's
     /// own id answers for the card without anything else alongside it.
     pub(crate) fn holds_preview_node(&self, node_id: NodeId) -> bool {
-        self.graph.find(node_id).is_some_and(is_preview_node)
+        self.graph
+            .find(node_id)
+            .is_some_and(|node| match node.kind {
+                NodeKind::Func(func_id) => preview::is_preview(func_id),
+                _ => false,
+            })
     }
 
     /// The viewer nodes a record pass will actually draw: each group renders
@@ -363,12 +335,10 @@ impl Document {
     /// uploads to what's on screen — a viewer stacked behind another tab in
     /// the same pane costs nothing until it's activated.
     pub(crate) fn visible_viewer_nodes(&self) -> impl Iterator<Item = NodeId> + '_ {
-        self.layout
-            .groups()
-            .filter_map(|group| match group.active_tab() {
-                TabRef::ImageViewer(node_id) => Some(node_id),
-                _ => None,
-            })
+        self.layout.active_tabs().filter_map(|tab| match tab {
+            TabRef::ImageViewer(node_id) => Some(node_id),
+            _ => None,
+        })
     }
 
     /// Bring the editor's derived state back in line with the graph: drop
@@ -379,24 +349,27 @@ impl Document {
     /// Runs every frame in the navigation phase, right after undo/redo and the
     /// intent drain, so a stale tab can never reach a save.
     pub(crate) fn reconcile_with_graph(&mut self) {
-        // Borrows `graph` alone, so the retain below can still take `layout`
-        // mutably. `Copy` — its only capture is a shared reference — which is
-        // what lets the same predicate answer both questions.
-        let alive = |tab: TabRef| tab_alive(&self.graph, tab);
         // Common case: every tab still resolves, so touch nothing.
         // `retain_tabs` rebuilds the whole node tree through `normalize`,
         // allocating as it goes, and must not run on a frame with nothing to
         // prune.
-        if self.layout.all_tabs().all(alive) {
+        if self.layout.all_tabs().all(|tab| self.holds_tab(tab)) {
             return;
         }
-        self.layout.retain_tabs(alive);
+        // The retain wants `layout` mutably while the predicate reads the rest
+        // of the document, which one `&mut self` cannot hand out. Moving the
+        // layout out for the call splits them: the predicate borrows a
+        // `Document` whose layout is a placeholder, and it never asks about
+        // one. Cold path only — the fast path above already returned.
+        let mut layout = std::mem::take(&mut self.layout);
+        layout.retain_tabs(|tab| self.holds_tab(tab));
+        self.layout = layout;
     }
 }
 
 impl From<CoreGraph> for Document {
     fn from(graph: CoreGraph) -> Self {
-        let main_view = GraphView::for_graph(&graph);
+        let main_view = GraphView::new(&graph);
         Self {
             graph,
             main_view,
@@ -410,6 +383,8 @@ pub(crate) mod harness;
 
 #[cfg(test)]
 mod tests {
+    use scenarium::Node;
+
     use super::*;
     use crate::core::document::dock::DockOp;
     use crate::core::document::harness::DocFixture;
@@ -448,9 +423,9 @@ mod tests {
 
         // The tab lift is the same rule asked of a tab: a viewer dies exactly
         // with its node, and the two non-node tabs never do.
-        assert!(tab_alive(&doc.graph, TabRef::ImageViewer(preview)));
-        assert!(tab_alive(&doc.graph, TabRef::Graph));
-        assert!(tab_alive(&doc.graph, TabRef::Preferences));
+        assert!(doc.holds_tab(TabRef::ImageViewer(preview)));
+        assert!(doc.holds_tab(TabRef::Graph));
+        assert!(doc.holds_tab(TabRef::Preferences));
 
         doc.graph.detach_node(preview);
         assert!(!doc.holds_node(preview), "the rule says gone");
@@ -459,7 +434,7 @@ mod tests {
             "and so does the narrowing"
         );
         assert!(
-            !tab_alive(&doc.graph, TabRef::ImageViewer(preview)),
+            !doc.holds_tab(TabRef::ImageViewer(preview)),
             "and so does the tab lift"
         );
         assert!(doc.holds_node(plain), "the surviving node is untouched");

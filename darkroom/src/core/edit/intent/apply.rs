@@ -87,7 +87,7 @@ pub(crate) fn apply_step(step: &UndoStep, doc: &mut Document) {
             doc.main_view.selected = to_selection.clone();
         }
         UndoStep::RemoveNode { detached, .. } => {
-            let removed = doc.remove_node(&detached.node_id);
+            let removed = doc.remove_node(detached.node_id);
             assert_eq!(
                 &removed, detached,
                 "removal diverged from the recorded step"
@@ -169,7 +169,7 @@ fn set_node_property(doc: &mut Document, node_id: &NodeId, prop: NodeProperty) {
 pub(crate) fn revert_step(step: &UndoStep, doc: &mut Document) {
     match step {
         UndoStep::AddNode { node_id, .. } => {
-            doc.remove_node(node_id);
+            doc.remove_node(*node_id);
         }
         UndoStep::DuplicateNodes {
             nodes,
@@ -180,7 +180,7 @@ pub(crate) fn revert_step(step: &UndoStep, doc: &mut Document) {
             // subscriptions that referenced it, so the batch's wiring goes
             // with it — only the selection needs explicit restoring.
             for (_, node_id, _) in nodes {
-                doc.remove_node(node_id);
+                doc.remove_node(*node_id);
             }
             doc.main_view.selected = from_selection.clone();
         }

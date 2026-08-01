@@ -148,7 +148,7 @@ impl OpenDocument {
                 // navigation, so it records no step, raises no signal, and
                 // breaks no run of graph edits around it.
                 DocumentRequest::View(op) => {
-                    self.document.apply_dock_op(op);
+                    self.document.layout.apply(op);
                     continue;
                 }
             };
