@@ -2,8 +2,11 @@ use super::*;
 
 /// A required input left unbound blocks its node, and the verdict travels
 /// down every consumer — so the whole tail of the chain is out of the run
-/// while its sources still stand.
-#[tokio::test]
+/// while its sources still stand. The report names the exact port that
+/// failed rather than the node as a whole, and the verdict is stable: what
+/// actually *runs* can differ as pure nodes start reusing their cache, but
+/// the missing set cannot flap.
+#[tokio::test(flavor = "multi_thread")]
 async fn required_missing_propagates_downstream() {
     let mut e = TestEngine::over(TestGraph::sample());
     e.edit(|g| g.unbind("sum", 0));
@@ -17,6 +20,17 @@ async fn required_missing_propagates_downstream() {
         "the one source still feeding something stands; unbinding sum[0] left \
          `get_a` reading into nothing, so the backward walk never reaches it"
     );
+
+    let first = e.run_sinks().await;
+    let second = e.run_sinks().await;
+
+    assert_eq!(
+        first.missing_ports("sum"),
+        [0],
+        "port 1 is still bound, so the run names the port that failed"
+    );
+    assert_eq!(first.missing_inputs(), ["Print", "mult", "sum"]);
+    assert_eq!(second.missing_inputs(), first.missing_inputs());
 }
 
 /// A *binding* to a missing-required producer propagates even through an

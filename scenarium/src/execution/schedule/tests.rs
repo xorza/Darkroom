@@ -165,45 +165,44 @@ mod planning {
         );
     }
 
+    /// An unbound input blocks its node only when the declaration called it
+    /// required — and when it does, the verdict travels down every consumer.
+    /// Optionality is the only difference between the two rows, so it is the
+    /// only thing that can decide them.
     #[test]
-    fn missing_required_input_blocks_node_and_dependents() {
-        // A has a required *unbound* input ⇒ missing; B binds A ⇒ inherits missing.
-        let mut prog = ProgramBuilder::default();
-        let a = prog
-            .node()
-            .required(ExecutionBinding::None)
-            .outputs(1)
+    fn only_a_required_unbound_input_blocks_the_node_and_its_dependents() {
+        for required in [true, false] {
+            let mut prog = ProgramBuilder::default();
+            let node = prog.node().outputs(1);
+            let a = if required {
+                node.required(ExecutionBinding::None)
+            } else {
+                node.input(ExecutionBinding::None)
+            }
             .add();
-        let b = prog.node().sink().input(a.out(0)).outputs(1).add();
+            let b = prog.node().sink().input(a.out(0)).outputs(1).add();
 
-        let p = prog.plan_sinks();
-        for idx in [a, b] {
-            assert!(
-                p.states[idx.node_idx].missing_required_inputs(),
-                "node {idx:?} missing"
-            );
-            assert!(
-                !p.states[idx.node_idx].is_runnable(),
-                "node {idx:?} not runnable"
-            );
+            let p = prog.plan_sinks();
+            for idx in [a, b] {
+                assert_eq!(
+                    p.states[idx.node_idx].missing_required_inputs(),
+                    required,
+                    "node {idx:?} with required={required}"
+                );
+                assert_eq!(
+                    p.states[idx.node_idx].is_runnable(),
+                    !required,
+                    "node {idx:?} with required={required}"
+                );
+            }
+            if !required {
+                assert_eq!(
+                    p.process_order,
+                    [a, b].map(|node| node.node_idx),
+                    "an optional unbound input still schedules the whole chain"
+                );
+            }
         }
-    }
-
-    #[test]
-    fn optional_unbound_input_does_not_block() {
-        // An *optional* unbound input is fine — the node still runs.
-        let mut prog = ProgramBuilder::default();
-        let a = prog
-            .node()
-            .sink()
-            .input(ExecutionBinding::None)
-            .outputs(1)
-            .add();
-
-        let p = prog.plan_sinks();
-        assert!(!p.states[a.node_idx].missing_required_inputs());
-        assert!(p.states[a.node_idx].is_runnable());
-        assert_eq!(p.process_order, [a].map(|node| node.node_idx));
     }
 
     #[test]
@@ -245,29 +244,6 @@ mod planning {
                 "the explicit producer seed makes every consumer runnable"
             );
         }
-    }
-
-    #[test]
-    fn node_seed_is_both_a_root_and_seeded() {
-        let mut prog = ProgramBuilder::default();
-        let a = prog.node().outputs(1).add();
-
-        let mut planner = Planner::default();
-        let mut p = RunSchedule::default();
-        let seeds = RunSeeds::nodes(vec![a.node_id]);
-        planner
-            .plan(prog.program(), &seeds, &mut p)
-            .expect("no cycle");
-
-        assert_eq!(p.seeded_roots(), vec![a.node_idx]);
-        assert_eq!(p.roots(), [a.node_idx]);
-
-        let seeds = RunSeeds::nodes(vec![a.node_id, a.node_id]);
-        planner
-            .plan(prog.program(), &seeds, &mut p)
-            .expect("no cycle");
-        assert_eq!(p.seeded_roots(), vec![a.node_idx]);
-        assert_eq!(p.roots(), [a.node_idx], "a repeated seed is one root");
     }
 
     #[test]
@@ -323,6 +299,20 @@ mod planning {
             p.states[c.node_idx],
             NodeState::Unvisited,
             "C is upstream of nothing seeded, so the walk never reached it"
+        );
+
+        // The same seed named twice is still one root: the seed pass marks, it
+        // does not append.
+        let seeds = RunSeeds::nodes(vec![b.node_id, b.node_id]);
+        planner
+            .plan(prog.program(), &seeds, &mut p)
+            .expect("no cycle");
+        assert_eq!(p.roots(), [b.node_idx], "a repeated seed is one root");
+        assert_eq!(p.seeded_roots(), vec![b.node_idx]);
+        assert_eq!(
+            p.process_order,
+            [a, b].map(|node| node.node_idx),
+            "and schedules the same cone"
         );
 
         // Node seeds combine with sinks: the same seed plus `sinks` schedules
@@ -449,26 +439,6 @@ mod resolving {
 
     fn value(value: i64) -> DynamicValue {
         DynamicValue::Static(StaticValue::Int(value))
-    }
-
-    #[tokio::test]
-    async fn reuse_hit_prunes_its_whole_upstream_cone() {
-        let mut prog = ProgramBuilder::default();
-        let source = prog.node().reusable().outputs(1).add();
-        let cached = prog.node().reusable().input(source.out(0)).outputs(1).add();
-        let sink = prog.node().reusable().input(cached.out(0)).outputs(0).add();
-
-        let run = prog
-            .sweep()
-            .root(sink)
-            .cached(cached, [value(1)])
-            .run()
-            .await;
-
-        assert_eq!(run.state(source), NodeState::Cut);
-        assert_eq!(run.state(cached), NodeState::Reuse);
-        assert_eq!(run.state(sink), NodeState::Run);
-        assert_eq!(run.readers(source), &[0]);
     }
 
     #[tokio::test]
@@ -619,5 +589,10 @@ mod resolving {
         assert_eq!(run.state(source), NodeState::Cut);
         assert_eq!(run.state(cached), NodeState::Reuse);
         assert_eq!(run.state(sink), NodeState::Run);
+        assert_eq!(
+            run.readers(source),
+            &[0],
+            "a cut producer owns no read for the reuse that replaced it"
+        );
     }
 }

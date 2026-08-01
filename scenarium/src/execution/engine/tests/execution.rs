@@ -46,22 +46,6 @@ async fn simple_compute() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn required_none_binding_is_stable() {
-    let mut e = TestEngine::over(TestGraph::sample());
-    // sum's first input unbound (required) — sum and downstream can't run.
-    e.edit(|g| g.unbind("sum", 0));
-
-    let first = e.run_sinks().await;
-    let second = e.run_sinks().await;
-
-    // The schedule is deterministic across runs. What actually *runs* can
-    // differ as pure nodes start reusing their cache, but the order cannot
-    // flap.
-    assert_eq!(first.missing_inputs(), second.missing_inputs());
-    assert_eq!(first.missing_inputs(), ["Print", "mult", "sum"]);
-}
-
-#[tokio::test(flavor = "multi_thread")]
 async fn schedule_stable_across_repeated_runs() {
     let mut e = TestEngine::over(TestGraph::sample());
 
@@ -85,24 +69,6 @@ async fn schedule_stable_across_repeated_runs() {
 
     // The cached product stays correct every run: sum(1 + 11 = 12) * get_b(11) = 132.
     assert_eq!(e.output_i64("mult", 0), Some(132));
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn cached_upstream_output_reused_after_rebinding() {
-    let mut e = TestEngine::over(TestGraph::sample());
-    e.run_sinks().await;
-
-    // Switch mult to const inputs: its upstream leaves the run.
-    e.edit(|g| {
-        g.constant("mult", 0, 2i64);
-        g.constant("mult", 1, 21i64);
-    });
-    assert_eq!(e.run_sinks().await.ran(), ["mult", "Print"]);
-
-    // Switch one back to a bind from the *cached* get_b — mult re-executes,
-    // but its producer is served from cache rather than re-run.
-    e.edit(|g| g.wire("get_b", 0, "mult", 0));
-    assert_eq!(e.run_sinks().await.ran(), ["mult", "Print"]);
 }
 
 /// Output buffers are wiped before a re-running node is invoked, so an

@@ -253,36 +253,53 @@ async fn unbound_output_errors_only_when_demanded() {
     ));
 }
 
-/// A `None`-cache producer's RAM output is dropped the moment its last consumer reads it.
-/// `Executor::run` does no end-of-run eviction, so an emptied slot here is the *mid-run*
-/// release and nothing else. A(None) → B(Ram): once B has read A, A is `Empty` while B keeps
-/// its own value.
+/// Retention after a run is the cache mode's call, not the reader count's.
+/// `Executor::run` does no end-of-run eviction, so an emptied slot here is the
+/// *mid-run* release and nothing else: a `None` producer is dropped the moment
+/// its last consumer reads it — and, with no consumer at all, the moment it
+/// finishes — while a `Ram` producer survives both.
+///
+/// `consumed` picks the shape, since a reader count has to match the wiring it
+/// describes: wired is `a(mode) → b(Ram)` with readers `[1, 1]` (b reads a, and
+/// a phantom consumer keeps b resident), unwired is two independent producers
+/// with readers `[0, 0]`.
 #[tokio::test]
-async fn frees_none_cache_output_once_last_consumer_reads() {
-    let mut prog = ProgramBuilder::default();
-    let a = prog.node().outputs(1).lambda(producer()).add();
-    let b = prog
-        .node()
-        .cache(CacheMode::Ram)
-        .input(a.out(0))
-        .outputs(1)
-        .lambda(increment())
-        .add();
+async fn ram_retention_survives_the_last_read_and_none_does_not() {
+    for (mode, consumed) in [
+        (CacheMode::None, true),
+        (CacheMode::Ram, true),
+        (CacheMode::None, false),
+        (CacheMode::Ram, false),
+    ] {
+        let mut prog = ProgramBuilder::default();
+        let a = prog.node().cache(mode).outputs(1).lambda(producer()).add();
+        let b = prog.node().cache(CacheMode::Ram).outputs(1);
+        // A consumer reads a's 7 and writes 7+1, so b's value says the read
+        // actually landed rather than merely that b ran.
+        let (b, readers, expected_b) = if consumed {
+            (b.input(a.out(0)).lambda(increment()), [1, 1], 8)
+        } else {
+            (b.lambda(producer()), [0, 0], 7)
+        };
+        let b = b.add();
 
-    // A's one output has one consumer (B); B's output has a phantom consumer, so B never drains.
-    let mut run = prog.runs().readers([1, 1]);
-    run.go().await;
+        let mut run = prog.runs().readers(readers);
+        run.go().await;
 
-    assert!(
-        run.outputs(a).is_none(),
-        "A (None) is freed the moment its last consumer B reads it: {:?}",
-        run.outputs(a)
-    );
-    assert_eq!(
-        run.output_i64(b, 0),
-        Some(8),
-        "B (Ram) keeps its own output (7+1)"
-    );
+        assert_eq!(
+            run.output_i64(a, 0).is_some(),
+            mode.caches_in_ram(),
+            "{mode:?} producer, consumed={consumed}: residency must equal caches_in_ram()"
+        );
+        if mode.caches_in_ram() {
+            assert_eq!(run.output_i64(a, 0), Some(7), "{mode:?} keeps its own 7");
+        }
+        assert_eq!(
+            run.output_i64(b, 0),
+            Some(expected_b),
+            "{mode:?}, consumed={consumed}: B (Ram) is kept hot regardless"
+        );
+    }
 }
 
 /// A lambda can name the execution node it is running as — the hook a host-side
@@ -391,35 +408,6 @@ async fn a_reused_output_with_no_consumers_is_reclaimed_immediately() {
     );
 }
 
-/// The release only reclaims modes that don't retain RAM: a `Ram` producer stays resident
-/// even after every consumer has read it. A(Ram) → B — A survives B's read.
-#[tokio::test]
-async fn keeps_ram_cache_output_after_all_consumers_read() {
-    let mut prog = ProgramBuilder::default();
-    let a = prog
-        .node()
-        .cache(CacheMode::Ram)
-        .outputs(1)
-        .lambda(producer())
-        .add();
-    prog.node()
-        .cache(CacheMode::Ram)
-        .input(a.out(0))
-        .outputs(1)
-        .lambda(relay())
-        .add();
-
-    // A has one consumer (B, which reads it) and B has none (usage 0).
-    let mut run = prog.runs().readers([1, 0]);
-    run.go().await;
-
-    assert_eq!(
-        run.output_i64(a, 0),
-        Some(7),
-        "A (Ram) is kept hot for the next run even though B has fully drained it"
-    );
-}
-
 /// A reused consumer contributes no reader. The shared non-RAM producer is reclaimed as
 /// soon as the one running consumer reads it, without waiting for end-of-run eviction.
 #[tokio::test]
@@ -454,35 +442,6 @@ async fn reused_consumer_does_not_delay_last_read_reclamation() {
     assert!(
         run.outputs(a).is_none(),
         "the producer is reclaimed immediately after its only live reader"
-    );
-}
-
-/// A node no one consumes (a sink, usage 0) is released the instant it finishes,
-/// not held to end-of-run: a `None` output is dropped, a `Ram` output kept hot.
-#[tokio::test]
-async fn frees_zero_consumer_output_right_after_it_runs() {
-    let mut prog = ProgramBuilder::default();
-    let a = prog.node().outputs(1).lambda(producer()).add();
-    let b = prog
-        .node()
-        .cache(CacheMode::Ram)
-        .outputs(1)
-        .lambda(producer())
-        .add();
-
-    // Neither output is consumed.
-    let mut run = prog.runs().readers([0, 0]);
-    run.go().await;
-
-    assert!(
-        run.outputs(a).is_none(),
-        "A (None, no consumers) is freed right after it runs: {:?}",
-        run.outputs(a)
-    );
-    assert_eq!(
-        run.output_i64(b, 0),
-        Some(7),
-        "B (Ram, no consumers) is kept hot"
     );
 }
 

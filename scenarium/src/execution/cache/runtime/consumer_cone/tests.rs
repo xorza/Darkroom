@@ -4,15 +4,10 @@ use crate::graph::identity::NodeId;
 use crate::testing::graph::TestGraph;
 use crate::testing::graph::compiled::Compiled;
 
-/// A sink reading a source, plus an unwired node — the three positions a
-/// seed can occupy relative to a consumer edge.
+/// The shared source → sink + unwired `loose` graph, compiled — the three
+/// positions a seed can occupy relative to a consumer edge.
 fn fixture() -> Compiled {
-    let mut g = TestGraph::new();
-    g.add("source", |n| n.pure().output(DataType::Int));
-    g.add("sink", |n| n.records());
-    g.add("loose", |n| n.pure().output(DataType::Int));
-    g.wire("source", 0, "sink", 0);
-    g.compile()
+    TestGraph::source_sink_loose().compile()
 }
 
 /// The cone back in the fixture's own names, so an assertion says which nodes

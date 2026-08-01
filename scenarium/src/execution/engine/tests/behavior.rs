@@ -3,33 +3,6 @@ use super::*;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 #[tokio::test(flavor = "multi_thread")]
-async fn pure_node_skips_on_rerun() {
-    // `get_b` is a pure source, so once its output is cached its digest is
-    // unchanged on a re-run and it reuses that value rather than running.
-    let mut e = TestEngine::over(TestGraph::sample());
-
-    assert!(e.run_sinks().await.ran().contains(&"get_b"));
-    assert!(!e.run_sinks().await.ran().contains(&"get_b"));
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn default_node_skips_on_rerun() {
-    let mut e = TestEngine::over(TestGraph::sample());
-
-    let first = e.run_sinks().await;
-    assert_eq!(first.ran(), ["get_b", "get_a", "sum", "mult", "Print"]);
-
-    // Second run: only print (an impure sink) re-executes.
-    let second = e.run_sinks().await;
-    assert_eq!(second.ran(), ["Print"]);
-    assert_eq!(second.cached(), ["get_a", "get_b", "mult", "sum"]);
-
-    // The cached mult must still hold the correct product, not a stale
-    // value: sum = get_a(1) + get_b(11) = 12; mult = 12 * get_b(11) = 132.
-    assert_eq!(e.output_i64("mult", 0), Some(132));
-}
-
-#[tokio::test(flavor = "multi_thread")]
 async fn execute_emits_started_then_finished_progress_per_node() {
     use crate::execution::report::RunPhase;
 

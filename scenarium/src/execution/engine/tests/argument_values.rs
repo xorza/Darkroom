@@ -1,32 +1,19 @@
 use super::*;
 
+/// Nothing has run, so nothing is reported: an id absent from the program
+/// resolves to no values at all, and a node that is present carries neither
+/// delivered inputs nor produced outputs.
 #[test]
-fn nonexistent_node_returns_none() {
+fn before_execution_reports_no_values() {
     let e = TestEngine::over(TestGraph::sample());
 
     let nonexistent: NodeId = "00000000-0000-0000-0000-000000000000".into();
     assert!(e.engine.get_argument_values(&nonexistent).is_none());
-}
 
-#[tokio::test(flavor = "multi_thread")]
-async fn with_const_bindings() {
-    let mut g = TestGraph::sample();
-    // Const-fed below, so the sources are never reached.
-    g.never("get_a");
-    g.never("get_b");
-
-    let mut e = TestEngine::over(g);
-    e.edit(|g| {
-        g.constant("mult", 0, 3i64);
-        g.constant("mult", 1, 5i64);
-    });
-
-    e.run_sinks().await;
-
-    assert_eq!(e.input_i64("mult", 0), Some(3));
-    assert_eq!(e.input_i64("mult", 1), Some(5));
-    assert_eq!(e.outputs("mult").len(), 1);
-    assert_eq!(e.output_i64("mult", 0), Some(15), "3 * 5");
+    let inputs = e.inputs("sum");
+    assert_eq!(inputs.len(), 2);
+    assert!(inputs.iter().all(Option::is_none));
+    assert!(e.outputs("sum").is_empty());
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -73,15 +60,4 @@ async fn with_none_binding() {
     assert_eq!(inputs.len(), 2);
     assert!(inputs[0].is_some());
     assert!(inputs[1].is_none(), "an unbound port delivers no value");
-}
-
-#[test]
-fn before_execution() {
-    let e = TestEngine::over(TestGraph::sample());
-
-    // Before execution: all inputs are None (no upstream values yet).
-    let inputs = e.inputs("sum");
-    assert_eq!(inputs.len(), 2);
-    assert!(inputs.iter().all(Option::is_none));
-    assert!(e.outputs("sum").is_empty());
 }

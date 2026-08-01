@@ -234,31 +234,6 @@ fn summary(compiled: &CompiledGraph, authored: &[NodeId]) -> Vec<String> {
     out
 }
 
-/// A sink reading a source, plus an unwired node — enough for every question
-/// the artifact answers about an authored node to have a distinct answer.
-fn fixture() -> TestGraph {
-    let mut g = TestGraph::new();
-    g.add("source", |n| n.pure().output(DataType::Int));
-    g.add("sink", |n| n.records());
-    g.add("loose", |n| n.pure().output(DataType::Int));
-    g.wire("source", 0, "sink", 0);
-    g
-}
-
-/// Every authored node holds compiled work, whatever its role — a source, its
-/// reader, and a node nothing wires to alike. An id the program never held does
-/// not.
-#[test]
-fn the_artifact_answers_for_each_authored_node() {
-    let g = fixture();
-    let compiled = g.compile();
-
-    for name in ["source", "sink", "loose"] {
-        assert!(compiled.program.contains(g.id(name)));
-    }
-    assert!(!compiled.program.contains(NodeId::unique()));
-}
-
 /// Every buffer a compile fills is owned by the `Compiler` and reused, so the
 /// hazard the reuse introduces is one compile's leftovers reaching the next.
 /// Compiling a differently shaped graph first must leave the second artifact
@@ -281,7 +256,7 @@ fn a_reused_compiler_produces_what_a_fresh_one_does() {
     warmup.wire("emitter", 1, "consumer", 1);
     warmup.subscribe("emitter", 0, "consumer");
 
-    let subject = fixture();
+    let subject = TestGraph::source_sink_loose();
     let authored: Vec<NodeId> = ["source", "sink", "loose"]
         .iter()
         .map(|name| subject.id(name))
@@ -307,7 +282,7 @@ fn a_reused_compiler_produces_what_a_fresh_one_does() {
 /// accumulate, which a growing pool would show as duplicated ports or nodes.
 #[test]
 fn recompiling_one_graph_does_not_accumulate_in_the_reused_buffers() {
-    let g = fixture();
+    let g = TestGraph::source_sink_loose();
     let authored: Vec<NodeId> = ["source", "sink", "loose"]
         .iter()
         .map(|name| g.id(name))
@@ -473,25 +448,6 @@ fn carries_the_disabled_flag_without_dropping_the_node() {
 
     assert_eq!(compiled.program.e_nodes.len(), 1);
     assert!(compiled.node("producer").disabled);
-}
-
-/// The walk keeps only scratch, so one `Compiler` serves every compile and a
-/// second walk cannot observe the first.
-#[test]
-fn a_second_walk_cannot_observe_the_first() {
-    let mut g = TestGraph::new();
-    g.add("producer", |n| n.pure().output(DataType::Int));
-    let mut compiler = Compiler::default();
-    compiler.compile(&g.graph, &g.library).unwrap();
-    let program = compiler.compile(&g.graph, &g.library).unwrap();
-
-    assert_eq!(program.e_nodes.len(), 1);
-    assert_eq!(
-        program.outputs.len(),
-        1,
-        "the port pools restart from empty"
-    );
-    assert!(program.events.is_empty());
 }
 
 /// The walk stamps each output with the type it *resolved*, wildcards followed —

@@ -142,6 +142,11 @@ async fn assert_mode_behavior(mode: CacheMode) {
             "{mode:?} has no disk blob, so mult recomputes on reopen"
         );
         assert!(
+            !reopen.cached().contains(&"mult"),
+            "{mode:?} must not be reported cached on reopen — with nothing on \
+             disk there is nothing a fresh engine could have reused"
+        );
+        assert!(
             reopen.ran().contains(&"src"),
             "{mode:?}: src recomputes to feed mult"
         );
@@ -256,27 +261,6 @@ async fn impure_cone_persist_node_is_not_disk_cached() {
     assert!(
         !run.cached().contains(&"mult"),
         "an impure-cone node must not be disk-cached"
-    );
-    assert!(run.ran().contains(&"mult"), "mult recomputes on reopen");
-}
-
-/// A RAM-only node (the default) is never written to disk even though its
-/// cone is reproducible — only `Disk` opts in — so on reopen it recomputes.
-#[tokio::test]
-async fn memory_persistence_node_is_not_disk_cached() {
-    let dir = TempDir::new("memory-persist");
-    let calls = Calls::default();
-
-    let mut e =
-        TestEngine::over(source_mult_print(CacheMode::Ram, 1, &calls)).with_disk_store(dir.path());
-    e.run_sinks().await;
-
-    // Reopen: fresh RAM, nothing on disk for mult ⇒ it recomputes.
-    let mut e = e.reopen();
-    let run = e.run_sinks().await;
-    assert!(
-        !run.cached().contains(&"mult"),
-        "a RAM-only node must not be disk-cached"
     );
     assert!(run.ran().contains(&"mult"), "mult recomputes on reopen");
 }
