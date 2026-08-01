@@ -18,8 +18,6 @@ invert removed retain logic to optimize
 
 mesh once registrations
 
-Darkroom currently recompiles on every run, so each new compile still needs installation
-
 save caches on cache click
 
 imageview to load only when active, until then save to disk
