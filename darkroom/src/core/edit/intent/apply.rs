@@ -8,7 +8,7 @@
 
 use scenarium::NodeId;
 
-use crate::core::document::Document;
+use crate::core::document::{Document, ItemPlacement};
 use crate::core::edit::intent::build::build_step;
 use crate::core::edit::intent::types::{GraphIntent, NodeProperty, Refusal, UndoStep};
 
@@ -59,7 +59,10 @@ pub(crate) fn apply_step(step: &UndoStep, doc: &mut Document) {
             for (port, binding) in bindings {
                 doc.graph.set_input_binding(*port, binding.clone());
             }
-            doc.main_view.item_placements.insert(*node_id, *pos);
+            let z = doc.main_view.front_z();
+            doc.main_view
+                .item_placements
+                .insert(*node_id, ItemPlacement { pos: *pos, z });
         }
         UndoStep::DuplicateNodes {
             nodes,
@@ -70,7 +73,10 @@ pub(crate) fn apply_step(step: &UndoStep, doc: &mut Document) {
         } => {
             for (pos, node_id, node) in nodes {
                 doc.graph.insert(*node_id, node.clone());
-                doc.main_view.item_placements.insert(*node_id, *pos);
+                let z = doc.main_view.front_z();
+                doc.main_view
+                    .item_placements
+                    .insert(*node_id, ItemPlacement { pos: *pos, z });
             }
             for (port, binding) in bindings {
                 doc.graph.set_input_binding(*port, binding.clone());
@@ -89,8 +95,8 @@ pub(crate) fn apply_step(step: &UndoStep, doc: &mut Document) {
         }
         UndoStep::MoveSelection { moves, .. } => {
             for (key, _, to) in moves {
-                if let Some(position) = doc.main_view.item_placements.get_mut(key) {
-                    *position = *to;
+                if let Some(placement) = doc.main_view.item_placements.get_mut(key) {
+                    placement.pos = *to;
                 }
             }
         }
@@ -103,8 +109,8 @@ pub(crate) fn apply_step(step: &UndoStep, doc: &mut Document) {
         UndoStep::SetSelection { to, .. } => {
             doc.main_view.selected = to.clone();
         }
-        UndoStep::Raise { key, to_index, .. } => {
-            doc.main_view.move_item_to_index(key, *to_index);
+        UndoStep::Raise { key, to_z, .. } => {
+            set_item_z(doc, key, *to_z);
         }
         UndoStep::SetNodeProperty { node_id, to, .. } => {
             set_node_property(doc, node_id, *to);
@@ -140,6 +146,15 @@ fn set_subscription(
 
 /// Write one [`NodeProperty`] into its node field. Shared by `apply_graph`
 /// (writes `to`) and `revert_graph` (writes `from`).
+/// Write one item's paint depth. The whole of what a raise does in either
+/// direction — no neighbour moves, which is why apply and revert are the same
+/// call with a different value.
+fn set_item_z(doc: &mut Document, key: &NodeId, z: u32) {
+    if let Some(placement) = doc.main_view.item_placements.get_mut(key) {
+        placement.z = z;
+    }
+}
+
 fn set_node_property(doc: &mut Document, node_id: &NodeId, prop: NodeProperty) {
     let node = doc.graph.find_mut(*node_id).unwrap();
     match prop {
@@ -178,16 +193,15 @@ pub(crate) fn revert_step(step: &UndoStep, doc: &mut Document) {
             // Ascending slot order (captured that way), so each insert
             // lands among already-restored earlier slots and the original
             // paint order comes back exactly.
-            for (slot, key, position) in item_placements {
-                doc.main_view.item_placements.insert(*key, *position);
-                doc.main_view.move_item_to_index(key, *slot);
+            for (key, placement) in item_placements {
+                doc.main_view.item_placements.insert(*key, *placement);
             }
             doc.main_view.selected.extend(selected.iter().copied());
         }
         UndoStep::MoveSelection { moves, .. } => {
             for (key, from, _) in moves {
-                if let Some(position) = doc.main_view.item_placements.get_mut(key) {
-                    *position = *from;
+                if let Some(placement) = doc.main_view.item_placements.get_mut(key) {
+                    placement.pos = *from;
                 }
             }
         }
@@ -200,10 +214,8 @@ pub(crate) fn revert_step(step: &UndoStep, doc: &mut Document) {
         UndoStep::SetSelection { from, .. } => {
             doc.main_view.selected = from.clone();
         }
-        UndoStep::Raise {
-            key, from_index, ..
-        } => {
-            doc.main_view.move_item_to_index(key, *from_index);
+        UndoStep::Raise { key, from_z, .. } => {
+            set_item_z(doc, key, *from_z);
         }
         UndoStep::SetNodeProperty { node_id, from, .. } => {
             set_node_property(doc, node_id, *from);

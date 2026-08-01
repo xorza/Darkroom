@@ -23,7 +23,7 @@ use scenarium::DetachedNode;
 use scenarium::{Binding, CacheMode, InputPort, Node, NodeId, Subscription};
 use serde::{Deserialize, Serialize};
 
-use crate::core::document::Viewport;
+use crate::core::document::{ItemPlacement, Viewport};
 
 /// One scalar node property an editor can toggle — the payload of
 /// [`GraphIntent::SetNodeProperty`]. Both variants are geometry-neutral (changing
@@ -145,13 +145,13 @@ pub(crate) enum GraphIntent {
     SetSelection {
         to: BTreeSet<NodeId>,
     },
-    /// Lift an item — a node body or a pinned output's preview widget —
-    /// to the top of its graph's paint stack: the end of `item_placements`,
-    /// which is drawn last and so sits in front. Emitted when either kind
-    /// is clicked or grabbed, so clicking brings it forward. The stack
-    /// order lives in `item_placements`, so it persists across save/load and
-    /// tab switches and walks with undo/redo — unlike the transient
-    /// selection-recency stack it replaced.
+    /// Lift an item — a node body or a pinned output's preview widget — to
+    /// the top of its graph's paint stack, by setting its
+    /// [`ItemPlacement::z`](crate::core::document::ItemPlacement::z) past
+    /// every other. Emitted when either kind is clicked or grabbed, so
+    /// clicking brings it forward. The depth is stored view state, so it
+    /// persists across save/load and tab switches and walks with undo/redo —
+    /// unlike the transient selection-recency stack it replaced.
     Raise {
         key: NodeId,
     },
@@ -221,9 +221,9 @@ pub(crate) enum UndoStep {
     /// into the doomed node, so undo can fully restore it.
     RemoveNode {
         detached: DetachedNode,
-        /// The node's view item with the paint-stack slot it occupied —
-        /// undo restores position *and* stacking exactly.
-        item_placements: Vec<(usize, NodeId, Vec2)>,
+        /// The node's view item, carrying both its position and its paint
+        /// depth — undo restores placement exactly.
+        item_placements: Vec<(NodeId, ItemPlacement)>,
         /// This node's selection membership — removal prunes it, undo re-adds.
         selected: Vec<NodeId>,
     },
@@ -249,15 +249,14 @@ pub(crate) enum UndoStep {
         from: BTreeSet<NodeId>,
         to: BTreeSet<NodeId>,
     },
-    /// Reorder within `item_placements` to raise an item (node body or pin
-    /// preview) to the top of the paint stack. `from_index`/`to_index` are
-    /// its slot before/after the raise, so apply slides it to `to_index`
-    /// and revert slides it back — a stable reorder that leaves every
-    /// other item's relative order intact.
+    /// Raise an item (node body or pin preview) to the top of the paint
+    /// stack. `from_z`/`to_z` are its depth before/after, so apply writes
+    /// `to_z` and revert writes `from_z` — no other item is touched, which is
+    /// what a positional reorder could not promise.
     Raise {
         key: NodeId,
-        from_index: usize,
-        to_index: usize,
+        from_z: u32,
+        to_z: u32,
     },
     /// Set a scalar node property (disable flag or cache mode). One step backs
     /// both, since they're geometry-neutral and apply/revert identically —

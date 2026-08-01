@@ -4,11 +4,18 @@ use common::internals::test_output_path;
 use scenarium::{Binding, InputPort, NodeId, StaticValue};
 
 use super::*;
+use crate::core::document::harness::DocFixture;
 
 #[test]
 fn document_round_trips_as_one_json_entry() {
     let path = test_output_path("darkroom_document/roundtrip.darkroom");
-    let document = Document::default();
+    // Populated, not `Document::default()`: an empty document has an empty
+    // placement map, which would never exercise a `NodeId` as a key.
+    let document = DocFixture::sample().doc;
+    assert!(
+        !document.main_view.item_placements.is_empty(),
+        "the fixture must place nodes for this to prove anything"
+    );
 
     save(&document, &path).expect("save document");
     assert_eq!(load(&path).expect("load document"), document);

@@ -1,13 +1,11 @@
 pub(crate) mod dock;
 pub(crate) mod open_document;
-mod serde;
 pub(crate) mod validate;
 
 use ::serde::{Deserialize, Serialize};
 use glam::Vec2;
-use indexmap::IndexMap;
 use scenarium::{DetachedNode, Graph as CoreGraph, InputPort, Node, NodeId, NodeKind, OutputPort};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::core::document::dock::{DockLayout, DockOp};
 use crate::core::preview;
@@ -149,62 +147,83 @@ impl Default for Viewport {
     }
 }
 
-/// Editor-side view metadata for the document's graph: per-item positions and
-/// paint order, the viewport, and the selection (`Document::main_view`). The
-/// graph *data* itself lives in the core `Graph`; this is purely how the editor
-/// presents and navigates it.
+/// Where one node body sits and how far forward it paints.
+///
+/// The two are independent: dragging a node changes `pos` and nothing else,
+/// raising it changes `z` and nothing else. Keeping the stacking order as a
+/// *value* here rather than as the position of an entry in an ordered map is
+/// what lets [`GraphView`] derive its equality and serde, and what makes
+/// `Raise` a field write instead of a reorder.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
+pub(crate) struct ItemPlacement {
+    /// Canvas-world position of the body's top-left corner.
+    pub(crate) pos: Vec2,
+    /// Paint depth: higher paints later, so it sits in front. Ties break by
+    /// `NodeId`, so the order is total and stable across frames — see
+    /// [`GraphView::paint_order`].
+    pub(crate) z: u32,
+}
+
+/// Editor-side view metadata for the document's graph: per-item placements,
+/// the viewport, and the selection (`Document::main_view`). The graph *data*
+/// itself lives in the core `Graph`; this is purely how the editor presents
+/// and navigates it.
 ///
 /// **Everything here is persisted and undoable, by design** — reopening
 /// a file restores the exact camera and selection, and Ctrl+Z walks
 /// camera/selection changes alongside structural edits (see the long
 /// note that used to live on `Document`).
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub(crate) struct GraphView {
-    /// Every node body's position, in the canvas's **paint stack** order:
-    /// later items draw in front, and `GraphIntent::Raise` lifts one to the top.
-    /// Exactly one entry per graph node — enforced by [`Self::validate`].
-    #[serde(with = "crate::core::document::serde")]
-    pub(crate) item_placements: IndexMap<NodeId, Vec2>,
+    /// Every node body's placement. Exactly one entry per graph node —
+    /// enforced by [`Self::validate`].
+    ///
+    /// Order-insensitive on purpose: paint order rides in each entry's
+    /// [`ItemPlacement::z`], so this map is free to be keyed and compared as a
+    /// set. Ten of the eleven callers that walk the nodes don't care about
+    /// stacking at all, and the one that does asks for [`Self::paint_order`].
+    pub(crate) item_placements: BTreeMap<NodeId, ItemPlacement>,
     pub(crate) viewport: Viewport,
     /// `BTreeSet` so equality and serialization are order-independent
     /// (no spurious undo entries from reordering).
     pub(crate) selected: BTreeSet<NodeId>,
 }
 
-impl PartialEq for GraphView {
-    fn eq(&self, other: &Self) -> bool {
-        self.viewport == other.viewport
-            && self.selected == other.selected
-            // `IndexMap`'s own `PartialEq` ignores order; the paint stack *is*
-            // the order, so compare as sequences. `Iterator::eq` is exactly
-            // that — same length, pairwise equal.
-            && self.item_placements.iter().eq(other.item_placements.iter())
-    }
-}
-
-impl Eq for GraphView {}
-
 impl GraphView {
     /// A fresh view seeded with a zero-positioned item for every node in
     /// `graph`.
     pub(crate) fn for_graph(graph: &CoreGraph) -> Self {
-        let mut item_placements = IndexMap::with_capacity(graph.len());
-        for node in graph.iter() {
-            item_placements.insert(node.id, Vec2::ZERO);
-        }
         Self {
-            item_placements,
+            item_placements: graph
+                .iter()
+                .map(|node| (node.id, ItemPlacement::default()))
+                .collect(),
             ..Default::default()
         }
     }
 
-    pub(crate) fn move_item_to_index(&mut self, key: &NodeId, target_index: usize) {
-        let from = self
-            .item_placements
-            .get_index_of(key)
-            .expect("view item to move must exist");
-        let to = target_index.min(self.item_placements.len() - 1);
-        self.item_placements.move_index(from, to);
+    /// The items back-to-front: what a paint pass draws in order, and the only
+    /// place stacking is resolved.
+    ///
+    /// `(z, NodeId)` rather than `z` alone so the sort is total — several
+    /// items share the seed `z` of 0 until something raises them, and a
+    /// comparator that let those tie would leave their relative order at the
+    /// mercy of the sort's stability.
+    pub(crate) fn paint_order(&self) -> Vec<(NodeId, ItemPlacement)> {
+        let mut items: Vec<(NodeId, ItemPlacement)> =
+            self.item_placements.iter().map(|(k, v)| (*k, *v)).collect();
+        items.sort_unstable_by_key(|(id, placement)| (placement.z, *id));
+        items
+    }
+
+    /// The depth that puts an item in front of every other. One past the
+    /// current maximum, so a raise never has to renumber its neighbours.
+    pub(crate) fn front_z(&self) -> u32 {
+        self.item_placements
+            .values()
+            .map(|placement| placement.z)
+            .max()
+            .map_or(0, |top| top.saturating_add(1))
     }
 }
 
@@ -283,9 +302,7 @@ impl Document {
     /// selection membership) — the one edit that has to touch both to leave
     /// the document consistent.
     pub(crate) fn remove_node(&mut self, node_id: &NodeId) -> DetachedNode {
-        self.main_view
-            .item_placements
-            .retain(|key, _| *key != *node_id);
+        self.main_view.item_placements.remove(node_id);
         let detached = self.graph.detach_node(*node_id);
         self.main_view.selected.retain(|k| *k != *node_id);
         detached
@@ -527,9 +544,37 @@ mod tests {
         DocFixture::sample().doc.validate().unwrap();
     }
 
+    /// Paint order is a total order over `(z, NodeId)`, so items sharing the
+    /// seed depth still come out in a fixed sequence, and `front_z` puts a
+    /// raise past every one of them. Both matter for stability: equal depths
+    /// are the common case until something is raised.
     #[test]
-    #[should_panic(expected = "view item to move must exist")]
-    fn moving_missing_view_item_panics() {
-        GraphView::default().move_item_to_index(&NodeId::unique(), 0);
+    fn paint_order_is_total_and_front_z_clears_every_item() {
+        let mut view = GraphView::default();
+        assert_eq!(view.front_z(), 0, "an empty view seeds at zero");
+
+        let (low, high) = (NodeId::from_u128(1), NodeId::from_u128(2));
+        view.item_placements.insert(high, ItemPlacement::default());
+        view.item_placements.insert(low, ItemPlacement::default());
+        assert_eq!(
+            view.paint_order()
+                .iter()
+                .map(|(id, _)| *id)
+                .collect::<Vec<_>>(),
+            [low, high],
+            "equal depths break by id, not by insertion"
+        );
+
+        assert_eq!(view.front_z(), 1, "one past the shared depth of zero");
+        view.item_placements.get_mut(&low).unwrap().z = view.front_z();
+        assert_eq!(
+            view.paint_order()
+                .iter()
+                .map(|(id, _)| *id)
+                .collect::<Vec<_>>(),
+            [high, low],
+            "raising the lower id lifts it past the higher one"
+        );
+        assert_eq!(view.front_z(), 2, "and the next raise clears that one too");
     }
 }

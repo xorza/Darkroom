@@ -46,10 +46,11 @@ pub(crate) fn build_duplicate_intent(
         let new_id = NodeId::unique();
         id_map.insert(*old_id, new_id);
         let clone = node.clone();
-        let pos = *view
+        let pos = view
             .item_placements
             .get(old_id)
-            .expect("view holds a position for every graph node")
+            .expect("view holds a placement for every graph node")
+            .pos
             + DUPLICATE_OFFSET;
         nodes.push((pos, new_id, clone));
     }

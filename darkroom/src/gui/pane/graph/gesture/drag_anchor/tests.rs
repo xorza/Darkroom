@@ -16,7 +16,7 @@ use crate::gui::pane::graph::harness::CanvasHarness;
 fn a_body_drag_moves_the_node_by_the_pointers_travel() {
     let mut h = CanvasHarness::new(DocFixture::probes(2));
     let (dragged, bystander) = (h.node(0), h.node(1));
-    let start = h.doc().main_view.item_placements[&dragged];
+    let start = h.doc().main_view.item_placements[&dragged].pos;
     h.prime(2);
 
     // Press the body, then travel past the drag threshold. The sweep sees

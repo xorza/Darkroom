@@ -38,9 +38,14 @@ fn a_culled_nodes_ports_stay_anchored_until_its_node_leaves_the_document() {
 
     // Scroll it far past the viewport. Two frames: the first still reads the
     // on-screen record, the second is the culled one that has to reconstruct.
-    let before = h.doc().main_view.item_placements[&leaves];
+    let before = h.doc().main_view.item_placements[&leaves].pos;
     let shift = Vec2::new(6000.0, 4000.0);
-    h.doc_mut().main_view.item_placements[&leaves] = before + shift;
+    h.doc_mut()
+        .main_view
+        .item_placements
+        .get_mut(&leaves)
+        .unwrap()
+        .pos = before + shift;
     h.prime(2);
 
     let culled = h
