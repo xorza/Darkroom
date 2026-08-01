@@ -50,13 +50,31 @@ pub(crate) enum AppCommand {
 
 impl App {
     /// Dispatch a command after the editor has finished authoring its pass.
-    pub(super) fn handle_command(&mut self, ui: &mut Ui, command: AppCommand) {
+    ///
+    /// Returns whether the command stranded the canvas's cached geometry.
+    /// Only an edit can — the rest touch state no canvas measures against —
+    /// but it is reported rather than requested here so that `App::frame`
+    /// stays the one place in the app that asks for a relayout.
+    #[must_use]
+    pub(super) fn handle_command(&mut self, ui: &mut Ui, command: AppCommand) -> bool {
         match command {
-            AppCommand::File(c) => self.handle_file(c),
-            AppCommand::Run(c) => self.handle_run(c),
-            AppCommand::Prefs(c) => self.handle_prefs(ui, c),
-            AppCommand::Edit(c) => self.handle_edit(ui, c),
-            AppCommand::Quit => self.guard_discard(PendingTransition::Quit),
+            AppCommand::File(c) => {
+                self.handle_file(c);
+                false
+            }
+            AppCommand::Run(c) => {
+                self.handle_run(c);
+                false
+            }
+            AppCommand::Prefs(c) => {
+                self.handle_prefs(ui, c);
+                false
+            }
+            AppCommand::Edit(c) => self.handle_edit(c),
+            AppCommand::Quit => {
+                self.guard_discard(PendingTransition::Quit);
+                false
+            }
         }
     }
 }

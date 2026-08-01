@@ -2,7 +2,6 @@
 //! inline `FsPath` const-input picker. The dialog opens after UI authoring,
 //! then the chosen paths land as an ordinary undoable `SetInput` edit.
 
-use palantir::Ui;
 use scenarium::Binding;
 use scenarium::FsPathMode;
 use scenarium::StaticValue;
@@ -24,9 +23,10 @@ pub(crate) enum EditCommand {
 }
 
 impl App {
-    pub(super) fn handle_edit(&mut self, ui: &mut Ui, command: EditCommand) {
+    #[must_use]
+    pub(super) fn handle_edit(&mut self, command: EditCommand) -> bool {
         match command {
-            EditCommand::PickInputPath(pick) => self.pick_input_path(ui, pick),
+            EditCommand::PickInputPath(pick) => self.pick_input_path(pick),
         }
     }
 
@@ -35,11 +35,11 @@ impl App {
     /// authoring, so it goes through `Editor::apply_edit` rather than the
     /// frame's intent drain.
     ///
-    /// Spends the edit's relayout here rather than handing it back: this runs
-    /// past the point where `Editor::frame` has already spent the frame's own,
-    /// so an edit that resizes a node body would otherwise leave the canvas
-    /// geometry stale until something else happened to ask for a pass.
-    fn pick_input_path(&mut self, ui: &mut Ui, pick: PathPick) {
+    /// Reports the edit's relayout need rather than acting on it — this runs
+    /// after `Editor::frame` has handed its own back, and `App::frame` spends
+    /// both together.
+    #[must_use]
+    fn pick_input_path(&mut self, pick: PathPick) -> bool {
         let extensions: Vec<&str> = pick.config.extensions.iter().map(String::as_str).collect();
         let value = match pick.config.mode {
             FsPathMode::ExistingFile => dialogs::pick_existing_file(&extensions)
@@ -58,17 +58,14 @@ impl App {
                 .map(|path| StaticValue::FsPath(path.to_string_lossy().into_owned())),
         };
         let Some(value) = value else {
-            return;
+            return false;
         };
-        let needs_relayout = self.editor.apply_edit(
+        self.editor.apply_edit(
             &mut self.open,
             GraphIntent::SetInput {
                 input: pick.port,
                 to: Some(Binding::Const(value)),
             },
-        );
-        if needs_relayout {
-            ui.request_relayout();
-        }
+        )
     }
 }
