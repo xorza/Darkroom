@@ -1,7 +1,5 @@
 scrolview on newnode popup
 
-cleanup binary caches
-
 file name as argument clap
 
 autoupdate image review and autorun node
@@ -21,5 +19,3 @@ save caches on cache click
 imageview to load only when active, until then save to disk
 
 uitest harness internals/test cfg
-
-inlinerename to select all text when entering edito mode
