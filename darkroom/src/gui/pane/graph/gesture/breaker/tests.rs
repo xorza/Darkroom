@@ -48,8 +48,12 @@ fn the_breaker_cuts_a_node_at_its_current_position_not_its_last_painted_one() {
     // Now move the node onto the scribble, centred on its far end. This frame
     // the document says the node is here while its arranged rect still says it
     // is back there — the divergence the probe has to resolve the new way.
-    h.doc_mut().main_view.item_placements[&node] =
-        SCRIBBLE_TO - Vec2::new(body.size.w, body.size.h) * 0.5;
+    h.doc_mut()
+        .main_view
+        .item_placements
+        .get_mut(&node)
+        .unwrap()
+        .pos = SCRIBBLE_TO - Vec2::new(body.size.w, body.size.h) * 0.5;
     h.frame();
 
     h.ui.release_button(PointerButton::Right);

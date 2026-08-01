@@ -166,24 +166,40 @@ impl<'a> GraphCtx<'a> {
         self.output_types
     }
 
-    /// This graph's nodes, in paint order: later entries draw in front, and
-    /// `GraphIntent::Raise` moves one to the end.
+    /// This graph's nodes, in no particular order.
     ///
     /// Driven by the view's placements rather than the graph's own node list,
-    /// because the paint stack *is* that order. A placement whose node is
+    /// since only a placed node has somewhere to be. A placement whose node is
     /// gone is skipped rather than faked.
+    ///
+    /// Unordered because almost nothing needs the stack: scanning for
+    /// emitters, resolving a drag anchor, framing the viewport and hit-testing
+    /// a rubber band all want the set. The one pass that draws asks for
+    /// [`Self::nodes_in_paint_order`] and pays for the sort there.
     pub(crate) fn nodes(self) -> impl Iterator<Item = NodeCtx<'a>> {
         self.view()
             .item_placements
             .iter()
-            .filter_map(move |(id, pos)| NodeCtx::resolve(self, *id, *pos))
+            .filter_map(move |(id, placement)| NodeCtx::resolve(self, *id, placement.pos))
+    }
+
+    /// This graph's nodes back-to-front: later entries draw in front, and
+    /// `GraphIntent::Raise` lifts one past the rest.
+    ///
+    /// Allocates the sorted run once, so a paint pass walks it instead of
+    /// re-resolving stacking per node.
+    pub(crate) fn nodes_in_paint_order(self) -> impl Iterator<Item = NodeCtx<'a>> {
+        self.view()
+            .paint_order()
+            .into_iter()
+            .filter_map(move |(id, placement)| NodeCtx::resolve(self, id, placement.pos))
     }
 
     /// One node of this graph, or `None` for an id it does not hold — a node
     /// deleted since the caller read the id, or one belonging to another pane.
     pub(crate) fn node(self, node_id: NodeId) -> Option<NodeCtx<'a>> {
-        let pos = *self.view().item_placements.get(&node_id)?;
-        NodeCtx::resolve(self, node_id, pos)
+        let placement = *self.view().item_placements.get(&node_id)?;
+        NodeCtx::resolve(self, node_id, placement.pos)
     }
 
     pub(crate) fn contains(self, node_id: NodeId) -> bool {

@@ -40,11 +40,11 @@ impl GraphView {
             return Err(GraphViewValidationError::InvalidViewport);
         }
 
-        // IndexMap guarantees unique keys, so counts plus reverse membership
-        // prove the graph and view contain exactly the same node and pin sets.
+        // A map guarantees unique keys, so counts plus reverse membership
+        // prove the graph and view contain exactly the same node set.
         let mut node_items = 0usize;
-        for (key, position) in &self.item_placements {
-            if !position.is_finite() {
+        for (key, placement) in &self.item_placements {
+            if !placement.pos.is_finite() {
                 return Err(GraphViewValidationError::NonFinitePosition { item: *key });
             }
             node_items += 1;

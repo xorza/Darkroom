@@ -85,11 +85,10 @@ impl NodeUI {
         probe: &mut BreakerProbe<'_>,
         out: &mut Requests,
     ) {
-        // Paint in the context's node order (the view's `item_placements`) —
-        // later draws sit on top, so the last item is frontmost. The order is
-        // persisted view state, so a raised item stays raised across
-        // save/load and tab switches; `GraphIntent::Raise` moves a clicked
-        // item to the end.
+        // Paint back-to-front, so the last item drawn is frontmost. Each
+        // item's depth is persisted view state, so a raised node stays raised
+        // across save/load and tab switches; `GraphIntent::Raise` lifts a
+        // clicked item past the rest.
         //
         // Culled nodes are skipped entirely — no measure, arrange, or
         // paint. Every widget id in a node's subtree derives from its
@@ -104,7 +103,7 @@ impl NodeUI {
         // and that first post-blur record is where the edit's pending draft
         // commits.
         let mut focus_kept = None;
-        for n in dcx.graph_ctx().nodes() {
+        for n in dcx.graph_ctx().nodes_in_paint_order() {
             let keeps_focus = ui.focus_within(node_widget_id(n.id));
             if keeps_focus {
                 focus_kept = Some(n.id);

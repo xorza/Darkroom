@@ -81,14 +81,16 @@ are gone; the field paths and the noun are not.
       `GraphCtx::is_visible` field, and `GraphUI::visible` (a cached copy kept
       only for edge detection).
 
-## `GraphView::item_placements` carries two jobs
+## `GraphView::item_placements` duplicates the graph's node set
 
-- [ ] It is both the position map and the paint-stack order, which is why
-      `GraphView` needs a hand-written `PartialEq` comparing it as a sequence
-      and why `Raise` is expressed as `move_item_to_index`.
-- [ ] The same field duplicates the graph's node set; `Document::validate`
-      exists partly to enforce the 1:1 correspondence, and
-      `Document::remove_node` exists because the invariant spans two fields.
+Paint order no longer rides in this field — each entry carries its own depth —
+but one entry per node is still an invariant spanning two fields.
+
+- [ ] `Document::validate` exists partly to enforce the 1:1 correspondence, and
+      `Document::remove_node` exists because the invariant spans the graph and
+      the view. Removing it means either moving placement onto the core `Graph`
+      node (a layering break — `scenarium` is a standalone crate) or letting a
+      missing entry default silently instead of failing validation.
 
 ## Known gaps, stated rather than fixed
 

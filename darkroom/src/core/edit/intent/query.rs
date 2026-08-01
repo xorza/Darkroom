@@ -24,12 +24,8 @@ impl UndoStep {
             UndoStep::RenameNode { from, to, .. } => from == to,
             UndoStep::SetInput { from, to, .. } => from == to,
             UndoStep::SetSelection { from, to } => from == to,
-            // Already on top (its slot is the last one) → nothing to raise.
-            UndoStep::Raise {
-                from_index,
-                to_index,
-                ..
-            } => from_index == to_index,
+            // Already frontmost → nothing to raise.
+            UndoStep::Raise { from_z, to_z, .. } => from_z == to_z,
             UndoStep::SetNodeProperty { from, to, .. } => from == to,
             UndoStep::SetViewport { from, to } => {
                 (from.pan - to.pan).length_squared() < VIEWPORT_EPS * VIEWPORT_EPS
@@ -110,7 +106,7 @@ impl UndoStep {
         match self {
             // Navigation only — panning, zooming, selecting, or
             // restacking is view state the user doesn't "save".
-            // Stacking order rides in `item_placements` and still writes on any
+            // Stacking rides in each item's depth and still writes on any
             // save (like selection), but a bare restack shouldn't nag on exit.
             UndoStep::SetSelection { .. }
             | UndoStep::Raise { .. }

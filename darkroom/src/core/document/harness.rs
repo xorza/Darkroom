@@ -12,14 +12,25 @@ use scenarium::{
 };
 
 use crate::core::document::dock::DockOp;
-use crate::core::document::{Document, GraphView, TabRef};
+use crate::core::document::{Document, GraphView, ItemPlacement, TabRef};
 
 /// Lay every placement out along a row so no node lands off-viewport and gets
 /// culled — [`GraphView::for_graph`] seeds every item at the origin.
 fn spread(view: &mut GraphView) {
-    for (i, pos) in view.item_placements.values_mut().enumerate() {
-        *pos = row_pos(i);
+    for (i, (id, _)) in view.paint_order().into_iter().enumerate() {
+        view.item_placements
+            .get_mut(&id)
+            .expect("paint order lists only placed items")
+            .pos = row_pos(i);
     }
+}
+
+/// Place `node_id` at `pos`, frontmost — so a fixture's paint order is the
+/// order its constructors added in, which is what [`DocFixture::node`] indexes.
+fn place(view: &mut GraphView, node_id: NodeId, pos: Vec2) {
+    let z = view.front_z();
+    view.item_placements
+        .insert(node_id, ItemPlacement { pos, z });
 }
 
 /// The `i`th slot of the row [`spread`] lays out.
@@ -83,7 +94,7 @@ impl DocFixture {
                 .doc
                 .graph
                 .insert(node_id, Node::new(NodeKind::Func(FuncId::unique())));
-            fixture.doc.main_view.item_placements.insert(node_id, pos);
+            place(&mut fixture.doc.main_view, node_id, pos);
         }
         fixture
     }
@@ -97,10 +108,7 @@ impl DocFixture {
         }
         let node_id = self.doc.graph.add_func_node(func);
         let slot = self.doc.main_view.item_placements.len();
-        self.doc
-            .main_view
-            .item_placements
-            .insert(node_id, row_pos(slot));
+        place(&mut self.doc.main_view, node_id, row_pos(slot));
         node_id
     }
 
@@ -112,18 +120,17 @@ impl DocFixture {
             .doc
             .graph
             .add(Node::new(NodeKind::Func(FuncId::unique())));
-        self.doc.main_view.item_placements.insert(node_id, pos);
+        place(&mut self.doc.main_view, node_id, pos);
         node_id
     }
 
     /// The `i`th node in placement order — the order the constructors add in,
     /// and the canvas's paint stack.
     pub(crate) fn node(&self, i: usize) -> NodeId {
-        *self
-            .doc
+        self.doc
             .main_view
-            .item_placements
-            .get_index(i)
+            .paint_order()
+            .get(i)
             .expect("the fixture placed that many nodes")
             .0
     }
@@ -132,7 +139,13 @@ impl DocFixture {
     /// *which* node a gesture reaches rather than merely that all of them are
     /// on screen.
     pub(crate) fn placed(mut self, id: NodeId, at: Vec2) -> Self {
-        self.doc.main_view.item_placements.insert(id, at);
+        match self.doc.main_view.item_placements.get_mut(&id) {
+            // Repositioning a node the fixture already placed must not
+            // restack it — `node(i)` indexes paint order, and several tests
+            // move one node after adding others.
+            Some(placement) => placement.pos = at,
+            None => place(&mut self.doc.main_view, id, at),
+        }
         self
     }
 

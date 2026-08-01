@@ -44,7 +44,7 @@ impl History {
     }
 
     fn pos(&self, node_id: NodeId) -> Vec2 {
-        self.doc.main_view.item_placements[&node_id]
+        self.doc.main_view.item_placements[&node_id].pos
     }
 
     /// Push one graph edit, as a widget's single intent does.

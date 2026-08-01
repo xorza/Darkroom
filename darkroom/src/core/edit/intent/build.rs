@@ -85,14 +85,11 @@ pub(crate) fn build_step(intent: GraphIntent, doc: &Document) -> Result<UndoStep
         GraphIntent::RemoveNode { node_id } => {
             validate::live_node(graph, node_id, "RemoveNode")?;
             let detached = graph.snapshot_node(node_id).ok_or(Refusal::Quiet)?;
-            // The node's own item with its paint-stack slot — ascending by
-            // construction (enumerate).
             let item_placements = view
                 .item_placements
-                .iter()
-                .enumerate()
-                .filter(|(_, (key, _))| **key == node_id)
-                .map(|(slot, (&key, &position))| (slot, key, position))
+                .get(&node_id)
+                .map(|&placement| (node_id, placement))
+                .into_iter()
                 .collect();
             let selected = view
                 .selected
@@ -112,10 +109,10 @@ pub(crate) fn build_step(intent: GraphIntent, doc: &Document) -> Result<UndoStep
                 validate::finite_position(to, "MoveSelection")?;
                 // Drag-sourced (spans frames): a member whose item vanished
                 // mid-gesture (node removed) drops quietly.
-                let Some(&from) = view.item_placements.get(&key) else {
+                let Some(placement) = view.item_placements.get(&key) else {
                     continue;
                 };
-                placed.push((key, from, to));
+                placed.push((key, placement.pos, to));
             }
             UndoStep::MoveSelection {
                 grabbed,
@@ -162,17 +159,14 @@ pub(crate) fn build_step(intent: GraphIntent, doc: &Document) -> Result<UndoStep
                 .collect(),
         },
         GraphIntent::Raise { key } => {
-            let from_index = view
-                .item_placements
-                .get_index_of(&key)
-                .ok_or(Refusal::Quiet)?;
-            // Top of the stack is the last slot — painted last, drawn in front.
-            let to_index = view.item_placements.len() - 1;
-            UndoStep::Raise {
-                key,
-                from_index,
-                to_index,
+            let from_z = view.item_placements.get(&key).ok_or(Refusal::Quiet)?.z;
+            let to_z = view.front_z();
+            // Already frontmost: raising it again would record a step that
+            // changes nothing and cost a Ctrl+Z.
+            if from_z == to_z {
+                return Err(Refusal::Quiet);
             }
+            UndoStep::Raise { key, from_z, to_z }
         }
         GraphIntent::SetNodeProperty { node_id, to } => {
             let node = validate::live_node(graph, node_id, "SetNodeProperty")?;
