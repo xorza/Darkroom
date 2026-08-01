@@ -103,20 +103,20 @@ fn path_graph(data_path: &str, mode: CacheMode, observed: Observed) -> TestGraph
     g
 }
 
-/// A declared path with no determinate identity fails **the node that
-/// declares it**, and its dependents skip as errored-upstream.
+/// A declared path with no determinate identity denies the node its **cache
+/// key**, not its turn.
 ///
-/// Leaving it unstamped is correct — the node recomputes rather than
-/// reusing a result keyed on a guess — but it is also silent: the only
-/// symptom is a cache that stops hitting, with nothing said. Failing
-/// the whole run is the other extreme, and the pre-run sweep cannot
-/// even name a culprit, since it batches every executing node's paths
-/// at once. Both routes therefore converge on the node: a const path
-/// the sweep could not stamp leaves its digest `None`, which sends it
-/// through the same per-node stamp a producer-supplied path takes.
+/// Failing the node outright read "unstampable" as "unusable", and those are
+/// different claims: a `None` digest is where every `Impure` node already
+/// sits, so the node runs — uncached — and only its lambda knows whether the
+/// path mattered. One that reads the file fails with its own message; one that
+/// never reads it, or writes the path it was handed, succeeds. What the node
+/// must not do is go quiet, because a node that asked to be cached and
+/// silently never is has no other symptom than a cache that stops hitting.
+/// Hence the warning, and hence its own test below.
 #[tokio::test]
 #[cfg(unix)]
-async fn an_unidentifiable_path_fails_only_the_node_declaring_it() {
+async fn an_unidentifiable_path_runs_the_node_uncached() {
     use std::fs::Permissions;
     use std::os::unix::fs::PermissionsExt;
 
@@ -125,16 +125,24 @@ async fn an_unidentifiable_path_fails_only_the_node_declaring_it() {
     std::fs::write(&data, "v1").unwrap();
     let data_path = data.to_string_lossy().into_owned();
     let lock = |mode| std::fs::set_permissions(dir.path(), Permissions::from_mode(mode)).unwrap();
+    let warned = |run: &RunOutcome| {
+        run.logs()
+            .iter()
+            .any(|line| line.contains("running uncached"))
+    };
 
-    // `loader` failed for want of a path identity, `dependent` was skipped
-    // for reading it, and the run itself still succeeded.
-    let assert_unavailable = |run: &RunOutcome, loader: &str, dependent: &str| {
+    // `loader` does read the file, so the locked directory reaches it as its
+    // own failure — and `dependent` skips as errored-upstream, the same
+    // cascade failing the node at stamp time produced.
+    let assert_lambda_failed = |run: &RunOutcome, loader: &str, dependent: &str| {
         assert!(
-            matches!(
-                run.error(loader),
-                Some(RunError::ResourceUnavailable { .. })
-            ),
-            "the node declaring the path must fail: {:?}",
+            warned(run),
+            "going uncached must be reported: {:?}",
+            run.logs(),
+        );
+        assert!(
+            matches!(run.error(loader), Some(RunError::Invoke { .. })),
+            "the lambda's own error is what fails the node: {:?}",
             run.error(loader),
         );
         assert!(
@@ -156,7 +164,7 @@ async fn an_unidentifiable_path_fails_only_the_node_declaring_it() {
     lock(0o000);
     let run = e.run_sinks().await;
     lock(0o755);
-    assert_unavailable(&run, "load_text", "capture");
+    assert_lambda_failed(&run, "load_text", "capture");
 
     // The same file reached through a producer's value, known only at the
     // node's turn. Same outcome, same route.
@@ -164,7 +172,41 @@ async fn an_unidentifiable_path_fails_only_the_node_declaring_it() {
     lock(0o000);
     let run = e.run_sinks().await;
     lock(0o755);
-    assert_unavailable(&run, "load_text", "annotate");
+    assert_lambda_failed(&run, "load_text", "annotate");
+
+    // The case failing at stamp time got wrong. The path is just as
+    // unstampable, but this lambda never reads it, so there is nothing for the
+    // locked directory to break: it runs, succeeds, and is merely uncached.
+    let mut g = TestGraph::new();
+    g.add("ignores_path", |n: NodeSpec| {
+        n.pure()
+            .input(existing_file())
+            .output(DataType::String)
+            .compute(|_| ConstValue::String("ran".into()))
+    });
+    g.add("capture", capture(Observed::default()));
+    g.constant("ignores_path", 0, ConstValue::FsPath(data_path.clone()));
+    g.wire("ignores_path", 0, "capture", 0);
+    let mut e = TestEngine::over(g);
+
+    lock(0o000);
+    let run = e.run_sinks().await;
+    lock(0o755);
+    assert!(
+        warned(&run),
+        "an unstampable path is still reported: {:?}",
+        run.logs(),
+    );
+    assert!(
+        run.error("ignores_path").is_none(),
+        "a path the lambda never reads must not fail it: {:?}",
+        run.error("ignores_path"),
+    );
+    assert!(
+        run.ran().contains(&"ignores_path"),
+        "and the node runs rather than being skipped: {:?}",
+        run.ran(),
+    );
 }
 
 /// The core regression: a path arriving over a **Bind** edge keys the loader
