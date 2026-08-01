@@ -183,13 +183,33 @@ impl App {
         // the compile the stream just acknowledged rather than the previous one.
         let previews = self.runtime.drain_previews();
         self.run_state.ingest_previews(ui, previews);
-        // Then drop what the document no longer holds. A `NodeId`-keyed cache
-        // outlives the scene on purpose, so only the document can say when an
-        // entry's node is gone rather than merely off-screen. Idempotent and
-        // proportional to the cached entries, so it runs unconditionally —
-        // beside the ingest above rather than inside the frame, since the store
-        // is `App`'s and a record pass only reads it.
-        self.run_state.previews.reconcile(ui, &self.open.document);
+    }
+
+    /// Sweep every `NodeId`-keyed cache derived from the open document, and
+    /// upload the full-resolution texture each visible viewer needs.
+    ///
+    /// **The one place these run.** All of them outlive the scene on purpose —
+    /// a closed tab must resolve its port centers the frame it comes back — so
+    /// none can decide for itself that an entry is dead; only the document
+    /// knows, and a node id is never reused. Enumerated here so a new cache
+    /// gets a line rather than a fourth call site — see
+    /// [`Document::holds_node`](crate::core::document::Document::holds_node),
+    /// which they all ask and which lists them.
+    ///
+    /// Runs from `update`, once a frame: every sweep is idempotent and
+    /// costs a lookup per cached entry, and `record` runs *twice* on a frame
+    /// carrying action input. After the worker drain, so a value published
+    /// this frame is already in the store when its viewer is materialized.
+    ///
+    /// A node deleted later in the same frame's record is swept next frame.
+    /// Nothing reads a dead entry in between — the geometry is reached through
+    /// a `NodeScope` that only resolves for live nodes, and `draw_panels`
+    /// skips a panel whose node is gone — so the lag costs memory and nothing
+    /// else.
+    fn reconcile_derived_state(&mut self, ui: &Ui) {
+        let document = &self.open.document;
+        self.run_state.previews.reconcile(ui, document);
+        self.editor.reconcile_caches(document);
     }
 
     /// Mirror the window's live geometry into the persisted preferences
@@ -323,6 +343,9 @@ impl palantir::App for App {
         // editor rebuilds its scene so the status/log projections it
         // reads reflect the latest run.
         self.drain_worker_events(ui);
+
+        // Then release what the document has stopped holding.
+        self.reconcile_derived_state(ui);
 
         self.handle_close_request(ui);
     }

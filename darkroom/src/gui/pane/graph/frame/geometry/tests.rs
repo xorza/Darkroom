@@ -66,15 +66,24 @@ fn a_culled_nodes_ports_stay_anchored_until_its_node_leaves_the_document() {
         );
     }
 
-    // Now say the document dropped it. Its entries go; its neighbour's stay.
-    h.graph_ui.retain_nodes(|id| id == stays);
+    // Now the document drops it for real, and the sweep runs against that
+    // document — the shape production takes, where a deleted node is gone from
+    // the graph before anything asks whether to keep its cache entries.
+    // Read off `node_sizes` directly: `node_world_rect` resolves through a
+    // `NodeScope`, which a deleted node no longer has.
+    h.doc_mut().remove_node(&leaves);
+    h.graph_ui.retain_nodes(&h.ctx.fixture.doc);
     assert!(
-        h.node_world_rect(leaves).is_none(),
+        !h.graph_ui.geometry.node_sizes.contains_key(&leaves),
         "a node the document stopped holding releases its cached size",
     );
     assert!(
-        h.node_world_rect(stays).is_some(),
+        h.graph_ui.geometry.node_sizes.contains_key(&stays),
         "and its neighbour keeps its own",
+    );
+    assert!(
+        h.node_world_rect(stays).is_some(),
+        "which still resolves through the live node",
     );
     // The port offsets went with it, so the next culled rebuild has nothing
     // left to reconstruct from.

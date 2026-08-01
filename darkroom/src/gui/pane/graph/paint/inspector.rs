@@ -92,11 +92,16 @@ impl Inspectors {
         self.modes.retain(|_, m| *m == InspectMode::Pinned);
     }
 
-    /// Read last-frame chip clicks to cycle node states, close unpinned
-    /// panels on an outside action, and drop entries for deleted nodes.
-    /// Reads everything off last-frame responses (same timing as the
-    /// chip toggle), so a chip click never reads as its own outside
-    /// action — the click lands on the chip, not the canvas or a body.
+    /// Read last-frame chip clicks to cycle node states and close unpinned
+    /// panels on an outside action. Reads everything off last-frame responses
+    /// (same timing as the chip toggle), so a chip click never reads as its
+    /// own outside action — the click lands on the chip, not the canvas or a
+    /// body.
+    ///
+    /// Dropping entries for deleted nodes is *not* here: that needs only the
+    /// document, so it runs once a frame with the canvas's other
+    /// `NodeId`-keyed sweeps ([`Self::retain_nodes`]) rather than per record
+    /// pass with the input handling.
     pub(crate) fn apply(&mut self, ui: &Ui, cx: CanvasCtx<'_>) {
         let hits = cx.hits();
         if let Some(node) = hits.chip(Chip::Inspect) {
@@ -112,11 +117,19 @@ impl Inspectors {
         if outside_action(ui, hits) {
             self.close_unpinned();
         }
-        // A panel outlives its node only until the next sweep. Asked of the
-        // document rather than of this pane: `modes` deliberately survives a
-        // tab switch, so only the node being *gone* may drop an entry.
-        let document = cx.graph_ctx().document();
-        self.modes.retain(|id, _| document.holds_node(*id));
+    }
+
+    /// Drop panels whose node the document has stopped holding.
+    ///
+    /// Pure ballast: [`Self::draw_panels`] already skips an entry whose node
+    /// does not resolve, so a mode that outlives its node costs memory and
+    /// nothing else — which is what lets this run once a frame beside the
+    /// canvas's other sweeps rather than inside the record pass.
+    ///
+    /// Asked of the document rather than of a pane: `modes` deliberately
+    /// survives a tab switch, so only the node being *gone* may drop an entry.
+    pub(crate) fn retain_nodes(&mut self, keep: impl Fn(NodeId) -> bool) {
+        self.modes.retain(|id, _| keep(*id));
     }
 
     /// Record a panel for every open inspector, positioned just right of

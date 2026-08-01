@@ -8,8 +8,8 @@
 //!
 //! [`App`]: crate::gui::app::App
 
-use crate::core::document::TabRef;
 use crate::core::document::open_document::OpenDocument;
+use crate::core::document::{Document, TabRef};
 use crate::core::edit::action_stack::ActionStack;
 use crate::core::edit::intent::apply::commit_intent;
 use crate::core::edit::intent::types::{GraphIntent, Refusal, UndoStep};
@@ -181,17 +181,10 @@ impl Editor {
         // before this frame's rebuild. After it, the active tab is fixed.
         self.navigate(ui, open, ctx, requests);
 
-        // Tabs are settled: drop viewer state for closed tabs.
+        // Tabs are settled: drop viewer state for closed tabs. A tab-lifetime
+        // question, not a node-liveness one — which is why it belongs to the
+        // frame rather than to `App`'s once-a-frame sweep.
         self.sync_image_viewers(open);
-        // The canvas's `NodeId`-keyed geometry cache outlives the scene on
-        // purpose, so only the document can say when an entry's node is gone
-        // rather than merely off-screen (the preview store's counterpart runs
-        // on `App`, which owns it). Run unconditionally: it is idempotent and
-        // costs a lookup per cached entry, which is noise beside the
-        // projection rebuild that re-projects every node and port anyway —
-        // cheaper than the bookkeeping that had every edit path declare
-        // whether it owed a pass.
-        self.main_window.reconcile(&open.document);
         // A canvas that just appeared or disappeared drops its tab-local
         // gesture state and needs a relayout — it may never have recorded,
         // and a dock op raises no geometry signal of its own.
@@ -325,6 +318,16 @@ impl Editor {
             return;
         }
         self.commit_batch(open, requests.drain_document());
+    }
+
+    /// Release the canvas's `NodeId`-keyed caches for nodes the document has
+    /// stopped holding. Driven by [`App::reconcile_derived_state`] once a
+    /// frame — `Editor::frame` runs per *record pass*, so a sweep here would
+    /// run twice on a frame carrying action input.
+    ///
+    /// [`App::reconcile_derived_state`]: crate::gui::app::App
+    pub(super) fn reconcile_caches(&mut self, document: &Document) {
+        self.main_window.reconcile(document);
     }
 
     /// Keep the viewer tabs in step with the document by dropping navigation

@@ -164,12 +164,19 @@ impl GraphUI {
         self.hits.scan(ui, graph_ctx);
     }
 
-    /// Evict the cross-frame geometry caches down to the nodes `keep` still
-    /// accepts — see [`CanvasGeometry::retain_nodes`] for why absence from
-    /// the scene isn't grounds on its own, and why this has to come from a
-    /// caller that can see the whole document.
-    pub(crate) fn retain_nodes(&mut self, keep: impl Fn(NodeId) -> bool) {
-        self.geometry.retain_nodes(keep);
+    /// Evict this canvas's two `NodeId`-keyed caches down to the nodes the
+    /// document still holds — the cross-frame geometry and the open inspection
+    /// panels.
+    ///
+    /// Both deliberately outlive the scene, so absence from it is no grounds
+    /// on its own and neither can do this itself; see
+    /// [`CanvasGeometry::retain_nodes`]. Swept together because `GraphUI` owns
+    /// both, so a new one lands here rather than in a fourth call site.
+    pub(crate) fn retain_nodes(&mut self, document: &Document) {
+        self.geometry
+            .retain_nodes(|node_id| document.holds_node(node_id));
+        self.inspectors
+            .retain_nodes(|node_id| document.holds_node(node_id));
     }
 
     /// Take note of whether a pane is showing this canvas, and report whether
