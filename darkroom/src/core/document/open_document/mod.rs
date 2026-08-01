@@ -15,7 +15,8 @@ use crate::core::document::Document;
 use crate::core::document::open_document::error::ReplayOutcome;
 use crate::core::edit::action_stack::ActionStack;
 use crate::core::edit::intent::apply::commit_intent;
-use crate::core::edit::intent::types::{GraphIntent, Refusal, UndoStep};
+use crate::core::edit::intent::error::MalformedIntent;
+use crate::core::edit::intent::types::{GraphIntent, UndoStep};
 use crate::core::io::document::{self, DocumentLoadError, DocumentSaveError};
 use crate::core::io::preferences::Preferences;
 use crate::core::status::StatusLog;
@@ -90,6 +91,7 @@ impl OpenDocument {
     #[must_use]
     pub(crate) fn apply_edit(&mut self, intent: GraphIntent) -> Relayout {
         self.commit([DocumentRequest::Graph(intent)])
+            .expect("a widget built a malformed intent")
     }
 
     /// Take everything `requests` holds for this document, apply it, and leave
@@ -113,6 +115,7 @@ impl OpenDocument {
             Relayout::NotNeeded
         } else {
             self.commit(requests.drain_document())
+                .expect("a widget built a malformed intent")
         };
         // A tab whose node is gone can't stay open. Cheap when nothing died —
         // `reconcile_with_graph` scans the tab list and returns.
@@ -126,9 +129,16 @@ impl OpenDocument {
     ///
     /// Nothing raised here can legitimately be malformed. Widgets read every
     /// identity they emit out of the live document, so the worst they build
-    /// is stale — which refuses [`Refusal::Quiet`]ly and is dropped. A
-    /// [`Refusal::Invalid`] is therefore our own bug, and it panics in every
-    /// build rather than going to a log nobody reads.
+    /// is stale — which yields no step and is dropped. A [`MalformedIntent`]
+    /// is therefore our own bug, and comes back as one rather than going to a
+    /// log nobody reads. Both callers unwrap it for now, so it still fails
+    /// loudly in every build.
+    ///
+    /// The batch stops at the first malformed intent: the steps before it are
+    /// already applied to the document but never reach the history, so an
+    /// `Err` leaves the document mutated and unundoable. That is survivable
+    /// only because the error is unreachable — a caller that ever *handles*
+    /// this has to stage the batch first.
     ///
     /// No-op and stale intents are dropped per-intent, and an empty batch
     /// records nothing. A *run* of intents becomes one undo entry, so a
@@ -137,8 +147,10 @@ impl OpenDocument {
     /// Returns whether the batch stranded the canvas's cached geometry. The
     /// batch's other outcome — a dirtied document — is landed here; only the
     /// relayout has to travel out to whoever holds the `Ui`.
-    #[must_use]
-    fn commit(&mut self, queued: impl IntoIterator<Item = DocumentRequest>) -> Relayout {
+    fn commit(
+        &mut self,
+        queued: impl IntoIterator<Item = DocumentRequest>,
+    ) -> Result<Relayout, MalformedIntent> {
         let mut batch = Vec::new();
         let mut signals = StepSignals::default();
         for item in queued {
@@ -152,19 +164,15 @@ impl OpenDocument {
                     continue;
                 }
             };
-            let step = match commit_intent(intent, &mut self.document) {
-                Ok(step) => step,
-                Err(Refusal::Quiet) => continue,
-                Err(Refusal::Invalid(reason)) => {
-                    panic!("a widget built a malformed intent: {reason}")
-                }
+            let Some(step) = commit_intent(intent, &mut self.document)? else {
+                continue;
             };
             signals.fold(&step);
             batch.push(step);
         }
         self.history.push_current(&batch);
         batch.clear();
-        self.land(signals)
+        Ok(self.land(signals))
     }
 
     /// Replay the last entry backwards. Reports whether the canvas's cached

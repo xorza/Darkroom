@@ -10,7 +10,8 @@ use scenarium::NodeId;
 
 use crate::core::document::{Document, ItemPlacement};
 use crate::core::edit::intent::build::build_step;
-use crate::core::edit::intent::types::{GraphIntent, NodeProperty, Refusal, UndoStep};
+use crate::core::edit::intent::error::MalformedIntent;
+use crate::core::edit::intent::types::{GraphIntent, NodeProperty, UndoStep};
 
 /// Build, no-op-filter, and apply one `intent` against `target` in a single
 /// call — the entry every frontend drives its per-intent loop through. A
@@ -19,21 +20,26 @@ use crate::core::edit::intent::types::{GraphIntent, NodeProperty, Refusal, UndoS
 /// see scenarium's `typed_binding`), so the edit stays a single step.
 ///
 /// Returns the committed [`UndoStep`] (the caller records it and reads its
-/// `requires_*` signals), or the [`Refusal`] that stopped it — in which case
-/// nothing was written. A stale anchor, a cycle-forming bind, and a no-op
-/// all refuse [`Refusal::Quiet`]ly; only a payload that could never have
-/// applied carries a reason back (see [`build_step`]).
+/// `requires_*` signals), or `Ok(None)` when nothing came of the intent and
+/// nothing was written — a stale anchor, a cycle-forming bind, or a no-op.
+/// Only a payload that could never have applied is an `Err` (see
+/// [`build_step`]).
 ///
 /// `build_step` / `apply_step` stay separate for the undo-stack redo path,
 /// which applies a stored step without rebuilding it (a redo replays
 /// already-valid history).
-pub(crate) fn commit_intent(intent: GraphIntent, doc: &mut Document) -> Result<UndoStep, Refusal> {
-    let step = build_step(intent, doc)?;
+pub(crate) fn commit_intent(
+    intent: GraphIntent,
+    doc: &mut Document,
+) -> Result<Option<UndoStep>, MalformedIntent> {
+    let Some(step) = build_step(intent, doc)? else {
+        return Ok(None);
+    };
     if step.is_noop() {
-        return Err(Refusal::Quiet);
+        return Ok(None);
     }
     apply_step(&step, doc);
-    Ok(step)
+    Ok(Some(step))
 }
 
 /// Forward apply: write the step's "to" half to `doc`. Used by

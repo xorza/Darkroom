@@ -8,7 +8,8 @@ use std::collections::HashSet;
 use scenarium::Binding;
 
 use crate::core::document::Document;
-use crate::core::edit::intent::types::{GraphIntent, NodeProperty, Refusal, UndoStep};
+use crate::core::edit::intent::error::MalformedIntent;
+use crate::core::edit::intent::types::{GraphIntent, NodeProperty, UndoStep};
 use crate::core::edit::intent::validate;
 
 /// Read pre-mutation state from `doc` and fold it with `intent` into a
@@ -21,12 +22,16 @@ use crate::core::edit::intent::validate;
 /// violate the staleness half, since they read the identities they emit out
 /// of the live document; anything else reaching here is a bug.
 ///
-/// [`Refusal::Quiet`] covers what a gesture spanning frames does normally:
-/// the anchor node vanished, or the edit is refused by design.
-/// [`Refusal::Invalid`] means the payload could never have applied.
+/// `Ok(None)` covers what a gesture spanning frames does normally: the anchor
+/// node vanished, or the edit is refused by design (a cycle-forming bind, a
+/// raise of what is already frontmost). Callers drop those without a word.
+/// An [`MalformedIntent`] means the payload could never have applied.
 /// (`MoveSelection` and `SetSelection` instead drop vanished members
 /// individually rather than refusing the whole intent.)
-pub(crate) fn build_step(intent: GraphIntent, doc: &Document) -> Result<UndoStep, Refusal> {
+pub(crate) fn build_step(
+    intent: GraphIntent,
+    doc: &Document,
+) -> Result<Option<UndoStep>, MalformedIntent> {
     let (graph, view) = (&doc.graph, &doc.main_view);
     let step = match intent {
         GraphIntent::AddNode {
@@ -83,8 +88,12 @@ pub(crate) fn build_step(intent: GraphIntent, doc: &Document) -> Result<UndoStep
             }
         }
         GraphIntent::RemoveNode { node_id } => {
-            validate::live_node(graph, node_id, "RemoveNode")?;
-            let detached = graph.snapshot_node(node_id).ok_or(Refusal::Quiet)?;
+            if validate::live_node(graph, node_id, "RemoveNode")?.is_none() {
+                return Ok(None);
+            }
+            let Some(detached) = graph.snapshot_node(node_id) else {
+                return Ok(None);
+            };
             let item_placements = view
                 .item_placements
                 .get(&node_id)
@@ -119,26 +128,33 @@ pub(crate) fn build_step(intent: GraphIntent, doc: &Document) -> Result<UndoStep
                 moves: placed,
             }
         }
-        GraphIntent::RenameNode { node_id, to } => UndoStep::RenameNode {
-            from: validate::live_node(graph, node_id, "RenameNode")?
-                .name
-                .clone(),
-            node_id,
-            to,
-        },
+        GraphIntent::RenameNode { node_id, to } => {
+            let Some(node) = validate::live_node(graph, node_id, "RenameNode")? else {
+                return Ok(None);
+            };
+            UndoStep::RenameNode {
+                from: node.name.clone(),
+                node_id,
+                to,
+            }
+        }
         GraphIntent::SetInput { input, to } => {
-            validate::live_node(graph, input.node_id, "SetInput destination")?;
+            if validate::live_node(graph, input.node_id, "SetInput destination")?.is_none() {
+                return Ok(None);
+            }
             if let Some(Binding::Bind(src)) = &to {
                 // A wire held across frames can outlive its producer, and
                 // the bind would leave the graph with a dangling edge.
-                validate::live_node(graph, src.node_id, "SetInput producer")?;
+                if validate::live_node(graph, src.node_id, "SetInput producer")?.is_none() {
+                    return Ok(None);
+                }
                 // Reject a bind that would close a data cycle: the planner
                 // rejects a cyclic graph outright (`Error::CycleDetected`), so
                 // the edit must never land. The GUI snap filter normally stops
                 // this earlier; this is the authoritative guard covering every
                 // binding path, including any that bypass the canvas.
                 if graph.produces_cycle(src.node_id, input.node_id) {
-                    return Err(Refusal::Quiet);
+                    return Ok(None);
                 }
             }
             UndoStep::SetInput {
@@ -159,17 +175,22 @@ pub(crate) fn build_step(intent: GraphIntent, doc: &Document) -> Result<UndoStep
                 .collect(),
         },
         GraphIntent::Raise { key } => {
-            let from_z = view.item_placements.get(&key).ok_or(Refusal::Quiet)?.z;
+            let Some(&placement) = view.item_placements.get(&key) else {
+                return Ok(None);
+            };
+            let from_z = placement.z;
             let to_z = view.front_z();
             // Already frontmost: raising it again would record a step that
             // changes nothing and cost a Ctrl+Z.
             if from_z == to_z {
-                return Err(Refusal::Quiet);
+                return Ok(None);
             }
             UndoStep::Raise { key, from_z, to_z }
         }
         GraphIntent::SetNodeProperty { node_id, to } => {
-            let node = validate::live_node(graph, node_id, "SetNodeProperty")?;
+            let Some(node) = validate::live_node(graph, node_id, "SetNodeProperty")? else {
+                return Ok(None);
+            };
             // Capture the *same* property's current value as `from` for revert.
             let from = match to {
                 NodeProperty::Disabled(_) => NodeProperty::Disabled(node.disabled),
@@ -179,9 +200,7 @@ pub(crate) fn build_step(intent: GraphIntent, doc: &Document) -> Result<UndoStep
         }
         GraphIntent::SetViewport { to } => {
             if !to.is_valid() {
-                return Err(Refusal::Invalid(
-                    "viewport needs finite pan and positive finite zoom".to_owned(),
-                ));
+                return Err(MalformedIntent::InvalidViewport);
             }
             UndoStep::SetViewport {
                 from: view.viewport,
@@ -195,17 +214,20 @@ pub(crate) fn build_step(intent: GraphIntent, doc: &Document) -> Result<UndoStep
             subscribe,
         } => {
             if emitter.is_nil() || subscriber.is_nil() {
-                return Err(Refusal::Invalid(
-                    "SetSubscription carries a nil node id".to_owned(),
-                ));
+                return Err(MalformedIntent::NilNodeId {
+                    role: "SetSubscription",
+                });
             }
             // A subscribe needs both endpoints present; a stale drag onto a
             // vanished node drops rather than recording a dangling subscription.
             // An unsubscribe of a vanished node no-ops naturally (nothing is
             // subscribed → from == to == false), so it needs no existence check.
-            if subscribe {
-                validate::live_node(graph, emitter, "SetSubscription emitter")?;
-                validate::live_node(graph, subscriber, "SetSubscription subscriber")?;
+            if subscribe
+                && (validate::live_node(graph, emitter, "SetSubscription emitter")?.is_none()
+                    || validate::live_node(graph, subscriber, "SetSubscription subscriber")?
+                        .is_none())
+            {
+                return Ok(None);
             }
             UndoStep::SetSubscription {
                 from: graph.is_subscribed(emitter, event_idx, subscriber),
@@ -216,5 +238,5 @@ pub(crate) fn build_step(intent: GraphIntent, doc: &Document) -> Result<UndoStep
             }
         }
     };
-    Ok(step)
+    Ok(Some(step))
 }

@@ -8,8 +8,9 @@
 //!     snapshot from `&Document`, fold with the incoming intent, return a
 //!     fully-populated step. Pure. Also *the* validation gate: it's the
 //!     single entry every frontend commits through, so each arm establishes
-//!     the whole precondition set its `apply` half assumes, and refuses
-//!     anything else with a `Refusal`.
+//!     the whole precondition set its `apply` half assumes, yielding
+//!     `Ok(None)` for a stale or no-op intent and a [`MalformedIntent`]
+//!     ([`error`]) for one that could never have applied.
 //!   - [`validate`] — the checks those arms are built from (is this id
 //!     resolvable, fresh, non-nil; is this position finite; is this kind
 //!     insertable here), split out so the trust boundary reads as one
@@ -31,6 +32,7 @@
 pub(crate) mod apply;
 pub(crate) mod build;
 pub(crate) mod duplicate;
+pub(crate) mod error;
 mod query;
 pub(crate) mod types;
 mod validate;

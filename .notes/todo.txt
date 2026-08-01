@@ -32,18 +32,4 @@ fn hash_bound_fs_path(&self, hasher: &mut DigestHasher, addr: &OutputAddr) -> Op
 
 staticvalue -> constvalue
 
-GestureSlot - remove?
-
-StepSignals
-
-hits - remove?
-
-remove Gestures
-
-pub(crate) enum Refusal { - remove
-
-fn drain_intents(&mut self, open: &mut OpenDocument) { - ugly
-
-runstate into runtimehost
-
 inlinerename to select all text when entering edito mode
