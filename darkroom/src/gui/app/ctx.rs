@@ -12,11 +12,17 @@ use crate::gui::theme::Theme;
 ///
 /// **The root of the context chain.** Every level below derives its own
 /// context from the one above rather than restating its refs:
-/// [`GraphCtx::new`](crate::gui::graph_ctx::GraphCtx::new)
-/// resolves this against a document to make the
-/// graph pane's context, and everything under the canvas reads the theme, the
-/// library and the run back off *that* — which is why nothing below
-/// [`MainWindow`](crate::gui::window::MainWindow) names this type.
+/// [`WindowCtx`](crate::gui::window::ctx::WindowCtx) pairs this with the
+/// document being edited, [`GraphCtx`](crate::gui::graph_ctx::GraphCtx) adds
+/// the resolved output types a canvas reads, and everything under the canvas
+/// reads the theme, the library and the run back off *that* — which is why
+/// nothing below [`MainWindow`](crate::gui::window::MainWindow) names this
+/// type.
+///
+/// **No document here**, deliberately: `App` composes one of these once per
+/// record pass and then hands the session a `&mut` for the frame, so a
+/// document reference at this level would pin the very thing the frame's
+/// drains have to mutate. It enters the chain one level down, per phase.
 ///
 /// Only shared state belongs here. The mutable sinks a frame writes through —
 /// `Ui`, the intent buffer, the preferences — stay explicit parameters, so a

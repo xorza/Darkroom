@@ -23,6 +23,7 @@ use crate::gui::app::commands::run::RunCommand;
 use crate::gui::relayout::Relayout;
 use crate::gui::requests::Requests;
 use crate::gui::window::MainWindow;
+use crate::gui::window::ctx::WindowCtx;
 use palantir::{Shortcut, Ui};
 use scenarium::Graph;
 
@@ -101,6 +102,12 @@ impl Session {
         // asked for; the drain between them is a document mutation, which is
         // why no two adjacent phases can collapse into one call on the UI.
         //
+        // Each phase takes a `WindowCtx` composed right here, over the document
+        // as the drain before it left it. That is the level of the context
+        // chain carrying a document, and this is why it cannot be composed
+        // once for the frame: the drains need the document exclusively, so a
+        // longer-lived context would have nothing able to run between phases.
+        //
         // 1. NAVIGATION — settle which tab is active, entirely from inputs
         //    available before the record: the undo/redo chords, and tab and
         //    chip clicks read off *last* frame's responses. Those responses
@@ -112,7 +119,7 @@ impl Session {
         //    `OpenDocument::land`.
         let mut needs_relayout = self.apply_undo_redo(ui);
         self.main_window
-            .scan_navigation(ui, ctx, &self.open.document, requests);
+            .scan_navigation(ui, WindowCtx::new(ctx, &self.open.document), requests);
         needs_relayout |= self.open.drain_requests(requests);
 
         // 2. PREPASS — reconcile pane visibility, rebuild the canvas's
@@ -123,9 +130,9 @@ impl Session {
         //    there rather than another question here. A canvas that just
         //    became visible needs a relayout: it may never have recorded, and
         //    a dock op raises no geometry signal of its own.
-        needs_relayout |= self
-            .main_window
-            .prepass(ui, ctx, &self.open.document, requests);
+        needs_relayout |=
+            self.main_window
+                .prepass(ui, WindowCtx::new(ctx, &self.open.document), requests);
         needs_relayout |= self.open.drain_requests(requests);
 
         // 3. RECORD — author the widget tree. The file/run/quit chords are
@@ -133,8 +140,12 @@ impl Session {
         //    `AppCommand`, so they need no drain of their own and simply have
         //    to land before `App` takes the tier.
         self.menu_shortcut(ui, requests);
-        self.main_window
-            .frame(ui, ctx, &self.open.document, preferences, requests);
+        self.main_window.frame(
+            ui,
+            WindowCtx::new(ctx, &self.open.document),
+            preferences,
+            requests,
+        );
         // Graph edits the record surfaced (node select, cache toggle, const
         // edit), plus the tab strip's dock ops.
         needs_relayout |= self.open.drain_requests(requests);

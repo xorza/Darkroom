@@ -1,3 +1,4 @@
+pub(crate) mod ctx;
 pub(crate) mod menu_bar;
 pub(crate) mod status_bar;
 
@@ -11,7 +12,6 @@ use crate::core::document::{Document, TabRef};
 use crate::core::io::preferences::Preferences;
 use crate::gui::app::commands::AppCommand;
 use crate::gui::app::commands::prefs::PrefsCommand;
-use crate::gui::app::ctx::AppCtx;
 use crate::gui::dock::{DockContext, DockUi};
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::pane::graph::GraphUI;
@@ -20,6 +20,7 @@ use crate::gui::pane::preferences;
 use crate::gui::pane::viewer::{self, ImageViewer};
 use crate::gui::relayout::Relayout;
 use crate::gui::requests::Requests;
+use crate::gui::window::ctx::WindowCtx;
 
 /// The application root's [`Configure::input_scope`] anchor. A fixed id
 /// rather than an auto one because the scope is the thing darkroom's
@@ -36,21 +37,20 @@ fn app_root_wid() -> WidgetId {
 /// each tab kind looks like (the `content` closure in [`Self::frame`]).
 /// Adding a new pane *kind* is a new arm there.
 ///
-/// **Where the graph context is composed.** Each entry point below derives its
-/// own [`GraphCtx`] from the frame's [`AppCtx`] and the document it is
-/// handed — which is settled by the time the caller reaches it, so the
-/// construction point and the call are the same instant. Keeping it here
-/// rather than in `Editor` means the editor shell never has to name the canvas
-/// subsystem's view type, and everything below this file takes that context
-/// alone rather than it *and* the app context it came from.
+/// **Where the graph context is composed.** Each entry point below takes a
+/// [`WindowCtx`] — the frame's world *and* the document it is showing, settled
+/// by the time the caller reaches it, so the composition point and the call
+/// are the same instant — and derives its own [`GraphCtx`] from it. Keeping
+/// that here rather than in `Editor` means the editor shell never has to name
+/// the canvas subsystem's view type, and everything below this file takes that
+/// context alone rather than it *and* the levels it came from.
 ///
 /// That is also why the resolved-output table lives here rather than on
-/// `Editor`: it is the context's third input, and
-/// [`GraphCtx::new`] resolves it against whichever document the
-/// entry point was handed. So each of the three below pays one resolve, over a
-/// document settled at that instant — the editor drains queued intents
-/// *between* them, and a table built once at frame top would be an edit behind
-/// by the record pass.
+/// `Editor`: it is the canvas context's second input, and [`GraphCtx::new`]
+/// resolves it against whichever document the entry point was handed. So each
+/// of the three below pays one resolve, over a document settled at that
+/// instant — the editor drains queued intents *between* them, and a table
+/// built once at frame top would be an edit behind by the record pass.
 #[derive(Default, Debug)]
 pub(crate) struct MainWindow {
     pub(crate) graph_ui: GraphUI,
@@ -73,14 +73,8 @@ impl MainWindow {
     /// chips). `App` runs this at the top of the frame so a switch
     /// applies before the record — the switched-to graph records in
     /// Pass A and its connections draw in Pass B, no first-frame gap.
-    pub(crate) fn scan_navigation(
-        &mut self,
-        ui: &mut Ui,
-        ctx: AppCtx<'_>,
-        doc: &Document,
-        out: &mut Requests,
-    ) {
-        self.dock.scan(ui, doc, out);
+    pub(crate) fn scan_navigation(&mut self, ui: &mut Ui, cx: WindowCtx<'_>, out: &mut Requests) {
+        self.dock.scan(ui, cx.document(), out);
         // One sweep of last frame's node responses, before anything reads
         // one: the canvas's own passes read it later in the frame, and the
         // two chip opens below are why it has to happen this early. Runs
@@ -91,7 +85,7 @@ impl MainWindow {
             output_types,
             ..
         } = self;
-        graph_ui.scan_hits(ui, GraphCtx::new(ctx, doc, output_types));
+        graph_ui.scan_hits(ui, GraphCtx::new(cx, output_types));
         let hits = &self.graph_ui.hits;
         if let Some(node) = hits.chip(Chip::PreviewImage) {
             out.push_view(DockOp::OpenTab {
@@ -113,8 +107,7 @@ impl MainWindow {
     pub(crate) fn prepass(
         &mut self,
         ui: &mut Ui,
-        ctx: AppCtx<'_>,
-        doc: &Document,
+        cx: WindowCtx<'_>,
         out: &mut Requests,
     ) -> Relayout {
         let MainWindow {
@@ -123,13 +116,12 @@ impl MainWindow {
             ..
         } = self;
         let mut request_relayout = Relayout::NotNeeded;
-        for tab in doc.layout.active_tabs() {
+        for tab in cx.document().layout.active_tabs() {
             match tab {
                 // Reached from `active_tabs`, so a pane is showing the graph
                 // by construction — which is what `GraphUI::prepass` asserts.
                 TabRef::Graph => {
-                    request_relayout |=
-                        graph_ui.prepass(ui, GraphCtx::new(ctx, doc, output_types), out);
+                    request_relayout |= graph_ui.prepass(ui, GraphCtx::new(cx, output_types), out);
                 }
                 // Neither derives a document mutation from input: preferences
                 // edits go through their own widgets, and a viewer only
@@ -143,14 +135,18 @@ impl MainWindow {
     pub(crate) fn frame(
         &mut self,
         ui: &mut Ui,
-        ctx: AppCtx<'_>,
-        doc: &Document,
+        cx: WindowCtx<'_>,
         prefs: &mut Preferences,
         out: &mut Requests,
     ) {
+        // The frame's world without the document, for the surfaces below that
+        // read one and not the other: the chrome bands take the app context,
+        // the panes take the whole thing.
+        let app = cx.app();
+        let doc = cx.document();
         // The menu bar rides its own chrome band; the dock fills the
         // space between it and the status bar.
-        let chrome = ctx.theme().colors.chrome_fill;
+        let chrome = app.theme().colors.chrome_fill;
         let MainWindow {
             graph_ui,
             image_viewers,
@@ -171,7 +167,7 @@ impl MainWindow {
             .collect();
         let dock_cx = DockContext {
             doc,
-            theme: ctx.theme(),
+            theme: app.theme(),
             viewer_labels: &viewer_labels,
         };
         Panel::vstack()
@@ -205,33 +201,33 @@ impl MainWindow {
                             .show(ui, |ui| {
                                 // The context carries everything the canvas
                                 // reads — theme and run included, through the
-                                // `ctx` it is composed from.
-                                let graph_ctx = GraphCtx::new(ctx, doc, output_types);
+                                // `cx` it is composed from.
+                                let graph_ctx = GraphCtx::new(cx, output_types);
                                 graph_ui.draw(ui, graph_ctx, out);
                                 graph_ui.draw_toolbar(ui, graph_ctx, out);
                             });
                     }
                     TabRef::Preferences => {
-                        preferences::show(ui, ctx.theme(), prefs, out);
+                        preferences::show(ui, app.theme(), prefs, out);
                     }
                     TabRef::ImageViewer(node_id) => {
                         let title = viewer_labels
                             .get(&node_id)
                             .map(String::as_str)
                             .unwrap_or("image");
-                        let source = ctx.run_state().previews.entries.get(&node_id);
+                        let source = app.run_state().previews.entries.get(&node_id);
                         let viewer = image_viewers
                             .entry(node_id)
                             .or_insert_with(|| ImageViewer::new(node_id));
                         // Viewer-toolbar edits ride the same in-place
                         // prefs path as the Preferences tab.
-                        if viewer.show(ui, ctx.theme(), &mut prefs.viewer, title, source) {
+                        if viewer.show(ui, app.theme(), &mut prefs.viewer, title, source) {
                             out.push_app(AppCommand::Prefs(PrefsCommand::Changed));
                         }
                     }
                 });
                 // Bottom chrome: the cache-memory readout, below the panes.
-                status_bar::show(ui, ctx);
+                status_bar::show(ui, app);
             });
     }
 

@@ -12,6 +12,7 @@ use crate::gui::app::ctx::{AppCtx, StatusInputs};
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::state::run_state::RunState;
 use crate::gui::theme::Theme;
+use crate::gui::window::ctx::WindowCtx;
 
 /// A document, and the theme / library / run a context resolves it against.
 ///
@@ -53,6 +54,6 @@ impl GraphCtxFixture {
             output_types,
         } = self;
         let app = AppCtx::new(theme, &fixture.library, run_state, StatusInputs::default());
-        GraphCtx::new(app, &fixture.doc, output_types)
+        GraphCtx::new(WindowCtx::new(app, &fixture.doc), output_types)
     }
 }
