@@ -1,5 +1,4 @@
-//! The [`GraphIntent`] / [`UndoStep`] / [`UndoStep`] / [`GestureKey`] type
-//! model, plus the
+//! The [`GraphIntent`] / [`UndoStep`] / [`GestureKey`] type model, plus the
 //! [`Refusal`] a commit answers with when no step comes out of it.
 //!
 //! An [`GraphIntent`] is "what the caller wants the graph to look like

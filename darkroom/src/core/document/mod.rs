@@ -117,6 +117,11 @@ pub(crate) struct Viewport {
 }
 
 impl Viewport {
+    /// Whether this is a *persistable graph* camera — what
+    /// `GraphViewValidationError::InvalidViewport` reports on. Only the
+    /// document's own viewport round-trips through serde and so needs
+    /// checking on the way back in; the image viewer's is rebuilt from the
+    /// pane every session and never validated.
     pub(crate) fn is_valid(self) -> bool {
         self.pan.is_finite() && self.zoom.is_finite() && self.zoom > 0.0
     }
