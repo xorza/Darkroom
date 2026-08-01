@@ -106,6 +106,17 @@ impl SessionHarness {
             process_memory,
             requests,
         } = self;
+        // The part of `App::update` a frame's *content* depends on: it
+        // reconciles the preview store against the document ahead of the
+        // record, which is what gives an already-open viewer tab its
+        // full-resolution texture by the time it draws. Without this a viewer
+        // would render its "being prepared" placeholder forever, since nothing
+        // else materializes one. The rest of `update` — the run projection,
+        // the cache sweeps — needs a `RuntimeHost` this harness has no reason
+        // to build, and no test reads what it produces.
+        run_state
+            .previews
+            .reconcile(ui.ui(), &session.open.document);
         let ctx = AppCtx::new(
             theme,
             library,

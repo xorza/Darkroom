@@ -142,21 +142,22 @@ impl<'a> ShownSource<'a> {
                 shown: None,
                 message: Some(message.as_str()),
             },
-            FullImage::Deferred(_) => {
-                // This pane is its group's visible tab, and the reconcile
-                // pass runs every frame ahead of the record, so it covered
-                // this viewer — unless the tab became visible after that
-                // pass, within this same frame.
-                debug_assert!(
-                    false,
-                    "visible image viewer source was not materialized: \
-                     the frame's reconcile pass did not cover it"
-                );
-                Self {
-                    shown: None,
-                    message: Some("image is being prepared"),
-                }
-            }
+            // The pass that materializes a visible viewer's source runs in
+            // `App::update`, ahead of the record — so it covers every viewer
+            // already on screen, and none that *arrives* during the record.
+            // Two ordinary actions do exactly that, both landing in a drain of
+            // the frame that then draws them: clicking a preview card's image
+            // opens a viewer tab, and clicking a strip chip activates one
+            // stacked behind another (only a group's active tab is
+            // materialized, so a stacked one is still deferred).
+            //
+            // So this is one frame of placeholder, resolved by the next
+            // `update`. The layout change that revealed the pane already earns
+            // that frame, so nothing here has to ask for one.
+            FullImage::Deferred(_) => Self {
+                shown: None,
+                message: Some("image is being prepared"),
+            },
         }
     }
 }

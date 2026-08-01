@@ -240,12 +240,70 @@ mod tests {
     use crate::core::document::dock::DockOp;
     use crate::core::document::harness::DocFixture;
     use crate::core::edit::intent::types::GraphIntent;
+    use crate::core::preview::preview_func;
     use crate::gui::app::commands::AppCommand;
     use crate::gui::app::commands::file::FileCommand;
     use crate::gui::app::commands::run::RunCommand;
     use crate::gui::app::session::harness::SessionHarness;
+    use crate::gui::pane::graph::node::preview_row::preview_image_wid;
     use crate::gui::pane::graph::toolbar::internals::run_chip_wid;
     use crate::gui::pane::viewer::ImageViewer;
+    use crate::gui::state::preview_store::internals::opaque_image_value;
+    use crate::gui::state::preview_store::{FullImage, StoredContent};
+
+    /// Opening a viewer by clicking a preview card lands its tab *inside* the
+    /// record that read the click — after the pass that materializes a visible
+    /// viewer's full-resolution source, which runs ahead of the record and so
+    /// saw a document with no such tab. The pane therefore draws its
+    /// placeholder for exactly that frame, and the next one resolves it.
+    #[test]
+    fn a_viewer_opened_by_click_materializes_on_the_following_frame() {
+        let mut fixture = DocFixture::default();
+        let node = fixture.add(&preview_func(Default::default()));
+        let mut test = SessionHarness::new(fixture);
+        test.run_state
+            .previews
+            .ingest_preview(test.ui.ui(), node, opaque_image_value());
+        test.prime(2);
+
+        let full_is = |test: &SessionHarness, resident: bool| {
+            let Some(StoredContent::Image(image)) = test.run_state.previews.entries.get(&node)
+            else {
+                panic!("the ingested image is the node's stored content");
+            };
+            match &image.full {
+                FullImage::Resident(_) => resident,
+                FullImage::Deferred(_) => !resident,
+                FullImage::Failed(why) => panic!("the image failed to prepare: {why}"),
+            }
+        };
+        assert!(
+            full_is(&test, false),
+            "a card-only preview never needs its full-resolution source"
+        );
+
+        test.ui.click_on(preview_image_wid(node));
+        let _ = test.frame();
+        assert!(
+            test.session
+                .open
+                .document
+                .layout
+                .all_tabs()
+                .any(|t| t == TabRef::ImageViewer(node)),
+            "the click opened the viewer tab within that same frame"
+        );
+        assert!(
+            full_is(&test, false),
+            "and the pane drew before any reconcile had seen the tab"
+        );
+
+        let _ = test.frame();
+        assert!(
+            full_is(&test, true),
+            "the next frame's reconcile materializes it, ending the placeholder"
+        );
+    }
 
     fn func_node() -> Node {
         let func = testing::with_stub_lambda(Func::new(FuncId::unique(), "probe"));

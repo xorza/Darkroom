@@ -14,9 +14,3 @@
 - `gui/pane/graph/gesture/new_node/mod.rs` declares
   `pub(crate) mod internals { impl NewNodeUi {} }` — an empty impl in an
   otherwise empty gated module.
-
-- Clicking a preview card's image opens its viewer tab within the same record
-  pass, after `PreviewStore::reconcile` has already run in `App::update`. The
-  viewer therefore draws its first frame against `FullImage::Deferred` and
-  trips the `debug_assert!` in `gui/pane/viewer/mod.rs` that says a visible
-  viewer's source was not materialized.
