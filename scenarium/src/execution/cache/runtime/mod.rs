@@ -352,7 +352,9 @@ impl RuntimeCache {
                 ExecutionBinding::Const(value) => {
                     hasher.write_input_tag(InputTag::Const);
                     hasher.write_static(value);
-                    self.hash_fs_paths(&mut hasher, value.as_fs_paths())?;
+                    if let Some(paths) = value.as_fs_paths() {
+                        self.hash_fs_paths(&mut hasher, paths)?;
+                    }
                 }
                 ExecutionBinding::Bind(addr) => {
                     // The producer was visited first (topological order), so its `current_digest`
@@ -396,7 +398,7 @@ impl RuntimeCache {
         match delivered.as_fs_paths() {
             Some(paths) => {
                 hasher.write_input_tag(InputTag::BoundPaths);
-                self.hash_fs_paths(hasher, Some(paths))?;
+                self.hash_fs_paths(hasher, paths)?;
             }
             // A mis-typed wire — a resource input handed something that is
             // not a path — keys on its marker alone, and stays cacheable.
@@ -409,14 +411,10 @@ impl RuntimeCache {
 
     /// Fold the identities behind the paths a value names.
     ///
-    /// The two `Option`s mean opposite things. A value naming *no* paths
-    /// folds nothing and succeeds — that is a plain const, not a
-    /// filesystem read. Returning `None` is the failure: a path this run
-    /// never stamped, leaving its node without a sound cache key.
-    fn hash_fs_paths(&self, hasher: &mut DigestHasher, paths: Option<&[String]>) -> Option<()> {
-        let Some(paths) = paths else {
-            return Some(());
-        };
+    /// `None` is the failure: a path this run never stamped, leaving its node
+    /// without a sound cache key. A value naming *no* paths does not call at
+    /// all — that is a plain const, not a filesystem read.
+    fn hash_fs_paths(&self, hasher: &mut DigestHasher, paths: &[String]) -> Option<()> {
         hasher.write_pod(paths.len() as u64);
         for path in paths {
             self.fs_paths.get(path)?.hash(hasher);
