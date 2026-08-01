@@ -3,19 +3,19 @@
 use scenarium::{Binding, DataType, FuncInput, InputPort, Library, StaticValue, ValueVariant};
 
 use crate::core::document::PortRef;
-use crate::gui::graph_ctx::node_scope::NodeScope;
+use crate::gui::graph_ctx::node_ctx::NodeCtx;
 
 /// One input port: what the func declares for it, and what the graph has
 /// bound to it.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct InputCtx<'a> {
-    node: NodeScope<'a>,
+    node: NodeCtx<'a>,
     port_idx: usize,
     declared: &'a FuncInput,
 }
 
 impl<'a> InputCtx<'a> {
-    pub(super) fn new(node: NodeScope<'a>, port_idx: usize, declared: &'a FuncInput) -> Self {
+    pub(super) fn new(node: NodeCtx<'a>, port_idx: usize, declared: &'a FuncInput) -> Self {
         Self {
             node,
             port_idx,

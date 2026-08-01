@@ -26,8 +26,9 @@ use crate::core::edit::intent::types::GraphIntent;
 use crate::core::preview;
 use crate::gui::EventRef;
 use crate::gui::graph_ctx::input_ctx::InputCtx;
+use crate::gui::graph_ctx::node_ctx::NodeCtx;
 use crate::gui::graph_ctx::output_ctx::OutputCtx;
-use crate::gui::pane::graph::node::ctx::NodeCtx;
+use crate::gui::pane::graph::ctx::DrawCtx;
 use crate::gui::pane::graph::node::port_color::{event_color, port_color};
 use crate::gui::pane::graph::node::port_row::glyph::{circle_frame, event_glyph, port_diameter};
 use crate::gui::pane::graph::node::value_editor;
@@ -64,10 +65,11 @@ const PORT_ROW_HEIGHT_EM: f32 = 2.0;
 pub(super) fn ports_row(
     ui: &mut Ui,
     ncx: NodeCtx<'_>,
+    dcx: DrawCtx<'_>,
     row_tracks: &mut Vec<Track>,
     out: &mut Requests,
 ) {
-    let (theme, node) = (ncx.theme(), ncx.node());
+    let (theme, node) = (ncx.theme(), ncx);
     // Events list under the outputs in the same column, so the output side
     // needs a row per output *and* per event.
     let n_rows = node
@@ -104,8 +106,8 @@ pub(super) fn ports_row(
             theme.port_col_pad_top,
         ))
         .show(ui, |ui| {
-            input_cells(ui, ncx, out);
-            output_cells(ui, ncx, out);
+            input_cells(ui, ncx, dcx, out);
+            output_cells(ui, ncx, dcx, out);
         });
 }
 
@@ -117,7 +119,7 @@ fn tip_for(ncx: NodeCtx<'_>, description: &str, ty: &DataType) -> String {
     if !ncx.tips() {
         return String::new();
     }
-    port_tip(description, type_label(ncx.graph_ctx().library(), ty))
+    port_tip(description, type_label(ncx.graph_ctx.library(), ty))
 }
 
 /// Render `name` as a port's label, with `tip` (the port's data type) as its
@@ -142,23 +144,23 @@ fn port_label(ui: &mut Ui, theme: &Theme, name: &str, tip: &str) {
     }
 }
 
-fn input_cells(ui: &mut Ui, ncx: NodeCtx<'_>, out: &mut Requests) {
-    for input in ncx.node().inputs() {
-        input_label_cell(ui, ncx, input, out);
+fn input_cells(ui: &mut Ui, ncx: NodeCtx<'_>, dcx: DrawCtx<'_>, out: &mut Requests) {
+    for input in ncx.inputs() {
+        input_label_cell(ui, ncx, dcx, input, out);
         value_cell(ui, ncx, input, out);
     }
 }
 
-fn output_cells(ui: &mut Ui, ncx: NodeCtx<'_>, out: &mut Requests) {
-    let node = ncx.node();
+fn output_cells(ui: &mut Ui, ncx: NodeCtx<'_>, dcx: DrawCtx<'_>, out: &mut Requests) {
+    let node = ncx;
     let output_count = node.port_count(PortKind::Output);
     for output in node.outputs() {
-        output_cell(ui, ncx, output, out);
+        output_cell(ui, ncx, dcx, output, out);
     }
     // Events emit from the same (right) side; list them in the rows directly
     // below the data outputs.
     for (i, event) in node.events().iter().enumerate() {
-        event_cell(ui, ncx, i, output_count + i, event);
+        event_cell(ui, ncx, dcx, i, output_count + i, event);
     }
 }
 
@@ -199,8 +201,14 @@ fn open_port_context_menu(ui: &mut Ui, menu_id: WidgetId, cell_secondary: bool, 
 /// menu (anchored here, so right-clicking the circle or label opens it).
 /// The circle's `WidgetId` is the deterministic `port_circle_wid(port)`, so
 /// `CanvasGeometry`/snap/draw reconstruct it from domain coords.
-fn input_label_cell(ui: &mut Ui, ncx: NodeCtx<'_>, input: InputCtx<'_>, out: &mut Requests) {
-    let (theme, node) = (ncx.theme(), ncx.node());
+fn input_label_cell(
+    ui: &mut Ui,
+    ncx: NodeCtx<'_>,
+    dcx: DrawCtx<'_>,
+    input: InputCtx<'_>,
+    out: &mut Requests,
+) {
+    let (theme, node) = (ncx.theme(), ncx);
     let port = input.port_ref();
     let tip = tip_for(ncx, input.description(), input.ty());
     // Flag a port only once a run actually failed on it — not on every unbound edit — so
@@ -216,7 +224,7 @@ fn input_label_cell(ui: &mut Ui, ncx: NodeCtx<'_>, input: InputCtx<'_>, out: &mu
             theme,
             input.ty(),
             PortKind::Input,
-            ncx.geometry().ports.is_hovered(port),
+            dcx.geometry().ports.is_hovered(port),
         )
     };
     // A required input's port reads as bigger — its total footprint matches
@@ -308,7 +316,7 @@ fn value_cell(ui: &mut Ui, ncx: NodeCtx<'_>, input: InputCtx<'_>, out: &mut Requ
             value_editor::show(
                 ui,
                 ncx.sve(),
-                ncx.graph_ctx().library(),
+                ncx.graph_ctx.library(),
                 editor_id,
                 value,
                 data_type,
@@ -324,7 +332,13 @@ fn value_cell(ui: &mut Ui, ncx: NodeCtx<'_>, input: InputCtx<'_>, out: &mut Requ
 /// pins it to the node's right edge); the circle overhangs that edge. (A dragged
 /// satellite can end up anywhere on the canvas, not just overhanging this
 /// node).
-fn output_cell(ui: &mut Ui, ncx: NodeCtx<'_>, output: OutputCtx<'_>, out: &mut Requests) {
+fn output_cell(
+    ui: &mut Ui,
+    ncx: NodeCtx<'_>,
+    dcx: DrawCtx<'_>,
+    output: OutputCtx<'_>,
+    out: &mut Requests,
+) {
     let theme = ncx.theme();
     let port = output.port_ref();
     // Resolved once for the fill and the tooltip: a wildcard output follows
@@ -334,7 +348,7 @@ fn output_cell(ui: &mut Ui, ncx: NodeCtx<'_>, output: OutputCtx<'_>, out: &mut R
         theme,
         &ty,
         PortKind::Output,
-        ncx.geometry().ports.is_hovered(port),
+        dcx.geometry().ports.is_hovered(port),
     );
     let tip = tip_for(ncx, output.description(), &ty);
     let wid = port_circle_wid(port);
@@ -369,7 +383,7 @@ fn output_cell(ui: &mut Ui, ncx: NodeCtx<'_>, output: OutputCtx<'_>, out: &mut R
     ContextMenu::for_id(menu_id)
         .size((Sizing::HUG, Sizing::HUG))
         .show(ui, |ui, popup| {
-            add_preview_item(ui, popup, ncx, port, out);
+            add_preview_item(ui, popup, ncx, dcx, port, out);
         });
 }
 
@@ -386,10 +400,11 @@ fn add_preview_item(
     ui: &mut Ui,
     popup: &PopupHandle,
     ncx: NodeCtx<'_>,
+    dcx: DrawCtx<'_>,
     port: PortRef,
     out: &mut Requests,
 ) {
-    let Some(func) = preview::registered(ncx.graph_ctx().library()) else {
+    let Some(func) = preview::registered(ncx.graph_ctx.library()) else {
         return;
     };
     if !MenuItem::new("Add preview").show(ui, popup).left.clicked() {
@@ -397,7 +412,7 @@ fn add_preview_item(
     }
     // Positioned off the port when its center is known (it is, after the first
     // frame); otherwise the node lands at the origin and the user drags it.
-    let pos = ncx
+    let pos = dcx
         .geometry()
         .ports
         .center(port)
@@ -432,13 +447,20 @@ pub(crate) fn add_preview_intents(
 /// glyph, right-aligned and overhanging the node edge like a data output. Sits in
 /// `COL_OUTPUT` at `row` (below the data outputs). The glyph senses drags so a
 /// wire can be pulled from it to a subscriber pin (see `SubscriptionUI`).
-fn event_cell(ui: &mut Ui, ncx: NodeCtx<'_>, event_idx: usize, row: usize, event: &FuncEvent) {
+fn event_cell(
+    ui: &mut Ui,
+    ncx: NodeCtx<'_>,
+    dcx: DrawCtx<'_>,
+    event_idx: usize,
+    row: usize,
+    event: &FuncEvent,
+) {
     let theme = ncx.theme();
-    let node_id = ncx.node().id;
+    let node_id = ncx.id;
     let overhang = theme.port_overhang();
     let wid = event_glyph_wid(node_id, event_idx);
     let ev = EventRef { node_id, event_idx };
-    let fill = event_color(theme, ncx.geometry().events.is_hovered(ev));
+    let fill = event_color(theme, dcx.geometry().events.is_hovered(ev));
     let tip = if ncx.tips() {
         format!("event: {}", event.name)
     } else {

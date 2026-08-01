@@ -10,7 +10,7 @@ use crate::gui::widgets::support::{
 };
 use scenarium::RamUsage;
 
-use crate::gui::pane::graph::node::ctx::NodeCtx;
+use crate::gui::graph_ctx::node_ctx::NodeCtx;
 use crate::gui::theme::Theme;
 use crate::gui::widgets::format::fmt_bytes;
 
@@ -20,7 +20,7 @@ const BAR_H: f32 = 3.0;
 /// Draw the node's memory footer, or nothing when it holds no RAM. `node.ram()`
 /// is mirrored from the run cache; each pool shows only when non-zero.
 pub(super) fn memory_row(ui: &mut Ui, ncx: NodeCtx<'_>) {
-    let node = ncx.node();
+    let node = ncx;
     let ram = node.ram();
     if ram.total() == 0 {
         return;

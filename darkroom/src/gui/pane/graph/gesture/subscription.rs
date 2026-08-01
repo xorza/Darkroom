@@ -5,7 +5,7 @@ use scenarium::NodeId;
 use crate::core::edit::intent::types::GraphIntent;
 use crate::gui::EventRef;
 use crate::gui::graph_ctx::GraphCtx;
-use crate::gui::graph_ctx::node_scope::NodeScope;
+use crate::gui::graph_ctx::node_ctx::NodeCtx;
 use crate::gui::pane::graph::ctx::CanvasCtx;
 use crate::gui::pane::graph::frame::geometry::CanvasGeometry;
 use crate::gui::pane::graph::gesture::slot::GestureSlot;
@@ -79,7 +79,7 @@ impl SubscriptionUI {
         // start one this frame (distinct widget-id spaces, one press), so
         // trying the emitter scan first is arbitrary, not a conflict.
         if self.state.is_idle() {
-            let emitters = graph_ctx.nodes().flat_map(NodeScope::event_refs);
+            let emitters = graph_ctx.nodes().flat_map(NodeCtx::event_refs);
             // Only sink nodes render a pin, so only they can start a reverse
             // event drag.
             let pins = graph_ctx.nodes().filter(|n| n.sink()).map(|n| n.id);
@@ -268,6 +268,6 @@ fn scan_emitter_target(
     let candidates = graph_ctx
         .nodes()
         .filter(|n| n.id != subscriber)
-        .flat_map(NodeScope::event_refs);
+        .flat_map(NodeCtx::event_refs);
     geometry.events.first_containing(pointer, candidates)
 }

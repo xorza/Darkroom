@@ -48,7 +48,7 @@ impl App {
     fn run_node(&mut self, node_id: NodeId) {
         // A node inside a local definition has no enclosing instance path,
         // so no execution seed resolves. The UI gates the play chip and the
-        // menu action on `NodeScope::runnable`, which is false there —
+        // menu action on `NodeCtx::runnable`, which is false there —
         // reaching this is a gating bug, not user input, so refuse rather
         // than kill the editor from a live command handler. Tested against
         // the *node's* graph, not the focused pane's: with several graph

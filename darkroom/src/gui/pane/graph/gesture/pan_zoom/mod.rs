@@ -207,7 +207,7 @@ pub(crate) enum Framing {
 /// selection, no nodes to fit, or the viewport not yet measured. The
 /// pane size comes from the outer canvas's `layout_rect`; node extents
 /// come from `geometry`'s cross-frame size cache, position from
-/// `NodeScope::pos`.
+/// `NodeCtx::pos`.
 pub(crate) fn framing_intent(
     ui: &Ui,
     geometry: &CanvasGeometry,
@@ -240,7 +240,7 @@ fn reset_target(geometry: &CanvasGeometry, graph_ctx: GraphCtx<'_>, pane: Vec2) 
 
 /// World-space (inner-canvas pre-transform) bounding box of the framed
 /// nodes — every node, or only the selected ones. Each node's rect comes
-/// from [`CanvasGeometry::node_world_rect`] (current `NodeScope::pos` +
+/// from [`CanvasGeometry::node_world_rect`] (current `NodeCtx::pos` +
 /// cached measured size) — NOT from live responses, because culled
 /// off-screen nodes record none and would drop out of the fit entirely.
 /// A node that has never measured counts as a point at its position;

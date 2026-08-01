@@ -1,4 +1,3 @@
-pub(crate) mod ctx;
 pub(super) mod header;
 mod memory_row;
 pub(super) mod port_color;
@@ -9,11 +8,11 @@ mod value_editor;
 use crate::core::document::PortRef;
 use crate::core::edit::intent::types::GraphIntent;
 use crate::gui::graph_ctx::GraphCtx;
+use crate::gui::graph_ctx::node_ctx::NodeCtx;
 use crate::gui::pane::graph::ctx::DrawCtx;
 use crate::gui::pane::graph::gesture::breaker::BreakerProbe;
 use crate::gui::pane::graph::gesture::drag_anchor::GroupDrag;
 use crate::gui::pane::graph::gesture::drag_anchor::selected_group_positions;
-use crate::gui::pane::graph::node::ctx::NodeCtx;
 use crate::gui::pane::graph::node::header::{header, status_row, subscription_pin};
 use crate::gui::pane::graph::node::memory_row::memory_row;
 use crate::gui::pane::graph::node::port_row::ports_row;
@@ -108,7 +107,8 @@ impl NodeUI {
             {
                 continue;
             }
-            self.draw_one(ui, NodeCtx::for_node(dcx, ui, n), probe, out);
+            let ncx = n.with_hover(node_hovered(ui, n.id));
+            self.draw_one(ui, ncx, dcx, probe, out);
         }
         self.focus_kept_last = focus_kept;
         // Belt-and-braces against a node deleted mid-drag; `prepass` makes
@@ -120,10 +120,11 @@ impl NodeUI {
         &mut self,
         ui: &mut Ui,
         ncx: NodeCtx<'_>,
+        dcx: DrawCtx<'_>,
         probe: &mut BreakerProbe<'_>,
         out: &mut Requests,
     ) {
-        let (theme, node) = (ncx.theme(), ncx.node());
+        let (theme, node) = (ncx.theme(), ncx);
 
         // Probe the body against the breaker polyline. Hit → recolor border
         // red and flag the node for deletion on release. The rect is the same
@@ -133,14 +134,14 @@ impl NodeUI {
         // a live gesture (an undo, say). A node that has never
         // recorded has no size yet, so the breaker can't catch it until next
         // frame: acceptable, since the user can't aim at something unpainted.
-        let broken = ncx
+        let broken = dcx
             .geometry()
             .node_world_rect(node)
             .is_some_and(|r| probe.crosses_rect(r));
         if broken {
             probe.mark_broken_node(node.id);
         }
-        let selected = ncx.is_selected();
+        let selected = dcx.is_selected(ncx.id);
         // The border width is *always* the selection width so selecting a
         // node never resizes it (stroke folds into padding — width-gated,
         // not color-gated). Only the color changes, a 4-tier decision: the
@@ -166,7 +167,7 @@ impl NodeUI {
         // from behind this node's corner while riding the same cull decision
         // and stack position as the node itself.
         if node.sink() {
-            subscription_pin(ui, theme, node, ncx.geometry().subs.is_hovered(node.id));
+            subscription_pin(ui, theme, node, dcx.geometry().subs.is_hovered(node.id));
         }
 
         // Borrowed off `self` before the body closure so it can't conflict
@@ -193,9 +194,9 @@ impl NodeUI {
                 .with_shadow(shadow),
             )
             .show(ui, |ui| {
-                header(ui, ncx, out);
+                header(ui, ncx, dcx, out);
                 status_row(ui, ncx, out);
-                ports_row(ui, ncx, row_tracks, out);
+                ports_row(ui, ncx, dcx, row_tracks, out);
                 // A preview has no output, so it has no cached value for the
                 // memory readout to report — its value takes that slot instead.
                 if node.preview() {
@@ -215,7 +216,7 @@ impl NodeUI {
         // selection. `UndoStep::is_noop` filters a click that doesn't
         // change the set (e.g. clicking the sole selected node).
         if body_clicked {
-            click_intents(shift_click, ncx.graph_ctx(), node.id, out);
+            click_intents(shift_click, ncx.graph_ctx, node.id, out);
         }
 
         // Latch the anchor on the press-frame edge, off whichever handle
@@ -224,15 +225,15 @@ impl NodeUI {
         // peeks `response_for(widget_id)` before record runs and converts
         // `drag_delta` into a `MoveSelection` applied to `Document` before
         // the record reads it back.
-        if let Some(handle) = ncx.hits().latched_on(node.id) {
+        if let Some(handle) = dcx.hits().latched_on(node.id) {
             // Grabbing a node already in the selection drags the whole
             // group together;
             // grabbing an unselected node selects only it and drags it
             // alone.
             let start_positions = if selected {
-                selected_group_positions(ncx.draw_ctx())
+                selected_group_positions(dcx)
             } else {
-                click_intents(false, ncx.graph_ctx(), node.id, out);
+                click_intents(false, ncx.graph_ctx, node.id, out);
                 vec![(node.id, node.pos)]
             };
             self.drag.latch(node.id, start_positions, handle);
@@ -340,9 +341,9 @@ pub(crate) fn drag_handles(node_id: NodeId) -> impl Iterator<Item = WidgetId> {
 ///
 /// Resolved against *last* frame's hover target and cascade, so the answer
 /// doesn't depend on where in this frame's record it is asked — which is what
-/// lets [`NodeCtx::for_node`](crate::gui::pane::graph::node::ctx::NodeCtx::for_node) settle
-/// it at the node body, before the subtree
-/// that reads it has recorded.
+/// lets the record pass settle it at the node body — one
+/// [`NodeCtx::with_hover`](crate::gui::graph_ctx::node_ctx::NodeCtx::with_hover)
+/// per node — before the subtree that reads it has recorded.
 pub(super) fn node_hovered(ui: &Ui, node_id: NodeId) -> bool {
     ui.hover_within(node_widget_id(node_id))
 }

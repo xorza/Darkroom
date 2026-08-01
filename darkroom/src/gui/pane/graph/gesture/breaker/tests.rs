@@ -10,7 +10,7 @@ use crate::gui::pane::graph::harness::CanvasHarness;
 /// painted.
 ///
 /// Both rects are one frame apart whenever something moves a node out from
-/// under a live gesture — an undo, say — because `NodeScope::pos`
+/// under a live gesture — an undo, say — because `NodeCtx::pos`
 /// is mirrored pre-record while the body's own arranged rect is still last
 /// frame's. Driving that here: scribble over empty canvas, move the node onto
 /// the scribble mid-gesture, release. The cut has to land, which it only does

@@ -3,19 +3,19 @@
 use scenarium::{DataType, FuncOutput, OutputPort};
 
 use crate::core::document::PortRef;
-use crate::gui::graph_ctx::node_scope::NodeScope;
+use crate::gui::graph_ctx::node_ctx::NodeCtx;
 
 /// One output port: what the func declares for it, and — for a wildcard —
 /// the type the graph resolves it to.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct OutputCtx<'a> {
-    node: NodeScope<'a>,
+    node: NodeCtx<'a>,
     port_idx: usize,
     declared: &'a FuncOutput,
 }
 
 impl<'a> OutputCtx<'a> {
-    pub(super) fn new(node: NodeScope<'a>, port_idx: usize, declared: &'a FuncOutput) -> Self {
+    pub(super) fn new(node: NodeCtx<'a>, port_idx: usize, declared: &'a FuncOutput) -> Self {
         Self {
             node,
             port_idx,
