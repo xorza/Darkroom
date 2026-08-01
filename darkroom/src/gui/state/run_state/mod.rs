@@ -141,6 +141,32 @@ pub(crate) struct RunState {
 }
 
 impl RunState {
+    /// Bring this projection up to date with everything that has happened
+    /// since the last frame: fold the worker's reports, take in the values
+    /// preview nodes published, and sweep the store against `document`.
+    ///
+    /// One entry point because the halves are ordered and nothing may come
+    /// between them. The reports are what make `compiled` name the compile the
+    /// worker just acknowledged; take the published values in first and each
+    /// is gated against the *previous* compile and silently dropped. Splitting
+    /// this across two calls put that constraint in the caller's statement
+    /// order, where nothing states it.
+    ///
+    /// Runs from `App::update`, once a frame — every sweep is idempotent and
+    /// costs a lookup per cached entry, while `record` runs *twice* on a frame
+    /// carrying action input — and before the session rebuilds its scene, so
+    /// the status and log projections it reads reflect the latest run.
+    pub(crate) fn sync(
+        &mut self,
+        runtime: &mut RuntimeHost,
+        status: &mut StatusLog,
+        ui: &Ui,
+        document: &Document,
+    ) {
+        self.drain_reports(runtime, status);
+        self.sync_previews(runtime, ui, document);
+    }
+
     /// Fold everything `runtime`'s worker has posted since the last frame into
     /// this projection.
     ///
@@ -157,14 +183,10 @@ impl RunState {
     /// writes — every arm below lands on `self`, and only the status line
     /// reaches back.
     ///
-    /// Reports only. A published *value* is taken separately by
-    /// [`Self::ingest_published`], which has to allocate a texture for it and
-    /// so belongs with the frame's other GPU work rather than here — this is a
-    /// pure fold and names no `Ui`.
-    ///
-    /// Called before the session rebuilds its scene, so the projections it
-    /// reads reflect the latest run.
-    pub(crate) fn drain_from(&mut self, runtime: &mut RuntimeHost, status: &mut StatusLog) {
+    /// Reports only — a published *value* needs a texture allocated for it and
+    /// is taken by [`Self::sync_previews`], so this stays a pure fold and names
+    /// no `Ui`.
+    fn drain_reports(&mut self, runtime: &mut RuntimeHost, status: &mut StatusLog) {
         // Owned, so the channel borrow is gone before the loop below needs
         // `runtime` again.
         let events = runtime.drain_worker();
@@ -398,10 +420,7 @@ impl RunState {
     /// earlier compile is dropped — the node it named may not exist any more,
     /// and a preview only ever shows the current run's value anyway.
     ///
-    /// **After [`Self::drain_from`]**, which is what makes `compiled` name the
-    /// compile the report stream just acknowledged. Run before it and a value
-    /// from the new run is gated against the old compile and silently dropped.
-    pub(crate) fn sync_previews(&mut self, runtime: &RuntimeHost, ui: &Ui, document: &Document) {
+    fn sync_previews(&mut self, runtime: &RuntimeHost, ui: &Ui, document: &Document) {
         for (node_id, value) in runtime.drain_previews() {
             // The gate's borrow ends with the condition, so the store can be
             // written in the body without cloning the compile to release it.
