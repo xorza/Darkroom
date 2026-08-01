@@ -55,7 +55,7 @@ impl App {
             AppCommand::File(c) => self.handle_file(c),
             AppCommand::Run(c) => self.handle_run(c),
             AppCommand::Prefs(c) => self.handle_prefs(ui, c),
-            AppCommand::Edit(c) => self.handle_edit(c),
+            AppCommand::Edit(c) => self.handle_edit(ui, c),
             AppCommand::Quit => self.guard_discard(PendingTransition::Quit),
         }
     }

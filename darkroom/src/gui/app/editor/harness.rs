@@ -80,15 +80,16 @@ impl EditorHarness {
     }
 
     /// Push one intent through the real edit path, as a widget's does.
-    pub(crate) fn apply(&mut self, intent: GraphIntent) {
-        self.editor.apply_edit(&mut self.open, intent);
+    /// Reports whether it stranded the canvas's cached geometry.
+    pub(crate) fn apply(&mut self, intent: GraphIntent) -> bool {
+        self.editor.apply_edit(&mut self.open, intent)
     }
 
     /// Drain the queued intents into the document, as the frame's edit phase
-    /// does.
-    pub(crate) fn drain(&mut self) {
+    /// does. Reports whether the batch stranded the canvas's cached geometry.
+    pub(crate) fn drain(&mut self) -> bool {
         self.editor
-            .drain_requests(&mut self.open, &mut self.requests);
+            .drain_requests(&mut self.open, &mut self.requests)
     }
 
     /// Take back the last undoable entry. Reports whether there was one.

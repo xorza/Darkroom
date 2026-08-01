@@ -231,14 +231,18 @@ impl GraphUI {
     /// [`CanvasGeometry`]'s port-offset table, so connections still anchor on
     /// the first frame after a switch.
     ///
-    /// The caller turns a `true` into a relayout request: a canvas that has
-    /// never recorded has no cached geometry to draw its first frame from,
-    /// and a dock op raises no geometry signal of its own
-    /// (`UndoStep::invalidates_cached_geometry` is `false` for one).
+    /// Returns whether the canvas just *appeared*, which the caller turns
+    /// into a relayout request: a canvas that has never recorded has no cached
+    /// geometry to draw its first frame from, and a dock op raises no geometry
+    /// signal of its own (`UndoStep::invalidates_cached_geometry` is `false`
+    /// for one). Disappearing is the other half of the same edge but needs no
+    /// pass — nothing is drawn to lay out — so it drops its gestures and
+    /// reports `false`.
     ///
-    /// Unlike the per-frame reconciles beside it, this cannot simply run
-    /// every frame: clearing gestures is only correct on the transition,
-    /// since every gesture spans frames by definition.
+    /// Must still run every frame even though it acts on neither steady
+    /// state: the edge is only visible by comparing against the frame before,
+    /// and clearing gestures is correct only on the transition, since every
+    /// gesture spans frames by definition.
     pub(crate) fn sync_visibility(&mut self, doc: &Document) -> bool {
         let visible = doc.shows_graph();
         if self.visible == visible {
@@ -247,7 +251,7 @@ impl GraphUI {
         self.visible = visible;
         self.reset_gestures();
         self.inspectors.close_unpinned();
-        true
+        visible
     }
 
     /// Pre-record pass — see

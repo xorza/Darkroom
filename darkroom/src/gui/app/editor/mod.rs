@@ -48,8 +48,9 @@ const QUIT_SHORTCUT: Shortcut = Shortcut::ctrl('Q');
 /// off the steps' own predicates. Accumulated as a value rather than written
 /// straight onto [`Editor`] because undo/redo replay folds its steps from a
 /// callback while `action_stack` itself is mutably borrowed — so both the
-/// commit path and the replay path fold here and hand the result to
-/// [`Editor::absorb_signals`], and a new signal is added in one place.
+/// commit path and the replay path fold into one of these and then spend it:
+/// `dirtied` lands on the open document, `geometry_stale` is reported up to
+/// whoever holds the `Ui` and owes the relayout.
 #[derive(Default, Debug)]
 struct StepSignals {
     geometry_stale: bool,
@@ -67,14 +68,6 @@ impl StepSignals {
 pub(crate) struct Editor {
     action_stack: ActionStack,
     main_window: MainWindow,
-    /// Per-frame accumulator: set by any step that strands
-    /// `CanvasGeometry`'s cross-frame caches (see
-    /// `invalidates_cached_geometry`) and by `GraphUI::sync_visibility` for
-    /// a canvas that has never recorded, then consumed once at the end of
-    /// `frame` as a single `ui.request_relayout()`. Reset at the top of
-    /// every frame. A plain side-effect field rather than a `bool` threaded
-    /// back through every helper's return.
-    needs_relayout: bool,
 }
 
 impl Editor {
@@ -83,7 +76,6 @@ impl Editor {
         Self {
             action_stack: ActionStack::new(UNDO_HISTORY_BYTES),
             main_window: MainWindow::default(),
-            needs_relayout: false,
         }
     }
 
@@ -91,8 +83,9 @@ impl Editor {
     /// edits raised *outside* the frame's intent drain — e.g. a file-picker
     /// result `App` handles after the record. No-ops (and self-cancelling
     /// steps) are dropped, like the in-frame drain.
-    pub(super) fn apply_edit(&mut self, open: &mut OpenDocument, intent: GraphIntent) {
-        self.commit_batch(open, [DocumentRequest::Graph(intent)]);
+    #[must_use]
+    pub(super) fn apply_edit(&mut self, open: &mut OpenDocument, intent: GraphIntent) -> bool {
+        self.commit_batch(open, [DocumentRequest::Graph(intent)])
     }
 
     /// Apply `queued`, each request according to its tier: a graph edit is
@@ -109,14 +102,16 @@ impl Editor {
     /// records nothing. A *run* of intents becomes one undo entry, so a
     /// gesture that emits N of them is still one Ctrl+Z.
     ///
-    /// Returns nothing: what the caller would do with the outcome is a
-    /// [`StepSignals`] effect, landed by [`Self::absorb_signals`] alongside
-    /// the other two rather than handed back to be acted on separately.
+    /// Returns whether the batch stranded the canvas's cached geometry. The
+    /// batch's other outcome — a dirtied document — is landed here, since
+    /// `open` is right there; only the relayout has to travel back out to
+    /// whoever holds the `Ui`.
+    #[must_use]
     fn commit_batch(
         &mut self,
         open: &mut OpenDocument,
         queued: impl IntoIterator<Item = DocumentRequest>,
-    ) {
+    ) -> bool {
         let mut batch = Vec::new();
         let mut signals = StepSignals::default();
         for item in queued {
@@ -142,20 +137,15 @@ impl Editor {
         }
         self.action_stack.push_current(&batch);
         batch.clear();
-        self.absorb_signals(open, signals);
-    }
-
-    /// Land folded [`StepSignals`] on the frame's accumulators. The one place
-    /// each signal's *effect* is spelled out, for both the commit path and
-    /// undo/redo replay.
-    fn absorb_signals(&mut self, open: &mut OpenDocument, signals: StepSignals) {
-        self.needs_relayout |= signals.geometry_stale;
-        // A content edit (or an undone/redone one) leaves the doc differing
-        // from the last save — barring the exact round-trip back to it, where
-        // we accept a stale "dirty" rather than tracking saved state precisely.
+        // A content edit leaves the doc differing from the last save —
+        // barring the exact round-trip back to it, where we accept a stale
+        // "dirty" rather than tracking saved state precisely.
         open.dirty |= signals.dirtied;
+        signals.geometry_stale
     }
+}
 
+impl Editor {
     /// Run one frame of the edit pipeline against `ctx` — the frame's
     /// read-only world — draining everything it raises against the document
     /// and leaving the app tier queued in `requests` for the shell.
@@ -173,13 +163,18 @@ impl Editor {
         requests: &mut Requests,
     ) {
         requests.clear();
-        self.needs_relayout = false;
 
+        // The frame's relayout accumulator, owned here for exactly as long as
+        // the frame it describes. Every pass that can strand
+        // `CanvasGeometry`'s cross-frame caches reports upward into it, and
+        // the single `request_relayout` at the bottom spends it — so there is
+        // no flag to reset, and none to leak into the next frame.
+        //
         // Settle the active tab entirely from frame-top inputs (keyboard
         // undo/redo + last-frame click responses). `navigate` reads *last*
         // frame's projection to resolve tab/chip clicks, so it must run
         // before this frame's rebuild. After it, the active tab is fixed.
-        self.navigate(ui, open, ctx, requests);
+        let mut needs_relayout = self.navigate(ui, open, ctx, requests);
 
         // Prepass reconciles pane visibility, rebuilds the canvas's
         // projection, then emits input-derived graph mutations (drag,
@@ -189,8 +184,8 @@ impl Editor {
         // rather than another question here. A canvas that just appeared or
         // vanished needs a relayout: it may never have recorded, and a dock op
         // raises no geometry signal of its own.
-        self.needs_relayout |= self.main_window.prepass(ui, ctx, &open.document, requests);
-        self.drain_requests(open, requests);
+        needs_relayout |= self.main_window.prepass(ui, ctx, &open.document, requests);
+        needs_relayout |= self.drain_requests(open, requests);
 
         self.menu_shortcut(ui, requests);
         self.main_window
@@ -198,7 +193,7 @@ impl Editor {
 
         // Post-record drain — graph edits the record surfaced (node select,
         // cache toggle, const edit), plus the tab strip's dock ops.
-        self.drain_requests(open, requests);
+        needs_relayout |= self.drain_requests(open, requests);
 
         // Sole consumption point for the frame's accumulated signal (edits,
         // tab switch, undo/redo), and darkroom's only `request_relayout`.
@@ -206,7 +201,7 @@ impl Editor {
         // header's elapsed-time label growing as a run reports — are not
         // covered: they leave `CanvasGeometry`'s offsets stale for one
         // frame rather than buying a pass.
-        if self.needs_relayout {
+        if needs_relayout {
             ui.request_relayout();
         }
     }
@@ -217,23 +212,25 @@ impl Editor {
     ///
     /// Done up front so the edit pipeline runs against a settled document
     /// and a switched-to tab records in the same present's Pass A.
+    #[must_use]
     fn navigate(
         &mut self,
         ui: &mut Ui,
         open: &mut OpenDocument,
         ctx: AppCtx<'_>,
         requests: &mut Requests,
-    ) {
-        self.apply_undo_redo(ui, open);
+    ) -> bool {
+        let mut needs_relayout = self.apply_undo_redo(ui, open);
         // Surface tab clicks from last frame's responses. Those responses are
         // last frame's; the document they resolve against is this frame's,
         // so a hit on a node the undo above removed simply finds nothing.
         self.main_window
             .scan_navigation(ui, ctx, &open.document, requests);
         // Dock ops apply straight to the layout — drain them.
-        self.drain_requests(open, requests);
+        needs_relayout |= self.drain_requests(open, requests);
         // A tab whose node is gone can't stay open.
         open.document.reconcile_with_graph();
+        needs_relayout
     }
 
     /// Ctrl+Z / Ctrl+Shift+Z. Replays undo/redo against the document
@@ -248,7 +245,8 @@ impl Editor {
     /// No focus test: Ctrl+Z is `KeyClass::Edit`, so while a text field
     /// holds focus palantir grants it to that field's scope and this
     /// read answers `false` on its own.
-    fn apply_undo_redo(&mut self, ui: &mut Ui, open: &mut OpenDocument) {
+    #[must_use]
+    fn apply_undo_redo(&mut self, ui: &mut Ui, open: &mut OpenDocument) -> bool {
         let undo = ui.key_pressed(UNDO_SHORTCUT);
         let redo = ui.key_pressed(REDO_SHORTCUT);
         // Folded into a value first: the replay callback runs while
@@ -260,7 +258,10 @@ impl Editor {
         } else if redo {
             self.action_stack.redo(&mut open.document, &mut on_step);
         }
-        self.absorb_signals(open, signals);
+        // An undone or redone edit dirties the document exactly as the
+        // original did.
+        open.dirty |= signals.dirtied;
+        signals.geometry_stale
     }
 
     /// Queue the [`AppCommand`] for whichever of Ctrl+N / Ctrl+O / Ctrl+S /
@@ -306,12 +307,17 @@ impl Editor {
     /// unbinding M ports) is one Cmd-Z. Marks the projection dirty when
     /// anything applied (so the pre-record rebuild folds the change in) and
     /// accumulates the relayout signal.
-    fn drain_requests(&mut self, open: &mut OpenDocument, requests: &mut Requests) {
+    #[must_use]
+    pub(crate) fn drain_requests(
+        &mut self,
+        open: &mut OpenDocument,
+        requests: &mut Requests,
+    ) -> bool {
         // Called three times a frame and usually with nothing queued.
         if requests.is_empty() {
-            return;
+            return false;
         }
-        self.commit_batch(open, requests.drain_document());
+        self.commit_batch(open, requests.drain_document())
     }
 
     /// Release the canvas's `NodeId`-keyed caches for nodes the document has

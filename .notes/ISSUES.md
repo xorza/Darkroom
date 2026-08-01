@@ -15,14 +15,6 @@
   `pub(crate) mod internals { impl NewNodeUi {} }` — an empty impl in an
   otherwise empty gated module.
 
-- A relayout requested by `Editor::apply_edit` is never issued.
-  `apply_edit` runs from `App::handle_command`, after `Editor::frame` has
-  already consumed `needs_relayout`, and the next `frame` resets the field to
-  `false` at its top before anything reads it. Reached today only by
-  `EditCommand::PickInputPath`, whose `SetInput` step happens to report
-  `invalidates_cached_geometry() == false` because the picker chip only exists
-  on a binding that is already `Const`.
-
 - Five of the eight canvas tests that drive `GraphUI` through `UiHarness`
   (`frame/geometry`, `gesture/{breaker,connection,new_node,preview_drag}`) omit
   `graph_ui.scan_hits`, so they record a frame sequence production never
