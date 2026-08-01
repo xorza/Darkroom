@@ -9,9 +9,9 @@
 //! those needs.
 //!
 //! This file is [`GraphUI`] and nothing else: the state a graph pane keeps
-//! across frames, the two phases that drive it ([`GraphUI::prepass`] and
-//! [`GraphUI::draw`]), and the cache sweep ([`GraphUI::retain_nodes`]) that
-//! runs outside them.
+//! across frames, the three phases that drive it in frame order
+//! ([`GraphUI::scan_navigation`], [`GraphUI::prepass`], [`GraphUI::draw`]),
+//! and the cache sweep ([`GraphUI::retain_nodes`]) that runs outside them.
 
 pub(crate) mod background;
 pub(crate) mod canvas;
@@ -27,7 +27,8 @@ use palantir::{Background, Configure, Panel, Sense, Sizing, TranslateScale, Ui};
 use scenarium::NodeId;
 use std::collections::BTreeSet;
 
-use crate::core::document::Document;
+use crate::core::document::dock::DockOp;
+use crate::core::document::{Document, TabRef};
 use crate::core::edit::intent::types::GraphIntent;
 use crate::gui::app::commands::AppCommand;
 use crate::gui::app::commands::edit::EditCommand;
@@ -112,12 +113,12 @@ pub(crate) struct GraphUI {
     /// widget ids. Persistent for ownership only — [`CanvasHits::scan`]
     /// rewrites it whole.
     ///
-    /// Swept by `MainWindow::scan_navigation`, *before* the scene is
-    /// rebuilt, because the graph-open chip it collects has to resolve
-    /// before the tab set settles — so it holds ids from last frame's
-    /// projection, and every reader confirms the node is still in the pane
-    /// it is drawing before acting.
-    pub(crate) hits: CanvasHits,
+    /// Swept by [`Self::scan_navigation`], *before* the scene is rebuilt,
+    /// because the preview-open chip it collects has to resolve before the tab
+    /// set settles — so it holds ids from last frame's projection, and every
+    /// reader confirms the node is still in the pane it is drawing before
+    /// acting.
+    hits: Canva sHits,
     /// Open inspection panels, keyed by node. Outside the gesture group
     /// so pinned panels survive a tab switch; panels only paint for nodes
     /// in the active scene, so off-tab ones hide and reappear.
@@ -160,6 +161,34 @@ pub(crate) struct GraphUI {
 }
 
 impl GraphUI {
+    /// The canvas's navigation-phase pass: sweep last frame's node responses
+    /// into [`Self::hits`], then raise the one request that has to resolve
+    /// before the tab set settles — a click on a preview card's image, which
+    /// opens that node in a viewer tab.
+    ///
+    /// That chip is *why* the sweep runs this early; every other reader of the
+    /// digest is a later phase of the same frame. Does nothing when no pane is
+    /// showing the graph — it runs before the tab set settles, so it cannot
+    /// assume one.
+    ///
+    /// The chip's siblings (play, cache-eviction) are raised in the record
+    /// instead, off the same digest — see [`Self::resolve_gestures`]. They are
+    /// app-tier commands with nothing to settle ahead of, so they wait for the
+    /// pass that reads a settled document.
+    pub(crate) fn scan_navigation(&mut self, ui: &Ui, graph_ctx: GraphCtx<'_>, out: &mut Requests) {
+        self.hits.scan(ui, graph_ctx);
+        // Read off last frame's projection, so the node may be gone already.
+        // No `contains` filter for that — unlike the record-phase chips, this
+        // one resolves before the scene settles. A tab for a dead node is
+        // pruned by `reconcile_with_graph` in the very drain that lands this
+        // op, and `OpenTab` dedupes, so a stale hit costs nothing.
+        if let Some(node) = self.hits.chip(Chip::PreviewImage) {
+            out.push_view(DockOp::OpenTab {
+                tab: TabRef::ImageViewer(node),
+            });
+        }
+    }
+
     /// Evict this canvas's two `NodeId`-keyed caches down to the nodes the
     /// document still holds — the cross-frame geometry and the open inspection
     /// panels.
