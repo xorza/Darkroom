@@ -2,11 +2,16 @@
 //! and logs, plus the latest value each preview node published. One
 //! [`RunState`] per [`App`], updated as worker reports arrive.
 //!
-//! **Two halves with different owners.** `nodes` and `previews` are derived
-//! from the open document and die with it ([`RunState::clear`]); `compiled`,
-//! `activity` and `cache_ram` describe the *worker* and outlive a document
-//! swap, because an in-flight run still reports against the program the
-//! worker acknowledged and its cache still holds what it holds.
+//! **Two halves with different owners.** `nodes` and `previews` belong to the
+//! open document and die with it ([`RunState::clear`]); `compiled`, `activity`
+//! and `cache_ram` describe the *worker* and outlive a document swap, because
+//! an in-flight run still reports against the program the worker acknowledged
+//! and its cache still holds what it holds.
+//!
+//! Within the first half the two differ again, and on purpose: `previews` is
+//! swept per node once a frame, `nodes` only wholesale at a document swap or
+//! the next completed run. See the field docs for why a run record is not a
+//! node-keyed cache.
 //!
 //! A run's node statuses are keyed by execution id.
 //! [`RunState::apply_worker_status`] resolves each through the
@@ -94,6 +99,31 @@ pub(crate) struct NodeLog {
 /// Central runtime state for the current editor. Off the serialized state.
 #[derive(Default, Debug)]
 pub(crate) struct RunState {
+    /// What the last run said about each node, keyed by the node that produced
+    /// it — a **record of that run**, not a cache swept against the document.
+    ///
+    /// So it is deliberately absent from
+    /// [`Document::holds_node`](crate::core::document::Document::holds_node)'s
+    /// list of `NodeId`-keyed caches, and from the once-a-frame pass that
+    /// sweeps them. Three reasons, in order of weight:
+    ///
+    /// 1. **Going stale on an edit is already what these mean.** Rewire a
+    ///    node's input and its `Executed` glow persists untouched until the
+    ///    next run — nothing on the edit path touches this. A status says
+    ///    *what the last run said*, never *what the graph would do now*.
+    ///    Sweeping on delete would make delete-then-undo the one edit that
+    ///    discards results, and only for the restored node while every
+    ///    neighbour from the same run keeps theirs: `UndoStep::RemoveNode`
+    ///    re-attaches the node under its original id, so its entry is still
+    ///    here and still reads.
+    /// 2. **Nothing reads a dead entry.** Every reader below is called from a
+    ///    node widget, which exists only for a node the document holds. An
+    ///    entry outliving its node costs memory and nothing else.
+    /// 3. **That memory is small and already bounded.** An enum, a short
+    ///    `Vec<NodeLog>` and two strings per node, capped by the last run's
+    ///    output — and `replace_results` resets every entry at the next
+    ///    completed run. The caches that *are* swept release textures up to
+    ///    8192² RGBA8, which is what earns them a per-frame pass.
     nodes: HashMap<NodeId, NodeRunState>,
     pub(crate) previews: PreviewStore,
     /// The program acknowledged by the worker's ordered report stream. Every
