@@ -613,24 +613,12 @@ pub(crate) mod harness;
 
 #[cfg(test)]
 mod tests {
-    use imaginarium::{ColorFormat, Image as RawImage, ImageBuffer, ImageDesc};
-    use lens::Image as LensImage;
-    use scenarium::DynamicValue;
-
     use super::*;
     use crate::core::document::harness::DocFixture;
     use crate::core::preview::preview_func;
     use crate::gui::pane::graph::harness::CanvasHarness;
     use crate::gui::pane::graph::node::preview_row::preview_image_wid;
-
-    /// A 2×1 opaque image — the smallest thing a preview card will render, and
-    /// rendering one is what makes the card clickable at all (`Sense::NONE`
-    /// without a value), so the chip only exists once something has published.
-    fn image_value() -> DynamicValue {
-        let desc = ImageDesc::new(2, 1, ColorFormat::RGBA_U8);
-        let raw = RawImage::new_with_data(desc, vec![255; desc.row_bytes()]).unwrap();
-        DynamicValue::from_custom(LensImage::from(ImageBuffer::from_cpu(raw)))
-    }
+    use crate::gui::state::preview_store::internals::opaque_image_value;
 
     /// Clicking a preview card's image asks the dock for that node's viewer
     /// tab — the canvas's one view-tier request, raised from the prepass off
@@ -645,7 +633,7 @@ mod tests {
         h.ctx
             .run_state
             .previews
-            .ingest_preview(h.ui.ui(), node, image_value());
+            .ingest_preview(h.ui.ui(), node, opaque_image_value());
         h.prime(2);
         assert!(h.view_ops.is_empty(), "nothing asked for before the click");
 
