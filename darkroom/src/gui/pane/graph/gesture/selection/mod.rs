@@ -5,7 +5,7 @@ use glam::Vec2;
 use palantir::{Rect, Shape, Stroke, Ui};
 
 use crate::core::edit::intent::types::GraphIntent;
-use crate::gui::pane::graph::canvas::{outer_canvas_widget_id, to_world};
+use crate::gui::pane::graph::canvas::outer_canvas_widget_id;
 use crate::gui::pane::graph::ctx::CanvasCtx;
 use crate::gui::pane::graph::gesture::canvas_gesture::CanvasGesture;
 use crate::gui::pane::graph::gesture::slot::GestureSlot;
@@ -105,7 +105,7 @@ impl SelectionUI {
             && cx.gesture() == Some(CanvasGesture::Select)
             && let Some(p) = resp.pointer_local
         {
-            let w = to_world(p, &graph_ctx.viewport());
+            let w = graph_ctx.viewport().to_world(p);
             let band = RubberBand {
                 start: w,
                 current: w,
@@ -132,7 +132,7 @@ impl SelectionUI {
             return;
         };
         if let Some(p) = resp.pointer_local {
-            band.current = to_world(p, &graph_ctx.viewport());
+            band.current = graph_ctx.viewport().to_world(p);
         }
         let rect = band.rect();
         // Swept into the reused preview buffer: refilled from scratch every

@@ -117,6 +117,18 @@ pub(crate) struct Viewport {
 }
 
 impl Viewport {
+    /// Invert the camera: a point in the surface's local space → the point of
+    /// *content* under it. The exact inverse of the `local = pan + zoom *
+    /// content` this type documents, so it is defined here rather than
+    /// re-derived by each reader.
+    ///
+    /// The graph canvas calls its content space "world" — node positions, wire
+    /// endpoints and the cull region all live in it — and is the only caller
+    /// today; the image viewer needs the forward direction instead.
+    pub(crate) fn to_world(self, local: Vec2) -> Vec2 {
+        (local - self.pan) / self.zoom
+    }
+
     /// Whether this is a *persistable graph* camera — what
     /// `GraphViewValidationError::InvalidViewport` reports on. Only the
     /// document's own viewport round-trips through serde and so needs

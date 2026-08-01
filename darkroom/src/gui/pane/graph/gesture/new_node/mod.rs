@@ -14,7 +14,7 @@ use scenarium::{SPECIAL_NODES, SpecialNode};
 use crate::core::document::PortRef;
 use crate::core::edit::intent::types::GraphIntent;
 use crate::gui::graph_ctx::GraphCtx;
-use crate::gui::pane::graph::canvas::{outer_canvas_widget_id, to_world};
+use crate::gui::pane::graph::canvas::outer_canvas_widget_id;
 use crate::gui::pane::graph::ctx::CanvasCtx;
 use crate::gui::pane::graph::gesture::canvas_gesture::CanvasGesture;
 use crate::gui::pane::graph::paint::anchored_menu::AnchoredMenu;
@@ -121,7 +121,7 @@ impl NewNodeUi {
         if (pending_source.is_some() || cx.gesture() == Some(CanvasGesture::NewNode))
             && let (Some(local), Some(rect)) = (resp.pointer_local, resp.rect)
         {
-            self.world_pos = to_world(local, &graph_ctx.viewport());
+            self.world_pos = graph_ctx.viewport().to_world(local);
             self.source = pending_source;
             self.menu.open_at(rect.min + local);
             // Fresh open: empty the filter, read the graph's own
