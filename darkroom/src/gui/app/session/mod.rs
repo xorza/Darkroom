@@ -217,11 +217,9 @@ impl Session {
     }
 
     /// Release the canvas's `NodeId`-keyed caches for nodes the document has
-    /// stopped holding. Driven by [`App::reconcile_derived_state`] once a
+    /// stopped holding. Driven by `App::update` once a
     /// frame — [`Self::frame`] runs per *record pass*, so a sweep here would
     /// run twice on a frame carrying action input.
-    ///
-    /// [`App::reconcile_derived_state`]: crate::gui::app::App
     pub(super) fn reconcile_caches(&mut self) {
         self.main_window.reconcile(&self.open.document);
     }
