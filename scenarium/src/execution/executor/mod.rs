@@ -28,7 +28,7 @@ use crate::RamUsage;
 use crate::common::column::Column;
 use crate::execution::identity::{NodeIdx, OutputAddr, OutputIdx};
 use crate::execution::report::EventTrigger;
-use crate::execution::report::{ExecutionOutcome, NodeExecutionStatus, NodeStatus};
+use crate::execution::report::{ExecutionOutcome, LogLevel, NodeExecutionStatus, NodeStatus};
 use crate::execution::report::{RunPhase, RunProgress, RunReporter};
 use crate::graph::func::error::InvokeError;
 use crate::graph::func::lambda::{Invocation, OutputDemand};
@@ -37,6 +37,7 @@ use crate::runtime::context::ContextManager;
 use crate::runtime::shared_any_state::SharedAnyState;
 
 use crate::execution::cache::disk_store::StorePolicy;
+use crate::execution::cache::resource::error::StampError;
 use crate::execution::cache::runtime::{ReuseOutcome, RuntimeCache};
 use crate::execution::compile::compiled_graph::{CompiledGraph, ExecutionBinding};
 use crate::execution::error::RunError;
@@ -237,11 +238,16 @@ impl Executor {
                         elapsed_secs: *secs,
                     })
                 }
-                // A cancelled invoke didn't complete, so it has neither a run to report nor a
-                // failure of its own — the run as a whole is what was cancelled.
+                // A cancelled node didn't complete, so it has neither a run to report nor a
+                // failure of its own — the run as a whole is what was cancelled. `Skipped`
+                // alongside `Failed`: a cancel can land before the invoke, on the path walk
+                // that would have keyed it, and it is no more a failure there.
                 NodeOutcome::Failed {
                     error: RunError::Cancelled { .. },
                     ..
+                }
+                | NodeOutcome::Skipped {
+                    error: RunError::Cancelled { .. },
                 } => None,
                 // A genuine failure did run: one row carries both the attempt's time and the
                 // reason it ended, so nothing has to reconcile a node listed as two things.
@@ -415,9 +421,10 @@ impl ExecutionFrame<'_, '_> {
     /// kept them alive — so re-stamp it now and serve the cache on a hit. A genuinely
     /// uncacheable node (an impure cone) just re-folds to `None` and runs as before.
     ///
-    /// `true` — nothing was improvable, or the improved digest still missed: the node runs.
-    /// `false` — its turn is already settled, whether it was *served* from cache or *failed*
-    /// on its own resource. The two are one answer to the caller, which asks only whether to
+    /// `true` — nothing was improvable, the improved digest still missed, or a declared path
+    /// would not stamp: the node runs, in the last case uncached and with a warning against
+    /// its name. `false` — its turn is already settled, whether it was *served* from cache or
+    /// stopped by a cancel. The two are one answer to the caller, which asks only whether to
     /// invoke; which of them happened is in the node's outcome.
     ///
     /// Loading *before* retiring this node's input reads is what lets a failed load fall
@@ -433,17 +440,30 @@ impl ExecutionFrame<'_, '_> {
             .restamp_and_hydrate(program, node_idx, demand, &mut self.ctx.contexts, cancel)
             .await;
         match hydrated {
-            // Attributable to exactly this node, so it fails as one rather
-            // than taking the run down — and the invoke is skipped because
-            // the node is already marked, and running it would report a
-            // second, less specific failure for the same cause.
-            Err(error) => {
-                let run_error = RunError::ResourceUnavailable {
+            // The run is being torn down, so there is nothing to start here:
+            // invoking would begin work the cancel exists to stop.
+            Err(StampError::Cancelled) => {
+                let run_error = RunError::Cancelled {
                     func_id: program[node_idx].func_id,
-                    message: error.to_string(),
                 };
                 self.mark_skipped(node_idx, run_error);
                 false
+            }
+            // A path that would not read denies this node a *cache key*, not
+            // the ability to run: its digest stays `None`, which is exactly
+            // where every `Impure` node sits, so the node runs uncached. Only
+            // the lambda knows what the path was for — one that writes the
+            // file it declares succeeds outright, and one that needed to read
+            // it fails with its own message naming what it was reading. What
+            // this arm must not do is stay quiet: never caching a node that
+            // asked to be cached is the symptom nobody would otherwise see.
+            Err(error) => {
+                self.ctx.log_node(
+                    program.node_ids[node_idx],
+                    LogLevel::Warn,
+                    format!("running uncached, a declared path could not be identified: {error}"),
+                );
+                true
             }
             Ok(ReuseOutcome::Missed) => true,
             Ok(ReuseOutcome::Served) => {
@@ -454,8 +474,8 @@ impl ExecutionFrame<'_, '_> {
                 // never owned them, which is why `serve_reuse` has no
                 // such line.
                 self.abandon_input_reads(node_idx);
-                self.node_outcomes[node_idx] = NodeOutcome::Reused;
                 self.release_drained_outputs(node_idx);
+                self.node_outcomes[node_idx] = NodeOutcome::Reused;
                 false
             }
         }

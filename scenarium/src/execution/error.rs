@@ -56,13 +56,6 @@ pub enum RunError {
     /// blob is dropped, so the next run misses cleanly.
     #[error("the node's cached output could not be loaded")]
     CacheLoadFailed { func_id: FuncId },
-    /// A filesystem path this node declares could not be identified — the
-    /// walk that keys its cache hit an I/O failure. Reported rather than
-    /// left silently uncached, and attributed here rather than aborting
-    /// the run: the node's dependents skip as errored-upstream, and every
-    /// unrelated node still runs.
-    #[error("a declared filesystem path could not be identified: {message}")]
-    ResourceUnavailable { func_id: FuncId, message: String },
     #[error("demanded outputs {outputs:?} were left unbound")]
     OutputsNotProduced {
         func_id: FuncId,
