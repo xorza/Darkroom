@@ -14,8 +14,6 @@ visual node groups
 
 audit allocations overshoot , see where reserve_exact would be better
 
-invert removed retain logic to optimize
-
 mesh once registrations
 
 save caches on cache click
