@@ -414,9 +414,20 @@ impl RuntimeCache {
     /// `None` is the failure: a path this run never stamped, leaving its node
     /// without a sound cache key. A value naming *no* paths does not call at
     /// all — that is a plain const, not a filesystem read.
+    ///
+    /// An [unset](is_unset_path) slot is neither. It names nothing to stat, so
+    /// it folds a marker and leaves the node cacheable — "no file chosen yet"
+    /// is a state the author passes through, not a resource that failed. The
+    /// marker stands in the slot rather than being skipped: on the Bind side
+    /// the authored strings are not folded alongside, so skipping would let
+    /// `["", p]` and `[p, ""]` key alike.
     fn hash_fs_paths(&self, hasher: &mut DigestHasher, paths: &[String]) -> Option<()> {
         hasher.write_pod(paths.len() as u64);
         for path in paths {
+            if is_unset_path(path) {
+                hasher.write_input_tag(InputTag::UnsetPath);
+                continue;
+            }
             self.fs_paths.get(path)?.hash(hasher);
         }
         Some(())
@@ -483,9 +494,13 @@ impl RuntimeCache {
             };
             let Some(paths) = paths else { continue };
             for path in paths {
-                if !self.fs_paths.contains_key(path) {
-                    self.stamp_job.request(path);
+                // An unset slot has nothing to walk, and queueing it would
+                // fail the whole pass on a `metadata("")` — costing every
+                // other node in the batch its pre-run identity.
+                if is_unset_path(path) || self.fs_paths.contains_key(path) {
+                    continue;
                 }
+                self.stamp_job.request(path);
             }
         }
     }
@@ -686,6 +701,22 @@ impl RuntimeCache {
     }
 }
 
+/// Whether a path string names nothing — the state a path port sits in before
+/// a file is chosen, whose placeholder is
+/// [`DataType::default_value`](crate::DataType::default_value)'s empty string.
+///
+/// Blank after trimming, not merely empty: whitespace is what a typed-in path
+/// collects, and no such string names a file anyone meant. The path itself is
+/// never trimmed — spaces are legal at either end of a filename, so rewriting
+/// one would read a file other than the authored one.
+///
+/// A free fn because the question is the string's alone, and because the queue
+/// side and the fold side must answer it identically: two copies of the rule
+/// would drift into a path that is walked but not folded, or the reverse.
+fn is_unset_path(path: &str) -> bool {
+    path.trim().is_empty()
+}
+
 #[cfg(test)]
 pub(crate) mod internals {
     use ::common::CancelToken;
@@ -720,8 +751,21 @@ pub(crate) mod internals {
         /// path that will not stamp simply does not land, exactly as in the
         /// batched pre-run pass.
         pub(crate) fn prepare_node_blocking(&mut self, program: &CompiledGraph, node_idx: NodeIdx) {
-            self.request_node_paths(program, node_idx);
-            let _ = self.stamp_queued(&CancelToken::never());
+            let _ = self.prepare_nodes_blocking(program, [node_idx]);
+        }
+
+        /// [`RuntimeCache::prepare`]'s batching on this thread: every node's
+        /// paths queued, then one walk. Hands back what production discards,
+        /// so a test can say whether the shared pass survived.
+        pub(crate) fn prepare_nodes_blocking(
+            &mut self,
+            program: &CompiledGraph,
+            nodes: impl IntoIterator<Item = NodeIdx>,
+        ) -> Result<(), StampError> {
+            for node_idx in nodes {
+                self.request_node_paths(program, node_idx);
+            }
+            self.stamp_queued(&CancelToken::never())
         }
 
         pub(crate) fn stamp_queued(&mut self, cancel: &CancelToken) -> Result<(), StampError> {
