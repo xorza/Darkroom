@@ -300,17 +300,18 @@ impl Document {
     /// | `Inspectors::modes` | `GraphUI::retain_nodes` |
     /// | `PreviewStore::entries` (through [`Self::holds_preview_node`]) | `PreviewStore::reconcile` |
     ///
-    /// All three run from `App::reconcile_derived_state`, once a frame. A new
-    /// cache keyed by `NodeId` that outlives the scene belongs in that pass and
-    /// on this list — nothing else enforces it, so this is where to look and
-    /// what to extend.
+    /// All three run from `App::reconcile_derived_state`, once a frame,
+    /// alongside `MainWindow::image_viewers` — which is swept in the same pass
+    /// but against the *layout*, since a viewer's framing dies with its tab
+    /// rather than with its node. A new cache derived from the document
+    /// belongs in that pass and on this list; nothing else enforces it, so
+    /// this is where to look and what to extend.
     ///
-    /// Three neighbours are deliberately *not* on it, because none asks this
-    /// question: `MainWindow::image_viewers` is keyed by node but lives as long
-    /// as its *tab*; [`Self::reconcile_with_graph`] is the document repairing
-    /// itself rather than a cache being swept; and `RunState::nodes` is a
-    /// record of the last run rather than a cache derived from the document —
-    /// see its field doc, which gives the reasoning.
+    /// Two neighbours are deliberately outside it: [`Self::reconcile_with_graph`]
+    /// is the document repairing *itself* rather than a cache being swept, and
+    /// must stay in the navigation phase so a stale tab cannot reach the record
+    /// or a save; and `RunState::nodes` is a record of the last run rather than
+    /// a cache derived from the document — see its field doc for the reasoning.
     pub(crate) fn holds_node(&self, node_id: NodeId) -> bool {
         node_alive(&self.graph, node_id)
     }

@@ -46,7 +46,4 @@ fn drain_intents(&mut self, open: &mut OpenDocument) { - ugly
 
 runstate into runtimehost
 
-self.run_state.ingest_previews(ui, previews);
-self.run_state.previews.reconcile(ui, &self.open.document); -merge into one call
-
 inlinerename to select all text when entering edito mode

@@ -185,8 +185,12 @@ impl App {
         self.run_state.ingest_previews(ui, previews);
     }
 
-    /// Sweep every `NodeId`-keyed cache derived from the open document, and
-    /// upload the full-resolution texture each visible viewer needs.
+    /// Sweep every cache derived from the open document, and upload the
+    /// full-resolution texture each visible viewer needs.
+    ///
+    /// Two owners, so two calls: the preview store filters on the node that
+    /// published, and everything the window caches — canvas geometry, open
+    /// inspectors, per-tab viewer framing — goes through the editor.
     ///
     /// **The one place these run.** All of them outlive the scene on purpose —
     /// a closed tab must resolve its port centers the frame it comes back — so
