@@ -428,7 +428,11 @@ mod tests {
                 }
             })
             .collect();
-        assert_eq!(out.drain_app().count(), 0, "nor any app command");
+        assert_eq!(
+            std::iter::from_fn(|| out.pop_app()).count(),
+            0,
+            "nor any app command"
+        );
         intents
     }
 

@@ -94,7 +94,7 @@ impl CanvasHarness {
             })
             .collect();
         commands.clear();
-        commands.extend(out.drain_app());
+        commands.extend(std::iter::from_fn(|| out.pop_app()));
         intents
     }
 

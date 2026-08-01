@@ -123,7 +123,7 @@ impl SessionHarness {
             // which owns the app's one `request_relayout`. This harness
             // asserts on commands and documents, not on layout passes.
             let _needs_relayout = session.frame(recorder, ctx, preferences, requests);
-            requests.drain_app().collect()
+            std::iter::from_fn(|| requests.pop_app()).collect()
         })
     }
 
