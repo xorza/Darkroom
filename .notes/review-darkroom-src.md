@@ -86,47 +86,6 @@ behaviour. Only one thing in the group survives:
       doc explains at length why the raw form is wrong for a
       `request_focus`-driven widget; nothing marks which sites are exempt.
 
-## `Viewport`'s doc describes one of its two uses
-
-Not a type-safety hole, contrary to how this was first written: `Viewport` is a
-sound shared abstraction — an affine camera satisfying `local = pan + zoom *
-content` — and both users satisfy it. The algebra really is shared
-(`pan_zoom::zoom_about` and `fold_scroll_zoom` are unit-agnostic, and the
-viewer imports both), so splitting the type would duplicate that math or force
-a generic for no gain. What is wrong is narrower.
-
-- [ ] `Viewport` (`core/document/mod.rs:108`) documents itself as "a graph's
-      camera: pan offset (canvas-local px)". The image viewer's
-      `view: Option<Viewport>` (`gui/pane/viewer/mod.rs:65`) holds pan as the
-      image's top-left offset in *pane-local* px and zoom as *display px per
-      texel*, so a reader arriving from there is told the wrong units for the
-      field in front of them.
-- [ ] `Viewport::is_valid` validates the *persisted graph* camera — it backs
-      `GraphViewValidationError::InvalidViewport` — but sits on the shared type
-      with nothing saying so. The viewer never calls it.
-
-## Doc comments describe a projection layer and a module tree that no longer exist
-
-The `Scene` / `SceneNode` projection was replaced by the `GraphCtx` scope
-chain, and `gui::canvas` / `gui::node` were replaced by `gui::pane::graph`.
-Neither rename reached the prose.
-
-- [ ] `SceneNode::pos` — `gui/pane/graph/frame/geometry/mod.rs:68`,
-      `gui/pane/graph/gesture/pan_zoom/mod.rs:210` and `:243`.
-- [ ] `SceneNode::runnable` — `gui/app/commands/run.rs:51`.
-      `SceneNode::cache_controls` — `gui/pane/graph/node/header.rs:286`.
-- [ ] "the per-frame `Scene` projection" — `core/document/mod.rs:105`.
-- [ ] `gui::canvas::background` — `gui/theme/mod.rs:348`;
-      `gui::canvas::GraphUI` — `core/document/dock/mod.rs:27`.
-- [ ] `gui::node::memory_row` / `gui::node::preview_row` —
-      `gui/widgets/support.rs:49-50`; `gui::node::port_rename` /
-      `gui::node::value_editor` — `gui/widgets/inline_rename.rs:5,7,24` and
-      `gui/widgets/buffered_edit/mod.rs:2`.
-- [ ] `TerminalSession::tick` named as a host loop — `core/worker.rs:5`. No
-      such frontend exists.
-- [ ] `DockStep` and `build_doc_step` — `core/edit/intent/mod.rs:6,8` and
-      `intent/types.rs:1`. (Already tracked in `ISSUES.md`.)
-
 ## State kept but never read
 
 - [ ] `StatusLog::lines` (`core/status/mod.rs:19`) maintains a 200-entry
