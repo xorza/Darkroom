@@ -51,7 +51,7 @@ impl App {
     /// preferences file can't fail silently.
     pub(crate) fn save_preferences(&mut self) {
         if let Err(err) = self.preferences.save() {
-            self.runtime.status.error(err);
+            self.status.error(err);
         }
     }
 

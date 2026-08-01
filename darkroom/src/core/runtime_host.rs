@@ -29,11 +29,6 @@ pub(crate) struct RuntimeHost {
     /// Long-lived so the lowering scratch is reused across compiles instead of
     /// reallocated per run.
     compiler: Compiler,
-    /// The shared user-facing outcome log: compile failures report here
-    /// (from [`Self::compile`]); frontends add their own outcomes (run
-    /// results, file ops) and renders it as the sticky error slot in the
-    /// status bar.
-    pub(crate) status: StatusLog,
 }
 
 impl RuntimeHost {
@@ -48,7 +43,6 @@ impl RuntimeHost {
             worker,
             disk_root: None,
             compiler: Compiler::default(),
-            status: StatusLog::default(),
         };
         // Install the store up front (memory-only until a document has a
         // path); `set_document_cache` repoints the root as documents open.
@@ -75,16 +69,20 @@ impl RuntimeHost {
     }
 
     /// Compile `graph` against the current library. A failure is reported to
-    /// [`Self::status`] and returns `None` (nothing sent, worker untouched); a
-    /// success clears the sticky error.
-    fn compile(&mut self, graph: &Graph) -> Option<Arc<CompiledGraph>> {
+    /// `status` and returns `None` (nothing sent, worker untouched); a success
+    /// clears the sticky error.
+    ///
+    /// The log is borrowed rather than owned: it is the app's user-facing
+    /// outcome slot, shared with file and preferences reporting, and this host
+    /// is otherwise headless.
+    fn compile(&mut self, graph: &Graph, status: &mut StatusLog) -> Option<Arc<CompiledGraph>> {
         match self.compiler.compile(graph, &self.library.published.load()) {
             Ok(compiled) => {
-                self.status.error = None;
+                status.error = None;
                 Some(Arc::new(compiled))
             }
             Err(e) => {
-                self.status.error(format!("compile failed: {e}"));
+                status.error(format!("compile failed: {e}"));
                 None
             }
         }
@@ -103,8 +101,8 @@ impl RuntimeHost {
     /// for one evaluation. `false` means the compile failed — it is reported
     /// to [`Self::status`] synchronously and nothing reaches the worker.
     /// Results arrive via [`Self::drain_worker`].
-    pub(crate) fn run_once(&mut self, graph: &Graph) -> bool {
-        let Some(compiled) = self.compile(graph) else {
+    pub(crate) fn run_once(&mut self, graph: &Graph, status: &mut StatusLog) -> bool {
+        let Some(compiled) = self.compile(graph, status) else {
             return false;
         };
         self.dispatch(|worker| {
@@ -122,13 +120,17 @@ impl RuntimeHost {
     /// (reported to [`Self::status`]) or the node has no execution footprint at
     /// all, i.e. the program dropped it. Results arrive via
     /// [`Self::drain_worker`].
-    pub(crate) fn run_node(&mut self, graph: &Graph, node_id: NodeId) -> bool {
-        let Some(compiled) = self.compile(graph) else {
+    pub(crate) fn run_node(
+        &mut self,
+        graph: &Graph,
+        node_id: NodeId,
+        status: &mut StatusLog,
+    ) -> bool {
+        let Some(compiled) = self.compile(graph, status) else {
             return false;
         };
         if !compiled.contains(node_id) {
-            self.status
-                .error("nothing to run: this node has no compiled work".to_owned());
+            status.error("nothing to run: this node has no compiled work".to_owned());
             return false;
         }
         self.dispatch(|worker| {
@@ -140,8 +142,13 @@ impl RuntimeHost {
 
     /// Compile the current graph and atomically install it with a runtime-cache
     /// eviction for `node_id` and its compiled downstream cone.
-    pub(crate) fn evict_cache(&mut self, graph: &Graph, node_id: NodeId) -> bool {
-        let Some(compiled) = self.compile(graph) else {
+    pub(crate) fn evict_cache(
+        &mut self,
+        graph: &Graph,
+        node_id: NodeId,
+        status: &mut StatusLog,
+    ) -> bool {
+        let Some(compiled) = self.compile(graph, status) else {
             return false;
         };
         self.dispatch(|worker| worker.install_and_evict_cache(compiled, node_id));
@@ -158,8 +165,8 @@ impl RuntimeHost {
     /// events). The worker's `Update` tears down any prior loop first.
     /// `false` means the compile failed — it is reported to [`Self::status`]
     /// and the loop's running state is untouched.
-    pub(crate) fn start_event_loop(&mut self, graph: &Graph) -> bool {
-        let Some(compiled) = self.compile(graph) else {
+    pub(crate) fn start_event_loop(&mut self, graph: &Graph, status: &mut StatusLog) -> bool {
+        let Some(compiled) = self.compile(graph, status) else {
             return false;
         };
         self.dispatch(|worker| {
@@ -216,6 +223,7 @@ impl RuntimeHost {
 mod tests {
     use std::sync::Arc;
 
+    use crate::core::status::StatusLog;
     use common::internals::test_output_path;
     use scenarium::{Binding, Graph, InputPort, NodeId, StaticValue};
 
@@ -248,15 +256,16 @@ mod tests {
         graph.set_input_binding(dangling, Binding::bind(producer, 99));
         drop(library);
 
+        let mut status = StatusLog::default();
         assert!(
-            host.run_once(&graph),
+            host.run_once(&graph, &mut status),
             "the drifted graph compiles and is queued"
         );
         assert!(
-            host.evict_cache(&graph, NodeId::unique()),
+            host.evict_cache(&graph, NodeId::unique(), &mut status),
             "the drifted graph compiles and queues an eviction"
         );
-        assert_eq!(host.status.error, None, "no compile failure was reported");
+        assert_eq!(status.error, None, "no compile failure was reported");
         assert_eq!(
             graph.bindings.get(&dangling),
             Some(&Binding::bind(producer, 99)),

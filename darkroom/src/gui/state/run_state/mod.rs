@@ -37,6 +37,7 @@ use palantir::Ui;
 
 use crate::core::document::Document;
 use crate::core::runtime_host::RuntimeHost;
+use crate::core::status::StatusLog;
 use scenarium::CompiledGraph;
 use scenarium::LogLevel;
 use scenarium::NodeExecutionStatus;
@@ -163,9 +164,9 @@ impl RunState {
     ///
     /// Called before the session rebuilds its scene, so the projections it
     /// reads reflect the latest run.
-    pub(crate) fn drain_from(&mut self, runtime: &mut RuntimeHost) {
-        // Owned, so the channel borrow is gone before the status writes
-        // below — both come off the same `runtime`.
+    pub(crate) fn drain_from(&mut self, runtime: &mut RuntimeHost, status: &mut StatusLog) {
+        // Owned, so the channel borrow is gone before the loop below needs
+        // `runtime` again.
         let events = runtime.drain_worker();
         for report in events {
             match report {
@@ -180,23 +181,26 @@ impl RunState {
                     if matches!(&error, WorkerError::Execution { .. }) {
                         self.clear();
                     }
-                    runtime.status.error(error.to_string());
+                    status.error(error.to_string());
                 }
-                WorkerReport::Status(status) => {
+                // Bound as `run` so it cannot shadow the `status` log this
+                // arm also writes — the two are unrelated and both want the
+                // obvious name.
+                WorkerReport::Status(run) => {
                     if let WorkerStatusKind::Completed {
                         executed_node_count,
                         cancelled,
                         ..
-                    } = status.kind
+                    } = run.kind
                     {
                         if cancelled {
                             tracing::info!("run cancelled after {executed_node_count} node(s)");
                         }
                         // A completed run supersedes any lingering failure message
                         // from an earlier event-loop tick.
-                        runtime.status.error = None;
+                        status.error = None;
                     }
-                    self.apply_worker_status(&status);
+                    self.apply_worker_status(&run);
                 }
             }
         }

@@ -23,6 +23,7 @@ use crate::gui::app::commands::run::RunCommand;
 use crate::gui::requests::Requests;
 use crate::gui::window::MainWindow;
 use palantir::{Shortcut, Ui};
+use scenarium::Graph;
 
 use crate::gui::app::ctx::AppCtx;
 
@@ -53,6 +54,13 @@ pub(crate) struct Session {
 }
 
 impl Session {
+    /// The graph the runtime is compiled and run against — the one reach
+    /// across this boundary that is not a frame concern, so it is named here
+    /// rather than spelled out at each of `App`'s run commands.
+    pub(crate) fn graph(&self) -> &Graph {
+        &self.open.document.graph
+    }
+
     /// Open `open` in a fresh UI.
     pub(crate) fn new(open: OpenDocument) -> Self {
         Self {
