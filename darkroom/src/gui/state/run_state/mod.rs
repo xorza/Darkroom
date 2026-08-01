@@ -1,6 +1,12 @@
 //! Last graph run's centralized runtime state: per-node execution outcomes
 //! and logs, plus the latest value each preview node published. One
-//! [`RunState`] per [`Editor`], updated as worker reports arrive.
+//! [`RunState`] per [`App`], updated as worker reports arrive.
+//!
+//! **Two halves with different owners.** `nodes` and `previews` are derived
+//! from the open document and die with it ([`RunState::clear`]); `compiled`,
+//! `activity` and `cache_ram` describe the *worker* and outlive a document
+//! swap, because an in-flight run still reports against the program the
+//! worker acknowledged and its cache still holds what it holds.
 //!
 //! A run's node statuses are keyed by execution id.
 //! [`RunState::apply_worker_status`] resolves each through the
@@ -16,7 +22,7 @@
 //! whichever report most recently mentioned it. Progress is a liveness cue and
 //! the completed snapshot is the authority that corrects it at the end.
 //!
-//! [`Editor`]: crate::gui::app::editor::Editor
+//! [`App`]: crate::gui::app::App
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -305,7 +311,13 @@ impl RunState {
         }
     }
 
-    /// Drop everything visible from a failed run: no glow, logs, or values.
+    /// Drop the document-derived half: no glow, timings, logs, or published
+    /// values. The worker-stream half is left alone — see the module doc.
+    ///
+    /// Two callers, one meaning ("nothing on screen came from a run"): a run
+    /// that failed or was cleared, and a document swap
+    /// (`App::adopt_document`), where the results describe a document that is
+    /// no longer open.
     pub(crate) fn clear(&mut self) {
         self.nodes.clear();
         self.previews.entries.clear();

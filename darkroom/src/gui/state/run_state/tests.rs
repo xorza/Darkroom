@@ -109,6 +109,61 @@ fn clearing_cache_projections_drops_ram_and_pins_but_keeps_run_results() {
     );
 }
 
+/// `clear` splits the two halves exactly where their owners do: everything
+/// derived from the open document goes, everything describing the *worker*
+/// stays.
+///
+/// Both sides are load-bearing for `App::adopt_document`. Node ids are
+/// persisted, so leaving the document half would reattach the previous
+/// session's statuses and preview images to a reopened document that has not
+/// run. Dropping the worker half would be worse: an in-flight run's next patch
+/// resolves through `compiled`, and clearing it turns that report into a panic.
+#[test]
+fn clear_drops_the_document_half_and_keeps_the_worker_half() {
+    let node = nid(1);
+    let mut state = run_state([node]);
+    let compiled = state.compiled.clone().expect("the fixture installs one");
+    state.nodes.entry(node).or_default().status = ExecStatus::Executed(1.5);
+    state.nodes.entry(node).or_default().logs.push(NodeLog {
+        level: LogLevel::Info,
+        message: "from the old document".into(),
+    });
+    state
+        .previews
+        .entries
+        .insert(node, StoredContent::Text("stale".into()));
+    state.cache_ram = RamUsage { cpu: 24, gpu: 0 };
+    state.activity = WorkerActivity::Executing;
+
+    state.clear();
+
+    // The document half: nothing survives to reattach to a reopened file.
+    assert_eq!(state.status(node), ExecStatus::None);
+    assert!(state.logs(node).is_empty());
+    assert!(state.previews.entries.is_empty());
+
+    // The worker half: the acknowledged program still resolves later reports,
+    // the run is still reported as in flight, and the cache still holds what
+    // it holds.
+    assert!(
+        state
+            .compiled
+            .as_ref()
+            .is_some_and(|c| Arc::ptr_eq(c, &compiled)),
+        "the acknowledged program is untouched"
+    );
+    assert!(state.activity.is_executing(), "the run is still in flight");
+    assert_eq!(state.cache_ram, RamUsage { cpu: 24, gpu: 0 });
+
+    // And that program still attributes a report, rather than panicking.
+    state.apply_worker_status(&node_patch(
+        WorkerActivity::Executing,
+        node,
+        NodeExecutionStatus::Cached,
+    ));
+    assert_eq!(state.status(node), ExecStatus::Cached);
+}
+
 #[test]
 fn node_patch_marks_the_attributed_node_running_then_executed() {
     let node = nid(1);
