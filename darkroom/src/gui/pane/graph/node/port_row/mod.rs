@@ -3,11 +3,10 @@
 //! lines up regardless of label width), a fill spacer (col 2), and the
 //! output port+label (col 3, right-aligned against the node edge). Row `i`
 //! holds input `i` and output `i`, so the two sides align. Drawn below the
-//! header by [`crate::gui::pane::graph::node::NodeUI`]. The low-level
-//! glyph primitives (circle, event triangle, hit-box growth) this grid
-//! renders each cell with live in the sibling [`glyph`] module.
-
-pub(super) mod glyph;
+//! header by [`crate::gui::pane::graph::node::NodeUI`]. This module is the
+//! grid orchestration and per-cell rendering; the sensing glyph each cell
+//! terminates a wire on — circle, event triangle, hit-box growth — is the
+//! shared [`PortGlyph`](crate::gui::widgets::port_glyph::PortGlyph) widget's.
 
 use std::sync::Arc;
 
@@ -34,12 +33,12 @@ use crate::gui::graph_ctx::node_ctx::NodeCtx;
 use crate::gui::graph_ctx::output_ctx::OutputCtx;
 use crate::gui::pane::graph::ctx::DrawCtx;
 use crate::gui::pane::graph::node::port_color::{event_color, port_color};
-use crate::gui::pane::graph::node::port_row::glyph::{circle_frame, event_glyph, port_diameter};
 use crate::gui::pane::graph::node::value_editor;
 use crate::gui::pane::graph::node::wid;
 use crate::gui::requests::Requests;
 use crate::gui::state::run_state::ExecStatus;
 use crate::gui::theme::Theme;
+use crate::gui::widgets::port_glyph::{PortGlyph, PortGlyphResponse};
 
 /// Grid columns: inputs (hug), input values (hug, capped at `max_width` — so
 /// wide editors fit but a very long one ellipsizes; the numeric `DragValue`
@@ -202,15 +201,13 @@ fn input_cell_wid(port: PortRef) -> WidgetId {
 /// Open `menu_id`'s context menu when the cell or its port circle was
 /// secondary-clicked this frame — shared by the input and output cells.
 ///
-/// `cell_secondary` is read by the caller before this runs: the cell's
-/// `Response` borrows `ui`, and this needs `ui` mutably. The circle senses
-/// its own `Sense::CLICK` and consumes hits over its rect, so the cell's
-/// click alone misses a right-click landed on the circle (no bubbling);
-/// checking both closes that gap.
-fn open_port_context_menu(ui: &mut Ui, menu_id: WidgetId, cell_secondary: bool, circle: WidgetId) {
-    if (cell_secondary || ui.response_for(circle).right.clicked())
-        && let Some(p) = ui.pointer_pos()
-    {
+/// `secondary` is read by the caller before this runs: the cell's `Response`
+/// borrows `ui`, and this needs `ui` mutably. It is the cell's right-click
+/// *or* the port glyph's — the glyph senses its own `Sense::CLICK` and
+/// consumes hits over its rect, so the cell alone misses a right-click landed
+/// on the circle (no bubbling).
+fn open_port_context_menu(ui: &mut Ui, menu_id: WidgetId, secondary: bool) {
+    if secondary && let Some(p) = ui.pointer_pos() {
         ContextMenu::open(ui, menu_id, p);
     }
 }
@@ -250,7 +247,7 @@ fn input_label_cell(
     // same visual weight on either side. An optional input instead gets a
     // muted outline, so "not required" reads at a glance without needing
     // the bigger required-input footprint.
-    let diameter = port_diameter(theme.ports.size, input.required());
+    let diameter = PortGlyph::enlarged_diameter(theme.ports.size, input.required());
     // Matches the node body itself — the ring reads as the node's own surface
     // wrapping around the port, rather than a separate accent.
     let outline = (!input.required()).then_some(theme.card.fill);
@@ -272,18 +269,30 @@ fn input_label_cell(
             // A const-only input can't be wired, so it has no connection anchor
             // — render just the label (+ its inline const editor).
             if !input.const_only() {
-                circle_frame(ui, wid, diameter, fill, outline, margin, &tip);
+                let mut circle = PortGlyph::circle(wid, diameter)
+                    .fill(fill)
+                    .margin(margin)
+                    .tip(tip.clone());
+                if let Some(color) = outline {
+                    circle = circle.outline(color);
+                }
+                let glyph = circle.show(ui);
+                port_label(ui, theme, input.name(), &tip);
+                glyph
+            } else {
+                port_label(ui, theme, input.name(), &tip);
+                PortGlyphResponse::default()
             }
-            port_label(ui, theme, input.name(), &tip);
         });
     // Open on right-click anywhere on the cell — circle or label. Pulled into
     // locals so the response's `&Ui` borrow ends before the reads below.
+    let glyph = cell.inner;
     let (menu_id, cell_secondary, cell_double) = (
         cell.response.id,
         cell.response.right.clicked(),
         cell.response.left.double_clicked(),
     );
-    open_port_context_menu(ui, menu_id, cell_secondary, wid);
+    open_port_context_menu(ui, menu_id, cell_secondary || glyph.secondary_clicked);
     // Double-click on the circle or the label toggles the binding: clear it,
     // or seed the default const when unbound.
     //
@@ -292,7 +301,7 @@ fn input_label_cell(
     // pass, and a double-click is action input — which always earns a second
     // pass — so the body re-arranges at its settled size with its wires
     // re-anchored before the frame paints.
-    if cell_double || ui.response_for(wid).left.double_clicked() {
+    if cell_double || glyph.double_clicked {
         match input.binding() {
             // Boundary ports route the interface — no const affordance, so an
             // unbound one has nothing to seed (its label double-click renames).
@@ -419,25 +428,22 @@ fn output_cell(
         .child_align(Align::v(VAlign::Center))
         .show(ui, |ui| {
             port_label(ui, theme, output.name(), &tip);
-            circle_frame(
-                ui,
-                wid,
-                theme.ports.size,
-                fill,
-                None,
-                Spacing::new(0.0, 0.0, -overhang, 0.0),
-                &tip,
-            );
+            PortGlyph::circle(wid, theme.ports.size)
+                .fill(fill)
+                .margin(Spacing::new(0.0, 0.0, -overhang, 0.0))
+                .tip(tip)
+                .show(ui)
         });
     // Right-click anywhere on the cell (circle or label) opens the port menu —
     // mirrors the input side's binding menu. Pulled into locals so the
     // response's `&Ui` borrow ends before the read below.
+    let glyph = cell.inner;
     let (menu_id, cell_secondary) = (cell.response.id, cell.response.right.clicked());
     // An output may feed many inputs, so a double-click on its circle clears
     // each consumer. Same pre-paint timing as the input side: the intents drain
     // at the end of this pass, and the second pass a double-click earns
     // re-arranges every node that lost a wire.
-    if ui.response_for(wid).left.double_clicked() {
+    if glyph.double_clicked {
         let fed: Vec<_> = ncx
             .graph_ctx
             .connections()
@@ -451,7 +457,7 @@ fn output_cell(
                 .map(|c| GraphIntent::set_input(c.into(), None)),
         );
     }
-    open_port_context_menu(ui, menu_id, cell_secondary, wid);
+    open_port_context_menu(ui, menu_id, cell_secondary || glyph.secondary_clicked);
     ContextMenu::for_id(menu_id)
         .size((Sizing::HUG, Sizing::HUG))
         .show(ui, |ui, popup| {
@@ -553,14 +559,11 @@ fn event_cell(
                     ..ui.theme.text.clone()
                 })
                 .show(ui);
-            event_glyph(
-                ui,
-                theme,
-                wid,
-                fill,
-                Spacing::new(0.0, 0.0, -overhang, 0.0),
-                &tip,
-            );
+            PortGlyph::arrow(wid, theme.ports.size)
+                .fill(fill)
+                .margin(Spacing::new(0.0, 0.0, -overhang, 0.0))
+                .tip(tip)
+                .show(ui);
         });
 }
 
