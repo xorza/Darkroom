@@ -28,7 +28,7 @@ use crate::gui::requests::Requests;
 /// app-level `AppCommand` enum; the canvas names the tier, since knowing that
 /// a file dialog can only run after the pass is its job, not a widget's.
 #[derive(Clone, Debug)]
-pub(crate) struct PathPickRequest {
+pub(crate) struct PathPick {
     pub(crate) port: InputPort,
     /// The picker config is type-level metadata, taken from the port's
     /// `DataType` (the value only carries the selected path strings).
@@ -43,7 +43,7 @@ pub(crate) struct PathPickRequest {
 /// path* is a question about the port's type, and answering it needs the
 /// scene. An editor on any other type has no button to click and falls
 /// out here.
-pub(crate) fn emit_path_picks(cx: CanvasCtx<'_>) -> Option<PathPickRequest> {
+pub(crate) fn emit_path_picks(cx: CanvasCtx<'_>) -> Option<PathPick> {
     let port = cx.hits().clicked_const_editor()?;
     let input = cx.graph_ctx().node(port.node_id)?.input(port.port_idx)?;
     if !matches!(
@@ -57,7 +57,7 @@ pub(crate) fn emit_path_picks(cx: CanvasCtx<'_>) -> Option<PathPickRequest> {
     let DataType::FsPath(config) = input.ty() else {
         return None;
     };
-    Some(PathPickRequest {
+    Some(PathPick {
         port,
         config: config.clone(),
     })

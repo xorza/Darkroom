@@ -17,7 +17,7 @@ use palantir::{
 use crate::gui::app::commands::AppCommand;
 use crate::gui::app::commands::run::RunCommand;
 use crate::gui::pane::graph::ctx::CanvasCtx;
-use crate::gui::pane::graph::gesture::pan_zoom::{self, ViewAction};
+use crate::gui::pane::graph::gesture::pan_zoom::{self, Framing};
 use crate::gui::requests::Requests;
 use crate::gui::widgets::support::{dot, filled_rect, frame, stroked_rect};
 use crate::gui::widgets::toolbar::{BUTTON_GAP, Chip, TOOLBAR_MARGIN, pill};
@@ -116,19 +116,19 @@ pub(super) fn show(ui: &mut Ui, cx: CanvasCtx<'_>, out: &mut Requests) {
                 .child_align(Align::new(HAlign::Left, VAlign::Top));
             pill(ui, theme, framing, |ui| {
                 if Chip::new(reset_view_wid(), "Reset view").show(ui, theme, draw_reset) {
-                    out.extend_graph(pan_zoom::view_action_intent(
+                    out.extend_graph(pan_zoom::framing_intent(
                         ui,
                         geometry,
                         graph_ctx,
-                        ViewAction::Reset,
+                        Framing::Reset,
                     ));
                 }
                 if Chip::new(show_all_wid(), "Show all").show(ui, theme, draw_show_all) {
-                    out.extend_graph(pan_zoom::view_action_intent(
+                    out.extend_graph(pan_zoom::framing_intent(
                         ui,
                         geometry,
                         graph_ctx,
-                        ViewAction::ShowAll,
+                        Framing::ShowAll,
                     ));
                 }
                 if Chip::new(show_selected_wid(), "Show selected").show(
@@ -136,11 +136,11 @@ pub(super) fn show(ui: &mut Ui, cx: CanvasCtx<'_>, out: &mut Requests) {
                     theme,
                     draw_show_selected,
                 ) {
-                    out.extend_graph(pan_zoom::view_action_intent(
+                    out.extend_graph(pan_zoom::framing_intent(
                         ui,
                         geometry,
                         graph_ctx,
-                        ViewAction::ShowSelected,
+                        Framing::ShowSelected,
                     ));
                 }
             });

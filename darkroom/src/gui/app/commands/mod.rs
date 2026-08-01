@@ -24,7 +24,7 @@ use file::FileCommand;
 use prefs::PrefsCommand;
 use run::RunCommand;
 
-use crate::gui::app::PendingAction;
+use crate::gui::app::PendingTransition;
 
 /// A command a UI surface (the menu bar, the graph toolbar, the Preferences
 /// tab, a node's G-badge, an inline path-picker) hands to [`App`]. The producing
@@ -56,7 +56,7 @@ impl App {
             AppCommand::Run(c) => self.handle_run(c),
             AppCommand::Prefs(c) => self.handle_prefs(ui, c),
             AppCommand::Edit(c) => self.handle_edit(c),
-            AppCommand::Quit => self.guard_discard(PendingAction::Quit),
+            AppCommand::Quit => self.guard_discard(PendingTransition::Quit),
         }
     }
 }
