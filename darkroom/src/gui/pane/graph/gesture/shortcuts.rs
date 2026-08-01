@@ -8,8 +8,6 @@
 //! running only while a graph pane is up is what keeps Delete from removing
 //! nodes nobody is looking at.
 
-use std::collections::BTreeSet;
-
 use palantir::{Key, Shortcut, Ui};
 
 use crate::core::document::Viewport;
@@ -38,9 +36,7 @@ pub(crate) fn emit(ui: &mut Ui, graph_ctx: GraphCtx<'_>, out: &mut Requests) {
         ui.key_pressed(Shortcut::key(Key::Delete)) || ui.key_pressed(Shortcut::key(Key::Backspace));
     let view = graph_ctx.view();
     if escape && !view.selected.is_empty() {
-        out.push_graph(GraphIntent::SetSelection {
-            to: BTreeSet::new(),
-        });
+        out.push_graph(GraphIntent::clear_selection());
     }
     if reset_zoom {
         out.push_graph(GraphIntent::SetViewport {

@@ -24,7 +24,6 @@ pub(crate) mod toolbar;
 
 use glam::Vec2;
 use palantir::{Background, Configure, Panel, Sense, Sizing, TranslateScale, Ui};
-use std::collections::BTreeSet;
 
 use crate::core::document::Document;
 use crate::core::edit::intent::types::GraphIntent;
@@ -351,9 +350,7 @@ impl GraphUI {
         // the user clicks the empty canvas. A *drag* on bare canvas is
         // the rubber band (classified as `Select`), not a `Deselect`.
         if cx.gesture() == Some(CanvasGesture::Deselect) && !cx.graph_ctx().selected().is_empty() {
-            out.push_graph(GraphIntent::SetSelection {
-                to: BTreeSet::new(),
-            });
+            out.push_graph(GraphIntent::clear_selection());
         }
         // `CanvasGeometry` was already rebuilt in `prepass` against every
         // visible graph's scene — `App` rebuilds the scene *before* prepass

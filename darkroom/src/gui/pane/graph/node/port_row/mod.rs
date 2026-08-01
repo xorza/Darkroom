@@ -35,8 +35,8 @@ use crate::gui::graph_ctx::output_ctx::OutputCtx;
 use crate::gui::pane::graph::ctx::DrawCtx;
 use crate::gui::pane::graph::node::port_color::{event_color, port_color};
 use crate::gui::pane::graph::node::port_row::glyph::{circle_frame, event_glyph, port_diameter};
+use crate::gui::pane::graph::node::port_wid;
 use crate::gui::pane::graph::node::value_editor;
-use crate::gui::pane::graph::node::{port_wid, set_input};
 use crate::gui::requests::Requests;
 use crate::gui::state::run_state::ExecStatus;
 use crate::gui::theme::Theme;
@@ -298,10 +298,10 @@ fn input_label_cell(
             // unbound one has nothing to seed (its label double-click renames).
             None => {
                 if let Some(default) = input.default() {
-                    out.push_graph(set_input(port, Binding::Const(default)));
+                    out.push_graph(GraphIntent::set_input(port, Binding::Const(default)));
                 }
             }
-            Some(_) => out.push_graph(set_input(port, None)),
+            Some(_) => out.push_graph(GraphIntent::set_input(port, None)),
         }
     }
     ContextMenu::for_id(menu_id)
@@ -318,7 +318,7 @@ fn input_label_cell(
                 .clicked()
                 && let Some(value) = default
             {
-                out.push_graph(set_input(port, Binding::Const(value)));
+                out.push_graph(GraphIntent::set_input(port, Binding::Const(value)));
             }
             if MenuItem::new("Clear binding")
                 .enabled(input.binding().is_some())
@@ -326,7 +326,7 @@ fn input_label_cell(
                 .left
                 .clicked()
             {
-                out.push_graph(set_input(port, None));
+                out.push_graph(GraphIntent::set_input(port, None));
             }
         });
 }
@@ -380,7 +380,7 @@ fn value_cell(ui: &mut Ui, ncx: NodeCtx<'_>, input: InputCtx<'_>, out: &mut Requ
             )
         });
     if let Some(new_value) = edited.inner {
-        out.push_graph(set_input(port, Binding::Const(new_value)));
+        out.push_graph(GraphIntent::set_input(port, Binding::Const(new_value)));
     }
 }
 
@@ -446,7 +446,10 @@ fn output_cell(
             })
             .map(|(consumer, _)| consumer)
             .collect();
-        out.extend_graph(fed.into_iter().map(|c| set_input(c.into(), None)));
+        out.extend_graph(
+            fed.into_iter()
+                .map(|c| GraphIntent::set_input(c.into(), None)),
+        );
     }
     open_port_context_menu(ui, menu_id, cell_secondary, wid);
     ContextMenu::for_id(menu_id)

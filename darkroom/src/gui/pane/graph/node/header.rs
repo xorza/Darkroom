@@ -25,7 +25,8 @@ use crate::gui::graph_ctx::node_ctx::NodeCtx;
 use crate::gui::pane::graph::ctx::DrawCtx;
 use crate::gui::pane::graph::node::port_color::event_color;
 use crate::gui::pane::graph::node::port_row::glyph::{EVENT_TRIANGLE_RADIUS, PORT_HIT_SCALE};
-use crate::gui::pane::graph::node::{click_intents, exec_color, node_rename_wid, node_wid};
+use crate::gui::pane::graph::node::widget::exec_color;
+use crate::gui::pane::graph::node::{node_rename_wid, node_wid};
 use crate::gui::pane::graph::paint::inspector::{InspectMode, inspect_badge_wid};
 use crate::gui::requests::Requests;
 use crate::gui::state::run_state::ExecStatus;
@@ -425,7 +426,7 @@ fn title(ui: &mut Ui, ncx: NodeCtx<'_>, out: &mut Requests) {
         })
         .show(ui);
     if ev.clicked {
-        click_intents(shift, ncx.graph_ctx, node.id, out);
+        out.extend_graph(GraphIntent::click(shift, ncx.graph_ctx.selected(), node.id));
     }
     if let Some(to) = ev.committed {
         out.push_graph(GraphIntent::RenameNode {
