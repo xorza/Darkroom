@@ -23,15 +23,6 @@ mod drag;
 pub(crate) mod strip;
 
 use std::borrow::Cow;
-use std::collections::HashMap;
-
-use common::FloatExt;
-use glam::Vec2;
-use palantir::{
-    Background, Configure, Corners, CursorIcon, Layer, Panel, Rect, Sizing, Spacing, SplitHalf,
-    Splitter, Stroke, Text, Ui, WidgetId,
-};
-use scenarium::NodeId;
 
 use crate::core::document::dock::{
     DockLayout, DockNode, DockOp, DockPath, DockSplit, NodeIdx, SplitDir, TabGroup, TabGroupId,
@@ -43,6 +34,12 @@ use crate::gui::pane::viewer;
 use crate::gui::requests::Requests;
 use crate::gui::theme::Theme;
 use crate::gui::widgets::support::sized_text;
+use common::FloatExt;
+use glam::Vec2;
+use palantir::{
+    Background, Configure, Corners, CursorIcon, Layer, Panel, Rect, Sizing, Spacing, SplitHalf,
+    Splitter, Stroke, Text, Ui, WidgetId,
+};
 
 /// Smallest a dock pane can be squeezed on its split axis, in logical px.
 const MIN_PANE: f32 = 220.0;
@@ -68,19 +65,13 @@ fn drag_ghost_wid() -> WidgetId {
     WidgetId::from_hash("dock.drag_ghost")
 }
 
-/// What the render walk needs from outside the layout: the document, plus
-/// this frame's viewer-tab labels resolved once by the caller.
-///
-/// [`viewer::node_label`] runs a recursive whole-document node search
-/// and allocates a `String`, and a visible viewer tab is labelled twice a
-/// frame — once for its strip chip, once for its pane header — so resolving
-/// it at each call site repeated that walk. Carried alongside `doc` rather
-/// than as another parameter so the recursive render keeps its arity.
+/// What the render walk needs from outside the layout: the document it is
+/// arranging, and the palette it paints with. Carried as one value rather
+/// than two parameters so the recursive render keeps its arity.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct DockContext<'a> {
     pub(crate) doc: &'a Document,
     pub(crate) theme: &'a Theme,
-    pub(crate) viewer_labels: &'a HashMap<NodeId, String>,
 }
 
 /// The dock's persistent GUI state — just the drag in flight; the
@@ -368,31 +359,15 @@ fn tab_labels(ui: &mut Ui, cx: DockContext<'_>, group: &TabGroup) -> Vec<TabLabe
         .enumerate()
         .map(|(i, &tab)| TabLabel {
             tab,
-            text: ui.intern(viewer_aware_text(cx, tab)),
+            text: ui.intern(tab_text(cx.doc, tab)),
             active: i == group.active,
             focused,
         })
         .collect()
 }
 
-/// Per-frame label for a strip chip. Viewer tabs read the caller's
-/// resolved map instead of re-running [`viewer::node_label`]'s
-/// recursive node search; every other kind is cheap and formats inline.
-fn viewer_aware_text<'a>(cx: DockContext<'a>, tab: TabRef) -> Cow<'a, str> {
-    match tab {
-        // A hit skips `node_label`'s recursive search; a miss falls through
-        // to it rather than to a placeholder, so the cache can only make the
-        // label cheaper, never different.
-        TabRef::ImageViewer(node_id) => match cx.viewer_labels.get(&node_id) {
-            Some(label) => Cow::Borrowed(label.as_str()),
-            None => tab_text(cx.doc, tab),
-        },
-        _ => tab_text(cx.doc, tab),
-    }
-}
-
-/// A tab's display text — shared by the strip labels and the drag's
-/// ghost chip.
+/// A tab's display text — shared by the strip labels, the drag's ghost chip,
+/// and the viewer pane's own header.
 fn tab_text(doc: &Document, tab: TabRef) -> Cow<'_, str> {
     match tab {
         TabRef::Graph => Cow::Borrowed("main"),

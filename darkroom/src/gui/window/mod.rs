@@ -153,22 +153,9 @@ impl MainWindow {
             dock,
             output_types,
         } = self;
-        // One recursive node search + one `String` per viewer tab for the
-        // whole frame. Both readers — the strip chip and the pane header —
-        // take their label from here, rather than each re-running the search.
-        //
-        // Rebuilt every frame: a label depends on the producing node's name,
-        // and nothing signals a rename cheaply enough to cache against. The
-        // cost is proportional to *open viewer tabs*, which is normally zero,
-        // so it stays off the common path on its own.
-        let viewer_labels: HashMap<NodeId, String> = doc
-            .viewer_nodes()
-            .map(|node_id| (node_id, viewer::node_label(doc, node_id)))
-            .collect();
         let dock_cx = DockContext {
             doc,
             theme: app.theme(),
-            viewer_labels: &viewer_labels,
         };
         Panel::vstack()
             .id(app_root_wid())
@@ -211,17 +198,18 @@ impl MainWindow {
                         preferences::show(ui, app.theme(), prefs, out);
                     }
                     TabRef::ImageViewer(node_id) => {
-                        let title = viewer_labels
-                            .get(&node_id)
-                            .map(String::as_str)
-                            .unwrap_or("image");
+                        // Resolved here rather than for every viewer tab up
+                        // front: only the pane being drawn needs a title, and
+                        // `node_label` is a graph lookup and a `String` — less
+                        // than the map that used to front it cost to build.
+                        let title = viewer::node_label(doc, node_id);
                         let source = app.run_state().previews.entries.get(&node_id);
                         let viewer = image_viewers
                             .entry(node_id)
                             .or_insert_with(|| ImageViewer::new(node_id));
                         // Viewer-toolbar edits ride the same in-place
                         // prefs path as the Preferences tab.
-                        if viewer.show(ui, app.theme(), &mut prefs.viewer, title, source) {
+                        if viewer.show(ui, app.theme(), &mut prefs.viewer, &title, source) {
                             out.push_app(AppCommand::Prefs(PrefsCommand::Changed));
                         }
                     }

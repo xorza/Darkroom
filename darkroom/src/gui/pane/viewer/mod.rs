@@ -454,8 +454,9 @@ impl ImageViewer {
 /// several ports of one node stay tellable apart — e.g. "stack · out 1".
 /// The one formatter for both the tab strip and the viewer title.
 ///
-/// A recursive whole-document node search plus a fresh `String`, so
-/// resolve it once per tab per frame rather than once per reader.
+/// A graph lookup and a fresh `String`, so each reader resolves its own:
+/// the strip labels the tabs it is drawing, the pane header labels the one
+/// tab it is. Fronting that with a per-frame map cost more than it saved.
 pub(crate) fn node_label(doc: &Document, node_id: NodeId) -> String {
     doc.graph
         .find(node_id)
