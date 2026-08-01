@@ -181,17 +181,15 @@ impl Editor {
         // before this frame's rebuild. After it, the active tab is fixed.
         self.navigate(ui, open, ctx, requests);
 
-        // A canvas that just appeared or disappeared drops its tab-local
-        // gesture state and needs a relayout — it may never have recorded,
-        // and a dock op raises no geometry signal of its own.
-        self.needs_relayout |= self.main_window.graph_ui.sync_visibility(&open.document);
-
-        // Prepass rebuilds the canvas's projection, then emits input-derived
-        // graph mutations (drag, pan/zoom, connection commit) drained *before*
-        // the record so Pass A sees the settled doc. Driven by the panes on
-        // screen, like the record pass below — a pane kind that grows input
-        // handling gets an arm there rather than another question here.
-        self.main_window.prepass(ui, ctx, &open.document, requests);
+        // Prepass reconciles pane visibility, rebuilds the canvas's
+        // projection, then emits input-derived graph mutations (drag,
+        // pan/zoom, connection commit) drained *before* the record so Pass A
+        // sees the settled doc. Driven by the panes on screen, like the record
+        // pass below — a pane kind that grows input handling gets an arm there
+        // rather than another question here. A canvas that just appeared or
+        // vanished needs a relayout: it may never have recorded, and a dock op
+        // raises no geometry signal of its own.
+        self.needs_relayout |= self.main_window.prepass(ui, ctx, &open.document, requests);
         self.drain_requests(open, requests);
 
         self.menu_shortcut(ui, requests);
