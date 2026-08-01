@@ -103,11 +103,11 @@ impl MainWindow {
     /// already-settled active graph, plus the per-pane visibility reconcile
     /// that has to happen before them.
     ///
-    /// Returns whether a pane appeared or vanished this frame — the caller
-    /// turns that into a relayout request, since a canvas that has never
-    /// recorded has no cached geometry to draw its first frame from. Reported
-    /// rather than requested here because this pass has no business deciding
-    /// when the frame's accumulated signals are spent.
+    /// Returns whether a pane *appeared* this frame — the caller turns that
+    /// into a relayout request, since a canvas that has never recorded has no
+    /// cached geometry to draw its first frame from. One that vanished needs
+    /// no pass. Reported rather than requested here because this pass has no
+    /// business deciding when the frame's accumulated signals are spent.
     pub(crate) fn prepass(
         &mut self,
         ui: &mut Ui,
