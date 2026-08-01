@@ -69,6 +69,14 @@ impl RubberBand {
 }
 
 impl SelectionUI {
+    /// Drop the in-flight band and its preview. `swept` is cleared in place —
+    /// keeping the allocation is the whole reason it is a `Vec`.
+    pub(crate) fn reset(&mut self) {
+        self.band.clear();
+        self.swept.clear();
+        self.preview.clear();
+    }
+
     /// The live swept set while a band is in flight over this pane,
     /// for node/pin draw to paint against; `None` for every other pane and
     /// when no band is active (the caller falls back to the pane's

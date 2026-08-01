@@ -63,6 +63,14 @@ pub(super) struct NodeUI {
 }
 
 impl NodeUI {
+    /// Drop the in-flight drag and the focus hysteresis. `row_tracks` is
+    /// scratch grown to the widest node seen, not gesture state, so it keeps
+    /// its capacity across the reset.
+    pub(super) fn reset(&mut self) {
+        self.drag.reset();
+        self.focus_kept_last = None;
+    }
+
     /// Record the widget tree of every scene node retained by `cull`
     /// (plus the focus-owning node — see the loop comment),
     /// skipping off-screen ones entirely. Emits selection/raise intents

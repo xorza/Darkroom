@@ -60,6 +60,13 @@ pub(super) enum DragMode {
 }
 
 impl ConnectionUI {
+    /// Drop the in-flight wire and both one-frame handoffs.
+    pub(crate) fn reset(&mut self) {
+        self.state.clear();
+        self.pending_open.clear();
+        self.ended_on_secondary = false;
+    }
+
     /// Drive the in-flight wire: latch a fresh drag, track the snap
     /// target, and resolve on the active mode's terminating input.
     ///
