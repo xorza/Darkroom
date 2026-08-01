@@ -26,8 +26,4 @@ imageview to load only when active, until then save to disk
 
 uitest harness internals/test cfg
 
-A Pure node with an unset path input now errors per run. DataType::FsPath's default value is String::new(), and metadata("") is NotFound.
-
-fn hash_bound_fs_path(&self, hasher: &mut DigestHasher, addr: &OutputAddr) -> Option<()> - what is option
-
 inlinerename to select all text when entering edito mode
