@@ -3,7 +3,7 @@
 use scenarium::{Graph as CoreGraph, GraphValidationError, NodeId};
 
 use crate::core::document::dock::DockValidationError;
-use crate::core::document::{Document, GraphView, TabRef, tab_alive};
+use crate::core::document::{Document, GraphView, TabRef};
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum GraphViewValidationError {
@@ -76,7 +76,7 @@ impl Document {
 
         self.layout.validate()?;
         for tab in self.layout.all_tabs() {
-            if !tab_alive(&self.graph, tab) {
+            if !self.holds_tab(tab) {
                 return Err(DocumentValidationError::MissingTab { tab });
             }
         }
