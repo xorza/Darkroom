@@ -14,3 +14,7 @@
 - `gui/pane/graph/gesture/new_node/mod.rs` declares
   `pub(crate) mod internals { impl NewNodeUi {} }` — an empty impl in an
   otherwise empty gated module.
+
+- `core/worker.rs::tests::drop_waits_for_worker_idle_before_runtime_shutdown`
+  fails intermittently under a full `cargo test` run (seen once in four),
+  panicking at `worker.rs:219`; it passes every time in isolation.

@@ -5,7 +5,6 @@ use scenarium::testing::graph::TestGraph;
 use super::*;
 use crate::core::document::harness::DocFixture;
 use crate::gui::graph_ctx::harness::GraphCtxFixture;
-use crate::gui::pane::graph::frame::hits::CanvasHits;
 use crate::gui::pane::graph::harness::CanvasHarness;
 use crate::gui::pane::graph::node::port_row::port_circle_wid;
 use crate::gui::requests::Requests;
@@ -58,13 +57,12 @@ fn prepass_with_wire_from(fixture: &mut GraphCtxFixture, start: PortRef) -> Opti
         mode: DragMode::Floating,
     });
     let mut out = Requests::default();
-    // The canvas state a context carries beside the pane, both empty: a
-    // fixture records nothing, so there are no port centers to cache and no
-    // responses to sweep. No gesture latched and no Esc either — these tests
-    // drive the wire directly rather than through the bare-canvas
-    // classification.
-    let (geometry, hits) = (CanvasGeometry::default(), CanvasHits::default());
-    let ctx = CanvasCtx::new(fixture.graph_ctx(), &geometry, &hits, None, false);
+    // The canvas state a context carries beside the pane, empty: a fixture
+    // records nothing, so there are no port centers to cache. No gesture
+    // latched and no Esc either — these tests drive the wire directly rather
+    // than through the bare-canvas classification.
+    let geometry = CanvasGeometry::default();
+    let ctx = CanvasCtx::new(fixture.graph_ctx(), &geometry, None, false);
     connections.apply(arena.ui(), ctx, None, &mut out);
     assert!(out.is_empty(), "an untouched prepass emits nothing");
     connections.state.get().copied()

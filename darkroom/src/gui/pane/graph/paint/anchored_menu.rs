@@ -2,7 +2,6 @@ use glam::Vec2;
 use palantir::{ClickOutside, Configure, Popup, PopupHandle, Sizing, Ui};
 use scenarium::NodeId;
 
-use crate::gui::pane::graph::ctx::CanvasCtx;
 use crate::gui::pane::graph::gesture::slot::GestureSlot;
 
 /// Shared open/close lifecycle + chrome for the canvas's anchored context
@@ -99,8 +98,10 @@ impl AnchoredMenu {
 /// opened on, which the open latched frames before the pick that needs it.
 ///
 /// What the caller still owns is the items and where a pick goes — an
-/// `AppCommand`, a `GraphIntent`, or a stash for the `Editor` to resolve. Which
-/// nodes offer the menu at all is settled by [`CanvasHits::scan`](crate::gui::pane::graph::frame::hits::CanvasHits::scan).
+/// `AppCommand`, a `GraphIntent`, or a stash for the `Editor` to resolve. Every
+/// node offers the menu; which one was right-clicked is settled by the node
+/// draw, which reports it as
+/// [`NodeDrawFindings::menu_opened`](crate::gui::pane::graph::node::NodeDrawFindings).
 #[derive(Default, Debug)]
 pub(crate) struct NodeContextMenu {
     menu: AnchoredMenu,
@@ -117,21 +118,23 @@ impl NodeContextMenu {
         self.menu.reset();
     }
 
-    /// Open on this frame's secondary click, anchored at the pointer, and
-    /// report the node it opened on (`None` on every other frame).
+    /// Open on `node`, anchored at the pointer, and report whether it did.
     ///
-    /// The hit comes from this frame's sweep, which already applied the trigger
-    /// widget's draw guard; all that is left here is confirming the node still
-    /// belongs to `cx`'s pane — the sweep ran against last frame's projection.
-    pub(crate) fn latch(&mut self, ui: &mut Ui, cx: CanvasCtx<'_>) -> Option<NodeId> {
-        let clicked = cx.hits().menu().filter(|&id| cx.graph_ctx().contains(id))?;
+    /// `node` comes from the record pass that drew it, so it is in the pane by
+    /// construction — nothing left to confirm. Called *after* that draw,
+    /// because the menu is the canvas's state and the draw holds it shared;
+    /// the popup itself records on the next pass, which a right-click
+    /// guarantees (action input always earns one).
+    pub(crate) fn open_on(&mut self, ui: &mut Ui, node: NodeId) -> bool {
         // A press that opened the menu has a pointer position by construction;
-        // the `?` is only for the frames where the pointer left the window
+        // this is only for the frames where the pointer left the window
         // between the click and this read.
-        let at = ui.pointer_pos()?;
-        self.node_id = Some(clicked);
+        let Some(at) = ui.pointer_pos() else {
+            return false;
+        };
+        self.node_id = Some(node);
         self.menu.open_at(at);
-        Some(clicked)
+        true
     }
 
     /// Show the menu — see [`AnchoredMenu::show`] for the close rules. `body`

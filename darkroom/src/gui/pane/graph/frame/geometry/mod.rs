@@ -10,7 +10,6 @@ use crate::core::document::{PortKind, PortRef};
 use crate::gui::EventRef;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::graph_ctx::node_ctx::NodeCtx;
-use crate::gui::pane::graph::frame::hits::CanvasHits;
 use crate::gui::pane::graph::node::header::subscription_glyph_wid;
 use crate::gui::pane::graph::node::node_widget_id;
 use crate::gui::pane::graph::node::port_row::{event_glyph_wid, port_circle_wid};
@@ -43,9 +42,8 @@ use crate::gui::pane::graph::node::port_row::{event_glyph_wid, port_circle_wid};
 /// two of them can disagree about where a node is.
 ///
 /// **And the one place a port glyph's is.** The same rule, one level down:
-/// [`Self::rebuild`] hands each port's response to
-/// [`CanvasHits::note_port`] as it reads it, so a double-click and a port
-/// center come off one poll instead of a poll each.
+/// [`Self::rebuild`] reads each port circle's response for its center, and
+/// every other reader asks here rather than polling that widget again.
 #[derive(Default, Debug)]
 pub(crate) struct CanvasGeometry {
     /// Data-port circles, keyed by [`PortRef`].
@@ -308,12 +306,11 @@ impl CanvasGeometry {
     /// Runs in [`crate::gui::pane::graph::GraphUI::prepass`], and is the
     /// digest's only writer — it clears and refills it whole, so nothing
     /// carries over from the frame before.
-    pub(crate) fn rebuild(&mut self, ui: &Ui, graph_ctx: GraphCtx<'_>, hits: &mut CanvasHits) {
+    pub(crate) fn rebuild(&mut self, ui: &Ui, graph_ctx: GraphCtx<'_>) {
         self.ports.live.clear();
         self.events.live.clear();
         self.subs.live.clear();
         self.node_screen.clear();
-        hits.clear();
         for n in graph_ctx.nodes() {
             // Port offsets within a node are stable; the node's
             // canvas-local position changes when the user drags. Take
@@ -323,7 +320,6 @@ impl CanvasGeometry {
             // with this frame's `n.pos` — curves anchor on the moved
             // node's *current* port positions, not last frame's.
             let body = ui.response_for(node_widget_id(n.id));
-            hits.note_node(ui, n, body);
             if let Some(r) = body.layout_rect {
                 self.node_sizes.insert(n.id, r.size);
             }
@@ -345,7 +341,6 @@ impl CanvasGeometry {
             for kind in [PortKind::Input, PortKind::Output] {
                 for port in n.ports(kind) {
                     let r = ui.response_for(port_circle_wid(port));
-                    hits.note_port(ui, port, r);
                     self.ports.record(port, r, Some(node_min), n.pos);
                 }
             }

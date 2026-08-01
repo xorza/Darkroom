@@ -19,6 +19,8 @@ use palantir::{
 use scenarium::{CacheMode, NodeId};
 
 use crate::core::edit::intent::types::{GraphIntent, NodeProperty};
+use crate::gui::app::commands::AppCommand;
+use crate::gui::app::commands::run::RunCommand;
 use crate::gui::graph_ctx::node_ctx::NodeCtx;
 use crate::gui::pane::graph::ctx::DrawCtx;
 use crate::gui::pane::graph::node::port_color::event_color;
@@ -122,7 +124,10 @@ pub(crate) fn subscription_glyph_wid(node_id: NodeId) -> WidgetId {
 /// controls ride in [`status_row`] below). The sink nodes' event-
 /// subscription pin is *not* drawn here — it records at canvas level, before the
 /// node bodies, so it peeks out from behind the node's corner.
-pub(super) fn header(ui: &mut Ui, ncx: NodeCtx<'_>, dcx: DrawCtx<'_>, out: &mut Requests) {
+/// Reports whether the inspect chip was clicked — cycling a panel needs
+/// `&mut Inspectors`, which the draw holds only shared, so the caller applies
+/// it once the draw is over.
+pub(super) fn header(ui: &mut Ui, ncx: NodeCtx<'_>, dcx: DrawCtx<'_>, out: &mut Requests) -> bool {
     let (theme, node) = (ncx.theme(), ncx);
     // The header sits inside the body's border stroke (the layout folds
     // the stroke width into the body's padding), so it must round to the
@@ -141,8 +146,10 @@ pub(super) fn header(ui: &mut Ui, ncx: NodeCtx<'_>, dcx: DrawCtx<'_>, out: &mut 
             // one control that *does* something with the node's output
             // rather than configuring it. Only on nodes that resolve as a
             // run seed.
-            if node.runnable() {
-                play_chip(ui, theme, node);
+            if node.runnable() && play_chip(ui, theme, node) {
+                // Run this node's cone — the same command the context menu's
+                // "Run to this node" resolves to.
+                out.push_app(AppCommand::Run(RunCommand::Node(node.id)));
             }
             title(ui, ncx, out);
             // Splits the title (left) from the descriptive cluster
@@ -170,9 +177,7 @@ pub(super) fn header(ui: &mut Ui, ncx: NodeCtx<'_>, dcx: DrawCtx<'_>, out: &mut 
                 .show(ui);
             }
             // Inspect toggle: filled (checked) when pinned, accent outline
-            // when open, muted-grey outline (`text_muted`) when closed. The
-            // click is consumed in `Inspectors::apply` via this chip's
-            // deterministic id, so the returned flag is ignored here.
+            // when open, muted-grey outline (`text_muted`) when closed.
             let mode = dcx.inspectors().mode(node.id);
             let color = if mode.is_some() {
                 theme.colors.badge_graph
@@ -186,8 +191,9 @@ pub(super) fn header(ui: &mut Ui, ncx: NodeCtx<'_>, dcx: DrawCtx<'_>, out: &mut 
                 inspect_badge_wid(node.id),
                 "Inspect — values, status, log",
             )
-            .show(ui);
-        });
+            .show(ui)
+        })
+        .inner
 }
 
 /// The strip under the header: the run-time label left-aligned, a `FILL`
@@ -262,15 +268,17 @@ pub(super) fn status_row(ui: &mut Ui, ncx: NodeCtx<'_>, out: &mut Requests) {
                     out,
                 );
             }
-            if node.can_evict_cache() {
-                Badge::control(
+            if node.can_evict_cache()
+                && Badge::control(
                     "↻",
                     theme.colors.badge_cache,
                     false,
-                    cache_eviction_badge_wid(node.id),
+                    node_wid("cache_eviction_badge", node.id),
                     "Drop this node and downstream caches from RAM and disk",
                 )
-                .show(ui);
+                .show(ui)
+            {
+                out.push_app(AppCommand::Run(RunCommand::EvictCache(node.id)));
             }
             // RuntimeCache toggles: the two independent bits of the node's `CacheMode` —
             // an `R` chip (keep the output resident in RAM, reused across runs) and
@@ -369,23 +377,25 @@ fn property_chip(
 /// optically centered at any zoom. Quiet at rest — muted ink like the
 /// other idle controls — and takes the palette's success green
 /// (`exec_executed_glow`) on hover: "go", pointing at the outcome the
-/// click delivers. The click is read at canvas level via
-/// [`play_badge_wid`] and translated into the run command there (node
-/// code never names `AppCommand`).
-fn play_chip(ui: &mut Ui, theme: &Theme, node: NodeCtx<'_>) {
+/// click delivers.
+///
+/// Reports its own click, like every other chip in this file: the widget is
+/// built here, so its response is read here rather than rediscovered by a
+/// canvas-level sweep that would have to respell this id to find it.
+fn play_chip(ui: &mut Ui, theme: &Theme, node: NodeCtx<'_>) -> bool {
     let tooltip = if node.disabled() {
         "Run to this node once — temporarily override its disabled flag"
     } else {
         "Run to this node — execute its upstream cone and keep the output for preview"
     };
     Badge::action(
-        play_badge_wid(node.id),
+        node_wid("play_badge", node.id),
         tooltip,
         draw_play_triangle,
         theme.colors.text_muted,
     )
     .hover_color(theme.status.success)
-    .show(ui);
+    .show(ui)
 }
 
 /// Play triangle about the chip center, nudged right — a play mark's
@@ -423,15 +433,4 @@ fn title(ui: &mut Ui, ncx: NodeCtx<'_>, out: &mut Requests) {
             to,
         });
     }
-}
-
-/// The run-to-node play chip. `pub(super)` so the prepass scan
-/// ([`prepass`](crate::gui::pane::graph::frame::prepass)) can poll the click from
-/// last frame's response.
-pub(crate) fn play_badge_wid(node_id: NodeId) -> WidgetId {
-    node_wid("play_badge", node_id)
-}
-
-pub(crate) fn cache_eviction_badge_wid(node_id: NodeId) -> WidgetId {
-    node_wid("cache_eviction_badge", node_id)
 }
