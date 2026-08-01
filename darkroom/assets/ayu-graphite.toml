@@ -354,8 +354,12 @@ weight = "Regular"
 indicator = "#1a1a1a"
 box_size = 16.0
 indicator_stroke = 2.0
+check_pts = [[0.21875, 0.53125], [0.4375, 0.75], [0.78125, 0.28125]]
 indicator_inset = 4.0
 row_gap = 8.0
+track_aspect = 1.0
+padding = 0.0
+margin = 0.0
 
 [palantir_theme.checkbox.unchecked.normal.background]
 corners = 3.0
@@ -443,8 +447,12 @@ weight = "Regular"
 indicator = "#1a1a1a"
 box_size = 16.0
 indicator_stroke = 2.0
+check_pts = [[0.21875, 0.53125], [0.4375, 0.75], [0.78125, 0.28125]]
 indicator_inset = 4.0
 row_gap = 8.0
+track_aspect = 1.0
+padding = 0.0
+margin = 0.0
 
 [palantir_theme.radio.unchecked.normal.background]
 corners = 8.0
@@ -532,8 +540,12 @@ weight = "Regular"
 indicator = "#e2dfd3"
 box_size = 20.0
 indicator_stroke = 2.0
+check_pts = [[0.21875, 0.53125], [0.4375, 0.75], [0.78125, 0.28125]]
 indicator_inset = 3.0
 row_gap = 8.0
+track_aspect = 1.75
+padding = 0.0
+margin = 0.0
 
 [palantir_theme.switch.unchecked.normal.background]
 corners = 10.0
@@ -818,6 +830,7 @@ inset = false
 [palantir_theme.context_menu.item]
 shortcut = "#aaaaa8"
 padding = [8.0, 5.0]
+margin = 0.0
 gap = 16.0
 
 [palantir_theme.context_menu.item.normal.text]
@@ -864,6 +877,11 @@ weight = "Regular"
 color = "#aaaaa82e"
 thickness = 1.0
 margin = [0.0, 4.0]
+
+[palantir_theme.combo_box]
+row_gap = 12.0
+arrow_size = [10.0, 6.0]
+arrow_stroke = 1.5
 
 [palantir_theme.modal]
 backdrop = "#00000080"
@@ -921,6 +939,7 @@ height = 6.0
 [palantir_theme.separator]
 color = "#aaaaa82e"
 thickness = 1.0
+margin = 0.0
 
 [palantir_theme.slider]
 rail = "#3e3e3e"
@@ -932,6 +951,10 @@ rail_thickness = 4.0
 [palantir_theme.spinner]
 color = "#9adbfb"
 diameter = 24.0
+sweep = 4.712389
+speed = 4.5
+thickness_ratio = 0.12
+min_thickness = 1.5
 
 [palantir_theme.splitter]
 thickness = 6.0
