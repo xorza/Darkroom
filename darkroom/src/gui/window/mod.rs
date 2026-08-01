@@ -123,7 +123,7 @@ impl MainWindow {
         // Before the per-tab loop, not inside it: a canvas that just went
         // *away* is not an active tab, and its gestures still have to be
         // dropped. `active_tabs` would never visit it.
-        let appeared_or_vanished = graph_ui.sync_visibility(doc);
+        let visibility_changed = graph_ui.sync_visibility(doc);
         for tab in doc.layout.active_tabs() {
             match tab {
                 // Reached from `active_tabs`, so a pane is showing the graph
@@ -135,7 +135,7 @@ impl MainWindow {
                 TabRef::Preferences | TabRef::ImageViewer(_) => {}
             }
         }
-        appeared_or_vanished
+        visibility_changed
     }
 
     pub(crate) fn frame(
