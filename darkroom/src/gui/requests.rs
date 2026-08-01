@@ -1,8 +1,6 @@
 //! The frame's pending requests: everything a UI surface asked for, in the
 //! order it asked.
 
-use scenarium::NodeId;
-
 use crate::core::document::dock::DockOp;
 use crate::core::edit::intent::types::GraphIntent;
 use crate::gui::app::commands::AppCommand;
@@ -67,22 +65,6 @@ impl Requests {
         self.items.extend(iter.into_iter().map(Request::Graph));
     }
 
-    /// Queue the removal of every node `nodes` yields — one
-    /// [`GraphIntent::RemoveNode`] each, which the drain batches into a single
-    /// undo entry. Shared by the Delete/Backspace chord, the node context
-    /// menu's "Remove", and the breaker's multi-delete.
-    ///
-    /// Takes an iterator rather than a slice because the selection-driven
-    /// callers hold a `BTreeSet` and the breaker a `Vec`; a slice would make
-    /// the first two allocate one just to call this.
-    pub(crate) fn push_node_removals(&mut self, nodes: impl IntoIterator<Item = NodeId>) {
-        self.extend_graph(
-            nodes
-                .into_iter()
-                .map(|node_id| GraphIntent::RemoveNode { node_id }),
-        );
-    }
-
     /// Queue a mutation of the pane arrangement.
     pub(crate) fn push_view(&mut self, op: DockOp) {
         self.items.push(Request::View(op));
@@ -132,6 +114,8 @@ impl Requests {
 
 #[cfg(test)]
 mod tests {
+    use scenarium::NodeId;
+
     use super::*;
     use crate::core::document::TabRef;
     use crate::gui::app::commands::run::RunCommand;

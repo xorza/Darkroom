@@ -73,19 +73,6 @@ behaviour. Only one thing in the group survives:
       resolves its colour from last frame's hover rather than taking it as a
       parameter — a third type for a one-line difference.
 
-## Three mechanisms for "buffered text field that commits on blur or Enter"
-
-- [ ] `EditBuffer` (`gui/widgets/buffered_edit/mod.rs:20`) exists specifically
-      to be the shared core, and is used by `inline_rename` (via `RenameState`)
-      and `value_editor::buffered_text_edit`.
-- [ ] `PathField` (`gui/pane/preferences/mod.rs:201`) reimplements the same job
-      with a different shape — `text` / `seen` / `problem`, mirroring on
-      external change rather than on unfocused — and does not use `EditBuffer`.
-- [ ] Commit detection differs per site: `EditBuffer::blur_edge` in two places,
-      raw `resp.submitted || resp.lost_focus` in `model_row`. The `blur_edge`
-      doc explains at length why the raw form is wrong for a
-      `request_focus`-driven widget; nothing marks which sites are exempt.
-
 ## Overlapping enums and one-line delegating wrappers
 
 - [ ] `Request` and `DocumentRequest` (`gui/requests.rs:27` and `:38`) declare

@@ -56,6 +56,10 @@ pub(crate) fn emit(ui: &mut Ui, graph_ctx: GraphCtx<'_>, out: &mut Requests) {
         out.push_graph(intent);
     }
     if delete {
-        out.push_node_removals(view.selected.iter().copied());
+        out.extend_graph(
+            view.selected
+                .iter()
+                .map(|&node_id| GraphIntent::RemoveNode { node_id }),
+        );
     }
 }
