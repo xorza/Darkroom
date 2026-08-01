@@ -7,7 +7,7 @@ use crate::CustomValueCodec;
 use crate::data::codec::Codecs;
 use crate::data::type_system::Strictness;
 use crate::graph::func::{Func, FuncInput, OutputType};
-use crate::{DataType, EnumVariants, StaticValue, TypeId};
+use crate::{ConstValue, DataType, EnumVariants, TypeId};
 
 #[derive(Clone, Debug)]
 enum TypeEntryKind {
@@ -264,7 +264,7 @@ impl Library {
     /// variant *name*, and only this map says which names a type declares.
     /// Everything else is [`FuncInput::accepts_const`], the one table both
     /// gates read.
-    pub(crate) fn const_satisfies(&self, input: &FuncInput, value: &StaticValue) -> bool {
+    pub(crate) fn const_satisfies(&self, input: &FuncInput, value: &ConstValue) -> bool {
         input.accepts_const(value, Strictness::Authored, |type_id, name| {
             self.enum_variants(type_id)
                 .is_some_and(|variants| variants.iter().any(|variant| variant == name))
@@ -305,7 +305,7 @@ fn assert_enum_defaults<'a>(func: &Func, variants_of: impl Fn(TypeId) -> Option<
         if !input.value_variants.is_empty() {
             continue;
         }
-        let (DataType::Enum(type_id), Some(StaticValue::Enum(name))) =
+        let (DataType::Enum(type_id), Some(ConstValue::Enum(name))) =
             (&input.data_type, &input.default_value)
         else {
             continue;
@@ -351,7 +351,7 @@ mod tests {
     use crate::testing;
     use crate::testing::func_invoker::FuncInvoker;
     use crate::{
-        CodecError, CustomValue, CustomValueCodec, DataType, DynamicValue, StaticValue, TypeId,
+        CodecError, ConstValue, CustomValue, CustomValueCodec, DataType, DynamicValue, TypeId,
         async_lambda,
     };
 
@@ -489,7 +489,7 @@ mod tests {
         testing::with_stub_lambda(
             Func::new(FuncId::unique(), "modal").input(
                 FuncInput::optional("mode", DataType::Enum(type_id))
-                    .default(StaticValue::Enum(default.into())),
+                    .default(ConstValue::Enum(default.into())),
             ),
         )
     }
@@ -608,13 +608,13 @@ mod tests {
                                        }| {
                     let total = inputs[0].as_i64().unwrap() + inputs[1].as_i64().unwrap();
                     state.set(total);
-                    outputs[0] = StaticValue::Int(total).into();
+                    outputs[0] = ConstValue::Int(total).into();
                     Ok(())
                 })),
         );
         let sum = library.by_name("sum").unwrap().id;
         let sum = library.by_id(sum).unwrap();
-        let int = |value: i64| DynamicValue::Static(StaticValue::Int(value));
+        let int = |value: i64| DynamicValue::Static(ConstValue::Int(value));
         let mut node = FuncInvoker::default();
 
         let outputs = node.call(sum, [int(2), int(4)]).await?;

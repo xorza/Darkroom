@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use imaginarium::{ColorFormat, ContrastBrightness};
 use scenarium::{
-    AnyState, ContextManager, DynamicValue, Func, OutputDemand, SharedAnyState, StaticValue,
+    AnyState, ConstValue, ContextManager, DynamicValue, Func, OutputDemand, SharedAnyState,
 };
 
 use crate::image::format::{CONVERSION_FORMAT_DATATYPE, ConversionFormat, conversion_target};
@@ -73,7 +73,7 @@ fn format_defaults_are_exact() {
     assert_eq!(convert.inputs[1].data_type, *CONVERSION_FORMAT_DATATYPE);
     assert_eq!(
         convert.inputs[1].default_value,
-        Some(StaticValue::Enum(ConversionFormat::RgbU8.label())),
+        Some(ConstValue::Enum(ConversionFormat::RgbU8.label())),
     );
 
     let save = func(&library, "Save Image");
@@ -85,7 +85,7 @@ fn format_defaults_are_exact() {
     assert_eq!(names, ["Image", "Path", "Format"]);
     assert_eq!(
         save.inputs[2].default_value,
-        Some(StaticValue::Enum(ConversionFormat::AsIs.label())),
+        Some(ConstValue::Enum(ConversionFormat::AsIs.label())),
     );
 }
 
@@ -107,8 +107,8 @@ async fn load_and_save_round_trip_exact_pixels() {
 
     let mut save_inputs = [
         DynamicValue::from_custom(Image::from(image)),
-        StaticValue::FsPath(path.display().to_string()).into(),
-        StaticValue::Enum(ConversionFormat::AsIs.label()).into(),
+        ConstValue::FsPath(path.display().to_string()).into(),
+        ConstValue::Enum(ConversionFormat::AsIs.label()).into(),
     ];
     func(&library, "Save Image")
         .lambda
@@ -123,7 +123,7 @@ async fn load_and_save_round_trip_exact_pixels() {
         .await
         .unwrap();
 
-    let mut load_inputs = [StaticValue::FsPath(path.display().to_string()).into()];
+    let mut load_inputs = [ConstValue::FsPath(path.display().to_string()).into()];
     let mut outputs = [DynamicValue::Unbound];
     func(&library, "Load Image")
         .lambda

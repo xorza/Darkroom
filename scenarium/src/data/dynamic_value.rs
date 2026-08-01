@@ -2,7 +2,7 @@ use std::any::Any;
 use std::fmt::Display;
 use std::sync::Arc;
 
-use crate::{StaticValue, TypeId};
+use crate::{ConstValue, TypeId};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct RamUsage {
@@ -48,7 +48,7 @@ pub trait CustomValue: Send + Sync + Display + 'static {
 pub enum DynamicValue {
     #[default]
     Unbound,
-    Static(StaticValue),
+    Static(ConstValue),
     Custom(Arc<dyn CustomValue>),
 }
 
@@ -70,7 +70,7 @@ impl DynamicValue {
         DynamicValue::Custom(Arc::new(value))
     }
 
-    pub fn as_static(&self) -> Option<&StaticValue> {
+    pub fn as_static(&self) -> Option<&ConstValue> {
         match self {
             DynamicValue::Static(value) => Some(value),
             _ => None,
@@ -78,31 +78,31 @@ impl DynamicValue {
     }
 
     pub fn as_f64(&self) -> Option<f64> {
-        self.as_static().and_then(StaticValue::as_f64)
+        self.as_static().and_then(ConstValue::as_f64)
     }
 
     pub fn as_i64(&self) -> Option<i64> {
-        self.as_static().and_then(StaticValue::as_i64)
+        self.as_static().and_then(ConstValue::as_i64)
     }
 
     pub fn as_bool(&self) -> Option<bool> {
-        self.as_static().and_then(StaticValue::as_bool)
+        self.as_static().and_then(ConstValue::as_bool)
     }
 
     pub fn as_string(&self) -> Option<&str> {
-        self.as_static().and_then(StaticValue::as_string)
+        self.as_static().and_then(ConstValue::as_string)
     }
 
     pub fn as_enum(&self) -> Option<&str> {
-        self.as_static().and_then(StaticValue::as_enum)
+        self.as_static().and_then(ConstValue::as_enum)
     }
 
     pub fn as_fs_path(&self) -> Option<&str> {
-        self.as_static().and_then(StaticValue::as_fs_path)
+        self.as_static().and_then(ConstValue::as_fs_path)
     }
 
     pub fn as_fs_paths(&self) -> Option<&[String]> {
-        self.as_static().and_then(StaticValue::as_fs_paths)
+        self.as_static().and_then(ConstValue::as_fs_paths)
     }
 
     pub fn as_custom<T: CustomValue>(&self) -> Option<&T> {
@@ -152,14 +152,14 @@ impl Display for DynamicValue {
     }
 }
 
-impl From<&StaticValue> for DynamicValue {
-    fn from(value: &StaticValue) -> Self {
+impl From<&ConstValue> for DynamicValue {
+    fn from(value: &ConstValue) -> Self {
         DynamicValue::Static(value.clone())
     }
 }
 
-impl From<StaticValue> for DynamicValue {
-    fn from(value: StaticValue) -> Self {
+impl From<ConstValue> for DynamicValue {
+    fn from(value: ConstValue) -> Self {
         DynamicValue::Static(value)
     }
 }

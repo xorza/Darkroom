@@ -20,7 +20,7 @@ use std::sync::Arc;
 use common::{FieldKind, FieldValue, Introspect};
 use scenarium::FuncLambda;
 use scenarium::Invocation;
-use scenarium::{CustomValue, DataType, DynamicValue, EnumVariants, StaticValue, TypeId};
+use scenarium::{ConstValue, CustomValue, DataType, DynamicValue, EnumVariants, TypeId};
 use scenarium::{Func, FuncInput, FuncOutput};
 use scenarium::{InvokeError, Library, TypeEntry};
 
@@ -71,7 +71,7 @@ pub(crate) fn config_data_type<T: NodeConfig>() -> DataType {
 /// directly, so this needs no library handle.)
 pub(crate) fn enum_input<E: EnumVariants>(name: &str, datatype: &DataType) -> FuncInput {
     let mut input = FuncInput::required(name, datatype.clone());
-    input.default_value = E::variant_names().into_iter().next().map(StaticValue::Enum);
+    input.default_value = E::variant_names().into_iter().next().map(ConstValue::Enum);
     input
 }
 
@@ -102,7 +102,7 @@ pub(crate) fn add_config_builder<T: NodeConfig>(
         } else {
             FuncInput::optional(&field.label, data_type)
         };
-        func = func.input(input.default(static_value(&field.default)));
+        func = func.input(input.default(const_value(&field.default)));
     }
     // The lambda needs each field's kind to read its input value back.
     let kinds: Arc<[FieldKind]> = fields
@@ -175,17 +175,17 @@ fn register_field_enum(library: &mut Library, kind: &FieldKind) {
 }
 
 /// A neutral field default → an authored constant.
-fn static_value(value: &FieldValue) -> StaticValue {
+fn const_value(value: &FieldValue) -> ConstValue {
     match value {
-        FieldValue::Int(n) => StaticValue::Int(
+        FieldValue::Int(n) => ConstValue::Int(
             i64::try_from(*n)
                 .expect("introspected integer defaults must fit Scenarium's i64 value model"),
         ),
-        FieldValue::Float(f) => StaticValue::Float(*f),
-        FieldValue::Bool(b) => StaticValue::Bool(*b),
-        FieldValue::Str(s) => StaticValue::String(s.clone()),
-        FieldValue::Enum(v) => StaticValue::Enum(v.clone()),
-        FieldValue::Null => StaticValue::Null,
+        FieldValue::Float(f) => ConstValue::Float(*f),
+        FieldValue::Bool(b) => ConstValue::Bool(*b),
+        FieldValue::Str(s) => ConstValue::String(s.clone()),
+        FieldValue::Enum(v) => ConstValue::Enum(v.clone()),
+        FieldValue::Null => ConstValue::Null,
     }
 }
 
@@ -221,7 +221,7 @@ fn field_value(kind: &FieldKind, value: &DynamicValue) -> FieldValue {
                 .to_string(),
         ),
         FieldKind::Option(_) if matches!(value, DynamicValue::Unbound) => FieldValue::Null,
-        FieldKind::Option(_) if matches!(value.as_static(), Some(StaticValue::Null)) => {
+        FieldKind::Option(_) if matches!(value.as_static(), Some(ConstValue::Null)) => {
             FieldValue::Null
         }
         FieldKind::Option(inner) => field_value(inner, value),
@@ -231,7 +231,7 @@ fn field_value(kind: &FieldKind, value: &DynamicValue) -> FieldValue {
 #[cfg(test)]
 mod tests {
     use common::{FieldKind, FieldValue, FloatKind, IntegerKind, IntegerValue};
-    use scenarium::{DataType, DynamicValue, Library, StaticValue, TypeId};
+    use scenarium::{ConstValue, DataType, DynamicValue, Library, TypeId};
 
     use crate::config_node::{data_type, field_value, register_field_enum};
 
@@ -299,14 +299,14 @@ mod tests {
         assert_eq!(
             field_value(
                 &FieldKind::Int(IntegerKind::Usize),
-                &DynamicValue::Static(StaticValue::Int(5))
+                &DynamicValue::Static(ConstValue::Int(5))
             ),
             FieldValue::Int(IntegerValue::Signed(5))
         );
         assert_eq!(
             field_value(
                 &FieldKind::Option(Box::new(FieldKind::Int(IntegerKind::U32))),
-                &DynamicValue::Static(StaticValue::Int(7))
+                &DynamicValue::Static(ConstValue::Int(7))
             ),
             FieldValue::Int(IntegerValue::Signed(7))
         );

@@ -45,7 +45,7 @@
 
 use blake3::Hasher;
 
-use crate::{DataType, StaticValue};
+use crate::{ConstValue, DataType};
 
 /// Domain separator mixed into every node digest. Bump the suffix to invalidate
 /// every cached digest when the hashing scheme itself changes.
@@ -176,33 +176,33 @@ impl DigestHasher {
     /// external files/dirs they point at are a separate concern, folded by the
     /// caller through `RuntimeCache::hash_fs_paths`, so this stays a pure,
     /// no-I/O structural fold.
-    pub(super) fn write_static(&mut self, value: &StaticValue) {
+    pub(super) fn write_static(&mut self, value: &ConstValue) {
         match value {
-            StaticValue::Null => {
+            ConstValue::Null => {
                 self.write_bytes(&[0]);
             }
-            StaticValue::Float(v) => {
+            ConstValue::Float(v) => {
                 self.write_bytes(&[1]).write_pod(*v);
             }
-            StaticValue::Int(v) => {
+            ConstValue::Int(v) => {
                 self.write_bytes(&[2]).write_pod(*v);
             }
-            StaticValue::Bool(v) => {
+            ConstValue::Bool(v) => {
                 self.write_bytes(&[3]).write_pod(*v);
             }
-            StaticValue::String(s) => {
+            ConstValue::String(s) => {
                 self.write_bytes(&[4]).write_str(s);
             }
-            StaticValue::FsPath(path) => {
+            ConstValue::FsPath(path) => {
                 self.write_bytes(&[5]).write_str(path);
             }
-            StaticValue::FsPaths(paths) => {
+            ConstValue::FsPaths(paths) => {
                 self.write_bytes(&[6]).write_pod(paths.len() as u64);
                 for path in paths {
                     self.write_str(path);
                 }
             }
-            StaticValue::Enum(name) => {
+            ConstValue::Enum(name) => {
                 self.write_bytes(&[7]).write_str(name);
             }
         }

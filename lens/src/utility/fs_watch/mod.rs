@@ -10,7 +10,7 @@ use tokio::sync::Notify;
 use tokio::time::timeout;
 
 use scenarium::Invocation;
-use scenarium::{DataType, FsPathConfig, FsPathMode, StaticValue};
+use scenarium::{ConstValue, DataType, FsPathConfig, FsPathMode};
 use scenarium::{
     EventLambda, Func, FuncId, FuncInput, FuncLambda, FuncOutput, InvokeError, Library,
 };
@@ -254,7 +254,7 @@ pub fn fs_watch_library() -> Library {
                             event_state.lock().await.clear();
                         }
 
-                        outputs[0] = StaticValue::FsPath(path).into();
+                        outputs[0] = ConstValue::FsPath(path).into();
                         Ok(())
                     })
                 },

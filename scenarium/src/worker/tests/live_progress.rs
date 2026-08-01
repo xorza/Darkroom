@@ -81,7 +81,7 @@ async fn live_patches_reach_the_host_before_downstream_nodes_run() {
 
     let mut graph = TestGraph::new();
     graph.add("first", |node| {
-        node.output(DataType::Int).compute(|_| StaticValue::Int(1))
+        node.output(DataType::Int).compute(|_| ConstValue::Int(1))
     });
     graph.add("second", |node| {
         let seen = Arc::clone(&seen_by_second);

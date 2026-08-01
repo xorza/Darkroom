@@ -1,8 +1,8 @@
 use std::collections::BTreeSet;
 
 use glam::Vec2;
+use scenarium::ConstValue;
 use scenarium::FuncId;
-use scenarium::StaticValue;
 use scenarium::Subscription;
 use scenarium::{Binding, CacheMode, InputPort, Node, NodeId, NodeKind};
 
@@ -64,11 +64,11 @@ fn dirties_document_splits_edits_from_navigation() {
 /// size, or introduces a node with no cached port offsets, may return true.
 #[test]
 fn invalidates_cached_geometry_splits_resizes_from_moves() {
-    use scenarium::StaticValue;
+    use scenarium::ConstValue;
 
     let node_id = NodeId::unique();
     let port = InputPort::new(node_id, 0);
-    let cst = |v: f64| Some(Binding::Const(StaticValue::Float(v)));
+    let cst = |v: f64| Some(Binding::Const(ConstValue::Float(v)));
 
     // Nothing remeasures: a port center is `node.pos + cached offset`, and
     // every one of these leaves that offset valid.
@@ -270,10 +270,8 @@ fn duplicate_intent_drops_or_keeps_external_by_flag() {
     let mut doc = fixture.doc;
     doc.graph
         .set_input_binding(InputPort::new(b, 0), Binding::bind(a, 0));
-    doc.graph.set_input_binding(
-        InputPort::new(b, 1),
-        Binding::Const(StaticValue::from(7i64)),
-    );
+    doc.graph
+        .set_input_binding(InputPort::new(b, 1), Binding::Const(ConstValue::from(7i64)));
     doc.graph
         .set_input_binding(InputPort::new(b, 2), Binding::bind(c, 0));
     doc.main_view.selected = [a, b].into_iter().collect();

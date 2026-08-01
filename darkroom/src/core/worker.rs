@@ -155,7 +155,7 @@ mod tests {
     use std::time::Duration;
 
     use scenarium::{
-        Binding, Compiler, Graph, InputPort, StaticValue, WorkerActivity, WorkerReport,
+        Binding, Compiler, ConstValue, Graph, InputPort, WorkerActivity, WorkerReport,
         WorkerStatusKind, system_library, worker_events_library,
     };
 
@@ -180,11 +180,11 @@ mod tests {
         let print = graph.add(library.by_name("Print").unwrap().into());
         graph.set_input_binding(
             InputPort::new(frame, 0),
-            Binding::from(StaticValue::Float(0.0)),
+            Binding::from(ConstValue::Float(0.0)),
         );
         graph.set_input_binding(
             InputPort::new(print, 0),
-            Binding::from(StaticValue::String("tick".to_string())),
+            Binding::from(ConstValue::String("tick".to_string())),
         );
         graph.subscribe(frame, 1, print);
         let compiled = Compiler::default()

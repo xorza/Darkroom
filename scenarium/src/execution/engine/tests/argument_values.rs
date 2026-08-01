@@ -27,18 +27,18 @@ async fn with_bound_outputs() {
     // so the variant is worth pinning, not just the number.
     assert!(matches!(
         e.inputs("sum")[0],
-        Some(DynamicValue::Static(StaticValue::Float(v))) if v.approximately_eq(2.0)
+        Some(DynamicValue::Static(ConstValue::Float(v))) if v.approximately_eq(2.0)
     ));
     assert!(matches!(
         e.inputs("sum")[1],
-        Some(DynamicValue::Static(StaticValue::Float(v))) if v.approximately_eq(5.0)
+        Some(DynamicValue::Static(ConstValue::Float(v))) if v.approximately_eq(5.0)
     ));
     assert_eq!(e.output_i64("sum", 0), Some(7), "2 + 5");
 
     assert_eq!(e.input_i64("mult", 0), Some(7));
     assert!(matches!(
         e.inputs("mult")[1],
-        Some(DynamicValue::Static(StaticValue::Float(v))) if v.approximately_eq(5.0)
+        Some(DynamicValue::Static(ConstValue::Float(v))) if v.approximately_eq(5.0)
     ));
     assert_eq!(e.output_i64("mult", 0), Some(35), "7 * 5");
 

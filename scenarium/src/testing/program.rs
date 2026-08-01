@@ -42,7 +42,7 @@ use crate::graph::func::event::EventLambda;
 use crate::graph::func::lambda::{FuncLambda, OutputDemand};
 use crate::graph::identity::{FuncId, NodeId};
 use crate::graph::node::CacheMode;
-use crate::{DataType, DynamicValue, StaticValue, async_lambda};
+use crate::{ConstValue, DataType, DynamicValue, async_lambda};
 
 /// Where one node landed: the stable id a host names it by, and the dense
 /// index every per-run column is keyed on.
@@ -263,7 +263,7 @@ impl NodeBuilder<'_> {
     }
 
     /// An optional input carrying a literal.
-    pub(crate) fn const_input(self, value: impl Into<StaticValue>) -> Self {
+    pub(crate) fn const_input(self, value: impl Into<ConstValue>) -> Self {
         self.input(ExecutionBinding::Const(value.into()))
     }
 

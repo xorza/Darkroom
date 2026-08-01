@@ -360,7 +360,7 @@ async fn missing_codec_skips_disk_cache_instead_of_panicking() {
             },
         );
         // A `Custom` value has no `compute` shape — that writes a
-        // `StaticValue` — so this body counts itself.
+        // `ConstValue` — so this body counts itself.
         g.add("make_blob", move |n: NodeSpec| {
             n.pure()
                 .sink()

@@ -225,7 +225,7 @@ mod tests {
 
     use crate::core::status::StatusLog;
     use common::internals::test_output_path;
-    use scenarium::{Binding, Graph, InputPort, NodeId, StaticValue};
+    use scenarium::{Binding, ConstValue, Graph, InputPort, NodeId};
 
     use crate::core::io::cache::document_cache_root;
     use crate::core::io::preferences::{MlModelPreferences, Preferences};
@@ -233,7 +233,7 @@ mod tests {
 
     /// The default value seeded into `func`'s model-path input (index 1),
     /// read back through the published library.
-    fn ml_model_default(host: &RuntimeHost, func: &str) -> Option<StaticValue> {
+    fn ml_model_default(host: &RuntimeHost, func: &str) -> Option<ConstValue> {
         host.library.published.load().by_name(func).unwrap().inputs[1]
             .default_value
             .clone()
@@ -289,11 +289,11 @@ mod tests {
         // Startup seeds the ML nodes' path inputs from the preferences.
         assert_eq!(
             ml_model_default(&host, "ML Denoise"),
-            Some(StaticValue::FsPath(denoise_path.to_owned()))
+            Some(ConstValue::FsPath(denoise_path.to_owned()))
         );
         assert_eq!(
             ml_model_default(&host, "ML Star Removal"),
-            Some(StaticValue::FsPath(star_removal_path.to_owned()))
+            Some(ConstValue::FsPath(star_removal_path.to_owned()))
         );
 
         // A later preferences edit republishes the library with the new paths.
@@ -304,11 +304,11 @@ mod tests {
         host.configure_ml_model_defaults(&preferences);
         assert_eq!(
             ml_model_default(&host, "ML Denoise"),
-            Some(StaticValue::FsPath(updated_denoise_path.to_owned()))
+            Some(ConstValue::FsPath(updated_denoise_path.to_owned()))
         );
         assert_eq!(
             ml_model_default(&host, "ML Star Removal"),
-            Some(StaticValue::FsPath(updated_star_removal_path.to_owned()))
+            Some(ConstValue::FsPath(updated_star_removal_path.to_owned()))
         );
 
         // The disk cache is memory-only until a document has a path, then

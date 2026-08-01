@@ -19,7 +19,7 @@ async fn removing_node_rebuilds_id_keyed_edges() {
     // sum = get_a(2) + none(0) = 2; mult = sum(2) * none(default 1) = 2.
     assert!(matches!(
         e.inputs("sum")[0],
-        Some(DynamicValue::Static(StaticValue::Float(v))) if v.approximately_eq(2.0)
+        Some(DynamicValue::Static(ConstValue::Float(v))) if v.approximately_eq(2.0)
     ));
     assert!(e.inputs("sum")[1].is_none());
     assert_eq!(e.output_i64("sum", 0), Some(2));

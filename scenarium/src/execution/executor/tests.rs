@@ -15,15 +15,15 @@ use crate::graph::func::lambda::{FuncLambda, Invocation};
 use crate::graph::identity::NodeId;
 use crate::graph::node::CacheMode;
 use crate::testing::program::ProgramBuilder;
-use crate::{DynamicValue, StaticValue, async_lambda};
+use crate::{ConstValue, DynamicValue, async_lambda};
 
 fn value(value: i64) -> DynamicValue {
-    DynamicValue::Static(StaticValue::Int(value))
+    DynamicValue::Static(ConstValue::Int(value))
 }
 
 fn producer() -> FuncLambda {
     async_lambda!(|Invocation { outputs, .. }| {
-        outputs[0] = DynamicValue::Static(StaticValue::Int(7));
+        outputs[0] = DynamicValue::Static(ConstValue::Int(7));
         Ok(())
     })
 }
@@ -33,7 +33,7 @@ fn relay() -> FuncLambda {
     async_lambda!(|Invocation {
                        inputs, outputs, ..
                    }| {
-        outputs[0] = DynamicValue::Static(StaticValue::Int(inputs[0].as_i64().unwrap()));
+        outputs[0] = DynamicValue::Static(ConstValue::Int(inputs[0].as_i64().unwrap()));
         Ok(())
     })
 }
@@ -45,7 +45,7 @@ fn increment() -> FuncLambda {
                        inputs, outputs, ..
                    }| {
         let v = inputs[0].as_i64().unwrap();
-        outputs[0] = DynamicValue::Static(StaticValue::Int(v + 1));
+        outputs[0] = DynamicValue::Static(ConstValue::Int(v + 1));
         Ok(())
     })
 }
@@ -114,7 +114,7 @@ async fn upstream_error_retires_skipped_reads_without_harming_live_readers() {
     let mut prog = ProgramBuilder::default();
     let failing = async_lambda!(|_| { Err(internals::failure("boom")) });
     let skipped = async_lambda!(|Invocation { outputs, .. }| {
-        outputs[0] = DynamicValue::Static(StaticValue::Int(1));
+        outputs[0] = DynamicValue::Static(ConstValue::Int(1));
         Ok(())
     });
     // `healthy` retains nothing, so an emptied slot below is the mid-run
@@ -214,7 +214,7 @@ async fn unbound_output_errors_only_when_demanded() {
         .input(a.out(1))
         .outputs(1)
         .lambda(async_lambda!(|Invocation { outputs, .. }| {
-            outputs[0] = DynamicValue::Static(StaticValue::Int(1));
+            outputs[0] = DynamicValue::Static(ConstValue::Int(1));
             Ok(())
         }))
         .add();
@@ -317,7 +317,7 @@ async fn a_lambda_reads_the_execution_node_it_is_running_as() {
         async_lambda!(
             move |Invocation { ctx, outputs, .. }| { seen = Arc::clone(&probe) } => {
                 seen.lock().unwrap().push(ctx.current_node());
-                outputs[0] = DynamicValue::Static(StaticValue::Int(wrote));
+                outputs[0] = DynamicValue::Static(ConstValue::Int(wrote));
                 Ok(())
             }
         )
@@ -348,7 +348,7 @@ async fn a_node_seed_demands_its_output_without_retaining_it() {
         .lambda(async_lambda!(
             move |Invocation { demand, outputs, .. }| { seen = Arc::clone(&probe_seen) } => {
                 *seen.lock().unwrap() = Some(demand[0]);
-                outputs[0] = DynamicValue::Static(StaticValue::Int(7));
+                outputs[0] = DynamicValue::Static(ConstValue::Int(7));
                 Ok(())
             }
         ))
@@ -523,7 +523,7 @@ async fn reuse_survives_failed_upstream_rerun() {
                 return Err(internals::failure("transient failure"));
             }
             state.set(true);
-            outputs[0] = DynamicValue::Static(StaticValue::Int(5));
+            outputs[0] = DynamicValue::Static(ConstValue::Int(5));
             Ok(())
         }))
         .add();

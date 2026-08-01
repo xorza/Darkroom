@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use imaginarium::SUPPORTED_EXTENSIONS;
-use scenarium::{DataType, DynamicValue, FsPathConfig, FsPathMode, InvokeError, StaticValue};
+use scenarium::{ConstValue, DataType, DynamicValue, FsPathConfig, FsPathMode, InvokeError};
 use scenarium::{Func, FuncInput, FuncLambda, FuncOutput, Library};
 
 use crate::config_node::enum_input;
@@ -69,7 +69,7 @@ fn register_save(library: &mut Library) {
             )
             .input(
                 enum_input::<ConversionFormat>("Format", &CONVERSION_FORMAT_DATATYPE)
-                    .default(StaticValue::Enum(ConversionFormat::AsIs.label()))
+                    .default(ConstValue::Enum(ConversionFormat::AsIs.label()))
                     .description(
                         "Convert to this color format before saving; \"As Is\" keeps the source format.",
                     ),

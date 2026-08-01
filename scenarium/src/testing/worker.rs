@@ -19,7 +19,7 @@ use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::{Duration, timeout};
 
-use crate::StaticValue;
+use crate::ConstValue;
 use crate::elements::system_library::system_library;
 use crate::elements::worker_events_library::worker_events_library;
 use crate::execution::cache::disk_store::DiskStore;
@@ -88,7 +88,7 @@ impl TestWorker {
         graph.add_declared("Frame Event");
         graph.add_declared("To String");
         graph.add_declared("Print");
-        graph.constant("Frame Event", 0, StaticValue::Int(1));
+        graph.constant("Frame Event", 0, ConstValue::Int(1));
         graph.subscribe("Frame Event", 0, "Print");
         graph.wire("Frame Event", 1, "To String", 0);
         graph.wire("To String", 0, "Print", 0);
@@ -106,7 +106,7 @@ impl TestWorker {
     pub(crate) fn print_graph(message: &str) -> TestGraph {
         let mut graph = TestGraph::over(system_library());
         graph.add_declared("Print");
-        graph.constant("Print", 0, StaticValue::String(message.to_owned()));
+        graph.constant("Print", 0, ConstValue::String(message.to_owned()));
         graph
     }
 

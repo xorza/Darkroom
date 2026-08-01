@@ -17,8 +17,8 @@ use ::serde::{Deserialize, Serialize};
 use hashbrown::hash_map::Entry;
 use hashbrown::{HashMap, HashSet};
 
+use crate::ConstValue;
 use crate::DataType;
-use crate::StaticValue;
 use crate::graph::detached::DetachedNode;
 use crate::graph::error::GraphValidationError;
 use crate::graph::error::ValidationResult;
@@ -41,7 +41,7 @@ mod serde;
 /// only holds these values, and an absent port is unbound.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum Binding {
-    Const(StaticValue),
+    Const(ConstValue),
     Bind(OutputPort),
 }
 
@@ -542,8 +542,8 @@ impl From<OutputPort> for Binding {
     }
 }
 
-impl From<StaticValue> for Binding {
-    fn from(value: StaticValue) -> Self {
+impl From<ConstValue> for Binding {
+    fn from(value: ConstValue) -> Self {
         Binding::Const(value)
     }
 }

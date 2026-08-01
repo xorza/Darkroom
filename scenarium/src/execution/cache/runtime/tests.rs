@@ -11,10 +11,10 @@ use crate::graph::func::FuncBehavior;
 use crate::graph::func::lambda::OutputDemand;
 use crate::graph::node::CacheMode;
 use crate::testing::program::ProgramBuilder;
-use crate::{DataType, DynamicValue, RamUsage, StaticValue};
+use crate::{ConstValue, DataType, DynamicValue, RamUsage};
 
 fn out() -> Vec<DynamicValue> {
-    vec![DynamicValue::Static(StaticValue::Int(1))]
+    vec![DynamicValue::Static(ConstValue::Int(1))]
 }
 
 const DEMANDED: &[OutputDemand] = &[OutputDemand::Produce];
@@ -412,7 +412,7 @@ fn resident_hit_derives_coverage_from_values() {
     let digest = Digest([5; 32]);
     let mut cache = RuntimeCache::default();
     let mut slot = keyed_slot(Some(digest));
-    slot.invoke_slot(2).outputs[0] = StaticValue::Int(10).into();
+    slot.invoke_slot(2).outputs[0] = ConstValue::Int(10).into();
     slot.stamp_produced();
     let node_idx = NodeIdx(0);
     install(&mut cache, &ram_program(1), [slot]);
@@ -555,7 +555,7 @@ fn resident_ram_stats_accounts_each_owner_once_and_dedups_the_total() {
                         gpu: 0,
                         calls: distinct_calls.clone(),
                     })),
-                    DynamicValue::Static(StaticValue::Int(9)),
+                    DynamicValue::Static(ConstValue::Int(9)),
                 ],
             ),
             // Slot B: the *same* shared Arc again — must not be counted twice.

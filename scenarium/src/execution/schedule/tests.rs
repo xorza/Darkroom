@@ -435,10 +435,10 @@ mod resolving {
     use crate::execution::schedule::NodeState;
     use crate::graph::func::lambda::{FuncLambda, OutputDemand};
     use crate::testing::program::ProgramBuilder;
-    use crate::{DynamicValue, StaticValue};
+    use crate::{ConstValue, DynamicValue};
 
     fn value(value: i64) -> DynamicValue {
-        DynamicValue::Static(StaticValue::Int(value))
+        DynamicValue::Static(ConstValue::Int(value))
     }
 
     #[tokio::test]

@@ -3,7 +3,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use crate::{DynamicValue, StaticValue};
+use crate::{ConstValue, DynamicValue};
 
 /// A shared count of how often the body it wraps was invoked.
 ///
@@ -35,8 +35,8 @@ impl Calls {
     /// `body`, counted.
     pub fn counting(
         &self,
-        body: impl Fn(&[DynamicValue]) -> StaticValue + Send + Sync + 'static,
-    ) -> impl Fn(&[DynamicValue]) -> StaticValue + Send + Sync + 'static {
+        body: impl Fn(&[DynamicValue]) -> ConstValue + Send + Sync + 'static,
+    ) -> impl Fn(&[DynamicValue]) -> ConstValue + Send + Sync + 'static {
         let calls = self.clone();
         move |inputs| {
             calls.0.fetch_add(1, Ordering::SeqCst);
@@ -52,16 +52,16 @@ impl Calls {
     /// [`NodeSpec::counted`]: crate::testing::graph::NodeSpec::counted
     pub fn returning(
         &self,
-        value: impl Into<StaticValue>,
-    ) -> impl Fn(&[DynamicValue]) -> StaticValue + Send + Sync + 'static {
+        value: impl Into<ConstValue>,
+    ) -> impl Fn(&[DynamicValue]) -> ConstValue + Send + Sync + 'static {
         let value = value.into();
         self.counting(move |_| value.clone())
     }
 
     /// A counted body emitting *its own count*, this call included — so one
     /// output says both that the node ran and how many times it has.
-    pub fn tally(&self) -> impl Fn(&[DynamicValue]) -> StaticValue + Send + Sync + 'static {
+    pub fn tally(&self) -> impl Fn(&[DynamicValue]) -> ConstValue + Send + Sync + 'static {
         let calls = self.clone();
-        move |_| StaticValue::Int(calls.0.fetch_add(1, Ordering::SeqCst) as i64 + 1)
+        move |_| ConstValue::Int(calls.0.fetch_add(1, Ordering::SeqCst) as i64 + 1)
     }
 }

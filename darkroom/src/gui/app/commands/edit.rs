@@ -3,8 +3,8 @@
 //! then the chosen paths land as an ordinary undoable `SetInput` edit.
 
 use scenarium::Binding;
+use scenarium::ConstValue;
 use scenarium::FsPathMode;
-use scenarium::StaticValue;
 
 use crate::core::edit::intent::types::GraphIntent;
 use crate::gui::app::App;
@@ -44,9 +44,9 @@ impl App {
         let extensions: Vec<&str> = pick.config.extensions.iter().map(String::as_str).collect();
         let value = match pick.config.mode {
             FsPathMode::ExistingFile => dialogs::pick_existing_file(&extensions)
-                .map(|path| StaticValue::FsPath(path.to_string_lossy().into_owned())),
+                .map(|path| ConstValue::FsPath(path.to_string_lossy().into_owned())),
             FsPathMode::ExistingFiles => dialogs::pick_existing_files(&extensions).map(|paths| {
-                StaticValue::FsPaths(
+                ConstValue::FsPaths(
                     paths
                         .into_iter()
                         .map(|path| path.to_string_lossy().into_owned())
@@ -54,9 +54,9 @@ impl App {
                 )
             }),
             FsPathMode::NewFile => dialogs::pick_new_file(&extensions)
-                .map(|path| StaticValue::FsPath(path.to_string_lossy().into_owned())),
+                .map(|path| ConstValue::FsPath(path.to_string_lossy().into_owned())),
             FsPathMode::Directory => dialogs::pick_directory()
-                .map(|path| StaticValue::FsPath(path.to_string_lossy().into_owned())),
+                .map(|path| ConstValue::FsPath(path.to_string_lossy().into_owned())),
         };
         let Some(value) = value else {
             return Relayout::NotNeeded;

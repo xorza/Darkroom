@@ -30,7 +30,7 @@ use crate::graph::node::{CacheMode, Node, NodeKind};
 use crate::graph::{Binding, Graph};
 use crate::library::Library;
 use crate::testing::calls::Calls;
-use crate::{DataType, DynamicValue, StaticValue};
+use crate::{ConstValue, DataType, DynamicValue};
 
 /// A graph, the library it resolves against, and the names its nodes answer to.
 ///
@@ -155,7 +155,7 @@ impl TestGraph {
                 n.pure()
                     .cache(CacheMode::Ram)
                     .output(DataType::Int)
-                    .compute(move |_| StaticValue::Float(value as f64))
+                    .compute(move |_| ConstValue::Float(value as f64))
             }
         };
 
@@ -202,7 +202,7 @@ impl TestGraph {
     }
 
     /// Put a literal on `consumer`'s input `input`.
-    pub fn constant(&mut self, consumer: &str, input: usize, value: impl Into<StaticValue>) {
+    pub fn constant(&mut self, consumer: &str, input: usize, value: impl Into<ConstValue>) {
         self.set(consumer, input, Binding::Const(value.into()));
     }
 
@@ -405,7 +405,7 @@ impl NodeSpec {
 
     /// An optional input carrying a declared default, so a fresh node of this
     /// func starts with that literal already bound.
-    pub fn defaulted(mut self, data_type: DataType, value: impl Into<StaticValue>) -> Self {
+    pub fn defaulted(mut self, data_type: DataType, value: impl Into<ConstValue>) -> Self {
         let name = format!("in{}", self.func.inputs.len());
         self.func = self
             .func
@@ -443,7 +443,7 @@ impl NodeSpec {
     /// [`observes`](Self::observes) is the form for a node with none.
     pub fn compute(
         self,
-        body: impl Fn(&[DynamicValue]) -> StaticValue + Send + Sync + 'static,
+        body: impl Fn(&[DynamicValue]) -> ConstValue + Send + Sync + 'static,
     ) -> Self {
         let body = Arc::new(body);
         self.lambda(async_lambda!(
@@ -472,7 +472,7 @@ impl NodeSpec {
     /// A pure source of one constant: declares the output too, typed from the
     /// literal (`Any` for a literal that names no type of its own — a path, an
     /// enum variant, `Null`).
-    pub fn returns(self, value: impl Into<StaticValue>) -> Self {
+    pub fn returns(self, value: impl Into<ConstValue>) -> Self {
         let value = value.into();
         let data_type = DataType::Any.or_const_type(&value);
         self.pure()
@@ -483,7 +483,7 @@ impl NodeSpec {
     /// [`returns`](Self::returns), counting each call — the source every "did
     /// the upstream recompute" fixture is built on, since `calls` says both
     /// whether the node ran and how often.
-    pub fn counted(self, value: impl Into<StaticValue>, calls: &Calls) -> Self {
+    pub fn counted(self, value: impl Into<ConstValue>, calls: &Calls) -> Self {
         let value = value.into();
         let data_type = DataType::Any.or_const_type(&value);
         self.pure()
@@ -745,12 +745,12 @@ mod tests {
 
         assert_eq!(
             g.graph.bindings[&port],
-            Binding::Const(StaticValue::Int(3)),
+            Binding::Const(ConstValue::Int(3)),
             "the declaration's default is bound on instantiation"
         );
 
         g.constant("n", 0, 9i64);
-        assert_eq!(g.graph.bindings[&port], Binding::Const(StaticValue::Int(9)));
+        assert_eq!(g.graph.bindings[&port], Binding::Const(ConstValue::Int(9)));
 
         g.unbind("n", 0);
         assert!(!g.graph.bindings.contains_key(&port));

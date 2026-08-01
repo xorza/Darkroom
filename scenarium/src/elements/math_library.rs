@@ -357,7 +357,7 @@ fn divide_func() -> Func {
 mod tests {
     use super::*;
     use crate::testing::func_invoker::FuncInvoker;
-    use crate::{DynamicValue, StaticValue};
+    use crate::{ConstValue, DynamicValue};
 
     async fn invoke(name: &str, values: &[DynamicValue]) -> Result<Vec<DynamicValue>, InvokeError> {
         let library = math_library();
@@ -366,7 +366,7 @@ mod tests {
     }
 
     fn float(value: f64) -> DynamicValue {
-        StaticValue::Float(value).into()
+        ConstValue::Float(value).into()
     }
 
     #[tokio::test]
@@ -386,7 +386,7 @@ mod tests {
         assert_eq!(divide[0].as_f64(), Some(7.0 / 3.0));
         assert_eq!(divide[1].as_f64(), Some(1.0));
 
-        let text = DynamicValue::Static(StaticValue::String("not a number".into()));
+        let text = DynamicValue::Static(ConstValue::String("not a number".into()));
         assert!(invoke("Add", &[text.clone(), float(3.0)]).await.is_err());
         assert!(invoke("Add", &[float(2.0), text.clone()]).await.is_err());
         assert!(invoke("Sine", &[text]).await.is_err());

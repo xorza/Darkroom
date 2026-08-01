@@ -15,11 +15,11 @@ const VALUE_EDITOR_WIDTH: f32 = 100.0;
 /// Upper bound on the value column: editors fill the column up to here, then a
 /// long value (a wide enum/preset dropdown, a long path) ellipsizes instead of
 /// stretching the node out. Read by both `Theme::build` and
-/// [`StaticValueEditorTheme::from_palette`], which sizes the editor itself.
+/// [`ConstValueEditorTheme::from_palette`], which sizes the editor itself.
 const VALUE_EDITOR_MAX_WIDTH: f32 = 240.0;
 
 // One named-const mod per built-in preset, so any builder (`Theme::dark`,
-// `StaticValueEditorTheme::dark`, future per-widget theme helpers) can
+// `ConstValueEditorTheme::dark`, future per-widget theme helpers) can
 // reach a swatch by name instead of inlining a hex literal. The two
 // mods line up 1:1 — every name in `dark::*` has a `light::*` peer with
 // the matching role.
@@ -119,7 +119,7 @@ pub(crate) mod dark {
     // palantir sub-theme palette — values palantir's widgets normally
     // read from its own `palette::*` consts. Pushed through
     // `PalantirPalette` so the live `ui.theme` recolours alongside
-    // darkroom chrome; reused by `StaticValueEditorTheme::dark` for
+    // darkroom chrome; reused by `ConstValueEditorTheme::dark` for
     // the per-palette path-pick chip.
     pub(crate) const PAL_TEXT: Color = Color::hex(0xe2dfd3);
     pub(crate) const PAL_TEXT_DISABLED: Color = Color::hex(0x878a8d);
@@ -403,13 +403,13 @@ pub(crate) struct Theme {
 
     /// Look + dimensions for the inline static-value editor that hugs a
     /// `Binding::Const` input port (number/string field, file-pick chip).
-    pub(crate) static_value_editor: StaticValueEditorTheme,
+    pub(crate) const_value_editor: ConstValueEditorTheme,
 
-    /// The pointer-over-node variant of `static_value_editor` (chip fill
+    /// The pointer-over-node variant of `const_value_editor` (chip fill
     /// pre-lit at half the hover strength). Precomputed at construction —
     /// deriving it per frame would clone the whole nested theme in the
     /// record path — and kept next to its base so the pair can't drift.
-    pub(crate) static_value_editor_revealed: StaticValueEditorTheme,
+    pub(crate) const_value_editor_revealed: ConstValueEditorTheme,
 
     /// Look for the inline-rename widget (node title, boundary port,
     /// graph tab).
@@ -481,7 +481,7 @@ impl TypeScale {
 /// `Button`/`ComboBox` siblings (path pick, enum, presets) borrow via
 /// `drag_value.chip`, and the fixed field width.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub(crate) struct StaticValueEditorTheme {
+pub(crate) struct ConstValueEditorTheme {
     pub(crate) drag_value: DragValueTheme,
     /// Minimum logical-px width of the value column — editors fill it down to
     /// at least this.
@@ -491,7 +491,7 @@ pub(crate) struct StaticValueEditorTheme {
     pub(crate) max_width: f32,
 }
 
-impl StaticValueEditorTheme {
+impl ConstValueEditorTheme {
     /// The pointer-over-node variant of [`Self::from_palette`]: the
     /// chip's hover fill (`elem_hover`), at reduced alpha, becomes the
     /// *resting* background — const editors surface as soon as the
@@ -935,8 +935,8 @@ impl Theme {
             status: StatusColors::for_preset(preset),
             colors,
             type_colors,
-            static_value_editor: StaticValueEditorTheme::from_palette(p),
-            static_value_editor_revealed: StaticValueEditorTheme::revealed_from_palette(p),
+            const_value_editor: ConstValueEditorTheme::from_palette(p),
+            const_value_editor_revealed: ConstValueEditorTheme::revealed_from_palette(p),
             inline_rename: InlineRenameTheme::from_palette(p),
             palantir_theme: palantir_theme_for(p, chrome_fill, &TypeScale::DEFAULT),
         }
@@ -1005,7 +1005,7 @@ mod tests {
     assert_not_impl_any!(TypeColors: Copy);
     assert_not_impl_any!(HoverColor: Copy);
     assert_not_impl_any!(CardBorder: Copy);
-    assert_not_impl_any!(StaticValueEditorTheme: Copy);
+    assert_not_impl_any!(ConstValueEditorTheme: Copy);
     assert_not_impl_any!(InlineRenameTheme: Copy);
 
     /// The checked-in `assets/ayu-graphite.toml` is a generated artifact — a

@@ -15,8 +15,8 @@ async fn unused_output_marked_skip() {
             .lambda(async_lambda!(
                 move |Invocation { demand, outputs, .. }| { seen = seen.clone() } => {
                     seen.lock().await.extend_from_slice(demand);
-                    outputs[0] = StaticValue::Int(1).into();
-                    outputs[1] = StaticValue::Int(2).into();
+                    outputs[0] = ConstValue::Int(1).into();
+                    outputs[1] = ConstValue::Int(2).into();
                     Ok(())
                 }
             ))
@@ -56,10 +56,10 @@ async fn cached_node_reruns_when_a_previously_skipped_output_becomes_needed() {
                 move |Invocation { demand, outputs, .. }| { calls = calls.clone() } => {
                     *calls.lock().await += 1;
                     if !demand[0].is_skip() {
-                        outputs[0] = StaticValue::Int(10).into();
+                        outputs[0] = ConstValue::Int(10).into();
                     }
                     if !demand[1].is_skip() {
-                        outputs[1] = StaticValue::Int(20).into();
+                        outputs[1] = ConstValue::Int(20).into();
                     }
                     Ok(())
                 }

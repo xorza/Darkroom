@@ -1,5 +1,5 @@
 use super::*;
-use scenarium::{AnyState, ContextManager, OutputDemand, SharedAnyState, StaticValue};
+use scenarium::{AnyState, ConstValue, ContextManager, OutputDemand, SharedAnyState};
 
 #[test]
 fn the_declaration_is_a_sink_that_produces_nothing() {
@@ -34,7 +34,7 @@ async fn invoking_publishes_the_latest_value_per_node() {
     let invoke = async |value: i64| {
         let mut ctx = ContextManager::default();
         ctx.set_current_node(first);
-        let mut inputs = [DynamicValue::Static(StaticValue::Int(value))];
+        let mut inputs = [DynamicValue::Static(ConstValue::Int(value))];
         func.lambda
             .invoke(Invocation {
                 ctx: &mut ctx,
@@ -66,7 +66,7 @@ async fn invoking_publishes_the_latest_value_per_node() {
 #[should_panic(expected = "only readable inside a lambda invoke")]
 async fn an_unattributed_invoke_is_a_bug_not_a_silent_no_op() {
     let func = preview_func(Arc::default());
-    let mut inputs = [DynamicValue::Static(StaticValue::Int(1))];
+    let mut inputs = [DynamicValue::Static(ConstValue::Int(1))];
     func.lambda
         .invoke(Invocation {
             ctx: &mut ContextManager::default(),

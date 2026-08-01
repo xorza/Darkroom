@@ -380,7 +380,7 @@ fn value_str(ui: &mut Ui, binding: Option<&Binding>) -> TextInput<'static> {
     match binding {
         None => TextInput::Borrowed("—"),
         Some(Binding::Bind(_)) => TextInput::Borrowed("linked"),
-        // `StaticValue::Display` — the same formatter a preview node's
+        // `ConstValue::Display` — the same formatter a preview node's
         // value goes through via `DynamicValue::Display`, so a static
         // binding and a live one can't render one float two ways.
         Some(Binding::Const(v)) => TextInput::Interned(ui.fmt(format_args!("{v}"))),

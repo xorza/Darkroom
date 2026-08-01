@@ -64,9 +64,9 @@ fn compiled_output_types_match_authoring_resolution() {
     g.add("scalar_const", passthrough);
     g.constant("scalar_const", 0, true);
     g.add("ambiguous_const", passthrough);
-    g.constant("ambiguous_const", 0, StaticValue::Enum("A".into()));
+    g.constant("ambiguous_const", 0, ConstValue::Enum("A".into()));
     g.add("typed_const", |n| n.input(path_type.clone()).wildcard(0));
-    g.constant("typed_const", 0, StaticValue::FsPath("input.fit".into()));
+    g.constant("typed_const", 0, ConstValue::FsPath("input.fit".into()));
     g.add("unbound", passthrough);
 
     let cases = [
@@ -134,7 +134,7 @@ async fn update_with_evolved_func_recompiles_and_runs_new_lambda() {
                 DataType::Int,
             ));
             func.lambda = async_lambda!(move |Invocation { outputs, .. }| {
-                outputs[0] = StaticValue::Int(2).into();
+                outputs[0] = ConstValue::Int(2).into();
                 Ok(())
             });
         })
@@ -169,9 +169,9 @@ async fn update_with_a_grown_output_list_retires_the_shorter_snapshot() {
 
     let body = || {
         async_lambda!(move |Invocation { outputs, .. }| {
-            outputs[0] = StaticValue::Int(1).into();
+            outputs[0] = ConstValue::Int(1).into();
             if outputs.len() > 1 {
-                outputs[1] = StaticValue::Int(2).into();
+                outputs[1] = ConstValue::Int(2).into();
             }
             Ok(())
         })

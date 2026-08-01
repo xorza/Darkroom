@@ -46,7 +46,7 @@ fn loader(observed: Observed) -> impl FnOnce(NodeSpec) -> NodeSpec {
                     loads.bump();
                     let path = inputs[0].as_fs_path().unwrap().to_string();
                     let text = std::fs::read_to_string(&path).map_err(InvokeError::external)?;
-                    outputs[0] = StaticValue::String(text).into();
+                    outputs[0] = ConstValue::String(text).into();
                     Ok(())
                 }
             ))
@@ -82,13 +82,13 @@ fn path_graph(data_path: &str, mode: CacheMode, observed: Observed) -> TestGraph
             .cache(mode)
             .input(DataType::String)
             .output(any_path())
-            .compute(|inputs| StaticValue::FsPath(inputs[0].as_string().unwrap().to_string()))
+            .compute(|inputs| ConstValue::FsPath(inputs[0].as_string().unwrap().to_string()))
     });
     g.add("load_text", |n| loader(observed.clone())(n).cache(mode));
     g.add("annotate", |n| {
-        let annotate = observed.annotates.counting(|inputs| {
-            StaticValue::String(format!("[{}]", inputs[0].as_string().unwrap()))
-        });
+        let annotate = observed
+            .annotates
+            .counting(|inputs| ConstValue::String(format!("[{}]", inputs[0].as_string().unwrap())));
         n.pure()
             .cache(mode)
             .input(DataType::String)
@@ -149,7 +149,7 @@ async fn an_unidentifiable_path_fails_only_the_node_declaring_it() {
     let mut g = TestGraph::new();
     g.add("load_text", loader(Observed::default()));
     g.add("capture", capture(Observed::default()));
-    g.constant("load_text", 0, StaticValue::FsPath(data_path.clone()));
+    g.constant("load_text", 0, ConstValue::FsPath(data_path.clone()));
     g.wire("load_text", 0, "capture", 0);
     let mut e = TestEngine::over(g);
 

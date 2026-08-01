@@ -10,7 +10,7 @@ use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::graph_ctx::input_ctx::InputCtx;
 use crate::gui::graph_ctx::output_ctx::OutputCtx;
 use crate::gui::state::run_state::ExecStatus;
-use crate::gui::theme::{StaticValueEditorTheme, Theme};
+use crate::gui::theme::{ConstValueEditorTheme, Theme};
 
 /// The `kind_label` a node reports when the library holds no func for it —
 /// see [`NodeCtx::missing`].
@@ -69,7 +69,7 @@ pub(crate) struct NodeCtx<'a> {
     /// Two things hang off it, the const editors' hover-revealed chips
     /// ([`Self::sve`]) and whether the port rows build tooltips at all
     /// ([`Self::tips`]), and both used to be resolved in `ports_row` and
-    /// threaded down as a `&StaticValueEditorTheme` and a `bool` that no
+    /// threaded down as a `&ConstValueEditorTheme` and a `bool` that no
     /// signature said were the same fact.
     ///
     /// Not resolved in [`Self::resolve`] because that takes no `Ui` — and
@@ -119,12 +119,12 @@ impl<'a> NodeCtx<'a> {
     /// over the node surfaces the (otherwise invisible) chips at half
     /// strength — the edit affordance appears exactly when the pointer is in
     /// the neighborhood, and geometry never changes.
-    pub(crate) fn sve(self) -> &'a StaticValueEditorTheme {
+    pub(crate) fn sve(self) -> &'a ConstValueEditorTheme {
         let theme = self.graph_ctx.theme();
         if self.hovered {
-            &theme.static_value_editor_revealed
+            &theme.const_value_editor_revealed
         } else {
-            &theme.static_value_editor
+            &theme.const_value_editor
         }
     }
 

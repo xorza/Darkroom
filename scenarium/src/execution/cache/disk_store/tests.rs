@@ -13,7 +13,7 @@ use crate::execution::cache::slot::OutputSnapshot;
 use crate::graph::func::lambda::OutputDemand;
 use crate::library::{Library, TypeEntry};
 use crate::runtime::context::ContextStore;
-use crate::{CodecError, CustomValue, CustomValueCodec, DynamicValue, StaticValue, TypeId};
+use crate::{CodecError, ConstValue, CustomValue, CustomValueCodec, DynamicValue, TypeId};
 
 fn target(path: &Path, digest: Digest) -> BlobTarget {
     BlobTarget {
@@ -143,8 +143,8 @@ async fn store_read_header_check_and_digest_replacement_round_trip() {
     let second_target = target(file.path(), second_digest);
     let first = OutputSnapshot::new(vec![
         DynamicValue::Unbound,
-        DynamicValue::Static(StaticValue::Int(7)),
-        DynamicValue::Static(StaticValue::String("x".into())),
+        DynamicValue::Static(ConstValue::Int(7)),
+        DynamicValue::Static(ConstValue::String("x".into())),
     ]);
 
     store
@@ -167,7 +167,7 @@ async fn store_read_header_check_and_digest_replacement_round_trip() {
     assert_eq!(restored.values()[1].as_i64(), Some(7));
     assert_eq!(restored.values()[2].as_string(), Some("x"));
 
-    let second = OutputSnapshot::new(vec![DynamicValue::Static(StaticValue::Int(35))]);
+    let second = OutputSnapshot::new(vec![DynamicValue::Static(ConstValue::Int(35))]);
     store
         .store(
             &second_target,
@@ -199,7 +199,7 @@ async fn broader_same_digest_blob_is_preserved() {
     let store = versioned_store(1, decode_calls.clone());
     let target = target(file.path(), Digest([11; 32]));
     let partial = OutputSnapshot::new(vec![
-        DynamicValue::Static(StaticValue::Int(7)),
+        DynamicValue::Static(ConstValue::Int(7)),
         DynamicValue::Unbound,
     ]);
     store
@@ -225,7 +225,7 @@ async fn broader_same_digest_blob_is_preserved() {
     assert!(file.exists(), "an insufficient but valid blob is retained");
 
     let complete = OutputSnapshot::new(vec![
-        DynamicValue::Static(StaticValue::Int(7)),
+        DynamicValue::Static(ConstValue::Int(7)),
         DynamicValue::from_custom(Blob(vec![1, 2, 3])),
     ]);
     store
@@ -377,7 +377,7 @@ async fn failed_publication_does_not_repeat_coverage_probe() {
     store
         .store(
             &target(file.path(), Digest([9; 32])),
-            &OutputSnapshot::new(vec![DynamicValue::Static(StaticValue::Int(9))]),
+            &OutputSnapshot::new(vec![DynamicValue::Static(ConstValue::Int(9))]),
             StorePolicy::PreserveCovering,
             &mut ContextStore::default(),
         )
@@ -400,7 +400,7 @@ async fn truncated_blob_is_rejected_by_header_check_and_read() {
     store
         .store(
             &target,
-            &OutputSnapshot::new(vec![DynamicValue::Static(StaticValue::String(
+            &OutputSnapshot::new(vec![DynamicValue::Static(ConstValue::String(
                 "payload".into(),
             ))]),
             StorePolicy::KnownMiss,
@@ -410,7 +410,7 @@ async fn truncated_blob_is_rejected_by_header_check_and_read() {
     let mut bytes = std::fs::read(file.path()).unwrap();
     bytes.pop();
     std::fs::write(file.path(), bytes).unwrap();
-    let expected = [DynamicValue::Static(StaticValue::String("payload".into()))];
+    let expected = [DynamicValue::Static(ConstValue::String("payload".into()))];
     assert!(!store.covers(&target, &expected).await);
     assert!(read_snapshot(&store, &target, 1).await.is_none());
     assert!(!file.exists(), "a corrupt cache blob is removed");
