@@ -1,7 +1,7 @@
 pub(super) mod header;
 mod memory_row;
 pub(super) mod port_color;
-pub(super) mod port_row;
+pub(crate) mod port_row;
 pub(crate) mod preview_row;
 mod value_editor;
 
@@ -62,6 +62,22 @@ pub(super) struct NodeUI {
     row_tracks: Vec<Track>,
 }
 
+/// What one record pass's node draw saw but could not act on itself.
+///
+/// Each drives state the draw itself holds *shared* — the inspection panels
+/// through [`DrawCtx`] so they can paint, the context menu because it is the
+/// canvas's and not a node's. So the clicks are seen here and applied by the
+/// caller once the draw is over and both can be taken `&mut`.
+#[derive(Default, Debug)]
+pub(crate) struct NodeDrawOutcome {
+    /// The node whose `i` chip was clicked, cycling its inspection panel.
+    pub(crate) inspect_toggled: Option<NodeId>,
+    /// Whether any node body was clicked or started a drag.
+    pub(crate) body_acted: bool,
+    /// The node whose body was right-clicked, opening its context menu.
+    pub(crate) menu_opened: Option<NodeId>,
+}
+
 impl NodeUI {
     /// Drop the in-flight drag and the focus hysteresis. `row_tracks` is
     /// scratch grown to the widest node seen, not gesture state, so it keeps
@@ -78,13 +94,15 @@ impl NodeUI {
     /// (port circles capture their own presses via `Sense::CLICK`, so
     /// drags don't latch off the port grabs); `prepass` converts the
     /// anchor into `GraphIntent::MoveSelection` on later frames.
+    /// Record every node the cull keeps, and report what the draw saw but
+    /// could not act on — see [`NodeDrawOutcome`].
     pub(super) fn draw_all(
         &mut self,
         ui: &mut Ui,
         dcx: DrawCtx<'_>,
         probe: &mut BreakerProbe<'_>,
         out: &mut Requests,
-    ) {
+    ) -> NodeDrawOutcome {
         // Paint back-to-front, so the last item drawn is frontmost. Each
         // item's depth is persisted view state, so a raised node stays raised
         // across save/load and tab switches; `GraphIntent::Raise` lifts a
@@ -102,6 +120,7 @@ impl NodeUI {
         // past the blur (`focus_kept_last`): focus clears before the record,
         // and that first post-blur record is where the edit's pending draft
         // commits.
+        let mut outcome = NodeDrawOutcome::default();
         let mut focus_kept = None;
         for n in dcx.graph_ctx().nodes_in_paint_order() {
             let keeps_focus = ui.focus_within(node_widget_id(n.id));
@@ -115,12 +134,13 @@ impl NodeUI {
                 continue;
             }
             let ncx = n.with_hover(node_hovered(ui, n.id));
-            self.draw_one(ui, ncx, dcx, probe, out);
+            self.draw_one(ui, ncx, dcx, probe, out, &mut outcome);
         }
         self.focus_kept_last = focus_kept;
         // Belt-and-braces against a node deleted mid-drag; `prepass` makes
         // the same check before it can emit anything against it.
         self.drag.drop_if_owner_gone(dcx.graph_ctx());
+        outcome
     }
 
     fn draw_one(
@@ -130,6 +150,7 @@ impl NodeUI {
         dcx: DrawCtx<'_>,
         probe: &mut BreakerProbe<'_>,
         out: &mut Requests,
+        outcome: &mut NodeDrawOutcome,
     ) {
         let (theme, node) = (ncx.theme(), ncx);
 
@@ -198,13 +219,15 @@ impl NodeUI {
                     .with_shadow(shadow),
             )
             .show(ui, |ui| {
-                header(ui, ncx, dcx, out);
+                if header(ui, ncx, dcx, out) {
+                    outcome.inspect_toggled.get_or_insert(node.id);
+                }
                 status_row(ui, ncx, out);
                 ports_row(ui, ncx, dcx, row_tracks, out);
                 // A preview has no output, so it has no cached value for the
                 // memory readout to report — its value takes that slot instead.
                 if node.preview() {
-                    preview_row::preview_row(ui, ncx);
+                    preview_row::preview_row(ui, ncx, out);
                 } else {
                     memory_row(ui, ncx);
                 }
@@ -214,6 +237,13 @@ impl NodeUI {
         // probe over `response_for`, so reading the body through either is
         // the same last-frame state.)
         let body_clicked = panel.response.left.clicked();
+        // "The user acted on a node", as opposed to on the bare canvas — what
+        // closes the unpinned inspection panels. The title is deliberately not
+        // folded in: a title drag moves the node but has never counted.
+        outcome.body_acted |= body_clicked || panel.response.left.drag.started();
+        if panel.response.right.clicked() {
+            outcome.menu_opened.get_or_insert(node.id);
+        }
 
         // Click without drag → select. Plain click selects only this
         // node; Shift-click toggles its membership in the current
@@ -223,13 +253,15 @@ impl NodeUI {
             click_intents(shift_click, ncx.graph_ctx, node.id, out);
         }
 
-        // Latch the anchor on the press-frame edge, off whichever handle
-        // caught the press (resolved by this frame's sweep, which walks the
-        // same curated `drag_handles` list); subsequent frames' `prepass`
-        // peeks `response_for(widget_id)` before record runs and converts
-        // `drag_delta` into a `MoveSelection` applied to `Document` before
-        // the record reads it back.
-        if let Some(handle) = dcx.hits().latched_on(node.id) {
+        // Latch the anchor on the press-frame edge, off whichever of this
+        // node's handles caught the press. Read here, where the handles are
+        // built, over the same curated list they are drawn from; subsequent
+        // frames' `prepass` peeks `response_for(widget_id)` before record runs
+        // and converts `drag_delta` into a `MoveSelection` applied to
+        // `Document` before the record reads it back.
+        if let Some(handle) =
+            drag_handles(node.id).find(|w| ui.response_for(*w).left.drag.started())
+        {
             // Grabbing a node already in the selection drags the whole
             // group together;
             // grabbing an unselected node selects only it and drags it
@@ -329,7 +361,7 @@ pub(super) fn node_widget_id(node_id: NodeId) -> WidgetId {
 /// "did anything in here start a drag" would wrongly move the node
 /// along with them. The dock's tab chips carry the same shape for the
 /// same reason (`gui::dock::strip::drag_handles`).
-pub(crate) fn drag_handles(node_id: NodeId) -> impl Iterator<Item = WidgetId> {
+fn drag_handles(node_id: NodeId) -> impl Iterator<Item = WidgetId> {
     [node_widget_id(node_id), node_rename_wid(node_id)].into_iter()
 }
 

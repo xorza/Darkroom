@@ -44,7 +44,7 @@ use crate::gui::pane::graph::gesture::selection::SelectionUI;
 use crate::gui::pane::graph::gesture::slot::GestureSlot;
 use crate::gui::pane::graph::gesture::subscription::SubscriptionUI;
 use crate::gui::pane::graph::gesture::{connection, pan_zoom, shortcuts, subscription};
-use crate::gui::pane::graph::node::{NodeDrawFindings, NodeUI};
+use crate::gui::pane::graph::node::{NodeDrawOutcome, NodeUI};
 use crate::gui::pane::graph::paint::inspector::Inspectors;
 use crate::gui::pane::graph::paint::wire::{WireEmphasis, WirePass};
 use crate::gui::relayout::Relayout;
@@ -405,7 +405,7 @@ impl GraphUI {
         // What the node draw sees but cannot act on: the inspect chip and the
         // body clicks, both of which drive `Inspectors` — held shared below so
         // the panels can paint, and taken `&mut` once the draw is over.
-        let mut found = NodeDrawFindings::default();
+        let mut outcome = NodeDrawOutcome::default();
 
         // Outer canvas: covers the whole pane, paints the canvas
         // background, owns the input routing for empty-canvas
@@ -496,7 +496,7 @@ impl GraphUI {
                             // Node bodies paint back-to-front by each
                             // placement's depth (`GraphView::paint_order`), so
                             // a clicked node raises above its neighbours.
-                            found = self.node_ui.draw_all(ui, dcx, &mut probe, out);
+                            outcome = self.node_ui.draw_all(ui, dcx, &mut probe, out);
                         }
                         // Inspection panels paint after the node bodies so
                         // they sit on top and win clicks over the nodes
@@ -511,8 +511,8 @@ impl GraphUI {
         // The draw is over, so the panels are free to take `&mut`: cycle the
         // node whose chip was clicked, and close the unpinned ones if the
         // action landed anywhere but on a panel.
-        self.inspectors.apply(ui, &found);
-        if let Some(node) = found.menu_opened {
+        self.inspectors.apply(ui, &outcome);
+        if let Some(node) = outcome.menu_opened {
             self.node_menu.open_on(ui, graph_ctx, node, out);
         }
     }

@@ -101,7 +101,7 @@ impl AnchoredMenu {
 /// `AppCommand`, a `GraphIntent`, or a stash for the `Editor` to resolve. Every
 /// node offers the menu; which one was right-clicked is settled by the node
 /// draw, which reports it as
-/// [`NodeDrawFindings::menu_opened`](crate::gui::pane::graph::node::NodeDrawFindings).
+/// [`NodeDrawOutcome::menu_opened`](crate::gui::pane::graph::node::NodeDrawOutcome).
 #[derive(Default, Debug)]
 pub(crate) struct NodeContextMenu {
     menu: AnchoredMenu,
