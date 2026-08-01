@@ -410,16 +410,21 @@ mod tests {
     }
 
     fn click(shift: bool, scene: &mut GraphCtxFixture, id: NodeId) -> Vec<GraphIntent> {
-        use crate::gui::requests::Request;
+        use crate::gui::requests::DocumentRequest;
 
         let mut out = Requests::default();
         click_intents(shift, scene.graph_ctx(), id, &mut out);
-        out.drain()
+        let intents: Vec<GraphIntent> = out
+            .drain_document()
             .map(|request| match request {
-                Request::Graph(intent) => intent,
-                other => panic!("a node click raises nothing but graph edits: {other:?}"),
+                DocumentRequest::Graph(intent) => intent,
+                DocumentRequest::View(op) => {
+                    panic!("a node click raises nothing but graph edits: {op:?}")
+                }
             })
-            .collect()
+            .collect();
+        assert_eq!(out.drain_app().count(), 0, "nor any app command");
+        intents
     }
 
     #[test]

@@ -17,7 +17,7 @@ use crate::core::io::preferences::Preferences;
 use crate::gui::app::commands::AppCommand;
 use crate::gui::app::commands::file::FileCommand;
 use crate::gui::app::commands::run::RunCommand;
-use crate::gui::requests::{Request, Requests};
+use crate::gui::requests::{DocumentRequest, Requests};
 use crate::gui::window::MainWindow;
 use palantir::{Shortcut, Ui};
 
@@ -75,18 +75,6 @@ pub(crate) struct Editor {
     /// every frame. A plain side-effect field rather than a `bool` threaded
     /// back through every helper's return.
     needs_relayout: bool,
-    /// Per-frame scratch buffer of pending mutations. Cleared at the top of
-    /// every `frame`, filled by prepass/record/shortcut handling, and fully
-    /// drained before `frame` returns — it carries no state across frames.
-    /// Kept as a field only to reuse the allocation; not part of the
-    /// observable state.
-    requests: Requests,
-    /// Where the drain parks the one tier it cannot apply itself: `App` owns
-    /// the state these reach, so they ride back out of [`Self::frame`] to be
-    /// run once the pass is over. An *output* accumulator, not a second
-    /// channel — every surface still raises everything through `requests`.
-    /// Cleared at the top of every frame, like the queue that fills it.
-    commands: Vec<AppCommand>,
 }
 
 impl Editor {
@@ -96,8 +84,6 @@ impl Editor {
             action_stack: ActionStack::new(UNDO_HISTORY_BYTES),
             main_window: MainWindow::default(),
             needs_relayout: false,
-            requests: Requests::default(),
-            commands: Vec::new(),
         }
     }
 
@@ -106,12 +92,12 @@ impl Editor {
     /// result `App` handles after the record. No-ops (and self-cancelling
     /// steps) are dropped, like the in-frame drain.
     pub(super) fn apply_edit(&mut self, open: &mut OpenDocument, intent: GraphIntent) {
-        self.commit_batch(open, [Request::Graph(intent)]);
+        self.commit_batch(open, [DocumentRequest::Graph(intent)]);
     }
 
     /// Apply `queued`, each request according to its tier: a graph edit is
-    /// built, applied, and recorded; a view op goes straight to the layout; an
-    /// app command is parked for `App`.
+    /// built, applied, and recorded; a view op goes straight to the layout.
+    /// The app tier never reaches here — it stays queued for the shell.
     ///
     /// Nothing raised here can legitimately be malformed. Widgets read every
     /// identity they emit out of the live document, so the worst they build
@@ -126,24 +112,21 @@ impl Editor {
     /// Returns nothing: what the caller would do with the outcome is a
     /// [`StepSignals`] effect, landed by [`Self::absorb_signals`] alongside
     /// the other two rather than handed back to be acted on separately.
-    fn commit_batch(&mut self, open: &mut OpenDocument, queued: impl IntoIterator<Item = Request>) {
+    fn commit_batch(
+        &mut self,
+        open: &mut OpenDocument,
+        queued: impl IntoIterator<Item = DocumentRequest>,
+    ) {
         let mut batch = Vec::new();
         let mut signals = StepSignals::default();
         for item in queued {
             let intent = match item {
-                Request::Graph(intent) => intent,
+                DocumentRequest::Graph(intent) => intent,
                 // Applied straight to the layout: pane arrangement is
                 // navigation, so it records no step, raises no signal, and
                 // breaks no run of graph edits around it.
-                Request::View(op) => {
+                DocumentRequest::View(op) => {
                     open.document.apply_dock_op(op);
-                    continue;
-                }
-                // Nothing here can run without `&mut App` — a dialog, the
-                // worker, the preferences file — so it waits for the pass to
-                // finish. Parking it breaks no run of graph edits around it.
-                Request::App(command) => {
-                    self.commands.push(command);
                     continue;
                 }
             };
@@ -174,8 +157,8 @@ impl Editor {
     }
 
     /// Run one frame of the edit pipeline against `ctx` — the frame's
-    /// read-only world — returning the [`AppCommand`]s it surfaced, in the
-    /// order raised, for `App` to execute now that the pass is over.
+    /// read-only world — draining everything it raises against the document
+    /// and leaving the app tier queued in `requests` for the shell.
     ///
     /// The frame splits into a **navigation phase** (settle which tab is
     /// active, from frame-top inputs) and an **edit phase** (mutate the
@@ -187,16 +170,16 @@ impl Editor {
         open: &mut OpenDocument,
         ctx: AppCtx<'_>,
         preferences: &mut Preferences,
-    ) -> Vec<AppCommand> {
-        self.requests.clear();
-        self.commands.clear();
+        requests: &mut Requests,
+    ) {
+        requests.clear();
         self.needs_relayout = false;
 
         // Settle the active tab entirely from frame-top inputs (keyboard
         // undo/redo + last-frame click responses). `navigate` reads *last*
         // frame's projection to resolve tab/chip clicks, so it must run
         // before this frame's rebuild. After it, the active tab is fixed.
-        self.navigate(ui, open, ctx);
+        self.navigate(ui, open, ctx, requests);
 
         // Tabs are settled: drop viewer state for closed tabs.
         self.sync_image_viewers(open);
@@ -219,17 +202,16 @@ impl Editor {
         // the record so Pass A sees the settled doc. Driven by the panes on
         // screen, like the record pass below — a pane kind that grows input
         // handling gets an arm there rather than another question here.
-        self.main_window
-            .prepass(ui, ctx, &open.document, &mut self.requests);
-        self.drain_requests(open);
+        self.main_window.prepass(ui, ctx, &open.document, requests);
+        self.drain_requests(open, requests);
 
-        self.menu_shortcut(ui);
+        self.menu_shortcut(ui, requests);
         self.main_window
-            .frame(ui, ctx, &open.document, preferences, &mut self.requests);
+            .frame(ui, ctx, &open.document, preferences, requests);
 
         // Post-record drain — graph edits the record surfaced (node select,
         // cache toggle, const edit), plus the tab strip's dock ops.
-        self.drain_requests(open);
+        self.drain_requests(open, requests);
 
         // Sole consumption point for the frame's accumulated signal (edits,
         // tab switch, undo/redo), and darkroom's only `request_relayout`.
@@ -240,7 +222,6 @@ impl Editor {
         if self.needs_relayout {
             ui.request_relayout();
         }
-        std::mem::take(&mut self.commands)
     }
 
     /// Settle which tab is active for this frame, from inputs all available
@@ -249,15 +230,21 @@ impl Editor {
     ///
     /// Done up front so the edit pipeline runs against a settled document
     /// and a switched-to tab records in the same present's Pass A.
-    fn navigate(&mut self, ui: &mut Ui, open: &mut OpenDocument, ctx: AppCtx<'_>) {
+    fn navigate(
+        &mut self,
+        ui: &mut Ui,
+        open: &mut OpenDocument,
+        ctx: AppCtx<'_>,
+        requests: &mut Requests,
+    ) {
         self.apply_undo_redo(ui, open);
         // Surface tab clicks from last frame's responses. Those responses are
         // last frame's; the document they resolve against is this frame's,
         // so a hit on a node the undo above removed simply finds nothing.
         self.main_window
-            .scan_navigation(ui, ctx, &open.document, &mut self.requests);
+            .scan_navigation(ui, ctx, &open.document, requests);
         // Dock ops apply straight to the layout — drain them.
-        self.drain_requests(open);
+        self.drain_requests(open, requests);
         // A tab whose node is gone can't stay open.
         open.document.reconcile_with_graph();
     }
@@ -301,7 +288,7 @@ impl Editor {
     /// the others' subscription that frame). Save-As (Ctrl+Shift+S) is
     /// checked before Save (Ctrl+S) so the shift variant wins its
     /// combo. Theme actions are menu-only — no shortcut.
-    fn menu_shortcut(&mut self, ui: &mut Ui) {
+    fn menu_shortcut(&self, ui: &mut Ui, requests: &mut Requests) {
         let new = ui.key_pressed(NEW_SHORTCUT);
         let open = ui.key_pressed(OPEN_SHORTCUT);
         let save_as = ui.key_pressed(SAVE_AS_SHORTCUT);
@@ -323,7 +310,7 @@ impl Editor {
         } else {
             return;
         };
-        self.requests.push_app(command);
+        requests.push_app(command);
     }
 
     /// Drain `requests`, landing each on its tier, and push the whole frame's
@@ -332,17 +319,12 @@ impl Editor {
     /// unbinding M ports) is one Cmd-Z. Marks the projection dirty when
     /// anything applied (so the pre-record rebuild folds the change in) and
     /// accumulates the relayout signal.
-    fn drain_requests(&mut self, open: &mut OpenDocument) {
+    fn drain_requests(&mut self, open: &mut OpenDocument, requests: &mut Requests) {
         // Called three times a frame and usually with nothing queued.
-        if self.requests.is_empty() {
+        if requests.is_empty() {
             return;
         }
-        // Move the scratch buffer out so it can drive the commit (which
-        // borrows `self` mutably), then put the now-empty buffer back to
-        // reuse its allocation next frame.
-        let mut scratch = std::mem::take(&mut self.requests);
-        self.commit_batch(open, scratch.drain());
-        self.requests = scratch;
+        self.commit_batch(open, requests.drain_document());
     }
 
     /// Keep the viewer tabs in step with the document by dropping navigation
@@ -431,7 +413,7 @@ mod tests {
 
         let tab = TabRef::ImageViewer(node_id);
         test.open.dirty = false;
-        test.editor.requests.push_view(DockOp::OpenTab { tab });
+        test.requests.push_view(DockOp::OpenTab { tab });
         test.drain();
         assert!(
             test.open.document.layout.all_tabs().any(|t| t == tab),
@@ -491,8 +473,8 @@ mod tests {
         let node_id = NodeId::unique();
         let tab = TabRef::ImageViewer(node_id);
 
-        test.editor.requests.push_view(DockOp::OpenTab { tab });
-        test.editor.requests.push_view(DockOp::OpenTab { tab });
+        test.requests.push_view(DockOp::OpenTab { tab });
+        test.requests.push_view(DockOp::OpenTab { tab });
         test.drain();
         assert_eq!(
             test.open
