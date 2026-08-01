@@ -97,7 +97,12 @@ impl NodeMenuUi {
             }
             // One intent per member, batched into a single undo entry by the
             // drain — the Delete chord's path exactly.
-            MenuChoice::Remove => out.push_node_removals(graph_ctx.selected().iter().copied()),
+            MenuChoice::Remove => out.extend_graph(
+                graph_ctx
+                    .selected()
+                    .iter()
+                    .map(|&node_id| GraphIntent::RemoveNode { node_id }),
+            ),
         }
     }
 }

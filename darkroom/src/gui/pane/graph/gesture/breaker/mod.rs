@@ -322,7 +322,11 @@ impl BreakerUI {
             broken_subscriptions,
             ..
         } = scribble;
-        out.push_node_removals(broken_nodes.iter().copied());
+        out.extend_graph(
+            broken_nodes
+                .iter()
+                .map(|&node_id| GraphIntent::RemoveNode { node_id }),
+        );
         for addr in broken.drain(..) {
             if broken_nodes.contains(&addr.node_id) {
                 continue;
