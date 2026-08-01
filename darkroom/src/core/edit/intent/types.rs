@@ -23,6 +23,7 @@ use scenarium::DetachedNode;
 use scenarium::{Binding, CacheMode, InputPort, Node, NodeId, Subscription};
 use serde::{Deserialize, Serialize};
 
+use crate::core::document::PortRef;
 use crate::core::document::{ItemPlacement, Viewport};
 
 /// One scalar node property an editor can toggle — the payload of
@@ -182,6 +183,64 @@ pub(crate) enum GraphIntent {
     },
 }
 
+impl GraphIntent {
+    /// [`Self::SetInput`] over a [`PortRef`] — the UI's port coordinate — so a
+    /// widget that has one does not restate the `PortRef` → [`InputPort`]
+    /// conversion at every call. `None` clears the binding.
+    /// The intents a click on `key` produces: the selection change, plus a
+    /// lift to the top of the paint stack so a clicked node comes to the
+    /// front. The raise is skipped only when a Shift-click *removes* `key`
+    /// from the selection — a node you just deselected shouldn't jump
+    /// forward. Shared by the node body, its header title and its port
+    /// labels, so clicking any of them behaves like clicking the body.
+    ///
+    /// Takes the committed selection rather than a UI context: that is the
+    /// only thing either rule reads, and it keeps the click policy beside the
+    /// intents it builds instead of in the widget that raises them.
+    pub(crate) fn click(
+        shift: bool,
+        selected: &BTreeSet<NodeId>,
+        key: NodeId,
+    ) -> impl Iterator<Item = Self> {
+        let deselecting = shift && selected.contains(&key);
+        std::iter::once(Self::select_click(shift, selected, key))
+            .chain((!deselecting).then_some(Self::Raise { key }))
+    }
+
+    /// The [`Self::SetSelection`] a click on `key` produces: a plain click
+    /// selects only it, a Shift-click toggles its membership.
+    /// `UndoStep::is_noop` drops the entry when nothing changed.
+    fn select_click(shift: bool, selected: &BTreeSet<NodeId>, key: NodeId) -> Self {
+        let mut to = if shift {
+            selected.clone()
+        } else {
+            BTreeSet::new()
+        };
+        if shift && selected.contains(&key) {
+            to.remove(&key);
+        } else {
+            to.insert(key);
+        }
+        Self::SetSelection { to }
+    }
+
+    /// Drop the whole selection. Named rather than spelled `SetSelection`
+    /// with an empty set at each call, so a reader sees the intent and not
+    /// the mechanism.
+    pub(crate) fn clear_selection() -> Self {
+        Self::SetSelection {
+            to: BTreeSet::new(),
+        }
+    }
+
+    pub(crate) fn set_input(port: PortRef, to: impl Into<Option<Binding>>) -> Self {
+        Self::SetInput {
+            input: InputPort::new(port.node_id, port.port_idx),
+            to: to.into(),
+        }
+    }
+}
+
 /// Self-contained undo-stack entry. Each leaf variant carries both
 /// halves: the forward "to" payload (read by `apply_step`) and the
 /// backward "from" payload (read by `revert_step`). Built from an
@@ -291,4 +350,47 @@ pub(crate) enum GestureKey {
     /// A group drag, keyed by whichever node the pointer latched, so two
     /// different grabbed nodes never coalesce.
     SelectionDrag(NodeId),
+}
+
+#[cfg(test)]
+mod click_tests {
+    use super::*;
+
+    /// A plain click always lifts its node to the front; a Shift-click that
+    /// *removes* a node must not, or deselecting would jump it forward.
+    #[test]
+    fn click_raises_unless_shift_deselects() {
+        let (a, b) = (NodeId::unique(), NodeId::unique());
+        let sel = |ids: &[NodeId]| ids.iter().copied().collect::<BTreeSet<_>>();
+        let click = |shift, selected: BTreeSet<NodeId>, key| {
+            GraphIntent::click(shift, &selected, key).collect::<Vec<_>>()
+        };
+
+        // Plain click on an unselected node: select it, then raise it.
+        let out = click(false, sel(&[]), a);
+        assert_eq!(out.len(), 2);
+        assert!(matches!(out[0], GraphIntent::SetSelection { .. }));
+        assert!(matches!(out[1], GraphIntent::Raise { key } if key == a));
+
+        // Plain click on an already-selected node still raises it.
+        let out = click(false, sel(&[a]), a);
+        assert!(
+            out.iter()
+                .any(|i| matches!(i, GraphIntent::Raise { key } if *key == a)),
+            "a plain click always lifts its node to the front"
+        );
+
+        // Shift-click adding a fresh node to the selection raises it.
+        let out = click(true, sel(&[a]), b);
+        assert!(
+            out.iter()
+                .any(|i| matches!(i, GraphIntent::Raise { key } if *key == b)),
+            "shift-adding a node raises it"
+        );
+
+        // Shift-click removing a node does NOT raise it.
+        let out = click(true, sel(&[a, b]), b);
+        assert_eq!(out.len(), 1, "shift-deselect suppresses the raise");
+        assert!(matches!(out[0], GraphIntent::SetSelection { .. }));
+    }
 }
