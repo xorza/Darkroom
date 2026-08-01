@@ -558,8 +558,9 @@ impl GraphUI {
                             };
                             connection::draw(ui, &mut wires);
                             subscription::draw(ui, &mut wires);
-                            // Node bodies paint in `scene.z_order`, so a
-                            // clicked node raises above its neighbours.
+                            // Node bodies paint back-to-front by each
+                            // placement's depth (`GraphView::paint_order`), so
+                            // a clicked node raises above its neighbours.
                             node_ui.draw_all(ui, dcx, &mut probe, out);
                         }
                         // Inspection panels paint after the node bodies so
