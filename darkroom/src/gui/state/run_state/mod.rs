@@ -35,6 +35,7 @@ use std::time::Instant;
 
 use palantir::Ui;
 
+use crate::core::document::Document;
 use crate::core::runtime_host::RuntimeHost;
 use scenarium::CompiledGraph;
 use scenarium::LogLevel;
@@ -378,36 +379,37 @@ impl RunState {
         self.nodes.entry(node_id).or_default().error = Some(error.to_string());
     }
 
-    /// Store what preview nodes published this frame, against the authored
-    /// nodes that published them.
+    /// The preview store's whole per-frame upkeep: take in what nodes
+    /// published, then sweep what the document no longer holds and upload the
+    /// textures the visible viewers need.
     ///
-    /// Nothing to resolve, unlike the old pinned push: a preview is
-    /// entry-only, so its execution id attributes to exactly one authored node
-    /// and that node is the widget. A value whose id belongs to an earlier
-    /// compile is dropped — the node it named may not exist any more, and a
-    /// preview only ever shows the current run's value anyway.
+    /// One pass because the two halves are ordered — a value published this
+    /// frame has to be in the store before the sweep decides what to keep and
+    /// what to upload, or it is taken in and immediately reconsidered against
+    /// a document that has already been walked.
     ///
-    /// Stores only; the store's own reconcile pass — which runs right after
-    /// this one — is what releases a value whose node is gone and uploads a
-    /// full-resolution texture for an open viewer.
+    /// Nothing to resolve on the way in, unlike the old pinned push: a preview
+    /// is entry-only, so its execution id attributes to exactly one authored
+    /// node and that node is the widget. A value whose id belongs to an
+    /// earlier compile is dropped — the node it named may not exist any more,
+    /// and a preview only ever shows the current run's value anyway.
     ///
     /// **After [`Self::drain_from`]**, which is what makes `compiled` name the
     /// compile the report stream just acknowledged. Run before it and a value
     /// from the new run is gated against the old compile and silently dropped.
-    pub(crate) fn ingest_published(&mut self, runtime: &RuntimeHost, ui: &Ui) {
-        let published = runtime.drain_previews();
-        if published.is_empty() {
-            return;
-        }
-        let Some(compiled) = self.compiled.clone() else {
-            return;
-        };
-        for (node_id, value) in published {
-            if !compiled.contains(node_id) {
-                continue;
+    pub(crate) fn sync_previews(&mut self, runtime: &RuntimeHost, ui: &Ui, document: &Document) {
+        for (node_id, value) in runtime.drain_previews() {
+            // The gate's borrow ends with the condition, so the store can be
+            // written in the body without cloning the compile to release it.
+            if self
+                .compiled
+                .as_ref()
+                .is_some_and(|compiled| compiled.contains(node_id))
+            {
+                self.previews.ingest_preview(ui, node_id, value);
             }
-            self.previews.ingest_preview(ui, node_id, value);
         }
+        self.previews.reconcile(ui, document);
     }
 
     /// Drop the document-derived half: no glow, timings, logs, or published

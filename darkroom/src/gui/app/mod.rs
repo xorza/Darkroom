@@ -155,12 +155,8 @@ impl App {
     /// skips a panel whose node is gone — so the lag costs memory and nothing
     /// else.
     fn reconcile_derived_state(&mut self, ui: &Ui) {
-        // Before the reconcile below, so a value published this frame is in
-        // the store when the sweep decides what to keep and what to upload.
-        self.run_state.ingest_published(&self.runtime, ui);
         self.run_state
-            .previews
-            .reconcile(ui, &self.session.open.document);
+            .sync_previews(&self.runtime, ui, &self.session.open.document);
         self.session.reconcile_caches();
     }
 
