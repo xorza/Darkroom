@@ -54,19 +54,19 @@ fn null_falls_back_to_positional_port_color() {
     let t = Theme::dark();
     assert_eq!(
         port_color(&t, &DataType::Any, PortKind::Input, false),
-        t.colors.input_port.rest
+        t.ports.input.rest
     );
     assert_eq!(
         port_color(&t, &DataType::Any, PortKind::Output, false),
-        t.colors.output_port.rest
+        t.ports.output.rest
     );
     assert_eq!(
         port_color(&t, &DataType::Any, PortKind::Input, true),
-        t.colors.input_port.hover
+        t.ports.input.hover
     );
     assert_eq!(
         port_color(&t, &DataType::Any, PortKind::Output, true),
-        t.colors.output_port.hover
+        t.ports.output.hover
     );
 }
 
@@ -109,8 +109,8 @@ fn event_color_is_neutral_and_lifts_on_hover() {
     for t in [Theme::dark(), Theme::light()] {
         let rest = event_color(&t, false);
         let hov = event_color(&t, true);
-        assert_eq!(rest, t.colors.event_port.rest);
-        assert_eq!(hov, t.colors.event_port.hover);
+        assert_eq!(rest, t.ports.event.rest);
+        assert_eq!(hov, t.ports.event.hover);
         assert_ne!(rest, hov, "hover must visibly differ from rest");
     }
 }

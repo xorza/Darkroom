@@ -395,7 +395,7 @@ impl BreakerUI {
             Shape::polyline(
                 &self.scribble.points,
                 PolylineColors::Single(theme.colors.breaker_stroke),
-                theme.breaker_stroke_width,
+                theme.stroke_width,
             )
             .cap(LineCap::Round)
             .join(LineJoin::Round),

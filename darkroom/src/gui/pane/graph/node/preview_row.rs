@@ -48,6 +48,7 @@ pub(crate) fn preview_image_wid(node_id: NodeId) -> WidgetId {
 /// Draw one preview node's value area, plus the image info footer when there is
 /// an image to describe.
 pub(super) fn preview_row(ui: &mut Ui, ncx: NodeCtx<'_>) {
+    let theme = ncx.theme();
     let node = ncx;
     let stored = ncx.graph_ctx.run_state().previews.entries.get(&node.id);
     let has_image = stored.and_then(StoredContent::image).is_some();
@@ -71,7 +72,7 @@ pub(super) fn preview_row(ui: &mut Ui, ncx: NodeCtx<'_>) {
                     .and_then(StoredContent::message)
                     .unwrap_or(EMPTY_LABEL);
                 Text::new(text)
-                    .style(&sized_text(ui, 11.0))
+                    .style(&sized_text(ui, theme.text.label))
                     .text_wrap(TextWrap::Wrap)
                     .show(ui);
             }
@@ -100,13 +101,14 @@ fn info_row(ui: &mut Ui, theme: &Theme, image: &PreviewImage) {
         .child_align(Align::v(VAlign::Center))
         // Round only the bottom corners so the strip seats into the body's
         // rounded bottom, the way the header rounds the top.
-        .background(footer_background(theme, theme.card_inner_radius()))
+        .background(footer_background(theme, theme.card.inner_radius()))
         .show(ui, |ui| {
             bare_value(
                 ui,
+                theme,
                 format!("{}\u{d7}{}", image.native_size.x, image.native_size.y),
             );
-            bare_value(ui, format_label(image.native_format));
+            bare_value(ui, theme, format_label(image.native_format));
             Panel::hstack()
                 .id_salt("preview_info_size")
                 .size((Sizing::HUG, Sizing::HUG))
@@ -127,8 +129,10 @@ fn format_label(format: ColorFormat) -> String {
 
 /// A bare mono-styled value with no label — used where the value's own shape
 /// (`1920×1080`, `RGBA · 8-bit`) already says what it is.
-fn bare_value(ui: &mut Ui, text: String) {
-    Text::new(text).style(&mono_text(ui, 10.5)).show(ui);
+fn bare_value(ui: &mut Ui, theme: &Theme, text: String) {
+    Text::new(text)
+        .style(&mono_text(ui, theme.text.label))
+        .show(ui);
 }
 
 #[cfg(test)]

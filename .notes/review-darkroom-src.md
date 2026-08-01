@@ -45,19 +45,6 @@ nothing here is about the struct.
 - [ ] The control-panel roster and its widgets: `readout_pill`,
       `filter_toggle`, `control_wid`, the backdrop radio table.
 
-## Typography sits outside the theme while every other dimension is in it
-
-`Theme` carries 15 layout `f32`s (`node_min_width`, `port_gap`,
-`canvas_dot_spacing`, …) but no type scale, so font size is a literal at the
-point of use.
-
-- [ ] 27 call sites pass a bare number to `sized_text` / `colored_text` /
-      `muted_text` / `mono_text` — seven distinct sizes (8.5, 10.5, 11, 12, 13,
-      14, 15), with no name saying which tier any of them is.
-- [ ] `gui/pane/graph/paint/inspector.rs` reacts by defining a *private* type
-      scale — `title_style`, `body_style`, `muted_style` — that only that panel
-      can use, so the next surface wanting "body text" re-picks a number.
-
 ## `Theme`'s two halves are shaped differently
 
 The palette half is macro-generated (`palette_struct!` builds `PaletteColors`

@@ -280,7 +280,7 @@ impl ConnectionUI {
         let theme = graph_ctx.theme();
         let drag_ty = port_data_type(graph_ctx, start_port).unwrap_or_default();
         let color = port_color(theme, &drag_ty, start_port.kind, false);
-        Wire::data(p0, p3).add(ui, theme.connection_width, CurveBrush::Solid(color));
+        Wire::data(p0, p3).add(ui, theme.stroke_width, CurveBrush::Solid(color));
     }
 }
 
@@ -319,7 +319,7 @@ fn data_tint(theme: &Theme, graph_ctx: GraphCtx<'_>, src: PortRef, tgt: PortRef)
     let src_ty = port_data_type(graph_ctx, src).unwrap_or_default();
     let tgt_ty = port_data_type(graph_ctx, tgt).unwrap_or_default();
     if !tgt_ty.compatible_with(&src_ty) {
-        return WireTint::flat(theme.colors.exec_missing_glow);
+        return WireTint::flat(theme.status.warning);
     }
     WireTint::new(
         port_color(theme, &src_ty, PortKind::Output, false),

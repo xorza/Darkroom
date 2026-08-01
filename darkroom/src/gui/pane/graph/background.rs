@@ -46,9 +46,9 @@ struct DotKey {
 impl DotKey {
     fn from_theme(theme: &Theme) -> Self {
         Self {
-            color: theme.colors.canvas_dot.to_srgb_u8(),
-            radius_bits: theme.canvas_dot_radius.to_bits(),
-            spacing_bits: theme.canvas_dot_spacing.to_bits(),
+            color: theme.canvas.dot.to_srgb_u8(),
+            radius_bits: theme.canvas.dot_radius.to_bits(),
+            spacing_bits: theme.canvas.dot_spacing.to_bits(),
         }
     }
 }
@@ -60,7 +60,7 @@ impl CanvasBackground {
     /// live viewport; a screen point `s` maps to grid coord
     /// `(s - pan) / tile_px`, which is exactly the tile UV.
     pub(super) fn draw(&mut self, ui: &mut Ui, theme: &Theme, pan: Vec2, zoom: f32) {
-        let spacing = theme.canvas_dot_spacing;
+        let spacing = theme.canvas.dot_spacing;
         if zoom <= f32::EPSILON || spacing <= f32::EPSILON {
             return;
         }
@@ -118,8 +118,8 @@ fn wrap_multiplier(zoom: f32) -> f32 {
 /// on-screen radius matches `canvas_dot_radius`.
 fn build_tile(theme: &Theme) -> Image {
     let n = TILE_PX;
-    let radius = (theme.canvas_dot_radius * n as f32 / theme.canvas_dot_spacing).max(0.5);
-    let c = theme.colors.canvas_dot.to_srgb_u8();
+    let radius = (theme.canvas.dot_radius * n as f32 / theme.canvas.dot_spacing).max(0.5);
+    let c = theme.canvas.dot.to_srgb_u8();
     let center = n as f32 * 0.5;
     let r2 = radius * radius;
     let mut pixels = Vec::with_capacity((n * n * 4) as usize);

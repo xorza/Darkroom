@@ -236,9 +236,9 @@ impl WirePass<'_, '_> {
             return false;
         }
         let broken = self.probe.crosses_wire(wire);
-        let stroke =
-            self.emphasis
-                .stroke(self.dcx.theme().connection_width, broken, endpoint_hover);
+        let stroke = self
+            .emphasis
+            .stroke(self.dcx.theme().stroke_width, broken, endpoint_hover);
         // A broken wire paints flat so the alarm read isn't diluted by the
         // family's own gradient, and it outranks the hover tint outright.
         let brush = if broken {

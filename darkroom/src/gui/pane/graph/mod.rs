@@ -497,7 +497,7 @@ impl GraphUI {
             .size((Sizing::FILL, Sizing::FILL))
             .sense(Sense::CLICK | Sense::DRAG | Sense::SCROLL | Sense::PINCH)
             .clip_rect()
-            .background(Background::fill(theme.colors.canvas_bg))
+            .background(Background::fill(theme.canvas.bg))
             .show(ui, |ui| {
                 // Dotted backdrop in screen space, beneath the inner
                 // (transformed) canvas — so it paints under everything.
@@ -543,7 +543,7 @@ impl GraphUI {
                             let fading = connection_ui.is_dragging()
                                 || subscription_ui.is_dragging()
                                 || probe.is_active();
-                            let emphasis = WireEmphasis::resolve(theme.colors.canvas_bg, fading);
+                            let emphasis = WireEmphasis::resolve(theme.canvas.bg, fading);
                             // Both wire renderers share these inputs, so
                             // they're bundled once and reborrowed into each.
                             // Subscription wires sit under the node bodies

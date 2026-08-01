@@ -202,7 +202,7 @@ impl SubscriptionUI {
         let theme = graph_ctx.theme();
         Wire::event(p0, p3).add(
             ui,
-            theme.connection_width,
+            theme.stroke_width,
             CurveBrush::Solid(event_color(theme, false)),
         );
     }

@@ -76,8 +76,8 @@ pub(super) fn show(ui: &mut Ui, cx: CanvasCtx<'_>, out: &mut Requests) {
                     // buttons below.
                     if Chip::new(run_button_wid(), run_tip)
                         .toggled(running)
-                        .idle_glyph(theme.colors.exec_executed_glow)
-                        .toggled_fill(theme.colors.exec_running_glow)
+                        .idle_glyph(theme.status.success)
+                        .toggled_fill(theme.status.busy)
                         .show(ui, theme, draw_play)
                     {
                         out.push_app(AppCommand::Run(if running {
@@ -95,7 +95,7 @@ pub(super) fn show(ui: &mut Ui, cx: CanvasCtx<'_>, out: &mut Requests) {
                     };
                     if Chip::new(events_button_wid(), events_tip)
                         .toggled(event_loop_active)
-                        .toggled_fill(theme.colors.exec_running_glow)
+                        .toggled_fill(theme.status.busy)
                         .show(ui, theme, draw_play_bar)
                     {
                         out.push_app(AppCommand::Run(if event_loop_active {

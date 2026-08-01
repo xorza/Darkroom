@@ -70,7 +70,7 @@ const RUN_TIME_MIN_WIDTH: f32 = 52.0;
 /// drop-snapping (rect-based) still accepts the whole box. `hovered` (set
 /// while a drag snaps to it) tints the triangle as drop feedback.
 pub(super) fn subscription_pin(ui: &mut Ui, theme: &Theme, node: NodeCtx<'_>, hovered: bool) {
-    let port = theme.port_size;
+    let port = theme.ports.size;
     let hit = port * PORT_HIT_SCALE;
     let inset = (hit - port) * 0.5;
     // Rotate the base (left-pointing) triangle +45° about its center so the
@@ -126,9 +126,9 @@ pub(super) fn header(ui: &mut Ui, ncx: NodeCtx<'_>, dcx: DrawCtx<'_>, out: &mut 
     let (theme, node) = (ncx.theme(), ncx);
     // The header sits inside the body's border stroke (the layout folds
     // the stroke width into the body's padding), so it must round to the
-    // stroke's *inner* radius, not the card's outer `node_corner_radius` —
+    // stroke's *inner* radius, not the card's outer `corner_radius` —
     // see `Theme::card_inner_radius`.
-    let r = theme.card_inner_radius();
+    let r = theme.card.inner_radius();
     Panel::hstack()
         .id_salt("header")
         .size((Sizing::FILL, Sizing::HUG))
@@ -384,7 +384,7 @@ fn play_chip(ui: &mut Ui, theme: &Theme, node: NodeCtx<'_>) {
         draw_play_triangle,
         theme.colors.text_muted,
     )
-    .hover_color(theme.colors.exec_executed_glow)
+    .hover_color(theme.status.success)
     .show(ui);
 }
 

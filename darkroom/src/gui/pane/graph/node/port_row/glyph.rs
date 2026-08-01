@@ -123,7 +123,7 @@ pub(super) fn event_glyph(
     margin: Spacing,
     tip: &str,
 ) {
-    let port = theme.port_size;
+    let port = theme.ports.size;
     glyph_frame(ui, wid, port, margin, tip, |ui, inset| {
         // Right-pointing isosceles triangle filling the port box: the apex
         // points outward (away from the node body), matching the emit

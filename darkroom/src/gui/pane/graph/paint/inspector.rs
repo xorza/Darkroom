@@ -153,7 +153,7 @@ impl Inspectors {
             let node_w = geometry
                 .node_world_rect(node)
                 .map(|r| r.size.w)
-                .unwrap_or(theme.node_min_width);
+                .unwrap_or(theme.card.min_width);
             let pos = node.pos + Vec2::new(node_w + theme.floating_widget_gap, 0.0);
             let ncx = node.with_hover(node_hovered(ui, node.id));
             self.draw_one(ui, ncx, mode, pos);
@@ -172,18 +172,15 @@ impl Inspectors {
             InspectMode::Pinned => theme.colors.badge_graph,
             InspectMode::Open => Color::TRANSPARENT,
         };
-        let chrome = Background::rounded(
-            theme.colors.node_fill,
-            Corners::all(theme.node_corner_radius),
-        )
-        .with_stroke(Stroke::solid(border, 1.0))
-        // Same elevation swatch as the node bodies, so every floating
-        // surface casts one kind of shadow (bigger blur — the panel sits higher).
-        .with_shadow(Shadow::drop(
-            theme.colors.node_ambient_shadow,
-            Vec2::new(0.0, 3.0),
-            12.0,
-        ));
+        let chrome = Background::rounded(theme.card.fill, Corners::all(theme.card.corner_radius))
+            .with_stroke(Stroke::solid(border, 1.0))
+            // Same elevation swatch as the node bodies, so every floating
+            // surface casts one kind of shadow (bigger blur — the panel sits higher).
+            .with_shadow(Shadow::drop(
+                theme.card.ambient_shadow,
+                Vec2::new(0.0, 3.0),
+                12.0,
+            ));
         Panel::vstack()
             .id(inspect_panel_wid(node.id))
             .position(pos)
@@ -199,7 +196,7 @@ impl Inspectors {
                     node.name()
                 };
                 let repeated_kind = node.kind_label().eq_ignore_ascii_case(title);
-                line(ui, title, title_style(ui));
+                line(ui, title, title_style(theme, ui));
                 // The kind line earns its row only when it says something the
                 // title doesn't — an unrenamed node repeats its func name.
                 if !repeated_kind {
@@ -216,7 +213,7 @@ impl Inspectors {
                     status,
                     TextStyle {
                         color: status_color,
-                        ..body_style(ui)
+                        ..body_style(theme, ui)
                     },
                 );
                 // The actual failure cause beneath the bare "errored" line, in
@@ -227,8 +224,8 @@ impl Inspectors {
                         ui,
                         message,
                         TextStyle {
-                            color: theme.colors.exec_errored_glow,
-                            ..body_style(ui)
+                            color: theme.status.error,
+                            ..body_style(theme, ui)
                         },
                     );
                 }
@@ -267,7 +264,7 @@ impl Inspectors {
                             &entry.message,
                             TextStyle {
                                 color: log_color(theme, ui, entry.level),
-                                ..body_style(ui)
+                                ..body_style(theme, ui)
                             },
                         );
                     }
@@ -281,8 +278,8 @@ impl Inspectors {
 fn log_color(theme: &Theme, ui: &Ui, level: LogLevel) -> Color {
     match level {
         LogLevel::Info => ui.theme.text.color.with_alpha(0.85),
-        LogLevel::Warn => theme.colors.exec_missing_glow,
-        LogLevel::Error => theme.colors.exec_errored_glow,
+        LogLevel::Warn => theme.status.warning,
+        LogLevel::Error => theme.status.error,
     }
 }
 
@@ -339,7 +336,7 @@ fn port_row(
     let label = port_label(library, name, ty);
     line(ui, label, muted_style(theme, ui));
     if let Some(v) = val {
-        line(ui, v, body_style(ui));
+        line(ui, v, body_style(theme, ui));
     }
 }
 
@@ -358,19 +355,19 @@ fn port_label<'a>(library: &Library, name: &'a str, ty: &DataType) -> TextInput<
     TextInput::Owned(format!("{name} \u{b7} {ty_name}"))
 }
 
-fn title_style(ui: &Ui) -> TextStyle {
-    sized_text(ui, 14.0)
+fn title_style(theme: &Theme, ui: &Ui) -> TextStyle {
+    sized_text(ui, theme.text.title)
 }
 
 /// The panel's de-emphasized ink. `port_label`, not `text_muted`: the panel
 /// surface is the node fill, exactly the combination the light palette's
 /// `text_muted` is too faint for (see the `port_label` slot).
 fn muted_style(theme: &Theme, ui: &Ui) -> TextStyle {
-    colored_text(ui, theme.colors.port_label, 11.0)
+    colored_text(ui, theme.ports.label, theme.text.label)
 }
 
-fn body_style(ui: &Ui) -> TextStyle {
-    sized_text(ui, 12.0)
+fn body_style(theme: &Theme, ui: &Ui) -> TextStyle {
+    sized_text(ui, theme.text.body)
 }
 
 /// The value tier of an input row.
