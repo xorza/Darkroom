@@ -27,34 +27,11 @@ passes whose length comes from nesting closures rather than from doing more.
       branches barely share anything but the id.
 - [ ] `gui/pane/preferences/mod.rs::model_row` — 128 lines for one settings
       row, most of it the path field's mirror/commit bookkeeping.
-- [ ] `gui/pane/viewer/mod.rs::show` — 119 lines.
 - [ ] `gui/window/mod.rs::frame` — 102 lines, the per-tab-kind dispatch buried
       inside the dock's content closure.
 
-## `gui/pane/viewer/mod.rs` is a grab-bag around one struct
+## `Theme` stores one sub-theme twice
 
-757 lines holding `ImageViewer` *and* three unrelated vocabularies. The same
-shape `gui/pane/graph/mod.rs` had before its split, and the same fix applies —
-nothing here is about the struct.
-
-- [ ] The glyph vocabulary: `draw_fit`, `draw_100`, `draw_pixels`,
-      `draw_swatch`, `checker_image`.
-- [ ] The coordinate math: `fit_viewport`, `draw_rect`, `logical_image_size`,
-      `zoom_about_pane_center` — the viewer's half of the affine-camera
-      algebra whose other half lives in `gesture/pan_zoom`.
-- [ ] The control-panel roster and its widgets: `readout_pill`,
-      `filter_toggle`, `control_wid`, the backdrop radio table.
-
-## `Theme`'s two halves are shaped differently
-
-The palette half is macro-generated (`palette_struct!` builds `PaletteColors`
-with its `DARK`/`LIGHT` pair, so the two presets cannot drift). The dimension
-half got none of that treatment.
-
-- [ ] 15 loose `f32` fields sit directly on `Theme` beside the tables, with no
-      grouping type and no macro — the asymmetry is what makes the field
-      *order* load-bearing, since TOML rejects a scalar after a table and a
-      comment at the top of the struct has to say so.
 - [ ] `static_value_editor_revealed` is a precomputed derived copy of
       `static_value_editor` stored beside its base, so the struct holds the
       same bundle twice with a comment asking that the pair not drift.
