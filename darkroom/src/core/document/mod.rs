@@ -294,10 +294,12 @@ impl Document {
     /// on this list — nothing else enforces it, so this is where to look and
     /// what to extend.
     ///
-    /// Two neighbours are deliberately *not* on it, because neither asks this
+    /// Three neighbours are deliberately *not* on it, because none asks this
     /// question: `MainWindow::image_viewers` is keyed by node but lives as long
-    /// as its *tab*, and [`Self::reconcile_with_graph`] is the document
-    /// repairing itself rather than a cache being swept.
+    /// as its *tab*; [`Self::reconcile_with_graph`] is the document repairing
+    /// itself rather than a cache being swept; and `RunState::nodes` is a
+    /// record of the last run rather than a cache derived from the document —
+    /// see its field doc, which gives the reasoning.
     pub(crate) fn holds_node(&self, node_id: NodeId) -> bool {
         node_alive(&self.graph, node_id)
     }
