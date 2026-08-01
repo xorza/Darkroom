@@ -45,7 +45,7 @@ fn app_root_wid() -> WidgetId {
 ///
 /// That is also why the resolved-output table lives here rather than on
 /// `Editor`: it is the context's third input, and
-/// [`GraphCtx::for_document`] resolves it against whichever document the
+/// [`GraphCtx::new`] resolves it against whichever document the
 /// entry point was handed. So each of the three below pays one resolve, over a
 /// document settled at that instant — the editor drains queued intents
 /// *between* them, and a table built once at frame top would be an edit behind
@@ -90,7 +90,7 @@ impl MainWindow {
             output_types,
             ..
         } = self;
-        graph_ui.scan_hits(ui, GraphCtx::for_document(ctx, doc, output_types));
+        graph_ui.scan_hits(ui, GraphCtx::new(ctx, doc, output_types));
         let hits = &self.graph_ui.hits;
         if let Some(node) = hits.chip(Chip::PreviewImage) {
             out.push_view(DockOp::OpenTab {
@@ -117,9 +117,7 @@ impl MainWindow {
             match tab {
                 // Reached from `active_tabs`, so a pane is showing the graph
                 // by construction — which is what `GraphUI::prepass` asserts.
-                TabRef::Graph => {
-                    graph_ui.prepass(ui, GraphCtx::for_document(ctx, doc, output_types), out)
-                }
+                TabRef::Graph => graph_ui.prepass(ui, GraphCtx::new(ctx, doc, output_types), out),
                 // Neither derives a document mutation from input: preferences
                 // edits go through their own widgets, and a viewer only
                 // navigates its own texture.
@@ -194,7 +192,7 @@ impl MainWindow {
                                 // The context carries everything the canvas
                                 // reads — theme and run included, through the
                                 // `ctx` it is composed from.
-                                let graph_ctx = GraphCtx::for_document(ctx, doc, output_types);
+                                let graph_ctx = GraphCtx::new(ctx, doc, output_types);
                                 graph_ui.draw(ui, graph_ctx, out);
                                 graph_ui.draw_toolbar(ui, graph_ctx, out);
                             });
