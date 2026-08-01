@@ -52,7 +52,7 @@ struct RubberBand {
     current: Vec2,
     /// Pre-drag selection captured at latch (empty unless Shift extends).
     /// The swept set unions onto this each frame, so we never re-read
-    /// `scene.selected` mid-drag — no dependency on the document staying
+    /// `GraphView::selected` mid-drag — no dependency on the document staying
     /// untouched, and the additive base is fixed at latch.
     ///
     /// Inside the band, not beside it: it is captured with the gesture
