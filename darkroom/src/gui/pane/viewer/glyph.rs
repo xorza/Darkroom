@@ -1,10 +1,12 @@
 //! The viewer's drawn vocabulary: the four control-button glyphs and the
 //! checkerboard tile behind a transparent image.
 //!
-//! Every one is painted from primitives rather than set in a font, so each is
-//! a pure function of the button side `s` and an ink colour — sized to its box
-//! rather than to a [`TypeScale`] tier, which is why the one glyph that *is*
-//! text ([`draw_100`]) carries its own size here.
+//! Every one is a pure function of the button side `s` and an ink colour,
+//! built from `s * k` factors so a glyph fills its box at any button size.
+//! That holds for the one glyph that is *text* rather than primitives
+//! ([`draw_100`]) too — it takes a share of `s` like its siblings rather than
+//! sitting on a [`TypeScale`] tier, because it is sized to a box and not to
+//! the reading hierarchy.
 //!
 //! [`TypeScale`]: crate::gui::theme::TypeScale
 
@@ -14,10 +16,10 @@ use crate::core::io::preferences::ViewerBackground;
 use crate::gui::theme::Theme;
 use crate::gui::widgets::support::{colored_text, filled_rect, stroked_rect};
 
-/// Font size of the one control glyph drawn as text rather than shape ("1:1").
-/// Sized to the button box like its drawn siblings, so it tracks the button
-/// side rather than a `TypeScale` tier.
-const GLYPH_PX: f32 = 11.0;
+/// The "1:1" glyph's share of its button box — the text peer of the `s * k`
+/// factors its drawn siblings are built from, so it scales with the box rather
+/// than sitting on a `TypeScale` tier.
+const LABEL_GLYPH_FILL: f32 = 0.37;
 
 /// On-screen side of one checkerboard square, logical px. Screen-fixed
 /// (doesn't pan/zoom with the image) — it's a transparency reference,
@@ -67,8 +69,8 @@ pub(super) fn draw_fit(ui: &mut Ui, s: f32, color: Color) {
 }
 
 /// "1:1" label — zoom to 100%.
-pub(super) fn draw_100(ui: &mut Ui, _s: f32, color: Color) {
-    let style = colored_text(ui, color, GLYPH_PX);
+pub(super) fn draw_100(ui: &mut Ui, s: f32, color: Color) {
+    let style = colored_text(ui, color, s * LABEL_GLYPH_FILL);
     Text::new("1:1").style(&style).align(Align::CENTER).show(ui);
 }
 
