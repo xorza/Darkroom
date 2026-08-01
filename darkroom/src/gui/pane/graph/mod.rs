@@ -159,14 +159,6 @@ pub(crate) struct GraphUI {
 }
 
 impl GraphUI {
-    /// Record the run/cancel toolbar overlaying this canvas's top-left
-    /// corner. Called from the dock's content closure right after
-    /// [`Self::draw`], so it hit-tests above the canvas and a click on it
-    /// never starts a pan.
-    pub(crate) fn draw_toolbar(&self, ui: &mut Ui, graph_ctx: GraphCtx<'_>, out: &mut Requests) {
-        toolbar::show(ui, self.canvas_ctx(graph_ctx), out);
-    }
-
     /// Sweep last frame's node responses into [`CanvasHits`]. Does nothing
     /// when no pane is showing the graph — the sweep runs before the tab set
     /// settles, so it cannot assume one.
@@ -342,10 +334,10 @@ impl GraphUI {
         appearing
     }
 
-    /// Record one graph pane: its gestures' record-phase halves, then the
-    /// canvas itself. Called once per visible graph tab from the dock's
-    /// content closure, so everything here is scoped to `graph_ctx` — the
-    /// canvas widget ids included.
+    /// Record one graph pane: its gestures' record-phase halves, the canvas
+    /// itself, and the run/cancel toolbar over it. Called once per visible
+    /// graph tab from the dock's content closure, so everything here is scoped
+    /// to `graph_ctx` — the canvas widget ids included.
     ///
     /// Anything the pane asks for — graph edits, and the commands a chip or a
     /// menu pick means — lands on `out` in the order it was raised.
@@ -357,11 +349,23 @@ impl GraphUI {
         // Pan/zoom was already folded into the document in `prepass`, and the
         // contexts built below read it straight off there, so the transform
         // sees the up-to-date viewport with nothing to re-sync. The gesture
-        // and the Esc were resolved in `prepass` too, and both halves below
-        // compose the same context off them — so the two passes cannot
-        // disagree about the frame they are drawing.
+        // and the Esc were resolved in `prepass` too, and every half below
+        // composes the same context off them — so no two passes can disagree
+        // about the frame they are drawing.
         self.resolve_gestures(ui, graph_ctx, out);
-        self.record_canvas(ui, graph_ctx, out);
+        // The toolbar overlays the canvas's top-left corner rather than
+        // sitting beside it, so the two share a stack. It records *second*,
+        // which is what puts it above the canvas in the hit-test: a click on a
+        // chip never starts a pan. The stacking is the pane's own business —
+        // the dock's content closure hands this method a plain `ui` and learns
+        // nothing about the overlay.
+        Panel::zstack()
+            .id_salt("graph_overlay")
+            .size((Sizing::FILL, Sizing::FILL))
+            .show(ui, |ui| {
+                self.record_canvas(ui, graph_ctx, out);
+                toolbar::show(ui, self.canvas_ctx(graph_ctx), out);
+            });
     }
 
     /// This frame's canvas context over `graph_ctx`, off the state

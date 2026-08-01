@@ -179,20 +179,10 @@ impl MainWindow {
                     });
                 dock.render(ui, dock_cx, out, |ui, tab, out| match tab {
                     TabRef::Graph => {
-                        // Overlay the run/cancel toggle on the canvas's
-                        // top-left corner; it hit-tests above the canvas,
-                        // so a click on it never starts a pan.
-                        Panel::zstack()
-                            .id_salt("graph_overlay")
-                            .size((Sizing::FILL, Sizing::FILL))
-                            .show(ui, |ui| {
-                                // The context carries everything the canvas
-                                // reads — theme and run included, through the
-                                // `cx` it is composed from.
-                                let graph_ctx = GraphCtx::new(cx, output_types);
-                                graph_ui.draw(ui, graph_ctx, out);
-                                graph_ui.draw_toolbar(ui, graph_ctx, out);
-                            });
+                        // The context carries everything the canvas reads —
+                        // theme and run included, through the `cx` it is
+                        // composed from.
+                        graph_ui.draw(ui, GraphCtx::new(cx, output_types), out);
                     }
                     TabRef::Preferences => {
                         preferences::show(ui, app.theme(), prefs, out);
