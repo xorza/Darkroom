@@ -20,7 +20,6 @@ use crate::gui::widgets::support::{colored_text, hspacer, muted_text};
 
 const PAD_X: f32 = 8.0;
 const PAD_Y: f32 = 3.0;
-const FONT: f32 = 12.0;
 
 /// The bar is a window singleton, so it carries a global id rather than a
 /// parent-scoped salt — one strip, one name, reachable from a test.
@@ -40,14 +39,14 @@ pub(crate) fn show(ui: &mut Ui, ctx: AppCtx<'_>) {
         .background(Background::fill(colors.chrome_fill))
         .show(ui, |ui| {
             if let Some(msg) = ctx.status_error() {
-                let style = colored_text(ui, colors.exec_errored_glow, FONT);
+                let style = colored_text(ui, ctx.theme().status.error, ctx.theme().text.body);
                 Text::new(msg).style(&style).show(ui);
             }
             // Spacer: pins the message to the left edge and the memory
             // readout to the right.
             hspacer(ui, "status_spacer");
             if let Some(label) = ram {
-                let style = muted_text(ui, ctx.theme(), FONT);
+                let style = muted_text(ui, ctx.theme(), ctx.theme().text.body);
                 Text::new(label).style(&style).show(ui);
             }
         });

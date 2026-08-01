@@ -45,7 +45,7 @@ pub(crate) fn show(ui: &mut Ui, theme: &Theme, prefs: &mut Preferences, out: &mu
         .size((Sizing::FILL, Sizing::FILL))
         .padding(Spacing::new(20.0, 32.0, 20.0, 20.0))
         .child_align(Align::new(HAlign::Center, VAlign::Top))
-        .background(Background::fill(theme.colors.canvas_bg))
+        .background(Background::fill(theme.canvas.bg))
         .show(ui, |ui| {
             Panel::vstack()
                 .id_salt("preferences_column")
@@ -140,7 +140,7 @@ fn section(ui: &mut Ui, theme: &Theme, title: &'static str, body: impl FnOnce(&m
         .show(ui, |ui| {
             let style = TextStyle {
                 weight: FontWeight::Bold,
-                ..muted_text(ui, theme, 13.0)
+                ..muted_text(ui, theme, theme.text.body)
             };
             Text::new(title).style(&style).show(ui);
             body(ui);
@@ -260,7 +260,9 @@ fn model_row(ui: &mut Ui, theme: &Theme, row: ModelRow, path: &mut PathBuf, out:
                         .id_salt("label")
                         .size((Sizing::fixed(ML_LABEL_WIDTH), Sizing::HUG))
                         .show(ui, |ui| {
-                            Text::new(label).style(&sized_text(ui, 13.0)).show(ui);
+                            Text::new(label)
+                                .style(&sized_text(ui, theme.text.body))
+                                .show(ui);
                         });
 
                     let mut edit = TextEdit::new(&mut draft)
@@ -278,8 +280,7 @@ fn model_row(ui: &mut Ui, theme: &Theme, row: ModelRow, path: &mut PathBuf, out:
                             &mut style.looks.active,
                         ] {
                             if let Some(bg) = look.background.as_mut() {
-                                bg.stroke =
-                                    Stroke::solid(theme.colors.exec_errored_glow, bg.stroke.width);
+                                bg.stroke = Stroke::solid(theme.status.error, bg.stroke.width);
                             }
                         }
                         style
@@ -322,7 +323,7 @@ fn model_row(ui: &mut Ui, theme: &Theme, row: ModelRow, path: &mut PathBuf, out:
             if let Some(problem) = problem {
                 indented_line(ui, "problem", |ui| {
                     Text::new(problem)
-                        .style(&colored_text(ui, theme.colors.exec_errored_glow, 12.0))
+                        .style(&colored_text(ui, theme.status.error, theme.text.body))
                         .show(ui);
                 });
             }
@@ -369,7 +370,7 @@ fn download_hint(ui: &mut Ui, theme: &Theme, link_label: &'static str, url: &'st
             .sense(Sense::CLICK)
             .show(ui, |ui| {
                 Text::new(link_label)
-                    .style(&colored_text(ui, link_color, 12.0))
+                    .style(&colored_text(ui, link_color, theme.text.body))
                     .show(ui);
             });
         let snapshot = link.response.snapshot();
@@ -380,7 +381,7 @@ fn download_hint(ui: &mut Ui, theme: &Theme, link_label: &'static str, url: &'st
         // link goes before clicking — the URL isn't otherwise visible.
         Tooltip::on(&snapshot).text(url).show(ui);
         Text::new(DOWNLOAD_HINT)
-            .style(&muted_text(ui, theme, 12.0))
+            .style(&muted_text(ui, theme, theme.text.body))
             .show(ui);
     });
 }

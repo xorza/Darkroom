@@ -156,11 +156,11 @@ impl NodeUI {
         // breaker alarm wins, then the missing-stub color, then
         // `Theme::card_border`'s own broken/selected/resting 3-tier (broken
         // can't recur here since it's already handled, but the helper still
-        let border_width = theme.card_border_width();
+        let border_width = theme.card.border_width_total();
         let border = if node.missing() && !broken {
             // A stub for a node whose func is gone from the library: paint it
             // in the error color so it reads as broken-but-deletable.
-            theme.colors.exec_errored_glow
+            theme.status.error
         } else {
             theme.card_border(broken, selected).color
         };
@@ -187,19 +187,16 @@ impl NodeUI {
             // A preview needs room for a thumbnail; every other node keeps the
             // theme's own floor.
             .min_size(if node.preview() {
-                (preview_row::PREVIEW_MIN_WIDTH, theme.node_min_height)
+                (preview_row::PREVIEW_MIN_WIDTH, theme.card.min_height)
             } else {
-                (theme.node_min_width, theme.node_min_height)
+                (theme.card.min_width, theme.card.min_height)
             })
             .size((Sizing::HUG, Sizing::HUG))
             .sense(Sense::CLICK | Sense::DRAG)
             .background(
-                Background::rounded(
-                    theme.colors.node_fill,
-                    Corners::all(theme.node_corner_radius),
-                )
-                .with_stroke(Stroke::solid(border, border_width))
-                .with_shadow(shadow),
+                Background::rounded(theme.card.fill, Corners::all(theme.card.corner_radius))
+                    .with_stroke(Stroke::solid(border, border_width))
+                    .with_shadow(shadow),
             )
             .show(ui, |ui| {
                 header(ui, ncx, dcx, out);
@@ -265,11 +262,11 @@ impl NodeUI {
 pub(super) fn exec_color(theme: &Theme, status: ExecStatus) -> Option<Color> {
     match status {
         ExecStatus::None => None,
-        ExecStatus::Cached => Some(theme.colors.exec_cached_glow),
-        ExecStatus::Executed(_) => Some(theme.colors.exec_executed_glow),
-        ExecStatus::Running(_) => Some(theme.colors.exec_running_glow),
-        ExecStatus::MissingInputs => Some(theme.colors.exec_missing_glow),
-        ExecStatus::Errored => Some(theme.colors.exec_errored_glow),
+        ExecStatus::Cached => Some(theme.status.info),
+        ExecStatus::Executed(_) => Some(theme.status.success),
+        ExecStatus::Running(_) => Some(theme.status.busy),
+        ExecStatus::MissingInputs => Some(theme.status.warning),
+        ExecStatus::Errored => Some(theme.status.error),
     }
 }
 
@@ -286,7 +283,7 @@ fn node_shadow(theme: &Theme, status: ExecStatus) -> Shadow {
         // sitting flatter than its idle neighbors. Kept a touch tighter than
         // the ambient shadow so the status reads as a crisp halo, not a bloom.
         Some(color) => Shadow::drop(color, Vec2::ZERO, 3.0).with_spread(0.5),
-        None => theme.elevation_shadow(10.0),
+        None => theme.card.elevation_shadow(10.0),
     }
 }
 

@@ -98,12 +98,12 @@ pub(super) fn ports_row(
             Track::hug(),
         ])
         .rows(&row_tracks[..n_rows])
-        .gap_xy(theme.port_gap, theme.port_cols_gap)
+        .gap_xy(theme.ports.gap, theme.ports.cols_gap)
         .padding(Spacing::new(
-            theme.port_col_pad_x,
-            theme.port_col_pad_top,
-            theme.port_col_pad_x,
-            theme.port_col_pad_top,
+            theme.ports.col_pad_x,
+            theme.ports.gap,
+            theme.ports.col_pad_x,
+            theme.ports.gap,
         ))
         .show(ui, |ui| {
             input_cells(ui, ncx, dcx, out);
@@ -133,7 +133,7 @@ fn tip_for(ncx: NodeCtx<'_>, description: &str, ty: &DataType) -> String {
 fn port_label(ui: &mut Ui, theme: &Theme, name: &str, tip: &str) {
     let snapshot = Text::new(name)
         .style(&TextStyle {
-            color: theme.colors.port_label,
+            color: theme.ports.label,
             ..ui.theme.text.clone()
         })
         .sense(Sense::HOVER)
@@ -218,7 +218,7 @@ fn input_label_cell(
     // once the node reaches a new status.
     let missing = matches!(node.exec_status(), ExecStatus::MissingInputs) && input.missing();
     let fill = if missing {
-        theme.colors.exec_missing_glow
+        theme.status.warning
     } else {
         port_color(
             theme,
@@ -232,10 +232,10 @@ fn input_label_cell(
     // same visual weight on either side. An optional input instead gets a
     // muted outline, so "not required" reads at a glance without needing
     // the bigger required-input footprint.
-    let diameter = port_diameter(theme.port_size, input.required());
+    let diameter = port_diameter(theme.ports.size, input.required());
     // Matches the node body itself — the ring reads as the node's own surface
     // wrapping around the port, rather than a separate accent.
-    let outline = (!input.required()).then_some(theme.colors.node_fill);
+    let outline = (!input.required()).then_some(theme.card.fill);
     let radius = diameter * 0.5;
     let overhang = theme.port_overhang_for(radius);
     let margin = Spacing::new(-overhang, 0.0, 0.0, 0.0);
@@ -366,7 +366,7 @@ fn output_cell(
             circle_frame(
                 ui,
                 wid,
-                theme.port_size,
+                theme.ports.size,
                 fill,
                 None,
                 Spacing::new(0.0, 0.0, -overhang, 0.0),
@@ -477,7 +477,7 @@ fn event_cell(
             // Muted like the data-port labels (see `port_label`).
             Text::new(event.name.as_str())
                 .style(&TextStyle {
-                    color: theme.colors.port_label,
+                    color: theme.ports.label,
                     ..ui.theme.text.clone()
                 })
                 .show(ui);

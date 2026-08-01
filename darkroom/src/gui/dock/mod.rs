@@ -341,7 +341,7 @@ fn draw_drag_feedback(ui: &mut Ui, cx: DockContext<'_>, dragged: &TabDrag) {
     }
     if let Some(p) = ui.pointer_pos() {
         let text = dragged.text.as_str();
-        let label_style = sized_text(ui, 13.0);
+        let label_style = sized_text(ui, theme.text.body);
         ui.layer(Layer::Tooltip, p + Vec2::new(14.0, 18.0), None, |ui| {
             Panel::hstack()
                 .id(drag_ghost_wid())

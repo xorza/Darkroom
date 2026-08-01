@@ -18,9 +18,6 @@ use crate::gui::requests::Requests;
 use crate::gui::theme::Theme;
 use crate::gui::widgets::support::{colored_text, muted_text};
 
-/// Font size of every chip label — the tabs' and the "+" chip's alike.
-const CHIP_LABEL_PX: f32 = 13.0;
-
 /// A chip's combined top + bottom inset. The active tab splits it
 /// differently (`ACCENT` px of it move to the outer panel so the accent
 /// cap adds no height), but the total is what sets the row's height.
@@ -85,7 +82,9 @@ pub(super) fn tab_new_wid() -> WidgetId {
 /// level with them while staying square. Derived from the same constants
 /// `tab_chip` lays its label out with rather than restating their values,
 /// which drifted apart silently when any one of them changed.
-const NEW_TAB_CHIP_SIDE: f32 = CHIP_LABEL_PX * DEFAULT_LINE_HEIGHT_MULT + CHIP_INSET_Y;
+fn new_tab_chip_side(theme: &Theme) -> f32 {
+    theme.text.body * DEFAULT_LINE_HEIGHT_MULT + CHIP_INSET_Y
+}
 
 /// Palantir's default `TextStyle::line_height_mult`, which the chip labels
 /// inherit — the "+" chip has no label to measure, so its box has to
@@ -96,7 +95,7 @@ const DEFAULT_LINE_HEIGHT_MULT: f32 = 1.2;
 /// tab-shaped chip (top corners rounded like the tabs, bottom square) that
 /// reads as an inactive tab; the click is consumed in [`DockUi::scan`](super::DockUi::scan).
 fn new_tab_chip(ui: &mut Ui, theme: &Theme) {
-    let r = theme.tab_corner_radius;
+    let r = theme.card.corner_radius;
     let bg = hover_bg(
         ui.response_for(tab_new_wid()).hovered,
         theme,
@@ -105,8 +104,8 @@ fn new_tab_chip(ui: &mut Ui, theme: &Theme) {
     Panel::zstack()
         .id(tab_new_wid())
         .size((
-            Sizing::fixed(NEW_TAB_CHIP_SIDE),
-            Sizing::fixed(NEW_TAB_CHIP_SIDE),
+            Sizing::fixed(new_tab_chip_side(theme)),
+            Sizing::fixed(new_tab_chip_side(theme)),
         ))
         .sense(Sense::CLICK)
         .child_align(Align::CENTER)
@@ -114,7 +113,7 @@ fn new_tab_chip(ui: &mut Ui, theme: &Theme) {
         .show(ui, |ui| {
             let style = TextStyle {
                 line_height_mult: 1.0,
-                ..muted_text(ui, theme, 15.0)
+                ..muted_text(ui, theme, theme.text.title)
             };
             Text::new("+")
                 .style(&style)
@@ -127,7 +126,7 @@ fn new_tab_chip(ui: &mut Ui, theme: &Theme) {
 /// pointer, nothing otherwise.
 fn hover_bg(hovered: bool, theme: &Theme, corners: Corners) -> Background {
     if hovered {
-        Background::rounded(theme.colors.header_fill, corners)
+        Background::rounded(theme.card.header_fill, corners)
     } else {
         Background::default()
     }
@@ -180,7 +179,7 @@ pub(super) fn show(
 fn tab_chip(ui: &mut Ui, s: &mut StripCtx<'_>, label: &TabLabel) {
     let theme = s.theme;
     let active = label.active;
-    let r = theme.tab_corner_radius;
+    let r = theme.card.corner_radius;
     // Active-tab selection cue: a 2px accent cap along the top, built from two
     // layered backgrounds. The outer is filled with the accent and rounded to
     // the full `r`; the inner tab fill is nested `ACCENT` px lower with a
@@ -195,7 +194,7 @@ fn tab_chip(ui: &mut Ui, s: &mut StripCtx<'_>, label: &TabLabel) {
         let cap = if label.focused {
             theme.colors.selection_rect
         } else {
-            theme.colors.header_fill
+            theme.card.header_fill
         };
         Background::rounded(cap, Corners::new(r, r, 0.0, 0.0))
     } else {
@@ -203,7 +202,7 @@ fn tab_chip(ui: &mut Ui, s: &mut StripCtx<'_>, label: &TabLabel) {
     };
     let inner_r = if active { (r - ACCENT).max(0.0) } else { r };
     let inner_fill = if active {
-        theme.colors.canvas_bg
+        theme.canvas.bg
     } else {
         theme.colors.tab_inactive
     };
@@ -225,7 +224,7 @@ fn tab_chip(ui: &mut Ui, s: &mut StripCtx<'_>, label: &TabLabel) {
     } else {
         theme.colors.text_muted
     };
-    let label_style = colored_text(ui, ink, CHIP_LABEL_PX);
+    let label_style = colored_text(ui, ink, theme.text.body);
     // Outer carries the accent fill + click sense + the 2px top inset; the
     // inner carries the tab fill + content, nested `ACCENT` px lower so the
     // accent shows only as a top cap. Every chip also senses drags — the
@@ -281,7 +280,7 @@ fn close_button(ui: &mut Ui, theme: &Theme, close_wid: WidgetId) {
             // instead of riding high.
             let style = TextStyle {
                 line_height_mult: 1.0,
-                ..muted_text(ui, theme, CHIP_LABEL_PX)
+                ..muted_text(ui, theme, theme.text.body)
             };
             Text::new("\u{00d7}")
                 .style(&style)

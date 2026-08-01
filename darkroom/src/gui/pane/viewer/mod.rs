@@ -28,6 +28,11 @@ use crate::gui::pane::graph::gesture::pan_zoom::{fold_scroll_zoom, zoom_about};
 use crate::gui::state::preview_store::{FullImage, StoredContent};
 use crate::gui::theme::Theme;
 use crate::gui::widgets::support::{colored_text, filled_rect, muted_text, stroked_rect};
+
+/// Font size of the one control glyph drawn as text rather than shape ("1:1").
+/// Sized to the button box like its drawn siblings, so it tracks
+/// [`CONTROL_SIDE`] rather than a `TypeScale` tier.
+const GLYPH_PX: f32 = 11.0;
 use crate::gui::widgets::toolbar::{
     BUTTON_GAP, Chip, TOOLBAR_MARGIN, pill, pill_background, pill_rule,
 };
@@ -178,7 +183,7 @@ impl ImageViewer {
         let pane = pane_size(ui, self.node_id);
         let display_scale = ui.display().scale_factor;
         let fill = match prefs.background {
-            ViewerBackground::Theme | ViewerBackground::Checker => theme.colors.canvas_bg,
+            ViewerBackground::Theme | ViewerBackground::Checker => theme.canvas.bg,
             ViewerBackground::Black => Color::BLACK,
             ViewerBackground::White => Color::WHITE,
         };
@@ -468,7 +473,7 @@ fn readout_pill<'a>(ui: &mut Ui, theme: &Theme, panel: Panel, text: impl Into<Te
         .padding(Spacing::new(10.0, 6.0, 10.0, 6.0))
         .background(pill_background(theme))
         .show(ui, |ui| {
-            let style = muted_text(ui, theme, 12.0);
+            let style = muted_text(ui, theme, theme.text.body);
             Text::new(text).style(&style).show(ui);
         });
 }
@@ -555,7 +560,7 @@ fn draw_fit(ui: &mut Ui, s: f32, color: Color) {
 
 /// "1:1" label — zoom to 100%.
 fn draw_100(ui: &mut Ui, _s: f32, color: Color) {
-    let style = colored_text(ui, color, 11.0);
+    let style = colored_text(ui, color, GLYPH_PX);
     Text::new("1:1").style(&style).align(Align::CENTER).show(ui);
 }
 
@@ -584,7 +589,7 @@ fn draw_swatch(ui: &mut Ui, s: f32, theme: &Theme, mode: ViewerBackground, selec
     // rather than over a flat-fill subset plus a wildcard that has to
     // re-reject the one mode it already handled.
     match mode {
-        ViewerBackground::Theme => filled_rect(ui, rect, 2.0, theme.colors.canvas_bg),
+        ViewerBackground::Theme => filled_rect(ui, rect, 2.0, theme.canvas.bg),
         ViewerBackground::Black => filled_rect(ui, rect, 2.0, Color::BLACK),
         ViewerBackground::White => filled_rect(ui, rect, 2.0, Color::WHITE),
         ViewerBackground::Checker => {

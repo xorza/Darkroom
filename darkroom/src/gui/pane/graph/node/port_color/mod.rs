@@ -41,15 +41,15 @@ pub(crate) fn port_color(theme: &Theme, ty: &DataType, kind: PortKind, hovered: 
 /// Events carry no data type, so they use the theme's neutral event swatch
 /// (not a type hue); `hovered` lifts it like the positional port colors.
 pub(crate) fn event_color(theme: &Theme, hovered: bool) -> Color {
-    theme.colors.event_port.pick(hovered)
+    theme.ports.event.pick(hovered)
 }
 
 /// Positional color for an untyped port — the theme's input/output port
 /// swatch, hover variant included.
 fn fallback(theme: &Theme, kind: PortKind, hovered: bool) -> Color {
     match kind {
-        PortKind::Input => theme.colors.input_port.pick(hovered),
-        PortKind::Output => theme.colors.output_port.pick(hovered),
+        PortKind::Input => theme.ports.input.pick(hovered),
+        PortKind::Output => theme.ports.output.pick(hovered),
     }
 }
 

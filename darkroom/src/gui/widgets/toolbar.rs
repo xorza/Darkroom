@@ -131,9 +131,9 @@ impl Chip {
         let fill = if self.toggled {
             self.toggled_fill.unwrap_or(theme.colors.selection_rect)
         } else if hovered {
-            theme.colors.header_fill
+            theme.card.header_fill
         } else {
-            theme.colors.node_fill
+            theme.card.fill
         };
         let s = BUTTON_SIZE;
         let button = Panel::zstack()

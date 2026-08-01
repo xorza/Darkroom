@@ -7,17 +7,16 @@ use palantir::{
 use crate::core::theme_pref::ThemeChoice;
 
 // Layout dimensions are palette-independent — dark and light pull the same
-// numbers. Each one's value lives on `Theme::DIMENSIONS` (its field carries
-// the doc comment); only the few read by more than one builder earn a name
-// here.
+// numbers. Each one's value lives on `Theme::build` (its field carries the doc
+// comment); only the few read by more than one builder earn a name here. Font
+// sizes are palette-independent too, and live on `TypeScale::DEFAULT`.
 
 const VALUE_EDITOR_WIDTH: f32 = 100.0;
 /// Upper bound on the value column: editors fill the column up to here, then a
 /// long value (a wide enum/preset dropdown, a long path) ellipsizes instead of
-/// stretching the node out. Read by both `Theme::DIMENSIONS` and
+/// stretching the node out. Read by both `Theme::build` and
 /// [`StaticValueEditorTheme::from_palette`], which sizes the editor itself.
 const VALUE_EDITOR_MAX_WIDTH: f32 = 240.0;
-const MENU_FONT_SIZE: f32 = 13.0;
 
 // One named-const mod per built-in preset, so any builder (`Theme::dark`,
 // `StaticValueEditorTheme::dark`, future per-widget theme helpers) can
@@ -71,11 +70,11 @@ pub(crate) mod dark {
     // marker reads at a glance.
     pub(crate) const BADGE_IMPURE: Color = Color::hex(0xc56cff);
 
-    pub(crate) const EXEC_EXECUTED_GLOW: Color = Color::hex(0xdaff58);
-    pub(crate) const EXEC_CACHED_GLOW: Color = Color::hex(0x9adbfb);
-    pub(crate) const EXEC_RUNNING_GLOW: Color = Color::hex(0xd4bfff);
-    pub(crate) const EXEC_MISSING_GLOW: Color = Color::hex(0xffa63d);
-    pub(crate) const EXEC_ERRORED_GLOW: Color = Color::hex(0xff5e44);
+    pub(crate) const STATUS_SUCCESS: Color = Color::hex(0xdaff58);
+    pub(crate) const STATUS_INFO: Color = Color::hex(0x9adbfb);
+    pub(crate) const STATUS_BUSY: Color = Color::hex(0xd4bfff);
+    pub(crate) const STATUS_WARNING: Color = Color::hex(0xffa63d);
+    pub(crate) const STATUS_ERROR: Color = Color::hex(0xff5e44);
 
     // ports — hover variants brighten for emphasis on a dark canvas.
     pub(crate) const INPUT_PORT: HoverColor = HoverColor {
@@ -167,11 +166,11 @@ pub(crate) mod light {
     pub(crate) const BADGE_IMPURE: Color = Color::hex(0x9333d6);
 
     // execution-status glow — success / accent / syn_keyword / error.
-    pub(crate) const EXEC_EXECUTED_GLOW: Color = Color::hex(0x85b304);
-    pub(crate) const EXEC_CACHED_GLOW: Color = Color::hex(0x3b9ee5);
-    pub(crate) const EXEC_RUNNING_GLOW: Color = Color::hex(0xa37acc);
-    pub(crate) const EXEC_MISSING_GLOW: Color = Color::hex(0xfa8d3e);
-    pub(crate) const EXEC_ERRORED_GLOW: Color = Color::hex(0xef7271);
+    pub(crate) const STATUS_SUCCESS: Color = Color::hex(0x85b304);
+    pub(crate) const STATUS_INFO: Color = Color::hex(0x3b9ee5);
+    pub(crate) const STATUS_BUSY: Color = Color::hex(0xa37acc);
+    pub(crate) const STATUS_WARNING: Color = Color::hex(0xfa8d3e);
+    pub(crate) const STATUS_ERROR: Color = Color::hex(0xef7271);
 
     // ports — input = success, output = syn_keyword. Hover variants on
     // the light canvas *darken* for emphasis (opposite to the dark theme).
@@ -257,20 +256,43 @@ pub(crate) struct TypeColors {
 /// [`PaletteColors`] chrome roster is built this way; the
 /// palantir-side rosters are plain [`palantir::Palette`] consts
 /// (`PALANTIR_DARK` / `PALANTIR_LIGHT`).
+///
+/// Fields listed after a `;` are palette-independent — layout measurements,
+/// mostly — given as `field: Ty = value` and copied verbatim into both
+/// presets. That is what lets a per-widget group ([`CardTheme`],
+/// [`PortTheme`], [`CanvasTheme`]) hold its geometry beside its colours
+/// without the numbers being authored twice.
 macro_rules! palette_struct {
     (
         $(#[$smeta:meta])*
         $vis:vis struct $name:ident;
         $($(#[$fmeta:meta])* $field:ident: $fty:ty => $konst:ident),+ $(,)?
+        $(; $($(#[$dmeta:meta])* $dfield:ident: $dty:ty = $dval:expr),+ $(,)?)?
     ) => {
         $(#[$smeta])*
         $vis struct $name {
             $($(#[$fmeta])* $vis $field: $fty,)+
+            $($($(#[$dmeta])* $vis $dfield: $dty,)+)?
         }
 
         impl $name {
-            const DARK: Self = Self { $($field: dark::$konst),+ };
-            const LIGHT: Self = Self { $($field: light::$konst),+ };
+            const DARK: Self = Self {
+                $($field: dark::$konst,)+
+                $($($dfield: $dval,)+)?
+            };
+            const LIGHT: Self = Self {
+                $($field: light::$konst,)+
+                $($($dfield: $dval,)+)?
+            };
+
+            /// This roster for `preset` — the per-group half of
+            /// [`Theme::from_preset`].
+            fn for_preset(preset: ThemePreset) -> Self {
+                match preset {
+                    ThemePreset::Dark => Self::DARK,
+                    ThemePreset::Light => Self::LIGHT,
+                }
+            }
         }
     };
 }
@@ -333,8 +355,8 @@ impl ThemeChoice {
 /// Export menu.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub(crate) struct Theme {
-    // Scalar fields (`preset` + the layout `f32`s) come first; the tables
-    // (`colors`, the per-widget sub-themes, `palantir_theme`) follow. TOML
+    // Scalar fields (`preset` + the few loose `f32`s) come first; the tables
+    // (the per-widget groups, `colors`, `palantir_theme`) follow. TOML
     // serialization requires every scalar value to precede any table at the
     // same level — otherwise the serializer errors with `ValueAfterTable`.
     /// Which built-in preset assembled this theme. Round-trips
@@ -342,38 +364,11 @@ pub(crate) struct Theme {
     /// behaviour the original `Theme::dark` / `light` had.
     pub(crate) preset: ThemePreset,
 
-    /// Dotted backdrop grid: world-space base spacing between dots, and
-    /// on-screen dot radius (px). Spacing is wrapped by a power-of-2
-    /// multiplier as the user zooms so the field never collapses into
-    /// noise — see `gui::pane::graph::background`. (Dot colour is `colors.canvas_dot`.)
-    pub(crate) canvas_dot_spacing: f32,
-    pub(crate) canvas_dot_radius: f32,
-    pub(crate) connection_width: f32,
-    pub(crate) breaker_stroke_width: f32,
-    pub(crate) node_border_width: f32,
-    pub(crate) node_corner_radius: f32,
-    /// Minimum content size for a node body. Caps how tightly a node
-    /// with very short port labels can shrink horizontally so the
-    /// header stays legible at any zoom.
-    pub(crate) node_min_width: f32,
-    pub(crate) node_min_height: f32,
-    /// Corner radius of the tab-strip tabs (the header derives its own
-    /// radius from `node_corner_radius`, so it doesn't read this).
-    pub(crate) tab_corner_radius: f32,
-    /// Side of the port circle quad. The circle's corner radius is
-    /// derived as `port_size * 0.5` (see [`Self::port_radius`]).
-    pub(crate) port_size: f32,
-    /// Vertical inset at the top of each port column (gap below the
-    /// header band before the first port).
-    pub(crate) port_col_pad_top: f32,
-    /// Horizontal inset on each side of the ports row. Port circles overhang
-    /// by `-port_overhang()` (which folds in this inset + the body border) so
-    /// their center sits on the node body edge regardless of this value.
-    pub(crate) port_col_pad_x: f32,
-    /// Vertical gap between adjacent ports in a column.
-    pub(crate) port_gap: f32,
-    /// Horizontal gap between the input and output port columns.
-    pub(crate) port_cols_gap: f32,
+    /// Stroke width of every mark drawn on the canvas at wire scale: the
+    /// wires themselves, the in-flight drag preview, the subscription pin's
+    /// leader, and the breaker scribble that cuts them — one width so the
+    /// blade reads at the same weight as what it severs.
+    pub(crate) stroke_width: f32,
     /// Gap between a node's edge and a floating widget's near edge — the
     /// inspector panel anchors from the node's right edge, so any future
     /// floating surface reads as the same clearance.
@@ -382,8 +377,24 @@ pub(crate) struct Theme {
     /// overflow when the function list exceeds the cap.
     pub(crate) new_node_popup_max_height: f32,
 
-    /// Every chrome colour — the palette half of the theme, serialized as
-    /// the `[colors]` sub-table.
+    /// Font sizes by hierarchy tier, serialized as the `[text]` sub-table.
+    pub(crate) text: TypeScale,
+
+    /// The graph canvas and its dotted backdrop (`[canvas]`).
+    pub(crate) canvas: CanvasTheme,
+
+    /// Elevated rounded surfaces — node bodies, the inspector panel, dock
+    /// tabs (`[card]`).
+    pub(crate) card: CardTheme,
+
+    /// A node's ports: swatches, label ink, column geometry (`[ports]`).
+    pub(crate) ports: PortTheme,
+
+    /// The semantic feedback palette — success / info / busy / warning /
+    /// error (`[status]`).
+    pub(crate) status: StatusColors,
+
+    /// The chrome colours belonging to no single widget (`[colors]`).
     pub(crate) colors: PaletteColors,
 
     /// Data-type → wire/port hue roster (see [`TypeColors`]),
@@ -410,6 +421,57 @@ pub(crate) struct Theme {
     /// call site restyling per use. Last field so its TOML table
     /// follows all the scalar fields above (TOML `ValueAfterTable`).
     pub(crate) palantir_theme: palantir::Theme,
+}
+
+/// Font sizes by tier in the visual hierarchy — the typographic half of a
+/// [`Theme`], beside the [`PaletteColors`] palette half and the layout
+/// dimensions.
+///
+/// Named by *prominence*, never by the surface that happens to use a tier, so
+/// a new surface picks one by asking how loud its text should be rather than
+/// copying whichever number a neighbouring panel reached for. Every size the
+/// app draws is here: a literal at a call site is a missing tier, not a local
+/// decision.
+///
+/// Palette-independent like the dimensions — dark and light pull the same
+/// numbers, so unlike [`PaletteColors`] there is no preset pair to keep in
+/// step and no macro generating one; a single [`Self::DEFAULT`] is the whole
+/// story.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub(crate) struct TypeScale {
+    /// The loudest tier: a floating panel's own heading (the inspector's node
+    /// title) and the "+" chip's glyph, which wants the same presence.
+    pub(crate) title: f32,
+    /// Default UI text — dock tab labels, menu rows, settings rows, the drag
+    /// ghost, the status bar, a settings row's help/error/link line, an
+    /// inspector row's value. The tier to reach for when none of the others
+    /// has a reason to win.
+    pub(crate) body: f32,
+    /// Labels on dense surfaces, where body would crowd: inspector port rows,
+    /// a node's preview row, the viewer's swatch caption, and the tabular
+    /// figures beside them (byte counts, dimensions) — the mono family comes
+    /// from [`crate::gui::widgets::support::mono_text`], not from a tier of
+    /// its own.
+    pub(crate) label: f32,
+    /// The caption above a readout — the smallest type that ships.
+    pub(crate) caption: f32,
+}
+
+impl TypeScale {
+    /// The authored scale. Four tiers, each a step the eye can actually
+    /// resolve: the 15/14 and 13/12 and 11/10.5 pairs this replaced sat a
+    /// half-step or a point apart and read as one size, so the smaller of
+    /// each was doing no work its neighbour wasn't.
+    ///
+    /// Badge glyphs stay out: a `■` sized to an 18px chip box is geometry
+    /// that happens to be drawn with a font, tracking the box rather than the
+    /// hierarchy, so it stays named beside the box (`BADGE_FONT`).
+    const DEFAULT: Self = Self {
+        title: 15.0,
+        body: 13.0,
+        label: 11.0,
+        caption: 8.5,
+    };
 }
 
 /// Per-widget theme bundle for the inline static-value editor on a
@@ -550,7 +612,15 @@ const PALANTIR_LIGHT: palantir::Palette = palantir::Palette {
 /// darkroom-only tweaks (smaller menu/context-menu font; menu-bar
 /// triggers muted + transparent at rest so they read as menus, not
 /// buttons).
-fn palantir_theme_for(p: &palantir::Palette, chrome_fill: Color) -> palantir::Theme {
+///
+/// Takes `text` rather than reaching for a private menu-font const: menu rows
+/// are ordinary UI text, so they read [`TypeScale::body`] like every other
+/// surface at that tier.
+fn palantir_theme_for(
+    p: &palantir::Palette,
+    chrome_fill: Color,
+    text: &TypeScale,
+) -> palantir::Theme {
     let mut theme = palantir::Theme::from_palette(p);
 
     // Dock splitter: the resting seam paints the chrome band that frames
@@ -569,12 +639,12 @@ fn palantir_theme_for(p: &palantir::Palette, chrome_fill: Color) -> palantir::Th
     // Font-only shrink (keeps each look's own colour) for the context-menu
     // rows; menu-bar triggers also recolour per state, so they use `restyle`.
     let shrink = |look: &mut WidgetLook| {
-        let text = look.text.take().unwrap_or_else(|| base.clone());
-        look.text = Some(text.with_font_size(MENU_FONT_SIZE));
+        let style = look.text.take().unwrap_or_else(|| base.clone());
+        look.text = Some(style.with_font_size(text.body));
     };
     let restyle = |look: &mut WidgetLook, color: Color| {
-        let text = look.text.take().unwrap_or_else(|| base.clone());
-        look.text = Some(text.with_color(color).with_font_size(MENU_FONT_SIZE));
+        let style = look.text.take().unwrap_or_else(|| base.clone());
+        look.text = Some(style.with_color(color).with_font_size(text.body));
     };
     let mb = &mut theme.menu_button;
     restyle(&mut mb.looks.normal, p.text_muted);
@@ -591,49 +661,150 @@ fn palantir_theme_for(p: &palantir::Palette, chrome_fill: Color) -> palantir::Th
 }
 
 palette_struct! {
-    /// Every darkroom chrome colour — the palette half of a [`Theme`]
-    /// (the other half is layout dimensions). Serialized as the theme's
-    /// `[colors]` table. Deliberately not `Copy` (25 colours): moved,
-    /// not silently bit-copied.
+    /// The graph canvas itself — the ground everything else sits on, and the
+    /// dotted grid ruled across it.
+    #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+    pub(crate) struct CanvasTheme;
+    /// Ground fill behind the whole graph.
+    bg: Color => CANVAS_BG,
+    /// Backdrop grid dot colour.
+    dot: Color => CANVAS_DOT,
+    ;
+    /// World-space base spacing between dots. Wrapped by a power-of-2
+    /// multiplier as the user zooms so the field never collapses into noise —
+    /// see `gui::pane::graph::background`.
+    dot_spacing: f32 = 18.0,
+    /// On-screen radius (px) of a backdrop dot.
+    dot_radius: f32 = 0.6,
+}
+
+palette_struct! {
+    /// An elevated rounded surface: node bodies, the inspector panel, the
+    /// dock's tabs. Named for the shape rather than the node, because all
+    /// three read from it — a header band derives its own tighter radius from
+    /// [`Self::inner_radius`] rather than carrying fields of its own.
+    #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+    pub(crate) struct CardTheme;
+    /// Body fill.
+    fill: Color => NODE_FILL,
+    /// Resting outline. Transparent in the dark preset, where the ambient
+    /// shadow carries the edge and the stroke slot is reserved for the
+    /// selection / breaker / missing colours.
+    border: Color => NODE_BORDER,
+    /// Header band fill, a step brighter than `fill` so the band reads
+    /// against the body. Doubles as the chrome lift behind a hovered strip
+    /// glyph.
+    header_fill: Color => HEADER_FILL,
+    /// Ambient elevation shadow cast when no status glow claims the slot —
+    /// one swatch so every elevated surface casts the same kind of shadow.
+    ambient_shadow: Color => NODE_AMBIENT_SHADOW,
+    ;
+    /// Resting outline width. The drawn stroke is always
+    /// [`Self::border_width_total`] — twice this — so selecting never resizes
+    /// a card.
+    border_width: f32 = 1.0,
+    /// How round a card is. A header derives its own from
+    /// [`Self::inner_radius`].
+    corner_radius: f32 = 6.0,
+    /// Minimum content size for a node body. Caps how tightly a node with
+    /// very short port labels can shrink horizontally so the header stays
+    /// legible at any zoom.
+    min_width: f32 = 160.0,
+    min_height: f32 = 10.0,
+}
+
+palette_struct! {
+    /// A node's ports: the circles straddling the body edge, their labels,
+    /// and the column geometry that lays them out.
+    ///
+    /// Positional swatches only — a *typed* port takes its hue from
+    /// [`TypeColors`] instead, resolved by
+    /// `gui::pane::graph::node::port_color`, which needs this roster, the
+    /// type roster and the preset together and so stays a function over the
+    /// whole [`Theme`].
+    #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+    pub(crate) struct PortTheme;
+    /// Positional swatch for untyped input ports; hover lifts for emphasis.
+    input: HoverColor => INPUT_PORT,
+    /// Positional swatch for untyped output ports.
+    output: HoverColor => OUTPUT_PORT,
+    /// Event emitter glyphs, subscription pins, and event wires — neutral,
+    /// distinct from the type-coloured data ports; hover lifts it like the
+    /// positional colours.
+    event: HoverColor => EVENT_PORT,
+    /// Port + event label ink — de-emphasized against the full-strength
+    /// value/editor text so each port row has one strong element. Its own
+    /// slot (not `text_muted`) because the light palette needs a darker value
+    /// for legibility on the card fill.
+    label: Color => PORT_LABEL,
+    ;
+    /// Side of the port circle quad; the circle's radius is derived as half
+    /// this (see [`Self::radius`]).
+    size: f32 = 13.0,
+    /// Horizontal inset on each side of the ports row. Circles overhang by
+    /// `-Theme::port_overhang()` (which folds in this inset and the card
+    /// border) so their centre sits on the body edge regardless of it.
+    col_pad_x: f32 = 8.0,
+    /// The column's vertical rhythm, spent twice over: the inset below the
+    /// header band before the first port, and the gap between adjacent ports.
+    /// One field because equal spacing is the point — a distinct top inset
+    /// would read as a misaligned first row.
+    gap: f32 = 6.0,
+    /// Horizontal gap between the input and output columns.
+    cols_gap: f32 = 12.0,
+}
+
+palette_struct! {
+    /// The app's semantic feedback palette: what an outcome *means*, not
+    /// which surface reports it.
+    ///
+    /// Node execution is the largest consumer — `gui::pane::graph::node`
+    /// maps an `ExecStatus` onto these — but it is not the only one, which is
+    /// why these are not named for it: `error` is also the invalid-path
+    /// outline in preferences, the status-bar message and `LogLevel::Error`;
+    /// `warning` is `LogLevel::Warn` and an unconnected required port;
+    /// `success` is the toolbar's run glyph.
+    #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+    pub(crate) struct StatusColors;
+    /// It worked / it ran — palette `success` (green).
+    success: Color => STATUS_SUCCESS,
+    /// It was reused from cache — palette `accent` (cyan).
+    info: Color => STATUS_INFO,
+    /// It is happening right now — palette `constant` (purple).
+    busy: Color => STATUS_BUSY,
+    /// It is incomplete but not broken — palette `syn_keyword` (orange).
+    warning: Color => STATUS_WARNING,
+    /// It failed — palette `error` (red).
+    error: Color => STATUS_ERROR,
+}
+
+palette_struct! {
+    /// Chrome colours that belong to no single widget — the surround, the
+    /// shared inks, and the badge roster. Serialized as the theme's
+    /// `[colors]` table.
     #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
     pub(crate) struct PaletteColors;
-    canvas_bg: Color => CANVAS_BG,
     /// The selection accent: the rubber-band rectangle (translucent fill +
     /// near-opaque 1px border, both derived from this) *and* the selected-
     /// node border, so "in the selection" reads as one color from sweep to
     /// committed halo (palette accent).
     selection_rect: Color => SELECTION_RECT,
-    /// Dotted backdrop grid dot color. Spacing + radius are layout
-    /// dimensions on `Theme` (`canvas_dot_spacing` / `canvas_dot_radius`).
-    canvas_dot: Color => CANVAS_DOT,
     connection_broken: Color => CONNECTION_BROKEN,
     breaker_stroke: Color => BREAKER_STROKE,
-    node_fill: Color => NODE_FILL,
-    node_border: Color => NODE_BORDER,
-    header_fill: Color => HEADER_FILL,
     /// Muted secondary foreground (palette `text_muted`, `#aaaaa8`). The
     /// de-emphasized accent shared across chrome: inactive/disabled header
     /// chips, the pinned-inspector outline, and active-tab text — visible
     /// without competing with the bright accent (`badge_graph`) or
     /// full-strength text.
     text_muted: Color => TEXT_MUTED,
-    /// Port + event label ink — de-emphasized against the full-strength
-    /// value/editor text so each port row has one strong element. Its own
-    /// slot (not `text_muted`) because the light palette needs a darker
-    /// value for legibility on the node fill.
-    port_label: Color => PORT_LABEL,
-    /// Ambient elevation shadow cast by nodes and floating panels (the
-    /// inspector) when no status glow claims the slot — one swatch so
-    /// every elevated surface casts the same kind of shadow.
-    node_ambient_shadow: Color => NODE_AMBIENT_SHADOW,
     /// Top-chrome fill behind the menu bar + tab strip. A notch darker
-    /// than the node surface, sitting between the graph (`canvas_bg`)
+    /// than the card surface, sitting between the graph (`canvas.bg`)
     /// and the nodes, so the chrome recedes and the active tab (which
-    /// uses `canvas_bg`) reads as continuous with the graph below it.
+    /// uses `canvas.bg`) reads as continuous with the graph below it.
     chrome_fill: Color => CHROME_FILL,
-    /// Inactive tab-strip chip. A notch above `chrome_fill` toward the node
+    /// Inactive tab-strip chip. A notch above `chrome_fill` toward the card
     /// surface, so an unselected tab reads as a resting chip rather than a
-    /// bare label; the active tab uses `canvas_bg` + a `selection_rect`
+    /// bare label; the active tab uses `canvas.bg` + a `selection_rect`
     /// accent top-line instead.
     tab_inactive: Color => TAB_INACTIVE,
     /// Accent cyan: the inspect chip, the pinned-inspector outline, and the
@@ -646,25 +817,6 @@ palette_struct! {
     /// Impure marker — `constant` purple. A read-only descriptor (the node
     /// recomputes every run and is never cached), not an interactive toggle.
     badge_impure: Color => BADGE_IMPURE,
-    /// Soft glow behind a node computed this run — palette `success` (green).
-    exec_executed_glow: Color => EXEC_EXECUTED_GLOW,
-    /// Node reused its cached result — palette `accent` (cyan).
-    exec_cached_glow: Color => EXEC_CACHED_GLOW,
-    /// Node is computing this run (live) — palette `constant` (purple).
-    exec_running_glow: Color => EXEC_RUNNING_GLOW,
-    /// Node has unfilled required inputs — palette `syn_keyword` (orange).
-    exec_missing_glow: Color => EXEC_MISSING_GLOW,
-    /// Node errored — palette `error` (red).
-    exec_errored_glow: Color => EXEC_ERRORED_GLOW,
-    /// Positional swatch for untyped input ports (typed ports use
-    /// [`TypeColors`]); hover lifts for emphasis.
-    input_port: HoverColor => INPUT_PORT,
-    /// Positional swatch for untyped output ports.
-    output_port: HoverColor => OUTPUT_PORT,
-    /// Event emitter glyphs, subscription pins, and event wires (neutral,
-    /// distinct from the type-colored data ports); hover lifts it like
-    /// the positional port colors.
-    event_port: HoverColor => EVENT_PORT,
 }
 
 impl PaletteColors {
@@ -688,21 +840,14 @@ impl PaletteColors {
 }
 
 /// Result of [`Theme::card_border`]: the resolved outline color. The width is
-/// [`Theme::card_border_width`] — constant, so selecting never resizes a card.
+/// [`CardTheme::border_width_total`] — constant, so selecting never resizes a
+/// card.
 #[derive(Clone, Debug)]
 pub(crate) struct CardBorder {
     pub(crate) color: Color,
 }
 
 impl Theme {
-    /// Derived radius for port circles — half the port side. Lives as
-    /// a method instead of a stored field so the two can't drift if
-    /// someone bumps `port_size` and forgets the radius.
-    #[inline]
-    fn port_radius(&self) -> f32 {
-        self.port_size * 0.5
-    }
-
     /// How far a port circle of the given `radius` is pulled out of its
     /// column so its **center** lands on the node body's outer edge: clear
     /// the column inset (`port_col_pad_x`) and the body border
@@ -714,25 +859,14 @@ impl Theme {
     /// common (plain-radius) case.
     #[inline]
     pub(crate) fn port_overhang_for(&self, radius: f32) -> f32 {
-        radius + self.port_col_pad_x + self.card_border_width()
+        radius + self.ports.col_pad_x + self.card.border_width_total()
     }
 
     /// [`Self::port_overhang_for`] at the plain port radius. Independent of
     /// `port_size` — bigger circles keep their center on the edge.
     #[inline]
     pub(crate) fn port_overhang(&self) -> f32 {
-        self.port_overhang_for(self.port_radius())
-    }
-
-    /// The stroke width a selectable card draws — always the *selection*
-    /// width (`node_border_width * 2`) regardless of selection state, so
-    /// selecting one never resizes it (only its color changes). Named so
-    /// the doubling can't drift between the call sites that need to agree
-    /// on it: the stroke itself, [`Self::card_inner_radius`], and
-    /// [`Self::port_overhang_for`].
-    #[inline]
-    pub(crate) fn card_border_width(&self) -> f32 {
-        self.node_border_width * 2.0
+        self.port_overhang_for(self.ports.radius())
     }
 
     /// Border color + width for a selectable card's 3-tier resting decision
@@ -751,32 +885,9 @@ impl Theme {
         } else if selected {
             self.colors.selection_rect
         } else {
-            self.colors.node_border
+            self.card.border
         };
         CardBorder { color }
-    }
-
-    /// Inner corner radius for a header or footer strip that seats flush
-    /// against a card's own outer stroke — a node body rounds its
-    /// header/footer band to this, not the raw
-    /// `node_corner_radius`, else the strip's corner leaves a wedge of the
-    /// card's plain fill showing between it and the (selection-lit) stroke.
-    #[inline]
-    pub(crate) fn card_inner_radius(&self) -> f32 {
-        (self.node_corner_radius - self.card_border_width()).max(0.0)
-    }
-
-    /// Ambient elevation shadow shared by every floating card — node
-    /// bodies, inspector panels — so they all read as the
-    /// same kind of surface. Only the blur scales with how high a surface
-    /// sits; color and offset are fixed.
-    #[inline]
-    pub(crate) fn elevation_shadow(&self, blur: f32) -> Shadow {
-        Shadow::drop(
-            self.colors.node_ambient_shadow,
-            glam::Vec2::new(0.0, 3.0),
-            blur,
-        )
     }
 
     /// Assemble the full theme for a built-in preset. One place so
@@ -790,23 +901,13 @@ impl Theme {
 
     /// Ayu Mirage High Contrast palette — the built-in dark look.
     pub(crate) fn dark() -> Self {
-        Self::build(
-            ThemePreset::Dark,
-            PaletteColors::DARK,
-            dark::TYPE_COLORS,
-            &PALANTIR_DARK,
-        )
+        Self::build(ThemePreset::Dark, dark::TYPE_COLORS, &PALANTIR_DARK)
     }
 
     /// Ayu Light palette — the built-in light look (Zed's "Ayu Light"
     /// variant ported into darkroom's structure).
     pub(crate) fn light() -> Self {
-        Self::build(
-            ThemePreset::Light,
-            PaletteColors::LIGHT,
-            light::TYPE_COLORS,
-            &PALANTIR_LIGHT,
-        )
+        Self::build(ThemePreset::Light, light::TYPE_COLORS, &PALANTIR_LIGHT)
     }
 
     /// Shared assembly path — the darkroom peer of
@@ -817,42 +918,66 @@ impl Theme {
     /// cascades from `p` here rather than being hand-assembled per
     /// preset. `preset` tags which built-in produced this theme so the
     /// toggle command doesn't have to guess.
-    fn build(
-        preset: ThemePreset,
-        colors: PaletteColors,
-        type_colors: TypeColors,
-        p: &palantir::Palette,
-    ) -> Self {
+    fn build(preset: ThemePreset, type_colors: TypeColors, p: &palantir::Palette) -> Self {
+        let colors = PaletteColors::for_preset(preset);
         let chrome_fill = colors.chrome_fill;
         Self {
             preset,
-            // Layout dimensions, authored here — the one place each is
-            // valued. Their meaning lives on the field's own doc comment, so
-            // a module-level `const` per dimension would only add a third
-            // site to keep in step.
-            canvas_dot_spacing: 18.0,
-            canvas_dot_radius: 0.6,
-            connection_width: 2.0,
-            breaker_stroke_width: 2.0,
-            node_border_width: 1.0,
-            node_corner_radius: 6.0,
-            node_min_width: 160.0,
-            node_min_height: 10.0,
-            tab_corner_radius: 6.0,
-            port_size: 13.0,
-            port_col_pad_top: 6.0,
-            port_col_pad_x: 8.0,
-            port_gap: 6.0,
-            port_cols_gap: 12.0,
+            // The three measurements that belong to no widget group; the
+            // rest are authored beside their colours in the groups below.
+            stroke_width: 2.0,
             floating_widget_gap: 16.0,
             new_node_popup_max_height: 400.0,
+            text: TypeScale::DEFAULT,
+            canvas: CanvasTheme::for_preset(preset),
+            card: CardTheme::for_preset(preset),
+            ports: PortTheme::for_preset(preset),
+            status: StatusColors::for_preset(preset),
             colors,
             type_colors,
             static_value_editor: StaticValueEditorTheme::from_palette(p),
             static_value_editor_revealed: StaticValueEditorTheme::revealed_from_palette(p),
             inline_rename: InlineRenameTheme::from_palette(p),
-            palantir_theme: palantir_theme_for(p, chrome_fill),
+            palantir_theme: palantir_theme_for(p, chrome_fill, &TypeScale::DEFAULT),
         }
+    }
+}
+
+impl CardTheme {
+    /// The stroke width a card actually draws — always the *selection* width
+    /// (`border_width * 2`) regardless of selection state, so selecting one
+    /// never resizes it (only its colour changes). Named so the doubling
+    /// can't drift between the call sites that must agree on it: the stroke
+    /// itself, [`Self::inner_radius`], and [`Theme::port_overhang_for`].
+    #[inline]
+    pub(crate) fn border_width_total(&self) -> f32 {
+        self.border_width * 2.0
+    }
+
+    /// Inner corner radius for a header or footer strip seating flush against
+    /// the card's own outer stroke — a node body rounds its header/footer band
+    /// to this, not the raw `corner_radius`, else the strip's corner leaves a
+    /// wedge of plain fill showing between it and the (selection-lit) stroke.
+    #[inline]
+    pub(crate) fn inner_radius(&self) -> f32 {
+        (self.corner_radius - self.border_width_total()).max(0.0)
+    }
+
+    /// Ambient elevation shadow shared by every card — node bodies, inspector
+    /// panels — so they all read as the same kind of surface. Only the blur
+    /// scales with how high a surface sits; colour and offset are fixed.
+    #[inline]
+    pub(crate) fn elevation_shadow(&self, blur: f32) -> Shadow {
+        Shadow::drop(self.ambient_shadow, glam::Vec2::new(0.0, 3.0), blur)
+    }
+}
+
+impl PortTheme {
+    /// Derived radius for port circles — half the port side. A method rather
+    /// than a stored field so the two can't drift if someone bumps `size`.
+    #[inline]
+    pub(crate) fn radius(&self) -> f32 {
+        self.size * 0.5
     }
 }
 
@@ -873,6 +998,10 @@ mod tests {
 
     assert_not_impl_any!(Theme: Copy);
     assert_not_impl_any!(PaletteColors: Copy);
+    assert_not_impl_any!(CanvasTheme: Copy);
+    assert_not_impl_any!(CardTheme: Copy);
+    assert_not_impl_any!(PortTheme: Copy);
+    assert_not_impl_any!(StatusColors: Copy);
     assert_not_impl_any!(TypeColors: Copy);
     assert_not_impl_any!(HoverColor: Copy);
     assert_not_impl_any!(CardBorder: Copy);
@@ -922,10 +1051,8 @@ mod tests {
     /// infinite max-size axis (handled by `Size`'s custom serde).
     #[test]
     fn theme_roundtrips_through_toml() {
-        let mut theme = Theme {
-            node_min_width: 137.5,
-            ..Theme::default()
-        };
+        let mut theme = Theme::default();
+        theme.card.min_width = 137.5;
         theme.colors.text_muted = Color::hex(0x123456);
         theme.palantir_theme.window_clear = Color::hex(0xabcdef);
 
@@ -933,9 +1060,9 @@ mod tests {
         let back: Theme = common::deserialize(&bytes, SerdeFormat::Toml)
             .expect("theme should deserialize from its own TOML output");
 
-        assert_eq!(back.node_min_width, 137.5);
+        assert_eq!(back.card.min_width, 137.5);
         assert_eq!(back.colors.text_muted, Color::hex(0x123456));
-        assert_eq!(back.colors.canvas_bg, theme.colors.canvas_bg);
+        assert_eq!(back.canvas.bg, theme.canvas.bg);
         // Nested palantir palette round-trips too.
         assert_eq!(back.palantir_theme.window_clear, Color::hex(0xabcdef));
         // The infinite tooltip-height axis survives `Size`'s serde.
@@ -950,14 +1077,14 @@ mod tests {
     #[test]
     fn default_palette_and_menu_tweak() {
         let theme = Theme::default();
-        assert_eq!(theme.colors.canvas_bg, Color::hex(0x1a1a1a));
-        assert_eq!(theme.colors.input_port.rest, Color::hex(0xdaff58));
-        assert_eq!(theme.colors.output_port.rest, Color::hex(0xffa63d));
+        assert_eq!(theme.canvas.bg, Color::hex(0x1a1a1a));
+        assert_eq!(theme.ports.input.rest, Color::hex(0xdaff58));
+        assert_eq!(theme.ports.output.rest, Color::hex(0xffa63d));
         // RuntimeCache (persist-to-disk) chip is the palette `warning` yellow.
         assert_eq!(theme.colors.badge_cache, Color::hex(0xffd44a));
         // Impure marker is the palette `constant` purple.
         assert_eq!(theme.colors.badge_impure, Color::hex(0xc56cff));
-        assert_eq!(theme.node_min_width, 160.0);
+        assert_eq!(theme.card.min_width, 160.0);
         assert!(theme.palantir_theme.tooltip.max_size.h.is_infinite());
         // The menu-bar font was shrunk from palantir's default to ours.
         let menu_text = theme
@@ -967,7 +1094,7 @@ mod tests {
             .normal
             .text
             .expect("menu button carries an explicit text style");
-        assert_eq!(menu_text.font_size_px, MENU_FONT_SIZE);
+        assert_eq!(menu_text.font_size_px, theme.text.body);
     }
 
     /// `from_preset` round-trips the tag both ways — the assembled theme
@@ -982,8 +1109,8 @@ mod tests {
         assert_eq!(Theme::dark().preset, ThemePreset::Dark);
         assert_eq!(Theme::light().preset, ThemePreset::Light);
         // Full palette swapped, not just the tag.
-        assert_eq!(dark.colors.canvas_bg, Color::hex(0x1a1a1a));
-        assert_eq!(light.colors.canvas_bg, Color::hex(0xfcfcfc));
+        assert_eq!(dark.canvas.bg, Color::hex(0x1a1a1a));
+        assert_eq!(light.canvas.bg, Color::hex(0xfcfcfc));
     }
 
     /// System detection must always resolve to one of the two built-in
