@@ -154,6 +154,11 @@ impl Editor {
     /// active, from frame-top inputs) and an **edit phase** (mutate the
     /// graph), because input that switches tabs comes from *last* frame's
     /// click responses and must resolve before anything edits or records.
+    ///
+    /// Returns whether the pass stranded the canvas's cached geometry. `App`
+    /// spends it once the command tier has run too, so the whole app requests
+    /// a relayout from exactly one place.
+    #[must_use]
     pub(crate) fn frame(
         &mut self,
         ui: &mut Ui,
@@ -161,14 +166,14 @@ impl Editor {
         ctx: AppCtx<'_>,
         preferences: &mut Preferences,
         requests: &mut Requests,
-    ) {
+    ) -> bool {
         requests.clear();
 
         // The frame's relayout accumulator, owned here for exactly as long as
         // the frame it describes. Every pass that can strand
-        // `CanvasGeometry`'s cross-frame caches reports upward into it, and
-        // the single `request_relayout` at the bottom spends it — so there is
-        // no flag to reset, and none to leak into the next frame.
+        // `CanvasGeometry`'s cross-frame caches reports upward into it, and it
+        // is handed to `App` to spend — so there is no flag to reset, and none
+        // to leak into the next frame.
         //
         // Settle the active tab entirely from frame-top inputs (keyboard
         // undo/redo + last-frame click responses). `navigate` reads *last*
@@ -195,15 +200,11 @@ impl Editor {
         // cache toggle, const edit), plus the tab strip's dock ops.
         needs_relayout |= self.drain_requests(open, requests);
 
-        // Sole consumption point for the frame's accumulated signal (edits,
-        // tab switch, undo/redo), and darkroom's only `request_relayout`.
-        // Resizes driven by something other than an `UndoStep` — the
-        // header's elapsed-time label growing as a run reports — are not
-        // covered: they leave `CanvasGeometry`'s offsets stale for one
-        // frame rather than buying a pass.
-        if needs_relayout {
-            ui.request_relayout();
-        }
+        // Resizes driven by something other than an `UndoStep` — the header's
+        // elapsed-time label growing as a run reports — are not covered: they
+        // leave `CanvasGeometry`'s offsets stale for one frame rather than
+        // buying a pass.
+        needs_relayout
     }
 
     /// Settle which tab is active for this frame, from inputs all available

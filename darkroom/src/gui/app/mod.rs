@@ -377,7 +377,7 @@ impl palantir::App for App {
                 process_memory: self.process_memory.sample(Instant::now()),
             },
         );
-        self.editor.frame(
+        let mut needs_relayout = self.editor.frame(
             ui,
             &mut self.open,
             ctx,
@@ -390,7 +390,13 @@ impl palantir::App for App {
         // `self`, and the drain borrows the queue that lives on it.
         let commands: Vec<AppCommand> = self.requests.drain_app().collect();
         for command in commands {
-            self.handle_command(ui, command);
+            needs_relayout |= self.handle_command(ui, command);
+        }
+        // The app's one relayout request, past both tiers: everything that can
+        // strand `CanvasGeometry`'s cross-frame caches has reported by here,
+        // and a single pass answers however many of them fired.
+        if needs_relayout {
+            ui.request_relayout();
         }
 
         self.record_discard_prompt(ui);

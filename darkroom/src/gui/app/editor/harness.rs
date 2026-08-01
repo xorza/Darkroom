@@ -129,7 +129,10 @@ impl EditorHarness {
         // would read the queue pass B left, and pass B clears what pass A
         // raised.
         ui.frame_value(|recorder: &mut Ui| {
-            editor.frame(recorder, open, ctx, preferences, requests);
+            // Deliberately dropped: production hands this to `App::frame`,
+            // which owns the app's one `request_relayout`. This harness
+            // asserts on commands and documents, not on layout passes.
+            let _needs_relayout = editor.frame(recorder, open, ctx, preferences, requests);
             requests.drain_app().collect()
         })
     }
