@@ -111,9 +111,6 @@ are gone; the field paths and the noun are not.
 
 ## Overlapping enums and one-line delegating wrappers
 
-- [ ] `Request` and `DocumentRequest` (`gui/requests.rs:25`, `:36`) declare the
-      `Graph` and `View` variants twice, with a `map` between them and an
-      `unreachable!` arm in each drain.
 - [ ] `Document::apply_dock_op` (`core/document/mod.rs:266`) is a one-line
       delegate to `self.layout.apply(op)`.
 - [ ] Graph visibility has three spellings: `Document::shows_graph`, the
