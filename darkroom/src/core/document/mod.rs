@@ -388,14 +388,18 @@ impl Document {
     /// Runs every frame in the navigation phase, right after undo/redo and the
     /// intent drain, so a stale tab can never reach a save.
     pub(crate) fn reconcile_with_graph(&mut self) {
-        // Common case: every tab still resolves — touch nothing (no
-        // per-frame allocation). Only when something died does the
-        // retain (and its re-pack) run, against the same predicate.
-        if self.layout.all_tabs().any(|t| !tab_alive(&self.graph, t)) {
-            // Split the borrow so the layout retain can read `graph`.
-            let Document { graph, layout, .. } = self;
-            layout.retain_tabs(|t| tab_alive(graph, t));
+        // Borrows `graph` alone, so the retain below can still take `layout`
+        // mutably. `Copy` — its only capture is a shared reference — which is
+        // what lets the same predicate answer both questions.
+        let alive = |tab: TabRef| tab_alive(&self.graph, tab);
+        // Common case: every tab still resolves, so touch nothing.
+        // `retain_tabs` rebuilds the whole node tree through `normalize`,
+        // allocating as it goes, and must not run on a frame with nothing to
+        // prune.
+        if self.layout.all_tabs().all(alive) {
+            return;
         }
+        self.layout.retain_tabs(alive);
     }
 }
 
