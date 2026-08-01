@@ -510,9 +510,11 @@ impl RuntimeCache {
     ///
     /// The job goes out and comes back — it owns its queue and scratch, so
     /// nothing of the cache is borrowed across the boundary and the memo never
-    /// moves at all. It returns on the failing path too, which is what keeps a
-    /// run that hits one unreadable path from re-walking every directory it had
-    /// already identified.
+    /// moves at all. The memo takes what the pass stamped whatever its verdict,
+    /// and the pass walks past a path that will not read
+    /// ([`StampJob::run`]) — so one unreadable path costs its own node's
+    /// digest and none of the identities the same pass gathered for the rest of
+    /// the run.
     async fn walk_queued(&mut self, cancel: CancelToken) -> Result<(), StampError> {
         if !self.stamp_job.is_queued() {
             return Ok(());

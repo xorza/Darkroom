@@ -1,6 +1,7 @@
 use ::common::{CancelToken, TempDir};
 
 use crate::execution::cache::digest::{Digest, DigestHasher};
+use crate::execution::cache::resource::error::StampError;
 use crate::execution::cache::resource::{FileId, FsPathId, StampJob, epoch_offset_ns};
 use crate::execution::cache::runtime::RuntimeCache;
 use crate::graph::identity::FuncId;
@@ -38,31 +39,11 @@ fn directory_identity_tracks_entry_changes() {
         let permissions = |mode: u32| Permissions::from_mode(mode);
         std::fs::set_permissions(dir.path(), permissions(0o000)).unwrap();
         let unreadable = StampJob::default().stamp(&path, &CancelToken::never());
-        // The whole pass fails with it, rather than dropping the path and
-        // leaving the node silently uncached forever.
-        let mut job = StampJob::default();
-        job.request(&path);
-        job.request("never-queued-twice");
-        let resolved = job.run(&CancelToken::never());
         std::fs::set_permissions(dir.path(), permissions(0o755)).unwrap();
 
         assert!(
             unreadable.is_err(),
             "an unlistable directory must surface its error, not a stamp: {unreadable:?}",
-        );
-        assert!(
-            resolved.is_err(),
-            "one unstampable path must fail the pass: {resolved:?}",
-        );
-        // The cache's memo receives exactly what the pass stamped, so an
-        // empty `stamped` is the same "identified nothing" one step earlier.
-        assert!(job.stamped.is_empty(), "and stamp nothing");
-        // The pass drains as it walks, so a failure part-way leaves nothing
-        // queued behind it — which is why queueing a node's paths never has
-        // to clear the queue first.
-        assert!(
-            !job.is_queued(),
-            "a failed pass must still empty its queue, including paths it never reached",
         );
         assert_eq!(
             fingerprint(&path),
@@ -85,6 +66,90 @@ fn directory_identity_tracks_entry_changes() {
 
     std::fs::remove_file(dir.join("b.fits")).unwrap();
     assert_ne!(fingerprint(&path), after_edit);
+}
+
+/// One pass identifies the paths of every node in a run, so a path that will
+/// not read must cost its own node's digest and nothing else. Aborting on the
+/// first failure left every path behind it unstamped — and which ones those
+/// were was queue order, not anything about the graph.
+#[test]
+fn one_unreadable_path_does_not_cost_the_pass() {
+    let dir = TempDir::new("survivors");
+    let in_dir = |name: String| dir.join(name).to_string_lossy().into_owned();
+    // The queue is a `HashSet`, so the order a pass drains it in is the
+    // hasher's, reseeded per process — one readable path beside one failure
+    // would only catch an abort on the runs that happened to draw the failure
+    // first. Twelve against three: an abort keeps every readable path only
+    // when all three failures draw last, one arrangement of `C(15, 3)`.
+    let present_paths = (0..12)
+        .map(|i| {
+            let path = in_dir(format!("present-{i}.bin"));
+            std::fs::write(&path, b"x").unwrap();
+            path
+        })
+        .collect::<Vec<_>>();
+    let missing_paths = (0..3).map(|i| in_dir(format!("missing-{i}.bin")));
+    let stamped_paths = |job: &StampJob| {
+        let mut paths = job
+            .stamped
+            .iter()
+            .map(|(path, _)| path.clone())
+            .collect::<Vec<_>>();
+        paths.sort();
+        paths
+    };
+
+    let mut job = StampJob::default();
+    for path in present_paths.iter().cloned().chain(missing_paths) {
+        job.request(&path);
+    }
+    let resolved = job.run(&CancelToken::never());
+    assert!(
+        resolved.is_err(),
+        "a path that would not read is still reported: {resolved:?}",
+    );
+    let mut expected = present_paths.clone();
+    expected.sort();
+    assert_eq!(
+        stamped_paths(&job),
+        expected,
+        "and every readable path still lands, wherever the failures fell",
+    );
+    // The pass drains as it walks, so nothing sits behind a failure — which is
+    // why queueing a node's paths never has to clear the queue first.
+    assert!(
+        !job.is_queued(),
+        "the pass drains whatever it reports, so nothing is left queued",
+    );
+
+    // Nothing records that a path was tried: the same path reads at the node's
+    // turn once an upstream producer has written it.
+    let written_late = in_dir("missing-0.bin".to_string());
+    std::fs::write(&written_late, b"now here").unwrap();
+    let mut job = StampJob::default();
+    job.request(&written_late);
+    assert!(
+        job.run(&CancelToken::never()).is_ok(),
+        "a failure is reported, not remembered",
+    );
+    assert_eq!(stamped_paths(&job), std::slice::from_ref(&written_late));
+
+    // Cancellation is the one verdict that still stops the walk where it
+    // stands, rather than raising itself once per remaining path.
+    let mut job = StampJob::default();
+    for path in &present_paths {
+        job.request(path);
+    }
+    let cancel = CancelToken::new();
+    cancel.cancel();
+    assert!(
+        matches!(job.run(&cancel), Err(StampError::Cancelled)),
+        "a cancelled pass reports the cancellation",
+    );
+    assert!(
+        job.stamped.is_empty(),
+        "and identifies nothing after it is raised",
+    );
 }
 
 /// A pure function handed a directory consumes it recursively, so its

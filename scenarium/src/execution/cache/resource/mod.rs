@@ -133,21 +133,48 @@ impl StampJob {
         self.stamped.drain(..)
     }
 
-    /// Stamp every queued path, draining the queue. The first path with no
-    /// determinate identity stops the pass and takes its error with it —
-    /// a node whose inputs cannot be identified has no sound cache key,
-    /// and continuing would mean silently never caching it again.
+    /// Stamp every queued path, draining the queue, and report the first path
+    /// that had no determinate identity.
+    ///
+    /// **An unreadable path costs its own node, not the pass.** A node whose
+    /// input cannot be identified has no sound cache key — but that is true of
+    /// *that* node, while this pass is shared by every node of the run. So the
+    /// walk carries on past a failure and the paths queued behind it still
+    /// land. The failing node is left without a digest either way, and the run
+    /// loop re-stamps it at its own turn, where the error belongs to one node
+    /// and is reported as that node's.
+    ///
+    /// A failure is reported, never remembered: a path that would not read
+    /// during the pre-run pass may read at the node's turn, once an upstream
+    /// producer has written it, so nothing here records that a path was tried.
+    ///
+    /// Cancellation is the one thing that still stops the pass where it
+    /// stands — every path left would raise it again, and no identity the walk
+    /// could still gather is wanted.
     pub(super) fn run(&mut self, cancel: &CancelToken) -> Result<(), StampError> {
         // The queue steps out so the walk can borrow the rest of the job
         // while it drains, and steps back in empty, with its capacity.
         let mut requests = std::mem::take(&mut self.requests);
-        let resolved = requests.drain().try_for_each(|path| {
-            let identity = self.stamp(&path, cancel)?;
-            self.stamped.push((path, identity));
-            Ok(())
-        });
+        let mut failure = None;
+        for path in requests.drain() {
+            match self.stamp(&path, cancel) {
+                Ok(identity) => self.stamped.push((path, identity)),
+                Err(StampError::Cancelled) => {
+                    failure = Some(StampError::Cancelled);
+                    break;
+                }
+                // The first one is what gets reported; a later path's failure
+                // would name a different node's resource just as truthfully,
+                // and one message can only carry one.
+                Err(error) => {
+                    if failure.is_none() {
+                        failure = Some(error);
+                    }
+                }
+            }
+        }
         self.requests = requests;
-        resolved
+        failure.map_or(Ok(()), Err)
     }
 
     fn stamp(&mut self, path: &str, cancel: &CancelToken) -> Result<FsPathId, StampError> {
