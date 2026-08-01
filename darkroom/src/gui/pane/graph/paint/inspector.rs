@@ -33,9 +33,8 @@ use scenarium::NodeId;
 
 use crate::gui::graph_ctx::node_ctx::NodeCtx;
 use crate::gui::pane::graph::canvas::outer_canvas_widget_id;
-use crate::gui::pane::graph::ctx::CanvasCtx;
 use crate::gui::pane::graph::ctx::DrawCtx;
-use crate::gui::pane::graph::frame::hits::{CanvasHits, Chip};
+use crate::gui::pane::graph::node::NodeDrawOutcome;
 use crate::gui::pane::graph::node::exec_color;
 use crate::gui::pane::graph::node::node_hovered;
 use crate::gui::state::run_state::ExecStatus;
@@ -93,19 +92,21 @@ impl Inspectors {
         self.modes.retain(|_, m| *m == InspectMode::Pinned);
     }
 
-    /// Read last-frame chip clicks to cycle node states and close unpinned
-    /// panels on an outside action. Reads everything off last-frame responses
-    /// (same timing as the chip toggle), so a chip click never reads as its
-    /// own outside action — the click lands on the chip, not the canvas or a
-    /// body.
+    /// Cycle the node whose `i` chip was clicked, and close the unpinned
+    /// panels on an outside action.
+    ///
+    /// Both node-side facts come from the record pass that just drew them
+    /// ([`NodeDrawOutcome`](crate::gui::pane::graph::node::NodeDrawOutcome));
+    /// the canvas half is read here. Everything is last-frame responses either
+    /// way, so a chip click never reads as its own outside action — the click
+    /// lands on the chip, not on the canvas or a body.
     ///
     /// Dropping entries for deleted nodes is *not* here: that needs only the
     /// document, so it runs once a frame with the canvas's other
     /// `NodeId`-keyed sweeps ([`Self::retain_nodes`]) rather than per record
     /// pass with the input handling.
-    pub(crate) fn apply(&mut self, ui: &Ui, cx: CanvasCtx<'_>) {
-        let hits = cx.hits();
-        if let Some(node) = hits.chip(Chip::Inspect) {
+    pub(crate) fn apply(&mut self, ui: &Ui, outcome: &NodeDrawOutcome) {
+        if let Some(node) = outcome.inspect_toggled {
             match cycle(self.modes.get(&node).copied()) {
                 Some(m) => {
                     self.modes.insert(node, m);
@@ -115,7 +116,7 @@ impl Inspectors {
                 }
             }
         }
-        if outside_action(ui, hits) {
+        if outside_action(ui, outcome.body_acted) {
             self.close_unpinned();
         }
     }
@@ -287,7 +288,7 @@ fn log_color(theme: &Theme, ui: &Ui, level: LogLevel) -> Color {
 /// node body, clicking bare canvas, or panning/zooming the canvas all
 /// count; clicks inside a panel or on a chip don't (those widgets
 /// capture the press, so neither the canvas nor a body sees it).
-fn outside_action(ui: &Ui, hits: &CanvasHits) -> bool {
+fn outside_action(ui: &Ui, body_acted: bool) -> bool {
     let oc = ui.response_for(outer_canvas_widget_id());
     // Any-button drag: left rubber-bands, middle pans, right scribbles
     // the breaker — all of them count as "acted on the canvas".
@@ -297,8 +298,8 @@ fn outside_action(ui: &Ui, hits: &CanvasHits) -> bool {
         || oc.scroll.lines != Vec2::ZERO
         || oc.scroll.pixels != Vec2::ZERO
         || (oc.scroll.zoom - 1.0).abs() > f32::EPSILON;
-    // The node half comes off this frame's sweep.
-    canvas_acted || hits.body_acted().is_some()
+    // The node half comes off the draw that just ran.
+    canvas_acted || body_acted
 }
 
 fn line<'a>(ui: &mut Ui, text: impl Into<TextInput<'a>>, style: TextStyle) {
