@@ -1,5 +1,4 @@
-//! The [`GraphIntent`] / [`UndoStep`] / [`GestureKey`] type model, plus the
-//! [`Refusal`] a commit answers with when no step comes out of it.
+//! The [`GraphIntent`] / [`UndoStep`] / [`GestureKey`] type model.
 //!
 //! An [`GraphIntent`] is "what the caller wants the graph to look like
 //! after"; it carries no history. To make the change reversible, we
@@ -36,28 +35,6 @@ pub(crate) enum NodeProperty {
     Disabled(bool),
     /// `Node::cache` — where the node's output is cached (see [`CacheMode`]).
     RuntimeCache(CacheMode),
-}
-
-/// Why an intent never became an [`UndoStep`]. The split is by who is at
-/// fault.
-///
-/// [`Quiet`](Self::Quiet) is the ordinary outcome of input that spans
-/// frames: the item the intent named is gone, the change is already in
-/// place, or the edit is refused by design. Callers drop it without a word.
-///
-/// [`Invalid`](Self::Invalid) means the payload could never have applied —
-/// a nil or colliding identity, a non-finite position, a link to state the
-/// document doesn't hold. Nothing that raises an intent can legitimately
-/// build one: widgets read the identities they emit out of the live
-/// document, so the worst they manage is stale, which refuses
-/// [`Quiet`](Self::Quiet)ly. An `Invalid` is therefore our own bug, and
-/// `Editor::commit_widget_batch` panics on it rather than swallowing it.
-/// It stays a value rather than a panic *here* so the check reads as a
-/// precondition on the way in, and so a test can assert which one broke.
-#[derive(Debug)]
-pub(crate) enum Refusal {
-    Quiet,
-    Invalid(String),
 }
 
 /// What the caller wants to change **in one graph**. Forward-only — no

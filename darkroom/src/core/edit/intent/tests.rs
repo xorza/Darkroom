@@ -11,7 +11,7 @@ use crate::core::document::{Document, Viewport};
 use crate::core::edit::intent::apply::{apply_step, commit_intent, revert_step};
 use crate::core::edit::intent::duplicate::build_duplicate_intent;
 use crate::core::edit::intent::duplicate::internals::duplicate_offset;
-use crate::core::edit::intent::types::{GraphIntent, NodeProperty, Refusal, UndoStep};
+use crate::core::edit::intent::types::{GraphIntent, NodeProperty, UndoStep};
 
 #[test]
 fn dirties_document_splits_edits_from_navigation() {
@@ -196,7 +196,9 @@ fn invalid_viewports_are_dropped_before_mutation() {
         zoom: 2.0,
     };
     assert!(
-        commit_intent(GraphIntent::SetViewport { to: valid }, &mut doc).is_ok(),
+        commit_intent(GraphIntent::SetViewport { to: valid }, &mut doc)
+            .unwrap()
+            .is_some(),
         "a finite positive viewport must commit"
     );
     assert_eq!(doc.main_view.viewport, valid);
@@ -217,13 +219,16 @@ fn subscribe_unsubscribe_commit_and_undo() {
     };
 
     // Subscribe commits and writes the edge.
-    let step =
-        commit_intent(set_sub(emitter, 0, subscriber, true), &mut doc).expect("subscribe commits");
+    let step = commit_intent(set_sub(emitter, 0, subscriber, true), &mut doc)
+        .unwrap()
+        .expect("subscribe commits");
     assert!(doc.graph.is_subscribed(emitter, 0, subscriber));
 
     // A second identical subscribe is a no-op (from == to == true).
     assert!(
-        commit_intent(set_sub(emitter, 0, subscriber, true), &mut doc).is_err(),
+        commit_intent(set_sub(emitter, 0, subscriber, true), &mut doc)
+            .unwrap()
+            .is_none(),
         "re-subscribing the same edge is a no-op"
     );
 
@@ -235,6 +240,7 @@ fn subscribe_unsubscribe_commit_and_undo() {
 
     // Unsubscribe commits, removes the edge, and undo brings it back.
     let step = commit_intent(set_sub(emitter, 0, subscriber, false), &mut doc)
+        .unwrap()
         .expect("unsubscribe commits");
     assert!(!doc.graph.is_subscribed(emitter, 0, subscriber));
     revert_step(&step, &mut doc);
@@ -245,7 +251,9 @@ fn subscribe_unsubscribe_commit_and_undo() {
     apply_step(&step, &mut doc);
     assert!(!doc.graph.is_subscribed(emitter, 0, subscriber));
     assert!(
-        commit_intent(set_sub(emitter, 0, subscriber, false), &mut doc).is_err(),
+        commit_intent(set_sub(emitter, 0, subscriber, false), &mut doc)
+            .unwrap()
+            .is_none(),
         "unsubscribing a missing edge is a no-op"
     );
 }
@@ -383,7 +391,8 @@ fn set_node_property_commits_and_reverts() {
     ];
     for to in cases {
         let step = commit_intent(GraphIntent::SetNodeProperty { node_id: id, to }, &mut doc)
-            .unwrap_or_else(|_| panic!("{to:?} is a real change, not a no-op"));
+            .unwrap()
+            .unwrap_or_else(|| panic!("{to:?} is a real change, not a no-op"));
         let node = doc.graph.find(id).unwrap();
         match to {
             NodeProperty::RuntimeCache(m) => assert_eq!(node.cache, m),
@@ -409,7 +418,9 @@ fn set_node_property_commits_and_reverts() {
         NodeProperty::Disabled(false),
     ] {
         assert!(
-            commit_intent(GraphIntent::SetNodeProperty { node_id: id, to }, &mut doc,).is_err(),
+            commit_intent(GraphIntent::SetNodeProperty { node_id: id, to }, &mut doc,)
+                .unwrap()
+                .is_none(),
             "{to:?} equals the current value → writes nothing"
         );
     }
@@ -436,7 +447,8 @@ fn commit_intent_rejects_cycle_forming_bind() {
             },
             &mut doc,
         )
-        .is_err(),
+        .unwrap()
+        .is_none(),
         "a bind that closes a cycle is rejected"
     );
     assert_eq!(
@@ -460,7 +472,8 @@ fn commit_intent_rejects_cycle_forming_bind() {
             },
             &mut doc,
         )
-        .is_ok(),
+        .unwrap()
+        .is_some(),
         "an acyclic bind commits"
     );
     assert_eq!(
@@ -469,14 +482,15 @@ fn commit_intent_rejects_cycle_forming_bind() {
     );
 }
 
-/// Commit `intent` expecting a stated refusal, and check nothing leaked
-/// through it — the gate exists to keep a malformed payload out of `apply`.
+/// Commit `intent` expecting it to be rejected as malformed, and check nothing
+/// leaked through it — the gate exists to keep a malformed payload out of
+/// `apply`.
 #[track_caller]
 fn assert_invalid(doc: &mut Document, intent: GraphIntent, what: &str) {
     let nodes = doc.graph.len();
     match commit_intent(intent, doc) {
-        Err(Refusal::Invalid(_)) => {}
-        other => panic!("{what}: expected an Invalid refusal, got {other:?}"),
+        Err(_) => {}
+        other => panic!("{what}: expected a MalformedIntent, got {other:?}"),
     }
     assert_eq!(
         doc.graph.len(),
@@ -487,12 +501,13 @@ fn assert_invalid(doc: &mut Document, intent: GraphIntent, what: &str) {
         .unwrap_or_else(|e| panic!("{what}: document invalid after a refusal: {e}"));
 }
 
-/// Commit `intent` expecting a quiet refusal — the drop widgets rely on.
+/// Commit `intent` expecting it to yield no step — the silent drop widgets
+/// rely on, which is an `Ok` outcome and not an error.
 #[track_caller]
 fn assert_quiet(doc: &mut Document, intent: GraphIntent, what: &str) {
     match commit_intent(intent, doc) {
-        Err(Refusal::Quiet) => {}
-        other => panic!("{what}: expected a quiet refusal, got {other:?}"),
+        Ok(None) => {}
+        other => panic!("{what}: expected no step, got {other:?}"),
     }
 }
 
@@ -711,6 +726,7 @@ fn selection_and_move_drop_members_whose_widget_is_gone() {
         },
         &mut doc,
     )
+    .unwrap()
     .expect("a selection with one live member commits");
     let UndoStep::SetSelection { to, .. } = &step else {
         panic!("expected a SetSelection step, got {step:?}");
@@ -729,6 +745,7 @@ fn selection_and_move_drop_members_whose_widget_is_gone() {
         },
         &mut doc,
     )
+    .unwrap()
     .expect("a move with one live member commits");
     let UndoStep::MoveSelection { moves, .. } = &step else {
         panic!("expected a MoveSelection step, got {step:?}");

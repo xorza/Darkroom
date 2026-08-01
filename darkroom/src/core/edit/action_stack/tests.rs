@@ -59,7 +59,9 @@ impl History {
         let steps: Vec<UndoStep> = intents
             .into_iter()
             .map(|intent| {
-                let step = build_step(intent, &self.doc).unwrap();
+                let step = build_step(intent, &self.doc)
+                    .unwrap()
+                    .expect("a test batch commits every intent");
                 apply_step(&step, &mut self.doc);
                 step
             })
