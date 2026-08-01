@@ -50,7 +50,9 @@ pub(crate) fn emit(ui: &mut Ui, graph_ctx: GraphCtx<'_>, out: &mut Intents) {
             },
         });
     }
-    if duplicate && let Some(intent) = build_duplicate_intent(graph_ctx.document()) {
+    // Ctrl+D drops wires from producers outside the selection; keeping them
+    // is the node menu's second Duplicate pick, which has a label to say so.
+    if duplicate && let Some(intent) = build_duplicate_intent(graph_ctx.document(), false) {
         out.push(intent);
     }
     if delete {

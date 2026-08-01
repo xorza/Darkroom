@@ -2,6 +2,7 @@ use std::collections::BTreeSet;
 
 use palantir::{MenuItem, Ui};
 
+use crate::core::edit::intent::duplicate::build_duplicate_intent;
 use crate::core::edit::intent::sink::Intents;
 use crate::core::edit::intent::types::GraphIntent;
 use crate::gui::app::commands::AppCommand;
@@ -11,41 +12,32 @@ use crate::gui::pane::graph::paint::anchored_menu::NodeContextMenu;
 
 /// Right-click on a node body → a small popup with actions on the node.
 /// The trigger scan, the per-open node latch, and the popup lifecycle are all
-/// [`NodeContextMenu`]'s. "Run to this node" resolves here (it only needs the
-/// clicked node's id) and surfaces an [`AppCommand`]; the structural picks
-/// stash a [`NodeMenuAction`] the `Editor` resolves against the live selection
-/// (where the `Document` is available to build the clone / removal intents).
+/// [`NodeContextMenu`]'s. "Run to this node" needs only the clicked node's id
+/// and surfaces an [`AppCommand`]; the structural picks read the live
+/// selection off the context and push their intents onto the frame's queue,
+/// the same two builders the Ctrl+D and Delete chords drive.
 #[derive(Default, Debug)]
 pub(crate) struct NodeMenuUi {
     menu: NodeContextMenu,
-    /// The pick, read out by the `Editor` and resolved against the live
-    /// selection.
-    action: Option<NodeMenuAction>,
 }
 
-/// A structural action picked from a node's context menu. The target is the
-/// current selection (right-click first selects the clicked node), so the
-/// action carries only its kind.
-#[derive(Copy, Clone, Debug)]
-pub(crate) enum NodeMenuAction {
-    Duplicate,
-    DuplicateWithIncoming,
-    Remove,
-}
-
-/// A menu pick before routing: the run resolves in place (into `cmd`) against
-/// the node the menu opened on, structural actions drain through
-/// [`NodeMenuUi::take_action`].
+/// A menu pick before routing. `Run` names the node the menu opened on; the
+/// structural picks carry only their kind, because their target is the
+/// selection (a right-click selects the node it landed on first).
 #[derive(Copy, Clone, Debug)]
 enum MenuChoice {
     Run,
-    Action(NodeMenuAction),
+    /// `incoming`: keep the clones' wires to producers outside the selection.
+    Duplicate {
+        incoming: bool,
+    },
+    Remove,
 }
 
 impl NodeMenuUi {
     /// Returns the command a pick resolves to, if any — the canvas decides
-    /// whether it wins the frame. A structural pick is stashed for the
-    /// `Editor` instead (see [`Self::take_action`]) and yields `None`.
+    /// whether it wins the frame. A structural pick lands on `out` as
+    /// ordinary intents instead, and yields `None`.
     pub(crate) fn apply(
         &mut self,
         ui: &mut Ui,
@@ -59,7 +51,9 @@ impl NodeMenuUi {
         let opened = self.menu.latch(ui, cx);
         // Right-click selects the clicked node when it isn't already part of
         // the selection, so the chosen action always targets a coherent set
-        // ("select then act").
+        // ("select then act"). A pick lands frames later — the menu has to
+        // record at least once before an item can be clicked — so this
+        // selection is committed by the time the arms below read it back.
         if let Some(node_id) = opened.filter(|&id| !graph_ctx.is_selected(id)) {
             out.push(GraphIntent::SetSelection {
                 to: BTreeSet::from([node_id]),
@@ -82,37 +76,36 @@ impl NodeMenuUi {
                 MenuItem::separator().show(ui);
             }
             if MenuItem::new("Duplicate").show(ui, popup).left.clicked() {
-                chosen = Some(MenuChoice::Action(NodeMenuAction::Duplicate));
+                chosen = Some(MenuChoice::Duplicate { incoming: false });
             }
             if MenuItem::new("Duplicate with incoming connections")
                 .show(ui, popup)
                 .left
                 .clicked()
             {
-                chosen = Some(MenuChoice::Action(NodeMenuAction::DuplicateWithIncoming));
+                chosen = Some(MenuChoice::Duplicate { incoming: true });
             }
             MenuItem::separator().show(ui);
             if MenuItem::new("Remove").show(ui, popup).left.clicked() {
-                chosen = Some(MenuChoice::Action(NodeMenuAction::Remove));
+                chosen = Some(MenuChoice::Remove);
             }
             chosen
         })?;
+        // `NodeContextMenu::show` answers `Some` only for the pane that opened
+        // the menu, so everything below is scoped to that pane.
         match pick.choice {
             MenuChoice::Run => Some(AppCommand::Run(RunCommand::Node(pick.node_id))),
-            MenuChoice::Action(action) => {
-                // `NodeContextMenu::show` answers `Some` only for the pane that
-                // opened the menu, so this is that pane.
-                self.action = Some(action);
+            MenuChoice::Duplicate { incoming } => {
+                out.extend(build_duplicate_intent(graph_ctx.document(), incoming));
+                None
+            }
+            // One intent per member, batched into a single undo entry by the
+            // drain — the Delete chord's path exactly.
+            MenuChoice::Remove => {
+                out.push_node_removals(graph_ctx.selected().iter().copied());
                 None
             }
         }
-    }
-
-    /// Take the structural action picked since the last call, with the pane
-    /// it was picked in. The `Editor` drains this each frame and resolves it
-    /// against that pane's live selection.
-    pub(crate) fn take_action(&mut self) -> Option<NodeMenuAction> {
-        self.action.take()
     }
 }
 

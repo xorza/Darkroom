@@ -37,7 +37,7 @@ use crate::gui::pane::graph::frame::prepass::{emit_path_picks, emit_port_dblclic
 use crate::gui::pane::graph::gesture::breaker::BreakerUI;
 use crate::gui::pane::graph::gesture::connection::ConnectionUI;
 use crate::gui::pane::graph::gesture::new_node::NewNodeUi;
-use crate::gui::pane::graph::gesture::node_menu::{NodeMenuAction, NodeMenuUi};
+use crate::gui::pane::graph::gesture::node_menu::NodeMenuUi;
 use crate::gui::pane::graph::gesture::preview_drag::PreviewDrag;
 use crate::gui::pane::graph::gesture::selection::SelectionUI;
 use crate::gui::pane::graph::gesture::slot::GestureSlot;
@@ -211,13 +211,6 @@ impl GraphUI {
         self.gestures = Gestures::default();
         self.inspectors.close_unpinned();
         true
-    }
-
-    /// Take the node context-menu action picked this frame, if any. The
-    /// `Editor` resolves it against the live selection (it owns the
-    /// `Document` needed to build the duplicate / removal intents).
-    pub(crate) fn take_node_menu_action(&mut self) -> Option<NodeMenuAction> {
-        self.gestures.node_menu.take_action()
     }
 
     /// Pre-record pass — see
@@ -407,8 +400,8 @@ impl GraphUI {
         //
         // Both context menus are polled whatever comes of it — their popups
         // own a lifecycle that has to record every frame, and a pick's other
-        // effects (a `DetachGraph` intent, a stashed `NodeMenuAction`) land
-        // through `out` rather than through the return. The chip scans are
+        // effects (the selection swap on open, the duplicate / removal
+        // intents) land through `out` rather than through the return. The chip scans are
         // pure reads over last frame's responses, so `or_else` short-circuits
         // past them once a menu has answered.
         gestures

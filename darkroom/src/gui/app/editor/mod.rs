@@ -16,7 +16,6 @@ use crate::core::document::dock::DockOp;
 use crate::core::document::open_document::OpenDocument;
 use crate::core::edit::action_stack::ActionStack;
 use crate::core::edit::intent::apply::commit_intent;
-use crate::core::edit::intent::duplicate::{build_duplicate_intent_for, selected_node_ids};
 use crate::core::edit::intent::sink::{Intents, Queued};
 use crate::core::edit::intent::types::{GraphIntent, Refusal, UndoStep};
 use crate::core::io::preferences::Preferences;
@@ -25,7 +24,6 @@ use crate::gui::app::commands::AppCommand;
 use crate::gui::app::commands::file::FileCommand;
 use crate::gui::app::commands::run::RunCommand;
 use crate::gui::app::commands::shell::ShellCommand;
-use crate::gui::pane::graph::gesture::node_menu::NodeMenuAction;
 use crate::gui::window::MainWindow;
 
 use crate::gui::app::ctx::AppCtx;
@@ -228,14 +226,6 @@ impl Editor {
             .frame(ui, ctx, &open.document, preferences, &mut self.intents)
             .or(command_from_shortcut);
 
-        // A node context-menu pick resolves here, where the Document is
-        // available to build the duplicate / removal intents against the
-        // live selection (the canvas gesture only sees the read-only Scene).
-        // Pushed before the post-record drain so it lands this frame.
-        if let Some(action) = self.main_window.graph_ui.take_node_menu_action() {
-            self.apply_node_menu_action(open, action);
-        }
-
         // Post-record drain — graph edits the record surfaced (node select,
         // cache toggle, const edit), plus the tab strip's dock ops.
         self.drain_intents(open);
@@ -250,28 +240,6 @@ impl Editor {
             ui.request_relayout();
         }
         command
-    }
-
-    /// Resolve a node context-menu pick against the live selection
-    /// (right-click already selected the clicked node). Duplicate variants
-    /// reuse the Ctrl+D builder; Remove mirrors the Delete-key path — one
-    /// intent per selected member, batched into a single undo entry by the
-    /// post-record drain.
-    fn apply_node_menu_action(&mut self, open: &OpenDocument, action: NodeMenuAction) {
-        let view = &open.document.main_view;
-        let document = &open.document;
-        match action {
-            NodeMenuAction::Duplicate | NodeMenuAction::DuplicateWithIncoming => {
-                let incoming = matches!(action, NodeMenuAction::DuplicateWithIncoming);
-                let node_ids = selected_node_ids(view);
-                if let Some(intent) = build_duplicate_intent_for(document, &node_ids, incoming) {
-                    self.intents.push(intent);
-                }
-            }
-            NodeMenuAction::Remove => self
-                .intents
-                .push_node_removals(view.selected.iter().copied()),
-        }
     }
 
     /// Settle which tab is active for this frame, from inputs all available
