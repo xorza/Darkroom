@@ -22,6 +22,7 @@ use crate::core::theme_pref::ThemeChoice;
 use crate::gui::app::commands::AppCommand;
 use crate::gui::app::commands::prefs::{MlModelKind, PrefsCommand};
 use crate::gui::dialogs;
+use crate::gui::requests::Requests;
 use crate::gui::theme::Theme;
 use crate::gui::widgets::support::{colored_text, muted_text, sized_text};
 
@@ -36,11 +37,9 @@ const SECTIONS_GAP: f32 = 26.0;
 /// Gap between a section's label and its rows, and between the rows.
 const SECTION_GAP: f32 = 8.0;
 
-/// Draw the preferences form, editing `prefs` in place. Returns the
-/// command the edit needs `App` to run (persist + re-sync, or a Browse
-/// dialog), if any.
-pub(crate) fn show(ui: &mut Ui, theme: &Theme, prefs: &mut Preferences) -> Option<AppCommand> {
-    let mut command: Option<AppCommand> = None;
+/// Draw the preferences form, editing `prefs` in place, and queue whatever
+/// the edit needs `App` to run: persist + re-sync, or a Browse dialog.
+pub(crate) fn show(ui: &mut Ui, theme: &Theme, prefs: &mut Preferences, out: &mut Requests) {
     Panel::vstack()
         .id_salt("preferences_view")
         .size((Sizing::FILL, Sizing::FILL))
@@ -75,7 +74,7 @@ pub(crate) fn show(ui: &mut Ui, theme: &Theme, prefs: &mut Preferences) -> Optio
                             });
                     });
                     if prefs.theme != before {
-                        command = Some(AppCommand::Prefs(PrefsCommand::Changed));
+                        out.push_app(AppCommand::Prefs(PrefsCommand::Changed));
                     }
 
                     // Behavior — the startup + exit toggles.
@@ -86,7 +85,7 @@ pub(crate) fn show(ui: &mut Ui, theme: &Theme, prefs: &mut Preferences) -> Optio
                             .left
                             .clicked()
                         {
-                            command = Some(AppCommand::Prefs(PrefsCommand::Changed));
+                            out.push_app(AppCommand::Prefs(PrefsCommand::Changed));
                         }
                         if Checkbox::new(&mut prefs.confirm_unsaved_changes)
                             .label("Ask to save unsaved changes")
@@ -94,39 +93,40 @@ pub(crate) fn show(ui: &mut Ui, theme: &Theme, prefs: &mut Preferences) -> Optio
                             .left
                             .clicked()
                         {
-                            command = Some(AppCommand::Prefs(PrefsCommand::Changed));
+                            out.push_app(AppCommand::Prefs(PrefsCommand::Changed));
                         }
                     });
 
                     // ML models — caller-supplied ONNX files the ml_denoise /
                     // remove_stars nodes load (lumos ships none).
                     section(ui, theme, "ML Models", |ui| {
-                        if let Some(c) = model_row(
+                        model_row(
                             ui,
                             theme,
-                            "Denoise (DeepSNR)",
+                            ModelRow {
+                                label: "Denoise (DeepSNR)",
+                                kind: MlModelKind::Denoise,
+                                download_label: "Download DeepSNR CLI \u{2197}",
+                                download_url: "https://starnetastro.com/cli-tools/deepsnr/",
+                            },
                             &mut prefs.ml_models.denoise,
-                            MlModelKind::Denoise,
-                            "Download DeepSNR CLI \u{2197}",
-                            "https://starnetastro.com/cli-tools/deepsnr/",
-                        ) {
-                            command = Some(c);
-                        }
-                        if let Some(c) = model_row(
+                            out,
+                        );
+                        model_row(
                             ui,
                             theme,
-                            "Star removal (StarNet)",
+                            ModelRow {
+                                label: "Star removal (StarNet)",
+                                kind: MlModelKind::StarRemoval,
+                                download_label: "Download StarNet CLI \u{2197}",
+                                download_url: "https://starnetastro.com/cli-tools/starnet/",
+                            },
                             &mut prefs.ml_models.star_removal,
-                            MlModelKind::StarRemoval,
-                            "Download StarNet CLI \u{2197}",
-                            "https://starnetastro.com/cli-tools/starnet/",
-                        ) {
-                            command = Some(c);
-                        }
+                            out,
+                        );
                     });
                 });
         });
-    command
 }
 
 /// One settings section: a bold muted label with its rows grouped tight
@@ -145,6 +145,17 @@ fn section(ui: &mut Ui, theme: &Theme, title: &'static str, body: impl FnOnce(&m
             Text::new(title).style(&style).show(ui);
             body(ui);
         });
+}
+
+/// One ML-model row's fixed description: what it is called, which preference
+/// a Browse pick writes, and where the file comes from. Everything about the
+/// row that the form knows before it draws.
+#[derive(Clone, Copy, Debug)]
+struct ModelRow {
+    label: &'static str,
+    kind: MlModelKind,
+    download_label: &'static str,
+    download_url: &'static str,
 }
 
 /// Floor of an ML-path field — it fills the leftover column width, but never
@@ -198,18 +209,15 @@ struct PathField {
 /// button, and — beneath, indented under the field — an error line when the
 /// committed path is broken, then a download hint (a browser link to the CLI
 /// tool plus unzip/point-at-the-`.onnx` guidance).
-/// Writes `path` in place and returns [`PrefsCommand::Changed`] on an
-/// edited path or [`PrefsCommand::PickMlModel`] when Browse is clicked.
-fn model_row(
-    ui: &mut Ui,
-    theme: &Theme,
-    label: &'static str,
-    path: &mut PathBuf,
-    kind: MlModelKind,
-    download_label: &'static str,
-    download_url: &'static str,
-) -> Option<AppCommand> {
-    let mut command = None;
+/// Writes `path` in place and queues [`PrefsCommand::Changed`] on an
+/// edited path, or [`PrefsCommand::PickMlModel`] when Browse is clicked.
+fn model_row(ui: &mut Ui, theme: &Theme, row: ModelRow, path: &mut PathBuf, out: &mut Requests) {
+    let ModelRow {
+        label,
+        kind,
+        download_label,
+        download_url,
+    } = row;
     let id = WidgetId::from_hash(("preferences.ml_model_path", label));
     // Refresh the draft from `path` only when `path` changed *externally*
     // (initial load, a Browse pick, or last frame's commit) — never on
@@ -287,7 +295,7 @@ fn model_row(
                     let field = ui.state_mut::<PathField>(id);
                     if commit && draft != field.seen {
                         *path = PathBuf::from(draft.clone());
-                        command = Some(AppCommand::Prefs(PrefsCommand::Changed));
+                        out.push_app(AppCommand::Prefs(PrefsCommand::Changed));
                     }
                     let field = ui.state_mut::<PathField>(id);
                     field.text = draft;
@@ -307,7 +315,7 @@ fn model_row(
                         .left
                         .clicked()
                     {
-                        command = Some(AppCommand::Prefs(PrefsCommand::PickMlModel(kind)));
+                        out.push_app(AppCommand::Prefs(PrefsCommand::PickMlModel(kind)));
                     }
                 });
 
@@ -320,7 +328,6 @@ fn model_row(
             }
             download_hint(ui, theme, download_label, download_url);
         });
-    command
 }
 
 /// The CLI tools ship as a zip of self-contained binaries plus the model

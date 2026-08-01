@@ -18,7 +18,6 @@ use palantir::{
 };
 use scenarium::{CacheMode, NodeId};
 
-use crate::core::edit::intent::sink::Intents;
 use crate::core::edit::intent::types::{GraphIntent, NodeProperty};
 use crate::gui::graph_ctx::node_scope::NodeScope;
 use crate::gui::pane::graph::node::ctx::NodeCtx;
@@ -26,6 +25,7 @@ use crate::gui::pane::graph::node::port_color::event_color;
 use crate::gui::pane::graph::node::port_row::glyph::{EVENT_TRIANGLE_RADIUS, PORT_HIT_SCALE};
 use crate::gui::pane::graph::node::{click_intents, exec_color, node_rename_wid, node_wid};
 use crate::gui::pane::graph::paint::inspector::{InspectMode, inspect_badge_wid};
+use crate::gui::requests::Requests;
 use crate::gui::state::run_state::ExecStatus;
 use crate::gui::theme::Theme;
 use crate::gui::widgets::badge::{BADGE_FONT, BADGE_SIZE, Badge};
@@ -122,7 +122,7 @@ pub(crate) fn subscription_glyph_wid(node_id: NodeId) -> WidgetId {
 /// controls ride in [`status_row`] below). The sink nodes' event-
 /// subscription pin is *not* drawn here — it records at canvas level, before the
 /// node bodies, so it peeks out from behind the node's corner.
-pub(super) fn header(ui: &mut Ui, ncx: NodeCtx<'_>, out: &mut Intents) {
+pub(super) fn header(ui: &mut Ui, ncx: NodeCtx<'_>, out: &mut Requests) {
     let (theme, node) = (ncx.theme(), ncx.node());
     // The header sits inside the body's border stroke (the layout folds
     // the stroke width into the body's padding), so it must round to the
@@ -195,7 +195,7 @@ pub(super) fn header(ui: &mut Ui, ncx: NodeCtx<'_>, out: &mut Intents) {
 /// sink-disable, `↻` evict, and `R`/`↓` cache. The controls group apart from the title's
 /// identity (header above); the run-time reads as the row's status
 /// counterweight.
-pub(super) fn status_row(ui: &mut Ui, ncx: NodeCtx<'_>, out: &mut Intents) {
+pub(super) fn status_row(ui: &mut Ui, ncx: NodeCtx<'_>, out: &mut Requests) {
     let (theme, node) = (ncx.theme(), ncx.node());
     Panel::hstack()
         .id_salt("status_row")
@@ -338,7 +338,7 @@ fn property_chip(
     theme: &Theme,
     node: NodeScope<'_>,
     chip: PropertyChip,
-    out: &mut Intents,
+    out: &mut Requests,
 ) {
     let color = if chip.on {
         chip.on_color
@@ -354,7 +354,7 @@ fn property_chip(
     )
     .show(ui)
     {
-        out.push(GraphIntent::SetNodeProperty {
+        out.push_graph(GraphIntent::SetNodeProperty {
             node_id: node.id,
             to: chip.to,
         });
@@ -405,7 +405,7 @@ fn draw_play_triangle(ui: &mut Ui, color: Color) {
 /// The node title: an inline-renamable label. Double-click swaps it for
 /// a `TextEdit`; commit emits [`GraphIntent::RenameNode`], single-click
 /// selects (the label would otherwise swallow the body's click).
-fn title(ui: &mut Ui, ncx: NodeCtx<'_>, out: &mut Intents) {
+fn title(ui: &mut Ui, ncx: NodeCtx<'_>, out: &mut Requests) {
     let node = ncx.node();
     let shift = ui.modifiers().shift;
     let id = node_rename_wid(node.id);
@@ -424,7 +424,7 @@ fn title(ui: &mut Ui, ncx: NodeCtx<'_>, out: &mut Intents) {
         click_intents(shift, ncx.graph_ctx(), node.id, out);
     }
     if let Some(to) = ev.committed {
-        out.push(GraphIntent::RenameNode {
+        out.push_graph(GraphIntent::RenameNode {
             node_id: node.id,
             to,
         });

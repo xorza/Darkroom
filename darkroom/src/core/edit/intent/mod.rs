@@ -28,16 +28,11 @@
 //!   - [`duplicate`] — editor-side `GraphIntent::DuplicateNodes` construction
 //!     from a selection (kept here rather than on `Document`, which is the
 //!     persisted model — intent construction is editing machinery).
-//!   - [`sink`] — `Intents`, the frame's queue: a `GraphIntent` paired with the
-//!     graph it commits against, or a bare `DockOp`. Several graph panes
-//!     can be on screen, so a target travels with every scoped intent rather
-//!     than being resolved once per frame.
 
 pub(crate) mod apply;
 pub(crate) mod build;
 pub(crate) mod duplicate;
 mod query;
-pub(crate) mod sink;
 pub(crate) mod types;
 mod validate;
 

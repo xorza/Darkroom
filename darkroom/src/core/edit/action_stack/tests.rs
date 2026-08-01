@@ -54,7 +54,7 @@ impl History {
 
     /// Push several edits as one undo entry: each built against the live
     /// document and applied before the next is built, exactly as
-    /// `drain_intents` does with a frame's worth.
+    /// `drain_requests` does with a frame's worth.
     fn batch(&mut self, intents: impl IntoIterator<Item = GraphIntent>) {
         let steps: Vec<UndoStep> = intents
             .into_iter()

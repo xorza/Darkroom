@@ -3,12 +3,12 @@ use palantir::{LineCap, LineJoin, PointerButton, PolylineColors, Rect, Shape, Ui
 use scenarium::NodeId;
 use scenarium::{InputPort, Subscription};
 
-use crate::core::edit::intent::sink::Intents;
 use crate::core::edit::intent::types::GraphIntent;
 use crate::gui::pane::graph::ctx::CanvasCtx;
 use crate::gui::pane::graph::gesture::slot::GestureSlot;
 use crate::gui::pane::graph::paint::wire::Wire;
 use crate::gui::pane::graph::{CanvasGesture, outer_canvas_widget_id, to_world};
+use crate::gui::requests::Requests;
 use crate::gui::theme::Theme;
 
 /// The active gesture, threaded through node and wire rendering so
@@ -280,7 +280,7 @@ impl BreakerUI {
     /// edge and pin, so emitting both would log a redundant history entry.
     /// The context's Esc — resolved once by the canvas — drops the
     /// scribble without emitting.
-    pub(crate) fn apply(&mut self, ui: &mut Ui, cx: CanvasCtx<'_>, out: &mut Intents) {
+    pub(crate) fn apply(&mut self, ui: &mut Ui, cx: CanvasCtx<'_>, out: &mut Requests) {
         let graph_ctx = cx.graph_ctx();
         let resp = ui.response_for(outer_canvas_widget_id());
         // The classifier resolves RMB-drag vs Ctrl+LMB-drag and hands back
@@ -327,7 +327,7 @@ impl BreakerUI {
             if broken_nodes.contains(&addr.node_id) {
                 continue;
             }
-            out.push(GraphIntent::SetInput {
+            out.push_graph(GraphIntent::SetInput {
                 input: addr,
                 to: None,
             });
@@ -340,7 +340,7 @@ impl BreakerUI {
             if broken_nodes.contains(&s.emitter) || broken_nodes.contains(&s.subscriber) {
                 continue;
             }
-            out.push(GraphIntent::SetSubscription {
+            out.push_graph(GraphIntent::SetSubscription {
                 emitter: s.emitter,
                 event_idx: s.event_idx,
                 subscriber: s.subscriber,

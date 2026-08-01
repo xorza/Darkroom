@@ -37,10 +37,10 @@ use crate::core::document::dock::{
     DockLayout, DockNode, DockOp, DockPath, DockSplit, NodeIdx, SplitDir, TabGroup, TabGroupId,
 };
 use crate::core::document::{Document, TabRef};
-use crate::core::edit::intent::sink::Intents;
 use crate::gui::dock::drag::{DropTarget, PaneGeometry, TabDrag, classify_drop};
 use crate::gui::dock::strip::TabLabel;
 use crate::gui::pane::viewer;
+use crate::gui::requests::Requests;
 use crate::gui::theme::Theme;
 use crate::gui::widgets::support::sized_text;
 
@@ -106,18 +106,18 @@ impl DockUi {
     /// load-bearing: the navigation phase settles the new arrangement
     /// before this frame's record, so a switch — or a committed drop —
     /// draws the same frame it lands.
-    pub(crate) fn scan(&mut self, ui: &mut Ui, doc: &Document, out: &mut Intents) {
+    pub(crate) fn scan(&mut self, ui: &mut Ui, doc: &Document, out: &mut Requests) {
         // Ahead of the chip pass: a read-only focus query, and one that only
         // ever moves `focused`, so it composes with an activation from the
         // same scan rather than racing it.
         scan_focus(ui, doc, out);
         for tab in doc.layout.all_tabs() {
             if strip::closable(tab) && ui.response_for(strip::tab_close_wid(tab)).left.clicked() {
-                out.push_dock(DockOp::CloseTab { tab });
+                out.push_view(DockOp::CloseTab { tab });
                 continue;
             }
             if ui.response_for(strip::tab_chip_wid(tab)).left.clicked() {
-                out.push_dock(DockOp::ActivateTab { tab });
+                out.push_view(DockOp::ActivateTab { tab });
             }
             if self.tab_drag.is_none()
                 && ui
@@ -148,7 +148,7 @@ impl DockUi {
             .stopped()
         {
             if let Some(target) = drop_target(ui, doc) {
-                out.push_dock(DockOp::MoveTab {
+                out.push_view(DockOp::MoveTab {
                     tab,
                     to: target.drop,
                 });
@@ -166,8 +166,8 @@ impl DockUi {
         &self,
         ui: &mut Ui,
         cx: DockContext<'_>,
-        out: &mut Intents,
-        mut content: impl FnMut(&mut Ui, TabRef, &mut Intents),
+        out: &mut Requests,
+        mut content: impl FnMut(&mut Ui, TabRef, &mut Requests),
     ) {
         render_node(ui, cx, DockLayout::ROOT, DockPath::ROOT, out, &mut content);
         if let Some(dragged) = &self.tab_drag {
@@ -180,12 +180,12 @@ impl DockUi {
 /// Recursive walk of the dock tree: a split renders as an palantir
 /// `Splitter` (ratio changes surface as `DockOp::SetRatio`), a
 /// group as its strip + the active tab's view.
-fn render_node<F: FnMut(&mut Ui, TabRef, &mut Intents)>(
+fn render_node<F: FnMut(&mut Ui, TabRef, &mut Requests)>(
     ui: &mut Ui,
     cx: DockContext<'_>,
     idx: NodeIdx,
     path: DockPath,
-    out: &mut Intents,
+    out: &mut Requests,
     content: &mut F,
 ) {
     match cx.doc.layout.node(idx) {
@@ -218,7 +218,7 @@ fn render_node<F: FnMut(&mut Ui, TabRef, &mut Intents)>(
             // compare for the same reason `pan_zoom::emit_pan_zoom` uses
             // one — an exact `!=` emits on sub-epsilon jitter.
             if !live_ratio.approximately_eq(ratio) {
-                out.push_dock(DockOp::SetRatio {
+                out.push_view(DockOp::SetRatio {
                     split: path,
                     ratio: live_ratio,
                 });
@@ -228,11 +228,11 @@ fn render_node<F: FnMut(&mut Ui, TabRef, &mut Intents)>(
 }
 
 /// One pane: the group's tab strip over its active tab's view.
-fn render_group<F: FnMut(&mut Ui, TabRef, &mut Intents)>(
+fn render_group<F: FnMut(&mut Ui, TabRef, &mut Requests)>(
     ui: &mut Ui,
     cx: DockContext<'_>,
     group: &TabGroup,
-    out: &mut Intents,
+    out: &mut Requests,
     content: &mut F,
 ) {
     let labels = tab_labels(ui, cx, group);
@@ -269,13 +269,13 @@ fn render_group<F: FnMut(&mut Ui, TabRef, &mut Intents)>(
 /// left-button-only for free. A press outside every pane (the menu bar, the
 /// status bar) focuses nothing and leaves the dock focus alone.
 ///
-fn scan_focus(ui: &Ui, doc: &Document, out: &mut Intents) {
+fn scan_focus(ui: &Ui, doc: &Document, out: &mut Requests) {
     if let Some(group) = doc
         .layout
         .groups()
         .find(|g| g.id != doc.layout.focused && ui.focus_within(pane_wid(g.id)))
     {
-        out.push_dock(DockOp::FocusPane { group: group.id });
+        out.push_view(DockOp::FocusPane { group: group.id });
     }
 }
 

@@ -82,7 +82,7 @@ impl EditorHarness {
     /// Drain the queued intents into the document, as the frame's edit phase
     /// does.
     pub(crate) fn drain(&mut self) {
-        self.editor.drain_intents(&mut self.open);
+        self.editor.drain_requests(&mut self.open);
     }
 
     /// Take back the last undoable entry. Reports whether there was one.
@@ -92,11 +92,11 @@ impl EditorHarness {
             .undo(&mut self.open.document, &mut |_| {})
     }
 
-    /// One editor frame. Returns the command the **first** record pass
+    /// One editor frame. Returns the commands the **first** record pass
     /// produced; a frame with pending action input records twice and the
     /// second pass no longer sees the one-frame edges that raise most
     /// commands.
-    pub(crate) fn frame(&mut self) -> Option<AppCommand> {
+    pub(crate) fn frame(&mut self) -> Vec<AppCommand> {
         let Self {
             ui,
             editor,

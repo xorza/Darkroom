@@ -9,12 +9,12 @@ use glam::Vec2;
 use palantir::{Rect, ResponseState, Size, Ui};
 
 use crate::core::document::Viewport;
-use crate::core::edit::intent::sink::Intents;
 use crate::core::edit::intent::types::GraphIntent;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::pane::graph::frame::geometry::CanvasGeometry;
 use crate::gui::pane::graph::gesture::slot::GestureSlot;
 use crate::gui::pane::graph::{CanvasGesture, outer_canvas_widget_id};
+use crate::gui::requests::Requests;
 
 /// Fold a live pan drag into `pan`: `anchor + delta` while the drag is
 /// held; a missing delta after a latch is the release edge and drops the
@@ -124,7 +124,7 @@ pub(crate) fn emit_pan_zoom(
     ui: &Ui,
     graph_ctx: GraphCtx<'_>,
     gesture: Option<CanvasGesture>,
-    out: &mut Intents,
+    out: &mut Requests,
 ) {
     let viewport = graph_ctx.viewport();
     let resp = ui.response_for(outer_canvas_widget_id());
@@ -139,11 +139,11 @@ pub(crate) fn emit_pan_zoom(
     // Only emit when the gesture actually moved the viewport
     // (approx compare — exact float `!=` would emit on sub-epsilon
     // jitter). The `SetViewport` undo step is also `is_noop`-
-    // filtered in `drain_intents`; this just skips the build on
+    // filtered in `drain_requests`; this just skips the build on
     // idle frames.
     let unchanged = v.pan.approximately_eq(viewport.pan) && v.zoom.approximately_eq(viewport.zoom);
     if !unchanged {
-        out.push(GraphIntent::SetViewport { to: v });
+        out.push_graph(GraphIntent::SetViewport { to: v });
     }
 }
 

@@ -12,12 +12,12 @@ use scenarium::{Node, NodeKind};
 use scenarium::{SPECIAL_NODES, SpecialNode};
 
 use crate::core::document::PortRef;
-use crate::core::edit::intent::sink::Intents;
 use crate::core::edit::intent::types::GraphIntent;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::pane::graph::ctx::CanvasCtx;
 use crate::gui::pane::graph::paint::anchored_menu::AnchoredMenu;
 use crate::gui::pane::graph::{CanvasGesture, outer_canvas_widget_id, to_world};
+use crate::gui::requests::Requests;
 
 /// One row of a category's palette list: a library `Func` or a built-in
 /// special node. Collecting them into one type lets a category's rows be
@@ -99,7 +99,7 @@ impl NewNodeUi {
         ui: &mut Ui,
         cx: CanvasCtx<'_>,
         pending_source: Option<PortRef>,
-        out: &mut Intents,
+        out: &mut Requests,
     ) {
         let graph_ctx = cx.graph_ctx();
         let resp = ui.response_for(outer_canvas_widget_id());
@@ -155,7 +155,7 @@ impl NewNodeUi {
             });
 
         if let Some(intent) = chosen {
-            out.push(intent);
+            out.push_graph(intent);
             // If a dropped connection opened this popup, hand its source
             // back so the wire resumes floating — the user then clicks the
             // exact port to land it, rather than it auto-attaching.

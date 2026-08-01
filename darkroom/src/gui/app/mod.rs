@@ -341,11 +341,12 @@ impl palantir::App for App {
                 process_memory: self.process_memory.sample(Instant::now()),
             },
         );
-        let command = self
+        // Every command the frame raised, in the order it raised them —
+        // a keyboard chord and a click on the same frame both land.
+        let commands = self
             .editor
             .frame(ui, &mut self.open, ctx, &mut self.preferences);
-
-        if let Some(command) = command {
+        for command in commands {
             self.handle_command(ui, command);
         }
 

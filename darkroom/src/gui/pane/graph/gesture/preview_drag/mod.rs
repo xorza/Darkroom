@@ -14,7 +14,6 @@ use palantir::Ui;
 use scenarium::NodeId;
 
 use crate::core::document::{PortKind, PortRef};
-use crate::core::edit::intent::sink::Intents;
 use crate::core::preview;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::pane::graph::ctx::CanvasCtx;
@@ -22,6 +21,7 @@ use crate::gui::pane::graph::frame::geometry::CanvasGeometry;
 use crate::gui::pane::graph::gesture::drag_anchor::GroupDrag;
 use crate::gui::pane::graph::node::port_row::{add_preview_intents, port_circle_wid};
 use crate::gui::pane::graph::preview_drag_modifier;
+use crate::gui::requests::Requests;
 
 /// The in-flight spawn-and-place drag, or none.
 #[derive(Default, Debug)]
@@ -33,7 +33,7 @@ impl PreviewDrag {
     /// Swept once per frame over the whole scene: only one pointer drag can be
     /// in flight, and `PortRef` is document-unique, so the pane comes from the
     /// port's own node rather than from the caller.
-    pub(crate) fn apply(&mut self, ui: &mut Ui, cx: CanvasCtx<'_>, out: &mut Intents) {
+    pub(crate) fn apply(&mut self, ui: &mut Ui, cx: CanvasCtx<'_>, out: &mut Requests) {
         let (graph_ctx, geometry) = (cx.graph_ctx(), cx.geometry());
         // A live drag owns the frame; only once it ends does the latch scan
         // below get a look at this frame's presses.
@@ -61,7 +61,7 @@ impl PreviewDrag {
         let node_id = NodeId::unique();
         // Start it *at* the port so it visually grows out of the circle;
         // the drag below carries it from there.
-        out.extend(add_preview_intents(func, port, center, node_id));
+        out.extend_graph(add_preview_intents(func, port, center, node_id));
         // A brand-new node is in no selection yet, so it drags alone. The
         // anchor is the port circle — the widget that owns this press; the node
         // itself has not been recorded yet and has no response to poll.

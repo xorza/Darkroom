@@ -14,11 +14,11 @@ use palantir::{
     Align, Color, Configure, HAlign, Panel, Rect, Shape, Sizing, Spacing, Ui, VAlign, WidgetId,
 };
 
-use crate::core::edit::intent::sink::Intents;
 use crate::gui::app::commands::AppCommand;
 use crate::gui::app::commands::run::RunCommand;
 use crate::gui::pane::graph::ctx::CanvasCtx;
 use crate::gui::pane::graph::gesture::pan_zoom::{self, ViewAction};
+use crate::gui::requests::Requests;
 use crate::gui::widgets::support::{dot, filled_rect, frame, stroked_rect};
 use crate::gui::widgets::toolbar::{BUTTON_GAP, Chip, TOOLBAR_MARGIN, pill};
 
@@ -44,15 +44,13 @@ fn show_selected_wid() -> WidgetId {
     WidgetId::from_hash("darkroom.graph.show_selected_button")
 }
 
-/// Draw the toolbar over the graph view's top-left corner. Returns the
-/// [`AppCommand`] a run/events click implies — always `None` off the main
-/// pane, which draws no run pill; view-framing clicks push an
-/// `GraphIntent::SetViewport` onto `out` instead. It hit-tests above the canvas
-/// (drawn after it), so a click on a button never starts a pan.
-pub(super) fn show(ui: &mut Ui, cx: CanvasCtx<'_>, out: &mut Intents) -> Option<AppCommand> {
+/// Draw the toolbar over the graph view's top-left corner. A run/events click
+/// queues its [`AppCommand`]; a view-framing click queues a
+/// `GraphIntent::SetViewport`. It hit-tests above the canvas (drawn after it),
+/// so a click on a button never starts a pan.
+pub(super) fn show(ui: &mut Ui, cx: CanvasCtx<'_>, out: &mut Requests) {
     let (theme, graph_ctx, geometry) = (cx.theme(), cx.graph_ctx(), cx.geometry());
     let run_state = graph_ctx.run_state();
-    let mut command = None;
     Panel::vstack()
         .id_salt("graph_toolbar")
         .size((Sizing::HUG, Sizing::HUG))
@@ -82,11 +80,11 @@ pub(super) fn show(ui: &mut Ui, cx: CanvasCtx<'_>, out: &mut Intents) -> Option<
                         .toggled_fill(theme.colors.exec_running_glow)
                         .show(ui, theme, draw_play)
                     {
-                        command = Some(if running {
-                            AppCommand::Run(RunCommand::Cancel)
+                        out.push_app(AppCommand::Run(if running {
+                            RunCommand::Cancel
                         } else {
-                            AppCommand::Run(RunCommand::Once)
-                        });
+                            RunCommand::Once
+                        }));
                     }
                     // Event loop start / stop: toggled while the loop runs.
                     let event_loop_active = run_state.activity.event_loop_active();
@@ -100,11 +98,11 @@ pub(super) fn show(ui: &mut Ui, cx: CanvasCtx<'_>, out: &mut Intents) -> Option<
                         .toggled_fill(theme.colors.exec_running_glow)
                         .show(ui, theme, draw_play_bar)
                     {
-                        command = Some(if event_loop_active {
-                            AppCommand::Run(RunCommand::StopEvents)
+                        out.push_app(AppCommand::Run(if event_loop_active {
+                            RunCommand::StopEvents
                         } else {
-                            AppCommand::Run(RunCommand::StartEvents)
-                        });
+                            RunCommand::StartEvents
+                        }));
                     }
                 },
             );
@@ -118,7 +116,7 @@ pub(super) fn show(ui: &mut Ui, cx: CanvasCtx<'_>, out: &mut Intents) -> Option<
                 .child_align(Align::new(HAlign::Left, VAlign::Top));
             pill(ui, theme, framing, |ui| {
                 if Chip::new(reset_view_wid(), "Reset view").show(ui, theme, draw_reset) {
-                    out.extend(pan_zoom::view_action_intent(
+                    out.extend_graph(pan_zoom::view_action_intent(
                         ui,
                         geometry,
                         graph_ctx,
@@ -126,7 +124,7 @@ pub(super) fn show(ui: &mut Ui, cx: CanvasCtx<'_>, out: &mut Intents) -> Option<
                     ));
                 }
                 if Chip::new(show_all_wid(), "Show all").show(ui, theme, draw_show_all) {
-                    out.extend(pan_zoom::view_action_intent(
+                    out.extend_graph(pan_zoom::view_action_intent(
                         ui,
                         geometry,
                         graph_ctx,
@@ -138,7 +136,7 @@ pub(super) fn show(ui: &mut Ui, cx: CanvasCtx<'_>, out: &mut Intents) -> Option<
                     theme,
                     draw_show_selected,
                 ) {
-                    out.extend(pan_zoom::view_action_intent(
+                    out.extend_graph(pan_zoom::view_action_intent(
                         ui,
                         geometry,
                         graph_ctx,
@@ -147,7 +145,6 @@ pub(super) fn show(ui: &mut Ui, cx: CanvasCtx<'_>, out: &mut Intents) -> Option<
                 }
             });
         });
-    command
 }
 
 /// A right-pointing play triangle (run once), optically centered in the box.
@@ -209,4 +206,14 @@ fn draw_show_selected(ui: &mut Ui, s: f32, color: Color) {
     let inner = s * 0.24;
     let o = (s - inner) * 0.5;
     filled_rect(ui, Rect::new(o, o, inner, inner), s * 0.04, color);
+}
+
+#[cfg(test)]
+pub(crate) mod internals {
+    use super::*;
+
+    /// The run/cancel chip, for the tests that click it.
+    pub(crate) fn run_chip_wid() -> WidgetId {
+        run_button_wid()
+    }
 }

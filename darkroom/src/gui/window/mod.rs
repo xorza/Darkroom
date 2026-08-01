@@ -8,7 +8,6 @@ use scenarium::{NodeId, OutputTypes};
 
 use crate::core::document::dock::DockOp;
 use crate::core::document::{Document, TabRef};
-use crate::core::edit::intent::sink::Intents;
 use crate::core::io::preferences::Preferences;
 use crate::gui::app::commands::AppCommand;
 use crate::gui::app::commands::prefs::PrefsCommand;
@@ -19,6 +18,7 @@ use crate::gui::pane::graph::GraphUI;
 use crate::gui::pane::graph::frame::hits::Chip;
 use crate::gui::pane::preferences;
 use crate::gui::pane::viewer::{self, ImageViewer};
+use crate::gui::requests::Requests;
 
 /// The application root's [`Configure::input_scope`] anchor. A fixed id
 /// rather than an auto one because the scope is the thing darkroom's
@@ -26,27 +26,6 @@ use crate::gui::pane::viewer::{self, ImageViewer};
 /// site.
 fn app_root_wid() -> WidgetId {
     WidgetId::from_hash("darkroom.app_root")
-}
-
-/// Offer `produce`'s command to the frame's single [`AppCommand`] slot, first
-/// claim winning.
-///
-/// Exactly one command leaves a frame, and this is the only thing that decides
-/// which: the menu bar records first, then every visible pane in dock order.
-/// Without it a later pane silently overwrote the menu-bar pick, or one pane's
-/// overwrote its neighbour's — so every surface that can raise a command goes
-/// through here rather than reaching for the slot itself.
-///
-/// `produce` still runs when the slot is taken: these surfaces have to record
-/// every frame regardless, and only the command they'd have contributed is
-/// dropped. In practice nothing is: every source here reads a pointer click,
-/// and one pointer produces one click. (The keyboard's own commands are a
-/// separate source, merged by `Editor::frame`.)
-fn claim(slot: &mut Option<AppCommand>, produce: impl FnOnce() -> Option<AppCommand>) {
-    let produced = produce();
-    if slot.is_none() {
-        *slot = produced;
-    }
 }
 
 /// Top of darkroom's UI tree: the chrome (menu bar, status bar) around
@@ -98,7 +77,7 @@ impl MainWindow {
         ui: &mut Ui,
         ctx: AppCtx<'_>,
         doc: &Document,
-        out: &mut Intents,
+        out: &mut Requests,
     ) {
         self.dock.scan(ui, doc, out);
         // One sweep of last frame's node responses, before anything reads
@@ -114,7 +93,7 @@ impl MainWindow {
         graph_ui.scan_hits(ui, GraphCtx::for_document(ctx, doc, output_types));
         let hits = &self.graph_ui.hits;
         if let Some(node) = hits.chip(Chip::PreviewImage) {
-            out.push_dock(DockOp::OpenTab {
+            out.push_view(DockOp::OpenTab {
                 tab: TabRef::ImageViewer(node),
             });
         }
@@ -127,7 +106,7 @@ impl MainWindow {
         ui: &mut Ui,
         ctx: AppCtx<'_>,
         doc: &Document,
-        out: &mut Intents,
+        out: &mut Requests,
     ) {
         let MainWindow {
             graph_ui,
@@ -159,9 +138,8 @@ impl MainWindow {
         ctx: AppCtx<'_>,
         doc: &Document,
         prefs: &mut Preferences,
-        out: &mut Intents,
-    ) -> Option<AppCommand> {
-        let mut command = None;
+        out: &mut Requests,
+    ) {
         // The menu bar rides its own chrome band; the dock fills the
         // space between it and the status bar.
         let chrome = ctx.theme().colors.chrome_fill;
@@ -206,7 +184,7 @@ impl MainWindow {
                     .child_align(Align::v(VAlign::Bottom))
                     .background(Background::fill(chrome))
                     .show(ui, |ui| {
-                        command = menu_bar::show(ui, out);
+                        menu_bar::show(ui, out);
                     });
                 dock.render(ui, dock_cx, out, |ui, tab, out| match tab {
                     TabRef::Graph => {
@@ -224,12 +202,12 @@ impl MainWindow {
                                 // proves it resolves.
                                 let graph_ctx = GraphCtx::for_document(ctx, doc, output_types)
                                     .expect("a Graph tab is active, so the context resolves");
-                                claim(&mut command, || graph_ui.draw(ui, graph_ctx, out));
-                                claim(&mut command, || graph_ui.draw_toolbar(ui, graph_ctx, out));
+                                graph_ui.draw(ui, graph_ctx, out);
+                                graph_ui.draw_toolbar(ui, graph_ctx, out);
                             });
                     }
                     TabRef::Preferences => {
-                        claim(&mut command, || preferences::show(ui, ctx.theme(), prefs));
+                        preferences::show(ui, ctx.theme(), prefs, out);
                     }
                     TabRef::ImageViewer(node_id) => {
                         let title = viewer_labels
@@ -242,18 +220,14 @@ impl MainWindow {
                             .or_insert_with(|| ImageViewer::new(node_id));
                         // Viewer-toolbar edits ride the same in-place
                         // prefs path as the Preferences tab.
-                        claim(&mut command, || {
-                            viewer
-                                .show(ui, ctx.theme(), &mut prefs.viewer, title, source)
-                                .then_some(AppCommand::Prefs(PrefsCommand::Changed))
-                        });
+                        if viewer.show(ui, ctx.theme(), &mut prefs.viewer, title, source) {
+                            out.push_app(AppCommand::Prefs(PrefsCommand::Changed));
+                        }
                     }
                 });
                 // Bottom chrome: the cache-memory readout, below the panes.
                 status_bar::show(ui, ctx);
             });
-
-        command
     }
 
     /// Release the canvas's cached geometry for nodes the document has

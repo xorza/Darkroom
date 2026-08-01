@@ -2,7 +2,6 @@ use glam::Vec2;
 use palantir::{CurveBrush, Ui};
 use scenarium::NodeId;
 
-use crate::core::edit::intent::sink::Intents;
 use crate::core::edit::intent::types::GraphIntent;
 use crate::gui::EventRef;
 use crate::gui::graph_ctx::GraphCtx;
@@ -12,6 +11,7 @@ use crate::gui::pane::graph::frame::geometry::CanvasGeometry;
 use crate::gui::pane::graph::gesture::slot::GestureSlot;
 use crate::gui::pane::graph::node::port_color::event_color;
 use crate::gui::pane::graph::paint::wire::{GlyphDrag, Wire, WirePass, WireTint};
+use crate::gui::requests::Requests;
 
 /// Owns the in-flight subscription wire — an emitter *or* subscriber drag.
 /// One wire at a time, so a single `Option` suffices. The committed wires
@@ -73,7 +73,7 @@ impl SubscriptionUI {
     /// Swept over the whole scene once per frame — one press, one wire —
     /// but the snap scans and the commit run against the pane holding the
     /// drag's fixed end, so a subscription can't span two graphs.
-    pub(crate) fn apply(&mut self, ui: &mut Ui, cx: CanvasCtx<'_>, out: &mut Intents) {
+    pub(crate) fn apply(&mut self, ui: &mut Ui, cx: CanvasCtx<'_>, out: &mut Requests) {
         let (graph_ctx, geometry) = (cx.graph_ctx(), cx.geometry());
         // Latch a fresh drag only when idle. An emitter and a pin can't both
         // start one this frame (distinct widget-id spaces, one press), so
@@ -130,7 +130,7 @@ impl SubscriptionUI {
             | InFlight::FromSubscriber(GlyphDrag {
                 from: subscriber,
                 snap: Some(emitter),
-            }) => out.push(GraphIntent::SetSubscription {
+            }) => out.push_graph(GraphIntent::SetSubscription {
                 emitter: emitter.node_id,
                 event_idx: emitter.event_idx,
                 subscriber,
