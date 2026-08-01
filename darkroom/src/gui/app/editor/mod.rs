@@ -8,8 +8,8 @@
 //!
 //! [`App`]: crate::gui::app::App
 
+use crate::core::document::Document;
 use crate::core::document::open_document::OpenDocument;
-use crate::core::document::{Document, TabRef};
 use crate::core::edit::action_stack::ActionStack;
 use crate::core::edit::intent::apply::commit_intent;
 use crate::core::edit::intent::types::{GraphIntent, Refusal, UndoStep};
@@ -181,10 +181,6 @@ impl Editor {
         // before this frame's rebuild. After it, the active tab is fixed.
         self.navigate(ui, open, ctx, requests);
 
-        // Tabs are settled: drop viewer state for closed tabs. A tab-lifetime
-        // question, not a node-liveness one — which is why it belongs to the
-        // frame rather than to `App`'s once-a-frame sweep.
-        self.sync_image_viewers(open);
         // A canvas that just appeared or disappeared drops its tab-local
         // gesture state and needs a relayout — it may never have recorded,
         // and a dock op raises no geometry signal of its own.
@@ -328,15 +324,6 @@ impl Editor {
     /// [`App::reconcile_derived_state`]: crate::gui::app::App
     pub(super) fn reconcile_caches(&mut self, document: &Document) {
         self.main_window.reconcile(document);
-    }
-
-    /// Keep the viewer tabs in step with the document by dropping navigation
-    /// state whose tab closed.
-    fn sync_image_viewers(&mut self, open: &OpenDocument) {
-        let layout = &open.document.layout;
-        self.main_window
-            .image_viewers
-            .retain(|port, _| layout.all_tabs().any(|t| t == TabRef::ImageViewer(*port)));
     }
 }
 
@@ -495,7 +482,7 @@ mod tests {
             .image_viewers
             .insert(node_id, ImageViewer::new(node_id));
         test.open.document.layout.apply(DockOp::CloseTab { tab });
-        test.editor.sync_image_viewers(&test.open);
+        test.editor.reconcile_caches(&test.open.document);
         assert!(
             test.editor.main_window.image_viewers.is_empty(),
             "closing the tab drops its navigation state"

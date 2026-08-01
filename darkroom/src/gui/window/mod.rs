@@ -221,10 +221,23 @@ impl MainWindow {
             });
     }
 
-    /// Release the canvas's `NodeId`-keyed caches for nodes the document has
-    /// stopped holding — see [`GraphUI::retain_nodes`]. Driven from
-    /// `App::reconcile_derived_state`, beside the preview store's sweep.
+    /// Release everything this window caches for a subject the document has
+    /// stopped holding: the canvas's `NodeId`-keyed tables (see
+    /// [`GraphUI::retain_nodes`]) and the per-tab viewer state.
+    ///
+    /// Driven from `App::reconcile_derived_state`, beside the preview store's
+    /// sweep. Both live here because `MainWindow` owns both, so a new cache
+    /// joins them rather than earning its own call site.
     pub(crate) fn reconcile(&mut self, document: &Document) {
         self.graph_ui.retain_nodes(document);
+        // Keyed by node, but scoped to its *tab*: a viewer's framing dies when
+        // the tab closes, not when the node does — and a closed tab's node may
+        // well still be in the graph.
+        self.image_viewers.retain(|node_id, _| {
+            document
+                .layout
+                .all_tabs()
+                .any(|t| t == TabRef::ImageViewer(*node_id))
+        });
     }
 }
