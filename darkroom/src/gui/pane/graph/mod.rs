@@ -544,13 +544,15 @@ pub(crate) mod harness;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::document::TabRef;
     use crate::core::document::dock::DockOp;
     use crate::core::document::harness::DocFixture;
+    use crate::core::document::{PortRef, TabRef};
     use crate::core::preview::preview_func;
     use crate::gui::pane::graph::harness::CanvasHarness;
+    use crate::gui::pane::graph::node::port_row::port_circle_wid;
     use crate::gui::pane::graph::node::preview_row::preview_image_wid;
     use crate::gui::state::preview_store::internals::opaque_image_value;
+    use scenarium::{Binding, InputPort};
 
     /// Clicking a preview card's image asks the dock for that node's viewer
     /// tab — the canvas's one view-tier request, raised from the prepass off
@@ -585,6 +587,47 @@ mod tests {
         assert!(
             intents.is_empty(),
             "opening a viewer is navigation, not a graph edit: {intents:?}"
+        );
+    }
+
+    /// Double-clicking a wired input's port circle clears its binding — and
+    /// one click alone does not.
+    ///
+    /// The signal is read off the glyph widget's own returned response, not a
+    /// `response_for` probe of its id after the fact. The circle senses its
+    /// own `Sense::CLICK` and consumes hits over its rect, so the cell around
+    /// it never sees this click (no bubbling) and only the glyph's answer can
+    /// carry it — which makes this the test that the widget hands its clicks
+    /// back rather than swallowing them.
+    #[test]
+    fn double_clicking_a_wired_input_port_circle_clears_its_binding() {
+        let mut h = CanvasHarness::new(DocFixture::probes(2));
+        let (producer, consumer) = (h.node(0), h.node(1));
+        let input = InputPort::new(consumer, 0);
+        h.doc_mut()
+            .graph
+            .set_input_binding(input, Binding::bind(producer, 0));
+        // Two frames so the circle has a widget id and a measured rect to aim at.
+        h.prime(2);
+        // Nudged off the circle's exact center: an input port hangs half its
+        // width past the node's left edge, which puts its center a hair
+        // *outside* the body and on the canvas beneath. Still well inside the
+        // glyph — its box is 23.4 px across — and both clicks land on the same
+        // point, so the double-click still registers.
+        let at = h.ui.center_of(port_circle_wid(PortRef::input(consumer, 0))) + Vec2::new(4.0, 0.0);
+
+        h.ui.click_at(at);
+        let first = h.frame();
+        assert!(first.is_empty(), "one click is not a double: {first:?}");
+
+        h.ui.click_at(at);
+        let cleared = h.frame();
+        assert!(
+            matches!(
+                cleared[..],
+                [GraphIntent::SetInput { input: got, to: None }] if got == input
+            ),
+            "the second click clears the wired input, and nothing else: {cleared:?}"
         );
     }
 

@@ -6,5 +6,6 @@ pub(crate) mod badge;
 pub(crate) mod buffered_edit;
 pub(crate) mod format;
 pub(crate) mod inline_rename;
+pub(crate) mod port_glyph;
 pub(crate) mod support;
 pub(crate) mod toolbar;

@@ -9,12 +9,11 @@
 //! below it. Drawn as the top children of each node body by
 //! [`crate::gui::pane::graph::node::NodeUI`].
 
-use std::f32::consts::FRAC_PI_4;
+use std::f32::consts::{FRAC_PI_4, PI};
 
-use glam::Vec2;
 use palantir::{
-    Align, Color, Configure, FontFamily, FontWeight, Panel, Sense, Shape, Sizing, Spacing, Spinner,
-    Text, TextStyle, Ui, VAlign, WidgetId,
+    Align, Color, Configure, FontFamily, FontWeight, Panel, Sizing, Spacing, Spinner, Text,
+    TextStyle, Ui, VAlign, WidgetId,
 };
 use scenarium::{CacheMode, NodeId};
 
@@ -24,7 +23,6 @@ use crate::gui::app::commands::run::RunCommand;
 use crate::gui::graph_ctx::node_ctx::NodeCtx;
 use crate::gui::pane::graph::ctx::DrawCtx;
 use crate::gui::pane::graph::node::port_color::event_color;
-use crate::gui::pane::graph::node::port_row::glyph::{EVENT_TRIANGLE_RADIUS, PORT_HIT_SCALE};
 use crate::gui::pane::graph::node::wid;
 use crate::gui::pane::graph::node::widget::exec_color;
 use crate::gui::pane::graph::paint::inspector::{InspectMode, inspect_badge_wid};
@@ -34,8 +32,9 @@ use crate::gui::theme::Theme;
 use crate::gui::widgets::badge::{BADGE_FONT, BADGE_SIZE, Badge};
 use crate::gui::widgets::format::fmt_elapsed;
 use crate::gui::widgets::inline_rename::InlineRename;
+use crate::gui::widgets::port_glyph::PortGlyph;
 use crate::gui::widgets::support::{
-    CARD_HEADER_PAD_X, CARD_HEADER_PAD_Y, header_background, hspacer, play_triangle, tooltip_after,
+    CARD_HEADER_PAD_X, CARD_HEADER_PAD_Y, header_background, hspacer, play_triangle,
 };
 
 /// Character cap for a node title in the inline rename editor.
@@ -73,42 +72,16 @@ const RUN_TIME_MIN_WIDTH: f32 = 52.0;
 /// drop-snapping (rect-based) still accepts the whole box. `hovered` (set
 /// while a drag snaps to it) tints the triangle as drop feedback.
 pub(super) fn subscription_pin(ui: &mut Ui, theme: &Theme, node: NodeCtx<'_>, hovered: bool) {
-    let port = theme.ports.size;
-    let hit = port * PORT_HIT_SCALE;
-    let inset = (hit - port) * 0.5;
-    // Rotate the base (left-pointing) triangle +45° about its center so the
-    // apex points up-left, aligned with the wire arriving from there. The
-    // rotated points are passed straight to the SDF triangle primitive; the
-    // layout box is unchanged (the glyph isn't clipped to the owner rect, so
-    // the rotated apex may exceed it). The base triangle is inset by the
-    // corner radius: the SDF rounds by *dilating* (`sdf - radius`), so the
-    // rounded result grows back to the port box instead of past it.
-    let r = EVENT_TRIANGLE_RADIUS;
-    let c = Vec2::splat(hit * 0.5);
-    let rot = Vec2::from_angle(FRAC_PI_4);
-    let tf = |v: Vec2| c + rot.rotate(v - c);
-    let pin = Panel::zstack()
-        .id(subscription_glyph_wid(node.id))
-        .position(node.pos - Vec2::splat(hit * 0.5))
-        .size((Sizing::fixed(hit), Sizing::fixed(hit)))
-        .sense(Sense::CLICK | Sense::DRAG)
-        .show(ui, |ui| {
-            ui.add_shape(
-                Shape::triangle(
-                    tf(Vec2::new(inset + port - r, inset + r)),
-                    tf(Vec2::new(inset + port - r, inset + port - r)),
-                    tf(Vec2::new(inset + r, inset + port * 0.5)),
-                )
-                .radius(r)
-                .fill(event_color(theme, hovered)),
-            );
-        });
-    let snapshot = pin.response.snapshot();
-    tooltip_after(
-        ui,
-        &snapshot,
-        "Event subscription — drag to an emitter, or drop an event wire here",
-    );
+    // The emitter arrow turned half a turn — mirroring its apex from right to
+    // left — plus a quarter, aiming it up-left along the wire arriving from
+    // there. Placed by its grown box's center rather than in flow, so it
+    // straddles the node's top-left corner.
+    PortGlyph::arrow(subscription_glyph_wid(node.id), theme.ports.size)
+        .turn(PI + FRAC_PI_4)
+        .fill(event_color(theme, hovered))
+        .centered_on(node.pos)
+        .tip("Event subscription — drag to an emitter, or drop an event wire here")
+        .show(ui);
 }
 
 /// Stable id for a node's event-subscription pin. Keyed on the node (a
