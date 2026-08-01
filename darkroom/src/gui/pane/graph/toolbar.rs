@@ -19,7 +19,7 @@ use crate::gui::app::commands::run::RunCommand;
 use crate::gui::pane::graph::ctx::CanvasCtx;
 use crate::gui::pane::graph::gesture::pan_zoom::{self, Framing};
 use crate::gui::requests::Requests;
-use crate::gui::widgets::support::{dot, filled_rect, frame, stroked_rect};
+use crate::gui::widgets::support::{dot, filled_rect, frame, play_triangle, stroked_rect};
 use crate::gui::widgets::toolbar::{BUTTON_GAP, Chip, TOOLBAR_MARGIN, pill};
 
 /// The toolbar's chip ids. One graph pane, so each is a fixed hash rather than
@@ -149,14 +149,7 @@ pub(super) fn show(ui: &mut Ui, cx: CanvasCtx<'_>, out: &mut Requests) {
 
 /// A right-pointing play triangle (run once), optically centered in the box.
 fn draw_play(ui: &mut Ui, s: f32, color: Color) {
-    ui.add_shape(
-        Shape::triangle(
-            Vec2::new(s * 0.38, s * 0.30),
-            Vec2::new(s * 0.38, s * 0.70),
-            Vec2::new(s * 0.70, s * 0.50),
-        )
-        .fill(color),
-    );
+    play_triangle(ui, s, PLAY_FILL, color);
 }
 
 /// `|>` — a vertical bar then a play triangle (start the event loop).
@@ -178,6 +171,11 @@ fn draw_play_bar(ui: &mut Ui, s: f32, color: Color) {
         .fill(color),
     );
 }
+
+/// How much of a toolbar button the play mark spans. Smaller than the node
+/// header's share of its badge: a 30px button carries proportionally less
+/// glyph than an 18px chip.
+const PLAY_FILL: f32 = 0.4;
 
 /// Reset view: a target ring with a center dot (recenter to 1:1).
 fn draw_reset(ui: &mut Ui, s: f32, color: Color) {

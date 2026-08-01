@@ -5,6 +5,8 @@
 
 use std::borrow::Cow;
 
+use glam::Vec2;
+
 use palantir::{
     Background, Color, Configure, Corners, FontFamily, Panel, Rect, ResponseSnapshot, Shape,
     Sizing, Stroke, Text, TextStyle, Tooltip, Ui,
@@ -105,6 +107,35 @@ pub(crate) fn stroked_rect(ui: &mut Ui, rect: Rect, radius: f32, color: Color, w
 /// A small filled circle of radius `r` centered at `(cx, cy)`.
 pub(crate) fn dot(ui: &mut Ui, cx: f32, cy: f32, r: f32, color: Color) {
     filled_rect(ui, Rect::new(cx - r, cy - r, 2.0 * r, 2.0 * r), r, color);
+}
+
+/// A right-pointing play triangle inscribed in an `s`-sized box, spanning
+/// `fill` of it.
+///
+/// Nudged right by a fifth of its half-width: a play mark's visual centre sits
+/// left of its bounding box's, so a geometrically centred one reads as offset.
+/// Its points are pulled in by the corner radius because the SDF rounds by
+/// dilating — the glyph grows back out to the intended extents.
+///
+/// Shared so the two chips carrying this mark — the node header's run chip and
+/// the graph toolbar's run button — cannot drift on that geometry. `fill`
+/// stays per-caller: a 30px toolbar button carries proportionally less glyph
+/// than an 18px header badge.
+pub(crate) fn play_triangle(ui: &mut Ui, s: f32, fill: f32, color: Color) {
+    let half_h = s * fill * 0.5;
+    let half_w = half_h * (5.0 / 6.0);
+    let r = s * 0.05;
+    let nudge = half_w * 0.2;
+    let c = Vec2::splat(s * 0.5);
+    ui.add_shape(
+        Shape::triangle(
+            c + Vec2::new(nudge - half_w + r, r - half_h),
+            c + Vec2::new(nudge - half_w + r, half_h - r),
+            c + Vec2::new(nudge + half_w - r, 0.0),
+        )
+        .radius(r)
+        .fill(color),
+    );
 }
 
 /// The shared rounded-rect outline glyphs frame their contents in,

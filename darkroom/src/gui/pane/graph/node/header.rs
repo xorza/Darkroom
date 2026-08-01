@@ -32,7 +32,7 @@ use crate::gui::widgets::badge::{BADGE_FONT, BADGE_SIZE, Badge};
 use crate::gui::widgets::format::fmt_elapsed;
 use crate::gui::widgets::inline_rename::InlineRename;
 use crate::gui::widgets::support::{
-    CARD_HEADER_PAD_X, CARD_HEADER_PAD_Y, header_background, hspacer, tooltip_after,
+    CARD_HEADER_PAD_X, CARD_HEADER_PAD_Y, header_background, hspacer, play_triangle, tooltip_after,
 };
 
 /// Character cap for a node title in the inline rename editor.
@@ -378,7 +378,14 @@ fn play_chip(ui: &mut Ui, theme: &Theme, node: NodeCtx<'_>) {
     } else {
         "Run to this node — execute its upstream cone and keep the output for preview"
     };
-    Badge::go(play_badge_wid(node.id), tooltip, draw_play_triangle).show(ui, theme);
+    Badge::action(
+        play_badge_wid(node.id),
+        tooltip,
+        draw_play_triangle,
+        theme.colors.text_muted,
+    )
+    .hover_color(theme.colors.exec_executed_glow)
+    .show(ui);
 }
 
 /// Play triangle about the chip center, nudged right — a play mark's
@@ -386,20 +393,7 @@ fn play_chip(ui: &mut Ui, theme: &Theme, node: NodeCtx<'_>) {
 /// the rounding radius: the SDF rounds by dilating, so the glyph grows
 /// back out to the intended extents.
 fn draw_play_triangle(ui: &mut Ui, color: Color) {
-    const R: f32 = 1.5;
-    const HALF_W: f32 = 3.75;
-    const HALF_H: f32 = 4.5;
-    const NUDGE: f32 = 0.75;
-    let c = Vec2::splat(BADGE_SIZE * 0.5);
-    ui.add_shape(
-        Shape::triangle(
-            c + Vec2::new(NUDGE - HALF_W + R, R - HALF_H),
-            c + Vec2::new(NUDGE - HALF_W + R, HALF_H - R),
-            c + Vec2::new(NUDGE + HALF_W - R, 0.0),
-        )
-        .radius(R)
-        .fill(color),
-    );
+    play_triangle(ui, BADGE_SIZE, 0.5, color);
 }
 
 /// The node title: an inline-renamable label. Double-click swaps it for
