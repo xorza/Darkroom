@@ -8,13 +8,13 @@ use crate::gui::graph_ctx::node_scope::NodeScope;
 /// One output port: what the func declares for it, and — for a wildcard —
 /// the type the graph resolves it to.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct OutputScope<'a> {
+pub(crate) struct OutputCtx<'a> {
     node: NodeScope<'a>,
     port_idx: usize,
     declared: &'a FuncOutput,
 }
 
-impl<'a> OutputScope<'a> {
+impl<'a> OutputCtx<'a> {
     pub(super) fn new(node: NodeScope<'a>, port_idx: usize, declared: &'a FuncOutput) -> Self {
         Self {
             node,

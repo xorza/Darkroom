@@ -24,7 +24,7 @@
 //!
 //! Graph tabs are *not* pinned to the primary group: any pane can show
 //! any graph, and every pane showing one gets its own canvas (see
-//! `gui::canvas::GraphUI`). `Main` still can't be closed, which is what
+//! `gui::pane::graph::GraphUI`). `Main` still can't be closed, which is what
 //! keeps the primary group — and so the tree — alive.
 
 use common::id_type;

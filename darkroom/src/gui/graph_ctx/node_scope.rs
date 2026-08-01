@@ -7,8 +7,8 @@ use crate::core::document::{PortKind, PortRef};
 use crate::core::preview;
 use crate::gui::EventRef;
 use crate::gui::graph_ctx::GraphCtx;
-use crate::gui::graph_ctx::input_scope::InputScope;
-use crate::gui::graph_ctx::output_scope::OutputScope;
+use crate::gui::graph_ctx::input_ctx::InputCtx;
+use crate::gui::graph_ctx::output_ctx::OutputCtx;
 use crate::gui::state::run_state::ExecStatus;
 
 /// The `kind_label` a node reports when the library holds no func for it —
@@ -188,33 +188,33 @@ impl<'a> NodeScope<'a> {
 
     /// This node's input ports, in declaration order. Empty for a stub, which
     /// declares nothing.
-    pub(crate) fn inputs(self) -> impl ExactSizeIterator<Item = InputScope<'a>> {
+    pub(crate) fn inputs(self) -> impl ExactSizeIterator<Item = InputCtx<'a>> {
         let declared = self.func.map_or(&[][..], |f| f.inputs.as_slice());
         declared
             .iter()
             .enumerate()
-            .map(move |(port_idx, input)| InputScope::new(self, port_idx, input))
+            .map(move |(port_idx, input)| InputCtx::new(self, port_idx, input))
     }
 
     /// One input port by index.
-    pub(crate) fn input(self, port_idx: usize) -> Option<InputScope<'a>> {
+    pub(crate) fn input(self, port_idx: usize) -> Option<InputCtx<'a>> {
         let declared = self.func?.inputs.get(port_idx)?;
-        Some(InputScope::new(self, port_idx, declared))
+        Some(InputCtx::new(self, port_idx, declared))
     }
 
     /// This node's output ports, in declaration order.
-    pub(crate) fn outputs(self) -> impl ExactSizeIterator<Item = OutputScope<'a>> {
+    pub(crate) fn outputs(self) -> impl ExactSizeIterator<Item = OutputCtx<'a>> {
         let declared = self.func.map_or(&[][..], |f| f.outputs.as_slice());
         declared
             .iter()
             .enumerate()
-            .map(move |(port_idx, output)| OutputScope::new(self, port_idx, output))
+            .map(move |(port_idx, output)| OutputCtx::new(self, port_idx, output))
     }
 
     /// One output port by index.
-    pub(crate) fn output(self, port_idx: usize) -> Option<OutputScope<'a>> {
+    pub(crate) fn output(self, port_idx: usize) -> Option<OutputCtx<'a>> {
         let declared = self.func?.outputs.get(port_idx)?;
-        Some(OutputScope::new(self, port_idx, declared))
+        Some(OutputCtx::new(self, port_idx, declared))
     }
 
     /// This node's event (emitter) ports. Events carry no data type — they

@@ -8,13 +8,13 @@ use crate::gui::graph_ctx::node_scope::NodeScope;
 /// One input port: what the func declares for it, and what the graph has
 /// bound to it.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct InputScope<'a> {
+pub(crate) struct InputCtx<'a> {
     node: NodeScope<'a>,
     port_idx: usize,
     declared: &'a FuncInput,
 }
 
-impl<'a> InputScope<'a> {
+impl<'a> InputCtx<'a> {
     pub(super) fn new(node: NodeScope<'a>, port_idx: usize, declared: &'a FuncInput) -> Self {
         Self {
             node,
@@ -87,7 +87,7 @@ impl<'a> InputScope<'a> {
     }
 }
 
-/// See [`InputScope::default`]. A free fn because the enum arm needs the
+/// See [`InputCtx::default`]. A free fn because the enum arm needs the
 /// library rather than anything on the port.
 fn default_static_value(library: &Library, input: &FuncInput) -> Option<StaticValue> {
     input.default_value.clone().or_else(|| {

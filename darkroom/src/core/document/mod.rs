@@ -100,10 +100,16 @@ pub(crate) enum TabRef {
     ImageViewer(NodeId),
 }
 
-/// A graph's camera: pan offset (canvas-local px) + zoom factor. One
-/// value shared by the persisted per-graph [`GraphView`], the per-frame
-/// `Scene` projection, and the `SetViewport` edit, so the three can't
-/// drift on field names or semantics.
+/// An affine 2D camera: `local = pan + zoom * content`. One value shared by
+/// the persisted per-graph [`GraphView`], the `GraphCtx` a canvas reads it
+/// through, and the `SetViewport` edit, so the three can't drift on field
+/// names or semantics.
+///
+/// The graph canvas reads `pan` as a canvas-local px offset and `zoom` as a
+/// world scale factor. The image viewer reuses the same algebra over a
+/// different content space — `pan` is the image's top-left offset in
+/// pane-local px, `zoom` is display px per texel — which is why
+/// `pan_zoom::zoom_about` and `fold_scroll_zoom` serve both.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub(crate) struct Viewport {
     pub(crate) pan: Vec2,
