@@ -110,7 +110,9 @@ impl PreviewStore {
             self.materialize_full(ui, node_id);
         }
         // A preview's own node is its retention: delete the node and the value
-        // it was showing has nothing left to draw it.
+        // it was showing has nothing left to draw it. The shared liveness rule
+        // narrowed to preview nodes — see `Document::holds_preview_node` for
+        // why this cache is stricter than the others.
         self.entries
             .retain(|node_id, _| document.holds_preview_node(*node_id));
     }

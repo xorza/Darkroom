@@ -112,8 +112,11 @@ impl Inspectors {
         if outside_action(ui, hits) {
             self.close_unpinned();
         }
-        // A panel outlives its node only until the next sweep.
-        self.modes.retain(|id, _| cx.graph_ctx().contains(*id));
+        // A panel outlives its node only until the next sweep. Asked of the
+        // document rather than of this pane: `modes` deliberately survives a
+        // tab switch, so only the node being *gone* may drop an entry.
+        let document = cx.graph_ctx().document();
+        self.modes.retain(|id, _| document.holds_node(*id));
     }
 
     /// Record a panel for every open inspector, positioned just right of

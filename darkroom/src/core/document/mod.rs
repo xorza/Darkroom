@@ -6,8 +6,7 @@ pub(crate) mod validate;
 use ::serde::{Deserialize, Serialize};
 use glam::Vec2;
 use indexmap::IndexMap;
-use scenarium::NodeKind;
-use scenarium::{DetachedNode, Graph as CoreGraph, InputPort, NodeId, OutputPort};
+use scenarium::{DetachedNode, Graph as CoreGraph, InputPort, Node, NodeId, NodeKind, OutputPort};
 use std::collections::BTreeSet;
 
 use crate::core::document::dock::{DockLayout, DockOp};
@@ -205,6 +204,32 @@ pub(crate) struct Document {
     pub(crate) layout: DockLayout,
 }
 
+/// Whether the graph still holds `node_id`.
+///
+/// **The** liveness question, and the single definition of it. Node ids are
+/// never reused, so a node absent here is gone for good — which is what makes
+/// this the retention rule for every `NodeId`-keyed cache that outlives the
+/// scene: the canvas geometry, the preview values, the open inspectors.
+/// Absence from a *scene* means only that a node is off-screen or on a closed
+/// tab; absence from here is permanent.
+///
+/// Free-standing over the graph rather than a [`Document`] method so
+/// [`Document::reconcile_with_graph`] can ask it while the layout is borrowed
+/// mutably. [`Document::holds_node`] is the `&Document` lift every other
+/// caller takes, and [`tab_alive`] is the same question asked of a tab.
+fn node_alive(graph: &CoreGraph, node_id: NodeId) -> bool {
+    graph.find(node_id).is_some()
+}
+
+/// Whether `node` is a preview node — the narrowing
+/// [`Document::holds_preview_node`] applies on top of [`node_alive`].
+fn is_preview_node(node: &Node) -> bool {
+    match node.kind {
+        NodeKind::Func(func_id) => preview::is_preview(func_id),
+        _ => false,
+    }
+}
+
 /// Whether a tab still resolves against the graph: the graph pane and
 /// `Preferences` always do, and a viewer tab dies with its node. The single
 /// predicate behind [`Document::reconcile_with_graph`]'s fast-path *and* its
@@ -212,7 +237,7 @@ pub(crate) struct Document {
 fn tab_alive(graph: &CoreGraph, tab: TabRef) -> bool {
     match tab {
         TabRef::Graph | TabRef::Preferences => true,
-        TabRef::ImageViewer(node_id) => graph.find(node_id).is_some(),
+        TabRef::ImageViewer(node_id) => node_alive(graph, node_id),
     }
 }
 
@@ -252,29 +277,24 @@ impl Document {
             .any(|group| matches!(group.active_tab(), TabRef::Graph))
     }
 
-    /// Whether the document still holds `node_id` anywhere — every local
-    /// graph's interior included, since node ids are unique across the whole
-    /// document and the canvas caches geometry for interiors it has shown.
-    ///
-    /// The retention question for any `NodeId`-keyed cache that outlives the
-    /// scene: a node absent from the *scene* may just be in a closed tab, but
-    /// one absent from here is gone for good — ids are never reused.
+    /// [`node_alive`] asked of the whole document — the form every
+    /// `NodeId`-keyed cache's sweep takes. See there for why this one question
+    /// answers for all of them.
     pub(crate) fn holds_node(&self, node_id: NodeId) -> bool {
-        self.graph.find(node_id).is_some()
+        node_alive(&self.graph, node_id)
     }
 
-    /// Whether `node_id` is a live preview node — what retains the value it
+    /// [`node_alive`] narrowed to preview nodes — what retains the value one
     /// published.
     ///
-    /// One node backs one on-screen card, so the node's own id answers for the
-    /// card without anything else alongside it.
+    /// Deliberately stricter than the shared rule rather than accidentally
+    /// different, which is why it is spelled as a narrowing: the preview store
+    /// holds textures up to 8192² RGBA8, so a value whose key is not a live
+    /// preview node releases at the next sweep instead of riding on the
+    /// node's own lifetime. One node backs one on-screen card, so the node's
+    /// own id answers for the card without anything else alongside it.
     pub(crate) fn holds_preview_node(&self, node_id: NodeId) -> bool {
-        self.graph
-            .find(node_id)
-            .is_some_and(|node| match node.kind {
-                NodeKind::Func(func_id) => preview::is_preview(func_id),
-                _ => false,
-            })
+        self.graph.find(node_id).is_some_and(is_preview_node)
     }
 
     /// Every open viewer tab's preview node, visible or not — the retention
@@ -337,6 +357,57 @@ mod tests {
     use super::*;
     use crate::core::document::dock::DockOp;
     use crate::core::document::harness::DocFixture;
+
+    /// Every `NodeId`-keyed cache sweeps against one rule, and the two
+    /// narrowings of it are strict subsets — so a node that is gone is gone by
+    /// all of them at once, and nothing can be retained by one sweep while
+    /// another has released it.
+    ///
+    /// Re-diverging the predicates is what this catches: they were four
+    /// separate spellings of `graph.find(..).is_some()` before, and nothing
+    /// said which were meant to differ.
+    #[test]
+    fn node_liveness_is_one_rule_with_two_declared_narrowings() {
+        let mut fixture = DocFixture::default();
+        let preview_func = crate::core::preview::preview_func(Default::default());
+        fixture.library.add(preview_func.clone());
+        let preview = fixture.doc.graph.add(Node::from(&preview_func));
+        let plain = fixture.stub_at(Vec2::ZERO);
+        let mut doc = fixture.doc;
+
+        // The shared rule answers for both kinds; the preview narrowing is a
+        // strict subset of it, never a different question.
+        for node in [preview, plain] {
+            assert!(doc.holds_node(node), "the document holds {node:?}");
+            assert!(
+                !doc.holds_preview_node(node) || doc.holds_node(node),
+                "the preview narrowing cannot outlive the rule it narrows"
+            );
+        }
+        assert!(doc.holds_preview_node(preview));
+        assert!(
+            !doc.holds_preview_node(plain),
+            "a stub node retains no published value"
+        );
+
+        // The tab lift is the same rule asked of a tab: a viewer dies exactly
+        // with its node, and the two non-node tabs never do.
+        assert!(tab_alive(&doc.graph, TabRef::ImageViewer(preview)));
+        assert!(tab_alive(&doc.graph, TabRef::Graph));
+        assert!(tab_alive(&doc.graph, TabRef::Preferences));
+
+        doc.graph.detach_node(preview);
+        assert!(!doc.holds_node(preview), "the rule says gone");
+        assert!(
+            !doc.holds_preview_node(preview),
+            "and so does the narrowing"
+        );
+        assert!(
+            !tab_alive(&doc.graph, TabRef::ImageViewer(preview)),
+            "and so does the tab lift"
+        );
+        assert!(doc.holds_node(plain), "the surviving node is untouched");
+    }
 
     /// A viewer tab retains its node's value while open, and only the pane's
     /// *visible* tab is owed a full-resolution texture.
