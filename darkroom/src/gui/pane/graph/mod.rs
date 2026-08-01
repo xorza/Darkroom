@@ -108,9 +108,10 @@ pub(crate) struct GraphUI {
     /// which is the only thing that pairs it with the gesture it was settled
     /// beside. Tests read it through [`internals::geometry`].
     geometry: CanvasGeometry,
-    /// Open inspection panels, keyed by node. Outside the gesture group
-    /// so pinned panels survive a tab switch; panels only paint for nodes
-    /// in the active scene, so off-tab ones hide and reappear.
+    /// Open inspection panels, keyed by node. Outside the gesture group so
+    /// they survive a tab switch — an open panel is a standing request about a
+    /// node, not gesture state; panels only paint for nodes in the active
+    /// scene, so off-tab ones hide and reappear.
     inspectors: Inspectors,
     /// This frame's bare-canvas gesture and the pane it latched on,
     /// resolved once in [`Self::prepass`] and read back by [`Self::draw`].
@@ -167,9 +168,14 @@ impl GraphUI {
 
     /// Drop every in-flight gesture, keeping the buffers the controllers grow.
     ///
+    /// Gestures only. The inspection panels stay open across a tab switch —
+    /// opening one is a deliberate choice about a node, not something the
+    /// pointer left latched, so leaving the canvas shouldn't undo it. They
+    /// close on an outside action instead ([`Inspectors::apply`]).
+    ///
     /// Destructured rather than assigned wholesale so the compiler makes the
     /// call: a field added to [`GraphUI`] does not compile until it is either
-    /// reset here or explicitly named as surviving. The `_`-bound arms below
+    /// dropped here or explicitly named as surviving. The `_`-bound arms below
     /// are the survivors — cross-frame caches and per-frame facts that the
     /// next frame overwrites anyway.
     fn reset_gestures(&mut self) {
@@ -183,8 +189,9 @@ impl GraphUI {
             node_menu,
             selection_ui,
             pan_anchor,
-            // Survivors: caches that outlive the scene on purpose, and the
-            // frame-local facts `prepass` rewrites before anything reads them.
+            // Survivors: caches and panels that outlive the scene on purpose,
+            // and the frame-local facts `prepass` rewrites before anything
+            // reads them.
             background: _,
             geometry: _,
             inspectors: _,
@@ -206,10 +213,10 @@ impl GraphUI {
     /// Take note of whether a pane is showing this canvas, and report whether
     /// that *changed* since last frame.
     ///
-    /// Crossing the edge drops all in-flight gesture state and closes the
-    /// transient inspection panels — both are tab-local, and a drag left
+    /// Crossing the edge drops all in-flight gesture state: a drag left
     /// latched while the canvas was away would otherwise resume when it
-    /// comes back. Cross-frame caches survive, notably
+    /// comes back. The inspection panels and the cross-frame caches survive —
+    /// notably
     /// [`CanvasGeometry`]'s port-offset table, so connections still anchor on
     /// the first frame after a switch.
     ///
@@ -245,13 +252,12 @@ impl GraphUI {
             graph_ctx.is_visible(),
             "the prepass is reached from an active Graph tab"
         );
-        // First: a canvas back from being away drops the transient state it
-        // left latched, since a drag still held would otherwise resume under
-        // a pointer that has long since moved on.
+        // First: a canvas back from being away drops the gesture state it left
+        // latched, since a drag still held would otherwise resume under a
+        // pointer that has long since moved on.
         let appearing = self.appearing(ui);
         if appearing {
             self.reset_gestures();
-            self.inspectors.close_unpinned();
         }
         // Resolve the frame's bare-canvas gesture and park it for `draw` to
         // read back — the classification is one response poll, and both
