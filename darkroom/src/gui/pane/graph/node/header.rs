@@ -25,8 +25,8 @@ use crate::gui::graph_ctx::node_ctx::NodeCtx;
 use crate::gui::pane::graph::ctx::DrawCtx;
 use crate::gui::pane::graph::node::port_color::event_color;
 use crate::gui::pane::graph::node::port_row::glyph::{EVENT_TRIANGLE_RADIUS, PORT_HIT_SCALE};
+use crate::gui::pane::graph::node::wid;
 use crate::gui::pane::graph::node::widget::exec_color;
-use crate::gui::pane::graph::node::{node_rename_wid, node_wid};
 use crate::gui::pane::graph::paint::inspector::{InspectMode, inspect_badge_wid};
 use crate::gui::requests::Requests;
 use crate::gui::state::run_state::ExecStatus;
@@ -116,7 +116,7 @@ pub(super) fn subscription_pin(ui: &mut Ui, theme: &Theme, node: NodeCtx<'_>, ho
 /// `SubscriptionUI` reconstruct it to poll the pin's geometry as a wire
 /// drop target.
 pub(crate) fn subscription_glyph_wid(node_id: NodeId) -> WidgetId {
-    node_wid("subscription_glyph", node_id)
+    wid::node("subscription_glyph", node_id)
 }
 
 /// The header bar: the node title (left) and the descriptive cluster (right) —
@@ -274,7 +274,7 @@ pub(super) fn status_row(ui: &mut Ui, ncx: NodeCtx<'_>, out: &mut Requests) {
                     "↻",
                     theme.colors.badge_cache,
                     false,
-                    node_wid("cache_eviction_badge", node.id),
+                    wid::node("cache_eviction_badge", node.id),
                     "Drop this node and downstream caches from RAM and disk",
                 )
                 .show(ui)
@@ -358,7 +358,7 @@ fn property_chip(
         chip.glyph,
         color,
         chip.on,
-        node_wid(chip.tag, node.id),
+        wid::node(chip.tag, node.id),
         chip.tip,
     )
     .show(ui)
@@ -390,7 +390,7 @@ fn play_chip(ui: &mut Ui, theme: &Theme, node: NodeCtx<'_>) -> bool {
         "Run to this node — execute its upstream cone and keep the output for preview"
     };
     Badge::action(
-        node_wid("play_badge", node.id),
+        wid::node("play_badge", node.id),
         tooltip,
         draw_play_triangle,
         theme.colors.text_muted,
@@ -413,7 +413,7 @@ fn draw_play_triangle(ui: &mut Ui, color: Color) {
 fn title(ui: &mut Ui, ncx: NodeCtx<'_>, out: &mut Requests) {
     let node = ncx;
     let shift = ui.modifiers().shift;
-    let id = node_rename_wid(node.id);
+    let id = wid::rename(node.id);
     // Interned here rather than carried on the node: the widget holds the
     // handle across the label⇄editor swap, and this is the one place the
     // name is drawn.

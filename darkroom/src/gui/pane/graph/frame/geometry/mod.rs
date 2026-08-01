@@ -11,8 +11,8 @@ use crate::gui::EventRef;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::graph_ctx::node_ctx::NodeCtx;
 use crate::gui::pane::graph::node::header::subscription_glyph_wid;
-use crate::gui::pane::graph::node::node_widget_id;
 use crate::gui::pane::graph::node::port_row::{event_glyph_wid, port_circle_wid};
+use crate::gui::pane::graph::node::wid;
 
 /// The canvas's response-derived geometry: a per-frame snapshot of every
 /// port-ish glyph plus the cross-frame node-size cache, all filled by one
@@ -38,7 +38,7 @@ use crate::gui::pane::graph::node::port_row::{event_glyph_wid, port_circle_wid};
 /// could want come off the same read: world coords for the gestures that share
 /// the canvas's own space (cull, breaker, rubber band, view fitting), screen
 /// coords for the ones testing a raw pointer position. Everything else asks
-/// here rather than calling `response_for(node_widget_id(..))` itself, so no
+/// here rather than calling `response_for(wid::body(..))` itself, so no
 /// two of them can disagree about where a node is.
 ///
 /// **And the one place a port glyph's is.** The same rule, one level down:
@@ -319,7 +319,7 @@ impl CanvasGeometry {
             // ancestor-shared canvas-origin term cancels) and combine
             // with this frame's `n.pos` — curves anchor on the moved
             // node's *current* port positions, not last frame's.
-            let body = ui.response_for(node_widget_id(n.id));
+            let body = ui.response_for(wid::body(n.id));
             if let Some(r) = body.layout_rect {
                 self.node_sizes.insert(n.id, r.size);
             }

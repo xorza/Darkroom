@@ -15,7 +15,7 @@ use crate::gui::pane::graph::harness::CanvasHarness;
 /// frame's. Driving that here: scribble over empty canvas, move the node onto
 /// the scribble mid-gesture, release. The cut has to land, which it only does
 /// if the probe reads the same `node_world_rect` the cull and the rubber band
-/// do rather than re-deriving one off `response_for(node_widget_id(..))`.
+/// do rather than re-deriving one off `response_for(wid::body(..))`.
 #[test]
 fn the_breaker_cuts_a_node_at_its_current_position_not_its_last_painted_one() {
     use palantir::PointerButton;

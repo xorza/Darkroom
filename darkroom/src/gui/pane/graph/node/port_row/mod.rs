@@ -35,8 +35,8 @@ use crate::gui::graph_ctx::output_ctx::OutputCtx;
 use crate::gui::pane::graph::ctx::DrawCtx;
 use crate::gui::pane::graph::node::port_color::{event_color, port_color};
 use crate::gui::pane::graph::node::port_row::glyph::{circle_frame, event_glyph, port_diameter};
-use crate::gui::pane::graph::node::port_wid;
 use crate::gui::pane::graph::node::value_editor;
+use crate::gui::pane::graph::node::wid;
 use crate::gui::requests::Requests;
 use crate::gui::state::run_state::ExecStatus;
 use crate::gui::theme::Theme;
@@ -169,13 +169,13 @@ fn output_cells(ui: &mut Ui, ncx: NodeCtx<'_>, dcx: DrawCtx<'_>, out: &mut Reque
 }
 
 pub(crate) fn port_circle_wid(port: PortRef) -> WidgetId {
-    port_wid("port_circle", port)
+    wid::port("port_circle", port)
 }
 
 /// An input port's inline const editor (text field, checkbox, or file-pick
 /// button).
 fn const_editor_wid(input: InputPort) -> WidgetId {
-    port_wid("const_editor", input.into())
+    wid::port("const_editor", input.into())
 }
 
 /// A click on an `FsPath` input's inline pick button: the port to set, and the
@@ -196,7 +196,7 @@ pub(crate) struct PathPick {
 /// *label* area — the circle has its own [`port_circle_wid`] and consumes
 /// hits over its own rect.
 fn input_cell_wid(port: PortRef) -> WidgetId {
-    port_wid("input_cell", port)
+    wid::port("input_cell", port)
 }
 
 /// Open `menu_id`'s context menu when the cell or its port circle was

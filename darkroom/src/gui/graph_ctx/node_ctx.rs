@@ -102,7 +102,7 @@ impl<'a> NodeCtx<'a> {
     /// record pass for everything below the node body that asks it.
     ///
     /// Takes the answer rather than a `Ui`: the widget id it comes off is
-    /// `gui::pane::graph::node`'s (`node_hovered`), and this type sits below
+    /// `gui::pane::graph::node`'s (`wid::hovered`), and this type sits below
     /// that module.
     pub(crate) fn with_hover(self, hovered: bool) -> Self {
         Self { hovered, ..self }
