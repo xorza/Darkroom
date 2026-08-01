@@ -9,8 +9,9 @@
 //! those needs.
 //!
 //! This file is [`GraphUI`] and nothing else: the state a graph pane keeps
-//! across frames, and the three phases (`prepass`, `draw`, and the sweeps
-//! between) that drive it.
+//! across frames, the two phases that drive it ([`GraphUI::prepass`] and
+//! [`GraphUI::draw`]), and the cache sweep ([`GraphUI::retain_nodes`]) that
+//! runs outside them.
 
 pub(crate) mod background;
 pub(crate) mod canvas;
@@ -159,13 +160,6 @@ pub(crate) struct GraphUI {
 }
 
 impl GraphUI {
-    /// Sweep last frame's node responses into [`CanvasHits`]. Does nothing
-    /// when no pane is showing the graph — the sweep runs before the tab set
-    /// settles, so it cannot assume one.
-    pub(crate) fn scan_hits(&mut self, ui: &Ui, graph_ctx: GraphCtx<'_>) {
-        self.hits.scan(ui, graph_ctx);
-    }
-
     /// Evict this canvas's two `NodeId`-keyed caches down to the nodes the
     /// document still holds — the cross-frame geometry and the open inspection
     /// panels.
@@ -265,8 +259,8 @@ impl GraphUI {
         // First: a canvas back from being away drops the transient state it
         // left latched, since a drag still held would otherwise resume under
         // a pointer that has long since moved on.
-        let appearing = Relayout::needed_if(self.appearing(ui));
-        if appearing == Relayout::Needed {
+        let appearing = self.appearing(ui);
+        if appearing {
             self.reset_gestures();
             self.inspectors.close_unpinned();
         }
@@ -331,7 +325,7 @@ impl GraphUI {
         // The keyboard half of the same phase. Last, so a chord reads the
         // document the pointer gestures above were raised against.
         shortcuts::emit(ui, graph_ctx, out);
-        appearing
+        Relayout::needed_if(appearing)
     }
 
     /// Record one graph pane: its gestures' record-phase halves, the canvas
@@ -364,31 +358,25 @@ impl GraphUI {
             .size((Sizing::FILL, Sizing::FILL))
             .show(ui, |ui| {
                 self.record_canvas(ui, graph_ctx, out);
-                toolbar::show(ui, self.canvas_ctx(graph_ctx), out);
+                // Composed here rather than shared with the halves above and
+                // below: both drive controllers and so hold all of `self`
+                // mutably, while a context borrows the geometry and the hits
+                // shared. The toolbar only reads, so it takes one built once
+                // `record_canvas` has given the fields back.
+                let cx = CanvasCtx::new(
+                    graph_ctx,
+                    &self.geometry,
+                    &self.hits,
+                    self.gesture,
+                    self.cancelled,
+                );
+                toolbar::show(ui, cx, out);
             });
     }
 
-    /// This frame's canvas context over `graph_ctx`, off the state
-    /// `prepass` settled.
-    ///
-    /// For the passes that only *read* this canvas. The two that also drive
-    /// its controllers hold `&mut self`, so they compose theirs from their own
-    /// field destructure instead — a context borrows the geometry and the hits
-    /// shared, and it cannot be handed to a method that wants all of `self`
-    /// mutably.
-    fn canvas_ctx<'a>(&'a self, graph_ctx: GraphCtx<'a>) -> CanvasCtx<'a> {
-        CanvasCtx::new(
-            graph_ctx,
-            &self.geometry,
-            &self.hits,
-            self.gesture,
-            self.cancelled,
-        )
-    }
-
-    /// The record pass's gesture half: run each controller's record-phase
-    /// `apply`. Everything here reads last frame's responses and raises
-    /// requests; nothing draws.
+    /// The record pass's non-drawing half: each controller's record-phase
+    /// `apply`, then the chip clicks that mean an [`AppCommand`]. Everything
+    /// here reads last frame's responses and raises requests; nothing draws.
     fn resolve_gestures(&mut self, ui: &mut Ui, graph_ctx: GraphCtx<'_>, out: &mut Requests) {
         let Self {
             geometry,
@@ -440,7 +428,30 @@ impl GraphUI {
         // `out`, so there is no precedence to settle here: a frame in which
         // both a menu pick and a chip click landed raises both.
         node_menu.apply(ui, cx, out);
-        emit_chip_commands(cx, out);
+        // The app-tier tail of the same read: each chip click in the recorded
+        // tree — an `FsPath` input's pick button, a node header's play or
+        // cache-eviction chip. Each source surfaces only a domain fact (which
+        // node to run, which port to pick a path for), and naming `AppCommand`
+        // is the canvas's job, since it is what knows these are app-tier — so
+        // the translation lives here rather than in `node`. All three are pure
+        // reads over [`CanvasHits`].
+        //
+        // A hit is keyed by a document-unique `NodeId`, so it can belong to a
+        // neighbouring pane — or to a node this pane no longer holds, since the
+        // sweep ran against last frame's projection. Both fall out of
+        // `in_scope`.
+        let in_scope = |id: NodeId| cx.graph_ctx().contains(id).then_some(id);
+        if let Some(req) = emit_path_picks(cx) {
+            out.push_app(AppCommand::Edit(EditCommand::PickInputPath(req)));
+        }
+        // A header play-chip click runs that node's cone — the same command the
+        // context menu's "Run to this node" resolves to.
+        if let Some(node_id) = cx.hits().chip(Chip::Play).and_then(in_scope) {
+            out.push_app(AppCommand::Run(RunCommand::Node(node_id)));
+        }
+        if let Some(node_id) = cx.hits().chip(Chip::EvictCache).and_then(in_scope) {
+            out.push_app(AppCommand::Run(RunCommand::EvictCache(node_id)));
+        }
     }
 
     /// The record pass's drawing half: the outer (pan-capture) canvas, the
@@ -576,32 +587,6 @@ impl GraphUI {
                         subscription_ui.draw_in_flight(ui, cx, canvas_origin);
                     });
             });
-    }
-}
-
-/// Queue the [`AppCommand`] behind each chip click in the recorded tree: an
-/// `FsPath` input's pick button, a node header's play or cache-eviction chip.
-///
-/// Each source surfaces only a domain fact — which node to run, which port to
-/// pick a path for — and naming `AppCommand` is the canvas's job, since it is
-/// what knows these are app-tier. So the translation lives here rather than in
-/// `node`. All three are pure reads over [`CanvasHits`].
-fn emit_chip_commands(cx: CanvasCtx<'_>, out: &mut Requests) {
-    let hits = cx.hits();
-    // A hit is keyed by a document-unique `NodeId`, so it can belong to a
-    // neighbouring pane — or to a node this pane no longer holds, since the
-    // sweep ran against last frame's projection. Both fall out here.
-    let in_scope = |id: NodeId| cx.graph_ctx().contains(id).then_some(id);
-    if let Some(req) = emit_path_picks(cx) {
-        out.push_app(AppCommand::Edit(EditCommand::PickInputPath(req)));
-    }
-    // A header play-chip click runs that node's cone — the same command the
-    // context menu's "Run to this node" resolves to.
-    if let Some(node_id) = hits.chip(Chip::Play).and_then(in_scope) {
-        out.push_app(AppCommand::Run(RunCommand::Node(node_id)));
-    }
-    if let Some(node_id) = hits.chip(Chip::EvictCache).and_then(in_scope) {
-        out.push_app(AppCommand::Run(RunCommand::EvictCache(node_id)));
     }
 }
 

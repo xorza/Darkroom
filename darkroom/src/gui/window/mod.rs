@@ -85,7 +85,7 @@ impl MainWindow {
             output_types,
             ..
         } = self;
-        graph_ui.scan_hits(ui, GraphCtx::new(cx, output_types));
+        graph_ui.hits.scan(ui, GraphCtx::new(cx, output_types));
         let hits = &self.graph_ui.hits;
         if let Some(node) = hits.chip(Chip::PreviewImage) {
             out.push_view(DockOp::OpenTab {
