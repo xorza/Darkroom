@@ -2,7 +2,7 @@
 //! and the last run.
 //!
 //! Nothing here is copied or cached. A [`GraphCtx`] is the frame's
-//! [`AppCtx`] plus two shared references; the handles it hands out
+//! [`WindowCtx`] plus one shared reference; the handles it hands out
 //! ([`NodeCtx`], [`InputCtx`],
 //! [`OutputCtx`]) each resolve one more borrow and answer every question
 //! from the authority that owns it — the node's record off the document, its
@@ -27,19 +27,19 @@ use std::collections::BTreeSet;
 use scenarium::{Graph, InputPort, Library, NodeId, OutputPort, OutputTypes, Subscription};
 
 use crate::core::document::{Document, GraphView, Viewport};
-use crate::gui::app::ctx::AppCtx;
 use crate::gui::graph_ctx::node_ctx::NodeCtx;
 use crate::gui::state::run_state::RunState;
 use crate::gui::theme::Theme;
+use crate::gui::window::ctx::WindowCtx;
 
-/// The graph pane for this frame. `Copy` (the app context plus two shared
-/// refs), so it threads through the draw chain like `DrawCtx`.
+/// The graph pane for this frame. `Copy` (the window context plus one shared
+/// ref), so it threads through the draw chain like `DrawCtx`.
 ///
 /// The canvas level of the context chain: it carries the frame's
-/// [`AppCtx`] rather than restating the refs inside it, so a widget
+/// [`WindowCtx`] rather than restating the refs inside it, so a widget
 /// reaches the theme, the library and the last run through the same context it
 /// asks about nodes — one path to each, and nothing under the canvas has to
-/// name the app level at all.
+/// name the app or window level at all.
 ///
 /// Composing one always succeeds: the document, the library and the run are
 /// there whether or not a pane happens to be showing the graph. Whether one
@@ -50,19 +50,19 @@ use crate::gui::theme::Theme;
 /// every call site unwrap.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct GraphCtx<'a> {
-    /// The frame's read-only world, one level up: the theme every widget
+    /// The window's context, one level up: the document this pane's graph
+    /// lives in, plus the frame's read-only world — the theme every widget
     /// paints from, the library each node's declaration resolves through (a
     /// node whose func it no longer holds reads as a
     /// [`missing`](NodeCtx::missing) stub rather than vanishing), and the
     /// last run's per-node verdicts — status, retained RAM, unfed inputs, and
     /// the compiled program's word on what is a sink.
-    app: AppCtx<'a>,
-    doc: &'a Document,
+    window: WindowCtx<'a>,
     /// Every output port's *resolved* type — the wildcard chains followed
     /// once for the whole graph, so reading one is a lookup rather than a
     /// walk. See [`OutputCtx::ty`](output_ctx::OutputCtx::ty).
     ///
-    /// Resolved by [`Self::new`] against the `doc` beside it, and
+    /// Resolved by [`Self::new`] against the document the `window` carries, and
     /// exclusively borrowed for as long as this context lives — so it cannot be
     /// a graph edit behind, and nothing can move it out from under a reader.
     output_types: &'a OutputTypes,
@@ -72,16 +72,16 @@ pub(crate) struct GraphCtx<'a> {
 }
 
 impl<'a> GraphCtx<'a> {
-    /// Derive the graph pane's context from the frame's `app` context and the
-    /// document it is showing.
+    /// Derive the graph pane's context from the `window`'s — the frame's
+    /// read-only world and the document it is showing.
     ///
     /// Visibility is asked of the *document*, not of its contents: a graph
     /// with no nodes on an active tab is a legitimate pane, and one that
     /// answered "no nodes, so no pane" would leave a fresh document with no
     /// canvas to place its first node on.
     ///
-    /// **Resolves `output_types` against `doc` on the way in**, which is why
-    /// it arrives `&mut` and leaves shared. A context's readers answer a
+    /// **Resolves `output_types` against that document on the way in**, which
+    /// is why it arrives `&mut` and leaves shared. A context's readers answer a
     /// wildcard port off that table, so its freshness is not a contract for
     /// callers to keep — composing a context *is* the refresh, and the borrow
     /// then lasts as long as the context, so nothing can edit the graph out from
@@ -91,16 +91,12 @@ impl<'a> GraphCtx<'a> {
     /// The table is threaded in rather than owned because the context is `Copy`:
     /// the caller keeps the allocation across frames, and a refresh reuses its
     /// capacity instead of building a map per pass.
-    pub(crate) fn new(
-        app: AppCtx<'a>,
-        doc: &'a Document,
-        output_types: &'a mut OutputTypes,
-    ) -> Self {
-        output_types.update(&doc.graph, app.library());
+    pub(crate) fn new(window: WindowCtx<'a>, output_types: &'a mut OutputTypes) -> Self {
+        let doc = window.document();
+        output_types.update(&doc.graph, window.app().library());
         Self {
             is_visible: doc.shows_graph(),
-            app,
-            doc,
+            window,
             output_types,
         }
     }
@@ -123,40 +119,40 @@ impl<'a> GraphCtx<'a> {
     /// describe. Prefer [`Self::body`] / [`Self::view`], which say which
     /// half is being read.
     pub(crate) fn document(self) -> &'a Document {
-        self.doc
+        self.window.document()
     }
 
     /// The authoring graph this pane shows.
     pub(crate) fn body(self) -> &'a Graph {
-        &self.doc.graph
+        &self.document().graph
     }
 
     /// Its view metadata: placements, viewport, committed selection.
     pub(crate) fn view(self) -> &'a GraphView {
-        &self.doc.main_view
+        &self.document().main_view
     }
 
     pub(crate) fn viewport(self) -> Viewport {
-        self.doc.main_view.viewport
+        self.view().viewport
     }
 
     /// The palette and metrics every widget in this pane paints from.
     pub(crate) fn theme(self) -> &'a Theme {
-        self.app.theme()
+        self.window.app().theme()
     }
 
     /// The library every node's declaration is resolved through — for the
     /// readers that need type metadata a port doesn't carry (an enum's
     /// registered variants, a type's display name).
     pub(crate) fn library(self) -> &'a Library {
-        self.app.library()
+        self.window.app().library()
     }
 
     /// The last run's results, for the readers that want more of a node than
     /// its [`NodeCtx`] surfaces — its logs, its failure message, the value
     /// a preview published.
     pub(crate) fn run_state(self) -> &'a RunState {
-        self.app.run_state()
+        self.window.app().run_state()
     }
 
     /// This graph's resolved output types. `pub(super)` because the one
