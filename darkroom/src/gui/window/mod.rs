@@ -7,7 +7,6 @@ use std::collections::HashMap;
 use palantir::{Align, Background, Configure, KeyFilter, Panel, Sizing, Ui, VAlign, WidgetId};
 use scenarium::{NodeId, OutputTypes};
 
-use crate::core::document::dock::DockOp;
 use crate::core::document::{Document, TabRef};
 use crate::core::io::preferences::Preferences;
 use crate::gui::app::commands::AppCommand;
@@ -15,7 +14,6 @@ use crate::gui::app::commands::prefs::PrefsCommand;
 use crate::gui::dock::{DockContext, DockUi};
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::pane::graph::GraphUI;
-use crate::gui::pane::graph::frame::hits::Chip;
 use crate::gui::pane::preferences;
 use crate::gui::pane::viewer::{self, ImageViewer};
 use crate::gui::relayout::Relayout;
@@ -75,23 +73,13 @@ impl MainWindow {
     /// Pass A and its connections draw in Pass B, no first-frame gap.
     pub(crate) fn scan_navigation(&mut self, ui: &mut Ui, cx: WindowCtx<'_>, out: &mut Requests) {
         self.dock.scan(ui, cx.document(), out);
-        // One sweep of last frame's node responses, before anything reads
-        // one: the canvas's own passes read it later in the frame, and the
-        // two chip opens below are why it has to happen this early. Runs
-        // ahead of the tab dispatch, so the context stays an `Option` — with
-        // no graph pane up there is nothing to sweep.
-        let MainWindow {
-            graph_ui,
-            output_types,
-            ..
-        } = self;
-        graph_ui.hits.scan(ui, GraphCtx::new(cx, output_types));
-        let hits = &self.graph_ui.hits;
-        if let Some(node) = hits.chip(Chip::PreviewImage) {
-            out.push_view(DockOp::OpenTab {
-                tab: TabRef::ImageViewer(node),
-            });
-        }
+        // The canvas's own half of the same phase: it sweeps last frame's node
+        // responses and raises the tab opens they mean. Runs ahead of the tab
+        // dispatch, so it is reached whether or not a pane is showing the
+        // graph — with none up there is nothing to sweep, which it answers for
+        // itself.
+        self.graph_ui
+            .scan_navigation(ui, GraphCtx::new(cx, &mut self.output_types), out);
     }
 
     /// Edit-phase prepass: input-derived graph mutations for the

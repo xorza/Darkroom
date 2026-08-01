@@ -122,7 +122,7 @@ impl CanvasHarness {
     fn record(graph_ui: &mut GraphUI, ctx: &mut GraphCtxFixture, recorder: &mut Ui) -> Requests {
         let mut out = Requests::default();
         let graph_ctx = ctx.graph_ctx();
-        graph_ui.hits.scan(recorder, graph_ctx);
+        graph_ui.scan_navigation(recorder, graph_ctx, &mut out);
         graph_ui.prepass(recorder, graph_ctx, &mut out);
         Panel::vstack()
             .id_salt("pane")
