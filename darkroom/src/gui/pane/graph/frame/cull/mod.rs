@@ -8,7 +8,6 @@ use glam::Vec2;
 use palantir::{Rect, Size};
 
 use crate::core::document::Viewport;
-use crate::gui::pane::graph::canvas::to_world;
 use crate::gui::pane::graph::paint::wire::Wire;
 
 /// World-space slack added around the viewport so paint that extends past
@@ -32,8 +31,8 @@ impl CullRegion {
                 min: outer.min - canvas_origin,
                 size: outer.size,
             };
-            let min = to_world(outer_local.min, viewport);
-            let max = to_world(outer_local.max(), viewport);
+            let min = viewport.to_world(outer_local.min);
+            let max = viewport.to_world(outer_local.max());
             Rect {
                 min,
                 size: Size::new(max.x - min.x, max.y - min.y),

@@ -4,7 +4,7 @@ use scenarium::NodeId;
 use scenarium::{InputPort, Subscription};
 
 use crate::core::edit::intent::types::GraphIntent;
-use crate::gui::pane::graph::canvas::{outer_canvas_widget_id, to_world};
+use crate::gui::pane::graph::canvas::outer_canvas_widget_id;
 use crate::gui::pane::graph::ctx::CanvasCtx;
 use crate::gui::pane::graph::gesture::canvas_gesture::CanvasGesture;
 use crate::gui::pane::graph::gesture::slot::GestureSlot;
@@ -298,7 +298,7 @@ impl BreakerUI {
             && let Some(p) = resp.pointer_local
         {
             self.latched.latch(button);
-            self.scribble.restart(to_world(p, &graph_ctx.viewport()));
+            self.scribble.restart(graph_ctx.viewport().to_world(p));
         }
         if cx.cancelled() {
             self.latched.clear();
@@ -316,7 +316,7 @@ impl BreakerUI {
         let scribble = &mut self.scribble;
         if resp.button(button).drag.delta().is_some() {
             if let Some(p) = resp.pointer_local {
-                scribble.add_point(to_world(p, &graph_ctx.viewport()));
+                scribble.add_point(graph_ctx.viewport().to_world(p));
             }
             return;
         }

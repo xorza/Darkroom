@@ -22,7 +22,6 @@ use palantir::{Color, CurveBrush, LineCap, LinearGradient, Rect, Shape, Size, St
 use scenarium::NodeId;
 
 use crate::gui::graph_ctx::GraphCtx;
-use crate::gui::pane::graph::canvas::pointer_world;
 use crate::gui::pane::graph::ctx::DrawCtx;
 use crate::gui::pane::graph::frame::geometry::{GlyphKey, PortLayer};
 use crate::gui::pane::graph::gesture::breaker::BreakerProbe;
@@ -186,7 +185,9 @@ impl<A: GlyphKey, B: GlyphKey> GlyphDrag<A, B> {
     ) -> Option<Vec2> {
         match self.snap {
             Some(key) => layer.center(key),
-            None => pointer_world(ui, graph_ctx, canvas_origin),
+            None => ui
+                .pointer_pos()
+                .map(|p| graph_ctx.viewport().to_world(p - canvas_origin)),
         }
     }
 }
