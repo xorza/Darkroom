@@ -3,9 +3,8 @@
 //! on [`types`].
 //!
 //! Split by responsibility:
-//!   - [`types`] — the `GraphIntent` / `UndoStep` / `UndoStep` / `DockStep` /
-//!     `GestureKey` model.
-//!   - [`build`] — `build_step` / `build_doc_step`: read the pre-mutation
+//!   - [`types`] — the `GraphIntent` / `UndoStep` / `GestureKey` model.
+//!   - [`build`] — `build_step`: read the pre-mutation
 //!     snapshot from `&Document`, fold with the incoming intent, return a
 //!     fully-populated step. Pure. Also *the* validation gate: it's the
 //!     single entry every frontend commits through, so each arm establishes
@@ -17,9 +16,9 @@
 //!     list rather than as asides inside `build_step`.
 //!   - [`apply`] — `apply_step` / `revert_step` write the "to"/"from" half
 //!     of an `UndoStep` to `&mut Document` (used by initial commit,
-//!     undo-stack redo, and undo respectively), plus the `commit_intent` /
-//!     `commit_intent` entries the live frontends drive their
-//!     per-intent loop through: build → no-op-filter → apply. Uniform
+//!     undo-stack redo, and undo respectively), plus the `commit_intent`
+//!     entry the live frontends drive their per-intent loop through:
+//!     build → no-op-filter → apply. Uniform
 //!     across variants — a wildcard-output retype severs nothing
 //!     (mismatched wires are tolerated and lower as unbound).
 //!   - [`query`] — the five exhaustive per-step predicates (`is_noop`,
