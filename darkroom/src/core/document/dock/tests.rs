@@ -85,7 +85,9 @@ fn default_is_a_single_main_group() {
 }
 
 /// Pointer-driven focus moves `focused` and nothing else — no pane
-/// switches tabs.
+/// switches tabs — and a group that has gone since the press was read
+/// leaves it where it was, rather than stranding a dead id that would
+/// fail validation at the next save.
 #[test]
 fn focus_moves_only_the_focused_group() {
     let mut l = seeded();
@@ -101,7 +103,7 @@ fn focus_moves_only_the_focused_group() {
     assert_ne!(split_off, primary, "the new pane took focus");
     let actives: Vec<TabRef> = l.groups().map(TabGroup::active_tab).collect();
 
-    l.focus(primary);
+    l.apply(DockOp::FocusPane { group: primary });
     l.validate().unwrap();
     assert_eq!(l.focused, primary, "focus moved to the pressed pane");
     assert_eq!(
@@ -110,18 +112,60 @@ fn focus_moves_only_the_focused_group() {
         "focus alone moved — no pane switched tabs"
     );
 
-    l.focus(primary);
+    l.apply(DockOp::FocusPane { group: primary });
     assert_eq!(l.focused, primary, "re-focusing the same pane is inert");
+
+    l.apply(DockOp::FocusPane {
+        group: TabGroupId::unique(),
+    });
+    assert_eq!(
+        l.focused, primary,
+        "a group that is gone leaves focus where it was"
+    );
     l.validate().unwrap();
 }
 
-/// Focusing a group that isn't in the tree is a caller bug, not a stale
-/// address to absorb: it would strand `focused` and fail validation at
-/// the next save, long after the code that fabricated it.
+/// `OpenTab` is "show me X" whole: it lands the tab in the focused group
+/// only when it isn't open already, and otherwise reuses — and focuses —
+/// whichever pane holds it. Reuse is what keeps a second click on a
+/// preview chip from opening a duplicate viewer in the wrong pane.
 #[test]
-#[should_panic(expected = "is not in the tree")]
-fn focusing_a_group_outside_the_tree_panics() {
-    DockLayout::default().focus(TabGroupId::unique());
+fn open_tab_reuses_an_existing_tab_and_focuses_its_pane() {
+    let mut l = seeded();
+    let primary = l.primary().id;
+    // Split the viewer off, so the two tabs live in different panes and
+    // "which pane gets focused" is a real question.
+    l.move_tab(
+        viewer(1),
+        DockDrop::Split {
+            group: primary,
+            side: SplitSide::Right,
+        },
+    );
+    let split_off = l.focused;
+    assert_ne!(split_off, primary);
+
+    // Already open, in the pane that is *not* focused... after focusing
+    // the primary one first.
+    l.apply(DockOp::FocusPane { group: primary });
+    l.apply(DockOp::OpenTab { tab: viewer(1) });
+    assert_eq!(
+        l.groups().flat_map(|g| g.tabs.clone()).collect::<Vec<_>>(),
+        [main_tab(), TabRef::Preferences, viewer(1)],
+        "no duplicate tab was inserted into the focused group"
+    );
+    assert_eq!(l.focused, split_off, "focus followed the tab to its pane");
+    assert_eq!(l.group(split_off).unwrap().active_tab(), viewer(1));
+
+    // Not open anywhere: it joins the focused group and becomes active.
+    l.apply(DockOp::OpenTab { tab: viewer(2) });
+    assert_eq!(
+        l.group(split_off).unwrap().tabs,
+        [viewer(1), viewer(2)],
+        "the new tab joined the focused pane"
+    );
+    assert_eq!(l.group(split_off).unwrap().active_tab(), viewer(2));
+    l.validate().unwrap();
 }
 
 #[test]

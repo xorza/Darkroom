@@ -15,12 +15,10 @@
   `pub(crate) mod internals { impl NewNodeUi {} }` — an empty impl in an
   otherwise empty gated module.
 
-- `core/edit/intent/mod.rs` and `intent/types.rs` document a `DockStep` type,
-  a `build_doc_step` fn, and a `from`/`to` snapshot diff for dock ops, none of
-  which exist; `core/document/dock/mod.rs`'s module doc repeats the same
-  `DockStep` claim. The same two doc comments also list duplicated names —
-  "`GraphIntent` / `UndoStep` / `UndoStep` / `GestureKey`" and "`commit_intent`
-  / `commit_intent`".
+- `core/edit/intent/mod.rs` and `intent/types.rs` document a `DockStep` type
+  and a `build_doc_step` fn, neither of which exists. The same two doc
+  comments also list duplicated names — "`GraphIntent` / `UndoStep` /
+  `UndoStep` / `GestureKey`" and "`commit_intent` / `commit_intent`".
 
 - Five of the eight canvas tests that drive `GraphUI` through `UiHarness`
   (`frame/geometry`, `gesture/{breaker,connection,new_node,preview_drag}`) omit

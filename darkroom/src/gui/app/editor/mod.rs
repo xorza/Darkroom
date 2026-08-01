@@ -8,23 +8,18 @@
 //!
 //! [`App`]: crate::gui::app::App
 
-use palantir::{Shortcut, Ui};
-use scenarium::NodeId;
-
 use crate::core::document::TabRef;
-use crate::core::document::dock::DockOp;
 use crate::core::document::open_document::OpenDocument;
 use crate::core::edit::action_stack::ActionStack;
 use crate::core::edit::intent::apply::commit_intent;
 use crate::core::edit::intent::sink::{Intents, Queued};
 use crate::core::edit::intent::types::{GraphIntent, Refusal, UndoStep};
 use crate::core::io::preferences::Preferences;
-use crate::gui::UiAction;
 use crate::gui::app::commands::AppCommand;
 use crate::gui::app::commands::file::FileCommand;
 use crate::gui::app::commands::run::RunCommand;
-use crate::gui::app::commands::shell::ShellCommand;
 use crate::gui::window::MainWindow;
+use palantir::{Shortcut, Ui};
 
 use crate::gui::app::ctx::AppCtx;
 
@@ -43,8 +38,8 @@ const OPEN_SHORTCUT: Shortcut = Shortcut::ctrl('O');
 const SAVE_SHORTCUT: Shortcut = Shortcut::ctrl('S');
 const SAVE_AS_SHORTCUT: Shortcut = Shortcut::ctrl_shift('S');
 const RUN_SHORTCUT: Shortcut = Shortcut::ctrl('R');
-/// ⌘Q on macOS, Ctrl+Q elsewhere. Routes through `AppCommand::Shell(ShellCommand::Quit)` →
-/// `App::request_quit`, so it prompts to save when the document is dirty
+/// ⌘Q on macOS, Ctrl+Q elsewhere. Routes through `AppCommand::Quit` →
+/// `App::guard_discard`, so it prompts to save when the document is dirty
 /// — same path as File ▸ Quit. (palantir drops winit's default macOS menu
 /// so ⌘Q reaches us instead of hard-terminating.)
 const QUIT_SHORTCUT: Shortcut = Shortcut::ctrl('Q');
@@ -86,11 +81,6 @@ pub(crate) struct Editor {
     /// Kept as a field only to reuse the allocation; not part of the
     /// observable state.
     intents: Intents,
-    /// Per-frame scratch buffer of view-state requests (activate/close tab,
-    /// open a viewer, focus a pane) raised during record. Drained each
-    /// frame; carries no cross-frame state — kept only to reuse the
-    /// allocation.
-    actions: Vec<UiAction>,
 }
 
 impl Editor {
@@ -101,7 +91,6 @@ impl Editor {
             main_window: MainWindow::default(),
             needs_relayout: false,
             intents: Intents::default(),
-            actions: Vec::new(),
         }
     }
 
@@ -185,7 +174,6 @@ impl Editor {
         preferences: &mut Preferences,
     ) -> Option<AppCommand> {
         self.intents.clear();
-        self.actions.clear();
         self.needs_relayout = false;
 
         // Settle the active tab entirely from frame-top inputs (keyboard
@@ -254,9 +242,8 @@ impl Editor {
         // last frame's; the document they resolve against is this frame's,
         // so a hit on a node the undo above removed simply finds nothing.
         self.main_window
-            .scan_navigation(ui, ctx, &open.document, &mut self.actions);
-        // Queued dock ops apply straight to the layout — drain them.
-        self.apply_view_actions(open);
+            .scan_navigation(ui, ctx, &open.document, &mut self.intents);
+        // Dock ops apply straight to the layout — drain them.
         self.drain_intents(open);
         // A tab whose node is gone can't stay open.
         open.document.reconcile_with_graph();
@@ -318,7 +305,7 @@ impl Editor {
         } else if run {
             Some(AppCommand::Run(RunCommand::Once))
         } else if quit {
-            Some(AppCommand::Shell(ShellCommand::Quit))
+            Some(AppCommand::Quit)
         } else {
             None
         }
@@ -343,30 +330,6 @@ impl Editor {
         self.intents = scratch;
     }
 
-    /// Apply the record pass's view-state requests. Dock ops queue as
-    /// [`Queued::Dock`] so they drain with everything else; `FocusPane`
-    /// writes straight through (see `DockLayout::focus`).
-    fn apply_view_actions(&mut self, open: &mut OpenDocument) {
-        for action in std::mem::take(&mut self.actions) {
-            match action {
-                UiAction::Dock(op) => self.intents.push_dock(op),
-                UiAction::FocusPane(group) => {
-                    open.document.layout.focus(group);
-                }
-                UiAction::OpenImageViewer(node_id) => self.open_image_viewer(open, node_id),
-            }
-        }
-    }
-
-    /// Open `node_id`'s image-viewer tab and focus it — one tab per node,
-    /// deduped. Mirrors [`Self::open_preferences`].
-    fn open_image_viewer(&mut self, open: &mut OpenDocument, node_id: NodeId) {
-        let group = open.document.layout.focused;
-        let tab = TabRef::ImageViewer(node_id);
-        open.document.layout.find_or_insert(tab, group);
-        self.push_activate(tab);
-    }
-
     /// Keep the viewer tabs in step with the document by dropping navigation
     /// state whose tab closed.
     fn sync_image_viewers(&mut self, open: &OpenDocument) {
@@ -375,29 +338,6 @@ impl Editor {
             .image_viewers
             .retain(|port, _| layout.all_tabs().any(|t| t == TabRef::ImageViewer(*port)));
     }
-
-    /// Queue the focus/activation half of an open.
-    fn push_activate(&mut self, tab: TabRef) {
-        self.intents.push_dock(activate_op(tab));
-    }
-
-    /// Open the [`TabRef::Preferences`] settings tab in the focused group
-    /// and focus it (reusing the existing tab wherever it lives). Adding the
-    /// tab is one half; the focus routes through a queued activation. Called
-    /// from the File ▸ Preferences menu via `App`, so it records the switch
-    /// and drains it immediately like every external edit.
-    pub(super) fn open_preferences(&mut self, open: &mut OpenDocument) {
-        let group = open.document.layout.focused;
-        open.document
-            .layout
-            .find_or_insert(TabRef::Preferences, group);
-        self.commit_batch(open, [Queued::Dock(activate_op(TabRef::Preferences))]);
-    }
-}
-
-/// The focus/activation half of opening `tab`.
-fn activate_op(tab: TabRef) -> DockOp {
-    DockOp::ActivateTab { tab }
 }
 
 #[cfg(test)]
@@ -409,7 +349,6 @@ mod tests {
     use crate::core::document::dock::DockOp;
     use crate::core::document::harness::DocFixture;
     use crate::core::edit::intent::types::GraphIntent;
-    use crate::gui::UiAction;
     use crate::gui::app::editor::harness::EditorHarness;
     use crate::gui::pane::viewer::ImageViewer;
 
@@ -472,8 +411,7 @@ mod tests {
 
         let tab = TabRef::ImageViewer(node_id);
         test.open.dirty = false;
-        test.editor.actions.push(UiAction::OpenImageViewer(node_id));
-        test.editor.apply_view_actions(&mut test.open);
+        test.editor.intents.push_dock(DockOp::OpenTab { tab });
         test.drain();
         assert!(
             test.open.document.layout.all_tabs().any(|t| t == tab),
@@ -502,8 +440,8 @@ mod tests {
         let node_id = NodeId::unique();
         let tab = TabRef::ImageViewer(node_id);
 
-        test.editor.open_image_viewer(&mut test.open, node_id);
-        test.editor.open_image_viewer(&mut test.open, node_id);
+        test.editor.intents.push_dock(DockOp::OpenTab { tab });
+        test.editor.intents.push_dock(DockOp::OpenTab { tab });
         test.drain();
         assert_eq!(
             test.open

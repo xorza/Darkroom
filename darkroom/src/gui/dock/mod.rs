@@ -6,8 +6,8 @@
 //!
 //! - [`DockUi::scan`] in the navigation phase — moves focus to the pane
 //!   the pointer pressed in, surfaces tab activate/close clicks, and
-//!   drives the drag lifecycle off last frame's responses, emitting
-//!   `UiAction`s.
+//!   drives the drag lifecycle off last frame's responses, queueing a
+//!   [`DockOp`] for each onto the frame's sink.
 //! - [`DockUi::render`] in the record — walks the split tree (splits as
 //!   palantir `Splitter`s whose ratio drags surface as
 //!   `DockOp::SetRatio`, groups as strip-over-content panes) and,
@@ -38,7 +38,6 @@ use crate::core::document::dock::{
 };
 use crate::core::document::{Document, TabRef};
 use crate::core::edit::intent::sink::Intents;
-use crate::gui::UiAction;
 use crate::gui::dock::drag::{DropTarget, PaneGeometry, TabDrag, classify_drop};
 use crate::gui::dock::strip::TabLabel;
 use crate::gui::pane::viewer;
@@ -107,18 +106,18 @@ impl DockUi {
     /// load-bearing: the navigation phase settles the new arrangement
     /// before this frame's record, so a switch — or a committed drop —
     /// draws the same frame it lands.
-    pub(crate) fn scan(&mut self, ui: &mut Ui, doc: &Document, actions: &mut Vec<UiAction>) {
+    pub(crate) fn scan(&mut self, ui: &mut Ui, doc: &Document, out: &mut Intents) {
         // Ahead of the chip pass: a read-only focus query, and one that only
         // ever moves `focused`, so it composes with an activation from the
         // same scan rather than racing it.
-        scan_focus(ui, doc, actions);
+        scan_focus(ui, doc, out);
         for tab in doc.layout.all_tabs() {
             if strip::closable(tab) && ui.response_for(strip::tab_close_wid(tab)).left.clicked() {
-                actions.push(UiAction::Dock(DockOp::CloseTab { tab }));
+                out.push_dock(DockOp::CloseTab { tab });
                 continue;
             }
             if ui.response_for(strip::tab_chip_wid(tab)).left.clicked() {
-                actions.push(UiAction::Dock(DockOp::ActivateTab { tab }));
+                out.push_dock(DockOp::ActivateTab { tab });
             }
             if self.tab_drag.is_none()
                 && ui
@@ -149,10 +148,10 @@ impl DockUi {
             .stopped()
         {
             if let Some(target) = drop_target(ui, doc) {
-                actions.push(UiAction::Dock(DockOp::MoveTab {
+                out.push_dock(DockOp::MoveTab {
                     tab,
                     to: target.drop,
-                }));
+                });
             }
             self.tab_drag = None;
         }
@@ -270,16 +269,13 @@ fn render_group<F: FnMut(&mut Ui, TabRef, &mut Intents)>(
 /// left-button-only for free. A press outside every pane (the menu bar, the
 /// status bar) focuses nothing and leaves the dock focus alone.
 ///
-/// Surfaces [`UiAction::FocusPane`], not a recorded `DockOp` — see
-/// [`DockLayout::focus`] for why this one mutation stays out of the undo
-/// record.
-fn scan_focus(ui: &Ui, doc: &Document, actions: &mut Vec<UiAction>) {
+fn scan_focus(ui: &Ui, doc: &Document, out: &mut Intents) {
     if let Some(group) = doc
         .layout
         .groups()
         .find(|g| g.id != doc.layout.focused && ui.focus_within(pane_wid(g.id)))
     {
-        actions.push(UiAction::FocusPane(group.id));
+        out.push_dock(DockOp::FocusPane { group: group.id });
     }
 }
 
