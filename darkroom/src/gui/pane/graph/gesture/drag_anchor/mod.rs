@@ -10,8 +10,8 @@ use glam::Vec2;
 use palantir::{Ui, WidgetId};
 use scenarium::NodeId;
 
-use crate::core::edit::intent::sink::Intents;
 use crate::core::edit::intent::types::GraphIntent;
+use crate::gui::requests::Requests;
 
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::pane::graph::ctx::DrawCtx;
@@ -90,7 +90,7 @@ impl GroupDrag {
     /// Runs pre-record, so the move lands in `Document` before the pass that
     /// draws the moved items: they paint at the cursor in Pass A with no
     /// relayout retry.
-    pub(crate) fn advance(&mut self, ui: &Ui, graph_ctx: GraphCtx<'_>, out: &mut Intents) -> bool {
+    pub(crate) fn advance(&mut self, ui: &Ui, graph_ctx: GraphCtx<'_>, out: &mut Requests) -> bool {
         self.drop_if_owner_gone(graph_ctx);
         // Copy the ids out and drop the borrow, so the branches below can
         // clear the slot without cloning `start_positions` — only the
@@ -116,7 +116,7 @@ impl GroupDrag {
         // Palantir reports drag deltas in the widget's pre-transform frame,
         // which is the same canvas-world space item positions live in.
         let move_selection = self.anchor.as_ref().unwrap().resolve(delta);
-        out.push(move_selection);
+        out.push_graph(move_selection);
         true
     }
 }

@@ -54,3 +54,5 @@ self.run_state.previews.reconcile(ui, &self.open.document); -merge into one call
 graphscope :from_doc -> option !
 
  pub(crate) fn push_node_removals( - remove
+
+editor - commands spearte from requests

@@ -6,6 +6,8 @@ use scenarium::{Binding, InputPort, NodeId};
 
 use crate::core::document::harness::DocFixture;
 use crate::core::edit::intent::types::GraphIntent;
+use crate::gui::app::commands::AppCommand;
+use crate::gui::app::commands::run::RunCommand;
 use crate::gui::pane::graph::harness::CanvasHarness;
 
 /// Room for three nodes in a row *and* the opened menu below them.
@@ -180,16 +182,26 @@ fn duplicate_picks_differ_by_whether_incoming_wires_survive() {
 
 /// "Run to this node" is the one pick that names the node the menu opened on
 /// rather than the selection, and the one that leaves the graph alone — it
-/// surfaces as a command instead of an intent.
+/// asks `App` to run that node and edits nothing.
 #[test]
-fn run_pick_raises_no_intent() {
+fn run_pick_names_the_opened_node_and_edits_nothing() {
     let mut h = CanvasHarness::shaping_text(DocFixture::probes(2), SURFACE);
-    let a = h.node(0);
-    h.doc_mut().main_view.selected = [a].into_iter().collect();
+    let (a, b) = (h.node(0), h.node(1));
+    // A different node selected, so "the node the menu opened on" and "the
+    // selection" name different things and the assertion can tell them apart.
+    h.doc_mut().main_view.selected = [b].into_iter().collect();
 
     let intents = pick(&mut h, a, RUN);
     assert!(
         intents.is_empty(),
         "running a node edits nothing: {intents:?}"
+    );
+    assert!(
+        matches!(
+            h.commands[..],
+            [AppCommand::Run(RunCommand::Node(node_id))] if node_id == a,
+        ),
+        "the run names the node the menu opened on, not the selection: {:?}",
+        h.commands
     );
 }

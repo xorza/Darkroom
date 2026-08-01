@@ -4,11 +4,11 @@ use scenarium::testing::graph::TestGraph;
 
 use super::*;
 use crate::core::document::harness::DocFixture;
-use crate::core::edit::intent::sink::Intents;
 use crate::gui::graph_ctx::harness::GraphCtxFixture;
 use crate::gui::pane::graph::frame::hits::CanvasHits;
 use crate::gui::pane::graph::harness::CanvasHarness;
 use crate::gui::pane::graph::node::port_row::port_circle_wid;
+use crate::gui::requests::Requests;
 
 /// Two two-in/one-out nodes wired producer → consumer — enough graph for a
 /// wire to be in flight over, and enough wiring for the snap filter to have a
@@ -36,7 +36,7 @@ fn committing_a_same_kind_pair_is_a_broken_invariant_not_a_silent_drop() {
     // it silently would show up as a wire that simply refuses to land, with
     // nothing anywhere saying why.
     let (_fixture, producer, consumer) = fixture();
-    let mut out = Intents::default();
+    let mut out = Requests::default();
     commit_connection(
         PortRef::input(consumer, 0),
         PortRef::input(producer, 0),
@@ -57,7 +57,7 @@ fn prepass_with_wire_from(fixture: &mut GraphCtxFixture, start: PortRef) -> Opti
         drag: GlyphDrag::new(start),
         mode: DragMode::Floating,
     });
-    let mut out = Intents::default();
+    let mut out = Requests::default();
     // The canvas state a context carries beside the pane, both empty: a
     // fixture records nothing, so there are no port centers to cache and no
     // responses to sweep. No gesture latched and no Esc either — these tests

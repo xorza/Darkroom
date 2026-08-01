@@ -7,7 +7,6 @@ pub(crate) mod preview_row;
 mod value_editor;
 
 use crate::core::document::PortRef;
-use crate::core::edit::intent::sink::Intents;
 use crate::core::edit::intent::types::GraphIntent;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::pane::graph::ctx::DrawCtx;
@@ -18,6 +17,7 @@ use crate::gui::pane::graph::node::ctx::NodeCtx;
 use crate::gui::pane::graph::node::header::{header, status_row, subscription_pin};
 use crate::gui::pane::graph::node::memory_row::memory_row;
 use crate::gui::pane::graph::node::port_row::ports_row;
+use crate::gui::requests::Requests;
 use crate::gui::state::run_state::ExecStatus;
 use crate::gui::theme::Theme;
 use glam::Vec2;
@@ -76,7 +76,7 @@ impl NodeUI {
         ui: &mut Ui,
         dcx: DrawCtx<'_>,
         probe: &mut BreakerProbe<'_>,
-        out: &mut Intents,
+        out: &mut Requests,
     ) {
         // Paint in the context's node order (the view's `item_placements`) —
         // later draws sit on top, so the last item is frontmost. The order is
@@ -121,7 +121,7 @@ impl NodeUI {
         ui: &mut Ui,
         ncx: NodeCtx<'_>,
         probe: &mut BreakerProbe<'_>,
-        out: &mut Intents,
+        out: &mut Requests,
     ) {
         let (theme, node) = (ncx.theme(), ncx.node());
 
@@ -245,7 +245,7 @@ impl NodeUI {
     /// from these intents (notably drag-driven `MoveSelection`) lands in
     /// `Document` before recording — Pass A's arrange already reflects the
     /// cursor; no Pass B relayout retry.
-    pub(super) fn prepass(&mut self, ui: &Ui, graph_ctx: GraphCtx<'_>, out: &mut Intents) {
+    pub(super) fn prepass(&mut self, ui: &Ui, graph_ctx: GraphCtx<'_>, out: &mut Requests) {
         self.drag.advance(ui, graph_ctx, out);
     }
 }
@@ -368,11 +368,11 @@ pub(super) fn set_input(port: PortRef, to: impl Into<Option<Binding>>) -> GraphI
 /// deselected shouldn't jump forward. Shared by the node body, header
 /// title, and port labels so clicking any of them behaves like clicking the
 /// body.
-pub(super) fn click_intents(shift: bool, graph_ctx: GraphCtx<'_>, key: NodeId, out: &mut Intents) {
-    out.push(select_intent(shift, graph_ctx, key));
+pub(super) fn click_intents(shift: bool, graph_ctx: GraphCtx<'_>, key: NodeId, out: &mut Requests) {
+    out.push_graph(select_intent(shift, graph_ctx, key));
     let deselecting = shift && graph_ctx.is_selected(key);
     if !deselecting {
-        out.push(GraphIntent::Raise { key });
+        out.push_graph(GraphIntent::Raise { key });
     }
 }
 
@@ -410,14 +410,14 @@ mod tests {
     }
 
     fn click(shift: bool, scene: &mut GraphCtxFixture, id: NodeId) -> Vec<GraphIntent> {
-        use crate::core::edit::intent::sink::Queued;
+        use crate::gui::requests::Request;
 
-        let mut out = Intents::default();
+        let mut out = Requests::default();
         click_intents(shift, scene.graph_ctx(), id, &mut out);
         out.drain()
-            .map(|queued| match queued {
-                Queued::Graph(intent) => intent,
-                Queued::Dock(intent) => panic!("a node click raises nothing global: {intent:?}"),
+            .map(|request| match request {
+                Request::Graph(intent) => intent,
+                other => panic!("a node click raises nothing but graph edits: {other:?}"),
             })
             .collect()
     }

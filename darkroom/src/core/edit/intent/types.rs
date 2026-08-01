@@ -65,11 +65,10 @@ pub(crate) enum Refusal {
 /// the previous Y at commit time via
 /// [`build_step`](crate::core::edit::intent::build::build_step).
 ///
-/// Every variant here edits the graph, and travels the frame's queue as
-/// [`Queued::Graph`](crate::core::edit::intent::sink::Queued). A mutation of
-/// the layout instead of the graph is a
-/// [`DockOp`](crate::core::document::dock::DockOp), queued as
-/// [`Queued::Dock`](crate::core::edit::intent::sink::Queued).
+/// Every variant here edits the graph, and travels the frame's queue as its
+/// `Graph` tier. A mutation of the layout instead of the graph is a
+/// [`DockOp`](crate::core::document::dock::DockOp), which travels the same
+/// queue in the `View` tier.
 ///
 /// **Adding a variant** — touch these spots:
 ///   1. add the variant here on `GraphIntent`,

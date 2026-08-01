@@ -178,7 +178,7 @@ pub(crate) enum DockDrop {
 /// One dock-layout mutation, executed by [`DockLayout::apply`]. The
 /// single op vocabulary the whole pipeline speaks: the dock UI (or a
 /// menu item, or a preview card's chip) constructs one, the frame's
-/// queue transports it as `Queued::Dock`, and `apply` runs it.
+/// queue transports it as `Request::View`, and `apply` runs it.
 ///
 /// **Every op tolerates a stale address.** One is built from a response
 /// of the frame before and applied a phase later, by which time the tab,

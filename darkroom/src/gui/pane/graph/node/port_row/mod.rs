@@ -22,7 +22,6 @@ use scenarium::NodeId;
 use scenarium::{DataType, FsPathMode, Func};
 
 use crate::core::document::{PortKind, PortRef};
-use crate::core::edit::intent::sink::Intents;
 use crate::core::edit::intent::types::GraphIntent;
 use crate::core::preview;
 use crate::gui::EventRef;
@@ -33,6 +32,7 @@ use crate::gui::pane::graph::node::port_color::{event_color, port_color};
 use crate::gui::pane::graph::node::port_row::glyph::{circle_frame, event_glyph, port_diameter};
 use crate::gui::pane::graph::node::value_editor;
 use crate::gui::pane::graph::node::{port_wid, set_input};
+use crate::gui::requests::Requests;
 use crate::gui::state::run_state::ExecStatus;
 use crate::gui::theme::Theme;
 
@@ -65,7 +65,7 @@ pub(super) fn ports_row(
     ui: &mut Ui,
     ncx: NodeCtx<'_>,
     row_tracks: &mut Vec<Track>,
-    out: &mut Intents,
+    out: &mut Requests,
 ) {
     let (theme, node) = (ncx.theme(), ncx.node());
     // Events list under the outputs in the same column, so the output side
@@ -142,14 +142,14 @@ fn port_label(ui: &mut Ui, theme: &Theme, name: &str, tip: &str) {
     }
 }
 
-fn input_cells(ui: &mut Ui, ncx: NodeCtx<'_>, out: &mut Intents) {
+fn input_cells(ui: &mut Ui, ncx: NodeCtx<'_>, out: &mut Requests) {
     for input in ncx.node().inputs() {
         input_label_cell(ui, ncx, input, out);
         value_cell(ui, ncx, input, out);
     }
 }
 
-fn output_cells(ui: &mut Ui, ncx: NodeCtx<'_>, out: &mut Intents) {
+fn output_cells(ui: &mut Ui, ncx: NodeCtx<'_>, out: &mut Requests) {
     let node = ncx.node();
     let output_count = node.port_count(PortKind::Output);
     for output in node.outputs() {
@@ -199,7 +199,7 @@ fn open_port_context_menu(ui: &mut Ui, menu_id: WidgetId, cell_secondary: bool, 
 /// menu (anchored here, so right-clicking the circle or label opens it).
 /// The circle's `WidgetId` is the deterministic `port_circle_wid(port)`, so
 /// `CanvasGeometry`/snap/draw reconstruct it from domain coords.
-fn input_label_cell(ui: &mut Ui, ncx: NodeCtx<'_>, input: InputScope<'_>, out: &mut Intents) {
+fn input_label_cell(ui: &mut Ui, ncx: NodeCtx<'_>, input: InputScope<'_>, out: &mut Requests) {
     let (theme, node) = (ncx.theme(), ncx.node());
     let port = input.port_ref();
     let tip = tip_for(ncx, input.description(), input.ty());
@@ -271,7 +271,7 @@ fn input_label_cell(ui: &mut Ui, ncx: NodeCtx<'_>, input: InputScope<'_>, out: &
                 .clicked()
                 && let Some(value) = default
             {
-                out.push(set_input(port, Binding::Const(value)));
+                out.push_graph(set_input(port, Binding::Const(value)));
             }
             if MenuItem::new("Clear binding")
                 .enabled(input.binding().is_some())
@@ -279,14 +279,14 @@ fn input_label_cell(ui: &mut Ui, ncx: NodeCtx<'_>, input: InputScope<'_>, out: &
                 .left
                 .clicked()
             {
-                out.push(set_input(port, None));
+                out.push_graph(set_input(port, None));
             }
         });
 }
 
 /// Column 1: the inline const editor for an input bound to a `Const`. A
 /// hug-sized column, so every editor starts at the same x.
-fn value_cell(ui: &mut Ui, ncx: NodeCtx<'_>, input: InputScope<'_>, out: &mut Intents) {
+fn value_cell(ui: &mut Ui, ncx: NodeCtx<'_>, input: InputScope<'_>, out: &mut Requests) {
     // The one owner of the "only Const bindings get an inline editor"
     // filter — wired and unbound inputs render no value cell.
     let Some(Binding::Const(value)) = input.binding() else {
@@ -316,7 +316,7 @@ fn value_cell(ui: &mut Ui, ncx: NodeCtx<'_>, input: InputScope<'_>, out: &mut In
             )
         });
     if let Some(new_value) = edited.inner {
-        out.push(set_input(port, Binding::Const(new_value)));
+        out.push_graph(set_input(port, Binding::Const(new_value)));
     }
 }
 
@@ -324,7 +324,7 @@ fn value_cell(ui: &mut Ui, ncx: NodeCtx<'_>, input: InputScope<'_>, out: &mut In
 /// pins it to the node's right edge); the circle overhangs that edge. (A dragged
 /// satellite can end up anywhere on the canvas, not just overhanging this
 /// node).
-fn output_cell(ui: &mut Ui, ncx: NodeCtx<'_>, output: OutputScope<'_>, out: &mut Intents) {
+fn output_cell(ui: &mut Ui, ncx: NodeCtx<'_>, output: OutputScope<'_>, out: &mut Requests) {
     let theme = ncx.theme();
     let port = output.port_ref();
     // Resolved once for the fill and the tooltip: a wildcard output follows
@@ -387,7 +387,7 @@ fn add_preview_item(
     popup: &PopupHandle,
     ncx: NodeCtx<'_>,
     port: PortRef,
-    out: &mut Intents,
+    out: &mut Requests,
 ) {
     let Some(func) = preview::registered(ncx.graph_ctx().library()) else {
         return;
@@ -402,7 +402,7 @@ fn add_preview_item(
         .ports
         .center(port)
         .map_or(Vec2::ZERO, |center| center + PREVIEW_SPAWN_OFFSET);
-    out.extend(add_preview_intents(func, port, pos, NodeId::unique()));
+    out.extend_graph(add_preview_intents(func, port, pos, NodeId::unique()));
 }
 
 /// The two intents that spawn a preview already reading `port`. Emitted

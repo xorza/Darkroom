@@ -22,7 +22,6 @@ use scenarium::NodeId;
 use std::collections::BTreeSet;
 
 use crate::core::document::{Document, Viewport};
-use crate::core::edit::intent::sink::Intents;
 use crate::core::edit::intent::types::GraphIntent;
 use crate::gui::app::commands::AppCommand;
 use crate::gui::app::commands::edit::EditCommand;
@@ -46,6 +45,7 @@ use crate::gui::pane::graph::gesture::{connection, pan_zoom, shortcuts, subscrip
 use crate::gui::pane::graph::node::NodeUI;
 use crate::gui::pane::graph::paint::inspector::Inspectors;
 use crate::gui::pane::graph::paint::wire::{WireEmphasis, WirePass};
+use crate::gui::requests::Requests;
 
 /// Canvas-level UI state, shared by **every** graph pane on screen: the
 /// port-widget-id cache, the `NodeUI` that renders graph nodes, the
@@ -153,13 +153,8 @@ impl GraphUI {
     /// corner. Called from the dock's content closure right after
     /// [`Self::draw`], so it hit-tests above the canvas and a click on it
     /// never starts a pan.
-    pub(crate) fn draw_toolbar(
-        &self,
-        ui: &mut Ui,
-        graph_ctx: GraphCtx<'_>,
-        out: &mut Intents,
-    ) -> Option<AppCommand> {
-        toolbar::show(ui, self.canvas_ctx(graph_ctx), out)
+    pub(crate) fn draw_toolbar(&self, ui: &mut Ui, graph_ctx: GraphCtx<'_>, out: &mut Requests) {
+        toolbar::show(ui, self.canvas_ctx(graph_ctx), out);
     }
 
     /// Sweep last frame's node responses into [`CanvasHits`]. Does nothing
@@ -238,7 +233,7 @@ impl GraphUI {
     /// the bare-canvas gesture classification and pan/zoom, which read one
     /// pane's outer-canvas response — loops the visible panes; everything
     /// else is keyed by document-unique ids and sweeps them all at once.
-    pub(crate) fn prepass(&mut self, ui: &mut Ui, graph_ctx: GraphCtx<'_>, out: &mut Intents) {
+    pub(crate) fn prepass(&mut self, ui: &mut Ui, graph_ctx: GraphCtx<'_>, out: &mut Requests) {
         let Self {
             geometry,
             hits,
@@ -303,25 +298,17 @@ impl GraphUI {
     /// content closure, so everything here is scoped to `graph_ctx` — the
     /// canvas widget ids included.
     ///
-    /// Returns the [`AppCommand`] this pane contributes, if any. Which
-    /// command *wins the frame* is not decided here: the caller arbitrates
-    /// every tab kind's answer through one `claim`, so the canvas states its
-    /// own precedence and nothing else.
-    pub(crate) fn draw(
-        &mut self,
-        ui: &mut Ui,
-        graph_ctx: GraphCtx<'_>,
-        out: &mut Intents,
-    ) -> Option<AppCommand> {
+    /// Anything the pane asks for — graph edits, and the commands a chip or a
+    /// menu pick means — lands on `out` in the order it was raised.
+    pub(crate) fn draw(&mut self, ui: &mut Ui, graph_ctx: GraphCtx<'_>, out: &mut Requests) {
         // Pan/zoom was already folded into the document in `prepass`, and the
         // contexts built below read it straight off there, so the transform
         // sees the up-to-date viewport with nothing to re-sync. The gesture
         // and the Esc were resolved in `prepass` too, and both halves below
         // compose the same context off them — so the two passes cannot
         // disagree about the frame they are drawing.
-        let command = self.resolve_gestures(ui, graph_ctx, out);
+        self.resolve_gestures(ui, graph_ctx, out);
         self.record_canvas(ui, graph_ctx, out);
-        command
     }
 
     /// This frame's canvas context over `graph_ctx`, off the state
@@ -343,15 +330,9 @@ impl GraphUI {
     }
 
     /// The record pass's gesture half: run each controller's record-phase
-    /// `apply`, and settle which [`AppCommand`] (if any) this pane
-    /// contributes. Everything here reads last frame's responses and pushes
-    /// intents; nothing draws.
-    fn resolve_gestures(
-        &mut self,
-        ui: &mut Ui,
-        graph_ctx: GraphCtx<'_>,
-        out: &mut Intents,
-    ) -> Option<AppCommand> {
+    /// `apply`. Everything here reads last frame's responses and raises
+    /// requests; nothing draws.
+    fn resolve_gestures(&mut self, ui: &mut Ui, graph_ctx: GraphCtx<'_>, out: &mut Requests) {
         let Self {
             geometry,
             hits,
@@ -368,7 +349,7 @@ impl GraphUI {
         // the user clicks the empty canvas. A *drag* on bare canvas is
         // the rubber band (classified as `Select`), not a `Deselect`.
         if cx.gesture() == Some(CanvasGesture::Deselect) && !cx.graph_ctx().selected().is_empty() {
-            out.push(GraphIntent::SetSelection {
+            out.push_graph(GraphIntent::SetSelection {
                 to: BTreeSet::new(),
             });
         }
@@ -395,26 +376,19 @@ impl GraphUI {
         gestures
             .new_node_ui
             .apply(ui, popup_cx, pending_connection, out);
-        // This pane's own precedence, in the order written: first source to
-        // answer wins, and nothing below can overwrite a decision above.
-        //
-        // Both context menus are polled whatever comes of it — their popups
-        // own a lifecycle that has to record every frame, and a pick's other
-        // effects (the selection swap on open, the duplicate / removal
-        // intents) land through `out` rather than through the return. The chip scans are
-        // pure reads over last frame's responses, so `or_else` short-circuits
-        // past them once a menu has answered.
-        gestures
-            .node_menu
-            .apply(ui, cx, out)
-            .or_else(|| emit_chip_command(cx))
+        // The menu records every frame whatever comes of it — its popup owns a
+        // lifecycle that depends on it — and everything a pick means goes onto
+        // `out`, so there is no precedence to settle here: a frame in which
+        // both a menu pick and a chip click landed raises both.
+        gestures.node_menu.apply(ui, cx, out);
+        emit_chip_commands(cx, out);
     }
 
     /// The record pass's drawing half: the outer (pan-capture) canvas, the
     /// dotted backdrop, and — under the inner canvas's pan/zoom transform —
     /// the wires, node bodies, inspection panels, and in-flight
     /// gesture previews.
-    fn record_canvas(&mut self, ui: &mut Ui, graph_ctx: GraphCtx<'_>, out: &mut Intents) {
+    fn record_canvas(&mut self, ui: &mut Ui, graph_ctx: GraphCtx<'_>, out: &mut Requests) {
         let Self {
             visible: _,
             background,
@@ -626,34 +600,30 @@ fn classify_canvas_gesture(ui: &mut Ui) -> Option<CanvasGesture> {
     None
 }
 
-/// The one `AppCommand` a chip click in the recorded tree can produce this
-/// frame: an `FsPath` input's pick button, a node header's play or
-/// or cache-eviction chip. First hit in that order wins.
+/// Queue the [`AppCommand`] behind each chip click in the recorded tree: an
+/// `FsPath` input's pick button, a node header's play or cache-eviction chip.
 ///
-/// Each source surfaces only a domain fact — which node to run, which port
-/// to pick a path for — and naming `AppCommand` is the canvas's job, since
-/// it owns the command channel. So the translation lives here rather than
-/// in `node`. All three are pure reads over [`CanvasHits`], which is why
-/// [`GraphUI::draw`] can skip the whole group once something else has
-/// claimed the frame.
-fn emit_chip_command(cx: CanvasCtx<'_>) -> Option<AppCommand> {
+/// Each source surfaces only a domain fact — which node to run, which port to
+/// pick a path for — and naming `AppCommand` is the canvas's job, since it is
+/// what knows these are app-tier. So the translation lives here rather than in
+/// `node`. All three are pure reads over [`CanvasHits`].
+fn emit_chip_commands(cx: CanvasCtx<'_>, out: &mut Requests) {
     let hits = cx.hits();
     // A hit is keyed by a document-unique `NodeId`, so it can belong to a
     // neighbouring pane — or to a node this pane no longer holds, since the
     // sweep ran against last frame's projection. Both fall out here.
     let in_scope = |id: NodeId| cx.graph_ctx().contains(id).then_some(id);
     if let Some(req) = emit_path_picks(cx) {
-        return Some(AppCommand::Edit(EditCommand::PickInputPath(req)));
+        out.push_app(AppCommand::Edit(EditCommand::PickInputPath(req)));
     }
     // A header play-chip click runs that node's cone — the same command the
     // context menu's "Run to this node" resolves to.
     if let Some(node_id) = hits.chip(Chip::Play).and_then(in_scope) {
-        return Some(AppCommand::Run(RunCommand::Node(node_id)));
+        out.push_app(AppCommand::Run(RunCommand::Node(node_id)));
     }
     if let Some(node_id) = hits.chip(Chip::EvictCache).and_then(in_scope) {
-        return Some(AppCommand::Run(RunCommand::EvictCache(node_id)));
+        out.push_app(AppCommand::Run(RunCommand::EvictCache(node_id)));
     }
-    None
 }
 
 /// Outer-canvas-local coords → inner-canvas pre-transform world

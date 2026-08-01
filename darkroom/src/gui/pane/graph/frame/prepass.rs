@@ -18,15 +18,15 @@ use scenarium::InputPort;
 use scenarium::{DataType, FsPathConfig, StaticValue};
 
 use crate::core::document::PortKind;
-use crate::core::edit::intent::sink::Intents;
 use crate::gui::pane::graph::ctx::CanvasCtx;
 use crate::gui::pane::graph::node::set_input;
+use crate::gui::requests::Requests;
 
 /// A click on an `FsPath` input's inline pick button, surfaced for the
-/// caller to translate into a file-dialog command. The node UI
-/// produces the domain request (node + port + picker config) and stays
-/// unaware of the app-level `AppCommand` enum — the canvas, which already
-/// owns the command channel, does the translation.
+/// caller to translate into a file-dialog command. The node UI produces the
+/// domain fact (node + port + picker config) and stays unaware of the
+/// app-level `AppCommand` enum; the canvas names the tier, since knowing that
+/// a file dialog can only run after the pass is its job, not a widget's.
 #[derive(Clone, Debug)]
 pub(crate) struct PathPickRequest {
     pub(crate) port: InputPort,
@@ -72,7 +72,7 @@ pub(crate) fn emit_path_picks(cx: CanvasCtx<'_>) -> Option<PathPickRequest> {
 /// a `Const` input's inline editor resizes the node — doing it before Pass A
 /// lets the node arrange at its settled size and the wires re-anchor the same
 /// frame, instead of floating until the relayout pass.
-pub(crate) fn emit_port_dblclicks(cx: CanvasCtx<'_>, out: &mut Intents) {
+pub(crate) fn emit_port_dblclicks(cx: CanvasCtx<'_>, out: &mut Requests) {
     let Some(port) = cx.hits().double_clicked_port() else {
         return;
     };
@@ -92,18 +92,18 @@ pub(crate) fn emit_port_dblclicks(cx: CanvasCtx<'_>, out: &mut Intents) {
                 // renames).
                 None => {
                     if let Some(default) = input.default() {
-                        out.push(set_input(port, Binding::Const(default)));
+                        out.push_graph(set_input(port, Binding::Const(default)));
                     }
                 }
                 // Already bound → clear it.
-                Some(_) => out.push(set_input(port, None)),
+                Some(_) => out.push_graph(set_input(port, None)),
             }
         }
         // An output may feed many inputs — clear each consumer.
         PortKind::Output => {
             for (consumer, producer) in cx.graph_ctx().connections() {
                 if producer.node_id == port.node_id && producer.port_idx == port.port_idx {
-                    out.push(set_input(consumer.into(), None));
+                    out.push_graph(set_input(consumer.into(), None));
                 }
             }
         }

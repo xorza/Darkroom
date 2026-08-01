@@ -3,6 +3,7 @@ pub(crate) mod dialogs;
 pub(crate) mod dock;
 pub(crate) mod graph_ctx;
 pub(crate) mod pane;
+pub(crate) mod requests;
 pub(crate) mod state;
 pub(crate) mod theme;
 pub(crate) mod widgets;

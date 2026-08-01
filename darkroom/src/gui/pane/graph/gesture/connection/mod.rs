@@ -4,7 +4,6 @@ use scenarium::DataType;
 use scenarium::{Binding, InputPort};
 
 use crate::core::document::{PortKind, PortRef};
-use crate::core::edit::intent::sink::Intents;
 use crate::core::edit::intent::types::GraphIntent;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::pane::graph::ctx::CanvasCtx;
@@ -14,6 +13,7 @@ use crate::gui::pane::graph::node::port_color::port_color;
 use crate::gui::pane::graph::node::set_input;
 use crate::gui::pane::graph::paint::wire::{GlyphDrag, Wire, WirePass, WireTint};
 use crate::gui::pane::graph::{outer_canvas_widget_id, preview_drag_modifier};
+use crate::gui::requests::Requests;
 use crate::gui::theme::Theme;
 
 /// Owns the in-flight new-connection wire — a held drag or a free-floating
@@ -83,7 +83,7 @@ impl ConnectionUI {
         ui: &mut Ui,
         cx: CanvasCtx<'_>,
         resume: Option<PortRef>,
-        out: &mut Intents,
+        out: &mut Requests,
     ) {
         let (graph_ctx, geometry) = (cx.graph_ctx(), cx.geometry());
         self.ended_on_secondary = false;
@@ -168,7 +168,7 @@ impl ConnectionUI {
         graph_ctx: GraphCtx<'_>,
         geometry: &CanvasGeometry,
         drag: GlyphDrag<PortRef, PortRef>,
-        out: &mut Intents,
+        out: &mut Requests,
     ) {
         if drag.held(&geometry.ports) {
             return;
@@ -176,7 +176,7 @@ impl ConnectionUI {
         if let Some(end) = drag.snap {
             commit_connection(drag.from, end, out);
         } else if let Some(intent) = const_drop(ui, graph_ctx, geometry, drag.from) {
-            out.push(intent);
+            out.push_graph(intent);
         } else if dropped_on_empty_canvas(ui, geometry) {
             // Open the palette and remember the source; the wire resumes
             // floating once a node is picked.
@@ -195,7 +195,7 @@ impl ConnectionUI {
         &mut self,
         ui: &mut Ui,
         drag: GlyphDrag<PortRef, PortRef>,
-        out: &mut Intents,
+        out: &mut Requests,
     ) {
         // `MOVE` wakes a repaint on every cursor move so the wire tracks the
         // pointer (no button is held, so there's no drag-capture keeping
@@ -471,7 +471,7 @@ fn port_data_type(graph_ctx: GraphCtx<'_>, port: PortRef) -> Option<DataType> {
 /// `Error::CycleDetected`). Re-typing a wildcard output (passthrough / reroute)
 /// severs nothing downstream: a now-mismatched wire is tolerated, drawn in
 /// the warning color, and lowers as unbound.
-fn commit_connection(start: PortRef, end: PortRef, out: &mut Intents) {
+fn commit_connection(start: PortRef, end: PortRef, out: &mut Requests) {
     let (input, output) = match (start.kind, end.kind) {
         (PortKind::Input, PortKind::Output) => (start, end),
         (PortKind::Output, PortKind::Input) => (end, start),
@@ -482,7 +482,7 @@ fn commit_connection(start: PortRef, end: PortRef, out: &mut Intents) {
         // that just doesn't land.
         (a, b) => unreachable!("a wire committed a {a:?} → {b:?} pair"),
     };
-    out.push(GraphIntent::SetInput {
+    out.push_graph(GraphIntent::SetInput {
         input: InputPort::new(input.node_id, input.port_idx),
         to: Some(Binding::bind(output.node_id, output.port_idx)),
     });

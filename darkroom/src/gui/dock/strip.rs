@@ -14,7 +14,7 @@ use palantir::{
 
 use crate::core::document::TabRef;
 use crate::core::document::dock::{DockDrop, DockOp, SplitSide, TabGroup, TabGroupId};
-use crate::core::edit::intent::sink::Intents;
+use crate::gui::requests::Requests;
 use crate::gui::theme::Theme;
 use crate::gui::widgets::support::{colored_text, muted_text};
 
@@ -140,7 +140,7 @@ struct StripCtx<'a> {
     theme: &'a Theme,
     /// The group a split-menu pick splits.
     group: TabGroupId,
-    out: &'a mut Intents,
+    out: &'a mut Requests,
 }
 
 /// Draw one group's strip. Tab activate / close clicks are handled in
@@ -151,7 +151,7 @@ pub(super) fn show(
     theme: &Theme,
     group: &TabGroup,
     labels: &[TabLabel],
-    out: &mut Intents,
+    out: &mut Requests,
 ) {
     let mut strip = StripCtx {
         theme,
@@ -311,7 +311,7 @@ fn split_menu(ui: &mut Ui, s: &mut StripCtx<'_>, tab: TabRef) {
                 side = Some(SplitSide::Bottom);
             }
             if let Some(side) = side {
-                s.out.push_dock(DockOp::MoveTab {
+                s.out.push_view(DockOp::MoveTab {
                     tab,
                     to: DockDrop::Split {
                         group: s.group,

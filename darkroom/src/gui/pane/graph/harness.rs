@@ -14,12 +14,13 @@ use scenarium::NodeId;
 
 use crate::core::document::harness::DocFixture;
 use crate::core::document::{Document, PortRef};
-use crate::core::edit::intent::sink::{Intents, Queued};
 use crate::core::edit::intent::types::GraphIntent;
+use crate::gui::app::commands::AppCommand;
 use crate::gui::graph_ctx::harness::GraphCtxFixture;
 use crate::gui::pane::graph::GraphUI;
 use crate::gui::pane::graph::node::node_widget_id;
 use crate::gui::pane::graph::node::port_row::port_circle_wid;
+use crate::gui::requests::{Request, Requests};
 
 /// Surface every canvas test records at unless it is about size. Wide enough
 /// that [`DocFixture`]'s row of nodes lands on screen uncropped.
@@ -35,6 +36,10 @@ pub(crate) struct CanvasHarness {
     /// `pub(crate)` so a test can edit the document between frames, the way an
     /// undo edits it under a running gesture.
     pub(crate) ctx: GraphCtxFixture,
+    /// The app commands the last [`Self::frame`] raised. Kept beside the
+    /// intents that call returns rather than folded into them: the canvas
+    /// raises both tiers, and a test is almost always about one of them.
+    pub(crate) commands: Vec<AppCommand>,
 }
 
 impl CanvasHarness {
@@ -64,18 +69,33 @@ impl CanvasHarness {
             ui,
             graph_ui: GraphUI::default(),
             ctx: GraphCtxFixture::over(fixture),
+            commands: Vec::new(),
         }
     }
 
     /// One canvas frame, in the order `MainWindow` runs its phases, returning
-    /// the graph intents it raised.
+    /// the graph intents it raised. App commands land in [`Self::commands`].
     ///
-    /// Panics if a canvas widget raised a dock intent: none of them can reach
-    /// the dock, so one that did is our own bug rather than a case to assert
-    /// on.
+    /// Panics if a canvas widget raised a view op: none of them can reach the
+    /// dock, so one that did is our own bug rather than a case to assert on.
     pub(crate) fn frame(&mut self) -> Vec<GraphIntent> {
-        let Self { ui, graph_ui, ctx } = self;
-        ui.frame_value(|recorder: &mut Ui| Self::record(graph_ui, ctx, recorder))
+        let Self {
+            ui,
+            graph_ui,
+            ctx,
+            commands,
+        } = self;
+        let requests = ui.frame_value(|recorder: &mut Ui| Self::record(graph_ui, ctx, recorder));
+        commands.clear();
+        let mut intents = Vec::new();
+        for request in requests {
+            match request {
+                Request::Graph(intent) => intents.push(intent),
+                Request::App(command) => commands.push(command),
+                Request::View(op) => panic!("a canvas widget raised {op:?}"),
+            }
+        }
+        intents
     }
 
     /// `n` frames whose intents are discarded. Two is the minimum before
@@ -90,7 +110,9 @@ impl CanvasHarness {
     /// Let the double-click window lapse, recording throughout, so the next
     /// press opens a fresh click rather than extending the last one.
     pub(crate) fn advance_past_double_click(&mut self) {
-        let Self { ui, graph_ui, ctx } = self;
+        let Self {
+            ui, graph_ui, ctx, ..
+        } = self;
         ui.advance_past_double_click(|recorder: &mut Ui| {
             Self::record(graph_ui, ctx, recorder);
         });
@@ -101,24 +123,18 @@ impl CanvasHarness {
         graph_ui: &mut GraphUI,
         ctx: &mut GraphCtxFixture,
         recorder: &mut Ui,
-    ) -> Vec<GraphIntent> {
-        let mut intents = Intents::default();
+    ) -> Vec<Request> {
+        let mut out = Requests::default();
         let graph_ctx = ctx.graph_ctx();
         graph_ui.scan_hits(recorder, Some(graph_ctx));
-        graph_ui.prepass(recorder, graph_ctx, &mut intents);
+        graph_ui.prepass(recorder, graph_ctx, &mut out);
         Panel::vstack()
             .id_salt("pane")
             .size((Sizing::FILL, Sizing::FILL))
             .show(recorder, |ui| {
-                graph_ui.draw(ui, graph_ctx, &mut intents);
+                graph_ui.draw(ui, graph_ctx, &mut out);
             });
-        intents
-            .drain()
-            .map(|item| match item {
-                Queued::Graph(intent) => intent,
-                Queued::Dock(intent) => panic!("a canvas widget raised {intent:?}"),
-            })
-            .collect()
+        out.drain().collect()
     }
 
     pub(crate) fn doc(&self) -> &Document {

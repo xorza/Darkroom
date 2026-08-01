@@ -3,12 +3,12 @@ use std::collections::BTreeSet;
 use palantir::{MenuItem, Ui};
 
 use crate::core::edit::intent::duplicate::build_duplicate_intent;
-use crate::core::edit::intent::sink::Intents;
 use crate::core::edit::intent::types::GraphIntent;
 use crate::gui::app::commands::AppCommand;
 use crate::gui::app::commands::run::RunCommand;
 use crate::gui::pane::graph::ctx::CanvasCtx;
 use crate::gui::pane::graph::paint::anchored_menu::NodeContextMenu;
+use crate::gui::requests::Requests;
 
 /// Right-click on a node body → a small popup with actions on the node.
 /// The trigger scan, the per-open node latch, and the popup lifecycle are all
@@ -35,15 +35,9 @@ enum MenuChoice {
 }
 
 impl NodeMenuUi {
-    /// Returns the command a pick resolves to, if any — the canvas decides
-    /// whether it wins the frame. A structural pick lands on `out` as
-    /// ordinary intents instead, and yields `None`.
-    pub(crate) fn apply(
-        &mut self,
-        ui: &mut Ui,
-        cx: CanvasCtx<'_>,
-        out: &mut Intents,
-    ) -> Option<AppCommand> {
+    /// Record the menu and resolve this frame's pick onto `out` — a run as
+    /// the [`AppCommand`] it means, the structural picks as ordinary intents.
+    pub(crate) fn apply(&mut self, ui: &mut Ui, cx: CanvasCtx<'_>, out: &mut Requests) {
         let graph_ctx = cx.graph_ctx();
         // Boundary interface nodes carry no structural identity to
         // duplicate/remove — the sweep applies that guard, so a boundary
@@ -55,7 +49,7 @@ impl NodeMenuUi {
         // record at least once before an item can be clicked — so this
         // selection is committed by the time the arms below read it back.
         if let Some(node_id) = opened.filter(|&id| !graph_ctx.is_selected(id)) {
-            out.push(GraphIntent::SetSelection {
+            out.push_graph(GraphIntent::SetSelection {
                 to: BTreeSet::from([node_id]),
             });
         }
@@ -90,21 +84,20 @@ impl NodeMenuUi {
                 chosen = Some(MenuChoice::Remove);
             }
             chosen
-        })?;
+        });
+        let Some(pick) = pick else {
+            return;
+        };
         // `NodeContextMenu::show` answers `Some` only for the pane that opened
         // the menu, so everything below is scoped to that pane.
         match pick.choice {
-            MenuChoice::Run => Some(AppCommand::Run(RunCommand::Node(pick.node_id))),
+            MenuChoice::Run => out.push_app(AppCommand::Run(RunCommand::Node(pick.node_id))),
             MenuChoice::Duplicate { incoming } => {
-                out.extend(build_duplicate_intent(graph_ctx.document(), incoming));
-                None
+                out.extend_graph(build_duplicate_intent(graph_ctx.document(), incoming));
             }
             // One intent per member, batched into a single undo entry by the
             // drain — the Delete chord's path exactly.
-            MenuChoice::Remove => {
-                out.push_node_removals(graph_ctx.selected().iter().copied());
-                None
-            }
+            MenuChoice::Remove => out.push_node_removals(graph_ctx.selected().iter().copied()),
         }
     }
 }

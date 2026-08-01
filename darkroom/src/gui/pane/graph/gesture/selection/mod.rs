@@ -4,11 +4,11 @@ use std::collections::BTreeSet;
 use glam::Vec2;
 use palantir::{Rect, Shape, Stroke, Ui};
 
-use crate::core::edit::intent::sink::Intents;
 use crate::core::edit::intent::types::GraphIntent;
 use crate::gui::pane::graph::ctx::CanvasCtx;
 use crate::gui::pane::graph::gesture::slot::GestureSlot;
 use crate::gui::pane::graph::{CanvasGesture, outer_canvas_widget_id, to_world};
+use crate::gui::requests::Requests;
 use crate::gui::theme::Theme;
 
 /// Rubber-band multi-selection. A plain left-drag on empty canvas
@@ -89,7 +89,7 @@ impl SelectionUI {
     /// Called once per visible graph pane; a band in flight belongs to
     /// exactly one of them, so every other pane's call returns
     /// immediately rather than advancing the band in its own coordinates.
-    pub(crate) fn apply(&mut self, ui: &mut Ui, cx: CanvasCtx<'_>, out: &mut Intents) {
+    pub(crate) fn apply(&mut self, ui: &mut Ui, cx: CanvasCtx<'_>, out: &mut Requests) {
         let graph_ctx = cx.graph_ctx();
         let resp = ui.response_for(outer_canvas_widget_id());
         if self.band.is_idle()
@@ -160,7 +160,7 @@ impl SelectionUI {
         // it paints the final selection; the `SetSelection` drains
         // post-record, and next frame — band now `None` — the early return
         // above clears the preview and draw falls back to the committed set.
-        out.push(GraphIntent::SetSelection {
+        out.push_graph(GraphIntent::SetSelection {
             to: swept.iter().copied().collect(),
         });
         self.preview.latch(());
