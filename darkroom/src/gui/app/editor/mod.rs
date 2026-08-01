@@ -1,23 +1,21 @@
 //! The per-frame GUI edit pipeline over a borrowed [`OpenDocument`].
 //!
-//! `Editor` owns the undo history, the GUI tree, and transient gesture
-//! state. The canvas's own projection of the graph lives with the canvas
-//! that draws it. [`App`] lends it the open document for each operation and
-//! the frame's [`AppCtx`] to read the rest through, keeping document,
-//! runtime and run-state ownership on the shell.
+//! `Editor` owns the GUI tree and transient gesture state. The canvas's own
+//! projection of the graph lives with the canvas that draws it, and every
+//! *mutation* lives on [`OpenDocument`] — this layer decides what to ask for
+//! and when, never what an edit means. [`App`] lends it the open document for
+//! each operation and the frame's [`AppCtx`] to read the rest through, keeping
+//! document, runtime and run-state ownership on the shell.
 //!
 //! [`App`]: crate::gui::app::App
 
 use crate::core::document::Document;
 use crate::core::document::open_document::OpenDocument;
-use crate::core::edit::action_stack::ActionStack;
-use crate::core::edit::intent::apply::commit_intent;
-use crate::core::edit::intent::types::{GraphIntent, Refusal, UndoStep};
 use crate::core::io::preferences::Preferences;
 use crate::gui::app::commands::AppCommand;
 use crate::gui::app::commands::file::FileCommand;
 use crate::gui::app::commands::run::RunCommand;
-use crate::gui::requests::{DocumentRequest, Requests};
+use crate::gui::requests::Requests;
 use crate::gui::window::MainWindow;
 use palantir::{Shortcut, Ui};
 
@@ -25,11 +23,6 @@ use crate::gui::app::ctx::AppCtx;
 
 #[cfg(test)]
 pub(crate) mod harness;
-
-/// Byte budget for the undo history's packed buffer (~1 MiB). Bounds
-/// memory rather than entry count — a single large edit can't be
-/// undone away, but the oldest entries drop once the buffer overflows.
-const UNDO_HISTORY_BYTES: usize = 1 << 20;
 
 const UNDO_SHORTCUT: Shortcut = Shortcut::ctrl('Z');
 const REDO_SHORTCUT: Shortcut = Shortcut::ctrl_shift('Z');
@@ -44,29 +37,8 @@ const RUN_SHORTCUT: Shortcut = Shortcut::ctrl('R');
 /// so ⌘Q reaches us instead of hard-terminating.)
 const QUIT_SHORTCUT: Shortcut = Shortcut::ctrl('Q');
 
-/// What applying one or more [`UndoStep`]s obliges the frame to do, folded
-/// off the steps' own predicates. Accumulated as a value rather than written
-/// straight onto [`Editor`] because undo/redo replay folds its steps from a
-/// callback while `action_stack` itself is mutably borrowed — so both the
-/// commit path and the replay path fold into one of these and then spend it:
-/// `dirtied` lands on the open document, `geometry_stale` is reported up to
-/// whoever holds the `Ui` and owes the relayout.
-#[derive(Default, Debug)]
-struct StepSignals {
-    geometry_stale: bool,
-    dirtied: bool,
-}
-
-impl StepSignals {
-    fn fold(&mut self, step: &UndoStep) {
-        self.geometry_stale |= step.invalidates_cached_geometry();
-        self.dirtied |= step.dirties_document();
-    }
-}
-
 #[derive(Debug)]
 pub(crate) struct Editor {
-    action_stack: ActionStack,
     main_window: MainWindow,
 }
 
@@ -74,78 +46,10 @@ impl Editor {
     /// Build fresh GUI editing state for an open document.
     pub(crate) fn new() -> Self {
         Self {
-            action_stack: ActionStack::new(UNDO_HISTORY_BYTES),
             main_window: MainWindow::default(),
         }
     }
 
-    /// Apply a single `intent` and record it as its own undo entry. For
-    /// edits raised *outside* the frame's intent drain — e.g. a file-picker
-    /// result `App` handles after the record. No-ops (and self-cancelling
-    /// steps) are dropped, like the in-frame drain.
-    #[must_use]
-    pub(super) fn apply_edit(&mut self, open: &mut OpenDocument, intent: GraphIntent) -> bool {
-        self.commit_batch(open, [DocumentRequest::Graph(intent)])
-    }
-
-    /// Apply `queued`, each request according to its tier: a graph edit is
-    /// built, applied, and recorded; a view op goes straight to the layout.
-    /// The app tier never reaches here — it stays queued for the shell.
-    ///
-    /// Nothing raised here can legitimately be malformed. Widgets read every
-    /// identity they emit out of the live document, so the worst they build
-    /// is stale — which refuses [`Refusal::Quiet`]ly and is dropped. A
-    /// [`Refusal::Invalid`] is therefore our own bug, and it panics in every
-    /// build rather than going to a log nobody reads.
-    ///
-    /// No-op and stale intents are dropped per-intent, and an empty batch
-    /// records nothing. A *run* of intents becomes one undo entry, so a
-    /// gesture that emits N of them is still one Ctrl+Z.
-    ///
-    /// Returns whether the batch stranded the canvas's cached geometry. The
-    /// batch's other outcome — a dirtied document — is landed here, since
-    /// `open` is right there; only the relayout has to travel back out to
-    /// whoever holds the `Ui`.
-    #[must_use]
-    fn commit_batch(
-        &mut self,
-        open: &mut OpenDocument,
-        queued: impl IntoIterator<Item = DocumentRequest>,
-    ) -> bool {
-        let mut batch = Vec::new();
-        let mut signals = StepSignals::default();
-        for item in queued {
-            let intent = match item {
-                DocumentRequest::Graph(intent) => intent,
-                // Applied straight to the layout: pane arrangement is
-                // navigation, so it records no step, raises no signal, and
-                // breaks no run of graph edits around it.
-                DocumentRequest::View(op) => {
-                    open.document.apply_dock_op(op);
-                    continue;
-                }
-            };
-            let step = match commit_intent(intent, &mut open.document) {
-                Ok(step) => step,
-                Err(Refusal::Quiet) => continue,
-                Err(Refusal::Invalid(reason)) => {
-                    panic!("a widget built a malformed intent: {reason}")
-                }
-            };
-            signals.fold(&step);
-            batch.push(step);
-        }
-        self.action_stack.push_current(&batch);
-        batch.clear();
-        // A content edit leaves the doc differing from the last save —
-        // barring the exact round-trip back to it, where we accept a stale
-        // "dirty" rather than tracking saved state precisely.
-        open.dirty |= signals.dirtied;
-        signals.geometry_stale
-    }
-}
-
-impl Editor {
     /// Run one frame of the edit pipeline against `ctx` — the frame's
     /// read-only world — draining everything it raises against the document
     /// and leaving the app tier queued in `requests` for the shell.
@@ -190,7 +94,7 @@ impl Editor {
         // visible needs a relayout: it may never have recorded, and a dock op
         // raises no geometry signal of its own.
         needs_relayout |= self.main_window.prepass(ui, ctx, &open.document, requests);
-        needs_relayout |= self.drain_requests(open, requests);
+        needs_relayout |= open.drain_requests(requests);
 
         self.menu_shortcut(ui, requests);
         self.main_window
@@ -198,7 +102,7 @@ impl Editor {
 
         // Post-record drain — graph edits the record surfaced (node select,
         // cache toggle, const edit), plus the tab strip's dock ops.
-        needs_relayout |= self.drain_requests(open, requests);
+        needs_relayout |= open.drain_requests(requests);
 
         // Resizes driven by something other than an `UndoStep` — the header's
         // elapsed-time label growing as a run reports — are not covered: they
@@ -228,7 +132,7 @@ impl Editor {
         self.main_window
             .scan_navigation(ui, ctx, &open.document, requests);
         // Dock ops apply straight to the layout — drain them.
-        needs_relayout |= self.drain_requests(open, requests);
+        needs_relayout |= open.drain_requests(requests);
         // A tab whose node is gone can't stay open.
         open.document.reconcile_with_graph();
         needs_relayout
@@ -250,19 +154,15 @@ impl Editor {
     fn apply_undo_redo(&mut self, ui: &mut Ui, open: &mut OpenDocument) -> bool {
         let undo = ui.key_pressed(UNDO_SHORTCUT);
         let redo = ui.key_pressed(REDO_SHORTCUT);
-        // Folded into a value first: the replay callback runs while
-        // `action_stack` is mutably borrowed, so it can't touch `self`.
-        let mut signals = StepSignals::default();
-        let mut on_step = |step: &UndoStep| signals.fold(step);
+        // The document owns its history and what a replay means; this layer
+        // only says which direction the chord asked for.
         if undo {
-            self.action_stack.undo(&mut open.document, &mut on_step);
+            open.undo().geometry_stale
         } else if redo {
-            self.action_stack.redo(&mut open.document, &mut on_step);
+            open.redo().geometry_stale
+        } else {
+            false
         }
-        // An undone or redone edit dirties the document exactly as the
-        // original did.
-        open.dirty |= signals.dirtied;
-        signals.geometry_stale
     }
 
     /// Queue the [`AppCommand`] for whichever of Ctrl+N / Ctrl+O / Ctrl+S /
@@ -300,25 +200,6 @@ impl Editor {
             return;
         };
         requests.push_app(command);
-    }
-
-    /// Drain `requests`, landing each on its tier, and push the whole frame's
-    /// resulting steps onto the undo stack as a single batch entry — so a
-    /// gesture that emits N intents (a breaker swipe deleting K nodes and
-    /// unbinding M ports) is one Cmd-Z. Marks the projection dirty when
-    /// anything applied (so the pre-record rebuild folds the change in) and
-    /// accumulates the relayout signal.
-    #[must_use]
-    pub(crate) fn drain_requests(
-        &mut self,
-        open: &mut OpenDocument,
-        requests: &mut Requests,
-    ) -> bool {
-        // Called three times a frame and usually with nothing queued.
-        if requests.is_empty() {
-            return false;
-        }
-        self.commit_batch(open, requests.drain_document())
     }
 
     /// Release the canvas's `NodeId`-keyed caches for nodes the document has

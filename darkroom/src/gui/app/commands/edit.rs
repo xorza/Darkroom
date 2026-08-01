@@ -60,12 +60,9 @@ impl App {
         let Some(value) = value else {
             return false;
         };
-        self.editor.apply_edit(
-            &mut self.open,
-            GraphIntent::SetInput {
-                input: pick.port,
-                to: Some(Binding::Const(value)),
-            },
-        )
+        self.open.apply_edit(GraphIntent::SetInput {
+            input: pick.port,
+            to: Some(Binding::Const(value)),
+        })
     }
 }

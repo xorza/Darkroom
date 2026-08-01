@@ -1,13 +1,52 @@
-//! The document currently open in a frontend, with its persistence path.
+//! The document currently open in a frontend, with its persistence path and
+//! the history of edits made to it.
+//!
+//! Every mutation of the document goes through this type: a frontend hands it
+//! intents and it decides what they mean, records them, and lands their
+//! outcomes. Keeping the history here rather than on a frontend is what makes
+//! that true — the two are one unit, replaced together when a different file
+//! is opened.
+
+pub(crate) mod error;
 
 use std::path::{Path, PathBuf};
 
 use crate::core::document::Document;
+use crate::core::document::open_document::error::ReplayOutcome;
+use crate::core::edit::action_stack::ActionStack;
+use crate::core::edit::intent::apply::commit_intent;
+use crate::core::edit::intent::types::{GraphIntent, Refusal, UndoStep};
 use crate::core::io::document::{self, DocumentLoadError, DocumentSaveError};
 use crate::core::io::preferences::Preferences;
 use crate::core::status::StatusLog;
+use crate::gui::requests::{DocumentRequest, Requests};
 
-#[derive(Debug, Default)]
+/// Byte budget for the undo history's packed buffer (~1 MiB). Bounds
+/// memory rather than entry count — a single large edit can't be
+/// undone away, but the oldest entries drop once the buffer overflows.
+const UNDO_HISTORY_BYTES: usize = 1 << 20;
+
+/// What applying one or more [`UndoStep`]s obliges the caller to do, folded
+/// off the steps' own predicates. Accumulated as a value rather than written
+/// straight onto [`OpenDocument`] because undo/redo replay folds its steps
+/// from a callback while the history itself is mutably borrowed — so both the
+/// commit path and the replay path fold into one of these and then spend it:
+/// `dirtied` lands on the document, `geometry_stale` is reported up to
+/// whoever holds the `Ui` and owes the relayout.
+#[derive(Default, Debug)]
+struct StepSignals {
+    geometry_stale: bool,
+    dirtied: bool,
+}
+
+impl StepSignals {
+    fn fold(&mut self, step: &UndoStep) {
+        self.geometry_stale |= step.invalidates_cached_geometry();
+        self.dirtied |= step.dirties_document();
+    }
+}
+
+#[derive(Debug)]
 pub(crate) struct OpenDocument {
     pub(crate) document: Document,
     pub(crate) path: Option<PathBuf>,
@@ -21,15 +60,148 @@ pub(crate) struct OpenDocument {
     /// It can read "dirty" after an undo returns the document to its saved
     /// state — the safe direction (prompt rather than silently discard).
     pub(crate) dirty: bool,
+    /// This document's undo history. Beside the document rather than on a
+    /// frontend because it *is* document state — opening another file
+    /// replaces the pair, and no UI can outlive one and inherit the other's
+    /// history.
+    history: ActionStack,
+}
+
+impl Default for OpenDocument {
+    /// An empty document with a fresh history. Hand-written rather than
+    /// derived because the history needs its byte budget, which has no
+    /// meaningful zero.
+    fn default() -> Self {
+        Self {
+            document: Document::default(),
+            path: None,
+            dirty: false,
+            history: ActionStack::new(UNDO_HISTORY_BYTES),
+        }
+    }
 }
 
 impl OpenDocument {
+    /// Apply a single `intent` and record it as its own undo entry. For edits
+    /// raised outside a frame's drain — e.g. a file-picker result handled
+    /// after the record. No-ops (and self-cancelling steps) are dropped, like
+    /// the in-frame drain.
+    #[must_use]
+    pub(crate) fn apply_edit(&mut self, intent: GraphIntent) -> bool {
+        self.commit([DocumentRequest::Graph(intent)])
+    }
+
+    /// Take everything `requests` holds for this document and apply it.
+    ///
+    /// Called three times a frame — after the navigation scan, the prepass,
+    /// and the record — so a request raised in one phase lands before the
+    /// next reads the document.
+    #[must_use]
+    pub(crate) fn drain_requests(&mut self, requests: &mut Requests) -> bool {
+        // Called three times a frame and usually with nothing queued.
+        if requests.is_empty() {
+            return false;
+        }
+        self.commit(requests.drain_document())
+    }
+
+    /// Apply `queued`, each request according to its tier: a graph edit is
+    /// built, applied, and recorded; a view op goes straight to the layout.
+    /// The app tier never reaches here — it stays queued for the shell.
+    ///
+    /// Nothing raised here can legitimately be malformed. Widgets read every
+    /// identity they emit out of the live document, so the worst they build
+    /// is stale — which refuses [`Refusal::Quiet`]ly and is dropped. A
+    /// [`Refusal::Invalid`] is therefore our own bug, and it panics in every
+    /// build rather than going to a log nobody reads.
+    ///
+    /// No-op and stale intents are dropped per-intent, and an empty batch
+    /// records nothing. A *run* of intents becomes one undo entry, so a
+    /// gesture that emits N of them is still one Ctrl+Z.
+    ///
+    /// Returns whether the batch stranded the canvas's cached geometry. The
+    /// batch's other outcome — a dirtied document — is landed here; only the
+    /// relayout has to travel out to whoever holds the `Ui`.
+    #[must_use]
+    fn commit(&mut self, queued: impl IntoIterator<Item = DocumentRequest>) -> bool {
+        let mut batch = Vec::new();
+        let mut signals = StepSignals::default();
+        for item in queued {
+            let intent = match item {
+                DocumentRequest::Graph(intent) => intent,
+                // Applied straight to the layout: pane arrangement is
+                // navigation, so it records no step, raises no signal, and
+                // breaks no run of graph edits around it.
+                DocumentRequest::View(op) => {
+                    self.document.apply_dock_op(op);
+                    continue;
+                }
+            };
+            let step = match commit_intent(intent, &mut self.document) {
+                Ok(step) => step,
+                Err(Refusal::Quiet) => continue,
+                Err(Refusal::Invalid(reason)) => {
+                    panic!("a widget built a malformed intent: {reason}")
+                }
+            };
+            signals.fold(&step);
+            batch.push(step);
+        }
+        self.history.push_current(&batch);
+        batch.clear();
+        self.land(signals)
+    }
+
+    /// Replay the last entry backwards. Reports whether the canvas's cached
+    /// geometry was stranded; `took` says whether there was an entry at all.
+    #[must_use]
+    pub(crate) fn undo(&mut self) -> ReplayOutcome {
+        // Folded into a value first: the replay callback runs while the
+        // history is mutably borrowed, so it cannot touch `self`.
+        let mut signals = StepSignals::default();
+        let took = self
+            .history
+            .undo(&mut self.document, &mut |step| signals.fold(step));
+        ReplayOutcome {
+            took,
+            geometry_stale: self.land(signals),
+        }
+    }
+
+    /// Replay the next entry forwards — the mirror of [`Self::undo`].
+    #[must_use]
+    pub(crate) fn redo(&mut self) -> ReplayOutcome {
+        let mut signals = StepSignals::default();
+        let took = self
+            .history
+            .redo(&mut self.document, &mut |step| signals.fold(step));
+        ReplayOutcome {
+            took,
+            geometry_stale: self.land(signals),
+        }
+    }
+
+    /// Land folded [`StepSignals`]. The one place each signal's *effect* is
+    /// spelled out, for both the commit path and undo/redo replay.
+    ///
+    /// Returns the one signal whose effect is a *call* rather than a stored
+    /// flag, so it has to travel back to whoever holds the `Ui`.
+    #[must_use]
+    fn land(&mut self, signals: StepSignals) -> bool {
+        // A content edit (or an undone/redone one) leaves the doc differing
+        // from the last save — barring the exact round-trip back to it, where
+        // we accept a stale "dirty" rather than tracking saved state
+        // precisely.
+        self.dirty |= signals.dirtied;
+        signals.geometry_stale
+    }
+
     pub(crate) fn load(path: PathBuf) -> Result<Self, DocumentLoadError> {
         let document = document::load(&path)?;
         Ok(Self {
             document,
             path: Some(path),
-            dirty: false,
+            ..Self::default()
         })
     }
 
@@ -78,6 +250,24 @@ impl OpenDocument {
         self.path = Some(path.to_path_buf());
         self.dirty = false;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod internals {
+    use crate::core::document::Document;
+    use crate::core::document::open_document::OpenDocument;
+
+    impl OpenDocument {
+        /// An unsaved document over `document`, with a fresh history — the
+        /// shape a fixture wants, since `history` is private and `Default`
+        /// cannot be spread across it from outside this module.
+        pub(crate) fn over(document: Document) -> Self {
+            Self {
+                document,
+                ..Self::default()
+            }
+        }
     }
 }
 

@@ -65,11 +65,7 @@ impl EditorHarness {
         Self {
             ui: UiHarness::with_text(SURFACE),
             editor: Editor::new(),
-            open: OpenDocument {
-                document: fixture.doc,
-                path: None,
-                dirty: false,
-            },
+            open: OpenDocument::over(fixture.doc),
             library: fixture.library,
             theme: Theme::default(),
             run_state: RunState::default(),
@@ -82,21 +78,18 @@ impl EditorHarness {
     /// Push one intent through the real edit path, as a widget's does.
     /// Reports whether it stranded the canvas's cached geometry.
     pub(crate) fn apply(&mut self, intent: GraphIntent) -> bool {
-        self.editor.apply_edit(&mut self.open, intent)
+        self.open.apply_edit(intent)
     }
 
     /// Drain the queued intents into the document, as the frame's edit phase
     /// does. Reports whether the batch stranded the canvas's cached geometry.
     pub(crate) fn drain(&mut self) -> bool {
-        self.editor
-            .drain_requests(&mut self.open, &mut self.requests)
+        self.open.drain_requests(&mut self.requests)
     }
 
     /// Take back the last undoable entry. Reports whether there was one.
     pub(crate) fn undo(&mut self) -> bool {
-        self.editor
-            .action_stack
-            .undo(&mut self.open.document, &mut |_| {})
+        self.open.undo().took
     }
 
     /// One editor frame. Returns the commands the **first** record pass
