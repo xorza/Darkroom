@@ -24,30 +24,30 @@ pub(crate) struct Preferences {
     /// Theme preference to restore (`system` / `dark` / `light`).
     /// Written by the Theme menu; the default (`system`) follows the
     /// OS light/dark setting.
-    pub theme: ThemeChoice,
+    pub(crate) theme: ThemeChoice,
     /// Document to reopen on launch. `None` starts with an empty doc.
-    pub document_path: Option<PathBuf>,
+    pub(crate) document_path: Option<PathBuf>,
     /// Reopen `document_path` on launch. When `false`, launch starts with
     /// an empty document (the path is still remembered, just not opened).
     /// Defaults to `true` — the historical reopen-where-you-left-off behavior.
-    pub load_last_document: bool,
+    pub(crate) load_last_document: bool,
     /// Prompt to save unsaved changes before any transition that would
     /// discard them — window close, ⌘Q, File ▸ Quit, File ▸ New, File ▸
     /// Open. When `false`, those proceed without asking. The prompt's
     /// "Don't ask again" checkbox clears it; the Preferences tab can
     /// restore it. Defaults to `true`.
-    pub confirm_unsaved_changes: bool,
+    pub(crate) confirm_unsaved_changes: bool,
     /// Main window geometry from the last session, restored at launch so
     /// the editor reopens at the same size / position. `None` on first run
     /// (platform picks). A TOML `[window]` table — a table field, so it
     /// sits with the other tables after every scalar key.
-    pub window: Option<WindowState>,
+    pub(crate) window: Option<WindowState>,
     /// Image-viewer toolbar choices (backdrop + magnification sampling),
     /// shared by all viewer tabs: a toolbar click in any viewer edits this
     /// in place and persists. A TOML `[viewer]` table.
-    pub viewer: ViewerPreferences,
+    pub(crate) viewer: ViewerPreferences,
     /// Default ONNX model paths copied into newly-authored ML node inputs.
-    pub ml_models: MlModelPreferences,
+    pub(crate) ml_models: MlModelPreferences,
 }
 
 /// Backdrop behind (and around) a viewer's image, as offered by the
@@ -70,10 +70,10 @@ pub(crate) enum ViewerBackground {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 pub(crate) struct ViewerPreferences {
-    pub background: ViewerBackground,
+    pub(crate) background: ViewerBackground,
     /// Magnification sampling for the shown image. Defaults to `Nearest`
     /// for pixel peeping; zoomed-out minification always stays linear.
-    pub mag_filter: ImageFilter,
+    pub(crate) mag_filter: ImageFilter,
 }
 
 impl Default for ViewerPreferences {
@@ -95,10 +95,10 @@ impl Default for ViewerPreferences {
 #[serde(default)]
 pub(crate) struct WindowState {
     /// Logical inner size `[w, h]`.
-    pub size: UVec2,
-    pub maximized: bool,
+    pub(crate) size: UVec2,
+    pub(crate) maximized: bool,
     /// Physical outer position `[x, y]`; `None` on Wayland.
-    pub position: Option<IVec2>,
+    pub(crate) position: Option<IVec2>,
 }
 
 impl Default for Preferences {
@@ -118,8 +118,8 @@ impl Default for Preferences {
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 pub(crate) struct MlModelPreferences {
-    pub denoise: PathBuf,
-    pub star_removal: PathBuf,
+    pub(crate) denoise: PathBuf,
+    pub(crate) star_removal: PathBuf,
 }
 
 impl Default for MlModelPreferences {

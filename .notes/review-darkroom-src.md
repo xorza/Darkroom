@@ -86,18 +86,6 @@ behaviour. Only one thing in the group survives:
       doc explains at length why the raw form is wrong for a
       `request_focus`-driven widget; nothing marks which sites are exempt.
 
-## State kept but never read
-
-- [ ] `StatusLog::lines` (`core/status/mod.rs:19`) maintains a 200-entry
-      rolling `VecDeque` with its own cap logic. Production never reads it —
-      the status bar shows the `error` slot alone, and every entry is already
-      emitted through `tracing`. The only reader is the `internals` mod.
-- [ ] `BackgroundRuntime`'s module doc (`core/background_runtime.rs:7,16`)
-      describes the type as capturing a pattern shared by "both owners" and
-      tells callers to "declare it after" their inner value. There is one
-      owner (`WorkerBridge`), and it is generic machinery built for a second
-      that does not exist.
-
 ## Overlapping enums and one-line delegating wrappers
 
 - [ ] `Request` and `DocumentRequest` (`gui/requests.rs:27` and `:38`) declare
@@ -123,9 +111,3 @@ behaviour. Only one thing in the group survives:
 - [ ] The same field duplicates the graph's node set. `Document::validate`
       exists partly to enforce the 1:1 correspondence, and `Document::remove_node`
       exists because that invariant spans two fields.
-
-## Visibility inconsistency
-
-- [ ] `Preferences` (`core/io/preferences/mod.rs:23`) is `pub(crate)` but every
-      field is declared `pub`, unlike the `pub(crate)` fields used throughout
-      the rest of the crate.

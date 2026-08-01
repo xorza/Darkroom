@@ -1,4 +1,5 @@
 use super::*;
+use crate::core::status::internals::STATUS_LOG_CAP;
 
 #[test]
 fn error_slot_tracks_last_failure_and_history_keeps_both() {
