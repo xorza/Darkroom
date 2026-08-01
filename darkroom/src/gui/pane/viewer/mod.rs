@@ -19,9 +19,9 @@
 //!
 //! [`TabRef::ImageViewer`]: crate::core::document::TabRef::ImageViewer
 
-pub(crate) mod camera;
-pub(crate) mod controls;
-pub(crate) mod glyph;
+mod camera;
+mod controls;
+mod glyph;
 
 use scenarium::NodeId;
 use std::fmt::Write as _;
@@ -82,6 +82,15 @@ struct ShownImage<'a> {
     native_size: UVec2,
     /// Source pixel format before the RGBA8 view conversion.
     native_format: ColorFormat,
+}
+
+impl ShownImage<'_> {
+    /// This texture's 1:1 logical footprint on the current display — the
+    /// space every viewport in this module is expressed in, so the framing
+    /// math never sees raw texels.
+    fn logical_size(&self, ui: &Ui) -> Vec2 {
+        logical_image_size(self.handle.size(), ui.display().scale_factor)
+    }
 }
 
 /// What [`StoredContent`] means to a viewer: at most one of a paintable
@@ -204,7 +213,6 @@ impl ImageViewer {
         self.apply_gestures(ui, shown);
 
         let pane = pane_size(ui, self.node_id);
-        let display_scale = ui.display().scale_factor;
         let fill = match prefs.background {
             ViewerBackground::Theme | ViewerBackground::Checker => theme.canvas.bg,
             ViewerBackground::Black => Color::BLACK,
@@ -225,7 +233,7 @@ impl ImageViewer {
                 }
                 match (shown, pane) {
                     (Some(shown), Some(pane)) => {
-                        let img = logical_image_size(shown.handle.size(), display_scale);
+                        let img = shown.logical_size(ui);
                         let v = self.effective_view(img, pane);
                         ui.add_shape(
                             Shape::image(shown.handle.clone())
@@ -307,7 +315,7 @@ impl ImageViewer {
         if shown.handle.size() != shown.native_size {
             text.push_str(" · downscaled view");
         }
-        let img = logical_image_size(shown.handle.size(), ui.display().scale_factor);
+        let img = shown.logical_size(ui);
         let zoom = match (self.view, pane) {
             (Some(v), _) => Some(v.zoom),
             (None, Some(pane)) => Some(self.effective_view(img, pane).zoom),
@@ -369,9 +377,7 @@ impl ImageViewer {
                         glyph::draw_100,
                     ) && let Some(pane) = pane
                     {
-                        let img =
-                            logical_image_size(shown.handle.size(), ui.display().scale_factor);
-                        let v = self.effective_view(img, pane);
+                        let v = self.effective_view(shown.logical_size(ui), pane);
                         self.view = Some(zoom_about_pane_center(v, 1.0, pane));
                     }
                 });
@@ -406,7 +412,7 @@ impl ImageViewer {
         };
         // Registered images have non-zero dims by construction, so the
         // texel size is always a valid divisor.
-        let img = logical_image_size(shown.handle.size(), ui.display().scale_factor);
+        let img = shown.logical_size(ui);
         let resp = ui.response_for(pane_wid(self.node_id));
         let Some(pane) = pane_size(ui, self.node_id) else {
             return;
