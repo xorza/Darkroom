@@ -1,15 +1,20 @@
-//! The per-frame GUI edit pipeline over a borrowed [`OpenDocument`].
+//! An editing session: the open document and the UI showing it, plus the
+//! per-frame pipeline that runs one against the other.
 //!
-//! `Editor` owns the GUI tree and transient gesture state. The canvas's own
-//! projection of the graph lives with the canvas that draws it, and every
-//! *mutation* lives on [`OpenDocument`] — this layer decides what to ask for
-//! and when, never what an edit means. [`App`] lends it the open document for
-//! each operation and the frame's [`AppCtx`] to read the rest through, keeping
-//! document, runtime and run-state ownership on the shell.
+//! The two are one unit — opening a different file replaces both, and a UI
+//! that outlived its document would hold gesture state and cached geometry
+//! keyed to nodes that no longer exist. Owning them together is also what lets
+//! the pipeline run without a document borrow crossing into it: every mutation
+//! is a call on [`OpenDocument`], which the session holds, and the UI below
+//! ([`MainWindow`]) only ever reads a `&Document`.
+//!
+//! So the layering reads in one direction. [`App`] owns the session and the
+//! runtime around it; the session decides *what to ask for and when*; the
+//! document decides what an edit *means*; the UI decides what to *draw* and
+//! what to ask for next.
 //!
 //! [`App`]: crate::gui::app::App
 
-use crate::core::document::Document;
 use crate::core::document::open_document::OpenDocument;
 use crate::core::io::preferences::Preferences;
 use crate::gui::app::commands::AppCommand;
@@ -38,14 +43,20 @@ const RUN_SHORTCUT: Shortcut = Shortcut::ctrl('R');
 const QUIT_SHORTCUT: Shortcut = Shortcut::ctrl('Q');
 
 #[derive(Debug)]
-pub(crate) struct Editor {
+pub(crate) struct Session {
+    /// The document being edited, its save path, and its undo history.
+    pub(crate) open: OpenDocument,
+    /// The panes showing it. Reset with the document rather than kept across
+    /// one: its gesture state and `NodeId`-keyed caches only mean anything
+    /// against the graph they were built from.
     main_window: MainWindow,
 }
 
-impl Editor {
-    /// Build fresh GUI editing state for an open document.
-    pub(crate) fn new() -> Self {
+impl Session {
+    /// Open `open` in a fresh UI.
+    pub(crate) fn new(open: OpenDocument) -> Self {
         Self {
+            open,
             main_window: MainWindow::default(),
         }
     }
@@ -66,7 +77,6 @@ impl Editor {
     pub(crate) fn frame(
         &mut self,
         ui: &mut Ui,
-        open: &mut OpenDocument,
         ctx: AppCtx<'_>,
         preferences: &mut Preferences,
         requests: &mut Requests,
@@ -83,7 +93,7 @@ impl Editor {
         // undo/redo + last-frame click responses). `navigate` reads *last*
         // frame's projection to resolve tab/chip clicks, so it must run
         // before this frame's rebuild. After it, the active tab is fixed.
-        let mut needs_relayout = self.navigate(ui, open, ctx, requests);
+        let mut needs_relayout = self.navigate(ui, ctx, requests);
 
         // Prepass reconciles pane visibility, rebuilds the canvas's
         // projection, then emits input-derived graph mutations (drag,
@@ -93,16 +103,18 @@ impl Editor {
         // rather than another question here. A canvas that just became
         // visible needs a relayout: it may never have recorded, and a dock op
         // raises no geometry signal of its own.
-        needs_relayout |= self.main_window.prepass(ui, ctx, &open.document, requests);
-        needs_relayout |= open.drain_requests(requests);
+        needs_relayout |= self
+            .main_window
+            .prepass(ui, ctx, &self.open.document, requests);
+        needs_relayout |= self.open.drain_requests(requests);
 
         self.menu_shortcut(ui, requests);
         self.main_window
-            .frame(ui, ctx, &open.document, preferences, requests);
+            .frame(ui, ctx, &self.open.document, preferences, requests);
 
         // Post-record drain — graph edits the record surfaced (node select,
         // cache toggle, const edit), plus the tab strip's dock ops.
-        needs_relayout |= open.drain_requests(requests);
+        needs_relayout |= self.open.drain_requests(requests);
 
         // Resizes driven by something other than an `UndoStep` — the header's
         // elapsed-time label growing as a run reports — are not covered: they
@@ -118,23 +130,17 @@ impl Editor {
     /// Done up front so the edit pipeline runs against a settled document
     /// and a switched-to tab records in the same present's Pass A.
     #[must_use]
-    fn navigate(
-        &mut self,
-        ui: &mut Ui,
-        open: &mut OpenDocument,
-        ctx: AppCtx<'_>,
-        requests: &mut Requests,
-    ) -> bool {
-        let mut needs_relayout = self.apply_undo_redo(ui, open);
+    fn navigate(&mut self, ui: &mut Ui, ctx: AppCtx<'_>, requests: &mut Requests) -> bool {
+        let mut needs_relayout = self.apply_undo_redo(ui);
         // Surface tab clicks from last frame's responses. Those responses are
         // last frame's; the document they resolve against is this frame's,
         // so a hit on a node the undo above removed simply finds nothing.
         self.main_window
-            .scan_navigation(ui, ctx, &open.document, requests);
+            .scan_navigation(ui, ctx, &self.open.document, requests);
         // Dock ops apply straight to the layout — drain them.
-        needs_relayout |= open.drain_requests(requests);
+        needs_relayout |= self.open.drain_requests(requests);
         // A tab whose node is gone can't stay open.
-        open.document.reconcile_with_graph();
+        self.open.document.reconcile_with_graph();
         needs_relayout
     }
 
@@ -151,15 +157,15 @@ impl Editor {
     /// holds focus palantir grants it to that field's scope and this
     /// read answers `false` on its own.
     #[must_use]
-    fn apply_undo_redo(&mut self, ui: &mut Ui, open: &mut OpenDocument) -> bool {
+    fn apply_undo_redo(&mut self, ui: &mut Ui) -> bool {
         let undo = ui.key_pressed(UNDO_SHORTCUT);
         let redo = ui.key_pressed(REDO_SHORTCUT);
         // The document owns its history and what a replay means; this layer
         // only says which direction the chord asked for.
         if undo {
-            open.undo().geometry_stale
+            self.open.undo().geometry_stale
         } else if redo {
-            open.redo().geometry_stale
+            self.open.redo().geometry_stale
         } else {
             false
         }
@@ -204,12 +210,12 @@ impl Editor {
 
     /// Release the canvas's `NodeId`-keyed caches for nodes the document has
     /// stopped holding. Driven by [`App::reconcile_derived_state`] once a
-    /// frame — `Editor::frame` runs per *record pass*, so a sweep here would
+    /// frame — [`Self::frame`] runs per *record pass*, so a sweep here would
     /// run twice on a frame carrying action input.
     ///
     /// [`App::reconcile_derived_state`]: crate::gui::app::App
-    pub(super) fn reconcile_caches(&mut self, document: &Document) {
-        self.main_window.reconcile(document);
+    pub(super) fn reconcile_caches(&mut self) {
+        self.main_window.reconcile(&self.open.document);
     }
 }
 
@@ -226,7 +232,7 @@ mod tests {
     use crate::gui::app::commands::AppCommand;
     use crate::gui::app::commands::file::FileCommand;
     use crate::gui::app::commands::run::RunCommand;
-    use crate::gui::app::editor::harness::EditorHarness;
+    use crate::gui::app::session::harness::SessionHarness;
     use crate::gui::pane::graph::toolbar::internals::run_chip_wid;
     use crate::gui::pane::viewer::ImageViewer;
 
@@ -251,7 +257,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "a widget built a malformed intent")]
     fn a_widget_built_malformed_intent_is_a_bug_not_a_refusal() {
-        let mut test = EditorHarness::new(DocFixture::default());
+        let mut test = SessionHarness::new(DocFixture::default());
         test.apply(GraphIntent::AddNode {
             pos: Vec2::ZERO,
             node_id: NodeId::nil(),
@@ -264,17 +270,17 @@ mod tests {
     /// doesn't.
     #[test]
     fn dirty_flag_tracks_content_edits_not_navigation() {
-        let mut test = EditorHarness::new(DocFixture::default());
+        let mut test = SessionHarness::new(DocFixture::default());
         let node_id = NodeId::unique();
 
         test.apply(add(node_id));
-        assert!(test.open.dirty, "adding a node is savable work");
+        assert!(test.session.open.dirty, "adding a node is savable work");
 
-        test.open.dirty = false;
+        test.session.open.dirty = false;
         test.apply(GraphIntent::SetSelection {
             to: [node_id].into_iter().collect(),
         });
-        assert!(!test.open.dirty, "selecting is navigation");
+        assert!(!test.session.open.dirty, "selecting is navigation");
     }
 
     /// Pane arrangement is navigation: the op lands on the layout but
@@ -283,28 +289,42 @@ mod tests {
     /// rearrangement doesn't prompt.
     #[test]
     fn dock_ops_apply_without_entering_the_undo_history_or_dirtying() {
-        let mut test = EditorHarness::new(DocFixture::default());
+        let mut test = SessionHarness::new(DocFixture::default());
         let node_id = NodeId::unique();
         test.apply(add(node_id));
 
         let tab = TabRef::ImageViewer(node_id);
-        test.open.dirty = false;
+        test.session.open.dirty = false;
         test.requests.push_view(DockOp::OpenTab { tab });
         test.drain();
         assert!(
-            test.open.document.layout.all_tabs().any(|t| t == tab),
+            test.session
+                .open
+                .document
+                .layout
+                .all_tabs()
+                .any(|t| t == tab),
             "the viewer tab opened"
         );
         assert!(
-            !test.open.dirty,
+            !test.session.open.dirty,
             "arranging panes is navigation, not savable work"
         );
 
         // One undo takes back the *node*, not the tab.
         assert!(test.undo(), "the node add is the only entry");
-        assert_eq!(test.open.document.graph.len(), 0, "the node came back out");
+        assert_eq!(
+            test.session.open.document.graph.len(),
+            0,
+            "the node came back out"
+        );
         assert!(
-            test.open.document.layout.all_tabs().any(|t| t == tab),
+            test.session
+                .open
+                .document
+                .layout
+                .all_tabs()
+                .any(|t| t == tab),
             "undo leaves the layout alone"
         );
         assert!(!test.undo(), "the dock op recorded nothing of its own");
@@ -316,7 +336,7 @@ mod tests {
     /// a run chip was clicked simply did not save.
     #[test]
     fn a_chord_and_a_click_on_one_frame_both_reach_the_app() {
-        let mut test = EditorHarness::new(DocFixture::probes(1));
+        let mut test = SessionHarness::new(DocFixture::probes(1));
         // Two frames so the toolbar chip has a rect to aim at, and so the
         // Ctrl+S chord is subscribed for palantir's keyboard wake-gate.
         test.prime(2);
@@ -345,7 +365,7 @@ mod tests {
     /// once the tab closes.
     #[test]
     fn image_viewer_tabs_dedupe_per_node_and_prune_state_on_close() {
-        let mut test = EditorHarness::new(DocFixture::default());
+        let mut test = SessionHarness::new(DocFixture::default());
         let node_id = NodeId::unique();
         let tab = TabRef::ImageViewer(node_id);
 
@@ -353,7 +373,8 @@ mod tests {
         test.requests.push_view(DockOp::OpenTab { tab });
         test.drain();
         assert_eq!(
-            test.open
+            test.session
+                .open
                 .document
                 .layout
                 .all_tabs()
@@ -363,14 +384,18 @@ mod tests {
             "one tab per node"
         );
 
-        test.editor
+        test.session
             .main_window
             .image_viewers
             .insert(node_id, ImageViewer::new(node_id));
-        test.open.document.layout.apply(DockOp::CloseTab { tab });
-        test.editor.reconcile_caches(&test.open.document);
+        test.session
+            .open
+            .document
+            .layout
+            .apply(DockOp::CloseTab { tab });
+        test.session.reconcile_caches();
         assert!(
-            test.editor.main_window.image_viewers.is_empty(),
+            test.session.main_window.image_viewers.is_empty(),
             "closing the tab drops its navigation state"
         );
     }
