@@ -41,10 +41,13 @@ use crate::gui::theme::Theme;
 /// asks about nodes — one path to each, and nothing under the canvas has to
 /// name the app level at all.
 ///
-/// Holding one is the proof that a pane *is* showing the graph:
-/// [`Self::for_document`] is the only way to obtain one and it checks that
-/// once, so no reader has to. A pass that runs whether or not a graph is on
-/// screen takes `Option<GraphCtx>` and says so in its signature.
+/// Composing one always succeeds: the document, the library and the run are
+/// there whether or not a pane happens to be showing the graph. Whether one
+/// is rides along as [`Self::is_visible`], because only a single pass cares —
+/// the hit sweep, which runs before the tab set settles. Every other reader is
+/// reached only from a pane that is drawing, and the two entry points that
+/// bridge the two worlds say so with a `debug_assert!` rather than making
+/// every call site unwrap.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct GraphCtx<'a> {
     /// The frame's read-only world, one level up: the theme every widget
@@ -63,15 +66,19 @@ pub(crate) struct GraphCtx<'a> {
     /// exclusively borrowed for as long as this context lives — so it cannot be
     /// a graph edit behind, and nothing can move it out from under a reader.
     output_types: &'a OutputTypes,
+    /// Whether a pane is showing this graph, snapshot when the context was
+    /// composed. See [`Self::is_visible`].
+    is_visible: bool,
 }
 
 impl<'a> GraphCtx<'a> {
     /// Derive the graph pane's context from the frame's `app` context and the
-    /// document it is showing — or `None` when no pane is showing one.
+    /// document it is showing.
     ///
-    /// Asked of the *document*: a graph with no nodes on an active tab is a
-    /// legitimate pane, and one that answered "no nodes, so no pane" would
-    /// leave a fresh document with no canvas to place its first node on.
+    /// Visibility is asked of the *document*, not of its contents: a graph
+    /// with no nodes on an active tab is a legitimate pane, and one that
+    /// answered "no nodes, so no pane" would leave a fresh document with no
+    /// canvas to place its first node on.
     ///
     /// **Resolves `output_types` against `doc` on the way in**, which is why
     /// it arrives `&mut` and leaves shared. A context's readers answer a
@@ -88,13 +95,25 @@ impl<'a> GraphCtx<'a> {
         app: AppCtx<'a>,
         doc: &'a Document,
         output_types: &'a mut OutputTypes,
-    ) -> Option<Self> {
+    ) -> Self {
         output_types.update(&doc.graph, app.library());
-        doc.shows_graph().then_some(Self {
+        Self {
+            is_visible: doc.shows_graph(),
             app,
             doc,
             output_types,
-        })
+        }
+    }
+
+    /// Whether a pane is showing this graph.
+    ///
+    /// Resolved once when the context was composed rather than asked of the
+    /// layout per call, so it obeys the module's one rule: every accessor is a
+    /// field read. The hit sweep is the one reader — it runs at the top of the
+    /// frame, before the navigation phase settles which tabs are active, so it
+    /// cannot assume a canvas.
+    pub(crate) fn is_visible(self) -> bool {
+        self.is_visible
     }
 
     /// The whole document behind this context.

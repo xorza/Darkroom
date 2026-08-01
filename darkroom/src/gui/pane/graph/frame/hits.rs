@@ -145,11 +145,11 @@ impl CanvasHits {
     /// responses, across every visible pane. Run once per frame, in the
     /// navigation phase — see the module docs for why there, what it
     /// costs, and which pass fills the port half.
-    pub(crate) fn scan(&mut self, ui: &Ui, graph: Option<GraphCtx<'_>>) {
+    pub(crate) fn scan(&mut self, ui: &Ui, graph: GraphCtx<'_>) {
         *self = Self::default();
-        let Some(graph) = graph else {
+        if !graph.is_visible() {
             return;
-        };
+        }
         for node in graph.nodes() {
             self.scan_node(ui, node);
         }

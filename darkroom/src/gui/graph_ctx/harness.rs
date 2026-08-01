@@ -54,6 +54,5 @@ impl GraphCtxFixture {
         } = self;
         let app = AppCtx::new(theme, &fixture.library, run_state, StatusInputs::default());
         GraphCtx::for_document(app, &fixture.doc, output_types)
-            .expect("the fixture's document shows the graph")
     }
 }
