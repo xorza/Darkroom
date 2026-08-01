@@ -89,66 +89,59 @@ impl Session {
         preferences: &mut Preferences,
         requests: &mut Requests,
     ) -> bool {
-        requests.clear();
-
         // The frame's relayout accumulator, owned here for exactly as long as
         // the frame it describes. Every pass that can strand
         // `CanvasGeometry`'s cross-frame caches reports upward into it, and it
         // is handed to `App` to spend — so there is no flag to reset, and none
         // to leak into the next frame.
         //
-        // Settle the active tab entirely from frame-top inputs (keyboard
-        // undo/redo + last-frame click responses). `navigate` reads *last*
-        // frame's projection to resolve tab/chip clicks, so it must run
-        // before this frame's rebuild. After it, the active tab is fixed.
-        let mut needs_relayout = self.navigate(ui, ctx, requests);
+        // Three phases, each ending in a drain. That is the shape because a
+        // phase reads the document and the next one must see what the previous
+        // asked for; the drain between them is a document mutation, which is
+        // why no two adjacent phases can collapse into one call on the UI.
+        //
+        // 1. NAVIGATION — settle which tab is active, entirely from inputs
+        //    available before the record: the undo/redo chords, and tab and
+        //    chip clicks read off *last* frame's responses. Those responses
+        //    are last frame's while the document they resolve against is this
+        //    frame's, so a hit on a node the undo just removed simply finds
+        //    nothing. It runs first so a switched-to tab records in the same
+        //    present's Pass A, with no first-frame gap. A tab whose node the
+        //    undo just removed is pruned by the mutation itself — see
+        //    `OpenDocument::land`.
+        let mut needs_relayout = self.apply_undo_redo(ui);
+        self.main_window
+            .scan_navigation(ui, ctx, &self.open.document, requests);
+        needs_relayout |= self.open.drain_requests(requests);
 
-        // Prepass reconciles pane visibility, rebuilds the canvas's
-        // projection, then emits input-derived graph mutations (drag,
-        // pan/zoom, connection commit) drained *before* the record so Pass A
-        // sees the settled doc. Driven by the panes on screen, like the record
-        // pass below — a pane kind that grows input handling gets an arm there
-        // rather than another question here. A canvas that just became
-        // visible needs a relayout: it may never have recorded, and a dock op
-        // raises no geometry signal of its own.
+        // 2. PREPASS — reconcile pane visibility, rebuild the canvas's
+        //    projection, then emit the input-derived graph mutations (drag,
+        //    pan/zoom, connection commit). Drained before the record so Pass A
+        //    sees the settled doc. Driven by the panes on screen, like the
+        //    record below — a pane kind that grows input handling gets an arm
+        //    there rather than another question here. A canvas that just
+        //    became visible needs a relayout: it may never have recorded, and
+        //    a dock op raises no geometry signal of its own.
         needs_relayout |= self
             .main_window
             .prepass(ui, ctx, &self.open.document, requests);
         needs_relayout |= self.open.drain_requests(requests);
 
+        // 3. RECORD — author the widget tree. The file/run/quit chords are
+        //    read just ahead of it: unlike undo/redo they only queue an
+        //    `AppCommand`, so they need no drain of their own and simply have
+        //    to land before `App` takes the tier.
         self.menu_shortcut(ui, requests);
         self.main_window
             .frame(ui, ctx, &self.open.document, preferences, requests);
-
-        // Post-record drain — graph edits the record surfaced (node select,
-        // cache toggle, const edit), plus the tab strip's dock ops.
+        // Graph edits the record surfaced (node select, cache toggle, const
+        // edit), plus the tab strip's dock ops.
         needs_relayout |= self.open.drain_requests(requests);
 
         // Resizes driven by something other than an `UndoStep` — the header's
         // elapsed-time label growing as a run reports — are not covered: they
         // leave `CanvasGeometry`'s offsets stale for one frame rather than
         // buying a pass.
-        needs_relayout
-    }
-
-    /// Settle which tab is active for this frame, from inputs all available
-    /// before the record: keyboard undo/redo and tab clicks read from *last*
-    /// frame's responses.
-    ///
-    /// Done up front so the edit pipeline runs against a settled document
-    /// and a switched-to tab records in the same present's Pass A.
-    #[must_use]
-    fn navigate(&mut self, ui: &mut Ui, ctx: AppCtx<'_>, requests: &mut Requests) -> bool {
-        let mut needs_relayout = self.apply_undo_redo(ui);
-        // Surface tab clicks from last frame's responses. Those responses are
-        // last frame's; the document they resolve against is this frame's,
-        // so a hit on a node the undo above removed simply finds nothing.
-        self.main_window
-            .scan_navigation(ui, ctx, &self.open.document, requests);
-        // Dock ops apply straight to the layout — drain them.
-        needs_relayout |= self.open.drain_requests(requests);
-        // A tab whose node is gone can't stay open.
-        self.open.document.reconcile_with_graph();
         needs_relayout
     }
 
@@ -371,8 +364,13 @@ mod tests {
     /// once the tab closes.
     #[test]
     fn image_viewer_tabs_dedupe_per_node_and_prune_state_on_close() {
-        let mut test = SessionHarness::new(DocFixture::default());
-        let node_id = NodeId::unique();
+        // A node the graph actually holds: a viewer tab names the preview node
+        // whose value it shows, and the drain below prunes a tab whose node is
+        // gone — as it must, since that is what closes a viewer when its node
+        // is deleted.
+        let fixture = DocFixture::probes(1);
+        let node_id = fixture.node(0);
+        let mut test = SessionHarness::new(fixture);
         let tab = TabRef::ImageViewer(node_id);
 
         test.requests.push_view(DockOp::OpenTab { tab });

@@ -91,18 +91,28 @@ impl OpenDocument {
         self.commit([DocumentRequest::Graph(intent)])
     }
 
-    /// Take everything `requests` holds for this document and apply it.
+    /// Take everything `requests` holds for this document, apply it, and leave
+    /// the document self-consistent.
     ///
     /// Called three times a frame — after the navigation scan, the prepass,
-    /// and the record — so a request raised in one phase lands before the
-    /// next reads the document.
+    /// and the record — so a request raised in one phase lands before the next
+    /// reads the document.
+    ///
+    /// The reconcile is *not* inside the empty-queue fast path, and not inside
+    /// [`Self::commit`] either. Not the fast path, because the mutation that
+    /// most often orphans a tab — an undo replaying a `RemoveNode` — never
+    /// touches the queue, so a frame whose only edit was Ctrl+Z would skip it.
+    /// Not `commit`, because closing a tab is a frontend policy about what is
+    /// on screen, and an edit applied outside a frame (a dialog result) has no
+    /// business acting on it.
     #[must_use]
     pub(crate) fn drain_requests(&mut self, requests: &mut Requests) -> bool {
-        // Called three times a frame and usually with nothing queued.
-        if requests.is_empty() {
-            return false;
-        }
-        self.commit(requests.drain_document())
+        // Usually nothing is queued, and the commit is what allocates.
+        let geometry_stale = !requests.is_empty() && self.commit(requests.drain_document());
+        // A tab whose node is gone can't stay open. Cheap when nothing died —
+        // `reconcile_with_graph` scans the tab list and returns.
+        self.document.reconcile_with_graph();
+        geometry_stale
     }
 
     /// Apply `queued`, each request according to its tier: a graph edit is

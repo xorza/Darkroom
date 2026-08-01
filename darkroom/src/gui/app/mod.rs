@@ -318,6 +318,10 @@ impl palantir::App for App {
                 process_memory: self.process_memory.sample(Instant::now()),
             },
         );
+        // Reset here rather than inside the frame: the queue is `App`'s, and
+        // `record` runs twice on a frame carrying action input — the second
+        // pass must not inherit what the first already ran.
+        self.requests.clear();
         let mut needs_relayout =
             self.session
                 .frame(ui, ctx, &mut self.preferences, &mut self.requests);
