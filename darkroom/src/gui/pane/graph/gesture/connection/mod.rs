@@ -6,13 +6,14 @@ use scenarium::{Binding, InputPort};
 use crate::core::document::{PortKind, PortRef};
 use crate::core::edit::intent::types::GraphIntent;
 use crate::gui::graph_ctx::GraphCtx;
+use crate::gui::pane::graph::canvas::outer_canvas_widget_id;
 use crate::gui::pane::graph::ctx::CanvasCtx;
 use crate::gui::pane::graph::frame::geometry::CanvasGeometry;
+use crate::gui::pane::graph::gesture::canvas_gesture::preview_drag_modifier;
 use crate::gui::pane::graph::gesture::slot::GestureSlot;
 use crate::gui::pane::graph::node::port_color::port_color;
 use crate::gui::pane::graph::node::set_input;
 use crate::gui::pane::graph::paint::wire::{GlyphDrag, Wire, WirePass, WireTint};
-use crate::gui::pane::graph::{outer_canvas_widget_id, preview_drag_modifier};
 use crate::gui::requests::Requests;
 use crate::gui::theme::Theme;
 

@@ -32,12 +32,12 @@ use scenarium::LogLevel;
 use scenarium::NodeId;
 
 use crate::gui::graph_ctx::node_ctx::NodeCtx;
+use crate::gui::pane::graph::canvas::outer_canvas_widget_id;
 use crate::gui::pane::graph::ctx::CanvasCtx;
 use crate::gui::pane::graph::ctx::DrawCtx;
 use crate::gui::pane::graph::frame::hits::{CanvasHits, Chip};
 use crate::gui::pane::graph::node::exec_color;
 use crate::gui::pane::graph::node::node_hovered;
-use crate::gui::pane::graph::outer_canvas_widget_id;
 use crate::gui::state::run_state::ExecStatus;
 use crate::gui::theme::Theme;
 use crate::gui::widgets::format::fmt_elapsed;

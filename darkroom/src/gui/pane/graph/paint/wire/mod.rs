@@ -22,10 +22,10 @@ use palantir::{Color, CurveBrush, LineCap, LinearGradient, Rect, Shape, Size, St
 use scenarium::NodeId;
 
 use crate::gui::graph_ctx::GraphCtx;
+use crate::gui::pane::graph::canvas::pointer_world;
 use crate::gui::pane::graph::ctx::DrawCtx;
 use crate::gui::pane::graph::frame::geometry::{GlyphKey, PortLayer};
 use crate::gui::pane::graph::gesture::breaker::BreakerProbe;
-use crate::gui::pane::graph::pointer_world;
 use crate::gui::theme::color::toward;
 
 /// Minimum length of a wire's bezier control handles, so a short or backward
