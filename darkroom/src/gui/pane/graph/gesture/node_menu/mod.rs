@@ -35,6 +35,11 @@ enum MenuChoice {
 }
 
 impl NodeMenuUi {
+    /// Close the menu.
+    pub(crate) fn reset(&mut self) {
+        self.menu.reset();
+    }
+
     /// Record the menu and resolve this frame's pick onto `out` — a run as
     /// the [`AppCommand`] it means, the structural picks as ordinary intents.
     pub(crate) fn apply(&mut self, ui: &mut Ui, cx: CanvasCtx<'_>, out: &mut Requests) {

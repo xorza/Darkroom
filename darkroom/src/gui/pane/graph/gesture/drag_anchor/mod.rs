@@ -52,6 +52,13 @@ struct Anchor {
 }
 
 impl GroupDrag {
+    /// Drop any latched drag. Called on the tab-switch reset — a drag left
+    /// latched while the canvas was away would otherwise resume when it
+    /// comes back.
+    pub(crate) fn reset(&mut self) {
+        self.anchor = None;
+    }
+
     /// Start (or replace) the gesture. `start_positions` includes the
     /// grabbed member itself.
     pub(crate) fn latch(

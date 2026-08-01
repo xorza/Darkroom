@@ -30,6 +30,11 @@ pub(crate) struct PreviewDrag {
 }
 
 impl PreviewDrag {
+    /// Drop the in-flight spawn-and-place drag.
+    pub(crate) fn reset(&mut self) {
+        self.drag.reset();
+    }
+
     /// Swept once per frame over the whole scene: only one pointer drag can be
     /// in flight, and `PortRef` is document-unique, so the pane comes from the
     /// port's own node rather than from the caller.

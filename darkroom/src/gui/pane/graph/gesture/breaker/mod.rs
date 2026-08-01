@@ -271,6 +271,13 @@ pub(crate) struct BreakerUI {
 }
 
 impl BreakerUI {
+    /// Drop the in-flight scribble. Only the latch is cleared: the point and
+    /// broken-target buffers are meaningless without it (see
+    /// [`Self::scribble`]) and keep their capacity for the next gesture.
+    pub(crate) fn reset(&mut self) {
+        self.latched.clear();
+    }
+
     /// Drive the gesture from the outer canvas response: start, extend,
     /// release. On release, drains all three `broken_*` collections into
     /// their matching severing `GraphIntent` (`RemoveNode`, `SetInput { to: None

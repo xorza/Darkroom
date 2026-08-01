@@ -94,6 +94,16 @@ impl Search {
 }
 
 impl NewNodeUi {
+    /// Close the palette and drop the pending wire handoffs. The search
+    /// buffers are cleared in place, keeping the allocation the fold reuses.
+    pub(crate) fn reset(&mut self) {
+        self.menu.reset();
+        self.source = None;
+        self.resume_floating = None;
+        self.search.text.clear();
+        self.search.folded.clear();
+    }
+
     pub(crate) fn apply(
         &mut self,
         ui: &mut Ui,

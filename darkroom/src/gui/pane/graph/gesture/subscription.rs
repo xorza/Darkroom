@@ -57,6 +57,11 @@ impl InFlight {
 }
 
 impl SubscriptionUI {
+    /// Drop the in-flight event wire.
+    pub(crate) fn reset(&mut self) {
+        self.state.clear();
+    }
+
     /// Whether a subscription-wire gesture is in flight — feeds the
     /// wire-fade tier. (A method, not a `pub(crate)` field: `InFlight` is
     /// module-private.)

@@ -25,6 +25,11 @@ pub(crate) struct AnchoredMenu {
 }
 
 impl AnchoredMenu {
+    /// Close the menu without a pick.
+    pub(crate) fn reset(&mut self) {
+        self.anchor.clear();
+    }
+
     /// Open (or re-anchor) the menu at a surface-space point.
     pub(crate) fn open_at(&mut self, anchor: Vec2) {
         self.anchor.latch(anchor);
@@ -106,6 +111,12 @@ pub(crate) struct NodeContextMenu {
 }
 
 impl NodeContextMenu {
+    /// Close the menu. `node_id` is left as it was — every read of it is
+    /// gated by the wrapped [`AnchoredMenu`] being open.
+    pub(crate) fn reset(&mut self) {
+        self.menu.reset();
+    }
+
     /// Open on this frame's secondary click, anchored at the pointer, and
     /// report the node it opened on (`None` on every other frame).
     ///

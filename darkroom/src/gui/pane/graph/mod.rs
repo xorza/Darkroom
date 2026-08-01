@@ -119,18 +119,13 @@ pub(crate) struct GraphUI {
     /// polling it separately is how they grew three different guards
     /// around it.
     cancelled: bool,
-    /// In-flight gesture controllers. Grouped so a tab switch can reset
-    /// *all* of them in one assignment (`sync_visibility`) without the
-    /// caller enumerating each — and so the persistent caches
-    /// (`background`, `geometry`) sitting beside this field survive by
-    /// construction.
-    gestures: Gestures,
-}
-
-/// The resettable, one-gesture-lifetime controllers. Everything here is
-/// dropped on a tab switch, and nothing here carries meaning across frames.
-#[derive(Default, Debug)]
-struct Gestures {
+    // The in-flight gesture controllers, each dropped by
+    // [`Self::reset_gestures`] on a tab switch. Flat rather than grouped
+    // behind one field: replacing a group wholesale threw away buffers
+    // several of them deliberately grow (the rubber band's swept set, the
+    // breaker's point and broken-target vectors, the palette's folded search),
+    // and each controller knows which of its own state is a buffer and which
+    // is the gesture.
     node_ui: NodeUI,
     breaker_ui: BreakerUI,
     connection_ui: ConnectionUI,
@@ -197,13 +192,52 @@ impl GraphUI {
     /// Unlike the per-frame reconciles beside it, this cannot simply run
     /// every frame: clearing gestures is only correct on the transition,
     /// since every gesture spans frames by definition.
+    /// Drop every in-flight gesture, keeping the buffers the controllers grow.
+    ///
+    /// Destructured rather than assigned wholesale so the compiler makes the
+    /// call: a field added to [`GraphUI`] does not compile until it is either
+    /// reset here or explicitly named as surviving. The `_`-bound arms below
+    /// are the survivors — cross-frame caches and per-frame facts that the
+    /// next frame overwrites anyway.
+    fn reset_gestures(&mut self) {
+        let Self {
+            node_ui,
+            breaker_ui,
+            connection_ui,
+            preview_drag,
+            subscription_ui,
+            new_node_ui,
+            node_menu,
+            selection_ui,
+            pan_anchor,
+            // Survivors: caches that outlive the scene on purpose, and the
+            // frame-local facts `prepass` rewrites before anything reads them.
+            background: _,
+            geometry: _,
+            hits: _,
+            inspectors: _,
+            visible: _,
+            gesture: _,
+            cancelled: _,
+        } = self;
+        node_ui.reset();
+        breaker_ui.reset();
+        connection_ui.reset();
+        preview_drag.reset();
+        subscription_ui.reset();
+        new_node_ui.reset();
+        node_menu.reset();
+        selection_ui.reset();
+        pan_anchor.clear();
+    }
+
     pub(crate) fn sync_visibility(&mut self, doc: &Document) -> bool {
         let visible = doc.shows_graph();
         if self.visible == visible {
             return false;
         }
         self.visible = visible;
-        self.gestures = Gestures::default();
+        self.reset_gestures();
         self.inspectors.close_unpinned();
         true
     }
@@ -244,9 +278,13 @@ impl GraphUI {
             inspectors,
             gesture: frame_gesture,
             cancelled,
-            gestures,
-            background: _,
-            visible: _,
+            pan_anchor,
+            node_ui,
+            preview_drag,
+            new_node_ui,
+            connection_ui,
+            subscription_ui,
+            ..
         } = self;
         // Resolve the frame's bare-canvas gesture and park it for `draw` to
         // read back — the classification is one response poll, and both
@@ -259,8 +297,8 @@ impl GraphUI {
         *cancelled = ui.escape_pressed();
         let gesture = classify_canvas_gesture(ui);
         *frame_gesture = gesture;
-        pan_zoom::emit_pan_zoom(&mut gestures.pan_anchor, ui, graph_ctx, gesture, out);
-        gestures.node_ui.prepass(ui, graph_ctx, out);
+        pan_zoom::emit_pan_zoom(pan_anchor, ui, graph_ctx, gesture, out);
+        node_ui.prepass(ui, graph_ctx, out);
         geometry.rebuild(ui, graph_ctx, hits);
         // Everything below reads the settled geometry and this frame's swept
         // hits, so from here the canvas has a context of its own.
@@ -273,16 +311,16 @@ impl GraphUI {
         // frame's drag edges and centers, and `preview_drag_modifier` keeps
         // them disjoint: the preview spawn takes the output column under the
         // chord, the wire gesture takes it otherwise.
-        gestures.preview_drag.apply(ui, cx, out);
+        preview_drag.apply(ui, cx, out);
         // A node picked from a drop-spawned palette last frame re-floats its
         // wire so the user clicks the exact port to land it.
-        let resume = gestures.new_node_ui.take_resume_floating();
-        gestures.connection_ui.apply(ui, cx, resume, out);
+        let resume = new_node_ui.take_resume_floating();
+        connection_ui.apply(ui, cx, resume, out);
         // Subscription wires (emitter → subscriber) latch/commit here, for
         // the same pre-record reasons as the connection gesture above; an
         // emitter glyph and a data port can't both latch (different widget-id
         // spaces).
-        gestures.subscription_ui.apply(ui, cx, out);
+        subscription_ui.apply(ui, cx, out);
         // Inspector chip toggles + the close-on-outside-action sweep, both
         // off this frame's swept hits.
         inspectors.apply(ui, cx);
@@ -290,8 +328,8 @@ impl GraphUI {
         // above, and the flags this writes are document-unique, so the draw
         // reads finished geometry. Taking the table back `&mut` is what ends
         // `cx` — nothing below may read one.
-        gestures.connection_ui.bake_snap_hover(geometry);
-        gestures.subscription_ui.bake_snap_hover(geometry);
+        connection_ui.bake_snap_hover(geometry);
+        subscription_ui.bake_snap_hover(geometry);
         // The keyboard half of the same phase. Last, so a chord reads the
         // document the pointer gestures above were raised against.
         shortcuts::emit(ui, graph_ctx, out);
@@ -346,7 +384,11 @@ impl GraphUI {
             hits,
             gesture,
             cancelled,
-            gestures,
+            selection_ui,
+            breaker_ui,
+            connection_ui,
+            new_node_ui,
+            node_menu,
             ..
         } = self;
         let cx = CanvasCtx::new(graph_ctx, geometry, hits, *gesture, *cancelled);
@@ -367,28 +409,26 @@ impl GraphUI {
         // graph, and the offset cache fills in port centers for nodes that
         // hadn't recorded yet. `cx` carries that same table; no second
         // rebuild needed.
-        gestures.selection_ui.apply(ui, cx, out);
-        gestures.breaker_ui.apply(ui, cx, out);
+        selection_ui.apply(ui, cx, out);
+        breaker_ui.apply(ui, cx, out);
         // A connection released over empty canvas (detected in `prepass`)
         // opens the new-node popup; picking a node re-floats the wire. Only
         // the pane holding the dropped wire's source claims it.
-        let pending_connection = gestures.connection_ui.take_pending_connection();
+        let pending_connection = connection_ui.take_pending_connection();
         // A right-click that just ended a floating wire shouldn't also open
         // the palette — suppress the `NewNode` gesture for this frame, by
         // handing the popup a context whose gesture slot is empty.
-        let popup_cx = if gestures.connection_ui.ended_on_secondary() {
+        let popup_cx = if connection_ui.ended_on_secondary() {
             cx.without_gesture()
         } else {
             cx
         };
-        gestures
-            .new_node_ui
-            .apply(ui, popup_cx, pending_connection, out);
+        new_node_ui.apply(ui, popup_cx, pending_connection, out);
         // The menu records every frame whatever comes of it — its popup owns a
         // lifecycle that depends on it — and everything a pick means goes onto
         // `out`, so there is no precedence to settle here: a frame in which
         // both a menu pick and a chip click landed raises both.
-        gestures.node_menu.apply(ui, cx, out);
+        node_menu.apply(ui, cx, out);
         emit_chip_commands(cx, out);
     }
 
@@ -405,18 +445,12 @@ impl GraphUI {
             cancelled,
             inspectors,
             gesture,
-            gestures:
-                Gestures {
-                    node_ui,
-                    breaker_ui,
-                    connection_ui,
-                    preview_drag: _,
-                    subscription_ui,
-                    new_node_ui: _,
-                    node_menu: _,
-                    selection_ui,
-                    pan_anchor: _,
-                },
+            node_ui,
+            breaker_ui,
+            connection_ui,
+            subscription_ui,
+            selection_ui,
+            ..
         } = self;
         let cx = CanvasCtx::new(graph_ctx, geometry, hits, *gesture, *cancelled);
         let theme = cx.theme();
@@ -432,7 +466,7 @@ impl GraphUI {
 
         // Outer canvas: covers the whole pane, paints the canvas
         // background, owns the input routing for empty-canvas
-        // gestures. Senses:
+        //  Senses:
         // - `DRAG`: middle-button canvas pan (graph-editor
         //   convention; left-drag is reserved for rubber-band
         //   selection once that lands). Pulled via
