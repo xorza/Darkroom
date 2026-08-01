@@ -5,9 +5,10 @@ use glam::Vec2;
 use palantir::{Rect, Shape, Stroke, Ui};
 
 use crate::core::edit::intent::types::GraphIntent;
+use crate::gui::pane::graph::canvas::{outer_canvas_widget_id, to_world};
 use crate::gui::pane::graph::ctx::CanvasCtx;
+use crate::gui::pane::graph::gesture::canvas_gesture::CanvasGesture;
 use crate::gui::pane::graph::gesture::slot::GestureSlot;
-use crate::gui::pane::graph::{CanvasGesture, outer_canvas_widget_id, to_world};
 use crate::gui::requests::Requests;
 use crate::gui::theme::Theme;
 

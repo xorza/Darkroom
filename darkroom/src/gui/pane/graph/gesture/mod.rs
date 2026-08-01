@@ -11,6 +11,7 @@
 //! rest are built out of.
 
 pub(crate) mod breaker;
+pub(crate) mod canvas_gesture;
 pub(crate) mod connection;
 pub(crate) mod drag_anchor;
 pub(crate) mod new_node;

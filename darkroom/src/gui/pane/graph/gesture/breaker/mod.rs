@@ -4,10 +4,11 @@ use scenarium::NodeId;
 use scenarium::{InputPort, Subscription};
 
 use crate::core::edit::intent::types::GraphIntent;
+use crate::gui::pane::graph::canvas::{outer_canvas_widget_id, to_world};
 use crate::gui::pane::graph::ctx::CanvasCtx;
+use crate::gui::pane::graph::gesture::canvas_gesture::CanvasGesture;
 use crate::gui::pane::graph::gesture::slot::GestureSlot;
 use crate::gui::pane::graph::paint::wire::Wire;
-use crate::gui::pane::graph::{CanvasGesture, outer_canvas_widget_id, to_world};
 use crate::gui::requests::Requests;
 use crate::gui::theme::Theme;
 

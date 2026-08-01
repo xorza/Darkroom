@@ -1,7 +1,7 @@
 use glam::Vec2;
 use palantir::{ColorU8, Image, ImageFit, ImageHandle, Shape, Ui};
 
-use crate::gui::pane::graph::outer_canvas_widget_id;
+use crate::gui::pane::graph::canvas::outer_canvas_widget_id;
 use crate::gui::theme::Theme;
 
 /// Target on-screen tile spacing range, as a multiple of the theme's

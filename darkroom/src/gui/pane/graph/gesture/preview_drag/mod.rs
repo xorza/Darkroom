@@ -18,9 +18,9 @@ use crate::core::preview;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::pane::graph::ctx::CanvasCtx;
 use crate::gui::pane::graph::frame::geometry::CanvasGeometry;
+use crate::gui::pane::graph::gesture::canvas_gesture::preview_drag_modifier;
 use crate::gui::pane::graph::gesture::drag_anchor::GroupDrag;
 use crate::gui::pane::graph::node::port_row::{add_preview_intents, port_circle_wid};
-use crate::gui::pane::graph::preview_drag_modifier;
 use crate::gui::requests::Requests;
 
 /// The in-flight spawn-and-place drag, or none.

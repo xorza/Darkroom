@@ -6,10 +6,10 @@ use std::collections::BTreeSet;
 use scenarium::NodeId;
 
 use crate::gui::graph_ctx::GraphCtx;
-use crate::gui::pane::graph::CanvasGesture;
 use crate::gui::pane::graph::frame::cull::CullRegion;
 use crate::gui::pane::graph::frame::geometry::CanvasGeometry;
 use crate::gui::pane::graph::frame::hits::CanvasHits;
+use crate::gui::pane::graph::gesture::canvas_gesture::CanvasGesture;
 use crate::gui::pane::graph::paint::inspector::Inspectors;
 use crate::gui::theme::Theme;
 

@@ -14,9 +14,10 @@ use scenarium::{SPECIAL_NODES, SpecialNode};
 use crate::core::document::PortRef;
 use crate::core::edit::intent::types::GraphIntent;
 use crate::gui::graph_ctx::GraphCtx;
+use crate::gui::pane::graph::canvas::{outer_canvas_widget_id, to_world};
 use crate::gui::pane::graph::ctx::CanvasCtx;
+use crate::gui::pane::graph::gesture::canvas_gesture::CanvasGesture;
 use crate::gui::pane::graph::paint::anchored_menu::AnchoredMenu;
-use crate::gui::pane::graph::{CanvasGesture, outer_canvas_widget_id, to_world};
 use crate::gui::requests::Requests;
 
 /// One row of a category's palette list: a library `Func` or a built-in
