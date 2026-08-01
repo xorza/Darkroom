@@ -93,10 +93,16 @@ use crate::gui::requests::Requests;
 /// classification) when it missed every node/port.
 #[derive(Default, Debug)]
 pub(crate) struct GraphUI {
-    /// Whether a pane showed this canvas last frame. Read back by
-    /// [`Self::sync_visibility`] as the edge detector behind the transient
-    /// reset — a question the current frame alone cannot answer.
-    visible: bool,
+    /// The frame this canvas last ran [`Self::prepass`] on, or `None` before
+    /// its first ever one.
+    ///
+    /// The prepass runs only while a pane is showing the graph, so a *gap*
+    /// here means the canvas was away — which is how it notices its own
+    /// reappearance without anything having to run on its behalf while it was
+    /// gone. A stamp rather than a cached `bool` copy of
+    /// [`Document::shows_graph`], so there is no second spelling of visibility
+    /// to keep in step with the first.
+    last_prepass_frame: Option<u64>,
     background: CanvasBackground,
     pub(crate) geometry: CanvasGeometry,
     /// Last frame's node interactions, swept once at the top of the frame
@@ -206,7 +212,7 @@ impl GraphUI {
             geometry: _,
             hits: _,
             inspectors: _,
-            visible: _,
+            last_prepass_frame: _,
             gesture: _,
             cancelled: _,
         } = self;
@@ -231,59 +237,46 @@ impl GraphUI {
     /// [`CanvasGeometry`]'s port-offset table, so connections still anchor on
     /// the first frame after a switch.
     ///
-    /// Returns whether the canvas just *appeared*, which the caller turns
-    /// into a relayout request: a canvas that has never recorded has no cached
-    /// geometry to draw its first frame from, and a dock op raises no geometry
-    /// signal of its own (`UndoStep::invalidates_cached_geometry` is `false`
-    /// for one). Disappearing is the other half of the same edge but needs no
-    /// pass — nothing is drawn to lay out — so it drops its gestures and
-    /// reports `false`.
+    /// Whether this prepass is the canvas's first after being away — the
+    /// edge that owes a relayout, since a canvas that has never recorded has
+    /// no cached geometry to draw its first frame from, and a dock op raises
+    /// no geometry signal of its own
+    /// (`UndoStep::invalidates_cached_geometry` is `false` for one).
     ///
-    /// Must still run every frame even though it acts on neither steady
-    /// state: the edge is only visible by comparing against the frame before,
-    /// and clearing gestures is correct only on the transition, since every
-    /// gesture spans frames by definition.
-    pub(crate) fn sync_visibility(&mut self, doc: &Document) -> bool {
-        let visible = doc.shows_graph();
-        if self.visible == visible {
-            return false;
-        }
-        self.visible = visible;
-        self.reset_gestures();
-        self.inspectors.close_unpinned();
-        visible
+    /// Reads the frame stamp rather than a visibility flag, so nothing has to
+    /// run while the canvas is off screen for it to notice coming back. Two
+    /// cases both mean *still here* and must not read as an appearance: the
+    /// previous frame (the ordinary steady state) and *this* frame — a split
+    /// view showing the graph in two panes runs this once per pane, since
+    /// `DockLayout::active_tabs` yields one tab per group and never dedupes.
+    /// Only a gap wider than that is an absence.
+    fn appearing(&mut self, ui: &Ui) -> bool {
+        let frame = ui.frame_id();
+        let appearing = self
+            .last_prepass_frame
+            .is_none_or(|last| last.saturating_add(1) < frame);
+        self.last_prepass_frame = Some(frame);
+        appearing
     }
 
-    /// Pre-record pass — see
-    /// [`crate::gui::pane::graph::node::NodeUI::prepass`]. Every input-derived
-    /// intent that can change layout is emitted here, *before* the
-    /// record, so its effect is applied to `Document` by the pre-record
-    /// drain and Pass A records the settled layout:
-    ///
-    /// - pan/zoom (`emit_pan_zoom` → `GraphIntent::SetViewport`),
-    /// - node drag (`node_ui.prepass` → `GraphIntent::MoveSelection`),
-    /// - connection commit (`connection_ui.apply` → `GraphIntent::SetInput`).
-    ///
-    /// Connection commit specifically *must* be here: binding an input
-    /// that had a const value removes its inline editor and resizes the
-    /// node. If committed during the record (post-record drain), Pass A
-    /// records the pre-resize layout and the relayout's Pass B rebuilds
-    /// `CanvasGeometry` from that stale cascade — the new connection floats
-    /// to the old port. Committing pre-record makes `cascade_A` the
-    /// resized layout, so Pass B anchors the curve correctly with no
-    /// extra frame. `CanvasGeometry` is rebuilt here (and reused by
-    /// [`Self::draw`]) because the commit reads it. Navigation (tab/open) is handled
-    /// separately, before this, so the target is already fixed here.
-    ///
-    /// Runs **once** for the whole graph. The viewport-dependent half —
-    /// the bare-canvas gesture classification and pan/zoom, which read one
-    /// pane's outer-canvas response — loops the visible panes; everything
-    /// else is keyed by document-unique ids and sweeps them all at once.
-    pub(crate) fn prepass(&mut self, ui: &mut Ui, graph_ctx: GraphCtx<'_>, out: &mut Requests) {
+    pub(crate) fn prepass(
+        &mut self,
+        ui: &mut Ui,
+        graph_ctx: GraphCtx<'_>,
+        out: &mut Requests,
+    ) -> bool {
         debug_assert!(
             graph_ctx.is_visible(),
             "the prepass is reached from an active Graph tab"
         );
+        // First: a canvas back from being away drops the transient state it
+        // left latched, since a drag still held would otherwise resume under
+        // a pointer that has long since moved on.
+        let appearing = self.appearing(ui);
+        if appearing {
+            self.reset_gestures();
+            self.inspectors.close_unpinned();
+        }
         let Self {
             geometry,
             hits,
@@ -345,6 +338,7 @@ impl GraphUI {
         // The keyboard half of the same phase. Last, so a chord reads the
         // document the pointer gestures above were raised against.
         shortcuts::emit(ui, graph_ctx, out);
+        appearing
     }
 
     /// Record one graph pane: its gestures' record-phase halves, then the
@@ -450,7 +444,7 @@ impl GraphUI {
     /// gesture previews.
     fn record_canvas(&mut self, ui: &mut Ui, graph_ctx: GraphCtx<'_>, out: &mut Requests) {
         let Self {
-            visible: _,
+            last_prepass_frame: _,
             background,
             geometry,
             hits,
@@ -608,3 +602,51 @@ fn emit_chip_commands(cx: CanvasCtx<'_>, out: &mut Requests) {
 
 #[cfg(test)]
 pub(crate) mod harness;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::document::harness::DocFixture;
+    use crate::gui::pane::graph::harness::CanvasHarness;
+
+    /// The prepass runs once per pane showing the graph, so the frame stamp —
+    /// not a visibility flag — is what tells the canvas it was away.
+    ///
+    /// Three cases must read as *still here*, and only a gap as an
+    /// appearance. The split-view one is the trap: `DockLayout::active_tabs`
+    /// yields one tab per group with no dedup, so two panes on the graph run
+    /// this twice in a single frame, and a second call reading as an
+    /// appearance would reset a drag mid-gesture.
+    #[test]
+    fn appearing_is_a_frame_gap_not_a_repeat_or_a_step() {
+        let mut h = CanvasHarness::new(DocFixture::probes(1));
+        let mut graph_ui = GraphUI::default();
+
+        assert!(
+            graph_ui.appearing(h.ui.ui()),
+            "a canvas that has never recorded is appearing"
+        );
+        assert!(
+            !graph_ui.appearing(h.ui.ui()),
+            "a second pane on the same frame is the same appearance, not a new one"
+        );
+
+        h.ui.frame(|_| {});
+        assert!(
+            !graph_ui.appearing(h.ui.ui()),
+            "the next consecutive frame is the steady state"
+        );
+
+        // Two frames the canvas sat out — the pane was on another tab.
+        h.ui.frame(|_| {});
+        h.ui.frame(|_| {});
+        assert!(
+            graph_ui.appearing(h.ui.ui()),
+            "a gap means it was away and is back"
+        );
+        assert!(
+            !graph_ui.appearing(h.ui.ui()),
+            "and the reappearance is reported once, not per pane"
+        );
+    }
+}

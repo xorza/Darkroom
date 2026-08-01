@@ -181,8 +181,8 @@ impl Editor {
         // pan/zoom, connection commit) drained *before* the record so Pass A
         // sees the settled doc. Driven by the panes on screen, like the record
         // pass below — a pane kind that grows input handling gets an arm there
-        // rather than another question here. A canvas that just appeared or
-        // vanished needs a relayout: it may never have recorded, and a dock op
+        // rather than another question here. A canvas that just became
+        // visible needs a relayout: it may never have recorded, and a dock op
         // raises no geometry signal of its own.
         needs_relayout |= self.main_window.prepass(ui, ctx, &open.document, requests);
         needs_relayout |= self.drain_requests(open, requests);
