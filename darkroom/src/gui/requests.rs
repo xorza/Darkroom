@@ -1,6 +1,8 @@
 //! The frame's pending requests: everything a UI surface asked for, in the
 //! order it asked.
 
+use std::collections::VecDeque;
+
 use crate::core::document::dock::DockOp;
 use crate::core::edit::intent::types::GraphIntent;
 use crate::gui::app::commands::AppCommand;
@@ -32,10 +34,10 @@ pub(crate) enum DocumentRequest {
 ///
 /// A surface pushes and moves on: the push methods are one vocabulary and say
 /// nothing about which level will pick the request up. Behind them the tiers
-/// are stored apart, one queue per drain, so each owner takes its own by type
-/// — [`Self::drain_document`] for the editor, [`Self::drain_app`] for the
-/// shell — and neither has to step over, or pattern-match away, a tier its
-/// queue cannot hold.
+/// are stored apart, one queue per taker, so each owner takes its own by type
+/// — [`Self::drain_document`] for the editor, [`Self::pop_app`] for the shell
+/// — and neither has to step over, or pattern-match away, a tier its queue
+/// cannot hold.
 ///
 /// Nothing is dropped and nothing is reordered *within* a tier: two surfaces
 /// answering the same frame both get what they asked for, in the order the
@@ -44,7 +46,7 @@ pub(crate) enum DocumentRequest {
 #[derive(Debug, Default)]
 pub(crate) struct Requests {
     document: Vec<DocumentRequest>,
-    app: Vec<AppCommand>,
+    app: VecDeque<AppCommand>,
 }
 
 impl Requests {
@@ -66,11 +68,11 @@ impl Requests {
 
     /// Queue a side effect for `App` to run after the pass.
     pub(crate) fn push_app(&mut self, command: AppCommand) {
-        self.app.push(command);
+        self.app.push_back(command);
     }
 
     /// Take everything the document owns, in the order raised, leaving the
-    /// app tier queued for [`Self::drain_app`].
+    /// app tier queued for [`Self::pop_app`].
     ///
     /// The editor calls this three times a frame — after the navigation scan,
     /// after the prepass, and after the record — so a request raised in one
@@ -81,9 +83,18 @@ impl Requests {
         self.document.drain(..)
     }
 
-    /// Take the app tier, in the order raised.
-    pub(crate) fn drain_app(&mut self) -> impl Iterator<Item = AppCommand> + '_ {
-        self.app.drain(..)
+    /// Take the next app-tier command, in the order raised.
+    ///
+    /// One at a time rather than an iterator over the lot, because running a
+    /// command needs `&mut App` and the queue lives on it: an iterator would
+    /// hold the queue borrowed for the whole loop, forcing the caller to move
+    /// the commands somewhere else first. Popping ends the borrow before each
+    /// dispatch, so the loop needs no buffer and allocates nothing.
+    ///
+    /// A `VecDeque` for that reason — `Vec::remove(0)` would be O(n) per
+    /// command, and popping the *back* would run them in reverse.
+    pub(crate) fn pop_app(&mut self) -> Option<AppCommand> {
+        self.app.pop_front()
     }
 
     pub(crate) fn is_empty(&self) -> bool {
@@ -149,7 +160,7 @@ mod tests {
         // nothing left of its own and still leaves the app tier alone.
         assert_eq!(out.drain_document().count(), 0);
 
-        let commands: Vec<AppCommand> = out.drain_app().collect();
+        let commands: Vec<AppCommand> = std::iter::from_fn(|| out.pop_app()).collect();
         assert!(
             matches!(
                 commands[..],

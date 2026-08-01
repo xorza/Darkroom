@@ -10,7 +10,6 @@ use crate::core::status::StatusLog;
 use crate::core::wake::Wake;
 use crate::gui::HostHandle;
 use crate::gui::MAIN_WINDOW;
-use crate::gui::app::commands::AppCommand;
 use crate::gui::app::ctx::{AppCtx, StatusInputs};
 use crate::gui::app::discard_dialog::{DiscardChoice, DiscardOutcome};
 use crate::gui::requests::Requests;
@@ -322,12 +321,12 @@ impl palantir::App for App {
         let mut needs_relayout =
             self.session
                 .frame(ui, ctx, &mut self.preferences, &mut self.requests);
-        // What the editor left behind: every command the frame raised, in the
+        // What the session left behind: every command the frame raised, in the
         // order it raised them — a keyboard chord and a click on the same
-        // frame both land. Collected first because running one needs all of
-        // `self`, and the drain borrows the queue that lives on it.
-        let commands: Vec<AppCommand> = self.requests.drain_app().collect();
-        for command in commands {
+        // frame both land. Popped one at a time so the queue is not borrowed
+        // while a command runs, which is what lets `handle_command` take all
+        // of `self`.
+        while let Some(command) = self.requests.pop_app() {
             needs_relayout |= self.handle_command(ui, command);
         }
         // The app's one relayout request, past both tiers: everything that can
