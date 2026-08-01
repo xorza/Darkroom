@@ -195,6 +195,23 @@ impl<'a> InlineRename<'a> {
                 .id(id)
                 .style(&edit_style)
                 .max_chars(max_chars)
+                // Renaming replaces a name far more often than it edits
+                // one, so the draft arrives selected and the first
+                // keystroke wipes it. Safe against the double-click that
+                // opened the session: `double_clicked` fires on the
+                // second *release*, so the button is already up by the
+                // frame the editor first records — and the select-all is
+                // gated on no press being held, which is what keeps a
+                // click *into* an open editor placing the caret instead.
+                .select_all_on_focus()
+                // Renaming replaces a name far more often than it edits
+                // one, so the draft arrives selected and the first
+                // keystroke wipes it. Safe against the double-click that
+                // opened the session: `double_clicked` fires on the
+                // second *release*, so the button is already up by the
+                // frame the editor first records — and the select-all is
+                // gated on no press being held, which is what keeps a
+                // click *into* an open editor placing the caret instead.
                 .size((Sizing::HUG, Sizing::HUG))
                 .min_size((MIN_EDIT_WIDTH, line_h))
                 .text_align(text_align)
@@ -244,4 +261,66 @@ fn edit_style(theme: &InlineRenameTheme, text: Option<&TextStyle>) -> TextEditTh
         }
     }
     style
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::gui::theme::Theme;
+    use glam::UVec2;
+    use palantir::Key;
+    use palantir::internals::UiHarness;
+
+    /// Entering rename selects the whole draft, so the first keystroke
+    /// replaces the name instead of appending to it.
+    ///
+    /// Asserted through the committed value rather than the editor's
+    /// selection range — that's the behaviour the caller sees, and the
+    /// range is palantir-internal anyway. Without `select_all_on_focus`
+    /// the caret sits where the double-click landed and this commits
+    /// some splice of the old name and the new character.
+    #[test]
+    fn entering_edit_mode_selects_the_whole_name() {
+        let theme = Theme::default();
+        let id = WidgetId::from_hash("rename-select-all");
+        let mut h = UiHarness::new(UVec2::new(300, 100));
+
+        fn render(ui: &mut Ui, id: WidgetId, theme: &Theme) -> RenameEvent {
+            let name = ui.intern("Alpha");
+            InlineRename::new(id, name, &theme.inline_rename).show(ui)
+        }
+
+        // Lay the label out, then double-click it to open the editor.
+        h.frame(|ui| {
+            render(ui, id, &theme);
+        });
+        let hit = h.rect(id).expect("label arranged").center();
+        h.click_at(hit);
+        h.frame(|ui| {
+            render(ui, id, &theme);
+        });
+        h.click_at(hit);
+        h.frame(|ui| {
+            render(ui, id, &theme);
+        });
+
+        // The editor's first frame: focus lands and the draft selects.
+        h.frame(|ui| {
+            render(ui, id, &theme);
+        });
+
+        // One character replaces the selection outright.
+        h.key(Key::Char('X'));
+        h.frame(|ui| {
+            render(ui, id, &theme);
+        });
+
+        h.key(Key::Enter);
+        let committed = h.frame_value(|ui| render(ui, id, &theme).committed);
+        assert_eq!(
+            committed.as_deref(),
+            Some("X"),
+            "the first keystroke must replace the whole name, not splice into it",
+        );
+    }
 }
