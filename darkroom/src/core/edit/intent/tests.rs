@@ -9,8 +9,8 @@ use scenarium::{Binding, CacheMode, InputPort, Node, NodeId, NodeKind};
 use crate::core::document::harness::DocFixture;
 use crate::core::document::{Document, Viewport};
 use crate::core::edit::intent::apply::{apply_step, commit_intent, revert_step};
+use crate::core::edit::intent::duplicate::build_duplicate_intent;
 use crate::core::edit::intent::duplicate::internals::duplicate_offset;
-use crate::core::edit::intent::duplicate::{build_duplicate_intent, build_duplicate_intent_for};
 use crate::core::edit::intent::types::{GraphIntent, NodeProperty, Refusal, UndoStep};
 
 #[test]
@@ -268,14 +268,13 @@ fn duplicate_intent_drops_or_keeps_external_by_flag() {
     );
     doc.graph
         .set_input_binding(InputPort::new(b, 2), Binding::bind(c, 0));
-    let node_ids: BTreeSet<NodeId> = [a, b].into_iter().collect();
-    doc.main_view.selected = node_ids.iter().copied().collect();
+    doc.main_view.selected = [a, b].into_iter().collect();
 
     let Some(GraphIntent::DuplicateNodes {
         nodes,
         bindings,
         subscriptions,
-    }) = build_duplicate_intent(&doc)
+    }) = build_duplicate_intent(&doc, false)
     else {
         panic!("expected a DuplicateNodes intent");
     };
@@ -332,7 +331,7 @@ fn duplicate_intent_drops_or_keeps_external_by_flag() {
         nodes: incoming_nodes,
         bindings: incoming,
         ..
-    }) = build_duplicate_intent_for(&doc, &node_ids, true)
+    }) = build_duplicate_intent(&doc, true)
     else {
         panic!("expected a DuplicateNodes intent");
     };
@@ -360,7 +359,7 @@ fn duplicate_intent_drops_or_keeps_external_by_flag() {
 fn duplicate_intent_none_without_selection() {
     let mut fixture = DocFixture::default();
     fixture.stub_at(Vec2::ZERO);
-    assert!(build_duplicate_intent(&fixture.doc).is_none());
+    assert!(build_duplicate_intent(&fixture.doc, false).is_none());
 }
 
 #[test]

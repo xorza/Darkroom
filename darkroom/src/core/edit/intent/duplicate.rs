@@ -2,52 +2,37 @@
 //! here rather than on `Document` — that's the persisted model; intent
 //! construction is editing machinery.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::HashMap;
 
 use glam::Vec2;
 use scenarium::{Binding, InputPort, NodeId, Subscription};
 
-use crate::core::document::{Document, GraphView};
+use crate::core::document::Document;
 use crate::core::edit::intent::types::GraphIntent;
 
 /// World-space offset applied to duplicated nodes so the copies don't
 /// land exactly on top of their originals.
 const DUPLICATE_OFFSET: Vec2 = Vec2::new(32.0, 32.0);
 
-/// The `NodeId`s in `view`'s selection. Shared by the Ctrl+D duplicate path
-/// ([`build_duplicate_intent`]) and the node context menu's duplicate action
-/// (`Editor::apply_node_menu_action`).
-pub(crate) fn selected_node_ids(view: &GraphView) -> BTreeSet<NodeId> {
-    view.selected.iter().copied().collect()
-}
-
-/// Build an [`GraphIntent::DuplicateNodes`] for `target`'s current selection.
-/// Thin wrapper over [`build_duplicate_intent_for`] with the selected node
-/// bodies and incoming (external) wires dropped — the Ctrl+D path.
-pub(crate) fn build_duplicate_intent(doc: &Document) -> Option<GraphIntent> {
-    let view = &doc.main_view;
-    let node_ids = selected_node_ids(view);
-    if node_ids.is_empty() {
-        return None;
-    }
-    build_duplicate_intent_for(doc, &node_ids, false)
-}
-
-/// Build an [`GraphIntent::DuplicateNodes`] cloning `node_ids`: each
-/// node gets a fresh id and an offset position, const-value bindings copy
-/// verbatim, and the data + event connections *among* `node_ids` are
-/// recreated against the clones. A `Bind` whose source is *outside* the set
-/// is dropped unless `include_incoming` is set, in which case the clone
-/// keeps the wire pointing at the original external producer. `None` when
-/// `node_ids` is empty or the target doesn't resolve. Reads the document to
-/// assemble the intent — editor-operation construction, kept with the rest
-/// of the intent machinery rather than on the `Document` model.
-pub(crate) fn build_duplicate_intent_for(
+/// Build an [`GraphIntent::DuplicateNodes`] cloning `doc`'s current
+/// selection: each node gets a fresh id and an offset position, const-value
+/// bindings copy verbatim, and the data + event connections *among* the
+/// selected nodes are recreated against the clones. A `Bind` whose source is
+/// *outside* the selection is dropped unless `include_incoming` is set, in
+/// which case the clone keeps the wire pointing at the original external
+/// producer. `None` when nothing is selected. Reads the document to assemble
+/// the intent — editor-operation construction, kept with the rest of the
+/// intent machinery rather than on the `Document` model.
+///
+/// The selection is the only source of a duplicate set: Ctrl+D and the node
+/// context menu's two Duplicate picks both act on it, the latter because a
+/// right-click selects the node it landed on first.
+pub(crate) fn build_duplicate_intent(
     doc: &Document,
-    node_ids: &BTreeSet<NodeId>,
     include_incoming: bool,
 ) -> Option<GraphIntent> {
     let (graph, view) = (&doc.graph, &doc.main_view);
+    let node_ids = &view.selected;
     if node_ids.is_empty() {
         return None;
     }
