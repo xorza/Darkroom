@@ -3,15 +3,16 @@
 //!
 //! One type rather than a closure per test file because the subject under test
 //! is the same machinery in each case — [`Self::frame`] runs the sequence
-//! `MainWindow` runs, `scan_navigation` → `prepass` → `draw`, and only the
-//! gesture driven through it differs. A test that skipped a phase would be
-//! exercising a frame the app never performs.
+//! `MainWindow` runs, `prepass` → `draw`, and only the gesture driven
+//! through it differs. A test that skipped a phase would be exercising a
+//! frame the app never performs.
 
 use glam::{UVec2, Vec2};
 use palantir::internals::UiHarness;
 use palantir::{Configure, Panel, Rect, Sizing, Ui};
 use scenarium::NodeId;
 
+use crate::core::document::dock::DockOp;
 use crate::core::document::harness::DocFixture;
 use crate::core::document::{Document, PortRef};
 use crate::core::edit::intent::types::GraphIntent;
@@ -40,6 +41,10 @@ pub(crate) struct CanvasHarness {
     /// intents that call returns rather than folded into them: the canvas
     /// raises both tiers, and a test is almost always about one of them.
     pub(crate) commands: Vec<AppCommand>,
+    /// The view ops the last [`Self::frame`] raised. Rare — the canvas asks
+    /// for one thing the dock owns, a viewer tab for a clicked preview card —
+    /// but real, so they are collected rather than treated as impossible.
+    pub(crate) view_ops: Vec<DockOp>,
 }
 
 impl CanvasHarness {
@@ -70,27 +75,32 @@ impl CanvasHarness {
             graph_ui: GraphUI::default(),
             ctx: GraphCtxFixture::over(fixture),
             commands: Vec::new(),
+            view_ops: Vec::new(),
         }
     }
 
     /// One canvas frame, in the order `MainWindow` runs its phases, returning
-    /// the graph intents it raised. App commands land in [`Self::commands`].
-    ///
-    /// Panics if a canvas widget raised a view op: none of them can reach the
-    /// dock, so one that did is our own bug rather than a case to assert on.
+    /// the graph intents it raised. App commands land in [`Self::commands`],
+    /// view ops in [`Self::view_ops`] — one tier per sink, so a test reads the
+    /// one it is about without matching the others away.
     pub(crate) fn frame(&mut self) -> Vec<GraphIntent> {
         let Self {
             ui,
             graph_ui,
             ctx,
             commands,
+            view_ops,
         } = self;
         let mut out = ui.frame_value(|recorder: &mut Ui| Self::record(graph_ui, ctx, recorder));
+        view_ops.clear();
         let intents: Vec<GraphIntent> = out
             .drain_document()
-            .map(|request| match request {
-                DocumentRequest::Graph(intent) => intent,
-                DocumentRequest::View(op) => panic!("a canvas widget raised {op:?}"),
+            .filter_map(|request| match request {
+                DocumentRequest::Graph(intent) => Some(intent),
+                DocumentRequest::View(op) => {
+                    view_ops.push(op);
+                    None
+                }
             })
             .collect();
         commands.clear();
@@ -122,7 +132,6 @@ impl CanvasHarness {
     fn record(graph_ui: &mut GraphUI, ctx: &mut GraphCtxFixture, recorder: &mut Ui) -> Requests {
         let mut out = Requests::default();
         let graph_ctx = ctx.graph_ctx();
-        graph_ui.scan_navigation(recorder, graph_ctx, &mut out);
         graph_ui.prepass(recorder, graph_ctx, &mut out);
         Panel::vstack()
             .id_salt("pane")

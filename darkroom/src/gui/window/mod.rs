@@ -65,21 +65,15 @@ pub(crate) struct MainWindow {
 }
 
 impl MainWindow {
-    /// Navigation scan: surface tab activate/close/drag-drop and
-    /// graph-open requests from *last* frame's responses (`scene` is
-    /// the last-rendered graph, which is what carried the clicked
-    /// chips). `App` runs this at the top of the frame so a switch
-    /// applies before the record — the switched-to graph records in
-    /// Pass A and its connections draw in Pass B, no first-frame gap.
+    /// Navigation scan: surface tab activate/close/drag-drop from *last*
+    /// frame's chip responses. Runs at the top of the frame so a switch
+    /// applies before the record — the switched-to tab records in Pass A and
+    /// its connections draw in Pass B, no first-frame gap.
+    ///
+    /// The dock is the whole of it. The panes' own input reads are the
+    /// prepass's, over the arrangement this phase's drain settles.
     pub(crate) fn scan_navigation(&mut self, ui: &mut Ui, cx: WindowCtx<'_>, out: &mut Requests) {
         self.dock.scan(ui, cx.document(), out);
-        // The canvas's own half of the same phase: it sweeps last frame's node
-        // responses and raises the tab opens they mean. Runs ahead of the tab
-        // dispatch, so it is reached whether or not a pane is showing the
-        // graph — with none up there is nothing to sweep, which it answers for
-        // itself.
-        self.graph_ui
-            .scan_navigation(ui, GraphCtx::new(cx, &mut self.output_types), out);
     }
 
     /// Edit-phase prepass: input-derived graph mutations for the

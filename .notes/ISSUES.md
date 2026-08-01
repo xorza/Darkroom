@@ -15,7 +15,8 @@
   `pub(crate) mod internals { impl NewNodeUi {} }` — an empty impl in an
   otherwise empty gated module.
 
-- Five of the eight canvas tests that drive `GraphUI` through `UiHarness`
-  (`frame/geometry`, `gesture/{breaker,connection,new_node,preview_drag}`) omit
-  `graph_ui.scan_hits`, so they record a frame sequence production never
-  performs and nothing reading `CanvasHits` is covered there.
+- Clicking a preview card's image opens its viewer tab within the same record
+  pass, after `PreviewStore::reconcile` has already run in `App::update`. The
+  viewer therefore draws its first frame against `FullImage::Deferred` and
+  trips the `debug_assert!` in `gui/pane/viewer/mod.rs` that says a visible
+  viewer's source was not materialized.

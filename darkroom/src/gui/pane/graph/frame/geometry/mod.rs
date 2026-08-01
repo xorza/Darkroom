@@ -299,16 +299,21 @@ impl CanvasGeometry {
         self.node_sizes.retain(|id, _| keep(*id));
     }
 
-    /// Fills `hits`' port half on the way through — see the type docs for
-    /// why the port polls live here. Runs in
-    /// [`crate::gui::pane::graph::GraphUI::prepass`], after
-    /// [`CanvasHits::scan`] has cleared the digest in the navigation
-    /// phase, so the two writers never race for a slot.
+    /// Fills `hits` on the way through — see the type docs for why the polls
+    /// live here. This walk and that digest want the same response for every
+    /// node and every port, so they share one: the body poll below is at once
+    /// the node's cached size, its screen rect, the cull test, and its click,
+    /// right-click and drag edges.
+    ///
+    /// Runs in [`crate::gui::pane::graph::GraphUI::prepass`], and is the
+    /// digest's only writer — it clears and refills it whole, so nothing
+    /// carries over from the frame before.
     pub(crate) fn rebuild(&mut self, ui: &Ui, graph_ctx: GraphCtx<'_>, hits: &mut CanvasHits) {
         self.ports.live.clear();
         self.events.live.clear();
         self.subs.live.clear();
         self.node_screen.clear();
+        hits.clear();
         for n in graph_ctx.nodes() {
             // Port offsets within a node are stable; the node's
             // canvas-local position changes when the user drags. Take
@@ -318,6 +323,7 @@ impl CanvasGeometry {
             // with this frame's `n.pos` — curves anchor on the moved
             // node's *current* port positions, not last frame's.
             let body = ui.response_for(node_widget_id(n.id));
+            hits.note_node(ui, n, body);
             if let Some(r) = body.layout_rect {
                 self.node_sizes.insert(n.id, r.size);
             }
