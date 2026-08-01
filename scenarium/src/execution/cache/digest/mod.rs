@@ -95,11 +95,12 @@ impl DigestPod for bool {
 
 /// One input's discriminant in a node digest.
 ///
-/// The whole space in one place, because it is written from two folds —
-/// the per-input match and the bound-path fold beneath it — and a value
-/// repeated between them would silently make two different inputs key
-/// alike. Written through [`DigestHasher::write_input_tag`], so the byte
-/// each name stands for is decided once.
+/// The whole space in one place, because it is written from three folds —
+/// the per-input match, the bound-path fold beneath it, and the per-path
+/// slots beneath that — and a value repeated between them would silently
+/// make two different inputs key alike. Written through
+/// [`DigestHasher::write_input_tag`], so the byte each name stands for is
+/// decided once.
 #[derive(Clone, Copy, Debug)]
 pub(super) enum InputTag {
     /// Nothing bound.
@@ -113,6 +114,10 @@ pub(super) enum InputTag {
     /// A resource input handed something that is not a path — the marker
     /// stands alone.
     BoundMistyped = 4,
+    /// One path slot naming nothing — the state a path port sits in before
+    /// a file is chosen. Stands in place of the identity a named path would
+    /// fold, so an unset slot keys on its position.
+    UnsetPath = 5,
 }
 
 /// A fluent builder for a [`Digest`] — a thin wrapper over the BLAKE3 hasher with

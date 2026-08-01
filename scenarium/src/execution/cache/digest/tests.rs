@@ -204,6 +204,49 @@ fn fs_path_folds_file_identity_and_path() {
         "a missing file leaves its node with no digest"
     );
 
+    // An *unset* path is not a missing one. It names nothing to stat, so the
+    // node keeps a sound key and runs — rather than being failed at stamp time
+    // over an `ENOENT` on the empty string, every run, until a file is picked.
+    let unset = |value: ConstValue| {
+        let (p, node) = path_node(value);
+        Digests::of(&p).at(node)
+    };
+    let d_empty = unset(ConstValue::FsPath(String::new()));
+    assert!(d_empty.is_some(), "an unset path leaves its node cacheable");
+    let d_blank = unset(ConstValue::FsPath("  ".into()));
+    assert!(d_blank.is_some(), "whitespace names no file either");
+    assert_ne!(
+        d_blank, d_empty,
+        "the authored string still folds — a blank path is not the empty one"
+    );
+    assert!(
+        unset(ConstValue::FsPaths(vec![String::new()])).is_some(),
+        "an unset slot inside a list is unset too"
+    );
+
+    // One unset port must not cost the *run* its batched stamping: before the
+    // walk skipped it, `metadata("")` failed the whole shared pass, and which
+    // of the other nodes had already landed was `HashSet` drain order.
+    std::fs::write(file, b"x").unwrap();
+    let mut batch = ProgramBuilder::default();
+    let blank_node = pure(&mut batch, 11, 1)
+        .const_input(ConstValue::FsPath(String::new()))
+        .add();
+    let real_node = pure(&mut batch, 12, 1)
+        .const_input(ConstValue::FsPath(path.clone()))
+        .add();
+    let batched = batch.program();
+    let mut cache = RuntimeCache::default();
+    cache.install_for_test(batched);
+    cache
+        .prepare_nodes_blocking(batched, [blank_node.node_idx, real_node.node_idx])
+        .expect("an unset path is not a walk failure");
+    assert!(
+        cache.node_digest(batched, real_node.node_idx).is_some(),
+        "a named path still stamps when batched beside an unset one"
+    );
+    std::fs::remove_file(file).unwrap();
+
     // The path string is folded on top of the file identity, so two nodes
     // reading equal files under different names still key apart. Planted
     // identities rather than real files: a constant is what makes the
@@ -323,6 +366,28 @@ fn bound_fs_path_folds_delivered_file_identity() {
         "a wired path list re-keys when any selected file changes"
     );
     std::fs::remove_file(second.path()).unwrap();
+
+    // An unset slot keys on its *position*, which is what the marker buys over
+    // skipping the slot: a Bind fold writes no authored strings alongside the
+    // identities, so a skip would leave `["", p]` and `[p, ""]` making the same
+    // two writes in the same order. Reaching that in a real run also takes a
+    // `Pure` producer that isn't — an honest one cannot deliver two values
+    // under the one digest folded just above — which is why this plants the
+    // pair rather than producing it. The marker is what keeps `hash_fs_paths`
+    // decodable from its own arguments instead of from that caller invariant.
+    let with_blank = |paths: Vec<String>| {
+        digests_with(Some(DynamicValue::Static(ConstValue::FsPaths(paths)))).typed
+    };
+    let blank_first = with_blank(vec![String::new(), path.clone()]);
+    let blank_last = with_blank(vec![path.clone(), String::new()]);
+    assert!(
+        blank_first.is_some(),
+        "an unset slot keeps the declared consumer cacheable"
+    );
+    assert_ne!(
+        blank_first, blank_last,
+        "where the unset slot sits is part of the key"
+    );
 
     std::fs::remove_file(file).unwrap();
     let DigestPair {
