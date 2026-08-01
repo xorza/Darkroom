@@ -268,39 +268,29 @@ impl palantir::App for App {
         // captures the latest size / position.
         self.track_window_state(ui);
 
-        // Fold the worker's reports since last frame, before the session
-        // rebuilds its scene so the status/log projections it reads reflect
-        // the latest run. Reports only — no texture is touched here.
-        self.run_state
-            .drain_from(&mut self.runtime, &mut self.status);
-
-        // Then everything that allocates, and **the one place the
-        // document-derived caches are swept**: take in the values published
-        // against the compile the reports just acknowledged, release what the
-        // document has stopped holding, and upload the full-resolution texture
-        // each visible viewer needs.
+        // Everything derived from the run and the document, swept once a
+        // frame — **the one place that happens**. All of these caches outlive
+        // the scene on purpose (a closed tab must resolve its port centers the
+        // frame it comes back), so none can decide for itself that an entry is
+        // dead; only the document knows, and a node id is never reused.
         //
-        // Two owners, so two calls: the preview store filters on the node that
-        // published, and everything the window caches — canvas geometry, open
-        // inspectors, per-tab viewer framing — goes through the session. All
-        // of them outlive the scene on purpose (a closed tab must resolve its
-        // port centers the frame it comes back), so none can decide for itself
-        // that an entry is dead; only the document knows, and a node id is
-        // never reused. A new cache gets a line here rather than a third call
-        // site — see `Document::holds_node`, which they all ask and which
-        // lists them.
-        //
-        // Here in `update` rather than `record`: every sweep is idempotent and
-        // costs a lookup per cached entry, and `record` runs *twice* on a
-        // frame carrying action input.
+        // Two owners, so two calls: the run projection filters on the node
+        // that published, and everything the window caches — canvas geometry,
+        // open inspectors, per-tab viewer framing — goes through the session.
+        // A new cache gets a line here rather than a third call site — see
+        // `Document::holds_node`, which they all ask and which lists them.
         //
         // A node deleted later in the same frame's record is swept next frame.
         // Nothing reads a dead entry in between — the geometry is reached
         // through a `NodeCtx` that only resolves for live nodes, and
         // `draw_panels` skips a panel whose node is gone — so the lag costs
         // memory and nothing else.
-        self.run_state
-            .sync_previews(&self.runtime, ui, &self.session.open.document);
+        self.run_state.sync(
+            &mut self.runtime,
+            &mut self.status,
+            ui,
+            &self.session.open.document,
+        );
         self.session.reconcile_caches();
 
         self.handle_close_request(ui);
