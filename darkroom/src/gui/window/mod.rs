@@ -6,10 +6,10 @@ use std::collections::HashMap;
 use palantir::{Align, Background, Configure, KeyFilter, Panel, Sizing, Ui, VAlign, WidgetId};
 use scenarium::{NodeId, OutputTypes};
 
+use crate::core::document::dock::DockOp;
 use crate::core::document::{Document, TabRef};
 use crate::core::edit::intent::sink::Intents;
 use crate::core::io::preferences::Preferences;
-use crate::gui::UiAction;
 use crate::gui::app::commands::AppCommand;
 use crate::gui::app::commands::prefs::PrefsCommand;
 use crate::gui::app::ctx::AppCtx;
@@ -98,9 +98,9 @@ impl MainWindow {
         ui: &mut Ui,
         ctx: AppCtx<'_>,
         doc: &Document,
-        actions: &mut Vec<UiAction>,
+        out: &mut Intents,
     ) {
-        self.dock.scan(ui, doc, actions);
+        self.dock.scan(ui, doc, out);
         // One sweep of last frame's node responses, before anything reads
         // one: the canvas's own passes read it later in the frame, and the
         // two chip opens below are why it has to happen this early. Runs
@@ -114,7 +114,9 @@ impl MainWindow {
         graph_ui.scan_hits(ui, GraphCtx::for_document(ctx, doc, output_types));
         let hits = &self.graph_ui.hits;
         if let Some(node) = hits.chip(Chip::PreviewImage) {
-            actions.push(UiAction::OpenImageViewer(node));
+            out.push_dock(DockOp::OpenTab {
+                tab: TabRef::ImageViewer(node),
+            });
         }
     }
 
@@ -204,7 +206,7 @@ impl MainWindow {
                     .child_align(Align::v(VAlign::Bottom))
                     .background(Background::fill(chrome))
                     .show(ui, |ui| {
-                        command = menu_bar::show(ui);
+                        command = menu_bar::show(ui, out);
                     });
                 dock.render(ui, dock_cx, out, |ui, tab, out| match tab {
                     TabRef::Graph => {

@@ -2,9 +2,9 @@
 //! Replaces the old flat tab strip — each [`TabGroup`] renders as one
 //! pane with its own strip, and a [`DockSplit`] divides the space
 //! between two child nodes at a draggable `ratio`. Pure data + pure
-//! ops; every mutation is snapshot-diffed by the intent layer
-//! (`DockStep`'s `from`/`to` pair), so ops apply in place and report
-//! nothing.
+//! ops: every mutation is a [`DockOp`] applied in place, reporting
+//! nothing. None of them is undoable — rearranging panes is navigation,
+//! so Ctrl+Z walks past it to the last graph edit.
 //!
 //! **Flat storage.** The tree lives in one `Vec<DockNode>` with
 //! [`NodeIdx`] children — no per-node boxes. The vec is kept
@@ -176,21 +176,27 @@ pub(crate) enum DockDrop {
 }
 
 /// One dock-layout mutation, executed by [`DockLayout::apply`]. The
-/// single op vocabulary the whole pipeline speaks: the dock UI
-/// constructs one, `UiAction::Dock` transports it, `Queued::Dock`
-/// records it as a before/after snapshot, and `apply` runs it. Ops fed
-/// something that no longer exists no-op, and the snapshot diff drops
-/// them.
+/// single op vocabulary the whole pipeline speaks: the dock UI (or a
+/// menu item, or a preview card's chip) constructs one, the frame's
+/// queue transports it as `Queued::Dock`, and `apply` runs it.
 ///
-/// Every tab op names its tab by identity, never by strip position. An
-/// op is built from one frame's response and applied in a later phase of
-/// the next, and undo can rearrange the layout in between — an index
-/// would by then address whatever tab slid into that slot.
+/// **Every op tolerates a stale address.** One is built from a response
+/// of the frame before and applied a phase later, by which time the tab,
+/// group, or split it names may be gone — so an op that resolves to
+/// nothing leaves the layout untouched rather than failing.
+///
+/// Every tab op names its tab by identity, never by strip position: an
+/// index would by then address whatever tab slid into that slot.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub(crate) enum DockOp {
     /// Make `tab` visible in whichever group holds it, and focus that
     /// group.
     ActivateTab { tab: TabRef },
+    /// Open `tab` in the focused group — reusing it wherever it already
+    /// sits — then make it visible and focus its pane. The whole of "show
+    /// me X": the Preferences menu item and a preview card's viewer chip
+    /// both raise this and nothing else.
+    OpenTab { tab: TabRef },
     /// Close `tab` wherever it sits. The `Main` tab never closes — the
     /// op refuses it.
     CloseTab { tab: TabRef },
@@ -199,6 +205,10 @@ pub(crate) enum DockOp {
     /// Set the ratio of the split at `split` (its packed root path).
     /// Emitted per frame by a divider drag; coalesces per split.
     SetRatio { split: DockPath, ratio: f32 },
+    /// Move focus onto `group`, because a press landed inside its pane.
+    /// The incidental half of navigation — focus following the pointer —
+    /// beside the deliberate ops around it.
+    FocusPane { group: TabGroupId },
 }
 
 /// One pane's tab strip: the open tabs plus which one is visible.
@@ -314,32 +324,15 @@ impl DockLayout {
         self.groups().find(|g| g.id == id)
     }
 
-    /// Move focus onto `group`.
+    /// Move focus onto `group` — the pane a press landed in.
     ///
-    /// Panics on a group that isn't in the tree. Like [`Self::find_or_insert`]
-    /// and unlike the intent-fed ops, this is a direct call whose caller read
-    /// a live group id in the same call chain — `gui::dock::scan_focus`
-    /// resolves it from `groups()` and `Editor::apply_view_actions` applies it
-    /// before anything structural can land — so a dead id is a logic error,
-    /// not tolerable staleness. Storing one would strand `focused` and fail
+    /// A group that has gone since the press no-ops, like every other op fed
+    /// a stale address: storing a dead id would strand `focused` and fail
     /// [`Self::validate`] at the next save.
-    ///
-    /// **The one layout mutation deliberately outside the undo record.**
-    /// Every *deliberate* navigation — a tab chip, an open, a move — still
-    /// goes through a recorded [`DockOp`]; this is the incidental half,
-    /// where focus follows the pointer into a pane
-    /// (`gui::dock::scan_focus`). Recording it would be both noise (an undo
-    /// entry per click into another pane) and a trap: keyboard focus is
-    /// sticky, so an undo restoring the old focus would be re-applied by
-    /// the very next scan — in the same frame, since `Editor::navigate`
-    /// runs undo, scan, and drain in that order — silently discarding the
-    /// redo tail.
-    pub(crate) fn focus(&mut self, group: TabGroupId) {
-        assert!(
-            self.group(group).is_some(),
-            "focus target group {group:?} is not in the tree"
-        );
-        self.focused = group;
+    fn focus(&mut self, group: TabGroupId) {
+        if self.group(group).is_some() {
+            self.focused = group;
+        }
     }
 
     fn group_mut(&mut self, id: TabGroupId) -> Option<&mut TabGroup> {
@@ -371,10 +364,20 @@ impl DockLayout {
     pub(crate) fn apply(&mut self, op: DockOp) {
         match op {
             DockOp::ActivateTab { tab } => self.activate(tab),
+            DockOp::OpenTab { tab } => self.open_tab(tab),
             DockOp::CloseTab { tab } => self.close_tab(tab),
             DockOp::MoveTab { tab, to } => self.move_tab(tab, to),
             DockOp::SetRatio { split, ratio } => self.set_ratio(split, ratio),
+            DockOp::FocusPane { group } => self.focus(group),
         }
+    }
+
+    /// Add `tab` to the focused group unless it is already open somewhere,
+    /// then activate it — which also focuses whichever pane ended up
+    /// holding it.
+    fn open_tab(&mut self, tab: TabRef) {
+        self.find_or_insert(tab, self.focused);
+        self.activate(tab);
     }
 
     /// Make `tab` the visible one in whichever group holds it, and focus
@@ -389,12 +392,11 @@ impl DockLayout {
         self.focused = group;
     }
 
-    /// Append `tab` to `group`'s strip unless it's already open
-    /// somewhere — the shared non-undoable half of opening any tab
-    /// (callers focus it through a recorded activation). Unlike the
-    /// intent-fed ops this is a direct call whose callers read a live
-    /// group id in the same call chain, so a dead id is a logic error,
-    /// not tolerable staleness.
+    /// Append `tab` to `group`'s strip unless it's already open somewhere —
+    /// the half of [`DockOp::OpenTab`] that puts the tab in the tree, without
+    /// the activation that follows. Unlike the queued ops this is a direct
+    /// call whose callers name a group they hold live (`open_tab` passes
+    /// `focused`), so a dead id is a logic error, not tolerable staleness.
     pub(crate) fn find_or_insert(&mut self, tab: TabRef, group: TabGroupId) {
         if self.find_tab(tab).is_none() {
             self.insert_tab(group, tab);

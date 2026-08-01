@@ -1,15 +1,20 @@
 use glam::Vec2;
 use palantir::{Button, Configure, ContextMenu, MenuItem, Panel, PopupHandle, Sizing, Spacing, Ui};
 
+use crate::core::document::TabRef;
+use crate::core::document::dock::DockOp;
+use crate::core::edit::intent::sink::Intents;
 use crate::gui::app::commands::AppCommand;
 use crate::gui::app::commands::file::FileCommand;
-use crate::gui::app::commands::shell::ShellCommand;
 
 /// Top-of-window menu bar. Horizontal strip of "menu trigger" buttons;
 /// each opens a [`ContextMenu`] anchored at the trigger's bottom-left.
-/// Every item — `Quit` included — returns an [`AppCommand`] for `App` to
-/// consume; `App` routes `Quit` through its unsaved-changes check.
-pub(crate) fn show(ui: &mut Ui) -> Option<AppCommand> {
+///
+/// A pick goes wherever its tier does: the file lifecycle and `Quit`
+/// return an [`AppCommand`] for `App` to run after the pass, while
+/// Preferences is a pane arrangement like any other and queues its
+/// [`DockOp`] onto `out`.
+pub(crate) fn show(ui: &mut Ui, out: &mut Intents) -> Option<AppCommand> {
     let mut command = None;
     Panel::hstack()
         .auto_id()
@@ -17,7 +22,7 @@ pub(crate) fn show(ui: &mut Ui) -> Option<AppCommand> {
         .padding(Spacing::xy(4.0, 4.0))
         .gap(2.0)
         .show(ui, |ui| {
-            if let Some(file_command) = file_menu(ui) {
+            if let Some(file_command) = file_menu(ui, out) {
                 command = Some(file_command);
             }
         });
@@ -51,7 +56,7 @@ fn dropdown(
     command
 }
 
-fn file_menu(ui: &mut Ui) -> Option<AppCommand> {
+fn file_menu(ui: &mut Ui, out: &mut Intents) -> Option<AppCommand> {
     dropdown(ui, "File", |ui, popup| {
         let mut command = None;
         if MenuItem::new("New").show(ui, popup).left.clicked() {
@@ -68,11 +73,13 @@ fn file_menu(ui: &mut Ui) -> Option<AppCommand> {
         }
         MenuItem::separator().show(ui);
         if MenuItem::new("Preferences").show(ui, popup).left.clicked() {
-            command = Some(AppCommand::Shell(ShellCommand::OpenPreferences));
+            out.push_dock(DockOp::OpenTab {
+                tab: TabRef::Preferences,
+            });
         }
         MenuItem::separator().show(ui);
         if MenuItem::new("Quit").show(ui, popup).left.clicked() {
-            command = Some(AppCommand::Shell(ShellCommand::Quit));
+            command = Some(AppCommand::Quit);
         }
         command
     })
