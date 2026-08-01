@@ -283,7 +283,7 @@ pub(super) fn status_row(ui: &mut Ui, ncx: NodeCtx<'_>, out: &mut Requests) {
             // ports and the status glow keep the stage.
             //
             // Shown only where direct storage controls can apply — see
-            // `SceneNode::cache_controls`.
+            // `NodeScope::cache_controls`.
             // (An impure node still paints the `~` marker below to say why.)
             if node.cache_controls() {
                 let ram = node.cache().caches_in_ram();

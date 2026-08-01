@@ -182,8 +182,8 @@ impl CanvasHits {
     }
 
     /// The header/body chips, each guarded by the same condition that
-    /// decides whether it draws at all (`gui::node::header`,
-    /// `gui::node::preview_row`) — so a stale response can't act on a node
+    /// decides whether it draws at all (`gui::pane::graph::node::header`,
+    /// `gui::pane::graph::node::preview_row`) — so a stale response can't act on a node
     /// that has stopped offering the affordance, and that rule lives in
     /// one place per chip rather than in the chip's draw and its scan.
     fn scan_chips(&mut self, ui: &Ui, node: NodeScope<'_>) {

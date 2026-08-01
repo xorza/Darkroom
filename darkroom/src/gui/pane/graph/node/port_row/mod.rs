@@ -25,8 +25,8 @@ use crate::core::document::{PortKind, PortRef};
 use crate::core::edit::intent::types::GraphIntent;
 use crate::core::preview;
 use crate::gui::EventRef;
-use crate::gui::graph_ctx::input_scope::InputScope;
-use crate::gui::graph_ctx::output_scope::OutputScope;
+use crate::gui::graph_ctx::input_ctx::InputCtx;
+use crate::gui::graph_ctx::output_ctx::OutputCtx;
 use crate::gui::pane::graph::node::ctx::NodeCtx;
 use crate::gui::pane::graph::node::port_color::{event_color, port_color};
 use crate::gui::pane::graph::node::port_row::glyph::{circle_frame, event_glyph, port_diameter};
@@ -199,7 +199,7 @@ fn open_port_context_menu(ui: &mut Ui, menu_id: WidgetId, cell_secondary: bool, 
 /// menu (anchored here, so right-clicking the circle or label opens it).
 /// The circle's `WidgetId` is the deterministic `port_circle_wid(port)`, so
 /// `CanvasGeometry`/snap/draw reconstruct it from domain coords.
-fn input_label_cell(ui: &mut Ui, ncx: NodeCtx<'_>, input: InputScope<'_>, out: &mut Requests) {
+fn input_label_cell(ui: &mut Ui, ncx: NodeCtx<'_>, input: InputCtx<'_>, out: &mut Requests) {
     let (theme, node) = (ncx.theme(), ncx.node());
     let port = input.port_ref();
     let tip = tip_for(ncx, input.description(), input.ty());
@@ -286,7 +286,7 @@ fn input_label_cell(ui: &mut Ui, ncx: NodeCtx<'_>, input: InputScope<'_>, out: &
 
 /// Column 1: the inline const editor for an input bound to a `Const`. A
 /// hug-sized column, so every editor starts at the same x.
-fn value_cell(ui: &mut Ui, ncx: NodeCtx<'_>, input: InputScope<'_>, out: &mut Requests) {
+fn value_cell(ui: &mut Ui, ncx: NodeCtx<'_>, input: InputCtx<'_>, out: &mut Requests) {
     // The one owner of the "only Const bindings get an inline editor"
     // filter — wired and unbound inputs render no value cell.
     let Some(Binding::Const(value)) = input.binding() else {
@@ -324,7 +324,7 @@ fn value_cell(ui: &mut Ui, ncx: NodeCtx<'_>, input: InputScope<'_>, out: &mut Re
 /// pins it to the node's right edge); the circle overhangs that edge. (A dragged
 /// satellite can end up anywhere on the canvas, not just overhanging this
 /// node).
-fn output_cell(ui: &mut Ui, ncx: NodeCtx<'_>, output: OutputScope<'_>, out: &mut Requests) {
+fn output_cell(ui: &mut Ui, ncx: NodeCtx<'_>, output: OutputCtx<'_>, out: &mut Requests) {
     let theme = ncx.theme();
     let port = output.port_ref();
     // Resolved once for the fill and the tooltip: a wildcard output follows
@@ -478,7 +478,7 @@ pub(crate) fn event_glyph_wid(node_id: NodeId, event_idx: usize) -> WidgetId {
 
 /// A port's hover tooltip: its `description` (when the func declares one) above a
 /// dimmer type line, else just the type. `description` is the resolved
-/// [`InputScope::description`] text (empty = none).
+/// [`InputCtx::description`] text (empty = none).
 fn port_tip(description: &str, type_label: String) -> String {
     if description.is_empty() {
         type_label

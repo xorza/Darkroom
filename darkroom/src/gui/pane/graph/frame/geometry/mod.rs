@@ -65,7 +65,7 @@ pub(crate) struct CanvasGeometry {
     /// a stale entry is off only across a content edit applied while hidden,
     /// and self-heals on next record. Read through [`Self::node_world_rect`].
     ///
-    /// Only the *size* is cached, never the position: `SceneNode::pos` is
+    /// Only the *size* is cached, never the position: `NodeScope::pos` is
     /// mirrored pre-record and a cached corner would be a frame behind it,
     /// which is the whole reason the world rect is assembled fresh each read.
     node_sizes: HashMap<NodeId, Size>,

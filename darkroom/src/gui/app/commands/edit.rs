@@ -17,7 +17,7 @@ use crate::gui::pane::graph::frame::prepass::PathPick;
 pub(crate) enum EditCommand {
     /// Open a file dialog (filtered by the pick's picker config) for a
     /// node's `FsPath` const input, applying the chosen paths as a `SetInput`
-    /// edit. Raised by the inline pick button (see `gui::node::prepass::emit_path_picks`,
+    /// edit. Raised by the inline pick button (see `gui::pane::graph::frame::prepass::emit_path_picks`,
     /// which produces the [`PathPick`]).
     PickInputPath(PathPick),
 }

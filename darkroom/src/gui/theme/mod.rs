@@ -233,7 +233,7 @@ impl HoverColor {
 }
 
 /// Data-type → wire/port-circle hue roster (consumed by
-/// `gui::node::port_color`). Serialized as the theme's `[type_colors]`
+/// `gui::pane::graph::node::port_color`). Serialized as the theme's `[type_colors]`
 /// table so a loaded theme file can restyle type hues like any other
 /// swatch. `ramp` backs the open-ended `Custom`/`Enum` families —
 /// keyed by `type_id`, so distinct custom types land on stable,
@@ -345,7 +345,7 @@ pub(crate) struct Theme {
     /// Dotted backdrop grid: world-space base spacing between dots, and
     /// on-screen dot radius (px). Spacing is wrapped by a power-of-2
     /// multiplier as the user zooms so the field never collapses into
-    /// noise — see `gui::canvas::background`. (Dot colour is `colors.canvas_dot`.)
+    /// noise — see `gui::pane::graph::background`. (Dot colour is `colors.canvas_dot`.)
     pub(crate) canvas_dot_spacing: f32,
     pub(crate) canvas_dot_radius: f32,
     pub(crate) connection_width: f32,

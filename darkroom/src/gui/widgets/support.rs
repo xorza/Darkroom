@@ -46,8 +46,8 @@ pub(crate) fn mono_text(ui: &Ui, px: f32) -> TextStyle {
 /// A muted micro-label immediately followed by its mono-styled value, as two
 /// direct `Text` widgets (no wrapping panel — draw it inside the caller's
 /// own panel so its `gap` spaces the pair like any other sibling). Shared
-/// shape behind a node body's memory footer (`gui::node::memory_row`) and a
-/// preview node's image-info footer (`gui::node::preview_row`).
+/// shape behind a node body's memory footer (`gui::pane::graph::node::memory_row`) and a
+/// preview node's image-info footer (`gui::pane::graph::node::preview_row`).
 pub(crate) fn labeled_value(ui: &mut Ui, theme: &Theme, label: &str, value: String) {
     Text::new(label).style(&muted_text(ui, theme, 8.5)).show(ui);
     Text::new(value).style(&mono_text(ui, 10.5)).show(ui);

@@ -86,7 +86,7 @@ pub(crate) fn emit_port_dblclicks(cx: CanvasCtx<'_>, out: &mut Requests) {
             };
             match input.binding() {
                 // Unbound → seed the default literal (or first enum / value-
-                // option variant, both resolved by `InputScope::default`).
+                // option variant, both resolved by `InputCtx::default`).
                 // Boundary ports route the interface — no const affordance, so
                 // an unbound one has nothing to seed (its label double-click
                 // renames).

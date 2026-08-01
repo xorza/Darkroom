@@ -3,8 +3,8 @@
 //!
 //! Nothing here is copied or cached. A [`GraphCtx`] is the frame's
 //! [`AppCtx`] plus two shared references; the handles it hands out
-//! ([`NodeScope`], [`InputScope`],
-//! [`OutputScope`]) each resolve one more borrow and answer every question
+//! ([`NodeScope`], [`InputCtx`],
+//! [`OutputCtx`]) each resolve one more borrow and answer every question
 //! from the authority that owns it — the node's record off the document, its
 //! ports off the library's declaration, its status off the run. A widget
 //! therefore cannot read anything a frame behind, and there is nothing to
@@ -16,11 +16,11 @@
 //! that cannot come off a declaration — a wildcard output's resolved type —
 //! is read out of the [`OutputTypes`] table the context carries, resolved once
 //! by [`GraphCtx::new`] rather than per read (see
-//! [`OutputScope::ty`](output_scope::OutputScope::ty)).
+//! [`OutputCtx::ty`](output_ctx::OutputCtx::ty)).
 
-pub(crate) mod input_scope;
+pub(crate) mod input_ctx;
 pub(crate) mod node_scope;
-pub(crate) mod output_scope;
+pub(crate) mod output_ctx;
 
 use std::collections::BTreeSet;
 
@@ -60,7 +60,7 @@ pub(crate) struct GraphCtx<'a> {
     doc: &'a Document,
     /// Every output port's *resolved* type — the wildcard chains followed
     /// once for the whole graph, so reading one is a lookup rather than a
-    /// walk. See [`OutputScope::ty`](output_scope::OutputScope::ty).
+    /// walk. See [`OutputCtx::ty`](output_ctx::OutputCtx::ty).
     ///
     /// Resolved by [`Self::new`] against the `doc` beside it, and
     /// exclusively borrowed for as long as this context lives — so it cannot be
@@ -160,7 +160,7 @@ impl<'a> GraphCtx<'a> {
     }
 
     /// This graph's resolved output types. `pub(super)` because the one
-    /// reader is [`OutputScope::ty`](output_scope::OutputScope::ty) — a widget
+    /// reader is [`OutputCtx::ty`](output_ctx::OutputCtx::ty) — a widget
     /// asks a port for its type, never the table for a port.
     pub(super) fn output_types(self) -> &'a OutputTypes {
         self.output_types

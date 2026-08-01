@@ -1,10 +1,9 @@
 //! Reusable inline-rename label. Renders plain text that swaps to a
 //! fixed-width `TextEdit` on double-click; Enter / focus-loss commits the
 //! edited string, Esc cancels. Used by the node-header title
-//! (the graph pane's node header) and the graph boundary-port names
-//! (`gui::node::port_rename`); each maps the returned
-//! [`RenameEvent`] onto its own intent. Mirrors the per-widget split of
-//! `gui::node::value_editor`; both share the blur-edge /
+//! (`gui::pane::graph::node::header`), which maps the returned
+//! [`RenameEvent`] onto a `RenameNode` intent. Mirrors the per-widget split of
+//! `gui::pane::graph::node::value_editor`; both share the blur-edge /
 //! buffered-text core in [`crate::gui::widgets::buffered_edit`].
 
 use palantir::{
@@ -21,7 +20,7 @@ use crate::gui::widgets::buffered_edit::EditBuffer;
 struct RenameState {
     active: bool,
     /// The in-progress draft plus blur-edge tracking, shared with
-    /// `gui::node::value_editor`'s buffered fields — see
+    /// `gui::pane::graph::node::value_editor`'s buffered fields — see
     /// [`EditBuffer`] for why the latch needs to survive the
     /// `request_focus` → focus-landing gap this widget opens.
     edit: EditBuffer,
