@@ -221,13 +221,10 @@ impl MainWindow {
             });
     }
 
-    /// Release the canvas's cached geometry for nodes the document has
-    /// stopped holding. The counterpart to the preview store's reconcile:
-    /// both are `NodeId`-keyed caches that outlive the scene on purpose, so
-    /// both need the document to tell them when an entry's subject is gone for
-    /// good, and both run once a frame.
+    /// Release the canvas's `NodeId`-keyed caches for nodes the document has
+    /// stopped holding — see [`GraphUI::retain_nodes`]. Driven from
+    /// `App::reconcile_derived_state`, beside the preview store's sweep.
     pub(crate) fn reconcile(&mut self, document: &Document) {
-        self.graph_ui
-            .retain_nodes(|node_id| document.holds_node(node_id));
+        self.graph_ui.retain_nodes(document);
     }
 }

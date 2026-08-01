@@ -59,7 +59,8 @@ impl App {
     /// falling out of that — and they have to be: node ids are *persisted*, so
     /// reopening a document would otherwise reattach the previous session's
     /// statuses, timings, logs and preview images to nodes that have not run.
-    /// [`RunState::clear`] drops exactly the document-derived half and leaves
+    /// [`RunState::clear`](crate::gui::state::run_state::RunState::clear) drops
+    /// exactly the document-derived half and leaves
     /// the worker-stream half (`compiled`, `activity`, `cache_ram`) standing —
     /// an in-flight run still reports against the program the worker
     /// acknowledged, and its cache really does still hold that RAM.

@@ -280,6 +280,24 @@ impl Document {
     /// [`node_alive`] asked of the whole document — the form every
     /// `NodeId`-keyed cache's sweep takes. See there for why this one question
     /// answers for all of them.
+    ///
+    /// **The caches that ask it**, and where each is swept:
+    ///
+    /// | Cache | Swept by |
+    /// |---|---|
+    /// | `CanvasGeometry`'s port offsets + node sizes | `GraphUI::retain_nodes` |
+    /// | `Inspectors::modes` | `GraphUI::retain_nodes` |
+    /// | `PreviewStore::entries` (through [`Self::holds_preview_node`]) | `PreviewStore::reconcile` |
+    ///
+    /// All three run from `App::reconcile_derived_state`, once a frame. A new
+    /// cache keyed by `NodeId` that outlives the scene belongs in that pass and
+    /// on this list — nothing else enforces it, so this is where to look and
+    /// what to extend.
+    ///
+    /// Two neighbours are deliberately *not* on it, because neither asks this
+    /// question: `MainWindow::image_viewers` is keyed by node but lives as long
+    /// as its *tab*, and [`Self::reconcile_with_graph`] is the document
+    /// repairing itself rather than a cache being swept.
     pub(crate) fn holds_node(&self, node_id: NodeId) -> bool {
         node_alive(&self.graph, node_id)
     }
