@@ -100,19 +100,30 @@ impl MainWindow {
     }
 
     /// Edit-phase prepass: input-derived graph mutations for the
-    /// already-settled active graph.
+    /// already-settled active graph, plus the per-pane visibility reconcile
+    /// that has to happen before them.
+    ///
+    /// Returns whether a pane appeared or vanished this frame — the caller
+    /// turns that into a relayout request, since a canvas that has never
+    /// recorded has no cached geometry to draw its first frame from. Reported
+    /// rather than requested here because this pass has no business deciding
+    /// when the frame's accumulated signals are spent.
     pub(crate) fn prepass(
         &mut self,
         ui: &mut Ui,
         ctx: AppCtx<'_>,
         doc: &Document,
         out: &mut Requests,
-    ) {
+    ) -> bool {
         let MainWindow {
             graph_ui,
             output_types,
             ..
         } = self;
+        // Before the per-tab loop, not inside it: a canvas that just went
+        // *away* is not an active tab, and its gestures still have to be
+        // dropped. `active_tabs` would never visit it.
+        let appeared_or_vanished = graph_ui.sync_visibility(doc);
         for tab in doc.layout.active_tabs() {
             match tab {
                 // Reached from `active_tabs`, so a pane is showing the graph
@@ -124,6 +135,7 @@ impl MainWindow {
                 TabRef::Preferences | TabRef::ImageViewer(_) => {}
             }
         }
+        appeared_or_vanished
     }
 
     pub(crate) fn frame(
