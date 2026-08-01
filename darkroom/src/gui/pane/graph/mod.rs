@@ -381,7 +381,7 @@ impl GraphUI {
         // lifecycle that depends on it — and everything a pick means goes onto
         // `out`, so there is no precedence to settle here: a frame in which
         // both a menu pick and a chip click landed raises both.
-        self.node_menu.apply(ui, cx, out);
+        self.node_menu.apply(ui, graph_ctx, out);
     }
 
     /// The record pass's drawing half: the outer (pan-capture) canvas, the
@@ -513,7 +513,7 @@ impl GraphUI {
         // action landed anywhere but on a panel.
         self.inspectors.apply(ui, &found);
         if let Some(node) = found.menu_opened {
-            self.node_menu.open_on(ui, node, graph_ctx, out);
+            self.node_menu.open_on(ui, graph_ctx, node, out);
         }
     }
 }

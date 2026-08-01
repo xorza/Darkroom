@@ -6,7 +6,9 @@ use crate::core::edit::intent::duplicate::build_duplicate_intent;
 use crate::core::edit::intent::types::GraphIntent;
 use crate::gui::app::commands::AppCommand;
 use crate::gui::app::commands::run::RunCommand;
-use crate::gui::pane::graph::ctx::CanvasCtx;
+use scenarium::NodeId;
+
+use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::pane::graph::paint::anchored_menu::NodeContextMenu;
 use crate::gui::requests::Requests;
 
@@ -42,23 +44,32 @@ impl NodeMenuUi {
 
     /// Record the menu and resolve this frame's pick onto `out` — a run as
     /// the [`AppCommand`] it means, the structural picks as ordinary intents.
-    pub(crate) fn apply(&mut self, ui: &mut Ui, cx: CanvasCtx<'_>, out: &mut Requests) {
-        let graph_ctx = cx.graph_ctx();
-        // Boundary interface nodes carry no structural identity to
-        // duplicate/remove — the sweep applies that guard, so a boundary
-        // node never surfaces here.
-        let opened = self.menu.latch(ui, cx);
-        // Right-click selects the clicked node when it isn't already part of
-        // the selection, so the chosen action always targets a coherent set
-        // ("select then act"). A pick lands frames later — the menu has to
-        // record at least once before an item can be clicked — so this
-        // selection is committed by the time the arms below read it back.
-        if let Some(node_id) = opened.filter(|&id| !graph_ctx.is_selected(id)) {
+    ///
+    /// Opening is [`Self::open_on`]'s, called after the node draw that saw the
+    /// right-click; this only ever shows a menu already latched.
+    /// Open the menu on `node`, which the record pass just saw right-clicked,
+    /// and select it if it isn't already part of the selection — so the chosen
+    /// action always targets a coherent set ("select then act"). A pick lands
+    /// frames later, so that selection is committed well before it is read
+    /// back.
+    pub(crate) fn open_on(
+        &mut self,
+        ui: &mut Ui,
+        graph_ctx: GraphCtx<'_>,
+        node: NodeId,
+        out: &mut Requests,
+    ) {
+        if !self.menu.open_on(ui, node) {
+            return;
+        }
+        if !graph_ctx.is_selected(node) {
             out.push_graph(GraphIntent::SetSelection {
-                to: BTreeSet::from([node_id]),
+                to: BTreeSet::from([node]),
             });
         }
+    }
 
+    pub(crate) fn apply(&mut self, ui: &mut Ui, graph_ctx: GraphCtx<'_>, out: &mut Requests) {
         let pick = self.menu.show(ui, "node_body_menu", |ui, popup, node_id| {
             let mut chosen = None;
             // "Run to this node" shows only when the clicked node can be a
