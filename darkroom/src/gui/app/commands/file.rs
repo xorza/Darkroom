@@ -84,12 +84,12 @@ impl App {
         let open = match OpenDocument::load(path.to_path_buf()) {
             Ok(open) => open,
             Err(err) => {
-                self.runtime.status.error(format!("load failed: {err:#}"));
+                self.status.error(format!("load failed: {err:#}"));
                 return;
             }
         };
         self.adopt_document(open);
-        self.runtime.status.error = None;
+        self.status.error = None;
     }
 
     /// Cmd+S: overwrite the current file if there is one, else fall
@@ -117,9 +117,9 @@ impl App {
                 self.runtime
                     .set_document_cache(self.session.open.path.as_deref());
                 self.remember_document_path();
-                self.runtime.status.error = None;
+                self.status.error = None;
             }
-            Err(err) => self.runtime.status.error(format!("save failed: {err:#}")),
+            Err(err) => self.status.error(format!("save failed: {err:#}")),
         }
     }
 

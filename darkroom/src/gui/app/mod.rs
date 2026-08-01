@@ -6,6 +6,7 @@ use palantir::Ui;
 use crate::core::document::open_document::OpenDocument;
 use crate::core::io::preferences::{Preferences, WindowState};
 use crate::core::runtime_host::RuntimeHost;
+use crate::core::status::StatusLog;
 use crate::core::wake::Wake;
 use crate::gui::HostHandle;
 use crate::gui::MAIN_WINDOW;
@@ -43,6 +44,14 @@ pub(crate) struct App {
     /// its only writer — it fills as the worker is drained — and lent to the
     /// frame through [`AppCtx`]. Off the serialized state.
     run_state: RunState,
+    /// The user-facing outcome log behind the status bar's sticky error slot.
+    ///
+    /// On `App` rather than inside the runtime because most of what reports
+    /// here is not the runtime's: file load/save outcomes, preferences
+    /// failures, and the document restore at startup all write it, and only
+    /// compile failures come from the worker side. Lent to whoever is
+    /// reporting.
+    status: StatusLog,
     theme: Theme,
     host_handle: HostHandle,
     /// Persisted session state (active theme name + last document).
@@ -106,12 +115,14 @@ impl App {
         // `preferences` is loaded in `run_gui` before the window exists, so
         // its saved geometry can size the window at creation.
         let mut runtime = RuntimeHost::new(wake, &preferences);
-        let open = OpenDocument::load_preferred(&mut preferences, &mut runtime.status);
+        let mut status = StatusLog::default();
+        let open = OpenDocument::load_preferred(&mut preferences, &mut status);
         runtime.set_document_cache(open.path.as_deref());
         let mut app = Self {
             session: Session::new(open),
             runtime,
             run_state: RunState::default(),
+            status,
             theme: Theme::default(),
             host_handle: handle,
             preferences,
@@ -291,7 +302,8 @@ impl palantir::App for App {
         // Fold the worker's reports since last frame, before the session
         // rebuilds its scene so the status/log projections it reads reflect
         // the latest run. Reports only — no texture is touched here.
-        self.run_state.drain_from(&mut self.runtime);
+        self.run_state
+            .drain_from(&mut self.runtime, &mut self.status);
 
         // Then everything that allocates: take in the values published against
         // the compile the reports just acknowledged, and release what the
@@ -320,7 +332,7 @@ impl palantir::App for App {
             &library,
             &self.run_state,
             StatusInputs {
-                error: self.runtime.status.error.as_deref(),
+                error: self.status.error.as_deref(),
                 process_memory: self.process_memory.sample(Instant::now()),
             },
         );
