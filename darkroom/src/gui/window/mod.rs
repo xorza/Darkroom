@@ -103,11 +103,12 @@ impl MainWindow {
     /// already-settled active graph, plus the per-pane visibility reconcile
     /// that has to happen before them.
     ///
-    /// Returns whether a pane *appeared* this frame — the caller turns that
-    /// into a relayout request, since a canvas that has never recorded has no
-    /// cached geometry to draw its first frame from. One that vanished needs
-    /// no pass. Reported rather than requested here because this pass has no
-    /// business deciding when the frame's accumulated signals are spent.
+    /// Returns whether any pane became visible this frame — the caller turns
+    /// that into a relayout request, since a canvas that has never recorded
+    /// has no cached geometry to draw its first frame from. A pane that
+    /// *vanished* needs no pass and is never visited here at all. Reported
+    /// rather than requested because this pass has no business deciding when
+    /// the frame's accumulated signals are spent.
     pub(crate) fn prepass(
         &mut self,
         ui: &mut Ui,
@@ -120,22 +121,22 @@ impl MainWindow {
             output_types,
             ..
         } = self;
-        // Before the per-tab loop, not inside it: a canvas that just went
-        // *away* is not an active tab, and its gestures still have to be
-        // dropped. `active_tabs` would never visit it.
-        let visibility_changed = graph_ui.sync_visibility(doc);
+        let mut request_relayout = false;
         for tab in doc.layout.active_tabs() {
             match tab {
                 // Reached from `active_tabs`, so a pane is showing the graph
                 // by construction — which is what `GraphUI::prepass` asserts.
-                TabRef::Graph => graph_ui.prepass(ui, GraphCtx::new(ctx, doc, output_types), out),
+                TabRef::Graph => {
+                    request_relayout |=
+                        graph_ui.prepass(ui, GraphCtx::new(ctx, doc, output_types), out);
+                }
                 // Neither derives a document mutation from input: preferences
                 // edits go through their own widgets, and a viewer only
                 // navigates its own texture.
                 TabRef::Preferences | TabRef::ImageViewer(_) => {}
             }
         }
-        visibility_changed
+        request_relayout
     }
 
     pub(crate) fn frame(
