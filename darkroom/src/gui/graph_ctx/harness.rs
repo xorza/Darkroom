@@ -53,6 +53,6 @@ impl GraphCtxFixture {
             output_types,
         } = self;
         let app = AppCtx::new(theme, &fixture.library, run_state, StatusInputs::default());
-        GraphCtx::for_document(app, &fixture.doc, output_types)
+        GraphCtx::new(app, &fixture.doc, output_types)
     }
 }

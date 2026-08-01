@@ -12,7 +12,7 @@ use crate::gui::theme::Theme;
 ///
 /// **The root of the context chain.** Every level below derives its own
 /// context from the one above rather than restating its refs:
-/// [`GraphCtx::for_document`](crate::gui::graph_ctx::GraphCtx::for_document)
+/// [`GraphCtx::new`](crate::gui::graph_ctx::GraphCtx::new)
 /// resolves this against a document to make the
 /// graph pane's context, and everything under the canvas reads the theme, the
 /// library and the run back off *that* — which is why nothing below

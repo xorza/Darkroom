@@ -15,7 +15,7 @@
 //! what the projection this replaced used to charge per frame. The one answer
 //! that cannot come off a declaration — a wildcard output's resolved type —
 //! is read out of the [`OutputTypes`] table the context carries, resolved once
-//! by [`GraphCtx::for_document`] rather than per read (see
+//! by [`GraphCtx::new`] rather than per read (see
 //! [`OutputScope::ty`](output_scope::OutputScope::ty)).
 
 pub(crate) mod input_scope;
@@ -62,7 +62,7 @@ pub(crate) struct GraphCtx<'a> {
     /// once for the whole graph, so reading one is a lookup rather than a
     /// walk. See [`OutputScope::ty`](output_scope::OutputScope::ty).
     ///
-    /// Resolved by [`Self::for_document`] against the `doc` beside it, and
+    /// Resolved by [`Self::new`] against the `doc` beside it, and
     /// exclusively borrowed for as long as this context lives — so it cannot be
     /// a graph edit behind, and nothing can move it out from under a reader.
     output_types: &'a OutputTypes,
@@ -91,7 +91,7 @@ impl<'a> GraphCtx<'a> {
     /// The table is threaded in rather than owned because the context is `Copy`:
     /// the caller keeps the allocation across frames, and a refresh reuses its
     /// capacity instead of building a map per pass.
-    pub(crate) fn for_document(
+    pub(crate) fn new(
         app: AppCtx<'a>,
         doc: &'a Document,
         output_types: &'a mut OutputTypes,
