@@ -115,15 +115,11 @@ impl MainWindow {
         } = self;
         for tab in doc.layout.active_tabs() {
             match tab {
-                // `Document::shows_graph` — which the context gates on — is
-                // this same predicate over the same groups, so matching the
-                // arm *is* the proof that it resolves.
-                TabRef::Graph => graph_ui.prepass(
-                    ui,
-                    GraphCtx::for_document(ctx, doc, output_types)
-                        .expect("a Graph tab is active, so the context resolves"),
-                    out,
-                ),
+                // Reached from `active_tabs`, so a pane is showing the graph
+                // by construction — which is what `GraphUI::prepass` asserts.
+                TabRef::Graph => {
+                    graph_ui.prepass(ui, GraphCtx::for_document(ctx, doc, output_types), out)
+                }
                 // Neither derives a document mutation from input: preferences
                 // edits go through their own widgets, and a viewer only
                 // navigates its own texture.
@@ -197,11 +193,8 @@ impl MainWindow {
                             .show(ui, |ui| {
                                 // The context carries everything the canvas
                                 // reads — theme and run included, through the
-                                // `ctx` it is composed from; see
-                                // `Self::prepass` for why matching the arm
-                                // proves it resolves.
-                                let graph_ctx = GraphCtx::for_document(ctx, doc, output_types)
-                                    .expect("a Graph tab is active, so the context resolves");
+                                // `ctx` it is composed from.
+                                let graph_ctx = GraphCtx::for_document(ctx, doc, output_types);
                                 graph_ui.draw(ui, graph_ctx, out);
                                 graph_ui.draw_toolbar(ui, graph_ctx, out);
                             });

@@ -160,7 +160,7 @@ impl GraphUI {
     /// Sweep last frame's node responses into [`CanvasHits`]. Does nothing
     /// when no pane is showing the graph — the sweep runs before the tab set
     /// settles, so it cannot assume one.
-    pub(crate) fn scan_hits(&mut self, ui: &Ui, graph_ctx: Option<GraphCtx<'_>>) {
+    pub(crate) fn scan_hits(&mut self, ui: &Ui, graph_ctx: GraphCtx<'_>) {
         self.hits.scan(ui, graph_ctx);
     }
 
@@ -170,13 +170,6 @@ impl GraphUI {
     /// caller that can see the whole document.
     pub(crate) fn retain_nodes(&mut self, keep: impl Fn(NodeId) -> bool) {
         self.geometry.retain_nodes(keep);
-    }
-
-    /// Whether a pane is showing this canvas — the same question the
-    /// projection gates on, asked of the layout rather than of the document's
-    /// contents, so an empty graph on an active tab still counts.
-    pub(crate) fn is_visible(&self, doc: &Document) -> bool {
-        doc.shows_graph()
     }
 
     /// Take note of whether a pane is showing this canvas, and report whether
@@ -198,7 +191,7 @@ impl GraphUI {
     /// every frame: clearing gestures is only correct on the transition,
     /// since every gesture spans frames by definition.
     pub(crate) fn sync_visibility(&mut self, doc: &Document) -> bool {
-        let visible = self.is_visible(doc);
+        let visible = doc.shows_graph();
         if self.visible == visible {
             return false;
         }
@@ -234,6 +227,10 @@ impl GraphUI {
     /// pane's outer-canvas response — loops the visible panes; everything
     /// else is keyed by document-unique ids and sweeps them all at once.
     pub(crate) fn prepass(&mut self, ui: &mut Ui, graph_ctx: GraphCtx<'_>, out: &mut Requests) {
+        debug_assert!(
+            graph_ctx.is_visible(),
+            "the prepass is reached from an active Graph tab"
+        );
         let Self {
             geometry,
             hits,
@@ -301,6 +298,10 @@ impl GraphUI {
     /// Anything the pane asks for — graph edits, and the commands a chip or a
     /// menu pick means — lands on `out` in the order it was raised.
     pub(crate) fn draw(&mut self, ui: &mut Ui, graph_ctx: GraphCtx<'_>, out: &mut Requests) {
+        debug_assert!(
+            graph_ctx.is_visible(),
+            "the record is reached from an active Graph tab"
+        );
         // Pan/zoom was already folded into the document in `prepass`, and the
         // contexts built below read it straight off there, so the transform
         // sees the up-to-date viewport with nothing to re-sync. The gesture

@@ -2,8 +2,33 @@ use scenarium::testing::graph::TestGraph;
 use scenarium::{Binding, CacheMode, DataType, Graph, InputPort, Node, NodeKind};
 
 use crate::core::document::PortKind;
+use crate::core::document::TabRef;
 use crate::core::document::harness::DocFixture;
 use crate::gui::graph_ctx::harness::GraphCtxFixture;
+
+/// Composing a context no longer asks whether anyone is looking — the
+/// document, the library and the run resolve either way — so visibility rides
+/// along as a field for the one pass that runs before the tab set settles.
+///
+/// It tracks the *active tab*, never the graph's contents, and the two come
+/// apart in both directions: an empty graph on a Graph tab is a real pane (a
+/// fresh document needs a canvas to place its first node on), and a populated
+/// graph still reads back with every pane showing something else.
+#[test]
+fn visibility_tracks_the_active_tab_not_the_graph_contents() {
+    let mut empty_but_shown = GraphCtxFixture::over(DocFixture::default());
+    assert!(empty_but_shown.graph_ctx().is_visible());
+    assert_eq!(empty_but_shown.graph_ctx().nodes().count(), 0);
+
+    let mut populated_but_hidden =
+        GraphCtxFixture::over(DocFixture::probes(2).with_tab(TabRef::Preferences));
+    assert!(!populated_but_hidden.graph_ctx().is_visible());
+    assert_eq!(
+        populated_but_hidden.graph_ctx().nodes().count(),
+        2,
+        "the graph still reads back — only the pane showing it is gone"
+    );
+}
 
 #[test]
 fn only_runnable_sinks_expose_the_disable_toggle() {
