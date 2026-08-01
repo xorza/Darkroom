@@ -8,7 +8,6 @@ use scenarium::NodeId;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::pane::graph::frame::cull::CullRegion;
 use crate::gui::pane::graph::frame::geometry::CanvasGeometry;
-use crate::gui::pane::graph::frame::hits::CanvasHits;
 use crate::gui::pane::graph::gesture::canvas_gesture::CanvasGesture;
 use crate::gui::pane::graph::paint::inspector::Inspectors;
 use crate::gui::theme::Theme;
@@ -35,7 +34,6 @@ use crate::gui::theme::Theme;
 pub(crate) struct CanvasCtx<'a> {
     graph_ctx: GraphCtx<'a>,
     geometry: &'a CanvasGeometry,
-    hits: &'a CanvasHits,
     gesture: Option<CanvasGesture>,
     cancelled: bool,
 }
@@ -44,14 +42,12 @@ impl<'a> CanvasCtx<'a> {
     pub(super) fn new(
         graph_ctx: GraphCtx<'a>,
         geometry: &'a CanvasGeometry,
-        hits: &'a CanvasHits,
         gesture: Option<CanvasGesture>,
         cancelled: bool,
     ) -> Self {
         Self {
             graph_ctx,
             geometry,
-            hits,
             gesture,
             cancelled,
         }
@@ -68,11 +64,6 @@ impl<'a> CanvasCtx<'a> {
     /// Last frame's port centers and node rects.
     pub(crate) fn geometry(self) -> &'a CanvasGeometry {
         self.geometry
-    }
-
-    /// This frame's swept node interactions.
-    pub(crate) fn hits(self) -> &'a CanvasHits {
-        self.hits
     }
 
     /// Which bare-canvas gesture latched this frame, if any. Canvas-private:
@@ -162,12 +153,6 @@ impl<'a> DrawCtx<'a> {
 
     pub(crate) fn geometry(self) -> &'a CanvasGeometry {
         self.canvas.geometry()
-    }
-
-    /// This frame's swept node interactions — the node body reads its
-    /// drag latch from here rather than re-polling its own handles.
-    pub(crate) fn hits(self) -> &'a CanvasHits {
-        self.canvas.hits()
     }
 
     pub(crate) fn inspectors(self) -> &'a Inspectors {

@@ -15,7 +15,10 @@ use palantir::{
 };
 use scenarium::NodeId;
 
+use crate::core::document::TabRef;
+use crate::core::document::dock::DockOp;
 use crate::gui::graph_ctx::node_ctx::NodeCtx;
+use crate::gui::requests::Requests;
 use crate::gui::state::preview_store::{PreviewImage, StoredContent};
 use crate::gui::theme::Theme;
 use crate::gui::widgets::format::fmt_bytes;
@@ -47,7 +50,7 @@ pub(crate) fn preview_image_wid(node_id: NodeId) -> WidgetId {
 
 /// Draw one preview node's value area, plus the image info footer when there is
 /// an image to describe.
-pub(super) fn preview_row(ui: &mut Ui, ncx: NodeCtx<'_>) {
+pub(super) fn preview_row(ui: &mut Ui, ncx: NodeCtx<'_>, out: &mut Requests) {
     let theme = ncx.theme();
     let node = ncx;
     let stored = ncx.graph_ctx.run_state().previews.entries.get(&node.id);
@@ -81,6 +84,19 @@ pub(super) fn preview_row(ui: &mut Ui, ncx: NodeCtx<'_>) {
         .snapshot();
     if content.hovered {
         ui.set_cursor(CursorIcon::Pointer);
+    }
+    // The card's one action: open this node's value at full resolution. Asked
+    // for here, where the clickable area is built, so the id it senses on and
+    // the id its click is read from are the same one.
+    //
+    // A view request rather than a graph edit — the pane arrangement is the
+    // dock's, and `Requests` routes by what is being asked for, not by who
+    // asks. Deduped by `OpenTab`, so clicking a card whose viewer is already
+    // open just activates it.
+    if content.left.clicked() {
+        out.push_view(DockOp::OpenTab {
+            tab: TabRef::ImageViewer(node.id),
+        });
     }
     if let Some(image) = stored.and_then(StoredContent::image) {
         info_row(ui, ncx.theme(), image);

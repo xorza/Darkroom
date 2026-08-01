@@ -9,6 +9,8 @@
 
 pub(super) mod glyph;
 
+use std::sync::Arc;
+
 use glam::Vec2;
 use palantir::{
     Align, Configure, ContextMenu, Grid, HAlign, MenuItem, Panel, PopupHandle, Sense, Sizing,
@@ -19,12 +21,14 @@ use scenarium::FuncEvent;
 use scenarium::InputPort;
 use scenarium::Library;
 use scenarium::NodeId;
-use scenarium::{DataType, FsPathMode, Func};
+use scenarium::{DataType, FsPathConfig, FsPathMode, Func, StaticValue};
 
 use crate::core::document::{PortKind, PortRef};
 use crate::core::edit::intent::types::GraphIntent;
 use crate::core::preview;
 use crate::gui::EventRef;
+use crate::gui::app::commands::AppCommand;
+use crate::gui::app::commands::edit::EditCommand;
 use crate::gui::graph_ctx::input_ctx::InputCtx;
 use crate::gui::graph_ctx::node_ctx::NodeCtx;
 use crate::gui::graph_ctx::output_ctx::OutputCtx;
@@ -170,14 +174,28 @@ pub(crate) fn port_circle_wid(port: PortRef) -> WidgetId {
 
 /// An input port's inline const editor (text field, checkbox, or file-pick
 /// button).
-pub(crate) fn const_editor_wid(input: InputPort) -> WidgetId {
+fn const_editor_wid(input: InputPort) -> WidgetId {
     port_wid("const_editor", input.into())
 }
 
-/// An input port's cell (circle + label). The prepass polls it for a
-/// double-click on the *label* area — the circle has its own
-/// [`port_circle_wid`] and consumes hits over its own rect.
-pub(crate) fn input_cell_wid(port: PortRef) -> WidgetId {
+/// A click on an `FsPath` input's inline pick button: the port to set, and the
+/// picker config to open the dialog with.
+///
+/// A named payload rather than the two values loose, because it travels as an
+/// `AppCommand` through `App` and back — the dialog can only run once the
+/// record pass is over, so the click and the effect are frames apart.
+#[derive(Clone, Debug)]
+pub(crate) struct PathPick {
+    pub(crate) port: InputPort,
+    /// Type-level metadata, taken from the port's `DataType` — the value
+    /// carries only the selected path strings.
+    pub(crate) config: Arc<FsPathConfig>,
+}
+
+/// An input port's cell (circle + label). Answers a double-click on the
+/// *label* area — the circle has its own [`port_circle_wid`] and consumes
+/// hits over its own rect.
+fn input_cell_wid(port: PortRef) -> WidgetId {
     port_wid("input_cell", port)
 }
 
@@ -240,7 +258,7 @@ fn input_label_cell(
     let overhang = theme.port_overhang_for(radius);
     let margin = Spacing::new(-overhang, 0.0, 0.0, 0.0);
     let wid = port_circle_wid(port);
-    // Stable cell id so the prepass can poll a label-area double-click (the
+    // Stable cell id so the label area answers a double-click of its own (the
     // circle has its own `port_circle_wid`); also the context-menu anchor.
     let cell = Panel::hstack()
         .id(input_cell_wid(port))
@@ -258,13 +276,34 @@ fn input_label_cell(
             }
             port_label(ui, theme, input.name(), &tip);
         });
-    // Open on right-click anywhere on the cell — circle or label.
-    let (menu_id, cell_secondary) = (cell.response.id, cell.response.right.clicked());
+    // Open on right-click anywhere on the cell — circle or label. Pulled into
+    // locals so the response's `&Ui` borrow ends before the reads below.
+    let (menu_id, cell_secondary, cell_double) = (
+        cell.response.id,
+        cell.response.right.clicked(),
+        cell.response.left.double_clicked(),
+    );
     open_port_context_menu(ui, menu_id, cell_secondary, wid);
-    // Double-click on the circle or label toggles the binding (clear, or seed
-    // the default const when unbound) — handled in `emit_port_dblclicks`
-    // (prepass), since adding/removing a `Const` resizes the node and the
-    // wires must re-anchor before the record.
+    // Double-click on the circle or the label toggles the binding: clear it,
+    // or seed the default const when unbound.
+    //
+    // Adding or removing a `Const` adds or removes this input's inline editor
+    // and so resizes the node. The intent drains at the end of this record
+    // pass, and a double-click is action input — which always earns a second
+    // pass — so the body re-arranges at its settled size with its wires
+    // re-anchored before the frame paints.
+    if cell_double || ui.response_for(wid).left.double_clicked() {
+        match input.binding() {
+            // Boundary ports route the interface — no const affordance, so an
+            // unbound one has nothing to seed (its label double-click renames).
+            None => {
+                if let Some(default) = input.default() {
+                    out.push_graph(set_input(port, Binding::Const(default)));
+                }
+            }
+            Some(_) => out.push_graph(set_input(port, None)),
+        }
+    }
     ContextMenu::for_id(menu_id)
         .size((Sizing::HUG, Sizing::HUG))
         .show(ui, |ui, popup| {
@@ -304,6 +343,23 @@ fn value_cell(ui: &mut Ui, ncx: NodeCtx<'_>, input: InputCtx<'_>, out: &mut Requ
     let data_type = input.ty();
     let value_variants = input.value_variants();
     let editor_id = const_editor_wid(input.port());
+    // An `FsPath` editor draws a pick button; clicking it raises a blocking
+    // file dialog, which only `App` can run — so this is the app tier.
+    //
+    // Every const editor shares one widget family, so "which editor was
+    // clicked" would be all a canvas-level sweep could say; whether the click
+    // means *pick a path* is a question about the port's type. Answering it
+    // here costs nothing, because the type is what decided to draw the button
+    // in the first place.
+    if ui.response_for(editor_id).left.clicked()
+        && matches!(value, StaticValue::FsPath(_) | StaticValue::FsPaths(_))
+        && let DataType::FsPath(config) = data_type
+    {
+        out.push_app(AppCommand::Edit(EditCommand::PickInputPath(PathPick {
+            port: input.port(),
+            config: config.clone(),
+        })));
+    }
     // Fill the value column so every editor is the same width (the column
     // hugs to the widest editor's content). `min_size` on the editors keeps
     // a sensible floor; the editor fills this cell, this cell fills the col.
@@ -373,12 +429,25 @@ fn output_cell(
                 &tip,
             );
         });
-    // Double-click to disconnect every consumer is handled in
-    // `emit_port_dblclicks` (prepass) alongside the input-side gesture.
-
     // Right-click anywhere on the cell (circle or label) opens the port menu —
-    // mirrors the input side's binding menu.
+    // mirrors the input side's binding menu. Pulled into locals so the
+    // response's `&Ui` borrow ends before the read below.
     let (menu_id, cell_secondary) = (cell.response.id, cell.response.right.clicked());
+    // An output may feed many inputs, so a double-click on its circle clears
+    // each consumer. Same pre-paint timing as the input side: the intents drain
+    // at the end of this pass, and the second pass a double-click earns
+    // re-arranges every node that lost a wire.
+    if ui.response_for(wid).left.double_clicked() {
+        let fed: Vec<_> = ncx
+            .graph_ctx
+            .connections()
+            .filter(|(_, producer)| {
+                producer.node_id == port.node_id && producer.port_idx == port.port_idx
+            })
+            .map(|(consumer, _)| consumer)
+            .collect();
+        out.extend_graph(fed.into_iter().map(|c| set_input(c.into(), None)));
+    }
     open_port_context_menu(ui, menu_id, cell_secondary, wid);
     ContextMenu::for_id(menu_id)
         .size((Sizing::HUG, Sizing::HUG))

@@ -6,12 +6,12 @@ use crate::gui::pane::graph::harness::CanvasHarness;
 
 /// A drag on a node body moves that node, by the pointer's travel.
 ///
-/// The drag *latch* is the one thing `CanvasHits` resolves for the record
-/// rather than for an input pass: `NodeUI::draw_one` no longer polls the
-/// node's own handles, it reads the handle the sweep found. So this drives
-/// a real press-and-travel through the harness — nothing else in the suite
-/// latches a body drag, and a latch that silently stopped firing would
-/// leave every node unmovable with the whole rest of the canvas green.
+/// The latch is read where the body is drawn: `NodeUI::draw_one` walks the
+/// node's own `drag_handles` for a fresh press, and later frames' `prepass`
+/// turns that handle's `drag_delta` into a `MoveSelection`. So this drives a
+/// real press-and-travel through the harness — nothing else in the suite
+/// latches a body drag, and a latch that silently stopped firing would leave
+/// every node unmovable with the whole rest of the canvas green.
 #[test]
 fn a_body_drag_moves_the_node_by_the_pointers_travel() {
     let mut h = CanvasHarness::new(DocFixture::probes(2));

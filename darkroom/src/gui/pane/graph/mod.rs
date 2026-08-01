@@ -24,23 +24,16 @@ pub(crate) mod toolbar;
 
 use glam::Vec2;
 use palantir::{Background, Configure, Panel, Sense, Sizing, TranslateScale, Ui};
-use scenarium::NodeId;
 use std::collections::BTreeSet;
 
-use crate::core::document::dock::DockOp;
-use crate::core::document::{Document, TabRef};
+use crate::core::document::Document;
 use crate::core::edit::intent::types::GraphIntent;
-use crate::gui::app::commands::AppCommand;
-use crate::gui::app::commands::edit::EditCommand;
-use crate::gui::app::commands::run::RunCommand;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::pane::graph::background::CanvasBackground;
 use crate::gui::pane::graph::canvas::{inner_canvas_widget_id, outer_canvas_widget_id};
 use crate::gui::pane::graph::ctx::{CanvasCtx, DrawCtx, Selection};
 use crate::gui::pane::graph::frame::cull::CullRegion;
 use crate::gui::pane::graph::frame::geometry::CanvasGeometry;
-use crate::gui::pane::graph::frame::hits::{CanvasHits, Chip};
-use crate::gui::pane::graph::frame::prepass::{emit_path_picks, emit_port_dblclicks};
 use crate::gui::pane::graph::gesture::breaker::BreakerUI;
 use crate::gui::pane::graph::gesture::canvas_gesture::{CanvasGesture, classify_canvas_gesture};
 use crate::gui::pane::graph::gesture::connection::ConnectionUI;
@@ -51,7 +44,7 @@ use crate::gui::pane::graph::gesture::selection::SelectionUI;
 use crate::gui::pane::graph::gesture::slot::GestureSlot;
 use crate::gui::pane::graph::gesture::subscription::SubscriptionUI;
 use crate::gui::pane::graph::gesture::{connection, pan_zoom, shortcuts, subscription};
-use crate::gui::pane::graph::node::NodeUI;
+use crate::gui::pane::graph::node::{NodeDrawFindings, NodeUI};
 use crate::gui::pane::graph::paint::inspector::Inspectors;
 use crate::gui::pane::graph::paint::wire::{WireEmphasis, WirePass};
 use crate::gui::relayout::Relayout;
@@ -113,18 +106,9 @@ pub(crate) struct GraphUI {
     /// [`Self::retain_nodes`] rather than by absence from a projection.
     ///
     /// Private: every production reader reaches it through a [`CanvasCtx`],
-    /// which is the only thing that pairs it with the hits and the gesture it
-    /// was settled beside. Tests read it through [`internals::geometry`].
+    /// which is the only thing that pairs it with the gesture it was settled
+    /// beside. Tests read it through [`internals::geometry`].
     geometry: CanvasGeometry,
-    /// Last frame's node interactions, swept once and read by every pass
-    /// below instead of each re-polling the same widget ids. Persistent for
-    /// ownership only — the rebuild rewrites it whole.
-    ///
-    /// Filled by [`CanvasGeometry::rebuild`] in [`Self::prepass`], off the
-    /// same per-node and per-port responses that pass reads anyway — so it
-    /// holds ids from last frame's projection, and every reader confirms the
-    /// node is still in the pane it is drawing before acting.
-    hits: CanvasHits,
     /// Open inspection panels, keyed by node. Outside the gesture group
     /// so pinned panels survive a tab switch; panels only paint for nodes
     /// in the active scene, so off-tab ones hide and reappear.
@@ -204,7 +188,6 @@ impl GraphUI {
             // frame-local facts `prepass` rewrites before anything reads them.
             background: _,
             geometry: _,
-            hits: _,
             inspectors: _,
             last_prepass_frame: _,
             gesture: _,
@@ -286,33 +269,10 @@ impl GraphUI {
         self.node_ui.prepass(ui, graph_ctx, out);
         // One walk, filling the geometry caches and the whole hit digest off
         // the same per-node and per-port responses.
-        self.geometry.rebuild(ui, graph_ctx, &mut self.hits);
-        // A click on a preview card's image opens that node in a viewer tab.
-        // Raised here rather than beside the record's app-tier chips because
-        // it is a *view* request: landing it in this phase's drain puts the tab
-        // on screen for the record below, so it opens on the frame it was asked
-        // for. Read off last frame's projection, so the node may be gone
-        // already — `OpenTab` dedupes and `reconcile_with_graph` prunes a tab
-        // whose node died, both in the very drain that lands this op, so a
-        // stale hit costs nothing.
-        if let Some(node) = self.hits.chip(Chip::PreviewImage) {
-            out.push_view(DockOp::OpenTab {
-                tab: TabRef::ImageViewer(node),
-            });
-        }
-        // Everything below reads the settled geometry and this frame's swept
-        // hits, so from here the canvas has a context of its own.
-        let cx = CanvasCtx::new(
-            graph_ctx,
-            &self.geometry,
-            &self.hits,
-            gesture,
-            self.cancelled,
-        );
-        // After the rebuild, which is where the port half of `hits` fills:
-        // a port double-click rides the same response read as that port's
-        // center, so there is nothing to act on before it.
-        emit_port_dblclicks(cx, out);
+        self.geometry.rebuild(ui, graph_ctx);
+        // Everything below reads the settled geometry, so from here the canvas
+        // has a context of its own.
+        let cx = CanvasCtx::new(graph_ctx, &self.geometry, gesture, self.cancelled);
         // Both port-drag claimants sit *after* the rebuild so they read this
         // frame's drag edges and centers, and `preview_drag_modifier` keeps
         // them disjoint: the preview spawn takes the output column under the
@@ -327,9 +287,6 @@ impl GraphUI {
         // emitter glyph and a data port can't both latch (different widget-id
         // spaces).
         self.subscription_ui.apply(ui, cx, out);
-        // Inspector chip toggles + the close-on-outside-action sweep, both
-        // off this frame's swept hits.
-        self.inspectors.apply(ui, cx);
         // Last, once: both wire gestures have settled their snap targets
         // above, and the flags this writes are document-unique, so the draw
         // reads finished geometry. Taking the table back `&mut` is what ends
@@ -374,16 +331,10 @@ impl GraphUI {
                 self.record_canvas(ui, graph_ctx, out);
                 // Composed here rather than shared with the halves above and
                 // below: both drive controllers and so hold all of `self`
-                // mutably, while a context borrows the geometry and the hits
-                // shared. The toolbar only reads, so it takes one built once
+                // mutably, while a context borrows the geometry shared. The
+                // toolbar only reads, so it takes one built once
                 // `record_canvas` has given the fields back.
-                let cx = CanvasCtx::new(
-                    graph_ctx,
-                    &self.geometry,
-                    &self.hits,
-                    self.gesture,
-                    self.cancelled,
-                );
+                let cx = CanvasCtx::new(graph_ctx, &self.geometry, self.gesture, self.cancelled);
                 toolbar::show(ui, cx, out);
             });
     }
@@ -392,13 +343,7 @@ impl GraphUI {
     /// `apply`, then the chip clicks that mean an [`AppCommand`]. Everything
     /// here reads last frame's responses and raises requests; nothing draws.
     fn resolve_gestures(&mut self, ui: &mut Ui, graph_ctx: GraphCtx<'_>, out: &mut Requests) {
-        let cx = CanvasCtx::new(
-            graph_ctx,
-            &self.geometry,
-            &self.hits,
-            self.gesture,
-            self.cancelled,
-        );
+        let cx = CanvasCtx::new(graph_ctx, &self.geometry, self.gesture, self.cancelled);
         // Click on bare canvas (node panels hit-test first, so this
         // only fires when the click missed every node) clears the
         // selection. Skip when nothing is selected so we don't pollute
@@ -437,30 +382,6 @@ impl GraphUI {
         // `out`, so there is no precedence to settle here: a frame in which
         // both a menu pick and a chip click landed raises both.
         self.node_menu.apply(ui, cx, out);
-        // The app-tier tail of the same read: each chip click in the recorded
-        // tree — an `FsPath` input's pick button, a node header's play or
-        // cache-eviction chip. Each source surfaces only a domain fact (which
-        // node to run, which port to pick a path for), and naming `AppCommand`
-        // is the canvas's job, since it is what knows these are app-tier — so
-        // the translation lives here rather than in `node`. All three are pure
-        // reads over [`CanvasHits`].
-        //
-        // A hit is keyed by a document-unique `NodeId`, so it can belong to a
-        // neighbouring pane — or to a node this pane no longer holds, since the
-        // sweep ran against last frame's projection. Both fall out of
-        // `in_scope`.
-        let in_scope = |id: NodeId| cx.graph_ctx().contains(id).then_some(id);
-        if let Some(req) = emit_path_picks(cx) {
-            out.push_app(AppCommand::Edit(EditCommand::PickInputPath(req)));
-        }
-        // A header play-chip click runs that node's cone — the same command the
-        // context menu's "Run to this node" resolves to.
-        if let Some(node_id) = cx.hits().chip(Chip::Play).and_then(in_scope) {
-            out.push_app(AppCommand::Run(RunCommand::Node(node_id)));
-        }
-        if let Some(node_id) = cx.hits().chip(Chip::EvictCache).and_then(in_scope) {
-            out.push_app(AppCommand::Run(RunCommand::EvictCache(node_id)));
-        }
     }
 
     /// The record pass's drawing half: the outer (pan-capture) canvas, the
@@ -468,13 +389,7 @@ impl GraphUI {
     /// the wires, node bodies, inspection panels, and in-flight
     /// gesture previews.
     fn record_canvas(&mut self, ui: &mut Ui, graph_ctx: GraphCtx<'_>, out: &mut Requests) {
-        let cx = CanvasCtx::new(
-            graph_ctx,
-            &self.geometry,
-            &self.hits,
-            self.gesture,
-            self.cancelled,
-        );
+        let cx = CanvasCtx::new(graph_ctx, &self.geometry, self.gesture, self.cancelled);
         let theme = cx.theme();
         let viewport = graph_ctx.viewport();
         let (pan_val, zoom_val) = (viewport.pan, viewport.zoom);
@@ -486,6 +401,11 @@ impl GraphUI {
             .selection_ui
             .preview()
             .map_or(Selection::Committed(graph_ctx.selected()), Selection::swept);
+
+        // What the node draw sees but cannot act on: the inspect chip and the
+        // body clicks, both of which drive `Inspectors` — held shared below so
+        // the panels can paint, and taken `&mut` once the draw is over.
+        let mut found = NodeDrawFindings::default();
 
         // Outer canvas: covers the whole pane, paints the canvas
         // background, owns the input routing for empty-canvas
@@ -576,7 +496,7 @@ impl GraphUI {
                             // Node bodies paint back-to-front by each
                             // placement's depth (`GraphView::paint_order`), so
                             // a clicked node raises above its neighbours.
-                            self.node_ui.draw_all(ui, dcx, &mut probe, out);
+                            found = self.node_ui.draw_all(ui, dcx, &mut probe, out);
                         }
                         // Inspection panels paint after the node bodies so
                         // they sit on top and win clicks over the nodes
@@ -588,6 +508,13 @@ impl GraphUI {
                         self.subscription_ui.draw_in_flight(ui, cx, canvas_origin);
                     });
             });
+        // The draw is over, so the panels are free to take `&mut`: cycle the
+        // node whose chip was clicked, and close the unpinned ones if the
+        // action landed anywhere but on a panel.
+        self.inspectors.apply(ui, &found);
+        if let Some(node) = found.menu_opened {
+            self.node_menu.open_on(ui, node, graph_ctx, out);
+        }
     }
 }
 
@@ -614,6 +541,8 @@ pub(crate) mod harness;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::document::TabRef;
+    use crate::core::document::dock::DockOp;
     use crate::core::document::harness::DocFixture;
     use crate::core::preview::preview_func;
     use crate::gui::pane::graph::harness::CanvasHarness;
