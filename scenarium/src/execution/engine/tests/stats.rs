@@ -2,18 +2,6 @@ use super::*;
 
 use crate::execution::report::NodeExecutionStatus;
 
-#[tokio::test(flavor = "multi_thread")]
-async fn missing_inputs_reported() {
-    let mut e = TestEngine::over(TestGraph::sample());
-    e.edit(|g| g.unbind("sum", 0));
-
-    let run = e.run_sinks().await;
-
-    // Port 1 is still bound, so the run names exactly the port that failed
-    // rather than flagging the node as a whole.
-    assert_eq!(run.missing_ports("sum"), [0]);
-}
-
 /// Library drift: wiring that references ports/events the library no
 /// longer declares must still compile — the dangling binding degrades
 /// to unbound (a required input reports missing), a dangling

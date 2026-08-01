@@ -39,30 +39,11 @@ async fn empty_graph_executes_cleanly() {
     assert!(run.missing_inputs().is_empty());
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn multiple_sinks_all_execute() {
-    // Two independent chains: a → print_a, b → print_b.
-    let mut g = TestGraph::new();
-    g.add("a", |n| n.returns(2i64));
-    g.add("b", |n| n.returns(5i64));
-    g.add("print_a", |n| n.records());
-    g.instance("print_b", "print_a");
-    g.wire("a", 0, "print_a", 0);
-    g.wire("b", 0, "print_b", 0);
-
-    let mut e = TestEngine::over(g);
-    let run = e.run_sinks().await;
-
-    assert_eq!(run.ran_node_count, 4, "both sinks and both sources");
-    let mut logged = run.logs();
-    logged.sort_unstable();
-    assert_eq!(logged, ["2", "5"]);
-}
-
+/// Two independent chains (`a → print_a`, `b → print_b`) both execute, and
+/// both sources are Pure, so their outputs are cached across runs. Removing
+/// one chain must preserve the survivor's id-keyed slot.
 #[tokio::test(flavor = "multi_thread")]
 async fn cached_output_survives_node_removal() {
-    // Both sources are Pure, so their outputs are cached across runs.
-    // Removing one chain must preserve the survivor's id-keyed slot.
     let (calls_a, calls_b) = (Calls::default(), Calls::default());
     let mut g = TestGraph::new();
     g.add("a", |n| n.counted(2i64, &calls_a).cache(CacheMode::Ram));
@@ -73,7 +54,11 @@ async fn cached_output_survives_node_removal() {
     g.wire("b", 0, "print_b", 0);
 
     let mut e = TestEngine::over(g);
-    e.run_sinks().await;
+    let run = e.run_sinks().await;
+    assert_eq!(run.ran_node_count, 4, "both sinks and both sources");
+    let mut logged = run.logs();
+    logged.sort_unstable();
+    assert_eq!(logged, ["2", "5"]);
     assert_eq!(calls_a.count(), 1);
     assert_eq!(calls_b.count(), 1);
 

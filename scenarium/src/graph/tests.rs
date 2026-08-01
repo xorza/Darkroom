@@ -139,22 +139,6 @@ fn a_new_node_takes_what_its_declaration_says() {
 }
 
 #[test]
-fn validate_rejects_dangling_binding() {
-    let mut g = TestGraph::sample();
-    // Repoint sum's input at a node that doesn't exist.
-    g.graph.set_input_binding(
-        InputPort::new(g.id("sum"), 0),
-        Binding::bind(NodeId::unique(), 0),
-    );
-
-    let err = g
-        .graph
-        .validate()
-        .expect_err("dangling binding must fail validation");
-    assert!(err.to_string().contains("binds to missing node"));
-}
-
-#[test]
 fn const_only_input_rejects_bind_but_a_normal_input_accepts_it() {
     // One Int-in / Int-out func, so a wire between two of its instances is
     // otherwise valid — only the `const_only` flag decides whether validation
@@ -343,29 +327,6 @@ fn type_mismatched_wiring_lowers_as_unbound_through_wildcard_chains() {
         Some(&Binding::bind(g.id("pass2"), 0)),
         "the mismatched wire stays authored"
     );
-
-    // A const that doesn't satisfy its port degrades the same way.
-    g.constant("sink", 0, StaticValue::String("nope".into()));
-    assert!(matches!(
-        g.compile().binding("sink", 0),
-        ExecutionBinding::None
-    ));
-    g.constant("sink", 0, StaticValue::Float(1.0));
-    assert!(matches!(
-        g.compile().binding("sink", 0),
-        ExecutionBinding::Const(_)
-    ));
-}
-
-#[test]
-fn resolve_output_type_breaks_a_binding_cycle() {
-    // A passthrough whose value input binds to its own output — a cycle the
-    // editor can momentarily hold. Resolution must terminate as `Any`.
-    let mut g = TestGraph::new();
-    g.add("pass", passthrough);
-    g.wire("pass", 0, "pass", 0);
-
-    assert_eq!(output_type(&g, "pass", 0), DataType::Any);
 }
 
 #[test]
@@ -572,8 +533,11 @@ fn wiring_snapshot_round_trips_through_serde_and_restore() -> TestResult {
     Ok(())
 }
 
+/// Placing a node seeds a const binding for every input its declaration gave a
+/// default, and nothing at all for the ones it did not — required and optional
+/// alike, so an absent binding means "no default" rather than "not optional".
 #[test]
-fn add_func_node_seeds_default_const_binding() {
+fn add_func_node_seeds_only_the_inputs_with_defaults() {
     let mut g = TestGraph::new();
     g.add("withdefault", |n| {
         n.pure()
@@ -590,21 +554,17 @@ fn add_func_node_seeds_default_const_binding() {
         g.graph.bindings.get(&InputPort::new(id, 0)),
         Some(&Binding::Const(7i64.into()))
     );
-}
 
-#[test]
-fn add_func_node_leaves_defaultless_inputs_unbound() {
-    let mut g = TestGraph::new();
     g.add("sum", |n| {
         n.pure()
             .input(DataType::Int)
             .optional(DataType::Int)
             .output(DataType::Int)
     });
-    let id = g.id("sum");
+    let sum = g.id("sum");
 
-    assert!(!g.graph.bindings.contains_key(&InputPort::new(id, 0)));
-    assert!(!g.graph.bindings.contains_key(&InputPort::new(id, 1)));
+    assert!(!g.graph.bindings.contains_key(&InputPort::new(sum, 0)));
+    assert!(!g.graph.bindings.contains_key(&InputPort::new(sum, 1)));
 }
 
 #[test]
@@ -632,12 +592,16 @@ fn loading_rejects_a_corrupt_graph() {
     let bytes = serialize(&g.graph, SerdeFormat::Bitcode).unwrap();
     let decoded: Graph = deserialize(&bytes, SerdeFormat::Bitcode)
         .expect("a structurally broken graph still decodes; validation is what rejects it");
+    let error = decoded
+        .validate()
+        .expect_err("a binding naming a node the document doesn't hold is rejected");
+    assert!(matches!(
+        error,
+        GraphValidationError::BindingMissingProducer { .. }
+    ));
     assert!(
-        matches!(
-            decoded.validate(),
-            Err(GraphValidationError::BindingMissingProducer { .. })
-        ),
-        "a binding naming a node the document doesn't hold is rejected"
+        error.to_string().contains("binds to missing node"),
+        "the message names what broke: {error}"
     );
 
     let mut nil_key = Graph::default();

@@ -31,13 +31,18 @@ fn output_metadata_follows_ranges_when_consumer_precedes_producer() {
 
 /// The authoring-side type at one output port, for the tests that compare
 /// what the editor would paint against what the compiled program carries.
+///
+/// A miss is the fixture naming a port that is not declared — never something
+/// to read as `Any`, which is what an unresolvable *chain* resolves to. Since
+/// `DataType::default()` is itself `Any`, defaulting here would let a resolver
+/// that recorded nothing pass every `Any` case below vacuously.
 fn authoring_output_type(g: &TestGraph, name: &str) -> DataType {
     let mut types = OutputTypes::default();
     types.update(&g.graph, &g.library);
     types
         .get(OutputPort::new(g.id(name), 0))
-        .cloned()
-        .unwrap_or_default()
+        .expect("the fixture names a declared output port")
+        .clone()
 }
 
 #[test]

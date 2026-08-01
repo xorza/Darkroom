@@ -176,6 +176,18 @@ impl TestGraph {
         g
     }
 
+    /// `source` → `sink`, plus an unwired `loose` — the three positions a node
+    /// can occupy relative to a consumer edge, and the smallest graph in which
+    /// every question a compile answers about a node has a distinct answer.
+    pub fn source_sink_loose() -> Self {
+        let mut g = Self::new();
+        g.add("source", |n| n.pure().output(DataType::Int));
+        g.add("sink", |n| n.records());
+        g.add("loose", |n| n.pure().output(DataType::Int));
+        g.wire("source", 0, "sink", 0);
+        g
+    }
+
     pub fn id(&self, name: &str) -> NodeId {
         *self
             .ids
