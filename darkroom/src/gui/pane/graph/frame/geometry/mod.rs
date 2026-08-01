@@ -9,7 +9,7 @@ use scenarium::NodeId;
 use crate::core::document::{PortKind, PortRef};
 use crate::gui::EventRef;
 use crate::gui::graph_ctx::GraphCtx;
-use crate::gui::graph_ctx::node_scope::NodeScope;
+use crate::gui::graph_ctx::node_ctx::NodeCtx;
 use crate::gui::pane::graph::frame::hits::CanvasHits;
 use crate::gui::pane::graph::node::header::subscription_glyph_wid;
 use crate::gui::pane::graph::node::node_widget_id;
@@ -65,7 +65,7 @@ pub(crate) struct CanvasGeometry {
     /// a stale entry is off only across a content edit applied while hidden,
     /// and self-heals on next record. Read through [`Self::node_world_rect`].
     ///
-    /// Only the *size* is cached, never the position: `NodeScope::pos` is
+    /// Only the *size* is cached, never the position: `NodeCtx::pos` is
     /// mirrored pre-record and a cached corner would be a frame behind it,
     /// which is the whole reason the world rect is assembled fresh each read.
     node_sizes: HashMap<NodeId, Size>,
@@ -258,7 +258,7 @@ impl CanvasGeometry {
     /// size — so a node the document moved under a live gesture (a drag, an
     /// undo) culls, band-hits, and breaker-hits where it is today, not where
     /// it last recorded. `None` until the node's first record.
-    pub(crate) fn node_world_rect(&self, node: NodeScope<'_>) -> Option<Rect> {
+    pub(crate) fn node_world_rect(&self, node: NodeCtx<'_>) -> Option<Rect> {
         let size = *self.node_sizes.get(&node.id)?;
         Some(Rect {
             min: node.pos,
@@ -362,7 +362,7 @@ impl CanvasGeometry {
     /// frame's `n.pos`, so a wire leaving the viewport stays anchored to the
     /// off-screen port it runs to; every interaction flag is false, which is
     /// the truth for a widget that isn't on screen to interact with.
-    fn replay_cached(&mut self, n: NodeScope<'_>) {
+    fn replay_cached(&mut self, n: NodeCtx<'_>) {
         for kind in [PortKind::Input, PortKind::Output] {
             for port in n.ports(kind) {
                 self.ports.replay(port, n.pos);

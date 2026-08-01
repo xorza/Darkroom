@@ -15,7 +15,7 @@ use palantir::{
 };
 use scenarium::NodeId;
 
-use crate::gui::pane::graph::node::ctx::NodeCtx;
+use crate::gui::graph_ctx::node_ctx::NodeCtx;
 use crate::gui::state::preview_store::{PreviewImage, StoredContent};
 use crate::gui::theme::Theme;
 use crate::gui::widgets::format::fmt_bytes;
@@ -48,8 +48,8 @@ pub(crate) fn preview_image_wid(node_id: NodeId) -> WidgetId {
 /// Draw one preview node's value area, plus the image info footer when there is
 /// an image to describe.
 pub(super) fn preview_row(ui: &mut Ui, ncx: NodeCtx<'_>) {
-    let node = ncx.node();
-    let stored = ncx.graph_ctx().run_state().previews.entries.get(&node.id);
+    let node = ncx;
+    let stored = ncx.graph_ctx.run_state().previews.entries.get(&node.id);
     let has_image = stored.and_then(StoredContent::image).is_some();
     let content = Panel::vstack()
         .id(preview_image_wid(node.id))

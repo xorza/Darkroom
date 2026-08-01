@@ -203,7 +203,7 @@ impl App {
     ///
     /// A node deleted later in the same frame's record is swept next frame.
     /// Nothing reads a dead entry in between — the geometry is reached through
-    /// a `NodeScope` that only resolves for live nodes, and `draw_panels`
+    /// a `NodeCtx` that only resolves for live nodes, and `draw_panels`
     /// skips a panel whose node is gone — so the lag costs memory and nothing
     /// else.
     fn reconcile_derived_state(&mut self, ui: &Ui) {

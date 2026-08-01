@@ -45,7 +45,7 @@ use scenarium::{InputPort, NodeId};
 
 use crate::core::document::{PortKind, PortRef};
 use crate::gui::graph_ctx::GraphCtx;
-use crate::gui::graph_ctx::node_scope::NodeScope;
+use crate::gui::graph_ctx::node_ctx::NodeCtx;
 use crate::gui::pane::graph::node::header::{cache_eviction_badge_wid, play_badge_wid};
 use crate::gui::pane::graph::node::port_row::{const_editor_wid, input_cell_wid};
 use crate::gui::pane::graph::node::preview_row::preview_image_wid;
@@ -155,7 +155,7 @@ impl CanvasHits {
         }
     }
 
-    fn scan_node(&mut self, ui: &Ui, node: NodeScope<'_>) {
+    fn scan_node(&mut self, ui: &Ui, node: NodeCtx<'_>) {
         let body = ui.response_for(node_widget_id(node.id));
         if body.left.clicked() || body.left.drag.started() {
             self.body_acted.get_or_insert(node.id);
@@ -186,7 +186,7 @@ impl CanvasHits {
     /// `gui::pane::graph::node::preview_row`) — so a stale response can't act on a node
     /// that has stopped offering the affordance, and that rule lives in
     /// one place per chip rather than in the chip's draw and its scan.
-    fn scan_chips(&mut self, ui: &Ui, node: NodeScope<'_>) {
+    fn scan_chips(&mut self, ui: &Ui, node: NodeCtx<'_>) {
         let candidates = [
             (Chip::Play, node.runnable(), play_badge_wid(node.id)),
             (

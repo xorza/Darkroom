@@ -19,24 +19,27 @@ one join them.
       diagnostic — the doc on `Document::holds_node` is the only signal, and
       only to a reader who goes looking.
 
-## The read-only context chain is five wrappers deep, mostly forwarding
+## The context chain's forwarding is a phase ladder, not redundancy
 
-`AppCtx` → `GraphCtx` → `CanvasCtx` → `DrawCtx` → `NodeCtx`, 52 accessor
-methods across the four files, of which the majority exist only to re-expose a
-ref held one level up.
+Corrected from the first pass, which read the five levels as mostly-forwarding
+nesting. They are not interchangeable: each gates on what the frame has
+resolved by the point it can be built, and the forwarding is what lets a
+late-phase reader ask an early-phase question through one handle.
 
-- [ ] `theme()` is defined five times — `gui/app/ctx.rs:49`,
-      `gui/graph_ctx/mod.rs:144`, `gui/pane/graph/ctx.rs:64`,
-      `gui/pane/graph/ctx.rs:155`, `gui/pane/graph/node/ctx.rs:52` — four of
-      them a single delegating call. `geometry()`, `hits()` and `graph_ctx()`
-      repeat the same pattern across the lower three.
-- [ ] Each level's doc justifies itself as "answering everything the level
-      below does", which is a statement that the layer adds forwarding. The
-      genuinely new field per level is one or two (`CanvasCtx`: gesture +
-      cancelled; `DrawCtx`: selection, inspectors, cull; `NodeCtx`: hovered).
+```
+navigate   scan_hits           GraphCtx     (geometry stale, no gesture yet)
+prepass    geometry.rebuild()  CanvasCtx    (+ geometry, hits, gesture, cancelled)
+record     cull + selection    DrawCtx      (+ selection, inspectors, cull)
+```
+
+`DrawCtx::new` has exactly one call site, inside `record_canvas`. Hoisting it
+would hand the hit sweep a cull region for an unfolded viewport and a gesture
+that has not been classified — so the levels cannot collapse without moving
+behaviour. Only one thing in the group survives:
+
 - [ ] `CanvasCtx::without_gesture` (`gui/pane/graph/ctx.rs:95`) constructs a
       derived context to suppress one flag for one reader, adding a fourth way
-      the same frame can be described.
+      the same frame can be described — unrelated to the phase ladder above.
 
 ## `Theme` is one flat struct for four unrelated concerns
 

@@ -10,19 +10,33 @@ use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::graph_ctx::input_ctx::InputCtx;
 use crate::gui::graph_ctx::output_ctx::OutputCtx;
 use crate::gui::state::run_state::ExecStatus;
+use crate::gui::theme::{StaticValueEditorTheme, Theme};
 
 /// The `kind_label` a node reports when the library holds no func for it —
-/// see [`NodeScope::missing`].
+/// see [`NodeCtx::missing`].
 const MISSING_FUNC_LABEL: &str = "missing func";
 
-/// One node of the graph being drawn: its authoring record, its position in
-/// the paint stack, and the declaration the library resolves for it.
+/// One node of the graph: its authoring record, its position in the paint
+/// stack, and the declaration the library resolves for it.
+///
+/// The leaf of the context chain, and the one level where the *item* is the
+/// level — every function below a node body is about that node, so passing it
+/// beside the context would be the same argument twice.
+///
+/// **Available for the whole frame**, unlike the passes above it: a
+/// [`GraphCtx`] is all it takes to resolve one, so the hit sweep at frame top,
+/// the prepass gestures, and the record all read nodes through this same type.
+/// The facts that only a *record* has settled — the effective selection, the
+/// open inspectors, the cull region — stay on
+/// [`DrawCtx`](crate::gui::pane::graph::ctx::DrawCtx), which travels beside
+/// this rather than inside it, so a reader cannot reach for one in a phase
+/// where it does not exist yet.
 ///
 /// `Copy`, and the three borrows are taken once at [`Self::resolve`] — so a
 /// pass that threads one down a widget tree pays a single library lookup for
 /// the node, not one per field it reads.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct NodeScope<'a> {
+pub(crate) struct NodeCtx<'a> {
     pub(crate) graph_ctx: GraphCtx<'a>,
     pub(crate) id: NodeId,
     /// Where the node's body sits, from the view's placements. A field rather
@@ -49,9 +63,22 @@ pub(crate) struct NodeScope<'a> {
     /// The input ports the last run could not feed, by index — one lookup
     /// per node rather than one per port.
     missing_inputs: &'a [usize],
+    /// Whether the pointer is over this node's body — `false` until a caller
+    /// that holds a `Ui` sets it through [`Self::with_hover`].
+    ///
+    /// Two things hang off it, the const editors' hover-revealed chips
+    /// ([`Self::sve`]) and whether the port rows build tooltips at all
+    /// ([`Self::tips`]), and both used to be resolved in `ports_row` and
+    /// threaded down as a `&StaticValueEditorTheme` and a `bool` that no
+    /// signature said were the same fact.
+    ///
+    /// Not resolved in [`Self::resolve`] because that takes no `Ui` — and
+    /// must not, since it is what the whole frame reads nodes through. The
+    /// record pass sets it once per node body instead.
+    hovered: bool,
 }
 
-impl<'a> NodeScope<'a> {
+impl<'a> NodeCtx<'a> {
     /// Resolve `node_id` against the graph, or `None` when the graph does not
     /// hold it — a placement left behind by a delete.
     pub(super) fn resolve(graph_ctx: GraphCtx<'a>, node_id: NodeId, pos: Vec2) -> Option<Self> {
@@ -67,7 +94,43 @@ impl<'a> NodeScope<'a> {
             node,
             func,
             missing_inputs: graph_ctx.run_state().missing_inputs(node_id),
+            hovered: false,
         })
+    }
+
+    /// This node with the pointer-over question answered, resolved once by the
+    /// record pass for everything below the node body that asks it.
+    ///
+    /// Takes the answer rather than a `Ui`: the widget id it comes off is
+    /// `gui::pane::graph::node`'s (`node_hovered`), and this type sits below
+    /// that module.
+    pub(crate) fn with_hover(self, hovered: bool) -> Self {
+        Self { hovered, ..self }
+    }
+
+    /// Whether the port rows build their hover tooltips: their text is
+    /// composed per port per frame, and no port can be showing one while the
+    /// pointer is elsewhere, so only the node under it pays.
+    pub(crate) fn tips(self) -> bool {
+        self.hovered
+    }
+
+    /// The const-editor styling this node's value cells paint with. Pointer
+    /// over the node surfaces the (otherwise invisible) chips at half
+    /// strength — the edit affordance appears exactly when the pointer is in
+    /// the neighborhood, and geometry never changes.
+    pub(crate) fn sve(self) -> &'a StaticValueEditorTheme {
+        let theme = self.graph_ctx.theme();
+        if self.hovered {
+            &theme.static_value_editor_revealed
+        } else {
+            &theme.static_value_editor
+        }
+    }
+
+    /// The palette and metrics this node paints from.
+    pub(crate) fn theme(self) -> &'a Theme {
+        self.graph_ctx.theme()
     }
 
     /// The user's name for the node, empty when it carries none.

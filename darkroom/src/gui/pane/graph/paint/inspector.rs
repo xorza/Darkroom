@@ -31,11 +31,12 @@ use scenarium::Library;
 use scenarium::LogLevel;
 use scenarium::NodeId;
 
+use crate::gui::graph_ctx::node_ctx::NodeCtx;
 use crate::gui::pane::graph::ctx::CanvasCtx;
 use crate::gui::pane::graph::ctx::DrawCtx;
 use crate::gui::pane::graph::frame::hits::{CanvasHits, Chip};
-use crate::gui::pane::graph::node::ctx::NodeCtx;
 use crate::gui::pane::graph::node::exec_color;
+use crate::gui::pane::graph::node::node_hovered;
 use crate::gui::pane::graph::outer_canvas_widget_id;
 use crate::gui::state::run_state::ExecStatus;
 use crate::gui::theme::Theme;
@@ -154,14 +155,15 @@ impl Inspectors {
                 .map(|r| r.size.w)
                 .unwrap_or(theme.node_min_width);
             let pos = node.pos + Vec2::new(node_w + theme.floating_widget_gap, 0.0);
-            self.draw_one(ui, NodeCtx::for_node(dcx, ui, node), mode, pos);
+            let ncx = node.with_hover(node_hovered(ui, node.id));
+            self.draw_one(ui, ncx, mode, pos);
         }
     }
 
     fn draw_one(&self, ui: &mut Ui, ncx: NodeCtx<'_>, mode: InspectMode, pos: Vec2) {
-        let (theme, node) = (ncx.theme(), ncx.node());
-        let logs = ncx.graph_ctx().run_state().logs(node.id);
-        let error = ncx.graph_ctx().run_state().error(node.id);
+        let (theme, node) = (ncx.theme(), ncx);
+        let logs = ncx.graph_ctx.run_state().logs(node.id);
+        let error = ncx.graph_ctx.run_state().error(node.id);
         // The outline is the *pinned* signal, in the same accent the header's
         // `i` chip uses for its open/pinned states — one color means
         // "inspector held open" on both ends. A transient panel rides on its
@@ -237,7 +239,7 @@ impl Inspectors {
                     line(ui, node.description(), muted_style(theme, ui));
                 }
 
-                let library = ncx.graph_ctx().library();
+                let library = ncx.graph_ctx.library();
                 if node.inputs().len() > 0 {
                     section(ui, theme, "Inputs");
                     for input in node.inputs() {

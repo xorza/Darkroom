@@ -3,7 +3,7 @@
 //!
 //! Nothing here is copied or cached. A [`GraphCtx`] is the frame's
 //! [`AppCtx`] plus two shared references; the handles it hands out
-//! ([`NodeScope`], [`InputCtx`],
+//! ([`NodeCtx`], [`InputCtx`],
 //! [`OutputCtx`]) each resolve one more borrow and answer every question
 //! from the authority that owns it — the node's record off the document, its
 //! ports off the library's declaration, its status off the run. A widget
@@ -19,7 +19,7 @@
 //! [`OutputCtx::ty`](output_ctx::OutputCtx::ty)).
 
 pub(crate) mod input_ctx;
-pub(crate) mod node_scope;
+pub(crate) mod node_ctx;
 pub(crate) mod output_ctx;
 
 use std::collections::BTreeSet;
@@ -28,7 +28,7 @@ use scenarium::{Graph, InputPort, Library, NodeId, OutputPort, OutputTypes, Subs
 
 use crate::core::document::{Document, GraphView, Viewport};
 use crate::gui::app::ctx::AppCtx;
-use crate::gui::graph_ctx::node_scope::NodeScope;
+use crate::gui::graph_ctx::node_ctx::NodeCtx;
 use crate::gui::state::run_state::RunState;
 use crate::gui::theme::Theme;
 
@@ -53,7 +53,7 @@ pub(crate) struct GraphCtx<'a> {
     /// The frame's read-only world, one level up: the theme every widget
     /// paints from, the library each node's declaration resolves through (a
     /// node whose func it no longer holds reads as a
-    /// [`missing`](NodeScope::missing) stub rather than vanishing), and the
+    /// [`missing`](NodeCtx::missing) stub rather than vanishing), and the
     /// last run's per-node verdicts — status, retained RAM, unfed inputs, and
     /// the compiled program's word on what is a sink.
     app: AppCtx<'a>,
@@ -153,7 +153,7 @@ impl<'a> GraphCtx<'a> {
     }
 
     /// The last run's results, for the readers that want more of a node than
-    /// its [`NodeScope`] surfaces — its logs, its failure message, the value
+    /// its [`NodeCtx`] surfaces — its logs, its failure message, the value
     /// a preview published.
     pub(crate) fn run_state(self) -> &'a RunState {
         self.app.run_state()
@@ -172,18 +172,18 @@ impl<'a> GraphCtx<'a> {
     /// Driven by the view's placements rather than the graph's own node list,
     /// because the paint stack *is* that order. A placement whose node is
     /// gone is skipped rather than faked.
-    pub(crate) fn nodes(self) -> impl Iterator<Item = NodeScope<'a>> {
+    pub(crate) fn nodes(self) -> impl Iterator<Item = NodeCtx<'a>> {
         self.view()
             .item_placements
             .iter()
-            .filter_map(move |(id, pos)| NodeScope::resolve(self, *id, *pos))
+            .filter_map(move |(id, pos)| NodeCtx::resolve(self, *id, *pos))
     }
 
     /// One node of this graph, or `None` for an id it does not hold — a node
     /// deleted since the caller read the id, or one belonging to another pane.
-    pub(crate) fn node(self, node_id: NodeId) -> Option<NodeScope<'a>> {
+    pub(crate) fn node(self, node_id: NodeId) -> Option<NodeCtx<'a>> {
         let pos = *self.view().item_placements.get(&node_id)?;
-        NodeScope::resolve(self, node_id, pos)
+        NodeCtx::resolve(self, node_id, pos)
     }
 
     pub(crate) fn contains(self, node_id: NodeId) -> bool {
