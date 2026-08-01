@@ -1,22 +1,21 @@
-//! Shared RAII helper for a dedicated background tokio runtime.
+//! RAII wrapper for [`WorkerBridge`](crate::core::worker::WorkerBridge)'s
+//! dedicated background tokio runtime.
 //!
-//! `WorkerBridge` spins up its own dedicated
-//! multi-thread runtime, `enter()` it just long enough to construct their
-//! tokio-spawning inner value (`Worker`), then hold the
-//! `Runtime` only for its `Drop` — dropping it shuts down the threads the
-//! inner value's tasks run on. [`BackgroundRuntime`] captures that pattern
-//! once so both owners just build one, `enter` it to construct their inner
-//! value, and store it alongside for drop order.
+//! The bridge builds one, `enter`s it just long enough to construct its
+//! tokio-spawning inner value (`Worker`), then holds it for its `Drop` —
+//! dropping the runtime shuts down the threads that value's tasks run on. The
+//! wrapper exists to make that drop order a property of the type rather than a
+//! comment on a field: declared after the `Worker`, so it drops after it.
 
 use std::future::Future;
 
 use tokio::runtime::{Builder, Runtime};
 
-/// A dedicated background tokio runtime, held only for its `Drop`. Build
-/// one with [`BackgroundRuntime::new`], use [`BackgroundRuntime::enter`] to
-/// construct a `tokio::spawn`-ing value inside its ambient context, then
-/// keep this alongside that value — declare it after, so it drops after
-/// (runtime shutdown happens once the tasks it hosts are gone).
+/// A dedicated background tokio runtime, held for its `Drop`. Build one with
+/// [`BackgroundRuntime::new`], use [`BackgroundRuntime::enter`] to construct a
+/// `tokio::spawn`-ing value inside its ambient context, then keep this
+/// alongside that value — declared *after* it, so it drops after (runtime
+/// shutdown happens once the tasks it hosts are gone).
 #[derive(Debug)]
 pub(crate) struct BackgroundRuntime {
     runtime: Runtime,
