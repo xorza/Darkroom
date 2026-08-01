@@ -3,9 +3,9 @@
 //!
 //! One type rather than a closure per test file because the subject under test
 //! is the same machinery in each case — [`Self::frame`] runs the sequence
-//! `MainWindow` runs, `scan_hits` → `prepass` → `draw`, and only the gesture
-//! driven through it differs. A test that skipped a phase would be exercising a
-//! frame the app never performs.
+//! `MainWindow` runs, `scan_navigation` → `prepass` → `draw`, and only the
+//! gesture driven through it differs. A test that skipped a phase would be
+//! exercising a frame the app never performs.
 
 use glam::{UVec2, Vec2};
 use palantir::internals::UiHarness;
@@ -176,6 +176,6 @@ impl CanvasHarness {
             .graph_ctx()
             .node(node_id)
             .expect("the document still holds that node");
-        graph_ui.geometry.node_world_rect(node)
+        graph_ui.geometry().node_world_rect(node)
     }
 }

@@ -107,7 +107,15 @@ pub(crate) struct GraphUI {
     /// to keep in step with the first.
     last_prepass_frame: Option<u64>,
     background: CanvasBackground,
-    pub(crate) geometry: CanvasGeometry,
+    /// Port centers, node sizes and world rects, cached across frames and
+    /// rebuilt in [`Self::prepass`]. Outlives the scene on purpose — a culled
+    /// node's ports still resolve off it — so it is swept by
+    /// [`Self::retain_nodes`] rather than by absence from a projection.
+    ///
+    /// Private: every production reader reaches it through a [`CanvasCtx`],
+    /// which is the only thing that pairs it with the hits and the gesture it
+    /// was settled beside. Tests read it through [`internals::geometry`].
+    geometry: CanvasGeometry,
     /// Last frame's node interactions, swept once at the top of the frame
     /// and read by every pass below instead of each re-polling the same
     /// widget ids. Persistent for ownership only — [`CanvasHits::scan`]
@@ -118,7 +126,7 @@ pub(crate) struct GraphUI {
     /// set settles — so it holds ids from last frame's projection, and every
     /// reader confirms the node is still in the pane it is drawing before
     /// acting.
-    hits: Canva sHits,
+    hits: CanvasHits,
     /// Open inspection panels, keyed by node. Outside the gesture group
     /// so pinned panels survive a tab switch; panels only paint for nodes
     /// in the active scene, so off-tab ones hide and reappear.
@@ -595,6 +603,23 @@ impl GraphUI {
                         self.subscription_ui.draw_in_flight(ui, cx, canvas_origin);
                     });
             });
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod internals {
+    use super::*;
+
+    impl GraphUI {
+        /// The canvas's cross-frame geometry cache, for the tests that assert
+        /// on what a record filled into it and what [`GraphUI::retain_nodes`]
+        /// released — port centers, node sizes, cached world rects.
+        ///
+        /// Shared, not `&mut`: a test reads what the passes settled, it does
+        /// not seed the cache by hand.
+        pub(crate) fn geometry(&self) -> &CanvasGeometry {
+            &self.geometry
+        }
     }
 }
 

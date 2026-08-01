@@ -31,7 +31,7 @@ fn a_culled_nodes_ports_stay_anchored_until_its_node_leaves_the_document() {
     let out_port = PortRef::output(leaves, 0);
     let anchored = h
         .graph_ui
-        .geometry
+        .geometry()
         .ports
         .center(out_port)
         .expect("a recorded port resolves its center");
@@ -50,7 +50,7 @@ fn a_culled_nodes_ports_stay_anchored_until_its_node_leaves_the_document() {
 
     let culled = h
         .graph_ui
-        .geometry
+        .geometry()
         .ports
         .center(out_port)
         .expect("a culled port still resolves, off the cached offset");
@@ -79,11 +79,11 @@ fn a_culled_nodes_ports_stay_anchored_until_its_node_leaves_the_document() {
     h.doc_mut().remove_node(leaves);
     h.graph_ui.retain_nodes(&h.ctx.fixture.doc);
     assert!(
-        !h.graph_ui.geometry.node_sizes.contains_key(&leaves),
+        !h.graph_ui.geometry().node_sizes.contains_key(&leaves),
         "a node the document stopped holding releases its cached size",
     );
     assert!(
-        h.graph_ui.geometry.node_sizes.contains_key(&stays),
+        h.graph_ui.geometry().node_sizes.contains_key(&stays),
         "and its neighbour keeps its own",
     );
     assert!(
@@ -94,7 +94,7 @@ fn a_culled_nodes_ports_stay_anchored_until_its_node_leaves_the_document() {
     // left to reconstruct from.
     h.prime(1);
     assert_eq!(
-        h.graph_ui.geometry.ports.center(out_port),
+        h.graph_ui.geometry().ports.center(out_port),
         None,
         "an evicted node's ports stop resolving",
     );
