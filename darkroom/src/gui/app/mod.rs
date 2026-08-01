@@ -2,7 +2,6 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use palantir::Ui;
-use scenarium::{WorkerError, WorkerReport, WorkerStatusKind};
 
 use crate::core::document::open_document::OpenDocument;
 use crate::core::io::preferences::{Preferences, WindowState};
@@ -128,59 +127,6 @@ impl App {
         ui.theme = app.theme.palantir_theme.clone();
         // ui.debug_overlay.damage_rect = true;
         app
-    }
-
-    /// Consume worker results posted since the last frame. A completed run
-    /// reprojects per-node `ExecStatus` (the status glow) and per-node
-    /// logs (the inspector's Log section); a failed run clears both and
-    /// surfaces in the status bar. A preview node's published value lands in
-    /// the centralized preview store, which uploads its small thumbnail;
-    /// visible cards and viewers read the new value during the frame
-    /// already scheduled by the worker's wake callback. Drained before the
-    /// editor's scene rebuild so they reflect the latest run, and followed by
-    /// the store's own reconcile against the open document — the whole of the
-    /// run state's per-frame upkeep, in the one place that owns it.
-    fn drain_worker_events(&mut self, ui: &Ui) {
-        // Owned, so the channel borrow is gone before the status writes
-        // below (both live on `self.runtime`).
-        let events = self.runtime.drain_worker();
-        for report in events {
-            match report {
-                WorkerReport::Installed(compiled) => {
-                    self.run_state.compiled = Some(compiled);
-                }
-                WorkerReport::Cleared => {
-                    self.run_state.compiled = None;
-                    self.run_state.clear();
-                }
-                WorkerReport::Error(error) => {
-                    if matches!(&error, WorkerError::Execution { .. }) {
-                        self.run_state.clear();
-                    }
-                    self.runtime.status.error(error.to_string());
-                }
-                WorkerReport::Status(status) => {
-                    if let WorkerStatusKind::Completed {
-                        executed_node_count,
-                        cancelled,
-                        ..
-                    } = status.kind
-                    {
-                        if cancelled {
-                            tracing::info!("run cancelled after {executed_node_count} node(s)");
-                        }
-                        // A completed run supersedes any lingering failure message
-                        // from an earlier event-loop tick.
-                        self.runtime.status.error = None;
-                    }
-                    self.run_state.apply_worker_status(&status);
-                }
-            }
-        }
-        // After the reports, so a value published during this run lands against
-        // the compile the stream just acknowledged rather than the previous one.
-        let previews = self.runtime.drain_previews();
-        self.run_state.ingest_previews(ui, previews);
     }
 
     /// Sweep every cache derived from the open document, and upload the
@@ -344,9 +290,9 @@ impl palantir::App for App {
         self.track_window_state(ui);
 
         // Drain anything the worker posted since last frame, before the
-        // editor rebuilds its scene so the status/log projections it
+        // session rebuilds its scene so the status/log projections it
         // reads reflect the latest run.
-        self.drain_worker_events(ui);
+        self.run_state.drain_from(&mut self.runtime, ui);
 
         // Then release what the document has stopped holding.
         self.reconcile_derived_state(ui);

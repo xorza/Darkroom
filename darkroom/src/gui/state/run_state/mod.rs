@@ -34,6 +34,8 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use palantir::Ui;
+
+use crate::core::runtime_host::RuntimeHost;
 use scenarium::CompiledGraph;
 use scenarium::DynamicValue;
 use scenarium::LogLevel;
@@ -44,6 +46,7 @@ use scenarium::RunError;
 use scenarium::WorkerActivity;
 use scenarium::WorkerStatus;
 use scenarium::WorkerStatusKind;
+use scenarium::{WorkerError, WorkerReport};
 
 use crate::gui::state::preview_store::PreviewStore;
 
@@ -137,6 +140,68 @@ pub(crate) struct RunState {
 }
 
 impl RunState {
+    /// Fold everything `runtime`'s worker has posted since the last frame into
+    /// this projection.
+    ///
+    /// A completed run reprojects per-node `ExecStatus` (the status glow) and
+    /// per-node logs (the inspector's Log section); a failed run clears both
+    /// and surfaces in the status bar. A preview node's published value lands
+    /// in the centralized preview store, which uploads its small thumbnail;
+    /// visible cards and viewers read the new value during the frame already
+    /// scheduled by the worker's wake callback.
+    ///
+    /// Pulls rather than being pushed to: the worker is headless
+    /// ([`RuntimeHost`] names no GUI type), while this projection registers
+    /// textures and so needs a `Ui`. Reading across the boundary in this
+    /// direction keeps the frame context out of the runtime, and puts the fold
+    /// beside the state it writes — every arm below lands on `self`, and only
+    /// the status line reaches back.
+    ///
+    /// Called before the session rebuilds its scene, so the projections it
+    /// reads reflect the latest run.
+    pub(crate) fn drain_from(&mut self, runtime: &mut RuntimeHost, ui: &Ui) {
+        // Owned, so the channel borrow is gone before the status writes
+        // below — both come off the same `runtime`.
+        let events = runtime.drain_worker();
+        for report in events {
+            match report {
+                WorkerReport::Installed(compiled) => {
+                    self.compiled = Some(compiled);
+                }
+                WorkerReport::Cleared => {
+                    self.compiled = None;
+                    self.clear();
+                }
+                WorkerReport::Error(error) => {
+                    if matches!(&error, WorkerError::Execution { .. }) {
+                        self.clear();
+                    }
+                    runtime.status.error(error.to_string());
+                }
+                WorkerReport::Status(status) => {
+                    if let WorkerStatusKind::Completed {
+                        executed_node_count,
+                        cancelled,
+                        ..
+                    } = status.kind
+                    {
+                        if cancelled {
+                            tracing::info!("run cancelled after {executed_node_count} node(s)");
+                        }
+                        // A completed run supersedes any lingering failure message
+                        // from an earlier event-loop tick.
+                        runtime.status.error = None;
+                    }
+                    self.apply_worker_status(&status);
+                }
+            }
+        }
+        // After the reports, so a value published during this run lands against
+        // the compile the stream just acknowledged rather than the previous one.
+        let previews = runtime.drain_previews();
+        self.ingest_previews(ui, previews);
+    }
+
     pub(crate) fn status(&self, id: NodeId) -> ExecStatus {
         self.nodes.get(&id).map(|n| n.status).unwrap_or_default()
     }
