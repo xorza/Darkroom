@@ -28,6 +28,7 @@ use crate::core::io::preferences::Preferences;
 use crate::gui::app::commands::AppCommand;
 use crate::gui::app::ctx::{AppCtx, StatusInputs};
 use crate::gui::app::editor::Editor;
+use crate::gui::requests::Requests;
 use crate::gui::state::run_state::RunState;
 use crate::gui::theme::Theme;
 
@@ -52,6 +53,9 @@ pub(crate) struct EditorHarness {
     /// no-reading path, so a test asserting on geometry isn't reading a
     /// figure that moves between runs; set it to pin the `MEM` clause.
     pub(crate) process_memory: u64,
+    /// The frame's request queue — `App`'s in production. `pub(crate)` so a
+    /// test can seed it the way a widget does.
+    pub(crate) requests: Requests,
 }
 
 impl EditorHarness {
@@ -71,6 +75,7 @@ impl EditorHarness {
             run_state: RunState::default(),
             preferences: Preferences::default(),
             process_memory: 0,
+            requests: Requests::default(),
         }
     }
 
@@ -82,7 +87,8 @@ impl EditorHarness {
     /// Drain the queued intents into the document, as the frame's edit phase
     /// does.
     pub(crate) fn drain(&mut self) {
-        self.editor.drain_requests(&mut self.open);
+        self.editor
+            .drain_requests(&mut self.open, &mut self.requests);
     }
 
     /// Take back the last undoable entry. Reports whether there was one.
@@ -106,6 +112,7 @@ impl EditorHarness {
             run_state,
             preferences,
             process_memory,
+            requests,
         } = self;
         let ctx = AppCtx::new(
             theme,
@@ -116,7 +123,14 @@ impl EditorHarness {
                 process_memory: *process_memory,
             },
         );
-        ui.frame_value(|recorder: &mut Ui| editor.frame(recorder, open, ctx, preferences))
+        // Drained *inside* the pass, as `App::record` does — it is the
+        // per-pass entry point in production. Draining after `frame_value`
+        // would read the queue pass B left, and pass B clears what pass A
+        // raised.
+        ui.frame_value(|recorder: &mut Ui| {
+            editor.frame(recorder, open, ctx, preferences, requests);
+            requests.drain_app().collect()
+        })
     }
 
     /// `n` frames whose commands are discarded — the editor equivalent of

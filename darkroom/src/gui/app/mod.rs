@@ -10,8 +10,10 @@ use crate::core::runtime_host::RuntimeHost;
 use crate::core::wake::Wake;
 use crate::gui::HostHandle;
 use crate::gui::MAIN_WINDOW;
+use crate::gui::app::commands::AppCommand;
 use crate::gui::app::ctx::{AppCtx, StatusInputs};
 use crate::gui::app::discard_dialog::{DiscardChoice, DiscardOutcome};
+use crate::gui::requests::Requests;
 use crate::gui::state::process_memory::ProcessMemory;
 use crate::gui::state::run_state::RunState;
 use crate::gui::theme::Theme;
@@ -59,6 +61,12 @@ pub(crate) struct App {
     /// [`ProcessMemory::sample`] refreshes at most once per interval, so a
     /// second record pass repeats the reading the first one drew.
     process_memory: ProcessMemory,
+    /// The frame's request queue, lent to [`Editor::frame`] and drained of
+    /// its app tier here once the pass is over. Lives on `App` because both
+    /// levels drain it: the editor takes what the document owns, and what is
+    /// left is ours. Carries no state between frames — a field only so the
+    /// allocation is reused.
+    requests: Requests,
 }
 
 /// A transition that replaces or discards the open document. Held while
@@ -112,6 +120,7 @@ impl App {
             preferences,
             confirm_discard: None,
             process_memory: ProcessMemory::new(),
+            requests: Requests::default(),
         };
         // Resolve the saved preference: `System` (the default) follows
         // the OS light/dark setting, re-queried each launch.
@@ -341,11 +350,18 @@ impl palantir::App for App {
                 process_memory: self.process_memory.sample(Instant::now()),
             },
         );
-        // Every command the frame raised, in the order it raised them —
-        // a keyboard chord and a click on the same frame both land.
-        let commands = self
-            .editor
-            .frame(ui, &mut self.open, ctx, &mut self.preferences);
+        self.editor.frame(
+            ui,
+            &mut self.open,
+            ctx,
+            &mut self.preferences,
+            &mut self.requests,
+        );
+        // What the editor left behind: every command the frame raised, in the
+        // order it raised them — a keyboard chord and a click on the same
+        // frame both land. Collected first because running one needs all of
+        // `self`, and the drain borrows the queue that lives on it.
+        let commands: Vec<AppCommand> = self.requests.drain_app().collect();
         for command in commands {
             self.handle_command(ui, command);
         }

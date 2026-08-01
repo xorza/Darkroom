@@ -20,7 +20,7 @@ use crate::gui::graph_ctx::harness::GraphCtxFixture;
 use crate::gui::pane::graph::GraphUI;
 use crate::gui::pane::graph::node::node_widget_id;
 use crate::gui::pane::graph::node::port_row::port_circle_wid;
-use crate::gui::requests::{Request, Requests};
+use crate::gui::requests::{DocumentRequest, Requests};
 
 /// Surface every canvas test records at unless it is about size. Wide enough
 /// that [`DocFixture`]'s row of nodes lands on screen uncropped.
@@ -85,16 +85,16 @@ impl CanvasHarness {
             ctx,
             commands,
         } = self;
-        let requests = ui.frame_value(|recorder: &mut Ui| Self::record(graph_ui, ctx, recorder));
+        let mut out = ui.frame_value(|recorder: &mut Ui| Self::record(graph_ui, ctx, recorder));
+        let intents: Vec<GraphIntent> = out
+            .drain_document()
+            .map(|request| match request {
+                DocumentRequest::Graph(intent) => intent,
+                DocumentRequest::View(op) => panic!("a canvas widget raised {op:?}"),
+            })
+            .collect();
         commands.clear();
-        let mut intents = Vec::new();
-        for request in requests {
-            match request {
-                Request::Graph(intent) => intents.push(intent),
-                Request::App(command) => commands.push(command),
-                Request::View(op) => panic!("a canvas widget raised {op:?}"),
-            }
-        }
+        commands.extend(out.drain_app());
         intents
     }
 
@@ -119,11 +119,7 @@ impl CanvasHarness {
     }
 
     /// The record body both frame drivers run.
-    fn record(
-        graph_ui: &mut GraphUI,
-        ctx: &mut GraphCtxFixture,
-        recorder: &mut Ui,
-    ) -> Vec<Request> {
+    fn record(graph_ui: &mut GraphUI, ctx: &mut GraphCtxFixture, recorder: &mut Ui) -> Requests {
         let mut out = Requests::default();
         let graph_ctx = ctx.graph_ctx();
         graph_ui.scan_hits(recorder, Some(graph_ctx));
@@ -134,7 +130,7 @@ impl CanvasHarness {
             .show(recorder, |ui| {
                 graph_ui.draw(ui, graph_ctx, &mut out);
             });
-        out.drain().collect()
+        out
     }
 
     pub(crate) fn doc(&self) -> &Document {
