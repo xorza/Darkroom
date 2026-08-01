@@ -358,15 +358,6 @@ impl Document {
         self.graph.find(node_id).is_some_and(is_preview_node)
     }
 
-    /// Every open viewer tab's preview node, visible or not — the retention
-    /// half: a hidden tab still expects its value to be there when shown.
-    pub(crate) fn viewer_nodes(&self) -> impl Iterator<Item = NodeId> + '_ {
-        self.layout.all_tabs().filter_map(|tab| match tab {
-            TabRef::ImageViewer(node_id) => Some(node_id),
-            _ => None,
-        })
-    }
-
     /// The viewer nodes a record pass will actually draw: each group renders
     /// its *visible* tab and nothing else. Scopes full-resolution texture
     /// uploads to what's on screen — a viewer stacked behind another tab in
@@ -474,28 +465,29 @@ mod tests {
         assert!(doc.holds_node(plain), "the surviving node is untouched");
     }
 
-    /// A viewer tab retains its node's value while open, and only the pane's
-    /// *visible* tab is owed a full-resolution texture.
+    /// Only a pane's *visible* tab is owed a full-resolution texture — being
+    /// open is not enough.
     #[test]
-    fn viewer_tabs_retain_their_node_and_only_the_visible_one_draws() {
+    fn only_the_visible_viewer_tab_draws() {
         let mut fixture = DocFixture::default();
         let root_node = fixture.stub_at(Vec2::ZERO);
         let doc = &mut fixture.doc;
-        assert_eq!(doc.viewer_nodes().count(), 0);
+        assert_eq!(doc.visible_viewer_nodes().count(), 0);
 
         let primary = doc.layout.primary().id;
         doc.layout
             .find_or_insert(TabRef::ImageViewer(root_node), primary);
+        // Open and visible are different questions: the tab is now in the
+        // group — beside the graph tab a fresh document starts with — but the
+        // group still *shows* the graph, so nothing draws the viewer and no
+        // full-resolution texture is owed.
         assert_eq!(
-            doc.viewer_nodes().collect::<Vec<_>>(),
-            vec![root_node],
-            "an open viewer tab retains exactly its own node"
+            doc.layout.all_tabs().count(),
+            2,
+            "the viewer tab joined the graph tab in the primary group"
         );
-
-        // Retention and visibility are different questions: the tab is open
-        // (so its value must be kept) but the pane still shows the graph tab,
-        // so nothing draws it and no full-resolution texture is owed.
         assert_eq!(doc.visible_viewer_nodes().count(), 0);
+
         doc.layout.apply(DockOp::ActivateTab {
             tab: TabRef::ImageViewer(root_node),
         });
@@ -509,9 +501,9 @@ mod tests {
             tab: TabRef::ImageViewer(root_node),
         });
         assert_eq!(
-            doc.viewer_nodes().count(),
+            doc.visible_viewer_nodes().count(),
             0,
-            "closing the viewer leaves nothing retained"
+            "closing the viewer leaves nothing drawn"
         );
     }
 
