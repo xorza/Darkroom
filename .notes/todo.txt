@@ -49,4 +49,4 @@ runstate into runtimehost
 self.run_state.ingest_previews(ui, previews);
 self.run_state.previews.reconcile(ui, &self.open.document); -merge into one call
 
-pub(crate) fn push_node_removals( - remove
+inlinerename to select all text when entering edito mode
