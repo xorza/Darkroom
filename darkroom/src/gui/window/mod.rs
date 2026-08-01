@@ -18,6 +18,7 @@ use crate::gui::pane::graph::GraphUI;
 use crate::gui::pane::graph::frame::hits::Chip;
 use crate::gui::pane::preferences;
 use crate::gui::pane::viewer::{self, ImageViewer};
+use crate::gui::relayout::Relayout;
 use crate::gui::requests::Requests;
 
 /// The application root's [`Configure::input_scope`] anchor. A fixed id
@@ -115,13 +116,13 @@ impl MainWindow {
         ctx: AppCtx<'_>,
         doc: &Document,
         out: &mut Requests,
-    ) -> bool {
+    ) -> Relayout {
         let MainWindow {
             graph_ui,
             output_types,
             ..
         } = self;
-        let mut request_relayout = false;
+        let mut request_relayout = Relayout::NotNeeded;
         for tab in doc.layout.active_tabs() {
             match tab {
                 // Reached from `active_tabs`, so a pane is showing the graph

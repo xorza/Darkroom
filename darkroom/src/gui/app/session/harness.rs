@@ -28,6 +28,7 @@ use crate::core::io::preferences::Preferences;
 use crate::gui::app::commands::AppCommand;
 use crate::gui::app::ctx::{AppCtx, StatusInputs};
 use crate::gui::app::session::Session;
+use crate::gui::relayout::Relayout;
 use crate::gui::requests::Requests;
 use crate::gui::state::run_state::RunState;
 use crate::gui::theme::Theme;
@@ -75,13 +76,13 @@ impl SessionHarness {
 
     /// Push one intent through the real edit path, as a widget's does.
     /// Reports whether it stranded the canvas's cached geometry.
-    pub(crate) fn apply(&mut self, intent: GraphIntent) -> bool {
+    pub(crate) fn apply(&mut self, intent: GraphIntent) -> Relayout {
         self.session.open.apply_edit(intent)
     }
 
     /// Drain the queued intents into the document, as the frame's edit phase
     /// does. Reports whether the batch stranded the canvas's cached geometry.
-    pub(crate) fn drain(&mut self) -> bool {
+    pub(crate) fn drain(&mut self) -> Relayout {
         self.session.open.drain_requests(&mut self.requests)
     }
 

@@ -12,6 +12,7 @@ use crate::gui::HostHandle;
 use crate::gui::MAIN_WINDOW;
 use crate::gui::app::ctx::{AppCtx, StatusInputs};
 use crate::gui::app::discard_dialog::{DiscardChoice, DiscardOutcome};
+use crate::gui::relayout::Relayout;
 use crate::gui::requests::Requests;
 use crate::gui::state::process_memory::ProcessMemory;
 use crate::gui::state::run_state::RunState;
@@ -336,7 +337,7 @@ impl palantir::App for App {
         // The app's one relayout request, past both tiers: everything that can
         // strand `CanvasGeometry`'s cross-frame caches has reported by here,
         // and a single pass answers however many of them fired.
-        if needs_relayout {
+        if needs_relayout == Relayout::Needed {
             ui.request_relayout();
         }
 

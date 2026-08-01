@@ -52,6 +52,7 @@ use crate::gui::pane::graph::gesture::{connection, pan_zoom, shortcuts, subscrip
 use crate::gui::pane::graph::node::NodeUI;
 use crate::gui::pane::graph::paint::inspector::Inspectors;
 use crate::gui::pane::graph::paint::wire::{WireEmphasis, WirePass};
+use crate::gui::relayout::Relayout;
 use crate::gui::requests::Requests;
 
 /// Canvas-level UI state, shared by **every** graph pane on screen: the
@@ -264,7 +265,7 @@ impl GraphUI {
         ui: &mut Ui,
         graph_ctx: GraphCtx<'_>,
         out: &mut Requests,
-    ) -> bool {
+    ) -> Relayout {
         debug_assert!(
             graph_ctx.is_visible(),
             "the prepass is reached from an active Graph tab"
@@ -272,8 +273,8 @@ impl GraphUI {
         // First: a canvas back from being away drops the transient state it
         // left latched, since a drag still held would otherwise resume under
         // a pointer that has long since moved on.
-        let appearing = self.appearing(ui);
-        if appearing {
+        let appearing = Relayout::needed_if(self.appearing(ui));
+        if appearing == Relayout::Needed {
             self.reset_gestures();
             self.inspectors.close_unpinned();
         }

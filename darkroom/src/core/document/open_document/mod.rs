@@ -19,6 +19,7 @@ use crate::core::edit::intent::types::{GraphIntent, Refusal, UndoStep};
 use crate::core::io::document::{self, DocumentLoadError, DocumentSaveError};
 use crate::core::io::preferences::Preferences;
 use crate::core::status::StatusLog;
+use crate::gui::relayout::Relayout;
 use crate::gui::requests::{DocumentRequest, Requests};
 
 /// Byte budget for the undo history's packed buffer (~1 MiB). Bounds
@@ -87,7 +88,7 @@ impl OpenDocument {
     /// after the record. No-ops (and self-cancelling steps) are dropped, like
     /// the in-frame drain.
     #[must_use]
-    pub(crate) fn apply_edit(&mut self, intent: GraphIntent) -> bool {
+    pub(crate) fn apply_edit(&mut self, intent: GraphIntent) -> Relayout {
         self.commit([DocumentRequest::Graph(intent)])
     }
 
@@ -106,13 +107,17 @@ impl OpenDocument {
     /// on screen, and an edit applied outside a frame (a dialog result) has no
     /// business acting on it.
     #[must_use]
-    pub(crate) fn drain_requests(&mut self, requests: &mut Requests) -> bool {
+    pub(crate) fn drain_requests(&mut self, requests: &mut Requests) -> Relayout {
         // Usually nothing is queued, and the commit is what allocates.
-        let geometry_stale = !requests.is_empty() && self.commit(requests.drain_document());
+        let relayout = if requests.is_empty() {
+            Relayout::NotNeeded
+        } else {
+            self.commit(requests.drain_document())
+        };
         // A tab whose node is gone can't stay open. Cheap when nothing died —
         // `reconcile_with_graph` scans the tab list and returns.
         self.document.reconcile_with_graph();
-        geometry_stale
+        relayout
     }
 
     /// Apply `queued`, each request according to its tier: a graph edit is
@@ -133,7 +138,7 @@ impl OpenDocument {
     /// batch's other outcome — a dirtied document — is landed here; only the
     /// relayout has to travel out to whoever holds the `Ui`.
     #[must_use]
-    fn commit(&mut self, queued: impl IntoIterator<Item = DocumentRequest>) -> bool {
+    fn commit(&mut self, queued: impl IntoIterator<Item = DocumentRequest>) -> Relayout {
         let mut batch = Vec::new();
         let mut signals = StepSignals::default();
         for item in queued {
@@ -174,7 +179,7 @@ impl OpenDocument {
             .undo(&mut self.document, &mut |step| signals.fold(step));
         ReplayOutcome {
             took,
-            geometry_stale: self.land(signals),
+            relayout: self.land(signals),
         }
     }
 
@@ -187,7 +192,7 @@ impl OpenDocument {
             .redo(&mut self.document, &mut |step| signals.fold(step));
         ReplayOutcome {
             took,
-            geometry_stale: self.land(signals),
+            relayout: self.land(signals),
         }
     }
 
@@ -197,13 +202,13 @@ impl OpenDocument {
     /// Returns the one signal whose effect is a *call* rather than a stored
     /// flag, so it has to travel back to whoever holds the `Ui`.
     #[must_use]
-    fn land(&mut self, signals: StepSignals) -> bool {
+    fn land(&mut self, signals: StepSignals) -> Relayout {
         // A content edit (or an undone/redone one) leaves the doc differing
         // from the last save — barring the exact round-trip back to it, where
         // we accept a stale "dirty" rather than tracking saved state
         // precisely.
         self.dirty |= signals.dirtied;
-        signals.geometry_stale
+        Relayout::needed_if(signals.geometry_stale)
     }
 
     pub(crate) fn load(path: PathBuf) -> Result<Self, DocumentLoadError> {
