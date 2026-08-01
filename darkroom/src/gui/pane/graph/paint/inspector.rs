@@ -35,7 +35,7 @@ use crate::gui::graph_ctx::node_ctx::NodeCtx;
 use crate::gui::pane::graph::canvas::outer_canvas_widget_id;
 use crate::gui::pane::graph::ctx::DrawCtx;
 use crate::gui::pane::graph::node::NodeDrawOutcome;
-use crate::gui::pane::graph::node::node_hovered;
+use crate::gui::pane::graph::node::wid;
 use crate::gui::pane::graph::node::widget::exec_color;
 use crate::gui::state::run_state::ExecStatus;
 use crate::gui::theme::Theme;
@@ -156,7 +156,7 @@ impl Inspectors {
                 .map(|r| r.size.w)
                 .unwrap_or(theme.card.min_width);
             let pos = node.pos + Vec2::new(node_w + theme.floating_widget_gap, 0.0);
-            let ncx = node.with_hover(node_hovered(ui, node.id));
+            let ncx = node.with_hover(wid::hovered(ui, node.id));
             self.draw_one(ui, ncx, mode, pos);
         }
     }

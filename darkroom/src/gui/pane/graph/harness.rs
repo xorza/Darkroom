@@ -19,8 +19,8 @@ use crate::core::edit::intent::types::GraphIntent;
 use crate::gui::app::commands::AppCommand;
 use crate::gui::graph_ctx::harness::GraphCtxFixture;
 use crate::gui::pane::graph::GraphUI;
-use crate::gui::pane::graph::node::node_widget_id;
 use crate::gui::pane::graph::node::port_row::port_circle_wid;
+use crate::gui::pane::graph::node::wid;
 use crate::gui::requests::{DocumentRequest, Requests};
 
 /// Surface every canvas test records at unless it is about size. Wide enough
@@ -161,13 +161,13 @@ impl CanvasHarness {
     /// a pointer aimed at the node has to land in.
     pub(crate) fn node_rect(&self, node_id: NodeId) -> Rect {
         self.ui
-            .rect(node_widget_id(node_id))
+            .rect(wid::body(node_id))
             .unwrap_or_else(|| panic!("{node_id:?} recorded no body — was the frame primed?"))
     }
 
     /// The point a press grabs `node_id`'s body at.
     pub(crate) fn node_center(&self, node_id: NodeId) -> Vec2 {
-        self.ui.center_of(node_widget_id(node_id))
+        self.ui.center_of(wid::body(node_id))
     }
 
     /// The point a wire drag leaves `port` from, or lands on — the snap scan

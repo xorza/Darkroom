@@ -11,7 +11,7 @@ use crate::gui::pane::graph::gesture::drag_anchor::selected_group_positions;
 use crate::gui::pane::graph::node::header::{header, status_row, subscription_pin};
 use crate::gui::pane::graph::node::memory_row::memory_row;
 use crate::gui::pane::graph::node::port_row::ports_row;
-use crate::gui::pane::graph::node::{NodeUI, drag_handles, node_widget_id, preview_row};
+use crate::gui::pane::graph::node::{NodeUI, preview_row, wid};
 use crate::gui::requests::Requests;
 use crate::gui::state::run_state::ExecStatus;
 use crate::gui::theme::Theme;
@@ -107,7 +107,7 @@ impl<'a> NodeWidget<'a> {
         // with the drag latch below, which reads a different field.
         let row_tracks = &mut state.row_tracks;
         let panel = Panel::vstack()
-            .id(node_widget_id(node.id))
+            .id(wid::body(node.id))
             .position(node.pos)
             // A preview needs room for a thumbnail; every other node keeps the
             // theme's own floor.
@@ -171,7 +171,7 @@ impl<'a> NodeWidget<'a> {
         // and converts `drag_delta` into a `MoveSelection` applied to
         // `Document` before the record reads it back.
         if let Some(handle) =
-            drag_handles(node.id).find(|w| ui.response_for(*w).left.drag.started())
+            wid::drag_handles(node.id).find(|w| ui.response_for(*w).left.drag.started())
         {
             // Grabbing a node already in the selection drags the whole
             // group together;
