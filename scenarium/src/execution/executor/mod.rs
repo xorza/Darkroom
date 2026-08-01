@@ -37,7 +37,7 @@ use crate::runtime::context::ContextManager;
 use crate::runtime::shared_any_state::SharedAnyState;
 
 use crate::execution::cache::disk_store::StorePolicy;
-use crate::execution::cache::runtime::RuntimeCache;
+use crate::execution::cache::runtime::{ReuseOutcome, RuntimeCache};
 use crate::execution::compile::compiled_graph::{CompiledGraph, ExecutionBinding};
 use crate::execution::error::RunError;
 use crate::execution::schedule::{NodeState, RunSchedule};
@@ -388,19 +388,22 @@ impl ExecutionFrame<'_, '_> {
     /// errored-upstream.
     async fn serve_reuse(&mut self, node_idx: NodeIdx, demand: &[OutputDemand]) {
         let program = self.program;
-        if !self
+        let hydrated = self
             .cache
             .hydrate_reuse(program, node_idx, demand, &mut self.ctx.contexts)
-            .await
-        {
-            let error = RunError::CacheLoadFailed {
-                func_id: program[node_idx].func_id,
-            };
-            self.mark_skipped(node_idx, error);
-            return;
+            .await;
+        match hydrated {
+            ReuseOutcome::Missed => {
+                let error = RunError::CacheLoadFailed {
+                    func_id: program[node_idx].func_id,
+                };
+                self.mark_skipped(node_idx, error);
+            }
+            ReuseOutcome::Served => {
+                self.node_outcomes[node_idx] = NodeOutcome::Reused;
+                self.release_drained_outputs(node_idx);
+            }
         }
-        self.node_outcomes[node_idx] = NodeOutcome::Reused;
-        self.release_drained_outputs(node_idx);
     }
 
     /// Whether this node's lambda still has to run — and the late second chance at reuse
@@ -442,8 +445,8 @@ impl ExecutionFrame<'_, '_> {
                 self.mark_skipped(node_idx, run_error);
                 false
             }
-            Ok(false) => true,
-            Ok(true) => {
+            Ok(ReuseOutcome::Missed) => true,
+            Ok(ReuseOutcome::Served) => {
                 // It came in as `Run`, so the sweep counted it as a
                 // reader of each producer — reads it will now not take.
                 // Handing them back is what lets a producer's value go the
