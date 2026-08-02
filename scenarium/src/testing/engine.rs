@@ -229,14 +229,14 @@ impl TestEngine {
         names: impl IntoIterator<Item = &'n str>,
     ) -> Vec<CacheEvictionFailure> {
         let node_ids: Vec<NodeId> = names.into_iter().map(|name| self.id(name)).collect();
-        self.engine.evict_cache(&node_ids).await
+        self.engine.evict_cache(node_ids).await
     }
 
     /// Persist these nodes' resident disk-backed values now — what the editor
     /// raises when a node's disk bit is turned on with a value already in RAM.
     pub(crate) async fn flush<'n>(&mut self, names: impl IntoIterator<Item = &'n str>) {
         let node_ids: Vec<NodeId> = names.into_iter().map(|name| self.id(name)).collect();
-        self.engine.flush_cache(&node_ids).await;
+        self.engine.flush_cache(node_ids).await;
     }
 
     /// [`flush`](Self::flush) over the whole program — the newly attached store's

@@ -171,11 +171,13 @@ impl RuntimeCache {
     pub(crate) async fn evict(
         &mut self,
         program: &CompiledGraph,
-        seeds: &[NodeId],
+        seeds: impl IntoIterator<Item = NodeId>,
     ) -> Vec<CacheEvictionFailure> {
         let downstream = self.cone.of(
             program,
-            seeds.iter().filter_map(|node_id| program.node(*node_id)),
+            seeds
+                .into_iter()
+                .filter_map(|node_id| program.node(node_id)),
         );
         let mut failures = Vec::new();
         for node_idx in downstream.iter() {
@@ -702,12 +704,14 @@ impl RuntimeCache {
     pub(crate) async fn flush(
         &mut self,
         program: &CompiledGraph,
-        seeds: &[NodeId],
+        seeds: impl IntoIterator<Item = NodeId>,
         ctx: &mut ContextStore,
     ) {
         self.flush_each(
             program,
-            seeds.iter().filter_map(|node_id| program.node(*node_id)),
+            seeds
+                .into_iter()
+                .filter_map(|node_id| program.node(node_id)),
             ctx,
         )
         .await;
