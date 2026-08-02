@@ -10,7 +10,7 @@ use ::common::{CancelToken, is_debug};
 
 use crate::RamUsage;
 use crate::common::column::Column;
-use crate::execution::cache::disk_store::{DiskStore, StorePolicy};
+use crate::execution::cache::disk_store::DiskStore;
 use crate::execution::cache::runtime::RuntimeCache;
 use crate::execution::cache::runtime::error::CacheEvictionFailure;
 use crate::execution::compile::compiled_graph::CompiledGraph;
@@ -171,31 +171,34 @@ impl ExecutionEngine {
         Ok(())
     }
 
-    /// Persist any resident **disk-backed** (`persists_to_disk`, i.e. `Disk`/`Both`)
-    /// values when the worker attaches a new
-    /// [`DiskStore`]. This makes values computed
-    /// while the store was memory-only durable once a document receives a cache root.
+    /// Persist these nodes' resident **disk-backed** (`persists_to_disk`, i.e.
+    /// `Disk`/`Both`) values now — [`evict_cache`](Self::evict_cache)'s
+    /// counterpart, for a host that just turned a node's disk bit on while its
+    /// value was already in RAM. Without it that value reaches disk only when
+    /// the node next *recomputes*: a run that resolves to a RAM reuse never
+    /// publishes a blob.
     ///
-    /// The attached store has no reuse verdict for these values, so each current resident
-    /// snapshot preserves an existing blob that already covers it. Also a no-op for a node with
-    /// no resident value.
-    pub(crate) async fn store_resident_caches(&mut self) {
+    /// A node absent from the installed program, not disk-backed, or holding
+    /// nothing current is skipped.
+    pub(crate) async fn flush_cache(&mut self, node_ids: &[NodeId]) {
         let Some(compiled) = self.compiled.as_deref() else {
             return;
         };
-        for node_idx in (0..compiled.e_nodes.len()).map(|i| NodeIdx(i as u32)) {
-            if !compiled[node_idx].cache.persists_to_disk() {
-                continue;
-            }
-            self.cache
-                .store_node(
-                    compiled,
-                    node_idx,
-                    StorePolicy::PreserveCovering,
-                    &mut self.executor.ctx_manager.contexts,
-                )
-                .await;
-        }
+        self.cache
+            .flush(compiled, node_ids, &mut self.executor.ctx_manager.contexts)
+            .await;
+    }
+
+    /// [`flush_cache`](Self::flush_cache) over every installed node, for when the
+    /// worker attaches a new [`DiskStore`]. This makes values computed while the
+    /// store was memory-only durable once a document receives a cache root.
+    pub(crate) async fn flush_all_caches(&mut self) {
+        let Some(compiled) = self.compiled.as_deref() else {
+            return;
+        };
+        self.cache
+            .flush_all(compiled, &mut self.executor.ctx_manager.contexts)
+            .await;
     }
 
     /// Self-consistency of the installed artifact and the cache aligned to it.

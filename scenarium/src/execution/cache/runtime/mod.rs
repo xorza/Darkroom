@@ -691,6 +691,66 @@ impl RuntimeCache {
         }
     }
 
+    /// Persist the resident values of `seeds` — [`evict`](Self::evict)'s
+    /// counterpart, for a node the host just made disk-backed while its value
+    /// was already in RAM.
+    ///
+    /// The named nodes alone, never their consumer cone: a blob is written from
+    /// one node's own snapshot and changes nothing a consumer does. An eviction
+    /// has to take the cone for the opposite reason — a surviving consumer would
+    /// reuse and prune what was freed.
+    pub(crate) async fn flush(
+        &mut self,
+        program: &CompiledGraph,
+        seeds: &[NodeId],
+        ctx: &mut ContextStore,
+    ) {
+        self.flush_each(
+            program,
+            seeds.iter().filter_map(|node_id| program.node(*node_id)),
+            ctx,
+        )
+        .await;
+    }
+
+    /// [`flush`](Self::flush) over the whole installed program — what a newly
+    /// attached [`DiskStore`] owes every value computed while it was
+    /// memory-only.
+    pub(crate) async fn flush_all(&mut self, program: &CompiledGraph, ctx: &mut ContextStore) {
+        self.flush_each(
+            program,
+            program.e_nodes.iter_indexed().map(|(node_idx, _)| node_idx),
+            ctx,
+        )
+        .await;
+    }
+
+    /// Store whichever of `nodes` are disk-backed and hold a value current under
+    /// their stamped digest — the shared body of the two flushes above. Both
+    /// tests are [`store_node`](Self::store_node)'s own, so a node that is
+    /// neither costs one [`DiskStore::blob_target`] that answers `None` before
+    /// it reads a digest or builds a path.
+    ///
+    /// [`StorePolicy::PreserveCovering`] because a flush carries no reuse
+    /// verdict: nothing here ran, so a blob that already covers the snapshot
+    /// must survive untouched.
+    ///
+    /// `&mut self` without mutating anything, for [`probe_reuse`](Self::probe_reuse)'s
+    /// reason: the slots hold `Send`-but-not-`Sync` node state, so a *shared*
+    /// cache borrow held across these awaits would make the whole worker future
+    /// non-`Send`.
+    async fn flush_each(
+        &mut self,
+        program: &CompiledGraph,
+        nodes: impl Iterator<Item = NodeIdx>,
+        ctx: &mut ContextStore,
+    ) {
+        for node_idx in nodes {
+            self.store_node(program, node_idx, StorePolicy::PreserveCovering, &mut *ctx)
+                .await;
+        }
+    }
+
     /// Release resident values that cannot be a future RAM hit under the installed program.
     /// Called both when a program is installed and after each run, so cache-mode downgrades,
     /// impure outputs, and superseded snapshots do not wait for another execution to free RAM.

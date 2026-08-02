@@ -242,6 +242,74 @@ async fn disabling_ram_retention_releases_resident_value_on_install() {
     }
 }
 
+/// Turning a node's disk bit on publishes its resident value straight away,
+/// instead of leaving it off disk until the node next recomputes — a run that
+/// resolves to a RAM reuse never reaches the executor's store, so without the
+/// flush a `Ram → Both` node would stay absent from the store for as long as
+/// its inputs held still.
+///
+/// And only the nodes the *installed program* calls disk-backed: `sum` is named
+/// by the same flush and stays memory-only, so the flush must skip it.
+#[tokio::test]
+async fn enabling_disk_persists_the_resident_value_without_a_run() {
+    let dir = TempDir::new("enable-disk-flush");
+
+    // sum(2, 3) = 5 → mult(·, 4) = 20 → print. Both cacheable nodes start
+    // memory-only; the sink is impure, so mult is demanded every run.
+    let mut g = TestGraph::new();
+    g.add("sum", |n| n.sum().cache(CacheMode::Ram));
+    g.add("mult", |n| n.mult().cache(CacheMode::Ram));
+    g.add("print", |n| n.records());
+    g.constant("sum", 0, 2i64);
+    g.constant("sum", 1, 3i64);
+    g.wire("sum", 0, "mult", 0);
+    g.constant("mult", 1, 4i64);
+    g.wire("mult", 0, "print", 0);
+
+    let mut e = TestEngine::over(g).with_disk_store(dir.path());
+    let cold = e.run_sinks().await;
+    assert_eq!(cold.logs(), ["20"], "(2 + 3) * 4");
+    assert!(e.holds_output("mult"), "Ram keeps the value resident");
+    assert_eq!(dir.entry_count(), 0, "Ram alone writes no blob");
+
+    // The case the flush exists for: a run that reuses the RAM value skips
+    // the store the executor makes after an invoke, so a second run adds
+    // nothing to disk either.
+    let rerun = e.run_sinks().await;
+    assert!(
+        rerun.cached().contains(&"mult"),
+        "mult reuses its RAM value"
+    );
+    assert_eq!(dir.entry_count(), 0);
+
+    // The editor's `↓` chip: Ram → Both, reinstalled, then flushed.
+    e.edit(|g| g.cache("mult", CacheMode::Both));
+    e.flush(["mult", "sum"]).await;
+    assert_eq!(dir.entry_count(), 1, "exactly one blob was published");
+    assert!(
+        e.blob_path("mult").exists(),
+        "the node whose disk bit was turned on is the one written"
+    );
+    assert!(
+        !e.blob_path("sum").exists(),
+        "a named node the program still calls memory-only is skipped"
+    );
+
+    // Reopening over the same store — empty RAM — serves mult from that blob,
+    // which is what proves the flush wrote the value and not an empty frame.
+    let mut e = e.reopen();
+    let reopen = e.run_sinks().await;
+    assert!(
+        reopen.cached().contains(&"mult"),
+        "the flushed blob is reused on reopen"
+    );
+    assert!(
+        !reopen.ran().contains(&"sum"),
+        "sum is cut behind the disk hit rather than recomputed"
+    );
+    assert_eq!(reopen.logs(), ["20"], "the blob carries (2 + 3) * 4");
+}
+
 /// A persisted node whose cone contains an impure node has digest `None`, so
 /// it's never disk-cached even with `Disk` — on reopen it recomputes.
 #[tokio::test]

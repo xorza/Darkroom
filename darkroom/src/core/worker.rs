@@ -83,6 +83,28 @@ impl WorkerBridge {
         ])
     }
 
+    /// Install the current program and persist an authored node's resident
+    /// disk-backed value as one worker commit. The install has to lead: the
+    /// engine reads the node's cache mode off the *installed* program, so a
+    /// flush sent against the previous one would find the node not yet
+    /// disk-backed and write nothing.
+    ///
+    /// No `StopEventLoop`, unlike the eviction beside it — a flush publishes
+    /// what is already in RAM and leaves nothing for a running loop to
+    /// repopulate.
+    pub(crate) fn install_and_flush_cache(
+        &self,
+        compiled: Arc<CompiledGraph>,
+        node_id: NodeId,
+    ) -> Result<(), WorkerExited> {
+        self.worker.send_many([
+            WorkerMessage::Update { compiled },
+            WorkerMessage::FlushCache {
+                nodes: vec![node_id],
+            },
+        ])
+    }
+
     /// Execute every sink in the installed program.
     pub(crate) fn run_sinks(&self) -> Result<(), WorkerExited> {
         self.worker.send(WorkerMessage::Run {

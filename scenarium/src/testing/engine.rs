@@ -232,6 +232,19 @@ impl TestEngine {
         self.engine.evict_cache(&node_ids).await
     }
 
+    /// Persist these nodes' resident disk-backed values now — what the editor
+    /// raises when a node's disk bit is turned on with a value already in RAM.
+    pub(crate) async fn flush<'n>(&mut self, names: impl IntoIterator<Item = &'n str>) {
+        let node_ids: Vec<NodeId> = names.into_iter().map(|name| self.id(name)).collect();
+        self.engine.flush_cache(&node_ids).await;
+    }
+
+    /// [`flush`](Self::flush) over the whole program — the newly attached store's
+    /// own flush, without going through [`attach_disk_store`](Self::attach_disk_store).
+    pub(crate) async fn flush_all(&mut self) {
+        self.engine.flush_all_caches().await;
+    }
+
     /// What the last plan settled for this node.
     pub(crate) fn state(&self, name: &str) -> NodeState {
         self.engine.node_state(self.id(name))

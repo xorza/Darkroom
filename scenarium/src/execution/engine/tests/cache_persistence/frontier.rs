@@ -325,17 +325,22 @@ async fn persist_node_lands_on_disk_before_its_consumer_runs() {
     );
 }
 
-/// `store_resident_caches` must not write a value under a digest it wasn't
-/// produced under. After an input change recompiles the program, a node's
-/// resident value is stale w.r.t. its new digest; flushing it stamped with
-/// D_B would overwrite the node's blob with bytes a later run at D_B would
-/// load as a false hit.
+/// A flush must not write a value under a digest it wasn't produced under.
+/// After an input change recompiles the program, a node's resident value is
+/// stale w.r.t. its new digest; flushing it stamped with D_B would overwrite
+/// the node's blob with bytes a later run at D_B would load as a false hit.
+///
+/// `Both`, so the value is still resident when the flush reaches it, and a
+/// plan between the edit and the flush, so the slot's *current* digest really
+/// has moved to D_B — under `Disk` there would be no resident value to
+/// mis-stamp, and with no plan the slot would still be carrying D_A, either of
+/// which leaves the flush nothing to get wrong.
 #[tokio::test]
 async fn flush_skips_a_value_stale_for_the_current_digest() {
     let dir = TempDir::new("stale_flush");
 
     let mut g = TestGraph::new();
-    g.add("mult", |n| n.mult().cache(CacheMode::Disk));
+    g.add("mult", |n| n.mult().cache(CacheMode::Both));
     g.add("print", |n| n.records());
     g.constant("mult", 0, 2i64);
     g.constant("mult", 1, 3i64);
@@ -348,17 +353,27 @@ async fn flush_skips_a_value_stale_for_the_current_digest() {
     let blob_a = e.blob("mult");
 
     // Config B: mult's inputs change ⇒ its *current* digest is now D_B, but
-    // the resident value was produced under D_A. Recompile, do not re-run,
-    // then flush — the stale value must not be re-stamped D_B. The blob is
-    // keyed by node id, so a bad flush shows as an overwrite.
+    // the resident value was produced under D_A. Recompile and re-plan, do
+    // not re-run, then flush — the stale value must not be re-stamped D_B.
+    // The blob is keyed by node id, so a bad flush shows as an overwrite.
     e.edit(|g| {
         g.constant("mult", 0, 5i64);
         g.constant("mult", 1, 7i64);
     });
-    e.engine.store_resident_caches().await;
+    e.plan_sinks().await;
+    assert!(
+        e.holds_output("mult"),
+        "the stale value is still resident, so the flush has one to mis-stamp"
+    );
+    e.flush_all().await;
     assert_eq!(
         e.blob("mult"),
         blob_a,
         "a value stale for the current digest is not flushed (blob untouched)"
     );
+
+    // The same flush over the node named directly, rather than the whole
+    // program: the skip is the value's, not the walk's.
+    e.flush(["mult"]).await;
+    assert_eq!(e.blob("mult"), blob_a, "the per-node flush skips it too");
 }

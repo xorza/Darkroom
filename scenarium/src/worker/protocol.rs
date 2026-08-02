@@ -19,12 +19,26 @@ pub enum WorkerReport {
 
 #[derive(Debug)]
 pub enum WorkerMessage {
-    Update { compiled: Arc<CompiledGraph> },
+    Update {
+        compiled: Arc<CompiledGraph>,
+    },
     Clear,
-    EvictCache { nodes: Vec<NodeId> },
+    EvictCache {
+        nodes: Vec<NodeId>,
+    },
+    /// Persist these nodes' resident disk-backed values now, rather than waiting
+    /// for a run that recomputes them. Raised when a node's cache mode gains its
+    /// disk bit while a value is already in RAM.
+    FlushCache {
+        nodes: Vec<NodeId>,
+    },
     SetDiskStore(DiskStore),
-    Run { seeds: RunSeeds },
+    Run {
+        seeds: RunSeeds,
+    },
     StartEventLoop,
     StopEventLoop,
-    Sync { reply: oneshot::Sender<()> },
+    Sync {
+        reply: oneshot::Sender<()>,
+    },
 }
