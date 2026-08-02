@@ -114,7 +114,6 @@ panic = "abort"
 debug = true
 incremental = true
 
-
 # debug=2 (the dev default) bloated target/ into ~1.6M DWARF .o files, starving builds on I/O
 # (Spotlight + fingerprint stats); line-tables-only keeps backtrace line numbers without the heavy DWARF.
 [profile.dev]
