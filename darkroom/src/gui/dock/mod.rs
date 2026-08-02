@@ -319,33 +319,38 @@ fn draw_drag_feedback(ui: &mut Ui, cx: DockContext<'_>, dragged: &TabDrag) {
     let accent = theme.colors.selection_rect;
     if let Some(target) = drop_target(ui, cx.doc) {
         let r = target.highlight;
-        ui.layer(Layer::Tooltip, r.min, Some(r.size), |ui| {
-            Panel::zstack()
-                .id(drag_highlight_wid())
-                .size((Sizing::FILL, Sizing::FILL))
-                .background(
-                    Background::rounded(accent.with_alpha(0.18), Corners::all(2.0))
-                        .with_stroke(Stroke::solid(accent, 1.5)),
-                )
-                .show(ui, |_| {});
-        });
+        ui.layer(Layer::Tooltip)
+            .at(r.min)
+            .max_size(r.size)
+            .show(|ui| {
+                Panel::zstack()
+                    .id(drag_highlight_wid())
+                    .size((Sizing::FILL, Sizing::FILL))
+                    .background(
+                        Background::rounded(accent.with_alpha(0.18), Corners::all(2.0))
+                            .with_stroke(Stroke::solid(accent, 1.5)),
+                    )
+                    .show(ui, |_| {});
+            });
     }
     if let Some(p) = ui.pointer_pos() {
         let text = dragged.text.as_str();
         let label_style = sized_text(ui, theme.text.body);
-        ui.layer(Layer::Tooltip, p + Vec2::new(14.0, 18.0), None, |ui| {
-            Panel::hstack()
-                .id(drag_ghost_wid())
-                .size((Sizing::HUG, Sizing::HUG))
-                .padding(Spacing::new(10.0, 4.0, 10.0, 4.0))
-                .background(
-                    Background::rounded(theme.colors.chrome_fill, Corners::all(4.0))
-                        .with_stroke(Stroke::solid(accent, 1.0)),
-                )
-                .show(ui, |ui| {
-                    Text::new(text).style(&label_style).show(ui);
-                });
-        });
+        ui.layer(Layer::Tooltip)
+            .at(p + Vec2::new(14.0, 18.0))
+            .show(|ui| {
+                Panel::hstack()
+                    .id(drag_ghost_wid())
+                    .size((Sizing::HUG, Sizing::HUG))
+                    .padding(Spacing::new(10.0, 4.0, 10.0, 4.0))
+                    .background(
+                        Background::rounded(theme.colors.chrome_fill, Corners::all(4.0))
+                            .with_stroke(Stroke::solid(accent, 1.0)),
+                    )
+                    .show(ui, |ui| {
+                        Text::new(text).style(&label_style).show(ui);
+                    });
+            });
     }
 }
 
