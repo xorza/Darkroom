@@ -88,8 +88,8 @@ use crate::gui::requests::Requests;
 /// classification) when it missed every node/port.
 #[derive(Default, Debug)]
 pub(crate) struct GraphUI {
-    /// The frame this canvas last ran [`Self::prepass`] on, or `None` before
-    /// its first ever one.
+    /// The *record* frame this canvas last ran [`Self::prepass`] on, or `None`
+    /// before its first ever one.
     ///
     /// The prepass runs only while a pane is showing the graph, so a *gap*
     /// here means the canvas was away — which is how it notices its own
@@ -97,6 +97,12 @@ pub(crate) struct GraphUI {
     /// gone. A stamp rather than a cached `bool` copy of
     /// [`Document::shows_graph`], so there is no second spelling of visibility
     /// to keep in step with the first.
+    ///
+    /// [`Ui::frame_id`] and not [`Ui::render_frame_id`]: the latter counts
+    /// painted frames too, and a paint-only frame runs no record pass at all —
+    /// so an idle caret blink (the new-node palette's search field is enough)
+    /// would open a gap here while the canvas never went anywhere, and the next
+    /// frame would drop every in-flight gesture.
     last_prepass_frame: Option<u64>,
     background: CanvasBackground,
     /// Port centers, node sizes and world rects, cached across frames and

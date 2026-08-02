@@ -128,6 +128,19 @@ impl CanvasHarness {
         });
     }
 
+    /// One frame that is allowed to be paint-only, reporting whether a record
+    /// pass ran. The wake a focused `TextEdit`'s caret blink schedules is
+    /// enough to produce one, and [`Self::frame`] panics on those.
+    pub(crate) fn try_frame(&mut self) -> bool {
+        let Self {
+            ui, graph_ui, ctx, ..
+        } = self;
+        ui.try_frame_value(|recorder: &mut Ui| {
+            let _ = Self::record(graph_ui, ctx, recorder);
+        })
+        .is_some()
+    }
+
     /// The record body both frame drivers run.
     fn record(graph_ui: &mut GraphUI, ctx: &mut GraphCtxFixture, recorder: &mut Ui) -> Requests {
         let mut out = Requests::default();

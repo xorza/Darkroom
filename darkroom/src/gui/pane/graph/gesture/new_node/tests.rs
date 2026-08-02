@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use glam::{UVec2, Vec2};
 use scenarium::{Func, FuncId, Graph, Library, testing};
 
@@ -152,4 +154,51 @@ fn name_matches_is_case_insensitive_substring_with_empty_query_wildcard() {
     assert!(!name_matches("Grün", "grun"));
     // An ASCII name never matches a non-ASCII query.
     assert!(!name_matches("Blur", "blür"));
+}
+
+/// An idle frame that only *paints* must not read as the canvas having been
+/// away — the open palette focuses its search field, whose caret blink wakes
+/// the runtime with no input behind it, and that wake runs no record pass.
+///
+/// Before this was pinned, `GraphUI::appearing` stamped `Ui::frame_id`, which
+/// counts painted frames too: one blink opened a gap in it, the next real
+/// frame reset every in-flight gesture, and the palette vanished under the
+/// pointer. The reset is `GraphUI`-wide, so the palette here stands in for
+/// every gesture the same blink dropped.
+#[test]
+fn a_caret_blink_does_not_read_as_the_canvas_having_been_away() {
+    /// Past the caret's blink half-period, so the wake has fired by the frame
+    /// below and that frame has nothing else to do.
+    const IDLE: Duration = Duration::from_millis(600);
+
+    let mut library = Library::default();
+    for i in 0..12 {
+        library.add(testing::with_stub_lambda(
+            Func::new(FuncId::unique(), format!("func{i:02}")).category("Bulk"),
+        ));
+    }
+    let mut h = CanvasHarness::new(DocFixture::with_library(Graph::default(), library));
+    h.frame();
+    let anchor = Vec2::new(500.0, 400.0);
+    h.ui.right_click_at(anchor);
+    h.prime(2);
+    let opened = h.ui.rect(results_wid()).expect("the palette opened");
+
+    h.ui.advance(IDLE);
+    assert!(
+        !h.try_frame(),
+        "the idle frame recorded a pass, so it is not the paint-only case \
+         this test is about",
+    );
+
+    // The smallest input there is: the pointer moves within the row it was
+    // already over. Nothing about the palette changed — only the frame the
+    // blink slipped in between.
+    h.ui.move_to(opened.center() + Vec2::new(1.0, 0.0));
+    h.prime(1);
+    assert_eq!(
+        h.ui.rect(results_wid()),
+        Some(opened),
+        "the palette closed across a paint-only frame",
+    );
 }
