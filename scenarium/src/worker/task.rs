@@ -215,8 +215,13 @@ where
             return;
         }
 
-        let node_ids = self.intent.evict_cache.drain(..).collect::<Vec<_>>();
-        let failures = self.engine.evict_cache(&node_ids).await;
+        // Drained straight into the engine, which consumes the ids exactly once:
+        // `engine` and `intent` are disjoint fields, so nothing has to be
+        // collected out of the batch first.
+        let failures = self
+            .engine
+            .evict_cache(self.intent.evict_cache.drain(..))
+            .await;
         if failures.is_empty() {
             return;
         }
@@ -241,8 +246,9 @@ where
         if self.intent.flush_cache.is_empty() {
             return;
         }
-        let node_ids = self.intent.flush_cache.drain(..).collect::<Vec<_>>();
-        self.engine.flush_cache(&node_ids).await;
+        self.engine
+            .flush_cache(self.intent.flush_cache.drain(..))
+            .await;
     }
 
     async fn execute(&mut self, run: PendingRun) {

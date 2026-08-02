@@ -107,7 +107,7 @@ async fn eviction_clears_only_the_output_cache() {
     let program = ram_program(1);
     install(&mut cache, &program, [slot]);
     let node_id = NodeId::from_u128(1);
-    let failures = cache.evict(&program, &[node_id]).await;
+    let failures = cache.evict(&program, [node_id]).await;
 
     assert!(failures.is_empty());
     assert!(cache.slots[node_idx].output_values().is_none());

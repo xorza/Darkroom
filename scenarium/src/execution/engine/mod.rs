@@ -93,7 +93,10 @@ impl ExecutionEngine {
         self.cache.set_disk_store(disk_store);
     }
 
-    pub(crate) async fn evict_cache(&mut self, node_ids: &[NodeId]) -> Vec<CacheEvictionFailure> {
+    pub(crate) async fn evict_cache(
+        &mut self,
+        node_ids: impl IntoIterator<Item = NodeId>,
+    ) -> Vec<CacheEvictionFailure> {
         let Some(compiled) = self.compiled.as_deref() else {
             return Vec::new();
         };
@@ -180,7 +183,7 @@ impl ExecutionEngine {
     ///
     /// A node absent from the installed program, not disk-backed, or holding
     /// nothing current is skipped.
-    pub(crate) async fn flush_cache(&mut self, node_ids: &[NodeId]) {
+    pub(crate) async fn flush_cache(&mut self, node_ids: impl IntoIterator<Item = NodeId>) {
         let Some(compiled) = self.compiled.as_deref() else {
             return;
         };
