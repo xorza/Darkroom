@@ -238,6 +238,7 @@ pub(super) fn status_row(ui: &mut Ui, ncx: NodeCtx<'_>, out: &mut Requests) {
                         tag: "disable_badge",
                         tip: "Disable — exclude this sink from graph runs",
                         to: NodeProperty::Disabled(!node.disabled()),
+                        then: None,
                     },
                     out,
                 );
@@ -280,6 +281,7 @@ pub(super) fn status_row(ui: &mut Ui, ncx: NodeCtx<'_>, out: &mut Requests) {
                         tag: "ram_badge",
                         tip: "RuntimeCache in RAM — keep the output resident, reused across runs this session",
                         to: NodeProperty::RuntimeCache(CacheMode::from_bits(!ram, disk)),
+                        then: None,
                     },
                     PropertyChip {
                         glyph: "↓",
@@ -288,6 +290,13 @@ pub(super) fn status_row(ui: &mut Ui, ncx: NodeCtx<'_>, out: &mut Requests) {
                         tag: "disk_badge",
                         tip: "RuntimeCache to disk — persist the output across runs and reopens",
                         to: NodeProperty::RuntimeCache(CacheMode::from_bits(ram, !disk)),
+                        // Turning the bit *on* publishes whatever is already in
+                        // RAM, right now. Without it the value would reach disk
+                        // only when the node next recomputes: a run that reuses
+                        // a resident value writes no blob, so an unchanged node
+                        // would sit "disk-cached" with nothing on disk.
+                        then: (!disk)
+                            .then_some(AppCommand::Run(RunCommand::FlushCache(node.id))),
                     },
                 ] {
                     property_chip(ui, theme, node, chip, out);
@@ -313,6 +322,12 @@ struct PropertyChip {
     tip: &'static str,
     /// What a click sets — already carries the flipped value.
     to: NodeProperty,
+    /// A side effect the click raises alongside the property, for a bit whose
+    /// new value the runtime has to be *told* about rather than merely read on
+    /// the next run. Raised only when the click flips the bit in the direction
+    /// that needs it, so the field is `None` on both the chip and the flip that
+    /// don't.
+    then: Option<AppCommand>,
 }
 
 fn property_chip(
@@ -340,6 +355,12 @@ fn property_chip(
             node_id: node.id,
             to: chip.to,
         });
+        // After the intent, and it matters: the document tier drains before the
+        // app tier runs, so the command compiles a graph that already carries
+        // the property this click just set.
+        if let Some(command) = chip.then {
+            out.push_app(command);
+        }
     }
 }
 
@@ -406,5 +427,89 @@ fn title(ui: &mut Ui, ncx: NodeCtx<'_>, out: &mut Requests) {
             node_id: node.id,
             to,
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use scenarium::{CacheMode, NodeId};
+
+    use crate::core::document::harness::DocFixture;
+    use crate::core::edit::intent::types::{GraphIntent, NodeProperty};
+    use crate::gui::app::commands::AppCommand;
+    use crate::gui::app::commands::run::RunCommand;
+    use crate::gui::pane::graph::harness::CanvasHarness;
+    use crate::gui::pane::graph::node::wid;
+
+    /// What one click on a chip raised, in the two tiers it can reach.
+    #[derive(Debug)]
+    struct ChipClick {
+        node_id: NodeId,
+        intents: Vec<GraphIntent>,
+        commands: Vec<AppCommand>,
+    }
+
+    /// Click the `↓` chip on the fixture's only node, over a document whose
+    /// node already sits at `from`.
+    fn click_disk_chip(from: CacheMode) -> ChipClick {
+        let mut h = CanvasHarness::new(DocFixture::probes(1));
+        let node_id = h.node(0);
+        h.doc_mut().graph.find_mut(node_id).unwrap().cache = from;
+        // Two frames so the node body — and with it the chip — has recorded
+        // and carries a rect to aim at.
+        h.prime(2);
+        h.ui.click_at(h.ui.center_of(wid::node("disk_badge", node_id)));
+        let intents = h.frame();
+        ChipClick {
+            node_id,
+            intents,
+            commands: std::mem::take(&mut h.commands),
+        }
+    }
+
+    /// Turning the disk bit **on** raises two things: the property edit, and
+    /// the flush that publishes whatever the node already holds in RAM —
+    /// without which the value would reach disk only when the node next
+    /// recomputed. Turning it **off** raises the edit alone: nothing is left to
+    /// publish, and re-sending the program would only cost an install.
+    ///
+    /// Both tiers are asserted per case, since the flush is only correct
+    /// *because* the edit travels with it: the document tier drains first, so
+    /// the command compiles a graph already carrying the new mode.
+    #[test]
+    fn disk_chip_flushes_the_cache_only_when_it_turns_the_bit_on() {
+        let cases = [
+            (CacheMode::None, CacheMode::Disk, true),
+            (CacheMode::Ram, CacheMode::Both, true),
+            (CacheMode::Disk, CacheMode::None, false),
+            (CacheMode::Both, CacheMode::Ram, false),
+        ];
+
+        for (from, to, flushes) in cases {
+            let click = click_disk_chip(from);
+            let edits: Vec<&NodeProperty> = click
+                .intents
+                .iter()
+                .filter_map(|intent| match intent {
+                    GraphIntent::SetNodeProperty { node_id, to } if *node_id == click.node_id => {
+                        Some(to)
+                    }
+                    _ => None,
+                })
+                .collect();
+            assert!(
+                matches!(edits[..], [NodeProperty::RuntimeCache(mode)] if *mode == to),
+                "{from:?} + one click must set exactly {to:?}, got {edits:?}"
+            );
+
+            let flushed = click.commands.iter().any(|command| {
+                matches!(command, AppCommand::Run(RunCommand::FlushCache(id)) if *id == click.node_id)
+            });
+            assert_eq!(
+                flushed, flushes,
+                "{from:?} → {to:?} raised {:?}",
+                click.commands
+            );
+        }
     }
 }

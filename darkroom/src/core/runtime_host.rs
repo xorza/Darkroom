@@ -155,6 +155,26 @@ impl RuntimeHost {
         true
     }
 
+    /// Compile the current graph and atomically install it with a request to
+    /// persist `node_id`'s resident value — what a node needs the moment its
+    /// cache mode gains the disk bit, since a run that reuses the RAM value
+    /// never publishes a blob of its own.
+    ///
+    /// The install has to travel with it: the worker reads the node's cache mode
+    /// off the installed program, which is still the pre-edit one here.
+    pub(crate) fn flush_cache(
+        &mut self,
+        graph: &Graph,
+        node_id: NodeId,
+        status: &mut StatusLog,
+    ) -> bool {
+        let Some(compiled) = self.compile(graph, status) else {
+            return false;
+        };
+        self.dispatch(|worker| worker.install_and_flush_cache(compiled, node_id));
+        true
+    }
+
     /// Request cancellation of the in-flight run (coarse — the running node
     /// finishes, nothing further is scheduled).
     pub(crate) fn cancel_run(&self) {

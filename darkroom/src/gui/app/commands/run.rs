@@ -14,6 +14,9 @@ pub(crate) enum RunCommand {
     Node(NodeId),
     /// Remove one authored node's compiled runtime-cache cone from RAM and disk.
     EvictCache(NodeId),
+    /// Write one authored node's resident value to the disk store now — raised
+    /// when its cache mode gains the disk bit.
+    FlushCache(NodeId),
     /// Request cancellation of the in-flight run.
     Cancel,
     /// Start the worker's event loop (emitter events → run subscribers).
@@ -28,6 +31,7 @@ impl App {
             RunCommand::Once => self.run_graph(),
             RunCommand::Node(node_id) => self.run_node(node_id),
             RunCommand::EvictCache(node_id) => self.evict_cache(node_id),
+            RunCommand::FlushCache(node_id) => self.flush_cache(node_id),
             RunCommand::Cancel => self.runtime.cancel_run(),
             RunCommand::StartEvents => self.start_events(),
             RunCommand::StopEvents => self.stop_events(),
@@ -70,6 +74,14 @@ impl App {
         {
             self.run_state.clear_cache_projections();
         }
+    }
+
+    /// Publish this node's resident value to the disk store. Nothing on screen
+    /// changes — the value stays exactly where it was, and only gains a copy on
+    /// disk — so unlike the eviction beside it, no projection is reset.
+    fn flush_cache(&mut self, node_id: NodeId) {
+        self.runtime
+            .flush_cache(self.session.graph(), node_id, &mut self.status);
     }
 
     /// Start the worker's event loop on the current graph: emitter events

@@ -170,7 +170,7 @@ where
 
         if let Some(cache) = self.intent.disk_store.take() {
             self.engine.set_disk_store(cache);
-            self.engine.store_resident_caches().await;
+            self.engine.flush_all_caches().await;
         }
 
         match self.intent.graph_state.take() {
@@ -187,6 +187,7 @@ where
         }
 
         self.evict_cache().await;
+        self.flush_cache().await;
 
         let mut ran = false;
         if let Some(run) = PendingRun::take(&mut self.intent, transition)
@@ -229,6 +230,19 @@ where
             failure_count: failures.len(),
             details,
         }));
+    }
+
+    /// Persist the named nodes' resident disk-backed values.
+    ///
+    /// After the eviction rather than before it, so a node this batch names in
+    /// both ends up with what the eviction asked for — nothing on disk — rather
+    /// than with a blob the flush re-wrote behind it.
+    async fn flush_cache(&mut self) {
+        if self.intent.flush_cache.is_empty() {
+            return;
+        }
+        let node_ids = self.intent.flush_cache.drain(..).collect::<Vec<_>>();
+        self.engine.flush_cache(&node_ids).await;
     }
 
     async fn execute(&mut self, run: PendingRun) {

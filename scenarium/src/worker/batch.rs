@@ -35,6 +35,7 @@ pub(crate) struct BatchIntent {
     /// put back together across the worker boundary.
     pub(crate) seeds: RunSeeds,
     pub(crate) evict_cache: IndexSet<NodeId>,
+    pub(crate) flush_cache: IndexSet<NodeId>,
     pub(crate) syncs: Vec<oneshot::Sender<()>>,
 }
 
@@ -52,6 +53,7 @@ impl BatchIntent {
                 }
                 WorkerMessage::Clear => self.graph_state = Some(GraphOp::Clear),
                 WorkerMessage::EvictCache { nodes } => self.evict_cache.extend(nodes),
+                WorkerMessage::FlushCache { nodes } => self.flush_cache.extend(nodes),
                 WorkerMessage::SetDiskStore(cache) => self.disk_store = Some(cache),
                 WorkerMessage::Run { seeds } => self.seeds.merge(seeds),
                 WorkerMessage::StartEventLoop => self.loop_request = Some(LoopCommand::Start),
@@ -68,6 +70,7 @@ impl BatchIntent {
         self.loop_request = None;
         self.seeds.clear();
         self.evict_cache.clear();
+        self.flush_cache.clear();
         self.syncs.clear();
     }
 }
@@ -112,6 +115,9 @@ mod tests {
             WorkerMessage::EvictCache {
                 nodes: vec![node_id],
             },
+            WorkerMessage::FlushCache {
+                nodes: vec![node_id],
+            },
             WorkerMessage::Run {
                 seeds: RunSeeds::sinks(),
             },
@@ -139,11 +145,13 @@ mod tests {
         );
         assert!(intent.seeds.node_ids.contains(&node_id));
         assert!(intent.evict_cache.contains(&node_id));
+        assert!(intent.flush_cache.contains(&node_id));
         assert_eq!(intent.syncs.len(), 1);
 
         let event_capacity = intent.seeds.events.capacity();
         let node_capacity = intent.seeds.node_ids.capacity();
         let eviction_capacity = intent.evict_cache.capacity();
+        let flush_capacity = intent.flush_cache.capacity();
         let sync_capacity = intent.syncs.capacity();
 
         intent.reset([WorkerMessage::StopEventLoop], []);
@@ -155,10 +163,12 @@ mod tests {
         assert!(intent.seeds.events.is_empty());
         assert!(intent.seeds.node_ids.is_empty());
         assert!(intent.evict_cache.is_empty());
+        assert!(intent.flush_cache.is_empty());
         assert!(intent.syncs.is_empty());
         assert_eq!(intent.seeds.events.capacity(), event_capacity);
         assert_eq!(intent.seeds.node_ids.capacity(), node_capacity);
         assert_eq!(intent.evict_cache.capacity(), eviction_capacity);
+        assert_eq!(intent.flush_cache.capacity(), flush_capacity);
         assert_eq!(intent.syncs.capacity(), sync_capacity);
     }
 
@@ -193,10 +203,14 @@ mod tests {
         );
     }
 
+    /// The two cache commands accumulate the same way — unique, in the order
+    /// first named — and into *separate* sets, so a batch that evicts one node
+    /// and flushes another does both rather than confusing the two.
     #[test]
-    fn batch_intent_accumulates_unique_cache_evictions_in_order() {
+    fn batch_intent_accumulates_unique_cache_nodes_in_order() {
         let first = NodeId::from_u128(1);
         let second = NodeId::from_u128(2);
+        let third = NodeId::from_u128(3);
         let intent = batch_intent([
             WorkerMessage::EvictCache {
                 nodes: vec![first, second],
@@ -204,11 +218,19 @@ mod tests {
             WorkerMessage::EvictCache {
                 nodes: vec![second, first],
             },
+            WorkerMessage::FlushCache {
+                nodes: vec![third, first],
+            },
+            WorkerMessage::FlushCache { nodes: vec![first] },
         ]);
 
         assert_eq!(
             intent.evict_cache.into_iter().collect::<Vec<_>>(),
             vec![first, second]
+        );
+        assert_eq!(
+            intent.flush_cache.into_iter().collect::<Vec<_>>(),
+            vec![third, first]
         );
     }
 
