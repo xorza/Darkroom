@@ -27,3 +27,7 @@
 - `core/worker.rs::tests::drop_waits_for_worker_idle_before_runtime_shutdown`
   fails intermittently under a full `cargo test` run (seen once in four),
   panicking at `worker.rs:219`; it passes every time in isolation.
+
+- darkroom does not compile: `gui/widgets/inline_rename.rs:177` and `:242` and
+  `gui/pane/graph/paint/inspector.rs:425` call `InternedStr::borrow_str`, which
+  no longer exists on the type.
