@@ -15,7 +15,7 @@ use crate::gui::pane::graph::gesture::pan_zoom::zoom_about;
 
 /// Viewer zoom bounds — far wider than the canvas's
 /// (`pan_zoom::CANVAS_MIN_ZOOM`/`CANVAS_MAX_ZOOM`): out to overview a
-/// texture-capped 8k frame in a small pane, in for pixel peeping. Named apart
+/// full-sensor frame in a small pane, in for pixel peeping. Named apart
 /// from the canvas pair because both are passed into the same shared
 /// `fold_scroll_zoom` / `zoom_about`, where an unqualified `MIN_ZOOM` at the
 /// call site wouldn't say which surface's range is in play.

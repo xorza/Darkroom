@@ -11,6 +11,7 @@ pub(crate) mod error;
 use std::borrow::Cow;
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::num::NonZeroU32;
 
 use glam::UVec2;
 use imaginarium::{ColorFormat, Image as CpuImage, Preview, ProcessingContext};
@@ -21,8 +22,10 @@ use scenarium::{DynamicValue, NodeId};
 use crate::core::document::Document;
 use crate::gui::state::preview_store::error::PreviewImageError;
 
-const PREVIEW_TEXTURE_DIM: u32 = 256;
-const FULL_TEXTURE_DIM: u32 = 8192;
+/// Longest edge of a preview card's thumbnail — the one size darkroom picks
+/// for itself. A viewer's texture names no figure at all; see
+/// [`prepare_drawable`].
+const PREVIEW_TEXTURE_DIM: NonZeroU32 = NonZeroU32::new(256).unwrap();
 
 #[derive(Default, Debug)]
 pub(crate) struct PreviewStore {
@@ -97,7 +100,8 @@ enum FullImage {
 #[derive(Clone, Debug)]
 pub(crate) struct DrawableImage {
     pub(crate) handle: ImageHandle,
-    /// Source dimensions before the texture-cap downscale.
+    /// Source dimensions before the downscale that sized the texture — the
+    /// thumbnail's own cap, or the device's texture limit for a viewer's.
     pub(crate) native_size: UVec2,
     /// Source pixel format before the RGBA8 view conversion.
     pub(crate) native_format: ColorFormat,
@@ -139,8 +143,9 @@ impl PreviewImage {
     /// ask and reusing the result from then on. The source is dropped as it
     /// becomes a texture, so an image is never held twice.
     ///
-    /// **Lazy, not deferred.** The upload is up to 8192² RGBA8 — hundreds of MB
-    /// — and only a viewer pane ever wants one; a preview card draws the
+    /// **Lazy, not deferred.** The upload is the source's own resolution — a
+    /// full-sensor frame is hundreds of MB of RGBA8 — and only a viewer pane
+    /// ever wants one; a preview card draws the
     /// thumbnail. Asking is therefore the whole scoping rule: a pane records
     /// only when its tab is the visible one, so a viewer stacked behind
     /// another uploads nothing, and one that becomes visible mid-record gets
@@ -184,7 +189,7 @@ impl PreviewImage {
         let image = value
             .as_custom::<LensImage>()
             .expect("a stored preview image is only built over an image value");
-        Ok(prepare_drawable(ui, image, FULL_TEXTURE_DIM)?.handle)
+        Ok(prepare_drawable(ui, image, None)?.handle)
     }
 }
 
@@ -196,7 +201,7 @@ fn prepare_content(ui: &Ui, value: DynamicValue) -> StoredContent {
     let Some(image) = value.as_custom::<LensImage>() else {
         return StoredContent::Text(value.to_string());
     };
-    match prepare_drawable(ui, image, PREVIEW_TEXTURE_DIM) {
+    match prepare_drawable(ui, image, Some(PREVIEW_TEXTURE_DIM)) {
         Ok(preview) => StoredContent::Image(PreviewImage {
             preview,
             source_bytes: value.ram_usage().total(),
@@ -206,13 +211,20 @@ fn prepare_content(ui: &Ui, value: DynamicValue) -> StoredContent {
     }
 }
 
-/// Read a published image back to the CPU, downscale it to `max_dim`, and hand
+/// Read a published image back to the CPU, fit it to `max_dim`, and hand
 /// the pixels to the renderer — the one path from a pipeline value to
 /// something a pane can draw, at whichever of the two sizes is asked for.
+///
+/// `max_dim` is the caller's *own* ceiling on the longest edge, or `None` to
+/// take as many texels as the machine will hold — which is what a viewer
+/// wants. The device's limit is read here and always binds on top of it, since
+/// registration rejects an over-limit image rather than shrinking it, and a
+/// mosaic wider than the GPU allows would otherwise have nothing to show at
+/// all.
 fn prepare_drawable(
     ui: &Ui,
     image: &LensImage,
-    max_dim: u32,
+    max_dim: Option<NonZeroU32>,
 ) -> Result<DrawableImage, PreviewImageError> {
     let cpu = image
         .buffer
@@ -222,7 +234,13 @@ fn prepare_drawable(
     if native_size.x == 0 || native_size.y == 0 {
         return Err(PreviewImageError::Empty);
     }
-    let raster = rgba8_raster(&cpu, capped_target(native_size, max_dim));
+    // Whichever ceiling is lower, and no ceiling at all only when neither the
+    // caller nor the device names one.
+    let ceiling = [max_dim, ui.max_image_dimension()]
+        .into_iter()
+        .flatten()
+        .min();
+    let raster = rgba8_raster(&cpu, capped_target(native_size, ceiling));
     Ok(DrawableImage {
         handle: ui.register_image(raster)?,
         native_size,
@@ -241,8 +259,14 @@ fn rgba8_raster(cpu: &CpuImage, target: UVec2) -> Raster {
     Raster::from_rgba8(target.x, target.y, pixels)
 }
 
-fn capped_target(native: UVec2, max_dim: u32) -> UVec2 {
-    let scale = (max_dim as f32 / native.x.max(native.y) as f32).min(1.0);
+/// `native` scaled to fit `max_dim` on its longest edge — aspect preserved,
+/// never upscaled. `None` is no ceiling, and answers the source's own
+/// dimensions.
+fn capped_target(native: UVec2, max_dim: Option<NonZeroU32>) -> UVec2 {
+    let Some(max_dim) = max_dim else {
+        return native;
+    };
+    let scale = (max_dim.get() as f32 / native.x.max(native.y) as f32).min(1.0);
     UVec2::new(
         (native.x as f32 * scale).round().max(1.0) as u32,
         (native.y as f32 * scale).round().max(1.0) as u32,

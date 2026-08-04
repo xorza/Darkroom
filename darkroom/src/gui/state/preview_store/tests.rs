@@ -29,22 +29,38 @@ fn document_with_preview(node: NodeId) -> Document {
     fixture.doc
 }
 
+/// The two ways a target is chosen: against a ceiling, and against none.
+/// `None` is what a viewer's texture gets on any device whose limit the source
+/// already fits under, so "the source's own dimensions" is the common answer
+/// and not an edge case.
 #[test]
 fn capped_target_preserves_aspect_without_upscaling() {
+    let device = NonZeroU32::new(16_384);
+
+    // No ceiling: the source's own dimensions, however large.
     assert_eq!(
-        capped_target(UVec2::new(6000, 4000), FULL_TEXTURE_DIM),
+        capped_target(UVec2::new(30_000, 20_000), None),
+        UVec2::new(30_000, 20_000)
+    );
+    // Under the device limit: likewise untouched.
+    assert_eq!(
+        capped_target(UVec2::new(6000, 4000), device),
         UVec2::new(6000, 4000)
     );
+    // Over it: the longest edge lands exactly on the limit, aspect held —
+    // 32768 → 16384 is a halving, so 20000 → 10000.
     assert_eq!(
-        capped_target(UVec2::new(16_384, 8192), FULL_TEXTURE_DIM),
-        UVec2::new(8192, 4096)
+        capped_target(UVec2::new(32_768, 20_000), device),
+        UVec2::new(16_384, 10_000)
+    );
+    // A degenerate aspect keeps at least one row: 100000/16384 ≈ 0.164, and
+    // 1 × 0.164 rounds to 0, which the floor lifts back to 1.
+    assert_eq!(
+        capped_target(UVec2::new(100_000, 1), device),
+        UVec2::new(16_384, 1)
     );
     assert_eq!(
-        capped_target(UVec2::new(100_000, 1), FULL_TEXTURE_DIM),
-        UVec2::new(8192, 1)
-    );
-    assert_eq!(
-        capped_target(UVec2::new(1024, 512), PREVIEW_TEXTURE_DIM),
+        capped_target(UVec2::new(1024, 512), Some(PREVIEW_TEXTURE_DIM)),
         UVec2::new(256, 128)
     );
 }
@@ -70,23 +86,34 @@ fn conversion_produces_opaque_rgba8_at_the_target_size() {
     );
 }
 
-/// What a pane reads off a registered image: the texture at the capped size,
-/// and the *source's* dimensions and format beside it — the pair the viewer
-/// header compares to say "downscaled view".
+/// What a pane reads off a registered image: the texture at the size it was
+/// prepared to, and the *source's* dimensions and format beside it — the pair
+/// the viewer header compares to say "downscaled view".
 #[test]
 fn a_drawable_reports_its_source_alongside_the_capped_texture() {
     let mut arena = UiHarness::arena();
     let value = image_value(1024, 512, ColorFormat::RGB_F32);
     let image = value.as_custom::<LensImage>().unwrap();
 
-    let full = prepare_drawable(arena.ui(), image, FULL_TEXTURE_DIM).unwrap();
-    assert_eq!(full.handle.size(), UVec2::new(1024, 512), "under the cap");
+    // The viewer names no ceiling of its own, so the device's is the only one
+    // — and a deviceless harness has none at all.
+    assert_eq!(
+        arena.ui().max_image_dimension(),
+        None,
+        "a deviceless harness imposes no ceiling"
+    );
+    let full = prepare_drawable(arena.ui(), image, None).unwrap();
+    assert_eq!(
+        full.handle.size(),
+        UVec2::new(1024, 512),
+        "the source's own resolution"
+    );
     assert_eq!(full.native_size, UVec2::new(1024, 512));
     assert_eq!(full.native_format, ColorFormat::RGB_F32);
 
     // The thumbnail caps the longest side at 256, and still reports the source
     // it was made from rather than what it was reduced to.
-    let thumb = prepare_drawable(arena.ui(), image, PREVIEW_TEXTURE_DIM).unwrap();
+    let thumb = prepare_drawable(arena.ui(), image, Some(PREVIEW_TEXTURE_DIM)).unwrap();
     assert_eq!(thumb.handle.size(), UVec2::new(256, 128));
     assert_eq!(thumb.native_size, UVec2::new(1024, 512));
     assert_eq!(thumb.native_format, ColorFormat::RGB_F32);
@@ -118,8 +145,8 @@ fn the_full_texture_is_uploaded_on_the_first_ask_and_reused_after() {
         "ingesting a value uploads the thumbnail and nothing else"
     );
 
-    // 512×256 is under the 8192 cap, so the full texture keeps the source's
-    // own dimensions — twice the thumbnail's on each axis.
+    // The full texture keeps the source's own dimensions — twice the
+    // thumbnail's on each axis.
     let full = image.full(arena.ui()).expect("a valid image uploads");
     assert_eq!(full.handle.size(), UVec2::new(512, 256));
     assert_eq!(
