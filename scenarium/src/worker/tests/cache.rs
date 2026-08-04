@@ -161,14 +161,15 @@ async fn a_flush_failure_uses_the_general_worker_error_report() {
     let blocked_path = dir.join(blocked.as_uuid().simple().to_string());
     std::fs::create_dir(&blocked_path).unwrap();
 
-    // The sweep a newly attached store owes every resident value.
-    w.settle([w.disk_store(dir.path())]).await;
+    // The sweep the host asks for once the store is attached.
+    w.settle([w.disk_store(dir.path()), WorkerMessage::FlushAllCaches])
+        .await;
     let WorkerReport::Error(WorkerError::CacheFlush {
         failures,
         unsupported,
     }) = w.report().await
     else {
-        panic!("a store attach that could not write must report it");
+        panic!("a sweep that could not write must report it");
     };
     assert!(
         unsupported.is_empty(),
@@ -259,7 +260,8 @@ async fn an_unpersistable_type_is_reported_only_when_the_flush_was_requested() {
     w.send_many([w.update(), TestWorker::sinks()]);
     w.run().await;
 
-    w.settle([w.disk_store(dir.path())]).await;
+    w.settle([w.disk_store(dir.path()), WorkerMessage::FlushAllCaches])
+        .await;
     w.quiet();
     assert_eq!(dir.entry_count(), 0, "nothing could be written");
 
@@ -386,12 +388,17 @@ async fn an_install_reports_the_cache_left_after_reconciling() {
     w.quiet();
 }
 
-/// `SetDiskStore` flushes resident disk-backed values into the just-attached
+/// `FlushAllCaches` writes resident disk-backed values into the attached
 /// store: a `Both`-mode value computed while no store root existed (an
 /// unsaved document) would otherwise be a RAM hit on every later run —
 /// which never stores — and silently recompute on reopen.
+///
+/// And attaching the store *alone* writes nothing. The sweep used to be
+/// inferred from the attach, which made every unrelated store swap — a document
+/// opened, a library edit rebuilding the codec map — pay for a sweep, and
+/// aimed some of them at the wrong root.
 #[tokio::test]
-async fn attaching_a_store_flushes_resident_disk_backed_values() {
+async fn resident_disk_backed_values_are_flushed_when_asked_and_not_on_a_bare_attach() {
     let dir = TempDir::new("storeswap");
     let calls = Calls::default();
     let mut graph = disk_cached_graph(&calls);
@@ -404,10 +411,81 @@ async fn attaching_a_store_flushes_resident_disk_backed_values() {
     assert_eq!(dir.entry_count(), 0);
 
     w.settle([w.disk_store(dir.path())]).await;
+    assert_eq!(
+        dir.entry_count(),
+        0,
+        "attaching a store is not a request to write into it"
+    );
 
+    w.settle([WorkerMessage::FlushAllCaches]).await;
     assert_eq!(
         dir.entry_count(),
         1,
-        "the resident Both-mode value was flushed into the new store"
+        "the sweep wrote the resident Both-mode value into the attached store"
+    );
+}
+
+/// The batch's graph op is the frame of reference for everything after it: a
+/// batch that repoints the store *and* replaces the graph resolves the graph
+/// first, so nothing of the outgoing program can be written into the incoming
+/// one's root.
+///
+/// This is the document-open path. It used to write the closed document's
+/// resident values into the opened document's cache directory, under ids
+/// nothing there would ever read — and since no cache root is ever pruned,
+/// those blobs were permanent.
+#[tokio::test]
+async fn a_batch_resolves_its_graph_before_the_store_it_repoints_to() {
+    let outgoing = TempDir::new("outgoing-doc");
+    let incoming = TempDir::new("incoming-doc");
+    let calls = Calls::default();
+    let mut graph = disk_cached_graph(&calls);
+    graph.cache("square", CacheMode::Both);
+
+    // The outgoing document: computed against its own store, value resident.
+    let mut w = TestWorker::over(graph);
+    w.send_many([
+        w.disk_store(outgoing.path()),
+        w.update(),
+        TestWorker::sinks(),
+    ]);
+    w.run().await;
+    assert_eq!(outgoing.entry_count(), 1, "it wrote its own blob");
+
+    // The control, and what makes the assertion below mean anything: the same
+    // repoint-and-sweep *without* a graph op does write, so the value really is
+    // resident and really would follow the store to a new root.
+    let elsewhere = TempDir::new("no-graph-op");
+    w.settle([
+        w.disk_store(elsewhere.path()),
+        WorkerMessage::FlushAllCaches,
+    ])
+    .await;
+    assert_eq!(
+        elsewhere.entry_count(),
+        1,
+        "with the program still installed, the sweep follows the store"
+    );
+
+    // Closing it and opening another is one batch — drop the program, repoint
+    // the store — and the host asks for the sweep too, which is the strongest
+    // form of the case: even an explicit sweep has nothing left to write,
+    // because the graph op ran first.
+    w.settle([
+        WorkerMessage::Clear,
+        w.disk_store(incoming.path()),
+        WorkerMessage::FlushAllCaches,
+    ])
+    .await;
+
+    assert_eq!(
+        incoming.entry_count(),
+        0,
+        "the closed document's values must not land in the opened document's store"
+    );
+    assert_eq!(
+        outgoing.entry_count(),
+        1,
+        "and the store it did write stays as it was"
     );
 }

@@ -133,7 +133,8 @@ impl WorkerBridge {
 
     /// Swap the engine's output cache (codec registry + store root) — e.g. to
     /// repoint at the active document's store. Takes effect before the next
-    /// run's compile. No caller is waiting on an answer, so the outcome is
+    /// run's compile. Attaching writes nothing; see [`Self::flush_all_caches`].
+    /// No caller is waiting on an answer, so the outcome is
     /// traced rather than returned; a run is where a dead worker becomes the
     /// user's problem.
     pub(crate) fn set_disk_store(&self, cache: DiskStore) {
@@ -143,6 +144,18 @@ impl WorkerBridge {
             .is_err()
         {
             tracing::warn!("worker exited; disk store not installed");
+        }
+    }
+
+    /// Write every installed node's resident disk-backed value into the
+    /// attached store — what the store is owed by values computed while there
+    /// was nowhere to put them. Ordered after any `SetDiskStore` in the same
+    /// batch by the worker's apply order, so the two travel together.
+    ///
+    /// Traced rather than returned, like the attach above: nothing waits on it.
+    pub(crate) fn flush_all_caches(&self) {
+        if self.worker.send(WorkerMessage::FlushAllCaches).is_err() {
+            tracing::warn!("worker exited; resident values not flushed");
         }
     }
 
