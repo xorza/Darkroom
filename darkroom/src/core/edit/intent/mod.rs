@@ -9,7 +9,8 @@
 //!     fully-populated step. Pure. Also *the* validation gate: it's the
 //!     single entry every frontend commits through, so each arm establishes
 //!     the whole precondition set its `apply` half assumes, yielding
-//!     `Ok(None)` for a stale or no-op intent and a [`MalformedIntent`]
+//!     `Ok(None)` for a stale or no-op intent and a
+//!     [`MalformedIntent`](error::MalformedIntent)
 //!     ([`error`]) for one that could never have applied.
 //!   - [`validate`] — the checks those arms are built from (is this id
 //!     resolvable, fresh, non-nil; is this position finite; is this kind

@@ -172,7 +172,8 @@ impl RuntimeHost {
 
     /// Compile `graph` against the current library and send it to the worker
     /// for one evaluation. `false` means the compile failed — it is reported
-    /// to [`Self::status`] synchronously and nothing reaches the worker.
+    /// to the caller's [`StatusLog`] synchronously and nothing reaches the
+    /// worker.
     /// Results arrive via [`Self::drain_worker`].
     pub(crate) fn run_once(&mut self, graph: &Graph, status: &mut StatusLog) -> bool {
         let Some(compiled) = self.compile(graph, status) else {
@@ -190,7 +191,8 @@ impl RuntimeHost {
     /// explicitly, which overrides its `disabled` flag during planning.
     ///
     /// `false` means nothing reached the worker — either the compile failed
-    /// (reported to [`Self::status`]) or the node has no execution footprint at
+    /// (reported to the caller's [`StatusLog`]) or the node has no execution
+    /// footprint at
     /// all, i.e. the program dropped it. Results arrive via
     /// [`Self::drain_worker`].
     pub(crate) fn run_node(
@@ -267,8 +269,8 @@ impl RuntimeHost {
 
     /// Start the event loop on `graph` (compiles + loads it, then fires
     /// events). The worker's `Update` tears down any prior loop first.
-    /// `false` means the compile failed — it is reported to [`Self::status`]
-    /// and the loop's running state is untouched.
+    /// `false` means the compile failed — it is reported to the caller's
+    /// [`StatusLog`] and the loop's running state is untouched.
     pub(crate) fn start_event_loop(&mut self, graph: &Graph, status: &mut StatusLog) -> bool {
         let Some(compiled) = self.compile(graph, status) else {
             return false;

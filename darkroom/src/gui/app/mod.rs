@@ -27,7 +27,7 @@ pub(crate) mod session;
 use session::Session;
 
 /// The editor shell: it owns the open document and the runtime services
-/// evaluating it, and lends the document to the [`Editor`] that authors each
+/// evaluating it, and lends the document to the [`Session`] that authors each
 /// frame. `App` also owns preferences, dialogs, theme, and exit policy.
 /// `update` drains external queues once, while replayable `record` runs
 /// `Editor::frame` and handles actions only in the pass that receives input.
@@ -69,7 +69,7 @@ pub(crate) struct App {
     /// [`ProcessMemory::sample`] refreshes at most once per interval, so a
     /// second record pass repeats the reading the first one drew.
     process_memory: ProcessMemory,
-    /// The frame's request queue, lent to [`Editor::frame`] and drained of
+    /// The frame's request queue, lent to [`Session::frame`] and drained of
     /// its app tier here once the pass is over. Lives on `App` because both
     /// levels drain it: the editor takes what the document owns, and what is
     /// left is ours. Carries no state between frames — a field only so the

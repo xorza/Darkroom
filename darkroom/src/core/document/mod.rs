@@ -312,7 +312,7 @@ impl Document {
         }
     }
 
-    /// [`node_alive`] narrowed to preview nodes — what retains the value one
+    /// [`Self::holds_node`] narrowed to preview nodes — what retains the value one
     /// published.
     ///
     /// Deliberately stricter than the shared rule rather than accidentally

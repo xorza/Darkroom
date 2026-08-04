@@ -18,7 +18,7 @@ const MAX_WRAP: f32 = 2.0;
 /// filtering across the zoom-wrap range.
 const TILE_PX: u32 = 64;
 
-/// Dotted canvas backdrop, drawn as one tiled [`Shape::Image`]. A small
+/// Dotted canvas backdrop, drawn as one tiled [`Shape::image`](palantir::Shape::image). A small
 /// dot tile is generated once, registered into palantir's image cache,
 /// and stamped across the whole canvas by a single tiled image whose UV
 /// transform carries the pan/zoom — so the grid pans and zooms for the

@@ -22,7 +22,8 @@ use crate::gui::theme::Theme;
 /// with this frame's input, so no caller re-polls for it.
 ///
 /// Booleans, because this is one node. Which node across the scene is
-/// [`NodeDrawOutcome`]'s question, and folding these into it is the loop's
+/// [`NodeDrawOutcome`](crate::gui::pane::graph::node::NodeDrawOutcome)'s
+/// question, and folding these into it is the loop's
 /// job rather than the node's.
 #[derive(Default, Debug)]
 pub(super) struct NodeResponse {

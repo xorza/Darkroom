@@ -3,8 +3,9 @@
 //!
 //! Nothing here is copied or cached. A [`GraphCtx`] is the frame's
 //! [`WindowCtx`] plus one shared reference; the handles it hands out
-//! ([`NodeCtx`], [`InputCtx`],
-//! [`OutputCtx`]) each resolve one more borrow and answer every question
+//! ([`NodeCtx`], [`InputCtx`](input_ctx::InputCtx),
+//! [`OutputCtx`](output_ctx::OutputCtx)) each resolve one more borrow and
+//! answer every question
 //! from the authority that owns it — the node's record off the document, its
 //! ports off the library's declaration, its status off the run. A widget
 //! therefore cannot read anything a frame behind, and there is nothing to

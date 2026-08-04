@@ -96,7 +96,7 @@ impl Inspectors {
     /// panels on an outside action.
     ///
     /// Both node-side facts come from the record pass that just drew them
-    /// ([`NodeDrawOutcome`](crate::gui::pane::graph::node::NodeDrawOutcome));
+    /// ([`NodeDrawOutcome`]);
     /// the canvas half is read here. Everything is last-frame responses either
     /// way, so a chip click never reads as its own outside action — the click
     /// lands on the chip, not on the canvas or a body.
