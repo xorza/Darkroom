@@ -4,9 +4,12 @@
 //!
 //! **Two halves with different owners.** `nodes` and `previews` belong to the
 //! open document and die with it ([`RunState::clear`]); `compiled`, `activity`
-//! and `cache_ram` describe the *worker* and outlive a document swap, because
-//! an in-flight run still reports against the program the worker acknowledged
-//! and its cache still holds what it holds.
+//! and `cache_ram` describe the *worker* and are only ever written by what the
+//! worker reports, because an in-flight run still reports against the program
+//! the worker acknowledged and its cache still holds what it holds. A document
+//! swap does not reset them behind the worker's back — it asks the worker to
+//! drop its program and cache, and the `Cleared` acknowledgement is what
+//! resets them.
 //!
 //! Within the first half the two differ again, and on purpose: `previews` is
 //! swept per node once a frame, `nodes` only wholesale at a document swap or
@@ -134,8 +137,11 @@ pub(crate) struct RunState {
     /// subsequent progress/result payload belongs to this exact compile.
     pub(crate) compiled: Option<Arc<CompiledGraph>>,
     pub(crate) activity: WorkerActivity,
-    /// RAM held by the worker's runtime cache after its latest run (system RAM
-    /// vs GPU VRAM). Explicit eviction clears this projection until the next
+    /// RAM held by the worker's runtime cache (system RAM vs GPU VRAM), as of
+    /// the last report that measured it: a completed run, or an install —
+    /// which releases the values of every node the new program dropped, and
+    /// is the only measurement a program with nothing to run ever produces.
+    /// Explicit eviction clears this projection until the next
     /// run because successful eviction is fire-and-forget.
     pub(crate) cache_ram: RamUsage,
 }
@@ -191,39 +197,56 @@ impl RunState {
         // `runtime` again.
         let events = runtime.drain_worker();
         for report in events {
-            match report {
-                WorkerReport::Installed(compiled) => {
-                    self.compiled = Some(compiled);
-                }
-                WorkerReport::Cleared => {
-                    self.compiled = None;
+            self.apply_report(report, status);
+        }
+    }
+
+    /// Fold one report. Split out from the drain so it can be exercised
+    /// against a report stream a test states, rather than one a live worker
+    /// would have to be driven into producing.
+    fn apply_report(&mut self, report: WorkerReport, status: &mut StatusLog) {
+        match report {
+            WorkerReport::Installed {
+                compiled,
+                cache_ram,
+            } => {
+                self.compiled = Some(compiled);
+                // An install reconciles the cache onto the new program,
+                // releasing whatever the nodes it dropped were holding.
+                // The figure it carries is that resident set measured
+                // afterwards, and it is the only correction there will be
+                // when the new program has nothing to run.
+                self.cache_ram = cache_ram;
+            }
+            WorkerReport::Cleared => {
+                self.compiled = None;
+                self.cache_ram = RamUsage::default();
+                self.clear();
+            }
+            WorkerReport::Error(error) => {
+                if matches!(&error, WorkerError::Execution { .. }) {
                     self.clear();
                 }
-                WorkerReport::Error(error) => {
-                    if matches!(&error, WorkerError::Execution { .. }) {
-                        self.clear();
+                status.error(error.to_string());
+            }
+            // Bound as `run` so it cannot shadow the `status` log this
+            // arm also writes — the two are unrelated and both want the
+            // obvious name.
+            WorkerReport::Status(run) => {
+                if let WorkerStatusKind::Completed {
+                    executed_node_count,
+                    cancelled,
+                    ..
+                } = run.kind
+                {
+                    if cancelled {
+                        tracing::info!("run cancelled after {executed_node_count} node(s)");
                     }
-                    status.error(error.to_string());
+                    // A completed run supersedes any lingering failure message
+                    // from an earlier event-loop tick.
+                    status.error = None;
                 }
-                // Bound as `run` so it cannot shadow the `status` log this
-                // arm also writes — the two are unrelated and both want the
-                // obvious name.
-                WorkerReport::Status(run) => {
-                    if let WorkerStatusKind::Completed {
-                        executed_node_count,
-                        cancelled,
-                        ..
-                    } = run.kind
-                    {
-                        if cancelled {
-                            tracing::info!("run cancelled after {executed_node_count} node(s)");
-                        }
-                        // A completed run supersedes any lingering failure message
-                        // from an earlier event-loop tick.
-                        status.error = None;
-                    }
-                    self.apply_worker_status(&run);
-                }
+                self.apply_worker_status(&run);
             }
         }
     }
