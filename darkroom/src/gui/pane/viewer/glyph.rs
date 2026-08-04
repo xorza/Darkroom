@@ -131,7 +131,6 @@ pub(super) fn draw_swatch(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use palantir::Image as AptImage;
 
     #[test]
     fn checker_image_is_one_2x2_period() {
@@ -144,6 +143,6 @@ mod tests {
             L, L, L, 255,  D, D, D, 255,
             D, D, D, 255,  L, L, L, 255,
         ];
-        assert_eq!(img, AptImage::from_rgba8(2, 2, expected.to_vec()));
+        assert_eq!(img, palantir::Image::from_rgba8(2, 2, expected.to_vec()));
     }
 }

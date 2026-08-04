@@ -29,7 +29,6 @@ use std::borrow::Cow;
 use std::fmt::Write as _;
 
 use glam::{UVec2, Vec2};
-use imaginarium::ColorFormat;
 use palantir::{
     Align, Background, Color, Configure, HAlign, ImageFilter, ImageFit, ImageHandle, Panel, Sense,
     Shape, Sizing, Spacing, Ui, VAlign, WidgetId,
@@ -44,7 +43,7 @@ use crate::gui::pane::viewer::camera::{
 };
 use crate::gui::pane::viewer::controls::{BACKDROPS, control_wid, filter_toggle, readout_pill};
 use crate::gui::state::preview_store::error::PreviewImageError;
-use crate::gui::state::preview_store::{PreviewStore, StoredContent};
+use crate::gui::state::preview_store::{DrawableImage, PreviewStore, StoredContent};
 use crate::gui::theme::Theme;
 use crate::gui::widgets::toolbar::{BUTTON_GAP, Chip, TOOLBAR_MARGIN, pill, pill_rule};
 
@@ -76,29 +75,6 @@ pub(crate) struct ImageViewer {
     checker: Option<ImageHandle>,
 }
 
-/// The texture a viewer paints this frame, once the store's content has
-/// cleared the viewer's own bar.
-#[derive(Clone, Debug)]
-struct ShownImage {
-    /// Owned rather than borrowed: the store uploads it on demand from behind
-    /// a cell, and the clone is a refcount bump on the texture the store still
-    /// owns.
-    handle: ImageHandle,
-    /// Source dimensions before the texture-cap downscale.
-    native_size: UVec2,
-    /// Source pixel format before the RGBA8 view conversion.
-    native_format: ColorFormat,
-}
-
-impl ShownImage {
-    /// This texture's 1:1 logical footprint on the current display — the
-    /// space every viewport in this module is expressed in, so the framing
-    /// math never sees raw texels.
-    fn logical_size(&self, ui: &Ui) -> Vec2 {
-        logical_image_size(self.handle.size(), ui.display().scale_factor)
-    }
-}
-
 /// Drawn when a viewer's node has published nothing yet. An invitation rather
 /// than a diagnosis, which is why [`ShownSource::Nothing`] is its own state and
 /// not a message.
@@ -114,7 +90,7 @@ const NOTHING_YET_HINT: &str = "the port's image appears here after the next gra
 #[derive(Clone, Debug)]
 enum ShownSource {
     Nothing,
-    Image(ShownImage),
+    Image(DrawableImage),
     /// Why this value has no picture. Carries the reason rather than its
     /// wording, so the pane decides how to say it — including for a perfectly
     /// good non-image value, which is [`PreviewImageError::NotAnImage`] and
@@ -132,31 +108,23 @@ impl ShownSource {
     /// than a frame later. The preview card never asks; its thumbnail is
     /// already resident.
     fn resolve(source: Option<&StoredContent>, ui: &Ui) -> Self {
-        let Some(value) = source else {
-            return Self::Nothing;
-        };
-        let Some(image) = value.image() else {
+        match source {
+            None => Self::Nothing,
+            Some(StoredContent::Image(image)) => match image.full(ui) {
+                Ok(drawable) => Self::Image(drawable),
+                Err(error) => Self::NoImage(error),
+            },
             // A stored failure keeps its own reason. A perfectly good
             // non-image value is `NotAnImage`: "7" is not what a viewer tab is
             // for, and the preview card is what renders it.
-            return Self::NoImage(match value {
-                StoredContent::Error(error) => error.clone(),
-                _ => PreviewImageError::NotAnImage,
-            });
-        };
-        match image.full(ui) {
-            Ok(handle) => Self::Image(ShownImage {
-                handle,
-                native_size: image.native_size,
-                native_format: image.native_format,
-            }),
-            Err(error) => Self::NoImage(error),
+            Some(StoredContent::Error(error)) => Self::NoImage(error.clone()),
+            Some(StoredContent::Text(_)) => Self::NoImage(PreviewImageError::NotAnImage),
         }
     }
 
     /// The texture, for the framing and gesture math that mean nothing
     /// without one.
-    fn image(&self) -> Option<&ShownImage> {
+    fn image(&self) -> Option<&DrawableImage> {
         match self {
             Self::Image(image) => Some(image),
             Self::Nothing | Self::NoImage(_) => None,
@@ -200,8 +168,14 @@ impl ImageViewer {
     /// The framing to draw with: the user's explicit viewport, else the
     /// recomputed fit — the single source for the draw rect, the zoom
     /// readout, and the gesture/button math.
-    fn effective_view(&self, img: Vec2, pane: Vec2) -> Viewport {
-        self.view.unwrap_or_else(|| fit_viewport(img, pane))
+    ///
+    /// Converts the texture to logical px itself rather than taking the
+    /// figure: every caller wanted the viewport, and only one of them wanted
+    /// the size too. Registered images have non-zero dims by construction, so
+    /// the fit always has a valid divisor.
+    fn effective_view(&self, ui: &Ui, image: &DrawableImage, pane: Vec2) -> Viewport {
+        self.view
+            .unwrap_or_else(|| fit_viewport(logical_size(image, ui), pane))
     }
 
     /// Keep framing across same-size revisions and refit when the displayed
@@ -256,29 +230,20 @@ impl ImageViewer {
                     self.draw_checker(ui, pane);
                 }
                 if let Some(shown) = source.image() {
-                    match pane {
+                    let image = Shape::image(shown.handle.clone())
+                        .min_filter(ImageFilter::Linear)
+                        .mag_filter(prefs.mag_filter);
+                    ui.add_shape(match pane {
                         Some(pane) => {
-                            let img = shown.logical_size(ui);
-                            let v = self.effective_view(img, pane);
-                            ui.add_shape(
-                                Shape::image(shown.handle.clone())
-                                    .at(draw_rect(img, v))
-                                    .fit(ImageFit::Fill)
-                                    .min_filter(ImageFilter::Linear)
-                                    .mag_filter(prefs.mag_filter),
-                            );
+                            let v = self.effective_view(ui, shown, pane);
+                            image
+                                .at(draw_rect(logical_size(shown, ui), v))
+                                .fit(ImageFit::Fill)
                         }
                         // Pane not measured yet (first frame): let palantir
                         // fit it.
-                        None => {
-                            ui.add_shape(
-                                Shape::image(shown.handle.clone())
-                                    .fit(ImageFit::Contain)
-                                    .min_filter(ImageFilter::Linear)
-                                    .mag_filter(prefs.mag_filter),
-                            );
-                        }
-                    }
+                        None => image.fit(ImageFit::Contain),
+                    });
                     self.header(ui, theme, pane, title, shown);
                     prefs_changed = self.controls(ui, theme, pane, prefs, shown);
                 }
@@ -331,7 +296,7 @@ impl ImageViewer {
         theme: &Theme,
         pane: Option<Vec2>,
         title: &str,
-        shown: &ShownImage,
+        shown: &DrawableImage,
     ) {
         let mut text = format!(
             "{} · {} × {} · {}",
@@ -340,10 +305,9 @@ impl ImageViewer {
         if shown.handle.size() != shown.native_size {
             text.push_str(" · downscaled view");
         }
-        let img = shown.logical_size(ui);
         let zoom = match (self.view, pane) {
             (Some(v), _) => Some(v.zoom),
-            (None, Some(pane)) => Some(self.effective_view(img, pane).zoom),
+            (None, Some(pane)) => Some(self.effective_view(ui, shown, pane).zoom),
             // Pane not measured yet (first frame): no fit zoom to report.
             (None, None) => None,
         };
@@ -375,7 +339,7 @@ impl ImageViewer {
         theme: &Theme,
         pane: Option<Vec2>,
         prefs: &mut ViewerPreferences,
-        shown: &ShownImage,
+        shown: &DrawableImage,
     ) -> bool {
         let node_id = self.node_id;
         let mut changed = false;
@@ -402,7 +366,7 @@ impl ImageViewer {
                         glyph::draw_100,
                     ) && let Some(pane) = pane
                     {
-                        let v = self.effective_view(shown.logical_size(ui), pane);
+                        let v = self.effective_view(ui, shown, pane);
                         self.view = Some(zoom_about_pane_center(v, 1.0, pane));
                     }
                 });
@@ -431,13 +395,10 @@ impl ImageViewer {
     /// pans, wheel/pinch zooms about the cursor, two-finger scroll pans,
     /// double-click resets to fit. The fit viewport materializes into an
     /// explicit one on the first adjusting gesture.
-    fn apply_gestures(&mut self, ui: &Ui, shown: Option<&ShownImage>) {
+    fn apply_gestures(&mut self, ui: &Ui, shown: Option<&DrawableImage>) {
         let Some(shown) = shown else {
             return;
         };
-        // Registered images have non-zero dims by construction, so the
-        // texel size is always a valid divisor.
-        let img = shown.logical_size(ui);
         let resp = ui.response_for(pane_wid(self.node_id));
         let Some(pane) = pane_size(ui, self.node_id) else {
             return;
@@ -454,7 +415,7 @@ impl ImageViewer {
         if self.view.is_none() && !adjusting {
             return;
         }
-        let mut v = self.effective_view(img, pane);
+        let mut v = self.effective_view(ui, shown, pane);
 
         if resp.left.drag.started() || resp.middle.drag.started() {
             self.pan_anchor = Some(v.pan);
@@ -489,6 +450,13 @@ pub(crate) fn node_label(doc: &Document, node_id: NodeId) -> String {
         .filter(|n| !n.is_empty())
         .unwrap_or("image")
         .to_owned()
+}
+
+/// A texture's 1:1 logical footprint on the current display — the space every
+/// viewport in this module is expressed in, so the framing math never sees raw
+/// texels.
+fn logical_size(image: &DrawableImage, ui: &Ui) -> Vec2 {
+    logical_image_size(image.handle.size(), ui.display().scale_factor)
 }
 
 /// Last frame's measured pane size, `None` before the first layout.
