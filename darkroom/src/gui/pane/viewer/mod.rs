@@ -214,6 +214,7 @@ impl ImageViewer {
         prefs: &mut ViewerPreferences,
         title: &str,
         previews: &PreviewStore,
+        pane: Option<Vec2>,
     ) -> bool {
         // The store rather than the entry: this viewer *is* its node, so
         // handing it the whole store is one lookup by an id that cannot
@@ -224,22 +225,8 @@ impl ImageViewer {
         // owes itself a later frame.
         let source = ShownSource::resolve(previews.entries.get(&self.node_id), ui);
         self.sync_source(source.image().map(|image| image.handle.size()));
-        self.apply_gestures(ui, source.image());
+        self.apply_gestures(ui, source.image(), pane);
 
-        let pane = pane_size(ui, self.node_id);
-        // A pane that was not on screen last frame has no arranged rect yet —
-        // every pass that puts a viewer tab up for the first time. The
-        // *image* no longer waits on that (see `effective_view`), but the
-        // chrome measured against the pane does: the checkerboard backdrop
-        // and the header's zoom readout.
-        //
-        // Pass B of a relayout frame reads pass A's arranged rects, so asking
-        // for one fills those in within this frame. Nothing else would: an
-        // idle host records no further frame, so without this they stay blank
-        // until the user happens to move the pointer.
-        if pane.is_none() && source.image().is_some() {
-            ui.request_relayout();
-        }
         let fill = match prefs.background {
             ViewerBackground::Theme | ViewerBackground::Checker => theme.canvas.bg,
             ViewerBackground::Black => Color::BLACK,
@@ -418,12 +405,12 @@ impl ImageViewer {
     /// pans, wheel/pinch zooms about the cursor, two-finger scroll pans,
     /// double-click resets to fit. The fit viewport materializes into an
     /// explicit one on the first adjusting gesture.
-    fn apply_gestures(&mut self, ui: &Ui, shown: Option<&DrawableImage>) {
+    fn apply_gestures(&mut self, ui: &Ui, shown: Option<&DrawableImage>, pane: Option<Vec2>) {
         let Some(shown) = shown else {
             return;
         };
         let resp = ui.response_for(pane_wid(self.node_id));
-        let Some(pane) = pane_size(ui, self.node_id) else {
+        let Some(pane) = pane else {
             return;
         };
         if resp.left.double_clicked() {
@@ -482,12 +469,6 @@ pub(crate) fn node_label(doc: &Document, node_id: NodeId) -> String {
 /// expressed in, so the framing math never sees raw texels.
 fn logical_size(image: &DrawableImage, ui: &Ui) -> Vec2 {
     image.handle.size().as_vec2() / ui.display().scale_factor
-}
-
-/// Last frame's measured pane size, `None` before the first layout.
-fn pane_size(ui: &Ui, node_id: NodeId) -> Option<Vec2> {
-    let size = ui.response_for(pane_wid(node_id)).layout_rect?.size;
-    (size.w > 0.0 && size.h > 0.0).then(|| Vec2::new(size.w, size.h))
 }
 
 /// Stable id for a viewer's pane — keyed by node so switching between two
@@ -578,11 +559,15 @@ mod tests {
         assert_eq!(resolved.hint().as_deref(), Some("value is not an image"));
     }
 
-    /// The frame that first draws a viewer both uploads its texture and
-    /// settles its framing. Nothing is left for a later frame to finish, which
-    /// matters because a viewer becomes visible on a tab switch — and the only
-    /// thing that would wake the next frame is the user happening to move the
-    /// mouse.
+    /// One pass is the whole story: the frame that first draws a viewer
+    /// uploads its texture and frames it against the pane it was handed.
+    ///
+    /// The pane is a parameter because a viewer cannot measure itself — its
+    /// own widget is at most one pass old, and a tab switch destroys it. The
+    /// dock measures its content area instead, which outlives the tab in it,
+    /// so a switched-to viewer is handed a size on the very pass it records.
+    /// Nothing is owed a later pass or a later frame, which is what stops the
+    /// scale and the zoom readout arriving a frame behind.
     #[test]
     fn the_frame_that_first_draws_a_viewer_uploads_and_frames_it() {
         let mut h = UiHarness::arena();
@@ -596,8 +581,10 @@ mod tests {
         let theme = Theme::default();
         let mut prefs = ViewerPreferences::default();
         let mut viewer = ImageViewer::new(node);
+        // The size the dock hands down on the pass a tab appears.
+        let pane = Some(Vec2::new(800.0, 600.0));
         let first = h.frame(|ui| {
-            viewer.show(ui, &theme, &mut prefs, "img", &store);
+            viewer.show(ui, &theme, &mut prefs, "img", &store, pane);
         });
 
         assert_eq!(
@@ -608,25 +595,12 @@ mod tests {
         );
         assert!(
             !first.repaint_requested,
-            "nothing is pending, so the viewer must not keep the host awake"
+            "a viewer handed its pane owes the host nothing"
         );
-        // Pass A had no arranged pane to fit to — the pane records for the
-        // first time in the very pass that switched to it. The retry it asks
-        // for is what puts the fitted scale on screen in this frame instead of
-        // whichever later frame input happens to wake.
         assert_eq!(
             first.processing,
-            FrameProcessing::DoubleLayout,
-            "an unarranged pane must ask for the pass that measures it"
-        );
-
-        let settled = h.frame(|ui| {
-            viewer.show(ui, &theme, &mut prefs, "img", &store);
-        });
-        assert_eq!(
-            settled.processing,
             FrameProcessing::SingleLayout,
-            "and must stop asking once it has a size"
+            "and needs no second pass to settle its framing"
         );
     }
 }

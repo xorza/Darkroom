@@ -159,7 +159,7 @@ impl MainWindow {
                     .show(ui, |ui| {
                         menu_bar::show(ui, out);
                     });
-                dock.render(ui, dock_cx, out, |ui, tab, out| match tab {
+                dock.render(ui, dock_cx, out, |ui, tab, pane, out| match tab {
                     TabRef::Graph => {
                         // The context carries everything the canvas reads —
                         // theme and run included, through the `cx` it is
@@ -181,7 +181,7 @@ impl MainWindow {
                             .or_insert_with(|| ImageViewer::new(node_id));
                         // Viewer-toolbar edits ride the same in-place
                         // prefs path as the Preferences tab.
-                        if viewer.show(ui, app.theme(), &mut prefs.viewer, &title, previews) {
+                        if viewer.show(ui, app.theme(), &mut prefs.viewer, &title, previews, pane) {
                             out.push_app(AppCommand::Prefs(PrefsCommand::Changed));
                         }
                     }

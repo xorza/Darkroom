@@ -51,6 +51,18 @@ fn pane_wid(group: TabGroupId) -> WidgetId {
     WidgetId::from_hash(("dock.pane", group))
 }
 
+/// Stable id for a group's *content* area — the space below the strip that
+/// the active tab's view fills.
+///
+/// Keyed by the group rather than by the tab it happens to be showing, which
+/// is the whole point: switching tabs leaves this widget in place, so a view
+/// can be handed its arranged size on the very pass it first records. A view
+/// measuring its own container instead would find nothing there — its widget
+/// is one pass old at most, and layout runs after the record.
+fn content_wid(group: TabGroupId) -> WidgetId {
+    WidgetId::from_hash(("dock.content", group))
+}
+
 /// Stable id for the splitter at a tree path.
 fn splitter_wid(path: DockPath) -> WidgetId {
     WidgetId::from_hash(("dock.splitter", path))
@@ -160,7 +172,7 @@ impl DockUi {
         ui: &mut Ui,
         cx: DockContext<'_>,
         out: &mut Requests,
-        mut content: impl FnMut(&mut Ui, TabRef, &mut Requests),
+        mut content: impl FnMut(&mut Ui, TabRef, Option<Vec2>, &mut Requests),
     ) {
         render_node(ui, cx, DockLayout::ROOT, DockPath::ROOT, out, &mut content);
         if let Some(dragged) = &self.tab_drag {
@@ -173,7 +185,7 @@ impl DockUi {
 /// Recursive walk of the dock tree: a split renders as an palantir
 /// `Splitter` (ratio changes surface as `DockOp::SetRatio`), a
 /// group as its strip + the active tab's view.
-fn render_node<F: FnMut(&mut Ui, TabRef, &mut Requests)>(
+fn render_node<F: FnMut(&mut Ui, TabRef, Option<Vec2>, &mut Requests)>(
     ui: &mut Ui,
     cx: DockContext<'_>,
     idx: NodeIdx,
@@ -221,7 +233,7 @@ fn render_node<F: FnMut(&mut Ui, TabRef, &mut Requests)>(
 }
 
 /// One pane: the group's tab strip over its active tab's view.
-fn render_group<F: FnMut(&mut Ui, TabRef, &mut Requests)>(
+fn render_group<F: FnMut(&mut Ui, TabRef, Option<Vec2>, &mut Requests)>(
     ui: &mut Ui,
     cx: DockContext<'_>,
     group: &TabGroup,
@@ -239,8 +251,23 @@ fn render_group<F: FnMut(&mut Ui, TabRef, &mut Requests)>(
         .focusable(true)
         .show(ui, |ui| {
             strip::show(ui, cx.theme, group, &labels, out);
-            content(ui, group.active_tab(), out);
+            // Last frame's arrangement, as every measurement during a record
+            // is — but of the *group's* content area, which outlives the tab
+            // in it. That is what lets a view that first records on this pass
+            // still be handed a size.
+            let size = content_size(ui, group.id);
+            Panel::vstack()
+                .id(content_wid(group.id))
+                .size((Sizing::FILL, Sizing::FILL))
+                .show(ui, |ui| content(ui, group.active_tab(), size, out));
         });
+}
+
+/// The arranged size of a group's content area, `None` before its first
+/// layout — the one frame in a group's life where a view has to size itself.
+fn content_size(ui: &Ui, group: TabGroupId) -> Option<Vec2> {
+    let size = ui.response_for(content_wid(group)).layout_rect?.size;
+    (size.w > 0.0 && size.h > 0.0).then(|| Vec2::new(size.w, size.h))
 }
 
 /// Dock focus follows keyboard focus into a pane: whichever pane holds it
