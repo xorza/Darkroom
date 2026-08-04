@@ -31,6 +31,17 @@ compatibility for now. Change serialized shapes and break APIs freely when that
 simplifies the current design; do not add migrations, compatibility shims,
 legacy deserializers, or legacy-format tests.
 
+**Never link the whole bench suite at once.** Unfiltered `cargo bench` /
+`cargo bench --no-run` can exhaust RAM and get OOM-killed: the root
+`[profile.bench]` is fat-LTO with full debug info, so each bench binary links
+its entire dependency graph in one codegen unit — GBs apiece — and cargo runs
+those links in parallel across every target (palantir has 21).
+
+- Compile-checking them: clippy `--all-targets` covers benches with no
+  optimized link, which the verification chain already does.
+- Running one: name it — `cargo bench -p <crate> --bench <name>`.
+- Linking several: cap with `-j 2`.
+
 **UUIDs / IDs.** Every new UUID literal (a `NodeId`, `FuncId`, `TypeId`, or
 any other `id_type!`-backed id) must be generated with the real `uuidgen` tool,
 lowercased — `uuidgen | tr 'A-Z' 'a-z'` — never hand-typed or model-invented.
