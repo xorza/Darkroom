@@ -1,15 +1,13 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use common::{SerdeFormat, deserialize, file_utils, serialize};
 use glam::{IVec2, UVec2};
 use palantir::ImageFilter;
 
-use crate::core::io::cwd_file;
 use crate::core::theme_pref::ThemeChoice;
 
-/// Preferences file name, resolved relative to the process working
-/// directory. TOML so it's hand-editable and matches the theme
-/// on-disk format.
+/// Preferences file name, resolved beside the running executable. TOML so
+/// it's hand-editable and matches the theme on-disk format.
 const PREFERENCES_FILE: &str = "darkroom.preferences.toml";
 
 /// Persisted session state: the theme preference to restore, the
@@ -142,11 +140,29 @@ impl From<&MlModelPreferences> for lens::MlModelPaths {
 }
 
 impl Preferences {
+    /// The preferences file, beside the running executable rather than in the
+    /// working directory — so the same install reads back the same settings
+    /// however it was launched, instead of one file per directory a shell
+    /// happened to be in.
+    ///
+    /// `current_exe` resolves symlinks, so a launcher symlinked onto `PATH`
+    /// resolves to wherever the real binary sits — for a cargo build, inside
+    /// `target/`, which `cargo clean` removes. `cargo install` puts the real
+    /// binary on `PATH` and settles that.
+    ///
+    /// A failure to locate the executable at all leaves the file name bare,
+    /// which resolves against the working directory. Degrading beats
+    /// panicking: everything else here already falls back rather than block
+    /// a launch over settings.
     fn path() -> PathBuf {
-        cwd_file(PREFERENCES_FILE)
+        std::env::current_exe()
+            .ok()
+            .and_then(|exe| exe.parent().map(Path::to_path_buf))
+            .unwrap_or_default()
+            .join(PREFERENCES_FILE)
     }
 
-    /// Read the preferences from the working dir. Any failure (missing
+    /// Read the preferences from beside the executable. Any failure (missing
     /// file, parse error) degrades to the default rather than
     /// blocking startup — a corrupt preferences file shouldn't brick the app.
     pub(crate) fn load() -> Self {
@@ -156,7 +172,7 @@ impl Preferences {
         }
     }
 
-    /// Write the preferences to the working dir. `Err` carries the
+    /// Write the preferences beside the executable. `Err` carries the
     /// display-ready reason — the caller surfaces it (status bar); a
     /// failed persist shouldn't interrupt the user's session.
     pub(crate) fn save(&self) -> Result<(), String> {
