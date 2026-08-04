@@ -30,8 +30,8 @@ use std::fmt::Write as _;
 
 use glam::{UVec2, Vec2};
 use palantir::{
-    Align, Background, Color, Configure, HAlign, ImageFilter, ImageFit, ImageHandle, Panel, Sense,
-    Shape, Sizing, Spacing, Ui, VAlign, WidgetId,
+    Align, Background, Color, Configure, HAlign, ImageDownsample, ImageFilter, ImageFit,
+    ImageHandle, Panel, Sense, Shape, Sizing, Spacing, Ui, VAlign, WidgetId,
 };
 
 use crate::core::document::{Document, Viewport};
@@ -248,7 +248,18 @@ impl ImageViewer {
                 if let Some(shown) = source.image() {
                     let image = Shape::image(shown.handle.clone())
                         .min_filter(ImageFilter::Linear)
-                        .mag_filter(prefs.mag_filter);
+                        .mag_filter(prefs.mag_filter)
+                        // A viewer's whole job is a frame shown smaller than it
+                        // is, which is exactly where one bilinear tap reads a
+                        // shifting slice of each pixel's source footprint and
+                        // makes fine detail blink under a pan. `Peak` rather
+                        // than `Mean` because these are astronomical frames: a
+                        // one-texel star area-averaged over its footprint drops
+                        // below visibility, and an overview that hides the
+                        // stars is not an overview. It reads brighter than the
+                        // true average — the trade a "find things" view wants,
+                        // and the reason the 100% button exists.
+                        .downsample(ImageDownsample::Mean);
                     ui.add_shape(match self.effective_view(ui, shown, pane) {
                         Some(v) => image
                             .at(draw_rect(logical_size(shown, ui), v))
