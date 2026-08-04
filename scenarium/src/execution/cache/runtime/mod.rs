@@ -22,11 +22,14 @@ use hashbrown::HashMap;
 
 use crate::common::column::Column;
 use crate::execution::cache::digest::{DOMAIN, Digest, DigestHasher, InputTag};
+use crate::execution::cache::disk_store::error::{StoreOutcome, StoreResult};
 use crate::execution::cache::disk_store::{BlobTarget, DiskStore, StorePolicy};
 use crate::execution::cache::resource::error::StampError;
 use crate::execution::cache::resource::{FsPathId, StampJob};
 use crate::execution::cache::runtime::consumer_cone::ConsumerCone;
-use crate::execution::cache::runtime::error::CacheEvictionFailure;
+use crate::execution::cache::runtime::error::{
+    CacheFlushReport, CacheFlushUnsupported, CacheNodeFailure,
+};
 use crate::execution::cache::slot::RuntimeSlot;
 use crate::execution::compile::compiled_graph::{CompiledGraph, ExecutionBinding};
 use crate::execution::identity::{NodeIdx, OutputAddr};
@@ -172,7 +175,7 @@ impl RuntimeCache {
         &mut self,
         program: &CompiledGraph,
         seeds: impl IntoIterator<Item = NodeId>,
-    ) -> Vec<CacheEvictionFailure> {
+    ) -> Vec<CacheNodeFailure> {
         let downstream = self.cone.of(
             program,
             seeds
@@ -184,7 +187,7 @@ impl RuntimeCache {
             let node_id = program.node_ids[node_idx];
             match self.disk_store.remove_node(node_id).await {
                 Ok(()) => self.slots[node_idx].clear_output(),
-                Err(error) => failures.push(CacheEvictionFailure {
+                Err(error) => failures.push(CacheNodeFailure {
                     node_id,
                     message: error.to_string(),
                 }),
@@ -672,6 +675,11 @@ impl RuntimeCache {
     /// the just-stamped value is always a current hit; this guards maintenance flushes when a
     /// disk store is attached.
     ///
+    /// `None` is the node with nothing to write — not disk-backed, or holding no
+    /// snapshot current under its digest. Every caller reads it the same way a
+    /// successful store reads; it is separate only because there is no
+    /// [`StoreOutcome`] to invent for a write that never happened.
+    ///
     /// `use<'a>` rather than a bare `+ 'a`: the program is read while resolving the target,
     /// synchronously, so the future must not go on borrowing it — the default capture of
     /// every in-scope lifetime would tie it to a program the caller is free to drop first.
@@ -681,15 +689,15 @@ impl RuntimeCache {
         node_idx: NodeIdx,
         policy: StorePolicy,
         ctx: &'a mut ContextStore,
-    ) -> impl Future<Output = ()> + use<'a> {
+    ) -> impl Future<Output = Option<StoreResult>> + use<'a> {
         let target = self.blob_target(program, node_idx);
         let resident = self.slots[node_idx].current_snapshot();
         let disk = &self.disk_store;
         async move {
             let (Some(target), Some(snapshot)) = (target, resident) else {
-                return;
+                return None;
             };
-            disk.store(&target, snapshot, policy, ctx).await;
+            Some(disk.store(&target, snapshot, policy, ctx).await)
         }
     }
 
@@ -706,7 +714,7 @@ impl RuntimeCache {
         program: &CompiledGraph,
         seeds: impl IntoIterator<Item = NodeId>,
         ctx: &mut ContextStore,
-    ) {
+    ) -> CacheFlushReport {
         self.flush_each(
             program,
             seeds
@@ -714,19 +722,23 @@ impl RuntimeCache {
                 .filter_map(|node_id| program.node(node_id)),
             ctx,
         )
-        .await;
+        .await
     }
 
     /// [`flush`](Self::flush) over the whole installed program — what a newly
     /// attached [`DiskStore`] owes every value computed while it was
     /// memory-only.
-    pub(crate) async fn flush_all(&mut self, program: &CompiledGraph, ctx: &mut ContextStore) {
+    pub(crate) async fn flush_all(
+        &mut self,
+        program: &CompiledGraph,
+        ctx: &mut ContextStore,
+    ) -> CacheFlushReport {
         self.flush_each(
             program,
             program.e_nodes.iter_indexed().map(|(node_idx, _)| node_idx),
             ctx,
         )
-        .await;
+        .await
     }
 
     /// Store whichever of `nodes` are disk-backed and hold a value current under
@@ -748,11 +760,31 @@ impl RuntimeCache {
         program: &CompiledGraph,
         nodes: impl Iterator<Item = NodeIdx>,
         ctx: &mut ContextStore,
-    ) {
+    ) -> CacheFlushReport {
+        let mut report = CacheFlushReport::default();
         for node_idx in nodes {
-            self.store_node(program, node_idx, StorePolicy::PreserveCovering, &mut *ctx)
-                .await;
+            // A node with nothing to write is not a shortfall — it holds no
+            // value to persist, which is the ordinary state of one that has
+            // not run.
+            let Some(outcome) = self
+                .store_node(program, node_idx, StorePolicy::PreserveCovering, &mut *ctx)
+                .await
+            else {
+                continue;
+            };
+            let node_id = program.node_ids[node_idx];
+            match outcome {
+                Ok(StoreOutcome::Published | StoreOutcome::AlreadyCovered) => {}
+                Ok(StoreOutcome::Unsupported { type_id }) => report
+                    .unsupported
+                    .push(CacheFlushUnsupported { node_id, type_id }),
+                Err(error) => report.failures.push(CacheNodeFailure {
+                    node_id,
+                    message: error.to_string(),
+                }),
+            }
         }
+        report
     }
 
     /// Release resident values that cannot be a future RAM hit under the installed program.
