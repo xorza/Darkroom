@@ -220,6 +220,78 @@ async fn vanished_frontier_blob_recomputes_instead_of_panicking() {
     );
 }
 
+/// A `Both`-mode node whose store failed owes a blob, and pays it on the next
+/// run — without recomputing.
+///
+/// The RAM half of `Both` is what makes this reachable: every later run is a
+/// resident hit, served without the disk being named, and only an invoke
+/// stores. So a write that never landed would go unwritten for as long as the
+/// value stays resident, the node reporting itself disk-cached with nothing
+/// behind it until its digest moved. `Disk` alone cannot reach it — its value is
+/// released after each run, so the next one misses and recomputes.
+///
+/// The debt is settled from memory, not by asking the filesystem: once a blob is
+/// known to be there, a later run must not re-probe it. Runs are not rare —
+/// an event loop executes on every tick.
+#[tokio::test]
+async fn a_both_mode_node_whose_store_failed_republishes_without_recomputing() {
+    let dir = TempDir::new("store-debt");
+    let calls = Calls::default();
+
+    let mut g = TestGraph::new();
+    g.add("src", |n| n.counted(7i64, &calls).cache(CacheMode::Both));
+    g.add("print", |n| n.records());
+    g.wire("src", 0, "print", 0);
+
+    let mut e = TestEngine::over(g).with_disk_store(dir.path());
+
+    // A directory where src's blob belongs: the publication cannot land.
+    let blob = e.blob_path("src");
+    std::fs::create_dir_all(&blob).unwrap();
+    e.run_sinks().await;
+    assert_eq!(calls.count(), 1, "the cold run computes");
+    assert!(blob.is_dir(), "the blocked path is still what it was");
+
+    // Clear the blockage. The value is still resident, so the node does not
+    // recompute — but the blob it owes is now written.
+    std::fs::remove_dir(&blob).unwrap();
+    let run = e.run_sinks().await;
+    assert_eq!(
+        calls.count(),
+        1,
+        "a resident value is still served from RAM"
+    );
+    assert!(
+        !run.ran().contains(&"src"),
+        "settling the debt must not re-run the node"
+    );
+    assert!(
+        blob.is_file(),
+        "the owed blob was published on the next run"
+    );
+    let published = std::fs::read(&blob).unwrap();
+
+    // The debt is now settled, and settled means remembered: overwrite the blob
+    // with bytes no coverage probe would accept. A third run leaves them alone,
+    // which it could only do without reading the file.
+    std::fs::write(&blob, b"not a blob").unwrap();
+    e.run_sinks().await;
+    assert_eq!(calls.count(), 1);
+    assert_eq!(
+        std::fs::read(&blob).unwrap(),
+        b"not a blob",
+        "a settled debt costs no further disk reads"
+    );
+
+    // And the blob that was published is a real one: a fresh engine over the
+    // same store serves it without computing.
+    std::fs::write(&blob, published).unwrap();
+    let mut e = e.reopen();
+    let run = e.run_sinks().await;
+    assert_eq!(calls.count(), 1, "the republished blob is served on reopen");
+    assert!(run.cached().contains(&"src"));
+}
+
 /// A redefined output type can't serve a stale blob: `produce`'s func is
 /// changed `Int → Float` with the same id, but the output signature is
 /// folded into the content digest, so the Float node re-keys away from the

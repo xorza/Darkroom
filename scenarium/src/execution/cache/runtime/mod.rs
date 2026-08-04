@@ -13,7 +13,6 @@ mod consumer_cone;
 pub(crate) mod error;
 
 use std::collections::HashSet;
-use std::future::Future;
 use std::ops::{Index, IndexMut};
 use std::sync::Arc;
 
@@ -186,6 +185,8 @@ impl RuntimeCache {
         for node_idx in downstream.iter() {
             let node_id = program.node_ids[node_idx];
             match self.disk_store.remove_node(node_id).await {
+                // Dropping the value drops the belief that a blob backed it,
+                // which is exactly what the removal just made false.
                 Ok(()) => self.slots[node_idx].clear_output(),
                 Err(error) => failures.push(CacheNodeFailure {
                     node_id,
@@ -651,23 +652,55 @@ impl RuntimeCache {
     ) -> ReuseOutcome {
         let target = match self.reuse_source(program, node_idx, demand) {
             None => return ReuseOutcome::Missed,
-            Some(ReuseSource::Resident) => return ReuseOutcome::Served,
+            Some(ReuseSource::Resident) => {
+                self.settle_blob_debt(program, node_idx, ctx).await;
+                return ReuseOutcome::Served;
+            }
             Some(ReuseSource::Blob(target)) => target,
         };
         let Some(snapshot) = self.disk_store.read(&target, demand, ctx).await else {
             return ReuseOutcome::Missed;
         };
-        self.slots[node_idx].load_output(snapshot, Some(target.digest));
+        self.slots[node_idx].load_from_blob(snapshot, target.digest);
         ReuseOutcome::Served
+    }
+
+    /// Write the blob a resident value owes.
+    ///
+    /// A `Both`-mode value is served from RAM without the disk being consulted,
+    /// so nothing else would ever notice that the write establishing its
+    /// durability never landed — a store that failed, a type whose codec was
+    /// missing, or a cache mode the host turned on after the value was already
+    /// resident. Only `invoke_node` stores, and a node served from RAM does not
+    /// invoke, so without this the node reports itself disk-cached with nothing
+    /// behind it until its digest moves.
+    ///
+    /// The debt check is a digest comparison, so the common case — a blob this
+    /// engine already wrote — costs no I/O at all. Runs are not rare enough to
+    /// pay a `stat` per disk-backed node in: an event loop executes on every
+    /// tick.
+    async fn settle_blob_debt(
+        &mut self,
+        program: &CompiledGraph,
+        node_idx: NodeIdx,
+        ctx: &mut ContextStore,
+    ) {
+        if self.slots[node_idx].blob_is_current() {
+            return;
+        }
+        // `PreserveCovering` rather than `KnownMiss`: this carries no reuse
+        // verdict about the *blob* — the verdict was about RAM — so a broader
+        // one already on disk must survive. It also re-establishes the belief
+        // when the debt was only ever a gap in this engine's knowledge.
+        self.store_node(program, node_idx, StorePolicy::PreserveCovering, ctx)
+            .await;
     }
 
     /// Write `node_id`'s freshly-computed outputs to disk the moment it finishes (the executor
     /// calls this right after a successful invoke), so a long run's earlier caches are durable
     /// even if a later node errors or the run is cancelled. [`StorePolicy::KnownMiss`] publishes
     /// directly after resolution proved reuse impossible; [`StorePolicy::PreserveCovering`]
-    /// first protects a broader blob when a maintenance flush has no such verdict. The target
-    /// and output slice are snapshotted **synchronously**; the borrow across the store await is
-    /// just the value slice (`Sync`), never the whole cache.
+    /// first protects a broader blob when a maintenance flush has no such verdict.
     ///
     /// Only writes a value that matches the node's *current* digest
     /// ([`is_resident_hit`](Self::is_resident_hit)): a resident value produced under a superseded
@@ -680,25 +713,23 @@ impl RuntimeCache {
     /// successful store reads; it is separate only because there is no
     /// [`StoreOutcome`] to invent for a write that never happened.
     ///
-    /// `use<'a>` rather than a bare `+ 'a`: the program is read while resolving the target,
-    /// synchronously, so the future must not go on borrowing it — the default capture of
-    /// every in-scope lifetime would tie it to a program the caller is free to drop first.
-    pub(crate) fn store_node<'a>(
-        &'a self,
+    /// The slot is told the answer here rather than by each caller: a value that
+    /// stays resident is served from RAM on every later run, so this is the last
+    /// moment anything would notice a write that did not land, and a caller that
+    /// forgot to pass the answer on would leave the node quietly claiming a
+    /// durability it never got.
+    pub(crate) async fn store_node(
+        &mut self,
         program: &CompiledGraph,
         node_idx: NodeIdx,
         policy: StorePolicy,
-        ctx: &'a mut ContextStore,
-    ) -> impl Future<Output = Option<StoreResult>> + use<'a> {
-        let target = self.blob_target(program, node_idx);
-        let resident = self.slots[node_idx].current_snapshot();
-        let disk = &self.disk_store;
-        async move {
-            let (Some(target), Some(snapshot)) = (target, resident) else {
-                return None;
-            };
-            Some(disk.store(&target, snapshot, policy, ctx).await)
-        }
+        ctx: &mut ContextStore,
+    ) -> Option<StoreResult> {
+        let target = self.blob_target(program, node_idx)?;
+        let snapshot = self.slots[node_idx].current_snapshot()?;
+        let outcome = self.disk_store.store(&target, snapshot, policy, ctx).await;
+        self.slots[node_idx].note_store(&outcome);
+        Some(outcome)
     }
 
     /// Persist the resident values of `seeds` — [`evict`](Self::evict)'s

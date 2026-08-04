@@ -591,10 +591,10 @@ impl ExecutionFrame<'_, '_> {
         // `store_node`; only the write awaits, so the cache borrow doesn't cross it. The
         // preceding reuse miss proves that no blob can cover this result.
         //
-        // The answer is dropped deliberately: this runs for every node of every
-        // run, with nobody waiting on it, so a blob that did not land degrades
-        // into a later recompute. The flush sweeps are where a store's answer
-        // reaches a human, because there one asked.
+        // The answer is dropped deliberately: nobody is waiting on it here, so a
+        // blob that did not land degrades into a later recompute rather than a
+        // report — the flush sweeps are where a store's answer reaches a human,
+        // because there one asked. The slot still records it, inside the store.
         let _ = self
             .cache
             .store_node(
