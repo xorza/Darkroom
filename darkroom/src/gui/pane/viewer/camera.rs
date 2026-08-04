@@ -7,7 +7,7 @@
 //! so the algebra can be read — and tested — without the widget tree around
 //! it: everything below is a pure function of sizes and viewports.
 
-use glam::{UVec2, Vec2};
+use glam::Vec2;
 use palantir::{Rect, Size};
 
 use crate::core::document::Viewport;
@@ -21,11 +21,6 @@ use crate::gui::pane::graph::gesture::pan_zoom::zoom_about;
 /// call site wouldn't say which surface's range is in play.
 pub(super) const VIEWER_MIN_ZOOM: f32 = 0.02;
 pub(super) const VIEWER_MAX_ZOOM: f32 = 32.0;
-
-/// A texture's logical footprint when each texel occupies one physical pixel.
-pub(super) fn logical_image_size(texels: UVec2, display_scale: f32) -> Vec2 {
-    texels.as_vec2() / display_scale
-}
 
 /// The pane-local rect a viewport paints the texture into.
 pub(super) fn draw_rect(img: Vec2, v: Viewport) -> Rect {
@@ -91,8 +86,7 @@ mod tests {
         // The same 400x200 fit in an 800x800 logical pane on a 2x display
         // occupies 1600x800 physical px, so its magnification is 4x while
         // the logical draw rect remains exactly 800x400.
-        let img = logical_image_size(UVec2::new(400, 200), 2.0);
-        assert_eq!(img, Vec2::new(200.0, 100.0));
+        let img = Vec2::new(200.0, 100.0);
         let v = fit_viewport(img, Vec2::new(800.0, 800.0));
         assert_eq!(v.zoom, 4.0);
         assert_eq!(v.pan, Vec2::new(0.0, 200.0));
@@ -121,7 +115,7 @@ mod tests {
 
         // At 2x display scale, 1:1 physical magnification draws each texel
         // into half a logical pixel, which composes back to one physical px.
-        let img_2x = logical_image_size(UVec2::new(400, 200), 2.0);
+        let img_2x = Vec2::new(200.0, 100.0);
         let fit_2x = fit_viewport(img_2x, Vec2::new(800.0, 800.0));
         let v = zoom_about_pane_center(fit_2x, 1.0, pane);
         assert_eq!(v.pan, Vec2::new(300.0, 350.0));
