@@ -81,7 +81,22 @@ pub(crate) struct RuntimeCache {
     /// built per call: what it derives is a pure function of the program and is
     /// refilled every time, but the allocations behind it need not be.
     cone: ConsumerCone,
+    /// Which shared values [`measure_resident_ram`](Self::measure_resident_ram) has
+    /// already counted toward its global total, by pointer identity. Scratch in the
+    /// strict sense — meaningless the moment that walk ends, and held only so the
+    /// allocation survives to the next measurement.
     ram_seen: HashSet<usize>,
+    /// The per-node breakdown the same walk produces. An *answer*, not scratch: it
+    /// outlives the call and is read through [`node_ram`](Self::node_ram) when the run is
+    /// reduced to status rows.
+    ///
+    /// A separate field from `ram_seen` because the two are different things that merely
+    /// share a walk — one keyed by pointer and dead at the end of it, one keyed by node
+    /// and deliberately undeduplicated, since a node reports everything it holds whether
+    /// or not a neighbour holds it too. Here rather than in a caller's buffer because its
+    /// length is `slots`': a caller could only ever have supplied the memory, never the
+    /// shape.
+    node_ram: Column<NodeIdx, RamUsage>,
 }
 
 /// Where a reuse would come from, if one is possible at all — the front half
@@ -196,19 +211,19 @@ impl RuntimeCache {
         failures
     }
 
-    /// The total and per-node RAM held by resident values. The global total deduplicates
-    /// shared custom values by pointer identity, while each node reports the full size of
-    /// every value it holds. `Empty` slots read as zero.
+    /// Measure the RAM held by resident values: the global total, returned, and the
+    /// per-node breakdown, left in [`node_ram`](Self::node_ram) for whoever pairs a
+    /// node's footprint with its run result. The total deduplicates shared custom values
+    /// by pointer identity, while each node reports the full size of every value it
+    /// holds. `Empty` slots read as zero.
     ///
-    /// `by_node` is filled from scratch, aligned like the slots themselves — dense
-    /// rather than sparse so the caller can pair a node's RAM with its run result by
-    /// index, without hashing an id or merging two orders.
-    pub(crate) fn resident_ram_stats(
-        &mut self,
-        by_node: &mut Column<NodeIdx, RamUsage>,
-    ) -> RamUsage {
+    /// One walk for both because the dedup pass is the expensive half and the two answers
+    /// fall out of it together. The breakdown is refilled from scratch and aligned like the
+    /// slots themselves — dense rather than sparse, so it is indexed the same way every
+    /// other per-node column is.
+    pub(crate) fn measure_resident_ram(&mut self) -> RamUsage {
         self.ram_seen.clear();
-        by_node.reset(self.slots.len(), RamUsage::default());
+        self.node_ram.reset(self.slots.len(), RamUsage::default());
         let mut total = RamUsage::default();
         for (node_idx, slot) in self.slots.iter_indexed() {
             let Some(values) = slot.output_values() else {
@@ -228,9 +243,16 @@ impl RuntimeCache {
                     total += usage;
                 }
             }
-            by_node[node_idx] = node_usage;
+            self.node_ram[node_idx] = node_usage;
         }
         total
+    }
+
+    /// The per-node breakdown the last
+    /// [`measure_resident_ram`](Self::measure_resident_ram) left behind, spanning the
+    /// program the slots are aligned to. Empty until the first measurement.
+    pub(crate) fn node_ram(&self) -> &Column<NodeIdx, RamUsage> {
+        &self.node_ram
     }
 
     /// Realign the slots from the program they currently belong to onto a newly

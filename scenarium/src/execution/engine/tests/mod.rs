@@ -3,6 +3,7 @@ use std::sync::Arc;
 use super::*;
 use crate::execution::compile::error::CompileError;
 use crate::execution::error::{Error, RunError};
+use crate::execution::identity::NodeIdx;
 use crate::execution::seeds::RunSeeds;
 use crate::graph::func::FuncBehavior;
 use crate::graph::func::error::InvokeError;
