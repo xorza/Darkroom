@@ -142,17 +142,28 @@ impl RuntimeHost {
 
     /// Compile the current graph and atomically install it with a runtime-cache
     /// eviction for `node_id` and its compiled downstream cone.
+    ///
+    /// Answers with the nodes that eviction reaches, resolved against the very
+    /// artifact it installs — so a caller projecting the outcome drops exactly
+    /// what the worker drops. Empty when nothing was dispatched: the compile
+    /// failed (reported to `status`), or the program holds no work for
+    /// `node_id`.
+    ///
+    /// Asking here rather than reading a reply: a successful eviction is
+    /// fire-and-forget (the worker reports only failures), and the cone is a
+    /// pure function of the artifact, so the answer is already in hand.
     pub(crate) fn evict_cache(
         &mut self,
         graph: &Graph,
         node_id: NodeId,
         status: &mut StatusLog,
-    ) -> bool {
+    ) -> Vec<NodeId> {
         let Some(compiled) = self.compile(graph, status) else {
-            return false;
+            return Vec::new();
         };
+        let evicted = compiled.consumer_cone([node_id]);
         self.dispatch(|worker| worker.install_and_evict_cache(compiled, node_id));
-        true
+        evicted
     }
 
     /// Compile the current graph and atomically install it with a request to
@@ -281,9 +292,16 @@ mod tests {
             host.run_once(&graph, &mut status),
             "the drifted graph compiles and is queued"
         );
+        assert_eq!(
+            host.evict_cache(&graph, consumer, &mut status),
+            vec![consumer],
+            "the drifted graph compiles and queues an eviction reaching only \
+             the seed — its one incoming wire is unbound, so nothing reads it"
+        );
         assert!(
-            host.evict_cache(&graph, NodeId::unique(), &mut status),
-            "the drifted graph compiles and queues an eviction"
+            host.evict_cache(&graph, NodeId::unique(), &mut status)
+                .is_empty(),
+            "a node the program has no work for reaches nothing"
         );
         assert_eq!(status.error, None, "no compile failure was reported");
         assert_eq!(

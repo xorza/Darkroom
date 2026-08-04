@@ -18,6 +18,7 @@
 use crate::graph::identity::FuncId;
 
 use crate::common::column::{Column, Span};
+use crate::execution::compile::consumer_cone::ConsumerCone;
 use crate::execution::identity::{EventIdx, InputIdx, NodeIdx, OutputAddr, OutputIdx};
 use crate::graph::func::FuncBehavior;
 use crate::graph::func::event::EventLambda;
@@ -147,6 +148,28 @@ impl CompiledGraph {
     /// and "does a report naming this node belong to this install".
     pub fn contains(&self, node_id: NodeId) -> bool {
         self.node(node_id).is_some()
+    }
+
+    /// Every node that reads `seeds`' outputs, transitively, plus the seeds
+    /// themselves — in this artifact's id order. Seeds this artifact holds no
+    /// work for contribute nothing.
+    ///
+    /// This is exactly the set
+    /// [`RuntimeCache::evict`](crate::execution::cache::runtime::RuntimeCache::evict)
+    /// clears, which is what it is public for: a host that requests an eviction
+    /// learns what it reaches, rather than having to assume the whole program.
+    /// The eviction resolves its own cone against the installed artifact, so a
+    /// caller asking the artifact it installs gets the same answer.
+    ///
+    /// Allocates its scratch per call — the reversed edges it walks are a pure
+    /// function of the artifact and are never kept (see [`ConsumerCone`]), and
+    /// the questions that ask this are user actions, not per-run work.
+    pub fn consumer_cone(&self, seeds: impl IntoIterator<Item = NodeId>) -> Vec<NodeId> {
+        let mut cone = ConsumerCone::default();
+        cone.of(self, seeds.into_iter().filter_map(|id| self.node(id)))
+            .iter()
+            .map(|node_idx| self.node_ids[node_idx])
+            .collect()
     }
 
     pub(crate) fn output_idx(&self, address: OutputAddr) -> OutputIdx {

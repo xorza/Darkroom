@@ -67,12 +67,16 @@ impl App {
             .run_node(self.session.graph(), node_id, &mut self.status);
     }
 
+    /// Evict one node's cache cone and project the outcome onto exactly the
+    /// nodes it reaches. An empty answer means nothing was dispatched — a
+    /// failed compile, or a node the program holds no work for — so there is
+    /// nothing to project either.
     fn evict_cache(&mut self, node_id: NodeId) {
-        if self
+        let evicted = self
             .runtime
-            .evict_cache(self.session.graph(), node_id, &mut self.status)
-        {
-            self.run_state.clear_cache_projections();
+            .evict_cache(self.session.graph(), node_id, &mut self.status);
+        if !evicted.is_empty() {
+            self.run_state.clear_cache_projections(&evicted);
         }
     }
 

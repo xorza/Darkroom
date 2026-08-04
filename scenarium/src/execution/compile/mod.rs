@@ -29,6 +29,7 @@
 //! This is phase 1 of the three [`execution`](crate::execution) describes.
 
 pub(crate) mod compiled_graph;
+pub(crate) mod consumer_cone;
 pub(crate) mod error;
 mod validate;
 

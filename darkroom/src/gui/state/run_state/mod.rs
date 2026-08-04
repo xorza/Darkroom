@@ -368,19 +368,34 @@ impl RunState {
             .retain(|_, n| n.status != ExecStatus::None || !n.logs.is_empty() || n.ram.total() > 0);
     }
 
-    /// Successful eviction has no reply, so its affected cache residency cannot
-    /// be projected exactly until the next run reports fresh status and pins.
-    pub(crate) fn clear_cache_projections(&mut self) {
+    /// Project an eviction of `evicted` — the nodes
+    /// [`RuntimeHost::evict_cache`] resolved it to, which is the seed's whole
+    /// downstream cone, not just the node the user clicked.
+    ///
+    /// Successful eviction has no reply, so this is a projection rather than a
+    /// report: it drops what the worker is about to drop and nothing else, and
+    /// the next completed run replaces it with measured truth either way.
+    ///
+    /// The global total is the one thing that cannot be projected: it
+    /// deduplicates values shared between nodes by pointer, so subtracting the
+    /// per-node figures below would over-count whatever they share. It reads as
+    /// unknown — the status bar drops the clause — until the next run measures
+    /// it again.
+    pub(crate) fn clear_cache_projections(&mut self, evicted: &[NodeId]) {
         self.cache_ram = RamUsage::default();
-        for node in self.nodes.values_mut() {
-            node.ram = RamUsage::default();
+        for node_id in evicted {
+            if let Some(node) = self.nodes.get_mut(node_id) {
+                node.ram = RamUsage::default();
+            }
+            // A preview's value is a run result: with the cache behind it
+            // evicted, what it shows can no longer be re-derived without
+            // another run. A preview *outside* the cone still can — its value
+            // is still cached — so it stays on screen.
+            self.previews.entries.remove(node_id);
         }
-        // A preview's value is a run result: with the cache behind it evicted,
-        // what it shows can no longer be re-derived without another run.
-        self.previews.entries.clear();
-        // Every node's RAM was just zeroed, so what survives here is exactly
-        // the nodes still carrying a status or a log — the run results the
-        // eviction deliberately leaves standing.
+        // An evicted node's RAM was just zeroed, so what survives here is
+        // exactly the nodes still carrying a status or a log — the run results
+        // the eviction deliberately leaves standing.
         self.drop_empty_nodes();
     }
 
