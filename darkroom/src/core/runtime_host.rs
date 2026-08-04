@@ -88,6 +88,22 @@ impl RuntimeHost {
         }
     }
 
+    /// Drop the worker's installed program and the whole runtime cache behind
+    /// it — what a document swap owes, since nothing the outgoing document
+    /// computed can serve the incoming one, and those values are the editor's
+    /// largest RAM tenant by far (decoded frames and GPU textures).
+    ///
+    /// Without it the old document's results sit resident until the *next*
+    /// install reconciles them away, which is whenever the user next runs
+    /// something — so a File ▸ New taken to free memory frees nothing.
+    ///
+    /// The disk store is untouched: it is repointed separately by
+    /// [`Self::set_document_cache`], and the blobs the old document wrote stay
+    /// where they are for when it is reopened.
+    pub(crate) fn clear_program(&self) {
+        self.worker.clear();
+    }
+
     /// Point the disk cache at `doc_path`'s project-local store
     /// (`<stem>.darkroom-cache/` beside the file), so disk-backed (`Disk`/`Both`)
     /// nodes reload across sessions. `None` (an unsaved document) is memory-only. Explicit-path cache

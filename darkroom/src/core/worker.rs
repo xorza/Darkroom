@@ -66,6 +66,16 @@ impl WorkerBridge {
         self.worker.send(WorkerMessage::Update { compiled })
     }
 
+    /// Drop the installed program and everything its cache holds. The worker
+    /// acknowledges it with `WorkerReport::Cleared`.
+    ///
+    /// Best-effort like the event-loop stop beside it: a worker that has
+    /// already exited holds nothing to release, which is the outcome the
+    /// caller wanted.
+    pub(crate) fn clear(&self) {
+        let _ = self.worker.send(WorkerMessage::Clear);
+    }
+
     /// Install the current program and evict an authored node's cache cone as
     /// one worker commit. Stopping the event loop keeps it from immediately
     /// repopulating the entries being removed.
