@@ -98,10 +98,12 @@ impl RuntimeHost {
     /// to the worker. The one constructor of worker-side disk stores, so a
     /// library edit or a root change can't leave the other half stale.
     fn sync_worker_disk_store(&self) {
-        self.worker.set_disk_store(DiskStore::new(
-            &self.library.published.load(),
-            self.disk_root.clone(),
-        ));
+        self.dispatch(|worker| {
+            worker.set_disk_store(DiskStore::new(
+                &self.library.published.load(),
+                self.disk_root.clone(),
+            ))
+        });
     }
 
     /// Compile `graph` against the current library. A failure is reported to
@@ -163,7 +165,7 @@ impl RuntimeHost {
                 // land in the batch *before* the store it is for, writing into
                 // the root being left behind.
                 self.sync_worker_disk_store();
-                self.worker.flush_all_caches();
+                self.dispatch(|worker| worker.flush_all_caches());
             }
         }
     }
