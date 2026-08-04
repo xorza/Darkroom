@@ -270,7 +270,7 @@ impl Compiler {
     fn place_nodes(&mut self, graph: &Graph, library: &Library) -> PortTotals {
         let placed = &mut self.placed;
         placed.clear();
-        placed.reserve(graph.len());
+        placed.reserve_exact(graph.len());
         let mut totals = PortTotals::default();
         for node in graph.iter() {
             let func = graph
