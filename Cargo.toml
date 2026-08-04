@@ -182,3 +182,6 @@ unreachable_pub = "deny"
 
 [workspace.lints.clippy]
 items_after_test_module = "deny"
+
+[workspace.lints.rustdoc]
+broken_intra_doc_links = "deny"

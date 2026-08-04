@@ -914,8 +914,9 @@ impl Theme {
     /// — how a node body resolves its outline: a breaker hit wins as the
     /// alarm color, else the selection halo
     /// when selected, else the neutral resting `node_border`. Width is
-    /// always [`Self::card_border_width`] regardless of tier, so selecting
-    /// (or breaking) a card never resizes it — only the color changes. A
+    /// always [`CardTheme::border_width_total`] regardless of tier, so
+    /// selecting (or breaking) a card never resizes it — only the color
+    /// changes. A
     /// caller with an extra tier of its own (e.g. a node body's "missing"
     /// stub state) special-cases that tier around this call instead of
     /// forcing it in here.
