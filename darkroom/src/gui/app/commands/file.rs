@@ -51,7 +51,7 @@ impl App {
     /// Swap in `open` and reset every piece of state derived from the
     /// document it replaces.
     ///
-    /// A fresh [`Editor`] covers what it owns in one move: empty undo history
+    /// A fresh [`Session`] covers what it owns in one move: empty undo history
     /// (restoring the old doc via Cmd-Z would replay intents that no longer
     /// match the live tree), dropped gesture state, forced scene rebuild.
     ///

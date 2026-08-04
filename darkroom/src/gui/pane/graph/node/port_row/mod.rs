@@ -6,7 +6,7 @@
 //! header by [`crate::gui::pane::graph::node::NodeUI`]. This module is the
 //! grid orchestration and per-cell rendering; the sensing glyph each cell
 //! terminates a wire on — circle, event triangle, hit-box growth — is the
-//! shared [`PortGlyph`](crate::gui::widgets::port_glyph::PortGlyph) widget's.
+//! shared [`PortGlyph`] widget's.
 
 use std::sync::Arc;
 

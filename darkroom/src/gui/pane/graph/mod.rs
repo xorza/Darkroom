@@ -74,7 +74,7 @@ use crate::gui::requests::Requests;
 ///
 /// **Bare-canvas gesture arbitration.** [`classify_canvas_gesture`] reads
 /// one pane's outer-canvas response
-/// ([`outer_canvas_widget_id`](canvas::outer_canvas_widget_id)) +
+/// ([`outer_canvas_widget_id`]) +
 /// modifiers and resolves which gesture latches this frame into a single
 /// [`CanvasGesture`]. `prepass` resolves it once per frame and parks the
 /// winner (with its pane) in [`Self::gesture`]; each sub-controller is
@@ -112,7 +112,7 @@ pub(crate) struct GraphUI {
     ///
     /// Private: every production reader reaches it through a [`CanvasCtx`],
     /// which is the only thing that pairs it with the gesture it was settled
-    /// beside. Tests read it through [`internals::geometry`].
+    /// beside. Tests read it through `internals`' `GraphUI::geometry`.
     geometry: CanvasGeometry,
     /// Open inspection panels, keyed by node. Outside the gesture group so
     /// they survive a tab switch — an open panel is a standing request about a
@@ -351,7 +351,8 @@ impl GraphUI {
     }
 
     /// The record pass's non-drawing half: each controller's record-phase
-    /// `apply`, then the chip clicks that mean an [`AppCommand`]. Everything
+    /// `apply`, then the chip clicks that mean an
+    /// [`AppCommand`](crate::gui::app::commands::AppCommand). Everything
     /// here reads last frame's responses and raises requests; nothing draws.
     fn resolve_gestures(&mut self, ui: &mut Ui, graph_ctx: GraphCtx<'_>, out: &mut Requests) {
         let cx = CanvasCtx::new(graph_ctx, &self.geometry, self.gesture, self.cancelled);

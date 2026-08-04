@@ -105,7 +105,8 @@ impl Wire {
 
     /// The curve's control-point bounding box. A cubic stays inside its
     /// control hull, so this is a conservative bound — what
-    /// [`CullRegion::keeps_wire`] tests against.
+    /// [`CullRegion::keeps_wire`](crate::gui::pane::graph::frame::cull::CullRegion::keeps_wire)
+    /// tests against.
     pub(crate) fn hull(&self) -> Rect {
         let min = self.p0.min(self.p1).min(self.p2).min(self.p3);
         let max = self.p0.max(self.p1).max(self.p2).max(self.p3);
