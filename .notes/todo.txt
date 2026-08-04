@@ -14,8 +14,4 @@ audit allocations overshoot , see where reserve_exact would be better
 
 mesh once registrations
 
-save caches on cache click
-
 imageview to load only when active, until then save to disk
-
-audit cacheing strategies
