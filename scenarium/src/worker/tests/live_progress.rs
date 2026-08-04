@@ -21,9 +21,17 @@ async fn node_patches_stream_before_completion() {
     let mut execution_started = false;
     loop {
         match w.report().await {
-            WorkerReport::Installed(program) => {
+            WorkerReport::Installed {
+                compiled: program,
+                cache_ram,
+            } => {
                 assert!(!installed, "one update installed more than once");
                 assert!(Arc::ptr_eq(&program, &compiled));
+                assert_eq!(
+                    cache_ram,
+                    RamUsage::default(),
+                    "the first install of a fresh worker reconciles onto an empty cache"
+                );
                 installed = true;
             }
             WorkerReport::Status(status)

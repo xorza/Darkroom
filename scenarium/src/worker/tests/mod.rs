@@ -23,7 +23,7 @@ use crate::worker::Worker;
 use crate::worker::error::WorkerError;
 use crate::worker::protocol::{WorkerMessage, WorkerReport};
 use crate::worker::status::{WorkerActivity, WorkerStatusKind};
-use crate::{ConstValue, DataType, async_lambda};
+use crate::{ConstValue, DataType, RamUsage, async_lambda};
 
 /// How long a "nothing happens" claim watches for before it is believed.
 const QUIET: Duration = Duration::from_millis(100);
