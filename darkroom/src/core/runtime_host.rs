@@ -244,7 +244,7 @@ mod tests {
     use std::sync::Arc;
 
     use crate::core::status::StatusLog;
-    use common::internals::test_output_path;
+    use common::TempDir;
     use scenarium::{Binding, ConstValue, Graph, InputPort, NodeId};
 
     use crate::core::io::cache::document_cache_root;
@@ -333,8 +333,11 @@ mod tests {
 
         // The disk cache is memory-only until a document has a path, then
         // repoints as documents open and again when the path goes away.
-        let first_path = test_output_path("darkroom_runtime_host/first.darkroom");
-        let second_path = test_output_path("darkroom_runtime_host/second.darkroom");
+        // A real directory: pointing the cache at a document creates its
+        // sibling cache root on disk.
+        let dir = TempDir::new("darkroom-runtime-host");
+        let first_path = dir.join("first.darkroom");
+        let second_path = dir.join("second.darkroom");
         assert_eq!(host.disk_root, None);
         host.set_document_cache(Some(&first_path));
         assert_eq!(host.disk_root, Some(document_cache_root(&first_path)));

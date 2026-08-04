@@ -1,9 +1,5 @@
 # Issues
 
-- `gui/pane/graph/gesture/new_node/mod.rs` declares
-  `pub(crate) mod internals { impl NewNodeUi {} }` — an empty impl in an
-  otherwise empty gated module.
-
 - A node with a disk-backed cache mode (`Disk`/`Both`) whose run resolves to a
   RAM reuse never republishes its blob: `Executor::serve_reuse` and the
   `ReuseOutcome::Served` arm of `Executor::needs_invoke` both skip the
@@ -17,7 +13,3 @@
   (`codec::error::Error::UnknownType`) is not even that. A user-initiated
   flush (the header's `↓` chip) therefore cannot tell the status bar that it
   wrote nothing.
-
-- `core/worker.rs::tests::drop_waits_for_worker_idle_before_runtime_shutdown`
-  fails intermittently under a full `cargo test` run (seen once in four),
-  panicking at `worker.rs:219`; it passes every time in isolation.
