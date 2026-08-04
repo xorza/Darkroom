@@ -60,7 +60,7 @@ winresource = "0.1"
 # assets/icons/generate.sh.
 [package.metadata.bundle]
 name = "darkroom"
-identifier = "com.darkroom.editor"
+identifier = "com.cssodessa.darkroom"
 icon = [
     "assets/icons/darkroom.icns",
     "assets/icons/darkroom-512.png",
