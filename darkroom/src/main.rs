@@ -1,6 +1,8 @@
 mod core;
 mod gui;
 
+use std::path::PathBuf;
+
 use clap::Parser;
 use common::is_debug;
 use palantir::{Image, WindowConfig, WinitHost, WinitHostError};
@@ -12,21 +14,27 @@ use crate::gui::app::App;
 /// darkroom — node-graph editor.
 #[derive(Parser, Debug)]
 #[command(version, about = "darkroom node-graph editor")]
-struct Cli {}
+struct Cli {
+    /// Document to open, in place of the remembered one. Saving it is what
+    /// makes the next bare launch reopen it.
+    #[arg(value_name = "FILE")]
+    document: Option<PathBuf>,
+}
 
 fn main() {
     init_tracing();
 
-    let Cli {} = Cli::parse();
-    if let Err(error) = run_gui() {
+    let Cli { document } = Cli::parse();
+    if let Err(error) = run_gui(document) {
         tracing::error!("darkroom: {error}");
         std::process::exit(1);
     }
 }
 
-/// Launch the Palantir desktop editor. The winit event loop owns the main
-/// thread, so this doesn't return until the window closes.
-fn run_gui() -> Result<(), WinitHostError> {
+/// Launch the Palantir desktop editor on `document` (the command-line
+/// argument, if there was one). The winit event loop owns the main thread, so
+/// this doesn't return until the window closes.
+fn run_gui(document: Option<PathBuf>) -> Result<(), WinitHostError> {
     // Load preferences here, before the window exists, so a saved size /
     // position seeds the window at creation (`App::new` runs after the
     // first window is already up, too late to size it). Reuse the same
@@ -51,7 +59,7 @@ fn run_gui() -> Result<(), WinitHostError> {
             // node and watch whether both halves advance together.
             ui.debug_overlay_mut().frame_stats = is_debug();
 
-            App::new(ui, handle, preferences)
+            App::new(ui, handle, preferences, document)
         })?
         .run()
 }
@@ -95,10 +103,21 @@ mod tests {
 
     #[test]
     fn bare_invocation_parses() {
-        assert!(Cli::try_parse_from(["darkroom"]).is_ok());
+        let cli = Cli::try_parse_from(["darkroom"]).unwrap();
+        assert_eq!(cli.document, None);
         assert!(
             Cli::try_parse_from(["darkroom", "--nope"]).is_err(),
             "an unknown flag is still rejected"
+        );
+    }
+
+    #[test]
+    fn a_document_argument_parses() {
+        let cli = Cli::try_parse_from(["darkroom", "graphs/scene.darkroom"]).unwrap();
+        assert_eq!(cli.document, Some(PathBuf::from("graphs/scene.darkroom")));
+        assert!(
+            Cli::try_parse_from(["darkroom", "one.darkroom", "two.darkroom"]).is_err(),
+            "only one document opens per launch"
         );
     }
 }
