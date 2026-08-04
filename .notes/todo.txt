@@ -1,7 +1,5 @@
 scrolview on newnode popup
 
-file name as argument clap
-
 stacking frames (outer, inner, reference)
 
 auto chosen reference frame for stacking and manually specified
