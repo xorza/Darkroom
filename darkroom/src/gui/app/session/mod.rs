@@ -119,7 +119,7 @@ impl Session {
         //    `OpenDocument::land`.
         let mut needs_relayout = self.apply_undo_redo(ui);
         self.main_window
-            .scan_navigation(ui, WindowCtx::new(ctx, &self.open.document), requests);
+            .scan_navigation(ui, WindowCtx::new(ctx, &self.open), requests);
         needs_relayout |= self.open.drain_requests(requests);
 
         // 2. PREPASS — reconcile pane visibility, rebuild the canvas's
@@ -130,9 +130,9 @@ impl Session {
         //    there rather than another question here. A canvas that just
         //    became visible needs a relayout: it may never have recorded, and
         //    a dock op raises no geometry signal of its own.
-        needs_relayout |=
-            self.main_window
-                .prepass(ui, WindowCtx::new(ctx, &self.open.document), requests);
+        needs_relayout |= self
+            .main_window
+            .prepass(ui, WindowCtx::new(ctx, &self.open), requests);
         needs_relayout |= self.open.drain_requests(requests);
 
         // 3. RECORD — author the widget tree. The file/run/quit chords are
@@ -140,12 +140,8 @@ impl Session {
         //    `AppCommand`, so they need no drain of their own and simply have
         //    to land before `App` takes the tier.
         self.menu_shortcut(ui, requests);
-        self.main_window.frame(
-            ui,
-            WindowCtx::new(ctx, &self.open.document),
-            preferences,
-            requests,
-        );
+        self.main_window
+            .frame(ui, WindowCtx::new(ctx, &self.open), preferences, requests);
         // Graph edits the record surfaced (node select, cache toggle, const
         // edit), plus the tab strip's dock ops.
         needs_relayout |= self.open.drain_requests(requests);

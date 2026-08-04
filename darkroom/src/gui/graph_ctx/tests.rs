@@ -275,8 +275,8 @@ fn a_wildcard_output_follows_the_wire_it_mirrors_from_the_next_read_on() {
     );
 
     fixture
-        .fixture
-        .doc
+        .open
+        .document
         .graph
         .set_input_binding(InputPort::new(consumer, 0), Binding::bind(producer, 0));
     assert_eq!(

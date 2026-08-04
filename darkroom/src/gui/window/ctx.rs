@@ -1,12 +1,19 @@
 //! The window level of the UI's context chain.
 
 use crate::core::document::Document;
+use crate::core::document::open_document::OpenDocument;
 use crate::gui::app::ctx::AppCtx;
 
-/// The frame's read-only world *and* the document it is showing — what every
-/// surface at window level reads. `Copy` (an [`AppCtx`], itself shared refs,
-/// plus one more), so a phase takes one parameter rather than two that must be
-/// kept in step by hand.
+/// The frame's read-only world *and* the open document it is showing — what
+/// every surface at window level reads. `Copy` (an [`AppCtx`], itself shared
+/// refs, plus one more), so a phase takes one parameter rather than two that
+/// must be kept in step by hand.
+///
+/// It takes the [`OpenDocument`] rather than the bare [`Document`] because the
+/// window shows both halves of it: the graph and its pane arrangement, and the
+/// unsaved-changes flag — a fact about the document *and* the file behind it,
+/// which is why no `Document` carries one. Read-only, so nothing at this level
+/// can reach the edit history the pair also holds.
 ///
 /// **The middle of the context chain.** [`AppCtx`] above knows nothing about a
 /// document; [`GraphCtx`](crate::gui::graph_ctx::GraphCtx) below adds the
@@ -25,18 +32,25 @@ use crate::gui::app::ctx::AppCtx;
 #[derive(Copy, Clone, Debug)]
 pub(crate) struct WindowCtx<'a> {
     app: AppCtx<'a>,
-    doc: &'a Document,
+    open: &'a OpenDocument,
 }
 
 impl<'a> WindowCtx<'a> {
-    pub(crate) fn new(app: AppCtx<'a>, doc: &'a Document) -> Self {
-        Self { app, doc }
+    pub(crate) fn new(app: AppCtx<'a>, open: &'a OpenDocument) -> Self {
+        Self { app, open }
     }
 
     /// The document this phase is reading — the graph, and the pane
-    /// arrangement around it.
+    /// arrangement around it. The projection nearly every reader wants; the
+    /// tab strip, which also shows [`OpenDocument::dirty`], takes the pair
+    /// through [`Self::open`] instead.
     pub(crate) fn document(self) -> &'a Document {
-        self.doc
+        &self.open.document
+    }
+
+    /// The open document whole — its content *and* the file it came from.
+    pub(crate) fn open(self) -> &'a OpenDocument {
+        self.open
     }
 
     /// The frame's world without the document: the theme, the func library,

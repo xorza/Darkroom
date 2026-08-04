@@ -156,18 +156,18 @@ impl CanvasHarness {
     }
 
     pub(crate) fn doc(&self) -> &Document {
-        &self.ctx.fixture.doc
+        &self.ctx.open.document
     }
 
     /// The document, to edit between frames — an undo moving a node out from
     /// under a live gesture is the case this exists for.
     pub(crate) fn doc_mut(&mut self) -> &mut Document {
-        &mut self.ctx.fixture.doc
+        &mut self.ctx.open.document
     }
 
     /// The `i`th node in placement order.
     pub(crate) fn node(&self, i: usize) -> NodeId {
-        self.ctx.fixture.node(i)
+        self.ctx.node(i)
     }
 
     /// Where `node_id`'s body last painted — post-transform, so it is the rect

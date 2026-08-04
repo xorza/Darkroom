@@ -27,6 +27,7 @@ use std::borrow::Cow;
 use crate::core::document::dock::{
     DockLayout, DockNode, DockOp, DockPath, DockSplit, NodeIdx, SplitDir, TabGroup, TabGroupId,
 };
+use crate::core::document::open_document::OpenDocument;
 use crate::core::document::{Document, TabRef};
 use crate::gui::dock::drag::{DropTarget, PaneGeometry, TabDrag, classify_drop};
 use crate::gui::dock::strip::TabLabel;
@@ -65,12 +66,13 @@ fn drag_ghost_wid() -> WidgetId {
     WidgetId::from_hash("dock.drag_ghost")
 }
 
-/// What the render walk needs from outside the layout: the document it is
-/// arranging, and the palette it paints with. Carried as one value rather
-/// than two parameters so the recursive render keeps its arity.
+/// What the render walk needs from outside the layout: the open document it
+/// is arranging — its panes, and the unsaved-changes flag the strip shows —
+/// and the palette it paints with. Carried as one value rather than two
+/// parameters so the recursive render keeps its arity.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct DockContext<'a> {
-    pub(crate) doc: &'a Document,
+    pub(crate) open: &'a OpenDocument,
     pub(crate) theme: &'a Theme,
 }
 
@@ -179,7 +181,7 @@ fn render_node<F: FnMut(&mut Ui, TabRef, &mut Requests)>(
     out: &mut Requests,
     content: &mut F,
 ) {
-    match cx.doc.layout.node(idx) {
+    match cx.open.document.layout.node(idx) {
         DockNode::Group(group) => render_group(ui, cx, group, out, content),
         DockNode::Split(split) => {
             let DockSplit {
@@ -317,7 +319,7 @@ fn drop_target(ui: &mut Ui, doc: &Document) -> Option<DropTarget> {
 fn draw_drag_feedback(ui: &mut Ui, cx: DockContext<'_>, dragged: &TabDrag) {
     let theme = cx.theme;
     let accent = theme.colors.selection_rect;
-    if let Some(target) = drop_target(ui, cx.doc) {
+    if let Some(target) = drop_target(ui, &cx.open.document) {
         let r = target.highlight;
         ui.layer(Layer::Tooltip)
             .at(r.min)
@@ -355,18 +357,21 @@ fn draw_drag_feedback(ui: &mut Ui, cx: DockContext<'_>, dragged: &TabDrag) {
 }
 
 /// Project one group's tabs into the strip's per-tab labels — the label
-/// text is the one thing the strip needs the `Document` for.
+/// text and the unsaved-changes flag are what the strip needs the open
+/// document for.
 fn tab_labels(ui: &mut Ui, cx: DockContext<'_>, group: &TabGroup) -> Vec<TabLabel> {
-    let focused = cx.doc.layout.focused == group.id;
+    let doc = &cx.open.document;
+    let focused = doc.layout.focused == group.id;
     group
         .tabs
         .iter()
         .enumerate()
         .map(|(i, &tab)| TabLabel {
             tab,
-            text: ui.intern(tab_text(cx.doc, tab)),
+            text: ui.intern(tab_text(doc, tab)),
             active: i == group.active,
             focused,
+            dirty: cx.open.dirty,
         })
         .collect()
 }
