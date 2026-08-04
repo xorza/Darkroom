@@ -3,8 +3,14 @@ Type=Application
 Name=darkroom
 GenericName=Node Graph Editor
 Comment=Node-graph image pipeline editor
-Exec=darkroom %F
+# %f, not %F: the CLI takes one optional document path and errors on a second.
+Exec=darkroom %f
 Icon=darkroom
 Terminal=false
 Categories=Graphics;Development;
+MimeType=application/x-darkroom;
+# Matches the X11 WM_CLASS, which winit defaults to argv[0]. On Wayland winit
+# sets an app_id only when the window is given a name, and palantir does not
+# give it one — so under Wayland the window has no app_id and this cannot
+# match it. Association still works; only taskbar grouping is affected.
 StartupWMClass=darkroom

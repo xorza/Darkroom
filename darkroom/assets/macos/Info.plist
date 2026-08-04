@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  The bundle property list for Darkroom.app.
+
+  Launch Services reads this out of a bundle and nowhere else, so a bare
+  binary cannot be registered at all. The expected layout is:
+
+    Darkroom.app/
+      Contents/
+        Info.plist              <- this file
+        MacOS/darkroom          <- the cargo-built binary
+        Resources/darkroom.icns <- assets/icons/darkroom.icns
+
+  Register a freshly assembled bundle with:
+
+    /System/Library/Frameworks/CoreServices.framework/Frameworks\
+      /LaunchServices.framework/Support/lsregister -f /Applications/Darkroom.app
+
+  KNOWN GAP — double-clicking a document will not open it yet. macOS does not
+  pass the path in argv the way a Linux desktop entry's %f does; Launch
+  Services sends an Apple Event, delivered as `application:openURLs:` on the
+  NSApplicationDelegate. winit 0.30 exposes no hook for it, so Finder will
+  show Darkroom as the handler and launch it with an empty document. Closing
+  that needs an objc2-side delegate that feeds the path into `App`.
+-->
+<plist version="1.0">
+<dict>
+	<key>CFBundleName</key>
+	<string>Darkroom</string>
+	<key>CFBundleDisplayName</key>
+	<string>Darkroom</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.xxorza.darkroom</string>
+	<key>CFBundleExecutable</key>
+	<string>darkroom</string>
+	<key>CFBundleIconFile</key>
+	<string>darkroom.icns</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.1.0</string>
+	<key>CFBundleVersion</key>
+	<string>0.1.0</string>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.photography</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>11.0</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+
+	<!--
+	  What the type *is*. Exported rather than imported because darkroom owns
+	  the format. Conforming to the zip UTI matches how the file is actually
+	  built (a zip holding one `document.json`), and keeps anything that reads
+	  archives able to read it, while this more specific type wins for us.
+	-->
+	<key>UTExportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.xxorza.darkroom.project</string>
+			<key>UTTypeDescription</key>
+			<string>Darkroom Project</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>com.pkware.zip-archive</string>
+			</array>
+			<key>UTTypeIconFile</key>
+			<string>darkroom.icns</string>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>darkroom</string>
+				</array>
+			</dict>
+		</dict>
+	</array>
+
+	<!--
+	  That we open it. `Owner` rank is what makes Darkroom the default handler
+	  over the generic archive tools its UTI conforms to.
+	-->
+	<key>CFBundleDocumentTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>Darkroom Project</string>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>LSHandlerRank</key>
+			<string>Owner</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>com.xxorza.darkroom.project</string>
+			</array>
+			<key>CFBundleTypeIconFile</key>
+			<string>darkroom.icns</string>
+		</dict>
+	</array>
+</dict>
+</plist>

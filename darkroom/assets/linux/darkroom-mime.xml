@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  The shared-mime-info package for darkroom projects. Installed by
+  `install.sh` as <data dir>/mime/packages/darkroom.xml.
+
+  A project file is a zip archive, so declaring the glob alone is not enough:
+  content sniffing recognizes the container and the file reads as a plain
+  `application/zip`, handled by whatever the desktop assigns to archives. The
+  two rules below are what make it read as its own type.
+
+  - `sub-class-of` says a darkroom project *is* a zip, so anything that can
+    handle archives still can, while the more specific type wins for us.
+  - The magic matches the archive's single entry, `document.json`, at offset
+    30 — a zip's first filename sits right after the 4-byte signature and the
+    26-byte local file header. That identifies a project by content, so a file
+    that has lost its extension is still recognized. It is the same rule ODF
+    and EPUB use for their marker entries.
+
+  The type's icon needs no `<icon>` element: the default lookup name is the
+  type with `/` replaced by `-`, which is what `install.sh` writes into the
+  `mimetypes` icon directories.
+-->
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+  <mime-type type="application/x-darkroom">
+    <comment>Darkroom project</comment>
+    <sub-class-of type="application/zip"/>
+    <glob pattern="*.darkroom"/>
+    <magic priority="60">
+      <match type="string" value="PK\003\004" offset="0">
+        <match type="string" value="document.json" offset="30"/>
+      </match>
+    </magic>
+  </mime-type>
+</mime-info>
