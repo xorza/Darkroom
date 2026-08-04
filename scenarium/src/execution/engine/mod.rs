@@ -12,7 +12,7 @@ use crate::RamUsage;
 use crate::common::column::Column;
 use crate::execution::cache::disk_store::DiskStore;
 use crate::execution::cache::runtime::RuntimeCache;
-use crate::execution::cache::runtime::error::CacheEvictionFailure;
+use crate::execution::cache::runtime::error::{CacheFlushReport, CacheNodeFailure};
 use crate::execution::compile::compiled_graph::CompiledGraph;
 use crate::execution::engine::error::InstallValidationError;
 use crate::execution::error::Result;
@@ -96,7 +96,7 @@ impl ExecutionEngine {
     pub(crate) async fn evict_cache(
         &mut self,
         node_ids: impl IntoIterator<Item = NodeId>,
-    ) -> Vec<CacheEvictionFailure> {
+    ) -> Vec<CacheNodeFailure> {
         let Some(compiled) = self.compiled.as_deref() else {
             return Vec::new();
         };
@@ -182,26 +182,29 @@ impl ExecutionEngine {
     /// publishes a blob.
     ///
     /// A node absent from the installed program, not disk-backed, or holding
-    /// nothing current is skipped.
-    pub(crate) async fn flush_cache(&mut self, node_ids: impl IntoIterator<Item = NodeId>) {
+    /// nothing current is skipped, and reported as nothing.
+    pub(crate) async fn flush_cache(
+        &mut self,
+        node_ids: impl IntoIterator<Item = NodeId>,
+    ) -> CacheFlushReport {
         let Some(compiled) = self.compiled.as_deref() else {
-            return;
+            return CacheFlushReport::default();
         };
         self.cache
             .flush(compiled, node_ids, &mut self.executor.ctx_manager.contexts)
-            .await;
+            .await
     }
 
     /// [`flush_cache`](Self::flush_cache) over every installed node, for when the
     /// worker attaches a new [`DiskStore`]. This makes values computed while the
     /// store was memory-only durable once a document receives a cache root.
-    pub(crate) async fn flush_all_caches(&mut self) {
+    pub(crate) async fn flush_all_caches(&mut self) -> CacheFlushReport {
         let Some(compiled) = self.compiled.as_deref() else {
-            return;
+            return CacheFlushReport::default();
         };
         self.cache
             .flush_all(compiled, &mut self.executor.ctx_manager.contexts)
-            .await;
+            .await
     }
 
     /// Self-consistency of the installed artifact and the cache aligned to it.
