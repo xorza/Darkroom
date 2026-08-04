@@ -139,7 +139,7 @@ impl RuntimeHost {
     /// [`Self::set_document_cache`], and the blobs the old document wrote stay
     /// where they are for when it is reopened.
     pub(crate) fn clear_program(&self) {
-        self.worker.clear();
+        self.dispatch(WorkerBridge::clear);
     }
 
     /// Point the disk cache at `doc_path`'s project-local store
@@ -280,10 +280,9 @@ impl RuntimeHost {
         true
     }
 
-    /// Stop the event loop. Best-effort: a worker that has already exited
-    /// has no loop left to stop, which is the outcome the caller wanted.
+    /// Stop the event loop.
     pub(crate) fn stop_event_loop(&self) {
-        self.worker.stop_event_loop();
+        self.dispatch(WorkerBridge::stop_event_loop);
     }
 
     /// Send a batch of worker commands.
