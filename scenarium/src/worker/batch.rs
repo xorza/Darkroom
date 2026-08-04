@@ -21,10 +21,24 @@ pub(crate) enum LoopCommand {
     Stop,
 }
 
+/// One wake's messages reduced to what the worker will actually do, one slot
+/// per kind — so a burst of edits installs once rather than N times.
+///
+/// **The graph op is the batch's frame of reference.** Reducing to slots loses
+/// the order the messages arrived in, so the order they are *applied* in is a
+/// standing rule rather than a caller's choice, and
+/// [`WorkerTask::apply_intent`](crate::worker::task::WorkerTask) states it:
+/// `graph_state` lands first, and every stage after it — the store, the cache
+/// maintenance, the run — is about the program it left installed. Anything
+/// added here that reads "the installed program" belongs after it too, or it
+/// will silently act on the one the batch is replacing.
 #[derive(Debug, Default)]
 pub(crate) struct BatchIntent {
     pub(crate) graph_state: Option<GraphOp>,
     pub(crate) disk_store: Option<DiskStore>,
+    /// Whether this batch owes every installed node a blob — see
+    /// [`WorkerMessage::FlushAllCaches`].
+    pub(crate) flush_all_caches: bool,
     pub(crate) loop_request: Option<LoopCommand>,
     /// What this batch's `Run` messages ask for, coalesced — plus the events
     /// the running loop fired, which arrive outside any message.
@@ -54,6 +68,7 @@ impl BatchIntent {
                 WorkerMessage::Clear => self.graph_state = Some(GraphOp::Clear),
                 WorkerMessage::EvictCache { nodes } => self.evict_cache.extend(nodes),
                 WorkerMessage::FlushCache { nodes } => self.flush_cache.extend(nodes),
+                WorkerMessage::FlushAllCaches => self.flush_all_caches = true,
                 WorkerMessage::SetDiskStore(cache) => self.disk_store = Some(cache),
                 WorkerMessage::Run { seeds } => self.seeds.merge(seeds),
                 WorkerMessage::StartEventLoop => self.loop_request = Some(LoopCommand::Start),
@@ -67,6 +82,7 @@ impl BatchIntent {
     fn clear(&mut self) {
         self.graph_state = None;
         self.disk_store = None;
+        self.flush_all_caches = false;
         self.loop_request = None;
         self.seeds.clear();
         self.evict_cache.clear();

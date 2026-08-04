@@ -31,6 +31,42 @@ pub(crate) struct RuntimeHost {
     compiler: Compiler,
 }
 
+/// What a [`RuntimeHost::set_document_cache`] call did to the disk-store root,
+/// and therefore what the worker has to be told.
+///
+/// Named rather than inlined because the interesting part is which transitions
+/// *don't* act. The worker cannot decide this for itself: a store is replaced
+/// for several unrelated reasons, and only the host knows whether the document
+/// kept its identity across one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CacheRootChange {
+    /// The same root: the store this would build is the one already installed.
+    /// A plain re-save, which used to cost a header read per resident
+    /// disk-backed node for nothing.
+    Unchanged,
+    /// A different root, or none at all — a document opened, closed, or saved
+    /// somewhere else. The worker takes the new store and writes nothing into
+    /// it: each location keeps its own store and refills lazily, per
+    /// [`prepare_document_cache_root`].
+    Repointed,
+    /// A document that had nowhere to persist gained a root — the first save of
+    /// an unsaved document. **The one transition that owes a flush**: its
+    /// `Both`-mode values were computed memory-only, and a RAM hit never
+    /// stores, so without one they would be served from RAM for the rest of the
+    /// session and silently recompute on reopen.
+    Gained,
+}
+
+impl CacheRootChange {
+    fn of(previous: Option<&Path>, current: Option<&Path>) -> Self {
+        match (previous, current) {
+            _ if previous == current => Self::Unchanged,
+            (None, Some(_)) => Self::Gained,
+            _ => Self::Repointed,
+        }
+    }
+}
+
 impl RuntimeHost {
     /// Assemble the func library and spin up the evaluation worker, which is
     /// woken through `wake`.
@@ -108,9 +144,28 @@ impl RuntimeHost {
     /// (`<stem>.darkroom-cache/` beside the file), so disk-backed (`Disk`/`Both`)
     /// nodes reload across sessions. `None` (an unsaved document) is memory-only. Explicit-path cache
     /// nodes are unaffected — they always use their own path.
+    ///
+    /// What the worker is told is [`CacheRootChange`]'s to decide — see there
+    /// for why only one of the transitions owes a flush.
     pub(crate) fn set_document_cache(&mut self, doc_path: Option<&Path>) {
-        self.disk_root = doc_path.map(prepare_document_cache_root);
-        self.sync_worker_disk_store();
+        let previous = std::mem::replace(
+            &mut self.disk_root,
+            doc_path.map(prepare_document_cache_root),
+        );
+        match CacheRootChange::of(previous.as_deref(), self.disk_root.as_deref()) {
+            CacheRootChange::Unchanged => {}
+            CacheRootChange::Repointed => self.sync_worker_disk_store(),
+            CacheRootChange::Gained => {
+                // The attach leads, and the two are not interchangeable. They
+                // usually reduce into one batch, where the worker's apply order
+                // decides and this order is moot — but the worker can wake
+                // between the sends and split them, and then the sweep would
+                // land in the batch *before* the store it is for, writing into
+                // the root being left behind.
+                self.sync_worker_disk_store();
+                self.worker.flush_all_caches();
+            }
+        }
     }
 
     /// Compile `graph` against the current library and send it to the worker
@@ -268,6 +323,7 @@ impl RuntimeHost {
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
     use std::sync::Arc;
 
     use crate::core::status::StatusLog;
@@ -276,7 +332,7 @@ mod tests {
 
     use crate::core::io::cache::document_cache_root;
     use crate::core::io::preferences::{MlModelPreferences, Preferences};
-    use crate::core::runtime_host::RuntimeHost;
+    use crate::core::runtime_host::{CacheRootChange, RuntimeHost};
 
     /// The default value seeded into `func`'s model-path input (index 1),
     /// read back through the published library.
@@ -379,5 +435,34 @@ mod tests {
         assert_eq!(host.disk_root, Some(document_cache_root(&second_path)));
         host.set_document_cache(None);
         assert_eq!(host.disk_root, None);
+    }
+
+    /// The whole policy behind what a root change tells the worker. Only the
+    /// first save of an unsaved document owes a flush of what is already
+    /// resident; everything else either repoints silently or does nothing at
+    /// all. Getting this wrong is what wrote a closed document's values into
+    /// the newly opened one's cache directory.
+    #[test]
+    fn only_gaining_a_first_root_owes_the_worker_a_flush() {
+        let a = Path::new("/docs/a.darkroom-cache");
+        let b = Path::new("/docs/b.darkroom-cache");
+        for (previous, current, expected, why) in [
+            (None, None, CacheRootChange::Unchanged, "still unsaved"),
+            (Some(a), Some(a), CacheRootChange::Unchanged, "a re-save"),
+            (None, Some(a), CacheRootChange::Gained, "the first save"),
+            (
+                Some(a),
+                Some(b),
+                CacheRootChange::Repointed,
+                "Save-As / open",
+            ),
+            (Some(a), None, CacheRootChange::Repointed, "File ▸ New"),
+        ] {
+            assert_eq!(
+                CacheRootChange::of(previous, current),
+                expected,
+                "{why}: {previous:?} -> {current:?}"
+            );
+        }
     }
 }

@@ -183,12 +183,10 @@ where
             self.finish_event_loop(None, false).await;
         }
 
-        if let Some(cache) = self.intent.disk_store.take() {
-            self.engine.set_disk_store(cache);
-            let report = self.engine.flush_all_caches().await;
-            self.report_flush(report, FlushReporting::Sweep);
-        }
-
+        // The graph op leads: it establishes the program every stage below is
+        // about. Applied after the store, the store's sweep wrote the outgoing
+        // document's values into the incoming document's root — see
+        // [`BatchIntent`].
         match self.intent.graph_state.take() {
             Some(GraphOp::Clear) => {
                 self.engine.clear();
@@ -206,6 +204,10 @@ where
                 });
             }
             None => {}
+        }
+
+        if let Some(cache) = self.intent.disk_store.take() {
+            self.engine.set_disk_store(cache);
         }
 
         self.evict_cache().await;
@@ -251,20 +253,30 @@ where
         (self.callback)(WorkerReport::Error(WorkerError::CacheEviction { failures }));
     }
 
-    /// Persist the named nodes' resident disk-backed values.
+    /// Persist resident disk-backed values: the nodes this batch named, then —
+    /// if it also asked for the sweep — every installed node.
     ///
     /// After the eviction rather than before it, so a node this batch names in
     /// both ends up with what the eviction asked for — nothing on disk — rather
     /// than with a blob the flush re-wrote behind it.
+    ///
+    /// Both halves in one stage, and in this order, because they differ only in
+    /// what they report: a node the host named is owed an answer about a type
+    /// that will never persist, and the sweep is not. Running the named half
+    /// first is what keeps that answer — the sweep would otherwise reach those
+    /// nodes as ordinary members and report nothing about them.
     async fn flush_cache(&mut self) {
-        if self.intent.flush_cache.is_empty() {
-            return;
+        if !self.intent.flush_cache.is_empty() {
+            let report = self
+                .engine
+                .flush_cache(self.intent.flush_cache.drain(..))
+                .await;
+            self.report_flush(report, FlushReporting::Requested);
         }
-        let report = self
-            .engine
-            .flush_cache(self.intent.flush_cache.drain(..))
-            .await;
-        self.report_flush(report, FlushReporting::Requested);
+        if std::mem::take(&mut self.intent.flush_all_caches) {
+            let report = self.engine.flush_all_caches().await;
+            self.report_flush(report, FlushReporting::Sweep);
+        }
     }
 
     /// Raise whatever a flush left unwritten, under `reporting`'s policy.
