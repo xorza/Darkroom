@@ -3,6 +3,7 @@
 use std::fmt;
 
 use crate::data::type_system::TypeId;
+use crate::execution::cache::disk_store::error::{RemovalError, StoreError};
 use crate::graph::identity::NodeId;
 
 /// One node a sweep could not do its work on, named by the id the host asked
@@ -16,14 +17,24 @@ use crate::graph::identity::NodeId;
 #[derive(Debug)]
 pub(crate) struct CacheNodeFailure {
     pub(crate) node_id: NodeId,
-    pub(crate) message: String,
+    pub(crate) cause: CacheNodeError,
 }
 
 impl fmt::Display for CacheNodeFailure {
     /// One entry of the `details` list a worker cache error carries.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?}: {}", self.node_id, self.message)
+        write!(f, "{:?}: {}", self.node_id, self.cause)
     }
+}
+
+/// Why a sweep could not finish with one node — the store operation it asked
+/// for, still carrying its own cause rather than a rendering of it.
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum CacheNodeError {
+    #[error(transparent)]
+    Removal(RemovalError),
+    #[error(transparent)]
+    Store(StoreError),
 }
 
 /// What a flush sweep did *not* leave on disk. Split in two because the halves

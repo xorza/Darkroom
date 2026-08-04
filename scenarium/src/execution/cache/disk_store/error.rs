@@ -1,4 +1,4 @@
-//! What one blob publication answers back.
+//! What the store's two write-side operations answer back.
 
 use std::io;
 use std::path::PathBuf;
@@ -70,3 +70,13 @@ pub(crate) enum StoreError {
 }
 
 pub(crate) type StoreResult = std::result::Result<StoreOutcome, StoreError>;
+
+/// A blob that would not go away. A blob that was never there is not one of
+/// these — an eviction wants the file gone, and an absent file already is.
+#[derive(Debug, thiserror::Error)]
+#[error("failed to remove {}: {source}", path.display())]
+pub(crate) struct RemovalError {
+    pub(crate) path: PathBuf,
+    #[source]
+    pub(crate) source: io::Error,
+}

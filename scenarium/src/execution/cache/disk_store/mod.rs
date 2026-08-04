@@ -13,7 +13,9 @@ use crate::DynamicValue;
 use crate::data::codec;
 use crate::data::codec::Codecs;
 use crate::execution::cache::digest::Digest;
-use crate::execution::cache::disk_store::error::{StoreError, StoreOutcome, StoreResult};
+use crate::execution::cache::disk_store::error::{
+    RemovalError, StoreError, StoreOutcome, StoreResult,
+};
 use crate::execution::cache::slot::OutputSnapshot;
 use crate::execution::compile::compiled_graph::ExecutionNode;
 use crate::graph::func::lambda::OutputDemand;
@@ -92,17 +94,14 @@ impl DiskStore {
         Some(self.disk_root.as_ref()?.join(name))
     }
 
-    pub(crate) async fn remove_node(&self, node_id: NodeId) -> io::Result<()> {
+    pub(crate) async fn remove_node(&self, node_id: NodeId) -> Result<(), RemovalError> {
         let Some(path) = self.node_path(node_id) else {
             return Ok(());
         };
         match tokio::fs::remove_file(&path).await {
             Ok(()) => Ok(()),
             Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
-            Err(error) => Err(io::Error::new(
-                error.kind(),
-                format!("failed to remove {}: {error}", path.display()),
-            )),
+            Err(source) => Err(RemovalError { path, source }),
         }
     }
 
