@@ -20,6 +20,10 @@ use scenarium::{RunSeeds, Worker, WorkerExited, WorkerMessage, WorkerReport};
 use crate::core::background_runtime::BackgroundRuntime;
 use crate::core::wake::Wake;
 
+/// Every command here answers whether the worker took it. A send only fails
+/// once the worker task is gone, and then *no report will ever arrive* — so a
+/// caller that assumed success would leave the UI waiting on a run that can
+/// never report back.
 pub(crate) struct WorkerBridge {
     worker: Worker,
     rx: Receiver<WorkerReport>,
@@ -57,23 +61,14 @@ impl WorkerBridge {
 
     /// Install a compiled program. The worker acknowledges it with
     /// `WorkerReport::Installed` before processing reports from later commands.
-    ///
-    /// Every command here answers whether the worker took it. A send only
-    /// fails once the worker task is gone, and then *no report will ever
-    /// arrive* — so a caller that assumed success would leave the UI
-    /// waiting on a run that can never report back.
     pub(crate) fn install(&self, compiled: Arc<CompiledGraph>) -> Result<(), WorkerExited> {
         self.worker.send(WorkerMessage::Update { compiled })
     }
 
     /// Drop the installed program and everything its cache holds. The worker
     /// acknowledges it with `WorkerReport::Cleared`.
-    ///
-    /// Best-effort like the event-loop stop beside it: a worker that has
-    /// already exited holds nothing to release, which is the outcome the
-    /// caller wanted.
-    pub(crate) fn clear(&self) {
-        let _ = self.worker.send(WorkerMessage::Clear);
+    pub(crate) fn clear(&self) -> Result<(), WorkerExited> {
+        self.worker.send(WorkerMessage::Clear)
     }
 
     /// Install the current program and evict an authored node's cache cone as
@@ -159,10 +154,9 @@ impl WorkerBridge {
         self.worker.send(WorkerMessage::StartEventLoop)
     }
 
-    /// Stop the event loop (aborts the per-event tasks). A dropped send
-    /// (worker already exited) is a harmless shutdown no-op.
-    pub(crate) fn stop_event_loop(&self) {
-        let _ = self.worker.send(WorkerMessage::StopEventLoop);
+    /// Stop the event loop (aborts the per-event tasks).
+    pub(crate) fn stop_event_loop(&self) -> Result<(), WorkerExited> {
+        self.worker.send(WorkerMessage::StopEventLoop)
     }
 
     /// Non-blocking drain of everything the worker has posted since the
