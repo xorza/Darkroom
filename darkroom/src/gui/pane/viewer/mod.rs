@@ -574,8 +574,8 @@ mod tests {
         let mut fixture = DocFixture::default();
         let node = fixture.add(&preview_func(Default::default()));
         let mut store = PreviewStore::default();
-        // 2×1 (see `opaque_image_value`) — under the cap, so the full texture
-        // keeps the source's own dimensions and the assertion can name them.
+        // 2×1 (see `opaque_image_value`) — the full texture keeps the source's
+        // own dimensions, so the assertion can name them.
         store.ingest_preview(h.ui(), node, opaque_image_value());
 
         let theme = Theme::default();
