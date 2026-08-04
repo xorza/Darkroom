@@ -1,6 +1,6 @@
 //! Benchmarks for the CPU contrast/brightness op on a ~6K (25 MP) frame, swept
-//! across all nine pixel formats: the public path (SIMD kernel plus per-row
-//! scratch bounce where one exists) against the scalar reference it replaces.
+//! across all nine pixel formats: the public path (a SIMD kernel on every
+//! format this arch covers) against the scalar reference it replaces.
 
 use std::hint::black_box;
 use std::time::Duration;
@@ -54,17 +54,10 @@ pub fn bench(c: &mut Criterion) {
     group.measurement_time(Duration::from_secs(3));
 
     for &format in ALL_FORMATS {
-        // u16 has no SIMD kernel, so the public path *is* the scalar reference
-        // there — benching both would time the same code twice.
-        let variants: &[(&str, ApplyFn)] = if format.channel_size == ChannelSize::_16bit {
-            &[("scalar", apply_scalar)]
-        } else {
-            &[("auto", apply_auto), ("scalar", apply_scalar)]
-        };
         // Criterion turns ids into report paths, so keep them space-free.
         let label = format.to_string().replace(' ', "_");
 
-        for &(variant, apply) in variants {
+        for &(variant, apply) in &[("auto", apply_auto as ApplyFn), ("scalar", apply_scalar)] {
             // A fresh image per variant so both start from identical pixels.
             // The op is in place and repeated iterations drive the data toward
             // saturation, which costs the same: the kernels are branch-free and
