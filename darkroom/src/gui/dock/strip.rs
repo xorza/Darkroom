@@ -249,7 +249,7 @@ fn tab_chip(ui: &mut Ui, s: &mut StripCtx<'_>, label: &TabLabel) {
                     // through to the chip around it, which is what
                     // `DockUi::scan` polls for both the activation click and
                     // the drag edges.
-                    Text::new(label.text.clone()).style(&label_style).show(ui);
+                    Text::new(label.text).style(&label_style).show(ui);
 
                     if closable(label.tab) {
                         close_button(ui, theme, tab_close_wid(label.tab));

@@ -1,7 +1,8 @@
 pub(crate) mod color;
 
 use palantir::{
-    Brush, ButtonTheme, Color, DragValueTheme, Shadow, Spacing, Stroke, TextEditTheme, WidgetLook,
+    Brush, ButtonTheme, Color, DragValueTheme, FontWeight, Shadow, Spacing, Stroke, TextEditTheme,
+    TextStyle, WidgetLook,
 };
 
 use crate::core::theme_pref::ThemeChoice;
@@ -412,8 +413,16 @@ pub(crate) struct Theme {
     pub(crate) const_value_editor_revealed: ConstValueEditorTheme,
 
     /// Look for the inline-rename widget (node title, boundary port,
-    /// graph tab).
+    /// graph tab). Text is left unset, so a rename inherits ambient
+    /// `palantir::Theme::text` like any other label.
     pub(crate) inline_rename: InlineRenameTheme,
+
+    /// The node-title variant of `inline_rename`, with the ambient text
+    /// style pinned to [`FontWeight::Bold`] on every state. Precomputed
+    /// at construction, beside its base so the two can't drift — a node
+    /// header would otherwise rebuild the whole nested text-edit bundle
+    /// per node per frame just to carry one weight.
+    pub(crate) inline_rename_title: InlineRenameTheme,
 
     /// Palantir-side widget theme. Pushed onto `Ui::theme` once at
     /// startup so every palantir widget (Button, TextEdit, MenuItem,
@@ -554,10 +563,23 @@ impl InlineRenameTheme {
     /// border, fill) so the field reads against whichever canvas hosts
     /// it.
     fn from_palette(p: &palantir::Palette) -> Self {
+        Self::flattened(&TextEditTheme::from_palette(p))
+    }
+
+    /// The flattening half of [`Self::from_palette`], over an existing
+    /// text-edit bundle rather than a palette — how an
+    /// [`InlineRename`](crate::gui::widgets::inline_rename::InlineRename)
+    /// with no `.style(…)` derives its look from ambient
+    /// [`palantir::Theme::text_edit`].
+    ///
+    /// Split out so the ambient path and this theme's own slot are
+    /// stripped by one function: a visual added here can't be flattened
+    /// in the configured bundle and left standing in the fallback.
+    pub(crate) fn flattened(text_edit: &TextEditTheme) -> Self {
         let mut style = TextEditTheme {
             padding: Spacing::ZERO,
             margin: Spacing::ZERO,
-            ..TextEditTheme::from_palette(p)
+            ..text_edit.clone()
         };
         for look in [
             &mut style.looks.normal,
@@ -571,6 +593,25 @@ impl InlineRenameTheme {
             }
         }
         Self { text_edit: style }
+    }
+
+    /// The same bundle with `text` pinned on every state.
+    ///
+    /// All four looks, not just `normal`: the idle label reads `normal`
+    /// while the open editor resolves per state, so leaving the others
+    /// to inherit would change the font when the field is hovered or
+    /// focused — mid-rename, on the widget whose whole contract is that
+    /// the glyphs don't move when it opens.
+    pub(crate) fn with_text(mut self, text: TextStyle) -> Self {
+        for look in [
+            &mut self.text_edit.looks.normal,
+            &mut self.text_edit.looks.hovered,
+            &mut self.text_edit.looks.active,
+            &mut self.text_edit.looks.disabled,
+        ] {
+            look.text = Some(text.clone());
+        }
+        self
     }
 }
 
@@ -921,6 +962,16 @@ impl Theme {
     fn build(preset: ThemePreset, type_colors: TypeColors, p: &palantir::Palette) -> Self {
         let colors = PaletteColors::for_preset(preset);
         let chrome_fill = colors.chrome_fill;
+        // Built before the struct literal because the title variant
+        // derives from the palantir theme's ambient text style — the
+        // same style an unstyled rename would have inherited anyway,
+        // so bolding it is the only difference between the two slots.
+        let palantir_theme = palantir_theme_for(p, chrome_fill, &TypeScale::DEFAULT);
+        let inline_rename = InlineRenameTheme::from_palette(p);
+        let inline_rename_title = inline_rename.clone().with_text(TextStyle {
+            weight: FontWeight::Bold,
+            ..palantir_theme.text.clone()
+        });
         Self {
             preset,
             // The three measurements that belong to no widget group; the
@@ -937,8 +988,9 @@ impl Theme {
             type_colors,
             const_value_editor: ConstValueEditorTheme::from_palette(p),
             const_value_editor_revealed: ConstValueEditorTheme::revealed_from_palette(p),
-            inline_rename: InlineRenameTheme::from_palette(p),
-            palantir_theme: palantir_theme_for(p, chrome_fill, &TypeScale::DEFAULT),
+            inline_rename,
+            inline_rename_title,
+            palantir_theme,
         }
     }
 }

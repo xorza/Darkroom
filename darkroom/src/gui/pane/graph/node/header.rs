@@ -12,8 +12,8 @@
 use std::f32::consts::{FRAC_PI_4, PI};
 
 use palantir::{
-    Align, Color, Configure, FontFamily, FontWeight, Panel, Sizing, Spacing, Spinner, Text,
-    TextStyle, Ui, VAlign, WidgetId,
+    Align, Color, Configure, FontFamily, Panel, Sizing, Spacing, Spinner, Text, TextStyle, Ui,
+    VAlign, WidgetId,
 };
 use scenarium::{CacheMode, NodeId};
 
@@ -408,16 +408,13 @@ fn title(ui: &mut Ui, ncx: NodeCtx<'_>, out: &mut Requests) {
     let node = ncx;
     let shift = ui.modifiers().shift;
     let id = wid::rename(node.id);
-    // Interned here rather than carried on the node: the widget holds the
-    // handle across the label⇄editor swap, and this is the one place the
-    // name is drawn.
-    let name = ui.intern(node.name());
-    let ev = InlineRename::new(id, name, &ncx.theme().inline_rename)
+    // Borrowed straight off the node: an interned handle is only valid
+    // within the record pass that minted it, and the widget reads the
+    // name back on the label⇄editor swap to seed the draft.
+    let ev = InlineRename::new(node.name())
+        .id(id)
+        .style(&ncx.theme().inline_rename_title)
         .max_chars(NODE_NAME_MAX_CHARS)
-        .style(&TextStyle {
-            weight: FontWeight::Bold,
-            ..ui.theme.text.clone()
-        })
         .show(ui);
     if ev.clicked {
         out.extend_graph(GraphIntent::click(shift, ncx.graph_ctx.selected(), node.id));
