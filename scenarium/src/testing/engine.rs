@@ -18,7 +18,7 @@ use hashbrown::HashMap;
 use ::common::CancelToken;
 
 use crate::execution::cache::disk_store::DiskStore;
-use crate::execution::cache::runtime::error::CacheEvictionFailure;
+use crate::execution::cache::runtime::error::CacheNodeFailure;
 use crate::execution::compile::error::CompileError;
 use crate::execution::engine::ExecutionEngine;
 use crate::execution::error::{Result, RunError};
@@ -227,7 +227,7 @@ impl TestEngine {
     pub(crate) async fn evict<'n>(
         &mut self,
         names: impl IntoIterator<Item = &'n str>,
-    ) -> Vec<CacheEvictionFailure> {
+    ) -> Vec<CacheNodeFailure> {
         let node_ids: Vec<NodeId> = names.into_iter().map(|name| self.id(name)).collect();
         self.engine.evict_cache(node_ids).await
     }

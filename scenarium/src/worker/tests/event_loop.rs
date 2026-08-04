@@ -171,8 +171,11 @@ async fn one_task_panicking_stops_the_loop() {
             }
             WorkerReport::Installed(_)
             | WorkerReport::Cleared
-            | WorkerReport::Error(WorkerError::Execution { .. })
-            | WorkerReport::Error(WorkerError::CacheEviction { .. }) => {}
+            | WorkerReport::Error(
+                WorkerError::Execution { .. }
+                | WorkerError::CacheEviction { .. }
+                | WorkerError::CacheFlush { .. },
+            ) => {}
         }
     }
     assert_eq!(
