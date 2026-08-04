@@ -9,7 +9,6 @@ use std::sync::Arc;
 use ::common::{CancelToken, is_debug};
 
 use crate::RamUsage;
-use crate::common::column::Column;
 use crate::execution::cache::disk_store::DiskStore;
 use crate::execution::cache::runtime::RuntimeCache;
 use crate::execution::cache::runtime::error::{CacheFlushReport, CacheNodeFailure};
@@ -17,7 +16,6 @@ use crate::execution::compile::compiled_graph::CompiledGraph;
 use crate::execution::engine::error::InstallValidationError;
 use crate::execution::error::Result;
 use crate::execution::executor::{Executor, RunRequest};
-use crate::execution::identity::NodeIdx;
 use crate::execution::report::ExecutionOutcome;
 use crate::execution::report::RunReporter;
 use crate::execution::schedule::RunSchedule;
@@ -52,10 +50,6 @@ pub(crate) struct ExecutionEngine {
     /// dispositions, demand, and reader counts the cache-aware sweep refines it into.
     /// Recycled across runs to avoid reallocation.
     schedule: RunSchedule,
-    /// What each node's cache holds once a run has released everything dead — filled by
-    /// the cache, read by the executor when it reduces the run to status rows. It lives
-    /// here because only the engine sees both ends of that handoff.
-    node_ram: Column<NodeIdx, RamUsage>,
 }
 
 impl ExecutionEngine {
@@ -87,6 +81,17 @@ impl ExecutionEngine {
         self.cache.reconcile(previous, &compiled);
         self.compiled = Some(compiled);
         self.validate_debug();
+    }
+
+    /// What the runtime cache's resident values hold right now — the same
+    /// measurement a completed run publishes, taken outside one.
+    ///
+    /// The worker reads it after an install, which is the other moment the
+    /// resident set changes size: reconciling onto a program that dropped
+    /// nodes frees their values, and a host told only by runs would keep
+    /// reporting the previous total until another run measured it.
+    pub(crate) fn resident_cache_ram(&mut self) -> RamUsage {
+        self.cache.measure_resident_ram()
     }
 
     pub(crate) fn set_disk_store(&mut self, disk_store: DiskStore) {
@@ -161,13 +166,14 @@ impl ExecutionEngine {
         self.cache.release_dead_outputs(compiled);
 
         // The resident set is now final (post-eviction), so this is the true
-        // cache footprint the run leaves behind — total and per-node.
-        outcome.cache_ram = self.cache.resident_ram_stats(&mut self.node_ram);
+        // cache footprint the run leaves behind — total here, per-node left on
+        // the cache for the reduction below.
+        outcome.cache_ram = self.cache.measure_resident_ram();
 
         // Phase 4: reduce the run to one status row per node. Last, because a node's row
         // carries the RAM it ended up holding — which the two steps above just settled.
         self.executor
-            .collect_outcome(compiled, &self.schedule, &self.node_ram, outcome);
+            .collect_outcome(compiled, &self.schedule, self.cache.node_ram(), outcome);
 
         outcome.triggered_events.append(&mut seeds.events);
 
