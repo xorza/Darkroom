@@ -418,11 +418,15 @@ mod tests {
     use super::*;
 
     /// The rendered text of a label, whichever form it came back in.
+    ///
+    /// An interned handle is a span into the record pass that minted it and
+    /// only that pass can resolve it, so there is nothing to read back here
+    /// — `port_label` never interns, which is what makes that arm dead.
     fn shown(input: &TextInput<'_>) -> String {
         match input {
             TextInput::Borrowed(text) => (*text).to_owned(),
             TextInput::Owned(text) => text.clone(),
-            TextInput::Interned(text) => text.borrow_str().to_owned(),
+            TextInput::Interned(_) => unreachable!("port_label borrows or owns, never interns"),
         }
     }
 

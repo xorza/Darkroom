@@ -239,6 +239,66 @@ line_height_mult = 1.2
 family = "Sans"
 weight = "Regular"
 
+[inline_rename_title.text_edit]
+placeholder = "#aaaaa8"
+caret = "#e2dfd3"
+caret_width = 1.5
+selection = "#9adbfb40"
+padding = 0.0
+margin = 0.0
+
+[inline_rename_title.text_edit.normal.background]
+corners = 4.0
+
+[inline_rename_title.text_edit.normal.background.fill]
+Solid = "#00000000"
+
+[inline_rename_title.text_edit.normal.text]
+font_size_px = 16.0
+color = "#e2dfd3"
+line_height_mult = 1.2
+family = "Sans"
+weight = "Bold"
+
+[inline_rename_title.text_edit.hovered.background]
+corners = 4.0
+
+[inline_rename_title.text_edit.hovered.background.fill]
+Solid = "#00000000"
+
+[inline_rename_title.text_edit.hovered.text]
+font_size_px = 16.0
+color = "#e2dfd3"
+line_height_mult = 1.2
+family = "Sans"
+weight = "Bold"
+
+[inline_rename_title.text_edit.active.background]
+corners = 4.0
+
+[inline_rename_title.text_edit.active.background.fill]
+Solid = "#00000000"
+
+[inline_rename_title.text_edit.active.text]
+font_size_px = 16.0
+color = "#e2dfd3"
+line_height_mult = 1.2
+family = "Sans"
+weight = "Bold"
+
+[inline_rename_title.text_edit.disabled.background]
+corners = 4.0
+
+[inline_rename_title.text_edit.disabled.background.fill]
+Solid = "#00000000"
+
+[inline_rename_title.text_edit.disabled.text]
+font_size_px = 16.0
+color = "#e2dfd3"
+line_height_mult = 1.2
+family = "Sans"
+weight = "Bold"
+
 [palantir_theme]
 window_clear = "#1a1a1a"
 text_scale = 1.0
