@@ -1,6 +1,6 @@
-//! Benchmarks for the CPU contrast/brightness op on a ~6K (25 MP) frame, swept
-//! across all nine pixel formats: the public path (a SIMD kernel on every
-//! format this arch covers) against the scalar reference it replaces.
+//! Benchmarks for the CPU contrast/brightness op, sweeping all nine pixel
+//! formats at two frame sizes: the public path (a SIMD kernel on every format
+//! this arch covers) against the scalar reference it replaces.
 
 use std::hint::black_box;
 use std::time::Duration;
@@ -15,10 +15,33 @@ use crate::image::Image;
 use crate::processing_context::ProcessingContext;
 use crate::processing_context::image_buffer::ImageBuffer;
 
-// 6K-class frame (~25 MP) — large enough to dominate per-call overhead and
-// exercise the rayon-parallel per-row kernel at scale.
-const WIDTH: usize = 6144;
-const HEIGHT: usize = 4096;
+/// A frame size to sweep, and what it is there to expose.
+#[derive(Debug, Clone, Copy)]
+struct Frame {
+    label: &'static str,
+    width: usize,
+    height: usize,
+}
+
+/// Both sizes are needed, and they answer different questions.
+///
+/// At 25 MP every format is pinned to the memory roof, so the numbers say what
+/// a big frame costs but reveal nothing about kernel quality — a kernel twice
+/// as good measures the same. At 4 MP the smaller formats sit in cache and the
+/// kernels become the limit, which is the only place a compute regression, or a
+/// SIMD path that has stopped paying for itself, is visible at all.
+const FRAMES: [Frame; 2] = [
+    Frame {
+        label: "25MP",
+        width: 6144,
+        height: 4096,
+    },
+    Frame {
+        label: "4MP",
+        width: 2048,
+        height: 2048,
+    },
+];
 
 /// Both knobs off their identity values, so neither path can short-circuit and
 /// the fused `v * contrast + offset` form the SIMD kernels use is exercised
@@ -55,21 +78,24 @@ pub fn bench(c: &mut Criterion) {
     group.warm_up_time(Duration::from_secs(1));
     group.measurement_time(Duration::from_secs(3));
 
-    for &format in ALL_FORMATS {
-        // Criterion turns ids into report paths, so keep them space-free.
-        let label = format.to_string().replace(' ', "_");
+    for frame in FRAMES {
+        for &format in ALL_FORMATS {
+            // Criterion turns ids into report paths, so keep them space-free.
+            let label = format!("{format}_{}", frame.label).replace(' ', "_");
 
-        for &(variant, apply) in &[("auto", apply_auto as ApplyFn), ("scalar", apply_scalar)] {
-            // A fresh image per variant so both start from identical pixels.
-            // The op is in place and repeated iterations drive the data toward
-            // saturation, which costs the same: the kernels are branch-free and
-            // clamp with min/max, so timing is data-independent.
-            let mut image = create_test_image(format, WIDTH, HEIGHT, 0);
+            for &(variant, apply) in &[("auto", apply_auto as ApplyFn), ("scalar", apply_scalar)] {
+                // A fresh image per variant so both start from identical pixels.
+                // The op is in place and repeated iterations drive the data
+                // toward saturation, which costs the same: the kernels are
+                // branch-free and clamp with min/max, so timing is
+                // data-independent.
+                let mut image = create_test_image(format, frame.width, frame.height, 0);
 
-            group.throughput(Throughput::Bytes(image.bytes().len() as u64));
-            group.bench_function(BenchmarkId::new(variant, &label), |b| {
-                b.iter(|| apply(black_box(&mut image), black_box(params)));
-            });
+                group.throughput(Throughput::Bytes(image.bytes().len() as u64));
+                group.bench_function(BenchmarkId::new(variant, &label), |b| {
+                    b.iter(|| apply(black_box(&mut image), black_box(params)));
+                });
+            }
         }
     }
 
@@ -94,7 +120,7 @@ fn bench_execute(c: &mut Criterion) {
     for &format in ALL_FORMATS {
         let label = format.to_string().replace(' ', "_");
         let mut ctx = ProcessingContext::cpu_only();
-        let source = create_test_image(format, WIDTH, HEIGHT, 0);
+        let source = create_test_image(format, FRAMES[0].width, FRAMES[0].height, 0);
         let mut buffer = ImageBuffer::from_cpu(source.clone());
 
         group.throughput(Throughput::Bytes(source.bytes().len() as u64));
