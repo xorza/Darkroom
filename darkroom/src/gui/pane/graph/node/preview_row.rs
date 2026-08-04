@@ -8,6 +8,8 @@
 //! node body, so selection, dragging, the breaker, and the input wire all come
 //! from the node machinery unchanged.
 
+use std::borrow::Cow;
+
 use imaginarium::ColorFormat;
 use palantir::{
     Align, Configure, CursorIcon, ImageFit, Justify, Panel, Sense, Shape, Sizing, Spacing, Text,
@@ -73,8 +75,8 @@ pub(super) fn preview_row(ui: &mut Ui, ncx: NodeCtx<'_>, out: &mut Requests) {
                 // alike; `EMPTY_LABEL` covers having nothing at all.
                 let text = stored
                     .and_then(StoredContent::message)
-                    .unwrap_or(EMPTY_LABEL);
-                Text::new(text)
+                    .unwrap_or(Cow::Borrowed(EMPTY_LABEL));
+                Text::new(&*text)
                     .style(&sized_text(ui, theme.text.label))
                     .text_wrap(TextWrap::Wrap)
                     .show(ui);
