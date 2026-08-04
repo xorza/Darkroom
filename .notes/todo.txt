@@ -15,7 +15,3 @@ audit allocations overshoot , see where reserve_exact would be better
 mesh once registrations
 
 imageview to load only when active, until then save to disk
-
-remove quickbench
-
-show dirty badge for graph

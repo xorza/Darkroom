@@ -24,9 +24,9 @@ use crate::gui::widgets::support::{colored_text, muted_text};
 const CHIP_INSET_Y: f32 = 8.0;
 
 /// One chip's whole draw state, resolved from its group by
-/// [`tab_labels`](super::tab_labels): the tab, its label text (the one
-/// projection that needs the `Document`), and the two flags that used to
-/// travel beside the slice as `group.active` / `focused`.
+/// [`tab_labels`](super::tab_labels): the tab, its label text and unsaved
+/// state (the projections that need the open document), and the two flags
+/// that used to travel beside the slice as `group.active` / `focused`.
 ///
 /// `active` lives here rather than being re-derived by position because
 /// the strip walks *labels* while `TabGroup::active` indexes `tabs` — a
@@ -41,11 +41,23 @@ pub(super) struct TabLabel {
     /// This tab's group holds the dock focus — the accent cap dims
     /// elsewhere so one pane always reads as "where actions go".
     pub(super) focused: bool,
+    /// The open document has unsaved changes. Inks the dot on the chips
+    /// that [`shows_document`] — the document-wide flag rides on every
+    /// label because it is the *tab kind*, not the label, that decides
+    /// which chips reserve the dot.
+    pub(super) dirty: bool,
 }
 
 /// Every tab except the pinned `Main` graph carries a close button.
 pub(super) fn closable(tab: TabRef) -> bool {
     tab != TabRef::Graph
+}
+
+/// Which tabs show the open document's own content, and so carry its
+/// unsaved-changes dot. Preferences are app state and a viewer shows a run's
+/// output — neither is in the file, so neither reserves the slot.
+fn shows_document(tab: TabRef) -> bool {
+    tab == TabRef::Graph
 }
 
 /// Stable id for `tab`'s chip — deterministic so the prepass
@@ -66,6 +78,12 @@ pub(super) fn strip_wid(group: TabGroupId) -> WidgetId {
 /// Stable id for `tab`'s close button.
 pub(super) fn tab_close_wid(tab: TabRef) -> WidgetId {
     WidgetId::from_hash(("dock.tab_close", tab))
+}
+
+/// Stable id for `tab`'s unsaved-changes dot — the box, which a document tab
+/// records whether or not the dot is inked.
+pub(crate) fn tab_dirty_wid(tab: TabRef) -> WidgetId {
+    WidgetId::from_hash(("dock.tab_dirty", tab))
 }
 
 /// Stable id for `tab`'s split context menu.
@@ -120,6 +138,35 @@ fn new_tab_chip(ui: &mut Ui, theme: &Theme) {
                 .text_align(Align::CENTER)
                 .show(ui);
         });
+}
+
+/// Diameter of the unsaved-changes dot.
+const DIRTY_DOT: f32 = 3.5;
+
+/// The unsaved-changes dot: a filled circle when the document differs from
+/// its file, an empty box of the same size when it does not.
+///
+/// Always recorded — never skipped on a saved document — so the chip's width
+/// is the same either way. A dot that came and went would resize the chip on
+/// every save and every first edit after one, shuffling the whole strip.
+///
+/// Centered on the label's line rather than inheriting the row's alignment:
+/// the chip's own `child_align` already centers, but a dot this much shorter
+/// than the text has nothing to sit on if that ever changes.
+fn dirty_dot(ui: &mut Ui, theme: &Theme, tab: TabRef, dirty: bool) {
+    let fill = if dirty {
+        Background::rounded(theme.status.warning, Corners::all(DIRTY_DOT * 0.5))
+    } else {
+        // Not a transparent fill: the default paints no quad at all, which
+        // is what "reserve the space, draw nothing" means here.
+        Background::default()
+    };
+    Panel::zstack()
+        .id(tab_dirty_wid(tab))
+        .size((Sizing::fixed(DIRTY_DOT), Sizing::fixed(DIRTY_DOT)))
+        .align(Align::v(VAlign::Center))
+        .background(fill)
+        .show(ui, |_| {});
 }
 
 /// Chrome lift behind a hoverable strip glyph: `header_fill` under the
@@ -251,6 +298,9 @@ fn tab_chip(ui: &mut Ui, s: &mut StripCtx<'_>, label: &TabLabel) {
                     // the drag edges.
                     Text::new(label.text).style(&label_style).show(ui);
 
+                    if shows_document(label.tab) {
+                        dirty_dot(ui, theme, label.tab, label.dirty);
+                    }
                     if closable(label.tab) {
                         close_button(ui, theme, tab_close_wid(label.tab));
                     }
@@ -319,4 +369,62 @@ fn split_menu(ui: &mut Ui, s: &mut StripCtx<'_>, tab: TabRef) {
                 });
             }
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::core::document::TabRef;
+    use crate::core::document::harness::DocFixture;
+    use crate::gui::app::session::harness::SessionHarness;
+    use crate::gui::dock::strip::{DIRTY_DOT, tab_chip_wid, tab_dirty_wid};
+
+    /// The dot is a visibility change, never a layout one: saving (or making
+    /// the first edit after a save) must leave the graph chip exactly the size
+    /// it was, or every chip to its right — and the "+" chip — would shift.
+    #[test]
+    fn the_dirty_dot_reserves_the_same_box_saved_and_unsaved() {
+        // Preferences beside the graph so the test also covers a chip that
+        // reserves nothing: it must not grow a slot of its own.
+        let mut h = SessionHarness::new(DocFixture::sample().with_tab(TabRef::Preferences));
+        h.session.open.dirty = false;
+        h.prime(2);
+        let saved_chip =
+            h.ui.rect(tab_chip_wid(TabRef::Graph))
+                .expect("the graph tab records a chip");
+        let saved_dot =
+            h.ui.rect(tab_dirty_wid(TabRef::Graph))
+                .expect("a saved document still reserves the dot's box");
+
+        h.session.open.dirty = true;
+        h.prime(2);
+        let unsaved_chip = h.ui.rect(tab_chip_wid(TabRef::Graph)).expect("still there");
+        let unsaved_dot =
+            h.ui.rect(tab_dirty_wid(TabRef::Graph))
+                .expect("still there");
+
+        assert_eq!(
+            (saved_chip.size.w, saved_chip.size.h),
+            (unsaved_chip.size.w, unsaved_chip.size.h),
+            "the dot resized the graph chip: {saved_chip:?} saved vs {unsaved_chip:?} unsaved",
+        );
+        assert_eq!(
+            (saved_dot.size.w, saved_dot.size.h),
+            (DIRTY_DOT, DIRTY_DOT),
+            "the reserved box is the dot's own size",
+        );
+        assert_eq!(
+            (unsaved_dot.size.w, unsaved_dot.size.h),
+            (DIRTY_DOT, DIRTY_DOT),
+            "an inked dot fills exactly the box the saved document reserved",
+        );
+        // The dot rides inside the chip that owns it, not past its edge.
+        assert!(
+            unsaved_dot.max().x <= unsaved_chip.max().x,
+            "the dot overflowed its chip: {unsaved_dot:?} in {unsaved_chip:?}",
+        );
+        assert!(
+            h.ui.rect(tab_dirty_wid(TabRef::Preferences)).is_none(),
+            "preferences are not in the document and reserve no dot",
+        );
+    }
 }

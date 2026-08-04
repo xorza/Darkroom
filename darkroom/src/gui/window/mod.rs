@@ -136,7 +136,7 @@ impl MainWindow {
             output_types,
         } = self;
         let dock_cx = DockContext {
-            doc,
+            open: cx.open(),
             theme: app.theme(),
         };
         Panel::vstack()

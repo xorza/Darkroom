@@ -77,7 +77,7 @@ fn a_culled_nodes_ports_stay_anchored_until_its_node_leaves_the_document() {
     // Read off `node_sizes` directly: `node_world_rect` resolves through a
     // `NodeCtx`, which a deleted node no longer has.
     h.doc_mut().remove_node(leaves);
-    h.graph_ui.retain_nodes(&h.ctx.fixture.doc);
+    h.graph_ui.retain_nodes(&h.ctx.open.document);
     assert!(
         !h.graph_ui.geometry().node_sizes.contains_key(&leaves),
         "a node the document stopped holding releases its cached size",
