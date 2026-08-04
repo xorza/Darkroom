@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use common::internals::test_output_path;
+use common::TempDir;
 
 use crate::core::document::Document;
 use crate::core::document::open_document::OpenDocument;
@@ -30,7 +30,8 @@ fn empty_document_has_the_main_graph_tab() {
 
 #[test]
 fn preferred_document_reopens_and_a_failed_load_forgets_the_path() {
-    let path = test_output_path("darkroom_open_document/preferred.darkroom");
+    let dir = TempDir::new("darkroom-open-document");
+    let path = dir.join("preferred.darkroom");
     document::save(&Document::default(), &path).unwrap();
     let mut preferences = Preferences {
         document_path: Some(path.clone()),

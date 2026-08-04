@@ -1,6 +1,6 @@
 use std::io::Read as _;
 
-use common::internals::test_output_path;
+use common::TempDir;
 use scenarium::{Binding, ConstValue, InputPort, NodeId};
 
 use super::*;
@@ -8,7 +8,8 @@ use crate::core::document::harness::DocFixture;
 
 #[test]
 fn document_round_trips_as_one_json_entry() {
-    let path = test_output_path("darkroom_document/roundtrip.darkroom");
+    let dir = TempDir::new("darkroom-document-roundtrip");
+    let path = dir.join("roundtrip.darkroom");
     // Populated, not `Document::default()`: an empty document has an empty
     // placement map, which would never exercise a `NodeId` as a key.
     let document = DocFixture::sample().doc;
@@ -33,7 +34,8 @@ fn document_round_trips_as_one_json_entry() {
 #[test]
 fn document_extension_is_required_case_insensitively() {
     let document = Document::default();
-    let wrong = test_output_path("darkroom_document/wrong.json");
+    let dir = TempDir::new("darkroom-document-extension");
+    let wrong = dir.join("wrong.json");
     assert!(matches!(
         save(&document, &wrong).unwrap_err(),
         DocumentSaveError::InvalidExtension { path } if path == wrong
@@ -46,7 +48,7 @@ fn document_extension_is_required_case_insensitively() {
         "load reports the exact rejected path"
     );
 
-    let uppercase = test_output_path("darkroom_document/uppercase.DARKROOM");
+    let uppercase = dir.join("uppercase.DARKROOM");
     save(&document, &uppercase).expect("uppercase extension is valid");
     assert_eq!(load(&uppercase).unwrap(), document);
 
@@ -70,7 +72,8 @@ fn save_refuses_an_invalid_document_and_leaves_the_file_alone() {
     // the next launch would refuse can never replace the one on disk.
     // Before this, save only asserted in debug builds — a release
     // build wrote the bad project happily and failed at reopen.
-    let path = test_output_path("darkroom_document/refused.darkroom");
+    let dir = TempDir::new("darkroom-document-refused");
+    let path = dir.join("refused.darkroom");
     let good = Document::default();
     save(&good, &path).expect("a valid document saves");
     let on_disk = std::fs::read(&path).unwrap();
@@ -100,7 +103,8 @@ fn save_refuses_an_invalid_document_and_leaves_the_file_alone() {
 
 #[test]
 fn load_rejects_invalid_archives_and_missing_or_invalid_documents() {
-    let corrupt = test_output_path("darkroom_document/corrupt.darkroom");
+    let dir = TempDir::new("darkroom-document-rejects");
+    let corrupt = dir.join("corrupt.darkroom");
     std::fs::write(&corrupt, b"not a zip archive").unwrap();
     assert!(
         matches!(
@@ -110,7 +114,7 @@ fn load_rejects_invalid_archives_and_missing_or_invalid_documents() {
         "corrupt ZIP reports the exact archive path"
     );
 
-    let missing = test_output_path("darkroom_document/missing.darkroom");
+    let missing = dir.join("missing.darkroom");
     write_test_archive(&missing, "other.json", b"{}");
     assert!(
         matches!(
@@ -120,7 +124,7 @@ fn load_rejects_invalid_archives_and_missing_or_invalid_documents() {
         "missing document entry reports its archive and exact count"
     );
 
-    let malformed = test_output_path("darkroom_document/malformed.darkroom");
+    let malformed = dir.join("malformed.darkroom");
     write_test_archive(&malformed, DOCUMENT_ENTRY, b"{");
     assert!(
         matches!(
@@ -130,7 +134,7 @@ fn load_rejects_invalid_archives_and_missing_or_invalid_documents() {
         "malformed JSON reports its archive"
     );
 
-    let invalid = test_output_path("darkroom_document/invalid.darkroom");
+    let invalid = dir.join("invalid.darkroom");
     let mut document = Document::default();
     document.graph.bindings.insert(
         InputPort::new(NodeId::unique(), 0),
