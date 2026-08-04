@@ -100,6 +100,12 @@ impl ShownImage<'_> {
 struct ShownSource<'a> {
     shown: Option<ShownImage<'a>>,
     message: Option<&'a str>,
+    /// The source is still deferred: this frame's placeholder is waiting on
+    /// an upload only a *later* frame can do, so the viewer owes the host a
+    /// request for one. Distinct from every other messageless state — those
+    /// are waiting on a graph run or on nothing at all, and neither resolves
+    /// by drawing again.
+    preparing: bool,
 }
 
 impl<'a> ShownSource<'a> {
@@ -113,6 +119,7 @@ impl<'a> ShownSource<'a> {
             return Self {
                 shown: None,
                 message: None,
+                preparing: false,
             };
         };
         let Some(image) = value.image() else {
@@ -127,6 +134,7 @@ impl<'a> ShownSource<'a> {
             return Self {
                 shown: None,
                 message: Some(message),
+                preparing: false,
             };
         };
         match &image.full {
@@ -137,10 +145,12 @@ impl<'a> ShownSource<'a> {
                     native_format: image.native_format,
                 }),
                 message: None,
+                preparing: false,
             },
             FullImage::Failed(message) => Self {
                 shown: None,
                 message: Some(message.as_str()),
+                preparing: false,
             },
             // The pass that materializes a visible viewer's source runs in
             // `App::update`, ahead of the record — so it covers every viewer
@@ -152,11 +162,13 @@ impl<'a> ShownSource<'a> {
             // materialized, so a stacked one is still deferred).
             //
             // So this is one frame of placeholder, resolved by the next
-            // `update`. The layout change that revealed the pane already earns
-            // that frame, so nothing here has to ask for one.
+            // `update` — and `preparing` is what asks for that frame. Nothing
+            // else does: the click that opened the tab is over by then, and an
+            // idle host records nothing until fresh input arrives.
             FullImage::Deferred(_) => Self {
                 shown: None,
                 message: Some("image is being prepared"),
+                preparing: true,
             },
         }
     }
@@ -209,7 +221,19 @@ impl ImageViewer {
         title: &str,
         source: Option<&StoredContent>,
     ) -> bool {
-        let ShownSource { shown, message } = ShownSource::resolve(source);
+        let ShownSource {
+            shown,
+            message,
+            preparing,
+        } = ShownSource::resolve(source);
+        // The upload that ends the placeholder happens in `App::update`, which
+        // only runs if there *is* another frame — so the pane that is waiting
+        // on one is the thing that has to ask. Re-asked every frame the
+        // placeholder is up, and it stops the moment the texture lands: an
+        // idle viewer never keeps the host awake.
+        if preparing {
+            ui.request_repaint();
+        }
         self.sync_source(shown.map(|image| image.handle.size()));
         self.apply_gestures(ui, shown);
 
@@ -483,6 +507,14 @@ fn pane_wid(node_id: NodeId) -> WidgetId {
 mod tests {
     use super::*;
 
+    use palantir::internals::UiHarness;
+
+    use crate::core::document::TabRef;
+    use crate::core::document::harness::DocFixture;
+    use crate::core::preview::preview_func;
+    use crate::gui::state::preview_store::PreviewStore;
+    use crate::gui::state::preview_store::internals::opaque_image_value;
+
     fn viewer_node() -> NodeId {
         NodeId::from_u128(1)
     }
@@ -528,14 +560,67 @@ mod tests {
     /// own reason, and the absent entry carries none — that last case is what
     /// draws the standing "after the next graph run" hint rather than an
     /// error, so it must stay distinguishable from a real failure.
+    ///
+    /// Only the deferred one is `preparing`: the others are waiting on a graph
+    /// run, on a fix, or on nothing, and no amount of redrawing resolves them.
     #[test]
     fn resolve_separates_no_entry_from_a_reason_there_is_no_image() {
         let nothing = ShownSource::resolve(None);
         assert!(nothing.shown.is_none() && nothing.message.is_none());
+        assert!(!nothing.preparing, "an absent entry is not being prepared");
 
         let errored = StoredContent::Error("boom".to_owned());
         let resolved = ShownSource::resolve(Some(&errored));
         assert!(resolved.shown.is_none());
         assert_eq!(resolved.message, Some("boom"));
+        assert!(!resolved.preparing, "a failure resolves by nothing");
+    }
+
+    /// A deferred source has to ask for the frame that ends it. The upload
+    /// runs in `App::update`, so it needs a *next* frame — and an idle host
+    /// records none on its own. Without the request the pane sat on "image is
+    /// being prepared" until unrelated input (a hover crossing any widget)
+    /// happened to wake one.
+    #[test]
+    fn a_deferred_source_asks_for_the_frame_that_materializes_it() {
+        let mut h = UiHarness::arena();
+        let mut fixture = DocFixture::default();
+        let node = fixture.add(&preview_func(Default::default()));
+        // The viewer tab open and active: that is what makes `reconcile`
+        // upload the full-resolution texture below.
+        let doc = fixture.with_tab(TabRef::ImageViewer(node)).doc;
+        let mut store = PreviewStore::default();
+        store.ingest_preview(h.ui(), node, opaque_image_value());
+
+        let theme = Theme::default();
+        let mut prefs = ViewerPreferences::default();
+        let mut viewer = ImageViewer::new(node);
+        let waiting = h
+            .frame(|ui| {
+                viewer.show(ui, &theme, &mut prefs, "img", store.entries.get(&node));
+            })
+            .repaint_requested;
+        assert!(
+            waiting,
+            "the placeholder frame must schedule the one that replaces it",
+        );
+
+        store.reconcile(h.ui(), &doc);
+        // Three frames, and the last one is the assertion: the texture's first
+        // frame brings the header and controls with it, and a chip settling in
+        // is a repaint request of its own — the claim here is that a *resting*
+        // viewer stops asking, not that it never asks twice.
+        let mut resting = true;
+        for _ in 0..3 {
+            resting = !h
+                .frame(|ui| {
+                    viewer.show(ui, &theme, &mut prefs, "img", store.entries.get(&node));
+                })
+                .repaint_requested;
+        }
+        assert!(
+            resting,
+            "a materialized viewer keeps the host awake for nothing",
+        );
     }
 }
