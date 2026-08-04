@@ -10,8 +10,6 @@ auto chosen reference frame for stacking and manually specified
 
 visual node groups
 
-audit allocations overshoot , see where reserve_exact would be better
-
 mesh once registrations
 
 imageview to load only when active, until then save to disk
