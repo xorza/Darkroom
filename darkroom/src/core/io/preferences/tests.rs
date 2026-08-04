@@ -9,6 +9,29 @@ use crate::core::io::preferences::{
 };
 use crate::core::theme_pref::ThemeChoice;
 
+/// The file sits beside the running executable, not in whatever directory the
+/// process was started from. Asserted against `current_exe` rather than by
+/// changing the working directory, which the rest of the suite shares.
+#[test]
+fn the_preferences_file_resolves_beside_the_executable() {
+    let path = Preferences::path();
+    let exe = std::env::current_exe().expect("the test binary can locate itself");
+
+    assert_eq!(
+        path.file_name(),
+        Some(std::ffi::OsStr::new("darkroom.preferences.toml"))
+    );
+    assert_eq!(
+        path.parent(),
+        exe.parent(),
+        "the preferences live in the executable's directory"
+    );
+    // And that directory is a real absolute location, not the empty prefix the
+    // fallback would leave — which is what a working-directory resolution
+    // would look like here.
+    assert!(path.is_absolute(), "{path:?} is not an absolute path");
+}
+
 fn roundtrip(cfg: &Preferences) -> Preferences {
     let bytes = serialize(cfg, SerdeFormat::Toml).expect("preferences TOML serializes");
     deserialize(&bytes, SerdeFormat::Toml).expect("preferences TOML round-trips")
