@@ -1,105 +1,62 @@
 #!/usr/bin/env bash
-# Install darkroom's icons, desktop entry and MIME type into the per-user XDG
-# data dirs, so GNOME/KDE/etc. show the icon in launchers and the taskbar and
-# open `.darkroom` files with it. Run after
-# `cargo build --release` (this only wires up the desktop integration; it
-# does not copy the binary). Re-runnable.
+# Wire darkroom into the desktop: launcher icons, the menu entry, and the
+# `.darkroom` file association. Run after `cargo build --release`; installs no
+# binary of its own. Re-runnable.
 #
-#   darkroom/assets/linux/install.sh
-#
-# System-wide instead of per-user:  PREFIX=/usr/local sudo darkroom/assets/linux/install.sh
+# System-wide:  PREFIX=/usr/local sudo darkroom/assets/linux/install.sh
 set -euo pipefail
 cd "$(dirname "$0")"
-ICONS=../icons
-# The desktop file ID: the entry's basename, the icon name, and the window's
-# Wayland app_id / X11 WM_CLASS are all this one string, and the shell pairs
-# the window with the launcher only when they agree. `main.rs` sets the
-# window's; keep the two in step.
-APP_ID=com.cssodessa.darkroom
 
+# The entry's basename, the icon name, and the window's Wayland app_id / X11
+# WM_CLASS (set in `main.rs`) are all this one string. The shell pairs a window
+# with its launcher only when they agree.
+APP_ID=com.cssodessa.darkroom
+MIME=application/x-darkroom
 DATA="${PREFIX:+$PREFIX/share}"
 DATA="${DATA:-$HOME/.local/share}"
 
-# Resolve what the entry's `Exec=` will name. This is load-bearing, not a
-# nicety: GIO discards a desktop entry whose Exec binary it cannot find on
-# PATH, and it does so silently — the file stays installed, `xdg-mime query
-# default` still answers `darkroom.desktop`, and yet file managers fall back
-# to whatever handles the parent `application/zip` type (Ark, on KDE). So an
-# association that looks installed does nothing.
-#
-# A plain `darkroom` on PATH is preferred, since the entry stays valid however
-# the binary is later moved. Failing that, the cargo build output is baked in
-# absolutely — which works, but breaks on `cargo clean`.
+# GIO discards an entry whose Exec binary it cannot resolve, and silently — the
+# association then looks installed while file managers fall back to whatever
+# handles the parent `application/zip`. Prefer PATH; else bake in the build
+# output, which `cargo clean` removes.
 BIN="${DARKROOM_BIN:-}"
-if [ -z "$BIN" ] && command -v darkroom >/dev/null 2>&1; then
-  BIN=darkroom
+if [ -z "$BIN" ] && command -v darkroom >/dev/null; then
+  BIN=darkroom # bare, so the entry survives the binary being moved
 fi
 if [ -z "$BIN" ]; then
-  for candidate in ../../../target/release/darkroom ../../../target/debug/darkroom; do
+  for candidate in ../../../target/{release,debug}/darkroom; do
     if [ -x "$candidate" ]; then
       BIN=$(readlink -f "$candidate")
-      echo "note: no 'darkroom' on PATH; pointing the entry at $BIN"
-      echo "      (a symlink into ~/.local/bin survives 'cargo clean'; this does not)"
       break
     fi
   done
 fi
 if [ -z "$BIN" ]; then
-  echo "warning: no darkroom binary found — on PATH, in target/release, or in" >&2
-  echo "         target/debug, and DARKROOM_BIN is unset. The entry will be" >&2
-  echo "         installed but ignored until one exists. Build first, or set" >&2
-  echo "         DARKROOM_BIN=/path/to/darkroom." >&2
+  echo "warning: no darkroom binary on PATH or in target/; the entry stays inert" >&2
   BIN=darkroom
 fi
 
-echo "installing hicolor PNGs into $DATA/icons/hicolor"
+echo "installing into $DATA (Exec=$BIN)"
 for n in 16 24 32 48 64 128 256 512; do
-  install -Dm644 "$ICONS/darkroom-$n.png" \
-    "$DATA/icons/hicolor/${n}x${n}/apps/$APP_ID.png"
-  # The same artwork under the type's default icon name, so file managers
-  # give `.darkroom` documents an icon of their own rather than the generic
-  # archive one.
-  install -Dm644 "$ICONS/darkroom-$n.png" \
-    "$DATA/icons/hicolor/${n}x${n}/mimetypes/application-x-darkroom.png"
+  install -Dm644 "../icons/darkroom-$n.png" "$DATA/icons/hicolor/${n}x${n}/apps/$APP_ID.png"
+  install -Dm644 "../icons/darkroom-$n.png" \
+    "$DATA/icons/hicolor/${n}x${n}/mimetypes/${MIME/\//-}.png"
 done
-
-echo "installing MIME type into $DATA/mime/packages"
 install -Dm644 darkroom-mime.xml "$DATA/mime/packages/darkroom.xml"
+sed "s|^Exec=darkroom |Exec=$BIN |" "$APP_ID.desktop" |
+  install -Dm644 /dev/stdin "$DATA/applications/$APP_ID.desktop"
 
-echo "installing desktop entry into $DATA/applications (Exec=$BIN)"
-entry=$(mktemp)
-trap 'rm -f "$entry"' EXIT
-sed "s|^Exec=darkroom |Exec=$BIN |" "$APP_ID.desktop" >"$entry"
-install -Dm644 "$entry" "$DATA/applications/$APP_ID.desktop"
-
-# Refresh caches (best-effort; harmless if the tools are absent).
 gtk-update-icon-cache -f -t "$DATA/icons/hicolor" 2>/dev/null || true
 update-mime-database "$DATA/mime" 2>/dev/null || true
 update-desktop-database "$DATA/applications" 2>/dev/null || true
+# Per-user only: this writes the caller's mimeapps.list, which a system-wide
+# install has no business touching.
+[ -n "${PREFIX:-}" ] || xdg-mime default "$APP_ID.desktop" "$MIME" 2>/dev/null || true
 
-# Claim the type as the default handler. Per-user only: this writes the
-# caller's mimeapps.list, which a PREFIX (system-wide) install has no business
-# touching — there the admin's `xdg-mime default` or the user's own file
-# decides.
-if [ -z "${PREFIX:-}" ]; then
-  xdg-mime default "$APP_ID.desktop" application/x-darkroom 2>/dev/null || true
-fi
-
-echo "done. darkroom should now appear in your application launcher."
-
-# Check the outcome rather than trusting the steps. `xdg-mime query default`
-# only reads back the line just written to mimeapps.list, so it answers
-# correctly even when the entry is unusable; `gio mime` resolves it the way a
-# file manager does, and is what catches an unloadable entry.
-if command -v gio >/dev/null 2>&1; then
-  if gio mime application/x-darkroom 2>/dev/null | grep -q "$APP_ID.desktop"; then
-    echo "verified: .darkroom files resolve to $APP_ID.desktop"
-  else
-    echo >&2
-    echo "warning: the type is installed but no application resolves for it." >&2
-    echo "         The usual cause is an Exec binary that cannot be found, which" >&2
-    echo "         makes the whole entry invalid. Check:" >&2
-    echo "           gio mime application/x-darkroom" >&2
-    echo "           command -v $BIN" >&2
-  fi
+# `xdg-mime query default` only reads back the line just written, so it cannot
+# catch an unloadable entry; `gio mime` resolves it the way a file manager does.
+if command -v gio >/dev/null && ! gio mime "$MIME" | grep -q "$APP_ID.desktop"; then
+  echo "warning: $MIME resolves to nothing — is $BIN reachable?" >&2
+else
+  echo "done: $MIME -> $APP_ID.desktop"
 fi
