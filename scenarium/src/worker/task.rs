@@ -6,6 +6,7 @@ use tokio_util::sync::CancellationToken;
 
 use ::common::CancelToken;
 
+use crate::execution::cache::runtime::error::CacheFlushReport;
 use crate::execution::engine::ExecutionEngine;
 use crate::execution::error::Error;
 use crate::execution::report::ExecutionOutcome;
@@ -37,6 +38,20 @@ impl EventLoopTransition {
             None => Self::Preserve,
         }
     }
+}
+
+/// Which halves of a flush report reach the host.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FlushReporting {
+    /// A flush the host asked for, by node. Everything it did not write is the
+    /// answer to that request — a type that will never persist included, since
+    /// the node goes on showing itself disk-backed with nothing behind it.
+    Requested,
+    /// The sweep a newly attached store owes every already-resident value.
+    /// Nobody named these nodes, so an unpersistable type among them is a
+    /// standing fact about the library rather than news; only a write that
+    /// broke is worth raising.
+    Sweep,
 }
 
 #[derive(Debug)]
@@ -170,7 +185,8 @@ where
 
         if let Some(cache) = self.intent.disk_store.take() {
             self.engine.set_disk_store(cache);
-            self.engine.flush_all_caches().await;
+            let report = self.engine.flush_all_caches().await;
+            self.report_flush(report, FlushReporting::Sweep);
         }
 
         match self.intent.graph_state.take() {
@@ -226,15 +242,7 @@ where
             return;
         }
 
-        let details = failures
-            .iter()
-            .map(|failure| format!("{:?}: {}", failure.node_id, failure.message))
-            .collect::<Vec<_>>()
-            .join("; ");
-        (self.callback)(WorkerReport::Error(WorkerError::CacheEviction {
-            failure_count: failures.len(),
-            details,
-        }));
+        (self.callback)(WorkerReport::Error(WorkerError::CacheEviction { failures }));
     }
 
     /// Persist the named nodes' resident disk-backed values.
@@ -246,9 +254,37 @@ where
         if self.intent.flush_cache.is_empty() {
             return;
         }
-        self.engine
+        let report = self
+            .engine
             .flush_cache(self.intent.flush_cache.drain(..))
             .await;
+        self.report_flush(report, FlushReporting::Requested);
+    }
+
+    /// Raise whatever a flush left unwritten, under `reporting`'s policy.
+    ///
+    /// A flush that wrote everything reports nothing — silence here means the
+    /// blobs are there, which is the one thing the host could not previously
+    /// tell apart from a store that failed on every node.
+    fn report_flush(&self, report: CacheFlushReport, reporting: FlushReporting) {
+        let CacheFlushReport {
+            failures,
+            unsupported,
+        } = report;
+        // The policy is the worker's because only it knows whether a node was
+        // named: the host sent the command, but nothing correlates a report
+        // back to one.
+        let unsupported = match reporting {
+            FlushReporting::Requested => unsupported,
+            FlushReporting::Sweep => Vec::new(),
+        };
+        if failures.is_empty() && unsupported.is_empty() {
+            return;
+        }
+        (self.callback)(WorkerReport::Error(WorkerError::CacheFlush {
+            failures,
+            unsupported,
+        }));
     }
 
     async fn execute(&mut self, run: PendingRun) {
