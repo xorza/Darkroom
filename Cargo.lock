@@ -1856,13 +1856,13 @@ version = "0.1.0"
 dependencies = [
  "arc-swap",
  "bytemuck",
+ "criterion",
  "glam 0.33.3",
  "hashbrown 0.17.1",
  "image",
  "parking_lot",
  "paste",
  "pollster 1.0.1",
- "quickbench 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "rayon",
  "serde",
  "strum",
@@ -2197,7 +2197,7 @@ dependencies = [
  "nalgebra",
  "ort",
  "parking_lot",
- "quickbench 0.1.1",
+ "quickbench",
  "rand 0.10.2",
  "rand_chacha 0.10.0",
  "rayon",
@@ -3360,17 +3360,7 @@ name = "quickbench"
 version = "0.1.1"
 dependencies = [
  "named-lock",
- "quickbench-macros 0.1.1",
-]
-
-[[package]]
-name = "quickbench"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8dc98b4e118db20675b101a4215f8727253ee30a999ea367ead3670483eec3b8"
-dependencies = [
- "named-lock",
- "quickbench-macros 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "quickbench-macros",
 ]
 
 [[package]]
@@ -3379,16 +3369,6 @@ version = "0.1.1"
 dependencies = [
  "quote",
  "syn 3.0.3",
-]
-
-[[package]]
-name = "quickbench-macros"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "79a5fe7ef76e17fa8327f03fbb12b295850fffbee7a03248b23d11f5ea08dcb5"
-dependencies = [
- "quote",
- "syn 2.0.119",
 ]
 
 [[package]]

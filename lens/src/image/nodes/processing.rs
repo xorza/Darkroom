@@ -283,36 +283,28 @@ fn adjust_image(
     context: &mut imaginarium::ProcessingContext,
     value: DynamicValue,
 ) -> InvokeResult<Image> {
-    match value.into_custom::<Image>() {
-        Ok(mut image) if image.buffer.is_cpu() => {
-            {
-                let cpu = image
-                    .buffer
-                    .make_cpu_mut(context)
-                    .map_err(InvokeError::external)?;
-                op.apply_cpu(cpu);
-            }
-            Ok(image)
-        }
-        Ok(image) => adjust_into_fresh(op, context, &image),
+    // Contrast/brightness works in place, so an owned input is adjusted where it
+    // stands — no output buffer to allocate. Only a value still shared with
+    // other consumers has to be copied first, and `duplicate` keeps that copy on
+    // whichever backend the image already lives on.
+    let mut image = match value.into_custom::<Image>() {
+        Ok(image) => image,
         Err(value) => {
             let input = value
                 .as_custom::<Image>()
                 .expect("image input type is validated at the compile boundary");
-            adjust_into_fresh(op, context, input)
+            Image::from(
+                input
+                    .buffer
+                    .duplicate(context)
+                    .map_err(InvokeError::external)?,
+            )
         }
-    }
-}
+    };
 
-fn adjust_into_fresh(
-    op: ContrastBrightness,
-    context: &mut imaginarium::ProcessingContext,
-    input: &Image,
-) -> InvokeResult<Image> {
-    let mut output = imaginarium::ImageBuffer::new_empty(input.buffer.desc);
-    op.execute(context, &input.buffer, &mut output)
+    op.execute(context, &mut image.buffer)
         .map_err(InvokeError::external)?;
-    Ok(Image::from(output))
+    Ok(image)
 }
 
 #[cfg(test)]
