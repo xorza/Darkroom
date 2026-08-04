@@ -55,6 +55,25 @@ fn the_cone_reaches_downstream_and_stops() {
     );
 }
 
+/// [`CompiledGraph::consumer_cone`] is the same walk answered in the *id*
+/// space — what a host projecting an eviction reads. Ascending indices out of
+/// the walk over an id-sorted column means ascending ids here.
+#[test]
+fn the_public_cone_answers_in_id_space() {
+    let f = fixture();
+    let mut expected = vec![f.id("source"), f.id("sink")];
+    expected.sort();
+
+    assert_eq!(f.program.consumer_cone([f.id("source")]), expected);
+    assert_eq!(
+        f.program.consumer_cone([f.id("source"), NodeId::unique()]),
+        expected,
+        "an id the program never held contributes nothing"
+    );
+    assert!(f.program.consumer_cone([NodeId::unique()]).is_empty());
+    assert!(f.program.consumer_cone(Vec::<NodeId>::new()).is_empty());
+}
+
 /// The set is the visited mark, so a seed named twice — and a seed already
 /// reachable from another — appears exactly once.
 #[test]

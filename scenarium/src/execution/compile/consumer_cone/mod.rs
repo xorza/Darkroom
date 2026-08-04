@@ -8,12 +8,13 @@ use crate::execution::identity::NodeIdx;
 /// outputs, transitively, plus the seeds themselves.
 ///
 /// Answering that needs the program's data edges reversed, which is a pure
-/// function of the program and so is **derived per call, never kept** — the one
-/// question that needs it, what evicting a node reaches, is a user action,
-/// while an index held between calls would be stale the moment the graph is
-/// edited. What persists is the *storage*: [`RuntimeCache`] owns one of these,
-/// so the second eviction refills the buffers below instead of allocating them
-/// again.
+/// function of the program and so is **derived per call, never kept** — what
+/// asks it, what evicting a node reaches, is a user action, while an index held
+/// between calls would be stale the moment the graph is edited. What persists
+/// is the *storage*: [`RuntimeCache`] owns one of these, so the second eviction
+/// refills the buffers below instead of allocating them again.
+/// [`CompiledGraph::consumer_cone`], answering the same question for a host
+/// ahead of the eviction, has nowhere to keep one and allocates per call.
 ///
 /// The reversed edges are one packed run per node rather than a `Vec` per node.
 /// The walk visits one node after another, so a run only ever has to be a
