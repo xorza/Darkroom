@@ -3,9 +3,10 @@
 
 use std::f32::consts::PI;
 use std::hint::black_box;
+use std::time::Duration;
 
+use criterion::{BenchmarkId, Criterion, Throughput};
 use glam::Vec2;
-use quickbench::quick_bench;
 
 use super::{FilterMode, Transform};
 use crate::common::color_format::ALL_FORMATS;
@@ -17,23 +18,31 @@ use crate::image::Image;
 const WIDTH: usize = 6144;
 const HEIGHT: usize = 4096;
 
-#[quick_bench(warmup_iters = 3, iters = 20)]
-fn bench_transform_rotate(b: quickbench::Bencher) {
+pub fn bench(c: &mut Criterion) {
     let center = Vec2::new(WIDTH as f32 / 2.0, HEIGHT as f32 / 2.0);
+
+    let mut group = c.benchmark_group("transform/rotate");
+    group.sample_size(20);
+    group.warm_up_time(Duration::from_secs(1));
+    group.measurement_time(Duration::from_secs(3));
 
     for &format in ALL_FORMATS {
         let input = create_test_image(format, WIDTH, HEIGHT, 0);
         let mut output = Image::new_black(input.desc()).unwrap();
+        // Criterion turns ids into report paths, so keep them space-free.
+        let label = format.to_string().replace(' ', "_");
 
+        group.throughput(Throughput::Bytes(input.bytes().len() as u64));
         for &filter in &[FilterMode::Nearest, FilterMode::Bilinear] {
             let transform = Transform::new()
                 .rotate_around(PI / 6.0, center)
                 .filter(filter);
-            let label = format!("{format}/{filter:?}");
 
-            b.bench_labeled(&label, || {
-                transform.apply_cpu(black_box(&input), black_box(&mut output));
+            group.bench_function(BenchmarkId::new(format!("{filter:?}"), &label), |b| {
+                b.iter(|| transform.apply_cpu(black_box(&input), black_box(&mut output)));
             });
         }
     }
+
+    group.finish();
 }

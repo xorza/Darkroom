@@ -17,3 +17,18 @@ polymorphism. A workspace member of Scenarium and a git submodule; consumed by
 - **9 formats, always.** New ops and shaders handle the full format set (or
   explicitly declare a narrower supported list). Half-covering the format
   matrix is a bug.
+
+## Benchmarks
+
+Criterion. `bench.rs` beside the code it measures, gated
+`#[cfg(feature = "bench")]` and reached only through the `crate::bench` facade,
+so `benches/*.rs` stays harness wiring and no production module goes `pub` for a
+benchmark's sake. `bench` implies `internals`.
+
+```
+cargo bench -p imaginarium --bench contrast_brightness
+```
+
+Name the target. An unfiltered `cargo bench` links every bench binary at once
+under a fat-LTO profile and can get OOM-killed; cap with `-j 2` if you need
+several.

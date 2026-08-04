@@ -3,8 +3,9 @@
 use super::scalar::{ConversionInfo, dispatch_convert_row_scalar};
 use super::simd::get_simd_row_converter;
 use crate::common::color_format::{ChannelSize, ColorFormat};
-use quickbench::quick_bench;
+use criterion::{BenchmarkId, Criterion, Throughput};
 use std::hint::black_box;
+use std::time::Duration;
 
 const WIDTH_4K: usize = 4096;
 
@@ -65,28 +66,39 @@ const CONVERSION_PAIRS: &[(ColorFormat, ColorFormat)] = &[
     (ColorFormat::L_F32, ColorFormat::L_U16),
 ];
 
-#[quick_bench(warmup_iters = 3, iters = 20)]
-fn bench_row_conversions(b: quickbench::Bencher) {
+pub fn bench(c: &mut Criterion) {
+    let mut group = c.benchmark_group("conversion/row");
+    group.sample_size(50);
+    group.warm_up_time(Duration::from_millis(500));
+    group.measurement_time(Duration::from_secs(2));
+
     for &(from_fmt, to_fmt) in CONVERSION_PAIRS {
         let src = create_row_for_format(WIDTH_4K, from_fmt);
         let dst_size = WIDTH_4K * to_fmt.byte_count() as usize;
         let mut dst = vec![0u8; dst_size];
         let info = ConversionInfo::new(from_fmt, to_fmt);
-        let label = format!("{from_fmt}_to_{to_fmt}");
+        // Criterion turns ids into report paths, so keep them space-free.
+        let label = format!("{from_fmt}_to_{to_fmt}").replace(' ', "_");
+
+        group.throughput(Throughput::Bytes(src.len() as u64));
 
         if let Some(simd_fn) = get_simd_row_converter(from_fmt, to_fmt) {
-            b.bench_labeled(&format!("{label}/simd"), || {
-                simd_fn(black_box(&src), black_box(&mut dst), black_box(WIDTH_4K));
+            group.bench_function(BenchmarkId::new("simd", &label), |b| {
+                b.iter(|| simd_fn(black_box(&src), black_box(&mut dst), black_box(WIDTH_4K)));
             });
         }
 
-        b.bench_labeled(&format!("{label}/scalar"), || {
-            dispatch_convert_row_scalar(
-                black_box(&src),
-                black_box(&mut dst),
-                black_box(WIDTH_4K),
-                black_box(&info),
-            );
+        group.bench_function(BenchmarkId::new("scalar", &label), |b| {
+            b.iter(|| {
+                dispatch_convert_row_scalar(
+                    black_box(&src),
+                    black_box(&mut dst),
+                    black_box(WIDTH_4K),
+                    black_box(&info),
+                );
+            });
         });
     }
+
+    group.finish();
 }

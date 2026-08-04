@@ -123,7 +123,7 @@ pub(super) fn apply(params: &ContrastBrightness, image: &mut Image) {
     }
 }
 
-trait ContrastBrightnessApply: Pod + Send + Sync {
+pub(super) trait ContrastBrightnessApply: Pod + Send + Sync {
     fn apply(self, contrast: f32, brightness: f32) -> Self;
 }
 
@@ -160,7 +160,7 @@ impl ContrastBrightnessApply for f32 {
 /// [`ContrastBrightnessApply`]. The u16 formats always take this path; the SIMD
 /// formats fall back to it when the CPU lacks the feature, and the tests cross-check
 /// the SIMD kernels against it.
-fn apply_typed<T>(image: &mut Image, params: ContrastBrightness)
+pub(super) fn apply_typed<T>(image: &mut Image, params: ContrastBrightness)
 where
     T: Pod + ContrastBrightnessApply,
 {

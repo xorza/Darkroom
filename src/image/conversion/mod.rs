@@ -22,8 +22,8 @@ const LUMA_B: u32 = 4732;
 // Used by the SIMD integer luminance kernels; [R, G, B].
 const LUMA_8BIT: [u16; 3] = [54, 183, 19];
 
-#[cfg(test)]
-mod bench;
+#[cfg(feature = "bench")]
+pub(crate) mod bench;
 #[cfg(test)]
 mod tests;
 

@@ -1,4 +1,4 @@
-mod conversion;
+pub(crate) mod conversion;
 mod io;
 pub(crate) mod pixels;
 mod tiff;

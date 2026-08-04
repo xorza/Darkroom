@@ -1,3 +1,5 @@
+#[cfg(feature = "bench")]
+pub(crate) mod bench;
 mod cpu;
 #[cfg(feature = "wgpu")]
 mod gpu;

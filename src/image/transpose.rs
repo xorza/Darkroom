@@ -186,7 +186,10 @@ mod tests {
 
         let image = Image::from([&planar.planes[0]]);
         assert_eq!(image.desc().color_format, ColorFormat::L_U16);
-        assert_eq!(image.bytes(), bytemuck::cast_slice(&[10u16, 20, 30]));
+        assert_eq!(
+            image.bytes(),
+            bytemuck::cast_slice::<u16, u8>(&[10u16, 20, 30])
+        );
     }
 
     #[test]

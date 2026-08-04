@@ -20,6 +20,8 @@ macro_rules! cfg_aarch64 {
     };
 }
 
+#[cfg(feature = "bench")]
+pub mod bench;
 mod common;
 pub mod cpu_features;
 pub mod drawing;

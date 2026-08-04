@@ -1,5 +1,5 @@
-#[cfg(test)]
-mod bench;
+#[cfg(feature = "bench")]
+pub(crate) mod bench;
 mod cpu;
 
 use crate::image::Image;
