@@ -174,7 +174,7 @@ impl Drop for WorkerBridge {
 mod tests {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
 
     use scenarium::{
         Binding, Compiler, ConstValue, Graph, InputPort, WorkerActivity, WorkerReport,
@@ -220,11 +220,13 @@ mod tests {
             .start_event_loop()
             .expect("worker accepts the event-loop start");
 
+        let mut delivered = 0_usize;
         loop {
             let report = bridge
                 .rx
                 .recv_timeout(Duration::from_secs(5))
                 .expect("worker did not start its event loop");
+            delivered += 1;
             if matches!(
                 report,
                 WorkerReport::Status(status)
@@ -234,11 +236,36 @@ mod tests {
                 break;
             }
         }
-        let before_drop = wake_count.load(Ordering::SeqCst);
+        // A report is queued *before* its wake fires, so receiving one says
+        // nothing about its wake having landed yet. Settling the count against
+        // the reports actually taken is what makes the drop delta below mean
+        // the shutdown wake rather than a straggler from the run.
+        //
+        // It does settle: the loop is quiescent — the FPS event is disabled at
+        // 0 Hz, so its lambda parks forever and no further report is produced
+        // until shutdown.
+        let settle_by = Instant::now() + Duration::from_secs(5);
+        while wake_count.load(Ordering::SeqCst) < delivered {
+            assert!(
+                Instant::now() < settle_by,
+                "only {} of {delivered} delivered reports woke the host",
+                wake_count.load(Ordering::SeqCst),
+            );
+            std::thread::yield_now();
+        }
+        assert_eq!(
+            wake_count.load(Ordering::SeqCst),
+            delivered,
+            "every wake belongs to a report the host was handed"
+        );
 
         drop(bridge);
 
-        assert_eq!(wake_count.load(Ordering::SeqCst), before_drop + 1);
+        assert_eq!(
+            wake_count.load(Ordering::SeqCst),
+            delivered + 1,
+            "shutdown reports the worker idle, and wakes the host for it, before the runtime goes away"
+        );
     }
 
     #[test]
