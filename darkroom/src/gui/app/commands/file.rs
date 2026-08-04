@@ -63,12 +63,15 @@ impl App {
     /// exactly the document-derived half and leaves
     /// the worker-stream half (`compiled`, `activity`, `cache_ram`) standing —
     /// an in-flight run still reports against the program the worker
-    /// acknowledged, and its cache really does still hold that RAM.
+    /// acknowledged. What makes that half true again is the worker itself: the
+    /// program and its whole runtime cache go with the document, and the
+    /// `Cleared` acknowledgement is what resets the projection.
     ///
     /// The worker's disk cache repoints too, so disk-backed nodes read the new
     /// document's store rather than the old one's.
     fn adopt_document(&mut self, open: OpenDocument) {
         self.run_state.clear();
+        self.runtime.clear_program();
         // One assignment, not two: the UI showing a document is replaced with
         // it, so there is no window where fresh panes hold a stale graph's
         // gesture state.
