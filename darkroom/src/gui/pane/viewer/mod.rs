@@ -4,11 +4,12 @@
 //! store and keeps only navigation state. Opening or restoring a tab therefore
 //! shows an already-received value without an editor-driven notification path.
 //!
-//! The store materializes the full RGBA8 texture before the viewer records and
-//! releases the source value immediately after registration. It does that only
-//! for the nodes a pane will actually show
-//! (`Document::visible_viewer_nodes`), so a viewer stacked behind another tab
-//! holds no full-resolution texture until it is activated.
+//! The full RGBA8 texture is uploaded by the store on demand, the first time a
+//! viewer asks for it while recording, and the source value is released as it
+//! goes. Asking is what scopes it: a pane records only while its tab is the
+//! visible one, so a viewer stacked behind another holds no full-resolution
+//! texture until it is activated — and one activated mid-record draws at full
+//! resolution in the pass that puts it on screen, never a frame later.
 //!
 //! Split the way the graph pane is, by what each part does rather than by what
 //! it draws: [`camera`] is the affine algebra between texels, logical px and
@@ -24,6 +25,7 @@ mod controls;
 mod glyph;
 
 use scenarium::NodeId;
+use std::borrow::Cow;
 use std::fmt::Write as _;
 
 use glam::{UVec2, Vec2};
@@ -41,7 +43,8 @@ use crate::gui::pane::viewer::camera::{
     zoom_about_pane_center,
 };
 use crate::gui::pane::viewer::controls::{BACKDROPS, control_wid, filter_toggle, readout_pill};
-use crate::gui::state::preview_store::{FullImage, StoredContent};
+use crate::gui::state::preview_store::error::PreviewImageError;
+use crate::gui::state::preview_store::{PreviewStore, StoredContent};
 use crate::gui::theme::Theme;
 use crate::gui::widgets::toolbar::{BUTTON_GAP, Chip, TOOLBAR_MARGIN, pill, pill_rule};
 
@@ -75,16 +78,19 @@ pub(crate) struct ImageViewer {
 
 /// The texture a viewer paints this frame, once the store's content has
 /// cleared the viewer's own bar.
-#[derive(Clone, Copy, Debug)]
-struct ShownImage<'a> {
-    handle: &'a ImageHandle,
+#[derive(Clone, Debug)]
+struct ShownImage {
+    /// Owned rather than borrowed: the store uploads it on demand from behind
+    /// a cell, and the clone is a refcount bump on the texture the store still
+    /// owns.
+    handle: ImageHandle,
     /// Source dimensions before the texture-cap downscale.
     native_size: UVec2,
     /// Source pixel format before the RGBA8 view conversion.
     native_format: ColorFormat,
 }
 
-impl ShownImage<'_> {
+impl ShownImage {
     /// This texture's 1:1 logical footprint on the current display — the
     /// space every viewport in this module is expressed in, so the framing
     /// math never sees raw texels.
@@ -93,83 +99,81 @@ impl ShownImage<'_> {
     }
 }
 
-/// What [`StoredContent`] means to a viewer: at most one of a paintable
-/// texture and a reason there isn't one. Both empty is the legitimate
-/// nothing-yet case, which draws the standing hint rather than a message.
-#[derive(Clone, Copy, Debug)]
-struct ShownSource<'a> {
-    shown: Option<ShownImage<'a>>,
-    message: Option<&'a str>,
-    /// The source is still deferred: this frame's placeholder is waiting on
-    /// an upload only a *later* frame can do, so the viewer owes the host a
-    /// request for one. Distinct from every other messageless state — those
-    /// are waiting on a graph run or on nothing at all, and neither resolves
-    /// by drawing again.
-    preparing: bool,
+/// Drawn when a viewer's node has published nothing yet. An invitation rather
+/// than a diagnosis, which is why [`ShownSource::Nothing`] is its own state and
+/// not a message.
+const NOTHING_YET_HINT: &str = "the port's image appears here after the next graph run";
+
+/// What [`StoredContent`] means to a viewer: a texture to paint, why there
+/// isn't one, or nothing published yet.
+///
+/// Three states, so not a `Result` — "no value yet" is neither a texture nor a
+/// failure, and it is the state a freshly opened viewer sits in. No lifetime
+/// either: a texture handle is refcounted and a reason is owned, so nothing
+/// here borrows from the entry it was resolved from.
+#[derive(Clone, Debug)]
+enum ShownSource {
+    Nothing,
+    Image(ShownImage),
+    /// Why this value has no picture. Carries the reason rather than its
+    /// wording, so the pane decides how to say it — including for a perfectly
+    /// good non-image value, which is [`PreviewImageError::NotAnImage`] and
+    /// not a fault.
+    NoImage(PreviewImageError),
 }
 
-impl<'a> ShownSource<'a> {
-    /// Read the store's entry for this viewer's node.
+impl ShownSource {
+    /// Read the store's entry for this viewer's node, uploading its
+    /// full-resolution texture if this is the first pass to ask.
     ///
-    /// Only the full-resolution upload is worth showing here — the pin card
-    /// is happy with the thumbnail — so a stored image that hasn't finished
-    /// materializing still resolves to a message rather than a texture.
-    fn resolve(source: Option<&'a StoredContent>) -> Self {
+    /// Asking here is what scopes the upload: this runs from the record of a
+    /// pane that is being drawn, so only a viewer actually on screen ever
+    /// costs one — and it costs it *now*, in the pass that draws it, rather
+    /// than a frame later. The preview card never asks; its thumbnail is
+    /// already resident.
+    fn resolve(source: Option<&StoredContent>, ui: &Ui) -> Self {
         let Some(value) = source else {
-            return Self {
-                shown: None,
-                message: None,
-                preparing: false,
-            };
+            return Self::Nothing;
         };
         let Some(image) = value.image() else {
-            // No image to show. A failure reports its own reason; a
-            // perfectly good non-image value doesn't get one, because
-            // "7" is not what a viewer tab is for — the preview card
-            // renders that.
-            let message = match value {
-                StoredContent::Error(message) => message.as_str(),
-                _ => "this preview has no image value",
-            };
-            return Self {
-                shown: None,
-                message: Some(message),
-                preparing: false,
-            };
+            // A stored failure keeps its own reason. A perfectly good
+            // non-image value is `NotAnImage`: "7" is not what a viewer tab is
+            // for, and the preview card is what renders it.
+            return Self::NoImage(match value {
+                StoredContent::Error(error) => error.clone(),
+                _ => PreviewImageError::NotAnImage,
+            });
         };
-        match &image.full {
-            FullImage::Resident(handle) => Self {
-                shown: Some(ShownImage {
-                    handle,
-                    native_size: image.native_size,
-                    native_format: image.native_format,
-                }),
-                message: None,
-                preparing: false,
-            },
-            FullImage::Failed(message) => Self {
-                shown: None,
-                message: Some(message.as_str()),
-                preparing: false,
-            },
-            // The pass that materializes a visible viewer's source runs in
-            // `App::update`, ahead of the record — so it covers every viewer
-            // already on screen, and none that *arrives* during the record.
-            // Two ordinary actions do exactly that, both landing in a drain of
-            // the frame that then draws them: clicking a preview card's image
-            // opens a viewer tab, and clicking a strip chip activates one
-            // stacked behind another (only a group's active tab is
-            // materialized, so a stacked one is still deferred).
-            //
-            // So this is one frame of placeholder, resolved by the next
-            // `update` — and `preparing` is what asks for that frame. Nothing
-            // else does: the click that opened the tab is over by then, and an
-            // idle host records nothing until fresh input arrives.
-            FullImage::Deferred(_) => Self {
-                shown: None,
-                message: Some("image is being prepared"),
-                preparing: true,
-            },
+        match image.full(ui) {
+            Ok(handle) => Self::Image(ShownImage {
+                handle,
+                native_size: image.native_size,
+                native_format: image.native_format,
+            }),
+            Err(error) => Self::NoImage(error),
+        }
+    }
+
+    /// The texture, for the framing and gesture math that mean nothing
+    /// without one.
+    fn image(&self) -> Option<&ShownImage> {
+        match self {
+            Self::Image(image) => Some(image),
+            Self::Nothing | Self::NoImage(_) => None,
+        }
+    }
+
+    /// The line to draw *in place of* an image. Exactly complementary to
+    /// [`Self::image`], so the pane draws one or the other and never both.
+    ///
+    /// Wording a reason is this method's job rather than the enum's, which is
+    /// why the `Cow` is here: the standing invitation is `'static`, and only a
+    /// viewer actually sitting on a failure renders one.
+    fn hint(&self) -> Option<Cow<'static, str>> {
+        match self {
+            Self::Image(_) => None,
+            Self::NoImage(error) => Some(Cow::Owned(error.to_string())),
+            Self::Nothing => Some(Cow::Borrowed(NOTHING_YET_HINT)),
         }
     }
 }
@@ -219,23 +223,18 @@ impl ImageViewer {
         theme: &Theme,
         prefs: &mut ViewerPreferences,
         title: &str,
-        source: Option<&StoredContent>,
+        previews: &PreviewStore,
     ) -> bool {
-        let ShownSource {
-            shown,
-            message,
-            preparing,
-        } = ShownSource::resolve(source);
-        // The upload that ends the placeholder happens in `App::update`, which
-        // only runs if there *is* another frame — so the pane that is waiting
-        // on one is the thing that has to ask. Re-asked every frame the
-        // placeholder is up, and it stops the moment the texture lands: an
-        // idle viewer never keeps the host awake.
-        if preparing {
-            ui.request_repaint();
-        }
-        self.sync_source(shown.map(|image| image.handle.size()));
-        self.apply_gestures(ui, shown);
+        // The store rather than the entry: this viewer *is* its node, so
+        // handing it the whole store is one lookup by an id that cannot
+        // disagree with the one keying the pane's widgets.
+        //
+        // Resolving is also what uploads a not-yet-registered full-resolution
+        // texture, so this pass draws it — there is no state where the pane
+        // owes itself a later frame.
+        let source = ShownSource::resolve(previews.entries.get(&self.node_id), ui);
+        self.sync_source(source.image().map(|image| image.handle.size()));
+        self.apply_gestures(ui, source.image());
 
         let pane = pane_size(ui, self.node_id);
         let fill = match prefs.background {
@@ -256,44 +255,45 @@ impl ImageViewer {
                 {
                     self.draw_checker(ui, pane);
                 }
-                match (shown, pane) {
-                    (Some(shown), Some(pane)) => {
-                        let img = shown.logical_size(ui);
-                        let v = self.effective_view(img, pane);
-                        ui.add_shape(
-                            Shape::image(shown.handle.clone())
-                                .at(draw_rect(img, v))
-                                .fit(ImageFit::Fill)
-                                .min_filter(ImageFilter::Linear)
-                                .mag_filter(prefs.mag_filter),
-                        );
+                if let Some(shown) = source.image() {
+                    match pane {
+                        Some(pane) => {
+                            let img = shown.logical_size(ui);
+                            let v = self.effective_view(img, pane);
+                            ui.add_shape(
+                                Shape::image(shown.handle.clone())
+                                    .at(draw_rect(img, v))
+                                    .fit(ImageFit::Fill)
+                                    .min_filter(ImageFilter::Linear)
+                                    .mag_filter(prefs.mag_filter),
+                            );
+                        }
+                        // Pane not measured yet (first frame): let palantir
+                        // fit it.
+                        None => {
+                            ui.add_shape(
+                                Shape::image(shown.handle.clone())
+                                    .fit(ImageFit::Contain)
+                                    .min_filter(ImageFilter::Linear)
+                                    .mag_filter(prefs.mag_filter),
+                            );
+                        }
                     }
-                    // Pane not measured yet (first frame): let palantir fit it.
-                    (Some(shown), None) => {
-                        ui.add_shape(
-                            Shape::image(shown.handle.clone())
-                                .fit(ImageFit::Contain)
-                                .min_filter(ImageFilter::Linear)
-                                .mag_filter(prefs.mag_filter),
-                        );
-                    }
-                    (None, _) => {
-                        let hint = message
-                            .unwrap_or("the port's image appears here after the next graph run");
-                        // On the frosted readout pill, so the hint stays
-                        // legible over the checker/white backdrops too.
-                        let text = ui.intern(hint);
-                        readout_pill(
-                            ui,
-                            theme,
-                            Panel::hstack().id_salt("viewer_hint").align(Align::CENTER),
-                            text,
-                        );
-                    }
-                }
-                if let Some(shown) = shown {
                     self.header(ui, theme, pane, title, shown);
                     prefs_changed = self.controls(ui, theme, pane, prefs, shown);
+                }
+                // Complementary to the image above, so this is the same
+                // either/or the enum states — never a second thing drawn over
+                // the picture. On the frosted readout pill, so the line stays
+                // legible over the checker/white backdrops too.
+                if let Some(hint) = source.hint() {
+                    let text = ui.intern(hint);
+                    readout_pill(
+                        ui,
+                        theme,
+                        Panel::hstack().id_salt("viewer_hint").align(Align::CENTER),
+                        text,
+                    );
                 }
             });
         prefs_changed
@@ -331,7 +331,7 @@ impl ImageViewer {
         theme: &Theme,
         pane: Option<Vec2>,
         title: &str,
-        shown: ShownImage<'_>,
+        shown: &ShownImage,
     ) {
         let mut text = format!(
             "{} · {} × {} · {}",
@@ -375,7 +375,7 @@ impl ImageViewer {
         theme: &Theme,
         pane: Option<Vec2>,
         prefs: &mut ViewerPreferences,
-        shown: ShownImage<'_>,
+        shown: &ShownImage,
     ) -> bool {
         let node_id = self.node_id;
         let mut changed = false;
@@ -431,7 +431,7 @@ impl ImageViewer {
     /// pans, wheel/pinch zooms about the cursor, two-finger scroll pans,
     /// double-click resets to fit. The fit viewport materializes into an
     /// explicit one on the first adjusting gesture.
-    fn apply_gestures(&mut self, ui: &Ui, shown: Option<ShownImage<'_>>) {
+    fn apply_gestures(&mut self, ui: &Ui, shown: Option<&ShownImage>) {
         let Some(shown) = shown else {
             return;
         };
@@ -509,10 +509,10 @@ mod tests {
 
     use palantir::internals::UiHarness;
 
-    use crate::core::document::TabRef;
     use crate::core::document::harness::DocFixture;
     use crate::core::preview::preview_func;
     use crate::gui::state::preview_store::PreviewStore;
+    use crate::gui::state::preview_store::error::PreviewImageError;
     use crate::gui::state::preview_store::internals::opaque_image_value;
 
     fn viewer_node() -> NodeId {
@@ -556,71 +556,66 @@ mod tests {
         assert!(viewer.view.is_none(), "removing the source clears framing");
     }
 
-    /// The three ways a store entry fails to yield a texture each carry their
-    /// own reason, and the absent entry carries none — that last case is what
-    /// draws the standing "after the next graph run" hint rather than an
-    /// error, so it must stay distinguishable from a real failure.
-    ///
-    /// Only the deferred one is `preparing`: the others are waiting on a graph
-    /// run, on a fix, or on nothing, and no amount of redrawing resolves them.
+    /// The ways a store entry yields no texture each carry their own reason,
+    /// and the absent entry carries none — that last case is what draws the
+    /// standing "after the next graph run" hint rather than an error, so it
+    /// must stay distinguishable from a real failure.
     #[test]
     fn resolve_separates_no_entry_from_a_reason_there_is_no_image() {
-        let nothing = ShownSource::resolve(None);
-        assert!(nothing.shown.is_none() && nothing.message.is_none());
-        assert!(!nothing.preparing, "an absent entry is not being prepared");
+        let mut h = UiHarness::arena();
 
-        let errored = StoredContent::Error("boom".to_owned());
-        let resolved = ShownSource::resolve(Some(&errored));
-        assert!(resolved.shown.is_none());
-        assert_eq!(resolved.message, Some("boom"));
-        assert!(!resolved.preparing, "a failure resolves by nothing");
+        let nothing = ShownSource::resolve(None, h.ui());
+        assert!(
+            matches!(nothing, ShownSource::Nothing),
+            "an absent entry is its own state, not a failure: {nothing:?}"
+        );
+        assert_eq!(nothing.hint().as_deref(), Some(NOTHING_YET_HINT));
+
+        let errored = StoredContent::Error(PreviewImageError::Empty);
+        let resolved = ShownSource::resolve(Some(&errored), h.ui());
+        assert!(resolved.image().is_none());
+        assert_eq!(resolved.hint().as_deref(), Some("image is empty"));
+
+        // A good non-image value is not a failure, and reads as one thing a
+        // viewer can't show rather than as that value's own formatting.
+        let text = StoredContent::Text("7".to_owned());
+        let resolved = ShownSource::resolve(Some(&text), h.ui());
+        assert!(resolved.image().is_none());
+        assert_eq!(resolved.hint().as_deref(), Some("value is not an image"));
     }
 
-    /// A deferred source has to ask for the frame that ends it. The upload
-    /// runs in `App::update`, so it needs a *next* frame — and an idle host
-    /// records none on its own. Without the request the pane sat on "image is
-    /// being prepared" until unrelated input (a hover crossing any widget)
-    /// happened to wake one.
+    /// The pass that first draws a viewer is the pass that uploads its
+    /// texture. There is no state in between, so nothing schedules a later
+    /// frame and nothing stands in for the image while one is awaited — the
+    /// viewer is framed against real texels on its very first record.
     #[test]
-    fn a_deferred_source_asks_for_the_frame_that_materializes_it() {
+    fn the_first_pass_that_draws_a_viewer_uploads_its_texture() {
         let mut h = UiHarness::arena();
         let mut fixture = DocFixture::default();
         let node = fixture.add(&preview_func(Default::default()));
-        // The viewer tab open and active: that is what makes `reconcile`
-        // upload the full-resolution texture below.
-        let doc = fixture.with_tab(TabRef::ImageViewer(node)).doc;
         let mut store = PreviewStore::default();
+        // 2×1 (see `opaque_image_value`) — under the cap, so the full texture
+        // keeps the source's own dimensions and the assertion can name them.
         store.ingest_preview(h.ui(), node, opaque_image_value());
 
         let theme = Theme::default();
         let mut prefs = ViewerPreferences::default();
         let mut viewer = ImageViewer::new(node);
-        let waiting = h
+        let asked_again = h
             .frame(|ui| {
-                viewer.show(ui, &theme, &mut prefs, "img", store.entries.get(&node));
+                viewer.show(ui, &theme, &mut prefs, "img", &store);
             })
             .repaint_requested;
-        assert!(
-            waiting,
-            "the placeholder frame must schedule the one that replaces it",
-        );
 
-        store.reconcile(h.ui(), &doc);
-        // Three frames, and the last one is the assertion: the texture's first
-        // frame brings the header and controls with it, and a chip settling in
-        // is a repaint request of its own — the claim here is that a *resting*
-        // viewer stops asking, not that it never asks twice.
-        let mut resting = true;
-        for _ in 0..3 {
-            resting = !h
-                .frame(|ui| {
-                    viewer.show(ui, &theme, &mut prefs, "img", store.entries.get(&node));
-                })
-                .repaint_requested;
-        }
+        assert_eq!(
+            viewer.source_size,
+            Some(UVec2::new(2, 1)),
+            "the first pass framed itself against the uploaded texture, \
+             not against an absent one"
+        );
         assert!(
-            resting,
-            "a materialized viewer keeps the host awake for nothing",
+            !asked_again,
+            "nothing is pending, so the viewer must not keep the host awake"
         );
     }
 }

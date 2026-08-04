@@ -1,10 +1,15 @@
 //! Runtime presentation resources for the values preview nodes publish.
 //!
 //! The store is the sole owner of preview-card and viewer textures. An image
-//! uploads a small thumbnail immediately, retains its source only until a
-//! viewer first needs the full texture, then drops the source after that
-//! upload. Non-image values are formatted on receipt and dropped immediately.
+//! uploads a small thumbnail immediately and holds its source until a viewer
+//! first asks for the full texture — [`PreviewImage::full`] uploads it there
+//! and then, in the pass that draws it, and drops the source as it goes.
+//! Non-image values are formatted on receipt and dropped immediately.
 
+pub(crate) mod error;
+
+use std::borrow::Cow;
+use std::cell::RefCell;
 use std::collections::HashMap;
 
 use glam::UVec2;
@@ -14,6 +19,7 @@ use palantir::{Image as AptImage, ImageHandle, Ui};
 use scenarium::{DynamicValue, NodeId};
 
 use crate::core::document::Document;
+use crate::gui::state::preview_store::error::PreviewImageError;
 
 const PREVIEW_TEXTURE_DIM: u32 = 256;
 const FULL_TEXTURE_DIM: u32 = 8192;
@@ -29,7 +35,7 @@ pub(crate) struct PreviewStore {
 pub(crate) enum StoredContent {
     Text(String),
     Image(PreviewImage),
-    Error(String),
+    Error(PreviewImageError),
 }
 
 impl StoredContent {
@@ -48,9 +54,13 @@ impl StoredContent {
     /// itself, or the reason it isn't renderable. `None` when [`Self::image`]
     /// answered — the two are complementary, so a caller that renders the
     /// image never also has a message to show.
-    pub(crate) fn message(&self) -> Option<&str> {
+    /// `Cow` because the two sources differ: a formatted value is already the
+    /// string it shows, while a failure is a typed error rendered on the way
+    /// out — and only a card sitting on a broken value pays for that.
+    pub(crate) fn message(&self) -> Option<Cow<'_, str>> {
         match self {
-            StoredContent::Text(text) | StoredContent::Error(text) => Some(text.as_str()),
+            StoredContent::Text(text) => Some(Cow::Borrowed(text.as_str())),
+            StoredContent::Error(error) => Some(Cow::Owned(error.to_string())),
             StoredContent::Image(_) => None,
         }
     }
@@ -59,17 +69,22 @@ impl StoredContent {
 #[derive(Debug)]
 pub(crate) struct PreviewImage {
     pub(crate) preview: ImageHandle,
-    pub(crate) full: FullImage,
+    /// The full-resolution texture, or the source still waiting to become one.
+    /// Read only through [`Self::full`], which is what resolves the wait.
+    full: RefCell<FullImage>,
     pub(crate) native_size: UVec2,
     pub(crate) native_format: ColorFormat,
     pub(crate) source_bytes: usize,
 }
 
+/// What a stored image holds for a viewer: the published value until one asks
+/// for it at full resolution, the texture from then on, or why there will
+/// never be one.
 #[derive(Debug)]
-pub(crate) enum FullImage {
-    Deferred(DynamicValue),
+enum FullImage {
+    Pending(DynamicValue),
     Resident(ImageHandle),
-    Failed(String),
+    Failed(PreviewImageError),
 }
 
 #[derive(Debug)]
@@ -90,61 +105,71 @@ impl PreviewStore {
         self.entries.insert(node_id, prepare_content(ui, value));
     }
 
-    /// Release every presentation resource the document no longer retains and
-    /// upload the full-resolution texture each *visible* viewer needs.
+    /// Release every presentation resource the document no longer retains.
     ///
-    /// Run unconditionally once a frame. Both halves are already idempotent —
-    /// `materialize_full` returns at once for anything not still deferred, and
-    /// the retain is a lookup per stored value — so asking every frame costs a
-    /// pass over the open viewer tabs (normally none) and the handful of nodes
-    /// holding a value. That is cheaper than the bookkeeping a request flag
-    /// needed: the store is written *outside* the frame too (`ingest_preview`
-    /// runs from the worker drain in `App::update`), so a flag had to survive
-    /// until the next frame rather than resetting with it, and every edit path
-    /// that moved the retained set had to remember to raise it.
-    pub(crate) fn reconcile(&mut self, ui: &Ui, document: &Document) {
-        // Scoped to what the coming record pass draws: a full texture is up
-        // to 8192² RGBA8, so uploading one for a viewer tab stacked behind
-        // another in the same pane would cost hundreds of MB unseen.
-        for node_id in document.visible_viewer_nodes() {
-            self.materialize_full(ui, node_id);
-        }
-        // A preview's own node is its retention: delete the node and the value
-        // it was showing has nothing left to draw it. The shared liveness rule
-        // narrowed to preview nodes — see `Document::holds_preview_node` for
-        // why this cache is stricter than the others.
+    /// Run unconditionally once a frame: the retain is a lookup per stored
+    /// value, over the handful of nodes holding one. That is cheaper than the
+    /// bookkeeping a dirty flag needed — the store is written *outside* the
+    /// frame too (`ingest_preview` runs from the worker drain), so a flag had
+    /// to survive until the next frame rather than resetting with it, and
+    /// every edit path that moved the retained set had to remember to raise
+    /// it.
+    ///
+    /// A preview's own node is its retention: delete the node and the value it
+    /// was showing has nothing left to draw it. The shared liveness rule
+    /// narrowed to preview nodes — see `Document::holds_preview_node` for why
+    /// this cache is stricter than the others.
+    pub(crate) fn reconcile(&mut self, document: &Document) {
         self.entries
             .retain(|node_id, _| document.holds_preview_node(*node_id));
-    }
-
-    fn materialize_full(&mut self, ui: &Ui, node_id: NodeId) {
-        if let Some(StoredContent::Image(image)) = self.entries.get_mut(&node_id) {
-            image.materialize_full(ui);
-        }
     }
 }
 
 impl PreviewImage {
-    /// Upload the deferred source at full resolution and drop it, in place —
-    /// a no-op once `full` is already `Resident` or `Failed`.
+    /// The full-resolution texture, uploading the published value on the first
+    /// ask and reusing the result from then on. The source is dropped as it
+    /// becomes a texture, so an image is never held twice.
     ///
-    /// The new `full` is built into a local before it's assigned, so the read
-    /// of the deferred value is finished by then. That's what lets this take
-    /// `&mut self`: no placeholder variant has to be parked in the slot while
-    /// the old value is owned, and no frame can observe the entry mid-swap.
-    fn materialize_full(&mut self, ui: &Ui) {
-        let FullImage::Deferred(value) = &self.full else {
-            return;
-        };
-        let resolved =
-            match as_image(value).and_then(|image| prepare_image(image, FULL_TEXTURE_DIM)) {
-                Ok(prepared) => match ui.register_image(prepared.raster) {
-                    Ok(handle) => FullImage::Resident(handle),
-                    Err(error) => FullImage::Failed(error.to_string()),
-                },
-                Err(message) => FullImage::Failed(message),
-            };
-        self.full = resolved;
+    /// **Lazy, not deferred.** The upload is up to 8192² RGBA8 — hundreds of MB
+    /// — and only a viewer pane ever wants one; a preview card draws the
+    /// thumbnail. Asking is therefore the whole scoping rule: a pane records
+    /// only when its tab is the visible one, so a viewer stacked behind
+    /// another uploads nothing, and one that becomes visible mid-record gets
+    /// its texture in the pass that draws it rather than a frame later.
+    ///
+    /// `&self` because that ask comes from the record pass, which holds the
+    /// run projection immutably (see [`AppCtx`](crate::gui::app::ctx::AppCtx)).
+    /// The borrow is taken, resolved and dropped inside this call, so nothing
+    /// can observe the cell mid-upload or hold it across a frame.
+    ///
+    /// Both arms are read *out* rather than borrowed from, since what they
+    /// name lives behind that cell: the handle clone is a refcount bump on the
+    /// texture the store still owns, and only a broken image copies its
+    /// reason.
+    pub(crate) fn full(&self, ui: &Ui) -> Result<ImageHandle, PreviewImageError> {
+        let mut full = self.full.borrow_mut();
+        if let FullImage::Pending(value) = &*full {
+            *full = Self::upload(ui, value);
+        }
+        match &*full {
+            FullImage::Resident(handle) => Ok(handle.clone()),
+            FullImage::Failed(error) => Err(error.clone()),
+            FullImage::Pending(_) => unreachable!("the pending source was just uploaded"),
+        }
+    }
+
+    /// Register the value's pixels at full resolution. Every failure — a value
+    /// that isn't an image, pixels that won't convert, a registration the
+    /// renderer refuses — lands as `Failed`, which is terminal: it is stored,
+    /// so a broken image is diagnosed once rather than retried every frame.
+    fn upload(ui: &Ui, value: &DynamicValue) -> FullImage {
+        match as_image(value).and_then(|image| prepare_image(image, FULL_TEXTURE_DIM)) {
+            Ok(prepared) => match ui.register_image(prepared.raster) {
+                Ok(handle) => FullImage::Resident(handle),
+                Err(error) => FullImage::Failed(error.into()),
+            },
+            Err(error) => FullImage::Failed(error),
+        }
     }
 }
 
@@ -165,33 +190,33 @@ fn prepare_content(ui: &Ui, value: DynamicValue) -> StoredContent {
                 let source_bytes = value.ram_usage().total();
                 StoredContent::Image(PreviewImage {
                     preview,
-                    full: FullImage::Deferred(value),
+                    full: RefCell::new(FullImage::Pending(value)),
                     native_size: prepared.native_size,
                     native_format: prepared.native_format,
                     source_bytes,
                 })
             }
-            Err(error) => StoredContent::Error(error.to_string()),
+            Err(error) => StoredContent::Error(error.into()),
         },
-        Err(message) => StoredContent::Error(message),
+        Err(error) => StoredContent::Error(error),
     }
 }
 
-/// The image behind a published value, or the message to show in its place.
-fn as_image(value: &DynamicValue) -> Result<&LensImage, String> {
+/// The image behind a published value, or why there isn't one.
+fn as_image(value: &DynamicValue) -> Result<&LensImage, PreviewImageError> {
     value
         .as_custom::<LensImage>()
-        .ok_or_else(|| "value is not an image".to_owned())
+        .ok_or(PreviewImageError::NotAnImage)
 }
 
-fn prepare_image(image: &LensImage, max_dim: u32) -> Result<PreparedImage, String> {
+fn prepare_image(image: &LensImage, max_dim: u32) -> Result<PreparedImage, PreviewImageError> {
     let cpu = image
         .buffer
         .make_cpu(&ProcessingContext::cpu_only())
-        .map_err(|e| format!("could not read image pixels: {e}"))?;
+        .map_err(|e| PreviewImageError::Pixels(e.to_string()))?;
     let native_size = UVec2::new(cpu.desc().width as u32, cpu.desc().height as u32);
     if native_size.x == 0 || native_size.y == 0 {
-        return Err("image is empty".to_owned());
+        return Err(PreviewImageError::Empty);
     }
     let native_format = cpu.desc().color_format;
     let target = capped_target(native_size, max_dim);
@@ -220,6 +245,16 @@ pub(crate) mod internals {
     use imaginarium::{Image as RawImage, ImageBuffer, ImageDesc};
 
     use super::*;
+
+    impl PreviewImage {
+        /// Whether the full-resolution texture has been uploaded yet.
+        ///
+        /// The one question a test can't ask through [`PreviewImage::full`],
+        /// since asking that *is* what uploads it.
+        pub(crate) fn is_full_resident(&self) -> bool {
+            matches!(&*self.full.borrow(), FullImage::Resident(_))
+        }
+    }
 
     /// The smallest opaque image a preview card will render — 2×1 RGBA8.
     ///
