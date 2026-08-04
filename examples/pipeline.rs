@@ -38,9 +38,8 @@ fn main() {
     println!("Step 2: Adjusting contrast...");
     ContrastBrightness::default()
         .contrast(1.2)
-        .execute(&mut ctx, &main_buffer, &mut temp_buffer)
+        .execute(&mut ctx, &mut main_buffer)
         .unwrap();
-    std::mem::swap(&mut main_buffer, &mut temp_buffer);
 
     // Step 3: Rotate overlay differently
     println!("Step 3: Rotating overlay...");
@@ -62,10 +61,10 @@ fn main() {
     println!("Step 5: Final brightness adjustment...");
     ContrastBrightness::default()
         .brightness(0.05)
-        .execute(&mut ctx, &blend_output, &mut temp_buffer)
+        .execute(&mut ctx, &mut blend_output)
         .unwrap();
 
-    let result = temp_buffer.make_cpu(&ctx).unwrap();
+    let result = blend_output.make_cpu(&ctx).unwrap();
     save_image(&result, "pipeline_final.png");
 
     println!("Done! Pipeline completed.");

@@ -64,6 +64,35 @@ impl ImageBuffer {
         }
     }
 
+    /// A copy of this buffer that leaves the data where it already lives — a
+    /// CPU image is cloned, a GPU image is copied device-side, and an empty
+    /// buffer stays empty.
+    ///
+    /// This is what a caller reaches for when an in-place op would otherwise
+    /// disturb an image it only borrows: the copy is explicit, and it stays on
+    /// the backend the pipeline is already using rather than round-tripping.
+    ///
+    /// # Errors
+    /// Returns an error if the data is on the GPU and `ctx` has no GPU context.
+    pub fn duplicate(&self, ctx: &ProcessingContext) -> Result<Self> {
+        let storage = match &*self.storage.read() {
+            Some(Storage::Cpu(image)) => Some(Storage::Cpu(image.clone())),
+            #[cfg(feature = "wgpu")]
+            Some(Storage::Gpu(image)) => {
+                let gpu = ctx.gpu().ok_or(Error::NoGpuContext)?;
+                Some(Storage::Gpu(image.clone_buffer(gpu)))
+            }
+            None => None,
+        };
+
+        #[cfg(not(feature = "wgpu"))]
+        let _ = ctx;
+        Ok(Self {
+            desc: self.desc,
+            storage: RwLock::new(storage),
+        })
+    }
+
     /// Creates an empty ImageBuffer with no storage, just a (packed) descriptor.
     pub fn new_empty(desc: ImageDesc) -> Self {
         Self {

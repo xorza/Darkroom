@@ -64,23 +64,21 @@ impl ContrastBrightness {
         cpu::apply(self, image);
     }
 
-    /// Applies the operation, automatically choosing CPU or GPU based on data location.
+    /// Applies the operation to `buffer` **in place**, choosing CPU or GPU by
+    /// where the data already lives.
     ///
-    /// Prefers GPU if any input/output is already on GPU and the format is supported.
+    /// In place is the only form this op offers. The adjustment is pointwise, so
+    /// a second buffer buys nothing and costs a great deal: the op is bandwidth
+    /// bound, and an output allocation the kernel has to fault in and zero can
+    /// dwarf the adjustment itself. A caller that must keep its input clones it
+    /// first, where the sharing is visible.
     ///
     /// # Errors
-    /// Returns an error if:
-    /// - Input and output have different color formats
-    /// - The color format is not supported by either CPU or GPU implementation
-    pub fn execute(
-        &self,
-        ctx: &mut ProcessingContext,
-        input: &ImageBuffer,
-        output: &mut ImageBuffer,
-    ) -> Result<()> {
+    /// Returns an error if the color format is not supported by either backend.
+    pub fn execute(&self, ctx: &mut ProcessingContext, buffer: &mut ImageBuffer) -> Result<()> {
         let backend = select_backend(
             ctx,
-            &[input, output],
+            &[buffer],
             ALL_FORMATS,
             ALL_FORMATS,
             "ContrastBrightness",
@@ -88,26 +86,83 @@ impl ContrastBrightness {
 
         match backend {
             #[cfg(feature = "wgpu")]
-            Backend::Gpu => self.execute_gpu(ctx, input, output),
-            Backend::Cpu => self.execute_cpu(ctx, input, output),
+            Backend::Gpu => self.execute_gpu(ctx, buffer),
+            Backend::Cpu => self.execute_cpu(ctx, buffer),
         }
     }
 
-    /// Applies the operation using CPU with ImageBuffer.
-    ///
-    /// Automatically downloads images from GPU if needed. The op itself is in-place
-    /// ([`apply_cpu`](Self::apply_cpu)); this buffer-level entry point clones the
-    /// input into a fresh image first, preserving `execute`'s out-of-place contract.
-    /// `output` is replaced wholesale (any prior storage and descriptor dropped).
-    pub fn execute_cpu(
-        &self,
-        ctx: &mut ProcessingContext,
-        input: &ImageBuffer,
-        output: &mut ImageBuffer,
-    ) -> Result<()> {
-        let mut image = input.make_cpu(ctx)?.clone();
-        self.apply_cpu(&mut image);
-        *output = ImageBuffer::from_cpu(image);
+    /// Applies the operation to `buffer` in place on the CPU, downloading it
+    /// from the GPU first if that is where it lives.
+    pub fn execute_cpu(&self, ctx: &mut ProcessingContext, buffer: &mut ImageBuffer) -> Result<()> {
+        self.apply_cpu(buffer.make_cpu_mut(ctx)?);
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::common::color_format::ALL_FORMATS;
+    use crate::common::image_diff::pixels_equal;
+    use crate::common::internals::create_test_image;
+    use crate::ops::contrast_brightness::ContrastBrightness;
+    use crate::processing_context::ProcessingContext;
+    use crate::processing_context::image_buffer::ImageBuffer;
+
+    const OP: ContrastBrightness = ContrastBrightness {
+        contrast: 1.5,
+        brightness: 0.1,
+    };
+
+    /// The address of a buffer's CPU pixel storage, for proving reuse.
+    fn storage_address(buffer: &ImageBuffer, ctx: &ProcessingContext) -> usize {
+        buffer.make_cpu(ctx).unwrap().bytes().as_ptr() as usize
+    }
+
+    #[test]
+    fn execute_adjusts_in_place_without_reallocating() {
+        let ctx = ProcessingContext::cpu_only();
+
+        for format in ALL_FORMATS {
+            let source = create_test_image(*format, 17, 5, 0);
+            let mut buffer = ImageBuffer::from_cpu(source.clone());
+            let before = storage_address(&buffer, &ctx);
+
+            let mut ctx = ProcessingContext::cpu_only();
+            OP.execute(&mut ctx, &mut buffer).unwrap();
+
+            assert_eq!(
+                before,
+                storage_address(&buffer, &ctx),
+                "{format}: execute should have written the existing storage, \
+                 not replaced it"
+            );
+
+            let mut want = source.clone();
+            OP.apply_cpu(&mut want);
+            assert!(
+                pixels_equal(&want, &buffer.make_cpu(&ctx).unwrap()),
+                "{format}: execute differs from apply_cpu"
+            );
+        }
+    }
+
+    #[test]
+    fn execute_downloads_a_gpu_buffer_before_adjusting_on_cpu() {
+        // A CPU-only context has nowhere to run the GPU path, so a buffer that
+        // has no CPU storage yet must still come back adjusted and CPU-resident.
+        let mut ctx = ProcessingContext::cpu_only();
+        let format = ALL_FORMATS[0];
+        let source = create_test_image(format, 17, 5, 0);
+        let mut buffer = ImageBuffer::from_cpu(source.clone());
+
+        OP.execute_cpu(&mut ctx, &mut buffer).unwrap();
+
+        assert!(buffer.is_cpu(), "buffer should be CPU resident afterwards");
+        let mut want = source.clone();
+        OP.apply_cpu(&mut want);
+        assert!(
+            pixels_equal(&want, &buffer.make_cpu(&ctx).unwrap()),
+            "execute_cpu differs from apply_cpu"
+        );
     }
 }

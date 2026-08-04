@@ -42,10 +42,7 @@ fn main() {
     // Step 2: Increase contrast (CPU)
     println!("Step 2: Adjusting contrast...");
     let contrast = ContrastBrightness::default().contrast(1.3);
-    contrast
-        .execute_cpu(&mut ctx, &main_buffer, &mut temp_buffer)
-        .unwrap();
-    std::mem::swap(&mut main_buffer, &mut temp_buffer);
+    contrast.execute_cpu(&mut ctx, &mut main_buffer).unwrap();
 
     save_image(
         &main_buffer.make_cpu(&ctx).unwrap(),
@@ -70,10 +67,7 @@ fn main() {
     // Step 4: Adjust brightness (CPU)
     println!("Step 4: Adjusting brightness...");
     let brightness = ContrastBrightness::default().brightness(0.1);
-    brightness
-        .execute_cpu(&mut ctx, &main_buffer, &mut temp_buffer)
-        .unwrap();
-    std::mem::swap(&mut main_buffer, &mut temp_buffer);
+    brightness.execute_cpu(&mut ctx, &mut main_buffer).unwrap();
 
     save_image(
         &main_buffer.make_cpu(&ctx).unwrap(),

@@ -16,13 +16,12 @@ fn main() {
 
     // GPU example
     let mut ctx = ProcessingContext::new();
-    let input_buf = ImageBuffer::from_cpu(input);
-    let mut output_buf = ImageBuffer::new_empty(input_buf.desc);
+    let mut buffer = ImageBuffer::from_cpu(input);
 
     ContrastBrightness::new(1.5, 0.1)
-        .execute(&mut ctx, &input_buf, &mut output_buf)
+        .execute(&mut ctx, &mut buffer)
         .unwrap();
 
-    let result = output_buf.make_cpu(&ctx).unwrap();
+    let result = buffer.make_cpu(&ctx).unwrap();
     save_image(&result, "contrast_brightness_gpu.png");
 }

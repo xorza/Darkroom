@@ -15,7 +15,7 @@ use rayon::prelude::*;
 use crate::common::color_format::{ChannelCount, ChannelSize, ChannelType, ColorFormat};
 #[cfg(target_arch = "x86_64")]
 use crate::cpu_features;
-use crate::image::Image;
+use crate::image::{Image, ImageDesc};
 use crate::ops::contrast_brightness::ContrastBrightness;
 
 /// The per-channel affine `value * scale + offset`, clamped to `[0, max]`, that
@@ -164,6 +164,16 @@ pub(super) fn apply(params: &ContrastBrightness, image: &mut Image) {
     }
 }
 
+/// How many items a kernel is asked to walk per row: channel values for the
+/// flat kernels, whole pixels for the alpha-preserving ones.
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+fn kernel_count(desc: ImageDesc) -> usize {
+    match desc.color_format.channel_count {
+        ChannelCount::Rgba => desc.width,
+        channels => desc.width * channels.channel_count() as usize,
+    }
+}
+
 /// Drives `kernel` over every row of `image`, one rayon job per row.
 ///
 /// # Safety
@@ -172,13 +182,8 @@ pub(super) fn apply(params: &ContrastBrightness, image: &mut Image) {
 unsafe fn apply_kernel(kernel: RowKernel, params: &ContrastBrightness, image: &mut Image) {
     let format = image.desc().color_format;
     let affine = ChannelAffine::new(params, format);
-    let width = image.desc().width;
+    let count = kernel_count(image.desc());
     let stride = image.desc().row_bytes();
-    // Flat kernels count channel values, alpha-preserving ones count pixels.
-    let count = match format.channel_count {
-        ChannelCount::Rgba => width,
-        channels => width * channels.channel_count() as usize,
-    };
 
     image.bytes_mut().par_chunks_mut(stride).for_each(|row| {
         // SAFETY: forwarded from this function's own contract.

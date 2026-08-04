@@ -61,7 +61,7 @@ fn test_mixed_gpu_cpu_operations() {
     let width = input_cpu.desc().width;
     let height = input_cpu.desc().height;
     let center = Vec2::new(width as f32 / 2.0, height as f32 / 2.0);
-    let mut buffer_a = ImageBuffer::from_cpu(input_cpu.clone());
+    let buffer_a = ImageBuffer::from_cpu(input_cpu.clone());
     let mut buffer_b = ImageBuffer::new_empty(input_cpu.desc());
 
     // GPU operation: Transform
@@ -70,16 +70,14 @@ fn test_mixed_gpu_cpu_operations() {
         .execute_gpu(&mut ctx, &buffer_a, &mut buffer_b)
         .unwrap();
 
-    // CPU operation: ContrastBrightness (will download from GPU)
+    // CPU operation: ContrastBrightness, in place (will download from GPU)
     let contrast = ContrastBrightness::default().contrast(1.2).brightness(0.1);
-    contrast
-        .execute_cpu(&mut ctx, &buffer_b, &mut buffer_a)
-        .unwrap();
+    contrast.execute_cpu(&mut ctx, &mut buffer_b).unwrap();
 
-    // After CPU operation, buffer_a should have CPU data
-    assert!(buffer_a.is_cpu());
+    // After CPU operation, buffer_b should have CPU data
+    assert!(buffer_b.is_cpu());
 
-    let result = buffer_a.make_cpu(&ctx).unwrap();
+    let result = buffer_b.make_cpu(&ctx).unwrap();
     assert_eq!(result.desc().width, width);
     assert_eq!(result.desc().height, height);
 }
@@ -171,20 +169,18 @@ fn test_full_pipeline() {
         .execute_gpu(&mut ctx, &main_buffer, &mut temp_buffer)
         .unwrap();
 
-    // Step 2: Adjust contrast/brightness (CPU - will download)
+    // Step 2: Adjust contrast/brightness in place (CPU - will download)
     let contrast = ContrastBrightness::default().contrast(1.1).brightness(0.05);
-    contrast
-        .execute_cpu(&mut ctx, &temp_buffer, &mut main_buffer)
-        .unwrap();
+    contrast.execute_cpu(&mut ctx, &mut temp_buffer).unwrap();
 
     // Step 3: Blend with overlay (GPU)
     let blend = Blend::default().mode(BlendMode::Overlay).alpha(0.3);
     blend
-        .execute_gpu(&mut ctx, &overlay_buffer, &main_buffer, &mut temp_buffer)
+        .execute_gpu(&mut ctx, &overlay_buffer, &temp_buffer, &mut main_buffer)
         .unwrap();
 
     // Verify final result - download from GPU to check
-    let result_cpu = temp_buffer.make_cpu(&ctx).unwrap();
+    let result_cpu = main_buffer.make_cpu(&ctx).unwrap();
     assert_eq!(result_cpu.desc().width, width);
     assert_eq!(result_cpu.desc().height, height);
 }
@@ -200,21 +196,20 @@ fn test_apply_auto_selects_gpu_when_data_on_gpu() {
     let width = input_cpu.desc().width;
     let height = input_cpu.desc().height;
 
-    let input = ImageBuffer::from_cpu(input_cpu.clone());
-    let mut output = ImageBuffer::new_empty(input_cpu.desc());
+    let mut buffer = ImageBuffer::from_cpu(input_cpu.clone());
 
     // Upload to GPU first
-    let _ = input.make_gpu(&ctx).unwrap();
-    assert!(input.is_gpu());
+    let _ = buffer.make_gpu(&ctx).unwrap();
+    assert!(buffer.is_gpu());
 
     // apply() should auto-select GPU since data is on GPU
     let contrast = ContrastBrightness::default().contrast(1.2).brightness(0.1);
-    contrast.execute(&mut ctx, &input, &mut output).unwrap();
+    contrast.execute(&mut ctx, &mut buffer).unwrap();
 
-    // Output should be on GPU since input was on GPU
-    assert!(output.is_gpu());
+    // The buffer stays on the GPU, adjusted in place
+    assert!(buffer.is_gpu());
 
-    let result = output.make_cpu(&ctx).unwrap();
+    let result = buffer.make_cpu(&ctx).unwrap();
     assert_eq!(result.desc().width, width);
     assert_eq!(result.desc().height, height);
 }
@@ -227,20 +222,19 @@ fn test_apply_uses_cpu_when_data_on_cpu() {
     let width = input_cpu.desc().width;
     let height = input_cpu.desc().height;
 
-    let input = ImageBuffer::from_cpu(input_cpu.clone());
-    let mut output = ImageBuffer::new_empty(input_cpu.desc());
+    let mut buffer = ImageBuffer::from_cpu(input_cpu.clone());
 
     // Data starts on CPU
-    assert!(input.is_cpu());
+    assert!(buffer.is_cpu());
 
     // apply() should use CPU since data is on CPU
     let contrast = ContrastBrightness::default().contrast(1.2).brightness(0.1);
-    contrast.execute(&mut ctx, &input, &mut output).unwrap();
+    contrast.execute(&mut ctx, &mut buffer).unwrap();
 
-    // Output should be on CPU
-    assert!(output.is_cpu());
+    // The buffer stays on the CPU, adjusted in place
+    assert!(buffer.is_cpu());
 
-    let result_cpu = output.make_cpu(&ctx).unwrap();
+    let result_cpu = buffer.make_cpu(&ctx).unwrap();
     assert_eq!(result_cpu.desc().width, width);
     assert_eq!(result_cpu.desc().height, height);
 }
@@ -268,13 +262,12 @@ fn test_apply_chained_operations() {
         .unwrap();
     std::mem::swap(&mut buffer_a, &mut buffer_b);
 
-    // Step 2: Contrast/brightness (will auto-select based on data location)
+    // Step 2: Contrast/brightness, in place, so there is nothing to swap
     ContrastBrightness::default()
         .contrast(1.3)
         .brightness(0.05)
-        .execute(&mut ctx, &buffer_a, &mut buffer_b)
+        .execute(&mut ctx, &mut buffer_a)
         .unwrap();
-    std::mem::swap(&mut buffer_a, &mut buffer_b);
 
     // Step 3: Another transform
     Transform::default()
@@ -341,12 +334,11 @@ fn test_apply_full_pipeline_with_blend() {
         .unwrap();
     std::mem::swap(&mut main_buffer, &mut temp_buffer);
 
-    // Step 2: Adjust contrast
+    // Step 2: Adjust contrast, in place, so there is nothing to swap
     ContrastBrightness::default()
         .contrast(1.2)
-        .execute(&mut ctx, &main_buffer, &mut temp_buffer)
+        .execute(&mut ctx, &mut main_buffer)
         .unwrap();
-    std::mem::swap(&mut main_buffer, &mut temp_buffer);
 
     // Step 3: Rotate overlay differently
     Transform::default()
@@ -362,13 +354,13 @@ fn test_apply_full_pipeline_with_blend() {
         .execute(&mut ctx, &overlay_buffer, &main_buffer, &mut blend_output)
         .unwrap();
 
-    // Step 5: Final contrast adjustment
+    // Step 5: Final contrast adjustment, in place on the blend result
     ContrastBrightness::default()
         .brightness(0.05)
-        .execute(&mut ctx, &blend_output, &mut temp_buffer)
+        .execute(&mut ctx, &mut blend_output)
         .unwrap();
 
-    let result = temp_buffer.make_cpu(&ctx).unwrap();
+    let result = blend_output.make_cpu(&ctx).unwrap();
     assert_eq!(result.desc().width, width);
     assert_eq!(result.desc().height, height);
 }
@@ -384,9 +376,10 @@ fn test_apply_error_on_mismatched_formats() {
     let input = ImageBuffer::from_cpu(img_rgba);
     let mut output = ImageBuffer::from_cpu(img_rgb);
 
-    // apply() should return error due to format mismatch
-    let contrast = ContrastBrightness::default().contrast(1.2);
-    let result = contrast.execute(&mut ctx, &input, &mut output);
+    // apply() should return error due to format mismatch. Checked through an op
+    // that still takes a separate output — contrast/brightness works in place,
+    // so it has no second format to disagree with.
+    let result = Transform::default().execute(&mut ctx, &input, &mut output);
 
     assert!(result.is_err());
 }
