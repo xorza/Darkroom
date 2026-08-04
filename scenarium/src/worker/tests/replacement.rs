@@ -83,7 +83,11 @@ async fn a_replacement_queued_mid_run_is_installed_after_the_running_program() {
     assert!(w.installed().contains(sink));
     assert!(!w.installed().contains(replacement_node));
 
-    let WorkerReport::Installed(installed) = w.report().await else {
+    let WorkerReport::Installed {
+        compiled: installed,
+        ..
+    } = w.report().await
+    else {
         panic!("the replacement installed before the running program finished");
     };
     assert!(Arc::ptr_eq(&installed, &replacement));

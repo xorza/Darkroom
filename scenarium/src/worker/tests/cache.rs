@@ -16,7 +16,11 @@ async fn a_successful_eviction_reports_nothing() {
     ])
     .await;
 
-    let WorkerReport::Installed(installed) = w.report().await else {
+    let WorkerReport::Installed {
+        compiled: installed,
+        ..
+    } = w.report().await
+    else {
         panic!("installation must be reported before cache eviction");
     };
     assert!(Arc::ptr_eq(&installed, &compiled));
@@ -41,7 +45,7 @@ async fn an_eviction_failure_uses_the_general_worker_error_report() {
     ])
     .await;
 
-    assert!(matches!(w.report().await, WorkerReport::Installed(_)));
+    assert!(matches!(w.report().await, WorkerReport::Installed { .. }));
     let WorkerReport::Error(error) = w.report().await else {
         panic!("a cache deletion failure must use the general worker error report");
     };
@@ -283,6 +287,102 @@ async fn an_unpersistable_type_is_reported_only_when_the_flush_was_requested() {
         TypeId::from(BLOB_TYPE),
         "the report names the type that cannot persist"
     );
+    w.quiet();
+}
+
+/// An install re-measures the cache it reconciled onto, and the report carries
+/// the figure: a program that dropped a node releases its resident value there
+/// and then, while the next completed run may never correct the host — an empty
+/// program does not execute at all. Without this the readout keeps naming a
+/// cache that is already gone.
+#[tokio::test]
+async fn an_install_reports_the_cache_left_after_reconciling() {
+    use std::any::Any;
+    use std::fmt;
+
+    use crate::library::TypeEntry;
+    use crate::{CustomValue, DynamicValue, TypeId};
+
+    const HEAVY_TYPE: &str = "c84cc23f-f313-4adb-8788-ef82c26691ae";
+    const HEAVY_CPU: usize = 4096;
+
+    #[derive(Debug)]
+    struct Heavy;
+    impl fmt::Display for Heavy {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.write_str("Heavy")
+        }
+    }
+    impl CustomValue for Heavy {
+        fn type_id(&self) -> TypeId {
+            HEAVY_TYPE.into()
+        }
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
+        fn into_any(self: Arc<Self>) -> Arc<dyn Any + Send + Sync> {
+            self
+        }
+        fn ram_bytes(&self) -> RamUsage {
+            RamUsage {
+                cpu: HEAVY_CPU,
+                gpu: 0,
+            }
+        }
+    }
+
+    let mut graph = TestGraph::new();
+    graph
+        .library
+        .register_type(HEAVY_TYPE, TypeEntry::custom("Heavy"));
+    graph.add("heavy", |node| {
+        node.pure()
+            .sink()
+            .cache(CacheMode::Ram)
+            .output(DataType::Custom(HEAVY_TYPE.into()))
+            .lambda(async_lambda!(|Invocation { outputs, .. }| {
+                outputs[0] = DynamicValue::Custom(Arc::new(Heavy));
+                Ok(())
+            }))
+    });
+
+    // The first install lands on an empty cache; the run then fills it.
+    let mut w = TestWorker::over(graph);
+    w.send(w.update());
+    let WorkerReport::Installed { cache_ram, .. } = w.report().await else {
+        panic!("the fixture installs before it runs");
+    };
+    assert_eq!(
+        cache_ram,
+        RamUsage::default(),
+        "a fresh worker reconciles onto nothing"
+    );
+
+    w.send(TestWorker::sinks());
+    let run = w.run().await;
+    assert_eq!(
+        run.cache_ram,
+        RamUsage {
+            cpu: HEAVY_CPU,
+            gpu: 0
+        },
+        "the one Ram-cached node's value is the whole resident set"
+    );
+
+    // Install a program without that node: reconcile drops its slot, and the
+    // install says so — nothing else will, since an empty program never runs.
+    w.graph = TestGraph::new();
+    w.send(w.update());
+    let WorkerReport::Installed { cache_ram, .. } = w.report().await else {
+        panic!("the replacement program installs");
+    };
+    assert_eq!(
+        cache_ram,
+        RamUsage::default(),
+        "the dropped node's value left with its slot"
+    );
+
+    w.settle([TestWorker::sinks()]).await;
     w.quiet();
 }
 

@@ -197,7 +197,13 @@ where
             Some(GraphOp::Replace(compiled)) => {
                 tracing::info!("Graph updated");
                 self.engine.install(Arc::clone(&compiled));
-                (self.callback)(WorkerReport::Installed(compiled));
+                // After the install, not before: reconciling onto the new
+                // program is what released the slots of the nodes it dropped.
+                let cache_ram = self.engine.resident_cache_ram();
+                (self.callback)(WorkerReport::Installed {
+                    compiled,
+                    cache_ram,
+                });
             }
             None => {}
         }

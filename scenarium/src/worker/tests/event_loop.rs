@@ -169,7 +169,7 @@ async fn one_task_panicking_stops_the_loop() {
                 assert!(message.contains("event loop stopped"));
                 break;
             }
-            WorkerReport::Installed(_)
+            WorkerReport::Installed { .. }
             | WorkerReport::Cleared
             | WorkerReport::Error(
                 WorkerError::Execution { .. }

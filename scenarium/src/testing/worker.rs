@@ -200,7 +200,7 @@ impl TestWorker {
             .expect("the worker published nothing in time")
             .expect("the worker's report channel closed");
         match &report {
-            WorkerReport::Installed(compiled) => self.installed = Some(Arc::clone(compiled)),
+            WorkerReport::Installed { compiled, .. } => self.installed = Some(Arc::clone(compiled)),
             WorkerReport::Cleared => self.installed = None,
             WorkerReport::Status(_) | WorkerReport::Error(_) => {}
         }
@@ -227,7 +227,7 @@ impl TestWorker {
                     return Ok(RunOutcome::published(&self.graph, &status));
                 }
                 WorkerReport::Error(WorkerError::Execution { error }) => return Err(error),
-                WorkerReport::Installed(_)
+                WorkerReport::Installed { .. }
                 | WorkerReport::Cleared
                 | WorkerReport::Status(_)
                 | WorkerReport::Error(
@@ -257,7 +257,9 @@ impl TestWorker {
         let mut drained = Vec::new();
         while let Ok(report) = self.reports.try_recv() {
             match &report {
-                WorkerReport::Installed(compiled) => self.installed = Some(Arc::clone(compiled)),
+                WorkerReport::Installed { compiled, .. } => {
+                    self.installed = Some(Arc::clone(compiled))
+                }
                 WorkerReport::Cleared => self.installed = None,
                 WorkerReport::Status(_) | WorkerReport::Error(_) => {}
             }

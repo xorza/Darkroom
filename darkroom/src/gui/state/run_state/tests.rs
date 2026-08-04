@@ -179,6 +179,71 @@ fn clear_drops_the_document_half_and_keeps_the_worker_half() {
     assert_eq!(state.status(node), ExecStatus::Cached);
 }
 
+/// The cache readout follows the worker's own measurements and nothing else.
+/// An install carries the resident set left after reconciling — which is the
+/// only figure a program with nothing to run will ever produce — and a clear
+/// means the cache is gone.
+///
+/// The reason both matter: `App::adopt_document` asks the worker to drop its
+/// program on a File ▸ New, and the status bar would otherwise keep naming the
+/// closed document's cache until some later run measured it again.
+#[test]
+fn install_and_clear_reports_carry_the_cache_reading() {
+    let node = nid(1);
+    let mut state = run_state([node]);
+    let mut log = StatusLog::default();
+    state.cache_ram = RamUsage { cpu: 24, gpu: 8 };
+    state.nodes.entry(node).or_default().status = ExecStatus::Cached;
+    state
+        .previews
+        .entries
+        .insert(node, StoredContent::Text("stale".into()));
+
+    // An install that dropped every cached node reports an empty cache, and
+    // the readout follows it down.
+    let mut builder = CompiledGraphBuilder::new();
+    builder.insert_node(nid(2));
+    let replacement = builder.build();
+    state.apply_report(
+        WorkerReport::Installed {
+            compiled: Arc::clone(&replacement),
+            cache_ram: RamUsage::default(),
+        },
+        &mut log,
+    );
+    assert_eq!(state.cache_ram, RamUsage::default());
+    assert!(
+        state
+            .compiled
+            .as_ref()
+            .is_some_and(|c| Arc::ptr_eq(c, &replacement)),
+        "the acknowledged program is the one just installed"
+    );
+    assert_eq!(
+        state.status(node),
+        ExecStatus::Cached,
+        "an install is not a run: it corrects the cache figure and nothing else"
+    );
+
+    // A non-empty install is taken just as literally.
+    state.apply_report(
+        WorkerReport::Installed {
+            compiled: replacement,
+            cache_ram: RamUsage { cpu: 7, gpu: 3 },
+        },
+        &mut log,
+    );
+    assert_eq!(state.cache_ram, RamUsage { cpu: 7, gpu: 3 });
+
+    // A cleared worker holds no program and no cache, and the document half
+    // goes with them.
+    state.apply_report(WorkerReport::Cleared, &mut log);
+    assert_eq!(state.cache_ram, RamUsage::default());
+    assert!(state.compiled.is_none());
+    assert_eq!(state.status(node), ExecStatus::None);
+    assert!(state.previews.entries.is_empty());
+}
+
 #[test]
 fn node_patch_marks_the_attributed_node_running_then_executed() {
     let node = nid(1);
