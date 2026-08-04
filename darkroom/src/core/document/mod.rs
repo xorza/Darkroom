@@ -330,17 +330,6 @@ impl Document {
             })
     }
 
-    /// The viewer nodes a record pass will actually draw: each group renders
-    /// its *visible* tab and nothing else. Scopes full-resolution texture
-    /// uploads to what's on screen — a viewer stacked behind another tab in
-    /// the same pane costs nothing until it's activated.
-    pub(crate) fn visible_viewer_nodes(&self) -> impl Iterator<Item = NodeId> + '_ {
-        self.layout.active_tabs().filter_map(|tab| match tab {
-            TabRef::ImageViewer(node_id) => Some(node_id),
-            _ => None,
-        })
-    }
-
     /// Bring the editor's derived state back in line with the graph: drop
     /// tabs whose target vanished, collapsing panes that empty. The graph pane
     /// always survives — the graph and `main_view` both always exist — so this
@@ -438,48 +427,6 @@ mod tests {
             "and so does the tab lift"
         );
         assert!(doc.holds_node(plain), "the surviving node is untouched");
-    }
-
-    /// Only a pane's *visible* tab is owed a full-resolution texture — being
-    /// open is not enough.
-    #[test]
-    fn only_the_visible_viewer_tab_draws() {
-        let mut fixture = DocFixture::default();
-        let root_node = fixture.stub_at(Vec2::ZERO);
-        let doc = &mut fixture.doc;
-        assert_eq!(doc.visible_viewer_nodes().count(), 0);
-
-        let primary = doc.layout.primary().id;
-        doc.layout
-            .find_or_insert(TabRef::ImageViewer(root_node), primary);
-        // Open and visible are different questions: the tab is now in the
-        // group — beside the graph tab a fresh document starts with — but the
-        // group still *shows* the graph, so nothing draws the viewer and no
-        // full-resolution texture is owed.
-        assert_eq!(
-            doc.layout.all_tabs().count(),
-            2,
-            "the viewer tab joined the graph tab in the primary group"
-        );
-        assert_eq!(doc.visible_viewer_nodes().count(), 0);
-
-        doc.layout.apply(DockOp::ActivateTab {
-            tab: TabRef::ImageViewer(root_node),
-        });
-        assert_eq!(
-            doc.visible_viewer_nodes().collect::<Vec<_>>(),
-            vec![root_node],
-            "activating the tab makes it the pane's drawn viewer"
-        );
-
-        doc.layout.apply(DockOp::CloseTab {
-            tab: TabRef::ImageViewer(root_node),
-        });
-        assert_eq!(
-            doc.visible_viewer_nodes().count(),
-            0,
-            "closing the viewer leaves nothing drawn"
-        );
     }
 
     #[test]

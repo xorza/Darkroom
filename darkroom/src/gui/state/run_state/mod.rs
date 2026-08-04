@@ -447,7 +447,7 @@ impl RunState {
                 self.previews.ingest_preview(ui, node_id, value);
             }
         }
-        self.previews.reconcile(ui, document);
+        self.previews.reconcile(document);
     }
 
     /// Drop the document-derived half: no glow, timings, logs, or published
