@@ -31,7 +31,7 @@
 	<key>CFBundleDisplayName</key>
 	<string>Darkroom</string>
 	<key>CFBundleIdentifier</key>
-	<string>com.xxorza.darkroom</string>
+	<string>com.cssodessa.darkroom</string>
 	<key>CFBundleExecutable</key>
 	<string>darkroom</string>
 	<key>CFBundleIconFile</key>
@@ -61,7 +61,7 @@
 	<array>
 		<dict>
 			<key>UTTypeIdentifier</key>
-			<string>com.xxorza.darkroom.project</string>
+			<string>com.cssodessa.darkroom.project</string>
 			<key>UTTypeDescription</key>
 			<string>Darkroom Project</string>
 			<key>UTTypeConformsTo</key>
@@ -95,7 +95,7 @@
 			<string>Owner</string>
 			<key>LSItemContentTypes</key>
 			<array>
-				<string>com.xxorza.darkroom.project</string>
+				<string>com.cssodessa.darkroom.project</string>
 			</array>
 			<key>CFBundleTypeIconFile</key>
 			<string>darkroom.icns</string>

@@ -1,0 +1,17 @@
+[Desktop Entry]
+Type=Application
+Name=darkroom
+GenericName=Node Graph Editor
+Comment=Node-graph image pipeline editor
+# %f, not %F: the CLI takes one optional document path and errors on a second.
+Exec=darkroom %f
+# Named for the app id rather than "darkroom", so it cannot collide with
+# another package's generic icon in the shared hicolor theme.
+Icon=com.cssodessa.darkroom
+Terminal=false
+Categories=Graphics;Development;
+MimeType=application/x-darkroom;
+# Must equal the window's Wayland app_id / X11 WM_CLASS, which `main.rs` sets
+# to this file's basename — that pairing is what groups the window under this
+# entry and gives it the launcher's icon.
+StartupWMClass=com.cssodessa.darkroom

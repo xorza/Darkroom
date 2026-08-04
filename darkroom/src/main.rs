@@ -40,7 +40,12 @@ fn run_gui(document: Option<PathBuf>) -> Result<(), WinitHostError> {
     // first window is already up, too late to size it). Reuse the same
     // instance for the app so we don't read the file twice.
     let preferences = Preferences::load();
-    let mut window = WindowConfig::new("Darkroom");
+    // Reverse-DNS, and exactly the basename of
+    // `assets/linux/com.cssodessa.darkroom.desktop` — that equality is what
+    // ties the window to its launcher entry, so the shell groups the two and
+    // takes the taskbar icon from the entry. Wayland windows carry no identity
+    // at all without it.
+    let mut window = WindowConfig::new("Darkroom").app_id("com.cssodessa.darkroom");
     if let Some(icon) = load_icon() {
         window = window.icon(icon);
     }

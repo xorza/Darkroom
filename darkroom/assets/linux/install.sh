@@ -11,6 +11,11 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 ICONS=../icons
+# The desktop file ID: the entry's basename, the icon name, and the window's
+# Wayland app_id / X11 WM_CLASS are all this one string, and the shell pairs
+# the window with the launcher only when they agree. `main.rs` sets the
+# window's; keep the two in step.
+APP_ID=com.cssodessa.darkroom
 
 DATA="${PREFIX:+$PREFIX/share}"
 DATA="${DATA:-$HOME/.local/share}"
@@ -50,7 +55,7 @@ fi
 echo "installing hicolor PNGs into $DATA/icons/hicolor"
 for n in 16 24 32 48 64 128 256 512; do
   install -Dm644 "$ICONS/darkroom-$n.png" \
-    "$DATA/icons/hicolor/${n}x${n}/apps/darkroom.png"
+    "$DATA/icons/hicolor/${n}x${n}/apps/$APP_ID.png"
   # The same artwork under the type's default icon name, so file managers
   # give `.darkroom` documents an icon of their own rather than the generic
   # archive one.
@@ -64,8 +69,8 @@ install -Dm644 darkroom-mime.xml "$DATA/mime/packages/darkroom.xml"
 echo "installing desktop entry into $DATA/applications (Exec=$BIN)"
 entry=$(mktemp)
 trap 'rm -f "$entry"' EXIT
-sed "s|^Exec=darkroom |Exec=$BIN |" darkroom.desktop >"$entry"
-install -Dm644 "$entry" "$DATA/applications/darkroom.desktop"
+sed "s|^Exec=darkroom |Exec=$BIN |" "$APP_ID.desktop" >"$entry"
+install -Dm644 "$entry" "$DATA/applications/$APP_ID.desktop"
 
 # Refresh caches (best-effort; harmless if the tools are absent).
 gtk-update-icon-cache -f -t "$DATA/icons/hicolor" 2>/dev/null || true
@@ -77,7 +82,7 @@ update-desktop-database "$DATA/applications" 2>/dev/null || true
 # touching — there the admin's `xdg-mime default` or the user's own file
 # decides.
 if [ -z "${PREFIX:-}" ]; then
-  xdg-mime default darkroom.desktop application/x-darkroom 2>/dev/null || true
+  xdg-mime default "$APP_ID.desktop" application/x-darkroom 2>/dev/null || true
 fi
 
 echo "done. darkroom should now appear in your application launcher."
@@ -87,8 +92,8 @@ echo "done. darkroom should now appear in your application launcher."
 # correctly even when the entry is unusable; `gio mime` resolves it the way a
 # file manager does, and is what catches an unloadable entry.
 if command -v gio >/dev/null 2>&1; then
-  if gio mime application/x-darkroom 2>/dev/null | grep -q 'darkroom\.desktop'; then
-    echo "verified: .darkroom files resolve to darkroom.desktop"
+  if gio mime application/x-darkroom 2>/dev/null | grep -q "$APP_ID.desktop"; then
+    echo "verified: .darkroom files resolve to $APP_ID.desktop"
   else
     echo >&2
     echo "warning: the type is installed but no application resolves for it." >&2
