@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -98,14 +99,20 @@ impl PendingTransition {
 }
 
 impl App {
-    /// Build the app before the first frame: restore the preferred document,
+    /// Build the app before the first frame: open the startup document —
+    /// `document` when the command line named one, else the preferred one —
     /// assemble runtime services, and push the resolved palantir theme onto
     /// `Ui`. Document restore failures degrade to an empty document and are
     /// retained in the shared status log rather than blocking launch.
     ///
     /// Handed to [`palantir::WinitHost::run`], which calls it once the
     /// `Ui` + [`HostHandle`] exist (before the first frame).
-    pub(crate) fn new(ui: &mut Ui, handle: HostHandle, mut preferences: Preferences) -> Self {
+    pub(crate) fn new(
+        ui: &mut Ui,
+        handle: HostHandle,
+        mut preferences: Preferences,
+        document: Option<PathBuf>,
+    ) -> Self {
         // The worker wakes the winit loop via the host handle (see
         // `crate::core::wake`).
         let wake: Wake = {
@@ -116,7 +123,7 @@ impl App {
         // its saved geometry can size the window at creation.
         let mut runtime = RuntimeHost::new(wake, &preferences);
         let mut status = StatusLog::default();
-        let open = OpenDocument::load_preferred(&mut preferences, &mut status);
+        let open = OpenDocument::open_at_launch(document, &mut preferences, &mut status);
         runtime.set_document_cache(open.path.as_deref());
         let mut app = Self {
             session: Session::new(open),

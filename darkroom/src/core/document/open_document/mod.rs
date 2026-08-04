@@ -228,19 +228,50 @@ impl OpenDocument {
         })
     }
 
-    /// The document a launching frontend restores: the one `preferences`
-    /// remembers, or an empty one when there is none or reopening is
-    /// switched off. A failed load is reported to `status` and forgets the
-    /// remembered path, so the next launch starts clean instead of failing
-    /// again — which is why this takes the preferences by `&mut` and
-    /// persists them.
-    pub(crate) fn load_preferred(preferences: &mut Preferences, status: &mut StatusLog) -> Self {
-        Self::load_preferred_with(preferences, status, Preferences::save)
+    /// The document a launching frontend opens: `argument` when the command
+    /// line named a file, otherwise the one `preferences` remembers.
+    pub(crate) fn open_at_launch(
+        argument: Option<PathBuf>,
+        preferences: &mut Preferences,
+        status: &mut StatusLog,
+    ) -> Self {
+        Self::open_at_launch_with(argument, preferences, status, Preferences::save)
     }
 
-    /// [`Self::load_preferred`] with the preferences write injected, so a
-    /// test can drive the path where forgetting the bad document fails too.
-    fn load_preferred_with(
+    /// [`Self::open_at_launch`] with the preferences write injected, so a test
+    /// can drive the path where forgetting a bad remembered document fails too.
+    ///
+    /// A named file outranks the remembered one, reopening preference
+    /// included — the user asked for that document by name — and a named file
+    /// that fails to load degrades to an empty document rather than falling
+    /// back to the remembered one, which would read as the file having loaded.
+    /// Either way it leaves the preferences alone: a command-line document is
+    /// this launch's, and saving it is what makes it the remembered one.
+    fn open_at_launch_with(
+        argument: Option<PathBuf>,
+        preferences: &mut Preferences,
+        status: &mut StatusLog,
+        save_preferences: impl FnOnce(&Preferences) -> Result<(), String>,
+    ) -> Self {
+        let Some(path) = argument else {
+            return Self::load_preferred(preferences, status, save_preferences);
+        };
+        // Made absolute up front: the argument is relative to the shell's
+        // working directory, which the file dialogs' anchor and the worker's
+        // disk cache both outlive.
+        let path = std::path::absolute(&path).unwrap_or(path);
+        Self::load(path).unwrap_or_else(|error| {
+            status.error(format!("load failed: {error:#}"));
+            Self::default()
+        })
+    }
+
+    /// The document `preferences` remembers, or an empty one when there is
+    /// none or reopening is switched off. A failed load is reported to
+    /// `status` and forgets the remembered path, so the next launch starts
+    /// clean instead of failing again — which is why this takes the
+    /// preferences by `&mut` and persists them.
+    fn load_preferred(
         preferences: &mut Preferences,
         status: &mut StatusLog,
         save_preferences: impl FnOnce(&Preferences) -> Result<(), String>,

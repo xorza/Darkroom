@@ -8,7 +8,7 @@
 //! here has to keep one. The bounded rolling buffer beside the slot is
 //! `cfg(test)` only: it exists so a test can assert *which* failures a path
 //! reported, which the slot cannot express — it holds one at a time, and paths
-//! like `OpenDocument::load_preferred` report two.
+//! like `OpenDocument::open_at_launch` report two.
 
 #[derive(Debug, Default)]
 pub(crate) struct StatusLog {
