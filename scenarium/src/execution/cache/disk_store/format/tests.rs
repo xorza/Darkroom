@@ -8,7 +8,7 @@ use std::task::{Context, Poll};
 
 use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncSeek, AsyncWrite, AsyncWriteExt as _, ReadBuf};
 
-use crate::data::codec;
+use crate::data::codec::error::CodecFormatError;
 use crate::execution::cache::digest::Digest;
 use crate::execution::cache::disk_store::format::{
     BODY_LEN_OFFSET, DESCRIPTOR_LEN, FIXED_LEN, FORMAT_VERSION, MAGIC, PAYLOAD_LEN_OFFSET,
@@ -340,7 +340,7 @@ async fn custom_decoder_is_bounded_and_must_consume_its_payload() {
     )
     .await
     .unwrap_err();
-    assert!(matches!(error, codec::error::Error::Frame(_)));
+    assert!(matches!(error, CodecFormatError::Frame(_)));
     assert_eq!(underread_calls.load(Ordering::SeqCst), 1);
 }
 
@@ -471,7 +471,7 @@ async fn malformed_header_lengths_tags_and_const_values_are_rejected() {
     )
     .await
     .unwrap_err();
-    assert!(matches!(error, codec::error::Error::Frame(_)));
+    assert!(matches!(error, CodecFormatError::Frame(_)));
 
     assert_eq!(DESCRIPTOR_LEN, 32);
 }

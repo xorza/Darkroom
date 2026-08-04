@@ -15,9 +15,9 @@ use crate::graph::identity::NodeId;
 /// Shared by eviction and flush. What the sweep was *trying* to do is already
 /// said by the report it arrives in, so the two need no separate types.
 #[derive(Debug)]
-pub(crate) struct CacheNodeFailure {
-    pub(crate) node_id: NodeId,
-    pub(crate) cause: CacheNodeError,
+pub struct CacheNodeFailure {
+    pub node_id: NodeId,
+    pub cause: CacheNodeError,
 }
 
 impl fmt::Display for CacheNodeFailure {
@@ -30,7 +30,7 @@ impl fmt::Display for CacheNodeFailure {
 /// Why a sweep could not finish with one node — the store operation it asked
 /// for, still carrying its own cause rather than a rendering of it.
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum CacheNodeError {
+pub enum CacheNodeError {
     #[error(transparent)]
     Removal(RemovalError),
     #[error(transparent)]
@@ -55,9 +55,9 @@ pub(crate) struct CacheFlushReport {
 /// One node holding a value whose custom type has no registered codec, so the
 /// flush wrote nothing for it and no future flush will either.
 #[derive(Debug)]
-pub(crate) struct CacheFlushUnsupported {
-    pub(crate) node_id: NodeId,
-    pub(crate) type_id: TypeId,
+pub struct CacheFlushUnsupported {
+    pub node_id: NodeId,
+    pub type_id: TypeId,
 }
 
 impl fmt::Display for CacheFlushUnsupported {

@@ -11,7 +11,7 @@ mod worker;
 
 pub use ::common::CancelToken;
 pub use data::codec::CustomValueCodec;
-pub use data::codec::error::CodecError;
+pub use data::codec::error::{CodecError, CodecFormatError};
 pub use data::const_value::ConstValue;
 pub use data::dynamic_value::{CustomValue, DynamicValue, RamUsage};
 pub use data::type_system::{DataType, EnumVariants, FsPathConfig, FsPathMode, TypeId};
@@ -19,6 +19,10 @@ pub use elements::math_library::math_library;
 pub use elements::system_library::system_library;
 pub use elements::worker_events_library::{FRAME_EVENT_FUNC_ID, worker_events_library};
 pub use execution::cache::disk_store::DiskStore;
+pub use execution::cache::disk_store::error::{RemovalError, StoreError};
+pub use execution::cache::runtime::error::{
+    CacheFlushUnsupported, CacheNodeError, CacheNodeFailure,
+};
 pub use execution::compile::Compiler;
 pub use execution::compile::compiled_graph::CompiledGraph;
 pub use execution::compile::error::CompileError;

@@ -10,8 +10,8 @@ use ::common::file_utils::{AtomicFile, PublicationMode};
 use tokio::io::{AsyncWriteExt as _, BufWriter};
 
 use crate::DynamicValue;
-use crate::data::codec;
 use crate::data::codec::Codecs;
+use crate::data::codec::error::CodecFormatError;
 use crate::execution::cache::digest::Digest;
 use crate::execution::cache::disk_store::error::{
     RemovalError, StoreError, StoreOutcome, StoreResult,
@@ -232,7 +232,7 @@ impl DiskStore {
         {
             // The one encode failure that is not a failure: a type this
             // library has no codec for was never going to be written.
-            let codec::error::Error::UnknownType(type_id) = error else {
+            let CodecFormatError::UnknownType(type_id) = error else {
                 return Err(StoreError::Encode {
                     path: path(),
                     source: error,

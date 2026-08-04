@@ -6,6 +6,8 @@ use ::common::TempDir;
 use tokio::sync::{Notify, mpsc, oneshot};
 use tokio::time::{Duration, timeout};
 
+use crate::execution::cache::disk_store::error::StoreError;
+use crate::execution::cache::runtime::error::CacheNodeError;
 use crate::execution::error::Error;
 use crate::execution::report::NodeExecutionStatus;
 use crate::execution::seeds::RunSeeds;
