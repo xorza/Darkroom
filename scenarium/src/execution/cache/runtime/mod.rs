@@ -28,7 +28,7 @@ use crate::execution::cache::resource::error::StampError;
 use crate::execution::cache::resource::{FsPathId, StampJob};
 use crate::execution::cache::runtime::consumer_cone::ConsumerCone;
 use crate::execution::cache::runtime::error::{
-    CacheFlushReport, CacheFlushUnsupported, CacheNodeFailure,
+    CacheFlushReport, CacheFlushUnsupported, CacheNodeError, CacheNodeFailure,
 };
 use crate::execution::cache::slot::RuntimeSlot;
 use crate::execution::compile::compiled_graph::{CompiledGraph, ExecutionBinding};
@@ -189,7 +189,7 @@ impl RuntimeCache {
                 Ok(()) => self.slots[node_idx].clear_output(),
                 Err(error) => failures.push(CacheNodeFailure {
                     node_id,
-                    message: error.to_string(),
+                    cause: CacheNodeError::Removal(error),
                 }),
             }
         }
@@ -780,7 +780,7 @@ impl RuntimeCache {
                     .push(CacheFlushUnsupported { node_id, type_id }),
                 Err(error) => report.failures.push(CacheNodeFailure {
                     node_id,
-                    message: error.to_string(),
+                    cause: CacheNodeError::Store(error),
                 }),
             }
         }

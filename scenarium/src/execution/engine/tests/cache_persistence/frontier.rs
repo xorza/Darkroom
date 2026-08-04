@@ -80,11 +80,13 @@ async fn explicit_cache_eviction_removes_the_downstream_ram_and_disk_cone() {
         panic!("the undeletable src_a path must be the only eviction failure");
     };
     assert_eq!(failure.node_id, e.id("src_a"));
-    assert!(
-        failure
-            .message
-            .starts_with(&format!("failed to remove {}:", blocked.display()))
-    );
+    let CacheNodeError::Removal(error) = &failure.cause else {
+        panic!(
+            "an undeletable blob is a removal failure, got {:?}",
+            failure.cause
+        );
+    };
+    assert_eq!(error.path, blocked, "the failure names the blob it kept");
     assert!(
         e.holds_output("src_a"),
         "a failed disk deletion must leave the matching RAM value resident"
