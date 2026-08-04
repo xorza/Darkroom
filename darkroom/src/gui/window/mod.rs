@@ -175,13 +175,13 @@ impl MainWindow {
                         // `node_label` is a graph lookup and a `String` — less
                         // than the map that used to front it cost to build.
                         let title = viewer::node_label(doc, node_id);
-                        let source = app.run_state().previews.entries.get(&node_id);
+                        let previews = &app.run_state().previews;
                         let viewer = image_viewers
                             .entry(node_id)
                             .or_insert_with(|| ImageViewer::new(node_id));
                         // Viewer-toolbar edits ride the same in-place
                         // prefs path as the Preferences tab.
-                        if viewer.show(ui, app.theme(), &mut prefs.viewer, &title, source) {
+                        if viewer.show(ui, app.theme(), &mut prefs.viewer, &title, previews) {
                             out.push_app(AppCommand::Prefs(PrefsCommand::Changed));
                         }
                     }
