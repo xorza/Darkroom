@@ -8,6 +8,7 @@ use tokio::io::{
 
 use crate::data::codec;
 use crate::data::codec::Codecs;
+use crate::data::codec::error::CodecFormatError;
 use crate::execution::cache::digest::Digest;
 use crate::graph::func::lambda::OutputDemand;
 use crate::runtime::context::ContextStore;
@@ -97,7 +98,7 @@ where
                 codec
                     .encode(value.as_ref(), writer, ctx)
                     .await
-                    .map_err(|source| codec::error::Error::Encode { type_id, source })?;
+                    .map_err(|source| CodecFormatError::Encode { type_id, source })?;
             }
         }
         let payload_end = writer.stream_position().await?;
@@ -192,7 +193,7 @@ where
                 let value = codec
                     .decode(&mut payload, descriptor.payload_len, ctx)
                     .await
-                    .map_err(|source| codec::error::Error::Decode { type_id, source })?;
+                    .map_err(|source| CodecFormatError::Decode { type_id, source })?;
                 require_consumed(&payload)?;
                 DynamicValue::Custom(value)
             }
@@ -319,7 +320,7 @@ fn descriptor_for(value: &DynamicValue, codecs: &Codecs) -> codec::error::Result
             let type_id = value.type_id();
             let codec = codecs
                 .get(type_id)
-                .ok_or(codec::error::Error::UnknownType(type_id))?;
+                .ok_or(CodecFormatError::UnknownType(type_id))?;
             OutputKind::Custom {
                 type_id,
                 version: codec.version(),
@@ -467,7 +468,7 @@ async fn read_static(
             match read_u8(reader).await? {
                 0 => Ok(ConstValue::Bool(false)),
                 1 => Ok(ConstValue::Bool(true)),
-                _ => Err(codec::error::Error::Frame(
+                _ => Err(CodecFormatError::Frame(
                     "cached boolean is not encoded as zero or one".into(),
                 )),
             }
@@ -478,7 +479,7 @@ async fn read_static(
             read_strings(reader, payload_len).await?,
         )),
         7 => Ok(ConstValue::Enum(read_string(reader, payload_len).await?)),
-        _ => Err(codec::error::Error::Frame(
+        _ => Err(CodecFormatError::Frame(
             "cached const value has an unknown variant".into(),
         )),
     }
@@ -492,14 +493,14 @@ async fn read_string(
     let expected_len = 1u64
         .checked_add(8)
         .and_then(|prefix| prefix.checked_add(byte_len))
-        .ok_or_else(|| codec::error::Error::Frame("cached string length overflow".into()))?;
+        .ok_or_else(|| CodecFormatError::Frame("cached string length overflow".into()))?;
     require_payload_len(payload_len, expected_len)?;
     let byte_len = usize::try_from(byte_len)
-        .map_err(|_| codec::error::Error::Frame("cached string does not fit in memory".into()))?;
+        .map_err(|_| CodecFormatError::Frame("cached string does not fit in memory".into()))?;
     let mut bytes = vec![0; byte_len];
     reader.read_exact(&mut bytes).await?;
     String::from_utf8(bytes)
-        .map_err(|_| codec::error::Error::Frame("cached string is not valid UTF-8".into()))
+        .map_err(|_| CodecFormatError::Frame("cached string is not valid UTF-8".into()))
 }
 
 async fn read_strings(
@@ -510,35 +511,34 @@ async fn read_strings(
     let minimum_len = 1u64
         .checked_add(8)
         .and_then(|prefix| prefix.checked_add(value_count.checked_mul(8)?))
-        .ok_or_else(|| codec::error::Error::Frame("cached path list length overflow".into()))?;
+        .ok_or_else(|| CodecFormatError::Frame("cached path list length overflow".into()))?;
     if minimum_len > payload_len {
-        return Err(codec::error::Error::Frame(
+        return Err(CodecFormatError::Frame(
             "cached path list count exceeds its payload".into(),
         ));
     }
-    let value_count = usize::try_from(value_count).map_err(|_| {
-        codec::error::Error::Frame("cached path count does not fit in memory".into())
-    })?;
+    let value_count = usize::try_from(value_count)
+        .map_err(|_| CodecFormatError::Frame("cached path count does not fit in memory".into()))?;
     let mut expected_len = minimum_len;
     let mut values = Vec::with_capacity(value_count);
     for _ in 0..value_count {
         let byte_len = read_u64(reader).await?;
         expected_len = expected_len
             .checked_add(byte_len)
-            .ok_or_else(|| codec::error::Error::Frame("cached path list length overflow".into()))?;
+            .ok_or_else(|| CodecFormatError::Frame("cached path list length overflow".into()))?;
         if expected_len > payload_len {
-            return Err(codec::error::Error::Frame(
+            return Err(CodecFormatError::Frame(
                 "cached path length exceeds its payload".into(),
             ));
         }
         let byte_len = usize::try_from(byte_len)
-            .map_err(|_| codec::error::Error::Frame("cached path does not fit in memory".into()))?;
+            .map_err(|_| CodecFormatError::Frame("cached path does not fit in memory".into()))?;
         let mut bytes = vec![0; byte_len];
         reader.read_exact(&mut bytes).await?;
-        values
-            .push(String::from_utf8(bytes).map_err(|_| {
-                codec::error::Error::Frame("cached path is not valid UTF-8".into())
-            })?);
+        values.push(
+            String::from_utf8(bytes)
+                .map_err(|_| CodecFormatError::Frame("cached path is not valid UTF-8".into()))?,
+        );
     }
     require_payload_len(payload_len, expected_len)?;
     Ok(values)
@@ -562,7 +562,7 @@ fn require_consumed<R: AsyncRead>(reader: &tokio::io::Take<R>) -> codec::error::
     if reader.limit() == 0 {
         Ok(())
     } else {
-        Err(codec::error::Error::Frame(
+        Err(CodecFormatError::Frame(
             "cached payload decoder did not consume its complete region".into(),
         ))
     }
@@ -572,7 +572,7 @@ fn require_payload_len(actual: u64, expected: u64) -> codec::error::Result<()> {
     if actual == expected {
         Ok(())
     } else {
-        Err(codec::error::Error::Frame(format!(
+        Err(CodecFormatError::Frame(format!(
             "cached static payload has length {actual}, expected {expected}"
         )))
     }

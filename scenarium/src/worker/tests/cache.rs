@@ -42,16 +42,28 @@ async fn an_eviction_failure_uses_the_general_worker_error_report() {
     .await;
 
     assert!(matches!(w.report().await, WorkerReport::Installed(_)));
-    let WorkerReport::Error(WorkerError::CacheEviction {
-        node_count,
-        details,
-    }) = w.report().await
-    else {
+    let WorkerReport::Error(error) = w.report().await else {
         panic!("a cache deletion failure must use the general worker error report");
     };
-    assert_eq!(node_count, 1);
-    assert!(details.contains(&format!("{blocked:?}")));
-    assert!(details.contains(&format!("failed to remove {}", blocked_path.display())));
+    let WorkerError::CacheEviction { failures } = &error else {
+        panic!("a deletion failure is an eviction error, got {error:?}");
+    };
+    let [failure] = failures.as_slice() else {
+        panic!("only the blocked node fails, got {failures:?}");
+    };
+    assert_eq!(failure.node_id, blocked);
+    let CacheNodeError::Removal(removal) = &failure.cause else {
+        panic!(
+            "a blocked deletion is a removal failure, got {:?}",
+            failure.cause
+        );
+    };
+    assert_eq!(removal.path, blocked_path);
+    // The typed payload still renders as the line a host displays.
+    assert!(
+        error.to_string().contains(&format!("{blocked:?}")),
+        "{error}"
+    );
     w.quiet();
 }
 
@@ -148,17 +160,29 @@ async fn a_flush_failure_uses_the_general_worker_error_report() {
     // The sweep a newly attached store owes every resident value.
     w.settle([w.disk_store(dir.path())]).await;
     let WorkerReport::Error(WorkerError::CacheFlush {
-        node_count,
-        details,
+        failures,
+        unsupported,
     }) = w.report().await
     else {
         panic!("a store attach that could not write must report it");
     };
-    assert_eq!(node_count, 1, "only `square` is disk-backed and resident");
-    assert!(details.contains(&format!("{blocked:?}")), "{details}");
     assert!(
-        details.contains(&format!("could not publish {}", blocked_path.display())),
-        "the report names the stage and the blob: {details}"
+        unsupported.is_empty(),
+        "the type persists fine; the disk did not"
+    );
+    let [failure] = failures.as_slice() else {
+        panic!("only `square` is disk-backed and resident, got {failures:?}");
+    };
+    assert_eq!(failure.node_id, blocked);
+    let CacheNodeError::Store(StoreError::Publish { path, .. }) = &failure.cause else {
+        panic!(
+            "a blocked destination fails at publication, got {:?}",
+            failure.cause
+        );
+    };
+    assert_eq!(
+        path, &blocked_path,
+        "the failure names the blob it could not write"
     );
     w.quiet();
 
@@ -167,10 +191,10 @@ async fn a_flush_failure_uses_the_general_worker_error_report() {
         nodes: vec![blocked],
     }])
     .await;
-    let WorkerReport::Error(WorkerError::CacheFlush { node_count, .. }) = w.report().await else {
+    let WorkerReport::Error(WorkerError::CacheFlush { failures, .. }) = w.report().await else {
         panic!("a requested flush that could not write must report it");
     };
-    assert_eq!(node_count, 1);
+    assert_eq!(failures.len(), 1);
     w.quiet();
 }
 
@@ -240,23 +264,24 @@ async fn an_unpersistable_type_is_reported_only_when_the_flush_was_requested() {
     }])
     .await;
     let WorkerReport::Error(WorkerError::CacheFlush {
-        node_count,
-        details,
+        failures,
+        unsupported,
     }) = w.report().await
     else {
         panic!("a requested flush of an unpersistable value must report it");
     };
-    assert_eq!(node_count, 1);
     assert!(
-        details.contains(&format!("{:?}", w.id("make_blob"))),
-        "{details}"
+        failures.is_empty(),
+        "nothing was attempted, so nothing failed"
     );
-    assert!(
-        details.contains(&format!(
-            "no cache codec registered for type {:?}",
-            TypeId::from(BLOB_TYPE)
-        )),
-        "the report names the type that cannot persist: {details}"
+    let [skipped] = unsupported.as_slice() else {
+        panic!("the one unpersistable node is the whole report, got {unsupported:?}");
+    };
+    assert_eq!(skipped.node_id, w.id("make_blob"));
+    assert_eq!(
+        skipped.type_id,
+        TypeId::from(BLOB_TYPE),
+        "the report names the type that cannot persist"
     );
     w.quiet();
 }

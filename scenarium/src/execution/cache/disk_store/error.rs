@@ -3,7 +3,7 @@
 use std::io;
 use std::path::PathBuf;
 
-use crate::data::codec;
+use crate::data::codec::error::CodecFormatError;
 use crate::data::type_system::TypeId;
 
 /// What a publication that did not fail actually did.
@@ -36,7 +36,7 @@ pub(crate) enum StoreOutcome {
 /// recoverable by degrading: a cache is an optimization, so a caller drops the
 /// blob rather than failing the run.
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum StoreError {
+pub enum StoreError {
     #[error("could not create the cache directory for {}: {source}", path.display())]
     Directory {
         path: PathBuf,
@@ -53,7 +53,7 @@ pub(crate) enum StoreError {
     Encode {
         path: PathBuf,
         #[source]
-        source: codec::error::Error,
+        source: CodecFormatError,
     },
     #[error("could not write {}: {source}", path.display())]
     Write {
@@ -75,8 +75,8 @@ pub(crate) type StoreResult = std::result::Result<StoreOutcome, StoreError>;
 /// these — an eviction wants the file gone, and an absent file already is.
 #[derive(Debug, thiserror::Error)]
 #[error("failed to remove {}: {source}", path.display())]
-pub(crate) struct RemovalError {
-    pub(crate) path: PathBuf,
+pub struct RemovalError {
+    pub path: PathBuf,
     #[source]
-    pub(crate) source: io::Error,
+    pub source: io::Error,
 }

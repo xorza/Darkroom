@@ -16,8 +16,10 @@ use crate::data::type_system::TypeId;
 /// thread and be reported.
 pub type CodecError = Box<dyn std::error::Error + Send + Sync>;
 
+/// What the blob format itself rejected — distinct from [`CodecError`], which
+/// is whatever an individual codec handed back and which this wraps.
 #[derive(Debug, Error)]
-pub(crate) enum Error {
+pub enum CodecFormatError {
     #[error("cache I/O failed: {0}")]
     Io(#[from] std::io::Error),
     #[error("malformed cached output frame: {0}")]
@@ -30,4 +32,4 @@ pub(crate) enum Error {
     Decode { type_id: TypeId, source: CodecError },
 }
 
-pub(crate) type Result<T> = std::result::Result<T, Error>;
+pub(crate) type Result<T> = std::result::Result<T, CodecFormatError>;
