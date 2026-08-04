@@ -230,7 +230,9 @@ impl TestWorker {
                 WorkerReport::Installed(_)
                 | WorkerReport::Cleared
                 | WorkerReport::Status(_)
-                | WorkerReport::Error(WorkerError::CacheEviction { .. }) => {}
+                | WorkerReport::Error(
+                    WorkerError::CacheEviction { .. } | WorkerError::CacheFlush { .. },
+                ) => {}
             }
         }
     }

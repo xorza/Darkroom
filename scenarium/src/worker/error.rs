@@ -16,11 +16,10 @@ pub enum WorkerError {
         #[source]
         error: Error,
     },
-    #[error("cache eviction failed for {failure_count} node(s): {details}")]
-    CacheEviction {
-        failure_count: usize,
-        details: String,
-    },
+    #[error("cache eviction failed for {node_count} node(s): {details}")]
+    CacheEviction { node_count: usize, details: String },
+    #[error("cache flush wrote nothing for {node_count} node(s): {details}")]
+    CacheFlush { node_count: usize, details: String },
 }
 
 #[derive(Debug, thiserror::Error)]

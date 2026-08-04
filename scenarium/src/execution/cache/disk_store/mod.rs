@@ -1,5 +1,6 @@
 //! Streamed, atomic persistence for node-output cache blobs.
 
+pub(crate) mod error;
 mod format;
 
 use std::io;
@@ -12,6 +13,7 @@ use crate::DynamicValue;
 use crate::data::codec;
 use crate::data::codec::Codecs;
 use crate::execution::cache::digest::Digest;
+use crate::execution::cache::disk_store::error::{StoreError, StoreOutcome, StoreResult};
 use crate::execution::cache::slot::OutputSnapshot;
 use crate::execution::compile::compiled_graph::ExecutionNode;
 use crate::graph::func::lambda::OutputDemand;
@@ -23,8 +25,6 @@ use crate::runtime::context::ContextStore;
 pub struct DiskStore {
     codecs: Codecs,
     disk_root: Option<PathBuf>,
-    #[cfg(test)]
-    pub(crate) store_io: internals::StoreIoCounts,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -69,8 +69,6 @@ impl DiskStore {
         Self {
             codecs: library.codecs(),
             disk_root,
-            #[cfg(test)]
-            store_io: internals::StoreIoCounts::default(),
         }
     }
 
@@ -188,44 +186,41 @@ impl DiskStore {
 
     /// Publish a snapshot directly after a known reuse miss, or first preserve an existing
     /// covering blob when the caller has no reuse verdict.
+    ///
+    /// Answers rather than logs. Whether a skipped or failed write is worth
+    /// telling a human depends entirely on who asked: this runs after every
+    /// node of every run, and also from a flush a user clicked for. Only the
+    /// caller knows which, so the reporting is theirs — see [`StoreOutcome`].
     pub(crate) async fn store(
         &self,
         target: &BlobTarget,
         snapshot: &OutputSnapshot,
         policy: StorePolicy,
         ctx: &mut ContextStore,
-    ) {
-        if policy == StorePolicy::PreserveCovering {
-            #[cfg(test)]
-            self.store_io
-                .coverage_probes
-                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        }
+    ) -> StoreResult {
         if policy == StorePolicy::PreserveCovering && self.covers(target, snapshot.values()).await {
-            return;
+            return Ok(StoreOutcome::AlreadyCovered);
         }
-        #[cfg(test)]
-        self.store_io
-            .publication_attempts
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let path = || target.path.clone();
         if let Some(parent) = target
             .path
             .parent()
             .filter(|parent| !parent.as_os_str().is_empty())
-            && let Err(error) = tokio::fs::create_dir_all(parent).await
         {
-            tracing::warn!(path = %target.path.display(), %error, "failed to create output-cache directory");
-            return;
+            tokio::fs::create_dir_all(parent)
+                .await
+                .map_err(|source| StoreError::Directory {
+                    path: path(),
+                    source,
+                })?;
         }
 
-        let file = AtomicFile::new(&target.path, PublicationMode::Cache).await;
-        let file = match file {
-            Ok(file) => file,
-            Err(error) => {
-                tracing::warn!(path = %target.path.display(), %error, "failed to begin output-cache publication");
-                return;
-            }
-        };
+        let file = AtomicFile::new(&target.path, PublicationMode::Cache)
+            .await
+            .map_err(|source| StoreError::Begin {
+                path: path(),
+                source,
+            })?;
         let mut writer = BufWriter::new(file);
         if let Err(error) = format::write(
             &mut writer,
@@ -236,34 +231,38 @@ impl DiskStore {
         )
         .await
         {
-            if !matches!(error, codec::error::Error::UnknownType(_)) {
-                tracing::warn!(path = %target.path.display(), %error, "failed to encode output cache");
-            }
-            return;
+            // The one encode failure that is not a failure: a type this
+            // library has no codec for was never going to be written.
+            let codec::error::Error::UnknownType(type_id) = error else {
+                return Err(StoreError::Encode {
+                    path: path(),
+                    source: error,
+                });
+            };
+            return Ok(StoreOutcome::Unsupported { type_id });
         }
-        if let Err(error) = writer.flush().await {
-            tracing::warn!(path = %target.path.display(), %error, "failed to flush output cache");
-            return;
-        }
-        if let Err(error) = writer.into_inner().commit().await {
-            tracing::warn!(path = %target.path.display(), %error, "failed to publish output cache");
-        }
+        writer.flush().await.map_err(|source| StoreError::Write {
+            path: path(),
+            source,
+        })?;
+        writer
+            .into_inner()
+            .commit()
+            .await
+            .map_err(|source| StoreError::Publish {
+                path: path(),
+                source,
+            })?;
+        Ok(StoreOutcome::Published)
     }
 }
 
 #[cfg(test)]
 pub(crate) mod internals {
     use std::path::PathBuf;
-    use std::sync::atomic::AtomicU64;
 
     use crate::execution::cache::disk_store::{DiskStore, format};
     use crate::graph::identity::NodeId;
-
-    #[derive(Debug, Default)]
-    pub(crate) struct StoreIoCounts {
-        pub(crate) coverage_probes: AtomicU64,
-        pub(crate) publication_attempts: AtomicU64,
-    }
 
     impl DiskStore {
         /// Where this node's blob lives, so a fixture can corrupt, read back or
