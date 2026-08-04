@@ -13,9 +13,9 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 
 use glam::UVec2;
-use imaginarium::{ColorFormat, Preview, ProcessingContext};
+use imaginarium::{ColorFormat, Image as CpuImage, Preview, ProcessingContext};
 use lens::Image as LensImage;
-use palantir::{Image as AptImage, ImageHandle, Ui};
+use palantir::{Image as Raster, ImageHandle, Ui};
 use scenarium::{DynamicValue, NodeId};
 
 use crate::core::document::Document;
@@ -68,12 +68,13 @@ impl StoredContent {
 
 #[derive(Debug)]
 pub(crate) struct PreviewImage {
-    pub(crate) preview: ImageHandle,
+    /// The card's thumbnail, registered the moment the value arrives — and
+    /// where the native metadata lives, since the full-resolution texture is
+    /// prepared from the same source and so is described by the same figures.
+    pub(crate) preview: DrawableImage,
     /// The full-resolution texture, or the source still waiting to become one.
     /// Read only through [`Self::full`], which is what resolves the wait.
     full: RefCell<FullImage>,
-    pub(crate) native_size: UVec2,
-    pub(crate) native_format: ColorFormat,
     pub(crate) source_bytes: usize,
 }
 
@@ -87,11 +88,19 @@ enum FullImage {
     Failed(PreviewImageError),
 }
 
-#[derive(Debug)]
-struct PreparedImage {
-    raster: AptImage,
-    native_size: UVec2,
-    native_format: ColorFormat,
+/// A registered texture plus what its source looked like before the
+/// downscale: everything a pane needs to draw one image and label it.
+///
+/// The one shape the store hands out — the card's thumbnail and the viewer's
+/// full-resolution texture are the same thing at two sizes, so neither reader
+/// needs a form of its own.
+#[derive(Clone, Debug)]
+pub(crate) struct DrawableImage {
+    pub(crate) handle: ImageHandle,
+    /// Source dimensions before the texture-cap downscale.
+    pub(crate) native_size: UVec2,
+    /// Source pixel format before the RGBA8 view conversion.
+    pub(crate) native_format: ColorFormat,
 }
 
 impl PreviewStore {
@@ -140,76 +149,71 @@ impl PreviewImage {
     /// `&self` because that ask comes from the record pass, which holds the
     /// run projection immutably (see [`AppCtx`](crate::gui::app::ctx::AppCtx)).
     /// The borrow is taken, resolved and dropped inside this call, so nothing
-    /// can observe the cell mid-upload or hold it across a frame.
+    /// can observe the cell mid-upload or hold it across a frame — and both
+    /// answers are read *out* of it rather than borrowed from, the handle as a
+    /// refcount bump on the texture the store still owns.
     ///
-    /// Both arms are read *out* rather than borrowed from, since what they
-    /// name lives behind that cell: the handle clone is a refcount bump on the
-    /// texture the store still owns, and only a broken image copies its
-    /// reason.
-    pub(crate) fn full(&self, ui: &Ui) -> Result<ImageHandle, PreviewImageError> {
+    /// A failure is stored, not just returned: it is terminal, so a broken
+    /// image is diagnosed once rather than retried on every frame that draws
+    /// it.
+    pub(crate) fn full(&self, ui: &Ui) -> Result<DrawableImage, PreviewImageError> {
         let mut full = self.full.borrow_mut();
         if let FullImage::Pending(value) = &*full {
-            *full = Self::upload(ui, value);
+            *full = match Self::upload(ui, value) {
+                Ok(handle) => FullImage::Resident(handle),
+                Err(error) => FullImage::Failed(error),
+            };
         }
         match &*full {
-            FullImage::Resident(handle) => Ok(handle.clone()),
+            // The thumbnail's metadata, because both textures come off the
+            // same source — only the handle differs between the two sizes.
+            FullImage::Resident(handle) => Ok(DrawableImage {
+                handle: handle.clone(),
+                ..self.preview.clone()
+            }),
             FullImage::Failed(error) => Err(error.clone()),
             FullImage::Pending(_) => unreachable!("the pending source was just uploaded"),
         }
     }
 
-    /// Register the value's pixels at full resolution. Every failure — a value
-    /// that isn't an image, pixels that won't convert, a registration the
-    /// renderer refuses — lands as `Failed`, which is terminal: it is stored,
-    /// so a broken image is diagnosed once rather than retried every frame.
-    fn upload(ui: &Ui, value: &DynamicValue) -> FullImage {
-        match as_image(value).and_then(|image| prepare_image(image, FULL_TEXTURE_DIM)) {
-            Ok(prepared) => match ui.register_image(prepared.raster) {
-                Ok(handle) => FullImage::Resident(handle),
-                Err(error) => FullImage::Failed(error.into()),
-            },
-            Err(error) => FullImage::Failed(error),
-        }
+    /// Register the value's pixels at full resolution.
+    fn upload(ui: &Ui, value: &DynamicValue) -> Result<ImageHandle, PreviewImageError> {
+        // Not a fallible step here, unlike in `prepare_content`: a
+        // `PreviewImage` is only ever built over a value that already
+        // downcast, and `Pending` holds that same value.
+        let image = value
+            .as_custom::<LensImage>()
+            .expect("a stored preview image is only built over an image value");
+        Ok(prepare_drawable(ui, image, FULL_TEXTURE_DIM)?.handle)
     }
 }
 
 fn prepare_content(ui: &Ui, value: DynamicValue) -> StoredContent {
-    // Scoped so the borrow ends before `value` moves into `Deferred` below.
     // One downcast serves both the "is this an image at all?" test and the
-    // conversion — a non-image renders as text, an image that fails to
-    // convert as an error, and those are different outcomes.
-    let prepared = {
-        let Some(image) = value.as_custom::<LensImage>() else {
-            return StoredContent::Text(value.to_string());
-        };
-        prepare_image(image, PREVIEW_TEXTURE_DIM)
+    // conversion — a non-image renders as text, an image that fails to convert
+    // as an error, and those are different outcomes. The borrow it hands out
+    // is dead by the time `value` moves into `Pending` below.
+    let Some(image) = value.as_custom::<LensImage>() else {
+        return StoredContent::Text(value.to_string());
     };
-    match prepared {
-        Ok(prepared) => match ui.register_image(prepared.raster) {
-            Ok(preview) => {
-                let source_bytes = value.ram_usage().total();
-                StoredContent::Image(PreviewImage {
-                    preview,
-                    full: RefCell::new(FullImage::Pending(value)),
-                    native_size: prepared.native_size,
-                    native_format: prepared.native_format,
-                    source_bytes,
-                })
-            }
-            Err(error) => StoredContent::Error(error.into()),
-        },
+    match prepare_drawable(ui, image, PREVIEW_TEXTURE_DIM) {
+        Ok(preview) => StoredContent::Image(PreviewImage {
+            preview,
+            source_bytes: value.ram_usage().total(),
+            full: RefCell::new(FullImage::Pending(value)),
+        }),
         Err(error) => StoredContent::Error(error),
     }
 }
 
-/// The image behind a published value, or why there isn't one.
-fn as_image(value: &DynamicValue) -> Result<&LensImage, PreviewImageError> {
-    value
-        .as_custom::<LensImage>()
-        .ok_or(PreviewImageError::NotAnImage)
-}
-
-fn prepare_image(image: &LensImage, max_dim: u32) -> Result<PreparedImage, PreviewImageError> {
+/// Read a published image back to the CPU, downscale it to `max_dim`, and hand
+/// the pixels to the renderer — the one path from a pipeline value to
+/// something a pane can draw, at whichever of the two sizes is asked for.
+fn prepare_drawable(
+    ui: &Ui,
+    image: &LensImage,
+    max_dim: u32,
+) -> Result<DrawableImage, PreviewImageError> {
     let cpu = image
         .buffer
         .make_cpu(&ProcessingContext::cpu_only())
@@ -218,18 +222,23 @@ fn prepare_image(image: &LensImage, max_dim: u32) -> Result<PreparedImage, Previ
     if native_size.x == 0 || native_size.y == 0 {
         return Err(PreviewImageError::Empty);
     }
-    let native_format = cpu.desc().color_format;
-    let target = capped_target(native_size, max_dim);
-    let rgba = Preview::new(target.x as usize, target.y as usize).to_rgba8(&cpu);
+    let raster = rgba8_raster(&cpu, capped_target(native_size, max_dim));
+    Ok(DrawableImage {
+        handle: ui.register_image(raster)?,
+        native_size,
+        native_format: cpu.desc().color_format,
+    })
+}
+
+/// Downscale to `target` and convert to RGBA8 — the one place pixels are
+/// produced, and so the seam a test asserts exact output on.
+fn rgba8_raster(cpu: &CpuImage, target: UVec2) -> Raster {
+    let rgba = Preview::new(target.x as usize, target.y as usize).to_rgba8(cpu);
     let desc = rgba.desc();
     assert_eq!(desc.color_format, ColorFormat::RGBA_U8);
     let pixels = rgba.into_bytes();
     assert_eq!(pixels.len(), desc.row_bytes() * desc.height);
-    Ok(PreparedImage {
-        raster: AptImage::from_rgba8(target.x, target.y, pixels),
-        native_size,
-        native_format,
-    })
+    Raster::from_rgba8(target.x, target.y, pixels)
 }
 
 fn capped_target(native: UVec2, max_dim: u32) -> UVec2 {

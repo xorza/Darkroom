@@ -67,7 +67,7 @@ pub(super) fn preview_row(ui: &mut Ui, ncx: NodeCtx<'_>, out: &mut Requests) {
         .sense(if has_image { Sense::CLICK } else { Sense::NONE })
         .show(ui, |ui| match stored.and_then(StoredContent::image) {
             Some(image) => {
-                ui.add_shape(Shape::image(image.preview.clone()).fit(ImageFit::Contain));
+                ui.add_shape(Shape::image(image.preview.handle.clone()).fit(ImageFit::Contain));
             }
             None => {
                 // `message` is complementary to `image`, so this covers a
@@ -124,9 +124,12 @@ fn info_row(ui: &mut Ui, theme: &Theme, image: &PreviewImage) {
             bare_value(
                 ui,
                 theme,
-                format!("{}\u{d7}{}", image.native_size.x, image.native_size.y),
+                format!(
+                    "{}\u{d7}{}",
+                    image.preview.native_size.x, image.preview.native_size.y
+                ),
             );
-            bare_value(ui, theme, format_label(image.native_format));
+            bare_value(ui, theme, format_label(image.preview.native_format));
             Panel::hstack()
                 .id_salt("preview_info_size")
                 .size((Sizing::HUG, Sizing::HUG))
