@@ -1,22 +1,5 @@
 [
   {
-    "label": "cargo test --release",
-    "command": "cargo",
-    "args": [
-      "test",
-      "-p",
-      "$ZED_CUSTOM_RUST_PACKAGE",
-      "--release",
-      "--all-features",
-      "$ZED_SYMBOL",
-      "--",
-
-      "--include-ignored",
-      "--nocapture",
-    ],
-    "tags": ["rust-test"],
-  },
-  {
     "label": "run darkroom",
     "command": "cargo",
     "args": ["run", "-p", "darkroom"],
