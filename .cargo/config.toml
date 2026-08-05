@@ -1,0 +1,8 @@
+[env]
+# `libraw-rs-sys` compiles LibRaw's own C++ sources statically, but its build.rs
+# never defines LIBRAW_NODLL. On MSVC, libraw.h auto-defines
+# LIBRAW_WIN32_DLLDEFS (gated on `_MSC_VER`), which makes `DllDef` expand to
+# `__declspec(dllimport)` — so every definition in the vendored sources is
+# marked dllimport and cl.exe rejects it with C2491. The macro is Windows-only,
+# so this stays scoped to the MSVC target and other platforms are untouched.
+CXXFLAGS_x86_64_pc_windows_msvc = "-DLIBRAW_NODLL"
