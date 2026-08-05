@@ -448,8 +448,8 @@ pub(crate) struct Theme {
 /// story.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub(crate) struct TypeScale {
-    /// The loudest tier: a floating panel's own heading (the inspector's node
-    /// title) and the "+" chip's glyph, which wants the same presence.
+    /// The loudest tier: a floating panel's own heading — the inspector's node
+    /// title.
     pub(crate) title: f32,
     /// Default UI text — dock tab labels, menu rows, settings rows, the drag
     /// ghost, the status bar, a settings row's help/error/link line, an

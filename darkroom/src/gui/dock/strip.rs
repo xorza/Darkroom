@@ -18,11 +18,6 @@ use crate::gui::requests::Requests;
 use crate::gui::theme::Theme;
 use crate::gui::widgets::support::{colored_text, muted_text};
 
-/// A chip's combined top + bottom inset. The active tab splits it
-/// differently (`ACCENT` px of it move to the outer panel so the accent
-/// cap adds no height), but the total is what sets the row's height.
-const CHIP_INSET_Y: f32 = 8.0;
-
 /// One chip's whole draw state, resolved from its group by
 /// [`tab_labels`](super::tab_labels): the tab, its label text and unsaved
 /// state (the projections that need the open document), and the two flags
@@ -89,55 +84,6 @@ pub(crate) fn tab_dirty_wid(tab: TabRef) -> WidgetId {
 /// Stable id for `tab`'s split context menu.
 fn tab_menu_wid(tab: TabRef) -> WidgetId {
     WidgetId::from_hash(("dock.tab_menu", tab))
-}
-
-/// Stable id for the trailing "+" new-graph chip.
-pub(super) fn tab_new_wid() -> WidgetId {
-    WidgetId::from_hash("dock.tab_new")
-}
-
-/// Side of the square "+" chip: exactly a tab chip's height, so it stands
-/// level with them while staying square. Derived from the same constants
-/// `tab_chip` lays its label out with rather than restating their values,
-/// which drifted apart silently when any one of them changed.
-fn new_tab_chip_side(theme: &Theme) -> f32 {
-    theme.text.body * DEFAULT_LINE_HEIGHT_MULT + CHIP_INSET_Y
-}
-
-/// Palantir's default `TextStyle::line_height_mult`, which the chip labels
-/// inherit — the "+" chip has no label to measure, so its box has to
-/// account for the same leading.
-const DEFAULT_LINE_HEIGHT_MULT: f32 = 1.2;
-
-/// The trailing "+" chip that creates and opens a fresh graph. A square,
-/// tab-shaped chip (top corners rounded like the tabs, bottom square) that
-/// reads as an inactive tab; the click is consumed in [`DockUi::scan`](super::DockUi::scan).
-fn new_tab_chip(ui: &mut Ui, theme: &Theme) {
-    let r = theme.card.corner_radius;
-    let bg = hover_bg(
-        ui.response_for(tab_new_wid()).hovered,
-        theme,
-        Corners::new(r, r, 0.0, 0.0),
-    );
-    Panel::zstack()
-        .id(tab_new_wid())
-        .size((
-            Sizing::fixed(new_tab_chip_side(theme)),
-            Sizing::fixed(new_tab_chip_side(theme)),
-        ))
-        .sense(Sense::CLICK)
-        .child_align(Align::CENTER)
-        .background(bg)
-        .show(ui, |ui| {
-            let style = TextStyle {
-                line_height_mult: 1.0,
-                ..muted_text(ui, theme, theme.text.title)
-            };
-            Text::new("+")
-                .style(&style)
-                .text_align(Align::CENTER)
-                .show(ui);
-        });
 }
 
 /// Diameter of the unsaved-changes dot.
@@ -216,9 +162,6 @@ pub(super) fn show(
         .show(ui, |ui| {
             for label in labels {
                 tab_chip(ui, &mut strip, label);
-            }
-            if group.tabs.contains(&TabRef::Graph) {
-                new_tab_chip(ui, theme);
             }
         });
 }
@@ -380,7 +323,7 @@ mod tests {
 
     /// The dot is a visibility change, never a layout one: saving (or making
     /// the first edit after a save) must leave the graph chip exactly the size
-    /// it was, or every chip to its right — and the "+" chip — would shift.
+    /// it was, or every chip to its right would shift.
     #[test]
     fn the_dirty_dot_reserves_the_same_box_saved_and_unsaved() {
         // Preferences beside the graph so the test also covers a chip that
