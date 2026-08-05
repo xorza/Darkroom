@@ -1,11 +1,10 @@
-//! GUI-side OS shell integration: native file-picker dialogs (rfd) and
-//! opening URLs in the user's browser. Project byte⇄type plumbing lives in
+//! Native file-picker dialogs (rfd). Project byte⇄type plumbing lives in
 //! `crate::core::io::document`; this side hands paths off to that GUI-free
-//! module. Failures degrade — a cancelled/failed pick returns `None`, a
-//! failed URL open logs — rather than crashing.
+//! module. Failures degrade — a cancelled or failed pick returns `None` —
+//! rather than crashing. Everything else the shell does for us is in
+//! `crate::platform`.
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use crate::core::io::document;
 
@@ -58,28 +57,6 @@ pub(crate) fn pick_new_file(extensions: &[&str]) -> Option<PathBuf> {
 
 pub(crate) fn pick_directory() -> Option<PathBuf> {
     rfd::FileDialog::new().pick_folder()
-}
-
-/// Open `url` in the user's default browser via the platform opener. Non-
-/// blocking (the spawn returns immediately, so it's safe to call mid-record,
-/// unlike the modal file dialogs). A missing opener just logs and degrades —
-/// there's no user-facing error surface yet.
-pub(crate) fn open_url(url: &str) {
-    #[cfg(target_os = "linux")]
-    let mut cmd = Command::new("xdg-open");
-    #[cfg(target_os = "macos")]
-    let mut cmd = Command::new("open");
-    #[cfg(target_os = "windows")]
-    let mut cmd = {
-        // `start` treats its first quoted arg as the window title, so pass an
-        // empty title before the URL.
-        let mut c = Command::new("cmd");
-        c.args(["/C", "start", ""]);
-        c
-    };
-    if let Err(e) = cmd.arg(url).spawn() {
-        tracing::warn!("failed to open url {url}: {e}");
-    }
 }
 
 #[cfg(test)]

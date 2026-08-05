@@ -21,10 +21,10 @@ use crate::core::io::preferences::Preferences;
 use crate::core::theme_pref::ThemeChoice;
 use crate::gui::app::commands::AppCommand;
 use crate::gui::app::commands::prefs::{MlModelKind, PrefsCommand};
-use crate::gui::dialogs;
 use crate::gui::requests::Requests;
 use crate::gui::theme::Theme;
 use crate::gui::widgets::support::{colored_text, muted_text, sized_text};
+use crate::platform;
 
 /// Cap on the settings column, so the form reads as a column on a wide
 /// window instead of a handful of controls in the corner of a bare sheet.
@@ -375,7 +375,7 @@ fn download_hint(ui: &mut Ui, theme: &Theme, link_label: &'static str, url: &'st
             });
         let snapshot = link.response.snapshot();
         if link.response.left.clicked() {
-            dialogs::open_url(url);
+            platform::open_url(url);
         }
         // Surface the destination on hover so the user sees where the
         // link goes before clicking — the URL isn't otherwise visible.

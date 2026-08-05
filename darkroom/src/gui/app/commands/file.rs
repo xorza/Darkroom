@@ -1,4 +1,4 @@
-//! Document file lifecycle: new / load / save / save-as, plus the shared
+//! Document file lifecycle: new / open / save / save-as, plus the shared
 //! document-path sink that repoints the dialog anchor, the worker's
 //! disk cache, and the persisted last-document.
 
@@ -14,8 +14,8 @@ use crate::gui::dialogs;
 pub(crate) enum FileCommand {
     /// Replace the document with an empty one.
     New,
-    /// Prompt for a file and load it.
-    Load,
+    /// Prompt for a file and open it.
+    Open,
     /// Save to the current file, or prompt (Save As) if there isn't one.
     Save,
     /// Always prompt for a destination.
@@ -28,15 +28,16 @@ impl App {
             // Both replace the open document, so they clear the
             // unsaved-changes guard before doing anything.
             FileCommand::New => self.guard_discard(PendingTransition::New),
-            FileCommand::Load => self.guard_discard(PendingTransition::Load),
+            FileCommand::Open => self.guard_discard(PendingTransition::OpenPicked),
             FileCommand::Save => self.save_current(),
             FileCommand::SaveAs => self.save_document_as(),
         }
     }
 
-    /// Prompt for a project file and load it. The [`PendingTransition::Load`]
-    /// body: the picker runs here, *after* the guard cleared, so cancelling
-    /// the unsaved-changes prompt never costs the user a file choice.
+    /// Prompt for a project file and load it. The
+    /// [`PendingTransition::OpenPicked`] body: the picker runs here, *after*
+    /// the guard cleared, so cancelling the unsaved-changes prompt never costs
+    /// the user a file choice.
     pub(crate) fn load_picked_document(&mut self) {
         if let Some(path) = dialogs::pick_project_open_path(self.session.open.path.as_deref()) {
             self.load_document(&path);
@@ -83,7 +84,7 @@ impl App {
 
     /// Load `path` into a fresh editor. A missing or corrupt file leaves the
     /// open document intact and surfaces its reason in the status bar.
-    fn load_document(&mut self, path: &Path) {
+    pub(crate) fn load_document(&mut self, path: &Path) {
         let open = match OpenDocument::load(path.to_path_buf()) {
             Ok(open) => open,
             Err(err) => {
