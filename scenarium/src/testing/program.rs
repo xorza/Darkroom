@@ -2,15 +2,12 @@
 //! the compiler.
 //!
 //! The schedule and cache tests are about topology, not authoring — they want
-//! "a source, a consumer reading its port 0, a sink" and no library at all. So
-//! they hand-build the artifact, and each place that did grew its own copy of
-//! the same two tricks: nodes placed with `NodeId::from_u128(idx + 1)` so a
-//! dense index is recoverable from an id, and a `bind(node, port)` free
-//! function to spell an [`ExecutionBinding`].
+//! "a source, a consumer reading its port 0, a sink" and no library at all, so
+//! they hand-build the artifact.
 //!
-//! Here the id↔index pair is a value ([`Placed`]) rather than a convention two
-//! `fn nx` copies have to agree on, and a binding is asked of the node it
-//! points at ([`Placed::out`]).
+//! The id↔index pair is a value ([`Placed`]) rather than a convention each
+//! fixture re-derives, and a binding is asked of the node it points at
+//! ([`Placed::out`]).
 //!
 //! The two terminals are [`Sweep`] — what the cache-aware pass makes of a
 //! schedule — and [`Runs`], the executor over one. A sweep asks what the

@@ -149,7 +149,7 @@ impl Library {
     }
 
     /// Register a nominal type. Panics on a duplicate id — two decls for one type
-    /// is a wiring bug, not a runtime condition (as the old codec registry did).
+    /// is a wiring bug, not a runtime condition.
     pub fn register_type(&mut self, type_id: impl Into<TypeId>, entry: TypeEntry) {
         let type_id = type_id.into();
         assert!(!type_id.is_nil());

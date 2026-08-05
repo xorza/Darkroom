@@ -140,8 +140,8 @@ impl RuntimeSlot {
     /// [`invoke_slot`](Self::invoke_slot).
     ///
     /// Reading a blob is itself proof it is there, so residency and durability
-    /// are established in one move; the alternative was every caller stamping
-    /// the two by hand and one of them eventually forgetting.
+    /// are established in one move rather than stamped separately by each
+    /// caller.
     pub(crate) fn load_from_blob(&mut self, snapshot: OutputSnapshot, digest: Digest) {
         self.value = ValueState::Resident {
             snapshot,

@@ -39,11 +39,9 @@ impl TestGraph {
 /// A [`TestGraph`] lowered, still answering by the names the fixture gave its
 /// nodes.
 ///
-/// A compile crosses into the dense index space, and asserting on what came out
-/// used to mean crossing back by hand — `program.by_id(node)` for the node,
-/// `program.inputs[node.inputs][0]` for the port, `program.node_ids[addr]` to
-/// read a wire's far end. Here the crossing happens once, and a test names the
-/// same node it authored.
+/// A compile crosses into the dense index space. Here the crossing happens
+/// once, so a test names the same node it authored rather than translating an
+/// id per assertion.
 ///
 /// The artifact stays public: a test that corrupts one to prove a validator
 /// catches it, or asks something the accessors below do not shorten, reaches

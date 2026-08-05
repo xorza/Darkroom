@@ -212,13 +212,10 @@ pub(crate) struct RunSchedule {
     /// node vector.
     ///
     /// One column rather than a set per property, because the properties are
-    /// not independent: a seeded node and an event source are *kinds of root*,
-    /// and holding them in sets of their own made "seeded ⊆ roots" a pair of
-    /// invariants to validate. Every bit is set through
-    /// [`add_root`](Self::add_root) from a [`RootFlags`] constant that already
-    /// carries [`RootFlags::PLAIN`], so a property off a root is not a state
-    /// this can reach — crate-wide, which the three `pub(crate)` sets this
-    /// replaced could not manage, any of them being insertable on its own.
+    /// not independent: a seeded node and an event source are *kinds of root*.
+    /// Every bit is set through [`add_root`](Self::add_root) from a
+    /// [`RootFlags`] constant that already carries [`RootFlags::PLAIN`], so a
+    /// property off a root is not a state this can reach — crate-wide.
     root_flags: Column<NodeIdx, RootFlags>,
     /// Exact per-output demand and live reader counts, written by the sweep
     /// once the state column above is settled.
@@ -504,8 +501,7 @@ impl RunSchedule {
         // else about the roots is checked, and nothing else needs to be: the list
         // and the column are written only by [`add_root`], which pushes once per
         // node and unions the flags, so they cannot disagree — and `RootFlags`
-        // cannot spell a property without the root bit, which is what the two
-        // "seeded/event source is not a root" checks here used to establish.
+        // cannot spell a property without the root bit.
         for &node_idx in &self.roots {
             if node_idx.idx() >= program.e_nodes.len() {
                 return Err(RunScheduleValidationError::NodeOutOfRange { node_idx });
@@ -641,12 +637,12 @@ pub(crate) mod internals {
                 .reset(self.states.len(), RootFlags::default());
         }
 
-        /// The node-seeded roots, ascending — the old `seeded` set spelled out.
+        /// The node-seeded roots, ascending.
         pub(crate) fn seeded_roots(&self) -> Vec<NodeIdx> {
             self.roots_where(RootFlags::is_seeded)
         }
 
-        /// The event-owning roots, ascending — the old `event_sources` set.
+        /// The event-owning roots, ascending.
         pub(crate) fn event_source_roots(&self) -> Vec<NodeIdx> {
             self.roots_where(RootFlags::is_event_source)
         }

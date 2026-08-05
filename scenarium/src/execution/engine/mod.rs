@@ -289,9 +289,9 @@ pub(crate) mod internals {
                 .expect("execution requires an installed compiled graph")
         }
 
-        /// Compile + install in one step — the pre-split `update` shape the
-        /// in-tree tests are written against. Production compiles on the host
-        /// (a long-lived [`compile::Compiler`]) and sends the artifact to the worker.
+        /// Compile + install in one step — the shape the in-tree tests are
+        /// written against. Production compiles on the host (a long-lived
+        /// [`compile::Compiler`]) and sends the artifact to the worker.
         pub(crate) fn update(
             &mut self,
             graph: &Graph,
