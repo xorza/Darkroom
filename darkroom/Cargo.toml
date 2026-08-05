@@ -44,9 +44,9 @@ static_assertions = { workspace = true }
 
 [features]
 # Forward palantir's tracy backend so `cargo run -p darkroom --features
-# profile-with-tracy` lights up zones across both crates against a single
-# tracy-client connection (palantir centralises the `tracy-client` dep
-# so the FFI singleton stays unique).
+# profile-with-tracy` captures the GUI library's zones. The editor
+# declares none of its own yet, so a capture shows frame / layout /
+# render phases with the app's own work as the gap between them.
 profile-with-tracy = ["palantir/profile-with-tracy"]
 
 [target.'cfg(target_os = "macos")'.dependencies]

@@ -40,10 +40,6 @@ OOM-killed on an unfiltered `cargo bench` / `cargo bench --no-run`.
 - Compile-checking them: clippy `--all-targets` covers benches with no
   optimized link, which the verification chain already does.
 - Running one: name the target — `cargo bench -p <crate> --bench <name>`.
-  palantir keeps every criterion driver in one `criterion` target, so
-  there the driver is a filter, not a target:
-  `cargo bench -p palantir --bench criterion -- damage`. Its other three
-  targets are the dhat allocation benches.
 - Linking several: cap with `-j 2`.
 
 **UUIDs / IDs.** Every new UUID literal (a `NodeId`, `FuncId`, `TypeId`, or
