@@ -40,21 +40,6 @@
     ],
   },
   {
-    "label": "run darkroom GUI (script TCP, no auth)",
-    "command": "cargo",
-    "args": [
-      "run",
-      "-p",
-      "darkroom",
-      "--",
-      "--script-tcp",
-      "--script-no-auth",
-      "--script-bind",
-      "127.0.0.1:34567",
-      "gui",
-    ],
-  },
-  {
     "label": "run palantir showcase",
     "command": "RUST_BACKTRACE=1 cargo",
     "args": [
