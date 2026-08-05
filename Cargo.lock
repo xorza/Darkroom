@@ -3115,6 +3115,7 @@ dependencies = [
  "backtrace",
  "bitflags 2.13.1",
  "bytemuck",
+ "clap",
  "cosmic-text",
  "criterion",
  "dhat",
