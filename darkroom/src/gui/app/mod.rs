@@ -92,6 +92,9 @@ enum PendingTransition {
     Quit,
     New,
     OpenPicked,
+    // Only `platform::macos` hands a path in; the other two OSes get theirs
+    // through argv at launch, before an `App` exists to guard.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     OpenAt(PathBuf),
 }
 
@@ -225,7 +228,10 @@ impl App {
 
     /// Open `path`, prompting first if the current document has unsaved
     /// edits. The entry point for a document the editor did not ask for —
-    /// today, one Finder handed us.
+    /// today, one Finder handed us, which makes this macOS-only: see
+    /// [`crate::platform::route_opened_documents`] for why no other OS has a
+    /// caller.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     pub(crate) fn open_document_at(&mut self, path: PathBuf) {
         self.guard_discard(PendingTransition::OpenAt(path));
     }
