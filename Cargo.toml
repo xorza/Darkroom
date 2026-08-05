@@ -72,6 +72,9 @@ lz4_flex = { version = "0.14", features = ["std"] }
 bitcode = { version = "0.6", features = ["serde"] }
 blake3 = { version = "1.8" }
 windows-sys = { version = "0.61" }
+objc2 = { version = "0.6" }
+objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSResponder"] }
+objc2-foundation = { version = "0.3", features = ["NSArray", "NSString", "NSURL"] }
 dark-light = { version = "2.0" }
 rfd = { version = "0.17" }
 zip = { version = "8.6", default-features = false, features = ["deflate"] }

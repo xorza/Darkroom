@@ -1,5 +1,6 @@
 mod core;
 mod gui;
+mod platform;
 
 use std::path::PathBuf;
 
@@ -55,7 +56,7 @@ fn run_gui(document: Option<PathBuf>) -> Result<(), WinitHostError> {
             window = window.position(pos);
         }
     }
-    WinitHost::builder(MAIN_WINDOW)
+    let host = WinitHost::builder(MAIN_WINDOW)
         .window(window)
         .build(move |ui, handle| {
             ui.debug_overlay_mut().damage_rect = is_debug();
@@ -65,8 +66,12 @@ fn run_gui(document: Option<PathBuf>) -> Result<(), WinitHostError> {
             ui.debug_overlay_mut().frame_stats = is_debug();
 
             App::new(ui, handle, preferences, document)
-        })?
-        .run()
+        })?;
+
+    // Between `build` and `run` because that is the only window that works on
+    // macOS; every other platform has nothing to do here.
+    platform::route_opened_documents(host.handle());
+    host.run()
 }
 
 /// Decode the baked-in window icon (PNG → RGBA8) for the title bar /

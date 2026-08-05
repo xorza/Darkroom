@@ -50,8 +50,8 @@ fn file_menu(ui: &mut Ui, out: &mut Requests) {
         if MenuItem::new("New").show(ui, popup).left.clicked() {
             out.push_app(AppCommand::File(FileCommand::New));
         }
-        if MenuItem::new("Load…").show(ui, popup).left.clicked() {
-            out.push_app(AppCommand::File(FileCommand::Load));
+        if MenuItem::new("Open…").show(ui, popup).left.clicked() {
+            out.push_app(AppCommand::File(FileCommand::Open));
         }
         if MenuItem::new("Save").show(ui, popup).left.clicked() {
             out.push_app(AppCommand::File(FileCommand::Save));

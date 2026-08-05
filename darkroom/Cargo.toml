@@ -49,6 +49,11 @@ static_assertions = { workspace = true }
 # so the FFI singleton stays unique).
 profile-with-tracy = ["palantir/profile-with-tracy"]
 
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = { workspace = true }
+objc2-app-kit = { workspace = true }
+objc2-foundation = { workspace = true }
+
 # Embeds `assets/icons/darkroom.ico` into the .exe as a Win32 resource so
 # Explorer / taskbar show the app icon. No-op off Windows (see build.rs).
 [target.'cfg(windows)'.build-dependencies]

@@ -202,7 +202,7 @@ impl Session {
         let command = if new {
             AppCommand::File(FileCommand::New)
         } else if open {
-            AppCommand::File(FileCommand::Load)
+            AppCommand::File(FileCommand::Open)
         } else if save_as {
             AppCommand::File(FileCommand::SaveAs)
         } else if save {

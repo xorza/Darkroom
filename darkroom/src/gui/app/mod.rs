@@ -80,20 +80,28 @@ pub(crate) struct App {
 /// A transition that replaces or discards the open document. Held while
 /// the unsaved-changes prompt is up, then carried out (or dropped) by the
 /// answer.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+///
+/// The two open variants differ only in where the path comes from:
+/// [`Self::OpenPicked`] runs the file dialog *after* the prompt clears, so a
+/// cancelled prompt doesn't leave the user having chosen a file for nothing,
+/// while [`Self::OpenAt`] already holds one handed in from outside the editor
+/// (Finder, via [`crate::platform`]). Carrying that path is what
+/// costs this `Copy`.
+#[derive(Clone, Debug, PartialEq, Eq)]
 enum PendingTransition {
     Quit,
     New,
-    Load,
+    OpenPicked,
+    OpenAt(PathBuf),
 }
 
 impl PendingTransition {
     /// How the prompt finishes "Save changes to X before …?".
-    fn prompt_tail(self) -> &'static str {
+    fn prompt_tail(&self) -> &'static str {
         match self {
             Self::Quit => "quitting",
             Self::New => "closing it",
-            Self::Load => "opening another document",
+            Self::OpenPicked | Self::OpenAt(_) => "opening another document",
         }
     }
 }
@@ -210,8 +218,16 @@ impl App {
         match transition {
             PendingTransition::Quit => self.quit(),
             PendingTransition::New => self.new_document(),
-            PendingTransition::Load => self.load_picked_document(),
+            PendingTransition::OpenPicked => self.load_picked_document(),
+            PendingTransition::OpenAt(path) => self.load_document(&path),
         }
+    }
+
+    /// Open `path`, prompting first if the current document has unsaved
+    /// edits. The entry point for a document the editor did not ask for —
+    /// today, one Finder handed us.
+    pub(crate) fn open_document_at(&mut self, path: PathBuf) {
+        self.guard_discard(PendingTransition::OpenAt(path));
     }
 
     /// The titlebar X. The window stays open only while the prompt is up
@@ -249,7 +265,13 @@ impl App {
     }
 
     fn record_discard_prompt(&mut self, ui: &mut Ui) {
-        let Some(pending) = self.confirm_discard else {
+        // Only the tail is taken, so the borrow of the pending transition ends
+        // here — `apply_discard_outcome` below needs `&mut self`.
+        let Some(tail) = self
+            .confirm_discard
+            .as_ref()
+            .map(PendingTransition::prompt_tail)
+        else {
             return;
         };
         if ui.close_requested() {
@@ -262,7 +284,7 @@ impl App {
             .as_deref()
             .and_then(|p| p.file_name())
             .and_then(|s| s.to_str());
-        let outcome = discard_dialog::show(ui, file_name, pending.prompt_tail());
+        let outcome = discard_dialog::show(ui, file_name, tail);
         if outcome.choice != DiscardChoice::Stay {
             self.apply_discard_outcome(outcome);
         }
@@ -349,5 +371,37 @@ impl palantir::App for App {
         }
 
         self.record_discard_prompt(ui);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A document Finder hands over is guarded exactly like one the user
+    /// picked: same question, same wording. The two differ only in where the
+    /// path came from, and the prompt has no business exposing that.
+    #[test]
+    fn an_externally_opened_document_prompts_like_a_picked_one() {
+        let picked = PendingTransition::OpenPicked;
+        let handed = PendingTransition::OpenAt(PathBuf::from("/tmp/scene.darkroom"));
+        assert_eq!(picked.prompt_tail(), "opening another document");
+        assert_eq!(handed.prompt_tail(), picked.prompt_tail());
+
+        // The other two stay distinct — a shared tail would misdescribe what
+        // the user is about to lose the document to.
+        assert_eq!(PendingTransition::Quit.prompt_tail(), "quitting");
+        assert_eq!(PendingTransition::New.prompt_tail(), "closing it");
+    }
+
+    /// The path rides along rather than being re-picked after the prompt, so
+    /// answering "Save" opens the document the user actually double-clicked.
+    #[test]
+    fn a_handed_in_transition_carries_its_path_through_the_prompt() {
+        let path = PathBuf::from("/tmp/from-finder.darkroom");
+        let pending = PendingTransition::OpenAt(path.clone());
+        let held = pending.clone();
+        assert_eq!(held, PendingTransition::OpenAt(path));
+        assert_eq!(held, pending, "surviving the guard costs the path nothing");
     }
 }
