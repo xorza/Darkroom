@@ -241,29 +241,34 @@ impl Graph {
     /// and any output of `producer` reaching any input of `consumer` closes the
     /// same loop.
     ///
-    /// Walks forward from `consumer` over the edges already there; reaching
-    /// `producer` means the proposed one closes the loop. Const bindings aren't
+    /// Walks *backward* from `producer` over what already feeds it; reaching
+    /// `consumer` means the proposed edge closes the loop. Const bindings aren't
     /// edges, so they can't take part.
+    ///
+    /// Backward because `bindings` is keyed by consumer port and [`InputPort`]
+    /// orders by node before port index — so a node's own inputs are one
+    /// contiguous range, and "what feeds this node" is a lookup the map already
+    /// answers. Asking it the other way round needs a reversed index built over
+    /// every binding in the graph, whatever the answer turns out to be.
     pub fn produces_cycle(&self, producer: NodeId, consumer: NodeId) -> bool {
         if producer == consumer {
             return true;
         }
-        let mut readers: HashMap<NodeId, Vec<NodeId>> = HashMap::new();
-        for (destination, source) in self.edges() {
-            readers
-                .entry(source.node_id)
-                .or_default()
-                .push(destination.node_id);
-        }
-        let mut stack = vec![consumer];
-        let mut seen: HashSet<NodeId> = HashSet::from_iter([consumer]);
+        let mut stack = vec![producer];
+        let mut seen: HashSet<NodeId> = HashSet::from_iter([producer]);
         while let Some(node) = stack.pop() {
-            for &next in readers.get(&node).into_iter().flatten() {
-                if next == producer {
+            for (port, binding) in self.bindings.range(InputPort::new(node, 0)..) {
+                if port.node_id != node {
+                    break;
+                }
+                let Binding::Bind(source) = binding else {
+                    continue;
+                };
+                if source.node_id == consumer {
                     return true;
                 }
-                if seen.insert(next) {
-                    stack.push(next);
+                if seen.insert(source.node_id) {
+                    stack.push(source.node_id);
                 }
             }
         }

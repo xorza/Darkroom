@@ -383,6 +383,42 @@ fn produces_cycle_detects_direct_and_transitive_loops() {
     assert!(!closes("a", "d"), "d reads from nothing");
 }
 
+/// The walk reads a node's inputs as one contiguous range of the binding map,
+/// so a producer feeding a *high* port has to be found as surely as one on
+/// port 0 — including across a const and an unbound port, neither of which is
+/// an edge and neither of which may end the scan early.
+#[test]
+fn produces_cycle_reaches_a_producer_past_a_const_and_an_unbound_port() {
+    let mut g = TestGraph::new();
+    g.add("a", passthrough);
+    g.instance("b", "a");
+    g.add("wide", |n| {
+        n.input(DataType::Any)
+            .input(DataType::Any)
+            .input(DataType::Any)
+            .wildcard(0)
+    });
+    g.wire("a", 0, "b", 0);
+    // The only wire into `wide` sits on port 2, behind a literal on port 0 and
+    // nothing at all on port 1.
+    g.constant("wide", 0, 7i64);
+    g.wire("b", 0, "wide", 2);
+
+    let closes = |from: &str, to: &str| g.graph.produces_cycle(g.id(from), g.id(to));
+    assert!(
+        closes("wide", "a"),
+        "a → b → wide[2] means wide → a closes the loop"
+    );
+    assert!(
+        closes("wide", "b"),
+        "and the one-hop b → wide[2] back-edge too"
+    );
+    // The same wiring in the other direction is a plain forward edge, and the
+    // const on port 0 is not an edge anything can be reached through.
+    assert!(!closes("a", "wide"), "a reads from nothing");
+    assert!(!closes("b", "wide"), "b reads only from a");
+}
+
 #[test]
 fn typed_id_from_str_preserves_uuid_error() {
     let input = "not-a-uuid";
