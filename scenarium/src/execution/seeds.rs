@@ -1,3 +1,4 @@
+use crate::common::unique;
 use crate::graph::identity::{EventPort, NodeId};
 
 /// What seeds a run's schedule — the roots the planner walks back from. The four
@@ -64,8 +65,7 @@ impl RunSeeds {
     /// This is what lets a worker coalesce a burst of `Run` messages into one
     /// run. It lives here rather than on the batch that calls it because the
     /// combining rule is a property of the seeds — "these four combine" is the
-    /// same sentence the type's own doc opens with — and a batch that spelled
-    /// its own four fields had to restate it.
+    /// same sentence the type's own doc opens with.
     pub(crate) fn merge(&mut self, other: RunSeeds) {
         let RunSeeds {
             sinks,
@@ -76,27 +76,12 @@ impl RunSeeds {
         self.sinks |= sinks;
         self.event_sources |= event_sources;
         self.add_events(events);
-        extend_unique(&mut self.node_ids, node_ids);
+        unique::extend(&mut self.node_ids, node_ids);
     }
 
     /// Seed the subscribers of `events` too — the event loop's fired events,
     /// which reach a batch outside any `Run` message.
     pub(crate) fn add_events(&mut self, events: impl IntoIterator<Item = EventPort>) {
-        extend_unique(&mut self.events, events);
-    }
-}
-
-/// Append what `incoming` adds, in first-seen order, dropping what is already
-/// there.
-///
-/// A linear scan rather than a hash set: one batch is one burst of worker
-/// messages, so these lists hold a handful of ids — building a set costs more
-/// than the scan it would save, and the run's seeds keep the order the host
-/// asked in.
-fn extend_unique<T: PartialEq>(into: &mut Vec<T>, incoming: impl IntoIterator<Item = T>) {
-    for item in incoming {
-        if !into.contains(&item) {
-            into.push(item);
-        }
+        unique::extend(&mut self.events, events);
     }
 }

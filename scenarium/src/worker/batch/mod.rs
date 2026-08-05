@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
-use indexmap::IndexSet;
 use tokio::sync::oneshot;
 
+use crate::common::unique;
 use crate::execution::cache::disk_store::DiskStore;
 use crate::execution::compile::compiled_graph::CompiledGraph;
 use crate::execution::seeds::RunSeeds;
@@ -48,8 +48,8 @@ pub(crate) struct BatchIntent {
     /// same value the engine is handed, so nothing has to be taken apart and
     /// put back together across the worker boundary.
     pub(crate) seeds: RunSeeds,
-    pub(crate) evict_cache: IndexSet<NodeId>,
-    pub(crate) flush_cache: IndexSet<NodeId>,
+    pub(crate) evict_cache: Vec<NodeId>,
+    pub(crate) flush_cache: Vec<NodeId>,
     pub(crate) syncs: Vec<oneshot::Sender<()>>,
 }
 
@@ -66,8 +66,8 @@ impl BatchIntent {
                     self.graph_state = Some(GraphOp::Replace(compiled));
                 }
                 WorkerMessage::Clear => self.graph_state = Some(GraphOp::Clear),
-                WorkerMessage::EvictCache { nodes } => self.evict_cache.extend(nodes),
-                WorkerMessage::FlushCache { nodes } => self.flush_cache.extend(nodes),
+                WorkerMessage::EvictCache { nodes } => unique::extend(&mut self.evict_cache, nodes),
+                WorkerMessage::FlushCache { nodes } => unique::extend(&mut self.flush_cache, nodes),
                 WorkerMessage::FlushAllCaches => self.flush_all_caches = true,
                 WorkerMessage::SetDiskStore(cache) => self.disk_store = Some(cache),
                 WorkerMessage::Run { seeds } => self.seeds.merge(seeds),

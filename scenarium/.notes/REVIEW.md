@@ -130,16 +130,52 @@ signature, or a generic `Lambda<Sig>`, removes ~50 lines and one place for the
 two to drift.
 
 **2.3 Two containers for "unique, insertion-ordered ids" in the same struct.**
-`BatchIntent` (`worker/batch.rs:51-52`) keys `evict_cache`/`flush_cache` on
-`IndexSet<NodeId>`, while `RunSeeds` — a field of that same struct — uses
-`Vec<NodeId>` + `extend_unique` (`execution/seeds.rs:96`), whose doc explicitly
-argues a linear scan beats a hash set at these sizes. Both are right about
-their own case only if the sizes differ, and they don't: all three lists are
-one burst of worker messages.
+*Investigated; prototype built and verified.*
 
-Pick one. Choosing `Vec` + `extend_unique` also **removes `indexmap` from the
-workspace entirely** — `rg indexmap` across every crate returns exactly
-`worker/batch.rs:3`.
+`BatchIntent` (`worker/batch/mod.rs:51-52`) keys `evict_cache`/`flush_cache` on
+`IndexSet<NodeId>`, while `RunSeeds` — a field of that same struct — uses
+`Vec<NodeId>` + `extend_unique` (`execution/seeds.rs:96`), whose doc argues a
+linear scan beats a hash set at these sizes. Both are right about their own
+case only if the sizes differ. They don't:
+
+| list | production producer | size |
+|---|---|---:|
+| `evict_cache` | `darkroom/src/core/worker.rs:84`, one per evict-badge click | 1 |
+| `flush_cache` | `darkroom/src/core/worker.rs:107`, one per cache-toggle click | 1 |
+| `seeds.node_ids` | `darkroom/src/core/runtime_host.rs:213` | 1 |
+
+Every id list in this system carries exactly one element in production —
+`run_nodes`' own doc says so ("a 'run to this node' contributes one"). Only
+scenarium's batch tests pass two or three. `IndexSet` there is a hash table
+plus an index vector maintained for N=1.
+
+Go the `Vec` direction, not the other one: `RunSeeds`' fields are `pub`, so
+making *them* sets would put `indexmap` in scenarium's public surface.
+(Downstream never reads those fields — darkroom only calls `RunSeeds::sinks()`
+and `RunSeeds::nodes(…)` — so the reverse is *possible*, just wrong at N=1.)
+
+Keep the dedup; it is specified behaviour, and it earns its place unevenly:
+eviction seeds get deduped again inside `ConsumerCone::walk` (its `reached`
+`IdxSet`), so duplicates there are free, but `flush_each` calls `store_node`
+per id and a duplicate costs a real `covers()` file read under
+`PreserveCovering`.
+
+**Verified prototype** (built, then reverted — patch at
+`/tmp/claude-60354/2.3-vec-unique.patch`): both fields to `Vec<NodeId>`,
+`extend_unique` moved out of `execution/seeds.rs` into a new
+`common/unique.rs` as `unique::extend`, manifest line dropped. Net −14 lines;
+`clippy --all-targets --all-features -D warnings` clean; 294 tests pass with
+**no test edits** — `contains`, `capacity`, `is_empty`, `into_iter` and
+`drain` are identical on `Vec`. Namespace it as `crate::common::unique`
+rather than a bare `common::extend_unique`, since `crate::common` reads
+confusingly next to the external `::common` crate the same files import.
+
+> **Correction.** An earlier draft claimed this "removes `indexmap` from the
+> workspace entirely". It does not. `cargo tree -i indexmap` lists six direct
+> dependents — `naga`, `naga-types`, `scenarium`, `toml_edit`, `wgpu-core`,
+> `zip` — and it reaches the build through wgpu via imaginarium and palantir
+> regardless. Dropping scenarium's use removes one manifest line and nothing
+> from the compile. The case for this change is consistency, not dependencies.
 
 **2.4 `DynamicValue` re-declares `ConstValue`'s accessor surface.**
 `dynamic_value.rs:80-106` — seven methods (`as_f64`, `as_i64`, `as_bool`,
@@ -257,7 +293,7 @@ this replaced could not manage" is a commit message living in a header.
 | # | Batch | Risk | Payoff |
 |---|---|---|---|
 | 1 | Dead impls, gating test-only impls, ~~9 test-file splits~~ (done), hashbrown | none — compiler-verified | 2 dead items gone, 4 impls correctly gated |
-| 2 | Port types, lambda types, unique-id containers, accessor forwarding | low | −1 workspace dep, −150 lines, 4 drift surfaces removed |
+| 2 | Port types, lambda types, unique-id containers, accessor forwarding | low | −150 lines, 4 drift surfaces removed |
 | 3 | Reversed-edge walk, `validate_debug` helper | low | removes the only per-frame allocation storm |
 | 4 | `math_library` specs, tag tables | low | −80 lines, one func-declaration idiom |
 | 5 | File-per-struct layout | none | navigability |
