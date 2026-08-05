@@ -306,24 +306,41 @@ Bundle with 1.2 — both are file-splitting work over an overlapping set.
 
 ---
 
-## Batch 6 — Delete the counterfactual doc comments
+## Batch 6 — Counterfactual doc comments — **DONE**
 
-Roughly fifteen comments justify the present design by describing code that no
-longer exists. A reader cannot verify them and a future edit will not update
-them. Delete the counterfactual, keep the invariant:
+Ten comments justified the present design by describing code that no longer
+exists. A reader cannot verify those, and a future edit will not update them.
+Each was cut back to the invariant it was there to state:
 
-- `library.rs:152` "as the old codec registry did"
-- `schedule/mod.rs:220` "which the three `pub(crate)` sets this replaced could not manage"
-- `schedule/mod.rs:508` "the two … checks here used to establish"
-- `schedule/mod.rs:644,649` "the old `seeded` set spelled out" / "the old `event_sources` set"
-- `cache/runtime/mod.rs:51` "The cache holding a second handle to the artifact instead made that…"
-- `cache/slot.rs:143` "the alternative was every caller stamping the two by hand"
-- `engine/mod.rs:292` "the pre-split `update` shape"
-- `seeds.rs:68` "a batch that spelled its own four fields had to restate it"
-- `testing/program.rs:6` "each place that did grew its own copy of the same two tricks"
+| where | dropped |
+|---|---|
+| `library/mod.rs:152` | "(as the old codec registry did)" |
+| `schedule/mod.rs:220` | "which the three `pub(crate)` sets this replaced could not manage" |
+| `schedule/mod.rs:508` | "the two … checks here used to establish" |
+| `schedule/mod.rs:644,649` | "the old `seeded` set spelled out" / "the old `event_sources` set" |
+| `cache/runtime/mod.rs:51` | "The cache holding a second handle to the artifact instead made that…" |
+| `cache/slot.rs:143` | "the alternative was every caller stamping the two by hand" |
+| `engine/mod.rs:292` | "the pre-split `update` shape" |
+| `worker/task/mod.rs:285` | "the one thing the host could not previously tell apart" |
+| `testing/program.rs:6` | "each place that did grew its own copy of the same two tricks" |
+| `testing/graph/compiled.rs:43` | "used to mean crossing back by hand — `program.by_id(node)` …" |
 
-"Every root flag carries the root bit" stands on its own; "which the three sets
-this replaced could not manage" is a commit message living in a header.
+(`seeds.rs:68`, "a batch that spelled its own four fields had to restate it",
+went earlier as part of 2.3 — it was three lines from code that change was
+already editing.)
+
+**Left alone on purpose: the same phrasing inside test files.** A regression
+test's doc naming the defect it guards — `worker/tests/cache.rs:143,396,433`,
+`schedule/tests.rs:125`, `compile/tests.rs:157` — is the one place history
+*is* the subject, and the test itself is the verification a production doc's
+counterfactual never has. The remaining "old" hits in tests
+(`resource/tests.rs:158`, `const_bindings.rs:8`, `blob_recovery.rs:60`,
+`cache_modes.rs:240`) describe old *runtime values*, not deleted code.
+
+`cargo fmt` + `clippy --all-targets --all-features -D warnings` clean, 294
+tests pass. `cargo doc` checked separately, since clippy does not cover
+rustdoc: no new link warnings — the two it reports are pre-existing, both in
+`compiled_graph.rs`, which this batch did not touch.
 
 ---
 
@@ -336,4 +353,4 @@ this replaced could not manage" is a commit message living in a header.
 | 3 | Reversed-edge walk, `validate_debug` helper | low | removes the only per-frame allocation storm |
 | 4 | `math_library` specs, tag tables | low | −80 lines, one func-declaration idiom |
 | 5 | File-per-struct layout | none | navigability |
-| 6 | Counterfactual doc comments | none | ~15 comments |
+| 6 | ~~Counterfactual doc comments~~ (done) | none | 10 comments cut back to their invariant |

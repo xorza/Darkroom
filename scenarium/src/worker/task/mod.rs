@@ -282,8 +282,7 @@ where
     /// Raise whatever a flush left unwritten, under `reporting`'s policy.
     ///
     /// A flush that wrote everything reports nothing — silence here means the
-    /// blobs are there, which is the one thing the host could not previously
-    /// tell apart from a store that failed on every node.
+    /// blobs are there.
     fn report_flush(&self, report: CacheFlushReport, reporting: FlushReporting) {
         let CacheFlushReport {
             failures,

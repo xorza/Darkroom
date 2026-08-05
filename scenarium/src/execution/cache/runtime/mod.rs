@@ -48,9 +48,8 @@ use crate::{DynamicValue, RamUsage};
 /// [`ExecutionEngine`](crate::execution::engine::ExecutionEngine), which owns both
 /// halves and is the only caller of [`reconcile`](Self::reconcile) — so there is
 /// no run in which the cache and the program it is asked about can be different
-/// installs. The cache holding a second handle to the artifact instead made that
-/// an invariant to validate rather than one to establish, and left every method
-/// unwrapping an `Option` it could not be reached without.
+/// installs. That makes the pairing something the owner establishes, rather
+/// than an invariant every method here would have to validate.
 ///
 /// The resolver stamps each node's digest and decides cache reuse, while the
 /// executor mutates outputs/state and consumes that decision. `disk_store`
