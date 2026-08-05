@@ -188,19 +188,58 @@ macro, or leaving callers to write `.as_static()?.as_f64()`, collapses it.
 
 ## Batch 3 — One implementation per algorithm
 
-**3.1 Reversed-edge walking exists twice, with very different quality.**
-`ConsumerCone` (`compile/consumer_cone/mod.rs`) reverses the data edges with a
-counting sort into four flat buffers its owner keeps across calls.
-`Graph::produces_cycle` (`graph/mod.rs:247`) does the same job over the
-authoring graph by building a fresh `HashMap<NodeId, Vec<NodeId>>` — one
-allocation for the map plus one `Vec` per producer node — **on every call**.
+**3.1 `Graph::produces_cycle` builds a whole reverse index to answer one
+question.** *Investigated; prototype built, fuzzed, and verified against both
+crates' suites.*
 
-It is called from darkroom's `accepts_wire`
-(`gesture/connection/mod.rs:415`), i.e. once per frame for the whole duration
-of a wire drag. It is the crate's only per-frame allocation storm, and the
-cheap fix already exists in-tree: give the reachability walk the `ConsumerCone`
-shape, or at minimum hang reusable scratch off the caller so the map is
-refilled rather than rebuilt.
+`Graph::produces_cycle` (`graph/mod.rs:247`) walks *forward* from `consumer`
+looking for `producer`. The authoring graph has no forward index, so it builds
+one first — a fresh `HashMap<NodeId, Vec<NodeId>>`, one allocation for the map
+plus a `Vec` per producer node — **before it looks at anything**. That pass is
+O(edges) unconditionally, however small the answer turns out to be. It runs
+from darkroom's `accepts_wire` (`gesture/connection/mod.rs:415`), once per
+frame for the duration of a wire drag.
+
+**The fix is to reverse the direction, not to share `ConsumerCone`.** The two
+cannot share code: `ConsumerCone` walks the dense compiled space (`NodeIdx`,
+columns), `produces_cycle` the sparse authoring graph (`NodeId`, `BTreeMap`).
+But `produces_cycle` needs no index at all. `bindings` is keyed by *consumer*
+port and `InputPort` orders by node before port index, so a node's own inputs
+are one contiguous range — "what feeds this node" is a lookup the map already
+answers. `Graph`'s own field doc states the property ("lets a node's ports
+range contiguously"); nothing exploits it. Walking backward from `producer`
+over its inputs, looking for `consumer`, answers the same question with no
+adjacency map and no allocation beyond the visited set.
+
+Equivalence is not obvious, so it was fuzzed: **20,142 (producer, consumer)
+pairs over 300 random graphs**, half of them containing real cycles — the two
+implementations agree on every pair.
+
+Measured (synthetic layered DAGs, ns per call):
+
+```
+                     both walks traverse          drag from a node with
+                                                  nothing feeding it
+ nodes   edges    current   backward  ratio     current   backward   ratio
+    16      24        479        150   3.2x         374       28.8     13x
+   256     480      12251       3880   3.2x       12408       27.8    446x
+  2048    4032     131870      23161   5.7x      126964       31.2   4072x
+```
+
+The right column is the common case — the backward walk is *constant* in graph
+size because the ancestor cone of the node you are dragging from is what
+bounds it, while the current implementation pays for every edge in the document
+to answer "that node reads from nothing".
+
+Honest scale check: at the graph sizes darkroom sees today (tens of nodes)
+this is ~2.6µs per frame, which is not a stall. The case for the change is
+that the replacement is *shorter* — the adjacency map disappears — and removes
+an allocation from a per-frame path; the asymptotics are insurance.
+
+Applied to the real crate: `clippy --all-targets --all-features -D warnings`
+clean, scenarium 294 tests and darkroom 202 tests pass (darkroom's
+connection-gesture tests exercise this path). Reverted pending a decision;
+patch at `/tmp/claude-60354/3.1-backward-cycle.patch`.
 
 **3.2 `validate` / `validate_debug` is written out three times.**
 `schedule/mod.rs:519`, `compile/validate.rs:109`, `engine/mod.rs:247` — each is
