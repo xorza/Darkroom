@@ -1,28 +1,17 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
-  The bundle property list for Darkroom.app.
+  The bundle property list for Darkroom.app. Launch Services reads this out of
+  a bundle and nowhere else, so a bare binary cannot be registered at all;
+  install.sh assembles the bundle around it and registers the result.
 
-  Launch Services reads this out of a bundle and nowhere else, so a bare
-  binary cannot be registered at all. The expected layout is:
-
-    Darkroom.app/
-      Contents/
-        Info.plist              <- this file
-        MacOS/darkroom          <- the cargo-built binary
-        Resources/darkroom.icns <- assets/icons/darkroom.icns
-
-  Register a freshly assembled bundle with:
-
-    /System/Library/Frameworks/CoreServices.framework/Frameworks\
-      /LaunchServices.framework/Support/lsregister -f /Applications/Darkroom.app
-
-  KNOWN GAP — double-clicking a document will not open it yet. macOS does not
-  pass the path in argv the way a Linux desktop entry's %f does; Launch
-  Services sends an Apple Event, delivered as `application:openURLs:` on the
-  NSApplicationDelegate. winit 0.30 exposes no hook for it, so Finder will
-  show Darkroom as the handler and launch it with an empty document. Closing
-  that needs an objc2-side delegate that feeds the path into `App`.
+  KNOWN GAP — double-clicking a document launches Darkroom empty. macOS sends
+  the path as an Apple Event (`application:openURLs:` on the
+  NSApplicationDelegate), never in argv. winit 0.30.13 both exposes no API for
+  it and holds the delegate slot itself, panicking if replaced
+  (rust-windowing/winit#4458) — so closing the gap means extending winit's own
+  delegate and handing the path to `App` through `HostHandle::run_on_main`,
+  which already buffers calls made before the app exists.
 -->
 <plist version="1.0">
 <dict>
@@ -40,12 +29,8 @@
 	<string>APPL</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
-	<!--
-	  CFBundleShortVersionString / CFBundleVersion are deliberately absent:
-	  install.sh stamps both from `darkroom --version`, so the bundle reports
-	  the version of the binary it actually wraps and no copy of the number
-	  lives here to drift from [workspace.package].
-	-->
+	<!-- Version keys are absent by design: install.sh stamps them from
+	     `darkroom --version`, so no copy lives here to drift. -->
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.photography</string>
 	<key>LSMinimumSystemVersion</key>
@@ -53,12 +38,9 @@
 	<key>NSHighResolutionCapable</key>
 	<true/>
 
-	<!--
-	  What the type *is*. Exported rather than imported because darkroom owns
-	  the format. Conforming to the zip UTI matches how the file is actually
-	  built (a zip holding one `document.json`), and keeps anything that reads
-	  archives able to read it, while this more specific type wins for us.
-	-->
+	<!-- What the type *is*. Exported because darkroom owns the format; the zip
+	     conformance is what the file actually is, so archive tools keep
+	     working while this more specific type wins for us. -->
 	<key>UTExportedTypeDeclarations</key>
 	<array>
 		<dict>
@@ -82,10 +64,8 @@
 		</dict>
 	</array>
 
-	<!--
-	  That we open it. `Owner` rank is what makes Darkroom the default handler
-	  over the generic archive tools its UTI conforms to.
-	-->
+	<!-- That we open it. `Owner` rank is what beats the archive tools our UTI
+	     conforms to. -->
 	<key>CFBundleDocumentTypes</key>
 	<array>
 		<dict>
