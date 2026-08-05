@@ -3140,6 +3140,7 @@ dependencies = [
  "toml",
  "tracing",
  "tracing-subscriber",
+ "tracy-client",
  "unicode-linebreak",
  "unicode-segmentation",
  "wgpu",
