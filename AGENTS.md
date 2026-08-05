@@ -31,15 +31,19 @@ compatibility for now. Change serialized shapes and break APIs freely when that
 simplifies the current design; do not add migrations, compatibility shims,
 legacy deserializers, or legacy-format tests.
 
-**Never link the whole bench suite at once.** Unfiltered `cargo bench` /
-`cargo bench --no-run` can exhaust RAM and get OOM-killed: the root
-`[profile.bench]` is fat-LTO with full debug info, so each bench binary links
-its entire dependency graph in one codegen unit — GBs apiece — and cargo runs
-those links in parallel across every target (palantir has 21).
+**Watch the bench link count.** The root `[profile.bench]` is fat-LTO with
+full debug info, so each bench binary links its entire dependency graph in
+one codegen unit — GBs apiece — and cargo runs those links in parallel across
+every target. A crate with many bench targets can exhaust RAM and get
+OOM-killed on an unfiltered `cargo bench` / `cargo bench --no-run`.
 
 - Compile-checking them: clippy `--all-targets` covers benches with no
   optimized link, which the verification chain already does.
-- Running one: name it — `cargo bench -p <crate> --bench <name>`.
+- Running one: name the target — `cargo bench -p <crate> --bench <name>`.
+  palantir keeps every criterion driver in a single `criterion` target, so
+  there the driver is a filter, not a target:
+  `cargo bench -p palantir --bench criterion -- damage`. Its other three
+  targets are the dhat allocation benches.
 - Linking several: cap with `-j 2`.
 
 **UUIDs / IDs.** Every new UUID literal (a `NodeId`, `FuncId`, `TypeId`, or
