@@ -53,7 +53,8 @@ pub(crate) fn fold_scroll_zoom(
     if resp.scroll.lines.y.abs() > f32::EPSILON
         && let Some(pivot) = resp.pointer_local
     {
-        let line_px = ui.theme.text.line_height_for(ui.theme.text.font_size_px);
+        let text = &ui.theme().text;
+        let line_px = text.line_height_for(text.font_size_px);
         zoom_about(
             &mut v.pan,
             &mut v.zoom,

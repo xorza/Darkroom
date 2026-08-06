@@ -210,7 +210,7 @@ fn tab_chip(ui: &mut Ui, s: &mut StripCtx<'_>, label: &TabLabel) {
     // Match the menu bar's smaller (13px) label scale on every tab; the
     // active tab carries full-strength ink, inactive tabs recede to muted.
     let ink = if active {
-        ui.theme.text.color
+        ui.theme().text.color
     } else {
         theme.colors.text_muted
     };

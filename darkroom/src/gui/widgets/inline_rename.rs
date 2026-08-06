@@ -145,7 +145,7 @@ impl<'a> InlineRename<'a> {
         let theme = match style {
             Some(theme) => theme,
             None => {
-                ambient = InlineRenameTheme::flattened(&ui.theme.text_edit);
+                ambient = InlineRenameTheme::flattened(&ui.theme().text_edit);
                 &ambient
             }
         };
@@ -170,7 +170,7 @@ impl<'a> InlineRename<'a> {
         // a clickable box (a `Hug` panel with no text would collapse to
         // zero height). Derived from the resolved text style so a bundle
         // that pins a font size also tightens the click target.
-        let style_for_metrics = text.unwrap_or(&ui.theme.text);
+        let style_for_metrics = text.unwrap_or(&ui.theme().text);
         let line_h = style_for_metrics.line_height_for(style_for_metrics.font_size_px);
         // Resolve the editor theme up front so the idle path can
         // mirror the active TextEdit's trailing caret-room — without

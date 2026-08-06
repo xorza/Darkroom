@@ -65,7 +65,7 @@ impl AnchoredMenu {
         // slot `ContextMenu::show` reads, so a canvas menu and a menu-bar
         // menu are the same object; these popups only opt out of
         // `ContextMenu` for its per-trigger open lifecycle, not its look.
-        let ctx = &ui.theme.context_menu;
+        let ctx = &ui.theme().context_menu;
         let chrome = ctx.panel.clone();
         let padding = ctx.padding;
         let min_width = ctx.min_width;

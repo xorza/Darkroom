@@ -220,11 +220,14 @@ pub(crate) fn results_wid() -> WidgetId {
 /// with it instead of silently mis-sizing the scroll. Only the first frame of
 /// the first open has no rect yet and falls back to one line of body text.
 fn chrome_above_results(ui: &Ui) -> f32 {
-    let menu = &ui.theme.context_menu;
+    let menu = &ui.theme().context_menu;
     // An arranged rect is margin-inclusive, so the field's already carries
     // [`SEARCH_ROW_GAP`]; only the bare-line fallback has to add it.
     let row = ui.response_for(search_field_wid()).layout_rect.map_or_else(
-        || ui.theme.text.line_height_for(ui.theme.text.font_size_px) + SEARCH_ROW_GAP,
+        || {
+            let text = &ui.theme().text;
+            text.line_height_for(text.font_size_px) + SEARCH_ROW_GAP
+        },
         |rect| rect.size.h,
     );
     menu.padding.vert() + menu.gap + row

@@ -153,7 +153,7 @@ impl App {
         app.theme = Theme::from_preset(app.preferences.theme.resolve());
         // Resolved theme (default, or whatever the preferences restored)
         // onto the Ui so palantir widgets paint correctly frame 1.
-        ui.theme = app.theme.palantir_theme.clone();
+        ui.set_theme(app.theme.palantir_theme.clone());
         // ui.debug_overlay.damage_rect = true;
         app
     }

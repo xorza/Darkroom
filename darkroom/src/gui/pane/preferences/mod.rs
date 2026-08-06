@@ -273,7 +273,7 @@ fn model_row(ui: &mut Ui, theme: &Theme, row: ModelRow, path: &mut PathBuf, out:
                     // A broken committed path recolors the field's chrome to
                     // the error tint (message under the row says what's wrong).
                     let error_style = problem.is_some().then(|| {
-                        let mut style = ui.theme.text_edit.clone();
+                        let mut style = ui.theme().text_edit.clone();
                         for look in [
                             &mut style.looks.normal,
                             &mut style.looks.hovered,

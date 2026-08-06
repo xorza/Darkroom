@@ -29,10 +29,12 @@ pub(crate) fn show(ui: &mut Ui, out: &mut Requests) {
 /// whatever a pick means. Centralizes the trigger + anchor + open plumbing so
 /// each menu is just its label + rows.
 fn dropdown(ui: &mut Ui, label: &'static str, build: impl FnOnce(&mut Ui, &PopupHandle)) {
-    let menu_button = ui.theme.menu_button.clone();
+    // Handle, not a borrow: `Button::style` holds the reference across
+    // `show`'s `&mut Ui`.
+    let ui_theme = ui.theme().clone();
     let trigger = Button::new()
         .label(label)
-        .style(&menu_button)
+        .style(&ui_theme.menu_button)
         .show(ui)
         .snapshot();
     if trigger.left.clicked()
