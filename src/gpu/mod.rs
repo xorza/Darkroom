@@ -16,7 +16,7 @@ impl Gpu {
     /// Creates a new GPU context, initializing wgpu with default settings.
     pub(crate) fn new() -> Result<Self> {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::all(),
+            backends: wgpu::Backends::all().with_env(),
             ..wgpu::InstanceDescriptor::new_without_display_handle()
         });
 
