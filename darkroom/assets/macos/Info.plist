@@ -1,18 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<!--
-  The bundle property list for Darkroom.app. Launch Services reads this out of
-  a bundle and nowhere else, so a bare binary cannot be registered at all;
-  install.sh assembles the bundle around it and registers the result.
-
-  KNOWN GAP — double-clicking a document launches Darkroom empty. macOS sends
-  the path as an Apple Event (`application:openURLs:` on the
-  NSApplicationDelegate), never in argv. winit 0.30.13 both exposes no API for
-  it and holds the delegate slot itself, panicking if replaced
-  (rust-windowing/winit#4458) — so closing the gap means extending winit's own
-  delegate and handing the path to `App` through `HostHandle::run_on_main`,
-  which already buffers calls made before the app exists.
--->
 <plist version="1.0">
 <dict>
 	<key>CFBundleName</key>
@@ -29,8 +16,8 @@
 	<string>APPL</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
-	<!-- Version keys are absent by design: install.sh stamps them from
-	     `darkroom --version`, so no copy lives here to drift. -->
+	<!-- Version keys are absent by design: install.sh and bundle.sh stamp them
+	     from `darkroom --version`, so no copy lives here to drift. -->
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.photography</string>
 	<key>LSMinimumSystemVersion</key>
