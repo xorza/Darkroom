@@ -7,21 +7,12 @@
 # so this stays scoped to the MSVC target and other platforms are untouched.
 CXXFLAGS_x86_64_pc_windows_msvc = "-DLIBRAW_NODLL"
 
-# Palantir packs colour, corner radii, spacing and shadow geometry as f16
-# (`primitives::half_simd`). Without F16C in the target features those
-# conversions take a runtime `is_x86_feature_detected!` branch into a
-# `#[target_feature]` fn, which cannot inline into a caller that lacks the
-# feature — so every conversion pays a stack spill and a call. Enabling it
-# statically lets the intrinsic inline and fold into surrounding vector code:
-# measured -6.7% on `frame/cached_cpu`, -8.2% on `frame/partial_cpu` and -5.4%
-# on `frame/scrolling_cpu`, A/B'd in both directions.
-#
-# Sets the CPU floor at Ivy Bridge (2012) / Piledriver (2011), which this app's
-# wgpu requirement already exceeds. Scoped by `cfg` rather than `[build]` so
-# non-x86 targets aren't handed a feature name they don't have.
-#
-# Applies to this workspace only. Palantir is a submodule that must still build
-# standalone, so it cannot assume the flag — its `half_simd` keeps the runtime
-# fallback for consumers who don't set it.
+# Palantir stores colour, corners, spacing and shadow geometry as f16. Without
+# F16C enabled statically, each conversion takes a runtime feature check into a
+# `#[target_feature]` fn that can't inline — a spill and a call each time, worth
+# -5 to -8% on the frame bench. Floor becomes Ivy Bridge (2012), which this
+# app's wgpu requirement already exceeds. `cfg`-scoped rather than `[build]` so
+# non-x86 targets aren't handed a feature they don't have; palantir keeps its
+# runtime fallback and still builds standalone without this.
 [target.'cfg(target_arch = "x86_64")']
 rustflags = ["-C", "target-feature=+f16c"]
