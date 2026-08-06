@@ -18,7 +18,7 @@ use crate::gui::theme::Theme;
 pub(crate) fn sized_text(ui: &Ui, px: f32) -> TextStyle {
     TextStyle {
         font_size_px: px,
-        ..ui.theme.text.clone()
+        ..ui.theme().text.clone()
     }
 }
 

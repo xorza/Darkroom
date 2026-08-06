@@ -207,7 +207,7 @@ impl Inspectors {
                 // Status right under the title — the most-glanceable fact.
                 // The colored line is self-labeling; no section header.
                 let status_color =
-                    exec_color(theme, node.exec_status()).unwrap_or(ui.theme.text.color);
+                    exec_color(theme, node.exec_status()).unwrap_or(ui.theme().text.color);
                 let status = status_text(ui, node.exec_status());
                 line(
                     ui,
@@ -278,7 +278,7 @@ impl Inspectors {
 /// reuses the missing-inputs glow (orange), error the errored glow (red).
 fn log_color(theme: &Theme, ui: &Ui, level: LogLevel) -> Color {
     match level {
-        LogLevel::Info => ui.theme.text.color.with_alpha(0.85),
+        LogLevel::Info => ui.theme().text.color.with_alpha(0.85),
         LogLevel::Warn => theme.status.warning,
         LogLevel::Error => theme.status.error,
     }

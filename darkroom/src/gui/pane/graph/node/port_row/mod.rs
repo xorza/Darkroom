@@ -137,7 +137,7 @@ fn port_label(ui: &mut Ui, theme: &Theme, name: &str, tip: &str) {
     let snapshot = Text::new(name)
         .style(&TextStyle {
             color: theme.ports.label,
-            ..ui.theme.text.clone()
+            ..ui.theme().text.clone()
         })
         .sense(Sense::HOVER)
         .show(ui)
@@ -556,7 +556,7 @@ fn event_cell(
             Text::new(event.name.as_str())
                 .style(&TextStyle {
                     color: theme.ports.label,
-                    ..ui.theme.text.clone()
+                    ..ui.theme().text.clone()
                 })
                 .show(ui);
             PortGlyph::arrow(wid, theme.ports.size)

@@ -41,7 +41,7 @@ impl App {
     /// [`Preferences`]: crate::core::io::preferences::Preferences
     fn apply_preferences(&mut self, ui: &mut Ui) {
         self.theme = Theme::from_preset(self.preferences.theme.resolve());
-        ui.theme = self.theme.palantir_theme.clone();
+        ui.set_theme(self.theme.palantir_theme.clone());
         self.runtime.configure_ml_model_defaults(&self.preferences);
         self.save_preferences();
     }

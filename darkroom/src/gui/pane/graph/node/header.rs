@@ -196,7 +196,7 @@ pub(super) fn status_row(ui: &mut Ui, ncx: NodeCtx<'_>, out: &mut Requests) {
                 _ => None,
             };
             if let Some(secs) = elapsed {
-                let color = exec_color(theme, node.exec_status()).unwrap_or(ui.theme.text.color);
+                let color = exec_color(theme, node.exec_status()).unwrap_or(ui.theme().text.color);
                 // A comet spinner while computing, just left of the live time,
                 // so glow + spin + ticking time read as one "running" cue.
                 if matches!(node.exec_status(), ExecStatus::Running(_)) {
@@ -211,7 +211,7 @@ pub(super) fn status_row(ui: &mut Ui, ncx: NodeCtx<'_>, out: &mut Requests) {
                         color,
                         font_size_px: BADGE_FONT,
                         family: FontFamily::Mono,
-                        ..ui.theme.text.clone()
+                        ..ui.theme().text.clone()
                     })
                     .min_size((RUN_TIME_MIN_WIDTH, 0.0))
                     .show(ui);
