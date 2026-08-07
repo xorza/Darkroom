@@ -37,6 +37,17 @@ impl ProgressCallback {
             callback: Some(Arc::new(callback)),
         }
     }
+
+    /// Report one step of `stage`. A default callback reports nowhere.
+    pub(crate) fn report(&self, current: usize, total: usize, stage: StackingStage) {
+        if let Some(callback) = &self.callback {
+            callback(StackingProgress {
+                current,
+                total,
+                stage,
+            });
+        }
+    }
 }
 
 impl fmt::Debug for ProgressCallback {
@@ -48,39 +59,22 @@ impl fmt::Debug for ProgressCallback {
     }
 }
 
-pub(crate) fn report_progress(
-    callback: &ProgressCallback,
-    current: usize,
-    total: usize,
-    stage: StackingStage,
-) {
-    if let Some(callback) = &callback.callback {
-        callback(StackingProgress {
-            current,
-            total,
-            stage,
-        });
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::sync::{Arc, Mutex};
 
-    use crate::stacking::progress::{
-        ProgressCallback, StackingProgress, StackingStage, report_progress,
-    };
+    use crate::stacking::progress::{ProgressCallback, StackingProgress, StackingStage};
 
     #[test]
     fn callback_reports_exact_progress_and_default_is_silent() {
-        report_progress(&ProgressCallback::default(), 1, 2, StackingStage::Loading);
+        ProgressCallback::default().report(1, 2, StackingStage::Loading);
 
         let reports = Arc::new(Mutex::new(Vec::new()));
         let callback = ProgressCallback::new({
             let reports = Arc::clone(&reports);
             move |progress| reports.lock().unwrap().push(progress)
         });
-        report_progress(&callback, 3, 5, StackingStage::Processing);
+        callback.report(3, 5, StackingStage::Processing);
 
         let reports = reports.lock().unwrap();
         let [

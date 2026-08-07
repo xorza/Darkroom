@@ -19,7 +19,7 @@ use crate::stacking::frame_store::{
     ChunkMemoryLayout, SpillDirectory, StackableImage, StoredFrame, StoredPlane, optimal_chunk_rows,
 };
 use crate::stacking::product::{QualityMap, QualityPlanes, StackProduct};
-use crate::stacking::progress::{ProgressCallback, StackingStage, report_progress};
+use crate::stacking::progress::{ProgressCallback, StackingStage};
 
 /// Per-thread scratch buffers for stacking combine closures.
 ///
@@ -370,7 +370,8 @@ impl CacheCore {
 
         let mut chunks: Vec<&[f32]> = Vec::with_capacity(frame_count);
 
-        report_progress(&self.progress, 0, total_work, StackingStage::Processing);
+        self.progress
+            .report(0, total_work, StackingStage::Processing);
 
         for channel in 0..channel_count {
             for chunk_idx in 0..num_chunks {
@@ -404,8 +405,7 @@ impl CacheCore {
                     },
                 );
 
-                report_progress(
-                    &self.progress,
+                self.progress.report(
                     channel * num_chunks + chunk_idx + 1,
                     total_work,
                     StackingStage::Processing,

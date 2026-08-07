@@ -25,7 +25,7 @@ use crate::stacking::frame_store::{
     cache_filename, channel_filename, decode_transient_bytes, fits_in_memory, frame_bytes,
     load_concurrency, reusable_plane,
 };
-use crate::stacking::progress::{ProgressCallback, StackingStage, report_progress};
+use crate::stacking::progress::{ProgressCallback, StackingStage};
 
 use crate::stacking::combine::cache::{
     CacheCore, FrameCache, validate_image_samples, validate_stored_samples,
@@ -55,7 +55,7 @@ fn load_tiered<I: StackableImage, P: AsRef<Path> + Sync>(
         return Err(Error::NoFrames);
     }
 
-    report_progress(&progress, 0, paths.len(), StackingStage::Loading);
+    progress.report(0, paths.len(), StackingStage::Loading);
 
     let first_path = paths[0].as_ref();
     let available_memory = config.get_available_memory();
@@ -258,7 +258,7 @@ fn load_in_memory<I: StackableImage, P: AsRef<Path> + Sync>(
         frames.push(loaded_frame.frame);
     }
 
-    report_progress(progress, paths.len(), paths.len(), StackingStage::Loading);
+    progress.report(paths.len(), paths.len(), StackingStage::Loading);
 
     tracing::info!("Loaded {} frames into memory", frames.len());
     Ok(LoadedTier {
@@ -299,7 +299,7 @@ fn load_to_disk<I: StackableImage, P: AsRef<Path> + Sync>(
         first_stats,
     )
     .map_err(Error::from)?;
-    report_progress(progress, 1, paths.len(), StackingStage::Loading);
+    progress.report(1, paths.len(), StackingStage::Loading);
 
     // Decode is CPU-bound, so fan out to the worker count, bounded by RAM. The disk tier streams
     // each decoded frame to its own file and drops it, so nothing stays resident (`0`) — only the
@@ -333,7 +333,7 @@ fn load_to_disk<I: StackableImage, P: AsRef<Path> + Sync>(
     frames.push(first_cached);
     frames.extend(remaining);
 
-    report_progress(progress, paths.len(), paths.len(), StackingStage::Loading);
+    progress.report(paths.len(), paths.len(), StackingStage::Loading);
 
     tracing::info!(
         "Cached {} frames ({} channels each) to disk at {:?}",

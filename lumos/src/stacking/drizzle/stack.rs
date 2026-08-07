@@ -10,7 +10,7 @@ use crate::stacking::drizzle::accumulator::{DrizzleAccumulator, DrizzleFrame};
 use crate::stacking::drizzle::config::DrizzleConfig;
 use crate::stacking::drizzle::error::DrizzleError;
 use crate::stacking::product::StackProduct;
-use crate::stacking::progress::{ProgressCallback, StackingStage, report_progress};
+use crate::stacking::progress::{ProgressCallback, StackingStage};
 
 fn load_drizzle_frame<P: AsRef<Path>>(
     frame: DrizzleFrame<P>,
@@ -146,7 +146,7 @@ fn accumulate(
 
     let mut accumulator = DrizzleAccumulator::new(input_dims, config.clone())?;
     accumulator.add_frame(first)?;
-    report_progress(&progress, 1, frame_count, StackingStage::Processing);
+    progress.report(1, frame_count, StackingStage::Processing);
 
     for (index, frame) in frames.enumerate() {
         // Between frames, so a cancelled run stops before loading and distributing the next one.
@@ -154,7 +154,7 @@ fn accumulate(
             return Err(DrizzleError::Cancelled);
         }
         accumulator.add_frame(frame?)?;
-        report_progress(&progress, index + 2, frame_count, StackingStage::Processing);
+        progress.report(index + 2, frame_count, StackingStage::Processing);
     }
 
     Ok(accumulator.finalize())
