@@ -18,7 +18,7 @@ fn exact_labels_simple_grid() {
     mask[14] = true;
     mask[15] = true;
 
-    let bit_mask = BitBuffer2::from_slice(4, 4, &mask);
+    let bit_mask = BitBuffer2::from_slice(Size2us::new(4, 4), &mask);
     let label_map = label_map_from_mask_with_connectivity(&bit_mask, Connectivity::Four);
 
     assert_eq!(label_map.num_labels(), 2);
@@ -56,7 +56,7 @@ fn exact_labels_diagonal_8conn() {
     mask[4] = true;
     mask[8] = true;
 
-    let bit_mask = BitBuffer2::from_slice(3, 3, &mask);
+    let bit_mask = BitBuffer2::from_slice(Size2us::new(3, 3), &mask);
 
     // 4-connectivity: 3 separate labels
     let label_map_4 = label_map_from_mask_with_connectivity(&bit_mask, Connectivity::Four);
@@ -87,7 +87,7 @@ fn exact_labels_u_shape() {
     mask[7] = true;
     mask[8] = true;
 
-    let bit_mask = BitBuffer2::from_slice(3, 3, &mask);
+    let bit_mask = BitBuffer2::from_slice(Size2us::new(3, 3), &mask);
     let label_map = label_map_from_mask_with_connectivity(&bit_mask, Connectivity::Four);
 
     assert_eq!(label_map.num_labels(), 1);
@@ -120,7 +120,7 @@ fn exact_labels_cross_pattern() {
     mask[5] = true;
     mask[7] = true;
 
-    let bit_mask = BitBuffer2::from_slice(3, 3, &mask);
+    let bit_mask = BitBuffer2::from_slice(Size2us::new(3, 3), &mask);
     let label_map = label_map_from_mask_with_connectivity(&bit_mask, Connectivity::Four);
 
     assert_eq!(label_map.num_labels(), 1);
@@ -145,7 +145,7 @@ fn labels_deterministic() {
         mask[i] = true;
     }
 
-    let bit_mask = BitBuffer2::from_slice(10, 10, &mask);
+    let bit_mask = BitBuffer2::from_slice(Size2us::new(10, 10), &mask);
 
     let label_map_1 = label_map_from_mask_with_connectivity(&bit_mask, Connectivity::Four);
     let label_map_2 = label_map_from_mask_with_connectivity(&bit_mask, Connectivity::Four);

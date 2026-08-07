@@ -44,7 +44,7 @@ pub(super) fn create_comparison_image(
     detected: &[Star],
     match_radius: f32,
 ) -> Image {
-    let mut image = gray_to_rgb_image(pixels, size.width, size.height);
+    let mut image = gray_to_rgb_image(pixels, size);
 
     // Match detected stars to ground truth
     let matches = match_stars(ground_truth, detected, match_radius);

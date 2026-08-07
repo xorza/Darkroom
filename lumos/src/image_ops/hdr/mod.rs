@@ -13,6 +13,7 @@ use crate::error::InvalidConfigField;
 use crate::image_ops::op::{OpError, require_f32_master};
 use crate::image_ops::remap_intensity;
 use crate::image_ops::wavelet::{atrous_smooth, max_scales};
+use crate::math::size2us::Size2us;
 use imaginarium::{Buffer2, Image};
 
 #[cfg(test)]
@@ -93,7 +94,7 @@ impl Hdr {
 /// layer pyramid (`scales` full planes at ~100 MB each on a real master).
 fn hdr_map(intensity: &Buffer2<f32>, config: &Hdr) -> Buffer2<f32> {
     let (w, h) = (intensity.width(), intensity.height());
-    let scales = config.scales.min(max_scales(w, h));
+    let scales = config.scales.min(max_scales(Size2us::new(w, h)));
 
     let mut c_curr = intensity.clone();
     let mut c_next = Buffer2::new_default(w, h);

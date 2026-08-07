@@ -204,8 +204,7 @@ impl LabelMap {
         connectivity: Connectivity,
         resources: &mut DetectionResources,
     ) -> Self {
-        debug_assert_eq!(mask.width, resources.dimensions.width);
-        debug_assert_eq!(mask.height, resources.dimensions.height);
+        debug_assert_eq!(mask.size, resources.dimensions);
 
         let mut labels = resources.acquire_u32();
         // Clear the buffer (it may contain old labels)
@@ -231,8 +230,8 @@ impl LabelMap {
         connectivity: Connectivity,
         mut labels: Buffer2<u32>,
     ) -> Self {
-        let width = mask.width;
-        let height = mask.height;
+        let width = mask.size.width;
+        let height = mask.size.height;
 
         assert_eq!(width, labels.width());
         assert_eq!(height, labels.height());
@@ -365,8 +364,8 @@ fn label_mask_sequential(
     labels: &mut Buffer2<u32>,
     connectivity: Connectivity,
 ) -> usize {
-    let width = mask.width;
-    let height = mask.height;
+    let width = mask.size.width;
+    let height = mask.size.height;
     let words_per_row = mask.words_per_row();
     let mask_words = &mask.words;
 
@@ -422,8 +421,8 @@ fn label_mask_parallel(
     labels: &mut Buffer2<u32>,
     connectivity: Connectivity,
 ) -> usize {
-    let width = mask.width;
-    let height = mask.height;
+    let width = mask.size.width;
+    let height = mask.size.height;
     let words_per_row = mask.words_per_row();
     let mask_words = &mask.words;
 

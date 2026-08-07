@@ -9,6 +9,7 @@
 
 use crate::ImageDimensions;
 use crate::io::image::linear::LinearImage;
+use crate::math::size2us::Size2us;
 use crate::stacking::registration::config::{self, InterpolationMethod, WarpParams};
 use crate::stacking::registration::resample::{self, internals};
 use crate::stacking::registration::synthetic_tests::helpers;
@@ -624,7 +625,7 @@ fn test_warp_with_sip_correction() {
             .polynomial;
 
     // Verify SIP correction is non-trivial
-    let max_correction = sip.max_correction(width, height, 10.0);
+    let max_correction = sip.max_correction(Size2us::new(width, height), 10.0);
     assert!(
         max_correction > 0.1,
         "SIP correction should be significant, got {}",

@@ -206,6 +206,7 @@ fn reference_subsample(values: &mut Vec<f32>, target_size: usize) {
 #[cfg(test)]
 mod tests {
     use crate::background_mesh::tile_stats::*;
+    use crate::math::size2us::Size2us;
     use crate::math::vec2us::Vec2us;
 
     #[test]
@@ -257,7 +258,7 @@ mod tests {
     #[test]
     fn test_collect_unmasked_pixels_none_masked() {
         let pixels = Buffer2::new_filled(64, 64, 0.5);
-        let mask = BitBuffer2::new_filled(64, 64, false);
+        let mask = BitBuffer2::new_filled(Size2us::new(64, 64), false);
         let mut values = Vec::new();
         collect_unmasked_pixels(
             &pixels,
@@ -271,7 +272,7 @@ mod tests {
     #[test]
     fn test_collect_unmasked_pixels_all_masked() {
         let pixels = Buffer2::new_filled(64, 64, 0.5);
-        let mask = BitBuffer2::new_filled(64, 64, true);
+        let mask = BitBuffer2::new_filled(Size2us::new(64, 64), true);
         let mut values = Vec::new();
         collect_unmasked_pixels(
             &pixels,
@@ -289,11 +290,11 @@ mod tests {
         let pixels = Buffer2::new_filled(width, height, 0.5);
 
         // Mask every other pixel
-        let mut mask = BitBuffer2::new_filled(width, height, false);
+        let mut mask = BitBuffer2::new_filled(Size2us::new(width, height), false);
         for y in 0..height {
             for x in 0..width {
                 if (x + y) % 2 == 0 {
-                    mask.set_xy(x, y, true);
+                    mask.set_at(Vec2us::new(x, y), true);
                 }
             }
         }
@@ -311,7 +312,7 @@ mod tests {
     #[test]
     fn test_collect_unmasked_pixels_partial_tile() {
         let pixels = Buffer2::new_filled(100, 100, 0.5);
-        let mask = BitBuffer2::new_filled(100, 100, false);
+        let mask = BitBuffer2::new_filled(Size2us::new(100, 100), false);
         let mut values = Vec::new();
         collect_unmasked_pixels(
             &pixels,
@@ -366,12 +367,12 @@ mod tests {
                 height,
                 (0..width * height).map(|i| i as f32).collect(),
             );
-            let mut mask = BitBuffer2::new_filled(width, height, false);
+            let mut mask = BitBuffer2::new_filled(Size2us::new(width, height), false);
             if let Some(modulus) = case.mask_modulus {
                 for y in 0..height {
                     for x in 0..width {
                         if (x + 3 * y) % modulus == 0 {
-                            mask.set_xy(x, y, true);
+                            mask.set_at(Vec2us::new(x, y), true);
                         }
                     }
                 }
@@ -382,7 +383,7 @@ mod tests {
                     let mask = &mask;
                     let pixels = &pixels;
                     (case.tile.min.x..case.tile.max.x)
-                        .filter(move |&x| !mask.get_xy(x, y))
+                        .filter(move |&x| !mask.get_at(Vec2us::new(x, y)))
                         .map(move |x| pixels[y * width + x])
                 })
                 .collect();

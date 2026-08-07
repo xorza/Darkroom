@@ -4,6 +4,7 @@
 
 use crate::ImageDimensions;
 use crate::io::image::linear::LinearImage;
+use crate::math::size2us::Size2us;
 
 use crate::stacking::star_detection::config::Config;
 use crate::stacking::star_detection::detector::StarDetector;
@@ -41,8 +42,7 @@ fn test_cosmic_ray_rejection() {
 
     save_grayscale(
         &pixels_vec,
-        width,
-        height,
+        Size2us::new(width, height),
         &test_output_path("synthetic_starfield/stage_cr_rejection_input.png"),
     );
 
@@ -57,7 +57,7 @@ fn test_cosmic_ray_rejection() {
     let stars = result.stars;
 
     // Create overlay
-    let mut img = gray_to_rgb_image_stretched(&pixels_vec, width, height);
+    let mut img = gray_to_rgb_image_stretched(&pixels_vec, Size2us::new(width, height));
 
     // Draw cosmic ray positions in red
     let red = Color::rgb(1.0, 0.2, 0.2);

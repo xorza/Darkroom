@@ -1,3 +1,5 @@
+use crate::math::size2us::Size2us;
+use crate::math::vec2us::Vec2us;
 use std::any::Any;
 use std::panic::catch_unwind;
 
@@ -18,11 +20,10 @@ fn construction_aligns_rows_and_preserves_fill_values() {
     for (width, expected_stride, expected_words_per_row) in
         [(1, 128, 2), (64, 128, 2), (128, 128, 2), (129, 256, 4)]
     {
-        let clear = BitBuffer2::new_default(width, 3);
-        let filled = BitBuffer2::new_filled(width, 3, true);
+        let clear = BitBuffer2::new_default(Size2us::new(width, 3));
+        let filled = BitBuffer2::new_filled(Size2us::new(width, 3), true);
 
-        assert_eq!(clear.width, width);
-        assert_eq!(clear.height, 3);
+        assert_eq!(clear.size, Size2us::new(width, 3));
         assert_eq!(clear.stride, expected_stride);
         assert_eq!(clear.words_per_row(), expected_words_per_row);
         assert_eq!(clear.words.len(), expected_words_per_row * 3);
@@ -34,11 +35,11 @@ fn construction_aligns_rows_and_preserves_fill_values() {
 
 #[test]
 fn linear_coordinate_and_index_access_agree() {
-    let mut buffer = BitBuffer2::new_default(65, 3);
+    let mut buffer = BitBuffer2::new_default(Size2us::new(65, 3));
     for index in [0, 63, 64, 65, 129, 194] {
         buffer.set(index, true);
     }
-    buffer.set_xy(4, 2, true);
+    buffer.set_at(Vec2us::new(4, 2), true);
 
     let expected = [0, 63, 64, 65, 129, 134, 194];
     assert_eq!(buffer.count_ones(), expected.len());
@@ -52,7 +53,7 @@ fn linear_coordinate_and_index_access_agree() {
     }
     assert!(buffer[(4, 2)]);
 
-    buffer.set_xy(4, 2, false);
+    buffer.set_at(Vec2us::new(4, 2), false);
     assert!(!buffer.get(134));
     assert_eq!(buffer.count_ones(), expected.len() - 1);
 }
@@ -62,7 +63,7 @@ fn slice_iteration_and_conversion_preserve_row_major_order() {
     let source = [
         true, false, true, false, false, true, false, true, true, false, false, true,
     ];
-    let buffer = BitBuffer2::from_slice(4, 3, &source);
+    let buffer = BitBuffer2::from_slice(Size2us::new(4, 3), &source);
     let mut iter = buffer.iter();
 
     assert_eq!(iter.len(), 12);
@@ -76,11 +77,10 @@ fn slice_iteration_and_conversion_preserve_row_major_order() {
 #[test]
 fn every_zero_dimension_is_empty_and_iterates_to_nothing() {
     for (width, height) in [(0, 0), (0, 7), (7, 0), (0, usize::MAX), (usize::MAX, 0)] {
-        let buffer = BitBuffer2::new_filled(width, height, true);
+        let buffer = BitBuffer2::new_filled(Size2us::new(width, height), true);
 
-        assert!(buffer.width == 0 || buffer.height == 0);
-        assert_eq!(buffer.width, width);
-        assert_eq!(buffer.height, height);
+        assert!(buffer.size.width == 0 || buffer.size.height == 0);
+        assert_eq!(buffer.size, Size2us::new(width, height));
         assert_eq!(buffer.stride, 0);
         assert!(buffer.words.is_empty());
         assert_eq!(buffer.len, 0);
@@ -93,21 +93,21 @@ fn every_zero_dimension_is_empty_and_iterates_to_nothing() {
 
 #[test]
 fn fill_count_copy_and_swap_ignore_padding() {
-    let mut first = BitBuffer2::new_default(7, 2);
+    let mut first = BitBuffer2::new_default(Size2us::new(7, 2));
     first.words[0] |= 1 << 7;
     assert_eq!(first.count_ones(), 0);
     assert!(first.iter().all(|value| !value));
 
     first.fill(true);
     assert_eq!(first.count_ones(), 14);
-    first.set_xy(3, 1, false);
+    first.set_at(Vec2us::new(3, 1), false);
     assert_eq!(first.count_ones(), 13);
 
-    let mut copy = BitBuffer2::new_default(7, 2);
+    let mut copy = BitBuffer2::new_default(Size2us::new(7, 2));
     copy.copy_from(&first);
     assert_eq!(Vec::<bool>::from(&copy), Vec::<bool>::from(&first));
 
-    let mut clear = BitBuffer2::new_default(7, 2);
+    let mut clear = BitBuffer2::new_default(Size2us::new(7, 2));
     std::mem::swap(&mut copy.words, &mut clear.words);
     assert_eq!(copy.count_ones(), 0);
     assert_eq!(clear.count_ones(), 13);
@@ -120,7 +120,7 @@ fn construction_rejects_every_dimension_overflow_stage() {
         (128, usize::MAX, "BitBuffer2 dimensions overflow"),
         (1, usize::MAX, "BitBuffer2 storage size overflow"),
     ] {
-        let panic = catch_unwind(|| BitBuffer2::new_default(width, height))
+        let panic = catch_unwind(|| BitBuffer2::new_default(Size2us::new(width, height)))
             .expect_err("overflowing dimensions must panic");
         assert!(
             panic_text(panic).contains(expected),
@@ -131,7 +131,7 @@ fn construction_rejects_every_dimension_overflow_stage() {
 
 #[test]
 fn from_slice_rejects_a_mismatched_length() {
-    let panic = catch_unwind(|| BitBuffer2::from_slice(2, 2, &[true, false, true]))
+    let panic = catch_unwind(|| BitBuffer2::from_slice(Size2us::new(2, 2), &[true, false, true]))
         .expect_err("mismatched data length must panic");
     assert!(panic_text(panic).contains("data length 3 does not match dimensions 2x2=4"));
 }
@@ -141,10 +141,10 @@ fn from_slice_rejects_a_mismatched_length() {
 fn debug_access_rejects_out_of_bounds_indices_and_coordinates() {
     use std::panic::AssertUnwindSafe;
 
-    let mut buffer = BitBuffer2::new_default(3, 2);
+    let mut buffer = BitBuffer2::new_default(Size2us::new(3, 2));
 
     assert!(catch_unwind(|| buffer.get(6)).is_err());
-    assert!(catch_unwind(|| buffer.get_xy(3, 0)).is_err());
+    assert!(catch_unwind(|| buffer.get_at(Vec2us::new(3, 0))).is_err());
     assert!(catch_unwind(AssertUnwindSafe(|| buffer.set(6, true))).is_err());
-    assert!(catch_unwind(AssertUnwindSafe(|| buffer.set_xy(0, 2, true))).is_err());
+    assert!(catch_unwind(AssertUnwindSafe(|| buffer.set_at(Vec2us::new(0, 2), true))).is_err());
 }

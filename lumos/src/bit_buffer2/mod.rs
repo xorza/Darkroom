@@ -6,6 +6,9 @@
 
 use std::ops::Index;
 
+use crate::math::size2us::Size2us;
+use crate::math::vec2us::Vec2us;
+
 /// Number of bits per storage word.
 const BITS_PER_WORD: usize = 64;
 
@@ -19,8 +22,8 @@ struct BitLayout {
     num_words: usize,
 }
 
-fn bit_layout(width: usize, height: usize) -> BitLayout {
-    if width == 0 || height == 0 {
+fn bit_layout(size: Size2us) -> BitLayout {
+    if size.width == 0 || size.height == 0 {
         return BitLayout {
             stride: 0,
             len: 0,
@@ -28,15 +31,17 @@ fn bit_layout(width: usize, height: usize) -> BitLayout {
         };
     }
 
-    let stride = width
+    let stride = size
+        .width
         .div_ceil(ROW_ALIGNMENT_BITS)
         .checked_mul(ROW_ALIGNMENT_BITS)
         .expect("BitBuffer2 row stride overflow");
-    let len = width
-        .checked_mul(height)
+    let len = size
+        .width
+        .checked_mul(size.height)
         .expect("BitBuffer2 dimensions overflow");
     let total_bits = stride
-        .checked_mul(height)
+        .checked_mul(size.height)
         .expect("BitBuffer2 storage size overflow");
     debug_assert_eq!(total_bits % BITS_PER_WORD, 0);
     BitLayout {
@@ -55,8 +60,7 @@ fn bit_layout(width: usize, height: usize) -> BitLayout {
 pub(crate) struct BitBuffer2 {
     /// Packed bit storage. Each u64 holds 64 boolean values.
     pub(crate) words: Vec<u64>,
-    pub(crate) width: usize,
-    pub(crate) height: usize,
+    pub(crate) size: Size2us,
     pub(crate) len: usize,
     /// Number of bits per row including padding (aligned to 128 bits).
     pub(crate) stride: usize,
@@ -65,14 +69,13 @@ pub(crate) struct BitBuffer2 {
 impl BitBuffer2 {
     /// Create a new bit buffer filled with the given value.
     #[inline]
-    pub(crate) fn new_filled(width: usize, height: usize, value: bool) -> Self {
-        let layout = bit_layout(width, height);
+    pub(crate) fn new_filled(size: Size2us, value: bool) -> Self {
+        let layout = bit_layout(size);
         let fill = if value { !0u64 } else { 0u64 };
         let words = vec![fill; layout.num_words];
         Self {
             words,
-            width,
-            height,
+            size,
             len: layout.len,
             stride: layout.stride,
         }
@@ -80,8 +83,8 @@ impl BitBuffer2 {
 
     /// Create a new bit buffer with all bits set to false.
     #[inline]
-    pub(crate) fn new_default(width: usize, height: usize) -> Self {
-        Self::new_filled(width, height, false)
+    pub(crate) fn new_default(size: Size2us) -> Self {
+        Self::new_filled(size, false)
     }
 
     /// Get the number of words per row.
@@ -94,25 +97,21 @@ impl BitBuffer2 {
     #[inline]
     pub(crate) fn get(&self, idx: usize) -> bool {
         debug_assert!(idx < self.len);
-        let x = idx % self.width;
-        let y = idx / self.width;
-        self.get_xy(x, y)
+        self.get_at(self.size.point_of(idx))
     }
 
     /// Set a bit value at the given linear index (row-major, no padding).
     #[inline]
     pub(crate) fn set(&mut self, idx: usize, value: bool) {
         debug_assert!(idx < self.len);
-        let x = idx % self.width;
-        let y = idx / self.width;
-        self.set_xy(x, y, value);
+        self.set_at(self.size.point_of(idx), value);
     }
 
     /// Get a bit value at the given (x, y) coordinates.
     #[inline]
-    pub(crate) fn get_xy(&self, x: usize, y: usize) -> bool {
-        debug_assert!(x < self.width && y < self.height);
-        let bit_idx = y * self.stride + x;
+    pub(crate) fn get_at(&self, pos: Vec2us) -> bool {
+        debug_assert!(self.size.contains(pos));
+        let bit_idx = pos.y * self.stride + pos.x;
         let word_idx = bit_idx / BITS_PER_WORD;
         let bit_in_word = bit_idx % BITS_PER_WORD;
         (self.words[word_idx] >> bit_in_word) & 1 != 0
@@ -120,9 +119,9 @@ impl BitBuffer2 {
 
     /// Set a bit value at the given (x, y) coordinates.
     #[inline]
-    pub(crate) fn set_xy(&mut self, x: usize, y: usize, value: bool) {
-        debug_assert!(x < self.width && y < self.height);
-        let bit_idx = y * self.stride + x;
+    pub(crate) fn set_at(&mut self, pos: Vec2us, value: bool) {
+        debug_assert!(self.size.contains(pos));
+        let bit_idx = pos.y * self.stride + pos.x;
         let word_idx = bit_idx / BITS_PER_WORD;
         let bit_in_word = bit_idx % BITS_PER_WORD;
         if value {
@@ -142,8 +141,7 @@ impl BitBuffer2 {
     /// Copy contents from another BitBuffer2.
     #[inline]
     pub(crate) fn copy_from(&mut self, other: &Self) {
-        assert_eq!(self.width, other.width, "width mismatch");
-        assert_eq!(self.height, other.height, "height mismatch");
+        assert_eq!(self.size, other.size, "size mismatch");
         assert_eq!(self.stride, other.stride, "stride mismatch");
         self.words.copy_from_slice(&other.words);
     }
@@ -151,18 +149,18 @@ impl BitBuffer2 {
     /// Count the number of set bits (true values, excluding padding).
     #[inline]
     pub(crate) fn count_ones(&self) -> usize {
-        if self.width == 0 || self.height == 0 {
+        if self.size.width == 0 || self.size.height == 0 {
             return 0;
         }
 
         let words_per_row = self.words_per_row();
-        let bits_in_last_word = self.width % BITS_PER_WORD;
+        let bits_in_last_word = self.size.width % BITS_PER_WORD;
         // Number of fully-used words (all 64 bits valid)
-        let full_words_per_row = self.width / BITS_PER_WORD;
+        let full_words_per_row = self.size.width / BITS_PER_WORD;
 
         let mut count = 0usize;
 
-        for y in 0..self.height {
+        for y in 0..self.size.height {
             let row_start = y * words_per_row;
 
             // Count full words (all 64 bits valid)
@@ -212,13 +210,17 @@ impl Index<(usize, usize)> for BitBuffer2 {
 
     #[inline]
     fn index(&self, (x, y): (usize, usize)) -> &Self::Output {
-        if self.get_xy(x, y) { &true } else { &false }
+        if self.get_at(Vec2us::new(x, y)) {
+            &true
+        } else {
+            &false
+        }
     }
 }
 
 // Note: IndexMut cannot be implemented for bit-packed storage because we cannot
 // return a mutable reference to a single bit. Use `set(idx, value)` or
-// `set_xy(x, y, value)` methods instead.
+// `set_at(pos, value)` methods instead.
 
 /// Convert BitBuffer2 to Vec<bool>.
 impl From<BitBuffer2> for Vec<bool> {
@@ -269,21 +271,22 @@ impl ExactSizeIterator for BitIter<'_> {}
 #[cfg(test)]
 mod internals {
     use crate::bit_buffer2::{BitBuffer2, bit_layout};
+    use crate::math::size2us::Size2us;
 
     impl BitBuffer2 {
-        pub(crate) fn from_slice(width: usize, height: usize, data: &[bool]) -> Self {
-            let layout = bit_layout(width, height);
+        pub(crate) fn from_slice(size: Size2us, data: &[bool]) -> Self {
+            let layout = bit_layout(size);
             assert_eq!(
                 data.len(),
                 layout.len,
                 "data length {} does not match dimensions {}x{}={}",
                 data.len(),
-                width,
-                height,
+                size.width,
+                size.height,
                 layout.len
             );
 
-            let mut buffer = Self::new_default(width, height);
+            let mut buffer = Self::new_default(size);
             for (index, &value) in data.iter().enumerate() {
                 if value {
                     buffer.set(index, true);

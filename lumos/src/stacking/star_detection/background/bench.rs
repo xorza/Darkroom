@@ -76,7 +76,7 @@ fn bench_tile_grid_6k_with_mask(b: ::quickbench::Bencher) {
     // Create mask from actual bright pixels (threshold at 0.1)
     let width = pixels.width();
     let height = pixels.height();
-    let mut mask = BitBuffer2::new_filled(width, height, false);
+    let mut mask = BitBuffer2::new_filled(Size2us::new(width, height), false);
 
     for (idx, &val) in pixels.iter().enumerate() {
         if val > 0.1 {

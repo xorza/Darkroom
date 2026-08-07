@@ -3,6 +3,7 @@
 //! Tests the Gaussian filtering for star enhancement.
 
 use crate::math::fwhm_to_sigma;
+use crate::math::size2us::Size2us;
 use crate::stacking::star_detection::config::BackgroundConfig;
 use crate::stacking::star_detection::convolution::internals::gaussian_convolve;
 use crate::stacking::star_detection::synthetic_tests::Scenario;
@@ -45,8 +46,7 @@ fn test_gaussian_filter_sparse() {
     // Save input
     save_grayscale(
         pixels.pixels(),
-        width,
-        height,
+        Size2us::new(width, height),
         &test_output_path("synthetic_starfield/stage_conv_sparse_input.png"),
     );
 
@@ -67,8 +67,7 @@ fn test_gaussian_filter_sparse() {
 
     save_grayscale(
         &bg_subtracted,
-        width,
-        height,
+        Size2us::new(width, height),
         &test_output_path("synthetic_starfield/stage_conv_sparse_bg_subtracted.png"),
     );
 
@@ -84,8 +83,7 @@ fn test_gaussian_filter_sparse() {
 
     save_grayscale(
         &filtered_display,
-        width,
-        height,
+        Size2us::new(width, height),
         &test_output_path("synthetic_starfield/stage_conv_sparse_filtered.png"),
     );
 
@@ -154,8 +152,7 @@ fn test_gaussian_filter_fwhm_range() {
     // Save input
     save_grayscale(
         pixels.pixels(),
-        width,
-        height,
+        Size2us::new(width, height),
         &test_output_path("synthetic_starfield/stage_conv_fwhm_range_input.png"),
     );
 
@@ -232,8 +229,7 @@ fn test_gaussian_filter_noise() {
     // Save input
     save_grayscale(
         pixels.pixels(),
-        width,
-        height,
+        Size2us::new(width, height),
         &test_output_path("synthetic_starfield/stage_conv_noise_input.png"),
     );
 
@@ -254,8 +250,7 @@ fn test_gaussian_filter_noise() {
 
     save_grayscale(
         &bg_subtracted,
-        width,
-        height,
+        Size2us::new(width, height),
         &test_output_path("synthetic_starfield/stage_conv_noise_bg_subtracted.png"),
     );
 
@@ -269,8 +264,7 @@ fn test_gaussian_filter_noise() {
 
     save_grayscale(
         &filtered_display,
-        width,
-        height,
+        Size2us::new(width, height),
         &test_output_path("synthetic_starfield/stage_conv_noise_filtered.png"),
     );
 

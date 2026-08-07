@@ -2,7 +2,7 @@ use crate::stacking::star_detection::labeling::tests::*;
 
 #[test]
 fn empty_mask() {
-    let mask = BitBuffer2::from_slice(4, 4, &[false; 16]);
+    let mask = BitBuffer2::from_slice(Size2us::new(4, 4), &[false; 16]);
     let label_map = label_map_from_mask_with_connectivity(&mask, Connectivity::Four);
 
     assert_eq!(label_map.num_labels(), 0);
@@ -14,7 +14,7 @@ fn single_pixel() {
     // 4x4 mask with single pixel at (1, 1)
     let mut mask_data = vec![false; 16];
     mask_data[1 * 4 + 1] = true;
-    let mask = BitBuffer2::from_slice(4, 4, &mask_data);
+    let mask = BitBuffer2::from_slice(Size2us::new(4, 4), &mask_data);
 
     let label_map = label_map_from_mask_with_connectivity(&mask, Connectivity::Four);
 
@@ -32,7 +32,7 @@ fn horizontal_line() {
     mask_data[1 * 5 + 0] = true;
     mask_data[1 * 5 + 1] = true;
     mask_data[1 * 5 + 2] = true;
-    let mask = BitBuffer2::from_slice(5, 3, &mask_data);
+    let mask = BitBuffer2::from_slice(Size2us::new(5, 3), &mask_data);
 
     let label_map = label_map_from_mask_with_connectivity(&mask, Connectivity::Four);
 
@@ -52,7 +52,7 @@ fn vertical_line() {
     mask_data[1 * 3 + 1] = true;
     mask_data[2 * 3 + 1] = true;
     mask_data[3 * 3 + 1] = true;
-    let mask = BitBuffer2::from_slice(3, 5, &mask_data);
+    let mask = BitBuffer2::from_slice(Size2us::new(3, 5), &mask_data);
 
     let label_map = label_map_from_mask_with_connectivity(&mask, Connectivity::Four);
 
@@ -73,7 +73,7 @@ fn two_separate_regions() {
     let mut mask_data = vec![false; 18];
     mask_data[0] = true; // (0, 0)
     mask_data[5] = true; // (5, 0)
-    let mask = BitBuffer2::from_slice(6, 3, &mask_data);
+    let mask = BitBuffer2::from_slice(Size2us::new(6, 3), &mask_data);
 
     let label_map = label_map_from_mask_with_connectivity(&mask, Connectivity::Four);
 
@@ -95,7 +95,7 @@ fn l_shape() {
     mask_data[1 * 4 + 0] = true;
     mask_data[2 * 4 + 0] = true;
     mask_data[2 * 4 + 1] = true;
-    let mask = BitBuffer2::from_slice(4, 4, &mask_data);
+    let mask = BitBuffer2::from_slice(Size2us::new(4, 4), &mask_data);
 
     let label_map = label_map_from_mask_with_connectivity(&mask, Connectivity::Four);
 
@@ -117,7 +117,7 @@ fn diagonal_not_connected() {
     mask_data[0 * 3 + 0] = true;
     mask_data[1 * 3 + 1] = true;
     mask_data[2 * 3 + 2] = true;
-    let mask = BitBuffer2::from_slice(3, 3, &mask_data);
+    let mask = BitBuffer2::from_slice(Size2us::new(3, 3), &mask_data);
 
     let label_map = label_map_from_mask_with_connectivity(&mask, Connectivity::Four);
 
@@ -144,7 +144,7 @@ fn u_shape_union_find() {
     mask_data[2 * 5 + 1] = true;
     mask_data[2 * 5 + 2] = true;
     mask_data[2 * 5 + 3] = true;
-    let mask = BitBuffer2::from_slice(5, 3, &mask_data);
+    let mask = BitBuffer2::from_slice(Size2us::new(5, 3), &mask_data);
 
     let label_map = label_map_from_mask_with_connectivity(&mask, Connectivity::Four);
 
@@ -177,7 +177,7 @@ fn checkerboard() {
             }
         }
     }
-    let mask = BitBuffer2::from_slice(4, 4, &mask_data);
+    let mask = BitBuffer2::from_slice(Size2us::new(4, 4), &mask_data);
 
     let label_map = label_map_from_mask_with_connectivity(&mask, Connectivity::Four);
 
@@ -188,7 +188,7 @@ fn checkerboard() {
 #[test]
 fn filled_rectangle() {
     // 3x3 all true
-    let mask = BitBuffer2::from_slice(3, 3, &[true; 9]);
+    let mask = BitBuffer2::from_slice(Size2us::new(3, 3), &[true; 9]);
     let label_map = label_map_from_mask_with_connectivity(&mask, Connectivity::Four);
 
     assert_eq!(label_map.num_labels(), 1);
@@ -203,7 +203,7 @@ fn labels_are_sequential() {
     mask_data[0] = true;
     mask_data[2] = true;
     mask_data[4] = true;
-    let mask = BitBuffer2::from_slice(6, 1, &mask_data);
+    let mask = BitBuffer2::from_slice(Size2us::new(6, 1), &mask_data);
 
     let label_map = label_map_from_mask_with_connectivity(&mask, Connectivity::Four);
 
@@ -217,12 +217,12 @@ fn labels_are_sequential() {
 #[test]
 fn zero_dimensions() {
     // Zero width
-    let mask = BitBuffer2::from_slice(0, 10, &[]);
+    let mask = BitBuffer2::from_slice(Size2us::new(0, 10), &[]);
     let label_map = label_map_from_mask_with_connectivity(&mask, Connectivity::Four);
     assert_eq!(label_map.num_labels(), 0);
 
     // Zero height
-    let mask = BitBuffer2::from_slice(10, 0, &[]);
+    let mask = BitBuffer2::from_slice(Size2us::new(10, 0), &[]);
     let label_map = label_map_from_mask_with_connectivity(&mask, Connectivity::Four);
     assert_eq!(label_map.num_labels(), 0);
 }
@@ -245,7 +245,7 @@ fn edge_touching_components() {
     // Right edge component
     mask_data[3 * width + 9] = true;
 
-    let mask = BitBuffer2::from_slice(width, height, &mask_data);
+    let mask = BitBuffer2::from_slice(Size2us::new(width, height), &mask_data);
     let label_map = label_map_from_mask_with_connectivity(&mask, Connectivity::Four);
 
     assert_eq!(label_map.num_labels(), 4);

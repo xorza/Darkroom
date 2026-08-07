@@ -443,7 +443,7 @@ fn test_filter_edge_row_top() {
     ];
 
     let mut output_row = vec![0.0f32; 5];
-    filter_edge_row(&pixels, 5, 5, 0, &mut output_row);
+    filter_edge_row(&pixels, Size2us::new(5, 5), 0, &mut output_row);
 
     // Check first pixel (corner)
     // Neighbors: [0.1, 0.2, 0.6, 0.7] -> median = (0.2 + 0.6) / 2 = 0.4
@@ -467,7 +467,7 @@ fn test_filter_edge_row_bottom() {
     ];
 
     let mut output_row = vec![0.0f32; 5];
-    filter_edge_row(&pixels, 5, 5, 4, &mut output_row);
+    filter_edge_row(&pixels, Size2us::new(5, 5), 4, &mut output_row);
 
     // Check last pixel (corner)
     // Neighbors: [1.9, 2.0, 2.4, 2.5] -> median = (2.0 + 2.4) / 2 = 2.2

@@ -30,6 +30,7 @@ use arrayvec::ArrayVec;
 use glam::DVec2;
 
 use crate::error::InvalidConfigField;
+use crate::math::size2us::Size2us;
 use crate::stacking::registration::distortion::SINGULAR_THRESHOLD;
 use crate::stacking::registration::result::RegistrationError;
 use crate::stacking::registration::transform::Transform;
@@ -345,14 +346,14 @@ impl SipPolynomial {
     }
 
     /// Get the maximum correction magnitude across a grid of points.
-    pub fn max_correction(&self, width: usize, height: usize, grid_spacing: f64) -> f64 {
+    pub fn max_correction(&self, size: Size2us, grid_spacing: f64) -> f64 {
         assert!(
             grid_spacing > 0.0,
             "grid_spacing must be positive, got {grid_spacing}"
         );
         // Integer-stepped to avoid float accumulation drift skipping the boundary band.
-        let nx = (width as f64 / grid_spacing).floor() as usize;
-        let ny = (height as f64 / grid_spacing).floor() as usize;
+        let nx = (size.width as f64 / grid_spacing).floor() as usize;
+        let ny = (size.height as f64 / grid_spacing).floor() as usize;
         let mut max_mag = 0.0f64;
         for iy in 0..=ny {
             let y = iy as f64 * grid_spacing;

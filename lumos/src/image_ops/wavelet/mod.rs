@@ -7,6 +7,7 @@
 //! coarse residual) **stream** [`atrous_smooth`] over a rolling pair of planes and exploit the
 //! telescoping identity, so the layer pyramid is never materialized.
 
+use crate::math::size2us::Size2us;
 use imaginarium::Buffer2;
 use rayon::prelude::*;
 
@@ -136,8 +137,8 @@ fn reflect(i: isize, n: isize) -> usize {
 
 /// Largest scale count for which the coarsest hole step stays within the image: `2^J ≤ min(w, h)`.
 /// Beyond it the à trous kernel spans the whole frame, so the extra scales do nothing.
-pub(crate) fn max_scales(width: usize, height: usize) -> usize {
-    let min_dim = width.min(height);
+pub(crate) fn max_scales(size: Size2us) -> usize {
+    let min_dim = size.width.min(size.height);
     if min_dim < 2 {
         return 1;
     }

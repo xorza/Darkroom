@@ -13,7 +13,8 @@ fn construction_constants_arithmetic_and_tuple_conversions_are_exact() {
 }
 
 #[test]
-fn row_major_indices_round_trip_at_boundaries() {
+fn row_major_index_matches_the_hand_computed_offset() {
+    // The inverse lives on `Size2us::point_of`, which knows the whole extent and can bounds-check.
     for width in [1, 5, 128] {
         for point in [
             Vec2us::new(0, 0),
@@ -21,9 +22,7 @@ fn row_major_indices_round_trip_at_boundaries() {
             Vec2us::new(0, 7),
             Vec2us::new(width - 1, 7),
         ] {
-            let expected = point.y * width + point.x;
-            assert_eq!(point.to_index(width), expected);
-            assert_eq!(Vec2us::from_index(expected, width), point);
+            assert_eq!(point.to_index(width), point.y * width + point.x);
         }
     }
 }

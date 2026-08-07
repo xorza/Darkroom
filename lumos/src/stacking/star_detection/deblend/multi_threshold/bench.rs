@@ -2,6 +2,7 @@
 //!
 //! Run with: `cargo test -p lumos --release bench_multi_threshold -- --ignored --nocapture`
 
+use crate::math::size2us::Size2us;
 use ::quickbench::quick_bench;
 use std::hint::black_box;
 
@@ -26,7 +27,7 @@ fn create_components_from_pixels(
     let width = pixels.width();
     let height = pixels.height();
 
-    let mut mask = BitBuffer2::new_filled(width, height, false);
+    let mut mask = BitBuffer2::new_filled(Size2us::new(width, height), false);
     for (idx, &value) in pixels.iter().enumerate() {
         if value > threshold {
             mask.set(idx, true);

@@ -2,6 +2,7 @@
 //!
 //! Tests the peak detection and thresholding logic.
 
+use crate::math::size2us::Size2us;
 use crate::stacking::star_detection::config::{BackgroundConfig, DetectionConfig};
 use crate::stacking::star_detection::detector::stages::detect_test_utils::detect_stars_test;
 use crate::stacking::star_detection::synthetic_tests::Scenario;
@@ -24,7 +25,7 @@ fn create_detection_overlay(
     candidates: &[(usize, usize)],
     ground_truth: &[(f32, f32)],
 ) -> imaginarium::Image {
-    let mut img = gray_to_rgb_image_stretched(pixels, width, height);
+    let mut img = gray_to_rgb_image_stretched(pixels, Size2us::new(width, height));
 
     // Draw ground truth in blue
     let blue = Color::rgb(0.3, 0.3, 1.0);
@@ -59,8 +60,7 @@ fn test_detection_sparse() {
     // Save input
     save_grayscale(
         pixels.pixels(),
-        width,
-        height,
+        Size2us::new(width, height),
         &test_output_path("synthetic_starfield/stage_det_sparse_input.png"),
     );
 
@@ -148,8 +148,7 @@ fn test_detection_thresholds() {
     // Save input
     save_grayscale(
         pixels.pixels(),
-        width,
-        height,
+        Size2us::new(width, height),
         &test_output_path("synthetic_starfield/stage_det_thresholds_input.png"),
     );
 
@@ -231,8 +230,7 @@ fn test_detection_area_filter() {
     // Save input
     save_grayscale(
         pixels.pixels(),
-        width,
-        height,
+        Size2us::new(width, height),
         &test_output_path("synthetic_starfield/stage_det_area_filter_input.png"),
     );
 

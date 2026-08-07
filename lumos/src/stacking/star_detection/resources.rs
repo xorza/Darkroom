@@ -61,7 +61,10 @@ impl DetectionResources {
     /// Acquire a BitBuffer2 from the pool, or allocate a new one.
     pub(crate) fn acquire_bit(&mut self) -> BitBuffer2 {
         self.bit_buffers.pop().unwrap_or_else(|| {
-            BitBuffer2::new_filled(self.dimensions.width, self.dimensions.height, false)
+            BitBuffer2::new_filled(
+                Size2us::new(self.dimensions.width, self.dimensions.height),
+                false,
+            )
         })
     }
 
@@ -71,8 +74,7 @@ impl DetectionResources {
     pub(crate) fn release_bit(&mut self, buffer: BitBuffer2) {
         // See release_f32: release assert, not debug — a mismatch here is out-of-bounds UB in
         // a downstream SIMD kernel, not a wrong pixel.
-        assert_eq!(buffer.width, self.dimensions.width);
-        assert_eq!(buffer.height, self.dimensions.height);
+        assert_eq!(buffer.size, self.dimensions);
         self.bit_buffers.push(buffer);
     }
 
@@ -182,13 +184,12 @@ mod tests {
         let mut pool = DetectionResources::new(Size2us::new(128, 64));
 
         let buf1 = pool.acquire_bit();
-        assert_eq!(buf1.width, 128);
-        assert_eq!(buf1.height, 64);
+        assert_eq!(buf1.size, Size2us::new(128, 64));
 
         pool.release_bit(buf1);
 
         let buf2 = pool.acquire_bit();
-        assert_eq!(buf2.width, 128);
+        assert_eq!(buf2.size.width, 128);
 
         pool.release_bit(buf2);
     }

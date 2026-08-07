@@ -4,6 +4,7 @@
 #![allow(clippy::identity_op, clippy::erasing_op)]
 
 use crate::bit_buffer2::BitBuffer2;
+use crate::math::size2us::Size2us;
 use crate::stacking::star_detection::config::Connectivity;
 use crate::stacking::star_detection::labeling::internals::label_map_from_mask_with_connectivity;
 
@@ -182,7 +183,7 @@ fn verify_ccl_invariants(
 
 /// Compare our implementation against reference flood-fill.
 fn compare_with_reference(mask_data: &[bool], width: usize, height: usize) {
-    let mask = BitBuffer2::from_slice(width, height, mask_data);
+    let mask = BitBuffer2::from_slice(Size2us::new(width, height), mask_data);
 
     // Test 4-connectivity
     let label_map_4 = label_map_from_mask_with_connectivity(&mask, Connectivity::Four);

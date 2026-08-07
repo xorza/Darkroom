@@ -567,7 +567,7 @@ fn xtrans_noise(
             }
             (0..size.pixel_count())
                 .map(|i| {
-                    let p = Vec2us::from_index(i, size.width);
+                    let p = size.point_of(i);
                     let c = (cfa.color_at(p.x, p.y) as usize).min(2);
                     let (bg, sigma) = stats[c];
                     empirical_noise(signal[i], bg, sigma)

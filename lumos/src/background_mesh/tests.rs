@@ -197,10 +197,10 @@ fn test_tile_grid_with_mask_excludes_masked() {
 
     let pixels = Buffer2::new(width, height, data);
 
-    let mut mask = BitBuffer2::new_filled(width, height, false);
+    let mut mask = BitBuffer2::new_filled(Size2us::new(width, height), false);
     for y in 0..32 {
         for x in 0..32 {
-            mask.set_xy(x, y, true);
+            mask.set_at(Vec2us::new(x, y), true);
         }
     }
 
@@ -224,7 +224,7 @@ fn test_tile_uses_few_unmasked_pixels_over_all_pixels() {
     // Set ~5% of the top-left tile (32×32 = 1024 pixels) to background value
     // 5% of 1024 = ~51 pixels. Use a stripe: first 2 rows unmasked.
     // 2 rows × 32 cols = 64 pixels of background
-    let mut mask = BitBuffer2::new_filled(width, height, false);
+    let mut mask = BitBuffer2::new_filled(Size2us::new(width, height), false);
     for y in 0..32 {
         for x in 0..32 {
             if y < 2 {
@@ -233,7 +233,7 @@ fn test_tile_uses_few_unmasked_pixels_over_all_pixels() {
                 // mask stays false (unmasked)
             } else {
                 // Star pixels: masked, value 0.9
-                mask.set_xy(x, y, true);
+                mask.set_at(Vec2us::new(x, y), true);
             }
         }
     }
@@ -256,7 +256,7 @@ fn test_all_pixels_masked_fallback() {
     let width = 64;
     let height = 64;
     let pixels = Buffer2::new_filled(width, height, 0.4);
-    let mask = BitBuffer2::new_filled(width, height, true);
+    let mask = BitBuffer2::new_filled(Size2us::new(width, height), true);
 
     let grid = make_grid_with_mask(&pixels, 32, &mask);
 
@@ -712,10 +712,10 @@ fn test_mask_excludes_sources_correctly() {
     let pixels = Buffer2::new(width, height, data);
 
     // Mask the bright source
-    let mut mask = BitBuffer2::new_filled(width, height, false);
+    let mut mask = BitBuffer2::new_filled(Size2us::new(width, height), false);
     for y in 0..32 {
         for x in 0..32 {
-            mask.set_xy(x, y, true);
+            mask.set_at(Vec2us::new(x, y), true);
         }
     }
 

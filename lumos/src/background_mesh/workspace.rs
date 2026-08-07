@@ -106,6 +106,7 @@ mod tests {
     use crate::background_mesh::workspace::MeshWorkspace;
     use crate::bit_buffer2::BitBuffer2;
     use crate::concurrency::internals::{all_by, job_count};
+    use crate::math::size2us::Size2us;
     use imaginarium::Buffer2;
 
     const SIGMA_CLIP_ITERATIONS: usize = 2;
@@ -195,7 +196,7 @@ mod tests {
     #[test]
     fn masked_compute_keeps_per_job_scratch_bounded() {
         let pixels = Buffer2::new_filled(512, 512, 0.5);
-        let mask = BitBuffer2::new_filled(512, 512, false);
+        let mask = BitBuffer2::new_filled(Size2us::new(512, 512), false);
         let mut workspace = MeshWorkspace::default();
 
         workspace.compute(&pixels, Some(&mask), 256, SIGMA_CLIP_ITERATIONS, false);
