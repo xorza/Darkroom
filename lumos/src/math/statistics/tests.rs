@@ -296,19 +296,19 @@ fn test_median_with_nan_does_not_panic() {
     assert!(!median.is_nan());
 }
 
+/// NaN input is a contract violation, not a supported case: `partial_cmp` orders a NaN `Equal`
+/// against everything, so the partition may return any element. Debug builds say so instead of
+/// handing back a number that looks like a median. Release compiles the check out, so this test
+/// only holds where `debug_assertions` is on.
 #[test]
-fn test_sigma_clip_with_nan_does_not_panic() {
+#[cfg(debug_assertions)]
+#[should_panic(expected = "NaN-free")]
+fn sigma_clip_rejects_nan_input() {
     let mut values = vec![10.0f32; 20];
     values[5] = f32::NAN;
     values[15] = f32::NAN;
     let mut deviations = Vec::new();
-    // Should not panic
-    let ClippedStats {
-        median,
-        sigma: _sigma,
-        ..
-    } = sigma_clipped_median_mad(&mut values, &mut deviations, 3.0, 3);
-    assert!(!median.is_nan());
+    sigma_clipped_median_mad(&mut values, &mut deviations, 3.0, 3);
 }
 
 #[test]
