@@ -498,12 +498,9 @@ fn xtrans_direct_and_calibration_black_corrections_match() {
             let active_cfa = CfaType::XTrans(visible_pattern);
             let direct = XTransImage::with_margins(
                 &raw_data,
-                raw_width,
-                raw_height,
-                area.size.width,
-                area.size.height,
-                area.margin.y,
-                area.margin.x,
+                Size2us::new(raw_width, raw_height),
+                area.size,
+                area.margin,
                 XTransPattern::new(raw_pattern).unwrap(),
                 channel_black,
                 inv_range,
@@ -577,12 +574,9 @@ fn real_xtrans_channel_black_matches_direct_and_calibration_paths() {
     let pattern = raw.raw_xtrans_pattern();
     let direct = XTransImage::with_margins(
         raw_data,
-        raw.raw_width,
-        raw.raw_height,
-        raw.width,
-        raw.height,
-        raw.top_margin,
-        raw.left_margin,
+        Size2us::new(raw.raw_width, raw.raw_height),
+        Size2us::new(raw.width, raw.height),
+        Vec2us::new(raw.left_margin, raw.top_margin),
         XTransPattern::new(pattern).unwrap(),
         [
             raw.black_level.per_channel[0],

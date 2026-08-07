@@ -1,5 +1,8 @@
 //! Bayer CFA demosaicing module.
 
+use crate::math::size2us::Size2us;
+use crate::math::vec2us::Vec2us;
+
 pub(crate) mod rcd;
 #[cfg(test)]
 mod tests;
@@ -103,23 +106,25 @@ pub(crate) struct BayerImage<'a> {
 impl<'a> BayerImage<'a> {
     /// Create a BayerImage with margins (libraw style).
     ///
+    /// `raw` is the whole buffer, `active` the visible window inside it, and `margin` that
+    /// window's top-left corner.
+    ///
     /// # Panics
     /// Panics if:
-    /// - `data.len() != raw_width * raw_height`
-    /// - `top_margin + height > raw_height`
-    /// - `left_margin + width > raw_width`
-    /// - `width == 0` or `height == 0`
-    #[allow(clippy::too_many_arguments)]
+    /// - `data.len() != raw.pixel_count()`
+    /// - `margin.y + active.height > raw.height`
+    /// - `margin.x + active.width > raw.width`
+    /// - either `active` extent is zero
     pub(crate) fn with_margins(
         data: &'a [f32],
-        raw_width: usize,
-        raw_height: usize,
-        width: usize,
-        height: usize,
-        top_margin: usize,
-        left_margin: usize,
+        raw: Size2us,
+        active: Size2us,
+        margin: Vec2us,
         raw_cfa_pattern: CfaPattern,
     ) -> Self {
+        let (raw_width, raw_height) = (raw.width, raw.height);
+        let (width, height) = (active.width, active.height);
+        let (top_margin, left_margin) = (margin.y, margin.x);
         assert!(
             width > 0 && height > 0,
             "Output dimensions must be non-zero: {}x{}",

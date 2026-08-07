@@ -569,12 +569,9 @@ impl UnpackedRaw {
         let raw_cfa_pattern = visible_cfa_pattern.at_raw_origin(self.top_margin, self.left_margin);
         let bayer = BayerImage::with_margins(
             &normalized_data,
-            self.raw_width,
-            self.raw_height,
-            self.width,
-            self.height,
-            self.top_margin,
-            self.left_margin,
+            Size2us::new(self.raw_width, self.raw_height),
+            Size2us::new(self.width, self.height),
+            Vec2us::new(self.left_margin, self.top_margin),
             raw_cfa_pattern,
         );
 
@@ -632,12 +629,9 @@ impl UnpackedRaw {
 
         let pixels = xtrans::process_xtrans(
             &raw_u16,
-            self.raw_width,
-            self.raw_height,
-            self.width,
-            self.height,
-            self.top_margin,
-            self.left_margin,
+            Size2us::new(self.raw_width, self.raw_height),
+            Size2us::new(self.width, self.height),
+            Vec2us::new(self.left_margin, self.top_margin),
             raw_pattern,
             channel_black,
             bl.inv_range,

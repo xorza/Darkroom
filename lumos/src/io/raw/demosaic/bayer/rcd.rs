@@ -18,6 +18,7 @@ use crate::io::raw::{
     alloc_uninit_vec,
     demosaic::bayer::{BayerImage, CfaPattern},
 };
+use crate::math::size2us::Size2us;
 
 const EPS: f32 = 1e-5;
 const EPSSQ: f32 = 1e-10;
@@ -26,15 +27,10 @@ const MIN_SIGNED_DENOMINATOR_RATIO: f32 = 0.25;
 /// Border size required by the algorithm (pixels on each side).
 const BORDER: usize = 4;
 
-pub(crate) fn demosaic_memory(
-    raw_width: usize,
-    raw_height: usize,
-    width: usize,
-    height: usize,
-) -> DemosaicMemory {
-    let raw_pixels = raw_width.saturating_mul(raw_height);
-    let active_pixels = width.saturating_mul(height);
-    let half_pixels = raw_width.div_ceil(2).saturating_mul(raw_height);
+pub(crate) fn demosaic_memory(raw: Size2us, active: Size2us) -> DemosaicMemory {
+    let raw_pixels = raw.width.saturating_mul(raw.height);
+    let active_pixels = active.width.saturating_mul(active.height);
+    let half_pixels = raw.width.div_ceil(2).saturating_mul(raw.height);
 
     let directional_peak = raw_pixels
         .saturating_mul(6)

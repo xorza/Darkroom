@@ -37,13 +37,14 @@ use crate::io::raw::demosaic::xtrans::XTransImage;
 use crate::io::raw::demosaic::xtrans::hex_lookup::HexLookup;
 use crate::io::raw::demosaic::xtrans::markesteijn_steps;
 use crate::io::raw::demosaic::{Cancelled, DemosaicMemory};
+use crate::math::size2us::Size2us;
 
 /// Number of interpolation directions (4 for 1-pass: H, V, D1, D2).
 pub(crate) const NDIR: usize = 4;
 const ARENA_WORDS_PER_PIXEL: usize = 18;
 
-pub(crate) fn demosaic_memory(width: usize, height: usize) -> DemosaicMemory {
-    let pixels = width.saturating_mul(height);
+pub(crate) fn demosaic_memory(size: Size2us) -> DemosaicMemory {
+    let pixels = size.width.saturating_mul(size.height);
     let output_words = pixels.saturating_mul(3);
     let peak_words = pixels.saturating_mul(1 + ARENA_WORDS_PER_PIXEL + 3);
     DemosaicMemory {
@@ -269,6 +270,7 @@ mod tests {
         TEST_INV_RANGE, make_xtrans, test_pattern, test_pattern_array, to_u16,
     };
     use crate::io::raw::demosaic::xtrans::markesteijn::*;
+    use crate::math::vec2us::Vec2us;
 
     #[derive(Clone, Copy, Debug)]
     enum SyntheticScene {
@@ -486,16 +488,9 @@ mod tests {
                     data[y * WIDTH + x] = synthetic_value(case.scene, channel, x, y);
                 }
             }
-            let xtrans = XTransImage::with_margins_f32(
-                &data,
-                WIDTH,
-                HEIGHT,
-                WIDTH,
-                HEIGHT,
-                0,
-                0,
-                test_pattern(),
-            );
+            let size = Size2us::new(WIDTH, HEIGHT);
+            let xtrans =
+                XTransImage::with_margins_f32(&data, size, size, Vec2us::ZERO, test_pattern());
             let planes = demosaic(&xtrans, &CancelToken::never()).unwrap();
             for sample in case.samples {
                 let index = sample.y * WIDTH + sample.x;
@@ -522,7 +517,12 @@ mod tests {
         let w = 12;
         let h = 12;
         let data = vec![to_u16(0.5); raw_w * raw_h];
-        let xtrans = make_xtrans(&data, raw_w, raw_h, w, h, 6, 6);
+        let xtrans = make_xtrans(
+            &data,
+            Size2us::new(raw_w, raw_h),
+            Size2us::new(w, h),
+            Vec2us::new(6, 6),
+        );
 
         let rgb = interleave_planes(demosaic(&xtrans, &CancelToken::never()).unwrap());
         assert_eq!(rgb.len(), w * h * 3);
@@ -535,7 +535,12 @@ mod tests {
         let w = 18;
         let h = 18;
         let data = vec![to_u16(0.5); raw_w * raw_h];
-        let xtrans = make_xtrans(&data, raw_w, raw_h, w, h, 6, 6);
+        let xtrans = make_xtrans(
+            &data,
+            Size2us::new(raw_w, raw_h),
+            Size2us::new(w, h),
+            Vec2us::new(6, 6),
+        );
 
         let rgb = interleave_planes(demosaic(&xtrans, &CancelToken::never()).unwrap());
 
@@ -559,7 +564,12 @@ mod tests {
         let data: Vec<u16> = (0..raw_w * raw_h)
             .map(|i| to_u16(i as f32 / (raw_w * raw_h) as f32))
             .collect();
-        let xtrans = make_xtrans(&data, raw_w, raw_h, w, h, 6, 6);
+        let xtrans = make_xtrans(
+            &data,
+            Size2us::new(raw_w, raw_h),
+            Size2us::new(w, h),
+            Vec2us::new(6, 6),
+        );
 
         let rgb = interleave_planes(demosaic(&xtrans, &CancelToken::never()).unwrap());
 
@@ -575,7 +585,12 @@ mod tests {
         let w = 12;
         let h = 12;
         let data = vec![0u16; raw_w * raw_h];
-        let xtrans = make_xtrans(&data, raw_w, raw_h, w, h, 6, 6);
+        let xtrans = make_xtrans(
+            &data,
+            Size2us::new(raw_w, raw_h),
+            Size2us::new(w, h),
+            Vec2us::new(6, 6),
+        );
 
         let rgb = interleave_planes(demosaic(&xtrans, &CancelToken::never()).unwrap());
         for &v in &rgb {
@@ -595,12 +610,9 @@ mod tests {
         let pattern = test_pattern();
         let xtrans = XTransImage::with_margins(
             &data,
-            raw_w,
-            raw_h,
-            w,
-            h,
-            top,
-            left,
+            Size2us::new(raw_w, raw_h),
+            Size2us::new(w, h),
+            Vec2us::new(left, top),
             pattern.clone(),
             [0.0; 3],
             TEST_INV_RANGE,

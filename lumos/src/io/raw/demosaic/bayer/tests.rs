@@ -2,6 +2,8 @@
 
 use crate::io::raw::demosaic::bayer::{BayerImage, CfaPattern, rcd};
 use crate::io::raw::demosaic::interleave_planes;
+use crate::math::size2us::Size2us;
+use crate::math::vec2us::Vec2us;
 use common::CancelToken;
 use rayon::ThreadPoolBuilder;
 
@@ -135,41 +137,64 @@ fn raw_origin_pattern_preserves_visible_color_for_every_margin_phase() {
 #[should_panic(expected = "Output dimensions must be non-zero")]
 fn test_bayer_image_zero_width() {
     let data = vec![0.0f32; 4];
-    BayerImage::with_margins(&data, 2, 2, 0, 2, 0, 0, CfaPattern::Rggb);
+    let raw = Size2us::new(2, 2);
+    BayerImage::with_margins(
+        &data,
+        raw,
+        Size2us::new(0, 2),
+        Vec2us::ZERO,
+        CfaPattern::Rggb,
+    );
 }
 
 #[test]
 #[should_panic(expected = "Output dimensions must be non-zero")]
 fn test_bayer_image_zero_height() {
     let data = vec![0.0f32; 4];
-    BayerImage::with_margins(&data, 2, 2, 2, 0, 0, 0, CfaPattern::Rggb);
+    let raw = Size2us::new(2, 2);
+    BayerImage::with_margins(
+        &data,
+        raw,
+        Size2us::new(2, 0),
+        Vec2us::ZERO,
+        CfaPattern::Rggb,
+    );
 }
 
 #[test]
 #[should_panic(expected = "Data length")]
 fn test_bayer_image_wrong_data_length() {
     let data = vec![0.0f32; 3];
-    BayerImage::with_margins(&data, 2, 2, 2, 2, 0, 0, CfaPattern::Rggb);
+    let size = Size2us::new(2, 2);
+    BayerImage::with_margins(&data, size, size, Vec2us::ZERO, CfaPattern::Rggb);
 }
 
 #[test]
 #[should_panic(expected = "Top margin")]
 fn test_bayer_image_margin_exceeds_height() {
     let data = vec![0.0f32; 4];
-    BayerImage::with_margins(&data, 2, 2, 2, 2, 1, 0, CfaPattern::Rggb);
+    let size = Size2us::new(2, 2);
+    BayerImage::with_margins(&data, size, size, Vec2us::new(0, 1), CfaPattern::Rggb);
 }
 
 #[test]
 #[should_panic(expected = "Left margin")]
 fn test_bayer_image_margin_exceeds_width() {
     let data = vec![0.0f32; 4];
-    BayerImage::with_margins(&data, 2, 2, 2, 2, 0, 1, CfaPattern::Rggb);
+    let size = Size2us::new(2, 2);
+    BayerImage::with_margins(&data, size, size, Vec2us::new(1, 0), CfaPattern::Rggb);
 }
 
 #[test]
 fn test_bayer_image_valid() {
     let data = vec![0.0f32; 16];
-    let bayer = BayerImage::with_margins(&data, 4, 4, 2, 2, 1, 1, CfaPattern::Rggb);
+    let bayer = BayerImage::with_margins(
+        &data,
+        Size2us::new(4, 4),
+        Size2us::new(2, 2),
+        Vec2us::new(1, 1),
+        CfaPattern::Rggb,
+    );
     assert_eq!(bayer.raw_width, 4);
     assert_eq!(bayer.raw_height, 4);
     assert_eq!(bayer.width, 2);
@@ -180,7 +205,8 @@ fn test_bayer_image_valid() {
 
 /// Helper: create a BayerImage from a flat CFA array with no margins.
 fn make_bayer(data: &[f32], width: usize, height: usize, cfa: CfaPattern) -> BayerImage<'_> {
-    BayerImage::with_margins(data, width, height, width, height, 0, 0, cfa)
+    let size = Size2us::new(width, height);
+    BayerImage::with_margins(data, size, size, Vec2us::ZERO, cfa)
 }
 
 #[test]
@@ -250,7 +276,13 @@ fn test_rcd_uniform_input() {
     let data = vec![val; raw_w * raw_h];
     let act_w = 20;
     let act_h = 20;
-    let bayer = BayerImage::with_margins(&data, raw_w, raw_h, act_w, act_h, 6, 6, CfaPattern::Rggb);
+    let bayer = BayerImage::with_margins(
+        &data,
+        Size2us::new(raw_w, raw_h),
+        Size2us::new(act_w, act_h),
+        Vec2us::new(6, 6),
+        CfaPattern::Rggb,
+    );
     let rgb = interleave_planes(rcd::demosaic(&bayer, &CancelToken::never()).unwrap());
 
     // Check all output pixels. With 6 pixels of margin on each side of the raw
@@ -447,12 +479,9 @@ fn test_rcd_with_margins() {
             }
             let bayer = BayerImage::with_margins(
                 &data,
-                raw_w,
-                raw_h,
-                act_w,
-                act_h,
-                top_margin,
-                left_margin,
+                Size2us::new(raw_w, raw_h),
+                Size2us::new(act_w, act_h),
+                Vec2us::new(left_margin, top_margin),
                 raw_pattern,
             );
             let rgb = interleave_planes(rcd::demosaic(&bayer, &CancelToken::never()).unwrap());
