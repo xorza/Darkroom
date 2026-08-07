@@ -12,6 +12,7 @@ use crate::stacking::star_detection::centroid::gaussian_fit::{
 use crate::stacking::star_detection::centroid::lm_optimizer::{
     FitData, NormalEquations, accumulate_chi2, accumulate_normal_equations,
 };
+use crate::stacking::star_detection::centroid::simd::hsum;
 use std::arch::aarch64::*;
 
 const LOG2E: f64 = LOG2_E;
@@ -66,13 +67,6 @@ unsafe fn simd_exp_fast(x: float64x2_t) -> float64x2_t {
     let pow2n: float64x2_t = vreinterpretq_f64_s64(pow2n);
 
     vmulq_f64(exp_r, pow2n)
-}
-
-/// Horizontal sum of 2 f64 lanes.
-#[inline]
-#[allow(unsafe_op_in_unsafe_fn)]
-unsafe fn hsum(v: float64x2_t) -> f64 {
-    vaddvq_f64(v)
 }
 
 /// Batch build normal equations (J^T J, J^T r, chi²) using NEON.

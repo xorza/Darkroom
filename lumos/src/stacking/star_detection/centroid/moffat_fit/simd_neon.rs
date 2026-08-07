@@ -7,6 +7,7 @@ use crate::stacking::star_detection::centroid::lm_optimizer::{
     FitData, NormalEquations, accumulate_chi2, accumulate_normal_equations,
 };
 use crate::stacking::star_detection::centroid::moffat_fit::{MoffatFixedBeta, PowStrategy};
+use crate::stacking::star_detection::centroid::simd::hsum;
 use std::arch::aarch64::*;
 
 /// SIMD `int_pow`: compute u^n for each lane using repeated squaring.
@@ -180,12 +181,6 @@ pub(super) unsafe fn batch_build_normal_equations_neon(
         }
 
         // Horizontal sums
-        #[inline(always)]
-        #[allow(unsafe_op_in_unsafe_fn)]
-        unsafe fn hsum(v: float64x2_t) -> f64 {
-            vaddvq_f64(v)
-        }
-
         let chi2 = hsum(v_chi2);
         let gradient = [hsum(v_g0), hsum(v_g1), hsum(v_g2), hsum(v_g3), hsum(v_g4)];
         let mut hessian = [[0.0f64; 5]; 5];
