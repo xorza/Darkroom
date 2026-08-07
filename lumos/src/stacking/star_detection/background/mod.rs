@@ -21,6 +21,7 @@ use rayon::prelude::*;
 use crate::background_mesh::TileGrid;
 use crate::background_mesh::spline::{cubic_spline_eval, solve_natural_spline_d2};
 use crate::concurrency::JobScratchPool;
+use crate::stacking::star_detection::background::simd::{SegmentRamp, SplineSegment};
 use crate::stacking::star_detection::background::workspace::InterpolateScratch;
 use crate::stacking::star_detection::config::BackgroundConfig;
 use crate::stacking::star_detection::mask_dilation::dilate_mask;
@@ -238,33 +239,26 @@ fn interpolate_row(
             let hx = cx1 - cx0;
             let hx2_6 = hx * hx / 6.0;
             let inv_hx = 1.0 / hx;
-            let tx_start = (x as f32 - cx0) * inv_hx;
-            let tx_step = inv_hx;
-
-            // Precompute spline coefficients: a = h²/6 * d2[left], b = h²/6 * d2[right]
-            let bg_f0 = node_bg[tx0];
-            let bg_f1 = node_bg[tx1];
-            let bg_a = hx2_6 * d2x_bg[tx0];
-            let bg_b = hx2_6 * d2x_bg[tx1];
-
-            let noise_f0 = node_noise[tx0];
-            let noise_f1 = node_noise[tx1];
-            let noise_a = hx2_6 * d2x_noise[tx0];
-            let noise_b = hx2_6 * d2x_noise[tx1];
 
             simd::interpolate_segment_cubic_simd(
                 bg_segment,
                 noise_segment,
-                bg_f0,
-                bg_f1,
-                bg_a,
-                bg_b,
-                noise_f0,
-                noise_f1,
-                noise_a,
-                noise_b,
-                tx_start,
-                tx_step,
+                SplineSegment {
+                    f0: node_bg[tx0],
+                    f1: node_bg[tx1],
+                    a: hx2_6 * d2x_bg[tx0],
+                    b: hx2_6 * d2x_bg[tx1],
+                },
+                SplineSegment {
+                    f0: node_noise[tx0],
+                    f1: node_noise[tx1],
+                    a: hx2_6 * d2x_noise[tx0],
+                    b: hx2_6 * d2x_noise[tx1],
+                },
+                SegmentRamp {
+                    start: (x as f32 - cx0) * inv_hx,
+                    step: inv_hx,
+                },
             );
         } else {
             // Single tile column — constant fill

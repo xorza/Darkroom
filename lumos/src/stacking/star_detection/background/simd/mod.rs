@@ -8,34 +8,58 @@
 #[cfg(target_arch = "x86_64")]
 use imaginarium::cpu_features;
 
+/// Natural cubic spline coefficients for one channel over a segment between two tile centers.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct SplineSegment {
+    /// Value at the left tile center (t = 0).
+    pub(super) f0: f32,
+    /// Value at the right tile center (t = 1).
+    pub(super) f1: f32,
+    /// Correction term h²/6 · d2 at the left center.
+    pub(super) a: f32,
+    /// Correction term h²/6 · d2 at the right center.
+    pub(super) b: f32,
+}
+
+impl SplineSegment {
+    /// Evaluates f(t) = (1-t)*f0 + t*f1 - t*(1-t)*((2-t)*a + (1+t)*b).
+    ///
+    /// Same polynomial as `background_mesh::spline::cubic_spline_eval`, but takes the
+    /// precomputed `a, b = h²/6·d2` instead of raw second derivatives — keep the two in sync.
+    #[inline]
+    fn eval(self, t: f32) -> f32 {
+        let ct = 1.0 - t;
+        let t_ct = t * ct;
+        ct * self.f0 + t * self.f1 - t_ct * ((2.0 - t) * self.a + (1.0 + t) * self.b)
+    }
+}
+
+/// The spline parameter ramp across a segment: t(i) = `start` + i · `step`.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct SegmentRamp {
+    /// Parameter at the first output pixel (0.0 at the left tile center).
+    pub(super) start: f32,
+    /// Parameter increment per pixel.
+    pub(super) step: f32,
+}
+
+impl SegmentRamp {
+    /// The clamped spline parameter at output pixel `i`.
+    #[inline]
+    fn t_at(self, i: usize) -> f32 {
+        (self.start + i as f32 * self.step).clamp(0.0, 1.0)
+    }
+}
+
 /// Natural cubic spline interpolation for a row segment using SIMD.
 ///
-/// Evaluates f(t) = (1-t)*f0 + t*f1 - t*(1-t)*((2-t)*a + (1+t)*b)
-/// where a = h²/6 * d2[left], b = h²/6 * d2[right].
-///
-/// # Arguments
-/// * `bg_out` / `noise_out` - Output slices (same length)
-/// * `bg_f0`, `bg_f1` - Background values at left/right tile centers
-/// * `bg_a`, `bg_b` - Background spline correction terms
-/// * `noise_f0`, `noise_f1` - Noise values at left/right tile centers
-/// * `noise_a`, `noise_b` - Noise spline correction terms
-/// * `tx_start` - Starting t parameter (0.0 at left center)
-/// * `tx_step` - t increment per pixel
-#[allow(clippy::too_many_arguments)]
-#[inline]
-pub(crate) fn interpolate_segment_cubic_simd(
+/// `bg_out` and `noise_out` are the output slices, which must have the same length.
+pub(super) fn interpolate_segment_cubic_simd(
     bg_out: &mut [f32],
     noise_out: &mut [f32],
-    bg_f0: f32,
-    bg_f1: f32,
-    bg_a: f32,
-    bg_b: f32,
-    noise_f0: f32,
-    noise_f1: f32,
-    noise_a: f32,
-    noise_b: f32,
-    tx_start: f32,
-    tx_step: f32,
+    bg: SplineSegment,
+    noise: SplineSegment,
+    ramp: SegmentRamp,
 ) {
     // Release assert, not debug: every SIMD backend below derives its store bound solely from
     // bg_out.len() and writes into noise_out using that same bound — a length mismatch would be
@@ -46,19 +70,13 @@ pub(crate) fn interpolate_segment_cubic_simd(
     {
         if cpu_features::has_avx2_fma() {
             unsafe {
-                interpolate_segment_cubic_avx2(
-                    bg_out, noise_out, bg_f0, bg_f1, bg_a, bg_b, noise_f0, noise_f1, noise_a,
-                    noise_b, tx_start, tx_step,
-                );
+                interpolate_segment_cubic_avx2(bg_out, noise_out, bg, noise, ramp);
             }
             return;
         }
         if cpu_features::has_sse4_1() {
             unsafe {
-                interpolate_segment_cubic_sse(
-                    bg_out, noise_out, bg_f0, bg_f1, bg_a, bg_b, noise_f0, noise_f1, noise_a,
-                    noise_b, tx_start, tx_step,
-                );
+                interpolate_segment_cubic_sse(bg_out, noise_out, bg, noise, ramp);
             }
             return;
         }
@@ -67,106 +85,69 @@ pub(crate) fn interpolate_segment_cubic_simd(
     #[cfg(target_arch = "aarch64")]
     {
         unsafe {
-            interpolate_segment_cubic_neon(
-                bg_out, noise_out, bg_f0, bg_f1, bg_a, bg_b, noise_f0, noise_f1, noise_a, noise_b,
-                tx_start, tx_step,
-            );
+            interpolate_segment_cubic_neon(bg_out, noise_out, bg, noise, ramp);
         }
         return;
     }
 
     // Scalar fallback
     #[allow(unreachable_code)]
-    interpolate_segment_cubic_scalar(
-        bg_out, noise_out, bg_f0, bg_f1, bg_a, bg_b, noise_f0, noise_f1, noise_a, noise_b,
-        tx_start, tx_step,
-    );
-}
-
-/// Evaluate cubic spline for a single value.
-///
-/// f(t) = (1-t)*f0 + t*f1 - t*(1-t)*((2-t)*a + (1+t)*b)
-///
-/// Same polynomial as `tile_grid::cubic_spline_eval`, but takes the precomputed
-/// `a, b = h²/6·d2` instead of raw second derivatives — keep the two in sync.
-#[inline]
-fn cubic_eval(f0: f32, f1: f32, a: f32, b: f32, t: f32) -> f32 {
-    let ct = 1.0 - t;
-    let t_ct = t * ct;
-    ct * f0 + t * f1 - t_ct * ((2.0 - t) * a + (1.0 + t) * b)
+    interpolate_segment_cubic_scalar(bg_out, noise_out, bg, noise, ramp);
 }
 
 /// Scalar implementation of cubic spline segment interpolation.
-#[allow(clippy::too_many_arguments)]
 #[inline]
 fn interpolate_segment_cubic_scalar(
     bg_out: &mut [f32],
     noise_out: &mut [f32],
-    bg_f0: f32,
-    bg_f1: f32,
-    bg_a: f32,
-    bg_b: f32,
-    noise_f0: f32,
-    noise_f1: f32,
-    noise_a: f32,
-    noise_b: f32,
-    tx_start: f32,
-    tx_step: f32,
+    bg: SplineSegment,
+    noise: SplineSegment,
+    ramp: SegmentRamp,
 ) {
-    for (i, (bg, noise)) in bg_out.iter_mut().zip(noise_out.iter_mut()).enumerate() {
-        let t = (tx_start + i as f32 * tx_step).clamp(0.0, 1.0);
-        *bg = cubic_eval(bg_f0, bg_f1, bg_a, bg_b, t);
-        *noise = cubic_eval(noise_f0, noise_f1, noise_a, noise_b, t);
+    for (i, (bg_px, noise_px)) in bg_out.iter_mut().zip(noise_out.iter_mut()).enumerate() {
+        let t = ramp.t_at(i);
+        *bg_px = bg.eval(t);
+        *noise_px = noise.eval(t);
     }
 }
 
 /// Evaluate cubic spline for 8 values using AVX2+FMA.
-///
-/// f(t) = (1-t)*f0 + t*f1 - t*(1-t)*((2-t)*a + (1+t)*b)
 #[cfg(target_arch = "x86_64")]
-#[allow(clippy::too_many_arguments)]
 #[target_feature(enable = "avx2,fma")]
 unsafe fn interpolate_segment_cubic_avx2(
     bg_out: &mut [f32],
     noise_out: &mut [f32],
-    bg_f0: f32,
-    bg_f1: f32,
-    bg_a: f32,
-    bg_b: f32,
-    noise_f0: f32,
-    noise_f1: f32,
-    noise_a: f32,
-    noise_b: f32,
-    tx_start: f32,
-    tx_step: f32,
+    bg: SplineSegment,
+    noise: SplineSegment,
+    ramp: SegmentRamp,
 ) {
     use std::arch::x86_64::*;
 
     let len = bg_out.len();
 
     unsafe {
-        let bg_f0_v = _mm256_set1_ps(bg_f0);
-        let bg_f1_v = _mm256_set1_ps(bg_f1);
-        let bg_a_v = _mm256_set1_ps(bg_a);
-        let bg_b_v = _mm256_set1_ps(bg_b);
-        let noise_f0_v = _mm256_set1_ps(noise_f0);
-        let noise_f1_v = _mm256_set1_ps(noise_f1);
-        let noise_a_v = _mm256_set1_ps(noise_a);
-        let noise_b_v = _mm256_set1_ps(noise_b);
+        let bg_f0_v = _mm256_set1_ps(bg.f0);
+        let bg_f1_v = _mm256_set1_ps(bg.f1);
+        let bg_a_v = _mm256_set1_ps(bg.a);
+        let bg_b_v = _mm256_set1_ps(bg.b);
+        let noise_f0_v = _mm256_set1_ps(noise.f0);
+        let noise_f1_v = _mm256_set1_ps(noise.f1);
+        let noise_a_v = _mm256_set1_ps(noise.a);
+        let noise_b_v = _mm256_set1_ps(noise.b);
         let one = _mm256_set1_ps(1.0);
         let two = _mm256_set1_ps(2.0);
         let zero = _mm256_setzero_ps();
-        let step8 = _mm256_set1_ps(tx_step * 8.0);
+        let step8 = _mm256_set1_ps(ramp.step * 8.0);
 
         let mut t_v = _mm256_set_ps(
-            tx_start + 7.0 * tx_step,
-            tx_start + 6.0 * tx_step,
-            tx_start + 5.0 * tx_step,
-            tx_start + 4.0 * tx_step,
-            tx_start + 3.0 * tx_step,
-            tx_start + 2.0 * tx_step,
-            tx_start + tx_step,
-            tx_start,
+            ramp.start + 7.0 * ramp.step,
+            ramp.start + 6.0 * ramp.step,
+            ramp.start + 5.0 * ramp.step,
+            ramp.start + 4.0 * ramp.step,
+            ramp.start + 3.0 * ramp.step,
+            ramp.start + 2.0 * ramp.step,
+            ramp.start + ramp.step,
+            ramp.start,
         );
 
         let mut i = 0;
@@ -197,22 +178,27 @@ unsafe fn interpolate_segment_cubic_avx2(
 
         // SSE remainder (4 at a time)
         if i + 4 <= len {
-            let bg_f0_4 = _mm_set1_ps(bg_f0);
-            let bg_f1_4 = _mm_set1_ps(bg_f1);
-            let bg_a_4 = _mm_set1_ps(bg_a);
-            let bg_b_4 = _mm_set1_ps(bg_b);
-            let noise_f0_4 = _mm_set1_ps(noise_f0);
-            let noise_f1_4 = _mm_set1_ps(noise_f1);
-            let noise_a_4 = _mm_set1_ps(noise_a);
-            let noise_b_4 = _mm_set1_ps(noise_b);
+            let bg_f0_4 = _mm_set1_ps(bg.f0);
+            let bg_f1_4 = _mm_set1_ps(bg.f1);
+            let bg_a_4 = _mm_set1_ps(bg.a);
+            let bg_b_4 = _mm_set1_ps(bg.b);
+            let noise_f0_4 = _mm_set1_ps(noise.f0);
+            let noise_f1_4 = _mm_set1_ps(noise.f1);
+            let noise_a_4 = _mm_set1_ps(noise.a);
+            let noise_b_4 = _mm_set1_ps(noise.b);
             let one4 = _mm_set1_ps(1.0);
             let two4 = _mm_set1_ps(2.0);
             let zero4 = _mm_setzero_ps();
 
-            let cur = tx_start + i as f32 * tx_step;
+            let cur = ramp.start + i as f32 * ramp.step;
             let t4 = _mm_min_ps(
                 _mm_max_ps(
-                    _mm_set_ps(cur + 3.0 * tx_step, cur + 2.0 * tx_step, cur + tx_step, cur),
+                    _mm_set_ps(
+                        cur + 3.0 * ramp.step,
+                        cur + 2.0 * ramp.step,
+                        cur + ramp.step,
+                        cur,
+                    ),
                     zero4,
                 ),
                 one4,
@@ -236,9 +222,9 @@ unsafe fn interpolate_segment_cubic_avx2(
 
         // Scalar remainder
         while i < len {
-            let t = (tx_start + i as f32 * tx_step).clamp(0.0, 1.0);
-            bg_out[i] = cubic_eval(bg_f0, bg_f1, bg_a, bg_b, t);
-            noise_out[i] = cubic_eval(noise_f0, noise_f1, noise_a, noise_b, t);
+            let t = ramp.t_at(i);
+            bg_out[i] = bg.eval(t);
+            noise_out[i] = noise.eval(t);
             i += 1;
         }
     }
@@ -246,45 +232,37 @@ unsafe fn interpolate_segment_cubic_avx2(
 
 /// Evaluate cubic spline for 4 values using SSE4.1.
 #[cfg(target_arch = "x86_64")]
-#[allow(clippy::too_many_arguments)]
 #[target_feature(enable = "sse4.1")]
 unsafe fn interpolate_segment_cubic_sse(
     bg_out: &mut [f32],
     noise_out: &mut [f32],
-    bg_f0: f32,
-    bg_f1: f32,
-    bg_a: f32,
-    bg_b: f32,
-    noise_f0: f32,
-    noise_f1: f32,
-    noise_a: f32,
-    noise_b: f32,
-    tx_start: f32,
-    tx_step: f32,
+    bg: SplineSegment,
+    noise: SplineSegment,
+    ramp: SegmentRamp,
 ) {
     use std::arch::x86_64::*;
 
     let len = bg_out.len();
 
     unsafe {
-        let bg_f0_v = _mm_set1_ps(bg_f0);
-        let bg_f1_v = _mm_set1_ps(bg_f1);
-        let bg_a_v = _mm_set1_ps(bg_a);
-        let bg_b_v = _mm_set1_ps(bg_b);
-        let noise_f0_v = _mm_set1_ps(noise_f0);
-        let noise_f1_v = _mm_set1_ps(noise_f1);
-        let noise_a_v = _mm_set1_ps(noise_a);
-        let noise_b_v = _mm_set1_ps(noise_b);
+        let bg_f0_v = _mm_set1_ps(bg.f0);
+        let bg_f1_v = _mm_set1_ps(bg.f1);
+        let bg_a_v = _mm_set1_ps(bg.a);
+        let bg_b_v = _mm_set1_ps(bg.b);
+        let noise_f0_v = _mm_set1_ps(noise.f0);
+        let noise_f1_v = _mm_set1_ps(noise.f1);
+        let noise_a_v = _mm_set1_ps(noise.a);
+        let noise_b_v = _mm_set1_ps(noise.b);
         let one = _mm_set1_ps(1.0);
         let two = _mm_set1_ps(2.0);
         let zero = _mm_setzero_ps();
-        let step4 = _mm_set1_ps(tx_step * 4.0);
+        let step4 = _mm_set1_ps(ramp.step * 4.0);
 
         let mut t_v = _mm_set_ps(
-            tx_start + 3.0 * tx_step,
-            tx_start + 2.0 * tx_step,
-            tx_start + tx_step,
-            tx_start,
+            ramp.start + 3.0 * ramp.step,
+            ramp.start + 2.0 * ramp.step,
+            ramp.start + ramp.step,
+            ramp.start,
         );
 
         let mut i = 0;
@@ -319,9 +297,9 @@ unsafe fn interpolate_segment_cubic_sse(
 
         // Scalar remainder
         while i < len {
-            let t = (tx_start + i as f32 * tx_step).clamp(0.0, 1.0);
-            bg_out[i] = cubic_eval(bg_f0, bg_f1, bg_a, bg_b, t);
-            noise_out[i] = cubic_eval(noise_f0, noise_f1, noise_a, noise_b, t);
+            let t = ramp.t_at(i);
+            bg_out[i] = bg.eval(t);
+            noise_out[i] = noise.eval(t);
             i += 1;
         }
     }
@@ -329,41 +307,33 @@ unsafe fn interpolate_segment_cubic_sse(
 
 /// Evaluate cubic spline for 4 values using NEON.
 #[cfg(target_arch = "aarch64")]
-#[allow(clippy::too_many_arguments)]
 unsafe fn interpolate_segment_cubic_neon(
     bg_out: &mut [f32],
     noise_out: &mut [f32],
-    bg_f0: f32,
-    bg_f1: f32,
-    bg_a: f32,
-    bg_b: f32,
-    noise_f0: f32,
-    noise_f1: f32,
-    noise_a: f32,
-    noise_b: f32,
-    tx_start: f32,
-    tx_step: f32,
+    bg: SplineSegment,
+    noise: SplineSegment,
+    ramp: SegmentRamp,
 ) {
     use std::arch::aarch64::*;
 
     let len = bg_out.len();
 
     unsafe {
-        let bg_f0_v = vdupq_n_f32(bg_f0);
-        let bg_f1_v = vdupq_n_f32(bg_f1);
-        let bg_a_v = vdupq_n_f32(bg_a);
-        let bg_b_v = vdupq_n_f32(bg_b);
-        let noise_f0_v = vdupq_n_f32(noise_f0);
-        let noise_f1_v = vdupq_n_f32(noise_f1);
-        let noise_a_v = vdupq_n_f32(noise_a);
-        let noise_b_v = vdupq_n_f32(noise_b);
+        let bg_f0_v = vdupq_n_f32(bg.f0);
+        let bg_f1_v = vdupq_n_f32(bg.f1);
+        let bg_a_v = vdupq_n_f32(bg.a);
+        let bg_b_v = vdupq_n_f32(bg.b);
+        let noise_f0_v = vdupq_n_f32(noise.f0);
+        let noise_f1_v = vdupq_n_f32(noise.f1);
+        let noise_a_v = vdupq_n_f32(noise.a);
+        let noise_b_v = vdupq_n_f32(noise.b);
         let one = vdupq_n_f32(1.0);
         let two = vdupq_n_f32(2.0);
         let zero = vdupq_n_f32(0.0);
-        let step4 = vdupq_n_f32(tx_step * 4.0);
+        let step4 = vdupq_n_f32(ramp.step * 4.0);
 
-        let offsets: [f32; 4] = [0.0, tx_step, 2.0 * tx_step, 3.0 * tx_step];
-        let mut t_v = vaddq_f32(vdupq_n_f32(tx_start), vld1q_f32(offsets.as_ptr()));
+        let offsets: [f32; 4] = [0.0, ramp.step, 2.0 * ramp.step, 3.0 * ramp.step];
+        let mut t_v = vaddq_f32(vdupq_n_f32(ramp.start), vld1q_f32(offsets.as_ptr()));
 
         let mut i = 0;
         while i + 4 <= len {
@@ -391,9 +361,9 @@ unsafe fn interpolate_segment_cubic_neon(
 
         // Scalar remainder
         while i < len {
-            let t = (tx_start + i as f32 * tx_step).clamp(0.0, 1.0);
-            bg_out[i] = cubic_eval(bg_f0, bg_f1, bg_a, bg_b, t);
-            noise_out[i] = cubic_eval(noise_f0, noise_f1, noise_a, noise_b, t);
+            let t = ramp.t_at(i);
+            bg_out[i] = bg.eval(t);
+            noise_out[i] = noise.eval(t);
             i += 1;
         }
     }
@@ -412,12 +382,43 @@ mod tests {
         let mut bg = vec![0.0f32; 8];
         let mut noise = vec![0.0f32; 4];
         interpolate_segment_cubic_simd(
-            &mut bg, &mut noise, 100.0, 200.0, -5.0, 3.0, 5.0, 10.0, -0.5, 0.3, 0.0, 0.1,
+            &mut bg,
+            &mut noise,
+            SplineSegment {
+                f0: 100.0,
+                f1: 200.0,
+                a: -5.0,
+                b: 3.0,
+            },
+            SplineSegment {
+                f0: 5.0,
+                f1: 10.0,
+                a: -0.5,
+                b: 0.3,
+            },
+            SegmentRamp {
+                start: 0.0,
+                step: 0.1,
+            },
         );
     }
 
     #[test]
     fn test_cubic_segment_simd_matches_scalar() {
+        // Non-trivial spline parameters: a = h²/6 * d2_left, b = h²/6 * d2_right
+        let bg = SplineSegment {
+            f0: 100.0,
+            f1: 200.0,
+            a: -5.0,
+            b: 3.0,
+        };
+        let noise = SplineSegment {
+            f0: 5.0,
+            f1: 10.0,
+            a: -0.5,
+            b: 0.3,
+        };
+
         // Test various segment lengths including SIMD boundary cases
         for len in [1, 3, 4, 7, 8, 15, 16, 31, 64, 100] {
             let mut bg_simd = vec![0.0f32; len];
@@ -425,47 +426,13 @@ mod tests {
             let mut bg_scalar = vec![0.0f32; len];
             let mut noise_scalar = vec![0.0f32; len];
 
-            // Non-trivial spline parameters
-            let bg_f0 = 100.0;
-            let bg_f1 = 200.0;
-            let bg_a = -5.0; // = -h²/6 * d2_left
-            let bg_b = 3.0; // = -h²/6 * d2_right
-            let noise_f0 = 5.0;
-            let noise_f1 = 10.0;
-            let noise_a = -0.5;
-            let noise_b = 0.3;
-            let tx_start = 0.1;
-            let tx_step = 0.8 / len as f32;
+            let ramp = SegmentRamp {
+                start: 0.1,
+                step: 0.8 / len as f32,
+            };
 
-            interpolate_segment_cubic_simd(
-                &mut bg_simd,
-                &mut noise_simd,
-                bg_f0,
-                bg_f1,
-                bg_a,
-                bg_b,
-                noise_f0,
-                noise_f1,
-                noise_a,
-                noise_b,
-                tx_start,
-                tx_step,
-            );
-
-            interpolate_segment_cubic_scalar(
-                &mut bg_scalar,
-                &mut noise_scalar,
-                bg_f0,
-                bg_f1,
-                bg_a,
-                bg_b,
-                noise_f0,
-                noise_f1,
-                noise_a,
-                noise_b,
-                tx_start,
-                tx_step,
-            );
+            interpolate_segment_cubic_simd(&mut bg_simd, &mut noise_simd, bg, noise, ramp);
+            interpolate_segment_cubic_scalar(&mut bg_scalar, &mut noise_scalar, bg, noise, ramp);
 
             for i in 0..len {
                 assert!(
@@ -497,7 +464,24 @@ mod tests {
 
         // t=0 for first pixel, t=1 for second pixel
         interpolate_segment_cubic_simd(
-            &mut bg, &mut noise, 100.0, 200.0, -10.0, 7.0, 5.0, 15.0, -1.0, 0.5, 0.0, 1.0,
+            &mut bg,
+            &mut noise,
+            SplineSegment {
+                f0: 100.0,
+                f1: 200.0,
+                a: -10.0,
+                b: 7.0,
+            },
+            SplineSegment {
+                f0: 5.0,
+                f1: 15.0,
+                a: -1.0,
+                b: 0.5,
+            },
+            SegmentRamp {
+                start: 0.0,
+                step: 1.0,
+            },
         );
 
         // f(0) = 1*100 + 0*200 + 0*1*(1*a + 0*b) = 100
@@ -532,13 +516,26 @@ mod tests {
         let mut bg = vec![0.0f32; 1];
         let mut noise = vec![0.0f32; 1];
 
-        let f0 = 100.0;
-        let f1 = 200.0;
-        let a = -8.0;
-        let b = 16.0;
         // Expected: (100+200)/2 - 0.375*(-8+16) = 150 - 3 = 147
         interpolate_segment_cubic_simd(
-            &mut bg, &mut noise, f0, f1, a, b, 0.0, 0.0, 0.0, 0.0, 0.5, 1.0,
+            &mut bg,
+            &mut noise,
+            SplineSegment {
+                f0: 100.0,
+                f1: 200.0,
+                a: -8.0,
+                b: 16.0,
+            },
+            SplineSegment {
+                f0: 0.0,
+                f1: 0.0,
+                a: 0.0,
+                b: 0.0,
+            },
+            SegmentRamp {
+                start: 0.5,
+                step: 1.0,
+            },
         );
 
         assert!(
@@ -556,14 +553,31 @@ mod tests {
 
         let f0 = 100.0;
         let f1 = 200.0;
-        let tx_step = 1.0 / 49.0;
+        let ramp = SegmentRamp {
+            start: 0.0,
+            step: 1.0 / 49.0,
+        };
 
         interpolate_segment_cubic_simd(
-            &mut bg, &mut noise, f0, f1, 0.0, 0.0, 5.0, 10.0, 0.0, 0.0, 0.0, tx_step,
+            &mut bg,
+            &mut noise,
+            SplineSegment {
+                f0,
+                f1,
+                a: 0.0,
+                b: 0.0,
+            },
+            SplineSegment {
+                f0: 5.0,
+                f1: 10.0,
+                a: 0.0,
+                b: 0.0,
+            },
+            ramp,
         );
 
         for (i, &b) in bg.iter().enumerate() {
-            let t = (i as f32 * tx_step).clamp(0.0, 1.0);
+            let t = (i as f32 * ramp.step).clamp(0.0, 1.0);
             let expected = (1.0 - t) * f0 + t * f1;
             assert!(
                 (b - expected).abs() < 1e-3,
@@ -583,7 +597,24 @@ mod tests {
 
         // tx_start = -0.5, step = 0.2 → t goes from -0.5 to 1.3
         interpolate_segment_cubic_simd(
-            &mut bg, &mut noise, 100.0, 200.0, -5.0, 3.0, 5.0, 10.0, -0.5, 0.3, -0.5, 0.2,
+            &mut bg,
+            &mut noise,
+            SplineSegment {
+                f0: 100.0,
+                f1: 200.0,
+                a: -5.0,
+                b: 3.0,
+            },
+            SplineSegment {
+                f0: 5.0,
+                f1: 10.0,
+                a: -0.5,
+                b: 0.3,
+            },
+            SegmentRamp {
+                start: -0.5,
+                step: 0.2,
+            },
         );
 
         // First element: t = -0.5 clamped to 0 → bg = f0 = 100
