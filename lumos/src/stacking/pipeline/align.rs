@@ -42,7 +42,7 @@ pub fn align_and_stack(
     if lights.is_empty() {
         return Err(Error::NoFrames);
     }
-    config.detection.validate()?;
+    config.validate()?;
 
     let total = lights.len();
     // The inputs are already decoded and resident, so only the warped outputs and the per-frame

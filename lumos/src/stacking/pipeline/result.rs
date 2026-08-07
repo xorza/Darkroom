@@ -6,6 +6,7 @@ use crate::io::image::error::ImageError;
 use crate::stacking::calibration_masters::CalibrationError;
 use crate::stacking::combine::error::Error as StackError;
 use crate::stacking::product::StackProduct;
+use crate::stacking::registration::result::RegistrationError;
 use crate::stacking::star_detection::error::StarDetectionConfigError;
 
 /// Registration bookkeeping for an aligned stack.
@@ -71,6 +72,11 @@ pub enum Error {
     Calibration(#[from] CalibrationError),
     #[error(transparent)]
     DetectionConfig(#[from] StarDetectionConfigError),
+    /// Constructed only from [`crate::RegistrationConfig::validate`], never from a registration
+    /// that ran and failed — those are frame-level outcomes, reported through
+    /// [`AlignmentSummary::dropped`].
+    #[error("invalid registration configuration: {0}")]
+    RegistrationConfig(RegistrationError),
     #[error(transparent)]
     Stack(#[from] StackError),
 }

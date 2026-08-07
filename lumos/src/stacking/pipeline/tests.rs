@@ -9,14 +9,16 @@ use crate::io::image::cfa::CfaType;
 use crate::io::image::fits::cfa::save_cfa_fits;
 use crate::io::image::linear::LinearImage;
 use crate::stacking::calibration_masters::CalibrationMasters;
-use crate::stacking::combine::error::Error as StackError;
+use crate::stacking::combine::config::{CombineMethod, StackConfig};
+use crate::stacking::combine::error::{Error as StackError, StackConfigError};
+use crate::stacking::combine::rejection::Rejection;
 use crate::stacking::pipeline::align::align_and_stack;
 use crate::stacking::pipeline::calibrate::calibrate_align_stack;
 use crate::stacking::pipeline::config::{AlignStackConfig, Reference};
 use crate::stacking::pipeline::result::Error;
 use crate::stacking::registration::config::Config as RegistrationConfig;
 use crate::stacking::registration::resample::warp;
-use crate::stacking::registration::transform::{Transform, WarpTransform};
+use crate::stacking::registration::transform::{Transform, TransformType, WarpTransform};
 use crate::stacking::star_detection::config::Config as StarDetectionConfig;
 use crate::stacking::star_detection::detector::StarDetector;
 use crate::stacking::star_detection::error::StarDetectionConfigError;
@@ -186,6 +188,71 @@ fn mismatched_frame_dimensions_are_rejected_before_registration() {
     assert_eq!(index, 1);
     assert_eq!(expected, ImageDimensions::new((256, 256), 1));
     assert_eq!(actual, ImageDimensions::new((128, 128), 1));
+}
+
+#[test]
+fn an_invalid_registration_config_is_reported_as_one() {
+    // `register` returns the same error type for "this config is invalid" and "these two
+    // catalogs did not match", and the pipeline reads the latter as a frame to drop — so before
+    // the config was validated up front, a bad registration config made every frame "fail to
+    // register" and surfaced as `AllFramesDropped`, blaming the data.
+    let BaseField {
+        image: base,
+        registration: reg,
+    } = base_field();
+    let frames = vec![
+        base.clone(),
+        shifted(&base, &reg, 5.0, 3.0),
+        shifted(&base, &reg, -4.0, 6.0),
+    ];
+
+    let mut config = AlignStackConfig {
+        reference: Reference::Index(0),
+        ..Default::default()
+    };
+    // Homography needs four points, so a three-match floor can never be satisfied.
+    config.registration.transform_type = TransformType::Homography;
+    config.registration.matching.min_matches = 3;
+    assert!(
+        config.registration.validate().is_err(),
+        "premise: this registration config must be invalid"
+    );
+
+    let error = align_and_stack(frames, &config, CancelToken::never()).unwrap_err();
+    assert!(
+        matches!(error, Error::RegistrationConfig(_)),
+        "expected the config to be blamed, got {error:?}"
+    );
+}
+
+#[test]
+fn an_invalid_stack_config_is_caught_before_the_frames_are_worked() {
+    // The combine validates its own config, but only after every frame has been decoded,
+    // detected, registered and warped — so a run whose frames also fail to register would
+    // report `AllFramesDropped` and never mention the config at all. Validating up front means
+    // the config is blamed, and nothing upstream is paid for.
+    let BaseField { image: base, .. } = base_field();
+    let dims = base.dimensions();
+    let blank = || LinearImage::from_pixels(dims, vec![0.1; dims.pixel_count()]);
+    let frames = vec![base, blank(), blank()];
+
+    let config = AlignStackConfig {
+        reference: Reference::Index(0),
+        stack: StackConfig {
+            method: CombineMethod::Mean(Rejection::sigma_clip(f32::NAN)),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+
+    let error = align_and_stack(frames, &config, CancelToken::never()).unwrap_err();
+    assert!(
+        matches!(
+            error,
+            Error::Stack(StackError::Config(StackConfigError::InvalidSigmaLow { .. }))
+        ),
+        "expected the stack config to be blamed rather than the frames, got {error:?}"
+    );
 }
 
 #[test]

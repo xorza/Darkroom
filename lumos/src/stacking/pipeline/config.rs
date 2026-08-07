@@ -2,6 +2,7 @@
 
 use crate::stacking::calibration_masters::cosmic_ray::CosmicRayConfig;
 use crate::stacking::combine::config::StackConfig;
+use crate::stacking::pipeline::result::Error;
 use crate::stacking::registration::config::Config as RegistrationConfig;
 use crate::stacking::star_detection::config::Config as StarDetectionConfig;
 
@@ -24,4 +25,24 @@ pub struct AlignStackConfig {
     pub reference: Reference,
     /// Optional single-frame cosmic-ray rejection after calibration and before demosaic.
     pub cosmic_ray: Option<CosmicRayConfig>,
+}
+
+impl AlignStackConfig {
+    /// Validate every stage's configuration.
+    ///
+    /// Each stage validates its own config where it runs, but by then the run has paid for
+    /// everything upstream — and the registration stage cannot report a config problem at all,
+    /// because it returns the same error type for "this config is invalid" and "these two star
+    /// catalogs don't match", and the pipeline reads the latter as a frame to drop. Checking all
+    /// three here means a bad config is reported as one, before any frame is decoded.
+    pub fn validate(&self) -> Result<(), Error> {
+        self.detection.validate()?;
+        self.registration
+            .validate()
+            .map_err(Error::RegistrationConfig)?;
+        self.stack
+            .validate()
+            .map_err(|source| Error::Stack(source.into()))?;
+        Ok(())
+    }
 }
