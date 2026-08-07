@@ -1,13 +1,14 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use common::{SerdeFormat, deserialize, file_utils, serialize};
 use glam::{IVec2, UVec2};
 use palantir::ImageFilter;
 
 use crate::core::theme_pref::ThemeChoice;
+use crate::platform;
 
-/// Preferences file name, resolved beside the running executable. TOML so
-/// it's hand-editable and matches the theme on-disk format.
+/// Preferences file name, resolved inside the platform's configuration
+/// directory. TOML so it's hand-editable and matches the theme on-disk format.
 const PREFERENCES_FILE: &str = "darkroom.preferences.toml";
 
 /// Persisted session state: the theme preference to restore, the
@@ -140,29 +141,27 @@ impl From<&MlModelPreferences> for lens::MlModelPaths {
 }
 
 impl Preferences {
-    /// The preferences file, beside the running executable rather than in the
-    /// working directory — so the same install reads back the same settings
-    /// however it was launched, instead of one file per directory a shell
-    /// happened to be in.
+    /// The preferences file, in the OS's own configuration directory (see
+    /// [`crate::platform::config_dir`]) — so the same user reads back the same
+    /// settings however the editor was launched and wherever it is installed.
     ///
-    /// `current_exe` resolves symlinks, so a launcher symlinked onto `PATH`
-    /// resolves to wherever the real binary sits — for a cargo build, inside
-    /// `target/`, which `cargo clean` removes. `cargo install` puts the real
-    /// binary on `PATH` and settles that.
+    /// Resolving beside the executable instead would tie the file to the
+    /// install location, and every packaged install puts that somewhere the
+    /// user cannot write: the flatpak's `/app/bin` is a read-only mount, a
+    /// `PREFIX=/usr` install needs root, and writing inside a macOS `.app`
+    /// invalidates its code signature.
     ///
-    /// A failure to locate the executable at all leaves the file name bare,
-    /// which resolves against the working directory. Degrading beats
-    /// panicking: everything else here already falls back rather than block
-    /// a launch over settings.
+    /// A platform that can name no home leaves the file name bare, which
+    /// resolves against the working directory. Degrading beats panicking:
+    /// everything else here already falls back rather than block a launch
+    /// over settings.
     fn path() -> PathBuf {
-        std::env::current_exe()
-            .ok()
-            .and_then(|exe| exe.parent().map(Path::to_path_buf))
+        platform::config_dir()
             .unwrap_or_default()
             .join(PREFERENCES_FILE)
     }
 
-    /// Read the preferences from beside the executable. Any failure (missing
+    /// Read the preferences from the configuration directory. Any failure (missing
     /// file, parse error) degrades to the default rather than
     /// blocking startup — a corrupt preferences file shouldn't brick the app.
     pub(crate) fn load() -> Self {
@@ -172,13 +171,24 @@ impl Preferences {
         }
     }
 
-    /// Write the preferences beside the executable. `Err` carries the
+    /// Write the preferences to the configuration directory. `Err` carries the
     /// display-ready reason — the caller surfaces it (status bar); a
     /// failed persist shouldn't interrupt the user's session.
     pub(crate) fn save(&self) -> Result<(), String> {
         let bytes = serialize(self, SerdeFormat::Toml)
             .map_err(|err| format!("preferences save failed: {err}"))?;
-        file_utils::publish_bytes(&Self::path(), &bytes, file_utils::PublicationMode::Durable)
+        let path = Self::path();
+        // Nothing has created the configuration directory on a first run, and
+        // publication needs it to exist to place its temporary file beside the
+        // target. Skipped for the bare-name fallback, whose parent is empty.
+        if let Some(parent) = path
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+        {
+            std::fs::create_dir_all(parent)
+                .map_err(|err| format!("preferences save failed: {err}"))?;
+        }
+        file_utils::publish_bytes(&path, &bytes, file_utils::PublicationMode::Durable)
             .map_err(|err| format!("preferences save failed: {err}"))
     }
 }

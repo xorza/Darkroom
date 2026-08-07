@@ -7,6 +7,8 @@
 //! nothing" and "nobody wrote it yet" — the first is written down, the second
 //! fails to compile.
 
+use std::path::PathBuf;
+
 use crate::gui::HostHandle;
 
 #[cfg(target_os = "linux")]
@@ -35,6 +37,16 @@ use windows as sys;
 /// only one that works, for the reasons in `macos::open_files`.
 pub(crate) fn route_opened_documents(handle: HostHandle) {
     sys::route_opened_documents(handle);
+}
+
+/// Where this OS keeps the editor's configuration, darkroom's own component
+/// included — callers join a file name and nothing else. Naming that component
+/// is per-OS: lowercase under XDG, capitalised on macOS and Windows.
+///
+/// Says where the directory belongs; creating it is the caller's business.
+/// `None` when the environment names no home.
+pub(crate) fn config_dir() -> Option<PathBuf> {
+    sys::config_dir()
 }
 
 /// Open `url` in the user's default browser.

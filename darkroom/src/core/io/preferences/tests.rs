@@ -9,27 +9,27 @@ use crate::core::io::preferences::{
 };
 use crate::core::theme_pref::ThemeChoice;
 
-/// The file sits beside the running executable, not in whatever directory the
-/// process was started from. Asserted against `current_exe` rather than by
-/// changing the working directory, which the rest of the suite shares.
+/// The file sits in the OS's configuration directory — not beside the
+/// executable, which every packaged install puts somewhere unwritable, and not
+/// in whatever directory the process was started from.
 #[test]
-fn the_preferences_file_resolves_beside_the_executable() {
+fn the_preferences_file_resolves_inside_the_platform_config_dir() {
     let path = Preferences::path();
-    let exe = std::env::current_exe().expect("the test binary can locate itself");
+    let config_dir = crate::platform::config_dir().expect("the test host has a home directory");
 
     assert_eq!(
         path.file_name(),
         Some(std::ffi::OsStr::new("darkroom.preferences.toml"))
     );
-    assert_eq!(
-        path.parent(),
-        exe.parent(),
-        "the preferences live in the executable's directory"
-    );
-    // And that directory is a real absolute location, not the empty prefix the
-    // fallback would leave — which is what a working-directory resolution
-    // would look like here.
+    assert_eq!(path.parent(), Some(config_dir.as_path()));
+    // A real absolute location, not the empty prefix the no-home fallback
+    // leaves — which is what a working-directory resolution would look like.
     assert!(path.is_absolute(), "{path:?} is not an absolute path");
+    // The executable's directory is exactly what this no longer tracks: under
+    // cargo that is `target/`, and the flatpak's read-only `/app/bin` is what
+    // made resolving there fail outright.
+    let exe = std::env::current_exe().expect("the test binary can locate itself");
+    assert_ne!(path.parent(), exe.parent());
 }
 
 fn roundtrip(cfg: &Preferences) -> Preferences {
