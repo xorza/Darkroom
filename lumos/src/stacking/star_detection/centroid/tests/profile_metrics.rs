@@ -1,3 +1,4 @@
+use crate::math::size2us::Size2us;
 use crate::stacking::star_detection::centroid::internals::{
     make_elliptical_star as make_elliptical_gaussian, make_moffat_star,
 };

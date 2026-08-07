@@ -11,9 +11,9 @@ use crate::testing::synthetic::scene::{BackgroundField, Scene};
 
 /// A uniform-random field of `num_stars` bright, cleanly-detected stars over a modest sky —
 /// the general-purpose populated field.
-pub(crate) fn star_field(width: usize, height: usize, num_stars: usize, seed: u64) -> SimFrame {
+pub(crate) fn star_field(size: Size2us, num_stars: usize, seed: u64) -> SimFrame {
     let scene = Scene::random_field(
-        Size2us::new(width, height),
+        size,
         num_stars,
         (6.0, 16.0),
         BackgroundField::Uniform { level: 0.1 },
@@ -29,9 +29,9 @@ pub(crate) fn star_field(width: usize, height: usize, num_stars: usize, seed: u6
 
 /// A crowded central cluster of `num_stars` with heavy blending over a dark sky — for
 /// deblend, labeling, and crowded-detection stress.
-pub(crate) fn cluster_field(width: usize, height: usize, num_stars: usize, seed: u64) -> SimFrame {
+pub(crate) fn cluster_field(size: Size2us, num_stars: usize, seed: u64) -> SimFrame {
     let scene = Scene::cluster(
-        Size2us::new(width, height),
+        size,
         num_stars,
         (5.0, 20.0),
         BackgroundField::Uniform { level: 0.05 },
@@ -62,7 +62,7 @@ mod tests {
 
     #[test]
     fn star_field_has_requested_sources_and_signal() {
-        let frame = star_field(128, 128, 30, 1);
+        let frame = star_field(Size2us::new(128, 128), 30, 1);
         assert_eq!(frame.truth.sources.len(), 30);
         assert_eq!(frame.image.channel(0).pixels().len(), 128 * 128);
         // Bright stars on a 0.1 sky: mean above background, a clear peak.
@@ -80,7 +80,7 @@ mod tests {
 
     #[test]
     fn cluster_field_is_denser_at_center() {
-        let frame = cluster_field(200, 200, 400, 2);
+        let frame = cluster_field(Size2us::new(200, 200), 400, 2);
         assert_eq!(frame.truth.sources.len(), 400);
         let px = frame.image.channel(0);
         // Central 40×40 carries much more flux than a corner 40×40.

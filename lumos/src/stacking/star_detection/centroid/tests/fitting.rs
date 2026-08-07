@@ -1,3 +1,4 @@
+use crate::math::size2us::Size2us;
 use crate::stacking::star_detection::centroid::tests::*;
 
 /// Test that weighted centroid achieves claimed ~0.05 pixel accuracy

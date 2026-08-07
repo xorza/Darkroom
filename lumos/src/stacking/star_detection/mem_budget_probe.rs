@@ -37,6 +37,7 @@
 //! Linux; elsewhere the run still exercises the pipeline but the measurement is reported as
 //! unavailable and the assertion is skipped.
 
+use crate::math::size2us::Size2us;
 use std::io::{self, Write};
 use std::time::Instant;
 
@@ -104,7 +105,7 @@ fn detect_memory_probe() {
     // resident-set contribution to peak heap is `ring` frames — independent of `n`.
     let gen_start = Instant::now();
     let frames: Vec<LinearImage> = (0..ring)
-        .map(|i| star_field(width, height, stars, seed ^ i as u64).image)
+        .map(|i| star_field(Size2us::new(width, height), stars, seed ^ i as u64).image)
         .collect();
     let channels = frames[0].channels() as u64;
     let resident_bytes = ring as u64 * channels * plane_bytes;

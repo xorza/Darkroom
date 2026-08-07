@@ -1,3 +1,4 @@
+use crate::math::size2us::Size2us;
 use crate::stacking::star_detection::centroid::tests::*;
 
 #[test]

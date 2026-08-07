@@ -67,7 +67,7 @@ fn create_components_from_pixels(
 
 #[quick_bench(warmup_iters = 1, iters = 3)]
 fn bench_deblend_multi_threshold_6k_dense(b: ::quickbench::Bencher) {
-    let pixels = cluster_field(6144, 6144, 50000, 42)
+    let pixels = cluster_field(Size2us::new(6144, 6144), 50000, 42)
         .image
         .channel(0)
         .clone();
@@ -100,7 +100,7 @@ fn bench_deblend_multi_threshold_6k_dense(b: ::quickbench::Bencher) {
 
 #[quick_bench(warmup_iters = 1, iters = 3)]
 fn bench_deblend_multi_threshold_6k_dense_fewer_levels(b: ::quickbench::Bencher) {
-    let pixels = cluster_field(6144, 6144, 50000, 42)
+    let pixels = cluster_field(Size2us::new(6144, 6144), 50000, 42)
         .image
         .channel(0)
         .clone();
@@ -136,7 +136,7 @@ fn bench_deblend_multi_threshold_6k_dense_fewer_levels(b: ::quickbench::Bencher)
 
 #[quick_bench(warmup_iters = 1, iters = 3)]
 fn bench_multi_threshold_4k_dense(b: ::quickbench::Bencher) {
-    let pixels = cluster_field(4096, 4096, 20000, 42)
+    let pixels = cluster_field(Size2us::new(4096, 4096), 20000, 42)
         .image
         .channel(0)
         .clone();

@@ -42,7 +42,10 @@ fn create_detection_mask(pixels: &Buffer2<f32>, sigma_threshold: f32) -> BitBuff
 fn bench_label_map_from_buffer_1k(b: ::quickbench::Bencher) {
     use crate::stacking::star_detection::labeling::label_mask_parallel;
 
-    let pixels = star_field(1024, 1024, 500, 42).image.channel(0).clone();
+    let pixels = star_field(Size2us::new(1024, 1024), 500, 42)
+        .image
+        .channel(0)
+        .clone();
     let mask = create_detection_mask(&pixels, 4.0);
     let mut labels = Buffer2::new_filled(1024, 1024, 0u32);
 
@@ -60,7 +63,10 @@ fn bench_label_map_from_buffer_1k(b: ::quickbench::Bencher) {
 fn bench_label_map_from_buffer_4k(b: ::quickbench::Bencher) {
     use crate::stacking::star_detection::labeling::label_mask_parallel;
 
-    let pixels = star_field(4096, 4096, 2000, 42).image.channel(0).clone();
+    let pixels = star_field(Size2us::new(4096, 4096), 2000, 42)
+        .image
+        .channel(0)
+        .clone();
     let mask = create_detection_mask(&pixels, 4.0);
     let mut labels = Buffer2::new_filled(4096, 4096, 0u32);
 
@@ -78,7 +84,10 @@ fn bench_label_map_from_buffer_4k(b: ::quickbench::Bencher) {
 fn bench_label_map_from_buffer_4k_globular(b: ::quickbench::Bencher) {
     use crate::stacking::star_detection::labeling::label_mask_parallel;
 
-    let pixels = star_field(4096, 4096, 50000, 42).image.channel(0).clone();
+    let pixels = star_field(Size2us::new(4096, 4096), 50000, 42)
+        .image
+        .channel(0)
+        .clone();
     let mask = create_detection_mask(&pixels, 4.0);
     let mut labels = Buffer2::new_filled(4096, 4096, 0u32);
 
@@ -128,7 +137,7 @@ fn bench_threshold_sweep() {
     ];
 
     for (width, height) in test_sizes {
-        let pixels = star_field(width, height, width * height / 200, 42)
+        let pixels = star_field(Size2us::new(width, height), width * height / 200, 42)
             .image
             .channel(0)
             .clone();

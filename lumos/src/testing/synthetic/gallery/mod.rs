@@ -295,7 +295,7 @@ fn gallery_sensor() {
         channel_gain: [1.0; 3],
     };
     save(
-        &vignette_flat.render(w, h, 0),
+        &vignette_flat.render(Size2us::new(w, h), 0),
         w,
         h,
         "sensor/flat_vignette_map",
@@ -499,21 +499,27 @@ fn gallery_fixtures() {
     // cluster_field}), at inspectable sizes.
     let size = 1024;
     save(
-        star_field(size, size, 100, 42).image.channel(0).pixels(),
+        star_field(Size2us::new(size, size), 100, 42)
+            .image
+            .channel(0)
+            .pixels(),
         size,
         size,
         "fixtures/star_field_sparse",
         Stretch::Asinh,
     );
     save(
-        star_field(size, size, 1000, 42).image.channel(0).pixels(),
+        star_field(Size2us::new(size, size), 1000, 42)
+            .image
+            .channel(0)
+            .pixels(),
         size,
         size,
         "fixtures/star_field_dense",
         Stretch::Asinh,
     );
     save(
-        cluster_field(size, size, 4000, 42)
+        cluster_field(Size2us::new(size, size), 4000, 42)
             .image
             .channel(0)
             .pixels(),
@@ -523,7 +529,7 @@ fn gallery_fixtures() {
         Stretch::Asinh,
     );
     save(
-        cluster_field(size, size, 15000, 42)
+        cluster_field(Size2us::new(size, size), 15000, 42)
             .image
             .channel(0)
             .pixels(),

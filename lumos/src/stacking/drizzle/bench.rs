@@ -4,6 +4,7 @@
 //!
 //! Run: `cargo test -p lumos --release drizzle::bench -- --ignored --nocapture`
 
+use crate::math::size2us::Size2us;
 use common::CancelToken;
 use glam::DVec2;
 use quickbench::quick_bench;
@@ -22,7 +23,7 @@ const N_FRAMES: usize = 8;
 /// `N_FRAMES` copies of one synthetic field, each with a small sub-pixel dither — the input a
 /// drizzle integration sees.
 fn dithered_set() -> Vec<DrizzleFrame<LinearImage>> {
-    let base = star_field(1000, 1000, 250, 5).image;
+    let base = star_field(Size2us::new(1000, 1000), 250, 5).image;
     (0..N_FRAMES)
         .map(|i| {
             let dx = (i as f64 * 0.37).fract() * 2.0 - 1.0;

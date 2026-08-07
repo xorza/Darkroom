@@ -148,7 +148,10 @@ fn bench_measure_star_local_annulus(b: ::quickbench::Bencher) {
 #[quick_bench(warmup_iters = 5, iters = 200)]
 fn bench_measure_star_batch_100(b: ::quickbench::Bencher) {
     // 100 stars batch processing with WeightedMoments
-    let pixels = star_field(512, 512, 100, 42).image.channel(0).clone();
+    let pixels = star_field(Size2us::new(512, 512), 100, 42)
+        .image
+        .channel(0)
+        .clone();
     let bg = estimate_background(&pixels, &BackgroundConfig::default());
     let candidates = detect_stars_test(&pixels, &bg, &DetectionConfig::default());
     let regions: Vec<_> = candidates.iter().collect();
@@ -169,7 +172,10 @@ fn bench_measure_star_batch_100(b: ::quickbench::Bencher) {
 #[quick_bench(warmup_iters = 2, iters = 10)]
 fn bench_measure_star_batch_6k_10000(b: ::quickbench::Bencher) {
     // 2000 stars on 4K image - compare all centroid methods
-    let pixels = star_field(6144, 6144, 10000, 42).image.channel(0).clone();
+    let pixels = star_field(Size2us::new(6144, 6144), 10000, 42)
+        .image
+        .channel(0)
+        .clone();
     let bg = estimate_background(&pixels, &BackgroundConfig::default());
     let candidates = detect_stars_test(&pixels, &bg, &DetectionConfig::default());
     let regions: Vec<_> = candidates.iter().collect();

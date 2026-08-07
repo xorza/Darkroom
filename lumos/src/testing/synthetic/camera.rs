@@ -6,6 +6,8 @@
 //! [`noise`](crate::testing::synthetic::noise)).
 
 use crate::math::fwhm_to_sigma;
+use crate::math::size2us::Size2us;
+use crate::math::vec2us::Vec2us;
 use crate::testing::synthetic::star_profiles::{
     fwhm_to_moffat_alpha, render_elliptical_star, render_gaussian_star, render_moffat_star,
 };
@@ -105,20 +107,20 @@ impl Default for FlatField {
 }
 
 impl FlatField {
-    /// Render the flat-field response map for `channel` into a fresh `width*height` buffer.
-    pub(crate) fn render(&self, width: usize, height: usize, channel: usize) -> Vec<f32> {
+    /// Render the flat-field response map for `channel` into a fresh `size`-sized buffer.
+    pub(crate) fn render(&self, size: Size2us, channel: usize) -> Vec<f32> {
         let gain = self.channel_gain[channel];
-        let mut flat = vec![gain; width * height];
+        let mut flat = vec![gain; size.pixel_count()];
         if let Some((center, edge, falloff)) = self.vignette {
-            let cx = width as f32 / 2.0;
-            let cy = height as f32 / 2.0;
+            let cx = size.width as f32 / 2.0;
+            let cy = size.height as f32 / 2.0;
             let max_r = (cx * cx + cy * cy).sqrt().max(1.0);
-            for y in 0..height {
-                for x in 0..width {
+            for y in 0..size.height {
+                for x in 0..size.width {
                     let dx = x as f32 - cx;
                     let dy = y as f32 - cy;
                     let t = ((dx * dx + dy * dy).sqrt() / max_r).powf(falloff);
-                    flat[y * width + x] = gain * (center + (edge - center) * t);
+                    flat[size.index_of(Vec2us::new(x, y))] = gain * (center + (edge - center) * t);
                 }
             }
         }
@@ -267,7 +269,7 @@ mod tests {
 
     #[test]
     fn flat_field_default_is_unit() {
-        let flat = FlatField::default().render(8, 8, 0);
+        let flat = FlatField::default().render(Size2us::new(8, 8), 0);
         assert!(flat.iter().all(|&f| (f - 1.0).abs() < 1e-6));
     }
 
@@ -278,14 +280,14 @@ mod tests {
             vignette: None,
             channel_gain: [0.9, 1.0, 1.1],
         };
-        assert!((ff.render(4, 4, 2)[0] - 1.1).abs() < 1e-6);
+        assert!((ff.render(Size2us::new(4, 4), 2)[0] - 1.1).abs() < 1e-6);
 
         // Vignette: center brighter than corner.
         let vig = FlatField {
             vignette: Some((1.0, 0.5, 2.0)),
             channel_gain: [1.0; 3],
         };
-        let map = vig.render(64, 64, 0);
+        let map = vig.render(Size2us::new(64, 64), 0);
         let center = map[32 * 64 + 32];
         let corner = map[0];
         assert!(center > corner, "center {center} corner {corner}");

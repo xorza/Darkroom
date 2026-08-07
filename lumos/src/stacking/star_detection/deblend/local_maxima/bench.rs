@@ -67,7 +67,7 @@ fn create_components_from_pixels(
 
 #[quick_bench(warmup_iters = 2, iters = 5)]
 fn bench_find_local_maxima_6k_dense(b: ::quickbench::Bencher) {
-    let pixels = cluster_field(6144, 6144, 50000, 42)
+    let pixels = cluster_field(Size2us::new(6144, 6144), 50000, 42)
         .image
         .channel(0)
         .clone();
@@ -93,7 +93,7 @@ fn bench_find_local_maxima_6k_dense(b: ::quickbench::Bencher) {
 
 #[quick_bench(warmup_iters = 2, iters = 5)]
 fn bench_deblend_local_maxima_6k_dense(b: ::quickbench::Bencher) {
-    let pixels = cluster_field(6144, 6144, 50000, 42)
+    let pixels = cluster_field(Size2us::new(6144, 6144), 50000, 42)
         .image
         .channel(0)
         .clone();
@@ -114,7 +114,7 @@ fn bench_deblend_local_maxima_6k_dense(b: ::quickbench::Bencher) {
 
 #[quick_bench(warmup_iters = 2, iters = 5)]
 fn bench_local_maxima_4k_dense(b: ::quickbench::Bencher) {
-    let pixels = cluster_field(4096, 4096, 20000, 42)
+    let pixels = cluster_field(Size2us::new(4096, 4096), 20000, 42)
         .image
         .channel(0)
         .clone();

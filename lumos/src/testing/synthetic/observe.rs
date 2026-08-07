@@ -93,7 +93,7 @@ pub(crate) fn render(scene: &Scene, camera: &Camera, obs: &Observation) -> SimFr
     }
 
     // 3 + 4. Flat field (multiplicative sensor response) → clean becomes the on-sensor signal.
-    let flat = camera.flat.render(width, height, 0);
+    let flat = camera.flat.render(scene.size, 0);
     for (c, f) in clean.iter_mut().zip(flat.iter()) {
         *c *= *f;
     }
