@@ -15,9 +15,7 @@ use crate::io::image::LoadContext;
 use crate::io::image::error::ImageError;
 use crate::io::image::linear::LinearImage;
 use crate::io::image::{ImageDimensions, ImageMetadata};
-use crate::io::raw::demosaic::DemosaicMemory;
 use crate::math::statistics::{ChannelStats, mad_f32_with_scratch, median_f32_mut};
-use crate::resources::memory_budget;
 
 /// Failure while creating or accessing disk-backed frame storage.
 #[derive(Debug, thiserror::Error)]
@@ -232,10 +230,11 @@ impl StoredFrame {
         confidence: Option<Buffer2<f32>>,
         source_stats: FrameStats,
     ) -> Result<Self, FrameStoreError> {
-        let channels = spill_channels(directory, name, image)?.planes;
-        let spill_quality = |suffix: &str, plane: Option<Buffer2<f32>>| match plane {
+        let spill = FrameSpill::new(directory, name);
+        let channels = spill_channels(spill, image)?.planes;
+        let spill_quality = |kind: &str, plane: Option<Buffer2<f32>>| match plane {
             Some(plane) => {
-                let path = directory.join(format!("{name}_{suffix}.bin"));
+                let path = spill.quality_path(kind);
                 write_plane(&path, &plane)?;
                 Ok(Some(StoredPlane::map(path)?))
             }
@@ -286,7 +285,7 @@ impl StoredImage {
         image: &LinearImage,
     ) -> Result<Self, FrameStoreError> {
         let dimensions = image.dimensions();
-        let spilled = spill_channels(directory, name, image)?;
+        let spilled = spill_channels(FrameSpill::new(directory, name), image)?;
         Ok(Self {
             metadata: image.metadata.clone(),
             dimensions,
@@ -310,15 +309,14 @@ impl StoredImage {
 }
 
 fn spill_channels(
-    directory: &Path,
-    name: &str,
+    spill: FrameSpill<'_>,
     image: &impl StackableImage,
 ) -> Result<SpilledChannels, FrameStoreError> {
     let dimensions = image.dimensions();
     let mut planes = ArrayVec::new();
     let mut paths = ArrayVec::new();
     for channel in 0..dimensions.channels() {
-        let path = directory.join(channel_filename(name, channel));
+        let path = spill.channel_path(channel);
         write_plane(&path, image.channel(channel))?;
         planes.push(StoredPlane::map(path.clone())?);
         paths.push(path);
@@ -326,35 +324,56 @@ fn spill_channels(
     Ok(SpilledChannels { planes, paths })
 }
 
-pub(crate) fn frame_bytes(dimensions: ImageDimensions) -> usize {
-    dimensions.sample_count() * size_of::<f32>()
+/// The files one frame occupies inside a spill directory: one plane per channel, plus the
+/// optional warp-quality planes.
+///
+/// Every name the frame store writes comes from here, so the writer that produced a plane and a
+/// later run looking for it cannot disagree about where it lives.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct FrameSpill<'a> {
+    directory: &'a Path,
+    name: &'a str,
 }
 
-/// Statistics hold a full-frame scratch buffer beside the decoded pixels.
-const DECODE_TRANSIENT_FACTOR: usize = 2;
+impl<'a> FrameSpill<'a> {
+    pub(crate) fn new(directory: &'a Path, name: &'a str) -> Self {
+        Self { directory, name }
+    }
 
-pub(crate) fn decode_transient_bytes(dimensions: ImageDimensions) -> usize {
-    DECODE_TRANSIENT_FACTOR * frame_bytes(dimensions)
-}
+    /// Basename for caching `source` across runs: a hash, so distinct sources never collide and
+    /// the same source always resolves to the same files.
+    pub(crate) fn cache_name(source: &Path) -> String {
+        let mut hasher = blake3::Hasher::new();
+        hasher.update(b"lumos-frame-cache-path-v1\0");
+        hasher.update(source.as_os_str().as_encoded_bytes());
+        format!("{}.bin", hasher.finalize().to_hex())
+    }
 
-pub(crate) fn cache_filename(path: &Path) -> String {
-    let mut hasher = blake3::Hasher::new();
-    hasher.update(b"lumos-frame-cache-path-v1\0");
-    hasher.update(path.as_os_str().as_encoded_bytes());
-    format!("{}.bin", hasher.finalize().to_hex())
-}
+    /// `cache_name` hands back a `.bin` basename; every file below appends its own suffix, so the
+    /// extension is stripped once here rather than doubled onto each name.
+    fn stem(self) -> &'a str {
+        self.name.strip_suffix(".bin").unwrap_or(self.name)
+    }
 
-pub(crate) fn channel_filename(name: &str, channel: usize) -> String {
-    let stem = name.strip_suffix(".bin").unwrap_or(name);
-    format!("{stem}_c{channel}.bin")
-}
+    pub(crate) fn channel_path(self, channel: usize) -> PathBuf {
+        self.directory
+            .join(format!("{}_c{channel}.bin", self.stem()))
+    }
 
-pub(crate) fn reusable_plane(path: &Path, dimensions: ImageDimensions) -> bool {
-    let Ok(metadata) = std::fs::metadata(path) else {
-        return false;
-    };
-    let expected = (dimensions.pixel_count() * size_of::<f32>()) as u64;
-    metadata.len() == expected
+    /// Path of a warp-quality plane — `coverage` or `confidence`.
+    fn quality_path(self, kind: &str) -> PathBuf {
+        self.directory.join(format!("{}_{kind}.bin", self.stem()))
+    }
+
+    /// Whether every channel plane is already on disk at the size `dimensions` implies. A plane
+    /// of the wrong length is a stale cache from different geometry, not a reusable one.
+    pub(crate) fn channels_reusable(self, dimensions: ImageDimensions) -> bool {
+        let expected = (dimensions.pixel_count() * size_of::<f32>()) as u64;
+        (0..dimensions.channels()).all(|channel| {
+            std::fs::metadata(self.channel_path(channel))
+                .is_ok_and(|metadata| metadata.len() == expected)
+        })
+    }
 }
 
 fn write_plane(path: &Path, pixels: &[f32]) -> Result<(), FrameStoreError> {
@@ -365,125 +384,6 @@ fn write_plane(path: &Path, pixels: &[f32]) -> Result<(), FrameStoreError> {
             source,
         }
     })
-}
-
-const MIN_CHUNK_ROWS: usize = 64;
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct ChunkMemoryLayout {
-    /// Planes read concurrently for the active row chunk.
-    pub(crate) input_planes: usize,
-    /// Full image-sized planes held throughout chunk processing.
-    pub(crate) resident_planes: usize,
-}
-
-pub(crate) fn optimal_chunk_rows(
-    width: usize,
-    height: usize,
-    layout: ChunkMemoryLayout,
-    available_memory: u64,
-) -> usize {
-    let bytes_per_row = width
-        .checked_mul(layout.input_planes)
-        .and_then(|value| value.checked_mul(size_of::<f32>()))
-        .map(|value| value as u64)
-        .unwrap_or(u64::MAX);
-    if bytes_per_row == 0 {
-        return MIN_CHUNK_ROWS;
-    }
-    let resident_bytes = width
-        .checked_mul(height)
-        .and_then(|value| value.checked_mul(layout.resident_planes))
-        .and_then(|value| value.checked_mul(size_of::<f32>()))
-        .map(|value| value as u64)
-        .unwrap_or(u64::MAX);
-    (memory_budget(available_memory).saturating_sub(resident_bytes) / bytes_per_row)
-        .max(MIN_CHUNK_ROWS as u64) as usize
-}
-
-pub(crate) fn load_concurrency(
-    resident_bytes_per_frame: usize,
-    transient_bytes_per_decode: usize,
-    resident_frames: usize,
-    available_memory: u64,
-    max_workers: usize,
-) -> usize {
-    let usable = memory_budget(available_memory);
-    let transient = (transient_bytes_per_decode as u64).max(1);
-    let resident = (resident_bytes_per_frame as u64).saturating_mul(resident_frames as u64);
-    let headroom = usable.saturating_sub(resident);
-    ((headroom / transient).max(1) as usize).min(max_workers.max(1))
-}
-
-pub(crate) fn fits_in_memory(
-    bytes_per_image: usize,
-    frame_count: usize,
-    available_memory: u64,
-) -> bool {
-    bytes_per_image
-        .checked_mul(frame_count)
-        .is_some_and(|bytes| bytes as u64 <= memory_budget(available_memory))
-}
-
-/// Calibrated/warped pixels plus detection or warp scratch.
-pub(crate) const PER_FRAME_WORKING_PLANES: usize = 8;
-const PER_FRAME_RESIDENT_PLANES: usize = 4;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct MemoryPlan {
-    pub(crate) fits_in_ram: bool,
-    pub(crate) decode_concurrency: usize,
-    pub(crate) warp_concurrency: usize,
-}
-
-pub(crate) fn plan_memory(
-    plane_bytes: usize,
-    demosaic: DemosaicMemory,
-    frame_count: usize,
-    threads: usize,
-    available: u64,
-) -> MemoryPlan {
-    assert!(
-        frame_count > 0,
-        "memory planning requires at least one frame"
-    );
-    let workers = frame_count.min(threads.max(1));
-    let working_bytes = PER_FRAME_WORKING_PLANES.saturating_mul(plane_bytes);
-    let decode_extra = demosaic.peak_bytes.saturating_sub(demosaic.output_bytes);
-    let usable = memory_budget(available);
-
-    let decoded_resident = (demosaic.output_bytes as u64).saturating_mul(frame_count as u64);
-    let decode_minimum = decoded_resident.saturating_add(decode_extra as u64);
-    let warped_bytes = PER_FRAME_RESIDENT_PLANES.saturating_mul(plane_bytes);
-    let warped_resident = (warped_bytes as u64).saturating_mul(frame_count as u64);
-    let working_peak =
-        warped_resident.saturating_add((working_bytes as u64).saturating_mul(workers as u64));
-    let fits_in_ram = decode_minimum.max(working_peak) <= usable;
-
-    let (decode_resident_frames, decode_bytes) = if fits_in_ram {
-        (frame_count, decode_extra)
-    } else {
-        (0, demosaic.peak_bytes.max(working_bytes))
-    };
-    let warp_resident_frames = usize::from(fits_in_ram) * frame_count;
-    let decode_concurrency = load_concurrency(
-        demosaic.output_bytes,
-        decode_bytes,
-        decode_resident_frames,
-        available,
-        workers,
-    );
-    let warp_concurrency = load_concurrency(
-        warped_bytes,
-        working_bytes,
-        warp_resident_frames,
-        available,
-        workers,
-    );
-    MemoryPlan {
-        fits_in_ram,
-        decode_concurrency,
-        warp_concurrency,
-    }
 }
 
 #[cfg(test)]

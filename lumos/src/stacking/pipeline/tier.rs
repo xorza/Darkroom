@@ -3,11 +3,10 @@
 use imaginarium::Buffer2;
 
 use crate::io::image::linear::LinearImage;
+use crate::memory::MemoryPlan;
 use crate::stacking::combine::cache_config::CacheConfig;
 use crate::stacking::combine::error::Error as StackError;
-use crate::stacking::frame_store::{
-    FrameStats, MemoryPlan, SpillDirectory, StoredFrame, StoredImage,
-};
+use crate::stacking::frame_store::{FrameStats, SpillDirectory, StoredFrame, StoredImage};
 use crate::stacking::pipeline::frame::PipelineFrame;
 use crate::stacking::pipeline::result::Error;
 

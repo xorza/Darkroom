@@ -152,7 +152,7 @@ fn test_load_and_cache_frame_reuse() {
     );
     drop(rewritten);
 
-    let cache_path = temp_dir.join(channel_filename(base_filename, 0));
+    let cache_path = FrameSpill::new(&temp_dir, base_filename).channel_path(0);
     let mut cache_file = OpenOptions::new().write(true).open(cache_path).unwrap();
     cache_file
         .seek(SeekFrom::Start((2 * std::mem::size_of::<f32>()) as u64))

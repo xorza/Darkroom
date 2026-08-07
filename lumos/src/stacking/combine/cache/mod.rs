@@ -9,15 +9,14 @@ use rayon::prelude::*;
 use crate::io::image::linear::LinearImage;
 use crate::io::image::linear_pixels::LinearPixels;
 use crate::io::image::{ImageDimensions, ImageMetadata};
+use crate::memory::{ChunkMemoryLayout, optimal_chunk_rows};
 use crate::stacking::combine::MIN_CONTRIBUTING_COVERAGE;
 use crate::stacking::combine::cache_config::CacheConfig;
 use crate::stacking::combine::config::Normalization;
 use crate::stacking::combine::error::Error;
 use crate::stacking::combine::normalization::{FrameNorm, compute_frame_norms};
 use crate::stacking::combine::stack::StackFrame;
-use crate::stacking::frame_store::{
-    ChunkMemoryLayout, SpillDirectory, StackableImage, StoredFrame, StoredPlane, optimal_chunk_rows,
-};
+use crate::stacking::frame_store::{SpillDirectory, StackableImage, StoredFrame, StoredPlane};
 use crate::stacking::product::{QualityMap, QualityPlanes, StackProduct};
 use crate::stacking::progress::{ProgressCallback, StackingStage};
 
