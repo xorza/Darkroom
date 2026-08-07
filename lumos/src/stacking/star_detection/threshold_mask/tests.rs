@@ -20,13 +20,12 @@ fn create_threshold_mask_test(
     bg: &[f32],
     noise: &[f32],
     sigma: f32,
-    width: usize,
-    height: usize,
+    size: Size2us,
 ) -> BitBuffer2 {
-    let pixels = Buffer2::new(width, height, pixels.to_vec());
-    let bg = Buffer2::new(width, height, bg.to_vec());
-    let noise = Buffer2::new(width, height, noise.to_vec());
-    let mut mask = BitBuffer2::new_filled(Size2us::new(width, height), false);
+    let pixels = Buffer2::new(size.width, size.height, pixels.to_vec());
+    let bg = Buffer2::new(size.width, size.height, bg.to_vec());
+    let noise = Buffer2::new(size.width, size.height, noise.to_vec());
+    let mut mask = BitBuffer2::new_filled(size, false);
     create_threshold_mask(&pixels, &bg, &noise, sigma, &mut mask);
     mask
 }
@@ -36,12 +35,11 @@ fn create_threshold_mask_filtered_test(
     filtered: &[f32],
     noise: &[f32],
     sigma: f32,
-    width: usize,
-    height: usize,
+    size: Size2us,
 ) -> BitBuffer2 {
-    let filtered = Buffer2::new(width, height, filtered.to_vec());
-    let noise = Buffer2::new(width, height, noise.to_vec());
-    let mut mask = BitBuffer2::new_filled(Size2us::new(width, height), false);
+    let filtered = Buffer2::new(size.width, size.height, filtered.to_vec());
+    let noise = Buffer2::new(size.width, size.height, noise.to_vec());
+    let mut mask = BitBuffer2::new_filled(size, false);
     create_threshold_mask_filtered(&filtered, &noise, sigma, &mut mask);
     mask
 }
@@ -78,8 +76,7 @@ struct ThresholdMaskCase {
     background: &'static [f32],
     noise: &'static [f32],
     sigma: f32,
-    width: usize,
-    height: usize,
+    size: Size2us,
     expected: &'static [bool],
 }
 
@@ -92,8 +89,7 @@ fn test_threshold_mask_truth_table() {
             background: &[50.0; 4],
             noise: &[10.0; 4],
             sigma: 3.0,
-            width: 4,
-            height: 1,
+            size: Size2us::new(4, 1),
             expected: &[true; 4],
         },
         ThresholdMaskCase {
@@ -102,8 +98,7 @@ fn test_threshold_mask_truth_table() {
             background: &[50.0; 4],
             noise: &[10.0; 4],
             sigma: 3.0,
-            width: 2,
-            height: 2,
+            size: Size2us::new(2, 2),
             expected: &[false; 4],
         },
         ThresholdMaskCase {
@@ -112,8 +107,7 @@ fn test_threshold_mask_truth_table() {
             background: &[1.0; 4],
             noise: &[0.1; 4],
             sigma: 3.0,
-            width: 2,
-            height: 2,
+            size: Size2us::new(2, 2),
             expected: &[false, true, false, true],
         },
         ThresholdMaskCase {
@@ -122,8 +116,7 @@ fn test_threshold_mask_truth_table() {
             background: &[1.0, 1.2, 1.4, 0.8],
             noise: &[0.1; 4],
             sigma: 3.0,
-            width: 2,
-            height: 2,
+            size: Size2us::new(2, 2),
             expected: &[true, false, false, true],
         },
         ThresholdMaskCase {
@@ -132,8 +125,7 @@ fn test_threshold_mask_truth_table() {
             background: &[1.0; 2],
             noise: &[0.1, 0.5],
             sigma: 3.0,
-            width: 2,
-            height: 1,
+            size: Size2us::new(2, 1),
             expected: &[true, false],
         },
         ThresholdMaskCase {
@@ -142,8 +134,7 @@ fn test_threshold_mask_truth_table() {
             background: &[0.0; 4],
             noise: &[0.1; 4],
             sigma: 3.0,
-            width: 2,
-            height: 2,
+            size: Size2us::new(2, 2),
             expected: &[false, true, false, true],
         },
         ThresholdMaskCase {
@@ -152,8 +143,7 @@ fn test_threshold_mask_truth_table() {
             background: &[-1.0, -0.5, 0.0, 0.5],
             noise: &[0.1; 4],
             sigma: 3.0,
-            width: 2,
-            height: 2,
+            size: Size2us::new(2, 2),
             expected: &[true, true, false, false],
         },
         ThresholdMaskCase {
@@ -162,8 +152,7 @@ fn test_threshold_mask_truth_table() {
             background: &[1.0; 2],
             noise: &[0.0; 2],
             sigma: 3.0,
-            width: 2,
-            height: 1,
+            size: Size2us::new(2, 1),
             expected: &[true, false],
         },
         ThresholdMaskCase {
@@ -172,8 +161,7 @@ fn test_threshold_mask_truth_table() {
             background: &[1.0; 2],
             noise: &[-0.1; 2],
             sigma: 3.0,
-            width: 2,
-            height: 1,
+            size: Size2us::new(2, 1),
             expected: &[true, false],
         },
         ThresholdMaskCase {
@@ -182,8 +170,7 @@ fn test_threshold_mask_truth_table() {
             background: &[1.0],
             noise: &[0.1],
             sigma: 3.0,
-            width: 1,
-            height: 1,
+            size: Size2us::new(1, 1),
             expected: &[true],
         },
         ThresholdMaskCase {
@@ -192,8 +179,7 @@ fn test_threshold_mask_truth_table() {
             background: &[1.0],
             noise: &[0.1],
             sigma: 3.0,
-            width: 1,
-            height: 1,
+            size: Size2us::new(1, 1),
             expected: &[false],
         },
         ThresholdMaskCase {
@@ -202,8 +188,7 @@ fn test_threshold_mask_truth_table() {
             background: &[1.0; 2],
             noise: &[0.1; 2],
             sigma: 3.0,
-            width: 2,
-            height: 1,
+            size: Size2us::new(2, 1),
             expected: &[false, true],
         },
         ThresholdMaskCase {
@@ -212,8 +197,7 @@ fn test_threshold_mask_truth_table() {
             background: &[1.0; 4],
             noise: &[0.1; 4],
             sigma: 3.0,
-            width: 2,
-            height: 2,
+            size: Size2us::new(2, 2),
             expected: &[true; 4],
         },
         ThresholdMaskCase {
@@ -222,8 +206,7 @@ fn test_threshold_mask_truth_table() {
             background: &[1.0; 4],
             noise: &[0.1; 4],
             sigma: 5.0,
-            width: 2,
-            height: 2,
+            size: Size2us::new(2, 2),
             expected: &[false; 4],
         },
         ThresholdMaskCase {
@@ -232,8 +215,7 @@ fn test_threshold_mask_truth_table() {
             background: &[1.0; 4],
             noise: &[0.1; 4],
             sigma: 4.0,
-            width: 2,
-            height: 2,
+            size: Size2us::new(2, 2),
             expected: &[true; 4],
         },
     ];
@@ -246,8 +228,7 @@ fn test_threshold_mask_truth_table() {
             case.background,
             case.noise,
             case.sigma,
-            case.width,
-            case.height,
+            case.size,
         );
         let actual: Vec<bool> = mask.iter().collect();
 
@@ -274,8 +255,7 @@ struct FilteredThresholdMaskCase {
     pixels: &'static [f32],
     noise: &'static [f32],
     sigma: f32,
-    width: usize,
-    height: usize,
+    size: Size2us,
     expected: &'static [bool],
 }
 
@@ -287,8 +267,7 @@ fn test_filtered_threshold_mask_truth_table() {
             pixels: &[50.0; 4],
             noise: &[10.0; 4],
             sigma: 3.0,
-            width: 4,
-            height: 1,
+            size: Size2us::new(4, 1),
             expected: &[true; 4],
         },
         FilteredThresholdMaskCase {
@@ -296,8 +275,7 @@ fn test_filtered_threshold_mask_truth_table() {
             pixels: &[0.2, 0.4, 0.6, 0.8],
             noise: &[0.1; 4],
             sigma: 3.0,
-            width: 2,
-            height: 2,
+            size: Size2us::new(2, 2),
             expected: &[false, true, true, true],
         },
         FilteredThresholdMaskCase {
@@ -305,8 +283,7 @@ fn test_filtered_threshold_mask_truth_table() {
             pixels: &[0.5; 4],
             noise: &[0.1, 0.2, 0.3, 0.05],
             sigma: 3.0,
-            width: 2,
-            height: 2,
+            size: Size2us::new(2, 2),
             expected: &[true, false, false, true],
         },
         FilteredThresholdMaskCase {
@@ -314,8 +291,7 @@ fn test_filtered_threshold_mask_truth_table() {
             pixels: &[-0.5, 0.5, -0.1, 0.4],
             noise: &[0.1; 4],
             sigma: 3.0,
-            width: 2,
-            height: 2,
+            size: Size2us::new(2, 2),
             expected: &[false, true, false, true],
         },
         FilteredThresholdMaskCase {
@@ -323,20 +299,14 @@ fn test_filtered_threshold_mask_truth_table() {
             pixels: &[0.1, -0.1],
             noise: &[0.0; 2],
             sigma: 3.0,
-            width: 2,
-            height: 1,
+            size: Size2us::new(2, 1),
             expected: &[true, false],
         },
     ];
 
     for case in cases {
-        let mask = create_threshold_mask_filtered_test(
-            case.pixels,
-            case.noise,
-            case.sigma,
-            case.width,
-            case.height,
-        );
+        let mask =
+            create_threshold_mask_filtered_test(case.pixels, case.noise, case.sigma, case.size);
         let actual: Vec<bool> = mask.iter().collect();
 
         assert_eq!(actual.as_slice(), case.expected, "{}: {case:?}", case.name);
@@ -358,7 +328,8 @@ fn test_various_lengths() {
         let pixels = vec![100.0f32; width * height];
         let bg = vec![50.0f32; width * height];
         let noise = vec![10.0f32; width * height];
-        let mask = create_threshold_mask_test(&pixels, &bg, &noise, 3.0, width, height);
+        let mask =
+            create_threshold_mask_test(&pixels, &bg, &noise, 3.0, Size2us::new(width, height));
         assert!(mask.iter().all(|v| v), "failed for len={}", len);
     }
 }
@@ -374,7 +345,7 @@ fn test_remainder_handling() {
         let bg = vec![1.0f32; size];
         let noise = vec![0.1f32; size];
 
-        let mask = create_threshold_mask_test(&pixels, &bg, &noise, 3.0, size, 1);
+        let mask = create_threshold_mask_test(&pixels, &bg, &noise, 3.0, Size2us::new(size, 1));
 
         // Verify correctness: even indices should be true (2.0 > 1.3), odd should be false (0.5 < 1.3)
         for i in 0..size {
@@ -407,7 +378,7 @@ fn test_large_image() {
         pixels[i] = 1.0; // threshold = 0.4 + 3*0.1 = 0.7, so 1.0 > 0.7
     }
 
-    let mask = create_threshold_mask_test(&pixels, &bg, &noise, 3.0, width, height);
+    let mask = create_threshold_mask_test(&pixels, &bg, &noise, 3.0, Size2us::new(width, height));
 
     // Verify the expected pixels are set
     for i in 0..size {
@@ -424,7 +395,7 @@ fn test_tiny_image_1xn() {
         let bg = vec![1.0f32; width];
         let noise = vec![0.1f32; width];
 
-        let mask = create_threshold_mask_test(&pixels, &bg, &noise, 3.0, width, 1);
+        let mask = create_threshold_mask_test(&pixels, &bg, &noise, 3.0, Size2us::new(width, 1));
         assert!(mask.iter().all(|v| v), "Failed for 1x{}", width);
     }
 }
@@ -437,7 +408,7 @@ fn test_tiny_image_nx1() {
         let bg = vec![1.0f32; height];
         let noise = vec![0.1f32; height];
 
-        let mask = create_threshold_mask_test(&pixels, &bg, &noise, 3.0, 1, height);
+        let mask = create_threshold_mask_test(&pixels, &bg, &noise, 3.0, Size2us::new(1, height));
         assert!(mask.iter().all(|v| v), "Failed for {}x1", height);
     }
 }
@@ -522,7 +493,12 @@ fn test_filtered_matches_scalar() {
     let scalar_mask = scalar_threshold_filtered(&pixels_data, &noise_data, sigma);
 
     // Compute with packed BitBuffer2
-    let mask = create_threshold_mask_filtered_test(&pixels_data, &noise_data, sigma, width, height);
+    let mask = create_threshold_mask_filtered_test(
+        &pixels_data,
+        &noise_data,
+        sigma,
+        Size2us::new(width, height),
+    );
 
     // Compare results
     for (i, &scalar_val) in scalar_mask.iter().enumerate() {
@@ -557,7 +533,7 @@ fn test_multirow_checkerboard_pattern() {
         }
     }
 
-    let mask = create_threshold_mask_test(&pixels, &bg, &noise, 3.0, width, height);
+    let mask = create_threshold_mask_test(&pixels, &bg, &noise, 3.0, Size2us::new(width, height));
 
     for y in 0..height {
         for x in 0..width {
@@ -593,7 +569,7 @@ fn test_multirow_horizontal_stripes() {
         }
     }
 
-    let mask = create_threshold_mask_test(&pixels, &bg, &noise, 3.0, width, height);
+    let mask = create_threshold_mask_test(&pixels, &bg, &noise, 3.0, Size2us::new(width, height));
 
     for y in 0..height {
         for x in 0..width {
@@ -629,7 +605,7 @@ fn test_multirow_vertical_stripes() {
         }
     }
 
-    let mask = create_threshold_mask_test(&pixels, &bg, &noise, 3.0, width, height);
+    let mask = create_threshold_mask_test(&pixels, &bg, &noise, 3.0, Size2us::new(width, height));
 
     for y in 0..height {
         for x in 0..width {
@@ -662,7 +638,7 @@ fn test_row_boundary_at_word_edge() {
     pixels[127] = 2.0; // Last pixel of row 1
     pixels[128] = 2.0; // First pixel of row 2
 
-    let mask = create_threshold_mask_test(&pixels, &bg, &noise, 3.0, width, height);
+    let mask = create_threshold_mask_test(&pixels, &bg, &noise, 3.0, Size2us::new(width, height));
 
     assert!(mask.get(63), "Last pixel of row 0");
     assert!(mask.get(64), "First pixel of row 1");
@@ -693,7 +669,7 @@ fn test_row_boundary_non_aligned() {
     pixels[139] = 2.0; // Last pixel of row 1
     pixels[140] = 2.0; // First pixel of row 2
 
-    let mask = create_threshold_mask_test(&pixels, &bg, &noise, 3.0, width, height);
+    let mask = create_threshold_mask_test(&pixels, &bg, &noise, 3.0, Size2us::new(width, height));
 
     assert!(mask.get(69), "Last pixel of row 0");
     assert!(mask.get(70), "First pixel of row 1");
@@ -718,7 +694,8 @@ fn test_filtered_remainder_handling() {
         // threshold = 3.0 * 0.1 = 0.3
         // even indices: 0.5 > 0.3 -> true
         // odd indices: 0.1 <= 0.3 -> false
-        let mask = create_threshold_mask_filtered_test(&filtered, &noise, 3.0, size, 1);
+        let mask =
+            create_threshold_mask_filtered_test(&filtered, &noise, 3.0, Size2us::new(size, 1));
 
         for i in 0..size {
             let expected = i % 2 == 0;
@@ -748,7 +725,8 @@ fn test_filtered_large_image() {
         filtered[i * width + i] = 0.5; // threshold = 0.3, 0.5 > 0.3
     }
 
-    let mask = create_threshold_mask_filtered_test(&filtered, &noise, 3.0, width, height);
+    let mask =
+        create_threshold_mask_filtered_test(&filtered, &noise, 3.0, Size2us::new(width, height));
 
     for y in 0..height {
         for x in 0..width {

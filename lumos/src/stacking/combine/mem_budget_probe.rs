@@ -48,6 +48,7 @@ use std::time::Instant;
 
 use common::CancelToken;
 
+use crate::math::size2us::Size2us;
 use crate::stacking::combine::config::{CombineMethod, StackConfig};
 use crate::stacking::combine::rejection::Rejection;
 use crate::stacking::combine::stack::stack;
@@ -81,8 +82,7 @@ fn build_config(
 #[ignore = "manual live peak-RSS probe; run explicitly with a filter, one config per process"]
 fn master_stack_memory_probe() -> io::Result<()> {
     let n: usize = env_parse("LUMOS_FRAMES", 24);
-    let width: usize = env_parse("LUMOS_W", 6000);
-    let height: usize = env_parse("LUMOS_H", 6000);
+    let size = Size2us::new(env_parse("LUMOS_W", 6000), env_parse("LUMOS_H", 6000));
     let seed: u64 = env_parse("LUMOS_SEED", 1);
     let method = std::env::var("LUMOS_METHOD").unwrap_or_else(|_| "sigma".into());
     let keep = env_parse("LUMOS_KEEP", 0) != 0;
@@ -93,10 +93,10 @@ fn master_stack_memory_probe() -> io::Result<()> {
         .unwrap_or_else(|_| {
             PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.tmp/lumos_master_stack")
         });
-    let frames_dir = base.join(format!("{width}x{height}_n{n}_s{seed}"));
+    let frames_dir = base.join(format!("{}x{}_n{n}_s{seed}", size.width, size.height));
     let cache_dir = base.join("cache");
 
-    let bytes_per_frame = (width * height * 4) as u64;
+    let bytes_per_frame = (size.pixel_count() * 4) as u64;
     let resident_if_ram = bytes_per_frame * n as u64;
 
     let mut sys = sysinfo::System::new();
@@ -104,7 +104,9 @@ fn master_stack_memory_probe() -> io::Result<()> {
 
     println!("=== lumos master-stack memory probe ===");
     println!(
-        "frames        {n} × {width}×{height} mono  ({:.1} MB/frame f32)",
+        "frames        {n} × {}×{} mono  ({:.1} MB/frame f32)",
+        size.width,
+        size.height,
         bytes_per_frame as f64 / MB as f64
     );
     println!("method        {method}");
@@ -131,7 +133,7 @@ fn master_stack_memory_probe() -> io::Result<()> {
     println!("frames dir    {}", frames_dir.display());
     println!();
 
-    let frames = ensure_frames(&frames_dir, "frame", n, width, height, seed)?;
+    let frames = ensure_frames(&frames_dir, "frame", n, size, seed)?;
     println!(
         "frames ready  {} on disk ({:.2} GB){}",
         n,
@@ -196,7 +198,7 @@ fn master_stack_memory_probe() -> io::Result<()> {
     let combine_secs = total_secs - combine_start_us.load(Ordering::Relaxed) as f64 / 1e6;
     let load_secs = total_secs - combine_secs;
     let dims = result.image.dimensions();
-    let mpix = (width * height * n) as f64 / 1e6;
+    let mpix = (size.pixel_count() * n) as f64 / 1e6;
     let anon_mb = peak.anon_mb;
     let total_mb = peak.total_mb;
     let load_anon_mb = peak.ungated_anon_mb;

@@ -270,34 +270,32 @@ pub(crate) mod internals {
     use crate::image_ops::rgb::Rgb;
     use crate::io::image::linear::{self, LinearImage};
     use crate::io::image::linear_pixels;
+    use crate::math::vec2us::Vec2us;
 
     pub(crate) fn from_image(image: &Image) -> LinearImage {
         linear::linear_from_image(image)
     }
 
     impl LinearImage {
-        pub(crate) fn get_pixel_gray(&self, x: usize, y: usize) -> f32 {
-            debug_assert!(x < self.width() && y < self.height());
+        pub(crate) fn get_pixel_gray(&self, pos: Vec2us) -> f32 {
             debug_assert!(self.is_grayscale());
-            self.channel(0)[y * self.width() + x]
+            self.channel(0)[self.dimensions().size().index_of(pos)]
         }
 
-        pub(crate) fn get_pixel_gray_mut(&mut self, x: usize, y: usize) -> &mut f32 {
-            debug_assert!(x < self.width() && y < self.height());
+        pub(crate) fn get_pixel_gray_mut(&mut self, pos: Vec2us) -> &mut f32 {
             debug_assert!(self.is_grayscale());
-            let width = self.width();
-            &mut self.channel_mut(0)[y * width + x]
+            let idx = self.dimensions().size().index_of(pos);
+            &mut self.channel_mut(0)[idx]
         }
 
-        pub(crate) fn get_pixel_channel(&self, x: usize, y: usize, c: usize) -> f32 {
-            debug_assert!(x < self.width() && y < self.height() && c < self.channels());
-            self.channel(c)[y * self.width() + x]
+        pub(crate) fn get_pixel_channel(&self, pos: Vec2us, c: usize) -> f32 {
+            debug_assert!(c < self.channels());
+            self.channel(c)[self.dimensions().size().index_of(pos)]
         }
 
-        pub(crate) fn get_pixel_rgb(&self, x: usize, y: usize) -> Rgb {
-            debug_assert!(x < self.width() && y < self.height());
+        pub(crate) fn get_pixel_rgb(&self, pos: Vec2us) -> Rgb {
             debug_assert!(self.is_rgb());
-            let idx = y * self.width() + x;
+            let idx = self.dimensions().size().index_of(pos);
             Rgb {
                 r: self.channel(0)[idx],
                 g: self.channel(1)[idx],
@@ -305,10 +303,9 @@ pub(crate) mod internals {
             }
         }
 
-        pub(crate) fn set_pixel_rgb(&mut self, x: usize, y: usize, rgb: Rgb) {
-            debug_assert!(x < self.width() && y < self.height());
+        pub(crate) fn set_pixel_rgb(&mut self, pos: Vec2us, rgb: Rgb) {
             debug_assert!(self.is_rgb());
-            let idx = y * self.width() + x;
+            let idx = self.dimensions().size().index_of(pos);
             self.channel_mut(0)[idx] = rgb.r;
             self.channel_mut(1)[idx] = rgb.g;
             self.channel_mut(2)[idx] = rgb.b;

@@ -10,6 +10,7 @@
 use crate::ImageDimensions;
 use crate::io::image::linear::LinearImage;
 use crate::math::size2us::Size2us;
+use crate::math::vec2us::Vec2us;
 use crate::stacking::registration::config::{self, InterpolationMethod, WarpParams};
 use crate::stacking::registration::resample::{self, internals};
 use crate::stacking::registration::synthetic_tests::helpers;
@@ -123,8 +124,12 @@ fn assert_roundtrip(
         let warped = do_warp(&ref_buf, &forward, method);
         let restored = do_warp(&warped, &inverse, method);
 
-        let (central_ref, central_restored) =
-            extract_central_region(ref_buf.pixels(), restored.pixels(), width, height, margin);
+        let (central_ref, central_restored) = extract_central_region(
+            ref_buf.pixels(),
+            restored.pixels(),
+            Size2us::new(width, height),
+            margin,
+        );
 
         let psnr = compute_psnr(&central_ref, &central_restored, 1.0);
         let ncc = compute_ncc(&central_ref, &central_restored);
@@ -340,8 +345,7 @@ fn test_warp_with_detected_transform() {
     let (central_ref, central_aligned) = extract_central_region(
         ref_pixels.pixels(),
         warped_astro.channel(0),
-        width,
-        height,
+        Size2us::new(width, height),
         margin,
     );
 
@@ -372,8 +376,12 @@ fn test_interpolation_quality_ordering() {
         let restored = do_warp(&warped, &inverse, method);
 
         let margin = 50;
-        let (central_ref, central_restored) =
-            extract_central_region(ref_buf.pixels(), restored.pixels(), width, height, margin);
+        let (central_ref, central_restored) = extract_central_region(
+            ref_buf.pixels(),
+            restored.pixels(),
+            Size2us::new(width, height),
+            margin,
+        );
 
         let psnr = compute_psnr(&central_ref, &central_restored, 1.0);
         results.push((method, psnr));
@@ -570,19 +578,18 @@ fn test_warp_preserves_output_metadata() {
 fn extract_central_region(
     a: &[f32],
     b: &[f32],
-    width: usize,
-    height: usize,
+    size: Size2us,
     margin: usize,
 ) -> (Vec<f32>, Vec<f32>) {
-    let inner_width = width - 2 * margin;
-    let inner_height = height - 2 * margin;
+    let inner_width = size.width - 2 * margin;
+    let inner_height = size.height - 2 * margin;
 
     let mut central_a = Vec::with_capacity(inner_width * inner_height);
     let mut central_b = Vec::with_capacity(inner_width * inner_height);
 
-    for y in margin..(height - margin) {
-        for x in margin..(width - margin) {
-            let idx = y * width + x;
+    for y in margin..(size.height - margin) {
+        for x in margin..(size.width - margin) {
+            let idx = size.index_of(Vec2us::new(x, y));
             central_a.push(a[idx]);
             central_b.push(b[idx]);
         }

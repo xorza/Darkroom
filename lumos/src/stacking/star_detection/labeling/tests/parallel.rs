@@ -1,4 +1,5 @@
 use crate::math::size2us::Size2us;
+use crate::math::vec2us::Vec2us;
 use crate::stacking::star_detection::labeling::tests::*;
 
 #[test]
@@ -262,28 +263,29 @@ fn all_pixels_set_large() {
 fn compare_sequential_parallel() {
     // Compare results between sequential and parallel paths
     // by testing same pattern at different sizes
-    let pattern_test = |width: usize, height: usize| {
-        let mut mask_data = vec![false; width * height];
+    let pattern_test = |size: Size2us| {
+        let mut mask_data = vec![false; size.pixel_count()];
 
         // Create a pattern: horizontal lines every 10 rows
-        for y in (5..height).step_by(10) {
-            for x in 10..(width - 10) {
-                mask_data[y * width + x] = true;
+        for y in (5..size.height).step_by(10) {
+            for x in 10..(size.width - 10) {
+                mask_data[size.index_of(Vec2us::new(x, y))] = true;
             }
         }
 
-        let mask = BitBuffer2::from_slice(Size2us::new(width, height), &mask_data);
+        let mask = BitBuffer2::from_slice(size, &mask_data);
         let label_map = label_map_from_mask_with_connectivity(&mask, Connectivity::Four);
 
         // Count expected: one component per line
-        let expected_lines = (height - 5) / 10 + if (height - 5) % 10 >= 1 { 1 } else { 0 };
+        let expected_lines =
+            (size.height - 5) / 10 + if (size.height - 5) % 10 >= 1 { 1 } else { 0 };
         (label_map.num_labels(), expected_lines)
     };
 
     // Small (sequential path)
-    let (small_labels, small_expected) = pattern_test(100, 100);
+    let (small_labels, small_expected) = pattern_test(Size2us::new(100, 100));
     // Large (parallel path)
-    let (large_labels, large_expected) = pattern_test(400, 300);
+    let (large_labels, large_expected) = pattern_test(Size2us::new(400, 300));
 
     assert_eq!(small_labels, small_expected);
     assert_eq!(large_labels, large_expected);

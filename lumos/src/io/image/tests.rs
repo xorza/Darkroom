@@ -8,6 +8,7 @@ use crate::io::image::cfa::CfaImage;
 use crate::io::image::linear::{LinearImage, internals};
 use crate::io::image::*;
 use crate::io::raw;
+use crate::math::vec2us::Vec2us;
 use crate::stacking::frame_store::StackableImage;
 #[cfg(feature = "real-data")]
 use common::CancelToken;
@@ -114,7 +115,7 @@ fn test_load_full_example_fits() {
     assert_eq!(image.metadata.bitpix, BitPix::Int32);
     assert_eq!(image.metadata.header_dimensions, vec![100, 100]);
 
-    let pixel = image.get_pixel_gray(5, 20);
+    let pixel = image.get_pixel_gray(Vec2us::new(5, 20));
     assert_eq!(pixel, 152.0);
 
     // No BAYERPAT header → cfa_type is None
@@ -388,12 +389,12 @@ fn test_get_pixel_gray() {
         vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
     );
 
-    assert_eq!(image.get_pixel_gray(0, 0), 1.0);
-    assert_eq!(image.get_pixel_gray(2, 0), 3.0);
-    assert_eq!(image.get_pixel_gray(0, 1), 4.0);
-    assert_eq!(image.get_pixel_gray(2, 1), 6.0);
-    assert_eq!(image.get_pixel_channel(1, 0, 0), 2.0);
-    assert_eq!(image.get_pixel_channel(1, 1, 0), 5.0);
+    assert_eq!(image.get_pixel_gray(Vec2us::new(0, 0)), 1.0);
+    assert_eq!(image.get_pixel_gray(Vec2us::new(2, 0)), 3.0);
+    assert_eq!(image.get_pixel_gray(Vec2us::new(0, 1)), 4.0);
+    assert_eq!(image.get_pixel_gray(Vec2us::new(2, 1)), 6.0);
+    assert_eq!(image.get_pixel_channel(Vec2us::new(1, 0), 0), 2.0);
+    assert_eq!(image.get_pixel_channel(Vec2us::new(1, 1), 0), 5.0);
 }
 
 #[test]
@@ -405,18 +406,18 @@ fn test_get_pixel_channel_rgb() {
         ],
     );
 
-    assert_eq!(image.get_pixel_channel(0, 0, 0), 1.0);
-    assert_eq!(image.get_pixel_channel(0, 0, 1), 2.0);
-    assert_eq!(image.get_pixel_channel(0, 0, 2), 3.0);
-    assert_eq!(image.get_pixel_channel(1, 0, 0), 4.0);
-    assert_eq!(image.get_pixel_channel(1, 0, 1), 5.0);
-    assert_eq!(image.get_pixel_channel(1, 0, 2), 6.0);
-    assert_eq!(image.get_pixel_channel(0, 1, 0), 7.0);
-    assert_eq!(image.get_pixel_channel(0, 1, 1), 8.0);
-    assert_eq!(image.get_pixel_channel(0, 1, 2), 9.0);
-    assert_eq!(image.get_pixel_channel(1, 1, 0), 10.0);
-    assert_eq!(image.get_pixel_channel(1, 1, 1), 11.0);
-    assert_eq!(image.get_pixel_channel(1, 1, 2), 12.0);
+    assert_eq!(image.get_pixel_channel(Vec2us::new(0, 0), 0), 1.0);
+    assert_eq!(image.get_pixel_channel(Vec2us::new(0, 0), 1), 2.0);
+    assert_eq!(image.get_pixel_channel(Vec2us::new(0, 0), 2), 3.0);
+    assert_eq!(image.get_pixel_channel(Vec2us::new(1, 0), 0), 4.0);
+    assert_eq!(image.get_pixel_channel(Vec2us::new(1, 0), 1), 5.0);
+    assert_eq!(image.get_pixel_channel(Vec2us::new(1, 0), 2), 6.0);
+    assert_eq!(image.get_pixel_channel(Vec2us::new(0, 1), 0), 7.0);
+    assert_eq!(image.get_pixel_channel(Vec2us::new(0, 1), 1), 8.0);
+    assert_eq!(image.get_pixel_channel(Vec2us::new(0, 1), 2), 9.0);
+    assert_eq!(image.get_pixel_channel(Vec2us::new(1, 1), 0), 10.0);
+    assert_eq!(image.get_pixel_channel(Vec2us::new(1, 1), 1), 11.0);
+    assert_eq!(image.get_pixel_channel(Vec2us::new(1, 1), 2), 12.0);
 }
 
 #[test]
@@ -490,7 +491,7 @@ fn test_get_pixel_rgb() {
     );
 
     assert_eq!(
-        image.get_pixel_rgb(0, 0),
+        image.get_pixel_rgb(Vec2us::new(0, 0)),
         Rgb {
             r: 1.0,
             g: 2.0,
@@ -498,7 +499,7 @@ fn test_get_pixel_rgb() {
         }
     );
     assert_eq!(
-        image.get_pixel_rgb(1, 0),
+        image.get_pixel_rgb(Vec2us::new(1, 0)),
         Rgb {
             r: 4.0,
             g: 5.0,
@@ -515,8 +516,7 @@ fn test_set_pixel_rgb() {
     );
 
     image.set_pixel_rgb(
-        0,
-        0,
+        Vec2us::new(0, 0),
         Rgb {
             r: 1.0,
             g: 2.0,
@@ -524,8 +524,7 @@ fn test_set_pixel_rgb() {
         },
     );
     image.set_pixel_rgb(
-        1,
-        0,
+        Vec2us::new(1, 0),
         Rgb {
             r: 4.0,
             g: 5.0,
@@ -534,7 +533,7 @@ fn test_set_pixel_rgb() {
     );
 
     assert_eq!(
-        image.get_pixel_rgb(0, 0),
+        image.get_pixel_rgb(Vec2us::new(0, 0)),
         Rgb {
             r: 1.0,
             g: 2.0,
@@ -542,7 +541,7 @@ fn test_set_pixel_rgb() {
         }
     );
     assert_eq!(
-        image.get_pixel_rgb(1, 0),
+        image.get_pixel_rgb(Vec2us::new(1, 0)),
         Rgb {
             r: 4.0,
             g: 5.0,
@@ -556,11 +555,11 @@ fn test_get_pixel_gray_mut() {
     let mut image =
         LinearImage::from_pixels(ImageDimensions::new((2, 2), 1), vec![1.0, 2.0, 3.0, 4.0]);
 
-    *image.get_pixel_gray_mut(0, 0) = 10.0;
-    *image.get_pixel_gray_mut(1, 1) = 40.0;
+    *image.get_pixel_gray_mut(Vec2us::new(0, 0)) = 10.0;
+    *image.get_pixel_gray_mut(Vec2us::new(1, 1)) = 40.0;
 
-    assert_eq!(image.get_pixel_gray(0, 0), 10.0);
-    assert_eq!(image.get_pixel_gray(1, 1), 40.0);
+    assert_eq!(image.get_pixel_gray(Vec2us::new(0, 0)), 10.0);
+    assert_eq!(image.get_pixel_gray(Vec2us::new(1, 1)), 40.0);
 }
 
 #[test]

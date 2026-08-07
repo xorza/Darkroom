@@ -138,7 +138,7 @@ fn bench_markesteijn_quality_vs_libraw() {
     let border = 6;
 
     println!("\n--- Ours vs libraw 1-pass (linear regression normalized) ---");
-    let ours_vs_one = compare_images(&ours, &reference, width, height, border);
+    let ours_vs_one = compare_images(&ours, &reference, Size2us::new(width, height), border);
     for (name, stats) in ["Red", "Green", "Blue"].iter().zip(&ours_vs_one.channels) {
         println!(
             "  {}: MAE={:.6}, max={:.6}, PSNR={:.1}dB, r={:.6}  (scale={:.4}, offset={:.6})",
@@ -168,8 +168,8 @@ fn bench_markesteijn_quality_vs_libraw() {
         ref3_time.as_secs_f64() * 1000.0
     );
 
-    let ours_vs_three = compare_images(&ours, &ref3, width, height, border);
-    let one_vs_three = compare_images(&reference, &ref3, width, height, border);
+    let ours_vs_three = compare_images(&ours, &ref3, Size2us::new(width, height), border);
+    let one_vs_three = compare_images(&reference, &ref3, Size2us::new(width, height), border);
     println!(
         "  Ours vs 3-pass:   avg MAE={:.6}, chroma mean={:.6}, max={:.6}",
         ours_vs_three.average_mae,
@@ -332,8 +332,12 @@ fn bench_bayer_rcd_quality_vs_libraw() {
         println!("  --- Ours vs libraw {label} (linear regression normalized) ---");
         let mut overall_mae = 0.0f64;
         for (c, name) in channel_names.iter().enumerate() {
-            let stats =
-                compare_channels(ours.channel(c), reference.channel(c), width, height, border);
+            let stats = compare_channels(
+                ours.channel(c),
+                reference.channel(c),
+                Size2us::new(width, height),
+                border,
+            );
             println!(
                 "    {}: MAE={:.6}, PSNR={:.1}dB, r={:.6}  (scale={:.4}, offset={:.6})",
                 name, stats.mae, stats.psnr, stats.correlation, stats.scale, stats.offset,
@@ -439,21 +443,14 @@ struct ImageCompareStats {
 fn compare_images(
     a: &LinearImage,
     b: &LinearImage,
-    width: usize,
-    height: usize,
+    size: Size2us,
     border: usize,
 ) -> ImageCompareStats {
     let channels = std::array::from_fn(|channel| {
-        compare_channels(
-            a.channel(channel),
-            b.channel(channel),
-            width,
-            height,
-            border,
-        )
+        compare_channels(a.channel(channel), b.channel(channel), size, border)
     });
     let average_mae = channels.iter().map(|stats| stats.mae).sum::<f64>() / 3.0;
-    let color_structure = compare_color_structure(a, b, &channels, width, height, border);
+    let color_structure = compare_color_structure(a, b, &channels, size, border);
 
     ImageCompareStats {
         channels,
@@ -466,17 +463,16 @@ fn compare_color_structure(
     a: &LinearImage,
     b: &LinearImage,
     transforms: &[ChannelCompareStats; 3],
-    width: usize,
-    height: usize,
+    size: Size2us,
     border: usize,
 ) -> ColorStructureStats {
     let mut sum = 0.0;
     let mut max = 0.0_f64;
     let mut count = 0usize;
 
-    for y in border..(height - border) {
-        for x in border..(width - border) {
-            let index = y * width + x;
+    for y in border..(size.height - border) {
+        for x in border..(size.width - border) {
+            let index = size.index_of(Vec2us::new(x, y));
             let mut predicted = [0.0; 3];
             let mut actual = [0.0; 3];
             for channel in 0..3 {
@@ -504,8 +500,7 @@ fn compare_color_structure(
 fn compare_channels(
     a: &imaginarium::Buffer2<f32>,
     b: &imaginarium::Buffer2<f32>,
-    width: usize,
-    height: usize,
+    size: Size2us,
     border: usize,
 ) -> ChannelCompareStats {
     // Linear regression: b ~ scale * a + offset
@@ -516,9 +511,9 @@ fn compare_channels(
     let mut sum_b2 = 0.0f64;
     let mut n = 0u64;
 
-    for y in border..(height - border) {
-        for x in border..(width - border) {
-            let idx = y * width + x;
+    for y in border..(size.height - border) {
+        for x in border..(size.width - border) {
+            let idx = size.index_of(Vec2us::new(x, y));
             let av = a[idx] as f64;
             let bv = b[idx] as f64;
             sum_a += av;
@@ -546,9 +541,9 @@ fn compare_channels(
     let mut max_abs = 0.0_f64;
     let mean_b = sum_b / nf;
 
-    for y in border..(height - border) {
-        for x in border..(width - border) {
-            let idx = y * width + x;
+    for y in border..(size.height - border) {
+        for x in border..(size.width - border) {
+            let idx = size.index_of(Vec2us::new(x, y));
             let predicted = (a[idx] as f64) * scale + offset;
             let actual = b[idx] as f64;
             let diff = predicted - actual;
@@ -585,7 +580,7 @@ fn compare_channels(
 fn quality_comparison_removes_affine_color_and_measures_chroma_residuals() {
     let source = imaginarium::Buffer2::new(3, 1, vec![0.0, 1.0, 2.0]);
     let reference = imaginarium::Buffer2::new(3, 1, vec![1.0, 3.0, 5.0]);
-    let channel = compare_channels(&source, &reference, 3, 1, 0);
+    let channel = compare_channels(&source, &reference, Size2us::new(3, 1), 0);
     assert!((channel.scale - 2.0).abs() < 1e-12);
     assert!((channel.offset - 1.0).abs() < 1e-12);
     assert_eq!(channel.mae, 0.0);
@@ -603,7 +598,7 @@ fn quality_comparison_removes_affine_color_and_measures_chroma_residuals() {
         scale: 1.0,
         offset: 0.0,
     });
-    let chroma = compare_color_structure(&black, &colored, &transforms, 1, 1, 0);
+    let chroma = compare_color_structure(&black, &colored, &transforms, Size2us::new(1, 1), 0);
     let expected = 20.0_f64.sqrt();
     assert!((chroma.mean - expected).abs() < 1e-12);
     assert!((chroma.max - expected).abs() < 1e-12);

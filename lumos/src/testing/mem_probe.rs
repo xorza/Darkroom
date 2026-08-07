@@ -211,14 +211,8 @@ fn synth_frame_u16(size: Size2us, frame_idx: usize, seed: u64) -> Vec<u16> {
 /// Write `data` as a 16-bit (BITPIX=16, BZERO=32768) FITS image, reusing `buf` as the encode scratch
 /// so a whole stack allocates it once. `std::fs::write` flushes reliably (unlike a `BufWriter`
 /// dropped inside the FITS writer).
-fn write_fits_u16(
-    path: &Path,
-    width: usize,
-    height: usize,
-    data: &[u16],
-    buf: &mut Vec<u8>,
-) -> io::Result<()> {
-    let image = Image::from_u16(vec![width, height], data).map_err(io::Error::other)?;
+fn write_fits_u16(path: &Path, size: Size2us, data: &[u16], buf: &mut Vec<u8>) -> io::Result<()> {
+    let image = Image::from_u16(vec![size.width, size.height], data).map_err(io::Error::other)?;
     buf.clear();
     FitsWriter::new(&mut *buf)
         .write_image(&image)
@@ -242,8 +236,7 @@ pub(crate) fn ensure_frames(
     dir: &Path,
     prefix: &str,
     n: usize,
-    width: usize,
-    height: usize,
+    size: Size2us,
     seed: u64,
 ) -> io::Result<FrameSet> {
     std::fs::create_dir_all(dir)?;
@@ -258,8 +251,8 @@ pub(crate) fn ensure_frames(
         if path.exists() {
             continue;
         }
-        let data = synth_frame_u16(Size2us::new(width, height), i, seed);
-        write_fits_u16(path, width, height, &data, &mut buf)?;
+        let data = synth_frame_u16(size, i, seed);
+        write_fits_u16(path, size, &data, &mut buf)?;
         generated += 1;
         print!("\r  generating {prefix} frames… {}/{}", i + 1, n);
         io::stdout().flush().ok();

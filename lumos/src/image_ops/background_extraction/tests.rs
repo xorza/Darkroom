@@ -2,20 +2,21 @@ use crate::image_ops::background_extraction::*;
 use crate::image_ops::internals::{channel_plane as channel, gray_image, rgb_image as rgb};
 use crate::image_ops::op::OpError;
 use crate::math::size2us::Size2us;
+use crate::math::vec2us::Vec2us;
 use imaginarium::Image;
 
-fn fill(w: usize, h: usize, f: impl Fn(usize, usize) -> f32) -> Vec<f32> {
-    let mut v = vec![0.0f32; w * h];
-    for y in 0..h {
-        for x in 0..w {
-            v[y * w + x] = f(x, y);
+fn fill(size: Size2us, f: impl Fn(usize, usize) -> f32) -> Vec<f32> {
+    let mut v = vec![0.0f32; size.pixel_count()];
+    for y in 0..size.height {
+        for x in 0..size.width {
+            v[size.index_of(Vec2us::new(x, y))] = f(x, y);
         }
     }
     v
 }
 
 fn gray(size: Size2us, f: impl Fn(usize, usize) -> f32) -> Image {
-    gray_image(size, fill(size.width, size.height, f))
+    gray_image(size, fill(size, f))
 }
 
 fn max_abs(p: &[f32]) -> f32 {
@@ -54,10 +55,10 @@ fn effective_degree_fits_within_samples() {
 
 #[test]
 fn subtract_removes_linear_gradient() {
-    let (w, h) = (200, 160);
+    let size = Size2us::new(200, 160);
     // a + b·x + c·y over [0.5, 0.5+0.16+0.096] — a pure additive plane, no signal.
     let plane = |x: usize, y: usize| 0.5 + 0.0008 * x as f32 + 0.0006 * y as f32;
-    let mut img = gray(Size2us::new(w, h), plane);
+    let mut img = gray(size, plane);
     ExtractBackground {
         degree: 1,
         tile_size: 40,
@@ -72,11 +73,14 @@ fn subtract_removes_linear_gradient() {
 
 #[test]
 fn subtract_removes_pedestal_keeps_stars() {
-    let (w, h) = (128, 128);
+    let size = Size2us::new(128, 128);
     let stars = [(10, 10), (50, 80), (100, 30), (70, 70), (20, 110)];
-    let mut img = gray(Size2us::new(w, h), |x, y| {
-        if stars.contains(&(x, y)) { 0.95 } else { 0.3 }
-    });
+    let mut img = gray(
+        size,
+        |x, y| {
+            if stars.contains(&(x, y)) { 0.95 } else { 0.3 }
+        },
+    );
     ExtractBackground {
         degree: 2,
         tile_size: 32,
@@ -88,11 +92,11 @@ fn subtract_removes_pedestal_keeps_stars() {
     // Per-tile sigma-clip rejects the lone star pixel, so the modeled sky is the 0.3 pedestal:
     // background → ~0, the star (0.95 − 0.3 = 0.65) survives.
     assert!(
-        out[60 * w + 10].abs() < 0.02,
+        out[size.index_of(Vec2us::new(10, 60))].abs() < 0.02,
         "background → ~0, got {}",
-        out[60 * w + 10]
+        out[size.index_of(Vec2us::new(10, 60))]
     );
-    let star = out[10 * w + 10];
+    let star = out[size.index_of(Vec2us::new(10, 10))];
     assert!(
         star > 0.55,
         "star signal survives the subtraction, got {star}"
@@ -101,7 +105,7 @@ fn subtract_removes_pedestal_keeps_stars() {
 
 #[test]
 fn divide_corrects_quadratic_vignette() {
-    let (w, h) = (160, 160);
+    let size = Size2us::new(160, 160);
     let (cx, cy) = (79.5f32, 79.5f32);
     // 1 − 0.3·(r²) ∈ [0.7, 1.0] — a smooth multiplicative falloff the master flat missed.
     let vignette = |x: usize, y: usize| {
@@ -110,7 +114,7 @@ fn divide_corrects_quadratic_vignette() {
         1.0 - 0.3 * r2
     };
     let signal = 0.5f32;
-    let mut img = gray(Size2us::new(w, h), |x, y| signal * vignette(x, y));
+    let mut img = gray(size, |x, y| signal * vignette(x, y));
     ExtractBackground {
         degree: 2,
         tile_size: 20,
@@ -131,13 +135,13 @@ fn divide_corrects_quadratic_vignette() {
 
 #[test]
 fn higher_degree_fits_cubic_better() {
-    let (w, h) = (180, 180);
+    let size = Size2us::new(180, 180);
     let cubic = |x: usize, y: usize| {
-        let (nx, ny) = (x as f32 / w as f32, y as f32 / h as f32);
+        let (nx, ny) = (x as f32 / size.width as f32, y as f32 / size.height as f32);
         0.4 + 0.2 * nx - 0.3 * nx * nx + 0.25 * nx * nx * nx + 0.15 * ny * ny * ny
     };
     let resid_energy = |degree| {
-        let mut img = gray(Size2us::new(w, h), cubic);
+        let mut img = gray(size, cubic);
         ExtractBackground {
             degree,
             tile_size: 20,
@@ -156,7 +160,7 @@ fn higher_degree_fits_cubic_better() {
     );
     // deg-3 removes the cubic to a tight per-pixel residual (only tile-sampling error remains —
     // ~0.2% RMS over a ~0.15-wide range).
-    let rms3 = (e3 / (w * h) as f64).sqrt();
+    let rms3 = (e3 / size.pixel_count() as f64).sqrt();
     assert!(
         rms3 < 2e-3,
         "deg-3 essentially removes the cubic: residual RMS {rms3:.2e}"
@@ -165,12 +169,12 @@ fn higher_degree_fits_cubic_better() {
 
 #[test]
 fn removes_independent_per_channel_gradients() {
-    let (w, h) = (120, 100);
+    let size = Size2us::new(120, 100);
     // A different additive gradient in each channel (coloured light pollution).
-    let r = fill(w, h, |x, _| 0.40 + 0.0010 * x as f32);
-    let g = fill(w, h, |_, y| 0.30 + 0.0008 * y as f32);
-    let b = fill(w, h, |x, y| 0.50 - 0.0005 * x as f32 + 0.0006 * y as f32);
-    let mut img = rgb(Size2us::new(w, h), r, g, b);
+    let r = fill(size, |x, _| 0.40 + 0.0010 * x as f32);
+    let g = fill(size, |_, y| 0.30 + 0.0008 * y as f32);
+    let b = fill(size, |x, y| 0.50 - 0.0005 * x as f32 + 0.0006 * y as f32);
+    let mut img = rgb(size, r, g, b);
     ExtractBackground {
         degree: 1,
         tile_size: 20,

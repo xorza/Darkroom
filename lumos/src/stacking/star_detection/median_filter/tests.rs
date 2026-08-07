@@ -355,8 +355,7 @@ fn median_at_side_edges() {
 fn median_at_edge_truth_table() {
     #[derive(Debug)]
     struct EdgeMedianCase {
-        x: usize,
-        y: usize,
+        pos: Vec2us,
         expected: f32,
     }
 
@@ -369,39 +368,33 @@ fn median_at_edge_truth_table() {
     ];
     let cases = [
         EdgeMedianCase {
-            x: 0,
-            y: 0,
+            pos: Vec2us::new(0, 0),
             expected: 0.35,
         },
         EdgeMedianCase {
-            x: 3,
-            y: 0,
+            pos: Vec2us::new(3, 0),
             expected: 0.55,
         },
         EdgeMedianCase {
-            x: 0,
-            y: 3,
+            pos: Vec2us::new(0, 3),
             expected: 1.15,
         },
         EdgeMedianCase {
-            x: 3,
-            y: 3,
+            pos: Vec2us::new(3, 3),
             expected: 1.35,
         },
         EdgeMedianCase {
-            x: 1,
-            y: 0,
+            pos: Vec2us::new(1, 0),
             expected: 0.4,
         },
         EdgeMedianCase {
-            x: 1,
-            y: 3,
+            pos: Vec2us::new(1, 3),
             expected: 1.2,
         },
     ];
 
     for case in cases {
-        let actual = median_at_edge(&pixels, Size2us::new(4, 4), Vec2us::new(case.x, case.y));
+        let actual = median_at_edge(&pixels, Size2us::new(4, 4), case.pos);
         assert!((actual - case.expected).abs() < 1e-6, "{case:?}");
     }
 }
