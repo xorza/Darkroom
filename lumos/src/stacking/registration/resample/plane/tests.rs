@@ -402,9 +402,9 @@ fn lanczos_homography_horizon_uses_border_and_zero_coverage() {
 
 #[test]
 fn warp_tiny_image_smaller_than_lanczos4_kernel() {
-    let (w, h) = (3, 3);
-    let input = Buffer2::new_filled(w, h, 0.5f32);
-    let mut output = Buffer2::new_default(w, h);
+    let size = Size2us::new(3, 3);
+    let input = Buffer2::new_filled(size.width, size.height, 0.5f32);
+    let mut output = Buffer2::new_default(size.width, size.height);
     let wt = WarpTransform::new(Transform::identity());
     let params = config::internals::warp_params(InterpolationMethod::Lanczos4);
     plane::warp(&input, &mut output, &wt, &params);

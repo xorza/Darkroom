@@ -111,16 +111,21 @@ fn builds_full_master_set() {
     assert!(masters.flat_dark.is_none());
 
     // All masters share the single sensor geometry (one CFA plane each).
-    let (w, h) = (dark.data.width(), dark.data.height());
-    assert!(w > 0 && h > 0, "degenerate master dimensions {w}x{h}");
+    let size = Size2us::new(dark.data.width(), dark.data.height());
+    assert!(
+        size.width > 0 && size.height > 0,
+        "degenerate master dimensions {}x{}",
+        size.width,
+        size.height
+    );
     assert_eq!(
         (flat.data.width(), flat.data.height()),
-        (w, h),
+        (size.width, size.height),
         "flat master dimensions differ from dark"
     );
     assert_eq!(
         (bias.data.width(), bias.data.height()),
-        (w, h),
+        (size.width, size.height),
         "bias master dimensions differ from dark"
     );
 

@@ -1,4 +1,5 @@
 use crate::math::size2us::Size2us;
+use crate::math::vec2us::Vec2us;
 use crate::stacking::star_detection::centroid::internals::{
     make_elliptical_star as make_elliptical_gaussian, make_moffat_star,
 };
@@ -252,11 +253,11 @@ fn test_moffat_fit_fwhm_more_accurate_than_moments() {
 fn windowed_covariance_recovers_gaussian_sigma() {
     // A clean round Gaussian of σ=2.5: the window deconvolution must recover σ²
     // on both axes (unbiased FWHM) with a ~zero cross term (round → ecc ≈ 0).
-    let (width, height) = (64, 64);
+    let size = Size2us::new(64, 64);
     let pos = Vec2::new(32.0, 32.0);
     let sigma = 2.5f32;
-    let pixels = make_gaussian_star(Size2us::new(width, height), pos, sigma, 1.0, 0.0);
-    let bg = background_map::uniform(Size2us::new(width, height), 0.0, 1.0);
+    let pixels = make_gaussian_star(size, pos, sigma, 1.0, 0.0);
+    let bg = background_map::uniform(size, 0.0, 1.0);
 
     let cov = windowed_covariance(&pixels, &bg, None, pos, 12, (sigma * sigma) as f64)
         .expect("clean Gaussian should converge");
@@ -284,11 +285,11 @@ fn windowed_covariance_recovers_elliptical_axes() {
     // An elliptical Gaussian (σx=3, σy=2): a circular window is isotropic, so its
     // deconvolution recovers both axis variances exactly — the measurement must
     // not circularize the source (otherwise eccentricity would be lost).
-    let (width, height) = (64, 64);
+    let size = Size2us::new(64, 64);
     let pos = Vec2::new(32.0, 32.0);
     let (sx, sy) = (3.0f32, 2.0f32);
-    let pixels = make_elliptical_star(Size2us::new(width, height), pos, sx, sy, 1.0, 0.0);
-    let bg = background_map::uniform(Size2us::new(width, height), 0.0, 1.0);
+    let pixels = make_elliptical_star(size, pos, sx, sy, 1.0, 0.0);
+    let bg = background_map::uniform(size, 0.0, 1.0);
 
     let seed = ((sx * sx + sy * sy) / 2.0) as f64;
     let cov = windowed_covariance(&pixels, &bg, None, pos, 14, seed)
@@ -320,12 +321,12 @@ fn windowed_covariance_resists_wing_noise() {
     // The PR2 failure mode: signed moments over a fixed stamp sum in far-wing
     // noise, which inflates eccentricity for round stars. The window must suppress
     // it — a round noisy star stays ~circular.
-    let (width, height) = (64, 64);
+    let size = Size2us::new(64, 64);
     let pos = Vec2::new(32.0, 32.0);
     let sigma = 2.5f32;
-    let mut pixels = make_gaussian_star(Size2us::new(width, height), pos, sigma, 1.0, 0.1);
+    let mut pixels = make_gaussian_star(size, pos, sigma, 1.0, 0.1);
     add_noise(pixels.pixels_mut(), 0.03, 12345);
-    let bg = background_map::uniform(Size2us::new(width, height), 0.1, 1.0);
+    let bg = background_map::uniform(size, 0.1, 1.0);
 
     let cov = windowed_covariance(&pixels, &bg, None, pos, 12, (sigma * sigma) as f64)
         .expect("noisy Gaussian should still converge");

@@ -6,6 +6,7 @@
 //! per-tile mappings. Brings out medium-scale structure (dust lanes, nebula filaments). Runs on the
 //! combined intensity and scales channels by `f(I)/I` so hue is preserved.
 
+use crate::math::size2us::Size2us;
 use imaginarium::Buffer2;
 use rayon::prelude::*;
 
@@ -117,13 +118,13 @@ fn clahe_map(intensity: &Buffer2<f32>, config: &LocalContrast) -> Buffer2<f32> {
 
 /// One mapping LUT per tile (`tiles*tiles`, row-major), each `bin → [0,1]` from the clipped CDF.
 fn build_tile_luts(intensity: &Buffer2<f32>, tiles: usize, clip_limit: f32) -> Vec<[f32; N_BINS]> {
-    let (w, h) = (intensity.width(), intensity.height());
-    let (tw, th) = (w.div_ceil(tiles), h.div_ceil(tiles));
+    let size = Size2us::new(intensity.width(), intensity.height());
+    let (tw, th) = (size.width.div_ceil(tiles), size.height.div_ceil(tiles));
     let mut luts = vec![[0.0f32; N_BINS]; tiles * tiles];
     luts.par_iter_mut().enumerate().for_each(|(idx, lut)| {
         let (tx, ty) = (idx % tiles, idx / tiles);
-        let (x0, x1) = (tx * tw, ((tx + 1) * tw).min(w));
-        let (y0, y1) = (ty * th, ((ty + 1) * th).min(h));
+        let (x0, x1) = (tx * tw, ((tx + 1) * tw).min(size.width));
+        let (y0, y1) = (ty * th, ((ty + 1) * th).min(size.height));
 
         let mut hist = [0u32; N_BINS];
         let mut count = 0u32;
@@ -175,12 +176,15 @@ fn apply_luts(
     tiles: usize,
     strength: f32,
 ) -> Buffer2<f32> {
-    let (w, h) = (intensity.width(), intensity.height());
-    let (tw, th) = (w.div_ceil(tiles) as f32, h.div_ceil(tiles) as f32);
+    let size = Size2us::new(intensity.width(), intensity.height());
+    let (tw, th) = (
+        size.width.div_ceil(tiles) as f32,
+        size.height.div_ceil(tiles) as f32,
+    );
     let last = tiles as f32 - 1.0;
-    let mut out = Buffer2::new_default(w, h);
+    let mut out = Buffer2::new_default(size.width, size.height);
     out.pixels_mut()
-        .par_chunks_mut(w)
+        .par_chunks_mut(size.width)
         .enumerate()
         .for_each(|(y, orow)| {
             // Fractional tile-centre position of this row (tile ty centred at (ty+0.5)·th).
@@ -189,7 +193,7 @@ fn apply_luts(
             let ty1 = (ty0 + 1).min(tiles - 1);
             let fy = gy - ty0 as f32;
             let irow = intensity.row(y);
-            for x in 0..w {
+            for x in 0..size.width {
                 let v = irow[x];
                 let b = bin_of(v);
                 let gx = ((x as f32 + 0.5) / tw - 0.5).clamp(0.0, last);

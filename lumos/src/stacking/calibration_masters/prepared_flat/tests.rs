@@ -118,17 +118,17 @@ fn prepared_flat_matches_hand_computed_mono_calibration() {
 #[test]
 fn prepared_flat_is_bit_exact_for_bayer_and_xtrans_with_subtraction() {
     for cfa_type in [CfaType::Bayer(CfaPattern::Rggb), standard_xtrans()] {
-        let (width, height) = match cfa_type {
-            CfaType::Bayer(_) => (4, 4),
-            CfaType::XTrans(_) => (6, 6),
+        let size = match cfa_type {
+            CfaType::Bayer(_) => Size2us::new(4, 4),
+            CfaType::XTrans(_) => Size2us::new(6, 6),
             CfaType::Mono => unreachable!(),
         };
         let means = [0.5f32, 1.0, 0.25];
         let mut counts = [0usize; 3];
-        let mut flat_pixels = Vec::with_capacity(width * height);
-        let mut expected_divisors = Vec::with_capacity(width * height);
-        for y in 0..height {
-            for x in 0..width {
+        let mut flat_pixels = Vec::with_capacity(size.pixel_count());
+        let mut expected_divisors = Vec::with_capacity(size.pixel_count());
+        for y in 0..size.height {
+            for x in 0..size.width {
                 let color = cfa_type.color_at(Vec2us::new(x, y)) as usize;
                 let divisor = if counts[color].is_multiple_of(2) {
                     0.5
@@ -141,12 +141,8 @@ fn prepared_flat_is_bit_exact_for_bayer_and_xtrans_with_subtraction() {
             }
         }
 
-        let flat = make_cfa(Size2us::new(width, height), flat_pixels, cfa_type.clone());
-        let subtractor = make_cfa(
-            Size2us::new(width, height),
-            vec![0.125; width * height],
-            cfa_type.clone(),
-        );
+        let flat = make_cfa(size, flat_pixels, cfa_type.clone());
+        let subtractor = make_cfa(size, vec![0.125; size.pixel_count()], cfa_type.clone());
         let prepared = prepare(flat, Some(&subtractor));
         assert_eq!(
             prepared
@@ -160,11 +156,7 @@ fn prepared_flat_is_bit_exact_for_bayer_and_xtrans_with_subtraction() {
                 .collect::<Vec<_>>()
         );
 
-        let mut light = make_cfa(
-            Size2us::new(width, height),
-            vec![0.75; width * height],
-            cfa_type,
-        );
+        let mut light = make_cfa(size, vec![0.75; size.pixel_count()], cfa_type);
         apply(&prepared, &mut light);
         let expected = expected_divisors
             .iter()

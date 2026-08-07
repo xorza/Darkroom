@@ -17,9 +17,9 @@ const INTERPOLATION_METHODS: [InterpolationMethod; 6] = [
 
 #[test]
 fn warp_coverage_nearest_identity_is_all_ones() {
-    let (w, h) = (8, 8);
+    let size = Size2us::new(8, 8);
     let wt = WarpTransform::new(Transform::identity());
-    let cov = quality::maps(Size2us::new(w, h), &wt, InterpolationMethod::Nearest).coverage;
+    let cov = quality::maps(size, &wt, InterpolationMethod::Nearest).coverage;
     for &c in cov.pixels() {
         assert!(
             (c - 1.0).abs() < TOL,
@@ -30,10 +30,10 @@ fn warp_coverage_nearest_identity_is_all_ones() {
 
 #[test]
 fn warp_coverage_fully_outside_is_zero() {
-    let (w, h) = (8, 8);
+    let size = Size2us::new(8, 8);
     // Source translated far outside the image: every kernel tap is out of bounds.
     let wt = WarpTransform::new(Transform::translation(DVec2::new(1000.0, 1000.0)));
-    let cov = quality::maps(Size2us::new(w, h), &wt, InterpolationMethod::Bilinear).coverage;
+    let cov = quality::maps(size, &wt, InterpolationMethod::Bilinear).coverage;
     for &c in cov.pixels() {
         assert_eq!(c, 0.0, "fully-outside coverage must be 0, got {c}");
     }
@@ -41,18 +41,18 @@ fn warp_coverage_fully_outside_is_zero() {
 
 #[test]
 fn warp_coverage_bilinear_edge_is_partial() {
-    let (w, h) = (8, 8);
+    let size = Size2us::new(8, 8);
     // Output (0,4) maps to src (-0.5, 4.0): the 2×2 bilinear footprint straddles the left
     // edge — taps at x=-1 (out, weight 0.5) and x=0 (in, weight 0.5) → coverage 0.5.
     let wt = WarpTransform::new(Transform::translation(DVec2::new(-0.5, 0.0)));
-    let cov = quality::maps(Size2us::new(w, h), &wt, InterpolationMethod::Bilinear).coverage;
-    let edge = cov.pixels()[4 * w];
+    let cov = quality::maps(size, &wt, InterpolationMethod::Bilinear).coverage;
+    let edge = cov.pixels()[4 * size.width];
     assert!(
         (edge - 0.5).abs() < TOL,
         "left-edge bilinear coverage should be 0.5, got {edge}"
     );
     // An interior output pixel maps fully in bounds → coverage 1.0.
-    let interior = cov.pixels()[4 * w + 4];
+    let interior = cov.pixels()[4 * size.width + 4];
     assert!(
         (interior - 1.0).abs() < TOL,
         "interior coverage should be 1.0, got {interior}"

@@ -98,10 +98,10 @@ fn clahe_tile_mappings_are_monotonic() {
 #[test]
 fn clahe_is_color_preserving() {
     // A 2:1:1 R:G:B field keeps its ratio (hue) through the intensity-based mapping.
-    let (w, h) = (64, 64);
-    let i: Vec<f32> = low_contrast(Size2us::new(w, h)); // use as the green/blue level
+    let size = Size2us::new(64, 64);
+    let i: Vec<f32> = low_contrast(size); // use as the green/blue level
     let r: Vec<f32> = i.iter().map(|&v| (2.0 * v).min(1.0)).collect();
-    let mut img = rgb(Size2us::new(w, h), r, i.clone(), i.clone());
+    let mut img = rgb(size, r, i.clone(), i.clone());
     LocalContrast::default().apply(&mut img).unwrap();
     let (ro, go, bo) = (
         channel(&img, 0).to_vec(),

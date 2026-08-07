@@ -101,7 +101,7 @@ fn demo_field(size: Size2us, background: BackgroundField, seed: u64) -> Scene {
 #[test]
 #[ignore = "visual gallery; run with --ignored"]
 fn gallery_backgrounds() {
-    let (w, h) = (256, 256);
+    let size = Size2us::new(256, 256);
     let cases: [(&str, BackgroundField, Stretch); 6] = [
         (
             "backgrounds/uniform",
@@ -154,19 +154,14 @@ fn gallery_backgrounds() {
         ),
     ];
     for (name, bg, stretch) in cases {
-        save(
-            &bg.render(Size2us::new(w, h)),
-            Size2us::new(w, h),
-            name,
-            stretch,
-        );
+        save(&bg.render(size), size, name, stretch);
     }
 }
 
 #[test]
 #[ignore = "visual gallery; run with --ignored"]
 fn gallery_psf_models() {
-    let (w, h) = (64, 64);
+    let size = Size2us::new(64, 64);
     let dark = BackgroundField::Uniform { level: 0.0 };
     let cases: [(&str, PsfModel); 6] = [
         ("psf/gaussian_fwhm3", PsfModel::Gaussian { fwhm: 3.0 }),
@@ -203,12 +198,7 @@ fn gallery_psf_models() {
         ),
     ];
     for (name, psf) in cases {
-        let scene = Scene::single(
-            Size2us::new(w, h),
-            DVec2::new(32.0, 32.0),
-            8.0,
-            dark.clone(),
-        );
+        let scene = Scene::single(size, DVec2::new(32.0, 32.0), 8.0, dark.clone());
         let camera = Camera {
             psf,
             ..Camera::ideal(4.0)
@@ -227,9 +217,9 @@ fn gallery_psf_models() {
 #[test]
 #[ignore = "visual gallery; run with --ignored"]
 fn gallery_noise() {
-    let (w, h) = (200, 200);
+    let size = Size2us::new(200, 200);
     let flat = Scene {
-        size: Size2us::new(w, h),
+        size,
         sources: vec![],
         background: BackgroundField::Uniform { level: 0.2 },
     };
@@ -250,11 +240,7 @@ fn gallery_noise() {
     );
 
     // A populated field across shot-noise (well depth) and read-noise levels.
-    let field = demo_field(
-        Size2us::new(w, h),
-        BackgroundField::Uniform { level: 0.05 },
-        7,
-    );
+    let field = demo_field(size, BackgroundField::Uniform { level: 0.05 }, 7);
     let well = |full_well_e: f32, read_noise_e: f32| Camera {
         full_well_e,
         read_noise_e,
@@ -293,22 +279,22 @@ fn gallery_noise() {
 #[test]
 #[ignore = "visual gallery; run with --ignored"]
 fn gallery_sensor() {
-    let (w, h) = (256, 256);
+    let size = Size2us::new(256, 256);
     // The multiplicative flat map itself.
     let vignette_flat = FlatField {
         vignette: Some((1.0, 0.4, 2.5)),
         channel_gain: [1.0; 3],
     };
     save(
-        &vignette_flat.render(Size2us::new(w, h), 0),
-        Size2us::new(w, h),
+        &vignette_flat.render(size, 0),
+        size,
         "sensor/flat_vignette_map",
         Stretch::Linear,
     );
 
     // A uniform sky seen through that vignette.
     let sky = Scene {
-        size: Size2us::new(w, h),
+        size,
         sources: vec![],
         background: BackgroundField::Uniform { level: 0.3 },
     };
@@ -325,14 +311,10 @@ fn gallery_sensor() {
     );
 
     // Defects + bias on a star field: hot pixels, a dead pixel block, a bad column.
-    let field = demo_field(
-        Size2us::new(w, h),
-        BackgroundField::Uniform { level: 0.05 },
-        9,
-    );
+    let field = demo_field(size, BackgroundField::Uniform { level: 0.05 }, 9);
     let defects = SensorDefects {
         hot: (0..40)
-            .map(|i| ((i * 53 + 7) % w, (i * 97 + 3) % h, 0.7))
+            .map(|i| ((i * 53 + 7) % size.width, (i * 97 + 3) % size.height, 0.7))
             .collect(),
         dead: (60..70)
             .flat_map(|x| (60..70).map(move |y| (x, y)))
@@ -359,10 +341,10 @@ fn gallery_sensor() {
 #[test]
 #[ignore = "visual gallery; run with --ignored"]
 fn gallery_scenes() {
-    let (w, h) = (512, 512);
+    let size = Size2us::new(512, 512);
 
     let sparse = Scene::random_field(
-        Size2us::new(w, h),
+        size,
         40,
         (5.0, 250.0),
         BackgroundField::Uniform { level: 0.05 },
@@ -377,11 +359,7 @@ fn gallery_scenes() {
         Stretch::Asinh,
     );
 
-    let dense = demo_field(
-        Size2us::new(w, h),
-        BackgroundField::Uniform { level: 0.06 },
-        2,
-    );
+    let dense = demo_field(size, BackgroundField::Uniform { level: 0.06 }, 2);
     save_frame(
         &dense,
         &Camera::realistic(3.5),
@@ -390,11 +368,7 @@ fn gallery_scenes() {
         Stretch::Asinh,
     );
 
-    let over_nebula = demo_field(
-        Size2us::new(w, h),
-        BackgroundField::Nebula(NebulaConfig::default()),
-        3,
-    );
+    let over_nebula = demo_field(size, BackgroundField::Nebula(NebulaConfig::default()), 3);
     save_frame(
         &over_nebula,
         &Camera::realistic(3.5),
@@ -422,7 +396,7 @@ fn gallery_scenes() {
 
     // Saturation: very bright sources clip flat at the well.
     let bright = Scene::random_field(
-        Size2us::new(w, h),
+        size,
         25,
         (300.0, 4000.0),
         BackgroundField::Uniform { level: 0.05 },
@@ -440,24 +414,15 @@ fn gallery_scenes() {
     // Cosmic rays peppered onto a realistic field.
     let frame = render(&dense, &Camera::realistic(3.5), &Observation::reference(7));
     let mut pixels = frame.image.channel(0).pixels().to_vec();
-    add_cosmic_rays(&mut pixels, w, 60, (0.5, 1.0), 1234);
-    save(
-        &pixels,
-        Size2us::new(w, h),
-        "scenes/cosmic_rays",
-        Stretch::Asinh,
-    );
+    add_cosmic_rays(&mut pixels, size.width, 60, (0.5, 1.0), 1234);
+    save(&pixels, size, "scenes/cosmic_rays", Stretch::Asinh);
 }
 
 #[test]
 #[ignore = "visual gallery; run with --ignored"]
 fn gallery_seeing() {
-    let (w, h) = (256, 256);
-    let field = demo_field(
-        Size2us::new(w, h),
-        BackgroundField::Uniform { level: 0.05 },
-        11,
-    );
+    let size = Size2us::new(256, 256);
+    let field = demo_field(size, BackgroundField::Uniform { level: 0.05 }, 11);
     for scale in [1.0f32, 1.5, 2.5] {
         let obs = Observation {
             seeing_scale: scale,
@@ -471,12 +436,8 @@ fn gallery_seeing() {
 #[test]
 #[ignore = "visual gallery; run with --ignored"]
 fn gallery_dither() {
-    let (w, h) = (256, 256);
-    let field = demo_field(
-        Size2us::new(w, h),
-        BackgroundField::Uniform { level: 0.05 },
-        13,
-    );
+    let size = Size2us::new(256, 256);
+    let field = demo_field(size, BackgroundField::Uniform { level: 0.05 }, 13);
     let dithers = [
         DVec2::new(0.0, 0.0),
         DVec2::new(12.0, -6.0),
@@ -486,7 +447,7 @@ fn gallery_dither() {
     for (i, frame) in frames.iter().enumerate() {
         save(
             frame.image.channel(0).pixels(),
-            Size2us::new(w, h),
+            size,
             &format!("dither/frame_{i}"),
             Stretch::Asinh,
         );
@@ -496,22 +457,22 @@ fn gallery_dither() {
 #[test]
 #[ignore = "visual gallery; run with --ignored"]
 fn gallery_patterns() {
-    let (w, h) = (256, 256);
+    let size = Size2us::new(256, 256);
     save(
-        checkerboard(Size2us::new(w, h), 16, 0.1, 0.9).pixels(),
-        Size2us::new(w, h),
+        checkerboard(size, 16, 0.1, 0.9).pixels(),
+        size,
         "patterns/checkerboard",
         Stretch::Linear,
     );
     save(
-        horizontal_gradient(Size2us::new(w, h), 0.0, 1.0).pixels(),
-        Size2us::new(w, h),
+        horizontal_gradient(size, 0.0, 1.0).pixels(),
+        size,
         "patterns/horizontal_gradient",
         Stretch::Linear,
     );
     save(
-        diagonal_gradient(Size2us::new(w, h)).pixels(),
-        Size2us::new(w, h),
+        diagonal_gradient(size).pixels(),
+        size,
         "patterns/diagonal_gradient",
         Stretch::Linear,
     );

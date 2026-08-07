@@ -40,17 +40,12 @@ fn deblend_config(n_thresholds: usize, min_contrast: f32) -> DetectionConfig {
 
 #[test]
 fn deblend_resolves_equal_pair_into_exactly_two() {
-    let (width, height) = (256, 256);
+    let size = Size2us::new(256, 256);
     let fwhm = 4.0;
     let sigma = fwhm_to_sigma(fwhm);
     let sep = fwhm * 2.5;
     let (x1, x2, y) = (128.0 - sep / 2.0, 128.0 + sep / 2.0, 128.0);
-    let pixels = field(
-        Size2us::new(width, height),
-        sigma,
-        &[(x1, y, 0.15), (x2, y, 0.15)],
-        42,
-    );
+    let pixels = field(size, sigma, &[(x1, y, 0.15), (x2, y, 0.15)], 42);
     let background = background_estimate(&pixels);
 
     let candidates = detect_stars_test(&pixels, &background, &deblend_config(32, 0.005));
@@ -69,14 +64,14 @@ fn deblend_resolves_equal_pair_into_exactly_two() {
 
 #[test]
 fn deblend_resolves_chain_of_five() {
-    let (width, height) = (256, 128);
+    let size = Size2us::new(256, 128);
     let fwhm = 4.0;
     let sigma = fwhm_to_sigma(fwhm);
     let sep = fwhm * 2.5;
     let star_y = 64.0;
     let truths: Vec<(f32, f32)> = (0..5).map(|i| (100.0 + i as f32 * sep, star_y)).collect();
     let stars: Vec<(f32, f32, f32)> = truths.iter().map(|&(x, y)| (x, y, 0.15)).collect();
-    let pixels = field(Size2us::new(width, height), sigma, &stars, 42);
+    let pixels = field(size, sigma, &stars, 42);
     let background = background_estimate(&pixels);
 
     let candidates = detect_stars_test(&pixels, &background, &deblend_config(32, 0.005));
@@ -95,18 +90,13 @@ fn deblend_resolves_chain_of_five() {
 
 #[test]
 fn deblend_resolves_unequal_pair() {
-    let (width, height) = (256, 256);
+    let size = Size2us::new(256, 256);
     let fwhm = 4.0;
     let sigma = fwhm_to_sigma(fwhm);
     let sep = fwhm * 2.5;
     let (x1, x2, y) = (128.0 - sep / 2.0, 128.0 + sep / 2.0, 128.0);
     // Bright (~20σ) + faint (~5σ companion).
-    let pixels = field(
-        Size2us::new(width, height),
-        sigma,
-        &[(x1, y, 0.20), (x2, y, 0.05)],
-        42,
-    );
+    let pixels = field(size, sigma, &[(x1, y, 0.20), (x2, y, 0.05)], 42);
     let background = background_estimate(&pixels);
 
     let candidates = detect_stars_test(&pixels, &background, &deblend_config(32, 0.005));
@@ -127,18 +117,13 @@ fn deblend_resolves_unequal_pair() {
 fn deblend_separation_controls_split() {
     // The separation at which a blended equal pair resolves is the deblender's defining knob:
     // far apart → two peaks, very close → merged into one.
-    let (width, height) = (256, 256);
+    let size = Size2us::new(256, 256);
     let fwhm = 4.0;
     let sigma = fwhm_to_sigma(fwhm);
     let pair_count = |sep_fwhm: f32| -> usize {
         let sep = fwhm * sep_fwhm;
         let (x1, x2, y) = (128.0 - sep / 2.0, 128.0 + sep / 2.0, 128.0);
-        let pixels = field(
-            Size2us::new(width, height),
-            sigma,
-            &[(x1, y, 0.15), (x2, y, 0.15)],
-            42,
-        );
+        let pixels = field(size, sigma, &[(x1, y, 0.15), (x2, y, 0.15)], 42);
         let background = background_estimate(&pixels);
         detect_stars_test(&pixels, &background, &deblend_config(32, 0.005)).len()
     };

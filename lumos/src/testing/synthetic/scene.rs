@@ -269,9 +269,9 @@ mod tests {
 
     #[test]
     fn cluster_is_centrally_concentrated() {
-        let (w, h) = (400usize, 400usize);
+        let size = Size2us::new(400usize, 400usize);
         let scene = Scene::cluster(
-            Size2us::new(w, h),
+            size,
             500,
             (1.0, 10.0),
             BackgroundField::Uniform { level: 0.0 },
@@ -280,16 +280,16 @@ mod tests {
         assert_eq!(scene.sources.len(), 500);
 
         // Count sources within a central disk of radius = 12% of the field (the core σ).
-        let (cx, cy) = (w as f64 / 2.0, h as f64 / 2.0);
-        let r = w as f64 * 0.12;
+        let (cx, cy) = (size.width as f64 / 2.0, size.height as f64 / 2.0);
+        let r = size.width as f64 * 0.12;
         let central = scene
             .sources
             .iter()
             .filter(|s| ((s.pos.x - cx).powi(2) + (s.pos.y - cy).powi(2)).sqrt() < r)
             .count();
-        // A uniform field would put only ~π r² / (w·h) ≈ 4.5% in that disk; clustering must
+        // A uniform field would put only ~π r² / (size.width·size.height) ≈ 4.5% in that disk; clustering must
         // pack far more (the 80% core inside ~1σ ⇒ well over a third).
-        let uniform_expectation = 500.0 * PI * r * r / (w * h) as f64;
+        let uniform_expectation = 500.0 * PI * r * r / (size.pixel_count()) as f64;
         assert!(
             central as f64 > uniform_expectation * 4.0 && central > 150,
             "central {central} vs uniform expectation {uniform_expectation:.1}"

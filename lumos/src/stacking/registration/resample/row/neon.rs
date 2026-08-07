@@ -8,6 +8,7 @@
 
 #![allow(clippy::needless_range_loop)] // indices drive pointer arithmetic over the pixel window
 
+use crate::math::size2us::Size2us;
 use std::arch::aarch64::*;
 
 use glam::{DVec2, Vec2};
@@ -220,9 +221,9 @@ mod tests {
     /// NEON Lanczos kernel must match a plain scalar weighted sum (mirror of the x86
     /// `lanczos_kernel_fma_matches_scalar` checks). Interior 20×20 window, no border.
     fn assert_lanczos_kernel_neon_matches_scalar<const A: usize, const SIZE: usize>(label: &str) {
-        let (width, height) = (20usize, 20usize);
-        let data: Vec<f32> = (0..width * height)
-            .map(|i| (i % width) as f32 + (i / width) as f32 * 0.1)
+        let size = Size2us::new(20usize, 20usize);
+        let data: Vec<f32> = (0..size.pixel_count())
+            .map(|i| (i % size.width) as f32 + (i / size.width) as f32 * 0.1)
             .collect();
 
         let lut = kernel::get_lanczos_lut(A);
@@ -249,11 +250,12 @@ mod tests {
         let mut scalar_sum = 0.0f32;
         for j in 0..SIZE {
             for k in 0..SIZE {
-                scalar_sum += data[(ky + j) * width + kx + k] * wx[k] * wy[j];
+                scalar_sum += data[(ky + j) * size.width + kx + k] * wx[k] * wy[j];
             }
         }
 
-        let simd = unsafe { neon::lanczos_kernel_neon::<SIZE>(&data, width, kx, ky, &wx, &wy) };
+        let simd =
+            unsafe { neon::lanczos_kernel_neon::<SIZE>(&data, size.width, kx, ky, &wx, &wy) };
         assert!(
             (simd - scalar_sum).abs() < 1e-4,
             "{label}: NEON {simd} vs scalar {scalar_sum}",

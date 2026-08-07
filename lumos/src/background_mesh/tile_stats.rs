@@ -327,50 +327,50 @@ mod tests {
     fn masked_sampling_matches_evenly_spaced_unmasked_ordinals() {
         #[derive(Debug)]
         struct SamplingCase {
-            dimensions: (usize, usize),
+            size: Size2us,
             tile: URect,
             mask_modulus: Option<usize>,
         }
 
         let cases = [
             SamplingCase {
-                dimensions: (17, 19),
+                size: Size2us::new(17, 19),
                 tile: URect::new(Vec2us::ZERO, Vec2us::new(17, 19)),
                 mask_modulus: None,
             },
             SamplingCase {
-                dimensions: (32, 32),
+                size: Size2us::new(32, 32),
                 tile: URect::new(Vec2us::ZERO, Vec2us::new(32, 32)),
                 mask_modulus: None,
             },
             SamplingCase {
-                dimensions: (40, 40),
+                size: Size2us::new(40, 40),
                 tile: URect::new(Vec2us::ZERO, Vec2us::new(40, 40)),
                 mask_modulus: Some(7),
             },
             SamplingCase {
-                dimensions: (130, 75),
+                size: Size2us::new(130, 75),
                 tile: URect::new(Vec2us::new(3, 2), Vec2us::new(129, 74)),
                 mask_modulus: Some(5),
             },
             SamplingCase {
-                dimensions: (256, 256),
+                size: Size2us::new(256, 256),
                 tile: URect::new(Vec2us::ZERO, Vec2us::new(256, 256)),
                 mask_modulus: None,
             },
         ];
 
         for case in cases {
-            let (width, height) = case.dimensions;
+            let size = case.size;
             let pixels = Buffer2::new(
-                width,
-                height,
-                (0..width * height).map(|i| i as f32).collect(),
+                size.width,
+                size.height,
+                (0..size.pixel_count()).map(|i| i as f32).collect(),
             );
-            let mut mask = BitBuffer2::new_filled(Size2us::new(width, height), false);
+            let mut mask = BitBuffer2::new_filled(size, false);
             if let Some(modulus) = case.mask_modulus {
-                for y in 0..height {
-                    for x in 0..width {
+                for y in 0..size.height {
+                    for x in 0..size.width {
                         if (x + 3 * y) % modulus == 0 {
                             mask.set_at(Vec2us::new(x, y), true);
                         }
@@ -384,7 +384,7 @@ mod tests {
                     let pixels = &pixels;
                     (case.tile.min.x..case.tile.max.x)
                         .filter(move |&x| !mask.get_at(Vec2us::new(x, y)))
-                        .map(move |x| pixels[y * width + x])
+                        .map(move |x| pixels[size.index_of(Vec2us::new(x, y))])
                 })
                 .collect();
             reference_subsample(&mut expected, MAX_TILE_SAMPLES);

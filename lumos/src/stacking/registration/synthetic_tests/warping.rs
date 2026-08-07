@@ -797,8 +797,11 @@ fn warp_emits_coverage_and_renormalizes_bilinear_border() {
     // Constant image so any darkening is unambiguous: a covered output pixel
     // must read back exactly V.
     const V: f32 = 0.5;
-    let (w, h) = (16usize, 8usize);
-    let image = LinearImage::from_pixels(ImageDimensions::new((w, h), 1), vec![V; w * h]);
+    let size = Size2us::new(16usize, 8usize);
+    let image = LinearImage::from_pixels(
+        ImageDimensions::new((size.width, size.height), 1),
+        vec![V; size.pixel_count()],
+    );
 
     // output(x,y) samples source (x + 2.5, y): columns 0..=12 are fully in
     // bounds, column 13 is half-covered (its right bilinear tap is off the
@@ -814,7 +817,7 @@ fn warp_emits_coverage_and_renormalizes_bilinear_border() {
     let cov = result.coverage.pixels();
     let confidence = result.confidence.pixels();
     let val = result.image.channel(0).pixels();
-    let at = |x: usize, y: usize| y * w + x;
+    let at = |x: usize, y: usize| size.index_of(Vec2us::new(x, y));
 
     // x-only translation → every row shares the column pattern; check one.
     let y = 4;
@@ -874,8 +877,11 @@ fn warp_emits_coverage_and_renormalizes_bilinear_border() {
 #[test]
 fn warp_renormalizes_lanczos_edges_and_emits_coverage() {
     const V: f32 = 0.5;
-    let (w, h) = (32usize, 8usize);
-    let image = LinearImage::from_pixels(ImageDimensions::new((w, h), 1), vec![V; w * h]);
+    let size = Size2us::new(32usize, 8usize);
+    let image = LinearImage::from_pixels(
+        ImageDimensions::new((size.width, size.height), 1),
+        vec![V; size.pixel_count()],
+    );
 
     // src = (x + 3.5, y): a Lanczos3 (6-tap) kernel reaches off the right edge
     // for x ≳ 26 and lands entirely outside by x = 31.
@@ -889,7 +895,7 @@ fn warp_renormalizes_lanczos_edges_and_emits_coverage() {
     let cov = result.coverage.pixels();
     let confidence = result.confidence.pixels();
     let val = result.image.channel(0).pixels();
-    let at = |x: usize, y: usize| y * w + x;
+    let at = |x: usize, y: usize| size.index_of(Vec2us::new(x, y));
     let y = 4;
 
     // Interior: every kernel tap is in bounds, so the magnitude support fraction is 1 exactly.

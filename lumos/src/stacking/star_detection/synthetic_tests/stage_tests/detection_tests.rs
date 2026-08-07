@@ -47,7 +47,7 @@ fn create_detection_overlay(
 fn test_detection_sparse() {
     init_tracing();
 
-    let (width, height) = (256, 256);
+    let size = Size2us::new(256, 256);
     let frame = Scenario {
         num_stars: 15,
         ..Default::default()
@@ -59,7 +59,7 @@ fn test_detection_sparse() {
     // Save input
     save_grayscale(
         pixels.pixels(),
-        Size2us::new(width, height),
+        size,
         &test_output_path("synthetic_starfield/stage_det_sparse_input.png"),
     );
 
@@ -88,7 +88,7 @@ fn test_detection_sparse() {
         candidates.iter().map(|c| (c.peak.x, c.peak.y)).collect();
     let overlay = create_detection_overlay(
         pixels.pixels(),
-        Size2us::new(width, height),
+        size,
         &candidate_positions,
         &truth_positions,
     );

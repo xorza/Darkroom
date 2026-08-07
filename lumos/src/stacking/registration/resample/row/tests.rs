@@ -313,7 +313,7 @@ fn test_lanczos_matches_scalar() {
 
 #[test]
 fn test_lanczos_preserves_signed_constants_at_interior_and_edges() {
-    let (width, height) = (24, 20);
+    let size = Size2us::new(24, 20);
     let identity = WarpTransform::new(Transform::identity());
 
     for method in [
@@ -323,9 +323,9 @@ fn test_lanczos_preserves_signed_constants_at_interior_and_edges() {
     ] {
         let params = config::internals::warp_params(method);
         for expected in [-1.25, 0.0, 2.5] {
-            let input = patterns::uniform(Size2us::new(width, height), expected);
-            for y in [0, 1, 4, 10, height - 1] {
-                let mut output = vec![0.0; width];
+            let input = patterns::uniform(size, expected);
+            for y in [0, 1, 4, 10, size.height - 1] {
+                let mut output = vec![0.0; size.width];
                 row::lanczos(&input, &mut output, y, &identity, &params);
                 for (x, actual) in output.into_iter().enumerate() {
                     assert!(
@@ -340,18 +340,18 @@ fn test_lanczos_preserves_signed_constants_at_interior_and_edges() {
 
 #[test]
 fn test_lanczos_is_translation_invariant_for_signed_data() {
-    let (width, height) = (24, 20);
+    let size = Size2us::new(24, 20);
     let input = Buffer2::new(
-        width,
-        height,
-        (0..width * height)
-            .map(|i| ((i * 13 + i / width * 7) % 31) as f32 / 9.0 - 1.7)
+        size.width,
+        size.height,
+        (0..size.pixel_count())
+            .map(|i| ((i * 13 + i / size.width * 7) % 31) as f32 / 9.0 - 1.7)
             .collect(),
     );
     let offset = 2.25;
     let shifted = Buffer2::new(
-        width,
-        height,
+        size.width,
+        size.height,
         input.pixels().iter().map(|value| value + offset).collect(),
     );
     let inverse = WarpTransform::new(Transform::translation(DVec2::new(0.37, -0.43)).inverse());
@@ -362,12 +362,12 @@ fn test_lanczos_is_translation_invariant_for_signed_data() {
         InterpolationMethod::Lanczos4,
     ] {
         let params = config::internals::warp_params(method);
-        for y in [0, 1, 5, 10, height - 1] {
-            let mut output = vec![0.0; width];
-            let mut shifted_output = vec![0.0; width];
+        for y in [0, 1, 5, 10, size.height - 1] {
+            let mut output = vec![0.0; size.width];
+            let mut shifted_output = vec![0.0; size.width];
             row::lanczos(&input, &mut output, y, &inverse, &params);
             row::lanczos(&shifted, &mut shifted_output, y, &inverse, &params);
-            for x in 1..width {
+            for x in 1..size.width {
                 let actual_offset = shifted_output[x] - output[x];
                 assert!(
                     (actual_offset - offset).abs() < 5e-5,

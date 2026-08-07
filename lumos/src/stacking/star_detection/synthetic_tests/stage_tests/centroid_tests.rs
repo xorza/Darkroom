@@ -42,12 +42,12 @@ fn field(
 
 /// Build a 11×11 candidate region centred on the pixel nearest `(x, y)`.
 fn candidate_at(pixels: &Buffer2<f32>, x: f32, y: f32) -> Region {
-    let (w, h) = (pixels.width(), pixels.height());
+    let size = Size2us::new(pixels.width(), pixels.height());
     let (px, py) = (x.round() as usize, y.round() as usize);
     Region {
         bbox: URect::new(
             Vec2us::new(px.saturating_sub(5), py.saturating_sub(5)),
-            Vec2us::new((px + 6).min(w), (py + 6).min(h)),
+            Vec2us::new((px + 6).min(size.width), (py + 6).min(size.height)),
         ),
         peak: Vec2us::new(px, py),
         peak_value: pixels[(px, py)],
@@ -57,7 +57,7 @@ fn candidate_at(pixels: &Buffer2<f32>, x: f32, y: f32) -> Region {
 
 #[test]
 fn centroid_recovers_known_subpixel_positions() {
-    let (width, height) = (256, 256);
+    let size = Size2us::new(256, 256);
     let fwhm = 4.0;
     let sigma = fwhm_to_sigma(fwhm);
     let positions = [
@@ -69,7 +69,7 @@ fn centroid_recovers_known_subpixel_positions() {
     ];
     // Bright stars (high SNR) so centroiding is limited by sampling, not noise.
     let stars: Vec<(f32, f32, f32)> = positions.iter().map(|&(x, y)| (x, y, 5.0)).collect();
-    let pixels = field(Size2us::new(width, height), sigma, &stars, 0.01, 42);
+    let pixels = field(size, sigma, &stars, 0.01, 42);
     let background = background_estimate(&pixels);
     let config = MeasurementConfig::default();
 
@@ -100,7 +100,7 @@ fn centroid_recovers_known_subpixel_positions() {
 
 #[test]
 fn centroid_accuracy_improves_with_snr() {
-    let (width, height) = (256, 128);
+    let size = Size2us::new(256, 128);
     let fwhm = 4.0;
     let sigma = fwhm_to_sigma(fwhm);
     // Descending brightness at a fixed sub-pixel position (bright → near the noise floor, but
@@ -112,7 +112,7 @@ fn centroid_accuracy_improves_with_snr() {
         .enumerate()
         .map(|(i, &b)| (40.0 + i as f32 * 60.0 + 0.42, y, b))
         .collect();
-    let pixels = field(Size2us::new(width, height), sigma, &stars, 0.01, 42);
+    let pixels = field(size, sigma, &stars, 0.01, 42);
     let background = background_estimate(&pixels);
     let config = MeasurementConfig::default();
 
@@ -157,18 +157,12 @@ fn centroid_accuracy_improves_with_snr() {
 
 #[test]
 fn centroid_methods_agree_and_fits_beat_moments() {
-    let (width, height) = (128, 128);
+    let size = Size2us::new(128, 128);
     let fwhm = 4.0;
     let sigma = fwhm_to_sigma(fwhm);
     let (tx, ty) = (64.37f32, 64.63f32);
     // A bright, clean star so all three methods are in their accurate regime.
-    let pixels = field(
-        Size2us::new(width, height),
-        sigma,
-        &[(tx, ty, 5.0)],
-        0.005,
-        7,
-    );
+    let pixels = field(size, sigma, &[(tx, ty, 5.0)], 0.005, 7);
     let background = background_estimate(&pixels);
 
     let error_for = |method: CentroidMethod| -> (f64, f64) {

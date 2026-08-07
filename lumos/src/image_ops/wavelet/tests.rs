@@ -45,10 +45,10 @@ fn max_scales_bounds_by_dimension() {
 #[test]
 fn atrous_smooth_preserves_constant() {
     // The B3 kernel sums to 1, so a flat field is reproduced exactly at every hole spacing.
-    let (w, h) = (8, 6);
-    let src = Buffer2::new_filled(w, h, 0.42);
-    let mut dst = Buffer2::new_default(w, h);
-    let mut tmp = Buffer2::new_default(w, h);
+    let size = Size2us::new(8, 6);
+    let src = Buffer2::new_filled(size.width, size.height, 0.42);
+    let mut dst = Buffer2::new_default(size.width, size.height);
+    let mut tmp = Buffer2::new_default(size.width, size.height);
     for step in [1usize, 2, 4] {
         atrous_smooth(&src, &mut dst, &mut tmp, step);
         for &v in dst.pixels() {

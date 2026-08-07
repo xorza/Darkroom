@@ -30,12 +30,12 @@ fn threshold_apply_hand_computed() {
 
 #[test]
 fn denoise_reduces_white_noise_and_preserves_mean() {
-    let (w, h) = (128, 128);
+    let size = Size2us::new(128, 128);
     let (bg, sigma) = (0.5, 0.05);
-    let px = noisy(Size2us::new(w, h), bg, sigma, 12345);
+    let px = noisy(size, bg, sigma, 12345);
     let in_std = std_dev(&px);
 
-    let mut img = gray(Size2us::new(w, h), px);
+    let mut img = gray(size, px);
     Denoise::default().apply(&mut img).unwrap();
     let out = channel(&img, 0).to_vec();
 
@@ -53,10 +53,10 @@ fn denoise_reduces_white_noise_and_preserves_mean() {
 
 #[test]
 fn higher_k_smooths_more() {
-    let (w, h) = (96, 96);
-    let px = noisy(Size2us::new(w, h), 0.5, 0.04, 7);
-    let mut img2 = gray(Size2us::new(w, h), px.clone());
-    let mut img5 = gray(Size2us::new(w, h), px);
+    let size = Size2us::new(96, 96);
+    let px = noisy(size, 0.5, 0.04, 7);
+    let mut img2 = gray(size, px.clone());
+    let mut img5 = gray(size, px);
     Denoise {
         k: 2.0,
         ..Default::default()
@@ -79,11 +79,11 @@ fn higher_k_smooths_more() {
 
 #[test]
 fn strength_zero_is_identity_and_blends_between() {
-    let (w, h) = (64, 64);
-    let px = noisy(Size2us::new(w, h), 0.5, 0.05, 3);
+    let size = Size2us::new(64, 64);
+    let px = noisy(size, 0.5, 0.05, 3);
 
     // strength 0 removes nothing — bit-for-bit identity.
-    let mut img0 = gray(Size2us::new(w, h), px.clone());
+    let mut img0 = gray(size, px.clone());
     Denoise {
         strength: 0.0,
         ..Default::default()
@@ -97,8 +97,8 @@ fn strength_zero_is_identity_and_blends_between() {
     );
 
     // Partial strength sits strictly between no-op and full denoise.
-    let mut half = gray(Size2us::new(w, h), px.clone());
-    let mut full = gray(Size2us::new(w, h), px.clone());
+    let mut half = gray(size, px.clone());
+    let mut full = gray(size, px.clone());
     Denoise {
         strength: 0.5,
         ..Default::default()
@@ -117,10 +117,10 @@ fn strength_zero_is_identity_and_blends_between() {
 
 #[test]
 fn hard_and_soft_thresholds_differ() {
-    let (w, h) = (64, 64);
-    let px = noisy(Size2us::new(w, h), 0.5, 0.05, 55);
-    let mut hard = gray(Size2us::new(w, h), px.clone());
-    let mut soft = gray(Size2us::new(w, h), px);
+    let size = Size2us::new(64, 64);
+    let px = noisy(size, 0.5, 0.05, 55);
+    let mut hard = gray(size, px.clone());
+    let mut soft = gray(size, px);
     Denoise {
         threshold: Threshold::Hard,
         ..Default::default()
@@ -149,21 +149,21 @@ fn hard_and_soft_thresholds_differ() {
 fn denoise_preserves_bright_feature() {
     // A bright 8x8 block on a faintly-noisy background: hard thresholding keeps its large
     // coefficients, so the block stays bright while the flat background is smoothed.
-    let (w, h) = (64, 64);
-    let mut px = noisy(Size2us::new(w, h), 0.1, 0.02, 808);
+    let size = Size2us::new(64, 64);
+    let mut px = noisy(size, 0.1, 0.02, 808);
     for yy in 28..36 {
         for xx in 28..36 {
-            px[yy * w + xx] = 0.9;
+            px[yy * size.width + xx] = 0.9;
         }
     }
-    let mut img = gray(Size2us::new(w, h), px);
+    let mut img = gray(size, px);
     Denoise::default().apply(&mut img).unwrap();
     let out = channel(&img, 0).to_vec();
 
     // 4x4 interior of the block stays near 0.9.
     let interior: Vec<f32> = (30..34)
         .flat_map(|yy| (30..34).map(move |xx| (yy, xx)))
-        .map(|(yy, xx)| out[yy * w + xx])
+        .map(|(yy, xx)| out[yy * size.width + xx])
         .collect();
     assert!(
         mean(&interior) > 0.8,
@@ -173,7 +173,7 @@ fn denoise_preserves_bright_feature() {
     // A flat corner far from the block is smoothed below the input noise floor.
     let corner: Vec<f32> = (0..10)
         .flat_map(|yy| (0..10).map(move |xx| (yy, xx)))
-        .map(|(yy, xx)| out[yy * w + xx])
+        .map(|(yy, xx)| out[yy * size.width + xx])
         .collect();
     assert!(
         std_dev(&corner) < 0.02,
@@ -184,12 +184,12 @@ fn denoise_preserves_bright_feature() {
 
 #[test]
 fn denoise_is_per_channel_on_rgb() {
-    let (w, h) = (48, 48);
-    let r = noisy(Size2us::new(w, h), 0.5, 0.03, 2024);
-    let g = noisy(Size2us::new(w, h), 0.5, 0.05, 4048);
-    let b = noisy(Size2us::new(w, h), 0.5, 0.04, 6072);
+    let size = Size2us::new(48, 48);
+    let r = noisy(size, 0.5, 0.03, 2024);
+    let g = noisy(size, 0.5, 0.05, 4048);
+    let b = noisy(size, 0.5, 0.04, 6072);
     let in_std = [std_dev(&r), std_dev(&g), std_dev(&b)];
-    let mut img = rgb(Size2us::new(w, h), r, g, b);
+    let mut img = rgb(size, r, g, b);
     Denoise::default().apply(&mut img).unwrap();
     for (c, &expected) in in_std.iter().enumerate() {
         let out_std = std_dev(&channel(&img, c));
