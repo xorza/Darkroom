@@ -2,12 +2,11 @@
 
 use std::path::PathBuf;
 
+use crate::error::InvalidConfigField;
 use crate::io::image::error::ImageError;
 use crate::stacking::calibration_masters::CalibrationError;
 use crate::stacking::combine::error::Error as StackError;
 use crate::stacking::product::StackProduct;
-use crate::stacking::registration::result::RegistrationError;
-use crate::stacking::star_detection::error::StarDetectionConfigError;
 
 /// Registration bookkeeping for an aligned stack.
 #[derive(Debug)]
@@ -70,13 +69,12 @@ pub enum Error {
     AllFramesDropped { count: usize },
     #[error(transparent)]
     Calibration(#[from] CalibrationError),
-    #[error(transparent)]
-    DetectionConfig(#[from] StarDetectionConfigError),
-    /// Constructed only from [`crate::RegistrationConfig::validate`], never from a registration
-    /// that ran and failed — those are frame-level outcomes, reported through
-    /// [`AlignmentSummary::dropped`].
+    /// Both config variants carry the same payload, so neither derives `From` — a bare `?` would
+    /// have to guess which config the field came from.
+    #[error("invalid star-detection configuration: {0}")]
+    DetectionConfig(InvalidConfigField),
     #[error("invalid registration configuration: {0}")]
-    RegistrationConfig(RegistrationError),
+    RegistrationConfig(InvalidConfigField),
     #[error(transparent)]
     Stack(#[from] StackError),
 }

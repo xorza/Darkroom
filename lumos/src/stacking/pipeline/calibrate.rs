@@ -85,7 +85,8 @@ pub fn calibrate_align_stack<P: AsRef<Path> + Sync>(
     let done = AtomicUsize::new(0);
     let detected: Vec<DetectedFrame> = {
         let mut detectors =
-            DetectorPool::from_config(&config.detection, plan.decode_concurrency.min(total))?;
+            DetectorPool::from_config(&config.detection, plan.decode_concurrency.min(total))
+                .map_err(Error::DetectionConfig)?;
         detectors.try_map(light_paths, |detector, index, path| {
             // Skip launching the RAW decode (the slow uninterruptible step) once cancelled.
             if cancel.is_cancelled() {

@@ -54,7 +54,6 @@ pub(crate) mod config;
 mod convolution;
 mod deblend;
 pub(crate) mod detector;
-pub(crate) mod error;
 mod labeling;
 mod mask_dilation;
 mod median_filter;

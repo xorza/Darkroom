@@ -35,43 +35,49 @@ fn test_drizzle_config_builder() {
 
 #[test]
 fn test_drizzle_config_invalid_parameters_return_exact_errors() {
-    let cases = [
+    // Each case: the config, and the field its rejection must name with the value it carries.
+    let range_checks = [
         (
             DrizzleConfig {
                 scale: 0.0,
                 ..Default::default()
             },
-            DrizzleConfigError::InvalidScale { value: 0.0 },
+            "scale",
+            0.0,
         ),
-        (
-            DrizzleConfig::default().with_pixfrac(1.5),
-            DrizzleConfigError::InvalidPixfrac { value: 1.5 },
-        ),
+        (DrizzleConfig::default().with_pixfrac(1.5), "pixfrac", 1.5),
         (
             DrizzleConfig {
                 fill_value: f32::INFINITY,
                 ..Default::default()
             },
-            DrizzleConfigError::InvalidFillValue {
-                value: f32::INFINITY,
-            },
+            "fill_value",
+            f64::INFINITY,
         ),
         (
             DrizzleConfig::default().with_min_coverage(-0.1),
-            DrizzleConfigError::InvalidMinCoverage { value: -0.1 },
-        ),
-        (
-            DrizzleConfig::default().with_kernel(DrizzleKernel::Lanczos),
-            DrizzleConfigError::InvalidLanczosSampling {
-                scale: 2.0,
-                pixfrac: 0.8,
-            },
+            "min_coverage",
+            // -0.1 has no exact f64 twin: compare against the f32 the field actually holds.
+            f64::from(-0.1f32),
         ),
     ];
-
-    for (config, expected) in cases {
-        assert_eq!(config.validate(), Err(expected));
+    for (config, field, value) in range_checks {
+        let DrizzleConfigError::Field(invalid) = config.validate().unwrap_err() else {
+            panic!("{field} should be reported as an out-of-range field")
+        };
+        assert_eq!((invalid.field, invalid.value), (field, value));
     }
+
+    // The kernel constrains scale and pixfrac together, so it keeps its own variant.
+    assert_eq!(
+        DrizzleConfig::default()
+            .with_kernel(DrizzleKernel::Lanczos)
+            .validate(),
+        Err(DrizzleConfigError::InvalidLanczosSampling {
+            scale: 2.0,
+            pixfrac: 0.8,
+        })
+    );
 
     for kernel in [
         DrizzleKernel::Square,
@@ -86,16 +92,14 @@ fn test_drizzle_config_invalid_parameters_return_exact_errors() {
             kernel,
             ..Default::default()
         };
-        assert_eq!(
-            config.validate(),
-            Err(DrizzleConfigError::InvalidPixfrac { value: 0.0 }),
-            "{kernel:?} must reject zero pixfrac before kernel arithmetic"
-        );
+        let DrizzleConfigError::Field(invalid) = config.validate().unwrap_err() else {
+            panic!("{kernel:?} must reject zero pixfrac before kernel arithmetic")
+        };
+        assert_eq!((invalid.field, invalid.value), ("pixfrac", 0.0));
         assert!(matches!(
             DrizzleAccumulator::new(ImageDimensions::new((2, 2), 1), config),
-            Err(DrizzleError::Config(DrizzleConfigError::InvalidPixfrac {
-                value: 0.0
-            }))
+            Err(DrizzleError::Config(DrizzleConfigError::Field(invalid)))
+                if invalid.field == "pixfrac"
         ));
     }
 
@@ -106,12 +110,8 @@ fn test_drizzle_config_invalid_parameters_return_exact_errors() {
     .unwrap_err();
     assert_eq!(
         error.to_string(),
-        "pixfrac must be finite, greater than 0, and at most 1, got 1.5"
+        "pixfrac must be finite and in (0, 1], got 1.5"
     );
-    assert!(matches!(
-        error,
-        DrizzleError::Config(DrizzleConfigError::InvalidPixfrac { value: 1.5 })
-    ));
 }
 
 #[test]

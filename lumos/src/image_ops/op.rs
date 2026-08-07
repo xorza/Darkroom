@@ -1,8 +1,11 @@
 //! The contract every in-place image op enforces at its `apply` boundary: a linear f32 master
-//! ([`require_f32_master`]) and valid configuration ([`ensure`]), reported via [`OpError`] instead
-//! of a panic. The ops themselves (`denoise`, `hdr`, `stretching`, …) run over [`crate::image_ops`].
+//! ([`require_f32_master`]) and valid configuration ([`crate::InvalidConfigField`]), reported via
+//! [`OpError`] instead of a panic. The ops themselves (`denoise`, `hdr`, `stretching`, …) run over
+//! [`crate::image_ops`].
 
 use imaginarium::{ColorFormat, Image};
+
+use crate::error::InvalidConfigField;
 
 /// Why a display/processing op failed.
 #[derive(Debug, thiserror::Error)]
@@ -12,7 +15,7 @@ pub enum OpError {
     UnsupportedFormat(ColorFormat),
     /// A configuration parameter is outside its valid range.
     #[error("invalid config: {0}")]
-    InvalidConfig(String),
+    InvalidConfig(#[from] InvalidConfigField),
     /// A model's design matrix does not contain enough independent information.
     #[error("{operation} is rank deficient: rank {rank}, requires {required_rank}")]
     RankDeficient {
@@ -30,15 +33,5 @@ pub(crate) fn require_f32_master(image: &Image) -> Result<(), OpError> {
         Ok(())
     } else {
         Err(OpError::UnsupportedFormat(format))
-    }
-}
-
-/// `Ok(())` when `cond` holds, else an [`OpError::InvalidConfig`] carrying `msg`. The Result-returning
-/// counterpart to `assert!` for config validation.
-pub(crate) fn ensure(cond: bool, msg: impl FnOnce() -> String) -> Result<(), OpError> {
-    if cond {
-        Ok(())
-    } else {
-        Err(OpError::InvalidConfig(msg()))
     }
 }

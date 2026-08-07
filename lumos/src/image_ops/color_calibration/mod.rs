@@ -9,7 +9,8 @@
 use crate::image_ops::rgb::Rgb;
 use imaginarium::{ChannelCount, Image};
 
-use crate::image_ops::op::{OpError, ensure, require_f32_master};
+use crate::error::InvalidConfigField;
+use crate::image_ops::op::{OpError, require_f32_master};
 use crate::image_ops::par_map_pixels;
 use crate::math::statistics::sigma_clipped_median_mad;
 
@@ -143,10 +144,10 @@ impl Scnr {
         Ok(())
     }
 
-    fn validate(&self) -> Result<(), OpError> {
+    fn validate(&self) -> Result<(), InvalidConfigField> {
         if let ScnrMethod::AdditiveMask { amount } = self.method {
-            ensure((0.0..=1.0).contains(&amount), || {
-                format!("SCNR amount must be in [0, 1], got {amount}")
+            InvalidConfigField::finite("SCNR amount", "finite and in [0, 1]", amount, |value| {
+                (0.0..=1.0).contains(&value)
             })?;
         }
         Ok(())

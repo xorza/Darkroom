@@ -97,27 +97,27 @@ fn test_invalid_config_returns_error() {
     let target_points = vec![DVec2::ZERO; 10];
     let transform = Transform::identity();
 
-    for (config, expected_message) in [
+    for (config, expected_field) in [
         (
             SipConfig {
                 order: 1,
                 ..Default::default()
             },
-            "SIP order must be 2-5, got 1",
+            "SIP order",
         ),
         (
             SipConfig {
                 order: 6,
                 ..Default::default()
             },
-            "SIP order must be 2-5, got 6",
+            "SIP order",
         ),
         (
             SipConfig {
                 clip_sigma: 0.0,
                 ..Default::default()
             },
-            "SIP clip_sigma must be positive and finite, got 0",
+            "SIP clip_sigma",
         ),
     ] {
         let error =
@@ -125,8 +125,8 @@ fn test_invalid_config_returns_error() {
                 .unwrap_err();
 
         match error {
-            RegistrationError::InvalidConfig(message) => {
-                assert_eq!(message, expected_message);
+            RegistrationError::InvalidConfig(invalid) => {
+                assert_eq!(invalid.field, expected_field);
             }
             other => panic!("expected invalid configuration error, got {other:?}"),
         }

@@ -17,7 +17,8 @@ use nalgebra::{DMatrix, DVector};
 use rayon::prelude::*;
 
 use crate::background_mesh::workspace::MeshWorkspace;
-use crate::image_ops::op::{OpError, ensure, require_f32_master};
+use crate::error::InvalidConfigField;
+use crate::image_ops::op::{OpError, require_f32_master};
 use crate::image_ops::process_channels;
 use crate::math::statistics::MAD_TO_SIGMA;
 use imaginarium::Image;
@@ -122,19 +123,31 @@ impl ExtractBackground {
         })
     }
 
-    fn validate(&self) -> Result<(), OpError> {
-        ensure((1..=4).contains(&self.degree), || {
-            format!("degree must be 1..=4, got {}", self.degree)
-        })?;
-        ensure(self.tile_size >= 8, || {
-            format!("tile_size must be ≥ 8, got {}", self.tile_size)
-        })?;
-        ensure(self.rejection_sigma > 0.0, || {
-            format!("rejection_sigma must be > 0, got {}", self.rejection_sigma)
-        })?;
-        ensure(self.divide_floor > 0.0 && self.divide_floor <= 1.0, || {
-            format!("divide_floor must be in (0, 1], got {}", self.divide_floor)
-        })
+    fn validate(&self) -> Result<(), InvalidConfigField> {
+        InvalidConfigField::check(
+            (1..=4).contains(&self.degree),
+            "degree",
+            "between 1 and 4",
+            self.degree as f64,
+        )?;
+        InvalidConfigField::check(
+            self.tile_size >= 8,
+            "tile_size",
+            "at least 8",
+            self.tile_size as f64,
+        )?;
+        InvalidConfigField::finite(
+            "rejection_sigma",
+            "finite and positive",
+            self.rejection_sigma,
+            |value| value > 0.0,
+        )?;
+        InvalidConfigField::finite(
+            "divide_floor",
+            "finite and in (0, 1]",
+            self.divide_floor,
+            |value| value > 0.0 && value <= 1.0,
+        )
     }
 }
 

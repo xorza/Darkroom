@@ -1,8 +1,8 @@
 //! Configuration for the registration module.
 
+use crate::error::InvalidConfigField;
 use crate::stacking::registration::distortion::sip::SipConfig;
 use crate::stacking::registration::ransac::RansacConfig;
-use crate::stacking::registration::result::RegistrationError;
 use crate::stacking::registration::transform::TransformType;
 use crate::stacking::registration::triangle::TriangleConfig;
 
@@ -73,14 +73,8 @@ impl Default for WarpParams {
 }
 
 impl WarpParams {
-    fn validate(&self) -> Result<(), RegistrationError> {
-        if !self.border_value.is_finite() {
-            return Err(RegistrationError::InvalidConfig(format!(
-                "warp border_value must be finite, got {}",
-                self.border_value
-            )));
-        }
-        Ok(())
+    fn validate(&self) -> Result<(), InvalidConfigField> {
+        InvalidConfigField::finite("warp border_value", "finite", self.border_value, |_| true)
     }
 }
 
@@ -124,39 +118,41 @@ impl RegistrationMatchingConfig {
         (2 * model.min_points()).max(3)
     }
 
-    fn validate(&self, transform_type: TransformType) -> Result<(), RegistrationError> {
-        let invalid = |msg: String| Err(RegistrationError::InvalidConfig(msg));
-        if self.max_stars < 3 {
-            return invalid(format!(
-                "max_stars must be >= 3 for triangle matching, got {}",
-                self.max_stars
-            ));
-        }
-        if let Some(n) = self.min_stars
-            && n < 3
-        {
-            return invalid(format!(
-                "min_stars must be >= 3 for triangle matching, got {n}"
-            ));
+    fn validate(&self, transform_type: TransformType) -> Result<(), InvalidConfigField> {
+        InvalidConfigField::check(
+            self.max_stars >= 3,
+            "max_stars",
+            "at least 3 for triangle matching",
+            self.max_stars as f64,
+        )?;
+        if let Some(min_stars) = self.min_stars {
+            InvalidConfigField::check(
+                min_stars >= 3,
+                "min_stars",
+                "at least 3 for triangle matching",
+                min_stars as f64,
+            )?;
         }
         let required_stars = self.required_stars(transform_type);
-        if self.max_stars < required_stars {
-            return invalid(format!(
-                "max_stars ({}) must be >= the star gate ({required_stars})",
-                self.max_stars
-            ));
-        }
+        InvalidConfigField::check_against(
+            self.max_stars >= required_stars,
+            "max_stars",
+            "at least the star gate",
+            self.max_stars as f64,
+            required_stars as f64,
+        )?;
         let required_points = if transform_type == TransformType::Auto {
             TransformType::Homography.min_points()
         } else {
             transform_type.min_points()
         };
-        if self.min_matches < required_points {
-            return invalid(format!(
-                "min_matches ({}) must be >= transform minimum points ({required_points})",
-                self.min_matches
-            ));
-        }
+        InvalidConfigField::check_against(
+            self.min_matches >= required_points,
+            "min_matches",
+            "at least the transform's minimum point count",
+            self.min_matches as f64,
+            required_points as f64,
+        )?;
         self.triangle.validate()
     }
 }
@@ -316,7 +312,7 @@ impl Config {
     ///
     /// # Errors
     ///
-    /// Returns [`RegistrationError::InvalidConfig`] if any parameter is invalid:
+    /// Returns the offending field if any parameter is invalid:
     /// - `max_stars` or `min_stars` < 3
     /// - `max_stars` < `min_stars`
     /// - `min_matches` < transform minimum points
@@ -326,20 +322,15 @@ impl Config {
     /// - `max_rms_error` non-finite or <= 0
     /// - invalid SIP configuration (when enabled)
     /// - invalid warp configuration
-    pub fn validate(&self) -> Result<(), RegistrationError> {
-        let invalid = |msg: String| Err(RegistrationError::InvalidConfig(msg));
-
+    pub fn validate(&self) -> Result<(), InvalidConfigField> {
         self.matching.validate(self.transform_type)?;
         self.ransac.validate()?;
-
-        // Quality
-        if !self.max_rms_error.is_finite() || self.max_rms_error <= 0.0 {
-            return invalid(format!(
-                "max_rms_error must be positive and finite, got {}",
-                self.max_rms_error
-            ));
-        }
-
+        InvalidConfigField::finite(
+            "max_rms_error",
+            "finite and positive",
+            self.max_rms_error,
+            |value| value > 0.0,
+        )?;
         if let Some(sip) = &self.sip {
             sip.validate()?;
         }
@@ -506,7 +497,7 @@ mod tests {
 
     #[test]
     fn test_config_validation_rejects_invalid() {
-        // Each case: a single out-of-range field and the substring its error must contain.
+        // Each case: a single out-of-range field and the field name its error must name.
         let cases: &[(Config, &str)] = &[
             (
                 Config {
@@ -516,7 +507,7 @@ mod tests {
                     },
                     ..Config::default()
                 },
-                "ransac max_iterations must be positive",
+                "ransac max_iterations",
             ),
             (
                 Config {
@@ -526,7 +517,7 @@ mod tests {
                     },
                     ..Config::default()
                 },
-                "max_stars must be >= 3",
+                "max_stars",
             ),
             (
                 Config {
@@ -536,7 +527,7 @@ mod tests {
                     },
                     ..Config::default()
                 },
-                "min_stars must be >= 3",
+                "min_stars",
             ),
             (
                 Config {
@@ -547,7 +538,7 @@ mod tests {
                     },
                     ..Config::default()
                 },
-                "max_stars (5) must be >= the star gate (10)",
+                "max_stars",
             ),
             (
                 Config {
@@ -560,7 +551,7 @@ mod tests {
                     },
                     ..Config::default()
                 },
-                "ratio_tolerance must be in (0, 1)",
+                "ratio_tolerance",
             ),
             (
                 Config {
@@ -573,7 +564,7 @@ mod tests {
                     },
                     ..Config::default()
                 },
-                "ratio_tolerance must be in (0, 1)",
+                "ratio_tolerance",
             ),
             (
                 Config {
@@ -586,7 +577,7 @@ mod tests {
                     },
                     ..Config::default()
                 },
-                "min_votes must be at least 1",
+                "min_votes",
             ),
             (
                 Config {
@@ -596,7 +587,7 @@ mod tests {
                     },
                     ..Config::default()
                 },
-                "confidence must be in [0, 1]",
+                "ransac confidence",
             ),
             (
                 Config {
@@ -606,7 +597,7 @@ mod tests {
                     },
                     ..Config::default()
                 },
-                "min_inlier_ratio must be in (0, 1]",
+                "ransac min_inlier_ratio",
             ),
             (
                 Config {
@@ -617,7 +608,7 @@ mod tests {
                     },
                     ..Config::default()
                 },
-                "lo_iterations must be positive",
+                "ransac lo_iterations",
             ),
             (
                 Config {
@@ -627,7 +618,7 @@ mod tests {
                     },
                     ..Config::default()
                 },
-                "max_rotation must be positive",
+                "ransac max_rotation",
             ),
             (
                 Config {
@@ -637,7 +628,7 @@ mod tests {
                     },
                     ..Config::default()
                 },
-                "max_rotation must be positive and finite",
+                "ransac max_rotation",
             ),
             (
                 Config {
@@ -647,7 +638,7 @@ mod tests {
                     },
                     ..Config::default()
                 },
-                "scale_range must have 0 < min < max",
+                "ransac scale_range maximum",
             ),
             (
                 Config {
@@ -657,21 +648,31 @@ mod tests {
                     },
                     ..Config::default()
                 },
-                "scale_range bounds must be finite",
+                "ransac scale_range maximum",
+            ),
+            (
+                Config {
+                    ransac: RansacConfig {
+                        scale_range: Some((f64::INFINITY, 1.2)),
+                        ..Default::default()
+                    },
+                    ..Config::default()
+                },
+                "ransac scale_range minimum",
             ),
             (
                 Config {
                     max_rms_error: 0.0,
                     ..Config::default()
                 },
-                "max_rms_error must be positive",
+                "max_rms_error",
             ),
             (
                 Config {
                     max_rms_error: f64::INFINITY,
                     ..Config::default()
                 },
-                "max_rms_error must be positive and finite",
+                "max_rms_error",
             ),
             (
                 Config {
@@ -681,7 +682,7 @@ mod tests {
                     }),
                     ..Config::default()
                 },
-                "SIP order must be 2-5",
+                "SIP order",
             ),
             (
                 Config {
@@ -691,7 +692,7 @@ mod tests {
                     }),
                     ..Config::default()
                 },
-                "SIP reference_point must be finite",
+                "SIP reference_point y",
             ),
             (
                 // Homography needs 4 points, so min_matches = 3 is too few.
@@ -703,7 +704,7 @@ mod tests {
                     },
                     ..Config::default()
                 },
-                "min_matches (3) must be >= transform minimum points (4)",
+                "min_matches",
             ),
             (
                 Config {
@@ -713,21 +714,12 @@ mod tests {
                     },
                     ..Config::default()
                 },
-                "border_value must be finite",
+                "warp border_value",
             ),
         ];
 
         for (config, expected) in cases {
-            let err = config.validate().unwrap_err();
-            assert!(
-                matches!(err, RegistrationError::InvalidConfig(_)),
-                "expected InvalidConfig for case '{expected}', got {err:?}"
-            );
-            let msg = err.to_string();
-            assert!(
-                msg.contains(expected),
-                "expected error to contain '{expected}', got '{msg}'"
-            );
+            assert_eq!(&config.validate().unwrap_err().field, expected);
         }
     }
 

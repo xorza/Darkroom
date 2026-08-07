@@ -360,7 +360,7 @@ fn rejects_out_of_range_config() {
     let mut img = gray(4, 4, vec![0.3; 16]);
     let err = Stretch::ghs(-1.0, 0.0, 0.5).apply(&mut img).unwrap_err();
     assert!(
-        matches!(&err, OpError::InvalidConfig(m) if m.contains("ghs d must be")),
+        matches!(&err, OpError::InvalidConfig(m) if m.field == "ghs d"),
         "expected an InvalidConfig ghs error, got {err:?}"
     );
 }

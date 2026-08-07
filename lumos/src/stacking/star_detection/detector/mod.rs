@@ -12,13 +12,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::io::image::linear::LinearImage;
 
+use crate::error::InvalidConfigField;
 use crate::math::statistics::median_f32_mut;
 use crate::stacking::star_detection::background::{estimate_background, refine_background};
 use crate::stacking::star_detection::config::Config;
 #[cfg(test)]
 use crate::stacking::star_detection::config::DetectionConfig;
 use crate::stacking::star_detection::detector::stages::filter::FilterOutcome;
-use crate::stacking::star_detection::error::StarDetectionConfigError;
 use crate::stacking::star_detection::resources::DetectionResources;
 use crate::stacking::star_detection::star::Star;
 
@@ -99,7 +99,7 @@ impl StarDetector {
     /// # Errors
     ///
     /// Returns an error when any configuration parameter is invalid.
-    pub fn from_config(config: Config) -> Result<Self, StarDetectionConfigError> {
+    pub fn from_config(config: Config) -> Result<Self, InvalidConfigField> {
         config.validate()?;
         Ok(Self {
             config,
@@ -247,10 +247,7 @@ mod tests {
             ..Config::default()
         })
         .unwrap_err();
-        assert_eq!(
-            error,
-            StarDetectionConfigError::InvalidSigmaThreshold { value: 0.0 }
-        );
+        assert_eq!((error.field, error.value), ("sigma_threshold", 0.0));
     }
 
     #[test]

@@ -2,9 +2,9 @@
 
 use rayon::prelude::*;
 
+use crate::error::InvalidConfigField;
 use crate::stacking::star_detection::config::Config;
 use crate::stacking::star_detection::detector::StarDetector;
-use crate::stacking::star_detection::error::StarDetectionConfigError;
 
 #[derive(Debug)]
 pub(crate) struct DetectorPool {
@@ -15,7 +15,7 @@ impl DetectorPool {
     pub(crate) fn from_config(
         config: &Config,
         max_concurrent: usize,
-    ) -> Result<Self, StarDetectionConfigError> {
+    ) -> Result<Self, InvalidConfigField> {
         assert!(max_concurrent > 0, "max_concurrent must be > 0");
         let detectors = (0..max_concurrent)
             .map(|_| StarDetector::from_config(config.clone()))

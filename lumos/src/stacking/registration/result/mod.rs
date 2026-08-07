@@ -2,6 +2,7 @@
 
 use glam::DVec2;
 
+use crate::error::InvalidConfigField;
 use crate::stacking::registration::distortion::sip::SipFitResult;
 use crate::stacking::registration::transform::{Transform, WarpTransform};
 
@@ -87,7 +88,7 @@ pub enum RegistrationError {
     /// Star detection failed.
     StarDetection(String),
     /// A configuration parameter is outside its valid range.
-    InvalidConfig(String),
+    InvalidConfig(InvalidConfigField),
     /// Reference and target point counts differ for SIP fitting.
     SipPointCountMismatch { reference: usize, target: usize },
     /// Not enough matched points are available for a stable SIP fit.
@@ -151,8 +152,8 @@ impl std::fmt::Display for RegistrationError {
             RegistrationError::StarDetection(msg) => {
                 write!(f, "Star detection failed: {}", msg)
             }
-            RegistrationError::InvalidConfig(msg) => {
-                write!(f, "Invalid configuration: {}", msg)
+            RegistrationError::InvalidConfig(invalid) => {
+                write!(f, "Invalid configuration: {invalid}")
             }
             RegistrationError::SipPointCountMismatch { reference, target } => {
                 write!(
@@ -172,6 +173,12 @@ impl std::fmt::Display for RegistrationError {
                 write!(f, "SIP fit failed: singular polynomial system")
             }
         }
+    }
+}
+
+impl From<InvalidConfigField> for RegistrationError {
+    fn from(invalid: InvalidConfigField) -> Self {
+        Self::InvalidConfig(invalid)
     }
 }
 

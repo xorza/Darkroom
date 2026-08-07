@@ -173,7 +173,7 @@ fn rejects_invalid_config_before_zero_amount_shortcut() {
     .apply(&mut img)
     .unwrap_err();
     assert!(
-        matches!(&err, OpError::InvalidConfig(m) if m.contains("amount must be in")),
+        matches!(&err, OpError::InvalidConfig(m) if m.field == "hdr amount"),
         "expected an InvalidConfig amount error, got {err:?}"
     );
 
@@ -184,7 +184,7 @@ fn rejects_invalid_config_before_zero_amount_shortcut() {
     .apply(&mut img)
     .unwrap_err();
     assert!(
-        matches!(&err, OpError::InvalidConfig(m) if m.contains("scales must be")),
+        matches!(&err, OpError::InvalidConfig(m) if m.field == "hdr scales"),
         "expected an InvalidConfig scales error, got {err:?}"
     );
 }

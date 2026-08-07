@@ -200,7 +200,7 @@ fn rejects_degree_out_of_range() {
     .apply(&mut img)
     .unwrap_err();
     assert!(
-        matches!(&err, OpError::InvalidConfig(m) if m.contains("degree must be 1..=4")),
+        matches!(&err, OpError::InvalidConfig(m) if m.field == "degree"),
         "expected an InvalidConfig degree error, got {err:?}"
     );
 }

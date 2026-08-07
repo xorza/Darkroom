@@ -7,10 +7,10 @@
 //! - Percentile clipping
 //! - Generalized Extreme Studentized Deviate (GESD)
 
+use crate::error::InvalidConfigField;
 use crate::math::statistics::{mad_f32_fast, mad_to_sigma, median_f32_fast};
 use crate::math::sum::weighted_mean_f32;
 use crate::stacking::combine::cache::{CombinedSample, ScratchBuffers};
-use crate::stacking::combine::error::StackConfigError;
 use statrs::distribution::{ContinuousCDF, StudentsT};
 
 /// Configuration for sigma clipping.
@@ -59,12 +59,14 @@ impl SigmaClipConfig {
     }
 
     /// Validate the clip thresholds and iteration count.
-    pub fn validate(&self) -> Result<(), StackConfigError> {
+    pub fn validate(&self) -> Result<(), InvalidConfigField> {
         validate_sigma_bounds(self.sigma_low, self.sigma_high)?;
-        if self.max_iterations == 0 {
-            return Err(StackConfigError::ZeroMaxIterations);
-        }
-        Ok(())
+        InvalidConfigField::check(
+            self.max_iterations >= 1,
+            "max_iterations",
+            "at least 1",
+            self.max_iterations as f64,
+        )
     }
 
     /// Partition values by sigma clipping, returning the number of survivors.
@@ -266,7 +268,7 @@ impl WinsorizedClipConfig {
     }
 
     /// Validate the clip thresholds.
-    pub fn validate(&self) -> Result<(), StackConfigError> {
+    pub fn validate(&self) -> Result<(), InvalidConfigField> {
         validate_sigma_bounds(self.sigma_low, self.sigma_high)
     }
 
@@ -410,12 +412,14 @@ impl LinearFitClipConfig {
     }
 
     /// Validate the clip thresholds and iteration count.
-    pub fn validate(&self) -> Result<(), StackConfigError> {
+    pub fn validate(&self) -> Result<(), InvalidConfigField> {
         validate_sigma_bounds(self.sigma_low, self.sigma_high)?;
-        if self.max_iterations == 0 {
-            return Err(StackConfigError::ZeroMaxIterations);
-        }
-        Ok(())
+        InvalidConfigField::check(
+            self.max_iterations >= 1,
+            "max_iterations",
+            "at least 1",
+            self.max_iterations as f64,
+        )
     }
 
     /// Partition values by linear fit clipping, returning the number of survivors.
@@ -565,22 +569,26 @@ impl PercentileClipConfig {
     }
 
     /// Validate that each end clips a sane share and that together they leave survivors.
-    pub fn validate(&self) -> Result<(), StackConfigError> {
-        if !self.low_percentile.is_finite() || !(0.0..=50.0).contains(&self.low_percentile) {
-            return Err(StackConfigError::InvalidLowPercentile {
-                value: self.low_percentile,
-            });
-        }
-        if !self.high_percentile.is_finite() || !(0.0..=50.0).contains(&self.high_percentile) {
-            return Err(StackConfigError::InvalidHighPercentile {
-                value: self.high_percentile,
-            });
-        }
+    pub fn validate(&self) -> Result<(), InvalidConfigField> {
+        InvalidConfigField::finite(
+            "low_percentile",
+            "finite and between 0 and 50",
+            self.low_percentile,
+            |value| (0.0..=50.0).contains(&value),
+        )?;
+        InvalidConfigField::finite(
+            "high_percentile",
+            "finite and between 0 and 50",
+            self.high_percentile,
+            |value| (0.0..=50.0).contains(&value),
+        )?;
         let total = self.low_percentile + self.high_percentile;
-        if total >= 100.0 {
-            return Err(StackConfigError::InvalidTotalPercentile { total });
-        }
-        Ok(())
+        InvalidConfigField::check(
+            total < 100.0,
+            "low_percentile + high_percentile",
+            "below 100",
+            total,
+        )
     }
 
     /// Compute the surviving index range for a sorted array of length `n`.
@@ -668,11 +676,10 @@ impl GesdConfig {
     }
 
     /// Validate the significance level.
-    pub fn validate(&self) -> Result<(), StackConfigError> {
-        if !self.alpha.is_finite() || !(0.0..1.0).contains(&self.alpha) {
-            return Err(StackConfigError::InvalidGesdAlpha { value: self.alpha });
-        }
-        Ok(())
+    pub fn validate(&self) -> Result<(), InvalidConfigField> {
+        InvalidConfigField::finite("GESD alpha", "finite and in [0, 1)", self.alpha, |value| {
+            (0.0..1.0).contains(&value)
+        })
     }
 
     /// Get the configured maximum or the validation-constrained automatic maximum.
@@ -790,14 +797,13 @@ fn prepare_gesd_critical_values(
 
 /// Both clip thresholds must be finite and positive: they scale a spread estimate, so a
 /// non-positive one inverts the keep-band and a non-finite one empties it.
-fn validate_sigma_bounds(sigma_low: f32, sigma_high: f32) -> Result<(), StackConfigError> {
-    if !sigma_low.is_finite() || sigma_low <= 0.0 {
-        return Err(StackConfigError::InvalidSigmaLow { value: sigma_low });
-    }
-    if !sigma_high.is_finite() || sigma_high <= 0.0 {
-        return Err(StackConfigError::InvalidSigmaHigh { value: sigma_high });
-    }
-    Ok(())
+fn validate_sigma_bounds(sigma_low: f32, sigma_high: f32) -> Result<(), InvalidConfigField> {
+    InvalidConfigField::finite("sigma_low", "finite and positive", sigma_low, |value| {
+        value > 0.0
+    })?;
+    InvalidConfigField::finite("sigma_high", "finite and positive", sigma_high, |value| {
+        value > 0.0
+    })
 }
 
 /// Reset an indices buffer to [0, 1, 2, ...n), reusing the allocation.
@@ -975,7 +981,7 @@ impl Rejection {
     }
 
     /// Validate the held configuration, if any.
-    pub fn validate(&self) -> Result<(), StackConfigError> {
+    pub fn validate(&self) -> Result<(), InvalidConfigField> {
         match self {
             Self::None => Ok(()),
             Self::SigmaClip(config) => config.validate(),

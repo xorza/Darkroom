@@ -948,7 +948,8 @@ mod tests {
         .unwrap_err();
         assert!(matches!(
             error,
-            Error::Config(StackConfigError::InvalidSigmaLow { value: -1.0 })
+            Error::Config(StackConfigError::Field(invalid))
+                if invalid.field == "sigma_low" && invalid.value == -1.0
         ));
     }
 

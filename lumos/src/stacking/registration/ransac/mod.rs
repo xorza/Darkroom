@@ -26,7 +26,7 @@ use transforms::{adaptive_iterations, estimate_transform};
 use glam::DVec2;
 use rand::prelude::*;
 
-use crate::stacking::registration::result::RegistrationError;
+use crate::error::InvalidConfigField;
 use crate::stacking::registration::transform::{Transform, TransformType};
 use crate::stacking::registration::triangle::voting::PointMatch;
 
@@ -99,50 +99,56 @@ impl Default for RansacConfig {
 }
 
 impl RansacConfig {
-    pub(super) fn validate(&self) -> Result<(), RegistrationError> {
-        let invalid = |msg: String| Err(RegistrationError::InvalidConfig(msg));
-        if self.max_iterations == 0 {
-            return invalid(format!(
-                "ransac max_iterations must be positive, got {}",
-                self.max_iterations
-            ));
-        }
-        if self.local_optimization && self.lo_iterations == 0 {
-            return invalid(format!(
-                "ransac lo_iterations must be positive when local_optimization is enabled, got {}",
-                self.lo_iterations
-            ));
-        }
-        if !(0.0..=1.0).contains(&self.confidence) {
-            return invalid(format!(
-                "ransac confidence must be in [0, 1], got {}",
-                self.confidence
-            ));
-        }
-        if !(self.min_inlier_ratio > 0.0 && self.min_inlier_ratio <= 1.0) {
-            return invalid(format!(
-                "ransac min_inlier_ratio must be in (0, 1], got {}",
-                self.min_inlier_ratio
-            ));
-        }
-        if let Some(max_rotation) = self.max_rotation
-            && (!max_rotation.is_finite() || max_rotation <= 0.0)
-        {
-            return invalid(format!(
-                "ransac max_rotation must be positive and finite, got {max_rotation}"
-            ));
+    pub(super) fn validate(&self) -> Result<(), InvalidConfigField> {
+        InvalidConfigField::check(
+            self.max_iterations >= 1,
+            "ransac max_iterations",
+            "at least 1",
+            self.max_iterations as f64,
+        )?;
+        InvalidConfigField::check(
+            !self.local_optimization || self.lo_iterations >= 1,
+            "ransac lo_iterations",
+            "at least 1 when local_optimization is enabled",
+            self.lo_iterations as f64,
+        )?;
+        InvalidConfigField::finite(
+            "ransac confidence",
+            "finite and in [0, 1]",
+            self.confidence,
+            |value| (0.0..=1.0).contains(&value),
+        )?;
+        InvalidConfigField::finite(
+            "ransac min_inlier_ratio",
+            "finite and in (0, 1]",
+            self.min_inlier_ratio,
+            |value| value > 0.0 && value <= 1.0,
+        )?;
+        if let Some(max_rotation) = self.max_rotation {
+            InvalidConfigField::finite(
+                "ransac max_rotation",
+                "finite and positive",
+                max_rotation,
+                |value| value > 0.0,
+            )?;
         }
         if let Some((min_scale, max_scale)) = self.scale_range {
-            if !min_scale.is_finite() || !max_scale.is_finite() {
-                return invalid(format!(
-                    "ransac scale_range bounds must be finite, got ({min_scale}, {max_scale})"
-                ));
-            }
-            if !(min_scale > 0.0 && max_scale > min_scale) {
-                return invalid(format!(
-                    "ransac scale_range must have 0 < min < max, got ({min_scale}, {max_scale})"
-                ));
-            }
+            InvalidConfigField::finite(
+                "ransac scale_range minimum",
+                "finite and positive",
+                min_scale,
+                |value| value > 0.0,
+            )?;
+            InvalidConfigField::finite(
+                "ransac scale_range maximum",
+                "finite and above the minimum",
+                max_scale,
+                |value| value > min_scale,
+            )
+            .map_err(|invalid| InvalidConfigField {
+                bound: Some(min_scale),
+                ..invalid
+            })?;
         }
         Ok(())
     }

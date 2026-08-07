@@ -29,6 +29,7 @@
 use arrayvec::ArrayVec;
 use glam::DVec2;
 
+use crate::error::InvalidConfigField;
 use crate::stacking::registration::distortion::SINGULAR_THRESHOLD;
 use crate::stacking::registration::result::RegistrationError;
 use crate::stacking::registration::transform::Transform;
@@ -77,26 +78,32 @@ impl Default for SipConfig {
 }
 
 impl SipConfig {
-    pub(crate) fn validate(&self) -> Result<(), RegistrationError> {
-        if !(2..=5).contains(&self.order) {
-            return Err(RegistrationError::InvalidConfig(format!(
-                "SIP order must be 2-5, got {}",
-                self.order
-            )));
-        }
-        if !self.clip_sigma.is_finite() || self.clip_sigma <= 0.0 {
-            return Err(RegistrationError::InvalidConfig(format!(
-                "SIP clip_sigma must be positive and finite, got {}",
-                self.clip_sigma
-            )));
-        }
-        if let Some(reference_point) = self.reference_point
-            && (!reference_point.x.is_finite() || !reference_point.y.is_finite())
-        {
-            return Err(RegistrationError::InvalidConfig(format!(
-                "SIP reference_point must be finite, got ({}, {})",
-                reference_point.x, reference_point.y
-            )));
+    pub(crate) fn validate(&self) -> Result<(), InvalidConfigField> {
+        InvalidConfigField::check(
+            (2..=5).contains(&self.order),
+            "SIP order",
+            "between 2 and 5",
+            self.order as f64,
+        )?;
+        InvalidConfigField::finite(
+            "SIP clip_sigma",
+            "finite and positive",
+            self.clip_sigma,
+            |value| value > 0.0,
+        )?;
+        if let Some(reference_point) = self.reference_point {
+            InvalidConfigField::finite(
+                "SIP reference_point x",
+                "finite",
+                reference_point.x,
+                |_| true,
+            )?;
+            InvalidConfigField::finite(
+                "SIP reference_point y",
+                "finite",
+                reference_point.y,
+                |_| true,
+            )?;
         }
         Ok(())
     }

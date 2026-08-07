@@ -3,7 +3,6 @@
 use crate::{
     stacking::star_detection::background,
     stacking::star_detection::config::{BackgroundConfig, BackgroundRefinement},
-    stacking::star_detection::error::StarDetectionConfigError,
     stacking::star_detection::resources::DetectionResources,
     testing::estimate_background,
 };
@@ -312,10 +311,8 @@ fn test_invalid_tile_sizes_return_exact_errors() {
             tile_size: value,
             ..Default::default()
         };
-        assert_eq!(
-            config.validate(),
-            Err(StarDetectionConfigError::InvalidTileSize { value })
-        );
+        let invalid = config.validate().unwrap_err();
+        assert_eq!((invalid.field, invalid.value), ("tile_size", value as f64));
     }
 }
 

@@ -27,7 +27,8 @@
 use crate::image_ops::rgb::Rgb;
 use rayon::prelude::*;
 
-use crate::image_ops::op::{OpError, ensure, require_f32_master};
+use crate::error::InvalidConfigField;
+use crate::image_ops::op::{OpError, require_f32_master};
 use crate::image_ops::par_map_pixels;
 use crate::math::statistics::{mad_to_sigma, median_and_mad_f32_mut};
 use imaginarium::{ChannelCount, Image};
@@ -181,37 +182,50 @@ impl Stretch {
         Ok(())
     }
 
-    fn validate(&self) -> Result<(), OpError> {
+    fn validate(&self) -> Result<(), InvalidConfigField> {
         match self.method {
             StretchMethod::AutoStf {
                 shadow_sigmas,
                 target_background,
             } => {
-                ensure(shadow_sigmas >= 0.0, || {
-                    format!("shadow_sigmas must be >= 0, got {shadow_sigmas}")
-                })?;
+                InvalidConfigField::finite(
+                    "shadow_sigmas",
+                    "finite and non-negative",
+                    shadow_sigmas,
+                    |value| value >= 0.0,
+                )?;
                 ensure_target_background(target_background)
             }
             StretchMethod::AutoAsinh { target_background } => {
                 ensure_target_background(target_background)
             }
             StretchMethod::Asinh { beta } => {
-                ensure(beta > 0.0, || format!("asinh beta must be > 0, got {beta}"))
+                InvalidConfigField::finite("asinh beta", "finite and positive", beta, |value| {
+                    value > 0.0
+                })
             }
             StretchMethod::Ghs { d, b, sp, lp, hp } => {
-                ensure(d >= 0.0 && d.is_finite(), || {
-                    format!("ghs d must be a finite value >= 0, got {d}")
+                InvalidConfigField::finite("ghs d", "finite and non-negative", d, |value| {
+                    value >= 0.0
                 })?;
-                ensure(b.is_finite(), || format!("ghs b must be finite, got {b}"))?;
-                ensure((0.0..=1.0).contains(&sp), || {
-                    format!("ghs sp must be in [0, 1], got {sp}")
+                InvalidConfigField::finite("ghs b", "finite", b, |_| true)?;
+                InvalidConfigField::finite("ghs sp", "finite and in [0, 1]", sp, |value| {
+                    (0.0..=1.0).contains(&value)
                 })?;
-                ensure((0.0..=sp).contains(&lp), || {
-                    format!("ghs lp must be in [0, sp], got {lp}")
-                })?;
-                ensure((sp..=1.0).contains(&hp), || {
-                    format!("ghs hp must be in [sp, 1], got {hp}")
-                })
+                InvalidConfigField::check_against(
+                    (0.0..=sp).contains(&lp),
+                    "ghs lp",
+                    "in [0, sp]",
+                    lp,
+                    sp,
+                )?;
+                InvalidConfigField::check_against(
+                    (sp..=1.0).contains(&hp),
+                    "ghs hp",
+                    "in [sp, 1]",
+                    hp,
+                    sp,
+                )
             }
         }
     }
@@ -224,9 +238,9 @@ impl Default for Stretch {
 }
 
 /// `Ok(())` if `t` is a valid target background in `(0, 1)`.
-fn ensure_target_background(t: f32) -> Result<(), OpError> {
-    ensure(t > 0.0 && t < 1.0, || {
-        format!("target_background must be in (0, 1), got {t}")
+fn ensure_target_background(t: f32) -> Result<(), InvalidConfigField> {
+    InvalidConfigField::finite("target_background", "finite and in (0, 1)", t, |value| {
+        value > 0.0 && value < 1.0
     })
 }
 

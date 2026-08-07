@@ -5,22 +5,17 @@ use std::path::PathBuf;
 
 use thiserror::Error;
 
+use crate::error::InvalidConfigField;
 use crate::io::image::ImageDimensions;
 
 /// Invalid [`crate::DrizzleConfig`] parameters.
+///
+/// Plain range checks report through [`InvalidConfigField`]; the variant below constrains two
+/// fields against the kernel, so it isn't one.
 #[derive(Debug, Error, Clone, PartialEq)]
 pub enum DrizzleConfigError {
-    #[error("scale must be finite and positive, got {value}")]
-    InvalidScale { value: f32 },
-
-    #[error("pixfrac must be finite, greater than 0, and at most 1, got {value}")]
-    InvalidPixfrac { value: f32 },
-
-    #[error("fill_value must be finite, got {value}")]
-    InvalidFillValue { value: f32 },
-
-    #[error("min_coverage must be finite and between 0 and 1, got {value}")]
-    InvalidMinCoverage { value: f32 },
+    #[error(transparent)]
+    Field(#[from] InvalidConfigField),
 
     #[error("Lanczos requires scale=1 and pixfrac=1, got scale={scale}, pixfrac={pixfrac}")]
     InvalidLanczosSampling { scale: f32, pixfrac: f32 },

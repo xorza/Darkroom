@@ -1,3 +1,4 @@
+use crate::error::InvalidConfigField;
 use crate::stacking::drizzle::error::DrizzleConfigError;
 
 /// Drizzle kernel type for distributing flux.
@@ -101,24 +102,19 @@ impl DrizzleConfig {
 
     /// Validate parameters before allocating or processing an output image.
     pub fn validate(&self) -> Result<(), DrizzleConfigError> {
-        if !self.scale.is_finite() || self.scale <= 0.0 {
-            return Err(DrizzleConfigError::InvalidScale { value: self.scale });
-        }
-        if !self.pixfrac.is_finite() || !(self.pixfrac > 0.0 && self.pixfrac <= 1.0) {
-            return Err(DrizzleConfigError::InvalidPixfrac {
-                value: self.pixfrac,
-            });
-        }
-        if !self.fill_value.is_finite() {
-            return Err(DrizzleConfigError::InvalidFillValue {
-                value: self.fill_value,
-            });
-        }
-        if !self.min_coverage.is_finite() || !(0.0..=1.0).contains(&self.min_coverage) {
-            return Err(DrizzleConfigError::InvalidMinCoverage {
-                value: self.min_coverage,
-            });
-        }
+        InvalidConfigField::finite("scale", "finite and positive", self.scale, |value| {
+            value > 0.0
+        })?;
+        InvalidConfigField::finite("pixfrac", "finite and in (0, 1]", self.pixfrac, |value| {
+            value > 0.0 && value <= 1.0
+        })?;
+        InvalidConfigField::finite("fill_value", "finite", self.fill_value, |_| true)?;
+        InvalidConfigField::finite(
+            "min_coverage",
+            "finite and in [0, 1]",
+            self.min_coverage,
+            |value| (0.0..=1.0).contains(&value),
+        )?;
         if self.kernel == DrizzleKernel::Lanczos && (self.scale != 1.0 || self.pixfrac != 1.0) {
             return Err(DrizzleConfigError::InvalidLanczosSampling {
                 scale: self.scale,
