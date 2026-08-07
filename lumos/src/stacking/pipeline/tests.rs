@@ -12,10 +12,12 @@ use crate::stacking::calibration_masters::CalibrationMasters;
 use crate::stacking::combine::config::{CombineMethod, StackConfig};
 use crate::stacking::combine::error::{Error as StackError, StackConfigError};
 use crate::stacking::combine::rejection::Rejection;
-use crate::stacking::pipeline::align::align_and_stack;
+use crate::stacking::pipeline::align::{align_and_stack, register_warp_and_stack};
 use crate::stacking::pipeline::calibrate::calibrate_align_stack;
 use crate::stacking::pipeline::config::{AlignStackConfig, Reference};
+use crate::stacking::pipeline::frame::{DetectedFrame, PipelineFrame};
 use crate::stacking::pipeline::result::Error;
+use crate::stacking::pipeline::tier::FrameTier;
 use crate::stacking::registration::config::Config as RegistrationConfig;
 use crate::stacking::registration::resample::warp;
 use crate::stacking::registration::transform::{Transform, TransformType, WarpTransform};
@@ -222,6 +224,51 @@ fn an_invalid_registration_config_is_reported_as_one() {
         matches!(error, Error::RegistrationConfig(_)),
         "expected the config to be blamed, got {error:?}"
     );
+}
+
+#[test]
+fn a_bad_registration_config_is_never_mistaken_for_frames_that_would_not_match() {
+    // The up-front `validate` is a fast fail, not the guarantee: `register` reports an invalid
+    // config with the same error type as "these two catalogs did not match", which the per-frame
+    // loop drops. Enter through the shared body so no up-front check runs, and the loop itself
+    // has to tell them apart.
+    let BaseField {
+        image: base,
+        registration: reg,
+    } = base_field();
+    let images = vec![
+        base.clone(),
+        shifted(&base, &reg, 5.0, 3.0),
+        shifted(&base, &reg, -4.0, 6.0),
+    ];
+
+    let mut config = AlignStackConfig {
+        reference: Reference::Index(0),
+        ..Default::default()
+    };
+    // Homography needs four points, so a three-match floor can never be satisfied.
+    config.registration.transform_type = TransformType::Homography;
+    config.registration.matching.min_matches = 3;
+    assert!(
+        config.registration.validate().is_err(),
+        "premise: this registration config must be invalid"
+    );
+
+    let mut detector = StarDetector::from_config(config.detection.clone()).unwrap();
+    let detected = images
+        .into_iter()
+        .map(|image| DetectedFrame {
+            stars: detector.detect(&image).stars,
+            image: PipelineFrame::Resident(image),
+        })
+        .collect();
+
+    let error = register_warp_and_stack(detected, &config, FrameTier::Ram, 1, CancelToken::never())
+        .unwrap_err();
+    let Error::RegistrationConfig(invalid) = error else {
+        panic!("expected the config to be blamed, got {error:?}")
+    };
+    assert_eq!(invalid.field, "min_matches");
 }
 
 #[test]

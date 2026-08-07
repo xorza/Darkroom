@@ -87,9 +87,9 @@ use triangle::voting::PointMatch;
 /// # Errors
 ///
 /// [`RegistrationError::InvalidConfig`] if `config` fails validation (see [`Config::validate`]),
-/// and the matching/accuracy failures below. Callers that run this per frame pair should
-/// validate once up front — a config error and a pair that simply did not match are the same
-/// type here, so only the caller knows which it can act on.
+/// and the matching/accuracy failures below. A caller that runs this per frame pair must treat
+/// `InvalidConfig` apart from the rest: every other variant describes one pair, and is a frame to
+/// drop, but an invalid config fails every pair identically and is the run's own fault.
 ///
 /// # Example
 ///
