@@ -12,7 +12,12 @@ use crate::stacking::star_detection::convolution::simd::{Kernel2d, convolve_pixe
 ///
 /// # Safety
 /// Caller must ensure running on aarch64 (NEON is always available on aarch64).
-pub(super) unsafe fn convolve_row_neon(input: &[f32], output: &mut [f32], kernel: &[f32], radius: usize) {
+pub(super) unsafe fn convolve_row_neon(
+    input: &[f32],
+    output: &mut [f32],
+    kernel: &[f32],
+    radius: usize,
+) {
     unsafe {
         let width = input.len();
 

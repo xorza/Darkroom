@@ -5,19 +5,16 @@
 //! - NEON on aarch64
 //! - Scalar fallback on other platforms
 
-use common::{cfg_aarch64, cfg_x86_64};
 use rayon::prelude::*;
 
 #[cfg(target_arch = "x86_64")]
 use imaginarium::cpu_features;
 
-cfg_x86_64! {
-    mod x86;
-}
+#[cfg(target_arch = "x86_64")]
+mod x86;
 
-cfg_aarch64! {
-    mod neon;
-}
+#[cfg(target_arch = "aarch64")]
+mod neon;
 
 #[cfg(test)]
 mod tests;
