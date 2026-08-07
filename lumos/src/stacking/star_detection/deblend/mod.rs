@@ -178,6 +178,7 @@ mod internals {
     use crate::stacking::star_detection::deblend::{ComponentData, MAX_PEAKS};
     use crate::stacking::star_detection::labeling::LabelMap;
     use crate::stacking::star_detection::labeling::internals::label_map_from_raw;
+    use crate::stacking::star_detection::test_common::test_star::TestStar;
 
     #[derive(Debug)]
     pub(super) struct TestComponent {
@@ -186,27 +187,23 @@ mod internals {
         pub(super) data: ComponentData,
     }
 
-    pub(super) fn make_test_component(
-        size: Size2us,
-        stars: &[(usize, usize, f32, f32)],
-    ) -> TestComponent {
+    pub(super) fn make_test_component(size: Size2us, stars: &[TestStar]) -> TestComponent {
         let mut pixels = Buffer2::new_filled(size.width, size.height, 0.0f32);
         let mut labels = Buffer2::new_filled(size.width, size.height, 0u32);
         let mut bbox = URect::empty();
         let mut area = 0;
 
-        for &(center_x, center_y, amplitude, sigma) in stars {
-            let radius = (sigma * 4.0).ceil() as i32;
+        for &star in stars {
+            let radius = star.radius();
             for offset_y in -radius..=radius {
                 for offset_x in -radius..=radius {
-                    let x = (center_x as i32 + offset_x) as usize;
-                    let y = (center_y as i32 + offset_y) as usize;
+                    let x = (star.center.x as i32 + offset_x) as usize;
+                    let y = (star.center.y as i32 + offset_y) as usize;
                     if !size.contains(Vec2us::new(x, y)) {
                         continue;
                     }
 
-                    let radius_squared = (offset_x * offset_x + offset_y * offset_y) as f32;
-                    let value = amplitude * (-radius_squared / (2.0 * sigma * sigma)).exp();
+                    let value = star.value_at(offset_x, offset_y);
                     if value <= 0.001 {
                         continue;
                     }

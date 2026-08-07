@@ -372,24 +372,20 @@ mod tests {
     use crate::math::rect::URect;
     use crate::stacking::star_detection::detector::stages::detect::*;
     use crate::stacking::star_detection::labeling::internals::label_map_from_raw;
+    use crate::stacking::star_detection::test_common::test_star::TestStar;
 
-    /// Render Gaussian `stars` (cx, cy, amplitude, sigma) into a single connected
-    /// component: every lit pixel gets label 1.
-    fn one_component(
-        size: Size2us,
-        stars: &[(usize, usize, f32, f32)],
-    ) -> (Buffer2<f32>, LabelMap) {
+    /// Render Gaussian `stars` into a single connected component: every lit pixel gets label 1.
+    fn one_component(size: Size2us, stars: &[TestStar]) -> (Buffer2<f32>, LabelMap) {
         let mut pixels = Buffer2::new_filled(size.width, size.height, 0.0f32);
         let mut labels = Buffer2::new_filled(size.width, size.height, 0u32);
-        for &(cx, cy, amplitude, sigma) in stars {
-            let radius = (sigma * 4.0).ceil() as i32;
+        for &star in stars {
+            let radius = star.radius();
             for dy in -radius..=radius {
                 for dx in -radius..=radius {
-                    let x = (cx as i32 + dx) as usize;
-                    let y = (cy as i32 + dy) as usize;
+                    let x = (star.center.x as i32 + dx) as usize;
+                    let y = (star.center.y as i32 + dy) as usize;
                     if size.contains(Vec2us::new(x, y)) {
-                        let r2 = (dx * dx + dy * dy) as f32;
-                        let v = amplitude * (-r2 / (2.0 * sigma * sigma)).exp();
+                        let v = star.value_at(dx, dy);
                         if v > 0.001 {
                             pixels[(x, y)] += v;
                             labels[(x, y)] = 1;
@@ -419,7 +415,11 @@ mod tests {
         // formula reported 3 - 1 = 2 here, which this pins against.
         let (pixels, label_map) = one_component(
             Size2us::new(48, 24),
-            &[(12, 12, 1.0, 3.0), (24, 12, 1.0, 3.0), (36, 12, 1.0, 3.0)],
+            &[
+                TestStar::new(Vec2us::new(12, 12), 1.0, 3.0),
+                TestStar::new(Vec2us::new(24, 12), 1.0, 3.0),
+                TestStar::new(Vec2us::new(36, 12), 1.0, 3.0),
+            ],
         );
 
         let result = extract_candidates(&pixels, &label_map, &local_maxima_config());
@@ -438,7 +438,10 @@ mod tests {
     #[test]
     fn local_maxima_single_peak_reports_zero_deblended() {
         // A lone star: one region from one component — nothing was split.
-        let (pixels, label_map) = one_component(Size2us::new(32, 32), &[(16, 16, 1.0, 3.0)]);
+        let (pixels, label_map) = one_component(
+            Size2us::new(32, 32),
+            &[TestStar::new(Vec2us::new(16, 16), 1.0, 3.0)],
+        );
 
         let result = extract_candidates(&pixels, &label_map, &local_maxima_config());
 
@@ -516,7 +519,10 @@ mod tests {
         // oddly-sized frame shouldn't abort the whole run. Covers both the exact boundary
         // (2 * 16 == 32) and a margin past the dimension itself (saturating_sub floors at 0).
         for edge_margin in [16, 32] {
-            let (pixels, label_map) = one_component(Size2us::new(32, 32), &[(16, 16, 1.0, 3.0)]);
+            let (pixels, label_map) = one_component(
+                Size2us::new(32, 32),
+                &[TestStar::new(Vec2us::new(16, 16), 1.0, 3.0)],
+            );
             let config = DetectionConfig {
                 edge_margin,
                 ..local_maxima_config()

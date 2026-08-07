@@ -8,6 +8,7 @@ use crate::stacking::star_detection::deblend::internals::{
 };
 use crate::stacking::star_detection::deblend::multi_threshold::*;
 use crate::stacking::star_detection::labeling::internals::label_map_from_raw;
+use crate::stacking::star_detection::test_common::test_star::TestStar;
 
 #[test]
 fn test_single_star_no_deblending() {
@@ -15,7 +16,10 @@ fn test_single_star_no_deblending() {
         pixels,
         labels,
         data,
-    } = make_test_component(Size2us::new(100, 100), &[(50, 50, 1.0, 3.0)]);
+    } = make_test_component(
+        Size2us::new(100, 100),
+        &[TestStar::new(Vec2us::new(50, 50), 1.0, 3.0)],
+    );
     let result = deblend_multi_threshold_test(&data, &pixels, &labels, 32, 3, 0.005);
 
     assert_eq!(result.len(), 1, "Single star should produce one object");
@@ -31,7 +35,10 @@ fn test_two_separated_stars_deblend() {
         data,
     } = make_test_component(
         Size2us::new(100, 100),
-        &[(30, 50, 1.0, 2.5), (70, 50, 0.8, 2.5)],
+        &[
+            TestStar::new(Vec2us::new(30, 50), 1.0, 2.5),
+            TestStar::new(Vec2us::new(70, 50), 0.8, 2.5),
+        ],
     );
 
     let result = deblend_multi_threshold_test(&data, &pixels, &labels, 32, 3, 0.005);
@@ -63,7 +70,10 @@ fn test_late_gaussian_split_uses_full_threshold_ladder() {
         data,
     } = make_test_component(
         Size2us::new(100, 100),
-        &[(44, 50, 1.0, 4.0), (56, 50, 1.0, 4.0)],
+        &[
+            TestStar::new(Vec2us::new(44, 50), 1.0, 4.0),
+            TestStar::new(Vec2us::new(56, 50), 1.0, 4.0),
+        ],
     );
 
     let threshold_count = 32;
@@ -106,7 +116,10 @@ fn test_faint_secondary_below_contrast() {
         data,
     } = make_test_component(
         Size2us::new(100, 100),
-        &[(30, 50, 1.0, 2.5), (70, 50, 0.001, 2.5)],
+        &[
+            TestStar::new(Vec2us::new(30, 50), 1.0, 2.5),
+            TestStar::new(Vec2us::new(70, 50), 0.001, 2.5),
+        ],
     );
 
     let result = deblend_multi_threshold_test(&data, &pixels, &labels, 32, 3, 0.01);
@@ -153,7 +166,10 @@ fn test_close_peaks_merge() {
         data,
     } = make_test_component(
         Size2us::new(100, 100),
-        &[(48, 50, 1.0, 2.0), (52, 50, 0.9, 2.0)],
+        &[
+            TestStar::new(Vec2us::new(48, 50), 1.0, 2.0),
+            TestStar::new(Vec2us::new(52, 50), 0.9, 2.0),
+        ],
     );
 
     let result = deblend_multi_threshold_test(&data, &pixels, &labels, 32, 5, 0.005);
@@ -184,7 +200,10 @@ fn test_deblend_disabled_with_high_contrast() {
         data,
     } = make_test_component(
         Size2us::new(100, 100),
-        &[(30, 50, 1.0, 2.5), (70, 50, 0.8, 2.5)],
+        &[
+            TestStar::new(Vec2us::new(30, 50), 1.0, 2.5),
+            TestStar::new(Vec2us::new(70, 50), 0.8, 2.5),
+        ],
     );
 
     let result = deblend_multi_threshold_test(&data, &pixels, &labels, 32, 3, 1.0);
@@ -204,7 +223,11 @@ fn test_three_stars_deblend() {
         data,
     } = make_test_component(
         Size2us::new(150, 100),
-        &[(30, 50, 1.0, 2.5), (75, 50, 0.9, 2.5), (120, 50, 0.8, 2.5)],
+        &[
+            TestStar::new(Vec2us::new(30, 50), 1.0, 2.5),
+            TestStar::new(Vec2us::new(75, 50), 0.9, 2.5),
+            TestStar::new(Vec2us::new(120, 50), 0.8, 2.5),
+        ],
     );
 
     let result = deblend_multi_threshold_test(&data, &pixels, &labels, 32, 3, 0.005);
@@ -230,7 +253,11 @@ fn test_hierarchical_deblend() {
         data,
     } = make_test_component(
         Size2us::new(150, 100),
-        &[(30, 50, 1.0, 2.5), (100, 50, 0.8, 2.5), (115, 50, 0.7, 2.5)],
+        &[
+            TestStar::new(Vec2us::new(30, 50), 1.0, 2.5),
+            TestStar::new(Vec2us::new(100, 50), 0.8, 2.5),
+            TestStar::new(Vec2us::new(115, 50), 0.7, 2.5),
+        ],
     );
 
     let result = deblend_multi_threshold_test(&data, &pixels, &labels, 32, 3, 0.1);
@@ -290,7 +317,10 @@ fn test_equal_brightness_stars() {
         data,
     } = make_test_component(
         Size2us::new(100, 100),
-        &[(30, 50, 1.0, 2.5), (70, 50, 1.0, 2.5)],
+        &[
+            TestStar::new(Vec2us::new(30, 50), 1.0, 2.5),
+            TestStar::new(Vec2us::new(70, 50), 1.0, 2.5),
+        ],
     );
 
     let result = deblend_multi_threshold_test(&data, &pixels, &labels, 32, 3, 0.005);
@@ -317,7 +347,10 @@ fn test_contrast_at_boundary() {
         data,
     } = make_test_component(
         Size2us::new(100, 100),
-        &[(30, 50, 1.0, 2.5), (70, 50, 0.1, 2.5)],
+        &[
+            TestStar::new(Vec2us::new(30, 50), 1.0, 2.5),
+            TestStar::new(Vec2us::new(70, 50), 0.1, 2.5),
+        ],
     );
 
     let result_pass = deblend_multi_threshold_test(&data, &pixels, &labels, 32, 3, 0.09);
@@ -338,7 +371,10 @@ fn test_pixel_assignment_conservation() {
         data,
     } = make_test_component(
         Size2us::new(100, 100),
-        &[(30, 50, 1.0, 2.5), (70, 50, 0.8, 2.5)],
+        &[
+            TestStar::new(Vec2us::new(30, 50), 1.0, 2.5),
+            TestStar::new(Vec2us::new(70, 50), 0.8, 2.5),
+        ],
     );
 
     let result = deblend_multi_threshold_test(&data, &pixels, &labels, 32, 3, 0.005);
@@ -358,7 +394,10 @@ fn test_vertical_star_pair() {
         data,
     } = make_test_component(
         Size2us::new(100, 100),
-        &[(50, 30, 1.0, 2.5), (50, 70, 0.8, 2.5)],
+        &[
+            TestStar::new(Vec2us::new(50, 30), 1.0, 2.5),
+            TestStar::new(Vec2us::new(50, 70), 0.8, 2.5),
+        ],
     );
 
     let result = deblend_multi_threshold_test(&data, &pixels, &labels, 32, 3, 0.005);
@@ -379,7 +418,10 @@ fn test_diagonal_star_pair() {
         data,
     } = make_test_component(
         Size2us::new(100, 100),
-        &[(30, 30, 1.0, 2.5), (70, 70, 0.8, 2.5)],
+        &[
+            TestStar::new(Vec2us::new(30, 30), 1.0, 2.5),
+            TestStar::new(Vec2us::new(70, 70), 0.8, 2.5),
+        ],
     );
 
     let result = deblend_multi_threshold_test(&data, &pixels, &labels, 32, 3, 0.005);
@@ -436,7 +478,10 @@ fn test_n_thresholds_effect() {
         data,
     } = make_test_component(
         Size2us::new(100, 100),
-        &[(35, 50, 1.0, 2.5), (65, 50, 0.9, 2.5)],
+        &[
+            TestStar::new(Vec2us::new(35, 50), 1.0, 2.5),
+            TestStar::new(Vec2us::new(65, 50), 0.9, 2.5),
+        ],
     );
     let result_few = deblend_multi_threshold_test(&data, &pixels, &labels, 4, 3, 0.005);
     let result_many = deblend_multi_threshold_test(&data, &pixels, &labels, 64, 3, 0.005);
@@ -529,14 +574,17 @@ fn test_zero_floor_pixel_does_not_prevent_deblending() {
         }
     }
 
-    for &(cx, cy, amplitude, sigma) in &[(30i32, 50i32, 1.0f32, 2.5f32), (70, 50, 0.8, 2.5)] {
-        let radius = (sigma * 6.0).ceil() as i32;
+    for &star in &[
+        TestStar::new(Vec2us::new(30, 50), 1.0, 2.5),
+        TestStar::new(Vec2us::new(70, 50), 0.8, 2.5),
+    ] {
+        // 6σ, not the fixture's 4σ: this component is padded well past the falloff on purpose.
+        let radius = (star.sigma * 6.0).ceil() as i32;
         for dy in -radius..=radius {
             for dx in -radius..=radius {
-                let x = (cx + dx) as usize;
-                let y = (cy + dy) as usize;
-                let r2 = (dx * dx + dy * dy) as f32;
-                pixels[(x, y)] += amplitude * (-r2 / (2.0 * sigma * sigma)).exp();
+                let x = (star.center.x as i32 + dx) as usize;
+                let y = (star.center.y as i32 + dy) as usize;
+                pixels[(x, y)] += star.value_at(dx, dy);
             }
         }
     }
@@ -571,7 +619,7 @@ fn test_zero_floor_pixel_does_not_prevent_deblending() {
 fn test_many_stars_max_peaks_limit() {
     // Create more stars than MAX_PEAKS to test limiting behavior
     let stars: Vec<_> = (0..12)
-        .map(|i| (15 + i * 12, 50usize, 1.0 - i as f32 * 0.05, 2.0f32))
+        .map(|i| TestStar::new(Vec2us::new(15 + i * 12, 50), 1.0 - i as f32 * 0.05, 2.0))
         .collect();
 
     let TestComponent {
@@ -605,7 +653,7 @@ fn test_large_tree_over_64_nodes() {
             let x = 20 + col * 25;
             let y = 20 + row * 25;
             let amp = 1.0 - (row * 4 + col) as f32 * 0.03;
-            stars.push((x, y, amp, 2.0f32));
+            stars.push(TestStar::new(Vec2us::new(x, y), amp, 2.0));
         }
     }
 
@@ -635,7 +683,7 @@ fn test_very_large_tree_heap_fallback() {
             let x = 15 + col * 20;
             let y = 15 + row * 20;
             let amp = 1.0 - (row * 6 + col) as f32 * 0.02;
-            stars.push((x, y, amp, 1.8f32));
+            stars.push(TestStar::new(Vec2us::new(x, y), amp, 1.8));
         }
     }
 
@@ -664,7 +712,10 @@ fn test_buffer_reuse_consistency() {
         data,
     } = make_test_component(
         Size2us::new(100, 100),
-        &[(30, 50, 1.0, 2.5), (70, 50, 0.8, 2.5)],
+        &[
+            TestStar::new(Vec2us::new(30, 50), 1.0, 2.5),
+            TestStar::new(Vec2us::new(70, 50), 0.8, 2.5),
+        ],
     );
 
     let result1 = deblend_multi_threshold_test(&data, &pixels, &labels, 32, 3, 0.005);
@@ -694,8 +745,8 @@ fn test_connected_regions_complex_shape() {
     } = make_test_component(
         Size2us::new(100, 50),
         &[
-            (20, 25, 1.0, 3.0), // Left blob
-            (80, 25, 0.9, 3.0), // Right blob
+            TestStar::new(Vec2us::new(20, 25), 1.0, 3.0), // Left blob
+            TestStar::new(Vec2us::new(80, 25), 0.9, 3.0), // Right blob
         ],
     );
 
@@ -724,7 +775,11 @@ fn test_bbox_contains_all_peaks() {
         data,
     } = make_test_component(
         Size2us::new(150, 100),
-        &[(30, 30, 1.0, 2.5), (75, 50, 0.9, 2.5), (120, 70, 0.8, 2.5)],
+        &[
+            TestStar::new(Vec2us::new(30, 30), 1.0, 2.5),
+            TestStar::new(Vec2us::new(75, 50), 0.9, 2.5),
+            TestStar::new(Vec2us::new(120, 70), 0.8, 2.5),
+        ],
     );
 
     let result = deblend_multi_threshold_test(&data, &pixels, &labels, 32, 3, 0.005);
@@ -748,7 +803,10 @@ fn test_peak_values_match_image() {
         data,
     } = make_test_component(
         Size2us::new(100, 100),
-        &[(30, 50, 1.0, 2.5), (70, 50, 0.8, 2.5)],
+        &[
+            TestStar::new(Vec2us::new(30, 50), 1.0, 2.5),
+            TestStar::new(Vec2us::new(70, 50), 0.8, 2.5),
+        ],
     );
 
     let result = deblend_multi_threshold_test(&data, &pixels, &labels, 32, 3, 0.005);
@@ -773,7 +831,10 @@ fn test_single_threshold_level() {
         data,
     } = make_test_component(
         Size2us::new(100, 100),
-        &[(30, 50, 1.0, 2.5), (70, 50, 0.8, 2.5)],
+        &[
+            TestStar::new(Vec2us::new(30, 50), 1.0, 2.5),
+            TestStar::new(Vec2us::new(70, 50), 0.8, 2.5),
+        ],
     );
 
     let result = deblend_multi_threshold_test(&data, &pixels, &labels, 1, 3, 0.005);
@@ -793,7 +854,10 @@ fn test_zero_threshold_level() {
         pixels,
         labels,
         data,
-    } = make_test_component(Size2us::new(100, 100), &[(50, 50, 1.0, 2.5)]);
+    } = make_test_component(
+        Size2us::new(100, 100),
+        &[TestStar::new(Vec2us::new(50, 50), 1.0, 2.5)],
+    );
 
     let result = deblend_multi_threshold_test(&data, &pixels, &labels, 0, 3, 0.005);
 
