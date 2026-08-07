@@ -10,6 +10,7 @@ mod subpixel_accuracy;
 
 use crate::ImageDimensions;
 use crate::io::image::linear::LinearImage;
+use crate::math::size2us::Size2us;
 use crate::stacking::star_detection::config::Config;
 use crate::stacking::star_detection::detector::StarDetector;
 use crate::testing::synthetic::artifacts::{BayerPattern, add_bayer_pattern, add_cosmic_rays};
@@ -57,8 +58,7 @@ pub(super) enum Placement {
 /// `SimFrame` whose `image` + `truth.sources` the tests grade against.
 #[derive(Debug, Clone)]
 pub(super) struct Scenario {
-    pub(super) width: usize,
-    pub(super) height: usize,
+    pub(super) size: Size2us,
     pub(super) num_stars: usize,
     /// Log-uniform total-flux range; higher = brighter / easier to detect.
     pub(super) flux: (f32, f32),
@@ -77,8 +77,7 @@ pub(super) struct Scenario {
 impl Default for Scenario {
     fn default() -> Self {
         Self {
-            width: 256,
-            height: 256,
+            size: Size2us::new(256, 256),
             num_stars: 30,
             // A flux-14 star peaks ~0.6 (fwhm 4): bright but clear of the saturation cut.
             flux: (5.0, 14.0),
@@ -99,8 +98,7 @@ impl Scenario {
     pub(super) fn frame(&self) -> SimFrame {
         let scene = match self.placement {
             Placement::Uniform { margin } => Scene::random_field(
-                self.width,
-                self.height,
+                self.size,
                 self.num_stars,
                 self.flux,
                 self.background.clone(),
@@ -108,8 +106,7 @@ impl Scenario {
                 self.seed,
             ),
             Placement::Cluster => Scene::cluster(
-                self.width,
-                self.height,
+                self.size,
                 self.num_stars,
                 self.flux,
                 self.background.clone(),
@@ -130,22 +127,20 @@ impl Scenario {
             if self.cosmic_rays > 0 {
                 add_cosmic_rays(
                     &mut px,
-                    self.width,
+                    self.size.width,
                     self.cosmic_rays,
                     (0.5, 1.0),
                     self.seed + 1000,
                 );
             }
             if self.bayer {
-                add_bayer_pattern(&mut px, self.width, 0.08, BayerPattern::RGGB);
+                add_bayer_pattern(&mut px, self.size.width, 0.08, BayerPattern::RGGB);
             }
             for p in &mut px {
                 *p = p.clamp(0.0, 1.0);
             }
-            frame.image = LinearImage::from_planar_channels(
-                ImageDimensions::new((self.width, self.height), 1),
-                [px],
-            );
+            frame.image =
+                LinearImage::from_planar_channels(ImageDimensions::new(self.size, 1), [px]);
         }
         frame
     }

@@ -5,6 +5,7 @@
 //! [`Observation`] translation, and verify the detector's centroids recover that shift to well
 //! under 0.1 px — grading per-frame completeness through [`metrics`] against captured truth.
 
+use crate::math::size2us::Size2us;
 use crate::stacking::registration::transform::Transform;
 use crate::stacking::star_detection::config::Config;
 use crate::stacking::star_detection::synthetic_tests::{
@@ -56,8 +57,7 @@ fn shifted_detections(
 fn subpixel_shift_recovered_to_sub_tenth_pixel() {
     let shift = DVec2::new(0.15, 0.23);
     let scene = Scene::random_field(
-        256,
-        256,
+        Size2us::new(256, 256),
         24,
         (8.0, 14.0),
         BackgroundField::Uniform { level: 0.1 },
@@ -92,8 +92,7 @@ fn subpixel_shift_recovered_to_sub_tenth_pixel() {
 #[test]
 fn subpixel_shift_recovered_across_offsets() {
     let scene = Scene::random_field(
-        256,
-        256,
+        Size2us::new(256, 256),
         24,
         (8.0, 14.0),
         BackgroundField::Uniform { level: 0.1 },

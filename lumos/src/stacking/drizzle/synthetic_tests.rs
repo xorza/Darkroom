@@ -5,6 +5,7 @@
 //! sub-pixel-dithered renders: total flux is conserved, a source lands at its scale-mapped truth
 //! position, and dithering recovers resolution a single undersampled frame cannot.
 
+use crate::math::size2us::Size2us;
 use common::CancelToken;
 use glam::DVec2;
 
@@ -92,8 +93,7 @@ fn star_moments(px: &[f32], w: usize, h: usize) -> (f64, f64, f64) {
 fn drizzle_conserves_total_flux() {
     let (w, h) = (64, 64);
     let scene = Scene::single(
-        w,
-        h,
+        Size2us::new(w, h),
         DVec2::new(32.0, 32.0),
         5.0,
         BackgroundField::Uniform { level: 0.0 },
@@ -135,7 +135,12 @@ fn drizzle_conserves_total_flux() {
 fn drizzle_places_star_at_scaled_truth_position() {
     let (w, h) = (64, 64);
     let pos = DVec2::new(28.0, 36.0);
-    let scene = Scene::single(w, h, pos, 5.0, BackgroundField::Uniform { level: 0.0 });
+    let scene = Scene::single(
+        Size2us::new(w, h),
+        pos,
+        5.0,
+        BackgroundField::Uniform { level: 0.0 },
+    );
     let camera = Camera::ideal(3.5);
     let dithers = [
         DVec2::ZERO,
@@ -178,8 +183,7 @@ fn drizzle_dithering_recovers_resolution() {
     // Undersampled PSF (fwhm 1.8 < Nyquist 2) at a sub-pixel centre. Flux kept low so the tight
     // PSF peak stays unsaturated (otherwise both peaks clip at 1.0 and the comparison is moot).
     let scene = Scene::single(
-        w,
-        h,
+        Size2us::new(w, h),
         DVec2::new(24.3, 24.7),
         2.0,
         BackgroundField::Uniform { level: 0.0 },
@@ -231,8 +235,7 @@ fn drizzle_emits_coverage_weight_and_linear_variance_maps() {
     // against the closed form for N equal-weight frames at full interior coverage.
     let (w, h) = (64, 64);
     let scene = Scene::single(
-        w,
-        h,
+        Size2us::new(w, h),
         DVec2::new(32.0, 32.0),
         5.0,
         BackgroundField::Uniform { level: 0.1 },

@@ -4,6 +4,7 @@
 //! [`SimFrame`] (sensor image + ground truth): benches take `frame.image` (or
 //! `frame.image.channel(0)`); tests grade against `frame.truth`.
 
+use crate::math::size2us::Size2us;
 use crate::testing::synthetic::camera::Camera;
 use crate::testing::synthetic::observe::{Observation, SimFrame, render};
 use crate::testing::synthetic::scene::{BackgroundField, Scene};
@@ -12,8 +13,7 @@ use crate::testing::synthetic::scene::{BackgroundField, Scene};
 /// the general-purpose populated field.
 pub(crate) fn star_field(width: usize, height: usize, num_stars: usize, seed: u64) -> SimFrame {
     let scene = Scene::random_field(
-        width,
-        height,
+        Size2us::new(width, height),
         num_stars,
         (6.0, 16.0),
         BackgroundField::Uniform { level: 0.1 },
@@ -31,8 +31,7 @@ pub(crate) fn star_field(width: usize, height: usize, num_stars: usize, seed: u6
 /// deblend, labeling, and crowded-detection stress.
 pub(crate) fn cluster_field(width: usize, height: usize, num_stars: usize, seed: u64) -> SimFrame {
     let scene = Scene::cluster(
-        width,
-        height,
+        Size2us::new(width, height),
         num_stars,
         (5.0, 20.0),
         BackgroundField::Uniform { level: 0.05 },

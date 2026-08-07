@@ -6,6 +6,7 @@
 
 use crate::ImageDimensions;
 use crate::io::image::linear::LinearImage;
+use crate::math::size2us::Size2us;
 use glam::DVec2;
 
 use crate::stacking::registration::config::{self, InterpolationMethod};
@@ -35,8 +36,7 @@ fn detector() -> StarDetector {
 /// Passes the inverse to the plane warp since it uses output→input coordinate mapping.
 fn transform_image(
     src_pixels: &[f32],
-    width: usize,
-    height: usize,
+    size: Size2us,
     dx: f64,
     dy: f64,
     angle_rad: f64,
@@ -44,8 +44,8 @@ fn transform_image(
 ) -> Vec<f32> {
     let transform = Transform::similarity(DVec2::new(dx, dy), angle_rad, scale);
     let inverse = transform.inverse();
-    let src_buf = Buffer2::new(width, height, src_pixels.to_vec());
-    let mut output = Buffer2::new_default(width, height);
+    let src_buf = Buffer2::new(size.width, size.height, src_pixels.to_vec());
+    let mut output = Buffer2::new_default(size.width, size.height);
     internals::warp_plane(
         &src_buf,
         &mut output,
@@ -166,7 +166,14 @@ fn test_image_registration_rotation() {
     let angle_deg: f64 = 1.0;
     let angle_rad = angle_deg.to_radians();
 
-    let target_pixels = transform_image(&ref_pixels_vec, width, height, dx, dy, angle_rad, 1.0);
+    let target_pixels = transform_image(
+        &ref_pixels_vec,
+        Size2us::new(width, height),
+        dx,
+        dy,
+        angle_rad,
+        1.0,
+    );
 
     let ref_image =
         LinearImage::from_pixels(ImageDimensions::new((width, height), 1), ref_pixels_vec);
@@ -222,7 +229,14 @@ fn test_image_registration_similarity() {
     let angle_rad = angle_deg.to_radians();
     let scale = 1.005;
 
-    let target_pixels = transform_image(&ref_pixels_vec, width, height, dx, dy, angle_rad, scale);
+    let target_pixels = transform_image(
+        &ref_pixels_vec,
+        Size2us::new(width, height),
+        dx,
+        dy,
+        angle_rad,
+        scale,
+    );
 
     let ref_image =
         LinearImage::from_pixels(ImageDimensions::new((width, height), 1), ref_pixels_vec);
@@ -277,8 +291,7 @@ fn test_image_registration_with_noise() {
     // Higher noise level: a shallow well + extra read noise stresses registration.
     let (width, height) = (256, 256);
     let scene = Scene::random_field(
-        width,
-        height,
+        Size2us::new(width, height),
         80,
         (6.0, 16.0),
         BackgroundField::Uniform { level: 0.1 },
@@ -361,7 +374,14 @@ fn test_image_registration_dense_field() {
     let dy = 8.0;
     let angle_rad = 0.5_f64.to_radians();
 
-    let target_pixels = transform_image(&ref_pixels_vec, width, height, dx, dy, angle_rad, 1.0);
+    let target_pixels = transform_image(
+        &ref_pixels_vec,
+        Size2us::new(width, height),
+        dx,
+        dy,
+        angle_rad,
+        1.0,
+    );
 
     let ref_image =
         LinearImage::from_pixels(ImageDimensions::new((width, height), 1), ref_pixels_vec);
