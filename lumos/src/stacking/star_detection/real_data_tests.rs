@@ -197,15 +197,7 @@ fn test_inspect_pipeline_intermediates_rho_opiuchi() {
     println!("Saved: 04_subtracted");
 
     // 5. FWHM estimation
-    let fwhm_result = estimate_fwhm(
-        &grayscale,
-        &background,
-        &config.fwhm,
-        &config.detection,
-        &config.measurement,
-        &config.filter,
-        &mut pool,
-    );
+    let fwhm_result = estimate_fwhm(&grayscale, &background, &config, &mut pool);
     let fwhm = fwhm_result.fwhm;
     println!(
         "Estimated FWHM: {:?} (from {} stars)",
