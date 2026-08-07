@@ -129,8 +129,8 @@ pub(crate) fn demosaic(
 ) -> Result<[Vec<f32>; 3], Cancelled> {
     use std::time::Instant;
 
-    let width = xtrans.width;
-    let height = xtrans.height;
+    let width = xtrans.active.width;
+    let height = xtrans.active.height;
     let pixels = width * height;
 
     // Build lookup tables

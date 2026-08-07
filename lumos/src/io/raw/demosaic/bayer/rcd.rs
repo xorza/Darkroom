@@ -115,15 +115,15 @@ pub(crate) fn demosaic(
     bayer: &BayerImage,
     cancel: &CancelToken,
 ) -> Result<[Vec<f32>; 3], Cancelled> {
-    let width = bayer.width;
-    let height = bayer.height;
-    let rw = bayer.raw_width;
-    let rh = bayer.raw_height;
-    let tm = bayer.top_margin;
-    let lm = bayer.left_margin;
+    let width = bayer.active.width;
+    let height = bayer.active.height;
+    let rw = bayer.raw.width;
+    let rh = bayer.raw.height;
+    let tm = bayer.margin.y;
+    let lm = bayer.margin.x;
     let cfa = bayer.data;
     let pattern = bayer.raw_cfa_pattern;
-    let npix = rw * rh;
+    let npix = bayer.raw.pixel_count();
 
     // Cooperative cancel: each stage below is a full-image parallel pass. A
     // check between stages lets a cancelled run bail within one stage (~tens of

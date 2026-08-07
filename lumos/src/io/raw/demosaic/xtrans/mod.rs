@@ -192,18 +192,12 @@ enum PixelSource<'a> {
 pub(crate) struct XTransImage<'a> {
     /// Pixel data (u16 raw sensor values or calibrated f32)
     data: PixelSource<'a>,
-    /// Width of the raw data buffer
-    pub(crate) raw_width: usize,
-    /// Height of the raw data buffer
-    pub(crate) raw_height: usize,
-    /// Width of the active/output image area
-    pub(crate) width: usize,
-    /// Height of the active/output image area
-    pub(crate) height: usize,
-    /// Top margin (offset from raw to active area)
-    pub(crate) top_margin: usize,
-    /// Left margin (offset from raw to active area)
-    pub(crate) left_margin: usize,
+    /// Extent of the raw data buffer.
+    pub(crate) raw: Size2us,
+    /// Extent of the active/output image area.
+    pub(crate) active: Size2us,
+    /// Top-left corner of the active area within the raw buffer.
+    pub(crate) margin: Vec2us,
     /// CFA pattern anchored at the full raw buffer origin.
     pub(crate) raw_pattern: XTransPattern,
     /// Per-channel black levels [R=0, G=1, B=2] for u16 path normalization.
@@ -275,12 +269,9 @@ impl<'a> XTransImage<'a> {
         });
         Self {
             data,
-            raw_width: raw.width,
-            raw_height: raw.height,
-            width: active.width,
-            height: active.height,
-            top_margin: margin.y,
-            left_margin: margin.x,
+            raw,
+            active,
+            margin,
             raw_pattern,
             channel_black,
             inv_range,
@@ -303,12 +294,9 @@ impl<'a> XTransImage<'a> {
         Self::validate_dimensions(data.len(), raw, active, margin);
         Self {
             data: PixelSource::F32(data),
-            raw_width: raw.width,
-            raw_height: raw.height,
-            width: active.width,
-            height: active.height,
-            top_margin: margin.y,
-            left_margin: margin.x,
+            raw,
+            active,
+            margin,
             raw_pattern,
             channel_black: [0.0; 3],
             inv_range: 1.0,
@@ -321,7 +309,7 @@ impl<'a> XTransImage<'a> {
     /// For f32 data: returns the calibrated value directly.
     #[inline(always)]
     pub(crate) fn read_normalized(&self, raw_y: usize, raw_x: usize) -> f32 {
-        let idx = raw_y * self.raw_width + raw_x;
+        let idx = raw_y * self.raw.width + raw_x;
         match &self.data {
             PixelSource::U16(data) => {
                 let val = data[idx] as f32;
@@ -331,7 +319,7 @@ impl<'a> XTransImage<'a> {
             PixelSource::U16WithRepeat { data, repeat } => {
                 let val = data[idx] as f32;
                 let ch = self.raw_pattern.color_at(raw_y, raw_x) as usize;
-                let repeat_delta = repeat.at_raw(raw_y, raw_x, self.top_margin, self.left_margin);
+                let repeat_delta = repeat.at_raw(raw_y, raw_x, self.margin.y, self.margin.x);
                 ((val - self.channel_black[ch]) * self.inv_range - repeat_delta).clamp(0.0, 1.0)
             }
             PixelSource::F32(data) => data[idx],
@@ -461,10 +449,9 @@ mod tests {
             1.0 / 65535.0,
             None,
         );
-        assert_eq!(img.raw_width, 6);
-        assert_eq!(img.raw_height, 6);
-        assert_eq!(img.width, 4);
-        assert_eq!(img.height, 4);
+        assert_eq!(img.raw, Size2us::new(6, 6));
+        assert_eq!(img.active, Size2us::new(4, 4));
+        assert_eq!(img.margin, Vec2us::new(1, 1));
     }
 
     #[test]

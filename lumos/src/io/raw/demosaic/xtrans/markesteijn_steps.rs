@@ -31,8 +31,8 @@ pub(crate) fn compute_green_minmax(
     gmin: &mut [f32],
     gmax: &mut [f32],
 ) {
-    let width = xtrans.width;
-    let height = xtrans.height;
+    let width = xtrans.active.width;
+    let height = xtrans.active.height;
     assert_eq!(gmin.len(), width * height);
     assert_eq!(gmax.len(), width * height);
 
@@ -40,9 +40,9 @@ pub(crate) fn compute_green_minmax(
         .zip(gmax.par_chunks_mut(width))
         .enumerate()
         .for_each(|(y, (gmin_row, gmax_row))| {
-            let raw_y = y + xtrans.top_margin;
+            let raw_y = y + xtrans.margin.y;
             for x in 0..width {
-                let raw_x = x + xtrans.left_margin;
+                let raw_x = x + xtrans.margin.x;
                 let color = xtrans.raw_pattern.color_at(raw_y, raw_x);
 
                 if color == 1 {
@@ -60,8 +60,8 @@ pub(crate) fn compute_green_minmax(
 
                         if ny >= 0
                             && nx >= 0
-                            && (ny as usize) < xtrans.raw_height
-                            && (nx as usize) < xtrans.raw_width
+                            && (ny as usize) < xtrans.raw.height
+                            && (nx as usize) < xtrans.raw.width
                         {
                             let g = xtrans.read_normalized(ny as usize, nx as usize);
                             min_g = min_g.min(g);
@@ -95,10 +95,10 @@ pub(crate) fn interpolate_green(
     gmax: &[f32],
     green_dir: &mut [f32],
 ) {
-    let width = xtrans.width;
-    let height = xtrans.height;
+    let width = xtrans.active.width;
+    let height = xtrans.active.height;
     let pixels = width * height;
-    let raw_width = xtrans.raw_width;
+    let raw_width = xtrans.raw.width;
 
     // SAFETY: We split green_dir into 4 disjoint direction slices and extract raw pointers.
     // Each parallel row writes to [y*width..(y+1)*width] within each direction slice,
@@ -117,13 +117,13 @@ pub(crate) fn interpolate_green(
 
     (0..height).into_par_iter().for_each(|y| {
         let dir_ptrs = dir_send.get();
-        let raw_y = y + xtrans.top_margin;
+        let raw_y = y + xtrans.margin.y;
         let row_off = y * width;
         // librtprocess stores the alternating-row candidates in the opposite direction slots.
         let flip = ((raw_y as i64 - hex.sgrow as i64).rem_euclid(3) == 0) as usize;
 
         for x in 0..width {
-            let raw_x = x + xtrans.left_margin;
+            let raw_x = x + xtrans.margin.x;
             let color = xtrans.raw_pattern.color_at(raw_y, raw_x);
 
             if color == 1 {
@@ -143,7 +143,7 @@ pub(crate) fn interpolate_green(
                     let nx = raw_x as i32 + dx;
                     if ny >= 0
                         && nx >= 0
-                        && (ny as usize) < xtrans.raw_height
+                        && (ny as usize) < xtrans.raw.height
                         && (nx as usize) < raw_width
                     {
                         xtrans.read_normalized(ny as usize, nx as usize)
@@ -205,7 +205,7 @@ fn is_solitary_green(hex: &HexLookup, raw_y: usize, raw_x: usize) -> bool {
 
 #[inline(always)]
 fn active_raw(xtrans: &XTransImage, y: usize, x: usize) -> f32 {
-    xtrans.read_normalized(y + xtrans.top_margin, x + xtrans.left_margin)
+    xtrans.read_normalized(y + xtrans.margin.y, x + xtrans.margin.x)
 }
 
 #[inline(always)]
@@ -228,15 +228,15 @@ fn solitary_green_candidate(
     x: usize,
     candidate: usize,
 ) -> SolitaryGreenCandidate {
-    let width = xtrans.width;
+    let width = xtrans.active.width;
     let (dy, dx) = if candidate & 1 == 0 {
         (0isize, 1isize)
     } else {
         (1, 0)
     };
     let center_green = green_at(green_dir, green_base, width, y, x);
-    let raw_y = y + xtrans.top_margin;
-    let raw_x = x + xtrans.left_margin;
+    let raw_y = y + xtrans.margin.y;
+    let raw_x = x + xtrans.margin.x;
     let mut colors = [0.0; 2];
     let mut difference = 0.0;
     let mut target = xtrans.raw_pattern.color_at(raw_y, raw_x + 1);
@@ -336,8 +336,8 @@ fn opposite_color(
     direction: usize,
     target: u8,
 ) -> f32 {
-    let width = xtrans.width;
-    let raw_y = y + xtrans.top_margin;
+    let width = xtrans.active.width;
+    let raw_y = y + xtrans.margin.y;
     let center_green = green_at(green_dir, green_base, width, y, x);
     let primary_vertical = (raw_y as i64 - hex.sgrow as i64).rem_euclid(3) != 0;
     let (primary_dy, primary_dx) = if primary_vertical {
@@ -397,16 +397,14 @@ fn color_before_green_block(
 ) -> f32 {
     let native = xtrans
         .raw_pattern
-        .color_at(y + xtrans.top_margin, x + xtrans.left_margin);
-    debug_assert!(
-        native != 1 || is_solitary_green(hex, y + xtrans.top_margin, x + xtrans.left_margin)
-    );
+        .color_at(y + xtrans.margin.y, x + xtrans.margin.x);
+    debug_assert!(native != 1 || is_solitary_green(hex, y + xtrans.margin.y, x + xtrans.margin.x));
     if native == target {
         active_raw(xtrans, y, x)
     } else {
-        let pixels = xtrans.width * xtrans.height;
+        let pixels = xtrans.active.pixel_count();
         // SAFETY: The solitary-green and opposite-color stages are complete before this stage.
-        unsafe { (*colors.add(direction * pixels + y * xtrans.width + x))[rb_index(target)] }
+        unsafe { (*colors.add(direction * pixels + y * xtrans.active.width + x))[rb_index(target)] }
     }
 }
 
@@ -424,8 +422,8 @@ fn green_block_colors(
 ) -> [f32; 2] {
     debug_assert!(direction < GREEN_BLOCK_DIRECTIONS);
 
-    let width = xtrans.width;
-    let offsets = hex.get(y + xtrans.top_margin, x + xtrans.left_margin);
+    let width = xtrans.active.width;
+    let offsets = hex.get(y + xtrans.margin.y, x + xtrans.margin.x);
     let first = offsets[direction * 2];
     let second = offsets[direction * 2 + 1];
     let first_y = y.wrapping_add_signed(first.dy as isize);
@@ -466,8 +464,8 @@ pub(crate) fn reconstruct_colors(
     green_dir: &[f32],
     colors: &mut [[f32; 2]],
 ) {
-    let width = xtrans.width;
-    let height = xtrans.height;
+    let width = xtrans.active.width;
+    let height = xtrans.active.height;
     let pixels = width * height;
     assert_eq!(green_dir.len(), NDIR * pixels);
     assert_eq!(colors.len(), NDIR * pixels);
@@ -480,8 +478,8 @@ pub(crate) fn reconstruct_colors(
             let index = flat % pixels;
             let y = index / width;
             let x = index % width;
-            let raw_y = y + xtrans.top_margin;
-            let raw_x = x + xtrans.left_margin;
+            let raw_y = y + xtrans.margin.y;
+            let raw_x = x + xtrans.margin.x;
             let native = xtrans.raw_pattern.color_at(raw_y, raw_x);
             *output = [0.0; 2];
             if native != 1 {
@@ -506,8 +504,8 @@ pub(crate) fn reconstruct_colors(
         if y < 3 || y + 3 >= height || x < 3 || x + 3 >= width {
             return;
         }
-        let raw_y = y + xtrans.top_margin;
-        let raw_x = x + xtrans.left_margin;
+        let raw_y = y + xtrans.margin.y;
+        let raw_x = x + xtrans.margin.x;
         let native = xtrans.raw_pattern.color_at(raw_y, raw_x);
         if native == 1 {
             return;
@@ -542,8 +540,8 @@ pub(crate) fn reconstruct_colors(
             if y < 2 || y + 2 >= height || x < 2 || x + 2 >= width {
                 return;
             }
-            let raw_y = y + xtrans.top_margin;
-            let raw_x = x + xtrans.left_margin;
+            let raw_y = y + xtrans.margin.y;
+            let raw_x = x + xtrans.margin.x;
             if xtrans.raw_pattern.color_at(raw_y, raw_x) != 1
                 || is_solitary_green(hex, raw_y, raw_x)
             {
@@ -577,8 +575,8 @@ pub(crate) fn compute_derivatives(
     colors: &[[f32; 2]],
     drv: &mut [f32],
 ) {
-    let width = xtrans.width;
-    let height = xtrans.height;
+    let width = xtrans.active.width;
+    let height = xtrans.active.height;
     let pixels = width * height;
     let drv_ptr = UnsafeSendPtr::new(drv.as_mut_ptr());
 
@@ -724,7 +722,7 @@ fn compute_ypbpr_row(
     out: &mut [(f32, f32, f32)],
 ) {
     for (x, val) in out.iter_mut().enumerate() {
-        let index = green_base + y * xtrans.width + x;
+        let index = green_base + y * xtrans.active.width + x;
         let [r, b] = colors[index];
         let g = green_dir[index];
         *val = rgb_to_ypbpr(r, g, b);
@@ -889,8 +887,8 @@ pub(crate) fn blend_final(
     out_g: &mut [f32],
     out_b: &mut [f32],
 ) {
-    let width = xtrans.width;
-    let height = xtrans.height;
+    let width = xtrans.active.width;
+    let height = xtrans.active.height;
     let pixels = width * height;
     assert_eq!(out_r.len(), pixels);
     assert_eq!(out_g.len(), pixels);
@@ -946,8 +944,8 @@ fn demosaic_border(
     out_b: &mut [f32],
     border: usize,
 ) {
-    let width = xtrans.width;
-    let height = xtrans.height;
+    let width = xtrans.active.width;
+    let height = xtrans.active.height;
 
     for y in 0..height {
         for x in 0..width {
@@ -967,10 +965,10 @@ fn demosaic_border(
                         (1, 1) => 0.25,
                         _ => unreachable!(),
                     };
-                    let color = xtrans.raw_pattern.color_at(
-                        neighbor_y + xtrans.top_margin,
-                        neighbor_x + xtrans.left_margin,
-                    ) as usize;
+                    let color = xtrans
+                        .raw_pattern
+                        .color_at(neighbor_y + xtrans.margin.y, neighbor_x + xtrans.margin.x)
+                        as usize;
                     sums[color] += active_raw(xtrans, neighbor_y, neighbor_x) * weight;
                     weights[color] += weight;
                 }
@@ -979,7 +977,7 @@ fn demosaic_border(
             let index = y * width + x;
             let native = xtrans
                 .raw_pattern
-                .color_at(y + xtrans.top_margin, x + xtrans.left_margin);
+                .color_at(y + xtrans.margin.y, x + xtrans.margin.x);
             let raw = active_raw(xtrans, y, x);
             if native == 1 && weights[0] == 0.0 {
                 out_r[index] = raw;
@@ -1539,8 +1537,8 @@ mod tests {
         for direction in 0..NDIR {
             for y in 3..h - 3 {
                 for x in 3..w - 3 {
-                    let raw_y = y + xtrans.top_margin;
-                    let raw_x = x + xtrans.left_margin;
+                    let raw_y = y + xtrans.margin.y;
+                    let raw_x = x + xtrans.margin.x;
                     let native = xtrans.raw_pattern.color_at(raw_y, raw_x);
                     let [red, blue] = colors[direction * pixels + y * w + x];
                     match native {
