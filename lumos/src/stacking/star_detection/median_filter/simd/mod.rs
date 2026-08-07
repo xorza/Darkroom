@@ -109,6 +109,16 @@ mod sse;
 #[cfg(target_arch = "aarch64")]
 mod neon;
 
+/// Row widths at or above which each kernel is entered. Every backend vectorizes the interior
+/// pixels as `(width - 2) / LANES` chunks, so a row only just wider than `2 + LANES` is nearly
+/// all scalar remainder; these sit above that break-even rather than at it.
+#[cfg(target_arch = "x86_64")]
+const AVX2_MIN_ROW_WIDTH: usize = 12;
+#[cfg(target_arch = "x86_64")]
+const SSE41_MIN_ROW_WIDTH: usize = 8;
+#[cfg(target_arch = "aarch64")]
+const NEON_MIN_ROW_WIDTH: usize = 8;
+
 /// Process a row of interior pixels using SIMD-accelerated median9.
 ///
 /// This function dispatches to the best available SIMD implementation at runtime.
@@ -130,13 +140,13 @@ pub(super) fn median_filter_row_simd(
 ) {
     #[cfg(target_arch = "x86_64")]
     {
-        if width >= 12 && cpu_features::has_avx2() {
+        if width >= AVX2_MIN_ROW_WIDTH && cpu_features::has_avx2() {
             unsafe {
                 sse::median_filter_row_avx2(row_above, row_curr, row_below, output_row, width);
             }
             return;
         }
-        if width >= 8 && cpu_features::has_sse4_1() {
+        if width >= SSE41_MIN_ROW_WIDTH && cpu_features::has_sse4_1() {
             unsafe {
                 sse::median_filter_row_sse41(row_above, row_curr, row_below, output_row, width);
             }
@@ -146,7 +156,7 @@ pub(super) fn median_filter_row_simd(
 
     #[cfg(target_arch = "aarch64")]
     {
-        if width >= 8 {
+        if width >= NEON_MIN_ROW_WIDTH {
             unsafe {
                 neon::median_filter_row_neon(row_above, row_curr, row_below, output_row, width);
             }

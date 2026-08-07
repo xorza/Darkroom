@@ -25,6 +25,16 @@ mod neon;
 #[cfg(test)]
 mod tests;
 
+/// Output pixels each bilinear kernel consumes per chunk (`output_width / LANES` chunks), so a
+/// row shorter than one vector gives the chunk loop nothing to do and every pixel falls through
+/// to the kernel's own remainder handling — cheaper to take the scalar row instead.
+#[cfg(target_arch = "x86_64")]
+const AVX2_LANES: usize = 8;
+#[cfg(target_arch = "x86_64")]
+const SSE41_LANES: usize = 4;
+#[cfg(target_arch = "aarch64")]
+const NEON_LANES: usize = 4;
+
 use crate::stacking::registration::config::WarpParams;
 #[cfg(target_arch = "x86_64")]
 use crate::stacking::registration::resample::kernel::LANCZOS_LUT_RESOLUTION;
@@ -115,13 +125,13 @@ pub(super) fn bilinear(
     #[cfg(target_arch = "x86_64")]
     if !wt.has_sip() && border_value == 0.0 {
         let output_width = output_row.len();
-        if output_width >= 8 && cpu_features::has_avx2() {
+        if output_width >= AVX2_LANES && cpu_features::has_avx2() {
             unsafe {
                 sse::bilinear_avx2(input, output_row, output_y, &wt.transform);
             }
             return;
         }
-        if output_width >= 4 && cpu_features::has_sse4_1() {
+        if output_width >= SSE41_LANES && cpu_features::has_sse4_1() {
             unsafe {
                 sse::bilinear_sse(input, output_row, output_y, &wt.transform);
             }
@@ -130,7 +140,7 @@ pub(super) fn bilinear(
     }
 
     #[cfg(target_arch = "aarch64")]
-    if !wt.has_sip() && border_value == 0.0 && output_row.len() >= 4 {
+    if !wt.has_sip() && border_value == 0.0 && output_row.len() >= NEON_LANES {
         // SAFETY: NEON is always available on aarch64.
         unsafe {
             neon::bilinear_neon(input, output_row, output_y, &wt.transform);
