@@ -32,7 +32,7 @@ fn limited_map_preserves_order_and_reaches_the_exact_cap() {
     let items: Vec<usize> = (0..6).collect();
 
     let result = pool.install(|| {
-        try_par_map_limited(&items, 3, |value| {
+        try_par_map_limited(&items, 3, |_index, value| {
             let current = in_flight.fetch_add(1, Ordering::SeqCst) + 1;
             max_observed.fetch_max(current, Ordering::SeqCst);
             barrier.wait();
@@ -51,7 +51,7 @@ fn limited_map_propagates_error_without_starting_later_batches() {
     let started = AtomicUsize::new(0);
     let items: Vec<usize> = (0..9).collect();
 
-    let result = try_par_map_limited(&items, 3, |value| {
+    let result = try_par_map_limited(&items, 3, |_index, value| {
         started.fetch_or(1 << value, Ordering::SeqCst);
         if *value == 4 {
             Err("four")
@@ -66,12 +66,12 @@ fn limited_map_propagates_error_without_starting_later_batches() {
 
 #[test]
 fn limited_map_accepts_empty_input() {
-    let result = try_par_map_limited(&[], 2, |value: &usize| Ok::<_, ()>(*value));
+    let result = try_par_map_limited(&[], 2, |_index, value: &usize| Ok::<_, ()>(*value));
     assert_eq!(result.unwrap(), Vec::<usize>::new());
 }
 
 #[test]
 #[should_panic(expected = "max_concurrent must be positive")]
 fn limited_map_rejects_zero_concurrency() {
-    let _ = try_par_map_limited(&[1], 0, |value| Ok::<_, ()>(*value));
+    let _ = try_par_map_limited(&[1], 0, |_index, value| Ok::<_, ()>(*value));
 }

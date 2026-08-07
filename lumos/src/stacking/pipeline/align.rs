@@ -65,7 +65,7 @@ pub fn align_and_stack(
     let stars = {
         let mut detectors =
             DetectorPool::from_config(&config.detection, total.min(rayon::current_num_threads()))?;
-        detectors.try_map(&lights, |detector, image| {
+        detectors.try_map(&lights, |detector, _index, image| {
             // Cancelled: abort the batch rather than spend the rest of the budget detecting
             // frames the run will discard.
             if cancel.is_cancelled() {

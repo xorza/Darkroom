@@ -1,6 +1,8 @@
 use std::io::Error;
 use std::path::Path;
 
+use common::CancelToken;
+
 use crate::io::image::LoadContext;
 use crate::io::image::error::ImageError;
 use crate::io::image::linear::LinearImage;
@@ -43,8 +45,8 @@ fn load_drizzle_frame<P: AsRef<Path>>(
 
 /// Drizzle stack images from disk with per-frame transforms.
 ///
-/// Streams frames one at a time (only one input image is resident at a time).
-/// To drizzle frames already held in memory, use [`drizzle_images`].
+/// Streams frames one at a time (only one input image is resident at a time). To drizzle frames
+/// already held in memory, use [`drizzle_images`].
 ///
 /// # Arguments
 ///
@@ -68,25 +70,78 @@ pub fn drizzle_stack<P: AsRef<Path>>(
     context: &LoadContext,
     progress: ProgressCallback,
 ) -> Result<StackProduct, DrizzleError> {
-    if frames.is_empty() {
+    let frame_count = frames.len();
+    // Lazy, so only the frame currently being accumulated is resident.
+    let loaded = frames
+        .into_iter()
+        .map(|frame| load_drizzle_frame(frame, context));
+    accumulate(
+        loaded,
+        frame_count,
+        config,
+        progress,
+        &context.cancel,
+        "paths",
+    )
+}
+
+/// Drizzle stack frames already held in memory.
+///
+/// In-memory counterpart to [`drizzle_stack`]: skips the per-frame disk load when the caller
+/// already owns the decoded frames. The frames are consumed.
+///
+/// # Errors
+///
+/// Returns an error for invalid configuration, missing frames, inconsistent image dimensions,
+/// invalid frame weights, or cancellation.
+pub fn drizzle_images(
+    frames: Vec<DrizzleFrame<LinearImage>>,
+    config: &DrizzleConfig,
+    progress: ProgressCallback,
+    cancel: &CancelToken,
+) -> Result<StackProduct, DrizzleError> {
+    let frame_count = frames.len();
+    accumulate(
+        frames.into_iter().map(Ok),
+        frame_count,
+        config,
+        progress,
+        cancel,
+        "memory",
+    )
+}
+
+/// Accumulate every frame into one drizzled product — the body both entry points share.
+///
+/// Frames arrive as a lazy fallible iterator so the path-based entry keeps exactly one input
+/// image resident: an item is produced, distributed into the accumulator, and dropped before the
+/// next is loaded.
+fn accumulate(
+    mut frames: impl Iterator<Item = Result<DrizzleFrame<LinearImage>, DrizzleError>>,
+    frame_count: usize,
+    config: &DrizzleConfig,
+    progress: ProgressCallback,
+    cancel: &CancelToken,
+    source: &'static str,
+) -> Result<StackProduct, DrizzleError> {
+    if frame_count == 0 {
         return Err(DrizzleError::NoFrames);
     }
     config.validate()?;
 
-    let frame_count = frames.len();
-    let mut frames = frames.into_iter();
-    let first = load_drizzle_frame(frames.next().unwrap(), context)?;
+    // The accumulator is sized from the first frame, so it has to be in hand before the loop.
+    let first = frames.next().expect("frame_count is non-zero")?;
     let input_dims = first.source.dimensions();
-
     tracing::info!(
+        source,
+        frame_count,
         input_width = input_dims.width(),
         input_height = input_dims.height(),
         channels = input_dims.channels(),
         output_scale = config.scale,
         pixfrac = config.pixfrac,
         kernel = ?config.kernel,
-        frame_count,
-        "Starting drizzle stacking (from paths)"
+        "Starting drizzle stacking"
     );
 
     let mut accumulator = DrizzleAccumulator::new(input_dims, config.clone())?;
@@ -94,50 +149,12 @@ pub fn drizzle_stack<P: AsRef<Path>>(
     report_progress(&progress, 1, frame_count, StackingStage::Processing);
 
     for (index, frame) in frames.enumerate() {
-        accumulator.add_frame(load_drizzle_frame(frame, context)?)?;
+        // Between frames, so a cancelled run stops before loading and distributing the next one.
+        if cancel.is_cancelled() {
+            return Err(DrizzleError::Cancelled);
+        }
+        accumulator.add_frame(frame?)?;
         report_progress(&progress, index + 2, frame_count, StackingStage::Processing);
-    }
-
-    Ok(accumulator.finalize())
-}
-
-/// Drizzle stack frames already held in memory.
-///
-/// In-memory counterpart to [`drizzle_stack`]: skips the per-frame disk load when
-/// the caller already owns the decoded frames. The frames are consumed.
-///
-/// # Errors
-///
-/// Returns an error for invalid configuration, missing frames, inconsistent image dimensions, or
-/// invalid frame weights.
-pub fn drizzle_images(
-    frames: Vec<DrizzleFrame<LinearImage>>,
-    config: &DrizzleConfig,
-    progress: ProgressCallback,
-) -> Result<StackProduct, DrizzleError> {
-    if frames.is_empty() {
-        return Err(DrizzleError::NoFrames);
-    }
-    config.validate()?;
-
-    let frame_count = frames.len();
-    let input_dims = frames[0].source.dimensions();
-
-    tracing::info!(
-        input_width = input_dims.width(),
-        input_height = input_dims.height(),
-        channels = input_dims.channels(),
-        output_scale = config.scale,
-        pixfrac = config.pixfrac,
-        kernel = ?config.kernel,
-        frame_count,
-        "Starting drizzle stacking (in memory)"
-    );
-
-    let mut accumulator = DrizzleAccumulator::new(input_dims, config.clone())?;
-    for (index, frame) in frames.into_iter().enumerate() {
-        accumulator.add_frame(frame)?;
-        report_progress(&progress, index + 1, frame_count, StackingStage::Processing);
     }
 
     Ok(accumulator.finalize())

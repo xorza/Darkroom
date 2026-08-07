@@ -77,10 +77,13 @@ impl<T> Drop for JobScratchLease<'_, T> {
     }
 }
 
-/// Maps a fallible operation over consecutive parallel batches.
+/// Maps a fallible operation over consecutive parallel batches, passing each item's index
+/// alongside it.
 ///
-/// At most `max_concurrent` operations run at once. Results preserve input
-/// order, and batches after the first error are not started.
+/// At most `max_concurrent` operations run at once. Results preserve input order, and batches
+/// after the first error are not started. The index is supplied because callers almost always
+/// need it — to name a spill file, to report which frame failed — and would otherwise each
+/// build a `Vec<(usize, &T)>` to carry it in.
 pub(crate) fn try_par_map_limited<T, R, E, F>(
     items: &[T],
     max_concurrent: usize,
@@ -90,16 +93,18 @@ where
     T: Sync,
     R: Send,
     E: Send,
-    F: Fn(&T) -> Result<R, E> + Sync,
+    F: Fn(usize, &T) -> Result<R, E> + Sync,
 {
     assert!(max_concurrent > 0, "max_concurrent must be positive");
 
     let mut results = Vec::with_capacity(items.len());
-    for chunk in items.chunks(max_concurrent) {
+    for (batch, chunk) in items.chunks(max_concurrent).enumerate() {
+        let base = batch * max_concurrent;
         results.extend(
             chunk
                 .par_iter()
-                .map(&operation)
+                .enumerate()
+                .map(|(offset, item)| operation(base + offset, item))
                 .collect::<Result<Vec<_>, _>>()?,
         );
     }

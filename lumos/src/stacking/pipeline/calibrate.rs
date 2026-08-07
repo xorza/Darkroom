@@ -83,11 +83,10 @@ pub fn calibrate_align_stack<P: AsRef<Path> + Sync>(
     // demosaic itself polls `cancel` between stages (see `CfaImage::demosaic`), so the heavy
     // phase stays interruptible at full core utilization within a batch.
     let done = AtomicUsize::new(0);
-    let indexed: Vec<(usize, &P)> = light_paths.iter().enumerate().collect();
     let detected: Vec<DetectedFrame> = {
         let mut detectors =
             DetectorPool::from_config(&config.detection, plan.decode_concurrency.min(total))?;
-        detectors.try_map(&indexed, |detector, &(index, path)| {
+        detectors.try_map(light_paths, |detector, index, path| {
             // Skip launching the RAW decode (the slow uninterruptible step) once cancelled.
             if cancel.is_cancelled() {
                 return Err(Error::Stack(StackError::Cancelled));
