@@ -44,6 +44,9 @@ fn urect_accumulation_uses_exclusive_max_and_const_union() {
     );
     assert_eq!(LEFT.union(RIGHT), RIGHT.union(LEFT));
     assert_eq!(URect::default(), URect::empty());
+    assert_eq!((LEFT.width(), LEFT.height(), LEFT.area()), (4, 6, 24));
+    // Inverted bounds saturate to zero instead of wrapping.
+    assert_eq!((URect::empty().width(), URect::empty().area()), (0, 0));
     assert!(URect::empty().is_empty());
     assert!(!LEFT.is_empty());
     assert!(LEFT.contains(Vec2us::new(2, 3)));
@@ -66,4 +69,5 @@ fn urect_accumulation_uses_exclusive_max_and_const_union() {
     assert_eq!(covered.first(), Some(&Vec2us::new(2, 1)));
     assert_eq!(covered.last(), Some(&Vec2us::new(8, 7)));
     assert_eq!(covered.len(), 7 * 7);
+    assert_eq!(bounds.area(), covered.len());
 }
