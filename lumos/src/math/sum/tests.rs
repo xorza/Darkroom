@@ -87,6 +87,41 @@ fn test_mean_f32_two_elements() {
 }
 
 #[test]
+fn mean_rounds_once_and_agrees_with_the_unit_weighted_mean() {
+    // The combine reaches the same pixel through `mean_f32` (equal weights) or
+    // `weighted_mean_f32` (frame weights), so the two must not disagree on the same data.
+    // Below the weighted mean's SIMD threshold both accumulate and divide in f64, making the
+    // agreement exact rather than approximate.
+    for len in [1usize, 2, 3, 5, 8, 17, 33, 64, 127] {
+        let values: Vec<f32> = (0..len).map(|i| 0.1 + (i as f32) * 0.0137).collect();
+        let ones = vec![1.0f32; len];
+        assert_eq!(
+            mean_f32(&values).to_bits(),
+            weighted_mean_f32(&values, &ones).to_bits(),
+            "mean and unit-weighted mean disagree at len {len}"
+        );
+    }
+
+    // Non-vacuous: on this set, rounding the f64 sum to f32 before dividing lands one ULP below
+    // the correctly-rounded mean. Exact mean is 0.47267352491617204; the single rounding gives
+    // 0.472673535 (bits 1056047684) and the double rounding 0.472673506 (bits 1056047683).
+    let values = [0.98646706f32, 0.68272305, 0.3804413, 0.23075151, 0.08298469];
+    let once = mean_f32(&values);
+    let twice = sum_f32(&values) / values.len() as f32;
+    assert_ne!(
+        once.to_bits(),
+        twice.to_bits(),
+        "witness no longer distinguishes one rounding from two"
+    );
+
+    let exact = values.iter().map(|&v| f64::from(v)).sum::<f64>() / values.len() as f64;
+    assert!(
+        (f64::from(once) - exact).abs() < (f64::from(twice) - exact).abs(),
+        "rounding once must land closer to the exact mean than rounding twice"
+    );
+}
+
+#[test]
 fn test_weighted_mean_uniform_weights() {
     let values = [1.0f32, 2.0, 3.0, 4.0, 5.0];
     let weights = [1.0f32; 5];
