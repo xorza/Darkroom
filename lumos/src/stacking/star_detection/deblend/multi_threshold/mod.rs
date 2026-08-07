@@ -312,6 +312,76 @@ struct DeblendNode {
 }
 
 /// All reusable buffers for deblending. Create once per thread and pass to
+/// The pooled state a connected-region search reuses: the grid it labels, the queue it walks, and
+/// the `Vec`s it hands out and takes back so no BFS allocates. Every entry point that finds
+/// regions needs all three, so they travel together.
+#[derive(Debug)]
+struct RegionScratch {
+    /// Grid for fast pixel lookup (replaces HashMap).
+    grid: PixelGrid,
+    /// BFS queue for connected component finding (flat grid indices).
+    queue: Vec<u32>,
+    /// Pool of recycled region Vecs to avoid per-BFS allocation.
+    pool: Vec<Vec<Pixel>>,
+}
+
+impl RegionScratch {
+    fn new() -> Self {
+        Self {
+            grid: PixelGrid::empty(),
+            queue: Vec::new(),
+            pool: Vec::new(),
+        }
+    }
+
+    /// Run BFS from a seed pixel, returning the connected region or None if already visited.
+    ///
+    /// Takes a recycled Vec from the pool when available.
+    #[inline]
+    fn bfs_region(&mut self, seed: &Pixel) -> Option<Vec<Pixel>> {
+        let Self { grid, queue, pool } = self;
+        let width = grid.width;
+        let offset_x = grid.offset_x;
+        let offset_y = grid.offset_y;
+
+        let lx = seed.pos.x.wrapping_sub(offset_x);
+        let ly = seed.pos.y.wrapping_sub(offset_y);
+        let start_idx = ly * width + lx;
+
+        // SAFETY: pixel is within grid bounds (placed during reset_with_pixels)
+        if unsafe { !grid.try_mark_visited_unchecked(start_idx) } {
+            return None;
+        }
+
+        let mut region = match pool.pop() {
+            Some(mut v) => {
+                v.clear();
+                v
+            }
+            None => Vec::new(),
+        };
+        queue.clear();
+        queue.push(start_idx as u32);
+
+        while let Some(idx) = queue.pop() {
+            let idx = idx as usize;
+            // SAFETY: idx was validated when pushed to queue
+            let value = unsafe { grid.get_value_unchecked(idx) };
+            let lx = idx % width;
+            let ly = idx / width;
+            region.push(Pixel {
+                pos: Vec2us::new(lx.wrapping_add(offset_x), ly.wrapping_add(offset_y)),
+                value,
+            });
+            // SAFETY: grid has guaranteed 1-pixel border (wrapping_sub in reset_with_pixels),
+            // so all 8 neighbors of any valid pixel are in-bounds.
+            unsafe { visit_neighbors_grid(idx, width, grid, queue) };
+        }
+
+        Some(region)
+    }
+}
+
 /// `deblend_multi_threshold` with pre-allocated buffers to avoid per-call allocations.
 #[derive(Debug)]
 pub(crate) struct DeblendBuffers {
@@ -323,14 +393,9 @@ pub(crate) struct DeblendBuffers {
     above_threshold: Vec<Pixel>,
     /// Pixels belonging to a parent that are above threshold.
     parent_pixels_above: Vec<Pixel>,
-    /// BFS queue for connected component finding (flat grid indices).
-    bfs_queue: Vec<u32>,
     /// Temporary storage for regions.
     regions: Vec<Vec<Pixel>>,
-    /// Pool of recycled region Vecs to avoid per-BFS allocation.
-    region_pool: Vec<Vec<Pixel>>,
-    /// Grid for fast pixel lookup (replaces HashMap).
-    pixel_grid: PixelGrid,
+    region_scratch: RegionScratch,
 }
 
 impl DeblendBuffers {
@@ -340,17 +405,15 @@ impl DeblendBuffers {
             pixel_to_node: NodeGrid::empty(),
             above_threshold: Vec::new(),
             parent_pixels_above: Vec::new(),
-            bfs_queue: Vec::new(),
             regions: Vec::new(),
-            region_pool: Vec::new(),
-            pixel_grid: PixelGrid::empty(),
+            region_scratch: RegionScratch::new(),
         }
     }
 
     /// Drain all regions back into the pool.
     fn recycle_regions(&mut self) {
         for region in self.regions.drain(..) {
-            self.region_pool.push(region);
+            self.region_scratch.pool.push(region);
         }
     }
 }
@@ -505,26 +568,13 @@ fn build_deblend_tree(
         find_connected_regions_grid(
             &buffers.above_threshold,
             &mut buffers.regions,
-            &mut buffers.region_pool,
-            &mut buffers.pixel_grid,
-            &mut buffers.bfs_queue,
+            &mut buffers.region_scratch,
         );
 
         if level == 0 {
             process_root_level(&mut tree, &mut buffers.pixel_to_node, &buffers.regions);
         } else {
-            process_higher_level(
-                &mut tree,
-                &mut buffers.pixel_to_node,
-                &buffers.component_pixels,
-                &buffers.regions,
-                threshold,
-                min_separation,
-                &mut buffers.parent_pixels_above,
-                &mut buffers.region_pool,
-                &mut buffers.pixel_grid,
-                &mut buffers.bfs_queue,
-            );
+            process_higher_level(&mut tree, buffers, threshold, min_separation);
         }
     }
 
@@ -558,20 +608,24 @@ fn process_root_level(
 }
 
 /// Process higher threshold levels - check for region splits.
-#[allow(clippy::too_many_arguments)]
 fn process_higher_level(
     tree: &mut DeblendTree,
-    pixel_to_node: &mut NodeGrid,
-    component_pixels: &[Pixel],
-    regions: &[Vec<Pixel>],
+    buffers: &mut DeblendBuffers,
     threshold: f32,
     min_separation: usize,
-    parent_pixels_buf: &mut Vec<Pixel>,
-    region_pool: &mut Vec<Vec<Pixel>>,
-    pixel_grid: &mut PixelGrid,
-    bfs_queue: &mut Vec<u32>,
 ) {
-    for region in regions {
+    // Destructured rather than reached through `buffers.` so the read of `regions` and the writes
+    // to the scratch below it borrow disjointly across the loop.
+    let DeblendBuffers {
+        pixel_to_node,
+        component_pixels,
+        regions,
+        parent_pixels_above,
+        region_scratch,
+        ..
+    } = buffers;
+
+    for region in regions.iter() {
         // Find the single parent node for this region
         // (all pixels in a connected region should come from same parent)
         let parent_idx = match find_single_parent_grid(region, pixel_to_node) {
@@ -591,8 +645,8 @@ fn process_higher_level(
         // Check if multiple distinct regions formed from same parent
         if region.len() < parent_above_count {
             // Collect parent pixels above threshold (reuse buffer)
-            parent_pixels_buf.clear();
-            parent_pixels_buf.extend(
+            parent_pixels_above.clear();
+            parent_pixels_above.extend(
                 component_pixels
                     .iter()
                     .filter(|p| {
@@ -605,11 +659,9 @@ fn process_higher_level(
             // Find child regions using grid-based lookup
             let mut child_regions: ArrayVec<Vec<Pixel>, MAX_CHILDREN> = ArrayVec::new();
             find_connected_regions_grid_into(
-                parent_pixels_buf,
+                parent_pixels_above,
                 &mut child_regions,
-                region_pool,
-                pixel_grid,
-                bfs_queue,
+                region_scratch,
             );
 
             if child_regions.len() > 1 {
@@ -834,20 +886,18 @@ fn assign_pixels_to_objects(
 fn find_connected_regions_grid(
     pixels: &[Pixel],
     regions: &mut Vec<Vec<Pixel>>,
-    region_pool: &mut Vec<Vec<Pixel>>,
-    grid: &mut PixelGrid,
-    idx_queue: &mut Vec<u32>,
+    scratch: &mut RegionScratch,
 ) {
     for region in regions.drain(..) {
-        region_pool.push(region);
+        scratch.pool.push(region);
     }
     if pixels.is_empty() {
         return;
     }
-    grid.reset_with_pixels(pixels);
+    scratch.grid.reset_with_pixels(pixels);
 
     for p in pixels {
-        if let Some(region) = bfs_region(p, grid, idx_queue, region_pool) {
+        if let Some(region) = scratch.bfs_region(p) {
             regions.push(region);
         }
     }
@@ -857,77 +907,24 @@ fn find_connected_regions_grid(
 fn find_connected_regions_grid_into<const N: usize>(
     pixels: &[Pixel],
     regions: &mut ArrayVec<Vec<Pixel>, N>,
-    region_pool: &mut Vec<Vec<Pixel>>,
-    grid: &mut PixelGrid,
-    idx_queue: &mut Vec<u32>,
+    scratch: &mut RegionScratch,
 ) {
     for region in regions.drain(..) {
-        region_pool.push(region);
+        scratch.pool.push(region);
     }
     if pixels.is_empty() {
         return;
     }
-    grid.reset_with_pixels(pixels);
+    scratch.grid.reset_with_pixels(pixels);
 
     for p in pixels {
         if regions.is_full() {
             break;
         }
-        if let Some(region) = bfs_region(p, grid, idx_queue, region_pool) {
+        if let Some(region) = scratch.bfs_region(p) {
             regions.push(region);
         }
     }
-}
-
-/// Run BFS from a seed pixel, returning the connected region or None if already visited.
-///
-/// Takes a recycled Vec from the pool when available.
-#[inline]
-fn bfs_region(
-    seed: &Pixel,
-    grid: &mut PixelGrid,
-    idx_queue: &mut Vec<u32>,
-    region_pool: &mut Vec<Vec<Pixel>>,
-) -> Option<Vec<Pixel>> {
-    let width = grid.width;
-    let offset_x = grid.offset_x;
-    let offset_y = grid.offset_y;
-
-    let lx = seed.pos.x.wrapping_sub(offset_x);
-    let ly = seed.pos.y.wrapping_sub(offset_y);
-    let start_idx = ly * width + lx;
-
-    // SAFETY: pixel is within grid bounds (placed during reset_with_pixels)
-    if unsafe { !grid.try_mark_visited_unchecked(start_idx) } {
-        return None;
-    }
-
-    let mut region = match region_pool.pop() {
-        Some(mut v) => {
-            v.clear();
-            v
-        }
-        None => Vec::new(),
-    };
-    idx_queue.clear();
-    idx_queue.push(start_idx as u32);
-
-    while let Some(idx) = idx_queue.pop() {
-        let idx = idx as usize;
-        // SAFETY: idx was validated when pushed to queue
-        let value = unsafe { grid.get_value_unchecked(idx) };
-        let lx = idx % width;
-        let ly = idx / width;
-        region.push(Pixel {
-            pos: Vec2us::new(lx.wrapping_add(offset_x), ly.wrapping_add(offset_y)),
-            value,
-        });
-        // SAFETY: grid has guaranteed 1-pixel border (wrapping_sub in reset_with_pixels),
-        // so all 8 neighbors of any valid pixel are in-bounds.
-        unsafe { visit_neighbors_grid(idx, width, grid, idx_queue) };
-    }
-
-    Some(region)
 }
 
 /// Visit 8-connected neighbors using grid-based lookup with flat indices.
