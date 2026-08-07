@@ -355,10 +355,12 @@ impl RegionScratch {
             let idx = idx as usize;
             // SAFETY: idx was validated when pushed to queue
             let value = unsafe { grid.get_value_unchecked(idx) };
-            let lx = idx % width;
-            let ly = idx / width;
+            let local = size.point_of(idx);
             region.push(Pixel {
-                pos: Vec2us::new(lx.wrapping_add(offset.x), ly.wrapping_add(offset.y)),
+                pos: Vec2us::new(
+                    local.x.wrapping_add(offset.x),
+                    local.y.wrapping_add(offset.y),
+                ),
                 value,
             });
             // SAFETY: grid has guaranteed 1-pixel border (wrapping_sub in reset_with_pixels),

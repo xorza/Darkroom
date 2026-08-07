@@ -172,16 +172,13 @@ impl DefectMap {
         // Mask every defect so each repair draws only on GOOD neighbours. Without it, a clustered
         // defect (hot column, adjacent same-color pixels) pulls a neighbour's bad/half-corrected
         // value into its median and the order of `hot ⧺ cold` changes the result.
-        let width = image.data.width();
-        let mut mask = BitBuffer2::new_default(width, image.data.height());
+        let mut mask = BitBuffer2::new_default(size.width, size.height);
         for &idx in self.hot_indices.iter().chain(&self.cold_indices) {
             mask.set(idx, true);
         }
 
         for &idx in self.hot_indices.iter().chain(&self.cold_indices) {
-            let x = idx % width;
-            let y = idx / width;
-            image.data[idx] = neighbors.at(&image.data, Vec2us::new(x, y), Some(&mask));
+            image.data[idx] = neighbors.at(&image.data, size.point_of(idx), Some(&mask));
         }
     }
 }
@@ -231,8 +228,8 @@ fn detect_hot_pixels(
     }
 
     let data = &image.data;
-    let width = data.width();
-    let total = width * data.height();
+    let size = Size2us::new(data.width(), data.height());
+    let total = size.pixel_count();
     let cfa_type = image.metadata.cfa_type.as_ref();
     let background = DarkBackground::fit(data, cfa_type, cancel)?;
     let sigma_floor = residual_sigma_floor(image);
@@ -247,10 +244,10 @@ fn detect_hot_pixels(
             if cancel.is_cancelled() {
                 return false;
             }
-            let color = cfa_color_at(cfa_type, Vec2us::new(i % width, i / width)) as usize;
+            let point = size.point_of(i);
+            let color = cfa_color_at(cfa_type, point) as usize;
             let ColorStats { median, sigma } = stats[color];
-            data[i] - background.at(Vec2us::new(i % width, i / width), color)
-                > median + sigma_threshold * sigma
+            data[i] - background.at(point, color) > median + sigma_threshold * sigma
         })
         .collect();
 
@@ -446,8 +443,8 @@ fn detect_cold_pixels(
     }
 
     let data = &image.data;
-    let width = data.width();
-    let total = width * data.height();
+    let size = Size2us::new(data.width(), data.height());
+    let total = size.pixel_count();
     let neighbors = SameColorMedian::new(image.metadata.cfa_type.as_ref());
 
     let indices = (0..total)
@@ -456,7 +453,7 @@ fn detect_cold_pixels(
             if cancel.is_cancelled() {
                 return false;
             }
-            let local = neighbors.at(data, Vec2us::new(i % width, i / width), None);
+            let local = neighbors.at(data, size.point_of(i), None);
             data[i] < dead_fraction * local
         })
         .collect();
@@ -543,16 +540,10 @@ fn collect_color_residual_samples(
     target_color: u8,
     background: &DarkBackground,
 ) -> Vec<f32> {
-    let width = data.width();
-    collect_color_sample_indices(Size2us::new(width, data.height()), cfa_type, target_color)
+    let size = Size2us::new(data.width(), data.height());
+    collect_color_sample_indices(size, cfa_type, target_color)
         .into_iter()
-        .map(|index| {
-            data[index]
-                - background.at(
-                    Vec2us::new(index % width, index / width),
-                    target_color as usize,
-                )
-        })
+        .map(|index| data[index] - background.at(size.point_of(index), target_color as usize))
         .collect()
 }
 
