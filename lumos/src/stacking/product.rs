@@ -38,26 +38,76 @@ impl From<QualityMap> for LinearImage {
     }
 }
 
+/// Which ancillary per-pixel planes a combine should produce.
+///
+/// Each one is a full image-sized allocation — per channel for weight and variance — that the
+/// combine writes whether or not anything reads it. A 60 MP RGB stack pays roughly 240 MB per
+/// plane per channel, so a caller that only wants the combined image (a calibration master, a
+/// quick preview) says so rather than paying for planes it discards.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct QualityPlanes {
+    /// Per-pixel coverage.
+    pub coverage: bool,
+    /// Per-channel sum of surviving frame weights.
+    pub weight: bool,
+    /// Per-channel linear-combine variance factor. A median has none whatever this says — it is
+    /// not a linear combination — so requesting it is an upper bound, not a guarantee.
+    pub variance: bool,
+}
+
+impl QualityPlanes {
+    /// Every ancillary plane: the science default, and what makes the stacked master measurable.
+    pub const ALL: Self = Self {
+        coverage: true,
+        weight: true,
+        variance: true,
+    };
+
+    /// The combined image alone.
+    pub const IMAGE_ONLY: Self = Self {
+        coverage: false,
+        weight: false,
+        variance: false,
+    };
+
+    /// Drop the planes this combine method cannot produce, so the request reaching the reducer
+    /// is exactly what it will write.
+    pub(crate) fn resolve(self, produces_variance: bool) -> Self {
+        Self {
+            variance: self.variance && produces_variance,
+            ..self
+        }
+    }
+}
+
+impl Default for QualityPlanes {
+    fn default() -> Self {
+        Self::ALL
+    }
+}
+
 /// A stacked science product shared by statistical combine and drizzle.
 ///
-/// Each producer documents how it normalizes `coverage`: statistical combine reports the fraction
-/// of frames with geometric support at a pixel, while drizzle reports accumulated coverage
-/// relative to its maximum. Statistical quality is channel-specific because rejection can retain
-/// different samples in each RGB channel; monochrome and drizzle quality use shared planes.
+/// Each plane is `Some` only when it was requested (see [`QualityPlanes`]) and the combine could
+/// produce it. Each producer documents how it normalizes `coverage`: statistical combine reports
+/// the fraction of frames with geometric support at a pixel, while drizzle reports accumulated
+/// coverage relative to its maximum. Statistical quality is channel-specific because rejection
+/// can retain different samples in each RGB channel; monochrome and drizzle quality use shared
+/// planes.
 #[derive(Debug)]
 pub struct StackProduct {
     /// The combined linear image.
     pub image: LinearImage,
     /// Normalized per-pixel coverage in `[0, 1]`, for masking and fill gating.
-    pub coverage: Buffer2<f32>,
+    pub coverage: Option<Buffer2<f32>>,
     /// WHT map. Statistical combines store per-channel sums of surviving frame weights multiplied
     /// by per-pixel confidence; Equal becomes survivor count at unit confidence, while
     /// Noise/Manual normalize frame weights before that multiplier. Drizzle stores one shared
     /// plane of summed geometric drop weights.
-    pub weight: QualityMap,
+    pub weight: Option<QualityMap>,
     /// Conditional linear-combine variance factor `Σwᵢ² / (Σwᵢ)²`.
     ///
     /// Present for weighted means and drizzle, using their actual surviving/contributing samples.
-    /// `None` for median output because a median is not a linear combination.
+    /// Absent for median output because a median is not a linear combination.
     pub linear_variance: Option<QualityMap>,
 }

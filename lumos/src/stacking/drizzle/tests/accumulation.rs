@@ -159,7 +159,7 @@ fn drizzle_rgb_uses_shared_quality_planes() {
     assert_eq!(result.image.width(), 100);
     assert_eq!(result.image.height(), 100);
     assert_eq!(result.image.channels(), 3);
-    let QualityMap::Shared(weight) = &result.weight else {
+    let Some(QualityMap::Shared(weight)) = &result.weight else {
         panic!("drizzle weight must be channel-independent");
     };
     let QualityMap::Shared(linear_variance) = result.linear_variance.as_ref().unwrap() else {
@@ -171,8 +171,8 @@ fn drizzle_rgb_uses_shared_quality_planes() {
         (100, 100)
     );
     assert!(std::ptr::eq(
-        result.weight.channel(0),
-        result.weight.channel(2)
+        result.weight.as_ref().unwrap().channel(0),
+        result.weight.as_ref().unwrap().channel(2)
     ));
 }
 
@@ -246,10 +246,10 @@ fn test_coverage_map() {
 
     // Output 8×8. Covered pixels at (2*ix, 2*iy) for ix,iy=0..3 (even coords).
     // Normalized coverage: max_coverage = 1.0
-    assert!((result.coverage[(0, 0)] - 1.0).abs() < f32::EPSILON); // covered
-    assert!((result.coverage[(1, 1)]).abs() < f32::EPSILON); // uncovered (odd)
-    assert!((result.coverage[(2, 2)] - 1.0).abs() < f32::EPSILON); // covered
-    assert!((result.coverage[(3, 3)]).abs() < f32::EPSILON); // uncovered (odd)
+    assert!((result.coverage.as_ref().unwrap()[(0, 0)] - 1.0).abs() < f32::EPSILON); // covered
+    assert!((result.coverage.as_ref().unwrap()[(1, 1)]).abs() < f32::EPSILON); // uncovered (odd)
+    assert!((result.coverage.as_ref().unwrap()[(2, 2)] - 1.0).abs() < f32::EPSILON); // covered
+    assert!((result.coverage.as_ref().unwrap()[(3, 3)]).abs() < f32::EPSILON); // uncovered (odd)
 }
 
 #[test]
@@ -279,9 +279,9 @@ fn test_weight_and_linear_variance_maps() {
     let equal = acc.finalize();
     let equal_linear_variance = equal.linear_variance.as_ref().unwrap();
     assert!(
-        (equal.weight.channel(0).pixels()[idx] - 3.0).abs() < 1e-5,
+        (equal.weight.as_ref().unwrap().channel(0).pixels()[idx] - 3.0).abs() < 1e-5,
         "Σw should be 3, got {}",
-        equal.weight.channel(0).pixels()[idx]
+        equal.weight.as_ref().unwrap().channel(0).pixels()[idx]
     );
     assert!(
         (equal_linear_variance.channel(0).pixels()[idx] - 1.0 / 3.0).abs() < 1e-5,
@@ -307,9 +307,9 @@ fn test_weight_and_linear_variance_maps() {
     let unequal = acc.finalize();
     let unequal_linear_variance = unequal.linear_variance.as_ref().unwrap();
     assert!(
-        (unequal.weight.channel(0).pixels()[idx] - 4.0).abs() < 1e-5,
+        (unequal.weight.as_ref().unwrap().channel(0).pixels()[idx] - 4.0).abs() < 1e-5,
         "Σw should be 4, got {}",
-        unequal.weight.channel(0).pixels()[idx]
+        unequal.weight.as_ref().unwrap().channel(0).pixels()[idx]
     );
     assert!(
         (unequal_linear_variance.channel(0).pixels()[idx] - 0.625).abs() < 1e-5,

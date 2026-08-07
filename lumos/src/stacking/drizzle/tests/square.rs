@@ -113,7 +113,7 @@ fn test_square_kernel_rotation() {
     let out = result.image.channel(0);
 
     // Verify coverage exists in the interior (rotated image should still cover center)
-    let center_coverage = result.coverage[(10, 10)];
+    let center_coverage = result.coverage.as_ref().unwrap()[(10, 10)];
     assert!(
         center_coverage > 0.0,
         "Center should have coverage, got {}",

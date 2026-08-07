@@ -495,22 +495,25 @@ pub(crate) fn run_stacking_weighted(cache: &FrameCache, config: &StackConfig) ->
         })
         .flatten();
 
+    // A median is not a linear combination, so it has no variance factor to report whatever the
+    // caller asked for. Resolving here means the reducer never allocates a plane it would drop.
+    let planes = config.quality.resolve(weighted_combine);
+
     let combined = match method {
         CombineMethod::Median => {
-            let mut combined = cache.process_chunked_weighted(None, frame_norms, |values, w, _| {
+            cache.process_chunked_weighted(None, frame_norms, planes, |values, w, _| {
                 CombinedSample::from_all(math::statistics::median_f32_mut(values), w)
-            });
-            combined.linear_variance = None;
-            combined
+            })
         }
         CombineMethod::Mean(rejection) => cache.process_chunked_weighted(
             weights.as_deref(),
             frame_norms,
+            planes,
             move |values, w, scratch| rejection.combine_mean_with_quality(values, w, scratch),
         ),
     };
 
-    cache.finish_product(combined)
+    cache.finish_product(combined, planes)
 }
 
 #[cfg(test)]
@@ -531,7 +534,7 @@ mod tests {
     use crate::stacking::combine::rejection::{PercentileClipConfig, Rejection};
     use crate::stacking::combine::stack::*;
     use crate::stacking::frame_store::{compute_frame_stats, store_frame};
-    use crate::stacking::product::QualityMap;
+    use crate::stacking::product::{QualityMap, QualityPlanes};
     use crate::stacking::registration::config::{self, InterpolationMethod};
     use crate::stacking::registration::resample;
     use crate::stacking::registration::transform::{Transform, WarpTransform};
@@ -772,16 +775,16 @@ mod tests {
             "stacked image differs between RAM and disk tiers"
         );
         assert_eq!(
-            bits(&ram.coverage),
-            bits(&disk.coverage),
+            bits(ram.coverage.as_ref().unwrap()),
+            bits(disk.coverage.as_ref().unwrap()),
             "coverage differs"
         );
         let ram_linear_variance = ram.linear_variance.as_ref().unwrap();
         let disk_linear_variance = disk.linear_variance.as_ref().unwrap();
         for channel in 0..ram.image.channels() {
             assert_eq!(
-                bits(ram.weight.channel(channel)),
-                bits(disk.weight.channel(channel)),
+                bits(ram.weight.as_ref().unwrap().channel(channel)),
+                bits(disk.weight.as_ref().unwrap().channel(channel)),
                 "weight channel {channel} differs"
             );
             assert_eq!(
@@ -1353,8 +1356,11 @@ mod tests {
             product.image.channel(0)[0]
         );
         assert_eq!(product.image.channel(0)[1], 10.0);
-        assert_eq!(product.coverage.pixels(), &[1.0, 1.0]);
-        assert_eq!(product.weight.channel(0).pixels(), &[1.5, 1.0]);
+        assert_eq!(product.coverage.as_ref().unwrap().pixels(), &[1.0, 1.0]);
+        assert_eq!(
+            product.weight.as_ref().unwrap().channel(0).pixels(),
+            &[1.5, 1.0]
+        );
         let linear_variance = product.linear_variance.as_ref().unwrap();
         assert!(
             (linear_variance.channel(0)[0] - 5.0 / 9.0).abs() < 1e-6,
@@ -1509,7 +1515,68 @@ mod tests {
                 ..Default::default()
             },
         );
-        assert!((product.weight.channel(0)[pixel] - 2.5).abs() < 1e-6);
+        assert!((product.weight.as_ref().unwrap().channel(0)[pixel] - 2.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn requested_planes_decide_what_the_combine_allocates() {
+        // Every ancillary plane is a full image-sized allocation the reducer writes per pixel, so
+        // "not requested" has to mean "never built" rather than "built and dropped".
+        let dims = ImageDimensions::new((2, 1), 1);
+        let frames = || {
+            (0..6)
+                .map(|i| StackFrame::from(LinearImage::from_pixels(dims, vec![i as f32, i as f32])))
+                .collect::<Vec<_>>()
+        };
+        let stack = |config: StackConfig| {
+            stack_images(
+                frames(),
+                config,
+                ProgressCallback::default(),
+                CancelToken::never(),
+            )
+            .unwrap()
+        };
+
+        // A mean asked for everything gets everything.
+        let all = stack(StackConfig {
+            method: CombineMethod::Mean(Rejection::None),
+            quality: QualityPlanes::ALL,
+            ..Default::default()
+        });
+        assert!(all.coverage.is_some());
+        assert!(all.weight.is_some());
+        assert!(all.linear_variance.is_some());
+
+        // A median is not a linear combination, so its variance plane is absent even though the
+        // request asked for it — and is never allocated, not allocated and cleared.
+        let median = stack(StackConfig {
+            method: CombineMethod::Median,
+            small_n: SmallN::none(),
+            quality: QualityPlanes::ALL,
+            ..Default::default()
+        });
+        assert!(median.coverage.is_some());
+        assert!(median.weight.is_some(), "a median still reports weight");
+        assert!(
+            median.linear_variance.is_none(),
+            "a median has no linear-combine variance factor"
+        );
+
+        // Image only: no ancillary plane survives, whatever the method would support.
+        let bare = stack(StackConfig {
+            method: CombineMethod::Mean(Rejection::None),
+            quality: QualityPlanes::IMAGE_ONLY,
+            ..Default::default()
+        });
+        assert!(bare.coverage.is_none());
+        assert!(bare.weight.is_none());
+        assert!(bare.linear_variance.is_none());
+        // The combined pixels are unaffected by which planes were asked for.
+        assert_eq!(
+            bare.image.channel(0).pixels(),
+            all.image.channel(0).pixels()
+        );
     }
 
     #[test]
@@ -1672,11 +1739,11 @@ mod tests {
         )
         .unwrap();
         let linear_variance = r.linear_variance.as_ref().unwrap();
-        assert_eq!(r.coverage[0], 1.0);
-        assert_eq!(r.weight.channel(0)[0], 2.0);
+        assert_eq!(r.coverage.as_ref().unwrap()[0], 1.0);
+        assert_eq!(r.weight.as_ref().unwrap().channel(0)[0], 2.0);
         assert_eq!(linear_variance.channel(0)[0], 0.5);
-        assert_eq!(r.coverage[1], 0.5);
-        assert_eq!(r.weight.channel(0)[1], 1.0);
+        assert_eq!(r.coverage.as_ref().unwrap()[1], 0.5);
+        assert_eq!(r.weight.as_ref().unwrap().channel(0)[1], 1.0);
         assert_eq!(linear_variance.channel(0)[1], 1.0);
     }
 
@@ -1709,12 +1776,12 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(result.coverage[0], 1.0);
+        assert_eq!(result.coverage.as_ref().unwrap()[0], 1.0);
         let expected_values = [5.0 / 3.0, 13.0 / 5.0, 5.0 / 2.0];
         let expected_weights = [3.0 / 6.0, 5.0 / 6.0, 4.0 / 6.0];
         let expected_linear_variances = [5.0 / 9.0, 13.0 / 25.0, 10.0 / 16.0];
         let linear_variance = result.linear_variance.as_ref().unwrap();
-        assert!(matches!(&result.weight, QualityMap::PerChannel(_)));
+        assert!(matches!(&result.weight, Some(QualityMap::PerChannel(_))));
         assert!(matches!(linear_variance, QualityMap::PerChannel(_)));
         for channel in 0..3 {
             assert!(
@@ -1722,7 +1789,9 @@ mod tests {
                 "channel {channel} value"
             );
             assert!(
-                (result.weight.channel(channel)[0] - expected_weights[channel]).abs() < 1e-6,
+                (result.weight.as_ref().unwrap().channel(channel)[0] - expected_weights[channel])
+                    .abs()
+                    < 1e-6,
                 "channel {channel} weight"
             );
             assert!(
@@ -1731,7 +1800,10 @@ mod tests {
                 "channel {channel} variance"
             );
         }
-        assert_ne!(result.weight.channel(0)[0], result.weight.channel(1)[0]);
+        assert_ne!(
+            result.weight.as_ref().unwrap().channel(0)[0],
+            result.weight.as_ref().unwrap().channel(1)[0]
+        );
         assert_ne!(linear_variance.channel(1)[0], linear_variance.channel(2)[0]);
     }
 
@@ -1768,9 +1840,9 @@ mod tests {
         for p in 0..8 {
             let expected = 100.0 + p as f32 * 2.0 / 7.0;
             assert!((explicit.image.channel(0)[p] - expected).abs() < 1e-5);
-            assert_eq!(explicit.coverage[p], 1.0);
+            assert_eq!(explicit.coverage.as_ref().unwrap()[p], 1.0);
             assert_eq!(
-                explicit.weight.channel(0)[p],
+                explicit.weight.as_ref().unwrap().channel(0)[p],
                 3.0,
                 "median quality must count unit-confidence contributors (= 3)"
             );
@@ -1794,7 +1866,7 @@ mod tests {
                 "{name} must expose no linear variance after its small-N median downgrade"
             );
             assert_eq!(
-                downgraded.weight.channel(0).pixels(),
+                downgraded.weight.as_ref().unwrap().channel(0).pixels(),
                 &[3.0; 8],
                 "{name} median fallback must count unit-confidence contributors"
             );
@@ -1876,9 +1948,12 @@ mod tests {
         let cache = make_uniform_frames(16, &[100.0, 150.0]);
         let norm_params = norm_params_for(&cache, Normalization::Global).unwrap();
 
-        let result = cache.process_chunked_weighted(None, Some(&norm_params), |values, w, _| {
-            mean_sample(values, w)
-        });
+        let result = cache.process_chunked_weighted(
+            None,
+            Some(&norm_params),
+            QualityPlanes::ALL,
+            |values, w, _| mean_sample(values, w),
+        );
         assert_channel_near(&result.pixels, 0, 100.0, 1.0);
     }
 
@@ -1928,9 +2003,12 @@ mod tests {
         let cache = make_uniform_frames(16, &[100.0, 200.0]);
         let norm_params = norm_params_for(&cache, Normalization::Multiplicative).unwrap();
 
-        let result = cache.process_chunked_weighted(None, Some(&norm_params), |values, w, _| {
-            mean_sample(values, w)
-        });
+        let result = cache.process_chunked_weighted(
+            None,
+            Some(&norm_params),
+            QualityPlanes::ALL,
+            |values, w, _| mean_sample(values, w),
+        );
         assert_channel_near(&result.pixels, 0, 100.0, 1.0);
     }
 
@@ -1948,10 +2026,12 @@ mod tests {
             let cache = make_rgb_frames(16, &[ref_rgb, frame1_rgb]);
             let norm_params = norm_params_for(&cache, mode).unwrap();
 
-            let result =
-                cache.process_chunked_weighted(None, Some(&norm_params), |values, w, _| {
-                    mean_sample(values, w)
-                });
+            let result = cache.process_chunked_weighted(
+                None,
+                Some(&norm_params),
+                QualityPlanes::ALL,
+                |values, w, _| mean_sample(values, w),
+            );
 
             for (ch, &expected) in ref_rgb.iter().enumerate() {
                 assert_channel_near(&result.pixels, ch, expected, 2.0);
@@ -1964,13 +2044,16 @@ mod tests {
         let cache = make_uniform_frames(16, &[100.0, 200.0]);
         let norm_params = norm_params_for(&cache, Normalization::Global).unwrap();
 
-        let result_norm =
-            cache.process_chunked_weighted(None, Some(&norm_params), |values, w, scratch| {
+        let result_norm = cache.process_chunked_weighted(
+            None,
+            Some(&norm_params),
+            QualityPlanes::ALL,
+            |values, w, scratch| Rejection::None.combine_mean_with_quality(values, w, scratch),
+        );
+        let result_unnorm =
+            cache.process_chunked_weighted(None, None, QualityPlanes::ALL, |values, w, scratch| {
                 Rejection::None.combine_mean_with_quality(values, w, scratch)
             });
-        let result_unnorm = cache.process_chunked_weighted(None, None, |values, w, scratch| {
-            Rejection::None.combine_mean_with_quality(values, w, scratch)
-        });
 
         let norm_pixel = result_norm.pixels.channel(0)[0];
         let unnorm_pixel = result_unnorm.pixels.channel(0)[0];
@@ -2098,9 +2181,12 @@ mod tests {
         let norm_params = norm_params_for(&cache, Normalization::Global).unwrap();
 
         // Frame 1 is reference (lower noise), so stacked result should be ~200
-        let result = cache.process_chunked_weighted(None, Some(&norm_params), |values, w, _| {
-            mean_sample(values, w)
-        });
+        let result = cache.process_chunked_weighted(
+            None,
+            Some(&norm_params),
+            QualityPlanes::ALL,
+            |values, w, _| mean_sample(values, w),
+        );
         assert_channel_near(&result.pixels, 0, 200.0, 2.0);
     }
 

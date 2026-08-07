@@ -18,7 +18,7 @@ use crate::stacking::combine::stack::StackFrame;
 use crate::stacking::frame_store::{
     ChunkMemoryLayout, SpillDirectory, StackableImage, StoredFrame, StoredPlane, optimal_chunk_rows,
 };
-use crate::stacking::product::{QualityMap, StackProduct};
+use crate::stacking::product::{QualityMap, QualityPlanes, StackProduct};
 use crate::stacking::progress::{ProgressCallback, StackingStage, report_progress};
 
 /// Per-thread scratch buffers for stacking combine closures.
@@ -97,12 +97,22 @@ impl CombinedSample {
 }
 
 /// Channel-shaped result of one light-frame combine pass and its pre-output memory snapshot.
+/// A plane is `None` when [`QualityPlanes`] did not ask for it.
 #[derive(Debug)]
 pub(crate) struct LightCombineOutput {
     pub(super) pixels: LinearPixels,
-    weight: LinearPixels,
-    pub(crate) linear_variance: Option<LinearPixels>,
+    weight: Option<LinearPixels>,
+    linear_variance: Option<LinearPixels>,
     chunk_available_memory: Option<u64>,
+}
+
+/// The output rows one combine row-task writes: the combined value, plus whichever ancillary
+/// planes were requested. Bundling them keeps one gather loop instead of one per plane subset.
+#[derive(Debug)]
+struct QualityRows<'a> {
+    value: &'a mut [f32],
+    weight: Option<&'a mut [f32]>,
+    linear_variance: Option<&'a mut [f32]>,
 }
 
 /// Shared cache context + combine engine — everything that doesn't depend on the frame type.
@@ -485,6 +495,22 @@ impl FrameCache {
         check_cancel(&cancel)?;
         for (index, frame) in frames.iter().enumerate() {
             validate_stored_samples(&frame.channels, dimensions.pixel_count(), index, &cancel)?;
+            // Same guarantee `from_stack_frames` gives caller-supplied planes: coverage in
+            // `[0, 1]` and confidence non-negative, so the gate and the weight multiplier below
+            // can't be handed a value that silently corrupts the combine.
+            for (plane_name, plane) in [
+                ("coverage", frame.coverage.as_ref()),
+                ("confidence", frame.confidence.as_ref()),
+            ] {
+                if let Some(plane) = plane {
+                    validate_warp_plane_values(
+                        index,
+                        plane_name,
+                        plane.chunk(0, dimensions.pixel_count()),
+                        &cancel,
+                    )?;
+                }
+            }
         }
         let frame_norms = compute_frame_norms(&frames, dimensions, normalization, &cancel)?;
         Ok(Self {
@@ -576,7 +602,11 @@ impl FrameCache {
     }
 
     /// Assemble the combined image, geometric coverage, and per-channel survivor quality.
-    pub(crate) fn finish_product(&self, combined: LightCombineOutput) -> StackProduct {
+    pub(crate) fn finish_product(
+        &self,
+        combined: LightCombineOutput,
+        planes: QualityPlanes,
+    ) -> StackProduct {
         let LightCombineOutput {
             pixels,
             weight: weight_pixels,
@@ -588,16 +618,20 @@ impl FrameCache {
             metadata: self.core.metadata.clone(),
             pixels,
         };
-        let weight = QualityMap::from_pixels(weight_pixels);
+        let weight = weight_pixels.map(QualityMap::from_pixels);
         let linear_variance = linear_variance_pixels.map(QualityMap::from_pixels);
         let frame_count = self.frames.len();
         let width = dimensions.width();
         let height = dimensions.height();
 
-        if self.frames.iter().all(|frame| frame.coverage.is_none()) {
+        // No frame carries support, so every pixel is fully covered. The plane is still
+        // materialized when asked for, since `coverage` has no uniform representation.
+        if !planes.coverage || self.frames.iter().all(|frame| frame.coverage.is_none()) {
             return StackProduct {
                 image,
-                coverage: Buffer2::new_filled(width, height, 1.0),
+                coverage: planes
+                    .coverage
+                    .then(|| Buffer2::new_filled(width, height, 1.0)),
                 weight,
                 linear_variance,
             };
@@ -662,7 +696,7 @@ impl FrameCache {
 
         StackProduct {
             image,
-            coverage,
+            coverage: Some(coverage),
             weight,
             linear_variance,
         }
@@ -675,6 +709,7 @@ impl FrameCache {
         &self,
         weights: Option<&[f32]>,
         frame_norms: Option<&[FrameNorm]>,
+        planes: QualityPlanes,
         combine: Combine,
     ) -> LightCombineOutput
     where
@@ -694,119 +729,135 @@ impl FrameCache {
         let memory = weighted_chunk_memory_layout(&self.frames, dimensions.channels());
         // Coverage sizing must reuse this pre-output snapshot or resident planes are charged twice.
         let chunk_available_memory = self.core.chunk_available_memory();
-        let mut output_weight = LinearPixels::new_zeroed(dimensions);
-        let mut output_linear_variance = LinearPixels::new_zeroed(dimensions);
-        let pixels =
-            self.core.process_chunks(
-                &self.frames,
-                |frame| &frame.channels,
-                memory,
-                chunk_available_memory,
-                |output_slice, ctx| {
-                    let ChunkContext {
-                        frames,
-                        width,
-                        channel,
-                        pixel_offset,
-                    } = ctx;
-                    let frame_count = frames.len();
-                    let chunk_pixels = output_slice.len();
-                    // Per-frame support and confidence slices; `None` means full support/unit confidence.
-                    let coverage: Vec<Option<&[f32]>> =
-                        self.frames
-                            .iter()
-                            .map(|frame| {
-                                frame.coverage.as_ref().map(|plane| {
-                                    plane.chunk(pixel_offset, pixel_offset + chunk_pixels)
-                                })
-                            })
-                            .collect();
-                    let confidence: Vec<Option<&[f32]>> =
-                        self.frames
-                            .iter()
-                            .map(|frame| {
-                                frame.confidence.as_ref().map(|plane| {
-                                    plane.chunk(pixel_offset, pixel_offset + chunk_pixels)
-                                })
-                            })
-                            .collect();
-                    let weight_slice = &mut output_weight.channel_mut(channel).pixels_mut()
+        let mut output_weight = planes.weight.then(|| LinearPixels::new_zeroed(dimensions));
+        let mut output_linear_variance = planes
+            .variance
+            .then(|| LinearPixels::new_zeroed(dimensions));
+        let pixels = self.core.process_chunks(
+            &self.frames,
+            |frame| &frame.channels,
+            memory,
+            chunk_available_memory,
+            |output_slice, ctx| {
+                let ChunkContext {
+                    frames,
+                    width,
+                    channel,
+                    pixel_offset,
+                } = ctx;
+                let frame_count = frames.len();
+                let chunk_pixels = output_slice.len();
+                // Per-frame support and confidence slices; `None` means full support/unit confidence.
+                let coverage: Vec<Option<&[f32]>> = self
+                    .frames
+                    .iter()
+                    .map(|frame| {
+                        frame
+                            .coverage
+                            .as_ref()
+                            .map(|plane| plane.chunk(pixel_offset, pixel_offset + chunk_pixels))
+                    })
+                    .collect();
+                let confidence: Vec<Option<&[f32]>> = self
+                    .frames
+                    .iter()
+                    .map(|frame| {
+                        frame
+                            .confidence
+                            .as_ref()
+                            .map(|plane| plane.chunk(pixel_offset, pixel_offset + chunk_pixels))
+                    })
+                    .collect();
+                // One row bundle per output row, so an unrequested plane simply has no slice
+                // to write instead of needing its own copy of the gather loop below.
+                let mut rows: Vec<QualityRows<'_>> = output_slice
+                    .chunks_mut(width)
+                    .map(|value| QualityRows {
+                        value,
+                        weight: None,
+                        linear_variance: None,
+                    })
+                    .collect();
+                if let Some(plane) = output_weight.as_mut() {
+                    let slice = &mut plane.channel_mut(channel).pixels_mut()
                         [pixel_offset..pixel_offset + chunk_pixels];
-                    let linear_variance_slice = &mut output_linear_variance
-                        .channel_mut(channel)
-                        .pixels_mut()[pixel_offset..pixel_offset + chunk_pixels];
-                    output_slice
-                    .par_chunks_mut(width)
-                    .zip(weight_slice.par_chunks_mut(width))
-                    .zip(linear_variance_slice.par_chunks_mut(width))
-                    .enumerate()
-                    .for_each_init(
-                        || {
-                            (
-                                vec![0.0f32; frame_count],
-                                vec![0.0f32; frame_count],
-                                ScratchBuffers::new(frame_count),
-                            )
-                        },
-                        |(values, eff_weights, scratch),
-                         (row_in_chunk, ((row_output, row_weight), row_linear_variance))| {
-                            // Cancelled: skip the row's work (output stays zero; the
-                            // caller discards the partial result and reports Cancelled).
-                            if cancel.is_cancelled() {
-                                return;
-                            }
-                            let row_offset = row_in_chunk * width;
-                            for pixel_in_row in 0..width {
-                                let pixel_idx = row_offset + pixel_in_row;
-                                let mut covered = 0usize;
-                                for (frame_idx, chunk) in frames.iter().enumerate() {
-                                    let c = match coverage[frame_idx] {
-                                        Some(map) => map[pixel_idx],
-                                        None => 1.0,
-                                    };
-                                    let q = match confidence[frame_idx] {
-                                        Some(map) => map[pixel_idx],
-                                        None => 1.0,
-                                    };
-                                    if c > MIN_CONTRIBUTING_COVERAGE && q > 0.0 {
-                                        let v = match frame_norms {
-                                            Some(fnm) => {
-                                                let cn = fnm[frame_idx].channels[channel];
-                                                chunk[pixel_idx] * cn.gain + cn.offset
-                                            }
-                                            None => chunk[pixel_idx],
-                                        };
-                                        values[covered] = v;
-                                        eff_weights[covered] =
-                                            weights.map_or(1.0, |w| w[frame_idx]) * q;
-                                        covered += 1;
-                                    }
-                                }
-                                let sample = if covered == 0 {
-                                    CombinedSample::default()
-                                } else {
-                                    debug_assert!(
-                                        values[..covered].iter().all(|v| v.is_finite()),
-                                        "non-finite pixel value entered the combine",
-                                    );
-                                    combine(
-                                        &mut values[..covered],
-                                        &eff_weights[..covered],
-                                        scratch,
-                                    )
+                    for (row, chunk) in rows.iter_mut().zip(slice.chunks_mut(width)) {
+                        row.weight = Some(chunk);
+                    }
+                }
+                if let Some(plane) = output_linear_variance.as_mut() {
+                    let slice = &mut plane.channel_mut(channel).pixels_mut()
+                        [pixel_offset..pixel_offset + chunk_pixels];
+                    for (row, chunk) in rows.iter_mut().zip(slice.chunks_mut(width)) {
+                        row.linear_variance = Some(chunk);
+                    }
+                }
+                rows.into_par_iter().enumerate().for_each_init(
+                    || {
+                        (
+                            vec![0.0f32; frame_count],
+                            vec![0.0f32; frame_count],
+                            ScratchBuffers::new(frame_count),
+                        )
+                    },
+                    |(values, eff_weights, scratch), (row_in_chunk, mut row)| {
+                        // Cancelled: skip the row's work (output stays zero; the
+                        // caller discards the partial result and reports Cancelled).
+                        if cancel.is_cancelled() {
+                            return;
+                        }
+                        let row_offset = row_in_chunk * width;
+                        for pixel_in_row in 0..width {
+                            let pixel_idx = row_offset + pixel_in_row;
+                            let mut covered = 0usize;
+                            for (frame_idx, chunk) in frames.iter().enumerate() {
+                                let c = match coverage[frame_idx] {
+                                    Some(map) => map[pixel_idx],
+                                    None => 1.0,
                                 };
-                                row_output[pixel_in_row] = sample.value;
-                                row_weight[pixel_in_row] = sample.weight;
-                                row_linear_variance[pixel_in_row] = sample.linear_variance;
+                                let q = match confidence[frame_idx] {
+                                    Some(map) => map[pixel_idx],
+                                    None => 1.0,
+                                };
+                                if c > MIN_CONTRIBUTING_COVERAGE && q > 0.0 {
+                                    let v = match frame_norms {
+                                        Some(fnm) => {
+                                            let cn = fnm[frame_idx].channels[channel];
+                                            chunk[pixel_idx] * cn.gain + cn.offset
+                                        }
+                                        None => chunk[pixel_idx],
+                                    };
+                                    values[covered] = v;
+                                    eff_weights[covered] =
+                                        weights.map_or(1.0, |w| w[frame_idx]) * q;
+                                    covered += 1;
+                                }
                             }
-                        },
-                    );
-                },
-            );
+                            let sample = if covered == 0 {
+                                CombinedSample::default()
+                            } else {
+                                debug_assert!(
+                                    values[..covered].iter().all(|v| v.is_finite()),
+                                    "non-finite pixel value entered the combine",
+                                );
+                                combine(&mut values[..covered], &eff_weights[..covered], scratch)
+                            };
+                            row.value[pixel_in_row] = sample.value;
+                            if let Some(weight) = row.weight.as_deref_mut() {
+                                weight[pixel_in_row] = sample.weight;
+                            }
+                            if let Some(variance) = row.linear_variance.as_deref_mut() {
+                                variance[pixel_in_row] = sample.linear_variance;
+                            }
+                        }
+                    },
+                );
+            },
+        );
         LightCombineOutput {
             pixels,
             weight: output_weight,
-            linear_variance: Some(output_linear_variance),
+            linear_variance: output_linear_variance,
             chunk_available_memory,
         }
     }

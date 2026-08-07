@@ -120,8 +120,20 @@ pub(crate) fn register(library: &mut Library) {
                         })
                         .await?;
 
-                        let coverage = LinearImage::from(result.product.coverage);
-                        let weight = LinearImage::from(result.product.weight);
+                        // The node advertises coverage and weight outputs, so the stack is
+                        // configured to produce them.
+                        let coverage = LinearImage::from(
+                            result
+                                .product
+                                .coverage
+                                .expect("coverage requested by the stacking config"),
+                        );
+                        let weight = LinearImage::from(
+                            result
+                                .product
+                                .weight
+                                .expect("weight requested by the stacking config"),
+                        );
                         outputs[0] = DynamicValue::from_custom(Image::from(RawImage::from(
                             &result.product.image,
                         )));
