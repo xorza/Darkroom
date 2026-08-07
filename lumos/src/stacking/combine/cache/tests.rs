@@ -100,7 +100,7 @@ fn stored_frames_of_the_wrong_shape_are_rejected_not_sliced() {
         let image =
             LinearImage::from_pixels(ImageDimensions::new((pixels, 1), 1), vec![1.0; pixels]);
         let stats = FrameStats::measure(&image);
-        StoredFrame::from_memory(image, None, None, stats)
+        StoredFrame::from_memory(image, WarpQuality::none(), stats)
     };
 
     // Short channel plane: 4 samples where the cache wants 8.
@@ -121,8 +121,11 @@ fn stored_frames_of_the_wrong_shape_are_rejected_not_sliced() {
     // A quality plane of the wrong length is caught the same way.
     let image = LinearImage::from_pixels(dimensions, vec![1.0; 8]);
     let stats = FrameStats::measure(&image);
-    let short_coverage =
-        StoredFrame::from_memory(image, Some(Buffer2::new(2, 1, vec![1.0; 2])), None, stats);
+    let short_coverage = StoredFrame::from_memory(
+        image,
+        WarpQuality::new(Some(Buffer2::new(2, 1, vec![1.0; 2])), None),
+        stats,
+    );
     let error = FrameCache::from_stored_frames(vec![short_coverage], params()).unwrap_err();
     assert!(
         matches!(
@@ -428,8 +431,7 @@ fn test_cleanup_removes_files() {
         &temp_dir,
         "cleanup_test.bin",
         &image,
-        None,
-        None,
+        WarpQuality::none(),
         FrameStats::measure(&image),
     )
     .unwrap();
@@ -505,8 +507,7 @@ fn test_read_channel_chunk_disk_backed() {
         &temp_dir,
         base_filename,
         &image,
-        None,
-        None,
+        WarpQuality::none(),
         FrameStats::measure(&image),
     )
     .unwrap();
@@ -564,8 +565,7 @@ fn test_frame_count_disk_backed() {
             &temp_dir,
             &base_filename,
             &image,
-            None,
-            None,
+            WarpQuality::none(),
             FrameStats::measure(&image),
         )
         .unwrap();
