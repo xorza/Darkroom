@@ -16,6 +16,8 @@ use std::path::PathBuf;
 
 use common::internals::test_output_path;
 use glam::{DVec2, Vec2};
+
+use crate::math::size2us::Size2us;
 use image::GrayImage;
 use imaginarium::Buffer2;
 
@@ -149,7 +151,7 @@ fn gallery_backgrounds() {
         ),
     ];
     for (name, bg, stretch) in cases {
-        save(&bg.render(w, h), w, h, name, stretch);
+        save(&bg.render(Size2us::new(w, h)), w, h, name, stretch);
     }
 }
 
@@ -460,21 +462,21 @@ fn gallery_dither() {
 fn gallery_patterns() {
     let (w, h) = (256, 256);
     save(
-        checkerboard(w, h, 16, 0.1, 0.9).pixels(),
+        checkerboard(Size2us::new(w, h), 16, 0.1, 0.9).pixels(),
         w,
         h,
         "patterns/checkerboard",
         Stretch::Linear,
     );
     save(
-        horizontal_gradient(w, h, 0.0, 1.0).pixels(),
+        horizontal_gradient(Size2us::new(w, h), 0.0, 1.0).pixels(),
         w,
         h,
         "patterns/horizontal_gradient",
         Stretch::Linear,
     );
     save(
-        diagonal_gradient(w, h).pixels(),
+        diagonal_gradient(Size2us::new(w, h)).pixels(),
         w,
         h,
         "patterns/diagonal_gradient",

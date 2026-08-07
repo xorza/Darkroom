@@ -9,6 +9,9 @@
 
 use glam::Vec2;
 
+use crate::math::size2us::Size2us;
+use crate::math::vec2us::Vec2us;
+
 /// Add uniform background to image.
 pub(super) fn add_uniform_background(pixels: &mut [f32], level: f32) {
     for p in pixels.iter_mut() {
@@ -26,8 +29,7 @@ pub(super) fn add_uniform_background(pixels: &mut [f32], level: f32) {
 /// * `angle` - Gradient direction in radians (0 = horizontal left-to-right)
 pub(super) fn add_gradient_background(
     pixels: &mut [f32],
-    width: usize,
-    height: usize,
+    size: Size2us,
     level_start: f32,
     level_end: f32,
     angle: f32,
@@ -36,14 +38,14 @@ pub(super) fn add_gradient_background(
     let sin_a = angle.sin();
 
     // Project diagonal to get max distance along gradient direction
-    let max_dist = (width as f32 * cos_a.abs() + height as f32 * sin_a.abs()).max(1.0);
+    let max_dist = (size.width as f32 * cos_a.abs() + size.height as f32 * sin_a.abs()).max(1.0);
 
-    for y in 0..height {
-        for x in 0..width {
+    for y in 0..size.height {
+        for x in 0..size.width {
             let dist = x as f32 * cos_a + y as f32 * sin_a;
             let t = (dist / max_dist).clamp(0.0, 1.0);
             let level = level_start + (level_end - level_start) * t;
-            pixels[y * width + x] += level;
+            pixels[size.index_of(Vec2us::new(x, y))] += level;
         }
     }
 }
@@ -58,22 +60,21 @@ pub(super) fn add_gradient_background(
 /// * `falloff` - Power of radial falloff (1.0 = linear, 2.0 = quadratic)
 pub(super) fn add_vignette_background(
     pixels: &mut [f32],
-    width: usize,
-    height: usize,
+    size: Size2us,
     center_level: f32,
     edge_level: f32,
     falloff: f32,
 ) {
-    let center = Vec2::new(width as f32 / 2.0, height as f32 / 2.0);
+    let center = Vec2::new(size.width as f32 / 2.0, size.height as f32 / 2.0);
     let max_r = center.length();
 
-    for y in 0..height {
-        for x in 0..width {
+    for y in 0..size.height {
+        for x in 0..size.width {
             let pixel_pos = Vec2::new(x as f32, y as f32);
             let r = pixel_pos.distance(center);
             let t = (r / max_r).powf(falloff);
             let level = center_level + (edge_level - center_level) * t;
-            pixels[y * width + x] += level;
+            pixels[size.index_of(Vec2us::new(x, y))] += level;
         }
     }
 }
@@ -112,23 +113,18 @@ impl Default for NebulaConfig {
 ///
 /// Creates an elliptical Gaussian-like bright region to simulate
 /// emission nebulae or light pollution gradients.
-pub(super) fn add_nebula_background(
-    pixels: &mut [f32],
-    width: usize,
-    height: usize,
-    config: &NebulaConfig,
-) {
-    let cx = config.center.x * width as f32;
-    let cy = config.center.y * height as f32;
-    let diag = ((width * width + height * height) as f32).sqrt();
+pub(super) fn add_nebula_background(pixels: &mut [f32], size: Size2us, config: &NebulaConfig) {
+    let cx = config.center.x * size.width as f32;
+    let cy = config.center.y * size.height as f32;
+    let diag = ((size.width * size.width + size.height * size.height) as f32).sqrt();
     let radius = config.radius * diag;
     let radius_sq = radius * radius;
 
     let cos_a = config.angle.cos();
     let sin_a = config.angle.sin();
 
-    for y in 0..height {
-        for x in 0..width {
+    for y in 0..size.height {
+        for x in 0..size.width {
             let dx = x as f32 - cx;
             let dy = y as f32 - cy;
 
@@ -141,7 +137,7 @@ pub(super) fn add_nebula_background(
 
             // Smooth falloff with configurable softness
             let falloff = (-t * config.softness).exp();
-            pixels[y * width + x] += config.amplitude * falloff;
+            pixels[size.index_of(Vec2us::new(x, y))] += config.amplitude * falloff;
         }
     }
 }
@@ -166,7 +162,7 @@ mod tests {
         let height = 64;
         let mut pixels = vec![0.0f32; width * height];
 
-        add_gradient_background(&mut pixels, width, height, 0.0, 1.0, 0.0);
+        add_gradient_background(&mut pixels, Size2us::new(width, height), 0.0, 1.0, 0.0);
 
         // Left edge should be ~0, right edge should be ~1
         assert!(pixels[32 * width] < 0.1);
@@ -179,7 +175,7 @@ mod tests {
         let height = 64;
         let mut pixels = vec![0.0f32; width * height];
 
-        add_vignette_background(&mut pixels, width, height, 0.5, 0.1, 2.0);
+        add_vignette_background(&mut pixels, Size2us::new(width, height), 0.5, 0.1, 2.0);
 
         // Center should be brightest
         let center = pixels[32 * width + 32];

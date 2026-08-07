@@ -255,7 +255,7 @@ fn windowed_covariance_recovers_gaussian_sigma() {
     let pos = Vec2::new(32.0, 32.0);
     let sigma = 2.5f32;
     let pixels = make_gaussian_star(Size2us::new(width, height), pos, sigma, 1.0, 0.0);
-    let bg = background_map::uniform(width, height, 0.0, 1.0);
+    let bg = background_map::uniform(Size2us::new(width, height), 0.0, 1.0);
 
     let cov = windowed_covariance(&pixels, &bg, None, pos, 12, (sigma * sigma) as f64)
         .expect("clean Gaussian should converge");
@@ -287,7 +287,7 @@ fn windowed_covariance_recovers_elliptical_axes() {
     let pos = Vec2::new(32.0, 32.0);
     let (sx, sy) = (3.0f32, 2.0f32);
     let pixels = make_elliptical_star(Size2us::new(width, height), pos, sx, sy, 1.0, 0.0);
-    let bg = background_map::uniform(width, height, 0.0, 1.0);
+    let bg = background_map::uniform(Size2us::new(width, height), 0.0, 1.0);
 
     let seed = ((sx * sx + sy * sy) / 2.0) as f64;
     let cov = windowed_covariance(&pixels, &bg, None, pos, 14, seed)
@@ -324,7 +324,7 @@ fn windowed_covariance_resists_wing_noise() {
     let sigma = 2.5f32;
     let mut pixels = make_gaussian_star(Size2us::new(width, height), pos, sigma, 1.0, 0.1);
     add_noise(pixels.pixels_mut(), 0.03, 12345);
-    let bg = background_map::uniform(width, height, 0.1, 1.0);
+    let bg = background_map::uniform(Size2us::new(width, height), 0.1, 1.0);
 
     let cov = windowed_covariance(&pixels, &bg, None, pos, 12, (sigma * sigma) as f64)
         .expect("noisy Gaussian should still converge");

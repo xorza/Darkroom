@@ -7,6 +7,7 @@
 
 use std::f64::consts::PI;
 
+use crate::math::size2us::Size2us;
 use crate::testing::TestRng;
 use crate::testing::synthetic::backgrounds::{
     NebulaConfig, add_gradient_background, add_nebula_background, add_uniform_background,
@@ -45,20 +46,20 @@ pub(crate) enum BackgroundField {
 }
 
 impl BackgroundField {
-    /// Render this background into a fresh `width*height` buffer of normalized values.
-    pub(crate) fn render(&self, width: usize, height: usize) -> Vec<f32> {
-        let mut pixels = vec![0.0f32; width * height];
+    /// Render this background into a fresh `size`-sized buffer of normalized values.
+    pub(crate) fn render(&self, size: Size2us) -> Vec<f32> {
+        let mut pixels = vec![0.0f32; size.pixel_count()];
         match self {
             BackgroundField::Uniform { level } => add_uniform_background(&mut pixels, *level),
             BackgroundField::Gradient { start, end, angle } => {
-                add_gradient_background(&mut pixels, width, height, *start, *end, *angle)
+                add_gradient_background(&mut pixels, size, *start, *end, *angle)
             }
             BackgroundField::Vignette {
                 center,
                 edge,
                 falloff,
-            } => add_vignette_background(&mut pixels, width, height, *center, *edge, *falloff),
-            BackgroundField::Nebula(cfg) => add_nebula_background(&mut pixels, width, height, cfg),
+            } => add_vignette_background(&mut pixels, size, *center, *edge, *falloff),
+            BackgroundField::Nebula(cfg) => add_nebula_background(&mut pixels, size, cfg),
         }
         pixels
     }
@@ -213,7 +214,7 @@ mod tests {
     #[test]
     fn uniform_background_renders_constant() {
         let bg = BackgroundField::Uniform { level: 0.1 };
-        let buf = bg.render(32, 16);
+        let buf = bg.render(Size2us::new(32, 16));
         assert_eq!(buf.len(), 32 * 16);
         assert!(buf.iter().all(|&p| (p - 0.1).abs() < 1e-6));
     }
@@ -226,7 +227,7 @@ mod tests {
             end: 1.0,
             angle: 0.0,
         };
-        let buf = bg.render(64, 4);
+        let buf = bg.render(Size2us::new(64, 4));
         assert!(buf[0] < 0.05, "left {}", buf[0]);
         assert!(buf[63] > 0.95, "right {}", buf[63]);
     }
@@ -261,7 +262,10 @@ mod tests {
         assert_eq!(scene.sources.len(), 1);
         assert_eq!(scene.positions(), vec![DVec2::new(32.0, 32.0)]);
         // Empty-sky background really is empty.
-        assert_eq!(pixel_stats(&scene.background.render(64, 64)).mean, 0.0);
+        assert_eq!(
+            pixel_stats(&scene.background.render(Size2us::new(64, 64))).mean,
+            0.0
+        );
     }
 
     #[test]

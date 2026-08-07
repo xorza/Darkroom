@@ -253,7 +253,7 @@ fn test_background_vignette() {
         edge: 0.05,
         falloff: 2.0,
     }
-    .render(width, height);
+    .render(Size2us::new(width, height));
     let true_mean = true_bg.iter().sum::<f32>() / true_bg.len() as f32;
     let est_mean =
         background.background.pixels().iter().sum::<f32>() / background.background.len() as f32;

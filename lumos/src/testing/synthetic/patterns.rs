@@ -5,32 +5,29 @@
 
 use imaginarium::Buffer2;
 
+use crate::math::size2us::Size2us;
+use crate::math::vec2us::Vec2us;
 use crate::testing::TestRng;
 
 /// Create a uniform image filled with a single value.
-pub(crate) fn uniform(width: usize, height: usize, value: f32) -> Buffer2<f32> {
-    Buffer2::new_filled(width, height, value)
+pub(crate) fn uniform(size: Size2us, value: f32) -> Buffer2<f32> {
+    Buffer2::new_filled(size.width, size.height, value)
 }
 
 /// Create a horizontal gradient from left to right.
-pub(super) fn horizontal_gradient(
-    width: usize,
-    height: usize,
-    left: f32,
-    right: f32,
-) -> Buffer2<f32> {
-    let mut pixels = vec![0.0f32; width * height];
-    for y in 0..height {
-        for x in 0..width {
-            let t = if width > 1 {
-                x as f32 / (width - 1) as f32
+pub(super) fn horizontal_gradient(size: Size2us, left: f32, right: f32) -> Buffer2<f32> {
+    let mut pixels = vec![0.0f32; size.pixel_count()];
+    for y in 0..size.height {
+        for x in 0..size.width {
+            let t = if size.width > 1 {
+                x as f32 / (size.width - 1) as f32
             } else {
                 0.5
             };
-            pixels[y * width + x] = left + t * (right - left);
+            pixels[size.index_of(Vec2us::new(x, y))] = left + t * (right - left);
         }
     }
-    Buffer2::new(width, height, pixels)
+    Buffer2::new(size.width, size.height, pixels)
 }
 
 /// Create a diagonal gradient for interpolation testing.
@@ -38,32 +35,31 @@ pub(super) fn horizontal_gradient(
 /// Formula: `(x + y * 0.5) / (width + height)`
 /// This creates a gradient that varies in both X and Y directions,
 /// making it useful for testing interpolation accuracy.
-pub(crate) fn diagonal_gradient(width: usize, height: usize) -> Buffer2<f32> {
-    let scale = (width + height) as f32;
-    let pixels: Vec<f32> = (0..height)
-        .flat_map(|y| (0..width).map(move |x| (x as f32 + y as f32 * 0.5) / scale))
+pub(crate) fn diagonal_gradient(size: Size2us) -> Buffer2<f32> {
+    let scale = (size.width + size.height) as f32;
+    let pixels: Vec<f32> = (0..size.height)
+        .flat_map(|y| (0..size.width).map(move |x| (x as f32 + y as f32 * 0.5) / scale))
         .collect();
-    Buffer2::new(width, height, pixels)
+    Buffer2::new(size.width, size.height, pixels)
 }
 
 /// Create a checkerboard pattern.
 ///
 /// Useful for phase correlation and registration tests.
 pub(super) fn checkerboard(
-    width: usize,
-    height: usize,
+    size: Size2us,
     cell_size: usize,
     value_a: f32,
     value_b: f32,
 ) -> Buffer2<f32> {
-    let mut pixels = vec![0.0f32; width * height];
-    for y in 0..height {
-        for x in 0..width {
+    let mut pixels = vec![0.0f32; size.pixel_count()];
+    for y in 0..size.height {
+        for x in 0..size.width {
             let checker = ((x / cell_size) + (y / cell_size)) % 2;
-            pixels[y * width + x] = if checker == 0 { value_a } else { value_b };
+            pixels[size.index_of(Vec2us::new(x, y))] = if checker == 0 { value_a } else { value_b };
         }
     }
-    Buffer2::new(width, height, pixels)
+    Buffer2::new(size.width, size.height, pixels)
 }
 
 /// Add deterministic Gaussian noise to a pixel slice.
@@ -84,7 +80,7 @@ mod tests {
 
     #[test]
     fn test_uniform() {
-        let img = uniform(10, 10, 0.5);
+        let img = uniform(Size2us::new(10, 10), 0.5);
         assert_eq!(img.width(), 10);
         assert_eq!(img.height(), 10);
         for &p in img.iter() {
@@ -94,7 +90,7 @@ mod tests {
 
     #[test]
     fn test_horizontal_gradient() {
-        let img = horizontal_gradient(100, 10, 0.0, 1.0);
+        let img = horizontal_gradient(Size2us::new(100, 10), 0.0, 1.0);
         assert!((img[(0, 0)] - 0.0).abs() < 1e-6);
         assert!((img[(99, 0)] - 1.0).abs() < 1e-6);
         // Middle should be ~0.5
@@ -103,7 +99,7 @@ mod tests {
 
     #[test]
     fn test_checkerboard() {
-        let img = checkerboard(16, 16, 4, 0.0, 1.0);
+        let img = checkerboard(Size2us::new(16, 16), 4, 0.0, 1.0);
         assert!((img[(0, 0)] - 0.0).abs() < 1e-6);
         assert!((img[(4, 0)] - 1.0).abs() < 1e-6);
         assert!((img[(0, 4)] - 1.0).abs() < 1e-6);

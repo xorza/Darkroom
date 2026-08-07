@@ -2,18 +2,14 @@
 //!
 //! Provides utilities to create BackgroundEstimate instances for benchmarks and tests.
 
+use crate::math::size2us::Size2us;
 use crate::stacking::star_detection::background::estimate::BackgroundEstimate;
 use imaginarium::Buffer2;
 
 /// Create a uniform BackgroundEstimate with constant background and noise values.
-pub(crate) fn uniform(
-    width: usize,
-    height: usize,
-    background: f32,
-    noise: f32,
-) -> BackgroundEstimate {
-    let mut bg_buf = Buffer2::new_default(width, height);
-    let mut noise_buf = Buffer2::new_default(width, height);
+pub(crate) fn uniform(size: Size2us, background: f32, noise: f32) -> BackgroundEstimate {
+    let mut bg_buf = Buffer2::new_default(size.width, size.height);
+    let mut noise_buf = Buffer2::new_default(size.width, size.height);
     bg_buf.fill(background);
     noise_buf.fill(noise);
     BackgroundEstimate {
@@ -28,7 +24,7 @@ mod tests {
 
     #[test]
     fn test_uniform() {
-        let bg = uniform(100, 100, 0.1, 0.01);
+        let bg = uniform(Size2us::new(100, 100), 0.1, 0.01);
         assert_eq!(bg.background.width(), 100);
         assert_eq!(bg.background.height(), 100);
         assert!((bg.background[(50, 50)] - 0.1).abs() < 1e-6);
