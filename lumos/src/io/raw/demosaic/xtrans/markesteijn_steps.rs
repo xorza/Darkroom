@@ -1012,6 +1012,8 @@ mod tests {
     use crate::io::raw::demosaic::xtrans::hex_lookup::HexLookup;
     use crate::io::raw::demosaic::xtrans::internals::{make_xtrans, test_pattern, to_u16};
     use crate::io::raw::demosaic::xtrans::markesteijn_steps::*;
+    use crate::math::size2us::Size2us;
+    use crate::math::vec2us::Vec2us;
 
     #[test]
     fn test_green_minmax_uniform() {
@@ -1020,7 +1022,12 @@ mod tests {
         let w = 12;
         let h = 12;
         let data = vec![to_u16(0.5); raw_w * raw_h];
-        let xtrans = make_xtrans(&data, raw_w, raw_h, w, h, 6, 6);
+        let xtrans = make_xtrans(
+            &data,
+            Size2us::new(raw_w, raw_h),
+            Size2us::new(w, h),
+            Vec2us::new(6, 6),
+        );
         let hex = HexLookup::new(&xtrans.raw_pattern);
 
         let mut gmin = vec![0.0f32; w * h];
@@ -1044,7 +1051,12 @@ mod tests {
         let data: Vec<u16> = (0..raw_w * raw_h)
             .map(|i| to_u16((i as f32) / (raw_w * raw_h) as f32))
             .collect();
-        let xtrans = make_xtrans(&data, raw_w, raw_h, w, h, 6, 6);
+        let xtrans = make_xtrans(
+            &data,
+            Size2us::new(raw_w, raw_h),
+            Size2us::new(w, h),
+            Vec2us::new(6, 6),
+        );
         let hex = HexLookup::new(&xtrans.raw_pattern);
 
         let mut gmin = vec![0.0f32; w * h];
@@ -1070,7 +1082,12 @@ mod tests {
         let w = 12;
         let h = 12;
         let data = vec![to_u16(0.5); raw_w * raw_h];
-        let xtrans = make_xtrans(&data, raw_w, raw_h, w, h, 6, 6);
+        let xtrans = make_xtrans(
+            &data,
+            Size2us::new(raw_w, raw_h),
+            Size2us::new(w, h),
+            Vec2us::new(6, 6),
+        );
         let hex = HexLookup::new(&xtrans.raw_pattern);
 
         let mut gmin = vec![0.0f32; w * h];
@@ -1203,7 +1220,12 @@ mod tests {
         let h = 12;
         let pixels = w * h;
         let data = vec![to_u16(0.5); raw_w * raw_h];
-        let xtrans = make_xtrans(&data, raw_w, raw_h, w, h, 6, 6);
+        let xtrans = make_xtrans(
+            &data,
+            Size2us::new(raw_w, raw_h),
+            Size2us::new(w, h),
+            Vec2us::new(6, 6),
+        );
         let hex = HexLookup::new(&xtrans.raw_pattern);
 
         let mut gmin = vec![0.0f32; pixels];
@@ -1252,7 +1274,12 @@ mod tests {
                 }
             })
             .collect();
-        let xtrans = make_xtrans(&data, raw_w, raw_h, w, h, 6, 6);
+        let xtrans = make_xtrans(
+            &data,
+            Size2us::new(raw_w, raw_h),
+            Size2us::new(w, h),
+            Vec2us::new(6, 6),
+        );
         let hex = HexLookup::new(&xtrans.raw_pattern);
 
         let mut gmin = vec![0.0f32; pixels];
@@ -1494,7 +1521,12 @@ mod tests {
         let h = 18;
         let pixels = w * h;
         let data = vec![to_u16(0.5); raw_w * raw_h];
-        let xtrans = make_xtrans(&data, raw_w, raw_h, w, h, 6, 6);
+        let xtrans = make_xtrans(
+            &data,
+            Size2us::new(raw_w, raw_h),
+            Size2us::new(w, h),
+            Vec2us::new(6, 6),
+        );
         let hex = HexLookup::new(&xtrans.raw_pattern);
         let mut gmin = vec![0.0; pixels];
         let mut gmax = vec![0.0; pixels];
@@ -1562,7 +1594,12 @@ mod tests {
         let h = 12;
         let pixels = w * h;
         let data = vec![to_u16(0.5); raw_w * raw_h];
-        let xtrans = make_xtrans(&data, raw_w, raw_h, w, h, 6, 6);
+        let xtrans = make_xtrans(
+            &data,
+            Size2us::new(raw_w, raw_h),
+            Size2us::new(w, h),
+            Vec2us::new(6, 6),
+        );
         let hex = HexLookup::new(&xtrans.raw_pattern);
 
         let mut gmin = vec![0.0f32; pixels];
@@ -1610,7 +1647,12 @@ mod tests {
         let h = 18;
         let pixels = w * h;
         let data = vec![to_u16(0.5); raw_w * raw_h];
-        let xtrans = make_xtrans(&data, raw_w, raw_h, w, h, 6, 6);
+        let xtrans = make_xtrans(
+            &data,
+            Size2us::new(raw_w, raw_h),
+            Size2us::new(w, h),
+            Vec2us::new(6, 6),
+        );
         let hex = HexLookup::new(&xtrans.raw_pattern);
 
         let mut gmin = vec![0.0f32; pixels];

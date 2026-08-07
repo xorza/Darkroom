@@ -4,6 +4,8 @@ use std::time::Instant;
 use common::CancelToken;
 use quickbench::quick_bench;
 
+use crate::math::size2us::Size2us;
+use crate::math::vec2us::Vec2us;
 use crate::testing::init_tracing;
 
 use crate::io::raw::*;
@@ -365,7 +367,8 @@ fn bench_rcd_demosaic_core() {
             }
         }
 
-        let bayer = BayerImage::with_margins(&data, w, h, w, h, 0, 0, CfaPattern::Rggb);
+        let size = Size2us::new(w, h);
+        let bayer = BayerImage::with_margins(&data, size, size, Vec2us::ZERO, CfaPattern::Rggb);
 
         // Warmup
         let _ = rcd::demosaic(&bayer, &CancelToken::never()).unwrap();

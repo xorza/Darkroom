@@ -19,6 +19,8 @@ use common::CancelToken;
 
 use crate::io::raw::BlackRepeat;
 use crate::io::raw::demosaic::DemosaicError;
+use crate::math::size2us::Size2us;
+use crate::math::vec2us::Vec2us;
 
 /// Process X-Trans sensor data and demosaic to RGB.
 ///
@@ -29,12 +31,9 @@ use crate::io::raw::demosaic::DemosaicError;
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn process_xtrans(
     raw_data: &[u16],
-    raw_width: usize,
-    raw_height: usize,
-    width: usize,
-    height: usize,
-    top_margin: usize,
-    left_margin: usize,
+    raw: Size2us,
+    active: Size2us,
+    margin: Vec2us,
     raw_pattern: [[u8; 6]; 6],
     channel_black: [f32; 3],
     inv_range: f32,
@@ -45,12 +44,9 @@ pub(crate) fn process_xtrans(
 
     let xtrans = XTransImage::with_margins(
         raw_data,
-        raw_width,
-        raw_height,
-        width,
-        height,
-        top_margin,
-        left_margin,
+        raw,
+        active,
+        margin,
         raw_pattern,
         channel_black,
         inv_range,
@@ -63,8 +59,8 @@ pub(crate) fn process_xtrans(
 
     tracing::info!(
         "X-Trans Markesteijn demosaicing {}x{} took {:.2}ms",
-        width,
-        height,
+        active.width,
+        active.height,
         demosaic_elapsed.as_secs_f64() * 1000.0
     );
 
@@ -74,30 +70,17 @@ pub(crate) fn process_xtrans(
 /// Process calibrated f32 X-Trans data and demosaic to RGB.
 ///
 /// Avoids the lossy f32->u16->f32 roundtrip of converting to u16 for `process_xtrans`.
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn process_xtrans_f32(
     data: &[f32],
-    raw_width: usize,
-    raw_height: usize,
-    width: usize,
-    height: usize,
-    top_margin: usize,
-    left_margin: usize,
+    raw: Size2us,
+    active: Size2us,
+    margin: Vec2us,
     raw_pattern: [[u8; 6]; 6],
     cancel: &CancelToken,
 ) -> Result<[Vec<f32>; 3], DemosaicError> {
     let raw_pattern = XTransPattern::new(raw_pattern)?;
 
-    let xtrans = XTransImage::with_margins_f32(
-        data,
-        raw_width,
-        raw_height,
-        width,
-        height,
-        top_margin,
-        left_margin,
-        raw_pattern,
-    );
+    let xtrans = XTransImage::with_margins_f32(data, raw, active, margin, raw_pattern);
 
     let demosaic_start = Instant::now();
     let rgb_pixels = markesteijn::demosaic(&xtrans, cancel)?;
@@ -105,8 +88,8 @@ pub(crate) fn process_xtrans_f32(
 
     tracing::info!(
         "X-Trans Markesteijn demosaicing (f32) {}x{} took {:.2}ms",
-        width,
-        height,
+        active.width,
+        active.height,
         demosaic_elapsed.as_secs_f64() * 1000.0
     );
 
@@ -231,15 +214,10 @@ pub(crate) struct XTransImage<'a> {
 
 impl<'a> XTransImage<'a> {
     /// Validate dimensions and margins (shared by both constructors).
-    fn validate_dimensions(
-        data_len: usize,
-        raw_width: usize,
-        raw_height: usize,
-        width: usize,
-        height: usize,
-        top_margin: usize,
-        left_margin: usize,
-    ) {
+    fn validate_dimensions(data_len: usize, raw: Size2us, active: Size2us, margin: Vec2us) {
+        let (raw_width, raw_height) = (raw.width, raw.height);
+        let (width, height) = (active.width, active.height);
+        let (top_margin, left_margin) = (margin.y, margin.x);
         assert!(
             width > 0 && height > 0,
             "Output dimensions must be non-zero: {}x{}",
@@ -277,40 +255,32 @@ impl<'a> XTransImage<'a> {
     }
 
     /// Create from raw u16 sensor data with on-the-fly per-channel normalization.
+    ///
+    /// `raw` is the whole buffer, `active` the visible window inside it, and `margin` that
+    /// window's top-left corner.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn with_margins(
         data: &'a [u16],
-        raw_width: usize,
-        raw_height: usize,
-        width: usize,
-        height: usize,
-        top_margin: usize,
-        left_margin: usize,
+        raw: Size2us,
+        active: Size2us,
+        margin: Vec2us,
         raw_pattern: XTransPattern,
         channel_black: [f32; 3],
         inv_range: f32,
         black_repeat: Option<&'a BlackRepeat>,
     ) -> Self {
-        Self::validate_dimensions(
-            data.len(),
-            raw_width,
-            raw_height,
-            width,
-            height,
-            top_margin,
-            left_margin,
-        );
+        Self::validate_dimensions(data.len(), raw, active, margin);
         let data = black_repeat.map_or(PixelSource::U16(data), |repeat| {
             PixelSource::U16WithRepeat { data, repeat }
         });
         Self {
             data,
-            raw_width,
-            raw_height,
-            width,
-            height,
-            top_margin,
-            left_margin,
+            raw_width: raw.width,
+            raw_height: raw.height,
+            width: active.width,
+            height: active.height,
+            top_margin: margin.y,
+            left_margin: margin.x,
             raw_pattern,
             channel_black,
             inv_range,
@@ -320,34 +290,25 @@ impl<'a> XTransImage<'a> {
     /// Create from calibrated f32 data, including negative and above-unity samples.
     ///
     /// Used by CfaImage after calibration to avoid lossy f32->u16->f32 roundtrip.
-    #[allow(clippy::too_many_arguments)]
+    ///
+    /// `raw` is the whole buffer, `active` the visible window inside it, and `margin` that
+    /// window's top-left corner.
     pub(crate) fn with_margins_f32(
         data: &'a [f32],
-        raw_width: usize,
-        raw_height: usize,
-        width: usize,
-        height: usize,
-        top_margin: usize,
-        left_margin: usize,
+        raw: Size2us,
+        active: Size2us,
+        margin: Vec2us,
         raw_pattern: XTransPattern,
     ) -> Self {
-        Self::validate_dimensions(
-            data.len(),
-            raw_width,
-            raw_height,
-            width,
-            height,
-            top_margin,
-            left_margin,
-        );
+        Self::validate_dimensions(data.len(), raw, active, margin);
         Self {
             data: PixelSource::F32(data),
-            raw_width,
-            raw_height,
-            width,
-            height,
-            top_margin,
-            left_margin,
+            raw_width: raw.width,
+            raw_height: raw.height,
+            width: active.width,
+            height: active.height,
+            top_margin: margin.y,
+            left_margin: margin.x,
             raw_pattern,
             channel_black: [0.0; 3],
             inv_range: 1.0,
@@ -449,12 +410,9 @@ mod tests {
         assert_eq!(
             process_xtrans(
                 &raw_data,
-                12,
-                12,
-                6,
-                6,
-                3,
-                3,
+                Size2us::new(12, 12),
+                Size2us::new(6, 6),
+                Vec2us::new(3, 3),
                 invalid_value_pattern,
                 [0.0; 3],
                 1.0,
@@ -473,12 +431,9 @@ mod tests {
         assert!(matches!(
             process_xtrans_f32(
                 &calibrated,
-                12,
-                12,
-                6,
-                6,
-                3,
-                3,
+                Size2us::new(12, 12),
+                Size2us::new(6, 6),
+                Vec2us::new(3, 3),
                 invalid_value_pattern,
                 &CancelToken::never(),
             ),
@@ -498,12 +453,9 @@ mod tests {
         let pattern = test_pattern();
         let img = XTransImage::with_margins(
             &data,
-            6,
-            6,
-            4,
-            4,
-            1,
-            1,
+            Size2us::new(6, 6),
+            Size2us::new(4, 4),
+            Vec2us::new(1, 1),
             pattern,
             [0.0; 3],
             1.0 / 65535.0,
@@ -522,12 +474,9 @@ mod tests {
         let pattern = test_pattern();
         XTransImage::with_margins(
             &data,
-            6,
-            6,
-            0,
-            4,
-            0,
-            0,
+            Size2us::new(6, 6),
+            Size2us::new(0, 4),
+            Vec2us::ZERO,
             pattern,
             [0.0; 3],
             1.0 / 65535.0,
@@ -540,14 +489,12 @@ mod tests {
     fn test_xtrans_image_wrong_data_length() {
         let data = vec![32768u16; 30]; // Should be 36
         let pattern = test_pattern();
+        let size = Size2us::new(6, 6);
         XTransImage::with_margins(
             &data,
-            6,
-            6,
-            6,
-            6,
-            0,
-            0,
+            size,
+            size,
+            Vec2us::ZERO,
             pattern,
             [0.0; 3],
             1.0 / 65535.0,
@@ -560,12 +507,9 @@ mod tests {
         let raw_data: Vec<u16> = vec![1000; 12 * 12];
         let rgb = process_xtrans(
             &raw_data,
-            12,
-            12,
-            6,
-            6,
-            3,
-            3,
+            Size2us::new(12, 12),
+            Size2us::new(6, 6),
+            Vec2us::new(3, 3),
             test_pattern_array(),
             [0.0; 3],
             1.0 / 4096.0,
@@ -590,12 +534,9 @@ mod tests {
 
         let rgb = process_xtrans(
             &raw_data,
-            12,
-            12,
-            6,
-            6,
-            3,
-            3,
+            Size2us::new(12, 12),
+            Size2us::new(6, 6),
+            Vec2us::new(3, 3),
             test_pattern_array(),
             [black; 3],
             inv_range,
@@ -620,12 +561,9 @@ mod tests {
 
         let rgb = process_xtrans(
             &raw_data,
-            12,
-            12,
-            6,
-            6,
-            3,
-            3,
+            Size2us::new(12, 12),
+            Size2us::new(6, 6),
+            Vec2us::new(3, 3),
             test_pattern_array(),
             [black; 3],
             inv_range,
@@ -648,12 +586,9 @@ mod tests {
 
         let rgb = process_xtrans(
             &raw_data,
-            12,
-            12,
-            6,
-            6,
-            3,
-            3,
+            Size2us::new(12, 12),
+            Size2us::new(6, 6),
+            Vec2us::new(3, 3),
             test_pattern_array(),
             [black; 3],
             inv_range,
@@ -674,14 +609,12 @@ mod tests {
         let inv_range = 1.0 / (maximum - common_black);
         let raw_val = 2000u16;
         let raw_data = vec![raw_val; 6 * 6];
+        let size = Size2us::new(6, 6);
         let image = XTransImage::with_margins(
             &raw_data,
-            6,
-            6,
-            6,
-            6,
-            0,
-            0,
+            size,
+            size,
+            Vec2us::ZERO,
             test_pattern(),
             [250.0, common_black, 220.0],
             inv_range,
@@ -701,12 +634,9 @@ mod tests {
         let data: Vec<f32> = vec![0.5; 12 * 12];
         let rgb = process_xtrans_f32(
             &data,
-            12,
-            12,
-            6,
-            6,
-            3,
-            3,
+            Size2us::new(12, 12),
+            Size2us::new(6, 6),
+            Vec2us::new(3, 3),
             test_pattern_array(),
             &CancelToken::never(),
         )
@@ -719,12 +649,9 @@ mod tests {
         let data: Vec<f32> = vec![0.5; 12 * 12];
         let rgb = process_xtrans_f32(
             &data,
-            12,
-            12,
-            6,
-            6,
-            3,
-            3,
+            Size2us::new(12, 12),
+            Size2us::new(6, 6),
+            Vec2us::new(3, 3),
             test_pattern_array(),
             &CancelToken::never(),
         )
@@ -750,12 +677,9 @@ mod tests {
 
         let rgb = process_xtrans_f32(
             &data,
-            raw_width,
-            raw_height,
-            width,
-            height,
-            top,
-            left,
+            Size2us::new(raw_width, raw_height),
+            Size2us::new(width, height),
+            Vec2us::new(left, top),
             pattern,
             &CancelToken::never(),
         )
@@ -792,12 +716,9 @@ mod tests {
         let demosaic = |data: &[f32]| {
             process_xtrans_f32(
                 data,
-                raw_width,
-                raw_height,
-                width,
-                height,
-                top,
-                left,
+                Size2us::new(raw_width, raw_height),
+                Size2us::new(width, height),
+                Vec2us::new(left, top),
                 test_pattern_array(),
                 &CancelToken::never(),
             )
@@ -848,12 +769,9 @@ mod tests {
 
         let rgb_u16 = process_xtrans(
             &raw_u16,
-            raw_width,
-            raw_height,
-            width,
-            height,
-            margin,
-            margin,
+            Size2us::new(raw_width, raw_height),
+            Size2us::new(width, height),
+            Vec2us::new(margin, margin),
             test_pattern_array(),
             [black; 3],
             inv_range,
@@ -863,12 +781,9 @@ mod tests {
         .unwrap();
         let rgb_f32 = process_xtrans_f32(
             &raw_f32,
-            raw_width,
-            raw_height,
-            width,
-            height,
-            margin,
-            margin,
+            Size2us::new(raw_width, raw_height),
+            Size2us::new(width, height),
+            Vec2us::new(margin, margin),
             test_pattern_array(),
             &CancelToken::never(),
         )
@@ -903,6 +818,8 @@ mod tests {
 #[cfg(test)]
 pub(crate) mod internals {
     use crate::io::raw::demosaic::xtrans::{XTransImage, XTransPattern};
+    use crate::math::size2us::Size2us;
+    use crate::math::vec2us::Vec2us;
 
     const TEST_PATTERN: [[u8; 6]; 6] = [
         [1, 1, 0, 1, 1, 2],
@@ -929,21 +846,15 @@ pub(crate) mod internals {
 
     pub(crate) fn make_xtrans(
         data: &[u16],
-        raw_width: usize,
-        raw_height: usize,
-        width: usize,
-        height: usize,
-        top_margin: usize,
-        left_margin: usize,
+        raw: Size2us,
+        active: Size2us,
+        margin: Vec2us,
     ) -> XTransImage<'_> {
         XTransImage::with_margins(
             data,
-            raw_width,
-            raw_height,
-            width,
-            height,
-            top_margin,
-            left_margin,
+            raw,
+            active,
+            margin,
             test_pattern(),
             [0.0; 3],
             TEST_INV_RANGE,

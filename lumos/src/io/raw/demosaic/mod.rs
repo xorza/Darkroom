@@ -34,15 +34,10 @@ impl DemosaicKind {
                     peak_bytes: bytes,
                 }
             }
-            Self::BayerRcd => bayer::rcd::demosaic_memory(
-                dimensions.width(),
-                dimensions.height(),
-                dimensions.width(),
-                dimensions.height(),
-            ),
-            Self::XTransMarkesteijn => {
-                xtrans::markesteijn::demosaic_memory(dimensions.width(), dimensions.height())
-            }
+            // Raw and active extents coincide here: the caller has already cropped to the
+            // visible area, so the margins the RCD arena would need are gone.
+            Self::BayerRcd => bayer::rcd::demosaic_memory(dimensions.size(), dimensions.size()),
+            Self::XTransMarkesteijn => xtrans::markesteijn::demosaic_memory(dimensions.size()),
         }
     }
 }
