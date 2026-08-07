@@ -148,6 +148,16 @@ pub(crate) enum StoredPlane {
 }
 
 impl StoredPlane {
+    /// Samples the plane holds. The only geometry a stored plane knows — width and height are
+    /// the cache's, not the plane's.
+    #[inline]
+    pub(crate) fn samples(&self) -> usize {
+        match self {
+            Self::Memory(buffer) => buffer.pixels().len(),
+            Self::Mapped(mmap) => mmap.len() / size_of::<f32>(),
+        }
+    }
+
     #[inline]
     pub(crate) fn chunk(&self, start: usize, end: usize) -> &[f32] {
         match self {

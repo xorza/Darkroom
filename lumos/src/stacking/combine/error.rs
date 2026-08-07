@@ -77,6 +77,24 @@ pub enum Error {
         actual: ImageDimensions,
     },
 
+    /// A frame already in the frame store does not match the geometry the cache was built for.
+    /// Reported as a plane count and sample counts rather than as [`ImageDimensions`] because a
+    /// stored plane knows only its length — it has no width or height to report.
+    #[error("stored frame {index} has {actual} channel planes, expected {expected}")]
+    StoredFrameChannels {
+        index: usize,
+        expected: usize,
+        actual: usize,
+    },
+
+    #[error("stored frame {index} {plane} holds {actual} samples, expected {expected}")]
+    StoredFramePlaneSamples {
+        index: usize,
+        plane: &'static str,
+        expected: usize,
+        actual: usize,
+    },
+
     #[error("frame {index}, channel {channel}, pixel {pixel} has non-finite image value {value}")]
     NonFiniteImageSample {
         index: usize,

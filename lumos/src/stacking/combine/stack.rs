@@ -381,6 +381,15 @@ fn tracked_sigma(max_sigma_bits: &AtomicU32) -> Option<f32> {
 /// which is what makes this the single engine for calibration masters and registered light
 /// stacks alike.
 pub(crate) fn run_stacking(cache: &FrameCache, config: &StackConfig) -> StackProduct {
+    // Normalization parameters are measured once, when the cache is built, and the combine reads
+    // them from the cache rather than from `config`. Running a cache against a config that asks
+    // for a different normalization would silently apply the one it was built with, so require
+    // the two to agree instead.
+    assert_eq!(
+        cache.normalization, config.normalization,
+        "cache was normalized as {:?} but the combine config asks for {:?}",
+        cache.normalization, config.normalization
+    );
     let stats = || cache.frames.iter().map(|frame| &frame.source_stats);
     let frame_count = cache.frames.len();
     let method = config.small_n.resolve(config.method, frame_count);
@@ -1480,6 +1489,31 @@ mod tests {
             },
         );
         assert!((product.weight.as_ref().unwrap().channel(0)[pixel] - 2.5).abs() < 1e-6);
+    }
+
+    #[test]
+    #[should_panic(expected = "cache was normalized as")]
+    fn combining_a_cache_against_a_different_normalization_is_refused() {
+        // Normalization parameters are measured when the cache is built and never recomputed, so
+        // a config naming a different normalization would be silently ignored rather than
+        // applied. The three entry points always pass the config they built with; this guards the
+        // next caller that does not.
+        let cache = cache_from_images(
+            vec![
+                crate::testing::make_cfa(2, 1, vec![0.4; 2], CfaType::Mono),
+                crate::testing::make_cfa(2, 1, vec![0.2; 2], CfaType::Mono),
+            ],
+            Normalization::None,
+        );
+
+        run_stacking(
+            &cache,
+            &StackConfig {
+                normalization: Normalization::Multiplicative,
+                small_n: SmallN::none(),
+                ..Default::default()
+            },
+        );
     }
 
     #[test]
