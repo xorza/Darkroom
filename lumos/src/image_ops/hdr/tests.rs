@@ -26,7 +26,7 @@ fn dome(size: Size2us) -> Vec<f32> {
 #[test]
 fn hdr_amount_zero_is_identity() {
     let px = dome(Size2us::new(64, 64));
-    let mut img = gray(64, 64, px.clone());
+    let mut img = gray(Size2us::new(64, 64), px.clone());
     Hdr {
         scales: 3,
         amount: 0.0,
@@ -48,7 +48,7 @@ fn hdr_compresses_large_scale_contrast() {
     let px = dome(Size2us::new(w, h));
     let ci = (h / 2) * w + w / 2;
     let in_contrast = px[ci] - px[0];
-    let mut img = gray(w, h, px);
+    let mut img = gray(Size2us::new(w, h), px);
     Hdr {
         scales: 3,
         amount: 0.5,
@@ -70,7 +70,7 @@ fn hdr_amount_controls_compression() {
     let px = dome(Size2us::new(w, h));
     let ci = (h / 2) * w + w / 2;
     let contrast_at = |amount: f32| {
-        let mut img = gray(w, h, px.clone());
+        let mut img = gray(Size2us::new(w, h), px.clone());
         Hdr { scales: 3, amount }.apply(&mut img).unwrap();
         let o = channel(&img, 0).to_vec();
         o[ci] - o[0]
@@ -94,7 +94,7 @@ fn hdr_preserves_fine_detail() {
             -0.03
         };
     }
-    let mut img = gray(w, h, px.clone());
+    let mut img = gray(Size2us::new(w, h), px.clone());
     Hdr {
         scales: 3,
         amount: 0.6,
@@ -147,7 +147,7 @@ fn hdr_matches_explicit_pyramid_reference() {
     let (w, h) = (64, 48);
     let (scales, amount) = (3, 0.6);
     let px = dome(Size2us::new(w, h));
-    let mut img = gray(w, h, px.clone());
+    let mut img = gray(Size2us::new(w, h), px.clone());
     Hdr { scales, amount }.apply(&mut img).unwrap();
     let out = channel(&img, 0);
     let expected = reference_hdr(&px, w, h, scales, amount);
@@ -161,7 +161,7 @@ fn hdr_matches_explicit_pyramid_reference() {
 
 #[test]
 fn hdr_output_stays_in_range() {
-    let mut img = gray(96, 96, dome(Size2us::new(96, 96)));
+    let mut img = gray(Size2us::new(96, 96), dome(Size2us::new(96, 96)));
     Hdr::default().apply(&mut img).unwrap();
     for &v in &channel(&img, 0).to_vec() {
         assert!((0.0..=1.0).contains(&v), "output in [0,1]: {v}");
@@ -170,7 +170,7 @@ fn hdr_output_stays_in_range() {
 
 #[test]
 fn rejects_invalid_config_before_zero_amount_shortcut() {
-    let mut img = gray(8, 8, vec![0.5; 64]);
+    let mut img = gray(Size2us::new(8, 8), vec![0.5; 64]);
     let err = Hdr {
         scales: 6,
         amount: 1.5,

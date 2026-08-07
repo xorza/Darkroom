@@ -66,7 +66,7 @@ fn calibrate_removes_vignette_dark_and_bias() {
 
     let masters = CalibrationMasters::from_images(
         CalibrationSet {
-            dark: Some(constant_cfa(w, h, bias + dark, CfaType::Mono)),
+            dark: Some(constant_cfa(Size2us::new(w, h), bias + dark, CfaType::Mono)),
             // Flat frame under uniform illumination: bias + sensor response.
             flat: Some(make_cfa(
                 w,
@@ -74,7 +74,7 @@ fn calibrate_removes_vignette_dark_and_bias() {
                 flat.iter().map(|&f| bias + f).collect(),
                 CfaType::Mono,
             )),
-            bias: Some(constant_cfa(w, h, bias, CfaType::Mono)),
+            bias: Some(constant_cfa(Size2us::new(w, h), bias, CfaType::Mono)),
             flat_dark: None,
         },
         5.0,
@@ -126,9 +126,9 @@ fn calibrate_recovers_star_field_through_a_noisy_light() {
 
     let masters = CalibrationMasters::from_images(
         CalibrationSet {
-            dark: Some(constant_cfa(w, h, bias + dark, CfaType::Mono)),
-            flat: Some(constant_cfa(w, h, bias + 1.0, CfaType::Mono)),
-            bias: Some(constant_cfa(w, h, bias, CfaType::Mono)),
+            dark: Some(constant_cfa(Size2us::new(w, h), bias + dark, CfaType::Mono)),
+            flat: Some(constant_cfa(Size2us::new(w, h), bias + 1.0, CfaType::Mono)),
+            bias: Some(constant_cfa(Size2us::new(w, h), bias, CfaType::Mono)),
             flat_dark: None,
         },
         5.0,

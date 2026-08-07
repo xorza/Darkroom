@@ -14,8 +14,8 @@ fn fill(w: usize, h: usize, f: impl Fn(usize, usize) -> f32) -> Vec<f32> {
     v
 }
 
-fn gray(w: usize, h: usize, f: impl Fn(usize, usize) -> f32) -> Image {
-    gray_image(w, h, fill(w, h, f))
+fn gray(size: Size2us, f: impl Fn(usize, usize) -> f32) -> Image {
+    gray_image(size, fill(size.width, size.height, f))
 }
 
 fn max_abs(p: &[f32]) -> f32 {
@@ -57,7 +57,7 @@ fn subtract_removes_linear_gradient() {
     let (w, h) = (200, 160);
     // a + b·x + c·y over [0.5, 0.5+0.16+0.096] — a pure additive plane, no signal.
     let plane = |x: usize, y: usize| 0.5 + 0.0008 * x as f32 + 0.0006 * y as f32;
-    let mut img = gray(w, h, plane);
+    let mut img = gray(Size2us::new(w, h), plane);
     ExtractBackground {
         degree: 1,
         tile_size: 40,
@@ -74,13 +74,9 @@ fn subtract_removes_linear_gradient() {
 fn subtract_removes_pedestal_keeps_stars() {
     let (w, h) = (128, 128);
     let stars = [(10, 10), (50, 80), (100, 30), (70, 70), (20, 110)];
-    let mut img = gray(
-        w,
-        h,
-        |x, y| {
-            if stars.contains(&(x, y)) { 0.95 } else { 0.3 }
-        },
-    );
+    let mut img = gray(Size2us::new(w, h), |x, y| {
+        if stars.contains(&(x, y)) { 0.95 } else { 0.3 }
+    });
     ExtractBackground {
         degree: 2,
         tile_size: 32,
@@ -114,7 +110,7 @@ fn divide_corrects_quadratic_vignette() {
         1.0 - 0.3 * r2
     };
     let signal = 0.5f32;
-    let mut img = gray(w, h, |x, y| signal * vignette(x, y));
+    let mut img = gray(Size2us::new(w, h), |x, y| signal * vignette(x, y));
     ExtractBackground {
         degree: 2,
         tile_size: 20,
@@ -141,7 +137,7 @@ fn higher_degree_fits_cubic_better() {
         0.4 + 0.2 * nx - 0.3 * nx * nx + 0.25 * nx * nx * nx + 0.15 * ny * ny * ny
     };
     let resid_energy = |degree| {
-        let mut img = gray(w, h, cubic);
+        let mut img = gray(Size2us::new(w, h), cubic);
         ExtractBackground {
             degree,
             tile_size: 20,
@@ -193,7 +189,7 @@ fn removes_independent_per_channel_gradients() {
 
 #[test]
 fn rejects_degree_out_of_range() {
-    let mut img = gray(32, 32, |_, _| 0.5);
+    let mut img = gray(Size2us::new(32, 32), |_, _| 0.5);
     let err = ExtractBackground {
         degree: 7,
         ..Default::default()
@@ -208,7 +204,9 @@ fn rejects_degree_out_of_range() {
 
 #[test]
 fn rank_deficient_sample_grid_is_reported_without_mutating_the_image() {
-    let mut img = gray(8, 64, |x, y| 0.2 + 0.01 * x as f32 + 0.001 * y as f32);
+    let mut img = gray(Size2us::new(8, 64), |x, y| {
+        0.2 + 0.01 * x as f32 + 0.001 * y as f32
+    });
     let before = channel(&img, 0).pixels().to_vec();
 
     let err = ExtractBackground {

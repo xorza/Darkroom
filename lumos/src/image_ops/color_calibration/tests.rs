@@ -98,7 +98,7 @@ fn scnr_additive_mask_amount_zero_noop_and_full_hand_computed() {
 
 #[test]
 fn color_ops_are_noops_on_grayscale() {
-    let mut g = gray(2, 1, vec![0.3, 0.7]);
+    let mut g = gray(Size2us::new(2, 1), vec![0.3, 0.7]);
     NeutralizeBackground.apply(&mut g).unwrap();
     Scnr::average_neutral().apply(&mut g).unwrap();
     assert_eq!(channel(&g, 0), vec![0.3, 0.7], "grayscale left unchanged");

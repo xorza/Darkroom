@@ -1,6 +1,7 @@
 use crate::io::image::LoadContext;
 use crate::io::image::cfa::{CfaImage, CfaType, QUANTIZATION_SIGMA_PER_STEP};
 use crate::io::raw::demosaic::bayer::CfaPattern;
+use crate::math::size2us::Size2us;
 use crate::stacking::calibration_masters::defect_map::DefectMap;
 use crate::stacking::calibration_masters::stack_cfa_master;
 use crate::stacking::calibration_masters::weighted_budget;
@@ -58,7 +59,7 @@ fn test_calibrate_twice_panics() {
     let masters =
         CalibrationMasters::from_images(CalibrationSet::default(), 5.0, CancelToken::never())
             .unwrap();
-    let mut light = constant_cfa(4, 4, 0.5, CfaType::Mono);
+    let mut light = constant_cfa(Size2us::new(4, 4), 0.5, CfaType::Mono);
     masters.calibrate(&mut light).unwrap();
     assert!(light.metadata.calibrated);
     masters.calibrate(&mut light).unwrap();
@@ -68,7 +69,7 @@ fn masters_with_component(
     component: CalibrationComponent,
     cfa_type: Option<CfaType>,
 ) -> CalibrationMasters {
-    let mut master = constant_cfa(2, 2, 1.0, CfaType::Mono);
+    let mut master = constant_cfa(Size2us::new(2, 2), 1.0, CfaType::Mono);
     master.metadata.cfa_type = cfa_type;
     let mut images = CalibrationSet::default();
     match component {
@@ -154,7 +155,7 @@ fn calibrate_rejects_missing_and_mismatched_cfa_before_mutation() {
 
     for case in cases {
         let masters = masters_with_component(case.component, case.master);
-        let mut light = constant_cfa(2, 2, 0.5, CfaType::Mono);
+        let mut light = constant_cfa(Size2us::new(2, 2), 0.5, CfaType::Mono);
         light.metadata.cfa_type = case.light.clone();
         let original_data = light.data.to_vec();
 
@@ -203,10 +204,10 @@ fn test_from_files_all_empty_yields_no_masters() {
 
 #[test]
 fn test_new_constructor() {
-    let dark = constant_cfa(4, 4, 0.1, CfaType::Mono);
-    let flat = constant_cfa(4, 4, 0.8, CfaType::Mono);
-    let bias = constant_cfa(4, 4, 0.02, CfaType::Mono);
-    let flat_dark = constant_cfa(4, 4, 0.03, CfaType::Mono);
+    let dark = constant_cfa(Size2us::new(4, 4), 0.1, CfaType::Mono);
+    let flat = constant_cfa(Size2us::new(4, 4), 0.8, CfaType::Mono);
+    let bias = constant_cfa(Size2us::new(4, 4), 0.02, CfaType::Mono);
+    let flat_dark = constant_cfa(Size2us::new(4, 4), 0.03, CfaType::Mono);
 
     let masters = CalibrationMasters::from_images(
         CalibrationSet {
@@ -262,7 +263,7 @@ fn cold_detection_uses_subtracted_unfloored_flat_response() {
         let mut flat_pixels = vec![11.0; width * height];
         flat_pixels[dead] = 10.0;
         let flat = make_cfa(width, height, flat_pixels, CfaType::Mono);
-        let subtractor = constant_cfa(width, height, 10.0, CfaType::Mono);
+        let subtractor = constant_cfa(Size2us::new(width, height), 10.0, CfaType::Mono);
         let mut images = CalibrationSet {
             flat: Some(flat),
             ..Default::default()
@@ -296,7 +297,7 @@ fn test_from_images_rejects_cancelled_operation() {
 
     let result = CalibrationMasters::from_images(
         CalibrationSet {
-            dark: Some(constant_cfa(4, 4, 0.1, CfaType::Mono)),
+            dark: Some(constant_cfa(Size2us::new(4, 4), 0.1, CfaType::Mono)),
             ..Default::default()
         },
         DEFAULT_SIGMA_THRESHOLD,
@@ -308,7 +309,7 @@ fn test_from_images_rejects_cancelled_operation() {
 
 #[test]
 fn test_new_no_dark_no_hot_pixels() {
-    let flat = constant_cfa(4, 4, 0.8, CfaType::Mono);
+    let flat = constant_cfa(Size2us::new(4, 4), 0.8, CfaType::Mono);
 
     let masters = CalibrationMasters::from_images(
         CalibrationSet {
@@ -336,7 +337,7 @@ fn test_new_no_dark_no_hot_pixels() {
 
 #[test]
 fn test_calibrate_dark_subtraction() {
-    let dark = constant_cfa(4, 4, 0.1, CfaType::Mono);
+    let dark = constant_cfa(Size2us::new(4, 4), 0.1, CfaType::Mono);
     let masters = CalibrationMasters::from_images(
         CalibrationSet {
             dark: Some(dark),
@@ -347,7 +348,7 @@ fn test_calibrate_dark_subtraction() {
     )
     .unwrap();
 
-    let mut light = constant_cfa(4, 4, 0.5, CfaType::Mono);
+    let mut light = constant_cfa(Size2us::new(4, 4), 0.5, CfaType::Mono);
     masters.calibrate(&mut light).unwrap();
 
     // 0.5 - 0.1 = 0.4
@@ -359,7 +360,7 @@ fn test_calibrate_dark_subtraction() {
 #[test]
 fn test_calibrate_bias_only() {
     // No dark → bias is subtracted instead
-    let bias = constant_cfa(4, 4, 0.05, CfaType::Mono);
+    let bias = constant_cfa(Size2us::new(4, 4), 0.05, CfaType::Mono);
     let masters = CalibrationMasters::from_images(
         CalibrationSet {
             bias: Some(bias),
@@ -370,7 +371,7 @@ fn test_calibrate_bias_only() {
     )
     .unwrap();
 
-    let mut light = constant_cfa(4, 4, 0.5, CfaType::Mono);
+    let mut light = constant_cfa(Size2us::new(4, 4), 0.5, CfaType::Mono);
     masters.calibrate(&mut light).unwrap();
 
     // 0.5 - 0.05 = 0.45
@@ -382,8 +383,8 @@ fn test_calibrate_bias_only() {
 #[test]
 fn test_calibrate_dark_takes_priority_over_bias() {
     // When both dark and bias exist, only dark is subtracted
-    let dark = constant_cfa(4, 4, 0.1, CfaType::Mono);
-    let bias = constant_cfa(4, 4, 0.05, CfaType::Mono);
+    let dark = constant_cfa(Size2us::new(4, 4), 0.1, CfaType::Mono);
+    let bias = constant_cfa(Size2us::new(4, 4), 0.05, CfaType::Mono);
     let masters = CalibrationMasters::from_images(
         CalibrationSet {
             dark: Some(dark),
@@ -395,7 +396,7 @@ fn test_calibrate_dark_takes_priority_over_bias() {
     )
     .unwrap();
 
-    let mut light = constant_cfa(4, 4, 0.5, CfaType::Mono);
+    let mut light = constant_cfa(Size2us::new(4, 4), 0.5, CfaType::Mono);
     masters.calibrate(&mut light).unwrap();
 
     // Dark subtracted: 0.5 - 0.1 = 0.4 (not 0.5 - 0.05)
@@ -429,7 +430,7 @@ fn test_calibrate_flat_correction() {
     )
     .unwrap();
 
-    let mut light = constant_cfa(2, 2, 0.3, CfaType::Mono);
+    let mut light = constant_cfa(Size2us::new(2, 2), 0.3, CfaType::Mono);
     masters.calibrate(&mut light).unwrap();
 
     // 0.3 / (0.4/0.6) = 0.3 / 0.6667 = 0.45
@@ -463,7 +464,7 @@ fn test_calibrate_full_pipeline() {
         .collect();
     let flat_pixels: Vec<f32> = vignetting.iter().map(|v| k * v + bias_val).collect();
 
-    let dark = constant_cfa(2, 1, dark_val, CfaType::Mono);
+    let dark = constant_cfa(Size2us::new(2, 1), dark_val, CfaType::Mono);
     let flat = CfaImage {
         data: Buffer2::new(2, 1, flat_pixels),
         metadata: ImageMetadata {
@@ -472,7 +473,7 @@ fn test_calibrate_full_pipeline() {
         },
         quantization_sigma: None,
     };
-    let bias = constant_cfa(2, 1, bias_val, CfaType::Mono);
+    let bias = constant_cfa(Size2us::new(2, 1), bias_val, CfaType::Mono);
 
     let masters = CalibrationMasters::from_images(
         CalibrationSet {
@@ -531,8 +532,8 @@ fn test_sigma_threshold_affects_detection() {
         .collect();
     pixels[15] = 400.0; // index 15 is odd → was 110
 
-    let dark_strict = constant_cfa(6, 6, 0.0, CfaType::Mono);
-    let dark_loose = constant_cfa(6, 6, 0.0, CfaType::Mono);
+    let dark_strict = constant_cfa(Size2us::new(6, 6), 0.0, CfaType::Mono);
+    let dark_loose = constant_cfa(Size2us::new(6, 6), 0.0, CfaType::Mono);
 
     // Build actual CfaImages with our pixel data
     let dark_strict = CfaImage {
@@ -696,7 +697,7 @@ fn test_calibrate_flat_dark() {
         .collect();
     let flat_pixels: Vec<f32> = vignetting.iter().map(|v| k * v + flat_dark_val).collect();
 
-    let dark = constant_cfa(2, 1, dark_val, CfaType::Mono);
+    let dark = constant_cfa(Size2us::new(2, 1), dark_val, CfaType::Mono);
     let flat = CfaImage {
         data: Buffer2::new(2, 1, flat_pixels),
         metadata: ImageMetadata {
@@ -705,7 +706,7 @@ fn test_calibrate_flat_dark() {
         },
         quantization_sigma: None,
     };
-    let flat_dark = constant_cfa(2, 1, flat_dark_val, CfaType::Mono);
+    let flat_dark = constant_cfa(Size2us::new(2, 1), flat_dark_val, CfaType::Mono);
 
     let masters = CalibrationMasters::from_images(
         CalibrationSet {
@@ -761,8 +762,8 @@ fn test_flat_dark_takes_priority_over_bias() {
         },
         quantization_sigma: None,
     };
-    let bias = constant_cfa(2, 2, 0.05, CfaType::Mono);
-    let flat_dark = constant_cfa(2, 2, 0.10, CfaType::Mono);
+    let bias = constant_cfa(Size2us::new(2, 2), 0.05, CfaType::Mono);
+    let flat_dark = constant_cfa(Size2us::new(2, 2), 0.10, CfaType::Mono);
 
     let masters = CalibrationMasters::from_images(
         CalibrationSet {
@@ -776,7 +777,7 @@ fn test_flat_dark_takes_priority_over_bias() {
     )
     .unwrap();
 
-    let mut light = constant_cfa(2, 2, 0.5, CfaType::Mono);
+    let mut light = constant_cfa(Size2us::new(2, 2), 0.5, CfaType::Mono);
     masters.calibrate(&mut light).unwrap();
 
     // Bias subtracted from light: 0.5 - 0.05 = 0.45
@@ -818,9 +819,9 @@ fn prepared_master_fits_bundle_round_trips_flat_and_calibration_bit_exactly() {
     };
     let mut masters = CalibrationMasters::from_images(
         CalibrationSet {
-            dark: Some(constant_cfa(4, 4, 0.05, cfa_type.clone())),
+            dark: Some(constant_cfa(Size2us::new(4, 4), 0.05, cfa_type.clone())),
             flat: Some(flat),
-            bias: Some(constant_cfa(4, 4, 0.1, cfa_type.clone())),
+            bias: Some(constant_cfa(Size2us::new(4, 4), 0.1, cfa_type.clone())),
             flat_dark: None,
         },
         DEFAULT_SIGMA_THRESHOLD,
@@ -837,7 +838,7 @@ fn prepared_master_fits_bundle_round_trips_flat_and_calibration_bit_exactly() {
         .map(|value| value.to_bits())
         .collect::<Vec<_>>();
 
-    let mut expected = constant_cfa(4, 4, 0.75, cfa_type.clone());
+    let mut expected = constant_cfa(Size2us::new(4, 4), 0.75, cfa_type.clone());
     masters.calibrate(&mut expected).unwrap();
 
     let cache_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(".tmp");
@@ -939,7 +940,7 @@ fn prepared_master_fits_bundle_round_trips_flat_and_calibration_bit_exactly() {
     );
     assert_eq!(loaded.defect_summary(), masters.defect_summary());
 
-    let mut actual = constant_cfa(4, 4, 0.75, cfa_type);
+    let mut actual = constant_cfa(Size2us::new(4, 4), 0.75, cfa_type);
     loaded.calibrate(&mut actual).unwrap();
     assert_eq!(
         actual
@@ -974,7 +975,7 @@ fn empty_master_fits_bundle_round_trips_as_a_checksummed_primary_hdu() {
 #[test]
 fn ram_bytes_sums_present_frames_and_defects() {
     // A 10×8 mono CFA frame holds 80 f32 pixels = 320 bytes.
-    let dark = constant_cfa(10, 8, 0.1, CfaType::Mono);
+    let dark = constant_cfa(Size2us::new(10, 8), 0.1, CfaType::Mono);
     assert_eq!(dark.ram_bytes(), 10 * 8 * 4);
 
     // A defect map counts only its hot + cold index lists (3 usize = 24 bytes on
@@ -988,7 +989,7 @@ fn ram_bytes_sums_present_frames_and_defects() {
     // The bundle sums present roles + the defect map; absent roles add nothing.
     let masters = CalibrationMasters {
         dark: Some(dark),
-        flat: Some(constant_cfa(4, 4, 1.0, CfaType::Mono)),
+        flat: Some(constant_cfa(Size2us::new(4, 4), 1.0, CfaType::Mono)),
         bias: None,
         flat_dark: None,
         defect_map: Some(defects),

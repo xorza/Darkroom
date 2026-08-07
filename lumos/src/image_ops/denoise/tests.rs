@@ -35,7 +35,7 @@ fn denoise_reduces_white_noise_and_preserves_mean() {
     let px = noisy(Size2us::new(w, h), bg, sigma, 12345);
     let in_std = std_dev(&px);
 
-    let mut img = gray(w, h, px);
+    let mut img = gray(Size2us::new(w, h), px);
     Denoise::default().apply(&mut img).unwrap();
     let out = channel(&img, 0).to_vec();
 
@@ -55,8 +55,8 @@ fn denoise_reduces_white_noise_and_preserves_mean() {
 fn higher_k_smooths_more() {
     let (w, h) = (96, 96);
     let px = noisy(Size2us::new(w, h), 0.5, 0.04, 7);
-    let mut img2 = gray(w, h, px.clone());
-    let mut img5 = gray(w, h, px);
+    let mut img2 = gray(Size2us::new(w, h), px.clone());
+    let mut img5 = gray(Size2us::new(w, h), px);
     Denoise {
         k: 2.0,
         ..Default::default()
@@ -83,7 +83,7 @@ fn strength_zero_is_identity_and_blends_between() {
     let px = noisy(Size2us::new(w, h), 0.5, 0.05, 3);
 
     // strength 0 removes nothing — bit-for-bit identity.
-    let mut img0 = gray(w, h, px.clone());
+    let mut img0 = gray(Size2us::new(w, h), px.clone());
     Denoise {
         strength: 0.0,
         ..Default::default()
@@ -97,8 +97,8 @@ fn strength_zero_is_identity_and_blends_between() {
     );
 
     // Partial strength sits strictly between no-op and full denoise.
-    let mut half = gray(w, h, px.clone());
-    let mut full = gray(w, h, px.clone());
+    let mut half = gray(Size2us::new(w, h), px.clone());
+    let mut full = gray(Size2us::new(w, h), px.clone());
     Denoise {
         strength: 0.5,
         ..Default::default()
@@ -119,8 +119,8 @@ fn strength_zero_is_identity_and_blends_between() {
 fn hard_and_soft_thresholds_differ() {
     let (w, h) = (64, 64);
     let px = noisy(Size2us::new(w, h), 0.5, 0.05, 55);
-    let mut hard = gray(w, h, px.clone());
-    let mut soft = gray(w, h, px);
+    let mut hard = gray(Size2us::new(w, h), px.clone());
+    let mut soft = gray(Size2us::new(w, h), px);
     Denoise {
         threshold: Threshold::Hard,
         ..Default::default()
@@ -156,7 +156,7 @@ fn denoise_preserves_bright_feature() {
             px[yy * w + xx] = 0.9;
         }
     }
-    let mut img = gray(w, h, px);
+    let mut img = gray(Size2us::new(w, h), px);
     Denoise::default().apply(&mut img).unwrap();
     let out = channel(&img, 0).to_vec();
 
@@ -203,9 +203,12 @@ fn denoise_is_per_channel_on_rgb() {
 #[test]
 fn denoise_handles_images_smaller_than_the_kernel() {
     // Scale count clamps to the dimensions — these must not panic.
-    let mut tiny = gray(3, 3, vec![0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]);
+    let mut tiny = gray(
+        Size2us::new(3, 3),
+        vec![0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
+    );
     Denoise::default().apply(&mut tiny).unwrap();
-    let mut one = gray(1, 1, vec![0.42]);
+    let mut one = gray(Size2us::new(1, 1), vec![0.42]);
     Denoise::default().apply(&mut one).unwrap();
     assert!(
         (channel(&one, 0).to_vec()[0] - 0.42).abs() < 1e-6,
@@ -215,7 +218,7 @@ fn denoise_handles_images_smaller_than_the_kernel() {
 
 #[test]
 fn validate_rejects_out_of_range_strength() {
-    let mut img = gray(4, 4, vec![0.0; 16]);
+    let mut img = gray(Size2us::new(4, 4), vec![0.0; 16]);
     let err = Denoise {
         strength: 1.5,
         ..Default::default()
@@ -230,7 +233,7 @@ fn validate_rejects_out_of_range_strength() {
 
 #[test]
 fn validate_rejects_nonpositive_k() {
-    let mut img = gray(4, 4, vec![0.0; 16]);
+    let mut img = gray(Size2us::new(4, 4), vec![0.0; 16]);
     let err = Denoise {
         k: 0.0,
         strength: 0.0,
