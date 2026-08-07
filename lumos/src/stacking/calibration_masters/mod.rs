@@ -207,19 +207,7 @@ pub fn stack_cfa_master(
         return Err(Error::Cancelled);
     }
 
-    // A CFA frame is a single mosaic plane, so a stack of them is too — `CfaImage` has nowhere
-    // to put a second channel and the loaders never produce one.
-    assert_eq!(
-        product.image.channels(),
-        1,
-        "a CFA master must be single-channel; got {} channels",
-        product.image.channels()
-    );
-    Ok(Some(CfaImage {
-        data: product.image.pixels.into_l(),
-        metadata: product.image.metadata,
-        quantization_sigma: product.quantization_sigma,
-    }))
+    Ok(Some(product.into_cfa_master()))
 }
 
 impl CalibrationMasters {

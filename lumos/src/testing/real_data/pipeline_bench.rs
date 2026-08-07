@@ -69,11 +69,7 @@ fn bench_full_pipeline() {
                 paths.len(),
                 t0.elapsed().as_secs_f64() * 1000.0
             );
-            Some(CfaImage {
-                data: result.image.pixels.into_l(),
-                metadata: result.image.metadata,
-                quantization_sigma: result.quantization_sigma,
-            })
+            Some(result.into_cfa_master())
         };
 
     let dark = stack_cfa("Dark", &dark_paths, StackConfig::dark());
