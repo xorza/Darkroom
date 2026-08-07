@@ -2,14 +2,15 @@ use crate::image_ops::wavelet::{atrous_smooth, max_scales, reflect};
 use crate::math::size2us::Size2us;
 use imaginarium::Buffer2;
 
-fn pattern(width: usize, height: usize) -> Buffer2<f32> {
-    let px = (0..width * height)
+fn pattern(size: Size2us) -> Buffer2<f32> {
+    let px = (0..size.pixel_count())
         .map(|i| {
-            let (x, y) = ((i % width) as f32, (i / width) as f32);
+            let p = size.point_of(i);
+            let (x, y) = (p.x as f32, p.y as f32);
             0.5 + 0.3 * (x * 0.3).sin() * (y * 0.2).cos()
         })
         .collect();
-    Buffer2::new(width, height, px)
+    Buffer2::new(size.width, size.height, px)
 }
 
 #[test]
@@ -64,7 +65,7 @@ fn starlet_details_telescope_exactly() {
     // The starlet identity `image == c_J + Σ (c_j − c_{j+1})`, within f32 rounding.
     // Both consumers (denoise, hdr) stream the transform and lean on this identity
     // instead of materializing layers — pin it against `atrous_smooth` directly.
-    let img = pattern(17, 13);
+    let img = pattern(Size2us::new(17, 13));
     let mut c_curr = img.clone();
     let mut c_next = Buffer2::new_default(17, 13);
     let mut tmp = Buffer2::new_default(17, 13);

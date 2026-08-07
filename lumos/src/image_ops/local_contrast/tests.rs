@@ -8,15 +8,15 @@ use crate::math::size2us::Size2us;
 use imaginarium::Buffer2;
 
 /// A low-contrast horizontal gradient (intensity in `[0.45, 0.55]`).
-fn low_contrast(width: usize, height: usize) -> Vec<f32> {
-    (0..width * height)
-        .map(|i| 0.45 + 0.1 * ((i % width) as f32 / (width - 1) as f32))
+fn low_contrast(size: Size2us) -> Vec<f32> {
+    (0..size.pixel_count())
+        .map(|i| 0.45 + 0.1 * (size.point_of(i).x as f32 / (size.width - 1) as f32))
         .collect()
 }
 
 #[test]
 fn clahe_strength_zero_is_identity() {
-    let px = low_contrast(64, 64);
+    let px = low_contrast(Size2us::new(64, 64));
     let mut img = gray(64, 64, px.clone());
     LocalContrast {
         strength: 0.0,
@@ -59,7 +59,7 @@ fn clahe_flat_region_not_blown_up() {
 #[test]
 fn clahe_increases_low_contrast() {
     // A low-contrast gradient gets its local contrast expanded → higher spread.
-    let px = low_contrast(64, 64);
+    let px = low_contrast(Size2us::new(64, 64));
     let in_std = std_dev(&px);
     let mut img = gray(64, 64, px);
     LocalContrast {
@@ -99,7 +99,7 @@ fn clahe_tile_mappings_are_monotonic() {
 fn clahe_is_color_preserving() {
     // A 2:1:1 R:G:B field keeps its ratio (hue) through the intensity-based mapping.
     let (w, h) = (64, 64);
-    let i: Vec<f32> = low_contrast(w, h); // use as the green/blue level
+    let i: Vec<f32> = low_contrast(Size2us::new(w, h)); // use as the green/blue level
     let r: Vec<f32> = i.iter().map(|&v| (2.0 * v).min(1.0)).collect();
     let mut img = rgb(Size2us::new(w, h), r, i.clone(), i.clone());
     LocalContrast::default().apply(&mut img).unwrap();

@@ -8,9 +8,9 @@ use crate::math::size2us::Size2us;
 use crate::testing::TestRng;
 use imaginarium::{ColorFormat, Image, ImageDesc};
 
-fn noisy(width: usize, height: usize, bg: f32, sigma: f32, seed: u64) -> Vec<f32> {
+fn noisy(size: Size2us, bg: f32, sigma: f32, seed: u64) -> Vec<f32> {
     let mut rng = TestRng::new(seed);
-    (0..width * height)
+    (0..size.pixel_count())
         .map(|_| bg + rng.next_gaussian_f32() * sigma)
         .collect()
 }
@@ -32,7 +32,7 @@ fn threshold_apply_hand_computed() {
 fn denoise_reduces_white_noise_and_preserves_mean() {
     let (w, h) = (128, 128);
     let (bg, sigma) = (0.5, 0.05);
-    let px = noisy(w, h, bg, sigma, 12345);
+    let px = noisy(Size2us::new(w, h), bg, sigma, 12345);
     let in_std = std_dev(&px);
 
     let mut img = gray(w, h, px);
@@ -54,7 +54,7 @@ fn denoise_reduces_white_noise_and_preserves_mean() {
 #[test]
 fn higher_k_smooths_more() {
     let (w, h) = (96, 96);
-    let px = noisy(w, h, 0.5, 0.04, 7);
+    let px = noisy(Size2us::new(w, h), 0.5, 0.04, 7);
     let mut img2 = gray(w, h, px.clone());
     let mut img5 = gray(w, h, px);
     Denoise {
@@ -80,7 +80,7 @@ fn higher_k_smooths_more() {
 #[test]
 fn strength_zero_is_identity_and_blends_between() {
     let (w, h) = (64, 64);
-    let px = noisy(w, h, 0.5, 0.05, 3);
+    let px = noisy(Size2us::new(w, h), 0.5, 0.05, 3);
 
     // strength 0 removes nothing — bit-for-bit identity.
     let mut img0 = gray(w, h, px.clone());
@@ -118,7 +118,7 @@ fn strength_zero_is_identity_and_blends_between() {
 #[test]
 fn hard_and_soft_thresholds_differ() {
     let (w, h) = (64, 64);
-    let px = noisy(w, h, 0.5, 0.05, 55);
+    let px = noisy(Size2us::new(w, h), 0.5, 0.05, 55);
     let mut hard = gray(w, h, px.clone());
     let mut soft = gray(w, h, px);
     Denoise {
@@ -150,7 +150,7 @@ fn denoise_preserves_bright_feature() {
     // A bright 8x8 block on a faintly-noisy background: hard thresholding keeps its large
     // coefficients, so the block stays bright while the flat background is smoothed.
     let (w, h) = (64, 64);
-    let mut px = noisy(w, h, 0.1, 0.02, 808);
+    let mut px = noisy(Size2us::new(w, h), 0.1, 0.02, 808);
     for yy in 28..36 {
         for xx in 28..36 {
             px[yy * w + xx] = 0.9;
@@ -185,9 +185,9 @@ fn denoise_preserves_bright_feature() {
 #[test]
 fn denoise_is_per_channel_on_rgb() {
     let (w, h) = (48, 48);
-    let r = noisy(w, h, 0.5, 0.03, 2024);
-    let g = noisy(w, h, 0.5, 0.05, 4048);
-    let b = noisy(w, h, 0.5, 0.04, 6072);
+    let r = noisy(Size2us::new(w, h), 0.5, 0.03, 2024);
+    let g = noisy(Size2us::new(w, h), 0.5, 0.05, 4048);
+    let b = noisy(Size2us::new(w, h), 0.5, 0.04, 6072);
     let in_std = [std_dev(&r), std_dev(&g), std_dev(&b)];
     let mut img = rgb(Size2us::new(w, h), r, g, b);
     Denoise::default().apply(&mut img).unwrap();
