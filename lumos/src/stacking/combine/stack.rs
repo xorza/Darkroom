@@ -506,7 +506,7 @@ mod tests {
     use crate::stacking::combine::normalization::{ChannelNorm, FrameNorm};
     use crate::stacking::combine::rejection::{PercentileClipConfig, Rejection};
     use crate::stacking::combine::stack::*;
-    use crate::stacking::frame_store::FrameStats;
+    use crate::stacking::frame_store::{FrameStats, WarpQuality};
     use crate::stacking::product::{QualityMap, QualityPlanes};
     use crate::stacking::registration::config::{self, InterpolationMethod};
     use crate::stacking::registration::resample;
@@ -723,8 +723,7 @@ mod tests {
                     &spill_directory.path,
                     &format!("f{i}"),
                     &f.image,
-                    f.coverage,
-                    f.confidence,
+                    WarpQuality::new(f.coverage, f.confidence),
                     f.source_stats,
                 )
                 .unwrap()
@@ -786,8 +785,7 @@ mod tests {
             &spill_directory.path,
             "frame",
             &invalid,
-            None,
-            None,
+            WarpQuality::none(),
             source_stats,
         )
         .unwrap();

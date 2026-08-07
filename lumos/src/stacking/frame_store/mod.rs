@@ -190,6 +190,57 @@ impl StoredPlane {
     }
 }
 
+/// The per-pixel warp quality a registered light carries: how much of each output pixel had
+/// support, and how confident the interpolation was.
+///
+/// Both are absent for a calibration frame and for a light loaded straight from disk, and they
+/// travel together everywhere a frame does — so the two planes are converted, written and named
+/// in one step rather than one apiece.
+#[derive(Debug, Default)]
+pub(crate) struct WarpQuality<P> {
+    pub(crate) coverage: Option<P>,
+    pub(crate) confidence: Option<P>,
+}
+
+impl<P> WarpQuality<P> {
+    pub(crate) fn new(coverage: Option<P>, confidence: Option<P>) -> Self {
+        Self {
+            coverage,
+            confidence,
+        }
+    }
+
+    /// No warp quality at all — a calibration frame, or a light read straight from disk.
+    pub(crate) fn none() -> Self {
+        Self {
+            coverage: None,
+            confidence: None,
+        }
+    }
+
+    fn map<Q>(self, mut convert: impl FnMut(P) -> Q) -> WarpQuality<Q> {
+        WarpQuality {
+            coverage: self.coverage.map(&mut convert),
+            confidence: self.confidence.map(&mut convert),
+        }
+    }
+
+    /// Convert each present plane, tagging it with the name its spill file carries. Which plane
+    /// answers to which name is stated here alone, so a writer and a later reader cannot disagree.
+    fn try_map<Q, E>(
+        self,
+        mut convert: impl FnMut(&'static str, P) -> Result<Q, E>,
+    ) -> Result<WarpQuality<Q>, E> {
+        Ok(WarpQuality {
+            coverage: self.coverage.map(|p| convert("coverage", p)).transpose()?,
+            confidence: self
+                .confidence
+                .map(|p| convert("confidence", p))
+                .transpose()?,
+        })
+    }
+}
+
 /// One frame as the combine engine sees it: its channel planes, the per-pixel warp quality a
 /// registered light carries (absent for calibration frames and for lights loaded straight from
 /// disk), and the statistics measured on the source before any interpolation.
@@ -204,8 +255,7 @@ pub(crate) struct StoredFrame {
 impl StoredFrame {
     pub(crate) fn from_memory(
         image: impl StackableImage,
-        coverage: Option<Buffer2<f32>>,
-        confidence: Option<Buffer2<f32>>,
+        quality: WarpQuality<Buffer2<f32>>,
         source_stats: FrameStats,
     ) -> Self {
         let channels = image
@@ -213,10 +263,11 @@ impl StoredFrame {
             .into_iter()
             .map(StoredPlane::Memory)
             .collect();
+        let quality = quality.map(StoredPlane::Memory);
         Self {
             channels,
-            coverage: coverage.map(StoredPlane::Memory),
-            confidence: confidence.map(StoredPlane::Memory),
+            coverage: quality.coverage,
+            confidence: quality.confidence,
             source_stats,
         }
     }
@@ -226,24 +277,20 @@ impl StoredFrame {
         directory: &Path,
         name: &str,
         image: &impl StackableImage,
-        coverage: Option<Buffer2<f32>>,
-        confidence: Option<Buffer2<f32>>,
+        quality: WarpQuality<Buffer2<f32>>,
         source_stats: FrameStats,
     ) -> Result<Self, FrameStoreError> {
         let spill = FrameSpill::new(directory, name);
         let channels = spill_channels(spill, image)?.planes;
-        let spill_quality = |kind: &str, plane: Option<Buffer2<f32>>| match plane {
-            Some(plane) => {
-                let path = spill.quality_path(kind);
-                write_plane(&path, &plane)?;
-                Ok(Some(StoredPlane::map(path)?))
-            }
-            None => Ok(None),
-        };
+        let quality = quality.try_map(|kind, plane| {
+            let path = spill.quality_path(kind);
+            write_plane(&path, &plane)?;
+            StoredPlane::map(path)
+        })?;
         Ok(Self {
             channels,
-            coverage: spill_quality("coverage", coverage)?,
-            confidence: spill_quality("confidence", confidence)?,
+            coverage: quality.coverage,
+            confidence: quality.confidence,
             source_stats,
         })
     }

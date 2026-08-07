@@ -7,7 +7,7 @@ use crate::math::statistics::ChannelStats;
 use crate::stacking::combine::config::Normalization;
 use crate::stacking::combine::error::Error;
 use crate::stacking::combine::normalization::*;
-use crate::stacking::frame_store::{FrameStats, StoredFrame};
+use crate::stacking::frame_store::{FrameStats, StoredFrame, WarpQuality};
 
 fn channel_stats(median: f32, mad: f32) -> ChannelStats {
     ChannelStats { median, mad }
@@ -102,8 +102,7 @@ fn registered_rgb_measurements_preserve_pair_order_and_honor_cancellation() {
         .map(|(frame_index, channels)| {
             StoredFrame::from_memory(
                 LinearImage::from_planar_channels(dimensions, channels),
-                Some(coverage.clone()),
-                None,
+                WarpQuality::new(Some(coverage.clone()), None),
                 FrameStats {
                     channels: [channel_stats(0.0, 1.0); 3].into_iter().collect(),
                     quantization_sigma: Some((frame_index + 1) as f32),

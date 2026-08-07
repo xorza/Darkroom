@@ -23,7 +23,7 @@ use crate::stacking::combine::error::Error;
 use crate::stacking::combine::normalization::compute_frame_norms;
 use crate::stacking::frame_store::{
     FrameSpill, FrameStats, FrameStoreError, SpillDirectory, StackableImage, StoredFrame,
-    StoredPlane,
+    StoredPlane, WarpQuality,
 };
 use crate::stacking::progress::{ProgressCallback, StackingStage};
 
@@ -238,7 +238,7 @@ fn load_in_memory<I: StackableImage, P: AsRef<Path> + Sync>(
         let metadata = (idx == 0).then(|| image.metadata().clone());
         let stats = FrameStats::measure(&image);
         Ok(LoadedMemoryFrame {
-            frame: StoredFrame::from_memory(image, None, None, stats),
+            frame: StoredFrame::from_memory(image, WarpQuality::none(), stats),
             metadata,
         })
     })?;
@@ -249,7 +249,11 @@ fn load_in_memory<I: StackableImage, P: AsRef<Path> + Sync>(
         validate_image_samples(&first_image, 0, cancel)?;
         metadata = Some(first_image.metadata().clone());
         let stats = FrameStats::measure(&first_image);
-        frames.push(StoredFrame::from_memory(first_image, None, None, stats));
+        frames.push(StoredFrame::from_memory(
+            first_image,
+            WarpQuality::none(),
+            stats,
+        ));
     }
     for loaded_frame in loaded {
         if loaded_frame.metadata.is_some() {
@@ -294,8 +298,7 @@ fn load_to_disk<I: StackableImage, P: AsRef<Path> + Sync>(
         cache_dir,
         &base_filename,
         &first_image,
-        None,
-        None,
+        WarpQuality::none(),
         first_stats,
     )
     .map_err(Error::from)?;
@@ -514,9 +517,14 @@ fn load_and_cache_frame<I: StackableImage>(
         }
 
         let stats = FrameStats::measure(&image);
-        let stored =
-            StoredFrame::spill(cache_dir, base_filename, &image, None, None, stats.clone())
-                .map_err(Error::from)?;
+        let stored = StoredFrame::spill(
+            cache_dir,
+            base_filename,
+            &image,
+            WarpQuality::none(),
+            stats.clone(),
+        )
+        .map_err(Error::from)?;
 
         // The identity sidecar is the commit record for the planes and stats.
         write_frame_stats(cache_dir, base_filename, &stats)?;

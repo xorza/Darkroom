@@ -16,7 +16,9 @@ use crate::stacking::combine::config::Normalization;
 use crate::stacking::combine::error::Error;
 use crate::stacking::combine::normalization::{FrameNorm, compute_frame_norms};
 use crate::stacking::combine::stack::StackFrame;
-use crate::stacking::frame_store::{SpillDirectory, StackableImage, StoredFrame, StoredPlane};
+use crate::stacking::frame_store::{
+    SpillDirectory, StackableImage, StoredFrame, StoredPlane, WarpQuality,
+};
 use crate::stacking::product::{QualityMap, QualityPlanes, StackProduct};
 use crate::stacking::progress::{ProgressCallback, StackingStage};
 
@@ -548,8 +550,7 @@ impl FrameCache {
             .map(|frame| {
                 StoredFrame::from_memory(
                     frame.image,
-                    frame.coverage,
-                    frame.confidence,
+                    WarpQuality::new(frame.coverage, frame.confidence),
                     frame.source_stats,
                 )
             })
@@ -848,7 +849,7 @@ pub(crate) mod internals {
     use crate::stacking::combine::cache_config::CacheConfig;
     use crate::stacking::combine::config::Normalization;
     use crate::stacking::combine::normalization::compute_frame_norms;
-    use crate::stacking::frame_store::{FrameStats, StackableImage, StoredFrame};
+    use crate::stacking::frame_store::{FrameStats, StackableImage, StoredFrame, WarpQuality};
     use crate::stacking::progress::ProgressCallback;
 
     /// An in-memory [`FrameCache`] over already-decoded frames — the shape `from_paths` builds,
@@ -864,7 +865,7 @@ pub(crate) mod internals {
             .into_iter()
             .map(|image| {
                 let source_stats = FrameStats::measure(&image);
-                StoredFrame::from_memory(image, None, None, source_stats)
+                StoredFrame::from_memory(image, WarpQuality::none(), source_stats)
             })
             .collect();
         let core = CacheCore {

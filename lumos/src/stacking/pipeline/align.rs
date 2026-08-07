@@ -10,7 +10,7 @@ use crate::io::raw::demosaic::DemosaicMemory;
 use crate::memory::plan_memory;
 use crate::stacking::combine::error::Error as StackError;
 use crate::stacking::combine::stack::stack_stored_frames;
-use crate::stacking::frame_store::{FrameStats, StoredFrame};
+use crate::stacking::frame_store::{FrameStats, StoredFrame, WarpQuality};
 use crate::stacking::progress::ProgressCallback;
 use crate::stacking::registration::register;
 use crate::stacking::registration::resample::warp;
@@ -182,7 +182,9 @@ pub(crate) fn register_warp_and_stack(
                 // The unwarped reference has full support and unit interpolation confidence.
                 let image = detected.image.into_image();
                 let source_stats = FrameStats::measure(&image);
-                return tier.store(&name, image, None, None, source_stats).map(Some);
+                return tier
+                    .store(&name, image, WarpQuality::none(), source_stats)
+                    .map(Some);
             }
 
             let n = registered_so_far.fetch_add(1, Ordering::Relaxed) + 1;
@@ -221,8 +223,7 @@ pub(crate) fn register_warp_and_stack(
             tier.store(
                 &name,
                 warped.image,
-                Some(warped.coverage),
-                Some(warped.confidence),
+                WarpQuality::new(Some(warped.coverage), Some(warped.confidence)),
                 source_stats,
             )
             .map(Some)
