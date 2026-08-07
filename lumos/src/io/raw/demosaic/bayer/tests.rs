@@ -201,8 +201,7 @@ fn test_bayer_image_valid() {
 }
 
 /// Helper: create a BayerImage from a flat CFA array with no margins.
-fn make_bayer(data: &[f32], width: usize, height: usize, cfa: CfaPattern) -> BayerImage<'_> {
-    let size = Size2us::new(width, height);
+fn make_bayer(data: &[f32], size: Size2us, cfa: CfaPattern) -> BayerImage<'_> {
     BayerImage::with_margins(data, size, size, Vec2us::ZERO, cfa)
 }
 
@@ -212,7 +211,7 @@ fn test_rcd_output_dimensions() {
     let w = 20;
     let h = 20;
     let data = vec![0.5f32; w * h];
-    let bayer = make_bayer(&data, w, h, CfaPattern::Rggb);
+    let bayer = make_bayer(&data, Size2us::new(w, h), CfaPattern::Rggb);
     let rgb = interleave_planes(rcd::demosaic(&bayer, &CancelToken::never()).unwrap());
     assert_eq!(rgb.len(), w * h * 3);
 }
@@ -221,7 +220,7 @@ fn test_rcd_output_dimensions() {
 fn cancelled_token_bails_the_demosaic() {
     let (w, h) = (20, 20);
     let data = vec![0.5f32; w * h];
-    let bayer = make_bayer(&data, w, h, CfaPattern::Rggb);
+    let bayer = make_bayer(&data, Size2us::new(w, h), CfaPattern::Rggb);
 
     // A live, tripped token bails at the first between-stage check rather than
     // running the whole demosaic.
@@ -246,7 +245,7 @@ fn parallel_rcd_matches_single_thread_bit_for_bit() {
     let data: Vec<f32> = (0..w * h)
         .map(|index| ((index * 37 + index / w * 11) % 1_024) as f32 / 1_023.0)
         .collect();
-    let bayer = make_bayer(&data, w, h, CfaPattern::Rggb);
+    let bayer = make_bayer(&data, Size2us::new(w, h), CfaPattern::Rggb);
 
     let run = |threads| {
         ThreadPoolBuilder::new()
@@ -321,7 +320,7 @@ fn test_rcd_preserves_cfa_channel() {
     assert_eq!(CfaPattern::Rggb.color_at(Vec2us::new(rx, ry)), 0); // confirm it's R
     data[ry * w + rx] = 0.7;
 
-    let bayer = make_bayer(&data, w, h, CfaPattern::Rggb);
+    let bayer = make_bayer(&data, Size2us::new(w, h), CfaPattern::Rggb);
     let rgb = interleave_planes(rcd::demosaic(&bayer, &CancelToken::never()).unwrap());
 
     // The red channel at this pixel should be exactly 0.7 (it's the CFA value)
@@ -367,7 +366,7 @@ fn test_rcd_green_at_red_position_hand_computed() {
         }
     }
 
-    let bayer = make_bayer(&data, w, h, cfa);
+    let bayer = make_bayer(&data, Size2us::new(w, h), cfa);
     let rgb = interleave_planes(rcd::demosaic(&bayer, &CancelToken::never()).unwrap());
 
     // At (8,8) which is R: green should be interpolated from surrounding green values.
@@ -406,7 +405,7 @@ fn test_rcd_all_patterns_preserve_native_samples_and_stay_finite() {
         CfaPattern::Grbg,
         CfaPattern::Gbrg,
     ] {
-        let bayer = make_bayer(&data, w, h, pattern);
+        let bayer = make_bayer(&data, Size2us::new(w, h), pattern);
         let rgb = interleave_planes(rcd::demosaic(&bayer, &CancelToken::never()).unwrap());
         assert_eq!(rgb.len(), w * h * 3);
 
@@ -442,7 +441,7 @@ fn signed_linear_gradient_crossing_zero_is_reconstructed_without_spikes() {
         CfaPattern::Grbg,
         CfaPattern::Gbrg,
     ] {
-        let bayer = make_bayer(&data, width, height, pattern);
+        let bayer = make_bayer(&data, Size2us::new(width, height), pattern);
         let rgb = interleave_planes(rcd::demosaic(&bayer, &CancelToken::never()).unwrap());
 
         for y in 6..height - 6 {
@@ -528,7 +527,7 @@ fn test_rcd_gradient_image_green_smoothness() {
         }
     }
 
-    let bayer = make_bayer(&data, w, h, CfaPattern::Rggb);
+    let bayer = make_bayer(&data, Size2us::new(w, h), CfaPattern::Rggb);
     let rgb = interleave_planes(rcd::demosaic(&bayer, &CancelToken::never()).unwrap());
 
     // Check that green channel is monotonically increasing (approximately)
@@ -572,7 +571,7 @@ fn test_rcd_red_blue_at_green_positions() {
         }
     }
 
-    let bayer = make_bayer(&data, w, h, cfa);
+    let bayer = make_bayer(&data, Size2us::new(w, h), cfa);
     let rgb = interleave_planes(rcd::demosaic(&bayer, &CancelToken::never()).unwrap());
 
     // Check interior pixels at green positions
@@ -626,7 +625,7 @@ fn test_rcd_blue_at_red_position() {
         }
     }
 
-    let bayer = make_bayer(&data, w, h, cfa);
+    let bayer = make_bayer(&data, Size2us::new(w, h), cfa);
     let rgb = interleave_planes(rcd::demosaic(&bayer, &CancelToken::never()).unwrap());
 
     let border = 5;
@@ -673,7 +672,7 @@ fn test_rcd_red_at_blue_position() {
         }
     }
 
-    let bayer = make_bayer(&data, w, h, cfa);
+    let bayer = make_bayer(&data, Size2us::new(w, h), cfa);
     let rgb = interleave_planes(rcd::demosaic(&bayer, &CancelToken::never()).unwrap());
 
     let border = 5;
@@ -720,7 +719,7 @@ fn test_rcd_bggr_correctness() {
         }
     }
 
-    let bayer = make_bayer(&data, w, h, cfa);
+    let bayer = make_bayer(&data, Size2us::new(w, h), cfa);
     let rgb = interleave_planes(rcd::demosaic(&bayer, &CancelToken::never()).unwrap());
 
     let border = 5;
@@ -767,7 +766,7 @@ fn test_rcd_grbg_gbrg_correctness() {
             }
         }
 
-        let bayer = make_bayer(&data, w, h, cfa);
+        let bayer = make_bayer(&data, Size2us::new(w, h), cfa);
         let rgb = interleave_planes(rcd::demosaic(&bayer, &CancelToken::never()).unwrap());
 
         let border = 5;
@@ -815,7 +814,7 @@ fn test_rcd_vh_direction_sensitivity() {
             h_data[y * w + x] = val;
         }
     }
-    let h_bayer = make_bayer(&h_data, w, h, CfaPattern::Rggb);
+    let h_bayer = make_bayer(&h_data, Size2us::new(w, h), CfaPattern::Rggb);
     let h_rgb = interleave_planes(rcd::demosaic(&h_bayer, &CancelToken::never()).unwrap());
 
     // Vertical stripes: cols 0-15 = 0.8, cols 16-31 = 0.2
@@ -825,7 +824,7 @@ fn test_rcd_vh_direction_sensitivity() {
             v_data[y * w + x] = if x < w / 2 { 0.8 } else { 0.2 };
         }
     }
-    let v_bayer = make_bayer(&v_data, w, h, CfaPattern::Rggb);
+    let v_bayer = make_bayer(&v_data, Size2us::new(w, h), CfaPattern::Rggb);
     let v_rgb = interleave_planes(rcd::demosaic(&v_bayer, &CancelToken::never()).unwrap());
 
     // For horizontal stripes: green variation along a row (far from edge) should be small
@@ -867,7 +866,7 @@ fn test_rcd_border_interpolation() {
     let val = 0.6f32;
     let data = vec![val; w * h];
     let cfa = CfaPattern::Rggb;
-    let bayer = make_bayer(&data, w, h, cfa);
+    let bayer = make_bayer(&data, Size2us::new(w, h), cfa);
     let rgb = interleave_planes(rcd::demosaic(&bayer, &CancelToken::never()).unwrap());
 
     // Border = 4 pixels. Check the very edge pixels are non-zero and close to val.
@@ -920,7 +919,7 @@ fn test_rcd_sharp_edge_no_excessive_artifacts() {
         }
     }
 
-    let bayer = make_bayer(&data, w, h, CfaPattern::Rggb);
+    let bayer = make_bayer(&data, Size2us::new(w, h), CfaPattern::Rggb);
     let rgb = interleave_planes(rcd::demosaic(&bayer, &CancelToken::never()).unwrap());
 
     for (i, &val) in rgb.iter().enumerate() {

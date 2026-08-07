@@ -17,7 +17,7 @@ fn low_contrast(size: Size2us) -> Vec<f32> {
 #[test]
 fn clahe_strength_zero_is_identity() {
     let px = low_contrast(Size2us::new(64, 64));
-    let mut img = gray(64, 64, px.clone());
+    let mut img = gray(Size2us::new(64, 64), px.clone());
     LocalContrast {
         strength: 0.0,
         ..Default::default()
@@ -36,7 +36,7 @@ fn clahe_output_stays_in_range() {
     let px: Vec<f32> = (0..96 * 96)
         .map(|i| ((i as f32 * 0.013).sin() * 0.5 + 0.5).clamp(0.0, 1.0))
         .collect();
-    let mut img = gray(96, 96, px);
+    let mut img = gray(Size2us::new(96, 96), px);
     LocalContrast::default().apply(&mut img).unwrap();
     for &v in &channel(&img, 0).to_vec() {
         assert!((0.0..=1.0).contains(&v), "output in [0,1]: {v}");
@@ -46,7 +46,7 @@ fn clahe_output_stays_in_range() {
 #[test]
 fn clahe_flat_region_not_blown_up() {
     // Contrast-limited: a flat field must stay put, not get stretched to full range.
-    let mut img = gray(64, 64, vec![0.5; 64 * 64]);
+    let mut img = gray(Size2us::new(64, 64), vec![0.5; 64 * 64]);
     LocalContrast::default().apply(&mut img).unwrap();
     let out = channel(&img, 0).to_vec();
     assert!(
@@ -61,7 +61,7 @@ fn clahe_increases_low_contrast() {
     // A low-contrast gradient gets its local contrast expanded → higher spread.
     let px = low_contrast(Size2us::new(64, 64));
     let in_std = std_dev(&px);
-    let mut img = gray(64, 64, px);
+    let mut img = gray(Size2us::new(64, 64), px);
     LocalContrast {
         tiles: 4,
         clip_limit: 4.0,
@@ -124,7 +124,7 @@ fn clahe_is_color_preserving() {
 
 #[test]
 fn rejects_clip_limit_below_one() {
-    let mut img = gray(8, 8, vec![0.5; 64]);
+    let mut img = gray(Size2us::new(8, 8), vec![0.5; 64]);
     let err = LocalContrast {
         clip_limit: 0.5,
         strength: 0.0,

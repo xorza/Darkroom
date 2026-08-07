@@ -1,3 +1,4 @@
+use crate::math::size2us::Size2us;
 use std::f64::consts::{FRAC_PI_4, PI};
 
 use glam::DVec2;
@@ -44,12 +45,12 @@ fn accumulator(input_dims: ImageDimensions, config: DrizzleConfig) -> DrizzleAcc
     DrizzleAccumulator::new(input_dims, config).expect("test drizzle config must be valid")
 }
 
-fn mono_image(width: usize, height: usize, pixels: Vec<f32>) -> LinearImage {
-    LinearImage::from_pixels(ImageDimensions::new((width, height), 1), pixels)
+fn mono_image(size: Size2us, pixels: Vec<f32>) -> LinearImage {
+    LinearImage::from_pixels(ImageDimensions::new(size, 1), pixels)
 }
 
-fn constant_mono_image(width: usize, height: usize, value: f32) -> LinearImage {
-    mono_image(width, height, vec![value; width * height])
+fn constant_mono_image(size: Size2us, value: f32) -> LinearImage {
+    mono_image(size, vec![value; size.pixel_count()])
 }
 
 fn assert_product_finite(product: &StackProduct) {

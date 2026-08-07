@@ -303,9 +303,11 @@ pub(crate) mod internals {
         channel_plane(image, channel).pixels().to_vec()
     }
 
-    pub(crate) fn gray_image(width: usize, height: usize, pixels: Vec<f32>) -> Image {
+    pub(crate) fn gray_image(size: Size2us, pixels: Vec<f32>) -> Image {
         Image::from(&PlanarPixels::from_planes([Buffer2::new(
-            width, height, pixels,
+            size.width,
+            size.height,
+            pixels,
         )]))
     }
 

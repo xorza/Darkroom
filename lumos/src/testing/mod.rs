@@ -130,9 +130,9 @@ pub(crate) fn make_cfa(
 }
 
 /// Create a CfaImage filled with a constant value.
-pub(crate) fn constant_cfa(width: usize, height: usize, value: f32, cfa_type: CfaType) -> CfaImage {
+pub(crate) fn constant_cfa(size: Size2us, value: f32, cfa_type: CfaType) -> CfaImage {
     CfaImage {
-        data: Buffer2::new_filled(width, height, value),
+        data: Buffer2::new_filled(size.width, size.height, value),
         metadata: ImageMetadata {
             cfa_type: Some(cfa_type),
             ..Default::default()

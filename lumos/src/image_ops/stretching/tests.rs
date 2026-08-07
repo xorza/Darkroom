@@ -238,7 +238,7 @@ fn ghs_d_controls_strength() {
 fn ghs_end_to_end_lifts_background_and_stays_in_range() {
     let mut px: Vec<f32> = (0..90).map(|i| 0.04 + (i % 3) as f32 * 0.01).collect();
     px.extend(std::iter::repeat_n(0.8f32, 10));
-    let mut img = gray(10, 10, px.clone());
+    let mut img = gray(Size2us::new(10, 10), px.clone());
     Stretch::ghs(5.0, 0.0, 0.1).apply(&mut img).unwrap();
     let out = channel(&img, 0).to_vec();
     for &v in &out {
@@ -334,7 +334,7 @@ fn end_to_end_gray_auto_stf_brightens_background_to_target() {
     px.extend(std::iter::repeat_n(0.6f32, 10));
     let input_median = median_of(&px);
 
-    let mut img = gray(10, 10, px);
+    let mut img = gray(Size2us::new(10, 10), px);
     Stretch::auto_stf().apply(&mut img).unwrap();
     let out = channel(&img, 0).to_vec();
 
@@ -363,7 +363,7 @@ fn default_config_is_color_preserving_auto_asinh() {
 
 #[test]
 fn rejects_out_of_range_config() {
-    let mut img = gray(4, 4, vec![0.3; 16]);
+    let mut img = gray(Size2us::new(4, 4), vec![0.3; 16]);
     let err = Stretch::ghs(-1.0, 0.0, 0.5).apply(&mut img).unwrap_err();
     assert!(
         matches!(&err, OpError::InvalidConfig(m) if m.field == "ghs d"),

@@ -1,10 +1,11 @@
+use crate::math::size2us::Size2us;
 use crate::stacking::drizzle::tests::*;
 use common::CancelToken;
 
 #[test]
 fn test_drizzle_single_image() {
     // Create a simple test image
-    let image = constant_mono_image(100, 100, 0.5);
+    let image = constant_mono_image(Size2us::new(100, 100), 0.5);
 
     let config = DrizzleConfig::x2();
     let mut acc = accumulator(ImageDimensions::new((100, 100), 1), config);
@@ -45,7 +46,7 @@ fn test_drizzle_single_image() {
 
 #[test]
 fn test_drizzle_point_kernel() {
-    let image = constant_mono_image(10, 10, 1.0);
+    let image = constant_mono_image(Size2us::new(10, 10), 1.0);
 
     let config = DrizzleConfig::x2().with_kernel(DrizzleKernel::Point);
     let mut acc = accumulator(ImageDimensions::new((10, 10), 1), config);
@@ -106,7 +107,12 @@ fn drizzle_stops_between_frames_when_cancelled() {
     let cancel = CancelToken::new();
     cancel.cancel();
     let frames: Vec<_> = (0..3)
-        .map(|_| DrizzleFrame::new(constant_mono_image(16, 16, 0.5), Transform::identity()))
+        .map(|_| {
+            DrizzleFrame::new(
+                constant_mono_image(Size2us::new(16, 16), 0.5),
+                Transform::identity(),
+            )
+        })
         .collect();
 
     let result = drizzle_images(
@@ -122,7 +128,12 @@ fn drizzle_stops_between_frames_when_cancelled() {
 
     // The same set completes when the run is live, so the guard is what stopped it.
     let frames: Vec<_> = (0..3)
-        .map(|_| DrizzleFrame::new(constant_mono_image(16, 16, 0.5), Transform::identity()))
+        .map(|_| {
+            DrizzleFrame::new(
+                constant_mono_image(Size2us::new(16, 16), 0.5),
+                Transform::identity(),
+            )
+        })
         .collect();
     assert!(
         drizzle_images(
@@ -139,7 +150,7 @@ fn drizzle_stops_between_frames_when_cancelled() {
 fn test_drizzle_images_matches_accumulator() {
     // drizzle_images with one identity-transformed frame must reproduce the
     // single-image accumulator path: 200x200 output, interior pixels = 0.5.
-    let image = constant_mono_image(100, 100, 0.5);
+    let image = constant_mono_image(Size2us::new(100, 100), 0.5);
     let result = drizzle_images(
         vec![DrizzleFrame::new(image, Transform::identity())],
         &DrizzleConfig::x2(),
@@ -160,8 +171,8 @@ fn test_drizzle_images_matches_accumulator() {
 
 #[test]
 fn test_drizzle_images_dimension_mismatch() {
-    let a = constant_mono_image(20, 20, 0.5);
-    let b = constant_mono_image(10, 10, 0.5);
+    let a = constant_mono_image(Size2us::new(20, 20), 0.5);
+    let b = constant_mono_image(Size2us::new(10, 10), 0.5);
     let result = drizzle_images(
         drizzle_frames(vec![a, b], &[Transform::identity(), Transform::identity()]),
         &DrizzleConfig::default(),
@@ -221,7 +232,7 @@ fn test_drizzle_with_translation() {
     // Single bright pixel at (10,10), all others zero
     let mut pixels = vec![0.0f32; 20 * 20];
     pixels[10 * 20 + 10] = 1.0;
-    let image = mono_image(20, 20, pixels);
+    let image = mono_image(Size2us::new(20, 20), pixels);
 
     // scale=2, pixfrac=0.8: drop_size = 0.8*2 = 1.6, half_drop = 0.8
     let config = DrizzleConfig::x2();
@@ -278,7 +289,7 @@ fn test_drizzle_with_translation() {
 #[test]
 fn test_coverage_map() {
     // Point kernel with identity: covered at even coords, uncovered at odd
-    let image = constant_mono_image(4, 4, 1.0);
+    let image = constant_mono_image(Size2us::new(4, 4), 1.0);
     let config = DrizzleConfig::x2().with_kernel(DrizzleKernel::Point);
     let mut acc = accumulator(ImageDimensions::new((4, 4), 1), config);
     acc.add_image(image, &Transform::identity(), 1.0, None);
