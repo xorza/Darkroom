@@ -849,7 +849,7 @@ pub(crate) mod internals {
     use crate::stacking::combine::cache_config::CacheConfig;
     use crate::stacking::combine::config::Normalization;
     use crate::stacking::combine::normalization::compute_frame_norms;
-    use crate::stacking::frame_store::{StackableImage, StoredFrame, compute_frame_stats};
+    use crate::stacking::frame_store::{FrameStats, StackableImage, StoredFrame};
     use crate::stacking::progress::ProgressCallback;
 
     /// An in-memory [`FrameCache`] over already-decoded frames — the shape `from_paths` builds,
@@ -864,7 +864,7 @@ pub(crate) mod internals {
         let frames: Vec<StoredFrame> = images
             .into_iter()
             .map(|image| {
-                let source_stats = compute_frame_stats(&image);
+                let source_stats = FrameStats::measure(&image);
                 StoredFrame::from_memory(image, None, None, source_stats)
             })
             .collect();

@@ -17,7 +17,7 @@ use crate::stacking::combine::config::{CombineMethod, StackConfig, Weighting};
 use crate::stacking::combine::error::{Error, StackConfigError};
 use crate::stacking::combine::normalization::FrameNorm;
 use crate::stacking::combine::rejection::Rejection;
-use crate::stacking::frame_store::{FrameStats, SpillDirectory, StoredFrame, compute_frame_stats};
+use crate::stacking::frame_store::{FrameStats, SpillDirectory, StoredFrame};
 use crate::stacking::product::StackProduct;
 use crate::stacking::progress::ProgressCallback;
 use crate::stacking::registration::resample::WarpResult;
@@ -40,7 +40,7 @@ impl StackFrame {
     /// Build a registered stack frame while preserving statistics from before interpolation.
     pub fn registered(source: &LinearImage, warped: WarpResult) -> Self {
         Self {
-            source_stats: compute_frame_stats(source),
+            source_stats: FrameStats::measure(source),
             image: warped.image,
             coverage: Some(warped.coverage),
             confidence: Some(warped.confidence),
@@ -50,7 +50,7 @@ impl StackFrame {
 
 impl From<LinearImage> for StackFrame {
     fn from(image: LinearImage) -> Self {
-        let source_stats = compute_frame_stats(&image);
+        let source_stats = FrameStats::measure(&image);
         Self {
             image,
             coverage: None,
@@ -506,7 +506,7 @@ mod tests {
     use crate::stacking::combine::normalization::{ChannelNorm, FrameNorm};
     use crate::stacking::combine::rejection::{PercentileClipConfig, Rejection};
     use crate::stacking::combine::stack::*;
-    use crate::stacking::frame_store::{compute_frame_stats, store_frame};
+    use crate::stacking::frame_store::FrameStats;
     use crate::stacking::product::{QualityMap, QualityPlanes};
     use crate::stacking::registration::config::{self, InterpolationMethod};
     use crate::stacking::registration::resample;
@@ -719,7 +719,7 @@ mod tests {
             .into_iter()
             .enumerate()
             .map(|(i, f)| {
-                store_frame(
+                StoredFrame::spill(
                     &spill_directory.path,
                     &format!("f{i}"),
                     &f.image,
@@ -775,14 +775,14 @@ mod tests {
             dimensions,
             [vec![1.0; 2], vec![1.0; 2], vec![1.0; 2]],
         );
-        let source_stats = compute_frame_stats(&finite);
+        let source_stats = FrameStats::measure(&finite);
         let invalid = LinearImage::from_planar_channels(
             dimensions,
             [vec![1.0; 2], vec![2.0; 2], vec![3.0, f32::NEG_INFINITY]],
         );
         let scratch = ScratchDirectory::new("lumos_nonfinite_mapped_frame");
         let spill_directory = SpillDirectory::create(scratch.join("cache"), false).unwrap();
-        let frame = store_frame(
+        let frame = StoredFrame::spill(
             &spill_directory.path,
             "frame",
             &invalid,

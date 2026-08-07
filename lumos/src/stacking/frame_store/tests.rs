@@ -14,7 +14,7 @@ fn stored_image_roundtrip_overwrites_stale_pixels_and_cleans_spill_files() {
     let path = directory.join("calibrated_c0.bin");
     write_plane(&path, &[9.0; 4]).unwrap();
 
-    let stored = store_image(&directory, "calibrated", &image).unwrap();
+    let stored = StoredImage::spill(&directory, "calibrated", &image).unwrap();
     let loaded = stored.load();
     assert_eq!(loaded.channel(0).pixels(), &[0.1, 0.2, 0.3, 0.4]);
     assert_eq!(loaded.metadata.exposure_time, Some(30.0));
@@ -29,7 +29,7 @@ fn light_frame_keeps_quality_with_its_planes() {
     let image = LinearImage::from_pixels(dimensions, vec![1.0, 2.0, 3.0, 4.0]);
     let coverage = Buffer2::new(2, 2, vec![1.0, 0.5, 0.25, 0.0]);
     let confidence = Buffer2::new(2, 2, vec![4.0, 3.0, 2.0, 1.0]);
-    let source_stats = compute_frame_stats(&image);
+    let source_stats = FrameStats::measure(&image);
     let frame = StoredFrame::from_memory(image, Some(coverage), Some(confidence), source_stats);
     assert_eq!(frame.channels[0].chunk(0, 4), &[1.0, 2.0, 3.0, 4.0]);
     assert_eq!(
@@ -55,7 +55,7 @@ fn plane_persistence_validates_dimensions_and_roundtrips_pixels() {
     assert!(reusable_plane(&path, dimensions));
     assert!(!reusable_plane(&path, ImageDimensions::new((8, 3), 1)));
     assert!(!reusable_plane(&directory.join("missing.bin"), dimensions));
-    let mapped = StoredPlane::Mapped(map_plane(path.clone()).unwrap());
+    let mapped = StoredPlane::map(path.clone()).unwrap();
     assert_eq!(mapped.chunk(0, pixels.len()), pixels);
 
     drop(mapped);

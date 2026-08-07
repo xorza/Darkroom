@@ -88,37 +88,40 @@ pub(crate) struct FrameStats {
     pub(crate) quantization_sigma: Option<f32>,
 }
 
-pub(crate) fn compute_frame_stats(image: &impl StackableImage) -> FrameStats {
-    let dimensions = image.dimensions();
-    let quantization_sigma = image.quantization_sigma();
-    if dimensions.channels() == 1 {
-        let data = image.channel(0);
-        let mut scratch = data.to_vec();
-        let median = median_f32_mut(&mut scratch);
-        let mad = mad_f32_with_scratch(data, median, &mut scratch);
-        let mut channels = ArrayVec::new();
-        channels.push(ChannelStats { median, mad });
-        return FrameStats {
-            channels,
-            quantization_sigma,
-        };
-    }
-
-    let channels = (0..dimensions.channels())
-        .into_par_iter()
-        .map(|channel| {
-            let data = image.channel(channel);
+impl FrameStats {
+    /// Measure per-channel median and MAD on `image`, before any interpolation touches it.
+    pub(crate) fn measure(image: &impl StackableImage) -> Self {
+        let dimensions = image.dimensions();
+        let quantization_sigma = image.quantization_sigma();
+        if dimensions.channels() == 1 {
+            let data = image.channel(0);
             let mut scratch = data.to_vec();
             let median = median_f32_mut(&mut scratch);
             let mad = mad_f32_with_scratch(data, median, &mut scratch);
-            ChannelStats { median, mad }
-        })
-        .collect::<Vec<_>>()
-        .into_iter()
-        .collect();
-    FrameStats {
-        channels,
-        quantization_sigma,
+            let mut channels = ArrayVec::new();
+            channels.push(ChannelStats { median, mad });
+            return Self {
+                channels,
+                quantization_sigma,
+            };
+        }
+
+        let channels = (0..dimensions.channels())
+            .into_par_iter()
+            .map(|channel| {
+                let data = image.channel(channel);
+                let mut scratch = data.to_vec();
+                let median = median_f32_mut(&mut scratch);
+                let mad = mad_f32_with_scratch(data, median, &mut scratch);
+                ChannelStats { median, mad }
+            })
+            .collect::<Vec<_>>()
+            .into_iter()
+            .collect();
+        Self {
+            channels,
+            quantization_sigma,
+        }
     }
 }
 
@@ -148,6 +151,26 @@ pub(crate) enum StoredPlane {
 }
 
 impl StoredPlane {
+    /// Memory-map a spilled plane file.
+    pub(crate) fn map(path: PathBuf) -> Result<Self, FrameStoreError> {
+        let file = File::open(&path).map_err(|source| FrameStoreError::OpenFile {
+            path: path.clone(),
+            source,
+        })?;
+        let mmap = unsafe {
+            Mmap::map(&file).map_err(|source| FrameStoreError::MemoryMap {
+                path: path.clone(),
+                source,
+            })?
+        };
+        #[cfg(unix)]
+        {
+            use memmap2::Advice;
+            let _ = mmap.advise(Advice::Sequential);
+        }
+        Ok(Self::Mapped(mmap))
+    }
+
     /// Samples the plane holds. The only geometry a stored plane knows — width and height are
     /// the cache's, not the plane's.
     #[inline]
@@ -199,6 +222,32 @@ impl StoredFrame {
             source_stats,
         }
     }
+
+    /// Write the frame's channels and quality planes under `directory` and memory-map them back.
+    pub(crate) fn spill(
+        directory: &Path,
+        name: &str,
+        image: &impl StackableImage,
+        coverage: Option<Buffer2<f32>>,
+        confidence: Option<Buffer2<f32>>,
+        source_stats: FrameStats,
+    ) -> Result<Self, FrameStoreError> {
+        let channels = spill_channels(directory, name, image)?.planes;
+        let spill_quality = |suffix: &str, plane: Option<Buffer2<f32>>| match plane {
+            Some(plane) => {
+                let path = directory.join(format!("{name}_{suffix}.bin"));
+                write_plane(&path, &plane)?;
+                Ok(Some(StoredPlane::map(path)?))
+            }
+            None => Ok(None),
+        };
+        Ok(Self {
+            channels,
+            coverage: spill_quality("coverage", coverage)?,
+            confidence: spill_quality("confidence", confidence)?,
+            source_stats,
+        })
+    }
 }
 
 #[derive(Debug)]
@@ -230,6 +279,24 @@ pub(crate) struct StoredImage {
 }
 
 impl StoredImage {
+    /// Write `image`'s channels under `directory` and memory-map them back.
+    pub(crate) fn spill(
+        directory: &Path,
+        name: &str,
+        image: &LinearImage,
+    ) -> Result<Self, FrameStoreError> {
+        let dimensions = image.dimensions();
+        let spilled = spill_channels(directory, name, image)?;
+        Ok(Self {
+            metadata: image.metadata.clone(),
+            dimensions,
+            channels: spilled.planes,
+            _spill_files: SpillFiles {
+                paths: spilled.paths,
+            },
+        })
+    }
+
     pub(crate) fn load(&self) -> LinearImage {
         let sample_count = self.dimensions.pixel_count();
         let planes = self
@@ -240,48 +307,6 @@ impl StoredImage {
         image.metadata = self.metadata.clone();
         image
     }
-}
-
-pub(crate) fn store_image(
-    directory: &Path,
-    name: &str,
-    image: &LinearImage,
-) -> Result<StoredImage, FrameStoreError> {
-    let dimensions = image.dimensions();
-    let spilled = spill_channels(directory, name, image)?;
-    Ok(StoredImage {
-        metadata: image.metadata.clone(),
-        dimensions,
-        channels: spilled.planes,
-        _spill_files: SpillFiles {
-            paths: spilled.paths,
-        },
-    })
-}
-
-pub(crate) fn store_frame(
-    directory: &Path,
-    name: &str,
-    image: &impl StackableImage,
-    coverage: Option<Buffer2<f32>>,
-    confidence: Option<Buffer2<f32>>,
-    source_stats: FrameStats,
-) -> Result<StoredFrame, FrameStoreError> {
-    let channels = spill_channels(directory, name, image)?.planes;
-    let spill_quality = |suffix: &str, plane: Option<Buffer2<f32>>| match plane {
-        Some(plane) => {
-            let path = directory.join(format!("{name}_{suffix}.bin"));
-            write_plane(&path, &plane)?;
-            Ok(Some(StoredPlane::Mapped(map_plane(path)?)))
-        }
-        None => Ok(None),
-    };
-    Ok(StoredFrame {
-        channels,
-        coverage: spill_quality("coverage", coverage)?,
-        confidence: spill_quality("confidence", confidence)?,
-        source_stats,
-    })
 }
 
 fn spill_channels(
@@ -295,7 +320,7 @@ fn spill_channels(
     for channel in 0..dimensions.channels() {
         let path = directory.join(channel_filename(name, channel));
         write_plane(&path, image.channel(channel))?;
-        planes.push(StoredPlane::Mapped(map_plane(path.clone())?));
+        planes.push(StoredPlane::map(path.clone())?);
         paths.push(path);
     }
     Ok(SpilledChannels { planes, paths })
@@ -340,25 +365,6 @@ fn write_plane(path: &Path, pixels: &[f32]) -> Result<(), FrameStoreError> {
             source,
         }
     })
-}
-
-pub(crate) fn map_plane(path: PathBuf) -> Result<Mmap, FrameStoreError> {
-    let file = File::open(&path).map_err(|source| FrameStoreError::OpenFile {
-        path: path.clone(),
-        source,
-    })?;
-    let mmap = unsafe {
-        Mmap::map(&file).map_err(|source| FrameStoreError::MemoryMap {
-            path: path.clone(),
-            source,
-        })?
-    };
-    #[cfg(unix)]
-    {
-        use memmap2::Advice;
-        let _ = mmap.advise(Advice::Sequential);
-    }
-    Ok(mmap)
 }
 
 const MIN_CHUNK_ROWS: usize = 64;

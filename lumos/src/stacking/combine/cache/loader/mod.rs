@@ -22,8 +22,8 @@ use crate::stacking::combine::error::Error;
 use crate::stacking::combine::normalization::compute_frame_norms;
 use crate::stacking::frame_store::{
     FrameStats, FrameStoreError, SpillDirectory, StackableImage, StoredFrame, StoredPlane,
-    cache_filename, channel_filename, compute_frame_stats, decode_transient_bytes, fits_in_memory,
-    frame_bytes, load_concurrency, map_plane, reusable_plane, store_frame,
+    cache_filename, channel_filename, decode_transient_bytes, fits_in_memory, frame_bytes,
+    load_concurrency, reusable_plane,
 };
 use crate::stacking::progress::{ProgressCallback, StackingStage, report_progress};
 
@@ -236,7 +236,7 @@ fn load_in_memory<I: StackableImage, P: AsRef<Path> + Sync>(
         }
         validate_image_samples(&image, idx, cancel)?;
         let metadata = (idx == 0).then(|| image.metadata().clone());
-        let stats = compute_frame_stats(&image);
+        let stats = FrameStats::measure(&image);
         Ok(LoadedMemoryFrame {
             frame: StoredFrame::from_memory(image, None, None, stats),
             metadata,
@@ -248,7 +248,7 @@ fn load_in_memory<I: StackableImage, P: AsRef<Path> + Sync>(
     if let Some(first_image) = first {
         validate_image_samples(&first_image, 0, cancel)?;
         metadata = Some(first_image.metadata().clone());
-        let stats = compute_frame_stats(&first_image);
+        let stats = FrameStats::measure(&first_image);
         frames.push(StoredFrame::from_memory(first_image, None, None, stats));
     }
     for loaded_frame in loaded {
@@ -287,10 +287,10 @@ fn load_to_disk<I: StackableImage, P: AsRef<Path> + Sync>(
     // Cache first image and compute stats. Frame 0 carries the stack metadata.
     validate_image_samples(&first_image, 0, cancel)?;
     let metadata = first_image.metadata().clone();
-    let first_stats = compute_frame_stats(&first_image);
+    let first_stats = FrameStats::measure(&first_image);
     let first_path = paths[0].as_ref();
     let base_filename = cache_filename(first_path);
-    let first_cached = store_frame(
+    let first_cached = StoredFrame::spill(
         cache_dir,
         &base_filename,
         &first_image,
@@ -479,7 +479,7 @@ fn load_and_cache_frame<I: StackableImage>(
         let mut planes = ArrayVec::new();
         for c in 0..channels {
             let channel_path = cache_dir.join(channel_filename(base_filename, c));
-            planes.push(StoredPlane::Mapped(map_plane(channel_path)?));
+            planes.push(StoredPlane::map(channel_path)?);
         }
         tracing::debug!(
             source = %source_path.display(),
@@ -518,9 +518,10 @@ fn load_and_cache_frame<I: StackableImage>(
             .into());
         }
 
-        let stats = compute_frame_stats(&image);
-        let stored = store_frame(cache_dir, base_filename, &image, None, None, stats.clone())
-            .map_err(Error::from)?;
+        let stats = FrameStats::measure(&image);
+        let stored =
+            StoredFrame::spill(cache_dir, base_filename, &image, None, None, stats.clone())
+                .map_err(Error::from)?;
 
         // The identity sidecar is the commit record for the planes and stats.
         write_frame_stats(cache_dir, base_filename, &stats)?;
