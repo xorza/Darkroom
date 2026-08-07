@@ -71,21 +71,26 @@ pub(crate) fn median_f32_fast(data: &mut [f32]) -> f32 {
     *median
 }
 
+/// Replace `scratch` with `|value - median|` for each of `values`, leaving it exactly as long.
+///
+/// One pass: the subtraction rides on the copy rather than following it, and the buffer's
+/// previous contents are never written before being overwritten.
+#[inline]
+fn fill_abs_deviations(values: &[f32], median: f32, scratch: &mut Vec<f32>) {
+    scratch.clear();
+    scratch.extend(values.iter().map(|&value| (value - median).abs()));
+}
+
 /// Compute MAD using fast median (no NaN handling, single partition).
 ///
 /// For use in rejection hot paths where data is guaranteed NaN-free.
-/// Writes deviations directly into `scratch[..values.len()]` (must have sufficient length).
 #[inline]
 pub(crate) fn mad_f32_fast(values: &[f32], median: f32, scratch: &mut Vec<f32>) -> f32 {
-    let n = values.len();
-    if n == 0 {
+    if values.is_empty() {
         return 0.0;
     }
-    scratch.resize(n, 0.0);
-    for i in 0..n {
-        scratch[i] = (values[i] - median).abs();
-    }
-    median_f32_fast(&mut scratch[..n])
+    fill_abs_deviations(values, median, scratch);
+    median_f32_fast(scratch)
 }
 
 /// Compute MAD (Median Absolute Deviation) using a scratch buffer.
@@ -96,8 +101,7 @@ pub(crate) fn mad_f32_with_scratch(values: &[f32], median: f32, scratch: &mut Ve
     if values.is_empty() {
         return 0.0;
     }
-    scratch.clear();
-    scratch.extend(values.iter().map(|&v| (v - median).abs()));
+    fill_abs_deviations(values, median, scratch);
     median_f32_mut(scratch)
 }
 
