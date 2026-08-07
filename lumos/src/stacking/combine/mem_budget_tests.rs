@@ -20,10 +20,9 @@ use fits_well::image::Image;
 
 use crate::io::image::LoadContext;
 use crate::io::image::linear::LinearImage;
-use crate::resources::memory_budget;
+use crate::memory::{fits_in_memory, load_concurrency, memory_budget};
 use crate::stacking::combine::config::StackConfig;
 use crate::stacking::combine::stack::stack;
-use crate::stacking::frame_store::{fits_in_memory, load_concurrency};
 use crate::stacking::progress::ProgressCallback;
 use crate::testing::ScratchDirectory;
 

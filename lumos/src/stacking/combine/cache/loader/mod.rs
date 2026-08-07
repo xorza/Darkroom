@@ -16,14 +16,14 @@ use crate::io::image::error::ImageError;
 use crate::io::image::linear::LinearImage;
 use crate::io::image::{ImageDimensions, ImageMetadata};
 use crate::math::statistics::ChannelStats;
+use crate::memory::{decode_transient_bytes, fits_in_memory, frame_bytes, load_concurrency};
 use crate::stacking::combine::cache_config::CacheConfig;
 use crate::stacking::combine::config::Normalization;
 use crate::stacking::combine::error::Error;
 use crate::stacking::combine::normalization::compute_frame_norms;
 use crate::stacking::frame_store::{
-    FrameStats, FrameStoreError, SpillDirectory, StackableImage, StoredFrame, StoredPlane,
-    cache_filename, channel_filename, decode_transient_bytes, fits_in_memory, frame_bytes,
-    load_concurrency, reusable_plane,
+    FrameSpill, FrameStats, FrameStoreError, SpillDirectory, StackableImage, StoredFrame,
+    StoredPlane,
 };
 use crate::stacking::progress::{ProgressCallback, StackingStage};
 
@@ -289,7 +289,7 @@ fn load_to_disk<I: StackableImage, P: AsRef<Path> + Sync>(
     let metadata = first_image.metadata().clone();
     let first_stats = FrameStats::measure(&first_image);
     let first_path = paths[0].as_ref();
-    let base_filename = cache_filename(first_path);
+    let base_filename = FrameSpill::cache_name(first_path);
     let first_cached = StoredFrame::spill(
         cache_dir,
         &base_filename,
@@ -318,7 +318,7 @@ fn load_to_disk<I: StackableImage, P: AsRef<Path> + Sync>(
             return Err(Error::Cancelled);
         }
         let path = path.as_ref();
-        let base_filename = cache_filename(path);
+        let base_filename = FrameSpill::cache_name(path);
         load_and_cache_frame::<I>(
             cache_dir,
             &base_filename,
@@ -465,21 +465,16 @@ fn load_and_cache_frame<I: StackableImage>(
     let identity_before = source_identity(source_path)?;
 
     // Check if all channel files exist, have correct size, and source hasn't changed
+    let spill = FrameSpill::new(cache_dir, base_filename);
     let meta_valid = validate_source_meta(cache_dir, base_filename, &identity_before);
     let cached_stats = read_frame_stats(cache_dir, base_filename);
-    let can_reuse = meta_valid
-        && cached_stats.is_some()
-        && (0..channels).all(|c| {
-            let channel_path = cache_dir.join(channel_filename(base_filename, c));
-            reusable_plane(&channel_path, dimensions)
-        });
+    let can_reuse = meta_valid && cached_stats.is_some() && spill.channels_reusable(dimensions);
 
     if can_reuse {
         // Reuse existing cache files - just mmap them
         let mut planes = ArrayVec::new();
         for c in 0..channels {
-            let channel_path = cache_dir.join(channel_filename(base_filename, c));
-            planes.push(StoredPlane::map(channel_path)?);
+            planes.push(StoredPlane::map(spill.channel_path(c))?);
         }
         tracing::debug!(
             source = %source_path.display(),

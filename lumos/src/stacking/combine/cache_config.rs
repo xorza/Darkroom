@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use crate::resources;
+use crate::memory;
 
 /// Common configuration for cache-based stacking methods (median, sigma-clipped).
 #[derive(Clone, Debug, PartialEq)]
@@ -46,7 +46,7 @@ impl CacheConfig {
     /// Get available memory, using the override when configured.
     pub(crate) fn get_available_memory(&self) -> u64 {
         self.available_memory
-            .unwrap_or_else(resources::available_memory)
+            .unwrap_or_else(memory::available_memory)
     }
 }
 

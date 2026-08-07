@@ -18,7 +18,7 @@ use crate::io::image::fits::provenance::FitsTransferProvenance;
 use crate::io::image::linear::LinearImage;
 use crate::io::raw;
 use crate::math::vec2us::Vec2us;
-use crate::resources;
+use crate::memory;
 
 const FITS_EXTENSIONS: &[&str] = &["fits", "fit"];
 const STANDARD_IMAGE_EXTENSIONS: &[&str] = &["tiff", "tif", "png", "jpg", "jpeg"];
@@ -63,7 +63,7 @@ impl Default for LoadContext {
     fn default() -> Self {
         Self::new(
             CancelToken::never(),
-            resources::memory_budget(resources::available_memory()),
+            memory::memory_budget(memory::available_memory()),
         )
     }
 }

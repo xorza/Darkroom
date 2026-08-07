@@ -29,7 +29,7 @@ pub(crate) mod error;
 pub(crate) mod image_ops;
 pub(crate) mod io;
 pub(crate) mod math;
-pub(crate) mod resources;
+pub(crate) mod memory;
 pub(crate) mod stacking;
 
 #[cfg(test)]
