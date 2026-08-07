@@ -26,8 +26,7 @@ const H: usize = 128;
 
 fn demo_scene(seed: u64) -> Scene {
     Scene::random_field(
-        W,
-        H,
+        Size2us::new(W, H),
         20,
         (4.0, 10.0),
         BackgroundField::Uniform { level: 0.1 },

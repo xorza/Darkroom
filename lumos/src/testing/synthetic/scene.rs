@@ -92,8 +92,7 @@ impl LogUniformFlux {
 #[derive(Debug, Clone)]
 pub(crate) struct Scene {
     /// Sky extent in reference-frame pixels; sources/background live within this.
-    pub(crate) width: usize,
-    pub(crate) height: usize,
+    pub(crate) size: Size2us,
     pub(crate) sources: Vec<TrueSource>,
     pub(crate) background: BackgroundField,
 }
@@ -102,15 +101,13 @@ impl Scene {
     /// A single source at `pos` with `flux` over `background`. Useful for precise
     /// photometric/astrometric verification.
     pub(crate) fn single(
-        width: usize,
-        height: usize,
+        size: Size2us,
         pos: DVec2,
         flux: f32,
         background: BackgroundField,
     ) -> Self {
         Scene {
-            width,
-            height,
+            size,
             sources: vec![TrueSource { pos, flux }],
             background,
         }
@@ -121,8 +118,7 @@ impl Scene {
     /// Fluxes are drawn **log-uniformly** in `flux_range` (a realistic brightness spread, not a
     /// flat one); `margin` keeps sources off the edges. Deterministic in `seed`.
     pub(crate) fn random_field(
-        width: usize,
-        height: usize,
+        size: Size2us,
         count: usize,
         flux_range: (f32, f32),
         background: BackgroundField,
@@ -133,16 +129,15 @@ impl Scene {
         let mut rng = TestRng::new(seed);
         let mut sources = Vec::with_capacity(count);
         for _ in 0..count {
-            let x = margin + rng.next_f64() * (width as f64 - 2.0 * margin);
-            let y = margin + rng.next_f64() * (height as f64 - 2.0 * margin);
+            let x = margin + rng.next_f64() * (size.width as f64 - 2.0 * margin);
+            let y = margin + rng.next_f64() * (size.height as f64 - 2.0 * margin);
             sources.push(TrueSource {
                 pos: DVec2::new(x, y),
                 flux: flux_dist.sample(&mut rng),
             });
         }
         Scene {
-            width,
-            height,
+            size,
             sources,
             background,
         }
@@ -152,8 +147,7 @@ impl Scene {
     /// sparse halo — a crowded cluster for deblend/labeling stress. Fluxes are log-uniform in
     /// `flux_range`; deterministic in `seed`.
     pub(crate) fn cluster(
-        width: usize,
-        height: usize,
+        size: Size2us,
         count: usize,
         flux_range: (f32, f32),
         background: BackgroundField,
@@ -161,8 +155,8 @@ impl Scene {
     ) -> Self {
         let flux_dist = LogUniformFlux::new(flux_range);
         let mut rng = TestRng::new(seed);
-        let (cx, cy) = (width as f64 / 2.0, height as f64 / 2.0);
-        let core_sigma = width.min(height) as f64 * 0.12;
+        let (cx, cy) = (size.width as f64 / 2.0, size.height as f64 / 2.0);
+        let core_sigma = size.width.min(size.height) as f64 * 0.12;
         let core_count = (count as f64 * 0.8) as usize;
         let margin = 4.0;
 
@@ -174,17 +168,17 @@ impl Scene {
                     let x = cx + rng.next_gaussian_f32() as f64 * core_sigma;
                     let y = cy + rng.next_gaussian_f32() as f64 * core_sigma;
                     if x >= margin
-                        && x < width as f64 - margin
+                        && x < size.width as f64 - margin
                         && y >= margin
-                        && y < height as f64 - margin
+                        && y < size.height as f64 - margin
                     {
                         break DVec2::new(x, y);
                     }
                 }
             } else {
                 DVec2::new(
-                    margin + rng.next_f64() * (width as f64 - 2.0 * margin),
-                    margin + rng.next_f64() * (height as f64 - 2.0 * margin),
+                    margin + rng.next_f64() * (size.width as f64 - 2.0 * margin),
+                    margin + rng.next_f64() * (size.height as f64 - 2.0 * margin),
                 )
             };
             sources.push(TrueSource {
@@ -193,8 +187,7 @@ impl Scene {
             });
         }
         Scene {
-            width,
-            height,
+            size,
             sources,
             background,
         }
@@ -235,7 +228,14 @@ mod tests {
     #[test]
     fn random_field_count_bounds_and_reproducibility() {
         let bg = BackgroundField::Uniform { level: 0.05 };
-        let a = Scene::random_field(200, 200, 50, (1.0, 100.0), bg.clone(), 10.0, 42);
+        let a = Scene::random_field(
+            Size2us::new(200, 200),
+            50,
+            (1.0, 100.0),
+            bg.clone(),
+            10.0,
+            42,
+        );
         assert_eq!(a.sources.len(), 50);
         for s in &a.sources {
             assert!(s.pos.x >= 10.0 && s.pos.x <= 190.0);
@@ -243,7 +243,7 @@ mod tests {
             assert!(s.flux >= 1.0 && s.flux <= 100.0);
         }
         // Same seed → identical scene.
-        let b = Scene::random_field(200, 200, 50, (1.0, 100.0), bg, 10.0, 42);
+        let b = Scene::random_field(Size2us::new(200, 200), 50, (1.0, 100.0), bg, 10.0, 42);
         for (sa, sb) in a.sources.iter().zip(&b.sources) {
             assert_eq!(sa.pos, sb.pos);
             assert_eq!(sa.flux, sb.flux);
@@ -253,8 +253,7 @@ mod tests {
     #[test]
     fn single_source_scene() {
         let scene = Scene::single(
-            64,
-            64,
+            Size2us::new(64, 64),
             DVec2::new(32.0, 32.0),
             5.0,
             BackgroundField::Uniform { level: 0.0 },
@@ -272,8 +271,7 @@ mod tests {
     fn cluster_is_centrally_concentrated() {
         let (w, h) = (400usize, 400usize);
         let scene = Scene::cluster(
-            w,
-            h,
+            Size2us::new(w, h),
             500,
             (1.0, 10.0),
             BackgroundField::Uniform { level: 0.0 },

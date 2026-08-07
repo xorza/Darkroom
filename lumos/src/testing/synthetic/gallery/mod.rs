@@ -83,8 +83,8 @@ fn save_frame(scene: &Scene, camera: &Camera, obs: &Observation, name: &str, str
     let frame = render(scene, camera, obs);
     save(
         frame.image.channel(0).pixels(),
-        scene.width,
-        scene.height,
+        scene.size.width,
+        scene.size.height,
         name,
         stretch,
     );
@@ -92,7 +92,14 @@ fn save_frame(scene: &Scene, camera: &Camera, obs: &Observation, name: &str, str
 
 /// A representative populated star field over `background`.
 fn demo_field(width: usize, height: usize, background: BackgroundField, seed: u64) -> Scene {
-    Scene::random_field(width, height, 120, (3.0, 250.0), background, 16.0, seed)
+    Scene::random_field(
+        Size2us::new(width, height),
+        120,
+        (3.0, 250.0),
+        background,
+        16.0,
+        seed,
+    )
 }
 
 #[test]
@@ -195,7 +202,12 @@ fn gallery_psf_models() {
         ),
     ];
     for (name, psf) in cases {
-        let scene = Scene::single(w, h, DVec2::new(32.0, 32.0), 8.0, dark.clone());
+        let scene = Scene::single(
+            Size2us::new(w, h),
+            DVec2::new(32.0, 32.0),
+            8.0,
+            dark.clone(),
+        );
         let camera = Camera {
             psf,
             ..Camera::ideal(4.0)
@@ -216,8 +228,7 @@ fn gallery_psf_models() {
 fn gallery_noise() {
     let (w, h) = (200, 200);
     let flat = Scene {
-        width: w,
-        height: h,
+        size: Size2us::new(w, h),
         sources: vec![],
         background: BackgroundField::Uniform { level: 0.2 },
     };
@@ -293,8 +304,7 @@ fn gallery_sensor() {
 
     // A uniform sky seen through that vignette.
     let sky = Scene {
-        width: w,
-        height: h,
+        size: Size2us::new(w, h),
         sources: vec![],
         background: BackgroundField::Uniform { level: 0.3 },
     };
@@ -344,8 +354,7 @@ fn gallery_scenes() {
     let (w, h) = (512, 512);
 
     let sparse = Scene::random_field(
-        w,
-        h,
+        Size2us::new(w, h),
         40,
         (5.0, 250.0),
         BackgroundField::Uniform { level: 0.05 },
@@ -397,8 +406,7 @@ fn gallery_scenes() {
 
     // Saturation: very bright sources clip flat at the well.
     let bright = Scene::random_field(
-        w,
-        h,
+        Size2us::new(w, h),
         25,
         (300.0, 4000.0),
         BackgroundField::Uniform { level: 0.05 },

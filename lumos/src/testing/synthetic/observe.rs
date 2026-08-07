@@ -68,11 +68,11 @@ pub(crate) struct SimFrame {
 
 /// Render `scene` through `camera` for one `obs` into a grayscale [`SimFrame`].
 pub(crate) fn render(scene: &Scene, camera: &Camera, obs: &Observation) -> SimFrame {
-    let width = scene.width;
-    let height = scene.height;
+    let width = scene.size.width;
+    let height = scene.size.height;
 
     // 1 + 2. Geometry + PSF + background → the clean (pre-flat) signal, and the truth catalog.
-    let mut clean = scene.background.render(Size2us::new(width, height));
+    let mut clean = scene.background.render(scene.size);
     let mut observed = Vec::with_capacity(scene.sources.len());
     let recovered_fwhm = camera.psf.fwhm() * obs.seeing_scale;
     for src in &scene.sources {
@@ -204,8 +204,7 @@ mod tests {
     fn ideal_render_equals_clean() {
         // Dim scene so the clean peak stays below saturation (no clamp difference).
         let scene = Scene::single(
-            64,
-            64,
+            Size2us::new(64, 64),
             DVec2::new(32.0, 32.0),
             2.0,
             BackgroundField::Uniform { level: 0.1 },
@@ -222,8 +221,7 @@ mod tests {
     #[test]
     fn source_lands_at_transformed_position() {
         let scene = Scene::single(
-            64,
-            64,
+            Size2us::new(64, 64),
             DVec2::new(20.0, 20.0),
             5.0,
             BackgroundField::Uniform { level: 0.0 },
@@ -241,8 +239,7 @@ mod tests {
     #[test]
     fn flux_conserved_in_clean() {
         let scene = Scene::single(
-            81,
-            81,
+            Size2us::new(81, 81),
             DVec2::new(40.0, 40.0),
             50.0,
             BackgroundField::Uniform { level: 0.0 },
@@ -256,8 +253,7 @@ mod tests {
     fn flat_applied_to_clean_truth() {
         // Uniform 0.3 sky, vignette flat: clean = bg × flat, so center (≈0.3) > darkened corner.
         let scene = Scene {
-            width: 64,
-            height: 64,
+            size: Size2us::new(64, 64),
             sources: vec![],
             background: BackgroundField::Uniform { level: 0.3 },
         };
@@ -280,8 +276,7 @@ mod tests {
     #[test]
     fn noise_raises_variance_but_keeps_mean() {
         let scene = Scene {
-            width: 128,
-            height: 128,
+            size: Size2us::new(128, 128),
             sources: vec![],
             background: BackgroundField::Uniform { level: 0.2 },
         };
@@ -302,8 +297,7 @@ mod tests {
     #[test]
     fn dither_shifts_peak() {
         let scene = Scene::single(
-            64,
-            64,
+            Size2us::new(64, 64),
             DVec2::new(20.0, 32.0),
             5.0,
             BackgroundField::Uniform { level: 0.0 },
@@ -324,8 +318,7 @@ mod tests {
     #[test]
     fn bias_and_defects_applied() {
         let scene = Scene {
-            width: 32,
-            height: 32,
+            size: Size2us::new(32, 32),
             sources: vec![],
             background: BackgroundField::Uniform { level: 0.0 },
         };
@@ -354,8 +347,7 @@ mod tests {
     fn saturation_clamps_bright_source() {
         // A flux-20 source at fwhm 3 has a clean peak ~2.0; the well clips it at `saturation`.
         let scene = Scene::single(
-            64,
-            64,
+            Size2us::new(64, 64),
             DVec2::new(32.0, 32.0),
             20.0,
             BackgroundField::Uniform { level: 0.1 },
@@ -392,8 +384,7 @@ mod tests {
     #[test]
     fn bad_columns_raise_their_column() {
         let scene = Scene {
-            width: 32,
-            height: 32,
+            size: Size2us::new(32, 32),
             sources: vec![],
             background: BackgroundField::Uniform { level: 0.1 },
         };
@@ -426,8 +417,7 @@ mod tests {
         // Dark pedestal = dark_rate·exposure/full_well. With read noise off and an empty sky, the
         // mean pixel is that pedestal, so a 100× exposure scales it ~100×.
         let scene = Scene {
-            width: 128,
-            height: 128,
+            size: Size2us::new(128, 128),
             sources: vec![],
             background: BackgroundField::Uniform { level: 0.0 },
         };

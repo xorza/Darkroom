@@ -6,6 +6,7 @@
 //! a vignette + dark + bias, recovers a star field through a single noisy light, and the
 //! `DefectMap` detects injected hot/cold pixels exactly and repairs them.
 
+use crate::math::size2us::Size2us;
 use crate::stacking::calibration_masters::defect_map::DefectMap;
 use crate::testing::TestRng;
 use crate::testing::synthetic::camera::Camera;
@@ -107,8 +108,7 @@ fn calibrate_recovers_star_field_through_a_noisy_light() {
 
     // True signal (sky + stars), noiseless.
     let scene = Scene::random_field(
-        w,
-        h,
+        Size2us::new(w, h),
         12,
         (3.0, 9.0),
         BackgroundField::Uniform { level: 0.1 },

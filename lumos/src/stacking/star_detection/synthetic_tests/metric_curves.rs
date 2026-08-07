@@ -6,6 +6,7 @@
 //! a source-free noise field yields essentially no false positives, completeness falls under
 //! crowding, and the `min_snr` knob gates the faint end.
 
+use crate::math::size2us::Size2us;
 use crate::stacking::star_detection::detector::StarDetector;
 use crate::stacking::star_detection::synthetic_tests::{
     Placement, Scenario, detected_positions, synthetic_config, truth_positions,
@@ -108,8 +109,7 @@ fn completeness_falls_for_fainter_sources() {
 #[test]
 fn negligible_false_positives_on_source_free_noise() {
     let scene = Scene {
-        width: 256,
-        height: 256,
+        size: Size2us::new(256, 256),
         sources: vec![],
         background: BackgroundField::Uniform { level: 0.1 },
     };
