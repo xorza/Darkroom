@@ -7,6 +7,7 @@ use crate::stacking::star_detection::centroid::lm_optimizer::{
     FitData, NormalEquations, accumulate_chi2, accumulate_normal_equations,
 };
 use crate::stacking::star_detection::centroid::moffat_fit::{MoffatFixedBeta, PowStrategy};
+use crate::stacking::star_detection::centroid::simd::hsum;
 use std::arch::x86_64::*;
 
 /// SIMD `int_pow`: compute u^n for each lane using repeated squaring.
@@ -188,15 +189,6 @@ pub(super) unsafe fn batch_build_normal_equations_avx2(
 
             // Row 4: h44 = sum of j4*j4 = count of pixels (added after loop)
             v_h44 = _mm256_add_pd(v_h44, v_one); // j4=1, so h44 += 1
-        }
-
-        // Horizontal sum helper
-        #[inline(always)]
-        #[allow(unsafe_op_in_unsafe_fn)]
-        unsafe fn hsum(v: __m256d) -> f64 {
-            let mut arr = [0.0f64; 4];
-            _mm256_storeu_pd(arr.as_mut_ptr(), v);
-            arr[0] + arr[1] + arr[2] + arr[3]
         }
 
         let chi2 = hsum(v_chi2);

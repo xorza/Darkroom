@@ -12,6 +12,7 @@ use crate::stacking::star_detection::centroid::gaussian_fit::{
 use crate::stacking::star_detection::centroid::lm_optimizer::{
     FitData, NormalEquations, accumulate_chi2, accumulate_normal_equations,
 };
+use crate::stacking::star_detection::centroid::simd::hsum;
 use std::arch::x86_64::*;
 
 const LOG2E: f64 = LOG2_E;
@@ -75,16 +76,6 @@ unsafe fn simd_exp_fast(x: __m256d) -> __m256d {
     let pow2n = _mm256_castsi256_pd(pow2n);
 
     _mm256_mul_pd(exp_r, pow2n)
-}
-
-/// Horizontal sum of 4 f64 lanes.
-#[target_feature(enable = "avx2,fma")]
-#[inline]
-#[allow(unsafe_op_in_unsafe_fn)]
-unsafe fn hsum(v: __m256d) -> f64 {
-    let mut arr = [0.0f64; 4];
-    _mm256_storeu_pd(arr.as_mut_ptr(), v);
-    arr[0] + arr[1] + arr[2] + arr[3]
 }
 
 /// Batch build normal equations (J^T J, J^T r, chi²) using AVX2+FMA.

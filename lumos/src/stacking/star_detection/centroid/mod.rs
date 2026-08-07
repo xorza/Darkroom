@@ -12,6 +12,8 @@ mod gaussian_fit;
 mod linear_solver;
 mod lm_optimizer;
 mod moffat_fit;
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+mod simd;
 
 #[cfg(test)]
 mod bench;
