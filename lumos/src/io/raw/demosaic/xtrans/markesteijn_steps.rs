@@ -219,7 +219,6 @@ struct SolitaryGreenCandidate {
     difference: f32,
 }
 
-#[allow(clippy::too_many_arguments)]
 #[inline(always)]
 fn solitary_green_candidate(
     xtrans: &XTransImage,
@@ -284,7 +283,6 @@ fn solitary_green_candidate(
     SolitaryGreenCandidate { colors, difference }
 }
 
-#[allow(clippy::too_many_arguments)]
 #[inline(always)]
 fn solitary_green_colors(
     xtrans: &XTransImage,
@@ -716,7 +714,6 @@ pub(crate) fn compute_derivatives(
 }
 
 /// Pre-compute YPbPr values for an entire row, storing results in `out`.
-#[allow(clippy::too_many_arguments)]
 #[inline(always)]
 fn compute_ypbpr_row(
     xtrans: &XTransImage,
