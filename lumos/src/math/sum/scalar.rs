@@ -13,10 +13,20 @@ pub(crate) fn neumaier_add(sum: &mut f32, c: &mut f32, v: f32) {
     *sum = t;
 }
 
+/// Sum f32 values into an f64 accumulator, unrounded.
+///
+/// Naive f64 accumulation beats f32 compensated summation by orders of magnitude at any length
+/// this crate sums (error `n·2⁻⁵³` against `2·2⁻²⁴`), so the wider accumulator *is* the accurate
+/// choice, not a fallback for one.
+#[inline]
+pub(crate) fn sum_f64(values: &[f32]) -> f64 {
+    values.iter().map(|&value| f64::from(value)).sum::<f64>()
+}
+
 /// Sum f32 values using a wider accumulator.
 #[inline]
 pub(crate) fn sum_f32(values: &[f32]) -> f32 {
-    values.iter().map(|&value| f64::from(value)).sum::<f64>() as f32
+    sum_f64(values) as f32
 }
 
 /// Weighted mean using wider products and accumulators.

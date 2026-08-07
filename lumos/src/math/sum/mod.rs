@@ -33,10 +33,22 @@ pub(crate) fn sum_f32(values: &[f32]) -> f32 {
     scalar::sum_f32(values)
 }
 
-/// Calculate the mean of f32 values using SIMD-accelerated sum.
+/// Mean of f32 values, rounded to f32 exactly once.
+///
+/// Accumulates and divides in f64 rather than reusing the SIMD [`sum_f32`]. Two reasons, and
+/// both are about the result rather than the loop:
+///
+/// - Rounding the sum to f32 and *then* dividing rounds twice, landing up to an extra ULP from
+///   the exact mean.
+/// - This is the unit-weight case of [`weighted_mean_f32`], and the combine reaches the same
+///   pixel through either function depending on whether frame weights are in play. Sharing the
+///   f64 accumulate-then-divide shape makes the two agree bit-for-bit below the weighted mean's
+///   SIMD threshold, so which entry point a stack takes cannot change its output.
+///
+/// Every caller averages over a frame count (tens), far below where the SIMD sum would pay.
 pub(crate) fn mean_f32(values: &[f32]) -> f32 {
     debug_assert!(!values.is_empty());
-    sum_f32(values) / values.len() as f32
+    (scalar::sum_f64(values) / values.len() as f64) as f32
 }
 
 /// Compute weighted mean of values with corresponding weights using SIMD when available.
