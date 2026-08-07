@@ -185,6 +185,14 @@ pub fn stack_cfa_master(
     if paths.is_empty() {
         return Ok(None);
     }
+    // The only combine entry point that does not go through `combine_cached`, so it is also the
+    // only one that has to validate for itself. Without this an out-of-range rejection reaches
+    // the reducer, where a NaN sigma rejects every sample and yields a silently black master.
+
+    // The only combine entry point that does not go through `combine_cached`, so it is also the
+    // only one that has to validate for itself. Without this an out-of-range rejection reaches
+    // the reducer, where a NaN sigma rejects every sample and yields a silently black master.
+    config.validate()?;
 
     // A master is mosaic data for the calibration stage to consume, not a science product: the
     // ancillary planes would be allocated and written per pixel for nothing.

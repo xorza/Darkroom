@@ -73,3 +73,21 @@ fn translated_images_use_border_only_outside_source_footprint() {
         }
     }
 }
+
+#[test]
+#[should_panic(expected = "warp border_value must be finite")]
+fn warp_refuses_a_non_finite_border() {
+    // `WarpParams::validate` is only reached through `RegistrationConfig::validate`, so a direct
+    // caller of the public `warp` could fill every out-of-footprint pixel with NaN and have it
+    // noticed only by a debug assert deep in the combine.
+    let image = LinearImage::from_pixels(ImageDimensions::new((4, 4), 1), vec![0.5; 16]);
+    let transform = WarpTransform::new(Transform::translation(DVec2::new(1.0, 1.0)));
+    resample::warp(
+        &image,
+        &transform,
+        &WarpParams {
+            border_value: f32::NAN,
+            ..Default::default()
+        },
+    );
+}
