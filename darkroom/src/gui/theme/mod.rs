@@ -26,10 +26,11 @@ const VALUE_EDITOR_MAX_WIDTH: f32 = 240.0;
 // the matching role.
 //
 // Sourced from the semantic palette TOMLs in `assets/`:
-//   - `dark`  — `ayu-graphite-palette.toml` (Ayu Mirage High Contrast)
-//   - `light` — `ayu-light-palette.toml`    (Zed's "Ayu Light")
-// The toml files are the hand-edited reference; the consts here are the
-// compile-time copy. Keep in sync when the palette changes.
+//   - `dark`  — `ayu-graphite-palette.toml`
+//   - `light` — `ayu-light-palette.toml`
+// Both are generated from `assets/ayu-graphite-base.toml` by
+// `tools/build_palettes.py`; edit the base, rerun the generator, then bring
+// the compile-time copy here back in step.
 
 pub(crate) mod dark {
     use super::{HoverColor, TypeColors};
