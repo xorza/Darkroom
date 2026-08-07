@@ -3,22 +3,14 @@
   The shared-mime-info package for darkroom projects. Installed by
   `install.sh` as <data dir>/mime/packages/darkroom.xml.
 
-  A project file is a zip archive, so declaring the glob alone is not enough:
-  content sniffing recognizes the container and the file reads as a plain
-  `application/zip`, handled by whatever the desktop assigns to archives. The
-  two rules below are what make it read as its own type.
+  A project is a zip. `sub-class-of` keeps archive handlers working and makes
+  the glob outrank the container's own `application/zip` sniff, so a named
+  file needs nothing else. The magic — `document.json` at offset 30, past the
+  signature and local file header — covers only the extensionless case, and
+  flatpak strips magic rules on export, leaving a flatpak install glob-only.
 
-  - `sub-class-of` says a darkroom project *is* a zip, so anything that can
-    handle archives still can, while the more specific type wins for us.
-  - The magic matches the archive's single entry, `document.json`, at offset
-    30 — a zip's first filename sits right after the 4-byte signature and the
-    26-byte local file header. That identifies a project by content, so a file
-    that has lost its extension is still recognized. It is the same rule ODF
-    and EPUB use for their marker entries.
-
-  The type's icon needs no `<icon>` element: the default lookup name is the
-  type with `/` replaced by `-`, which is what `install.sh` writes into the
-  `mimetypes` icon directories.
+  No `<icon>` element needed; the default lookup is the type with `/` as `-`.
+  `flatpak.sh` splices one in, anchored on the `sub-class-of` line below.
 -->
 <mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
   <mime-type type="application/x-darkroom">
