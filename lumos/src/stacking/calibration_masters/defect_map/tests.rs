@@ -365,7 +365,7 @@ fn test_cfa_hot_pixel_correction_bayer() {
     let defect_map = DefectMap {
         hot_indices: vec![2 * 6 + 2],
         cold_indices: vec![],
-        dimensions: Some(Vec2us::new(6, 6)),
+        dimensions: Some(Size2us::new(6, 6)),
     };
 
     defect_map.correct(&mut image);
@@ -387,7 +387,7 @@ fn test_cfa_hot_pixel_correction_mono() {
     let defect_map = DefectMap {
         hot_indices: vec![4],
         cold_indices: vec![],
-        dimensions: Some(Vec2us::new(3, 3)),
+        dimensions: Some(Size2us::new(3, 3)),
     };
 
     defect_map.correct(&mut image);
@@ -856,7 +856,7 @@ fn test_correct_cfa_dimension_mismatch() {
     let defect_map = DefectMap {
         hot_indices: vec![],
         cold_indices: vec![],
-        dimensions: Some(Vec2us::new(2, 2)),
+        dimensions: Some(Size2us::new(2, 2)),
     };
 
     defect_map.correct(&mut image);

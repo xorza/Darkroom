@@ -7,6 +7,8 @@
 
 use rayon::prelude::*;
 
+use crate::math::size2us::Size2us;
+
 #[cfg(target_arch = "x86_64")]
 use imaginarium::cpu_features;
 
@@ -159,16 +161,15 @@ pub(super) fn convolve_row_scalar(
 pub(super) fn convolve_cols_direct(
     input: &[f32],
     output: &mut [f32],
-    width: usize,
-    height: usize,
+    size: Size2us,
     kernel: &[f32],
     radius: usize,
 ) {
     output
-        .par_chunks_mut(width)
+        .par_chunks_mut(size.width)
         .enumerate()
         .for_each(|(y, out_row)| {
-            convolve_cols_row(input, out_row, width, height, y, kernel, radius);
+            convolve_cols_row(input, out_row, size, y, kernel, radius);
         });
 }
 
@@ -177,8 +178,7 @@ pub(super) fn convolve_cols_direct(
 fn convolve_cols_row(
     input: &[f32],
     out_row: &mut [f32],
-    width: usize,
-    height: usize,
+    size: Size2us,
     y: usize,
     kernel: &[f32],
     radius: usize,
@@ -187,13 +187,13 @@ fn convolve_cols_row(
     {
         if cpu_features::has_avx2_fma() {
             unsafe {
-                x86::convolve_cols_row_avx2(input, out_row, width, height, y, kernel, radius);
+                x86::convolve_cols_row_avx2(input, out_row, size, y, kernel, radius);
             }
             return;
         }
         if cpu_features::has_sse4_1() {
             unsafe {
-                x86::convolve_cols_row_sse41(input, out_row, width, height, y, kernel, radius);
+                x86::convolve_cols_row_sse41(input, out_row, size, y, kernel, radius);
             }
             return;
         }
@@ -202,14 +202,14 @@ fn convolve_cols_row(
     #[cfg(target_arch = "aarch64")]
     {
         unsafe {
-            neon::convolve_cols_row_neon(input, out_row, width, height, y, kernel, radius);
+            neon::convolve_cols_row_neon(input, out_row, size, y, kernel, radius);
         }
         return;
     }
 
     // Scalar fallback is dead code on aarch64, where the NEON path returns unconditionally.
     #[allow(unreachable_code)]
-    convolve_cols_row_scalar(input, out_row, width, height, y, kernel, radius);
+    convolve_cols_row_scalar(input, out_row, size, y, kernel, radius);
 }
 
 /// Scalar single column-row convolution.
@@ -217,8 +217,7 @@ fn convolve_cols_row(
 fn convolve_cols_row_scalar(
     input: &[f32],
     out_row: &mut [f32],
-    width: usize,
-    height: usize,
+    size: Size2us,
     y: usize,
     kernel: &[f32],
     radius: usize,
@@ -226,8 +225,8 @@ fn convolve_cols_row_scalar(
     for (x, out) in out_row.iter_mut().enumerate() {
         let mut sum = 0.0f32;
         for (k, &kval) in kernel.iter().enumerate() {
-            let sy = mirror_index(y as isize + k as isize - radius as isize, height);
-            sum += input[sy * width + x] * kval;
+            let sy = mirror_index(y as isize + k as isize - radius as isize, size.height);
+            sum += input[sy * size.width + x] * kval;
         }
         *out = sum;
     }
@@ -240,8 +239,7 @@ fn convolve_cols_row_scalar(
 pub(super) fn convolve_2d_row(
     input: &[f32],
     output_row: &mut [f32],
-    width: usize,
-    height: usize,
+    size: Size2us,
     y: usize,
     kernel: Kernel2d,
 ) {
@@ -249,13 +247,13 @@ pub(super) fn convolve_2d_row(
     {
         if cpu_features::has_avx2_fma() {
             unsafe {
-                x86::convolve_2d_row_avx2(input, output_row, width, height, y, kernel);
+                x86::convolve_2d_row_avx2(input, output_row, size, y, kernel);
             }
             return;
         }
         if cpu_features::has_sse4_1() {
             unsafe {
-                x86::convolve_2d_row_sse41(input, output_row, width, height, y, kernel);
+                x86::convolve_2d_row_sse41(input, output_row, size, y, kernel);
             }
             return;
         }
@@ -264,14 +262,14 @@ pub(super) fn convolve_2d_row(
     #[cfg(target_arch = "aarch64")]
     {
         unsafe {
-            neon::convolve_2d_row_neon(input, output_row, width, height, y, kernel);
+            neon::convolve_2d_row_neon(input, output_row, size, y, kernel);
         }
         return;
     }
 
     // Scalar fallback is dead code on aarch64, where the NEON path returns unconditionally.
     #[allow(unreachable_code)]
-    convolve_2d_row_scalar(input, output_row, width, height, y, kernel);
+    convolve_2d_row_scalar(input, output_row, size, y, kernel);
 }
 
 /// Scalar implementation of single-row 2D convolution.
@@ -279,8 +277,7 @@ pub(super) fn convolve_2d_row(
 fn convolve_2d_row_scalar(
     input: &[f32],
     output_row: &mut [f32],
-    width: usize,
-    height: usize,
+    size: Size2us,
     y: usize,
     kernel: Kernel2d,
 ) {
@@ -288,10 +285,10 @@ fn convolve_2d_row_scalar(
     for (x, out_px) in output_row.iter_mut().enumerate() {
         let mut sum = 0.0f32;
         for ky in 0..kernel.size() {
-            let sy = mirror_index(y as isize + ky as isize - radius, height);
+            let sy = mirror_index(y as isize + ky as isize - radius, size.height);
             for kx in 0..kernel.size() {
-                let sx = mirror_index(x as isize + kx as isize - radius, width);
-                sum += input[sy * width + sx] * kernel.at(ky, kx);
+                let sx = mirror_index(x as isize + kx as isize - radius, size.width);
+                sum += input[sy * size.width + sx] * kernel.at(ky, kx);
             }
         }
         *out_px = sum;

@@ -404,10 +404,10 @@ fn load_raw_libraw_demosaic(path: &Path, user_qual: i32) -> Result<LinearImage, 
         (*raw.inner).params.user_qual = user_qual;
     }
 
-    let (pixels, out_width, out_height, num_channels) = raw.demosaic_libraw_fallback()?;
+    let demosaiced = raw.demosaic_libraw_fallback()?;
 
-    let dimensions = ImageDimensions::new((out_width, out_height), num_channels);
-    Ok(LinearImage::from_pixels(dimensions, pixels))
+    let dimensions = ImageDimensions::new(demosaiced.size, demosaiced.channels);
+    Ok(LinearImage::from_pixels(dimensions, demosaiced.pixels))
 }
 
 #[derive(Debug)]

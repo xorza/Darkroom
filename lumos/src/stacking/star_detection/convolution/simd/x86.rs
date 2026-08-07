@@ -9,6 +9,7 @@
 
 use std::arch::x86_64::*;
 
+use crate::math::size2us::Size2us;
 use crate::stacking::star_detection::convolution::simd::{Kernel2d, convolve_pixel_scalar};
 
 /// Convolve a row using AVX2 + FMA intrinsics.
@@ -154,8 +155,7 @@ pub(super) unsafe fn convolve_row_sse41(
 pub(super) unsafe fn convolve_cols_row_avx2(
     input: &[f32],
     out_row: &mut [f32],
-    width: usize,
-    height: usize,
+    size: Size2us,
     y: usize,
     kernel: &[f32],
     radius: usize,
@@ -164,22 +164,22 @@ pub(super) unsafe fn convolve_cols_row_avx2(
         use crate::stacking::star_detection::convolution::simd::mirror_index;
 
         let mut x = 0;
-        while x + 8 <= width {
+        while x + 8 <= size.width {
             let mut sum = _mm256_setzero_ps();
             for (k, &kval) in kernel.iter().enumerate() {
-                let sy = mirror_index(y as isize + k as isize - radius as isize, height);
-                let vals = _mm256_loadu_ps(input.as_ptr().add(sy * width + x));
+                let sy = mirror_index(y as isize + k as isize - radius as isize, size.height);
+                let vals = _mm256_loadu_ps(input.as_ptr().add(sy * size.width + x));
                 sum = _mm256_fmadd_ps(vals, _mm256_set1_ps(kval), sum);
             }
             _mm256_storeu_ps(out_row.as_mut_ptr().add(x), sum);
             x += 8;
         }
 
-        while x < width {
+        while x < size.width {
             let mut sum = 0.0f32;
             for (k, &kval) in kernel.iter().enumerate() {
-                let sy = mirror_index(y as isize + k as isize - radius as isize, height);
-                sum += input[sy * width + x] * kval;
+                let sy = mirror_index(y as isize + k as isize - radius as isize, size.height);
+                sum += input[sy * size.width + x] * kval;
             }
             out_row[x] = sum;
             x += 1;
@@ -196,8 +196,7 @@ pub(super) unsafe fn convolve_cols_row_avx2(
 pub(super) unsafe fn convolve_cols_row_sse41(
     input: &[f32],
     out_row: &mut [f32],
-    width: usize,
-    height: usize,
+    size: Size2us,
     y: usize,
     kernel: &[f32],
     radius: usize,
@@ -206,22 +205,22 @@ pub(super) unsafe fn convolve_cols_row_sse41(
         use crate::stacking::star_detection::convolution::simd::mirror_index;
 
         let mut x = 0;
-        while x + 4 <= width {
+        while x + 4 <= size.width {
             let mut sum = _mm_setzero_ps();
             for (k, &kval) in kernel.iter().enumerate() {
-                let sy = mirror_index(y as isize + k as isize - radius as isize, height);
-                let vals = _mm_loadu_ps(input.as_ptr().add(sy * width + x));
+                let sy = mirror_index(y as isize + k as isize - radius as isize, size.height);
+                let vals = _mm_loadu_ps(input.as_ptr().add(sy * size.width + x));
                 sum = _mm_add_ps(sum, _mm_mul_ps(vals, _mm_set1_ps(kval)));
             }
             _mm_storeu_ps(out_row.as_mut_ptr().add(x), sum);
             x += 4;
         }
 
-        while x < width {
+        while x < size.width {
             let mut sum = 0.0f32;
             for (k, &kval) in kernel.iter().enumerate() {
-                let sy = mirror_index(y as isize + k as isize - radius as isize, height);
-                sum += input[sy * width + x] * kval;
+                let sy = mirror_index(y as isize + k as isize - radius as isize, size.height);
+                sum += input[sy * size.width + x] * kval;
             }
             out_row[x] = sum;
             x += 1;
@@ -239,8 +238,7 @@ pub(super) unsafe fn convolve_cols_row_sse41(
 pub(super) unsafe fn convolve_2d_row_avx2(
     input: &[f32],
     output_row: &mut [f32],
-    width: usize,
-    height: usize,
+    size: Size2us,
     y: usize,
     kernel: Kernel2d,
 ) {
@@ -251,12 +249,12 @@ pub(super) unsafe fn convolve_2d_row_avx2(
 
         // Process 8 output pixels at a time
         let mut x = 0;
-        while x + 8 <= width {
+        while x + 8 <= size.width {
             let mut sum = _mm256_setzero_ps();
 
             for ky in 0..kernel.size() {
-                let sy = mirror_index(y as isize + ky as isize - radius, height);
-                let input_row_offset = sy * width;
+                let sy = mirror_index(y as isize + ky as isize - radius, size.height);
+                let input_row_offset = sy * size.width;
 
                 for kx in 0..kernel.size() {
                     let kval = kernel.at(ky, kx);
@@ -267,7 +265,7 @@ pub(super) unsafe fn convolve_2d_row_avx2(
                     let kv = _mm256_set1_ps(kval);
                     let base_sx = x as isize + kx as isize - radius;
 
-                    if base_sx >= 0 && base_sx + 8 <= width as isize {
+                    if base_sx >= 0 && base_sx + 8 <= size.width as isize {
                         let vals = _mm256_loadu_ps(
                             input.as_ptr().add(input_row_offset + base_sx as usize),
                         );
@@ -276,7 +274,7 @@ pub(super) unsafe fn convolve_2d_row_avx2(
                         let mut vals = [0.0f32; 8];
                         for i in 0..8 {
                             let sx = base_sx + i as isize;
-                            let sx = mirror_index(sx, width);
+                            let sx = mirror_index(sx, size.width);
                             vals[i] = input[input_row_offset + sx];
                         }
                         let vvals = _mm256_loadu_ps(vals.as_ptr());
@@ -290,13 +288,13 @@ pub(super) unsafe fn convolve_2d_row_avx2(
         }
 
         // Handle remaining pixels with scalar
-        while x < width {
+        while x < size.width {
             let mut sum = 0.0f32;
             for ky in 0..kernel.size() {
-                let sy = mirror_index(y as isize + ky as isize - radius, height);
+                let sy = mirror_index(y as isize + ky as isize - radius, size.height);
                 for kx in 0..kernel.size() {
-                    let sx = mirror_index(x as isize + kx as isize - radius, width);
-                    sum += input[sy * width + sx] * kernel.at(ky, kx);
+                    let sx = mirror_index(x as isize + kx as isize - radius, size.width);
+                    sum += input[sy * size.width + sx] * kernel.at(ky, kx);
                 }
             }
             output_row[x] = sum;
@@ -315,8 +313,7 @@ pub(super) unsafe fn convolve_2d_row_avx2(
 pub(super) unsafe fn convolve_2d_row_sse41(
     input: &[f32],
     output_row: &mut [f32],
-    width: usize,
-    height: usize,
+    size: Size2us,
     y: usize,
     kernel: Kernel2d,
 ) {
@@ -327,12 +324,12 @@ pub(super) unsafe fn convolve_2d_row_sse41(
 
         // Process 4 output pixels at a time
         let mut x = 0;
-        while x + 4 <= width {
+        while x + 4 <= size.width {
             let mut sum = _mm_setzero_ps();
 
             for ky in 0..kernel.size() {
-                let sy = mirror_index(y as isize + ky as isize - radius, height);
-                let input_row_offset = sy * width;
+                let sy = mirror_index(y as isize + ky as isize - radius, size.height);
+                let input_row_offset = sy * size.width;
 
                 for kx in 0..kernel.size() {
                     let kval = kernel.at(ky, kx);
@@ -343,7 +340,7 @@ pub(super) unsafe fn convolve_2d_row_sse41(
                     let kv = _mm_set1_ps(kval);
                     let base_sx = x as isize + kx as isize - radius;
 
-                    if base_sx >= 0 && base_sx + 4 <= width as isize {
+                    if base_sx >= 0 && base_sx + 4 <= size.width as isize {
                         let vals =
                             _mm_loadu_ps(input.as_ptr().add(input_row_offset + base_sx as usize));
                         sum = _mm_add_ps(sum, _mm_mul_ps(vals, kv));
@@ -351,7 +348,7 @@ pub(super) unsafe fn convolve_2d_row_sse41(
                         let mut vals = [0.0f32; 4];
                         for i in 0..4 {
                             let sx = base_sx + i as isize;
-                            let sx = mirror_index(sx, width);
+                            let sx = mirror_index(sx, size.width);
                             vals[i] = input[input_row_offset + sx];
                         }
                         let vvals = _mm_loadu_ps(vals.as_ptr());
@@ -365,13 +362,13 @@ pub(super) unsafe fn convolve_2d_row_sse41(
         }
 
         // Handle remaining pixels with scalar
-        while x < width {
+        while x < size.width {
             let mut sum = 0.0f32;
             for ky in 0..kernel.size() {
-                let sy = mirror_index(y as isize + ky as isize - radius, height);
+                let sy = mirror_index(y as isize + ky as isize - radius, size.height);
                 for kx in 0..kernel.size() {
-                    let sx = mirror_index(x as isize + kx as isize - radius, width);
-                    sum += input[sy * width + sx] * kernel.at(ky, kx);
+                    let sx = mirror_index(x as isize + kx as isize - radius, size.width);
+                    sum += input[sy * size.width + sx] * kernel.at(ky, kx);
                 }
             }
             output_row[x] = sum;
@@ -476,8 +473,7 @@ mod tests {
                 convolve_cols_row_avx2(
                     &input,
                     &mut output_avx2[y * width..(y + 1) * width],
-                    width,
-                    height,
+                    Size2us::new(width, height),
                     y,
                     &kernel,
                     radius,
@@ -532,8 +528,7 @@ mod tests {
                 convolve_cols_row_sse41(
                     &input,
                     &mut output_sse[y * width..(y + 1) * width],
-                    width,
-                    height,
+                    Size2us::new(width, height),
                     y,
                     &kernel,
                     radius,

@@ -2,7 +2,7 @@
 
 use rayon::prelude::*;
 
-use crate::math::vec2us::Vec2us;
+use crate::math::size2us::Size2us;
 use crate::stacking::registration::config::InterpolationMethod;
 use crate::stacking::registration::resample::{kernel, row};
 use crate::stacking::registration::transform::WarpTransform;
@@ -67,22 +67,22 @@ fn separable_confidence(x: AxisWeightStats, y: AxisWeightStats) -> f32 {
     }
 }
 
-fn bilinear_quality(pos: Vec2, dims: Vec2us) -> SampleQuality {
+fn bilinear_quality(pos: Vec2, size: Size2us) -> SampleQuality {
     let (sx, sy) = (pos.x, pos.y);
     let x0 = sx.floor() as i32;
     let y0 = sy.floor() as i32;
     let fx = sx - x0 as f32;
     let fy = sy - y0 as f32;
-    let x = axis_weight_stats(x0, &[1.0 - fx, fx], dims.x);
-    let y = axis_weight_stats(y0, &[1.0 - fy, fy], dims.y);
+    let x = axis_weight_stats(x0, &[1.0 - fx, fx], size.width);
+    let y = axis_weight_stats(y0, &[1.0 - fy, fy], size.height);
     SampleQuality {
         coverage: separable_coverage(x, y),
         confidence: separable_confidence(x, y),
     }
 }
 
-fn quality_at(pos: Vec2, dims: Vec2us, method: InterpolationMethod) -> SampleQuality {
-    if !kernel::source_footprint_contains(pos, dims) {
+fn quality_at(pos: Vec2, size: Size2us, method: InterpolationMethod) -> SampleQuality {
+    if !kernel::source_footprint_contains(pos, size) {
         return SampleQuality::default();
     }
     let (sx, sy) = (pos.x, pos.y);
@@ -91,7 +91,7 @@ fn quality_at(pos: Vec2, dims: Vec2us, method: InterpolationMethod) -> SampleQua
             coverage: 1.0,
             confidence: 1.0,
         },
-        InterpolationMethod::Bilinear => bilinear_quality(pos, dims),
+        InterpolationMethod::Bilinear => bilinear_quality(pos, size),
         InterpolationMethod::Bicubic => {
             let x0 = sx.floor() as i32;
             let y0 = sy.floor() as i32;
@@ -99,8 +99,8 @@ fn quality_at(pos: Vec2, dims: Vec2us, method: InterpolationMethod) -> SampleQua
             let fy = sy - y0 as f32;
             let wx = kernel::bicubic_weights(fx);
             let wy = kernel::bicubic_weights(fy);
-            let x = axis_weight_stats(x0 - 1, &wx, dims.x);
-            let y = axis_weight_stats(y0 - 1, &wy, dims.y);
+            let x = axis_weight_stats(x0 - 1, &wx, size.width);
+            let y = axis_weight_stats(y0 - 1, &wy, size.height);
             SampleQuality {
                 coverage: separable_coverage(x, y),
                 confidence: separable_confidence(x, y),
@@ -116,28 +116,28 @@ fn quality_at(pos: Vec2, dims: Vec2us, method: InterpolationMethod) -> SampleQua
             let fx = sx - x0 as f32;
             let fy = sy - y0 as f32;
             let ai = a as i32;
-            let size = 2 * a;
+            let taps = 2 * a;
             let mut wx = [0.0f32; 8];
             let mut wy = [0.0f32; 8];
-            for i in 0..size {
+            for i in 0..taps {
                 wx[i] = lut.lookup(fx - (i as i32 - ai + 1) as f32);
                 wy[i] = lut.lookup(fy - (i as i32 - ai + 1) as f32);
             }
             let start_x = x0 - ai + 1;
             let start_y = y0 - ai + 1;
-            let x = axis_weight_stats(start_x, &wx[..size], dims.x);
-            let y = axis_weight_stats(start_y, &wy[..size], dims.y);
+            let x = axis_weight_stats(start_x, &wx[..taps], size.width);
+            let y = axis_weight_stats(start_y, &wy[..taps], size.height);
             let coverage = separable_coverage(x, y);
             let fully_supported = start_x >= 0
                 && start_y >= 0
-                && start_x + size as i32 <= dims.x as i32
-                && start_y + size as i32 <= dims.y as i32;
+                && start_x + taps as i32 <= size.width as i32
+                && start_y + taps as i32 <= size.height as i32;
             let confidence = if coverage == 0.0 {
                 0.0
             } else if fully_supported {
                 separable_confidence(x, y)
             } else {
-                bilinear_quality(kernel::clamp_to_pixel_centers(pos, dims), dims).confidence
+                bilinear_quality(kernel::clamp_to_pixel_centers(pos, size), size).confidence
             };
             SampleQuality {
                 coverage,
@@ -147,18 +147,18 @@ fn quality_at(pos: Vec2, dims: Vec2us, method: InterpolationMethod) -> SampleQua
     }
 }
 
-pub(super) fn maps(dims: Vec2us, transform: &WarpTransform, method: InterpolationMethod) -> Maps {
-    let mut coverage = Buffer2::new_default(dims.x, dims.y);
-    let mut confidence = Buffer2::new_default(dims.x, dims.y);
+pub(super) fn maps(size: Size2us, transform: &WarpTransform, method: InterpolationMethod) -> Maps {
+    let mut coverage = Buffer2::new_default(size.width, size.height);
+    let mut confidence = Buffer2::new_default(size.width, size.height);
     coverage
         .pixels_mut()
-        .par_chunks_mut(dims.x)
-        .zip(confidence.pixels_mut().par_chunks_mut(dims.x))
+        .par_chunks_mut(size.width)
+        .zip(confidence.pixels_mut().par_chunks_mut(size.width))
         .enumerate()
         .for_each(|(y, (coverage_row, confidence_row))| {
-            row::for_each_source_position(y, transform, dims.x, |x, pos| {
+            row::for_each_source_position(y, transform, size.width, |x, pos| {
                 let quality =
-                    pos.map_or_else(SampleQuality::default, |pos| quality_at(pos, dims, method));
+                    pos.map_or_else(SampleQuality::default, |pos| quality_at(pos, size, method));
                 coverage_row[x] = quality.coverage;
                 confidence_row[x] = quality.confidence;
             });

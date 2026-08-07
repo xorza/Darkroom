@@ -7,6 +7,7 @@
 
 use crate::io::image::ImageDimensions;
 use crate::io::raw::demosaic::DemosaicMemory;
+use crate::math::size2us::Size2us;
 
 /// Share of available RAM the pipeline will commit, leaving the rest as headroom for allocator
 /// slack, the OS page cache, and whatever else the machine is doing.
@@ -58,12 +59,12 @@ pub(crate) struct ChunkMemoryLayout {
 /// Rows a combine may hold at once: the budget left after the resident planes, divided by the
 /// cost of a row, floored at [`MIN_CHUNK_ROWS`] so a tight budget still makes progress.
 pub(crate) fn optimal_chunk_rows(
-    width: usize,
-    height: usize,
+    size: Size2us,
     layout: ChunkMemoryLayout,
     available_memory: u64,
 ) -> usize {
-    let bytes_per_row = width
+    let bytes_per_row = size
+        .width
         .checked_mul(layout.input_planes)
         .and_then(|value| value.checked_mul(size_of::<f32>()))
         .map(|value| value as u64)
@@ -71,8 +72,9 @@ pub(crate) fn optimal_chunk_rows(
     if bytes_per_row == 0 {
         return MIN_CHUNK_ROWS;
     }
-    let resident_bytes = width
-        .checked_mul(height)
+    let resident_bytes = size
+        .width
+        .checked_mul(size.height)
         .and_then(|value| value.checked_mul(layout.resident_planes))
         .and_then(|value| value.checked_mul(size_of::<f32>()))
         .map(|value| value as u64)
@@ -254,8 +256,7 @@ mod tests {
             let expected = (usable / bytes_per_row).max(MIN_CHUNK_ROWS as u64) as usize;
             assert_eq!(
                 optimal_chunk_rows(
-                    width,
-                    100,
+                    Size2us::new(width, 100),
                     ChunkMemoryLayout {
                         input_planes,
                         resident_planes: 0,
@@ -270,8 +271,7 @@ mod tests {
         // bytes; nine active input planes consume 3,600 bytes/row, leaving exactly 85 whole rows.
         assert_eq!(
             optimal_chunk_rows(
-                100,
-                200,
+                Size2us::new(100, 200),
                 ChunkMemoryLayout {
                     input_planes: 9,
                     resident_planes: 6,
@@ -282,8 +282,7 @@ mod tests {
         );
         assert_eq!(
             optimal_chunk_rows(
-                0,
-                100,
+                Size2us::new(0, 100),
                 ChunkMemoryLayout {
                     input_planes: 60,
                     resident_planes: 3,
@@ -294,8 +293,7 @@ mod tests {
         );
         assert_eq!(
             optimal_chunk_rows(
-                100,
-                200,
+                Size2us::new(100, 200),
                 ChunkMemoryLayout {
                     input_planes: 9,
                     resident_planes: 10,

@@ -7,6 +7,7 @@
 
 pub(crate) mod dmat3;
 pub(crate) mod rect;
+pub(crate) mod size2us;
 pub(crate) mod vec2us;
 
 pub(crate) mod statistics;

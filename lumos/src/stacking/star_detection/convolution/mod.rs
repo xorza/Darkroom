@@ -18,6 +18,7 @@ mod tests;
 use rayon::prelude::*;
 
 use crate::math::fwhm_to_sigma;
+use crate::math::size2us::Size2us;
 use imaginarium::Buffer2;
 
 /// Maximum deviation of axis_ratio from 1.0 to use the faster separable
@@ -208,7 +209,13 @@ fn convolve_2d(pixels: &Buffer2<f32>, kernel: &GaussianKernel2d, output: &mut Bu
         .par_chunks_mut(width)
         .enumerate()
         .for_each(|(y, out_row)| {
-            simd::convolve_2d_row(pixels.pixels(), out_row, width, height, y, kernel);
+            simd::convolve_2d_row(
+                pixels.pixels(),
+                out_row,
+                Size2us::new(width, height),
+                y,
+                kernel,
+            );
         });
 }
 
@@ -253,18 +260,10 @@ fn convolve_rows_parallel(input: &Buffer2<f32>, output: &mut Buffer2<f32>, kerne
 
 /// Convolve all columns: rayon-parallel over output rows, SIMD across the columns within each row.
 fn convolve_cols(input: &Buffer2<f32>, output: &mut Buffer2<f32>, kernel: &[f32]) {
-    let width = input.width();
-    let height = input.height();
+    let size = Size2us::new(input.width(), input.height());
     let radius = kernel.len() / 2;
 
-    simd::convolve_cols_direct(
-        input.pixels(),
-        output.pixels_mut(),
-        width,
-        height,
-        kernel,
-        radius,
-    );
+    simd::convolve_cols_direct(input.pixels(), output.pixels_mut(), size, kernel, radius);
 }
 
 /// Direct 2D Gaussian convolution for small images or large kernels.

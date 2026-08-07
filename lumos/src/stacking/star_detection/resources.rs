@@ -3,7 +3,7 @@
 //! The resources retain image buffers and stage-specific workspaces across detections.
 
 use crate::bit_buffer2::BitBuffer2;
-use crate::math::vec2us::Vec2us;
+use crate::math::size2us::Size2us;
 use crate::stacking::star_detection::background::workspace::BackgroundWorkspace;
 use imaginarium::Buffer2;
 
@@ -16,7 +16,7 @@ use imaginarium::Buffer2;
 /// zeroed, but a reused one keeps its previous data. Callers must overwrite before reading.
 #[derive(Debug)]
 pub(crate) struct DetectionResources {
-    pub(crate) dimensions: Vec2us,
+    pub(crate) dimensions: Size2us,
     /// Pool of f32 buffers (for grayscale, scratch, background, noise, etc.)
     f32_buffers: Vec<Buffer2<f32>>,
     /// Pool of BitBuffer2 (for threshold masks, dilation scratch, etc.)
@@ -30,7 +30,7 @@ impl DetectionResources {
     /// Create resources for the given image dimensions.
     pub(crate) fn new(width: usize, height: usize) -> Self {
         Self {
-            dimensions: Vec2us::new(width, height),
+            dimensions: Size2us::new(width, height),
             f32_buffers: Vec::new(),
             bit_buffers: Vec::new(),
             u32_buffer: None,
@@ -42,7 +42,7 @@ impl DetectionResources {
     pub(crate) fn acquire_f32(&mut self) -> Buffer2<f32> {
         self.f32_buffers
             .pop()
-            .unwrap_or_else(|| Buffer2::new_default(self.dimensions.x, self.dimensions.y))
+            .unwrap_or_else(|| Buffer2::new_default(self.dimensions.width, self.dimensions.height))
     }
 
     /// Return an f32 buffer to the pool for reuse.
@@ -53,16 +53,16 @@ impl DetectionResources {
         // silently reused by SIMD kernels elsewhere in this module that do unchecked-length
         // loads/stores off the pool's declared dimensions — out-of-bounds UB, not a wrong pixel.
         // The check is O(1) per acquire/release, not "too expensive for release".
-        assert_eq!(buffer.width(), self.dimensions.x);
-        assert_eq!(buffer.height(), self.dimensions.y);
+        assert_eq!(buffer.width(), self.dimensions.width);
+        assert_eq!(buffer.height(), self.dimensions.height);
         self.f32_buffers.push(buffer);
     }
 
     /// Acquire a BitBuffer2 from the pool, or allocate a new one.
     pub(crate) fn acquire_bit(&mut self) -> BitBuffer2 {
-        self.bit_buffers
-            .pop()
-            .unwrap_or_else(|| BitBuffer2::new_filled(self.dimensions.x, self.dimensions.y, false))
+        self.bit_buffers.pop().unwrap_or_else(|| {
+            BitBuffer2::new_filled(self.dimensions.width, self.dimensions.height, false)
+        })
     }
 
     /// Return a BitBuffer2 to the pool for reuse.
@@ -71,8 +71,8 @@ impl DetectionResources {
     pub(crate) fn release_bit(&mut self, buffer: BitBuffer2) {
         // See release_f32: release assert, not debug — a mismatch here is out-of-bounds UB in
         // a downstream SIMD kernel, not a wrong pixel.
-        assert_eq!(buffer.width, self.dimensions.x);
-        assert_eq!(buffer.height, self.dimensions.y);
+        assert_eq!(buffer.width, self.dimensions.width);
+        assert_eq!(buffer.height, self.dimensions.height);
         self.bit_buffers.push(buffer);
     }
 
@@ -80,7 +80,7 @@ impl DetectionResources {
     pub(crate) fn acquire_u32(&mut self) -> Buffer2<u32> {
         self.u32_buffer
             .take()
-            .unwrap_or_else(|| Buffer2::new_default(self.dimensions.x, self.dimensions.y))
+            .unwrap_or_else(|| Buffer2::new_default(self.dimensions.width, self.dimensions.height))
     }
 
     /// Return the u32 buffer to the pool for reuse.
@@ -89,8 +89,8 @@ impl DetectionResources {
     pub(crate) fn release_u32(&mut self, buffer: Buffer2<u32>) {
         // See release_f32: release assert, not debug — a mismatch here is out-of-bounds UB in
         // a downstream SIMD kernel, not a wrong pixel.
-        assert_eq!(buffer.width(), self.dimensions.x);
-        assert_eq!(buffer.height(), self.dimensions.y);
+        assert_eq!(buffer.width(), self.dimensions.width);
+        assert_eq!(buffer.height(), self.dimensions.height);
         self.u32_buffer = Some(buffer);
     }
 
@@ -104,16 +104,16 @@ impl DetectionResources {
 
     /// Reset the pool for new dimensions, clearing all buffers.
     pub(crate) fn reset(&mut self, width: usize, height: usize) {
-        if self.dimensions.x != width || self.dimensions.y != height {
+        if self.dimensions != Size2us::new(width, height) {
             self.clear();
-            self.dimensions.x = width;
-            self.dimensions.y = height;
+            self.dimensions = Size2us::new(width, height);
         }
     }
 }
 
 #[cfg(test)]
 pub(crate) mod internals {
+    use crate::math::size2us::Size2us;
     use crate::stacking::star_detection::resources::DetectionResources;
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -128,7 +128,7 @@ pub(crate) mod internals {
         width: usize,
         height: usize,
     ) -> bool {
-        resources.dimensions.x == width && resources.dimensions.y == height
+        resources.dimensions == Size2us::new(width, height)
     }
 
     pub(crate) fn buffer_counts(resources: &DetectionResources) -> BufferCounts {
@@ -142,7 +142,7 @@ pub(crate) mod internals {
 
 #[cfg(test)]
 mod tests {
-    use crate::math::vec2us::Vec2us;
+    use crate::math::size2us::Size2us;
     use crate::stacking::star_detection::resources::DetectionResources;
     use crate::stacking::star_detection::resources::internals::BufferCounts;
     use crate::stacking::star_detection::resources::internals::buffer_counts;
@@ -152,7 +152,7 @@ mod tests {
     #[test]
     fn test_pool_creation() {
         let pool = DetectionResources::new(100, 50);
-        assert_eq!(pool.dimensions, Vec2us::new(100, 50));
+        assert_eq!(pool.dimensions, Size2us::new(100, 50));
         assert!(matches_dimensions(&pool, 100, 50));
         assert!(!matches_dimensions(&pool, 50, 100));
     }
@@ -269,7 +269,7 @@ mod tests {
 
         // Reset to different dimensions clears buffers
         pool.reset(128, 128);
-        assert_eq!(pool.dimensions, Vec2us::new(128, 128));
+        assert_eq!(pool.dimensions, Size2us::new(128, 128));
         assert!(pool.f32_buffers.is_empty());
     }
 }

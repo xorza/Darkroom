@@ -20,6 +20,7 @@ use crate::background_mesh::workspace::MeshWorkspace;
 use crate::error::InvalidConfigField;
 use crate::image_ops::op::{OpError, require_f32_master};
 use crate::image_ops::process_channels;
+use crate::math::size2us::Size2us;
 use crate::math::statistics::MAD_TO_SIGMA;
 use imaginarium::Image;
 
@@ -162,7 +163,7 @@ fn extract_background_plane(
     let samples = collect_samples(plane, config.tile_size, workspace);
     let terms = poly_terms(effective_degree(samples.len(), config.degree));
     let coeffs = fit_surface(&samples, &terms, config.rejection_sigma, config.iterations)?;
-    let surface = Surface::new(&coeffs, &terms, plane.width(), plane.height());
+    let surface = Surface::new(&coeffs, &terms, Size2us::new(plane.width(), plane.height()));
     match config.mode {
         BackgroundMode::Subtract => surface.remove(plane, |p, m| p - m),
         BackgroundMode::Divide => {
@@ -343,12 +344,11 @@ struct Surface {
     /// Row-major `C[i*d1 + j]` for the monomials `x^i·y^j`; `(degree+1)² ≤ 25`.
     c_mat: [f64; 25],
     degree: usize,
-    width: usize,
-    height: usize,
+    size: Size2us,
 }
 
 impl Surface {
-    fn new(coeffs: &DVector<f64>, terms: &[(u32, u32)], width: usize, height: usize) -> Self {
+    fn new(coeffs: &DVector<f64>, terms: &[(u32, u32)], size: Size2us) -> Self {
         let degree = terms
             .iter()
             .map(|&(i, j)| (i + j) as usize)
@@ -364,15 +364,14 @@ impl Surface {
         Self {
             c_mat,
             degree,
-            width,
-            height,
+            size,
         }
     }
 
     /// Collapse the y dimension for row `y`: `b[i] = Σ_j C[i][j]·y^j`.
     fn row_coeffs(&self, y: usize) -> [f64; 5] {
         let d1 = self.degree + 1;
-        let ny = norm(y as f64, self.height);
+        let ny = norm(y as f64, self.size.height);
         let mut yp = [0.0f64; 5];
         yp[0] = 1.0;
         for j in 1..d1 {
@@ -388,7 +387,7 @@ impl Surface {
     /// Rewrite every pixel as `remove(pixel, model)`, evaluating the surface on the fly,
     /// parallel over rows.
     fn remove(&self, plane: &mut Buffer2<f32>, remove: impl Fn(f32, f32) -> f32 + Sync) {
-        let (w, degree) = (self.width, self.degree);
+        let (w, degree) = (self.size.width, self.degree);
         plane
             .pixels_mut()
             .par_chunks_mut(w)
@@ -410,8 +409,8 @@ impl Surface {
     /// separable, so `mean = Σ C[i][j] · mean_x(x^i) · mean_y(y^j)`.
     fn mean(&self) -> f64 {
         let d1 = self.degree + 1;
-        let mx = axis_moments(self.width, d1);
-        let my = axis_moments(self.height, d1);
+        let mx = axis_moments(self.size.width, d1);
+        let my = axis_moments(self.size.height, d1);
         let mut mean = 0.0;
         for (i, &mx_i) in mx[..d1].iter().enumerate() {
             for (j, &my_j) in my[..d1].iter().enumerate() {

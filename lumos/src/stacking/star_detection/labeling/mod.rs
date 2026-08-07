@@ -204,8 +204,8 @@ impl LabelMap {
         connectivity: Connectivity,
         resources: &mut DetectionResources,
     ) -> Self {
-        debug_assert_eq!(mask.width, resources.dimensions.x);
-        debug_assert_eq!(mask.height, resources.dimensions.y);
+        debug_assert_eq!(mask.width, resources.dimensions.width);
+        debug_assert_eq!(mask.height, resources.dimensions.height);
 
         let mut labels = resources.acquire_u32();
         // Clear the buffer (it may contain old labels)

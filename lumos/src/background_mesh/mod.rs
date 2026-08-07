@@ -19,6 +19,7 @@ use crate::background_mesh::workspace::TileScratch;
 use crate::bit_buffer2::BitBuffer2;
 use crate::concurrency::JobScratchPool;
 use crate::math::rect::URect;
+use crate::math::size2us::Size2us;
 use crate::math::statistics::median_f32_mut;
 use crate::math::vec2us::Vec2us;
 use imaginarium::Buffer2;
@@ -46,7 +47,7 @@ pub(crate) struct TileGrid {
     pub(crate) centers_x: Vec<f32>,
     pub(crate) centers_y: Vec<f32>,
     tile_size: usize,
-    dimensions: Vec2us,
+    dimensions: Size2us,
 }
 
 impl TileGrid {
@@ -89,12 +90,12 @@ impl TileGrid {
             centers_x,
             centers_y,
             tile_size,
-            dimensions: Vec2us::new(width, height),
+            dimensions: Size2us::new(width, height),
         }
     }
 
     fn matches_layout(&self, width: usize, height: usize, tile_size: usize) -> bool {
-        self.dimensions == Vec2us::new(width, height)
+        self.dimensions == Size2us::new(width, height)
             && self.tile_size == tile_size.min(width).min(height)
     }
 
@@ -139,8 +140,8 @@ impl TileGrid {
     ) {
         let tiles_x = self.stats.width();
         let tile_size = self.tile_size;
-        let width = self.dimensions.x;
-        let height = self.dimensions.y;
+        let width = self.dimensions.width;
+        let height = self.dimensions.height;
 
         self.stats
             .pixels_mut()

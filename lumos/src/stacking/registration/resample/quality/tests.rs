@@ -1,4 +1,4 @@
-use crate::math::vec2us::Vec2us;
+use crate::math::size2us::Size2us;
 use crate::stacking::registration::config::InterpolationMethod;
 use crate::stacking::registration::resample::kernel;
 use crate::stacking::registration::resample::quality;
@@ -19,7 +19,7 @@ const INTERPOLATION_METHODS: [InterpolationMethod; 6] = [
 fn warp_coverage_nearest_identity_is_all_ones() {
     let (w, h) = (8, 8);
     let wt = WarpTransform::new(Transform::identity());
-    let cov = quality::maps(Vec2us::new(w, h), &wt, InterpolationMethod::Nearest).coverage;
+    let cov = quality::maps(Size2us::new(w, h), &wt, InterpolationMethod::Nearest).coverage;
     for &c in cov.pixels() {
         assert!(
             (c - 1.0).abs() < TOL,
@@ -33,7 +33,7 @@ fn warp_coverage_fully_outside_is_zero() {
     let (w, h) = (8, 8);
     // Source translated far outside the image: every kernel tap is out of bounds.
     let wt = WarpTransform::new(Transform::translation(DVec2::new(1000.0, 1000.0)));
-    let cov = quality::maps(Vec2us::new(w, h), &wt, InterpolationMethod::Bilinear).coverage;
+    let cov = quality::maps(Size2us::new(w, h), &wt, InterpolationMethod::Bilinear).coverage;
     for &c in cov.pixels() {
         assert_eq!(c, 0.0, "fully-outside coverage must be 0, got {c}");
     }
@@ -45,7 +45,7 @@ fn warp_coverage_bilinear_edge_is_partial() {
     // Output (0,4) maps to src (-0.5, 4.0): the 2×2 bilinear footprint straddles the left
     // edge — taps at x=-1 (out, weight 0.5) and x=0 (in, weight 0.5) → coverage 0.5.
     let wt = WarpTransform::new(Transform::translation(DVec2::new(-0.5, 0.0)));
-    let cov = quality::maps(Vec2us::new(w, h), &wt, InterpolationMethod::Bilinear).coverage;
+    let cov = quality::maps(Size2us::new(w, h), &wt, InterpolationMethod::Bilinear).coverage;
     let edge = cov.pixels()[4 * w];
     assert!(
         (edge - 0.5).abs() < TOL,
@@ -61,7 +61,7 @@ fn warp_coverage_bilinear_edge_is_partial() {
 
 #[test]
 fn bilinear_quality_has_hand_computed_support_and_confidence() {
-    let dims = Vec2us::new(8, 8);
+    let dims = Size2us::new(8, 8);
     let interior = quality::quality_at(Vec2::new(0.5, 4.0), dims, InterpolationMethod::Bilinear);
     assert!((interior.coverage - 1.0).abs() < TOL);
     // Coefficients [0.5, 0.5] have variance gain 0.5, so inverse variance is 2.
@@ -75,7 +75,7 @@ fn bilinear_quality_has_hand_computed_support_and_confidence() {
 
 #[test]
 fn source_footprint_boundary_is_inclusive() {
-    let dims = Vec2us::new(8, 6);
+    let dims = Size2us::new(8, 6);
     for position in [
         Vec2::new(-0.5, 2.0),
         Vec2::new(7.5, 2.0),
@@ -107,7 +107,7 @@ fn source_footprint_boundary_is_inclusive() {
 
 #[test]
 fn coverage_is_continuous_and_monotonic_across_left_border() {
-    let dims = Vec2us::new(32, 32);
+    let dims = Size2us::new(32, 32);
     for method in INTERPOLATION_METHODS {
         let radius = method.kernel_radius() as i32;
         let mut previous = 0.0;

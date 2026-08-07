@@ -4,6 +4,7 @@ use crate::image_ops::internals::{
     standard_deviation as std_dev,
 };
 use crate::image_ops::op::OpError;
+use crate::math::size2us::Size2us;
 use crate::testing::TestRng;
 use imaginarium::{ColorFormat, Image, ImageDesc};
 
@@ -188,7 +189,7 @@ fn denoise_is_per_channel_on_rgb() {
     let g = noisy(w, h, 0.5, 0.05, 4048);
     let b = noisy(w, h, 0.5, 0.04, 6072);
     let in_std = [std_dev(&r), std_dev(&g), std_dev(&b)];
-    let mut img = rgb(w, h, r, g, b);
+    let mut img = rgb(Size2us::new(w, h), r, g, b);
     Denoise::default().apply(&mut img).unwrap();
     for (c, &expected) in in_std.iter().enumerate() {
         let out_std = std_dev(&channel(&img, c));

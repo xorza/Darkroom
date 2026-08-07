@@ -1,4 +1,4 @@
-use crate::math::vec2us::Vec2us;
+use crate::math::size2us::Size2us;
 use crate::stacking::registration::config::{InterpolationMethod, WarpParams};
 use crate::stacking::registration::resample::kernel;
 use glam::Vec2;
@@ -27,7 +27,7 @@ fn interpolate_lanczos_impl<const A: usize, const SIZE: usize>(
 ) -> f32 {
     let (x, y) = (pos.x, pos.y);
     let (w, h) = (data.width(), data.height());
-    if !kernel::source_footprint_contains(pos, Vec2us::new(w, h)) {
+    if !kernel::source_footprint_contains(pos, Size2us::new(w, h)) {
         return border_value;
     }
 

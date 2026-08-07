@@ -21,6 +21,7 @@
 //! without a per-frame discriminator. (`xtrans_removes_cosmic_ray...` / `bayer_tight_star...` tests
 //! pin the tight-star behavior.)
 
+use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 use imaginarium::Buffer2;
 use rayon::prelude::*;
@@ -409,11 +410,11 @@ struct XtransStructure {
 /// iteration handles multi-pixel hits. Significance is `S = L⁺/N`; no `S'` median-subtraction is
 /// needed because `L⁺` (excess over the same-color median) is already a local high-pass.
 fn reject_xtrans(data: &mut Buffer2<f32>, cfa: &CfaType, config: &CosmicRayConfig) -> usize {
-    let size = Vec2us::new(data.width(), data.height());
-    if size.x < 7 || size.y < 7 {
+    let size = Size2us::new(data.width(), data.height());
+    if size.width < 7 || size.height < 7 {
         return 0;
     }
-    let mut mask = vec![false; size.x * size.y];
+    let mut mask = vec![false; size.pixel_count()];
 
     for _ in 0..config.niter {
         let pix = data.pixels();
@@ -421,7 +422,7 @@ fn reject_xtrans(data: &mut Buffer2<f32>, cfa: &CfaType, config: &CosmicRayConfi
         let noise = xtrans_noise(pix, size, cfa, &signal, &config.noise);
         let s: Vec<f32> = lplus.iter().zip(&noise).map(|(&l, &nz)| l / nz).collect();
 
-        let flags = detect_and_grow(&s, &f, &noise, &mask, size.x, size.y, config);
+        let flags = detect_and_grow(&s, &f, &noise, &mask, size.width, size.height, config);
 
         let mut newly = 0usize;
         for (m, &flag) in mask.iter_mut().zip(&flags) {
@@ -444,7 +445,7 @@ fn reject_xtrans(data: &mut Buffer2<f32>, cfa: &CfaType, config: &CosmicRayConfi
 #[derive(Debug, Clone, Copy)]
 struct CfaScene<'a> {
     pix: &'a [f32],
-    size: Vec2us,
+    size: Size2us,
     cfa: &'a CfaType,
     mask: &'a [bool],
 }
@@ -460,8 +461,8 @@ fn same_color_values(
 ) {
     out.clear();
     let my = scene.cfa.color_at(pos.x, pos.y);
-    let w = scene.size.x;
-    let (wi, hi) = (scene.size.x as i32, scene.size.y as i32);
+    let w = scene.size.width;
+    let (wi, hi) = (scene.size.width as i32, scene.size.height as i32);
     for dy in -radius..=radius {
         for dx in -radius..=radius {
             if dx == 0 && dy == 0 {
@@ -487,8 +488,8 @@ fn same_color_values(
 
 /// Compute `L⁺`, `F`, and the signal estimate per pixel from same-color medians at two scales (one
 /// gather per pixel: nearest-`XTRANS_LARGE`, with the nearest-`XTRANS_SMALL` subset).
-fn xtrans_structure(pix: &[f32], size: Vec2us, cfa: &CfaType, mask: &[bool]) -> XtransStructure {
-    let (w, n) = (size.x, size.x * size.y);
+fn xtrans_structure(pix: &[f32], size: Size2us, cfa: &CfaType, mask: &[bool]) -> XtransStructure {
+    let (w, n) = (size.width, size.pixel_count());
     let mut lplus = vec![0.0f32; n];
     let mut f = vec![0.0f32; n];
     let mut signal = vec![0.0f32; n];
@@ -540,7 +541,7 @@ fn xtrans_structure(pix: &[f32], size: Vec2us, cfa: &CfaType, mask: &[bool]) -> 
 /// color-independent (sensor gain), reusing the Poisson+read model on the same-color signal.
 fn xtrans_noise(
     pix: &[f32],
-    size: Vec2us,
+    size: Size2us,
     cfa: &CfaType,
     signal: &[f32],
     noise: &NoiseEstimation,
@@ -548,10 +549,10 @@ fn xtrans_noise(
     match *noise {
         NoiseEstimation::Empirical => {
             let mut by_color: [Vec<f32>; 3] = [Vec::new(), Vec::new(), Vec::new()];
-            for y in 0..size.y {
-                for x in 0..size.x {
+            for y in 0..size.height {
+                for x in 0..size.width {
                     let c = (cfa.color_at(x, y) as usize).min(2);
-                    by_color[c].push(pix[y * size.x + x]);
+                    by_color[c].push(pix[y * size.width + x]);
                 }
             }
             let mut scratch = Vec::new();
@@ -564,9 +565,9 @@ fn xtrans_noise(
                 let sigma = mad_to_sigma(mad_f32_fast(vals, bg, &mut scratch)).max(1e-9);
                 stats[c] = (bg, sigma);
             }
-            (0..size.x * size.y)
+            (0..size.pixel_count())
                 .map(|i| {
-                    let p = Vec2us::from_index(i, size.x);
+                    let p = Vec2us::from_index(i, size.width);
                     let c = (cfa.color_at(p.x, p.y) as usize).min(2);
                     let (bg, sigma) = stats[c];
                     empirical_noise(signal[i], bg, sigma)
@@ -583,8 +584,8 @@ fn xtrans_noise(
 
 /// Replace masked pixels with the median of their nearest unmasked same-color neighbors.
 fn xtrans_replace(data: &mut Buffer2<f32>, cfa: &CfaType, mask: &[bool]) {
-    let size = Vec2us::new(data.width(), data.height());
-    let w = size.x;
+    let size = Size2us::new(data.width(), data.height());
+    let w = size.width;
     let src = data.pixels().to_vec();
     let scene = CfaScene {
         pix: &src,

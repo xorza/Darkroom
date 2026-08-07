@@ -1,6 +1,7 @@
 use crate::image_ops::background_extraction::*;
 use crate::image_ops::internals::{channel_plane as channel, gray_image, rgb_image as rgb};
 use crate::image_ops::op::OpError;
+use crate::math::size2us::Size2us;
 use imaginarium::Image;
 
 fn fill(w: usize, h: usize, f: impl Fn(usize, usize) -> f32) -> Vec<f32> {
@@ -173,7 +174,7 @@ fn removes_independent_per_channel_gradients() {
     let r = fill(w, h, |x, _| 0.40 + 0.0010 * x as f32);
     let g = fill(w, h, |_, y| 0.30 + 0.0008 * y as f32);
     let b = fill(w, h, |x, y| 0.50 - 0.0005 * x as f32 + 0.0006 * y as f32);
-    let mut img = rgb(w, h, r, g, b);
+    let mut img = rgb(Size2us::new(w, h), r, g, b);
     ExtractBackground {
         degree: 1,
         tile_size: 20,

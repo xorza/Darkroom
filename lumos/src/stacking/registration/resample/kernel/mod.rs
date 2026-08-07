@@ -7,7 +7,7 @@
 use std::f32::consts::PI;
 use std::sync::OnceLock;
 
-use crate::math::vec2us::Vec2us;
+use crate::math::size2us::Size2us;
 use glam::Vec2;
 use imaginarium::Buffer2;
 
@@ -126,20 +126,20 @@ pub(super) fn fast_floor_i32(x: f32) -> i32 {
 }
 
 #[inline]
-pub(super) fn source_footprint_contains(pos: Vec2, dims: Vec2us) -> bool {
-    if dims.x == 0 || dims.y == 0 || !pos.is_finite() {
+pub(super) fn source_footprint_contains(pos: Vec2, size: Size2us) -> bool {
+    if size.width == 0 || size.height == 0 || !pos.is_finite() {
         return false;
     }
-    let max = Vec2::new(dims.x as f32 - 0.5, dims.y as f32 - 0.5);
+    let max = Vec2::new(size.width as f32 - 0.5, size.height as f32 - 0.5);
     pos.x >= -0.5 && pos.y >= -0.5 && pos.x <= max.x && pos.y <= max.y
 }
 
 #[inline]
-pub(super) fn clamp_to_pixel_centers(pos: Vec2, dims: Vec2us) -> Vec2 {
-    debug_assert!(dims.x > 0 && dims.y > 0);
+pub(super) fn clamp_to_pixel_centers(pos: Vec2, size: Size2us) -> Vec2 {
+    debug_assert!(size.width > 0 && size.height > 0);
     pos.clamp(
         Vec2::ZERO,
-        Vec2::new(dims.x as f32 - 1.0, dims.y as f32 - 1.0),
+        Vec2::new(size.width as f32 - 1.0, size.height as f32 - 1.0),
     )
 }
 
@@ -148,24 +148,24 @@ pub(super) fn clamp_to_pixel_centers(pos: Vec2, dims: Vec2us) -> Vec2 {
 #[inline]
 pub(super) fn bilinear_sample(input: &Buffer2<f32>, pos: Vec2, border_value: f32) -> f32 {
     let pixels = input.pixels();
-    let dims = Vec2us::new(input.width(), input.height());
-    if !source_footprint_contains(pos, dims) {
+    let size = Size2us::new(input.width(), input.height());
+    if !source_footprint_contains(pos, size) {
         return border_value;
     }
-    let sample_pos = clamp_to_pixel_centers(pos, dims);
+    let sample_pos = clamp_to_pixel_centers(pos, size);
     let (x, y) = (sample_pos.x, sample_pos.y);
 
     let x0 = fast_floor_i32(x) as usize;
     let y0 = fast_floor_i32(y) as usize;
     let fx = x - x0 as f32;
     let fy = y - y0 as f32;
-    let x1 = (x0 + 1).min(dims.x - 1);
-    let y1 = (y0 + 1).min(dims.y - 1);
+    let x1 = (x0 + 1).min(size.width - 1);
+    let y1 = (y0 + 1).min(size.height - 1);
 
-    let p00 = pixels[y0 * dims.x + x0];
-    let p10 = pixels[y0 * dims.x + x1];
-    let p01 = pixels[y1 * dims.x + x0];
-    let p11 = pixels[y1 * dims.x + x1];
+    let p00 = pixels[y0 * size.width + x0];
+    let p10 = pixels[y0 * size.width + x1];
+    let p01 = pixels[y1 * size.width + x0];
+    let p11 = pixels[y1 * size.width + x1];
 
     let top = p00 + fx * (p10 - p00);
     let bottom = p01 + fx * (p11 - p01);
@@ -174,19 +174,19 @@ pub(super) fn bilinear_sample(input: &Buffer2<f32>, pos: Vec2, border_value: f32
 
 #[inline]
 pub(super) fn interpolate_nearest(data: &Buffer2<f32>, pos: Vec2, border_value: f32) -> f32 {
-    let dims = Vec2us::new(data.width(), data.height());
-    if !source_footprint_contains(pos, dims) {
+    let size = Size2us::new(data.width(), data.height());
+    if !source_footprint_contains(pos, size) {
         return border_value;
     }
-    let sample_pos = clamp_to_pixel_centers(pos, dims);
+    let sample_pos = clamp_to_pixel_centers(pos, size);
     let x = sample_pos.x.round() as usize;
     let y = sample_pos.y.round() as usize;
-    data.pixels()[y * dims.x + x]
+    data.pixels()[y * size.width + x]
 }
 
 pub(super) fn interpolate_bicubic(data: &Buffer2<f32>, pos: Vec2, border_value: f32) -> f32 {
-    let dims = Vec2us::new(data.width(), data.height());
-    if !source_footprint_contains(pos, dims) {
+    let size = Size2us::new(data.width(), data.height());
+    if !source_footprint_contains(pos, size) {
         return border_value;
     }
     let (x, y) = (pos.x, pos.y);
