@@ -1,6 +1,7 @@
 use crate::image_ops::internals::{channel_plane as channel, gray_image as gray, rgb_image as rgb};
 use crate::image_ops::op::OpError;
 use crate::image_ops::stretching::*;
+use crate::math::size2us::Size2us;
 use crate::math::statistics::median_f32_mut;
 
 fn median_of(v: &[f32]) -> f32 {
@@ -250,7 +251,12 @@ fn ghs_end_to_end_lifts_background_and_stays_in_range() {
 #[test]
 fn color_preserving_keeps_channel_ratio_and_caps_highlights() {
     // Two pixels with a 2:1:1 R:G:B ratio; pixel 1 is bright enough to trip the highlight guard.
-    let mut img = rgb(2, 1, vec![0.3, 0.9], vec![0.15, 0.45], vec![0.15, 0.45]);
+    let mut img = rgb(
+        Size2us::new(2, 1),
+        vec![0.3, 0.9],
+        vec![0.15, 0.45],
+        vec![0.15, 0.45],
+    );
     let cfg = Stretch {
         method: StretchMethod::Asinh { beta: 0.05 },
         color: ColorMode::ColorPreserving,
@@ -284,8 +290,8 @@ fn per_channel_neutralizes_color_preserving_keeps_it() {
     let r = vec![0.20, 0.21, 0.19, 0.20, 0.50];
     let g = vec![0.05, 0.06, 0.04, 0.05, 0.50];
     let b = vec![0.05, 0.06, 0.04, 0.05, 0.50];
-    let mut linked = rgb(5, 1, r.clone(), g.clone(), b.clone());
-    let mut unlinked = rgb(5, 1, r, g, b);
+    let mut linked = rgb(Size2us::new(5, 1), r.clone(), g.clone(), b.clone());
+    let mut unlinked = rgb(Size2us::new(5, 1), r, g, b);
 
     Stretch::auto_stf().apply(&mut linked).unwrap();
     Stretch {

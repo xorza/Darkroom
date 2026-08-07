@@ -632,7 +632,8 @@ fn test_image_dimensions_invalid_channels() {
 }
 
 #[test]
-#[should_panic(expected = "Image pixel count must fit in usize")]
+// The pixel-count overflow is caught by `Size2us::pixel_count`, which owns the multiply.
+#[should_panic(expected = "grid pixel count must fit in usize")]
 fn test_image_dimensions_reject_pixel_count_overflow() {
     ImageDimensions::new((usize::MAX, 2), 1);
 }

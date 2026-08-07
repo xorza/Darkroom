@@ -6,6 +6,7 @@
 use parking_lot::Mutex;
 use rayon::prelude::*;
 
+use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 use imaginarium::Buffer2;
 
@@ -117,7 +118,8 @@ pub(crate) fn detect(
 
     pool.release_bit(mask);
 
-    let extraction = extract_and_filter_candidates(pixels, &label_map, config, width, height);
+    let extraction =
+        extract_and_filter_candidates(pixels, &label_map, config, Size2us::new(width, height));
 
     label_map.release_to_pool(pool);
     if let Some(scratch) = filtered {
@@ -137,9 +139,9 @@ fn extract_and_filter_candidates(
     pixels: &Buffer2<f32>,
     label_map: &LabelMap,
     config: &DetectionConfig,
-    width: usize,
-    height: usize,
+    size: Size2us,
 ) -> ExtractionResult {
+    let (width, height) = (size.width, size.height);
     let mut result = extract_candidates(pixels, label_map, config);
 
     // `DetectionConfig::validate()` can't bound `edge_margin` against the image (it doesn't know the
@@ -521,7 +523,8 @@ mod tests {
                 ..local_maxima_config()
             };
 
-            let result = extract_and_filter_candidates(&pixels, &label_map, &config, 32, 32);
+            let result =
+                extract_and_filter_candidates(&pixels, &label_map, &config, Size2us::new(32, 32));
 
             assert!(
                 result.regions.is_empty(),

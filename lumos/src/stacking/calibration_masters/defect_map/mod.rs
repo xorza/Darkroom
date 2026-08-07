@@ -49,8 +49,8 @@
 
 use crate::bit_buffer2::BitBuffer2;
 use crate::io::image::cfa::{CfaImage, CfaType};
+use crate::math::size2us::Size2us;
 use crate::math::statistics::{MAD_TO_SIGMA, median_f32_mut};
-use crate::math::vec2us::Vec2us;
 use crate::stacking::combine::error::Error;
 use common::CancelToken;
 use imaginarium::Buffer2;
@@ -74,7 +74,7 @@ pub struct DefectMap {
     /// local-neighbourhood median in the flat), ascending.
     pub cold_indices: Vec<usize>,
     /// Sensor dimensions the indices apply to — `None` until the first `detect_*` call records them.
-    pub(super) dimensions: Option<Vec2us>,
+    pub(super) dimensions: Option<Size2us>,
 }
 
 impl DefectMap {
@@ -100,7 +100,7 @@ impl DefectMap {
         // and a non-positive value (which would flag every pixel above the median) must not panic
         // the pipeline. Nothing below 1σ is a meaningful defect threshold.
         let sigma_threshold = sigma_threshold.max(MIN_SIGMA_THRESHOLD);
-        self.set_dimensions(Vec2us::new(dark.data.width(), dark.data.height()));
+        self.set_dimensions(Size2us::new(dark.data.width(), dark.data.height()));
         self.hot_indices = detect_hot_pixels(dark, sigma_threshold, cancel)?;
         Ok(self)
     }
@@ -113,14 +113,14 @@ impl DefectMap {
     ///
     /// Returns [`Error::Cancelled`] if cancellation is requested before detection completes.
     pub fn detect_cold(mut self, flat: &CfaImage, cancel: &CancelToken) -> Result<Self, Error> {
-        self.set_dimensions(Vec2us::new(flat.data.width(), flat.data.height()));
+        self.set_dimensions(Size2us::new(flat.data.width(), flat.data.height()));
         self.cold_indices = detect_cold_pixels(flat, DEAD_PIXEL_FRACTION, cancel)?;
         Ok(self)
     }
 
     /// Record the master dimensions on first detection, or assert they match on later calls: every
     /// master feeding one map corrects the same sensor, so all must share dimensions.
-    fn set_dimensions(&mut self, dims: Vec2us) {
+    fn set_dimensions(&mut self, dims: Size2us) {
         match self.dimensions {
             None => self.dimensions = Some(dims),
             Some(existing) => assert!(
@@ -137,23 +137,24 @@ impl DefectMap {
 
     /// Percentage of defective pixels, or `0.0` before any master has been detected.
     pub fn percentage(&self) -> f32 {
-        self.dimensions
-            .map_or(0.0, |d| 100.0 * self.count() as f32 / (d.x * d.y) as f32)
+        self.dimensions.map_or(0.0, |size| {
+            100.0 * self.count() as f32 / size.pixel_count() as f32
+        })
     }
 
     /// Correct defective pixels on raw CFA data by replacing with median of
     /// same-color CFA neighbors.
     pub fn correct(&self, image: &mut CfaImage) {
-        let dims = self
+        let size = self
             .dimensions
             .expect("defect map has no dimensions; detect a master first");
         assert!(
-            image.data.width() == dims.x && image.data.height() == dims.y,
+            Size2us::new(image.data.width(), image.data.height()) == size,
             "CfaImage dimensions {}x{} don't match defect pixel map {}x{}",
             image.data.width(),
             image.data.height(),
-            dims.x,
-            dims.y
+            size.width,
+            size.height
         );
 
         if self.hot_indices.is_empty() && self.cold_indices.is_empty() {

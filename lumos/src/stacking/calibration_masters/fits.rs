@@ -14,7 +14,7 @@ use crate::io::image::fits::cfa::{
 };
 use crate::io::image::fits::decode::read_cfa_hdu;
 use crate::io::image::fits::error::fits_to_io;
-use crate::math::vec2us::Vec2us;
+use crate::math::size2us::Size2us;
 use crate::stacking::calibration_masters::CalibrationMasters;
 use crate::stacking::calibration_masters::defect_map::DefectMap;
 
@@ -299,14 +299,14 @@ fn encode_defect_map(map: &DefectMap) -> std::io::Result<EncodedDefectMap> {
         header
             .set(
                 "LUMWID",
-                i64::try_from(dimensions.x).map_err(|_| {
+                i64::try_from(dimensions.width).map_err(|_| {
                     invalid_data("defect-map width exceeds the FITS signed-64 range")
                 })?,
             )
             .and_then(|header| {
                 header.set(
                     "LUMHEI",
-                    i64::try_from(dimensions.y)
+                    i64::try_from(dimensions.height)
                         .map_err(|_| fits_well::FitsError::KeywordOutOfRange { name: "LUMHEI" })?,
                 )
             })
@@ -357,7 +357,7 @@ fn read_defect_map(
         return Err(invalid_data("non-empty DEFECT_MAP is missing dimensions"));
     }
 
-    let pixel_count = dimensions.map(|dimensions| dimensions.x * dimensions.y);
+    let pixel_count = dimensions.map(Size2us::pixel_count);
     let mut hot_indices = Vec::new();
     let mut cold_indices = Vec::new();
     for (kind, index) in kinds.into_iter().zip(indices) {
@@ -383,7 +383,7 @@ fn read_defect_map(
     }))
 }
 
-fn read_defect_dimensions(header: &Header) -> std::io::Result<Option<Vec2us>> {
+fn read_defect_dimensions(header: &Header) -> std::io::Result<Option<Size2us>> {
     let width = header.get_integer("LUMWID").map_err(fits_to_io)?;
     let height = header.get_integer("LUMHEI").map_err(fits_to_io)?;
     match (width, height) {
@@ -400,7 +400,7 @@ fn read_defect_dimensions(header: &Header) -> std::io::Result<Option<Vec2us>> {
             width
                 .checked_mul(height)
                 .ok_or_else(|| invalid_data("DEFECT_MAP dimensions overflow"))?;
-            Ok(Some(Vec2us::new(width, height)))
+            Ok(Some(Size2us::new(width, height)))
         }
         _ => Err(invalid_data(
             "DEFECT_MAP must declare both LUMWID and LUMHEI or neither",
@@ -428,7 +428,7 @@ fn validate_dimensions(masters: &CalibrationMasters) -> std::io::Result<()> {
     .into_iter()
     .flatten()
     {
-        let current = Vec2us::new(master.data.width(), master.data.height());
+        let current = Size2us::new(master.data.width(), master.data.height());
         match dimensions {
             None => dimensions = Some(current),
             Some(expected) if expected == current => {}

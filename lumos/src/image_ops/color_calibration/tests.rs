@@ -3,6 +3,7 @@ use crate::image_ops::internals::{
     channel_samples as channel, gray_image as gray, rgb_image as rgb,
 };
 use crate::image_ops::op::OpError;
+use crate::math::size2us::Size2us;
 
 #[test]
 fn neutralize_equalizes_backgrounds_and_makes_image_neutral() {
@@ -11,7 +12,7 @@ fn neutralize_equalizes_backgrounds_and_makes_image_neutral() {
     let r = [vec![0.1; 7], vec![0.5, 0.5]].concat();
     let g = [vec![0.3; 7], vec![0.7, 0.7]].concat();
     let b = [vec![0.1; 7], vec![0.5, 0.5]].concat();
-    let mut img = rgb(3, 3, r, g, b);
+    let mut img = rgb(Size2us::new(3, 3), r, g, b);
 
     let before = channel_backgrounds(&img);
     assert!(
@@ -53,7 +54,12 @@ fn neutralize_equalizes_backgrounds_and_makes_image_neutral() {
 #[test]
 fn scnr_average_neutral_clamps_only_green_excess() {
     // px0: green above (R+B)/2 -> clamped; px1: green below it -> untouched. R and B never change.
-    let mut img = rgb(2, 1, vec![0.2, 0.5], vec![0.6, 0.3], vec![0.2, 0.5]);
+    let mut img = rgb(
+        Size2us::new(2, 1),
+        vec![0.2, 0.5],
+        vec![0.6, 0.3],
+        vec![0.2, 0.5],
+    );
     Scnr::average_neutral().apply(&mut img).unwrap();
     let (r, g, b) = (channel(&img, 0), channel(&img, 1), channel(&img, 2));
     assert!(
@@ -73,7 +79,7 @@ fn scnr_average_neutral_clamps_only_green_excess() {
 #[test]
 fn scnr_additive_mask_amount_zero_noop_and_full_hand_computed() {
     // amount = 0 is a no-op.
-    let mut img0 = rgb(1, 1, vec![0.2], vec![0.6], vec![0.2]);
+    let mut img0 = rgb(Size2us::new(1, 1), vec![0.2], vec![0.6], vec![0.2]);
     Scnr::additive_mask(0.0).apply(&mut img0).unwrap();
     assert!(
         (channel(&img0, 1)[0] - 0.6).abs() < 1e-6,
@@ -81,7 +87,7 @@ fn scnr_additive_mask_amount_zero_noop_and_full_hand_computed() {
     );
 
     // amount = 1: m = min(1, R+B) = min(1, 0.4) = 0.4; G' = G·0·(1−m) + m·G = 0.4·0.6 = 0.24.
-    let mut img1 = rgb(1, 1, vec![0.2], vec![0.6], vec![0.2]);
+    let mut img1 = rgb(Size2us::new(1, 1), vec![0.2], vec![0.6], vec![0.2]);
     Scnr::additive_mask(1.0).apply(&mut img1).unwrap();
     assert!(
         (channel(&img1, 1)[0] - 0.24).abs() < 1e-6,
@@ -100,7 +106,7 @@ fn color_ops_are_noops_on_grayscale() {
 
 #[test]
 fn scnr_rejects_out_of_range_amount() {
-    let mut img = rgb(1, 1, vec![0.2], vec![0.6], vec![0.2]);
+    let mut img = rgb(Size2us::new(1, 1), vec![0.2], vec![0.6], vec![0.2]);
     let err = Scnr::additive_mask(1.5).apply(&mut img).unwrap_err();
     assert!(
         matches!(&err, OpError::InvalidConfig(m) if m.field == "SCNR amount"),

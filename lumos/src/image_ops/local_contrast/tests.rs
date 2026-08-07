@@ -4,6 +4,7 @@ use crate::image_ops::internals::{
 };
 use crate::image_ops::local_contrast::{LocalContrast, build_tile_luts};
 use crate::image_ops::op::OpError;
+use crate::math::size2us::Size2us;
 use imaginarium::Buffer2;
 
 /// A low-contrast horizontal gradient (intensity in `[0.45, 0.55]`).
@@ -100,7 +101,7 @@ fn clahe_is_color_preserving() {
     let (w, h) = (64, 64);
     let i: Vec<f32> = low_contrast(w, h); // use as the green/blue level
     let r: Vec<f32> = i.iter().map(|&v| (2.0 * v).min(1.0)).collect();
-    let mut img = rgb(w, h, r, i.clone(), i.clone());
+    let mut img = rgb(Size2us::new(w, h), r, i.clone(), i.clone());
     LocalContrast::default().apply(&mut img).unwrap();
     let (ro, go, bo) = (
         channel(&img, 0).to_vec(),

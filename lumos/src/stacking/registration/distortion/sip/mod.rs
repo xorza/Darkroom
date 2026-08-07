@@ -190,9 +190,13 @@ impl SipPolynomial {
 
         // Initial fit on all points
         let mut mask = vec![true; n];
-        let Some((mut coeffs_u, mut coeffs_v)) = solve_masked(
+        let Some(SipCoefficients {
+            u: mut coeffs_u,
+            v: mut coeffs_v,
+        }) = solve_masked(
             ref_points, &targets_u, &targets_v, &mask, ref_pt, norm_scale, &terms,
-        ) else {
+        )
+        else {
             return Err(RegistrationError::SingularSipSystem);
         };
 
@@ -262,13 +266,13 @@ impl SipPolynomial {
             }
 
             // Re-fit on surviving points
-            let Some((new_u, new_v)) = solve_masked(
+            let Some(refit) = solve_masked(
                 ref_points, &targets_u, &targets_v, &mask, ref_pt, norm_scale, &terms,
             ) else {
                 return Err(RegistrationError::SingularSipSystem);
             };
-            coeffs_u = new_u;
-            coeffs_v = new_v;
+            coeffs_u = refit.u;
+            coeffs_v = refit.v;
         }
 
         let polynomial = Self {
@@ -419,6 +423,27 @@ fn avg_distance(points: &[DVec2], ref_pt: DVec2) -> f64 {
     if avg > 1e-10 { avg } else { 1.0 }
 }
 
+/// One SIP fit: the polynomial coefficients for each output axis.
+///
+/// The two axes share a design matrix and differ only in their target values, so they are
+/// always solved and consumed together.
+#[derive(Debug)]
+struct SipCoefficients {
+    u: ArrayVec<f64, MAX_TERMS>,
+    v: ArrayVec<f64, MAX_TERMS>,
+}
+
+/// The normal equations for one SIP fit: `A^T·A` shared by both axes, and one `A^T·b` per axis.
+///
+/// `ata` is `n_terms × n_terms` row-major in a fixed-capacity buffer, so it carries no dimension
+/// of its own — the caller's `terms.len()` is the order.
+#[derive(Debug)]
+struct SipNormalEquations {
+    ata: [f64; MAX_ATA],
+    atb_u: [f64; MAX_TERMS],
+    atb_v: [f64; MAX_TERMS],
+}
+
 /// Solve the SIP normal equations using only the masked-in points.
 fn solve_masked(
     points: &[DVec2],
@@ -428,14 +453,15 @@ fn solve_masked(
     ref_pt: DVec2,
     norm_scale: f64,
     terms: &[(usize, usize)],
-) -> Option<(ArrayVec<f64, MAX_TERMS>, ArrayVec<f64, MAX_TERMS>)> {
-    let (ata, atb_u, atb_v) = build_normal_equations(
+) -> Option<SipCoefficients> {
+    let equations = build_normal_equations(
         points, targets_u, targets_v, mask, ref_pt, norm_scale, terms,
     );
     let n_terms = terms.len();
-    let coeffs_u = solve_cholesky(&ata, &atb_u, n_terms)?;
-    let coeffs_v = solve_cholesky(&ata, &atb_v, n_terms)?;
-    Some((coeffs_u, coeffs_v))
+    Some(SipCoefficients {
+        u: solve_cholesky(&equations.ata, &equations.atb_u, n_terms)?,
+        v: solve_cholesky(&equations.ata, &equations.atb_v, n_terms)?,
+    })
 }
 
 /// Build normal equations A^T*A and A^T*b from point/target pairs (masked).
@@ -447,7 +473,7 @@ fn build_normal_equations(
     ref_pt: DVec2,
     norm_scale: f64,
     terms: &[(usize, usize)],
-) -> ([f64; MAX_ATA], [f64; MAX_TERMS], [f64; MAX_TERMS]) {
+) -> SipNormalEquations {
     let n_terms = terms.len();
     let mut ata = [0.0; MAX_ATA];
     let mut atb_u = [0.0; MAX_TERMS];
@@ -475,7 +501,7 @@ fn build_normal_equations(
         }
     }
 
-    (ata, atb_u, atb_v)
+    SipNormalEquations { ata, atb_u, atb_v }
 }
 
 /// Solve a symmetric positive definite system Ax = b using Cholesky decomposition.

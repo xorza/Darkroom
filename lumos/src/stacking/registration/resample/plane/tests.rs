@@ -1,4 +1,4 @@
-use crate::math::vec2us::Vec2us;
+use crate::math::size2us::Size2us;
 use crate::stacking::registration::config::{self, InterpolationMethod, WarpParams};
 use crate::stacking::registration::resample::kernel::internals as kernel_test_support;
 use crate::stacking::registration::resample::{plane, quality};
@@ -374,7 +374,7 @@ fn lanczos_homography_horizon_uses_border_and_zero_coverage() {
             };
             let mut output = Buffer2::new_default(WIDTH, HEIGHT);
             plane::warp(&input, &mut output, &wt, &params);
-            let coverage = quality::maps(Vec2us::new(WIDTH, HEIGHT), &wt, method).coverage;
+            let coverage = quality::maps(Size2us::new(WIDTH, HEIGHT), &wt, method).coverage;
 
             for y in 0..HEIGHT {
                 assert_eq!(

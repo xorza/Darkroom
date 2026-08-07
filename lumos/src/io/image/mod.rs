@@ -17,7 +17,7 @@ use crate::io::image::fits::options::FitsLoadOptions;
 use crate::io::image::fits::provenance::FitsTransferProvenance;
 use crate::io::image::linear::LinearImage;
 use crate::io::raw;
-use crate::math::vec2us::Vec2us;
+use crate::math::size2us::Size2us;
 use crate::memory;
 
 const FITS_EXTENSIONS: &[&str] = &["fits", "fit"];
@@ -143,41 +143,37 @@ pub enum BitPix {
 /// Image dimensions: pixel size and number of channels.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ImageDimensions {
-    size: Vec2us,
+    size: Size2us,
     channels: usize,
 }
 
 impl ImageDimensions {
-    pub fn new(size: impl Into<Vec2us>, channels: usize) -> Self {
+    pub fn new(size: impl Into<Size2us>, channels: usize) -> Self {
         let size = size.into();
-        assert!(size.x > 0, "Width must be positive");
-        assert!(size.y > 0, "Height must be positive");
+        assert!(size.width > 0, "Width must be positive");
+        assert!(size.height > 0, "Height must be positive");
         assert!(
             channels == 1 || channels == 3,
             "Only 1 (grayscale) or 3 (RGB) channels supported, got {}",
             channels
         );
-        let pixel_count = size
-            .x
-            .checked_mul(size.y)
-            .expect("Image pixel count must fit in usize");
-        pixel_count
+        size.pixel_count()
             .checked_mul(channels)
             .expect("Image sample count must fit in usize");
         Self { size, channels }
     }
 
-    /// Pixel dimensions as a `(width, height)` vector.
-    pub fn size(&self) -> Vec2us {
+    /// Pixel extent, without the channel count.
+    pub fn size(&self) -> Size2us {
         self.size
     }
 
     pub fn width(&self) -> usize {
-        self.size.x
+        self.size.width
     }
 
     pub fn height(&self) -> usize {
-        self.size.y
+        self.size.height
     }
 
     pub fn channels(&self) -> usize {
@@ -195,10 +191,7 @@ impl ImageDimensions {
     /// Number of pixels: `width * height`.
     /// For a 100x100 RGB image, returns 10000.
     pub fn pixel_count(&self) -> usize {
-        self.size
-            .x
-            .checked_mul(self.size.y)
-            .expect("ImageDimensions validates pixel count during construction")
+        self.size.pixel_count()
     }
 
     pub fn is_grayscale(&self) -> bool {

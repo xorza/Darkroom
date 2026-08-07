@@ -1,5 +1,6 @@
 //! Tests for SIMD convolution implementations.
 
+use crate::math::size2us::Size2us;
 use crate::stacking::star_detection::convolution::simd::{
     Kernel2d, convolve_2d_row, convolve_2d_row_scalar, convolve_cols_direct,
     convolve_cols_row_scalar, convolve_row, convolve_row_scalar, mirror_index,
@@ -10,17 +11,15 @@ use crate::stacking::star_detection::convolution::simd::{
 fn convolve_cols_scalar_ref(
     input: &[f32],
     output: &mut [f32],
-    width: usize,
-    height: usize,
+    size: Size2us,
     kernel: &[f32],
     radius: usize,
 ) {
-    for y in 0..height {
+    for y in 0..size.height {
         convolve_cols_row_scalar(
             input,
-            &mut output[y * width..(y + 1) * width],
-            width,
-            height,
+            &mut output[y * size.width..(y + 1) * size.width],
+            size,
             y,
             kernel,
             radius,
@@ -452,8 +451,20 @@ fn test_convolve_cols_matches_scalar() {
     let mut output_simd = vec![0.0f32; width * height];
     let mut output_scalar = vec![0.0f32; width * height];
 
-    convolve_cols_direct(&input, &mut output_simd, width, height, &kernel, radius);
-    convolve_cols_scalar_ref(&input, &mut output_scalar, width, height, &kernel, radius);
+    convolve_cols_direct(
+        &input,
+        &mut output_simd,
+        Size2us::new(width, height),
+        &kernel,
+        radius,
+    );
+    convolve_cols_scalar_ref(
+        &input,
+        &mut output_scalar,
+        Size2us::new(width, height),
+        &kernel,
+        radius,
+    );
 
     for i in 0..width * height {
         assert!(
@@ -475,7 +486,13 @@ fn test_convolve_cols_uniform_input() {
     let radius = 2;
 
     let mut output = vec![0.0f32; width * height];
-    convolve_cols_direct(&input, &mut output, width, height, &kernel, radius);
+    convolve_cols_direct(
+        &input,
+        &mut output,
+        Size2us::new(width, height),
+        &kernel,
+        radius,
+    );
 
     for (i, &v) in output.iter().enumerate() {
         assert!(
@@ -500,7 +517,13 @@ fn test_convolve_cols_impulse_response() {
     let radius = kernel.len() / 2;
 
     let mut output = vec![0.0f32; width * height];
-    convolve_cols_direct(&input, &mut output, width, height, &kernel, radius);
+    convolve_cols_direct(
+        &input,
+        &mut output,
+        Size2us::new(width, height),
+        &kernel,
+        radius,
+    );
 
     // Check vertical spread at column 4
     // The impulse at y=8 spreads to y-radius..y+radius
@@ -540,8 +563,20 @@ fn test_convolve_cols_various_sizes() {
         let mut output_simd = vec![0.0f32; width * height];
         let mut output_scalar = vec![0.0f32; width * height];
 
-        convolve_cols_direct(&input, &mut output_simd, width, height, &kernel, radius);
-        convolve_cols_scalar_ref(&input, &mut output_scalar, width, height, &kernel, radius);
+        convolve_cols_direct(
+            &input,
+            &mut output_simd,
+            Size2us::new(width, height),
+            &kernel,
+            radius,
+        );
+        convolve_cols_scalar_ref(
+            &input,
+            &mut output_scalar,
+            Size2us::new(width, height),
+            &kernel,
+            radius,
+        );
 
         for i in 0..width * height {
             assert!(
@@ -575,8 +610,20 @@ fn test_convolve_2d_row_matches_scalar() {
         let mut output_simd = vec![0.0f32; width];
         let mut output_scalar = vec![0.0f32; width];
 
-        convolve_2d_row(&input, &mut output_simd, width, height, y, kernel);
-        convolve_2d_row_scalar(&input, &mut output_scalar, width, height, y, kernel);
+        convolve_2d_row(
+            &input,
+            &mut output_simd,
+            Size2us::new(width, height),
+            y,
+            kernel,
+        );
+        convolve_2d_row_scalar(
+            &input,
+            &mut output_scalar,
+            Size2us::new(width, height),
+            y,
+            kernel,
+        );
 
         for x in 0..width {
             assert!(
@@ -603,7 +650,7 @@ fn test_convolve_2d_row_uniform() {
 
     for y in 0..height {
         let mut output = vec![0.0f32; width];
-        convolve_2d_row(&input, &mut output, width, height, y, kernel);
+        convolve_2d_row(&input, &mut output, Size2us::new(width, height), y, kernel);
 
         for (x, &v) in output.iter().enumerate() {
             assert!(
@@ -630,7 +677,7 @@ fn test_convolve_2d_row_impulse() {
     let kernel = Kernel2d::new(&weights, 3);
 
     let mut output = vec![0.0f32; width];
-    convolve_2d_row(&input, &mut output, width, height, 8, kernel);
+    convolve_2d_row(&input, &mut output, Size2us::new(width, height), 8, kernel);
 
     // Only position 8 should have value 1.0
     assert!(
@@ -658,8 +705,20 @@ fn test_convolve_2d_row_various_kernel_sizes() {
             let mut output_simd = vec![0.0f32; width];
             let mut output_scalar = vec![0.0f32; width];
 
-            convolve_2d_row(&input, &mut output_simd, width, height, y, kernel);
-            convolve_2d_row_scalar(&input, &mut output_scalar, width, height, y, kernel);
+            convolve_2d_row(
+                &input,
+                &mut output_simd,
+                Size2us::new(width, height),
+                y,
+                kernel,
+            );
+            convolve_2d_row_scalar(
+                &input,
+                &mut output_scalar,
+                Size2us::new(width, height),
+                y,
+                kernel,
+            );
 
             for x in 0..width {
                 assert!(
@@ -690,8 +749,20 @@ fn test_convolve_2d_row_boundary_handling() {
         let mut output_simd = vec![0.0f32; width];
         let mut output_scalar = vec![0.0f32; width];
 
-        convolve_2d_row(&input, &mut output_simd, width, height, y, kernel);
-        convolve_2d_row_scalar(&input, &mut output_scalar, width, height, y, kernel);
+        convolve_2d_row(
+            &input,
+            &mut output_simd,
+            Size2us::new(width, height),
+            y,
+            kernel,
+        );
+        convolve_2d_row_scalar(
+            &input,
+            &mut output_scalar,
+            Size2us::new(width, height),
+            y,
+            kernel,
+        );
 
         for x in 0..width {
             assert!(

@@ -284,6 +284,7 @@ mod tests {
 #[cfg(test)]
 pub(crate) mod internals {
     use crate::image_ops::gather_channel;
+    use crate::math::size2us::Size2us;
     use imaginarium::{Buffer2, Image, PlanarPixels};
 
     pub(crate) fn channel_plane(image: &Image, channel: usize) -> Buffer2<f32> {
@@ -305,16 +306,15 @@ pub(crate) mod internals {
     }
 
     pub(crate) fn rgb_image(
-        width: usize,
-        height: usize,
+        size: Size2us,
         red: Vec<f32>,
         green: Vec<f32>,
         blue: Vec<f32>,
     ) -> Image {
         Image::from(&PlanarPixels::from_planes([
-            Buffer2::new(width, height, red),
-            Buffer2::new(width, height, green),
-            Buffer2::new(width, height, blue),
+            Buffer2::new(size.width, size.height, red),
+            Buffer2::new(size.width, size.height, green),
+            Buffer2::new(size.width, size.height, blue),
         ]))
     }
 

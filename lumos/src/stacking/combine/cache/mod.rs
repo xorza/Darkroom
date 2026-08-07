@@ -360,7 +360,7 @@ impl CacheCore {
         let height = dims.height();
 
         let chunk_rows = available_memory.map_or(height, |available_memory| {
-            optimal_chunk_rows(width, height, memory, available_memory)
+            optimal_chunk_rows(dims.size(), memory, available_memory)
         });
 
         let mut output = LinearPixels::new_zeroed(dims);
@@ -624,8 +624,7 @@ impl FrameCache {
             let resident_planes =
                 dimensions.channels() * (2 + usize::from(linear_variance.is_some())) + 1;
             optimal_chunk_rows(
-                width,
-                height,
+                dimensions.size(),
                 ChunkMemoryLayout {
                     input_planes,
                     resident_planes,

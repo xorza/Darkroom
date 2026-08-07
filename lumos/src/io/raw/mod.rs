@@ -18,6 +18,8 @@ use std::slice;
 use std::time::Instant;
 
 use crate::io::image::error::ImageError;
+use crate::math::size2us::Size2us;
+use crate::math::vec2us::Vec2us;
 
 use rayon::prelude::*;
 
@@ -372,13 +374,15 @@ fn validate_xtrans_pattern(path: &Path, pattern: [[u8; 6]; 6]) -> Result<(), Ima
     Ok(())
 }
 
+/// The visible window inside a raw frame: where it starts, how big it is, and the stride of the
+/// buffer it sits in.
 #[derive(Debug, Clone, Copy)]
 struct RawActiveArea {
+    /// Row stride of the source buffer, which spans the masked margins as well as `size`.
     raw_width: usize,
-    width: usize,
-    height: usize,
-    top_margin: usize,
-    left_margin: usize,
+    size: Size2us,
+    /// Top-left corner of the window within the source buffer.
+    margin: Vec2us,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -417,16 +421,16 @@ fn normalize_active_area<const CLAMP: bool>(
     channel_delta: Option<ChannelBlackDelta>,
     repeat: Option<&BlackRepeat>,
 ) -> Vec<f32> {
-    let output_size = area.width * area.height;
+    let output_size = area.size.pixel_count();
     // SAFETY: Every element is written by the parallel row pass below.
     let mut pixels = unsafe { alloc_uninit_vec::<f32>(output_size) };
     pixels
-        .par_chunks_mut(area.width)
+        .par_chunks_mut(area.size.width)
         .enumerate()
         .for_each(|(y, row)| {
-            let raw_y = area.top_margin + y;
-            let src_start = raw_y * area.raw_width + area.left_margin;
-            let source = &raw_data[src_start..src_start + area.width];
+            let raw_y = area.margin.y + y;
+            let src_start = raw_y * area.raw_width + area.margin.x;
+            let source = &raw_data[src_start..src_start + area.size.width];
             normalize_u16_to_f32_into::<CLAMP>(source, row, black, inv_range);
 
             if channel_delta.is_some() || repeat.is_some() {
@@ -526,10 +530,8 @@ impl UnpackedRaw {
             raw_data,
             RawActiveArea {
                 raw_width: self.raw_width,
-                width: self.width,
-                height: self.height,
-                top_margin: self.top_margin,
-                left_margin: self.left_margin,
+                size: Size2us::new(self.width, self.height),
+                margin: Vec2us::new(self.left_margin, self.top_margin),
             },
             self.black_level.common,
             self.black_level.inv_range,
@@ -649,8 +651,7 @@ impl UnpackedRaw {
 
     /// Process unknown CFA pattern using libraw's built-in demosaic.
     /// This is slower but handles exotic sensor patterns correctly.
-    /// Returns (pixels, width, height, num_channels).
-    fn demosaic_libraw_fallback(&self) -> Result<(Vec<f32>, usize, usize, usize), ImageError> {
+    fn demosaic_libraw_fallback(&self) -> Result<LibrawDemosaiced, ImageError> {
         let demosaic_start = Instant::now();
 
         // Configure libraw for linear output (no gamma, no color conversion)
@@ -773,8 +774,25 @@ impl UnpackedRaw {
             demosaic_elapsed.as_secs_f64() * 1000.0
         );
 
-        Ok((pixels, img_width, img_height, img_colors))
+        Ok(LibrawDemosaiced {
+            pixels,
+            size: Size2us::new(img_width, img_height),
+            channels: img_colors,
+        })
     }
+}
+
+/// What libraw's own demosaic produced: interleaved samples normalized to `[0, 1]`, and the
+/// geometry they are laid out by — libraw picks the output size and channel count itself, so
+/// neither is known before the call.
+///
+/// Not an [`ImageDimensions`]: that admits only 1 or 3 channels, and libraw reports whatever the
+/// sensor gave it.
+#[derive(Debug)]
+struct LibrawDemosaiced {
+    pixels: Vec<f32>,
+    size: Size2us,
+    channels: usize,
 }
 
 /// Open and unpack a raw file using libraw.
@@ -947,12 +965,16 @@ enum DemosaicedPixels {
     Flat(Vec<f32>),
 }
 
+/// One decoded raw frame before it becomes a [`LinearImage`]: the samples, the geometry they are
+/// laid out by, and how they were produced.
+///
+/// Carries [`ImageDimensions`] rather than a loose size and channel count — every path here ends
+/// in one, so building it at the source rejects a channel count the image type cannot hold at the
+/// decode that produced it rather than several steps later.
 #[derive(Debug)]
 struct DecodedRawPreview {
     pixels: DemosaicedPixels,
-    width: usize,
-    height: usize,
-    channels: usize,
+    dimensions: ImageDimensions,
     cfa_type: Option<CfaType>,
     color: ColorProvenance,
     demosaic: DemosaicProvenance,
@@ -981,9 +1003,7 @@ pub(crate) fn load_raw(path: &Path, cancel: &CancelToken) -> Result<LinearImage,
             let pixels = raw.extract_cfa_pixels::<true>()?;
             DecodedRawPreview {
                 pixels: DemosaicedPixels::Flat(pixels),
-                width: raw.width,
-                height: raw.height,
-                channels: 1,
+                dimensions: ImageDimensions::new(Size2us::new(raw.width, raw.height), 1),
                 cfa_type: None,
                 color: ColorProvenance::Monochrome,
                 demosaic: DemosaicProvenance::None,
@@ -994,9 +1014,7 @@ pub(crate) fn load_raw(path: &Path, cancel: &CancelToken) -> Result<LinearImage,
             let planes = raw.demosaic_bayer(cfa_pattern, cancel)?;
             DecodedRawPreview {
                 pixels: DemosaicedPixels::Planar(planes),
-                width: raw.width,
-                height: raw.height,
-                channels: 3,
+                dimensions: ImageDimensions::new(Size2us::new(raw.width, raw.height), 3),
                 cfa_type: Some(CfaType::Bayer(cfa_pattern)),
                 color: ColorProvenance::SensorRgb,
                 demosaic: DemosaicProvenance::LumosRcd,
@@ -1009,9 +1027,7 @@ pub(crate) fn load_raw(path: &Path, cancel: &CancelToken) -> Result<LinearImage,
             let planes = raw.demosaic_xtrans(raw_pattern, cancel)?;
             DecodedRawPreview {
                 pixels: DemosaicedPixels::Planar(planes),
-                width: raw.width,
-                height: raw.height,
-                channels: 3,
+                dimensions: ImageDimensions::new(Size2us::new(raw.width, raw.height), 3),
                 cfa_type: Some(CfaType::XTrans(visible_pattern)),
                 color: ColorProvenance::SensorRgb,
                 demosaic: DemosaicProvenance::LumosMarkesteijn,
@@ -1019,13 +1035,11 @@ pub(crate) fn load_raw(path: &Path, cancel: &CancelToken) -> Result<LinearImage,
         }
         SensorType::Unknown => {
             tracing::info!("Unknown CFA pattern, using libraw demosaic fallback");
-            let (pixels, w, h, c) = raw.demosaic_libraw_fallback()?;
+            let demosaiced = raw.demosaic_libraw_fallback()?;
             check_cancelled(path, cancel)?;
             DecodedRawPreview {
-                pixels: DemosaicedPixels::Flat(pixels),
-                width: w,
-                height: h,
-                channels: c,
+                pixels: DemosaicedPixels::Flat(demosaiced.pixels),
+                dimensions: ImageDimensions::new(demosaiced.size, demosaiced.channels),
                 cfa_type: Some(CfaType::Mono),
                 color: ColorProvenance::Unspecified,
                 demosaic: DemosaicProvenance::LibRaw,
@@ -1034,9 +1048,7 @@ pub(crate) fn load_raw(path: &Path, cancel: &CancelToken) -> Result<LinearImage,
     };
     let DecodedRawPreview {
         pixels,
-        width,
-        height,
-        channels,
+        dimensions,
         cfa_type,
         color,
         demosaic,
@@ -1045,7 +1057,11 @@ pub(crate) fn load_raw(path: &Path, cancel: &CancelToken) -> Result<LinearImage,
     let metadata = ImageMetadata {
         iso: raw.iso,
         bitpix: BitPix::UInt16,
-        header_dimensions: vec![height, width, channels],
+        header_dimensions: vec![
+            dimensions.height(),
+            dimensions.width(),
+            dimensions.channels(),
+        ],
         cfa_type,
         camera_white_balance: raw.camera_white_balance,
         provenance: Some(ImageProvenance {
@@ -1060,7 +1076,6 @@ pub(crate) fn load_raw(path: &Path, cancel: &CancelToken) -> Result<LinearImage,
     };
     drop(raw);
 
-    let dimensions = ImageDimensions::new((width, height), channels);
     let mut image = match pixels {
         DemosaicedPixels::Planar(planes) => LinearImage::from_planar_channels(dimensions, planes),
         DemosaicedPixels::Flat(px) => LinearImage::from_pixels(dimensions, px),

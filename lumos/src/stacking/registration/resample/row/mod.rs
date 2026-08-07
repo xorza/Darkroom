@@ -12,7 +12,7 @@
 //! When SIP distortion correction is active, incremental stepping is disabled
 //! (SIP is nonlinear) and SIMD paths fall back to scalar.
 
-use crate::math::vec2us::Vec2us;
+use crate::math::size2us::Size2us;
 #[cfg(target_arch = "x86_64")]
 use imaginarium::cpu_features;
 
@@ -57,7 +57,7 @@ fn source_position_in_footprint(
     input_height: usize,
 ) -> Option<Vec2> {
     let pos = finite_source_position(src_x, src_y)?;
-    kernel::source_footprint_contains(pos, Vec2us::new(input_width, input_height)).then_some(pos)
+    kernel::source_footprint_contains(pos, Size2us::new(input_width, input_height)).then_some(pos)
 }
 
 #[inline]
