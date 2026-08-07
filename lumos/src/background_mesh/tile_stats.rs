@@ -3,6 +3,7 @@
 
 use crate::background_mesh::TileStats;
 use crate::bit_buffer2::BitBuffer2;
+use crate::math::rect::URect;
 use crate::math::statistics::ClippedStats;
 use crate::math::statistics::sigma_clipped_median_mad;
 use imaginarium::Buffer2;
@@ -10,42 +11,35 @@ use imaginarium::Buffer2;
 /// Maximum samples per tile for statistics computation.
 pub(crate) const MAX_TILE_SAMPLES: usize = 1024;
 
-/// Compute sigma-clipped statistics for a tile region.
+/// Compute sigma-clipped statistics for the pixels of `tile`.
 ///
 /// When a mask is provided, only unmasked pixels are used. If all pixels
 /// are masked, falls back to sampling all pixels (including masked) as a
 /// last resort. A noisy estimate from few background pixels is far better
 /// than a biased estimate contaminated by star flux.
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn compute_tile_stats(
     pixels: &Buffer2<f32>,
     mask: Option<&BitBuffer2>,
-    x_start: usize,
-    x_end: usize,
-    y_start: usize,
-    y_end: usize,
+    tile: URect,
     sigma_clip_iterations: usize,
     values: &mut Vec<f32>,
     deviations: &mut Vec<f32>,
 ) -> TileStats {
     values.clear();
 
-    let width = pixels.width();
-    let tile_pixels = (x_end - x_start) * (y_end - y_start);
-
     match mask {
         Some(m) => {
-            collect_unmasked_pixels(pixels, m, x_start, x_end, y_start, y_end, width, values);
+            collect_unmasked_pixels(pixels, m, tile, values);
             if values.is_empty() {
                 // All pixels masked — no choice but to use all pixels
-                collect_sampled_pixels(pixels, x_start, x_end, y_start, y_end, width, values);
+                collect_sampled_pixels(pixels, tile, values);
             }
         }
         None => {
-            if tile_pixels <= MAX_TILE_SAMPLES {
-                collect_all_pixels(pixels, x_start, x_end, y_start, y_end, width, values);
+            if tile.area() <= MAX_TILE_SAMPLES {
+                collect_all_pixels(pixels, tile, values);
             } else {
-                collect_sampled_pixels(pixels, x_start, x_end, y_start, y_end, width, values);
+                collect_sampled_pixels(pixels, tile, values);
             }
         }
     }
@@ -80,64 +74,45 @@ fn sextractor_sky(stats: &ClippedStats) -> f32 {
 
 /// Collect all pixels from a tile region.
 #[inline]
-fn collect_all_pixels(
-    pixels: &Buffer2<f32>,
-    x_start: usize,
-    x_end: usize,
-    y_start: usize,
-    y_end: usize,
-    width: usize,
-    values: &mut Vec<f32>,
-) {
-    let tile_width = x_end - x_start;
-    for y in y_start..y_end {
-        let row_start = y * width + x_start;
+fn collect_all_pixels(pixels: &Buffer2<f32>, tile: URect, values: &mut Vec<f32>) {
+    let width = pixels.width();
+    let tile_width = tile.width();
+    for y in tile.min.y..tile.max.y {
+        let row_start = y * width + tile.min.x;
         values.extend_from_slice(&pixels[row_start..row_start + tile_width]);
     }
 }
 
 /// Collect sampled pixels using strided access (~MAX_TILE_SAMPLES pixels).
 #[inline]
-fn collect_sampled_pixels(
-    pixels: &Buffer2<f32>,
-    x_start: usize,
-    x_end: usize,
-    y_start: usize,
-    y_end: usize,
-    width: usize,
-    values: &mut Vec<f32>,
-) {
-    let tile_pixels = (x_end - x_start) * (y_end - y_start);
-    let stride = ((tile_pixels as f32 / MAX_TILE_SAMPLES as f32).max(1.0))
+fn collect_sampled_pixels(pixels: &Buffer2<f32>, tile: URect, values: &mut Vec<f32>) {
+    let width = pixels.width();
+    let stride = ((tile.area() as f32 / MAX_TILE_SAMPLES as f32).max(1.0))
         .sqrt()
         .ceil() as usize;
 
-    for y in (y_start..y_end).step_by(stride) {
+    for y in (tile.min.y..tile.max.y).step_by(stride) {
         let row_start = y * width;
-        for x in (x_start..x_end).step_by(stride) {
+        for x in (tile.min.x..tile.max.x).step_by(stride) {
             values.push(pixels[row_start + x]);
         }
     }
 }
 
 #[inline]
-#[allow(clippy::too_many_arguments)]
 fn collect_unmasked_pixels(
     pixels: &Buffer2<f32>,
     mask: &BitBuffer2,
-    x_start: usize,
-    x_end: usize,
-    y_start: usize,
-    y_end: usize,
-    width: usize,
+    tile: URect,
     values: &mut Vec<f32>,
 ) {
-    let unmasked_count = count_unmasked_pixels(mask, x_start, x_end, y_start, y_end);
+    let unmasked_count = count_unmasked_pixels(mask, tile);
     let sample_count = unmasked_count.min(MAX_TILE_SAMPLES);
     if sample_count == 0 {
         return;
     }
 
+    let width = pixels.width();
     let mask_words = &mask.words;
     let words_per_row = mask.words_per_row();
     let ordinal_step = unmasked_count / sample_count;
@@ -147,16 +122,16 @@ fn collect_unmasked_pixels(
     let mut ordinal = 0;
     let mut selected_count = 0;
 
-    for y in y_start..y_end {
+    for y in tile.min.y..tile.max.y {
         let row_start = y * width;
         let word_row_start = y * words_per_row;
-        let mut x = x_start;
+        let mut x = tile.min.x;
 
-        while x < x_end {
+        while x < tile.max.x {
             let word_idx = x / 64;
             let bit_offset = x % 64;
             let mask_word = mask_words[word_row_start + word_idx];
-            let bits_to_process = (64 - bit_offset).min(x_end - x);
+            let bits_to_process = (64 - bit_offset).min(tile.max.x - x);
             let mut bits = unmasked_bits(mask_word, bit_offset, bits_to_process);
             while bits != 0 {
                 if ordinal == next_ordinal {
@@ -182,24 +157,18 @@ fn collect_unmasked_pixels(
 }
 
 #[inline]
-fn count_unmasked_pixels(
-    mask: &BitBuffer2,
-    x_start: usize,
-    x_end: usize,
-    y_start: usize,
-    y_end: usize,
-) -> usize {
+fn count_unmasked_pixels(mask: &BitBuffer2, tile: URect) -> usize {
     let mask_words = &mask.words;
     let words_per_row = mask.words_per_row();
     let mut count = 0;
 
-    for y in y_start..y_end {
+    for y in tile.min.y..tile.max.y {
         let word_row_start = y * words_per_row;
-        let mut x = x_start;
-        while x < x_end {
+        let mut x = tile.min.x;
+        while x < tile.max.x {
             let word_idx = x / 64;
             let bit_offset = x % 64;
-            let bits_to_process = (64 - bit_offset).min(x_end - x);
+            let bits_to_process = (64 - bit_offset).min(tile.max.x - x);
             count += unmasked_bits(
                 mask_words[word_row_start + word_idx],
                 bit_offset,
@@ -237,6 +206,7 @@ fn reference_subsample(values: &mut Vec<f32>, target_size: usize) {
 #[cfg(test)]
 mod tests {
     use crate::background_mesh::tile_stats::*;
+    use crate::math::vec2us::Vec2us;
 
     #[test]
     fn sextractor_sky_hand_computed() {
@@ -261,7 +231,11 @@ mod tests {
     fn test_collect_sampled_pixels_small_tile() {
         let pixels = Buffer2::new_filled(32, 32, 0.5);
         let mut values = Vec::new();
-        collect_sampled_pixels(&pixels, 0, 32, 0, 32, 32, &mut values);
+        collect_sampled_pixels(
+            &pixels,
+            URect::new(Vec2us::ZERO, Vec2us::new(32, 32)),
+            &mut values,
+        );
         // Small tile should collect all or most pixels
         assert!(values.len() >= 100);
         assert!(values.iter().all(|&v| (v - 0.5).abs() < 0.01));
@@ -271,7 +245,11 @@ mod tests {
     fn test_collect_sampled_pixels_large_tile() {
         let pixels = Buffer2::new_filled(256, 256, 0.5);
         let mut values = Vec::new();
-        collect_sampled_pixels(&pixels, 0, 256, 0, 256, 256, &mut values);
+        collect_sampled_pixels(
+            &pixels,
+            URect::new(Vec2us::ZERO, Vec2us::new(256, 256)),
+            &mut values,
+        );
         assert!(values.len() <= MAX_TILE_SAMPLES);
         assert!(values.iter().all(|&v| (v - 0.5).abs() < 0.01));
     }
@@ -281,7 +259,12 @@ mod tests {
         let pixels = Buffer2::new_filled(64, 64, 0.5);
         let mask = BitBuffer2::new_filled(64, 64, false);
         let mut values = Vec::new();
-        collect_unmasked_pixels(&pixels, &mask, 0, 64, 0, 64, 64, &mut values);
+        collect_unmasked_pixels(
+            &pixels,
+            &mask,
+            URect::new(Vec2us::ZERO, Vec2us::new(64, 64)),
+            &mut values,
+        );
         assert_eq!(values.len(), MAX_TILE_SAMPLES);
     }
 
@@ -290,7 +273,12 @@ mod tests {
         let pixels = Buffer2::new_filled(64, 64, 0.5);
         let mask = BitBuffer2::new_filled(64, 64, true);
         let mut values = Vec::new();
-        collect_unmasked_pixels(&pixels, &mask, 0, 64, 0, 64, 64, &mut values);
+        collect_unmasked_pixels(
+            &pixels,
+            &mask,
+            URect::new(Vec2us::ZERO, Vec2us::new(64, 64)),
+            &mut values,
+        );
         assert!(values.is_empty());
     }
 
@@ -311,7 +299,12 @@ mod tests {
         }
 
         let mut values = Vec::new();
-        collect_unmasked_pixels(&pixels, &mask, 0, 64, 0, 64, 64, &mut values);
+        collect_unmasked_pixels(
+            &pixels,
+            &mask,
+            URect::new(Vec2us::ZERO, Vec2us::new(64, 64)),
+            &mut values,
+        );
         assert_eq!(values.len(), MAX_TILE_SAMPLES);
     }
 
@@ -320,7 +313,12 @@ mod tests {
         let pixels = Buffer2::new_filled(100, 100, 0.5);
         let mask = BitBuffer2::new_filled(100, 100, false);
         let mut values = Vec::new();
-        collect_unmasked_pixels(&pixels, &mask, 10, 70, 20, 80, 100, &mut values);
+        collect_unmasked_pixels(
+            &pixels,
+            &mask,
+            URect::new(Vec2us::new(10, 20), Vec2us::new(70, 80)),
+            &mut values,
+        );
         assert_eq!(values.len(), MAX_TILE_SAMPLES);
     }
 
@@ -329,40 +327,34 @@ mod tests {
         #[derive(Debug)]
         struct SamplingCase {
             dimensions: (usize, usize),
-            x_range: std::ops::Range<usize>,
-            y_range: std::ops::Range<usize>,
+            tile: URect,
             mask_modulus: Option<usize>,
         }
 
         let cases = [
             SamplingCase {
                 dimensions: (17, 19),
-                x_range: 0..17,
-                y_range: 0..19,
+                tile: URect::new(Vec2us::ZERO, Vec2us::new(17, 19)),
                 mask_modulus: None,
             },
             SamplingCase {
                 dimensions: (32, 32),
-                x_range: 0..32,
-                y_range: 0..32,
+                tile: URect::new(Vec2us::ZERO, Vec2us::new(32, 32)),
                 mask_modulus: None,
             },
             SamplingCase {
                 dimensions: (40, 40),
-                x_range: 0..40,
-                y_range: 0..40,
+                tile: URect::new(Vec2us::ZERO, Vec2us::new(40, 40)),
                 mask_modulus: Some(7),
             },
             SamplingCase {
                 dimensions: (130, 75),
-                x_range: 3..129,
-                y_range: 2..74,
+                tile: URect::new(Vec2us::new(3, 2), Vec2us::new(129, 74)),
                 mask_modulus: Some(5),
             },
             SamplingCase {
                 dimensions: (256, 256),
-                x_range: 0..256,
-                y_range: 0..256,
+                tile: URect::new(Vec2us::ZERO, Vec2us::new(256, 256)),
                 mask_modulus: None,
             },
         ];
@@ -385,14 +377,11 @@ mod tests {
                 }
             }
 
-            let mut expected: Vec<f32> = case
-                .y_range
-                .clone()
+            let mut expected: Vec<f32> = (case.tile.min.y..case.tile.max.y)
                 .flat_map(|y| {
                     let mask = &mask;
                     let pixels = &pixels;
-                    case.x_range
-                        .clone()
+                    (case.tile.min.x..case.tile.max.x)
                         .filter(move |&x| !mask.get_xy(x, y))
                         .map(move |x| pixels[y * width + x])
                 })
@@ -400,16 +389,7 @@ mod tests {
             reference_subsample(&mut expected, MAX_TILE_SAMPLES);
 
             let mut actual = Vec::new();
-            collect_unmasked_pixels(
-                &pixels,
-                &mask,
-                case.x_range.start,
-                case.x_range.end,
-                case.y_range.start,
-                case.y_range.end,
-                width,
-                &mut actual,
-            );
+            collect_unmasked_pixels(&pixels, &mask, case.tile, &mut actual);
 
             assert_eq!(actual, expected, "case: {case:?}");
             assert!(

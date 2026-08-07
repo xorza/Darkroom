@@ -73,6 +73,24 @@ impl URect {
         self.min.x >= self.max.x || self.min.y >= self.max.y
     }
 
+    // Saturating, not plain subtraction: `empty()` inverts the bounds to seed accumulation,
+    // so it is the one rectangle whose min can exceed its max.
+    #[inline]
+    pub(crate) const fn width(self) -> usize {
+        self.max.x.saturating_sub(self.min.x)
+    }
+
+    #[inline]
+    pub(crate) const fn height(self) -> usize {
+        self.max.y.saturating_sub(self.min.y)
+    }
+
+    /// Number of pixels the rectangle covers.
+    #[inline]
+    pub(crate) const fn area(self) -> usize {
+        self.width() * self.height()
+    }
+
     #[inline]
     pub(crate) const fn contains(self, point: Vec2us) -> bool {
         point.x >= self.min.x

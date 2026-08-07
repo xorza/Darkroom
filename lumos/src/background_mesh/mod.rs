@@ -18,6 +18,7 @@ use crate::background_mesh::tile_stats::compute_tile_stats;
 use crate::background_mesh::workspace::TileScratch;
 use crate::bit_buffer2::BitBuffer2;
 use crate::concurrency::JobScratchPool;
+use crate::math::rect::URect;
 use crate::math::statistics::median_f32_mut;
 use crate::math::vec2us::Vec2us;
 use imaginarium::Buffer2;
@@ -152,18 +153,19 @@ impl TileGrid {
                     let tx = idx % tiles_x;
                     let ty = idx / tiles_x;
 
-                    let x_start = tx * tile_size;
-                    let y_start = ty * tile_size;
-                    let x_end = (x_start + tile_size).min(width);
-                    let y_end = (y_start + tile_size).min(height);
+                    let start = Vec2us::new(tx * tile_size, ty * tile_size);
+                    let tile = URect::new(
+                        start,
+                        Vec2us::new(
+                            (start.x + tile_size).min(width),
+                            (start.y + tile_size).min(height),
+                        ),
+                    );
 
                     *out = compute_tile_stats(
                         pixels,
                         mask,
-                        x_start,
-                        x_end,
-                        y_start,
-                        y_end,
+                        tile,
                         sigma_clip_iterations,
                         values,
                         deviations,
