@@ -8,6 +8,7 @@
 
 use crate::io::image::ImageDimensions;
 use crate::io::image::linear::LinearImage;
+use crate::math::size2us::Size2us;
 use crate::stacking::registration::transform::Transform;
 use crate::testing::TestRng;
 use crate::testing::synthetic::camera::Camera;
@@ -71,7 +72,7 @@ pub(crate) fn render(scene: &Scene, camera: &Camera, obs: &Observation) -> SimFr
     let height = scene.height;
 
     // 1 + 2. Geometry + PSF + background → the clean (pre-flat) signal, and the truth catalog.
-    let mut clean = scene.background.render(width, height);
+    let mut clean = scene.background.render(Size2us::new(width, height));
     let mut observed = Vec::with_capacity(scene.sources.len());
     let recovered_fwhm = camera.psf.fwhm() * obs.seeing_scale;
     for src in &scene.sources {

@@ -1,3 +1,4 @@
+use crate::math::size2us::Size2us;
 use crate::stacking::registration::resample::kernel;
 use crate::stacking::registration::resample::row;
 use crate::stacking::registration::resample::row::x86;
@@ -76,7 +77,7 @@ fn assert_sse_matches_scalar(
 #[test]
 #[cfg(target_arch = "x86_64")]
 fn test_avx2_warp_row_translation() {
-    let input = patterns::diagonal_gradient(128, 64);
+    let input = patterns::diagonal_gradient(Size2us::new(128, 64));
     let transform = Transform::translation(DVec2::new(2.5, 1.5));
     assert_avx2_matches_scalar(&input, &transform, 30, 1e-5, "AVX2 translation");
 }
@@ -84,7 +85,7 @@ fn test_avx2_warp_row_translation() {
 #[test]
 #[cfg(target_arch = "x86_64")]
 fn test_avx2_warp_row_identity() {
-    let input = patterns::diagonal_gradient(128, 64);
+    let input = patterns::diagonal_gradient(Size2us::new(128, 64));
     let transform = Transform::identity();
     assert_avx2_matches_scalar(&input, &transform, 30, 1e-5, "AVX2 identity");
 }
@@ -92,7 +93,7 @@ fn test_avx2_warp_row_identity() {
 #[test]
 #[cfg(target_arch = "x86_64")]
 fn test_avx2_warp_row_similarity() {
-    let input = patterns::diagonal_gradient(128, 64);
+    let input = patterns::diagonal_gradient(Size2us::new(128, 64));
     let transform = Transform::similarity(DVec2::new(3.0, 2.0), 0.1, 1.05);
     assert_avx2_matches_scalar(&input, &transform, 30, 1e-4, "AVX2 similarity");
 }
@@ -102,7 +103,7 @@ fn test_avx2_warp_row_similarity() {
 fn test_avx2_warp_row_remainder_pixels() {
     // Width not a multiple of 8: tests the scalar remainder path.
     // Width=13: 1 chunk of 8 + 5 remainder pixels.
-    let input = patterns::diagonal_gradient(13, 32);
+    let input = patterns::diagonal_gradient(Size2us::new(13, 32));
     let transform = Transform::translation(DVec2::new(1.5, 0.5));
     assert_avx2_matches_scalar(&input, &transform, 15, 1e-5, "AVX2 width=13");
 }
@@ -110,7 +111,7 @@ fn test_avx2_warp_row_remainder_pixels() {
 #[test]
 #[cfg(target_arch = "x86_64")]
 fn test_sse_warp_row_similarity() {
-    let input = patterns::diagonal_gradient(64, 64);
+    let input = patterns::diagonal_gradient(Size2us::new(64, 64));
     let transform = Transform::similarity(DVec2::new(1.0, 2.0), 0.05, 1.02);
     assert_sse_matches_scalar(&input, &transform, 25, 1e-5, "SSE similarity");
 }
@@ -118,7 +119,7 @@ fn test_sse_warp_row_similarity() {
 #[test]
 #[cfg(target_arch = "x86_64")]
 fn test_sse_warp_row_identity() {
-    let input = patterns::diagonal_gradient(64, 64);
+    let input = patterns::diagonal_gradient(Size2us::new(64, 64));
     let transform = Transform::identity();
     assert_sse_matches_scalar(&input, &transform, 25, 1e-5, "SSE identity");
 }
@@ -128,7 +129,7 @@ fn test_sse_warp_row_identity() {
 fn test_sse_warp_row_remainder_pixels() {
     // Width not a multiple of 4: tests the scalar remainder path.
     // Width=11: 2 chunks of 4 + 3 remainder pixels.
-    let input = patterns::diagonal_gradient(11, 32);
+    let input = patterns::diagonal_gradient(Size2us::new(11, 32));
     let transform = Transform::translation(DVec2::new(1.5, 0.5));
     assert_sse_matches_scalar(&input, &transform, 15, 1e-5, "SSE width=11");
 }
