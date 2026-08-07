@@ -1,11 +1,18 @@
+use std::path::{Path, PathBuf};
+
 use common::CancelToken;
 use glam::DVec2;
+use imaginarium::Buffer2;
 
 use crate::io::image::ImageDimensions;
+use crate::io::image::cfa::CfaType;
+use crate::io::image::fits::cfa::save_cfa_fits;
 use crate::io::image::linear::LinearImage;
+use crate::stacking::calibration_masters::CalibrationMasters;
 use crate::stacking::pipeline::align::align_and_stack;
 use crate::stacking::pipeline::config::{AlignStackConfig, Reference};
 use crate::stacking::pipeline::result::Error;
+use crate::stacking::pipeline::streaming::calibrate_align_stack;
 use crate::stacking::registration::config::Config as RegistrationConfig;
 use crate::stacking::registration::resample::warp;
 use crate::stacking::registration::transform::{Transform, WarpTransform};
@@ -13,6 +20,7 @@ use crate::stacking::star_detection::config::Config as StarDetectionConfig;
 use crate::stacking::star_detection::detector::StarDetector;
 use crate::stacking::star_detection::error::StarDetectionConfigError;
 use crate::testing::synthetic::fixtures::star_field;
+use crate::testing::{ScratchDirectory, make_cfa};
 
 #[derive(Debug)]
 struct BaseField {
@@ -214,6 +222,163 @@ fn public_input_errors() {
         error,
         Error::DetectionConfig(StarDetectionConfigError::InvalidSigmaThreshold { value: 0.0 })
     ));
+}
+
+fn bits(buffer: &Buffer2<f32>) -> Vec<u32> {
+    buffer
+        .pixels()
+        .iter()
+        .map(|value| value.to_bits())
+        .collect()
+}
+
+/// Persist `image` as a single-channel (`CfaType::Mono`) Lumos CFA FITS light — the cheapest
+/// input `calibrate_align_stack` accepts, since the mono demosaic is a passthrough and the frame
+/// reaches detection unchanged. `exposure_time` is distinct per frame so the stacked master's
+/// metadata identifies which frame it was inherited from.
+fn write_mono_cfa_light(directory: &Path, index: usize, image: &LinearImage) -> PathBuf {
+    let path = directory.join(format!("light_{index}.fits"));
+    let mut cfa = make_cfa(
+        image.width(),
+        image.height(),
+        image.channel(0).pixels().to_vec(),
+        CfaType::Mono,
+    );
+    cfa.metadata.exposure_time = Some(10.0 + index as f64);
+    save_cfa_fits(&path, &cfa).expect("write synthetic CFA FITS light");
+    path
+}
+
+/// The RAM tier (`pipeline::align`) and the memory-bounded streaming tier
+/// (`pipeline::streaming`) are separate transcriptions of the same detect → register → warp →
+/// combine sequence, so nothing but a test keeps them in step.
+///
+/// This is the synthetic, always-run counterpart to
+/// `streaming_disk_tier_matches_ram_on_real_lights`, which is gated behind `real-data` *and*
+/// `#[ignore]` *and* a dataset on disk, so it never runs in the verification chain.
+///
+/// Both tiers read the same mono-CFA FITS lights and differ only in `available_memory`, the
+/// input `plan_memory` keys its tier decision on. RANSAC is seeded, removing the pipeline's only
+/// other source of nondeterminism, so any difference the assertions find is a real divergence.
+#[test]
+fn ram_and_streaming_tiers_produce_identical_stacks() {
+    let scratch = ScratchDirectory::new("lumos_tier_equivalence");
+    let BaseField {
+        image: base,
+        registration: reg,
+    } = base_field();
+
+    // Five dithered exposures: five clears `StackConfig`'s default `SmallN::median_below(5)`, so
+    // the σ-clipped mean actually runs and the combine emits a linear-variance plane — without
+    // that the comparison would silently skip one of the four output planes.
+    let mut frames = vec![base.clone()];
+    frames.extend(
+        [(6.0, -4.0), (-5.0, 7.0), (3.0, 9.0), (-8.0, -2.0)]
+            .into_iter()
+            .map(|(dx, dy)| shifted(&base, &reg, dx, dy)),
+    );
+    let paths: Vec<PathBuf> = frames
+        .iter()
+        .enumerate()
+        .map(|(index, frame)| write_mono_cfa_light(&scratch, index, frame))
+        .collect();
+
+    let mut config = AlignStackConfig::default();
+    config.registration.ransac.seed = Some(0x5EED_0F5E);
+
+    let mut ram_config = config.clone();
+    ram_config.stack.cache.available_memory = Some(u64::MAX);
+    ram_config.stack.cache.cache_dir = scratch.join("ram_cache");
+
+    let mut streaming_config = config;
+    streaming_config.stack.cache.available_memory = Some(1);
+    streaming_config.stack.cache.cache_dir = scratch.join("streaming_cache");
+    // Kept so the premise assertion below can observe that the spill tier really ran; the whole
+    // scratch tree goes away when `scratch` drops.
+    streaming_config.stack.cache.keep_cache = true;
+
+    let masters = CalibrationMasters::default();
+    let ram = calibrate_align_stack(&paths, &masters, &ram_config, CancelToken::never())
+        .expect("RAM-tier stack");
+    let streaming =
+        calibrate_align_stack(&paths, &masters, &streaming_config, CancelToken::never())
+            .expect("streaming-tier stack");
+
+    // Premise: the two budgets must straddle the tier boundary. Only the streaming path creates a
+    // spill directory, so its presence — and the RAM path's lack of one — is what proves this test
+    // exercised two code paths rather than the same one twice.
+    assert!(
+        streaming_config.stack.cache.cache_dir.is_dir(),
+        "streaming tier never spilled; both runs took the RAM path"
+    );
+    assert!(
+        !ram_config.stack.cache.cache_dir.exists(),
+        "RAM tier spilled to disk; both runs took the streaming path"
+    );
+
+    assert_eq!(ram.alignment.reference, streaming.alignment.reference);
+    assert_eq!(ram.alignment.registered, streaming.alignment.registered);
+    assert_eq!(ram.alignment.dropped, streaming.alignment.dropped);
+    assert_eq!(
+        ram.alignment.registered,
+        paths.len(),
+        "every dithered frame should register against the reference"
+    );
+
+    assert_eq!(
+        ram.product.image.dimensions(),
+        streaming.product.image.dimensions()
+    );
+    let channels = ram.product.image.channels();
+    for channel in 0..channels {
+        assert_eq!(
+            bits(ram.product.image.channel(channel)),
+            bits(streaming.product.image.channel(channel)),
+            "image channel {channel} differs between the RAM and streaming tiers"
+        );
+        assert_eq!(
+            bits(ram.product.weight.channel(channel)),
+            bits(streaming.product.weight.channel(channel)),
+            "weight channel {channel} differs between the RAM and streaming tiers"
+        );
+    }
+    assert_eq!(
+        bits(&ram.product.coverage),
+        bits(&streaming.product.coverage),
+        "coverage differs between the RAM and streaming tiers"
+    );
+
+    let ram_variance = ram
+        .product
+        .linear_variance
+        .as_ref()
+        .expect("a σ-clipped mean emits a linear-variance plane");
+    let streaming_variance = streaming
+        .product
+        .linear_variance
+        .as_ref()
+        .expect("a σ-clipped mean emits a linear-variance plane");
+    for channel in 0..channels {
+        assert_eq!(
+            bits(ram_variance.channel(channel)),
+            bits(streaming_variance.channel(channel)),
+            "linear-variance channel {channel} differs between the RAM and streaming tiers"
+        );
+    }
+
+    // The master inherits the reference frame's metadata, and the two tiers reach that by
+    // different routes — the RAM path overwrites it after combining, the streaming path threads it
+    // in. Distinct per-frame exposure times make the comparison non-vacuous.
+    let inherited = ram.product.image.metadata.exposure_time;
+    assert!(
+        inherited.is_some(),
+        "per-frame exposure time did not survive the FITS round-trip; \
+         the metadata comparison below would be vacuous"
+    );
+    assert_eq!(
+        inherited, streaming.product.image.metadata.exposure_time,
+        "master metadata came from a different frame on each tier"
+    );
 }
 
 #[cfg(feature = "real-data")]
