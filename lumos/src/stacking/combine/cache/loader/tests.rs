@@ -14,7 +14,7 @@ fn load_test_frame(
     source_path: &Path,
     dimensions: ImageDimensions,
     frame_index: usize,
-) -> Result<LoadedStoredFrame, Error> {
+) -> Result<StoredFrame, Error> {
     load_and_cache_frame::<LinearImage>(
         cache_dir,
         base_filename,
@@ -28,7 +28,7 @@ fn load_test_frame(
 #[test]
 fn from_paths_reports_empty_and_missing_sources() {
     let config = CacheConfig::default();
-    let empty = LightCache::from_paths(
+    let empty = FrameCache::from_paths(
         &Vec::<PathBuf>::new(),
         &config,
         Normalization::None,
@@ -38,7 +38,7 @@ fn from_paths_reports_empty_and_missing_sources() {
     assert!(matches!(empty.unwrap_err(), Error::NoFrames));
 
     let missing_path = PathBuf::from(".tmp/missing/image.fits");
-    let missing = LightCache::from_paths(
+    let missing = FrameCache::from_paths(
         &[missing_path],
         &config,
         Normalization::None,
@@ -65,10 +65,10 @@ fn test_load_and_cache_frame_fresh() {
     // First call should load and cache
     let cached_frame = load_test_frame(&temp_dir, base_filename, &source_path, dims, 0).unwrap();
 
-    assert_eq!(cached_frame.frame.channels.len(), 1);
+    assert_eq!(cached_frame.channels.len(), 1);
 
     // Verify cached data matches original
-    let cached_data = cached_frame.frame.channels[0].chunk(0, dims.pixel_count());
+    let cached_data = cached_frame.channels[0].chunk(0, dims.pixel_count());
     assert_eq!(cached_data, &pixels[..]);
 
     // Cleanup
@@ -97,8 +97,8 @@ fn test_load_and_cache_frame_reuse() {
 
     // Both should have same data
     let n = dims.pixel_count();
-    let first_data = first_frame.frame.channels[0].chunk(0, n);
-    let second_data = second_frame.frame.channels[0].chunk(0, n);
+    let first_data = first_frame.channels[0].chunk(0, n);
+    let second_data = second_frame.channels[0].chunk(0, n);
     assert_eq!(first_data, second_data);
     assert_eq!(first_data, &pixels[..]);
 
@@ -121,7 +121,7 @@ fn test_load_and_cache_frame_reuse() {
         .unwrap();
     let collided = load_test_frame(&temp_dir, base_filename, &collided_path, dims, 1).unwrap();
     assert_eq!(
-        collided.frame.channels[0].chunk(0, dims.pixel_count()),
+        collided.channels[0].chunk(0, dims.pixel_count()),
         collided_pixels
     );
     drop(collided);
@@ -147,7 +147,7 @@ fn test_load_and_cache_frame_reuse() {
         .unwrap();
     let rewritten = load_test_frame(&temp_dir, base_filename, &collided_path, dims, 1).unwrap();
     assert_eq!(
-        rewritten.frame.channels[0].chunk(0, dims.pixel_count()),
+        rewritten.channels[0].chunk(0, dims.pixel_count()),
         rewritten_pixels
     );
     drop(rewritten);
@@ -359,7 +359,7 @@ fn test_load_and_cache_frame_reuse_preserves_stats() {
 
     // First call — loads image, computes stats, writes sidecar
     let first = load_test_frame(&temp_dir, base_filename, &source_path, dims, 0).unwrap();
-    let first_stats = first.stats;
+    let first_stats = first.source_stats;
 
     assert_eq!(first_stats.channels.len(), 1);
     assert!((first_stats.channels[0].median - 5.5).abs() < f32::EPSILON);
@@ -368,7 +368,7 @@ fn test_load_and_cache_frame_reuse_preserves_stats() {
     // Second call — reuses cache, reads stats from sidecar
     let reused_stats = load_test_frame(&temp_dir, base_filename, &source_path, dims, 0)
         .unwrap()
-        .stats;
+        .source_stats;
 
     // Stats must be identical (exact f32 roundtrip via le_bytes)
     assert_eq!(reused_stats.channels.len(), first_stats.channels.len());
@@ -399,7 +399,7 @@ fn test_missing_stats_sidecar_forces_reload() {
     // First call — creates cache + sidecars
     let first_stats = load_test_frame(&temp_dir, base_filename, &source_path, dims, 0)
         .unwrap()
-        .stats;
+        .source_stats;
 
     // Delete only the .stats sidecar
     let sp = stats_path(&temp_dir, base_filename);
@@ -409,7 +409,7 @@ fn test_missing_stats_sidecar_forces_reload() {
     // Second call — should reload (not panic) and recompute stats
     let reloaded_stats = load_test_frame(&temp_dir, base_filename, &source_path, dims, 0)
         .unwrap()
-        .stats;
+        .source_stats;
 
     // Stats should match (same source image)
     assert_eq!(

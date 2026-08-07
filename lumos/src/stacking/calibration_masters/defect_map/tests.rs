@@ -1,12 +1,9 @@
 use crate::io::image::cfa::QUANTIZATION_SIGMA_PER_STEP;
-use crate::io::image::{ImageDimensions, ImageMetadata};
 use crate::stacking::calibration_masters::defect_map::*;
-use crate::stacking::combine::cache::{CacheCore, CfaCache};
-use crate::stacking::combine::cache_config::CacheConfig;
-use crate::stacking::combine::config::StackConfig;
+use crate::stacking::combine::cache::internals::cache_from_images;
+use crate::stacking::combine::config::{Normalization, StackConfig};
 use crate::stacking::combine::stack::run_stacking;
-use crate::stacking::frame_store::{compute_frame_stats, frame_from_memory};
-use crate::stacking::progress::ProgressCallback;
+
 use crate::{io::raw::demosaic::bayer::CfaPattern, testing::make_cfa};
 
 #[derive(Debug, PartialEq)]
@@ -206,7 +203,6 @@ fn quantization_floor_scales_with_bit_depth_and_master_count() {
 #[test]
 fn cfa_stack_propagates_raw_quantization_into_hot_detection() {
     let (width, height, frame_count) = (128usize, 64usize, 8usize);
-    let dimensions = ImageDimensions::new((width, height), 1);
     let source_sigma = QUANTIZATION_SIGMA_PER_STEP / 4095.0;
     let master_sigma = source_sigma / (frame_count as f32).sqrt();
     let expected = [10 * width + 10, 20 * width + 80];
@@ -226,23 +222,7 @@ fn cfa_stack_propagates_raw_quantization_into_hot_detection() {
             image
         })
         .collect();
-    let frame_stats = images.iter().map(compute_frame_stats).collect();
-    let frames = images.into_iter().map(frame_from_memory).collect();
-    let cache = CfaCache {
-        frames,
-        frame_stats,
-        core: CacheCore {
-            spill_directory: None,
-            dimensions,
-            metadata: ImageMetadata {
-                cfa_type: Some(CfaType::Mono),
-                ..Default::default()
-            },
-            config: CacheConfig::default(),
-            progress: ProgressCallback::default(),
-            cancel: CancelToken::never(),
-        },
-    };
+    let cache = cache_from_images(images, Normalization::None);
 
     let master = run_stacking(&cache, &StackConfig::default());
     assert!(

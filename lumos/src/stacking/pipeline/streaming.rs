@@ -18,8 +18,8 @@ use crate::stacking::calibration_masters::cosmic_ray::reject_cosmic_rays;
 use crate::stacking::combine::error::Error as StackError;
 use crate::stacking::combine::stack::stack_stored_frames;
 use crate::stacking::frame_store::{
-    MemoryPlan, SpillDirectory, StoredImage, StoredLightFrame, compute_frame_stats, plan_memory,
-    store_image, store_light_frame,
+    MemoryPlan, SpillDirectory, StoredFrame, StoredImage, compute_frame_stats, plan_memory,
+    store_frame, store_image,
 };
 use crate::stacking::pipeline::align::{DetectedFrame, align_and_stack, select_reference};
 use crate::stacking::pipeline::config::AlignStackConfig;
@@ -246,14 +246,14 @@ fn calibrate_align_stack_streaming<P: AsRef<Path> + Sync>(
         "Streaming: registering + warping (spilling to disk)"
     );
     let registered_so_far = AtomicUsize::new(0);
-    let mut outcomes: Vec<Option<StoredLightFrame>> = Vec::with_capacity(total);
+    let mut outcomes: Vec<Option<StoredFrame>> = Vec::with_capacity(total);
     let mut pending = detected.into_iter().enumerate();
     loop {
         let batch: Vec<_> = pending.by_ref().take(warp_concurrency).collect();
         if batch.is_empty() {
             break;
         }
-        let batch_outcomes: Result<Vec<Option<StoredLightFrame>>, Error> = batch
+        let batch_outcomes: Result<Vec<Option<StoredFrame>>, Error> = batch
             .into_par_iter()
             .map(|(idx, detected)| {
                 if cancel.is_cancelled() {
@@ -263,17 +263,10 @@ fn calibrate_align_stack_streaming<P: AsRef<Path> + Sync>(
                 let source_stats = compute_frame_stats(&calibrated);
                 let name = format!("warped_{idx}");
                 if idx == reference {
-                    return store_light_frame(
-                        cache_dir,
-                        &name,
-                        calibrated,
-                        None,
-                        None,
-                        source_stats,
-                    )
-                    .map(Some)
-                    .map_err(StackError::from)
-                    .map_err(Error::Stack);
+                    return store_frame(cache_dir, &name, &calibrated, None, None, source_stats)
+                        .map(Some)
+                        .map_err(StackError::from)
+                        .map_err(Error::Stack);
                 }
 
                 let n = registered_so_far.fetch_add(1, Ordering::Relaxed) + 1;
@@ -299,10 +292,10 @@ fn calibrate_align_stack_streaming<P: AsRef<Path> + Sync>(
                     transform = %registration.transform(),
                     "registered (streaming)"
                 );
-                store_light_frame(
+                store_frame(
                     cache_dir,
                     &name,
-                    warped.image,
+                    &warped.image,
                     Some(warped.coverage),
                     Some(warped.confidence),
                     source_stats,

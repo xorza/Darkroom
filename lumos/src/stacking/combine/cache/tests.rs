@@ -1,15 +1,16 @@
 use crate::io::image::cfa::{CfaImage, CfaType};
 use crate::io::image::linear::LinearImage;
+use crate::stacking::combine::cache::internals::cache_from_images;
 use crate::stacking::combine::cache::*;
 use crate::stacking::combine::config::Normalization;
 use crate::stacking::combine::rejection::Rejection;
-use crate::stacking::frame_store::{frame_from_memory, store_frame};
+use crate::stacking::frame_store::{compute_frame_stats, store_frame};
 use crate::testing::ScratchDirectory;
 
-/// Create an in-memory [`LightCache`] from loaded images, with no coverage (test helper).
-pub(crate) fn make_test_cache(images: Vec<LinearImage>) -> LightCache {
+/// Create an in-memory [`FrameCache`] from loaded images, with no coverage (test helper).
+pub(crate) fn make_test_cache(images: Vec<LinearImage>) -> FrameCache {
     let frames = images.into_iter().map(StackFrame::from).collect();
-    LightCache::from_stack_frames(
+    FrameCache::from_stack_frames(
         frames,
         &CacheConfig::default(),
         Normalization::None,
@@ -19,7 +20,7 @@ pub(crate) fn make_test_cache(images: Vec<LinearImage>) -> LightCache {
     .expect("test images must be non-empty and dimension-consistent")
 }
 
-fn mean_product(cache: &LightCache, weights: Option<&[f32]>) -> StackProduct {
+fn mean_product(cache: &FrameCache, weights: Option<&[f32]>) -> StackProduct {
     let combined = cache.process_chunked_weighted(weights, None, |values, weights, scratch| {
         Rejection::None.combine_mean_with_quality(values, weights, scratch)
     });
@@ -40,7 +41,7 @@ fn weighted_chunk_memory_counts_active_inputs_and_full_outputs() {
     frames[2].coverage = Some(plane());
     frames[2].confidence = Some(plane());
 
-    let cache = LightCache::from_stack_frames(
+    let cache = FrameCache::from_stack_frames(
         frames,
         &CacheConfig::default(),
         Normalization::None,
@@ -114,7 +115,7 @@ fn finish_product_partial_coverage() {
             frame
         })
         .collect();
-    let cache = LightCache::from_stack_frames(
+    let cache = FrameCache::from_stack_frames(
         frames,
         &CacheConfig::default(),
         Normalization::None,
@@ -138,35 +139,21 @@ fn finish_product_partial_coverage() {
     );
 }
 
-/// Build an in-memory [`CfaCache`] from single-channel CFA frame pixels (test helper for the
-/// plain combine; `process_chunked` ignores statistics.
-fn make_cfa_cache(frames_pixels: Vec<Vec<f32>>, dims: ImageDimensions) -> CfaCache {
-    let frames = frames_pixels
+/// Build an in-memory [`FrameCache`] from single-channel CFA frame pixels (test helper for the
+/// plain combine).
+fn make_cfa_cache(frames_pixels: Vec<Vec<f32>>, dims: ImageDimensions) -> FrameCache {
+    let images = frames_pixels
         .into_iter()
-        .map(|pixels| {
-            let image = CfaImage {
-                data: Buffer2::new(dims.width(), dims.height(), pixels),
-                metadata: ImageMetadata {
-                    cfa_type: Some(CfaType::Mono),
-                    ..Default::default()
-                },
-                quantization_sigma: None,
-            };
-            frame_from_memory(image)
+        .map(|pixels| CfaImage {
+            data: Buffer2::new(dims.width(), dims.height(), pixels),
+            metadata: ImageMetadata {
+                cfa_type: Some(CfaType::Mono),
+                ..Default::default()
+            },
+            quantization_sigma: None,
         })
         .collect();
-    CfaCache {
-        frames,
-        frame_stats: vec![],
-        core: CacheCore {
-            spill_directory: None,
-            dimensions: dims,
-            metadata: ImageMetadata::default(),
-            config: CacheConfig::default(),
-            progress: ProgressCallback::default(),
-            cancel: CancelToken::never(),
-        },
-    }
+    cache_from_images(images, Normalization::None)
 }
 
 #[test]
@@ -254,7 +241,7 @@ fn test_process_chunked_with_weights() {
 
 #[test]
 fn test_cfa_cache_plain_combine() {
-    // The plain `CfaCache::process_chunked` path (calibration): no coverage, every frame
+    // The plain `FrameCache::process_chunked` path (calibration): no coverage, every frame
     // contributes at every pixel.
     let dims = ImageDimensions::new((2, 2), 1);
 
@@ -311,7 +298,15 @@ fn test_cleanup_removes_files() {
     let pixels: Vec<f32> = (0..12).map(|i| i as f32).collect();
     let image = LinearImage::from_pixels(dims, pixels);
 
-    let cached_frame = store_frame(&temp_dir, "cleanup_test.bin", &image).unwrap();
+    let cached_frame = store_frame(
+        &temp_dir,
+        "cleanup_test.bin",
+        &image,
+        None,
+        None,
+        compute_frame_stats(&image),
+    )
+    .unwrap();
 
     // Verify cache dir has files
     assert!(temp_dir.exists());
@@ -323,9 +318,9 @@ fn test_cleanup_removes_files() {
         ..Default::default()
     };
 
-    let cache = CfaCache {
+    let cache = FrameCache {
         frames: vec![cached_frame],
-        frame_stats: vec![],
+        frame_norms: None,
         core: CacheCore {
             spill_directory: Some(SpillDirectory::create(temp_dir.to_path_buf(), false).unwrap()),
             dimensions: dims,
@@ -379,11 +374,19 @@ fn test_read_channel_chunk_disk_backed() {
 
     // Cache the image to disk
     let base_filename = "test_chunk.bin";
-    let cached_frame = store_frame(&temp_dir, base_filename, &image).unwrap();
+    let cached_frame = store_frame(
+        &temp_dir,
+        base_filename,
+        &image,
+        None,
+        None,
+        compute_frame_stats(&image),
+    )
+    .unwrap();
 
-    let cache = CfaCache {
+    let cache = FrameCache {
         frames: vec![cached_frame],
-        frame_stats: vec![],
+        frame_norms: None,
         core: CacheCore {
             spill_directory: Some(SpillDirectory::create(temp_dir.to_path_buf(), false).unwrap()),
             dimensions: dims,
@@ -429,13 +432,21 @@ fn test_frame_count_disk_backed() {
         let pixels: Vec<f32> = vec![i as f32; 4];
         let image = LinearImage::from_pixels(dims, pixels);
         let base_filename = format!("frame{}.bin", i);
-        let cached_frame = store_frame(&temp_dir, &base_filename, &image).unwrap();
+        let cached_frame = store_frame(
+            &temp_dir,
+            &base_filename,
+            &image,
+            None,
+            None,
+            compute_frame_stats(&image),
+        )
+        .unwrap();
         frames.push(cached_frame);
     }
 
-    let cache = CfaCache {
+    let cache = FrameCache {
         frames,
-        frame_stats: vec![],
+        frame_norms: None,
         core: CacheCore {
             spill_directory: Some(SpillDirectory::create(temp_dir.to_path_buf(), false).unwrap()),
             dimensions: dims,

@@ -21,7 +21,7 @@ use common::CancelToken;
 use crate::io::image::LoadContext;
 use crate::io::image::cfa::{CfaFrameInfo, CfaImage, CfaType};
 use crate::io::image::error::ImageError;
-use crate::stacking::combine::cache::CfaCache;
+use crate::stacking::combine::cache::FrameCache;
 use crate::stacking::combine::config::StackConfig;
 use crate::stacking::combine::error::Error;
 use crate::stacking::combine::stack::run_stacking;
@@ -187,7 +187,13 @@ pub fn stack_cfa_master(
 
     // `cancel` rides on the cache from construction, so the RAW-decode load loop
     // polls it too (not just the combine).
-    let cache = CfaCache::from_paths(paths, &config.cache, ProgressCallback::default(), cancel)?;
+    let cache = FrameCache::from_cfa_paths(
+        paths,
+        &config.cache,
+        config.normalization,
+        ProgressCallback::default(),
+        cancel,
+    )?;
 
     let result = run_stacking(&cache, &config);
     if cache.core.cancel.is_cancelled() {

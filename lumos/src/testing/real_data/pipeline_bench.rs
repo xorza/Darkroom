@@ -8,7 +8,7 @@ use crate::concurrency;
 use crate::io::image::cfa::CfaImage;
 use crate::io::image::linear::LinearImage;
 use crate::io::raw::load_raw_cfa;
-use crate::stacking::combine::cache::CfaCache;
+use crate::stacking::combine::cache::FrameCache;
 use crate::stacking::combine::stack::run_stacking;
 use crate::testing::{calibration_dir, calibration_image_paths, init_tracing};
 use crate::{
@@ -50,9 +50,10 @@ fn bench_full_pipeline() {
             };
 
             let t0 = Instant::now();
-            let cache = CfaCache::from_paths(
+            let cache = FrameCache::from_cfa_paths(
                 paths,
                 &config.cache,
+                config.normalization,
                 ProgressCallback::default(),
                 CancelToken::never(),
             )

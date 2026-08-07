@@ -159,24 +159,20 @@ impl StoredPlane {
     }
 }
 
-/// Stored channels for an unweighted frame.
+/// One frame as the combine engine sees it: its channel planes, the per-pixel warp quality a
+/// registered light carries (absent for calibration frames and for lights loaded straight from
+/// disk), and the statistics measured on the source before any interpolation.
 #[derive(Debug)]
 pub(crate) struct StoredFrame {
-    pub(crate) channels: ArrayVec<StoredPlane, 3>,
-}
-
-/// Stored channels and warp quality for one registered light frame.
-#[derive(Debug)]
-pub(crate) struct StoredLightFrame {
     pub(crate) channels: ArrayVec<StoredPlane, 3>,
     pub(crate) coverage: Option<StoredPlane>,
     pub(crate) confidence: Option<StoredPlane>,
     pub(crate) source_stats: FrameStats,
 }
 
-impl StoredLightFrame {
+impl StoredFrame {
     pub(crate) fn from_memory(
-        image: LinearImage,
+        image: impl StackableImage,
         coverage: Option<Buffer2<f32>>,
         confidence: Option<Buffer2<f32>>,
         source_stats: FrameStats,
@@ -190,15 +186,6 @@ impl StoredLightFrame {
             channels,
             coverage: coverage.map(StoredPlane::Memory),
             confidence: confidence.map(StoredPlane::Memory),
-            source_stats,
-        }
-    }
-
-    pub(crate) fn from_stored(frame: StoredFrame, source_stats: FrameStats) -> Self {
-        Self {
-            channels: frame.channels,
-            coverage: None,
-            confidence: None,
             source_stats,
         }
     }
@@ -262,57 +249,29 @@ pub(crate) fn store_image(
     })
 }
 
-pub(crate) fn store_light_frame(
-    directory: &Path,
-    name: &str,
-    image: LinearImage,
-    coverage: Option<Buffer2<f32>>,
-    confidence: Option<Buffer2<f32>>,
-    source_stats: FrameStats,
-) -> Result<StoredLightFrame, FrameStoreError> {
-    let channels = spill_channels(directory, name, &image)?.planes;
-    let coverage = match coverage {
-        Some(coverage) => {
-            let path = directory.join(format!("{name}_coverage.bin"));
-            write_plane(&path, &coverage)?;
-            Some(StoredPlane::Mapped(map_plane(path)?))
-        }
-        None => None,
-    };
-    let confidence = match confidence {
-        Some(confidence) => {
-            let path = directory.join(format!("{name}_confidence.bin"));
-            write_plane(&path, &confidence)?;
-            Some(StoredPlane::Mapped(map_plane(path)?))
-        }
-        None => None,
-    };
-    Ok(StoredLightFrame {
-        channels,
-        coverage,
-        confidence,
-        source_stats,
-    })
-}
-
 pub(crate) fn store_frame(
     directory: &Path,
     name: &str,
     image: &impl StackableImage,
+    coverage: Option<Buffer2<f32>>,
+    confidence: Option<Buffer2<f32>>,
+    source_stats: FrameStats,
 ) -> Result<StoredFrame, FrameStoreError> {
+    let channels = spill_channels(directory, name, image)?.planes;
+    let spill_quality = |suffix: &str, plane: Option<Buffer2<f32>>| match plane {
+        Some(plane) => {
+            let path = directory.join(format!("{name}_{suffix}.bin"));
+            write_plane(&path, &plane)?;
+            Ok(Some(StoredPlane::Mapped(map_plane(path)?)))
+        }
+        None => Ok(None),
+    };
     Ok(StoredFrame {
-        channels: spill_channels(directory, name, image)?.planes,
+        channels,
+        coverage: spill_quality("coverage", coverage)?,
+        confidence: spill_quality("confidence", confidence)?,
+        source_stats,
     })
-}
-
-pub(crate) fn frame_from_memory<I: StackableImage>(image: I) -> StoredFrame {
-    StoredFrame {
-        channels: image
-            .into_planes()
-            .into_iter()
-            .map(StoredPlane::Memory)
-            .collect(),
-    }
 }
 
 fn spill_channels(
