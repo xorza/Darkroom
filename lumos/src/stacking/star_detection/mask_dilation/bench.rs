@@ -8,11 +8,11 @@ use ::quickbench::quick_bench;
 use std::hint::black_box;
 
 /// Create a sparse mask with some set bits for benchmarking.
-fn create_sparse_mask(width: usize, height: usize) -> BitBuffer2 {
-    let mut mask = BitBuffer2::new_default(Size2us::new(width, height));
+fn create_sparse_mask(size: Size2us) -> BitBuffer2 {
+    let mut mask = BitBuffer2::new_default(size);
     // Set ~1% of pixels in a scattered pattern
-    for y in (0..height).step_by(10) {
-        for x in (0..width).step_by(10) {
+    for y in (0..size.height).step_by(10) {
+        for x in (0..size.width).step_by(10) {
             mask.set_at(Vec2us::new(x, y), true);
         }
     }
@@ -21,7 +21,7 @@ fn create_sparse_mask(width: usize, height: usize) -> BitBuffer2 {
 
 #[quick_bench(warmup_iters = 1, iters = 200)]
 fn bench_dilate_mask_6k(b: ::quickbench::Bencher) {
-    let mask = create_sparse_mask(6144, 6144);
+    let mask = create_sparse_mask(Size2us::new(6144, 6144));
     let mut output = BitBuffer2::new_default(Size2us::new(6144, 6144));
 
     b.bench(|| {

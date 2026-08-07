@@ -4,6 +4,8 @@ use std::hint::black_box;
 
 use ::quickbench::quick_bench;
 
+use crate::math::size2us::Size2us;
+use crate::math::vec2us::Vec2us;
 use crate::stacking::registration::config::{self, InterpolationMethod};
 use crate::stacking::registration::resample::kernel::internals as kernel_test_support;
 use crate::stacking::registration::resample::{kernel, plane, row};
@@ -12,15 +14,15 @@ use glam::{DVec2, Vec2};
 use imaginarium::Buffer2;
 
 /// Create a test image of specified size filled with gradient pattern.
-fn create_test_image(width: usize, height: usize) -> Buffer2<f32> {
-    let mut data = vec![0.0f32; width * height];
-    for y in 0..height {
-        for x in 0..width {
+fn create_test_image(size: Size2us) -> Buffer2<f32> {
+    let mut data = vec![0.0f32; size.pixel_count()];
+    for y in 0..size.height {
+        for x in 0..size.width {
             // Gradient pattern with some variation
-            data[y * width + x] = ((x + y) % 256) as f32 / 255.0;
+            data[size.index_of(Vec2us::new(x, y))] = ((x + y) % 256) as f32 / 255.0;
         }
     }
-    Buffer2::new(width, height, data)
+    Buffer2::new(size.width, size.height, data)
 }
 
 /// Create a small rotation transform for realistic warping.
@@ -32,7 +34,7 @@ fn create_test_transform() -> Transform {
 
 #[quick_bench(warmup_iters = 2, iters = 10)]
 fn bench_warp_lanczos3_1k(b: quickbench::Bencher) {
-    let input = create_test_image(1024, 1024);
+    let input = create_test_image(Size2us::new(1024, 1024));
     let mut output = Buffer2::new_default(1024, 1024);
     let transform = create_test_transform();
 
@@ -48,7 +50,7 @@ fn bench_warp_lanczos3_1k(b: quickbench::Bencher) {
 
 #[quick_bench(warmup_iters = 1, iters = 5)]
 fn bench_warp_lanczos3_2k(b: quickbench::Bencher) {
-    let input = create_test_image(2048, 2048);
+    let input = create_test_image(Size2us::new(2048, 2048));
     let mut output = Buffer2::new_default(2048, 2048);
     let transform = create_test_transform();
 
@@ -64,7 +66,7 @@ fn bench_warp_lanczos3_2k(b: quickbench::Bencher) {
 
 #[quick_bench(warmup_iters = 1, iters = 3)]
 fn bench_warp_lanczos3_4k(b: quickbench::Bencher) {
-    let input = create_test_image(4096, 4096);
+    let input = create_test_image(Size2us::new(4096, 4096));
     let mut output = Buffer2::new_default(4096, 4096);
     let transform = create_test_transform();
 
@@ -80,7 +82,7 @@ fn bench_warp_lanczos3_4k(b: quickbench::Bencher) {
 
 #[quick_bench(warmup_iters = 2, iters = 10)]
 fn bench_warp_bilinear_2k(b: quickbench::Bencher) {
-    let input = create_test_image(2048, 2048);
+    let input = create_test_image(Size2us::new(2048, 2048));
     let mut output = Buffer2::new_default(2048, 2048);
     let transform = create_test_transform();
 
@@ -97,7 +99,7 @@ fn bench_warp_bilinear_2k(b: quickbench::Bencher) {
 /// Single-threaded 1k warp to measure per-thread throughput without rayon overhead.
 #[quick_bench(warmup_iters = 3, iters = 10)]
 fn bench_warp_lanczos3_1k_single_thread(b: quickbench::Bencher) {
-    let input = create_test_image(1024, 1024);
+    let input = create_test_image(Size2us::new(1024, 1024));
     let mut output = Buffer2::new_default(1024, 1024);
     let transform = create_test_transform();
     let wt = WarpTransform::new(transform);
@@ -117,7 +119,7 @@ fn bench_warp_lanczos3_1k_single_thread(b: quickbench::Bencher) {
 
 #[quick_bench(warmup_iters = 2, iters = 10)]
 fn bench_warp_bicubic_2k(b: quickbench::Bencher) {
-    let input = create_test_image(2048, 2048);
+    let input = create_test_image(Size2us::new(2048, 2048));
     let mut output = Buffer2::new_default(2048, 2048);
     let transform = create_test_transform();
 
@@ -133,7 +135,7 @@ fn bench_warp_bicubic_2k(b: quickbench::Bencher) {
 
 #[quick_bench(warmup_iters = 2, iters = 10)]
 fn bench_warp_lanczos4_2k(b: quickbench::Bencher) {
-    let input = create_test_image(2048, 2048);
+    let input = create_test_image(Size2us::new(2048, 2048));
     let mut output = Buffer2::new_default(2048, 2048);
     let transform = create_test_transform();
 
@@ -149,7 +151,7 @@ fn bench_warp_lanczos4_2k(b: quickbench::Bencher) {
 
 #[quick_bench(warmup_iters = 2, iters = 10)]
 fn bench_warp_lanczos2_2k(b: quickbench::Bencher) {
-    let input = create_test_image(2048, 2048);
+    let input = create_test_image(Size2us::new(2048, 2048));
     let mut output = Buffer2::new_default(2048, 2048);
     let transform = create_test_transform();
 
@@ -179,7 +181,7 @@ fn bench_lut_lookup(b: quickbench::Bencher) {
 
 #[quick_bench(warmup_iters = 3, iters = 20)]
 fn bench_interpolate_lanczos3_single(b: quickbench::Bencher) {
-    let input = create_test_image(256, 256);
+    let input = create_test_image(Size2us::new(256, 256));
     // Test positions near center
     let positions: Vec<(f32, f32)> = (0..1000)
         .map(|i| {

@@ -10,13 +10,13 @@ use crate::stacking::star_detection::labeling::internals::label_map_from_mask_wi
 
 /// Simple flood-fill reference implementation for ground truth comparison.
 /// This is intentionally naive and slow but obviously correct.
-fn reference_ccl_4conn(mask: &[bool], width: usize, height: usize) -> (Vec<u32>, usize) {
-    let mut labels = vec![0u32; width * height];
+fn reference_ccl_4conn(mask: &[bool], size: Size2us) -> (Vec<u32>, usize) {
+    let mut labels = vec![0u32; size.width * size.height];
     let mut current_label = 0u32;
 
-    for start_y in 0..height {
-        for start_x in 0..width {
-            let start_idx = start_y * width + start_x;
+    for start_y in 0..size.height {
+        for start_x in 0..size.width {
+            let start_idx = start_y * size.width + start_x;
             if !mask[start_idx] || labels[start_idx] != 0 {
                 continue;
             }
@@ -26,7 +26,7 @@ fn reference_ccl_4conn(mask: &[bool], width: usize, height: usize) -> (Vec<u32>,
             let mut stack = vec![(start_x, start_y)];
 
             while let Some((x, y)) = stack.pop() {
-                let idx = y * width + x;
+                let idx = y * size.width + x;
                 if labels[idx] != 0 || !mask[idx] {
                     continue;
                 }
@@ -36,13 +36,13 @@ fn reference_ccl_4conn(mask: &[bool], width: usize, height: usize) -> (Vec<u32>,
                 if x > 0 {
                     stack.push((x - 1, y));
                 }
-                if x + 1 < width {
+                if x + 1 < size.width {
                     stack.push((x + 1, y));
                 }
                 if y > 0 {
                     stack.push((x, y - 1));
                 }
-                if y + 1 < height {
+                if y + 1 < size.height {
                     stack.push((x, y + 1));
                 }
             }
@@ -53,13 +53,13 @@ fn reference_ccl_4conn(mask: &[bool], width: usize, height: usize) -> (Vec<u32>,
 }
 
 /// Simple flood-fill reference implementation for 8-connectivity.
-fn reference_ccl_8conn(mask: &[bool], width: usize, height: usize) -> (Vec<u32>, usize) {
-    let mut labels = vec![0u32; width * height];
+fn reference_ccl_8conn(mask: &[bool], size: Size2us) -> (Vec<u32>, usize) {
+    let mut labels = vec![0u32; size.width * size.height];
     let mut current_label = 0u32;
 
-    for start_y in 0..height {
-        for start_x in 0..width {
-            let start_idx = start_y * width + start_x;
+    for start_y in 0..size.height {
+        for start_x in 0..size.width {
+            let start_idx = start_y * size.width + start_x;
             if !mask[start_idx] || labels[start_idx] != 0 {
                 continue;
             }
@@ -69,7 +69,7 @@ fn reference_ccl_8conn(mask: &[bool], width: usize, height: usize) -> (Vec<u32>,
             let mut stack = vec![(start_x, start_y)];
 
             while let Some((x, y)) = stack.pop() {
-                let idx = y * width + x;
+                let idx = y * size.width + x;
                 if labels[idx] != 0 || !mask[idx] {
                     continue;
                 }
@@ -83,7 +83,7 @@ fn reference_ccl_8conn(mask: &[bool], width: usize, height: usize) -> (Vec<u32>,
                         }
                         let nx = x as i32 + dx;
                         let ny = y as i32 + dy;
-                        if nx >= 0 && nx < width as i32 && ny >= 0 && ny < height as i32 {
+                        if nx >= 0 && nx < size.width as i32 && ny >= 0 && ny < size.height as i32 {
                             stack.push((nx as usize, ny as usize));
                         }
                     }
@@ -96,13 +96,7 @@ fn reference_ccl_8conn(mask: &[bool], width: usize, height: usize) -> (Vec<u32>,
 }
 
 /// Verify CCL invariants on any label map.
-fn verify_ccl_invariants(
-    mask: &[bool],
-    labels: &[u32],
-    width: usize,
-    height: usize,
-    connectivity: Connectivity,
-) {
+fn verify_ccl_invariants(mask: &[bool], labels: &[u32], size: Size2us, connectivity: Connectivity) {
     // Invariant 1: Background pixels have label 0
     for (i, (&m, &l)) in mask.iter().zip(labels.iter()).enumerate() {
         if !m {
@@ -122,9 +116,9 @@ fn verify_ccl_invariants(
     }
 
     // Invariant 3: Connected pixels have the same label
-    for y in 0..height {
-        for x in 0..width {
-            let idx = y * width + x;
+    for y in 0..size.height {
+        for x in 0..size.width {
+            let idx = y * size.width + x;
             if !mask[idx] {
                 continue;
             }
@@ -148,8 +142,8 @@ fn verify_ccl_invariants(
             for (dx, dy) in neighbors {
                 let nx = x as i32 + dx;
                 let ny = y as i32 + dy;
-                if nx >= 0 && nx < width as i32 && ny >= 0 && ny < height as i32 {
-                    let nidx = ny as usize * width + nx as usize;
+                if nx >= 0 && nx < size.width as i32 && ny >= 0 && ny < size.height as i32 {
+                    let nidx = ny as usize * size.width + nx as usize;
                     if mask[nidx] {
                         assert_eq!(
                             labels[nidx], label,
@@ -182,12 +176,12 @@ fn verify_ccl_invariants(
 }
 
 /// Compare our implementation against reference flood-fill.
-fn compare_with_reference(mask_data: &[bool], width: usize, height: usize) {
-    let mask = BitBuffer2::from_slice(Size2us::new(width, height), mask_data);
+fn compare_with_reference(mask_data: &[bool], size: Size2us) {
+    let mask = BitBuffer2::from_slice(size, mask_data);
 
     // Test 4-connectivity
     let label_map_4 = label_map_from_mask_with_connectivity(&mask, Connectivity::Four);
-    let (ref_labels_4, ref_count_4) = reference_ccl_4conn(mask_data, width, height);
+    let (ref_labels_4, ref_count_4) = reference_ccl_4conn(mask_data, size);
 
     assert_eq!(
         label_map_4.num_labels(),
@@ -197,20 +191,14 @@ fn compare_with_reference(mask_data: &[bool], width: usize, height: usize) {
         ref_count_4
     );
 
-    verify_ccl_invariants(
-        mask_data,
-        label_map_4.labels(),
-        width,
-        height,
-        Connectivity::Four,
-    );
+    verify_ccl_invariants(mask_data, label_map_4.labels(), size, Connectivity::Four);
 
     // Verify same grouping (labels may differ but grouping must match)
-    verify_same_grouping(label_map_4.labels(), &ref_labels_4, width * height);
+    verify_same_grouping(label_map_4.labels(), &ref_labels_4, size.pixel_count());
 
     // Test 8-connectivity
     let label_map_8 = label_map_from_mask_with_connectivity(&mask, Connectivity::Eight);
-    let (ref_labels_8, ref_count_8) = reference_ccl_8conn(mask_data, width, height);
+    let (ref_labels_8, ref_count_8) = reference_ccl_8conn(mask_data, size);
 
     assert_eq!(
         label_map_8.num_labels(),
@@ -220,14 +208,8 @@ fn compare_with_reference(mask_data: &[bool], width: usize, height: usize) {
         ref_count_8
     );
 
-    verify_ccl_invariants(
-        mask_data,
-        label_map_8.labels(),
-        width,
-        height,
-        Connectivity::Eight,
-    );
-    verify_same_grouping(label_map_8.labels(), &ref_labels_8, width * height);
+    verify_ccl_invariants(mask_data, label_map_8.labels(), size, Connectivity::Eight);
+    verify_same_grouping(label_map_8.labels(), &ref_labels_8, size.pixel_count());
 }
 
 /// Verify two labelings have the same grouping (same pixels grouped together).

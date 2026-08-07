@@ -1,3 +1,4 @@
+use crate::math::size2us::Size2us;
 use std::ops::Range;
 
 use crate::stacking::star_detection::labeling::tests::*;
@@ -56,7 +57,7 @@ fn random_masks_match_reference() {
     for case in cases {
         for seed in case.seeds.clone() {
             let mask = random_mask(&case, seed);
-            compare_with_reference(&mask, case.width, case.height);
+            compare_with_reference(&mask, Size2us::new(case.width, case.height));
         }
     }
 }

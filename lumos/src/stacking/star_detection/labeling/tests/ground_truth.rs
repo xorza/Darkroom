@@ -1,3 +1,4 @@
+use crate::math::size2us::Size2us;
 use crate::stacking::star_detection::labeling::tests::*;
 
 #[test]
@@ -5,21 +6,21 @@ fn simple_shapes() {
     // Single pixel
     let mut mask = vec![false; 16];
     mask[5] = true;
-    compare_with_reference(&mask, 4, 4);
+    compare_with_reference(&mask, Size2us::new(4, 4));
 
     // Horizontal line
     let mut mask = vec![false; 20];
     for x in 2..7 {
         mask[1 * 5 + x % 5] = true;
     }
-    compare_with_reference(&mask, 5, 4);
+    compare_with_reference(&mask, Size2us::new(5, 4));
 
     // Vertical line
     let mut mask = vec![false; 20];
     for y in 0..4 {
         mask[y * 5 + 2] = true;
     }
-    compare_with_reference(&mask, 5, 4);
+    compare_with_reference(&mask, Size2us::new(5, 4));
 
     // L-shape
     let mut mask = vec![false; 16];
@@ -27,7 +28,7 @@ fn simple_shapes() {
     mask[4] = true;
     mask[8] = true;
     mask[9] = true;
-    compare_with_reference(&mask, 4, 4);
+    compare_with_reference(&mask, Size2us::new(4, 4));
 }
 
 #[test]
@@ -39,14 +40,14 @@ fn multiple_components() {
     mask[5] = true;
     mask[23] = true;
     mask[24] = true;
-    compare_with_reference(&mask, 5, 5);
+    compare_with_reference(&mask, Size2us::new(5, 5));
 
     // Three diagonal pixels (separate in 4-conn, together in 8-conn)
     let mut mask = vec![false; 9];
     mask[0] = true;
     mask[4] = true;
     mask[8] = true;
-    compare_with_reference(&mask, 3, 3);
+    compare_with_reference(&mask, Size2us::new(3, 3));
 }
 
 #[test]
@@ -59,7 +60,7 @@ fn checkerboard_patterns() {
             (x + y) % 2 == 0
         })
         .collect();
-    compare_with_reference(&mask, 4, 4);
+    compare_with_reference(&mask, Size2us::new(4, 4));
 
     // Larger checkerboard
     let mask: Vec<bool> = (0..64)
@@ -69,7 +70,7 @@ fn checkerboard_patterns() {
             (x + y) % 2 == 0
         })
         .collect();
-    compare_with_reference(&mask, 8, 8);
+    compare_with_reference(&mask, Size2us::new(8, 8));
 }
 
 #[test]
@@ -108,7 +109,7 @@ fn spiral_shape() {
     }
     mask[4 * width + 4] = true;
 
-    compare_with_reference(&mask, width, height);
+    compare_with_reference(&mask, Size2us::new(width, height));
 }
 
 #[test]
@@ -138,5 +139,5 @@ fn concentric_squares() {
         mask[y * width + 6] = true;
     }
 
-    compare_with_reference(&mask, width, height);
+    compare_with_reference(&mask, Size2us::new(width, height));
 }

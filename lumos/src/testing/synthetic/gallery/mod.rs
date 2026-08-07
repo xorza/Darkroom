@@ -64,17 +64,21 @@ fn to_bytes(pixels: &[f32], stretch: Stretch) -> Vec<u8> {
 }
 
 /// Save a grayscale frame to `synthetic_gallery/<name>.png`, returning the path.
-fn save(pixels: &[f32], width: usize, height: usize, name: &str, stretch: Stretch) -> PathBuf {
+fn save(pixels: &[f32], size: Size2us, name: &str, stretch: Stretch) -> PathBuf {
     assert_eq!(
         pixels.len(),
-        width * height,
+        size.pixel_count(),
         "pixel/dimension mismatch for {name}"
     );
     let path = test_output_path(&format!("synthetic_gallery/{name}.png"));
-    GrayImage::from_raw(width as u32, height as u32, to_bytes(pixels, stretch))
-        .expect("buffer fits image dimensions")
-        .save(&path)
-        .expect("write png");
+    GrayImage::from_raw(
+        size.width as u32,
+        size.height as u32,
+        to_bytes(pixels, stretch),
+    )
+    .expect("buffer fits image dimensions")
+    .save(&path)
+    .expect("write png");
     path
 }
 
@@ -83,23 +87,15 @@ fn save_frame(scene: &Scene, camera: &Camera, obs: &Observation, name: &str, str
     let frame = render(scene, camera, obs);
     save(
         frame.image.channel(0).pixels(),
-        scene.size.width,
-        scene.size.height,
+        Size2us::new(scene.size.width, scene.size.height),
         name,
         stretch,
     );
 }
 
 /// A representative populated star field over `background`.
-fn demo_field(width: usize, height: usize, background: BackgroundField, seed: u64) -> Scene {
-    Scene::random_field(
-        Size2us::new(width, height),
-        120,
-        (3.0, 250.0),
-        background,
-        16.0,
-        seed,
-    )
+fn demo_field(size: Size2us, background: BackgroundField, seed: u64) -> Scene {
+    Scene::random_field(size, 120, (3.0, 250.0), background, 16.0, seed)
 }
 
 #[test]
@@ -158,7 +154,12 @@ fn gallery_backgrounds() {
         ),
     ];
     for (name, bg, stretch) in cases {
-        save(&bg.render(Size2us::new(w, h)), w, h, name, stretch);
+        save(
+            &bg.render(Size2us::new(w, h)),
+            Size2us::new(w, h),
+            name,
+            stretch,
+        );
     }
 }
 
@@ -249,7 +250,11 @@ fn gallery_noise() {
     );
 
     // A populated field across shot-noise (well depth) and read-noise levels.
-    let field = demo_field(w, h, BackgroundField::Uniform { level: 0.05 }, 7);
+    let field = demo_field(
+        Size2us::new(w, h),
+        BackgroundField::Uniform { level: 0.05 },
+        7,
+    );
     let well = |full_well_e: f32, read_noise_e: f32| Camera {
         full_well_e,
         read_noise_e,
@@ -296,8 +301,7 @@ fn gallery_sensor() {
     };
     save(
         &vignette_flat.render(Size2us::new(w, h), 0),
-        w,
-        h,
+        Size2us::new(w, h),
         "sensor/flat_vignette_map",
         Stretch::Linear,
     );
@@ -321,7 +325,11 @@ fn gallery_sensor() {
     );
 
     // Defects + bias on a star field: hot pixels, a dead pixel block, a bad column.
-    let field = demo_field(w, h, BackgroundField::Uniform { level: 0.05 }, 9);
+    let field = demo_field(
+        Size2us::new(w, h),
+        BackgroundField::Uniform { level: 0.05 },
+        9,
+    );
     let defects = SensorDefects {
         hot: (0..40)
             .map(|i| ((i * 53 + 7) % w, (i * 97 + 3) % h, 0.7))
@@ -369,7 +377,11 @@ fn gallery_scenes() {
         Stretch::Asinh,
     );
 
-    let dense = demo_field(w, h, BackgroundField::Uniform { level: 0.06 }, 2);
+    let dense = demo_field(
+        Size2us::new(w, h),
+        BackgroundField::Uniform { level: 0.06 },
+        2,
+    );
     save_frame(
         &dense,
         &Camera::realistic(3.5),
@@ -378,7 +390,11 @@ fn gallery_scenes() {
         Stretch::Asinh,
     );
 
-    let over_nebula = demo_field(w, h, BackgroundField::Nebula(NebulaConfig::default()), 3);
+    let over_nebula = demo_field(
+        Size2us::new(w, h),
+        BackgroundField::Nebula(NebulaConfig::default()),
+        3,
+    );
     save_frame(
         &over_nebula,
         &Camera::realistic(3.5),
@@ -425,14 +441,23 @@ fn gallery_scenes() {
     let frame = render(&dense, &Camera::realistic(3.5), &Observation::reference(7));
     let mut pixels = frame.image.channel(0).pixels().to_vec();
     add_cosmic_rays(&mut pixels, w, 60, (0.5, 1.0), 1234);
-    save(&pixels, w, h, "scenes/cosmic_rays", Stretch::Asinh);
+    save(
+        &pixels,
+        Size2us::new(w, h),
+        "scenes/cosmic_rays",
+        Stretch::Asinh,
+    );
 }
 
 #[test]
 #[ignore = "visual gallery; run with --ignored"]
 fn gallery_seeing() {
     let (w, h) = (256, 256);
-    let field = demo_field(w, h, BackgroundField::Uniform { level: 0.05 }, 11);
+    let field = demo_field(
+        Size2us::new(w, h),
+        BackgroundField::Uniform { level: 0.05 },
+        11,
+    );
     for scale in [1.0f32, 1.5, 2.5] {
         let obs = Observation {
             seeing_scale: scale,
@@ -447,7 +472,11 @@ fn gallery_seeing() {
 #[ignore = "visual gallery; run with --ignored"]
 fn gallery_dither() {
     let (w, h) = (256, 256);
-    let field = demo_field(w, h, BackgroundField::Uniform { level: 0.05 }, 13);
+    let field = demo_field(
+        Size2us::new(w, h),
+        BackgroundField::Uniform { level: 0.05 },
+        13,
+    );
     let dithers = [
         DVec2::new(0.0, 0.0),
         DVec2::new(12.0, -6.0),
@@ -457,8 +486,7 @@ fn gallery_dither() {
     for (i, frame) in frames.iter().enumerate() {
         save(
             frame.image.channel(0).pixels(),
-            w,
-            h,
+            Size2us::new(w, h),
             &format!("dither/frame_{i}"),
             Stretch::Asinh,
         );
@@ -471,22 +499,19 @@ fn gallery_patterns() {
     let (w, h) = (256, 256);
     save(
         checkerboard(Size2us::new(w, h), 16, 0.1, 0.9).pixels(),
-        w,
-        h,
+        Size2us::new(w, h),
         "patterns/checkerboard",
         Stretch::Linear,
     );
     save(
         horizontal_gradient(Size2us::new(w, h), 0.0, 1.0).pixels(),
-        w,
-        h,
+        Size2us::new(w, h),
         "patterns/horizontal_gradient",
         Stretch::Linear,
     );
     save(
         diagonal_gradient(Size2us::new(w, h)).pixels(),
-        w,
-        h,
+        Size2us::new(w, h),
         "patterns/diagonal_gradient",
         Stretch::Linear,
     );
@@ -503,8 +528,7 @@ fn gallery_fixtures() {
             .image
             .channel(0)
             .pixels(),
-        size,
-        size,
+        Size2us::new(size, size),
         "fixtures/star_field_sparse",
         Stretch::Asinh,
     );
@@ -513,8 +537,7 @@ fn gallery_fixtures() {
             .image
             .channel(0)
             .pixels(),
-        size,
-        size,
+        Size2us::new(size, size),
         "fixtures/star_field_dense",
         Stretch::Asinh,
     );
@@ -523,8 +546,7 @@ fn gallery_fixtures() {
             .image
             .channel(0)
             .pixels(),
-        size,
-        size,
+        Size2us::new(size, size),
         "fixtures/cluster_field",
         Stretch::Asinh,
     );
@@ -533,8 +555,7 @@ fn gallery_fixtures() {
             .image
             .channel(0)
             .pixels(),
-        size,
-        size,
+        Size2us::new(size, size),
         "fixtures/cluster_field_dense",
         Stretch::Asinh,
     );
