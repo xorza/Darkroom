@@ -10,15 +10,15 @@ label = 11.0
 caption = 8.5
 
 [canvas]
-bg = "#1a1a1a"
-dot = "#363636"
+bg = "#161514"
+dot = "#3d3c3b"
 dot_spacing = 18.0
 dot_radius = 0.6
 
 [card]
-fill = "#343434"
+fill = "#323130"
 border = "#00000000"
-header_fill = "#4b4b4b"
+header_fill = "#484745"
 ambient_shadow = "#00000080"
 border_width = 1.0
 corner_radius = 6.0
@@ -34,43 +34,43 @@ cols_gap = 12.0
 
 [ports.input]
 rest = "#daff58"
-hover = "#e9ff8e"
+hover = "#eaff9a"
 
 [ports.output]
 rest = "#ffa63d"
-hover = "#ffc878"
+hover = "#ffd44a"
 
 [ports.event]
-rest = "#ff5e44"
-hover = "#ff8b78"
+rest = "#ff6b52"
+hover = "#ff8f7a"
 
 [status]
 success = "#daff58"
-info = "#9adbfb"
-busy = "#d4bfff"
+info = "#59d4ff"
+busy = "#e8c2ff"
 warning = "#ffa63d"
-error = "#ff5e44"
+error = "#ff6b52"
 
 [colors]
-selection_rect = "#9adbfb"
-connection_broken = "#ff5e44"
-breaker_stroke = "#ff5e44"
+selection_rect = "#59d4ff"
+connection_broken = "#ff6b52"
+breaker_stroke = "#ff6b52"
 text_muted = "#aaaaa8"
-chrome_fill = "#252525"
-tab_inactive = "#2e2e2e"
-badge_graph = "#9adbfb"
-badge_sink = "#ff5e44"
+chrome_fill = "#1f1e1d"
+tab_inactive = "#282726"
+badge_graph = "#59d4ff"
+badge_sink = "#ff6b52"
 badge_cache = "#ffd44a"
-badge_impure = "#c56cff"
+badge_impure = "#d897ff"
 
 [type_colors]
-boolean = "#f28779"
-int = "#95e6cb"
-float = "#73d0ff"
-string = "#ffd173"
-path = "#d4bfff"
-image = "#ff9eb5"
-ramp = ["#ffa759", "#7bd88f", "#5ccfe6", "#e6cd8a"]
+boolean = "#ff8f7a"
+int = "#69ffd1"
+float = "#7adcf3"
+string = "#ffdd8c"
+path = "#e8c2ff"
+image = "#d897ff"
+ramp = ["#ffa63d", "#daff58", "#77adbc", "#c7c6bf"]
 
 [const_value_editor]
 width = 100.0
@@ -90,13 +90,13 @@ Solid = "#00000000"
 corners = 4.0
 
 [const_value_editor.drag_value.chip.hovered.background.fill]
-Solid = "#3e3e3e"
+Solid = "#3d3c3b"
 
 [const_value_editor.drag_value.chip.active.background]
 corners = 4.0
 
 [const_value_editor.drag_value.chip.active.background.fill]
-Solid = "#4b4b4b"
+Solid = "#484745"
 
 [const_value_editor.drag_value.chip.disabled.background]
 corners = 4.0
@@ -108,7 +108,7 @@ Solid = "#00000000"
 placeholder = "#aaaaa8"
 caret = "#e2dfd3"
 caret_width = 1.5
-selection = "#9adbfb40"
+selection = "#59d4ff40"
 padding = [8.0, 4.0]
 margin = 0.0
 
@@ -122,13 +122,13 @@ Solid = "#00000000"
 corners = 4.0
 
 [const_value_editor.drag_value.editor.hovered.background.fill]
-Solid = "#3e3e3e"
+Solid = "#3d3c3b"
 
 [const_value_editor.drag_value.editor.active.background]
 corners = 4.0
 
 [const_value_editor.drag_value.editor.active.background.fill]
-Solid = "#3e3e3e"
+Solid = "#3d3c3b"
 
 [const_value_editor.drag_value.editor.disabled.background]
 corners = 4.0
@@ -148,19 +148,19 @@ margin = 0.0
 corners = 4.0
 
 [const_value_editor_revealed.drag_value.chip.normal.background.fill]
-Solid = "#3e3e3e80"
+Solid = "#3d3c3b80"
 
 [const_value_editor_revealed.drag_value.chip.hovered.background]
 corners = 4.0
 
 [const_value_editor_revealed.drag_value.chip.hovered.background.fill]
-Solid = "#3e3e3e"
+Solid = "#3d3c3b"
 
 [const_value_editor_revealed.drag_value.chip.active.background]
 corners = 4.0
 
 [const_value_editor_revealed.drag_value.chip.active.background.fill]
-Solid = "#4b4b4b"
+Solid = "#484745"
 
 [const_value_editor_revealed.drag_value.chip.disabled.background]
 corners = 4.0
@@ -172,7 +172,7 @@ Solid = "#00000000"
 placeholder = "#aaaaa8"
 caret = "#e2dfd3"
 caret_width = 1.5
-selection = "#9adbfb40"
+selection = "#59d4ff40"
 padding = [8.0, 4.0]
 margin = 0.0
 
@@ -180,19 +180,19 @@ margin = 0.0
 corners = 4.0
 
 [const_value_editor_revealed.drag_value.editor.normal.background.fill]
-Solid = "#3e3e3e80"
+Solid = "#3d3c3b80"
 
 [const_value_editor_revealed.drag_value.editor.hovered.background]
 corners = 4.0
 
 [const_value_editor_revealed.drag_value.editor.hovered.background.fill]
-Solid = "#3e3e3e"
+Solid = "#3d3c3b"
 
 [const_value_editor_revealed.drag_value.editor.active.background]
 corners = 4.0
 
 [const_value_editor_revealed.drag_value.editor.active.background.fill]
-Solid = "#3e3e3e"
+Solid = "#3d3c3b"
 
 [const_value_editor_revealed.drag_value.editor.disabled.background]
 corners = 4.0
@@ -204,7 +204,7 @@ Solid = "#00000000"
 placeholder = "#aaaaa8"
 caret = "#e2dfd3"
 caret_width = 1.5
-selection = "#9adbfb40"
+selection = "#59d4ff40"
 padding = 0.0
 margin = 0.0
 
@@ -243,7 +243,7 @@ weight = "Regular"
 placeholder = "#aaaaa8"
 caret = "#e2dfd3"
 caret_width = 1.5
-selection = "#9adbfb40"
+selection = "#59d4ff40"
 padding = 0.0
 margin = 0.0
 
@@ -300,7 +300,7 @@ family = "Sans"
 weight = "Bold"
 
 [palantir_theme]
-window_clear = "#1a1a1a"
+window_clear = "#161514"
 text_scale = 1.0
 
 [palantir_theme.button]
@@ -311,7 +311,7 @@ margin = 0.0
 corners = 4.0
 
 [palantir_theme.button.normal.background.fill]
-Solid = "#3e3e3e"
+Solid = "#3d3c3b"
 
 [palantir_theme.button.normal.background.stroke]
 color = "#aaaaa82e"
@@ -321,7 +321,7 @@ width = 1.0
 corners = 4.0
 
 [palantir_theme.button.hovered.background.fill]
-Solid = "#4b4b4b"
+Solid = "#484745"
 
 [palantir_theme.button.hovered.background.stroke]
 color = "#aaaaa82e"
@@ -331,7 +331,7 @@ width = 1.0
 corners = 4.0
 
 [palantir_theme.button.active.background.fill]
-Solid = "#4b4b4b"
+Solid = "#484745"
 
 [palantir_theme.button.active.background.stroke]
 color = "#105577"
@@ -341,7 +341,7 @@ width = 1.0
 corners = 4.0
 
 [palantir_theme.button.disabled.background.fill]
-Solid = "#343434"
+Solid = "#323130"
 
 [palantir_theme.button.disabled.background.stroke]
 color = "#aaaaa82e"
@@ -375,7 +375,7 @@ weight = "Regular"
 corners = 4.0
 
 [palantir_theme.menu_button.hovered.background.fill]
-Solid = "#3e3e3e"
+Solid = "#3d3c3b"
 
 [palantir_theme.menu_button.hovered.text]
 font_size_px = 13.0
@@ -388,7 +388,7 @@ weight = "Regular"
 corners = 4.0
 
 [palantir_theme.menu_button.active.background.fill]
-Solid = "#4b4b4b"
+Solid = "#484745"
 
 [palantir_theme.menu_button.active.text]
 font_size_px = 13.0
@@ -411,7 +411,7 @@ family = "Sans"
 weight = "Regular"
 
 [palantir_theme.checkbox]
-indicator = "#1a1a1a"
+indicator = "#161514"
 box_size = 16.0
 indicator_stroke = 2.0
 check_pts = [[0.21875, 0.53125], [0.4375, 0.75], [0.78125, 0.28125]]
@@ -425,7 +425,7 @@ margin = 0.0
 corners = 3.0
 
 [palantir_theme.checkbox.unchecked.normal.background.fill]
-Solid = "#3e3e3e"
+Solid = "#3d3c3b"
 
 [palantir_theme.checkbox.unchecked.normal.background.stroke]
 color = "#aaaaa859"
@@ -435,7 +435,7 @@ width = 1.0
 corners = 3.0
 
 [palantir_theme.checkbox.unchecked.hovered.background.fill]
-Solid = "#4b4b4b"
+Solid = "#484745"
 
 [palantir_theme.checkbox.unchecked.hovered.background.stroke]
 color = "#aaaaa859"
@@ -445,7 +445,7 @@ width = 1.0
 corners = 3.0
 
 [palantir_theme.checkbox.unchecked.active.background.fill]
-Solid = "#4b4b4b"
+Solid = "#484745"
 
 [palantir_theme.checkbox.unchecked.active.background.stroke]
 color = "#105577"
@@ -455,7 +455,7 @@ width = 1.0
 corners = 3.0
 
 [palantir_theme.checkbox.unchecked.disabled.background.fill]
-Solid = "#343434"
+Solid = "#323130"
 
 [palantir_theme.checkbox.unchecked.disabled.background.stroke]
 color = "#aaaaa82e"
@@ -472,19 +472,19 @@ weight = "Regular"
 corners = 3.0
 
 [palantir_theme.checkbox.checked.normal.background.fill]
-Solid = "#9adbfb"
+Solid = "#59d4ff"
 
 [palantir_theme.checkbox.checked.hovered.background]
 corners = 3.0
 
 [palantir_theme.checkbox.checked.hovered.background.fill]
-Solid = "#9adbfb"
+Solid = "#59d4ff"
 
 [palantir_theme.checkbox.checked.active.background]
 corners = 3.0
 
 [palantir_theme.checkbox.checked.active.background.fill]
-Solid = "#9adbfb"
+Solid = "#59d4ff"
 
 [palantir_theme.checkbox.checked.active.background.stroke]
 color = "#105577"
@@ -494,7 +494,7 @@ width = 1.0
 corners = 3.0
 
 [palantir_theme.checkbox.checked.disabled.background.fill]
-Solid = "#9adbfb73"
+Solid = "#59d4ff73"
 
 [palantir_theme.checkbox.checked.disabled.text]
 font_size_px = 16.0
@@ -504,7 +504,7 @@ family = "Sans"
 weight = "Regular"
 
 [palantir_theme.radio]
-indicator = "#1a1a1a"
+indicator = "#161514"
 box_size = 16.0
 indicator_stroke = 2.0
 check_pts = [[0.21875, 0.53125], [0.4375, 0.75], [0.78125, 0.28125]]
@@ -518,7 +518,7 @@ margin = 0.0
 corners = 8.0
 
 [palantir_theme.radio.unchecked.normal.background.fill]
-Solid = "#3e3e3e"
+Solid = "#3d3c3b"
 
 [palantir_theme.radio.unchecked.normal.background.stroke]
 color = "#aaaaa859"
@@ -528,7 +528,7 @@ width = 1.0
 corners = 8.0
 
 [palantir_theme.radio.unchecked.hovered.background.fill]
-Solid = "#4b4b4b"
+Solid = "#484745"
 
 [palantir_theme.radio.unchecked.hovered.background.stroke]
 color = "#aaaaa859"
@@ -538,7 +538,7 @@ width = 1.0
 corners = 8.0
 
 [palantir_theme.radio.unchecked.active.background.fill]
-Solid = "#4b4b4b"
+Solid = "#484745"
 
 [palantir_theme.radio.unchecked.active.background.stroke]
 color = "#105577"
@@ -548,7 +548,7 @@ width = 1.0
 corners = 8.0
 
 [palantir_theme.radio.unchecked.disabled.background.fill]
-Solid = "#343434"
+Solid = "#323130"
 
 [palantir_theme.radio.unchecked.disabled.background.stroke]
 color = "#aaaaa82e"
@@ -565,19 +565,19 @@ weight = "Regular"
 corners = 8.0
 
 [palantir_theme.radio.checked.normal.background.fill]
-Solid = "#9adbfb"
+Solid = "#59d4ff"
 
 [palantir_theme.radio.checked.hovered.background]
 corners = 8.0
 
 [palantir_theme.radio.checked.hovered.background.fill]
-Solid = "#9adbfb"
+Solid = "#59d4ff"
 
 [palantir_theme.radio.checked.active.background]
 corners = 8.0
 
 [palantir_theme.radio.checked.active.background.fill]
-Solid = "#9adbfb"
+Solid = "#59d4ff"
 
 [palantir_theme.radio.checked.active.background.stroke]
 color = "#105577"
@@ -587,7 +587,7 @@ width = 1.0
 corners = 8.0
 
 [palantir_theme.radio.checked.disabled.background.fill]
-Solid = "#9adbfb73"
+Solid = "#59d4ff73"
 
 [palantir_theme.radio.checked.disabled.text]
 font_size_px = 16.0
@@ -611,7 +611,7 @@ margin = 0.0
 corners = 10.0
 
 [palantir_theme.switch.unchecked.normal.background.fill]
-Solid = "#3e3e3e"
+Solid = "#3d3c3b"
 
 [palantir_theme.switch.unchecked.normal.background.stroke]
 color = "#aaaaa859"
@@ -621,7 +621,7 @@ width = 1.0
 corners = 10.0
 
 [palantir_theme.switch.unchecked.hovered.background.fill]
-Solid = "#4b4b4b"
+Solid = "#484745"
 
 [palantir_theme.switch.unchecked.hovered.background.stroke]
 color = "#aaaaa859"
@@ -631,7 +631,7 @@ width = 1.0
 corners = 10.0
 
 [palantir_theme.switch.unchecked.active.background.fill]
-Solid = "#4b4b4b"
+Solid = "#484745"
 
 [palantir_theme.switch.unchecked.active.background.stroke]
 color = "#105577"
@@ -641,7 +641,7 @@ width = 1.0
 corners = 10.0
 
 [palantir_theme.switch.unchecked.disabled.background.fill]
-Solid = "#343434"
+Solid = "#323130"
 
 [palantir_theme.switch.unchecked.disabled.background.stroke]
 color = "#aaaaa82e"
@@ -658,19 +658,19 @@ weight = "Regular"
 corners = 10.0
 
 [palantir_theme.switch.checked.normal.background.fill]
-Solid = "#9adbfb"
+Solid = "#59d4ff"
 
 [palantir_theme.switch.checked.hovered.background]
 corners = 10.0
 
 [palantir_theme.switch.checked.hovered.background.fill]
-Solid = "#9adbfb"
+Solid = "#59d4ff"
 
 [palantir_theme.switch.checked.active.background]
 corners = 10.0
 
 [palantir_theme.switch.checked.active.background.fill]
-Solid = "#9adbfb"
+Solid = "#59d4ff"
 
 [palantir_theme.switch.checked.active.background.stroke]
 color = "#105577"
@@ -680,7 +680,7 @@ width = 1.0
 corners = 10.0
 
 [palantir_theme.switch.checked.disabled.background.fill]
-Solid = "#9adbfb73"
+Solid = "#59d4ff73"
 
 [palantir_theme.switch.checked.disabled.text]
 font_size_px = 16.0
@@ -708,7 +708,7 @@ radius = 4.0
 placeholder = "#aaaaa8"
 caret = "#e2dfd3"
 caret_width = 1.5
-selection = "#9adbfb40"
+selection = "#59d4ff40"
 padding = [5.0, 3.0]
 margin = 0.0
 
@@ -716,7 +716,7 @@ margin = 0.0
 corners = 4.0
 
 [palantir_theme.text_edit.normal.background.fill]
-Solid = "#3e3e3e"
+Solid = "#3d3c3b"
 
 [palantir_theme.text_edit.normal.background.stroke]
 color = "#aaaaa82e"
@@ -726,7 +726,7 @@ width = 1.5
 corners = 4.0
 
 [palantir_theme.text_edit.hovered.background.fill]
-Solid = "#3e3e3e"
+Solid = "#3d3c3b"
 
 [palantir_theme.text_edit.hovered.background.stroke]
 color = "#aaaaa82e"
@@ -736,7 +736,7 @@ width = 1.5
 corners = 4.0
 
 [palantir_theme.text_edit.active.background.fill]
-Solid = "#3e3e3e"
+Solid = "#3d3c3b"
 
 [palantir_theme.text_edit.active.background.stroke]
 color = "#105577"
@@ -746,7 +746,7 @@ width = 1.5
 corners = 4.0
 
 [palantir_theme.text_edit.disabled.background.fill]
-Solid = "#343434"
+Solid = "#323130"
 
 [palantir_theme.text_edit.disabled.background.stroke]
 color = "#aaaaa82e"
@@ -767,7 +767,7 @@ margin = 0.0
 corners = 4.0
 
 [palantir_theme.drag_value.chip.normal.background.fill]
-Solid = "#3e3e3e"
+Solid = "#3d3c3b"
 
 [palantir_theme.drag_value.chip.normal.background.stroke]
 color = "#aaaaa82e"
@@ -777,7 +777,7 @@ width = 1.0
 corners = 4.0
 
 [palantir_theme.drag_value.chip.hovered.background.fill]
-Solid = "#4b4b4b"
+Solid = "#484745"
 
 [palantir_theme.drag_value.chip.hovered.background.stroke]
 color = "#aaaaa82e"
@@ -787,7 +787,7 @@ width = 1.0
 corners = 4.0
 
 [palantir_theme.drag_value.chip.active.background.fill]
-Solid = "#4b4b4b"
+Solid = "#484745"
 
 [palantir_theme.drag_value.chip.active.background.stroke]
 color = "#105577"
@@ -797,7 +797,7 @@ width = 1.0
 corners = 4.0
 
 [palantir_theme.drag_value.chip.disabled.background.fill]
-Solid = "#343434"
+Solid = "#323130"
 
 [palantir_theme.drag_value.chip.disabled.background.stroke]
 color = "#aaaaa82e"
@@ -814,7 +814,7 @@ weight = "Regular"
 placeholder = "#aaaaa8"
 caret = "#e2dfd3"
 caret_width = 1.5
-selection = "#9adbfb40"
+selection = "#59d4ff40"
 padding = [12.0, 6.0]
 margin = 0.0
 
@@ -822,7 +822,7 @@ margin = 0.0
 corners = 4.0
 
 [palantir_theme.drag_value.editor.normal.background.fill]
-Solid = "#3e3e3e"
+Solid = "#3d3c3b"
 
 [palantir_theme.drag_value.editor.normal.background.stroke]
 color = "#aaaaa82e"
@@ -832,7 +832,7 @@ width = 1.0
 corners = 4.0
 
 [palantir_theme.drag_value.editor.hovered.background.fill]
-Solid = "#4b4b4b"
+Solid = "#484745"
 
 [palantir_theme.drag_value.editor.hovered.background.stroke]
 color = "#aaaaa82e"
@@ -842,7 +842,7 @@ width = 1.0
 corners = 4.0
 
 [palantir_theme.drag_value.editor.active.background.fill]
-Solid = "#4b4b4b"
+Solid = "#484745"
 
 [palantir_theme.drag_value.editor.active.background.stroke]
 color = "#aaaaa82e"
@@ -852,7 +852,7 @@ width = 1.0
 corners = 4.0
 
 [palantir_theme.drag_value.editor.disabled.background.fill]
-Solid = "#343434"
+Solid = "#323130"
 
 [palantir_theme.drag_value.editor.disabled.background.stroke]
 color = "#aaaaa82e"
@@ -874,7 +874,7 @@ gap = 0.0
 corners = 4.0
 
 [palantir_theme.context_menu.panel.fill]
-Solid = "#343434"
+Solid = "#323130"
 
 [palantir_theme.context_menu.panel.stroke]
 color = "#aaaaa838"
@@ -904,7 +904,7 @@ weight = "Regular"
 corners = 3.0
 
 [palantir_theme.context_menu.item.hovered.background.fill]
-Solid = "#3e3e3e"
+Solid = "#3d3c3b"
 
 [palantir_theme.context_menu.item.hovered.text]
 font_size_px = 13.0
@@ -917,7 +917,7 @@ weight = "Regular"
 corners = 3.0
 
 [palantir_theme.context_menu.item.active.background.fill]
-Solid = "#3e3e3e"
+Solid = "#3d3c3b"
 
 [palantir_theme.context_menu.item.active.text]
 font_size_px = 13.0
@@ -952,7 +952,7 @@ min_width = 280.0
 corners = 12.0
 
 [palantir_theme.modal.card.fill]
-Solid = "#3e3e3e"
+Solid = "#3d3c3b"
 
 [palantir_theme.modal.card.stroke]
 color = "#aaaaa838"
@@ -968,7 +968,7 @@ gap = 6.0
 corners = 4.0
 
 [palantir_theme.tooltip.panel.fill]
-Solid = "#343434"
+Solid = "#323130"
 
 [palantir_theme.tooltip.panel.stroke]
 color = "#aaaaa838"
@@ -992,8 +992,8 @@ weight = "Regular"
 w = 280.0
 
 [palantir_theme.progress_bar]
-track = "#3e3e3e"
-fill = "#9adbfb"
+track = "#3d3c3b"
+fill = "#59d4ff"
 height = 6.0
 
 [palantir_theme.separator]
@@ -1002,14 +1002,14 @@ thickness = 1.0
 margin = 0.0
 
 [palantir_theme.slider]
-rail = "#3e3e3e"
-fill = "#9adbfb"
+rail = "#3d3c3b"
+fill = "#59d4ff"
 knob = "#e2dfd3"
 knob_size = 18.0
 rail_thickness = 4.0
 
 [palantir_theme.spinner]
-color = "#9adbfb"
+color = "#59d4ff"
 diameter = 24.0
 sweep = 4.712389
 speed = 4.5
@@ -1018,10 +1018,10 @@ min_thickness = 1.5
 
 [palantir_theme.splitter]
 thickness = 6.0
-rule = "#252525"
+rule = "#1f1e1d"
 rule_thickness = 4.0
-hover = "#3e3e3e"
-drag = "#9adbfb99"
+hover = "#3d3c3b"
+drag = "#59d4ff99"
 
 [palantir_theme.text]
 font_size_px = 16.0

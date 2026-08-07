@@ -9,6 +9,8 @@ and emits two flat, fully-resolved palettes with an identical key set:
   assets/ayu-graphite-palette.toml — dark; a direct projection of the base.
   assets/ayu-light-palette.toml    — light; the same roles put through a
                                      role-class transform in OKLCH.
+  src/gui/theme/swatches.rs        — both presets as Rust consts, so the app
+                                     reads the palette rather than a copy of it.
 
 The light half cannot be a hand-picked theme — it is derived — so the transform
 is stated as rules rather than swatches. Every rule was fitted against Zed's
@@ -29,6 +31,7 @@ ASSETS = Path(__file__).resolve().parent.parent / "assets"
 BASE = ASSETS / "ayu-graphite-base.toml"
 DARK_OUT = ASSETS / "ayu-graphite-palette.toml"
 LIGHT_OUT = ASSETS / "ayu-light-palette.toml"
+SWATCHES_OUT = ASSETS.parent / "src" / "gui" / "theme" / "swatches.rs"
 
 
 def to_linear(c):
@@ -94,6 +97,17 @@ def gamut_clamp(lch):
         else:
             hi = mid
     return oklch_to_srgb((lab_l, lo, hue))
+
+
+def oklab_distance(one, other):
+    """Perceptual gap between two hex colours — OKLab is near-uniform, so a
+    plain euclidean distance in it ranks "can I tell these apart" honestly."""
+    points = []
+    for hexstr in (one, other):
+        lightness, chroma, hue = srgb_to_oklch(parse_hex(hexstr))
+        rad = math.radians(hue)
+        points.append((lightness, chroma * math.cos(rad), chroma * math.sin(rad)))
+    return math.dist(*points)
 
 
 def luminance(rgb):
@@ -423,6 +437,217 @@ LIGHT_HEADER = """\
 """
 
 
+# darkroom's swatch roster: `CONST` -> which palette role fills it, plus the
+# doc comment the generated Rust carries. This table is the whole mapping layer
+# — darkroom names no colour of its own, so a hue it wants has to already exist
+# in the base palette. Where the base's vocabulary is narrower than the roster,
+# two swatches share a role; that is called out on the entries it affects.
+#
+# A spec is a role name when both presets read the same one, or
+# `{"dark": ..., "light": ...}` when the choice is structural rather than a
+# colour — a card that needs no outline on a dark ground needs one on a light
+# one. `(role, alpha)` applies an 8-bit alpha to the role.
+SWATCHES = [
+    ("CANVAS_BG", "terminal_bg", "Ground fill behind the whole graph."),
+    ("CANVAS_DOT", "border", "Backdrop grid dot colour."),
+    (
+        "SELECTION_RECT",
+        "accent",
+        "Rubber-band sweep and committed selection halo — one swatch so\n"
+        '"in the selection" reads the same from drag to commit.',
+    ),
+    ("CONNECTION_BROKEN", "error", "A wire whose endpoint no longer resolves."),
+    ("BREAKER_STROKE", "error", "The scribble that cuts wires."),
+    (
+        "NODE_FILL",
+        "elem",
+        "Node body fill. The same swatch palantir gives its own surfaces:\n"
+        "nodes and popups sit on one surface tier by design.",
+    ),
+    (
+        "NODE_BORDER",
+        {"dark": None, "light": "border"},
+        "Resting outline. Transparent on the dark ground, where the ambient\n"
+        "shadow carries the edge and the stroke slot is reserved for the\n"
+        "selection / breaker / missing colours; a light surface needs the\n"
+        "hairline, because a shadow alone reads mushy on near-white.",
+    ),
+    (
+        "HEADER_FILL",
+        "elem_active",
+        "Header band, a step off the body so the band reads against it.",
+    ),
+    ("TEXT_MUTED", "text_muted", "De-emphasized chrome ink."),
+    (
+        "PORT_LABEL",
+        {"dark": "text_muted", "light": "text"},
+        "Port + event label ink. Muted on the dark ground; full-strength on\n"
+        "the light one, where the muted grey drops under 3:1 on the card fill.",
+    ),
+    (
+        "NODE_AMBIENT_SHADOW",
+        {"dark": ("overlay_black", 0x80), "light": ("overlay_black", 0x33)},
+        "Ambient elevation shadow. A near-black canvas needs a lot of alpha\n"
+        "before a shadow registers at all; a light surface needs far less.",
+    ),
+    (
+        "CHROME_FILL",
+        "bg",
+        "Top-chrome fill behind the menu bar + tab strip — the surround the\n"
+        "graph and its nodes sit inside.",
+    ),
+    (
+        "TAB_INACTIVE",
+        "panel",
+        "Inactive tab chip: the rung between `CHROME_FILL` and the card\n"
+        "surface, so an unselected tab reads as a chip and not a bare label.",
+    ),
+    ("BADGE_GRAPH", "accent", "Inspect chip and pinned-inspector outline."),
+    ("BADGE_SINK", "error", "Sink chip."),
+    ("BADGE_CACHE", "warning", "Persist-to-disk cache chip."),
+    (
+        "BADGE_IMPURE",
+        "syn_number",
+        "Impure marker — the node recomputes every run and is never cached.\n"
+        "Shares the violet with `TypeColors::image`: the base carries no\n"
+        "second pink, and the two never meet (a header glyph vs. a wire).",
+    ),
+    ("STATUS_SUCCESS", "success", "It worked / it ran."),
+    ("STATUS_INFO", "accent", "It was reused from cache."),
+    (
+        "STATUS_BUSY",
+        "ansi_bright_magenta",
+        "It is happening right now. Shares the lilac with\n"
+        "`TypeColors::path`, as it always has.",
+    ),
+    ("STATUS_WARNING", "syn_keyword", "It is incomplete but not broken."),
+    ("STATUS_ERROR", "error", "It failed."),
+    ("PAL_TEXT", "text", "Palantir's primary ink."),
+    ("PAL_TEXT_DISABLED", "text_disabled", "Palantir's disabled ink."),
+    ("PAL_ELEM_HOVER", "elem_hover", "Palantir's hovered control fill."),
+    ("PAL_ELEM_ACTIVE", "elem_active", "Palantir's pressed control fill."),
+    ("PAL_BORDER_FOCUSED", "border_focused", "Palantir's focus ring."),
+]
+
+# `CONST` -> (resting role, hover role). Hover lifts away from the ground in
+# both presets — the light palette already inverted these when it derived them,
+# so the same pair of roles reads as emphasis either way.
+PORT_PAIRS = [
+    (
+        "INPUT_PORT",
+        "success",
+        "ansi_bright_green",
+        "Positional swatch for untyped input ports.",
+    ),
+    (
+        "OUTPUT_PORT",
+        "syn_keyword",
+        "warning",
+        "Positional swatch for untyped output ports.",
+    ),
+    (
+        "EVENT_PORT",
+        "error",
+        "ansi_bright_red",
+        "Event emitters, subscription pins and event wires — the same red as\n"
+        "the sink marker the pin sits beside, so the trigger machinery reads\n"
+        "as one family. Shape keeps events apart from data ports.",
+    ),
+]
+
+# Data-type hues (wires + typed port circles). Every entry is a base role, so
+# the ramp harmonizes with the syntax palette for free. `image` takes the
+# base's most saturated pink-violet: darkroom's safelight rose is the one hue
+# the palette has no primitive for.
+TYPE_HUES = {
+    "boolean": "ansi_bright_red",
+    "int": "syn_string_regex",
+    "float": "syn_type",
+    "string": "syn_string_special",
+    "path": "ansi_bright_magenta",
+    "image": "syn_number",
+}
+# Backs the open-ended Custom/Enum families, picked by a `type_id` hash, so
+# these carry no meaning beyond "not each other" — they are chosen to keep all
+# ten type hues as far apart as the palette allows (see TYPE_HUE_FLOOR), and
+# among the sets that tie there, to be the brightest on the dark canvas. The
+# obvious warm-and-bright picks are the wrong ones: `accent` lands 0.031 off
+# `float` once the light transform compresses it, which is invisible on a wire.
+TYPE_RAMP = ["syn_keyword", "success", "hint", "syn_punctuation"]
+
+# Two type hues closer than this in OKLab are the same colour on a 2px wire.
+# The palette's own ceiling is 0.071 — `path` and `image` sit that far apart in
+# light mode, and cannot open further while the base carries no second pink —
+# so this sits below that to catch a collapse without firing on drift.
+TYPE_HUE_FLOOR = 0.06
+
+SWATCHES_HEADER = """\
+//! Colour swatches for the two built-in presets.
+//!
+//! GENERATED by `tools/build_palettes.py` from `assets/ayu-graphite-base.toml`.
+//! Edit the base palette and rerun the generator; edits here are overwritten.
+//!
+//! The two mods line up 1:1 — every name in [`dark`] has a [`light`] peer with
+//! the matching role — which is what lets `palette_struct!` fill both presets
+//! from one `field => CONST` list.
+"""
+
+
+def rust_color(hexstr, alpha=None):
+    packed = hexstr.lstrip("#")
+    if alpha is None:
+        return f"Color::hex(0x{packed})"
+    return f"Color::hexa(0x{packed}{alpha:02x})"
+
+
+def swatch_value(spec, roles, preset):
+    """One swatch's Rust literal for `preset`, from that preset's role map."""
+    if isinstance(spec, dict):
+        spec = spec[preset]
+    if spec is None:
+        return "Color::TRANSPARENT"
+    if isinstance(spec, tuple):
+        role, alpha = spec
+        return rust_color(roles[role], alpha)
+    return rust_color(roles[spec])
+
+
+def render_swatches(presets):
+    lines = [SWATCHES_HEADER]
+    for preset, (note, roles) in presets.items():
+        lines.append(f"/// {note}")
+        lines.append(f"pub(crate) mod {preset} {{")
+        lines.append("    use palantir::Color;")
+        lines.append("")
+        lines.append("    use crate::gui::theme::{HoverColor, TypeColors};")
+        for name, spec, doc in SWATCHES:
+            lines.append("")
+            lines.extend(f"    /// {line}" for line in doc.split("\n"))
+            lines.append(
+                f"    pub(crate) const {name}: Color = {swatch_value(spec, roles, preset)};"
+            )
+        for name, rest, hover, doc in PORT_PAIRS:
+            lines.append("")
+            lines.extend(f"    /// {line}" for line in doc.split("\n"))
+            lines.append(f"    pub(crate) const {name}: HoverColor = HoverColor {{")
+            lines.append(f"        rest: {rust_color(roles[rest])},")
+            lines.append(f"        hover: {rust_color(roles[hover])},")
+            lines.append("    };")
+        lines.append("")
+        lines.append("    /// Data-type hues for wires and typed port circles.")
+        lines.append("    pub(crate) const TYPE_COLORS: TypeColors = TypeColors {")
+        for field, role in TYPE_HUES.items():
+            lines.append(f"        {field}: {rust_color(roles[role])},")
+        lines.append("        ramp: [")
+        for role in TYPE_RAMP:
+            lines.append(f"            {rust_color(roles[role])},")
+        lines.append("        ],")
+        lines.append("    };")
+        lines.append("}")
+        lines.append("")
+    return "\n".join(lines).rstrip("\n") + "\n"
+
+
 def render(header, roles):
     lines = [header]
     for name, note, keys in SECTIONS:
@@ -457,6 +682,12 @@ def audit(roles, label, light):
         ratio = contrast(parse_hex(roles["on_accent"]), parse_hex(roles[fill]))
         if ratio < 4.5:
             problems.append(f"on_accent on {fill} is {ratio:.2f}:1, under 4.5")
+    hues = list(TYPE_HUES.items()) + [(f"ramp[{i}]", r) for i, r in enumerate(TYPE_RAMP)]
+    for index, (name, role) in enumerate(hues):
+        for other, other_role in hues[index + 1 :]:
+            gap = oklab_distance(roles[role], roles[other_role])
+            if gap < TYPE_HUE_FLOOR:
+                problems.append(f"type hues {name} and {other} are {gap:.3f} apart")
     for problem in problems:
         print(f"{label}: {problem}", file=sys.stderr)
     return not problems
@@ -476,9 +707,18 @@ def main():
     light = to_light(roles)
     clean = audit(roles, "dark", light=False) & audit(light, "light", light=True)
 
+    presets = {
+        "dark": ("The built-in dark preset.", roles),
+        "light": ("The built-in light preset.", light),
+    }
+    outputs = [
+        (DARK_OUT, render(DARK_HEADER, roles)),
+        (LIGHT_OUT, render(LIGHT_HEADER, light)),
+        (SWATCHES_OUT, render_swatches(presets)),
+    ]
+
     stale = False
-    for path, header, table in ((DARK_OUT, DARK_HEADER, roles), (LIGHT_OUT, LIGHT_HEADER, light)):
-        text = render(header, table)
+    for path, text in outputs:
         if check:
             if not path.exists() or path.read_text() != text:
                 print(f"stale: {path.name}", file=sys.stderr)
