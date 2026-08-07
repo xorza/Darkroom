@@ -186,11 +186,12 @@ fn scatter_channel(image: &mut Image, channel: usize, channels: usize, plane: &B
 #[cfg(test)]
 mod tests {
     use crate::image_ops::*;
+    use crate::math::size2us::Size2us;
     use imaginarium::{ColorFormat, ImageDesc};
 
-    fn rgb_f32(width: usize, height: usize, samples: Vec<f32>) -> Image {
+    fn rgb_f32(size: Size2us, samples: Vec<f32>) -> Image {
         Image::new_with_data(
-            ImageDesc::new(width, height, ColorFormat::RGB_F32),
+            ImageDesc::new(size.width, size.height, ColorFormat::RGB_F32),
             bytemuck::cast_slice(&samples).to_vec(),
         )
         .unwrap()
@@ -199,7 +200,7 @@ mod tests {
     #[test]
     fn par_map_pixels_maps_rgb_per_pixel() {
         // 2x1 RGB: pixels (0.1,0.2,0.3) and (0.4,0.5,0.6).
-        let mut image = rgb_f32(2, 1, vec![0.1, 0.2, 0.3, 0.4, 0.5, 0.6]);
+        let mut image = rgb_f32(Size2us::new(2, 1), vec![0.1, 0.2, 0.3, 0.4, 0.5, 0.6]);
         par_map_pixels(&mut image, |l| l, |px| px.scale(2.0));
         let out: &[f32] = bytemuck::cast_slice(image.bytes());
         assert_eq!(out, &[0.2, 0.4, 0.6, 0.8, 1.0, 1.2]);
@@ -220,7 +221,7 @@ mod tests {
     #[test]
     fn intensity_plane_is_channel_mean_for_rgb_and_identity_for_l() {
         // RGB: (0.3,0,0) → 0.1, (0.6,0.6,0.6) → 0.6 (mean; approx for the /3 rounding).
-        let rgb = rgb_f32(2, 1, vec![0.3, 0.0, 0.0, 0.6, 0.6, 0.6]);
+        let rgb = rgb_f32(Size2us::new(2, 1), vec![0.3, 0.0, 0.0, 0.6, 0.6, 0.6]);
         let i = intensity_plane(&rgb);
         assert!((i.pixels()[0] - 0.1).abs() < 1e-6 && (i.pixels()[1] - 0.6).abs() < 1e-6);
 
@@ -235,7 +236,7 @@ mod tests {
     #[test]
     fn apply_intensity_remap_scales_rgb_hue_preservingly() {
         // One pixel (0.2,0.1,0.1), I = 0.4/3; double the mapped intensity → gain 2.
-        let mut image = rgb_f32(1, 1, vec![0.2, 0.1, 0.1]);
+        let mut image = rgb_f32(Size2us::new(1, 1), vec![0.2, 0.1, 0.1]);
         let intensity = intensity_plane(&image);
         let mapped = Buffer2::new(1, 1, vec![intensity.pixels()[0] * 2.0]);
         apply_intensity_remap(&mut image, &intensity, &mapped);
@@ -246,7 +247,10 @@ mod tests {
     #[test]
     fn process_channels_streams_each_channel_planar_and_in_order() {
         // Dyadic values so the +1.0 edit is exact in f32.
-        let mut rgb = rgb_f32(2, 1, vec![0.125, 0.25, 0.375, 0.5, 0.625, 0.75]);
+        let mut rgb = rgb_f32(
+            Size2us::new(2, 1),
+            vec![0.125, 0.25, 0.375, 0.5, 0.625, 0.75],
+        );
         let mut seen = Vec::new();
         process_channels(&mut rgb, |plane| {
             seen.push(plane.pixels().to_vec());

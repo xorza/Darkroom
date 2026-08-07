@@ -2,16 +2,21 @@ use crate::image_ops::hdr::Hdr;
 use crate::image_ops::internals::{channel_plane as channel, gray_image as gray};
 use crate::image_ops::op::OpError;
 use crate::image_ops::wavelet::atrous_smooth;
+use crate::math::size2us::Size2us;
 use imaginarium::Buffer2;
 
 /// A smooth radial brightness dome — bright center (~1.0), dark corners (~0.1). The large-scale
 /// brightness HDR is meant to compress.
-fn dome(width: usize, height: usize) -> Vec<f32> {
-    let (cx, cy) = ((width as f32 - 1.0) / 2.0, (height as f32 - 1.0) / 2.0);
-    let sigma = width as f32 / 4.0;
-    (0..width * height)
+fn dome(size: Size2us) -> Vec<f32> {
+    let (cx, cy) = (
+        (size.width as f32 - 1.0) / 2.0,
+        (size.height as f32 - 1.0) / 2.0,
+    );
+    let sigma = size.width as f32 / 4.0;
+    (0..size.pixel_count())
         .map(|i| {
-            let (x, y) = ((i % width) as f32, (i / width) as f32);
+            let p = size.point_of(i);
+            let (x, y) = (p.x as f32, p.y as f32);
             let r2 = (x - cx) * (x - cx) + (y - cy) * (y - cy);
             0.1 + 0.9 * (-r2 / (2.0 * sigma * sigma)).exp()
         })
@@ -20,7 +25,7 @@ fn dome(width: usize, height: usize) -> Vec<f32> {
 
 #[test]
 fn hdr_amount_zero_is_identity() {
-    let px = dome(64, 64);
+    let px = dome(Size2us::new(64, 64));
     let mut img = gray(64, 64, px.clone());
     Hdr {
         scales: 3,
@@ -40,7 +45,7 @@ fn hdr_compresses_large_scale_contrast() {
     // The dome lives in the residual (scales=3 → residual captures >8 px structure); compressing it
     // shrinks the center-vs-corner contrast while keeping it monotone.
     let (w, h) = (128, 128);
-    let px = dome(w, h);
+    let px = dome(Size2us::new(w, h));
     let ci = (h / 2) * w + w / 2;
     let in_contrast = px[ci] - px[0];
     let mut img = gray(w, h, px);
@@ -62,7 +67,7 @@ fn hdr_compresses_large_scale_contrast() {
 #[test]
 fn hdr_amount_controls_compression() {
     let (w, h) = (128, 128);
-    let px = dome(w, h);
+    let px = dome(Size2us::new(w, h));
     let ci = (h / 2) * w + w / 2;
     let contrast_at = |amount: f32| {
         let mut img = gray(w, h, px.clone());
@@ -81,7 +86,7 @@ fn hdr_preserves_fine_detail() {
     // Dome + a 1-px ±0.03 checkerboard texture: the dome (residual) compresses, the texture (finest
     // detail layer) is preserved.
     let (w, h) = (128, 128);
-    let mut px = dome(w, h);
+    let mut px = dome(Size2us::new(w, h));
     for (i, p) in px.iter_mut().enumerate() {
         *p += if (i % w + i / w) % 2 == 0 {
             0.03
@@ -141,7 +146,7 @@ fn reference_hdr(px: &[f32], w: usize, h: usize, scales: usize, amount: f32) -> 
 fn hdr_matches_explicit_pyramid_reference() {
     let (w, h) = (64, 48);
     let (scales, amount) = (3, 0.6);
-    let px = dome(w, h);
+    let px = dome(Size2us::new(w, h));
     let mut img = gray(w, h, px.clone());
     Hdr { scales, amount }.apply(&mut img).unwrap();
     let out = channel(&img, 0);
@@ -156,7 +161,7 @@ fn hdr_matches_explicit_pyramid_reference() {
 
 #[test]
 fn hdr_output_stays_in_range() {
-    let mut img = gray(96, 96, dome(96, 96));
+    let mut img = gray(96, 96, dome(Size2us::new(96, 96)));
     Hdr::default().apply(&mut img).unwrap();
     for &v in &channel(&img, 0).to_vec() {
         assert!((0.0..=1.0).contains(&v), "output in [0,1]: {v}");

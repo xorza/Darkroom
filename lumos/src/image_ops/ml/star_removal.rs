@@ -71,19 +71,20 @@ fn build_stars(image: &mut Image, starless: &Image) {
 #[cfg(test)]
 mod tests {
     use crate::image_ops::ml::star_removal::*;
+    use crate::math::size2us::Size2us;
     use imaginarium::{ColorFormat, ImageDesc};
 
-    fn l_f32(width: usize, height: usize, samples: Vec<f32>) -> Image {
+    fn l_f32(size: Size2us, samples: Vec<f32>) -> Image {
         Image::new_with_data(
-            ImageDesc::new(width, height, ColorFormat::L_F32),
+            ImageDesc::new(size.width, size.height, ColorFormat::L_F32),
             bytemuck::cast_slice(&samples).to_vec(),
         )
         .unwrap()
     }
 
-    fn rgb_f32(width: usize, height: usize, samples: Vec<f32>) -> Image {
+    fn rgb_f32(size: Size2us, samples: Vec<f32>) -> Image {
         Image::new_with_data(
-            ImageDesc::new(width, height, ColorFormat::RGB_F32),
+            ImageDesc::new(size.width, size.height, ColorFormat::RGB_F32),
             bytemuck::cast_slice(&samples).to_vec(),
         )
         .unwrap()
@@ -95,9 +96,9 @@ mod tests {
         // (0.75, 0.5) -> 1 - 0.25/0.5 = 0.5
         // (1.0, 0.0)  -> 1 - 0.0/1.0  = 1.0
         // (0.5, 1.0)  -> denominator floors at 1e-4 -> huge negative -> clamps to 0.0
-        let mut orig = l_f32(3, 1, vec![0.75, 1.0, 0.5]);
+        let mut orig = l_f32(Size2us::new(3, 1), vec![0.75, 1.0, 0.5]);
         let orig_desc = orig.desc();
-        let starless = l_f32(3, 1, vec![0.5, 0.0, 1.0]);
+        let starless = l_f32(Size2us::new(3, 1), vec![0.5, 0.0, 1.0]);
         build_stars(&mut orig, &starless);
         let out: &[f32] = bytemuck::cast_slice(orig.bytes());
         assert_eq!(out, &[0.5, 1.0, 0.0]);
@@ -109,8 +110,8 @@ mod tests {
         // Same (o, s) pairs as above, packed as one RGB pixel instead of three L pixels —
         // pins that treating the interleaved buffer as flat samples (no per-channel
         // deinterleave) gives the same per-channel result.
-        let mut orig = rgb_f32(1, 1, vec![0.75, 1.0, 0.5]);
-        let starless = rgb_f32(1, 1, vec![0.5, 0.0, 1.0]);
+        let mut orig = rgb_f32(Size2us::new(1, 1), vec![0.75, 1.0, 0.5]);
+        let starless = rgb_f32(Size2us::new(1, 1), vec![0.5, 0.0, 1.0]);
         build_stars(&mut orig, &starless);
         let out: &[f32] = bytemuck::cast_slice(orig.bytes());
         assert_eq!(out, &[0.5, 1.0, 0.0]);
@@ -121,8 +122,8 @@ mod tests {
         // Exercise the `PIXELS_PER_BLOCK`-chunked parallel path across more than one chunk
         // (2.5 blocks of L samples) with a uniform (o, s) pair everywhere.
         let n = PIXELS_PER_BLOCK * 2 + PIXELS_PER_BLOCK / 2;
-        let mut orig = l_f32(n, 1, vec![0.75; n]);
-        let starless = l_f32(n, 1, vec![0.5; n]);
+        let mut orig = l_f32(Size2us::new(n, 1), vec![0.75; n]);
+        let starless = l_f32(Size2us::new(n, 1), vec![0.5; n]);
         build_stars(&mut orig, &starless);
         let out: &[f32] = bytemuck::cast_slice(orig.bytes());
         assert!(out.iter().all(|&v| (v - 0.5).abs() < 1e-6));
