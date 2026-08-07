@@ -43,11 +43,11 @@ impl CfaType {
     /// Get the color index (0=R, 1=G, 2=B) at position (x, y).
     /// For Mono, always returns 0.
     #[inline(always)]
-    pub fn color_at(&self, x: usize, y: usize) -> u8 {
+    pub fn color_at(&self, pos: Vec2us) -> u8 {
         match self {
             CfaType::Mono => 0,
-            CfaType::Bayer(p) => p.color_at(y, x) as u8,
-            CfaType::XTrans(pattern) => pattern[y % 6][x % 6],
+            CfaType::Bayer(p) => p.color_at(pos) as u8,
+            CfaType::XTrans(pattern) => pattern[pos.y % 6][pos.x % 6],
         }
     }
 
@@ -372,37 +372,46 @@ mod tests {
     #[test]
     fn test_cfa_type_mono_color_at() {
         let mono = CfaType::Mono;
-        assert_eq!(mono.color_at(0, 0), 0);
-        assert_eq!(mono.color_at(5, 5), 0);
+        assert_eq!(mono.color_at(Vec2us::new(0, 0)), 0);
+        assert_eq!(mono.color_at(Vec2us::new(5, 5)), 0);
     }
 
     #[test]
     fn test_cfa_type_bayer_rggb_color_at() {
         let bayer = CfaType::Bayer(CfaPattern::Rggb);
         // RGGB: (x=0,y=0)=R, (x=1,y=0)=G, (x=0,y=1)=G, (x=1,y=1)=B
-        assert_eq!(bayer.color_at(0, 0), 0); // R
-        assert_eq!(bayer.color_at(1, 0), 1); // G
-        assert_eq!(bayer.color_at(0, 1), 1); // G
-        assert_eq!(bayer.color_at(1, 1), 2); // B
+        assert_eq!(bayer.color_at(Vec2us::new(0, 0)), 0); // R
+        assert_eq!(bayer.color_at(Vec2us::new(1, 0)), 1); // G
+        assert_eq!(bayer.color_at(Vec2us::new(0, 1)), 1); // G
+        assert_eq!(bayer.color_at(Vec2us::new(1, 1)), 2); // B
     }
 
     #[test]
     fn test_cfa_type_bayer_bggr_color_at() {
         let bayer = CfaType::Bayer(CfaPattern::Bggr);
         // BGGR: (x=0,y=0)=B, (x=1,y=0)=G, (x=0,y=1)=G, (x=1,y=1)=R
-        assert_eq!(bayer.color_at(0, 0), 2); // B
-        assert_eq!(bayer.color_at(1, 0), 1); // G
-        assert_eq!(bayer.color_at(0, 1), 1); // G
-        assert_eq!(bayer.color_at(1, 1), 0); // R
+        assert_eq!(bayer.color_at(Vec2us::new(0, 0)), 2); // B
+        assert_eq!(bayer.color_at(Vec2us::new(1, 0)), 1); // G
+        assert_eq!(bayer.color_at(Vec2us::new(0, 1)), 1); // G
+        assert_eq!(bayer.color_at(Vec2us::new(1, 1)), 0); // R
     }
 
     #[test]
     fn test_cfa_type_bayer_wrapping() {
         let bayer = CfaType::Bayer(CfaPattern::Rggb);
         // Pattern repeats every 2 pixels
-        assert_eq!(bayer.color_at(0, 0), bayer.color_at(2, 0));
-        assert_eq!(bayer.color_at(0, 0), bayer.color_at(0, 2));
-        assert_eq!(bayer.color_at(1, 1), bayer.color_at(3, 3));
+        assert_eq!(
+            bayer.color_at(Vec2us::new(0, 0)),
+            bayer.color_at(Vec2us::new(2, 0))
+        );
+        assert_eq!(
+            bayer.color_at(Vec2us::new(0, 0)),
+            bayer.color_at(Vec2us::new(0, 2))
+        );
+        assert_eq!(
+            bayer.color_at(Vec2us::new(1, 1)),
+            bayer.color_at(Vec2us::new(3, 3))
+        );
     }
 
     #[test]
@@ -416,12 +425,18 @@ mod tests {
             [1, 0, 1, 1, 2, 1],
         ];
         let xtrans = CfaType::XTrans(pattern);
-        assert_eq!(xtrans.color_at(0, 0), 1); // G
-        assert_eq!(xtrans.color_at(1, 0), 0); // R
-        assert_eq!(xtrans.color_at(0, 1), 2); // B
+        assert_eq!(xtrans.color_at(Vec2us::new(0, 0)), 1); // G
+        assert_eq!(xtrans.color_at(Vec2us::new(1, 0)), 0); // R
+        assert_eq!(xtrans.color_at(Vec2us::new(0, 1)), 2); // B
         // Wrapping
-        assert_eq!(xtrans.color_at(6, 0), xtrans.color_at(0, 0));
-        assert_eq!(xtrans.color_at(0, 6), xtrans.color_at(0, 0));
+        assert_eq!(
+            xtrans.color_at(Vec2us::new(6, 0)),
+            xtrans.color_at(Vec2us::new(0, 0))
+        );
+        assert_eq!(
+            xtrans.color_at(Vec2us::new(0, 6)),
+            xtrans.color_at(Vec2us::new(0, 0))
+        );
     }
 
     #[test]

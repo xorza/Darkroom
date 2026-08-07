@@ -13,6 +13,7 @@ use crate::io::image::fits::decode::load_linear_fits;
 use crate::io::image::linear::LinearImage;
 use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::io::raw::demosaic::xtrans::internals::test_pattern_array;
+use crate::math::vec2us::Vec2us;
 use crate::stacking::frame_store::StackableImage;
 use crate::testing::make_cfa;
 use crate::{CalibrationMasters, CalibrationSet, CfaImage, CfaType, PreviewImage};
@@ -158,7 +159,8 @@ fn mosaic_fits_uses_the_cfa_calibration_route() {
     let pixels: Vec<f32> = (0..height)
         .flat_map(|y| {
             let pattern = pattern.clone();
-            (0..width).map(move |x| target[pattern.color_at(x, y) as usize] + dark_value)
+            (0..width)
+                .map(move |x| target[pattern.color_at(Vec2us::new(x, y)) as usize] + dark_value)
         })
         .collect();
     let image = Image::new(vec![width, height], pixels.clone()).unwrap();
@@ -195,7 +197,7 @@ fn mosaic_fits_uses_the_cfa_calibration_route() {
     let preview_pixels = bytemuck::cast_slice::<u8, f32>(preview.bytes());
     for y in 6..height - 6 {
         for x in 6..width - 6 {
-            let channel = pattern.color_at(x, y) as usize;
+            let channel = pattern.color_at(Vec2us::new(x, y)) as usize;
             assert_eq!(
                 preview_pixels[(y * width + x) * 3 + channel],
                 target[channel] + dark_value
@@ -250,7 +252,7 @@ fn mosaic_fits_uses_the_cfa_calibration_route() {
     ));
     for y in 6..height - 6 {
         for x in 6..width - 6 {
-            let channel = pattern.color_at(x, y) as usize;
+            let channel = pattern.color_at(Vec2us::new(x, y)) as usize;
             let expected = (target[channel] + dark_value) - dark_value;
             assert_eq!(demosaiced.channel(channel)[y * width + x], expected);
         }
@@ -283,7 +285,7 @@ fn demosaic_uniform_bayer_recovers_colour() {
     let mut mosaic = vec![0.0f32; w * h];
     for y in 0..h {
         for x in 0..w {
-            mosaic[y * w + x] = rgb[cfa.color_at(x, y) as usize];
+            mosaic[y * w + x] = rgb[cfa.color_at(Vec2us::new(x, y)) as usize];
         }
     }
     let image = make_cfa(w, h, mosaic, cfa)

@@ -10,41 +10,41 @@ use rayon::ThreadPoolBuilder;
 #[test]
 fn test_cfa_rggb_pattern() {
     let cfa = CfaPattern::Rggb;
-    assert_eq!(cfa.color_at(0, 0), 0); // R
-    assert_eq!(cfa.color_at(0, 1), 1); // G
-    assert_eq!(cfa.color_at(0, 2), 0); // R
-    assert_eq!(cfa.color_at(0, 3), 1); // G
-    assert_eq!(cfa.color_at(1, 0), 1); // G
-    assert_eq!(cfa.color_at(1, 1), 2); // B
-    assert_eq!(cfa.color_at(1, 2), 1); // G
-    assert_eq!(cfa.color_at(1, 3), 2); // B
+    assert_eq!(cfa.color_at(Vec2us::new(0, 0)), 0); // R
+    assert_eq!(cfa.color_at(Vec2us::new(1, 0)), 1); // G
+    assert_eq!(cfa.color_at(Vec2us::new(2, 0)), 0); // R
+    assert_eq!(cfa.color_at(Vec2us::new(3, 0)), 1); // G
+    assert_eq!(cfa.color_at(Vec2us::new(0, 1)), 1); // G
+    assert_eq!(cfa.color_at(Vec2us::new(1, 1)), 2); // B
+    assert_eq!(cfa.color_at(Vec2us::new(2, 1)), 1); // G
+    assert_eq!(cfa.color_at(Vec2us::new(3, 1)), 2); // B
 }
 
 #[test]
 fn test_cfa_bggr_pattern() {
     let cfa = CfaPattern::Bggr;
-    assert_eq!(cfa.color_at(0, 0), 2); // B
-    assert_eq!(cfa.color_at(0, 1), 1); // G
-    assert_eq!(cfa.color_at(1, 0), 1); // G
-    assert_eq!(cfa.color_at(1, 1), 0); // R
+    assert_eq!(cfa.color_at(Vec2us::new(0, 0)), 2); // B
+    assert_eq!(cfa.color_at(Vec2us::new(1, 0)), 1); // G
+    assert_eq!(cfa.color_at(Vec2us::new(0, 1)), 1); // G
+    assert_eq!(cfa.color_at(Vec2us::new(1, 1)), 0); // R
 }
 
 #[test]
 fn test_cfa_grbg_pattern() {
     let cfa = CfaPattern::Grbg;
-    assert_eq!(cfa.color_at(0, 0), 1); // G
-    assert_eq!(cfa.color_at(0, 1), 0); // R
-    assert_eq!(cfa.color_at(1, 0), 2); // B
-    assert_eq!(cfa.color_at(1, 1), 1); // G
+    assert_eq!(cfa.color_at(Vec2us::new(0, 0)), 1); // G
+    assert_eq!(cfa.color_at(Vec2us::new(1, 0)), 0); // R
+    assert_eq!(cfa.color_at(Vec2us::new(0, 1)), 2); // B
+    assert_eq!(cfa.color_at(Vec2us::new(1, 1)), 1); // G
 }
 
 #[test]
 fn test_cfa_gbrg_pattern() {
     let cfa = CfaPattern::Gbrg;
-    assert_eq!(cfa.color_at(0, 0), 1); // G
-    assert_eq!(cfa.color_at(0, 1), 2); // B
-    assert_eq!(cfa.color_at(1, 0), 0); // R
-    assert_eq!(cfa.color_at(1, 1), 1); // G
+    assert_eq!(cfa.color_at(Vec2us::new(0, 0)), 1); // G
+    assert_eq!(cfa.color_at(Vec2us::new(1, 0)), 2); // B
+    assert_eq!(cfa.color_at(Vec2us::new(0, 1)), 0); // R
+    assert_eq!(cfa.color_at(Vec2us::new(1, 1)), 1); // G
 }
 
 #[test]
@@ -122,8 +122,8 @@ fn raw_origin_pattern_preserves_visible_color_for_every_margin_phase() {
                 for y in 0..4 {
                     for x in 0..4 {
                         assert_eq!(
-                            raw.color_at(y + top_margin, x + left_margin),
-                            visible.color_at(y, x),
+                            raw.color_at(Vec2us::new(x + left_margin, y + top_margin)),
+                            visible.color_at(Vec2us::new(x, y)),
                             "{visible:?}, margin ({top_margin}, {left_margin}), ({y}, {x})"
                         );
                     }
@@ -318,7 +318,7 @@ fn test_rcd_preserves_cfa_channel() {
     // Set a specific R pixel value
     let ry = 8;
     let rx = 8; // This is R in RGGB (even row, even col)
-    assert_eq!(CfaPattern::Rggb.color_at(ry, rx), 0); // confirm it's R
+    assert_eq!(CfaPattern::Rggb.color_at(Vec2us::new(rx, ry)), 0); // confirm it's R
     data[ry * w + rx] = 0.7;
 
     let bayer = make_bayer(&data, w, h, CfaPattern::Rggb);
@@ -359,7 +359,11 @@ fn test_rcd_green_at_red_position_hand_computed() {
     let mut data = vec![0.0f32; w * h];
     for y in 0..h {
         for x in 0..w {
-            data[y * w + x] = if cfa.color_at(y, x) == 1 { 0.6 } else { 0.3 };
+            data[y * w + x] = if cfa.color_at(Vec2us::new(x, y)) == 1 {
+                0.6
+            } else {
+                0.3
+            };
         }
     }
 
@@ -412,7 +416,7 @@ fn test_rcd_all_patterns_preserve_native_samples_and_stay_finite() {
         for y in 0..h {
             for x in 0..w {
                 let pixel = y * w + x;
-                let channel = pattern.color_at(y, x);
+                let channel = pattern.color_at(Vec2us::new(x, y));
                 assert_eq!(
                     rgb[pixel * 3 + channel],
                     data[pixel],
@@ -471,7 +475,7 @@ fn test_rcd_with_margins() {
             let mut data = vec![0.0f32; raw_w * raw_h];
             for y in 0..raw_h {
                 for x in 0..raw_w {
-                    data[y * raw_w + x] = channel_values[raw_pattern.color_at(y, x)];
+                    data[y * raw_w + x] = channel_values[raw_pattern.color_at(Vec2us::new(x, y))];
                 }
             }
             let bayer = BayerImage::with_margins(
@@ -486,7 +490,7 @@ fn test_rcd_with_margins() {
 
             for y in 0..act_h {
                 for x in 0..act_w {
-                    let native_channel = visible_pattern.color_at(y, x);
+                    let native_channel = visible_pattern.color_at(Vec2us::new(x, y));
                     let native = rgb[(y * act_w + x) * 3 + native_channel];
                     assert!(
                         (native - channel_values[native_channel]).abs() < 1e-7,
@@ -559,7 +563,7 @@ fn test_rcd_red_blue_at_green_positions() {
     let mut data = vec![0.0f32; w * h];
     for y in 0..h {
         for x in 0..w {
-            data[y * w + x] = match cfa.color_at(y, x) {
+            data[y * w + x] = match cfa.color_at(Vec2us::new(x, y)) {
                 0 => 0.8, // R
                 1 => 0.5, // G
                 2 => 0.2, // B
@@ -575,7 +579,7 @@ fn test_rcd_red_blue_at_green_positions() {
     let border = 5;
     for y in border..h - border {
         for x in border..w - border {
-            if cfa.color_at(y, x) != 1 {
+            if cfa.color_at(Vec2us::new(x, y)) != 1 {
                 continue; // Only check green CFA positions
             }
             let idx = (y * w + x) * 3;
@@ -613,7 +617,7 @@ fn test_rcd_blue_at_red_position() {
     let mut data = vec![0.0f32; w * h];
     for y in 0..h {
         for x in 0..w {
-            data[y * w + x] = match cfa.color_at(y, x) {
+            data[y * w + x] = match cfa.color_at(Vec2us::new(x, y)) {
                 0 => 0.9, // R
                 1 => 0.5, // G
                 2 => 0.1, // B
@@ -628,7 +632,7 @@ fn test_rcd_blue_at_red_position() {
     let border = 5;
     for y in border..h - border {
         for x in border..w - border {
-            if cfa.color_at(y, x) != 0 {
+            if cfa.color_at(Vec2us::new(x, y)) != 0 {
                 continue; // Only check R CFA positions
             }
             let idx = (y * w + x) * 3;
@@ -660,7 +664,7 @@ fn test_rcd_red_at_blue_position() {
     let mut data = vec![0.0f32; w * h];
     for y in 0..h {
         for x in 0..w {
-            data[y * w + x] = match cfa.color_at(y, x) {
+            data[y * w + x] = match cfa.color_at(Vec2us::new(x, y)) {
                 0 => 0.9,
                 1 => 0.5,
                 2 => 0.1,
@@ -675,7 +679,7 @@ fn test_rcd_red_at_blue_position() {
     let border = 5;
     for y in border..h - border {
         for x in border..w - border {
-            if cfa.color_at(y, x) != 2 {
+            if cfa.color_at(Vec2us::new(x, y)) != 2 {
                 continue; // Only check B CFA positions
             }
             let idx = (y * w + x) * 3;
@@ -707,7 +711,7 @@ fn test_rcd_bggr_correctness() {
     let mut data = vec![0.0f32; w * h];
     for y in 0..h {
         for x in 0..w {
-            data[y * w + x] = match cfa.color_at(y, x) {
+            data[y * w + x] = match cfa.color_at(Vec2us::new(x, y)) {
                 0 => 0.8,
                 1 => 0.5,
                 2 => 0.2,
@@ -754,7 +758,7 @@ fn test_rcd_grbg_gbrg_correctness() {
         let mut data = vec![0.0f32; w * h];
         for y in 0..h {
             for x in 0..w {
-                data[y * w + x] = match cfa.color_at(y, x) {
+                data[y * w + x] = match cfa.color_at(Vec2us::new(x, y)) {
                     0 => 0.7,
                     1 => 0.4,
                     2 => 0.1,

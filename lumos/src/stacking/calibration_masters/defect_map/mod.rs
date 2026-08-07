@@ -198,7 +198,7 @@ const MIN_TAIL_SCALE_SAMPLES: usize = 500;
 /// Get CFA color index at (x, y). Returns 0 for Mono (None CFA type).
 fn cfa_color_at(cfa_type: Option<&CfaType>, pos: Vec2us) -> u8 {
     match cfa_type {
-        Some(cfa) => cfa.color_at(pos.x, pos.y),
+        Some(cfa) => cfa.color_at(pos),
         // Mono images have no CFA pattern — treat all pixels as the same color channel.
         None => 0,
     }

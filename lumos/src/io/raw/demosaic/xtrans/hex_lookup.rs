@@ -11,6 +11,7 @@
 //! Reference: Frank Markesteijn's algorithm as implemented in dcraw/libraw.
 
 use crate::io::raw::demosaic::xtrans::XTransPattern;
+use crate::math::vec2us::Vec2us;
 
 /// Number of hex neighbor entries per pattern position.
 const HEX_ENTRIES: usize = 8;
@@ -79,7 +80,7 @@ impl HexLookup {
                 // d indexes into ORTH to get direction vectors
                 let mut d = 0;
                 while d < 10 {
-                    let g = if pattern.color_at(row, col) == 1 {
+                    let g = if pattern.color_at(Vec2us::new(col, row)) == 1 {
                         1i32
                     } else {
                         0i32
@@ -89,7 +90,7 @@ impl HexLookup {
                     // Add 6 before converting to usize so negative offsets wrap correctly
                     let nr = (row as i32 + ORTH[d] + 6) as usize;
                     let nc = (col as i32 + ORTH[d + 2] + 6) as usize;
-                    if pattern.color_at(nr, nc) == 1 {
+                    if pattern.color_at(Vec2us::new(nc, nr)) == 1 {
                         ng = 0;
                     } else {
                         ng += 1;
@@ -213,12 +214,12 @@ mod tests {
 
         assert!(hex.sgrow < 3);
         assert!(hex.sgcol < 3);
-        assert_eq!(pattern.color_at(hex.sgrow, hex.sgcol), 1);
+        assert_eq!(pattern.color_at(Vec2us::new(hex.sgcol, hex.sgrow)), 1);
         for (dy, dx) in [(0, 1), (1, 0), (0, -1), (-1, 0)] {
-            let color = pattern.color_at(
-                (hex.sgrow as i32 + dy + 6) as usize,
+            let color = pattern.color_at(Vec2us::new(
                 (hex.sgcol as i32 + dx + 6) as usize,
-            );
+                (hex.sgrow as i32 + dy + 6) as usize,
+            ));
             assert_ne!(color, 1);
         }
     }
@@ -231,18 +232,18 @@ mod tests {
         // For non-green pixels, hex neighbors should include green positions
         for r in 0..3 {
             for c in 0..3 {
-                if pattern.color_at(r, c) != 1 {
+                if pattern.color_at(Vec2us::new(c, r)) != 1 {
                     let offsets = hex.get(r, c);
                     // First two hex neighbors (indices 0,1) are used for
                     // green interpolation — they should point to green pixels
-                    let n0_color = pattern.color_at(
-                        (r as i32 + offsets[0].dy) as usize,
+                    let n0_color = pattern.color_at(Vec2us::new(
                         (c as i32 + offsets[0].dx) as usize,
-                    );
-                    let n1_color = pattern.color_at(
-                        (r as i32 + offsets[1].dy) as usize,
+                        (r as i32 + offsets[0].dy) as usize,
+                    ));
+                    let n1_color = pattern.color_at(Vec2us::new(
                         (c as i32 + offsets[1].dx) as usize,
-                    );
+                        (r as i32 + offsets[1].dy) as usize,
+                    ));
                     assert_eq!(
                         n0_color, 1,
                         "Hex[{r}][{c}][0] at ({},{}) should be green",

@@ -19,6 +19,7 @@ use crate::io::raw::{
     demosaic::bayer::{BayerImage, CfaPattern},
 };
 use crate::math::size2us::Size2us;
+use crate::math::vec2us::Vec2us;
 
 const EPS: f32 = 1e-5;
 const EPSSQ: f32 = 1e-10;
@@ -151,7 +152,7 @@ pub(crate) fn demosaic(
         (0..rh).into_par_iter().for_each(|ry| {
             let ptrs = [ptr_r.get(), ptr_g.get(), ptr_b.get()];
             for rx in 0..rw {
-                let c = pattern.color_at(ry, rx);
+                let c = pattern.color_at(Vec2us::new(rx, ry));
                 // SAFETY: Each (ry, rx) maps to a unique index ry*rw+rx.
                 // Only one channel is written per pixel, so no data races.
                 unsafe {
@@ -259,7 +260,7 @@ pub(crate) fn demosaic(
                 return;
             }
 
-            let col_start = BORDER + (pattern.color_at(ry, 0) & 1);
+            let col_start = BORDER + (pattern.color_at(Vec2us::new(0, ry)) & 1);
             let mut rx = col_start;
             while rx < rw.saturating_sub(BORDER) {
                 let idx = ry * rw + rx;
@@ -365,7 +366,7 @@ pub(crate) fn demosaic(
                 if ry < BORDER || ry + BORDER >= rh {
                     return;
                 }
-                let col_start = BORDER + (pattern.color_at(ry, 0) & 1);
+                let col_start = BORDER + (pattern.color_at(Vec2us::new(0, ry)) & 1);
                 let mut rx = col_start;
                 while rx < rw.saturating_sub(BORDER) {
                     let h_center = ry * half_w + rx / 2;
@@ -461,8 +462,8 @@ fn step4_2_rb_at_opposing(
     (BORDER..rh.saturating_sub(BORDER))
         .into_par_iter()
         .for_each(|ry| {
-            let col_start = BORDER + (pattern.color_at(ry, 0) & 1);
-            let color = pattern.color_at(ry, col_start);
+            let col_start = BORDER + (pattern.color_at(Vec2us::new(0, ry)) & 1);
+            let color = pattern.color_at(Vec2us::new(col_start, ry));
             let ptr = match color {
                 0 => dst_b.get(), // R-row → write B
                 2 => dst_r.get(), // B-row → write R
@@ -569,7 +570,7 @@ fn step4_3_rb_at_green(
                 unsafe { b_ptr.add(index).read() }
             };
 
-            let col_start = BORDER + (pattern.color_at(ry, 1) & 1);
+            let col_start = BORDER + (pattern.color_at(Vec2us::new(1, ry)) & 1);
             let mut rx = col_start;
             while rx < rw.saturating_sub(BORDER) {
                 let idx = ry * rw + rx;
@@ -659,7 +660,7 @@ fn border_interpolate(
         // This avoids walking the entire image just to skip interior pixels.
         let mut border_pixel = |ry: usize, rx: usize| {
             let idx = ry * width + rx;
-            let c = pattern.color_at(ry, rx);
+            let c = pattern.color_at(Vec2us::new(rx, ry));
             if ic == c {
                 rgb_ch[idx] = cfa[idx];
                 return;
@@ -675,7 +676,7 @@ fn border_interpolate(
                     let nx = rx as i32 + dx;
                     if ny >= 0 && ny < height as i32 && nx >= 0 && nx < width as i32 {
                         let nidx = ny as usize * width + nx as usize;
-                        if pattern.color_at(ny as usize, nx as usize) == ic {
+                        if pattern.color_at(Vec2us::new(nx as usize, ny as usize)) == ic {
                             sum += cfa[nidx];
                             count += 1;
                         }
@@ -691,7 +692,7 @@ fn border_interpolate(
                         let nx = rx as i32 + dx;
                         if ny >= 0 && ny < height as i32 && nx >= 0 && nx < width as i32 {
                             let nidx = ny as usize * width + nx as usize;
-                            if pattern.color_at(ny as usize, nx as usize) == ic {
+                            if pattern.color_at(Vec2us::new(nx as usize, ny as usize)) == ic {
                                 sum += cfa[nidx];
                                 count += 1;
                             }
@@ -869,7 +870,11 @@ mod tests {
             let cfa: Vec<f32> = (0..HEIGHT)
                 .flat_map(|y| {
                     (0..WIDTH).map(move |x| {
-                        neighborhood_value(neighborhood, pattern.color_at(y, x), Vec2us::new(x, y))
+                        neighborhood_value(
+                            neighborhood,
+                            pattern.color_at(Vec2us::new(x, y)),
+                            Vec2us::new(x, y),
+                        )
                     })
                 })
                 .collect();
