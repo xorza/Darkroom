@@ -1,8 +1,8 @@
 //! Tests for SIMD convolution implementations.
 
 use crate::stacking::star_detection::convolution::simd::{
-    convolve_2d_row, convolve_2d_row_scalar, convolve_cols_direct, convolve_cols_row_scalar,
-    convolve_row, convolve_row_scalar, mirror_index,
+    Kernel2d, convolve_2d_row, convolve_2d_row_scalar, convolve_cols_direct,
+    convolve_cols_row_scalar, convolve_row, convolve_row_scalar, mirror_index,
 };
 
 /// Whole-image scalar column convolution — a parity oracle for [`convolve_cols_direct`] (production
@@ -565,37 +565,18 @@ fn test_convolve_2d_row_matches_scalar() {
         .map(|i| (i as f32 * 0.1).sin())
         .collect();
 
-    // 3x3 kernel
-    let ksize = 3;
-    let radius = 1;
-    let kernel = vec![
+    // Gaussian-like 3x3 kernel, sums to 1.0
+    let weights = vec![
         0.0625, 0.125, 0.0625, 0.125, 0.25, 0.125, 0.0625, 0.125, 0.0625,
-    ]; // Gaussian-like, sums to 1.0
+    ];
+    let kernel = Kernel2d::new(&weights, 3);
 
     for y in 0..height {
         let mut output_simd = vec![0.0f32; width];
         let mut output_scalar = vec![0.0f32; width];
 
-        convolve_2d_row(
-            &input,
-            &mut output_simd,
-            width,
-            height,
-            y,
-            &kernel,
-            ksize,
-            radius,
-        );
-        convolve_2d_row_scalar(
-            &input,
-            &mut output_scalar,
-            width,
-            height,
-            y,
-            &kernel,
-            ksize,
-            radius,
-        );
+        convolve_2d_row(&input, &mut output_simd, width, height, y, kernel);
+        convolve_2d_row_scalar(&input, &mut output_scalar, width, height, y, kernel);
 
         for x in 0..width {
             assert!(
@@ -617,22 +598,12 @@ fn test_convolve_2d_row_uniform() {
     let input = vec![42.0f32; width * height];
 
     // Normalized 5x5 kernel
-    let ksize = 5;
-    let radius = 2;
-    let kernel = vec![1.0 / 25.0; 25];
+    let weights = vec![1.0 / 25.0; 25];
+    let kernel = Kernel2d::new(&weights, 5);
 
     for y in 0..height {
         let mut output = vec![0.0f32; width];
-        convolve_2d_row(
-            &input,
-            &mut output,
-            width,
-            height,
-            y,
-            &kernel,
-            ksize,
-            radius,
-        );
+        convolve_2d_row(&input, &mut output, width, height, y, kernel);
 
         for (x, &v) in output.iter().enumerate() {
             assert!(
@@ -655,21 +626,11 @@ fn test_convolve_2d_row_impulse() {
     input[8 * width + 8] = 1.0;
 
     // 3x3 identity-ish kernel
-    let ksize = 3;
-    let radius = 1;
-    let kernel = vec![0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0];
+    let weights = vec![0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0];
+    let kernel = Kernel2d::new(&weights, 3);
 
     let mut output = vec![0.0f32; width];
-    convolve_2d_row(
-        &input,
-        &mut output,
-        width,
-        height,
-        8,
-        &kernel,
-        ksize,
-        radius,
-    );
+    convolve_2d_row(&input, &mut output, width, height, 8, kernel);
 
     // Only position 8 should have value 1.0
     assert!(
@@ -690,33 +651,15 @@ fn test_convolve_2d_row_various_kernel_sizes() {
     let input: Vec<f32> = (0..width * height).map(|i| i as f32 * 0.01).collect();
 
     for ksize in [3, 5, 7, 9] {
-        let radius = ksize / 2;
-        let kernel: Vec<f32> = vec![1.0 / (ksize * ksize) as f32; ksize * ksize];
+        let weights: Vec<f32> = vec![1.0 / (ksize * ksize) as f32; ksize * ksize];
+        let kernel = Kernel2d::new(&weights, ksize);
 
         for y in [0, height / 2, height - 1] {
             let mut output_simd = vec![0.0f32; width];
             let mut output_scalar = vec![0.0f32; width];
 
-            convolve_2d_row(
-                &input,
-                &mut output_simd,
-                width,
-                height,
-                y,
-                &kernel,
-                ksize,
-                radius,
-            );
-            convolve_2d_row_scalar(
-                &input,
-                &mut output_scalar,
-                width,
-                height,
-                y,
-                &kernel,
-                ksize,
-                radius,
-            );
+            convolve_2d_row(&input, &mut output_simd, width, height, y, kernel);
+            convolve_2d_row_scalar(&input, &mut output_scalar, width, height, y, kernel);
 
             for x in 0..width {
                 assert!(
@@ -739,35 +682,16 @@ fn test_convolve_2d_row_boundary_handling() {
     let height = 8;
     let input: Vec<f32> = (0..width * height).map(|i| (i + 1) as f32).collect();
 
-    let ksize = 5;
-    let radius = 2;
-    let kernel: Vec<f32> = vec![1.0 / 25.0; 25];
+    let weights: Vec<f32> = vec![1.0 / 25.0; 25];
+    let kernel = Kernel2d::new(&weights, 5);
 
     // Test boundary rows
     for y in [0, 1, height - 2, height - 1] {
         let mut output_simd = vec![0.0f32; width];
         let mut output_scalar = vec![0.0f32; width];
 
-        convolve_2d_row(
-            &input,
-            &mut output_simd,
-            width,
-            height,
-            y,
-            &kernel,
-            ksize,
-            radius,
-        );
-        convolve_2d_row_scalar(
-            &input,
-            &mut output_scalar,
-            width,
-            height,
-            y,
-            &kernel,
-            ksize,
-            radius,
-        );
+        convolve_2d_row(&input, &mut output_simd, width, height, y, kernel);
+        convolve_2d_row_scalar(&input, &mut output_scalar, width, height, y, kernel);
 
         for x in 0..width {
             assert!(

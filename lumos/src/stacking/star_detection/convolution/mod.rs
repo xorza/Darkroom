@@ -200,7 +200,7 @@ fn elliptical_gaussian_convolve(
 fn convolve_2d(pixels: &Buffer2<f32>, kernel: &GaussianKernel2d, output: &mut Buffer2<f32>) {
     let width = pixels.width();
     let height = pixels.height();
-    let radius = kernel.size / 2;
+    let kernel = simd::Kernel2d::new(&kernel.weights, kernel.size);
 
     // Parallel SIMD 2D convolution - process rows in parallel
     output
@@ -208,16 +208,7 @@ fn convolve_2d(pixels: &Buffer2<f32>, kernel: &GaussianKernel2d, output: &mut Bu
         .par_chunks_mut(width)
         .enumerate()
         .for_each(|(y, out_row)| {
-            simd::convolve_2d_row(
-                pixels.pixels(),
-                out_row,
-                width,
-                height,
-                y,
-                &kernel.weights,
-                kernel.size,
-                radius,
-            );
+            simd::convolve_2d_row(pixels.pixels(), out_row, width, height, y, kernel);
         });
 }
 
