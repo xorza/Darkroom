@@ -11,6 +11,12 @@ mod avx2;
 #[cfg(target_arch = "x86_64")]
 mod sse;
 
+/// One full NEON vector of f32 — the shortest input the kernel can do any vector work on.
+#[cfg(target_arch = "aarch64")]
+const NEON_MIN_LEN: usize = 4;
+
+/// Throughput crossovers, not structural minimums: both sit far above the 8-lane AVX2 and 4-lane
+/// SSE4.1 vector widths, so below them the scalar loop wins on a length the kernels could handle.
 #[cfg(target_arch = "x86_64")]
 const AVX2_SUM_MIN_LEN: usize = 256;
 #[cfg(target_arch = "x86_64")]
@@ -20,7 +26,7 @@ const X86_WEIGHTED_MEAN_MIN_LEN: usize = 128;
 pub(crate) fn sum_f32(values: &[f32]) -> f32 {
     #[cfg(target_arch = "aarch64")]
     {
-        if values.len() >= 4 {
+        if values.len() >= NEON_MIN_LEN {
             return unsafe { neon::sum_f32(values) };
         }
     }
@@ -70,7 +76,7 @@ pub(crate) fn weighted_mean_f32(values: &[f32], weights: &[f32]) -> f32 {
 
     #[cfg(target_arch = "aarch64")]
     {
-        if values.len() >= 4 {
+        if values.len() >= NEON_MIN_LEN {
             return unsafe { neon::weighted_mean_f32(values, weights) };
         }
     }
