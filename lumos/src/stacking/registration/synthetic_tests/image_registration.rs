@@ -58,11 +58,11 @@ fn transform_image(
 /// Apply a translation to an image.
 /// Creates a target where stars are visually shifted by (dx, dy).
 /// Passes the inverse to the plane warp since it uses output→input coordinate mapping.
-fn translate_image(src_pixels: &[f32], width: usize, height: usize, dx: f64, dy: f64) -> Vec<f32> {
+fn translate_image(src_pixels: &[f32], size: Size2us, dx: f64, dy: f64) -> Vec<f32> {
     let transform = Transform::translation(DVec2::new(dx, dy));
     let inverse = transform.inverse();
-    let src_buf = Buffer2::new(width, height, src_pixels.to_vec());
-    let mut output = Buffer2::new_default(width, height);
+    let src_buf = Buffer2::new(size.width, size.height, src_pixels.to_vec());
+    let mut output = Buffer2::new_default(size.width, size.height);
     internals::warp_plane(
         &src_buf,
         &mut output,
@@ -85,7 +85,7 @@ fn test_image_registration_translation() {
     // Apply a known translation to create target image
     let dx = 15.5;
     let dy = -12.3;
-    let target_pixels = translate_image(&ref_pixels_vec, width, height, dx, dy);
+    let target_pixels = translate_image(&ref_pixels_vec, Size2us::new(width, height), dx, dy);
 
     // Create AstroImages
     let ref_image =
@@ -312,7 +312,7 @@ fn test_image_registration_with_noise() {
     // Apply translation
     let dx = 20.0;
     let dy = -15.0;
-    let target_pixels = translate_image(&ref_pixels_vec, width, height, dx, dy);
+    let target_pixels = translate_image(&ref_pixels_vec, Size2us::new(width, height), dx, dy);
 
     let ref_image =
         LinearImage::from_pixels(ImageDimensions::new((width, height), 1), ref_pixels_vec);
@@ -434,7 +434,7 @@ fn test_image_registration_large_image() {
     // Larger translation for larger image
     let dx = 50.0;
     let dy = -35.0;
-    let target_pixels = translate_image(&ref_pixels_vec, width, height, dx, dy);
+    let target_pixels = translate_image(&ref_pixels_vec, Size2us::new(width, height), dx, dy);
 
     let ref_image =
         LinearImage::from_pixels(ImageDimensions::new((width, height), 1), ref_pixels_vec);

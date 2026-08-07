@@ -14,6 +14,7 @@
 //!   cargo test -p lumos --release --features real-data \
 //!     calibration_masters::real_data_tests -- --ignored --nocapture
 
+use crate::math::size2us::Size2us;
 use std::hint::black_box;
 use std::path::PathBuf;
 
@@ -182,30 +183,31 @@ struct HotMaskMetrics {
 #[derive(Debug)]
 struct DetectedHotMask {
     map: DefectMap,
-    width: usize,
-    height: usize,
+    size: Size2us,
 }
 
-fn hot_mask_metrics(map: &DefectMap, width: usize, height: usize) -> HotMaskMetrics {
+fn hot_mask_metrics(map: &DefectMap, size: Size2us) -> HotMaskMetrics {
     const BINS: usize = 8;
 
-    let margin_x = width / 10;
-    let margin_y = height / 10;
+    let margin_x = size.width / 10;
+    let margin_y = size.height / 10;
     let edge_count = map
         .hot_indices
         .iter()
         .filter(|&&index| {
-            let x = index % width;
-            let y = index / width;
-            x < margin_x || x >= width - margin_x || y < margin_y || y >= height - margin_y
+            let p = size.point_of(index);
+            let (x, y) = (p.x, p.y);
+            x < margin_x
+                || x >= size.width - margin_x
+                || y < margin_y
+                || y >= size.height - margin_y
         })
         .count();
     let mut bins = [0usize; BINS * BINS];
     for &index in &map.hot_indices {
-        let x = index % width;
-        let y = index / width;
-        let bx = (x * BINS / width).min(BINS - 1);
-        let by = (y * BINS / height).min(BINS - 1);
+        let p = size.point_of(index);
+        let bx = (p.x * BINS / size.width).min(BINS - 1);
+        let by = (p.y * BINS / size.height).min(BINS - 1);
         bins[by * BINS + bx] += 1;
     }
 
@@ -258,26 +260,25 @@ fn hot_mask_spatial_distribution_and_repeatability() {
         let dark = stack_cfa_master(dark_paths, StackConfig::dark(), CancelToken::never())
             .expect("master-dark stack failed")
             .expect("master dark");
-        let width = dark.data.width();
-        let height = dark.data.height();
+        let size = Size2us::new(dark.data.width(), dark.data.height());
         let map = DefectMap::default()
             .detect_hot(&dark, DEFAULT_SIGMA_THRESHOLD, &CancelToken::never())
             .expect("hot detection failed");
-        DetectedHotMask { map, width, height }
+        DetectedHotMask { map, size }
     };
 
     let first = detect(&first_paths);
     let second = detect(&second_paths);
     let full = detect(&full_paths);
-    assert_eq!((second.width, second.height), (first.width, first.height));
-    assert_eq!((full.width, full.height), (first.width, first.height));
+    assert_eq!(second.size, first.size);
+    assert_eq!(full.size, first.size);
 
     let intersection = sorted_intersection_count(&first.map.hot_indices, &second.map.hot_indices);
     let union = first.map.hot_indices.len() + second.map.hot_indices.len() - intersection;
     let jaccard = intersection as f32 / union as f32;
-    let first_metrics = hot_mask_metrics(&first.map, first.width, first.height);
-    let second_metrics = hot_mask_metrics(&second.map, second.width, second.height);
-    let full_metrics = hot_mask_metrics(&full.map, full.width, full.height);
+    let first_metrics = hot_mask_metrics(&first.map, first.size);
+    let second_metrics = hot_mask_metrics(&second.map, second.size);
+    let full_metrics = hot_mask_metrics(&full.map, full.size);
     println!(
         "  alternating master-dark hot masks: {} and {}, intersection {}, Jaccard {:.4}",
         first.map.hot_indices.len(),

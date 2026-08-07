@@ -174,10 +174,10 @@ fn bench_remove_duplicate_stars_10000(b: ::quickbench::Bencher) {
     });
 }
 
-fn component_label_map(width: usize, height: usize, components: usize) -> LabelMap {
-    let mut labels = Buffer2::new_filled(width, height, 0u32);
-    let columns = width / 4;
-    let capacity = columns * (height / 4);
+fn component_label_map(size: Size2us, components: usize) -> LabelMap {
+    let mut labels = Buffer2::new_filled(size.width, size.height, 0u32);
+    let columns = size.width / 4;
+    let capacity = columns * (size.height / 4);
     assert!((1..=capacity).contains(&components));
     for component in 0..components {
         let slot = component * capacity / components;
@@ -194,26 +194,26 @@ fn component_label_map(width: usize, height: usize, components: usize) -> LabelM
 
 #[quick_bench(warmup_iters = 2, iters = 10)]
 fn bench_components_4k_sparse(b: ::quickbench::Bencher) {
-    let labels = component_label_map(4096, 4096, 2_000);
+    let labels = component_label_map(Size2us::new(4096, 4096), 2_000);
     b.bench(|| black_box(collect_components(black_box(&labels))));
 }
 
 #[quick_bench(warmup_iters = 2, iters = 10)]
 fn bench_components_6k_crowded(b: ::quickbench::Bencher) {
-    let labels = component_label_map(6144, 6144, 50_000);
+    let labels = component_label_map(Size2us::new(6144, 6144), 50_000);
     b.bench(|| black_box(collect_components(black_box(&labels))));
 }
 
 #[quick_bench(warmup_iters = 2, iters = 10)]
 fn bench_components_2k_low_threshold(b: ::quickbench::Bencher) {
-    let labels = component_label_map(2048, 2048, 100_000);
+    let labels = component_label_map(Size2us::new(2048, 2048), 100_000);
     b.bench(|| black_box(collect_components(black_box(&labels))));
 }
 
 #[quick_bench(warmup_iters = 2, iters = 10)]
 fn bench_components_4k_crossover(b: ::quickbench::Bencher) {
     for components in [100, 500, 2_000, 10_000, 25_000, 50_000, 100_000] {
-        let labels = component_label_map(4096, 4096, components);
+        let labels = component_label_map(Size2us::new(4096, 4096), components);
         b.bench_labeled(&components.to_string(), || {
             black_box(collect_components(black_box(&labels)))
         });
