@@ -13,11 +13,10 @@ use crate::stacking::combine::MIN_CONTRIBUTING_COVERAGE;
 use crate::stacking::combine::cache_config::CacheConfig;
 use crate::stacking::combine::config::Normalization;
 use crate::stacking::combine::error::Error;
-use crate::stacking::combine::normalization::{FrameNorm, compute_light_frame_norms};
+use crate::stacking::combine::normalization::{FrameNorm, compute_frame_norms};
 use crate::stacking::combine::stack::StackFrame;
 use crate::stacking::frame_store::{
-    ChunkMemoryLayout, FrameStats, SpillDirectory, StackableImage, StoredFrame, StoredLightFrame,
-    StoredPlane, optimal_chunk_rows,
+    ChunkMemoryLayout, SpillDirectory, StackableImage, StoredFrame, StoredPlane, optimal_chunk_rows,
 };
 use crate::stacking::product::{QualityMap, StackProduct};
 use crate::stacking::progress::{ProgressCallback, StackingStage, report_progress};
@@ -107,7 +106,7 @@ pub(crate) struct LightCombineOutput {
 }
 
 /// Shared cache context + combine engine — everything that doesn't depend on the frame type.
-/// Owned by composition inside [`CfaCache`] and [`LightCache`]; all frames share one tier, and
+/// Owned by composition inside [`FrameCache`]; all frames share one tier, and
 /// `spill_directory` is `Some` only when the planes are memory-mapped.
 #[derive(Debug)]
 pub(crate) struct CacheCore {
@@ -125,26 +124,18 @@ pub(crate) struct CacheCore {
     pub(crate) cancel: CancelToken,
 }
 
-/// Plain calibration cache: `CfaImage` frames, channels only (never coverage), plain combine.
-/// Built from disk via [`CfaCache::from_paths`]; stacks to a `CfaImage`.
+/// The frames feeding one combine, with their normalization parameters. Calibration masters and
+/// registered light stacks share it; a calibration frame simply carries no warp quality planes.
 #[derive(Debug)]
-pub(crate) struct CfaCache {
+pub(crate) struct FrameCache {
     // Stored planes drop before the spill directory owner in `core`.
     pub(crate) frames: Vec<StoredFrame>,
-    pub(crate) frame_stats: Vec<FrameStats>,
-    pub(crate) core: CacheCore,
-}
-
-/// Light-frame stacking cache with optional support and interpolation-confidence planes.
-#[derive(Debug)]
-pub(crate) struct LightCache {
-    pub(crate) frames: Vec<StoredLightFrame>,
     pub(crate) frame_norms: Option<Vec<FrameNorm>>,
     pub(crate) core: CacheCore,
 }
 
 #[derive(Debug)]
-pub(crate) struct StoredLightCacheParams {
+pub(crate) struct FrameCacheParams {
     pub(crate) spill_directory: Option<SpillDirectory>,
     pub(crate) dimensions: ImageDimensions,
     pub(crate) metadata: ImageMetadata,
@@ -255,7 +246,7 @@ fn validate_warp_plane_values(
 }
 
 fn weighted_chunk_memory_layout(
-    frames: &[StoredLightFrame],
+    frames: &[StoredFrame],
     output_channels: usize,
 ) -> ChunkMemoryLayout {
     ChunkMemoryLayout {
@@ -381,10 +372,15 @@ impl CacheCore {
     }
 }
 
-impl CfaCache {
-    /// Plain per-pixel combine: every frame contributes at every pixel (CFA frames have no
-    /// coverage). Optional `weights` provide per-frame weights; `frame_norms` apply per-frame
-    /// affine normalization before combining. Per-channel, parallelized per-row with rayon.
+impl FrameCache {
+    /// Plain per-pixel combine: every frame contributes at every pixel, and no weight or variance
+    /// plane is produced. Optional `weights` provide per-frame weights; `frame_norms` apply
+    /// per-frame affine normalization before combining. Per-channel, parallelized per-row with
+    /// rayon.
+    ///
+    /// Only valid for a cache whose frames carry no warp quality — this reducer has nowhere to
+    /// apply coverage or confidence, so it would silently ignore them. Registered light stacks
+    /// use [`Self::process_chunked_weighted`].
     pub(crate) fn process_chunked<Combine>(
         &self,
         weights: Option<&[f32]>,
@@ -394,6 +390,14 @@ impl CfaCache {
     where
         Combine: Fn(&mut [f32], Option<&[f32]>, &mut ScratchBuffers) -> f32 + Sync,
     {
+        // Release assert, not debug: silently dropping coverage would corrupt the combined pixel,
+        // and this is a once-per-stack check on a cold path.
+        assert!(
+            self.frames
+                .iter()
+                .all(|frame| frame.coverage.is_none() && frame.confidence.is_none()),
+            "the plain combine cannot honour warp quality planes; use process_chunked_weighted",
+        );
         if let Some(w) = weights {
             assert_eq!(
                 w.len(),
@@ -463,13 +467,13 @@ impl CfaCache {
     }
 }
 
-impl LightCache {
+impl FrameCache {
     /// Build a cache from frames already placed in the shared frame store.
     pub(crate) fn from_stored_frames(
-        frames: Vec<StoredLightFrame>,
-        params: StoredLightCacheParams,
+        frames: Vec<StoredFrame>,
+        params: FrameCacheParams,
     ) -> Result<Self, Error> {
-        let StoredLightCacheParams {
+        let FrameCacheParams {
             spill_directory,
             dimensions,
             metadata,
@@ -482,7 +486,7 @@ impl LightCache {
         for (index, frame) in frames.iter().enumerate() {
             validate_stored_samples(&frame.channels, dimensions.pixel_count(), index, &cancel)?;
         }
-        let frame_norms = compute_light_frame_norms(&frames, dimensions, normalization, &cancel)?;
+        let frame_norms = compute_frame_norms(&frames, dimensions, normalization, &cancel)?;
         Ok(Self {
             frames,
             frame_norms,
@@ -547,7 +551,7 @@ impl LightCache {
         let stored = frames
             .into_iter()
             .map(|frame| {
-                StoredLightFrame::from_memory(
+                StoredFrame::from_memory(
                     frame.image,
                     frame.coverage,
                     frame.confidence,
@@ -555,7 +559,7 @@ impl LightCache {
                 )
             })
             .collect::<Vec<_>>();
-        let frame_norms = compute_light_frame_norms(&stored, dimensions, normalization, &cancel)?;
+        let frame_norms = compute_frame_norms(&stored, dimensions, normalization, &cancel)?;
 
         Ok(Self {
             frames: stored,
@@ -804,6 +808,51 @@ impl LightCache {
             weight: output_weight,
             linear_variance: Some(output_linear_variance),
             chunk_available_memory,
+        }
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod internals {
+    use common::CancelToken;
+
+    use crate::stacking::combine::cache::{CacheCore, FrameCache};
+    use crate::stacking::combine::cache_config::CacheConfig;
+    use crate::stacking::combine::config::Normalization;
+    use crate::stacking::combine::normalization::compute_frame_norms;
+    use crate::stacking::frame_store::{StackableImage, StoredFrame, compute_frame_stats};
+    use crate::stacking::progress::ProgressCallback;
+
+    /// An in-memory [`FrameCache`] over already-decoded frames — the shape `from_paths` builds,
+    /// without the file round-trip. The frames carry no warp quality, so this is the plain-combine
+    /// cache the calibration path uses.
+    pub(crate) fn cache_from_images<I: StackableImage>(
+        images: Vec<I>,
+        normalization: Normalization,
+    ) -> FrameCache {
+        let dimensions = images[0].dimensions();
+        let metadata = images[0].metadata().clone();
+        let frames: Vec<StoredFrame> = images
+            .into_iter()
+            .map(|image| {
+                let source_stats = compute_frame_stats(&image);
+                StoredFrame::from_memory(image, None, None, source_stats)
+            })
+            .collect();
+        let core = CacheCore {
+            spill_directory: None,
+            dimensions,
+            metadata,
+            config: CacheConfig::default(),
+            progress: ProgressCallback::default(),
+            cancel: CancelToken::never(),
+        };
+        let frame_norms = compute_frame_norms(&frames, dimensions, normalization, &core.cancel)
+            .expect("frames without coverage have no failing normalization path");
+        FrameCache {
+            frames,
+            frame_norms,
+            core,
         }
     }
 }

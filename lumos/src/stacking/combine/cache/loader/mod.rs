@@ -21,30 +21,27 @@ use crate::stacking::combine::config::Normalization;
 use crate::stacking::combine::error::Error;
 use crate::stacking::combine::normalization::compute_frame_norms;
 use crate::stacking::frame_store::{
-    FrameStats, FrameStoreError, SpillDirectory, StackableImage, StoredFrame, StoredLightFrame,
-    StoredPlane, cache_filename, channel_filename, compute_frame_stats, decode_transient_bytes,
-    fits_in_memory, frame_bytes, frame_from_memory, load_concurrency, map_plane, reusable_plane,
-    store_frame,
+    FrameStats, FrameStoreError, SpillDirectory, StackableImage, StoredFrame, StoredPlane,
+    cache_filename, channel_filename, compute_frame_stats, decode_transient_bytes, fits_in_memory,
+    frame_bytes, load_concurrency, map_plane, reusable_plane, store_frame,
 };
 use crate::stacking::progress::{ProgressCallback, StackingStage, report_progress};
 
 use crate::stacking::combine::cache::{
-    CacheCore, CfaCache, LightCache, validate_image_samples, validate_stored_samples,
+    CacheCore, FrameCache, validate_image_samples, validate_stored_samples,
 };
 
 #[derive(Debug)]
 struct LoadedTier {
     frames: Vec<StoredFrame>,
     spill_directory: Option<SpillDirectory>,
-    frame_stats: Vec<FrameStats>,
     metadata: ImageMetadata,
 }
 
-/// [`load_tiered`] output: the loaded plain frames plus the assembled [`CacheCore`].
+/// [`load_tiered`] output: the loaded frames plus the assembled [`CacheCore`].
 #[derive(Debug)]
 struct LoadedCache {
     frames: Vec<StoredFrame>,
-    frame_stats: Vec<FrameStats>,
     core: CacheCore,
 }
 
@@ -90,7 +87,6 @@ fn load_tiered<I: StackableImage, P: AsRef<Path> + Sync>(
     let LoadedTier {
         frames,
         spill_directory,
-        frame_stats,
         metadata,
     } = if use_in_memory {
         load_in_memory::<I, P>(
@@ -121,7 +117,6 @@ fn load_tiered<I: StackableImage, P: AsRef<Path> + Sync>(
 
     Ok(LoadedCache {
         frames,
-        frame_stats,
         core: CacheCore {
             spill_directory,
             dimensions,
@@ -144,30 +139,23 @@ fn load_image<I: StackableImage>(path: &Path, context: &LoadContext) -> Result<I
     }
 }
 
-impl CfaCache {
-    /// Build a calibration cache from CFA frame files (tiered in-memory/disk per available RAM).
-    pub(crate) fn from_paths<P: AsRef<Path> + Sync>(
+impl FrameCache {
+    /// Build a cache from CFA calibration frame files (tiered in-memory/disk per available RAM).
+    pub(crate) fn from_cfa_paths<P: AsRef<Path> + Sync>(
         paths: &[P],
         config: &CacheConfig,
+        normalization: Normalization,
         progress: ProgressCallback,
         cancel: CancelToken,
     ) -> Result<Self, Error> {
-        let LoadedCache {
-            frames,
-            frame_stats,
-            core,
-        } = load_tiered::<CfaImage, P>(paths, config, progress, cancel)?;
-        Ok(Self {
-            frames,
-            frame_stats,
-            core,
-        })
+        Self::from_tiered_paths(
+            load_tiered::<CfaImage, P>(paths, config, progress, cancel)?,
+            normalization,
+        )
     }
-}
 
-impl LightCache {
-    /// Build a light-frame cache from image files (tiered per available RAM). Disk files carry no
-    /// warp quality planes, so every pixel has full support and unit confidence.
+    /// Build a cache from light-frame image files (tiered per available RAM). Files on disk carry
+    /// no warp quality planes, so every pixel has full support and unit confidence.
     pub(crate) fn from_paths<P: AsRef<Path> + Sync>(
         paths: &[P],
         config: &CacheConfig,
@@ -175,17 +163,16 @@ impl LightCache {
         progress: ProgressCallback,
         cancel: CancelToken,
     ) -> Result<Self, Error> {
-        let LoadedCache {
-            frames,
-            frame_stats,
-            core,
-        } = load_tiered::<LinearImage, P>(paths, config, progress, cancel)?;
-        let frame_norms = compute_frame_norms(&frame_stats, normalization);
-        let frames = frames
-            .into_iter()
-            .zip(frame_stats)
-            .map(|(frame, stats)| StoredLightFrame::from_stored(frame, stats))
-            .collect();
+        Self::from_tiered_paths(
+            load_tiered::<LinearImage, P>(paths, config, progress, cancel)?,
+            normalization,
+        )
+    }
+
+    fn from_tiered_paths(loaded: LoadedCache, normalization: Normalization) -> Result<Self, Error> {
+        let LoadedCache { frames, core } = loaded;
+        let frame_norms =
+            compute_frame_norms(&frames, core.dimensions, normalization, &core.cancel)?;
         Ok(Self {
             frames,
             frame_norms,
@@ -197,7 +184,6 @@ impl LightCache {
 #[derive(Debug)]
 struct LoadedMemoryFrame {
     frame: StoredFrame,
-    stats: FrameStats,
     metadata: Option<ImageMetadata>,
 }
 
@@ -255,27 +241,24 @@ fn load_in_memory<I: StackableImage, P: AsRef<Path> + Sync>(
         let metadata = (idx == 0).then(|| image.metadata().clone());
         let stats = compute_frame_stats(&image);
         Ok(LoadedMemoryFrame {
-            frame: frame_from_memory(image),
-            stats,
+            frame: StoredFrame::from_memory(image, None, None, stats),
             metadata,
         })
     })?;
 
     let mut frames = Vec::with_capacity(paths.len());
-    let mut all_stats = Vec::with_capacity(paths.len());
     let mut metadata = None;
     if let Some(first_image) = first {
         validate_image_samples(&first_image, 0, cancel)?;
         metadata = Some(first_image.metadata().clone());
-        all_stats.push(compute_frame_stats(&first_image));
-        frames.push(frame_from_memory(first_image));
+        let stats = compute_frame_stats(&first_image);
+        frames.push(StoredFrame::from_memory(first_image, None, None, stats));
     }
     for loaded_frame in loaded {
         if loaded_frame.metadata.is_some() {
             metadata = loaded_frame.metadata;
         }
         frames.push(loaded_frame.frame);
-        all_stats.push(loaded_frame.stats);
     }
 
     report_progress(progress, paths.len(), paths.len(), StackingStage::Loading);
@@ -284,7 +267,6 @@ fn load_in_memory<I: StackableImage, P: AsRef<Path> + Sync>(
     Ok(LoadedTier {
         frames,
         spill_directory: None,
-        frame_stats: all_stats,
         metadata: metadata.expect("frame 0 provides metadata"),
     })
 }
@@ -311,7 +293,15 @@ fn load_to_disk<I: StackableImage, P: AsRef<Path> + Sync>(
     let first_stats = compute_frame_stats(&first_image);
     let first_path = paths[0].as_ref();
     let base_filename = cache_filename(first_path);
-    let first_cached = store_frame(cache_dir, &base_filename, &first_image).map_err(Error::from)?;
+    let first_cached = store_frame(
+        cache_dir,
+        &base_filename,
+        &first_image,
+        None,
+        None,
+        first_stats,
+    )
+    .map_err(Error::from)?;
     report_progress(progress, 1, paths.len(), StackingStage::Loading);
 
     // Decode is CPU-bound, so fan out to the worker count, bounded by RAM. The disk tier streams
@@ -348,15 +338,9 @@ fn load_to_disk<I: StackableImage, P: AsRef<Path> + Sync>(
             )
         })?;
 
-    // Build final vectors
     let mut frames = Vec::with_capacity(paths.len());
-    let mut all_stats = Vec::with_capacity(paths.len());
     frames.push(first_cached);
-    all_stats.push(first_stats);
-    for loaded in remaining {
-        frames.push(loaded.frame);
-        all_stats.push(loaded.stats);
-    }
+    frames.extend(remaining);
 
     report_progress(progress, paths.len(), paths.len(), StackingStage::Loading);
 
@@ -370,7 +354,6 @@ fn load_to_disk<I: StackableImage, P: AsRef<Path> + Sync>(
     Ok(LoadedTier {
         frames,
         spill_directory: Some(spill_directory),
-        frame_stats: all_stats,
         metadata,
     })
 }
@@ -478,12 +461,6 @@ fn validate_source_meta(cache_dir: &Path, base_filename: &str, identity: &Source
 }
 
 /// Load an image and cache it, or reuse existing cache files if valid.
-#[derive(Debug)]
-struct LoadedStoredFrame {
-    frame: StoredFrame,
-    stats: FrameStats,
-}
-
 fn load_and_cache_frame<I: StackableImage>(
     cache_dir: &Path,
     base_filename: &str,
@@ -491,7 +468,7 @@ fn load_and_cache_frame<I: StackableImage>(
     dimensions: ImageDimensions,
     frame_index: usize,
     context: &LoadContext,
-) -> Result<LoadedStoredFrame, Error> {
+) -> Result<StoredFrame, Error> {
     let cancel = &context.cancel;
     let channels = dimensions.channels();
     let identity_before = source_identity(source_path)?;
@@ -517,15 +494,19 @@ fn load_and_cache_frame<I: StackableImage>(
             source = %source_path.display(),
             "Reusing existing cache files"
         );
-        let frame = StoredFrame { channels: planes };
+        let frame = StoredFrame {
+            channels: planes,
+            coverage: None,
+            confidence: None,
+            source_stats: cached_stats.expect("valid cache has readable frame statistics"),
+        };
         validate_stored_samples(
             &frame.channels,
             dimensions.pixel_count(),
             frame_index,
             cancel,
         )?;
-        let stats = cached_stats.expect("valid cache has readable frame statistics");
-        Ok(LoadedStoredFrame { frame, stats })
+        Ok(frame)
     } else {
         // Load image and write to cache
         let image = load_image::<I>(source_path, context)?;
@@ -547,16 +528,14 @@ fn load_and_cache_frame<I: StackableImage>(
         }
 
         let stats = compute_frame_stats(&image);
-        let result = store_frame(cache_dir, base_filename, &image).map_err(Error::from)?;
+        let stored = store_frame(cache_dir, base_filename, &image, None, None, stats.clone())
+            .map_err(Error::from)?;
 
         // The identity sidecar is the commit record for the planes and stats.
         write_frame_stats(cache_dir, base_filename, &stats)?;
         write_source_meta(cache_dir, base_filename, &identity_after)?;
 
-        Ok(LoadedStoredFrame {
-            frame: result,
-            stats,
-        })
+        Ok(stored)
     }
 }
 

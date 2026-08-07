@@ -9,7 +9,7 @@ use crate::math::statistics::{ChannelStats, mad_to_sigma, median_f32_mut};
 use crate::stacking::combine::MIN_CONTRIBUTING_COVERAGE;
 use crate::stacking::combine::config::Normalization;
 use crate::stacking::combine::error::Error;
-use crate::stacking::frame_store::{FrameStats, StoredLightFrame, StoredPlane};
+use crate::stacking::frame_store::{FrameStats, StoredFrame, StoredPlane};
 
 /// Per-channel affine normalization applied as `normalized = raw * gain + offset`.
 #[derive(Debug, Clone, Copy)]
@@ -115,22 +115,7 @@ const PHOTOMETRIC_SAMPLE_LIMIT: usize = 65_536;
 const NORMALIZATION_CHUNK_SIZE: usize = 16_384;
 
 pub(crate) fn compute_frame_norms(
-    stats: &[FrameStats],
-    normalization: Normalization,
-) -> Option<Vec<FrameNorm>> {
-    if normalization == Normalization::None {
-        return None;
-    }
-    let reference = select_reference_frame(stats.iter());
-    Some(compute_frame_norms_with_reference(
-        stats.iter(),
-        normalization,
-        reference,
-    ))
-}
-
-pub(crate) fn compute_light_frame_norms(
-    frames: &[StoredLightFrame],
+    frames: &[StoredFrame],
     dimensions: ImageDimensions,
     normalization: Normalization,
     cancel: &CancelToken,
@@ -273,7 +258,7 @@ fn identity_norm(channel_count: usize) -> FrameNorm {
 }
 
 fn measure_registered_frames(
-    frames: &[StoredLightFrame],
+    frames: &[StoredFrame],
     dimensions: ImageDimensions,
     normalization: Normalization,
     cancel: &CancelToken,
@@ -298,7 +283,7 @@ fn measure_registered_frames(
 }
 
 fn build_common_domain(
-    frames: &[StoredLightFrame],
+    frames: &[StoredFrame],
     pixel_count: usize,
     cancel: &CancelToken,
 ) -> Result<CommonDomain, Error> {
@@ -358,7 +343,7 @@ fn intersect_domain(
 }
 
 fn measure_common_stats(
-    frames: &[StoredLightFrame],
+    frames: &[StoredFrame],
     pixel_count: usize,
     common_domain: &CommonDomain,
     cancel: &CancelToken,
@@ -394,7 +379,7 @@ fn measure_common_stats(
 }
 
 fn measure_global_norms_to_first(
-    frames: &[StoredLightFrame],
+    frames: &[StoredFrame],
     common_stats: &[FrameStats],
     pixel_count: usize,
     common_domain: &CommonDomain,
@@ -533,7 +518,7 @@ fn gather_indexed_samples(
 }
 
 fn source_noise_variance(
-    frame: &StoredLightFrame,
+    frame: &StoredFrame,
     channel: usize,
     indices: &[usize],
     pixel_count: usize,

@@ -2,7 +2,7 @@
 //! `test_data/lumos_data/{Bias,Darks,Flats}` Fuji X-Trans RAF set.
 //!
 //! These drive the **canonical** master-build API — `CalibrationMasters::from_files`
-//! → `stack_cfa_master` → `CfaCache`/`run_stacking` + defect-map derivation — the same
+//! → `stack_cfa_master` → `FrameCache`/`run_stacking` + defect-map derivation — the same
 //! path `lens` calls, including the libraw RAW decode of every calibration frame. That
 //! decode dominates the wall time, so these measure the real end-to-end cost of producing
 //! masters, not the isolated combine kernel.

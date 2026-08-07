@@ -13,16 +13,12 @@ use common::CancelToken;
 use imaginarium::Buffer2;
 
 use crate::math;
-use crate::stacking::combine::cache::{
-    CfaCache, CombinedSample, LightCache, StoredLightCacheParams,
-};
+use crate::stacking::combine::cache::{CombinedSample, FrameCache, FrameCacheParams};
 use crate::stacking::combine::config::{CombineMethod, StackConfig, Weighting};
 use crate::stacking::combine::error::{Error, StackConfigError};
-use crate::stacking::combine::normalization::{FrameNorm, compute_frame_norms};
+use crate::stacking::combine::normalization::FrameNorm;
 use crate::stacking::combine::rejection::Rejection;
-use crate::stacking::frame_store::{
-    FrameStats, SpillDirectory, StoredLightFrame, compute_frame_stats,
-};
+use crate::stacking::frame_store::{FrameStats, SpillDirectory, StoredFrame, compute_frame_stats};
 use crate::stacking::product::StackProduct;
 use crate::stacking::progress::ProgressCallback;
 use crate::stacking::registration::resample::WarpResult;
@@ -122,11 +118,11 @@ pub fn stack<P: AsRef<Path> + Sync>(
         "Starting unified stack (from paths)"
     );
 
-    // Files on disk carry no coverage, so this is a `LightCache` with `coverage: None` — the
+    // Files on disk carry no coverage, so this is a `FrameCache` with `coverage: None` — the
     // weighted combine then treats every pixel as fully covered (identical to a plain stack).
     // `cancel` rides on the cache from construction, so the load loop polls it too.
     let cache =
-        LightCache::from_paths(paths, &config.cache, config.normalization, progress, cancel)?;
+        FrameCache::from_paths(paths, &config.cache, config.normalization, progress, cancel)?;
     // The disk cache (if any) is removed when `cache` drops via `CacheCore`'s `Drop`.
     let result = run_stacking_weighted(&cache, &config);
     if cache.core.cancel.is_cancelled() {
@@ -173,7 +169,7 @@ pub fn stack_images(
         "Starting unified stack (in memory)"
     );
 
-    let cache = LightCache::from_stack_frames(
+    let cache = FrameCache::from_stack_frames(
         frames,
         &config.cache,
         config.normalization,
@@ -190,7 +186,7 @@ pub fn stack_images(
 
 /// Combine frames produced by the shared frame store.
 pub(crate) fn stack_stored_frames(
-    frames: Vec<StoredLightFrame>,
+    frames: Vec<StoredFrame>,
     spill_directory: Option<SpillDirectory>,
     dimensions: ImageDimensions,
     metadata: ImageMetadata,
@@ -213,9 +209,9 @@ pub(crate) fn stack_stored_frames(
         "Starting unified stack (pre-tiered frames)"
     );
 
-    let cache = LightCache::from_stored_frames(
+    let cache = FrameCache::from_stored_frames(
         frames,
-        StoredLightCacheParams {
+        FrameCacheParams {
             spill_directory,
             dimensions,
             metadata,
@@ -312,9 +308,11 @@ fn warn_if_weights_ignored(method: CombineMethod, weighting: &Weighting) {
     }
 }
 
-fn source_quantization_sigmas(stats: &[FrameStats]) -> Option<Vec<f32>> {
+fn source_quantization_sigmas<'a>(
+    stats: impl IntoIterator<Item = &'a FrameStats>,
+) -> Option<Vec<f32>> {
     stats
-        .iter()
+        .into_iter()
         .map(|stats| {
             stats
                 .quantization_sigma
@@ -391,14 +389,14 @@ fn tracked_sigma(max_sigma_bits: &AtomicU32) -> Option<f32> {
     (bits != 0).then(|| f32::from_bits(bits))
 }
 
-pub(crate) fn run_stacking(cache: &CfaCache, config: &StackConfig) -> CfaImage {
-    let stats = &cache.frame_stats;
-    let method = config.small_n.resolve(config.method, stats.len());
+pub(crate) fn run_stacking(cache: &FrameCache, config: &StackConfig) -> CfaImage {
+    let stats = || cache.frames.iter().map(|frame| &frame.source_stats);
+    let frame_count = cache.frames.len();
+    let method = config.small_n.resolve(config.method, frame_count);
     warn_if_weights_ignored(method, &config.weighting);
-    let frame_norms = compute_frame_norms(stats, config.normalization);
-    let weights = resolve_weights(&config.weighting, stats, frame_norms.as_deref());
-    let norms = frame_norms.as_deref();
-    let source_sigmas = source_quantization_sigmas(stats);
+    let norms = cache.frame_norms.as_deref();
+    let weights = resolve_weights(&config.weighting, stats(), norms);
+    let source_sigmas = source_quantization_sigmas(stats());
 
     let (pixels, quantization_sigma) = match method {
         CombineMethod::Median => {
@@ -412,7 +410,7 @@ pub(crate) fn run_stacking(cache: &CfaCache, config: &StackConfig) -> CfaImage {
         }
         CombineMethod::Mean(Rejection::None) => {
             let sigma = source_sigmas.as_deref().and_then(|sigmas| {
-                combined_mean_quantization_sigma(sigmas, weights.as_deref(), norms, 0..stats.len())
+                combined_mean_quantization_sigma(sigmas, weights.as_deref(), norms, 0..frame_count)
             });
             let pixels =
                 cache.process_chunked(weights.as_deref(), norms, |values, weights, scratch| {
@@ -439,7 +437,7 @@ pub(crate) fn run_stacking(cache: &CfaCache, config: &StackConfig) -> CfaImage {
                     source_sigmas,
                     weights.as_deref(),
                     norms,
-                    0..stats.len(),
+                    0..frame_count,
                 )
                 .expect("a validated CFA stack has positive total weight");
                 let max_sigma_bits = AtomicU32::new(all_survivors_sigma.to_bits());
@@ -480,9 +478,9 @@ pub(crate) fn run_stacking(cache: &CfaCache, config: &StackConfig) -> CfaImage {
     }
 }
 
-/// Coverage-weighted counterpart to [`run_stacking`] for a [`LightCache`]: identical combine math,
+/// Coverage-weighted counterpart to [`run_stacking`] for a [`FrameCache`]: identical combine math,
 /// but each frame contributes only where it covers (`process_chunked_weighted`).
-pub(crate) fn run_stacking_weighted(cache: &LightCache, config: &StackConfig) -> StackProduct {
+pub(crate) fn run_stacking_weighted(cache: &FrameCache, config: &StackConfig) -> StackProduct {
     let method = config.small_n.resolve(config.method, cache.frames.len());
     warn_if_weights_ignored(method, &config.weighting);
     let weighted_combine = matches!(method, CombineMethod::Mean(_));
@@ -524,7 +522,7 @@ mod tests {
     use crate::io::image::linear::LinearImage;
     use crate::io::image::linear_pixels::LinearPixels;
     use crate::math::statistics::ChannelStats;
-    use crate::stacking::combine::cache::CacheCore;
+    use crate::stacking::combine::cache::internals::cache_from_images;
     use crate::stacking::combine::cache::tests::make_test_cache;
     use crate::stacking::combine::cache_config::CacheConfig;
     use crate::stacking::combine::config::{Normalization, SmallN};
@@ -532,7 +530,7 @@ mod tests {
     use crate::stacking::combine::normalization::{ChannelNorm, FrameNorm};
     use crate::stacking::combine::rejection::{PercentileClipConfig, Rejection};
     use crate::stacking::combine::stack::*;
-    use crate::stacking::frame_store::{compute_frame_stats, frame_from_memory, store_light_frame};
+    use crate::stacking::frame_store::{compute_frame_stats, store_frame};
     use crate::stacking::product::QualityMap;
     use crate::stacking::registration::config::{self, InterpolationMethod};
     use crate::stacking::registration::resample;
@@ -555,7 +553,8 @@ mod tests {
         frame_pixels: Vec<Vec<f32>>,
         source_sigmas: &[f32],
         dimensions: ImageDimensions,
-    ) -> CfaCache {
+        normalization: Normalization,
+    ) -> FrameCache {
         assert_eq!(frame_pixels.len(), source_sigmas.len());
         let images: Vec<CfaImage> = frame_pixels
             .into_iter()
@@ -571,21 +570,7 @@ mod tests {
                 image
             })
             .collect();
-        let metadata = images[0].metadata.clone();
-        let frame_stats = images.iter().map(compute_frame_stats).collect();
-        let frames = images.into_iter().map(frame_from_memory).collect();
-        CfaCache {
-            frames,
-            frame_stats,
-            core: CacheCore {
-                spill_directory: None,
-                dimensions,
-                metadata,
-                config: CacheConfig::default(),
-                progress: ProgressCallback::default(),
-                cancel: CancelToken::never(),
-            },
-        }
+        cache_from_images(images, normalization)
     }
 
     #[test]
@@ -628,16 +613,16 @@ mod tests {
     #[test]
     fn cfa_stack_quantization_uses_normalization_and_actual_rejection_survivors() {
         let dimensions = ImageDimensions::new((2, 1), 1);
-        let mut normalized_cache =
-            make_cfa_stack_cache(vec![vec![0.4; 2], vec![0.2; 2]], &[0.01, 0.02], dimensions);
-        normalized_cache.frame_stats[0].channels[0] = ChannelStats {
-            median: 0.4,
-            mad: 0.01,
-        };
-        normalized_cache.frame_stats[1].channels[0] = ChannelStats {
-            median: 0.2,
-            mad: 0.02,
-        };
+        // Flat frames, so each frame's measured median *is* its pixel value and its MAD is zero.
+        // Multiplicative normalization keys on the medians (0.4 / 0.2 → frame 1 gains 2.0) and the
+        // manual weights bypass MAD entirely, so the measured statistics are exactly what this
+        // assertion needs.
+        let normalized_cache = make_cfa_stack_cache(
+            vec![vec![0.4; 2], vec![0.2; 2]],
+            &[0.01, 0.02],
+            dimensions,
+            Normalization::Multiplicative,
+        );
         let normalized = run_stacking(
             &normalized_cache,
             &StackConfig {
@@ -661,6 +646,7 @@ mod tests {
             vec![vec![0.3; 2], vec![0.4; 2], vec![0.5; 2]],
             &[0.01; 3],
             dimensions,
+            Normalization::None,
         );
         let median = run_stacking(&median_cache, &StackConfig::median());
         let expected_median_sigma = 0.01 * (3.0f32 / 5.0).sqrt();
@@ -670,8 +656,12 @@ mod tests {
             "an equal-source three-frame median must use the exact uniform order statistic"
         );
 
-        let winsorized_cache =
-            make_cfa_stack_cache(vec![vec![0.3; 2], vec![0.5; 2]], &[0.01, 0.02], dimensions);
+        let winsorized_cache = make_cfa_stack_cache(
+            vec![vec![0.3; 2], vec![0.5; 2]],
+            &[0.01, 0.02],
+            dimensions,
+            Normalization::None,
+        );
         let winsorized = run_stacking(&winsorized_cache, &StackConfig::winsorized(2.5));
         assert!(
             (winsorized.quantization_sigma.unwrap() - 0.02).abs() < f32::EPSILON,
@@ -684,6 +674,7 @@ mod tests {
                 .collect(),
             &[0.01; 8],
             dimensions,
+            Normalization::None,
         );
         let rejected = run_stacking(
             &rejection_cache,
@@ -752,10 +743,10 @@ mod tests {
             .into_iter()
             .enumerate()
             .map(|(i, f)| {
-                store_light_frame(
+                store_frame(
                     &spill_directory.path,
                     &format!("f{i}"),
-                    f.image,
+                    &f.image,
                     f.coverage,
                     f.confidence,
                     f.source_stats,
@@ -815,10 +806,10 @@ mod tests {
         );
         let scratch = ScratchDirectory::new("lumos_nonfinite_mapped_frame");
         let spill_directory = SpillDirectory::create(scratch.join("cache"), false).unwrap();
-        let frame = store_light_frame(
+        let frame = store_frame(
             &spill_directory.path,
             "frame",
-            invalid,
+            &invalid,
             None,
             None,
             source_stats,
@@ -847,8 +838,8 @@ mod tests {
         ));
     }
 
-    fn norm_params_for(cache: &LightCache, normalization: Normalization) -> Option<Vec<FrameNorm>> {
-        normalization::compute_light_frame_norms(
+    fn norm_params_for(cache: &FrameCache, normalization: Normalization) -> Option<Vec<FrameNorm>> {
+        normalization::compute_frame_norms(
             &cache.frames,
             cache.core.dimensions,
             normalization,
@@ -857,11 +848,11 @@ mod tests {
         .unwrap()
     }
 
-    fn source_stats(cache: &LightCache) -> impl Iterator<Item = &FrameStats> {
+    fn source_stats(cache: &FrameCache) -> impl Iterator<Item = &FrameStats> {
         cache.frames.iter().map(|frame| &frame.source_stats)
     }
 
-    fn make_uniform_frames(pixel_counts: usize, values: &[f32]) -> LightCache {
+    fn make_uniform_frames(pixel_counts: usize, values: &[f32]) -> FrameCache {
         let dims = ImageDimensions::new((pixel_counts, 1), 1);
         let images = values
             .iter()
@@ -870,7 +861,7 @@ mod tests {
         make_test_cache(images)
     }
 
-    fn make_rgb_frames(pixels: usize, frame_values: &[[f32; 3]]) -> LightCache {
+    fn make_rgb_frames(pixels: usize, frame_values: &[[f32; 3]]) -> FrameCache {
         let dims = ImageDimensions::new((pixels, 1), 3);
         let images = frame_values
             .iter()
@@ -1236,7 +1227,7 @@ mod tests {
                 frame
             })
             .collect();
-            LightCache::from_stack_frames(
+            FrameCache::from_stack_frames(
                 frames,
                 &CacheConfig::default(),
                 Normalization::Multiplicative,
@@ -1437,7 +1428,7 @@ mod tests {
                 ),
             ),
         ];
-        let cache = LightCache::from_stack_frames(
+        let cache = FrameCache::from_stack_frames(
             frames,
             &CacheConfig::default(),
             Normalization::Global,
@@ -1481,7 +1472,7 @@ mod tests {
                 ),
             ),
         ];
-        let cache = LightCache::from_stack_frames(
+        let cache = FrameCache::from_stack_frames(
             frames,
             &CacheConfig::default(),
             Normalization::None,

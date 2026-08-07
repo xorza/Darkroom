@@ -30,8 +30,7 @@ fn light_frame_keeps_quality_with_its_planes() {
     let coverage = Buffer2::new(2, 2, vec![1.0, 0.5, 0.25, 0.0]);
     let confidence = Buffer2::new(2, 2, vec![4.0, 3.0, 2.0, 1.0]);
     let source_stats = compute_frame_stats(&image);
-    let frame =
-        StoredLightFrame::from_memory(image, Some(coverage), Some(confidence), source_stats);
+    let frame = StoredFrame::from_memory(image, Some(coverage), Some(confidence), source_stats);
     assert_eq!(frame.channels[0].chunk(0, 4), &[1.0, 2.0, 3.0, 4.0]);
     assert_eq!(
         frame.coverage.as_ref().unwrap().chunk(0, 4),
