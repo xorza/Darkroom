@@ -141,15 +141,8 @@ impl StarDetector {
         }
 
         // Step 3: Determine effective FWHM (manual > auto-estimate > disabled)
-        let fwhm_result = stages::fwhm::estimate_fwhm(
-            &grayscale_image,
-            &background,
-            &self.config.fwhm,
-            &self.config.detection,
-            &self.config.measurement,
-            &self.config.filter,
-            resources,
-        );
+        let fwhm_result =
+            stages::fwhm::estimate_fwhm(&grayscale_image, &background, &self.config, resources);
         let effective_fwhm = fwhm_result.fwhm.unwrap_or(0.0);
 
         // Step 4: Detect star candidate regions (with optional matched filter)
