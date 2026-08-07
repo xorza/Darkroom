@@ -19,202 +19,16 @@ const VALUE_EDITOR_WIDTH: f32 = 100.0;
 /// [`ConstValueEditorTheme::from_palette`], which sizes the editor itself.
 const VALUE_EDITOR_MAX_WIDTH: f32 = 240.0;
 
-// One named-const mod per built-in preset, so any builder (`Theme::dark`,
-// `ConstValueEditorTheme::dark`, future per-widget theme helpers) can
-// reach a swatch by name instead of inlining a hex literal. The two
-// mods line up 1:1 — every name in `dark::*` has a `light::*` peer with
-// the matching role.
-//
-// Sourced from the semantic palette TOMLs in `assets/`:
-//   - `dark`  — `ayu-graphite-palette.toml`
-//   - `light` — `ayu-light-palette.toml`
-// Both are generated from `assets/ayu-graphite-base.toml` by
-// `tools/build_palettes.py`; edit the base, rerun the generator, then bring
-// the compile-time copy here back in step.
+// The two preset swatch rosters live in `swatches.rs`, generated from
+// `assets/ayu-graphite-base.toml` by `tools/build_palettes.py` alongside the
+// two semantic palette TOMLs in `assets/`. Any builder (`Theme::dark`,
+// `ConstValueEditorTheme::dark`, future per-widget helpers) reaches a swatch by
+// name instead of inlining a hex literal, and the app reads the palette rather
+// than a transcription of it: to restyle, edit the base and rerun the
+// generator.
+mod swatches;
 
-pub(crate) mod dark {
-    use super::{HoverColor, TypeColors};
-    use palantir::Color;
-
-    pub(crate) const CANVAS_BG: Color = Color::hex(0x1a1a1a);
-    pub(crate) const SELECTION_RECT: Color = Color::hex(0x9adbfb);
-    pub(crate) const CANVAS_DOT: Color = Color::hex(0x363636);
-
-    pub(crate) const CONNECTION_BROKEN: Color = Color::hex(0xff5e44);
-    pub(crate) const BREAKER_STROKE: Color = Color::hex(0xff5e44);
-
-    pub(crate) const NODE_FILL: Color = Color::hex(0x343434);
-    // Transparent at rest: the ambient node shadow carries the edge, and the
-    // stroke slot is reserved for the selection / breaker / missing colors
-    // (its width still folds into layout, so selecting never resizes).
-    pub(crate) const NODE_BORDER: Color = Color::TRANSPARENT;
-    // Palette `elem_active` — a step brighter than the old `title_bar`
-    // swatch so the header band actually reads against the body fill.
-    pub(crate) const HEADER_FILL: Color = Color::hex(0x4b4b4b);
-    pub(crate) const TEXT_MUTED: Color = Color::hex(0xaaaaa8);
-    // Port/event labels: de-emphasized so the value column carries each row.
-    pub(crate) const PORT_LABEL: Color = Color::hex(0xaaaaa8);
-    // Ambient elevation shadow under nodes and floating panels. Heavy black:
-    // a near-black canvas needs a lot of alpha before a shadow registers.
-    pub(crate) const NODE_AMBIENT_SHADOW: Color = Color::linear_rgba(0.0, 0.0, 0.0, 0.5);
-    pub(crate) const CHROME_FILL: Color = Color::hex(0x252525);
-    // Inactive tab chip — a notch above `CHROME_FILL` toward the node
-    // surface, so an unselected tab reads as a resting chip, not a bare
-    // label on the band.
-    pub(crate) const TAB_INACTIVE: Color = Color::hex(0x2e2e2e);
-
-    pub(crate) const BADGE_GRAPH: Color = Color::hex(0x9adbfb);
-    pub(crate) const BADGE_SINK: Color = Color::hex(0xff5e44);
-    // cache (persist-to-disk) chip — palette `warning` yellow.
-    pub(crate) const BADGE_CACHE: Color = Color::hex(0xffd44a);
-    // impure marker — a saturated violet (the "volatile / recomputes every run"
-    // hue). Deliberately punchier than the pale running-glow purple so the `~`
-    // marker reads at a glance.
-    pub(crate) const BADGE_IMPURE: Color = Color::hex(0xc56cff);
-
-    pub(crate) const STATUS_SUCCESS: Color = Color::hex(0xdaff58);
-    pub(crate) const STATUS_INFO: Color = Color::hex(0x9adbfb);
-    pub(crate) const STATUS_BUSY: Color = Color::hex(0xd4bfff);
-    pub(crate) const STATUS_WARNING: Color = Color::hex(0xffa63d);
-    pub(crate) const STATUS_ERROR: Color = Color::hex(0xff5e44);
-
-    // ports — hover variants brighten for emphasis on a dark canvas.
-    pub(crate) const INPUT_PORT: HoverColor = HoverColor {
-        rest: Color::hex(0xdaff58),
-        hover: Color::hex(0xe9ff8e),
-    };
-    pub(crate) const OUTPUT_PORT: HoverColor = HoverColor {
-        rest: Color::hex(0xffa63d),
-        hover: Color::hex(0xffc878),
-    };
-    // Events wear the palette's `error` red — the same swatch as the
-    // sink `■` marker the subscription pin sits beside, so the trigger
-    // machinery reads as one family. Shape (triangle vs. circle) keeps
-    // events apart from data ports; hover lifts toward white like the
-    // typed port hovers.
-    pub(crate) const EVENT_PORT: HoverColor = HoverColor {
-        rest: Color::hex(0xff5e44),
-        hover: Color::hex(0xff8b78),
-    };
-
-    // data-type hues (wires + typed port circles) — hand-tuned to
-    // harmonize with the palette. The ramp deliberately carries no rose
-    // (Image owns it) and no purple (the running/impure status family),
-    // so a hash pick can't impersonate either.
-    pub(crate) const TYPE_COLORS: TypeColors = TypeColors {
-        boolean: Color::hex(0xf28779),
-        int: Color::hex(0x95e6cb),
-        float: Color::hex(0x73d0ff),
-        string: Color::hex(0xffd173),
-        path: Color::hex(0xd4bfff),
-        // Safelight rose — the photographic-darkroom hue for the image
-        // payload.
-        image: Color::hex(0xff9eb5),
-        ramp: [
-            Color::hex(0xffa759),
-            Color::hex(0x7bd88f),
-            Color::hex(0x5ccfe6),
-            Color::hex(0xe6cd8a),
-        ],
-    };
-
-    // palantir sub-theme palette — values palantir's widgets normally
-    // read from its own `palette::*` consts. Pushed through
-    // `PalantirPalette` so the live `ui.theme` recolours alongside
-    // darkroom chrome; reused by `ConstValueEditorTheme::dark` for
-    // the per-palette path-pick chip.
-    pub(crate) const PAL_TEXT: Color = Color::hex(0xe2dfd3);
-    pub(crate) const PAL_TEXT_DISABLED: Color = Color::hex(0x878a8d);
-    pub(crate) const PAL_ELEM_HOVER: Color = Color::hex(0x3e3e3e);
-    pub(crate) const PAL_ELEM_ACTIVE: Color = Color::hex(0x4b4b4b);
-    pub(crate) const PAL_BORDER_FOCUSED: Color = Color::hex(0x105577);
-}
-
-pub(crate) mod light {
-    use super::{HoverColor, TypeColors};
-    use palantir::Color;
-
-    pub(crate) const CANVAS_BG: Color = Color::hex(0xfcfcfc);
-    pub(crate) const SELECTION_RECT: Color = Color::hex(0x3b9ee5);
-    pub(crate) const CANVAS_DOT: Color = Color::hex(0xcfd1d2);
-
-    pub(crate) const CONNECTION_BROKEN: Color = Color::hex(0xef7271);
-    pub(crate) const BREAKER_STROKE: Color = Color::hex(0xef7271);
-
-    // node chrome — light surfaces keep the hairline border even with the
-    // ambient shadow; a shadow alone reads mushy on near-white.
-    pub(crate) const NODE_FILL: Color = Color::hex(0xececed);
-    pub(crate) const NODE_BORDER: Color = Color::hex(0xcfd1d2);
-    pub(crate) const HEADER_FILL: Color = Color::hex(0xdcddde);
-    pub(crate) const TEXT_MUTED: Color = Color::hex(0x8b8e92);
-    // Darker than `text_muted`: labels are primary content and Ayu Light's
-    // muted gray drops under 3:1 on the node fill.
-    pub(crate) const PORT_LABEL: Color = Color::hex(0x6e7378);
-    // Light surfaces need far less shadow than the dark canvas.
-    pub(crate) const NODE_AMBIENT_SHADOW: Color = Color::linear_rgba(0.0, 0.0, 0.0, 0.2);
-    pub(crate) const CHROME_FILL: Color = Color::hex(0xdcddde);
-    // Inactive tab chip — a notch above `CHROME_FILL` toward the node
-    // surface, so an unselected tab reads as a chip on the light band.
-    pub(crate) const TAB_INACTIVE: Color = Color::hex(0xe6e7e8);
-
-    // header badges — accent / error / a deeper amber than the palette's
-    // warning yellow (#f1ad49 was barely visible on a light surface).
-    pub(crate) const BADGE_GRAPH: Color = Color::hex(0x3b9ee5);
-    pub(crate) const BADGE_SINK: Color = Color::hex(0xef7271);
-    // cache (persist-to-disk) chip — palette `warning` yellow.
-    pub(crate) const BADGE_CACHE: Color = Color::hex(0xf1ad49);
-    // impure marker — a saturated violet, punchier than the running-glow purple
-    // so the `~` marker reads at a glance on the light ground.
-    pub(crate) const BADGE_IMPURE: Color = Color::hex(0x9333d6);
-
-    // execution-status glow — success / accent / syn_keyword / error.
-    pub(crate) const STATUS_SUCCESS: Color = Color::hex(0x85b304);
-    pub(crate) const STATUS_INFO: Color = Color::hex(0x3b9ee5);
-    pub(crate) const STATUS_BUSY: Color = Color::hex(0xa37acc);
-    pub(crate) const STATUS_WARNING: Color = Color::hex(0xfa8d3e);
-    pub(crate) const STATUS_ERROR: Color = Color::hex(0xef7271);
-
-    // ports — input = success, output = syn_keyword. Hover variants on
-    // the light canvas *darken* for emphasis (opposite to the dark theme).
-    pub(crate) const INPUT_PORT: HoverColor = HoverColor {
-        rest: Color::hex(0x85b304),
-        hover: Color::hex(0x6f9603),
-    };
-    pub(crate) const OUTPUT_PORT: HoverColor = HoverColor {
-        rest: Color::hex(0xfa8d3e),
-        hover: Color::hex(0xd97527),
-    };
-    // Events wear the light palette's `error` red (see the dark peer's
-    // rationale); hover darkens for emphasis like the light port hovers.
-    pub(crate) const EVENT_PORT: HoverColor = HoverColor {
-        rest: Color::hex(0xef7271),
-        hover: Color::hex(0xb35555),
-    };
-
-    // data-type hues — the light peers of `dark::TYPE_COLORS` (deeper
-    // values: light surfaces need saturation, not brightness).
-    pub(crate) const TYPE_COLORS: TypeColors = TypeColors {
-        boolean: Color::hex(0xe05252),
-        int: Color::hex(0x2e9e5b),
-        float: Color::hex(0x2b8fd6),
-        string: Color::hex(0xb8860b),
-        path: Color::hex(0x7a4fd0),
-        image: Color::hex(0xc23b73),
-        ramp: [
-            Color::hex(0xd9722a),
-            Color::hex(0x1f8fb3),
-            Color::hex(0x2f9e6a),
-            Color::hex(0xa67c1a),
-        ],
-    };
-
-    // palantir sub-theme palette — see `dark::PAL_*` for the contract.
-    pub(crate) const PAL_TEXT: Color = Color::hex(0x5c6166);
-    pub(crate) const PAL_TEXT_DISABLED: Color = Color::hex(0xa9acae);
-    pub(crate) const PAL_ELEM_HOVER: Color = Color::hex(0xdfe0e1);
-    pub(crate) const PAL_ELEM_ACTIVE: Color = Color::hex(0xcfd0d2);
-    pub(crate) const PAL_BORDER_FOCUSED: Color = Color::hex(0xc4daf6);
-}
+use crate::gui::theme::swatches::{dark, light};
 
 /// Two-state colour pack for chrome that lifts under the pointer —
 /// the colour-granularity peer of palantir's `StatefulLook`: the pair
@@ -1124,20 +938,24 @@ mod tests {
         assert_eq!(back.palantir_theme.tooltip.max_size.w, 280.0);
     }
 
-    /// Pin a few const-defined default values (Ayu Mirage High Contrast:
-    /// canvas = terminal_bg, ports = success-green / syn-keyword-orange)
-    /// plus the non-trivial palantir tweak, so an accidental const edit or
-    /// a regression in `default_palantir_theme` fails loudly.
+    /// Pin which swatch reaches which field, plus the non-trivial palantir
+    /// tweak, so a regression in `Theme::build`'s wiring or in
+    /// `default_palantir_theme` fails loudly. Against the generated consts
+    /// rather than hex literals: the values are the palette's to choose, but
+    /// landing `HEADER_FILL` in `canvas.bg` is still a bug.
     #[test]
     fn default_palette_and_menu_tweak() {
         let theme = Theme::default();
-        assert_eq!(theme.canvas.bg, Color::hex(0x1a1a1a));
-        assert_eq!(theme.ports.input.rest, Color::hex(0xdaff58));
-        assert_eq!(theme.ports.output.rest, Color::hex(0xffa63d));
-        // RuntimeCache (persist-to-disk) chip is the palette `warning` yellow.
-        assert_eq!(theme.colors.badge_cache, Color::hex(0xffd44a));
-        // Impure marker is the palette `constant` purple.
-        assert_eq!(theme.colors.badge_impure, Color::hex(0xc56cff));
+        assert_eq!(theme.canvas.bg, dark::CANVAS_BG);
+        assert_eq!(theme.ports.input.rest, dark::INPUT_PORT.rest);
+        assert_eq!(theme.ports.output.rest, dark::OUTPUT_PORT.rest);
+        assert_eq!(theme.colors.badge_cache, dark::BADGE_CACHE);
+        assert_eq!(theme.colors.badge_impure, dark::BADGE_IMPURE);
+        // Each of those is a distinct role, so a roster that collapsed them
+        // onto one swatch would pass every assertion above.
+        assert_ne!(theme.canvas.bg, theme.ports.input.rest);
+        assert_ne!(theme.ports.input.rest, theme.ports.output.rest);
+        assert_ne!(theme.colors.badge_cache, theme.colors.badge_impure);
         assert_eq!(theme.card.min_width, 160.0);
         assert!(theme.palantir_theme.tooltip.max_size.h.is_infinite());
         // The menu-bar font was shrunk from palantir's default to ours.
@@ -1163,8 +981,9 @@ mod tests {
         assert_eq!(Theme::dark().preset, ThemePreset::Dark);
         assert_eq!(Theme::light().preset, ThemePreset::Light);
         // Full palette swapped, not just the tag.
-        assert_eq!(dark.canvas.bg, Color::hex(0x1a1a1a));
-        assert_eq!(light.canvas.bg, Color::hex(0xfcfcfc));
+        assert_eq!(dark.canvas.bg, dark::CANVAS_BG);
+        assert_eq!(light.canvas.bg, light::CANVAS_BG);
+        assert_ne!(dark.canvas.bg, light.canvas.bg);
     }
 
     /// System detection must always resolve to one of the two built-in
