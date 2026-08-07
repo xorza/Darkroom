@@ -35,6 +35,21 @@ impl Size2us {
         point.y * self.width + point.x
     }
 
+    /// The point `index` addresses — the inverse of [`Self::index_of`].
+    ///
+    /// # Panics
+    /// Panics in debug builds if `index` is past the last pixel.
+    #[inline]
+    pub fn point_of(self, index: usize) -> Vec2us {
+        debug_assert!(
+            index < self.pixel_count(),
+            "index {index} past the last pixel of a {}x{} grid",
+            self.width,
+            self.height
+        );
+        Vec2us::new(index % self.width, index / self.width)
+    }
+
     /// Whether `point` lies inside the grid.
     #[inline]
     pub const fn contains(self, point: Vec2us) -> bool {

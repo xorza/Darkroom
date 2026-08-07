@@ -829,18 +829,24 @@ fn build_summed_area_table(data: &[u8], size: Size2us, sat: &mut [u32]) {
 /// Query a rectangular sum from a summed area table.
 /// Computes sum of data[y0..=y1][x0..=x1] in O(1).
 #[inline(always)]
-fn sat_query(sat: &[u32], width: usize, y0: usize, x0: usize, y1: usize, x1: usize) -> u32 {
-    let bottom_right = sat[y1 * width + x1];
-    let above = if y0 == 0 {
+/// `min` and `max` are both inclusive. Takes the corners loose rather than as a [`URect`] because
+/// this runs once per direction per pixel and `URect::new` asserts its bounds in release.
+fn sat_query(sat: &[u32], width: usize, min: Vec2us, max: Vec2us) -> u32 {
+    let bottom_right = sat[max.y * width + max.x];
+    let above = if min.y == 0 {
         0
     } else {
-        sat[(y0 - 1) * width + x1]
+        sat[(min.y - 1) * width + max.x]
     };
-    let left = if x0 == 0 { 0 } else { sat[y1 * width + x0 - 1] };
-    let above_left = if y0 == 0 || x0 == 0 {
+    let left = if min.x == 0 {
         0
     } else {
-        sat[(y0 - 1) * width + x0 - 1]
+        sat[max.y * width + min.x - 1]
+    };
+    let above_left = if min.y == 0 || min.x == 0 {
+        0
+    } else {
+        sat[(min.y - 1) * width + min.x - 1]
     };
     bottom_right + above_left - above - left
 }
@@ -858,9 +864,9 @@ fn score_homogeneity(homo: &[u8], size: Size2us, scores: &mut [[u32; NDIR]], sat
             let y0 = y.saturating_sub(2);
             let y1 = (y + 2).min(size.height - 1);
             for x in 0..size.width {
-                let x0 = x.saturating_sub(2);
-                let x1 = (x + 2).min(size.width - 1);
-                scores[y * size.width + x][d] = sat_query(sat, size.width, y0, x0, y1, x1);
+                let min = Vec2us::new(x.saturating_sub(2), y0);
+                let max = Vec2us::new((x + 2).min(size.width - 1), y1);
+                scores[size.index_of(Vec2us::new(x, y))][d] = sat_query(sat, size.width, min, max);
             }
         }
     }
@@ -1320,18 +1326,19 @@ mod tests {
         build_summed_area_table(&data, Size2us::new(4, 3), &mut sat);
         assert_eq!(sat, [1, 2, 3, 4, 2, 4, 6, 8, 3, 6, 9, 12]);
 
+        let origin = Vec2us::ZERO;
         // Full image sum = 12
-        assert_eq!(sat_query(&sat, 4, 0, 0, 2, 3), 12);
+        assert_eq!(sat_query(&sat, 4, origin, Vec2us::new(3, 2)), 12);
         // Single pixel (0,0) = 1
-        assert_eq!(sat_query(&sat, 4, 0, 0, 0, 0), 1);
+        assert_eq!(sat_query(&sat, 4, origin, origin), 1);
         // First row sum = 4
-        assert_eq!(sat_query(&sat, 4, 0, 0, 0, 3), 4);
+        assert_eq!(sat_query(&sat, 4, origin, Vec2us::new(3, 0)), 4);
         // First column sum = 3
-        assert_eq!(sat_query(&sat, 4, 0, 0, 2, 0), 3);
+        assert_eq!(sat_query(&sat, 4, origin, Vec2us::new(0, 2)), 3);
         // 2×2 top-left corner = 4
-        assert_eq!(sat_query(&sat, 4, 0, 0, 1, 1), 4);
+        assert_eq!(sat_query(&sat, 4, origin, Vec2us::new(1, 1)), 4);
         // 2×2 bottom-right corner = 4
-        assert_eq!(sat_query(&sat, 4, 1, 2, 2, 3), 4);
+        assert_eq!(sat_query(&sat, 4, Vec2us::new(2, 1), Vec2us::new(3, 2)), 4);
     }
 
     #[test]
@@ -1342,13 +1349,14 @@ mod tests {
         build_summed_area_table(&data, Size2us::new(3, 3), &mut sat);
 
         // Full sum = 45
-        assert_eq!(sat_query(&sat, 3, 0, 0, 2, 2), 45);
+        assert_eq!(sat_query(&sat, 3, Vec2us::ZERO, Vec2us::new(2, 2)), 45);
         // Center pixel only = 5
-        assert_eq!(sat_query(&sat, 3, 1, 1, 1, 1), 5);
+        let center = Vec2us::new(1, 1);
+        assert_eq!(sat_query(&sat, 3, center, center), 5);
         // Middle row = 4+5+6 = 15
-        assert_eq!(sat_query(&sat, 3, 1, 0, 1, 2), 15);
+        assert_eq!(sat_query(&sat, 3, Vec2us::new(0, 1), Vec2us::new(2, 1)), 15);
         // Bottom-right 2×2 = 5+6+8+9 = 28
-        assert_eq!(sat_query(&sat, 3, 1, 1, 2, 2), 28);
+        assert_eq!(sat_query(&sat, 3, center, Vec2us::new(2, 2)), 28);
     }
 
     #[test]
@@ -1356,7 +1364,7 @@ mod tests {
         let data = vec![42u8];
         let mut sat = vec![u32::MAX; data.len()];
         build_summed_area_table(&data, Size2us::new(1, 1), &mut sat);
-        assert_eq!(sat_query(&sat, 1, 0, 0, 0, 0), 42);
+        assert_eq!(sat_query(&sat, 1, Vec2us::ZERO, Vec2us::ZERO), 42);
     }
 
     #[test]
@@ -1365,9 +1373,9 @@ mod tests {
         let mut sat = vec![u32::MAX; data.len()];
         build_summed_area_table(&data, Size2us::new(5, 1), &mut sat);
         // Full row = 15
-        assert_eq!(sat_query(&sat, 5, 0, 0, 0, 4), 15);
+        assert_eq!(sat_query(&sat, 5, Vec2us::ZERO, Vec2us::new(4, 0)), 15);
         // Middle 3 elements = 2+3+4 = 9
-        assert_eq!(sat_query(&sat, 5, 0, 1, 0, 3), 9);
+        assert_eq!(sat_query(&sat, 5, Vec2us::new(1, 0), Vec2us::new(3, 0)), 9);
     }
 
     #[test]
@@ -1376,9 +1384,9 @@ mod tests {
         let mut sat = vec![u32::MAX; data.len()];
         build_summed_area_table(&data, Size2us::new(1, 5), &mut sat);
         // Full column = 15
-        assert_eq!(sat_query(&sat, 1, 0, 0, 4, 0), 15);
+        assert_eq!(sat_query(&sat, 1, Vec2us::ZERO, Vec2us::new(0, 4)), 15);
         // Middle 3 = 2+3+4 = 9
-        assert_eq!(sat_query(&sat, 1, 1, 0, 3, 0), 9);
+        assert_eq!(sat_query(&sat, 1, Vec2us::new(0, 1), Vec2us::new(0, 3)), 9);
     }
 
     #[test]
@@ -1386,7 +1394,7 @@ mod tests {
         let data = vec![0u8; 4 * 4];
         let mut sat = vec![u32::MAX; data.len()];
         build_summed_area_table(&data, Size2us::new(4, 4), &mut sat);
-        assert_eq!(sat_query(&sat, 4, 0, 0, 3, 3), 0);
+        assert_eq!(sat_query(&sat, 4, Vec2us::ZERO, Vec2us::new(3, 3)), 0);
     }
 
     #[test]
