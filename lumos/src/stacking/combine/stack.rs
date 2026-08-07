@@ -6,7 +6,6 @@
 use std::path::Path;
 use std::sync::atomic::{AtomicU32, Ordering};
 
-use crate::io::image::cfa::CfaImage;
 use crate::io::image::linear::LinearImage;
 use crate::io::image::{ImageDimensions, ImageMetadata};
 use common::CancelToken;
@@ -124,7 +123,7 @@ pub fn stack<P: AsRef<Path> + Sync>(
     let cache =
         FrameCache::from_paths(paths, &config.cache, config.normalization, progress, cancel)?;
     // The disk cache (if any) is removed when `cache` drops via `CacheCore`'s `Drop`.
-    let result = run_stacking_weighted(&cache, &config);
+    let result = run_stacking(&cache, &config);
     if cache.core.cancel.is_cancelled() {
         return Err(Error::Cancelled);
     }
@@ -177,7 +176,7 @@ pub fn stack_images(
         cancel,
     )?;
     // In-memory only (no disk cache), but `cache` drops cleanly via `CacheCore`'s `Drop` regardless.
-    let result = run_stacking_weighted(&cache, &config);
+    let result = run_stacking(&cache, &config);
     if cache.core.cancel.is_cancelled() {
         return Err(Error::Cancelled);
     }
@@ -221,7 +220,7 @@ pub(crate) fn stack_stored_frames(
             cancel,
         },
     )?;
-    let result = run_stacking_weighted(&cache, &config);
+    let result = run_stacking(&cache, &config);
     if cache.core.cancel.is_cancelled() {
         return Err(Error::Cancelled);
     }
@@ -389,131 +388,110 @@ fn tracked_sigma(max_sigma_bits: &AtomicU32) -> Option<f32> {
     (bits != 0).then(|| f32::from_bits(bits))
 }
 
-pub(crate) fn run_stacking(cache: &FrameCache, config: &StackConfig) -> CfaImage {
+/// Combine the cached frames into one stacked product.
+///
+/// Coverage gates a frame's contribution at a pixel while confidence scales its statistical
+/// weight independently; a frame with neither plane contributes everywhere at unit confidence,
+/// which is what makes this the single engine for calibration masters and registered light
+/// stacks alike.
+pub(crate) fn run_stacking(cache: &FrameCache, config: &StackConfig) -> StackProduct {
     let stats = || cache.frames.iter().map(|frame| &frame.source_stats);
     let frame_count = cache.frames.len();
     let method = config.small_n.resolve(config.method, frame_count);
     warn_if_weights_ignored(method, &config.weighting);
-    let norms = cache.frame_norms.as_deref();
-    let weights = resolve_weights(&config.weighting, stats(), norms);
-    let source_sigmas = source_quantization_sigmas(stats());
-
-    let (pixels, quantization_sigma) = match method {
-        CombineMethod::Median => {
-            let sigma = source_sigmas
-                .as_deref()
-                .and_then(|sigmas| combined_median_quantization_sigma(sigmas, norms));
-            let pixels = cache.process_chunked(None, norms, |values, _, _| {
-                math::statistics::median_f32_mut(values)
-            });
-            (pixels, sigma)
-        }
-        CombineMethod::Mean(Rejection::None) => {
-            let sigma = source_sigmas.as_deref().and_then(|sigmas| {
-                combined_mean_quantization_sigma(sigmas, weights.as_deref(), norms, 0..frame_count)
-            });
-            let pixels =
-                cache.process_chunked(weights.as_deref(), norms, |values, weights, scratch| {
-                    Rejection::None.combine_mean(values, weights, scratch)
-                });
-            (pixels, sigma)
-        }
-        // Winsorization replaces samples with order statistics, so it has no fixed linear
-        // coefficient set from which to propagate quantization variance.
-        CombineMethod::Mean(rejection @ Rejection::Winsorized(_)) => {
-            let sigma = source_sigmas
-                .as_deref()
-                .and_then(|sigmas| conservative_quantization_sigma(sigmas, norms));
-            let pixels = cache.process_chunked(
-                weights.as_deref(),
-                norms,
-                move |values, weights, scratch| rejection.combine_mean(values, weights, scratch),
-            );
-            (pixels, sigma)
-        }
-        CombineMethod::Mean(rejection) => {
-            if let Some(source_sigmas) = source_sigmas.as_deref() {
-                let all_survivors_sigma = combined_mean_quantization_sigma(
-                    source_sigmas,
-                    weights.as_deref(),
-                    norms,
-                    0..frame_count,
-                )
-                .expect("a validated CFA stack has positive total weight");
-                let max_sigma_bits = AtomicU32::new(all_survivors_sigma.to_bits());
-                let pixels =
-                    cache.process_chunked(weights.as_deref(), norms, |values, weights, scratch| {
-                        let sample =
-                            rejection.combine_mean_with_survivors(values, weights, scratch);
-                        if sample.survivor_count != source_sigmas.len() {
-                            record_max_sigma(
-                                &max_sigma_bits,
-                                combined_mean_quantization_sigma(
-                                    source_sigmas,
-                                    weights,
-                                    norms,
-                                    scratch.indices[..sample.survivor_count].iter().copied(),
-                                ),
-                            );
-                        }
-                        sample.value
-                    });
-                (pixels, tracked_sigma(&max_sigma_bits))
-            } else {
-                let pixels = cache.process_chunked(
-                    weights.as_deref(),
-                    norms,
-                    move |values, weights, scratch| {
-                        rejection.combine_mean(values, weights, scratch)
-                    },
-                );
-                (pixels, None)
-            }
-        }
-    };
-    CfaImage {
-        data: pixels.into_l(),
-        metadata: cache.core.metadata.clone(),
-        quantization_sigma,
-    }
-}
-
-/// Coverage-weighted counterpart to [`run_stacking`] for a [`FrameCache`]: identical combine math,
-/// but each frame contributes only where it covers (`process_chunked_weighted`).
-pub(crate) fn run_stacking_weighted(cache: &FrameCache, config: &StackConfig) -> StackProduct {
-    let method = config.small_n.resolve(config.method, cache.frames.len());
-    warn_if_weights_ignored(method, &config.weighting);
     let weighted_combine = matches!(method, CombineMethod::Mean(_));
-    let frame_norms = cache.frame_norms.as_deref();
+    let norms = cache.frame_norms.as_deref();
     let weights = weighted_combine
-        .then(|| {
-            resolve_weights(
-                &config.weighting,
-                cache.frames.iter().map(|frame| &frame.source_stats),
-                frame_norms,
-            )
-        })
+        .then(|| resolve_weights(&config.weighting, stats(), norms))
         .flatten();
 
     // A median is not a linear combination, so it has no variance factor to report whatever the
     // caller asked for. Resolving here means the reducer never allocates a plane it would drop.
     let planes = config.quality.resolve(weighted_combine);
+    let measure_quality = planes.weight || planes.variance;
 
-    let combined = match method {
+    let source_sigmas = source_quantization_sigmas(stats());
+    // Propagating quantization noise through rejection needs each surviving sample's *frame*
+    // index, to reach that frame's source sigma and normalization gain. Under partial coverage
+    // the reducer sees a compacted subset whose indices no longer name frames, so the tracking
+    // is limited to frame sets that carry no coverage — every calibration master, and every
+    // light stack loaded straight from disk.
+    let frame_indices_are_stable = cache
+        .frames
+        .iter()
+        .all(|frame| frame.coverage.is_none() && frame.confidence.is_none());
+    let sigmas = source_sigmas
+        .as_deref()
+        .filter(|_| frame_indices_are_stable);
+
+    let (combined, quantization_sigma) = match method {
         CombineMethod::Median => {
-            cache.process_chunked_weighted(None, frame_norms, planes, |values, w, _| {
-                CombinedSample::from_all(math::statistics::median_f32_mut(values), w)
-            })
+            let sigma = sigmas.and_then(|sigmas| combined_median_quantization_sigma(sigmas, norms));
+            let combined = cache.process_chunked(None, norms, planes, |values, w, _| {
+                let value = math::statistics::median_f32_mut(values);
+                if measure_quality {
+                    CombinedSample::from_all(value, w)
+                } else {
+                    CombinedSample::value_only(value, values.len())
+                }
+            });
+            (combined, sigma)
         }
-        CombineMethod::Mean(rejection) => cache.process_chunked_weighted(
-            weights.as_deref(),
-            frame_norms,
-            planes,
-            move |values, w, scratch| rejection.combine_mean_with_quality(values, w, scratch),
-        ),
+        // Winsorization replaces samples with order statistics, so it has no fixed linear
+        // coefficient set from which to propagate quantization variance.
+        CombineMethod::Mean(rejection @ Rejection::Winsorized(_)) => {
+            let sigma = sigmas.and_then(|sigmas| conservative_quantization_sigma(sigmas, norms));
+            let combined = cache.process_chunked(
+                weights.as_deref(),
+                norms,
+                planes,
+                move |values, w, scratch| {
+                    rejection.combine_mean(values, w, scratch, measure_quality)
+                },
+            );
+            (combined, sigma)
+        }
+        CombineMethod::Mean(rejection) => {
+            let Some(sigmas) = sigmas else {
+                let combined = cache.process_chunked(
+                    weights.as_deref(),
+                    norms,
+                    planes,
+                    move |values, w, scratch| {
+                        rejection.combine_mean(values, w, scratch, measure_quality)
+                    },
+                );
+                return cache.finish_product(combined, planes, None);
+            };
+            // Rejection keeps a different survivor set at every pixel, so the master's floor is
+            // the least-reduced pixel: seed with "nothing rejected" and raise it wherever a
+            // pixel lost frames.
+            let all_survivors =
+                combined_mean_quantization_sigma(sigmas, weights.as_deref(), norms, 0..frame_count)
+                    .expect("a validated stack has positive total weight");
+            let max_sigma_bits = AtomicU32::new(all_survivors.to_bits());
+            let frame_weights = weights.as_deref();
+            let combined =
+                cache.process_chunked(weights.as_deref(), norms, planes, |values, w, scratch| {
+                    let sample = rejection.combine_mean(values, w, scratch, measure_quality);
+                    if sample.survivor_count != frame_count {
+                        record_max_sigma(
+                            &max_sigma_bits,
+                            combined_mean_quantization_sigma(
+                                sigmas,
+                                frame_weights,
+                                norms,
+                                scratch.indices[..sample.survivor_count].iter().copied(),
+                            ),
+                        );
+                    }
+                    sample
+                });
+            (combined, tracked_sigma(&max_sigma_bits))
+        }
     };
 
-    cache.finish_product(combined, planes)
+    cache.finish_product(combined, planes, quantization_sigma)
 }
 
 #[cfg(test)]
@@ -638,7 +616,7 @@ mod tests {
         );
         let expected_normalized_sigma =
             ((0.25f32 * 0.01).powi(2) + (0.75f32 * 2.0 * 0.02).powi(2)).sqrt();
-        assert_eq!(normalized.data.to_vec(), vec![0.4; 2]);
+        assert_eq!(normalized.image.channel(0).pixels().to_vec(), vec![0.4; 2]);
         assert!(
             (normalized.quantization_sigma.unwrap() - expected_normalized_sigma).abs()
                 < f32::EPSILON,
@@ -653,7 +631,7 @@ mod tests {
         );
         let median = run_stacking(&median_cache, &StackConfig::median());
         let expected_median_sigma = 0.01 * (3.0f32 / 5.0).sqrt();
-        assert_eq!(median.data.to_vec(), vec![0.4; 2]);
+        assert_eq!(median.image.channel(0).pixels().to_vec(), vec![0.4; 2]);
         assert!(
             (median.quantization_sigma.unwrap() - expected_median_sigma).abs() < f32::EPSILON,
             "an equal-source three-frame median must use the exact uniform order statistic"
@@ -687,7 +665,7 @@ mod tests {
                 ..Default::default()
             },
         );
-        assert_eq!(rejected.data.to_vec(), vec![4.0, 1.0]);
+        assert_eq!(rejected.image.channel(0).pixels().to_vec(), vec![4.0, 1.0]);
         let expected_rejected_sigma = 0.01 / 7.0f32.sqrt();
         assert!(
             (rejected.quantization_sigma.unwrap() - expected_rejected_sigma).abs() < f32::EPSILON,
@@ -1264,8 +1242,8 @@ mod tests {
             normalization: Normalization::Multiplicative,
             ..Default::default()
         };
-        let first = run_stacking_weighted(&caches[0], &config);
-        let second = run_stacking_weighted(&caches[1], &config);
+        let first = run_stacking(&caches[0], &config);
+        let second = run_stacking(&caches[1], &config);
         assert_eq!(
             first.image.channel(0).pixels(),
             second.image.channel(0).pixels()
@@ -1505,7 +1483,7 @@ mod tests {
         assert!((effective_ratio - 4.0).abs() < 1e-6);
         assert!((effective_ratio - 16.0).abs() > 1.0);
 
-        let product = run_stacking_weighted(
+        let product = run_stacking(
             &cache,
             &StackConfig {
                 method: CombineMethod::Mean(Rejection::None),
@@ -1948,7 +1926,7 @@ mod tests {
         let cache = make_uniform_frames(16, &[100.0, 150.0]);
         let norm_params = norm_params_for(&cache, Normalization::Global).unwrap();
 
-        let result = cache.process_chunked_weighted(
+        let result = cache.process_chunked(
             None,
             Some(&norm_params),
             QualityPlanes::ALL,
@@ -2003,7 +1981,7 @@ mod tests {
         let cache = make_uniform_frames(16, &[100.0, 200.0]);
         let norm_params = norm_params_for(&cache, Normalization::Multiplicative).unwrap();
 
-        let result = cache.process_chunked_weighted(
+        let result = cache.process_chunked(
             None,
             Some(&norm_params),
             QualityPlanes::ALL,
@@ -2026,7 +2004,7 @@ mod tests {
             let cache = make_rgb_frames(16, &[ref_rgb, frame1_rgb]);
             let norm_params = norm_params_for(&cache, mode).unwrap();
 
-            let result = cache.process_chunked_weighted(
+            let result = cache.process_chunked(
                 None,
                 Some(&norm_params),
                 QualityPlanes::ALL,
@@ -2044,15 +2022,15 @@ mod tests {
         let cache = make_uniform_frames(16, &[100.0, 200.0]);
         let norm_params = norm_params_for(&cache, Normalization::Global).unwrap();
 
-        let result_norm = cache.process_chunked_weighted(
+        let result_norm = cache.process_chunked(
             None,
             Some(&norm_params),
             QualityPlanes::ALL,
-            |values, w, scratch| Rejection::None.combine_mean_with_quality(values, w, scratch),
+            |values, w, scratch| Rejection::None.combine_mean(values, w, scratch, true),
         );
         let result_unnorm =
-            cache.process_chunked_weighted(None, None, QualityPlanes::ALL, |values, w, scratch| {
-                Rejection::None.combine_mean_with_quality(values, w, scratch)
+            cache.process_chunked(None, None, QualityPlanes::ALL, |values, w, scratch| {
+                Rejection::None.combine_mean(values, w, scratch, true)
             });
 
         let norm_pixel = result_norm.pixels.channel(0)[0];
@@ -2181,7 +2159,7 @@ mod tests {
         let norm_params = norm_params_for(&cache, Normalization::Global).unwrap();
 
         // Frame 1 is reference (lower noise), so stacked result should be ~200
-        let result = cache.process_chunked_weighted(
+        let result = cache.process_chunked(
             None,
             Some(&norm_params),
             QualityPlanes::ALL,
@@ -2281,7 +2259,7 @@ mod tests {
             weighting: Weighting::Noise,
             ..Default::default()
         };
-        let result = run_stacking_weighted(&cache, &config);
+        let result = run_stacking(&cache, &config);
         let pixel = result.image.channel(0).pixels()[0];
         // Result should be near 100 (clean frame value), not near 999 (outlier)
         assert!(

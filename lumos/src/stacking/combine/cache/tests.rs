@@ -36,7 +36,7 @@ fn unrequested_quality_planes_are_never_allocated() {
         CombinedSample::from_all(values.iter().sum::<f32>() / values.len() as f32, weights)
     };
 
-    let weight_only = cache.process_chunked_weighted(
+    let weight_only = cache.process_chunked(
         None,
         None,
         QualityPlanes {
@@ -51,12 +51,12 @@ fn unrequested_quality_planes_are_never_allocated() {
         "a variance plane was allocated for a combine that did not ask for one"
     );
 
-    let bare = cache.process_chunked_weighted(None, None, QualityPlanes::IMAGE_ONLY, reduce);
+    let bare = cache.process_chunked(None, None, QualityPlanes::IMAGE_ONLY, reduce);
     assert!(bare.weight.is_none());
     assert!(bare.linear_variance.is_none());
 
     // Skipping the planes must not disturb the combined pixels.
-    let all = cache.process_chunked_weighted(None, None, QualityPlanes::ALL, reduce);
+    let all = cache.process_chunked(None, None, QualityPlanes::ALL, reduce);
     assert_eq!(
         bare.pixels.channel(0).pixels(),
         all.pixels.channel(0).pixels()
@@ -82,15 +82,13 @@ fn quality_plane_request_drops_variance_for_a_non_linear_combine() {
 }
 
 fn mean_product(cache: &FrameCache, weights: Option<&[f32]>) -> StackProduct {
-    let combined = cache.process_chunked_weighted(
+    let combined = cache.process_chunked(
         weights,
         None,
         QualityPlanes::ALL,
-        |values, weights, scratch| {
-            Rejection::None.combine_mean_with_quality(values, weights, scratch)
-        },
+        |values, weights, scratch| Rejection::None.combine_mean(values, weights, scratch, true),
     );
-    cache.finish_product(combined, QualityPlanes::ALL)
+    cache.finish_product(combined, QualityPlanes::ALL, None)
 }
 
 #[test]
@@ -239,11 +237,10 @@ fn test_process_chunked_median() {
     assert_eq!(cache.core.chunk_available_memory(), None);
 
     // Median of [1, 3, 2] = 2
-    let result =
-        cache.process_chunked_weighted(None, None, QualityPlanes::ALL, |values, weights, _| {
-            values.sort_by(|a, b| a.partial_cmp(b).unwrap());
-            CombinedSample::from_all(values[values.len() / 2], weights)
-        });
+    let result = cache.process_chunked(None, None, QualityPlanes::ALL, |values, weights, _| {
+        values.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        CombinedSample::from_all(values[values.len() / 2], weights)
+    });
 
     assert_eq!(result.chunk_available_memory, None);
     assert_eq!(result.pixels.channel_count(), 1);
@@ -270,10 +267,9 @@ fn test_process_chunked_rgb() {
     let cache = make_test_cache(images);
 
     // Mean: R=(1+5)/2=3, G=(2+6)/2=4, B=(3+7)/2=5
-    let result =
-        cache.process_chunked_weighted(None, None, QualityPlanes::ALL, |values, weights, _| {
-            CombinedSample::from_all(values.iter().sum::<f32>() / values.len() as f32, weights)
-        });
+    let result = cache.process_chunked(None, None, QualityPlanes::ALL, |values, weights, _| {
+        CombinedSample::from_all(values.iter().sum::<f32>() / values.len() as f32, weights)
+    });
 
     assert_eq!(result.pixels.channel_count(), 3);
     for &pixel in result.pixels.channel(0).pixels() {
@@ -299,12 +295,11 @@ fn test_process_chunked_with_weights() {
 
     // Weighted mean with weights [1, 3]: (10*1 + 20*3) / (1+3) = 70/4 = 17.5
     let weights = vec![1.0, 3.0];
-    let result =
-        cache.process_chunked_weighted(Some(&weights), None, QualityPlanes::ALL, |values, w, _| {
-            let sum: f32 = values.iter().zip(w.iter()).map(|(v, wt)| v * wt).sum();
-            let weight_sum: f32 = w.iter().sum();
-            CombinedSample::from_all(sum / weight_sum, w)
-        });
+    let result = cache.process_chunked(Some(&weights), None, QualityPlanes::ALL, |values, w, _| {
+        let sum: f32 = values.iter().zip(w.iter()).map(|(v, wt)| v * wt).sum();
+        let weight_sum: f32 = w.iter().sum();
+        CombinedSample::from_all(sum / weight_sum, w)
+    });
 
     for &pixel in result.pixels.channel(0).pixels() {
         assert!((pixel - 17.5).abs() < f32::EPSILON);
@@ -312,38 +307,37 @@ fn test_process_chunked_with_weights() {
 }
 
 #[test]
-fn test_cfa_cache_plain_combine() {
-    // The plain `FrameCache::process_chunked` path (calibration): no coverage, every frame
-    // contributes at every pixel.
+fn calibration_frames_combine_through_the_same_engine_as_lights() {
+    // A calibration cache carries no coverage, so every frame contributes at every pixel and the
+    // one engine behaves as the plain combine it replaced.
     let dims = ImageDimensions::new((2, 2), 1);
+    let planes = QualityPlanes::IMAGE_ONLY;
 
     // Median of [1, 3, 2] = 2 at every pixel.
     let cache = make_cfa_cache(vec![vec![1.0; 4], vec![3.0; 4], vec![2.0; 4]], dims);
-    let median = cache.process_chunked(None, None, |values, _, _| {
-        values.sort_by(|a, b| a.partial_cmp(b).unwrap());
-        values[values.len() / 2]
+    let median = cache.process_chunked(None, None, planes, |values, _, _| {
+        let value = crate::math::statistics::median_f32_mut(values);
+        CombinedSample::value_only(value, values.len())
     });
-    assert_eq!(median.channel_count(), 1);
-    for &pixel in median.channel(0).pixels() {
+    assert_eq!(median.pixels.channel_count(), 1);
+    for &pixel in median.pixels.channel(0).pixels() {
         assert!(
             (pixel - 2.0).abs() < f32::EPSILON,
-            "CFA plain median should be 2, got {pixel}"
+            "calibration median should be 2, got {pixel}"
         );
     }
 
-    // Weighted mean of [10, 20] with weights [1, 3] = (10 + 60) / 4 = 17.5 — weights flow
-    // through to the combine closure unchanged (no coverage scaling on the plain path).
+    // Weighted mean of [10, 20] with weights [1, 3] = (10 + 60) / 4 = 17.5 — per-frame weights
+    // reach the reducer unscaled, since no coverage or confidence modulates them.
     let cache = make_cfa_cache(vec![vec![10.0; 4], vec![20.0; 4]], dims);
     let weights = [1.0, 3.0];
-    let weighted = cache.process_chunked(Some(&weights), None, |values, w, _| {
-        let w = w.unwrap();
-        let sum: f32 = values.iter().zip(w).map(|(v, wt)| v * wt).sum();
-        sum / w.iter().sum::<f32>()
+    let weighted = cache.process_chunked(Some(&weights), None, planes, |values, w, scratch| {
+        Rejection::None.combine_mean(values, w, scratch, false)
     });
-    for &pixel in weighted.channel(0).pixels() {
+    for &pixel in weighted.pixels.channel(0).pixels() {
         assert!(
             (pixel - 17.5).abs() < f32::EPSILON,
-            "CFA plain weighted mean should be 17.5, got {pixel}"
+            "calibration weighted mean should be 17.5, got {pixel}"
         );
     }
 }

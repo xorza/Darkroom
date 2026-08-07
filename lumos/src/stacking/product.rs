@@ -110,4 +110,11 @@ pub struct StackProduct {
     /// Present for weighted means and drizzle, using their actual surviving/contributing samples.
     /// Absent for median output because a median is not a linear combination.
     pub linear_variance: Option<QualityMap>,
+    /// Source-quantization uncertainty carried through the combine, in the stacked image's
+    /// sample units.
+    ///
+    /// Present when every input frame declared one and the frame set carries no coverage, which
+    /// is what lets a surviving sample be traced back to the frame whose sigma and normalization
+    /// gain it inherited. `None` otherwise.
+    pub quantization_sigma: Option<f32>,
 }
