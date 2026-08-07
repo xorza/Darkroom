@@ -199,19 +199,23 @@ fn calibrate_align_stack_streaming<P: AsRef<Path> + Sync>(
                 return Err(Error::Stack(StackError::Cancelled));
             }
             let image = decode_calibrate_demosaic(path.as_ref(), masters, config, &load_context)?;
-            let stars = detector.detect(&image).stars;
+            let result = detector.detect(&image);
             let stored = store_image(cache_dir, &format!("calib_{idx}"), &image)
                 .map_err(StackError::from)?;
             let n = done.fetch_add(1, Ordering::Relaxed) + 1;
+            let diagnostics = &result.diagnostics;
             tracing::info!(
                 frame = n,
                 total,
-                stars = stars.len(),
+                candidates = diagnostics.candidates_after_filtering,
+                deblended = diagnostics.deblended_components,
+                measured = diagnostics.stars_after_centroid,
+                stars = result.stars.len(),
                 "calibrated + detected"
             );
             Ok(DetectedFrame {
                 image: stored,
-                stars,
+                stars: result.stars,
             })
         })
     }?;
@@ -290,6 +294,9 @@ fn calibrate_align_stack_streaming<P: AsRef<Path> + Sync>(
                     frame = n,
                     total = total - 1,
                     inliers = registration.num_inliers(),
+                    rms = format!("{:.3}", registration.rms_error()),
+                    quality = format!("{:.3}", registration.quality_score()),
+                    transform = %registration.transform(),
                     "registered (streaming)"
                 );
                 store_light_frame(
@@ -311,16 +318,17 @@ fn calibrate_align_stack_streaming<P: AsRef<Path> + Sync>(
         return Err(Error::Stack(StackError::Cancelled));
     }
 
-    // `try_par_map_limited` preserves input order, so the position is the frame index.
     let mut frames = Vec::with_capacity(outcomes.len());
     let mut dropped = Vec::new();
+    // Batches are appended in order and each batch's `into_par_iter().collect()` preserves it, so
+    // the position is the frame index and `dropped` comes out ascending without a sort — the
+    // ordering `AlignmentSummary::dropped` documents.
     for (idx, outcome) in outcomes.into_iter().enumerate() {
         match outcome {
             Some(frame) => frames.push(frame),
             None => dropped.push(idx),
         }
     }
-    dropped.sort_unstable();
     if frames.len() <= 1 && total > 1 {
         return Err(Error::AllFramesDropped { count: total - 1 });
     }
