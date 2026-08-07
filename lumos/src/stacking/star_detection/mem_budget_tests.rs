@@ -14,6 +14,7 @@
 //! [`StarDetector`]: crate::stacking::star_detection::detector::StarDetector
 //! [`DetectionResources`]: crate::stacking::star_detection::resources::DetectionResources
 
+use crate::math::size2us::Size2us;
 use crate::stacking::star_detection::config::Config;
 use crate::stacking::star_detection::detector::StarDetector;
 use crate::stacking::star_detection::detector::internals::buffer_counts_for;
@@ -43,7 +44,7 @@ fn buffer_working_set_stays_flat_in_frame_count() {
     // every content-dependent detection path runs during warmup and the pool reaches its true
     // high-water mark before we start checking for growth.
     let frames: Vec<_> = (0..4)
-        .map(|s| star_field(w, h, 60, 4200 + s).image)
+        .map(|s| star_field(Size2us::new(w, h), 60, 4200 + s).image)
         .collect();
 
     let mut detector = StarDetector::from_config(Config::default()).unwrap();

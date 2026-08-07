@@ -1,3 +1,4 @@
+use crate::math::size2us::Size2us;
 use std::path::{Path, PathBuf};
 
 use common::CancelToken;
@@ -34,7 +35,7 @@ struct BaseField {
 
 fn base_field() -> BaseField {
     BaseField {
-        image: star_field(256, 256, 40, 66666).image,
+        image: star_field(Size2us::new(256, 256), 40, 66666).image,
         registration: RegistrationConfig::default(),
     }
 }

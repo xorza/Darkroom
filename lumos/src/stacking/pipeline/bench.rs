@@ -1,3 +1,4 @@
+use crate::math::size2us::Size2us;
 use std::convert::Infallible;
 use std::hint::black_box;
 
@@ -13,7 +14,10 @@ use crate::testing::synthetic::fixtures::star_field;
 
 #[quick_bench(warmup_iters = 1, iters = 3)]
 fn bench_detector_batch_reuse_1k(b: quickbench::Bencher) {
-    let pixels = star_field(1024, 1024, 100, 42).image.channel(0).clone();
+    let pixels = star_field(Size2us::new(1024, 1024), 100, 42)
+        .image
+        .channel(0)
+        .clone();
     let image = LinearImage::from_pixels(ImageDimensions::new((1024, 1024), 1), pixels.into_vec());
     let images: Vec<&LinearImage> = std::iter::repeat_n(&image, 16).collect();
     let config = Config::default();

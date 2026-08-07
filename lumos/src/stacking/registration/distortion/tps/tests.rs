@@ -1,5 +1,6 @@
 //! Tests for thin-plate spline distortion modeling.
 
+use crate::math::size2us::Size2us;
 use std::f64::consts::E;
 
 use crate::stacking::registration::distortion::tps::*;

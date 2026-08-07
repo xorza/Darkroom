@@ -4,6 +4,7 @@
 //!
 //! Run: `cargo test -p lumos --release registration::bench -- --ignored --nocapture`
 
+use crate::math::size2us::Size2us;
 use glam::DVec2;
 use quickbench::quick_bench;
 use std::hint::black_box;
@@ -16,7 +17,7 @@ use crate::{RegistrationConfig, Star, StarDetectionConfig, StarDetector, registe
 /// applying a known similarity transform to those stars — a clean, deterministic correspondence
 /// set that still drives the full matching + RANSAC machinery over `num_stars` points.
 fn star_pair(num_stars: usize, seed: u64) -> (Vec<Star>, Vec<Star>) {
-    let frame = star_field(1500, 1500, num_stars, seed);
+    let frame = star_field(Size2us::new(1500, 1500), num_stars, seed);
     let mut detector = StarDetector::from_config(StarDetectionConfig::default()).unwrap();
     let ref_stars = detector.detect(&frame.image).stars;
     // A modest rotation + scale + shift, the kind dithered subs differ by.

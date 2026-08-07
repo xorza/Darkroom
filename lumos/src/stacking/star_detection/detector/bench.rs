@@ -2,6 +2,7 @@
 //!
 //! Run with: `cargo test -p lumos --release bench_star_detection -- --ignored --nocapture`
 
+use crate::math::size2us::Size2us;
 use ::quickbench::quick_bench;
 use std::hint::black_box;
 
@@ -24,7 +25,7 @@ fn bench_detect_6k_globular_cluster(b: ::quickbench::Bencher) {
     init_tracing();
 
     // 6K globular cluster with 50000 stars - extreme crowding
-    let pixels = cluster_field(6144, 6144, 50000, 42)
+    let pixels = cluster_field(Size2us::new(6144, 6144), 50000, 42)
         .image
         .channel(0)
         .clone();
@@ -83,7 +84,10 @@ fn bench_detect_6k_globular_cluster(b: ::quickbench::Bencher) {
 #[quick_bench(warmup_iters = 1, iters = 3)]
 fn bench_detect_4k_dense(b: ::quickbench::Bencher) {
     // 4K image with 2000 stars
-    let pixels = star_field(4096, 4096, 2000, 42).image.channel(0).clone();
+    let pixels = star_field(Size2us::new(4096, 4096), 2000, 42)
+        .image
+        .channel(0)
+        .clone();
     let image = LinearImage::from_pixels(
         ImageDimensions::new((pixels.width(), pixels.height()), 1),
         pixels.into_vec(),
@@ -96,7 +100,10 @@ fn bench_detect_4k_dense(b: ::quickbench::Bencher) {
 #[quick_bench(warmup_iters = 2, iters = 5)]
 fn bench_detect_1k_sparse(b: ::quickbench::Bencher) {
     // 1K image with 100 stars (sparse field)
-    let pixels = star_field(1024, 1024, 100, 42).image.channel(0).clone();
+    let pixels = star_field(Size2us::new(1024, 1024), 100, 42)
+        .image
+        .channel(0)
+        .clone();
     let image = LinearImage::from_pixels(
         ImageDimensions::new((pixels.width(), pixels.height()), 1),
         pixels.into_vec(),

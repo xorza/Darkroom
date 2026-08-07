@@ -111,7 +111,10 @@ fn assert_roundtrip(
     margin: usize,
     thresholds: MethodThresholds,
 ) {
-    let ref_buf = star_field(256, 256, 30, seed).image.channel(0).clone();
+    let ref_buf = star_field(Size2us::new(256, 256), 30, seed)
+        .image
+        .channel(0)
+        .clone();
     let width = ref_buf.width();
     let height = ref_buf.height();
     let inverse = forward.inverse();
@@ -138,7 +141,10 @@ fn assert_roundtrip(
 /// Test that warping with identity transform preserves the image.
 #[test]
 fn test_warp_identity_all_methods() {
-    let ref_buf = star_field(256, 256, 30, 12345).image.channel(0).clone();
+    let ref_buf = star_field(Size2us::new(256, 256), 30, 12345)
+        .image
+        .channel(0)
+        .clone();
     let identity = Transform::identity();
 
     for method in all_interpolation_methods() {
@@ -274,7 +280,7 @@ fn test_warp_with_detected_transform() {
 
     let width = 256;
     let height = 256;
-    let ref_pixels = star_field(width, height, 40, 66666)
+    let ref_pixels = star_field(Size2us::new(width, height), 40, 66666)
         .image
         .channel(0)
         .clone();
@@ -348,7 +354,10 @@ fn test_warp_with_detected_transform() {
 
 #[test]
 fn test_interpolation_quality_ordering() {
-    let ref_buf = star_field(256, 256, 30, 77777).image.channel(0).clone();
+    let ref_buf = star_field(Size2us::new(256, 256), 30, 77777)
+        .image
+        .channel(0)
+        .clone();
     let width = ref_buf.width();
     let height = ref_buf.height();
 
@@ -414,7 +423,10 @@ fn test_interpolation_quality_ordering() {
 
 #[test]
 fn test_warp_grayscale_translation() {
-    let ref_buf = star_field(256, 256, 30, 88888).image.channel(0).clone();
+    let ref_buf = star_field(Size2us::new(256, 256), 30, 88888)
+        .image
+        .channel(0)
+        .clone();
     let width = ref_buf.width();
     let height = ref_buf.height();
     let ref_pixels = ref_buf.into_vec();
@@ -462,7 +474,10 @@ fn test_warp_grayscale_translation() {
 
 #[test]
 fn test_warp_rgb() {
-    let gray_buf = star_field(256, 256, 30, 99999).image.channel(0).clone();
+    let gray_buf = star_field(Size2us::new(256, 256), 30, 99999)
+        .image
+        .channel(0)
+        .clone();
     let width = gray_buf.width();
     let height = gray_buf.height();
 
@@ -524,7 +539,10 @@ fn test_warp_rgb() {
 fn test_warp_preserves_output_metadata() {
     use crate::io::image::ImageMetadata;
 
-    let pixels = star_field(256, 256, 30, 11111).image.channel(0).clone();
+    let pixels = star_field(Size2us::new(256, 256), 30, 11111)
+        .image
+        .channel(0)
+        .clone();
     let width = pixels.width();
     let height = pixels.height();
     let mut image =
@@ -633,7 +651,7 @@ fn test_warp_with_sip_correction() {
     );
 
     // Create a test image with a gradient pattern
-    let ref_buf = star_field(width, height, 30, 54321)
+    let ref_buf = star_field(Size2us::new(width, height), 30, 54321)
         .image
         .channel(0)
         .clone();
@@ -726,7 +744,7 @@ fn test_warp_api_with_sip() {
             .polynomial;
 
     // Create a grayscale image
-    let pixels = star_field(width, height, 20, 12321)
+    let pixels = star_field(Size2us::new(width, height), 20, 12321)
         .image
         .channel(0)
         .clone();

@@ -33,7 +33,7 @@ fn bench_background_estimate_6k(b: ::quickbench::Bencher) {
     let height = 6144;
     let num_stars = (width * height) / 1000;
 
-    let pixels = star_field(width, height, num_stars, 42)
+    let pixels = star_field(Size2us::new(width, height), num_stars, 42)
         .image
         .channel(0)
         .clone();
@@ -54,7 +54,7 @@ const BENCH_SIGMA_CLIP_ITERATIONS: usize = 2;
 
 #[quick_bench(warmup_iters = 2, iters = 10)]
 fn bench_tile_grid_6k_globular(b: ::quickbench::Bencher) {
-    let pixels = cluster_field(6144, 6144, 50000, 42)
+    let pixels = cluster_field(Size2us::new(6144, 6144), 50000, 42)
         .image
         .channel(0)
         .clone();
@@ -68,7 +68,7 @@ fn bench_tile_grid_6k_globular(b: ::quickbench::Bencher) {
 
 #[quick_bench(warmup_iters = 2, iters = 50)]
 fn bench_tile_grid_6k_with_mask(b: ::quickbench::Bencher) {
-    let pixels = cluster_field(6144, 6144, 50000, 42)
+    let pixels = cluster_field(Size2us::new(6144, 6144), 50000, 42)
         .image
         .channel(0)
         .clone();

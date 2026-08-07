@@ -1,4 +1,3 @@
-use crate::math::size2us::Size2us;
 use crate::stacking::registration::distortion::sip::*;
 use crate::stacking::registration::transform::Transform;
 

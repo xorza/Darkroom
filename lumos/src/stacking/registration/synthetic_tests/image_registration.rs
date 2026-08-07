@@ -76,7 +76,7 @@ fn translate_image(src_pixels: &[f32], width: usize, height: usize, dx: f64, dy:
 fn test_image_registration_translation() {
     // Reference star field image (forward model).
     let (width, height) = (256, 256);
-    let ref_pixels_vec = star_field(width, height, 50, 42)
+    let ref_pixels_vec = star_field(Size2us::new(width, height), 50, 42)
         .image
         .channel(0)
         .pixels()
@@ -154,7 +154,7 @@ fn test_image_registration_translation() {
 #[test]
 fn test_image_registration_rotation() {
     let (width, height) = (256, 256);
-    let ref_pixels_vec = star_field(width, height, 60, 123)
+    let ref_pixels_vec = star_field(Size2us::new(width, height), 60, 123)
         .image
         .channel(0)
         .pixels()
@@ -216,7 +216,7 @@ fn test_image_registration_rotation() {
 #[test]
 fn test_image_registration_similarity() {
     let (width, height) = (256, 256);
-    let ref_pixels_vec = star_field(width, height, 70, 456)
+    let ref_pixels_vec = star_field(Size2us::new(width, height), 70, 456)
         .image
         .channel(0)
         .pixels()
@@ -364,7 +364,7 @@ fn test_image_registration_with_noise() {
 fn test_image_registration_dense_field() {
     // Dense star field.
     let (width, height) = (256, 256);
-    let ref_pixels_vec = star_field(width, height, 200, 999)
+    let ref_pixels_vec = star_field(Size2us::new(width, height), 200, 999)
         .image
         .channel(0)
         .pixels()
@@ -425,7 +425,7 @@ fn test_image_registration_dense_field() {
 #[test]
 fn test_image_registration_large_image() {
     let (width, height) = (1024, 1024);
-    let ref_pixels_vec = star_field(width, height, 100, 111)
+    let ref_pixels_vec = star_field(Size2us::new(width, height), 100, 111)
         .image
         .channel(0)
         .pixels()

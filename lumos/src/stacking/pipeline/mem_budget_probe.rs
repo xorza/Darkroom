@@ -31,6 +31,7 @@
 //! `from_files` / `calibrate_align_stack` orchestration — those need real RAW data (the real-data
 //! tests are the hook). Everything downstream of the decode is exercised here on synthetic data.
 
+use crate::math::size2us::Size2us;
 use std::hint::black_box;
 use std::io;
 use std::path::PathBuf;
@@ -208,7 +209,7 @@ fn align_stack_memory_probe() {
     // Build the input set: a base star field plus `n-1` small dithers of it, so registration has a
     // shared pattern to solve. Warp scratch is freed per frame; only the `n` inputs stay resident.
     let reg = RegistrationConfig::default();
-    let base = star_field(width, height, stars, seed).image;
+    let base = star_field(Size2us::new(width, height), stars, seed).image;
     let channels = base.channels();
     let gen_start = Instant::now();
     let mut frames: Vec<LinearImage> = Vec::with_capacity(n);

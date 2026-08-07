@@ -1,5 +1,6 @@
 use crate::background_mesh::workspace::internals::compute_grid;
 use crate::background_mesh::*;
+use crate::math::size2us::Size2us;
 
 /// Number of sigma-clipping iterations for tests.
 const TEST_SIGMA_CLIP_ITERATIONS: usize = 2;
