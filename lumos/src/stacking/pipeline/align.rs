@@ -13,6 +13,7 @@ use crate::stacking::frame_store::{StoredFrame, compute_frame_stats, plan_memory
 use crate::stacking::progress::ProgressCallback;
 use crate::stacking::registration::register;
 use crate::stacking::registration::resample::warp;
+use crate::stacking::registration::result::RegistrationError;
 use crate::stacking::star_detection::detector::DetectionResult;
 
 use crate::stacking::pipeline::config::{AlignStackConfig, Reference};
@@ -190,6 +191,12 @@ pub(crate) fn register_warp_and_stack(
             let source_stats = compute_frame_stats(&source);
             let registration = match register(&ref_stars, &detected.stars, &config.registration) {
                 Ok(registration) => registration,
+                // A pair that did not match is a frame to drop. An invalid config is not: it
+                // fails identically for every pair, so dropping it would spend the whole run to
+                // report `AllFramesDropped` and blame the data.
+                Err(RegistrationError::InvalidConfig(invalid)) => {
+                    return Err(Error::RegistrationConfig(invalid));
+                }
                 Err(error) => {
                     tracing::info!(frame = n, total = total - 1, %error, "registration failed");
                     return Ok(None);
