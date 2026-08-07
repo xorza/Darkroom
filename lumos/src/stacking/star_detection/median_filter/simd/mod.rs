@@ -104,7 +104,7 @@ macro_rules! median9_simd_sort {
 }
 
 #[cfg(target_arch = "x86_64")]
-mod sse;
+mod x86;
 
 #[cfg(target_arch = "aarch64")]
 mod neon;
@@ -142,13 +142,13 @@ pub(super) fn median_filter_row_simd(
     {
         if width >= AVX2_MIN_ROW_WIDTH && cpu_features::has_avx2() {
             unsafe {
-                sse::median_filter_row_avx2(row_above, row_curr, row_below, output_row, width);
+                x86::median_filter_row_avx2(row_above, row_curr, row_below, output_row, width);
             }
             return;
         }
         if width >= SSE41_MIN_ROW_WIDTH && cpu_features::has_sse4_1() {
             unsafe {
-                sse::median_filter_row_sse41(row_above, row_curr, row_below, output_row, width);
+                x86::median_filter_row_sse41(row_above, row_curr, row_below, output_row, width);
             }
             return;
         }

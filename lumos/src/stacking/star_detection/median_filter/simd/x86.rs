@@ -188,7 +188,7 @@ unsafe fn median9_sse41(
 
 #[cfg(test)]
 mod tests {
-    use crate::stacking::star_detection::median_filter::simd::sse::*;
+    use crate::stacking::star_detection::median_filter::simd::x86::*;
     #[cfg(target_arch = "x86_64")]
     use imaginarium::cpu_features;
 
