@@ -160,6 +160,10 @@ pub(crate) struct FrameCache {
     // Stored planes drop before the spill directory owner in `core`.
     pub(crate) frames: Vec<StoredFrame>,
     pub(crate) frame_norms: Option<Vec<FrameNorm>>,
+    /// The normalization `frame_norms` was measured for. Kept so the combine can confirm the
+    /// `StackConfig` it is handed asks for the normalization the cache was actually built with —
+    /// the parameters are fixed at construction and never recomputed.
+    pub(crate) normalization: Normalization,
     pub(crate) core: CacheCore,
 }
 
@@ -231,6 +235,43 @@ fn validate_image_samples(
         (0..image.dimensions().channels()).map(|channel| image.channel(channel)),
         cancel,
     )
+}
+
+/// Check a stored frame's shape against the geometry the cache was built for.
+///
+/// The counterpart to the dimension checks [`FrameCache::from_stack_frames`] makes on
+/// caller-supplied images. A stored plane carries no width or height, so this compares plane
+/// counts and sample counts instead — enough to guarantee every `chunk(..)` below is in range.
+fn validate_stored_geometry(
+    frame: &StoredFrame,
+    dimensions: ImageDimensions,
+    index: usize,
+) -> Result<(), Error> {
+    if frame.channels.len() != dimensions.channels() {
+        return Err(Error::StoredFrameChannels {
+            index,
+            expected: dimensions.channels(),
+            actual: frame.channels.len(),
+        });
+    }
+    let expected = dimensions.pixel_count();
+    let planes = frame
+        .channels
+        .iter()
+        .map(|plane| ("a channel", plane))
+        .chain(frame.coverage.as_ref().map(|plane| ("coverage", plane)))
+        .chain(frame.confidence.as_ref().map(|plane| ("confidence", plane)));
+    for (plane_name, plane) in planes {
+        if plane.samples() != expected {
+            return Err(Error::StoredFramePlaneSamples {
+                index,
+                plane: plane_name,
+                expected,
+                actual: plane.samples(),
+            });
+        }
+    }
+    Ok(())
 }
 
 fn validate_stored_samples(
@@ -418,6 +459,10 @@ impl FrameCache {
         } = params;
         check_cancel(&cancel)?;
         for (index, frame) in frames.iter().enumerate() {
+            // Geometry before contents: every read below and in the combine slices a plane to
+            // `pixel_count`, so a short plane would panic out of a slice index rather than
+            // reporting which frame was the wrong shape.
+            validate_stored_geometry(frame, dimensions, index)?;
             validate_stored_samples(&frame.channels, dimensions.pixel_count(), index, &cancel)?;
             // Same guarantee `from_stack_frames` gives caller-supplied planes: coverage in
             // `[0, 1]` and confidence non-negative, so the gate and the weight multiplier below
@@ -440,6 +485,7 @@ impl FrameCache {
         Ok(Self {
             frames,
             frame_norms,
+            normalization,
             core: CacheCore {
                 spill_directory,
                 dimensions,
@@ -514,6 +560,7 @@ impl FrameCache {
         Ok(Self {
             frames: stored,
             frame_norms,
+            normalization,
             core: CacheCore {
                 spill_directory: None,
                 dimensions,
@@ -834,6 +881,7 @@ pub(crate) mod internals {
         FrameCache {
             frames,
             frame_norms,
+            normalization,
             core,
         }
     }

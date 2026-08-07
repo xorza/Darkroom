@@ -176,6 +176,7 @@ impl FrameCache {
         Ok(Self {
             frames,
             frame_norms,
+            normalization,
             core,
         })
     }

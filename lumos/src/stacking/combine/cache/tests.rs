@@ -81,6 +81,66 @@ fn quality_plane_request_drops_variance_for_a_non_linear_combine() {
     );
 }
 
+#[test]
+fn stored_frames_of_the_wrong_shape_are_rejected_not_sliced() {
+    // Every read of a stored plane slices it to the cache's pixel count, so a frame that does not
+    // match would fault out of a slice index naming neither the frame nor the field. The geometry
+    // check runs first and names both.
+    let dimensions = ImageDimensions::new((4, 2), 1);
+    let params = || FrameCacheParams {
+        spill_directory: None,
+        dimensions,
+        metadata: ImageMetadata::default(),
+        config: CacheConfig::default(),
+        normalization: Normalization::None,
+        progress: ProgressCallback::default(),
+        cancel: CancelToken::never(),
+    };
+    let frame = |pixels: usize| {
+        let image =
+            LinearImage::from_pixels(ImageDimensions::new((pixels, 1), 1), vec![1.0; pixels]);
+        let stats = compute_frame_stats(&image);
+        StoredFrame::from_memory(image, None, None, stats)
+    };
+
+    // Short channel plane: 4 samples where the cache wants 8.
+    let error = FrameCache::from_stored_frames(vec![frame(8), frame(4)], params()).unwrap_err();
+    assert!(
+        matches!(
+            error,
+            Error::StoredFramePlaneSamples {
+                index: 1,
+                plane: "a channel",
+                expected: 8,
+                actual: 4,
+            }
+        ),
+        "expected a geometry error naming frame 1, got {error:?}"
+    );
+
+    // A quality plane of the wrong length is caught the same way.
+    let image = LinearImage::from_pixels(dimensions, vec![1.0; 8]);
+    let stats = compute_frame_stats(&image);
+    let short_coverage =
+        StoredFrame::from_memory(image, Some(Buffer2::new(2, 1, vec![1.0; 2])), None, stats);
+    let error = FrameCache::from_stored_frames(vec![short_coverage], params()).unwrap_err();
+    assert!(
+        matches!(
+            error,
+            Error::StoredFramePlaneSamples {
+                plane: "coverage",
+                expected: 8,
+                actual: 2,
+                ..
+            }
+        ),
+        "expected a coverage geometry error, got {error:?}"
+    );
+
+    // A correctly shaped set still builds.
+    assert!(FrameCache::from_stored_frames(vec![frame(8), frame(8)], params()).is_ok());
+}
+
 fn mean_product(cache: &FrameCache, weights: Option<&[f32]>) -> StackProduct {
     let combined = cache.process_chunked(
         weights,
@@ -387,6 +447,7 @@ fn test_cleanup_removes_files() {
     let cache = FrameCache {
         frames: vec![cached_frame],
         frame_norms: None,
+        normalization: Normalization::None,
         core: CacheCore {
             spill_directory: Some(SpillDirectory::create(temp_dir.to_path_buf(), false).unwrap()),
             dimensions: dims,
@@ -453,6 +514,7 @@ fn test_read_channel_chunk_disk_backed() {
     let cache = FrameCache {
         frames: vec![cached_frame],
         frame_norms: None,
+        normalization: Normalization::None,
         core: CacheCore {
             spill_directory: Some(SpillDirectory::create(temp_dir.to_path_buf(), false).unwrap()),
             dimensions: dims,
@@ -513,6 +575,7 @@ fn test_frame_count_disk_backed() {
     let cache = FrameCache {
         frames,
         frame_norms: None,
+        normalization: Normalization::None,
         core: CacheCore {
             spill_directory: Some(SpillDirectory::create(temp_dir.to_path_buf(), false).unwrap()),
             dimensions: dims,
