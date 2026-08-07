@@ -5,32 +5,18 @@ use std::path::PathBuf;
 
 use thiserror::Error;
 
+use crate::error::InvalidConfigField;
 use crate::io::image::ImageDimensions;
 use crate::stacking::frame_store::FrameStoreError;
 
 /// Invalid [`crate::StackConfig`] parameters.
+///
+/// Plain range checks report through [`InvalidConfigField`]; the variants below are the
+/// constraints that aren't one — a per-element check and two that span fields.
 #[derive(Debug, Error, Clone, PartialEq)]
 pub enum StackConfigError {
-    #[error("sigma_low must be finite and positive, got {value}")]
-    InvalidSigmaLow { value: f32 },
-
-    #[error("sigma_high must be finite and positive, got {value}")]
-    InvalidSigmaHigh { value: f32 },
-
-    #[error("max_iterations must be at least 1")]
-    ZeroMaxIterations,
-
-    #[error("low_percentile must be finite and between 0 and 50, got {value}")]
-    InvalidLowPercentile { value: f32 },
-
-    #[error("high_percentile must be finite and between 0 and 50, got {value}")]
-    InvalidHighPercentile { value: f32 },
-
-    #[error("low_percentile + high_percentile must be less than 100, got {total}")]
-    InvalidTotalPercentile { total: f32 },
-
-    #[error("GESD alpha must be finite and between 0 and 1, got {value}")]
-    InvalidGesdAlpha { value: f32 },
+    #[error(transparent)]
+    Field(#[from] InvalidConfigField),
 
     #[error("manual weight {index} must be finite and non-negative, got {value}")]
     InvalidManualWeight { index: usize, value: f32 },

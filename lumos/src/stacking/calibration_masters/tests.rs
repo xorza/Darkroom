@@ -1025,7 +1025,7 @@ fn stack_cfa_master_rejects_an_invalid_config_before_reading_anything() {
         assert!(
             matches!(
                 error,
-                Error::Config(StackConfigError::InvalidSigmaLow { .. })
+                Error::Config(StackConfigError::Field(invalid)) if invalid.field == "sigma_low"
             ),
             "expected the config to be rejected, got {error:?}"
         );

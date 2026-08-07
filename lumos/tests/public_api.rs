@@ -8,16 +8,15 @@ use lumos::{
     DrizzleConfig, DrizzleConfigError, DrizzleError, DrizzleFrame, FitsChecksumPolicy,
     FitsChecksumProvenance, FitsChecksumState, FitsCubeInterpretation, FitsHduProvenance,
     FitsHduSelector, FitsLoadOptions, FitsTransferProvenance, FrameStoreError, GesdConfig,
-    ImageDimensions, ImageMetadata, InterpolationMethod, LinearFitClipConfig, LinearImage,
-    LoadContext, NoiseModel, Normalization, PercentileClipConfig, QualityMap, QualityPlanes,
-    RansacConfig, RegistrationCatalog, RegistrationConfig, RegistrationError,
+    ImageDimensions, ImageMetadata, InterpolationMethod, InvalidConfigField, LinearFitClipConfig,
+    LinearImage, LoadContext, NoiseModel, Normalization, PercentileClipConfig, QualityMap,
+    QualityPlanes, RansacConfig, RegistrationCatalog, RegistrationConfig, RegistrationError,
     RegistrationMatchingConfig, Rejection, SigmaClipConfig, SipConfig, SmallN, StackConfig,
     StackConfigError, StackError, StackProduct, StarDetectionBackgroundConfig,
-    StarDetectionCandidateConfig, StarDetectionConfig, StarDetectionConfigError,
-    StarDetectionDiagnostics, StarDetectionFilterConfig, StarDetectionFwhmConfig,
-    StarDetectionMeasurementConfig, StarDetectionQualityFilterDiagnostics, StarDetector, StarMatch,
-    TransferProvenance, Transform, TransformType, TriangleConfig, WarpParams, Weighting,
-    WinsorizedClipConfig,
+    StarDetectionCandidateConfig, StarDetectionConfig, StarDetectionDiagnostics,
+    StarDetectionFilterConfig, StarDetectionFwhmConfig, StarDetectionMeasurementConfig,
+    StarDetectionQualityFilterDiagnostics, StarDetector, StarMatch, TransferProvenance, Transform,
+    TransformType, TriangleConfig, WarpParams, Weighting, WinsorizedClipConfig,
 };
 
 #[test]
@@ -213,13 +212,18 @@ fn stacking_configuration_errors_are_available_from_the_crate_root() {
     let stack_error = StackConfig::sigma_clipped(0.0).validate().unwrap_err();
     assert_eq!(
         stack_error,
-        StackConfigError::InvalidSigmaLow { value: 0.0 }
+        StackConfigError::Field(InvalidConfigField {
+            field: "sigma_low",
+            expected: "finite and positive",
+            value: 0.0,
+            bound: None,
+        })
     );
     let operation_error: StackError = stack_error.into();
-    assert!(matches!(
-        operation_error,
-        StackError::Config(StackConfigError::InvalidSigmaLow { value: 0.0 })
-    ));
+    assert_eq!(
+        operation_error.to_string(),
+        "sigma_low must be finite and positive, got 0"
+    );
 
     let storage_error = FrameStoreError::CreateDirectory {
         path: ".tmp/unwritable".into(),
@@ -239,13 +243,18 @@ fn stacking_configuration_errors_are_available_from_the_crate_root() {
     .unwrap_err();
     assert_eq!(
         drizzle_error,
-        DrizzleConfigError::InvalidScale { value: 0.0 }
+        DrizzleConfigError::Field(InvalidConfigField {
+            field: "scale",
+            expected: "finite and positive",
+            value: 0.0,
+            bound: None,
+        })
     );
     let operation_error: DrizzleError = drizzle_error.into();
-    assert!(matches!(
-        operation_error,
-        DrizzleError::Config(DrizzleConfigError::InvalidScale { value: 0.0 })
-    ));
+    assert_eq!(
+        operation_error.to_string(),
+        "scale must be finite and positive, got 0"
+    );
 
     let detection_error = StarDetector::from_config(StarDetectionConfig {
         detection: StarDetectionCandidateConfig {
@@ -257,15 +266,18 @@ fn stacking_configuration_errors_are_available_from_the_crate_root() {
     .unwrap_err();
     assert_eq!(
         detection_error,
-        StarDetectionConfigError::InvalidSigmaThreshold { value: 0.0 }
+        InvalidConfigField {
+            field: "sigma_threshold",
+            expected: "finite and positive",
+            value: 0.0,
+            bound: None,
+        }
     );
-    let pipeline_error: AlignStackError = detection_error.into();
-    assert!(matches!(
-        pipeline_error,
-        AlignStackError::DetectionConfig(StarDetectionConfigError::InvalidSigmaThreshold {
-            value: 0.0
-        })
-    ));
+    let pipeline_error = AlignStackError::DetectionConfig(detection_error);
+    assert_eq!(
+        pipeline_error.to_string(),
+        "invalid star-detection configuration: sigma_threshold must be finite and positive, got 0"
+    );
 
     let calibration_error = CalibrationError::MissingLightCfaPattern;
     let pipeline_error: AlignStackError = calibration_error.into();

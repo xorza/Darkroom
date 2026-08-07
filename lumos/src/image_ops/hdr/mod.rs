@@ -9,7 +9,8 @@
 
 use rayon::prelude::*;
 
-use crate::image_ops::op::{OpError, ensure, require_f32_master};
+use crate::error::InvalidConfigField;
+use crate::image_ops::op::{OpError, require_f32_master};
 use crate::image_ops::remap_intensity;
 use crate::image_ops::wavelet::{atrous_smooth, max_scales};
 use imaginarium::{Buffer2, Image};
@@ -69,12 +70,15 @@ impl Hdr {
         Ok(())
     }
 
-    fn validate(&self) -> Result<(), OpError> {
-        ensure(self.scales >= 1, || {
-            format!("hdr scales must be ≥ 1, got {}", self.scales)
-        })?;
-        ensure((0.0..=1.0).contains(&self.amount), || {
-            format!("hdr amount must be in [0, 1], got {}", self.amount)
+    fn validate(&self) -> Result<(), InvalidConfigField> {
+        InvalidConfigField::check(
+            self.scales >= 1,
+            "hdr scales",
+            "at least 1",
+            self.scales as f64,
+        )?;
+        InvalidConfigField::finite("hdr amount", "finite and in [0, 1]", self.amount, |value| {
+            (0.0..=1.0).contains(&value)
         })
     }
 }

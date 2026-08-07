@@ -64,7 +64,8 @@ pub fn align_and_stack(
     let detected_count = AtomicUsize::new(0);
     let stars = {
         let mut detectors =
-            DetectorPool::from_config(&config.detection, total.min(rayon::current_num_threads()))?;
+            DetectorPool::from_config(&config.detection, total.min(rayon::current_num_threads()))
+                .map_err(Error::DetectionConfig)?;
         detectors.try_map(&lights, |detector, _index, image| {
             // Cancelled: abort the batch rather than spend the rest of the budget detecting
             // frames the run will discard.

@@ -222,7 +222,7 @@ fn validate_rejects_out_of_range_strength() {
     .apply(&mut img)
     .unwrap_err();
     assert!(
-        matches!(&err, OpError::InvalidConfig(m) if m.contains("strength must be in")),
+        matches!(&err, OpError::InvalidConfig(m) if m.field == "denoise strength"),
         "expected an InvalidConfig strength error, got {err:?}"
     );
 }
@@ -238,7 +238,7 @@ fn validate_rejects_nonpositive_k() {
     .apply(&mut img)
     .unwrap_err();
     assert!(
-        matches!(&err, OpError::InvalidConfig(m) if m.contains("k must")),
+        matches!(&err, OpError::InvalidConfig(m) if m.field == "denoise k"),
         "expected an InvalidConfig k error, got {err:?}"
     );
 }

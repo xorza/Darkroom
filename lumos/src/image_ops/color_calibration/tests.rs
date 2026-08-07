@@ -103,7 +103,7 @@ fn scnr_rejects_out_of_range_amount() {
     let mut img = rgb(1, 1, vec![0.2], vec![0.6], vec![0.2]);
     let err = Scnr::additive_mask(1.5).apply(&mut img).unwrap_err();
     assert!(
-        matches!(&err, OpError::InvalidConfig(m) if m.contains("SCNR amount must be in")),
+        matches!(&err, OpError::InvalidConfig(m) if m.field == "SCNR amount"),
         "expected an InvalidConfig SCNR amount error, got {err:?}"
     );
 }

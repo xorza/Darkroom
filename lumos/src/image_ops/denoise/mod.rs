@@ -12,7 +12,8 @@
 use imaginarium::Buffer2;
 use rayon::prelude::*;
 
-use crate::image_ops::op::{OpError, ensure, require_f32_master};
+use crate::error::InvalidConfigField;
+use crate::image_ops::op::{OpError, require_f32_master};
 use crate::image_ops::process_channels;
 use crate::image_ops::wavelet::{atrous_smooth, max_scales};
 use crate::math::statistics::{mad_f32_with_scratch, mad_to_sigma, median_f32_mut};
@@ -142,16 +143,22 @@ impl Denoise {
         Ok(())
     }
 
-    fn validate(&self) -> Result<(), OpError> {
-        ensure(self.scales >= 1, || {
-            format!("denoise scales must be ≥ 1, got {}", self.scales)
+    fn validate(&self) -> Result<(), InvalidConfigField> {
+        InvalidConfigField::check(
+            self.scales >= 1,
+            "denoise scales",
+            "at least 1",
+            self.scales as f64,
+        )?;
+        InvalidConfigField::finite("denoise k", "finite and positive", self.k, |value| {
+            value > 0.0
         })?;
-        ensure(self.k > 0.0 && self.k.is_finite(), || {
-            format!("denoise k must be a finite value > 0, got {}", self.k)
-        })?;
-        ensure((0.0..=1.0).contains(&self.strength), || {
-            format!("denoise strength must be in [0, 1], got {}", self.strength)
-        })
+        InvalidConfigField::finite(
+            "denoise strength",
+            "finite and in [0, 1]",
+            self.strength,
+            |value| (0.0..=1.0).contains(&value),
+        )
     }
 }
 

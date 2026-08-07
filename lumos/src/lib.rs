@@ -25,6 +25,7 @@
 pub(crate) mod background_mesh;
 pub(crate) mod bit_buffer2;
 pub(crate) mod concurrency;
+pub(crate) mod error;
 pub(crate) mod image_ops;
 pub(crate) mod io;
 pub(crate) mod math;
@@ -34,6 +35,7 @@ pub(crate) mod stacking;
 #[cfg(test)]
 pub mod testing;
 
+pub use error::InvalidConfigField;
 pub use io::image::cfa::{CfaImage, CfaType};
 pub use io::image::error::ImageError;
 pub use io::image::fits::options::{
@@ -69,7 +71,6 @@ pub use stacking::star_detection::detector::{
     DetectionResult as StarDetectionResult, Diagnostics as StarDetectionDiagnostics,
     QualityFilterDiagnostics as StarDetectionQualityFilterDiagnostics, StarDetector,
 };
-pub use stacking::star_detection::error::StarDetectionConfigError;
 pub use stacking::star_detection::star::Star;
 
 pub use stacking::registration::config::{

@@ -9,7 +9,8 @@
 use imaginarium::Buffer2;
 use rayon::prelude::*;
 
-use crate::image_ops::op::{OpError, ensure, require_f32_master};
+use crate::error::InvalidConfigField;
+use crate::image_ops::op::{OpError, require_f32_master};
 use crate::image_ops::remap_intensity;
 use imaginarium::Image;
 
@@ -79,25 +80,25 @@ impl LocalContrast {
         Ok(())
     }
 
-    fn validate(&self) -> Result<(), OpError> {
-        ensure(self.tiles >= 1, || {
-            format!("local contrast tiles must be ≥ 1, got {}", self.tiles)
-        })?;
-        ensure(
-            self.clip_limit >= 1.0 && self.clip_limit.is_finite(),
-            || {
-                format!(
-                    "local contrast clip_limit must be ≥ 1, got {}",
-                    self.clip_limit
-                )
-            },
+    fn validate(&self) -> Result<(), InvalidConfigField> {
+        InvalidConfigField::check(
+            self.tiles >= 1,
+            "local contrast tiles",
+            "at least 1",
+            self.tiles as f64,
         )?;
-        ensure((0.0..=1.0).contains(&self.strength), || {
-            format!(
-                "local contrast strength must be in [0, 1], got {}",
-                self.strength
-            )
-        })
+        InvalidConfigField::finite(
+            "local contrast clip_limit",
+            "finite and at least 1",
+            self.clip_limit,
+            |value| value >= 1.0,
+        )?;
+        InvalidConfigField::finite(
+            "local contrast strength",
+            "finite and in [0, 1]",
+            self.strength,
+            |value| (0.0..=1.0).contains(&value),
+        )
     }
 }
 

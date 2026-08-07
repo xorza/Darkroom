@@ -397,11 +397,9 @@ mod tests {
 
     #[test]
     fn test_validate_invalid_config_returns_exact_errors() {
-        let cases = [
-            (
-                StackConfig::sigma_clipped(-1.0),
-                StackConfigError::InvalidSigmaLow { value: -1.0 },
-            ),
+        // Each case: the config, and the field its rejection must name with the value it carries.
+        let range_checks = [
+            (StackConfig::sigma_clipped(-1.0), "sigma_low", -1.0),
             (
                 StackConfig {
                     method: CombineMethod::Mean(Rejection::sigma_clip_asymmetric(
@@ -410,16 +408,16 @@ mod tests {
                     )),
                     ..Default::default()
                 },
-                StackConfigError::InvalidSigmaHigh {
-                    value: f32::INFINITY,
-                },
+                "sigma_high",
+                f64::INFINITY,
             ),
             (
                 StackConfig {
                     method: CombineMethod::Mean(Rejection::SigmaClip(SigmaClipConfig::new(2.0, 0))),
                     ..Default::default()
                 },
-                StackConfigError::ZeroMaxIterations,
+                "max_iterations",
+                0.0,
             ),
             (
                 StackConfig {
@@ -428,7 +426,8 @@ mod tests {
                     ))),
                     ..Default::default()
                 },
-                StackConfigError::InvalidSigmaLow { value: 0.0 },
+                "sigma_low",
+                0.0,
             ),
             (
                 StackConfig {
@@ -437,12 +436,10 @@ mod tests {
                     ))),
                     ..Default::default()
                 },
-                StackConfigError::InvalidSigmaHigh { value: 0.0 },
+                "sigma_high",
+                0.0,
             ),
-            (
-                StackConfig::percentile(60.0),
-                StackConfigError::InvalidLowPercentile { value: 60.0 },
-            ),
+            (StackConfig::percentile(60.0), "low_percentile", 60.0),
             (
                 StackConfig {
                     method: CombineMethod::Mean(Rejection::Percentile(PercentileClipConfig::new(
@@ -450,7 +447,8 @@ mod tests {
                     ))),
                     ..Default::default()
                 },
-                StackConfigError::InvalidHighPercentile { value: 60.0 },
+                "high_percentile",
+                60.0,
             ),
             (
                 StackConfig {
@@ -459,15 +457,27 @@ mod tests {
                     ))),
                     ..Default::default()
                 },
-                StackConfigError::InvalidTotalPercentile { total: 100.0 },
+                "low_percentile + high_percentile",
+                100.0,
             ),
             (
                 StackConfig {
                     method: CombineMethod::Mean(Rejection::Gesd(GesdConfig::new(1.0, None))),
                     ..Default::default()
                 },
-                StackConfigError::InvalidGesdAlpha { value: 1.0 },
+                "GESD alpha",
+                1.0,
             ),
+        ];
+        for (config, field, value) in range_checks {
+            let StackConfigError::Field(invalid) = config.validate().unwrap_err() else {
+                panic!("{field} should be reported as an out-of-range field")
+            };
+            assert_eq!((invalid.field, invalid.value), (field, value));
+        }
+
+        // The constraints that aren't a range check on one field keep their own variant.
+        let structural = [
             (
                 StackConfig::weighted(vec![1.0, -0.5]),
                 StackConfigError::InvalidManualWeight {
@@ -490,8 +500,7 @@ mod tests {
                 StackConfigError::RejectingSmallNFallback,
             ),
         ];
-
-        for (config, expected) in cases {
+        for (config, expected) in structural {
             assert_eq!(config.validate(), Err(expected));
         }
     }

@@ -21,7 +21,6 @@ use crate::stacking::registration::resample::warp;
 use crate::stacking::registration::transform::{Transform, TransformType, WarpTransform};
 use crate::stacking::star_detection::config::Config as StarDetectionConfig;
 use crate::stacking::star_detection::detector::StarDetector;
-use crate::stacking::star_detection::error::StarDetectionConfigError;
 use crate::testing::synthetic::fixtures::star_field;
 use crate::testing::{ScratchDirectory, make_cfa};
 
@@ -249,7 +248,8 @@ fn an_invalid_stack_config_is_caught_before_the_frames_are_worked() {
     assert!(
         matches!(
             error,
-            Error::Stack(StackError::Config(StackConfigError::InvalidSigmaLow { .. }))
+            Error::Stack(StackError::Config(StackConfigError::Field(invalid)))
+                if invalid.field == "sigma_low"
         ),
         "expected the stack config to be blamed rather than the frames, got {error:?}"
     );
@@ -323,10 +323,10 @@ fn public_input_errors() {
     };
     let image = LinearImage::from_pixels(ImageDimensions::new((1, 1), 1), vec![0.0]);
     let error = align_and_stack(vec![image], &config, CancelToken::never()).unwrap_err();
-    assert!(matches!(
-        error,
-        Error::DetectionConfig(StarDetectionConfigError::InvalidSigmaThreshold { value: 0.0 })
-    ));
+    let Error::DetectionConfig(invalid) = error else {
+        panic!("expected a detection config error, got {error:?}")
+    };
+    assert_eq!((invalid.field, invalid.value), ("sigma_threshold", 0.0));
 }
 
 fn bits(buffer: &Buffer2<f32>) -> Vec<u32> {

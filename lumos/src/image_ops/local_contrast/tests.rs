@@ -132,7 +132,7 @@ fn rejects_clip_limit_below_one() {
     .apply(&mut img)
     .unwrap_err();
     assert!(
-        matches!(&err, OpError::InvalidConfig(m) if m.contains("clip_limit must be ≥ 1")),
+        matches!(&err, OpError::InvalidConfig(m) if m.field == "local contrast clip_limit"),
         "expected an InvalidConfig clip_limit error, got {err:?}"
     );
 }

@@ -19,7 +19,7 @@ pub(super) mod matching;
 mod tests;
 pub(super) mod voting;
 
-use crate::stacking::registration::result::RegistrationError;
+use crate::error::InvalidConfigField;
 
 /// Configuration for triangle matching.
 #[derive(Debug, Clone)]
@@ -31,20 +31,19 @@ pub struct TriangleConfig {
 
 impl TriangleConfig {
     /// Validate the matching invariants this config owns.
-    pub fn validate(&self) -> Result<(), RegistrationError> {
-        if !(self.ratio_tolerance > 0.0 && self.ratio_tolerance < 1.0) {
-            return Err(RegistrationError::InvalidConfig(format!(
-                "ratio_tolerance must be in (0, 1), got {}",
-                self.ratio_tolerance
-            )));
-        }
-        if self.min_votes == 0 {
-            return Err(RegistrationError::InvalidConfig(format!(
-                "min_votes must be at least 1, got {}",
-                self.min_votes
-            )));
-        }
-        Ok(())
+    pub fn validate(&self) -> Result<(), InvalidConfigField> {
+        InvalidConfigField::finite(
+            "ratio_tolerance",
+            "finite and in (0, 1)",
+            self.ratio_tolerance,
+            |value| value > 0.0 && value < 1.0,
+        )?;
+        InvalidConfigField::check(
+            self.min_votes >= 1,
+            "min_votes",
+            "at least 1",
+            self.min_votes as f64,
+        )
     }
 }
 
