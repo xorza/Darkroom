@@ -8,7 +8,7 @@
 //! - Generalized Extreme Studentized Deviate (GESD)
 
 use crate::math::statistics::{mad_f32_fast, mad_to_sigma, median_f32_fast};
-use crate::math::sum::{mean_f32, weighted_mean_f32};
+use crate::math::sum::weighted_mean_f32;
 use crate::stacking::combine::cache::{CombinedSample, ScratchBuffers};
 use statrs::distribution::{ContinuousCDF, StudentsT};
 
@@ -874,13 +874,6 @@ pub enum Rejection {
     Gesd(GesdConfig),
 }
 
-/// Mean reduction plus the number of source frames retained by rejection.
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct MeanSample {
-    pub(crate) value: f32,
-    pub(crate) survivor_count: usize,
-}
-
 impl Default for Rejection {
     fn default() -> Self {
         Self::SigmaClip(SigmaClipConfig::new(2.5, 3))
@@ -933,66 +926,30 @@ impl Rejection {
         }
     }
 
-    /// Reject outliers then compute (weighted) mean.
+    /// Reject outliers, then reduce the survivors to their weighted mean.
     ///
-    /// Uses index tracking to maintain correct value-weight alignment after rejection
-    /// functions partition/reorder the values array.
+    /// The one reduction entry point: `values` and `weights` are the samples actually reaching
+    /// this pixel, and the returned sample always carries its survivor count. `measure_quality`
+    /// asks for the survivors' effective weight as well — skipped when no output plane will read
+    /// it, since it is a second pass over the frames at every pixel.
+    ///
+    /// Rejection reorders `values`, so weights are re-paired through `scratch.indices` rather
+    /// than by position.
     pub(crate) fn combine_mean(
-        &self,
-        values: &mut [f32],
-        weights: Option<&[f32]>,
-        scratch: &mut ScratchBuffers,
-    ) -> f32 {
-        self.combine_mean_with_survivors(values, weights, scratch)
-            .value
-    }
-
-    pub(crate) fn combine_mean_with_survivors(
-        &self,
-        values: &mut [f32],
-        weights: Option<&[f32]>,
-        scratch: &mut ScratchBuffers,
-    ) -> MeanSample {
-        // None doesn't reorder values, so weights align directly
-        if let Rejection::None = self {
-            let value = match weights {
-                Some(w) => weighted_mean_f32(values, w),
-                None => mean_f32(values),
-            };
-            return MeanSample {
-                value,
-                survivor_count: values.len(),
-            };
-        }
-
-        // Rejection variants that reorder values: use index mapping for weights
-        let remaining = self.reject(values, scratch);
-
-        let value = match weights {
-            Some(w) if remaining > 0 => weighted_mean_indexed(
-                &values[..remaining],
-                w,
-                &scratch.indices[..remaining],
-                &mut scratch.floats_a,
-            ),
-            _ => mean_f32(&values[..remaining]),
-        };
-        MeanSample {
-            value,
-            survivor_count: remaining,
-        }
-    }
-
-    /// Reject outliers, compute the weighted mean, and describe the weights of its survivors.
-    pub(crate) fn combine_mean_with_quality(
         &self,
         values: &mut [f32],
         weights: &[f32],
         scratch: &mut ScratchBuffers,
+        measure_quality: bool,
     ) -> CombinedSample {
         debug_assert_eq!(values.len(), weights.len());
         if let Rejection::None = self {
-            return CombinedSample::from_all(weighted_mean_f32(values, weights), weights);
+            let value = weighted_mean_f32(values, weights);
+            return if measure_quality {
+                CombinedSample::from_all(value, weights)
+            } else {
+                CombinedSample::value_only(value, values.len())
+            };
         }
 
         let remaining = self.reject(values, scratch);
@@ -1007,7 +964,11 @@ impl Rejection {
         } else {
             0.0
         };
-        CombinedSample::from_survivors(value, weights, survivors.iter().copied())
+        if measure_quality {
+            CombinedSample::from_survivors(value, weights, remaining, survivors.iter().copied())
+        } else {
+            CombinedSample::value_only(value, remaining)
+        }
     }
 }
 
@@ -1517,14 +1478,18 @@ mod tests {
     #[test]
     fn test_combine_mean_none() {
         let mut values = vec![1.0, 2.0, 3.0, 4.0, 5.0];
-        let mean = Rejection::None.combine_mean(&mut values, None, &mut scratch());
+        let mean = Rejection::None
+            .combine_mean(&mut values, &[1.0; 5], &mut scratch(), true)
+            .value;
         assert!((mean - 3.0).abs() < f32::EPSILON);
     }
 
     #[test]
     fn test_combine_mean_sigma_clip() {
         let mut values = vec![1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 100.0];
-        let mean = Rejection::sigma_clip(2.0).combine_mean(&mut values, None, &mut scratch());
+        let mean = Rejection::sigma_clip(2.0)
+            .combine_mean(&mut values, &[1.0; 8], &mut scratch(), true)
+            .value;
         assert!(mean < 10.0, "Outlier should be clipped, got {}", mean);
     }
 
@@ -1533,8 +1498,9 @@ mod tests {
         let mut values = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0];
         let weights = vec![1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 10.0, 1.0, 1.0];
 
-        let mean =
-            Rejection::percentile(20.0).combine_mean(&mut values, Some(&weights), &mut scratch());
+        let mean = Rejection::percentile(20.0)
+            .combine_mean(&mut values, &weights, &mut scratch(), true)
+            .value;
 
         assert!(
             mean > 5.5 + 0.5,
@@ -1548,16 +1514,15 @@ mod tests {
         let mut values = vec![1.0, 2.0, 2.0, 2.0, 2.0, 100.0];
         let weights = vec![10.0, 1.0, 1.0, 1.0, 1.0, 1.0];
 
-        let mean =
-            Rejection::winsorized(2.0).combine_mean(&mut values, Some(&weights), &mut scratch());
+        let mean = Rejection::winsorized(2.0)
+            .combine_mean(&mut values, &weights, &mut scratch(), true)
+            .value;
 
         let mut values_unwt = vec![1.0, 2.0, 2.0, 2.0, 2.0, 100.0];
         let uniform_weights = vec![1.0; 6];
-        let unweighted_mean = Rejection::winsorized(2.0).combine_mean(
-            &mut values_unwt,
-            Some(&uniform_weights),
-            &mut scratch(),
-        );
+        let unweighted_mean = Rejection::winsorized(2.0)
+            .combine_mean(&mut values_unwt, &uniform_weights, &mut scratch(), true)
+            .value;
 
         assert!(
             mean < unweighted_mean,
@@ -1572,11 +1537,9 @@ mod tests {
         let mut values = vec![1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 100.0];
         let weights = vec![10.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0];
 
-        let mean = Rejection::sigma_clip_asymmetric(4.0, 2.0).combine_mean(
-            &mut values,
-            Some(&weights),
-            &mut scratch(),
-        );
+        let mean = Rejection::sigma_clip_asymmetric(4.0, 2.0)
+            .combine_mean(&mut values, &weights, &mut scratch(), true)
+            .value;
 
         assert!(mean < 2.5, "Should be pulled toward 1.0, got {}", mean);
     }
@@ -1586,8 +1549,9 @@ mod tests {
         let mut values = vec![2.0, 100.0, 3.0, 2.5, 2.2, 1.8, 2.8, 2.3];
         let weights = vec![10.0, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1];
 
-        let mean =
-            Rejection::sigma_clip(2.0).combine_mean(&mut values, Some(&weights), &mut scratch());
+        let mean = Rejection::sigma_clip(2.0)
+            .combine_mean(&mut values, &weights, &mut scratch(), true)
+            .value;
 
         assert!(
             (mean - 2.0).abs() < 0.25,
@@ -1603,8 +1567,9 @@ mod tests {
         let mut values = vec![1.0, 1.1, 1.2, 1.3, 100.0, 1.4];
         let weights = vec![10.0, 0.1, 0.1, 0.1, 0.1, 0.1];
 
-        let mean =
-            Rejection::linear_fit(3.0).combine_mean(&mut values, Some(&weights), &mut scratch());
+        let mean = Rejection::linear_fit(3.0)
+            .combine_mean(&mut values, &weights, &mut scratch(), true)
+            .value;
 
         assert!(
             mean < 1.1,
@@ -1618,11 +1583,9 @@ mod tests {
         let mut values = vec![1.0, 1.1, 0.9, 1.0, 1.2, 0.8, 1.0, 100.0];
         let weights = vec![10.0, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1];
 
-        let mean = Rejection::Gesd(GesdConfig::new(0.05, Some(3))).combine_mean(
-            &mut values,
-            Some(&weights),
-            &mut scratch(),
-        );
+        let mean = Rejection::Gesd(GesdConfig::new(0.05, Some(3)))
+            .combine_mean(&mut values, &weights, &mut scratch(), true)
+            .value;
 
         assert!(
             (mean - 1.0).abs() < 0.05,
@@ -1873,7 +1836,10 @@ mod tests {
     #[test]
     fn test_combine_mean_percentile_unweighted() {
         let mut values = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0];
-        let mean = Rejection::percentile(20.0).combine_mean(&mut values, None, &mut scratch());
+        let ones = vec![1.0f32; values.len()];
+        let mean = Rejection::percentile(20.0)
+            .combine_mean(&mut values, &ones, &mut scratch(), true)
+            .value;
         // Clips 2 low (1,2) and 2 high (9,10), mean of [3,4,5,6,7,8] = 5.5
         assert!(
             (mean - 5.5).abs() < 0.01,
@@ -1886,7 +1852,9 @@ mod tests {
     fn test_combine_mean_none_with_weights() {
         let mut values = vec![1.0, 2.0, 3.0, 4.0, 5.0];
         let weights = vec![10.0, 1.0, 1.0, 1.0, 1.0];
-        let mean = Rejection::None.combine_mean(&mut values, Some(&weights), &mut scratch());
+        let mean = Rejection::None
+            .combine_mean(&mut values, &weights, &mut scratch(), true)
+            .value;
         // Weighted mean: (10+2+3+4+5) / (10+1+1+1+1) = 24/14 ≈ 1.714
         assert!(
             (mean - 24.0 / 14.0).abs() < 1e-5,
@@ -1897,25 +1865,35 @@ mod tests {
     }
 
     #[test]
-    fn test_weighted_rejection_uniform_weights_unchanged() {
-        let values = vec![1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 100.0];
-        let uniform_weights = vec![1.0; 8];
+    fn unit_weights_reduce_to_the_plain_mean_of_the_survivors() {
+        // Calibration masters used to reach a separate reducer that took `mean_f32` over the
+        // survivors; they now go through this weighted reduction with unit weights. The two must
+        // agree bit-for-bit or merging the engines silently changed every master ever built.
+        let values = vec![1.0f32, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 100.0];
+        let ones = vec![1.0f32; 8];
 
-        let weighted = Rejection::sigma_clip(2.0).combine_mean(
-            &mut values.clone(),
-            Some(&uniform_weights),
+        let mut weighted_values = values.clone();
+        let combined = Rejection::sigma_clip(2.0).combine_mean(
+            &mut weighted_values,
+            &ones,
             &mut scratch(),
+            true,
         );
 
-        let mut values2 = values;
-        let unweighted =
-            Rejection::sigma_clip(2.0).combine_mean(&mut values2, None, &mut scratch());
+        // The retired path, reproduced: reject, then plainly average what survived.
+        let mut plain_values = values;
+        let mut plain_scratch = scratch();
+        let remaining = Rejection::sigma_clip(2.0).reject(&mut plain_values, &mut plain_scratch);
+        let plain = mean_f32(&plain_values[..remaining]);
 
-        assert!(
-            (weighted - unweighted).abs() < 1e-5,
-            "Uniform weighted should match non-weighted: {} vs {}",
-            weighted,
-            unweighted
+        assert!(remaining < 8, "the 100.0 outlier must be rejected");
+        assert_eq!(combined.survivor_count, remaining);
+        assert_eq!(
+            combined.value.to_bits(),
+            plain.to_bits(),
+            "unit-weighted reduction {} diverged from the plain survivor mean {}",
+            combined.value,
+            plain
         );
     }
 

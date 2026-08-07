@@ -58,22 +58,29 @@ impl ScratchBuffers {
     }
 }
 
-/// One reduced channel sample and the effective quality of the samples that survived rejection.
+/// One reduced channel sample: the combined value, how many samples reached it, and — when the
+/// caller asked for the quality planes — the effective weight of the survivors.
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct CombinedSample {
-    value: f32,
+    pub(crate) value: f32,
+    /// Samples that survived rejection. Always tracked: it is a count the reducer already knows,
+    /// and quantization-noise propagation keys on it.
+    pub(crate) survivor_count: usize,
     weight: f32,
     linear_variance: f32,
 }
 
 impl CombinedSample {
+    /// A reduction whose survivors are all the inputs.
     pub(crate) fn from_all(value: f32, weights: &[f32]) -> Self {
-        Self::from_survivors(value, weights, 0..weights.len())
+        Self::from_survivors(value, weights, weights.len(), 0..weights.len())
     }
 
+    /// A reduction over `survivor_indices` into `weights`, measuring their effective weight.
     pub(crate) fn from_survivors(
         value: f32,
         weights: &[f32],
+        survivor_count: usize,
         survivor_indices: impl IntoIterator<Item = usize>,
     ) -> Self {
         let mut weight = 0.0f32;
@@ -90,8 +97,20 @@ impl CombinedSample {
         };
         Self {
             value,
+            survivor_count,
             weight,
             linear_variance,
+        }
+    }
+
+    /// A reduction for a combine that asked for no quality planes: the walk over survivor weights
+    /// would produce two numbers nothing reads, and it costs one pass over the frames per pixel.
+    pub(crate) fn value_only(value: f32, survivor_count: usize) -> Self {
+        Self {
+            value,
+            survivor_count,
+            weight: 0.0,
+            linear_variance: 0.0,
         }
     }
 }
@@ -383,101 +402,6 @@ impl CacheCore {
 }
 
 impl FrameCache {
-    /// Plain per-pixel combine: every frame contributes at every pixel, and no weight or variance
-    /// plane is produced. Optional `weights` provide per-frame weights; `frame_norms` apply
-    /// per-frame affine normalization before combining. Per-channel, parallelized per-row with
-    /// rayon.
-    ///
-    /// Only valid for a cache whose frames carry no warp quality — this reducer has nowhere to
-    /// apply coverage or confidence, so it would silently ignore them. Registered light stacks
-    /// use [`Self::process_chunked_weighted`].
-    pub(crate) fn process_chunked<Combine>(
-        &self,
-        weights: Option<&[f32]>,
-        frame_norms: Option<&[FrameNorm]>,
-        combine: Combine,
-    ) -> LinearPixels
-    where
-        Combine: Fn(&mut [f32], Option<&[f32]>, &mut ScratchBuffers) -> f32 + Sync,
-    {
-        // Release assert, not debug: silently dropping coverage would corrupt the combined pixel,
-        // and this is a once-per-stack check on a cold path.
-        assert!(
-            self.frames
-                .iter()
-                .all(|frame| frame.coverage.is_none() && frame.confidence.is_none()),
-            "the plain combine cannot honour warp quality planes; use process_chunked_weighted",
-        );
-        if let Some(w) = weights {
-            assert_eq!(
-                w.len(),
-                self.frames.len(),
-                "Weight count must match frame count"
-            );
-        }
-        // An in-memory stack is one chunk, so the per-chunk cancel check in
-        // `process_chunks` can't interrupt the combine — poll per row here too.
-        let cancel = self.core.cancel.clone();
-        let chunk_available_memory = self.core.chunk_available_memory();
-        self.core.process_chunks(
-            &self.frames,
-            |frame| &frame.channels,
-            ChunkMemoryLayout {
-                input_planes: self.frames.len(),
-                resident_planes: self.core.dimensions.channels(),
-            },
-            chunk_available_memory,
-            |output_slice, ctx| {
-                let ChunkContext {
-                    frames,
-                    width,
-                    channel,
-                    pixel_offset: _,
-                } = ctx;
-                let frame_count = frames.len();
-                output_slice
-                    .par_chunks_mut(width)
-                    .enumerate()
-                    .for_each_init(
-                        || (vec![0.0f32; frame_count], ScratchBuffers::new(frame_count)),
-                        |(values, scratch), (row_in_chunk, row_output)| {
-                            // Cancelled: skip the row's work (output stays zero; the
-                            // caller discards the partial result and reports Cancelled).
-                            if cancel.is_cancelled() {
-                                return;
-                            }
-                            let row_offset = row_in_chunk * width;
-                            for (pixel_in_row, out) in row_output.iter_mut().enumerate() {
-                                let pixel_idx = row_offset + pixel_in_row;
-                                if let Some(frame_norm) = frame_norms {
-                                    for (frame_idx, chunk) in frames.iter().enumerate() {
-                                        let cn = frame_norm[frame_idx].channels[channel];
-                                        values[frame_idx] = chunk[pixel_idx] * cn.gain + cn.offset;
-                                    }
-                                } else {
-                                    for (frame_idx, chunk) in frames.iter().enumerate() {
-                                        values[frame_idx] = chunk[pixel_idx];
-                                    }
-                                }
-                                // The combine reducers (median/MAD, precise sums) assume finite
-                                // inputs — NaN/Inf would silently corrupt the output (NaN-unsafe
-                                // ordering, multiply-through). No production path emits them today
-                                // (FITS load rejects them, flat division is floored, warp border-fills 0),
-                                // so this guards against a future upstream regression.
-                                debug_assert!(
-                                    values.iter().all(|v| v.is_finite()),
-                                    "non-finite pixel value entered the combine",
-                                );
-                                *out = combine(values, weights, scratch);
-                            }
-                        },
-                    );
-            },
-        )
-    }
-}
-
-impl FrameCache {
     /// Build a cache from frames already placed in the shared frame store.
     pub(crate) fn from_stored_frames(
         frames: Vec<StoredFrame>,
@@ -606,6 +530,7 @@ impl FrameCache {
         &self,
         combined: LightCombineOutput,
         planes: QualityPlanes,
+        quantization_sigma: Option<f32>,
     ) -> StackProduct {
         let LightCombineOutput {
             pixels,
@@ -634,6 +559,7 @@ impl FrameCache {
                     .then(|| Buffer2::new_filled(width, height, 1.0)),
                 weight,
                 linear_variance,
+                quantization_sigma,
             };
         }
 
@@ -699,13 +625,18 @@ impl FrameCache {
             coverage: Some(coverage),
             weight,
             linear_variance,
+            quantization_sigma,
         }
     }
 
-    /// Warp-quality-aware combine: coverage gates inclusion, while confidence scales statistical
-    /// weight independently. Effective weight and linear variance use each channel reducer's
-    /// actual survivor set. A pixel no frame supports gets `0`.
-    pub(crate) fn process_chunked_weighted<Combine>(
+    /// The combine: for each output pixel, gather the frames that cover it, hand them to
+    /// `combine`, and write the reduced value plus whichever [`QualityPlanes`] were requested.
+    ///
+    /// Coverage gates a frame's inclusion while confidence scales its statistical weight
+    /// independently; a frame carrying neither plane contributes everywhere at unit confidence,
+    /// which is what lets calibration masters and registered light stacks share this loop. A
+    /// pixel no frame supports gets `0`.
+    pub(crate) fn process_chunked<Combine>(
         &self,
         weights: Option<&[f32]>,
         frame_norms: Option<&[FrameNorm]>,

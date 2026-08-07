@@ -26,6 +26,7 @@ use crate::stacking::combine::config::StackConfig;
 use crate::stacking::combine::error::Error;
 use crate::stacking::combine::stack::run_stacking;
 use crate::stacking::frame_store::fits_in_memory;
+use crate::stacking::product::QualityPlanes;
 use crate::stacking::progress::ProgressCallback;
 use defect_map::DefectMap;
 
@@ -185,6 +186,12 @@ pub fn stack_cfa_master(
         return Ok(None);
     }
 
+    // A master is mosaic data for the calibration stage to consume, not a science product: the
+    // ancillary planes would be allocated and written per pixel for nothing.
+    let config = StackConfig {
+        quality: QualityPlanes::IMAGE_ONLY,
+        ..config
+    };
     // `cancel` rides on the cache from construction, so the RAW-decode load loop
     // polls it too (not just the combine).
     let cache = FrameCache::from_cfa_paths(
@@ -195,12 +202,24 @@ pub fn stack_cfa_master(
         cancel,
     )?;
 
-    let result = run_stacking(&cache, &config);
+    let product = run_stacking(&cache, &config);
     if cache.core.cancel.is_cancelled() {
         return Err(Error::Cancelled);
     }
 
-    Ok(Some(result))
+    // A CFA frame is a single mosaic plane, so a stack of them is too — `CfaImage` has nowhere
+    // to put a second channel and the loaders never produce one.
+    assert_eq!(
+        product.image.channels(),
+        1,
+        "a CFA master must be single-channel; got {} channels",
+        product.image.channels()
+    );
+    Ok(Some(CfaImage {
+        data: product.image.pixels.into_l(),
+        metadata: product.image.metadata,
+        quantization_sigma: product.quantization_sigma,
+    }))
 }
 
 impl CalibrationMasters {

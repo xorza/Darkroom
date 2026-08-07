@@ -331,6 +331,7 @@ fn stacking_outputs_and_relationships_use_named_public_types() {
         coverage: Some(Buffer2::new(2, 1, vec![1.0, 0.5])),
         weight: Some(QualityMap::Shared(Buffer2::new(2, 1, vec![2.0, 1.0]))),
         linear_variance: Some(QualityMap::Shared(Buffer2::new(2, 1, vec![0.5, 1.0]))),
+        quantization_sigma: Some(0.001),
     };
     let result = AlignStackResult {
         product,

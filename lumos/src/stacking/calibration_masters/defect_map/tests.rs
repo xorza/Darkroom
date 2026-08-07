@@ -224,11 +224,17 @@ fn cfa_stack_propagates_raw_quantization_into_hot_detection() {
         .collect();
     let cache = cache_from_images(images, Normalization::None);
 
-    let master = run_stacking(&cache, &StackConfig::default());
+    let product = run_stacking(&cache, &StackConfig::default());
     assert!(
-        (master.quantization_sigma.unwrap() - master_sigma).abs() < f32::EPSILON,
+        (product.quantization_sigma.unwrap() - master_sigma).abs() < f32::EPSILON,
         "eight equal surviving frames must propagate σ/√8"
     );
+    // Defect detection consumes the mosaic master, the same projection `stack_cfa_master` makes.
+    let master = CfaImage {
+        data: product.image.pixels.into_l(),
+        metadata: product.image.metadata,
+        quantization_sigma: product.quantization_sigma,
+    };
     let detected = DefectMap::default()
         .detect_hot(&master, 5.0, &CancelToken::never())
         .unwrap()
