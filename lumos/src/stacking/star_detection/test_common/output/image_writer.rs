@@ -5,6 +5,7 @@ use imaginarium::{ColorFormat, Image, ImageDesc};
 use std::path::Path;
 
 use crate::{
+    math::size2us::Size2us,
     stacking::star_detection::{
         star::Star,
         test_common::output::{TEST_OUTPUT_IMAGE_EXT, comparison::create_comparison_image},
@@ -170,15 +171,13 @@ pub(crate) fn save_rgb(image: &image::RgbImage, path: &Path) {
 /// Save comparison image showing ground truth vs detected stars.
 pub(crate) fn save_comparison(
     pixels: &[f32],
-    width: usize,
-    height: usize,
+    size: Size2us,
     ground_truth: &[ObservedSource],
     detected: &[Star],
     match_radius: f32,
     path: &Path,
 ) {
-    let image =
-        create_comparison_image(pixels, width, height, ground_truth, detected, match_radius);
+    let image = create_comparison_image(pixels, size, ground_truth, detected, match_radius);
     save_image(image, path);
 }
 

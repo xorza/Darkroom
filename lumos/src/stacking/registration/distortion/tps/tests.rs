@@ -857,16 +857,15 @@ fn test_distortion_map_translation() {
     let target: Vec<DVec2> = source.iter().map(|&p| p + shift).collect();
 
     let tps = fit_default(&source, &target);
-    let map = DistortionMap::from_tps(&tps, 100, 100, 20.0);
+    let map = DistortionMap::from_tps(&tps, Size2us::new(100, 100), 20.0);
 
     // Grid dimensions: ceil(100/20) + 1 = 6
-    assert_eq!(map.width, 6);
-    assert_eq!(map.height, 6);
+    assert_eq!(map.grid, Size2us::new(6, 6));
     assert!((map.spacing - 20.0).abs() < 1e-12);
 
     // For pure translation, every grid point should have distortion ~(5, 3)
-    for gy in 0..map.height {
-        for gx in 0..map.width {
+    for gy in 0..map.grid.height {
+        for gx in 0..map.grid.width {
             let d = map.get(gx, gy).unwrap();
             assert_dvec2_near(d, shift, 0.1, &format!("grid ({gx},{gy})"));
         }
@@ -896,15 +895,15 @@ fn test_distortion_map_get_out_of_bounds() {
     let source = square_source_4();
     let target: Vec<DVec2> = source.iter().map(|&p| p + DVec2::new(1.0, 1.0)).collect();
     let tps = fit_default(&source, &target);
-    let map = DistortionMap::from_tps(&tps, 100, 100, 50.0);
+    let map = DistortionMap::from_tps(&tps, Size2us::new(100, 100), 50.0);
 
     // Valid: within grid
     assert!(map.get(0, 0).is_some());
 
     // Invalid: beyond grid dimensions
-    assert!(map.get(map.width, 0).is_none());
-    assert!(map.get(0, map.height).is_none());
-    assert!(map.get(map.width, map.height).is_none());
+    assert!(map.get(map.grid.width, 0).is_none());
+    assert!(map.get(0, map.grid.height).is_none());
+    assert!(map.get(map.grid.width, map.grid.height).is_none());
     assert!(map.get(1000, 1000).is_none());
 }
 
@@ -916,7 +915,7 @@ fn test_distortion_map_interpolation() {
     let target: Vec<DVec2> = source.iter().map(|&p| p + shift).collect();
 
     let tps = fit_default(&source, &target);
-    let map = DistortionMap::from_tps(&tps, 100, 100, 25.0);
+    let map = DistortionMap::from_tps(&tps, Size2us::new(100, 100), 25.0);
 
     // At grid point (0, 0): should be ~(10, 5)
     let d0 = map.interpolate(DVec2::new(0.0, 0.0));
@@ -948,7 +947,7 @@ fn test_distortion_map_non_uniform_gradient() {
     }
 
     let tps = fit_default(&source, &target);
-    let map = DistortionMap::from_tps(&tps, 200, 200, 25.0);
+    let map = DistortionMap::from_tps(&tps, Size2us::new(200, 200), 25.0);
 
     // At (25, 100): dx = 25*0.05 = 1.25, dy = 100*0.02 = 2.0
     let d_left = map.interpolate(DVec2::new(25.0, 100.0));

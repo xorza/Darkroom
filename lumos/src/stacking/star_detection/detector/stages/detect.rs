@@ -141,7 +141,6 @@ fn extract_and_filter_candidates(
     config: &DetectionConfig,
     size: Size2us,
 ) -> ExtractionResult {
-    let (width, height) = (size.width, size.height);
     let mut result = extract_candidates(pixels, label_map, config);
 
     // `DetectionConfig::validate()` can't bound `edge_margin` against the image (it doesn't know the
@@ -149,12 +148,14 @@ fn extract_and_filter_candidates(
     // below needs `bbox.min >= edge_margin && bbox.max <= dim - edge_margin`, which no bbox can
     // satisfy once `2 * edge_margin >= dim` — every region is silently filtered out. Surface it
     // instead of leaving an empty result indistinguishable from "no stars in the image".
-    if 2 * config.edge_margin >= width.min(height) {
+    if 2 * config.edge_margin >= size.width.min(size.height) {
         tracing::warn!(
-            "edge_margin ({}) leaves no valid interior in a {width}x{height} image \
+            "edge_margin ({}) leaves no valid interior in a {}x{} image \
              (needs 2 * edge_margin < the smallest dimension); every detected region \
              will be filtered out",
             config.edge_margin,
+            size.width,
+            size.height,
         );
     }
 
@@ -162,8 +163,8 @@ fn extract_and_filter_candidates(
         c.area >= config.min_area
             && c.bbox.min.x >= config.edge_margin
             && c.bbox.min.y >= config.edge_margin
-            && c.bbox.max.x <= width.saturating_sub(config.edge_margin)
-            && c.bbox.max.y <= height.saturating_sub(config.edge_margin)
+            && c.bbox.max.x <= size.width.saturating_sub(config.edge_margin)
+            && c.bbox.max.y <= size.height.saturating_sub(config.edge_margin)
     });
 
     result
@@ -375,19 +376,18 @@ mod tests {
     /// Render Gaussian `stars` (cx, cy, amplitude, sigma) into a single connected
     /// component: every lit pixel gets label 1.
     fn one_component(
-        width: usize,
-        height: usize,
+        size: Size2us,
         stars: &[(usize, usize, f32, f32)],
     ) -> (Buffer2<f32>, LabelMap) {
-        let mut pixels = Buffer2::new_filled(width, height, 0.0f32);
-        let mut labels = Buffer2::new_filled(width, height, 0u32);
+        let mut pixels = Buffer2::new_filled(size.width, size.height, 0.0f32);
+        let mut labels = Buffer2::new_filled(size.width, size.height, 0u32);
         for &(cx, cy, amplitude, sigma) in stars {
             let radius = (sigma * 4.0).ceil() as i32;
             for dy in -radius..=radius {
                 for dx in -radius..=radius {
                     let x = (cx as i32 + dx) as usize;
                     let y = (cy as i32 + dy) as usize;
-                    if x < width && y < height {
+                    if size.contains(Vec2us::new(x, y)) {
                         let r2 = (dx * dx + dy * dy) as f32;
                         let v = amplitude * (-r2 / (2.0 * sigma * sigma)).exp();
                         if v > 0.001 {
@@ -418,8 +418,7 @@ mod tests {
         // `deblended_components` must be 1. The previous `regions - num_components`
         // formula reported 3 - 1 = 2 here, which this pins against.
         let (pixels, label_map) = one_component(
-            48,
-            24,
+            Size2us::new(48, 24),
             &[(12, 12, 1.0, 3.0), (24, 12, 1.0, 3.0), (36, 12, 1.0, 3.0)],
         );
 
@@ -439,7 +438,7 @@ mod tests {
     #[test]
     fn local_maxima_single_peak_reports_zero_deblended() {
         // A lone star: one region from one component — nothing was split.
-        let (pixels, label_map) = one_component(32, 32, &[(16, 16, 1.0, 3.0)]);
+        let (pixels, label_map) = one_component(Size2us::new(32, 32), &[(16, 16, 1.0, 3.0)]);
 
         let result = extract_candidates(&pixels, &label_map, &local_maxima_config());
 
@@ -517,7 +516,7 @@ mod tests {
         // oddly-sized frame shouldn't abort the whole run. Covers both the exact boundary
         // (2 * 16 == 32) and a margin past the dimension itself (saturating_sub floors at 0).
         for edge_margin in [16, 32] {
-            let (pixels, label_map) = one_component(32, 32, &[(16, 16, 1.0, 3.0)]);
+            let (pixels, label_map) = one_component(Size2us::new(32, 32), &[(16, 16, 1.0, 3.0)]);
             let config = DetectionConfig {
                 edge_margin,
                 ..local_maxima_config()

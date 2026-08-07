@@ -5,6 +5,7 @@
 use quickbench::quick_bench;
 use std::hint::black_box;
 
+use crate::math::size2us::Size2us;
 use crate::stacking::star_detection::centroid::internals::make_moffat_star;
 use crate::stacking::star_detection::centroid::moffat_fit::{MoffatFitConfig, fit_moffat_2d};
 use glam::Vec2;
@@ -12,7 +13,14 @@ use glam::Vec2;
 #[quick_bench(warmup_iters = 100, iters = 10000)]
 fn bench_moffat_fit_fixed_beta_small(b: quickbench::Bencher) {
     // 17x17 stamp
-    let pixels = make_moffat_star(17, 17, Vec2::new(8.3, 8.7), 2.5, 2.5, 1.0, 0.1);
+    let pixels = make_moffat_star(
+        Size2us::new(17, 17),
+        Vec2::new(8.3, 8.7),
+        2.5,
+        2.5,
+        1.0,
+        0.1,
+    );
     let config = MoffatFitConfig {
         fixed_beta: 2.5,
         ..Default::default()
@@ -33,7 +41,14 @@ fn bench_moffat_fit_fixed_beta_small(b: quickbench::Bencher) {
 #[quick_bench(warmup_iters = 100, iters = 10000)]
 fn bench_moffat_fit_fixed_beta_medium(b: quickbench::Bencher) {
     // 25x25 stamp
-    let pixels = make_moffat_star(25, 25, Vec2::new(12.3, 12.7), 2.5, 2.5, 1.0, 0.1);
+    let pixels = make_moffat_star(
+        Size2us::new(25, 25),
+        Vec2::new(12.3, 12.7),
+        2.5,
+        2.5,
+        1.0,
+        0.1,
+    );
     let config = MoffatFitConfig {
         fixed_beta: 2.5,
         ..Default::default()

@@ -730,6 +730,7 @@ fn border_interpolate(
 mod tests {
     use crate::io::raw::demosaic::bayer::CfaPattern;
     use crate::io::raw::demosaic::bayer::rcd::{EPS, MIN_SIGNED_DENOMINATOR_RATIO, estimate_green};
+    use crate::math::vec2us::Vec2us;
 
     fn canonical_green(neighbor_green: f32, center_lpf: f32, same_color_lpf: f32) -> f32 {
         neighbor_green * (center_lpf + center_lpf) / (EPS + center_lpf + same_color_lpf)
@@ -788,27 +789,27 @@ mod tests {
         Noise,
     }
 
-    fn neighborhood_value(neighborhood: Neighborhood, channel: usize, x: usize, y: usize) -> f32 {
+    fn neighborhood_value(neighborhood: Neighborhood, channel: usize, pos: Vec2us) -> f32 {
         match neighborhood {
             Neighborhood::Edge => {
-                if x < 4 {
+                if pos.x < 4 {
                     [0.7, 0.4, 0.2][channel]
                 } else {
                     [0.1, 0.3, 0.8][channel]
                 }
             }
             Neighborhood::Impulse => {
-                let impulse = if x == 4 && y == 2 { 0.9 } else { 0.0 };
+                let impulse = if pos.x == 4 && pos.y == 2 { 0.9 } else { 0.0 };
                 [0.05 + impulse, 0.08, 0.03][channel]
             }
             Neighborhood::ChromaticStar => {
-                let dx = x as f32 - 3.5;
-                let dy = y as f32 - 2.0;
+                let dx = pos.x as f32 - 3.5;
+                let dy = pos.y as f32 - 2.0;
                 let profile = (-0.5 * (dx * dx + dy * dy)).exp();
                 0.02 + [0.9, 0.5, 0.2][channel] * profile
             }
             Neighborhood::Noise => {
-                let sample = (x * 17 + y * 29 + channel * 11) % 31;
+                let sample = (pos.x * 17 + pos.y * 29 + channel * 11) % 31;
                 0.02 + sample as f32 / 62.0
             }
         }
@@ -868,7 +869,7 @@ mod tests {
             let cfa: Vec<f32> = (0..HEIGHT)
                 .flat_map(|y| {
                     (0..WIDTH).map(move |x| {
-                        neighborhood_value(neighborhood, pattern.color_at(y, x), x, y)
+                        neighborhood_value(neighborhood, pattern.color_at(y, x), Vec2us::new(x, y))
                     })
                 })
                 .collect();

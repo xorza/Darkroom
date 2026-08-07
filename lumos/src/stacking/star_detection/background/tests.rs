@@ -1,6 +1,7 @@
 //! Tests for background estimation.
 
 use crate::{
+    math::size2us::Size2us,
     stacking::star_detection::background,
     stacking::star_detection::config::{BackgroundConfig, BackgroundRefinement},
     stacking::star_detection::resources::DetectionResources,
@@ -277,7 +278,7 @@ fn repeated_estimation_and_dimension_reset_preserve_exact_results() {
         tile_size: 16,
         ..Default::default()
     };
-    let mut resources = DetectionResources::new(96, 64);
+    let mut resources = DetectionResources::new(Size2us::new(96, 64));
 
     let first = background::estimate_background(&pixels, &config, &mut resources);
     let expected_background = first.background.pixels().to_vec();
@@ -289,7 +290,7 @@ fn repeated_estimation_and_dimension_reset_preserve_exact_results() {
     assert_eq!(second.noise.pixels(), expected_noise);
     second.release_to_pool(&mut resources);
 
-    resources.reset(48, 32);
+    resources.reset(Size2us::new(48, 32));
     let resized_pixels = Buffer2::new_filled(48, 32, 0.25);
     let resized = background::estimate_background(&resized_pixels, &config, &mut resources);
     assert_eq!(resized.background.width(), 48);

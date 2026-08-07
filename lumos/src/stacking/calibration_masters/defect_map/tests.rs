@@ -64,8 +64,11 @@ fn capped_color_sampling_spans_sensor_and_cfa_phases() {
                 }
             }
 
-            let indices =
-                collect_color_sample_indices(width, height, Some(&cfa_type), target_color);
+            let indices = collect_color_sample_indices(
+                Size2us::new(width, height),
+                Some(&cfa_type),
+                target_color,
+            );
             assert_eq!(
                 indices.len(),
                 population.min(MAX_MEDIAN_SAMPLES),
@@ -527,9 +530,9 @@ fn dark_background_reconstructs_affine_mono_signal_through_image_edges() {
         for x in 0..width {
             let expected = 0.02 + 0.0001 * x as f32 + 0.0002 * y as f32;
             assert!(
-                (background.at(x, y, 0) - expected).abs() < 2e-7,
+                (background.at(Vec2us::new(x, y), 0) - expected).abs() < 2e-7,
                 "affine background mismatch at ({x}, {y}): expected {expected}, got {}",
-                background.at(x, y, 0)
+                background.at(Vec2us::new(x, y), 0)
             );
         }
     }
@@ -747,16 +750,16 @@ const XTRANS_PATTERN: [[u8; 6]; 6] = [
 /// Reference X-Trans same-color median: collect every in-bounds, unmasked same-color neighbour
 /// in the radius-6 window, take the closest `XTRANS_NEIGHBORS` by Manhattan distance (ties in
 /// scan order), median them. The precomputed [`XTransOffsets`] must reproduce this exactly.
-fn brute_force_xtrans_median(pixels: &Buffer2<f32>, x: usize, y: usize, pattern: &CfaType) -> f32 {
+fn brute_force_xtrans_median(pixels: &Buffer2<f32>, pos: Vec2us, pattern: &CfaType) -> f32 {
     let (w, h) = (pixels.width() as i32, pixels.height() as i32);
-    let my_color = pattern.color_at(x, y);
+    let my_color = pattern.color_at(pos.x, pos.y);
     let mut cands: Vec<(i32, f32)> = Vec::new();
     for dy in -XTRANS_RADIUS..=XTRANS_RADIUS {
         for dx in -XTRANS_RADIUS..=XTRANS_RADIUS {
             if dx == 0 && dy == 0 {
                 continue;
             }
-            let (nx, ny) = (x as i32 + dx, y as i32 + dy);
+            let (nx, ny) = (pos.x as i32 + dx, pos.y as i32 + dy);
             if nx < 0 || ny < 0 || nx >= w || ny >= h {
                 continue;
             }
@@ -787,7 +790,7 @@ fn xtrans_offsets_match_brute_force() {
     for y in 0..h {
         for x in 0..w {
             let got = offsets.median(&pixels, x, y, None);
-            let want = brute_force_xtrans_median(&pixels, x, y, &pattern);
+            let want = brute_force_xtrans_median(&pixels, Vec2us::new(x, y), &pattern);
             assert_eq!(
                 got, want,
                 "X-Trans median mismatch at ({x},{y}): precomputed {got} vs brute-force {want}"
@@ -812,7 +815,7 @@ fn xtrans_median_selects_same_color() {
     // Interior pixels (≥6 from every border) of each color — all 24 nearest same-color in-bounds.
     for &(x, y) in &[(13usize, 12usize), (12, 12), (14, 13)] {
         let c = pattern.color_at(x, y);
-        let got = neighbors.at(&pixels, x, y, None);
+        let got = neighbors.at(&pixels, Vec2us::new(x, y), None);
         assert!(
             (got - color_val(c)).abs() < f32::EPSILON,
             "({x},{y}) color {c}: expected {} got {got}",

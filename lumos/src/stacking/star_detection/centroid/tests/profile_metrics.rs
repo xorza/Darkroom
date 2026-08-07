@@ -54,7 +54,7 @@ fn test_gaussian_fit_fwhm_from_fit_params() {
     let true_fwhm = FWHM_TO_SIGMA * sigma;
 
     let pos = Vec2::new(64.0, 64.0);
-    let pixels = make_elliptical_gaussian(128, 128, pos, sigma, sigma, 0.8, 0.1);
+    let pixels = make_elliptical_gaussian(Size2us::new(128, 128), pos, sigma, sigma, 0.8, 0.1);
 
     let star = measure_single_star(&pixels, 0.1, 0.01, pos, CentroidMethod::GaussianFit);
 
@@ -81,7 +81,7 @@ fn test_gaussian_fit_eccentricity_from_fit_params() {
     let true_ecc = (1.0 - (sigma_x / sigma_y).powi(2)).sqrt();
 
     let pos = Vec2::new(64.0, 64.0);
-    let pixels = make_elliptical_gaussian(128, 128, pos, sigma_x, sigma_y, 0.8, 0.1);
+    let pixels = make_elliptical_gaussian(Size2us::new(128, 128), pos, sigma_x, sigma_y, 0.8, 0.1);
 
     let star = measure_single_star(&pixels, 0.1, 0.01, pos, CentroidMethod::GaussianFit);
 
@@ -108,7 +108,7 @@ fn test_gaussian_fit_fwhm_more_accurate_than_moments() {
     let true_fwhm = FWHM_TO_SIGMA * sigma;
 
     let pos = Vec2::new(64.0, 64.0);
-    let pixels = make_elliptical_gaussian(128, 128, pos, sigma, sigma, 0.8, 0.1);
+    let pixels = make_elliptical_gaussian(Size2us::new(128, 128), pos, sigma, sigma, 0.8, 0.1);
 
     let fit_star = measure_single_star(&pixels, 0.1, 0.01, pos, CentroidMethod::GaussianFit);
     let moments_star =
@@ -153,7 +153,7 @@ fn test_moffat_fit_fwhm_from_fit_params() {
     );
 
     let pos = Vec2::new(64.0, 64.0);
-    let pixels = make_moffat_star(128, 128, pos, alpha, beta, 0.8, 0.1);
+    let pixels = make_moffat_star(Size2us::new(128, 128), pos, alpha, beta, 0.8, 0.1);
 
     let star = measure_single_star(&pixels, 0.1, 0.01, pos, CentroidMethod::MoffatFit { beta });
 
@@ -176,7 +176,7 @@ fn test_moffat_fit_eccentricity_stays_moment_based() {
     let alpha = 3.0f32;
     let beta = 2.5f32;
     let pos = Vec2::new(64.0, 64.0);
-    let pixels = make_moffat_star(128, 128, pos, alpha, beta, 0.8, 0.1);
+    let pixels = make_moffat_star(Size2us::new(128, 128), pos, alpha, beta, 0.8, 0.1);
 
     let star = measure_single_star(&pixels, 0.1, 0.01, pos, CentroidMethod::MoffatFit { beta });
 
@@ -199,7 +199,7 @@ fn test_moments_only_fwhm_unchanged() {
     let true_fwhm = FWHM_TO_SIGMA * sigma;
 
     let pos = Vec2::new(64.0, 64.0);
-    let pixels = make_elliptical_gaussian(128, 128, pos, sigma, sigma, 0.8, 0.1);
+    let pixels = make_elliptical_gaussian(Size2us::new(128, 128), pos, sigma, sigma, 0.8, 0.1);
 
     let star = measure_single_star(&pixels, 0.1, 0.01, pos, CentroidMethod::WeightedMoments);
 
@@ -226,7 +226,7 @@ fn test_moffat_fit_fwhm_more_accurate_than_moments() {
     let true_fwhm = alpha_beta_to_fwhm(alpha, beta);
 
     let pos = Vec2::new(64.0, 64.0);
-    let pixels = make_moffat_star(128, 128, pos, alpha, beta, 0.8, 0.1);
+    let pixels = make_moffat_star(Size2us::new(128, 128), pos, alpha, beta, 0.8, 0.1);
 
     let fit_star = measure_single_star(&pixels, 0.1, 0.01, pos, CentroidMethod::MoffatFit { beta });
     let moments_star =
@@ -254,7 +254,7 @@ fn windowed_covariance_recovers_gaussian_sigma() {
     let (width, height) = (64, 64);
     let pos = Vec2::new(32.0, 32.0);
     let sigma = 2.5f32;
-    let pixels = make_gaussian_star(width, height, pos, sigma, 1.0, 0.0);
+    let pixels = make_gaussian_star(Size2us::new(width, height), pos, sigma, 1.0, 0.0);
     let bg = background_map::uniform(width, height, 0.0, 1.0);
 
     let cov = windowed_covariance(&pixels, &bg, None, pos, 12, (sigma * sigma) as f64)
@@ -286,7 +286,7 @@ fn windowed_covariance_recovers_elliptical_axes() {
     let (width, height) = (64, 64);
     let pos = Vec2::new(32.0, 32.0);
     let (sx, sy) = (3.0f32, 2.0f32);
-    let pixels = make_elliptical_star(width, height, pos, sx, sy, 1.0, 0.0);
+    let pixels = make_elliptical_star(Size2us::new(width, height), pos, sx, sy, 1.0, 0.0);
     let bg = background_map::uniform(width, height, 0.0, 1.0);
 
     let seed = ((sx * sx + sy * sy) / 2.0) as f64;
@@ -322,7 +322,7 @@ fn windowed_covariance_resists_wing_noise() {
     let (width, height) = (64, 64);
     let pos = Vec2::new(32.0, 32.0);
     let sigma = 2.5f32;
-    let mut pixels = make_gaussian_star(width, height, pos, sigma, 1.0, 0.1);
+    let mut pixels = make_gaussian_star(Size2us::new(width, height), pos, sigma, 1.0, 0.1);
     add_noise(pixels.pixels_mut(), 0.03, 12345);
     let bg = background_map::uniform(width, height, 0.1, 1.0);
 

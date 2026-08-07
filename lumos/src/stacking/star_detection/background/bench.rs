@@ -6,6 +6,7 @@ use std::hint::black_box;
 
 use crate::background_mesh::workspace::MeshWorkspace;
 use crate::bit_buffer2::BitBuffer2;
+use crate::math::size2us::Size2us;
 use crate::stacking::star_detection::background::estimate::BackgroundEstimate;
 use crate::stacking::star_detection::background::{estimate_background, refine_background};
 use crate::stacking::star_detection::config::BackgroundConfig;
@@ -40,7 +41,7 @@ fn bench_background_estimate_6k(b: ::quickbench::Bencher) {
         tile_size: 64,
         ..Default::default()
     };
-    let mut resources = DetectionResources::new(width, height);
+    let mut resources = DetectionResources::new(Size2us::new(width, height));
 
     b.bench(|| {
         let bg = estimate_background_test(&pixels, &config, &mut resources);

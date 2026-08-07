@@ -209,42 +209,39 @@ pub(crate) struct XTransImage<'a> {
 impl<'a> XTransImage<'a> {
     /// Validate dimensions and margins (shared by both constructors).
     fn validate_dimensions(data_len: usize, raw: Size2us, active: Size2us, margin: Vec2us) {
-        let (raw_width, raw_height) = (raw.width, raw.height);
-        let (width, height) = (active.width, active.height);
-        let (top_margin, left_margin) = (margin.y, margin.x);
         assert!(
-            width > 0 && height > 0,
+            active.width > 0 && active.height > 0,
             "Output dimensions must be non-zero: {}x{}",
-            width,
-            height
+            active.width,
+            active.height
         );
         assert!(
-            raw_width > 0 && raw_height > 0,
+            raw.width > 0 && raw.height > 0,
             "Raw dimensions must be non-zero: {}x{}",
-            raw_width,
-            raw_height
+            raw.width,
+            raw.height
         );
         assert!(
-            data_len == raw_width * raw_height,
+            data_len == raw.pixel_count(),
             "Data length {} doesn't match raw dimensions {}x{}={}",
             data_len,
-            raw_width,
-            raw_height,
-            raw_width * raw_height
+            raw.width,
+            raw.height,
+            raw.pixel_count()
         );
         assert!(
-            top_margin + height <= raw_height,
+            margin.y + active.height <= raw.height,
             "Top margin {} + height {} exceeds raw height {}",
-            top_margin,
-            height,
-            raw_height
+            margin.y,
+            active.height,
+            raw.height
         );
         assert!(
-            left_margin + width <= raw_width,
+            margin.x + active.width <= raw.width,
             "Left margin {} + width {} exceeds raw width {}",
-            left_margin,
-            width,
-            raw_width
+            margin.x,
+            active.width,
+            raw.width
         );
     }
 
@@ -319,7 +316,7 @@ impl<'a> XTransImage<'a> {
             PixelSource::U16WithRepeat { data, repeat } => {
                 let val = data[idx] as f32;
                 let ch = self.raw_pattern.color_at(raw_y, raw_x) as usize;
-                let repeat_delta = repeat.at_raw(raw_y, raw_x, self.margin.y, self.margin.x);
+                let repeat_delta = repeat.at_raw(raw_y, raw_x, self.margin);
                 ((val - self.channel_black[ch]) * self.inv_range - repeat_delta).clamp(0.0, 1.0)
             }
             PixelSource::F32(data) => data[idx],

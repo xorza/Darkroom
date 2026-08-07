@@ -15,6 +15,8 @@
 
 use glam::DVec2;
 
+use crate::math::size2us::Size2us;
+use crate::math::vec2us::Vec2us;
 use crate::stacking::registration::distortion::SINGULAR_THRESHOLD;
 
 /// Configuration for thin-plate spline fitting.
@@ -356,10 +358,8 @@ fn solve_linear_system(a: &[Vec<f64>], b: &[f64]) -> Option<Vec<f64>> {
 /// useful for visualization and analysis.
 #[derive(Debug, Clone)]
 struct DistortionMap {
-    /// Width of the grid
-    width: usize,
-    /// Height of the grid
-    height: usize,
+    /// Extent of the grid in grid points
+    grid: Size2us,
     /// Grid spacing in pixels
     spacing: f64,
     /// Distortion vectors at each grid point
@@ -378,21 +378,18 @@ impl DistortionMap {
     /// * `image_width` - Image width in pixels
     /// * `image_height` - Image height in pixels
     /// * `grid_spacing` - Spacing between grid points
-    fn from_tps(
-        tps: &ThinPlateSpline,
-        image_width: usize,
-        image_height: usize,
-        grid_spacing: f64,
-    ) -> Self {
-        let grid_width = (image_width as f64 / grid_spacing).ceil() as usize + 1;
-        let grid_height = (image_height as f64 / grid_spacing).ceil() as usize + 1;
+    fn from_tps(tps: &ThinPlateSpline, image: Size2us, grid_spacing: f64) -> Self {
+        let grid = Size2us::new(
+            (image.width as f64 / grid_spacing).ceil() as usize + 1,
+            (image.height as f64 / grid_spacing).ceil() as usize + 1,
+        );
 
-        let mut vectors = Vec::with_capacity(grid_width * grid_height);
+        let mut vectors = Vec::with_capacity(grid.pixel_count());
         let mut max_magnitude = 0.0f64;
         let mut sum_magnitude = 0.0;
 
-        for gy in 0..grid_height {
-            for gx in 0..grid_width {
+        for gy in 0..grid.height {
+            for gx in 0..grid.width {
                 let p = DVec2::new(gx as f64 * grid_spacing, gy as f64 * grid_spacing);
                 let t = tps.transform(p);
                 let d = t - p;
@@ -407,8 +404,7 @@ impl DistortionMap {
         let mean_magnitude = sum_magnitude / vectors.len() as f64;
 
         Self {
-            width: grid_width,
-            height: grid_height,
+            grid,
             spacing: grid_spacing,
             vectors,
             max_magnitude,
@@ -418,11 +414,10 @@ impl DistortionMap {
 
     /// Get the distortion vector at a grid position.
     fn get(&self, gx: usize, gy: usize) -> Option<DVec2> {
-        if gx < self.width && gy < self.height {
-            Some(self.vectors[gy * self.width + gx])
-        } else {
-            None
-        }
+        let point = Vec2us::new(gx, gy);
+        self.grid
+            .contains(point)
+            .then(|| self.vectors[self.grid.index_of(point)])
     }
 
     /// Interpolate the distortion at an arbitrary position.
@@ -432,8 +427,8 @@ impl DistortionMap {
 
         let gx0 = gx.floor() as usize;
         let gy0 = gy.floor() as usize;
-        let gx1 = (gx0 + 1).min(self.width - 1);
-        let gy1 = (gy0 + 1).min(self.height - 1);
+        let gx1 = (gx0 + 1).min(self.grid.width - 1);
+        let gy1 = (gy0 + 1).min(self.grid.height - 1);
 
         let fx = gx - gx0 as f64;
         let fy = gy - gy0 as f64;

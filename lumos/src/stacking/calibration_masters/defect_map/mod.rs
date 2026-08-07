@@ -51,6 +51,7 @@ use crate::bit_buffer2::BitBuffer2;
 use crate::io::image::cfa::{CfaImage, CfaType};
 use crate::math::size2us::Size2us;
 use crate::math::statistics::{MAD_TO_SIGMA, median_f32_mut};
+use crate::math::vec2us::Vec2us;
 use crate::stacking::combine::error::Error;
 use common::CancelToken;
 use imaginarium::Buffer2;
@@ -180,7 +181,7 @@ impl DefectMap {
         for &idx in self.hot_indices.iter().chain(&self.cold_indices) {
             let x = idx % width;
             let y = idx / width;
-            image.data[idx] = neighbors.at(&image.data, x, y, Some(&mask));
+            image.data[idx] = neighbors.at(&image.data, Vec2us::new(x, y), Some(&mask));
         }
     }
 }
@@ -198,9 +199,9 @@ const ABSOLUTE_RESIDUAL_P99_TO_SIGMA: f32 = 0.388_224_48;
 const MIN_TAIL_SCALE_SAMPLES: usize = 500;
 
 /// Get CFA color index at (x, y). Returns 0 for Mono (None CFA type).
-fn cfa_color_at(cfa_type: Option<&CfaType>, x: usize, y: usize) -> u8 {
+fn cfa_color_at(cfa_type: Option<&CfaType>, pos: Vec2us) -> u8 {
     match cfa_type {
-        Some(cfa) => cfa.color_at(x, y),
+        Some(cfa) => cfa.color_at(pos.x, pos.y),
         // Mono images have no CFA pattern — treat all pixels as the same color channel.
         None => 0,
     }
@@ -246,9 +247,10 @@ fn detect_hot_pixels(
             if cancel.is_cancelled() {
                 return false;
             }
-            let color = cfa_color_at(cfa_type, i % width, i / width) as usize;
+            let color = cfa_color_at(cfa_type, Vec2us::new(i % width, i / width)) as usize;
             let ColorStats { median, sigma } = stats[color];
-            data[i] - background.at(i % width, i / width, color) > median + sigma_threshold * sigma
+            data[i] - background.at(Vec2us::new(i % width, i / width), color)
+                > median + sigma_threshold * sigma
         })
         .collect();
 
@@ -311,7 +313,7 @@ impl DarkBackground {
 
                 for y in y_start..y_end {
                     for x in x_start..x_end {
-                        let color = cfa_color_at(cfa_type, x, y) as usize;
+                        let color = cfa_color_at(cfa_type, Vec2us::new(x, y)) as usize;
                         samples[color].push(data[y * width + x]);
                     }
                 }
@@ -355,9 +357,9 @@ impl DarkBackground {
     }
 
     #[inline]
-    fn at(&self, x: usize, y: usize, color: usize) -> f32 {
-        let xs = self.x_spans[x];
-        let ys = self.y_spans[y];
+    fn at(&self, pos: Vec2us, color: usize) -> f32 {
+        let xs = self.x_spans[pos.x];
+        let ys = self.y_spans[pos.y];
         let top = lerp(
             self.tiles[(xs.lower, ys.lower)].values[color],
             self.tiles[(xs.upper, ys.lower)].values[color],
@@ -454,7 +456,7 @@ fn detect_cold_pixels(
             if cancel.is_cancelled() {
                 return false;
             }
-            let local = neighbors.at(data, i % width, i / width, None);
+            let local = neighbors.at(data, Vec2us::new(i % width, i / width), None);
             data[i] < dead_fraction * local
         })
         .collect();
@@ -542,10 +544,14 @@ fn collect_color_residual_samples(
     background: &DarkBackground,
 ) -> Vec<f32> {
     let width = data.width();
-    collect_color_sample_indices(width, data.height(), cfa_type, target_color)
+    collect_color_sample_indices(Size2us::new(width, data.height()), cfa_type, target_color)
         .into_iter()
         .map(|index| {
-            data[index] - background.at(index % width, index / width, target_color as usize)
+            data[index]
+                - background.at(
+                    Vec2us::new(index % width, index / width),
+                    target_color as usize,
+                )
         })
         .collect()
 }
@@ -558,20 +564,23 @@ fn collect_color_samples(
     cfa_type: Option<&CfaType>,
     target_color: u8,
 ) -> Vec<f32> {
-    collect_color_sample_indices(data.width(), data.height(), cfa_type, target_color)
-        .into_iter()
-        .map(|index| data[index])
-        .collect()
+    collect_color_sample_indices(
+        Size2us::new(data.width(), data.height()),
+        cfa_type,
+        target_color,
+    )
+    .into_iter()
+    .map(|index| data[index])
+    .collect()
 }
 
 fn collect_color_sample_indices(
-    width: usize,
-    height: usize,
+    size: Size2us,
     cfa_type: Option<&CfaType>,
     target_color: u8,
 ) -> Vec<usize> {
     assert!(
-        width > 0 && height > 0,
+        size.width > 0 && size.height > 0,
         "color sampling needs non-zero dimensions"
     );
 
@@ -582,13 +591,13 @@ fn collect_color_sample_indices(
     };
 
     let mut phases = ArrayVec::<CfaSamplePhase, 36>::new();
-    for y_offset in 0..period.min(height) {
-        for x_offset in 0..period.min(width) {
-            if cfa_color_at(cfa_type, x_offset, y_offset) != target_color {
+    for y_offset in 0..period.min(size.height) {
+        for x_offset in 0..period.min(size.width) {
+            if cfa_color_at(cfa_type, Vec2us::new(x_offset, y_offset)) != target_color {
                 continue;
             }
-            let columns = (width - 1 - x_offset) / period + 1;
-            let rows = (height - 1 - y_offset) / period + 1;
+            let columns = (size.width - 1 - x_offset) / period + 1;
+            let rows = (size.height - 1 - y_offset) / period + 1;
             phases.push(CfaSamplePhase {
                 x_offset,
                 y_offset,
@@ -622,7 +631,7 @@ fn collect_color_sample_indices(
                 let y = phase.y_offset + row * period;
                 for column in 0..phase.columns {
                     let x = phase.x_offset + column * period;
-                    indices.push(y * width + x);
+                    indices.push(size.index_of(Vec2us::new(x, y)));
                 }
             }
             continue;
@@ -643,7 +652,7 @@ fn collect_color_sample_indices(
                     + rotation)
                     % phase.columns;
                 let x = phase.x_offset + column * period;
-                indices.push(y * width + x);
+                indices.push(size.index_of(Vec2us::new(x, y)));
             }
         }
     }
@@ -733,17 +742,11 @@ impl SameColorMedian {
 
     /// Median of `(x, y)`'s same-color neighbours, skipping any flagged in `defect_mask` so a defect
     /// is never repaired from another defect.
-    fn at(
-        &self,
-        pixels: &Buffer2<f32>,
-        x: usize,
-        y: usize,
-        defect_mask: Option<&BitBuffer2>,
-    ) -> f32 {
+    fn at(&self, pixels: &Buffer2<f32>, pos: Vec2us, defect_mask: Option<&BitBuffer2>) -> f32 {
         match self {
-            Self::Mono => median_of_neighbors_raw(pixels, x, y, defect_mask),
-            Self::Bayer => bayer_same_color_median(pixels, x, y, defect_mask),
-            Self::XTrans(offsets) => offsets.median(pixels, x, y, defect_mask),
+            Self::Mono => median_of_neighbors_raw(pixels, pos.x, pos.y, defect_mask),
+            Self::Bayer => bayer_same_color_median(pixels, pos.x, pos.y, defect_mask),
+            Self::XTrans(offsets) => offsets.median(pixels, pos.x, pos.y, defect_mask),
         }
     }
 }

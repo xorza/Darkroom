@@ -6,6 +6,7 @@ use ::quickbench::quick_bench;
 use glam::Vec2;
 use std::hint::black_box;
 
+use crate::math::size2us::Size2us;
 use crate::stacking::star_detection::centroid::gaussian_fit::{GaussianFitConfig, fit_gaussian_2d};
 use crate::stacking::star_detection::centroid::internals::make_gaussian_star;
 use crate::stacking::star_detection::centroid::measure_star;
@@ -24,7 +25,13 @@ fn bench_measure_star_single(b: ::quickbench::Bencher) {
     // Single star centroid computation with WeightedMoments
     let width = 64;
     let height = 64;
-    let pixels = make_gaussian_star(width, height, Vec2::new(32.3, 32.7), 2.5, 0.8, 0.1);
+    let pixels = make_gaussian_star(
+        Size2us::new(width, height),
+        Vec2::new(32.3, 32.7),
+        2.5,
+        0.8,
+        0.1,
+    );
     let bg = estimate_background(&pixels, &BackgroundConfig::default());
     let candidates = detect_stars_test(&pixels, &bg, &DetectionConfig::default());
     let region = candidates.first().expect("Should detect star");
@@ -49,7 +56,13 @@ fn bench_measure_star_gaussian_fit(b: ::quickbench::Bencher) {
     // Single star centroid with Gaussian fitting
     let width = 64;
     let height = 64;
-    let pixels = make_gaussian_star(width, height, Vec2::new(32.3, 32.7), 2.5, 0.8, 0.1);
+    let pixels = make_gaussian_star(
+        Size2us::new(width, height),
+        Vec2::new(32.3, 32.7),
+        2.5,
+        0.8,
+        0.1,
+    );
     let bg = estimate_background(&pixels, &BackgroundConfig::default());
     let candidates = detect_stars_test(&pixels, &bg, &DetectionConfig::default());
     let region = candidates.first().expect("Should detect star");
@@ -74,7 +87,13 @@ fn bench_measure_star_moffat_fit(b: ::quickbench::Bencher) {
     // Single star centroid with Moffat fitting
     let width = 64;
     let height = 64;
-    let pixels = make_gaussian_star(width, height, Vec2::new(32.3, 32.7), 2.5, 0.8, 0.1);
+    let pixels = make_gaussian_star(
+        Size2us::new(width, height),
+        Vec2::new(32.3, 32.7),
+        2.5,
+        0.8,
+        0.1,
+    );
     let bg = estimate_background(&pixels, &BackgroundConfig::default());
     let candidates = detect_stars_test(&pixels, &bg, &DetectionConfig::default());
     let region = candidates.first().expect("Should detect star");
@@ -99,7 +118,13 @@ fn bench_measure_star_local_annulus(b: ::quickbench::Bencher) {
     // Single star centroid with LocalAnnulus background
     let width = 128;
     let height = 128;
-    let pixels = make_gaussian_star(width, height, Vec2::splat(64.0), 2.5, 0.8, 0.1);
+    let pixels = make_gaussian_star(
+        Size2us::new(width, height),
+        Vec2::splat(64.0),
+        2.5,
+        0.8,
+        0.1,
+    );
     let bg = estimate_background(&pixels, &BackgroundConfig::default());
     let candidates = detect_stars_test(&pixels, &bg, &DetectionConfig::default());
     let region = candidates.first().expect("Should detect star");
@@ -192,7 +217,13 @@ fn bench_refine_centroid_single(b: ::quickbench::Bencher) {
     // Single refine_centroid call - isolates the exp() hot path
     let width = 64;
     let height = 64;
-    let pixels = make_gaussian_star(width, height, Vec2::new(32.3, 32.7), 2.5, 0.8, 0.1);
+    let pixels = make_gaussian_star(
+        Size2us::new(width, height),
+        Vec2::new(32.3, 32.7),
+        2.5,
+        0.8,
+        0.1,
+    );
     let bg = estimate_background(&pixels, &BackgroundConfig::default());
     let stamp_radius = 7; // typical for FWHM ~4
     let expected_fwhm = 4.0;
@@ -200,8 +231,7 @@ fn bench_refine_centroid_single(b: ::quickbench::Bencher) {
     b.bench(|| {
         black_box(refine_centroid(
             black_box(&*pixels),
-            black_box(width),
-            black_box(height),
+            black_box(Size2us::new(width, height)),
             black_box(&bg),
             black_box(Vec2::splat(32.0)),
             black_box(stamp_radius),
@@ -215,7 +245,13 @@ fn bench_refine_centroid_batch_1000(b: ::quickbench::Bencher) {
     // 1000 refine_centroid calls to amplify exp() cost
     let width = 64;
     let height = 64;
-    let pixels = make_gaussian_star(width, height, Vec2::new(32.3, 32.7), 2.5, 0.8, 0.1);
+    let pixels = make_gaussian_star(
+        Size2us::new(width, height),
+        Vec2::new(32.3, 32.7),
+        2.5,
+        0.8,
+        0.1,
+    );
     let bg = estimate_background(&pixels, &BackgroundConfig::default());
     let stamp_radius = 7;
     let expected_fwhm = 4.0;
@@ -224,8 +260,7 @@ fn bench_refine_centroid_batch_1000(b: ::quickbench::Bencher) {
         for _ in 0..1000 {
             black_box(refine_centroid(
                 black_box(&*pixels),
-                black_box(width),
-                black_box(height),
+                black_box(Size2us::new(width, height)),
                 black_box(&bg),
                 black_box(Vec2::splat(32.0)),
                 black_box(stamp_radius),

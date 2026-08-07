@@ -8,6 +8,8 @@ use rayon::prelude::*;
 use crate::io::raw::demosaic::xtrans::XTransImage;
 use crate::io::raw::demosaic::xtrans::hex_lookup::HexLookup;
 use crate::io::raw::demosaic::xtrans::markesteijn::NDIR;
+use crate::math::size2us::Size2us;
+use crate::math::vec2us::Vec2us;
 
 use crate::concurrency::UnsafeSendPtr;
 
@@ -314,12 +316,11 @@ fn color_before_opposite(
     pixels: usize,
     direction: usize,
     width: usize,
-    y: usize,
-    x: usize,
+    pos: Vec2us,
     target: u8,
 ) -> f32 {
     // SAFETY: Initialization and the solitary-green stage are complete before this stage.
-    unsafe { (*colors.add(direction * pixels + y * width + x))[rb_index(target)] }
+    unsafe { (*colors.add(direction * pixels + pos.y * width + pos.x))[rb_index(target)] }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -375,10 +376,10 @@ fn opposite_color(
     let plus_x = x.wrapping_add_signed(dx);
     let minus_y = y.wrapping_add_signed(-dy);
     let minus_x = x.wrapping_add_signed(-dx);
-    let color_plus =
-        color_before_opposite(colors, pixels, direction, width, plus_y, plus_x, target);
-    let color_minus =
-        color_before_opposite(colors, pixels, direction, width, minus_y, minus_x, target);
+    let plus = Vec2us::new(plus_x, plus_y);
+    let minus = Vec2us::new(minus_x, minus_y);
+    let color_plus = color_before_opposite(colors, pixels, direction, width, plus, target);
+    let color_minus = color_before_opposite(colors, pixels, direction, width, minus, target);
     let green_plus = green_at(green_dir, green_base, width, plus_y, plus_x);
     let green_minus = green_at(green_dir, green_base, width, minus_y, minus_x);
 
@@ -745,20 +746,19 @@ fn rgb_to_ypbpr(r: f32, g: f32, b: f32) -> (f32, f32, f32) {
 /// 2. In a 3×3 window, count how many pixels have drv ≤ threshold
 pub(crate) fn compute_homogeneity(
     drv: &[f32],
-    width: usize,
-    height: usize,
+    size: Size2us,
     homo: &mut [u8],
     threshold: &mut [f32],
 ) {
-    let pixels = width * height;
+    let pixels = size.pixel_count();
 
     // Sub-pass 1: compute min derivative across directions and threshold
     threshold
-        .par_chunks_mut(width)
+        .par_chunks_mut(size.width)
         .enumerate()
         .for_each(|(y, thr_row)| {
             for (x, thr) in thr_row.iter_mut().enumerate() {
-                let idx = y * width + x;
+                let idx = y * size.width + x;
                 let mut min_drv = f32::MAX;
                 for d in 0..NDIR {
                     min_drv = min_drv.min(drv[d * pixels + idx]);
@@ -770,34 +770,34 @@ pub(crate) fn compute_homogeneity(
     // Sub-pass 2: count pixels in 3×3 window where drv ≤ threshold
     // Parallelize across all (direction, row) pairs for full core utilization.
     // Every element is written (border pixels get 0), avoiding a costly fill(0) of the full buffer.
-    homo.par_chunks_mut(width)
+    homo.par_chunks_mut(size.width)
         .enumerate()
         .for_each(|(flat_idx, homo_row)| {
-            let d = flat_idx / height;
-            let y = flat_idx % height;
+            let d = flat_idx / size.height;
+            let y = flat_idx % size.height;
 
-            if y == 0 || y >= height - 1 {
+            if y == 0 || y >= size.height - 1 {
                 homo_row.fill(0);
                 return;
             }
 
             // First and last columns are border pixels
             homo_row[0] = 0;
-            if width > 1 {
-                homo_row[width - 1] = 0;
+            if size.width > 1 {
+                homo_row[size.width - 1] = 0;
             }
 
             for (x, homo_val) in homo_row
                 .iter_mut()
                 .enumerate()
                 .skip(1)
-                .take(width.saturating_sub(2))
+                .take(size.width.saturating_sub(2))
             {
                 let mut count = 0u8;
-                let center_threshold = threshold[y * width + x];
+                let center_threshold = threshold[y * size.width + x];
                 for vy in y - 1..=y + 1 {
                     for vx in x - 1..=x + 1 {
-                        let nidx = vy * width + vx;
+                        let nidx = vy * size.width + vx;
                         if drv[d * pixels + nidx] <= center_threshold {
                             count += 1;
                         }
@@ -809,15 +809,19 @@ pub(crate) fn compute_homogeneity(
 }
 
 /// Build an inclusive summed-area table in exactly one `width × height` plane.
-fn build_summed_area_table(data: &[u8], width: usize, height: usize, sat: &mut [u32]) {
-    debug_assert_eq!(data.len(), width * height);
-    debug_assert_eq!(sat.len(), width * height);
-    for y in 0..height {
+fn build_summed_area_table(data: &[u8], size: Size2us, sat: &mut [u32]) {
+    debug_assert_eq!(data.len(), size.pixel_count());
+    debug_assert_eq!(sat.len(), size.pixel_count());
+    for y in 0..size.height {
         let mut row_sum = 0u32;
-        for x in 0..width {
-            row_sum += data[y * width + x] as u32;
-            let above = if y == 0 { 0 } else { sat[(y - 1) * width + x] };
-            sat[y * width + x] = row_sum + above;
+        for x in 0..size.width {
+            row_sum += data[y * size.width + x] as u32;
+            let above = if y == 0 {
+                0
+            } else {
+                sat[(y - 1) * size.width + x]
+            };
+            sat[y * size.width + x] = row_sum + above;
         }
     }
 }
@@ -841,28 +845,22 @@ fn sat_query(sat: &[u32], width: usize, y0: usize, x0: usize, y1: usize, x1: usi
     bottom_right + above_left - above - left
 }
 
-fn score_homogeneity(
-    homo: &[u8],
-    width: usize,
-    height: usize,
-    scores: &mut [[u32; NDIR]],
-    sat: &mut [u32],
-) {
-    let pixels = width * height;
+fn score_homogeneity(homo: &[u8], size: Size2us, scores: &mut [[u32; NDIR]], sat: &mut [u32]) {
+    let pixels = size.pixel_count();
     debug_assert_eq!(homo.len(), NDIR * pixels);
     debug_assert_eq!(scores.len(), pixels);
     debug_assert_eq!(sat.len(), pixels);
 
     for d in 0..NDIR {
-        build_summed_area_table(&homo[d * pixels..(d + 1) * pixels], width, height, sat);
+        build_summed_area_table(&homo[d * pixels..(d + 1) * pixels], size, sat);
 
-        for y in 0..height {
+        for y in 0..size.height {
             let y0 = y.saturating_sub(2);
-            let y1 = (y + 2).min(height - 1);
-            for x in 0..width {
+            let y1 = (y + 2).min(size.height - 1);
+            for x in 0..size.width {
                 let x0 = x.saturating_sub(2);
-                let x1 = (x + 2).min(width - 1);
-                scores[y * width + x][d] = sat_query(sat, width, y0, x0, y1, x1);
+                let x1 = (x + 2).min(size.width - 1);
+                scores[y * size.width + x][d] = sat_query(sat, size.width, y0, x0, y1, x1);
             }
         }
     }
@@ -888,13 +886,12 @@ pub(crate) fn blend_final(
     out_b: &mut [f32],
 ) {
     let width = xtrans.active.width;
-    let height = xtrans.active.height;
-    let pixels = width * height;
+    let pixels = xtrans.active.pixel_count();
     assert_eq!(out_r.len(), pixels);
     assert_eq!(out_g.len(), pixels);
     assert_eq!(out_b.len(), pixels);
 
-    score_homogeneity(homo, width, height, scores, sat);
+    score_homogeneity(homo, xtrans.active, scores, sat);
 
     out_r
         .par_chunks_mut(width)
@@ -1120,7 +1117,7 @@ mod tests {
         let drv = vec![1.0f32; NDIR * pixels];
         let mut homo = vec![0u8; NDIR * pixels];
         let mut threshold = vec![0.0f32; pixels];
-        compute_homogeneity(&drv, w, h, &mut homo, &mut threshold);
+        compute_homogeneity(&drv, Size2us::new(w, h), &mut homo, &mut threshold);
 
         // Interior pixels should have equal homogeneity across all directions
         for y in 2..h - 2 {
@@ -1155,7 +1152,7 @@ mod tests {
         let mut homo = vec![0u8; NDIR * pixels];
         let mut threshold = vec![0.0f32; pixels];
 
-        compute_homogeneity(&drv, width, height, &mut homo, &mut threshold);
+        compute_homogeneity(&drv, Size2us::new(width, height), &mut homo, &mut threshold);
 
         assert_eq!(threshold[center], 8.0);
         assert_eq!(homo[center], 9);
@@ -1320,7 +1317,7 @@ mod tests {
         // 4×3 grid of all 1s
         let data = vec![1u8; 4 * 3];
         let mut sat = vec![u32::MAX; data.len()];
-        build_summed_area_table(&data, 4, 3, &mut sat);
+        build_summed_area_table(&data, Size2us::new(4, 3), &mut sat);
         assert_eq!(sat, [1, 2, 3, 4, 2, 4, 6, 8, 3, 6, 9, 12]);
 
         // Full image sum = 12
@@ -1342,7 +1339,7 @@ mod tests {
         // 3×3 grid: [1,2,3; 4,5,6; 7,8,9]
         let data = vec![1, 2, 3, 4, 5, 6, 7, 8, 9];
         let mut sat = vec![u32::MAX; data.len()];
-        build_summed_area_table(&data, 3, 3, &mut sat);
+        build_summed_area_table(&data, Size2us::new(3, 3), &mut sat);
 
         // Full sum = 45
         assert_eq!(sat_query(&sat, 3, 0, 0, 2, 2), 45);
@@ -1358,7 +1355,7 @@ mod tests {
     fn test_sat_single_pixel() {
         let data = vec![42u8];
         let mut sat = vec![u32::MAX; data.len()];
-        build_summed_area_table(&data, 1, 1, &mut sat);
+        build_summed_area_table(&data, Size2us::new(1, 1), &mut sat);
         assert_eq!(sat_query(&sat, 1, 0, 0, 0, 0), 42);
     }
 
@@ -1366,7 +1363,7 @@ mod tests {
     fn test_sat_single_row() {
         let data = vec![1, 2, 3, 4, 5];
         let mut sat = vec![u32::MAX; data.len()];
-        build_summed_area_table(&data, 5, 1, &mut sat);
+        build_summed_area_table(&data, Size2us::new(5, 1), &mut sat);
         // Full row = 15
         assert_eq!(sat_query(&sat, 5, 0, 0, 0, 4), 15);
         // Middle 3 elements = 2+3+4 = 9
@@ -1377,7 +1374,7 @@ mod tests {
     fn test_sat_single_column() {
         let data = vec![1, 2, 3, 4, 5];
         let mut sat = vec![u32::MAX; data.len()];
-        build_summed_area_table(&data, 1, 5, &mut sat);
+        build_summed_area_table(&data, Size2us::new(1, 5), &mut sat);
         // Full column = 15
         assert_eq!(sat_query(&sat, 1, 0, 0, 4, 0), 15);
         // Middle 3 = 2+3+4 = 9
@@ -1388,7 +1385,7 @@ mod tests {
     fn test_sat_zeros() {
         let data = vec![0u8; 4 * 4];
         let mut sat = vec![u32::MAX; data.len()];
-        build_summed_area_table(&data, 4, 4, &mut sat);
+        build_summed_area_table(&data, Size2us::new(4, 4), &mut sat);
         assert_eq!(sat_query(&sat, 4, 0, 0, 3, 3), 0);
     }
 
@@ -1409,7 +1406,7 @@ mod tests {
         let mut scores = vec![[u32::MAX; NDIR]; pixels];
         let mut sat = vec![u32::MAX; pixels];
 
-        score_homogeneity(&homo, width, height, &mut scores, &mut sat);
+        score_homogeneity(&homo, Size2us::new(width, height), &mut scores, &mut sat);
 
         for direction in 0..NDIR {
             for y in 0..height {
@@ -1436,7 +1433,7 @@ mod tests {
         let drv = vec![1.0f32; NDIR * pixels];
         let mut homo = vec![0xFFu8; NDIR * pixels]; // fill with garbage to detect missing writes
         let mut threshold = vec![0.0f32; pixels];
-        compute_homogeneity(&drv, w, h, &mut homo, &mut threshold);
+        compute_homogeneity(&drv, Size2us::new(w, h), &mut homo, &mut threshold);
 
         for d in 0..NDIR {
             // Top and bottom rows should be 0
@@ -1471,7 +1468,7 @@ mod tests {
         drv[..pixels].fill(0.1); // dir 0
         let mut homo = vec![0u8; NDIR * pixels];
         let mut threshold = vec![0.0f32; pixels];
-        compute_homogeneity(&drv, w, h, &mut homo, &mut threshold);
+        compute_homogeneity(&drv, Size2us::new(w, h), &mut homo, &mut threshold);
 
         // Interior pixels: dir 0 should have high homogeneity, others low
         for y in 2..h - 2 {
