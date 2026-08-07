@@ -4,7 +4,7 @@ use crate::stacking::combine::cache::internals::cache_from_images;
 use crate::stacking::combine::cache::*;
 use crate::stacking::combine::config::Normalization;
 use crate::stacking::combine::rejection::Rejection;
-use crate::stacking::frame_store::{compute_frame_stats, store_frame};
+use crate::stacking::frame_store::{FrameStats, StoredFrame};
 use crate::stacking::product::QualityPlanes;
 use crate::testing::ScratchDirectory;
 
@@ -99,7 +99,7 @@ fn stored_frames_of_the_wrong_shape_are_rejected_not_sliced() {
     let frame = |pixels: usize| {
         let image =
             LinearImage::from_pixels(ImageDimensions::new((pixels, 1), 1), vec![1.0; pixels]);
-        let stats = compute_frame_stats(&image);
+        let stats = FrameStats::measure(&image);
         StoredFrame::from_memory(image, None, None, stats)
     };
 
@@ -120,7 +120,7 @@ fn stored_frames_of_the_wrong_shape_are_rejected_not_sliced() {
 
     // A quality plane of the wrong length is caught the same way.
     let image = LinearImage::from_pixels(dimensions, vec![1.0; 8]);
-    let stats = compute_frame_stats(&image);
+    let stats = FrameStats::measure(&image);
     let short_coverage =
         StoredFrame::from_memory(image, Some(Buffer2::new(2, 1, vec![1.0; 2])), None, stats);
     let error = FrameCache::from_stored_frames(vec![short_coverage], params()).unwrap_err();
@@ -424,13 +424,13 @@ fn test_cleanup_removes_files() {
     let pixels: Vec<f32> = (0..12).map(|i| i as f32).collect();
     let image = LinearImage::from_pixels(dims, pixels);
 
-    let cached_frame = store_frame(
+    let cached_frame = StoredFrame::spill(
         &temp_dir,
         "cleanup_test.bin",
         &image,
         None,
         None,
-        compute_frame_stats(&image),
+        FrameStats::measure(&image),
     )
     .unwrap();
 
@@ -501,13 +501,13 @@ fn test_read_channel_chunk_disk_backed() {
 
     // Cache the image to disk
     let base_filename = "test_chunk.bin";
-    let cached_frame = store_frame(
+    let cached_frame = StoredFrame::spill(
         &temp_dir,
         base_filename,
         &image,
         None,
         None,
-        compute_frame_stats(&image),
+        FrameStats::measure(&image),
     )
     .unwrap();
 
@@ -560,13 +560,13 @@ fn test_frame_count_disk_backed() {
         let pixels: Vec<f32> = vec![i as f32; 4];
         let image = LinearImage::from_pixels(dims, pixels);
         let base_filename = format!("frame{}.bin", i);
-        let cached_frame = store_frame(
+        let cached_frame = StoredFrame::spill(
             &temp_dir,
             &base_filename,
             &image,
             None,
             None,
-            compute_frame_stats(&image),
+            FrameStats::measure(&image),
         )
         .unwrap();
         frames.push(cached_frame);

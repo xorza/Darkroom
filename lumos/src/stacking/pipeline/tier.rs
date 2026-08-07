@@ -6,7 +6,7 @@ use crate::io::image::linear::LinearImage;
 use crate::stacking::combine::cache_config::CacheConfig;
 use crate::stacking::combine::error::Error as StackError;
 use crate::stacking::frame_store::{
-    FrameStats, MemoryPlan, SpillDirectory, StoredFrame, store_frame, store_image,
+    FrameStats, MemoryPlan, SpillDirectory, StoredFrame, StoredImage,
 };
 use crate::stacking::pipeline::frame::PipelineFrame;
 use crate::stacking::pipeline::result::Error;
@@ -39,7 +39,7 @@ impl FrameTier {
     pub(crate) fn hold(&self, name: &str, image: LinearImage) -> Result<PipelineFrame, Error> {
         match self {
             Self::Ram => Ok(PipelineFrame::Resident(image)),
-            Self::Spill(directory) => store_image(&directory.path, name, &image)
+            Self::Spill(directory) => StoredImage::spill(&directory.path, name, &image)
                 .map(PipelineFrame::Spilled)
                 .map_err(|source| Error::Stack(StackError::from(source))),
         }
@@ -61,7 +61,7 @@ impl FrameTier {
                 confidence,
                 source_stats,
             )),
-            Self::Spill(directory) => store_frame(
+            Self::Spill(directory) => StoredFrame::spill(
                 &directory.path,
                 name,
                 &image,

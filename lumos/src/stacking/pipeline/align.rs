@@ -9,7 +9,7 @@ use crate::io::image::linear::LinearImage;
 use crate::io::raw::demosaic::DemosaicMemory;
 use crate::stacking::combine::error::Error as StackError;
 use crate::stacking::combine::stack::stack_stored_frames;
-use crate::stacking::frame_store::{StoredFrame, compute_frame_stats, plan_memory};
+use crate::stacking::frame_store::{FrameStats, StoredFrame, plan_memory};
 use crate::stacking::progress::ProgressCallback;
 use crate::stacking::registration::register;
 use crate::stacking::registration::resample::warp;
@@ -180,7 +180,7 @@ pub(crate) fn register_warp_and_stack(
             if index == reference {
                 // The unwarped reference has full support and unit interpolation confidence.
                 let image = detected.image.into_image();
-                let source_stats = compute_frame_stats(&image);
+                let source_stats = FrameStats::measure(&image);
                 return tier.store(&name, image, None, None, source_stats).map(Some);
             }
 
@@ -188,7 +188,7 @@ pub(crate) fn register_warp_and_stack(
             let source = detected.image.into_image();
             // Measured before interpolation, which correlates neighbouring pixels and would
             // otherwise understate the frame's noise.
-            let source_stats = compute_frame_stats(&source);
+            let source_stats = FrameStats::measure(&source);
             let registration = match register(&ref_stars, &detected.stars, &config.registration) {
                 Ok(registration) => registration,
                 // A pair that did not match is a frame to drop. An invalid config is not: it
