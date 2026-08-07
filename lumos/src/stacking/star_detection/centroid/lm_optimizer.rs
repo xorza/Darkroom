@@ -48,39 +48,96 @@ pub(super) struct LMResult<const N: usize> {
     pub(super) iterations: usize,
 }
 
-/// Accumulate the normal equations (Hessian upper triangle, gradient) and chi² over
-/// `range` into the given accumulators via `model.evaluate_and_jacobian`. `weights`
-/// applies an optional per-pixel inverse-variance weight (`None` ≡ all 1).
+/// The samples a model is fit against, with optional per-pixel inverse-variance
+/// weights (`None` ≡ all 1). All three coordinate slices are indexed in lockstep.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct FitData<'a> {
+    pub(super) x: &'a [f64],
+    pub(super) y: &'a [f64],
+    pub(super) z: &'a [f64],
+    pub(super) weights: Option<&'a [f64]>,
+}
+
+impl<'a> FitData<'a> {
+    pub(super) fn unweighted(x: &'a [f64], y: &'a [f64], z: &'a [f64]) -> Self {
+        Self {
+            x,
+            y,
+            z,
+            weights: None,
+        }
+    }
+
+    pub(super) fn weighted(x: &'a [f64], y: &'a [f64], z: &'a [f64], weights: &'a [f64]) -> Self {
+        Self {
+            x,
+            y,
+            z,
+            weights: Some(weights),
+        }
+    }
+
+    #[inline]
+    fn weight(&self, i: usize) -> f64 {
+        self.weights.map_or(1.0, |ws| ws[i])
+    }
+}
+
+/// One L-M step's normal equations: the Hessian `J^T·W·J`, the gradient `J^T·W·r`, and χ².
+///
+/// Accumulation fills the Hessian's upper triangle only; [`Self::mirror_lower_triangle`]
+/// completes it once the last sample has been added.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct NormalEquations<const N: usize> {
+    pub(super) hessian: [[f64; N]; N],
+    pub(super) gradient: [f64; N],
+    pub(super) chi2: f64,
+}
+
+impl<const N: usize> NormalEquations<N> {
+    pub(super) fn zeroed() -> Self {
+        Self {
+            hessian: [[0.0f64; N]; N],
+            gradient: [0.0f64; N],
+            chi2: 0.0,
+        }
+    }
+
+    /// Copy the accumulated upper triangle into the lower one, making the Hessian symmetric.
+    pub(super) fn mirror_lower_triangle(&mut self) {
+        for i in 1..N {
+            for j in 0..i {
+                self.hessian[i][j] = self.hessian[j][i];
+            }
+        }
+    }
+}
+
+/// Accumulate the normal equations and chi² over `range` into `out` via
+/// `model.evaluate_and_jacobian`.
 ///
 /// This is the one scalar per-pixel accumulation loop shared by [`LMModel`]'s
 /// default `batch_build_normal_equations` (and its weighted variant), every model's
 /// scalar-fallback override (no SIMD available for this target), and every SIMD
 /// backend's tail loop over the pixels left after the last full SIMD chunk — so a
-/// numerical-stability fix only has to land once instead of in every copy. Does not
-/// mirror the hessian's lower triangle; callers that need a full matrix do that once
-/// after accumulating.
-#[allow(clippy::needless_range_loop, clippy::too_many_arguments)]
+/// numerical-stability fix only has to land once instead of in every copy. Leaves the
+/// Hessian's lower triangle untouched; callers mirror it once after accumulating.
 pub(super) fn accumulate_normal_equations<const N: usize>(
     model: &(impl LMModel<N> + ?Sized),
-    data_x: &[f64],
-    data_y: &[f64],
-    data_z: &[f64],
-    weights: Option<&[f64]>,
+    data: FitData,
     params: &[f64; N],
     range: std::ops::Range<usize>,
-    hessian: &mut [[f64; N]; N],
-    gradient: &mut [f64; N],
-    chi2: &mut f64,
+    out: &mut NormalEquations<N>,
 ) {
     for i in range {
-        let w = weights.map_or(1.0, |ws| ws[i]);
-        let (model_val, row) = model.evaluate_and_jacobian(data_x[i], data_y[i], params);
-        let r = data_z[i] - model_val;
-        *chi2 += w * r * r;
+        let w = data.weight(i);
+        let (model_val, row) = model.evaluate_and_jacobian(data.x[i], data.y[i], params);
+        let r = data.z[i] - model_val;
+        out.chi2 += w * r * r;
         for k in 0..N {
-            gradient[k] += w * row[k] * r;
+            out.gradient[k] += w * row[k] * r;
             for j in k..N {
-                hessian[k][j] += w * row[k] * row[j];
+                out.hessian[k][j] += w * row[k] * row[j];
             }
         }
     }
@@ -92,60 +149,32 @@ pub(super) fn accumulate_normal_equations<const N: usize>(
 /// duplicated per model/backend.
 pub(super) fn accumulate_chi2<const N: usize>(
     model: &(impl LMModel<N> + ?Sized),
-    data_x: &[f64],
-    data_y: &[f64],
-    data_z: &[f64],
-    weights: Option<&[f64]>,
+    data: FitData,
     params: &[f64; N],
     range: std::ops::Range<usize>,
 ) -> f64 {
     let mut chi2 = 0.0f64;
     for i in range {
-        let w = weights.map_or(1.0, |ws| ws[i]);
-        let residual = data_z[i] - model.evaluate(data_x[i], data_y[i], params);
+        let w = data.weight(i);
+        let residual = data.z[i] - model.evaluate(data.x[i], data.y[i], params);
         chi2 += w * residual * residual;
     }
     chi2
 }
 
-/// Build the full normal equations (mirrored Hessian, gradient) and chi² over the
-/// whole data set with the scalar accumulation loop — the shared body of
+/// Build the full normal equations (mirrored Hessian, gradient, chi²) over the whole
+/// data set with the scalar accumulation loop — the shared body of
 /// [`LMModel::batch_build_normal_equations`] and its weighted variant, also called
 /// directly by the fit models' scalar fallbacks when no SIMD backend applies.
-#[allow(clippy::needless_range_loop)]
 pub(super) fn build_normal_equations_scalar<const N: usize>(
     model: &(impl LMModel<N> + ?Sized),
-    data_x: &[f64],
-    data_y: &[f64],
-    data_z: &[f64],
-    weights: Option<&[f64]>,
+    data: FitData,
     params: &[f64; N],
-) -> ([[f64; N]; N], [f64; N], f64) {
-    let mut hessian = [[0.0f64; N]; N];
-    let mut gradient = [0.0f64; N];
-    let mut chi2 = 0.0f64;
-
-    accumulate_normal_equations(
-        model,
-        data_x,
-        data_y,
-        data_z,
-        weights,
-        params,
-        0..data_x.len(),
-        &mut hessian,
-        &mut gradient,
-        &mut chi2,
-    );
-
-    // Mirror upper triangle to lower
-    for i in 1..N {
-        for j in 0..i {
-            hessian[i][j] = hessian[j][i];
-        }
-    }
-
-    (hessian, gradient, chi2)
+) -> NormalEquations<N> {
+    let mut equations = NormalEquations::zeroed();
+    accumulate_normal_equations(model, data, params, 0..data.x.len(), &mut equations);
+    equations.mirror_lower_triangle();
+    equations
 }
 
 /// Trait for models that can be fit with L-M optimization.
@@ -178,8 +207,8 @@ pub(super) trait LMModel<const N: usize> {
         data_y: &[f64],
         data_z: &[f64],
         params: &[f64; N],
-    ) -> ([[f64; N]; N], [f64; N], f64) {
-        build_normal_equations_scalar(self, data_x, data_y, data_z, None, params)
+    ) -> NormalEquations<N> {
+        build_normal_equations_scalar(self, FitData::unweighted(data_x, data_y, data_z), params)
     }
 
     /// Batch compute chi² (sum of squared residuals).
@@ -192,7 +221,12 @@ pub(super) trait LMModel<const N: usize> {
         data_z: &[f64],
         params: &[f64; N],
     ) -> f64 {
-        accumulate_chi2(self, data_x, data_y, data_z, None, params, 0..data_x.len())
+        accumulate_chi2(
+            self,
+            FitData::unweighted(data_x, data_y, data_z),
+            params,
+            0..data_x.len(),
+        )
     }
 
     /// Weighted `batch_build_normal_equations`: each pixel contributes its inverse-variance
@@ -205,8 +239,12 @@ pub(super) trait LMModel<const N: usize> {
         data_z: &[f64],
         weights: &[f64],
         params: &[f64; N],
-    ) -> ([[f64; N]; N], [f64; N], f64) {
-        build_normal_equations_scalar(self, data_x, data_y, data_z, Some(weights), params)
+    ) -> NormalEquations<N> {
+        build_normal_equations_scalar(
+            self,
+            FitData::weighted(data_x, data_y, data_z, weights),
+            params,
+        )
     }
 
     /// Weighted `batch_compute_chi2` (inverse-variance).
@@ -220,10 +258,7 @@ pub(super) trait LMModel<const N: usize> {
     ) -> f64 {
         accumulate_chi2(
             self,
-            data_x,
-            data_y,
-            data_z,
-            Some(weights),
+            FitData::weighted(data_x, data_y, data_z, weights),
             params,
             0..data_x.len(),
         )
@@ -258,17 +293,21 @@ pub(super) fn optimize<const N: usize, M: LMModel<N>>(
     // Normal equations at the current `params`. Rebuilt only when `params` actually moves — a
     // rejected step changes only `lambda`, so the cached (SIMD-accelerated) Jacobian pass is reused
     // across damping retries instead of being recomputed identically every iteration.
-    let (mut hessian, mut gradient, mut prev_chi2) = build(&params);
+    let mut equations = build(&params);
+    // Tracked apart from `equations.chi2`: an accepted step keeps the χ² `chi2_at` already
+    // computed for the new params rather than the rebuild's, so the accept test and the
+    // recorded χ² can never disagree by a rounding difference between those two code paths.
+    let mut prev_chi2 = equations.chi2;
 
     for iter in 0..config.max_iterations {
         iterations = iter + 1;
 
-        let mut damped_hessian = hessian;
+        let mut damped_hessian = equations.hessian;
         for (i, row) in damped_hessian.iter_mut().enumerate() {
             row[i] *= 1.0 + lambda;
         }
 
-        let Some(delta) = solve(&damped_hessian, &gradient) else {
+        let Some(delta) = solve(&damped_hessian, &equations.gradient) else {
             break;
         };
 
@@ -300,9 +339,7 @@ pub(super) fn optimize<const N: usize, M: LMModel<N>>(
             }
 
             // `params` moved → refresh the normal equations for the next iteration.
-            let (h, g, _) = build(&params);
-            hessian = h;
-            gradient = g;
+            equations = build(&params);
         } else {
             // Rejected step (worse fit, or a non-finite χ² from a bad trial point): keep `params`
             // and the cached normal equations, just increase damping. A non-finite χ² skips the

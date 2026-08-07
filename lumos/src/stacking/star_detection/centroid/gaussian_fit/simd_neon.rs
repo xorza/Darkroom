@@ -10,7 +10,7 @@ use crate::stacking::star_detection::centroid::gaussian_fit::{
     EXP_P0, EXP_P1, EXP_P2, EXP_Q0, EXP_Q1, EXP_Q2, EXP_Q3, Gaussian2D, LN2_HI, LN2_LO,
 };
 use crate::stacking::star_detection::centroid::lm_optimizer::{
-    accumulate_chi2, accumulate_normal_equations,
+    FitData, NormalEquations, accumulate_chi2, accumulate_normal_equations,
 };
 use std::arch::aarch64::*;
 
@@ -79,14 +79,13 @@ unsafe fn hsum(v: float64x2_t) -> f64 {
 ///
 /// For N=6 (Gaussian2D), accumulates 21 upper-triangle hessian elements,
 /// 6 gradient elements, and chi² directly in NEON registers (28 total).
-#[allow(clippy::needless_range_loop)]
 pub(super) unsafe fn batch_build_normal_equations_neon(
     _model: &Gaussian2D,
     data_x: &[f64],
     data_y: &[f64],
     data_z: &[f64],
     params: &[f64; 6],
-) -> ([[f64; 6]; 6], [f64; 6], f64) {
+) -> NormalEquations<6> {
     let n = data_x.len();
     let [x0, y0, amp, sigma_x, sigma_y, bg] = *params;
     let sigma_x2 = sigma_x * sigma_x;
@@ -223,8 +222,8 @@ pub(super) unsafe fn batch_build_normal_equations_neon(
         }
 
         // Horizontal sums
-        let mut chi2 = hsum(v_chi2);
-        let mut gradient = [
+        let chi2 = hsum(v_chi2);
+        let gradient = [
             hsum(v_g0),
             hsum(v_g1),
             hsum(v_g2),
@@ -255,29 +254,24 @@ pub(super) unsafe fn batch_build_normal_equations_neon(
         hessian[4][5] = hsum(v_h45);
         hessian[5][5] = hsum(v_h55);
 
+        let mut equations = NormalEquations {
+            hessian,
+            gradient,
+            chi2,
+        };
+
         // Scalar tail (0 or 1 element)
         let tail_start = chunks * 2;
         accumulate_normal_equations(
             _model,
-            data_x,
-            data_y,
-            data_z,
-            None,
+            FitData::unweighted(data_x, data_y, data_z),
             params,
             tail_start..n,
-            &mut hessian,
-            &mut gradient,
-            &mut chi2,
+            &mut equations,
         );
 
-        // Mirror upper triangle to lower
-        for i in 1..6 {
-            for j in 0..i {
-                hessian[i][j] = hessian[j][i];
-            }
-        }
-
-        (hessian, gradient, chi2)
+        equations.mirror_lower_triangle();
+        equations
     }
 }
 
@@ -329,7 +323,12 @@ pub(super) unsafe fn batch_compute_chi2_neon(
 
         // Scalar tail
         let tail_start = chunks * 2;
-        chi2 += accumulate_chi2(_model, data_x, data_y, data_z, None, params, tail_start..n);
+        chi2 += accumulate_chi2(
+            _model,
+            FitData::unweighted(data_x, data_y, data_z),
+            params,
+            tail_start..n,
+        );
 
         chi2
     }

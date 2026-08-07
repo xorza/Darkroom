@@ -4,7 +4,7 @@
 //! and `batch_compute_chi2`. Supports HalfInt, Int, and General PowStrategy variants.
 
 use crate::stacking::star_detection::centroid::lm_optimizer::{
-    accumulate_chi2, accumulate_normal_equations,
+    FitData, NormalEquations, accumulate_chi2, accumulate_normal_equations,
 };
 use crate::stacking::star_detection::centroid::moffat_fit::{MoffatFixedBeta, PowStrategy};
 use std::arch::aarch64::*;
@@ -72,14 +72,13 @@ unsafe fn simd_fast_pow_neg(u: float64x2_t, strategy: PowStrategy) -> float64x2_
 ///
 /// For N=5 (MoffatFixedBeta), accumulates 15 upper-triangle hessian elements,
 /// 5 gradient elements, and chi² directly in NEON registers.
-#[allow(clippy::needless_range_loop)]
 pub(super) unsafe fn batch_build_normal_equations_neon(
     model: &MoffatFixedBeta,
     data_x: &[f64],
     data_y: &[f64],
     data_z: &[f64],
     params: &[f64; 5],
-) -> ([[f64; 5]; 5], [f64; 5], f64) {
+) -> NormalEquations<5> {
     let n = data_x.len();
     let [x0, y0, amp, alpha, bg] = *params;
     let alpha2 = alpha * alpha;
@@ -187,8 +186,8 @@ pub(super) unsafe fn batch_build_normal_equations_neon(
             vaddvq_f64(v)
         }
 
-        let mut chi2 = hsum(v_chi2);
-        let mut gradient = [hsum(v_g0), hsum(v_g1), hsum(v_g2), hsum(v_g3), hsum(v_g4)];
+        let chi2 = hsum(v_chi2);
+        let gradient = [hsum(v_g0), hsum(v_g1), hsum(v_g2), hsum(v_g3), hsum(v_g4)];
         let mut hessian = [[0.0f64; 5]; 5];
         hessian[0][0] = hsum(v_h00);
         hessian[0][1] = hsum(v_h01);
@@ -206,29 +205,24 @@ pub(super) unsafe fn batch_build_normal_equations_neon(
         hessian[3][4] = hsum(v_h34);
         hessian[4][4] = hsum(v_h44);
 
+        let mut equations = NormalEquations {
+            hessian,
+            gradient,
+            chi2,
+        };
+
         // Scalar tail
         let tail_start = chunks * 2;
         accumulate_normal_equations(
             model,
-            data_x,
-            data_y,
-            data_z,
-            None,
+            FitData::unweighted(data_x, data_y, data_z),
             params,
             tail_start..n,
-            &mut hessian,
-            &mut gradient,
-            &mut chi2,
+            &mut equations,
         );
 
-        // Mirror upper triangle to lower
-        for i in 1..5 {
-            for j in 0..i {
-                hessian[i][j] = hessian[j][i];
-            }
-        }
-
-        (hessian, gradient, chi2)
+        equations.mirror_lower_triangle();
+        equations
     }
 }
 
@@ -275,7 +269,12 @@ pub(super) unsafe fn batch_compute_chi2_neon(
 
         // Scalar tail
         let tail_start = chunks * 2;
-        chi2 += accumulate_chi2(model, data_x, data_y, data_z, None, params, tail_start..n);
+        chi2 += accumulate_chi2(
+            model,
+            FitData::unweighted(data_x, data_y, data_z),
+            params,
+            tail_start..n,
+        );
 
         chi2
     }
