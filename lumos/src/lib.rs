@@ -98,11 +98,11 @@ pub use stacking::product::{QualityMap, StackProduct};
 pub use stacking::progress::{ProgressCallback, StackingProgress, StackingStage};
 
 pub use stacking::pipeline::align::align_and_stack;
+pub use stacking::pipeline::calibrate::calibrate_align_stack;
 pub use stacking::pipeline::config::{AlignStackConfig, Reference};
 pub use stacking::pipeline::result::{
     AlignStackResult, AlignmentSummary, Error as AlignStackError,
 };
-pub use stacking::pipeline::streaming::calibrate_align_stack;
 
 pub use stacking::drizzle::accumulator::{DrizzleAccumulator, DrizzleFrame};
 pub use stacking::drizzle::config::{DrizzleConfig, DrizzleKernel};

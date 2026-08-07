@@ -9,10 +9,11 @@ use crate::io::image::cfa::CfaType;
 use crate::io::image::fits::cfa::save_cfa_fits;
 use crate::io::image::linear::LinearImage;
 use crate::stacking::calibration_masters::CalibrationMasters;
+use crate::stacking::combine::error::Error as StackError;
 use crate::stacking::pipeline::align::align_and_stack;
+use crate::stacking::pipeline::calibrate::calibrate_align_stack;
 use crate::stacking::pipeline::config::{AlignStackConfig, Reference};
 use crate::stacking::pipeline::result::Error;
-use crate::stacking::pipeline::streaming::calibrate_align_stack;
 use crate::stacking::registration::config::Config as RegistrationConfig;
 use crate::stacking::registration::resample::warp;
 use crate::stacking::registration::transform::{Transform, WarpTransform};
@@ -156,6 +157,35 @@ fn stacked_master_inherits_reference_frame_metadata() {
         result.product.image.metadata.camera_white_balance,
         Some([2.0, 1.0, 1.25, 1.0])
     );
+}
+
+#[test]
+fn mismatched_frame_dimensions_are_rejected_before_registration() {
+    // `warp` reprojects into the source frame's own grid, so a frame from a different sensor
+    // would reach the combine as a differently-sized plane rather than as an error. The guard
+    // sits ahead of registration; frame 1 is the first mismatch even though frame 2 also differs.
+    let BaseField { image: base, .. } = base_field();
+    let odd = LinearImage::from_pixels(ImageDimensions::new((128, 128), 1), vec![0.1; 128 * 128]);
+    let odder = LinearImage::from_pixels(ImageDimensions::new((64, 64), 1), vec![0.1; 64 * 64]);
+
+    let error = align_and_stack(
+        vec![base, odd, odder],
+        &AlignStackConfig::default(),
+        CancelToken::never(),
+    )
+    .unwrap_err();
+
+    let Error::Stack(StackError::DimensionMismatch {
+        index,
+        expected,
+        actual,
+    }) = error
+    else {
+        panic!("expected a dimension mismatch, got {error:?}");
+    };
+    assert_eq!(index, 1);
+    assert_eq!(expected, ImageDimensions::new((256, 256), 1));
+    assert_eq!(actual, ImageDimensions::new((128, 128), 1));
 }
 
 #[test]
@@ -405,7 +435,7 @@ fn ram_and_streaming_tiers_produce_identical_stacks() {
 #[ignore = "real-data integration test; run explicitly with --ignored"]
 fn calibrate_align_stack_runs_end_to_end_on_real_lights() {
     use crate::stacking::calibration_masters::CalibrationMasters;
-    use crate::stacking::pipeline::streaming::calibrate_align_stack;
+    use crate::stacking::pipeline::calibrate::calibrate_align_stack;
     use crate::testing::calibration_image_paths;
     use crate::{CalibrationSet, DEFAULT_SIGMA_THRESHOLD};
 
@@ -454,7 +484,7 @@ fn calibrate_align_stack_runs_end_to_end_on_real_lights() {
 #[ignore = "real-data integration test; run explicitly with --ignored"]
 fn streaming_disk_tier_matches_ram_on_real_lights() {
     use crate::stacking::calibration_masters::CalibrationMasters;
-    use crate::stacking::pipeline::streaming::calibrate_align_stack;
+    use crate::stacking::pipeline::calibrate::calibrate_align_stack;
     use crate::testing::calibration_image_paths;
     use crate::{CalibrationSet, DEFAULT_SIGMA_THRESHOLD};
 

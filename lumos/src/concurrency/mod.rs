@@ -106,6 +106,42 @@ where
     Ok(results)
 }
 
+/// Consuming counterpart to [`try_par_map_limited`]: maps a fallible operation over `items`,
+/// handing each one to `operation` by value along with its input index.
+///
+/// At most `max_concurrent` operations run at once. Results preserve input order, and batches
+/// after the first error are not started. Taking items by value is what lets a caller drop each
+/// input as soon as its output exists — the property that keeps the register/warp stage from
+/// holding the whole input and output sets simultaneously.
+pub(crate) fn try_par_map_limited_owned<T, R, E, F>(
+    items: Vec<T>,
+    max_concurrent: usize,
+    operation: F,
+) -> Result<Vec<R>, E>
+where
+    T: Send,
+    R: Send,
+    E: Send,
+    F: Fn(usize, T) -> Result<R, E> + Sync,
+{
+    assert!(max_concurrent > 0, "max_concurrent must be positive");
+
+    let mut results = Vec::with_capacity(items.len());
+    let mut pending = items.into_iter().enumerate();
+    loop {
+        let batch: Vec<(usize, T)> = pending.by_ref().take(max_concurrent).collect();
+        if batch.is_empty() {
+            return Ok(results);
+        }
+        results.extend(
+            batch
+                .into_par_iter()
+                .map(|(index, item)| operation(index, item))
+                .collect::<Result<Vec<_>, _>>()?,
+        );
+    }
+}
+
 #[cfg(test)]
 pub(crate) mod internals {
     use crate::concurrency::JobScratchPool;
