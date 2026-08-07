@@ -174,18 +174,17 @@ fn test_metrics_large_fwhm() {
 
 /// Create two overlapping stars.
 fn make_blended_stars(
-    width: usize,
-    height: usize,
+    size: Size2us,
     pos1: Vec2,
     pos2: Vec2,
     sigma: f32,
     amp1: f32,
     amp2: f32,
 ) -> Buffer2<f32> {
-    let mut pixels = vec![0.1f32; width * height];
+    let mut pixels = vec![0.1f32; size.pixel_count()];
 
-    for y in 0..height {
-        for x in 0..width {
+    for y in 0..size.height {
+        for x in 0..size.width {
             let dx1 = x as f32 - pos1.x;
             let dy1 = y as f32 - pos1.y;
             let r2_1 = dx1 * dx1 + dy1 * dy1;
@@ -197,12 +196,12 @@ fn make_blended_stars(
             let v2 = amp2 * (-r2_2 / (2.0 * sigma * sigma)).exp();
 
             if v1 > 0.001 || v2 > 0.001 {
-                pixels[y * width + x] += v1 + v2;
+                pixels[size.index_of(Vec2us::new(x, y))] += v1 + v2;
             }
         }
     }
 
-    Buffer2::new(width, height, pixels)
+    Buffer2::new(size.width, size.height, pixels)
 }
 
 /// Test centroiding with a nearby contaminating star.
@@ -215,7 +214,14 @@ fn test_centroid_with_nearby_star() {
     // Primary star at center, fainter companion 8 pixels away
     let primary_pos = Vec2::new(32.0, 32.0);
     let secondary_pos = Vec2::new(40.0, 32.0); // 8 pixels separation
-    let pixels = make_blended_stars(width, height, primary_pos, secondary_pos, sigma, 0.8, 0.3);
+    let pixels = make_blended_stars(
+        Size2us::new(width, height),
+        primary_pos,
+        secondary_pos,
+        sigma,
+        0.8,
+        0.3,
+    );
 
     let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
     let expected_fwhm = FWHM_TO_SIGMA * sigma;
@@ -252,7 +258,14 @@ fn test_centroid_blended_stars() {
     // Two stars only 5 pixels apart (significant overlap)
     let primary_pos = Vec2::new(32.0, 32.0);
     let secondary_pos = Vec2::new(37.0, 32.0);
-    let pixels = make_blended_stars(width, height, primary_pos, secondary_pos, sigma, 0.8, 0.5);
+    let pixels = make_blended_stars(
+        Size2us::new(width, height),
+        primary_pos,
+        secondary_pos,
+        sigma,
+        0.8,
+        0.5,
+    );
 
     let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
     let expected_fwhm = FWHM_TO_SIGMA * sigma;
@@ -359,8 +372,7 @@ fn test_eccentricity_with_contamination() {
 
     // Star with nearby companion (will appear elongated)
     let contaminated = make_blended_stars(
-        width,
-        height,
+        Size2us::new(width, height),
         Vec2::splat(32.0),
         Vec2::new(38.0, 32.0),
         sigma,
@@ -403,21 +415,20 @@ fn test_eccentricity_with_contamination() {
 
 /// Create a rotated elliptical Gaussian.
 fn make_rotated_elliptical_star(
-    width: usize,
-    height: usize,
+    size: Size2us,
     pos: Vec2,
     sigma_major: f32,
     sigma_minor: f32,
     angle_rad: f32,
     amplitude: f32,
 ) -> Buffer2<f32> {
-    let mut pixels = vec![0.1f32; width * height];
+    let mut pixels = vec![0.1f32; size.pixel_count()];
 
     let cos_a = angle_rad.cos();
     let sin_a = angle_rad.sin();
 
-    for y in 0..height {
-        for x in 0..width {
+    for y in 0..size.height {
+        for x in 0..size.width {
             let dx = x as f32 - pos.x;
             let dy = y as f32 - pos.y;
 
@@ -430,12 +441,12 @@ fn make_rotated_elliptical_star(
             let value = amplitude * (-r2 / 2.0).exp();
 
             if value > 0.001 {
-                pixels[y * width + x] += value;
+                pixels[size.index_of(Vec2us::new(x, y))] += value;
             }
         }
     }
 
-    Buffer2::new(width, height, pixels)
+    Buffer2::new(size.width, size.height, pixels)
 }
 
 /// Test centroiding on a 45-degree rotated ellipse.
@@ -446,7 +457,8 @@ fn test_centroid_rotated_ellipse_45deg() {
     let true_pos = Vec2::new(32.3, 32.7);
     let angle = FRAC_PI_4; // 45 degrees
 
-    let pixels = make_rotated_elliptical_star(width, height, true_pos, 4.0, 2.0, angle, 0.8);
+    let pixels =
+        make_rotated_elliptical_star(Size2us::new(width, height), true_pos, 4.0, 2.0, angle, 0.8);
     let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
 
     let result = refine_centroid(
@@ -482,8 +494,14 @@ fn test_centroid_various_rotation_angles() {
     // Test multiple rotation angles
     for angle_deg in [0, 30, 45, 60, 90, 120, 150] {
         let angle_rad = (angle_deg as f32).to_radians();
-        let pixels =
-            make_rotated_elliptical_star(width, height, true_pos, 4.0, 2.0, angle_rad, 0.8);
+        let pixels = make_rotated_elliptical_star(
+            Size2us::new(width, height),
+            true_pos,
+            4.0,
+            2.0,
+            angle_rad,
+            0.8,
+        );
 
         let result = refine_centroid(
             &pixels,
@@ -523,7 +541,14 @@ fn test_eccentricity_rotation_invariant() {
 
     for angle_deg in [0, 45, 90, 135] {
         let angle_rad = (angle_deg as f32).to_radians();
-        let pixels = make_rotated_elliptical_star(width, height, pos, 4.0, 2.0, angle_rad, 0.8);
+        let pixels = make_rotated_elliptical_star(
+            Size2us::new(width, height),
+            pos,
+            4.0,
+            2.0,
+            angle_rad,
+            0.8,
+        );
 
         let metrics = compute_star(&pixels, &bg, pos, 0.0, TEST_STAMP_RADIUS, None, None).unwrap();
         eccentricities.push((angle_deg, metrics.eccentricity));
@@ -559,8 +584,7 @@ fn test_gaussian_fit_rotated_ellipse() {
 
     // Create 45° rotated ellipse
     let pixels = make_rotated_elliptical_star(
-        width,
-        height,
+        Size2us::new(width, height),
         Vec2::new(true_cx, true_cy),
         3.5,
         2.0,
