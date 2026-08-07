@@ -1,5 +1,6 @@
 //! Full pipeline tests - tests complete star detection on various scenarios.
 
+use crate::math::size2us::Size2us;
 use crate::stacking::star_detection::config::Config;
 use crate::stacking::star_detection::detector::StarDetector;
 use crate::stacking::star_detection::test_common::output::image_writer::{
@@ -48,8 +49,7 @@ fn run_test(
 
     save_comparison(
         pixels,
-        width,
-        height,
+        Size2us::new(width, height),
         truth,
         &stars,
         match_radius,

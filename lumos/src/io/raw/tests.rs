@@ -268,17 +268,17 @@ fn test_normalize_u16_large_array() {
 #[test]
 fn test_normalize_active_area_crops_and_applies_bayer_deltas() {
     let area = RawActiveArea {
-        raw_width: 6,
-        size: Size2us::new(3, 2),
+        raw: Size2us::new(6, 4),
+        active: Size2us::new(3, 2),
         margin: Vec2us::new(2, 1),
     };
     let black = 100.0;
     let inv_range = 0.001;
     let filters = 0x94949494;
     let channel_delta = [0.1, 0.2, 0.3, 0.4];
-    let mut raw_data = vec![65_535; area.raw_width * 4];
-    raw_data[area.raw_width + 2..area.raw_width + 5].copy_from_slice(&[50, 100, 200]);
-    raw_data[2 * area.raw_width + 2..2 * area.raw_width + 5].copy_from_slice(&[300, 1100, 1200]);
+    let mut raw_data = vec![65_535; area.raw.width * 4];
+    raw_data[area.raw.width + 2..area.raw.width + 5].copy_from_slice(&[50, 100, 200]);
+    raw_data[2 * area.raw.width + 2..2 * area.raw.width + 5].copy_from_slice(&[300, 1100, 1200]);
 
     let without_delta =
         normalize_active_area::<true>(&raw_data, area, black, inv_range, None, None);
@@ -342,7 +342,12 @@ fn direct_and_calibration_normalization_share_raw_linear_color_scale() {
             for raw_y in 0..3 {
                 for raw_x in 0..3 {
                     assert_eq!(
-                        raw_filter_color(filters, raw_y, raw_x, top_margin, left_margin),
+                        raw_filter_color(
+                            filters,
+                            raw_y,
+                            raw_x,
+                            Vec2us::new(left_margin, top_margin)
+                        ),
                         raw_pattern.color_at(raw_y, raw_x)
                     );
                 }
@@ -352,15 +357,14 @@ fn direct_and_calibration_normalization_share_raw_linear_color_scale() {
             apply_bayer_black_corrections(
                 &mut direct,
                 raw_width,
-                top_margin,
-                left_margin,
+                Vec2us::new(left_margin, top_margin),
                 filters,
                 &channel_delta,
                 None,
             );
             let area = RawActiveArea {
-                raw_width,
-                size: Size2us::new(2, 2),
+                raw: Size2us::new(raw_width, 3),
+                active: Size2us::new(2, 2),
                 margin: Vec2us::new(left_margin, top_margin),
             };
             let calibration = normalize_active_area::<false>(
@@ -375,13 +379,13 @@ fn direct_and_calibration_normalization_share_raw_linear_color_scale() {
                 None,
             );
 
-            for y in 0..area.size.height {
-                for x in 0..area.size.width {
+            for y in 0..area.active.height {
+                for x in 0..area.active.width {
                     let active_channel = active_cfa.color_at(x, y) as usize;
                     assert_eq!(active_channel, libraw_filter_color(filters, y, x));
                     let expected = 0.5 - channel_delta[active_channel];
                     let direct_value = direct[(y + top_margin) * raw_width + x + left_margin];
-                    let calibration_value = calibration[y * area.size.width + x];
+                    let calibration_value = calibration[y * area.active.width + x];
                     assert!(
                         (direct_value - expected).abs() < 1e-6,
                         "direct margin ({top_margin}, {left_margin}), ({y}, {x})"
@@ -412,8 +416,7 @@ fn spatial_black_repeat_uses_visible_coordinates_with_nonzero_margins() {
         assert!((actual - expected).abs() < 1e-8);
     }
     let repeat = black.repeat.as_ref().unwrap();
-    assert_eq!(repeat.width, 3);
-    assert_eq!(repeat.height, 2);
+    assert_eq!(repeat.size, Size2us::new(3, 2));
     for (&actual, expected) in repeat
         .delta_norm
         .iter()
@@ -423,21 +426,20 @@ fn spatial_black_repeat_uses_visible_coordinates_with_nonzero_margins() {
     }
 
     let area = RawActiveArea {
-        raw_width: 7,
-        size: Size2us::new(3, 2),
+        raw: Size2us::new(7, 4),
+        active: Size2us::new(3, 2),
         margin: Vec2us::new(2, 1),
     };
-    let mut raw_data = vec![0u16; area.raw_width * 4];
-    raw_data[area.raw_width + 2..area.raw_width + 5].copy_from_slice(&[315, 327, 319]);
-    raw_data[2 * area.raw_width + 2..2 * area.raw_width + 5].copy_from_slice(&[331, 343, 335]);
+    let mut raw_data = vec![0u16; area.raw.width * 4];
+    raw_data[area.raw.width + 2..area.raw.width + 5].copy_from_slice(&[315, 327, 319]);
+    raw_data[2 * area.raw.width + 2..2 * area.raw.width + 5].copy_from_slice(&[331, 343, 335]);
 
     let mut direct =
         normalize::normalize_u16_to_f32_parallel(&raw_data, black.common, black.inv_range);
     apply_bayer_black_corrections(
         &mut direct,
-        area.raw_width,
-        area.margin.y,
-        area.margin.x,
+        area.raw.width,
+        area.margin,
         0x94949494,
         &black.channel_delta_norm,
         black.repeat.as_ref(),
@@ -454,10 +456,10 @@ fn spatial_black_repeat_uses_visible_coordinates_with_nonzero_margins() {
         black.repeat.as_ref(),
     );
 
-    for y in 0..area.size.height {
-        for x in 0..area.size.width {
-            let direct_value = direct[(y + area.margin.y) * area.raw_width + x + area.margin.x];
-            let calibration_value = calibration[y * area.size.width + x];
+    for y in 0..area.active.height {
+        for x in 0..area.active.width {
+            let direct_value = direct[(y + area.margin.y) * area.raw.width + x + area.margin.x];
+            let calibration_value = calibration[y * area.active.width + x];
             assert!((direct_value - 0.2).abs() < 1e-7, "direct ({x}, {y})");
             assert!(
                 (calibration_value - 0.2).abs() < 1e-7,
@@ -480,16 +482,15 @@ fn xtrans_direct_and_calibration_black_corrections_match() {
     let inv_range = 0.001;
     let raw_data = vec![600u16; raw_width * raw_height];
     let repeat = BlackRepeat {
-        width: 3,
-        height: 2,
+        size: Size2us::new(3, 2),
         delta_norm: [0.0, 0.002, 0.004, 0.006, 0.008, 0.010].into(),
     };
 
     for top_margin in 0..6 {
         for left_margin in 0..6 {
             let area = RawActiveArea {
-                raw_width,
-                size: Size2us::new(6, 6),
+                raw: Size2us::new(raw_width, raw_height),
+                active: Size2us::new(6, 6),
                 margin: Vec2us::new(left_margin, top_margin),
             };
             let visible_pattern = std::array::from_fn(|y| {
@@ -499,7 +500,7 @@ fn xtrans_direct_and_calibration_black_corrections_match() {
             let direct = XTransImage::with_margins(
                 &raw_data,
                 Size2us::new(raw_width, raw_height),
-                area.size,
+                area.active,
                 area.margin,
                 XTransPattern::new(raw_pattern).unwrap(),
                 channel_black,
@@ -518,8 +519,8 @@ fn xtrans_direct_and_calibration_black_corrections_match() {
                 Some(&repeat),
             );
 
-            for y in 0..area.size.height {
-                for x in 0..area.size.width {
+            for y in 0..area.active.height {
+                for x in 0..area.active.width {
                     let raw_y = y + area.margin.y;
                     let raw_x = x + area.margin.x;
                     let raw_channel = raw_pattern[raw_y % 6][raw_x % 6] as usize;
@@ -530,7 +531,7 @@ fn xtrans_direct_and_calibration_black_corrections_match() {
 
                     let expected = [0.49, 0.48, 0.47][raw_channel] - repeat.at_visible(y, x);
                     let direct_value = direct.read_normalized(raw_y, raw_x);
-                    let calibration_value = calibration[y * area.size.width + x];
+                    let calibration_value = calibration[y * area.active.width + x];
                     assert!(
                         (direct_value - expected).abs() < 1e-7,
                         "direct margin ({top_margin}, {left_margin}), ({y}, {x})"
@@ -574,9 +575,9 @@ fn real_xtrans_channel_black_matches_direct_and_calibration_paths() {
     let pattern = raw.raw_xtrans_pattern();
     let direct = XTransImage::with_margins(
         raw_data,
-        Size2us::new(raw.raw_width, raw.raw_height),
-        Size2us::new(raw.width, raw.height),
-        Vec2us::new(raw.left_margin, raw.top_margin),
+        raw.area.raw,
+        raw.area.active,
+        raw.area.margin,
         XTransPattern::new(pattern).unwrap(),
         [
             raw.black_level.per_channel[0],
@@ -589,11 +590,11 @@ fn real_xtrans_channel_black_matches_direct_and_calibration_paths() {
     let calibration = raw.extract_cfa_pixels::<false>().unwrap();
     let mut compared = 0usize;
 
-    for y in (0..raw.height).step_by(101) {
-        for x in (0..raw.width).step_by(113) {
-            let raw_y = y + raw.top_margin;
-            let raw_x = x + raw.left_margin;
-            let calibration_value = calibration[y * raw.width + x];
+    for y in (0..raw.area.active.height).step_by(101) {
+        for x in (0..raw.area.active.width).step_by(113) {
+            let raw_y = y + raw.area.margin.y;
+            let raw_x = x + raw.area.margin.x;
+            let calibration_value = calibration[y * raw.area.active.width + x];
             if (0.0..=1.0).contains(&calibration_value) {
                 let direct_value = direct.read_normalized(raw_y, raw_x);
                 assert!((direct_value - calibration_value).abs() < 1e-7);
@@ -872,7 +873,7 @@ fn test_apply_bayer_black_corrections_identity() {
     let mut data = vec![0.5f32; 4];
     let delta = [0.0; 4];
 
-    apply_bayer_black_corrections(&mut data, 2, 0, 0, 0x94949494, &delta, None);
+    apply_bayer_black_corrections(&mut data, 2, Vec2us::ZERO, 0x94949494, &delta, None);
 
     // No change expected
     for &v in &data {
@@ -886,7 +887,7 @@ fn test_apply_bayer_black_corrections() {
     let mut data = vec![0.5f32; 4];
     let delta = [0.1, 0.0, 0.05, 0.0]; // R has delta=0.1, B has delta=0.05
 
-    apply_bayer_black_corrections(&mut data, 2, 0, 0, 0x94949494, &delta, None);
+    apply_bayer_black_corrections(&mut data, 2, Vec2us::ZERO, 0x94949494, &delta, None);
 
     assert!(
         (data[0] - 0.4).abs() < 1e-6,
@@ -907,7 +908,7 @@ fn test_apply_bayer_black_corrections_clamp_negative() {
     let mut data = vec![0.05f32; 4];
     let delta = [0.1, 0.0, 0.0, 0.0]; // R delta bigger than value
 
-    apply_bayer_black_corrections(&mut data, 2, 0, 0, 0x94949494, &delta, None);
+    apply_bayer_black_corrections(&mut data, 2, Vec2us::ZERO, 0x94949494, &delta, None);
 
     // R at (0,0): (0.05 - 0.1).max(0.0) = 0.0
     assert_eq!(data[0], 0.0, "Should clamp to 0.0");

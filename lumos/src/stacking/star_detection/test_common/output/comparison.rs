@@ -2,6 +2,7 @@
 //!
 //! Creates annotated images showing ground truth vs detected stars.
 
+use crate::math::size2us::Size2us;
 use crate::stacking::star_detection::star::Star;
 use crate::stacking::star_detection::test_common::output::image_writer::gray_to_rgb_image;
 use crate::testing::synthetic::observe::ObservedSource;
@@ -24,7 +25,7 @@ mod colors {
 ///
 /// # Arguments
 /// * `pixels` - Background image pixels
-/// * `width`, `height` - Image dimensions
+/// * `size` - Image dimensions
 /// * `ground_truth` - True star positions
 /// * `detected` - Detected stars
 /// * `match_radius` - Maximum distance for matching (in pixels)
@@ -38,13 +39,12 @@ mod colors {
 /// - Cyan crosses: detected centroids
 pub(super) fn create_comparison_image(
     pixels: &[f32],
-    width: usize,
-    height: usize,
+    size: Size2us,
     ground_truth: &[ObservedSource],
     detected: &[Star],
     match_radius: f32,
 ) -> Image {
-    let mut image = gray_to_rgb_image(pixels, width, height);
+    let mut image = gray_to_rgb_image(pixels, size.width, size.height);
 
     // Match detected stars to ground truth
     let matches = match_stars(ground_truth, detected, match_radius);

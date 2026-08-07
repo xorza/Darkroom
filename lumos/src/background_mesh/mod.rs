@@ -58,28 +58,30 @@ impl TileGrid {
     /// interpolation path handles correctly (1-tile dimensions degenerate to a constant fill).
     ///
     /// Constructed and populated only by `MeshWorkspace`.
-    fn new_uninit(width: usize, height: usize, tile_size: usize) -> Self {
+    fn new_uninit(dimensions: Size2us, tile_size: usize) -> Self {
         assert!(
-            width > 0 && height > 0 && tile_size > 0,
-            "TileGrid needs non-zero dimensions and tile size, got {width}x{height} tile {tile_size}"
+            dimensions.width > 0 && dimensions.height > 0 && tile_size > 0,
+            "TileGrid needs non-zero dimensions and tile size, got {}x{} tile {tile_size}",
+            dimensions.width,
+            dimensions.height
         );
-        let tile_size = tile_size.min(width).min(height);
-        let tiles_x = width.div_ceil(tile_size);
-        let tiles_y = height.div_ceil(tile_size);
+        let tile_size = tile_size.min(dimensions.width).min(dimensions.height);
+        let tiles_x = dimensions.width.div_ceil(tile_size);
+        let tiles_y = dimensions.height.div_ceil(tile_size);
         let n = tiles_x * tiles_y;
 
         // Precompute tile center X-coordinates (invariant across rows)
         let centers_x: Vec<f32> = (0..tiles_x)
             .map(|tx| {
                 let x_start = tx * tile_size;
-                let x_end = (x_start + tile_size).min(width);
+                let x_end = (x_start + tile_size).min(dimensions.width);
                 (x_start + x_end) as f32 * 0.5
             })
             .collect();
         let centers_y: Vec<f32> = (0..tiles_y)
             .map(|ty| {
                 let y_start = ty * tile_size;
-                let y_end = (y_start + tile_size).min(height);
+                let y_end = (y_start + tile_size).min(dimensions.height);
                 (y_start + y_end) as f32 * 0.5
             })
             .collect();
@@ -90,13 +92,13 @@ impl TileGrid {
             centers_x,
             centers_y,
             tile_size,
-            dimensions: Size2us::new(width, height),
+            dimensions,
         }
     }
 
-    fn matches_layout(&self, width: usize, height: usize, tile_size: usize) -> bool {
-        self.dimensions == Size2us::new(width, height)
-            && self.tile_size == tile_size.min(width).min(height)
+    fn matches_layout(&self, dimensions: Size2us, tile_size: usize) -> bool {
+        self.dimensions == dimensions
+            && self.tile_size == tile_size.min(dimensions.width).min(dimensions.height)
     }
 
     /// Second derivative of sky in Y at tile (tx, ty) for natural cubic spline.

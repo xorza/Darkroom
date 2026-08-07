@@ -25,6 +25,7 @@ mod tests;
 use arrayvec::ArrayVec;
 use glam::Vec2;
 
+use crate::math::size2us::Size2us;
 use crate::math::statistics::{ClippedStats, sigma_clipped_median_mad_arrayvec};
 use crate::math::{FWHM_TO_SIGMA, sigma_to_fwhm};
 use crate::stacking::star_detection::background::estimate::BackgroundEstimate;
@@ -92,13 +93,13 @@ fn compute_stamp_radius(expected_fwhm: f32) -> usize {
 
 /// Check if position is within valid bounds for stamp extraction.
 #[inline]
-fn is_valid_stamp_position(pos: Vec2, width: usize, height: usize, stamp_radius: usize) -> bool {
+fn is_valid_stamp_position(pos: Vec2, size: Size2us, stamp_radius: usize) -> bool {
     let icx = pos.x.round() as isize;
     let icy = pos.y.round() as isize;
     icx >= stamp_radius as isize
         && icy >= stamp_radius as isize
-        && icx < (width - stamp_radius) as isize
-        && icy < (height - stamp_radius) as isize
+        && icx < (size.width - stamp_radius) as isize
+        && icy < (size.height - stamp_radius) as isize
 }
 
 /// Stack-allocated stamp data extracted around a star candidate.
@@ -123,7 +124,7 @@ fn extract_stamp(pixels: &Buffer2<f32>, pos: Vec2, stamp_radius: usize) -> Optio
     let width = pixels.width();
     let height = pixels.height();
 
-    if !is_valid_stamp_position(pos, width, height, stamp_radius) {
+    if !is_valid_stamp_position(pos, Size2us::new(width, height), stamp_radius) {
         return None;
     }
 
@@ -256,8 +257,7 @@ struct LocalBackground {
 /// The local background/noise, or None if not enough valid pixels
 fn compute_annulus_background(
     pixels: &[f32],
-    width: usize,
-    height: usize,
+    size: Size2us,
     pos: Vec2,
     inner_radius: usize,
     outer_radius: usize,
@@ -281,8 +281,8 @@ fn compute_annulus_background(
             let x = icx + dx as isize;
             let y = icy + dy as isize;
 
-            if x >= 0 && x < width as isize && y >= 0 && y < height as isize {
-                values.push(pixels[y as usize * width + x as usize]);
+            if x >= 0 && x < size.width as isize && y >= 0 && y < size.height as isize {
+                values.push(pixels[y as usize * size.width + x as usize]);
             }
         }
     }
@@ -353,8 +353,7 @@ pub(super) fn measure_star(
     for _ in 0..phase1_iters {
         let new_pos = refine_centroid(
             pixels,
-            width,
-            height,
+            Size2us::new(width, height),
             background,
             pos,
             stamp_radius,
@@ -389,7 +388,13 @@ pub(super) fn measure_star(
         LocalBackgroundMethod::LocalAnnulus => {
             let inner_radius = stamp_radius;
             let outer_radius = (stamp_radius as f32 * 1.5).ceil() as usize;
-            compute_annulus_background(pixels, width, height, pos, inner_radius, outer_radius)
+            compute_annulus_background(
+                pixels,
+                Size2us::new(width, height),
+                pos,
+                inner_radius,
+                outer_radius,
+            )
         }
     };
     let LocalBackground {
@@ -481,14 +486,13 @@ pub(super) fn measure_star(
 /// Uses f64 accumulators for numerical stability.
 fn refine_centroid(
     pixels: &[f32],
-    width: usize,
-    height: usize,
+    size: Size2us,
     background: &BackgroundEstimate,
     pos: Vec2,
     stamp_radius: usize,
     expected_fwhm: f32,
 ) -> Option<Vec2> {
-    if !is_valid_stamp_position(pos, width, height, stamp_radius) {
+    if !is_valid_stamp_position(pos, size, stamp_radius) {
         return None;
     }
 
@@ -512,7 +516,7 @@ fn refine_centroid(
         for dx in -stamp_radius_i32..=stamp_radius_i32 {
             let x = (icx + dx as isize) as usize;
             let y = (icy + dy as isize) as usize;
-            let idx = y * width + x;
+            let idx = y * size.width + x;
 
             // Background-subtracted value
             let value = (pixels[idx] - background.background[idx]).max(0.0) as f64;
@@ -709,7 +713,7 @@ fn compute_star(
     let width = pixels.width();
     let height = pixels.height();
 
-    if !is_valid_stamp_position(pos, width, height, stamp_radius) {
+    if !is_valid_stamp_position(pos, Size2us::new(width, height), stamp_radius) {
         return None;
     }
 

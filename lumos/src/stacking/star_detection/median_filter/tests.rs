@@ -400,7 +400,7 @@ fn median_at_edge_truth_table() {
     ];
 
     for case in cases {
-        let actual = median_at_edge(&pixels, 4, 4, case.x, case.y);
+        let actual = median_at_edge(&pixels, Size2us::new(4, 4), Vec2us::new(case.x, case.y));
         assert!((actual - case.expected).abs() < 1e-6, "{case:?}");
     }
 }

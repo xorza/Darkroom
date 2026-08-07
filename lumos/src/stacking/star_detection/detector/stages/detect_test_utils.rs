@@ -1,5 +1,6 @@
 //! Test utilities for the detect stage.
 
+use crate::math::size2us::Size2us;
 use crate::stacking::star_detection::background::estimate::BackgroundEstimate;
 use crate::stacking::star_detection::config::DetectionConfig;
 use crate::stacking::star_detection::deblend::region::Region;
@@ -17,6 +18,6 @@ pub(crate) fn detect_stars_test(
     background: &BackgroundEstimate,
     config: &DetectionConfig,
 ) -> Vec<Region> {
-    let mut pool = DetectionResources::new(pixels.width(), pixels.height());
+    let mut pool = DetectionResources::new(Size2us::new(pixels.width(), pixels.height()));
     detect(pixels, background, None, config, &mut pool).regions
 }

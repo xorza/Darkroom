@@ -165,6 +165,7 @@ fn peaks_too_close(a: Vec2us, b: Vec2us, min_sep_sq: usize) -> bool {
 
 #[cfg(test)]
 mod internals {
+    use crate::math::size2us::Size2us;
     use crate::math::vec2us::Vec2us;
     use imaginarium::Buffer2;
     use smallvec::SmallVec;
@@ -186,12 +187,11 @@ mod internals {
     }
 
     pub(super) fn make_test_component(
-        width: usize,
-        height: usize,
+        size: Size2us,
         stars: &[(usize, usize, f32, f32)],
     ) -> TestComponent {
-        let mut pixels = Buffer2::new_filled(width, height, 0.0f32);
-        let mut labels = Buffer2::new_filled(width, height, 0u32);
+        let mut pixels = Buffer2::new_filled(size.width, size.height, 0.0f32);
+        let mut labels = Buffer2::new_filled(size.width, size.height, 0u32);
         let mut bbox = URect::empty();
         let mut area = 0;
 
@@ -201,7 +201,7 @@ mod internals {
                 for offset_x in -radius..=radius {
                     let x = (center_x as i32 + offset_x) as usize;
                     let y = (center_y as i32 + offset_y) as usize;
-                    if x >= width || y >= height {
+                    if !size.contains(Vec2us::new(x, y)) {
                         continue;
                     }
 

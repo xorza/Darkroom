@@ -1,6 +1,8 @@
 //! Tests for multi-threshold deblending.
 
 use crate::math::rect::URect;
+use crate::math::size2us::Size2us;
+use crate::math::vec2us::Vec2us;
 use crate::stacking::star_detection::deblend::internals::{
     TestComponent, deblend_multi_threshold_test, make_test_component,
 };
@@ -13,7 +15,7 @@ fn test_single_star_no_deblending() {
         pixels,
         labels,
         data,
-    } = make_test_component(100, 100, &[(50, 50, 1.0, 3.0)]);
+    } = make_test_component(Size2us::new(100, 100), &[(50, 50, 1.0, 3.0)]);
     let result = deblend_multi_threshold_test(&data, &pixels, &labels, 32, 3, 0.005);
 
     assert_eq!(result.len(), 1, "Single star should produce one object");
@@ -27,7 +29,10 @@ fn test_two_separated_stars_deblend() {
         pixels,
         labels,
         data,
-    } = make_test_component(100, 100, &[(30, 50, 1.0, 2.5), (70, 50, 0.8, 2.5)]);
+    } = make_test_component(
+        Size2us::new(100, 100),
+        &[(30, 50, 1.0, 2.5), (70, 50, 0.8, 2.5)],
+    );
 
     let result = deblend_multi_threshold_test(&data, &pixels, &labels, 32, 3, 0.005);
 
@@ -56,7 +61,10 @@ fn test_late_gaussian_split_uses_full_threshold_ladder() {
         pixels,
         labels,
         data,
-    } = make_test_component(100, 100, &[(44, 50, 1.0, 4.0), (56, 50, 1.0, 4.0)]);
+    } = make_test_component(
+        Size2us::new(100, 100),
+        &[(44, 50, 1.0, 4.0), (56, 50, 1.0, 4.0)],
+    );
 
     let threshold_count = 32;
     let low = data
@@ -96,7 +104,10 @@ fn test_faint_secondary_below_contrast() {
         pixels,
         labels,
         data,
-    } = make_test_component(100, 100, &[(30, 50, 1.0, 2.5), (70, 50, 0.001, 2.5)]);
+    } = make_test_component(
+        Size2us::new(100, 100),
+        &[(30, 50, 1.0, 2.5), (70, 50, 0.001, 2.5)],
+    );
 
     let result = deblend_multi_threshold_test(&data, &pixels, &labels, 32, 3, 0.01);
 
@@ -140,7 +151,10 @@ fn test_close_peaks_merge() {
         pixels,
         labels,
         data,
-    } = make_test_component(100, 100, &[(48, 50, 1.0, 2.0), (52, 50, 0.9, 2.0)]);
+    } = make_test_component(
+        Size2us::new(100, 100),
+        &[(48, 50, 1.0, 2.0), (52, 50, 0.9, 2.0)],
+    );
 
     let result = deblend_multi_threshold_test(&data, &pixels, &labels, 32, 5, 0.005);
 
@@ -168,7 +182,10 @@ fn test_deblend_disabled_with_high_contrast() {
         pixels,
         labels,
         data,
-    } = make_test_component(100, 100, &[(30, 50, 1.0, 2.5), (70, 50, 0.8, 2.5)]);
+    } = make_test_component(
+        Size2us::new(100, 100),
+        &[(30, 50, 1.0, 2.5), (70, 50, 0.8, 2.5)],
+    );
 
     let result = deblend_multi_threshold_test(&data, &pixels, &labels, 32, 3, 1.0);
 
@@ -186,8 +203,7 @@ fn test_three_stars_deblend() {
         labels,
         data,
     } = make_test_component(
-        150,
-        100,
+        Size2us::new(150, 100),
         &[(30, 50, 1.0, 2.5), (75, 50, 0.9, 2.5), (120, 50, 0.8, 2.5)],
     );
 
@@ -213,8 +229,7 @@ fn test_hierarchical_deblend() {
         labels,
         data,
     } = make_test_component(
-        150,
-        100,
+        Size2us::new(150, 100),
         &[(30, 50, 1.0, 2.5), (100, 50, 0.8, 2.5), (115, 50, 0.7, 2.5)],
     );
 
@@ -273,7 +288,10 @@ fn test_equal_brightness_stars() {
         pixels,
         labels,
         data,
-    } = make_test_component(100, 100, &[(30, 50, 1.0, 2.5), (70, 50, 1.0, 2.5)]);
+    } = make_test_component(
+        Size2us::new(100, 100),
+        &[(30, 50, 1.0, 2.5), (70, 50, 1.0, 2.5)],
+    );
 
     let result = deblend_multi_threshold_test(&data, &pixels, &labels, 32, 3, 0.005);
 
@@ -297,7 +315,10 @@ fn test_contrast_at_boundary() {
         pixels,
         labels,
         data,
-    } = make_test_component(100, 100, &[(30, 50, 1.0, 2.5), (70, 50, 0.1, 2.5)]);
+    } = make_test_component(
+        Size2us::new(100, 100),
+        &[(30, 50, 1.0, 2.5), (70, 50, 0.1, 2.5)],
+    );
 
     let result_pass = deblend_multi_threshold_test(&data, &pixels, &labels, 32, 3, 0.09);
 
@@ -315,7 +336,10 @@ fn test_pixel_assignment_conservation() {
         pixels,
         labels,
         data,
-    } = make_test_component(100, 100, &[(30, 50, 1.0, 2.5), (70, 50, 0.8, 2.5)]);
+    } = make_test_component(
+        Size2us::new(100, 100),
+        &[(30, 50, 1.0, 2.5), (70, 50, 0.8, 2.5)],
+    );
 
     let result = deblend_multi_threshold_test(&data, &pixels, &labels, 32, 3, 0.005);
 
@@ -332,7 +356,10 @@ fn test_vertical_star_pair() {
         pixels,
         labels,
         data,
-    } = make_test_component(100, 100, &[(50, 30, 1.0, 2.5), (50, 70, 0.8, 2.5)]);
+    } = make_test_component(
+        Size2us::new(100, 100),
+        &[(50, 30, 1.0, 2.5), (50, 70, 0.8, 2.5)],
+    );
 
     let result = deblend_multi_threshold_test(&data, &pixels, &labels, 32, 3, 0.005);
 
@@ -350,7 +377,10 @@ fn test_diagonal_star_pair() {
         pixels,
         labels,
         data,
-    } = make_test_component(100, 100, &[(30, 30, 1.0, 2.5), (70, 70, 0.8, 2.5)]);
+    } = make_test_component(
+        Size2us::new(100, 100),
+        &[(30, 30, 1.0, 2.5), (70, 70, 0.8, 2.5)],
+    );
 
     let result = deblend_multi_threshold_test(&data, &pixels, &labels, 32, 3, 0.005);
 
@@ -404,7 +434,10 @@ fn test_n_thresholds_effect() {
         pixels,
         labels,
         data,
-    } = make_test_component(100, 100, &[(35, 50, 1.0, 2.5), (65, 50, 0.9, 2.5)]);
+    } = make_test_component(
+        Size2us::new(100, 100),
+        &[(35, 50, 1.0, 2.5), (65, 50, 0.9, 2.5)],
+    );
     let result_few = deblend_multi_threshold_test(&data, &pixels, &labels, 4, 3, 0.005);
     let result_many = deblend_multi_threshold_test(&data, &pixels, &labels, 64, 3, 0.005);
 
@@ -545,7 +578,7 @@ fn test_many_stars_max_peaks_limit() {
         pixels,
         labels,
         data,
-    } = make_test_component(180, 100, &stars);
+    } = make_test_component(Size2us::new(180, 100), &stars);
 
     let result = deblend_multi_threshold_test(&data, &pixels, &labels, 32, 3, 0.005);
 
@@ -580,7 +613,7 @@ fn test_large_tree_over_64_nodes() {
         pixels,
         labels,
         data,
-    } = make_test_component(150, 150, &stars);
+    } = make_test_component(Size2us::new(150, 150), &stars);
 
     let result = deblend_multi_threshold_test(&data, &pixels, &labels, 64, 3, 0.005);
 
@@ -610,7 +643,7 @@ fn test_very_large_tree_heap_fallback() {
         pixels,
         labels,
         data,
-    } = make_test_component(150, 150, &stars);
+    } = make_test_component(Size2us::new(150, 150), &stars);
 
     let result = deblend_multi_threshold_test(&data, &pixels, &labels, 128, 2, 0.001);
 
@@ -629,7 +662,10 @@ fn test_buffer_reuse_consistency() {
         pixels,
         labels,
         data,
-    } = make_test_component(100, 100, &[(30, 50, 1.0, 2.5), (70, 50, 0.8, 2.5)]);
+    } = make_test_component(
+        Size2us::new(100, 100),
+        &[(30, 50, 1.0, 2.5), (70, 50, 0.8, 2.5)],
+    );
 
     let result1 = deblend_multi_threshold_test(&data, &pixels, &labels, 32, 3, 0.005);
     let result2 = deblend_multi_threshold_test(&data, &pixels, &labels, 32, 3, 0.005);
@@ -656,8 +692,7 @@ fn test_connected_regions_complex_shape() {
         labels,
         data,
     } = make_test_component(
-        100,
-        50,
+        Size2us::new(100, 50),
         &[
             (20, 25, 1.0, 3.0), // Left blob
             (80, 25, 0.9, 3.0), // Right blob
@@ -688,8 +723,7 @@ fn test_bbox_contains_all_peaks() {
         labels,
         data,
     } = make_test_component(
-        150,
-        100,
+        Size2us::new(150, 100),
         &[(30, 30, 1.0, 2.5), (75, 50, 0.9, 2.5), (120, 70, 0.8, 2.5)],
     );
 
@@ -712,7 +746,10 @@ fn test_peak_values_match_image() {
         pixels,
         labels,
         data,
-    } = make_test_component(100, 100, &[(30, 50, 1.0, 2.5), (70, 50, 0.8, 2.5)]);
+    } = make_test_component(
+        Size2us::new(100, 100),
+        &[(30, 50, 1.0, 2.5), (70, 50, 0.8, 2.5)],
+    );
 
     let result = deblend_multi_threshold_test(&data, &pixels, &labels, 32, 3, 0.005);
 
@@ -734,7 +771,10 @@ fn test_single_threshold_level() {
         pixels,
         labels,
         data,
-    } = make_test_component(100, 100, &[(30, 50, 1.0, 2.5), (70, 50, 0.8, 2.5)]);
+    } = make_test_component(
+        Size2us::new(100, 100),
+        &[(30, 50, 1.0, 2.5), (70, 50, 0.8, 2.5)],
+    );
 
     let result = deblend_multi_threshold_test(&data, &pixels, &labels, 1, 3, 0.005);
 
@@ -753,7 +793,7 @@ fn test_zero_threshold_level() {
         pixels,
         labels,
         data,
-    } = make_test_component(100, 100, &[(50, 50, 1.0, 2.5)]);
+    } = make_test_component(Size2us::new(100, 100), &[(50, 50, 1.0, 2.5)]);
 
     let result = deblend_multi_threshold_test(&data, &pixels, &labels, 0, 3, 0.005);
 
@@ -853,9 +893,8 @@ fn test_pixel_grid_single_pixel() {
 #[test]
 fn test_node_grid_empty() {
     let grid = NodeGrid::empty();
-    assert_eq!(grid.width, 0);
-    assert_eq!(grid.height, 0);
-    assert!(grid.get(0, 0).is_none());
+    assert_eq!(grid.size, Size2us::default());
+    assert!(grid.get(Vec2us::new(0, 0)).is_none());
 }
 
 #[test]
@@ -879,21 +918,21 @@ fn test_node_grid_basic_operations() {
     grid.reset_with_pixels(&pixels);
 
     // Initially all positions should be unassigned
-    assert!(grid.get(10, 10).is_none());
-    assert!(grid.get(11, 10).is_none());
+    assert!(grid.get(Vec2us::new(10, 10)).is_none());
+    assert!(grid.get(Vec2us::new(11, 10)).is_none());
 
     // Set node indices
-    grid.set(10, 10, 0);
-    grid.set(11, 10, 1);
-    grid.set(10, 11, 0);
+    grid.set(Vec2us::new(10, 10), 0);
+    grid.set(Vec2us::new(11, 10), 1);
+    grid.set(Vec2us::new(10, 11), 0);
 
     // Verify
-    assert_eq!(grid.get(10, 10), Some(0));
-    assert_eq!(grid.get(11, 10), Some(1));
-    assert_eq!(grid.get(10, 11), Some(0));
+    assert_eq!(grid.get(Vec2us::new(10, 10)), Some(0));
+    assert_eq!(grid.get(Vec2us::new(11, 10)), Some(1));
+    assert_eq!(grid.get(Vec2us::new(10, 11)), Some(0));
 
     // Out of bounds should return None
-    assert!(grid.get(100, 100).is_none());
+    assert!(grid.get(Vec2us::new(100, 100)).is_none());
 }
 
 #[test]
@@ -906,12 +945,12 @@ fn test_node_grid_overwrite() {
     let mut grid = NodeGrid::empty();
     grid.reset_with_pixels(&pixels);
 
-    grid.set(5, 5, 10);
-    assert_eq!(grid.get(5, 5), Some(10));
+    grid.set(Vec2us::new(5, 5), 10);
+    assert_eq!(grid.get(Vec2us::new(5, 5)), Some(10));
 
     // Overwrite with new value
-    grid.set(5, 5, 20);
-    assert_eq!(grid.get(5, 5), Some(20));
+    grid.set(Vec2us::new(5, 5), 20);
+    assert_eq!(grid.get(Vec2us::new(5, 5)), Some(20));
 }
 
 #[test]
@@ -924,8 +963,8 @@ fn test_node_grid_reuse() {
         value: 1.0,
     }];
     grid.reset_with_pixels(&pixels1);
-    grid.set(10, 10, 5);
-    assert_eq!(grid.get(10, 10), Some(5));
+    grid.set(Vec2us::new(10, 10), 5);
+    assert_eq!(grid.get(Vec2us::new(10, 10)), Some(5));
 
     // Reuse with different pixels
     let pixels2 = vec![Pixel {
@@ -935,10 +974,10 @@ fn test_node_grid_reuse() {
     grid.reset_with_pixels(&pixels2);
 
     // Old position should no longer be valid
-    assert!(grid.get(10, 10).is_none());
+    assert!(grid.get(Vec2us::new(10, 10)).is_none());
 
     // New position should be unassigned
-    assert!(grid.get(20, 20).is_none());
+    assert!(grid.get(Vec2us::new(20, 20)).is_none());
 }
 
 #[test]
@@ -953,8 +992,8 @@ fn test_node_grid_large_indices() {
 
     // Test with large node index (but within u32 range)
     let large_idx = 1_000_000;
-    grid.set(100, 100, large_idx);
-    assert_eq!(grid.get(100, 100), Some(large_idx));
+    grid.set(Vec2us::new(100, 100), large_idx);
+    assert_eq!(grid.get(Vec2us::new(100, 100)), Some(large_idx));
 }
 
 #[test]
@@ -973,14 +1012,14 @@ fn test_node_grid_boundary() {
     let mut grid = NodeGrid::empty();
     grid.reset_with_pixels(&pixels);
 
-    grid.set(0, 0, 1);
-    grid.set(99, 99, 2);
+    grid.set(Vec2us::new(0, 0), 1);
+    grid.set(Vec2us::new(99, 99), 2);
 
-    assert_eq!(grid.get(0, 0), Some(1));
-    assert_eq!(grid.get(99, 99), Some(2));
+    assert_eq!(grid.get(Vec2us::new(0, 0)), Some(1));
+    assert_eq!(grid.get(Vec2us::new(99, 99)), Some(2));
 
     // Just outside the grid
-    assert!(grid.get(100, 100).is_none());
+    assert!(grid.get(Vec2us::new(100, 100)).is_none());
 }
 
 #[test]

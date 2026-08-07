@@ -13,6 +13,7 @@ use arrayvec::ArrayVec;
 
 use smallvec::SmallVec;
 
+use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 use crate::stacking::star_detection::deblend::region::Region;
 use crate::stacking::star_detection::deblend::{
@@ -56,14 +57,10 @@ struct PixelGrid {
     current_generation: u32,
     /// Separate generation counter for visited state (incremented on each new BFS).
     visited_generation_counter: u32,
-    /// Bounding box offset (min x coordinate).
-    offset_x: usize,
-    /// Bounding box offset (min y coordinate).
-    offset_y: usize,
-    /// Grid width (bbox width + 2 for boundary padding).
-    width: usize,
-    /// Grid height (bbox height + 2 for boundary padding).
-    height: usize,
+    /// Bounding box offset — one cell outside the component's top-left corner.
+    offset: Vec2us,
+    /// Grid extent, the bbox plus one cell of boundary padding on every side.
+    size: Size2us,
 }
 
 impl PixelGrid {
@@ -75,10 +72,8 @@ impl PixelGrid {
             visited_generation: Vec::new(),
             current_generation: 0,
             visited_generation_counter: 0,
-            offset_x: 0,
-            offset_y: 0,
-            width: 0,
-            height: 0,
+            offset: Vec2us::ZERO,
+            size: Size2us::default(),
         }
     }
 
@@ -91,8 +86,7 @@ impl PixelGrid {
     /// clearing O(n) cells, we just increment generation counters O(1).
     fn reset_with_pixels(&mut self, pixels: &[Pixel]) {
         if pixels.is_empty() {
-            self.width = 0;
-            self.height = 0;
+            self.size = Size2us::default();
             return;
         }
 
@@ -123,36 +117,38 @@ impl PixelGrid {
         // The grid is indexed by (pos - offset) so the border cells are at local
         // coordinate 0 on each axis. These cells have no pixel value (generation
         // check returns NO_PIXEL), so BFS never propagates into them.
-        let offset_x = min_x.wrapping_sub(1);
-        let offset_y = min_y.wrapping_sub(1);
-        // width = (max_x - offset_x) + 1 (inclusive) + 1 (right border)
-        // For the wrapping case (min_x=0), offset_x wraps to usize::MAX, and
+        let offset = Vec2us::new(min_x.wrapping_sub(1), min_y.wrapping_sub(1));
+        // width = (max_x - offset.x) + 1 (inclusive) + 1 (right border)
+        // For the wrapping case (min_x=0), offset.x wraps to usize::MAX, and
         // (max_x - usize::MAX) wraps to (max_x + 1), giving correct total with borders.
-        let width = max_x.wrapping_sub(offset_x) + 2;
-        let height = max_y.wrapping_sub(offset_y) + 2;
+        let size = Size2us::new(
+            max_x.wrapping_sub(offset.x) + 2,
+            max_y.wrapping_sub(offset.y) + 2,
+        );
 
-        let size = width * height;
+        let cells = size.pixel_count();
 
         // Grow vectors if needed (never shrink — reuse allocations)
-        if self.values.len() < size {
-            self.values.resize(size, 0.0);
+        if self.values.len() < cells {
+            self.values.resize(cells, 0.0);
         }
-        if self.values_generation.len() < size {
-            self.values_generation.resize(size, 0);
+        if self.values_generation.len() < cells {
+            self.values_generation.resize(cells, 0);
         }
-        if self.visited_generation.len() < size {
-            self.visited_generation.resize(size, 0);
+        if self.visited_generation.len() < cells {
+            self.visited_generation.resize(cells, 0);
         }
 
-        self.offset_x = offset_x;
-        self.offset_y = offset_y;
-        self.width = width;
-        self.height = height;
+        self.offset = offset;
+        self.size = size;
 
         // Populate grid with pixel values (generation-stamped)
         let generation = self.current_generation;
         for p in pixels {
-            let idx = p.pos.y.wrapping_sub(offset_y) * width + p.pos.x.wrapping_sub(offset_x);
+            let idx = size.index_of(Vec2us::new(
+                p.pos.x.wrapping_sub(offset.x),
+                p.pos.y.wrapping_sub(offset.y),
+            ));
             // SAFETY: idx is within size because p.pos is within bounding box + border
             unsafe {
                 *self.values.get_unchecked_mut(idx) = p.value;
@@ -198,14 +194,10 @@ struct NodeGrid {
     nodes_generation: Vec<u32>,
     /// Current generation counter.
     current_generation: u32,
-    /// Bounding box offset (min x coordinate).
-    offset_x: usize,
-    /// Bounding box offset (min y coordinate).
-    offset_y: usize,
-    /// Grid width.
-    width: usize,
-    /// Grid height.
-    height: usize,
+    /// Bounding box offset — the component's top-left corner in image coordinates.
+    offset: Vec2us,
+    /// Grid extent.
+    size: Size2us,
 }
 
 impl NodeGrid {
@@ -215,10 +207,8 @@ impl NodeGrid {
             nodes: Vec::new(),
             nodes_generation: Vec::new(),
             current_generation: 0,
-            offset_x: 0,
-            offset_y: 0,
-            width: 0,
-            height: 0,
+            offset: Vec2us::ZERO,
+            size: Size2us::default(),
         }
     }
 
@@ -226,8 +216,7 @@ impl NodeGrid {
     /// Uses generation counter to avoid O(n) clearing.
     fn reset_with_pixels(&mut self, pixels: &[Pixel]) {
         if pixels.is_empty() {
-            self.width = 0;
-            self.height = 0;
+            self.size = Size2us::default();
             return;
         }
 
@@ -249,32 +238,34 @@ impl NodeGrid {
             max_y = max_y.max(p.pos.y);
         }
 
-        self.offset_x = min_x;
-        self.offset_y = min_y;
-        self.width = max_x - min_x + 1;
-        self.height = max_y - min_y + 1;
+        self.offset = Vec2us::new(min_x, min_y);
+        self.size = Size2us::new(max_x - min_x + 1, max_y - min_y + 1);
 
-        let size = self.width * self.height;
-        if self.nodes.len() < size {
-            self.nodes.resize(size, 0);
+        let cells = self.size.pixel_count();
+        if self.nodes.len() < cells {
+            self.nodes.resize(cells, 0);
         }
-        if self.nodes_generation.len() < size {
-            self.nodes_generation.resize(size, 0);
+        if self.nodes_generation.len() < cells {
+            self.nodes_generation.resize(cells, 0);
         }
+    }
+
+    /// Local cell index for an image position, or None if outside the grid.
+    #[inline]
+    fn cell_index(&self, pos: Vec2us) -> Option<usize> {
+        // wrapping_sub keeps the underflow case (position left of / above the offset) inside the
+        // one `contains` check below instead of needing a separate signed comparison.
+        let local = Vec2us::new(
+            pos.x.wrapping_sub(self.offset.x),
+            pos.y.wrapping_sub(self.offset.y),
+        );
+        self.size.contains(local).then(|| self.size.index_of(local))
     }
 
     /// Get node index at position, or None if unassigned.
     #[inline]
-    fn get(&self, x: usize, y: usize) -> Option<usize> {
-        if self.width == 0 {
-            return None;
-        }
-        let lx = x.wrapping_sub(self.offset_x);
-        let ly = y.wrapping_sub(self.offset_y);
-        if lx >= self.width || ly >= self.height {
-            return None;
-        }
-        let idx = ly * self.width + lx;
+    fn get(&self, pos: Vec2us) -> Option<usize> {
+        let idx = self.cell_index(pos)?;
         if self.nodes_generation[idx] != self.current_generation {
             None
         } else {
@@ -284,16 +275,10 @@ impl NodeGrid {
 
     /// Set node index at position.
     #[inline]
-    fn set(&mut self, x: usize, y: usize, node_idx: usize) {
-        if self.width == 0 {
+    fn set(&mut self, pos: Vec2us, node_idx: usize) {
+        let Some(idx) = self.cell_index(pos) else {
             return;
-        }
-        let lx = x.wrapping_sub(self.offset_x);
-        let ly = y.wrapping_sub(self.offset_y);
-        if lx >= self.width || ly >= self.height {
-            return;
-        }
-        let idx = ly * self.width + lx;
+        };
         self.nodes[idx] = node_idx as u32;
         self.nodes_generation[idx] = self.current_generation;
     }
@@ -340,13 +325,16 @@ impl RegionScratch {
     #[inline]
     fn bfs_region(&mut self, seed: &Pixel) -> Option<Vec<Pixel>> {
         let Self { grid, queue, pool } = self;
-        let width = grid.width;
-        let offset_x = grid.offset_x;
-        let offset_y = grid.offset_y;
+        // Hoisted out of the loop below: `grid` is borrowed mutably inside it, so the extent and
+        // offset can't be re-read from the struct there.
+        let size = grid.size;
+        let offset = grid.offset;
+        let width = size.width;
 
-        let lx = seed.pos.x.wrapping_sub(offset_x);
-        let ly = seed.pos.y.wrapping_sub(offset_y);
-        let start_idx = ly * width + lx;
+        let start_idx = size.index_of(Vec2us::new(
+            seed.pos.x.wrapping_sub(offset.x),
+            seed.pos.y.wrapping_sub(offset.y),
+        ));
 
         // SAFETY: pixel is within grid bounds (placed during reset_with_pixels)
         if unsafe { !grid.try_mark_visited_unchecked(start_idx) } {
@@ -370,7 +358,7 @@ impl RegionScratch {
             let lx = idx % width;
             let ly = idx / width;
             region.push(Pixel {
-                pos: Vec2us::new(lx.wrapping_add(offset_x), ly.wrapping_add(offset_y)),
+                pos: Vec2us::new(lx.wrapping_add(offset.x), ly.wrapping_add(offset.y)),
                 value,
             });
             // SAFETY: grid has guaranteed 1-pixel border (wrapping_sub in reset_with_pixels),
@@ -596,7 +584,7 @@ fn process_root_level(
         let flux = region.iter().map(|p| p.value).sum();
 
         for p in region {
-            pixel_to_node.set(p.pos.x, p.pos.y, node_idx);
+            pixel_to_node.set(p.pos, node_idx);
         }
 
         tree.push(DeblendNode {
@@ -637,9 +625,7 @@ fn process_higher_level(
         // (avoid allocation by counting first)
         let parent_above_count = component_pixels
             .iter()
-            .filter(|p| {
-                pixel_to_node.get(p.pos.x, p.pos.y) == Some(parent_idx) && p.value >= threshold
-            })
+            .filter(|p| pixel_to_node.get(p.pos) == Some(parent_idx) && p.value >= threshold)
             .count();
 
         // Check if multiple distinct regions formed from same parent
@@ -650,8 +636,7 @@ fn process_higher_level(
                 component_pixels
                     .iter()
                     .filter(|p| {
-                        pixel_to_node.get(p.pos.x, p.pos.y) == Some(parent_idx)
-                            && p.value >= threshold
+                        pixel_to_node.get(p.pos) == Some(parent_idx) && p.value >= threshold
                     })
                     .copied(),
             );
@@ -683,7 +668,7 @@ fn find_single_parent_grid(region: &[Pixel], pixel_to_node: &NodeGrid) -> Option
     let mut parent: Option<usize> = None;
 
     for p in region {
-        if let Some(idx) = pixel_to_node.get(p.pos.x, p.pos.y) {
+        if let Some(idx) = pixel_to_node.get(p.pos) {
             match parent {
                 None => parent = Some(idx),
                 Some(existing) if existing != idx => return None, // Multiple parents
@@ -727,7 +712,7 @@ fn create_child_nodes(
         let child_flux = child_region.iter().map(|p| p.value).sum();
 
         for p in child_region {
-            pixel_to_node.set(p.pos.x, p.pos.y, child_idx);
+            pixel_to_node.set(p.pos, child_idx);
         }
 
         tree.push(DeblendNode {

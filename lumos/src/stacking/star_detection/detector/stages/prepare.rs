@@ -107,6 +107,7 @@ fn combine_channels(image: &LinearImage, weights: [f32; 3], output: &mut Buffer2
 mod tests {
     use crate::io::image::ImageDimensions;
     use crate::io::image::linear::LinearImage;
+    use crate::math::size2us::Size2us;
     use crate::stacking::star_detection::detector::stages::prepare::*;
 
     /// Build a 16-pixel channel whose median is `center` and MAD is exactly `mad`
@@ -123,7 +124,7 @@ mod tests {
         let data = vec![0.5f32; 64 * 64];
         let image = LinearImage::from_pixels(dim, data);
 
-        let mut pool = DetectionResources::new(64, 64);
+        let mut pool = DetectionResources::new(Size2us::new(64, 64));
         let result = prepare(&image, &mut pool);
 
         assert_eq!(result.width(), 64);
@@ -144,7 +145,7 @@ mod tests {
         let dim = ImageDimensions::new((width, height), 1);
         let image = LinearImage::from_pixels(dim, data);
 
-        let mut pool = DetectionResources::new(width, height);
+        let mut pool = DetectionResources::new(Size2us::new(width, height));
         let result = prepare(&image, &mut pool);
 
         // Star pixel should be preserved (no CFA, no defects)
@@ -223,7 +224,7 @@ mod tests {
         let b = channel_with_mad(0.70, 0.02);
         let image = LinearImage::from_planar_channels(dims, vec![r.clone(), g.clone(), b.clone()]);
 
-        let mut pool = DetectionResources::new(4, 4);
+        let mut pool = DetectionResources::new(Size2us::new(4, 4));
         let out = prepare(&image, &mut pool);
 
         for (i, &out_v) in out.pixels().iter().enumerate() {
@@ -247,7 +248,7 @@ mod tests {
         let b = channel_with_mad(0.10, 0.01);
         let image = LinearImage::from_planar_channels(dims, vec![r, g, b]);
 
-        let mut pool = DetectionResources::new(4, 4);
+        let mut pool = DetectionResources::new(Size2us::new(4, 4));
         let out = prepare(&image, &mut pool);
 
         // Background ~0.10; star pixel should be well above it (~0.10*2/3 + 0.90/3 ≈ 0.37).

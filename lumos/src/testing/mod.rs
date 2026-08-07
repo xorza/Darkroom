@@ -10,6 +10,7 @@ use imaginarium::Buffer2;
 use crate::io::image::ImageMetadata;
 use crate::io::image::cfa::{CfaImage, CfaType};
 use crate::io::raw::RAW_EXTENSIONS;
+use crate::math::size2us::Size2us;
 use crate::stacking::star_detection::background::{self, estimate::BackgroundEstimate};
 use crate::stacking::star_detection::config::BackgroundConfig;
 use crate::stacking::star_detection::resources::DetectionResources;
@@ -107,7 +108,7 @@ pub(crate) fn estimate_background(
     pixels: &Buffer2<f32>,
     config: &BackgroundConfig,
 ) -> BackgroundEstimate {
-    let mut pool = DetectionResources::new(pixels.width(), pixels.height());
+    let mut pool = DetectionResources::new(Size2us::new(pixels.width(), pixels.height()));
     background::estimate_background(pixels, config, &mut pool)
 }
 

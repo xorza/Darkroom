@@ -5,6 +5,7 @@
 use std::time::Instant;
 
 use crate::io::image::linear::LinearImage;
+use crate::math::size2us::Size2us;
 use crate::stacking::star_detection::config::Config;
 use crate::stacking::star_detection::detector::StarDetector;
 use crate::stacking::star_detection::threshold_mask::create_threshold_mask;
@@ -153,7 +154,7 @@ fn test_inspect_pipeline_intermediates_rho_opiuchi() {
     println!("Image size: {width}x{height}");
 
     let config = Config::precise_ground();
-    let mut pool = DetectionResources::new(width, height);
+    let mut pool = DetectionResources::new(Size2us::new(width, height));
 
     let out = |name: &str| test_output_path(&format!("rho-opiuchi-inspect/{name}"));
 

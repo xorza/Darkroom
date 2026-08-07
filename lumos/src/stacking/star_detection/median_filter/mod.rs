@@ -8,6 +8,8 @@ mod simd;
 #[cfg(test)]
 mod tests;
 
+use crate::math::size2us::Size2us;
+use crate::math::vec2us::Vec2us;
 use imaginarium::Buffer2;
 use rayon::prelude::*;
 
@@ -64,7 +66,7 @@ fn filter_interior_row(pixels: &[f32], width: usize, y: usize, output_row: &mut 
 #[inline]
 fn filter_edge_row(pixels: &[f32], width: usize, height: usize, y: usize, output_row: &mut [f32]) {
     for (x, out) in output_row.iter_mut().enumerate() {
-        *out = median_at_edge(pixels, width, height, x, y);
+        *out = median_at_edge(pixels, Size2us::new(width, height), Vec2us::new(x, y));
     }
 }
 
@@ -97,17 +99,17 @@ fn median_at_right_edge(pixels: &[f32], width: usize, y: usize) -> f32 {
 
 /// Compute median for edge/corner pixels with variable neighborhood size.
 #[inline]
-fn median_at_edge(pixels: &[f32], width: usize, height: usize, x: usize, y: usize) -> f32 {
+fn median_at_edge(pixels: &[f32], size: Size2us, pos: Vec2us) -> f32 {
     let mut neighbors = [0.0f32; 9];
     let mut count = 0;
 
-    let y_start = y.saturating_sub(1);
-    let y_end = (y + 2).min(height);
-    let x_start = x.saturating_sub(1);
-    let x_end = (x + 2).min(width);
+    let y_start = pos.y.saturating_sub(1);
+    let y_end = (pos.y + 2).min(size.height);
+    let x_start = pos.x.saturating_sub(1);
+    let x_end = (pos.x + 2).min(size.width);
 
     for ny in y_start..y_end {
-        let row_offset = ny * width;
+        let row_offset = ny * size.width;
         for nx in x_start..x_end {
             neighbors[count] = pixels[row_offset + nx];
             count += 1;

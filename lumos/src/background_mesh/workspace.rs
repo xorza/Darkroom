@@ -2,6 +2,7 @@ use crate::background_mesh::TileGrid;
 use crate::background_mesh::TileStats;
 use crate::bit_buffer2::BitBuffer2;
 use crate::concurrency::JobScratchPool;
+use crate::math::size2us::Size2us;
 use imaginarium::Buffer2;
 
 #[derive(Debug, Default)]
@@ -31,12 +32,13 @@ impl MeshWorkspace {
     ) -> &TileGrid {
         let width = pixels.width();
         let height = pixels.height();
+        let dimensions = Size2us::new(width, height);
         if self
             .grid
             .as_ref()
-            .is_none_or(|grid| !grid.matches_layout(width, height, tile_size))
+            .is_none_or(|grid| !grid.matches_layout(dimensions, tile_size))
         {
-            self.grid = Some(TileGrid::new_uninit(width, height, tile_size));
+            self.grid = Some(TileGrid::new_uninit(dimensions, tile_size));
             self.median_filter_scratch = None;
         }
 

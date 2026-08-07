@@ -17,7 +17,7 @@ fn test_weighted_centroid_precision_statistical() {
         for dy in 0..10 {
             let true_pos = Vec2::new(64.0 + dx as f32 * 0.1, 64.0 + dy as f32 * 0.1);
 
-            let pixels = make_gaussian_star(width, height, true_pos, sigma, 1.0, 0.1);
+            let pixels = make_gaussian_star(Size2us::new(width, height), true_pos, sigma, 1.0, 0.1);
             let bg = estimate_background(
                 &pixels,
                 &BackgroundConfig {
@@ -209,7 +209,13 @@ fn test_fwhm_estimation_accuracy() {
     // Test various sigma values
     for sigma in [1.5f32, 2.0, 2.5, 3.0, 3.5, 4.0] {
         let expected_fwhm = FWHM_TO_SIGMA * sigma;
-        let pixels = make_gaussian_star(width, height, Vec2::splat(64.0), sigma, 1.0, 0.1);
+        let pixels = make_gaussian_star(
+            Size2us::new(width, height),
+            Vec2::splat(64.0),
+            sigma,
+            1.0,
+            0.1,
+        );
 
         let metrics = compute_star(
             &pixels,
@@ -251,8 +257,7 @@ fn test_eccentricity_calculation_accuracy() {
 
     for (sigma_major, sigma_minor, expected_ecc) in test_cases {
         let pixels = make_elliptical_star(
-            width,
-            height,
+            Size2us::new(width, height),
             Vec2::splat(32.0),
             sigma_major,
             sigma_minor,
@@ -306,7 +311,13 @@ fn test_sharpness_point_vs_extended() {
     let bg = make_uniform_background(width, height, 0.1, 0.01);
 
     // Compact star (small sigma) - high sharpness
-    let compact = make_gaussian_star(width, height, Vec2::splat(32.0), 1.5, 0.8, 0.1);
+    let compact = make_gaussian_star(
+        Size2us::new(width, height),
+        Vec2::splat(32.0),
+        1.5,
+        0.8,
+        0.1,
+    );
     let metrics_compact = compute_star(
         &compact,
         &bg,
@@ -319,7 +330,13 @@ fn test_sharpness_point_vs_extended() {
     .unwrap();
 
     // Extended star (large sigma) - lower sharpness
-    let extended = make_gaussian_star(width, height, Vec2::splat(32.0), 4.0, 0.8, 0.1);
+    let extended = make_gaussian_star(
+        Size2us::new(width, height),
+        Vec2::splat(32.0),
+        4.0,
+        0.8,
+        0.1,
+    );
     let metrics_extended = compute_star(
         &extended,
         &bg,
@@ -536,7 +553,13 @@ fn test_gaussian_fit_with_noise() {
 fn test_roundness1_circular_source() {
     let width = 64;
     let height = 64;
-    let pixels = make_gaussian_star(width, height, Vec2::splat(32.0), 2.5, 0.8, 0.1);
+    let pixels = make_gaussian_star(
+        Size2us::new(width, height),
+        Vec2::splat(32.0),
+        2.5,
+        0.8,
+        0.1,
+    );
     let bg = make_uniform_background(width, height, 0.1, 0.01);
 
     let metrics = compute_star(
@@ -563,7 +586,14 @@ fn test_roundness1_x_elongated() {
     let width = 64;
     let height = 64;
     // sigma_x > sigma_y means more spread in x direction
-    let pixels = make_elliptical_star(width, height, Vec2::splat(32.0), 4.0, 2.0, 0.8, 0.1);
+    let pixels = make_elliptical_star(
+        Size2us::new(width, height),
+        Vec2::splat(32.0),
+        4.0,
+        2.0,
+        0.8,
+        0.1,
+    );
     let bg = make_uniform_background(width, height, 0.1, 0.01);
 
     let metrics = compute_star(
@@ -591,7 +621,13 @@ fn test_roundness1_x_elongated() {
 fn test_roundness2_symmetric_source() {
     let width = 64;
     let height = 64;
-    let pixels = make_gaussian_star(width, height, Vec2::splat(32.0), 2.5, 0.8, 0.1);
+    let pixels = make_gaussian_star(
+        Size2us::new(width, height),
+        Vec2::splat(32.0),
+        2.5,
+        0.8,
+        0.1,
+    );
     let bg = make_uniform_background(width, height, 0.1, 0.01);
 
     let metrics = compute_star(

@@ -84,23 +84,25 @@ impl Drop for ProcessedImageGuard {
 
 #[derive(Debug)]
 pub(crate) struct BlackRepeat {
-    width: usize,
-    height: usize,
+    /// Extent of the repeating tile the deltas cover.
+    size: Size2us,
     delta_norm: Box<[f32]>,
 }
 
 impl BlackRepeat {
     #[inline(always)]
     fn at_visible(&self, row: usize, col: usize) -> f32 {
-        self.delta_norm[(row % self.height) * self.width + col % self.width]
+        self.delta_norm[(row % self.size.height) * self.size.width + col % self.size.width]
     }
 
     #[inline(always)]
-    fn at_raw(&self, raw_row: usize, raw_col: usize, top_margin: usize, left_margin: usize) -> f32 {
+    fn at_raw(&self, raw_row: usize, raw_col: usize, margin: Vec2us) -> f32 {
         // LibRaw defines repeat phase after cropping, so margins shift full-buffer coordinates.
-        let row = (raw_row % self.height + self.height - top_margin % self.height) % self.height;
-        let col = (raw_col % self.width + self.width - left_margin % self.width) % self.width;
-        self.delta_norm[row * self.width + col]
+        let row = (raw_row % self.size.height + self.size.height - margin.y % self.size.height)
+            % self.size.height;
+        let col = (raw_col % self.size.width + self.size.width - margin.x % self.size.width)
+            % self.size.width;
+        self.delta_norm[row * self.size.width + col]
     }
 }
 
@@ -233,11 +235,10 @@ fn consolidate_black_levels(
     let repeat = if cblack[4] > 0 && cblack[5] > 0 {
         let height = cblack[4] as usize;
         let width = cblack[5] as usize;
-        let pattern_size = height * width;
+        let size = Size2us::new(width, height);
         Some(BlackRepeat {
-            width,
-            height,
-            delta_norm: cblack[6..6 + pattern_size]
+            size,
+            delta_norm: cblack[6..6 + size.pixel_count()]
                 .iter()
                 .map(|&delta| delta as f32 * inv_range)
                 .collect(),
@@ -249,8 +250,8 @@ fn consolidate_black_levels(
     tracing::debug!(
         "Black levels: common={common}, per_channel={per_channel:?}, \
          delta_norm={channel_delta_norm:?}, repeat={}x{}, inv_range={inv_range}",
-        repeat.as_ref().map_or(0, |pattern| pattern.width),
-        repeat.as_ref().map_or(0, |pattern| pattern.height)
+        repeat.as_ref().map_or(0, |pattern| pattern.size.width),
+        repeat.as_ref().map_or(0, |pattern| pattern.size.height)
     );
 
     Ok(BlackLevel {
@@ -293,8 +294,7 @@ fn canonical_camera_white_balance(sensor_type: &SensorType, cam_mul: [f32; 4]) -
 fn apply_bayer_black_corrections(
     data: &mut [f32],
     raw_width: usize,
-    top_margin: usize,
-    left_margin: usize,
+    margin: Vec2us,
     visible_filters: u32,
     delta_norm: &[f32; 4],
     repeat: Option<&BlackRepeat>,
@@ -309,10 +309,8 @@ fn apply_bayer_black_corrections(
         .enumerate()
         .for_each(|(row, row_data)| {
             for (col, pixel) in row_data.iter_mut().enumerate() {
-                let ch = raw_filter_color(visible_filters, row, col, top_margin, left_margin);
-                let repeat_delta = repeat.map_or(0.0, |pattern| {
-                    pattern.at_raw(row, col, top_margin, left_margin)
-                });
+                let ch = raw_filter_color(visible_filters, row, col, margin);
+                let repeat_delta = repeat.map_or(0.0, |pattern| pattern.at_raw(row, col, margin));
                 *pixel = (*pixel - delta_norm[ch] - repeat_delta).clamp(0.0, 1.0);
             }
         });
@@ -325,17 +323,11 @@ fn libraw_filter_color(filters: u32, row: usize, col: usize) -> usize {
 }
 
 #[inline(always)]
-fn raw_filter_color(
-    visible_filters: u32,
-    raw_row: usize,
-    raw_col: usize,
-    top_margin: usize,
-    left_margin: usize,
-) -> usize {
+fn raw_filter_color(visible_filters: u32, raw_row: usize, raw_col: usize, margin: Vec2us) -> usize {
     libraw_filter_color(
         visible_filters,
-        raw_row.wrapping_sub(top_margin),
-        raw_col.wrapping_sub(left_margin),
+        raw_row.wrapping_sub(margin.y),
+        raw_col.wrapping_sub(margin.x),
     )
 }
 
@@ -378,9 +370,10 @@ fn validate_xtrans_pattern(path: &Path, pattern: [[u8; 6]; 6]) -> Result<(), Ima
 /// buffer it sits in.
 #[derive(Debug, Clone, Copy)]
 struct RawActiveArea {
-    /// Row stride of the source buffer, which spans the masked margins as well as `size`.
-    raw_width: usize,
-    size: Size2us,
+    /// Extent of the source buffer, which spans the masked margins as well as `active`.
+    raw: Size2us,
+    /// Extent of the visible window.
+    active: Size2us,
     /// Top-left corner of the window within the source buffer.
     margin: Vec2us,
 }
@@ -421,16 +414,16 @@ fn normalize_active_area<const CLAMP: bool>(
     channel_delta: Option<ChannelBlackDelta>,
     repeat: Option<&BlackRepeat>,
 ) -> Vec<f32> {
-    let output_size = area.size.pixel_count();
+    let output_size = area.active.pixel_count();
     // SAFETY: Every element is written by the parallel row pass below.
     let mut pixels = unsafe { alloc_uninit_vec::<f32>(output_size) };
     pixels
-        .par_chunks_mut(area.size.width)
+        .par_chunks_mut(area.active.width)
         .enumerate()
         .for_each(|(y, row)| {
             let raw_y = area.margin.y + y;
-            let src_start = raw_y * area.raw_width + area.margin.x;
-            let source = &raw_data[src_start..src_start + area.size.width];
+            let src_start = raw_y * area.raw.width + area.margin.x;
+            let source = &raw_data[src_start..src_start + area.active.width];
             normalize_u16_to_f32_into::<CLAMP>(source, row, black, inv_range);
 
             if channel_delta.is_some() || repeat.is_some() {
@@ -458,12 +451,7 @@ struct UnpackedRaw {
     guard: Option<LibrawGuard>,
     buf: Option<Vec<u8>>,
     path: PathBuf,
-    raw_width: usize,
-    raw_height: usize,
-    width: usize,
-    height: usize,
-    top_margin: usize,
-    left_margin: usize,
+    area: RawActiveArea,
     black_level: BlackLevel,
     visible_filters: u32,
     sensor_type: SensorType,
@@ -481,10 +469,7 @@ impl UnpackedRaw {
             return Err(raw_err(&self.path, "libraw: raw_image is null"));
         }
 
-        let pixel_count = self
-            .raw_width
-            .checked_mul(self.raw_height)
-            .expect("libraw: raw dimensions overflow");
+        let pixel_count = self.area.raw.pixel_count();
 
         // SAFETY: raw_image_ptr is valid (checked above), and dimensions were validated in open_raw.
         Ok(unsafe { slice::from_raw_parts(raw_image_ptr, pixel_count) })
@@ -528,11 +513,7 @@ impl UnpackedRaw {
         };
         Ok(normalize_active_area::<CLAMP>(
             raw_data,
-            RawActiveArea {
-                raw_width: self.raw_width,
-                size: Size2us::new(self.width, self.height),
-                margin: Vec2us::new(self.left_margin, self.top_margin),
-            },
+            self.area,
             self.black_level.common,
             self.black_level.inv_range,
             channel_delta,
@@ -558,20 +539,20 @@ impl UnpackedRaw {
 
         apply_bayer_black_corrections(
             &mut normalized_data,
-            self.raw_width,
-            self.top_margin,
-            self.left_margin,
+            self.area.raw.width,
+            self.area.margin,
             self.visible_filters,
             &self.black_level.channel_delta_norm,
             self.black_level.repeat.as_ref(),
         );
 
-        let raw_cfa_pattern = visible_cfa_pattern.at_raw_origin(self.top_margin, self.left_margin);
+        let raw_cfa_pattern =
+            visible_cfa_pattern.at_raw_origin(self.area.margin.y, self.area.margin.x);
         let bayer = BayerImage::with_margins(
             &normalized_data,
-            Size2us::new(self.raw_width, self.raw_height),
-            Size2us::new(self.width, self.height),
-            Vec2us::new(self.left_margin, self.top_margin),
+            self.area.raw,
+            self.area.active,
+            self.area.margin,
             raw_cfa_pattern,
         );
 
@@ -582,8 +563,8 @@ impl UnpackedRaw {
 
         tracing::info!(
             "Fast SIMD demosaicing {}x{} took {:.2}ms",
-            self.width,
-            self.height,
+            self.area.active.width,
+            self.area.active.height,
             demosaic_elapsed.as_secs_f64() * 1000.0
         );
 
@@ -629,9 +610,9 @@ impl UnpackedRaw {
 
         let pixels = xtrans::process_xtrans(
             &raw_u16,
-            Size2us::new(self.raw_width, self.raw_height),
-            Size2us::new(self.width, self.height),
-            Vec2us::new(self.left_margin, self.top_margin),
+            self.area.raw,
+            self.area.active,
+            self.area.margin,
             raw_pattern,
             channel_black,
             bl.inv_range,
@@ -890,12 +871,11 @@ fn open_raw(path: &Path) -> Result<UnpackedRaw, ImageError> {
         guard: Some(guard),
         buf,
         path: path.to_path_buf(),
-        raw_width,
-        raw_height,
-        width,
-        height,
-        top_margin,
-        left_margin,
+        area: RawActiveArea {
+            raw: Size2us::new(raw_width, raw_height),
+            active: Size2us::new(width, height),
+            margin: Vec2us::new(left_margin, top_margin),
+        },
         black_level,
         visible_filters,
         sensor_type,
@@ -997,7 +977,7 @@ pub(crate) fn load_raw(path: &Path, cancel: &CancelToken) -> Result<LinearImage,
             let pixels = raw.extract_cfa_pixels::<true>()?;
             DecodedRawPreview {
                 pixels: DemosaicedPixels::Flat(pixels),
-                dimensions: ImageDimensions::new(Size2us::new(raw.width, raw.height), 1),
+                dimensions: ImageDimensions::new(raw.area.active, 1),
                 cfa_type: None,
                 color: ColorProvenance::Monochrome,
                 demosaic: DemosaicProvenance::None,
@@ -1008,7 +988,7 @@ pub(crate) fn load_raw(path: &Path, cancel: &CancelToken) -> Result<LinearImage,
             let planes = raw.demosaic_bayer(cfa_pattern, cancel)?;
             DecodedRawPreview {
                 pixels: DemosaicedPixels::Planar(planes),
-                dimensions: ImageDimensions::new(Size2us::new(raw.width, raw.height), 3),
+                dimensions: ImageDimensions::new(raw.area.active, 3),
                 cfa_type: Some(CfaType::Bayer(cfa_pattern)),
                 color: ColorProvenance::SensorRgb,
                 demosaic: DemosaicProvenance::LumosRcd,
@@ -1021,7 +1001,7 @@ pub(crate) fn load_raw(path: &Path, cancel: &CancelToken) -> Result<LinearImage,
             let planes = raw.demosaic_xtrans(raw_pattern, cancel)?;
             DecodedRawPreview {
                 pixels: DemosaicedPixels::Planar(planes),
-                dimensions: ImageDimensions::new(Size2us::new(raw.width, raw.height), 3),
+                dimensions: ImageDimensions::new(raw.area.active, 3),
                 cfa_type: Some(CfaType::XTrans(visible_pattern)),
                 color: ColorProvenance::SensorRgb,
                 demosaic: DemosaicProvenance::LumosMarkesteijn,
@@ -1156,7 +1136,7 @@ pub(crate) fn load_raw_cfa(path: &Path, cancel: &CancelToken) -> Result<CfaImage
     let metadata = ImageMetadata {
         iso: raw.iso,
         bitpix: BitPix::UInt16,
-        header_dimensions: vec![raw.height, raw.width, 1],
+        header_dimensions: vec![raw.area.active.height, raw.area.active.width, 1],
         cfa_type: Some(cfa_type),
         camera_white_balance: raw.camera_white_balance,
         provenance: Some(ImageProvenance {
@@ -1171,7 +1151,7 @@ pub(crate) fn load_raw_cfa(path: &Path, cancel: &CancelToken) -> Result<CfaImage
     };
 
     Ok(CfaImage {
-        data: Buffer2::new(raw.width, raw.height, pixels),
+        data: Buffer2::new(raw.area.active.width, raw.area.active.height, pixels),
         metadata,
         quantization_sigma: Some(raw.black_level.inv_range * QUANTIZATION_SIGMA_PER_STEP),
     })

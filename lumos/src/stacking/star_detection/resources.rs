@@ -28,9 +28,9 @@ pub(crate) struct DetectionResources {
 
 impl DetectionResources {
     /// Create resources for the given image dimensions.
-    pub(crate) fn new(width: usize, height: usize) -> Self {
+    pub(crate) fn new(dimensions: Size2us) -> Self {
         Self {
-            dimensions: Size2us::new(width, height),
+            dimensions,
             f32_buffers: Vec::new(),
             bit_buffers: Vec::new(),
             u32_buffer: None,
@@ -103,10 +103,10 @@ impl DetectionResources {
     }
 
     /// Reset the pool for new dimensions, clearing all buffers.
-    pub(crate) fn reset(&mut self, width: usize, height: usize) {
-        if self.dimensions != Size2us::new(width, height) {
+    pub(crate) fn reset(&mut self, dimensions: Size2us) {
+        if self.dimensions != dimensions {
             self.clear();
-            self.dimensions = Size2us::new(width, height);
+            self.dimensions = dimensions;
         }
     }
 }
@@ -123,12 +123,8 @@ pub(crate) mod internals {
         pub labels: usize,
     }
 
-    pub(crate) fn matches_dimensions(
-        resources: &DetectionResources,
-        width: usize,
-        height: usize,
-    ) -> bool {
-        resources.dimensions == Size2us::new(width, height)
+    pub(crate) fn matches_dimensions(resources: &DetectionResources, dimensions: Size2us) -> bool {
+        resources.dimensions == dimensions
     }
 
     pub(crate) fn buffer_counts(resources: &DetectionResources) -> BufferCounts {
@@ -151,15 +147,15 @@ mod tests {
 
     #[test]
     fn test_pool_creation() {
-        let pool = DetectionResources::new(100, 50);
+        let pool = DetectionResources::new(Size2us::new(100, 50));
         assert_eq!(pool.dimensions, Size2us::new(100, 50));
-        assert!(matches_dimensions(&pool, 100, 50));
-        assert!(!matches_dimensions(&pool, 50, 100));
+        assert!(matches_dimensions(&pool, Size2us::new(100, 50)));
+        assert!(!matches_dimensions(&pool, Size2us::new(50, 100)));
     }
 
     #[test]
     fn test_f32_buffer_acquire_release() {
-        let mut pool = DetectionResources::new(64, 64);
+        let mut pool = DetectionResources::new(Size2us::new(64, 64));
 
         // First acquire allocates
         let buf1 = pool.acquire_f32();
@@ -183,7 +179,7 @@ mod tests {
 
     #[test]
     fn test_bit_buffer_acquire_release() {
-        let mut pool = DetectionResources::new(128, 64);
+        let mut pool = DetectionResources::new(Size2us::new(128, 64));
 
         let buf1 = pool.acquire_bit();
         assert_eq!(buf1.width, 128);
@@ -199,7 +195,7 @@ mod tests {
 
     #[test]
     fn test_u32_buffer_acquire_release() {
-        let mut pool = DetectionResources::new(32, 32);
+        let mut pool = DetectionResources::new(Size2us::new(32, 32));
 
         let buf1 = pool.acquire_u32();
         assert_eq!(buf1.width(), 32);
@@ -216,7 +212,7 @@ mod tests {
 
     #[test]
     fn test_pool_clear() {
-        let mut pool = DetectionResources::new(64, 64);
+        let mut pool = DetectionResources::new(Size2us::new(64, 64));
 
         let buf1 = pool.acquire_f32();
         let buf2 = pool.acquire_bit();
@@ -251,24 +247,24 @@ mod tests {
         // A mismatched buffer must be rejected even in release builds: downstream SIMD kernels
         // do unchecked-length loads/stores off the pool's declared dimensions, so a silently
         // accepted mismatch would be out-of-bounds UB, not just a wrong pixel.
-        let mut pool = DetectionResources::new(64, 64);
+        let mut pool = DetectionResources::new(Size2us::new(64, 64));
         let wrong_size = Buffer2::new_default(32, 32);
         pool.release_f32(wrong_size);
     }
 
     #[test]
     fn test_pool_reset() {
-        let mut pool = DetectionResources::new(64, 64);
+        let mut pool = DetectionResources::new(Size2us::new(64, 64));
 
         let buf = pool.acquire_f32();
         pool.release_f32(buf);
 
         // Reset to same dimensions keeps buffers
-        pool.reset(64, 64);
+        pool.reset(Size2us::new(64, 64));
         assert_eq!(pool.f32_buffers.len(), 1);
 
         // Reset to different dimensions clears buffers
-        pool.reset(128, 128);
+        pool.reset(Size2us::new(128, 128));
         assert_eq!(pool.dimensions, Size2us::new(128, 128));
         assert!(pool.f32_buffers.is_empty());
     }

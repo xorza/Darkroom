@@ -24,7 +24,7 @@ fn make_grid_with_mask(pixels: &Buffer2<f32>, tile_size: usize, mask: &BitBuffer
 fn new_uninit_clamps_tile_size_to_image() {
     // tile_size larger than the image must clamp to min(width, height) = 8 instead of
     // producing a 0-tile grid: 10.div_ceil(8) = 2 tiles in x, 8.div_ceil(8) = 1 in y.
-    let grid = TileGrid::new_uninit(10, 8, 64);
+    let grid = TileGrid::new_uninit(Size2us::new(10, 8), 64);
     assert_eq!(grid.stats.width(), 2);
     assert_eq!(grid.stats.height(), 1);
 }
@@ -34,7 +34,7 @@ fn new_uninit_clamps_tile_size_to_image() {
 fn new_uninit_zero_dimension_panics() {
     // A zero-size image is a logic error upstream (ImageDimensions asserts > 0); fail fast
     // with a clear message instead of a bare div_ceil divide-by-zero.
-    TileGrid::new_uninit(0, 100, 64);
+    TileGrid::new_uninit(Size2us::new(0, 100), 64);
 }
 
 #[test]

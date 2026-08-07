@@ -11,6 +11,7 @@ mod bench;
 use serde::{Deserialize, Serialize};
 
 use crate::io::image::linear::LinearImage;
+use crate::math::size2us::Size2us;
 
 use crate::error::InvalidConfigField;
 use crate::math::statistics::median_f32_mut;
@@ -119,8 +120,8 @@ impl StarDetector {
 
         let resources = self
             .resources
-            .get_or_insert_with(|| DetectionResources::new(width, height));
-        resources.reset(width, height);
+            .get_or_insert_with(|| DetectionResources::new(Size2us::new(width, height)));
+        resources.reset(Size2us::new(width, height));
 
         // Step 1: Image preparation (grayscale, CFA filter)
         let grayscale_image = stages::prepare::prepare(image, resources);

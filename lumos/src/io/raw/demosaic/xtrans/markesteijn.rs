@@ -72,9 +72,8 @@ struct FinalBlendBuffers<'a> {
 }
 
 impl DemosaicArena {
-    fn new(width: usize, height: usize) -> Self {
-        let pixels = width * height;
-        let total = ARENA_WORDS_PER_PIXEL * pixels;
+    fn new(size: Size2us) -> Self {
+        let total = ARENA_WORDS_PER_PIXEL * size.pixel_count();
 
         // SAFETY: Every element in every region is fully written by parallel passes
         // before being read. See per-step comments in demosaic().
@@ -83,8 +82,8 @@ impl DemosaicArena {
         tracing::debug!(
             "Demosaic arena: {:.1} MB ({} × {} × {} × 4 bytes)",
             (total * 4) as f64 / (1024.0 * 1024.0),
-            width,
-            height,
+            size.width,
+            size.height,
             ARENA_WORDS_PER_PIXEL,
         );
 
@@ -136,7 +135,7 @@ pub(crate) fn demosaic(
     // Build lookup tables
     let hex = HexLookup::new(&xtrans.raw_pattern);
     // Allocate all working memory in one shot
-    let mut arena = DemosaicArena::new(width, height);
+    let mut arena = DemosaicArena::new(xtrans.active);
 
     // Step 1: Compute green min/max bounds for non-green pixels
     // Writes: Region C (gmin), Region D (gmax)
@@ -223,7 +222,7 @@ pub(crate) fn demosaic(
         // gmin data is dead after Step 2. f32 alignment (4) satisfies u8 alignment (1).
         let homo =
             unsafe { std::slice::from_raw_parts_mut(region_c.as_mut_ptr() as *mut u8, pixels * 4) };
-        markesteijn_steps::compute_homogeneity(drv, width, height, homo, region_d);
+        markesteijn_steps::compute_homogeneity(drv, xtrans.active, homo, region_d);
     }
     tracing::debug!(
         "  Step 5 (homogeneity): {:.1}ms",
@@ -299,7 +298,7 @@ mod tests {
         let height = 3;
         let pixels = width * height;
         let bytes_per_word = std::mem::size_of::<f32>();
-        let mut arena = DemosaicArena::new(width, height);
+        let mut arena = DemosaicArena::new(Size2us::new(width, height));
         arena.storage.fill(0.0);
         let arena_start = arena.storage.as_ptr() as usize;
         let arena_end = arena_start + arena.storage.len() * bytes_per_word;
@@ -334,7 +333,7 @@ mod tests {
         );
     }
 
-    fn synthetic_value(scene: SyntheticScene, channel: usize, x: usize, y: usize) -> f32 {
+    fn synthetic_value(scene: SyntheticScene, channel: usize, pos: Vec2us) -> f32 {
         const WIDTH: usize = 96;
         const HEIGHT: usize = 96;
 
@@ -342,29 +341,29 @@ mod tests {
             SyntheticScene::ColorEdge => {
                 let left = [0.1, 0.3, 0.8];
                 let right = [0.9, 0.6, 0.2];
-                if x < WIDTH / 2 {
+                if pos.x < WIDTH / 2 {
                     left[channel]
                 } else {
                     right[channel]
                 }
             }
             SyntheticScene::Impulse => {
-                if x == WIDTH / 2 && y == HEIGHT / 2 {
+                if pos.x == WIDTH / 2 && pos.y == HEIGHT / 2 {
                     [1.0, 0.7, 0.4][channel]
                 } else {
                     0.05
                 }
             }
             SyntheticScene::Star => {
-                let dx = x as f32 - (WIDTH - 1) as f32 * 0.5;
-                let dy = y as f32 - (HEIGHT - 1) as f32 * 0.5;
+                let dx = pos.x as f32 - (WIDTH - 1) as f32 * 0.5;
+                let dy = pos.y as f32 - (HEIGHT - 1) as f32 * 0.5;
                 let sigma = [1.2_f32, 1.6, 2.0][channel];
                 let amplitude = [0.9_f32, 0.7, 0.5][channel];
                 0.02 + amplitude * (-(dx * dx + dy * dy) / (2.0 * sigma * sigma)).exp()
             }
             SyntheticScene::ColorGrating => {
                 let phase = [0.0_f32, 2.094_395_2, 4.188_790_3][channel];
-                0.5 + 0.4 * (0.47 * x as f32 + 0.31 * y as f32 + phase).sin()
+                0.5 + 0.4 * (0.47 * pos.x as f32 + 0.31 * pos.y as f32 + phase).sin()
             }
         }
     }
@@ -485,7 +484,7 @@ mod tests {
             for y in 0..HEIGHT {
                 for x in 0..WIDTH {
                     let channel = pattern[y % 6][x % 6] as usize;
-                    data[y * WIDTH + x] = synthetic_value(case.scene, channel, x, y);
+                    data[y * WIDTH + x] = synthetic_value(case.scene, channel, Vec2us::new(x, y));
                 }
             }
             let size = Size2us::new(WIDTH, HEIGHT);
