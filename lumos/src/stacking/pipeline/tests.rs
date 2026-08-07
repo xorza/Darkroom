@@ -392,8 +392,7 @@ fn bits(buffer: &Buffer2<f32>) -> Vec<u32> {
 fn write_mono_cfa_light(directory: &Path, index: usize, image: &LinearImage) -> PathBuf {
     let path = directory.join(format!("light_{index}.fits"));
     let mut cfa = make_cfa(
-        image.width(),
-        image.height(),
+        Size2us::new(image.width(), image.height()),
         image.channel(0).pixels().to_vec(),
         CfaType::Mono,
     );

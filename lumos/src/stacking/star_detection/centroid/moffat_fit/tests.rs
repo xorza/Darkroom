@@ -1,5 +1,7 @@
 //! Tests for Moffat profile fitting.
 
+use crate::math::size2us::Size2us;
+use crate::math::vec2us::Vec2us;
 use std::f64::consts::PI;
 
 use crate::stacking::star_detection::centroid::internals::{
@@ -11,8 +13,7 @@ use glam::Vec2;
 
 #[allow(clippy::too_many_arguments)]
 fn make_moffat_stamp(
-    width: usize,
-    height: usize,
+    size: Size2us,
     cx: f32,
     cy: f32,
     amplitude: f32,
@@ -20,12 +21,12 @@ fn make_moffat_stamp(
     beta: f32,
     background: f32,
 ) -> Vec<f32> {
-    let mut pixels = vec![background; width * height];
-    for y in 0..height {
-        for x in 0..width {
+    let mut pixels = vec![background; size.pixel_count()];
+    for y in 0..size.height {
+        for x in 0..size.width {
             let r2 = (x as f32 - cx).powi(2) + (y as f32 - cy).powi(2);
             let value = amplitude * (1.0 + r2 / (alpha * alpha)).powf(-beta);
-            pixels[y * width + x] += value;
+            pixels[size.index_of(Vec2us::new(x, y))] += value;
         }
     }
     pixels
@@ -43,7 +44,13 @@ fn test_moffat_fit_centered_fixed_beta() {
     let true_bg = 0.1;
 
     let pixels = make_moffat_stamp(
-        width, height, true_cx, true_cy, true_amp, true_alpha, true_beta, true_bg,
+        Size2us::new(width, height),
+        true_cx,
+        true_cy,
+        true_amp,
+        true_alpha,
+        true_beta,
+        true_bg,
     );
     let pixels_buf = Buffer2::new(width, height, pixels);
 
@@ -73,7 +80,13 @@ fn test_moffat_fit_subpixel_offset() {
     let true_bg = 0.1;
 
     let pixels = make_moffat_stamp(
-        width, height, true_cx, true_cy, true_amp, true_alpha, true_beta, true_bg,
+        Size2us::new(width, height),
+        true_cx,
+        true_cy,
+        true_amp,
+        true_alpha,
+        true_beta,
+        true_bg,
     );
     let pixels_buf = Buffer2::new(width, height, pixels);
 
@@ -125,7 +138,13 @@ fn test_moffat_fit_with_gaussian_noise() {
     let noise_sigma = 0.05; // 5% of amplitude
 
     let mut pixels = make_moffat_stamp(
-        width, height, true_cx, true_cy, true_amp, true_alpha, true_beta, true_bg,
+        Size2us::new(width, height),
+        true_cx,
+        true_cy,
+        true_amp,
+        true_alpha,
+        true_beta,
+        true_bg,
     );
     add_noise(&mut pixels, noise_sigma, 12345);
 
@@ -166,7 +185,13 @@ fn test_moffat_fit_high_noise_still_converges() {
     let noise_sigma = 0.15; // 15% noise - challenging
 
     let mut pixels = make_moffat_stamp(
-        width, height, true_cx, true_cy, true_amp, true_alpha, true_beta, true_bg,
+        Size2us::new(width, height),
+        true_cx,
+        true_cy,
+        true_amp,
+        true_alpha,
+        true_beta,
+        true_bg,
     );
     add_noise(&mut pixels, noise_sigma, 54321);
 
@@ -209,7 +234,13 @@ fn test_moffat_fit_low_snr() {
     let true_bg = 0.5;
 
     let pixels = make_moffat_stamp(
-        width, height, true_cx, true_cy, true_amp, true_alpha, true_beta, true_bg,
+        Size2us::new(width, height),
+        true_cx,
+        true_cy,
+        true_amp,
+        true_alpha,
+        true_beta,
+        true_bg,
     );
     let pixels_buf = Buffer2::new(width, height, pixels);
 
@@ -246,7 +277,13 @@ fn test_moffat_fit_wrong_background_estimate() {
     let true_bg = 0.1;
 
     let pixels = make_moffat_stamp(
-        width, height, true_cx, true_cy, true_amp, true_alpha, true_beta, true_bg,
+        Size2us::new(width, height),
+        true_cx,
+        true_cy,
+        true_amp,
+        true_alpha,
+        true_beta,
+        true_bg,
     );
     let pixels_buf = Buffer2::new(width, height, pixels);
 
@@ -294,7 +331,13 @@ fn test_moffat_fit_wrong_beta_still_finds_centroid() {
     let true_bg = 0.1;
 
     let pixels = make_moffat_stamp(
-        width, height, true_cx, true_cy, true_amp, true_alpha, true_beta, true_bg,
+        Size2us::new(width, height),
+        true_cx,
+        true_cy,
+        true_amp,
+        true_alpha,
+        true_beta,
+        true_bg,
     );
     let pixels_buf = Buffer2::new(width, height, pixels);
 
@@ -332,7 +375,13 @@ fn test_moffat_fit_very_high_amplitude() {
     let true_bg = 100.0;
 
     let pixels = make_moffat_stamp(
-        width, height, true_cx, true_cy, true_amp, true_alpha, true_beta, true_bg,
+        Size2us::new(width, height),
+        true_cx,
+        true_cy,
+        true_amp,
+        true_alpha,
+        true_beta,
+        true_bg,
     );
     let pixels_buf = Buffer2::new(width, height, pixels);
 
@@ -362,7 +411,13 @@ fn test_moffat_fit_very_low_amplitude() {
     let true_bg = 0.001;
 
     let pixels = make_moffat_stamp(
-        width, height, true_cx, true_cy, true_amp, true_alpha, true_beta, true_bg,
+        Size2us::new(width, height),
+        true_cx,
+        true_cy,
+        true_amp,
+        true_alpha,
+        true_beta,
+        true_bg,
     );
     let pixels_buf = Buffer2::new(width, height, pixels);
 
@@ -391,7 +446,13 @@ fn test_moffat_fit_narrow_psf() {
     let true_bg = 0.1;
 
     let pixels = make_moffat_stamp(
-        width, height, true_cx, true_cy, true_amp, true_alpha, true_beta, true_bg,
+        Size2us::new(width, height),
+        true_cx,
+        true_cy,
+        true_amp,
+        true_alpha,
+        true_beta,
+        true_bg,
     );
     let pixels_buf = Buffer2::new(width, height, pixels);
 
@@ -420,7 +481,13 @@ fn test_moffat_fit_wide_psf() {
     let true_bg = 0.1;
 
     let pixels = make_moffat_stamp(
-        width, height, true_cx, true_cy, true_amp, true_alpha, true_beta, true_bg,
+        Size2us::new(width, height),
+        true_cx,
+        true_cy,
+        true_amp,
+        true_alpha,
+        true_beta,
+        true_bg,
     );
     let pixels_buf = Buffer2::new(width, height, pixels);
 
@@ -455,7 +522,13 @@ fn test_moffat_fit_various_beta_values() {
     // Test various beta values from Lorentzian-like (1.5) to Gaussian-like (6.0)
     for &true_beta in &[1.5f32, 2.0, 2.5, 3.0, 4.0, 5.0, 6.0] {
         let pixels = make_moffat_stamp(
-            width, height, true_cx, true_cy, true_amp, true_alpha, true_beta, true_bg,
+            Size2us::new(width, height),
+            true_cx,
+            true_cy,
+            true_amp,
+            true_alpha,
+            true_beta,
+            true_bg,
         );
         let pixels_buf = Buffer2::new(width, height, pixels);
 
@@ -493,7 +566,13 @@ fn test_moffat_fit_converges_within_max_iterations() {
     let true_bg = 0.1;
 
     let pixels = make_moffat_stamp(
-        width, height, true_cx, true_cy, true_amp, true_alpha, true_beta, true_bg,
+        Size2us::new(width, height),
+        true_cx,
+        true_cy,
+        true_amp,
+        true_alpha,
+        true_beta,
+        true_bg,
     );
     let pixels_buf = Buffer2::new(width, height, pixels);
 
@@ -525,7 +604,13 @@ fn test_moffat_fit_bad_initial_guess_still_converges() {
     let true_bg = 0.1;
 
     let pixels = make_moffat_stamp(
-        width, height, true_cx, true_cy, true_amp, true_alpha, true_beta, true_bg,
+        Size2us::new(width, height),
+        true_cx,
+        true_cy,
+        true_amp,
+        true_alpha,
+        true_beta,
+        true_bg,
     );
     let pixels_buf = Buffer2::new(width, height, pixels);
 
@@ -595,7 +680,13 @@ fn test_moffat_fwhm_computed_correctly() {
     let true_bg = 0.1;
 
     let pixels = make_moffat_stamp(
-        width, height, true_cx, true_cy, true_amp, true_alpha, true_beta, true_bg,
+        Size2us::new(width, height),
+        true_cx,
+        true_cy,
+        true_amp,
+        true_alpha,
+        true_beta,
+        true_bg,
     );
     let pixels_buf = Buffer2::new(width, height, pixels);
 

@@ -10,7 +10,7 @@ fn test_phase1_reaches_good_accuracy_in_few_iterations() {
     let height = 64;
     let true_pos = Vec2::new(32.3, 32.7);
     let pixels = make_gaussian_star(Size2us::new(width, height), true_pos, 2.5, 0.8, 0.1);
-    let bg = make_uniform_background(width, height, 0.1, 0.01);
+    let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
     let stamp_radius = 7;
     let expected_fwhm = 5.9;
 
@@ -78,7 +78,7 @@ fn test_single_phase1_iteration_provides_good_seed() {
         for dy in 0..5 {
             let true_pos = Vec2::new(32.0 + dx as f32 * 0.2, 32.0 + dy as f32 * 0.2);
             let pixels = make_gaussian_star(Size2us::new(width, height), true_pos, 2.5, 0.8, 0.1);
-            let bg = make_uniform_background(width, height, 0.1, 0.01);
+            let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
 
             // Start from integer peak position
             let start = Vec2::new(true_pos.x.round(), true_pos.y.round());
@@ -113,7 +113,7 @@ fn test_gaussian_fit_accuracy_independent_of_phase1_iterations() {
     let true_pos = Vec2::new(32.3, 32.7);
     let sigma = 2.5;
     let pixels = make_gaussian_star(Size2us::new(width, height), true_pos, sigma, 0.8, 0.1);
-    let bg = make_uniform_background(width, height, 0.1, 0.01);
+    let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
     let stamp_radius = 7;
     let expected_fwhm = 5.9;
 
@@ -188,7 +188,7 @@ fn test_moffat_fit_accuracy_independent_of_phase1_iterations() {
     let height = 64;
     let true_pos = Vec2::new(32.3, 32.7);
     let pixels = make_gaussian_star(Size2us::new(width, height), true_pos, 2.5, 0.8, 0.1);
-    let bg = make_uniform_background(width, height, 0.1, 0.01);
+    let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
     let stamp_radius = 7;
     let expected_fwhm = 5.9;
 
@@ -306,7 +306,7 @@ fn test_prefit_moments_iterations_sufficient() {
 
     for (true_pos, sigma) in test_cases {
         let pixels = make_gaussian_star(Size2us::new(width, height), true_pos, sigma, 0.8, 0.1);
-        let bg = make_uniform_background(width, height, 0.1, 0.01);
+        let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
         let expected_fwhm = sigma / FWHM_TO_SIGMA;
         let stamp_radius = 7;
 
@@ -435,7 +435,7 @@ fn test_prefit_moments_iterations_sufficient_moffat() {
     let sigma = 2.5f32;
 
     let pixels = make_gaussian_star(Size2us::new(width, height), true_pos, sigma, 0.8, 0.1);
-    let bg = make_uniform_background(width, height, 0.1, 0.01);
+    let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
     let expected_fwhm = sigma / FWHM_TO_SIGMA;
     let stamp_radius = 7;
 

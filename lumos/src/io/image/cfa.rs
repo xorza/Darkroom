@@ -441,8 +441,8 @@ mod tests {
 
     #[test]
     fn test_subtract() {
-        let mut light = make_cfa(2, 2, vec![0.5, 0.6, 0.7, 0.8], CfaType::Mono);
-        let dark = make_cfa(2, 2, vec![0.1, 0.1, 0.1, 0.1], CfaType::Mono);
+        let mut light = make_cfa(Size2us::new(2, 2), vec![0.5, 0.6, 0.7, 0.8], CfaType::Mono);
+        let dark = make_cfa(Size2us::new(2, 2), vec![0.1, 0.1, 0.1, 0.1], CfaType::Mono);
 
         light.subtract(&dark);
 
@@ -455,8 +455,8 @@ mod tests {
     #[test]
     #[should_panic(expected = "dimensions mismatch")]
     fn test_subtract_dimension_mismatch() {
-        let mut light = make_cfa(2, 2, vec![0.5; 4], CfaType::Mono);
-        let dark = make_cfa(3, 3, vec![0.1; 9], CfaType::Mono);
+        let mut light = make_cfa(Size2us::new(2, 2), vec![0.5; 4], CfaType::Mono);
+        let dark = make_cfa(Size2us::new(3, 3), vec![0.1; 9], CfaType::Mono);
         light.subtract(&dark);
     }
 

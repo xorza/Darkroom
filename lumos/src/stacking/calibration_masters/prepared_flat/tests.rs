@@ -1,3 +1,4 @@
+use crate::math::size2us::Size2us;
 use rayon::prelude::*;
 
 use crate::CfaType;
@@ -102,14 +103,14 @@ fn reference_apply_mono(light: &mut CfaImage, flat: &CfaImage, subtractor: Optio
 
 #[test]
 fn prepared_flat_matches_hand_computed_mono_calibration() {
-    let flat = make_cfa(2, 2, vec![0.0, 1.0, 1.0, 2.0], CfaType::Mono);
+    let flat = make_cfa(Size2us::new(2, 2), vec![0.0, 1.0, 1.0, 2.0], CfaType::Mono);
     let prepared = prepare(flat, None);
     assert_eq!(
         prepared.data.pixels(),
         &[MIN_NORMALIZED_FLAT, 1.0, 1.0, 2.0]
     );
 
-    let mut light = make_cfa(2, 2, vec![1.0; 4], CfaType::Mono);
+    let mut light = make_cfa(Size2us::new(2, 2), vec![1.0; 4], CfaType::Mono);
     apply(&prepared, &mut light);
     assert_eq!(light.data.pixels(), &[10.0, 1.0, 1.0, 0.5]);
 }
@@ -140,8 +141,12 @@ fn prepared_flat_is_bit_exact_for_bayer_and_xtrans_with_subtraction() {
             }
         }
 
-        let flat = make_cfa(width, height, flat_pixels, cfa_type.clone());
-        let subtractor = make_cfa(width, height, vec![0.125; width * height], cfa_type.clone());
+        let flat = make_cfa(Size2us::new(width, height), flat_pixels, cfa_type.clone());
+        let subtractor = make_cfa(
+            Size2us::new(width, height),
+            vec![0.125; width * height],
+            cfa_type.clone(),
+        );
         let prepared = prepare(flat, Some(&subtractor));
         assert_eq!(
             prepared
@@ -155,7 +160,11 @@ fn prepared_flat_is_bit_exact_for_bayer_and_xtrans_with_subtraction() {
                 .collect::<Vec<_>>()
         );
 
-        let mut light = make_cfa(width, height, vec![0.75; width * height], cfa_type);
+        let mut light = make_cfa(
+            Size2us::new(width, height),
+            vec![0.75; width * height],
+            cfa_type,
+        );
         apply(&prepared, &mut light);
         let expected = expected_divisors
             .iter()
@@ -185,11 +194,14 @@ fn prepared_flat_matches_previous_per_light_equation_bit_exactly() {
         let subtractor_pixels = (0..width * height)
             .map(|index| 0.02 + (index.wrapping_mul(11) % 17) as f32 * 0.0005)
             .collect::<Vec<_>>();
-        let flat = make_cfa(width, height, pixels, cfa_type.clone());
-        let subtractor = make_cfa(width, height, subtractor_pixels, cfa_type.clone());
+        let flat = make_cfa(Size2us::new(width, height), pixels, cfa_type.clone());
+        let subtractor = make_cfa(
+            Size2us::new(width, height),
+            subtractor_pixels,
+            cfa_type.clone(),
+        );
         let light = make_cfa(
-            width,
-            height,
+            Size2us::new(width, height),
             (0..width * height)
                 .map(|index| 0.1 + (index.wrapping_mul(19) % 89) as f32 * 0.004)
                 .collect(),
@@ -219,7 +231,7 @@ fn prepared_flat_matches_previous_per_light_equation_bit_exactly() {
 #[test]
 #[should_panic(expected = "Flat subtractor dimensions mismatch")]
 fn preparation_rejects_mismatched_subtractor_dimensions() {
-    let flat = make_cfa(2, 2, vec![1.0; 4], CfaType::Mono);
-    let subtractor = make_cfa(3, 2, vec![0.1; 6], CfaType::Mono);
+    let flat = make_cfa(Size2us::new(2, 2), vec![1.0; 4], CfaType::Mono);
+    let subtractor = make_cfa(Size2us::new(3, 2), vec![0.1; 6], CfaType::Mono);
     prepare(flat, Some(&subtractor));
 }

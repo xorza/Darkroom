@@ -1,5 +1,6 @@
 //! Tests for centroid computation.
 
+use crate::math::size2us::Size2us;
 use std::f32::consts::FRAC_PI_4;
 
 use glam::Vec2;
@@ -30,14 +31,9 @@ const TEST_EXPECTED_FWHM: f32 = 5.9;
 
 use crate::stacking::star_detection::centroid::internals::make_gaussian_star;
 
-fn make_uniform_background(
-    width: usize,
-    height: usize,
-    bg_value: f32,
-    noise: f32,
-) -> BackgroundEstimate {
-    let mut bg_buf = Buffer2::new_default(width, height);
-    let mut noise_buf = Buffer2::new_default(width, height);
+fn make_uniform_background(size: Size2us, bg_value: f32, noise: f32) -> BackgroundEstimate {
+    let mut bg_buf = Buffer2::new_default(size.width, size.height);
+    let mut noise_buf = Buffer2::new_default(size.width, size.height);
     bg_buf.fill(bg_value);
     noise_buf.fill(noise);
     BackgroundEstimate {

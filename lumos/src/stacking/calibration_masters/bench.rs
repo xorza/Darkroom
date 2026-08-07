@@ -7,6 +7,7 @@
 //!
 //! Run: `cargo test -p lumos --release calibration_masters::bench -- --ignored --nocapture`
 
+use crate::math::size2us::Size2us;
 use common::CancelToken;
 use quickbench::quick_bench;
 use std::hint::black_box;
@@ -47,9 +48,21 @@ fn cfa_pixels(base: f32, amp: f32, defect: f32, salt: u32) -> Vec<f32> {
 fn make_masters() -> CalibrationMasters {
     CalibrationMasters::from_images(
         CalibrationSet {
-            dark: Some(make_cfa(W, H, cfa_pixels(0.02, 0.004, 0.9, 0x11), bayer())),
-            flat: Some(make_cfa(W, H, cfa_pixels(0.6, 0.05, 0.001, 0x22), bayer())),
-            bias: Some(make_cfa(W, H, cfa_pixels(0.01, 0.002, 0.5, 0x33), bayer())),
+            dark: Some(make_cfa(
+                Size2us::new(W, H),
+                cfa_pixels(0.02, 0.004, 0.9, 0x11),
+                bayer(),
+            )),
+            flat: Some(make_cfa(
+                Size2us::new(W, H),
+                cfa_pixels(0.6, 0.05, 0.001, 0x22),
+                bayer(),
+            )),
+            bias: Some(make_cfa(
+                Size2us::new(W, H),
+                cfa_pixels(0.01, 0.002, 0.5, 0x33),
+                bayer(),
+            )),
             flat_dark: None,
         },
         DEFAULT_SIGMA_THRESHOLD,
@@ -64,7 +77,11 @@ fn bench_calibrate_apply_bayer(b: ::quickbench::Bencher) {
     // A fresh, uncalibrated light per call: `calibrate` asserts the frame isn't already
     // calibrated and mutates in place, so the clone is the realistic per-light cost — each
     // light arrives freshly decoded and owned.
-    let light = make_cfa(W, H, cfa_pixels(0.3, 0.05, 0.95, 0x44), bayer());
+    let light = make_cfa(
+        Size2us::new(W, H),
+        cfa_pixels(0.3, 0.05, 0.95, 0x44),
+        bayer(),
+    );
     b.bench(|| {
         let mut frame = light.clone();
         masters.calibrate(&mut frame).unwrap();
@@ -75,7 +92,11 @@ fn bench_calibrate_apply_bayer(b: ::quickbench::Bencher) {
 #[quick_bench(warmup_iters = 0, iters = 3)]
 fn bench_calibrate_30_lights_bayer(b: ::quickbench::Bencher) {
     let masters = make_masters();
-    let light = make_cfa(W, H, cfa_pixels(0.3, 0.05, 0.95, 0x44), bayer());
+    let light = make_cfa(
+        Size2us::new(W, H),
+        cfa_pixels(0.3, 0.05, 0.95, 0x44),
+        bayer(),
+    );
     b.bench(|| {
         for _ in 0..30 {
             let mut frame = light.clone();
@@ -87,8 +108,16 @@ fn bench_calibrate_30_lights_bayer(b: ::quickbench::Bencher) {
 
 #[quick_bench(warmup_iters = 1, iters = 10)]
 fn bench_defect_map_build_bayer(b: ::quickbench::Bencher) {
-    let dark = make_cfa(W, H, cfa_pixels(0.02, 0.004, 0.9, 0x11), bayer());
-    let flat = make_cfa(W, H, cfa_pixels(0.6, 0.05, 0.001, 0x22), bayer());
+    let dark = make_cfa(
+        Size2us::new(W, H),
+        cfa_pixels(0.02, 0.004, 0.9, 0x11),
+        bayer(),
+    );
+    let flat = make_cfa(
+        Size2us::new(W, H),
+        cfa_pixels(0.6, 0.05, 0.001, 0x22),
+        bayer(),
+    );
     b.bench(|| {
         black_box(
             DefectMap::default()
@@ -118,7 +147,7 @@ fn cosmic_ray_frame(cfa: CfaType) -> CfaImage {
         let idx = (k as u32).wrapping_mul(2246822519) as usize % n;
         px[idx] = 0.95;
     }
-    make_cfa(CR_W, CR_H, px, cfa)
+    make_cfa(Size2us::new(CR_W, CR_H), px, cfa)
 }
 
 #[quick_bench(warmup_iters = 1, iters = 3)]

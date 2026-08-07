@@ -113,14 +113,9 @@ pub(crate) fn estimate_background(
 }
 
 /// Create a CfaImage from raw pixel data and CFA type.
-pub(crate) fn make_cfa(
-    width: usize,
-    height: usize,
-    pixels: Vec<f32>,
-    cfa_type: CfaType,
-) -> CfaImage {
+pub(crate) fn make_cfa(size: Size2us, pixels: Vec<f32>, cfa_type: CfaType) -> CfaImage {
     CfaImage {
-        data: Buffer2::new(width, height, pixels),
+        data: Buffer2::new(size.width, size.height, pixels),
         metadata: ImageMetadata {
             cfa_type: Some(cfa_type),
             ..Default::default()

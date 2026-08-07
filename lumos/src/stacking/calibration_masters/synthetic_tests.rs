@@ -69,8 +69,7 @@ fn calibrate_removes_vignette_dark_and_bias() {
             dark: Some(constant_cfa(Size2us::new(w, h), bias + dark, CfaType::Mono)),
             // Flat frame under uniform illumination: bias + sensor response.
             flat: Some(make_cfa(
-                w,
-                h,
+                Size2us::new(w, h),
                 flat.iter().map(|&f| bias + f).collect(),
                 CfaType::Mono,
             )),
@@ -82,7 +81,7 @@ fn calibrate_removes_vignette_dark_and_bias() {
     )
     .unwrap();
 
-    let mut light = make_cfa(w, h, light_px, CfaType::Mono);
+    let mut light = make_cfa(Size2us::new(w, h), light_px, CfaType::Mono);
     masters.calibrate(&mut light).unwrap();
 
     // Recovered = sky·mean(flat), spatially flat (vignette divided out).
@@ -136,7 +135,7 @@ fn calibrate_recovers_star_field_through_a_noisy_light() {
     )
     .unwrap();
 
-    let mut light = make_cfa(w, h, light_px, CfaType::Mono);
+    let mut light = make_cfa(Size2us::new(w, h), light_px, CfaType::Mono);
     masters.calibrate(&mut light).unwrap();
 
     // Uniform flat (mean 1) → recovered ≈ true signal. The residual is the single-frame shot+read
@@ -160,7 +159,7 @@ fn defect_map_detects_injected_hot_and_cold_pixels() {
     for &i in &hot {
         dark_px[i] = 0.9;
     }
-    let dark = make_cfa(w, h, dark_px, CfaType::Mono);
+    let dark = make_cfa(Size2us::new(w, h), dark_px, CfaType::Mono);
     let map = DefectMap::default()
         .detect_hot(&dark, 5.0, &CancelToken::never())
         .unwrap();
@@ -176,7 +175,7 @@ fn defect_map_detects_injected_hot_and_cold_pixels() {
     for &i in &dead {
         flat_px[i] = 0.01;
     }
-    let flat = make_cfa(w, h, flat_px, CfaType::Mono);
+    let flat = make_cfa(Size2us::new(w, h), flat_px, CfaType::Mono);
     let map = DefectMap::default()
         .detect_cold(&flat, &CancelToken::never())
         .unwrap();
@@ -201,7 +200,7 @@ fn hot_detection_sigma_threshold_is_monotonic() {
     for &i in &[800usize, 1800, 2800] {
         dark_px[i] = 0.1 + 0.10; // ~10σ
     }
-    let dark = make_cfa(w, h, dark_px, CfaType::Mono);
+    let dark = make_cfa(Size2us::new(w, h), dark_px, CfaType::Mono);
     let lenient = DefectMap::default()
         .detect_hot(&dark, 3.0, &CancelToken::never())
         .unwrap()
@@ -231,7 +230,7 @@ fn defect_correction_replaces_hot_pixels_with_neighbours() {
     }
     let map = DefectMap::default()
         .detect_hot(
-            &make_cfa(w, h, dark, CfaType::Mono),
+            &make_cfa(Size2us::new(w, h), dark, CfaType::Mono),
             5.0,
             &CancelToken::never(),
         )
@@ -241,7 +240,7 @@ fn defect_correction_replaces_hot_pixels_with_neighbours() {
     for &(x, y) in &hot {
         img_px[y * w + x] = 0.95;
     }
-    let mut img = make_cfa(w, h, img_px, CfaType::Mono);
+    let mut img = make_cfa(Size2us::new(w, h), img_px, CfaType::Mono);
     map.correct(&mut img);
 
     // Each hot pixel is replaced by its (uniform) neighbourhood; ordinary pixels are untouched.

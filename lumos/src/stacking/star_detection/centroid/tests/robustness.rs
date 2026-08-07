@@ -11,7 +11,7 @@ fn test_centroid_undersampled_psf() {
     let true_pos = Vec2::new(32.3, 32.7);
 
     let pixels = make_gaussian_star(Size2us::new(width, height), true_pos, sigma, 0.9, 0.1);
-    let bg = make_uniform_background(width, height, 0.1, 0.01);
+    let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
 
     let expected_fwhm = FWHM_TO_SIGMA * sigma;
     let stamp_radius = 5; // Smaller stamp for undersampled
@@ -50,7 +50,7 @@ fn test_centroid_large_psf() {
     let true_pos = Vec2::new(64.3, 64.7);
 
     let pixels = make_gaussian_star(Size2us::new(width, height), true_pos, sigma, 0.8, 0.1);
-    let bg = make_uniform_background(width, height, 0.1, 0.01);
+    let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
 
     let expected_fwhm = FWHM_TO_SIGMA * sigma;
     let stamp_radius = MAX_STAMP_RADIUS; // Use maximum allowed
@@ -132,7 +132,7 @@ fn test_metrics_small_fwhm() {
         0.9,
         0.1,
     );
-    let bg = make_uniform_background(width, height, 0.1, 0.01);
+    let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
 
     let metrics = compute_star(&pixels, &bg, Vec2::splat(32.0), 0.0, 5, None, None);
 
@@ -155,7 +155,7 @@ fn test_metrics_large_fwhm() {
         0.8,
         0.1,
     );
-    let bg = make_uniform_background(width, height, 0.1, 0.01);
+    let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
 
     let metrics = compute_star(
         &pixels,
@@ -217,7 +217,7 @@ fn test_centroid_with_nearby_star() {
     let secondary_pos = Vec2::new(40.0, 32.0); // 8 pixels separation
     let pixels = make_blended_stars(width, height, primary_pos, secondary_pos, sigma, 0.8, 0.3);
 
-    let bg = make_uniform_background(width, height, 0.1, 0.01);
+    let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
     let expected_fwhm = FWHM_TO_SIGMA * sigma;
 
     let result = refine_centroid(
@@ -254,7 +254,7 @@ fn test_centroid_blended_stars() {
     let secondary_pos = Vec2::new(37.0, 32.0);
     let pixels = make_blended_stars(width, height, primary_pos, secondary_pos, sigma, 0.8, 0.5);
 
-    let bg = make_uniform_background(width, height, 0.1, 0.01);
+    let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
     let expected_fwhm = FWHM_TO_SIGMA * sigma;
 
     let result = refine_centroid(
@@ -368,7 +368,7 @@ fn test_eccentricity_with_contamination() {
         0.4,
     );
 
-    let bg = make_uniform_background(width, height, 0.1, 0.01);
+    let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
 
     let metrics_single = compute_star(
         &single_star,
@@ -447,7 +447,7 @@ fn test_centroid_rotated_ellipse_45deg() {
     let angle = FRAC_PI_4; // 45 degrees
 
     let pixels = make_rotated_elliptical_star(width, height, true_pos, 4.0, 2.0, angle, 0.8);
-    let bg = make_uniform_background(width, height, 0.1, 0.01);
+    let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
 
     let result = refine_centroid(
         &pixels,
@@ -477,7 +477,7 @@ fn test_centroid_various_rotation_angles() {
     let width = 64;
     let height = 64;
     let true_pos = Vec2::new(32.0, 32.0);
-    let bg = make_uniform_background(width, height, 0.1, 0.01);
+    let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
 
     // Test multiple rotation angles
     for angle_deg in [0, 30, 45, 60, 90, 120, 150] {
@@ -517,7 +517,7 @@ fn test_eccentricity_rotation_invariant() {
     let width = 64;
     let height = 64;
     let pos = Vec2::splat(32.0);
-    let bg = make_uniform_background(width, height, 0.1, 0.01);
+    let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
 
     let mut eccentricities = Vec::new();
 
@@ -610,7 +610,7 @@ fn test_recovery_from_2pixel_offset() {
     let sigma = 2.5f32;
 
     let pixels = make_gaussian_star(Size2us::new(width, height), true_pos, sigma, 0.8, 0.1);
-    let bg = make_uniform_background(width, height, 0.1, 0.01);
+    let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
     let expected_fwhm = FWHM_TO_SIGMA * sigma;
 
     // Start 2 pixels away
@@ -653,7 +653,7 @@ fn test_recovery_from_3pixel_offset() {
     let sigma = 2.5f32;
 
     let pixels = make_gaussian_star(Size2us::new(width, height), true_pos, sigma, 0.8, 0.1);
-    let bg = make_uniform_background(width, height, 0.1, 0.01);
+    let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
     let expected_fwhm = FWHM_TO_SIGMA * sigma;
 
     // Start 3 pixels away diagonally
