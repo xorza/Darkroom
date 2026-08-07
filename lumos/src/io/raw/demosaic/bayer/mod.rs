@@ -87,18 +87,12 @@ impl CfaPattern {
 pub(crate) struct BayerImage<'a> {
     /// Decoded or calibrated linear samples; calibration may put values outside `[0, 1]`.
     pub(crate) data: &'a [f32],
-    /// Width of the raw data buffer
-    pub(crate) raw_width: usize,
-    /// Height of the raw data buffer
-    pub(crate) raw_height: usize,
-    /// Width of the active/output image area
-    pub(crate) width: usize,
-    /// Height of the active/output image area
-    pub(crate) height: usize,
-    /// Top margin (offset from raw to active area)
-    pub(crate) top_margin: usize,
-    /// Left margin (offset from raw to active area)
-    pub(crate) left_margin: usize,
+    /// Extent of the raw data buffer.
+    pub(crate) raw: Size2us,
+    /// Extent of the active/output image area.
+    pub(crate) active: Size2us,
+    /// Top-left corner of the active area within the raw buffer.
+    pub(crate) margin: Vec2us,
     /// CFA pattern anchored at the full raw buffer origin.
     pub(crate) raw_cfa_pattern: CfaPattern,
 }
@@ -122,42 +116,39 @@ impl<'a> BayerImage<'a> {
         margin: Vec2us,
         raw_cfa_pattern: CfaPattern,
     ) -> Self {
-        let (raw_width, raw_height) = (raw.width, raw.height);
-        let (width, height) = (active.width, active.height);
-        let (top_margin, left_margin) = (margin.y, margin.x);
         assert!(
-            width > 0 && height > 0,
+            active.width > 0 && active.height > 0,
             "Output dimensions must be non-zero: {}x{}",
-            width,
-            height
+            active.width,
+            active.height
         );
         assert!(
-            raw_width > 0 && raw_height > 0,
+            raw.width > 0 && raw.height > 0,
             "Raw dimensions must be non-zero: {}x{}",
-            raw_width,
-            raw_height
+            raw.width,
+            raw.height
         );
         assert!(
-            data.len() == raw_width * raw_height,
+            data.len() == raw.pixel_count(),
             "Data length {} doesn't match raw dimensions {}x{}={}",
             data.len(),
-            raw_width,
-            raw_height,
-            raw_width * raw_height
+            raw.width,
+            raw.height,
+            raw.pixel_count()
         );
         assert!(
-            top_margin + height <= raw_height,
+            margin.y + active.height <= raw.height,
             "Top margin {} + height {} exceeds raw height {}",
-            top_margin,
-            height,
-            raw_height
+            margin.y,
+            active.height,
+            raw.height
         );
         assert!(
-            left_margin + width <= raw_width,
+            margin.x + active.width <= raw.width,
             "Left margin {} + width {} exceeds raw width {}",
-            left_margin,
-            width,
-            raw_width
+            margin.x,
+            active.width,
+            raw.width
         );
 
         debug_assert!(
@@ -167,12 +158,9 @@ impl<'a> BayerImage<'a> {
 
         Self {
             data,
-            raw_width,
-            raw_height,
-            width,
-            height,
-            top_margin,
-            left_margin,
+            raw,
+            active,
+            margin,
             raw_cfa_pattern,
         }
     }
