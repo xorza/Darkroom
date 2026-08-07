@@ -38,7 +38,8 @@ const LN2_HI: f64 = 6.931_457_519_531_25e-1;
 const LN2_LO: f64 = 1.428_606_820_309_417_3e-6;
 
 use crate::stacking::star_detection::centroid::lm_optimizer::{
-    LMConfig, LMModel, LMResult, accumulate_chi2, build_normal_equations_scalar, optimize,
+    FitData, LMConfig, LMModel, LMResult, NormalEquations, accumulate_chi2,
+    build_normal_equations_scalar, optimize,
 };
 use crate::stacking::star_detection::centroid::{
     FitNoise, MAX_STAMP_PIXELS, estimate_sigma_from_moments, extract_stamp, fit_weights,
@@ -158,7 +159,7 @@ impl LMModel<6> for Gaussian2D {
         data_y: &[f64],
         data_z: &[f64],
         params: &[f64; 6],
-    ) -> ([[f64; 6]; 6], [f64; 6], f64) {
+    ) -> NormalEquations<6> {
         #[cfg(target_arch = "x86_64")]
         if imaginarium::cpu_features::has_avx2_fma() {
             return unsafe {
@@ -172,7 +173,7 @@ impl LMModel<6> for Gaussian2D {
             };
         }
         // Scalar fallback
-        build_normal_equations_scalar(self, data_x, data_y, data_z, None, params)
+        build_normal_equations_scalar(self, FitData::unweighted(data_x, data_y, data_z), params)
     }
 
     // Scalar fallback is dead code on aarch64, where the NEON path returns unconditionally.
@@ -197,7 +198,12 @@ impl LMModel<6> for Gaussian2D {
             };
         }
         // Scalar fallback
-        accumulate_chi2(self, data_x, data_y, data_z, None, params, 0..data_x.len())
+        accumulate_chi2(
+            self,
+            FitData::unweighted(data_x, data_y, data_z),
+            params,
+            0..data_x.len(),
+        )
     }
 }
 

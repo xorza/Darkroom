@@ -818,8 +818,11 @@ fn test_batch_build_normal_equations_matches_scalar() {
     let (hessian_scalar, gradient_scalar) = compute_hessian_gradient(&jac_scalar, &res_scalar);
 
     // Batch path (uses SIMD on x86_64 with AVX2)
-    let (hessian_batch, gradient_batch, chi2_batch) =
-        model.batch_build_normal_equations(&data_x, &data_y, &data_z, &params);
+    let NormalEquations {
+        hessian: hessian_batch,
+        gradient: gradient_batch,
+        chi2: chi2_batch,
+    } = model.batch_build_normal_equations(&data_x, &data_y, &data_z, &params);
 
     // Chi² should match
     assert!(
@@ -910,8 +913,11 @@ fn test_batch_build_normal_equations_various_stamp_sizes() {
         let (hessian_scalar, gradient_scalar) = compute_hessian_gradient(&jac_scalar, &res_scalar);
 
         // Batch
-        let (hessian_batch, gradient_batch, chi2_batch) =
-            model.batch_build_normal_equations(&data_x, &data_y, &data_z, &params);
+        let NormalEquations {
+            hessian: hessian_batch,
+            gradient: gradient_batch,
+            chi2: chi2_batch,
+        } = model.batch_build_normal_equations(&data_x, &data_y, &data_z, &params);
 
         assert!(
             approx_eq(chi2_scalar, chi2_batch),
@@ -964,8 +970,11 @@ fn test_batch_build_normal_equations_all_pow_strategies() {
         let (hessian_scalar, gradient_scalar) = compute_hessian_gradient(&jac_scalar, &res_scalar);
 
         // Batch
-        let (hessian_batch, gradient_batch, chi2_batch) =
-            model.batch_build_normal_equations(&data_x, &data_y, &data_z, &params);
+        let NormalEquations {
+            hessian: hessian_batch,
+            gradient: gradient_batch,
+            chi2: chi2_batch,
+        } = model.batch_build_normal_equations(&data_x, &data_y, &data_z, &params);
 
         assert!(
             approx_eq(chi2_scalar, chi2_batch),

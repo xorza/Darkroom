@@ -23,7 +23,8 @@ mod simd_neon;
 
 use crate::math::FWHM_TO_SIGMA;
 use crate::stacking::star_detection::centroid::lm_optimizer::{
-    LMConfig, LMModel, accumulate_chi2, build_normal_equations_scalar, optimize,
+    FitData, LMConfig, LMModel, NormalEquations, accumulate_chi2, build_normal_equations_scalar,
+    optimize,
 };
 use crate::stacking::star_detection::centroid::{
     FitNoise, MAX_STAMP_PIXELS, estimate_sigma_from_moments, extract_stamp, fit_weights,
@@ -237,7 +238,7 @@ impl LMModel<5> for MoffatFixedBeta {
         data_y: &[f64],
         data_z: &[f64],
         params: &[f64; 5],
-    ) -> ([[f64; 5]; 5], [f64; 5], f64) {
+    ) -> NormalEquations<5> {
         #[cfg(target_arch = "x86_64")]
         if imaginarium::cpu_features::has_avx2_fma() {
             // SAFETY: AVX2+FMA availability checked above
@@ -252,7 +253,7 @@ impl LMModel<5> for MoffatFixedBeta {
             };
         }
         // Scalar fallback
-        build_normal_equations_scalar(self, data_x, data_y, data_z, None, params)
+        build_normal_equations_scalar(self, FitData::unweighted(data_x, data_y, data_z), params)
     }
 
     // Scalar fallback is dead code on aarch64, where the NEON path returns unconditionally.
@@ -278,7 +279,12 @@ impl LMModel<5> for MoffatFixedBeta {
             };
         }
         // Scalar fallback
-        accumulate_chi2(self, data_x, data_y, data_z, None, params, 0..data_x.len())
+        accumulate_chi2(
+            self,
+            FitData::unweighted(data_x, data_y, data_z),
+            params,
+            0..data_x.len(),
+        )
     }
 }
 
