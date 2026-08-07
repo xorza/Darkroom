@@ -19,12 +19,33 @@ pub(super) mod matching;
 mod tests;
 pub(super) mod voting;
 
+use crate::stacking::registration::result::RegistrationError;
+
 /// Configuration for triangle matching.
 #[derive(Debug, Clone)]
 pub struct TriangleConfig {
     pub ratio_tolerance: f64,
     pub min_votes: usize,
     pub check_orientation: bool,
+}
+
+impl TriangleConfig {
+    /// Validate the matching invariants this config owns.
+    pub fn validate(&self) -> Result<(), RegistrationError> {
+        if !(self.ratio_tolerance > 0.0 && self.ratio_tolerance < 1.0) {
+            return Err(RegistrationError::InvalidConfig(format!(
+                "ratio_tolerance must be in (0, 1), got {}",
+                self.ratio_tolerance
+            )));
+        }
+        if self.min_votes == 0 {
+            return Err(RegistrationError::InvalidConfig(format!(
+                "min_votes must be at least 1, got {}",
+                self.min_votes
+            )));
+        }
+        Ok(())
+    }
 }
 
 impl Default for TriangleConfig {

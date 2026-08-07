@@ -157,19 +157,7 @@ impl RegistrationMatchingConfig {
                 self.min_matches
             ));
         }
-        if !(self.triangle.ratio_tolerance > 0.0 && self.triangle.ratio_tolerance < 1.0) {
-            return invalid(format!(
-                "ratio_tolerance must be in (0, 1), got {}",
-                self.triangle.ratio_tolerance
-            ));
-        }
-        if self.triangle.min_votes == 0 {
-            return invalid(format!(
-                "min_votes must be at least 1, got {}",
-                self.triangle.min_votes
-            ));
-        }
-        Ok(())
+        self.triangle.validate()
     }
 }
 
