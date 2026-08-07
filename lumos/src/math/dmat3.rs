@@ -19,50 +19,34 @@ use std::ops::{Index, IndexMut, Mul};
 /// | g  h  1  |
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct DMat3 {
+pub(crate) struct DMat3 {
     data: [f64; 9],
 }
 
 impl DMat3 {
     /// Create from a raw array in row-major order.
     #[inline]
-    pub const fn from_array(data: [f64; 9]) -> Self {
+    pub(crate) const fn from_array(data: [f64; 9]) -> Self {
         Self { data }
     }
 
     /// Create the 3x3 identity matrix.
     #[inline]
-    pub const fn identity() -> Self {
+    pub(crate) const fn identity() -> Self {
         Self {
             data: [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
         }
     }
 
-    /// Create from three row arrays.
-    #[inline]
-    pub const fn from_rows(row0: [f64; 3], row1: [f64; 3], row2: [f64; 3]) -> Self {
-        Self {
-            data: [
-                row0[0], row0[1], row0[2], row1[0], row1[1], row1[2], row2[0], row2[1], row2[2],
-            ],
-        }
-    }
-
     /// Reference to the underlying row-major array.
     #[inline]
-    pub const fn as_array(&self) -> &[f64; 9] {
+    pub(crate) const fn as_array(&self) -> &[f64; 9] {
         &self.data
-    }
-
-    /// Consume and return the underlying array.
-    #[inline]
-    pub const fn to_array(self) -> [f64; 9] {
-        self.data
     }
 
     /// Matrix multiplication: `self * rhs`.
     #[inline]
-    pub fn mul_mat(&self, rhs: &DMat3) -> DMat3 {
+    pub(crate) fn mul_mat(&self, rhs: &DMat3) -> DMat3 {
         let a = &self.data;
         let b = &rhs.data;
         DMat3 {
@@ -82,7 +66,7 @@ impl DMat3 {
 
     /// Compute the determinant.
     #[inline]
-    pub fn determinant(&self) -> f64 {
+    pub(crate) fn determinant(&self) -> f64 {
         let d = &self.data;
         d[0] * (d[4] * d[8] - d[5] * d[7]) - d[1] * (d[3] * d[8] - d[5] * d[6])
             + d[2] * (d[3] * d[7] - d[4] * d[6])
@@ -95,7 +79,7 @@ impl DMat3 {
     /// det = 1e-15, singular) but is capped at the absolute `1e-12` above unit scale: 2D
     /// homogeneous transforms legitimately carry translations of ~1e4–1e10 px that inflate the
     /// element magnitude without inflating the determinant.
-    pub fn inverse(&self) -> Option<DMat3> {
+    pub(crate) fn inverse(&self) -> Option<DMat3> {
         let det = self.determinant();
         let scale = self.data.iter().fold(0.0f64, |m, v| m.max(v.abs()));
         if det.abs() <= 1e-12 * scale.powi(3).min(1.0) {
@@ -134,7 +118,7 @@ impl DMat3 {
     /// and would read pixel (0,0). Affine/similarity/euclidean have a `[0,0,1]`
     /// bottom row, so `w` is structurally 1 and this branch never fires for them.
     #[inline]
-    pub fn transform_point(&self, p: DVec2) -> DVec2 {
+    pub(crate) fn transform_point(&self, p: DVec2) -> DVec2 {
         let d = &self.data;
         let w = d[6] * p.x + d[7] * p.y + d[8];
         if w.abs() <= f64::EPSILON {
@@ -221,10 +205,25 @@ impl Mul<DMat3> for f64 {
     }
 }
 
-/// Mutable element access used only by tests to perturb individual entries.
+/// Construction and element access used only by tests.
 #[cfg(test)]
 impl DMat3 {
-    pub fn as_array_mut(&mut self) -> &mut [f64; 9] {
+    /// Create from three row arrays.
+    pub(crate) const fn from_rows(row0: [f64; 3], row1: [f64; 3], row2: [f64; 3]) -> Self {
+        Self {
+            data: [
+                row0[0], row0[1], row0[2], row1[0], row1[1], row1[2], row2[0], row2[1], row2[2],
+            ],
+        }
+    }
+
+    /// Consume and return the underlying array.
+    pub(crate) const fn to_array(self) -> [f64; 9] {
+        self.data
+    }
+
+    /// Mutable element access, to perturb individual entries.
+    pub(crate) fn as_array_mut(&mut self) -> &mut [f64; 9] {
         &mut self.data
     }
 
