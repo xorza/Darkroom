@@ -126,24 +126,24 @@ impl ExtractBackground {
     fn validate(&self) -> Result<(), InvalidConfigField> {
         InvalidConfigField::check(
             (1..=4).contains(&self.degree),
-            "degree",
+            "background extraction degree",
             "between 1 and 4",
             self.degree as f64,
         )?;
         InvalidConfigField::check(
             self.tile_size >= 8,
-            "tile_size",
+            "background extraction tile_size",
             "at least 8",
             self.tile_size as f64,
         )?;
         InvalidConfigField::finite(
-            "rejection_sigma",
+            "background extraction rejection_sigma",
             "finite and positive",
             self.rejection_sigma,
             |value| value > 0.0,
         )?;
         InvalidConfigField::finite(
-            "divide_floor",
+            "background extraction divide_floor",
             "finite and in (0, 1]",
             self.divide_floor,
             |value| value > 0.0 && value <= 1.0,
