@@ -220,33 +220,17 @@ fn compute_final_stats(values: &mut [f32], deviations: &mut [f32]) -> (f32, f32)
     (median, sigma)
 }
 
-/// Compute sigma-clipped median and MAD-based sigma.
+/// Iteratively clip `values`, then measure what survived.
 ///
-/// Iteratively rejects outliers beyond `kappa × sigma` from the median.
-/// Uses scratch buffer `deviations` for efficiency when called repeatedly.
-///
-/// # Arguments
-/// * `values` - Mutable slice of values (will be reordered)
-/// * `deviations` - Scratch buffer for deviations (reused between calls)
-/// * `kappa` - Number of sigma for clipping threshold
-/// * `iterations` - Number of clipping iterations
-///
-/// # Returns
-/// [`ClippedStats`] (median, MAD-sigma, mean) of the clip survivors.
-pub(crate) fn sigma_clipped_median_mad(
+/// `deviations` must already be `values.len()` long; the two public entry points differ only in
+/// how they get it that way, so everything after the sizing lives here.
+fn sigma_clipped_core(
     values: &mut [f32],
-    deviations: &mut Vec<f32>,
+    deviations: &mut [f32],
     kappa: f32,
     iterations: usize,
 ) -> ClippedStats {
-    if values.is_empty() {
-        return ClippedStats::ZERO;
-    }
-
     let mut len = values.len();
-
-    // Ensure deviations buffer has enough capacity
-    deviations.resize(len, 0.0);
 
     let mut converged = None;
     for _ in 0..iterations {
@@ -271,10 +255,37 @@ pub(crate) fn sigma_clipped_median_mad(
     }
 }
 
+/// Compute sigma-clipped median and MAD-based sigma.
+///
+/// Iteratively rejects outliers beyond `kappa × sigma` from the median.
+/// Uses scratch buffer `deviations` for efficiency when called repeatedly.
+///
+/// # Arguments
+/// * `values` - Mutable slice of values (will be reordered)
+/// * `deviations` - Scratch buffer for deviations (reused between calls)
+/// * `kappa` - Number of sigma for clipping threshold
+/// * `iterations` - Number of clipping iterations
+///
+/// # Returns
+/// [`ClippedStats`] (median, MAD-sigma, mean) of the clip survivors.
+pub(crate) fn sigma_clipped_median_mad(
+    values: &mut [f32],
+    deviations: &mut Vec<f32>,
+    kappa: f32,
+    iterations: usize,
+) -> ClippedStats {
+    if values.is_empty() {
+        return ClippedStats::ZERO;
+    }
+
+    deviations.resize(values.len(), 0.0);
+    sigma_clipped_core(values, deviations, kappa, iterations)
+}
+
 /// Sigma-clipped median and MAD computation using ArrayVec for zero heap allocation.
 ///
-/// This is identical to `sigma_clipped_median_mad` but works with ArrayVec
-/// instead of Vec for the deviations buffer, enabling stack allocation.
+/// Same computation as [`sigma_clipped_median_mad`]; only the scratch buffer differs, so that
+/// stamp-sized callers can keep it on the stack.
 ///
 /// # Arguments
 /// * `values` - Mutable slice of values (will be reordered)
@@ -299,32 +310,10 @@ pub(crate) fn sigma_clipped_median_mad_arrayvec<const N: usize>(
         values.len()
     );
 
-    let mut len = values.len();
-
-    // Ensure deviations buffer is sized correctly (len ≤ N, asserted above).
+    // Sized to exactly `values.len()` (≤ N, asserted above), as the core requires.
     deviations.clear();
-    deviations.extend(std::iter::repeat_n(0.0f32, len));
-
-    let mut converged = None;
-    for _ in 0..iterations {
-        match sigma_clip_iteration(values, &mut len, deviations.as_mut_slice(), kappa) {
-            ClipResult::Converged(median, sigma) => {
-                converged = Some((median, sigma));
-                break;
-            }
-            ClipResult::TooFew => break,
-            ClipResult::Clipped => {}
-        }
-    }
-
-    let (median, sigma) = converged.unwrap_or_else(|| {
-        compute_final_stats(&mut values[..len], &mut deviations.as_mut_slice()[..len])
-    });
-    ClippedStats {
-        median,
-        sigma,
-        mean: mean_f32(&values[..len]),
-    }
+    deviations.extend(std::iter::repeat_n(0.0f32, values.len()));
+    sigma_clipped_core(values, deviations.as_mut_slice(), kappa, iterations)
 }
 
 #[cfg(test)]
