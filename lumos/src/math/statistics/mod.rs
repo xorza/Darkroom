@@ -60,10 +60,19 @@ pub(crate) fn median_f32_mut(data: &mut [f32]) -> f32 {
 ///
 /// Returns the upper-middle element for even-length arrays (no averaging).
 /// Uses `partial_cmp` instead of `total_cmp` for ~30% faster comparisons.
-/// Only safe for data guaranteed to contain no NaN values.
+///
+/// `data` must contain no NaN: comparing one orders it `Equal` against everything, which is not
+/// a total order, and `select_nth_unstable_by` is then free to return any element. Not unsound —
+/// just a meaningless median, which is why this is checked rather than left to the caller's
+/// comment. Every decoded frame satisfies it (the FITS reader rejects non-finite pixels and RAW
+/// decodes from integers), so the check is debug-only and the hot paths pay nothing in release.
 #[inline]
 pub(crate) fn median_f32_fast(data: &mut [f32]) -> f32 {
     debug_assert!(!data.is_empty());
+    debug_assert!(
+        !data.iter().any(|value| value.is_nan()),
+        "median_f32_fast requires NaN-free data; use median_f32_mut for data that may hold NaN"
+    );
 
     let mid = data.len() / 2;
     let (_, median, _) =
@@ -83,9 +92,15 @@ fn fill_abs_deviations(values: &[f32], median: f32, scratch: &mut Vec<f32>) {
 
 /// Compute MAD using fast median (no NaN handling, single partition).
 ///
-/// For use in rejection hot paths where data is guaranteed NaN-free.
+/// For use in rejection hot paths where data is guaranteed NaN-free — see
+/// [`median_f32_fast`] for what a NaN would cost and why the check is debug-only. Checked here
+/// as well as there so a violation names the caller's data rather than the derived deviations.
 #[inline]
 pub(crate) fn mad_f32_fast(values: &[f32], median: f32, scratch: &mut Vec<f32>) -> f32 {
+    debug_assert!(
+        !median.is_nan() && !values.iter().any(|value| value.is_nan()),
+        "mad_f32_fast requires a NaN-free median and values; use mad_f32_with_scratch otherwise"
+    );
     if values.is_empty() {
         return 0.0;
     }
@@ -264,6 +279,8 @@ fn sigma_clipped_core(
 /// Iteratively rejects outliers beyond `kappa × sigma` from the median.
 /// Uses scratch buffer `deviations` for efficiency when called repeatedly.
 ///
+/// `values` must be NaN-free — the clip iteration medians with [`median_f32_fast`].
+///
 /// # Arguments
 /// * `values` - Mutable slice of values (will be reordered)
 /// * `deviations` - Scratch buffer for deviations (reused between calls)
@@ -288,8 +305,8 @@ pub(crate) fn sigma_clipped_median_mad(
 
 /// Sigma-clipped median and MAD computation using ArrayVec for zero heap allocation.
 ///
-/// Same computation as [`sigma_clipped_median_mad`]; only the scratch buffer differs, so that
-/// stamp-sized callers can keep it on the stack.
+/// Same computation as [`sigma_clipped_median_mad`], including its NaN-free requirement; only
+/// the scratch buffer differs, so that stamp-sized callers can keep it on the stack.
 ///
 /// # Arguments
 /// * `values` - Mutable slice of values (will be reordered)
