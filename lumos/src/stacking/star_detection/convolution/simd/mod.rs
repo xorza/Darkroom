@@ -133,7 +133,7 @@ pub(super) fn convolve_row(input: &[f32], output: &mut [f32], kernel: &[f32], ra
         return;
     }
 
-    // Scalar fallback
+    // Scalar fallback is dead code on aarch64, where the NEON path returns unconditionally.
     #[allow(unreachable_code)]
     convolve_row_scalar(input, output, kernel, radius);
 }
@@ -207,6 +207,7 @@ fn convolve_cols_row(
         return;
     }
 
+    // Scalar fallback is dead code on aarch64, where the NEON path returns unconditionally.
     #[allow(unreachable_code)]
     convolve_cols_row_scalar(input, out_row, width, height, y, kernel, radius);
 }
@@ -268,7 +269,7 @@ pub(super) fn convolve_2d_row(
         return;
     }
 
-    // Scalar fallback
+    // Scalar fallback is dead code on aarch64, where the NEON path returns unconditionally.
     #[allow(unreachable_code)]
     convolve_2d_row_scalar(input, output_row, width, height, y, kernel);
 }
