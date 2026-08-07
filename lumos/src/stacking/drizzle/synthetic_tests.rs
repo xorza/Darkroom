@@ -253,7 +253,7 @@ fn drizzle_emits_coverage_weight_and_linear_variance_maps() {
     .unwrap();
 
     // Coverage is normalized to [0,1]; the interior is fully covered by all 4 frames.
-    let cov = result.coverage.pixels();
+    let cov = result.coverage.as_ref().unwrap().pixels();
     assert!(
         cov.iter().all(|&c| (-1e-4..=1.0001).contains(&c)),
         "coverage must stay in [0,1]"
@@ -267,7 +267,7 @@ fn drizzle_emits_coverage_weight_and_linear_variance_maps() {
     // weight = Σwᵢ ≈ the 4 frames' total. variance = Σwᵢ²/(Σwᵢ)² = 1/N_eff; drizzle pools each
     // frame's drop across neighbouring output pixels, so N_eff ≥ the frame count (variance
     // smaller than a naive 1/4) — that pooling is the whole point of the WHT.
-    let weight_c = result.weight.channel(0).pixels()[32 * w + 32];
+    let weight_c = result.weight.as_ref().unwrap().channel(0).pixels()[32 * w + 32];
     let var_c = result.linear_variance.as_ref().unwrap().channel(0).pixels()[32 * w + 32];
     let n_eff = 1.0 / var_c;
     println!("interior weight {weight_c:.3}, variance {var_c:.4}, N_eff {n_eff:.1}");

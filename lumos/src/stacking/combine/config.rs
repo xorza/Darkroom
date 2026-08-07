@@ -6,6 +6,7 @@
 use crate::stacking::combine::cache_config::CacheConfig;
 use crate::stacking::combine::error::StackConfigError;
 use crate::stacking::combine::rejection::Rejection;
+use crate::stacking::product::QualityPlanes;
 
 /// Method for combining pixel values across frames.
 ///
@@ -138,6 +139,10 @@ pub struct StackConfig {
     pub small_n: SmallN,
     /// Cache/memory behavior.
     pub cache: CacheConfig,
+    /// Which ancillary per-pixel planes the combine should produce. Defaults to all of them —
+    /// they are what makes the stacked master measurable — but each is a full image-sized
+    /// allocation, so a caller that discards them should say so.
+    pub quality: QualityPlanes,
 }
 
 impl Default for StackConfig {
@@ -149,6 +154,7 @@ impl Default for StackConfig {
             // Default method is σ-clip, so the default fallback is the library σ-floor.
             small_n: SmallN::median_below(MIN_FRAMES_FOR_REJECTION),
             cache: CacheConfig::default(),
+            quality: QualityPlanes::ALL,
         }
     }
 }

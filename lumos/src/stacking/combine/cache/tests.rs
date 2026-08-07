@@ -5,6 +5,7 @@ use crate::stacking::combine::cache::*;
 use crate::stacking::combine::config::Normalization;
 use crate::stacking::combine::rejection::Rejection;
 use crate::stacking::frame_store::{compute_frame_stats, store_frame};
+use crate::stacking::product::QualityPlanes;
 use crate::testing::ScratchDirectory;
 
 /// Create an in-memory [`FrameCache`] from loaded images, with no coverage (test helper).
@@ -20,11 +21,76 @@ pub(crate) fn make_test_cache(images: Vec<LinearImage>) -> FrameCache {
     .expect("test images must be non-empty and dimension-consistent")
 }
 
+#[test]
+fn unrequested_quality_planes_are_never_allocated() {
+    // The observable `StackProduct` has said `linear_variance: None` for a median for as long as
+    // the field has existed — it used to be allocated, written per pixel, and then cleared. What
+    // matters is that the reducer no longer builds it, which is only visible on the combine's own
+    // output, before `finish_product` shapes it.
+    let dims = ImageDimensions::new((4, 2), 1);
+    let cache = make_test_cache(vec![
+        LinearImage::from_pixels(dims, vec![1.0; 8]),
+        LinearImage::from_pixels(dims, vec![3.0; 8]),
+    ]);
+    let reduce = |values: &mut [f32], weights: &[f32], _: &mut ScratchBuffers| {
+        CombinedSample::from_all(values.iter().sum::<f32>() / values.len() as f32, weights)
+    };
+
+    let weight_only = cache.process_chunked_weighted(
+        None,
+        None,
+        QualityPlanes {
+            variance: false,
+            ..QualityPlanes::ALL
+        },
+        reduce,
+    );
+    assert!(weight_only.weight.is_some());
+    assert!(
+        weight_only.linear_variance.is_none(),
+        "a variance plane was allocated for a combine that did not ask for one"
+    );
+
+    let bare = cache.process_chunked_weighted(None, None, QualityPlanes::IMAGE_ONLY, reduce);
+    assert!(bare.weight.is_none());
+    assert!(bare.linear_variance.is_none());
+
+    // Skipping the planes must not disturb the combined pixels.
+    let all = cache.process_chunked_weighted(None, None, QualityPlanes::ALL, reduce);
+    assert_eq!(
+        bare.pixels.channel(0).pixels(),
+        all.pixels.channel(0).pixels()
+    );
+}
+
+#[test]
+fn quality_plane_request_drops_variance_for_a_non_linear_combine() {
+    assert_eq!(
+        QualityPlanes::ALL.resolve(false),
+        QualityPlanes {
+            variance: false,
+            ..QualityPlanes::ALL
+        },
+        "a reducer that is not a linear combination reports no variance factor"
+    );
+    assert_eq!(QualityPlanes::ALL.resolve(true), QualityPlanes::ALL);
+    assert_eq!(
+        QualityPlanes::IMAGE_ONLY.resolve(true),
+        QualityPlanes::IMAGE_ONLY,
+        "resolving never adds a plane the caller declined"
+    );
+}
+
 fn mean_product(cache: &FrameCache, weights: Option<&[f32]>) -> StackProduct {
-    let combined = cache.process_chunked_weighted(weights, None, |values, weights, scratch| {
-        Rejection::None.combine_mean_with_quality(values, weights, scratch)
-    });
-    cache.finish_product(combined)
+    let combined = cache.process_chunked_weighted(
+        weights,
+        None,
+        QualityPlanes::ALL,
+        |values, weights, scratch| {
+            Rejection::None.combine_mean_with_quality(values, weights, scratch)
+        },
+    );
+    cache.finish_product(combined, QualityPlanes::ALL)
 }
 
 #[test]
@@ -69,12 +135,15 @@ fn finish_product_uniform_equal_weights() {
         .collect();
     let product = mean_product(&make_test_cache(images), None);
     let linear_variance = product.linear_variance.as_ref().unwrap();
-    assert!(matches!(&product.weight, QualityMap::Shared(_)));
+    assert!(matches!(
+        product.weight.as_ref().unwrap(),
+        QualityMap::Shared(_)
+    ));
     assert!(matches!(linear_variance, QualityMap::Shared(_)));
     assert_eq!(product.image.channel(0).pixels(), &[1.5; 6]);
     for p in 0..6 {
-        assert_eq!(product.coverage[p], 1.0);
-        assert_eq!(product.weight.channel(0)[p], 4.0);
+        assert_eq!(product.coverage.as_ref().unwrap()[p], 1.0);
+        assert_eq!(product.weight.as_ref().unwrap().channel(0)[p], 4.0);
         assert_eq!(linear_variance.channel(0)[p], 0.25);
     }
 }
@@ -89,8 +158,8 @@ fn finish_product_uniform_manual_weights() {
     let product = mean_product(&make_test_cache(images), Some(&[1.0, 2.0, 3.0, 4.0]));
     let linear_variance = product.linear_variance.as_ref().unwrap();
     for p in 0..2 {
-        assert_eq!(product.coverage[p], 1.0);
-        assert_eq!(product.weight.channel(0)[p], 10.0);
+        assert_eq!(product.coverage.as_ref().unwrap()[p], 1.0);
+        assert_eq!(product.weight.as_ref().unwrap().channel(0)[p], 10.0);
         assert!(
             (linear_variance.channel(0)[p] - 0.30).abs() < 1e-6,
             "variance = {}",
@@ -126,12 +195,12 @@ fn finish_product_partial_coverage() {
     let product = mean_product(&cache, None);
     let linear_variance = product.linear_variance.as_ref().unwrap();
 
-    assert_eq!(product.coverage[0], 1.0);
-    assert_eq!(product.weight.channel(0)[0], 4.0);
+    assert_eq!(product.coverage.as_ref().unwrap()[0], 1.0);
+    assert_eq!(product.weight.as_ref().unwrap().channel(0)[0], 4.0);
     assert_eq!(linear_variance.channel(0)[0], 0.25);
 
-    assert_eq!(product.coverage[1], 0.75);
-    assert_eq!(product.weight.channel(0)[1], 3.0);
+    assert_eq!(product.coverage.as_ref().unwrap()[1], 0.75);
+    assert_eq!(product.weight.as_ref().unwrap().channel(0)[1], 3.0);
     assert!(
         (linear_variance.channel(0)[1] - 1.0 / 3.0).abs() < 1e-6,
         "variance = {}",
@@ -170,10 +239,11 @@ fn test_process_chunked_median() {
     assert_eq!(cache.core.chunk_available_memory(), None);
 
     // Median of [1, 3, 2] = 2
-    let result = cache.process_chunked_weighted(None, None, |values, weights, _| {
-        values.sort_by(|a, b| a.partial_cmp(b).unwrap());
-        CombinedSample::from_all(values[values.len() / 2], weights)
-    });
+    let result =
+        cache.process_chunked_weighted(None, None, QualityPlanes::ALL, |values, weights, _| {
+            values.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            CombinedSample::from_all(values[values.len() / 2], weights)
+        });
 
     assert_eq!(result.chunk_available_memory, None);
     assert_eq!(result.pixels.channel_count(), 1);
@@ -200,9 +270,10 @@ fn test_process_chunked_rgb() {
     let cache = make_test_cache(images);
 
     // Mean: R=(1+5)/2=3, G=(2+6)/2=4, B=(3+7)/2=5
-    let result = cache.process_chunked_weighted(None, None, |values, weights, _| {
-        CombinedSample::from_all(values.iter().sum::<f32>() / values.len() as f32, weights)
-    });
+    let result =
+        cache.process_chunked_weighted(None, None, QualityPlanes::ALL, |values, weights, _| {
+            CombinedSample::from_all(values.iter().sum::<f32>() / values.len() as f32, weights)
+        });
 
     assert_eq!(result.pixels.channel_count(), 3);
     for &pixel in result.pixels.channel(0).pixels() {
@@ -228,11 +299,12 @@ fn test_process_chunked_with_weights() {
 
     // Weighted mean with weights [1, 3]: (10*1 + 20*3) / (1+3) = 70/4 = 17.5
     let weights = vec![1.0, 3.0];
-    let result = cache.process_chunked_weighted(Some(&weights), None, |values, w, _| {
-        let sum: f32 = values.iter().zip(w.iter()).map(|(v, wt)| v * wt).sum();
-        let weight_sum: f32 = w.iter().sum();
-        CombinedSample::from_all(sum / weight_sum, w)
-    });
+    let result =
+        cache.process_chunked_weighted(Some(&weights), None, QualityPlanes::ALL, |values, w, _| {
+            let sum: f32 = values.iter().zip(w.iter()).map(|(v, wt)| v * wt).sum();
+            let weight_sum: f32 = w.iter().sum();
+            CombinedSample::from_all(sum / weight_sum, w)
+        });
 
     for &pixel in result.pixels.channel(0).pixels() {
         assert!((pixel - 17.5).abs() < f32::EPSILON);

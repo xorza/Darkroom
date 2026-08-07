@@ -386,14 +386,14 @@ fn ram_and_streaming_tiers_produce_identical_stacks() {
             "image channel {channel} differs between the RAM and streaming tiers"
         );
         assert_eq!(
-            bits(ram.product.weight.channel(channel)),
-            bits(streaming.product.weight.channel(channel)),
+            bits(ram.product.weight.as_ref().unwrap().channel(channel)),
+            bits(streaming.product.weight.as_ref().unwrap().channel(channel)),
             "weight channel {channel} differs between the RAM and streaming tiers"
         );
     }
     assert_eq!(
-        bits(&ram.product.coverage),
-        bits(&streaming.product.coverage),
+        bits(ram.product.coverage.as_ref().unwrap()),
+        bits(streaming.product.coverage.as_ref().unwrap()),
         "coverage differs between the RAM and streaming tiers"
     );
 

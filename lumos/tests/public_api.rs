@@ -9,14 +9,15 @@ use lumos::{
     FitsChecksumProvenance, FitsChecksumState, FitsCubeInterpretation, FitsHduProvenance,
     FitsHduSelector, FitsLoadOptions, FitsTransferProvenance, FrameStoreError, GesdConfig,
     ImageDimensions, ImageMetadata, InterpolationMethod, LinearFitClipConfig, LinearImage,
-    LoadContext, NoiseModel, Normalization, PercentileClipConfig, QualityMap, RansacConfig,
-    RegistrationCatalog, RegistrationConfig, RegistrationError, RegistrationMatchingConfig,
-    Rejection, SigmaClipConfig, SipConfig, SmallN, StackConfig, StackConfigError, StackError,
-    StackProduct, StarDetectionBackgroundConfig, StarDetectionCandidateConfig, StarDetectionConfig,
-    StarDetectionConfigError, StarDetectionDiagnostics, StarDetectionFilterConfig,
-    StarDetectionFwhmConfig, StarDetectionMeasurementConfig, StarDetectionQualityFilterDiagnostics,
-    StarDetector, StarMatch, TransferProvenance, Transform, TransformType, TriangleConfig,
-    WarpParams, Weighting, WinsorizedClipConfig,
+    LoadContext, NoiseModel, Normalization, PercentileClipConfig, QualityMap, QualityPlanes,
+    RansacConfig, RegistrationCatalog, RegistrationConfig, RegistrationError,
+    RegistrationMatchingConfig, Rejection, SigmaClipConfig, SipConfig, SmallN, StackConfig,
+    StackConfigError, StackError, StackProduct, StarDetectionBackgroundConfig,
+    StarDetectionCandidateConfig, StarDetectionConfig, StarDetectionConfigError,
+    StarDetectionDiagnostics, StarDetectionFilterConfig, StarDetectionFwhmConfig,
+    StarDetectionMeasurementConfig, StarDetectionQualityFilterDiagnostics, StarDetector, StarMatch,
+    TransferProvenance, Transform, TransformType, TriangleConfig, WarpParams, Weighting,
+    WinsorizedClipConfig,
 };
 
 #[test]
@@ -98,6 +99,7 @@ fn stacking_configuration_types_are_available_from_the_crate_root() {
             fallback: CombineMethod::Median,
         },
         cache: CacheConfig::default(),
+        quality: QualityPlanes::IMAGE_ONLY,
     };
     let StackConfig {
         method,
@@ -105,6 +107,7 @@ fn stacking_configuration_types_are_available_from_the_crate_root() {
         normalization,
         small_n,
         cache,
+        quality,
     } = config;
 
     assert_eq!(method, CombineMethod::Mean(Rejection::None));
@@ -113,6 +116,8 @@ fn stacking_configuration_types_are_available_from_the_crate_root() {
     assert_eq!(small_n.min_frames, 3);
     assert_eq!(small_n.fallback, CombineMethod::Median);
     let _: CacheConfig = cache;
+    assert_eq!(quality, QualityPlanes::IMAGE_ONLY);
+    assert_eq!(QualityPlanes::default(), QualityPlanes::ALL);
 
     let registration = RegistrationConfig {
         transform_type: TransformType::Similarity,
@@ -323,8 +328,8 @@ fn calibration_master_views_are_available_from_the_crate_root() {
 fn stacking_outputs_and_relationships_use_named_public_types() {
     let product = StackProduct {
         image: LinearImage::from_pixels(ImageDimensions::new((2, 1), 1), vec![0.25, 0.75]),
-        coverage: Buffer2::new(2, 1, vec![1.0, 0.5]),
-        weight: QualityMap::Shared(Buffer2::new(2, 1, vec![2.0, 1.0])),
+        coverage: Some(Buffer2::new(2, 1, vec![1.0, 0.5])),
+        weight: Some(QualityMap::Shared(Buffer2::new(2, 1, vec![2.0, 1.0]))),
         linear_variance: Some(QualityMap::Shared(Buffer2::new(2, 1, vec![0.5, 1.0]))),
     };
     let result = AlignStackResult {
@@ -337,8 +342,14 @@ fn stacking_outputs_and_relationships_use_named_public_types() {
     };
 
     assert_eq!(result.product.image.channel(0).pixels(), &[0.25, 0.75]);
-    assert_eq!(result.product.coverage.pixels(), &[1.0, 0.5]);
-    assert_eq!(result.product.weight.channel(0).pixels(), &[2.0, 1.0]);
+    assert_eq!(
+        result.product.coverage.as_ref().unwrap().pixels(),
+        &[1.0, 0.5]
+    );
+    assert_eq!(
+        result.product.weight.as_ref().unwrap().channel(0).pixels(),
+        &[2.0, 1.0]
+    );
     assert_eq!(
         result
             .product

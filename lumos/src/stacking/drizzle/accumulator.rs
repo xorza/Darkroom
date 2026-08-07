@@ -640,8 +640,8 @@ impl DrizzleAccumulator {
         );
         StackProduct {
             image,
-            coverage,
-            weight: QualityMap::Shared(self.weight),
+            coverage: Some(coverage),
+            weight: Some(QualityMap::Shared(self.weight)),
             linear_variance: Some(QualityMap::Shared(linear_variance)),
         }
     }

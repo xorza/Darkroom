@@ -65,6 +65,8 @@ fn assert_product_finite(product: &StackProduct) {
     assert!(
         product
             .coverage
+            .as_ref()
+            .unwrap()
             .pixels()
             .iter()
             .all(|value| value.is_finite())
@@ -73,6 +75,8 @@ fn assert_product_finite(product: &StackProduct) {
         assert!(
             product
                 .weight
+                .as_ref()
+                .unwrap()
                 .channel(channel)
                 .pixels()
                 .iter()
