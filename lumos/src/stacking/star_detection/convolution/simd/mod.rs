@@ -12,7 +12,7 @@ use rayon::prelude::*;
 use imaginarium::cpu_features;
 
 cfg_x86_64! {
-    mod sse;
+    mod x86;
 }
 
 cfg_aarch64! {
@@ -116,13 +116,13 @@ pub(super) fn convolve_row(input: &[f32], output: &mut [f32], kernel: &[f32], ra
     {
         if cpu_features::has_avx2_fma() {
             unsafe {
-                sse::convolve_row_avx2(input, output, kernel, radius);
+                x86::convolve_row_avx2(input, output, kernel, radius);
             }
             return;
         }
         if cpu_features::has_sse4_1() {
             unsafe {
-                sse::convolve_row_sse41(input, output, kernel, radius);
+                x86::convolve_row_sse41(input, output, kernel, radius);
             }
             return;
         }
@@ -190,13 +190,13 @@ fn convolve_cols_row(
     {
         if cpu_features::has_avx2_fma() {
             unsafe {
-                sse::convolve_cols_row_avx2(input, out_row, width, height, y, kernel, radius);
+                x86::convolve_cols_row_avx2(input, out_row, width, height, y, kernel, radius);
             }
             return;
         }
         if cpu_features::has_sse4_1() {
             unsafe {
-                sse::convolve_cols_row_sse41(input, out_row, width, height, y, kernel, radius);
+                x86::convolve_cols_row_sse41(input, out_row, width, height, y, kernel, radius);
             }
             return;
         }
@@ -251,13 +251,13 @@ pub(super) fn convolve_2d_row(
     {
         if cpu_features::has_avx2_fma() {
             unsafe {
-                sse::convolve_2d_row_avx2(input, output_row, width, height, y, kernel);
+                x86::convolve_2d_row_avx2(input, output_row, width, height, y, kernel);
             }
             return;
         }
         if cpu_features::has_sse4_1() {
             unsafe {
-                sse::convolve_2d_row_sse41(input, output_row, width, height, y, kernel);
+                x86::convolve_2d_row_sse41(input, output_row, width, height, y, kernel);
             }
             return;
         }

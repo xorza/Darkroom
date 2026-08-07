@@ -1,6 +1,6 @@
 use crate::stacking::registration::resample::kernel;
 use crate::stacking::registration::resample::row;
-use crate::stacking::registration::resample::row::sse;
+use crate::stacking::registration::resample::row::x86;
 use crate::stacking::registration::transform::{Transform, WarpTransform};
 use crate::testing::synthetic::patterns;
 use glam::DVec2;
@@ -26,7 +26,7 @@ fn assert_avx2_matches_scalar(
     let mut output_scalar = vec![0.0f32; width];
 
     unsafe {
-        sse::bilinear_avx2(input, &mut output_avx2, y, &inverse);
+        x86::bilinear_avx2(input, &mut output_avx2, y, &inverse);
     }
     let inverse_wt = WarpTransform::new(inverse);
     row::bilinear_scalar(input, &mut output_scalar, y, &inverse_wt, 0.0);
@@ -58,7 +58,7 @@ fn assert_sse_matches_scalar(
     let mut output_scalar = vec![0.0f32; width];
 
     unsafe {
-        sse::bilinear_sse(input, &mut output_sse, y, &inverse);
+        x86::bilinear_sse(input, &mut output_sse, y, &inverse);
     }
     let inverse_wt = WarpTransform::new(inverse);
     row::bilinear_scalar(input, &mut output_scalar, y, &inverse_wt, 0.0);
@@ -185,7 +185,7 @@ fn assert_lanczos_kernel_fma_matches_scalar<const A: usize, const SIZE: usize>(l
         }
     }
 
-    let simd_acc = unsafe { sse::lanczos_kernel_fma::<SIZE>(&data, width, kx, ky, &wx, &wy) };
+    let simd_acc = unsafe { x86::lanczos_kernel_fma::<SIZE>(&data, width, kx, ky, &wx, &wy) };
     assert!(
         (simd_acc - scalar_sum).abs() < 1e-4,
         "{label}: SIMD {simd_acc} vs scalar {scalar_sum}",

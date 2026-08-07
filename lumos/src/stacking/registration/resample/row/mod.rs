@@ -17,7 +17,7 @@ use crate::math::vec2us::Vec2us;
 use imaginarium::cpu_features;
 
 #[cfg(target_arch = "x86_64")]
-mod sse;
+mod x86;
 
 #[cfg(target_arch = "aarch64")]
 mod neon;
@@ -127,13 +127,13 @@ pub(super) fn bilinear(
         let output_width = output_row.len();
         if output_width >= AVX2_LANES && cpu_features::has_avx2() {
             unsafe {
-                sse::bilinear_avx2(input, output_row, output_y, &wt.transform);
+                x86::bilinear_avx2(input, output_row, output_y, &wt.transform);
             }
             return;
         }
         if output_width >= SSE41_LANES && cpu_features::has_sse4_1() {
             unsafe {
-                sse::bilinear_sse(input, output_row, output_y, &wt.transform);
+                x86::bilinear_sse(input, output_row, output_y, &wt.transform);
             }
             return;
         }
@@ -196,7 +196,7 @@ pub(super) fn lanczos(
 }
 
 /// Scalar Lanczos tap weights for fractional offset `frac` (non-x86 / no-AVX2 fallback for
-/// [`sse::lanczos_weights_gather`]). Same distance convention as the gather helper.
+/// [`x86::lanczos_weights_gather`]). Same distance convention as the gather helper.
 #[inline]
 fn lanczos_weights_scalar<const A: usize, const SIZE: usize>(
     lut: &LanczosLut,
@@ -298,8 +298,8 @@ fn lanczos_inner<const A: usize, const SIZE: usize>(
             let ptr = lut.values.as_ptr();
             unsafe {
                 (
-                    sse::lanczos_weights_gather::<SIZE>(ptr, &lut_base, &lut_sign, res, fx),
-                    sse::lanczos_weights_gather::<SIZE>(ptr, &lut_base, &lut_sign, res, fy),
+                    x86::lanczos_weights_gather::<SIZE>(ptr, &lut_base, &lut_sign, res, fx),
+                    x86::lanczos_weights_gather::<SIZE>(ptr, &lut_base, &lut_sign, res, fy),
                 )
             }
         } else {
@@ -340,7 +340,7 @@ fn lanczos_inner<const A: usize, const SIZE: usize>(
                 let acc = unsafe {
                     #[cfg(target_arch = "x86_64")]
                     {
-                        sse::lanczos_kernel_fma::<SIZE>(
+                        x86::lanczos_kernel_fma::<SIZE>(
                             pixels,
                             input_width,
                             kx0 as usize,

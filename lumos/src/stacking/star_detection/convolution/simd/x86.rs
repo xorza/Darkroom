@@ -384,7 +384,7 @@ pub(super) unsafe fn convolve_2d_row_sse41(
 mod tests {
     use crate::stacking::star_detection::convolution::simd;
 
-    use crate::stacking::star_detection::convolution::simd::sse::*;
+    use crate::stacking::star_detection::convolution::simd::x86::*;
     use imaginarium::cpu_features;
 
     #[test]

@@ -1,7 +1,7 @@
 //! ARM NEON implementations of the bilinear + Lanczos row-warp kernels.
 //!
 //! 128-bit (4-wide f32) counterparts of the x86 kernels in
-//! [`crate::stacking::registration::resample::row::sse`]. For SIZE>4 the x86 Lanczos kernel is
+//! [`crate::stacking::registration::resample::row::x86`]. For SIZE>4 the x86 Lanczos kernel is
 //! 256-bit (one `__m256`/row); NEON has no 256-bit, so it processes the same window as a 128-bit
 //! lo+hi pair (`float32x4_t` + `vfmaq_f32` + horizontal `vaddvq_f32`). NEON is mandatory on aarch64,
 //! so these need no runtime feature check; the caller dispatches on `cfg(target_arch)`.
@@ -126,7 +126,7 @@ pub(super) unsafe fn bilinear_neon(
 }
 
 /// NEON counterpart of
-/// [`crate::stacking::registration::resample::row::sse::lanczos_kernel_fma`]: separable
+/// [`crate::stacking::registration::resample::row::x86::lanczos_kernel_fma`]: separable
 /// Lanczos over a `SIZE×SIZE` window. 128-bit lo+hi where the x86 kernel is 256-bit (SIZE>4).
 ///
 /// # Safety
