@@ -23,20 +23,27 @@ impl DetectorPool {
         Ok(Self { detectors })
     }
 
+    /// Map `f` over `items` with one detector per concurrent slot, passing each item's index.
+    ///
+    /// Same batching shape as [`crate::concurrency::try_par_map_limited`], with a reused
+    /// detector — and its working buffers — bound to each slot.
     pub(crate) fn try_map<T, R, E, F>(&mut self, items: &[T], f: F) -> Result<Vec<R>, E>
     where
         T: Sync,
         R: Send,
         E: Send,
-        F: Fn(&mut StarDetector, &T) -> Result<R, E> + Sync,
+        F: Fn(&mut StarDetector, usize, &T) -> Result<R, E> + Sync,
     {
+        let slots = self.detectors.len();
         let mut results = Vec::with_capacity(items.len());
-        for chunk in items.chunks(self.detectors.len()) {
+        for (batch, chunk) in items.chunks(slots).enumerate() {
+            let base = batch * slots;
             let chunk_results: Result<Vec<R>, E> = self
                 .detectors
                 .par_iter_mut()
                 .zip(chunk.par_iter())
-                .map(|(detector, item)| f(detector, item))
+                .enumerate()
+                .map(|(offset, (detector, item))| f(detector, base + offset, item))
                 .collect();
             results.extend(chunk_results?);
         }
@@ -62,7 +69,7 @@ mod tests {
     fn slots_are_reused_across_ordered_batches() {
         let mut pool = DetectorPool::from_config(&Config::default(), 2).unwrap();
         let uses = pool
-            .try_map(&[0, 1, 2, 3, 4], |detector, &item| {
+            .try_map(&[0, 1, 2, 3, 4], |detector, _index, &item| {
                 Ok::<_, ()>(DetectorUse {
                     item,
                     detector_address: (detector as *const StarDetector).addr(),
@@ -81,7 +88,7 @@ mod tests {
 
         let attempted = Mutex::new(Vec::new());
         let error = pool
-            .try_map(&[0, 1, 2, 3, 4], |_, &item| {
+            .try_map(&[0, 1, 2, 3, 4], |_, _index, &item| {
                 attempted.lock().push(item);
                 if item == 2 { Err(item) } else { Ok(item) }
             })

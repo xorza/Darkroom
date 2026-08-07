@@ -35,7 +35,7 @@ fn bench_detector_batch_reuse_1k(b: quickbench::Bencher) {
     b.bench_labeled("reused", || {
         black_box(
             detectors
-                .try_map(&images, |detector, image| {
+                .try_map(&images, |detector, _index, image| {
                     Ok::<_, Infallible>(detector.detect(image))
                 })
                 .unwrap(),

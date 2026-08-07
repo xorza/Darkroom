@@ -219,12 +219,8 @@ fn load_in_memory<I: StackableImage, P: AsRef<Path> + Sync>(
     // frame 1 and reuses it; otherwise every frame (frame 0 included) decodes in parallel. Frame 0
     // supplies the stack metadata either way.
     let start = if first.is_some() { 1 } else { 0 };
-    let indexed_paths: Vec<(usize, &P)> = paths[start..]
-        .iter()
-        .enumerate()
-        .map(|(i, p)| (i + start, p))
-        .collect();
-    let loaded = concurrency::try_par_map_limited(&indexed_paths, concurrency, |&(idx, path)| {
+    let loaded = concurrency::try_par_map_limited(&paths[start..], concurrency, |offset, path| {
+        let idx = offset + start;
         // Cancelled: stop decoding further frames (the slow phase).
         if cancel.is_cancelled() {
             return Err(Error::Cancelled);
@@ -315,28 +311,22 @@ fn load_to_disk<I: StackableImage, P: AsRef<Path> + Sync>(
         available_memory,
         rayon::current_num_threads(),
     );
-    let indexed_paths: Vec<(usize, &P)> = paths[1..]
-        .iter()
-        .enumerate()
-        .map(|(i, p)| (i + 1, p))
-        .collect();
-    let remaining =
-        concurrency::try_par_map_limited(&indexed_paths, concurrency, |&(idx, ref path)| {
-            // Cancelled: stop decoding further frames (the slow phase).
-            if cancel.is_cancelled() {
-                return Err(Error::Cancelled);
-            }
-            let path_ref = path.as_ref();
-            let base_filename = cache_filename(path_ref);
-            load_and_cache_frame::<I>(
-                cache_dir,
-                &base_filename,
-                path_ref,
-                dimensions,
-                idx,
-                context,
-            )
-        })?;
+    let remaining = concurrency::try_par_map_limited(&paths[1..], concurrency, |offset, path| {
+        // Cancelled: stop decoding further frames (the slow phase).
+        if cancel.is_cancelled() {
+            return Err(Error::Cancelled);
+        }
+        let path = path.as_ref();
+        let base_filename = cache_filename(path);
+        load_and_cache_frame::<I>(
+            cache_dir,
+            &base_filename,
+            path,
+            dimensions,
+            offset + 1,
+            context,
+        )
+    })?;
 
     let mut frames = Vec::with_capacity(paths.len());
     frames.push(first_cached);

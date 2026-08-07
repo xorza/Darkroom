@@ -1,4 +1,5 @@
 use crate::stacking::drizzle::tests::*;
+use common::CancelToken;
 
 #[test]
 fn test_drizzle_single_image() {
@@ -93,8 +94,45 @@ fn test_drizzle_images_empty() {
         Vec::new(),
         &DrizzleConfig::default(),
         ProgressCallback::default(),
+        &CancelToken::never(),
     );
     assert!(matches!(result.unwrap_err(), DrizzleError::NoFrames));
+}
+
+#[test]
+fn drizzle_stops_between_frames_when_cancelled() {
+    // Cancellation is checked between frames, so a run already cancelled distributes the frame
+    // the accumulator was sized from and then stops rather than walking the rest of the set.
+    let cancel = CancelToken::new();
+    cancel.cancel();
+    let frames: Vec<_> = (0..3)
+        .map(|_| DrizzleFrame::new(constant_mono_image(16, 16, 0.5), Transform::identity()))
+        .collect();
+
+    let result = drizzle_images(
+        frames,
+        &DrizzleConfig::default(),
+        ProgressCallback::default(),
+        &cancel,
+    );
+    assert!(
+        matches!(result.unwrap_err(), DrizzleError::Cancelled),
+        "a cancelled drizzle must report cancellation, not a partial product"
+    );
+
+    // The same set completes when the run is live, so the guard is what stopped it.
+    let frames: Vec<_> = (0..3)
+        .map(|_| DrizzleFrame::new(constant_mono_image(16, 16, 0.5), Transform::identity()))
+        .collect();
+    assert!(
+        drizzle_images(
+            frames,
+            &DrizzleConfig::default(),
+            ProgressCallback::default(),
+            &CancelToken::never(),
+        )
+        .is_ok()
+    );
 }
 
 #[test]
@@ -106,6 +144,7 @@ fn test_drizzle_images_matches_accumulator() {
         vec![DrizzleFrame::new(image, Transform::identity())],
         &DrizzleConfig::x2(),
         ProgressCallback::default(),
+        &CancelToken::never(),
     )
     .unwrap();
 
@@ -127,6 +166,7 @@ fn test_drizzle_images_dimension_mismatch() {
         drizzle_frames(vec![a, b], &[Transform::identity(), Transform::identity()]),
         &DrizzleConfig::default(),
         ProgressCallback::default(),
+        &CancelToken::never(),
     );
     assert!(matches!(
         result.unwrap_err(),

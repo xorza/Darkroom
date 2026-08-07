@@ -4,6 +4,7 @@
 //!
 //! Run: `cargo test -p lumos --release drizzle::bench -- --ignored --nocapture`
 
+use common::CancelToken;
 use glam::DVec2;
 use quickbench::quick_bench;
 use std::hint::black_box;
@@ -44,6 +45,7 @@ fn bench_kernel(b: ::quickbench::Bencher, kernel: DrizzleKernel) {
             frames.clone(),
             &config,
             ProgressCallback::default(),
+            &CancelToken::never(),
         ))
     });
 }

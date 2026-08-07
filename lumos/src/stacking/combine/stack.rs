@@ -102,32 +102,11 @@ pub fn stack<P: AsRef<Path> + Sync>(
     progress: ProgressCallback,
     cancel: CancelToken,
 ) -> Result<StackProduct, Error> {
-    if paths.is_empty() {
-        return Err(Error::NoFrames);
-    }
-
-    config.validate()?;
-    validate_manual_weights(&config, paths.len())?;
-
-    tracing::info!(
-        method = ?config.method,
-        weighting = ?config.weighting,
-        normalization = ?config.normalization,
-        frame_count = paths.len(),
-        "Starting unified stack (from paths)"
-    );
-
-    // Files on disk carry no coverage, so this is a `FrameCache` with `coverage: None` — the
-    // weighted combine then treats every pixel as fully covered (identical to a plain stack).
+    // Files on disk carry no coverage, so the combine treats every pixel as fully covered.
     // `cancel` rides on the cache from construction, so the load loop polls it too.
-    let cache =
-        FrameCache::from_paths(paths, &config.cache, config.normalization, progress, cancel)?;
-    // The disk cache (if any) is removed when `cache` drops via `CacheCore`'s `Drop`.
-    let result = run_stacking(&cache, &config);
-    if cache.core.cancel.is_cancelled() {
-        return Err(Error::Cancelled);
-    }
-    Ok(result)
+    combine_cached(&config, paths.len(), "paths", || {
+        FrameCache::from_paths(paths, &config.cache, config.normalization, progress, cancel)
+    })
 }
 
 /// Stack frames already held in memory into a single result.
@@ -150,37 +129,16 @@ pub fn stack_images(
     progress: ProgressCallback,
     cancel: CancelToken,
 ) -> Result<StackProduct, Error> {
-    if frames.is_empty() {
-        return Err(Error::NoFrames);
-    }
-
-    config.validate()?;
-    validate_manual_weights(&config, frames.len())?;
-
-    tracing::info!(
-        method = ?config.method,
-        weighting = ?config.weighting,
-        normalization = ?config.normalization,
-        frame_count = frames.len(),
-        warp_quality_weighted = frames
-            .iter()
-            .any(|f| f.coverage.is_some() || f.confidence.is_some()),
-        "Starting unified stack (in memory)"
-    );
-
-    let cache = FrameCache::from_stack_frames(
-        frames,
-        &config.cache,
-        config.normalization,
-        progress,
-        cancel,
-    )?;
-    // In-memory only (no disk cache), but `cache` drops cleanly via `CacheCore`'s `Drop` regardless.
-    let result = run_stacking(&cache, &config);
-    if cache.core.cancel.is_cancelled() {
-        return Err(Error::Cancelled);
-    }
-    Ok(result)
+    let frame_count = frames.len();
+    combine_cached(&config, frame_count, "memory", || {
+        FrameCache::from_stack_frames(
+            frames,
+            &config.cache,
+            config.normalization,
+            progress,
+            cancel,
+        )
+    })
 }
 
 /// Combine frames produced by the shared frame store.
@@ -193,38 +151,66 @@ pub(crate) fn stack_stored_frames(
     progress: ProgressCallback,
     cancel: CancelToken,
 ) -> Result<StackProduct, Error> {
-    if frames.is_empty() {
+    let frame_count = frames.len();
+    combine_cached(&config, frame_count, "frame store", || {
+        FrameCache::from_stored_frames(
+            frames,
+            FrameCacheParams {
+                spill_directory,
+                dimensions,
+                metadata,
+                config: config.cache.clone(),
+                normalization: config.normalization,
+                progress,
+                cancel,
+            },
+        )
+    })
+}
+
+/// The shell all three combine entry points share: reject an empty set, validate the
+/// configuration against the frame count, build the cache, combine, and decide whether the
+/// result is real.
+///
+/// `build` is deferred rather than taken as a built cache so the validation above runs before a
+/// potentially long load, and so the cache — which owns the spill directory — drops at the end
+/// of this scope on every path.
+fn combine_cached(
+    config: &StackConfig,
+    frame_count: usize,
+    source: &'static str,
+    build: impl FnOnce() -> Result<FrameCache, Error>,
+) -> Result<StackProduct, Error> {
+    if frame_count == 0 {
         return Err(Error::NoFrames);
     }
     config.validate()?;
-    validate_manual_weights(&config, frames.len())?;
+    validate_manual_weights(config, frame_count)?;
 
+    let cache = build()?;
+    // Logged after the load so the tier and warp-quality facts come from the cache itself rather
+    // than being restated at each entry point.
     tracing::info!(
+        source,
+        frame_count,
         method = ?config.method,
         weighting = ?config.weighting,
         normalization = ?config.normalization,
-        frame_count = frames.len(),
-        disk_tier = spill_directory.is_some(),
-        "Starting unified stack (pre-tiered frames)"
+        disk_tier = cache.core.spill_directory.is_some(),
+        warp_quality = cache
+            .frames
+            .iter()
+            .any(|frame| frame.coverage.is_some() || frame.confidence.is_some()),
+        "Combining frames"
     );
 
-    let cache = FrameCache::from_stored_frames(
-        frames,
-        FrameCacheParams {
-            spill_directory,
-            dimensions,
-            metadata,
-            config: config.cache.clone(),
-            normalization: config.normalization,
-            progress,
-            cancel,
-        },
-    )?;
-    let result = run_stacking(&cache, &config);
+    let product = run_stacking(&cache, config);
+    // The combine bails between chunks on cancellation and returns whatever it had rather than
+    // unwinding, so the token — not the return value — says whether that result is meaningful.
     if cache.core.cancel.is_cancelled() {
         return Err(Error::Cancelled);
     }
-    Ok(result)
+    Ok(product)
 }
 
 /// Resolve weights from the weighting strategy and pre-computed channel stats.
