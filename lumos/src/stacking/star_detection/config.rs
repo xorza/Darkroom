@@ -290,7 +290,7 @@ impl DetectionConfig {
             self.psf_axis_ratio,
             |value| value > 0.0 && value <= 1.0,
         )?;
-        InvalidConfigField::finite("psf_angle", "finite", self.psf_angle, |_| true)?;
+        InvalidConfigField::finite_only("psf_angle", self.psf_angle)?;
         InvalidConfigField::check(
             self.deblend_min_separation >= 1,
             "deblend_min_separation",

@@ -208,7 +208,7 @@ impl Stretch {
                 InvalidConfigField::finite("ghs d", "finite and non-negative", d, |value| {
                     value >= 0.0
                 })?;
-                InvalidConfigField::finite("ghs b", "finite", b, |_| true)?;
+                InvalidConfigField::finite_only("ghs b", b)?;
                 InvalidConfigField::finite("ghs sp", "finite and in [0, 1]", sp, |value| {
                     (0.0..=1.0).contains(&value)
                 })?;

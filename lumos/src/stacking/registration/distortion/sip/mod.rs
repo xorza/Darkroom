@@ -92,18 +92,8 @@ impl SipConfig {
             |value| value > 0.0,
         )?;
         if let Some(reference_point) = self.reference_point {
-            InvalidConfigField::finite(
-                "SIP reference_point x",
-                "finite",
-                reference_point.x,
-                |_| true,
-            )?;
-            InvalidConfigField::finite(
-                "SIP reference_point y",
-                "finite",
-                reference_point.y,
-                |_| true,
-            )?;
+            InvalidConfigField::finite_only("SIP reference_point x", reference_point.x)?;
+            InvalidConfigField::finite_only("SIP reference_point y", reference_point.y)?;
         }
         Ok(())
     }

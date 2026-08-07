@@ -108,7 +108,7 @@ impl DrizzleConfig {
         InvalidConfigField::finite("pixfrac", "finite and in (0, 1]", self.pixfrac, |value| {
             value > 0.0 && value <= 1.0
         })?;
-        InvalidConfigField::finite("fill_value", "finite", self.fill_value, |_| true)?;
+        InvalidConfigField::finite_only("fill_value", self.fill_value)?;
         InvalidConfigField::finite(
             "min_coverage",
             "finite and in [0, 1]",

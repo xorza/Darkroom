@@ -139,16 +139,13 @@ impl RansacConfig {
                 min_scale,
                 |value| value > 0.0,
             )?;
-            InvalidConfigField::finite(
+            InvalidConfigField::check_against(
+                max_scale.is_finite() && max_scale > min_scale,
                 "ransac scale_range maximum",
                 "finite and above the minimum",
                 max_scale,
-                |value| value > min_scale,
-            )
-            .map_err(|invalid| InvalidConfigField {
-                bound: Some(min_scale),
-                ..invalid
-            })?;
+                min_scale,
+            )?;
         }
         Ok(())
     }
