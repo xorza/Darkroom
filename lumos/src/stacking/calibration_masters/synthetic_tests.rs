@@ -7,6 +7,7 @@
 //! `DefectMap` detects injected hot/cold pixels exactly and repairs them.
 
 use crate::math::size2us::Size2us;
+use crate::math::vec2us::Vec2us;
 use crate::stacking::calibration_masters::defect_map::DefectMap;
 use crate::testing::TestRng;
 use crate::testing::synthetic::camera::Camera;
@@ -19,12 +20,12 @@ use crate::{CalibrationMasters, CalibrationSet, CfaType};
 use common::CancelToken;
 
 /// A multiplicative radial vignette (sensor flat-field response).
-fn vignette_map(w: usize, h: usize, center: f32, edge: f32, falloff: f32) -> Vec<f32> {
-    let (cx, cy) = (w as f32 / 2.0, h as f32 / 2.0);
+fn vignette_map(size: Size2us, center: f32, edge: f32, falloff: f32) -> Vec<f32> {
+    let (cx, cy) = (size.width as f32 / 2.0, size.height as f32 / 2.0);
     let max_r = (cx * cx + cy * cy).sqrt().max(1.0);
-    (0..h)
+    (0..size.height)
         .flat_map(|y| {
-            (0..w).map(move |x| {
+            (0..size.width).map(move |x| {
                 let (dx, dy) = (x as f32 - cx, y as f32 - cy);
                 let t = ((dx * dx + dy * dy).sqrt() / max_r).powf(falloff);
                 center + (edge - center) * t
@@ -50,9 +51,9 @@ fn mean(px: &[f32]) -> f32 {
 #[test]
 fn calibrate_removes_vignette_dark_and_bias() {
     // A uniformly-lit sky seen through a vignette, plus bias + dark. Calibration must flatten it.
-    let (w, h) = (64, 64);
+    let size = Size2us::new(64, 64);
     let (sky, bias, dark) = (0.3f32, 0.05f32, 0.02f32);
-    let flat = vignette_map(w, h, 1.0, 0.7, 2.0);
+    let flat = vignette_map(size, 1.0, 0.7, 2.0);
 
     // light = bias + dark + flat·sky  (noiseless, for an exact assertion).
     let light_px: Vec<f32> = flat.iter().map(|&f| bias + dark + f * sky).collect();
@@ -66,14 +67,14 @@ fn calibrate_removes_vignette_dark_and_bias() {
 
     let masters = CalibrationMasters::from_images(
         CalibrationSet {
-            dark: Some(constant_cfa(Size2us::new(w, h), bias + dark, CfaType::Mono)),
+            dark: Some(constant_cfa(size, bias + dark, CfaType::Mono)),
             // Flat frame under uniform illumination: bias + sensor response.
             flat: Some(make_cfa(
-                Size2us::new(w, h),
+                size,
                 flat.iter().map(|&f| bias + f).collect(),
                 CfaType::Mono,
             )),
-            bias: Some(constant_cfa(Size2us::new(w, h), bias, CfaType::Mono)),
+            bias: Some(constant_cfa(size, bias, CfaType::Mono)),
             flat_dark: None,
         },
         5.0,
@@ -81,7 +82,7 @@ fn calibrate_removes_vignette_dark_and_bias() {
     )
     .unwrap();
 
-    let mut light = make_cfa(Size2us::new(w, h), light_px, CfaType::Mono);
+    let mut light = make_cfa(size, light_px, CfaType::Mono);
     masters.calibrate(&mut light).unwrap();
 
     // Recovered = sky·mean(flat), spatially flat (vignette divided out).
@@ -102,12 +103,12 @@ fn calibrate_removes_vignette_dark_and_bias() {
 
 #[test]
 fn calibrate_recovers_star_field_through_a_noisy_light() {
-    let (w, h) = (96, 96);
+    let size = Size2us::new(96, 96);
     let (bias, dark) = (0.05f32, 0.02f32);
 
     // True signal (sky + stars), noiseless.
     let scene = Scene::random_field(
-        Size2us::new(w, h),
+        size,
         12,
         (3.0, 9.0),
         BackgroundField::Uniform { level: 0.1 },
@@ -125,9 +126,9 @@ fn calibrate_recovers_star_field_through_a_noisy_light() {
 
     let masters = CalibrationMasters::from_images(
         CalibrationSet {
-            dark: Some(constant_cfa(Size2us::new(w, h), bias + dark, CfaType::Mono)),
-            flat: Some(constant_cfa(Size2us::new(w, h), bias + 1.0, CfaType::Mono)),
-            bias: Some(constant_cfa(Size2us::new(w, h), bias, CfaType::Mono)),
+            dark: Some(constant_cfa(size, bias + dark, CfaType::Mono)),
+            flat: Some(constant_cfa(size, bias + 1.0, CfaType::Mono)),
+            bias: Some(constant_cfa(size, bias, CfaType::Mono)),
             flat_dark: None,
         },
         5.0,
@@ -135,7 +136,7 @@ fn calibrate_recovers_star_field_through_a_noisy_light() {
     )
     .unwrap();
 
-    let mut light = make_cfa(Size2us::new(w, h), light_px, CfaType::Mono);
+    let mut light = make_cfa(size, light_px, CfaType::Mono);
     masters.calibrate(&mut light).unwrap();
 
     // Uniform flat (mean 1) → recovered ≈ true signal. The residual is the single-frame shot+read
@@ -150,8 +151,8 @@ fn calibrate_recovers_star_field_through_a_noisy_light() {
 
 #[test]
 fn defect_map_detects_injected_hot_and_cold_pixels() {
-    let (w, h) = (64, 64);
-    let n = w * h;
+    let size = Size2us::new(64, 64);
+    let n = size.pixel_count();
 
     // Hot pixels (bright) injected into an otherwise-uniform dark.
     let hot: [usize; 5] = [100, 517, 1234, 2048, 3900];
@@ -159,7 +160,7 @@ fn defect_map_detects_injected_hot_and_cold_pixels() {
     for &i in &hot {
         dark_px[i] = 0.9;
     }
-    let dark = make_cfa(Size2us::new(w, h), dark_px, CfaType::Mono);
+    let dark = make_cfa(size, dark_px, CfaType::Mono);
     let map = DefectMap::default()
         .detect_hot(&dark, 5.0, &CancelToken::never())
         .unwrap();
@@ -175,7 +176,7 @@ fn defect_map_detects_injected_hot_and_cold_pixels() {
     for &i in &dead {
         flat_px[i] = 0.01;
     }
-    let flat = make_cfa(Size2us::new(w, h), flat_px, CfaType::Mono);
+    let flat = make_cfa(size, flat_px, CfaType::Mono);
     let map = DefectMap::default()
         .detect_cold(&flat, &CancelToken::never())
         .unwrap();
@@ -188,8 +189,8 @@ fn defect_map_detects_injected_hot_and_cold_pixels() {
 fn hot_detection_sigma_threshold_is_monotonic() {
     // A noisy dark (so MAD is meaningful) with two tiers of hot pixels — moderate and extreme.
     // A lower σ threshold must flag strictly more pixels than a higher one.
-    let (w, h) = (64, 64);
-    let n = w * h;
+    let size = Size2us::new(64, 64);
+    let n = size.pixel_count();
     let mut rng = TestRng::new(99);
     let mut dark_px: Vec<f32> = (0..n)
         .map(|_| 0.1 + rng.next_gaussian_f32() * 0.01)
@@ -200,7 +201,7 @@ fn hot_detection_sigma_threshold_is_monotonic() {
     for &i in &[800usize, 1800, 2800] {
         dark_px[i] = 0.1 + 0.10; // ~10σ
     }
-    let dark = make_cfa(Size2us::new(w, h), dark_px, CfaType::Mono);
+    let dark = make_cfa(size, dark_px, CfaType::Mono);
     let lenient = DefectMap::default()
         .detect_hot(&dark, 3.0, &CancelToken::never())
         .unwrap()
@@ -219,18 +220,18 @@ fn hot_detection_sigma_threshold_is_monotonic() {
 
 #[test]
 fn defect_correction_replaces_hot_pixels_with_neighbours() {
-    let (w, h) = (32, 32);
-    let n = w * h;
+    let size = Size2us::new(32, 32);
+    let n = size.pixel_count();
     let background = 0.2f32;
 
     let hot: [(usize, usize); 2] = [(10, 10), (20, 15)];
     let mut dark = vec![0.05f32; n];
     for &(x, y) in &hot {
-        dark[y * w + x] = 0.9;
+        dark[size.index_of(Vec2us::new(x, y))] = 0.9;
     }
     let map = DefectMap::default()
         .detect_hot(
-            &make_cfa(Size2us::new(w, h), dark, CfaType::Mono),
+            &make_cfa(size, dark, CfaType::Mono),
             5.0,
             &CancelToken::never(),
         )
@@ -238,18 +239,18 @@ fn defect_correction_replaces_hot_pixels_with_neighbours() {
 
     let mut img_px = vec![background; n];
     for &(x, y) in &hot {
-        img_px[y * w + x] = 0.95;
+        img_px[size.index_of(Vec2us::new(x, y))] = 0.95;
     }
-    let mut img = make_cfa(Size2us::new(w, h), img_px, CfaType::Mono);
+    let mut img = make_cfa(size, img_px, CfaType::Mono);
     map.correct(&mut img);
 
     // Each hot pixel is replaced by its (uniform) neighbourhood; ordinary pixels are untouched.
     let px = img.data.pixels();
     for &(x, y) in &hot {
         assert!(
-            (px[y * w + x] - background).abs() < 0.05,
+            (px[size.index_of(Vec2us::new(x, y))] - background).abs() < 0.05,
             "hot pixel at ({x},{y}) not corrected: {}",
-            px[y * w + x]
+            px[size.index_of(Vec2us::new(x, y))]
         );
     }
     assert!(

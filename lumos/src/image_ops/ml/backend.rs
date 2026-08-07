@@ -16,6 +16,9 @@ use ort::value::TensorRef;
 
 use imaginarium::{Buffer2, ChannelCount, Image, PlanarPixels};
 
+use crate::math::size2us::Size2us;
+use crate::math::vec2us::Vec2us;
+
 /// The fixed model processing window — these nets take a `[1, 512, 512, 3]` (NHWC) input.
 const WINDOW: usize = 512;
 /// Feather ramp (px): tiles fade in over this border width so overlaps blend without seams.
@@ -44,8 +47,8 @@ impl TiledOnnxConfig {
 /// Why an ML filter failed.
 #[derive(Debug, thiserror::Error)]
 pub enum MlError {
-    #[error("image must be at least {WINDOW}×{WINDOW}, got {0}×{1}")]
-    TooSmall(usize, usize),
+    #[error("image must be at least {WINDOW}×{WINDOW}, got {}×{}", .0.width, .0.height)]
+    TooSmall(Size2us),
     #[error("ONNX model error: {0}")]
     Model(String),
 }
@@ -89,9 +92,9 @@ fn interleave_f32(planes: ArrayVec<Buffer2<f32>, 3>) -> Image {
 /// (`L_F32` or `RGB_F32`).
 pub(crate) fn run_tiled(image: &Image, config: &TiledOnnxConfig) -> Result<Image, MlError> {
     let planes = deinterleave_f32(image);
-    let (w, h) = (image.desc().width, image.desc().height);
-    if w < WINDOW || h < WINDOW {
-        return Err(MlError::TooSmall(w, h));
+    let size = Size2us::new(image.desc().width, image.desc().height);
+    if size.width < WINDOW || size.height < WINDOW {
+        return Err(MlError::TooSmall(size));
     }
     assert!(config.stride > 0, "TiledOnnxConfig.stride must be > 0");
     let mut session = Session::builder()
@@ -99,18 +102,19 @@ pub(crate) fn run_tiled(image: &Image, config: &TiledOnnxConfig) -> Result<Image
         .commit_from_file(&config.weights)
         .map_err(model_err)?;
 
-    let mut acc = [vec![0.0f32; w * h], vec![0.0; w * h], vec![0.0; w * h]];
-    let mut weight = vec![0.0f32; w * h];
+    let pixels = size.pixel_count();
+    let mut acc = [vec![0.0f32; pixels], vec![0.0; pixels], vec![0.0; pixels]];
+    let mut weight = vec![0.0f32; pixels];
     // Reused across every tile: `TensorRef::from_array_view` borrows this buffer for the
     // duration of `session.run` instead of taking ownership, so one allocation serves the
     // whole tile loop instead of one per tile (up to ~345 for a full 24 MP frame).
     let mut input = vec![0.0f32; WINDOW * WINDOW * 3];
 
-    let xs = tile_starts(w, config.stride);
-    let ys = tile_starts(h, config.stride);
+    let xs = tile_starts(size.width, config.stride);
+    let ys = tile_starts(size.height, config.stride);
     for &ty in &ys {
         for &tx in &xs {
-            fill_tile_input(&planes, tx, ty, &mut input);
+            fill_tile_input(&planes, Vec2us::new(tx, ty), &mut input);
             let tensor =
                 TensorRef::from_array_view(([1usize, WINDOW, WINDOW, 3], input.as_slice()))
                     .map_err(model_err)?;
@@ -123,10 +127,10 @@ pub(crate) fn run_tiled(image: &Image, config: &TiledOnnxConfig) -> Result<Image
                     tile.len()
                 )));
             }
-            accumulate(tile, tx, ty, w, &mut acc, &mut weight);
+            accumulate(tile, Vec2us::new(tx, ty), size.width, &mut acc, &mut weight);
         }
     }
-    Ok(build_output(planes.len() == 3, &acc, &weight, w, h))
+    Ok(build_output(planes.len() == 3, &acc, &weight, size))
 }
 
 /// Tile origins covering `dim` with 512-px windows at `stride`, the last one flush to the edge.
@@ -147,7 +151,7 @@ fn tile_starts(dim: usize, stride: usize) -> Vec<usize> {
 /// Fill the reused NHWC `[1,512,512,3]` `input` buffer from the tile at `(tx, ty)`, clamped to
 /// `[0,1]`. Grayscale replicates its single channel to R=G=B. `input` is the caller's
 /// tile-loop-lifetime scratch buffer (see `run_tiled`), overwritten in full every call.
-fn fill_tile_input(planes: &[Buffer2<f32>], tx: usize, ty: usize, input: &mut [f32]) {
+fn fill_tile_input(planes: &[Buffer2<f32>], tile: Vec2us, input: &mut [f32]) {
     let w = planes[0].width();
     let chans: [&[f32]; 3] = if planes.len() == 3 {
         [planes[0].pixels(), planes[1].pixels(), planes[2].pixels()]
@@ -156,7 +160,7 @@ fn fill_tile_input(planes: &[Buffer2<f32>], tx: usize, ty: usize, input: &mut [f
         [c, c, c]
     };
     for hh in 0..WINDOW {
-        let row = (ty + hh) * w + tx;
+        let row = (tile.y + hh) * w + tile.x;
         for ww in 0..WINDOW {
             let src = row + ww;
             let dst = (hh * WINDOW + ww) * 3;
@@ -191,17 +195,10 @@ const fn feather(i: usize) -> f32 {
     FEATHER_LUT[i]
 }
 
-fn accumulate(
-    out: &[f32],
-    tx: usize,
-    ty: usize,
-    w: usize,
-    acc: &mut [Vec<f32>; 3],
-    weight: &mut [f32],
-) {
+fn accumulate(out: &[f32], tile: Vec2us, w: usize, acc: &mut [Vec<f32>; 3], weight: &mut [f32]) {
     for hh in 0..WINDOW {
         let fy = feather(hh);
-        let row = (ty + hh) * w + tx;
+        let row = (tile.y + hh) * w + tile.x;
         for ww in 0..WINDOW {
             let fw = feather(ww) * fy;
             let idx = row + ww;
@@ -215,7 +212,7 @@ fn accumulate(
 }
 
 /// Normalize the feather-weighted accumulation into an `Image` matching the input's channels.
-fn build_output(rgb: bool, acc: &[Vec<f32>; 3], weight: &[f32], w: usize, h: usize) -> Image {
+fn build_output(rgb: bool, acc: &[Vec<f32>; 3], weight: &[f32], size: Size2us) -> Image {
     if rgb {
         let planes: ArrayVec<Buffer2<f32>, 3> = (0..3)
             .map(|c| {
@@ -224,17 +221,17 @@ fn build_output(rgb: bool, acc: &[Vec<f32>; 3], weight: &[f32], w: usize, h: usi
                     .zip(weight)
                     .map(|(&a, &wt)| (a / wt).clamp(0.0, 1.0))
                     .collect();
-                Buffer2::new(w, h, px)
+                Buffer2::new(size.width, size.height, px)
             })
             .collect();
         interleave_f32(planes)
     } else {
         // Average the three model output channels back to grayscale.
-        let gray: Vec<f32> = (0..w * h)
+        let gray: Vec<f32> = (0..size.pixel_count())
             .map(|i| ((acc[0][i] + acc[1][i] + acc[2][i]) / (3.0 * weight[i])).clamp(0.0, 1.0))
             .collect();
         let mut planes = ArrayVec::new();
-        planes.push(Buffer2::new(w, h, gray));
+        planes.push(Buffer2::new(size.width, size.height, gray));
         interleave_f32(planes)
     }
 }

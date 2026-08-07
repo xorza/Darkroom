@@ -11,14 +11,15 @@ use std::hint::black_box;
 
 use crate::io::image::ImageDimensions;
 use crate::io::image::linear::LinearImage;
+use crate::math::size2us::Size2us;
 use crate::stacking::combine::config::StackConfig;
 use crate::stacking::combine::stack::{StackFrame, stack_images};
 use crate::stacking::progress::ProgressCallback;
 
 /// A 1 MP mono frame: smooth background + per-frame offset/gain (so normalization has work to do) +
 /// ~0.2% bright outliers (so rejection has something to clip).
-fn synth_frame(w: usize, h: usize, frame: u32) -> LinearImage {
-    let n = w * h;
+fn synth_frame(size: Size2us, frame: u32) -> LinearImage {
+    let n = size.pixel_count();
     let offset = 0.05 + (frame as f32) * 0.002;
     let gain = 1.0 + (frame as f32) * 0.01;
     let mut px = vec![0.0f32; n];
@@ -31,15 +32,14 @@ fn synth_frame(w: usize, h: usize, frame: u32) -> LinearImage {
         let idx = ((k as u32).wrapping_mul(2246822519) ^ frame) as usize % n;
         px[idx] = 0.95;
     }
-    LinearImage::from_planar_channels(ImageDimensions::new((w, h), 1), [px])
+    LinearImage::from_planar_channels(ImageDimensions::new(size, 1), [px])
 }
 
-const W: usize = 1024;
-const H: usize = 1024;
+const SIZE: Size2us = Size2us::new(1024, 1024);
 const FRAMES: u32 = 30;
 
 fn frames() -> Vec<StackFrame> {
-    (0..FRAMES).map(|f| synth_frame(W, H, f).into()).collect()
+    (0..FRAMES).map(|f| synth_frame(SIZE, f).into()).collect()
 }
 
 fn run(config: StackConfig) {

@@ -30,8 +30,12 @@ impl Size2us {
     }
 
     /// Row-major index of `point`, for a buffer laid out by this size.
+    ///
+    /// # Panics
+    /// Panics in debug builds if `point` is outside the grid.
     #[inline]
     pub const fn index_of(self, point: Vec2us) -> usize {
+        debug_assert!(self.contains(point), "point is outside the grid");
         point.y * self.width + point.x
     }
 

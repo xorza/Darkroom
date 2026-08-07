@@ -109,24 +109,23 @@ pub(crate) fn reject_cosmic_rays(image: &mut CfaImage, config: &CosmicRayConfig)
 /// Laplacian → resample → significance `S = L⁺/(2N)` → `S' = S − median₅(S)` → fine structure `F`
 /// → flag → grow → in-paint → iterate. Returns the CR pixel count.
 fn reject_mono_buffer(data: &mut Buffer2<f32>, config: &CosmicRayConfig) -> usize {
-    let w = data.width();
-    let h = data.height();
-    if w < 3 || h < 3 {
+    let size = Size2us::new(data.width(), data.height());
+    if size.width < 3 || size.height < 3 {
         return 0;
     }
-    let mut mask = vec![false; w * h];
+    let mut mask = vec![false; size.pixel_count()];
 
     for _ in 0..config.niter {
         let pix = data.pixels();
 
         // L⁺: clipped Laplacian of the ×2-subsampled frame, averaged back to native resolution.
-        let sub = subsample2(pix, w, h);
-        let lplus = laplacian_plus(&sub, w * 2, h * 2, w, h);
+        let sub = subsample2(pix, size);
+        let lplus = laplacian_plus(&sub, size);
 
         // Object fine structure F = median₃(I) − median₇(median₃(I)); large for real sources, ~0 at
         // a CR (median₃ already erased the spike).
-        let m3 = median_window(pix, w, h, 1);
-        let m37 = median_window(&m3, w, h, 3);
+        let m3 = median_window(pix, size, 1);
+        let m37 = median_window(&m3, size, 3);
         let f: Vec<f32> = m3
             .iter()
             .zip(&m37)
@@ -134,17 +133,17 @@ fn reject_mono_buffer(data: &mut Buffer2<f32>, config: &CosmicRayConfig) -> usiz
             .collect();
 
         // Significance S = L⁺/(2N), then S' = S − median₅(S) to strip smooth large-scale structure.
-        let m5 = median_window(pix, w, h, 2);
+        let m5 = median_window(pix, size, 2);
         let noise = noise_map(pix, &m5, &config.noise);
         let s: Vec<f32> = lplus
             .iter()
             .zip(&noise)
             .map(|(&l, &nz)| l / (2.0 * nz))
             .collect();
-        let s_med5 = median_window(&s, w, h, 2);
+        let s_med5 = median_window(&s, size, 2);
         let sprime: Vec<f32> = s.iter().zip(&s_med5).map(|(&a, &b)| a - b).collect();
 
-        let flags = detect_and_grow(&sprime, &f, &noise, &mask, w, h, config);
+        let flags = detect_and_grow(&sprime, &f, &noise, &mask, size, config);
 
         let mut newly = 0usize;
         for (m, &flag) in mask.iter_mut().zip(&flags) {
@@ -156,28 +155,30 @@ fn reject_mono_buffer(data: &mut Buffer2<f32>, config: &CosmicRayConfig) -> usiz
         if newly == 0 {
             break;
         }
-        replace_flagged(data, w, h, &mask);
+        replace_flagged(data, size, &mask);
     }
 
     mask.iter().filter(|&&m| m).count()
 }
 
-/// Block-replicate `data` to `2w × 2h` (each pixel → a 2×2 block).
-fn subsample2(data: &[f32], w: usize, h: usize) -> Vec<f32> {
-    let w2 = w * 2;
-    let mut out = vec![0.0f32; w2 * h * 2];
+/// Block-replicate `data` to twice `size` on each axis (each pixel → a 2×2 block).
+fn subsample2(data: &[f32], size: Size2us) -> Vec<f32> {
+    let w2 = size.width * 2;
+    let mut out = vec![0.0f32; w2 * size.height * 2];
     out.par_chunks_mut(w2).enumerate().for_each(|(y2, row)| {
         let y = y2 / 2;
         for (x2, o) in row.iter_mut().enumerate() {
-            *o = data[y * w + x2 / 2];
+            *o = data[size.index_of(Vec2us::new(x2 / 2, y))];
         }
     });
     out
 }
 
-/// Convolve `sub` (the ×2 image) with the Laplacian `[[0,−1,0],[−1,4,−1],[0,−1,0]]`, clip negatives
-/// to 0 (keep only sharp positive peaks), then 2×2 block-average back to `w × h`. Edge-clamped.
-fn laplacian_plus(sub: &[f32], w2: usize, h2: usize, w: usize, h: usize) -> Vec<f32> {
+/// Convolve `sub` (the ×2 image, i.e. twice `size` on each axis) with the Laplacian
+/// `[[0,−1,0],[−1,4,−1],[0,−1,0]]`, clip negatives to 0 (keep only sharp positive peaks), then 2×2
+/// block-average back down to `size`. Edge-clamped.
+fn laplacian_plus(sub: &[f32], size: Size2us) -> Vec<f32> {
+    let (w2, h2) = (size.width * 2, size.height * 2);
     let mut lap = vec![0.0f32; w2 * h2];
     lap.par_chunks_mut(w2).enumerate().for_each(|(y, row)| {
         let yu = y.saturating_sub(1);
@@ -192,36 +193,41 @@ fn laplacian_plus(sub: &[f32], w2: usize, h2: usize, w: usize, h: usize) -> Vec<
         }
     });
 
-    let mut lplus = vec![0.0f32; w * h];
-    lplus.par_chunks_mut(w).enumerate().for_each(|(y, row)| {
-        let (r0, r1) = (2 * y * w2, (2 * y + 1) * w2);
-        for (x, o) in row.iter_mut().enumerate() {
-            let (c0, c1) = (2 * x, 2 * x + 1);
-            *o = 0.25 * (lap[r0 + c0] + lap[r0 + c1] + lap[r1 + c0] + lap[r1 + c1]);
-        }
-    });
+    let mut lplus = vec![0.0f32; size.pixel_count()];
+    lplus
+        .par_chunks_mut(size.width)
+        .enumerate()
+        .for_each(|(y, row)| {
+            let (r0, r1) = (2 * y * w2, (2 * y + 1) * w2);
+            for (x, o) in row.iter_mut().enumerate() {
+                let (c0, c1) = (2 * x, 2 * x + 1);
+                *o = 0.25 * (lap[r0 + c0] + lap[r0 + c1] + lap[r1 + c0] + lap[r1 + c1]);
+            }
+        });
     lplus
 }
 
 /// Median over a `(2r+1)²` window, edge-clamped. Scalar, row-parallel.
-fn median_window(data: &[f32], w: usize, h: usize, r: usize) -> Vec<f32> {
+fn median_window(data: &[f32], size: Size2us, r: usize) -> Vec<f32> {
     let ri = r as isize;
-    let (wi, hi) = (w as isize, h as isize);
-    let mut out = vec![0.0f32; w * h];
-    out.par_chunks_mut(w).enumerate().for_each(|(y, row)| {
-        let mut buf: Vec<f32> = Vec::with_capacity((2 * r + 1) * (2 * r + 1));
-        for (x, o) in row.iter_mut().enumerate() {
-            buf.clear();
-            for dy in -ri..=ri {
-                let yy = (y as isize + dy).clamp(0, hi - 1) as usize;
-                for dx in -ri..=ri {
-                    let xx = (x as isize + dx).clamp(0, wi - 1) as usize;
-                    buf.push(data[yy * w + xx]);
+    let (wi, hi) = (size.width as isize, size.height as isize);
+    let mut out = vec![0.0f32; size.pixel_count()];
+    out.par_chunks_mut(size.width)
+        .enumerate()
+        .for_each(|(y, row)| {
+            let mut buf: Vec<f32> = Vec::with_capacity((2 * r + 1) * (2 * r + 1));
+            for (x, o) in row.iter_mut().enumerate() {
+                buf.clear();
+                for dy in -ri..=ri {
+                    let yy = (y as isize + dy).clamp(0, hi - 1) as usize;
+                    for dx in -ri..=ri {
+                        let xx = (x as isize + dx).clamp(0, wi - 1) as usize;
+                        buf.push(data[size.index_of(Vec2us::new(xx, yy))]);
+                    }
                 }
+                *o = median_f32_mut(&mut buf);
             }
-            *o = median_f32_mut(&mut buf);
-        }
-    });
+        });
     out
 }
 
@@ -281,32 +287,31 @@ fn detect_and_grow(
     f: &[f32],
     noise: &[f32],
     mask: &[bool],
-    w: usize,
-    h: usize,
+    size: Size2us,
     cfg: &CosmicRayConfig,
 ) -> Vec<bool> {
     let passes_contrast = |i: usize, sig_thresh: f32| {
         let f_norm = (f[i] / noise[i]).max(FINE_STRUCTURE_SIGMA_FLOOR);
         significance[i] > sig_thresh && significance[i] > cfg.objlim * f_norm
     };
-    let primary: Vec<bool> = (0..w * h)
+    let primary: Vec<bool> = (0..size.pixel_count())
         .map(|i| !mask[i] && passes_contrast(i, cfg.sigclip))
         .collect();
 
     let lowered = cfg.sigclip * cfg.sigfrac;
     let mut flags = primary.clone();
-    for y in 0..h {
-        for x in 0..w {
-            if !primary[y * w + x] {
+    for y in 0..size.height {
+        for x in 0..size.width {
+            if !primary[size.index_of(Vec2us::new(x, y))] {
                 continue;
             }
             let y0 = y.saturating_sub(1);
-            let y1 = (y + 1).min(h - 1);
+            let y1 = (y + 1).min(size.height - 1);
             let x0 = x.saturating_sub(1);
-            let x1 = (x + 1).min(w - 1);
+            let x1 = (x + 1).min(size.width - 1);
             for ny in y0..=y1 {
                 for nx in x0..=x1 {
-                    let j = ny * w + nx;
+                    let j = size.index_of(Vec2us::new(nx, ny));
                     if !flags[j] && !mask[j] && passes_contrast(j, lowered) {
                         flags[j] = true;
                     }
@@ -320,16 +325,16 @@ fn detect_and_grow(
 /// Replace masked pixels with the median of their unmasked 5×5 neighbors (edge-clamped). Reads a
 /// snapshot so replacements within one pass use pre-replacement values; fully-masked neighborhoods
 /// (huge CRs) are left for the next iteration to shrink.
-fn replace_flagged(data: &mut Buffer2<f32>, w: usize, h: usize, mask: &[bool]) {
+fn replace_flagged(data: &mut Buffer2<f32>, size: Size2us, mask: &[bool]) {
     let src = data.pixels().to_vec();
-    let (wi, hi) = (w as isize, h as isize);
+    let (wi, hi) = (size.width as isize, size.height as isize);
     data.pixels_mut()
-        .par_chunks_mut(w)
+        .par_chunks_mut(size.width)
         .enumerate()
         .for_each(|(y, row)| {
             let mut buf: Vec<f32> = Vec::with_capacity(25);
             for (x, o) in row.iter_mut().enumerate() {
-                if !mask[y * w + x] {
+                if !mask[size.index_of(Vec2us::new(x, y))] {
                     continue;
                 }
                 buf.clear();
@@ -337,7 +342,7 @@ fn replace_flagged(data: &mut Buffer2<f32>, w: usize, h: usize, mask: &[bool]) {
                     let yy = (y as isize + dy).clamp(0, hi - 1) as usize;
                     for dx in -2..=2 {
                         let xx = (x as isize + dx).clamp(0, wi - 1) as usize;
-                        let j = yy * w + xx;
+                        let j = size.index_of(Vec2us::new(xx, yy));
                         if !mask[j] {
                             buf.push(src[j]);
                         }
@@ -422,7 +427,7 @@ fn reject_xtrans(data: &mut Buffer2<f32>, cfa: &CfaType, config: &CosmicRayConfi
         let noise = xtrans_noise(pix, size, cfa, &signal, &config.noise);
         let s: Vec<f32> = lplus.iter().zip(&noise).map(|(&l, &nz)| l / nz).collect();
 
-        let flags = detect_and_grow(&s, &f, &noise, &mask, size.width, size.height, config);
+        let flags = detect_and_grow(&s, &f, &noise, &mask, size, config);
 
         let mut newly = 0usize;
         for (m, &flag) in mask.iter_mut().zip(&flags) {
@@ -622,32 +627,35 @@ fn xtrans_replace(data: &mut Buffer2<f32>, cfa: &CfaType, mask: &[bool]) {
 
 #[cfg(test)]
 mod tests {
+    use glam::Vec2;
+
     use crate::io::image::ImageMetadata;
     use crate::io::image::cfa::CfaType;
     use crate::io::raw::demosaic::bayer::CfaPattern;
     use crate::stacking::calibration_masters::cosmic_ray::*;
     use crate::testing::TestRng;
 
-    /// Add a round Gaussian source (peak above the existing background) at `(cx, cy)`.
-    fn add_gaussian(data: &mut [f32], w: usize, h: usize, cx: f32, cy: f32, peak: f32, sigma: f32) {
+    /// Add a round Gaussian source (peak above the existing background) at `center`.
+    fn add_gaussian(data: &mut [f32], size: Size2us, center: Vec2, peak: f32, sigma: f32) {
         let r = (sigma * 4.0).ceil() as isize;
         let two_s2 = 2.0 * sigma * sigma;
         for dy in -r..=r {
             for dx in -r..=r {
-                let x = cx as isize + dx;
-                let y = cy as isize + dy;
-                if x < 0 || y < 0 || x >= w as isize || y >= h as isize {
+                let x = center.x as isize + dx;
+                let y = center.y as isize + dy;
+                if x < 0 || y < 0 || x >= size.width as isize || y >= size.height as isize {
                     continue;
                 }
-                let (xf, yf) = (x as f32 - cx, y as f32 - cy);
-                data[y as usize * w + x as usize] += peak * (-(xf * xf + yf * yf) / two_s2).exp();
+                let (xf, yf) = (x as f32 - center.x, y as f32 - center.y);
+                let i = size.index_of(Vec2us::new(x as usize, y as usize));
+                data[i] += peak * (-(xf * xf + yf * yf) / two_s2).exp();
             }
         }
     }
 
-    fn mono(data: Vec<f32>, w: usize, h: usize) -> CfaImage {
+    fn mono(data: Vec<f32>, size: Size2us) -> CfaImage {
         CfaImage {
-            data: Buffer2::new(w, h, data),
+            data: Buffer2::new(size.width, size.height, data),
             metadata: ImageMetadata {
                 cfa_type: Some(CfaType::Mono),
                 ..Default::default()
@@ -656,55 +664,85 @@ mod tests {
         }
     }
 
+    /// The 64×64 synthetic field [`synthetic_field`] builds.
+    #[derive(Debug)]
+    struct SyntheticField {
+        data: Vec<f32>,
+        size: Size2us,
+        /// Rounded star centers, so a test can assert the cores survive.
+        centers: Vec<Vec2us>,
+    }
+
     /// 64×64: flat sky + deterministic Gaussian noise (σ≈0.003) + three well-sampled stars
-    /// (FWHM≈3 px). Star centers are returned so a test can assert they survive.
-    fn synthetic_field() -> (Vec<f32>, usize, usize, Vec<(usize, usize)>) {
-        let (w, h) = (64, 64);
-        let mut data = vec![0.05f32; w * h];
+    /// (FWHM≈3 px).
+    fn synthetic_field() -> SyntheticField {
+        let size = Size2us::new(64, 64);
+        let mut data = vec![0.05f32; size.pixel_count()];
         let mut rng = TestRng::new(7);
         for v in data.iter_mut() {
             *v += rng.next_gaussian_f32() * 0.003;
         }
-        let stars = [(20.0, 20.0, 0.6), (44.0, 30.0, 0.45), (32.0, 50.0, 0.7)];
-        for &(cx, cy, peak) in &stars {
-            add_gaussian(&mut data, w, h, cx, cy, peak, 1.3);
+        let stars = [
+            (Vec2::new(20.0, 20.0), 0.6),
+            (Vec2::new(44.0, 30.0), 0.45),
+            (Vec2::new(32.0, 50.0), 0.7),
+        ];
+        for &(center, peak) in &stars {
+            add_gaussian(&mut data, size, center, peak, 1.3);
         }
         let centers = stars
             .iter()
-            .map(|&(x, y, _)| (x as usize, y as usize))
+            .map(|&(c, _)| Vec2us::new(c.x as usize, c.y as usize))
             .collect();
-        (data, w, h, centers)
+        SyntheticField {
+            data,
+            size,
+            centers,
+        }
     }
 
     #[test]
     fn removes_cosmic_rays_preserves_stars() {
-        let (mut data, w, h, star_cores) = synthetic_field();
+        let SyntheticField {
+            mut data,
+            size,
+            centers: star_cores,
+        } = synthetic_field();
         // Single-pixel CRs at empty positions + a short horizontal streak.
-        let crs = [(10usize, 10usize), (54, 12), (12, 54), (50, 50)];
-        let streak = [(30usize, 8usize), (31, 8), (32, 8)];
-        for &(x, y) in crs.iter().chain(&streak) {
-            data[y * w + x] = 0.95;
+        let crs = [
+            Vec2us::new(10, 10),
+            Vec2us::new(54, 12),
+            Vec2us::new(12, 54),
+            Vec2us::new(50, 50),
+        ];
+        let streak = [Vec2us::new(30, 8), Vec2us::new(31, 8), Vec2us::new(32, 8)];
+        for &p in crs.iter().chain(&streak) {
+            data[size.index_of(p)] = 0.95;
         }
-        let star_vals: Vec<f32> = star_cores.iter().map(|&(x, y)| data[y * w + x]).collect();
+        let star_vals: Vec<f32> = star_cores.iter().map(|&p| data[size.index_of(p)]).collect();
 
-        let mut img = mono(data, w, h);
+        let mut img = mono(data, size);
         let count = reject_cosmic_rays(&mut img, &CosmicRayConfig::default());
         let out = img.data.pixels();
 
         // Every injected CR is removed (the spike drops back toward sky, ≪ 0.95).
-        for &(x, y) in crs.iter().chain(&streak) {
+        for &p in crs.iter().chain(&streak) {
             assert!(
-                out[y * w + x] < 0.2,
-                "CR at ({x},{y}) not removed: {}",
-                out[y * w + x]
+                out[size.index_of(p)] < 0.2,
+                "CR at ({},{}) not removed: {}",
+                p.x,
+                p.y,
+                out[size.index_of(p)]
             );
         }
         // Star cores are untouched — the fine-structure test must not flag PSF-broadened peaks.
-        for (&(x, y), &orig) in star_cores.iter().zip(&star_vals) {
+        for (&p, &orig) in star_cores.iter().zip(&star_vals) {
             assert!(
-                (out[y * w + x] - orig).abs() < 1e-6,
-                "star core at ({x},{y}) was altered: {} vs {orig}",
-                out[y * w + x]
+                (out[size.index_of(p)] - orig).abs() < 1e-6,
+                "star core at ({},{}) was altered: {} vs {orig}",
+                p.x,
+                p.y,
+                out[size.index_of(p)]
             );
         }
         // 7 injected; allow modest growth but not runaway over-flagging.
@@ -713,25 +751,28 @@ mod tests {
 
     #[test]
     fn clean_field_few_false_positives() {
-        let (data, w, h, _) = synthetic_field();
-        let count = reject_cosmic_rays(&mut mono(data, w, h), &CosmicRayConfig::default());
+        let field = synthetic_field();
+        let count = reject_cosmic_rays(
+            &mut mono(field.data, field.size),
+            &CosmicRayConfig::default(),
+        );
         assert!(count <= 2, "clean field should flag ~0 CRs, got {count}");
     }
 
     #[test]
     fn sigclip_controls_sensitivity() {
         // A modest spike (~15σ): a sensitive sigclip flags it, a strict one doesn't (A→X, B→Y, X≠Y).
-        let (mut data, w, h, _) = synthetic_field();
-        data[40 * w + 40] = 0.05 + 0.045;
+        let SyntheticField { mut data, size, .. } = synthetic_field();
+        data[size.index_of(Vec2us::new(40, 40))] = 0.05 + 0.045;
         let sensitive = reject_cosmic_rays(
-            &mut mono(data.clone(), w, h),
+            &mut mono(data.clone(), size),
             &CosmicRayConfig {
                 sigclip: 3.0,
                 ..Default::default()
             },
         );
         let strict = reject_cosmic_rays(
-            &mut mono(data, w, h),
+            &mut mono(data, size),
             &CosmicRayConfig {
                 sigclip: 60.0,
                 ..Default::default()
@@ -746,8 +787,9 @@ mod tests {
     #[test]
     fn empirical_and_parametric_both_catch_a_bright_cr() {
         // Both noise models must flag an obvious bright CR among the stars.
-        let (mut data, w, h, _) = synthetic_field();
-        data[33 * w + 15] = 0.99;
+        let SyntheticField { mut data, size, .. } = synthetic_field();
+        let cr = Vec2us::new(15, 33);
+        data[size.index_of(cr)] = 0.99;
         for noise in [
             NoiseEstimation::Empirical,
             NoiseEstimation::Parametric {
@@ -756,7 +798,7 @@ mod tests {
                 full_scale: 4095.0,
             },
         ] {
-            let mut img = mono(data.clone(), w, h);
+            let mut img = mono(data.clone(), size);
             let count = reject_cosmic_rays(
                 &mut img,
                 &CosmicRayConfig {
@@ -766,7 +808,7 @@ mod tests {
             );
             assert!(count >= 1, "bright CR missed");
             assert!(
-                img.data.pixels()[33 * w + 15] < 0.2,
+                img.data.pixels()[size.index_of(cr)] < 0.2,
                 "bright CR not in-painted"
             );
         }
@@ -776,21 +818,27 @@ mod tests {
     fn bayer_removes_cosmic_rays_preserves_star() {
         // Bayer deinterleave path: a well-sampled star + CRs spread across all four 2×2 phases. The
         // CRs go; the star core survives (each phase plane's mono detector protects it).
-        let (w, h) = (48, 48);
-        let mut data = vec![0.05f32; w * h];
+        let size = Size2us::new(48, 48);
+        let mut data = vec![0.05f32; size.pixel_count()];
         let mut rng = TestRng::new(11);
         for v in data.iter_mut() {
             *v += rng.next_gaussian_f32() * 0.003;
         }
-        add_gaussian(&mut data, w, h, 24.0, 24.0, 0.6, 2.5);
-        let star = data[24 * w + 24];
+        add_gaussian(&mut data, size, Vec2::new(24.0, 24.0), 0.6, 2.5);
+        let core = Vec2us::new(24, 24);
+        let star = data[size.index_of(core)];
         // Each CR sits in a different (x%2, y%2) phase, exercising all four planes.
-        let crs = [(8usize, 8usize), (9, 12), (12, 41), (37, 37)];
-        for &(x, y) in &crs {
-            data[y * w + x] = 0.95;
+        let crs = [
+            Vec2us::new(8, 8),
+            Vec2us::new(9, 12),
+            Vec2us::new(12, 41),
+            Vec2us::new(37, 37),
+        ];
+        for &p in &crs {
+            data[size.index_of(p)] = 0.95;
         }
         let mut img = CfaImage {
-            data: Buffer2::new(w, h, data),
+            data: Buffer2::new(size.width, size.height, data),
             metadata: ImageMetadata {
                 cfa_type: Some(CfaType::Bayer(CfaPattern::Rggb)),
                 ..Default::default()
@@ -799,17 +847,19 @@ mod tests {
         };
         let count = reject_cosmic_rays(&mut img, &CosmicRayConfig::default());
         let out = img.data.pixels();
-        for &(x, y) in &crs {
+        for &p in &crs {
             assert!(
-                out[y * w + x] < 0.2,
-                "Bayer CR ({x},{y}) not removed: {}",
-                out[y * w + x]
+                out[size.index_of(p)] < 0.2,
+                "Bayer CR ({},{}) not removed: {}",
+                p.x,
+                p.y,
+                out[size.index_of(p)]
             );
         }
         assert!(
-            out[24 * w + 24] > 0.5,
+            out[size.index_of(core)] > 0.5,
             "star core gutted: {} (was {star})",
-            out[24 * w + 24]
+            out[size.index_of(core)]
         );
         assert!((4..=24).contains(&count), "unexpected CR count: {count}");
     }
@@ -824,19 +874,21 @@ mod tests {
         // instead of per-frame CFA L.A.Cosmic. The test pins the behavior so a future fix
         // (e.g. mosaic-level detection) flips it loudly. Contrast `bayer_removes_cosmic_rays_...`,
         // which uses a *well-sampled* FWHM≈5.9 px star that survives.
-        let (w, h) = (48, 48);
-        let mut data = vec![0.05f32; w * h];
+        let size = Size2us::new(48, 48);
+        let mut data = vec![0.05f32; size.pixel_count()];
         let mut rng = TestRng::new(13);
         for v in data.iter_mut() {
             *v += rng.next_gaussian_f32() * 0.003;
         }
-        add_gaussian(&mut data, w, h, 24.0, 24.0, 0.6, 1.0); // σ=1.0 → FWHM≈2.35 px in the mosaic
-        let crs = [(8usize, 8usize), (37, 37)];
-        for &(x, y) in &crs {
-            data[y * w + x] = 0.95;
+        // σ=1.0 → FWHM≈2.35 px in the mosaic
+        add_gaussian(&mut data, size, Vec2::new(24.0, 24.0), 0.6, 1.0);
+        let core = Vec2us::new(24, 24);
+        let crs = [Vec2us::new(8, 8), Vec2us::new(37, 37)];
+        for &p in &crs {
+            data[size.index_of(p)] = 0.95;
         }
         let mut img = CfaImage {
-            data: Buffer2::new(w, h, data),
+            data: Buffer2::new(size.width, size.height, data),
             metadata: ImageMetadata {
                 cfa_type: Some(CfaType::Bayer(CfaPattern::Rggb)),
                 ..Default::default()
@@ -846,19 +898,21 @@ mod tests {
         reject_cosmic_rays(&mut img, &CosmicRayConfig::default());
         let out = img.data.pixels();
         // CR rejection still works — the injected CRs are removed.
-        for &(x, y) in &crs {
+        for &p in &crs {
             assert!(
-                out[y * w + x] < 0.2,
-                "Bayer CR ({x},{y}) not removed: {}",
-                out[y * w + x]
+                out[size.index_of(p)] < 0.2,
+                "Bayer CR ({},{}) not removed: {}",
+                p.x,
+                p.y,
+                out[size.index_of(p)]
             );
         }
         // Known limitation: the tight star core is also gutted (flagged as a CR).
         assert!(
-            out[24 * w + 24] < 0.2,
+            out[size.index_of(core)] < 0.2,
             "tight star core unexpectedly survived ({}) — if per-phase Bayer CR detection was \
              fixed, update this characterization test",
-            out[24 * w + 24]
+            out[size.index_of(core)]
         );
     }
 
@@ -875,25 +929,26 @@ mod tests {
             [1, 0, 1, 1, 2, 1],
         ];
         let cfa = CfaType::XTrans(pattern);
-        let (w, h) = (18usize, 18usize);
+        let size = Size2us::new(18, 18);
         let color_val = |c: u8| match c {
             0 => 0.10, // R
             1 => 0.20, // G
             _ => 0.30, // B
         };
-        let mut data = vec![0.0f32; w * h];
+        let mut data = vec![0.0f32; size.pixel_count()];
         let mut rng = TestRng::new(5);
-        for y in 0..h {
-            for x in 0..w {
-                data[y * w + x] =
-                    color_val(cfa.color_at(Vec2us::new(x, y))) + rng.next_gaussian_f32() * 0.002;
+        for y in 0..size.height {
+            for x in 0..size.width {
+                let p = Vec2us::new(x, y);
+                data[size.index_of(p)] =
+                    color_val(cfa.color_at(p)) + rng.next_gaussian_f32() * 0.002;
             }
         }
-        let cr = (9usize, 9usize);
-        data[cr.1 * w + cr.0] = 0.95;
+        let cr = Vec2us::new(9, 9);
+        data[size.index_of(cr)] = 0.95;
 
         let mut img = CfaImage {
-            data: Buffer2::new(w, h, data),
+            data: Buffer2::new(size.width, size.height, data),
             metadata: ImageMetadata {
                 cfa_type: Some(cfa.clone()),
                 ..Default::default()
@@ -905,19 +960,21 @@ mod tests {
 
         assert!(count >= 1, "X-Trans CR missed");
         // Replaced with the same-color (G, here) neighborhood median, ≈ 0.20 — well below the spike.
-        let cr_color = cfa.color_at(Vec2us::new(cr.0, cr.1));
+        let cr_color = cfa.color_at(cr);
         assert!(
-            (out[cr.1 * w + cr.0] - color_val(cr_color)).abs() < 0.05,
+            (out[size.index_of(cr)] - color_val(cr_color)).abs() < 0.05,
             "X-Trans CR not repaired to its color baseline: {}",
-            out[cr.1 * w + cr.0]
+            out[size.index_of(cr)]
         );
         // A flat pixel of each color far from the CR is untouched (no false positives).
-        for &(x, y) in &[(3usize, 3usize), (4, 3), (3, 4)] {
-            let c = cfa.color_at(Vec2us::new(x, y));
+        for &p in &[Vec2us::new(3, 3), Vec2us::new(4, 3), Vec2us::new(3, 4)] {
+            let c = cfa.color_at(p);
             assert!(
-                (out[y * w + x] - color_val(c)).abs() < 0.02,
-                "flat {c}-pixel ({x},{y}) altered: {}",
-                out[y * w + x]
+                (out[size.index_of(p)] - color_val(c)).abs() < 0.02,
+                "flat {c}-pixel ({},{}) altered: {}",
+                p.x,
+                p.y,
+                out[size.index_of(p)]
             );
         }
     }

@@ -20,6 +20,7 @@ use fits_well::image::Image;
 
 use crate::io::image::LoadContext;
 use crate::io::image::linear::LinearImage;
+use crate::math::size2us::Size2us;
 use crate::memory::{fits_in_memory, load_concurrency, memory_budget};
 use crate::stacking::combine::config::StackConfig;
 use crate::stacking::combine::stack::stack;
@@ -64,8 +65,12 @@ fn load_budget_is_respected_across_configs() {
 }
 
 /// Write a spatially-uniform 16-bit FITS frame (`value` in every pixel) to `path`.
-fn write_const_fits(path: &std::path::Path, w: usize, h: usize, value: u16) {
-    let image = Image::from_u16(vec![w, h], &vec![value; w * h]).expect("valid image");
+fn write_const_fits(path: &std::path::Path, size: Size2us, value: u16) {
+    let image = Image::from_u16(
+        vec![size.width, size.height],
+        &vec![value; size.pixel_count()],
+    )
+    .expect("valid image");
     let mut buf = Vec::new();
     FitsWriter::new(&mut buf)
         .write_image(&image)
@@ -79,7 +84,8 @@ fn write_const_fits(path: &std::path::Path, w: usize, h: usize, value: u16) {
 #[test]
 fn disk_and_memory_tiers_produce_identical_masters() {
     let dir = ScratchDirectory::new("lumos_mem_tier_test");
-    let (w, h, n) = (24usize, 24usize, 6usize);
+    let size = Size2us::new(24, 24);
+    let n = 6usize;
 
     // Distinct per-frame constant → a spatially-uniform master bracketed by the frame values, so a
     // per-frame or per-tier bug shows up as a non-uniform or mis-averaged plane.
@@ -89,7 +95,7 @@ fn disk_and_memory_tiers_produce_identical_masters() {
         .enumerate()
         .map(|(i, &v)| {
             let p = dir.join(format!("f{i}.fits"));
-            write_const_fits(&p, w, h, v);
+            write_const_fits(&p, size, v);
             p
         })
         .collect();

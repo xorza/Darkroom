@@ -59,8 +59,10 @@ use crate::testing::synthetic::fixtures::star_field;
 #[ignore = "manual live peak-RSS probe; run explicitly with a filter, one config per process"]
 fn pipeline_stack_budget_probe() -> io::Result<()> {
     let n: usize = env_parse("LUMOS_PIPE_FRAMES", 24);
-    let width: usize = env_parse("LUMOS_PIPE_W", 6000);
-    let height: usize = env_parse("LUMOS_PIPE_H", 6000);
+    let size = Size2us::new(
+        env_parse("LUMOS_PIPE_W", 6000),
+        env_parse("LUMOS_PIPE_H", 6000),
+    );
     let seed: u64 = env_parse("LUMOS_PIPE_SEED", 1);
     // Default 2048 MB so the default 6000×6000 × 24 set (3.3 GB resident) overflows it → disk tier.
     let budget = parse_budget("LUMOS_PIPE_BUDGET", BudgetChoice::mb(2048));
@@ -70,9 +72,9 @@ fn pipeline_stack_budget_probe() -> io::Result<()> {
         .unwrap_or_else(|_| {
             PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.tmp/lumos_pipeline_stack")
         });
-    let frames_dir = base.join(format!("{width}x{height}_n{n}_s{seed}"));
+    let frames_dir = base.join(format!("{}x{}_n{n}_s{seed}", size.width, size.height));
 
-    let frame_bytes = (width * height * std::mem::size_of::<f32>()) as u64;
+    let frame_bytes = (size.pixel_count() * std::mem::size_of::<f32>()) as u64;
     let resident_if_ram = frame_bytes * n as u64;
 
     // The pipeline's stacking sequence: three calibration masters + the final light combine. The same
@@ -82,7 +84,9 @@ fn pipeline_stack_budget_probe() -> io::Result<()> {
 
     println!("=== lumos pipeline stacking memory probe (total budget across stages) ===");
     println!(
-        "per stage     {n} × {width}×{height} mono  ({:.1} MB/frame f32)",
+        "per stage     {n} × {}×{} mono  ({:.1} MB/frame f32)",
+        size.width,
+        size.height,
         frame_bytes as f64 / MB as f64
     );
     println!("stages        {} ({})", stages.len(), stages.join(" → "));
@@ -102,7 +106,7 @@ fn pipeline_stack_budget_probe() -> io::Result<()> {
     }
     println!();
 
-    let frames = ensure_frames(&frames_dir, "pipe", n, width, height, seed)?;
+    let frames = ensure_frames(&frames_dir, "pipe", n, size, seed)?;
     println!(
         "frames ready  {} on disk ({:.2} GB){}",
         n,
@@ -153,7 +157,7 @@ fn pipeline_stack_budget_probe() -> io::Result<()> {
     let peak = sampler.finish();
     let anon_mb = peak.anon_mb;
     let total_stacks = stages.len();
-    let mpix = (width * height * n * total_stacks) as f64 / 1e6;
+    let mpix = (size.pixel_count() * n * total_stacks) as f64 / 1e6;
 
     println!("\n=== result ===");
     println!(
@@ -193,23 +197,27 @@ const DETECT_WORKING_PLANES: usize = 8;
 #[ignore = "manual live peak-RSS probe; run explicitly with a filter, one config per process"]
 fn align_stack_memory_probe() {
     let n: usize = env_parse::<usize>("LUMOS_ALIGN_FRAMES", 24).max(2);
-    let width: usize = env_parse("LUMOS_ALIGN_W", 2000);
-    let height: usize = env_parse("LUMOS_ALIGN_H", 2000);
+    let size = Size2us::new(
+        env_parse("LUMOS_ALIGN_W", 2000),
+        env_parse("LUMOS_ALIGN_H", 2000),
+    );
     let stars: usize = env_parse("LUMOS_ALIGN_STARS", 800);
     let seed: u64 = env_parse("LUMOS_ALIGN_SEED", 1);
 
-    let frame_bytes = (width * height * std::mem::size_of::<f32>()) as u64;
+    let frame_bytes = (size.pixel_count() * std::mem::size_of::<f32>()) as u64;
 
     println!("=== lumos align+stack memory probe (detect → register → warp → combine) ===");
     println!(
-        "frames        {n} × {width}×{height} ({stars} stars each, {:.1} MB/frame f32)",
+        "frames        {n} × {}×{} ({stars} stars each, {:.1} MB/frame f32)",
+        size.width,
+        size.height,
         frame_bytes as f64 / MB as f64
     );
 
     // Build the input set: a base star field plus `n-1` small dithers of it, so registration has a
     // shared pattern to solve. Warp scratch is freed per frame; only the `n` inputs stay resident.
     let reg = RegistrationConfig::default();
-    let base = star_field(Size2us::new(width, height), stars, seed).image;
+    let base = star_field(size, stars, seed).image;
     let channels = base.channels();
     let gen_start = Instant::now();
     let mut frames: Vec<LinearImage> = Vec::with_capacity(n);
@@ -243,7 +251,7 @@ fn align_stack_memory_probe() {
 
     let peak = sampler.finish();
     let anon_mb = peak.anon_mb;
-    let mpix = (width * height * n) as f64 / 1e6;
+    let mpix = (size.pixel_count() * n) as f64 / 1e6;
 
     println!("=== result ===");
     println!(

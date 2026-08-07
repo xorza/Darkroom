@@ -5,11 +5,12 @@
 //! sub-pixel-dithered renders: total flux is conserved, a source lands at its scale-mapped truth
 //! position, and dithering recovers resolution a single undersampled frame cannot.
 
-use crate::math::size2us::Size2us;
 use common::CancelToken;
 use glam::DVec2;
 
 use crate::io::image::linear::LinearImage;
+use crate::math::size2us::Size2us;
+use crate::math::vec2us::Vec2us;
 use crate::stacking::drizzle::accumulator::DrizzleFrame;
 use crate::stacking::drizzle::config::DrizzleConfig;
 use crate::stacking::drizzle::stack::drizzle_images;
@@ -62,38 +63,27 @@ fn peak(px: &[f32]) -> f32 {
     px.iter().copied().fold(f32::MIN, f32::max)
 }
 
-/// Flux-weighted centroid and a second-moment FWHM of a star on a (near-)zero background.
-fn star_moments(px: &[f32], w: usize, h: usize) -> (f64, f64, f64) {
+/// Flux-weighted centroid of a star on a (near-)zero background.
+fn star_centroid(px: &[f32], size: Size2us) -> DVec2 {
     let mut s = 0.0;
     let mut sx = 0.0;
     let mut sy = 0.0;
-    for y in 0..h {
-        for x in 0..w {
-            let v = px[y * w + x] as f64;
+    for y in 0..size.height {
+        for x in 0..size.width {
+            let v = px[size.index_of(Vec2us::new(x, y))] as f64;
             s += v;
             sx += v * x as f64;
             sy += v * y as f64;
         }
     }
-    let (cx, cy) = (sx / s, sy / s);
-    let mut vxx = 0.0;
-    let mut vyy = 0.0;
-    for y in 0..h {
-        for x in 0..w {
-            let v = px[y * w + x] as f64;
-            vxx += v * (x as f64 - cx).powi(2);
-            vyy += v * (y as f64 - cy).powi(2);
-        }
-    }
-    let sigma = ((vxx + vyy) / (2.0 * s)).sqrt();
-    (cx, cy, 2.354_82 * sigma)
+    DVec2::new(sx / s, sy / s)
 }
 
 #[test]
 fn drizzle_conserves_total_flux() {
-    let (w, h) = (64, 64);
+    let size = Size2us::new(64, 64);
     let scene = Scene::single(
-        Size2us::new(w, h),
+        size,
         DVec2::new(32.0, 32.0),
         5.0,
         BackgroundField::Uniform { level: 0.0 },
@@ -133,14 +123,9 @@ fn drizzle_conserves_total_flux() {
 
 #[test]
 fn drizzle_places_star_at_scaled_truth_position() {
-    let (w, h) = (64, 64);
+    let size = Size2us::new(64, 64);
     let pos = DVec2::new(28.0, 36.0);
-    let scene = Scene::single(
-        Size2us::new(w, h),
-        pos,
-        5.0,
-        BackgroundField::Uniform { level: 0.0 },
-    );
+    let scene = Scene::single(size, pos, 5.0, BackgroundField::Uniform { level: 0.0 });
     let camera = Camera::ideal(3.5);
     let dithers = [
         DVec2::ZERO,
@@ -164,26 +149,28 @@ fn drizzle_places_star_at_scaled_truth_position() {
     )
     .unwrap();
     let out = result.image.channel(0);
-    let (cx, cy, _) = star_moments(out.pixels(), out.width(), out.height());
+    let center = star_centroid(out.pixels(), Size2us::new(out.width(), out.height()));
     assert!(
-        (cx - pos.x * scale as f64).abs() < 1.0,
-        "centroid x {cx:.2} vs pos·scale {}",
+        (center.x - pos.x * scale as f64).abs() < 1.0,
+        "centroid x {:.2} vs pos·scale {}",
+        center.x,
         pos.x * scale as f64
     );
     assert!(
-        (cy - pos.y * scale as f64).abs() < 1.0,
-        "centroid y {cy:.2} vs pos·scale {}",
+        (center.y - pos.y * scale as f64).abs() < 1.0,
+        "centroid y {:.2} vs pos·scale {}",
+        center.y,
         pos.y * scale as f64
     );
 }
 
 #[test]
 fn drizzle_dithering_recovers_resolution() {
-    let (w, h) = (48, 48);
+    let size = Size2us::new(48, 48);
     // Undersampled PSF (fwhm 1.8 < Nyquist 2) at a sub-pixel centre. Flux kept low so the tight
     // PSF peak stays unsaturated (otherwise both peaks clip at 1.0 and the comparison is moot).
     let scene = Scene::single(
-        Size2us::new(w, h),
+        size,
         DVec2::new(24.3, 24.7),
         2.0,
         BackgroundField::Uniform { level: 0.0 },
@@ -233,9 +220,9 @@ fn drizzle_dithering_recovers_resolution() {
 fn drizzle_emits_coverage_weight_and_linear_variance_maps() {
     // The coverage, weight, and linear-variance maps are drizzle's science deliverable; verify them
     // against the closed form for N equal-weight frames at full interior coverage.
-    let (w, h) = (64, 64);
+    let size = Size2us::new(64, 64);
     let scene = Scene::single(
-        Size2us::new(w, h),
+        size,
         DVec2::new(32.0, 32.0),
         5.0,
         BackgroundField::Uniform { level: 0.1 },
@@ -268,16 +255,18 @@ fn drizzle_emits_coverage_weight_and_linear_variance_maps() {
         "coverage must stay in [0,1]"
     );
     assert!(
-        (cov[32 * w + 32] - 1.0).abs() < 0.05,
+        (cov[size.index_of(Vec2us::new(32, 32))] - 1.0).abs() < 0.05,
         "interior coverage {} should be ~1",
-        cov[32 * w + 32]
+        cov[size.index_of(Vec2us::new(32, 32))]
     );
 
     // weight = Σwᵢ ≈ the 4 frames' total. variance = Σwᵢ²/(Σwᵢ)² = 1/N_eff; drizzle pools each
     // frame's drop across neighbouring output pixels, so N_eff ≥ the frame count (variance
     // smaller than a naive 1/4) — that pooling is the whole point of the WHT.
-    let weight_c = result.weight.as_ref().unwrap().channel(0).pixels()[32 * w + 32];
-    let var_c = result.linear_variance.as_ref().unwrap().channel(0).pixels()[32 * w + 32];
+    let weight_c =
+        result.weight.as_ref().unwrap().channel(0).pixels()[size.index_of(Vec2us::new(32, 32))];
+    let var_c = result.linear_variance.as_ref().unwrap().channel(0).pixels()
+        [size.index_of(Vec2us::new(32, 32))];
     let n_eff = 1.0 / var_c;
     println!("interior weight {weight_c:.3}, variance {var_c:.4}, N_eff {n_eff:.1}");
     assert!(

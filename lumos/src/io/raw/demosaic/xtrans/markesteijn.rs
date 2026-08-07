@@ -281,8 +281,7 @@ mod tests {
 
     #[derive(Debug)]
     struct GoldenSample {
-        x: usize,
-        y: usize,
+        pos: Vec2us,
         rgb: [f32; 3],
     }
 
@@ -380,23 +379,19 @@ mod tests {
                 scene: SyntheticScene::ColorEdge,
                 samples: [
                     GoldenSample {
-                        x: 47,
-                        y: 48,
+                        pos: Vec2us::new(47, 48),
                         rgb: [0.099_999_994, 0.300_000_012, 0.800_000_012],
                     },
                     GoldenSample {
-                        x: 48,
-                        y: 48,
+                        pos: Vec2us::new(48, 48),
                         rgb: [0.899_999_976, 0.600_000_024, 0.199_999_988],
                     },
                     GoldenSample {
-                        x: 49,
-                        y: 48,
+                        pos: Vec2us::new(49, 48),
                         rgb: [0.899_999_976, 0.600_000_024, 0.200_000_018],
                     },
                     GoldenSample {
-                        x: 50,
-                        y: 48,
+                        pos: Vec2us::new(50, 48),
                         rgb: [0.899_999_976, 0.600_000_024, 0.199_999_988],
                     },
                 ],
@@ -405,23 +400,19 @@ mod tests {
                 scene: SyntheticScene::Impulse,
                 samples: [
                     GoldenSample {
-                        x: 48,
-                        y: 48,
+                        pos: Vec2us::new(48, 48),
                         rgb: [0.552_734_375, 0.699_999_988, 0.552_734_375],
                     },
                     GoldenSample {
-                        x: 48,
-                        y: 47,
+                        pos: Vec2us::new(48, 47),
                         rgb: [0.050_000_000_7, 0.270_898_432, 0.270_898_432],
                     },
                     GoldenSample {
-                        x: 47,
-                        y: 48,
+                        pos: Vec2us::new(47, 48),
                         rgb: [0.270_898_432, 0.270_898_432, 0.050_000_000_7],
                     },
                     GoldenSample {
-                        x: 49,
-                        y: 49,
+                        pos: Vec2us::new(49, 49),
                         rgb: [0.050_000_004_5, 0.050_000_000_7, 0.050_000_004_5],
                     },
                 ],
@@ -430,23 +421,19 @@ mod tests {
                 scene: SyntheticScene::Star,
                 samples: [
                     GoldenSample {
-                        x: 47,
-                        y: 47,
+                        pos: Vec2us::new(47, 47),
                         rgb: [0.653_244_376, 0.654_872_417, 0.588_915_467],
                     },
                     GoldenSample {
-                        x: 50,
-                        y: 47,
+                        pos: Vec2us::new(50, 47),
                         rgb: [0.110_830_717, 0.216_674_328, 0.257_652_014],
                     },
                     GoldenSample {
-                        x: 47,
-                        y: 52,
+                        pos: Vec2us::new(47, 52),
                         rgb: [0.029_506_173, 0.032_290_011_6, 0.058_555_860_1],
                     },
                     GoldenSample {
-                        x: 48,
-                        y: 48,
+                        pos: Vec2us::new(48, 48),
                         rgb: [0.673_444_748, 0.654_872_417, 0.579_427_004],
                     },
                 ],
@@ -455,23 +442,19 @@ mod tests {
                 scene: SyntheticScene::ColorGrating,
                 samples: [
                     GoldenSample {
-                        x: 31,
-                        y: 24,
+                        pos: Vec2us::new(31, 24),
                         rgb: [0.405_019_253, 0.157_421_41, 0.712_104_738],
                     },
                     GoldenSample {
-                        x: 48,
-                        y: 48,
+                        pos: Vec2us::new(48, 48),
                         rgb: [0.447_177_649, 0.886_090_875, 0.324_239_552],
                     },
                     GoldenSample {
-                        x: 65,
-                        y: 70,
+                        pos: Vec2us::new(65, 70),
                         rgb: [0.694_080_234, 0.141_468_421, 0.456_137_031],
                     },
                     GoldenSample {
-                        x: 63,
-                        y: 32,
+                        pos: Vec2us::new(63, 32),
                         rgb: [0.886_546_731, 0.217_050_105, 0.379_481_941],
                     },
                 ],
@@ -492,7 +475,7 @@ mod tests {
                 XTransImage::with_margins_f32(&data, size, size, Vec2us::ZERO, test_pattern());
             let planes = demosaic(&xtrans, &CancelToken::never()).unwrap();
             for sample in case.samples {
-                let index = sample.y * WIDTH + sample.x;
+                let index = size.index_of(sample.pos);
                 for (channel, plane) in planes.iter().enumerate() {
                     let actual = plane[index];
                     let expected = sample.rgb[channel];
@@ -500,8 +483,8 @@ mod tests {
                         (actual - expected).abs() <= TOLERANCE,
                         "{:?} ({}, {}) channel {}: {actual} != {expected}",
                         case.scene,
-                        sample.x,
-                        sample.y,
+                        sample.pos.x,
+                        sample.pos.y,
                         channel,
                     );
                 }
