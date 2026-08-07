@@ -5,6 +5,7 @@
 //! physical integer/float preservation and null rejection. The demosaic path is
 //! exercised by building mosaics from known colours and demosaicing them back.
 
+use crate::math::size2us::Size2us;
 use std::fs::File;
 
 use crate::io::image::LoadContext;
@@ -206,8 +207,7 @@ fn mosaic_fits_uses_the_cfa_calibration_route() {
     }
 
     let dark = make_cfa(
-        width,
-        height,
+        Size2us::new(width, height),
         vec![dark_value; width * height],
         pattern.clone(),
     );
@@ -222,7 +222,7 @@ fn mosaic_fits_uses_the_cfa_calibration_route() {
         CancelToken::never(),
     )
     .unwrap();
-    let mut equivalent = make_cfa(width, height, pixels, pattern.clone());
+    let mut equivalent = make_cfa(Size2us::new(width, height), pixels, pattern.clone());
     masters.calibrate(&mut loaded).unwrap();
     masters.calibrate(&mut equivalent).unwrap();
     assert_eq!(loaded.data, equivalent.data);
@@ -288,7 +288,7 @@ fn demosaic_uniform_bayer_recovers_colour() {
             mosaic[y * w + x] = rgb[cfa.color_at(Vec2us::new(x, y)) as usize];
         }
     }
-    let image = make_cfa(w, h, mosaic, cfa)
+    let image = make_cfa(Size2us::new(w, h), mosaic, cfa)
         .demosaic(&CancelToken::never())
         .unwrap();
 
@@ -334,7 +334,7 @@ fn calibrated_demosaic_preserves_out_of_range_samples() {
         CfaType::XTrans(test_pattern_array()),
     ] {
         for expected in [-0.25f32, 1.25] {
-            let image = make_cfa(w, h, vec![expected; w * h], cfa.clone())
+            let image = make_cfa(Size2us::new(w, h), vec![expected; w * h], cfa.clone())
                 .demosaic(&CancelToken::never())
                 .unwrap();
 

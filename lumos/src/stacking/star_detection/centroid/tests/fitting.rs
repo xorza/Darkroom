@@ -205,7 +205,7 @@ fn test_moffat_fit_precision_statistical() {
 fn test_fwhm_estimation_accuracy() {
     let width = 128;
     let height = 128;
-    let bg = make_uniform_background(width, height, 0.1, 0.001);
+    let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.001);
 
     // Test various sigma values
     for sigma in [1.5f32, 2.0, 2.5, 3.0, 3.5, 4.0] {
@@ -246,7 +246,7 @@ fn test_fwhm_estimation_accuracy() {
 fn test_eccentricity_calculation_accuracy() {
     let width = 64;
     let height = 64;
-    let bg = make_uniform_background(width, height, 0.1, 0.01);
+    let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
 
     // Test various axis ratios
     // eccentricity = sqrt(1 - (b/a)^2) where a >= b
@@ -309,7 +309,7 @@ fn snr_uses_normalized_noise_units() {
 fn test_sharpness_point_vs_extended() {
     let width = 64;
     let height = 64;
-    let bg = make_uniform_background(width, height, 0.1, 0.01);
+    let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
 
     // Compact star (small sigma) - high sharpness
     let compact = make_gaussian_star(
@@ -561,7 +561,7 @@ fn test_roundness1_circular_source() {
         0.8,
         0.1,
     );
-    let bg = make_uniform_background(width, height, 0.1, 0.01);
+    let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
 
     let metrics = compute_star(
         &pixels,
@@ -595,7 +595,7 @@ fn test_roundness1_x_elongated() {
         0.8,
         0.1,
     );
-    let bg = make_uniform_background(width, height, 0.1, 0.01);
+    let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
 
     let metrics = compute_star(
         &pixels,
@@ -629,7 +629,7 @@ fn test_roundness2_symmetric_source() {
         0.8,
         0.1,
     );
-    let bg = make_uniform_background(width, height, 0.1, 0.01);
+    let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
 
     let metrics = compute_star(
         &pixels,

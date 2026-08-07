@@ -93,7 +93,7 @@ fn test_refine_centroid_adaptive_sigma_small_fwhm() {
     let expected_fwhm = FWHM_TO_SIGMA * sigma;
 
     let pixels = make_gaussian_star(Size2us::new(width, height), true_pos, sigma, 0.8, 0.1);
-    let bg = make_uniform_background(width, height, 0.1, 0.01);
+    let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
 
     // Use small expected FWHM
     let result = refine_centroid(
@@ -126,7 +126,7 @@ fn test_refine_centroid_adaptive_sigma_large_fwhm() {
     let expected_fwhm = FWHM_TO_SIGMA * sigma;
 
     let pixels = make_gaussian_star(Size2us::new(width, height), true_pos, sigma, 0.8, 0.1);
-    let bg = make_uniform_background(width, height, 0.1, 0.01);
+    let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
 
     // Use large expected FWHM
     let result = refine_centroid(

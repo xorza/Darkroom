@@ -154,7 +154,7 @@ fn capped_color_sampling_matches_exact_row_and_column_statistics() {
 
 #[test]
 fn cancelled_detection_returns_error() {
-    let image = make_cfa(4, 4, vec![0.5; 16], CfaType::Mono);
+    let image = make_cfa(Size2us::new(4, 4), vec![0.5; 16], CfaType::Mono);
     let cancel = CancelToken::new();
     cancel.cancel();
 
@@ -188,7 +188,7 @@ fn quantization_floor_scales_with_bit_depth_and_master_count() {
                     pixels[index] += 4.0 * sigma;
                 }
 
-                let mut dark = make_cfa(width, height, pixels, CfaType::Mono);
+                let mut dark = make_cfa(Size2us::new(width, height), pixels, CfaType::Mono);
                 dark.quantization_sigma = Some(sigma);
                 dark.metadata.gain = Some(gain);
                 let detected = DefectMap::default()
@@ -223,7 +223,7 @@ fn cfa_stack_propagates_raw_quantization_into_hot_detection() {
             for &index in &below_threshold {
                 pixels[index] += 4.0 * master_sigma;
             }
-            let mut image = make_cfa(width, height, pixels, CfaType::Mono);
+            let mut image = make_cfa(Size2us::new(width, height), pixels, CfaType::Mono);
             image.quantization_sigma = Some(source_sigma);
             image
         })
@@ -260,13 +260,13 @@ fn test_correct_clustered_defect_uses_only_good_neighbors() {
     for &(x, y) in &hot {
         px[y * w + x] = 0.95;
     }
-    let dark = make_cfa(w, h, px, cfa.clone());
+    let dark = make_cfa(Size2us::new(w, h), px, cfa.clone());
     let defect_map = DefectMap::default()
         .detect_hot(&dark, 5.0, &CancelToken::never())
         .unwrap();
     assert_eq!(defect_map.hot_count(), 6, "all six 0.95 red pixels are hot");
 
-    let mut light = make_cfa(w, h, vec![0.5f32; w * h], cfa);
+    let mut light = make_cfa(Size2us::new(w, h), vec![0.5f32; w * h], cfa);
     for &(x, y) in &hot {
         light.data[y * w + x] = 0.95;
     }
@@ -310,7 +310,7 @@ fn test_xtrans_hot_pixel_correction_uses_same_color() {
         for &(x, y) in corrupt {
             px[y * w + x] = 0.9;
         }
-        make_cfa(w, h, px, cfa.clone())
+        make_cfa(Size2us::new(w, h), px, cfa.clone())
     };
 
     let r_hot = (1usize, 0usize); // pattern[0][1] = 0 → R
@@ -347,7 +347,7 @@ fn test_cfa_hot_pixel_detection() {
     pixels[14] = 10000.0; // hot at (2,2)
     pixels[35] = 10000.0; // hot at (5,5)
 
-    let dark = make_cfa(6, 6, pixels, CfaType::Bayer(CfaPattern::Rggb));
+    let dark = make_cfa(Size2us::new(6, 6), pixels, CfaType::Bayer(CfaPattern::Rggb));
     let defect_map = DefectMap::default()
         .detect_hot(&dark, 5.0, &CancelToken::never())
         .unwrap();
@@ -366,7 +366,7 @@ fn test_cfa_hot_pixel_correction_bayer() {
     let mut pixels = vec![100.0; 36];
     pixels[2 * 6 + 2] = 10000.0; // hot at (2,2)
 
-    let mut image = make_cfa(6, 6, pixels, CfaType::Bayer(CfaPattern::Rggb));
+    let mut image = make_cfa(Size2us::new(6, 6), pixels, CfaType::Bayer(CfaPattern::Rggb));
 
     let defect_map = DefectMap {
         hot_indices: vec![2 * 6 + 2],
@@ -388,7 +388,7 @@ fn test_cfa_hot_pixel_correction_bayer() {
 fn test_cfa_hot_pixel_correction_mono() {
     // Mono: uses standard 8-connected neighbors
     let pixels = vec![10.0, 20.0, 30.0, 40.0, 1000.0, 50.0, 60.0, 70.0, 80.0];
-    let mut image = make_cfa(3, 3, pixels, CfaType::Mono);
+    let mut image = make_cfa(Size2us::new(3, 3), pixels, CfaType::Mono);
 
     let defect_map = DefectMap {
         hot_indices: vec![4],
@@ -460,7 +460,11 @@ fn test_cfa_hot_pixel_detection_large() {
         pixels[idx] = 10000.0;
     }
 
-    let dark = make_cfa(size, size, pixels, CfaType::Bayer(CfaPattern::Rggb));
+    let dark = make_cfa(
+        Size2us::new(size, size),
+        pixels,
+        CfaType::Bayer(CfaPattern::Rggb),
+    );
     let defect_map = DefectMap::default()
         .detect_hot(&dark, 5.0, &CancelToken::never())
         .unwrap();
@@ -499,7 +503,7 @@ fn test_per_channel_detection_bayer() {
     // Make one red pixel hot
     pixels[0] = 500.0; // (0,0) = R
 
-    let dark = make_cfa(8, 8, pixels, pattern.clone());
+    let dark = make_cfa(Size2us::new(8, 8), pixels, pattern.clone());
     let defect_map = DefectMap::default()
         .detect_hot(&dark, 3.0, &CancelToken::never())
         .unwrap();
@@ -579,7 +583,7 @@ fn hot_detection_rejects_column_noise_gradient_and_amp_glow_but_keeps_clusters()
         pixels[index] += 0.08;
     }
 
-    let dark = make_cfa(width, height, pixels, cfa);
+    let dark = make_cfa(Size2us::new(width, height), pixels, cfa);
     let defect_map = DefectMap::default()
         .detect_hot(&dark, 5.0, &CancelToken::never())
         .unwrap();
@@ -594,7 +598,7 @@ fn hot_detection_rejects_column_noise_gradient_and_amp_glow_but_keeps_clusters()
 #[test]
 fn test_cfa_no_defective_pixels() {
     let pixels = vec![100.0; 36];
-    let dark = make_cfa(6, 6, pixels, CfaType::Mono);
+    let dark = make_cfa(Size2us::new(6, 6), pixels, CfaType::Mono);
     let defect_map = DefectMap::default()
         .detect_hot(&dark, 5.0, &CancelToken::never())
         .unwrap();
@@ -616,7 +620,7 @@ fn near_zero_median_dark_flags_only_hot_pixels() {
     for &idx in &[100usize, 2000, 4000] {
         pixels[idx] = 0.5;
     }
-    let dark = make_cfa(w, h, pixels, CfaType::Mono);
+    let dark = make_cfa(Size2us::new(w, h), pixels, CfaType::Mono);
 
     let defect_map = DefectMap::default()
         .detect_hot(&dark, 5.0, &CancelToken::never())
@@ -644,7 +648,7 @@ fn cold_pixels_detected_from_flat() {
     // 6x6 mono flat: uniform illumination 0.4 with one dead pixel (no response).
     let mut pixels = vec![0.4f32; 36];
     pixels[5] = 0.0; // dead pixel at index 5
-    let flat = make_cfa(6, 6, pixels, CfaType::Mono);
+    let flat = make_cfa(Size2us::new(6, 6), pixels, CfaType::Mono);
 
     let defect_map = DefectMap::default()
         .detect_cold(&flat, &CancelToken::never())
@@ -662,7 +666,7 @@ fn cold_pixels_detected_from_flat() {
 /// neighbourhood median, so none falls below half of it.
 #[test]
 fn uniform_flat_flags_no_cold() {
-    let flat = make_cfa(8, 8, vec![0.5f32; 64], CfaType::Mono);
+    let flat = make_cfa(Size2us::new(8, 8), vec![0.5f32; 64], CfaType::Mono);
     let defect_map = DefectMap::default()
         .detect_cold(&flat, &CancelToken::never())
         .unwrap();
@@ -687,7 +691,7 @@ fn cold_detection_survives_vignetting_gradient() {
     }
     let dead = 8 * w + 8; // (8,8), normally ≈0.52; its 8 neighbours median ≈0.52
     pixels[dead] = 0.0;
-    let flat = make_cfa(w, h, pixels, CfaType::Mono);
+    let flat = make_cfa(Size2us::new(w, h), pixels, CfaType::Mono);
 
     let defect_map = DefectMap::default()
         .detect_cold(&flat, &CancelToken::never())
@@ -721,11 +725,11 @@ fn detect_hot_and_cold_combine() {
     // Near-zero dark with one hot pixel; illuminated flat with one dead pixel.
     let mut dark_px = vec![0.001f32; 36];
     dark_px[0] = 0.5; // hot
-    let dark = make_cfa(6, 6, dark_px, CfaType::Mono);
+    let dark = make_cfa(Size2us::new(6, 6), dark_px, CfaType::Mono);
 
     let mut flat_px = vec![0.4f32; 36];
     flat_px[5] = 0.0; // dead
-    let flat = make_cfa(6, 6, flat_px, CfaType::Mono);
+    let flat = make_cfa(Size2us::new(6, 6), flat_px, CfaType::Mono);
 
     let defect_map = DefectMap::default()
         .detect_hot(&dark, 5.0, &CancelToken::never())
@@ -841,7 +845,7 @@ fn xtrans_cold_pixel_detected() {
     let dead = 12 * w + 12; // interior G pixel: 0.0 < 0.5 · 0.2 neighbourhood median
     assert_eq!(pattern.color_at(Vec2us::new(12, 12)), 1, "(12,12) is green");
     px[dead] = 0.0;
-    let flat = make_cfa(w, h, px, pattern);
+    let flat = make_cfa(Size2us::new(w, h), px, pattern);
 
     let defect_map = DefectMap::default()
         .detect_cold(&flat, &CancelToken::never())
@@ -858,7 +862,7 @@ fn xtrans_cold_pixel_detected() {
 #[should_panic(expected = "don't match")]
 fn test_correct_cfa_dimension_mismatch() {
     let pixels = vec![10.0; 9];
-    let mut image = make_cfa(3, 3, pixels, CfaType::Mono);
+    let mut image = make_cfa(Size2us::new(3, 3), pixels, CfaType::Mono);
 
     let defect_map = DefectMap {
         hot_indices: vec![],

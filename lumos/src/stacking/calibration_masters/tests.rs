@@ -262,7 +262,7 @@ fn cold_detection_uses_subtracted_unfloored_flat_response() {
     for kind in [SubtractorKind::Bias, SubtractorKind::FlatDark] {
         let mut flat_pixels = vec![11.0; width * height];
         flat_pixels[dead] = 10.0;
-        let flat = make_cfa(width, height, flat_pixels, CfaType::Mono);
+        let flat = make_cfa(Size2us::new(width, height), flat_pixels, CfaType::Mono);
         let subtractor = constant_cfa(Size2us::new(width, height), 10.0, CfaType::Mono);
         let mut images = CalibrationSet {
             flat: Some(flat),

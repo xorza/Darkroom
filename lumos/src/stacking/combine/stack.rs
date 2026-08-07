@@ -497,6 +497,7 @@ mod tests {
     use crate::io::image::cfa::{CfaImage, CfaType};
     use crate::io::image::linear::LinearImage;
     use crate::io::image::linear_pixels::LinearPixels;
+    use crate::math::size2us::Size2us;
     use crate::math::statistics::ChannelStats;
     use crate::stacking::combine::cache::internals::cache_from_images;
     use crate::stacking::combine::cache::tests::make_test_cache;
@@ -537,8 +538,7 @@ mod tests {
             .zip(source_sigmas)
             .map(|(pixels, &sigma)| {
                 let mut image = crate::testing::make_cfa(
-                    dimensions.width(),
-                    dimensions.height(),
+                    Size2us::new(dimensions.width(), dimensions.height()),
                     pixels,
                     CfaType::Mono,
                 );
@@ -1499,8 +1499,8 @@ mod tests {
         // next caller that does not.
         let cache = cache_from_images(
             vec![
-                crate::testing::make_cfa(2, 1, vec![0.4; 2], CfaType::Mono),
-                crate::testing::make_cfa(2, 1, vec![0.2; 2], CfaType::Mono),
+                crate::testing::make_cfa(Size2us::new(2, 1), vec![0.4; 2], CfaType::Mono),
+                crate::testing::make_cfa(Size2us::new(2, 1), vec![0.2; 2], CfaType::Mono),
             ],
             Normalization::None,
         );

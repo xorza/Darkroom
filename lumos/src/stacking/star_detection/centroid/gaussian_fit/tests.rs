@@ -1,5 +1,7 @@
 //! Tests for 2D Gaussian fitting.
 
+use crate::math::size2us::Size2us;
+use crate::math::vec2us::Vec2us;
 use crate::math::{fwhm_to_sigma, sigma_to_fwhm};
 use crate::stacking::star_detection::centroid::gaussian_fit::*;
 use crate::stacking::star_detection::centroid::internals::{
@@ -8,21 +10,20 @@ use crate::stacking::star_detection::centroid::internals::{
 use glam::Vec2;
 
 fn make_gaussian_stamp(
-    width: usize,
-    height: usize,
+    size: Size2us,
     cx: f32,
     cy: f32,
     amplitude: f32,
     sigma: f32,
     background: f32,
 ) -> Vec<f32> {
-    let mut pixels = vec![background; width * height];
-    for y in 0..height {
-        for x in 0..width {
+    let mut pixels = vec![background; size.pixel_count()];
+    for y in 0..size.height {
+        for x in 0..size.width {
             let dx = x as f32 - cx;
             let dy = y as f32 - cy;
             let value = amplitude * (-0.5 * (dx * dx + dy * dy) / (sigma * sigma)).exp();
-            pixels[y * width + x] += value;
+            pixels[size.index_of(Vec2us::new(x, y))] += value;
         }
     }
     pixels
@@ -30,8 +31,7 @@ fn make_gaussian_stamp(
 
 #[allow(clippy::too_many_arguments)]
 fn make_gaussian_stamp_asymmetric(
-    width: usize,
-    height: usize,
+    size: Size2us,
     cx: f32,
     cy: f32,
     amplitude: f32,
@@ -39,14 +39,14 @@ fn make_gaussian_stamp_asymmetric(
     sigma_y: f32,
     background: f32,
 ) -> Vec<f32> {
-    let mut pixels = vec![background; width * height];
-    for y in 0..height {
-        for x in 0..width {
+    let mut pixels = vec![background; size.pixel_count()];
+    for y in 0..size.height {
+        for x in 0..size.width {
             let dx = x as f32 - cx;
             let dy = y as f32 - cy;
             let value = amplitude
                 * (-0.5 * (dx * dx / (sigma_x * sigma_x) + dy * dy / (sigma_y * sigma_y))).exp();
-            pixels[y * width + x] += value;
+            pixels[size.index_of(Vec2us::new(x, y))] += value;
         }
     }
     pixels
@@ -63,7 +63,12 @@ fn test_gaussian_fit_centered() {
     let true_bg = 0.1;
 
     let pixels = make_gaussian_stamp(
-        width, height, true_cx, true_cy, true_amp, true_sigma, true_bg,
+        Size2us::new(width, height),
+        true_cx,
+        true_cy,
+        true_amp,
+        true_sigma,
+        true_bg,
     );
     let pixels_buf = Buffer2::new(width, height, pixels);
 
@@ -91,7 +96,12 @@ fn test_gaussian_fit_subpixel_offset() {
     let true_bg = 0.1;
 
     let pixels = make_gaussian_stamp(
-        width, height, true_cx, true_cy, true_amp, true_sigma, true_bg,
+        Size2us::new(width, height),
+        true_cx,
+        true_cy,
+        true_amp,
+        true_sigma,
+        true_bg,
     );
     let pixels_buf = Buffer2::new(width, height, pixels);
 
@@ -123,7 +133,15 @@ fn test_gaussian_fit_asymmetric() {
     let sigma_y = 3.0;
     let bg = 0.1;
 
-    let pixels = make_gaussian_stamp_asymmetric(width, height, cx, cy, amp, sigma_x, sigma_y, bg);
+    let pixels = make_gaussian_stamp_asymmetric(
+        Size2us::new(width, height),
+        cx,
+        cy,
+        amp,
+        sigma_x,
+        sigma_y,
+        bg,
+    );
     let pixels_buf = Buffer2::new(width, height, pixels);
 
     let config = GaussianFitConfig::default();
@@ -169,7 +187,12 @@ fn test_gaussian_fit_high_snr() {
     let true_bg = 1.0;
 
     let pixels = make_gaussian_stamp(
-        width, height, true_cx, true_cy, true_amp, true_sigma, true_bg,
+        Size2us::new(width, height),
+        true_cx,
+        true_cy,
+        true_amp,
+        true_sigma,
+        true_bg,
     );
     let pixels_buf = Buffer2::new(width, height, pixels);
 
@@ -194,7 +217,12 @@ fn test_gaussian_fit_low_amplitude() {
     let true_bg = 0.1;
 
     let pixels = make_gaussian_stamp(
-        width, height, true_cx, true_cy, true_amp, true_sigma, true_bg,
+        Size2us::new(width, height),
+        true_cx,
+        true_cy,
+        true_amp,
+        true_sigma,
+        true_bg,
     );
     let pixels_buf = Buffer2::new(width, height, pixels);
 
@@ -216,7 +244,12 @@ fn test_gaussian_fit_large_sigma() {
     let true_bg = 0.1;
 
     let pixels = make_gaussian_stamp(
-        width, height, true_cx, true_cy, true_amp, true_sigma, true_bg,
+        Size2us::new(width, height),
+        true_cx,
+        true_cy,
+        true_amp,
+        true_sigma,
+        true_bg,
     );
     let pixels_buf = Buffer2::new(width, height, pixels);
 
@@ -241,7 +274,12 @@ fn test_gaussian_fit_small_sigma() {
     let true_bg = 0.1;
 
     let pixels = make_gaussian_stamp(
-        width, height, true_cx, true_cy, true_amp, true_sigma, true_bg,
+        Size2us::new(width, height),
+        true_cx,
+        true_cy,
+        true_amp,
+        true_sigma,
+        true_bg,
     );
     let pixels_buf = Buffer2::new(width, height, pixels);
 
@@ -266,7 +304,12 @@ fn test_gaussian_fit_with_noise() {
     let true_bg = 0.1;
 
     let mut pixels = make_gaussian_stamp(
-        width, height, true_cx, true_cy, true_amp, true_sigma, true_bg,
+        Size2us::new(width, height),
+        true_cx,
+        true_cy,
+        true_amp,
+        true_sigma,
+        true_bg,
     );
 
     // Add deterministic "noise" pattern
@@ -312,7 +355,12 @@ fn test_gaussian_fit_zero_background() {
     let true_bg = 0.0;
 
     let pixels = make_gaussian_stamp(
-        width, height, true_cx, true_cy, true_amp, true_sigma, true_bg,
+        Size2us::new(width, height),
+        true_cx,
+        true_cy,
+        true_amp,
+        true_sigma,
+        true_bg,
     );
     let pixels_buf = Buffer2::new(width, height, pixels);
 
@@ -337,7 +385,12 @@ fn test_gaussian_fit_high_background() {
     let true_bg = 10.0; // High background
 
     let pixels = make_gaussian_stamp(
-        width, height, true_cx, true_cy, true_amp, true_sigma, true_bg,
+        Size2us::new(width, height),
+        true_cx,
+        true_cy,
+        true_amp,
+        true_sigma,
+        true_bg,
     );
     let pixels_buf = Buffer2::new(width, height, pixels);
 
@@ -373,7 +426,12 @@ fn test_gaussian_fit_with_gaussian_noise() {
     let noise_sigma = 0.05; // 5% of amplitude
 
     let mut pixels = make_gaussian_stamp(
-        width, height, true_cx, true_cy, true_amp, true_sigma, true_bg,
+        Size2us::new(width, height),
+        true_cx,
+        true_cy,
+        true_amp,
+        true_sigma,
+        true_bg,
     );
     add_noise(&mut pixels, noise_sigma, 12345);
 
@@ -410,7 +468,12 @@ fn test_gaussian_fit_high_noise_still_converges() {
     let noise_sigma = 0.15; // 15% noise - challenging
 
     let mut pixels = make_gaussian_stamp(
-        width, height, true_cx, true_cy, true_amp, true_sigma, true_bg,
+        Size2us::new(width, height),
+        true_cx,
+        true_cy,
+        true_amp,
+        true_sigma,
+        true_bg,
     );
     add_noise(&mut pixels, noise_sigma, 54321);
 
@@ -447,7 +510,12 @@ fn test_gaussian_fit_low_snr() {
     let true_bg = 0.5; // High background (SNR ~ 0.2)
 
     let pixels = make_gaussian_stamp(
-        width, height, true_cx, true_cy, true_amp, true_sigma, true_bg,
+        Size2us::new(width, height),
+        true_cx,
+        true_cy,
+        true_amp,
+        true_sigma,
+        true_bg,
     );
     let pixels_buf = Buffer2::new(width, height, pixels);
 
@@ -475,7 +543,12 @@ fn test_gaussian_fit_wrong_background_estimate() {
     let true_bg = 0.1;
 
     let pixels = make_gaussian_stamp(
-        width, height, true_cx, true_cy, true_amp, true_sigma, true_bg,
+        Size2us::new(width, height),
+        true_cx,
+        true_cy,
+        true_amp,
+        true_sigma,
+        true_bg,
     );
     let pixels_buf = Buffer2::new(width, height, pixels);
 
@@ -519,7 +592,12 @@ fn test_gaussian_fit_very_high_amplitude() {
     let true_bg = 100.0;
 
     let pixels = make_gaussian_stamp(
-        width, height, true_cx, true_cy, true_amp, true_sigma, true_bg,
+        Size2us::new(width, height),
+        true_cx,
+        true_cy,
+        true_amp,
+        true_sigma,
+        true_bg,
     );
     let pixels_buf = Buffer2::new(width, height, pixels);
 
@@ -545,7 +623,12 @@ fn test_gaussian_fit_narrow_psf() {
     let true_bg = 0.1;
 
     let pixels = make_gaussian_stamp(
-        width, height, true_cx, true_cy, true_amp, true_sigma, true_bg,
+        Size2us::new(width, height),
+        true_cx,
+        true_cy,
+        true_amp,
+        true_sigma,
+        true_bg,
     );
     let pixels_buf = Buffer2::new(width, height, pixels);
 
@@ -570,7 +653,12 @@ fn test_gaussian_fit_converges_within_max_iterations() {
     let true_bg = 0.1;
 
     let pixels = make_gaussian_stamp(
-        width, height, true_cx, true_cy, true_amp, true_sigma, true_bg,
+        Size2us::new(width, height),
+        true_cx,
+        true_cy,
+        true_amp,
+        true_sigma,
+        true_bg,
     );
     let pixels_buf = Buffer2::new(width, height, pixels);
 
@@ -598,7 +686,12 @@ fn test_gaussian_fit_bad_initial_guess_still_converges() {
     let true_bg = 0.1;
 
     let pixels = make_gaussian_stamp(
-        width, height, true_cx, true_cy, true_amp, true_sigma, true_bg,
+        Size2us::new(width, height),
+        true_cx,
+        true_cy,
+        true_amp,
+        true_sigma,
+        true_bg,
     );
     let pixels_buf = Buffer2::new(width, height, pixels);
 
@@ -667,7 +760,12 @@ fn test_gaussian_fit_center_outside_stamp_rejected() {
 
     // Create a stamp with peak at edge so fitting might push center outside
     let pixels = make_gaussian_stamp(
-        width, height, true_cx, true_cy, true_amp, true_sigma, true_bg,
+        Size2us::new(width, height),
+        true_cx,
+        true_cy,
+        true_amp,
+        true_sigma,
+        true_bg,
     );
     let pixels_buf = Buffer2::new(width, height, pixels);
 
@@ -691,7 +789,12 @@ fn test_gaussian_fit_rms_residual_computed() {
     let true_bg = 0.1;
 
     let pixels = make_gaussian_stamp(
-        width, height, true_cx, true_cy, true_amp, true_sigma, true_bg,
+        Size2us::new(width, height),
+        true_cx,
+        true_cy,
+        true_amp,
+        true_sigma,
+        true_bg,
     );
     let pixels_buf = Buffer2::new(width, height, pixels);
 
@@ -728,7 +831,12 @@ fn test_gaussian_fit_multiple_positions() {
         let true_cy = 10.0 + offset_y;
 
         let pixels = make_gaussian_stamp(
-            width, height, true_cx, true_cy, true_amp, true_sigma, true_bg,
+            Size2us::new(width, height),
+            true_cx,
+            true_cy,
+            true_amp,
+            true_sigma,
+            true_bg,
         );
         let pixels_buf = Buffer2::new(width, height, pixels);
 
@@ -1081,7 +1189,12 @@ fn test_gaussian_fit_sigma_at_lower_bound() {
     let true_bg = 0.1;
 
     let pixels = make_gaussian_stamp(
-        width, height, true_cx, true_cy, true_amp, true_sigma, true_bg,
+        Size2us::new(width, height),
+        true_cx,
+        true_cy,
+        true_amp,
+        true_sigma,
+        true_bg,
     );
     let pixels_buf = Buffer2::new(width, height, pixels);
 
@@ -1111,7 +1224,12 @@ fn test_gaussian_fit_sigma_at_upper_bound() {
     let true_bg = 0.1;
 
     let pixels = make_gaussian_stamp(
-        width, height, true_cx, true_cy, true_amp, true_sigma, true_bg,
+        Size2us::new(width, height),
+        true_cx,
+        true_cy,
+        true_amp,
+        true_sigma,
+        true_bg,
     );
     let pixels_buf = Buffer2::new(width, height, pixels);
 
@@ -1148,7 +1266,12 @@ fn test_gaussian_fit_extreme_amplitude_range() {
     for amp_exp in [-3, -2, -1, 0, 1, 2, 3, 4] {
         let true_amp = 10.0f32.powi(amp_exp);
         let pixels = make_gaussian_stamp(
-            width, height, true_cx, true_cy, true_amp, true_sigma, true_bg,
+            Size2us::new(width, height),
+            true_cx,
+            true_cy,
+            true_amp,
+            true_sigma,
+            true_bg,
         );
         let pixels_buf = Buffer2::new(width, height, pixels);
 
@@ -1187,7 +1310,12 @@ fn test_gaussian_fit_high_sigma_low_amplitude() {
     let true_bg = 0.05;
 
     let pixels = make_gaussian_stamp(
-        width, height, true_cx, true_cy, true_amp, true_sigma, true_bg,
+        Size2us::new(width, height),
+        true_cx,
+        true_cy,
+        true_amp,
+        true_sigma,
+        true_bg,
     );
     let pixels_buf = Buffer2::new(width, height, pixels);
 
@@ -1216,7 +1344,12 @@ fn test_gaussian_fit_residual_distribution() {
     let noise_sigma = 0.05;
 
     let mut pixels = make_gaussian_stamp(
-        width, height, true_cx, true_cy, true_amp, true_sigma, true_bg,
+        Size2us::new(width, height),
+        true_cx,
+        true_cy,
+        true_amp,
+        true_sigma,
+        true_bg,
     );
     add_noise(&mut pixels, noise_sigma, 11111);
 
