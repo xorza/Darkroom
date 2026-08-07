@@ -20,12 +20,11 @@ use crate::stacking::star_detection::synthetic_tests::stage_tests::{TILE_SIZE, m
 /// Create a detection overlay image showing candidates.
 fn create_detection_overlay(
     pixels: &[f32],
-    width: usize,
-    height: usize,
+    size: Size2us,
     candidates: &[(usize, usize)],
     ground_truth: &[(f32, f32)],
 ) -> imaginarium::Image {
-    let mut img = gray_to_rgb_image_stretched(pixels, Size2us::new(width, height));
+    let mut img = gray_to_rgb_image_stretched(pixels, size);
 
     // Draw ground truth in blue
     let blue = Color::rgb(0.3, 0.3, 1.0);
@@ -89,8 +88,7 @@ fn test_detection_sparse() {
         candidates.iter().map(|c| (c.peak.x, c.peak.y)).collect();
     let overlay = create_detection_overlay(
         pixels.pixels(),
-        width,
-        height,
+        Size2us::new(width, height),
         &candidate_positions,
         &truth_positions,
     );
