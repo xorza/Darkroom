@@ -104,14 +104,7 @@ impl SigmaClipConfig {
             return n0;
         }
 
-        sort_with_indices(
-            values,
-            &mut scratch.indices,
-            &mut scratch.floats_b,
-            &mut scratch.usize_a,
-            &mut scratch.usize_b,
-            n0,
-        );
+        sort_with_indices(values, scratch, n0);
 
         // Active survivors are the sorted, contiguous window `values[lo..hi]`.
         let mut lo = 0usize;
@@ -474,14 +467,7 @@ impl LinearFitClipConfig {
                 // Subsequent passes: linear fit rejection
 
                 // Sort remaining values with index co-array
-                sort_with_indices(
-                    values,
-                    &mut scratch.indices,
-                    &mut scratch.floats_b,
-                    &mut scratch.usize_a,
-                    &mut scratch.usize_b,
-                    len,
-                );
+                sort_with_indices(values, scratch, len);
 
                 // Fit line y = a + b*x through sorted values, x = sorted position
                 let n = len as f32;
@@ -623,14 +609,7 @@ impl PercentileClipConfig {
             return n;
         }
 
-        sort_with_indices(
-            values,
-            &mut scratch.indices,
-            &mut scratch.floats_a,
-            &mut scratch.usize_a,
-            &mut scratch.usize_b,
-            n,
-        );
+        sort_with_indices(values, scratch, n);
 
         let range = self.surviving_range(n);
         let count = range.len();
@@ -850,14 +829,18 @@ fn compact_within(
 /// Sort `values[..n]` and `indices[..n]` together by value.
 /// Uses insertion sort for small N (optimal for typical 10–50 frame stacks)
 /// and introsort via `sort_unstable_by` for large N to avoid O(N^2).
-fn sort_with_indices(
-    values: &mut [f32],
-    indices: &mut [usize],
-    scratch_buf: &mut Vec<f32>,
-    perm: &mut Vec<usize>,
-    old_indices: &mut Vec<usize>,
-    n: usize,
-) {
+fn sort_with_indices(values: &mut [f32], scratch: &mut ScratchBuffers, n: usize) {
+    // Destructured under the role each generic buffer plays here. No caller reads the f32 scratch
+    // after this returns, so which one it borrows is this function's business rather than a
+    // parameter every call site has to get right.
+    let ScratchBuffers {
+        indices,
+        floats_b: scratch_buf,
+        usize_a: perm,
+        usize_b: old_indices,
+        ..
+    } = scratch;
+
     const INSERTION_SORT_THRESHOLD: usize = 64;
 
     if n <= INSERTION_SORT_THRESHOLD {
@@ -2150,24 +2133,14 @@ mod tests {
         // Indices:  indices[0]=99, indices[1]=98, ..., indices[99]=0
         let n = 100;
         let mut values: Vec<f32> = (0..n).rev().map(|i| i as f32).collect();
-        let mut indices: Vec<usize> = (0..n).collect();
-        let mut scratch_buf = Vec::new();
-        let mut perm = Vec::new();
-        let mut old_indices = Vec::new();
+        let mut scratch = scratch();
+        reset_indices(&mut scratch.indices, n);
+        sort_with_indices(&mut values, &mut scratch, n);
 
-        sort_with_indices(
-            &mut values,
-            &mut indices,
-            &mut scratch_buf,
-            &mut perm,
-            &mut old_indices,
-            n,
-        );
-
-        for i in 0..n {
-            assert_eq!(values[i], i as f32, "values[{i}] wrong");
+        for (i, (&value, &index)) in values.iter().zip(&scratch.indices).enumerate() {
+            assert_eq!(value, i as f32, "values[{i}] wrong");
             // Original position of value i was (n-1-i)
-            assert_eq!(indices[i], n - 1 - i, "indices[{i}] wrong");
+            assert_eq!(index, n - 1 - i, "indices[{i}] wrong");
         }
     }
 
@@ -2177,24 +2150,14 @@ mod tests {
         // Verifies sort + index tracking for a non-trivial permutation.
         let n = 200;
         let mut values = vec![0.0f32; n];
-        let mut indices: Vec<usize> = (0..n).collect();
         // Place value (i*37 % 200) at position i
         for (i, v) in values.iter_mut().enumerate() {
             *v = ((i * 37) % n) as f32;
         }
         let original_values = values.clone();
-        let mut scratch_buf = Vec::new();
-        let mut perm = Vec::new();
-        let mut old_indices = Vec::new();
-
-        sort_with_indices(
-            &mut values,
-            &mut indices,
-            &mut scratch_buf,
-            &mut perm,
-            &mut old_indices,
-            n,
-        );
+        let mut scratch = scratch();
+        reset_indices(&mut scratch.indices, n);
+        sort_with_indices(&mut values, &mut scratch, n);
 
         // Values must be sorted
         for i in 1..n {
@@ -2207,7 +2170,7 @@ mod tests {
             );
         }
         // Each index must point back to where this value came from
-        for (i, (&v, &idx)) in values.iter().zip(indices.iter()).enumerate() {
+        for (i, (&v, &idx)) in values.iter().zip(scratch.indices.iter()).enumerate() {
             assert_eq!(
                 original_values[idx], v,
                 "Index tracking broken at position {i}: indices[{i}]={idx}, original[{idx}]={}, but values[{i}]={v}",

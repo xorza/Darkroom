@@ -30,7 +30,7 @@ pub(crate) struct ScratchBuffers {
     pub(crate) indices: Vec<usize>,
     /// General-purpose f32 scratch (e.g. winsorized working copy).
     pub(crate) floats_a: Vec<f32>,
-    /// Second f32 scratch (e.g. median/MAD computation).
+    /// Second f32 scratch, taken by large-N `sort_with_indices` for its value copy.
     pub(crate) floats_b: Vec<f32>,
     /// usize scratch (large-N `sort_with_indices` permutation).
     pub(crate) usize_a: Vec<usize>,
