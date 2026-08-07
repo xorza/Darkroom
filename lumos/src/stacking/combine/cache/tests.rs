@@ -206,8 +206,8 @@ fn finish_product_partial_coverage() {
     );
 }
 
-/// Build an in-memory [`FrameCache`] from single-channel CFA frame pixels (test helper for the
-/// plain combine).
+/// Build an in-memory [`FrameCache`] from single-channel CFA frame pixels: a calibration cache,
+/// carrying no coverage or confidence.
 fn make_cfa_cache(frames_pixels: Vec<Vec<f32>>, dims: ImageDimensions) -> FrameCache {
     let images = frames_pixels
         .into_iter()
@@ -308,8 +308,8 @@ fn test_process_chunked_with_weights() {
 
 #[test]
 fn calibration_frames_combine_through_the_same_engine_as_lights() {
-    // A calibration cache carries no coverage, so every frame contributes at every pixel and the
-    // one engine behaves as the plain combine it replaced.
+    // A calibration cache carries no coverage, so every frame contributes at every pixel — the
+    // behaviour the separate calibration reducer used to provide.
     let dims = ImageDimensions::new((2, 2), 1);
     let planes = QualityPlanes::IMAGE_ONLY;
 

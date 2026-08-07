@@ -115,10 +115,10 @@ impl CombinedSample {
     }
 }
 
-/// Channel-shaped result of one light-frame combine pass and its pre-output memory snapshot.
-/// A plane is `None` when [`QualityPlanes`] did not ask for it.
+/// Channel-shaped result of one combine pass, plus the memory snapshot taken before the output
+/// planes were allocated. A plane is `None` when [`QualityPlanes`] did not ask for it.
 #[derive(Debug)]
-pub(crate) struct LightCombineOutput {
+pub(crate) struct CombineOutput {
     pub(super) pixels: LinearPixels,
     weight: Option<LinearPixels>,
     linear_variance: Option<LinearPixels>,
@@ -528,11 +528,11 @@ impl FrameCache {
     /// Assemble the combined image, geometric coverage, and per-channel survivor quality.
     pub(crate) fn finish_product(
         &self,
-        combined: LightCombineOutput,
+        combined: CombineOutput,
         planes: QualityPlanes,
         quantization_sigma: Option<f32>,
     ) -> StackProduct {
-        let LightCombineOutput {
+        let CombineOutput {
             pixels,
             weight: weight_pixels,
             linear_variance: linear_variance_pixels,
@@ -642,7 +642,7 @@ impl FrameCache {
         frame_norms: Option<&[FrameNorm]>,
         planes: QualityPlanes,
         combine: Combine,
-    ) -> LightCombineOutput
+    ) -> CombineOutput
     where
         Combine: Fn(&mut [f32], &[f32], &mut ScratchBuffers) -> CombinedSample + Sync,
     {
@@ -785,7 +785,7 @@ impl FrameCache {
                 );
             },
         );
-        LightCombineOutput {
+        CombineOutput {
             pixels,
             weight: output_weight,
             linear_variance: output_linear_variance,

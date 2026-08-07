@@ -1,5 +1,6 @@
 use imaginarium::Buffer2;
 
+use crate::io::image::cfa::CfaImage;
 use crate::io::image::linear::LinearImage;
 use crate::io::image::linear_pixels::LinearPixels;
 
@@ -117,4 +118,27 @@ pub struct StackProduct {
     /// is what lets a surviving sample be traced back to the frame whose sigma and normalization
     /// gain it inherited. `None` otherwise.
     pub quantization_sigma: Option<f32>,
+}
+
+impl StackProduct {
+    /// Reinterpret a combined mosaic stack as the calibration master it is.
+    ///
+    /// # Panics
+    ///
+    /// If the product has more than one channel. A CFA frame is a single mosaic plane, so a
+    /// stack of them is too — `CfaImage` has nowhere to put a second channel and no loader
+    /// produces one.
+    pub(crate) fn into_cfa_master(self) -> CfaImage {
+        assert_eq!(
+            self.image.channels(),
+            1,
+            "a CFA master must be single-channel; got {} channels",
+            self.image.channels()
+        );
+        CfaImage {
+            data: self.image.pixels.into_l(),
+            metadata: self.image.metadata,
+            quantization_sigma: self.quantization_sigma,
+        }
+    }
 }

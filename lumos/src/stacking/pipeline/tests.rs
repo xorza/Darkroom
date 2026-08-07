@@ -287,17 +287,21 @@ fn write_mono_cfa_light(directory: &Path, index: usize, image: &LinearImage) -> 
     path
 }
 
-/// The RAM tier (`pipeline::align`) and the memory-bounded streaming tier
-/// (`pipeline::streaming`) are separate transcriptions of the same detect → register → warp →
-/// combine sequence, so nothing but a test keeps them in step.
+/// The all-RAM and memory-bounded runs must produce the same stack.
 ///
-/// This is the synthetic, always-run counterpart to
-/// `streaming_disk_tier_matches_ram_on_real_lights`, which is gated behind `real-data` *and*
-/// `#[ignore]` *and* a dataset on disk, so it never runs in the verification chain.
+/// Both go through one body now ([`super::align::register_warp_and_stack`]), so this no longer
+/// guards two transcriptions against drift — it guards the claim that
+/// [`super::tier::FrameTier`] only decides *where* a frame lives. A resident frame moves out of
+/// `PipelineFrame`, a spilled one is read back from its memory map, and the combined result has
+/// to be bit-identical either way.
 ///
-/// Both tiers read the same mono-CFA FITS lights and differ only in `available_memory`, the
-/// input `plan_memory` keys its tier decision on. RANSAC is seeded, removing the pipeline's only
-/// other source of nondeterminism, so any difference the assertions find is a real divergence.
+/// The always-run counterpart to `streaming_disk_tier_matches_ram_on_real_lights`, which is
+/// gated behind `real-data` *and* `#[ignore]` *and* a dataset on disk, so it never runs in the
+/// verification chain.
+///
+/// Both runs read the same mono-CFA FITS lights and differ only in `available_memory`, the input
+/// `plan_memory` keys its tier decision on. RANSAC is seeded, removing the pipeline's only other
+/// source of nondeterminism, so any difference the assertions find is a real divergence.
 #[test]
 fn ram_and_streaming_tiers_produce_identical_stacks() {
     let scratch = ScratchDirectory::new("lumos_tier_equivalence");
