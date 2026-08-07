@@ -46,7 +46,7 @@ pub fn calibrate_align_stack<P: AsRef<Path> + Sync>(
     if light_paths.is_empty() {
         return Err(Error::NoFrames);
     }
-    config.detection.validate()?;
+    config.validate()?;
     let total = light_paths.len();
     let available = config.stack.cache.get_available_memory();
     let load_context = LoadContext {

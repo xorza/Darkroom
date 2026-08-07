@@ -84,9 +84,12 @@ use triangle::voting::PointMatch;
 /// The RANSAC `max_sigma` parameter is automatically derived from the median FWHM
 /// of the input stars, providing optimal noise tolerance for the seeing conditions.
 ///
-/// # Panics
+/// # Errors
 ///
-/// If `config` fails validation (see [`Config::validate`]).
+/// [`RegistrationError::InvalidConfig`] if `config` fails validation (see [`Config::validate`]),
+/// and the matching/accuracy failures below. Callers that run this per frame pair should
+/// validate once up front — a config error and a pair that simply did not match are the same
+/// type here, so only the caller knows which it can act on.
 ///
 /// # Example
 ///
