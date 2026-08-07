@@ -16,6 +16,7 @@ use crate::error::InvalidConfigField;
 use crate::image_ops::op::{OpError, require_f32_master};
 use crate::image_ops::process_channels;
 use crate::image_ops::wavelet::{atrous_smooth, max_scales};
+use crate::math::size2us::Size2us;
 use crate::math::statistics::{mad_f32_with_scratch, mad_to_sigma, median_f32_mut};
 use imaginarium::Image;
 
@@ -126,9 +127,9 @@ impl Denoise {
         if self.strength == 0.0 {
             return Ok(());
         }
-        let (width, height) = (image.desc().width, image.desc().height);
-        let scales = self.scales.min(max_scales(width, height));
-        let mut scratch = DenoiseScratch::new(width, height);
+        let size = Size2us::new(image.desc().width, image.desc().height);
+        let scales = self.scales.min(max_scales(size));
+        let mut scratch = DenoiseScratch::new(size);
         process_channels(image, |plane| {
             denoise_plane(
                 plane,
@@ -178,11 +179,11 @@ struct DenoiseScratch {
 }
 
 impl DenoiseScratch {
-    fn new(width: usize, height: usize) -> Self {
+    fn new(size: Size2us) -> Self {
         Self {
-            c_curr: Buffer2::new_default(width, height),
-            c_next: Buffer2::new_default(width, height),
-            tmp: Buffer2::new_default(width, height),
+            c_curr: Buffer2::new_default(size.width, size.height),
+            c_next: Buffer2::new_default(size.width, size.height),
+            tmp: Buffer2::new_default(size.width, size.height),
             samples: Vec::new(),
             dev: Vec::new(),
         }

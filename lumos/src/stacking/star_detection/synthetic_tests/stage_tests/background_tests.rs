@@ -2,6 +2,7 @@
 //!
 //! Tests the background estimation with various synthetic backgrounds.
 
+use crate::math::size2us::Size2us;
 use glam::Vec2;
 
 use crate::stacking::star_detection::config::BackgroundConfig;
@@ -48,16 +49,14 @@ fn test_background_uniform() {
     // Save input image
     save_grayscale(
         pixels.pixels(),
-        width,
-        height,
+        Size2us::new(width, height),
         &test_output_path("synthetic_starfield/stage_bg_uniform_input.png"),
     );
 
     // Save background map
     save_grayscale(
         background.background.pixels(),
-        width,
-        height,
+        Size2us::new(width, height),
         &test_output_path("synthetic_starfield/stage_bg_uniform_background.png"),
     );
 
@@ -69,8 +68,7 @@ fn test_background_uniform() {
         .collect();
     save_grayscale(
         &subtracted,
-        width,
-        height,
+        Size2us::new(width, height),
         &test_output_path("synthetic_starfield/stage_bg_uniform_subtracted.png"),
     );
 
@@ -135,15 +133,13 @@ fn test_background_gradient() {
     // Save images
     save_grayscale(
         &pixels,
-        width,
-        height,
+        Size2us::new(width, height),
         &test_output_path("synthetic_starfield/stage_bg_gradient_input.png"),
     );
 
     save_grayscale(
         background.background.pixels(),
-        width,
-        height,
+        Size2us::new(width, height),
         &test_output_path("synthetic_starfield/stage_bg_gradient_background.png"),
     );
 
@@ -154,8 +150,7 @@ fn test_background_gradient() {
         .collect();
     save_grayscale(
         &subtracted,
-        width,
-        height,
+        Size2us::new(width, height),
         &test_output_path("synthetic_starfield/stage_bg_gradient_subtracted.png"),
     );
 
@@ -220,15 +215,13 @@ fn test_background_vignette() {
     // Save images
     save_grayscale(
         &pixels,
-        width,
-        height,
+        Size2us::new(width, height),
         &test_output_path("synthetic_starfield/stage_bg_vignette_input.png"),
     );
 
     save_grayscale(
         background.background.pixels(),
-        width,
-        height,
+        Size2us::new(width, height),
         &test_output_path("synthetic_starfield/stage_bg_vignette_background.png"),
     );
 
@@ -239,8 +232,7 @@ fn test_background_vignette() {
         .collect();
     save_grayscale(
         &subtracted,
-        width,
-        height,
+        Size2us::new(width, height),
         &test_output_path("synthetic_starfield/stage_bg_vignette_subtracted.png"),
     );
 
@@ -316,15 +308,13 @@ fn test_background_nebula() {
     // Save images
     save_grayscale(
         &pixels,
-        width,
-        height,
+        Size2us::new(width, height),
         &test_output_path("synthetic_starfield/stage_bg_nebula_input.png"),
     );
 
     save_grayscale(
         background.background.pixels(),
-        width,
-        height,
+        Size2us::new(width, height),
         &test_output_path("synthetic_starfield/stage_bg_nebula_background.png"),
     );
 
@@ -335,8 +325,7 @@ fn test_background_nebula() {
         .collect();
     save_grayscale(
         &subtracted,
-        width,
-        height,
+        Size2us::new(width, height),
         &test_output_path("synthetic_starfield/stage_bg_nebula_subtracted.png"),
     );
 

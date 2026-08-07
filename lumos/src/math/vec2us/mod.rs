@@ -27,15 +27,6 @@ impl Vec2us {
     pub const fn to_index(self, width: usize) -> usize {
         self.y * width + self.x
     }
-
-    /// Create from linear index with row-major layout.
-    #[inline]
-    pub const fn from_index(index: usize, width: usize) -> Self {
-        Self {
-            x: index % width,
-            y: index / width,
-        }
-    }
 }
 
 impl Add for Vec2us {

@@ -16,6 +16,6 @@ pub(crate) fn label_map_from_mask_with_connectivity(
     mask: &BitBuffer2,
     connectivity: Connectivity,
 ) -> LabelMap {
-    let labels = Buffer2::new_filled(mask.width, mask.height, 0u32);
+    let labels = Buffer2::new_filled(mask.size.width, mask.size.height, 0u32);
     LabelMap::from_buffer(mask, connectivity, labels)
 }

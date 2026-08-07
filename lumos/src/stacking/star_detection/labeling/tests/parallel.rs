@@ -27,7 +27,7 @@ fn large_image_parallel_path() {
         }
     }
 
-    let mask = BitBuffer2::from_slice(width, height, &mask_data);
+    let mask = BitBuffer2::from_slice(Size2us::new(width, height), &mask_data);
     let label_map = label_map_from_mask_with_connectivity(&mask, Connectivity::Four);
 
     assert_eq!(label_map.num_labels(), 3);
@@ -69,7 +69,7 @@ fn dense_mask_does_not_overflow_atomic_uf() {
         }
     }
 
-    let mask = BitBuffer2::from_slice(width, height, &mask_data);
+    let mask = BitBuffer2::from_slice(Size2us::new(width, height), &mask_data);
     let label_map = label_map_from_mask_with_connectivity(&mask, Connectivity::Four);
 
     // Every isolated pixel is its own component (4-connectivity, 1-px gaps).
@@ -88,7 +88,7 @@ fn strip_boundary_vertical_line() {
         mask_data[y * width + 200] = true;
     }
 
-    let mask = BitBuffer2::from_slice(width, height, &mask_data);
+    let mask = BitBuffer2::from_slice(Size2us::new(width, height), &mask_data);
     let label_map = label_map_from_mask_with_connectivity(&mask, Connectivity::Four);
 
     // Should be single component despite crossing strip boundaries
@@ -118,7 +118,7 @@ fn strip_boundary_diagonal() {
         mask_data[i * width + i] = true;
     }
 
-    let mask = BitBuffer2::from_slice(width, height, &mask_data);
+    let mask = BitBuffer2::from_slice(Size2us::new(width, height), &mask_data);
     let label_map = label_map_from_mask_with_connectivity(&mask, Connectivity::Four);
 
     // Each diagonal pixel should be separate (4-connectivity)
@@ -145,7 +145,7 @@ fn strip_boundary_u_shape_large() {
         mask_data[249 * width + x] = true;
     }
 
-    let mask = BitBuffer2::from_slice(width, height, &mask_data);
+    let mask = BitBuffer2::from_slice(Size2us::new(width, height), &mask_data);
     let label_map = label_map_from_mask_with_connectivity(&mask, Connectivity::Four);
 
     // All should be one component
@@ -174,7 +174,7 @@ fn many_small_components() {
         }
     }
 
-    let mask = BitBuffer2::from_slice(width, height, &mask_data);
+    let mask = BitBuffer2::from_slice(Size2us::new(width, height), &mask_data);
     let label_map = label_map_from_mask_with_connectivity(&mask, Connectivity::Four);
 
     assert_eq!(label_map.num_labels(), expected_count);
@@ -192,7 +192,7 @@ fn single_row_large() {
     mask_data[100..110].fill(true);
     mask_data[400..410].fill(true);
 
-    let mask = BitBuffer2::from_slice(width, height, &mask_data);
+    let mask = BitBuffer2::from_slice(Size2us::new(width, height), &mask_data);
     let label_map = label_map_from_mask_with_connectivity(&mask, Connectivity::Four);
 
     assert_eq!(label_map.num_labels(), 3);
@@ -210,7 +210,7 @@ fn single_column_large() {
     mask_data[100..110].fill(true);
     mask_data[400..410].fill(true);
 
-    let mask = BitBuffer2::from_slice(width, height, &mask_data);
+    let mask = BitBuffer2::from_slice(Size2us::new(width, height), &mask_data);
     let label_map = label_map_from_mask_with_connectivity(&mask, Connectivity::Four);
 
     assert_eq!(label_map.num_labels(), 3);
@@ -230,7 +230,7 @@ fn component_at_strip_boundary_exact() {
         }
     }
 
-    let mask = BitBuffer2::from_slice(width, height, &mask_data);
+    let mask = BitBuffer2::from_slice(Size2us::new(width, height), &mask_data);
     let label_map = label_map_from_mask_with_connectivity(&mask, Connectivity::Four);
 
     assert_eq!(label_map.num_labels(), 1);
@@ -250,7 +250,7 @@ fn all_pixels_set_large() {
     let height = 200;
     let mask_data = vec![true; width * height];
 
-    let mask = BitBuffer2::from_slice(width, height, &mask_data);
+    let mask = BitBuffer2::from_slice(Size2us::new(width, height), &mask_data);
     let label_map = label_map_from_mask_with_connectivity(&mask, Connectivity::Four);
 
     assert_eq!(label_map.num_labels(), 1);
@@ -271,7 +271,7 @@ fn compare_sequential_parallel() {
             }
         }
 
-        let mask = BitBuffer2::from_slice(width, height, &mask_data);
+        let mask = BitBuffer2::from_slice(Size2us::new(width, height), &mask_data);
         let label_map = label_map_from_mask_with_connectivity(&mask, Connectivity::Four);
 
         // Count expected: one component per line
@@ -302,7 +302,7 @@ fn alternating_rows_large() {
         }
     }
 
-    let mask = BitBuffer2::from_slice(width, height, &mask_data);
+    let mask = BitBuffer2::from_slice(Size2us::new(width, height), &mask_data);
     let label_map = label_map_from_mask_with_connectivity(&mask, Connectivity::Four);
 
     // Each row is a separate component (no vertical connectivity)
@@ -323,7 +323,7 @@ fn sparse_large() {
     mask_data[990 * width + 10] = true;
     mask_data[990 * width + 990] = true;
 
-    let mask = BitBuffer2::from_slice(width, height, &mask_data);
+    let mask = BitBuffer2::from_slice(Size2us::new(width, height), &mask_data);
     let label_map = label_map_from_mask_with_connectivity(&mask, Connectivity::Four);
 
     assert_eq!(label_map.num_labels(), 4);

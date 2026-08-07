@@ -162,8 +162,7 @@ fn test_inspect_pipeline_intermediates_rho_opiuchi() {
     let grayscale = prepare::prepare(&linear_image, &mut pool);
     image_writer::save_grayscale_stretched(
         grayscale.pixels(),
-        width,
-        height,
+        Size2us::new(width, height),
         &out("01_grayscale.tiff"),
     );
     println!("Saved: 01_grayscale");
@@ -172,8 +171,7 @@ fn test_inspect_pipeline_intermediates_rho_opiuchi() {
     let background = estimate_background(&grayscale, &config.background, &mut pool);
     image_writer::save_grayscale_stretched(
         background.background.pixels(),
-        width,
-        height,
+        Size2us::new(width, height),
         &out("02_background.tiff"),
     );
     println!("Saved: 02_background");
@@ -181,8 +179,7 @@ fn test_inspect_pipeline_intermediates_rho_opiuchi() {
     // 3. Noise
     image_writer::save_grayscale_stretched(
         background.noise.pixels(),
-        width,
-        height,
+        Size2us::new(width, height),
         &out("03_noise.tiff"),
     );
     println!("Saved: 03_noise");
@@ -194,7 +191,11 @@ fn test_inspect_pipeline_intermediates_rho_opiuchi() {
         .zip(background.background.pixels().iter())
         .map(|(&p, &bg)| (p - bg).max(0.0))
         .collect();
-    image_writer::save_grayscale_stretched(&subtracted, width, height, &out("04_subtracted.tiff"));
+    image_writer::save_grayscale_stretched(
+        &subtracted,
+        Size2us::new(width, height),
+        &out("04_subtracted.tiff"),
+    );
     println!("Saved: 04_subtracted");
 
     // 5. FWHM estimation
@@ -228,8 +229,7 @@ fn test_inspect_pipeline_intermediates_rho_opiuchi() {
         let pixels = scratch.pixels().to_vec();
         image_writer::save_grayscale_stretched(
             &pixels,
-            width,
-            height,
+            Size2us::new(width, height),
             &out("05_matched_filter.tiff"),
         );
         println!("Saved: 05_matched_filter");
@@ -263,7 +263,11 @@ fn test_inspect_pipeline_intermediates_rho_opiuchi() {
     }
     let mask_bools: Vec<bool> = mask.iter().collect();
     let pixels_above = mask_bools.iter().filter(|&&b| b).count();
-    image_writer::save_mask(&mask_bools, width, height, &out("06_threshold_mask.tiff"));
+    image_writer::save_mask(
+        &mask_bools,
+        Size2us::new(width, height),
+        &out("06_threshold_mask.tiff"),
+    );
     println!("Saved: 06_threshold_mask ({pixels_above} pixels above threshold)");
 
     // 8. Dilated mask
@@ -272,7 +276,11 @@ fn test_inspect_pipeline_intermediates_rho_opiuchi() {
     dilate_mask(&mask, 1, &mut dilated);
     let dilated_bools: Vec<bool> = dilated.iter().collect();
     let dilated_count = dilated_bools.iter().filter(|&&b| b).count();
-    image_writer::save_mask(&dilated_bools, width, height, &out("07_dilated_mask.tiff"));
+    image_writer::save_mask(
+        &dilated_bools,
+        Size2us::new(width, height),
+        &out("07_dilated_mask.tiff"),
+    );
     println!("Saved: 07_dilated_mask ({dilated_count} pixels)");
 
     // 9. Label map

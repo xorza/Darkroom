@@ -1,4 +1,5 @@
 use crate::image_ops::wavelet::{atrous_smooth, max_scales, reflect};
+use crate::math::size2us::Size2us;
 use imaginarium::Buffer2;
 
 fn pattern(width: usize, height: usize) -> Buffer2<f32> {
@@ -31,11 +32,13 @@ fn reflect_mirrors_indices() {
 
 #[test]
 fn max_scales_bounds_by_dimension() {
-    assert_eq!(max_scales(1, 1), 1);
-    assert_eq!(max_scales(2, 2), 1);
-    assert_eq!(max_scales(5, 5), 2);
-    assert_eq!(max_scales(8, 8), 3);
-    assert_eq!(max_scales(1000, 8), 3);
+    assert_eq!(max_scales(Size2us::new(1, 1)), 1);
+    assert_eq!(max_scales(Size2us::new(2, 2)), 1);
+    assert_eq!(max_scales(Size2us::new(5, 5)), 2);
+    assert_eq!(max_scales(Size2us::new(8, 8)), 3);
+    // Bounded by the smaller axis, whichever it is.
+    assert_eq!(max_scales(Size2us::new(1000, 8)), 3);
+    assert_eq!(max_scales(Size2us::new(8, 1000)), 3);
 }
 
 #[test]

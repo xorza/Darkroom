@@ -32,8 +32,7 @@ fn run_test(
 
     save_grayscale(
         pixels,
-        width,
-        height,
+        Size2us::new(width, height),
         &test_output_path(&format!(
             "synthetic_starfield/{}_{}_input.png",
             prefix, name

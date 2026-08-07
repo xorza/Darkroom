@@ -22,8 +22,7 @@ use rayon::slice::ParallelSliceMut;
 /// Uses separable dilation (horizontal then vertical passes) for O(r) complexity
 /// per pixel instead of O(r²). Operates on packed 64-bit words for efficiency.
 pub(crate) fn dilate_mask(mask: &BitBuffer2, radius: usize, output: &mut BitBuffer2) {
-    assert_eq!(mask.width, output.width, "width mismatch");
-    assert_eq!(mask.height, output.height, "height mismatch");
+    assert_eq!(mask.size, output.size, "size mismatch");
 
     if radius == 0 {
         output.copy_from(mask);
@@ -36,7 +35,7 @@ pub(crate) fn dilate_mask(mask: &BitBuffer2, radius: usize, output: &mut BitBuff
         "dilate_mask radius must be <= 63, got {radius}"
     );
 
-    let width = mask.width;
+    let width = mask.size.width;
     let words_per_row = mask.words_per_row();
     let input_words = &mask.words;
 
@@ -64,7 +63,7 @@ pub(crate) fn dilate_mask(mask: &BitBuffer2, radius: usize, output: &mut BitBuff
 
     // Vertical dilation pass with sliding window. Columns are strided across the row-major buffer,
     // so each task writes disjoint word columns through a shared raw pointer.
-    let height = mask.height;
+    let height = mask.size.height;
     let num_words = output.words.len();
     let out_ptr = UnsafeSendPtr::new(output.words.as_mut_ptr());
     let chunk_size = 64.max(words_per_row / rayon::current_num_threads().max(1));

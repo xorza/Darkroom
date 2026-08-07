@@ -183,7 +183,7 @@ fn test_max_correction_at_corners() {
 
     let sip = fit_sip(&ref_points, &target_points, &transform, &config).polynomial;
 
-    let max_corr = sip.max_correction(1000, 1000, 50.0);
+    let max_corr = sip.max_correction(Size2us::new(1000, 1000), 50.0);
 
     // Hand-compute expected max correction at corner (0,0):
     // d = (0,0) - (500,500) = (-500, -500), |d|^2 = 500000
@@ -200,7 +200,7 @@ fn test_max_correction_at_corners() {
     );
 
     // Also verify max_correction at center region is much smaller
-    let _max_corr_center = sip.max_correction(100, 100, 50.0);
+    let _max_corr_center = sip.max_correction(Size2us::new(100, 100), 50.0);
     // The 100x100 grid at (0,0)-(100,100) is far from center,
     // but let's use a grid around center instead by testing correction there
     let center_correction = (sip.correct(center) - center).length();
@@ -233,7 +233,7 @@ fn test_max_correction_zero_distortion() {
 
     let sip = fit_sip(&ref_points, &target_points, &transform, &config).polynomial;
 
-    let max_corr = sip.max_correction(400, 400, 100.0);
+    let max_corr = sip.max_correction(Size2us::new(400, 400), 100.0);
     assert!(
         max_corr < 1e-8,
         "Zero distortion max_correction should be ~0, got {:.e}",

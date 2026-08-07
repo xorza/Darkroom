@@ -8,6 +8,7 @@
 //! - Multi-row tests: 2D image patterns and row boundary handling
 
 use crate::bit_buffer2::BitBuffer2;
+use crate::math::size2us::Size2us;
 use crate::stacking::star_detection::threshold_mask::{
     create_threshold_mask, create_threshold_mask_filtered,
 };
@@ -25,7 +26,7 @@ fn create_threshold_mask_test(
     let pixels = Buffer2::new(width, height, pixels.to_vec());
     let bg = Buffer2::new(width, height, bg.to_vec());
     let noise = Buffer2::new(width, height, noise.to_vec());
-    let mut mask = BitBuffer2::new_filled(width, height, false);
+    let mut mask = BitBuffer2::new_filled(Size2us::new(width, height), false);
     create_threshold_mask(&pixels, &bg, &noise, sigma, &mut mask);
     mask
 }
@@ -40,7 +41,7 @@ fn create_threshold_mask_filtered_test(
 ) -> BitBuffer2 {
     let filtered = Buffer2::new(width, height, filtered.to_vec());
     let noise = Buffer2::new(width, height, noise.to_vec());
-    let mut mask = BitBuffer2::new_filled(width, height, false);
+    let mut mask = BitBuffer2::new_filled(Size2us::new(width, height), false);
     create_threshold_mask_filtered(&filtered, &noise, sigma, &mut mask);
     mask
 }
@@ -467,7 +468,7 @@ fn test_packed_matches_scalar() {
     let pixels = Buffer2::new(width, height, pixels_data.clone());
     let bg = Buffer2::new(width, height, bg_data.clone());
     let noise = Buffer2::new(width, height, noise_data.clone());
-    let mut packed_mask = BitBuffer2::new_filled(width, height, false);
+    let mut packed_mask = BitBuffer2::new_filled(Size2us::new(width, height), false);
     create_threshold_mask(&pixels, &bg, &noise, sigma, &mut packed_mask);
 
     // Compare results
@@ -494,7 +495,7 @@ fn test_packed_non_aligned_size() {
     let bg = Buffer2::new_filled(width, height, 0.0f32);
     let noise = Buffer2::new_filled(width, height, 0.1f32);
 
-    let mut mask = BitBuffer2::new_filled(width, height, false);
+    let mut mask = BitBuffer2::new_filled(Size2us::new(width, height), false);
     create_threshold_mask(&pixels, &bg, &noise, 3.0, &mut mask);
 
     // All should be set

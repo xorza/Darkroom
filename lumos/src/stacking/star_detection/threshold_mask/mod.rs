@@ -164,8 +164,8 @@ pub(crate) fn create_threshold_mask(
     sigma_threshold: f32,
     mask: &mut BitBuffer2,
 ) {
-    let width = mask.width;
-    let height = mask.height;
+    let width = mask.size.width;
+    let height = mask.size.height;
     // Release asserts, not debug: the SIMD kernels do unchecked loads off these dims, so a mismatch
     // is out-of-bounds UB rather than a wrong pixel. The check is O(1) per whole-image call.
     assert_eq!(width, pixels.width());
@@ -210,8 +210,8 @@ pub(crate) fn create_threshold_mask_filtered(
     sigma_threshold: f32,
     mask: &mut BitBuffer2,
 ) {
-    let width = mask.width;
-    let height = mask.height;
+    let width = mask.size.width;
+    let height = mask.size.height;
     // Release asserts (see `create_threshold_mask`): these dims drive unchecked SIMD loads.
     assert_eq!(width, filtered.width());
     assert_eq!(height, filtered.height());

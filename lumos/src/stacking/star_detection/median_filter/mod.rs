@@ -18,27 +18,26 @@ use rayon::prelude::*;
 /// Uses parallel processing for large images. Separates interior pixels
 /// (full 9-element neighborhood) from edge pixels for better performance.
 pub(crate) fn median_filter_3x3(pixels: &Buffer2<f32>, output: &mut Buffer2<f32>) {
-    let width = pixels.width();
-    let height = pixels.height();
-    debug_assert_eq!(width, output.width());
-    debug_assert_eq!(height, output.height());
+    let size = Size2us::new(pixels.width(), pixels.height());
+    debug_assert_eq!(size.width, output.width());
+    debug_assert_eq!(size.height, output.height());
 
-    if width < 3 || height < 3 {
+    if size.width < 3 || size.height < 3 {
         output.copy_from_slice(pixels);
         return;
     }
 
     output
         .pixels_mut()
-        .par_chunks_mut(width)
+        .par_chunks_mut(size.width)
         .enumerate()
         .for_each(|(y, row)| {
-            if y == 0 || y == height - 1 {
+            if y == 0 || y == size.height - 1 {
                 // Edge row - use generic edge handling
-                filter_edge_row(pixels, width, height, y, row);
+                filter_edge_row(pixels, size, y, row);
             } else {
                 // Interior row - fast path for most pixels
-                filter_interior_row(pixels, width, y, row);
+                filter_interior_row(pixels, size.width, y, row);
             }
         });
 }
@@ -64,9 +63,9 @@ fn filter_interior_row(pixels: &[f32], width: usize, y: usize, output_row: &mut 
 
 /// Filter an edge row (y=0 or y=height-1).
 #[inline]
-fn filter_edge_row(pixels: &[f32], width: usize, height: usize, y: usize, output_row: &mut [f32]) {
+fn filter_edge_row(pixels: &[f32], size: Size2us, y: usize, output_row: &mut [f32]) {
     for (x, out) in output_row.iter_mut().enumerate() {
-        *out = median_at_edge(pixels, Size2us::new(width, height), Vec2us::new(x, y));
+        *out = median_at_edge(pixels, size, Vec2us::new(x, y));
     }
 }
 

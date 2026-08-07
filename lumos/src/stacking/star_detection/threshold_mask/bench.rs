@@ -1,6 +1,7 @@
 //! Benchmarks for threshold mask creation.
 
 use crate::bit_buffer2::BitBuffer2;
+use crate::math::size2us::Size2us;
 use crate::stacking::star_detection::threshold_mask::{process_words, process_words_scalar};
 use ::quickbench::quick_bench;
 use imaginarium::Buffer2;
@@ -31,7 +32,7 @@ fn create_bench_data(size: usize) -> (Buffer2<f32>, Buffer2<f32>, Buffer2<f32>) 
 #[quick_bench(warmup_iters = 3, iters = 200)]
 fn bench_threshold_mask_4k(b: ::quickbench::Bencher) {
     let (pixels, bg, noise) = create_bench_data(4096 * 4096);
-    let mut mask = BitBuffer2::new_filled(4096, 4096, false);
+    let mut mask = BitBuffer2::new_filled(Size2us::new(4096, 4096), false);
     let pixel_end = pixels.len();
 
     b.bench_labeled("simd", || {

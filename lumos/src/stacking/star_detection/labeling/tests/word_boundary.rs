@@ -11,7 +11,7 @@ fn boundary_64() {
     for x in 62..67 {
         mask_data[1 * width + x] = true;
     }
-    let mask = BitBuffer2::from_slice(width, height, &mask_data);
+    let mask = BitBuffer2::from_slice(Size2us::new(width, height), &mask_data);
 
     let label_map = label_map_from_mask_with_connectivity(&mask, Connectivity::Four);
 
@@ -38,7 +38,7 @@ fn boundary_128() {
     for x in 126..131 {
         mask_data[1 * width + x] = true;
     }
-    let mask = BitBuffer2::from_slice(width, height, &mask_data);
+    let mask = BitBuffer2::from_slice(Size2us::new(width, height), &mask_data);
 
     let label_map = label_map_from_mask_with_connectivity(&mask, Connectivity::Four);
 

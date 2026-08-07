@@ -172,7 +172,7 @@ impl DefectMap {
         // Mask every defect so each repair draws only on GOOD neighbours. Without it, a clustered
         // defect (hot column, adjacent same-color pixels) pulls a neighbour's bad/half-corrected
         // value into its median and the order of `hot ⧺ cold` changes the result.
-        let mut mask = BitBuffer2::new_default(size.width, size.height);
+        let mut mask = BitBuffer2::new_default(Size2us::new(size.width, size.height));
         for &idx in self.hot_indices.iter().chain(&self.cold_indices) {
             mask.set(idx, true);
         }
@@ -666,8 +666,7 @@ fn stratified_center(part: usize, part_count: usize, length: usize) -> usize {
 /// `defect_mask` so a defect is never repaired from another defect.
 fn median_of_neighbors_raw(
     pixels: &Buffer2<f32>,
-    x: usize,
-    y: usize,
+    pos: Vec2us,
     defect_mask: Option<&BitBuffer2>,
 ) -> f32 {
     let width = pixels.width();
@@ -687,12 +686,12 @@ fn median_of_neighbors_raw(
     ];
 
     for (dx, dy) in offsets {
-        let nx = x as i32 + dx;
-        let ny = y as i32 + dy;
+        let nx = pos.x as i32 + dx;
+        let ny = pos.y as i32 + dy;
 
         if nx >= 0 && nx < width as i32 && ny >= 0 && ny < height as i32 {
             let (nx, ny) = (nx as usize, ny as usize);
-            if defect_mask.is_some_and(|m| m.get_xy(nx, ny)) {
+            if defect_mask.is_some_and(|m| m.get_at(Vec2us::new(nx, ny))) {
                 continue;
             }
             neighbors[count] = *pixels.get(nx, ny);
@@ -701,7 +700,7 @@ fn median_of_neighbors_raw(
     }
 
     if count == 0 {
-        return *pixels.get(x, y);
+        return *pixels.get(pos.x, pos.y);
     }
 
     median_f32_mut(&mut neighbors[..count])
@@ -735,9 +734,9 @@ impl SameColorMedian {
     /// is never repaired from another defect.
     fn at(&self, pixels: &Buffer2<f32>, pos: Vec2us, defect_mask: Option<&BitBuffer2>) -> f32 {
         match self {
-            Self::Mono => median_of_neighbors_raw(pixels, pos.x, pos.y, defect_mask),
-            Self::Bayer => bayer_same_color_median(pixels, pos.x, pos.y, defect_mask),
-            Self::XTrans(offsets) => offsets.median(pixels, pos.x, pos.y, defect_mask),
+            Self::Mono => median_of_neighbors_raw(pixels, pos, defect_mask),
+            Self::Bayer => bayer_same_color_median(pixels, pos, defect_mask),
+            Self::XTrans(offsets) => offsets.median(pixels, pos, defect_mask),
         }
     }
 }
@@ -746,8 +745,7 @@ impl SameColorMedian {
 /// Same-color neighbors are at stride 2 in all directions.
 fn bayer_same_color_median(
     pixels: &Buffer2<f32>,
-    x: usize,
-    y: usize,
+    pos: Vec2us,
     defect_mask: Option<&BitBuffer2>,
 ) -> f32 {
     let width = pixels.width();
@@ -765,11 +763,11 @@ fn bayer_same_color_median(
     let mut buf = [0.0f32; 8];
     let mut count = 0;
     for (dx, dy) in offsets {
-        let nx = x as i32 + dx;
-        let ny = y as i32 + dy;
+        let nx = pos.x as i32 + dx;
+        let ny = pos.y as i32 + dy;
         if nx >= 0 && ny >= 0 && nx < width as i32 && ny < height as i32 {
             let (nx, ny) = (nx as usize, ny as usize);
-            if defect_mask.is_some_and(|m| m.get_xy(nx, ny)) {
+            if defect_mask.is_some_and(|m| m.get_at(Vec2us::new(nx, ny))) {
                 continue;
             }
             buf[count] = *pixels.get(nx, ny);
@@ -777,7 +775,7 @@ fn bayer_same_color_median(
         }
     }
     if count == 0 {
-        return *pixels.get(x, y);
+        return *pixels.get(pos.x, pos.y);
     }
     median_f32_mut(&mut buf[..count])
 }
@@ -835,35 +833,29 @@ impl XTransOffsets {
     /// Median of the nearest valid same-color neighbours of `(x, y)`. Walks the precomputed
     /// nearest-first offsets, skipping out-of-bounds and `defect_mask`ed positions, and stops once
     /// [`XTRANS_NEIGHBORS`] valid samples are gathered — equivalent to "closest-N valid neighbours".
-    fn median(
-        &self,
-        pixels: &Buffer2<f32>,
-        x: usize,
-        y: usize,
-        defect_mask: Option<&BitBuffer2>,
-    ) -> f32 {
+    fn median(&self, pixels: &Buffer2<f32>, pos: Vec2us, defect_mask: Option<&BitBuffer2>) -> f32 {
         let width = pixels.width() as i32;
         let height = pixels.height() as i32;
         let mut buf = [0.0f32; XTRANS_NEIGHBORS];
         let mut count = 0;
-        for &(dx, dy) in &self.per_phase[(y % 6) * 6 + (x % 6)] {
+        for &(dx, dy) in &self.per_phase[(pos.y % 6) * 6 + (pos.x % 6)] {
             if count == XTRANS_NEIGHBORS {
                 break;
             }
-            let nx = x as i32 + dx;
-            let ny = y as i32 + dy;
+            let nx = pos.x as i32 + dx;
+            let ny = pos.y as i32 + dy;
             if nx < 0 || ny < 0 || nx >= width || ny >= height {
                 continue;
             }
             let (nx, ny) = (nx as usize, ny as usize);
-            if defect_mask.is_some_and(|m| m.get_xy(nx, ny)) {
+            if defect_mask.is_some_and(|m| m.get_at(Vec2us::new(nx, ny))) {
                 continue;
             }
             buf[count] = *pixels.get(nx, ny);
             count += 1;
         }
         if count == 0 {
-            return *pixels.get(x, y);
+            return *pixels.get(pos.x, pos.y);
         }
         median_f32_mut(&mut buf[..count])
     }

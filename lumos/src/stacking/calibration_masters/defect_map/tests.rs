@@ -414,7 +414,7 @@ fn test_bayer_same_color_neighbors() {
     pixels[4 * 6 + 2] = 80.0; // (2,4)
 
     let pixels = imaginarium::Buffer2::new(6, 6, pixels);
-    let result = bayer_same_color_median(&pixels, 2, 2, None);
+    let result = bayer_same_color_median(&pixels, Vec2us::new(2, 2), None);
 
     // Neighbors: 50, 60, 70, 80, 100 (0,2=100), 100 (4,2=100), 100 (0,4=100), 100 (4,4=100)
     // Sorted: 50, 60, 70, 80, 100, 100, 100, 100 → median of 8 = (80+100)/2 = 90
@@ -434,7 +434,7 @@ fn test_bayer_same_color_neighbors_corner() {
         10.0,
     ];
     let pixels = imaginarium::Buffer2::new(4, 4, pixels);
-    let result = bayer_same_color_median(&pixels, 0, 0, None);
+    let result = bayer_same_color_median(&pixels, Vec2us::ZERO, None);
 
     // Same-color neighbors: (2,0)=50, (0,2)=60, (2,2)=70
     // Median of [50, 60, 70] = 60
@@ -789,8 +789,9 @@ fn xtrans_offsets_match_brute_force() {
 
     for y in 0..h {
         for x in 0..w {
-            let got = offsets.median(&pixels, x, y, None);
-            let want = brute_force_xtrans_median(&pixels, Vec2us::new(x, y), &pattern);
+            let pos = Vec2us::new(x, y);
+            let got = offsets.median(&pixels, pos, None);
+            let want = brute_force_xtrans_median(&pixels, pos, &pattern);
             assert_eq!(
                 got, want,
                 "X-Trans median mismatch at ({x},{y}): precomputed {got} vs brute-force {want}"
