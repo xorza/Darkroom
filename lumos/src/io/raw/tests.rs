@@ -348,7 +348,7 @@ fn direct_and_calibration_normalization_share_raw_linear_color_scale() {
                             raw_x,
                             Vec2us::new(left_margin, top_margin)
                         ),
-                        raw_pattern.color_at(raw_y, raw_x)
+                        raw_pattern.color_at(Vec2us::new(raw_x, raw_y))
                     );
                 }
             }
@@ -381,7 +381,7 @@ fn direct_and_calibration_normalization_share_raw_linear_color_scale() {
 
             for y in 0..area.active.height {
                 for x in 0..area.active.width {
-                    let active_channel = active_cfa.color_at(x, y) as usize;
+                    let active_channel = active_cfa.color_at(Vec2us::new(x, y)) as usize;
                     assert_eq!(active_channel, libraw_filter_color(filters, y, x));
                     let expected = 0.5 - channel_delta[active_channel];
                     let direct_value = direct[(y + top_margin) * raw_width + x + left_margin];
@@ -525,7 +525,7 @@ fn xtrans_direct_and_calibration_black_corrections_match() {
                     let raw_x = x + area.margin.x;
                     let raw_channel = raw_pattern[raw_y % 6][raw_x % 6] as usize;
                     let visible_channel = visible_pattern[y % 6][x % 6] as usize;
-                    let active_channel = active_cfa.color_at(x, y) as usize;
+                    let active_channel = active_cfa.color_at(Vec2us::new(x, y)) as usize;
                     assert_eq!(raw_channel, visible_channel);
                     assert_eq!(raw_channel, active_channel);
 

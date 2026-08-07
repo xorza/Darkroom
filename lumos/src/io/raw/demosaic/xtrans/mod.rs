@@ -165,8 +165,8 @@ impl XTransPattern {
     /// Get the color at position (row, col).
     /// Returns: 0=Red, 1=Green, 2=Blue
     #[inline(always)]
-    pub(crate) fn color_at(&self, row: usize, col: usize) -> u8 {
-        self.pattern[row % 6][col % 6]
+    pub(crate) fn color_at(&self, pos: Vec2us) -> u8 {
+        self.pattern[pos.y % 6][pos.x % 6]
     }
 }
 
@@ -310,12 +310,12 @@ impl<'a> XTransImage<'a> {
         match &self.data {
             PixelSource::U16(data) => {
                 let val = data[idx] as f32;
-                let ch = self.raw_pattern.color_at(raw_y, raw_x) as usize;
+                let ch = self.raw_pattern.color_at(Vec2us::new(raw_x, raw_y)) as usize;
                 ((val - self.channel_black[ch]).max(0.0) * self.inv_range).min(1.0)
             }
             PixelSource::U16WithRepeat { data, repeat } => {
                 let val = data[idx] as f32;
-                let ch = self.raw_pattern.color_at(raw_y, raw_x) as usize;
+                let ch = self.raw_pattern.color_at(Vec2us::new(raw_x, raw_y)) as usize;
                 let repeat_delta = repeat.at_raw(raw_y, raw_x, self.margin);
                 ((val - self.channel_black[ch]) * self.inv_range - repeat_delta).clamp(0.0, 1.0)
             }
@@ -336,14 +336,23 @@ mod tests {
     fn test_xtrans_pattern_color_at() {
         let pattern = test_pattern();
         // Check corners
-        assert_eq!(pattern.color_at(0, 0), 1); // G
-        assert_eq!(pattern.color_at(0, 2), 0); // R
-        assert_eq!(pattern.color_at(0, 5), 2); // B
-        assert_eq!(pattern.color_at(2, 0), 2); // B
+        assert_eq!(pattern.color_at(Vec2us::new(0, 0)), 1); // G
+        assert_eq!(pattern.color_at(Vec2us::new(2, 0)), 0); // R
+        assert_eq!(pattern.color_at(Vec2us::new(5, 0)), 2); // B
+        assert_eq!(pattern.color_at(Vec2us::new(0, 2)), 2); // B
         // Check wrapping
-        assert_eq!(pattern.color_at(6, 0), pattern.color_at(0, 0));
-        assert_eq!(pattern.color_at(0, 6), pattern.color_at(0, 0));
-        assert_eq!(pattern.color_at(12, 12), pattern.color_at(0, 0));
+        assert_eq!(
+            pattern.color_at(Vec2us::new(0, 6)),
+            pattern.color_at(Vec2us::new(0, 0))
+        );
+        assert_eq!(
+            pattern.color_at(Vec2us::new(6, 0)),
+            pattern.color_at(Vec2us::new(0, 0))
+        );
+        assert_eq!(
+            pattern.color_at(Vec2us::new(12, 12)),
+            pattern.color_at(Vec2us::new(0, 0))
+        );
     }
 
     #[test]

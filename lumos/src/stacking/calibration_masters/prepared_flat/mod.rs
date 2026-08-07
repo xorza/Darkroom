@@ -2,6 +2,7 @@ use imaginarium::Buffer2;
 use rayon::prelude::*;
 
 use crate::io::image::cfa::{CfaImage, CfaType};
+use crate::math::vec2us::Vec2us;
 
 // Bounds amplification at dead/near-zero photosites while keeping every pixel calibrated.
 const MIN_NORMALIZED_FLAT: f32 = 0.1;
@@ -76,7 +77,7 @@ fn normalize_cfa(flat: &mut Buffer2<f32>, cfa_type: &CfaType) {
             let mut sums = [0.0f64; 3];
             let mut counts = [0u64; 3];
             for (x, value) in row.iter_mut().enumerate() {
-                let color = cfa_type.color_at(x, y) as usize;
+                let color = cfa_type.color_at(Vec2us::new(x, y)) as usize;
                 sums[color] += *value as f64;
                 counts[color] += 1;
             }
@@ -109,7 +110,7 @@ fn normalize_cfa(flat: &mut Buffer2<f32>, cfa_type: &CfaType) {
 
     flat.par_chunks_mut(width).enumerate().for_each(|(y, row)| {
         for (x, value) in row.iter_mut().enumerate() {
-            let color = cfa_type.color_at(x, y) as usize;
+            let color = cfa_type.color_at(Vec2us::new(x, y)) as usize;
             *value = (*value * inv_means[color]).max(MIN_NORMALIZED_FLAT);
         }
     });

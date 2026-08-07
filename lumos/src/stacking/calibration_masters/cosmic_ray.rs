@@ -460,7 +460,7 @@ fn same_color_values(
     out: &mut Vec<(i32, f32)>,
 ) {
     out.clear();
-    let my = scene.cfa.color_at(pos.x, pos.y);
+    let my = scene.cfa.color_at(pos);
     let w = scene.size.width;
     let (wi, hi) = (scene.size.width as i32, scene.size.height as i32);
     for dy in -radius..=radius {
@@ -477,7 +477,7 @@ fn same_color_values(
             if scene.mask[nyu * w + nxu] {
                 continue;
             }
-            if scene.cfa.color_at(nxu, nyu) == my {
+            if scene.cfa.color_at(Vec2us::new(nxu, nyu)) == my {
                 out.push((dx.abs() + dy.abs(), scene.pix[nyu * w + nxu]));
             }
         }
@@ -551,7 +551,7 @@ fn xtrans_noise(
             let mut by_color: [Vec<f32>; 3] = [Vec::new(), Vec::new(), Vec::new()];
             for y in 0..size.height {
                 for x in 0..size.width {
-                    let c = (cfa.color_at(x, y) as usize).min(2);
+                    let c = (cfa.color_at(Vec2us::new(x, y)) as usize).min(2);
                     by_color[c].push(pix[y * size.width + x]);
                 }
             }
@@ -568,7 +568,7 @@ fn xtrans_noise(
             (0..size.pixel_count())
                 .map(|i| {
                     let p = size.point_of(i);
-                    let c = (cfa.color_at(p.x, p.y) as usize).min(2);
+                    let c = (cfa.color_at(p) as usize).min(2);
                     let (bg, sigma) = stats[c];
                     empirical_noise(signal[i], bg, sigma)
                 })
@@ -885,7 +885,8 @@ mod tests {
         let mut rng = TestRng::new(5);
         for y in 0..h {
             for x in 0..w {
-                data[y * w + x] = color_val(cfa.color_at(x, y)) + rng.next_gaussian_f32() * 0.002;
+                data[y * w + x] =
+                    color_val(cfa.color_at(Vec2us::new(x, y))) + rng.next_gaussian_f32() * 0.002;
             }
         }
         let cr = (9usize, 9usize);
@@ -904,7 +905,7 @@ mod tests {
 
         assert!(count >= 1, "X-Trans CR missed");
         // Replaced with the same-color (G, here) neighborhood median, ≈ 0.20 — well below the spike.
-        let cr_color = cfa.color_at(cr.0, cr.1);
+        let cr_color = cfa.color_at(Vec2us::new(cr.0, cr.1));
         assert!(
             (out[cr.1 * w + cr.0] - color_val(cr_color)).abs() < 0.05,
             "X-Trans CR not repaired to its color baseline: {}",
@@ -912,7 +913,7 @@ mod tests {
         );
         // A flat pixel of each color far from the CR is untouched (no false positives).
         for &(x, y) in &[(3usize, 3usize), (4, 3), (3, 4)] {
-            let c = cfa.color_at(x, y);
+            let c = cfa.color_at(Vec2us::new(x, y));
             assert!(
                 (out[y * w + x] - color_val(c)).abs() < 0.02,
                 "flat {c}-pixel ({x},{y}) altered: {}",

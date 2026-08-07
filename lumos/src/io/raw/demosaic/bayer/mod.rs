@@ -70,9 +70,9 @@ impl CfaPattern {
     /// Get color index at position (y, x) in the Bayer pattern.
     /// Returns: 0=Red, 1=Green, 2=Blue
     #[inline(always)]
-    pub fn color_at(&self, y: usize, x: usize) -> usize {
-        let row = y & 1;
-        let col = x & 1;
+    pub fn color_at(&self, pos: Vec2us) -> usize {
+        let row = pos.y & 1;
+        let col = pos.x & 1;
         match self {
             CfaPattern::Rggb => [0, 1, 1, 2][(row << 1) | col],
             CfaPattern::Bggr => [2, 1, 1, 0][(row << 1) | col],

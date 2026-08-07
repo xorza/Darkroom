@@ -625,7 +625,7 @@ mod tests {
             for x in 0..w {
                 let raw_y = y + top;
                 let raw_x = x + left;
-                if pattern.color_at(raw_y, raw_x) == 1 {
+                if pattern.color_at(Vec2us::new(raw_x, raw_y)) == 1 {
                     let g = rgb[(y * w + x) * 3 + 1];
                     assert!(
                         (g - 0.5).abs() < 0.001,

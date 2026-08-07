@@ -45,7 +45,7 @@ pub(crate) fn compute_green_minmax(
             let raw_y = y + xtrans.margin.y;
             for x in 0..width {
                 let raw_x = x + xtrans.margin.x;
-                let color = xtrans.raw_pattern.color_at(raw_y, raw_x);
+                let color = xtrans.raw_pattern.color_at(Vec2us::new(raw_x, raw_y));
 
                 if color == 1 {
                     let val = xtrans.read_normalized(raw_y, raw_x);
@@ -126,7 +126,7 @@ pub(crate) fn interpolate_green(
 
         for x in 0..width {
             let raw_x = x + xtrans.margin.x;
-            let color = xtrans.raw_pattern.color_at(raw_y, raw_x);
+            let color = xtrans.raw_pattern.color_at(Vec2us::new(raw_x, raw_y));
 
             if color == 1 {
                 let val = xtrans.read_normalized(raw_y, raw_x);
@@ -241,7 +241,7 @@ fn solitary_green_candidate(
     let raw_x = x + xtrans.margin.x;
     let mut colors = [0.0; 2];
     let mut difference = 0.0;
-    let mut target = xtrans.raw_pattern.color_at(raw_y, raw_x + 1);
+    let mut target = xtrans.raw_pattern.color_at(Vec2us::new(raw_x + 1, raw_y));
     if candidate & 1 != 0 {
         target ^= 2;
     }
@@ -257,13 +257,14 @@ fn solitary_green_candidate(
 
         let green_plus = green_at(green_dir, green_base, width, plus_y, plus_x);
         let green_minus = green_at(green_dir, green_base, width, minus_y, minus_x);
-        let plus_native = xtrans
-            .raw_pattern
-            .color_at(raw_y.wrapping_add_signed(oy), raw_x.wrapping_add_signed(ox));
-        let minus_native = xtrans.raw_pattern.color_at(
-            raw_y.wrapping_add_signed(-oy),
+        let plus_native = xtrans.raw_pattern.color_at(Vec2us::new(
+            raw_x.wrapping_add_signed(ox),
+            raw_y.wrapping_add_signed(oy),
+        ));
+        let minus_native = xtrans.raw_pattern.color_at(Vec2us::new(
             raw_x.wrapping_add_signed(-ox),
-        );
+            raw_y.wrapping_add_signed(-oy),
+        ));
         let raw_plus = if plus_native == target {
             active_raw(xtrans, plus_y, plus_x)
         } else {
@@ -398,7 +399,7 @@ fn color_before_green_block(
 ) -> f32 {
     let native = xtrans
         .raw_pattern
-        .color_at(y + xtrans.margin.y, x + xtrans.margin.x);
+        .color_at(Vec2us::new(x + xtrans.margin.x, y + xtrans.margin.y));
     debug_assert!(native != 1 || is_solitary_green(hex, y + xtrans.margin.y, x + xtrans.margin.x));
     if native == target {
         active_raw(xtrans, y, x)
@@ -481,7 +482,7 @@ pub(crate) fn reconstruct_colors(
             let x = index % width;
             let raw_y = y + xtrans.margin.y;
             let raw_x = x + xtrans.margin.x;
-            let native = xtrans.raw_pattern.color_at(raw_y, raw_x);
+            let native = xtrans.raw_pattern.color_at(Vec2us::new(raw_x, raw_y));
             *output = [0.0; 2];
             if native != 1 {
                 output[rb_index(native)] = active_raw(xtrans, y, x);
@@ -507,7 +508,7 @@ pub(crate) fn reconstruct_colors(
         }
         let raw_y = y + xtrans.margin.y;
         let raw_x = x + xtrans.margin.x;
-        let native = xtrans.raw_pattern.color_at(raw_y, raw_x);
+        let native = xtrans.raw_pattern.color_at(Vec2us::new(raw_x, raw_y));
         if native == 1 {
             return;
         }
@@ -543,7 +544,7 @@ pub(crate) fn reconstruct_colors(
             }
             let raw_y = y + xtrans.margin.y;
             let raw_x = x + xtrans.margin.x;
-            if xtrans.raw_pattern.color_at(raw_y, raw_x) != 1
+            if xtrans.raw_pattern.color_at(Vec2us::new(raw_x, raw_y)) != 1
                 || is_solitary_green(hex, raw_y, raw_x)
             {
                 return;
@@ -968,10 +969,10 @@ fn demosaic_border(
                         (1, 1) => 0.25,
                         _ => unreachable!(),
                     };
-                    let color = xtrans
-                        .raw_pattern
-                        .color_at(neighbor_y + xtrans.margin.y, neighbor_x + xtrans.margin.x)
-                        as usize;
+                    let color = xtrans.raw_pattern.color_at(Vec2us::new(
+                        neighbor_x + xtrans.margin.x,
+                        neighbor_y + xtrans.margin.y,
+                    )) as usize;
                     sums[color] += active_raw(xtrans, neighbor_y, neighbor_x) * weight;
                     weights[color] += weight;
                 }
@@ -980,7 +981,7 @@ fn demosaic_border(
             let index = y * width + x;
             let native = xtrans
                 .raw_pattern
-                .color_at(y + xtrans.margin.y, x + xtrans.margin.x);
+                .color_at(Vec2us::new(x + xtrans.margin.x, y + xtrans.margin.y));
             let raw = active_raw(xtrans, y, x);
             if native == 1 && weights[0] == 0.0 {
                 out_r[index] = raw;
@@ -1502,7 +1503,7 @@ mod tests {
 
         for y in 0..6 {
             for x in 0..6 {
-                match pattern.color_at(y, x) {
+                match pattern.color_at(Vec2us::new(x, y)) {
                     0 | 2 => colored += 1,
                     1 if is_solitary_green(&hex, y, x) => solitary += 1,
                     1 => green_block += 1,
@@ -1544,7 +1545,7 @@ mod tests {
                 for x in 3..w - 3 {
                     let raw_y = y + xtrans.margin.y;
                     let raw_x = x + xtrans.margin.x;
-                    let native = xtrans.raw_pattern.color_at(raw_y, raw_x);
+                    let native = xtrans.raw_pattern.color_at(Vec2us::new(raw_x, raw_y));
                     let [red, blue] = colors[direction * pixels + y * w + x];
                     match native {
                         0 => assert_eq!(red, active_raw(&xtrans, y, x)),
@@ -1570,13 +1571,13 @@ mod tests {
 
         for y in 3..9 {
             for x in 3..9 {
-                let native = pattern.color_at(y, x);
+                let native = pattern.color_at(Vec2us::new(x, y));
                 if native == 1 && !is_solitary_green(&hex, y, x) {
                     let offsets = hex.get(y, x);
                     for offset in &offsets[..4] {
                         let neighbor_y = y.wrapping_add_signed(offset.dy as isize);
                         let neighbor_x = x.wrapping_add_signed(offset.dx as isize);
-                        let neighbor = pattern.color_at(neighbor_y, neighbor_x);
+                        let neighbor = pattern.color_at(Vec2us::new(neighbor_x, neighbor_y));
                         assert!(
                             neighbor != 1 || is_solitary_green(&hex, neighbor_y, neighbor_x),
                             "2x2-green dependency at ({y},{x}) reaches another block at \

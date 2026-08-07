@@ -55,7 +55,7 @@ fn capped_color_sampling_spans_sensor_and_cfa_phases() {
             let mut population = 0;
             for y in 0..height {
                 for x in 0..width {
-                    if cfa_type.color_at(x, y) == target_color {
+                    if cfa_type.color_at(Vec2us::new(x, y)) == target_color {
                         expected_rows[y] = true;
                         expected_columns[x] = true;
                         expected_phases[(y % period) * period + x % period] = true;
@@ -85,7 +85,7 @@ fn capped_color_sampling_spans_sensor_and_cfa_phases() {
             for index in indices {
                 let x = index % width;
                 let y = index / width;
-                assert_eq!(cfa_type.color_at(x, y), target_color);
+                assert_eq!(cfa_type.color_at(Vec2us::new(x, y)), target_color);
                 sampled_rows[y] = true;
                 sampled_columns[x] = true;
                 sampled_phases[(y % period) * period + x % period] = true;
@@ -124,7 +124,9 @@ fn capped_color_sampling_matches_exact_row_and_column_statistics() {
             let data = Buffer2::new(width, height, pixels);
             let exact = median_mad(
                 (0..width * height)
-                    .filter(|&index| cfa_type.color_at(index % width, index / width) == 0)
+                    .filter(|&index| {
+                        cfa_type.color_at(Vec2us::new(index % width, index / width)) == 0
+                    })
                     .map(|index| data[index])
                     .collect(),
             );
@@ -301,7 +303,7 @@ fn test_xtrans_hot_pixel_correction_uses_same_color() {
         let mut px = vec![0.0f32; w * h];
         for y in 0..h {
             for x in 0..w {
-                px[y * w + x] = color_val(cfa.color_at(x, y));
+                px[y * w + x] = color_val(cfa.color_at(Vec2us::new(x, y)));
             }
         }
         for &(x, y) in corrupt {
@@ -312,8 +314,8 @@ fn test_xtrans_hot_pixel_correction_uses_same_color() {
 
     let r_hot = (1usize, 0usize); // pattern[0][1] = 0 → R
     let b_hot = (0usize, 1usize); // pattern[1][0] = 2 → B
-    assert_eq!(cfa.color_at(r_hot.0, r_hot.1), 0);
-    assert_eq!(cfa.color_at(b_hot.0, b_hot.1), 2);
+    assert_eq!(cfa.color_at(Vec2us::new(r_hot.0, r_hot.1)), 0);
+    assert_eq!(cfa.color_at(Vec2us::new(b_hot.0, b_hot.1)), 2);
 
     let dark = build(&[r_hot, b_hot]);
     let defect_map = DefectMap::default()
@@ -484,7 +486,7 @@ fn test_per_channel_detection_bayer() {
     let mut pixels = vec![0.0f32; 64];
     for y in 0..8 {
         for x in 0..8 {
-            let color = pattern.color_at(x, y);
+            let color = pattern.color_at(Vec2us::new(x, y));
             pixels[y * 8 + x] = match color {
                 0 => 100.0, // R
                 1 => 200.0, // G
@@ -546,7 +548,7 @@ fn hot_detection_rejects_column_noise_gradient_and_amp_glow_but_keeps_clusters()
     let mut cluster = Vec::new();
     for y in (124..=132).step_by(2) {
         for x in (156..=164).step_by(2) {
-            assert_eq!(cfa.color_at(x, y), 0);
+            assert_eq!(cfa.color_at(Vec2us::new(x, y)), 0);
             cluster.push((x, y));
         }
     }
@@ -554,7 +556,7 @@ fn hot_detection_rejects_column_noise_gradient_and_amp_glow_but_keeps_clusters()
     let mut pixels = vec![0.0f32; width * height];
     for y in 0..height {
         for x in 0..width {
-            let color = cfa.color_at(x, y) as usize;
+            let color = cfa.color_at(Vec2us::new(x, y)) as usize;
             let x_unit = x as f32 / (width - 1) as f32;
             let y_unit = y as f32 / (height - 1) as f32;
             let baseline = [0.01, 0.02, 0.03][color];
@@ -752,7 +754,7 @@ const XTRANS_PATTERN: [[u8; 6]; 6] = [
 /// scan order), median them. The precomputed [`XTransOffsets`] must reproduce this exactly.
 fn brute_force_xtrans_median(pixels: &Buffer2<f32>, pos: Vec2us, pattern: &CfaType) -> f32 {
     let (w, h) = (pixels.width() as i32, pixels.height() as i32);
-    let my_color = pattern.color_at(pos.x, pos.y);
+    let my_color = pattern.color_at(pos);
     let mut cands: Vec<(i32, f32)> = Vec::new();
     for dy in -XTRANS_RADIUS..=XTRANS_RADIUS {
         for dx in -XTRANS_RADIUS..=XTRANS_RADIUS {
@@ -763,7 +765,7 @@ fn brute_force_xtrans_median(pixels: &Buffer2<f32>, pos: Vec2us, pattern: &CfaTy
             if nx < 0 || ny < 0 || nx >= w || ny >= h {
                 continue;
             }
-            if pattern.color_at(nx as usize, ny as usize) == my_color {
+            if pattern.color_at(Vec2us::new(nx as usize, ny as usize)) == my_color {
                 cands.push((dx.abs() + dy.abs(), *pixels.get(nx as usize, ny as usize)));
             }
         }
@@ -808,14 +810,14 @@ fn xtrans_median_selects_same_color() {
     let (w, h) = (24usize, 24usize);
     let color_val = |c: u8| 0.1 * (c + 1) as f32; // R→0.1, G→0.2, B→0.3
     let px: Vec<f32> = (0..w * h)
-        .map(|i| color_val(pattern.color_at(i % w, i / w)))
+        .map(|i| color_val(pattern.color_at(Vec2us::new(i % w, i / w))))
         .collect();
     let pixels = Buffer2::new(w, h, px);
     let neighbors = SameColorMedian::new(Some(&pattern));
 
     // Interior pixels (≥6 from every border) of each color — all 24 nearest same-color in-bounds.
     for &(x, y) in &[(13usize, 12usize), (12, 12), (14, 13)] {
-        let c = pattern.color_at(x, y);
+        let c = pattern.color_at(Vec2us::new(x, y));
         let got = neighbors.at(&pixels, Vec2us::new(x, y), None);
         assert!(
             (got - color_val(c)).abs() < f32::EPSILON,
@@ -833,10 +835,10 @@ fn xtrans_cold_pixel_detected() {
     let (w, h) = (24usize, 24usize);
     let color_val = |c: u8| 0.1 * (c + 1) as f32;
     let mut px: Vec<f32> = (0..w * h)
-        .map(|i| color_val(pattern.color_at(i % w, i / w)))
+        .map(|i| color_val(pattern.color_at(Vec2us::new(i % w, i / w))))
         .collect();
     let dead = 12 * w + 12; // interior G pixel: 0.0 < 0.5 · 0.2 neighbourhood median
-    assert_eq!(pattern.color_at(12, 12), 1, "(12,12) is green");
+    assert_eq!(pattern.color_at(Vec2us::new(12, 12)), 1, "(12,12) is green");
     px[dead] = 0.0;
     let flat = make_cfa(w, h, px, pattern);
 

@@ -3,6 +3,7 @@ use rayon::prelude::*;
 use crate::CfaType;
 use crate::io::image::cfa::CfaImage;
 use crate::io::raw::demosaic::bayer::CfaPattern;
+use crate::math::vec2us::Vec2us;
 use crate::stacking::calibration_masters::prepared_flat::{
     MIN_NORMALIZED_FLAT, apply, normalize, subtract,
 };
@@ -42,7 +43,7 @@ fn reference_apply(light: &mut CfaImage, flat: &CfaImage, subtractor: Option<&Cf
             let mut sums = [0.0f64; 3];
             let mut counts = [0u64; 3];
             for x in 0..width {
-                let color = cfa_type.color_at(x, y) as usize;
+                let color = cfa_type.color_at(Vec2us::new(x, y)) as usize;
                 let value = subtractor_row.map_or(flat_row[x], |row| flat_row[x] - row[x]);
                 sums[color] += value as f64;
                 counts[color] += 1;
@@ -70,7 +71,7 @@ fn reference_apply(light: &mut CfaImage, flat: &CfaImage, subtractor: Option<&Cf
             let flat_row = flat.data.row(y);
             let subtractor_row = subtractor.map(|image| image.data.row(y));
             for (x, light) in row.iter_mut().enumerate() {
-                let color = cfa_type.color_at(x, y) as usize;
+                let color = cfa_type.color_at(Vec2us::new(x, y)) as usize;
                 let value = subtractor_row.map_or(flat_row[x], |row| flat_row[x] - row[x]);
                 *light /= (value * inv_means[color]).max(MIN_NORMALIZED_FLAT);
             }
@@ -127,7 +128,7 @@ fn prepared_flat_is_bit_exact_for_bayer_and_xtrans_with_subtraction() {
         let mut expected_divisors = Vec::with_capacity(width * height);
         for y in 0..height {
             for x in 0..width {
-                let color = cfa_type.color_at(x, y) as usize;
+                let color = cfa_type.color_at(Vec2us::new(x, y)) as usize;
                 let divisor = if counts[color].is_multiple_of(2) {
                     0.5
                 } else {
