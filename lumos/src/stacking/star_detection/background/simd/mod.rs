@@ -90,7 +90,7 @@ pub(super) fn interpolate_segment_cubic_simd(
         return;
     }
 
-    // Scalar fallback
+    // Scalar fallback is dead code on aarch64, where the NEON path returns unconditionally.
     #[allow(unreachable_code)]
     interpolate_segment_cubic_scalar(bg_out, noise_out, bg, noise, ramp);
 }

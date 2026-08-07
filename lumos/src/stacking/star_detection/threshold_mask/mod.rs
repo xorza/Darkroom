@@ -73,6 +73,8 @@ fn process_words_scalar<const WITH_BG: bool>(
 
 /// Dispatch the packed threshold kernel to the best available backend. See `process_words_scalar`
 /// for the `WITH_BG` meaning; pass an empty `bg` when `WITH_BG` is false.
+// Scalar fallback is dead code on aarch64, where the NEON path returns unconditionally.
+#[allow(unreachable_code)]
 #[cfg_attr(not(test), inline)]
 fn process_words<const WITH_BG: bool>(
     pixels: &[f32],
@@ -97,6 +99,7 @@ fn process_words<const WITH_BG: bool>(
                 pixel_end,
             );
         }
+        return;
     }
 
     #[cfg(target_arch = "x86_64")]
@@ -132,30 +135,17 @@ fn process_words<const WITH_BG: bool>(
             }
             return;
         }
-
-        process_words_scalar::<WITH_BG>(
-            pixels,
-            bg,
-            noise,
-            sigma_threshold,
-            words,
-            pixel_offset,
-            pixel_end,
-        );
     }
 
-    #[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
-    {
-        process_words_scalar::<WITH_BG>(
-            pixels,
-            bg,
-            noise,
-            sigma_threshold,
-            words,
-            pixel_offset,
-            pixel_end,
-        );
-    }
+    process_words_scalar::<WITH_BG>(
+        pixels,
+        bg,
+        noise,
+        sigma_threshold,
+        words,
+        pixel_offset,
+        pixel_end,
+    );
 }
 
 /// Create binary mask of pixels above threshold into a BitBuffer2.
