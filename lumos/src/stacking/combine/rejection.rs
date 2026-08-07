@@ -10,6 +10,7 @@
 use crate::math::statistics::{mad_f32_fast, mad_to_sigma, median_f32_fast};
 use crate::math::sum::weighted_mean_f32;
 use crate::stacking::combine::cache::{CombinedSample, ScratchBuffers};
+use crate::stacking::combine::error::StackConfigError;
 use statrs::distribution::{ContinuousCDF, StudentsT};
 
 /// Configuration for sigma clipping.
@@ -55,6 +56,15 @@ impl SigmaClipConfig {
             sigma_high,
             max_iterations,
         }
+    }
+
+    /// Validate the clip thresholds and iteration count.
+    pub fn validate(&self) -> Result<(), StackConfigError> {
+        validate_sigma_bounds(self.sigma_low, self.sigma_high)?;
+        if self.max_iterations == 0 {
+            return Err(StackConfigError::ZeroMaxIterations);
+        }
+        Ok(())
     }
 
     /// Partition values by sigma clipping, returning the number of survivors.
@@ -255,6 +265,11 @@ impl WinsorizedClipConfig {
         }
     }
 
+    /// Validate the clip thresholds.
+    pub fn validate(&self) -> Result<(), StackConfigError> {
+        validate_sigma_bounds(self.sigma_low, self.sigma_high)
+    }
+
     /// Phase 1: Iteratively Winsorize to get robust (center, sigma) estimates.
     ///
     /// Uses Huber's c=1.5 for Winsorization boundaries, converges when
@@ -392,6 +407,15 @@ impl LinearFitClipConfig {
             sigma_high,
             max_iterations,
         }
+    }
+
+    /// Validate the clip thresholds and iteration count.
+    pub fn validate(&self) -> Result<(), StackConfigError> {
+        validate_sigma_bounds(self.sigma_low, self.sigma_high)?;
+        if self.max_iterations == 0 {
+            return Err(StackConfigError::ZeroMaxIterations);
+        }
+        Ok(())
     }
 
     /// Partition values by linear fit clipping, returning the number of survivors.
@@ -540,6 +564,25 @@ impl PercentileClipConfig {
         }
     }
 
+    /// Validate that each end clips a sane share and that together they leave survivors.
+    pub fn validate(&self) -> Result<(), StackConfigError> {
+        if !self.low_percentile.is_finite() || !(0.0..=50.0).contains(&self.low_percentile) {
+            return Err(StackConfigError::InvalidLowPercentile {
+                value: self.low_percentile,
+            });
+        }
+        if !self.high_percentile.is_finite() || !(0.0..=50.0).contains(&self.high_percentile) {
+            return Err(StackConfigError::InvalidHighPercentile {
+                value: self.high_percentile,
+            });
+        }
+        let total = self.low_percentile + self.high_percentile;
+        if total >= 100.0 {
+            return Err(StackConfigError::InvalidTotalPercentile { total });
+        }
+        Ok(())
+    }
+
     /// Compute the surviving index range for a sorted array of length `n`.
     ///
     /// Returns the half-open range of elements to keep after clipping
@@ -622,6 +665,14 @@ impl GesdConfig {
             alpha,
             max_outliers,
         }
+    }
+
+    /// Validate the significance level.
+    pub fn validate(&self) -> Result<(), StackConfigError> {
+        if !self.alpha.is_finite() || !(0.0..1.0).contains(&self.alpha) {
+            return Err(StackConfigError::InvalidGesdAlpha { value: self.alpha });
+        }
+        Ok(())
     }
 
     /// Get the configured maximum or the validation-constrained automatic maximum.
@@ -735,6 +786,18 @@ fn prepare_gesd_critical_values(
 
     scratch.gesd_sample_count = sample_count;
     scratch.gesd_alpha_bits = config.alpha.to_bits();
+}
+
+/// Both clip thresholds must be finite and positive: they scale a spread estimate, so a
+/// non-positive one inverts the keep-band and a non-finite one empties it.
+fn validate_sigma_bounds(sigma_low: f32, sigma_high: f32) -> Result<(), StackConfigError> {
+    if !sigma_low.is_finite() || sigma_low <= 0.0 {
+        return Err(StackConfigError::InvalidSigmaLow { value: sigma_low });
+    }
+    if !sigma_high.is_finite() || sigma_high <= 0.0 {
+        return Err(StackConfigError::InvalidSigmaHigh { value: sigma_high });
+    }
+    Ok(())
 }
 
 /// Reset an indices buffer to [0, 1, 2, ...n), reusing the allocation.
@@ -909,6 +972,18 @@ impl Rejection {
     /// Create GESD with default alpha.
     pub fn gesd() -> Self {
         Self::Gesd(GesdConfig::default())
+    }
+
+    /// Validate the held configuration, if any.
+    pub fn validate(&self) -> Result<(), StackConfigError> {
+        match self {
+            Self::None => Ok(()),
+            Self::SigmaClip(config) => config.validate(),
+            Self::Winsorized(config) => config.validate(),
+            Self::LinearFit(config) => config.validate(),
+            Self::Percentile(config) => config.validate(),
+            Self::Gesd(config) => config.validate(),
+        }
     }
 
     /// Partition values by rejection algorithm, returning the number of survivors.

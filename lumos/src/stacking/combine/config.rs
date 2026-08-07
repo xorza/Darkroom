@@ -279,67 +279,7 @@ impl StackConfig {
     /// Validate configuration parameters.
     pub fn validate(&self) -> Result<(), StackConfigError> {
         if let CombineMethod::Mean(rejection) = &self.method {
-            match rejection {
-                Rejection::None => {}
-                Rejection::SigmaClip(c) => {
-                    if !c.sigma_low.is_finite() || c.sigma_low <= 0.0 {
-                        return Err(StackConfigError::InvalidSigmaLow { value: c.sigma_low });
-                    }
-                    if !c.sigma_high.is_finite() || c.sigma_high <= 0.0 {
-                        return Err(StackConfigError::InvalidSigmaHigh {
-                            value: c.sigma_high,
-                        });
-                    }
-                    if c.max_iterations == 0 {
-                        return Err(StackConfigError::ZeroMaxIterations);
-                    }
-                }
-                Rejection::Winsorized(c) => {
-                    if !c.sigma_low.is_finite() || c.sigma_low <= 0.0 {
-                        return Err(StackConfigError::InvalidSigmaLow { value: c.sigma_low });
-                    }
-                    if !c.sigma_high.is_finite() || c.sigma_high <= 0.0 {
-                        return Err(StackConfigError::InvalidSigmaHigh {
-                            value: c.sigma_high,
-                        });
-                    }
-                }
-                Rejection::LinearFit(c) => {
-                    if !c.sigma_low.is_finite() || c.sigma_low <= 0.0 {
-                        return Err(StackConfigError::InvalidSigmaLow { value: c.sigma_low });
-                    }
-                    if !c.sigma_high.is_finite() || c.sigma_high <= 0.0 {
-                        return Err(StackConfigError::InvalidSigmaHigh {
-                            value: c.sigma_high,
-                        });
-                    }
-                    if c.max_iterations == 0 {
-                        return Err(StackConfigError::ZeroMaxIterations);
-                    }
-                }
-                Rejection::Percentile(c) => {
-                    if !c.low_percentile.is_finite() || !(0.0..=50.0).contains(&c.low_percentile) {
-                        return Err(StackConfigError::InvalidLowPercentile {
-                            value: c.low_percentile,
-                        });
-                    }
-                    if !c.high_percentile.is_finite() || !(0.0..=50.0).contains(&c.high_percentile)
-                    {
-                        return Err(StackConfigError::InvalidHighPercentile {
-                            value: c.high_percentile,
-                        });
-                    }
-                    let total = c.low_percentile + c.high_percentile;
-                    if total >= 100.0 {
-                        return Err(StackConfigError::InvalidTotalPercentile { total });
-                    }
-                }
-                Rejection::Gesd(c) => {
-                    if !c.alpha.is_finite() || !(0.0..1.0).contains(&c.alpha) {
-                        return Err(StackConfigError::InvalidGesdAlpha { value: c.alpha });
-                    }
-                }
-            }
+            rejection.validate()?;
         }
 
         if matches!(
