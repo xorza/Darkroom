@@ -4,7 +4,7 @@
 
 use std::arch::aarch64::*;
 
-use crate::stacking::star_detection::convolution::simd::convolve_pixel_scalar;
+use crate::stacking::star_detection::convolution::simd::{Kernel2d, convolve_pixel_scalar};
 
 /// Convolve a row using NEON intrinsics.
 ///
@@ -119,38 +119,36 @@ pub(super) unsafe fn convolve_cols_row_neon(
 ///
 /// # Safety
 /// Caller must ensure running on aarch64.
-#[allow(clippy::too_many_arguments)]
 pub(super) unsafe fn convolve_2d_row_neon(
     input: &[f32],
     output_row: &mut [f32],
     width: usize,
     height: usize,
     y: usize,
-    kernel: &[f32],
-    ksize: usize,
-    radius: usize,
+    kernel: Kernel2d,
 ) {
     unsafe {
         use crate::stacking::star_detection::convolution::simd::mirror_index;
+
+        let radius = kernel.radius() as isize;
 
         // Process 4 output pixels at a time
         let mut x = 0;
         while x + 4 <= width {
             let mut sum = vdupq_n_f32(0.0);
 
-            for ky in 0..ksize {
-                let sy = y as isize + ky as isize - radius as isize;
-                let sy = mirror_index(sy, height);
+            for ky in 0..kernel.size() {
+                let sy = mirror_index(y as isize + ky as isize - radius, height);
                 let input_row_offset = sy * width;
 
-                for kx in 0..ksize {
-                    let kval = kernel[ky * ksize + kx];
+                for kx in 0..kernel.size() {
+                    let kval = kernel.at(ky, kx);
                     if kval.abs() < 1e-10 {
                         continue;
                     }
 
                     let kv = vdupq_n_f32(kval);
-                    let base_sx = x as isize + kx as isize - radius as isize;
+                    let base_sx = x as isize + kx as isize - radius;
 
                     if base_sx >= 0 && base_sx + 4 <= width as isize {
                         let vals =
@@ -176,13 +174,11 @@ pub(super) unsafe fn convolve_2d_row_neon(
         // Handle remaining pixels with scalar
         while x < width {
             let mut sum = 0.0f32;
-            for ky in 0..ksize {
-                let sy = y as isize + ky as isize - radius as isize;
-                let sy = mirror_index(sy, height);
-                for kx in 0..ksize {
-                    let sx = x as isize + kx as isize - radius as isize;
-                    let sx = mirror_index(sx, width);
-                    sum += input[sy * width + sx] * kernel[ky * ksize + kx];
+            for ky in 0..kernel.size() {
+                let sy = mirror_index(y as isize + ky as isize - radius, height);
+                for kx in 0..kernel.size() {
+                    let sx = mirror_index(x as isize + kx as isize - radius, width);
+                    sum += input[sy * width + sx] * kernel.at(ky, kx);
                 }
             }
             output_row[x] = sum;
