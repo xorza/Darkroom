@@ -218,9 +218,9 @@ fn test_rcd_output_dimensions() {
 
 #[test]
 fn cancelled_token_bails_the_demosaic() {
-    let (w, h) = (20, 20);
-    let data = vec![0.5f32; w * h];
-    let bayer = make_bayer(&data, Size2us::new(w, h), CfaPattern::Rggb);
+    let size = Size2us::new(20, 20);
+    let data = vec![0.5f32; size.pixel_count()];
+    let bayer = make_bayer(&data, size, CfaPattern::Rggb);
 
     // A live, tripped token bails at the first between-stage check rather than
     // running the whole demosaic.
@@ -237,15 +237,15 @@ fn cancelled_token_bails_the_demosaic() {
 
 #[test]
 fn parallel_rcd_matches_single_thread_bit_for_bit() {
-    let (w, h) = if cfg!(miri) {
-        (20usize, 20usize)
+    let size = if cfg!(miri) {
+        Size2us::new(20, 20)
     } else {
-        (96usize, 80usize)
+        Size2us::new(96, 80)
     };
-    let data: Vec<f32> = (0..w * h)
-        .map(|index| ((index * 37 + index / w * 11) % 1_024) as f32 / 1_023.0)
+    let data: Vec<f32> = (0..size.pixel_count())
+        .map(|index| ((index * 37 + index / size.width * 11) % 1_024) as f32 / 1_023.0)
         .collect();
-    let bayer = make_bayer(&data, Size2us::new(w, h), CfaPattern::Rggb);
+    let bayer = make_bayer(&data, size, CfaPattern::Rggb);
 
     let run = |threads| {
         ThreadPoolBuilder::new()

@@ -10,12 +10,12 @@ use crate::stacking::star_detection::mask_dilation::dilate_mask;
 
 /// Verify dilation result against naive O(n²×r²) box dilation.
 fn assert_naive_dilation(mask: &BitBuffer2, dilated: &BitBuffer2, radius: usize, ctx: &str) {
-    let (width, height) = (mask.size.width, mask.size.height);
-    for y in 0..height {
-        for x in 0..width {
+    let size = Size2us::new(mask.size.width, mask.size.height);
+    for y in 0..size.height {
+        for x in 0..size.width {
             let mut expected = false;
-            for sy in y.saturating_sub(radius)..=(y + radius).min(height - 1) {
-                for sx in x.saturating_sub(radius)..=(x + radius).min(width - 1) {
+            for sy in y.saturating_sub(radius)..=(y + radius).min(size.height - 1) {
+                for sx in x.saturating_sub(radius)..=(x + radius).min(size.width - 1) {
                     if mask.get_at(Vec2us::new(sx, sy)) {
                         expected = true;
                         break;

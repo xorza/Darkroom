@@ -1,5 +1,6 @@
 use crate::io::image::cfa::QUANTIZATION_SIGMA_PER_STEP;
 use crate::math::size2us::Size2us;
+use crate::math::vec2us::Vec2us;
 use crate::stacking::calibration_masters::defect_map::*;
 use crate::stacking::combine::cache::internals::cache_from_images;
 use crate::stacking::combine::config::{Normalization, StackConfig};
@@ -170,9 +171,9 @@ fn cancelled_detection_returns_error() {
 
 #[test]
 fn quantization_floor_scales_with_bit_depth_and_master_count() {
-    let (width, height) = (128usize, 64usize);
-    let expected = [10 * width + 10, 20 * width + 80];
-    let below_threshold = [30 * width + 20, 40 * width + 90];
+    let size = Size2us::new(128usize, 64usize);
+    let expected = [10 * size.width + 10, 20 * size.width + 80];
+    let below_threshold = [30 * size.width + 20, 40 * size.width + 90];
 
     for bits in [12u32, 14, 16] {
         let quantization_step = 1.0 / ((1u32 << bits) - 1) as f32;
@@ -180,7 +181,7 @@ fn quantization_floor_scales_with_bit_depth_and_master_count() {
             let sigma =
                 quantization_step * QUANTIZATION_SIGMA_PER_STEP / (frame_count as f32).sqrt();
             for gain in [0.5f64, 4.0] {
-                let mut pixels = vec![0.05f32; width * height];
+                let mut pixels = vec![0.05f32; size.pixel_count()];
                 for &index in &expected {
                     pixels[index] += 6.0 * sigma;
                 }
@@ -188,7 +189,7 @@ fn quantization_floor_scales_with_bit_depth_and_master_count() {
                     pixels[index] += 4.0 * sigma;
                 }
 
-                let mut dark = make_cfa(Size2us::new(width, height), pixels, CfaType::Mono);
+                let mut dark = make_cfa(size, pixels, CfaType::Mono);
                 dark.quantization_sigma = Some(sigma);
                 dark.metadata.gain = Some(gain);
                 let detected = DefectMap::default()
@@ -253,28 +254,28 @@ fn test_correct_clustered_defect_uses_only_good_neighbors() {
     // the few good ones — the defect mask excludes the bad neighbours. Pre-mask, the neighbour
     // median was dominated by the cluster and left the pixel ~uncorrected (≈0.95 here).
     let cfa = CfaType::Bayer(CfaPattern::Rggb);
-    let (w, h) = (16usize, 16usize);
+    let size = Size2us::new(16usize, 16usize);
     // Red pixels sit at (even,even). Target (6,6); make 5 of its 8 stride-2 red neighbours hot.
     let hot = [(6, 6), (4, 6), (8, 6), (6, 4), (6, 8), (4, 4)];
-    let mut px = vec![0.5f32; w * h];
+    let mut px = vec![0.5f32; size.pixel_count()];
     for &(x, y) in &hot {
-        px[y * w + x] = 0.95;
+        px[size.index_of(Vec2us::new(x, y))] = 0.95;
     }
-    let dark = make_cfa(Size2us::new(w, h), px, cfa.clone());
+    let dark = make_cfa(size, px, cfa.clone());
     let defect_map = DefectMap::default()
         .detect_hot(&dark, 5.0, &CancelToken::never())
         .unwrap();
     assert_eq!(defect_map.hot_count(), 6, "all six 0.95 red pixels are hot");
 
-    let mut light = make_cfa(Size2us::new(w, h), vec![0.5f32; w * h], cfa);
+    let mut light = make_cfa(size, vec![0.5f32; size.pixel_count()], cfa);
     for &(x, y) in &hot {
-        light.data[y * w + x] = 0.95;
+        light.data[size.index_of(Vec2us::new(x, y))] = 0.95;
     }
     defect_map.correct(&mut light);
 
     // (6,6)'s only good red neighbours (4,8),(8,4),(8,8) are all 0.5 → median 0.5, despite the
     // five hot neighbours that would otherwise dominate.
-    let corrected = light.data[6 * w + 6];
+    let corrected = light.data[6 * size.width + 6];
     assert!(
         (corrected - 0.5).abs() < 1e-4,
         "clustered defect repaired from good neighbours → expected 0.5, got {corrected}"
@@ -293,7 +294,7 @@ fn test_xtrans_hot_pixel_correction_uses_same_color() {
         [1, 0, 1, 1, 2, 1],
     ];
     let cfa = CfaType::XTrans(pattern);
-    let (w, h) = (12usize, 12usize);
+    let size = Size2us::new(12usize, 12usize);
     // Distinct per-color baselines so a wrong-color repair is detectable.
     let color_val = |c: u8| match c {
         0 => 0.1, // R
@@ -301,16 +302,16 @@ fn test_xtrans_hot_pixel_correction_uses_same_color() {
         _ => 0.3, // B
     };
     let build = |corrupt: &[(usize, usize)]| {
-        let mut px = vec![0.0f32; w * h];
-        for y in 0..h {
-            for x in 0..w {
-                px[y * w + x] = color_val(cfa.color_at(Vec2us::new(x, y)));
+        let mut px = vec![0.0f32; size.pixel_count()];
+        for y in 0..size.height {
+            for x in 0..size.width {
+                px[size.index_of(Vec2us::new(x, y))] = color_val(cfa.color_at(Vec2us::new(x, y)));
             }
         }
         for &(x, y) in corrupt {
-            px[y * w + x] = 0.9;
+            px[size.index_of(Vec2us::new(x, y))] = 0.9;
         }
-        make_cfa(Size2us::new(w, h), px, cfa.clone())
+        make_cfa(size, px, cfa.clone())
     };
 
     let r_hot = (1usize, 0usize); // pattern[0][1] = 0 → R
@@ -327,8 +328,8 @@ fn test_xtrans_hot_pixel_correction_uses_same_color() {
     let mut light = build(&[r_hot, b_hot]);
     defect_map.correct(&mut light);
 
-    let r_val = light.data[r_hot.1 * w + r_hot.0];
-    let b_val = light.data[b_hot.1 * w + b_hot.0];
+    let r_val = light.data[r_hot.1 * size.width + r_hot.0];
+    let b_val = light.data[b_hot.1 * size.width + b_hot.0];
     assert!(
         (r_val - 0.1).abs() < 1e-4,
         "R hot repaired from R neighbours → expected 0.1, got {r_val}"
@@ -521,20 +522,20 @@ fn test_per_channel_detection_bayer() {
 
 #[test]
 fn dark_background_reconstructs_affine_mono_signal_through_image_edges() {
-    let (width, height) = (192usize, 128usize);
-    let pixels: Vec<f32> = (0..width * height)
+    let size = Size2us::new(192usize, 128usize);
+    let pixels: Vec<f32> = (0..size.pixel_count())
         .map(|index| {
-            let x = (index % width) as f32;
-            let y = (index / width) as f32;
+            let x = (index % size.width) as f32;
+            let y = (index / size.width) as f32;
             0.02 + 0.0001 * x + 0.0002 * y
         })
         .collect();
-    let data = Buffer2::new(width, height, pixels);
+    let data = Buffer2::new(size.width, size.height, pixels);
     let background =
         DarkBackground::fit(&data, Some(&CfaType::Mono), &CancelToken::never()).unwrap();
 
-    for y in 0..height {
-        for x in 0..width {
+    for y in 0..size.height {
+        for x in 0..size.width {
             let expected = 0.02 + 0.0001 * x as f32 + 0.0002 * y as f32;
             assert!(
                 (background.at(Vec2us::new(x, y), 0) - expected).abs() < 2e-7,
@@ -547,7 +548,7 @@ fn dark_background_reconstructs_affine_mono_signal_through_image_edges() {
 
 #[test]
 fn hot_detection_rejects_column_noise_gradient_and_amp_glow_but_keeps_clusters() {
-    let (width, height) = (384usize, 256usize);
+    let size = Size2us::new(384usize, 256usize);
     let cfa = CfaType::Bayer(CfaPattern::Rggb);
     let isolated = [(17usize, 23usize), (201, 48), (312, 190)];
     let mut cluster = Vec::new();
@@ -558,32 +559,33 @@ fn hot_detection_rejects_column_noise_gradient_and_amp_glow_but_keeps_clusters()
         }
     }
 
-    let mut pixels = vec![0.0f32; width * height];
-    for y in 0..height {
-        for x in 0..width {
+    let mut pixels = vec![0.0f32; size.pixel_count()];
+    for y in 0..size.height {
+        for x in 0..size.width {
             let color = cfa.color_at(Vec2us::new(x, y)) as usize;
-            let x_unit = x as f32 / (width - 1) as f32;
-            let y_unit = y as f32 / (height - 1) as f32;
+            let x_unit = x as f32 / (size.width - 1) as f32;
+            let y_unit = y as f32 / (size.height - 1) as f32;
             let baseline = [0.01, 0.02, 0.03][color];
             let gradient = [0.012, 0.018, 0.024][color] * x_unit + 0.01 * y_unit;
             let amp_glow = [0.05, 0.07, 0.09][color] * x_unit * x_unit * (0.5 + 0.5 * y_unit);
             let column_noise = ((x * 13) % 11) as f32 * 0.00004 - 0.0002;
             let noise = ((x * 37 + y * 19) % 17) as f32 * 0.00003 - 0.00024;
-            pixels[y * width + x] = baseline + gradient + amp_glow + column_noise + noise;
+            pixels[size.index_of(Vec2us::new(x, y))] =
+                baseline + gradient + amp_glow + column_noise + noise;
         }
     }
 
     let mut expected: Vec<usize> = isolated
         .iter()
         .chain(&cluster)
-        .map(|&(x, y)| y * width + x)
+        .map(|&(x, y)| size.index_of(Vec2us::new(x, y)))
         .collect();
     expected.sort_unstable();
     for &index in &expected {
         pixels[index] += 0.08;
     }
 
-    let dark = make_cfa(Size2us::new(width, height), pixels, cfa);
+    let dark = make_cfa(size, pixels, cfa);
     let defect_map = DefectMap::default()
         .detect_hot(&dark, 5.0, &CancelToken::never())
         .unwrap();
@@ -612,15 +614,15 @@ fn test_cfa_no_defective_pixels() {
 #[test]
 fn near_zero_median_dark_flags_only_hot_pixels() {
     // 64x64 mono dark: small zero-mean noise (many pixels < 0), median ≈ 0.
-    let (w, h) = (64usize, 64usize);
-    let mut pixels: Vec<f32> = (0..w * h)
+    let size = Size2us::new(64usize, 64usize);
+    let mut pixels: Vec<f32> = (0..size.pixel_count())
         .map(|i| if i % 2 == 0 { -0.0003 } else { 0.0002 })
         .collect();
     // Three genuinely hot pixels.
     for &idx in &[100usize, 2000, 4000] {
         pixels[idx] = 0.5;
     }
-    let dark = make_cfa(Size2us::new(w, h), pixels, CfaType::Mono);
+    let dark = make_cfa(size, pixels, CfaType::Mono);
 
     let defect_map = DefectMap::default()
         .detect_hot(&dark, 5.0, &CancelToken::never())
@@ -680,18 +682,18 @@ fn uniform_flat_flags_no_cold() {
 /// the genuinely dead pixel and leaves both edges alone.
 #[test]
 fn cold_detection_survives_vignetting_gradient() {
-    let (w, h) = (16usize, 16usize);
-    let mut pixels: Vec<f32> = (0..w * h)
-        .map(|i| 0.2 + 0.6 * (i % w) as f32 / (w - 1) as f32)
+    let size = Size2us::new(16usize, 16usize);
+    let mut pixels: Vec<f32> = (0..size.pixel_count())
+        .map(|i| 0.2 + 0.6 * (i % size.width) as f32 / (size.width - 1) as f32)
         .collect();
     for y in 6..10 {
         for x in 2..6 {
-            pixels[y * w + x] *= 0.65;
+            pixels[size.index_of(Vec2us::new(x, y))] *= 0.65;
         }
     }
-    let dead = 8 * w + 8; // (8,8), normally ≈0.52; its 8 neighbours median ≈0.52
+    let dead = 8 * size.width + 8; // (8,8), normally ≈0.52; its 8 neighbours median ≈0.52
     pixels[dead] = 0.0;
-    let flat = make_cfa(Size2us::new(w, h), pixels, CfaType::Mono);
+    let flat = make_cfa(size, pixels, CfaType::Mono);
 
     let defect_map = DefectMap::default()
         .detect_cold(&flat, &CancelToken::never())
@@ -701,17 +703,17 @@ fn cold_detection_survives_vignetting_gradient() {
     assert_eq!(defect_map.hot_count(), 0, "a flat yields no hot pixels");
     assert!(is_cold(&defect_map, dead));
     assert!(
-        !is_cold(&defect_map, 8 * w),
+        !is_cold(&defect_map, 8 * size.width),
         "dim edge (0.2) is vignetting, not dead"
     );
     assert!(
-        !is_cold(&defect_map, 8 * w + 15),
+        !is_cold(&defect_map, 8 * size.width + 15),
         "bright edge (0.8) is fine"
     );
     for y in 6..10 {
         for x in 2..6 {
             assert!(
-                !is_cold(&defect_map, y * w + x),
+                !is_cold(&defect_map, size.index_of(Vec2us::new(x, y))),
                 "dust shadow ({x}, {y}) is attenuated, not dead"
             );
         }
@@ -786,16 +788,17 @@ fn brute_force_xtrans_median(pixels: &Buffer2<f32>, pos: Vec2us, pattern: &CfaTy
 #[test]
 fn xtrans_offsets_match_brute_force() {
     let pattern = CfaType::XTrans(XTRANS_PATTERN);
-    let (w, h) = (29usize, 23usize); // not a multiple of 6, so all 36 phases hit the borders
+    // Not a multiple of 6, so all 36 phases hit the borders.
+    let size = Size2us::new(29, 23);
     // Deterministic, well-spread values so medians are sensitive to which neighbours are chosen.
-    let px: Vec<f32> = (0..w * h)
+    let px: Vec<f32> = (0..size.pixel_count())
         .map(|i| ((i.wrapping_mul(2_654_435_761) >> 8) % 1000) as f32 / 1000.0)
         .collect();
-    let pixels = Buffer2::new(w, h, px);
+    let pixels = Buffer2::new(size.width, size.height, px);
     let offsets = XTransOffsets::new(&XTRANS_PATTERN);
 
-    for y in 0..h {
-        for x in 0..w {
+    for y in 0..size.height {
+        for x in 0..size.width {
             let pos = Vec2us::new(x, y);
             let got = offsets.median(&pixels, pos, None);
             let want = brute_force_xtrans_median(&pixels, pos, &pattern);
@@ -812,12 +815,12 @@ fn xtrans_offsets_match_brute_force() {
 #[test]
 fn xtrans_median_selects_same_color() {
     let pattern = CfaType::XTrans(XTRANS_PATTERN);
-    let (w, h) = (24usize, 24usize);
+    let size = Size2us::new(24usize, 24usize);
     let color_val = |c: u8| 0.1 * (c + 1) as f32; // R→0.1, G→0.2, B→0.3
-    let px: Vec<f32> = (0..w * h)
-        .map(|i| color_val(pattern.color_at(Vec2us::new(i % w, i / w))))
+    let px: Vec<f32> = (0..size.pixel_count())
+        .map(|i| color_val(pattern.color_at(Vec2us::new(i % size.width, i / size.width))))
         .collect();
-    let pixels = Buffer2::new(w, h, px);
+    let pixels = Buffer2::new(size.width, size.height, px);
     let neighbors = SameColorMedian::new(Some(&pattern));
 
     // Interior pixels (≥6 from every border) of each color — all 24 nearest same-color in-bounds.
@@ -837,15 +840,15 @@ fn xtrans_median_selects_same_color() {
 #[test]
 fn xtrans_cold_pixel_detected() {
     let pattern = CfaType::XTrans(XTRANS_PATTERN);
-    let (w, h) = (24usize, 24usize);
+    let size = Size2us::new(24usize, 24usize);
     let color_val = |c: u8| 0.1 * (c + 1) as f32;
-    let mut px: Vec<f32> = (0..w * h)
-        .map(|i| color_val(pattern.color_at(Vec2us::new(i % w, i / w))))
+    let mut px: Vec<f32> = (0..size.pixel_count())
+        .map(|i| color_val(pattern.color_at(Vec2us::new(i % size.width, i / size.width))))
         .collect();
-    let dead = 12 * w + 12; // interior G pixel: 0.0 < 0.5 · 0.2 neighbourhood median
+    let dead = 12 * size.width + 12; // interior G pixel: 0.0 < 0.5 · 0.2 neighbourhood median
     assert_eq!(pattern.color_at(Vec2us::new(12, 12)), 1, "(12,12) is green");
     px[dead] = 0.0;
-    let flat = make_cfa(Size2us::new(w, h), px, pattern);
+    let flat = make_cfa(size, px, pattern);
 
     let defect_map = DefectMap::default()
         .detect_cold(&flat, &CancelToken::never())
@@ -855,7 +858,7 @@ fn xtrans_cold_pixel_detected() {
     assert_eq!(defect_map.hot_count(), 0, "detect_cold sets no hot pixels");
     assert!(is_cold(&defect_map, dead));
     // A normal R neighbour: one dead neighbour can't drag its 24-sample median below half.
-    assert!(!is_cold(&defect_map, 12 * w + 13));
+    assert!(!is_cold(&defect_map, 12 * size.width + 13));
 }
 
 #[test]

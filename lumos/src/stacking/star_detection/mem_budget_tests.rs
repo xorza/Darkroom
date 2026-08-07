@@ -39,12 +39,12 @@ const DEFAULT_WORKING_SET: BufferCounts = BufferCounts {
 /// counts up without bound, making peak heap linear in the frame count — this catches it.
 #[test]
 fn buffer_working_set_stays_flat_in_frame_count() {
-    let (w, h) = (128, 128);
+    let size = Size2us::new(128, 128);
     // A handful of distinct fields (same dimensions, so the pool reuses rather than reallocates) so
     // every content-dependent detection path runs during warmup and the pool reaches its true
     // high-water mark before we start checking for growth.
     let frames: Vec<_> = (0..4)
-        .map(|s| star_field(Size2us::new(w, h), 60, 4200 + s).image)
+        .map(|s| star_field(size, 60, 4200 + s).image)
         .collect();
 
     let mut detector = StarDetector::from_config(Config::default()).unwrap();

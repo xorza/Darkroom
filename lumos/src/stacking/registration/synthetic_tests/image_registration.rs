@@ -75,23 +75,23 @@ fn translate_image(src_pixels: &[f32], size: Size2us, dx: f64, dy: f64) -> Vec<f
 #[test]
 fn test_image_registration_translation() {
     // Reference star field image (forward model).
-    let (width, height) = (256, 256);
-    let ref_pixels_vec = star_field(Size2us::new(width, height), 50, 42)
-        .image
-        .channel(0)
-        .pixels()
-        .to_vec();
+    let size = Size2us::new(256, 256);
+    let ref_pixels_vec = star_field(size, 50, 42).image.channel(0).pixels().to_vec();
 
     // Apply a known translation to create target image
     let dx = 15.5;
     let dy = -12.3;
-    let target_pixels = translate_image(&ref_pixels_vec, Size2us::new(width, height), dx, dy);
+    let target_pixels = translate_image(&ref_pixels_vec, size, dx, dy);
 
     // Create AstroImages
-    let ref_image =
-        LinearImage::from_pixels(ImageDimensions::new((width, height), 1), ref_pixels_vec);
-    let target_image =
-        LinearImage::from_pixels(ImageDimensions::new((width, height), 1), target_pixels);
+    let ref_image = LinearImage::from_pixels(
+        ImageDimensions::new((size.width, size.height), 1),
+        ref_pixels_vec,
+    );
+    let target_image = LinearImage::from_pixels(
+        ImageDimensions::new((size.width, size.height), 1),
+        target_pixels,
+    );
 
     // Detect stars in both images
     let mut det = detector();
@@ -153,12 +153,8 @@ fn test_image_registration_translation() {
 
 #[test]
 fn test_image_registration_rotation() {
-    let (width, height) = (256, 256);
-    let ref_pixels_vec = star_field(Size2us::new(width, height), 60, 123)
-        .image
-        .channel(0)
-        .pixels()
-        .to_vec();
+    let size = Size2us::new(256, 256);
+    let ref_pixels_vec = star_field(size, 60, 123).image.channel(0).pixels().to_vec();
 
     // Apply rotation + small translation
     let dx = 5.0;
@@ -166,19 +162,16 @@ fn test_image_registration_rotation() {
     let angle_deg: f64 = 1.0;
     let angle_rad = angle_deg.to_radians();
 
-    let target_pixels = transform_image(
-        &ref_pixels_vec,
-        Size2us::new(width, height),
-        dx,
-        dy,
-        angle_rad,
-        1.0,
-    );
+    let target_pixels = transform_image(&ref_pixels_vec, size, dx, dy, angle_rad, 1.0);
 
-    let ref_image =
-        LinearImage::from_pixels(ImageDimensions::new((width, height), 1), ref_pixels_vec);
-    let target_image =
-        LinearImage::from_pixels(ImageDimensions::new((width, height), 1), target_pixels);
+    let ref_image = LinearImage::from_pixels(
+        ImageDimensions::new((size.width, size.height), 1),
+        ref_pixels_vec,
+    );
+    let target_image = LinearImage::from_pixels(
+        ImageDimensions::new((size.width, size.height), 1),
+        target_pixels,
+    );
 
     let mut det = detector();
     let ref_result = det.detect(&ref_image);
@@ -215,12 +208,8 @@ fn test_image_registration_rotation() {
 
 #[test]
 fn test_image_registration_similarity() {
-    let (width, height) = (256, 256);
-    let ref_pixels_vec = star_field(Size2us::new(width, height), 70, 456)
-        .image
-        .channel(0)
-        .pixels()
-        .to_vec();
+    let size = Size2us::new(256, 256);
+    let ref_pixels_vec = star_field(size, 70, 456).image.channel(0).pixels().to_vec();
 
     // Apply similarity transform (translation + rotation + scale)
     let dx = 8.0;
@@ -229,19 +218,16 @@ fn test_image_registration_similarity() {
     let angle_rad = angle_deg.to_radians();
     let scale = 1.005;
 
-    let target_pixels = transform_image(
-        &ref_pixels_vec,
-        Size2us::new(width, height),
-        dx,
-        dy,
-        angle_rad,
-        scale,
-    );
+    let target_pixels = transform_image(&ref_pixels_vec, size, dx, dy, angle_rad, scale);
 
-    let ref_image =
-        LinearImage::from_pixels(ImageDimensions::new((width, height), 1), ref_pixels_vec);
-    let target_image =
-        LinearImage::from_pixels(ImageDimensions::new((width, height), 1), target_pixels);
+    let ref_image = LinearImage::from_pixels(
+        ImageDimensions::new((size.width, size.height), 1),
+        ref_pixels_vec,
+    );
+    let target_image = LinearImage::from_pixels(
+        ImageDimensions::new((size.width, size.height), 1),
+        target_pixels,
+    );
 
     let mut det = detector();
     let ref_result = det.detect(&ref_image);
@@ -289,9 +275,9 @@ fn test_image_registration_similarity() {
 #[test]
 fn test_image_registration_with_noise() {
     // Higher noise level: a shallow well + extra read noise stresses registration.
-    let (width, height) = (256, 256);
+    let size = Size2us::new(256, 256);
     let scene = Scene::random_field(
-        Size2us::new(width, height),
+        size,
         80,
         (6.0, 16.0),
         BackgroundField::Uniform { level: 0.1 },
@@ -312,12 +298,16 @@ fn test_image_registration_with_noise() {
     // Apply translation
     let dx = 20.0;
     let dy = -15.0;
-    let target_pixels = translate_image(&ref_pixels_vec, Size2us::new(width, height), dx, dy);
+    let target_pixels = translate_image(&ref_pixels_vec, size, dx, dy);
 
-    let ref_image =
-        LinearImage::from_pixels(ImageDimensions::new((width, height), 1), ref_pixels_vec);
-    let target_image =
-        LinearImage::from_pixels(ImageDimensions::new((width, height), 1), target_pixels);
+    let ref_image = LinearImage::from_pixels(
+        ImageDimensions::new((size.width, size.height), 1),
+        ref_pixels_vec,
+    );
+    let target_image = LinearImage::from_pixels(
+        ImageDimensions::new((size.width, size.height), 1),
+        target_pixels,
+    );
 
     let mut detection_config = DetConfig::default();
     detection_config.fwhm.expected = 0.0;
@@ -363,8 +353,8 @@ fn test_image_registration_with_noise() {
 #[test]
 fn test_image_registration_dense_field() {
     // Dense star field.
-    let (width, height) = (256, 256);
-    let ref_pixels_vec = star_field(Size2us::new(width, height), 200, 999)
+    let size = Size2us::new(256, 256);
+    let ref_pixels_vec = star_field(size, 200, 999)
         .image
         .channel(0)
         .pixels()
@@ -374,19 +364,16 @@ fn test_image_registration_dense_field() {
     let dy = 8.0;
     let angle_rad = 0.5_f64.to_radians();
 
-    let target_pixels = transform_image(
-        &ref_pixels_vec,
-        Size2us::new(width, height),
-        dx,
-        dy,
-        angle_rad,
-        1.0,
-    );
+    let target_pixels = transform_image(&ref_pixels_vec, size, dx, dy, angle_rad, 1.0);
 
-    let ref_image =
-        LinearImage::from_pixels(ImageDimensions::new((width, height), 1), ref_pixels_vec);
-    let target_image =
-        LinearImage::from_pixels(ImageDimensions::new((width, height), 1), target_pixels);
+    let ref_image = LinearImage::from_pixels(
+        ImageDimensions::new((size.width, size.height), 1),
+        ref_pixels_vec,
+    );
+    let target_image = LinearImage::from_pixels(
+        ImageDimensions::new((size.width, size.height), 1),
+        target_pixels,
+    );
 
     let mut det = detector();
     let ref_result = det.detect(&ref_image);
@@ -424,8 +411,8 @@ fn test_image_registration_dense_field() {
 
 #[test]
 fn test_image_registration_large_image() {
-    let (width, height) = (1024, 1024);
-    let ref_pixels_vec = star_field(Size2us::new(width, height), 100, 111)
+    let size = Size2us::new(1024, 1024);
+    let ref_pixels_vec = star_field(size, 100, 111)
         .image
         .channel(0)
         .pixels()
@@ -434,12 +421,16 @@ fn test_image_registration_large_image() {
     // Larger translation for larger image
     let dx = 50.0;
     let dy = -35.0;
-    let target_pixels = translate_image(&ref_pixels_vec, Size2us::new(width, height), dx, dy);
+    let target_pixels = translate_image(&ref_pixels_vec, size, dx, dy);
 
-    let ref_image =
-        LinearImage::from_pixels(ImageDimensions::new((width, height), 1), ref_pixels_vec);
-    let target_image =
-        LinearImage::from_pixels(ImageDimensions::new((width, height), 1), target_pixels);
+    let ref_image = LinearImage::from_pixels(
+        ImageDimensions::new((size.width, size.height), 1),
+        ref_pixels_vec,
+    );
+    let target_image = LinearImage::from_pixels(
+        ImageDimensions::new((size.width, size.height), 1),
+        target_pixels,
+    );
 
     let mut det = detector();
     let ref_result = det.detect(&ref_image);

@@ -84,20 +84,20 @@ fn fits_metadata_errors_survive_the_lumos_loader() {
 
 #[test]
 fn fits_float32_round_trips_pixels_and_order() {
-    let (w, h) = (32usize, 24usize);
+    let size = Size2us::new(32usize, 24usize);
     // The asymmetric physical scale catches both transposition and accidental frame-max scaling.
-    let pixels: Vec<f32> = (0..h)
-        .flat_map(|y| (0..w).map(move |x| -12.0 + y as f32 * 3.0 + x as f32 * 0.25))
+    let pixels: Vec<f32> = (0..size.height)
+        .flat_map(|y| (0..size.width).map(move |x| -12.0 + y as f32 * 3.0 + x as f32 * 0.25))
         .collect();
     let image = Image::new(
-        vec![w, h], // fits-well is NAXIS1-first: [width, height]
+        vec![size.width, size.height], // fits-well is NAXIS1-first: [width, height]
         pixels.clone(),
     )
     .unwrap();
 
     let loaded = write_and_load("float32", &image).unwrap();
-    assert_eq!(loaded.width(), w);
-    assert_eq!(loaded.height(), h);
+    assert_eq!(loaded.width(), size.width);
+    assert_eq!(loaded.height(), size.height);
     assert_eq!(loaded.channels(), 1);
     assert_eq!(loaded.channel(0).pixels(), pixels);
 }
@@ -124,9 +124,9 @@ fn fits_signed_scaled_and_unsigned_samples_remain_physical() {
     let scaled_loaded = write_and_load("negative_bscale", &scaled).unwrap();
     assert_eq!(scaled_loaded.channel(0).pixels(), &[17.5, 10.0, 0.0]);
 
-    let (w, h) = (5usize, 1usize);
+    let size = Size2us::new(5usize, 1usize);
     let raw = [0u16, 16384, 32768, 49152, 65535];
-    let image = Image::from_u16(vec![w, h], &raw).unwrap();
+    let image = Image::from_u16(vec![size.width, size.height], &raw).unwrap();
 
     let loaded = write_and_load("uint16", &image).unwrap();
     let expected: Vec<f32> = raw.iter().map(|&value| value as f32).collect();
@@ -153,18 +153,18 @@ fn fits_datamax_is_metadata_only() {
 
 #[test]
 fn mosaic_fits_uses_the_cfa_calibration_route() {
-    let (width, height) = (32usize, 32usize);
+    let size = Size2us::new(32usize, 32usize);
     let pattern = CfaType::Bayer(CfaPattern::Rggb);
     let target = [0.8f32, 0.5, 0.2];
     let dark_value = 0.1f32;
-    let pixels: Vec<f32> = (0..height)
+    let pixels: Vec<f32> = (0..size.height)
         .flat_map(|y| {
             let pattern = pattern.clone();
-            (0..width)
+            (0..size.width)
                 .map(move |x| target[pattern.color_at(Vec2us::new(x, y)) as usize] + dark_value)
         })
         .collect();
-    let image = Image::new(vec![width, height], pixels.clone()).unwrap();
+    let image = Image::new(vec![size.width, size.height], pixels.clone()).unwrap();
     let mut header = Header::new();
     header.set("BAYERPAT", "RGGB").unwrap();
     let path = write_with_header("bayer_cfa", &image, &header);
@@ -181,7 +181,7 @@ fn mosaic_fits_uses_the_cfa_calibration_route() {
     assert_eq!(cache_loaded.metadata.cfa_type, loaded.metadata.cfa_type);
     assert_eq!(
         <CfaImage as StackableImage>::peek_dimensions(&path, &LoadContext::default()),
-        Some(crate::ImageDimensions::new((width, height), 1))
+        Some(crate::ImageDimensions::new((size.width, size.height), 1))
     );
 
     let preview = PreviewImage::from_file(&path, &LoadContext::default()).unwrap();
@@ -196,21 +196,17 @@ fn mosaic_fits_uses_the_cfa_calibration_route() {
     let preview: imaginarium::Image = preview.into();
     assert_eq!(preview.desc().color_format, ColorFormat::RGB_F32);
     let preview_pixels = bytemuck::cast_slice::<u8, f32>(preview.bytes());
-    for y in 6..height - 6 {
-        for x in 6..width - 6 {
+    for y in 6..size.height - 6 {
+        for x in 6..size.width - 6 {
             let channel = pattern.color_at(Vec2us::new(x, y)) as usize;
             assert_eq!(
-                preview_pixels[(y * width + x) * 3 + channel],
+                preview_pixels[(size.index_of(Vec2us::new(x, y))) * 3 + channel],
                 target[channel] + dark_value
             );
         }
     }
 
-    let dark = make_cfa(
-        Size2us::new(width, height),
-        vec![dark_value; width * height],
-        pattern.clone(),
-    );
+    let dark = make_cfa(size, vec![dark_value; size.pixel_count()], pattern.clone());
     let masters = CalibrationMasters::from_images(
         CalibrationSet {
             dark: Some(dark),
@@ -222,7 +218,7 @@ fn mosaic_fits_uses_the_cfa_calibration_route() {
         CancelToken::never(),
     )
     .unwrap();
-    let mut equivalent = make_cfa(Size2us::new(width, height), pixels, pattern.clone());
+    let mut equivalent = make_cfa(size, pixels, pattern.clone());
     masters.calibrate(&mut loaded).unwrap();
     masters.calibrate(&mut equivalent).unwrap();
     assert_eq!(loaded.data, equivalent.data);
@@ -250,23 +246,26 @@ fn mosaic_fits_uses_the_cfa_calibration_route() {
             ..
         })
     ));
-    for y in 6..height - 6 {
-        for x in 6..width - 6 {
+    for y in 6..size.height - 6 {
+        for x in 6..size.width - 6 {
             let channel = pattern.color_at(Vec2us::new(x, y)) as usize;
             let expected = (target[channel] + dark_value) - dark_value;
-            assert_eq!(demosaiced.channel(channel)[y * width + x], expected);
+            assert_eq!(
+                demosaiced.channel(channel)[size.index_of(Vec2us::new(x, y))],
+                expected
+            );
         }
     }
 }
 
 #[test]
 fn fits_rejects_nan_and_inf_with_summary() {
-    let (w, h) = (4usize, 4usize);
-    let mut pixels = vec![0.3f32; w * h];
+    let size = Size2us::new(4usize, 4usize);
+    let mut pixels = vec![0.3f32; size.pixel_count()];
     pixels[0] = f32::NAN;
     pixels[5] = f32::INFINITY;
     pixels[10] = f32::NEG_INFINITY;
-    let image = Image::new(vec![w, h], pixels).unwrap();
+    let image = Image::new(vec![size.width, size.height], pixels).unwrap();
 
     assert!(matches!(
         write_and_load("nan_inf", &image),
@@ -277,18 +276,19 @@ fn fits_rejects_nan_and_inf_with_summary() {
 
 #[test]
 fn demosaic_uniform_bayer_recovers_colour() {
-    let (w, h) = (32usize, 32usize);
+    let size = Size2us::new(32usize, 32usize);
     let rgb = [0.8f32, 0.5, 0.2]; // R, G, B
     let cfa = CfaType::Bayer(CfaPattern::Rggb);
 
     // Sample each Bayer site from the (uniform) true colour.
-    let mut mosaic = vec![0.0f32; w * h];
-    for y in 0..h {
-        for x in 0..w {
-            mosaic[y * w + x] = rgb[cfa.color_at(Vec2us::new(x, y)) as usize];
+    let mut mosaic = vec![0.0f32; size.pixel_count()];
+    for y in 0..size.height {
+        for x in 0..size.width {
+            mosaic[size.index_of(Vec2us::new(x, y))] =
+                rgb[cfa.color_at(Vec2us::new(x, y)) as usize];
         }
     }
-    let image = make_cfa(Size2us::new(w, h), mosaic, cfa)
+    let image = make_cfa(size, mosaic, cfa)
         .demosaic(&CancelToken::never())
         .unwrap();
 
@@ -304,9 +304,9 @@ fn demosaic_uniform_bayer_recovers_colour() {
     for (ch, &true_c) in channels.iter().zip(&rgb) {
         let mut devs: Vec<f32> = Vec::new();
         let mut sum = 0.0f64;
-        for y in 6..h - 6 {
-            for x in 6..w - 6 {
-                let v = ch[y * w + x];
+        for y in 6..size.height - 6 {
+            for x in 6..size.width - 6 {
+                let v = ch[size.index_of(Vec2us::new(x, y))];
                 sum += v as f64;
                 devs.push((v - true_c).abs());
             }
@@ -327,23 +327,23 @@ fn demosaic_uniform_bayer_recovers_colour() {
 
 #[test]
 fn calibrated_demosaic_preserves_out_of_range_samples() {
-    let (w, h) = (48usize, 48usize);
+    let size = Size2us::new(48usize, 48usize);
 
     for cfa in [
         CfaType::Bayer(CfaPattern::Rggb),
         CfaType::XTrans(test_pattern_array()),
     ] {
         for expected in [-0.25f32, 1.25] {
-            let image = make_cfa(Size2us::new(w, h), vec![expected; w * h], cfa.clone())
+            let image = make_cfa(size, vec![expected; size.pixel_count()], cfa.clone())
                 .demosaic(&CancelToken::never())
                 .unwrap();
 
             for channel in 0..3 {
                 let pixels = image.channel(channel).pixels();
                 assert!(pixels.iter().all(|sample| sample.is_finite()));
-                for y in 8..h - 8 {
-                    for x in 8..w - 8 {
-                        let actual = pixels[y * w + x];
+                for y in 8..size.height - 8 {
+                    for x in 8..size.width - 8 {
+                        let actual = pixels[size.index_of(Vec2us::new(x, y))];
                         assert!(
                             (actual - expected).abs() < 1e-4,
                             "{cfa:?} channel {channel} at ({x},{y}) changed uniform {expected} to {actual}"

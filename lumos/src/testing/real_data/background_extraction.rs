@@ -6,6 +6,7 @@
 use crate::image_ops::intensity_plane;
 use crate::io::image::LoadContext;
 use crate::io::image::linear::LinearImage;
+use crate::math::size2us::Size2us;
 use crate::math::statistics::median_f32_mut;
 use crate::testing::{calibration_dir, init_tracing, save_png};
 use crate::{ExtractBackground, NeutralizeBackground, Scnr, Stretch};
@@ -16,15 +17,15 @@ use imaginarium::Image;
 /// flattening the background drives them together.
 fn corner_background_spread(image: &Image) -> f32 {
     let plane = intensity_plane(image);
-    let (w, h) = (plane.width(), plane.height());
+    let size = Size2us::new(plane.width(), plane.height());
     let px = plane.pixels();
-    let patch = 256.min(w / 4).min(h / 4);
+    let patch = 256.min(size.width / 4).min(size.height / 4);
     let inset = patch / 2;
 
     let patch_median = |x0: usize, y0: usize| -> f32 {
         let mut vals: Vec<f32> = Vec::with_capacity(patch * patch);
         for y in y0..y0 + patch {
-            let row = y * w + x0;
+            let row = y * size.width + x0;
             vals.extend_from_slice(&px[row..row + patch]);
         }
         median_f32_mut(&mut vals)
@@ -32,9 +33,9 @@ fn corner_background_spread(image: &Image) -> f32 {
 
     let corners = [
         patch_median(inset, inset),
-        patch_median(w - inset - patch, inset),
-        patch_median(inset, h - inset - patch),
-        patch_median(w - inset - patch, h - inset - patch),
+        patch_median(size.width - inset - patch, inset),
+        patch_median(inset, size.height - inset - patch),
+        patch_median(size.width - inset - patch, size.height - inset - patch),
     ];
     let max = corners.iter().copied().fold(f32::NEG_INFINITY, f32::max);
     let min = corners.iter().copied().fold(f32::INFINITY, f32::min);

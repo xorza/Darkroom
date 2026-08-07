@@ -26,8 +26,8 @@ fn interpolate_lanczos_impl<const A: usize, const SIZE: usize>(
     border_value: f32,
 ) -> f32 {
     let (x, y) = (pos.x, pos.y);
-    let (w, h) = (data.width(), data.height());
-    if !kernel::source_footprint_contains(pos, Size2us::new(w, h)) {
+    let size = Size2us::new(data.width(), data.height());
+    if !kernel::source_footprint_contains(pos, size) {
         return border_value;
     }
 
@@ -38,7 +38,11 @@ fn interpolate_lanczos_impl<const A: usize, const SIZE: usize>(
     let a_i32 = A as i32;
     let kx0 = x0 - a_i32 + 1;
     let ky0 = y0 - a_i32 + 1;
-    if kx0 < 0 || ky0 < 0 || kx0 + SIZE as i32 > w as i32 || ky0 + SIZE as i32 > h as i32 {
+    if kx0 < 0
+        || ky0 < 0
+        || kx0 + SIZE as i32 > size.width as i32
+        || ky0 + SIZE as i32 > size.height as i32
+    {
         return kernel::bilinear_sample(data, pos, border_value);
     }
 
@@ -57,7 +61,7 @@ fn interpolate_lanczos_impl<const A: usize, const SIZE: usize>(
     let mut sum = 0.0f32;
     for (j, &wyj) in wy.iter().enumerate() {
         let py = y0 - a_i32 + 1 + j as i32;
-        let row_off = py as usize * w;
+        let row_off = py as usize * size.width;
         for (i, &wxi) in wx.iter().enumerate() {
             let px = x0 - a_i32 + 1 + i as i32;
             sum += pixels[row_off + px as usize] * wxi * wyj;

@@ -93,12 +93,12 @@ impl Hdr {
 /// residual is ever computed — a streaming à trous over three reused planes — never the
 /// layer pyramid (`scales` full planes at ~100 MB each on a real master).
 fn hdr_map(intensity: &Buffer2<f32>, config: &Hdr) -> Buffer2<f32> {
-    let (w, h) = (intensity.width(), intensity.height());
-    let scales = config.scales.min(max_scales(Size2us::new(w, h)));
+    let size = Size2us::new(intensity.width(), intensity.height());
+    let scales = config.scales.min(max_scales(size));
 
     let mut c_curr = intensity.clone();
-    let mut c_next = Buffer2::new_default(w, h);
-    let mut tmp = Buffer2::new_default(w, h);
+    let mut c_next = Buffer2::new_default(size.width, size.height);
+    let mut tmp = Buffer2::new_default(size.width, size.height);
     for j in 0..scales {
         atrous_smooth(&c_curr, &mut c_next, &mut tmp, 1 << j);
         std::mem::swap(&mut c_curr, &mut c_next);

@@ -35,6 +35,7 @@ use imaginarium::{Buffer2, ChannelCount, Image};
 use rayon::prelude::*;
 
 use crate::image_ops::op::OpError;
+use crate::math::size2us::Size2us;
 
 /// Pixels per rayon work item. Parallelizing per pixel (`par_chunks_mut(3)`) drowns a cheap
 /// per-pixel op in rayon's recursive split/join overhead (it dominated SCNR); a coarse block
@@ -77,7 +78,7 @@ pub(crate) fn par_map_pixels(
 /// Per-pixel combined intensity as a plane: the channel itself for L, `(r+g+b)/3`
 /// for RGB.
 pub(crate) fn intensity_plane(image: &Image) -> Buffer2<f32> {
-    let (width, height) = (image.desc().width, image.desc().height);
+    let size = Size2us::new(image.desc().width, image.desc().height);
     let samples: &[f32] = bytemuck::cast_slice(image.bytes());
     if image.desc().color_format.channel_count == ChannelCount::Rgb {
         let intensity = samples
@@ -91,9 +92,9 @@ pub(crate) fn intensity_plane(image: &Image) -> Buffer2<f32> {
                 .intensity()
             })
             .collect();
-        Buffer2::new(width, height, intensity)
+        Buffer2::new(size.width, size.height, intensity)
     } else {
-        Buffer2::new(width, height, samples.to_vec())
+        Buffer2::new(size.width, size.height, samples.to_vec())
     }
 }
 

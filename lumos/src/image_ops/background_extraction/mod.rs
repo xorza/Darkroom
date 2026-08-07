@@ -198,15 +198,15 @@ fn collect_samples(
     tile: usize,
     workspace: &mut MeshWorkspace,
 ) -> Vec<Sample> {
-    let (w, h) = (channel.width(), channel.height());
+    let size = Size2us::new(channel.width(), channel.height());
     let grid = workspace.compute(channel, None, tile, SKY_CLIP_ITERATIONS, false);
 
     let mut samples = Vec::with_capacity(grid.stats.width() * grid.stats.height());
     for ty in 0..grid.stats.height() {
-        let y = norm(grid.centers_y[ty] as f64, h);
+        let y = norm(grid.centers_y[ty] as f64, size.height);
         for (tx, &cx) in grid.centers_x.iter().enumerate() {
             samples.push(Sample {
-                x: norm(cx as f64, w),
+                x: norm(cx as f64, size.width),
                 y,
                 z: grid.stats[(tx, ty)].sky as f64,
             });
