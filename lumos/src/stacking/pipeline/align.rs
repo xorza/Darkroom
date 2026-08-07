@@ -42,10 +42,10 @@ pub fn align_and_stack(
         let mut detectors =
             DetectorPool::from_config(&config.detection, total.min(rayon::current_num_threads()))?;
         detectors.try_map(&lights, |detector, image| {
-            // Cancelled: skip this frame's detection (cheap empty result); the
-            // post-loop check below turns the run into `Cancelled`.
+            // Cancelled: abort the batch rather than spend the rest of the budget detecting
+            // frames the run will discard.
             if cancel.is_cancelled() {
-                return Ok(Vec::new());
+                return Err(Error::Stack(StackError::Cancelled));
             }
             let result = detector.detect(image);
             let d = &result.diagnostics;
@@ -61,7 +61,7 @@ pub fn align_and_stack(
                 stars = result.stars.len(),
                 "detected stars"
             );
-            Ok::<_, Error>(result.stars)
+            Ok(result.stars)
         })
     }?;
     let mut detected_frames: Vec<DetectedFrame<LinearImage>> = lights
@@ -149,13 +149,14 @@ pub fn align_and_stack(
     // already in `outcomes` at its original index.
     let mut frames: Vec<StackFrame> = Vec::with_capacity(outcomes.len());
     let mut dropped = Vec::new();
+    // Ascending without a sort: rayon's indexed `collect` preserves input order, so this visits
+    // outcomes by frame index — the ordering `AlignmentSummary::dropped` documents.
     for outcome in outcomes {
         match outcome {
             Ok(frame) => frames.push(frame),
             Err(index) => dropped.push(index),
         }
     }
-    dropped.sort_unstable();
     tracing::info!(
         aligned = frames.len(),
         dropped = dropped.len(),

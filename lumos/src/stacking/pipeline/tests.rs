@@ -92,9 +92,17 @@ fn drops_unregisterable_frame_and_stacks_the_rest() {
         registration: reg,
     } = base_field();
     let dims = base.dimensions();
-    // A flat frame has no stars → registration fails → it is dropped, not fatal.
-    let blank = LinearImage::from_pixels(dims, vec![0.1; dims.pixel_count()]);
-    let frames = vec![base.clone(), shifted(&base, &reg, 5.0, 3.0), blank];
+    // A flat frame has no stars → registration fails → it is dropped, not fatal. Two of them, at
+    // non-adjacent indices, so `dropped` also pins its documented ascending order — no sort
+    // produces that, only rayon's order-preserving indexed `collect`.
+    let blank = || LinearImage::from_pixels(dims, vec![0.1; dims.pixel_count()]);
+    let frames = vec![
+        base.clone(),
+        blank(),
+        shifted(&base, &reg, 5.0, 3.0),
+        blank(),
+        shifted(&base, &reg, -4.0, 6.0),
+    ];
 
     let config = AlignStackConfig {
         reference: Reference::Index(0),
@@ -104,12 +112,12 @@ fn drops_unregisterable_frame_and_stacks_the_rest() {
 
     assert_eq!(
         result.alignment.dropped,
-        vec![2],
-        "blank frame should be dropped"
+        vec![1, 3],
+        "both blank frames should be dropped, in ascending index order"
     );
     assert_eq!(
-        result.alignment.registered, 2,
-        "reference + one aligned frame"
+        result.alignment.registered, 3,
+        "reference + two aligned frames"
     );
 }
 
@@ -270,13 +278,20 @@ fn ram_and_streaming_tiers_produce_identical_stacks() {
 
     // Five dithered exposures: five clears `StackConfig`'s default `SmallN::median_below(5)`, so
     // the σ-clipped mean actually runs and the combine emits a linear-variance plane — without
-    // that the comparison would silently skip one of the four output planes.
-    let mut frames = vec![base.clone()];
-    frames.extend(
-        [(6.0, -4.0), (-5.0, 7.0), (3.0, 9.0), (-8.0, -2.0)]
-            .into_iter()
-            .map(|(dx, dy)| shifted(&base, &reg, dx, dy)),
-    );
+    // that the comparison would silently skip one of the four output planes. Two starless frames
+    // at non-adjacent indices fail registration on both tiers, so the drop bookkeeping and its
+    // ascending order are compared too.
+    let dims = base.dimensions();
+    let blank = || LinearImage::from_pixels(dims, vec![0.1; dims.pixel_count()]);
+    let frames = [
+        base.clone(),
+        shifted(&base, &reg, 6.0, -4.0),
+        blank(),
+        shifted(&base, &reg, -5.0, 7.0),
+        shifted(&base, &reg, 3.0, 9.0),
+        blank(),
+        shifted(&base, &reg, -8.0, -2.0),
+    ];
     let paths: Vec<PathBuf> = frames
         .iter()
         .enumerate()
@@ -320,8 +335,12 @@ fn ram_and_streaming_tiers_produce_identical_stacks() {
     assert_eq!(ram.alignment.registered, streaming.alignment.registered);
     assert_eq!(ram.alignment.dropped, streaming.alignment.dropped);
     assert_eq!(
-        ram.alignment.registered,
-        paths.len(),
+        ram.alignment.dropped,
+        vec![2, 5],
+        "the two starless frames should drop, in ascending index order"
+    );
+    assert_eq!(
+        ram.alignment.registered, 5,
         "every dithered frame should register against the reference"
     );
 
