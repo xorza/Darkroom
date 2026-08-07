@@ -57,6 +57,17 @@ pub fn warp(
     warp_transform: &WarpTransform,
     config: &WarpParams,
 ) -> WarpResult {
+    // Release assert rather than a `Result`: a non-finite border is caller error, not a runtime
+    // failure, and it reaches every pixel outside the source footprint — seeding NaN into the
+    // combine, where only a debug assert would notice. Once per frame, so the check is free.
+    // Release assert rather than a `Result`: a non-finite border is caller error, not a runtime
+    // failure, and it reaches every pixel outside the source footprint — seeding NaN into the
+    // combine, where only a debug assert would notice. Once per frame, so the check is free.
+    assert!(
+        config.border_value.is_finite(),
+        "warp border_value must be finite, got {}",
+        config.border_value
+    );
     let dimensions = image.dimensions();
     let mut output = LinearImage {
         metadata: image.metadata.clone(),

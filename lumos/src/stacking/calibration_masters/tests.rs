@@ -2,9 +2,12 @@ use crate::io::image::LoadContext;
 use crate::io::image::cfa::{CfaImage, CfaType, QUANTIZATION_SIGMA_PER_STEP};
 use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::stacking::calibration_masters::defect_map::DefectMap;
+use crate::stacking::calibration_masters::stack_cfa_master;
 use crate::stacking::calibration_masters::weighted_budget;
 use crate::stacking::calibration_masters::{CalibrationError, DEFAULT_SIGMA_THRESHOLD};
-use crate::stacking::combine::error::Error;
+use crate::stacking::combine::config::{CombineMethod, StackConfig};
+use crate::stacking::combine::error::{Error, StackConfigError};
+use crate::stacking::combine::rejection::Rejection;
 use crate::testing::{constant_cfa, make_cfa};
 use crate::{
     CalibrationComponent, CalibrationMasters, CalibrationSet, DefectSummary, ImageError,
@@ -1002,5 +1005,37 @@ fn ram_bytes_sums_present_frames_and_defects() {
             cold_pixels: 1,
             percentage: 0.0,
         })
+    );
+}
+
+#[test]
+fn stack_cfa_master_rejects_an_invalid_config_before_reading_anything() {
+    // The only combine entry point outside `combine_cached`, so the only one that could reach
+    // the reducer unvalidated. A NaN sigma rejects every sample at every pixel and yields a
+    // silently black master; a negative one inverts the clip band and faults on the survivor
+    // range. Both are configuration errors and must be reported as such.
+    let missing = [std::path::PathBuf::from(".tmp/does-not-exist.fits")];
+
+    for rejection in [Rejection::sigma_clip(f32::NAN), Rejection::sigma_clip(-1.0)] {
+        let config = StackConfig {
+            method: CombineMethod::Mean(rejection),
+            ..StackConfig::dark()
+        };
+        let error = stack_cfa_master(&missing, config, CancelToken::never()).unwrap_err();
+        assert!(
+            matches!(
+                error,
+                Error::Config(StackConfigError::InvalidSigmaLow { .. })
+            ),
+            "expected the config to be rejected, got {error:?}"
+        );
+    }
+
+    // Reported from the config alone: the paths are never opened, so a valid config on the same
+    // missing files fails differently.
+    let error = stack_cfa_master(&missing, StackConfig::dark(), CancelToken::never()).unwrap_err();
+    assert!(
+        !matches!(error, Error::Config(_)),
+        "a valid config must get past validation and fail on the missing file, got {error:?}"
     );
 }
