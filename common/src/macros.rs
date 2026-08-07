@@ -1,25 +1,3 @@
-/// Shorter alias for `#[cfg(target_arch = "x86_64")]`
-#[macro_export]
-macro_rules! cfg_x86_64 {
-    ($($item:item)*) => {
-        $(
-            #[cfg(target_arch = "x86_64")]
-            $item
-        )*
-    };
-}
-
-/// Shorter alias for `#[cfg(target_arch = "aarch64")]`
-#[macro_export]
-macro_rules! cfg_aarch64 {
-    ($($item:item)*) => {
-        $(
-            #[cfg(target_arch = "aarch64")]
-            $item
-        )*
-    };
-}
-
 /// Defines a `#[repr(transparent)]` strongly-typed UUID newtype.
 ///
 /// The expansion references `uuid` and `serde` (with the `derive` feature) in
