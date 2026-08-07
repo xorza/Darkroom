@@ -74,7 +74,7 @@ impl Default for WarpParams {
 
 impl WarpParams {
     fn validate(&self) -> Result<(), InvalidConfigField> {
-        InvalidConfigField::finite("warp border_value", "finite", self.border_value, |_| true)
+        InvalidConfigField::finite_only("warp border_value", self.border_value)
     }
 }
 

@@ -11,7 +11,8 @@ use std::fmt;
 /// typed variant on their module's error.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct InvalidConfigField {
-    /// The offending field, spelled as it is in the config struct.
+    /// The offending field. Its name in the config struct, prefixed with the algorithm that owns
+    /// it when the bare name would not identify it — `tile_size` alone names two unrelated fields.
     pub field: &'static str,
     /// The accepted range as prose, completing "`<field>` must be …": `"finite and positive"`,
     /// `"between 16 and 256"`.
@@ -57,6 +58,11 @@ impl InvalidConfigField {
     ) -> Result<(), Self> {
         let value = value.into();
         Self::check(value.is_finite() && accepted(value), field, expected, value)
+    }
+
+    /// [`finite`](Self::finite) for a field with no bound beyond being a real number.
+    pub(crate) fn finite_only(field: &'static str, value: impl Into<f64>) -> Result<(), Self> {
+        Self::finite(field, "finite", value, |_| true)
     }
 
     /// [`check`](Self::check) for a bound that is itself a config value — `expected` names the
