@@ -1052,7 +1052,9 @@ pub(crate) fn load_raw(path: &Path, cancel: &CancelToken) -> Result<LinearImage,
             DecodedRawPreview {
                 pixels: DemosaicedPixels::Flat(demosaiced.pixels),
                 dimensions: demosaiced.dimensions,
-                cfa_type: Some(CfaType::Mono),
+                // libraw already interpolated these samples, and it never told us from which
+                // pattern — there is no mosaic left to describe and no pattern to name.
+                cfa_type: None,
                 color: ColorProvenance::Unspecified,
                 demosaic: DemosaicProvenance::LibRaw,
             }

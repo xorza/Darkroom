@@ -1,5 +1,11 @@
+use crate::io::image::cfa::CfaType;
 use crate::io::image::image_dimensions::ImageDimensions;
+use crate::io::image::image_provenance::{
+    ColorProvenance, DecoderProvenance, DemosaicProvenance, ImageProvenance, SourceContainer,
+    TransferProvenance,
+};
 use crate::io::image::linear::LinearImage;
+use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::math::size2us::Size2us;
 use crate::stacking::star_detection::detector::stages::prepare::*;
 
@@ -43,6 +49,72 @@ fn test_prepare_with_star() {
 
     // Star pixel should be preserved (no CFA, no defects)
     assert!((result[(32, 32)] - 0.9).abs() < 1e-6);
+}
+
+#[test]
+fn the_median_filter_follows_interpolation_not_the_sensor_pattern() {
+    #[derive(Debug)]
+    struct Case {
+        demosaic: Option<DemosaicProvenance>,
+        cfa_type: Option<CfaType>,
+        /// The spike after `prepare`: background once the median has erased it, else untouched.
+        peak: f32,
+    }
+
+    // An isolated spike is exactly what a 3×3 median erases — 8 of its 9 neighbours sit at
+    // background, so the median is background — which makes it a clean probe for whether the
+    // filter ran at all.
+    let size = Size2us::new(8, 8);
+    let mut data = vec![0.1f32; size.pixel_count()];
+    data[4 * size.width + 4] = 0.9;
+
+    let cases = [
+        // Interpolated: the artifacts the filter exists for are present.
+        Case {
+            demosaic: Some(DemosaicProvenance::LumosRcd),
+            cfa_type: Some(CfaType::Bayer(CfaPattern::Rggb)),
+            peak: 0.1,
+        },
+        // libraw's fallback interpolates too, and no longer names a pattern to prove it.
+        Case {
+            demosaic: Some(DemosaicProvenance::LibRaw),
+            cfa_type: None,
+            peak: 0.1,
+        },
+        // A monochrome sensor's plane is measured, not interpolated — its CFA tag must not
+        // smooth the PSF that FWHM and flux are read off.
+        Case {
+            demosaic: Some(DemosaicProvenance::None),
+            cfa_type: Some(CfaType::Mono),
+            peak: 0.9,
+        },
+        // No provenance at all: nothing claims an interpolation, so nothing is suppressed.
+        Case {
+            demosaic: None,
+            cfa_type: Some(CfaType::Mono),
+            peak: 0.9,
+        },
+    ];
+
+    for case in cases {
+        let mut image = LinearImage::from_pixels(ImageDimensions::new(size, 1), data.clone());
+        image.metadata.cfa_type = case.cfa_type.clone();
+        image.metadata.provenance = case.demosaic.map(|demosaic| ImageProvenance {
+            container: SourceContainer::CameraRaw,
+            decoder: DecoderProvenance::LibRaw,
+            transfer: TransferProvenance::RawNormalized,
+            color: ColorProvenance::SensorRgb,
+            clipped: true,
+            demosaic,
+        });
+
+        let mut pool = DetectionResources::new(size);
+        let out = prepare(&image, &mut pool);
+
+        assert_eq!(out[(4, 4)], case.peak, "{case:?}");
+        // Only the spike is in play; the flat background is a fixed point of both paths.
+        assert_eq!(out[(0, 0)], 0.1, "{case:?}");
+    }
 }
 
 #[test]
