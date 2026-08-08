@@ -13,14 +13,15 @@ use crate::stacking::star_detection::synthetic_tests::stage_tests::{
     background_estimate, matched_truths,
 };
 use crate::testing::TestRng;
-use crate::testing::synthetic::star_profiles::render_gaussian_star;
+use crate::testing::synthetic::star_profiles::{StarProfile, SyntheticStar};
 use imaginarium::Buffer2;
 
 /// Render `stars` as `(x, y, amplitude)` on a 0.1 sky with light Gaussian noise (σ 0.01).
 fn field(size: Size2us, sigma: f32, stars: &[(f32, f32, f32)], seed: u64) -> Buffer2<f32> {
     let mut pixels = vec![0.1f32; size.pixel_count()];
     for &(x, y, amp) in stars {
-        render_gaussian_star(&mut pixels, size.width, x, y, sigma, amp);
+        SyntheticStar::new(glam::Vec2::new(x, y), amp, StarProfile::Gaussian { sigma })
+            .add_to(&mut pixels, size.width);
     }
     let mut rng = TestRng::new(seed);
     for p in &mut pixels {

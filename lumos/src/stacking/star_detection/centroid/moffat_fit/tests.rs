@@ -1,7 +1,6 @@
 //! Tests for Moffat profile fitting.
 
 use crate::math::size2us::Size2us;
-use crate::math::vec2us::Vec2us;
 use std::f64::consts::PI;
 
 use crate::stacking::star_detection::centroid::internals::{
@@ -9,28 +8,8 @@ use crate::stacking::star_detection::centroid::internals::{
 };
 use crate::stacking::star_detection::centroid::lm_optimizer::LMConfig;
 use crate::stacking::star_detection::centroid::moffat_fit::*;
+use crate::testing::synthetic::star_profiles::{StarProfile, SyntheticStar};
 use glam::Vec2;
-
-#[allow(clippy::too_many_arguments)]
-fn make_moffat_stamp(
-    size: Size2us,
-    cx: f32,
-    cy: f32,
-    amplitude: f32,
-    alpha: f32,
-    beta: f32,
-    background: f32,
-) -> Vec<f32> {
-    let mut pixels = vec![background; size.pixel_count()];
-    for y in 0..size.height {
-        for x in 0..size.width {
-            let r2 = (x as f32 - cx).powi(2) + (y as f32 - cy).powi(2);
-            let value = amplitude * (1.0 + r2 / (alpha * alpha)).powf(-beta);
-            pixels[size.index_of(Vec2us::new(x, y))] += value;
-        }
-    }
-    pixels
-}
 
 #[test]
 fn test_moffat_fit_centered_fixed_beta() {
@@ -43,22 +22,21 @@ fn test_moffat_fit_centered_fixed_beta() {
     let true_beta = 2.5;
     let true_bg = 0.1;
 
-    let pixels = make_moffat_stamp(
-        Size2us::new(width, height),
-        true_cx,
-        true_cy,
+    let pixels = SyntheticStar::new(
+        Vec2::new(true_cx, true_cy),
         true_amp,
-        true_alpha,
-        true_beta,
-        true_bg,
-    );
-    let pixels_buf = Buffer2::new(width, height, pixels);
+        StarProfile::Moffat {
+            alpha: true_alpha,
+            beta: true_beta,
+        },
+    )
+    .stamp(Size2us::new(width, height), true_bg);
 
     let config = MoffatFitConfig {
         fixed_beta: true_beta,
         ..Default::default()
     };
-    let result = fit_moffat_2d(&pixels_buf, Vec2::splat(10.0), 8, true_bg, None, &config);
+    let result = fit_moffat_2d(&pixels, Vec2::splat(10.0), 8, true_bg, None, &config);
 
     assert!(result.is_some());
     let result = result.unwrap();
@@ -79,22 +57,21 @@ fn test_moffat_fit_subpixel_offset() {
     let true_beta = 2.5;
     let true_bg = 0.1;
 
-    let pixels = make_moffat_stamp(
-        Size2us::new(width, height),
-        true_cx,
-        true_cy,
+    let pixels = SyntheticStar::new(
+        Vec2::new(true_cx, true_cy),
         true_amp,
-        true_alpha,
-        true_beta,
-        true_bg,
-    );
-    let pixels_buf = Buffer2::new(width, height, pixels);
+        StarProfile::Moffat {
+            alpha: true_alpha,
+            beta: true_beta,
+        },
+    )
+    .stamp(Size2us::new(width, height), true_bg);
 
     let config = MoffatFitConfig {
         fixed_beta: true_beta,
         ..Default::default()
     };
-    let result = fit_moffat_2d(&pixels_buf, Vec2::splat(10.0), 8, true_bg, None, &config);
+    let result = fit_moffat_2d(&pixels, Vec2::splat(10.0), 8, true_bg, None, &config);
 
     assert!(result.is_some());
     let result = result.unwrap();
@@ -117,11 +94,10 @@ fn test_alpha_beta_fwhm_conversion() {
 fn test_moffat_fit_edge_position() {
     let width = 21;
     let height = 21;
-    let pixels = vec![0.1f32; width * height];
-    let pixels_buf = Buffer2::new(width, height, pixels);
+    let pixels = Buffer2::new_filled(width, height, 0.1f32);
 
     let config = MoffatFitConfig::default();
-    let result = fit_moffat_2d(&pixels_buf, Vec2::new(2.0, 10.0), 8, 0.1, None, &config);
+    let result = fit_moffat_2d(&pixels, Vec2::new(2.0, 10.0), 8, 0.1, None, &config);
     assert!(result.is_none());
 }
 
@@ -137,24 +113,22 @@ fn test_moffat_fit_with_gaussian_noise() {
     let true_bg = 0.1;
     let noise_sigma = 0.05; // 5% of amplitude
 
-    let mut pixels = make_moffat_stamp(
-        Size2us::new(width, height),
-        true_cx,
-        true_cy,
+    let mut pixels = SyntheticStar::new(
+        Vec2::new(true_cx, true_cy),
         true_amp,
-        true_alpha,
-        true_beta,
-        true_bg,
-    );
+        StarProfile::Moffat {
+            alpha: true_alpha,
+            beta: true_beta,
+        },
+    )
+    .stamp(Size2us::new(width, height), true_bg);
     add_noise(&mut pixels, noise_sigma, 12345);
-
-    let pixels_buf = Buffer2::new(width, height, pixels);
 
     let config = MoffatFitConfig {
         fixed_beta: true_beta,
         ..Default::default()
     };
-    let result = fit_moffat_2d(&pixels_buf, Vec2::splat(10.0), 8, true_bg, None, &config);
+    let result = fit_moffat_2d(&pixels, Vec2::splat(10.0), 8, true_bg, None, &config);
 
     assert!(result.is_some());
     let result = result.unwrap();
@@ -184,24 +158,22 @@ fn test_moffat_fit_high_noise_still_converges() {
     let true_bg = 0.1;
     let noise_sigma = 0.15; // 15% noise - challenging
 
-    let mut pixels = make_moffat_stamp(
-        Size2us::new(width, height),
-        true_cx,
-        true_cy,
+    let mut pixels = SyntheticStar::new(
+        Vec2::new(true_cx, true_cy),
         true_amp,
-        true_alpha,
-        true_beta,
-        true_bg,
-    );
+        StarProfile::Moffat {
+            alpha: true_alpha,
+            beta: true_beta,
+        },
+    )
+    .stamp(Size2us::new(width, height), true_bg);
     add_noise(&mut pixels, noise_sigma, 54321);
-
-    let pixels_buf = Buffer2::new(width, height, pixels);
 
     let config = MoffatFitConfig {
         fixed_beta: true_beta,
         ..Default::default()
     };
-    let result = fit_moffat_2d(&pixels_buf, Vec2::splat(10.0), 8, true_bg, None, &config);
+    let result = fit_moffat_2d(&pixels, Vec2::splat(10.0), 8, true_bg, None, &config);
 
     // Should still converge even with high noise
     assert!(result.is_some());
@@ -233,22 +205,21 @@ fn test_moffat_fit_low_snr() {
     let true_beta = 2.5;
     let true_bg = 0.5;
 
-    let pixels = make_moffat_stamp(
-        Size2us::new(width, height),
-        true_cx,
-        true_cy,
+    let pixels = SyntheticStar::new(
+        Vec2::new(true_cx, true_cy),
         true_amp,
-        true_alpha,
-        true_beta,
-        true_bg,
-    );
-    let pixels_buf = Buffer2::new(width, height, pixels);
+        StarProfile::Moffat {
+            alpha: true_alpha,
+            beta: true_beta,
+        },
+    )
+    .stamp(Size2us::new(width, height), true_bg);
 
     let config = MoffatFitConfig {
         fixed_beta: true_beta,
         ..Default::default()
     };
-    let result = fit_moffat_2d(&pixels_buf, Vec2::splat(10.0), 8, true_bg, None, &config);
+    let result = fit_moffat_2d(&pixels, Vec2::splat(10.0), 8, true_bg, None, &config);
 
     // Even at low SNR, the noiseless Moffat should still be recoverable
     let result = result.expect("Low-SNR Moffat should converge");
@@ -276,16 +247,15 @@ fn test_moffat_fit_wrong_background_estimate() {
     let true_beta = 2.5;
     let true_bg = 0.1;
 
-    let pixels = make_moffat_stamp(
-        Size2us::new(width, height),
-        true_cx,
-        true_cy,
+    let pixels = SyntheticStar::new(
+        Vec2::new(true_cx, true_cy),
         true_amp,
-        true_alpha,
-        true_beta,
-        true_bg,
-    );
-    let pixels_buf = Buffer2::new(width, height, pixels);
+        StarProfile::Moffat {
+            alpha: true_alpha,
+            beta: true_beta,
+        },
+    )
+    .stamp(Size2us::new(width, height), true_bg);
 
     let config = MoffatFitConfig {
         fixed_beta: true_beta,
@@ -294,7 +264,7 @@ fn test_moffat_fit_wrong_background_estimate() {
 
     // Use wrong background estimate (20% error)
     let wrong_bg = true_bg * 1.2;
-    let result = fit_moffat_2d(&pixels_buf, Vec2::splat(10.0), 8, wrong_bg, None, &config);
+    let result = fit_moffat_2d(&pixels, Vec2::splat(10.0), 8, wrong_bg, None, &config);
 
     assert!(result.is_some());
     let result = result.unwrap();
@@ -330,22 +300,21 @@ fn test_moffat_fit_wrong_beta_still_finds_centroid() {
     let true_beta = 4.0; // True beta
     let true_bg = 0.1;
 
-    let pixels = make_moffat_stamp(
-        Size2us::new(width, height),
-        true_cx,
-        true_cy,
+    let pixels = SyntheticStar::new(
+        Vec2::new(true_cx, true_cy),
         true_amp,
-        true_alpha,
-        true_beta,
-        true_bg,
-    );
-    let pixels_buf = Buffer2::new(width, height, pixels);
+        StarProfile::Moffat {
+            alpha: true_alpha,
+            beta: true_beta,
+        },
+    )
+    .stamp(Size2us::new(width, height), true_bg);
 
     let config = MoffatFitConfig {
         fixed_beta: 2.5, // Wrong beta (2.5 instead of 4.0)
         ..Default::default()
     };
-    let result = fit_moffat_2d(&pixels_buf, Vec2::splat(10.0), 8, true_bg, None, &config);
+    let result = fit_moffat_2d(&pixels, Vec2::splat(10.0), 8, true_bg, None, &config);
 
     assert!(result.is_some());
     let result = result.unwrap();
@@ -374,22 +343,21 @@ fn test_moffat_fit_very_high_amplitude() {
     let true_beta = 2.5;
     let true_bg = 100.0;
 
-    let pixels = make_moffat_stamp(
-        Size2us::new(width, height),
-        true_cx,
-        true_cy,
+    let pixels = SyntheticStar::new(
+        Vec2::new(true_cx, true_cy),
         true_amp,
-        true_alpha,
-        true_beta,
-        true_bg,
-    );
-    let pixels_buf = Buffer2::new(width, height, pixels);
+        StarProfile::Moffat {
+            alpha: true_alpha,
+            beta: true_beta,
+        },
+    )
+    .stamp(Size2us::new(width, height), true_bg);
 
     let config = MoffatFitConfig {
         fixed_beta: true_beta,
         ..Default::default()
     };
-    let result = fit_moffat_2d(&pixels_buf, Vec2::splat(10.0), 8, true_bg, None, &config);
+    let result = fit_moffat_2d(&pixels, Vec2::splat(10.0), 8, true_bg, None, &config);
 
     assert!(result.is_some());
     let result = result.unwrap();
@@ -410,22 +378,21 @@ fn test_moffat_fit_very_low_amplitude() {
     let true_beta = 2.5;
     let true_bg = 0.001;
 
-    let pixels = make_moffat_stamp(
-        Size2us::new(width, height),
-        true_cx,
-        true_cy,
+    let pixels = SyntheticStar::new(
+        Vec2::new(true_cx, true_cy),
         true_amp,
-        true_alpha,
-        true_beta,
-        true_bg,
-    );
-    let pixels_buf = Buffer2::new(width, height, pixels);
+        StarProfile::Moffat {
+            alpha: true_alpha,
+            beta: true_beta,
+        },
+    )
+    .stamp(Size2us::new(width, height), true_bg);
 
     let config = MoffatFitConfig {
         fixed_beta: true_beta,
         ..Default::default()
     };
-    let result = fit_moffat_2d(&pixels_buf, Vec2::splat(10.0), 8, true_bg, None, &config);
+    let result = fit_moffat_2d(&pixels, Vec2::splat(10.0), 8, true_bg, None, &config);
 
     assert!(result.is_some());
     let result = result.unwrap();
@@ -445,22 +412,21 @@ fn test_moffat_fit_narrow_psf() {
     let true_beta = 2.5;
     let true_bg = 0.1;
 
-    let pixels = make_moffat_stamp(
-        Size2us::new(width, height),
-        true_cx,
-        true_cy,
+    let pixels = SyntheticStar::new(
+        Vec2::new(true_cx, true_cy),
         true_amp,
-        true_alpha,
-        true_beta,
-        true_bg,
-    );
-    let pixels_buf = Buffer2::new(width, height, pixels);
+        StarProfile::Moffat {
+            alpha: true_alpha,
+            beta: true_beta,
+        },
+    )
+    .stamp(Size2us::new(width, height), true_bg);
 
     let config = MoffatFitConfig {
         fixed_beta: true_beta,
         ..Default::default()
     };
-    let result = fit_moffat_2d(&pixels_buf, Vec2::splat(10.0), 8, true_bg, None, &config);
+    let result = fit_moffat_2d(&pixels, Vec2::splat(10.0), 8, true_bg, None, &config);
 
     assert!(result.is_some());
     let result = result.unwrap();
@@ -480,22 +446,21 @@ fn test_moffat_fit_wide_psf() {
     let true_beta = 2.5;
     let true_bg = 0.1;
 
-    let pixels = make_moffat_stamp(
-        Size2us::new(width, height),
-        true_cx,
-        true_cy,
+    let pixels = SyntheticStar::new(
+        Vec2::new(true_cx, true_cy),
         true_amp,
-        true_alpha,
-        true_beta,
-        true_bg,
-    );
-    let pixels_buf = Buffer2::new(width, height, pixels);
+        StarProfile::Moffat {
+            alpha: true_alpha,
+            beta: true_beta,
+        },
+    )
+    .stamp(Size2us::new(width, height), true_bg);
 
     let config = MoffatFitConfig {
         fixed_beta: true_beta,
         ..Default::default()
     };
-    let result = fit_moffat_2d(&pixels_buf, Vec2::splat(15.0), 12, true_bg, None, &config);
+    let result = fit_moffat_2d(&pixels, Vec2::splat(15.0), 12, true_bg, None, &config);
 
     assert!(result.is_some());
     let result = result.unwrap();
@@ -521,22 +486,21 @@ fn test_moffat_fit_various_beta_values() {
 
     // Test various beta values from Lorentzian-like (1.5) to Gaussian-like (6.0)
     for &true_beta in &[1.5f32, 2.0, 2.5, 3.0, 4.0, 5.0, 6.0] {
-        let pixels = make_moffat_stamp(
-            Size2us::new(width, height),
-            true_cx,
-            true_cy,
+        let pixels = SyntheticStar::new(
+            Vec2::new(true_cx, true_cy),
             true_amp,
-            true_alpha,
-            true_beta,
-            true_bg,
-        );
-        let pixels_buf = Buffer2::new(width, height, pixels);
+            StarProfile::Moffat {
+                alpha: true_alpha,
+                beta: true_beta,
+            },
+        )
+        .stamp(Size2us::new(width, height), true_bg);
 
         let config = MoffatFitConfig {
             fixed_beta: true_beta,
             ..Default::default()
         };
-        let result = fit_moffat_2d(&pixels_buf, Vec2::splat(10.0), 8, true_bg, None, &config);
+        let result = fit_moffat_2d(&pixels, Vec2::splat(10.0), 8, true_bg, None, &config);
 
         assert!(result.is_some(), "Failed for beta={}", true_beta);
         let result = result.unwrap();
@@ -565,16 +529,15 @@ fn test_moffat_fit_converges_within_max_iterations() {
     let true_beta = 2.5;
     let true_bg = 0.1;
 
-    let pixels = make_moffat_stamp(
-        Size2us::new(width, height),
-        true_cx,
-        true_cy,
+    let pixels = SyntheticStar::new(
+        Vec2::new(true_cx, true_cy),
         true_amp,
-        true_alpha,
-        true_beta,
-        true_bg,
-    );
-    let pixels_buf = Buffer2::new(width, height, pixels);
+        StarProfile::Moffat {
+            alpha: true_alpha,
+            beta: true_beta,
+        },
+    )
+    .stamp(Size2us::new(width, height), true_bg);
 
     let config = MoffatFitConfig {
         fixed_beta: true_beta,
@@ -583,7 +546,7 @@ fn test_moffat_fit_converges_within_max_iterations() {
             ..Default::default()
         },
     };
-    let result = fit_moffat_2d(&pixels_buf, Vec2::splat(10.0), 8, true_bg, None, &config);
+    let result = fit_moffat_2d(&pixels, Vec2::splat(10.0), 8, true_bg, None, &config);
 
     assert!(result.is_some());
     let result = result.unwrap();
@@ -603,16 +566,15 @@ fn test_moffat_fit_bad_initial_guess_still_converges() {
     let true_beta = 2.5;
     let true_bg = 0.1;
 
-    let pixels = make_moffat_stamp(
-        Size2us::new(width, height),
-        true_cx,
-        true_cy,
+    let pixels = SyntheticStar::new(
+        Vec2::new(true_cx, true_cy),
         true_amp,
-        true_alpha,
-        true_beta,
-        true_bg,
-    );
-    let pixels_buf = Buffer2::new(width, height, pixels);
+        StarProfile::Moffat {
+            alpha: true_alpha,
+            beta: true_beta,
+        },
+    )
+    .stamp(Size2us::new(width, height), true_bg);
 
     let config = MoffatFitConfig {
         fixed_beta: true_beta,
@@ -623,7 +585,7 @@ fn test_moffat_fit_bad_initial_guess_still_converges() {
     };
 
     // Start from a position offset by 2 pixels
-    let result = fit_moffat_2d(&pixels_buf, Vec2::new(8.0, 12.0), 8, true_bg, None, &config);
+    let result = fit_moffat_2d(&pixels, Vec2::new(8.0, 12.0), 8, true_bg, None, &config);
 
     assert!(result.is_some());
     let result = result.unwrap();
@@ -646,25 +608,17 @@ fn test_moffat_fit_uniform_data_returns_result() {
     let width = 21;
     let height = 21;
     let uniform_value = 0.5f32;
-    let pixels = vec![uniform_value; width * height];
-    let pixels_buf = Buffer2::new(width, height, pixels);
+    let pixels = Buffer2::new_filled(width, height, uniform_value);
 
     let config = MoffatFitConfig::default();
-    let result = fit_moffat_2d(
-        &pixels_buf,
-        Vec2::splat(10.0),
-        8,
-        uniform_value,
-        None,
-        &config,
-    );
+    let result = fit_moffat_2d(&pixels, Vec2::splat(10.0), 8, uniform_value, None, &config);
 
     // Should produce some result (may not converge well)
     assert!(result.is_some());
     let result = result.unwrap();
     // Values should be finite
-    assert!((result.pos.x as f32).is_finite());
-    assert!((result.pos.y as f32).is_finite());
+    assert!(result.pos.x.is_finite());
+    assert!(result.pos.y.is_finite());
     assert!(result.debug.amplitude.is_finite());
 }
 
@@ -679,22 +633,21 @@ fn test_moffat_fwhm_computed_correctly() {
     let true_beta = 2.5;
     let true_bg = 0.1;
 
-    let pixels = make_moffat_stamp(
-        Size2us::new(width, height),
-        true_cx,
-        true_cy,
+    let pixels = SyntheticStar::new(
+        Vec2::new(true_cx, true_cy),
         true_amp,
-        true_alpha,
-        true_beta,
-        true_bg,
-    );
-    let pixels_buf = Buffer2::new(width, height, pixels);
+        StarProfile::Moffat {
+            alpha: true_alpha,
+            beta: true_beta,
+        },
+    )
+    .stamp(Size2us::new(width, height), true_bg);
 
     let config = MoffatFitConfig {
         fixed_beta: true_beta,
         ..Default::default()
     };
-    let result = fit_moffat_2d(&pixels_buf, Vec2::splat(10.0), 8, true_bg, None, &config).unwrap();
+    let result = fit_moffat_2d(&pixels, Vec2::splat(10.0), 8, true_bg, None, &config).unwrap();
 
     // FWHM should match analytical formula
     let expected_fwhm = alpha_beta_to_fwhm(true_alpha, true_beta);

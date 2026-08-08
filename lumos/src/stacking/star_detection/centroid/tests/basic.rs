@@ -7,7 +7,8 @@ fn test_centroid_accuracy() {
     let width = 128;
     let height = 128;
     let true_pos = Vec2::new(64.3, 64.7);
-    let pixels = make_gaussian_star(Size2us::new(width, height), true_pos, 2.5, 0.8, 0.1);
+    let pixels = SyntheticStar::new(true_pos, 0.8, StarProfile::Gaussian { sigma: 2.5 })
+        .stamp(Size2us::new(width, height), 0.1);
 
     let bg = estimate_background(
         &pixels,
@@ -57,13 +58,8 @@ fn test_fwhm_estimation() {
     let height = 128;
     let sigma = 3.0f32;
     let expected_fwhm = FWHM_TO_SIGMA * sigma;
-    let pixels = make_gaussian_star(
-        Size2us::new(width, height),
-        Vec2::splat(64.0),
-        sigma,
-        0.8,
-        0.1,
-    );
+    let pixels = SyntheticStar::new(Vec2::splat(64.0), 0.8, StarProfile::Gaussian { sigma })
+        .stamp(Size2us::new(width, height), 0.1);
 
     let bg = estimate_background(
         &pixels,
@@ -109,13 +105,8 @@ fn test_fwhm_estimation() {
 fn test_circular_star_eccentricity() {
     let width = 64;
     let height = 64;
-    let pixels = make_gaussian_star(
-        Size2us::new(width, height),
-        Vec2::splat(32.0),
-        2.5,
-        0.8,
-        0.1,
-    );
+    let pixels = SyntheticStar::new(Vec2::splat(32.0), 0.8, StarProfile::Gaussian { sigma: 2.5 })
+        .stamp(Size2us::new(width, height), 0.1);
 
     let bg = estimate_background(
         &pixels,
@@ -149,13 +140,8 @@ fn test_snr_and_flux_values() {
     // substantial SNR (>> 10) and measurable flux
     let width = 64;
     let height = 64;
-    let pixels = make_gaussian_star(
-        Size2us::new(width, height),
-        Vec2::splat(32.0),
-        2.5,
-        0.8,
-        0.1,
-    );
+    let pixels = SyntheticStar::new(Vec2::splat(32.0), 0.8, StarProfile::Gaussian { sigma: 2.5 })
+        .stamp(Size2us::new(width, height), 0.1);
 
     let bg = estimate_background(
         &pixels,
