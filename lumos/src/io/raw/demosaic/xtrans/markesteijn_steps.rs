@@ -593,7 +593,10 @@ pub(crate) fn compute_derivatives(
 
     (0..total_chunks).into_par_iter().for_each_init(
         || {
-            // Allocate 3 row buffers once per rayon thread, reused across chunks.
+            // Allocate 3 row buffers once per rayon thread, reused across chunks. Allocated in
+            // the init rather than leased from a `JobScratchPool`: a demosaic pass runs this loop
+            // once and nothing in the RAW decode path outlives a single frame, so there is
+            // nowhere warm to hand them back to.
             [
                 vec![(0.0f32, 0.0f32, 0.0f32); width],
                 vec![(0.0f32, 0.0f32, 0.0f32); width],
