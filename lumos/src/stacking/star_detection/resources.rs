@@ -96,7 +96,6 @@ impl DetectionResources {
 #[cfg(test)]
 pub(crate) mod internals {
     use crate::buffer_pool::internals::pooled_count;
-    use crate::math::size2us::Size2us;
     use crate::stacking::star_detection::resources::DetectionResources;
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -106,10 +105,8 @@ pub(crate) mod internals {
         pub labels: usize,
     }
 
-    pub(crate) fn matches_dimensions(resources: &DetectionResources, dimensions: Size2us) -> bool {
-        resources.dimensions == dimensions
-    }
-
+    /// The pools' occupancy, for readers outside this module — `dimensions` is already
+    /// `pub(crate)` and needs no accessor, but the pools themselves are private.
     pub(crate) fn buffer_counts(resources: &DetectionResources) -> BufferCounts {
         BufferCounts {
             floats: pooled_count(&resources.floats),
@@ -125,15 +122,21 @@ mod tests {
     use crate::stacking::star_detection::resources::DetectionResources;
     use crate::stacking::star_detection::resources::internals::BufferCounts;
     use crate::stacking::star_detection::resources::internals::buffer_counts;
-    use crate::stacking::star_detection::resources::internals::matches_dimensions;
     use imaginarium::Buffer2;
 
     #[test]
     fn test_pool_creation() {
         let pool = DetectionResources::new(Size2us::new(100, 50));
         assert_eq!(pool.dimensions, Size2us::new(100, 50));
-        assert!(matches_dimensions(&pool, Size2us::new(100, 50)));
-        assert!(!matches_dimensions(&pool, Size2us::new(50, 100)));
+        // Nothing is pooled up front, so the first acquire of each kind allocates.
+        assert_eq!(
+            buffer_counts(&pool),
+            BufferCounts {
+                floats: 0,
+                bitmasks: 0,
+                labels: 0,
+            }
+        );
     }
 
     #[test]
