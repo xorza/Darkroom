@@ -5,7 +5,7 @@ use crate::math::vec2us::Vec2us;
 use std::f64::consts::PI;
 
 use crate::stacking::star_detection::centroid::internals::{
-    add_noise, approx_eq, compute_hessian_gradient,
+    add_noise, approx_eq, reference_normal_equations,
 };
 use crate::stacking::star_detection::centroid::lm_optimizer::LMConfig;
 use crate::stacking::star_detection::centroid::moffat_fit::*;
@@ -898,15 +898,16 @@ fn test_batch_build_normal_equations_matches_scalar() {
     // Scalar reference: build jacobian/residuals then compute hessian/gradient
     let mut jac_scalar = Vec::new();
     let mut res_scalar = Vec::new();
-    let mut chi2_scalar = 0.0f64;
     for ((&x, &y), &z) in data_x.iter().zip(data_y.iter()).zip(data_z.iter()) {
         let (model_val, jac_row) = model.evaluate_and_jacobian(x, y, &params);
-        let residual = z - model_val;
-        chi2_scalar += residual * residual;
         jac_scalar.push(jac_row);
-        res_scalar.push(residual);
+        res_scalar.push(z - model_val);
     }
-    let (hessian_scalar, gradient_scalar) = compute_hessian_gradient(&jac_scalar, &res_scalar);
+    let NormalEquations {
+        hessian: hessian_scalar,
+        gradient: gradient_scalar,
+        chi2: chi2_scalar,
+    } = reference_normal_equations(&jac_scalar, &res_scalar);
 
     // Batch path (uses SIMD on x86_64 with AVX2)
     let NormalEquations {
@@ -993,15 +994,16 @@ fn test_batch_build_normal_equations_various_stamp_sizes() {
         // Scalar reference
         let mut jac_scalar = Vec::new();
         let mut res_scalar = Vec::new();
-        let mut chi2_scalar = 0.0f64;
         for ((&x, &y), &z) in data_x.iter().zip(data_y.iter()).zip(data_z.iter()) {
             let (model_val, jac_row) = model.evaluate_and_jacobian(x, y, &params);
-            let residual = z - model_val;
-            chi2_scalar += residual * residual;
             jac_scalar.push(jac_row);
-            res_scalar.push(residual);
+            res_scalar.push(z - model_val);
         }
-        let (hessian_scalar, gradient_scalar) = compute_hessian_gradient(&jac_scalar, &res_scalar);
+        let NormalEquations {
+            hessian: hessian_scalar,
+            gradient: gradient_scalar,
+            chi2: chi2_scalar,
+        } = reference_normal_equations(&jac_scalar, &res_scalar);
 
         // Batch
         let NormalEquations {
@@ -1050,15 +1052,16 @@ fn test_batch_build_normal_equations_all_pow_strategies() {
         // Scalar reference
         let mut jac_scalar = Vec::new();
         let mut res_scalar = Vec::new();
-        let mut chi2_scalar = 0.0f64;
         for ((&x, &y), &z) in data_x.iter().zip(data_y.iter()).zip(data_z.iter()) {
             let (model_val, jac_row) = model.evaluate_and_jacobian(x, y, &params);
-            let residual = z - model_val;
-            chi2_scalar += residual * residual;
             jac_scalar.push(jac_row);
-            res_scalar.push(residual);
+            res_scalar.push(z - model_val);
         }
-        let (hessian_scalar, gradient_scalar) = compute_hessian_gradient(&jac_scalar, &res_scalar);
+        let NormalEquations {
+            hessian: hessian_scalar,
+            gradient: gradient_scalar,
+            chi2: chi2_scalar,
+        } = reference_normal_equations(&jac_scalar, &res_scalar);
 
         // Batch
         let NormalEquations {

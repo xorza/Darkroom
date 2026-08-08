@@ -5,6 +5,7 @@ use glam::Vec2;
 use imaginarium::Buffer2;
 
 use crate::math::size2us::Size2us;
+use crate::stacking::star_detection::centroid::lm_optimizer::NormalEquations;
 
 use crate::testing::synthetic::patterns::add_gaussian_noise;
 
@@ -29,30 +30,34 @@ pub(super) fn approx_eq(a: f64, b: f64) -> bool {
     abs_diff / max_abs < 1e-10
 }
 
-/// Scalar reference for computing J^T J (hessian) and J^T r (gradient).
+/// Scalar reference for the normal equations: `J^T·J`, `J^T·r`, and `Σr²`, from a jacobian and
+/// residuals computed by the caller.
 ///
-/// Used as ground truth in SIMD-vs-scalar validation tests.
+/// Ground truth in SIMD-vs-scalar validation tests, so it re-derives the symmetric fill instead
+/// of calling [`NormalEquations::mirror_lower_triangle`] — sharing that step with the code under
+/// test would let a bug in it pass unnoticed. Unweighted, matching the unweighted batch paths it
+/// is compared against.
 #[allow(clippy::needless_range_loop)]
-pub(super) fn compute_hessian_gradient<const N: usize>(
+pub(super) fn reference_normal_equations<const N: usize>(
     jacobian: &[[f64; N]],
     residuals: &[f64],
-) -> ([[f64; N]; N], [f64; N]) {
-    let mut hessian = [[0.0f64; N]; N];
-    let mut gradient = [0.0f64; N];
+) -> NormalEquations<N> {
+    let mut equations = NormalEquations::zeroed();
     for (row, &r) in jacobian.iter().zip(residuals.iter()) {
+        equations.chi2 += r * r;
         for i in 0..N {
-            gradient[i] += row[i] * r;
+            equations.gradient[i] += row[i] * r;
             for j in i..N {
-                hessian[i][j] += row[i] * row[j];
+                equations.hessian[i][j] += row[i] * row[j];
             }
         }
     }
     for i in 1..N {
         for j in 0..i {
-            hessian[i][j] = hessian[j][i];
+            equations.hessian[i][j] = equations.hessian[j][i];
         }
     }
-    (hessian, gradient)
+    equations
 }
 
 /// Generate a circular Gaussian star stamp.
