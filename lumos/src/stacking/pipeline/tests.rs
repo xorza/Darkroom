@@ -19,6 +19,7 @@ use crate::stacking::pipeline::config::{AlignStackConfig, Reference};
 use crate::stacking::pipeline::frame::{DetectedFrame, PipelineFrame};
 use crate::stacking::pipeline::result::Error;
 use crate::stacking::pipeline::tier::FrameTier;
+use crate::stacking::progress::ProgressCallback;
 use crate::stacking::registration::config::Config as RegistrationConfig;
 use crate::stacking::registration::resample::warp;
 use crate::stacking::registration::transform::{Transform, TransformType, WarpTransform};
@@ -62,7 +63,13 @@ fn aligns_shifted_frames_into_a_sharp_stack() {
         reference: Reference::Index(0),
         ..Default::default()
     };
-    let result = align_and_stack(frames, &config, CancelToken::never()).expect("stack");
+    let result = align_and_stack(
+        frames,
+        &config,
+        ProgressCallback::default(),
+        CancelToken::never(),
+    )
+    .expect("stack");
 
     assert_eq!(result.alignment.reference, 0);
     assert_eq!(
@@ -113,7 +120,13 @@ fn drops_unregisterable_frame_and_stacks_the_rest() {
         reference: Reference::Index(0),
         ..Default::default()
     };
-    let result = align_and_stack(frames, &config, CancelToken::never()).expect("stack");
+    let result = align_and_stack(
+        frames,
+        &config,
+        ProgressCallback::default(),
+        CancelToken::never(),
+    )
+    .expect("stack");
 
     assert_eq!(
         result.alignment.dropped,
@@ -149,7 +162,13 @@ fn stacked_master_inherits_reference_frame_metadata() {
         reference: Reference::Index(1),
         ..Default::default()
     };
-    let result = align_and_stack(vec![f0, f1, f2], &config, CancelToken::never()).expect("stack");
+    let result = align_and_stack(
+        vec![f0, f1, f2],
+        &config,
+        ProgressCallback::default(),
+        CancelToken::never(),
+    )
+    .expect("stack");
 
     assert_eq!(result.alignment.reference, 1);
     assert_eq!(
@@ -175,6 +194,7 @@ fn mismatched_frame_dimensions_are_rejected_before_registration() {
     let error = align_and_stack(
         vec![base, odd, odder],
         &AlignStackConfig::default(),
+        ProgressCallback::default(),
         CancelToken::never(),
     )
     .unwrap_err();
@@ -220,7 +240,13 @@ fn an_invalid_registration_config_is_reported_as_one() {
         "premise: this registration config must be invalid"
     );
 
-    let error = align_and_stack(frames, &config, CancelToken::never()).unwrap_err();
+    let error = align_and_stack(
+        frames,
+        &config,
+        ProgressCallback::default(),
+        CancelToken::never(),
+    )
+    .unwrap_err();
     assert!(
         matches!(error, Error::RegistrationConfig(_)),
         "expected the config to be blamed, got {error:?}"
@@ -264,8 +290,15 @@ fn a_bad_registration_config_is_never_mistaken_for_frames_that_would_not_match()
         })
         .collect();
 
-    let error = register_warp_and_stack(detected, &config, FrameTier::Ram, 1, CancelToken::never())
-        .unwrap_err();
+    let error = register_warp_and_stack(
+        detected,
+        &config,
+        FrameTier::Ram,
+        1,
+        ProgressCallback::default(),
+        CancelToken::never(),
+    )
+    .unwrap_err();
     let Error::RegistrationConfig(invalid) = error else {
         panic!("expected the config to be blamed, got {error:?}")
     };
@@ -292,7 +325,13 @@ fn an_invalid_stack_config_is_caught_before_the_frames_are_worked() {
         ..Default::default()
     };
 
-    let error = align_and_stack(frames, &config, CancelToken::never()).unwrap_err();
+    let error = align_and_stack(
+        frames,
+        &config,
+        ProgressCallback::default(),
+        CancelToken::never(),
+    )
+    .unwrap_err();
     assert!(
         matches!(
             error,
@@ -317,7 +356,13 @@ fn all_non_reference_frames_dropped_errors() {
         reference: Reference::Index(0),
         ..Default::default()
     };
-    let err = align_and_stack(frames, &config, CancelToken::never()).unwrap_err();
+    let err = align_and_stack(
+        frames,
+        &config,
+        ProgressCallback::default(),
+        CancelToken::never(),
+    )
+    .unwrap_err();
     assert!(
         matches!(err, Error::AllFramesDropped { count: 2 }),
         "all non-reference frames dropped → AllFramesDropped {{ count: 2 }}, got {err:?}"
@@ -336,8 +381,13 @@ fn auto_reference_picks_the_richest_frame() {
     let sparse = LinearImage::from_pixels(dims, vec![0.1; dims.pixel_count()]);
     let frames = vec![sparse, base.clone(), shifted(&base, &reg, 4.0, -3.0)];
 
-    let result =
-        align_and_stack(frames, &AlignStackConfig::default(), CancelToken::never()).expect("stack");
+    let result = align_and_stack(
+        frames,
+        &AlignStackConfig::default(),
+        ProgressCallback::default(),
+        CancelToken::never(),
+    )
+    .expect("stack");
     assert_ne!(
         result.alignment.reference, 0,
         "Auto must not anchor on the near-blank frame"
@@ -354,6 +404,7 @@ fn public_input_errors() {
     let err = align_and_stack(
         Vec::new(),
         &AlignStackConfig::default(),
+        ProgressCallback::default(),
         CancelToken::never(),
     )
     .unwrap_err();
@@ -370,7 +421,13 @@ fn public_input_errors() {
         ..AlignStackConfig::default()
     };
     let image = LinearImage::from_pixels(ImageDimensions::new((1, 1), 1), vec![0.0]);
-    let error = align_and_stack(vec![image], &config, CancelToken::never()).unwrap_err();
+    let error = align_and_stack(
+        vec![image],
+        &config,
+        ProgressCallback::default(),
+        CancelToken::never(),
+    )
+    .unwrap_err();
     let Error::DetectionConfig(invalid) = error else {
         panic!("expected a detection config error, got {error:?}")
     };
@@ -461,11 +518,22 @@ fn ram_and_streaming_tiers_produce_identical_stacks() {
     streaming_config.stack.cache.keep_cache = true;
 
     let masters = CalibrationMasters::default();
-    let ram = calibrate_align_stack(&paths, &masters, &ram_config, CancelToken::never())
-        .expect("RAM-tier stack");
-    let streaming =
-        calibrate_align_stack(&paths, &masters, &streaming_config, CancelToken::never())
-            .expect("streaming-tier stack");
+    let ram = calibrate_align_stack(
+        &paths,
+        &masters,
+        &ram_config,
+        ProgressCallback::default(),
+        CancelToken::never(),
+    )
+    .expect("RAM-tier stack");
+    let streaming = calibrate_align_stack(
+        &paths,
+        &masters,
+        &streaming_config,
+        ProgressCallback::default(),
+        CancelToken::never(),
+    )
+    .expect("streaming-tier stack");
 
     // Premise: the two budgets must straddle the tier boundary. Only the streaming path creates a
     // spill directory, so its presence — and the RAM path's lack of one — is what proves this test
@@ -581,6 +649,7 @@ fn calibrate_align_stack_runs_end_to_end_on_real_lights() {
         lights,
         &masters,
         &AlignStackConfig::default(),
+        ProgressCallback::default(),
         CancelToken::never(),
     )
     .expect("calibrate_align_stack");
@@ -633,14 +702,26 @@ fn streaming_disk_tier_matches_ram_on_real_lights() {
     // RAM tier: huge memory budget → the all-in-memory path.
     let mut ram_cfg = config.clone();
     ram_cfg.stack.cache.available_memory = Some(u64::MAX);
-    let ram = calibrate_align_stack(lights, &masters, &ram_cfg, CancelToken::never())
-        .expect("RAM-tier stack");
+    let ram = calibrate_align_stack(
+        lights,
+        &masters,
+        &ram_cfg,
+        ProgressCallback::default(),
+        CancelToken::never(),
+    )
+    .expect("RAM-tier stack");
 
     // Disk tier: a 1-byte budget forces the streaming disk path.
     let mut disk_cfg = config;
     disk_cfg.stack.cache.available_memory = Some(1);
-    let disk = calibrate_align_stack(lights, &masters, &disk_cfg, CancelToken::never())
-        .expect("disk-tier (streaming) stack");
+    let disk = calibrate_align_stack(
+        lights,
+        &masters,
+        &disk_cfg,
+        ProgressCallback::default(),
+        CancelToken::never(),
+    )
+    .expect("disk-tier (streaming) stack");
 
     assert_eq!(
         ram.alignment.registered, disk.alignment.registered,

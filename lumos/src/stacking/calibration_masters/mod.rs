@@ -180,15 +180,12 @@ fn frames_fit_in_memory<P: AsRef<Path> + Sync>(
 pub fn stack_cfa_master(
     paths: &[impl AsRef<Path> + Sync],
     config: StackConfig,
+    progress: ProgressCallback,
     cancel: CancelToken,
 ) -> Result<Option<CfaImage>, Error> {
     if paths.is_empty() {
         return Ok(None);
     }
-    // The only combine entry point that does not go through `combine_cached`, so it is also the
-    // only one that has to validate for itself. Without this an out-of-range rejection reaches
-    // the reducer, where a NaN sigma rejects every sample and yields a silently black master.
-
     // The only combine entry point that does not go through `combine_cached`, so it is also the
     // only one that has to validate for itself. Without this an out-of-range rejection reaches
     // the reducer, where a NaN sigma rejects every sample and yields a silently black master.
@@ -202,13 +199,8 @@ pub fn stack_cfa_master(
     };
     // `cancel` rides on the cache from construction, so the RAW-decode load loop
     // polls it too (not just the combine).
-    let cache = FrameCache::from_cfa_paths(
-        paths,
-        &config.cache,
-        config.normalization,
-        ProgressCallback::default(),
-        cancel,
-    )?;
+    let cache =
+        FrameCache::from_cfa_paths(paths, &config.cache, config.normalization, progress, cancel)?;
 
     let product = run_stacking(&cache, &config);
     if cache.core.cancel.is_cancelled() {
@@ -392,18 +384,47 @@ impl CalibrationMasters {
 
                 // Independent stacks on the shared rayon pool — work-stealing interleaves their
                 // parallel sections, filling the gaps a single sequential role would leave idle.
+                // Four concurrent stacks cannot share one callback: each reports its own
+                // (current, total) against a different frame count, so the streams would
+                // interleave into nonsense. Watch a role by stacking it with `stack_cfa_master`.
                 let ((dark, flat), (bias, flat_dark)) = rayon::join(
                     move || {
                         rayon::join(
-                            move || stack_cfa_master(frames.dark, dark_cfg, dark_cancel),
-                            move || stack_cfa_master(frames.flat, flat_cfg, flat_cancel),
+                            move || {
+                                stack_cfa_master(
+                                    frames.dark,
+                                    dark_cfg,
+                                    ProgressCallback::default(),
+                                    dark_cancel,
+                                )
+                            },
+                            move || {
+                                stack_cfa_master(
+                                    frames.flat,
+                                    flat_cfg,
+                                    ProgressCallback::default(),
+                                    flat_cancel,
+                                )
+                            },
                         )
                     },
                     move || {
                         rayon::join(
-                            move || stack_cfa_master(frames.bias, bias_cfg, bias_cancel),
                             move || {
-                                stack_cfa_master(frames.flat_dark, flat_dark_cfg, flat_dark_cancel)
+                                stack_cfa_master(
+                                    frames.bias,
+                                    bias_cfg,
+                                    ProgressCallback::default(),
+                                    bias_cancel,
+                                )
+                            },
+                            move || {
+                                stack_cfa_master(
+                                    frames.flat_dark,
+                                    flat_dark_cfg,
+                                    ProgressCallback::default(),
+                                    flat_dark_cancel,
+                                )
                             },
                         )
                     },
@@ -413,10 +434,30 @@ impl CalibrationMasters {
                 // Sequential, full budget each (each role's cache frees before the next loads), so a
                 // role that fits the whole budget stays in RAM instead of being forced to disk.
                 (
-                    stack_cfa_master(frames.dark, StackConfig::dark(), cancel.clone())?,
-                    stack_cfa_master(frames.flat, StackConfig::flat(), cancel.clone())?,
-                    stack_cfa_master(frames.bias, StackConfig::bias(), cancel.clone())?,
-                    stack_cfa_master(frames.flat_dark, StackConfig::dark(), cancel.clone())?,
+                    stack_cfa_master(
+                        frames.dark,
+                        StackConfig::dark(),
+                        ProgressCallback::default(),
+                        cancel.clone(),
+                    )?,
+                    stack_cfa_master(
+                        frames.flat,
+                        StackConfig::flat(),
+                        ProgressCallback::default(),
+                        cancel.clone(),
+                    )?,
+                    stack_cfa_master(
+                        frames.bias,
+                        StackConfig::bias(),
+                        ProgressCallback::default(),
+                        cancel.clone(),
+                    )?,
+                    stack_cfa_master(
+                        frames.flat_dark,
+                        StackConfig::dark(),
+                        ProgressCallback::default(),
+                        cancel.clone(),
+                    )?,
                 )
             };
 

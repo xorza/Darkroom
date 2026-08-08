@@ -21,6 +21,7 @@ use crate::stacking::pipeline::detector_pool::DetectorPool;
 use crate::stacking::pipeline::frame::DetectedFrame;
 use crate::stacking::pipeline::result::{AlignStackResult, Error};
 use crate::stacking::pipeline::tier::FrameTier;
+use crate::stacking::progress::ProgressCallback;
 
 /// Calibrate, align, and stack camera-RAW or mosaic-FITS light frames end to end.
 ///
@@ -41,6 +42,7 @@ pub fn calibrate_align_stack<P: AsRef<Path> + Sync>(
     light_paths: &[P],
     masters: &CalibrationMasters,
     config: &AlignStackConfig,
+    progress: ProgressCallback,
     cancel: CancelToken,
 ) -> Result<AlignStackResult, Error> {
     if light_paths.is_empty() {
@@ -106,7 +108,14 @@ pub fn calibrate_align_stack<P: AsRef<Path> + Sync>(
         })
     }?;
 
-    register_warp_and_stack(detected, config, tier, plan.warp_concurrency, cancel)
+    register_warp_and_stack(
+        detected,
+        config,
+        tier,
+        plan.warp_concurrency,
+        progress,
+        cancel,
+    )
 }
 
 /// Load one raw light, apply the calibration masters, optionally reject cosmic rays, and

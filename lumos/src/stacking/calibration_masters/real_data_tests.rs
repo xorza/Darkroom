@@ -25,6 +25,7 @@ use quickbench::quick_bench;
 use crate::io::raw;
 use crate::stacking::calibration_masters::defect_map::DefectMap;
 use crate::stacking::calibration_masters::stack_cfa_master;
+use crate::stacking::progress::ProgressCallback;
 use crate::testing::{calibration_dir, init_tracing};
 use crate::{CalibrationMasters, CalibrationSet, CfaImage, DEFAULT_SIGMA_THRESHOLD, StackConfig};
 
@@ -262,9 +263,14 @@ fn hot_mask_spatial_distribution_and_repeatability() {
     let full_paths: Vec<_> = paths.darks.iter().collect();
 
     let detect = |dark_paths: &[&PathBuf]| {
-        let dark = stack_cfa_master(dark_paths, StackConfig::dark(), CancelToken::never())
-            .expect("master-dark stack failed")
-            .expect("master dark");
+        let dark = stack_cfa_master(
+            dark_paths,
+            StackConfig::dark(),
+            ProgressCallback::default(),
+            CancelToken::never(),
+        )
+        .expect("master-dark stack failed")
+        .expect("master dark");
         let size = Size2us::new(dark.data.width(), dark.data.height());
         let map = DefectMap::default()
             .detect_hot(&dark, DEFAULT_SIGMA_THRESHOLD, &CancelToken::never())
@@ -345,8 +351,13 @@ fn bench_stack_master_dark(b: ::quickbench::Bencher) {
     println!("Stacking master dark from {} frames", paths.darks.len());
     b.bench(|| {
         black_box(
-            stack_cfa_master(&paths.darks, StackConfig::dark(), CancelToken::never())
-                .expect("dark stack failed"),
+            stack_cfa_master(
+                &paths.darks,
+                StackConfig::dark(),
+                ProgressCallback::default(),
+                CancelToken::never(),
+            )
+            .expect("dark stack failed"),
         )
     });
 }
@@ -360,8 +371,13 @@ fn bench_stack_master_flat(b: ::quickbench::Bencher) {
     println!("Stacking master flat from {} frames", paths.flats.len());
     b.bench(|| {
         black_box(
-            stack_cfa_master(&paths.flats, StackConfig::flat(), CancelToken::never())
-                .expect("flat stack failed"),
+            stack_cfa_master(
+                &paths.flats,
+                StackConfig::flat(),
+                ProgressCallback::default(),
+                CancelToken::never(),
+            )
+            .expect("flat stack failed"),
         )
     });
 }
@@ -375,8 +391,13 @@ fn bench_stack_master_bias(b: ::quickbench::Bencher) {
     println!("Stacking master bias from {} frames", paths.bias.len());
     b.bench(|| {
         black_box(
-            stack_cfa_master(&paths.bias, StackConfig::bias(), CancelToken::never())
-                .expect("bias stack failed"),
+            stack_cfa_master(
+                &paths.bias,
+                StackConfig::bias(),
+                ProgressCallback::default(),
+                CancelToken::never(),
+            )
+            .expect("bias stack failed"),
         )
     });
 }

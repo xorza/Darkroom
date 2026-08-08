@@ -245,7 +245,13 @@ fn align_stack_memory_probe() {
         reference: Reference::Index(0),
         ..Default::default()
     };
-    let result = align_and_stack(frames, &config, CancelToken::never()).expect("align_and_stack");
+    let result = align_and_stack(
+        frames,
+        &config,
+        ProgressCallback::default(),
+        CancelToken::never(),
+    )
+    .expect("align_and_stack");
     let total_secs = start.elapsed().as_secs_f64();
 
     let peak = sampler.finish();
