@@ -5,7 +5,7 @@
 
 use imaginarium::Buffer2;
 
-use crate::stacking::star_detection::background::estimate::BackgroundEstimate;
+use crate::stacking::star_detection::background::background_estimate::BackgroundEstimate;
 use crate::stacking::star_detection::centroid::measure_star;
 use crate::stacking::star_detection::config::measurement_config::MeasurementConfig;
 use crate::stacking::star_detection::deblend::region::Region;

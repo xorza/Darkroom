@@ -28,7 +28,7 @@ use glam::Vec2;
 use crate::math::size2us::Size2us;
 use crate::math::statistics::{ClippedStats, sigma_clipped_median_mad_arrayvec};
 use crate::math::{FWHM_TO_SIGMA, sigma_to_fwhm};
-use crate::stacking::star_detection::background::estimate::BackgroundEstimate;
+use crate::stacking::star_detection::background::background_estimate::BackgroundEstimate;
 use crate::stacking::star_detection::config::measurement_config::{
     CentroidMethod, LocalBackgroundMethod, MeasurementConfig, NoiseModel,
 };

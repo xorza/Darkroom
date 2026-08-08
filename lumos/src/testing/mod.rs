@@ -11,7 +11,7 @@ use crate::io::image::cfa::{CfaImage, CfaType};
 use crate::io::image::image_metadata::ImageMetadata;
 use crate::io::raw::RAW_EXTENSIONS;
 use crate::math::size2us::Size2us;
-use crate::stacking::star_detection::background::{self, estimate::BackgroundEstimate};
+use crate::stacking::star_detection::background::background_estimate::BackgroundEstimate;
 use crate::stacking::star_detection::config::background_config::BackgroundConfig;
 use crate::stacking::star_detection::resources::DetectionResources;
 
@@ -110,7 +110,7 @@ pub(crate) fn estimate_background(
     config: &BackgroundConfig,
 ) -> BackgroundEstimate {
     let mut pool = DetectionResources::new(Size2us::new(pixels.width(), pixels.height()));
-    background::estimate_background(pixels, config, &mut pool)
+    BackgroundEstimate::estimate(pixels, config, &mut pool)
 }
 
 /// Create a CfaImage from raw pixel data and CFA type.

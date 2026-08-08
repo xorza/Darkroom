@@ -2,7 +2,7 @@
 
 use crate::{
     math::size2us::Size2us,
-    stacking::star_detection::background,
+    stacking::star_detection::background::background_estimate::BackgroundEstimate,
     stacking::star_detection::config::background_config::{BackgroundConfig, BackgroundRefinement},
     stacking::star_detection::resources::DetectionResources,
     testing::estimate_background,
@@ -280,19 +280,19 @@ fn repeated_estimation_and_dimension_reset_preserve_exact_results() {
     };
     let mut resources = DetectionResources::new(Size2us::new(96, 64));
 
-    let first = background::estimate_background(&pixels, &config, &mut resources);
+    let first = BackgroundEstimate::estimate(&pixels, &config, &mut resources);
     let expected_background = first.background.pixels().to_vec();
     let expected_noise = first.noise.pixels().to_vec();
     first.release_to_pool(&mut resources);
 
-    let second = background::estimate_background(&pixels, &config, &mut resources);
+    let second = BackgroundEstimate::estimate(&pixels, &config, &mut resources);
     assert_eq!(second.background.pixels(), expected_background);
     assert_eq!(second.noise.pixels(), expected_noise);
     second.release_to_pool(&mut resources);
 
     resources.reset(Size2us::new(48, 32));
     let resized_pixels = Buffer2::new_filled(48, 32, 0.25);
-    let resized = background::estimate_background(&resized_pixels, &config, &mut resources);
+    let resized = BackgroundEstimate::estimate(&resized_pixels, &config, &mut resources);
     assert_eq!(resized.background.width(), 48);
     assert_eq!(resized.background.height(), 32);
     assert!(

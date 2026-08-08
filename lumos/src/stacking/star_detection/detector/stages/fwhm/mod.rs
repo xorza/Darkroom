@@ -4,7 +4,7 @@
 //! a manual value, auto-estimating from bright stars, or disabling.
 
 use crate::math::statistics::{mad_f32_with_scratch, mad_floored, median_f32_mut};
-use crate::stacking::star_detection::background::estimate::BackgroundEstimate;
+use crate::stacking::star_detection::background::background_estimate::BackgroundEstimate;
 use crate::stacking::star_detection::config::Config;
 use crate::stacking::star_detection::config::detection_config::DetectionConfig;
 use crate::stacking::star_detection::config::filter_config::FilterConfig;

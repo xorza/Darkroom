@@ -7,8 +7,7 @@ use std::hint::black_box;
 use crate::background_mesh::workspace::MeshWorkspace;
 use crate::bit_buffer2::BitBuffer2;
 use crate::math::size2us::Size2us;
-use crate::stacking::star_detection::background::estimate::BackgroundEstimate;
-use crate::stacking::star_detection::background::{estimate_background, refine_background};
+use crate::stacking::star_detection::background::background_estimate::BackgroundEstimate;
 use crate::stacking::star_detection::config::background_config::BackgroundConfig;
 use crate::stacking::star_detection::resources::DetectionResources;
 use crate::testing::synthetic::fixtures::{cluster_field, star_field};
@@ -20,9 +19,9 @@ fn estimate_background_test(
     config: &BackgroundConfig,
     resources: &mut DetectionResources,
 ) -> BackgroundEstimate {
-    let mut estimate = estimate_background(pixels, config, resources);
+    let mut estimate = BackgroundEstimate::estimate(pixels, config, resources);
     if config.refinement.iterations() > 0 {
-        refine_background(pixels, &mut estimate, config, 4.0, resources);
+        estimate.refine(pixels, config, 4.0, resources);
     }
     estimate
 }

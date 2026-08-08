@@ -10,7 +10,7 @@ use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 use imaginarium::Buffer2;
 
-use crate::stacking::star_detection::background::estimate::BackgroundEstimate;
+use crate::stacking::star_detection::background::background_estimate::BackgroundEstimate;
 use crate::stacking::star_detection::config::detection_config::DetectionConfig;
 use crate::stacking::star_detection::convolution::{MatchedFilterBuffers, matched_filter};
 use crate::stacking::star_detection::deblend::ComponentData;
