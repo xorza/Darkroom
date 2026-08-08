@@ -110,9 +110,46 @@ pub(crate) fn fits_in_memory(
         .is_some_and(|bytes| bytes as u64 <= memory_budget(available_memory))
 }
 
-/// Calibrated/warped pixels plus detection or warp scratch.
-pub(crate) const PER_FRAME_WORKING_PLANES: usize = 8;
-const PER_FRAME_RESIDENT_PLANES: usize = 4;
+/// Quality planes a warp emits beside the image: `coverage` and `confidence`, one image-sized
+/// plane each. The register/warp stage stores both, so a warped frame costs its own pixels plus
+/// these — see `registration::resample::WarpResult` and `frame_store::WarpQuality`.
+const WARP_QUALITY_PLANES: usize = 2;
+
+/// Image-sized planes the star detector's pool holds at its high-water mark: six f32 planes, the
+/// u32 label map, and the threshold bitmask. The bitmask is a thirty-second of an f32 plane;
+/// charging it as a whole one keeps this integral and errs high.
+///
+/// `star_detection::mem_budget_tests` pins the detector's actual pool and checks it against this,
+/// so a stage that grows its scratch cannot drift away from the planner silently.
+pub(crate) const DETECTION_WORKING_PLANES: usize = 8;
+
+/// What one frame costs the detect-register-warp stage, derived from the decoded frame rather
+/// than assumed — so a mono frame is not charged for channels it does not have, and a demosaiced
+/// three-channel one is charged for all of them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct PerFrameBytes {
+    /// Resident once warped: the frame's own pixels plus its two quality planes.
+    pub(crate) warped: usize,
+    /// Peak transient one in-flight frame adds, whichever stage wants more — the warp, which
+    /// holds the source and the warped output together until it drops the source, or detection
+    /// with its whole scratch pool.
+    pub(crate) working: usize,
+}
+
+impl PerFrameBytes {
+    pub(crate) fn new(plane_bytes: usize, demosaic: DemosaicMemory) -> Self {
+        let warped = demosaic
+            .output_bytes
+            .saturating_add(WARP_QUALITY_PLANES.saturating_mul(plane_bytes));
+        Self {
+            warped,
+            working: demosaic
+                .output_bytes
+                .saturating_add(warped)
+                .max(DETECTION_WORKING_PLANES.saturating_mul(plane_bytes)),
+        }
+    }
+}
 
 /// The tier decision for one run, plus the concurrency each stage may use under it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -138,22 +175,21 @@ pub(crate) fn plan_memory(
         "memory planning requires at least one frame"
     );
     let workers = frame_count.min(threads.max(1));
-    let working_bytes = PER_FRAME_WORKING_PLANES.saturating_mul(plane_bytes);
+    let per_frame = PerFrameBytes::new(plane_bytes, demosaic);
     let decode_extra = demosaic.peak_bytes.saturating_sub(demosaic.output_bytes);
     let usable = memory_budget(available);
 
     let decoded_resident = (demosaic.output_bytes as u64).saturating_mul(frame_count as u64);
     let decode_minimum = decoded_resident.saturating_add(decode_extra as u64);
-    let warped_bytes = PER_FRAME_RESIDENT_PLANES.saturating_mul(plane_bytes);
-    let warped_resident = (warped_bytes as u64).saturating_mul(frame_count as u64);
+    let warped_resident = (per_frame.warped as u64).saturating_mul(frame_count as u64);
     let working_peak =
-        warped_resident.saturating_add((working_bytes as u64).saturating_mul(workers as u64));
+        warped_resident.saturating_add((per_frame.working as u64).saturating_mul(workers as u64));
     let fits_in_ram = decode_minimum.max(working_peak) <= usable;
 
     let (decode_resident_frames, decode_bytes) = if fits_in_ram {
         (frame_count, decode_extra)
     } else {
-        (0, demosaic.peak_bytes.max(working_bytes))
+        (0, demosaic.peak_bytes.max(per_frame.working))
     };
     let warp_resident_frames = usize::from(fits_in_ram) * frame_count;
     let decode_concurrency = load_concurrency(
@@ -164,8 +200,8 @@ pub(crate) fn plan_memory(
         workers,
     );
     let warp_concurrency = load_concurrency(
-        warped_bytes,
-        working_bytes,
+        per_frame.warped,
+        per_frame.working,
         warp_resident_frames,
         available,
         workers,
