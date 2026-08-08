@@ -96,10 +96,12 @@ pub use stacking::registration::triangle::TriangleConfig;
 pub use stacking::combine::cache_config::CacheConfig;
 pub use stacking::combine::config::{CombineMethod, Normalization, SmallN, StackConfig, Weighting};
 pub use stacking::combine::error::{Error as StackError, FramePlane, StackConfigError};
-pub use stacking::combine::rejection::{
-    GesdConfig, LinearFitClipConfig, PercentileClipConfig, Rejection, SigmaClipConfig,
-    WinsorizedClipConfig,
-};
+pub use stacking::combine::rejection::Rejection;
+pub use stacking::combine::rejection::gesd_config::GesdConfig;
+pub use stacking::combine::rejection::linear_fit_clip_config::LinearFitClipConfig;
+pub use stacking::combine::rejection::percentile_clip_config::PercentileClipConfig;
+pub use stacking::combine::rejection::sigma_clip_config::SigmaClipConfig;
+pub use stacking::combine::rejection::winsorized_clip_config::WinsorizedClipConfig;
 pub use stacking::combine::stack::{StackFrame, stack, stack_images};
 pub use stacking::frame_store::FrameStoreError;
 pub use stacking::product::{QualityMap, QualityPlanes, StackProduct};
