@@ -37,9 +37,9 @@ fn test_norm_scale_stored_correctly() {
 
     let expected_norm_scale = avg_distance(&ref_points, center);
     assert!(
-        (sip.norm_scale - expected_norm_scale).abs() < 1e-10,
-        "norm_scale: got {:.6}, expected {:.6}",
-        sip.norm_scale,
+        (sip.norm.scale - expected_norm_scale).abs() < 1e-10,
+        "norm scale: got {:.6}, expected {:.6}",
+        sip.norm.scale,
         expected_norm_scale
     );
 }

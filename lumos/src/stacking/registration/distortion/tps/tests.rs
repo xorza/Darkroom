@@ -123,11 +123,30 @@ fn test_compute_normalization_square() {
         DVec2::new(0.0, 100.0),
         DVec2::new(100.0, 100.0),
     ];
-    let (center, scale) = compute_normalization(&points);
+    let norm = compute_normalization(&points);
     // Bounding box: [0,100] x [0,100]
     // center = (50, 50), scale = max(100, 100) / 2 = 50
-    assert_dvec2_near(center, DVec2::new(50.0, 50.0), 1e-12, "center");
-    assert!((scale - 50.0).abs() < 1e-12, "scale: {scale}");
+    assert_dvec2_near(norm.center, DVec2::new(50.0, 50.0), 1e-12, "center");
+    assert!((norm.scale - 50.0).abs() < 1e-12, "scale: {}", norm.scale);
+
+    // The box corner normalizes to the unit corner: (100 - 50) / 50 = 1.
+    let corner = DVec2::new(100.0, 100.0);
+    assert_dvec2_near(norm.normalize(corner), DVec2::ONE, 1e-12, "normalized");
+    assert_dvec2_near(norm.denormalize(DVec2::ONE), corner, 1e-12, "denormalized");
+    // A displacement carries no center, only the scale.
+    let delta = DVec2::new(25.0, -50.0);
+    assert_dvec2_near(
+        norm.normalize_delta(delta),
+        DVec2::new(0.5, -1.0),
+        1e-12,
+        "normalized delta",
+    );
+    assert_dvec2_near(
+        norm.denormalize_delta(DVec2::new(0.5, -1.0)),
+        delta,
+        1e-12,
+        "denormalized delta",
+    );
 }
 
 /// Test normalization with a rectangular bounding box (wider than tall).
@@ -139,12 +158,20 @@ fn test_compute_normalization_rectangle() {
         DVec2::new(10.0, 80.0),
         DVec2::new(210.0, 80.0),
     ];
-    let (center, scale) = compute_normalization(&points);
+    let norm = compute_normalization(&points);
     // Bounding box: [10,210] x [20,80]
     // center = ((10+210)/2, (20+80)/2) = (110, 50)
     // range = (200, 60), max = 200, scale = 100
-    assert_dvec2_near(center, DVec2::new(110.0, 50.0), 1e-12, "center");
-    assert!((scale - 100.0).abs() < 1e-12, "scale: {scale}");
+    assert_dvec2_near(norm.center, DVec2::new(110.0, 50.0), 1e-12, "center");
+    assert!((norm.scale - 100.0).abs() < 1e-12, "scale: {}", norm.scale);
+
+    // The short axis stays inside [-1, 1]: (20 - 50) / 100 = -0.3.
+    assert_dvec2_near(
+        norm.normalize(DVec2::new(10.0, 20.0)),
+        DVec2::new(-1.0, -0.3),
+        1e-12,
+        "normalized",
+    );
 }
 
 /// Test normalization with coincident points (degenerate case).
@@ -155,13 +182,15 @@ fn test_compute_normalization_coincident() {
         DVec2::new(42.0, 17.0),
         DVec2::new(42.0, 17.0),
     ];
-    let (center, scale) = compute_normalization(&points);
+    let norm = compute_normalization(&points);
     // All points identical, range = (0, 0), scale falls back to 1.0
-    assert_dvec2_near(center, DVec2::new(42.0, 17.0), 1e-12, "center");
+    assert_dvec2_near(norm.center, DVec2::new(42.0, 17.0), 1e-12, "center");
     assert!(
-        (scale - 1.0).abs() < 1e-12,
+        (norm.scale - 1.0).abs() < 1e-12,
         "degenerate scale should be 1.0"
     );
+    // With scale 1 the mapping is a pure translation, so the points land on the origin.
+    assert_dvec2_near(norm.normalize(points[0]), DVec2::ZERO, 1e-12, "normalized");
 }
 
 /// Test solve_linear_system with a simple 2x2 system.

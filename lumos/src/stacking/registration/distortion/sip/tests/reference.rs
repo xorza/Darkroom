@@ -41,9 +41,9 @@ fn test_reference_point_none_uses_centroid() {
     // x values: 200,300,...,800 (7 values), mean = (200+800)/2 = 500
     // y values: same. So centroid = (500, 500).
     assert!(
-        (sip.reference_point - center).length() < 1e-10,
+        (sip.norm.center - center).length() < 1e-10,
         "Reference point should be centroid (500,500), got {:?}",
-        sip.reference_point
+        sip.norm.center
     );
 }
 

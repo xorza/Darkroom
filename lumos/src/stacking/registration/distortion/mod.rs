@@ -26,6 +26,7 @@
 //!
 //! where U(r) = r² log(r). Use when distortion is non-radial or non-uniform.
 
+mod point_normalization;
 pub(crate) mod sip;
 mod tps;
 

@@ -32,6 +32,7 @@ use glam::DVec2;
 use crate::error::InvalidConfigField;
 use crate::math::size2us::Size2us;
 use crate::stacking::registration::distortion::SINGULAR_THRESHOLD;
+use crate::stacking::registration::distortion::point_normalization::PointNormalization;
 use crate::stacking::registration::result::RegistrationError;
 use crate::stacking::registration::transform::Transform;
 
@@ -106,12 +107,11 @@ impl SipConfig {
 /// relative to the reference point, computes the distortion correction
 /// (du, dv) to apply before the linear transform.
 ///
-/// Internally, coordinates are normalized by a scale factor for numerical
-/// stability. The coefficients are stored in normalized space.
+/// Internally, coordinates are normalized for numerical stability. The
+/// coefficients are stored in normalized space.
 #[derive(Debug, Clone)]
 pub struct SipPolynomial {
-    reference_point: DVec2,
-    norm_scale: f64,
+    norm: PointNormalization,
     terms: ArrayVec<(usize, usize), MAX_TERMS>,
     coeffs_u: ArrayVec<f64, MAX_TERMS>,
     coeffs_v: ArrayVec<f64, MAX_TERMS>,
@@ -175,28 +175,23 @@ impl SipPolynomial {
             let sum: DVec2 = ref_points.iter().sum();
             sum / n as f64
         });
-        let norm_scale = avg_distance(ref_points, ref_pt);
+        let norm = PointNormalization::new(ref_pt, avg_distance(ref_points, ref_pt));
 
         // Compute target residuals in normalized space (constant across iterations)
-        let targets_u: Vec<f64> = ref_points
+        let targets: Vec<DVec2> = ref_points
             .iter()
             .zip(target_points.iter())
-            .map(|(&r, &t)| -(transform.apply(r).x - t.x) / norm_scale)
+            .map(|(&r, &t)| norm.normalize_delta(t - transform.apply(r)))
             .collect();
-        let targets_v: Vec<f64> = ref_points
-            .iter()
-            .zip(target_points.iter())
-            .map(|(&r, &t)| -(transform.apply(r).y - t.y) / norm_scale)
-            .collect();
+        let targets_u: Vec<f64> = targets.iter().map(|d| d.x).collect();
+        let targets_v: Vec<f64> = targets.iter().map(|d| d.y).collect();
 
         // Initial fit on all points
         let mut mask = vec![true; n];
         let Some(SipCoefficients {
             u: mut coeffs_u,
             v: mut coeffs_v,
-        }) = solve_masked(
-            ref_points, &targets_u, &targets_v, &mask, ref_pt, norm_scale, &terms,
-        )
+        }) = solve_masked(ref_points, &targets_u, &targets_v, &mask, norm, &terms)
         else {
             return Err(RegistrationError::SingularSipSystem);
         };
@@ -210,10 +205,10 @@ impl SipPolynomial {
                     residuals.push(f64::INFINITY);
                     continue;
                 }
-                let (u, v) = normalize_point(ref_points[i], ref_pt, norm_scale);
+                let uv = norm.normalize(ref_points[i]);
 
                 let mut basis = [0.0; MAX_TERMS];
-                evaluate_basis(u, v, &terms, &mut basis[..terms.len()]);
+                evaluate_basis(uv, &terms, &mut basis[..terms.len()]);
 
                 let mut pred_u = 0.0;
                 let mut pred_v = 0.0;
@@ -267,9 +262,8 @@ impl SipPolynomial {
             }
 
             // Re-fit on surviving points
-            let Some(refit) = solve_masked(
-                ref_points, &targets_u, &targets_v, &mask, ref_pt, norm_scale, &terms,
-            ) else {
+            let Some(refit) = solve_masked(ref_points, &targets_u, &targets_v, &mask, norm, &terms)
+            else {
                 return Err(RegistrationError::SingularSipSystem);
             };
             coeffs_u = refit.u;
@@ -277,8 +271,7 @@ impl SipPolynomial {
         }
 
         let polynomial = Self {
-            reference_point: ref_pt,
-            norm_scale,
+            norm,
             terms,
             coeffs_u,
             coeffs_v,
@@ -368,10 +361,10 @@ impl SipPolynomial {
 
     /// Compute the correction vector at a point (without applying it).
     fn correction_at(&self, p: DVec2) -> DVec2 {
-        let (u, v) = normalize_point(p, self.reference_point, self.norm_scale);
+        let uv = self.norm.normalize(p);
 
         let mut basis = [0.0; MAX_TERMS];
-        evaluate_basis(u, v, &self.terms, &mut basis[..self.terms.len()]);
+        evaluate_basis(uv, &self.terms, &mut basis[..self.terms.len()]);
 
         let mut du = 0.0;
         let mut dv = 0.0;
@@ -380,7 +373,7 @@ impl SipPolynomial {
             dv += self.coeffs_v[i] * b;
         }
 
-        DVec2::new(du * self.norm_scale, dv * self.norm_scale)
+        self.norm.denormalize_delta(DVec2::new(du, dv))
     }
 }
 
@@ -397,23 +390,17 @@ fn term_exponents(order: usize) -> ArrayVec<(usize, usize), MAX_TERMS> {
     terms
 }
 
-/// Evaluate a monomial u^p * v^q.
+/// Evaluate a monomial u^p * v^q on a normalized point.
 #[inline]
-fn monomial(u: f64, v: f64, p: usize, q: usize) -> f64 {
-    u.powi(p as i32) * v.powi(q as i32)
-}
-
-/// Normalize a point relative to the SIP reference point and scale.
-#[inline]
-fn normalize_point(p: DVec2, ref_pt: DVec2, norm_scale: f64) -> (f64, f64) {
-    ((p.x - ref_pt.x) / norm_scale, (p.y - ref_pt.y) / norm_scale)
+fn monomial(uv: DVec2, p: usize, q: usize) -> f64 {
+    uv.x.powi(p as i32) * uv.y.powi(q as i32)
 }
 
 /// Evaluate all monomial basis functions for a normalized point.
 #[inline]
-fn evaluate_basis(u: f64, v: f64, terms: &[(usize, usize)], basis: &mut [f64]) {
+fn evaluate_basis(uv: DVec2, terms: &[(usize, usize)], basis: &mut [f64]) {
     for (j, &(p, q)) in terms.iter().enumerate() {
-        basis[j] = monomial(u, v, p, q);
+        basis[j] = monomial(uv, p, q);
     }
 }
 
@@ -451,13 +438,10 @@ fn solve_masked(
     targets_u: &[f64],
     targets_v: &[f64],
     mask: &[bool],
-    ref_pt: DVec2,
-    norm_scale: f64,
+    norm: PointNormalization,
     terms: &[(usize, usize)],
 ) -> Option<SipCoefficients> {
-    let equations = build_normal_equations(
-        points, targets_u, targets_v, mask, ref_pt, norm_scale, terms,
-    );
+    let equations = build_normal_equations(points, targets_u, targets_v, mask, norm, terms);
     let n_terms = terms.len();
     Some(SipCoefficients {
         u: solve_cholesky(&equations.ata, &equations.atb_u, n_terms)?,
@@ -471,8 +455,7 @@ fn build_normal_equations(
     targets_u: &[f64],
     targets_v: &[f64],
     mask: &[bool],
-    ref_pt: DVec2,
-    norm_scale: f64,
+    norm: PointNormalization,
     terms: &[(usize, usize)],
 ) -> SipNormalEquations {
     let n_terms = terms.len();
@@ -485,8 +468,7 @@ fn build_normal_equations(
         if !mask[i] {
             continue;
         }
-        let (u, v) = normalize_point(*point, ref_pt, norm_scale);
-        evaluate_basis(u, v, terms, &mut basis[..n_terms]);
+        evaluate_basis(norm.normalize(*point), terms, &mut basis[..n_terms]);
 
         // Accumulate A^T*A and A^T*b
         for j in 0..n_terms {
