@@ -1,9 +1,7 @@
 //! Deterministic tests for the raw-light pipeline's memory tier and concurrency arithmetic.
 
 use crate::io::raw::demosaic::DemosaicMemory;
-use crate::memory::{
-    MemoryPlan, PER_FRAME_WORKING_PLANES, fits_in_memory, memory_budget, plan_memory,
-};
+use crate::memory::{MemoryPlan, PerFrameBytes, fits_in_memory, memory_budget, plan_memory};
 
 const MIB: u64 = 1024 * 1024;
 const GIB: u64 = 1024 * MIB;
@@ -39,11 +37,15 @@ fn available_for_usable(usable: u64) -> u64 {
 fn scratch_reserve_streams_a_set_whose_frames_alone_would_fit() {
     let plane_bytes = plane(100);
     let (frames, threads, available) = (10, 8, 8 * GIB);
+    let demosaic = xtrans(plane_bytes);
 
-    assert!(fits_in_memory(4 * plane_bytes, frames, available));
-    assert!(
-        !plan_memory(plane_bytes, xtrans(plane_bytes), frames, threads, available,).fits_in_ram
-    );
+    // The warped set alone fits; it is the per-worker scratch on top that forces the spill.
+    assert!(fits_in_memory(
+        PerFrameBytes::new(plane_bytes, demosaic).warped,
+        frames,
+        available
+    ));
+    assert!(!plan_memory(plane_bytes, demosaic, frames, threads, available).fits_in_ram);
 }
 
 #[test]
@@ -97,48 +99,49 @@ fn small_set_uses_all_workers_in_ram() {
 #[test]
 fn ram_tier_respects_algorithm_specific_concurrency_boundaries() {
     let plane_bytes = plane(10);
-    let frames = 5;
-    let threads = 4;
+    let (frames, threads) = (5, 4);
 
-    // At 520 MiB usable, resident/working memory is exactly 4P×5 + 8P×4 = 520 MiB.
-    // X-Trans then has 370 MiB beyond its 3P×5 outputs: enough for one 19P transient.
-    let one_worker = plan_memory(
-        plane_bytes,
-        xtrans(plane_bytes),
-        frames,
-        threads,
-        available_for_usable(520 * MIB),
-    );
+    // 570 MiB usable is exactly the RAM-tier boundary for the two three-channel demosaics:
+    // 5 warped planes × 5 frames + 8 working planes × 4 workers = 57 planes.
+    let boundary = available_for_usable(570 * MIB);
+
+    // All three fit there, but the demosaic transients buy different decode fan-outs from the
+    // 420 MiB left beyond the 3P×5 resident outputs: X-Trans's 19P admits two workers where
+    // Bayer's 4P and mono's nothing admit all four.
     assert_eq!(
-        one_worker,
+        plan_memory(plane_bytes, xtrans(plane_bytes), frames, threads, boundary),
         MemoryPlan {
             fits_in_ram: true,
-            decode_concurrency: 1,
+            decode_concurrency: 2,
             warp_concurrency: 4,
         }
     );
-
-    // Ten more usable MiB makes that headroom exactly 2 × 19P = 380 MiB.
-    let two_workers = plan_memory(
-        plane_bytes,
-        xtrans(plane_bytes),
-        frames,
-        threads,
-        available_for_usable(530 * MIB),
-    );
-    assert_eq!(two_workers.decode_concurrency, 2);
-
     for demosaic in [mono(plane_bytes), bayer(plane_bytes)] {
-        let plan = plan_memory(
-            plane_bytes,
-            demosaic,
-            frames,
-            threads,
-            available_for_usable(520 * MIB),
-        );
+        let plan = plan_memory(plane_bytes, demosaic, frames, threads, boundary);
         assert_eq!(plan.decode_concurrency, 4);
         assert!(plan.fits_in_ram);
     }
+
+    // A MiB under the boundary and the three-channel pair spills; mono's 47 planes still fit.
+    let under = available_for_usable(569 * MIB);
+    for demosaic in [bayer(plane_bytes), xtrans(plane_bytes)] {
+        assert!(!plan_memory(plane_bytes, demosaic, frames, threads, under).fits_in_ram);
+    }
+    assert!(plan_memory(plane_bytes, mono(plane_bytes), frames, threads, under).fits_in_ram);
+
+    // Headroom scales the X-Trans fan-out: 760 usable less 150 resident is 610 MiB, three 19P
+    // transients' worth.
+    assert_eq!(
+        plan_memory(
+            plane_bytes,
+            xtrans(plane_bytes),
+            frames,
+            threads,
+            available_for_usable(760 * MIB),
+        )
+        .decode_concurrency,
+        3
+    );
 }
 
 #[test]
@@ -152,6 +155,7 @@ fn planned_concurrency_never_overshoots_its_tier_budget() {
                     for &budget_gib in &[1u64, 2, 4, 8, 16] {
                         let available = budget_gib * GIB;
                         let plan = plan_memory(plane_bytes, demosaic, frames, threads, available);
+                        let per_frame = PerFrameBytes::new(plane_bytes, demosaic);
                         let usable = memory_budget(available);
                         let worker_cap = frames.min(threads.max(1));
 
@@ -164,19 +168,14 @@ fn planned_concurrency_never_overshoots_its_tier_budget() {
                                 + (demosaic.peak_bytes.saturating_sub(demosaic.output_bytes) as u64)
                                     .saturating_mul(plan.decode_concurrency as u64)
                         } else {
-                            (demosaic
-                                .peak_bytes
-                                .max(PER_FRAME_WORKING_PLANES * plane_bytes)
-                                as u64)
+                            (demosaic.peak_bytes.max(per_frame.working) as u64)
                                 .saturating_mul(plan.decode_concurrency as u64)
                         };
                         let warp_peak = if plan.fits_in_ram {
-                            (4 * plane_bytes * frames) as u64
-                                + (PER_FRAME_WORKING_PLANES * plane_bytes) as u64
-                                    * plan.warp_concurrency as u64
+                            (per_frame.warped * frames) as u64
+                                + per_frame.working as u64 * plan.warp_concurrency as u64
                         } else {
-                            (PER_FRAME_WORKING_PLANES * plane_bytes) as u64
-                                * plan.warp_concurrency as u64
+                            per_frame.working as u64 * plan.warp_concurrency as u64
                         };
                         assert!(
                             decode_peak <= usable || plan.decode_concurrency == 1,

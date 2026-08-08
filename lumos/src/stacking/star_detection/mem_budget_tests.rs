@@ -15,6 +15,7 @@
 //! [`DetectionResources`]: crate::stacking::star_detection::resources::DetectionResources
 
 use crate::math::size2us::Size2us;
+use crate::memory::DETECTION_WORKING_PLANES;
 use crate::stacking::star_detection::config::Config;
 use crate::stacking::star_detection::detector::StarDetector;
 use crate::stacking::star_detection::detector::internals::buffer_counts_for;
@@ -32,6 +33,25 @@ const DEFAULT_WORKING_SET: BufferCounts = BufferCounts {
     bitmasks: 1,
     labels: 1,
 };
+
+/// The memory planner charges [`DETECTION_WORKING_PLANES`] image-sized planes for a frame in
+/// detection, which only means anything while that matches what the pool actually holds. Tying the
+/// two together here is what stops the planner's figure from being a number nobody can check: a
+/// stage that grows its scratch fails [`buffer_working_set_stays_flat_in_frame_count`] first, and
+/// raising `DEFAULT_WORKING_SET` to match then fails this until the planner is raised too.
+#[test]
+fn pinned_working_set_matches_what_the_memory_planner_charges() {
+    let BufferCounts {
+        floats,
+        bitmasks,
+        labels,
+    } = DEFAULT_WORKING_SET;
+
+    // The label map is u32, the same width as an f32 plane. The bitmask is one bit per pixel
+    // against those 32, and the planner rounds it up to a whole plane rather than model a
+    // fraction — so a plain sum is the figure it should carry.
+    assert_eq!(floats + labels + bitmasks, DETECTION_WORKING_PLANES);
+}
 
 /// A reused detector's buffer-pool working set must stay flat in the number of frames detected: the
 /// pool never grows past its warmed high-water mark, and that mark is a small, image-bounded
