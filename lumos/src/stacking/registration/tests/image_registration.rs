@@ -11,7 +11,7 @@ use glam::DVec2;
 
 use crate::stacking::registration::config::{self, InterpolationMethod};
 use crate::stacking::registration::resample::internals;
-use crate::stacking::registration::synthetic_tests::helpers;
+use crate::stacking::registration::tests::helpers;
 use crate::stacking::registration::transform::{Transform, WarpTransform};
 use crate::stacking::registration::{Config, TransformType, register};
 use crate::stacking::star_detection::config::Config as DetConfig;

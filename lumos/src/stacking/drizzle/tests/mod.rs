@@ -1,3 +1,4 @@
+mod synthetic;
 use crate::math::size2us::Size2us;
 use std::f64::consts::{FRAC_PI_4, PI};
 

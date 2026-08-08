@@ -6,7 +6,7 @@ use crate::math::size2us::Size2us;
 use glam::Vec2;
 
 use crate::stacking::star_detection::config::background_config::BackgroundConfig;
-use crate::stacking::star_detection::synthetic_tests::Scenario;
+use crate::stacking::star_detection::tests::Scenario;
 use crate::testing::synthetic::backgrounds::NebulaConfig;
 use crate::testing::synthetic::scene::BackgroundField;
 use crate::testing::visual::save_grayscale;
@@ -14,7 +14,7 @@ use crate::testing::{estimate_background, init_tracing};
 use common::internals::test_output_path;
 use imaginarium::Buffer2;
 
-use crate::stacking::star_detection::synthetic_tests::stage_tests::TILE_SIZE;
+use crate::stacking::star_detection::tests::stage_tests::TILE_SIZE;
 
 /// Test background estimation on uniform background.
 #[test]

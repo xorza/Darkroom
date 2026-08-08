@@ -364,7 +364,7 @@ fn elliptical_gaussian_kernel_2d(sigma: f32, axis_ratio: f32, angle: f32) -> Gau
 pub(super) mod internals {
     use imaginarium::Buffer2;
 
-    /// Proxy for `synthetic_tests`, a cousin module of `convolution` under `star_detection`.
+    /// Proxy for `tests`, a cousin module of `convolution` under `star_detection`.
     pub(crate) fn gaussian_convolve(
         pixels: &Buffer2<f32>,
         sigma: f32,

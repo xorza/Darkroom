@@ -5,7 +5,7 @@
 //! recovers it — the residuals collapse versus a linear-only registration of the same field.
 
 use crate::stacking::registration::distortion::sip::SipConfig;
-use crate::stacking::registration::synthetic_tests::helpers;
+use crate::stacking::registration::tests::helpers;
 use crate::stacking::registration::transform::Transform;
 use crate::stacking::registration::{Config, register};
 use crate::testing::synthetic::transforms::{generate_random_positions, positions_to_stars};

@@ -8,8 +8,8 @@
 //! to nothing. A regression in either fails the test.
 
 use crate::stacking::star_detection::config::Config;
-use crate::stacking::star_detection::synthetic_tests::pipeline_tests::run_test;
-use crate::stacking::star_detection::synthetic_tests::{Placement, Scenario};
+use crate::stacking::star_detection::tests::pipeline_tests::run_test;
+use crate::stacking::star_detection::tests::{Placement, Scenario};
 use crate::testing::init_tracing;
 use crate::testing::synthetic::backgrounds::NebulaConfig;
 use crate::testing::synthetic::camera::PsfModel;

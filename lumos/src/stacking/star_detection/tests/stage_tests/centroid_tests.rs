@@ -15,7 +15,7 @@ use crate::stacking::star_detection::config::measurement_config::{
     CentroidMethod, MeasurementConfig,
 };
 use crate::stacking::star_detection::deblend::region::Region;
-use crate::stacking::star_detection::synthetic_tests::stage_tests::background_estimate;
+use crate::stacking::star_detection::tests::stage_tests::background_estimate;
 use crate::testing::TestRng;
 use crate::testing::synthetic::star_profiles::{StarProfile, SyntheticStar};
 use imaginarium::Buffer2;

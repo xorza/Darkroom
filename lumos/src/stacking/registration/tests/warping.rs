@@ -13,7 +13,7 @@ use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 use crate::stacking::registration::config::{self, InterpolationMethod, WarpParams};
 use crate::stacking::registration::resample::{self, internals};
-use crate::stacking::registration::synthetic_tests::helpers;
+use crate::stacking::registration::tests::helpers;
 use crate::stacking::registration::transform::{Transform, TransformType, WarpTransform};
 use crate::stacking::star_detection::detector::StarDetector;
 use crate::testing::synthetic::fixtures::star_field;

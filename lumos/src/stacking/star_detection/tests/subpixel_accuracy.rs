@@ -8,7 +8,7 @@
 use crate::math::size2us::Size2us;
 use crate::stacking::registration::transform::Transform;
 use crate::stacking::star_detection::config::Config;
-use crate::stacking::star_detection::synthetic_tests::{
+use crate::stacking::star_detection::tests::{
     detected_positions, synthetic_config, truth_positions,
 };
 use crate::testing::synthetic::camera::Camera;

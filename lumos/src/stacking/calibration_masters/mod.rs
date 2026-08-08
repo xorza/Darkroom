@@ -10,8 +10,6 @@ mod bench;
 #[cfg(all(test, feature = "real-data"))]
 mod real_data_tests;
 #[cfg(test)]
-mod synthetic_tests;
-#[cfg(test)]
 mod tests;
 
 use std::path::Path;
