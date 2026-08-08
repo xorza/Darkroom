@@ -352,6 +352,7 @@ fn stacking_outputs_and_relationships_use_named_public_types() {
             registered: 2,
             dropped: vec![0, 3],
         },
+        detection: vec![StarDetectionDiagnostics::default(); 4],
     };
 
     assert_eq!(result.product.image.channel(0).pixels(), &[0.25, 0.75]);

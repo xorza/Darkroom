@@ -87,6 +87,31 @@ fn aligns_shifted_frames_into_a_sharp_stack() {
         result.alignment.dropped
     );
 
+    // The detection funnel reaches the caller instead of only the log: one entry per input frame,
+    // in input order, each one internally consistent.
+    assert_eq!(
+        result.detection.len(),
+        3,
+        "one funnel entry per input frame"
+    );
+    for (frame, diagnostics) in result.detection.iter().enumerate() {
+        assert!(
+            diagnostics.final_star_count > 0,
+            "frame {frame} detected no stars"
+        );
+        assert!(
+            diagnostics.final_star_count <= diagnostics.stars_after_centroid,
+            "frame {frame}: filtering cannot add stars ({} > {})",
+            diagnostics.final_star_count,
+            diagnostics.stars_after_centroid
+        );
+        assert!(
+            diagnostics.stars_after_centroid
+                <= diagnostics.candidates_after_filtering + diagnostics.deblended_components,
+            "frame {frame}: centroids cannot exceed candidates plus deblends"
+        );
+    }
+
     // The pipeline's own stages reach the callback, not just the combine's. Counters come off
     // shared atomics, so the reports arrive in any order — sort before comparing.
     let reports = reports.lock().unwrap();
@@ -323,9 +348,13 @@ fn a_bad_registration_config_is_never_mistaken_for_frames_that_would_not_match()
     let mut detector = StarDetector::from_config(config.detection.clone()).unwrap();
     let detected = images
         .into_iter()
-        .map(|image| DetectedFrame {
-            stars: detector.detect(&image).stars,
-            image: PipelineFrame::Resident(image),
+        .map(|image| {
+            let result = detector.detect(&image);
+            DetectedFrame {
+                stars: result.stars,
+                diagnostics: result.diagnostics,
+                image: PipelineFrame::Resident(image),
+            }
         })
         .collect();
 

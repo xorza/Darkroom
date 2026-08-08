@@ -147,8 +147,8 @@ fn estimate_fwhm_from_stars(
         );
         // `fallback_fwhm` has no dependence on `fwhms` (it's `expected_fwhm` or the
         // hardcoded default), so `stars_used` must report 0, not the quality-passing
-        // count — otherwise `fwhm_was_auto_estimated` downstream would read true for
-        // a fallback that never actually auto-estimated anything.
+        // count — that zero is what makes this a `FwhmSource::Configured` downstream
+        // rather than an `Estimated` that never measured anything.
         return FwhmResult {
             fwhm: Some(fallback_fwhm),
             stars_used: 0,

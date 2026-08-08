@@ -81,7 +81,7 @@ pub use stacking::star_detection::config::measurement_config::{
     NoiseModel,
 };
 pub use stacking::star_detection::detector::{
-    DetectionResult as StarDetectionResult, Diagnostics as StarDetectionDiagnostics,
+    DetectionResult as StarDetectionResult, Diagnostics as StarDetectionDiagnostics, FwhmSource,
     QualityFilterDiagnostics as StarDetectionQualityFilterDiagnostics, StarDetector,
 };
 pub use stacking::star_detection::roundness::Roundness;

@@ -7,6 +7,7 @@ use crate::io::image::error::ImageError;
 use crate::stacking::calibration_masters::CalibrationError;
 use crate::stacking::combine::error::Error as StackError;
 use crate::stacking::product::StackProduct;
+use crate::stacking::star_detection::detector::Diagnostics;
 
 /// Registration bookkeeping for an aligned stack.
 #[derive(Debug)]
@@ -26,6 +27,9 @@ pub struct AlignStackResult {
     pub product: StackProduct,
     /// Reference selection and frame registration outcome.
     pub alignment: AlignmentSummary,
+    /// Per-frame star-detection funnel, in input order — every frame the pipeline detected on,
+    /// including those registration later dropped, so an index here matches an input index.
+    pub detection: Vec<Diagnostics>,
 }
 
 impl AlignStackResult {
@@ -34,6 +38,7 @@ impl AlignStackResult {
         reference: usize,
         registered: usize,
         dropped: Vec<usize>,
+        detection: Vec<Diagnostics>,
     ) -> Self {
         Self {
             product,
@@ -42,6 +47,7 @@ impl AlignStackResult {
                 registered,
                 dropped,
             },
+            detection,
         }
     }
 }
