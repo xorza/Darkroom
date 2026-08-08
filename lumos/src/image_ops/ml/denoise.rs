@@ -6,9 +6,9 @@
 //! are applied (after the stretch / channel combination).
 
 use crate::image_ops::ml::backend::{MlError, TiledOnnxConfig, run_tiled};
-use imaginarium::Image;
+use crate::io::image::linear::LinearImage;
 
 /// Denoise a *stretched* (display-domain, `[0, 1]`) image with a caller-supplied ONNX denoiser.
-pub fn ml_denoise(image: &Image, config: &TiledOnnxConfig) -> Result<Image, MlError> {
+pub fn ml_denoise(image: &LinearImage, config: &TiledOnnxConfig) -> Result<LinearImage, MlError> {
     run_tiled(image, config)
 }

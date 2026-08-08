@@ -9,7 +9,6 @@ use crate::io::image::LoadContext;
 use crate::io::image::linear::LinearImage;
 use crate::testing::{calibration_dir, init_tracing, save_png};
 use crate::{NeutralizeBackground, Scnr, Stretch};
-use imaginarium::Image;
 
 fn spread(bg: Rgb) -> f32 {
     bg.r.max(bg.g).max(bg.b) - bg.r.min(bg.g).min(bg.b)
@@ -20,13 +19,11 @@ fn spread(bg: Rgb) -> f32 {
 fn neutralize_then_stretch_removes_green() {
     init_tracing();
 
-    let image = Image::from(
-        &LinearImage::from_file(
-            calibration_dir().join("stacked_light.tiff"),
-            &LoadContext::default(),
-        )
-        .expect("load"),
-    );
+    let image = LinearImage::from_file(
+        calibration_dir().join("stacked_light.tiff"),
+        &LoadContext::default(),
+    )
+    .expect("load");
 
     // The raw OSC stack has a colored (green-elevated) background: the per-channel backgrounds differ.
     let before = channel_backgrounds(&image);

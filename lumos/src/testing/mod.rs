@@ -167,14 +167,13 @@ pub(crate) fn init_tracing() {
 /// 8-bit/JPEG output needs `RGB_U8`, so the (often `[0,1]`-float) image is converted first. Used by
 /// real-data tests to write viewable results for inspection.
 #[cfg(feature = "real-data")]
-fn save_png(image: &imaginarium::Image, name: &str) {
+fn save_png(image: &crate::io::image::linear::LinearImage, name: &str) {
     use common::internals::test_output_path;
     use imaginarium::ColorFormat;
 
     let path = test_output_path(name);
     std::fs::create_dir_all(path.parent().unwrap()).expect("create test_output dir");
-    image
-        .clone()
+    imaginarium::Image::from(image)
         .convert(ColorFormat::RGB_U8)
         .expect("convert to RGB_U8")
         .save_file(&path)

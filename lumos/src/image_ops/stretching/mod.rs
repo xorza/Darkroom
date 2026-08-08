@@ -28,10 +28,10 @@ use crate::image_ops::rgb::Rgb;
 use rayon::prelude::*;
 
 use crate::error::InvalidConfigField;
-use crate::image_ops::op::{OpError, require_f32_master};
-use crate::image_ops::par_map_pixels;
+use crate::image_ops::op::OpError;
+use crate::image_ops::{map_rgb, map_samples};
+use crate::io::image::linear::LinearImage;
 use crate::math::statistics::{median_and_mad_f32_mut, median_f32_mut};
-use imaginarium::{ChannelCount, Image};
 
 #[cfg(test)]
 mod bench;
@@ -165,11 +165,9 @@ impl Stretch {
     /// Apply this non-linear stretch to a stacked image in place.
     ///
     /// # Errors
-    /// [`OpError::UnsupportedFormat`] unless `image` is `L_F32`/`RGB_F32`; [`OpError::InvalidConfig`]
-    /// on out-of-range parameters.
-    pub fn apply(&self, image: &mut Image) -> Result<(), OpError> {
+    /// [`OpError::InvalidConfig`] on out-of-range parameters.
+    pub fn apply(&self, image: &mut LinearImage) -> Result<(), OpError> {
         self.validate()?;
-        require_f32_master(image)?;
         match self.color {
             ColorMode::ColorPreserving => {
                 // Auto methods derive the curve from the combined intensity (one curve for the image).
@@ -244,29 +242,22 @@ fn ensure_target_background(t: f32) -> Result<(), InvalidConfigField> {
     })
 }
 
-/// Per-channel stretch on the interleaved image: each channel gets its own auto curve from its own
-/// statistics (explicit methods share one curve across channels), applied in place — no deinterleave.
-/// Channels are independent, so building channel `c`'s curve from its own samples and writing it back
-/// before moving on never reads a value another channel already changed.
-fn apply_per_channel_image(image: &mut Image, method: StretchMethod) {
-    let nchan = image.desc().color_format.channel_count.channel_count() as usize;
-    let samples: &mut [f32] = bytemuck::cast_slice_mut(image.bytes_mut());
-    for c in 0..nchan {
-        let curve = explicit_curve(method)
-            .unwrap_or_else(|| build_curve(&mut subsample_channel(samples, c, nchan), method));
-        apply_curve_channel(samples, c, nchan, curve);
+/// Per-channel stretch: each channel gets its own auto curve from its own statistics (explicit
+/// methods share one curve across channels), applied to its own plane. Channels are independent, so
+/// nothing here reads a value another channel already changed.
+fn apply_per_channel_image(image: &mut LinearImage, method: StretchMethod) {
+    for plane in image.planes_mut() {
+        let plane = plane.pixels_mut();
+        let curve =
+            explicit_curve(method).unwrap_or_else(|| build_curve(&mut subsample(plane), method));
+        apply_curve_plane(plane, curve);
     }
 }
 
-/// Uniform-stride subsample of channel `channel` from the interleaved `samples` (every `nchan`-th
-/// value), capped at `MAX_STRETCH_SAMPLES` for the curve's median/MAD.
-fn subsample_channel(samples: &[f32], channel: usize, nchan: usize) -> Vec<f32> {
-    let stride = (samples.len() / nchan / MAX_STRETCH_SAMPLES).max(1);
-    samples[channel..]
-        .iter()
-        .step_by(nchan * stride)
-        .copied()
-        .collect()
+/// Uniform-stride subsample of a plane, capped at `MAX_STRETCH_SAMPLES` for the curve's median/MAD.
+fn subsample(plane: &[f32]) -> Vec<f32> {
+    let stride = (plane.len() / MAX_STRETCH_SAMPLES).max(1);
+    plane.iter().step_by(stride).copied().collect()
 }
 
 /// Curves that need no image statistics — built straight from their parameters. Returns `None` for
@@ -287,28 +278,35 @@ fn explicit_curve(method: StretchMethod) -> Option<Curve> {
 const MAX_STRETCH_SAMPLES: usize = 1_000_000;
 
 /// Uniform-stride subsample of the combined intensity `I = (r+g+b)/3` (the sample itself for mono),
-/// computed directly from the interleaved image — never materializing the full intensity plane just
-/// to throw all but every `stride`-th value away. Identical samples to subsampling [`intensity_plane`].
-fn subsample_intensity(image: &Image) -> Vec<f32> {
-    let samples: &[f32] = bytemuck::cast_slice(image.bytes());
-    if image.desc().color_format.channel_count == ChannelCount::Rgb {
-        let stride = (samples.len() / 3 / MAX_STRETCH_SAMPLES).max(1);
-        samples
-            .chunks_exact(3)
-            .step_by(stride)
-            .map(|px| {
-                Rgb {
-                    r: px[0],
-                    g: px[1],
-                    b: px[2],
-                }
-                .intensity()
-            })
-            .collect()
-    } else {
-        let stride = (samples.len() / MAX_STRETCH_SAMPLES).max(1);
-        samples.iter().step_by(stride).copied().collect()
+/// computed from the planes directly — never materializing the full intensity plane just to throw
+/// all but every `stride`-th value away. Identical samples to subsampling
+/// [`crate::image_ops::intensity_plane`].
+fn subsample_intensity(image: &LinearImage) -> Vec<f32> {
+    let plane = image.channel(0).pixels();
+    let stride = (plane.len() / MAX_STRETCH_SAMPLES).max(1);
+    if !image.is_rgb() {
+        return plane.iter().step_by(stride).copied().collect();
     }
+    let (g, b) = (image.channel(1).pixels(), image.channel(2).pixels());
+    // The one place the interleaved layout was genuinely better: a stride-`n` walk got r, g and b
+    // of each sampled pixel from a single cache line, where three planes cost three lines and three
+    // TLB streams. Running it in parallel hides that latency — the work is a pure map over indices.
+    //
+    // Indexed rather than `zip(g).zip(b).step_by(stride)` for a second reason: `step_by` on a
+    // nested `Zip` walks every element and discards all but each stride-th, reading all three planes
+    // in full instead of the 1/stride of them this needs.
+    (0..plane.len().div_ceil(stride))
+        .into_par_iter()
+        .map(|sample| {
+            let i = sample * stride;
+            Rgb {
+                r: plane[i],
+                g: g[i],
+                b: b[i],
+            }
+            .intensity()
+        })
+        .collect()
 }
 
 /// A prepared tone curve, selected once from the [`StretchMethod`]. Implementors clamp their
@@ -573,20 +571,23 @@ fn build_curve(samples: &mut [f32], method: StretchMethod) -> Curve {
     }
 }
 
-/// Stretch channel `channel` (every `nchan`-th interleaved sample). Resolves the curve type once,
-/// then runs a monomorphized loop.
-fn apply_curve_channel(samples: &mut [f32], channel: usize, nchan: usize, curve: Curve) {
+/// Stretch one plane. Resolves the curve type once, then runs a monomorphized loop.
+fn apply_curve_plane(plane: &mut [f32], curve: Curve) {
     match curve {
-        Curve::Stf(c) => map_channel(samples, channel, nchan, c),
-        Curve::Asinh(c) => map_channel(samples, channel, nchan, c),
-        Curve::Ghs(c) => map_channel(samples, channel, nchan, c),
+        Curve::Stf(c) => map_plane(plane, c),
+        Curve::Asinh(c) => map_plane(plane, c),
+        Curve::Ghs(c) => map_plane(plane, c),
     }
 }
 
-fn map_channel<C: ToneCurve>(samples: &mut [f32], channel: usize, nchan: usize, curve: C) {
-    samples
-        .par_chunks_mut(nchan)
-        .for_each(|px| px[channel] = curve.eval(px[channel]));
+fn map_plane<C: ToneCurve>(plane: &mut [f32], curve: C) {
+    plane
+        .par_chunks_mut(crate::image_ops::SAMPLES_PER_BLOCK)
+        .for_each(|block| {
+            for value in block {
+                *value = curve.eval(*value);
+            }
+        });
 }
 
 /// Map one pixel under color-preserving stretch: run `curve` on the combined
@@ -608,39 +609,61 @@ fn color_preserve_pixel<C: ToneCurve>(px: Rgb, curve: &C) -> Rgb {
     }
 }
 
-/// Color-preserving stretch on an interleaved `Image`. Resolves the curve type once.
-fn apply_color_preserving_image(image: &mut Image, curve: Curve) {
+/// Color-preserving stretch. Resolves the curve type once.
+///
+/// On a grayscale image the combined intensity *is* the single channel, so "scale each channel by
+/// `f(I)/I`" reduces to evaluating the curve on that channel — [`map_samples`], not [`map_rgb`].
+fn apply_color_preserving_image(image: &mut LinearImage, curve: Curve) {
+    if !image.is_rgb() {
+        match curve {
+            Curve::Stf(c) => map_samples(image, |l| c.eval(l)),
+            Curve::Asinh(c) => map_samples(image, |l| c.eval(l)),
+            Curve::Ghs(c) => map_samples(image, |l| c.eval(l)),
+        }
+        return;
+    }
     match curve {
-        Curve::Stf(c) => par_map_pixels(image, |l| c.eval(l), |px| color_preserve_pixel(px, &c)),
+        Curve::Stf(c) => map_rgb(image, |px| color_preserve_pixel(px, &c)),
         Curve::Asinh(c) => apply_color_preserving_asinh(image, c),
-        Curve::Ghs(c) => par_map_pixels(image, |l| c.eval(l), |px| color_preserve_pixel(px, &c)),
+        Curve::Ghs(c) => map_rgb(image, |px| color_preserve_pixel(px, &c)),
     }
 }
 
-/// Color-preserving arcsinh. The per-pixel `asinh` is the curve's hot spot, so RGB images take a
-/// vectorized path (AVX2+FMA on x86_64, NEON on aarch64) that computes it ≈ f32-exact
-/// (~1 ULP vs libm); everything else uses the scalar per-pixel map.
-fn apply_color_preserving_asinh(image: &mut Image, c: AsinhCurve) {
+/// Color-preserving arcsinh on an **RGB** image. The per-pixel `asinh` is the curve's hot spot, so
+/// there is a vectorized path (AVX2+FMA on x86_64, NEON on aarch64) computing it ≈ f32-exact
+/// (~1 ULP vs libm); anything else falls back to the scalar per-pixel map.
+///
+/// Planar storage is what lets the kernels take three plain `loadu`/`storeu` per 8 lanes. On
+/// interleaved data AVX2 needed three stride-3 gathers and a 24-store scalar write-back per 8
+/// pixels; NEON's `vld3q_f32`/`vst3q_f32` did it in one instruction each, so this is a large win on
+/// x86 and roughly neutral on aarch64.
+fn apply_color_preserving_asinh(image: &mut LinearImage, c: AsinhCurve) {
+    debug_assert!(image.is_rgb(), "caller dispatches grayscale to map_samples");
     #[cfg(target_arch = "x86_64")]
-    if image.desc().color_format.channel_count == ChannelCount::Rgb && cpu_features::has_avx2_fma()
-    {
-        // ~8K pixels per task; each band stays whole-pixel (length a multiple of 3).
-        let samples: &mut [f32] = bytemuck::cast_slice_mut(image.bytes_mut());
-        samples.par_chunks_mut(8192 * 3).for_each(|blk| {
-            // SAFETY: AVX2 and FMA availability checked above.
-            unsafe { simd_avx2::asinh_color_preserve_avx2(blk, c.inv_beta, c.inv_norm) };
-        });
+    if cpu_features::has_avx2_fma() {
+        let [r, g, b] = image.rgb_planes_mut();
+        // ~8K pixels per task, the three planes split in lockstep so each task sees one band's
+        // worth of every channel.
+        r.par_chunks_mut(8192)
+            .zip(g.par_chunks_mut(8192))
+            .zip(b.par_chunks_mut(8192))
+            .for_each(|((r, g), b)| {
+                // SAFETY: AVX2 and FMA availability checked above.
+                unsafe { simd_avx2::asinh_color_preserve_avx2(r, g, b, c.inv_beta, c.inv_norm) };
+            });
         return;
     }
     #[cfg(target_arch = "aarch64")]
-    if image.desc().color_format.channel_count == ChannelCount::Rgb {
-        // ~8K pixels per task; each band stays whole-pixel (length a multiple of 3).
-        let samples: &mut [f32] = bytemuck::cast_slice_mut(image.bytes_mut());
-        samples.par_chunks_mut(8192 * 3).for_each(|blk| {
-            // SAFETY: NEON is always available on aarch64.
-            unsafe { simd_neon::asinh_color_preserve_neon(blk, c.inv_beta, c.inv_norm) };
-        });
-        return;
+    {
+        let [r, g, b] = image.rgb_planes_mut();
+        r.par_chunks_mut(8192)
+            .zip(g.par_chunks_mut(8192))
+            .zip(b.par_chunks_mut(8192))
+            .for_each(|((r, g), b)| {
+                // SAFETY: NEON is always available on aarch64.
+                unsafe { simd_neon::asinh_color_preserve_neon(r, g, b, c.inv_beta, c.inv_norm) };
+            });
     }
-    par_map_pixels(image, |l| c.eval(l), |px| color_preserve_pixel(px, &c));
+    #[cfg(not(target_arch = "aarch64"))]
+    map_rgb(image, |px| color_preserve_pixel(px, &c));
 }

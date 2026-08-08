@@ -13,7 +13,7 @@ use std::path::PathBuf;
 use ort::session::Session;
 use ort::value::TensorRef;
 
-use imaginarium::{Buffer2, Image};
+use imaginarium::Buffer2;
 
 use crate::io::image::linear::LinearImage;
 use crate::math::size2us::Size2us;
@@ -58,17 +58,18 @@ fn model_err(e: ort::Error) -> MlError {
 }
 
 /// Run the model over `image` in 512² tiles (NHWC `[0,1]` in, NHWC out), feather-blending the
-/// overlaps. Returns the output as an `Image` with the same channel count as the input (grayscale
-/// is replicated to RGB for the model, then averaged back). Expects a display-domain f32 master
-/// (`L_F32` or `RGB_F32`).
+/// overlaps. Returns a new image with the same channel count as the input (grayscale is replicated
+/// to RGB for the model, then averaged back). Expects a display-domain `[0, 1]` master.
 ///
-/// Unlike the in-place ops this cannot write through [`crate::image_ops::op::on_planes`] — the
-/// model's output is a separate buffer from its input — but it deinterleaves and re-interleaves
-/// through the same [`LinearImage`] conversions they do, so there is one definition of the
-/// planar↔interleaved boundary in the crate.
-pub(crate) fn run_tiled(image: &Image, config: &TiledOnnxConfig) -> Result<Image, MlError> {
-    let planar = LinearImage::from_f32_image(image);
-    let size = Size2us::new(image.desc().width, image.desc().height);
+/// Unlike the in-place ops this returns a fresh image rather than mutating: the model's output is a
+/// separate buffer from its input, and the tile loop reads the input long after it has begun
+/// writing the output.
+pub(crate) fn run_tiled(
+    image: &LinearImage,
+    config: &TiledOnnxConfig,
+) -> Result<LinearImage, MlError> {
+    let planar = image;
+    let size = Size2us::new(image.width(), image.height());
     if size.width < WINDOW || size.height < WINDOW {
         return Err(MlError::TooSmall(size));
     }
@@ -90,7 +91,7 @@ pub(crate) fn run_tiled(image: &Image, config: &TiledOnnxConfig) -> Result<Image
     let ys = tile_starts(size.height, config.stride);
     for &ty in &ys {
         for &tx in &xs {
-            fill_tile_input(&planar, Vec2us::new(tx, ty), &mut input);
+            fill_tile_input(planar, Vec2us::new(tx, ty), &mut input);
             let tensor =
                 TensorRef::from_array_view(([1usize, WINDOW, WINDOW, 3], input.as_slice()))
                     .map_err(model_err)?;
@@ -191,9 +192,9 @@ fn accumulate(out: &[f32], tile: Vec2us, w: usize, acc: &mut [Vec<f32>; 3], weig
     }
 }
 
-/// Normalize the feather-weighted accumulation into an `Image` matching the input's channels.
-fn build_output(rgb: bool, acc: &[Vec<f32>; 3], weight: &[f32], size: Size2us) -> Image {
-    let planar = if rgb {
+/// Normalize the feather-weighted accumulation into an image matching the input's channels.
+fn build_output(rgb: bool, acc: &[Vec<f32>; 3], weight: &[f32], size: Size2us) -> LinearImage {
+    if rgb {
         LinearImage::from(std::array::from_fn::<_, 3, _>(|c| {
             let px = acc[c]
                 .iter()
@@ -208,8 +209,7 @@ fn build_output(rgb: bool, acc: &[Vec<f32>; 3], weight: &[f32], size: Size2us) -
             .map(|i| ((acc[0][i] + acc[1][i] + acc[2][i]) / (3.0 * weight[i])).clamp(0.0, 1.0))
             .collect();
         LinearImage::from(Buffer2::new(size.width, size.height, gray))
-    };
-    Image::from(&planar)
+    }
 }
 
 #[cfg(test)]

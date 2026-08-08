@@ -18,10 +18,10 @@ use rayon::prelude::*;
 
 use crate::background_mesh::workspace::MeshWorkspace;
 use crate::error::InvalidConfigField;
-use crate::image_ops::op::{self, OpError};
+use crate::image_ops::op::OpError;
+use crate::io::image::linear::LinearImage;
 use crate::math::size2us::Size2us;
 use crate::math::statistics::MAD_TO_SIGMA;
-use imaginarium::Image;
 
 /// Sigma-clip passes for the per-tile sky estimate (matches the detector's tiled-background default).
 const SKY_CLIP_ITERATIONS: usize = 3;
@@ -111,18 +111,15 @@ impl ExtractBackground {
     /// Model and remove the smooth background of `image` in place, per channel.
     ///
     /// # Errors
-    /// [`OpError::UnsupportedFormat`] unless `image` is `L_F32`/`RGB_F32`; [`OpError::InvalidConfig`]
-    /// on out-of-range parameters; [`OpError::RankDeficient`] when the sample geometry cannot
-    /// determine the requested polynomial.
-    pub fn apply(&self, image: &mut Image) -> Result<(), OpError> {
+    /// [`OpError::InvalidConfig`] on out-of-range parameters; [`OpError::RankDeficient`] when the
+    /// sample geometry cannot determine the requested polynomial.
+    pub fn apply(&self, image: &mut LinearImage) -> Result<(), OpError> {
         self.validate()?;
         let mut workspace = MeshWorkspace::default();
-        op::on_planes(image, |planar| {
-            for plane in planar.planes_mut() {
-                extract_background_plane(plane, self, &mut workspace)?;
-            }
-            Ok(())
-        })
+        for plane in image.planes_mut() {
+            extract_background_plane(plane, self, &mut workspace)?;
+        }
+        Ok(())
     }
 
     fn validate(&self) -> Result<(), InvalidConfigField> {

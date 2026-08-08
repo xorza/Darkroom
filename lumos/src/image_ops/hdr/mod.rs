@@ -10,11 +10,12 @@
 use rayon::prelude::*;
 
 use crate::error::InvalidConfigField;
-use crate::image_ops::op::{OpError, require_f32_master};
+use crate::image_ops::op::OpError;
 use crate::image_ops::remap_intensity;
 use crate::image_ops::wavelet::{atrous_smooth, max_scales};
+use crate::io::image::linear::LinearImage;
 use crate::math::size2us::Size2us;
-use imaginarium::{Buffer2, Image};
+use imaginarium::Buffer2;
 
 #[cfg(test)]
 mod tests;
@@ -59,11 +60,9 @@ impl Hdr {
     /// Compress the dynamic range of `image` in place.
     ///
     /// # Errors
-    /// [`OpError::UnsupportedFormat`] unless `image` is `L_F32`/`RGB_F32`; [`OpError::InvalidConfig`]
-    /// on out-of-range parameters.
-    pub fn apply(&self, image: &mut Image) -> Result<(), OpError> {
+    /// [`OpError::InvalidConfig`] on out-of-range parameters.
+    pub fn apply(&self, image: &mut LinearImage) -> Result<(), OpError> {
         self.validate()?;
-        require_f32_master(image)?;
         if self.amount == 0.0 {
             return Ok(());
         }

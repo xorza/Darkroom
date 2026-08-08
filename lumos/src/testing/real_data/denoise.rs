@@ -8,12 +8,11 @@ use crate::io::image::linear::LinearImage;
 use crate::math::statistics::{mad_f32_with_scratch, mad_to_sigma, median_f32_mut};
 use crate::testing::{calibration_dir, init_tracing, save_png};
 use crate::{Denoise, NeutralizeBackground, Scnr, Stretch};
-use imaginarium::Image;
 
 /// Robust high-frequency noise of a channel: the MAD-sigma of adjacent-pixel differences. Slow
 /// gradients and extended signal cancel in the difference, so this isolates the pixel-scale noise
 /// that denoising removes (unlike a global sigma, which is dominated by real structure).
-fn highfreq_noise(image: &Image, channel: usize) -> f32 {
+fn highfreq_noise(image: &LinearImage, channel: usize) -> f32 {
     let buf = channel_plane(image, channel);
     let width = buf.width();
     let px = buf.pixels();
@@ -36,13 +35,11 @@ fn highfreq_noise(image: &Image, channel: usize) -> f32 {
 fn denoise_reduces_linear_noise() {
     init_tracing();
 
-    let mut img = Image::from(
-        &LinearImage::from_file(
-            calibration_dir().join("stacked_light.tiff"),
-            &LoadContext::default(),
-        )
-        .expect("load"),
-    );
+    let mut img = LinearImage::from_file(
+        calibration_dir().join("stacked_light.tiff"),
+        &LoadContext::default(),
+    )
+    .expect("load");
 
     // Neutralize the background first so denoising runs on color-calibrated linear data.
     NeutralizeBackground.apply(&mut img).unwrap();

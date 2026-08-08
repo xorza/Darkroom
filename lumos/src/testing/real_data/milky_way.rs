@@ -12,13 +12,12 @@ use crate::testing::{calibration_dir, init_tracing, save_png};
 use crate::{
     ColorMode, Denoise, Hdr, LocalContrast, NeutralizeBackground, Scnr, Stretch, StretchMethod,
 };
-use imaginarium::Image;
 
-fn median(image: &Image) -> f32 {
+fn median(image: &LinearImage) -> f32 {
     median_f32_mut(&mut intensity_plane(image).into_vec())
 }
 
-fn assert_displayable(image: &Image, label: &str) {
+fn assert_displayable(image: &LinearImage, label: &str) {
     let plane = intensity_plane(image);
     let (min, max) = plane
         .pixels()
@@ -40,9 +39,8 @@ fn assert_displayable(image: &Image, label: &str) {
 fn milky_way_best_pipeline() {
     init_tracing();
     let path = calibration_dir().join("stacked_light.tiff");
-    let mut img = Image::from(
-        &LinearImage::from_file(&path, &LoadContext::default()).expect("load stacked_light.tiff"),
-    );
+    let mut img =
+        LinearImage::from_file(&path, &LoadContext::default()).expect("load stacked_light.tiff");
 
     NeutralizeBackground.apply(&mut img).unwrap(); // equalize the green-elevated background
     Denoise::default().apply(&mut img).unwrap(); // gentle wavelet denoise (MW-tuned default)
