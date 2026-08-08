@@ -6,8 +6,9 @@
 
 use std::f64::consts::LOG2_E;
 
-use crate::stacking::star_detection::centroid::gaussian_fit::{
-    EXP_P0, EXP_P1, EXP_P2, EXP_Q0, EXP_Q1, EXP_Q2, EXP_Q3, Gaussian2D, LN2_HI, LN2_LO,
+use crate::stacking::star_detection::centroid::gaussian_fit::Gaussian2D;
+use crate::stacking::star_detection::centroid::gaussian_fit::exp_poly::{
+    EXP_P0, EXP_P1, EXP_P2, EXP_Q0, EXP_Q1, EXP_Q2, EXP_Q3, LN2_HI, LN2_LO,
 };
 use crate::stacking::star_detection::centroid::lm_optimizer::{
     FitData, NormalEquations, accumulate_chi2, accumulate_normal_equations,

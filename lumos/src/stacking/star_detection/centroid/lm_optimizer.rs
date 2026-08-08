@@ -183,16 +183,12 @@ pub(super) trait LMModel<const N: usize> {
     /// Evaluate the model at a point.
     fn evaluate(&self, x: f64, y: f64, params: &[f64; N]) -> f64;
 
-    /// Compute partial derivatives at a point.
-    fn jacobian_row(&self, x: f64, y: f64, params: &[f64; N]) -> [f64; N];
-
-    /// Evaluate model and compute Jacobian row in a single pass.
-    /// Default implementation calls evaluate + jacobian_row separately.
-    /// Override to share expensive intermediate computations (e.g., powf).
-    #[inline]
-    fn evaluate_and_jacobian(&self, x: f64, y: f64, params: &[f64; N]) -> (f64, [f64; N]) {
-        (self.evaluate(x, y, params), self.jacobian_row(x, y, params))
-    }
+    /// Evaluate the model and its Jacobian row at a point, in one pass.
+    ///
+    /// Fused rather than split into evaluate + derivatives so the expensive shared intermediate
+    /// (the `exp` for a Gaussian, the `powf` for a Moffat) is computed once. Every accumulation
+    /// loop goes through this, so it is the only derivative path production code takes.
+    fn evaluate_and_jacobian(&self, x: f64, y: f64, params: &[f64; N]) -> (f64, [f64; N]);
 
     /// Apply parameter constraints after an update.
     fn constrain(&self, params: &mut [f64; N]);

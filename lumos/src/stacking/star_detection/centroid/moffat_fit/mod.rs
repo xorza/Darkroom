@@ -179,27 +179,6 @@ impl LMModel<5> for MoffatFixedBeta {
     }
 
     #[inline]
-    fn jacobian_row(&self, x: f64, y: f64, params: &[f64; 5]) -> [f64; 5] {
-        let [x0, y0, amp, alpha, _bg] = *params;
-        let alpha2 = alpha * alpha;
-        let dx = x - x0;
-        let dy = y - y0;
-        let r2 = dx * dx + dy * dy;
-        let u = 1.0 + r2 / alpha2;
-        let u_neg_beta = fast_pow_neg(u, self.pow_strategy);
-        let u_neg_beta_m1 = u_neg_beta / u;
-        let common = 2.0 * amp * self.beta / alpha2 * u_neg_beta_m1;
-
-        [
-            common * dx,         // df/dx0
-            common * dy,         // df/dy0
-            u_neg_beta,          // df/damp
-            common * r2 / alpha, // df/dalpha
-            1.0,                 // df/dbg
-        ]
-    }
-
-    #[inline]
     fn evaluate_and_jacobian(&self, x: f64, y: f64, params: &[f64; 5]) -> (f64, [f64; 5]) {
         let [x0, y0, amp, alpha, bg] = *params;
         let alpha2 = alpha * alpha;
@@ -373,13 +352,44 @@ pub(super) fn fwhm_beta_to_alpha(fwhm: f32, beta: f32) -> f32 {
 
 #[cfg(test)]
 mod internals {
-    use crate::stacking::star_detection::centroid::moffat_fit::MoffatFitResult;
+    use crate::stacking::star_detection::centroid::moffat_fit::{
+        MoffatFitResult, MoffatFixedBeta, fast_pow_neg,
+    };
 
     impl MoffatFitResult {
         /// Exposes `MoffatFitDebug::alpha` to `centroid::tests`, which sits outside
         /// `moffat_fit` and so can't reach the private `debug` field directly.
         pub(crate) fn debug_alpha(&self) -> f32 {
             self.debug.alpha
+        }
+    }
+
+    impl MoffatFixedBeta {
+        /// The Jacobian row alone, derived independently of
+        /// [`MoffatFixedBeta::evaluate_and_jacobian`]'s fused form.
+        ///
+        /// Production takes only the fused path; this exists so
+        /// `test_moffat_fixed_beta_evaluate_and_jacobian_consistency` has a second derivation of
+        /// the same algebra to check it against. Keep the two written out separately — sharing a
+        /// helper between them would make the test compare an expression with itself.
+        pub(super) fn jacobian_row(&self, x: f64, y: f64, params: &[f64; 5]) -> [f64; 5] {
+            let [x0, y0, amp, alpha, _bg] = *params;
+            let alpha2 = alpha * alpha;
+            let dx = x - x0;
+            let dy = y - y0;
+            let r2 = dx * dx + dy * dy;
+            let u = 1.0 + r2 / alpha2;
+            let u_neg_beta = fast_pow_neg(u, self.pow_strategy);
+            let u_neg_beta_m1 = u_neg_beta / u;
+            let common = 2.0 * amp * self.beta / alpha2 * u_neg_beta_m1;
+
+            [
+                common * dx,         // df/dx0
+                common * dy,         // df/dy0
+                u_neg_beta,          // df/damp
+                common * r2 / alpha, // df/dalpha
+                1.0,                 // df/dbg
+            ]
         }
     }
 }

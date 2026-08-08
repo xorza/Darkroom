@@ -11,31 +11,15 @@ mod bench;
 #[cfg(test)]
 mod tests;
 
+/// Coefficients the two SIMD backends' `exp` approximations share.
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+mod exp_poly;
+
 #[cfg(target_arch = "x86_64")]
 mod simd_avx2;
 
 #[cfg(target_arch = "aarch64")]
 mod simd_neon;
-
-// Cephes exp() polynomial coefficients (shared by AVX2 and NEON SIMD).
-//
-// Algorithm: range reduction via x = n*ln2 + r, then rational approximation
-//   exp(r) ≈ 1 + 2r * P(r²) / (Q(r²) - P(r²))
-// Coefficients from Cephes library (Stephen Moshier), public domain.
-// Max relative error < 2e-13.
-
-const EXP_P0: f64 = 1.261_771_930_748_105_8e-4;
-const EXP_P1: f64 = 3.029_944_077_074_419_5e-2;
-const EXP_P2: f64 = 1.0;
-
-const EXP_Q0: f64 = 3.001_985_051_386_644_6e-6;
-const EXP_Q1: f64 = 2.524_483_403_496_841e-3;
-const EXP_Q2: f64 = 2.272_655_482_081_550_3e-1;
-const EXP_Q3: f64 = 2.0;
-
-// ln(2) split into high and low parts for exact range reduction
-const LN2_HI: f64 = 6.931_457_519_531_25e-1;
-const LN2_LO: f64 = 1.428_606_820_309_417_3e-6;
 
 use crate::stacking::star_detection::centroid::lm_optimizer::{
     FitData, LMConfig, LMModel, LMResult, NormalEquations, accumulate_chi2,
@@ -96,27 +80,6 @@ impl LMModel<6> for Gaussian2D {
         let dy = y - y0;
         let exponent = -0.5 * (dx * dx / (sigma_x * sigma_x) + dy * dy / (sigma_y * sigma_y));
         amp * exponent.exp() + bg
-    }
-
-    #[inline]
-    fn jacobian_row(&self, x: f64, y: f64, params: &[f64; 6]) -> [f64; 6] {
-        let [x0, y0, amp, sigma_x, sigma_y, _bg] = *params;
-        let sigma_x2 = sigma_x * sigma_x;
-        let sigma_y2 = sigma_y * sigma_y;
-        let dx = x - x0;
-        let dy = y - y0;
-        let exponent = -0.5 * (dx * dx / sigma_x2 + dy * dy / sigma_y2);
-        let exp_val = exponent.exp();
-        let amp_exp = amp * exp_val;
-
-        [
-            amp_exp * dx / sigma_x2,                  // df/dx0
-            amp_exp * dy / sigma_y2,                  // df/dy0
-            exp_val,                                  // df/damp
-            amp_exp * dx * dx / (sigma_x2 * sigma_x), // df/dsigma_x
-            amp_exp * dy * dy / (sigma_y2 * sigma_y), // df/dsigma_y
-            1.0,                                      // df/dbg
-        ]
     }
 
     #[inline]
@@ -281,4 +244,38 @@ fn validate_result(
             iterations: result.iterations,
         },
     })
+}
+
+#[cfg(test)]
+mod internals {
+    use crate::stacking::star_detection::centroid::gaussian_fit::Gaussian2D;
+
+    impl Gaussian2D {
+        /// The Jacobian row alone, derived independently of
+        /// [`Gaussian2D::evaluate_and_jacobian`]'s fused form.
+        ///
+        /// Production takes only the fused path; this exists so
+        /// `test_gaussian_evaluate_and_jacobian_consistency` has a second derivation of the same
+        /// algebra to check it against. Keep the two written out separately — sharing a helper
+        /// between them would make the test compare an expression with itself.
+        pub(super) fn jacobian_row(&self, x: f64, y: f64, params: &[f64; 6]) -> [f64; 6] {
+            let [x0, y0, amp, sigma_x, sigma_y, _bg] = *params;
+            let sigma_x2 = sigma_x * sigma_x;
+            let sigma_y2 = sigma_y * sigma_y;
+            let dx = x - x0;
+            let dy = y - y0;
+            let exponent = -0.5 * (dx * dx / sigma_x2 + dy * dy / sigma_y2);
+            let exp_val = exponent.exp();
+            let amp_exp = amp * exp_val;
+
+            [
+                amp_exp * dx / sigma_x2,                  // df/dx0
+                amp_exp * dy / sigma_y2,                  // df/dy0
+                exp_val,                                  // df/damp
+                amp_exp * dx * dx / (sigma_x2 * sigma_x), // df/dsigma_x
+                amp_exp * dy * dy / (sigma_y2 * sigma_y), // df/dsigma_y
+                1.0,                                      // df/dbg
+            ]
+        }
+    }
 }
