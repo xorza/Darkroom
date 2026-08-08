@@ -3,9 +3,11 @@
 //! time in a per-pixel libm `asinhf` (one call per pixel on the combined intensity). This vectorizes
 //! the whole color-preserving pixel op — intensity, `asinh` curve, channel scale, highlight cap —
 //! four pixels at a time, in place, with `asinh(x) = logf(x + √(x²+1))` over a Cephes single-precision
-//! `logf` (≈1–2 ULP, i.e. f32-exact). Where AVX2 stride-3-gathers the channels, NEON deinterleaves
-//! them directly with `vld3q_f32` and writes back with `vst3q_f32`. NEON is mandatory on aarch64, so
-//! the caller dispatches on `cfg(target_arch)` with no runtime feature check.
+//! `logf` (≈1–2 ULP, i.e. f32-exact). The channels are contiguous planes, so loads and stores are
+//! plain `vld1q_f32`/`vst1q_f32`. Note this is the one place planar storage bought aarch64 nothing:
+//! on interleaved data `vld3q_f32`/`vst3q_f32` deinterleaved in hardware, one instruction each,
+//! where AVX2 needed three gathers and a 24-store scalar loop. NEON is mandatory on aarch64, so the
+//! caller dispatches on `cfg(target_arch)` with no runtime feature check.
 
 use std::arch::aarch64::*;
 
@@ -67,14 +69,23 @@ unsafe fn asinh_neon(x: float32x4_t) -> float32x4_t {
     }
 }
 
-/// Color-preserving arcsinh stretch of an interleaved RGB-f32 `block` (length a multiple of 3) in
-/// place. Four pixels per NEON iteration; a scalar tail finishes the remainder.
+/// Color-preserving arcsinh stretch of one band of three RGB-f32 **planes**, in place. The three
+/// slices must be the same length. Four pixels per NEON iteration; a scalar tail finishes the
+/// remainder.
 ///
 /// # Safety
 /// Caller must be on aarch64 (NEON is always available there).
-pub(crate) unsafe fn asinh_color_preserve_neon(block: &mut [f32], inv_beta: f32, inv_norm: f32) {
+pub(crate) unsafe fn asinh_color_preserve_neon(
+    red: &mut [f32],
+    green: &mut [f32],
+    blue: &mut [f32],
+    inv_beta: f32,
+    inv_norm: f32,
+) {
     unsafe {
-        let n_px = block.len() / 3;
+        debug_assert_eq!(red.len(), green.len());
+        debug_assert_eq!(green.len(), blue.len());
+        let n_px = red.len();
         let third = vdupq_n_f32(1.0 / 3.0);
         let vib = vdupq_n_f32(inv_beta);
         let vin = vdupq_n_f32(inv_norm);
@@ -83,9 +94,9 @@ pub(crate) unsafe fn asinh_color_preserve_neon(block: &mut [f32], inv_beta: f32,
 
         let mut p = 0;
         while p + 4 <= n_px {
-            let ptr = block.as_mut_ptr().add(p * 3);
-            let rgb = vld3q_f32(ptr); // deinterleave 12 floats → (r, g, b)
-            let (r, g, b) = (rgb.0, rgb.1, rgb.2);
+            let r = vld1q_f32(red.as_ptr().add(p));
+            let g = vld1q_f32(green.as_ptr().add(p));
+            let b = vld1q_f32(blue.as_ptr().add(p));
 
             let intensity = vmulq_f32(vaddq_f32(vaddq_f32(r, g), b), third);
             let curved = asinh_neon(vmulq_f32(intensity, vib));
@@ -101,25 +112,25 @@ pub(crate) unsafe fn asinh_color_preserve_neon(block: &mut [f32], inv_beta: f32,
             let maxc = vmaxq_f32(vmaxq_f32(nr, ng), nb);
             let cap = vbslq_f32(vcgtq_f32(maxc, one), vdivq_f32(one, maxc), one);
 
-            let out = float32x4x3_t(vmulq_f32(nr, cap), vmulq_f32(ng, cap), vmulq_f32(nb, cap));
-            vst3q_f32(ptr, out);
+            vst1q_f32(red.as_mut_ptr().add(p), vmulq_f32(nr, cap));
+            vst1q_f32(green.as_mut_ptr().add(p), vmulq_f32(ng, cap));
+            vst1q_f32(blue.as_mut_ptr().add(p), vmulq_f32(nb, cap));
             p += 4;
         }
 
         let curve = AsinhCurve { inv_beta, inv_norm };
         while p < n_px {
-            let o = p * 3;
             let out = color_preserve_pixel(
                 Rgb {
-                    r: block[o],
-                    g: block[o + 1],
-                    b: block[o + 2],
+                    r: red[p],
+                    g: green[p],
+                    b: blue[p],
                 },
                 &curve,
             );
-            block[o] = out.r;
-            block[o + 1] = out.g;
-            block[o + 2] = out.b;
+            red[p] = out.r;
+            green[p] = out.g;
+            blue[p] = out.b;
             p += 1;
         }
     }
@@ -135,7 +146,7 @@ mod tests {
         let inv_beta = 1.0 / beta;
         let inv_norm = 1.0 / inv_beta.asinh();
 
-        // 19 pixels (not a multiple of 4 → exercises the SIMD body and the scalar tail), spanning
+        // 19 pixels per plane (not a multiple of 4 → exercises the SIMD body and the scalar tail), spanning
         // background, midtones, above-unity stars, exact zero, a tiny value, and a sub-background
         // pixel whose channels sum to ≤ 0 (must map to black).
         let pixels: Vec<[f32; 3]> = vec![
@@ -159,8 +170,11 @@ mod tests {
             [2.5, 2.4, 2.6],
             [0.07, 0.06, 0.08],
         ];
-        let mut simd: Vec<f32> = pixels.iter().flatten().copied().collect();
-        unsafe { asinh_color_preserve_neon(&mut simd, inv_beta, inv_norm) };
+        // Planes, not interleaved samples — the kernel now takes one slice per channel.
+        let mut r: Vec<f32> = pixels.iter().map(|px| px[0]).collect();
+        let mut g: Vec<f32> = pixels.iter().map(|px| px[1]).collect();
+        let mut b: Vec<f32> = pixels.iter().map(|px| px[2]).collect();
+        unsafe { asinh_color_preserve_neon(&mut r, &mut g, &mut b, inv_beta, inv_norm) };
 
         // Reference: the production scalar path (`color_preserve_pixel` ∘ `AsinhCurve`), so the SIMD
         // body is pinned to exactly what the non-NEON path produces.
@@ -174,7 +188,7 @@ mod tests {
                 },
                 &curve,
             );
-            let got = [simd[i * 3], simd[i * 3 + 1], simd[i * 3 + 2]];
+            let got = [r[i], g[i], b[i]];
             for (g, e) in got.iter().zip([exp.r, exp.g, exp.b]) {
                 assert!(
                     (g - e).abs() < 1e-5,

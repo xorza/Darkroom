@@ -2,8 +2,10 @@
 //! in a per-pixel libm `asinhf` (one call per pixel on the combined intensity). This vectorizes the
 //! whole color-preserving pixel op — intensity, `asinh` curve, channel scale, highlight cap — eight
 //! pixels at a time, in place, with `asinh(x) = logf(x + √(x²+1))` over a Cephes single-precision
-//! `logf` (≈1–2 ULP, i.e. f32-exact). The three channels are gathered with a constant stride-3 index
-//! (no hand-rolled deinterleave) and the result scalar-written back.
+//! `logf` (≈1–2 ULP, i.e. f32-exact). The three channels are contiguous planes, so each iteration is
+//! three `loadu` and three `storeu` — on interleaved storage this needed three stride-3
+//! `_mm256_i32gather_ps` on load and a 24-store scalar loop on the way back, which against ~35
+//! vector ops of actual maths was a large fraction of the kernel.
 
 use std::arch::x86_64::*;
 
@@ -64,17 +66,24 @@ unsafe fn asinh_avx2(x: __m256) -> __m256 {
     logf_avx2(_mm256_add_ps(x, root))
 }
 
-/// Color-preserving arcsinh stretch of an interleaved RGB-f32 `block` (length a multiple of 3) in
-/// place. Eight pixels per AVX2 iteration; a scalar tail finishes the remainder.
+/// Color-preserving arcsinh stretch of one band of three RGB-f32 **planes**, in place. The three
+/// slices must be the same length. Eight pixels per AVX2 iteration; a scalar tail finishes the
+/// remainder.
 ///
 /// # Safety
 /// The caller must ensure AVX2+FMA are available (checked once at dispatch).
 #[target_feature(enable = "avx2,fma")]
 #[allow(unsafe_op_in_unsafe_fn)]
-pub(crate) unsafe fn asinh_color_preserve_avx2(block: &mut [f32], inv_beta: f32, inv_norm: f32) {
-    let n_px = block.len() / 3;
-    let base = block.as_ptr();
-    let idx = _mm256_setr_epi32(0, 3, 6, 9, 12, 15, 18, 21); // stride-3 pixel offsets
+pub(crate) unsafe fn asinh_color_preserve_avx2(
+    red: &mut [f32],
+    green: &mut [f32],
+    blue: &mut [f32],
+    inv_beta: f32,
+    inv_norm: f32,
+) {
+    debug_assert_eq!(red.len(), green.len());
+    debug_assert_eq!(green.len(), blue.len());
+    let n_px = red.len();
     let third = _mm256_set1_ps(1.0 / 3.0);
     let vib = _mm256_set1_ps(inv_beta);
     let vin = _mm256_set1_ps(inv_norm);
@@ -83,10 +92,9 @@ pub(crate) unsafe fn asinh_color_preserve_avx2(block: &mut [f32], inv_beta: f32,
 
     let mut p = 0;
     while p + 8 <= n_px {
-        let g0 = base.add(p * 3);
-        let r = _mm256_i32gather_ps::<4>(g0, idx);
-        let g = _mm256_i32gather_ps::<4>(g0.add(1), idx);
-        let b = _mm256_i32gather_ps::<4>(g0.add(2), idx);
+        let r = _mm256_loadu_ps(red.as_ptr().add(p));
+        let g = _mm256_loadu_ps(green.as_ptr().add(p));
+        let b = _mm256_loadu_ps(blue.as_ptr().add(p));
 
         let intensity = _mm256_mul_ps(_mm256_add_ps(_mm256_add_ps(r, g), b), third);
         let curved = asinh_avx2(_mm256_mul_ps(intensity, vib));
@@ -105,33 +113,25 @@ pub(crate) unsafe fn asinh_color_preserve_avx2(block: &mut [f32], inv_beta: f32,
             _mm256_div_ps(one, maxc),
             _mm256_cmp_ps::<_CMP_GT_OQ>(maxc, one),
         );
-        let (mut tr, mut tg, mut tb) = ([0f32; 8], [0f32; 8], [0f32; 8]);
-        _mm256_storeu_ps(tr.as_mut_ptr(), _mm256_mul_ps(nr, cap));
-        _mm256_storeu_ps(tg.as_mut_ptr(), _mm256_mul_ps(ng, cap));
-        _mm256_storeu_ps(tb.as_mut_ptr(), _mm256_mul_ps(nb, cap));
-        for k in 0..8 {
-            let o = (p + k) * 3;
-            *block.get_unchecked_mut(o) = tr[k];
-            *block.get_unchecked_mut(o + 1) = tg[k];
-            *block.get_unchecked_mut(o + 2) = tb[k];
-        }
+        _mm256_storeu_ps(red.as_mut_ptr().add(p), _mm256_mul_ps(nr, cap));
+        _mm256_storeu_ps(green.as_mut_ptr().add(p), _mm256_mul_ps(ng, cap));
+        _mm256_storeu_ps(blue.as_mut_ptr().add(p), _mm256_mul_ps(nb, cap));
         p += 8;
     }
 
     let curve = AsinhCurve { inv_beta, inv_norm };
     while p < n_px {
-        let o = p * 3;
         let out = color_preserve_pixel(
             Rgb {
-                r: block[o],
-                g: block[o + 1],
-                b: block[o + 2],
+                r: red[p],
+                g: green[p],
+                b: blue[p],
             },
             &curve,
         );
-        block[o] = out.r;
-        block[o + 1] = out.g;
-        block[o + 2] = out.b;
+        red[p] = out.r;
+        green[p] = out.g;
+        blue[p] = out.b;
         p += 1;
     }
 }
@@ -149,7 +149,7 @@ mod tests {
         let inv_beta = 1.0 / beta;
         let inv_norm = 1.0 / inv_beta.asinh();
 
-        // 19 pixels (not a multiple of 8 → exercises the SIMD body and the scalar tail), spanning
+        // 19 pixels per plane (not a multiple of 8 → exercises the SIMD body and the scalar tail), spanning
         // background, midtones, above-unity stars, exact zero, a tiny value, and a sub-background
         // pixel whose channels sum to ≤ 0 (must map to black).
         let pixels: Vec<[f32; 3]> = vec![
@@ -173,8 +173,11 @@ mod tests {
             [2.5, 2.4, 2.6],
             [0.07, 0.06, 0.08],
         ];
-        let mut simd: Vec<f32> = pixels.iter().flatten().copied().collect();
-        unsafe { asinh_color_preserve_avx2(&mut simd, inv_beta, inv_norm) };
+        // Planes, not interleaved samples — the kernel now takes one slice per channel.
+        let mut r: Vec<f32> = pixels.iter().map(|px| px[0]).collect();
+        let mut g: Vec<f32> = pixels.iter().map(|px| px[1]).collect();
+        let mut b: Vec<f32> = pixels.iter().map(|px| px[2]).collect();
+        unsafe { asinh_color_preserve_avx2(&mut r, &mut g, &mut b, inv_beta, inv_norm) };
 
         // Reference: the production scalar path (`color_preserve_pixel` ∘ `AsinhCurve`), so the SIMD
         // body is pinned to exactly what the non-AVX2 path produces.
@@ -188,7 +191,7 @@ mod tests {
                 },
                 &curve,
             );
-            let got = [simd[i * 3], simd[i * 3 + 1], simd[i * 3 + 2]];
+            let got = [r[i], g[i], b[i]];
             for (g, e) in got.iter().zip([exp.r, exp.g, exp.b]) {
                 assert!(
                     (g - e).abs() < 1e-5,
