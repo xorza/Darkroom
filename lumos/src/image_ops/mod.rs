@@ -18,6 +18,9 @@
 #[cfg(all(test, feature = "real-data"))]
 mod bench;
 
+#[cfg(test)]
+mod mem_budget_probe;
+
 pub(crate) mod background_extraction;
 pub(crate) mod color_calibration;
 pub(crate) mod denoise;

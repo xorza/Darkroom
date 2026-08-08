@@ -22,7 +22,10 @@ use imaginarium::Image;
 use crate::io::image::LoadContext;
 use crate::io::image::linear::LinearImage;
 use crate::testing::calibration_dir;
-use crate::{Denoise, ExtractBackground, Hdr, LocalContrast, NeutralizeBackground, Scnr, Stretch};
+use crate::{
+    ColorMode, Denoise, ExtractBackground, Hdr, LocalContrast, NeutralizeBackground, Scnr, Stretch,
+    StretchMethod,
+};
 
 // Must match the `#[quick_bench]` attributes below: quickbench's iter-capped loops call the closure
 // exactly `WARMUP_ITERS + ITERS` times, which is the pre-clone pool size.
@@ -73,6 +76,24 @@ fn bench_stretch_auto_stf(b: ::quickbench::Bencher) {
 fn bench_stretch_auto_asinh(b: ::quickbench::Bencher) {
     let master = linear_master();
     bench_op(b, &master, |img| Stretch::auto_asinh().apply(img).unwrap());
+}
+
+/// The same AVX2 arcsinh kernel as [`bench_stretch_auto_asinh`] with the auto prologue removed: an
+/// explicit `beta` skips `subsample_intensity` and the median/MAD curve fit, so the difference
+/// between the two is what that prologue costs on a full-size master, and this number alone is the
+/// kernel plus its memory traffic. Isolated because `stretching::bench`'s kernel bench runs
+/// single-threaded on a 6 MP synthetic image, which says nothing about either at 24 MP.
+#[quick_bench(warmup_iters = 1, iters = 5)]
+fn bench_stretch_asinh_explicit(b: ::quickbench::Bencher) {
+    let master = linear_master();
+    bench_op(b, &master, |img| {
+        Stretch {
+            method: StretchMethod::Asinh { beta: 0.05 },
+            color: ColorMode::ColorPreserving,
+        }
+        .apply(img)
+        .unwrap()
+    });
 }
 
 #[quick_bench(warmup_iters = 1, iters = 5)]
