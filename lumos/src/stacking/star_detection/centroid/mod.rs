@@ -304,10 +304,9 @@ fn compute_annulus_background(
 /// Uses stack-allocated ArrayVec for deviations to avoid heap allocation.
 #[inline]
 fn sigma_clipped_median_mad(values: &mut [f32], kappa: f32, iterations: usize) -> ClippedStats {
+    // Stack scratch: this runs per star inside the parallel measure loop, so it must not allocate.
     let mut deviations: ArrayVec<f32, MAX_ANNULUS_PIXELS> = ArrayVec::new();
-    // Resize to match values length
-    deviations.extend(std::iter::repeat_n(0.0, values.len()));
-    ClippedStats::sigma_clipped_arrayvec(values, &mut deviations, kappa, iterations)
+    ClippedStats::sigma_clipped(values, &mut deviations, kappa, iterations)
 }
 
 /// Measure a star candidate: compute sub-pixel position and quality metrics.
