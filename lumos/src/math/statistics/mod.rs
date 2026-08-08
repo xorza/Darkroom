@@ -6,11 +6,24 @@ use serde::{Deserialize, Serialize};
 
 use crate::math::sum::mean_f32;
 
-/// Per-channel robust statistics (median and MAD).
+/// A distribution's location and spread — what one pass over the values measures.
+///
+/// The spread is always the raw MAD, in the data's own units; [`Self::sigma`] rescales on
+/// demand. Carrying the MAD rather than an already-scaled sigma is what keeps "median and MAD"
+/// and "median and sigma" one type instead of two, and applies the 1.4826 factor exactly once,
+/// where the caller needs Gaussian units.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-pub(crate) struct ChannelStats {
+pub(crate) struct MedianMad {
     pub median: f32,
     pub mad: f32,
+}
+
+impl MedianMad {
+    /// The MAD rescaled to the standard deviation of an equivalent normal distribution.
+    #[inline]
+    pub(crate) fn sigma(self) -> f32 {
+        mad_to_sigma(self.mad)
+    }
 }
 
 /// Compute absolute deviations from median in-place.
@@ -124,16 +137,14 @@ pub(crate) fn mad_f32_with_scratch(values: &[f32], median: f32, scratch: &mut Ve
 ///
 /// More efficient than computing separately since median is needed for MAD.
 /// Mutates the input buffer.
-pub(crate) fn median_and_mad_f32_mut(data: &mut [f32]) -> (f32, f32) {
+pub(crate) fn median_and_mad_f32_mut(data: &mut [f32]) -> MedianMad {
     debug_assert!(!data.is_empty());
 
     let median = median_f32_mut(data);
-
-    // Compute MAD in-place by replacing values with absolute deviations
     abs_deviation_inplace(data, median);
     let mad = median_f32_mut(data);
 
-    (median, mad)
+    MedianMad { median, mad }
 }
 
 /// MAD floored at `floor_fraction * center`.
@@ -144,17 +155,6 @@ pub(crate) fn median_and_mad_f32_mut(data: &mut [f32]) -> (f32, f32) {
 #[inline]
 pub(crate) fn mad_floored(mad: f32, center: f32, floor_fraction: f32) -> f32 {
     mad.max(center * floor_fraction)
-}
-
-/// A distribution's location and MAD-based spread — what one pass over the values measures.
-///
-/// The clip loop carries this from whichever pass produced the final estimate;
-/// [`ClippedStats`] is this widened with the survivors' mean.
-#[derive(Debug, Clone, Copy)]
-struct MedianSigma {
-    median: f32,
-    /// MAD scaled to a Gaussian-equivalent sigma by [`mad_to_sigma`].
-    sigma: f32,
 }
 
 /// Statistics of the sigma-clip survivors, from [`sigma_clipped_median_mad`].
@@ -176,10 +176,10 @@ impl ClippedStats {
     };
 
     /// Widen a clip pass's estimate with the mean of the same survivors.
-    fn from_median_sigma(location: MedianSigma, mean: f32) -> Self {
+    fn from_median_mad(location: MedianMad, mean: f32) -> Self {
         Self {
             median: location.median,
-            sigma: location.sigma,
+            sigma: location.sigma(),
             mean,
         }
     }
@@ -188,7 +188,7 @@ impl ClippedStats {
 /// Result of a single sigma-clipping iteration.
 enum ClipResult {
     /// Converged: no values were clipped (or sigma ≈ 0). Final stats.
-    Converged(MedianSigma),
+    Converged(MedianMad),
     /// Values were clipped; continue iterating.
     Clipped,
     /// Too few values remain (< 3) to compute meaningful statistics.
@@ -219,7 +219,7 @@ fn sigma_clip_iteration(
     let sigma = mad_to_sigma(mad);
 
     if sigma < f32::EPSILON {
-        return ClipResult::Converged(MedianSigma { median, sigma: 0.0 });
+        return ClipResult::Converged(MedianMad { median, mad: 0.0 });
     }
 
     // Clip values outside threshold, computing deviations on-the-fly.
@@ -236,7 +236,7 @@ fn sigma_clip_iteration(
 
     if write_idx == *len {
         // Converged - no values clipped
-        return ClipResult::Converged(MedianSigma { median, sigma });
+        return ClipResult::Converged(MedianMad { median, mad });
     }
 
     *len = write_idx;
@@ -245,11 +245,11 @@ fn sigma_clip_iteration(
 
 /// Compute final statistics from remaining values.
 #[inline]
-fn compute_final_stats(values: &mut [f32], deviations: &mut [f32]) -> MedianSigma {
+fn compute_final_stats(values: &mut [f32], deviations: &mut [f32]) -> MedianMad {
     if values.is_empty() {
-        return MedianSigma {
+        return MedianMad {
             median: 0.0,
-            sigma: 0.0,
+            mad: 0.0,
         };
     }
 
@@ -258,10 +258,7 @@ fn compute_final_stats(values: &mut [f32], deviations: &mut [f32]) -> MedianSigm
     abs_deviation_inplace(&mut deviations[..values.len()], median);
     let mad = median_f32_mut(&mut deviations[..values.len()]);
 
-    MedianSigma {
-        median,
-        sigma: mad_to_sigma(mad),
-    }
+    MedianMad { median, mad }
 }
 
 /// Iteratively clip `values`, then measure what survived.
@@ -292,7 +289,7 @@ fn sigma_clipped_core(
     // non-empty and a clip pass always keeps at least the values at the median).
     let location = converged
         .unwrap_or_else(|| compute_final_stats(&mut values[..len], &mut deviations[..len]));
-    ClippedStats::from_median_sigma(location, mean_f32(&values[..len]))
+    ClippedStats::from_median_mad(location, mean_f32(&values[..len]))
 }
 
 /// Compute sigma-clipped median and MAD-based sigma.

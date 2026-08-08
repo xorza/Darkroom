@@ -30,7 +30,7 @@ use rayon::prelude::*;
 use crate::error::InvalidConfigField;
 use crate::image_ops::op::{OpError, require_f32_master};
 use crate::image_ops::par_map_pixels;
-use crate::math::statistics::{mad_to_sigma, median_and_mad_f32_mut};
+use crate::math::statistics::{median_and_mad_f32_mut, median_f32_mut};
 use imaginarium::{ChannelCount, Image};
 
 #[cfg(test)]
@@ -555,16 +555,16 @@ fn build_curve(samples: &mut [f32], method: StretchMethod) -> Curve {
             shadow_sigmas,
             target_background,
         } => {
-            let (median, mad) = median_and_mad_f32_mut(samples);
+            let background = median_and_mad_f32_mut(samples);
             Curve::Stf(StfCurve::new(
-                median,
-                mad_to_sigma(mad),
+                background.median,
+                background.sigma(),
                 shadow_sigmas,
                 target_background,
             ))
         }
         StretchMethod::AutoAsinh { target_background } => {
-            let (median, _) = median_and_mad_f32_mut(samples);
+            let median = median_f32_mut(samples);
             Curve::Asinh(AsinhCurve::new(solve_asinh_beta(median, target_background)))
         }
         StretchMethod::Asinh { .. } | StretchMethod::Ghs { .. } => {

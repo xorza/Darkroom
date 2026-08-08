@@ -3,14 +3,14 @@ use imaginarium::Buffer2;
 
 use crate::io::image::ImageDimensions;
 use crate::io::image::linear::LinearImage;
-use crate::math::statistics::ChannelStats;
+use crate::math::statistics::MedianMad;
 use crate::stacking::combine::config::Normalization;
 use crate::stacking::combine::error::Error;
 use crate::stacking::combine::normalization::*;
 use crate::stacking::frame_store::{FrameStats, StoredFrame, WarpQuality};
 
-fn channel_stats(median: f32, mad: f32) -> ChannelStats {
-    ChannelStats { median, mad }
+fn channel_stats(median: f32, mad: f32) -> MedianMad {
+    MedianMad { median, mad }
 }
 
 fn frame_stats(median: f32, mad: f32) -> FrameStats {

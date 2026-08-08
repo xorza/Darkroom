@@ -265,7 +265,7 @@ impl WinsorizedClipConfig {
         validate_sigma_bounds(self.sigma_low, self.sigma_high)
     }
 
-    /// Phase 1: Iteratively Winsorize to get robust (center, sigma) estimates.
+    /// Phase 1: Iteratively Winsorize to get a robust [`WinsorizedEstimate`].
     ///
     /// Uses Huber's c=1.5 for Winsorization boundaries, converges when
     /// `|sigma_new - sigma_old| / sigma_old < 0.0005`. Applies 1.134 bias
@@ -276,9 +276,7 @@ impl WinsorizedClipConfig {
     /// The median is then the middle element (O(1)) every pass — replacing the per-iteration
     /// quickselect + buffer copy that dominated this hot path. `winsorized_stddev` is an
     /// order-independent sum, so sorting changes neither the center nor the sigma.
-    ///
-    /// Returns (center, corrected_sigma).
-    fn robust_estimate(&self, values: &[f32], working: &mut Vec<f32>) -> (f32, f32) {
+    fn robust_estimate(&self, values: &[f32], working: &mut Vec<f32>) -> WinsorizedEstimate {
         working.clear();
         working.extend_from_slice(values);
         working.sort_unstable_by(f32::total_cmp);
@@ -290,7 +288,7 @@ impl WinsorizedClipConfig {
         let mut sigma = winsorized_stddev(working, center) * WINSORIZED_CORRECTION;
 
         if sigma < f32::EPSILON {
-            return (center, 0.0);
+            return WinsorizedEstimate { center, sigma: 0.0 };
         }
 
         for _ in 0..WINSORIZE_MAX_ITER {
@@ -307,7 +305,7 @@ impl WinsorizedClipConfig {
             let sigma_new = winsorized_stddev(working, center) * WINSORIZED_CORRECTION;
 
             if sigma_new < f32::EPSILON {
-                return (center, 0.0);
+                return WinsorizedEstimate { center, sigma: 0.0 };
             }
 
             let converged = (sigma_new - sigma).abs() <= sigma * WINSORIZE_CONVERGENCE;
@@ -318,13 +316,13 @@ impl WinsorizedClipConfig {
             }
         }
 
-        (center, sigma)
+        WinsorizedEstimate { center, sigma }
     }
 
-    /// Phase 2: Reject outliers using the robust estimates from phase 1.
+    /// Phase 2: Reject outliers using the robust estimate from phase 1.
     ///
-    /// Standard sigma clipping with the Winsorized (center, sigma) and
-    /// the user's sigma_low/sigma_high thresholds.
+    /// Standard sigma clipping with the [`WinsorizedEstimate`] and the user's
+    /// sigma_low/sigma_high thresholds.
     fn reject(&self, values: &mut [f32], scratch: &mut ScratchBuffers) -> usize {
         debug_assert!(!values.is_empty());
 
@@ -334,9 +332,9 @@ impl WinsorizedClipConfig {
             return values.len();
         }
 
-        let (center, sigma) = self.robust_estimate(values, &mut scratch.floats_a);
+        let estimate = self.robust_estimate(values, &mut scratch.floats_a);
 
-        if sigma < f32::EPSILON {
+        if estimate.sigma < f32::EPSILON {
             return values.len();
         }
 
@@ -345,11 +343,23 @@ impl WinsorizedClipConfig {
             values,
             &mut scratch.indices,
             n,
-            self.sigma_low * sigma,
-            self.sigma_high * sigma,
-            |_| center,
+            self.sigma_low * estimate.sigma,
+            self.sigma_high * estimate.sigma,
+            |_| estimate.center,
         )
     }
+}
+
+/// Location and spread from [`WinsorizedClipConfig::robust_estimate`].
+///
+/// Deliberately not a [`MedianMad`](crate::math::statistics::MedianMad): `sigma` is a
+/// bias-corrected sample standard deviation about the Winsorized center — see
+/// [`winsorized_stddev`] — so it is already in Gaussian units, and sending it through that
+/// type's MAD rescale would silently inflate every Winsorized threshold by 1.4826.
+#[derive(Debug, Clone, Copy)]
+struct WinsorizedEstimate {
+    center: f32,
+    sigma: f32,
 }
 
 /// Sample standard deviation of `values` about the given `center` (not MAD) — the spread estimate
@@ -1969,7 +1979,7 @@ mod tests {
         let config = WinsorizedClipConfig::new(3.0);
         let values: Vec<f32> = (0..20).map(|i| 10.0 + i as f32 * 0.1).collect();
         let mut working = vec![];
-        let (center, sigma) = config.robust_estimate(&values, &mut working);
+        let WinsorizedEstimate { center, sigma } = config.robust_estimate(&values, &mut working);
 
         // Center should be near median (10.95)
         assert!(
@@ -1990,7 +2000,7 @@ mod tests {
         let config = WinsorizedClipConfig::new(3.0);
         let values = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0];
         let mut working = vec![];
-        let (_center, sigma) = config.robust_estimate(&values, &mut working);
+        let sigma = config.robust_estimate(&values, &mut working).sigma;
 
         // Raw stddev of 1..=10 is ~3.03. With no outliers to Winsorize,
         // sigma should be approximately 3.03 * 1.134 ≈ 3.43
@@ -2008,7 +2018,7 @@ mod tests {
         let config = WinsorizedClipConfig::new(2.5);
         let values = vec![10.0, 10.1, 10.2, 9.9, 10.0, 10.1, 9.8, 10.3, 50.0];
         let mut working = vec![];
-        let (center, sigma) = config.robust_estimate(&values, &mut working);
+        let WinsorizedEstimate { center, sigma } = config.robust_estimate(&values, &mut working);
 
         // Center should be near the cluster (~10.05), not pulled toward 50
         assert!(
@@ -2035,8 +2045,14 @@ mod tests {
         let values = vec![1.0, 1.1, 1.2, 0.9, 1.0, 1.1, 0.8, 1.3, 2.0];
         let mut w1 = vec![];
         let mut w2 = vec![];
-        let (center1, sigma1) = config_permissive.robust_estimate(&values, &mut w1);
-        let (center2, sigma2) = config_tight.robust_estimate(&values, &mut w2);
+        let WinsorizedEstimate {
+            center: center1,
+            sigma: sigma1,
+        } = config_permissive.robust_estimate(&values, &mut w1);
+        let WinsorizedEstimate {
+            center: center2,
+            sigma: sigma2,
+        } = config_tight.robust_estimate(&values, &mut w2);
 
         // Both should produce the same robust estimates (same Huber c=1.5)
         assert!(
