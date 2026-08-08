@@ -2,12 +2,12 @@
 //! These tests compare behavior between local_maxima and multi_threshold.
 
 use crate::math::size2us::Size2us;
-use crate::math::vec2us::Vec2us;
 use crate::stacking::star_detection::deblend::internals::{
     TestComponent, deblend_multi_threshold_test, make_test_component,
 };
 use crate::stacking::star_detection::deblend::local_maxima::deblend_local_maxima;
-use crate::stacking::star_detection::test_common::test_star::TestStar;
+use crate::testing::synthetic::star_profiles::{StarProfile, SyntheticStar};
+use glam::Vec2;
 
 #[test]
 fn test_local_vs_multi_threshold_single_star() {
@@ -18,7 +18,11 @@ fn test_local_vs_multi_threshold_single_star() {
         data,
     } = make_test_component(
         Size2us::new(100, 100),
-        &[TestStar::new(Vec2us::new(50, 50), 1.0, 3.0)],
+        &[SyntheticStar::new(
+            Vec2::new(50.0, 50.0),
+            1.0,
+            StarProfile::Gaussian { sigma: 3.0 },
+        )],
     );
 
     // Local maxima deblending (default: min_separation=3, min_prominence=0.3)
@@ -45,8 +49,16 @@ fn test_local_vs_multi_threshold_two_stars() {
     } = make_test_component(
         Size2us::new(100, 100),
         &[
-            TestStar::new(Vec2us::new(30, 50), 1.0, 2.5),
-            TestStar::new(Vec2us::new(70, 50), 0.8, 2.5),
+            SyntheticStar::new(
+                Vec2::new(30.0, 50.0),
+                1.0,
+                StarProfile::Gaussian { sigma: 2.5 },
+            ),
+            SyntheticStar::new(
+                Vec2::new(70.0, 50.0),
+                0.8,
+                StarProfile::Gaussian { sigma: 2.5 },
+            ),
         ],
     );
 

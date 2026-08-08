@@ -3,13 +3,9 @@
 use crate::math::size2us::Size2us;
 use crate::stacking::star_detection::config::Config;
 use crate::stacking::star_detection::detector::StarDetector;
-use crate::stacking::star_detection::test_common::output::image_writer::{
-    save_comparison, save_grayscale,
-};
-use crate::stacking::star_detection::test_common::output::metrics::{
-    DetectionMetrics, compute_detection_metrics, save_metrics,
-};
 use crate::testing::synthetic::observe::SimFrame;
+use crate::testing::visual::report::{DetectionMetrics, compute_detection_metrics, save_metrics};
+use crate::testing::visual::{save_comparison, save_grayscale};
 use common::internals::test_output_path;
 
 mod challenging_tests;

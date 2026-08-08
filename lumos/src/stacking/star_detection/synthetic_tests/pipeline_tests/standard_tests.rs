@@ -3,12 +3,10 @@
 use crate::stacking::star_detection::config::Config;
 use crate::stacking::star_detection::synthetic_tests::Scenario;
 use crate::stacking::star_detection::synthetic_tests::pipeline_tests::run_test;
-use crate::stacking::star_detection::test_common::output::metrics::{
-    PassCriteria, check_pass, standard_criteria,
-};
 use crate::testing::init_tracing;
 use crate::testing::synthetic::camera::PsfModel;
 use crate::testing::synthetic::scene::BackgroundField;
+use crate::testing::visual::report::{PassCriteria, check_pass, standard_criteria};
 
 /// Detection config for synthetic images: disable the CFA matched filter so FWHM stays accurate.
 fn detection_config() -> Config {

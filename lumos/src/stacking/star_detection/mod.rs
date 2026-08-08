@@ -70,5 +70,3 @@ mod mem_budget_tests;
 mod real_data_tests;
 #[cfg(test)]
 mod synthetic_tests;
-#[cfg(test)]
-mod test_common;

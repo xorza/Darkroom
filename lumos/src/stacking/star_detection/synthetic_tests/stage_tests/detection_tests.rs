@@ -7,9 +7,7 @@ use crate::stacking::star_detection::config::background_config::BackgroundConfig
 use crate::stacking::star_detection::config::detection_config::DetectionConfig;
 use crate::stacking::star_detection::detector::stages::detect_test_utils::detect_stars_test;
 use crate::stacking::star_detection::synthetic_tests::Scenario;
-use crate::stacking::star_detection::test_common::output::image_writer::{
-    gray_to_rgb_image_stretched, save_grayscale, save_image,
-};
+use crate::testing::visual::{gray_to_rgb_image_stretched, save_grayscale, save_image};
 use crate::testing::{estimate_background, init_tracing};
 use common::internals::test_output_path;
 use glam::Vec2;

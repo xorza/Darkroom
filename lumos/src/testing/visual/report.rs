@@ -1,8 +1,9 @@
 //! Detection metrics computation for visual tests.
 
 use crate::stacking::star_detection::star::Star;
-use crate::stacking::star_detection::test_common::output::comparison::match_stars;
+use crate::testing::synthetic::metrics::match_catalogs;
 use crate::testing::synthetic::observe::ObservedSource;
+use glam::DVec2;
 use std::fmt;
 use std::fs::File;
 use std::io::Write;
@@ -134,11 +135,13 @@ pub(crate) fn compute_detection_metrics(
     detected: &[Star],
     match_radius: f32,
 ) -> DetectionMetrics {
-    let match_result = match_stars(ground_truth, detected, match_radius);
+    let truth_positions: Vec<DVec2> = ground_truth.iter().map(|s| s.pos).collect();
+    let detected_positions: Vec<DVec2> = detected.iter().map(|s| s.pos).collect();
+    let pairs = match_catalogs(&truth_positions, &detected_positions, match_radius as f64);
 
-    let true_positives = match_result.matched_truth.len();
+    let true_positives = pairs.len();
     let false_negatives = ground_truth.len() - true_positives;
-    let false_positives = detected.len() - match_result.matched_detected.len();
+    let false_positives = detected.len() - true_positives;
 
     // Detection rate and precision
     let detection_rate = if ground_truth.is_empty() {
@@ -166,10 +169,9 @@ pub(crate) fn compute_detection_metrics(
     };
 
     // Compute centroid errors
-    let centroid_errors: Vec<f32> = match_result
-        .pairs
+    let centroid_errors: Vec<f32> = pairs
         .iter()
-        .map(|(_, _, dist)| *dist)
+        .map(|&(ti, di)| truth_positions[ti].distance(detected_positions[di]) as f32)
         .collect();
 
     let mean_centroid_error = if centroid_errors.is_empty() {
@@ -203,7 +205,7 @@ pub(crate) fn compute_detection_metrics(
     let mut fwhm_errors = Vec::new();
     let mut flux_errors = Vec::new();
 
-    for &(ti, di, _) in &match_result.pairs {
+    for &(ti, di) in &pairs {
         let truth = &ground_truth[ti];
         let det = &detected[di];
 
@@ -358,7 +360,9 @@ pub(crate) fn check_pass(
 
 #[cfg(test)]
 mod tests {
-    use crate::stacking::star_detection::test_common::output::metrics::*;
+    use crate::stacking::star_detection::star::Star;
+    use crate::testing::synthetic::observe::ObservedSource;
+    use crate::testing::visual::report::*;
 
     fn make_truth(x: f64, y: f64) -> ObservedSource {
         ObservedSource {

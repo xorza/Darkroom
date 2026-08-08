@@ -7,7 +7,8 @@ use crate::stacking::star_detection::deblend::assign_to_nearest_peak;
 use crate::stacking::star_detection::deblend::internals::{TestComponent, make_test_component};
 use crate::stacking::star_detection::deblend::local_maxima::*;
 use crate::stacking::star_detection::labeling::internals::label_map_from_raw;
-use crate::stacking::star_detection::test_common::test_star::TestStar;
+use crate::testing::synthetic::star_profiles::{StarProfile, SyntheticStar};
+use glam::Vec2;
 
 use crate::stacking::star_detection::deblend::local_maxima::is_local_maximum;
 
@@ -22,7 +23,11 @@ fn test_find_single_peak() {
         data,
     } = make_test_component(
         Size2us::new(100, 100),
-        &[TestStar::new(Vec2us::new(50, 50), 1.0, 3.0)],
+        &[SyntheticStar::new(
+            Vec2::new(50.0, 50.0),
+            1.0,
+            StarProfile::Gaussian { sigma: 3.0 },
+        )],
     );
 
     let peaks = find_local_maxima(
@@ -49,8 +54,16 @@ fn test_find_two_peaks() {
     } = make_test_component(
         Size2us::new(100, 100),
         &[
-            TestStar::new(Vec2us::new(30, 50), 1.0, 2.5),
-            TestStar::new(Vec2us::new(70, 50), 0.8, 2.5),
+            SyntheticStar::new(
+                Vec2::new(30.0, 50.0),
+                1.0,
+                StarProfile::Gaussian { sigma: 2.5 },
+            ),
+            SyntheticStar::new(
+                Vec2::new(70.0, 50.0),
+                0.8,
+                StarProfile::Gaussian { sigma: 2.5 },
+            ),
         ],
     );
 
@@ -68,8 +81,16 @@ fn test_deblend_creates_separate_candidates() {
     } = make_test_component(
         Size2us::new(100, 100),
         &[
-            TestStar::new(Vec2us::new(30, 50), 1.0, 2.5),
-            TestStar::new(Vec2us::new(70, 50), 0.8, 2.5),
+            SyntheticStar::new(
+                Vec2::new(30.0, 50.0),
+                1.0,
+                StarProfile::Gaussian { sigma: 2.5 },
+            ),
+            SyntheticStar::new(
+                Vec2::new(70.0, 50.0),
+                0.8,
+                StarProfile::Gaussian { sigma: 2.5 },
+            ),
         ],
     );
 
@@ -88,7 +109,11 @@ fn test_iter_pixels_count() {
         data,
     } = make_test_component(
         Size2us::new(100, 100),
-        &[TestStar::new(Vec2us::new(50, 50), 1.0, 3.0)],
+        &[SyntheticStar::new(
+            Vec2::new(50.0, 50.0),
+            1.0,
+            StarProfile::Gaussian { sigma: 3.0 },
+        )],
     );
 
     let iter_count = data.iter_pixels(&pixels, &labels).count();
@@ -110,8 +135,16 @@ fn test_euclidean_separation() {
     } = make_test_component(
         Size2us::new(100, 100),
         &[
-            TestStar::new(Vec2us::new(50, 50), 1.0, 1.5),
-            TestStar::new(Vec2us::new(53, 53), 0.9, 1.5),
+            SyntheticStar::new(
+                Vec2::new(50.0, 50.0),
+                1.0,
+                StarProfile::Gaussian { sigma: 1.5 },
+            ),
+            SyntheticStar::new(
+                Vec2::new(53.0, 53.0),
+                0.9,
+                StarProfile::Gaussian { sigma: 1.5 },
+            ),
         ],
     );
 
@@ -132,8 +165,16 @@ fn test_prominence_filter() {
     } = make_test_component(
         Size2us::new(100, 100),
         &[
-            TestStar::new(Vec2us::new(30, 50), 1.0, 2.5),
-            TestStar::new(Vec2us::new(70, 50), 0.2, 2.5),
+            SyntheticStar::new(
+                Vec2::new(30.0, 50.0),
+                1.0,
+                StarProfile::Gaussian { sigma: 2.5 },
+            ),
+            SyntheticStar::new(
+                Vec2::new(70.0, 50.0),
+                0.2,
+                StarProfile::Gaussian { sigma: 2.5 },
+            ),
         ],
     );
 
@@ -154,7 +195,11 @@ fn test_deblend_empty_peaks() {
         data,
     } = make_test_component(
         Size2us::new(100, 100),
-        &[TestStar::new(Vec2us::new(50, 50), 1.0, 3.0)],
+        &[SyntheticStar::new(
+            Vec2::new(50.0, 50.0),
+            1.0,
+            StarProfile::Gaussian { sigma: 3.0 },
+        )],
     );
     let empty_peaks: &[Pixel] = &[];
 
@@ -173,7 +218,11 @@ fn test_deblend_single_peak_returns_full_component() {
         data,
     } = make_test_component(
         Size2us::new(100, 100),
-        &[TestStar::new(Vec2us::new(50, 50), 1.0, 3.0)],
+        &[SyntheticStar::new(
+            Vec2::new(50.0, 50.0),
+            1.0,
+            StarProfile::Gaussian { sigma: 3.0 },
+        )],
     );
 
     let candidates = deblend_local_maxima(
@@ -199,9 +248,21 @@ fn test_peaks_sorted_by_brightness() {
     } = make_test_component(
         Size2us::new(100, 100),
         &[
-            TestStar::new(Vec2us::new(30, 50), 0.5, 2.5),
-            TestStar::new(Vec2us::new(50, 50), 1.0, 2.5),
-            TestStar::new(Vec2us::new(70, 50), 0.7, 2.5),
+            SyntheticStar::new(
+                Vec2::new(30.0, 50.0),
+                0.5,
+                StarProfile::Gaussian { sigma: 2.5 },
+            ),
+            SyntheticStar::new(
+                Vec2::new(50.0, 50.0),
+                1.0,
+                StarProfile::Gaussian { sigma: 2.5 },
+            ),
+            SyntheticStar::new(
+                Vec2::new(70.0, 50.0),
+                0.7,
+                StarProfile::Gaussian { sigma: 2.5 },
+            ),
         ],
     );
 
@@ -223,9 +284,21 @@ fn test_find_peak_returns_global_max() {
     } = make_test_component(
         Size2us::new(100, 100),
         &[
-            TestStar::new(Vec2us::new(30, 50), 0.5, 2.5),
-            TestStar::new(Vec2us::new(50, 50), 1.0, 2.5),
-            TestStar::new(Vec2us::new(70, 50), 0.7, 2.5),
+            SyntheticStar::new(
+                Vec2::new(30.0, 50.0),
+                0.5,
+                StarProfile::Gaussian { sigma: 2.5 },
+            ),
+            SyntheticStar::new(
+                Vec2::new(50.0, 50.0),
+                1.0,
+                StarProfile::Gaussian { sigma: 2.5 },
+            ),
+            SyntheticStar::new(
+                Vec2::new(70.0, 50.0),
+                0.7,
+                StarProfile::Gaussian { sigma: 2.5 },
+            ),
         ],
     );
 
@@ -247,8 +320,16 @@ fn test_deblend_area_conservation() {
     } = make_test_component(
         Size2us::new(100, 100),
         &[
-            TestStar::new(Vec2us::new(30, 50), 1.0, 2.5),
-            TestStar::new(Vec2us::new(70, 50), 0.8, 2.5),
+            SyntheticStar::new(
+                Vec2::new(30.0, 50.0),
+                1.0,
+                StarProfile::Gaussian { sigma: 2.5 },
+            ),
+            SyntheticStar::new(
+                Vec2::new(70.0, 50.0),
+                0.8,
+                StarProfile::Gaussian { sigma: 2.5 },
+            ),
         ],
     );
 
@@ -271,8 +352,16 @@ fn test_peak_replacement_when_brighter() {
     } = make_test_component(
         Size2us::new(100, 100),
         &[
-            TestStar::new(Vec2us::new(50, 50), 1.0, 1.5),
-            TestStar::new(Vec2us::new(51, 50), 0.8, 1.5),
+            SyntheticStar::new(
+                Vec2::new(50.0, 50.0),
+                1.0,
+                StarProfile::Gaussian { sigma: 1.5 },
+            ),
+            SyntheticStar::new(
+                Vec2::new(51.0, 50.0),
+                0.8,
+                StarProfile::Gaussian { sigma: 1.5 },
+            ),
         ],
     );
 
@@ -351,8 +440,16 @@ fn test_voronoi_partitioning() {
     } = make_test_component(
         Size2us::new(100, 100),
         &[
-            TestStar::new(Vec2us::new(25, 50), 1.0, 3.0),
-            TestStar::new(Vec2us::new(75, 50), 1.0, 3.0),
+            SyntheticStar::new(
+                Vec2::new(25.0, 50.0),
+                1.0,
+                StarProfile::Gaussian { sigma: 3.0 },
+            ),
+            SyntheticStar::new(
+                Vec2::new(75.0, 50.0),
+                1.0,
+                StarProfile::Gaussian { sigma: 3.0 },
+            ),
         ],
     );
 
@@ -385,7 +482,13 @@ fn test_voronoi_partitioning() {
 fn test_many_peaks_limited_to_max() {
     // Create component with more peaks than MAX_PEAKS
     let stars: Vec<_> = (0..12)
-        .map(|i| TestStar::new(Vec2us::new(10 + i * 8, 50), 1.0 - i as f32 * 0.05, 1.5))
+        .map(|i| {
+            SyntheticStar::new(
+                Vec2::new((10 + i * 8) as f32, 50.0),
+                1.0 - i as f32 * 0.05,
+                StarProfile::Gaussian { sigma: 1.5 },
+            )
+        })
         .collect();
 
     let TestComponent {
@@ -463,8 +566,16 @@ fn test_equal_brightness_tie_breaking() {
     } = make_test_component(
         Size2us::new(100, 100),
         &[
-            TestStar::new(Vec2us::new(30, 50), 1.0, 2.5),
-            TestStar::new(Vec2us::new(70, 50), 1.0, 2.5),
+            SyntheticStar::new(
+                Vec2::new(30.0, 50.0),
+                1.0,
+                StarProfile::Gaussian { sigma: 2.5 },
+            ),
+            SyntheticStar::new(
+                Vec2::new(70.0, 50.0),
+                1.0,
+                StarProfile::Gaussian { sigma: 2.5 },
+            ),
         ],
     );
 
@@ -602,8 +713,16 @@ fn test_zero_min_separation() {
     } = make_test_component(
         Size2us::new(100, 100),
         &[
-            TestStar::new(Vec2us::new(30, 50), 1.0, 2.0),
-            TestStar::new(Vec2us::new(70, 50), 0.9, 2.0),
+            SyntheticStar::new(
+                Vec2::new(30.0, 50.0),
+                1.0,
+                StarProfile::Gaussian { sigma: 2.0 },
+            ),
+            SyntheticStar::new(
+                Vec2::new(70.0, 50.0),
+                0.9,
+                StarProfile::Gaussian { sigma: 2.0 },
+            ),
         ],
     );
 
@@ -623,9 +742,21 @@ fn test_bbox_contains_peak() {
     } = make_test_component(
         Size2us::new(100, 100),
         &[
-            TestStar::new(Vec2us::new(25, 25), 1.0, 2.5),
-            TestStar::new(Vec2us::new(75, 25), 0.9, 2.5),
-            TestStar::new(Vec2us::new(50, 75), 0.8, 2.5),
+            SyntheticStar::new(
+                Vec2::new(25.0, 25.0),
+                1.0,
+                StarProfile::Gaussian { sigma: 2.5 },
+            ),
+            SyntheticStar::new(
+                Vec2::new(75.0, 25.0),
+                0.9,
+                StarProfile::Gaussian { sigma: 2.5 },
+            ),
+            SyntheticStar::new(
+                Vec2::new(50.0, 75.0),
+                0.8,
+                StarProfile::Gaussian { sigma: 2.5 },
+            ),
         ],
     );
 
@@ -650,7 +781,11 @@ fn test_peak_value_matches_pixel() {
         data,
     } = make_test_component(
         Size2us::new(100, 100),
-        &[TestStar::new(Vec2us::new(50, 50), 1.0, 2.5)],
+        &[SyntheticStar::new(
+            Vec2::new(50.0, 50.0),
+            1.0,
+            StarProfile::Gaussian { sigma: 2.5 },
+        )],
     );
 
     let candidates = deblend_local_maxima(

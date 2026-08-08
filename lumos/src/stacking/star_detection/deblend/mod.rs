@@ -178,7 +178,7 @@ mod internals {
     use crate::stacking::star_detection::deblend::{ComponentData, MAX_PEAKS};
     use crate::stacking::star_detection::labeling::LabelMap;
     use crate::stacking::star_detection::labeling::internals::label_map_from_raw;
-    use crate::stacking::star_detection::test_common::test_star::TestStar;
+    use crate::testing::synthetic::star_profiles::SyntheticStar;
 
     #[derive(Debug)]
     pub(super) struct TestComponent {
@@ -187,7 +187,7 @@ mod internals {
         pub(super) data: ComponentData,
     }
 
-    pub(super) fn make_test_component(size: Size2us, stars: &[TestStar]) -> TestComponent {
+    pub(super) fn make_test_component(size: Size2us, stars: &[SyntheticStar]) -> TestComponent {
         let mut pixels = Buffer2::new_filled(size.width, size.height, 0.0f32);
         let mut labels = Buffer2::new_filled(size.width, size.height, 0u32);
         let mut bbox = URect::empty();
@@ -203,7 +203,9 @@ mod internals {
                         continue;
                     }
 
-                    let value = star.value_at(offset_x, offset_y);
+                    // The cutoff decides component membership, not just brightness: a pixel
+                    // below it stays unlabelled, so it never joins the component's bbox or area.
+                    let value = star.value_at(x as f32, y as f32);
                     if value <= 0.001 {
                         continue;
                     }
