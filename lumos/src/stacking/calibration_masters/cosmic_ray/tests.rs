@@ -336,3 +336,72 @@ fn xtrans_removes_cosmic_ray_preserves_flat_field() {
         );
     }
 }
+
+/// An independently written reference for [`replace_flagged`], asserting the property that makes
+/// the pass order-independent: it writes only masked pixels and reads only unmasked ones, so no
+/// replacement can observe another. Any future attempt to drop the frame copy depends on exactly
+/// that, and this is what would catch a change that broke it.
+fn replace_flagged_via_snapshot(pixels: &[f32], size: Size2us, mask: &[bool]) -> Vec<f32> {
+    let src = pixels.to_vec();
+    let mut out = pixels.to_vec();
+    let (wi, hi) = (size.width as isize, size.height as isize);
+    for y in 0..size.height {
+        for x in 0..size.width {
+            let target = size.index_of(Vec2us::new(x, y));
+            if !mask[target] {
+                continue;
+            }
+            let mut buf = Vec::new();
+            for dy in -2..=2 {
+                let yy = (y as isize + dy).clamp(0, hi - 1) as usize;
+                for dx in -2..=2 {
+                    let xx = (x as isize + dx).clamp(0, wi - 1) as usize;
+                    let j = size.index_of(Vec2us::new(xx, yy));
+                    if !mask[j] {
+                        buf.push(src[j]);
+                    }
+                }
+            }
+            if !buf.is_empty() {
+                out[target] = median_f32_mut(&mut buf);
+            }
+        }
+    }
+    out
+}
+
+#[test]
+fn replace_flagged_matches_a_snapshot_reference() {
+    let size = Size2us::new(12, 12);
+    // Distinct values so a median that picked up a replaced neighbour would shift visibly.
+    let pixels: Vec<f32> = (0..size.pixel_count()).map(|i| i as f32).collect();
+
+    let mut mask = vec![false; size.pixel_count()];
+    let at = |x, y| size.index_of(Vec2us::new(x, y));
+    // Isolated hit.
+    mask[at(6, 6)] = true;
+    // Adjacent 2x2 block: the case that would expose an order-dependent read, since each of the
+    // four sits inside the others' 5x5 windows.
+    for (x, y) in [(2, 9), (3, 9), (2, 10), (3, 10)] {
+        mask[at(x, y)] = true;
+    }
+    // Corner, to exercise the clamped window.
+    mask[at(0, 0)] = true;
+    // A hit whose entire 5x5 is masked — nothing to repair from, so it must be left alone.
+    for y in 0..5 {
+        for x in 7..12 {
+            mask[at(x, y)] = true;
+        }
+    }
+
+    let want = replace_flagged_via_snapshot(&pixels, size, &mask);
+
+    let mut got = Buffer2::new(size.width, size.height, pixels.clone());
+    replace_flagged(&mut got, size, &mask);
+
+    assert_eq!(got.pixels(), &want[..]);
+    // The fully-masked interior keeps its original value rather than picking up a neighbour.
+    assert_eq!(got.pixels()[at(9, 2)], pixels[at(9, 2)]);
+    // ...while a repairable hit actually moved.
+    assert_ne!(got.pixels()[at(6, 6)], pixels[at(6, 6)]);
+}
