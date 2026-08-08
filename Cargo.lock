@@ -2069,6 +2069,7 @@ dependencies = [
  "imaginarium",
  "lumos",
  "notify",
+ "parking_lot",
  "rand 0.10.2",
  "scenarium",
  "strum",

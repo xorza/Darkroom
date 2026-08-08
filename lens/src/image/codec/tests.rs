@@ -47,8 +47,8 @@ async fn cpu_image_streams_round_trip_pixel_exact() {
         .as_any()
         .downcast_ref::<Image>()
         .expect("decoded back into a lens Image");
-    let cpu = decoded
-        .buffer()
+    let buffer = decoded.make_interleaved();
+    let cpu = buffer
         .make_cpu(&ProcessingContext::cpu_only())
         .expect("rebuilt image is CPU-resident");
     assert_eq!(cpu.desc(), sample.desc);

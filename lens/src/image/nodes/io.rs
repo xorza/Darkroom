@@ -97,13 +97,13 @@ fn register_save(library: &mut Library) {
                                     .expect(
                                         "image input type is validated at the compile boundary",
                                     )
-                                    .buffer()
+                                    .make_interleaved()
                                     .duplicate(&vision.processing_ctx)
                                     .map_err(InvokeError::external)?,
                             ),
                         };
                         image
-                            .buffer()
+                            .make_interleaved()
                             .make_cpu(&vision.processing_ctx)
                             .map_err(InvokeError::external)?
                             .clone()

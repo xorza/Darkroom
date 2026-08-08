@@ -7,3 +7,5 @@ auto chosen reference frame for stacking and manually specified
 visual node groups
 
 mesh once registrations
+
+image buffer and lens image interleaved/planar formats
