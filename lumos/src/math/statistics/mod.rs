@@ -146,6 +146,17 @@ pub(crate) fn mad_floored(mad: f32, center: f32, floor_fraction: f32) -> f32 {
     mad.max(center * floor_fraction)
 }
 
+/// A distribution's location and MAD-based spread — what one pass over the values measures.
+///
+/// The clip loop carries this from whichever pass produced the final estimate;
+/// [`ClippedStats`] is this widened with the survivors' mean.
+#[derive(Debug, Clone, Copy)]
+struct MedianSigma {
+    median: f32,
+    /// MAD scaled to a Gaussian-equivalent sigma by [`mad_to_sigma`].
+    sigma: f32,
+}
+
 /// Statistics of the sigma-clip survivors, from [`sigma_clipped_median_mad`].
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct ClippedStats {
@@ -163,12 +174,21 @@ impl ClippedStats {
         sigma: 0.0,
         mean: 0.0,
     };
+
+    /// Widen a clip pass's estimate with the mean of the same survivors.
+    fn from_median_sigma(location: MedianSigma, mean: f32) -> Self {
+        Self {
+            median: location.median,
+            sigma: location.sigma,
+            mean,
+        }
+    }
 }
 
 /// Result of a single sigma-clipping iteration.
 enum ClipResult {
     /// Converged: no values were clipped (or sigma ≈ 0). Final stats.
-    Converged(f32, f32),
+    Converged(MedianSigma),
     /// Values were clipped; continue iterating.
     Clipped,
     /// Too few values remain (< 3) to compute meaningful statistics.
@@ -199,7 +219,7 @@ fn sigma_clip_iteration(
     let sigma = mad_to_sigma(mad);
 
     if sigma < f32::EPSILON {
-        return ClipResult::Converged(median, 0.0);
+        return ClipResult::Converged(MedianSigma { median, sigma: 0.0 });
     }
 
     // Clip values outside threshold, computing deviations on-the-fly.
@@ -216,7 +236,7 @@ fn sigma_clip_iteration(
 
     if write_idx == *len {
         // Converged - no values clipped
-        return ClipResult::Converged(median, sigma);
+        return ClipResult::Converged(MedianSigma { median, sigma });
     }
 
     *len = write_idx;
@@ -225,18 +245,23 @@ fn sigma_clip_iteration(
 
 /// Compute final statistics from remaining values.
 #[inline]
-fn compute_final_stats(values: &mut [f32], deviations: &mut [f32]) -> (f32, f32) {
+fn compute_final_stats(values: &mut [f32], deviations: &mut [f32]) -> MedianSigma {
     if values.is_empty() {
-        return (0.0, 0.0);
+        return MedianSigma {
+            median: 0.0,
+            sigma: 0.0,
+        };
     }
 
     let median = median_f32_mut(values);
     deviations[..values.len()].copy_from_slice(values);
     abs_deviation_inplace(&mut deviations[..values.len()], median);
     let mad = median_f32_mut(&mut deviations[..values.len()]);
-    let sigma = mad_to_sigma(mad);
 
-    (median, sigma)
+    MedianSigma {
+        median,
+        sigma: mad_to_sigma(mad),
+    }
 }
 
 /// Iteratively clip `values`, then measure what survived.
@@ -254,8 +279,8 @@ fn sigma_clipped_core(
     let mut converged = None;
     for _ in 0..iterations {
         match sigma_clip_iteration(values, &mut len, deviations, kappa) {
-            ClipResult::Converged(median, sigma) => {
-                converged = Some((median, sigma));
+            ClipResult::Converged(location) => {
+                converged = Some(location);
                 break;
             }
             ClipResult::TooFew => break,
@@ -265,13 +290,9 @@ fn sigma_clipped_core(
 
     // Every exit path leaves the survivors in `values[..len]` (len ≥ 1: at entry values is
     // non-empty and a clip pass always keeps at least the values at the median).
-    let (median, sigma) = converged
+    let location = converged
         .unwrap_or_else(|| compute_final_stats(&mut values[..len], &mut deviations[..len]));
-    ClippedStats {
-        median,
-        sigma,
-        mean: mean_f32(&values[..len]),
-    }
+    ClippedStats::from_median_sigma(location, mean_f32(&values[..len]))
 }
 
 /// Compute sigma-clipped median and MAD-based sigma.
