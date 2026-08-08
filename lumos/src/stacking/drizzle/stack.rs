@@ -146,7 +146,7 @@ fn accumulate(
 
     let mut accumulator = DrizzleAccumulator::new(input_dims, config.clone())?;
     accumulator.add_frame(first)?;
-    progress.report(1, frame_count, StackingStage::Processing);
+    progress.report(1, frame_count, StackingStage::Drizzling);
 
     for (index, frame) in frames.enumerate() {
         // Between frames, so a cancelled run stops before loading and distributing the next one.
@@ -154,7 +154,7 @@ fn accumulate(
             return Err(DrizzleError::Cancelled);
         }
         accumulator.add_frame(frame?)?;
-        progress.report(index + 2, frame_count, StackingStage::Processing);
+        progress.report(index + 2, frame_count, StackingStage::Drizzling);
     }
 
     Ok(accumulator.finalize())

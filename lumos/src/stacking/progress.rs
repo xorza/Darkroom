@@ -14,13 +14,31 @@ pub struct StackingProgress {
     pub stage: StackingStage,
 }
 
-/// Stage of stacking operation.
+/// The pass a [`StackingProgress`] report belongs to.
+///
+/// One variant per pass that walks a countable set, so `current`/`total` mean one thing within a
+/// stage and a stage change is a real change of work. Which stages a run emits depends on the
+/// entry point, and no run emits all of them: the raw pipeline detects stars while the decoded
+/// frame is still in hand, so it folds that into `Calibrating` and never reports `Detecting`,
+/// which belongs to the already-decoded path. Each stage's counter restarts at its own total.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StackingStage {
-    /// Loading images into memory or writing to disk cache.
+    /// Decoding, calibrating and demosaicing raw lights, detecting each frame's stars as it
+    /// lands. Counted in frames.
+    Calibrating,
+    /// Detecting stars in frames that arrived already decoded. Counted in frames.
+    Detecting,
+    /// Registering each frame against the reference and warping it into place. Counted in
+    /// frames, and the reference itself is not among them.
+    Registering,
+    /// Reading frames into the combine's cache, spilling them to disk on the streaming tier.
+    /// Counted in frames.
     Loading,
-    /// Processing chunks during stacking.
-    Processing,
+    /// Walking the output in row chunks and reducing the frames into it. Counted in
+    /// chunk-channel pairs, not frames.
+    Combining,
+    /// Accumulating frames into the drizzle grid. Counted in frames.
+    Drizzling,
 }
 
 type ProgressFn = dyn Fn(StackingProgress) + Send + Sync;
@@ -74,7 +92,7 @@ mod tests {
             let reports = Arc::clone(&reports);
             move |progress| reports.lock().unwrap().push(progress)
         });
-        callback.report(3, 5, StackingStage::Processing);
+        callback.report(3, 5, StackingStage::Combining);
 
         let reports = reports.lock().unwrap();
         let [
@@ -87,9 +105,6 @@ mod tests {
         else {
             panic!("expected one progress report");
         };
-        assert_eq!(
-            (*current, *total, *stage),
-            (3, 5, StackingStage::Processing)
-        );
+        assert_eq!((*current, *total, *stage), (3, 5, StackingStage::Combining));
     }
 }

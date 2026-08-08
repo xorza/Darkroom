@@ -425,7 +425,7 @@ impl CacheCore {
         let mut chunks: Vec<&[f32]> = Vec::with_capacity(frame_count);
 
         self.progress
-            .report(0, total_work, StackingStage::Processing);
+            .report(0, total_work, StackingStage::Combining);
 
         for channel in 0..channel_count {
             for chunk_idx in 0..num_chunks {
@@ -462,7 +462,7 @@ impl CacheCore {
                 self.progress.report(
                     channel * num_chunks + chunk_idx + 1,
                     total_work,
-                    StackingStage::Processing,
+                    StackingStage::Combining,
                 );
 
                 // Cooperative cancel: bail between chunks (the in-flight chunk

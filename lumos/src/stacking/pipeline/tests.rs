@@ -1,5 +1,6 @@
 use crate::math::size2us::Size2us;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 use common::CancelToken;
 use glam::DVec2;
@@ -19,7 +20,7 @@ use crate::stacking::pipeline::config::{AlignStackConfig, Reference};
 use crate::stacking::pipeline::frame::{DetectedFrame, PipelineFrame};
 use crate::stacking::pipeline::result::Error;
 use crate::stacking::pipeline::tier::FrameTier;
-use crate::stacking::progress::ProgressCallback;
+use crate::stacking::progress::{ProgressCallback, StackingProgress, StackingStage};
 use crate::stacking::registration::config::Config as RegistrationConfig;
 use crate::stacking::registration::resample::warp;
 use crate::stacking::registration::transform::{Transform, TransformType, WarpTransform};
@@ -63,13 +64,17 @@ fn aligns_shifted_frames_into_a_sharp_stack() {
         reference: Reference::Index(0),
         ..Default::default()
     };
-    let result = align_and_stack(
-        frames,
-        &config,
-        ProgressCallback::default(),
-        CancelToken::never(),
-    )
-    .expect("stack");
+    let reports = Arc::new(Mutex::new(Vec::new()));
+    let progress = ProgressCallback::new({
+        let reports = Arc::clone(&reports);
+        move |report: StackingProgress| {
+            reports
+                .lock()
+                .unwrap()
+                .push((report.stage, report.current, report.total));
+        }
+    });
+    let result = align_and_stack(frames, &config, progress, CancelToken::never()).expect("stack");
 
     assert_eq!(result.alignment.reference, 0);
     assert_eq!(
@@ -81,6 +86,40 @@ fn aligns_shifted_frames_into_a_sharp_stack() {
         "dropped: {:?}",
         result.alignment.dropped
     );
+
+    // The pipeline's own stages reach the callback, not just the combine's. Counters come off
+    // shared atomics, so the reports arrive in any order — sort before comparing.
+    let reports = reports.lock().unwrap();
+    let currents = |wanted: StackingStage| {
+        let mut seen: Vec<usize> = reports
+            .iter()
+            .filter(|(stage, ..)| *stage == wanted)
+            .map(|(_, current, _)| *current)
+            .collect();
+        seen.sort_unstable();
+        seen
+    };
+    let totals = |wanted: StackingStage| {
+        reports
+            .iter()
+            .filter(|(stage, ..)| *stage == wanted)
+            .map(|(.., total)| *total)
+            .collect::<Vec<_>>()
+    };
+
+    assert_eq!(currents(StackingStage::Detecting), [1, 2, 3]);
+    assert_eq!(totals(StackingStage::Detecting), [3, 3, 3]);
+    // Registration counts every frame but the reference, which needs none.
+    assert_eq!(currents(StackingStage::Registering), [1, 2]);
+    assert_eq!(totals(StackingStage::Registering), [2, 2]);
+    assert!(
+        reports
+            .iter()
+            .any(|(stage, ..)| *stage == StackingStage::Combining),
+        "the combine stage never reported"
+    );
+    // Already-decoded frames never enter the raw path, so its stage stays silent.
+    assert_eq!(currents(StackingStage::Calibrating), Vec::<usize>::new());
 
     // Alignment check: every frame was warped back to the reference, so the reference's
     // brightest star must reappear at the same place in the combined image.
