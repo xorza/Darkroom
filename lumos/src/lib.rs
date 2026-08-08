@@ -67,11 +67,18 @@ pub use stacking::calibration_masters::{
     DEFAULT_SIGMA_THRESHOLD, DefectSummary, stack_cfa_master,
 };
 
-pub use stacking::star_detection::config::{
-    BackgroundConfig as StarDetectionBackgroundConfig, BackgroundRefinement, CentroidMethod,
-    Config as StarDetectionConfig, Connectivity, DetectionConfig as StarDetectionCandidateConfig,
-    FilterConfig as StarDetectionFilterConfig, FwhmConfig as StarDetectionFwhmConfig,
-    LocalBackgroundMethod, MeasurementConfig as StarDetectionMeasurementConfig, NoiseModel,
+pub use stacking::star_detection::config::Config as StarDetectionConfig;
+pub use stacking::star_detection::config::background_config::{
+    BackgroundConfig as StarDetectionBackgroundConfig, BackgroundRefinement,
+};
+pub use stacking::star_detection::config::detection_config::{
+    Connectivity, DetectionConfig as StarDetectionCandidateConfig,
+};
+pub use stacking::star_detection::config::filter_config::FilterConfig as StarDetectionFilterConfig;
+pub use stacking::star_detection::config::fwhm_config::FwhmConfig as StarDetectionFwhmConfig;
+pub use stacking::star_detection::config::measurement_config::{
+    CentroidMethod, LocalBackgroundMethod, MeasurementConfig as StarDetectionMeasurementConfig,
+    NoiseModel,
 };
 pub use stacking::star_detection::detector::{
     DetectionResult as StarDetectionResult, Diagnostics as StarDetectionDiagnostics,

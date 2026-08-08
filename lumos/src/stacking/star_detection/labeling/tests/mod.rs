@@ -5,7 +5,7 @@
 
 use crate::bit_buffer2::BitBuffer2;
 use crate::math::size2us::Size2us;
-use crate::stacking::star_detection::config::Connectivity;
+use crate::stacking::star_detection::config::detection_config::Connectivity;
 use crate::stacking::star_detection::labeling::internals::label_map_from_mask_with_connectivity;
 
 /// Simple flood-fill reference implementation for ground truth comparison.

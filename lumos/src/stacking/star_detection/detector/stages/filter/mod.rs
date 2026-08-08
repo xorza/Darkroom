@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use smallvec::SmallVec;
 
 use crate::math::statistics::{mad_floored, median_and_mad_f32_mut};
-use crate::stacking::star_detection::config::FilterConfig;
+use crate::stacking::star_detection::config::filter_config::FilterConfig;
 use crate::stacking::star_detection::detector::QualityFilterDiagnostics;
 use crate::stacking::star_detection::detector::stages::FWHM_MAD_FLOOR_FRACTION;
 use crate::stacking::star_detection::star::{SATURATION_PEAK, Star};

@@ -9,7 +9,7 @@ use std::hint::black_box;
 use crate::bit_buffer2::BitBuffer2;
 use crate::math::rect::URect;
 use crate::math::vec2us::Vec2us;
-use crate::stacking::star_detection::config::Connectivity;
+use crate::stacking::star_detection::config::detection_config::Connectivity;
 use crate::stacking::star_detection::deblend::ComponentData;
 use crate::stacking::star_detection::deblend::multi_threshold::{
     DeblendBuffers, deblend_multi_threshold,

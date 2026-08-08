@@ -23,7 +23,7 @@ use crate::background_mesh::spline::{cubic_spline_eval, solve_natural_spline_d2}
 use crate::concurrency::JobScratchPool;
 use crate::stacking::star_detection::background::simd::{SegmentRamp, SplineSegment};
 use crate::stacking::star_detection::background::workspace::InterpolateScratch;
-use crate::stacking::star_detection::config::BackgroundConfig;
+use crate::stacking::star_detection::config::background_config::BackgroundConfig;
 use crate::stacking::star_detection::mask_dilation::dilate_mask;
 use crate::stacking::star_detection::resources::DetectionResources;
 use crate::stacking::star_detection::threshold_mask::create_threshold_mask;

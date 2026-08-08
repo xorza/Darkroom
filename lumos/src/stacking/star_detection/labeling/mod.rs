@@ -22,7 +22,7 @@ use crate::concurrency::UnsafeSendPtr;
 use crate::stacking::star_detection::resources::DetectionResources;
 use imaginarium::Buffer2;
 
-use crate::stacking::star_detection::config::Connectivity;
+use crate::stacking::star_detection::config::detection_config::Connectivity;
 
 #[cfg(test)]
 pub(crate) mod internals;

@@ -3,7 +3,7 @@
 use crate::{
     math::size2us::Size2us,
     stacking::star_detection::background,
-    stacking::star_detection::config::{BackgroundConfig, BackgroundRefinement},
+    stacking::star_detection::config::background_config::{BackgroundConfig, BackgroundRefinement},
     stacking::star_detection::resources::DetectionResources,
     testing::estimate_background,
 };

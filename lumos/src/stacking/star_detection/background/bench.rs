@@ -9,7 +9,7 @@ use crate::bit_buffer2::BitBuffer2;
 use crate::math::size2us::Size2us;
 use crate::stacking::star_detection::background::estimate::BackgroundEstimate;
 use crate::stacking::star_detection::background::{estimate_background, refine_background};
-use crate::stacking::star_detection::config::BackgroundConfig;
+use crate::stacking::star_detection::config::background_config::BackgroundConfig;
 use crate::stacking::star_detection::resources::DetectionResources;
 use crate::testing::synthetic::fixtures::{cluster_field, star_field};
 use imaginarium::Buffer2;

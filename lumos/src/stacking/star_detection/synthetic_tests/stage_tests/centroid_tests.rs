@@ -11,7 +11,9 @@ use crate::math::fwhm_to_sigma;
 use crate::math::rect::URect;
 use crate::math::vec2us::Vec2us;
 use crate::stacking::star_detection::centroid::measure_star;
-use crate::stacking::star_detection::config::{CentroidMethod, MeasurementConfig};
+use crate::stacking::star_detection::config::measurement_config::{
+    CentroidMethod, MeasurementConfig,
+};
 use crate::stacking::star_detection::deblend::region::Region;
 use crate::stacking::star_detection::synthetic_tests::stage_tests::background_estimate;
 use crate::testing::TestRng;

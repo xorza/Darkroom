@@ -2,7 +2,7 @@
 
 use crate::math::size2us::Size2us;
 use crate::stacking::star_detection::background::estimate::BackgroundEstimate;
-use crate::stacking::star_detection::config::DetectionConfig;
+use crate::stacking::star_detection::config::detection_config::DetectionConfig;
 use crate::stacking::star_detection::deblend::region::Region;
 use crate::stacking::star_detection::resources::DetectionResources;
 use imaginarium::Buffer2;
