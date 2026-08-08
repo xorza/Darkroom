@@ -14,7 +14,7 @@ use crate::memory::{ChunkMemoryLayout, optimal_chunk_rows};
 use crate::stacking::combine::MIN_CONTRIBUTING_COVERAGE;
 use crate::stacking::combine::cache_config::CacheConfig;
 use crate::stacking::combine::config::Normalization;
-use crate::stacking::combine::error::Error;
+use crate::stacking::combine::error::{Error, FramePlane};
 use crate::stacking::combine::normalization::{FrameNorm, compute_frame_norms};
 use crate::stacking::combine::stack::StackFrame;
 use crate::stacking::frame_store::{
@@ -283,14 +283,24 @@ fn validate_stored_geometry(
     let planes = frame
         .channels
         .iter()
-        .map(|plane| ("a channel", plane))
-        .chain(frame.coverage.as_ref().map(|plane| ("coverage", plane)))
-        .chain(frame.confidence.as_ref().map(|plane| ("confidence", plane)));
-    for (plane_name, plane) in planes {
+        .map(|plane| (FramePlane::Channel, plane))
+        .chain(
+            frame
+                .coverage
+                .as_ref()
+                .map(|plane| (FramePlane::Coverage, plane)),
+        )
+        .chain(
+            frame
+                .confidence
+                .as_ref()
+                .map(|plane| (FramePlane::Confidence, plane)),
+        );
+    for (kind, plane) in planes {
         if plane.samples() != expected {
             return Err(Error::StoredFramePlaneSamples {
                 index,
-                plane: plane_name,
+                plane: kind,
                 expected,
                 actual: plane.samples(),
             });
@@ -314,7 +324,7 @@ fn validate_stored_samples(
 
 fn validate_warp_plane_values(
     index: usize,
-    plane_name: &'static str,
+    kind: FramePlane,
     samples: &[f32],
     cancel: &CancelToken,
 ) -> Result<(), Error> {
@@ -322,16 +332,10 @@ fn validate_warp_plane_values(
         if pixel.is_multiple_of(VALIDATION_CHUNK_SIZE) {
             check_cancel(cancel)?;
         }
-        let invalid = !value.is_finite()
-            || if plane_name == "coverage" {
-                !(0.0..=1.0).contains(&value)
-            } else {
-                value < 0.0
-            };
-        if invalid {
+        if !kind.accepts(value) {
             return Err(Error::InvalidWarpPlaneValue {
                 index,
-                plane: plane_name,
+                plane: kind,
                 pixel,
                 value,
             });
@@ -538,14 +542,14 @@ impl FrameCache {
             // Same guarantee `from_stack_frames` gives caller-supplied planes: coverage in
             // `[0, 1]` and confidence non-negative, so the gate and the weight multiplier below
             // can't be handed a value that silently corrupts the combine.
-            for (plane_name, plane) in [
-                ("coverage", frame.coverage.as_ref()),
-                ("confidence", frame.confidence.as_ref()),
+            for (kind, plane) in [
+                (FramePlane::Coverage, frame.coverage.as_ref()),
+                (FramePlane::Confidence, frame.confidence.as_ref()),
             ] {
                 if let Some(plane) = plane {
                     validate_warp_plane_values(
                         index,
-                        plane_name,
+                        kind,
                         plane.chunk(0, dimensions.pixel_count()),
                         &cancel,
                     )?;
@@ -593,9 +597,9 @@ impl FrameCache {
                 });
             }
             validate_image_samples(&frame.image, index, &cancel)?;
-            for (plane_name, plane) in [
-                ("coverage", frame.coverage.as_ref()),
-                ("confidence", frame.confidence.as_ref()),
+            for (kind, plane) in [
+                (FramePlane::Coverage, frame.coverage.as_ref()),
+                (FramePlane::Confidence, frame.confidence.as_ref()),
             ] {
                 let Some(plane) = plane else {
                     continue;
@@ -606,14 +610,14 @@ impl FrameCache {
                 if (plane.width(), plane.height()) != (dimensions.width(), dimensions.height()) {
                     return Err(Error::WarpPlaneDimensionMismatch {
                         index,
-                        plane: plane_name,
+                        plane: kind,
                         expected_width: dimensions.width(),
                         expected_height: dimensions.height(),
                         actual_width: plane.width(),
                         actual_height: plane.height(),
                     });
                 }
-                validate_warp_plane_values(index, plane_name, plane.pixels(), &cancel)?;
+                validate_warp_plane_values(index, kind, plane.pixels(), &cancel)?;
             }
         }
         check_cancel(&cancel)?;

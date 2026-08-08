@@ -110,7 +110,7 @@ fn stored_frames_of_the_wrong_shape_are_rejected_not_sliced() {
             error,
             Error::StoredFramePlaneSamples {
                 index: 1,
-                plane: "a channel",
+                plane: FramePlane::Channel,
                 expected: 8,
                 actual: 4,
             }
@@ -131,7 +131,7 @@ fn stored_frames_of_the_wrong_shape_are_rejected_not_sliced() {
         matches!(
             error,
             Error::StoredFramePlaneSamples {
-                plane: "coverage",
+                plane: FramePlane::Coverage,
                 expected: 8,
                 actual: 2,
                 ..
