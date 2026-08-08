@@ -597,9 +597,13 @@ impl FrameCache {
                 ("coverage", frame.coverage.as_ref()),
                 ("confidence", frame.confidence.as_ref()),
             ] {
-                if let Some(plane) = plane
-                    && (plane.width(), plane.height()) != (dimensions.width(), dimensions.height())
-                {
+                let Some(plane) = plane else {
+                    continue;
+                };
+                // Geometry before contents, as in `from_stored_frames`: `pixels()` is read to the
+                // plane's own length, so a wrong-shaped plane has to be named here rather than
+                // reported as bad values.
+                if (plane.width(), plane.height()) != (dimensions.width(), dimensions.height()) {
                     return Err(Error::WarpPlaneDimensionMismatch {
                         index,
                         plane: plane_name,
@@ -609,9 +613,7 @@ impl FrameCache {
                         actual_height: plane.height(),
                     });
                 }
-                if let Some(plane) = plane {
-                    validate_warp_plane_values(index, plane_name, plane.pixels(), &cancel)?;
-                }
+                validate_warp_plane_values(index, plane_name, plane.pixels(), &cancel)?;
             }
         }
         check_cancel(&cancel)?;
