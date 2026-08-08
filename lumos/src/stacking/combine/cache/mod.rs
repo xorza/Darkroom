@@ -349,6 +349,23 @@ fn resident_planes_per_channel(planes: QualityPlanes) -> usize {
     1 + usize::from(planes.weight) + usize::from(planes.variance)
 }
 
+/// Each frame's slice of one warp-quality plane over `[start, end)`, `None` where the frame
+/// carries no such plane.
+///
+/// `plane` picks which of the two a frame's slot is — the combine and the coverage pass both
+/// gather them the same way and differ only in that choice.
+fn quality_plane_chunks(
+    frames: &[StoredFrame],
+    plane: fn(&StoredFrame) -> Option<&StoredPlane>,
+    start: usize,
+    end: usize,
+) -> Vec<Option<&[f32]>> {
+    frames
+        .iter()
+        .map(|frame| plane(frame).map(|plane| plane.chunk(start, end)))
+        .collect()
+}
+
 /// What the combine pass holds: one input plane per frame channel, plus one more for each of that
 /// frame's coverage and confidence planes, against the resident output planes.
 fn weighted_chunk_memory_layout(
@@ -682,11 +699,12 @@ impl FrameCache {
             let base = start_row * width;
             let span = (end_row - start_row) * width;
 
-            let cov_chunks: Vec<Option<&[f32]>> = self
-                .frames
-                .iter()
-                .map(|f| f.coverage.as_ref().map(|p| p.chunk(base, base + span)))
-                .collect();
+            let cov_chunks = quality_plane_chunks(
+                &self.frames,
+                |frame| frame.coverage.as_ref(),
+                base,
+                base + span,
+            );
 
             let cov_out = &mut coverage.pixels_mut()[base..base + span];
             cov_out
@@ -771,26 +789,19 @@ impl FrameCache {
                 let frame_count = frames.len();
                 let chunk_pixels = output_slice.len();
                 // Per-frame support and confidence slices; `None` means full support/unit confidence.
-                let coverage: Vec<Option<&[f32]>> = self
-                    .frames
-                    .iter()
-                    .map(|frame| {
-                        frame
-                            .coverage
-                            .as_ref()
-                            .map(|plane| plane.chunk(pixel_offset, pixel_offset + chunk_pixels))
-                    })
-                    .collect();
-                let confidence: Vec<Option<&[f32]>> = self
-                    .frames
-                    .iter()
-                    .map(|frame| {
-                        frame
-                            .confidence
-                            .as_ref()
-                            .map(|plane| plane.chunk(pixel_offset, pixel_offset + chunk_pixels))
-                    })
-                    .collect();
+                let chunk_end = pixel_offset + chunk_pixels;
+                let coverage = quality_plane_chunks(
+                    &self.frames,
+                    |frame| frame.coverage.as_ref(),
+                    pixel_offset,
+                    chunk_end,
+                );
+                let confidence = quality_plane_chunks(
+                    &self.frames,
+                    |frame| frame.confidence.as_ref(),
+                    pixel_offset,
+                    chunk_end,
+                );
                 // One row bundle per output row, so an unrequested plane simply has no slice
                 // to write instead of needing its own copy of the gather loop below.
                 let mut rows: Vec<QualityRows<'_>> = output_slice
