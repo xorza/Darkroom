@@ -59,22 +59,23 @@ pub(super) struct FitData<'a> {
 }
 
 impl<'a> FitData<'a> {
-    pub(super) fn unweighted(x: &'a [f64], y: &'a [f64], z: &'a [f64]) -> Self {
-        Self {
-            x,
-            y,
-            z,
-            weights: None,
-        }
+    pub(super) fn new(
+        x: &'a [f64],
+        y: &'a [f64],
+        z: &'a [f64],
+        weights: Option<&'a [f64]>,
+    ) -> Self {
+        Self { x, y, z, weights }
     }
 
-    pub(super) fn weighted(x: &'a [f64], y: &'a [f64], z: &'a [f64], weights: &'a [f64]) -> Self {
-        Self {
-            x,
-            y,
-            z,
-            weights: Some(weights),
-        }
+    pub(super) fn unweighted(x: &'a [f64], y: &'a [f64], z: &'a [f64]) -> Self {
+        Self::new(x, y, z, None)
+    }
+
+    /// Sample count — the three coordinate slices are indexed in lockstep, so any of them.
+    #[inline]
+    pub(super) fn len(&self) -> usize {
+        self.x.len()
     }
 
     #[inline]
@@ -163,16 +164,16 @@ pub(super) fn accumulate_chi2<const N: usize>(
 }
 
 /// Build the full normal equations (mirrored Hessian, gradient, chi²) over the whole
-/// data set with the scalar accumulation loop — the shared body of
-/// [`LMModel::batch_build_normal_equations`] and its weighted variant, also called
-/// directly by the fit models' scalar fallbacks when no SIMD backend applies.
+/// data set with the scalar accumulation loop — the default body of
+/// [`LMModel::batch_build_normal_equations`], also called directly by the fit models'
+/// scalar fallbacks when no SIMD backend applies.
 pub(super) fn build_normal_equations_scalar<const N: usize>(
     model: &(impl LMModel<N> + ?Sized),
     data: FitData,
     params: &[f64; N],
 ) -> NormalEquations<N> {
     let mut equations = NormalEquations::zeroed();
-    accumulate_normal_equations(model, data, params, 0..data.x.len(), &mut equations);
+    accumulate_normal_equations(model, data, params, 0..data.len(), &mut equations);
     equations.mirror_lower_triangle();
     equations
 }
@@ -196,95 +197,34 @@ pub(super) trait LMModel<const N: usize> {
     /// Apply parameter constraints after an update.
     fn constrain(&self, params: &mut [f64; N]);
 
-    /// Build normal equations (J^T J, J^T r) and chi² in a single pass.
+    /// Build normal equations (J^T·W·J, J^T·W·r) and chi² in a single pass.
     /// Fuses model evaluation, Jacobian computation, and Hessian/gradient
     /// accumulation to avoid storing intermediate jacobian/residuals arrays.
-    /// Default implementation calls `evaluate_and_jacobian` per pixel.
-    /// Override with SIMD to process multiple pixels at once.
-    fn batch_build_normal_equations(
-        &self,
-        data_x: &[f64],
-        data_y: &[f64],
-        data_z: &[f64],
-        params: &[f64; N],
-    ) -> NormalEquations<N> {
-        build_normal_equations_scalar(self, FitData::unweighted(data_x, data_y, data_z), params)
+    /// Default implementation calls `evaluate_and_jacobian` per pixel, applying
+    /// `data.weights` when they are present.
+    ///
+    /// Override with SIMD to process multiple pixels at once. The weighted fit is opt-in
+    /// (set a `NoiseModel`), so an override whose kernel is unweighted-only must test
+    /// `data.weights` and delegate to [`build_normal_equations_scalar`] when it is set.
+    fn batch_build_normal_equations(&self, data: FitData, params: &[f64; N]) -> NormalEquations<N> {
+        build_normal_equations_scalar(self, data, params)
     }
 
-    /// Batch compute chi² (sum of squared residuals).
-    /// Default implementation calls `evaluate` per pixel.
-    /// Override with SIMD to process multiple pixels at once.
-    fn batch_compute_chi2(
-        &self,
-        data_x: &[f64],
-        data_y: &[f64],
-        data_z: &[f64],
-        params: &[f64; N],
-    ) -> f64 {
-        accumulate_chi2(
-            self,
-            FitData::unweighted(data_x, data_y, data_z),
-            params,
-            0..data_x.len(),
-        )
-    }
-
-    /// Weighted `batch_build_normal_equations`: each pixel contributes its inverse-variance
-    /// weight `w_i` to chi²/gradient/Hessian. Scalar default — the weighted fit is opt-in
-    /// (set a `NoiseModel`), so the unweighted SIMD overrides stay untouched.
-    fn batch_build_normal_equations_weighted(
-        &self,
-        data_x: &[f64],
-        data_y: &[f64],
-        data_z: &[f64],
-        weights: &[f64],
-        params: &[f64; N],
-    ) -> NormalEquations<N> {
-        build_normal_equations_scalar(
-            self,
-            FitData::weighted(data_x, data_y, data_z, weights),
-            params,
-        )
-    }
-
-    /// Weighted `batch_compute_chi2` (inverse-variance).
-    fn batch_compute_chi2_weighted(
-        &self,
-        data_x: &[f64],
-        data_y: &[f64],
-        data_z: &[f64],
-        weights: &[f64],
-        params: &[f64; N],
-    ) -> f64 {
-        accumulate_chi2(
-            self,
-            FitData::weighted(data_x, data_y, data_z, weights),
-            params,
-            0..data_x.len(),
-        )
+    /// Batch compute chi² — the (weighted) sum of squared residuals.
+    /// Default implementation calls `evaluate` per pixel. Override with SIMD under the same
+    /// weighted-delegation rule as [`Self::batch_build_normal_equations`].
+    fn batch_compute_chi2(&self, data: FitData, params: &[f64; N]) -> f64 {
+        accumulate_chi2(self, data, params, 0..data.len())
     }
 }
 
 /// Run L-M optimization for N-parameter model (generic implementation).
 pub(super) fn optimize<const N: usize, M: LMModel<N>>(
     model: &M,
-    data_x: &[f64],
-    data_y: &[f64],
-    data_z: &[f64],
-    weights: Option<&[f64]>,
+    data: FitData,
     initial_params: [f64; N],
     config: &LMConfig,
 ) -> LMResult<N> {
-    // Build normal equations (J^T J, J^T r) + χ² in one fused pass, or its weighted form.
-    let build = |p: &[f64; N]| match weights {
-        Some(w) => model.batch_build_normal_equations_weighted(data_x, data_y, data_z, w, p),
-        None => model.batch_build_normal_equations(data_x, data_y, data_z, p),
-    };
-    let chi2_at = |p: &[f64; N]| match weights {
-        Some(w) => model.batch_compute_chi2_weighted(data_x, data_y, data_z, w, p),
-        None => model.batch_compute_chi2(data_x, data_y, data_z, p),
-    };
-
     let mut params = initial_params;
     let mut lambda = config.initial_lambda;
     let mut converged = false;
@@ -293,9 +233,9 @@ pub(super) fn optimize<const N: usize, M: LMModel<N>>(
     // Normal equations at the current `params`. Rebuilt only when `params` actually moves — a
     // rejected step changes only `lambda`, so the cached (SIMD-accelerated) Jacobian pass is reused
     // across damping retries instead of being recomputed identically every iteration.
-    let mut equations = build(&params);
-    // Tracked apart from `equations.chi2`: an accepted step keeps the χ² `chi2_at` already
-    // computed for the new params rather than the rebuild's, so the accept test and the
+    let mut equations = model.batch_build_normal_equations(data, &params);
+    // Tracked apart from `equations.chi2`: an accepted step keeps the χ² `batch_compute_chi2`
+    // already computed for the new params rather than the rebuild's, so the accept test and the
     // recorded χ² can never disagree by a rounding difference between those two code paths.
     let mut prev_chi2 = equations.chi2;
 
@@ -317,7 +257,7 @@ pub(super) fn optimize<const N: usize, M: LMModel<N>>(
         }
         model.constrain(&mut new_params);
 
-        let new_chi2 = chi2_at(&new_params);
+        let new_chi2 = model.batch_compute_chi2(data, &new_params);
 
         if new_chi2.is_finite() && new_chi2 < prev_chi2 {
             let chi2_rel_change = (prev_chi2 - new_chi2) / prev_chi2.max(1e-30);
@@ -339,7 +279,7 @@ pub(super) fn optimize<const N: usize, M: LMModel<N>>(
             }
 
             // `params` moved → refresh the normal equations for the next iteration.
-            equations = build(&params);
+            equations = model.batch_build_normal_equations(data, &params);
         } else {
             // Rejected step (worse fit, or a non-finite χ² from a bad trial point): keep `params`
             // and the cached normal equations, just increase damping. A non-finite χ² skips the
