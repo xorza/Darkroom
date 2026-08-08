@@ -167,21 +167,32 @@ pub(crate) fn process_channels(
 /// Copy channel `channel` of the interleaved `image` into `plane`.
 fn gather_channel(image: &Image, channel: usize, channels: usize, plane: &mut Buffer2<f32>) {
     let samples: &[f32] = bytemuck::cast_slice(image.bytes());
+    if channels == 1 {
+        // A single-channel master is already planar; the interleaved walk below would pay rayon's
+        // split and a per-element closure to express a memcpy.
+        plane.pixels_mut().copy_from_slice(samples);
+        return;
+    }
+    // Chunked by pixel rather than `samples[channel..].step_by(channels)`: same elements, but the
+    // stride lives inside a contiguous chunk instead of in the iterator, which splits cleanly.
     plane
         .pixels_mut()
         .par_iter_mut()
-        .zip(samples[channel..].par_iter().step_by(channels))
-        .for_each(|(p, &s)| *p = s);
+        .zip(samples.par_chunks_exact(channels))
+        .for_each(|(p, pixel)| *p = pixel[channel]);
 }
 
 /// Write `plane` back as channel `channel` of the interleaved `image`.
 fn scatter_channel(image: &mut Image, channel: usize, channels: usize, plane: &Buffer2<f32>) {
     let samples: &mut [f32] = bytemuck::cast_slice_mut(image.bytes_mut());
-    samples[channel..]
-        .par_iter_mut()
-        .step_by(channels)
+    if channels == 1 {
+        samples.copy_from_slice(plane.pixels());
+        return;
+    }
+    samples
+        .par_chunks_exact_mut(channels)
         .zip(plane.pixels().par_iter())
-        .for_each(|(s, &p)| *s = p);
+        .for_each(|(pixel, &p)| pixel[channel] = p);
 }
 
 #[cfg(test)]
