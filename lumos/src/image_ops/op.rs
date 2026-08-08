@@ -2,6 +2,12 @@
 //! ([`require_f32_master`]) and valid configuration ([`crate::InvalidConfigField`]), reported via
 //! [`OpError`] instead of a panic. The ops themselves (`denoise`, `hdr`, `stretching`, …) run over
 //! [`crate::image_ops`].
+//!
+//! A convention rather than a trait, deliberately. A trait would turn seven inherent `apply`
+//! methods into trait methods, so every downstream call site would need it in scope, to save the
+//! two-line prologue and express a composability nothing uses — `lens` drives each op from its own
+//! node with its own deserialized config type, and would keep doing so. `NeutralizeBackground`
+//! takes no parameters and so has no `validate` to call; that is the contract met, not skipped.
 
 use imaginarium::{ColorFormat, Image};
 
