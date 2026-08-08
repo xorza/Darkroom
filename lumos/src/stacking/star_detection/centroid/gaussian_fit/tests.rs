@@ -9,93 +9,264 @@ use crate::stacking::star_detection::centroid::internals::{
 use crate::testing::synthetic::star_profiles::{StarProfile, SyntheticStar};
 use glam::Vec2;
 
-#[test]
-fn test_gaussian_fit_centered() {
-    let width = 21;
-    let height = 21;
-    let true_cx = 10.0;
-    let true_cy = 10.0;
-    let true_amp = 1.0;
-    let true_sigma = 2.5;
-    let true_bg = 0.1;
-
-    let pixels = SyntheticStar::new(
-        Vec2::new(true_cx, true_cy),
-        true_amp,
-        StarProfile::Gaussian { sigma: true_sigma },
-    )
-    .stamp(Size2us::new(width, height), true_bg);
-
-    let config = GaussianFitConfig::default();
-    let result = fit_gaussian_2d(&pixels, Vec2::splat(10.0), 8, true_bg, None, &config);
-
-    assert!(result.is_some());
-    let result = result.unwrap();
-    // Note: converged flag may be false if initial guess was already close
-    // What matters is the accuracy of the result
-    assert!((result.pos.x - true_cx).abs() < 0.1);
-    assert!((result.pos.y - true_cy).abs() < 0.1);
-    assert!((result.sigma.x - true_sigma).abs() < 0.2);
-    assert!((result.sigma.y - true_sigma).abs() < 0.2);
+/// One noiseless recovery case: render a star of known parameters, fit it, and check what the
+/// fitter got back.
+///
+/// Every tolerance is per-case and every one is optional. They span 0.02 (a bright, well-sampled
+/// star) to 0.5 (a profile barely wider than the pixel grid), so a single shared bound would
+/// quietly loosen the strict cases; `None` means the case makes no claim about that quantity at
+/// all, which is not the same as a loose bound.
+#[derive(Debug)]
+struct RecoveryCase {
+    name: &'static str,
+    /// Square stamp side, in pixels.
+    stamp: usize,
+    center: Vec2,
+    amplitude: f32,
+    /// Per-axis sigma; equal components render through the circular Gaussian path.
+    sigma: Vec2,
+    background: f32,
+    /// Starting point handed to the fitter, deliberately offset from `center` in some cases.
+    guess: Vec2,
+    fit_radius: usize,
+    pos_tol: Option<f32>,
+    sigma_tol: Option<f32>,
+    amplitude_tol: Option<f32>,
+    background_tol: Option<f32>,
+    /// Only asserted where the original test did: a guess that starts on the answer can report
+    /// `converged == false` having had nothing to do.
+    expect_converged: bool,
 }
 
-#[test]
-fn test_gaussian_fit_subpixel_offset() {
-    let width = 21;
-    let height = 21;
-    let true_cx = 10.3;
-    let true_cy = 10.7;
-    let true_amp = 1.0;
-    let true_sigma = 2.5;
-    let true_bg = 0.1;
-
-    let pixels = SyntheticStar::new(
-        Vec2::new(true_cx, true_cy),
-        true_amp,
-        StarProfile::Gaussian { sigma: true_sigma },
-    )
-    .stamp(Size2us::new(width, height), true_bg);
-
-    let config = GaussianFitConfig::default();
-    let result = fit_gaussian_2d(&pixels, Vec2::new(10.0, 11.0), 8, true_bg, None, &config);
-
-    assert!(result.is_some());
-    let result = result.unwrap();
-    assert!(result.converged);
-    assert!((result.pos.x - true_cx).abs() < 0.05);
-    assert!((result.pos.y - true_cy).abs() < 0.05);
+impl RecoveryCase {
+    /// Circular sigmas keep the `Gaussian` path rather than an `Elliptical` with equal axes —
+    /// the two agree analytically but not bit-for-bit, and these cases were written against
+    /// the circular one.
+    fn profile(&self) -> StarProfile {
+        if self.sigma.x == self.sigma.y {
+            StarProfile::Gaussian {
+                sigma: self.sigma.x,
+            }
+        } else {
+            StarProfile::Elliptical {
+                sigma_x: self.sigma.x,
+                sigma_y: self.sigma.y,
+                angle: 0.0,
+            }
+        }
+    }
 }
 
+const RECOVERY_CASES: &[RecoveryCase] = &[
+    RecoveryCase {
+        name: "centered",
+        stamp: 21,
+        center: Vec2::new(10.0, 10.0),
+        amplitude: 1.0,
+        sigma: Vec2::splat(2.5),
+        background: 0.1,
+        guess: Vec2::splat(10.0),
+        fit_radius: 8,
+        pos_tol: Some(0.1),
+        sigma_tol: Some(0.2),
+        amplitude_tol: None,
+        background_tol: None,
+        expect_converged: false,
+    },
+    RecoveryCase {
+        name: "subpixel_offset",
+        stamp: 21,
+        center: Vec2::new(10.3, 10.7),
+        amplitude: 1.0,
+        sigma: Vec2::splat(2.5),
+        background: 0.1,
+        guess: Vec2::new(10.0, 11.0),
+        fit_radius: 8,
+        pos_tol: Some(0.05),
+        sigma_tol: None,
+        amplitude_tol: None,
+        background_tol: None,
+        expect_converged: true,
+    },
+    RecoveryCase {
+        name: "asymmetric",
+        stamp: 21,
+        center: Vec2::new(10.0, 10.0),
+        amplitude: 1.0,
+        sigma: Vec2::new(2.0, 3.0),
+        background: 0.1,
+        guess: Vec2::splat(10.0),
+        fit_radius: 8,
+        pos_tol: None,
+        sigma_tol: Some(0.3),
+        amplitude_tol: None,
+        background_tol: None,
+        expect_converged: false,
+    },
+    RecoveryCase {
+        name: "high_snr",
+        stamp: 21,
+        center: Vec2::new(10.25, 10.35),
+        amplitude: 100.0,
+        sigma: Vec2::splat(2.0),
+        background: 1.0,
+        guess: Vec2::splat(10.0),
+        fit_radius: 8,
+        pos_tol: Some(0.02),
+        sigma_tol: None,
+        amplitude_tol: Some(1.0),
+        background_tol: None,
+        expect_converged: false,
+    },
+    RecoveryCase {
+        // Amplitude is clamped to a 0.01 floor, so this only pins that a fit comes back at all.
+        name: "low_amplitude",
+        stamp: 21,
+        center: Vec2::new(10.0, 10.0),
+        amplitude: 0.05,
+        sigma: Vec2::splat(2.5),
+        background: 0.1,
+        guess: Vec2::splat(10.0),
+        fit_radius: 8,
+        pos_tol: None,
+        sigma_tol: None,
+        amplitude_tol: None,
+        background_tol: None,
+        expect_converged: false,
+    },
+    RecoveryCase {
+        name: "large_sigma",
+        stamp: 31,
+        center: Vec2::new(15.0, 15.0),
+        amplitude: 1.0,
+        sigma: Vec2::splat(5.0),
+        background: 0.1,
+        guess: Vec2::splat(15.0),
+        fit_radius: 12,
+        pos_tol: Some(0.2),
+        sigma_tol: Some(0.5),
+        amplitude_tol: None,
+        background_tol: None,
+        expect_converged: false,
+    },
+    RecoveryCase {
+        // Sigma 1.0 is close to Nyquist: fewer lit pixels, so position is looser.
+        name: "small_sigma",
+        stamp: 15,
+        center: Vec2::new(7.0, 7.0),
+        amplitude: 1.0,
+        sigma: Vec2::splat(1.0),
+        background: 0.1,
+        guess: Vec2::splat(7.0),
+        fit_radius: 5,
+        pos_tol: Some(0.15),
+        sigma_tol: None,
+        amplitude_tol: None,
+        background_tol: None,
+        expect_converged: false,
+    },
+    RecoveryCase {
+        name: "zero_background",
+        stamp: 21,
+        center: Vec2::new(10.0, 10.0),
+        amplitude: 1.0,
+        sigma: Vec2::splat(2.5),
+        background: 0.0,
+        guess: Vec2::splat(10.0),
+        fit_radius: 8,
+        pos_tol: Some(0.1),
+        sigma_tol: None,
+        amplitude_tol: None,
+        background_tol: Some(0.05),
+        expect_converged: false,
+    },
+    RecoveryCase {
+        name: "high_background",
+        stamp: 21,
+        center: Vec2::new(10.0, 10.0),
+        amplitude: 1.0,
+        sigma: Vec2::splat(2.5),
+        background: 10.0,
+        guess: Vec2::splat(10.0),
+        fit_radius: 8,
+        pos_tol: Some(0.1),
+        sigma_tol: None,
+        amplitude_tol: None,
+        background_tol: None,
+        expect_converged: false,
+    },
+];
+
 #[test]
-fn test_gaussian_fit_asymmetric() {
-    let width = 21;
-    let height = 21;
-    let cx = 10.0;
-    let cy = 10.0;
-    let amp = 1.0;
-    let sigma_x = 2.0;
-    let sigma_y = 3.0;
-    let bg = 0.1;
+fn gaussian_fit_recovers_known_parameters_from_noiseless_stamps() {
+    for case in RECOVERY_CASES {
+        let pixels = SyntheticStar::new(case.center, case.amplitude, case.profile())
+            .stamp(Size2us::new(case.stamp, case.stamp), case.background);
 
-    let pixels = SyntheticStar::new(
-        Vec2::new(cx, cy),
-        amp,
-        StarProfile::Elliptical {
-            sigma_x,
-            sigma_y,
-            angle: 0.0,
-        },
-    )
-    .stamp(Size2us::new(width, height), bg);
+        let result = fit_gaussian_2d(
+            &pixels,
+            case.guess,
+            case.fit_radius,
+            case.background,
+            None,
+            &GaussianFitConfig::default(),
+        )
+        .unwrap_or_else(|| panic!("{}: fit returned None", case.name));
 
-    let config = GaussianFitConfig::default();
-    let result = fit_gaussian_2d(&pixels, Vec2::splat(10.0), 8, bg, None, &config);
-
-    assert!(result.is_some());
-    let result = result.unwrap();
-    // Note: converged flag may be false if initial guess was already close
-    assert!((result.sigma.x - sigma_x).abs() < 0.3);
-    assert!((result.sigma.y - sigma_y).abs() < 0.3);
+        if case.expect_converged {
+            assert!(result.converged, "{}: did not converge", case.name);
+        }
+        if let Some(tol) = case.pos_tol {
+            assert!(
+                (result.pos.x - case.center.x).abs() < tol,
+                "{}: x {} vs {} (tol {tol})",
+                case.name,
+                result.pos.x,
+                case.center.x
+            );
+            assert!(
+                (result.pos.y - case.center.y).abs() < tol,
+                "{}: y {} vs {} (tol {tol})",
+                case.name,
+                result.pos.y,
+                case.center.y
+            );
+        }
+        if let Some(tol) = case.sigma_tol {
+            assert!(
+                (result.sigma.x - case.sigma.x).abs() < tol,
+                "{}: sigma.x {} vs {} (tol {tol})",
+                case.name,
+                result.sigma.x,
+                case.sigma.x
+            );
+            assert!(
+                (result.sigma.y - case.sigma.y).abs() < tol,
+                "{}: sigma.y {} vs {} (tol {tol})",
+                case.name,
+                result.sigma.y,
+                case.sigma.y
+            );
+        }
+        if let Some(tol) = case.amplitude_tol {
+            assert!(
+                (result.debug.amplitude - case.amplitude).abs() < tol,
+                "{}: amplitude {} vs {} (tol {tol})",
+                case.name,
+                result.debug.amplitude,
+                case.amplitude
+            );
+        }
+        if let Some(tol) = case.background_tol {
+            assert!(
+                (result.debug.background - case.background).abs() < tol,
+                "{}: background {} vs {} (tol {tol})",
+                case.name,
+                result.debug.background,
+                case.background
+            );
+        }
+    }
 }
 
 #[test]
@@ -116,112 +287,6 @@ fn test_gaussian_fit_edge_position() {
     let config = GaussianFitConfig::default();
     let result = fit_gaussian_2d(&pixels, Vec2::new(2.0, 10.0), 8, 0.1, None, &config);
     assert!(result.is_none());
-}
-
-#[test]
-fn test_gaussian_fit_high_snr() {
-    // High SNR case - should achieve very accurate fit
-    let width = 21;
-    let height = 21;
-    let true_cx = 10.25;
-    let true_cy = 10.35;
-    let true_amp = 100.0;
-    let true_sigma = 2.0;
-    let true_bg = 1.0;
-
-    let pixels = SyntheticStar::new(
-        Vec2::new(true_cx, true_cy),
-        true_amp,
-        StarProfile::Gaussian { sigma: true_sigma },
-    )
-    .stamp(Size2us::new(width, height), true_bg);
-
-    let config = GaussianFitConfig::default();
-    let result = fit_gaussian_2d(&pixels, Vec2::splat(10.0), 8, true_bg, None, &config);
-
-    assert!(result.is_some());
-    let result = result.unwrap();
-    assert!((result.pos.x - true_cx).abs() < 0.02);
-    assert!((result.pos.y - true_cy).abs() < 0.02);
-    assert!((result.debug.amplitude - true_amp).abs() < 1.0);
-}
-
-#[test]
-fn test_gaussian_fit_low_amplitude() {
-    let width = 21;
-    let height = 21;
-    let true_cx = 10.0;
-    let true_cy = 10.0;
-    let true_amp = 0.05; // Very low amplitude
-    let true_sigma = 2.5;
-    let true_bg = 0.1;
-
-    let pixels = SyntheticStar::new(
-        Vec2::new(true_cx, true_cy),
-        true_amp,
-        StarProfile::Gaussian { sigma: true_sigma },
-    )
-    .stamp(Size2us::new(width, height), true_bg);
-
-    let config = GaussianFitConfig::default();
-    let result = fit_gaussian_2d(&pixels, Vec2::splat(10.0), 8, true_bg, None, &config);
-
-    // Should still find something (amplitude is constrained to min 0.01)
-    assert!(result.is_some());
-}
-
-#[test]
-fn test_gaussian_fit_large_sigma() {
-    let width = 31;
-    let height = 31;
-    let true_cx = 15.0;
-    let true_cy = 15.0;
-    let true_amp = 1.0;
-    let true_sigma = 5.0; // Large sigma
-    let true_bg = 0.1;
-
-    let pixels = SyntheticStar::new(
-        Vec2::new(true_cx, true_cy),
-        true_amp,
-        StarProfile::Gaussian { sigma: true_sigma },
-    )
-    .stamp(Size2us::new(width, height), true_bg);
-
-    let config = GaussianFitConfig::default();
-    let result = fit_gaussian_2d(&pixels, Vec2::splat(15.0), 12, true_bg, None, &config);
-
-    assert!(result.is_some());
-    let result = result.unwrap();
-    assert!((result.pos.x - true_cx).abs() < 0.2);
-    assert!((result.pos.y - true_cy).abs() < 0.2);
-    assert!((result.sigma.x - true_sigma).abs() < 0.5);
-}
-
-#[test]
-fn test_gaussian_fit_small_sigma() {
-    let width = 15;
-    let height = 15;
-    let true_cx = 7.0;
-    let true_cy = 7.0;
-    let true_amp = 1.0;
-    let true_sigma = 1.0; // Small sigma (close to Nyquist)
-    let true_bg = 0.1;
-
-    let pixels = SyntheticStar::new(
-        Vec2::new(true_cx, true_cy),
-        true_amp,
-        StarProfile::Gaussian { sigma: true_sigma },
-    )
-    .stamp(Size2us::new(width, height), true_bg);
-
-    let config = GaussianFitConfig::default();
-    let result = fit_gaussian_2d(&pixels, Vec2::splat(7.0), 5, true_bg, None, &config);
-
-    assert!(result.is_some());
-    let result = result.unwrap();
-    // Smaller sigma means less pixels with signal, so accuracy may be lower
-    assert!((result.pos.x - true_cx).abs() < 0.15);
-    assert!((result.pos.y - true_cy).abs() < 0.15);
 }
 
 #[test]
@@ -268,59 +333,6 @@ fn test_gaussian_fit_stamp_too_small() {
     // extract_stamp returns None when stamp doesn't fit
     let result = fit_gaussian_2d(&pixels, Vec2::splat(2.0), 3, 0.5, None, &config);
     assert!(result.is_none());
-}
-
-#[test]
-fn test_gaussian_fit_zero_background() {
-    let width = 21;
-    let height = 21;
-    let true_cx = 10.0;
-    let true_cy = 10.0;
-    let true_amp = 1.0;
-    let true_sigma = 2.5;
-    let true_bg = 0.0;
-
-    let pixels = SyntheticStar::new(
-        Vec2::new(true_cx, true_cy),
-        true_amp,
-        StarProfile::Gaussian { sigma: true_sigma },
-    )
-    .stamp(Size2us::new(width, height), true_bg);
-
-    let config = GaussianFitConfig::default();
-    let result = fit_gaussian_2d(&pixels, Vec2::splat(10.0), 8, true_bg, None, &config);
-
-    assert!(result.is_some());
-    let result = result.unwrap();
-    assert!((result.pos.x - true_cx).abs() < 0.1);
-    assert!((result.pos.y - true_cy).abs() < 0.1);
-    assert!(result.debug.background.abs() < 0.05);
-}
-
-#[test]
-fn test_gaussian_fit_high_background() {
-    let width = 21;
-    let height = 21;
-    let true_cx = 10.0;
-    let true_cy = 10.0;
-    let true_amp = 1.0;
-    let true_sigma = 2.5;
-    let true_bg = 10.0; // High background
-
-    let pixels = SyntheticStar::new(
-        Vec2::new(true_cx, true_cy),
-        true_amp,
-        StarProfile::Gaussian { sigma: true_sigma },
-    )
-    .stamp(Size2us::new(width, height), true_bg);
-
-    let config = GaussianFitConfig::default();
-    let result = fit_gaussian_2d(&pixels, Vec2::splat(10.0), 8, true_bg, None, &config);
-
-    assert!(result.is_some());
-    let result = result.unwrap();
-    assert!((result.pos.x - true_cx).abs() < 0.1);
-    assert!((result.pos.y - true_cy).abs() < 0.1);
 }
 
 #[test]
