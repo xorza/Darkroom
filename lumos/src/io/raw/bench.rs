@@ -407,14 +407,17 @@ fn load_raw_libraw_demosaic(path: &Path, user_qual: i32) -> Result<LinearImage, 
     let raw = open_raw(path)?;
 
     // Set demosaic quality before processing
+    // SAFETY: `raw` owns the libraw instance for the rest of this function.
     unsafe {
-        (*raw.inner).params.user_qual = user_qual;
+        (*raw.libraw.as_ptr()).params.user_qual = user_qual;
     }
 
     let demosaiced = raw.demosaic_libraw_fallback()?;
 
-    let dimensions = ImageDimensions::new(demosaiced.size, demosaiced.channels);
-    Ok(LinearImage::from_pixels(dimensions, demosaiced.pixels))
+    Ok(LinearImage::from_pixels(
+        demosaiced.dimensions,
+        demosaiced.pixels,
+    ))
 }
 
 #[derive(Debug)]
