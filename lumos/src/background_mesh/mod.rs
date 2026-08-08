@@ -34,6 +34,16 @@ pub(crate) struct TileStats {
     pub(crate) sigma: f32,
 }
 
+/// The `sky` of a tile, as a function so the spline solve can be run over either plane.
+fn sky(stats: &TileStats) -> f32 {
+    stats.sky
+}
+
+/// The `sigma` of a tile. Companion to [`sky`] — see [`TileGrid::compute_y_spline_derivatives`].
+fn sigma(stats: &TileStats) -> f32 {
+    stats.sigma
+}
+
 /// Tile grid with precomputed centers and spline coefficients for interpolation.
 #[derive(Debug)]
 pub(crate) struct TileGrid {
@@ -235,23 +245,30 @@ impl TileGrid {
             return;
         }
 
-        for tx in 0..tiles_x {
-            // Solve for sky
-            for (ty, val) in spline_values.iter_mut().enumerate() {
-                *val = self.stats[(tx, ty)].sky;
-            }
-            solve_natural_spline_d2(spline_values, &self.centers_y, spline_d2, spline_scratch);
-            for (ty, &d) in spline_d2.iter().enumerate() {
-                self.d2y_sky[ty * tiles_x + tx] = d;
-            }
+        // Destructured so the two output buffers can be borrowed mutably alongside the shared
+        // `stats` read — the plane loop below needs all three at once.
+        let Self {
+            stats,
+            d2y_sky,
+            d2y_sigma,
+            centers_y,
+            ..
+        } = self;
 
-            // Solve for sigma
-            for (ty, val) in spline_values.iter_mut().enumerate() {
-                *val = self.stats[(tx, ty)].sigma;
-            }
-            solve_natural_spline_d2(spline_values, &self.centers_y, spline_d2, spline_scratch);
-            for (ty, &d) in spline_d2.iter().enumerate() {
-                self.d2y_sigma[ty * tiles_x + tx] = d;
+        for tx in 0..tiles_x {
+            // Both planes for this column before moving on, so the strided `stats` reads for one
+            // tile column happen together rather than the whole grid being walked twice.
+            for (tile_value, d2y) in [
+                (sky as fn(&TileStats) -> f32, &mut *d2y_sky),
+                (sigma as fn(&TileStats) -> f32, &mut *d2y_sigma),
+            ] {
+                for (ty, value) in spline_values.iter_mut().enumerate() {
+                    *value = tile_value(&stats[(tx, ty)]);
+                }
+                solve_natural_spline_d2(spline_values, centers_y, spline_d2, spline_scratch);
+                for (ty, &d) in spline_d2.iter().enumerate() {
+                    d2y[ty * tiles_x + tx] = d;
+                }
             }
         }
     }
