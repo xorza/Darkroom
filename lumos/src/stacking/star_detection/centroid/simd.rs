@@ -3,6 +3,13 @@
 //! Both profile fits accumulate their normal equations in vector lanes and reduce the whole set
 //! once per batch — 28 accumulators for Gaussian2D, 21 for MoffatFixedBeta — so these run per fit
 //! rather than per pixel.
+//!
+//! The reduction is all that is shared. Each of the four backends declares, updates and reduces
+//! its accumulators as flat named locals, and that repetition is deliberate: collapsing them to
+//! `[__m256d; N]` / `[float64x2_t; N]` arrays driven by `for i in 0..N` was tried and measured
+//! ~2-3% slower on `bench_gaussian_fit_large` (min 23.59µs against 22.82µs, six to seven runs
+//! each), presumably because indexed arrays of vectors spill where named locals stay in
+//! registers. The flat form is buying throughput on the fit hot path, so leave it flat.
 
 #[cfg(target_arch = "aarch64")]
 use std::arch::aarch64::{float64x2_t, vaddvq_f64};

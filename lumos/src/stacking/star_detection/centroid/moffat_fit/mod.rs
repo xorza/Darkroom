@@ -210,7 +210,7 @@ impl LMModel<5> for MoffatFixedBeta {
     }
 
     fn batch_build_normal_equations(&self, data: FitData, params: &[f64; 5]) -> NormalEquations<5> {
-        // Both kernels are unweighted-only, so a weighted fit falls through to the scalar loop.
+        // The SIMD kernels are unweighted-only, so a weighted fit takes the scalar path.
         if data.weights.is_none() {
             #[cfg(target_arch = "x86_64")]
             if imaginarium::cpu_features::has_avx2_fma() {
@@ -235,7 +235,7 @@ impl LMModel<5> for MoffatFixedBeta {
     }
 
     fn batch_compute_chi2(&self, data: FitData, params: &[f64; 5]) -> f64 {
-        // Both kernels are unweighted-only, so a weighted fit falls through to the scalar loop.
+        // The SIMD kernels are unweighted-only, so a weighted fit takes the scalar path.
         if data.weights.is_none() {
             #[cfg(target_arch = "x86_64")]
             if imaginarium::cpu_features::has_avx2_fma() {

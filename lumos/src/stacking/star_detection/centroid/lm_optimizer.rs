@@ -202,6 +202,12 @@ pub(super) trait LMModel<const N: usize> {
     /// Override with SIMD to process multiple pixels at once. The weighted fit is opt-in
     /// (set a `NoiseModel`), so an override whose kernel is unweighted-only must test
     /// `data.weights` and delegate to [`build_normal_equations_scalar`] when it is set.
+    ///
+    /// Both models' overrides spell that dispatch out identically, differing only in `N`. It is
+    /// left duplicated: the backend is chosen by `cfg`, so the arms name functions that exist
+    /// only under their own `target_arch`, and the sole way to share them is a macro — which
+    /// buys ~15 lines at the cost of making an `unsafe` call site expand from something a reader
+    /// cannot see.
     fn batch_build_normal_equations(&self, data: FitData, params: &[f64; N]) -> NormalEquations<N> {
         build_normal_equations_scalar(self, data, params)
     }
