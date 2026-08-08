@@ -14,7 +14,7 @@ use rayon::prelude::*;
 
 use crate::error::InvalidConfigField;
 use crate::image_ops::op::{OpError, require_f32_master};
-use crate::image_ops::process_channels;
+use crate::image_ops::process_channel_samples;
 use crate::image_ops::wavelet::{atrous_smooth, max_scales};
 use crate::math::size2us::Size2us;
 use crate::math::statistics::{mad_f32_with_scratch, mad_to_sigma, median_f32_mut};
@@ -130,7 +130,7 @@ impl Denoise {
         let size = Size2us::new(image.desc().width, image.desc().height);
         let scales = self.scales.min(max_scales(size));
         let mut scratch = DenoiseScratch::new(size);
-        process_channels(image, |plane| {
+        process_channel_samples(image, |plane| {
             denoise_plane(
                 plane,
                 scales,
@@ -194,7 +194,7 @@ impl DenoiseScratch {
 /// planes: it starts from the original (`c_0`) and subtracts only the *removed* noise per scale, so
 /// the coarse residual `c_J` is preserved implicitly (the telescoping sum `c_0 = c_J + Σ w_j`).
 fn denoise_plane(
-    plane: &mut Buffer2<f32>,
+    plane: &mut [f32],
     scales: usize,
     k: f32,
     threshold: Threshold,
@@ -209,7 +209,7 @@ fn denoise_plane(
         dev,
     } = scratch;
 
-    c_curr.copy_from(plane);
+    c_curr.pixels_mut().copy_from_slice(plane);
     for j in 0..scales {
         let step = 1usize << j;
         atrous_smooth(c_curr, c_next, tmp, step); // c_next = c_{j+1}
@@ -222,7 +222,6 @@ fn denoise_plane(
 
         // Subtract the strength-weighted noise removed at this scale from the running result.
         plane
-            .pixels_mut()
             .par_iter_mut()
             .zip(c_curr.pixels().par_iter())
             .zip(c_next.pixels().par_iter())
