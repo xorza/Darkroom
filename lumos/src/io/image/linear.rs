@@ -153,6 +153,23 @@ impl LinearImage {
         self.pixels.channel_mut(c)
     }
 
+    /// Iterate the channel planes in channel order: one for grayscale, three for RGB.
+    pub(crate) fn planes_mut(&mut self) -> impl Iterator<Item = &mut Buffer2<f32>> {
+        self.pixels.planes_mut()
+    }
+
+    /// Deinterleave an already-`f32` (`L_F32` / `RGB_F32`) imaginarium image into planes.
+    ///
+    /// # Panics
+    /// If `image` is not one of those two formats — callers gate on
+    /// [`crate::image_ops::op::require_f32_master`] first.
+    pub(crate) fn from_f32_image(image: &Image) -> Self {
+        LinearImage {
+            metadata: ImageMetadata::default(),
+            pixels: LinearPixels::from_f32_image(image),
+        }
+    }
+
     /// Calculate mean pixel value across all channels.
     pub fn mean(&self) -> f32 {
         self.pixels.mean()
@@ -241,25 +258,15 @@ impl From<LinearImage> for Image {
     }
 }
 
-/// Deinterleave an already-`f32` (`L_F32` / `RGB_F32`) imaginarium image into a
-/// planar [`LinearImage`]. This is the single unavoidable copy a per-channel op
-/// pays to get planar data; callers must convert to f32 first.
-fn linear_from_f32_image(image: &Image) -> LinearImage {
-    LinearImage {
-        metadata: ImageMetadata::default(),
-        pixels: LinearPixels::from_f32_image(image),
-    }
-}
-
 fn linear_from_image(image: &Image) -> LinearImage {
     let target = f32_target_format(image);
     if image.desc().color_format == target {
-        linear_from_f32_image(image)
+        LinearImage::from_f32_image(image)
     } else {
         let converted = image
             .convert_to(target)
             .expect("image converts to its f32 channel format");
-        linear_from_f32_image(&converted)
+        LinearImage::from_f32_image(&converted)
     }
 }
 

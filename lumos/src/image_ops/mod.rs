@@ -7,9 +7,10 @@
 //!   [`crate::image_ops::color_calibration::neutralize_background`], per-channel
 //!   [`crate::image_ops::stretching`]);
 //! - ops with genuine per-channel 2D structure ([`crate::image_ops::denoise`]'s wavelets,
-//!   [`crate::image_ops::background_extraction`]'s surface fit) stream one plane at a time through
-//!   [`process_channels`]. The optional ML backend privately converts full images at its model
-//!   boundary, where input and output buffers differ.
+//!   [`crate::image_ops::background_extraction`]'s surface fit) are written against planes and
+//!   reach them through [`crate::image_ops::op::on_planes`], which deinterleaves the master once
+//!   for the op and writes the planes back over its samples. The optional ML backend converts at
+//!   its model boundary, where input and output buffers differ.
 //!
 //! The submodules below are the image operations themselves (each an op-named config struct with an
 //! in-place `apply`), plus their shared support: [`op`] (the `OpError` contract) and [`wavelet`]
@@ -37,7 +38,6 @@ use crate::image_ops::rgb::Rgb;
 use imaginarium::{Buffer2, ChannelCount, Image};
 use rayon::prelude::*;
 
-use crate::image_ops::op::OpError;
 use crate::math::size2us::Size2us;
 
 /// Pixels per rayon work item. Parallelizing per pixel (`par_chunks_mut(3)`) drowns a cheap
@@ -147,85 +147,6 @@ fn apply_intensity_remap(image: &mut Image, intensity: &Buffer2<f32>, mapped: &B
     }
 }
 
-/// Run a per-channel operation that needs a contiguous 2D plane, **one channel at a
-/// time**: gather the channel into a reused plane, process it, scatter it back. For the
-/// spatial ops ([`crate::image_ops::denoise`], [`crate::image_ops::background_extraction`])
-/// whose per-channel 2D work is cache-friendly on planar data. Streaming bounds the
-/// planar scratch at a single plane whatever the channel count — a full RGB deinterleave
-/// would hold three (~an extra full image resident).
-/// Run `process` over each channel as a contiguous run of samples.
-///
-/// A single-channel master is *already* planar, so the op runs on the image's own samples and no
-/// copy happens at all. Multi-channel deinterleaves into one reused scratch plane and writes each
-/// channel back before the next.
-pub(crate) fn process_channel_samples(
-    image: &mut Image,
-    mut process: impl FnMut(&mut [f32]) -> Result<(), OpError>,
-) -> Result<(), OpError> {
-    let desc = image.desc();
-    let channels = desc.color_format.channel_count.channel_count() as usize;
-    if channels == 1 {
-        return process(bytemuck::cast_slice_mut(image.bytes_mut()));
-    }
-    let mut plane = vec![0.0f32; desc.width * desc.height];
-    for channel in 0..channels {
-        gather_channel(image, channel, channels, &mut plane);
-        process(&mut plane)?;
-        scatter_channel(image, channel, channels, &plane);
-    }
-    Ok(())
-}
-
-/// [`process_channel_samples`] for an op that needs a [`Buffer2`] — one that passes the plane on
-/// to something taking a `&Buffer2<f32>`, as background extraction does with
-/// [`crate::background_mesh::MeshWorkspace::compute`].
-///
-/// Always copies, single-channel included: `Buffer2` owns its samples, so there is no borrowing a
-/// plane out of the image the way the sample form can.
-pub(crate) fn process_channels(
-    image: &mut Image,
-    mut process: impl FnMut(&mut Buffer2<f32>) -> Result<(), OpError>,
-) -> Result<(), OpError> {
-    let channels = image.desc().color_format.channel_count.channel_count() as usize;
-    let mut plane = Buffer2::new_default(image.desc().width, image.desc().height);
-    for channel in 0..channels {
-        gather_channel(image, channel, channels, plane.pixels_mut());
-        process(&mut plane)?;
-        scatter_channel(image, channel, channels, plane.pixels());
-    }
-    Ok(())
-}
-
-/// Copy channel `channel` of the interleaved `image` into `plane`.
-fn gather_channel(image: &Image, channel: usize, channels: usize, plane: &mut [f32]) {
-    let samples: &[f32] = bytemuck::cast_slice(image.bytes());
-    if channels == 1 {
-        // A single-channel master is already planar; the interleaved walk below would pay rayon's
-        // split and a per-element closure to express a memcpy.
-        plane.copy_from_slice(samples);
-        return;
-    }
-    // Chunked by pixel rather than `samples[channel..].step_by(channels)`: same elements, but the
-    // stride lives inside a contiguous chunk instead of in the iterator, which splits cleanly.
-    plane
-        .par_iter_mut()
-        .zip(samples.par_chunks_exact(channels))
-        .for_each(|(p, pixel)| *p = pixel[channel]);
-}
-
-/// Write `plane` back as channel `channel` of the interleaved `image`.
-fn scatter_channel(image: &mut Image, channel: usize, channels: usize, plane: &[f32]) {
-    let samples: &mut [f32] = bytemuck::cast_slice_mut(image.bytes_mut());
-    if channels == 1 {
-        samples.copy_from_slice(plane);
-        return;
-    }
-    samples
-        .par_chunks_exact_mut(channels)
-        .zip(plane.par_iter())
-        .for_each(|(pixel, &p)| pixel[channel] = p);
-}
-
 #[cfg(test)]
 mod tests {
     use crate::image_ops::*;
@@ -286,106 +207,16 @@ mod tests {
         let out: &[f32] = bytemuck::cast_slice(image.bytes());
         assert_eq!(out, &[0.4, 0.2, 0.2]); // each channel ×2, none exceeds 1 → no cap
     }
-
-    #[test]
-    fn process_channel_samples_borrows_a_mono_master_instead_of_copying_it() {
-        // A single-channel master is already planar, so the op must be handed the image's own
-        // storage — the whole reason this form exists beside `process_channels`.
-        let mut l = Image::new_with_data(
-            ImageDesc::new(3, 1, ColorFormat::L_F32),
-            bytemuck::cast_slice(&[0.25f32, 0.5, 0.75]).to_vec(),
-        )
-        .unwrap();
-        let storage = l.bytes().as_ptr();
-        process_channel_samples(&mut l, |plane| {
-            assert!(
-                std::ptr::eq(plane.as_ptr().cast::<u8>(), storage),
-                "a single-channel master was copied into a scratch plane"
-            );
-            for p in plane.iter_mut() {
-                *p *= 2.0;
-            }
-            Ok(())
-        })
-        .unwrap();
-        assert_eq!(bytemuck::cast_slice::<u8, f32>(l.bytes()), &[0.5, 1.0, 1.5]);
-
-        // Multi-channel still arrives one contiguous plane at a time, in channel order, and the
-        // edits land back in the right interleaved slots.
-        let mut rgb = rgb_f32(
-            Size2us::new(2, 1),
-            vec![0.125, 0.25, 0.375, 0.5, 0.625, 0.75],
-        );
-        let mut seen = Vec::new();
-        process_channel_samples(&mut rgb, |plane| {
-            seen.push(plane.to_vec());
-            for p in plane.iter_mut() {
-                *p += 1.0;
-            }
-            Ok(())
-        })
-        .unwrap();
-        assert_eq!(
-            seen,
-            [vec![0.125, 0.5], vec![0.25, 0.625], vec![0.375, 0.75]]
-        );
-        let out: &[f32] = bytemuck::cast_slice(rgb.bytes());
-        assert_eq!(out, &[1.125, 1.25, 1.375, 1.5, 1.625, 1.75]);
-    }
-
-    #[test]
-    fn process_channels_streams_each_channel_planar_and_in_order() {
-        // Dyadic values so the +1.0 edit is exact in f32.
-        let mut rgb = rgb_f32(
-            Size2us::new(2, 1),
-            vec![0.125, 0.25, 0.375, 0.5, 0.625, 0.75],
-        );
-        let mut seen = Vec::new();
-        process_channels(&mut rgb, |plane| {
-            seen.push(plane.pixels().to_vec());
-            for p in plane.pixels_mut() {
-                *p += 1.0;
-            }
-            Ok(())
-        })
-        .unwrap();
-        // Each channel arrived as its contiguous plane, R then G then B...
-        assert_eq!(
-            seen,
-            [vec![0.125, 0.5], vec![0.25, 0.625], vec![0.375, 0.75]]
-        );
-        // ...and the edits landed back in the right interleaved slots.
-        let out: &[f32] = bytemuck::cast_slice(rgb.bytes());
-        assert_eq!(out, &[1.125, 1.25, 1.375, 1.5, 1.625, 1.75]);
-
-        let mut l = Image::new_with_data(
-            ImageDesc::new(3, 1, ColorFormat::L_F32),
-            bytemuck::cast_slice(&[0.25f32, 0.5, 0.75]).to_vec(),
-        )
-        .unwrap();
-        process_channels(&mut l, |plane| {
-            for p in plane.pixels_mut() {
-                *p *= 2.0;
-            }
-            Ok(())
-        })
-        .unwrap();
-        assert_eq!(bytemuck::cast_slice::<u8, f32>(l.bytes()), &[0.5, 1.0, 1.5]);
-    }
 }
 
 #[cfg(test)]
 pub(crate) mod internals {
-    use crate::image_ops::gather_channel;
+    use crate::io::image::linear::LinearImage;
     use crate::math::size2us::Size2us;
     use imaginarium::{Buffer2, Image, PlanarPixels};
 
     pub(crate) fn channel_plane(image: &Image, channel: usize) -> Buffer2<f32> {
-        let channels = image.desc().color_format.channel_count.channel_count() as usize;
-        assert!(channel < channels);
-        let mut plane = Buffer2::new_default(image.desc().width, image.desc().height);
-        gather_channel(image, channel, channels, &mut plane);
-        plane
+        LinearImage::from_f32_image(image).channel(channel).clone()
     }
 
     pub(crate) fn channel_samples(image: &Image, channel: usize) -> Vec<f32> {

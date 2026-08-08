@@ -10,12 +10,12 @@
 
 use std::path::PathBuf;
 
-use arrayvec::ArrayVec;
 use ort::session::Session;
 use ort::value::TensorRef;
 
-use imaginarium::{Buffer2, ChannelCount, Image, PlanarPixels};
+use imaginarium::{Buffer2, Image};
 
+use crate::io::image::linear::LinearImage;
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 
@@ -57,41 +57,17 @@ fn model_err(e: ort::Error) -> MlError {
     MlError::Model(e.to_string())
 }
 
-fn deinterleave_f32(image: &Image) -> ArrayVec<Buffer2<f32>, 3> {
-    match image.desc().color_format.channel_count {
-        ChannelCount::L => {
-            let planar: PlanarPixels<1, f32> = image.try_into().unwrap();
-            planar.planes.into_iter().collect()
-        }
-        ChannelCount::Rgb => {
-            let planar: PlanarPixels<3, f32> = image.try_into().unwrap();
-            planar.planes.into_iter().collect()
-        }
-        ChannelCount::Rgba => unreachable!("ML operations reject RGBA inputs"),
-    }
-}
-
-fn interleave_f32(planes: ArrayVec<Buffer2<f32>, 3>) -> Image {
-    match planes.len() {
-        1 => {
-            let mut planes = planes.into_iter();
-            let channels = [planes.next().unwrap()];
-            Image::from(&PlanarPixels::from_planes(channels))
-        }
-        3 => {
-            let channels = planes.into_inner().unwrap();
-            Image::from(&PlanarPixels::from_planes(channels))
-        }
-        n => panic!("interleave_f32 expects 1 (L) or 3 (RGB) planes, got {n}"),
-    }
-}
-
 /// Run the model over `image` in 512² tiles (NHWC `[0,1]` in, NHWC out), feather-blending the
 /// overlaps. Returns the output as an `Image` with the same channel count as the input (grayscale
 /// is replicated to RGB for the model, then averaged back). Expects a display-domain f32 master
 /// (`L_F32` or `RGB_F32`).
+///
+/// Unlike the in-place ops this cannot write through [`crate::image_ops::op::on_planes`] — the
+/// model's output is a separate buffer from its input — but it deinterleaves and re-interleaves
+/// through the same [`LinearImage`] conversions they do, so there is one definition of the
+/// planar↔interleaved boundary in the crate.
 pub(crate) fn run_tiled(image: &Image, config: &TiledOnnxConfig) -> Result<Image, MlError> {
-    let planes = deinterleave_f32(image);
+    let planar = LinearImage::from_f32_image(image);
     let size = Size2us::new(image.desc().width, image.desc().height);
     if size.width < WINDOW || size.height < WINDOW {
         return Err(MlError::TooSmall(size));
@@ -114,7 +90,7 @@ pub(crate) fn run_tiled(image: &Image, config: &TiledOnnxConfig) -> Result<Image
     let ys = tile_starts(size.height, config.stride);
     for &ty in &ys {
         for &tx in &xs {
-            fill_tile_input(&planes, Vec2us::new(tx, ty), &mut input);
+            fill_tile_input(&planar, Vec2us::new(tx, ty), &mut input);
             let tensor =
                 TensorRef::from_array_view(([1usize, WINDOW, WINDOW, 3], input.as_slice()))
                     .map_err(model_err)?;
@@ -130,7 +106,7 @@ pub(crate) fn run_tiled(image: &Image, config: &TiledOnnxConfig) -> Result<Image
             accumulate(tile, Vec2us::new(tx, ty), size.width, &mut acc, &mut weight);
         }
     }
-    Ok(build_output(planes.len() == 3, &acc, &weight, size))
+    Ok(build_output(planar.is_rgb(), &acc, &weight, size))
 }
 
 /// Tile origins covering `dim` with 512-px windows at `stride`, the last one flush to the edge.
@@ -151,12 +127,16 @@ fn tile_starts(dim: usize, stride: usize) -> Vec<usize> {
 /// Fill the reused NHWC `[1,512,512,3]` `input` buffer from the tile at `(tx, ty)`, clamped to
 /// `[0,1]`. Grayscale replicates its single channel to R=G=B. `input` is the caller's
 /// tile-loop-lifetime scratch buffer (see `run_tiled`), overwritten in full every call.
-fn fill_tile_input(planes: &[Buffer2<f32>], tile: Vec2us, input: &mut [f32]) {
-    let w = planes[0].width();
-    let chans: [&[f32]; 3] = if planes.len() == 3 {
-        [planes[0].pixels(), planes[1].pixels(), planes[2].pixels()]
+fn fill_tile_input(planar: &LinearImage, tile: Vec2us, input: &mut [f32]) {
+    let w = planar.width();
+    let chans: [&[f32]; 3] = if planar.is_rgb() {
+        [
+            planar.channel(0).pixels(),
+            planar.channel(1).pixels(),
+            planar.channel(2).pixels(),
+        ]
     } else {
-        let c = planes[0].pixels();
+        let c = planar.channel(0).pixels();
         [c, c, c]
     };
     for hh in 0..WINDOW {
@@ -213,47 +193,91 @@ fn accumulate(out: &[f32], tile: Vec2us, w: usize, acc: &mut [Vec<f32>; 3], weig
 
 /// Normalize the feather-weighted accumulation into an `Image` matching the input's channels.
 fn build_output(rgb: bool, acc: &[Vec<f32>; 3], weight: &[f32], size: Size2us) -> Image {
-    if rgb {
-        let planes: ArrayVec<Buffer2<f32>, 3> = (0..3)
-            .map(|c| {
-                let px = acc[c]
-                    .iter()
-                    .zip(weight)
-                    .map(|(&a, &wt)| (a / wt).clamp(0.0, 1.0))
-                    .collect();
-                Buffer2::new(size.width, size.height, px)
-            })
-            .collect();
-        interleave_f32(planes)
+    let planar = if rgb {
+        LinearImage::from(std::array::from_fn::<_, 3, _>(|c| {
+            let px = acc[c]
+                .iter()
+                .zip(weight)
+                .map(|(&a, &wt)| (a / wt).clamp(0.0, 1.0))
+                .collect();
+            Buffer2::new(size.width, size.height, px)
+        }))
     } else {
         // Average the three model output channels back to grayscale.
         let gray: Vec<f32> = (0..size.pixel_count())
             .map(|i| ((acc[0][i] + acc[1][i] + acc[2][i]) / (3.0 * weight[i])).clamp(0.0, 1.0))
             .collect();
-        let mut planes = ArrayVec::new();
-        planes.push(Buffer2::new(size.width, size.height, gray));
-        interleave_f32(planes)
-    }
+        LinearImage::from(Buffer2::new(size.width, size.height, gray))
+    };
+    Image::from(&planar)
 }
 
 #[cfg(test)]
 mod tests {
     use crate::image_ops::ml::backend::*;
-    use imaginarium::{ColorFormat, ImageDesc};
+
+    /// Plane of `width × height` whose value at `(x, y)` is `base + x + y * 1000`, so a wrong tile
+    /// origin or a swapped channel produces a distinctly wrong number rather than a near miss.
+    fn ramp(width: usize, height: usize, base: f32) -> Buffer2<f32> {
+        let pixels = (0..width * height)
+            .map(|i| base + (i % width) as f32 + (i / width) as f32 * 1000.0)
+            .collect();
+        Buffer2::new(width, height, pixels)
+    }
 
     #[test]
-    fn deinterleave_interleave_round_trips() {
-        let samples = [0.1f32, 0.2, 0.3, 0.4, 0.5, 0.6];
-        let image = Image::new_with_data(
-            ImageDesc::new(2, 1, ColorFormat::RGB_F32),
-            bytemuck::cast_slice(&samples).to_vec(),
-        )
-        .unwrap();
-        let bytes = image.bytes().to_vec();
-        let planes = deinterleave_f32(&image);
-        assert_eq!(planes.len(), 3);
-        assert_eq!(planes[0].pixels(), &[0.1, 0.4]);
-        let back = interleave_f32(planes);
-        assert_eq!(back.bytes(), bytes);
+    fn a_tile_reads_from_its_own_origin_with_each_channel_in_its_own_model_slot() {
+        // 640² so the tile origin is not forced to (0,0) and an off-by-one in the row stride shows.
+        let (side, tile) = (640usize, Vec2us::new(128, 96));
+        let planar = LinearImage::from(std::array::from_fn::<_, 3, _>(|c| {
+            ramp(side, side, c as f32 * 0.5)
+        }));
+        let mut input = vec![0.0f32; WINDOW * WINDOW * 3];
+        fill_tile_input(&planar, tile, &mut input);
+
+        // Model pixel (ww, hh) must be master pixel (tile.x + ww, tile.y + hh). Every value here
+        // exceeds 1.0 and so arrives clamped — which is the contract, the model wants [0,1].
+        for (ww, hh) in [(0usize, 0usize), (1, 0), (0, 1), (WINDOW - 1, WINDOW - 1)] {
+            let dst = (hh * WINDOW + ww) * 3;
+            let src = (tile.y + hh) * side + tile.x + ww;
+            for c in 0..3 {
+                let expected = planar.channel(c).pixels()[src].clamp(0.0, 1.0);
+                assert_eq!(
+                    input[dst + c],
+                    expected,
+                    "channel {c} at model ({ww}, {hh})"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_mono_master_replicates_into_all_three_model_channels() {
+        // The net is RGB-only, so a grayscale master must arrive as R=G=B rather than leaving two
+        // channels at zero — and the clamp is what keeps a sub-background or star-core sample in
+        // the [0,1] domain the model was trained on.
+        let side = WINDOW;
+        let plane = Buffer2::new(
+            side,
+            side,
+            (0..side * side)
+                .map(|i| match i {
+                    0 => -0.25,
+                    1 => 1.5,
+                    _ => 0.5,
+                })
+                .collect(),
+        );
+        let planar = LinearImage::from(plane);
+        let mut input = vec![0.0f32; WINDOW * WINDOW * 3];
+        fill_tile_input(&planar, Vec2us::new(0, 0), &mut input);
+
+        for (pixel, expected) in [(0usize, 0.0f32), (1, 1.0), (2, 0.5), (side * side - 1, 0.5)] {
+            assert_eq!(
+                &input[pixel * 3..pixel * 3 + 3],
+                &[expected; 3],
+                "pixel {pixel}"
+            );
+        }
     }
 }
