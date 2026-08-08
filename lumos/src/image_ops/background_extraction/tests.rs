@@ -1,9 +1,9 @@
 use crate::image_ops::background_extraction::*;
 use crate::image_ops::internals::{channel_plane as channel, gray_image, rgb_image as rgb};
 use crate::image_ops::op::OpError;
+use crate::io::image::linear::LinearImage;
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
-use imaginarium::Image;
 
 fn fill(size: Size2us, f: impl Fn(usize, usize) -> f32) -> Vec<f32> {
     let mut v = vec![0.0f32; size.pixel_count()];
@@ -15,7 +15,7 @@ fn fill(size: Size2us, f: impl Fn(usize, usize) -> f32) -> Vec<f32> {
     v
 }
 
-fn gray(size: Size2us, f: impl Fn(usize, usize) -> f32) -> Image {
+fn gray(size: Size2us, f: impl Fn(usize, usize) -> f32) -> LinearImage {
     gray_image(size, fill(size, f))
 }
 

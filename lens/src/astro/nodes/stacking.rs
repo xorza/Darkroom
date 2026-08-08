@@ -3,6 +3,7 @@
 use std::path::PathBuf;
 
 use imaginarium::Image as RawImage;
+use lumos::ProgressCallback;
 use lumos::{AlignStackConfig, CalibrationMasters, LinearImage, Reference, calibrate_align_stack};
 use scenarium::{
     DataType, DynamicValue, Func, FuncInput, FuncLambda, FuncOutput, InvokeError, Library,
@@ -116,7 +117,13 @@ pub(crate) fn register(library: &mut Library) {
                                 .as_custom::<Masters>()
                                 .map(|masters| &masters.masters)
                                 .unwrap_or(&empty);
-                            calibrate_align_stack(&lights, masters, &config, cancel)
+                            calibrate_align_stack(
+                                &lights,
+                                masters,
+                                &config,
+                                ProgressCallback::default(),
+                                cancel,
+                            )
                         })
                         .await?;
 

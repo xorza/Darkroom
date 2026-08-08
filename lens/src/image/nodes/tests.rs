@@ -37,7 +37,7 @@ fn adjust_image_runs_in_place_only_for_unique_cpu_inputs() {
     let unique_ptr = image.bytes().as_ptr();
     let unique = DynamicValue::from_custom(Image::from(image));
     let adjusted = adjust_image(op, &mut context, unique).unwrap();
-    let adjusted_cpu = adjusted.buffer.make_cpu(&context).unwrap();
+    let adjusted_cpu = adjusted.buffer().make_cpu(&context).unwrap();
     assert_eq!(adjusted_cpu.bytes().as_ptr(), unique_ptr);
     assert_ne!(adjusted_cpu.bytes(), pattern.as_slice());
 
@@ -46,10 +46,10 @@ fn adjust_image_runs_in_place_only_for_unique_cpu_inputs() {
     let shared = DynamicValue::from_custom(Image::from(image));
     let holder = shared.clone();
     let adjusted_shared = adjust_image(op, &mut context, shared).unwrap();
-    let shared_cpu = adjusted_shared.buffer.make_cpu(&context).unwrap();
+    let shared_cpu = adjusted_shared.buffer().make_cpu(&context).unwrap();
     assert_ne!(shared_cpu.bytes().as_ptr(), shared_ptr);
     let original = holder.as_custom::<Image>().unwrap();
-    let original_cpu = original.buffer.make_cpu(&context).unwrap();
+    let original_cpu = original.buffer().make_cpu(&context).unwrap();
     assert_eq!(original_cpu.bytes().as_ptr(), shared_ptr);
     assert_eq!(original_cpu.bytes(), pattern.as_slice());
     assert_eq!(adjusted_cpu.bytes(), shared_cpu.bytes());
@@ -139,7 +139,7 @@ async fn load_and_save_round_trip_exact_pixels() {
         .unwrap();
     let loaded = outputs[0].as_custom::<Image>().unwrap();
     let cpu = loaded
-        .buffer
+        .buffer()
         .make_cpu(&imaginarium::ProcessingContext::cpu_only())
         .unwrap();
     assert_eq!(cpu.desc(), desc);

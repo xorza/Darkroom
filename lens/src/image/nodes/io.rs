@@ -89,19 +89,24 @@ fn register_save(library: &mut Library) {
                         .to_owned();
                     let cpu_image = {
                         let vision = contexts.get(VISION_CTX_TYPE);
-                        match value.into_custom::<Image>() {
-                            Ok(image) => image
-                                .buffer
-                                .to_cpu(&vision.processing_ctx)
-                                .map_err(InvokeError::external)?,
-                            Err(value) => value
-                                .as_custom::<Image>()
-                                .expect("image input type is validated at the compile boundary")
-                                .buffer
-                                .make_cpu(&vision.processing_ctx)
-                                .map_err(InvokeError::external)?
-                                .clone(),
-                        }
+                        let image = match value.into_custom::<Image>() {
+                            Ok(image) => image,
+                            Err(value) => Image::from(
+                                value
+                                    .as_custom::<Image>()
+                                    .expect(
+                                        "image input type is validated at the compile boundary",
+                                    )
+                                    .buffer()
+                                    .duplicate(&vision.processing_ctx)
+                                    .map_err(InvokeError::external)?,
+                            ),
+                        };
+                        image
+                            .buffer()
+                            .make_cpu(&vision.processing_ctx)
+                            .map_err(InvokeError::external)?
+                            .clone()
                     };
                     tokio::task::spawn_blocking(move || {
                         match conversion_target(&format, cpu_image.desc().color_format) {

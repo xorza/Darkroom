@@ -1,21 +1,21 @@
 //! Shared blocking-runtime adapters for astro node implementations.
 
 use common::CancelToken;
-use imaginarium::{Image as RawImage, ProcessingContext};
-use lumos::{MlError, OpError};
+use imaginarium::ProcessingContext;
+use lumos::{LinearImage, MlError, OpError};
 use scenarium::{DynamicValue, InvokeError, InvokeResult};
 
 use crate::image::Image;
 
 pub(crate) async fn run_frame_op<F>(value: DynamicValue, op: F) -> InvokeResult<DynamicValue>
 where
-    F: FnOnce(&mut RawImage) -> Result<(), OpError> + Send + 'static,
+    F: FnOnce(&mut LinearImage) -> Result<(), OpError> + Send + 'static,
 {
-    let cpu = image_to_cpu(value).map_err(InvokeError::external)?;
+    let planar = image_to_planar(value).map_err(InvokeError::external)?;
     let out = tokio::task::spawn_blocking(move || {
-        let mut cpu = cpu;
-        op(&mut cpu)?;
-        Ok::<_, OpError>(cpu)
+        let mut planar = planar;
+        op(&mut planar)?;
+        Ok::<_, OpError>(planar)
     })
     .await
     .map_err(InvokeError::external)?
@@ -25,26 +25,27 @@ where
 
 pub(crate) async fn run_ml<R, F>(value: DynamicValue, op: F) -> InvokeResult<R>
 where
-    F: FnOnce(RawImage) -> Result<R, MlError> + Send + 'static,
+    F: FnOnce(LinearImage) -> Result<R, MlError> + Send + 'static,
     R: Send + 'static,
 {
-    let cpu = image_to_cpu(value).map_err(InvokeError::external)?;
-    tokio::task::spawn_blocking(move || op(cpu))
+    let planar = image_to_planar(value).map_err(InvokeError::external)?;
+    tokio::task::spawn_blocking(move || op(planar))
         .await
         .map_err(InvokeError::external)?
         .map_err(InvokeError::external)
 }
 
-fn image_to_cpu(value: DynamicValue) -> imaginarium::Result<RawImage> {
+/// The planes the `lumos` ops run on. An input produced by another astro node is already planar and
+/// is taken as-is, so a chain of astro nodes never repacks; only an edge coming from the
+/// `imaginarium` side converts, and only once.
+fn image_to_planar(value: DynamicValue) -> imaginarium::Result<LinearImage> {
     let cpu = ProcessingContext::cpu_only();
     match value.into_custom::<Image>() {
-        Ok(image) => image.buffer.to_cpu(&cpu),
-        Err(value) => {
-            let image = value
-                .as_custom::<Image>()
-                .expect("image input type is validated at the compile boundary");
-            Ok(image.buffer.make_cpu(&cpu)?.clone())
-        }
+        Ok(image) => image.into_planar(&cpu),
+        Err(value) => value
+            .as_custom::<Image>()
+            .expect("image input type is validated at the compile boundary")
+            .to_planar(&cpu),
     }
 }
 
@@ -67,10 +68,10 @@ where
 
 #[cfg(test)]
 pub(super) mod internals {
-    use imaginarium::Image as RawImage;
+    use lumos::LinearImage;
     use scenarium::DynamicValue;
 
-    pub(crate) fn image_to_cpu(value: DynamicValue) -> imaginarium::Result<RawImage> {
-        super::image_to_cpu(value)
+    pub(crate) fn image_to_planar(value: DynamicValue) -> imaginarium::Result<LinearImage> {
+        super::image_to_planar(value)
     }
 }
