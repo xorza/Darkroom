@@ -11,7 +11,6 @@ use scenarium::TypeEntry;
 use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
 
 use crate::image::Image;
-use crate::image::context::VISION_CTX_TYPE;
 
 const VERSION: u32 = 2;
 const HEADER_LEN: u64 = 3 + 8 + 8;
@@ -31,17 +30,13 @@ impl CustomValueCodec for ImageCodec {
         &self,
         value: &dyn CustomValue,
         writer: &mut (dyn AsyncWrite + Unpin + Send),
-        ctx: &mut ContextStore,
+        _ctx: &mut ContextStore,
     ) -> std::result::Result<(), BoxError> {
         let image = value
             .as_any()
             .downcast_ref::<Image>()
             .expect("ImageCodec is only registered for the Image type");
-        let vision = ctx.get(VISION_CTX_TYPE);
-        let buffer = image.make_interleaved();
-        let cpu = buffer
-            .make_cpu(&vision.processing_ctx)
-            .map_err(|error| format!("image GPU readback failed: {error:?}"))?;
+        let cpu = image.interleaved();
         let desc = cpu.desc();
         let format = desc.color_format;
         let mut header = [0; HEADER_LEN as usize];

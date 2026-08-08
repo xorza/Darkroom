@@ -1,7 +1,6 @@
 //! Shared blocking-runtime adapters for astro node implementations.
 
 use common::CancelToken;
-use imaginarium::ProcessingContext;
 use lumos::{LinearImage, MlError, OpError};
 use scenarium::{DynamicValue, InvokeError, InvokeResult};
 
@@ -11,7 +10,7 @@ pub(crate) async fn run_frame_op<F>(value: DynamicValue, op: F) -> InvokeResult<
 where
     F: FnOnce(&mut LinearImage) -> Result<(), OpError> + Send + 'static,
 {
-    let planar = image_to_planar(value).map_err(InvokeError::external)?;
+    let planar = image_to_planar(value);
     let out = tokio::task::spawn_blocking(move || {
         let mut planar = planar;
         op(&mut planar)?;
@@ -28,7 +27,7 @@ where
     F: FnOnce(LinearImage) -> Result<R, MlError> + Send + 'static,
     R: Send + 'static,
 {
-    let planar = image_to_planar(value).map_err(InvokeError::external)?;
+    let planar = image_to_planar(value);
     tokio::task::spawn_blocking(move || op(planar))
         .await
         .map_err(InvokeError::external)?
@@ -38,15 +37,14 @@ where
 /// The planes the `lumos` ops run on. An input produced by another astro node is already planar and
 /// is taken as-is, so a chain of astro nodes never repacks; only an edge coming from the
 /// `imaginarium` side converts, and only once.
-fn image_to_planar(value: DynamicValue) -> imaginarium::Result<LinearImage> {
-    let cpu = ProcessingContext::cpu_only();
+fn image_to_planar(value: DynamicValue) -> LinearImage {
     match value.into_custom::<Image>() {
-        Ok(image) => image.to_planar(&cpu),
+        Ok(image) => image.to_planar(),
         Err(value) => value
             .as_custom::<Image>()
             .expect("image input type is validated at the compile boundary")
-            .make_planar(&cpu)
-            .map(|planar| planar.clone()),
+            .planar()
+            .into_owned(),
     }
 }
 
@@ -72,7 +70,7 @@ pub(super) mod internals {
     use lumos::LinearImage;
     use scenarium::DynamicValue;
 
-    pub(crate) fn image_to_planar(value: DynamicValue) -> imaginarium::Result<LinearImage> {
+    pub(crate) fn image_to_planar(value: DynamicValue) -> LinearImage {
         super::image_to_planar(value)
     }
 }

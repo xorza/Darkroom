@@ -6,7 +6,6 @@ use scenarium::{ConstValue, DataType, DynamicValue, InvokeError, InvokeResult};
 use scenarium::{Func, FuncInput, FuncLambda, FuncOutput, Library};
 
 use crate::config_node::enum_input;
-use crate::image::context::VISION_CTX_TYPE;
 use crate::image::format::{CONVERSION_FORMAT_DATATYPE, ConversionFormat, conversion_target};
 use crate::image::nodes::BLENDMODE_DATATYPE;
 use crate::image::{IMAGE_DATA_TYPE, Image};
@@ -43,10 +42,7 @@ fn register_brightness(library: &mut Library) {
         .output(FuncOutput::new("Image", IMAGE_DATA_TYPE.clone()).description("Adjusted image."))
         .lambda(FuncLambda::new(
             move |Invocation {
-                      ctx: contexts,
-                      inputs,
-                      outputs,
-                      ..
+                      inputs, outputs, ..
                   }| {
                 Box::pin(async move {
                     debug_assert_eq!(inputs.len(), 3);
@@ -60,12 +56,7 @@ fn register_brightness(library: &mut Library) {
                         .as_f64()
                         .expect("contrast input type is validated at the compile boundary")
                         as f32;
-                    let vision = contexts.get(VISION_CTX_TYPE);
-                    let image = adjust_image(
-                        ContrastBrightness::new(contrast, brightness),
-                        &mut vision.processing_ctx,
-                        value,
-                    )?;
+                    let image = adjust_image(ContrastBrightness::new(contrast, brightness), value)?;
                     outputs[0] = DynamicValue::from_custom(image);
                     Ok(())
                 })
@@ -94,10 +85,7 @@ fn register_convert(library: &mut Library) {
             )
             .lambda(FuncLambda::new(
                 move |Invocation {
-                          ctx: contexts,
-                          inputs,
-                          outputs,
-                          ..
+                          inputs, outputs, ..
                       }| {
                     Box::pin(async move {
                         debug_assert_eq!(inputs.len(), 2);
@@ -111,18 +99,12 @@ fn register_convert(library: &mut Library) {
                                 .as_custom::<Image>()
                                 .expect("image input type is validated at the compile boundary");
                             match conversion_target(format, image.desc().color_format) {
-                                Some(target) => {
-                                    let vision = contexts.get(VISION_CTX_TYPE);
-                                    let buffer = image.make_interleaved();
-                                    let cpu_image = buffer
-                                        .make_cpu(&vision.processing_ctx)
-                                        .map_err(InvokeError::external)?;
-                                    Some(
-                                        cpu_image
-                                            .convert_to(target)
-                                            .map_err(InvokeError::external)?,
-                                    )
-                                }
+                                Some(target) => Some(
+                                    image
+                                        .interleaved()
+                                        .convert_to(target)
+                                        .map_err(InvokeError::external)?,
+                                ),
                                 None => None,
                             }
                         };
@@ -160,10 +142,7 @@ fn register_blend(library: &mut Library) {
             .output(FuncOutput::new("Image", IMAGE_DATA_TYPE.clone()).description("Blended image."))
             .lambda(FuncLambda::new(
                 move |Invocation {
-                          ctx: contexts,
-                          inputs,
-                          outputs,
-                          ..
+                          inputs, outputs, ..
                       }| {
                     Box::pin(async move {
                         debug_assert_eq!(inputs.len(), 4);
@@ -183,16 +162,13 @@ fn register_blend(library: &mut Library) {
                             .as_f64()
                             .expect("alpha input type is validated at the compile boundary")
                             as f32;
-                        let vision = contexts.get(VISION_CTX_TYPE);
-                        let mut output = imaginarium::ImageBuffer::new_empty(source.desc());
-                        Blend::new(mode, alpha)
-                            .execute(
-                                &mut vision.processing_ctx,
-                                &source.make_interleaved(),
-                                &destination.make_interleaved(),
-                                &mut output,
-                            )
+                        let mut output = imaginarium::Image::new_black(source.desc())
                             .map_err(InvokeError::external)?;
+                        Blend::new(mode, alpha).apply_cpu(
+                            &source.interleaved(),
+                            &destination.interleaved(),
+                            &mut output,
+                        );
                         outputs[0] = DynamicValue::from_custom(Image::from(output));
                         Ok(())
                     })
@@ -241,10 +217,7 @@ fn register_transform(library: &mut Library) {
             )
             .lambda(FuncLambda::new(
                 move |Invocation {
-                          ctx: contexts,
-                          inputs,
-                          outputs,
-                          ..
+                          inputs, outputs, ..
                       }| {
                     Box::pin(async move {
                         debug_assert_eq!(inputs.len(), 6);
@@ -258,8 +231,8 @@ fn register_transform(library: &mut Library) {
                                 .expect("transform input type is validated at the compile boundary")
                                 as f32
                         };
-                        let vision = contexts.get(VISION_CTX_TYPE);
-                        let mut output = imaginarium::ImageBuffer::new_empty(image.desc());
+                        let mut output = imaginarium::Image::new_black(image.desc())
+                            .map_err(InvokeError::external)?;
                         let center = Vec2::new(
                             image.desc().width as f32 / 2.0,
                             image.desc().height as f32 / 2.0,
@@ -268,12 +241,7 @@ fn register_transform(library: &mut Library) {
                             .scale(Vec2::new(scalar(1), scalar(2)))
                             .rotate_around(scalar(3), center)
                             .translate(Vec2::new(scalar(4), scalar(5)))
-                            .execute(
-                                &mut vision.processing_ctx,
-                                &image.make_interleaved(),
-                                &mut output,
-                            )
-                            .map_err(InvokeError::external)?;
+                            .apply_cpu(&image.interleaved(), &mut output);
                         outputs[0] = DynamicValue::from_custom(Image::from(output));
                         Ok(())
                     })
@@ -282,32 +250,21 @@ fn register_transform(library: &mut Library) {
     );
 }
 
-fn adjust_image(
-    op: ContrastBrightness,
-    context: &mut imaginarium::ProcessingContext,
-    value: DynamicValue,
-) -> InvokeResult<Image> {
-    // Contrast/brightness works in place, so an owned input is adjusted where it
-    // stands — no output buffer to allocate. Only a value still shared with
-    // other consumers has to be copied first, and `duplicate` keeps that copy on
-    // whichever backend the image already lives on.
+fn adjust_image(op: ContrastBrightness, value: DynamicValue) -> InvokeResult<Image> {
+    // Contrast/brightness works in place, so an owned input is adjusted where it stands — no output
+    // image to allocate. Only a value still shared with other consumers has to be copied first.
     let mut image = match value.into_custom::<Image>() {
         Ok(image) => image,
-        Err(value) => {
-            let input = value
+        Err(value) => Image::from(
+            value
                 .as_custom::<Image>()
-                .expect("image input type is validated at the compile boundary");
-            Image::from(
-                input
-                    .make_interleaved()
-                    .duplicate(context)
-                    .map_err(InvokeError::external)?,
-            )
-        }
+                .expect("image input type is validated at the compile boundary")
+                .interleaved()
+                .into_owned(),
+        ),
     };
 
-    op.execute(context, image.make_interleaved_mut())
-        .map_err(InvokeError::external)?;
+    op.apply_cpu(image.interleaved_mut());
     Ok(image)
 }
 
@@ -318,11 +275,7 @@ pub(super) mod internals {
 
     use crate::image::Image;
 
-    pub(crate) fn adjust_image(
-        op: ContrastBrightness,
-        context: &mut imaginarium::ProcessingContext,
-        value: DynamicValue,
-    ) -> InvokeResult<Image> {
-        super::adjust_image(op, context, value)
+    pub(crate) fn adjust_image(op: ContrastBrightness, value: DynamicValue) -> InvokeResult<Image> {
+        super::adjust_image(op, value)
     }
 }

@@ -8,7 +8,6 @@ use scenarium::{ConstValue, DataType, DynamicValue, FsPathConfig, FsPathMode, In
 use scenarium::{Func, FuncInput, FuncLambda, FuncOutput, Library};
 
 use crate::config_node::enum_input;
-use crate::image::context::VISION_CTX_TYPE;
 use crate::image::format::{CONVERSION_FORMAT_DATATYPE, ConversionFormat, conversion_target};
 use crate::image::{IMAGE_DATA_TYPE, Image};
 use scenarium::Invocation;
@@ -74,7 +73,7 @@ fn register_save(library: &mut Library) {
                         "Convert to this color format before saving; \"As Is\" keeps the source format.",
                     ),
             )
-            .lambda(FuncLambda::new(move |Invocation { ctx: contexts, inputs, .. }| {
+            .lambda(FuncLambda::new(move |Invocation { inputs, .. }| {
                 Box::pin(async move {
                     debug_assert_eq!(inputs.len(), 3);
                     let value = std::mem::take(&mut inputs[0]);
@@ -87,26 +86,15 @@ fn register_save(library: &mut Library) {
                         .as_enum()
                         .expect("format input type is validated at the compile boundary")
                         .to_owned();
-                    let cpu_image = {
-                        let vision = contexts.get(VISION_CTX_TYPE);
-                        let image = match value.into_custom::<Image>() {
-                            Ok(image) => image,
-                            Err(value) => Image::from(
-                                value
-                                    .as_custom::<Image>()
-                                    .expect(
-                                        "image input type is validated at the compile boundary",
-                                    )
-                                    .make_interleaved()
-                                    .duplicate(&vision.processing_ctx)
-                                    .map_err(InvokeError::external)?,
-                            ),
-                        };
-                        image
-                            .make_interleaved()
-                            .make_cpu(&vision.processing_ctx)
-                            .map_err(InvokeError::external)?
-                            .clone()
+                    // Saving needs the pixels by value anyway, so take them when this is the last
+                    // holder and copy only when it is not.
+                    let cpu_image = match value.into_custom::<Image>() {
+                        Ok(image) => image.to_interleaved(),
+                        Err(value) => value
+                            .as_custom::<Image>()
+                            .expect("image input type is validated at the compile boundary")
+                            .interleaved()
+                            .into_owned(),
                     };
                     tokio::task::spawn_blocking(move || {
                         match conversion_target(&format, cpu_image.desc().color_format) {

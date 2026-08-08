@@ -1,8 +1,7 @@
-use imaginarium::{ColorFormat, Image as CpuImage, ImageDesc, ProcessingContext};
+use imaginarium::{ColorFormat, Image as CpuImage, ImageDesc};
 use scenarium::{ContextStore, CustomValueCodec, Library};
 
 use crate::image::codec::{HEADER_LEN, ImageCodec, image_type_entry};
-use crate::image::context::VisionCtx;
 use crate::image::{IMAGE_TYPE_ID, Image};
 
 #[derive(Debug)]
@@ -18,12 +17,10 @@ fn sample() -> Sample {
     }
 }
 
+/// The codec no longer reads anything out of the store — image values are CPU-resident by
+/// construction — but the trait still hands one in, so tests need something to pass.
 fn cpu_context() -> ContextStore {
-    let mut context = ContextStore::default();
-    context.insert_context(VisionCtx {
-        processing_ctx: ProcessingContext::cpu_only(),
-    });
-    context
+    ContextStore::default()
 }
 
 #[tokio::test]
@@ -47,10 +44,7 @@ async fn cpu_image_streams_round_trip_pixel_exact() {
         .as_any()
         .downcast_ref::<Image>()
         .expect("decoded back into a lens Image");
-    let buffer = decoded.make_interleaved();
-    let cpu = buffer
-        .make_cpu(&ProcessingContext::cpu_only())
-        .expect("rebuilt image is CPU-resident");
+    let cpu = decoded.interleaved();
     assert_eq!(cpu.desc(), sample.desc);
     assert_eq!(cpu.bytes(), sample.pixels);
 }
