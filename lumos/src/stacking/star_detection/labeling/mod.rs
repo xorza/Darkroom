@@ -24,9 +24,6 @@ use imaginarium::Buffer2;
 
 use crate::stacking::star_detection::config::detection_config::Connectivity;
 
-#[cfg(test)]
-pub(crate) mod internals;
-
 /// Pixel count below which sequential CCL is faster than parallel.
 /// Determined by benchmark: parallel overhead dominates for small images.
 const PARALLEL_CCL_THRESHOLD: usize = 65_000;
@@ -834,6 +831,28 @@ impl AtomicUnionFind {
         LabelMapping {
             map,
             count: count as usize,
+        }
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod internals {
+    use imaginarium::Buffer2;
+
+    use crate::bit_buffer2::BitBuffer2;
+    use crate::stacking::star_detection::config::detection_config::Connectivity;
+    use crate::stacking::star_detection::labeling::LabelMap;
+
+    impl LabelMap {
+        /// Adopt pre-computed labels, bypassing connected-component analysis entirely.
+        pub(crate) fn from_raw(labels: Buffer2<u32>, num_labels: usize) -> Self {
+            Self { labels, num_labels }
+        }
+
+        /// Label `mask` into a freshly allocated buffer instead of one drawn from the pool.
+        pub(crate) fn from_mask(mask: &BitBuffer2, connectivity: Connectivity) -> Self {
+            let labels = Buffer2::new_filled(mask.size.width, mask.size.height, 0u32);
+            Self::from_buffer(mask, connectivity, labels)
         }
     }
 }

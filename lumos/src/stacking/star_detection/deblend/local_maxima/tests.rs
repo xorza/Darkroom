@@ -6,7 +6,7 @@ use crate::math::vec2us::Vec2us;
 use crate::stacking::star_detection::deblend::assign_to_nearest_peak;
 use crate::stacking::star_detection::deblend::internals::{TestComponent, make_test_component};
 use crate::stacking::star_detection::deblend::local_maxima::*;
-use crate::stacking::star_detection::labeling::internals::label_map_from_raw;
+use crate::stacking::star_detection::labeling::LabelMap;
 use crate::testing::synthetic::star_profiles::{StarProfile, SyntheticStar};
 use glam::Vec2;
 
@@ -521,7 +521,7 @@ fn test_plateau_no_local_max() {
         }
     }
 
-    let labels = label_map_from_raw(labels_buf, 1);
+    let labels = LabelMap::from_raw(labels_buf, 1);
     let data = ComponentData {
         bbox: URect::new(Vec2us::new(3, 3), Vec2us::new(6, 6)),
         label: 1,
@@ -543,7 +543,7 @@ fn test_single_pixel_is_local_max() {
     pixels[(5, 5)] = 1.0;
     labels_buf[(5, 5)] = 1;
 
-    let labels = label_map_from_raw(labels_buf, 1);
+    let labels = LabelMap::from_raw(labels_buf, 1);
     let data = ComponentData {
         bbox: URect::new(Vec2us::new(5, 5), Vec2us::new(6, 6)),
         label: 1,
@@ -603,7 +603,7 @@ fn test_voronoi_midpoint_assignment() {
     pixels[(20, 50)] = 1.0;
     pixels[(79, 50)] = 1.0;
 
-    let labels = label_map_from_raw(labels_buf, 1);
+    let labels = LabelMap::from_raw(labels_buf, 1);
     let data = ComponentData {
         bbox: URect::new(Vec2us::new(20, 50), Vec2us::new(80, 51)),
         label: 1,
@@ -651,7 +651,7 @@ fn test_diagonal_neighbors() {
     pixels[(6, 4)] = 0.5;
     labels_buf[(6, 4)] = 1;
 
-    let _labels = label_map_from_raw(labels_buf, 1);
+    let _labels = LabelMap::from_raw(labels_buf, 1);
 
     let pixel = Pixel {
         pos: Vec2us::new(5, 5),

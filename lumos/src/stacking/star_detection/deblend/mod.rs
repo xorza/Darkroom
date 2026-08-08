@@ -177,7 +177,6 @@ mod internals {
     use crate::stacking::star_detection::deblend::region::Region;
     use crate::stacking::star_detection::deblend::{ComponentData, MAX_PEAKS};
     use crate::stacking::star_detection::labeling::LabelMap;
-    use crate::stacking::star_detection::labeling::internals::label_map_from_raw;
     use crate::testing::synthetic::star_profiles::SyntheticStar;
 
     #[derive(Debug)]
@@ -222,7 +221,7 @@ mod internals {
 
         TestComponent {
             pixels,
-            labels: label_map_from_raw(labels, 1),
+            labels: LabelMap::from_raw(labels, 1),
             data: ComponentData {
                 bbox,
                 label: 1,

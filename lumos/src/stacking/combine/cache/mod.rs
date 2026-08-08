@@ -923,37 +923,39 @@ pub(crate) mod internals {
     use crate::stacking::frame_store::{FrameStats, StackableImage, StoredFrame, WarpQuality};
     use crate::stacking::progress::ProgressCallback;
 
-    /// An in-memory [`FrameCache`] over already-decoded frames — the shape `from_paths` builds,
-    /// without the file round-trip. The frames carry no warp quality, so this is the plain-combine
-    /// cache the calibration path uses.
-    pub(crate) fn cache_from_images<I: StackableImage>(
-        images: Vec<I>,
-        normalization: Normalization,
-    ) -> FrameCache {
-        let dimensions = images[0].dimensions();
-        let metadata = images[0].metadata().clone();
-        let frames: Vec<StoredFrame> = images
-            .into_iter()
-            .map(|image| {
-                let source_stats = FrameStats::measure(&image);
-                StoredFrame::from_memory(image, WarpQuality::none(), source_stats)
-            })
-            .collect();
-        let core = CacheCore {
-            spill_directory: None,
-            dimensions,
-            metadata,
-            config: CacheConfig::default(),
-            progress: ProgressCallback::default(),
-            cancel: CancelToken::never(),
-        };
-        let frame_norms = compute_frame_norms(&frames, dimensions, normalization, &core.cancel)
-            .expect("frames without coverage have no failing normalization path");
-        FrameCache {
-            frames,
-            frame_norms,
-            normalization,
-            core,
+    impl FrameCache {
+        /// An in-memory cache over already-decoded frames — the shape `from_paths` builds, without
+        /// the file round-trip. The frames carry no warp quality, so this is the plain-combine
+        /// cache the calibration path uses.
+        pub(crate) fn from_images<I: StackableImage>(
+            images: Vec<I>,
+            normalization: Normalization,
+        ) -> Self {
+            let dimensions = images[0].dimensions();
+            let metadata = images[0].metadata().clone();
+            let frames: Vec<StoredFrame> = images
+                .into_iter()
+                .map(|image| {
+                    let source_stats = FrameStats::measure(&image);
+                    StoredFrame::from_memory(image, WarpQuality::none(), source_stats)
+                })
+                .collect();
+            let core = CacheCore {
+                spill_directory: None,
+                dimensions,
+                metadata,
+                config: CacheConfig::default(),
+                progress: ProgressCallback::default(),
+                cancel: CancelToken::never(),
+            };
+            let frame_norms = compute_frame_norms(&frames, dimensions, normalization, &core.cancel)
+                .expect("frames without coverage have no failing normalization path");
+            Self {
+                frames,
+                frame_norms,
+                normalization,
+                core,
+            }
         }
     }
 }

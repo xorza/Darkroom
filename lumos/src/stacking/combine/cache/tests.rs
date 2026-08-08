@@ -1,7 +1,6 @@
 use crate::io::image::cfa::{CfaImage, CfaType};
 use crate::io::image::linear::LinearImage;
 use crate::math::size2us::Size2us;
-use crate::stacking::combine::cache::internals::cache_from_images;
 use crate::stacking::combine::cache::*;
 use crate::stacking::combine::config::Normalization;
 use crate::stacking::combine::rejection::Rejection;
@@ -321,7 +320,7 @@ fn make_cfa_cache(frames_pixels: Vec<Vec<f32>>, dims: ImageDimensions) -> FrameC
             quantization_sigma: None,
         })
         .collect();
-    cache_from_images(images, Normalization::None)
+    FrameCache::from_images(images, Normalization::None)
 }
 
 #[test]

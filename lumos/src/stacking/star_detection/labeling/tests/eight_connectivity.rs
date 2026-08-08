@@ -16,11 +16,11 @@ fn diagonal_connected() {
     let mask = BitBuffer2::from_slice(Size2us::new(3, 3), &mask_data);
 
     // 4-connectivity: diagonals are separate
-    let label_map_4 = label_map_from_mask_with_connectivity(&mask, Connectivity::Four);
+    let label_map_4 = LabelMap::from_mask(&mask, Connectivity::Four);
     assert_eq!(label_map_4.num_labels(), 3);
 
     // 8-connectivity: diagonals are connected
-    let label_map_8 = label_map_from_mask_with_connectivity(&mask, Connectivity::Eight);
+    let label_map_8 = LabelMap::from_mask(&mask, Connectivity::Eight);
     assert_eq!(label_map_8.num_labels(), 1);
 }
 
@@ -37,11 +37,11 @@ fn anti_diagonal_connected() {
     let mask = BitBuffer2::from_slice(Size2us::new(3, 3), &mask_data);
 
     // 4-connectivity: diagonals are separate
-    let label_map_4 = label_map_from_mask_with_connectivity(&mask, Connectivity::Four);
+    let label_map_4 = LabelMap::from_mask(&mask, Connectivity::Four);
     assert_eq!(label_map_4.num_labels(), 3);
 
     // 8-connectivity: diagonals are connected
-    let label_map_8 = label_map_from_mask_with_connectivity(&mask, Connectivity::Eight);
+    let label_map_8 = LabelMap::from_mask(&mask, Connectivity::Eight);
     assert_eq!(label_map_8.num_labels(), 1);
 }
 
@@ -63,11 +63,11 @@ fn checkerboard_8conn() {
     let mask = BitBuffer2::from_slice(Size2us::new(4, 4), &mask_data);
 
     // 4-connectivity: each pixel is isolated
-    let label_map_4 = label_map_from_mask_with_connectivity(&mask, Connectivity::Four);
+    let label_map_4 = LabelMap::from_mask(&mask, Connectivity::Four);
     assert_eq!(label_map_4.num_labels(), 8);
 
     // 8-connectivity: all are connected diagonally
-    let label_map_8 = label_map_from_mask_with_connectivity(&mask, Connectivity::Eight);
+    let label_map_8 = LabelMap::from_mask(&mask, Connectivity::Eight);
     assert_eq!(label_map_8.num_labels(), 1);
 }
 
@@ -95,11 +95,11 @@ fn adjacent_runs_diagonal() {
     // 4-connectivity: no overlap (run1 ends at 3, run2 starts at 3)
     // Actually, run1=[0,3), run2=[3,6), so they share x=3? No, run1.end=3 exclusive
     // So run1 covers x=0,1,2 and run2 covers x=3,4,5 - no vertical overlap
-    let label_map_4 = label_map_from_mask_with_connectivity(&mask, Connectivity::Four);
+    let label_map_4 = LabelMap::from_mask(&mask, Connectivity::Four);
     assert_eq!(label_map_4.num_labels(), 2);
 
     // 8-connectivity: diagonal touch (x=2 in row0 touches x=3 in row1)
-    let label_map_8 = label_map_from_mask_with_connectivity(&mask, Connectivity::Eight);
+    let label_map_8 = LabelMap::from_mask(&mask, Connectivity::Eight);
     assert_eq!(label_map_8.num_labels(), 1);
 }
 
@@ -127,10 +127,10 @@ fn l_shape_diagonal_gap() {
 
     let mask = BitBuffer2::from_slice(Size2us::new(width, height), &mask_data);
 
-    let label_map_4 = label_map_from_mask_with_connectivity(&mask, Connectivity::Four);
+    let label_map_4 = LabelMap::from_mask(&mask, Connectivity::Four);
     assert_eq!(label_map_4.num_labels(), 3);
 
-    let label_map_8 = label_map_from_mask_with_connectivity(&mask, Connectivity::Eight);
+    let label_map_8 = LabelMap::from_mask(&mask, Connectivity::Eight);
     assert_eq!(label_map_8.num_labels(), 1);
 }
 
@@ -154,11 +154,11 @@ fn parallel_strip_boundary_diagonal() {
     let mask = BitBuffer2::from_slice(Size2us::new(width, height), &mask_data);
 
     // 4-connectivity: each pixel is separate
-    let label_map_4 = label_map_from_mask_with_connectivity(&mask, Connectivity::Four);
+    let label_map_4 = LabelMap::from_mask(&mask, Connectivity::Four);
     assert_eq!(label_map_4.num_labels(), 150);
 
     // 8-connectivity: all pixels form one diagonal line
-    let label_map_8 = label_map_from_mask_with_connectivity(&mask, Connectivity::Eight);
+    let label_map_8 = LabelMap::from_mask(&mask, Connectivity::Eight);
     assert_eq!(label_map_8.num_labels(), 1);
 }
 
@@ -173,11 +173,11 @@ fn corner_touch_only() {
     let mask = BitBuffer2::from_slice(Size2us::new(2, 2), &mask_data);
 
     // 4-conn: separate
-    let label_map_4 = label_map_from_mask_with_connectivity(&mask, Connectivity::Four);
+    let label_map_4 = LabelMap::from_mask(&mask, Connectivity::Four);
     assert_eq!(label_map_4.num_labels(), 2);
 
     // 8-conn: connected
-    let label_map_8 = label_map_from_mask_with_connectivity(&mask, Connectivity::Eight);
+    let label_map_8 = LabelMap::from_mask(&mask, Connectivity::Eight);
     assert_eq!(label_map_8.num_labels(), 1);
 }
 
@@ -190,7 +190,7 @@ fn horizontal_still_connected() {
     mask_data[1 * 5 + 2] = true;
     let mask = BitBuffer2::from_slice(Size2us::new(5, 3), &mask_data);
 
-    let label_map_8 = label_map_from_mask_with_connectivity(&mask, Connectivity::Eight);
+    let label_map_8 = LabelMap::from_mask(&mask, Connectivity::Eight);
     assert_eq!(label_map_8.num_labels(), 1);
 }
 
@@ -203,6 +203,6 @@ fn vertical_still_connected() {
     mask_data[2 * 3 + 1] = true;
     let mask = BitBuffer2::from_slice(Size2us::new(3, 5), &mask_data);
 
-    let label_map_8 = label_map_from_mask_with_connectivity(&mask, Connectivity::Eight);
+    let label_map_8 = LabelMap::from_mask(&mask, Connectivity::Eight);
     assert_eq!(label_map_8.num_labels(), 1);
 }

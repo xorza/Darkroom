@@ -15,7 +15,6 @@ use crate::stacking::star_detection::deblend::local_maxima::{
     deblend_local_maxima, find_local_maxima,
 };
 use crate::stacking::star_detection::labeling::LabelMap;
-use crate::stacking::star_detection::labeling::internals::label_map_from_mask_with_connectivity;
 use crate::testing::synthetic::fixtures::cluster_field;
 use imaginarium::Buffer2;
 
@@ -34,7 +33,7 @@ fn create_components_from_pixels(
         }
     }
 
-    let labels = label_map_from_mask_with_connectivity(&mask, Connectivity::Four);
+    let labels = LabelMap::from_mask(&mask, Connectivity::Four);
     let num_labels = labels.num_labels();
 
     let mut components = Vec::with_capacity(num_labels);

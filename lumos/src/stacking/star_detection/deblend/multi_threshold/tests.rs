@@ -7,7 +7,7 @@ use crate::stacking::star_detection::deblend::internals::{
     TestComponent, deblend_multi_threshold_test, make_test_component,
 };
 use crate::stacking::star_detection::deblend::multi_threshold::*;
-use crate::stacking::star_detection::labeling::internals::label_map_from_raw;
+use crate::stacking::star_detection::labeling::LabelMap;
 use crate::testing::synthetic::star_profiles::{StarProfile, SyntheticStar};
 use glam::Vec2;
 
@@ -218,7 +218,7 @@ fn test_close_peaks_merge() {
 fn test_empty_component() {
     let pixels = Buffer2::new_filled(10, 10, 0.0f32);
     let labels_buf = Buffer2::new_filled(10, 10, 0u32);
-    let labels = label_map_from_raw(labels_buf, 0);
+    let labels = LabelMap::from_raw(labels_buf, 0);
     let data = ComponentData {
         bbox: URect::default(),
         label: 1,
@@ -617,7 +617,7 @@ fn test_single_pixel_component() {
     pixels[(5, 5)] = 1.0;
     labels_buf[(5, 5)] = 1;
 
-    let labels = label_map_from_raw(labels_buf, 1);
+    let labels = LabelMap::from_raw(labels_buf, 1);
     let data = ComponentData {
         bbox: URect::new(Vec2us::new(5, 5), Vec2us::new(6, 6)),
         label: 1,
@@ -651,7 +651,7 @@ fn test_flat_profile_no_deblend() {
         }
     }
 
-    let labels = label_map_from_raw(labels_buf, 1);
+    let labels = LabelMap::from_raw(labels_buf, 1);
     let data = ComponentData {
         bbox,
         label: 1,
@@ -717,7 +717,7 @@ fn test_zero_floor_pixel_does_not_prevent_deblending() {
         }
     }
 
-    let labels = label_map_from_raw(labels_buf, 1);
+    let labels = LabelMap::from_raw(labels_buf, 1);
     let data = ComponentData {
         bbox,
         label: 1,

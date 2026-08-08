@@ -34,7 +34,7 @@ fn long_horizontal_run() {
     }
 
     let mask = BitBuffer2::from_slice(Size2us::new(width, height), &mask_data);
-    let label_map = label_map_from_mask_with_connectivity(&mask, Connectivity::Four);
+    let label_map = LabelMap::from_mask(&mask, Connectivity::Four);
 
     assert_eq!(label_map.num_labels(), 1);
     let label = label_map[2 * width + 10];
@@ -69,7 +69,7 @@ fn multiple_runs_per_row() {
     }
 
     let mask = BitBuffer2::from_slice(Size2us::new(width, height), &mask_data);
-    let label_map = label_map_from_mask_with_connectivity(&mask, Connectivity::Four);
+    let label_map = LabelMap::from_mask(&mask, Connectivity::Four);
 
     assert_eq!(label_map.num_labels(), 3);
 
@@ -103,7 +103,7 @@ fn runs_merging_vertically() {
     }
 
     let mask = BitBuffer2::from_slice(Size2us::new(width, height), &mask_data);
-    let label_map = label_map_from_mask_with_connectivity(&mask, Connectivity::Four);
+    let label_map = LabelMap::from_mask(&mask, Connectivity::Four);
 
     // Should be single component due to vertical overlap
     assert_eq!(label_map.num_labels(), 1);
@@ -134,7 +134,7 @@ fn runs_not_merging_no_overlap() {
     }
 
     let mask = BitBuffer2::from_slice(Size2us::new(width, height), &mask_data);
-    let label_map = label_map_from_mask_with_connectivity(&mask, Connectivity::Four);
+    let label_map = LabelMap::from_mask(&mask, Connectivity::Four);
 
     // Should be two separate components
     assert_eq!(label_map.num_labels(), 2);
@@ -171,7 +171,7 @@ fn complex_run_pattern() {
     }
 
     let mask = BitBuffer2::from_slice(Size2us::new(width, height), &mask_data);
-    let label_map = label_map_from_mask_with_connectivity(&mask, Connectivity::Four);
+    let label_map = LabelMap::from_mask(&mask, Connectivity::Four);
 
     // Row 0 left connects to row 1 left (overlap at x=2)
     // Row 1 left connects to row 2 (overlap at x=4)
@@ -204,7 +204,7 @@ fn all_ones_word() {
     }
 
     let mask = BitBuffer2::from_slice(Size2us::new(width, height), &mask_data);
-    let label_map = label_map_from_mask_with_connectivity(&mask, Connectivity::Four);
+    let label_map = LabelMap::from_mask(&mask, Connectivity::Four);
 
     assert_eq!(label_map.num_labels(), 1);
     let label = label_map[1 * width + 0];
@@ -226,7 +226,7 @@ fn alternating_bits_in_word() {
     }
 
     let mask = BitBuffer2::from_slice(Size2us::new(width, height), &mask_data);
-    let label_map = label_map_from_mask_with_connectivity(&mask, Connectivity::Four);
+    let label_map = LabelMap::from_mask(&mask, Connectivity::Four);
 
     // Each pixel is isolated (4-connectivity)
     assert_eq!(label_map.num_labels(), 32);
@@ -250,7 +250,7 @@ fn strip_boundary_run_overlap() {
     }
 
     let mask = BitBuffer2::from_slice(Size2us::new(width, height), &mask_data);
-    let label_map = label_map_from_mask_with_connectivity(&mask, Connectivity::Four);
+    let label_map = LabelMap::from_mask(&mask, Connectivity::Four);
 
     assert_eq!(label_map.num_labels(), 1);
 
@@ -285,7 +285,7 @@ fn empty_rows_between_runs() {
     }
 
     let mask = BitBuffer2::from_slice(Size2us::new(width, height), &mask_data);
-    let label_map = label_map_from_mask_with_connectivity(&mask, Connectivity::Four);
+    let label_map = LabelMap::from_mask(&mask, Connectivity::Four);
 
     // Should be two separate components
     assert_eq!(label_map.num_labels(), 2);

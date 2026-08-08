@@ -65,6 +65,18 @@ fn test_from_bayerpat() {
 }
 
 #[test]
+fn test_from_filters() {
+    // Standard LibRaw encodings: two bits per position, the 2x2 block repeated across the word.
+    assert_eq!(CfaPattern::from_filters(0x94949494), Some(CfaPattern::Rggb));
+    assert_eq!(CfaPattern::from_filters(0x16161616), Some(CfaPattern::Bggr));
+    assert_eq!(CfaPattern::from_filters(0x61616161), Some(CfaPattern::Grbg));
+    assert_eq!(CfaPattern::from_filters(0x49494949), Some(CfaPattern::Gbrg));
+    // filters == 0 is monochrome / no CFA; exotic patterns match nothing either.
+    assert_eq!(CfaPattern::from_filters(0), None);
+    assert_eq!(CfaPattern::from_filters(0x12345678), None);
+}
+
+#[test]
 fn test_flip_vertical() {
     // Flip swaps rows: RGGB row0=[R,G] row1=[G,B] → row0=[G,B] row1=[R,G] = GBRG
     assert_eq!(CfaPattern::Rggb.flip_vertical(), CfaPattern::Gbrg);

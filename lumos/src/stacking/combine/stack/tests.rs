@@ -8,7 +8,6 @@ use crate::io::image::linear::LinearImage;
 use crate::io::image::linear_pixels::LinearPixels;
 use crate::math::size2us::Size2us;
 use crate::math::statistics::MedianMad;
-use crate::stacking::combine::cache::internals::cache_from_images;
 use crate::stacking::combine::cache::tests::make_test_cache;
 use crate::stacking::combine::cache_config::CacheConfig;
 use crate::stacking::combine::config::{Normalization, SmallN};
@@ -56,7 +55,7 @@ fn make_cfa_stack_cache(
             image
         })
         .collect();
-    cache_from_images(images, normalization)
+    FrameCache::from_images(images, normalization)
 }
 
 #[test]
@@ -648,7 +647,7 @@ fn cancelled_combine_reports_cancellation_from_either_exit() {
         ..Default::default()
     };
 
-    let without_sigmas = cache_from_images(
+    let without_sigmas = FrameCache::from_images(
         vec![
             LinearImage::from_pixels(dimensions, vec![1.0; 2]),
             LinearImage::from_pixels(dimensions, vec![3.0; 2]),
@@ -1052,7 +1051,7 @@ fn combining_a_cache_against_a_different_normalization_is_refused() {
     // a config naming a different normalization would be silently ignored rather than
     // applied. The three entry points always pass the config they built with; this guards the
     // next caller that does not.
-    let cache = cache_from_images(
+    let cache = FrameCache::from_images(
         vec![
             crate::testing::make_cfa(Size2us::new(2, 1), vec![0.4; 2], CfaType::Mono),
             crate::testing::make_cfa(Size2us::new(2, 1), vec![0.2; 2], CfaType::Mono),

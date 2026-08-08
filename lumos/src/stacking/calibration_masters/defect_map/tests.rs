@@ -2,7 +2,7 @@ use crate::io::image::cfa::QUANTIZATION_SIGMA_PER_STEP;
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 use crate::stacking::calibration_masters::defect_map::*;
-use crate::stacking::combine::cache::internals::cache_from_images;
+use crate::stacking::combine::cache::FrameCache;
 use crate::stacking::combine::config::{Normalization, StackConfig};
 use crate::stacking::combine::stack::run_stacking;
 
@@ -229,7 +229,7 @@ fn cfa_stack_propagates_raw_quantization_into_hot_detection() {
             image
         })
         .collect();
-    let cache = cache_from_images(images, Normalization::None);
+    let cache = FrameCache::from_images(images, Normalization::None);
 
     let product =
         run_stacking(&cache, &StackConfig::default()).expect("this cache is never cancelled");
