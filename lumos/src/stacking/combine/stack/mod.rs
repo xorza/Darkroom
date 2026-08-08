@@ -6,8 +6,9 @@
 use std::path::Path;
 use std::sync::atomic::{AtomicU32, Ordering};
 
+use crate::io::image::image_dimensions::ImageDimensions;
+use crate::io::image::image_metadata::ImageMetadata;
 use crate::io::image::linear::LinearImage;
-use crate::io::image::{ImageDimensions, ImageMetadata};
 use common::CancelToken;
 use imaginarium::Buffer2;
 

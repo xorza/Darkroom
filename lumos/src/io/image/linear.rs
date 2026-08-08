@@ -4,15 +4,18 @@ use std::path::Path;
 use imaginarium::{Buffer2, ChannelCount, ChannelType, Image};
 use rayon::prelude::*;
 
-use crate::io::image::LoadContext;
 use crate::io::image::error::ImageError;
 use crate::io::image::fits::decode as fits_decode;
+use crate::io::image::image_dimensions::ImageDimensions;
+use crate::io::image::image_metadata::ImageMetadata;
+use crate::io::image::image_provenance::{
+    ColorProvenance, DecoderProvenance, DemosaicProvenance, ImageProvenance, TransferProvenance,
+};
 use crate::io::image::linear_pixels::LinearPixels;
+use crate::io::image::load_context::LoadContext;
 use crate::io::image::{
-    ColorProvenance, DecoderProvenance, DemosaicProvenance, FITS_EXTENSIONS, ImageDimensions,
-    ImageMetadata, ImageProvenance, STANDARD_IMAGE_EXTENSIONS, TransferProvenance,
-    f32_target_format, file_extension, read_standard_image, scientific_rejection,
-    standard_container,
+    FITS_EXTENSIONS, STANDARD_IMAGE_EXTENSIONS, f32_target_format, file_extension,
+    read_standard_image, scientific_rejection, standard_container,
 };
 use crate::io::raw;
 use crate::stacking::frame_store::StackableImage;

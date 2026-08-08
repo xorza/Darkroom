@@ -12,11 +12,12 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 use crate::concurrency;
-use crate::io::image::LoadContext;
 use crate::io::image::cfa::CfaImage;
 use crate::io::image::error::ImageError;
+use crate::io::image::image_dimensions::ImageDimensions;
+use crate::io::image::image_metadata::ImageMetadata;
 use crate::io::image::linear::LinearImage;
-use crate::io::image::{ImageDimensions, ImageMetadata};
+use crate::io::image::load_context::LoadContext;
 use crate::memory::{decode_transient_bytes, fits_in_memory, frame_bytes, load_concurrency};
 use crate::stacking::combine::cache_config::CacheConfig;
 use crate::stacking::combine::config::Normalization;

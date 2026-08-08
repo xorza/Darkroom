@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use thiserror::Error;
 
 use crate::error::InvalidConfigField;
-use crate::io::image::ImageDimensions;
+use crate::io::image::image_dimensions::ImageDimensions;
 
 /// Invalid [`crate::DrizzleConfig`] parameters.
 ///

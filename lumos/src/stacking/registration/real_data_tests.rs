@@ -11,8 +11,8 @@ use std::time::Instant;
 use ::quickbench::quick_bench;
 use common::file_utils;
 
-use crate::io::image::LoadContext;
 use crate::io::image::linear::LinearImage;
+use crate::io::image::load_context::LoadContext;
 use crate::math::size2us::Size2us;
 use crate::stacking::registration::config::Config as RegistrationConfig;
 use crate::stacking::registration::distortion::sip::{SipConfig, SipPolynomial};

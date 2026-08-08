@@ -6,9 +6,9 @@ use common::CancelToken;
 use glam::DVec2;
 use imaginarium::Buffer2;
 
-use crate::io::image::ImageDimensions;
 use crate::io::image::cfa::CfaType;
 use crate::io::image::fits::cfa::save_cfa_fits;
+use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::linear::LinearImage;
 use crate::stacking::calibration_masters::CalibrationMasters;
 use crate::stacking::combine::config::{CombineMethod, StackConfig};

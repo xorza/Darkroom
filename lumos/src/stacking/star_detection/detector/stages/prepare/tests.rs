@@ -1,4 +1,4 @@
-use crate::io::image::ImageDimensions;
+use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::linear::LinearImage;
 use crate::math::size2us::Size2us;
 use crate::stacking::star_detection::detector::stages::prepare::*;

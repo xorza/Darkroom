@@ -1,7 +1,7 @@
 use common::CancelToken;
 use imaginarium::Buffer2;
 
-use crate::io::image::ImageDimensions;
+use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::linear::LinearImage;
 use crate::math::statistics::MedianMad;
 use crate::stacking::combine::config::Normalization;

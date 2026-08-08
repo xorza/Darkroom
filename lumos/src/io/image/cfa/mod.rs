@@ -8,13 +8,15 @@ use std::path::Path;
 
 use rayon::prelude::*;
 
-use crate::io::image::LoadContext;
 use crate::io::image::error::ImageError;
 use crate::io::image::fits::{cfa as fits_cfa, decode as fits_decode};
+use crate::io::image::image_dimensions::ImageDimensions;
+use crate::io::image::image_metadata::ImageMetadata;
+use crate::io::image::image_provenance::{ColorProvenance, DemosaicProvenance};
 use crate::io::image::linear::LinearImage;
+use crate::io::image::load_context::LoadContext;
 use crate::io::image::{
-    ColorProvenance, DemosaicProvenance, FITS_EXTENSIONS, ImageDimensions, ImageMetadata,
-    STANDARD_IMAGE_EXTENSIONS, file_extension, scientific_rejection,
+    FITS_EXTENSIONS, STANDARD_IMAGE_EXTENSIONS, file_extension, scientific_rejection,
 };
 use crate::io::raw;
 use crate::io::raw::demosaic::bayer::CfaPattern;

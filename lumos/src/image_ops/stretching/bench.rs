@@ -27,7 +27,7 @@ fn scalar_asinh(red: &mut [f32], green: &mut [f32], blue: &mut [f32], curve: &As
         blue[i] = out.b;
     }
 }
-use crate::io::image::ImageDimensions;
+use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::linear::LinearImage;
 
 const W: usize = 3000;

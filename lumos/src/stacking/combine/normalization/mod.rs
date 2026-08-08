@@ -4,7 +4,7 @@ use arrayvec::ArrayVec;
 use common::CancelToken;
 use rayon::prelude::*;
 
-use crate::io::image::ImageDimensions;
+use crate::io::image::image_dimensions::ImageDimensions;
 use crate::math::statistics::{MedianMad, mad_to_sigma, median_f32_mut};
 use crate::stacking::combine::MIN_CONTRIBUTING_COVERAGE;
 use crate::stacking::combine::config::Normalization;

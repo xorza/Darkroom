@@ -14,12 +14,12 @@ use crate::io::image::fits::options::{FitsChecksumPolicy, FitsCubeInterpretation
 use crate::io::image::fits::provenance::{
     FitsChecksumProvenance, FitsChecksumState, FitsTransferProvenance,
 };
+use crate::io::image::image_metadata::{BitPix, ImageMetadata};
+use crate::io::image::image_provenance::{ColorProvenance, ImageProvenance, TransferProvenance};
 use crate::io::image::linear::LinearImage;
 use crate::io::image::linear_pixels::LinearPixels;
-use crate::io::image::{
-    BitPix, ColorProvenance, ImageMetadata, ImageProvenance, LoadContext, TransferProvenance,
-    scientific_rejection,
-};
+use crate::io::image::load_context::LoadContext;
+use crate::io::image::scientific_rejection;
 use crate::io::raw::demosaic::DemosaicError;
 
 mod pixels;

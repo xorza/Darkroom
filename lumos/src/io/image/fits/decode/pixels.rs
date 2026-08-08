@@ -16,11 +16,12 @@ use crate::io::image::fits::metadata::{read_metadata, read_text};
 use crate::io::image::fits::provenance::{
     FitsChecksumProvenance, FitsHduProvenance, FitsTransferProvenance,
 };
-use crate::io::image::linear_pixels::LinearPixels;
-use crate::io::image::{
-    ColorProvenance, DecoderProvenance, DemosaicProvenance, ImageProvenance, LoadContext,
-    SourceContainer, TransferProvenance,
+use crate::io::image::image_provenance::{
+    ColorProvenance, DecoderProvenance, DemosaicProvenance, ImageProvenance, SourceContainer,
+    TransferProvenance,
 };
+use crate::io::image::linear_pixels::LinearPixels;
+use crate::io::image::load_context::LoadContext;
 
 pub(super) fn read_stream_hdu(
     reader: &mut StreamReader<File>,

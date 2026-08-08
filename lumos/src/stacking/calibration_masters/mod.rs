@@ -18,9 +18,9 @@ use std::path::Path;
 
 use common::CancelToken;
 
-use crate::io::image::LoadContext;
 use crate::io::image::cfa::{CfaFrameInfo, CfaImage, CfaType};
 use crate::io::image::error::ImageError;
+use crate::io::image::load_context::LoadContext;
 use crate::memory::fits_in_memory;
 use crate::stacking::combine::cache::FrameCache;
 use crate::stacking::combine::config::StackConfig;

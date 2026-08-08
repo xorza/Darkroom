@@ -2,7 +2,8 @@ use fits_well::header::Header;
 
 use crate::io::image::cfa::{CfaImage, CfaType};
 use crate::io::image::fits::provenance::FitsTransferProvenance;
-use crate::io::image::{BitPix, ImageMetadata, ImageProvenance, TransferProvenance};
+use crate::io::image::image_metadata::{BitPix, ImageMetadata};
+use crate::io::image::image_provenance::{ImageProvenance, TransferProvenance};
 use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::io::raw::demosaic::xtrans::XTransPattern;
 

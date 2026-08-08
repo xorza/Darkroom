@@ -8,7 +8,8 @@ use fits_well::io::{BLOCK_SIZE, Hdu, HduKind};
 use crate::io::image::error::ImageError;
 use crate::io::image::fits::error::{fits_err, fits_unsupported};
 use crate::io::image::fits::options::FitsCubeInterpretation;
-use crate::io::image::{BitPix, ImageDimensions};
+use crate::io::image::image_dimensions::ImageDimensions;
+use crate::io::image::image_metadata::BitPix;
 
 const FITS_DECODE_CHUNK_BYTES: usize = 4 * 1024 * 1024;
 

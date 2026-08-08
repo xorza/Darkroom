@@ -545,7 +545,7 @@ fn test_warp_rgb() {
 
 #[test]
 fn test_warp_preserves_output_metadata() {
-    use crate::io::image::ImageMetadata;
+    use crate::io::image::image_metadata::ImageMetadata;
 
     let pixels = star_field(Size2us::new(256, 256), 30, 11111)
         .image

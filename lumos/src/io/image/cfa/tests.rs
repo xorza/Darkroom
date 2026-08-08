@@ -1,6 +1,6 @@
-use crate::io::image::LoadContext;
 use crate::io::image::cfa::*;
 use crate::io::image::error::ImageError;
+use crate::io::image::load_context::LoadContext;
 use crate::io::raw::demosaic::DemosaicKind;
 use crate::io::raw::demosaic::xtrans::internals::test_pattern_array;
 use crate::testing::make_cfa;

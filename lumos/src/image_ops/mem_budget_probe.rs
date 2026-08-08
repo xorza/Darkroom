@@ -35,7 +35,7 @@
 use std::io::{self, Write};
 use std::time::Instant;
 
-use crate::io::image::ImageDimensions;
+use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::linear::LinearImage;
 use crate::testing::mem_probe::{MB, RssSampler, env_parse, measured};
 use crate::{Denoise, ExtractBackground, Stretch};

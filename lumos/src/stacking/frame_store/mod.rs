@@ -12,10 +12,11 @@ use serde::{Deserialize, Serialize};
 
 use common::file_utils;
 
-use crate::io::image::LoadContext;
 use crate::io::image::error::ImageError;
+use crate::io::image::image_dimensions::ImageDimensions;
+use crate::io::image::image_metadata::ImageMetadata;
 use crate::io::image::linear::LinearImage;
-use crate::io::image::{ImageDimensions, ImageMetadata};
+use crate::io::image::load_context::LoadContext;
 use crate::math::statistics::{MedianMad, mad_f32_with_scratch, median_f32_mut};
 
 /// Failure while creating or accessing disk-backed frame storage.

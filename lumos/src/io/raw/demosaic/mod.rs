@@ -9,7 +9,7 @@ pub(crate) mod xtrans;
 
 use std::mem::size_of;
 
-use crate::io::image::ImageDimensions;
+use crate::io::image::image_dimensions::ImageDimensions;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct DemosaicMemory {
@@ -81,7 +81,7 @@ pub(crate) fn interleave_planes(planes: [Vec<f32>; 3]) -> Vec<f32> {
 
 #[cfg(test)]
 mod memory_tests {
-    use crate::io::image::ImageDimensions;
+    use crate::io::image::image_dimensions::ImageDimensions;
     use crate::io::raw::demosaic::DemosaicKind;
 
     #[test]

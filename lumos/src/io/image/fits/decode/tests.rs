@@ -14,7 +14,9 @@ use crate::io::image::fits::options::{
     FitsChecksumPolicy, FitsCubeInterpretation, FitsHduSelector, FitsLoadOptions,
 };
 use crate::io::image::fits::provenance::{FitsChecksumState, FitsTransferProvenance};
-use crate::io::image::{ImageDimensions, LoadContext, TransferProvenance};
+use crate::io::image::image_dimensions::ImageDimensions;
+use crate::io::image::image_provenance::TransferProvenance;
+use crate::io::image::load_context::LoadContext;
 use crate::testing::ScratchDirectory;
 
 fn load_context() -> LoadContext {

@@ -9,7 +9,7 @@ use common::CancelToken;
 use quickbench::quick_bench;
 use std::hint::black_box;
 
-use crate::io::image::ImageDimensions;
+use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::linear::LinearImage;
 use crate::math::size2us::Size2us;
 use crate::stacking::combine::config::StackConfig;

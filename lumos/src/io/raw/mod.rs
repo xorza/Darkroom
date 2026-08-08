@@ -24,12 +24,14 @@ use crate::math::vec2us::Vec2us;
 use rayon::prelude::*;
 
 use crate::io::image::cfa::{CfaFrameInfo, CfaImage, CfaType, QUANTIZATION_SIGMA_PER_STEP};
+use crate::io::image::image_dimensions::ImageDimensions;
+use crate::io::image::image_metadata::{BitPix, ImageMetadata};
+use crate::io::image::image_provenance::{
+    ColorProvenance, DecoderProvenance, DemosaicProvenance, ImageProvenance, SourceContainer,
+    TransferProvenance,
+};
 use crate::io::image::linear::LinearImage;
 use crate::io::image::sensor::{SensorType, detect_sensor_type};
-use crate::io::image::{
-    BitPix, ColorProvenance, DecoderProvenance, DemosaicProvenance, ImageDimensions, ImageMetadata,
-    ImageProvenance, SourceContainer, TransferProvenance,
-};
 use common::CancelToken;
 use demosaic::bayer::{BayerImage, CfaPattern, rcd};
 use demosaic::xtrans;

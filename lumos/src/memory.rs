@@ -5,7 +5,7 @@
 //! resident-vs-spilled tier decision. Every caller sizes its work against this file rather than
 //! against `available_memory` directly.
 
-use crate::io::image::ImageDimensions;
+use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::raw::demosaic::DemosaicMemory;
 use crate::math::size2us::Size2us;
 
