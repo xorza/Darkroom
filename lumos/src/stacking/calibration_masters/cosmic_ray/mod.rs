@@ -114,6 +114,9 @@ fn reject_mono_buffer(data: &mut Buffer2<f32>, config: &CosmicRayConfig) -> usiz
         return 0;
     }
     let mut mask = vec![false; size.pixel_count()];
+    // Median scratch, reused across iterations. Each is written in full before it is read, so the
+    // carried-over contents never matter — only the capacity does.
+    let (mut m3, mut m37, mut m5, mut s_med5) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
 
     for _ in 0..config.niter {
         let pix = data.pixels();
@@ -124,8 +127,8 @@ fn reject_mono_buffer(data: &mut Buffer2<f32>, config: &CosmicRayConfig) -> usiz
 
         // Object fine structure F = median₃(I) − median₇(median₃(I)); large for real sources, ~0 at
         // a CR (median₃ already erased the spike).
-        let m3 = median_window(pix, size, 1);
-        let m37 = median_window(&m3, size, 3);
+        median_window_into(pix, size, 1, &mut m3);
+        median_window_into(&m3, size, 3, &mut m37);
         let f: Vec<f32> = m3
             .iter()
             .zip(&m37)
@@ -133,14 +136,14 @@ fn reject_mono_buffer(data: &mut Buffer2<f32>, config: &CosmicRayConfig) -> usiz
             .collect();
 
         // Significance S = L⁺/(2N), then S' = S − median₅(S) to strip smooth large-scale structure.
-        let m5 = median_window(pix, size, 2);
+        median_window_into(pix, size, 2, &mut m5);
         let noise = noise_map(pix, &m5, &config.noise);
         let s: Vec<f32> = lplus
             .iter()
             .zip(&noise)
             .map(|(&l, &nz)| l / (2.0 * nz))
             .collect();
-        let s_med5 = median_window(&s, size, 2);
+        median_window_into(&s, size, 2, &mut s_med5);
         let sprime: Vec<f32> = s.iter().zip(&s_med5).map(|(&a, &b)| a - b).collect();
 
         let flags = detect_and_grow(&sprime, &f, &noise, &mask, size, config);
@@ -207,11 +210,27 @@ fn laplacian_plus(sub: &[f32], size: Size2us) -> Vec<f32> {
     lplus
 }
 
-/// Median over a `(2r+1)²` window, edge-clamped. Scalar, row-parallel.
-fn median_window(data: &[f32], size: Size2us, r: usize) -> Vec<f32> {
+/// Median over a `(2r+1)²` window, replicating the border pixel for out-of-bounds coordinates so
+/// every output sees a full window. Scalar, row-parallel.
+///
+/// Deliberately not [`median_filter_3x3`](crate::stacking::star_detection::median_filter), even
+/// though `r == 1` describes the same 3×3 median: that one *shrinks* its window at the border to
+/// the 4 or 6 in-bounds samples where this one replicates. L.A.Cosmic differences two of these
+/// windows against each other — the fine structure is `median₃ − median₇(median₃)` — so every
+/// radius here has to share one border convention. Feeding a shrunk `median₃` into that
+/// difference while `median₇` stayed replicated would corrupt the border in a way neither
+/// convention does alone. Replication is also the usual choice for astronomical median filtering.
+///
+/// The two *could* still share an interior kernel: `median_filter`'s `median_filter_row_simd`
+/// takes three rows and fills the interior, knowing nothing about edges. That is worth doing
+/// behind a cosmic-ray benchmark rather than before one — it couples two subsystems to accelerate
+/// one of the four windows below (areas 9, 49, 25, 25), and an `r == 1` fast path would have to
+/// be proven bit-identical to this general one or the detection changes.
+fn median_window_into(data: &[f32], size: Size2us, r: usize, out: &mut Vec<f32>) {
     let ri = r as isize;
     let (wi, hi) = (size.width as isize, size.height as isize);
-    let mut out = vec![0.0f32; size.pixel_count()];
+    // Every element is written below, so only the length matters.
+    out.resize(size.pixel_count(), 0.0);
     out.par_chunks_mut(size.width)
         .enumerate()
         .for_each(|(y, row)| {
@@ -228,7 +247,6 @@ fn median_window(data: &[f32], size: Size2us, r: usize) -> Vec<f32> {
                 *o = median_f32_mut(&mut buf);
             }
         });
-    out
 }
 
 /// Per-pixel noise `N` from the median-filtered (CR-free) signal estimate `m5`.
