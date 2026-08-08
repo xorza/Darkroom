@@ -21,7 +21,7 @@ use crate::stacking::pipeline::detector_pool::DetectorPool;
 use crate::stacking::pipeline::frame::DetectedFrame;
 use crate::stacking::pipeline::result::{AlignStackResult, Error};
 use crate::stacking::pipeline::tier::FrameTier;
-use crate::stacking::progress::ProgressCallback;
+use crate::stacking::progress::{ProgressCallback, StackingStage};
 
 /// Calibrate, align, and stack camera-RAW or mosaic-FITS light frames end to end.
 ///
@@ -101,6 +101,7 @@ pub fn calibrate_align_stack<P: AsRef<Path> + Sync>(
             let image = tier.hold(&format!("calib_{index}"), image)?;
             let n = done.fetch_add(1, Ordering::Relaxed) + 1;
             log_detection(n, total, &result);
+            progress.report(n, total, StackingStage::Calibrating);
             Ok(DetectedFrame {
                 image,
                 stars: result.stars,

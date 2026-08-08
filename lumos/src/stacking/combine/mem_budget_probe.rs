@@ -176,7 +176,7 @@ fn master_stack_memory_probe() -> io::Result<()> {
                 );
                 io::stdout().flush().ok();
             }
-            StackingStage::Processing => {
+            StackingStage::Combining => {
                 combining.open();
                 combine_start_us
                     .compare_exchange(
@@ -187,6 +187,11 @@ fn master_stack_memory_probe() -> io::Result<()> {
                     )
                     .ok();
             }
+            // This probe drives `stack`, which loads and combines and nothing else.
+            StackingStage::Calibrating
+            | StackingStage::Detecting
+            | StackingStage::Registering
+            | StackingStage::Drizzling => {}
         })
     };
 
