@@ -401,97 +401,33 @@ fn test_mad_with_scratch_two_elements() {
     assert!((mad - 3.0).abs() < 1e-6);
 }
 
+/// Stack scratch must give the same answer as heap scratch — the property the separate `ArrayVec`
+/// entry point used to exist to provide, now carried by the two `DeviationScratch` impls.
 #[test]
-fn test_sigma_clipped_arrayvec_basic() {
+fn test_sigma_clipped_is_agnostic_to_where_the_scratch_lives() {
+    let base: Vec<f32> = vec![1.0, 2.0, 3.0, 100.0, 4.0, 5.0, 6.0, 200.0];
+
+    let mut heap_values = base.clone();
+    let mut heap_scratch: Vec<f32> = Vec::new();
+    let heap = ClippedStats::sigma_clipped(&mut heap_values, &mut heap_scratch, 3.0, 3);
+
+    let mut stack_values = base.clone();
+    let mut stack_scratch: arrayvec::ArrayVec<f32, 16> = arrayvec::ArrayVec::new();
+    let stack = ClippedStats::sigma_clipped(&mut stack_values, &mut stack_scratch, 3.0, 3);
+
+    assert_eq!(heap.median, stack.median);
+    assert_eq!(heap.sigma, stack.sigma);
+    assert_eq!(heap.mean, stack.mean);
+}
+
+/// A heap scratch grows to fit; a fixed one cannot, and says so while sizing rather than
+/// misbehaving deeper in the clip.
+#[test]
+#[should_panic(expected = "capacity")]
+fn test_sigma_clipped_stack_scratch_too_small_panics() {
     let mut values = vec![1.0f32, 2.0, 3.0, 4.0, 5.0];
-    let mut deviations: arrayvec::ArrayVec<f32, 16> = arrayvec::ArrayVec::new();
-    let ClippedStats { median, sigma, .. } =
-        ClippedStats::sigma_clipped_arrayvec(&mut values, &mut deviations, 3.0, 3);
-    assert!((median - 3.0).abs() < 0.1);
-    assert!(sigma > 0.0);
-}
-
-#[test]
-#[should_panic(expected = "exceeds deviations capacity")]
-fn test_sigma_clipped_arrayvec_overflow_panics() {
-    // values.len() (5) > N (3): the scratch can't hold the deviations. Verify the explicit
-    // capacity assert fires instead of an opaque out-of-bounds panic deeper in.
-    let mut values = vec![1.0f32, 2.0, 3.0, 4.0, 5.0];
-    let mut deviations: arrayvec::ArrayVec<f32, 3> = arrayvec::ArrayVec::new();
-    let _ = ClippedStats::sigma_clipped_arrayvec(&mut values, &mut deviations, 3.0, 2);
-}
-
-#[test]
-fn test_sigma_clipped_arrayvec_empty() {
-    let mut values: Vec<f32> = vec![];
-    let mut deviations: arrayvec::ArrayVec<f32, 16> = arrayvec::ArrayVec::new();
-    let ClippedStats { median, sigma, .. } =
-        ClippedStats::sigma_clipped_arrayvec(&mut values, &mut deviations, 3.0, 3);
-    assert_eq!(median, 0.0);
-    assert_eq!(sigma, 0.0);
-}
-
-#[test]
-fn test_sigma_clipped_arrayvec_single() {
-    let mut values = vec![42.0f32];
-    let mut deviations: arrayvec::ArrayVec<f32, 16> = arrayvec::ArrayVec::new();
-    let ClippedStats { median, sigma, .. } =
-        ClippedStats::sigma_clipped_arrayvec(&mut values, &mut deviations, 3.0, 3);
-    assert_eq!(median, 42.0);
-    assert_eq!(sigma, 0.0);
-}
-
-#[test]
-fn test_sigma_clipped_arrayvec_rejects_outliers() {
-    let mut values: Vec<f32> = vec![10.0; 12];
-    values.extend([1000.0, 2000.0]);
-    let mut deviations: arrayvec::ArrayVec<f32, 16> = arrayvec::ArrayVec::new();
-
-    let ClippedStats { median, sigma, .. } =
-        ClippedStats::sigma_clipped_arrayvec(&mut values, &mut deviations, 3.0, 3);
-
-    assert!((median - 10.0).abs() < 0.1);
-    assert!(sigma < 1.0);
-}
-
-#[test]
-fn test_sigma_clipped_arrayvec_uniform() {
-    let mut values = vec![5.0f32; 10];
-    let mut deviations: arrayvec::ArrayVec<f32, 16> = arrayvec::ArrayVec::new();
-    let ClippedStats { median, sigma, .. } =
-        ClippedStats::sigma_clipped_arrayvec(&mut values, &mut deviations, 3.0, 3);
-    assert_eq!(median, 5.0);
-    assert_eq!(sigma, 0.0);
-}
-
-#[test]
-fn test_sigma_clipped_arrayvec_matches_vec_version() {
-    let base_values: Vec<f32> = vec![1.0, 2.0, 3.0, 100.0, 4.0, 5.0, 6.0, 200.0];
-
-    let mut values_vec = base_values.clone();
-    let mut deviations_vec = Vec::new();
-    let ClippedStats {
-        median: median_vec,
-        sigma: sigma_vec,
-        mean: mean_vec,
-    } = ClippedStats::sigma_clipped(&mut values_vec, &mut deviations_vec, 3.0, 3);
-
-    let mut values_arrayvec = base_values.clone();
-    let mut deviations_arrayvec: arrayvec::ArrayVec<f32, 16> = arrayvec::ArrayVec::new();
-    let ClippedStats {
-        median: median_arrayvec,
-        sigma: sigma_arrayvec,
-        mean: mean_arrayvec,
-    } = ClippedStats::sigma_clipped_arrayvec(
-        &mut values_arrayvec,
-        &mut deviations_arrayvec,
-        3.0,
-        3,
-    );
-
-    assert!((median_vec - median_arrayvec).abs() < 1e-6);
-    assert!((sigma_vec - sigma_arrayvec).abs() < 1e-6);
-    assert!((mean_vec - mean_arrayvec).abs() < 1e-6);
+    let mut deviations: arrayvec::ArrayVec<f32, 4> = arrayvec::ArrayVec::new();
+    let _ = ClippedStats::sigma_clipped(&mut values, &mut deviations, 3.0, 2);
 }
 
 #[test]
