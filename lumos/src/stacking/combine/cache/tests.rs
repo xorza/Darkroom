@@ -465,11 +465,7 @@ fn test_cleanup_removes_files() {
     assert!(temp_dir.exists());
     assert!(temp_dir.read_dir().unwrap().count() > 0);
 
-    // Use keep_cache: false to actually test cleanup
-    let config = CacheConfig {
-        keep_cache: false,
-        ..Default::default()
-    };
+    let config = CacheConfig::default();
 
     let cache = FrameCache {
         frames: vec![cached_frame],

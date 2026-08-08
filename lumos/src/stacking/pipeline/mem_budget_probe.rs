@@ -133,7 +133,6 @@ fn pipeline_stack_budget_probe() -> io::Result<()> {
         // A per-stage cache dir under the (real-disk) base, removed on drop so temp disk doesn't grow
         // across stages either. Distinct dirs avoid any cross-stage file reuse confusing the tiering.
         config.cache.cache_dir = base.join(format!("cache_{k}"));
-        config.cache.keep_cache = false;
 
         let stage_start = Instant::now();
         let result = stack(
