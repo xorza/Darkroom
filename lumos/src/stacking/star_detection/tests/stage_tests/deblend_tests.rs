@@ -9,9 +9,7 @@ use crate::math::fwhm_to_sigma;
 use crate::math::size2us::Size2us;
 use crate::stacking::star_detection::config::detection_config::DetectionConfig;
 use crate::stacking::star_detection::detector::stages::detect_test_utils::detect_stars_test;
-use crate::stacking::star_detection::synthetic_tests::stage_tests::{
-    background_estimate, matched_truths,
-};
+use crate::stacking::star_detection::tests::stage_tests::{background_estimate, matched_truths};
 use crate::testing::TestRng;
 use crate::testing::synthetic::star_profiles::{StarProfile, SyntheticStar};
 use imaginarium::Buffer2;

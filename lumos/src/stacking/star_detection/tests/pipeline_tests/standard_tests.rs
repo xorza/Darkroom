@@ -1,8 +1,8 @@
 //! Standard pipeline tests - full star detection on typical forward-model scenarios.
 
 use crate::stacking::star_detection::config::Config;
-use crate::stacking::star_detection::synthetic_tests::Scenario;
-use crate::stacking::star_detection::synthetic_tests::pipeline_tests::run_test;
+use crate::stacking::star_detection::tests::Scenario;
+use crate::stacking::star_detection::tests::pipeline_tests::run_test;
 use crate::testing::init_tracing;
 use crate::testing::synthetic::camera::PsfModel;
 use crate::testing::synthetic::scene::BackgroundField;

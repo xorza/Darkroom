@@ -54,7 +54,7 @@ mod bench;
 #[cfg(all(test, feature = "real-data"))]
 mod real_data_tests;
 #[cfg(test)]
-mod synthetic_tests;
+mod tests;
 
 use config::Config;
 use distortion::sip::SipPolynomial;

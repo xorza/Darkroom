@@ -8,7 +8,7 @@ use crate::math::size2us::Size2us;
 
 use crate::stacking::star_detection::config::Config;
 use crate::stacking::star_detection::detector::StarDetector;
-use crate::stacking::star_detection::synthetic_tests::Scenario;
+use crate::stacking::star_detection::tests::Scenario;
 use crate::testing::init_tracing;
 use crate::testing::synthetic::artifacts::add_cosmic_rays;
 use crate::testing::visual::{gray_to_rgb_image_stretched, save_grayscale, save_image};

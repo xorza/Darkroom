@@ -267,7 +267,7 @@ pub(super) mod internals {
 mod tests {
     use crate::stacking::star_detection::config::detection_config::DetectionConfig;
     use crate::stacking::star_detection::detector::*;
-    use crate::stacking::star_detection::synthetic_tests::Scenario;
+    use crate::stacking::star_detection::tests::Scenario;
 
     #[test]
     fn fwhm_source_distinguishes_measured_from_supplied() {

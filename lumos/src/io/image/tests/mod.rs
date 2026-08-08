@@ -1,3 +1,5 @@
+mod synthetic;
+
 use crate::image_ops::rgb::Rgb;
 use common::internals::test_output_path;
 use imaginarium::{Buffer2, ColorFormat, Image, ImageDesc};

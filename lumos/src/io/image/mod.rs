@@ -9,8 +9,6 @@ pub(crate) mod linear_pixels;
 pub(crate) mod load_context;
 pub(crate) mod preview_image;
 pub(crate) mod sensor;
-#[cfg(test)]
-mod synthetic_tests;
 
 use std::path::Path;
 

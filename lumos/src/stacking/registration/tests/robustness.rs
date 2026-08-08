@@ -17,7 +17,7 @@ use crate::testing::synthetic::transforms::{
 };
 use glam::DVec2;
 
-use crate::stacking::registration::synthetic_tests::helpers::{
+use crate::stacking::registration::tests::helpers::{
     self, FWHM_NORMAL, FWHM_TIGHT, apply_affine, apply_homography,
 };
 
