@@ -3,7 +3,7 @@ use std::sync::{Arc, Barrier};
 
 use rayon::ThreadPoolBuilder;
 
-use crate::concurrency::{JobScratchPool, try_par_map_limited};
+use crate::concurrency::{JobScratchPool, try_par_map_limited, try_par_map_limited_owned};
 
 #[test]
 fn job_scratch_leases_are_exclusive_and_reused() {
@@ -74,4 +74,37 @@ fn limited_map_accepts_empty_input() {
 #[should_panic(expected = "max_concurrent must be positive")]
 fn limited_map_rejects_zero_concurrency() {
     let _ = try_par_map_limited(&[1], 0, |_index, value| Ok::<_, ()>(*value));
+}
+
+#[test]
+fn owned_map_indexes_by_input_position_across_batches() {
+    // The index is derived per batch, so a window-relative offset would restart at 0 on the
+    // second batch and pass every order-only assertion.
+    let items: Vec<String> = (0..6).map(|i| format!("f{i}")).collect();
+    let result = try_par_map_limited_owned(items, 2, |index, value| {
+        Ok::<_, ()>(format!("{index}:{value}"))
+    });
+
+    assert_eq!(
+        result.unwrap(),
+        ["0:f0", "1:f1", "2:f2", "3:f3", "4:f4", "5:f5"]
+    );
+}
+
+#[test]
+fn owned_map_propagates_error_without_starting_later_batches() {
+    let started = AtomicUsize::new(0);
+    let items: Vec<usize> = (0..9).collect();
+
+    let result = try_par_map_limited_owned(items, 3, |_index, value| {
+        started.fetch_or(1 << value, Ordering::SeqCst);
+        if value == 4 {
+            Err("four")
+        } else {
+            Ok(value * 2)
+        }
+    });
+
+    assert_eq!(result, Err("four"));
+    assert_eq!(started.load(Ordering::SeqCst) & 0b111_000_000, 0);
 }

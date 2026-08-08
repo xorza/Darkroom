@@ -2,6 +2,7 @@
 
 use rayon::prelude::*;
 
+use crate::concurrency;
 use crate::error::InvalidConfigField;
 use crate::stacking::star_detection::config::Config;
 use crate::stacking::star_detection::detector::StarDetector;
@@ -36,8 +37,10 @@ impl DetectorPool {
 
     /// Map `f` over `items` with one detector per concurrent slot, passing each item's index.
     ///
-    /// Same batching shape as [`crate::concurrency::try_par_map_limited`], with a reused
-    /// detector — and its working buffers — bound to each slot.
+    /// The batch width is the slot count, so the window that
+    /// [`concurrency::try_collect_batches`] hands back indexes the detectors directly: slot *k*
+    /// always takes the *k*-th item of every window, and carries its warmed buffers into the
+    /// next one.
     pub(crate) fn try_map<T, R, E, F>(&mut self, items: &[T], f: F) -> Result<Vec<R>, E>
     where
         T: Sync,
@@ -45,20 +48,16 @@ impl DetectorPool {
         E: Send,
         F: Fn(&mut StarDetector, usize, &T) -> Result<R, E> + Sync,
     {
-        let slots = self.detectors.len();
-        let mut results = Vec::with_capacity(items.len());
-        for (batch, chunk) in items.chunks(slots).enumerate() {
-            let base = batch * slots;
-            let chunk_results: Result<Vec<R>, E> = self
-                .detectors
+        let detectors = &mut self.detectors;
+        let slots = detectors.len();
+        concurrency::try_collect_batches(items.len(), slots, |batch| {
+            detectors[..batch.len()]
                 .par_iter_mut()
-                .zip(chunk.par_iter())
+                .zip(items[batch.start..batch.end].par_iter())
                 .enumerate()
-                .map(|(offset, (detector, item))| f(detector, base + offset, item))
-                .collect();
-            results.extend(chunk_results?);
-        }
-        Ok(results)
+                .map(|(offset, (detector, item))| f(detector, batch.start + offset, item))
+                .collect()
+        })
     }
 }
 

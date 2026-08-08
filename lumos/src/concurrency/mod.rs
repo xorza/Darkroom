@@ -2,6 +2,7 @@
 
 use std::ops::Deref;
 use std::ops::DerefMut;
+use std::ops::Range;
 
 use parking_lot::Mutex;
 use rayon::prelude::*;
@@ -91,13 +92,35 @@ impl<T> Drop for JobScratchLease<'_, T> {
     }
 }
 
-/// Maps a fallible operation over consecutive parallel batches, passing each item's index
-/// alongside it.
+/// Splice the results of `batch` over consecutive windows of at most `max_concurrent` of `len`
+/// items, in input order.
 ///
-/// At most `max_concurrent` operations run at once. Results preserve input order, and batches
-/// after the first error are not started. The index is supplied because callers almost always
-/// need it — to name a spill file, to report which frame failed — and would otherwise each
-/// build a `Vec<(usize, &T)>` to carry it in.
+/// The window boundary is a barrier: one batch finishes before the next starts, and the first to
+/// fail leaves the rest unstarted. Callers supply only the parallel iterator over a window — the
+/// ordering, the window width, and the early exit live here rather than being spelled out again
+/// in each entry point.
+pub(crate) fn try_collect_batches<R, E>(
+    len: usize,
+    max_concurrent: usize,
+    mut batch: impl FnMut(Range<usize>) -> Result<Vec<R>, E>,
+) -> Result<Vec<R>, E> {
+    assert!(max_concurrent > 0, "max_concurrent must be positive");
+
+    let mut results = Vec::with_capacity(len);
+    let mut start = 0;
+    while start < len {
+        let end = (start + max_concurrent).min(len);
+        results.extend(batch(start..end)?);
+        start = end;
+    }
+    Ok(results)
+}
+
+/// Maps a fallible operation over `items` in [`try_collect_batches`] windows, passing each item's
+/// index alongside it.
+///
+/// The index is supplied because callers almost always need it — to name a spill file, to report
+/// which frame failed — and would otherwise each build a `Vec<(usize, &T)>` to carry it in.
 pub(crate) fn try_par_map_limited<T, R, E, F>(
     items: &[T],
     max_concurrent: usize,
@@ -109,29 +132,21 @@ where
     E: Send,
     F: Fn(usize, &T) -> Result<R, E> + Sync,
 {
-    assert!(max_concurrent > 0, "max_concurrent must be positive");
-
-    let mut results = Vec::with_capacity(items.len());
-    for (batch, chunk) in items.chunks(max_concurrent).enumerate() {
-        let base = batch * max_concurrent;
-        results.extend(
-            chunk
-                .par_iter()
-                .enumerate()
-                .map(|(offset, item)| operation(base + offset, item))
-                .collect::<Result<Vec<_>, _>>()?,
-        );
-    }
-    Ok(results)
+    try_collect_batches(items.len(), max_concurrent, |batch| {
+        items[batch.start..batch.end]
+            .par_iter()
+            .enumerate()
+            .map(|(offset, item)| operation(batch.start + offset, item))
+            .collect()
+    })
 }
 
-/// Consuming counterpart to [`try_par_map_limited`]: maps a fallible operation over `items`,
-/// handing each one to `operation` by value along with its input index.
+/// Consuming counterpart to [`try_par_map_limited`]: hands each item to `operation` by value.
 ///
-/// At most `max_concurrent` operations run at once. Results preserve input order, and batches
-/// after the first error are not started. Taking items by value is what lets a caller drop each
-/// input as soon as its output exists — the property that keeps the register/warp stage from
-/// holding the whole input and output sets simultaneously.
+/// Taking items by value is what lets a caller drop each input as soon as its output exists —
+/// the property that keeps the register/warp stage from holding the whole input and output sets
+/// simultaneously. Each window is drained off the input iterator just before it runs, so items
+/// beyond the current window stay untouched until their turn.
 pub(crate) fn try_par_map_limited_owned<T, R, E, F>(
     items: Vec<T>,
     max_concurrent: usize,
@@ -143,22 +158,18 @@ where
     E: Send,
     F: Fn(usize, T) -> Result<R, E> + Sync,
 {
-    assert!(max_concurrent > 0, "max_concurrent must be positive");
-
-    let mut results = Vec::with_capacity(items.len());
-    let mut pending = items.into_iter().enumerate();
-    loop {
-        let batch: Vec<(usize, T)> = pending.by_ref().take(max_concurrent).collect();
-        if batch.is_empty() {
-            return Ok(results);
-        }
-        results.extend(
-            batch
-                .into_par_iter()
-                .map(|(index, item)| operation(index, item))
-                .collect::<Result<Vec<_>, _>>()?,
-        );
-    }
+    let len = items.len();
+    let mut pending = items.into_iter();
+    try_collect_batches(len, max_concurrent, |batch| {
+        pending
+            .by_ref()
+            .take(batch.len())
+            .collect::<Vec<T>>()
+            .into_par_iter()
+            .enumerate()
+            .map(|(offset, item)| operation(batch.start + offset, item))
+            .collect()
+    })
 }
 
 #[cfg(test)]
