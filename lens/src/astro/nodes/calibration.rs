@@ -7,6 +7,7 @@ use std::time::UNIX_EPOCH;
 
 use common::CancelToken;
 use common::file_utils::{self, PublicationMode};
+use lumos::ProgressCallback;
 use lumos::{
     CalibrationMasters, CalibrationSet, CfaImage, DEFAULT_SIGMA_THRESHOLD, LoadContext,
     StackConfig, stack_cfa_master,
@@ -173,8 +174,9 @@ fn build_masters_cached(
             }
         }
 
-        let master = stack_cfa_master(&frames, config, cancel.clone())?
-            .expect("a non-empty calibration frame set produces a master");
+        let master =
+            stack_cfa_master(&frames, config, ProgressCallback::default(), cancel.clone())?
+                .expect("a non-empty calibration frame set produces a master");
         if let Some(cache_paths) = cache_paths {
             master
                 .save_fits(&cache_paths.master)

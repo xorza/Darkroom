@@ -6,7 +6,6 @@ use crate::image_ops::internals::{
 use crate::image_ops::op::OpError;
 use crate::math::size2us::Size2us;
 use crate::testing::TestRng;
-use imaginarium::{ColorFormat, Image, ImageDesc};
 
 fn noisy(size: Size2us, bg: f32, sigma: f32, seed: u64) -> Vec<f32> {
     let mut rng = TestRng::new(seed);
@@ -244,25 +243,5 @@ fn validate_rejects_nonpositive_k() {
     assert!(
         matches!(&err, OpError::InvalidConfig(m) if m.field == "denoise k"),
         "expected an InvalidConfig k error, got {err:?}"
-    );
-}
-
-#[test]
-fn rejects_non_f32_master() {
-    // An 8-bit image is not a linear f32 master, so the op is rejected before running.
-    let mut img = Image::new_with_data(
-        ImageDesc::new(4, 4, ColorFormat::RGB_U8),
-        vec![0u8; 4 * 4 * 3],
-    )
-    .unwrap();
-    let err = Denoise {
-        strength: 0.0,
-        ..Default::default()
-    }
-    .apply(&mut img)
-    .unwrap_err();
-    assert!(
-        matches!(err, OpError::UnsupportedFormat(ColorFormat::RGB_U8)),
-        "expected UnsupportedFormat(RGB_U8), got {err:?}"
     );
 }

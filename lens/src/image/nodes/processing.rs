@@ -110,11 +110,11 @@ fn register_convert(library: &mut Library) {
                             let image = value
                                 .as_custom::<Image>()
                                 .expect("image input type is validated at the compile boundary");
-                            match conversion_target(format, image.buffer.desc.color_format) {
+                            match conversion_target(format, image.desc().color_format) {
                                 Some(target) => {
                                     let vision = contexts.get(VISION_CTX_TYPE);
                                     let cpu_image = image
-                                        .buffer
+                                        .buffer()
                                         .make_cpu(&vision.processing_ctx)
                                         .map_err(InvokeError::external)?;
                                     Some(
@@ -184,12 +184,12 @@ fn register_blend(library: &mut Library) {
                             .expect("alpha input type is validated at the compile boundary")
                             as f32;
                         let vision = contexts.get(VISION_CTX_TYPE);
-                        let mut output = imaginarium::ImageBuffer::new_empty(source.buffer.desc);
+                        let mut output = imaginarium::ImageBuffer::new_empty(source.desc());
                         Blend::new(mode, alpha)
                             .execute(
                                 &mut vision.processing_ctx,
-                                &source.buffer,
-                                &destination.buffer,
+                                source.buffer(),
+                                destination.buffer(),
                                 &mut output,
                             )
                             .map_err(InvokeError::external)?;
@@ -259,16 +259,16 @@ fn register_transform(library: &mut Library) {
                                 as f32
                         };
                         let vision = contexts.get(VISION_CTX_TYPE);
-                        let mut output = imaginarium::ImageBuffer::new_empty(image.buffer.desc);
+                        let mut output = imaginarium::ImageBuffer::new_empty(image.desc());
                         let center = Vec2::new(
-                            image.buffer.desc.width as f32 / 2.0,
-                            image.buffer.desc.height as f32 / 2.0,
+                            image.desc().width as f32 / 2.0,
+                            image.desc().height as f32 / 2.0,
                         );
                         Transform::new()
                             .scale(Vec2::new(scalar(1), scalar(2)))
                             .rotate_around(scalar(3), center)
                             .translate(Vec2::new(scalar(4), scalar(5)))
-                            .execute(&mut vision.processing_ctx, &image.buffer, &mut output)
+                            .execute(&mut vision.processing_ctx, image.buffer(), &mut output)
                             .map_err(InvokeError::external)?;
                         outputs[0] = DynamicValue::from_custom(Image::from(output));
                         Ok(())
@@ -295,14 +295,14 @@ fn adjust_image(
                 .expect("image input type is validated at the compile boundary");
             Image::from(
                 input
-                    .buffer
+                    .buffer()
                     .duplicate(context)
                     .map_err(InvokeError::external)?,
             )
         }
     };
 
-    op.execute(context, &mut image.buffer)
+    op.execute(context, image.buffer_mut())
         .map_err(InvokeError::external)?;
     Ok(image)
 }

@@ -227,7 +227,7 @@ fn prepare_drawable(
     max_dim: Option<NonZeroU32>,
 ) -> Result<DrawableImage, PreviewImageError> {
     let cpu = image
-        .buffer
+        .buffer()
         .make_cpu(&ProcessingContext::cpu_only())
         .map_err(|e| PreviewImageError::Pixels(e.to_string()))?;
     let native_size = UVec2::new(cpu.desc().width as u32, cpu.desc().height as u32);
