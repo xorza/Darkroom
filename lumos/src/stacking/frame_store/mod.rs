@@ -15,7 +15,7 @@ use crate::io::image::LoadContext;
 use crate::io::image::error::ImageError;
 use crate::io::image::linear::LinearImage;
 use crate::io::image::{ImageDimensions, ImageMetadata};
-use crate::math::statistics::{ChannelStats, mad_f32_with_scratch, median_f32_mut};
+use crate::math::statistics::{MedianMad, mad_f32_with_scratch, median_f32_mut};
 
 /// Failure while creating or accessing disk-backed frame storage.
 #[derive(Debug, thiserror::Error)]
@@ -82,7 +82,7 @@ impl Drop for SpillDirectory {
 /// Per-frame statistics: one median/MAD pair per channel.
 #[derive(Debug, Clone)]
 pub(crate) struct FrameStats {
-    pub(crate) channels: ArrayVec<ChannelStats, 3>,
+    pub(crate) channels: ArrayVec<MedianMad, 3>,
     pub(crate) quantization_sigma: Option<f32>,
 }
 
@@ -97,7 +97,7 @@ impl FrameStats {
             let median = median_f32_mut(&mut scratch);
             let mad = mad_f32_with_scratch(data, median, &mut scratch);
             let mut channels = ArrayVec::new();
-            channels.push(ChannelStats { median, mad });
+            channels.push(MedianMad { median, mad });
             return Self {
                 channels,
                 quantization_sigma,
@@ -111,7 +111,7 @@ impl FrameStats {
                 let mut scratch = data.to_vec();
                 let median = median_f32_mut(&mut scratch);
                 let mad = mad_f32_with_scratch(data, median, &mut scratch);
-                ChannelStats { median, mad }
+                MedianMad { median, mad }
             })
             .collect::<Vec<_>>()
             .into_iter()

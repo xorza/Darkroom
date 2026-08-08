@@ -3,7 +3,7 @@
 use rayon::prelude::*;
 
 use crate::io::image::linear::LinearImage;
-use crate::math::statistics::{mad_to_sigma, median_and_mad_f32_mut};
+use crate::math::statistics::median_and_mad_f32_mut;
 use crate::stacking::star_detection::median_filter::median_filter_3x3;
 use crate::stacking::star_detection::resources::DetectionResources;
 use imaginarium::Buffer2;
@@ -71,8 +71,7 @@ fn detection_channel_weights(image: &LinearImage, scratch: &mut [Buffer2<f32>; 3
         .for_each(|(c, (iv, buf))| {
             let dst = buf.pixels_mut();
             dst.copy_from_slice(image.channel(c).pixels());
-            let (_median, mad) = median_and_mad_f32_mut(dst);
-            let sigma = mad_to_sigma(mad);
+            let sigma = median_and_mad_f32_mut(dst).sigma();
             *iv = if sigma > f32::EPSILON {
                 1.0 / (sigma * sigma)
             } else {

@@ -43,17 +43,20 @@ fn median_f32_truth_table() {
 #[test]
 fn test_median_and_mad_odd() {
     let mut values = [2.0f32, 4.0, 3.0];
-    let (median, mad) = median_and_mad_f32_mut(&mut values);
-    assert!((median - 3.0).abs() < 1e-6);
-    assert!((mad - 1.0).abs() < 1e-6);
+    let stats = median_and_mad_f32_mut(&mut values);
+    assert!((stats.median - 3.0).abs() < 1e-6);
+    assert!((stats.mad - 1.0).abs() < 1e-6);
+    // 1.4826 × 1.0, the Gaussian rescale MedianMad::sigma applies.
+    assert!((stats.sigma() - 1.4826022).abs() < 1e-6);
 }
 
 #[test]
 fn test_median_and_mad_uniform() {
     let mut values = [3.5f32, 3.5, 3.5, 3.5, 3.5];
-    let (median, mad) = median_and_mad_f32_mut(&mut values);
-    assert!((median - 3.5).abs() < 1e-6);
-    assert!(mad.abs() < 1e-6);
+    let stats = median_and_mad_f32_mut(&mut values);
+    assert!((stats.median - 3.5).abs() < 1e-6);
+    assert!(stats.mad.abs() < 1e-6);
+    assert!(stats.sigma().abs() < 1e-6);
 }
 
 #[test]

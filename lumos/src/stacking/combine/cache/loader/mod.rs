@@ -15,7 +15,7 @@ use crate::io::image::cfa::CfaImage;
 use crate::io::image::error::ImageError;
 use crate::io::image::linear::LinearImage;
 use crate::io::image::{ImageDimensions, ImageMetadata};
-use crate::math::statistics::ChannelStats;
+use crate::math::statistics::MedianMad;
 use crate::memory::{decode_transient_bytes, fits_in_memory, frame_bytes, load_concurrency};
 use crate::stacking::combine::cache_config::CacheConfig;
 use crate::stacking::combine::config::Normalization;
@@ -592,7 +592,7 @@ fn read_frame_stats(cache_dir: &Path, base_filename: &str) -> Option<FrameStats>
         let off = 6 + i * 8;
         let median = f32::from_le_bytes(bytes[off..off + 4].try_into().unwrap());
         let mad = f32::from_le_bytes(bytes[off + 4..off + 8].try_into().unwrap());
-        channels.push(ChannelStats { median, mad });
+        channels.push(MedianMad { median, mad });
     }
     Some(FrameStats {
         channels,

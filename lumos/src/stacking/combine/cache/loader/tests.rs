@@ -271,7 +271,7 @@ fn test_frame_stats_sidecar_roundtrip() {
 
     // 1-channel stats
     let stats_1ch = FrameStats {
-        channels: [ChannelStats {
+        channels: [MedianMad {
             median: 42.5,
             mad: 3.25,
         }]
@@ -289,15 +289,15 @@ fn test_frame_stats_sidecar_roundtrip() {
     // 3-channel stats (overwrites the file)
     let stats_3ch = FrameStats {
         channels: [
-            ChannelStats {
+            MedianMad {
                 median: 100.0,
                 mad: 1.5,
             },
-            ChannelStats {
+            MedianMad {
                 median: 200.0,
                 mad: 2.5,
             },
-            ChannelStats {
+            MedianMad {
                 median: 300.0,
                 mad: 3.5,
             },

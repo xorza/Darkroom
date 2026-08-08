@@ -5,7 +5,7 @@ use common::CancelToken;
 use rayon::prelude::*;
 
 use crate::io::image::ImageDimensions;
-use crate::math::statistics::{ChannelStats, mad_to_sigma, median_f32_mut};
+use crate::math::statistics::{MedianMad, mad_to_sigma, median_f32_mut};
 use crate::stacking::combine::MIN_CONTRIBUTING_COVERAGE;
 use crate::stacking::combine::config::Normalization;
 use crate::stacking::combine::error::Error;
@@ -46,7 +46,7 @@ struct CommonDomain {
 #[derive(Debug)]
 struct ReferenceFit {
     samples: Vec<f32>,
-    stats: ChannelStats,
+    stats: MedianMad,
     noise_variance: f64,
 }
 
@@ -203,7 +203,7 @@ fn compute_frame_norms_with_reference<'a>(
         .collect();
 
     for channel in 0..channels {
-        let ChannelStats {
+        let MedianMad {
             median: reference_median,
             mad: reference_mad,
         } = stats[reference].channels[channel];
@@ -212,7 +212,7 @@ fn compute_frame_norms_with_reference<'a>(
             if frame_index == reference {
                 continue;
             }
-            let ChannelStats {
+            let MedianMad {
                 median: frame_median,
                 mad: frame_mad,
             } = frame_stats.channels[channel];
@@ -363,7 +363,7 @@ fn measure_common_stats(
                     pixel_count,
                     cancel,
                 )?;
-                channel_stats(samples, cancel)
+                cancellable_median_mad(samples, cancel)
             },
         )
         .collect::<Result<Vec<_>, Error>>()?;
@@ -546,7 +546,7 @@ fn check_cancel(cancel: &CancelToken) -> Result<(), Error> {
     Ok(())
 }
 
-fn channel_stats(samples: &mut [f32], cancel: &CancelToken) -> Result<ChannelStats, Error> {
+fn cancellable_median_mad(samples: &mut [f32], cancel: &CancelToken) -> Result<MedianMad, Error> {
     check_cancel(cancel)?;
     let median = median_f32_mut(samples);
     check_cancel(cancel)?;
@@ -559,19 +559,19 @@ fn channel_stats(samples: &mut [f32], cancel: &CancelToken) -> Result<ChannelSta
     }
     let mad = median_f32_mut(samples);
     check_cancel(cancel)?;
-    Ok(ChannelStats { median, mad })
+    Ok(MedianMad { median, mad })
 }
 
 fn paired_photometric_gain(
     frame: &[f32],
     reference: &[f32],
-    reference_stats: ChannelStats,
+    reference_stats: MedianMad,
     frame_noise_variance: f64,
     reference_noise_variance: f64,
     cancel: &CancelToken,
 ) -> Result<f32, Error> {
     let mut scratch = frame.to_vec();
-    let frame_stats = channel_stats(&mut scratch, cancel)?;
+    let frame_stats = cancellable_median_mad(&mut scratch, cancel)?;
     let gain = if frame_stats.mad > f32::EPSILON {
         reference_stats.mad / frame_stats.mad
     } else {
@@ -588,7 +588,7 @@ fn paired_photometric_gain(
             |(&frame_value, &reference_value)| reference_value - (frame_value * gain + offset),
         ));
     }
-    let residual_stats = channel_stats(&mut scratch, cancel)?;
+    let residual_stats = cancellable_median_mad(&mut scratch, cancel)?;
     if residual_stats.mad <= f32::EPSILON {
         return Ok(gain);
     }
@@ -605,9 +605,9 @@ fn paired_photometric_gain(
     ))
 }
 
-fn sample_stats(samples: &[f32], cancel: &CancelToken) -> Result<ChannelStats, Error> {
+fn sample_stats(samples: &[f32], cancel: &CancelToken) -> Result<MedianMad, Error> {
     let mut scratch = samples.to_vec();
-    channel_stats(&mut scratch, cancel)
+    cancellable_median_mad(&mut scratch, cancel)
 }
 
 fn deming_gain(

@@ -498,7 +498,7 @@ mod tests {
     use crate::io::image::linear::LinearImage;
     use crate::io::image::linear_pixels::LinearPixels;
     use crate::math::size2us::Size2us;
-    use crate::math::statistics::ChannelStats;
+    use crate::math::statistics::MedianMad;
     use crate::stacking::combine::cache::internals::cache_from_images;
     use crate::stacking::combine::cache::tests::make_test_cache;
     use crate::stacking::combine::cache_config::CacheConfig;
@@ -1196,7 +1196,7 @@ mod tests {
                     None,
                 );
                 frame.source_stats = FrameStats {
-                    channels: [ChannelStats { median, mad }].into_iter().collect(),
+                    channels: [MedianMad { median, mad }].into_iter().collect(),
                     quantization_sigma: None,
                 };
                 frame
@@ -2294,7 +2294,7 @@ mod tests {
         // Without the pscale² term both weights would come out 0.5.
         let frame_stats = |mad: f32| {
             let mut channels = ArrayVec::new();
-            channels.push(ChannelStats { median: 0.5, mad });
+            channels.push(MedianMad { median: 0.5, mad });
             FrameStats {
                 channels,
                 quantization_sigma: None,
