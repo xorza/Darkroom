@@ -12,13 +12,15 @@ use common::CancelToken;
 use imaginarium::Buffer2;
 
 use crate::math;
-use crate::stacking::combine::cache::{CombinedSample, FrameCache, FrameCacheParams};
+use crate::stacking::combine::cache::{
+    CombineOutput, CombinedSample, FrameCache, FrameCacheParams,
+};
 use crate::stacking::combine::config::{CombineMethod, StackConfig, Weighting};
 use crate::stacking::combine::error::{Error, StackConfigError};
 use crate::stacking::combine::normalization::FrameNorm;
 use crate::stacking::combine::rejection::Rejection;
 use crate::stacking::frame_store::{FrameStats, SpillDirectory, StoredFrame};
-use crate::stacking::product::StackProduct;
+use crate::stacking::product::{QualityPlanes, StackProduct};
 use crate::stacking::progress::ProgressCallback;
 use crate::stacking::registration::resample::WarpResult;
 
@@ -204,13 +206,7 @@ fn combine_cached(
         "Combining frames"
     );
 
-    let product = run_stacking(&cache, config);
-    // The combine bails between chunks on cancellation and returns whatever it had rather than
-    // unwinding, so the token — not the return value — says whether that result is meaningful.
-    if cache.core.cancel.is_cancelled() {
-        return Err(Error::Cancelled);
-    }
-    Ok(product)
+    run_stacking(&cache, config)
 }
 
 /// Resolve weights from the weighting strategy and pre-computed channel stats.
@@ -380,7 +376,18 @@ fn tracked_sigma(max_sigma_bits: &AtomicU32) -> Option<f32> {
 /// weight independently; a frame with neither plane contributes everywhere at unit confidence,
 /// which is what makes this the single engine for calibration masters and registered light
 /// stacks alike.
-pub(crate) fn run_stacking(cache: &FrameCache, config: &StackConfig) -> StackProduct {
+///
+/// # Errors
+///
+/// [`Error::Cancelled`] if the cache's token was set. The chunk walk abandons the output between
+/// chunks rather than unwinding, so a cancelled run still produces a `StackProduct` — one holding
+/// zeros wherever it stopped. Returning that as an error is what keeps the partial image from
+/// being mistaken for a stack; the alternative, handing it back and trusting each caller to
+/// consult the token, was missed by every caller but two.
+pub(crate) fn run_stacking(
+    cache: &FrameCache,
+    config: &StackConfig,
+) -> Result<StackProduct, Error> {
     // Normalization parameters are measured once, when the cache is built, and the combine reads
     // them from the cache rather than from `config`. Running a cache against a config that asks
     // for a different normalization would silently apply the one it was built with, so require
@@ -456,7 +463,7 @@ pub(crate) fn run_stacking(cache: &FrameCache, config: &StackConfig) -> StackPro
                         rejection.combine_mean(values, w, scratch, measure_quality)
                     },
                 );
-                return cache.finish_product(combined, planes, None);
+                return finish_unless_cancelled(cache, combined, planes, None);
             };
             // Rejection keeps a different survivor set at every pixel, so the master's floor is
             // the least-reduced pixel: seed with "nothing rejected" and raise it wherever a
@@ -486,7 +493,21 @@ pub(crate) fn run_stacking(cache: &FrameCache, config: &StackConfig) -> StackPro
         }
     };
 
-    cache.finish_product(combined, planes, quantization_sigma)
+    finish_unless_cancelled(cache, combined, planes, quantization_sigma)
+}
+
+/// Assemble the product, or report the run as cancelled — the single exit both of
+/// [`run_stacking`]'s paths take, so neither can hand back a partial stack as a whole one.
+fn finish_unless_cancelled(
+    cache: &FrameCache,
+    combined: CombineOutput,
+    planes: QualityPlanes,
+    quantization_sigma: Option<f32>,
+) -> Result<StackProduct, Error> {
+    if cache.core.cancel.is_cancelled() {
+        return Err(Error::Cancelled);
+    }
+    Ok(cache.finish_product(combined, planes, quantization_sigma))
 }
 
 #[cfg(test)]
@@ -608,7 +629,8 @@ mod tests {
                 small_n: SmallN::none(),
                 ..Default::default()
             },
-        );
+        )
+        .expect("this cache is never cancelled");
         let expected_normalized_sigma =
             ((0.25f32 * 0.01).powi(2) + (0.75f32 * 2.0 * 0.02).powi(2)).sqrt();
         assert_eq!(normalized.image.channel(0).pixels().to_vec(), vec![0.4; 2]);
@@ -624,7 +646,8 @@ mod tests {
             dimensions,
             Normalization::None,
         );
-        let median = run_stacking(&median_cache, &StackConfig::median());
+        let median = run_stacking(&median_cache, &StackConfig::median())
+            .expect("this cache is never cancelled");
         let expected_median_sigma = 0.01 * (3.0f32 / 5.0).sqrt();
         assert_eq!(median.image.channel(0).pixels().to_vec(), vec![0.4; 2]);
         assert!(
@@ -638,7 +661,8 @@ mod tests {
             dimensions,
             Normalization::None,
         );
-        let winsorized = run_stacking(&winsorized_cache, &StackConfig::winsorized(2.5));
+        let winsorized = run_stacking(&winsorized_cache, &StackConfig::winsorized(2.5))
+            .expect("this cache is never cancelled");
         assert!(
             (winsorized.quantization_sigma.unwrap() - 0.02).abs() < f32::EPSILON,
             "nonlinear unequal-source combines must retain the conservative largest σ"
@@ -659,7 +683,8 @@ mod tests {
                 small_n: SmallN::none(),
                 ..Default::default()
             },
-        );
+        )
+        .expect("this cache is never cancelled");
         assert_eq!(rejected.image.channel(0).pixels().to_vec(), vec![4.0, 1.0]);
         let expected_rejected_sigma = 0.01 / 7.0f32.sqrt();
         assert!(
@@ -1125,6 +1150,51 @@ mod tests {
     }
 
     #[test]
+    fn cancelled_combine_reports_cancellation_from_either_exit() {
+        // The chunk walk abandons the output between chunks rather than unwinding, so a cancelled
+        // run still assembles a `StackProduct` — one holding zeros wherever it stopped. Both of
+        // `run_stacking`'s exits must report that as an error rather than hand it back: the
+        // early one taken when no frame carries a quantization sigma, and the normal one.
+        // The token is swapped in after the cache is built, so this exercises the combine itself
+        // rather than the loader's own cancellation check.
+        let dimensions = ImageDimensions::new((2, 1), 1);
+        let config = StackConfig {
+            method: CombineMethod::Mean(Rejection::None),
+            normalization: Normalization::None,
+            small_n: SmallN::none(),
+            ..Default::default()
+        };
+
+        let without_sigmas = cache_from_images(
+            vec![
+                LinearImage::from_pixels(dimensions, vec![1.0; 2]),
+                LinearImage::from_pixels(dimensions, vec![3.0; 2]),
+            ],
+            Normalization::None,
+        );
+        let with_sigmas = make_cfa_stack_cache(
+            vec![vec![0.4; 2], vec![0.2; 2]],
+            &[0.01, 0.02],
+            dimensions,
+            Normalization::None,
+        );
+
+        for mut cache in [without_sigmas, with_sigmas] {
+            // Uncancelled, the same cache and config produce a product — so the error below is
+            // the token talking, not a combine that could never have succeeded.
+            run_stacking(&cache, &config).expect("an uncancelled combine produces a product");
+
+            let cancel = CancelToken::new();
+            cancel.cancel();
+            cache.core.cancel = cancel;
+            assert!(matches!(
+                run_stacking(&cache, &config).unwrap_err(),
+                Error::Cancelled
+            ));
+        }
+    }
+
+    #[test]
     fn cancelled_stack_returns_cancelled_error() {
         let a = LinearImage::from_pixels(ImageDimensions::new((4, 4), 1), vec![1.0; 16]);
         let mut invalid_pixels = vec![2.0; 16];
@@ -1236,8 +1306,8 @@ mod tests {
             normalization: Normalization::Multiplicative,
             ..Default::default()
         };
-        let first = run_stacking(&caches[0], &config);
-        let second = run_stacking(&caches[1], &config);
+        let first = run_stacking(&caches[0], &config).expect("this cache is never cancelled");
+        let second = run_stacking(&caches[1], &config).expect("this cache is never cancelled");
         assert_eq!(
             first.image.channel(0).pixels(),
             second.image.channel(0).pixels()
@@ -1486,7 +1556,8 @@ mod tests {
                 small_n: SmallN::none(),
                 ..Default::default()
             },
-        );
+        )
+        .expect("this cache is never cancelled");
         assert!((product.weight.as_ref().unwrap().channel(0)[pixel] - 2.5).abs() < 1e-6);
     }
 
@@ -1505,7 +1576,8 @@ mod tests {
             Normalization::None,
         );
 
-        run_stacking(
+        // The assert fires before any product exists, so there is no result to inspect.
+        let _ = run_stacking(
             &cache,
             &StackConfig {
                 normalization: Normalization::Multiplicative,
@@ -2278,7 +2350,7 @@ mod tests {
             weighting: Weighting::Noise,
             ..Default::default()
         };
-        let result = run_stacking(&cache, &config);
+        let result = run_stacking(&cache, &config).expect("this cache is never cancelled");
         let pixel = result.image.channel(0).pixels()[0];
         // Result should be near 100 (clean frame value), not near 999 (outlier)
         assert!(

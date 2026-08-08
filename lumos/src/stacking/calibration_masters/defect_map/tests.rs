@@ -231,7 +231,8 @@ fn cfa_stack_propagates_raw_quantization_into_hot_detection() {
         .collect();
     let cache = cache_from_images(images, Normalization::None);
 
-    let product = run_stacking(&cache, &StackConfig::default());
+    let product =
+        run_stacking(&cache, &StackConfig::default()).expect("this cache is never cancelled");
     assert!(
         (product.quantization_sigma.unwrap() - master_sigma).abs() < f32::EPSILON,
         "eight equal surviving frames must propagate σ/√8"
