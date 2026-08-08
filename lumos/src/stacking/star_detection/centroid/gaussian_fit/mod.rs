@@ -115,7 +115,7 @@ impl LMModel<6> for Gaussian2D {
     }
 
     fn batch_build_normal_equations(&self, data: FitData, params: &[f64; 6]) -> NormalEquations<6> {
-        // Both kernels are unweighted-only, so a weighted fit falls through to the scalar loop.
+        // The SIMD kernels are unweighted-only, so a weighted fit takes the scalar path.
         if data.weights.is_none() {
             #[cfg(target_arch = "x86_64")]
             if imaginarium::cpu_features::has_avx2_fma() {
@@ -140,7 +140,7 @@ impl LMModel<6> for Gaussian2D {
     }
 
     fn batch_compute_chi2(&self, data: FitData, params: &[f64; 6]) -> f64 {
-        // Both kernels are unweighted-only, so a weighted fit falls through to the scalar loop.
+        // The SIMD kernels are unweighted-only, so a weighted fit takes the scalar path.
         if data.weights.is_none() {
             #[cfg(target_arch = "x86_64")]
             if imaginarium::cpu_features::has_avx2_fma() {

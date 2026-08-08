@@ -114,7 +114,8 @@ pub(super) unsafe fn batch_build_normal_equations_avx2(
         let v_one = _mm256_set1_pd(1.0);
         let zero = _mm256_setzero_pd();
 
-        // 21 upper-triangle hessian + 6 gradient + 1 chi² = 28 accumulators
+        // 21 upper-triangle hessian + 6 gradient + 1 chi² = 28 accumulators. Flat rather than
+        // arrays-plus-loops on purpose — see `centroid::simd` for the measurement.
         let mut v_chi2 = zero;
         let mut v_g0 = zero;
         let mut v_g1 = zero;
