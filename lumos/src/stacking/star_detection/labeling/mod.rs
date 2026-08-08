@@ -12,6 +12,7 @@ mod bench;
 #[cfg(test)]
 mod tests;
 
+use std::ops::Range;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use rayon::prelude::*;
@@ -42,13 +43,15 @@ struct Run {
 }
 
 impl Run {
-    /// Get the search window for finding overlapping runs in the previous row.
-    /// Returns (start, end) where end is exclusive.
+    /// The x interval of the adjacent row to scan for runs that could connect to this one.
+    ///
+    /// Eight-connectivity reaches one pixel further each way, so a run touching this one only
+    /// at a diagonal still falls inside the window.
     #[inline]
-    fn search_window(&self, connectivity: Connectivity) -> (u32, u32) {
+    fn search_window(&self, connectivity: Connectivity) -> Range<u32> {
         match connectivity {
-            Connectivity::Four => (self.start, self.end),
-            Connectivity::Eight => (self.start.saturating_sub(1), self.end + 1),
+            Connectivity::Four => self.start..self.end,
+            Connectivity::Eight => self.start.saturating_sub(1)..self.end + 1,
         }
     }
 }
@@ -334,15 +337,15 @@ fn merge_runs_with_prev(
 ) {
     let mut prev_idx = 0;
     for run in curr_runs.iter_mut() {
-        let (search_start, search_end) = run.search_window(connectivity);
+        let window = run.search_window(connectivity);
 
-        while prev_idx < prev_runs.len() && prev_runs[prev_idx].end <= search_start {
+        while prev_idx < prev_runs.len() && prev_runs[prev_idx].end <= window.start {
             prev_idx += 1;
         }
 
         let mut assigned_label = None;
         let mut check_idx = prev_idx;
-        while check_idx < prev_runs.len() && prev_runs[check_idx].start < search_end {
+        while check_idx < prev_runs.len() && prev_runs[check_idx].start < window.end {
             let prev_run = &prev_runs[check_idx];
             if runs_connected(prev_run, run, connectivity) {
                 match assigned_label {
@@ -579,14 +582,14 @@ fn merge_strip_boundary_sorted(
         let above = &above_runs[above_idx];
         let below = &below_runs[below_idx];
 
-        let (above_search_start, above_search_end) = above.search_window(connectivity);
-        let (below_search_start, below_search_end) = below.search_window(connectivity);
+        let above_window = above.search_window(connectivity);
+        let below_window = below.search_window(connectivity);
 
-        if above_search_end <= below_search_start {
+        if above_window.end <= below_window.start {
             above_idx += 1;
             continue;
         }
-        if below_search_end <= above_search_start {
+        if below_window.end <= above_window.start {
             below_idx += 1;
             continue;
         }
@@ -595,7 +598,7 @@ fn merge_strip_boundary_sorted(
         let mut check_above = above_idx;
         while check_above < above_runs.len() {
             let a = &above_runs[check_above];
-            if a.start >= below_search_end {
+            if a.start >= below_window.end {
                 break;
             }
             if runs_connected(a, below, connectivity) && a.label != below.label {
