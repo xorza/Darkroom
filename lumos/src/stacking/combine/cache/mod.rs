@@ -340,9 +340,21 @@ fn validate_warp_plane_values(
     Ok(())
 }
 
+/// Planes a combine keeps resident per output channel: the combined pixels, plus whichever
+/// quality planes were asked for and so were allocated up front.
+///
+/// Coverage is not among them — it has no per-channel plane and is accumulated after the combine,
+/// in [`FrameCache::finish_product`].
+fn resident_planes_per_channel(planes: QualityPlanes) -> usize {
+    1 + usize::from(planes.weight) + usize::from(planes.variance)
+}
+
+/// What the combine pass holds: one input plane per frame channel, plus one more for each of that
+/// frame's coverage and confidence planes, against the resident output planes.
 fn weighted_chunk_memory_layout(
     frames: &[StoredFrame],
     output_channels: usize,
+    planes: QualityPlanes,
 ) -> ChunkMemoryLayout {
     ChunkMemoryLayout {
         input_planes: frames
@@ -351,7 +363,24 @@ fn weighted_chunk_memory_layout(
                 1 + usize::from(frame.coverage.is_some()) + usize::from(frame.confidence.is_some())
             })
             .sum(),
-        resident_planes: 3 * output_channels,
+        resident_planes: output_channels * resident_planes_per_channel(planes),
+    }
+}
+
+/// What the coverage pass holds: one input plane per frame that carries coverage, against the
+/// combine's residents — which are all still alive at that point — plus the single coverage plane
+/// being accumulated.
+fn coverage_chunk_memory_layout(
+    frames: &[StoredFrame],
+    output_channels: usize,
+    planes: QualityPlanes,
+) -> ChunkMemoryLayout {
+    ChunkMemoryLayout {
+        input_planes: frames
+            .iter()
+            .filter(|frame| frame.coverage.is_some())
+            .count(),
+        resident_planes: output_channels * resident_planes_per_channel(planes) + 1,
     }
 }
 
@@ -640,19 +669,9 @@ impl FrameCache {
         // Coverage planes share their frame's tier, so they may be mmap-backed: read them in the
         // same row-aligned chunks the combine uses.
         let chunk_rows = chunk_available_memory.map_or(height, |available_memory| {
-            let input_planes = self
-                .frames
-                .iter()
-                .filter(|frame| frame.coverage.is_some())
-                .count();
-            let resident_planes =
-                dimensions.channels() * (2 + usize::from(linear_variance.is_some())) + 1;
             optimal_chunk_rows(
                 dimensions.size(),
-                ChunkMemoryLayout {
-                    input_planes,
-                    resident_planes,
-                },
+                coverage_chunk_memory_layout(&self.frames, dimensions.channels(), planes),
                 available_memory,
             )
         });
@@ -727,7 +746,7 @@ impl FrameCache {
         // `process_chunks` can't interrupt the combine — poll per row here too.
         let cancel = self.core.cancel.clone();
         let dimensions = self.core.dimensions;
-        let memory = weighted_chunk_memory_layout(&self.frames, dimensions.channels());
+        let memory = weighted_chunk_memory_layout(&self.frames, dimensions.channels(), planes);
         // Coverage sizing must reuse this pre-output snapshot or resident planes are charged twice.
         let chunk_available_memory = self.core.chunk_available_memory();
         let mut output_weight = planes.weight.then(|| LinearPixels::new_zeroed(dimensions));

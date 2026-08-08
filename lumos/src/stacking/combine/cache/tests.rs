@@ -177,11 +177,36 @@ fn weighted_chunk_memory_counts_active_inputs_and_full_outputs() {
     )
     .expect("frames are valid");
 
+    // Inputs: 3 frames × 1 channel, plus frame 1's coverage and frame 2's coverage + confidence.
+    // Residents: 3 channels × (pixels + weight + variance).
     assert_eq!(
-        weighted_chunk_memory_layout(&cache.frames, dimensions.channels()),
+        weighted_chunk_memory_layout(&cache.frames, dimensions.channels(), QualityPlanes::ALL),
         ChunkMemoryLayout {
             input_planes: 6,
             resident_planes: 9,
+        }
+    );
+
+    // Declining the quality planes drops their residency, so the same frames buy more rows.
+    assert_eq!(
+        weighted_chunk_memory_layout(
+            &cache.frames,
+            dimensions.channels(),
+            QualityPlanes::IMAGE_ONLY
+        ),
+        ChunkMemoryLayout {
+            input_planes: 6,
+            resident_planes: 3,
+        }
+    );
+
+    // The coverage pass reads only the two frames carrying coverage, and adds the plane it is
+    // accumulating to the combine's residents.
+    assert_eq!(
+        coverage_chunk_memory_layout(&cache.frames, dimensions.channels(), QualityPlanes::ALL),
+        ChunkMemoryLayout {
+            input_planes: 2,
+            resident_planes: 10,
         }
     );
 }
