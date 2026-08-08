@@ -6,6 +6,7 @@ use common::CancelToken;
 use imaginarium::Buffer2;
 use rayon::prelude::*;
 
+use crate::concurrency::JobScratchPool;
 use crate::io::image::linear::LinearImage;
 use crate::io::image::linear_pixels::LinearPixels;
 use crate::io::image::{ImageDimensions, ImageMetadata};
@@ -44,18 +45,41 @@ pub(crate) struct ScratchBuffers {
 }
 
 impl ScratchBuffers {
-    fn new(frame_count: usize) -> Self {
-        Self {
-            indices: Vec::with_capacity(frame_count),
-            floats_a: Vec::with_capacity(frame_count),
-            floats_b: Vec::with_capacity(frame_count),
-            usize_a: Vec::with_capacity(frame_count),
-            usize_b: Vec::with_capacity(frame_count),
-            gesd_statistics: Vec::with_capacity(frame_count / 4),
-            gesd_critical_values: Vec::with_capacity(frame_count / 4),
-            gesd_sample_count: 0,
-            gesd_alpha_bits: 0,
-        }
+    /// Reserve room for `frame_count` samples. The rejection methods clear and refill these per
+    /// pixel, so only capacity carries over — a lease reused from the pool is already big enough
+    /// and every call after the first is a no-op.
+    fn reserve(&mut self, frame_count: usize) {
+        self.indices.reserve(frame_count);
+        self.floats_a.reserve(frame_count);
+        self.floats_b.reserve(frame_count);
+        self.usize_a.reserve(frame_count);
+        self.usize_b.reserve(frame_count);
+        self.gesd_statistics.reserve(frame_count / 4);
+        self.gesd_critical_values.reserve(frame_count / 4);
+    }
+}
+
+/// Everything one combine job needs beyond the pixels themselves: the covering frames' values
+/// packed to the front, their effective weights in the same order, and the rejection methods'
+/// own working buffers.
+///
+/// Leased from a [`JobScratchPool`] rather than built in a `for_each_init` init closure, because
+/// the row loop below runs once per chunk per channel — a fresh init would rebuild all nine
+/// vectors on every one of those.
+#[derive(Debug, Default)]
+pub(crate) struct CombineScratch {
+    values: Vec<f32>,
+    eff_weights: Vec<f32>,
+    buffers: ScratchBuffers,
+}
+
+impl CombineScratch {
+    /// Size the gather buffers for `frame_count` frames. `values` and `eff_weights` are indexed
+    /// directly, so they need the length, not just the capacity.
+    fn resize(&mut self, frame_count: usize) {
+        self.values.resize(frame_count, 0.0);
+        self.eff_weights.resize(frame_count, 0.0);
+        self.buffers.reserve(frame_count);
     }
 }
 
@@ -710,6 +734,9 @@ impl FrameCache {
         let mut output_linear_variance = planes
             .variance
             .then(|| LinearPixels::new_zeroed(dimensions));
+        // One pool for the whole combine. `process_chunks` invokes the row loop below once per
+        // chunk per channel, so the leases have to outlive any single `for_each_init`.
+        let scratch_pool = JobScratchPool::<CombineScratch>::default();
         let pixels = self.core.process_chunks(
             &self.frames,
             |frame| &frame.channels,
@@ -771,18 +798,24 @@ impl FrameCache {
                 }
                 rows.into_par_iter().enumerate().for_each_init(
                     || {
-                        (
-                            vec![0.0f32; frame_count],
-                            vec![0.0f32; frame_count],
-                            ScratchBuffers::new(frame_count),
-                        )
+                        let mut scratch = scratch_pool.acquire();
+                        scratch.resize(frame_count);
+                        scratch
                     },
-                    |(values, eff_weights, scratch), (row_in_chunk, mut row)| {
+                    |scratch, (row_in_chunk, mut row)| {
                         // Cancelled: skip the row's work (output stays zero; the
                         // caller discards the partial result and reports Cancelled).
                         if cancel.is_cancelled() {
                             return;
                         }
+                        // One deref, then disjoint field borrows — `combine` takes two of them
+                        // at once, which `scratch.values` / `scratch.buffers` through the lease's
+                        // `DerefMut` could not provide.
+                        let CombineScratch {
+                            values,
+                            eff_weights,
+                            buffers,
+                        } = &mut **scratch;
                         let row_offset = row_in_chunk * width;
                         for pixel_in_row in 0..width {
                             let pixel_idx = row_offset + pixel_in_row;
@@ -817,7 +850,7 @@ impl FrameCache {
                                     values[..covered].iter().all(|v| v.is_finite()),
                                     "non-finite pixel value entered the combine",
                                 );
-                                combine(&mut values[..covered], &eff_weights[..covered], scratch)
+                                combine(&mut values[..covered], &eff_weights[..covered], buffers)
                             };
                             row.value[pixel_in_row] = sample.value;
                             if let Some(weight) = row.weight.as_deref_mut() {
