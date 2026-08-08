@@ -95,5 +95,5 @@ pub(crate) fn weighted_mean_f32(values: &[f32], weights: &[f32]) -> f32 {
 #[cfg(test)]
 mod tests;
 
-#[cfg(test)]
+#[cfg(all(test, feature = "internals"))]
 mod bench;

@@ -6,7 +6,7 @@
 //!
 //! Uses SIMD acceleration when available for statistics computation.
 
-#[cfg(test)]
+#[cfg(all(test, feature = "internals"))]
 mod bench;
 pub(crate) mod estimate;
 mod simd;

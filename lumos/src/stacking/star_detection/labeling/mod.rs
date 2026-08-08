@@ -7,7 +7,7 @@
 //! - Lock-free union-find with atomic operations
 //! - Minimal allocations via buffer reuse
 
-#[cfg(test)]
+#[cfg(all(test, feature = "internals"))]
 mod bench;
 #[cfg(test)]
 mod tests;

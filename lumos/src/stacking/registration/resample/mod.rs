@@ -7,7 +7,7 @@ use crate::io::image::linear_pixels::LinearPixels;
 use crate::stacking::registration::config::WarpParams;
 use crate::stacking::registration::transform::WarpTransform;
 
-#[cfg(test)]
+#[cfg(all(test, feature = "internals"))]
 mod bench;
 mod kernel;
 mod plane;

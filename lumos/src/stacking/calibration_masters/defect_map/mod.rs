@@ -875,7 +875,7 @@ impl DefectMap {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "internals"))]
 mod bench;
 
 #[cfg(test)]

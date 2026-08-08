@@ -12,7 +12,7 @@
 //! in-place `apply`), plus their shared support: [`op`] (the `OpError` contract) and [`wavelet`]
 //! (the multiscale primitive `denoise`/`hdr` build on).
 
-#[cfg(all(test, feature = "real-data"))]
+#[cfg(all(test, feature = "internals", feature = "real-data"))]
 mod bench;
 
 #[cfg(test)]

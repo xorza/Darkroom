@@ -23,7 +23,7 @@ use imaginarium::Buffer2;
 #[cfg(test)]
 mod tests;
 
-#[cfg(test)]
+#[cfg(all(test, feature = "internals"))]
 mod bench;
 
 /// Deblend a component using local maxima detection.

@@ -11,6 +11,7 @@ workspace = true
 [features]
 real-data = []
 ml = ["dep:ort"]
+internals = []
 
 [dependencies]
 common = { workspace = true }

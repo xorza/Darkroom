@@ -358,5 +358,5 @@ pub(crate) fn sigma_clipped_median_mad_arrayvec<const N: usize>(
 #[cfg(test)]
 mod tests;
 
-#[cfg(test)]
+#[cfg(all(test, feature = "internals"))]
 mod bench;
