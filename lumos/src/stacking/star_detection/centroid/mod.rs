@@ -26,7 +26,7 @@ use arrayvec::ArrayVec;
 use glam::Vec2;
 
 use crate::math::size2us::Size2us;
-use crate::math::statistics::{ClippedStats, sigma_clipped_median_mad_arrayvec};
+use crate::math::statistics::ClippedStats;
 use crate::math::{FWHM_TO_SIGMA, sigma_to_fwhm};
 use crate::stacking::star_detection::background::background_estimate::BackgroundEstimate;
 use crate::stacking::star_detection::config::measurement_config::{
@@ -307,7 +307,7 @@ fn sigma_clipped_median_mad(values: &mut [f32], kappa: f32, iterations: usize) -
     let mut deviations: ArrayVec<f32, MAX_ANNULUS_PIXELS> = ArrayVec::new();
     // Resize to match values length
     deviations.extend(std::iter::repeat_n(0.0, values.len()));
-    sigma_clipped_median_mad_arrayvec(values, &mut deviations, kappa, iterations)
+    ClippedStats::sigma_clipped_arrayvec(values, &mut deviations, kappa, iterations)
 }
 
 /// Measure a star candidate: compute sub-pixel position and quality metrics.

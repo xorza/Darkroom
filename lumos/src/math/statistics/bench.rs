@@ -49,7 +49,7 @@ fn bench_sigma_clipped_median_mad(b: ::quickbench::Bencher) {
 
     b.bench(|| {
         let mut d = data.clone();
-        black_box(sigma_clipped_median_mad(
+        black_box(ClippedStats::sigma_clipped(
             black_box(&mut d),
             black_box(&mut deviations),
             3.0,
@@ -66,7 +66,7 @@ fn bench_sigma_clipped_tile_4096(b: ::quickbench::Bencher) {
 
     b.bench(|| {
         let mut d = data.clone();
-        black_box(sigma_clipped_median_mad(
+        black_box(ClippedStats::sigma_clipped(
             black_box(&mut d),
             black_box(&mut deviations),
             3.0,

@@ -61,7 +61,7 @@ fn ml_model_load_timing() {
     let cold = t.elapsed().as_secs_f64();
 
     // Warm: file bytes are now in the OS page cache; a fresh Session still re-parses/re-plans
-    // the graph from scratch (no cross-call session caching in `run_tiled`).
+    // the graph from scratch (no cross-call session caching in `TiledOnnxConfig::run`).
     let t = Instant::now();
     let _session2 = Session::builder()
         .expect("session builder")

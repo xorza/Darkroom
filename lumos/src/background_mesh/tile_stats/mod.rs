@@ -1,58 +1,67 @@
 //! Per-tile SExtractor sky estimation: pixel collection (masked/sampled), sigma-clipped robust
 //! statistics, and the crowding-aware Pearson-mode sky estimator for a single tile box.
 
-use crate::background_mesh::TileStats;
 use crate::bit_buffer2::BitBuffer2;
 use crate::math::rect::URect;
 use crate::math::statistics::ClippedStats;
-use crate::math::statistics::sigma_clipped_median_mad;
 use imaginarium::Buffer2;
 
 /// Maximum samples per tile for statistics computation.
 pub(crate) const MAX_TILE_SAMPLES: usize = 1024;
 
-/// Compute sigma-clipped statistics for the pixels of `tile`.
-///
-/// When a mask is provided, only unmasked pixels are used. If all pixels
-/// are masked, falls back to sampling all pixels (including masked) as a
-/// last resort. A noisy estimate from few background pixels is far better
-/// than a biased estimate contaminated by star flux.
-pub(crate) fn compute_tile_stats(
-    pixels: &Buffer2<f32>,
-    mask: Option<&BitBuffer2>,
-    tile: URect,
-    sigma_clip_iterations: usize,
-    values: &mut Vec<f32>,
-    deviations: &mut Vec<f32>,
-) -> TileStats {
-    values.clear();
+/// Tile statistics computed during background estimation.
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct TileStats {
+    /// Sky level: SExtractor's crowding-aware estimator (Pearson mode, median fallback when
+    /// strongly skewed) over the sigma-clip survivors. Computed by [`TileStats::compute`].
+    pub(crate) sky: f32,
+    pub(crate) sigma: f32,
+}
 
-    match mask {
-        Some(m) => {
-            collect_unmasked_pixels(pixels, m, tile, values);
-            if values.is_empty() {
-                // All pixels masked — no choice but to use all pixels
-                collect_sampled_pixels(pixels, tile, values);
+impl TileStats {
+    /// Compute sigma-clipped statistics for the pixels of `tile`.
+    ///
+    /// When a mask is provided, only unmasked pixels are used. If all pixels
+    /// are masked, falls back to sampling all pixels (including masked) as a
+    /// last resort. A noisy estimate from few background pixels is far better
+    /// than a biased estimate contaminated by star flux.
+    pub(crate) fn compute(
+        pixels: &Buffer2<f32>,
+        mask: Option<&BitBuffer2>,
+        tile: URect,
+        sigma_clip_iterations: usize,
+        values: &mut Vec<f32>,
+        deviations: &mut Vec<f32>,
+    ) -> Self {
+        values.clear();
+
+        match mask {
+            Some(m) => {
+                collect_unmasked_pixels(pixels, m, tile, values);
+                if values.is_empty() {
+                    // All pixels masked — no choice but to use all pixels
+                    collect_sampled_pixels(pixels, tile, values);
+                }
+            }
+            None => {
+                if tile.area() <= MAX_TILE_SAMPLES {
+                    collect_all_pixels(pixels, tile, values);
+                } else {
+                    collect_sampled_pixels(pixels, tile, values);
+                }
             }
         }
-        None => {
-            if tile.area() <= MAX_TILE_SAMPLES {
-                collect_all_pixels(pixels, tile, values);
-            } else {
-                collect_sampled_pixels(pixels, tile, values);
-            }
+
+        if values.is_empty() {
+            return Self::default();
         }
-    }
 
-    if values.is_empty() {
-        return TileStats::default();
-    }
+        let stats = ClippedStats::sigma_clipped(values, deviations, 3.0, sigma_clip_iterations);
 
-    let stats = sigma_clipped_median_mad(values, deviations, 3.0, sigma_clip_iterations);
-
-    TileStats {
-        sky: sextractor_sky(&stats),
-        sigma: stats.sigma,
+        Self {
+            sky: sextractor_sky(&stats),
+            sigma: stats.sigma,
+        }
     }
 }
 

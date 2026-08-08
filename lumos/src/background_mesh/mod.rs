@@ -14,7 +14,7 @@ mod tile_stats;
 pub(crate) mod workspace;
 
 use crate::background_mesh::spline::solve_natural_spline_d2;
-use crate::background_mesh::tile_stats::compute_tile_stats;
+use crate::background_mesh::tile_stats::TileStats;
 use crate::background_mesh::workspace::TileScratch;
 use crate::bit_buffer2::BitBuffer2;
 use crate::concurrency::JobScratchPool;
@@ -24,15 +24,6 @@ use crate::math::statistics::median_f32_mut;
 use crate::math::vec2us::Vec2us;
 use imaginarium::Buffer2;
 use rayon::prelude::*;
-
-/// Tile statistics computed during background estimation.
-#[derive(Clone, Copy, Debug, Default)]
-pub(crate) struct TileStats {
-    /// Sky level: SExtractor's crowding-aware estimator (Pearson mode, median fallback when
-    /// strongly skewed) over the sigma-clip survivors. Computed by `tile_stats::compute_tile_stats`.
-    pub(crate) sky: f32,
-    pub(crate) sigma: f32,
-}
 
 /// The `sky` of a tile, as a function so the spline solve can be run over either plane.
 fn sky(stats: &TileStats) -> f32 {
@@ -175,7 +166,7 @@ impl TileGrid {
                         ),
                     );
 
-                    *out = compute_tile_stats(
+                    *out = TileStats::compute(
                         pixels,
                         mask,
                         tile,

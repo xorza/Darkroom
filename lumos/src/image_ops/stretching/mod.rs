@@ -30,7 +30,7 @@ use rayon::prelude::*;
 use crate::error::InvalidConfigField;
 use crate::image_ops::op::OpError;
 use crate::io::image::linear::LinearImage;
-use crate::math::statistics::{median_and_mad_f32_mut, median_f32_mut};
+use crate::math::statistics::{MedianMad, median_f32_mut};
 
 #[cfg(all(test, feature = "internals"))]
 mod bench;
@@ -552,7 +552,7 @@ fn build_curve(samples: &mut [f32], method: StretchMethod) -> Curve {
             shadow_sigmas,
             target_background,
         } => {
-            let background = median_and_mad_f32_mut(samples);
+            let background = MedianMad::of_mut(samples);
             Curve::Stf(StfCurve::new(
                 background.median,
                 background.sigma(),

@@ -10,7 +10,7 @@ use fits_well::{FitsReader, FitsWriter};
 
 use crate::io::image::cfa::CfaImage;
 use crate::io::image::fits::cfa::{
-    CFA_FITS_FORMAT, CFA_FITS_VERSION, CfaFitsHduMetadata, encode_cfa_hdu,
+    CFA_FITS_FORMAT, CFA_FITS_VERSION, CfaFitsHdu, CfaFitsHduMetadata,
 };
 use crate::io::image::fits::decode::read_cfa_hdu;
 use crate::io::image::fits::error::fits_to_io;
@@ -97,7 +97,7 @@ pub(super) fn save(path: &Path, masters: &CalibrationMasters) -> std::io::Result
             let Some(image) = master.image else {
                 continue;
             };
-            let encoded = encode_cfa_hdu(
+            let encoded = CfaFitsHdu::encode(
                 image,
                 CfaFitsHduMetadata {
                     extname: Some(master.role.extname()),

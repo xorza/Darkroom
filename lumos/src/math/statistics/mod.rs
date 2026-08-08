@@ -19,6 +19,20 @@ pub(crate) struct MedianMad {
 }
 
 impl MedianMad {
+    /// Measure both together, in one pass over `data`.
+    ///
+    /// More efficient than computing separately since the median is needed for the MAD.
+    /// Mutates the input buffer.
+    pub(crate) fn of_mut(data: &mut [f32]) -> Self {
+        debug_assert!(!data.is_empty());
+
+        let median = median_f32_mut(data);
+        abs_deviation_inplace(data, median);
+        let mad = median_f32_mut(data);
+
+        Self { median, mad }
+    }
+
     /// The MAD rescaled to the standard deviation of an equivalent normal distribution.
     #[inline]
     pub(crate) fn sigma(self) -> f32 {
@@ -133,20 +147,6 @@ pub(crate) fn mad_f32_with_scratch(values: &[f32], median: f32, scratch: &mut Ve
     median_f32_mut(scratch)
 }
 
-/// Compute median and MAD (Median Absolute Deviation) together.
-///
-/// More efficient than computing separately since median is needed for MAD.
-/// Mutates the input buffer.
-pub(crate) fn median_and_mad_f32_mut(data: &mut [f32]) -> MedianMad {
-    debug_assert!(!data.is_empty());
-
-    let median = median_f32_mut(data);
-    abs_deviation_inplace(data, median);
-    let mad = median_f32_mut(data);
-
-    MedianMad { median, mad }
-}
-
 /// MAD floored at `floor_fraction * center`.
 ///
 /// A near-degenerate distribution (values nearly identical) has MAD ≈ 0, which would
@@ -157,7 +157,7 @@ pub(crate) fn mad_floored(mad: f32, center: f32, floor_fraction: f32) -> f32 {
     mad.max(center * floor_fraction)
 }
 
-/// Statistics of the sigma-clip survivors, from [`sigma_clipped_median_mad`].
+/// Statistics of the sigma-clip survivors, from [`ClippedStats::sigma_clipped`].
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct ClippedStats {
     pub median: f32,
@@ -182,6 +182,57 @@ impl ClippedStats {
             sigma: location.sigma(),
             mean,
         }
+    }
+
+    /// Sigma-clipped median, MAD-sigma and mean of `values`.
+    ///
+    /// Iteratively rejects outliers beyond `kappa × sigma` from the median.
+    /// Uses scratch buffer `deviations` for efficiency when called repeatedly.
+    ///
+    /// `values` must be NaN-free — the clip iteration medians with [`median_f32_fast`].
+    ///
+    /// # Arguments
+    /// * `values` - Mutable slice of values (will be reordered)
+    /// * `deviations` - Scratch buffer for deviations (reused between calls)
+    /// * `kappa` - Number of sigma for clipping threshold
+    /// * `iterations` - Number of clipping iterations
+    pub(crate) fn sigma_clipped(
+        values: &mut [f32],
+        deviations: &mut Vec<f32>,
+        kappa: f32,
+        iterations: usize,
+    ) -> Self {
+        if values.is_empty() {
+            return ClippedStats::ZERO;
+        }
+
+        deviations.resize(values.len(), 0.0);
+        sigma_clipped_core(values, deviations, kappa, iterations)
+    }
+
+    /// [`Self::sigma_clipped`] over an `ArrayVec` scratch buffer, for zero heap allocation.
+    ///
+    /// Same computation, including its NaN-free requirement; only the scratch buffer differs, so
+    /// that stamp-sized callers can keep it on the stack.
+    pub(crate) fn sigma_clipped_arrayvec<const N: usize>(
+        values: &mut [f32],
+        deviations: &mut arrayvec::ArrayVec<f32, N>,
+        kappa: f32,
+        iterations: usize,
+    ) -> Self {
+        if values.is_empty() {
+            return ClippedStats::ZERO;
+        }
+        assert!(
+            values.len() <= N,
+            "ClippedStats::sigma_clipped_arrayvec: values.len()={} exceeds deviations capacity N={N}",
+            values.len()
+        );
+
+        // Sized to exactly `values.len()` (≤ N, asserted above), as the core requires.
+        deviations.clear();
+        deviations.extend(std::iter::repeat_n(0.0f32, values.len()));
+        sigma_clipped_core(values, deviations.as_mut_slice(), kappa, iterations)
     }
 }
 
@@ -293,68 +344,6 @@ fn sigma_clipped_core(
 }
 
 /// Compute sigma-clipped median and MAD-based sigma.
-///
-/// Iteratively rejects outliers beyond `kappa × sigma` from the median.
-/// Uses scratch buffer `deviations` for efficiency when called repeatedly.
-///
-/// `values` must be NaN-free — the clip iteration medians with [`median_f32_fast`].
-///
-/// # Arguments
-/// * `values` - Mutable slice of values (will be reordered)
-/// * `deviations` - Scratch buffer for deviations (reused between calls)
-/// * `kappa` - Number of sigma for clipping threshold
-/// * `iterations` - Number of clipping iterations
-///
-/// # Returns
-/// [`ClippedStats`] (median, MAD-sigma, mean) of the clip survivors.
-pub(crate) fn sigma_clipped_median_mad(
-    values: &mut [f32],
-    deviations: &mut Vec<f32>,
-    kappa: f32,
-    iterations: usize,
-) -> ClippedStats {
-    if values.is_empty() {
-        return ClippedStats::ZERO;
-    }
-
-    deviations.resize(values.len(), 0.0);
-    sigma_clipped_core(values, deviations, kappa, iterations)
-}
-
-/// Sigma-clipped median and MAD computation using ArrayVec for zero heap allocation.
-///
-/// Same computation as [`sigma_clipped_median_mad`], including its NaN-free requirement; only
-/// the scratch buffer differs, so that stamp-sized callers can keep it on the stack.
-///
-/// # Arguments
-/// * `values` - Mutable slice of values (will be reordered)
-/// * `deviations` - Pre-sized ArrayVec scratch buffer for deviations
-/// * `kappa` - Number of sigma for clipping threshold
-/// * `iterations` - Number of clipping iterations
-///
-/// # Returns
-/// [`ClippedStats`] (median, MAD-sigma, mean) of the clip survivors.
-pub(crate) fn sigma_clipped_median_mad_arrayvec<const N: usize>(
-    values: &mut [f32],
-    deviations: &mut arrayvec::ArrayVec<f32, N>,
-    kappa: f32,
-    iterations: usize,
-) -> ClippedStats {
-    if values.is_empty() {
-        return ClippedStats::ZERO;
-    }
-    assert!(
-        values.len() <= N,
-        "sigma_clipped_median_mad_arrayvec: values.len()={} exceeds deviations capacity N={N}",
-        values.len()
-    );
-
-    // Sized to exactly `values.len()` (≤ N, asserted above), as the core requires.
-    deviations.clear();
-    deviations.extend(std::iter::repeat_n(0.0f32, values.len()));
-    sigma_clipped_core(values, deviations.as_mut_slice(), kappa, iterations)
-}
-
 #[cfg(test)]
 mod tests;
 

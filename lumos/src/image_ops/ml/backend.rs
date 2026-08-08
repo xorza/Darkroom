@@ -57,57 +57,57 @@ fn model_err(e: ort::Error) -> MlError {
     MlError::Model(e.to_string())
 }
 
-/// Run the model over `image` in 512² tiles (NHWC `[0,1]` in, NHWC out), feather-blending the
-/// overlaps. Returns a new image with the same channel count as the input (grayscale is replicated
-/// to RGB for the model, then averaged back). Expects a display-domain `[0, 1]` master.
-///
-/// Unlike the in-place ops this returns a fresh image rather than mutating: the model's output is a
-/// separate buffer from its input, and the tile loop reads the input long after it has begun
-/// writing the output.
-pub(crate) fn run_tiled(
-    image: &LinearImage,
-    config: &TiledOnnxConfig,
-) -> Result<LinearImage, MlError> {
-    let planar = image;
-    let size = Size2us::new(image.width(), image.height());
-    if size.width < WINDOW || size.height < WINDOW {
-        return Err(MlError::TooSmall(size));
-    }
-    assert!(config.stride > 0, "TiledOnnxConfig.stride must be > 0");
-    let mut session = Session::builder()
-        .map_err(model_err)?
-        .commit_from_file(&config.weights)
-        .map_err(model_err)?;
-
-    let pixels = size.pixel_count();
-    let mut acc = [vec![0.0f32; pixels], vec![0.0; pixels], vec![0.0; pixels]];
-    let mut weight = vec![0.0f32; pixels];
-    // Reused across every tile: `TensorRef::from_array_view` borrows this buffer for the
-    // duration of `session.run` instead of taking ownership, so one allocation serves the
-    // whole tile loop instead of one per tile (up to ~345 for a full 24 MP frame).
-    let mut input = vec![0.0f32; WINDOW * WINDOW * 3];
-
-    let xs = tile_starts(size.width, config.stride);
-    let ys = tile_starts(size.height, config.stride);
-    for &ty in &ys {
-        for &tx in &xs {
-            fill_tile_input(planar, Vec2us::new(tx, ty), &mut input);
-            let tensor =
-                TensorRef::from_array_view(([1usize, WINDOW, WINDOW, 3], input.as_slice()))
-                    .map_err(model_err)?;
-            let outputs = session.run(ort::inputs![tensor]).map_err(model_err)?;
-            let (_shape, tile) = outputs[0].try_extract_tensor::<f32>().map_err(model_err)?;
-            let expected = WINDOW * WINDOW * 3;
-            if tile.len() != expected {
-                return Err(MlError::Model(format!(
-                    "model output has {} values, expected {expected} (NHWC [1,{WINDOW},{WINDOW},3])",
-                    tile.len()
-                )));
-            }
-            accumulate(tile, Vec2us::new(tx, ty), size.width, &mut acc, &mut weight);
+impl TiledOnnxConfig {
+    /// Run the model over `image` in 512² tiles (NHWC `[0,1]` in, NHWC out), feather-blending the
+    /// overlaps. Returns a new image with the same channel count as the input (grayscale is
+    /// replicated to RGB for the model, then averaged back). Expects a display-domain `[0, 1]`
+    /// master.
+    ///
+    /// Unlike the in-place ops this returns a fresh image rather than mutating: the model's output
+    /// is a separate buffer from its input, and the tile loop reads the input long after it has
+    /// begun writing the output.
+    pub(crate) fn run(&self, image: &LinearImage) -> Result<LinearImage, MlError> {
+        let planar = image;
+        let size = Size2us::new(image.width(), image.height());
+        if size.width < WINDOW || size.height < WINDOW {
+            return Err(MlError::TooSmall(size));
         }
+        assert!(self.stride > 0, "TiledOnnxConfig.stride must be > 0");
+        let mut session = Session::builder()
+            .map_err(model_err)?
+            .commit_from_file(&self.weights)
+            .map_err(model_err)?;
+
+        let pixels = size.pixel_count();
+        let mut acc = [vec![0.0f32; pixels], vec![0.0; pixels], vec![0.0; pixels]];
+        let mut weight = vec![0.0f32; pixels];
+        // Reused across every tile: `TensorRef::from_array_view` borrows this buffer for the
+        // duration of `session.run` instead of taking ownership, so one allocation serves the
+        // whole tile loop instead of one per tile (up to ~345 for a full 24 MP frame).
+        let mut input = vec![0.0f32; WINDOW * WINDOW * 3];
+
+        let xs = tile_starts(size.width, self.stride);
+        let ys = tile_starts(size.height, self.stride);
+        for &ty in &ys {
+            for &tx in &xs {
+                fill_tile_input(planar, Vec2us::new(tx, ty), &mut input);
+                let tensor =
+                    TensorRef::from_array_view(([1usize, WINDOW, WINDOW, 3], input.as_slice()))
+                        .map_err(model_err)?;
+                let outputs = session.run(ort::inputs![tensor]).map_err(model_err)?;
+                let (_shape, tile) = outputs[0].try_extract_tensor::<f32>().map_err(model_err)?;
+                let expected = WINDOW * WINDOW * 3;
+                if tile.len() != expected {
+                    return Err(MlError::Model(format!(
+                        "model output has {} values, expected {expected} (NHWC [1,{WINDOW},{WINDOW},3])",
+                        tile.len()
+                    )));
+                }
+                accumulate(tile, Vec2us::new(tx, ty), size.width, &mut acc, &mut weight);
+            }
+        }
+        Ok(build_output(planar.is_rgb(), &acc, &weight, size))
     }
-    Ok(build_output(planar.is_rgb(), &acc, &weight, size))
 }
 
 /// Tile origins covering `dim` with 512-px windows at `stride`, the last one flush to the edge.
@@ -127,7 +127,7 @@ fn tile_starts(dim: usize, stride: usize) -> Vec<usize> {
 
 /// Fill the reused NHWC `[1,512,512,3]` `input` buffer from the tile at `(tx, ty)`, clamped to
 /// `[0,1]`. Grayscale replicates its single channel to R=G=B. `input` is the caller's
-/// tile-loop-lifetime scratch buffer (see `run_tiled`), overwritten in full every call.
+/// tile-loop-lifetime scratch buffer (see [`TiledOnnxConfig::run`]), overwritten in full every call.
 fn fill_tile_input(planar: &LinearImage, tile: Vec2us, input: &mut [f32]) {
     let w = planar.width();
     let chans: [&[f32]; 3] = if planar.is_rgb() {
