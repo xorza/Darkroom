@@ -1,4 +1,5 @@
 pub(crate) mod demosaic;
+mod error;
 mod normalize;
 
 #[cfg(all(test, feature = "internals"))]
@@ -18,6 +19,7 @@ use std::slice;
 use std::time::Instant;
 
 use crate::io::image::error::ImageError;
+use crate::io::raw::error::BlackLevelError;
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 
@@ -43,20 +45,46 @@ use normalize::{normalize_u16_to_f32_into, normalize_u16_to_f32_parallel};
 /// Camera-RAW extensions accepted by this decoder.
 pub const RAW_EXTENSIONS: &[&str] = &["raf", "cr2", "cr3", "nef", "arw", "dng"];
 
-/// RAII guard for libraw_data_t to ensure proper cleanup.
+/// An open libraw instance and, where the platform needed one, the file bytes it parses in place.
+///
+/// One owner for both, because they have one lifetime: `libraw_open_buffer` leaves libraw holding
+/// a pointer into `buf`, so releasing the bytes first would leave it reading freed memory. The
+/// handle is only ever reachable through [`Self::as_ptr`], which borrows `self`, so no caller can
+/// hold it past the value that frees it.
 #[derive(Debug)]
-struct LibrawGuard(*mut sys::libraw_data_t);
+struct LibrawState {
+    inner: *mut sys::libraw_data_t,
+    buf: Option<Vec<u8>>,
+}
 
-// SAFETY: LibrawGuard owns the pointer and ensures exclusive access.
-// The libraw library itself is thread-safe when using separate instances.
-unsafe impl Send for LibrawGuard {}
-
-impl Drop for LibrawGuard {
-    fn drop(&mut self) {
-        if !self.0.is_null() {
-            // SAFETY: We own this pointer and it was allocated by libraw_init.
-            unsafe { sys::libraw_close(self.0) };
+impl LibrawState {
+    /// Initialize libraw and open `path`, reading the file into memory where the platform's paths
+    /// cannot go through libraw's narrow file API.
+    fn open(path: &Path) -> Result<Self, ImageError> {
+        // SAFETY: libraw_init returns a valid pointer or null on failure.
+        let inner = unsafe { sys::libraw_init(0) };
+        if inner.is_null() {
+            return Err(raw_err(path, "libraw: Failed to initialize"));
         }
+
+        // Owns `inner` from here, so a failure to open still frees it.
+        let mut state = Self { inner, buf: None };
+        state.buf = open_libraw_input(state.inner, path)?;
+        Ok(state)
+    }
+
+    /// The libraw instance, borrowed for no longer than the state that frees it.
+    fn as_ptr(&self) -> *mut sys::libraw_data_t {
+        self.inner
+    }
+}
+
+impl Drop for LibrawState {
+    fn drop(&mut self) {
+        // Runs ahead of the fields, which is the order libraw needs: it may still be pointing into
+        // `buf`, and `buf` is dropped only after this returns.
+        // SAFETY: We own this pointer and it was allocated by libraw_init.
+        unsafe { sys::libraw_close(self.inner) };
     }
 }
 
@@ -114,27 +142,25 @@ fn consolidate_black_levels(
     black_raw: u32,
     maximum_raw: u32,
     visible_filters: u32,
-) -> Result<BlackLevel, String> {
+) -> Result<BlackLevel, BlackLevelError> {
     let mut cblack = [0u32; 4104];
     cblack.copy_from_slice(cblack_raw);
     let mut black = black_raw;
 
     if cblack[4] > 0 && cblack[5] > 0 {
-        let pattern_size = (cblack[4] as usize)
-            .checked_mul(cblack[5] as usize)
-            .ok_or_else(|| {
-                format!(
-                    "invalid spatial black pattern dimensions: {}x{}",
-                    cblack[5], cblack[4]
-                )
-            })?;
-        if pattern_size > cblack.len() - 6 {
-            return Err(format!(
-                "spatial black pattern {}x{} exceeds {} entries",
-                cblack[5],
-                cblack[4],
-                cblack.len() - 6
-            ));
+        let pattern_size = (cblack[4] as usize).checked_mul(cblack[5] as usize).ok_or(
+            BlackLevelError::SpatialPatternOverflow {
+                width: cblack[5],
+                height: cblack[4],
+            },
+        )?;
+        let capacity = cblack.len() - 6;
+        if pattern_size > capacity {
+            return Err(BlackLevelError::SpatialPatternTooLarge {
+                width: cblack[5],
+                height: cblack[4],
+                capacity,
+            });
         }
     }
 
@@ -214,9 +240,10 @@ fn consolidate_black_levels(
     // File-derived metadata: a corrupt RAW can report maximum <= black. Return an error rather
     // than panicking at this trust boundary.
     if effective_max <= 0.0 {
-        return Err(format!(
-            "invalid black level: common black {common} >= maximum {maximum_raw}"
-        ));
+        return Err(BlackLevelError::BlackExceedsMaximum {
+            black,
+            maximum: maximum_raw,
+        });
     }
     let inv_range = 1.0 / effective_max;
     let mut channel_delta_norm = [0f32; 4];
@@ -438,9 +465,7 @@ fn normalize_active_area<const CLAMP: bool>(
 /// Unpacked raw file data from libraw, ready for sensor-specific processing.
 #[derive(Debug)]
 struct UnpackedRaw {
-    inner: *mut sys::libraw_data_t,
-    guard: Option<LibrawGuard>,
-    buf: Option<Vec<u8>>,
+    libraw: LibrawState,
     path: PathBuf,
     area: RawActiveArea,
     black_level: BlackLevel,
@@ -454,8 +479,8 @@ impl UnpackedRaw {
     /// Get the raw u16 image pointer and total pixel count.
     /// Returns the pointer and count, or an error if null.
     fn raw_image_slice(&self) -> Result<&[u16], ImageError> {
-        // SAFETY: inner is valid and unpack succeeded.
-        let raw_image_ptr = unsafe { (*self.inner).rawdata.raw_image };
+        // SAFETY: the libraw instance is valid and unpack succeeded.
+        let raw_image_ptr = unsafe { (*self.libraw.as_ptr()).rawdata.raw_image };
         if raw_image_ptr.is_null() {
             return Err(raw_err(&self.path, "libraw: raw_image is null"));
         }
@@ -548,7 +573,7 @@ impl UnpackedRaw {
         );
 
         let demosaic_start = Instant::now();
-        let rgb_pixels = rcd::demosaic(&bayer, cancel)
+        let mut rgb_pixels = rcd::demosaic(&bayer, cancel)
             .map_err(|source| demosaic_err(&self.path, source.into()))?;
         let demosaic_elapsed = demosaic_start.elapsed();
 
@@ -559,59 +584,69 @@ impl UnpackedRaw {
             demosaic_elapsed.as_secs_f64() * 1000.0
         );
 
+        clamp_interpolated(&mut rgb_pixels);
         Ok(rgb_pixels)
     }
 
     /// Extract LibRaw's visible-origin X-Trans pattern for active-area consumers.
     fn visible_xtrans_pattern(&self) -> [[u8; 6]; 6] {
-        // SAFETY: inner is valid and xtrans is populated for X-Trans sensors.
-        let pattern = unsafe { (*self.inner).idata.xtrans };
+        // SAFETY: the libraw instance is valid and xtrans is populated for X-Trans sensors.
+        let pattern = unsafe { (*self.libraw.as_ptr()).idata.xtrans };
         xtrans_pattern_from_libraw(pattern)
     }
 
     /// Extract LibRaw's absolute X-Trans pattern for full-raw-buffer consumers.
     fn raw_xtrans_pattern(&self) -> [[u8; 6]; 6] {
-        // SAFETY: inner is valid and xtrans_abs is populated for X-Trans sensors.
-        let pattern = unsafe { (*self.inner).idata.xtrans_abs };
+        // SAFETY: the libraw instance is valid and xtrans_abs is populated for X-Trans sensors.
+        let pattern = unsafe { (*self.libraw.as_ptr()).idata.xtrans_abs };
         xtrans_pattern_from_libraw(pattern)
     }
 
-    /// Process X-Trans sensor data using our Markesteijn demosaic.
+    /// Process X-Trans sensor data using our Markesteijn demosaic. Returns planar `[R, G, B]`
+    /// channels.
     ///
-    /// Drops LibRaw state and any fallback input buffer before the expensive demosaicing step,
-    /// reducing peak memory by ~77 MB.
+    /// Takes `self` by value so libraw's state — ~77 MB of it — is released before the demosaic
+    /// allocates its own working set, and so the compiler, rather than the order of the lines in
+    /// the caller, is what stops anything reaching a libraw instance this has already freed.
     fn demosaic_xtrans(
-        &mut self,
+        self,
         raw_pattern: [[u8; 6]; 6],
         cancel: &CancelToken,
     ) -> Result<[Vec<f32>; 3], ImageError> {
-        let raw_data = self.raw_image_slice()?;
-
         // Copy raw u16 data so we can drop libraw before demosaicing.
         // P×2 bytes (~47 MB) instead of P×4 bytes (~93 MB) for normalized f32.
-        let raw_u16: Vec<u16> = raw_data.to_vec();
+        let raw_u16: Vec<u16> = self.raw_image_slice()?.to_vec();
+
+        let UnpackedRaw {
+            libraw,
+            path,
+            area,
+            black_level,
+            ..
+        } = self;
+        drop(libraw);
 
         // Convert 4-channel black to 3-channel for X-Trans (R=0, G=1, B=2)
-        let bl = &self.black_level;
-        let channel_black = [bl.per_channel[0], bl.per_channel[1], bl.per_channel[2]];
+        let channel_black = [
+            black_level.per_channel[0],
+            black_level.per_channel[1],
+            black_level.per_channel[2],
+        ];
 
-        // Drop libraw and any fallback file buffer to reduce peak memory during demosaicing
-        self.guard.take();
-        self.buf.take();
-
-        let pixels = xtrans::process_xtrans(
+        let mut pixels = xtrans::process_xtrans(
             &raw_u16,
-            self.area.raw,
-            self.area.active,
-            self.area.margin,
+            area.raw,
+            area.active,
+            area.margin,
             raw_pattern,
             channel_black,
-            bl.inv_range,
-            bl.repeat.as_ref(),
+            black_level.inv_range,
+            black_level.repeat.as_ref(),
             cancel,
         )
-        .map_err(|source| demosaic_err(&self.path, source))?;
+        .map_err(|source| demosaic_err(&path, source))?;
 
+        clamp_interpolated(&mut pixels);
         Ok(pixels)
     }
 
@@ -621,28 +656,29 @@ impl UnpackedRaw {
         let demosaic_start = Instant::now();
 
         // Configure libraw for linear output (no gamma, no color conversion)
-        // SAFETY: inner is valid
+        // SAFETY: the libraw instance is valid
         unsafe {
+            let inner = self.libraw.as_ptr();
             // Output in linear color space (no gamma curve)
-            (*self.inner).params.gamm[0] = 1.0;
-            (*self.inner).params.gamm[1] = 1.0;
+            (*inner).params.gamm[0] = 1.0;
+            (*inner).params.gamm[1] = 1.0;
             // No brightness adjustment
-            (*self.inner).params.bright = 1.0;
+            (*inner).params.bright = 1.0;
             // LibRaw otherwise falls back to daylight WB when camera and auto WB are disabled.
-            (*self.inner).params.user_mul = [1.0; 4];
-            (*self.inner).params.use_auto_wb = 0;
-            (*self.inner).params.use_camera_wb = 0;
+            (*inner).params.user_mul = [1.0; 4];
+            (*inner).params.use_auto_wb = 0;
+            (*inner).params.use_camera_wb = 0;
             // Output 16-bit
-            (*self.inner).params.output_bps = 16;
+            (*inner).params.output_bps = 16;
             // Linear color space (raw)
-            (*self.inner).params.output_color = 0;
+            (*inner).params.output_color = 0;
             // No auto-brightness
-            (*self.inner).params.no_auto_bright = 1;
+            (*inner).params.no_auto_bright = 1;
         }
 
         // Run libraw's demosaic
-        // SAFETY: inner is valid and configured
-        let ret = unsafe { sys::libraw_dcraw_process(self.inner) };
+        // SAFETY: the libraw instance is valid and configured
+        let ret = unsafe { sys::libraw_dcraw_process(self.libraw.as_ptr()) };
         if ret != 0 {
             return Err(raw_err(
                 &self.path,
@@ -651,9 +687,10 @@ impl UnpackedRaw {
         }
 
         // Get the processed image
-        // SAFETY: inner is valid and dcraw_process succeeded
+        // SAFETY: the libraw instance is valid and dcraw_process succeeded
         let mut errc: i32 = 0;
-        let processed_ptr = unsafe { sys::libraw_dcraw_make_mem_image(self.inner, &mut errc) };
+        let processed_ptr =
+            unsafe { sys::libraw_dcraw_make_mem_image(self.libraw.as_ptr(), &mut errc) };
         if processed_ptr.is_null() || errc != 0 {
             return Err(raw_err(
                 &self.path,
@@ -680,6 +717,18 @@ impl UnpackedRaw {
             img_bits,
             data_size
         );
+
+        // libraw reports whatever the sensor gave it, and `output_color = 0` above skips the
+        // conversion that would otherwise fold a four-colour sensor down to RGB. This is the trust
+        // boundary: reject a geometry `ImageDimensions` cannot hold rather than assert on it.
+        if img_width == 0 || img_height == 0 || (img_colors != 1 && img_colors != 3) {
+            return Err(raw_err(
+                &self.path,
+                format!(
+                    "libraw: demosaic produced unusable geometry {img_width}x{img_height}x{img_colors}"
+                ),
+            ));
+        }
 
         // The data array is at the end of the struct (flexible array member)
         // SAFETY: processed_ptr is valid, data_size tells us the valid range
@@ -742,23 +791,18 @@ impl UnpackedRaw {
 
         Ok(LibrawDemosaiced {
             pixels,
-            size: Size2us::new(img_width, img_height),
-            channels: img_colors,
+            dimensions: ImageDimensions::new(Size2us::new(img_width, img_height), img_colors),
         })
     }
 }
 
 /// What libraw's own demosaic produced: interleaved samples normalized to `[0, 1]`, and the
 /// geometry they are laid out by — libraw picks the output size and channel count itself, so
-/// neither is known before the call.
-///
-/// Not an [`ImageDimensions`]: that admits only 1 or 3 channels, and libraw reports whatever the
-/// sensor gave it.
+/// neither is known before the call, and both are checked there rather than trusted here.
 #[derive(Debug)]
 struct LibrawDemosaiced {
     pixels: Vec<f32>,
-    size: Size2us,
-    channels: usize,
+    dimensions: ImageDimensions,
 }
 
 /// Open and unpack a raw file using libraw.
@@ -766,16 +810,9 @@ struct LibrawDemosaiced {
 /// Performs: libraw init, file open, unpack, dimension/color
 /// validation, sensor type detection, and ISO extraction.
 fn open_raw(path: &Path) -> Result<UnpackedRaw, ImageError> {
-    // SAFETY: libraw_init returns a valid pointer or null on failure.
-    let inner = unsafe { sys::libraw_init(0) };
-    if inner.is_null() {
-        return Err(raw_err(path, "libraw: Failed to initialize"));
-    }
-
-    // Guard ensures cleanup even on early return or panic
-    let guard = LibrawGuard(inner);
-
-    let buf = open_libraw_input(inner, path)?;
+    let libraw = LibrawState::open(path)?;
+    // Valid for the whole function: `libraw` owns it and outlives every use below.
+    let inner = libraw.as_ptr();
 
     // SAFETY: inner is valid and open_buffer succeeded.
     let ret = unsafe { sys::libraw_unpack(inner) };
@@ -821,8 +858,8 @@ fn open_raw(path: &Path) -> Result<UnpackedRaw, ImageError> {
     }
 
     // SAFETY: inner is valid, color struct is initialized after unpack.
-    let black_raw = unsafe { (*inner).color.black } as u32;
-    let maximum_raw = unsafe { (*inner).color.maximum } as u32;
+    let black_raw = unsafe { (*inner).color.black };
+    let maximum_raw = unsafe { (*inner).color.maximum };
 
     // Get sensor info from libraw metadata
     // SAFETY: inner is valid, idata struct is initialized after unpack.
@@ -850,7 +887,7 @@ fn open_raw(path: &Path) -> Result<UnpackedRaw, ImageError> {
     let cblack_raw: [u32; 4104] = unsafe { (*inner).color.cblack };
     let black_level =
         consolidate_black_levels(&cblack_raw, black_raw, maximum_raw, visible_filters)
-            .map_err(|reason| raw_err(path, reason))?;
+            .map_err(|source| raw_err(path, source.to_string()))?;
 
     // SAFETY: inner is valid, and color.cam_mul is initialized after unpack.
     let cam_mul = unsafe { (*inner).color.cam_mul };
@@ -858,9 +895,7 @@ fn open_raw(path: &Path) -> Result<UnpackedRaw, ImageError> {
     let iso = extract_iso(inner);
 
     Ok(UnpackedRaw {
-        inner,
-        guard: Some(guard),
-        buf,
+        libraw,
         path: path.to_path_buf(),
         area: RawActiveArea {
             raw: Size2us::new(raw_width, raw_height),
@@ -913,17 +948,12 @@ fn open_libraw_input(
     Ok(Some(buf))
 }
 
-/// Load raw file using libraw (C library, broader camera support).
+/// How a decoded frame's samples are laid out.
 ///
-/// Demosaicing strategy:
-/// - Monochrome sensors: no demosaic needed, returns grayscale
-/// - Known Bayer patterns (RGGB, BGGR, GRBG, GBRG): fast SIMD demosaic
-/// - Unknown patterns (X-Trans, etc.): libraw's built-in demosaic (slower but correct)
-///
-/// Our RGB demosaic kernels emit planar `[R, G, B]`, taken zero-copy into the
-/// image via [`LinearImage::from_planar_channels`]. The mono path and libraw's
-/// fallback emit a single flat buffer — grayscale or interleaved RGB — that
-/// [`LinearImage::from_pixels`] handles (grayscale zero-copy, RGB de-interleaved).
+/// Our RGB demosaic kernels emit planar `[R, G, B]`, taken zero-copy into the image via
+/// [`LinearImage::from_planar_channels`]. The mono path and libraw's fallback emit a single flat
+/// buffer — grayscale or interleaved RGB — that [`LinearImage::from_pixels`] handles (grayscale
+/// zero-copy, RGB de-interleaved).
 #[derive(Debug)]
 enum DemosaicedPixels {
     Planar([Vec<f32>; 3]),
@@ -945,20 +975,37 @@ struct DecodedRawPreview {
     demosaic: DemosaicProvenance,
 }
 
-fn clamp_direct_raw_image(image: &mut LinearImage) {
-    for channel in 0..image.channels() {
-        image
-            .channel_mut(channel)
-            .pixels_mut()
+/// Bring an interpolated RGB frame back inside the light-frame `[0, 1]` contract.
+///
+/// Interpolation is the only thing in the direct path that leaves the range: RAW input arrives
+/// bounded from [`normalize_u16_to_f32_into`], but the demosaic kernels are shared with the
+/// calibration path and deliberately pass samples through unclipped, so a step edge overshoots —
+/// measurably ~1.06 out of RCD and ~1.16 out of Markesteijn. Clamping here rather than in the
+/// kernels keeps the calibration path's sub-pedestal tail intact.
+fn clamp_interpolated(planes: &mut [Vec<f32>; 3]) {
+    for plane in planes {
+        plane
             .par_iter_mut()
             .for_each(|sample| *sample = sample.clamp(0.0, 1.0));
     }
 }
 
+/// Load a raw file using libraw (C library, broader camera support).
+///
+/// Demosaicing strategy:
+/// - Monochrome sensors: no demosaic needed, returns grayscale
+/// - Known Bayer patterns (RGGB, BGGR, GRBG, GBRG): our RCD demosaic
+/// - X-Trans: our Markesteijn demosaic
+/// - Anything else: libraw's built-in demosaic (slower, but handles exotic CFAs)
 pub(crate) fn load_raw(path: &Path, cancel: &CancelToken) -> Result<LinearImage, ImageError> {
     check_cancelled(path, cancel)?;
-    let mut raw = open_raw(path)?;
+    let raw = open_raw(path)?;
     check_cancelled(path, cancel)?;
+
+    // Read before the match: the X-Trans arm consumes `raw` to free libraw ahead of its demosaic.
+    let active = raw.area.active;
+    let iso = raw.iso;
+    let camera_white_balance = raw.camera_white_balance;
 
     let sensor_type = raw.sensor_type.clone();
     let decoded = match sensor_type {
@@ -968,7 +1015,7 @@ pub(crate) fn load_raw(path: &Path, cancel: &CancelToken) -> Result<LinearImage,
             let pixels = raw.extract_cfa_pixels::<true>()?;
             DecodedRawPreview {
                 pixels: DemosaicedPixels::Flat(pixels),
-                dimensions: ImageDimensions::new(raw.area.active, 1),
+                dimensions: ImageDimensions::new(active, 1),
                 cfa_type: None,
                 color: ColorProvenance::Monochrome,
                 demosaic: DemosaicProvenance::None,
@@ -979,7 +1026,7 @@ pub(crate) fn load_raw(path: &Path, cancel: &CancelToken) -> Result<LinearImage,
             let planes = raw.demosaic_bayer(cfa_pattern, cancel)?;
             DecodedRawPreview {
                 pixels: DemosaicedPixels::Planar(planes),
-                dimensions: ImageDimensions::new(raw.area.active, 3),
+                dimensions: ImageDimensions::new(active, 3),
                 cfa_type: Some(CfaType::Bayer(cfa_pattern)),
                 color: ColorProvenance::SensorRgb,
                 demosaic: DemosaicProvenance::LumosRcd,
@@ -992,7 +1039,7 @@ pub(crate) fn load_raw(path: &Path, cancel: &CancelToken) -> Result<LinearImage,
             let planes = raw.demosaic_xtrans(raw_pattern, cancel)?;
             DecodedRawPreview {
                 pixels: DemosaicedPixels::Planar(planes),
-                dimensions: ImageDimensions::new(raw.area.active, 3),
+                dimensions: ImageDimensions::new(active, 3),
                 cfa_type: Some(CfaType::XTrans(visible_pattern)),
                 color: ColorProvenance::SensorRgb,
                 demosaic: DemosaicProvenance::LumosMarkesteijn,
@@ -1004,7 +1051,7 @@ pub(crate) fn load_raw(path: &Path, cancel: &CancelToken) -> Result<LinearImage,
             check_cancelled(path, cancel)?;
             DecodedRawPreview {
                 pixels: DemosaicedPixels::Flat(demosaiced.pixels),
-                dimensions: ImageDimensions::new(demosaiced.size, demosaiced.channels),
+                dimensions: demosaiced.dimensions,
                 cfa_type: Some(CfaType::Mono),
                 color: ColorProvenance::Unspecified,
                 demosaic: DemosaicProvenance::LibRaw,
@@ -1020,7 +1067,7 @@ pub(crate) fn load_raw(path: &Path, cancel: &CancelToken) -> Result<LinearImage,
     } = decoded;
 
     let metadata = ImageMetadata {
-        iso: raw.iso,
+        iso,
         bitpix: BitPix::UInt16,
         header_dimensions: vec![
             dimensions.height(),
@@ -1028,24 +1075,24 @@ pub(crate) fn load_raw(path: &Path, cancel: &CancelToken) -> Result<LinearImage,
             dimensions.channels(),
         ],
         cfa_type,
-        camera_white_balance: raw.camera_white_balance,
+        camera_white_balance,
         provenance: Some(ImageProvenance {
             container: SourceContainer::CameraRaw,
             decoder: DecoderProvenance::LibRaw,
             transfer: TransferProvenance::RawNormalized,
             color,
+            // Every arm above lands inside [0, 1]: the mono path clamps as it normalizes, libraw's
+            // fallback divides by the integer maximum, and both demosaic paths clamp their output.
             clipped: true,
             demosaic,
         }),
         ..Default::default()
     };
-    drop(raw);
 
     let mut image = match pixels {
         DemosaicedPixels::Planar(planes) => LinearImage::from_planar_channels(dimensions, planes),
         DemosaicedPixels::Flat(px) => LinearImage::from_pixels(dimensions, px),
     };
-    clamp_direct_raw_image(&mut image);
     image.metadata = metadata;
     Ok(image)
 }
@@ -1062,22 +1109,13 @@ pub(crate) fn raw_cfa_frame_info(
     cancel: &CancelToken,
 ) -> Result<CfaFrameInfo, ImageError> {
     check_cancelled(path, cancel)?;
-    // SAFETY: libraw_init returns a valid pointer or null on failure.
-    let inner = unsafe { sys::libraw_init(0) };
-    if inner.is_null() {
-        return Err(raw_err(path, "libraw: Failed to initialize"));
-    }
-    // Drops (frees libraw state) on every return path.
-    let _guard = LibrawGuard(inner);
-
-    // Retain the fallback buffer until after metadata is read on platforms where the path cannot
-    // be passed losslessly through LibRaw's narrow file API.
-    let _buf = open_libraw_input(inner, path)?;
+    // Frees libraw, and the file bytes it parses in place, on every return path.
+    let libraw = LibrawState::open(path)?;
     check_cancelled(path, cancel)?;
 
     // SAFETY: opening succeeded, so the sizes struct is initialized.
-    let width = unsafe { (*inner).sizes.width } as usize;
-    let height = unsafe { (*inner).sizes.height } as usize;
+    let width = unsafe { (*libraw.as_ptr()).sizes.width } as usize;
+    let height = unsafe { (*libraw.as_ptr()).sizes.height } as usize;
     if width == 0 || height == 0 {
         return Err(raw_err(
             path,
@@ -1085,8 +1123,8 @@ pub(crate) fn raw_cfa_frame_info(
         ));
     }
     // SAFETY: opening succeeded, so the image metadata is initialized.
-    let filters = unsafe { (*inner).idata.filters };
-    let colors = unsafe { (*inner).idata.colors };
+    let filters = unsafe { (*libraw.as_ptr()).idata.filters };
+    let colors = unsafe { (*libraw.as_ptr()).idata.colors };
     let demosaic = match SensorType::from_libraw(filters, colors) {
         SensorType::Monochrome => DemosaicKind::Mono,
         SensorType::Bayer(_) => DemosaicKind::BayerRcd,

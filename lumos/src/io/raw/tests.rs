@@ -69,6 +69,11 @@ fn test_load_raw_rejects_invalid_files() {
         let path = directory.join(format!("{}.raf", case.name));
         fs::write(&path, case.contents).unwrap();
         assert!(load_raw(&path, &CancelToken::never()).is_err(), "{case:?}");
+
+        // The rejection happens while libraw is being opened, so the state exists and has to free
+        // itself on the way out — the failure path most likely to leak the instance.
+        let error = LibrawState::open(&path).unwrap_err().to_string();
+        assert!(error.contains("Failed to open file"), "{case:?}: {error}");
     }
 }
 
@@ -93,22 +98,52 @@ fn malformed_xtrans_metadata_returns_raw_image_error() {
 }
 
 #[test]
-fn direct_raw_boundary_clamps_finished_image_once() {
-    let dimensions = ImageDimensions::new((3, 1), 3);
-    let mut image = LinearImage::from_planar_channels(
-        dimensions,
-        [
-            vec![-0.25, 0.5, 1.25],
-            vec![1.5, -0.5, 0.25],
-            vec![0.0, 1.0, 2.0],
-        ],
-    );
+fn interpolated_planes_clamp_to_the_light_frame_range() {
+    let mut planes = [
+        vec![-0.25, 0.5, 1.25],
+        vec![1.5, -0.5, 0.25],
+        vec![0.0, 1.0, 2.0],
+    ];
 
-    clamp_direct_raw_image(&mut image);
+    clamp_interpolated(&mut planes);
 
-    assert_eq!(image.channel(0).pixels(), &[0.0, 0.5, 1.0]);
-    assert_eq!(image.channel(1).pixels(), &[1.0, 0.0, 0.25]);
-    assert_eq!(image.channel(2).pixels(), &[0.0, 1.0, 1.0]);
+    assert_eq!(planes[0], [0.0, 0.5, 1.0]);
+    assert_eq!(planes[1], [1.0, 0.0, 0.25]);
+    assert_eq!(planes[2], [0.0, 1.0, 1.0]);
+}
+
+#[test]
+fn demosaic_overshoots_the_light_frame_range_it_is_clamped_back_into() {
+    use crate::io::raw::demosaic::bayer::{BayerImage, CfaPattern, rcd};
+
+    // A saturated square on black: the sharpest edge a CFA can carry, and the case RCD's ratio
+    // correction overshoots on. Pins why `clamp_interpolated` exists — if the kernel ever starts
+    // bounding its own output, this fails and the clamp becomes dead weight to remove.
+    let size = Size2us::new(32, 32);
+    let mut cfa = vec![0.0f32; size.pixel_count()];
+    for y in 12..20 {
+        for x in 12..20 {
+            cfa[y * size.width + x] = 1.0;
+        }
+    }
+
+    let bayer = BayerImage::with_margins(&cfa, size, size, Vec2us::ZERO, CfaPattern::Rggb);
+    let mut planes = rcd::demosaic(&bayer, &CancelToken::never()).unwrap();
+
+    let peak = planes
+        .iter()
+        .flatten()
+        .copied()
+        .fold(f32::NEG_INFINITY, f32::max);
+    assert!(peak > 1.0, "expected an overshoot, got a peak of {peak}");
+
+    clamp_interpolated(&mut planes);
+    for (channel, plane) in planes.iter().enumerate() {
+        assert!(
+            plane.iter().all(|&sample| (0.0..=1.0).contains(&sample)),
+            "channel {channel} still leaves [0, 1]"
+        );
+    }
 }
 
 #[cfg(feature = "real-data")]
@@ -134,12 +169,14 @@ fn test_load_raw_valid_file() {
     assert!(image.dimensions().height() > 0);
     assert_eq!(image.dimensions().channels(), 3); // RGB output
 
-    // Validate pixel values are normalized (check all channels)
+    // Every channel is inside the light-frame contract. The demosaic kernels overshoot on their
+    // own, so this is what catches a decode path that stopped clamping their output.
     for c in 0..3 {
         for &pixel in image.channel(c) {
-            assert!(pixel >= 0.0, "Pixel value {} is negative", pixel);
-            // Values can exceed 1.0 slightly due to demosaic interpolation overshoot
-            assert!(pixel <= 1.5, "Pixel value {} is too large", pixel);
+            assert!(
+                (0.0..=1.0).contains(&pixel),
+                "Pixel value {pixel} left [0, 1] in channel {c}"
+            );
         }
     }
 
@@ -176,25 +213,6 @@ fn test_load_raw_dimensions_match() {
         image.metadata.header_dimensions[2],
         image.dimensions().channels()
     );
-}
-
-#[test]
-fn test_libraw_guard_cleanup() {
-    // Test that LibrawGuard properly cleans up
-    {
-        let inner = unsafe { sys::libraw_init(0) };
-        assert!(!inner.is_null());
-        let _guard = LibrawGuard(inner);
-        // Guard will be dropped here and call libraw_close
-    }
-    // If we got here without crashing, cleanup worked
-}
-
-#[test]
-fn test_libraw_guard_null_safe() {
-    // Test that LibrawGuard handles null pointer safely
-    let _guard = LibrawGuard(std::ptr::null_mut());
-    // Should not crash on drop
 }
 
 #[test]
@@ -841,13 +859,26 @@ fn test_consolidate_black_levels_xtrans_1x1_fold() {
 fn consolidate_black_levels_rejects_invalid_metadata() {
     let cblack = [0u32; 4104];
     let error = consolidate_black_levels(&cblack, 512, 512, 0x94949494).unwrap_err();
-    assert!(error.contains("common black 512 >= maximum 512"));
+    assert!(matches!(
+        error,
+        BlackLevelError::BlackExceedsMaximum {
+            black: 512,
+            maximum: 512
+        }
+    ));
 
     let mut oversized = [0u32; 4104];
     oversized[4] = 64;
     oversized[5] = 65;
     let error = consolidate_black_levels(&oversized, 0, 4096, 0x94949494).unwrap_err();
-    assert!(error.contains("spatial black pattern 65x64 exceeds 4098 entries"));
+    assert!(matches!(
+        error,
+        BlackLevelError::SpatialPatternTooLarge {
+            width: 65,
+            height: 64,
+            capacity: 4098
+        }
+    ));
 }
 
 #[test]
