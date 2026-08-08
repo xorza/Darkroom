@@ -3,6 +3,7 @@
 //! The resources retain image buffers and stage-specific workspaces across detections.
 
 use crate::bit_buffer2::BitBuffer2;
+use crate::buffer_pool::BufferPool;
 use crate::math::size2us::Size2us;
 use crate::stacking::star_detection::background::workspace::BackgroundWorkspace;
 use imaginarium::Buffer2;
@@ -23,12 +24,13 @@ use imaginarium::Buffer2;
 #[derive(Debug)]
 pub(crate) struct DetectionResources {
     pub(crate) dimensions: Size2us,
-    /// Pool of f32 buffers (for grayscale, scratch, background, noise, etc.)
-    f32_buffers: Vec<Buffer2<f32>>,
-    /// Pool of BitBuffer2 (for threshold masks, dilation scratch, etc.)
-    bit_buffers: Vec<BitBuffer2>,
-    /// Single u32 buffer for label map (only one needed at a time)
-    u32_buffer: Option<Buffer2<u32>>,
+    /// Grayscale, scratch, background, noise — anything one f32 plane wide.
+    floats: BufferPool<Buffer2<f32>>,
+    /// Threshold masks, dilation scratch.
+    bitmasks: BufferPool<BitBuffer2>,
+    /// Label maps. Only one is live at a time, but pooling rather than holding a single slot
+    /// means a second release keeps both instead of dropping one on the floor.
+    labels: BufferPool<Buffer2<u32>>,
     pub(crate) background: BackgroundWorkspace,
 }
 
@@ -37,76 +39,48 @@ impl DetectionResources {
     pub(crate) fn new(dimensions: Size2us) -> Self {
         Self {
             dimensions,
-            f32_buffers: Vec::new(),
-            bit_buffers: Vec::new(),
-            u32_buffer: None,
+            floats: BufferPool::default(),
+            bitmasks: BufferPool::default(),
+            labels: BufferPool::default(),
             background: BackgroundWorkspace::default(),
         }
     }
 
     /// Acquire an f32 buffer from the pool, or allocate a new one.
     pub(crate) fn acquire_f32(&mut self) -> Buffer2<f32> {
-        self.f32_buffers
-            .pop()
-            .unwrap_or_else(|| Buffer2::new_default(self.dimensions.width, self.dimensions.height))
+        self.floats.acquire(self.dimensions)
     }
 
-    /// Return an f32 buffer to the pool for reuse.
-    ///
-    /// The buffer must have the correct dimensions.
+    /// Return an f32 buffer to the pool for reuse. It must have the pool's dimensions.
     pub(crate) fn release_f32(&mut self, buffer: Buffer2<f32>) {
-        // Release asserts, not debug: a mismatched buffer handed back to acquire_f32() would be
-        // silently reused by SIMD kernels elsewhere in this module that do unchecked-length
-        // loads/stores off the pool's declared dimensions — out-of-bounds UB, not a wrong pixel.
-        // The check is O(1) per acquire/release, not "too expensive for release".
-        assert_eq!(buffer.width(), self.dimensions.width);
-        assert_eq!(buffer.height(), self.dimensions.height);
-        self.f32_buffers.push(buffer);
+        self.floats.release(buffer, self.dimensions);
     }
 
     /// Acquire a BitBuffer2 from the pool, or allocate a new one.
     pub(crate) fn acquire_bit(&mut self) -> BitBuffer2 {
-        self.bit_buffers.pop().unwrap_or_else(|| {
-            BitBuffer2::new_filled(
-                Size2us::new(self.dimensions.width, self.dimensions.height),
-                false,
-            )
-        })
+        self.bitmasks.acquire(self.dimensions)
     }
 
-    /// Return a BitBuffer2 to the pool for reuse.
-    ///
-    /// The buffer must have the correct dimensions.
+    /// Return a BitBuffer2 to the pool for reuse. It must have the pool's dimensions.
     pub(crate) fn release_bit(&mut self, buffer: BitBuffer2) {
-        // See release_f32: release assert, not debug — a mismatch here is out-of-bounds UB in
-        // a downstream SIMD kernel, not a wrong pixel.
-        assert_eq!(buffer.size, self.dimensions);
-        self.bit_buffers.push(buffer);
+        self.bitmasks.release(buffer, self.dimensions);
     }
 
-    /// Acquire the u32 buffer (for label map), or allocate a new one.
+    /// Acquire a label map from the pool, or allocate a new one.
     pub(crate) fn acquire_u32(&mut self) -> Buffer2<u32> {
-        self.u32_buffer
-            .take()
-            .unwrap_or_else(|| Buffer2::new_default(self.dimensions.width, self.dimensions.height))
+        self.labels.acquire(self.dimensions)
     }
 
-    /// Return the u32 buffer to the pool for reuse.
-    ///
-    /// The buffer must have the correct dimensions.
+    /// Return a label map to the pool for reuse. It must have the pool's dimensions.
     pub(crate) fn release_u32(&mut self, buffer: Buffer2<u32>) {
-        // See release_f32: release assert, not debug — a mismatch here is out-of-bounds UB in
-        // a downstream SIMD kernel, not a wrong pixel.
-        assert_eq!(buffer.width(), self.dimensions.width);
-        assert_eq!(buffer.height(), self.dimensions.height);
-        self.u32_buffer = Some(buffer);
+        self.labels.release(buffer, self.dimensions);
     }
 
     /// Clear all pooled buffers, freeing memory.
     pub(crate) fn clear(&mut self) {
-        self.f32_buffers.clear();
-        self.bit_buffers.clear();
-        self.u32_buffer = None;
+        self.floats.clear();
+        self.bitmasks.clear();
+        self.labels.clear();
         self.background.clear();
     }
 
@@ -121,6 +95,7 @@ impl DetectionResources {
 
 #[cfg(test)]
 pub(crate) mod internals {
+    use crate::buffer_pool::internals::pooled_count;
     use crate::math::size2us::Size2us;
     use crate::stacking::star_detection::resources::DetectionResources;
 
@@ -137,9 +112,9 @@ pub(crate) mod internals {
 
     pub(crate) fn buffer_counts(resources: &DetectionResources) -> BufferCounts {
         BufferCounts {
-            floats: resources.f32_buffers.len(),
-            bitmasks: resources.bit_buffers.len(),
-            labels: resources.u32_buffer.is_some() as usize,
+            floats: pooled_count(&resources.floats),
+            bitmasks: pooled_count(&resources.bitmasks),
+            labels: pooled_count(&resources.labels),
         }
     }
 }
@@ -268,11 +243,11 @@ mod tests {
 
         // Reset to same dimensions keeps buffers
         pool.reset(Size2us::new(64, 64));
-        assert_eq!(pool.f32_buffers.len(), 1);
+        assert_eq!(buffer_counts(&pool).floats, 1);
 
         // Reset to different dimensions clears buffers
         pool.reset(Size2us::new(128, 128));
         assert_eq!(pool.dimensions, Size2us::new(128, 128));
-        assert!(pool.f32_buffers.is_empty());
+        assert_eq!(buffer_counts(&pool).floats, 0);
     }
 }

@@ -24,6 +24,7 @@
 
 pub(crate) mod background_mesh;
 pub(crate) mod bit_buffer2;
+pub(crate) mod buffer_pool;
 pub(crate) mod concurrency;
 pub(crate) mod error;
 pub(crate) mod image_ops;
