@@ -1,5 +1,25 @@
 use crate::math::size2us::Size2us;
+use crate::stacking::star_detection::labeling::Run;
 use crate::stacking::star_detection::labeling::tests::*;
+
+#[test]
+fn search_window_widens_by_one_each_way_for_eight_connectivity() {
+    let run = Run {
+        start: 5,
+        end: 10,
+        label: 0,
+    };
+    assert_eq!(run.search_window(Connectivity::Four), 5..10);
+    assert_eq!(run.search_window(Connectivity::Eight), 4..11);
+
+    // At the left edge the widened start saturates rather than wrapping to u32::MAX.
+    let at_edge = Run {
+        start: 0,
+        end: 3,
+        label: 0,
+    };
+    assert_eq!(at_edge.search_window(Connectivity::Eight), 0..4);
+}
 
 #[test]
 fn long_horizontal_run() {
