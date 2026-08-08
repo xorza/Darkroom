@@ -1,7 +1,9 @@
 use crate::stacking::combine::config::*;
-use crate::stacking::combine::rejection::{
-    GesdConfig, LinearFitClipConfig, PercentileClipConfig, SigmaClipConfig, WinsorizedClipConfig,
-};
+use crate::stacking::combine::rejection::gesd_config::GesdConfig;
+use crate::stacking::combine::rejection::linear_fit_clip_config::LinearFitClipConfig;
+use crate::stacking::combine::rejection::percentile_clip_config::PercentileClipConfig;
+use crate::stacking::combine::rejection::sigma_clip_config::SigmaClipConfig;
+use crate::stacking::combine::rejection::winsorized_clip_config::WinsorizedClipConfig;
 
 #[test]
 fn small_n_resolve_downgrades_below_min_frames() {
