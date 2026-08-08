@@ -16,7 +16,7 @@ mod neon;
 #[cfg(target_arch = "x86_64")]
 mod sse;
 
-#[cfg(test)]
+#[cfg(all(test, feature = "internals"))]
 mod bench;
 
 #[cfg(test)]

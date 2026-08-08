@@ -5,7 +5,7 @@
 
 pub(super) mod stages;
 
-#[cfg(test)]
+#[cfg(all(test, feature = "internals"))]
 mod bench;
 
 use serde::{Deserialize, Serialize};

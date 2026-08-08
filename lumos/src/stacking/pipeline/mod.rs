@@ -13,7 +13,7 @@ pub(crate) mod frame;
 pub(crate) mod result;
 pub(crate) mod tier;
 
-#[cfg(test)]
+#[cfg(all(test, feature = "internals"))]
 mod bench;
 #[cfg(test)]
 mod mem_budget_probe;

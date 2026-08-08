@@ -6,7 +6,7 @@ pub(crate) mod error;
 pub(crate) mod geometry;
 pub(crate) mod stack;
 
-#[cfg(test)]
+#[cfg(all(test, feature = "internals"))]
 mod bench;
 #[cfg(test)]
 mod tests;

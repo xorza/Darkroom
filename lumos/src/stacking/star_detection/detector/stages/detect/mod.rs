@@ -356,7 +356,9 @@ fn merge_component_data(target: &mut ComponentData, source: ComponentData) {
     target.area += source.area;
 }
 
-#[cfg(test)]
+/// Reaches `collect_component_data` from the detector's benchmarks; production code and the
+/// tests both go through `detect()`.
+#[cfg(all(test, feature = "internals"))]
 pub(crate) mod internals {
     use crate::stacking::star_detection::deblend::ComponentData;
     use crate::stacking::star_detection::detector::stages::detect::collect_component_data;

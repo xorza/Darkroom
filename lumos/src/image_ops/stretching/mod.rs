@@ -33,7 +33,7 @@ use crate::image_ops::{map_rgb, map_samples};
 use crate::io::image::linear::LinearImage;
 use crate::math::statistics::{median_and_mad_f32_mut, median_f32_mut};
 
-#[cfg(test)]
+#[cfg(all(test, feature = "internals"))]
 mod bench;
 #[cfg(target_arch = "x86_64")]
 mod simd_avx2;

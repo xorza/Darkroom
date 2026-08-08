@@ -9,7 +9,7 @@ pub(crate) mod stack;
 /// Coverage below this threshold is dominated by warp border fill.
 const MIN_CONTRIBUTING_COVERAGE: f32 = 1e-3;
 
-#[cfg(test)]
+#[cfg(all(test, feature = "internals"))]
 mod bench;
 #[cfg(test)]
 mod mem_budget_probe;

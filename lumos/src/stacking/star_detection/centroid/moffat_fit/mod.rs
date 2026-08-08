@@ -10,7 +10,7 @@
 //! Uses f64 throughout the fitting pipeline for numerical stability,
 //! achieving ~0.01 pixel centroid accuracy.
 
-#[cfg(test)]
+#[cfg(all(test, feature = "internals"))]
 mod bench;
 #[cfg(test)]
 mod tests;

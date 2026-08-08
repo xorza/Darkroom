@@ -1,8 +1,8 @@
 pub(crate) mod demosaic;
 mod normalize;
 
-#[cfg(test)]
-mod benches;
+#[cfg(all(test, feature = "internals"))]
+mod bench;
 #[cfg(test)]
 mod tests;
 
