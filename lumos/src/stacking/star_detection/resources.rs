@@ -12,6 +12,12 @@ use imaginarium::Buffer2;
 /// Buffers are stored and reused across multiple `detect()` calls to avoid
 /// allocation overhead. All buffers in the pool have the same dimensions.
 ///
+/// This recycles planes between the *sequential* stages of one detection, which is why
+/// `acquire_*`/`release_*` take `&mut self` — unlike
+/// [`JobScratchPool`](crate::concurrency::JobScratchPool) it never hands scratch to concurrent
+/// jobs. A stage acquires its planes, is free to work them across rayon workers itself, and
+/// releases them before the next stage runs.
+///
 /// `acquire_*` returns buffers with **unspecified contents**: a freshly allocated buffer is
 /// zeroed, but a reused one keeps its previous data. Callers must overwrite before reading.
 #[derive(Debug)]
