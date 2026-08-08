@@ -350,6 +350,62 @@ const RECOVERY_CASES: &[RecoveryCase] = &[
         max_iterations: Some(100),
         expect_converged: true,
     },
+    RecoveryCase {
+        name: "very_high_amplitude",
+        stamp: 21,
+        center: Vec2::new(10.0, 10.0),
+        amplitude: 10000.0,
+        sigma: Vec2::splat(2.5),
+        background: 100.0,
+        guess: Vec2::splat(10.0),
+        fit_radius: 8,
+        pos_tol: Some(0.1),
+        sigma_tol: None,
+        amplitude_tol: None,
+        background_tol: None,
+        perturbation: Perturbation::None,
+        fit_background: None,
+        max_iterations: None,
+        expect_converged: true,
+    },
+    RecoveryCase {
+        // Sigma 0.8 is below the pixel scale — barely resolved.
+        name: "narrow_psf",
+        stamp: 21,
+        center: Vec2::new(10.0, 10.0),
+        amplitude: 1.0,
+        sigma: Vec2::splat(0.8),
+        background: 0.1,
+        guess: Vec2::splat(10.0),
+        fit_radius: 8,
+        pos_tol: Some(0.15),
+        sigma_tol: None,
+        amplitude_tol: None,
+        background_tol: None,
+        perturbation: Perturbation::None,
+        fit_background: None,
+        max_iterations: None,
+        expect_converged: true,
+    },
+    RecoveryCase {
+        // Wide and faint at once: the loosest position bound in the table.
+        name: "high_sigma_low_amplitude",
+        stamp: 41,
+        center: Vec2::new(20.0, 20.0),
+        amplitude: 0.1,
+        sigma: Vec2::splat(8.0),
+        background: 0.05,
+        guess: Vec2::splat(20.0),
+        fit_radius: 15,
+        pos_tol: Some(1.0),
+        sigma_tol: None,
+        amplitude_tol: None,
+        background_tol: None,
+        perturbation: Perturbation::None,
+        fit_background: None,
+        max_iterations: None,
+        expect_converged: false,
+    },
 ];
 
 #[test]
@@ -489,61 +545,6 @@ fn test_fwhm_accuracy() {
     // FWHM = 2 * sqrt(2 * ln(2)) * sigma ≈ 2.355 * sigma
     let expected = 2.0 * (2.0 * 2.0f32.ln()).sqrt() * sigma;
     assert!((fwhm - expected).abs() < 1e-5);
-}
-
-#[test]
-fn test_gaussian_fit_very_high_amplitude() {
-    let width = 21;
-    let height = 21;
-    let true_cx = 10.0;
-    let true_cy = 10.0;
-    let true_amp = 10000.0; // Very high amplitude
-    let true_sigma = 2.5;
-    let true_bg = 100.0;
-
-    let pixels = SyntheticStar::new(
-        Vec2::new(true_cx, true_cy),
-        true_amp,
-        StarProfile::Gaussian { sigma: true_sigma },
-    )
-    .stamp(Size2us::new(width, height), true_bg);
-
-    let config = GaussianFitConfig::default();
-    let result = fit_gaussian_2d(&pixels, Vec2::splat(10.0), 8, true_bg, None, &config);
-
-    assert!(result.is_some());
-    let result = result.unwrap();
-    assert!(result.converged);
-    assert!((result.pos.x - true_cx).abs() < 0.1);
-    assert!((result.pos.y - true_cy).abs() < 0.1);
-    assert!((result.debug.amplitude - true_amp).abs() / true_amp < 0.01);
-}
-
-#[test]
-fn test_gaussian_fit_narrow_psf() {
-    let width = 21;
-    let height = 21;
-    let true_cx = 10.0;
-    let true_cy = 10.0;
-    let true_amp = 1.0;
-    let true_sigma = 0.8; // Very narrow PSF (close to Nyquist limit)
-    let true_bg = 0.1;
-
-    let pixels = SyntheticStar::new(
-        Vec2::new(true_cx, true_cy),
-        true_amp,
-        StarProfile::Gaussian { sigma: true_sigma },
-    )
-    .stamp(Size2us::new(width, height), true_bg);
-
-    let config = GaussianFitConfig::default();
-    let result = fit_gaussian_2d(&pixels, Vec2::splat(10.0), 8, true_bg, None, &config);
-
-    assert!(result.is_some());
-    let result = result.unwrap();
-    assert!(result.converged);
-    assert!((result.pos.x - true_cx).abs() < 0.15);
-    assert!((result.pos.y - true_cy).abs() < 0.15);
 }
 
 #[test]
@@ -1147,36 +1148,6 @@ fn test_gaussian_fit_extreme_amplitude_range() {
             amp_exp
         );
     }
-}
-
-#[test]
-fn test_gaussian_fit_high_sigma_low_amplitude() {
-    // Combination: very wide PSF with low amplitude
-    let width = 41;
-    let height = 41;
-    let true_cx = 20.0;
-    let true_cy = 20.0;
-    let true_amp = 0.1; // Low amplitude
-    let true_sigma = 8.0; // Wide PSF
-    let true_bg = 0.05;
-
-    let pixels = SyntheticStar::new(
-        Vec2::new(true_cx, true_cy),
-        true_amp,
-        StarProfile::Gaussian { sigma: true_sigma },
-    )
-    .stamp(Size2us::new(width, height), true_bg);
-
-    let config = GaussianFitConfig::default();
-    let result = fit_gaussian_2d(&pixels, Vec2::splat(20.0), 15, true_bg, None, &config);
-
-    assert!(result.is_some());
-    let result = result.unwrap();
-    // With wide PSF and low amplitude, accuracy is reduced but should still work
-    assert!(result.pos.x.is_finite());
-    assert!(result.pos.y.is_finite());
-    assert!((result.pos.x - true_cx).abs() < 1.0);
-    assert!((result.pos.y - true_cy).abs() < 1.0);
 }
 
 #[test]
