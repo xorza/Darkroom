@@ -10,14 +10,14 @@
 use crate::stacking::star_detection::config::Config;
 use crate::stacking::star_detection::synthetic_tests::pipeline_tests::run_test;
 use crate::stacking::star_detection::synthetic_tests::{Placement, Scenario};
-use crate::stacking::star_detection::test_common::output::metrics::{
-    PassCriteria, check_pass, crowded_criteria, faint_star_criteria,
-};
 use crate::testing::init_tracing;
 use crate::testing::synthetic::backgrounds::NebulaConfig;
 use crate::testing::synthetic::camera::PsfModel;
 use crate::testing::synthetic::observe::SimFrame;
 use crate::testing::synthetic::scene::BackgroundField;
+use crate::testing::visual::report::{
+    PassCriteria, check_pass, crowded_criteria, faint_star_criteria,
+};
 use glam::Vec2;
 
 /// Run the pipeline on `frame`, print the aspirational per-scenario criteria (informational),

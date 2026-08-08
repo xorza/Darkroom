@@ -7,7 +7,7 @@ use crate::math::size2us::Size2us;
 use crate::stacking::star_detection::config::background_config::BackgroundConfig;
 use crate::stacking::star_detection::convolution::internals::gaussian_convolve;
 use crate::stacking::star_detection::synthetic_tests::Scenario;
-use crate::stacking::star_detection::test_common::output::image_writer::save_grayscale;
+use crate::testing::visual::save_grayscale;
 use crate::testing::{estimate_background, init_tracing};
 use common::internals::test_output_path;
 use imaginarium::Buffer2;

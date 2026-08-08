@@ -19,6 +19,7 @@ pub(crate) mod mem_probe;
 #[cfg(feature = "real-data")]
 mod real_data;
 pub(crate) mod synthetic;
+pub(crate) mod visual;
 
 #[derive(Debug)]
 pub(crate) struct ScratchDirectory(PathBuf);

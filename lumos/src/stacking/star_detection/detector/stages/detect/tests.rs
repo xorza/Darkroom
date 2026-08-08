@@ -1,10 +1,11 @@
 use crate::math::rect::URect;
 use crate::stacking::star_detection::detector::stages::detect::*;
 use crate::stacking::star_detection::labeling::internals::label_map_from_raw;
-use crate::stacking::star_detection::test_common::test_star::TestStar;
+use crate::testing::synthetic::star_profiles::{StarProfile, SyntheticStar};
+use glam::Vec2;
 
 /// Render Gaussian `stars` into a single connected component: every lit pixel gets label 1.
-fn one_component(size: Size2us, stars: &[TestStar]) -> (Buffer2<f32>, LabelMap) {
+fn one_component(size: Size2us, stars: &[SyntheticStar]) -> (Buffer2<f32>, LabelMap) {
     let mut pixels = Buffer2::new_filled(size.width, size.height, 0.0f32);
     let mut labels = Buffer2::new_filled(size.width, size.height, 0u32);
     for &star in stars {
@@ -14,7 +15,7 @@ fn one_component(size: Size2us, stars: &[TestStar]) -> (Buffer2<f32>, LabelMap) 
                 let x = (star.center.x as i32 + dx) as usize;
                 let y = (star.center.y as i32 + dy) as usize;
                 if size.contains(Vec2us::new(x, y)) {
-                    let v = star.value_at(dx, dy);
+                    let v = star.value_at(x as f32, y as f32);
                     if v > 0.001 {
                         pixels[(x, y)] += v;
                         labels[(x, y)] = 1;
@@ -45,9 +46,21 @@ fn local_maxima_deblended_counts_split_components_not_extra_regions() {
     let (pixels, label_map) = one_component(
         Size2us::new(48, 24),
         &[
-            TestStar::new(Vec2us::new(12, 12), 1.0, 3.0),
-            TestStar::new(Vec2us::new(24, 12), 1.0, 3.0),
-            TestStar::new(Vec2us::new(36, 12), 1.0, 3.0),
+            SyntheticStar::new(
+                Vec2::new(12.0, 12.0),
+                1.0,
+                StarProfile::Gaussian { sigma: 3.0 },
+            ),
+            SyntheticStar::new(
+                Vec2::new(24.0, 12.0),
+                1.0,
+                StarProfile::Gaussian { sigma: 3.0 },
+            ),
+            SyntheticStar::new(
+                Vec2::new(36.0, 12.0),
+                1.0,
+                StarProfile::Gaussian { sigma: 3.0 },
+            ),
         ],
     );
 
@@ -69,7 +82,11 @@ fn local_maxima_single_peak_reports_zero_deblended() {
     // A lone star: one region from one component — nothing was split.
     let (pixels, label_map) = one_component(
         Size2us::new(32, 32),
-        &[TestStar::new(Vec2us::new(16, 16), 1.0, 3.0)],
+        &[SyntheticStar::new(
+            Vec2::new(16.0, 16.0),
+            1.0,
+            StarProfile::Gaussian { sigma: 3.0 },
+        )],
     );
 
     let result = extract_candidates(&pixels, &label_map, &local_maxima_config());
@@ -150,7 +167,11 @@ fn edge_margin_swallowing_image_yields_no_regions_without_panicking() {
     for edge_margin in [16, 32] {
         let (pixels, label_map) = one_component(
             Size2us::new(32, 32),
-            &[TestStar::new(Vec2us::new(16, 16), 1.0, 3.0)],
+            &[SyntheticStar::new(
+                Vec2::new(16.0, 16.0),
+                1.0,
+                StarProfile::Gaussian { sigma: 3.0 },
+            )],
         );
         let config = DetectionConfig {
             edge_margin,

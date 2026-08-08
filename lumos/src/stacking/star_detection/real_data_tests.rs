@@ -130,8 +130,8 @@ fn test_inspect_pipeline_intermediates_rho_opiuchi() {
     use crate::stacking::star_detection::labeling::LabelMap;
     use crate::stacking::star_detection::mask_dilation::dilate_mask;
     use crate::stacking::star_detection::resources::DetectionResources;
-    use crate::stacking::star_detection::test_common::output::image_writer;
     use crate::stacking::star_detection::threshold_mask::create_threshold_mask_filtered;
+    use crate::testing::visual;
     use imaginarium::Buffer2;
 
     init_tracing();
@@ -160,7 +160,7 @@ fn test_inspect_pipeline_intermediates_rho_opiuchi() {
 
     // 1. Grayscale
     let grayscale = prepare::prepare(&linear_image, &mut pool);
-    image_writer::save_grayscale_stretched(
+    visual::save_grayscale_stretched(
         grayscale.pixels(),
         Size2us::new(width, height),
         &out("01_grayscale.tiff"),
@@ -169,7 +169,7 @@ fn test_inspect_pipeline_intermediates_rho_opiuchi() {
 
     // 2. Background
     let background = estimate_background(&grayscale, &config.background, &mut pool);
-    image_writer::save_grayscale_stretched(
+    visual::save_grayscale_stretched(
         background.background.pixels(),
         Size2us::new(width, height),
         &out("02_background.tiff"),
@@ -177,7 +177,7 @@ fn test_inspect_pipeline_intermediates_rho_opiuchi() {
     println!("Saved: 02_background");
 
     // 3. Noise
-    image_writer::save_grayscale_stretched(
+    visual::save_grayscale_stretched(
         background.noise.pixels(),
         Size2us::new(width, height),
         &out("03_noise.tiff"),
@@ -191,7 +191,7 @@ fn test_inspect_pipeline_intermediates_rho_opiuchi() {
         .zip(background.background.pixels().iter())
         .map(|(&p, &bg)| (p - bg).max(0.0))
         .collect();
-    image_writer::save_grayscale_stretched(
+    visual::save_grayscale_stretched(
         &subtracted,
         Size2us::new(width, height),
         &out("04_subtracted.tiff"),
@@ -227,7 +227,7 @@ fn test_inspect_pipeline_intermediates_rho_opiuchi() {
         pool.release_f32(conv_scratch);
 
         let pixels = scratch.pixels().to_vec();
-        image_writer::save_grayscale_stretched(
+        visual::save_grayscale_stretched(
             &pixels,
             Size2us::new(width, height),
             &out("05_matched_filter.tiff"),
@@ -263,7 +263,7 @@ fn test_inspect_pipeline_intermediates_rho_opiuchi() {
     }
     let mask_bools: Vec<bool> = mask.iter().collect();
     let pixels_above = mask_bools.iter().filter(|&&b| b).count();
-    image_writer::save_mask(
+    visual::save_mask(
         &mask_bools,
         Size2us::new(width, height),
         &out("06_threshold_mask.tiff"),
@@ -276,7 +276,7 @@ fn test_inspect_pipeline_intermediates_rho_opiuchi() {
     dilate_mask(&mask, 1, &mut dilated);
     let dilated_bools: Vec<bool> = dilated.iter().collect();
     let dilated_count = dilated_bools.iter().filter(|&&b| b).count();
-    image_writer::save_mask(
+    visual::save_mask(
         &dilated_bools,
         Size2us::new(width, height),
         &out("07_dilated_mask.tiff"),
@@ -287,8 +287,8 @@ fn test_inspect_pipeline_intermediates_rho_opiuchi() {
     let label_map = LabelMap::from_pool(&dilated, config.detection.connectivity, &mut pool);
     let num_labels = label_map.num_labels();
     let labels_buf = Buffer2::new(width, height, label_map.labels().to_vec());
-    let labels_rgb = image_writer::labels_to_rgb(&labels_buf);
-    image_writer::save_rgb(&labels_rgb, &out("08_label_map.tiff"));
+    let labels_rgb = visual::labels_to_rgb(&labels_buf);
+    visual::save_rgb(&labels_rgb, &out("08_label_map.tiff"));
     println!("Saved: 08_label_map ({num_labels} components)");
 
     // Clean up

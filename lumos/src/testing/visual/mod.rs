@@ -1,17 +1,24 @@
-//! Image writing utilities for visual tests.
+//! Debug image output for visual tests: PNG writers, tone mapping, and annotated overlays.
+//!
+//! These write to `test_output/` for a human to look at; nothing here is asserted on. The
+//! grading a test actually asserts lives in [`report`] and
+//! [`metrics`](crate::testing::synthetic::metrics).
+
+pub(crate) mod comparison;
+pub(crate) mod report;
 
 use image::GrayImage;
 use imaginarium::{ColorFormat, Image, ImageDesc};
 use std::path::Path;
 
 use crate::{
-    math::size2us::Size2us,
-    stacking::star_detection::{
-        star::Star,
-        test_common::output::{TEST_OUTPUT_IMAGE_EXT, comparison::create_comparison_image},
-    },
+    math::size2us::Size2us, stacking::star_detection::star::Star,
     testing::synthetic::observe::ObservedSource,
+    testing::visual::comparison::create_comparison_image,
 };
+
+/// Extension every debug image is written with.
+const TEST_OUTPUT_IMAGE_EXT: &str = "png";
 
 /// Build an output path with the configured test image extension.
 /// Takes a base path and replaces or adds the extension from `TEST_OUTPUT_IMAGE_EXT`.
@@ -192,7 +199,7 @@ pub(crate) fn save_mask(mask: &[bool], size: Size2us, path: &Path) {
 #[cfg(test)]
 mod tests {
     use crate::math::size2us::Size2us;
-    use crate::stacking::star_detection::test_common::output::image_writer::*;
+    use crate::testing::visual::*;
 
     #[test]
     fn test_gray_image_conversion() {
