@@ -85,6 +85,7 @@ fn test_drizzle_stack_empty_paths() {
         &config,
         &LoadContext::default(),
         ProgressCallback::default(),
+        CancelToken::never(),
     );
     assert!(matches!(result.unwrap_err(), DrizzleError::NoFrames));
 }
@@ -95,7 +96,7 @@ fn test_drizzle_images_empty() {
         Vec::new(),
         &DrizzleConfig::default(),
         ProgressCallback::default(),
-        &CancelToken::never(),
+        CancelToken::never(),
     );
     assert!(matches!(result.unwrap_err(), DrizzleError::NoFrames));
 }
@@ -119,7 +120,7 @@ fn drizzle_stops_between_frames_when_cancelled() {
         frames,
         &DrizzleConfig::default(),
         ProgressCallback::default(),
-        &cancel,
+        cancel,
     );
     assert!(
         matches!(result.unwrap_err(), DrizzleError::Cancelled),
@@ -140,7 +141,7 @@ fn drizzle_stops_between_frames_when_cancelled() {
             frames,
             &DrizzleConfig::default(),
             ProgressCallback::default(),
-            &CancelToken::never(),
+            CancelToken::never(),
         )
         .is_ok()
     );
@@ -155,7 +156,7 @@ fn test_drizzle_images_matches_accumulator() {
         vec![DrizzleFrame::new(image, Transform::identity())],
         &DrizzleConfig::x2(),
         ProgressCallback::default(),
-        &CancelToken::never(),
+        CancelToken::never(),
     )
     .unwrap();
 
@@ -177,7 +178,7 @@ fn test_drizzle_images_dimension_mismatch() {
         drizzle_frames(vec![a, b], &[Transform::identity(), Transform::identity()]),
         &DrizzleConfig::default(),
         ProgressCallback::default(),
-        &CancelToken::never(),
+        CancelToken::never(),
     );
     assert!(matches!(
         result.unwrap_err(),

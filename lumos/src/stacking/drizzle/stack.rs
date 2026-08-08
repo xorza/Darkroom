@@ -52,8 +52,11 @@ fn load_drizzle_frame<P: AsRef<Path>>(
 ///
 /// * `frames` - Paths bundled with their transform and optional quality weights
 /// * `config` - Drizzle configuration
-/// * `context` - Cancellation, resource limits, and image-load policy
+/// * `context` - Resource limits and image-load policy. Its `cancel` field is **ignored** — the
+///   `cancel` argument governs the whole run, decode included, so cancellation reads the same
+///   here as on every other stacking entry point
 /// * `progress` - Progress callback
+/// * `cancel` - Cooperative cancellation, polled between frames and inside each decode
 ///
 /// # Returns
 ///
@@ -69,20 +72,20 @@ pub fn drizzle_stack<P: AsRef<Path>>(
     config: &DrizzleConfig,
     context: &LoadContext,
     progress: ProgressCallback,
+    cancel: CancelToken,
 ) -> Result<StackProduct, DrizzleError> {
     let frame_count = frames.len();
+    // The decoders poll cancellation off the context, so the run's token has to reach them —
+    // the caller supplies decode policy, this supplies the token.
+    let context = LoadContext {
+        cancel: cancel.clone(),
+        ..context.clone()
+    };
     // Lazy, so only the frame currently being accumulated is resident.
     let loaded = frames
         .into_iter()
-        .map(|frame| load_drizzle_frame(frame, context));
-    accumulate(
-        loaded,
-        frame_count,
-        config,
-        progress,
-        &context.cancel,
-        "paths",
-    )
+        .map(|frame| load_drizzle_frame(frame, &context));
+    accumulate(loaded, frame_count, config, progress, &cancel, "paths")
 }
 
 /// Drizzle stack frames already held in memory.
@@ -98,7 +101,7 @@ pub fn drizzle_images(
     frames: Vec<DrizzleFrame<LinearImage>>,
     config: &DrizzleConfig,
     progress: ProgressCallback,
-    cancel: &CancelToken,
+    cancel: CancelToken,
 ) -> Result<StackProduct, DrizzleError> {
     let frame_count = frames.len();
     accumulate(
@@ -106,7 +109,7 @@ pub fn drizzle_images(
         frame_count,
         config,
         progress,
-        cancel,
+        &cancel,
         "memory",
     )
 }

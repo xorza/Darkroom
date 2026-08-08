@@ -46,7 +46,7 @@ fn bench_kernel(b: ::quickbench::Bencher, kernel: DrizzleKernel) {
             frames.clone(),
             &config,
             ProgressCallback::default(),
-            &CancelToken::never(),
+            CancelToken::never(),
         ))
     });
 }

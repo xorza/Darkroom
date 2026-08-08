@@ -109,7 +109,7 @@ fn drizzle_conserves_total_flux() {
             drizzle_frames(images.clone(), &transforms),
             &config,
             ProgressCallback::default(),
-            &CancelToken::never(),
+            CancelToken::never(),
         )
         .unwrap();
         let out_flux = sum(result.image.channel(0).pixels());
@@ -145,7 +145,7 @@ fn drizzle_places_star_at_scaled_truth_position() {
         drizzle_frames(images, &transforms),
         &config,
         ProgressCallback::default(),
-        &CancelToken::never(),
+        CancelToken::never(),
     )
     .unwrap();
     let out = result.image.channel(0);
@@ -195,7 +195,7 @@ fn drizzle_dithering_recovers_resolution() {
         drizzle_frames(images.clone(), &transforms),
         &config,
         ProgressCallback::default(),
-        &CancelToken::never(),
+        CancelToken::never(),
     )
     .unwrap();
     let replicated_imgs: Vec<LinearImage> = (0..dithers.len()).map(|_| images[4].clone()).collect();
@@ -204,7 +204,7 @@ fn drizzle_dithering_recovers_resolution() {
         drizzle_frames(replicated_imgs, &replicated_tf),
         &config,
         ProgressCallback::default(),
-        &CancelToken::never(),
+        CancelToken::never(),
     )
     .unwrap();
 
@@ -244,7 +244,7 @@ fn drizzle_emits_coverage_weight_and_linear_variance_maps() {
         drizzle_frames(images, &transforms),
         &config,
         ProgressCallback::default(),
-        &CancelToken::never(),
+        CancelToken::never(),
     )
     .unwrap();
 
