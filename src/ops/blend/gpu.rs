@@ -7,8 +7,6 @@ use crate::common::error::Result;
 use crate::gpu::Gpu;
 use crate::gpu::gpu_image::GpuImage;
 use crate::image::ImageDesc;
-use crate::processing_context::ProcessingContext;
-use crate::processing_context::image_buffer::ImageBuffer;
 
 impl Blend {
     /// Applies blending of two images using GPU.
@@ -81,28 +79,6 @@ impl Blend {
         queue.submit(std::iter::once(encoder.finish()));
 
         Ok(())
-    }
-
-    /// Applies the operation using GPU with ImageBuffer.
-    ///
-    /// Automatically uploads images to GPU if needed.
-    pub fn execute_gpu(
-        &self,
-        ctx: &mut ProcessingContext,
-        src: &ImageBuffer,
-        dst: &ImageBuffer,
-        output: &mut ImageBuffer,
-    ) -> Result<()> {
-        let src_gpu = src.make_gpu(ctx)?;
-        let dst_gpu = dst.make_gpu(ctx)?;
-        let output_gpu = output.make_gpu_mut(ctx)?;
-
-        let gpu_processing_ctx = ctx.gpu_context().expect("GPU context required for blend");
-
-        let gpu_ctx = gpu_processing_ctx.gpu.clone();
-        let pipeline = gpu_processing_ctx.get_or_create(GpuBlendPipeline::new)?;
-
-        self.apply_gpu(&gpu_ctx, pipeline, &src_gpu, &dst_gpu, output_gpu)
     }
 }
 

@@ -1,4 +1,3 @@
-mod backend_selection;
 pub(crate) mod blend;
 pub(crate) mod contrast_brightness;
 #[cfg(feature = "wgpu")]

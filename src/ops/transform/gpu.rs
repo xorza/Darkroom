@@ -3,12 +3,9 @@ use wgpu::util::DeviceExt;
 
 use super::pipeline::GpuTransformPipeline;
 use super::{FilterMode, Transform};
-use crate::common::error::Result;
 use crate::gpu::Gpu;
 use crate::gpu::gpu_image::GpuImage;
 use crate::ops::gpu_format::*;
-use crate::processing_context::ProcessingContext;
-use crate::processing_context::image_buffer::ImageBuffer;
 
 impl Transform {
     /// Applies the transform to the input image, writing to output.
@@ -111,30 +108,6 @@ impl Transform {
         }
 
         queue.submit(std::iter::once(encoder.finish()));
-    }
-
-    /// Applies the operation using GPU with ImageBuffer.
-    ///
-    /// Automatically uploads images to GPU if needed.
-    pub fn execute_gpu(
-        &self,
-        ctx: &mut ProcessingContext,
-        input: &ImageBuffer,
-        output: &mut ImageBuffer,
-    ) -> Result<()> {
-        let input_gpu = input.make_gpu(ctx)?;
-        let output_gpu = output.make_gpu_mut(ctx)?;
-
-        let gpu_processing_ctx = ctx
-            .gpu_context()
-            .expect("GPU context required for transform");
-
-        let gpu_ctx = gpu_processing_ctx.gpu.clone();
-        let pipeline = gpu_processing_ctx.get_or_create(GpuTransformPipeline::new)?;
-
-        self.apply_gpu(&gpu_ctx, pipeline, &input_gpu, output_gpu);
-
-        Ok(())
     }
 }
 

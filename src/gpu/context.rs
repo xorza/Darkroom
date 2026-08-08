@@ -9,13 +9,17 @@ use crate::gpu::Gpu;
 /// Trait marker for GPU pipelines that can be cached.
 pub trait GpuPipeline: Any + std::fmt::Debug + Send + Sync {}
 
-/// Cache for GPU pipelines.
+/// Cache for GPU pipelines, and the [`Gpu`] they were built against.
 ///
 /// Lazily initializes pipelines on first use to avoid startup cost
 /// for unused operations. Pipelines are stored by their TypeId.
+///
+/// Purely a cache: it decides nothing about where an image lives or which backend an op runs on.
+/// A caller that wants the GPU builds one of these, uploads with [`crate::GpuImage::from_image`],
+/// and calls the op's `apply_gpu`.
 #[derive(Debug)]
 pub struct GpuContext {
-    pub(crate) gpu: Gpu,
+    pub gpu: Gpu,
     pipelines: HashMap<TypeId, Box<dyn GpuPipeline>>,
 }
 

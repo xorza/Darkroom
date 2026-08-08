@@ -45,15 +45,10 @@ criterion = { version = "0.8", optional = true }
 
 [[example]]
 name = "transform"
-# Drives GpuImage/Gpu directly, whose constructors are `internals`-gated.
-required-features = ["wgpu", "internals"]
-
-[[example]]
-name = "pipeline"
 required-features = ["wgpu"]
 
 [[example]]
-name = "pipeline_explicit"
+name = "pipeline"
 required-features = ["wgpu"]
 
 [[bench]]

@@ -29,7 +29,6 @@ pub mod drawing;
 mod gpu;
 mod image;
 mod ops;
-mod processing_context;
 
 pub use glam::{Affine2, Vec2};
 
@@ -43,9 +42,6 @@ pub use crate::common::buffer2::Buffer2;
 pub use crate::image::pixels::planar::PlanarPixels;
 pub use crate::image::{Image, ImageDesc, SUPPORTED_EXTENSIONS};
 
-pub use crate::processing_context::ProcessingContext;
-pub use crate::processing_context::image_buffer::{ImageBuffer, ImageMemory};
-
 pub use crate::ops::blend::{Blend, BlendMode};
 pub use crate::ops::contrast_brightness::ContrastBrightness;
 pub use crate::ops::preview::Preview;
@@ -54,9 +50,9 @@ pub use crate::ops::transform::{FilterMode, Transform};
 #[cfg(feature = "wgpu")]
 pub use crate::{
     gpu::Gpu,
+    gpu::context::{GpuContext, GpuPipeline},
     gpu::gpu_image::GpuImage,
     ops::blend::pipeline::GpuBlendPipeline,
     ops::contrast_brightness::pipeline::GpuContrastBrightnessPipeline,
     ops::transform::pipeline::GpuTransformPipeline,
-    processing_context::gpu_context::{GpuContext, GpuPipeline},
 };

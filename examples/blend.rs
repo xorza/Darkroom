@@ -10,22 +10,31 @@ fn main() {
     let dst = load_lena_rgba_u8();
     print_image_info("Source", &src);
 
+    // CPU
     let mut output = Image::new_black(src.desc()).unwrap();
-
-    // CPU example
     Blend::new(BlendMode::Screen, 0.5).apply_cpu(&src, &dst, &mut output);
     save_image(&output, "blend_cpu.png");
 
-    // GPU example
-    let mut ctx = ProcessingContext::new();
-    let src_buf = ImageBuffer::from_cpu(src);
-    let dst_buf = ImageBuffer::from_cpu(dst);
-    let mut output_buf = ImageBuffer::new_empty(src_buf.desc);
+    #[cfg(feature = "wgpu")]
+    on_gpu(&src, &dst);
+}
 
+/// Upload both inputs, allocate the output on the device, run, download.
+#[cfg(feature = "wgpu")]
+fn on_gpu(src: &Image, dst: &Image) {
+    let Ok(gpu) = Gpu::new() else {
+        println!("no GPU available, skipping the GPU example");
+        return;
+    };
+    let mut context = GpuContext::new(gpu.clone());
+    let pipeline = context.get_or_create(GpuBlendPipeline::new).unwrap();
+
+    let src_gpu = GpuImage::from_image(&gpu, src);
+    let dst_gpu = GpuImage::from_image(&gpu, dst);
+    let mut output_gpu = GpuImage::new_empty(&gpu, src.desc());
     Blend::new(BlendMode::Screen, 0.5)
-        .execute(&mut ctx, &src_buf, &dst_buf, &mut output_buf)
+        .apply_gpu(&gpu, pipeline, &src_gpu, &dst_gpu, &mut output_gpu)
         .unwrap();
 
-    let result = output_buf.make_cpu(&ctx).unwrap();
-    save_image(&result, "blend_gpu.png");
+    save_image(&output_gpu.to_image(&gpu).unwrap(), "blend_gpu.png");
 }

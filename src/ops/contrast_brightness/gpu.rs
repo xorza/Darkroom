@@ -7,8 +7,6 @@ use crate::common::error::Result;
 use crate::gpu::Gpu;
 use crate::gpu::gpu_image::GpuImage;
 use crate::image::ImageDesc;
-use crate::processing_context::ProcessingContext;
-use crate::processing_context::image_buffer::ImageBuffer;
 
 impl ContrastBrightness {
     /// Applies contrast and brightness adjustment using GPU.
@@ -73,35 +71,6 @@ impl ContrastBrightness {
 
         queue.submit(std::iter::once(encoder.finish()));
 
-        Ok(())
-    }
-
-    /// Applies the operation using GPU with ImageBuffer.
-    ///
-    /// Automatically uploads images to GPU if needed.
-    /// Applies the operation to `buffer` in place on the GPU, uploading it
-    /// first if that is not already where it lives.
-    ///
-    /// The shader reads and writes through separate bindings and WebGPU will
-    /// not let those alias one buffer, so this runs into a fresh image and
-    /// hands its storage back. Unlike the CPU side, that costs only a device
-    /// allocation — there are no pages to fault in.
-    pub fn execute_gpu(&self, ctx: &mut ProcessingContext, buffer: &mut ImageBuffer) -> Result<()> {
-        let mut output = ImageBuffer::new_empty(buffer.desc);
-        {
-            let input_gpu = buffer.make_gpu(ctx)?;
-            let output_gpu = output.make_gpu_mut(ctx)?;
-
-            let gpu_processing_ctx = ctx
-                .gpu_context()
-                .expect("GPU context required for contrast/brightness");
-
-            let gpu_ctx = gpu_processing_ctx.gpu.clone();
-            let pipeline = gpu_processing_ctx.get_or_create(GpuContrastBrightnessPipeline::new)?;
-
-            self.apply_gpu(&gpu_ctx, pipeline, &input_gpu, output_gpu)?;
-        }
-        *buffer = output;
         Ok(())
     }
 }

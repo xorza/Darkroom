@@ -6,12 +6,7 @@ pub(crate) mod pipeline;
 
 use strum_macros::{EnumString, VariantNames};
 
-use crate::common::color_format::ALL_FORMATS;
-use crate::common::error::Result;
 use crate::image::Image;
-use crate::ops::backend_selection::{Backend, select_backend};
-use crate::processing_context::ProcessingContext;
-use crate::processing_context::image_buffer::ImageBuffer;
 
 /// Blend modes for combining two images.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, EnumString, VariantNames)]
@@ -80,48 +75,5 @@ impl Blend {
     /// Panics if images have different dimensions or color formats.
     pub fn apply_cpu(&self, src: &Image, dst: &Image, output: &mut Image) {
         cpu::apply(self, src, dst, output);
-    }
-
-    /// Applies the operation, automatically choosing CPU or GPU based on data location.
-    ///
-    /// Prefers GPU if any input/output is already on GPU and the format is supported.
-    ///
-    /// # Errors
-    /// Returns an error if:
-    /// - Inputs and output have different color formats
-    /// - The color format is not supported by either CPU or GPU implementation
-    pub fn execute(
-        &self,
-        ctx: &mut ProcessingContext,
-        src: &ImageBuffer,
-        dst: &ImageBuffer,
-        output: &mut ImageBuffer,
-    ) -> Result<()> {
-        let backend = select_backend(ctx, &[src, dst, output], ALL_FORMATS, ALL_FORMATS, "Blend")?;
-
-        match backend {
-            #[cfg(feature = "wgpu")]
-            Backend::Gpu => self.execute_gpu(ctx, src, dst, output),
-            Backend::Cpu => self.execute_cpu(ctx, src, dst, output),
-        }
-    }
-
-    /// Applies the operation using CPU with ImageBuffer.
-    ///
-    /// Automatically downloads images from GPU if needed.
-    pub fn execute_cpu(
-        &self,
-        ctx: &mut ProcessingContext,
-        src: &ImageBuffer,
-        dst: &ImageBuffer,
-        output: &mut ImageBuffer,
-    ) -> Result<()> {
-        let src_cpu = src.make_cpu(ctx)?;
-        let dst_cpu = dst.make_cpu(ctx)?;
-        let output_cpu = output.make_cpu_mut(ctx)?;
-
-        self.apply_cpu(&src_cpu, &dst_cpu, output_cpu);
-
-        Ok(())
     }
 }

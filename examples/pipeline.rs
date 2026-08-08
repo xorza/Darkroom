@@ -1,3 +1,8 @@
+//! A multi-step pipeline, showing what callers own now that the ops do no residency management:
+//! upload once, run a chain of GPU ops without ever going back to the CPU, and download once at
+//! the end. Keeping the data on the device across steps is the caller's choice — nothing does it
+//! automatically — and step 2 shows the round trip you pay when you *do* need the CPU.
+
 mod common;
 
 use std::f32::consts::PI;
@@ -8,63 +13,58 @@ use imaginarium::*;
 fn main() {
     ensure_output_dir();
 
-    let mut ctx = ProcessingContext::new();
-    if !ctx.has_gpu() {
+    let Ok(gpu) = Gpu::new() else {
         println!("No GPU available, exiting");
         return;
-    }
+    };
+    let mut context = GpuContext::new(gpu.clone());
 
-    let input_cpu = load_lena_rgba_u8();
-    print_image_info("Input", &input_cpu);
+    let input = load_lena_rgba_u8();
+    print_image_info("Input", &input);
 
-    let width = input_cpu.desc().width;
-    let height = input_cpu.desc().height;
-    let center = Vec2::new(width as f32 / 2.0, height as f32 / 2.0);
+    let desc = input.desc();
+    let center = Vec2::new(desc.width as f32 / 2.0, desc.height as f32 / 2.0);
 
-    let mut main_buffer = ImageBuffer::from_cpu(input_cpu.clone());
-    let mut temp_buffer = ImageBuffer::new_empty(input_cpu.desc());
-    let mut overlay_buffer = ImageBuffer::from_cpu(input_cpu.clone());
-    let mut blend_output = ImageBuffer::new_empty(input_cpu.desc());
+    let mut main = GpuImage::from_image(&gpu, &input);
+    let mut scratch = GpuImage::new_empty(&gpu, desc);
 
-    // Step 1: Rotate main image
-    println!("Step 1: Rotating main image...");
+    // Step 1: rotate. The transform shader cannot read and write one image, so it renders into
+    // `scratch` and the two swap — `main` is always the live one.
+    println!("Step 1: rotating...");
+    let pipeline = context.get_or_create(GpuTransformPipeline::new).unwrap();
     Transform::default()
-        .rotate_around(PI / 8.0, center)
-        .execute(&mut ctx, &main_buffer, &mut temp_buffer)
-        .unwrap();
-    std::mem::swap(&mut main_buffer, &mut temp_buffer);
+        .rotate_around(PI / 12.0, center)
+        .apply_gpu(&gpu, pipeline, &main, &mut scratch);
+    std::mem::swap(&mut main, &mut scratch);
 
-    // Step 2: Adjust contrast
-    println!("Step 2: Adjusting contrast...");
+    // Step 2: contrast, on the CPU. This is the one step that costs a round trip, and it is
+    // visible in the code rather than hidden behind a backend chooser.
+    println!("Step 2: adjusting contrast (CPU)...");
+    let mut cpu = main.to_image(&gpu).unwrap();
     ContrastBrightness::default()
-        .contrast(1.2)
-        .execute(&mut ctx, &mut main_buffer)
-        .unwrap();
+        .contrast(1.3)
+        .apply_cpu(&mut cpu);
+    main = GpuImage::from_image(&gpu, &cpu);
 
-    // Step 3: Rotate overlay differently
-    println!("Step 3: Rotating overlay...");
+    // Step 3: blend against a differently-rotated copy of the original, all on the device.
+    println!("Step 3: blending an overlay...");
+    let mut overlay = GpuImage::from_image(&gpu, &input);
+    let pipeline = context.get_or_create(GpuTransformPipeline::new).unwrap();
     Transform::default()
-        .rotate_around(-PI / 8.0, center)
-        .execute(&mut ctx, &overlay_buffer, &mut temp_buffer)
-        .unwrap();
-    std::mem::swap(&mut overlay_buffer, &mut temp_buffer);
+        .rotate_around(-PI / 6.0, center)
+        .apply_gpu(&gpu, pipeline, &overlay, &mut scratch);
+    std::mem::swap(&mut overlay, &mut scratch);
 
-    // Step 4: Blend main with overlay
-    println!("Step 4: Blending images...");
+    let mut blended = GpuImage::new_empty(&gpu, desc);
+    let pipeline = context.get_or_create(GpuBlendPipeline::new).unwrap();
     Blend::default()
         .mode(BlendMode::Screen)
-        .alpha(0.5)
-        .execute(&mut ctx, &overlay_buffer, &main_buffer, &mut blend_output)
+        .alpha(0.4)
+        .apply_gpu(&gpu, pipeline, &overlay, &main, &mut blended)
         .unwrap();
 
-    // Step 5: Final brightness adjustment
-    println!("Step 5: Final brightness adjustment...");
-    ContrastBrightness::default()
-        .brightness(0.05)
-        .execute(&mut ctx, &mut blend_output)
-        .unwrap();
-
-    let result = blend_output.make_cpu(&ctx).unwrap();
+    // Download once, at the end.
+    let result = blended.to_image(&gpu).unwrap();
     save_image(&result, "pipeline_final.png");
 
     println!("Done! Pipeline completed.");

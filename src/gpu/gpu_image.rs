@@ -57,7 +57,7 @@ pub struct GpuImage {
 
 impl GpuImage {
     /// Creates a new GPU image from (packed) CPU image data.
-    pub(crate) fn from_image(ctx: &Gpu, image: &Image) -> Self {
+    pub fn from_image(ctx: &Gpu, image: &Image) -> Self {
         let desc = image.desc();
         let packed = desc.size_in_bytes();
         let buf_size = align_to_u32(packed); // wgpu buffers: size multiple of 4
@@ -84,7 +84,7 @@ impl GpuImage {
     }
 
     /// Creates an empty GPU image with the given (packed) descriptor.
-    pub(crate) fn new_empty(ctx: &Gpu, desc: ImageDesc) -> Self {
+    pub fn new_empty(ctx: &Gpu, desc: ImageDesc) -> Self {
         let size = align_to_u32(desc.size_in_bytes()) as u64;
 
         let buffer = ctx.device.create_buffer(&wgpu::BufferDescriptor {
@@ -112,7 +112,7 @@ impl GpuImage {
     }
 
     /// Downloads GPU image data to CPU.
-    pub(crate) fn to_image(&self, ctx: &Gpu) -> Result<Image> {
+    pub fn to_image(&self, ctx: &Gpu) -> Result<Image> {
         let size = self.buffer_size();
 
         let staging_buffer = ctx.device.create_buffer(&wgpu::BufferDescriptor {
@@ -164,7 +164,7 @@ impl GpuImage {
     /// Note: This method requires the GPU device to be polled (via `ctx.wait()` or
     /// `ctx.wait_async()`) for the download to complete. The polling can happen
     /// from another thread - the callback will fire when polled, waking up this future.
-    pub(crate) async fn to_image_async(&self, ctx: &Gpu) -> Result<Image> {
+    pub async fn to_image_async(&self, ctx: &Gpu) -> Result<Image> {
         let size = self.buffer_size();
 
         let staging_buffer = ctx.device.create_buffer(&wgpu::BufferDescriptor {
@@ -247,28 +247,6 @@ impl GpuImage {
     /// Note: `&mut self` is intentional to prevent accidental writes to non-mutable buffers.
     pub(crate) fn write_buffer(&mut self) -> WriteBuffer<'_> {
         WriteBuffer(&self.buffer)
-    }
-}
-
-#[cfg(any(test, feature = "internals"))]
-pub(crate) mod internals {
-    use crate::common::error::Result;
-    use crate::gpu::Gpu;
-    use crate::gpu::gpu_image::GpuImage;
-    use crate::image::{Image, ImageDesc};
-
-    impl GpuImage {
-        pub fn from_image_for_internals(ctx: &Gpu, image: &Image) -> Self {
-            Self::from_image(ctx, image)
-        }
-
-        pub fn new_empty_for_internals(ctx: &Gpu, desc: ImageDesc) -> Self {
-            Self::new_empty(ctx, desc)
-        }
-
-        pub fn to_image_for_internals(&self, ctx: &Gpu) -> Result<Image> {
-            self.to_image(ctx)
-        }
     }
 }
 

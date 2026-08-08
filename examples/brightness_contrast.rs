@@ -9,19 +9,36 @@ fn main() {
     let input = load_lena_rgba_u8();
     print_image_info("Input", &input);
 
-    // CPU example — the op is in-place, so adjust a copy of the input.
+    // CPU: the op is in-place, so adjust a copy of the input.
     let mut output = input.clone();
     ContrastBrightness::new(1.5, 0.1).apply_cpu(&mut output);
     save_image(&output, "contrast_brightness_cpu.png");
 
-    // GPU example
-    let mut ctx = ProcessingContext::new();
-    let mut buffer = ImageBuffer::from_cpu(input);
+    #[cfg(feature = "wgpu")]
+    on_gpu(&input);
+}
 
-    ContrastBrightness::new(1.5, 0.1)
-        .execute(&mut ctx, &mut buffer)
+/// Residency is the caller's to manage: upload, run, download. The shader reads and writes through
+/// separate bindings, so the op needs a distinct output image.
+#[cfg(feature = "wgpu")]
+fn on_gpu(input: &Image) {
+    let Ok(gpu) = Gpu::new() else {
+        println!("no GPU available, skipping the GPU example");
+        return;
+    };
+    let mut context = GpuContext::new(gpu.clone());
+    let pipeline = context
+        .get_or_create(GpuContrastBrightnessPipeline::new)
         .unwrap();
 
-    let result = buffer.make_cpu(&ctx).unwrap();
-    save_image(&result, "contrast_brightness_gpu.png");
+    let uploaded = GpuImage::from_image(&gpu, input);
+    let mut rendered = GpuImage::new_empty(&gpu, input.desc());
+    ContrastBrightness::new(1.5, 0.1)
+        .apply_gpu(&gpu, pipeline, &uploaded, &mut rendered)
+        .unwrap();
+
+    save_image(
+        &rendered.to_image(&gpu).unwrap(),
+        "contrast_brightness_gpu.png",
+    );
 }

@@ -3,7 +3,6 @@ use std::sync::OnceLock;
 
 use crate::common::color_format::{ChannelCount, ChannelSize, ChannelType, ColorFormat};
 use crate::image::Image;
-use crate::processing_context::ProcessingContext;
 
 fn workspace_root() -> &'static str {
     env!("CARGO_MANIFEST_DIR")
@@ -67,24 +66,6 @@ pub(crate) fn load_lena_rgba_u8_61x38() -> Image {
                 .unwrap()
         })
         .clone()
-}
-
-/// Returns a shared ProcessingContext for tests.
-/// This avoids the ~2 second GPU initialization overhead per test.
-pub(crate) fn test_processing_context() -> ProcessingContext {
-    #[cfg(feature = "wgpu")]
-    {
-        match gpu::test_gpu() {
-            Some(gpu) => ProcessingContext {
-                gpu_context: Some(crate::processing_context::gpu_context::GpuContext::new(gpu)),
-            },
-            None => ProcessingContext::cpu_only(),
-        }
-    }
-    #[cfg(not(feature = "wgpu"))]
-    {
-        ProcessingContext::cpu_only()
-    }
 }
 
 /// Creates a test image with a deterministic pattern based on seed.

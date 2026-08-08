@@ -12,8 +12,6 @@ use super::cpu::apply_typed;
 use crate::common::color_format::{ALL_FORMATS, ChannelSize, ChannelType};
 use crate::common::internals::create_test_image;
 use crate::image::Image;
-use crate::processing_context::ProcessingContext;
-use crate::processing_context::image_buffer::ImageBuffer;
 
 /// A frame size to sweep, and what it is there to expose.
 #[derive(Debug, Clone, Copy)]
@@ -97,36 +95,6 @@ pub fn bench(c: &mut Criterion) {
                 });
             }
         }
-    }
-
-    group.finish();
-
-    bench_execute(c);
-}
-
-/// The buffer-level entry point a pipeline calls.
-///
-/// Benched because this path is where the op's cost is easiest to lose — it
-/// once spent an order of magnitude more time faulting in a fresh output
-/// allocation than adjusting the pixels.
-fn bench_execute(c: &mut Criterion) {
-    let params = ContrastBrightness::new(CONTRAST, BRIGHTNESS);
-
-    let mut group = c.benchmark_group("contrast_brightness_execute");
-    group.sample_size(20);
-    group.warm_up_time(Duration::from_secs(1));
-    group.measurement_time(Duration::from_secs(3));
-
-    for &format in ALL_FORMATS {
-        let label = format.to_string().replace(' ', "_");
-        let mut ctx = ProcessingContext::cpu_only();
-        let source = create_test_image(format, FRAMES[0].width, FRAMES[0].height, 0);
-        let mut buffer = ImageBuffer::from_cpu(source.clone());
-
-        group.throughput(Throughput::Bytes(source.bytes().len() as u64));
-        group.bench_function(BenchmarkId::new("execute", &label), |b| {
-            b.iter(|| params.execute(&mut ctx, black_box(&mut buffer)).unwrap());
-        });
     }
 
     group.finish();

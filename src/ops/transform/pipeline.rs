@@ -1,6 +1,6 @@
 use crate::common::error::Result;
 use crate::gpu::Gpu;
-use crate::processing_context::gpu_context::GpuPipeline;
+use crate::gpu::context::GpuPipeline;
 
 #[derive(Debug)]
 pub struct GpuTransformPipeline {

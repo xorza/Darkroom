@@ -1,3 +1,4 @@
+pub(crate) mod context;
 pub(crate) mod gpu_image;
 mod slot;
 
@@ -14,7 +15,7 @@ pub struct Gpu {
 
 impl Gpu {
     /// Creates a new GPU context, initializing wgpu with default settings.
-    pub(crate) fn new() -> Result<Self> {
+    pub fn new() -> Result<Self> {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: wgpu::Backends::all().with_env(),
             ..wgpu::InstanceDescriptor::new_without_display_handle()
@@ -67,18 +68,6 @@ impl Gpu {
                 break;
             }
             tokio::task::yield_now().await;
-        }
-    }
-}
-
-#[cfg(any(test, feature = "internals"))]
-pub(crate) mod internals {
-    use crate::common::error::Result;
-    use crate::gpu::Gpu;
-
-    impl Gpu {
-        pub fn new_for_internals() -> Result<Self> {
-            Self::new()
         }
     }
 }
