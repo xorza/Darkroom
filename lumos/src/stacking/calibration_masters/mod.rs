@@ -202,12 +202,7 @@ pub fn stack_cfa_master(
     let cache =
         FrameCache::from_cfa_paths(paths, &config.cache, config.normalization, progress, cancel)?;
 
-    let product = run_stacking(&cache, &config);
-    if cache.core.cancel.is_cancelled() {
-        return Err(Error::Cancelled);
-    }
-
-    Ok(Some(product.into_cfa_master()))
+    Ok(Some(run_stacking(&cache, &config)?.into_cfa_master()))
 }
 
 impl CalibrationMasters {

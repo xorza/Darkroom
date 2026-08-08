@@ -61,7 +61,7 @@ fn bench_full_pipeline() {
             let load_ms = t0.elapsed().as_secs_f64() * 1000.0;
 
             let t1 = Instant::now();
-            let result = run_stacking(&cache, &config);
+            let result = run_stacking(&cache, &config).expect("this cache is never cancelled");
             let stack_ms = t1.elapsed().as_secs_f64() * 1000.0;
 
             println!(
