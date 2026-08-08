@@ -5,8 +5,6 @@
 use quickbench::quick_bench;
 use std::hint::black_box;
 
-use imaginarium::Image;
-
 use crate::Stretch;
 #[cfg(not(target_arch = "aarch64"))]
 use crate::image_ops::rgb::Rgb;
@@ -14,19 +12,19 @@ use crate::image_ops::stretching::{self, AsinhCurve};
 
 /// Scalar reference path for targets (or x86 CPUs) without the SIMD kernel.
 #[cfg(not(target_arch = "aarch64"))]
-fn scalar_asinh(buf: &mut [f32], curve: &AsinhCurve) {
-    for px in buf.chunks_exact_mut(3) {
+fn scalar_asinh(red: &mut [f32], green: &mut [f32], blue: &mut [f32], curve: &AsinhCurve) {
+    for i in 0..red.len() {
         let out = stretching::color_preserve_pixel(
             Rgb {
-                r: px[0],
-                g: px[1],
-                b: px[2],
+                r: red[i],
+                g: green[i],
+                b: blue[i],
             },
             curve,
         );
-        px[0] = out.r;
-        px[1] = out.g;
-        px[2] = out.b;
+        red[i] = out.r;
+        green[i] = out.g;
+        blue[i] = out.b;
     }
 }
 use crate::io::image::ImageDimensions;
@@ -70,11 +68,10 @@ fn linear_master() -> LinearImage {
 fn bench_stretch_auto_stf_rgb(b: ::quickbench::Bencher) {
     let master = linear_master();
     let stretch = Stretch::auto_stf();
-    // A fresh linear image per call: `apply` stretches in place, so re-stretching the same image
-    // would feed an already-stretched master back in. The convert-from-`LinearImage` is the
-    // realistic input cost (the master is handed to the display stage as a linear `LinearImage`).
+    // A fresh clone per call: `apply` stretches in place, so re-stretching the same image would
+    // feed an already-stretched master back in.
     b.bench(|| {
-        let mut img: Image = master.clone().into();
+        let mut img = master.clone();
         stretch
             .apply(&mut img)
             .expect("stretch applies to an RGB f32 master");
@@ -87,7 +84,7 @@ fn bench_stretch_auto_asinh_rgb(b: ::quickbench::Bencher) {
     let master = linear_master();
     let stretch = Stretch::auto_asinh();
     b.bench(|| {
-        let mut img: Image = master.clone().into();
+        let mut img = master.clone();
         stretch
             .apply(&mut img)
             .expect("stretch applies to an RGB f32 master");
@@ -96,29 +93,37 @@ fn bench_stretch_auto_asinh_rgb(b: ::quickbench::Bencher) {
 }
 
 /// Single-thread throughput of the color-preserving arcsinh kernel itself, isolated from the
-/// `clone`/planar→interleaved-convert/subsample overhead the end-to-end benches above also pay.
-/// The kernel is branchless in the pixel data, so re-running it in place over drifting values costs
-/// a constant per call — no per-iteration reset needed.
+/// `clone`/subsample overhead the end-to-end benches above also pay. The kernel is branchless in
+/// the pixel data, so re-running it in place over drifting values costs a constant per call — no
+/// per-iteration reset needed.
 #[quick_bench(warmup_iters = 1, iters = 10)]
 fn bench_stretch_asinh_kernel_single_thread(b: ::quickbench::Bencher) {
     let curve = AsinhCurve::new(0.05);
     let n_px = W * H;
-    let mut buf = vec![0.0f32; n_px * 3];
-    for (i, px) in buf.chunks_exact_mut(3).enumerate() {
-        let hash = (i as u32).wrapping_mul(2654435761) as f32 / u32::MAX as f32;
-        let v = 0.03 + hash * 0.5; // background-to-star spread, some channels above 1
-        px[0] = v;
-        px[1] = v * 0.9;
-        px[2] = v * 0.8;
-    }
+    // Per channel, so the three planes get the same value scaled — matching what the interleaved
+    // fixture wrote per pixel.
+    let planes: [Vec<f32>; 3] = std::array::from_fn(|channel| {
+        let scale = 1.0 - 0.1 * channel as f32;
+        (0..n_px)
+            .map(|i| {
+                let hash = (i as u32).wrapping_mul(2654435761) as f32 / u32::MAX as f32;
+                // background-to-star spread, some channels above 1
+                (0.03 + hash * 0.5) * scale
+            })
+            .collect()
+    });
+    let mut planes = planes;
     b.bench(|| {
+        let [r, g, bch] = &mut planes;
         // Mirror `apply_color_preserving_asinh`'s dispatch so the bench
         // times the kernel production actually runs on this machine.
         #[cfg(target_arch = "aarch64")]
         // SAFETY: NEON is always available on aarch64.
         unsafe {
             stretching::simd_neon::asinh_color_preserve_neon(
-                &mut buf,
+                r,
+                g,
+                bch,
                 curve.inv_beta,
                 curve.inv_norm,
             );
@@ -128,16 +133,18 @@ fn bench_stretch_asinh_kernel_single_thread(b: ::quickbench::Bencher) {
             // SAFETY: AVX2+FMA availability checked above.
             unsafe {
                 stretching::simd_avx2::asinh_color_preserve_avx2(
-                    &mut buf,
+                    r,
+                    g,
+                    bch,
                     curve.inv_beta,
                     curve.inv_norm,
                 );
             }
         } else {
-            scalar_asinh(&mut buf, &curve);
+            scalar_asinh(r, g, bch, &curve);
         }
         #[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
-        scalar_asinh(&mut buf, &curve);
-        black_box(&buf);
+        scalar_asinh(r, g, bch, &curve);
+        black_box(&planes);
     });
 }
