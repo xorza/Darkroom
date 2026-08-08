@@ -99,6 +99,13 @@ fn filter_fwhm_outliers(stars: &mut Vec<Star>, max_deviation: f32) -> usize {
 /// pass `stars` already sorted by flux descending (as `filter()` does via
 /// `sort_by_flux` before calling this) for "first kept" to mean "brightest
 /// kept"; otherwise an arbitrary, non-brightest star in each cluster survives.
+///
+/// Deliberately not `registration::spatial::KdTree`, which is the crate's other spatial index.
+/// That one is built once over a fixed point set; this queries a set that *grows as it decides* —
+/// only stars already kept are in the grid, which is what makes "first kept wins" hold. The same
+/// answer can be had from a static tree over every star plus a `neighbour < i && kept[neighbour]`
+/// filter, at the cost of an O(n log n) build and n radius queries whose results are mostly
+/// discarded, in place of a structure built as the single pass goes.
 fn remove_duplicate_stars(stars: &mut Vec<Star>, min_separation: f32) -> usize {
     if stars.len() < 2 {
         return 0;
