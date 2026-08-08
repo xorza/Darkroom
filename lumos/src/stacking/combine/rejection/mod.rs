@@ -82,14 +82,13 @@ fn compact_within(
 /// Uses insertion sort for small N (optimal for typical 10–50 frame stacks)
 /// and introsort via `sort_unstable_by` for large N to avoid O(N^2).
 fn sort_with_indices(values: &mut [f32], scratch: &mut ScratchBuffers, n: usize) {
-    // Destructured under the role each generic buffer plays here. No caller reads the f32 scratch
-    // after this returns, so which one it borrows is this function's business rather than a
-    // parameter every call site has to get right.
+    // These three buffers exist for this function alone; they are caller-owned only so the
+    // allocation survives from one pixel to the next.
     let ScratchBuffers {
         indices,
-        floats_b: scratch_buf,
-        usize_a: perm,
-        usize_b: old_indices,
+        sort_values,
+        sort_permutation,
+        sort_indices,
         ..
     } = scratch;
 
@@ -107,17 +106,17 @@ fn sort_with_indices(values: &mut [f32], scratch: &mut ScratchBuffers, n: usize)
     } else {
         // Build position permutation, sort by values, apply to both arrays. All scratch
         // (value copy, permutation, index copy) is caller-owned and reused — no per-pixel alloc.
-        perm.clear();
-        perm.extend(0..n);
-        perm.sort_unstable_by(|&a, &b| values[a].total_cmp(&values[b]));
+        sort_permutation.clear();
+        sort_permutation.extend(0..n);
+        sort_permutation.sort_unstable_by(|&a, &b| values[a].total_cmp(&values[b]));
 
-        scratch_buf.clear();
-        scratch_buf.extend_from_slice(&values[..n]);
-        old_indices.clear();
-        old_indices.extend_from_slice(&indices[..n]);
-        for (dst, &src) in perm.iter().enumerate() {
-            values[dst] = scratch_buf[src];
-            indices[dst] = old_indices[src];
+        sort_values.clear();
+        sort_values.extend_from_slice(&values[..n]);
+        sort_indices.clear();
+        sort_indices.extend_from_slice(&indices[..n]);
+        for (dst, &src) in sort_permutation.iter().enumerate() {
+            values[dst] = sort_values[src];
+            indices[dst] = sort_indices[src];
         }
     }
 }
@@ -275,7 +274,7 @@ impl Rejection {
                 &values[..remaining],
                 weights,
                 survivors,
-                &mut scratch.floats_a,
+                &mut scratch.estimate_values,
             )
         } else {
             0.0

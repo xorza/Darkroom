@@ -133,7 +133,7 @@ impl WinsorizedClipConfig {
             return values.len();
         }
 
-        let estimate = self.robust_estimate(values, &mut scratch.floats_a);
+        let estimate = self.robust_estimate(values, &mut scratch.estimate_values);
 
         if estimate.sigma < f32::EPSILON {
             return values.len();

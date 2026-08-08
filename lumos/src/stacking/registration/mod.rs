@@ -67,6 +67,7 @@ use std::time::Instant;
 
 use glam::DVec2;
 
+use crate::math::statistics::median_f32_mut;
 use crate::stacking::star_detection::star::Star;
 use ransac::RansacEstimator;
 use ransac::transforms::estimate_transform;
@@ -225,8 +226,7 @@ fn median_fwhm(ref_stars: &[Star], target_stars: &[Star]) -> f64 {
         .map(|s| s.fwhm)
         .collect();
 
-    fwhms.sort_by(|a, b| a.total_cmp(b));
-    fwhms[fwhms.len() / 2] as f64
+    median_f32_mut(&mut fwhms) as f64
 }
 
 /// Maximum RMS (px) at which an `Auto` rung is accepted before escalating to a more general model.
@@ -525,6 +525,17 @@ mod input_tests {
         // Combined: [2.0, 2.5, 3.0, 3.5, 4.0] -> median = 3.0
         let median = median_fwhm(&ref_stars, &target_stars);
         assert!((median - 3.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_median_fwhm_even_count_averages_the_middle_pair() {
+        // Four stars: [2.0, 3.0, 4.0, 5.0] -> (3.0 + 4.0) / 2 = 3.5. The old full sort read the
+        // upper middle (4.0); quickselect averages, matching how the detector's own median FWHM
+        // is computed.
+        let ref_stars = vec![make_star(2.0), make_star(5.0)];
+        let target_stars = vec![make_star(4.0), make_star(3.0)];
+        let median = median_fwhm(&ref_stars, &target_stars);
+        assert!((median - 3.5).abs() < 0.01, "got {median}");
     }
 
     #[test]

@@ -80,10 +80,10 @@ impl LinearFitClipConfig {
 
             if iteration == 0 {
                 // Initial pass: median + MAD sigma clipping (robust starting point)
-                scratch.floats_a.clear();
-                scratch.floats_a.extend_from_slice(&values[..len]);
-                let center = median_f32_fast(&mut scratch.floats_a);
-                let mad = mad_f32_fast(&values[..len], center, &mut scratch.floats_a);
+                scratch.estimate_values.clear();
+                scratch.estimate_values.extend_from_slice(&values[..len]);
+                let center = median_f32_fast(&mut scratch.estimate_values);
+                let mad = mad_f32_fast(&values[..len], center, &mut scratch.estimate_values);
                 let sigma = mad_to_sigma(mad);
 
                 if sigma < f32::EPSILON {
