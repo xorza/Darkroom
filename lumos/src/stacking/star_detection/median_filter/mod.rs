@@ -17,6 +17,12 @@ use rayon::prelude::*;
 ///
 /// Uses parallel processing for large images. Separates interior pixels
 /// (full 9-element neighborhood) from edge pixels for better performance.
+///
+/// Border pixels are filtered over the 4 or 6 neighbours that exist rather than over a window
+/// padded out to 9 — no sample is duplicated. That is why `cosmic_ray`'s `median_window` is a
+/// separate filter instead of calling this at `r == 1`: L.A.Cosmic differences two window sizes
+/// against each other and so needs one border convention across all of them, and it picked
+/// replication.
 pub(crate) fn median_filter_3x3(pixels: &Buffer2<f32>, output: &mut Buffer2<f32>) {
     let size = Size2us::new(pixels.width(), pixels.height());
     debug_assert_eq!(size.width, output.width());
