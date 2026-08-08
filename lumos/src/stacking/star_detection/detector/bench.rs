@@ -22,7 +22,6 @@ use crate::stacking::star_detection::config::measurement_config::{
 use crate::stacking::star_detection::detector::stages::detect::internals::collect_components;
 use crate::stacking::star_detection::detector::stages::filter::internals::remove_duplicate_stars;
 use crate::stacking::star_detection::labeling::LabelMap;
-use crate::stacking::star_detection::labeling::internals::label_map_from_raw;
 use crate::stacking::star_detection::roundness::Roundness;
 use crate::stacking::star_detection::star::Star;
 use crate::testing::init_tracing;
@@ -185,7 +184,7 @@ fn component_label_map(size: Size2us, components: usize) -> LabelMap {
             }
         }
     }
-    label_map_from_raw(labels, components)
+    LabelMap::from_raw(labels, components)
 }
 
 #[quick_bench(warmup_iters = 2, iters = 10)]

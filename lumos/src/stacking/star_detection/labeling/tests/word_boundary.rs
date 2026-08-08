@@ -14,7 +14,7 @@ fn boundary_64() {
     }
     let mask = BitBuffer2::from_slice(Size2us::new(width, height), &mask_data);
 
-    let label_map = label_map_from_mask_with_connectivity(&mask, Connectivity::Four);
+    let label_map = LabelMap::from_mask(&mask, Connectivity::Four);
 
     assert_eq!(label_map.num_labels(), 1);
     let label = label_map[1 * width + 62];
@@ -41,7 +41,7 @@ fn boundary_128() {
     }
     let mask = BitBuffer2::from_slice(Size2us::new(width, height), &mask_data);
 
-    let label_map = label_map_from_mask_with_connectivity(&mask, Connectivity::Four);
+    let label_map = LabelMap::from_mask(&mask, Connectivity::Four);
 
     assert_eq!(label_map.num_labels(), 1);
     let label = label_map[1 * width + 126];

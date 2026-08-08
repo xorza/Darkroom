@@ -33,6 +33,44 @@ impl CfaPattern {
         }
     }
 
+    /// Parse from LibRaw's `filters` field, which encodes the color at each position of a
+    /// repeating pattern — 2x2 for Bayer sensors — two bits per position:
+    /// `color_index = (filters >> (((row << 1 & 14) | (col & 1)) << 1)) & 3`
+    ///
+    /// Color indices: 0=Red, 1=Green, 2=Blue, 3=Green2.
+    ///
+    /// Returns `None` when the pattern is not a known 2x2 Bayer CFA — X-Trans, monochrome, and
+    /// other exotic sensors all land here.
+    pub(crate) fn from_filters(filters: u32) -> Option<Self> {
+        let color_at =
+            |row: u32, col: u32| -> u32 { (filters >> (((row << 1 & 14) | (col & 1)) << 1)) & 3 };
+
+        let c00 = color_at(0, 0);
+        let c01 = color_at(0, 1);
+        let c10 = color_at(1, 0);
+        let c11 = color_at(1, 1);
+
+        let is_red = |c: u32| c == 0;
+        // Both green indices count as green.
+        let is_green = |c: u32| c == 1 || c == 3;
+        let is_blue = |c: u32| c == 2;
+
+        if is_red(c00) && is_green(c01) && is_green(c10) && is_blue(c11) {
+            return Some(CfaPattern::Rggb);
+        }
+        if is_blue(c00) && is_green(c01) && is_green(c10) && is_red(c11) {
+            return Some(CfaPattern::Bggr);
+        }
+        if is_green(c00) && is_red(c01) && is_blue(c10) && is_green(c11) {
+            return Some(CfaPattern::Grbg);
+        }
+        if is_green(c00) && is_blue(c01) && is_red(c10) && is_green(c11) {
+            return Some(CfaPattern::Gbrg);
+        }
+
+        None
+    }
+
     /// Flip the pattern vertically (swap rows).
     /// Used when ROWORDER is BOTTOM-UP, since BAYERPAT assumes TOP-DOWN.
     pub fn flip_vertical(self) -> Self {

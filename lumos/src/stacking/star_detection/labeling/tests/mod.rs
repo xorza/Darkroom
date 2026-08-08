@@ -6,7 +6,7 @@
 use crate::bit_buffer2::BitBuffer2;
 use crate::math::size2us::Size2us;
 use crate::stacking::star_detection::config::detection_config::Connectivity;
-use crate::stacking::star_detection::labeling::internals::label_map_from_mask_with_connectivity;
+use crate::stacking::star_detection::labeling::LabelMap;
 
 /// Simple flood-fill reference implementation for ground truth comparison.
 /// This is intentionally naive and slow but obviously correct.
@@ -180,7 +180,7 @@ fn compare_with_reference(mask_data: &[bool], size: Size2us) {
     let mask = BitBuffer2::from_slice(size, mask_data);
 
     // Test 4-connectivity
-    let label_map_4 = label_map_from_mask_with_connectivity(&mask, Connectivity::Four);
+    let label_map_4 = LabelMap::from_mask(&mask, Connectivity::Four);
     let (ref_labels_4, ref_count_4) = reference_ccl_4conn(mask_data, size);
 
     assert_eq!(
@@ -197,7 +197,7 @@ fn compare_with_reference(mask_data: &[bool], size: Size2us) {
     verify_same_grouping(label_map_4.labels(), &ref_labels_4, size.pixel_count());
 
     // Test 8-connectivity
-    let label_map_8 = label_map_from_mask_with_connectivity(&mask, Connectivity::Eight);
+    let label_map_8 = LabelMap::from_mask(&mask, Connectivity::Eight);
     let (ref_labels_8, ref_count_8) = reference_ccl_8conn(mask_data, size);
 
     assert_eq!(
