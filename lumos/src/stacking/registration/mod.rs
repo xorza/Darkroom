@@ -500,28 +500,21 @@ fn recover_matches(
 #[cfg(test)]
 mod input_tests {
     use crate::stacking::registration::*;
-    use crate::stacking::star_detection::roundness::Roundness;
 
-    fn make_star(fwhm: f32) -> Star {
-        Star {
-            pos: DVec2::ZERO,
-            flux: 1000.0,
-            fwhm,
-            eccentricity: 0.0,
-            snr: 100.0,
-            peak: 1.0,
-            sharpness: 0.5,
-            roundness: Roundness {
-                ground: 0.0,
-                sround: 0.0,
-            },
-        }
-    }
+    // Registration reads only `pos` and `fwhm`, so these fixtures set the FWHM under test and
+    // leave everything else — position included — at its `Star::at` default.
 
     #[test]
     fn test_median_fwhm_basic() {
-        let ref_stars = vec![make_star(2.0), make_star(3.0), make_star(4.0)];
-        let target_stars = vec![make_star(2.5), make_star(3.5)];
+        let ref_stars = vec![
+            Star::at(DVec2::ZERO).with_fwhm(2.0),
+            Star::at(DVec2::ZERO).with_fwhm(3.0),
+            Star::at(DVec2::ZERO).with_fwhm(4.0),
+        ];
+        let target_stars = vec![
+            Star::at(DVec2::ZERO).with_fwhm(2.5),
+            Star::at(DVec2::ZERO).with_fwhm(3.5),
+        ];
         // Combined: [2.0, 2.5, 3.0, 3.5, 4.0] -> median = 3.0
         let median = median_fwhm(&ref_stars, &target_stars);
         assert!((median - 3.0).abs() < 0.01);
@@ -532,15 +525,25 @@ mod input_tests {
         // Four stars: [2.0, 3.0, 4.0, 5.0] -> (3.0 + 4.0) / 2 = 3.5. The old full sort read the
         // upper middle (4.0); quickselect averages, matching how the detector's own median FWHM
         // is computed.
-        let ref_stars = vec![make_star(2.0), make_star(5.0)];
-        let target_stars = vec![make_star(4.0), make_star(3.0)];
+        let ref_stars = vec![
+            Star::at(DVec2::ZERO).with_fwhm(2.0),
+            Star::at(DVec2::ZERO).with_fwhm(5.0),
+        ];
+        let target_stars = vec![
+            Star::at(DVec2::ZERO).with_fwhm(4.0),
+            Star::at(DVec2::ZERO).with_fwhm(3.0),
+        ];
         let median = median_fwhm(&ref_stars, &target_stars);
         assert!((median - 3.5).abs() < 0.01, "got {median}");
     }
 
     #[test]
     fn test_median_fwhm_single_set() {
-        let ref_stars = vec![make_star(1.5), make_star(2.5), make_star(3.5)];
+        let ref_stars = vec![
+            Star::at(DVec2::ZERO).with_fwhm(1.5),
+            Star::at(DVec2::ZERO).with_fwhm(2.5),
+            Star::at(DVec2::ZERO).with_fwhm(3.5),
+        ];
         let target_stars = vec![];
         // Combined: [1.5, 2.5, 3.5] -> median = 2.5
         let median = median_fwhm(&ref_stars, &target_stars);
@@ -565,8 +568,15 @@ mod input_tests {
         // Typical ground seeing: FWHM = 2.0-4.0 pixels
         // FWHM = 2.0 -> max_sigma = 1.0 (~3px effective threshold)
         // FWHM = 4.0 -> max_sigma = 2.0 (~6px effective threshold)
-        let ref_stars = vec![make_star(2.0), make_star(2.5), make_star(3.0)];
-        let target_stars = vec![make_star(2.2), make_star(2.8)];
+        let ref_stars = vec![
+            Star::at(DVec2::ZERO).with_fwhm(2.0),
+            Star::at(DVec2::ZERO).with_fwhm(2.5),
+            Star::at(DVec2::ZERO).with_fwhm(3.0),
+        ];
+        let target_stars = vec![
+            Star::at(DVec2::ZERO).with_fwhm(2.2),
+            Star::at(DVec2::ZERO).with_fwhm(2.8),
+        ];
 
         let median = median_fwhm(&ref_stars, &target_stars);
         let max_sigma = (median * 0.5).max(0.5);
@@ -580,7 +590,7 @@ mod input_tests {
     #[test]
     fn test_register_rejects_non_finite_positions_in_both_catalogs() {
         for catalog in [RegistrationCatalog::Reference, RegistrationCatalog::Target] {
-            let mut ref_stars = vec![make_star(2.0); 8];
+            let mut ref_stars = vec![Star::at(DVec2::ZERO).with_fwhm(2.0); 8];
             let mut target_stars = ref_stars.clone();
             let stars = match catalog {
                 RegistrationCatalog::Reference => &mut ref_stars,
@@ -608,7 +618,7 @@ mod input_tests {
     #[test]
     fn test_register_rejects_non_finite_fwhm_in_both_catalogs() {
         for catalog in [RegistrationCatalog::Reference, RegistrationCatalog::Target] {
-            let mut ref_stars = vec![make_star(2.0); 8];
+            let mut ref_stars = vec![Star::at(DVec2::ZERO).with_fwhm(2.0); 8];
             let mut target_stars = ref_stars.clone();
             let stars = match catalog {
                 RegistrationCatalog::Reference => &mut ref_stars,

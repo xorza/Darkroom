@@ -25,12 +25,11 @@ pub(super) fn apply_affine(stars: &[Star], params: [f64; 6]) -> Vec<Star> {
     let [a, b, tx, c, d, ty] = params;
     stars
         .iter()
-        .map(|s| Star {
-            pos: DVec2::new(
+        .map(|s| {
+            s.with_pos(DVec2::new(
                 a * s.pos.x + b * s.pos.y + tx,
                 c * s.pos.x + d * s.pos.y + ty,
-            ),
-            ..*s
+            ))
         })
         .collect()
 }
@@ -46,10 +45,7 @@ pub(super) fn apply_homography(stars: &[Star], params: [f64; 8]) -> Vec<Star> {
             let w = params[6] * s.pos.x + params[7] * s.pos.y + 1.0;
             let x_prime = (params[0] * s.pos.x + params[1] * s.pos.y + params[2]) / w;
             let y_prime = (params[3] * s.pos.x + params[4] * s.pos.y + params[5]) / w;
-            Star {
-                pos: DVec2::new(x_prime, y_prime),
-                ..*s
-            }
+            s.with_pos(DVec2::new(x_prime, y_prime))
         })
         .collect()
 }

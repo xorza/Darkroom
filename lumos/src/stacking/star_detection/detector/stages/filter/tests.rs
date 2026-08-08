@@ -3,74 +3,36 @@ use crate::stacking::star_detection::roundness::Roundness;
 use crate::testing::TestRng;
 use glam::DVec2;
 
-fn make_test_star(fwhm: f32, flux: f32) -> Star {
-    Star {
-        pos: DVec2::new(10.0, 10.0),
-        flux,
-        fwhm,
-        eccentricity: 0.1,
-        snr: 50.0,
-        peak: 0.5,
-        sharpness: 0.3,
-        roundness: Roundness {
-            ground: 0.0,
-            sround: 0.0,
-        },
-    }
-}
-
-fn make_star_at(x: f32, y: f32, flux: f32) -> Star {
-    Star {
-        pos: DVec2::new(x as f64, y as f64),
-        flux,
-        fwhm: 3.0,
-        eccentricity: 0.1,
-        snr: 50.0,
-        peak: 0.5,
-        sharpness: 0.3,
-        roundness: Roundness {
-            ground: 0.0,
-            sround: 0.0,
-        },
-    }
-}
-
 #[test]
 fn filter_returns_the_diagnostics_stored_by_the_detector() {
     let stars = vec![
-        make_star_at(10.0, 10.0, 200.0),
-        make_star_at(11.0, 11.0, 190.0),
-        make_star_at(50.0, 10.0, 180.0),
-        make_star_at(90.0, 10.0, 170.0),
-        make_star_at(130.0, 10.0, 160.0),
-        make_star_at(170.0, 10.0, 150.0),
-        Star {
-            fwhm: 20.0,
-            ..make_star_at(210.0, 10.0, 140.0)
-        },
-        Star {
-            peak: 0.96,
-            ..make_star_at(250.0, 10.0, 130.0)
-        },
-        Star {
-            snr: 5.0,
-            ..make_star_at(290.0, 10.0, 120.0)
-        },
-        Star {
-            eccentricity: 0.7,
-            ..make_star_at(330.0, 10.0, 110.0)
-        },
-        Star {
-            sharpness: 0.8,
-            ..make_star_at(370.0, 10.0, 100.0)
-        },
-        Star {
-            roundness: Roundness {
+        Star::at(DVec2::new(10.0, 10.0)).with_flux(200.0),
+        Star::at(DVec2::new(11.0, 11.0)).with_flux(190.0),
+        Star::at(DVec2::new(50.0, 10.0)).with_flux(180.0),
+        Star::at(DVec2::new(90.0, 10.0)).with_flux(170.0),
+        Star::at(DVec2::new(130.0, 10.0)).with_flux(160.0),
+        Star::at(DVec2::new(170.0, 10.0)).with_flux(150.0),
+        Star::at(DVec2::new(210.0, 10.0))
+            .with_flux(140.0)
+            .with_fwhm(20.0),
+        Star::at(DVec2::new(250.0, 10.0))
+            .with_flux(130.0)
+            .with_peak(0.96),
+        Star::at(DVec2::new(290.0, 10.0))
+            .with_flux(120.0)
+            .with_snr(5.0),
+        Star::at(DVec2::new(330.0, 10.0))
+            .with_flux(110.0)
+            .with_eccentricity(0.7),
+        Star::at(DVec2::new(370.0, 10.0))
+            .with_flux(100.0)
+            .with_sharpness(0.8),
+        Star::at(DVec2::new(410.0, 10.0))
+            .with_flux(90.0)
+            .with_roundness(Roundness {
                 ground: 0.6,
                 sround: 0.0,
-            },
-            ..make_star_at(410.0, 10.0, 90.0)
-        },
+            }),
     ];
 
     let outcome = filter(stars, &FilterConfig::default());
@@ -99,8 +61,13 @@ fn filter_returns_the_diagnostics_stored_by_the_detector() {
 
 #[test]
 fn test_filter_fwhm_outliers_disabled_when_zero_deviation() {
+    // `filter_fwhm_outliers` never reads position, so every fixture below sits at the origin.
     let mut stars: Vec<Star> = (0..10)
-        .map(|i| make_test_star(3.0 + i as f32, 100.0 - i as f32))
+        .map(|i| {
+            Star::at(DVec2::ZERO)
+                .with_fwhm(3.0 + i as f32)
+                .with_flux(100.0 - i as f32)
+        })
         .collect();
 
     let removed = filter_fwhm_outliers(&mut stars, 0.0);
@@ -112,7 +79,11 @@ fn test_filter_fwhm_outliers_disabled_when_zero_deviation() {
 #[test]
 fn test_filter_fwhm_outliers_disabled_when_too_few_stars() {
     let mut stars: Vec<Star> = (0..4)
-        .map(|i| make_test_star(3.0 + i as f32 * 10.0, 100.0 - i as f32))
+        .map(|i| {
+            Star::at(DVec2::ZERO)
+                .with_fwhm(3.0 + i as f32 * 10.0)
+                .with_flux(100.0 - i as f32)
+        })
         .collect();
 
     let removed = filter_fwhm_outliers(&mut stars, 3.0);
@@ -125,9 +96,14 @@ fn test_filter_fwhm_outliers_disabled_when_too_few_stars() {
 fn test_filter_fwhm_outliers_removes_single_outlier() {
     // 9 stars with FWHM ~3.0, 1 star with FWHM 20.0
     let mut stars: Vec<Star> = (0..9)
-        .map(|i| make_test_star(3.0 + (i as f32 * 0.1), 100.0 - i as f32))
+        .map(|i| {
+            Star::at(DVec2::ZERO)
+                .with_fwhm(3.0 + (i as f32 * 0.1))
+                .with_flux(100.0 - i as f32)
+        })
         .collect();
-    stars.push(make_test_star(20.0, 10.0)); // Outlier with low flux
+    // Outlier with low flux
+    stars.push(Star::at(DVec2::ZERO).with_fwhm(20.0).with_flux(10.0));
 
     let removed = filter_fwhm_outliers(&mut stars, 3.0);
 
@@ -140,11 +116,15 @@ fn test_filter_fwhm_outliers_removes_single_outlier() {
 fn test_filter_fwhm_outliers_removes_multiple_outliers() {
     // 7 stars with FWHM ~3.0, 3 stars with FWHM > 15.0
     let mut stars: Vec<Star> = (0..7)
-        .map(|i| make_test_star(3.0 + (i as f32 * 0.1), 100.0 - i as f32))
+        .map(|i| {
+            Star::at(DVec2::ZERO)
+                .with_fwhm(3.0 + (i as f32 * 0.1))
+                .with_flux(100.0 - i as f32)
+        })
         .collect();
-    stars.push(make_test_star(15.0, 5.0));
-    stars.push(make_test_star(18.0, 4.0));
-    stars.push(make_test_star(25.0, 3.0));
+    stars.push(Star::at(DVec2::ZERO).with_fwhm(15.0).with_flux(5.0));
+    stars.push(Star::at(DVec2::ZERO).with_fwhm(18.0).with_flux(4.0));
+    stars.push(Star::at(DVec2::ZERO).with_fwhm(25.0).with_flux(3.0));
 
     let removed = filter_fwhm_outliers(&mut stars, 3.0);
 
@@ -156,7 +136,11 @@ fn test_filter_fwhm_outliers_removes_multiple_outliers() {
 fn test_filter_fwhm_outliers_keeps_all_when_uniform() {
     // All stars have similar FWHM
     let mut stars: Vec<Star> = (0..10)
-        .map(|i| make_test_star(3.0 + (i as f32 * 0.05), 100.0 - i as f32))
+        .map(|i| {
+            Star::at(DVec2::ZERO)
+                .with_fwhm(3.0 + (i as f32 * 0.05))
+                .with_flux(100.0 - i as f32)
+        })
         .collect();
 
     let removed = filter_fwhm_outliers(&mut stars, 3.0);
@@ -171,9 +155,14 @@ fn test_filter_fwhm_outliers_uses_effective_mad_floor() {
     // With median = 3.0, effective_mad = 0.3
     // max_fwhm = 3.0 + 3.0 * 0.3 = 3.9
     let mut stars: Vec<Star> = (0..9)
-        .map(|i| make_test_star(3.0, 100.0 - i as f32))
+        .map(|i| {
+            Star::at(DVec2::ZERO)
+                .with_fwhm(3.0)
+                .with_flux(100.0 - i as f32)
+        })
         .collect();
-    stars.push(make_test_star(5.0, 10.0)); // Should be removed (5.0 > 3.9)
+    // Should be removed (5.0 > 3.9)
+    stars.push(Star::at(DVec2::ZERO).with_fwhm(5.0).with_flux(10.0));
 
     let removed = filter_fwhm_outliers(&mut stars, 3.0);
 
@@ -186,17 +175,17 @@ fn test_filter_fwhm_outliers_uses_top_half_for_reference() {
     // First 5 stars (top half by flux) have FWHM ~3.0
     // Last 5 stars have varying FWHM including outliers
     let mut stars: Vec<Star> = vec![
-        make_test_star(3.0, 100.0),
-        make_test_star(3.1, 95.0),
-        make_test_star(2.9, 90.0),
-        make_test_star(3.2, 85.0),
-        make_test_star(3.0, 80.0),
+        Star::at(DVec2::ZERO).with_fwhm(3.0).with_flux(100.0),
+        Star::at(DVec2::ZERO).with_fwhm(3.1).with_flux(95.0),
+        Star::at(DVec2::ZERO).with_fwhm(2.9).with_flux(90.0),
+        Star::at(DVec2::ZERO).with_fwhm(3.2).with_flux(85.0),
+        Star::at(DVec2::ZERO).with_fwhm(3.0).with_flux(80.0),
         // Lower flux stars - some outliers
-        make_test_star(3.5, 50.0),  // Keep
-        make_test_star(4.0, 40.0),  // Keep (borderline)
-        make_test_star(8.0, 30.0),  // Remove
-        make_test_star(3.1, 20.0),  // Keep
-        make_test_star(15.0, 10.0), // Remove
+        Star::at(DVec2::ZERO).with_fwhm(3.5).with_flux(50.0), // Keep
+        Star::at(DVec2::ZERO).with_fwhm(4.0).with_flux(40.0), // Keep (borderline)
+        Star::at(DVec2::ZERO).with_fwhm(8.0).with_flux(30.0), // Remove
+        Star::at(DVec2::ZERO).with_fwhm(3.1).with_flux(20.0), // Keep
+        Star::at(DVec2::ZERO).with_fwhm(15.0).with_flux(10.0), // Remove
     ];
 
     let removed = filter_fwhm_outliers(&mut stars, 3.0);
@@ -212,11 +201,11 @@ fn test_filter_fwhm_outliers_uses_top_half_for_reference() {
 fn test_filter_fwhm_outliers_preserves_order() {
     // Stars should remain sorted by flux after filtering
     let mut stars: Vec<Star> = vec![
-        make_test_star(3.0, 100.0),
-        make_test_star(3.1, 90.0),
-        make_test_star(20.0, 80.0), // Outlier
-        make_test_star(3.2, 70.0),
-        make_test_star(3.0, 60.0),
+        Star::at(DVec2::ZERO).with_fwhm(3.0).with_flux(100.0),
+        Star::at(DVec2::ZERO).with_fwhm(3.1).with_flux(90.0),
+        Star::at(DVec2::ZERO).with_fwhm(20.0).with_flux(80.0), // Outlier
+        Star::at(DVec2::ZERO).with_fwhm(3.2).with_flux(70.0),
+        Star::at(DVec2::ZERO).with_fwhm(3.0).with_flux(60.0),
     ];
 
     filter_fwhm_outliers(&mut stars, 3.0);
@@ -235,10 +224,14 @@ fn test_filter_fwhm_outliers_stricter_deviation() {
     // Stars: FWHM 3.0, 3.2, 3.4, ..., 4.4 (8 stars) + outliers 6.0, 7.0
     // Strict (1.5) should remove more than loose (5.0)
     let mut stars1: Vec<Star> = (0..8)
-        .map(|i| make_test_star(3.0 + (i as f32 * 0.2), 100.0 - i as f32))
+        .map(|i| {
+            Star::at(DVec2::ZERO)
+                .with_fwhm(3.0 + (i as f32 * 0.2))
+                .with_flux(100.0 - i as f32)
+        })
         .collect();
-    stars1.push(make_test_star(6.0, 10.0));
-    stars1.push(make_test_star(7.0, 5.0));
+    stars1.push(Star::at(DVec2::ZERO).with_fwhm(6.0).with_flux(10.0));
+    stars1.push(Star::at(DVec2::ZERO).with_fwhm(7.0).with_flux(5.0));
 
     let mut stars2 = stars1.clone();
 
@@ -269,11 +262,11 @@ fn test_filter_fwhm_outliers_stricter_deviation() {
 fn test_filter_fwhm_outliers_exactly_five_stars() {
     // Minimum number of stars for filtering to work
     let mut stars: Vec<Star> = vec![
-        make_test_star(3.0, 100.0),
-        make_test_star(3.1, 90.0),
-        make_test_star(3.0, 80.0),
-        make_test_star(3.2, 70.0),
-        make_test_star(20.0, 60.0), // Outlier
+        Star::at(DVec2::ZERO).with_fwhm(3.0).with_flux(100.0),
+        Star::at(DVec2::ZERO).with_fwhm(3.1).with_flux(90.0),
+        Star::at(DVec2::ZERO).with_fwhm(3.0).with_flux(80.0),
+        Star::at(DVec2::ZERO).with_fwhm(3.2).with_flux(70.0),
+        Star::at(DVec2::ZERO).with_fwhm(20.0).with_flux(60.0), // Outlier
     ];
 
     let removed = filter_fwhm_outliers(&mut stars, 3.0);
@@ -285,7 +278,11 @@ fn test_filter_fwhm_outliers_exactly_five_stars() {
 #[test]
 fn test_filter_fwhm_outliers_negative_deviation_disabled() {
     let mut stars: Vec<Star> = (0..10)
-        .map(|i| make_test_star(3.0 + i as f32 * 5.0, 100.0 - i as f32))
+        .map(|i| {
+            Star::at(DVec2::ZERO)
+                .with_fwhm(3.0 + i as f32 * 5.0)
+                .with_flux(100.0 - i as f32)
+        })
         .collect();
 
     let removed = filter_fwhm_outliers(&mut stars, -1.0);
@@ -305,7 +302,7 @@ fn test_remove_duplicate_stars_empty() {
 
 #[test]
 fn test_remove_duplicate_stars_single() {
-    let mut stars = vec![make_star_at(10.0, 10.0, 100.0)];
+    let mut stars = vec![Star::at(DVec2::new(10.0, 10.0)).with_flux(100.0)];
     let removed = remove_duplicate_stars(&mut stars, 8.0);
 
     assert_eq!(removed, 0);
@@ -316,9 +313,9 @@ fn test_remove_duplicate_stars_single() {
 fn test_remove_duplicate_stars_no_duplicates() {
     // Stars far apart - no removal
     let mut stars = vec![
-        make_star_at(10.0, 10.0, 100.0),
-        make_star_at(50.0, 50.0, 90.0),
-        make_star_at(100.0, 100.0, 80.0),
+        Star::at(DVec2::new(10.0, 10.0)).with_flux(100.0),
+        Star::at(DVec2::new(50.0, 50.0)).with_flux(90.0),
+        Star::at(DVec2::new(100.0, 100.0)).with_flux(80.0),
     ];
 
     let removed = remove_duplicate_stars(&mut stars, 8.0);
@@ -331,9 +328,9 @@ fn test_remove_duplicate_stars_no_duplicates() {
 fn test_remove_duplicate_stars_one_pair() {
     // Two stars within separation - keep brighter one
     let mut stars = vec![
-        make_star_at(10.0, 10.0, 100.0), // Brighter - keep
-        make_star_at(12.0, 12.0, 90.0),  // Within 8 pixels - remove
-        make_star_at(50.0, 50.0, 80.0),  // Far away - keep
+        Star::at(DVec2::new(10.0, 10.0)).with_flux(100.0), // Brighter - keep
+        Star::at(DVec2::new(12.0, 12.0)).with_flux(90.0),  // Within 8 pixels - remove
+        Star::at(DVec2::new(50.0, 50.0)).with_flux(80.0),  // Far away - keep
     ];
 
     let removed = remove_duplicate_stars(&mut stars, 8.0);
@@ -348,8 +345,8 @@ fn test_remove_duplicate_stars_one_pair() {
 fn test_remove_duplicate_stars_keeps_brightest() {
     // Stars sorted by flux (brightest first) - keep first one
     let mut stars = vec![
-        make_star_at(10.0, 10.0, 100.0), // Brightest
-        make_star_at(11.0, 11.0, 50.0),  // Dimmer duplicate
+        Star::at(DVec2::new(10.0, 10.0)).with_flux(100.0), // Brightest
+        Star::at(DVec2::new(11.0, 11.0)).with_flux(50.0),  // Dimmer duplicate
     ];
 
     let removed = remove_duplicate_stars(&mut stars, 8.0);
@@ -367,8 +364,8 @@ fn test_remove_duplicate_stars_unsorted_input_keeps_first_not_brightest() {
     // test feeds dimmer-first input to show what a caller that skips sorting
     // actually gets, so a future refactor can't silently assume flux-awareness.
     let mut stars = vec![
-        make_star_at(11.0, 11.0, 50.0),  // Dimmer, but first in the Vec
-        make_star_at(10.0, 10.0, 100.0), // Brighter, but second
+        Star::at(DVec2::new(11.0, 11.0)).with_flux(50.0), // Dimmer, but first in the Vec
+        Star::at(DVec2::new(10.0, 10.0)).with_flux(100.0), // Brighter, but second
     ];
 
     let removed = remove_duplicate_stars(&mut stars, 8.0);
@@ -386,8 +383,8 @@ fn test_remove_duplicate_stars_exact_separation() {
     // Stars exactly at separation distance - should NOT be removed
     // Distance = sqrt(6^2 + 6^2) = 8.485 > 8.0
     let mut stars = vec![
-        make_star_at(10.0, 10.0, 100.0),
-        make_star_at(16.0, 16.0, 90.0),
+        Star::at(DVec2::new(10.0, 10.0)).with_flux(100.0),
+        Star::at(DVec2::new(16.0, 16.0)).with_flux(90.0),
     ];
 
     let removed = remove_duplicate_stars(&mut stars, 8.0);
@@ -401,8 +398,8 @@ fn test_remove_duplicate_stars_just_under_separation() {
     // Stars just under separation - should be removed
     // Distance = sqrt(5^2 + 5^2) = 7.07 < 8.0
     let mut stars = vec![
-        make_star_at(10.0, 10.0, 100.0),
-        make_star_at(15.0, 15.0, 90.0),
+        Star::at(DVec2::new(10.0, 10.0)).with_flux(100.0),
+        Star::at(DVec2::new(15.0, 15.0)).with_flux(90.0),
     ];
 
     let removed = remove_duplicate_stars(&mut stars, 8.0);
@@ -415,9 +412,9 @@ fn test_remove_duplicate_stars_just_under_separation() {
 fn test_remove_duplicate_stars_cluster_of_three() {
     // Three stars in a cluster - keep only brightest
     let mut stars = vec![
-        make_star_at(10.0, 10.0, 100.0), // Keep
-        make_star_at(12.0, 10.0, 90.0),  // Remove (close to first)
-        make_star_at(14.0, 10.0, 80.0),  // Remove (close to first)
+        Star::at(DVec2::new(10.0, 10.0)).with_flux(100.0), // Keep
+        Star::at(DVec2::new(12.0, 10.0)).with_flux(90.0),  // Remove (close to first)
+        Star::at(DVec2::new(14.0, 10.0)).with_flux(80.0),  // Remove (close to first)
     ];
 
     let removed = remove_duplicate_stars(&mut stars, 8.0);
@@ -431,10 +428,10 @@ fn test_remove_duplicate_stars_cluster_of_three() {
 fn test_remove_duplicate_stars_two_separate_pairs() {
     // Two pairs of duplicates, far apart from each other
     let mut stars = vec![
-        make_star_at(10.0, 10.0, 100.0),  // Pair 1 - keep
-        make_star_at(12.0, 10.0, 90.0),   // Pair 1 - remove
-        make_star_at(100.0, 100.0, 80.0), // Pair 2 - keep
-        make_star_at(102.0, 100.0, 70.0), // Pair 2 - remove
+        Star::at(DVec2::new(10.0, 10.0)).with_flux(100.0), // Pair 1 - keep
+        Star::at(DVec2::new(12.0, 10.0)).with_flux(90.0),  // Pair 1 - remove
+        Star::at(DVec2::new(100.0, 100.0)).with_flux(80.0), // Pair 2 - keep
+        Star::at(DVec2::new(102.0, 100.0)).with_flux(70.0), // Pair 2 - remove
     ];
 
     let removed = remove_duplicate_stars(&mut stars, 8.0);
@@ -449,10 +446,10 @@ fn test_remove_duplicate_stars_two_separate_pairs() {
 fn test_remove_duplicate_stars_horizontal_line() {
     // Stars in a horizontal line with spacing
     let mut stars = vec![
-        make_star_at(0.0, 0.0, 100.0),
-        make_star_at(5.0, 0.0, 90.0),  // Within 8 of first
-        make_star_at(10.0, 0.0, 80.0), // Within 8 of second (but second removed)
-        make_star_at(20.0, 0.0, 70.0), // Far from all remaining
+        Star::at(DVec2::new(0.0, 0.0)).with_flux(100.0),
+        Star::at(DVec2::new(5.0, 0.0)).with_flux(90.0), // Within 8 of first
+        Star::at(DVec2::new(10.0, 0.0)).with_flux(80.0), // Within 8 of second (but second removed)
+        Star::at(DVec2::new(20.0, 0.0)).with_flux(70.0), // Far from all remaining
     ];
 
     let removed = remove_duplicate_stars(&mut stars, 8.0);
@@ -468,9 +465,9 @@ fn test_remove_duplicate_stars_horizontal_line() {
 fn test_remove_duplicate_stars_vertical_separation() {
     // Stars separated only vertically
     let mut stars = vec![
-        make_star_at(10.0, 10.0, 100.0),
-        make_star_at(10.0, 15.0, 90.0), // 5 pixels vertical - remove
-        make_star_at(10.0, 25.0, 80.0), // 15 pixels from first - keep
+        Star::at(DVec2::new(10.0, 10.0)).with_flux(100.0),
+        Star::at(DVec2::new(10.0, 15.0)).with_flux(90.0), // 5 pixels vertical - remove
+        Star::at(DVec2::new(10.0, 25.0)).with_flux(80.0), // 15 pixels from first - keep
     ];
 
     let removed = remove_duplicate_stars(&mut stars, 8.0);
@@ -483,9 +480,9 @@ fn test_remove_duplicate_stars_vertical_separation() {
 fn test_remove_duplicate_stars_zero_separation() {
     // Zero separation - removes all but one
     let mut stars = vec![
-        make_star_at(10.0, 10.0, 100.0),
-        make_star_at(10.0, 10.0, 90.0), // Exact same position
-        make_star_at(10.0, 10.0, 80.0), // Exact same position
+        Star::at(DVec2::new(10.0, 10.0)).with_flux(100.0),
+        Star::at(DVec2::new(10.0, 10.0)).with_flux(90.0), // Exact same position
+        Star::at(DVec2::new(10.0, 10.0)).with_flux(80.0), // Exact same position
     ];
 
     let removed = remove_duplicate_stars(&mut stars, 8.0);
@@ -498,9 +495,9 @@ fn test_remove_duplicate_stars_zero_separation() {
 fn test_remove_duplicate_stars_large_separation_threshold() {
     // Large separation threshold removes more
     let mut stars = vec![
-        make_star_at(10.0, 10.0, 100.0),
-        make_star_at(30.0, 10.0, 90.0), // 20 pixels away
-        make_star_at(50.0, 10.0, 80.0), // 40 pixels from first
+        Star::at(DVec2::new(10.0, 10.0)).with_flux(100.0),
+        Star::at(DVec2::new(30.0, 10.0)).with_flux(90.0), // 20 pixels away
+        Star::at(DVec2::new(50.0, 10.0)).with_flux(80.0), // 40 pixels from first
     ];
 
     let removed = remove_duplicate_stars(&mut stars, 25.0);
@@ -515,10 +512,10 @@ fn test_remove_duplicate_stars_large_separation_threshold() {
 fn test_remove_duplicate_stars_preserves_order() {
     // Remaining stars should maintain their relative order
     let mut stars = vec![
-        make_star_at(10.0, 10.0, 100.0),
-        make_star_at(12.0, 10.0, 95.0), // Remove
-        make_star_at(50.0, 50.0, 90.0),
-        make_star_at(100.0, 100.0, 85.0),
+        Star::at(DVec2::new(10.0, 10.0)).with_flux(100.0),
+        Star::at(DVec2::new(12.0, 10.0)).with_flux(95.0), // Remove
+        Star::at(DVec2::new(50.0, 50.0)).with_flux(90.0),
+        Star::at(DVec2::new(100.0, 100.0)).with_flux(85.0),
     ];
 
     remove_duplicate_stars(&mut stars, 8.0);
@@ -537,7 +534,7 @@ fn test_remove_duplicate_stars_many_duplicates() {
     // Star at x=18.0 is 8.0px from star[0] — at boundary (not removed since
     // distance must be strictly less). But star at x=17.5 is 7.5 < 8.0 → removed.
     let mut stars: Vec<Star> = (0..20)
-        .map(|i| make_star_at(10.0 + (i as f32 * 0.5), 10.0, 100.0 - i as f32))
+        .map(|i| Star::at(DVec2::new(10.0 + (i as f64 * 0.5), 10.0)).with_flux(100.0 - i as f32))
         .collect();
 
     let removed = remove_duplicate_stars(&mut stars, 8.0);
@@ -564,17 +561,17 @@ fn test_remove_duplicate_stars_spatial_hash_path() {
     // Create 150 stars in a grid pattern (15x10)
     for y in 0..10 {
         for x in 0..15 {
-            let px = x as f32 * 20.0 + 10.0; // 20 pixel spacing
-            let py = y as f32 * 20.0 + 10.0;
+            let px = x as f64 * 20.0 + 10.0; // 20 pixel spacing
+            let py = y as f64 * 20.0 + 10.0;
             let flux = 1000.0 - (y * 15 + x) as f32; // Decreasing flux
-            stars.push(make_star_at(px, py, flux));
+            stars.push(Star::at(DVec2::new(px, py)).with_flux(flux));
         }
     }
 
     // Add some duplicates close to existing stars
-    stars.push(make_star_at(12.0, 12.0, 50.0)); // Close to (10, 10)
-    stars.push(make_star_at(32.0, 12.0, 45.0)); // Close to (30, 10)
-    stars.push(make_star_at(52.0, 32.0, 40.0)); // Close to (50, 30)
+    stars.push(Star::at(DVec2::new(12.0, 12.0)).with_flux(50.0)); // Close to (10, 10)
+    stars.push(Star::at(DVec2::new(32.0, 12.0)).with_flux(45.0)); // Close to (30, 10)
+    stars.push(Star::at(DVec2::new(52.0, 32.0)).with_flux(40.0)); // Close to (50, 30)
 
     // Sort by flux (required)
     stars.sort_by(|a, b| b.flux.partial_cmp(&a.flux).unwrap());
@@ -612,14 +609,14 @@ fn test_remove_duplicate_stars_spatial_hash_edge_cases() {
 
     // Create 200 stars spread across a large area
     for i in 0..200 {
-        let x = (i % 20) as f32 * 100.0 + 50.0;
-        let y = (i / 20) as f32 * 100.0 + 50.0;
-        stars.push(make_star_at(x, y, 1000.0 - i as f32));
+        let x = (i % 20) as f64 * 100.0 + 50.0;
+        let y = (i / 20) as f64 * 100.0 + 50.0;
+        stars.push(Star::at(DVec2::new(x, y)).with_flux(1000.0 - i as f32));
     }
 
     // Add duplicates at cell boundaries (separation = 5.0, so cell size = 5.0)
     // Star at boundary between cells
-    stars.push(make_star_at(52.0, 50.0, 10.0)); // Close to (50, 50)
+    stars.push(Star::at(DVec2::new(52.0, 50.0)).with_flux(10.0)); // Close to (50, 50)
 
     stars.sort_by(|a, b| b.flux.partial_cmp(&a.flux).unwrap());
 
@@ -634,14 +631,13 @@ fn test_remove_duplicate_stars_spatial_hash_consistency() {
     // Verify spatial hash gives same results as simple algorithm
     let mut rng = TestRng::new(12345);
 
-    // Generate 500 random stars
+    // Generate 500 random stars. The positions stay f32-derived so the RNG stream, and with it
+    // the fixture, is unchanged by the widening to DVec2.
     let base_stars: Vec<Star> = (0..500)
         .map(|i| {
-            make_star_at(
-                rng.next_f32() * 1000.0,
-                rng.next_f32() * 1000.0,
-                1000.0 - i as f32,
-            )
+            let x = (rng.next_f32() * 1000.0) as f64;
+            let y = (rng.next_f32() * 1000.0) as f64;
+            Star::at(DVec2::new(x, y)).with_flux(1000.0 - i as f32)
         })
         .collect();
 

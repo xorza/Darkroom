@@ -6,10 +6,7 @@
 
 use std::f64::consts::FRAC_PI_2;
 
-use crate::{
-    stacking::star_detection::{roundness::Roundness, star::Star},
-    testing::TestRng,
-};
+use crate::{stacking::star_detection::star::Star, testing::TestRng};
 use glam::DVec2;
 
 /// Generate random star positions within a bounded area (default 50-px margin).
@@ -42,18 +39,10 @@ pub(crate) fn positions_to_stars(positions: &[DVec2], fwhm: f32) -> Vec<Star> {
     positions
         .iter()
         .enumerate()
-        .map(|(i, &pos)| Star {
-            pos,
-            flux: 10000.0 - i as f32 * 10.0,
-            fwhm,
-            eccentricity: 0.0,
-            snr: 100.0,
-            peak: 1.0,
-            sharpness: 0.5,
-            roundness: Roundness {
-                ground: 0.0,
-                sround: 0.0,
-            },
+        .map(|(i, &pos)| {
+            Star::at(pos)
+                .with_flux(10000.0 - i as f32 * 10.0)
+                .with_fwhm(fwhm)
         })
         .collect()
 }
@@ -73,13 +62,7 @@ pub(crate) fn generate_random_stars(
 /// Apply a translation transform to Stars.
 pub(crate) fn translate_star_list(stars: &[Star], dx: f64, dy: f64) -> Vec<Star> {
     let offset = DVec2::new(dx, dy);
-    stars
-        .iter()
-        .map(|s| Star {
-            pos: s.pos + offset,
-            ..*s
-        })
-        .collect()
+    stars.iter().map(|s| s.with_pos(s.pos + offset)).collect()
 }
 
 /// Apply a similarity transform (translation + rotation + scale) to Stars.
@@ -106,10 +89,7 @@ pub(crate) fn transform_star_list(
             let r = s.pos - center;
             let new_x = cos_a * r.x - sin_a * r.y + center.x + offset.x;
             let new_y = sin_a * r.x + cos_a * r.y + center.y + offset.y;
-            Star {
-                pos: DVec2::new(new_x, new_y),
-                ..*s
-            }
+            s.with_pos(DVec2::new(new_x, new_y))
         })
         .collect()
 }
@@ -124,10 +104,7 @@ pub(crate) fn add_star_noise(stars: &[Star], noise_amplitude: f64, seed: u64) ->
                 (rng.next_f64() * 2.0 - 1.0) * noise_amplitude,
                 (rng.next_f64() * 2.0 - 1.0) * noise_amplitude,
             );
-            Star {
-                pos: s.pos + noise,
-                ..*s
-            }
+            s.with_pos(s.pos + noise)
         })
         .collect()
 }
@@ -162,19 +139,15 @@ pub(crate) fn add_spurious_star_list(
     for i in 0..count {
         let x = margin + rng.next_f64() * (width - 2.0 * margin);
         let y = margin + rng.next_f64() * (height - 2.0 * margin);
-        result.push(Star {
-            pos: DVec2::new(x, y),
-            flux: 100.0 - i as f32,
-            fwhm,
-            eccentricity: 0.0,
-            snr: 10.0,
-            peak: 0.1,
-            sharpness: 0.5,
-            roundness: Roundness {
-                ground: 0.0,
-                sround: 0.0,
-            },
-        });
+        // Faint by construction: a spurious detection has to look like one to any grader that
+        // later learns to weigh SNR.
+        result.push(
+            Star::at(DVec2::new(x, y))
+                .with_flux(100.0 - i as f32)
+                .with_fwhm(fwhm)
+                .with_snr(10.0)
+                .with_peak(0.1),
+        );
     }
 
     result
@@ -207,10 +180,7 @@ pub(crate) fn translate_stars_with_overlap(
     let offset = DVec2::new(dx, dy);
     stars
         .iter()
-        .map(|s| Star {
-            pos: s.pos + offset,
-            ..*s
-        })
+        .map(|s| s.with_pos(s.pos + offset))
         .filter(|s| {
             s.pos.x >= margin
                 && s.pos.x <= width - margin

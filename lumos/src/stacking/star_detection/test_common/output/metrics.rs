@@ -1,6 +1,5 @@
 //! Detection metrics computation for visual tests.
 
-use crate::stacking::star_detection::roundness::Roundness;
 use crate::stacking::star_detection::star::Star;
 use crate::stacking::star_detection::test_common::output::comparison::match_stars;
 use crate::testing::synthetic::observe::ObservedSource;
@@ -370,19 +369,7 @@ mod tests {
     }
 
     fn make_det(x: f32, y: f32) -> Star {
-        Star {
-            pos: glam::DVec2::new(x as f64, y as f64),
-            flux: 100.0,
-            fwhm: 3.0,
-            eccentricity: 0.0,
-            snr: 50.0,
-            peak: 0.5,
-            sharpness: 0.3,
-            roundness: Roundness {
-                ground: 0.0,
-                sround: 0.0,
-            },
-        }
+        Star::at(glam::DVec2::new(x as f64, y as f64)).with_eccentricity(0.0)
     }
 
     #[test]
