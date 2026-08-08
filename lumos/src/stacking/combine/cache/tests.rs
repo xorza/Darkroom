@@ -1,10 +1,12 @@
 use crate::io::image::cfa::{CfaImage, CfaType};
 use crate::io::image::linear::LinearImage;
+use crate::math::size2us::Size2us;
 use crate::stacking::combine::cache::internals::cache_from_images;
 use crate::stacking::combine::cache::*;
 use crate::stacking::combine::config::Normalization;
 use crate::stacking::combine::rejection::Rejection;
 use crate::stacking::frame_store::{FrameStats, StoredFrame};
+use crate::stacking::product::Coverage;
 use crate::stacking::product::QualityPlanes;
 use crate::testing::ScratchDirectory;
 
@@ -227,6 +229,17 @@ fn finish_product_uniform_equal_weights() {
     ));
     assert!(matches!(linear_variance, QualityMap::Shared(_)));
     assert_eq!(product.image.channel(0).pixels(), &[1.5; 6]);
+    // No frame carried a coverage map, so coverage is the constant 1.0 and no plane is built —
+    // at a full-frame master that is the difference between one number and 240 MB.
+    let coverage = product.coverage.as_ref().unwrap();
+    assert!(
+        matches!(coverage, Coverage::Uniform { value, .. } if *value == 1.0),
+        "fully-covered stack should not materialize a plane: {coverage:?}"
+    );
+    assert!(coverage.per_pixel().is_none());
+    assert_eq!(coverage.size(), Size2us::new(3, 2));
+    // It still reads and materializes like the plane it stands for.
+    assert_eq!(coverage.to_plane().pixels(), &[1.0; 6]);
     for p in 0..6 {
         assert_eq!(product.coverage.as_ref().unwrap()[p], 1.0);
         assert_eq!(product.weight.as_ref().unwrap().channel(0)[p], 4.0);

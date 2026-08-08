@@ -111,7 +111,7 @@ pub use stacking::combine::rejection::sigma_clip_config::SigmaClipConfig;
 pub use stacking::combine::rejection::winsorized_clip_config::WinsorizedClipConfig;
 pub use stacking::combine::stack::{StackFrame, stack, stack_images};
 pub use stacking::frame_store::FrameStoreError;
-pub use stacking::product::{QualityMap, QualityPlanes, StackProduct};
+pub use stacking::product::{Coverage, QualityMap, QualityPlanes, StackProduct};
 pub use stacking::progress::{ProgressCallback, StackingProgress, StackingStage};
 
 pub use stacking::pipeline::align::align_and_stack;

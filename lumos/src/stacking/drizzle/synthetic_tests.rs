@@ -249,7 +249,8 @@ fn drizzle_emits_coverage_weight_and_linear_variance_maps() {
     .unwrap();
 
     // Coverage is normalized to [0,1]; the interior is fully covered by all 4 frames.
-    let cov = result.coverage.as_ref().unwrap().pixels();
+    let cov_plane = result.coverage.as_ref().unwrap().to_plane();
+    let cov = cov_plane.pixels();
     assert!(
         cov.iter().all(|&c| (-1e-4..=1.0001).contains(&c)),
         "coverage must stay in [0,1]"

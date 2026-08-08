@@ -11,6 +11,7 @@ use crate::math::rect::Rect;
 use crate::stacking::drizzle::config::{DrizzleConfig, DrizzleKernel};
 use crate::stacking::drizzle::error::DrizzleError;
 use crate::stacking::drizzle::geometry::{boxer, lanczos_kernel, local_jacobian};
+use crate::stacking::product::Coverage;
 use crate::stacking::product::{QualityMap, StackProduct};
 use crate::stacking::registration::transform::Transform;
 
@@ -640,7 +641,7 @@ impl DrizzleAccumulator {
         );
         StackProduct {
             image,
-            coverage: Some(coverage),
+            coverage: Some(Coverage::PerPixel(coverage)),
             weight: Some(QualityMap::Shared(self.weight)),
             linear_variance: Some(QualityMap::Shared(linear_variance)),
             // Drizzle redistributes flux by geometry rather than combining aligned samples, so
