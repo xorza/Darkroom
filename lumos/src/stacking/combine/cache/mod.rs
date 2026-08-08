@@ -31,14 +31,14 @@ use crate::stacking::progress::{ProgressCallback, StackingStage};
 pub(crate) struct ScratchBuffers {
     /// Tracks original frame indices after rejection reordering.
     pub(crate) indices: Vec<usize>,
-    /// General-purpose f32 scratch (e.g. winsorized working copy).
-    pub(crate) floats_a: Vec<f32>,
-    /// Second f32 scratch, taken by large-N `sort_with_indices` for its value copy.
-    pub(crate) floats_b: Vec<f32>,
-    /// usize scratch (large-N `sort_with_indices` permutation).
-    pub(crate) usize_a: Vec<usize>,
-    /// Second usize scratch (large-N `sort_with_indices` index copy).
-    pub(crate) usize_b: Vec<usize>,
+    /// Values copied out for a robust centre/spread estimate, leaving the originals untouched.
+    pub(crate) estimate_values: Vec<f32>,
+    /// Large-N `sort_with_indices`: the value copy it permutes from.
+    pub(crate) sort_values: Vec<f32>,
+    /// Large-N `sort_with_indices`: the position permutation it sorts.
+    pub(crate) sort_permutation: Vec<usize>,
+    /// Large-N `sort_with_indices`: the frame-index copy it permutes from.
+    pub(crate) sort_indices: Vec<usize>,
     pub(crate) gesd_statistics: Vec<f64>,
     pub(crate) gesd_critical_values: Vec<f64>,
     pub(crate) gesd_sample_count: usize,
@@ -51,10 +51,10 @@ impl ScratchBuffers {
     /// and every call after the first is a no-op.
     fn reserve(&mut self, frame_count: usize) {
         self.indices.reserve(frame_count);
-        self.floats_a.reserve(frame_count);
-        self.floats_b.reserve(frame_count);
-        self.usize_a.reserve(frame_count);
-        self.usize_b.reserve(frame_count);
+        self.estimate_values.reserve(frame_count);
+        self.sort_values.reserve(frame_count);
+        self.sort_permutation.reserve(frame_count);
+        self.sort_indices.reserve(frame_count);
         self.gesd_statistics.reserve(frame_count / 4);
         self.gesd_critical_values.reserve(frame_count / 4);
     }
