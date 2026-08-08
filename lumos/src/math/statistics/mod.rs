@@ -40,9 +40,12 @@ impl MedianMad {
     }
 }
 
-/// Compute absolute deviations from median in-place.
+/// Replace each value with `|value − median|`, in place.
 ///
-/// Replaces each value with |value - median|.
+/// Twin of [`fill_abs_deviations`], which computes the same transform into a separate buffer.
+/// They stay separate because the two contracts are incompatible, not by oversight: this one
+/// consumes its input, that one preserves it, and a single function doing both would need input
+/// and output to alias.
 #[inline]
 fn abs_deviation_inplace(values: &mut [f32], median: f32) {
     for v in values.iter_mut() {
@@ -83,6 +86,48 @@ pub(crate) fn median_f32_mut(data: &mut [f32]) -> f32 {
     }
 }
 
+/// Calculate the median of f64 values in-place.
+///
+/// The `f64` counterpart to [`median_f32_mut`], and the crate's only one: the polynomial surface
+/// fit in `background_extraction` works in `f64` throughout, so downcasting its residuals to run
+/// the `f32` path would lose precision inside a fitting loop.
+#[inline]
+pub(crate) fn median_f64_mut(data: &mut [f64]) -> f64 {
+    debug_assert!(!data.is_empty());
+
+    let len = data.len();
+    let mid = len / 2;
+
+    if len & 1 == 1 {
+        let (_, median, _) = data.select_nth_unstable_by(mid, f64::total_cmp);
+        *median
+    } else {
+        let (left_part, right_median, _) = data.select_nth_unstable_by(mid, f64::total_cmp);
+        let right = *right_median;
+        let left = left_part.iter().copied().reduce(f64::max).unwrap();
+        (left + right) * 0.5
+    }
+}
+
+/// MAD-scaled robust sigma of `data`: `1.4826 · median|x − median(x)|`, or `0.0` when empty.
+///
+/// Leaves `data` intact — callers that go on to threshold against their own residuals need them
+/// — by working entirely in `scratch`, which is overwritten in full. Hoist `scratch` out of a
+/// refit loop and the whole iteration allocates nothing.
+pub(crate) fn robust_sigma_f64(data: &[f64], scratch: &mut Vec<f64>) -> f64 {
+    if data.is_empty() {
+        return 0.0;
+    }
+
+    scratch.clear();
+    scratch.extend_from_slice(data);
+    let median = median_f64_mut(scratch);
+    for value in scratch.iter_mut() {
+        *value = (*value - median).abs();
+    }
+    f64::from(MAD_TO_SIGMA) * median_f64_mut(scratch)
+}
+
 /// Fast approximate median using `partial_cmp` (single partition, no NaN handling).
 ///
 /// Returns the upper-middle element for even-length arrays (no averaging).
@@ -111,6 +156,8 @@ pub(crate) fn median_f32_fast(data: &mut [f32]) -> f32 {
 ///
 /// One pass: the subtraction rides on the copy rather than following it, and the buffer's
 /// previous contents are never written before being overwritten.
+///
+/// Twin of [`abs_deviation_inplace`] — see there for why the pair does not collapse into one.
 #[inline]
 fn fill_abs_deviations(values: &[f32], median: f32, scratch: &mut Vec<f32>) {
     scratch.clear();
