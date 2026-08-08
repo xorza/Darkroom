@@ -4,6 +4,7 @@ use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::image_metadata::ImageMetadata;
 use crate::io::image::linear::LinearImage;
 use crate::stacking::frame_store::StoredImage;
+use crate::stacking::star_detection::detector::Diagnostics;
 use crate::stacking::star_detection::star::Star;
 
 /// A calibrated frame waiting to be registered, held wherever the memory tier put it.
@@ -49,4 +50,6 @@ impl PipelineFrame {
 pub(crate) struct DetectedFrame {
     pub(crate) image: PipelineFrame,
     pub(crate) stars: Vec<Star>,
+    /// The detection funnel for this frame, carried through to the caller rather than only logged.
+    pub(crate) diagnostics: Diagnostics,
 }

@@ -105,6 +105,7 @@ pub fn calibrate_align_stack<P: AsRef<Path> + Sync>(
             Ok(DetectedFrame {
                 image,
                 stars: result.stars,
+                diagnostics: result.diagnostics,
             })
         })
     }?;

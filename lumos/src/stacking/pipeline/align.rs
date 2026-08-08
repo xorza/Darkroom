@@ -16,6 +16,7 @@ use crate::stacking::registration::register;
 use crate::stacking::registration::resample::warp;
 use crate::stacking::registration::result::RegistrationError;
 use crate::stacking::star_detection::detector::DetectionResult;
+use crate::stacking::star_detection::detector::Diagnostics;
 
 use crate::stacking::pipeline::config::{AlignStackConfig, Reference};
 use crate::stacking::pipeline::detector_pool::DetectorPool;
@@ -65,7 +66,7 @@ pub fn align_and_stack(
 
     tracing::info!(frames = total, spilling = tier.spills(), "Detecting stars");
     let detected_count = AtomicUsize::new(0);
-    let stars = {
+    let detections = {
         let mut detectors =
             DetectorPool::from_config(&config.detection, total.min(rayon::current_num_threads()))
                 .map_err(Error::DetectionConfig)?;
@@ -79,7 +80,7 @@ pub fn align_and_stack(
             let n = detected_count.fetch_add(1, Ordering::Relaxed) + 1;
             log_detection(n, total, &result);
             progress.report(n, total, StackingStage::Detecting);
-            Ok(result.stars)
+            Ok(result)
         })
     }?;
 
@@ -88,10 +89,11 @@ pub fn align_and_stack(
     // the one that would otherwise double the footprint.
     let detected: Vec<DetectedFrame> = lights
         .into_iter()
-        .zip(stars)
-        .map(|(image, stars)| DetectedFrame {
+        .zip(detections)
+        .map(|(image, result)| DetectedFrame {
             image: PipelineFrame::Resident(image),
-            stars,
+            stars: result.stars,
+            diagnostics: result.diagnostics,
         })
         .collect();
 
@@ -154,6 +156,13 @@ pub(crate) fn register_warp_and_stack(
             actual: frame.image.dimensions(),
         }));
     }
+
+    // Taken before the frames are consumed below, so the funnel survives into the result in input
+    // order — including for frames registration goes on to drop.
+    let detection: Vec<Diagnostics> = detected
+        .iter()
+        .map(|frame| frame.diagnostics.clone())
+        .collect();
 
     let star_counts: Vec<usize> = detected.iter().map(|frame| frame.stars.len()).collect();
     let reference = select_reference(
@@ -292,7 +301,7 @@ pub(crate) fn register_warp_and_stack(
     tracing::info!("Stack complete");
 
     Ok(AlignStackResult::from_product(
-        stacked, reference, registered, dropped,
+        stacked, reference, registered, dropped, detection,
     ))
 }
 

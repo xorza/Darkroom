@@ -18,6 +18,7 @@ use crate::math::statistics::median_f32_mut;
 use crate::stacking::star_detection::background::{estimate_background, refine_background};
 use crate::stacking::star_detection::config::Config;
 use crate::stacking::star_detection::detector::stages::filter::FilterOutcome;
+use crate::stacking::star_detection::detector::stages::fwhm::FwhmResult;
 use crate::stacking::star_detection::resources::DetectionResources;
 use crate::stacking::star_detection::star::Star;
 
@@ -70,12 +71,52 @@ pub struct Diagnostics {
     pub median_fwhm: f32,
     /// Median SNR of detected stars.
     pub median_snr: f32,
-    /// Estimated FWHM from auto-estimation (0.0 if not used or disabled).
-    pub estimated_fwhm: f32,
-    /// Number of stars used for FWHM estimation.
-    pub fwhm_estimation_star_count: usize,
-    /// Whether FWHM was auto-estimated (true) or manual/disabled (false).
-    pub fwhm_was_auto_estimated: bool,
+    /// Where the matched filter's FWHM came from.
+    pub fwhm: FwhmSource,
+}
+
+/// Where the FWHM the detector ran with came from — the three states the matched-filter stage can
+/// end in, which were previously spread over an `f32`, a count, and a `bool` derived from the count.
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
+pub enum FwhmSource {
+    /// Matched filtering was off: auto-estimation disabled and no configured FWHM.
+    #[default]
+    Disabled,
+    /// Taken from configuration, or from the built-in fallback when too few stars passed to
+    /// estimate one. Nothing was measured from this frame.
+    Configured(f32),
+    /// Measured from this frame's own stars.
+    Estimated {
+        fwhm: f32,
+        /// Stars that contributed to the estimate; always non-zero.
+        stars_used: usize,
+    },
+}
+
+impl FwhmSource {
+    /// The FWHM the detector ran with, or `None` when matched filtering was off.
+    pub fn value(&self) -> Option<f32> {
+        match self {
+            FwhmSource::Disabled => None,
+            FwhmSource::Configured(fwhm) => Some(*fwhm),
+            FwhmSource::Estimated { fwhm, .. } => Some(*fwhm),
+        }
+    }
+
+    /// Whether the FWHM was measured from this frame rather than supplied.
+    pub fn was_estimated(&self) -> bool {
+        matches!(self, FwhmSource::Estimated { .. })
+    }
+}
+
+impl From<&FwhmResult> for FwhmSource {
+    fn from(result: &FwhmResult) -> Self {
+        match (result.fwhm, result.stars_used) {
+            (None, _) => FwhmSource::Disabled,
+            (Some(fwhm), 0) => FwhmSource::Configured(fwhm),
+            (Some(fwhm), stars_used) => FwhmSource::Estimated { fwhm, stars_used },
+        }
+    }
 }
 
 /// Star detector with reusable processing resources.
@@ -158,9 +199,7 @@ impl StarDetector {
             connected_components: detect_result.connected_components,
             candidates_after_filtering: detect_result.regions.len(),
             deblended_components: detect_result.deblended_components,
-            estimated_fwhm: effective_fwhm,
-            fwhm_estimation_star_count: fwhm_result.stars_used,
-            fwhm_was_auto_estimated: fwhm_result.stars_used > 0,
+            fwhm: FwhmSource::from(&fwhm_result),
             ..Default::default()
         };
         tracing::debug!("Detected {} star candidates", detect_result.regions.len());
@@ -231,6 +270,61 @@ mod tests {
     use crate::stacking::star_detection::synthetic_tests::Scenario;
 
     #[test]
+    fn fwhm_source_distinguishes_measured_from_supplied() {
+        // The stage reports `stars_used == 0` for anything it did not measure — a configured
+        // `expected` FWHM and the too-few-stars fallback both land there — so that zero is what
+        // separates `Configured` from `Estimated`.
+        assert_eq!(
+            FwhmSource::from(&FwhmResult {
+                fwhm: Some(3.5),
+                stars_used: 0
+            }),
+            FwhmSource::Configured(3.5)
+        );
+        assert_eq!(
+            FwhmSource::from(&FwhmResult {
+                fwhm: Some(3.5),
+                stars_used: 12
+            }),
+            FwhmSource::Estimated {
+                fwhm: 3.5,
+                stars_used: 12
+            }
+        );
+        // Matched filtering off: no FWHM at all, whatever the count says.
+        assert_eq!(
+            FwhmSource::from(&FwhmResult {
+                fwhm: None,
+                stars_used: 0
+            }),
+            FwhmSource::Disabled
+        );
+
+        // `value` reports what the detector ran with; only a measured one is `was_estimated`.
+        assert_eq!(FwhmSource::Configured(3.5).value(), Some(3.5));
+        assert_eq!(
+            FwhmSource::Estimated {
+                fwhm: 3.5,
+                stars_used: 12
+            }
+            .value(),
+            Some(3.5)
+        );
+        assert_eq!(FwhmSource::Disabled.value(), None);
+        assert!(!FwhmSource::Configured(3.5).was_estimated());
+        assert!(
+            FwhmSource::Estimated {
+                fwhm: 3.5,
+                stars_used: 12
+            }
+            .was_estimated()
+        );
+        assert!(!FwhmSource::Disabled.was_estimated());
+        // A default-constructed `Diagnostics` reports no FWHM rather than a bogus 0.0.
+        assert_eq!(Diagnostics::default().fwhm, FwhmSource::Disabled);
+    }
+
+    #[test]
     fn constructor_rejects_invalid_configuration() {
         let error = StarDetector::from_config(Config {
             detection: DetectionConfig {
@@ -270,10 +364,14 @@ mod tests {
                 .unwrap()
                 .detect(&frame.image);
             assert!(
-                auto_result.diagnostics.fwhm_was_auto_estimated,
+                auto_result.diagnostics.fwhm.was_estimated(),
                 "FWHM {actual_fwhm} fixture must produce a genuine estimate"
             );
-            let effective_fwhm = auto_result.diagnostics.estimated_fwhm;
+            let effective_fwhm = auto_result
+                .diagnostics
+                .fwhm
+                .value()
+                .expect("an estimated FWHM has a value");
             assert!(
                 (effective_fwhm - configured_seed).abs() > 1.0,
                 "fixture must estimate far from its configured seed: estimate {effective_fwhm}, seed {configured_seed}"
