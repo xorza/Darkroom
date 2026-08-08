@@ -1,6 +1,6 @@
 //! Algorithm stage tests - tests individual components of the star detection pipeline.
 
-use crate::stacking::star_detection::background::estimate::BackgroundEstimate;
+use crate::stacking::star_detection::background::background_estimate::BackgroundEstimate;
 use crate::stacking::star_detection::config::background_config::BackgroundConfig;
 use crate::stacking::star_detection::deblend::region::Region;
 use crate::testing::estimate_background;

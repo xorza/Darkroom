@@ -15,7 +15,7 @@ use crate::math::size2us::Size2us;
 
 use crate::error::InvalidConfigField;
 use crate::math::statistics::median_f32_mut;
-use crate::stacking::star_detection::background::{estimate_background, refine_background};
+use crate::stacking::star_detection::background::background_estimate::BackgroundEstimate;
 use crate::stacking::star_detection::config::Config;
 use crate::stacking::star_detection::detector::stages::filter::FilterOutcome;
 use crate::stacking::star_detection::detector::stages::fwhm::FwhmResult;
@@ -167,13 +167,12 @@ impl StarDetector {
 
         // Step 2: Estimate background and noise
         let mut background =
-            estimate_background(&grayscale_image, &self.config.background, resources);
+            BackgroundEstimate::estimate(&grayscale_image, &self.config.background, resources);
 
         // Step 2b: Refine background if iterative refinement is enabled
         if self.config.background.refinement.iterations() > 0 {
-            refine_background(
+            background.refine(
                 &grayscale_image,
-                &mut background,
                 &self.config.background,
                 self.config.detection.sigma_threshold,
                 resources,

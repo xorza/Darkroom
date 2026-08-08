@@ -3,7 +3,7 @@
 //! Provides utilities to create BackgroundEstimate instances for benchmarks and tests.
 
 use crate::math::size2us::Size2us;
-use crate::stacking::star_detection::background::estimate::BackgroundEstimate;
+use crate::stacking::star_detection::background::background_estimate::BackgroundEstimate;
 use imaginarium::Buffer2;
 
 /// Create a uniform BackgroundEstimate with constant background and noise values.

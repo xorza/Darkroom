@@ -123,7 +123,7 @@ fn test_detect_rho_opiuchi() {
 #[test]
 #[ignore = "real-data inspection test; run explicitly with --ignored"]
 fn test_inspect_pipeline_intermediates_rho_opiuchi() {
-    use crate::stacking::star_detection::background::estimate_background;
+    use crate::stacking::star_detection::background::background_estimate::BackgroundEstimate;
     use crate::stacking::star_detection::convolution::{MatchedFilterBuffers, matched_filter};
     use crate::stacking::star_detection::detector::stages::fwhm::estimate_fwhm;
     use crate::stacking::star_detection::detector::stages::prepare;
@@ -168,7 +168,7 @@ fn test_inspect_pipeline_intermediates_rho_opiuchi() {
     println!("Saved: 01_grayscale");
 
     // 2. Background
-    let background = estimate_background(&grayscale, &config.background, &mut pool);
+    let background = BackgroundEstimate::estimate(&grayscale, &config.background, &mut pool);
     visual::save_grayscale_stretched(
         background.background.pixels(),
         Size2us::new(width, height),
