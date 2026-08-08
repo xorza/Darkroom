@@ -5,6 +5,7 @@ use std::time::{Duration, UNIX_EPOCH};
 
 use crate::io::image::LoadContext;
 use crate::io::image::linear::LinearImage;
+use crate::math::statistics::MedianMad;
 use crate::stacking::combine::cache::loader::*;
 use crate::testing::ScratchDirectory;
 
@@ -202,7 +203,7 @@ fn test_load_and_cache_frame_dimension_mismatch() {
 }
 
 #[test]
-fn source_meta_validates_path_length_and_precise_mtime() {
+fn source_meta_detects_size_and_precise_mtime_changes() {
     let temp_dir = ScratchDirectory::new("test_source_meta_validates");
 
     let source = temp_dir.join("source.fits");
@@ -328,6 +329,34 @@ fn test_frame_stats_sidecar_roundtrip() {
     let corrupt_path = stats_path(&temp_dir, "corrupt.bin");
     std::fs::write(&corrupt_path, b"bad").unwrap();
     assert!(read_frame_stats(&temp_dir, "corrupt.bin").is_none());
+
+    // A sidecar carrying a different layout tag is rejected rather than decoded — bitcode is not
+    // self-describing, so without the tag a cache from a build with different structs would come
+    // back as plausible nonsense.
+    let stale = common::serialize(
+        &Sidecar {
+            format: SIDECAR_FORMAT + 1,
+            value: &stats_1ch,
+        },
+        SerdeFormat::Bitcode,
+    )
+    .unwrap();
+    std::fs::write(stats_path(&temp_dir, "stale_format.bin"), stale).unwrap();
+    assert!(read_frame_stats(&temp_dir, "stale_format.bin").is_none());
+
+    // Decoding cleanly is not enough: a sigma that would poison every weight derived from it is
+    // rejected too, which costs a re-decode rather than a silently wrong stack.
+    for sigma in [f32::NAN, f32::INFINITY, 0.0, -1.0] {
+        let poisoned = FrameStats {
+            channels: stats_1ch.channels.clone(),
+            quantization_sigma: Some(sigma),
+        };
+        write_frame_stats(&temp_dir, "poisoned.bin", &poisoned).unwrap();
+        assert!(
+            read_frame_stats(&temp_dir, "poisoned.bin").is_none(),
+            "a cached sigma of {sigma} must not be reused"
+        );
+    }
 
     let blocker = temp_dir.join("not_a_directory");
     std::fs::write(&blocker, b"file").unwrap();

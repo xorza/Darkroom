@@ -8,6 +8,7 @@ use arrayvec::ArrayVec;
 use imaginarium::Buffer2;
 use memmap2::Mmap;
 use rayon::prelude::*;
+use serde::{Deserialize, Serialize};
 
 use common::file_utils;
 
@@ -80,7 +81,7 @@ impl Drop for SpillDirectory {
 }
 
 /// Per-frame statistics: one median/MAD pair per channel.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct FrameStats {
     pub(crate) channels: ArrayVec<MedianMad, 3>,
     pub(crate) quantization_sigma: Option<f32>,

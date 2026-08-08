@@ -1,13 +1,15 @@
 //! Tier selection, frame loading, and persistent cache sidecars.
 
 use std::io::Error as IoError;
-use std::mem::size_of;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
 use arrayvec::ArrayVec;
 use common::CancelToken;
+use common::SerdeFormat;
 use common::file_utils;
+use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
 
 use crate::concurrency;
 use crate::io::image::LoadContext;
@@ -15,7 +17,6 @@ use crate::io::image::cfa::CfaImage;
 use crate::io::image::error::ImageError;
 use crate::io::image::linear::LinearImage;
 use crate::io::image::{ImageDimensions, ImageMetadata};
-use crate::math::statistics::MedianMad;
 use crate::memory::{decode_transient_bytes, fits_in_memory, frame_bytes, load_concurrency};
 use crate::stacking::combine::cache_config::CacheConfig;
 use crate::stacking::combine::config::Normalization;
@@ -188,7 +189,7 @@ struct LoadedMemoryFrame {
     metadata: Option<ImageMetadata>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct SourceIdentity {
     canonical_path: Vec<u8>,
     byte_len: u64,
@@ -380,57 +381,38 @@ fn source_identity(path: &Path) -> Result<SourceIdentity, FrameStoreError> {
     })
 }
 
-const SOURCE_META_MAGIC: [u8; 8] = *b"LUMSRC01";
+/// Layout tag carried by every sidecar.
+///
+/// Bitcode is not self-describing, so a file written by a build whose sidecar structs differed
+/// would otherwise decode into plausible nonsense instead of being rejected. Bump this whenever
+/// [`SourceIdentity`] or [`FrameStats`] changes shape; a cache that fails the check is simply
+/// re-decoded.
+const SIDECAR_FORMAT: u32 = 1;
 
-fn encode_source_identity(identity: &SourceIdentity) -> Vec<u8> {
-    let path_len =
-        u32::try_from(identity.canonical_path.len()).expect("a filesystem path length fits in u32");
-    let mut bytes = Vec::with_capacity(
-        SOURCE_META_MAGIC.len()
-            + size_of::<u32>()
-            + identity.canonical_path.len()
-            + size_of::<u64>()
-            + size_of::<i128>(),
-    );
-    bytes.extend_from_slice(&SOURCE_META_MAGIC);
-    bytes.extend_from_slice(&path_len.to_le_bytes());
-    bytes.extend_from_slice(&identity.canonical_path);
-    bytes.extend_from_slice(&identity.byte_len.to_le_bytes());
-    bytes.extend_from_slice(&identity.modified_nanos.to_le_bytes());
-    bytes
+/// A sidecar payload behind its layout tag.
+#[derive(Debug, Serialize, Deserialize)]
+struct Sidecar<T> {
+    format: u32,
+    value: T,
 }
 
-fn decode_source_identity(bytes: &[u8]) -> Option<SourceIdentity> {
-    let path_len_offset = SOURCE_META_MAGIC.len();
-    let path_offset = path_len_offset + size_of::<u32>();
-    if bytes.get(..path_len_offset)? != SOURCE_META_MAGIC {
-        return None;
-    }
-    let path_len = u32::from_le_bytes(
-        bytes
-            .get(path_len_offset..path_offset)?
-            .try_into()
-            .expect("source path length is four bytes"),
-    ) as usize;
-    let byte_len_offset = path_offset.checked_add(path_len)?;
-    let modified_offset = byte_len_offset.checked_add(size_of::<u64>())?;
-    let expected_len = modified_offset.checked_add(size_of::<i128>())?;
-    if bytes.len() != expected_len {
-        return None;
-    }
-    Some(SourceIdentity {
-        canonical_path: bytes[path_offset..byte_len_offset].to_vec(),
-        byte_len: u64::from_le_bytes(
-            bytes[byte_len_offset..modified_offset]
-                .try_into()
-                .expect("source byte length is eight bytes"),
-        ),
-        modified_nanos: i128::from_le_bytes(
-            bytes[modified_offset..]
-                .try_into()
-                .expect("source timestamp is sixteen bytes"),
-        ),
-    })
+fn write_sidecar_value<T: Serialize>(path: PathBuf, value: &T) -> Result<(), FrameStoreError> {
+    let sidecar = Sidecar {
+        format: SIDECAR_FORMAT,
+        value,
+    };
+    // Sidecars are plain scalars and a byte vector; a failure here would be a broken derive, not
+    // anything the filesystem or the caller can cause.
+    let bytes = common::serialize(&sidecar, SerdeFormat::Bitcode)
+        .expect("a sidecar of plain scalars always serializes");
+    write_sidecar(path, &bytes)
+}
+
+/// Read a sidecar back, or `None` if it is absent, unreadable, or not this layout.
+fn read_sidecar_value<T: DeserializeOwned>(path: &Path) -> Option<T> {
+    let bytes = std::fs::read(path).ok()?;
+    let sidecar: Sidecar<T> = common::deserialize(&bytes, SerdeFormat::Bitcode).ok()?;
+    (sidecar.format == SIDECAR_FORMAT).then_some(sidecar.value)
 }
 
 fn meta_path(cache_dir: &Path, base_filename: &str) -> PathBuf {
@@ -442,16 +424,12 @@ fn write_source_meta(
     base_filename: &str,
     identity: &SourceIdentity,
 ) -> Result<(), FrameStoreError> {
-    let path = meta_path(cache_dir, base_filename);
-    write_sidecar(path, &encode_source_identity(identity))
+    write_sidecar_value(meta_path(cache_dir, base_filename), identity)
 }
 
 fn validate_source_meta(cache_dir: &Path, base_filename: &str, identity: &SourceIdentity) -> bool {
-    let path = meta_path(cache_dir, base_filename);
-    let Ok(bytes) = std::fs::read(&path) else {
-        return false;
-    };
-    decode_source_identity(&bytes).is_some_and(|stored| stored == *identity)
+    read_sidecar_value::<SourceIdentity>(&meta_path(cache_dir, base_filename))
+        .is_some_and(|stored| stored == *identity)
 }
 
 /// Load an image and cache it, or reuse existing cache files if valid.
@@ -540,24 +518,12 @@ fn stats_path(cache_dir: &Path, base_filename: &str) -> PathBuf {
 }
 
 /// Write frame stats to a sidecar file.
-/// Format: [n_channels: u8] [has_quantization: u8] [quantization_sigma: f32]
-/// [median_0: f32] [mad_0: f32] [median_1: f32] ...
 fn write_frame_stats(
     cache_dir: &Path,
     base_filename: &str,
     stats: &FrameStats,
 ) -> Result<(), FrameStoreError> {
-    let path = stats_path(cache_dir, base_filename);
-    let n = stats.channels.len();
-    let mut buf = Vec::with_capacity(6 + n * 8);
-    buf.push(n as u8);
-    buf.push(u8::from(stats.quantization_sigma.is_some()));
-    buf.extend_from_slice(&stats.quantization_sigma.unwrap_or_default().to_le_bytes());
-    for ch in &stats.channels {
-        buf.extend_from_slice(&ch.median.to_le_bytes());
-        buf.extend_from_slice(&ch.mad.to_le_bytes());
-    }
-    write_sidecar(path, &buf)
+    write_sidecar_value(stats_path(cache_dir, base_filename), stats)
 }
 
 fn write_sidecar(path: PathBuf, bytes: &[u8]) -> Result<(), FrameStoreError> {
@@ -567,37 +533,17 @@ fn write_sidecar(path: PathBuf, bytes: &[u8]) -> Result<(), FrameStoreError> {
 
 /// Read frame stats from a sidecar file.
 fn read_frame_stats(cache_dir: &Path, base_filename: &str) -> Option<FrameStats> {
-    let path = stats_path(cache_dir, base_filename);
-    let bytes = std::fs::read(&path).ok()?;
-    if bytes.len() < 6 {
+    let stats: FrameStats = read_sidecar_value(&stats_path(cache_dir, base_filename))?;
+    // A file can decode cleanly and still hold a sigma that would poison every weight derived
+    // from it, so the value is checked rather than just the layout. Rejecting means re-decoding
+    // the frame, not failing the run.
+    if stats
+        .quantization_sigma
+        .is_some_and(|sigma| !sigma.is_finite() || sigma <= 0.0)
+    {
         return None;
     }
-    let n = bytes[0] as usize;
-    if bytes.len() != 6 + n * 8 {
-        return None;
-    }
-    let quantization_sigma = match bytes[1] {
-        0 => None,
-        1 => {
-            let sigma = f32::from_le_bytes(bytes[2..6].try_into().unwrap());
-            if !sigma.is_finite() || sigma <= 0.0 {
-                return None;
-            }
-            Some(sigma)
-        }
-        _ => return None,
-    };
-    let mut channels = ArrayVec::new();
-    for i in 0..n {
-        let off = 6 + i * 8;
-        let median = f32::from_le_bytes(bytes[off..off + 4].try_into().unwrap());
-        let mad = f32::from_le_bytes(bytes[off + 4..off + 8].try_into().unwrap());
-        channels.push(MedianMad { median, mad });
-    }
-    Some(FrameStats {
-        channels,
-        quantization_sigma,
-    })
+    Some(stats)
 }
 
 #[cfg(test)]
