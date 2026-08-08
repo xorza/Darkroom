@@ -39,6 +39,7 @@ use crate::stacking::pipeline::tier::FrameTier;
 pub fn align_and_stack(
     lights: Vec<LinearImage>,
     config: &AlignStackConfig,
+    progress: ProgressCallback,
     cancel: CancelToken,
 ) -> Result<AlignStackResult, Error> {
     if lights.is_empty() {
@@ -93,7 +94,14 @@ pub fn align_and_stack(
         })
         .collect();
 
-    register_warp_and_stack(detected, config, tier, plan.warp_concurrency, cancel)
+    register_warp_and_stack(
+        detected,
+        config,
+        tier,
+        plan.warp_concurrency,
+        progress,
+        cancel,
+    )
 }
 
 /// The detection funnel — candidates → deblended → centroided → kept — shows how confidently
@@ -122,6 +130,7 @@ pub(crate) fn register_warp_and_stack(
     config: &AlignStackConfig,
     tier: FrameTier,
     warp_concurrency: usize,
+    progress: ProgressCallback,
     cancel: CancelToken,
 ) -> Result<AlignStackResult, Error> {
     let total = detected.len();
@@ -263,7 +272,7 @@ pub(crate) fn register_warp_and_stack(
         dimensions,
         metadata,
         config.stack.clone(),
-        ProgressCallback::default(),
+        progress,
         cancel,
     )?;
     tracing::info!("Stack complete");

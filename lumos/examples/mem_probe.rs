@@ -14,8 +14,8 @@ use std::time::Duration;
 
 use common::{CancelToken, file_utils};
 use lumos::{
-    AlignStackConfig, CalibrationMasters, CalibrationSet, DEFAULT_SIGMA_THRESHOLD, RAW_EXTENSIONS,
-    calibrate_align_stack,
+    AlignStackConfig, CalibrationMasters, CalibrationSet, DEFAULT_SIGMA_THRESHOLD,
+    ProgressCallback, RAW_EXTENSIONS, calibrate_align_stack,
 };
 
 /// Read a `/proc/self/status` field (e.g. `RssAnon`, `VmRSS`) in KiB.
@@ -83,8 +83,14 @@ fn main() {
         })
     };
 
-    let result =
-        calibrate_align_stack(lights, &masters, &config, CancelToken::never()).expect("stack");
+    let result = calibrate_align_stack(
+        lights,
+        &masters,
+        &config,
+        ProgressCallback::default(),
+        CancelToken::never(),
+    )
+    .expect("stack");
 
     stop.store(true, Ordering::Relaxed);
     sampler.join().ok();

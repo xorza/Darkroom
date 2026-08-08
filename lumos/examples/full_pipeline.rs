@@ -17,8 +17,8 @@ use std::time::Instant;
 
 use common::{CancelToken, file_utils};
 use lumos::{
-    AlignStackConfig, CalibrationMasters, CalibrationSet, DEFAULT_SIGMA_THRESHOLD, RAW_EXTENSIONS,
-    calibrate_align_stack,
+    AlignStackConfig, CalibrationMasters, CalibrationSet, DEFAULT_SIGMA_THRESHOLD,
+    ProgressCallback, RAW_EXTENSIONS, calibrate_align_stack,
 };
 use tracing_subscriber::EnvFilter;
 
@@ -55,6 +55,7 @@ fn main() {
         &light_paths,
         &masters,
         &AlignStackConfig::default(),
+        ProgressCallback::default(),
         CancelToken::never(),
     )
     .expect("calibrate_align_stack failed");
