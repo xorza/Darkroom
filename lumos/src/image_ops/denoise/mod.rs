@@ -13,8 +13,7 @@ use imaginarium::Buffer2;
 use rayon::prelude::*;
 
 use crate::error::InvalidConfigField;
-use crate::image_ops::op::{OpError, require_f32_master};
-use crate::image_ops::process_channel_samples;
+use crate::image_ops::op::{self, OpError, require_f32_master};
 use crate::image_ops::wavelet::{atrous_smooth, max_scales};
 use crate::math::size2us::Size2us;
 use crate::math::statistics::{mad_f32_with_scratch, mad_to_sigma, median_f32_mut};
@@ -127,21 +126,25 @@ impl Denoise {
         if self.strength == 0.0 {
             return Ok(());
         }
-        let size = Size2us::new(image.desc().width, image.desc().height);
-        let scales = self.scales.min(max_scales(size));
-        let mut scratch = DenoiseScratch::new(size);
-        process_channel_samples(image, |plane| {
-            denoise_plane(
-                plane,
-                scales,
-                self.k,
-                self.threshold,
-                self.strength,
-                &mut scratch,
-            );
+        op::on_planes(image, |planar| {
+            // Allocated *inside* the adapter so it is released before the planes are
+            // re-interleaved: it is three image-sized planes, and holding it across the write-back
+            // would put three full masters on the heap at once.
+            let size = Size2us::new(planar.width(), planar.height());
+            let scales = self.scales.min(max_scales(size));
+            let mut scratch = DenoiseScratch::new(size);
+            for plane in planar.planes_mut() {
+                denoise_plane(
+                    plane.pixels_mut(),
+                    scales,
+                    self.k,
+                    self.threshold,
+                    self.strength,
+                    &mut scratch,
+                );
+            }
             Ok(())
-        })?;
-        Ok(())
+        })
     }
 
     fn validate(&self) -> Result<(), InvalidConfigField> {

@@ -137,6 +137,13 @@ impl LinearPixels {
         }
     }
 
+    pub(crate) fn planes_mut(&mut self) -> impl Iterator<Item = &mut Buffer2<f32>> {
+        match self {
+            LinearPixels::L(plane) => std::slice::from_mut(plane).iter_mut(),
+            LinearPixels::Rgb(planes) => planes.iter_mut(),
+        }
+    }
+
     pub(crate) fn channel_count(&self) -> usize {
         match self {
             LinearPixels::L(_) => 1,

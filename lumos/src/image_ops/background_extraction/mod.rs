@@ -18,8 +18,7 @@ use rayon::prelude::*;
 
 use crate::background_mesh::workspace::MeshWorkspace;
 use crate::error::InvalidConfigField;
-use crate::image_ops::op::{OpError, require_f32_master};
-use crate::image_ops::process_channels;
+use crate::image_ops::op::{self, OpError};
 use crate::math::size2us::Size2us;
 use crate::math::statistics::MAD_TO_SIGMA;
 use imaginarium::Image;
@@ -117,10 +116,12 @@ impl ExtractBackground {
     /// determine the requested polynomial.
     pub fn apply(&self, image: &mut Image) -> Result<(), OpError> {
         self.validate()?;
-        require_f32_master(image)?;
         let mut workspace = MeshWorkspace::default();
-        process_channels(image, |plane| {
-            extract_background_plane(plane, self, &mut workspace)
+        op::on_planes(image, |planar| {
+            for plane in planar.planes_mut() {
+                extract_background_plane(plane, self, &mut workspace)?;
+            }
+            Ok(())
         })
     }
 
