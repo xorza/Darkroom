@@ -41,7 +41,7 @@ impl LinearFitClipConfig {
     }
 
     /// Validate the clip thresholds and iteration count.
-    pub fn validate(&self) -> Result<(), InvalidConfigField> {
+    pub(super) fn validate(&self) -> Result<(), InvalidConfigField> {
         validate_sigma_bounds(self.sigma_low, self.sigma_high)?;
         InvalidConfigField::check(
             self.max_iterations >= 1,

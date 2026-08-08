@@ -33,7 +33,7 @@ pub enum CentroidMethod {
 
 impl CentroidMethod {
     /// Validate the centroid method configuration.
-    pub fn validate(&self) -> Result<(), InvalidConfigField> {
+    pub(super) fn validate(&self) -> Result<(), InvalidConfigField> {
         if let CentroidMethod::MoffatFit { beta } = self {
             InvalidConfigField::finite("Moffat beta", "finite and in (0, 10]", *beta, |value| {
                 value > 0.0 && value <= 10.0

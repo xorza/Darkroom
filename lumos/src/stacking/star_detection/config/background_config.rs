@@ -21,7 +21,7 @@ pub enum BackgroundRefinement {
 
 impl BackgroundRefinement {
     /// Validate the configuration.
-    pub fn validate(&self) -> Result<(), InvalidConfigField> {
+    pub(super) fn validate(&self) -> Result<(), InvalidConfigField> {
         match self {
             Self::None => Ok(()),
             Self::Iterative { iterations } => InvalidConfigField::check(

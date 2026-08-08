@@ -169,7 +169,7 @@ impl Rejection {
     }
 
     /// Validate the held configuration, if any.
-    pub fn validate(&self) -> Result<(), InvalidConfigField> {
+    pub(super) fn validate(&self) -> Result<(), InvalidConfigField> {
         match self {
             Self::None => Ok(()),
             Self::SigmaClip(config) => config.validate(),

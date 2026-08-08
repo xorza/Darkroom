@@ -35,7 +35,7 @@ impl AlignStackConfig {
     /// because it returns the same error type for "this config is invalid" and "these two star
     /// catalogs don't match", and the pipeline reads the latter as a frame to drop. Checking all
     /// three here means a bad config is reported as one, before any frame is decoded.
-    pub fn validate(&self) -> Result<(), Error> {
+    pub(super) fn validate(&self) -> Result<(), Error> {
         self.detection.validate().map_err(Error::DetectionConfig)?;
         self.registration
             .validate()
