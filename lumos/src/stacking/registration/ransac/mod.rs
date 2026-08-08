@@ -56,6 +56,34 @@ impl LocalOptBuffers {
     }
 }
 
+/// A candidate transform together with the score and inlier set it earned.
+///
+/// The three always move as a unit — a score belongs to the transform that produced it and to
+/// the inliers it counted — so the loop swaps whole hypotheses. `inliers` is owned rather than
+/// borrowed for exactly that reason: a swap trades two vector headers and keeps both
+/// allocations for reuse, where separate fields would need three assignments to stay coherent.
+#[derive(Debug)]
+struct ScoredHypothesis {
+    transform: Transform,
+    score: f64,
+    inliers: Vec<usize>,
+}
+
+impl ScoredHypothesis {
+    /// An empty hypothesis, scored worse than anything that will be compared against it.
+    ///
+    /// `transform` is a placeholder: "nothing found yet" is carried by `inliers` staying below
+    /// the model's minimum sample count, and no reader reaches the transform without clearing
+    /// that bar first.
+    fn empty(inlier_capacity: usize) -> Self {
+        Self {
+            transform: Transform::identity(),
+            score: f64::NEG_INFINITY,
+            inliers: Vec::with_capacity(inlier_capacity),
+        }
+    }
+}
+
 /// Minimum cross-product magnitude to consider points non-collinear.
 /// For points separated by ~1 pixel, a cross product of 1.0 corresponds
 /// to ~1 pixel perpendicular offset — below this, the sample is too
@@ -210,30 +238,30 @@ impl RansacEstimator {
         true
     }
 
-    /// Local optimization: refine transform using iterative re-estimation (LO-RANSAC).
+    /// Local optimization: refine `hypothesis` in place by iterative re-estimation (LO-RANSAC).
     ///
     /// 1. Re-estimate transform using current inliers
     /// 2. Find new inliers with the refined transform
     /// 3. Repeat until convergence or max iterations
     ///
-    /// On return, `inlier_buf` contains the best inlier set found.
-    /// Typically improves inlier count by 5-15%.
+    /// Typically improves inlier count by 5-15%. `hypothesis` is left exactly as it came in
+    /// unless the refinement strictly improves it — see the acceptance test at the end for why
+    /// that guard is not optional.
     fn local_optimization(
         &self,
         ref_points: &[DVec2],
         target_points: &[DVec2],
-        initial_transform: &Transform,
-        initial_inliers: &[usize],
+        hypothesis: &mut ScoredHypothesis,
         scorer: &MagsacScorer,
         buffers: &mut LocalOptBuffers,
-    ) -> (Transform, f64) {
-        let transform_type = initial_transform.transform_type();
+    ) {
+        let transform_type = hypothesis.transform.transform_type();
         let min_samples = transform_type.min_points();
-        let mut current_transform = *initial_transform;
+        let mut current_transform = hypothesis.transform;
 
         // Use inlier_buf as the "current best" and a local scratch for scoring.
         buffers.inlier_buf.clear();
-        buffers.inlier_buf.extend_from_slice(initial_inliers);
+        buffers.inlier_buf.extend_from_slice(&hypothesis.inliers);
         let mut scratch_inliers = Vec::with_capacity(buffers.inlier_buf.len());
 
         // Compute initial score
@@ -290,7 +318,16 @@ impl RansacEstimator {
             current_score = new_score;
         }
 
-        (current_transform, current_score)
+        // Commit only if LO actually improved the score (and is still plausible). Without the
+        // `>` guard, LO can hand back a lower score — it accepts refits with more (possibly
+        // budget-early-exited) inliers even when the score drops — discarding a hypothesis that
+        // had already beaten the running best. Leaving `hypothesis` untouched on that path is
+        // what keeps its complete pre-LO inliers.
+        if current_score > hypothesis.score && self.is_plausible(&current_transform) {
+            hypothesis.transform = current_transform;
+            hypothesis.score = current_score;
+            std::mem::swap(&mut hypothesis.inliers, &mut buffers.inlier_buf);
+        }
     }
 
     /// Core RANSAC loop with MAGSAC++ scoring.
@@ -309,15 +346,13 @@ impl RansacEstimator {
         // Initialize MAGSAC++ scorer
         let scorer = MagsacScorer::new(self.max_sigma);
 
-        let mut best_transform: Option<Transform> = None;
-        let mut best_inliers: Vec<usize> = Vec::new();
-        let mut best_score = f64::NEG_INFINITY;
+        let mut best = ScoredHypothesis::empty(0);
 
         // Pre-allocate buffers to avoid per-iteration allocations
         let mut sample_indices: Vec<usize> = Vec::with_capacity(min_samples);
         let mut sample_ref: Vec<DVec2> = Vec::with_capacity(min_samples);
         let mut sample_target: Vec<DVec2> = Vec::with_capacity(min_samples);
-        let mut inlier_buf: Vec<usize> = Vec::with_capacity(n);
+        let mut current = ScoredHypothesis::empty(n);
         let mut lo_buffers = LocalOptBuffers::with_capacity(n);
 
         let mut iterations = 0;
@@ -354,50 +389,37 @@ impl RansacEstimator {
             }
 
             // Score with MAGSAC++ (preemptive: skip if cannot beat current best)
-            let mut score = score_hypothesis(
+            current.transform = transform;
+            current.score = score_hypothesis(
                 ref_points,
                 target_points,
                 &transform,
                 &scorer,
-                &mut inlier_buf,
-                best_score,
+                &mut current.inliers,
+                best.score,
             );
-
-            let mut current_transform = transform;
 
             // Local Optimization: refine only new-best hypotheses (standard LO-RANSAC)
             if self.config.local_optimization
-                && score > best_score
-                && inlier_buf.len() >= min_samples
+                && current.score > best.score
+                && current.inliers.len() >= min_samples
             {
-                let (lo_transform, lo_score) = self.local_optimization(
+                self.local_optimization(
                     ref_points,
                     target_points,
-                    &current_transform,
-                    &inlier_buf,
+                    &mut current,
                     &scorer,
                     &mut lo_buffers,
                 );
-                // Accept LO only if it actually improved the score (and is still plausible).
-                // Without the `lo_score > score` guard, LO can return a lower score (it accepts
-                // refits with more — possibly budget-early-exited — inliers even when the score
-                // drops), discarding a hypothesis that had already beaten `best_score`. On the
-                // not-accepted path `inlier_buf` still holds the complete pre-LO inliers.
-                if lo_score > score && self.is_plausible(&lo_transform) {
-                    current_transform = lo_transform;
-                    std::mem::swap(&mut inlier_buf, &mut lo_buffers.inlier_buf);
-                    score = lo_score;
-                }
             }
 
-            // Update best if improved
-            if score > best_score {
-                best_score = score;
-                std::mem::swap(&mut best_inliers, &mut inlier_buf);
-                best_transform = Some(current_transform);
+            // Update best if improved. The swap hands `current` the old best's inlier buffer,
+            // which the next iteration's scoring refills.
+            if current.score > best.score {
+                std::mem::swap(&mut best, &mut current);
 
                 // Adaptive iteration count based on inlier ratio
-                let inlier_ratio = best_inliers.len() as f64 / n as f64;
+                let inlier_ratio = best.inliers.len() as f64 / n as f64;
                 if inlier_ratio >= self.config.min_inlier_ratio {
                     let adaptive_max =
                         adaptive_iterations(inlier_ratio, min_samples, self.config.confidence);
@@ -408,13 +430,12 @@ impl RansacEstimator {
             }
         }
 
-        // Final refinement with least squares on all inliers
-        if let Some(transform) = best_transform
-            && best_inliers.len() >= min_samples
-        {
+        // Final refinement with least squares on all inliers. Too few inliers to re-estimate
+        // from is also how "no hypothesis was ever accepted" reads — `best` starts empty.
+        if best.inliers.len() >= min_samples {
             lo_buffers.point_buf_ref.clear();
             lo_buffers.point_buf_target.clear();
-            for &i in &best_inliers {
+            for &i in &best.inliers {
                 lo_buffers.point_buf_ref.push(ref_points[i]);
                 lo_buffers.point_buf_target.push(target_points[i]);
             }
@@ -425,6 +446,9 @@ impl RansacEstimator {
                 transform_type,
             );
 
+            // The loop's scratch, reused to score the refit.
+            let mut scratch_inliers = current.inliers;
+
             if let Some(refined) = refined
                 && refined.is_valid()
                 && self.is_plausible(&refined)
@@ -434,22 +458,22 @@ impl RansacEstimator {
                     target_points,
                     &refined,
                     &scorer,
-                    &mut inlier_buf,
-                    best_score,
+                    &mut scratch_inliers,
+                    best.score,
                 );
 
-                if refined_score >= best_score && inlier_buf.len() >= min_samples {
+                if refined_score >= best.score && scratch_inliers.len() >= min_samples {
                     return Some(RansacResult {
                         transform: refined,
-                        inliers: inlier_buf,
+                        inliers: scratch_inliers,
                         iterations,
                     });
                 }
             }
 
             return Some(RansacResult {
-                transform,
-                inliers: best_inliers,
+                transform: best.transform,
+                inliers: best.inliers,
                 iterations,
             });
         }
