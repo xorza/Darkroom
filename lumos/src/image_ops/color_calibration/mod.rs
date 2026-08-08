@@ -11,7 +11,7 @@ use crate::image_ops::rgb::Rgb;
 use crate::error::InvalidConfigField;
 use crate::image_ops::op::OpError;
 use crate::io::image::linear::LinearImage;
-use crate::math::statistics::sigma_clipped_median_mad;
+use crate::math::statistics::ClippedStats;
 
 #[cfg(test)]
 mod tests;
@@ -72,7 +72,7 @@ pub(crate) fn channel_backgrounds(image: &LinearImage) -> Rgb {
 fn channel_background(plane: &[f32], scratch: &mut Vec<f32>) -> f32 {
     let stride = (plane.len() / MAX_BACKGROUND_SAMPLES).max(1);
     let mut s: Vec<f32> = plane.iter().step_by(stride).copied().collect();
-    sigma_clipped_median_mad(&mut s, scratch, BACKGROUND_KAPPA, BACKGROUND_ITERATIONS).median
+    ClippedStats::sigma_clipped(&mut s, scratch, BACKGROUND_KAPPA, BACKGROUND_ITERATIONS).median
 }
 
 /// Remove the residual green cast (Subtractive Chromatic Noise Reduction). Intended for the

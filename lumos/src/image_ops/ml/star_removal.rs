@@ -7,7 +7,7 @@
 use std::path::PathBuf;
 
 use crate::image_ops::SAMPLES_PER_BLOCK;
-use crate::image_ops::ml::backend::{MlError, TiledOnnxConfig, run_tiled};
+use crate::image_ops::ml::backend::{MlError, TiledOnnxConfig};
 use crate::io::image::linear::LinearImage;
 use rayon::prelude::*;
 
@@ -47,7 +47,7 @@ impl RemoveStars {
     /// The ONNX inference dominates either way, but this skips the whole-image unscreen pass
     /// [`split`](Self::split) needs to derive the stars layer.
     pub fn apply(&self, image: &mut LinearImage) -> Result<(), MlError> {
-        let starless = run_tiled(image, &self.onnx)?;
+        let starless = self.onnx.run(image)?;
         *image = starless;
         Ok(())
     }
@@ -60,7 +60,7 @@ impl RemoveStars {
     /// as a new `Image`. Callers who still need the original pixels afterward should `.clone()`
     /// before calling.
     pub fn split(&self, mut image: LinearImage) -> Result<StarRemovalResult, MlError> {
-        let starless = run_tiled(&image, &self.onnx)?;
+        let starless = self.onnx.run(&image)?;
         build_stars(&mut image, &starless);
         Ok(StarRemovalResult {
             starless,

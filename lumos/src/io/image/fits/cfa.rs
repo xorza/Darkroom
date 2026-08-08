@@ -66,7 +66,7 @@ pub(super) fn validate_cfa_image_header(path: &Path, image: &Header) -> Result<b
 }
 
 pub(crate) fn save_cfa_fits(path: &Path, image: &CfaImage) -> std::io::Result<()> {
-    let encoded = encode_cfa_hdu(
+    let encoded = CfaFitsHdu::encode(
         image,
         CfaFitsHduMetadata {
             extname: None,
@@ -82,30 +82,33 @@ pub(crate) fn save_cfa_fits(path: &Path, image: &CfaImage) -> std::io::Result<()
     })
 }
 
-pub(crate) fn encode_cfa_hdu(
-    cfa: &CfaImage,
-    hdu_metadata: CfaFitsHduMetadata<'_>,
-) -> std::io::Result<CfaFitsHdu> {
-    let mut header = Header::new();
-    header
-        .set("LUMOSFMT", CFA_FITS_FORMAT)
-        .and_then(|header| header.set("LUMOSVER", CFA_FITS_VERSION))
-        .map_err(fits_to_io)?;
-    if let Some(extname) = hdu_metadata.extname {
-        header.set("EXTNAME", extname).map_err(fits_to_io)?;
-        header.set("LUMROLE", extname).map_err(fits_to_io)?;
-    }
-    if hdu_metadata.prepared {
-        header.set("LUMPREP", true).map_err(fits_to_io)?;
-    }
-    write_image_metadata(&mut header, &cfa.metadata, hdu_metadata.image_type)
-        .map_err(fits_to_io)?;
-    write_cfa_metadata(&mut header, cfa).map_err(fits_to_io)?;
+impl CfaFitsHdu {
+    /// Build the image and header a CFA HDU writes, from `cfa` plus the per-HDU metadata.
+    pub(crate) fn encode(
+        cfa: &CfaImage,
+        hdu_metadata: CfaFitsHduMetadata<'_>,
+    ) -> std::io::Result<Self> {
+        let mut header = Header::new();
+        header
+            .set("LUMOSFMT", CFA_FITS_FORMAT)
+            .and_then(|header| header.set("LUMOSVER", CFA_FITS_VERSION))
+            .map_err(fits_to_io)?;
+        if let Some(extname) = hdu_metadata.extname {
+            header.set("EXTNAME", extname).map_err(fits_to_io)?;
+            header.set("LUMROLE", extname).map_err(fits_to_io)?;
+        }
+        if hdu_metadata.prepared {
+            header.set("LUMPREP", true).map_err(fits_to_io)?;
+        }
+        write_image_metadata(&mut header, &cfa.metadata, hdu_metadata.image_type)
+            .map_err(fits_to_io)?;
+        write_cfa_metadata(&mut header, cfa).map_err(fits_to_io)?;
 
-    let image = Image::new(
-        [cfa.data.width(), cfa.data.height()],
-        cfa.data.pixels().to_vec(),
-    )
-    .map_err(fits_to_io)?;
-    Ok(CfaFitsHdu { image, header })
+        let image = Image::new(
+            [cfa.data.width(), cfa.data.height()],
+            cfa.data.pixels().to_vec(),
+        )
+        .map_err(fits_to_io)?;
+        Ok(Self { image, header })
+    }
 }

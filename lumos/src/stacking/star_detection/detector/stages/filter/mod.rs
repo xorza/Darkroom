@@ -7,7 +7,7 @@ use std::collections::HashMap;
 
 use smallvec::SmallVec;
 
-use crate::math::statistics::{mad_floored, median_and_mad_f32_mut};
+use crate::math::statistics::{MedianMad, mad_floored};
 use crate::stacking::star_detection::config::filter_config::FilterConfig;
 use crate::stacking::star_detection::detector::QualityFilterDiagnostics;
 use crate::stacking::star_detection::detector::stages::FWHM_MAD_FLOOR_FRACTION;
@@ -84,7 +84,7 @@ fn filter_fwhm_outliers(stars: &mut Vec<Star>, max_deviation: f32) -> usize {
     // `stars.len() >= 5` past the early return, so `max(len/2, 5) <= len` — no upper clamp needed.
     let reference_count = (stars.len() / 2).max(5);
     let mut fwhms: Vec<f32> = stars.iter().take(reference_count).map(|s| s.fwhm).collect();
-    let reference = median_and_mad_f32_mut(&mut fwhms);
+    let reference = MedianMad::of_mut(&mut fwhms);
 
     let effective_mad = mad_floored(reference.mad, reference.median, FWHM_MAD_FLOOR_FRACTION);
     let max_fwhm = reference.median + max_deviation * effective_mad;

@@ -7,7 +7,7 @@
 
 use std::path::PathBuf;
 
-use crate::image_ops::ml::backend::{MlError, TiledOnnxConfig, run_tiled};
+use crate::image_ops::ml::backend::{MlError, TiledOnnxConfig};
 use crate::io::image::linear::LinearImage;
 
 /// Denoise a *stretched* (display-domain, `[0, 1]`) image with a caller-supplied ONNX denoiser.
@@ -34,7 +34,7 @@ impl MlDenoise {
     }
 
     pub fn apply(&self, image: &mut LinearImage) -> Result<(), MlError> {
-        let denoised = run_tiled(image, &self.onnx)?;
+        let denoised = self.onnx.run(image)?;
         *image = denoised;
         Ok(())
     }

@@ -28,8 +28,9 @@ fn starnet_removes_stars() {
 
     let remove = RemoveStars::new(weights);
     // The starless-only path (used when a caller doesn't need the `stars` layer) must
-    // reproduce `split`'s `starless` output exactly — it's the same underlying `run_tiled`
-    // inference either way. `apply` overwrites in place, so it gets its own copy.
+    // reproduce `split`'s `starless` output exactly — it's the same underlying
+    // `TiledOnnxConfig::run` inference either way. `apply` overwrites in place, so it gets its
+    // own copy.
     let mut starless_only = img.clone();
     remove
         .apply(&mut starless_only)

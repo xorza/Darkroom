@@ -1,5 +1,5 @@
 use crate::background_mesh::TileGrid;
-use crate::background_mesh::TileStats;
+use crate::background_mesh::tile_stats::TileStats;
 use crate::bit_buffer2::BitBuffer2;
 use crate::concurrency::JobScratchPool;
 use crate::math::size2us::Size2us;
