@@ -5,7 +5,7 @@ use crate::math::vec2us::Vec2us;
 use crate::math::{fwhm_to_sigma, sigma_to_fwhm};
 use crate::stacking::star_detection::centroid::gaussian_fit::*;
 use crate::stacking::star_detection::centroid::internals::{
-    add_noise, approx_eq, compute_hessian_gradient,
+    add_noise, approx_eq, reference_normal_equations,
 };
 use glam::Vec2;
 
@@ -868,7 +868,7 @@ fn test_gaussian_fit_multiple_positions() {
 }
 
 #[test]
-fn test_compute_hessian_gradient_symmetry() {
+fn test_reference_normal_equations_symmetry() {
     // Create test jacobian and residuals
     let jacobian = vec![
         [1.0f64, 0.5, 0.3, 0.2, 0.1, 0.05],
@@ -878,7 +878,9 @@ fn test_compute_hessian_gradient_symmetry() {
     ];
     let residuals = vec![0.1f64, -0.05, 0.08, -0.03];
 
-    let (hessian, gradient) = compute_hessian_gradient(&jacobian, &residuals);
+    let NormalEquations {
+        hessian, gradient, ..
+    } = reference_normal_equations(&jacobian, &residuals);
 
     // Hessian must be symmetric: H[i][j] == H[j][i]
     for (i, row) in hessian.iter().enumerate() {
@@ -904,12 +906,19 @@ fn test_compute_hessian_gradient_symmetry() {
 }
 
 #[test]
-fn test_compute_hessian_gradient_values() {
+fn test_reference_normal_equations_values() {
     // Simple case: single jacobian row
     let jacobian = vec![[1.0f64, 2.0, 3.0, 4.0, 5.0, 6.0]];
     let residuals = vec![1.0f64];
 
-    let (hessian, gradient) = compute_hessian_gradient(&jacobian, &residuals);
+    let NormalEquations {
+        hessian,
+        gradient,
+        chi2,
+    } = reference_normal_equations(&jacobian, &residuals);
+
+    // chi² is Σr² over the one residual: 1² = 1
+    assert_eq!(chi2, 1.0);
 
     // Gradient should be J^T * r = [1, 2, 3, 4, 5, 6]
     for (i, &g) in gradient.iter().enumerate() {
@@ -940,13 +949,18 @@ fn test_compute_hessian_gradient_values() {
 }
 
 #[test]
-fn test_compute_hessian_gradient_empty() {
+fn test_reference_normal_equations_empty() {
     let jacobian: Vec<[f64; 6]> = vec![];
     let residuals: Vec<f64> = vec![];
 
-    let (hessian, gradient) = compute_hessian_gradient(&jacobian, &residuals);
+    let NormalEquations {
+        hessian,
+        gradient,
+        chi2,
+    } = reference_normal_equations(&jacobian, &residuals);
 
-    // Empty input should give zero hessian and gradient
+    // Empty input should give zero hessian, gradient and chi²
+    assert_eq!(chi2, 0.0);
     for &g in &gradient {
         assert_eq!(g, 0.0);
     }
@@ -958,7 +972,7 @@ fn test_compute_hessian_gradient_empty() {
 }
 
 #[test]
-fn test_compute_hessian_gradient_positive_semidefinite() {
+fn test_reference_normal_equations_positive_semidefinite() {
     // For any Jacobian, J^T * J should be positive semi-definite
     // This means x^T * H * x >= 0 for all x
     let jacobian = vec![
@@ -968,7 +982,7 @@ fn test_compute_hessian_gradient_positive_semidefinite() {
     ];
     let residuals = vec![0.1f64, -0.2, 0.15];
 
-    let (hessian, _) = compute_hessian_gradient(&jacobian, &residuals);
+    let NormalEquations { hessian, .. } = reference_normal_equations(&jacobian, &residuals);
 
     // Test with several random vectors
     let test_vectors = [
@@ -993,9 +1007,9 @@ fn test_compute_hessian_gradient_positive_semidefinite() {
     }
 }
 
-/// Test that compute_hessian_gradient produces correct results with many rows.
+/// Test that reference_normal_equations produces correct results with many rows.
 #[test]
-fn test_compute_hessian_gradient_many_rows() {
+fn test_reference_normal_equations_many_rows() {
     let n = 17;
     let mut jacobian = Vec::with_capacity(n);
     let mut residuals = Vec::with_capacity(n);
@@ -1013,7 +1027,9 @@ fn test_compute_hessian_gradient_many_rows() {
         residuals.push(0.05 - 0.01 * i as f64);
     }
 
-    let (hessian, gradient) = compute_hessian_gradient(&jacobian, &residuals);
+    let NormalEquations {
+        hessian, gradient, ..
+    } = reference_normal_equations(&jacobian, &residuals);
 
     // Compute reference result
     let mut ref_hessian = [[0.0f64; 6]; 6];
@@ -1061,7 +1077,7 @@ fn test_compute_hessian_gradient_many_rows() {
 
 /// Test with exactly 8 rows.
 #[test]
-fn test_compute_hessian_gradient_exactly_8_rows() {
+fn test_reference_normal_equations_exactly_8_rows() {
     let jacobian: Vec<[f64; 6]> = (0..8)
         .map(|i| {
             let v = (i + 1) as f64;
@@ -1070,7 +1086,9 @@ fn test_compute_hessian_gradient_exactly_8_rows() {
         .collect();
     let residuals: Vec<f64> = (0..8).map(|i| 0.1 * (i as f64 - 3.5)).collect();
 
-    let (hessian, gradient) = compute_hessian_gradient(&jacobian, &residuals);
+    let NormalEquations {
+        hessian, gradient, ..
+    } = reference_normal_equations(&jacobian, &residuals);
 
     // Reference
     let mut ref_hessian = [[0.0f64; 6]; 6];
@@ -1107,7 +1125,7 @@ fn test_compute_hessian_gradient_exactly_8_rows() {
 
 /// Test with a realistic stamp size (289 pixels = 17x17) to verify accumulated precision.
 #[test]
-fn test_compute_hessian_gradient_large_stamp() {
+fn test_reference_normal_equations_large_stamp() {
     let n = 289;
     let mut jacobian = Vec::with_capacity(n);
     let mut residuals = Vec::with_capacity(n);
@@ -1130,7 +1148,9 @@ fn test_compute_hessian_gradient_large_stamp() {
         residuals.push(0.01 * exp_val + 0.001 * (i as f64 % 7.0 - 3.0));
     }
 
-    let (hessian, gradient) = compute_hessian_gradient(&jacobian, &residuals);
+    let NormalEquations {
+        hessian, gradient, ..
+    } = reference_normal_equations(&jacobian, &residuals);
 
     // Reference
     let mut ref_hessian = [[0.0f64; 6]; 6];
@@ -1406,15 +1426,16 @@ fn test_batch_build_normal_equations_matches_scalar() {
     // Scalar reference: build jacobian/residuals then compute hessian/gradient
     let mut jac_scalar = Vec::new();
     let mut res_scalar = Vec::new();
-    let mut chi2_scalar = 0.0f64;
     for ((&x, &y), &z) in data_x.iter().zip(data_y.iter()).zip(data_z.iter()) {
         let (model_val, jac_row) = model.evaluate_and_jacobian(x, y, &params);
-        let residual = z - model_val;
-        chi2_scalar += residual * residual;
         jac_scalar.push(jac_row);
-        res_scalar.push(residual);
+        res_scalar.push(z - model_val);
     }
-    let (hessian_scalar, gradient_scalar) = compute_hessian_gradient(&jac_scalar, &res_scalar);
+    let NormalEquations {
+        hessian: hessian_scalar,
+        gradient: gradient_scalar,
+        chi2: chi2_scalar,
+    } = reference_normal_equations(&jac_scalar, &res_scalar);
 
     // Batch path (uses SIMD on x86_64 with AVX2)
     let NormalEquations {
@@ -1499,15 +1520,16 @@ fn test_batch_build_normal_equations_various_stamp_sizes() {
         // Scalar reference
         let mut jac_scalar = Vec::new();
         let mut res_scalar = Vec::new();
-        let mut chi2_scalar = 0.0f64;
         for ((&x, &y), &z) in data_x.iter().zip(data_y.iter()).zip(data_z.iter()) {
             let (model_val, jac_row) = model.evaluate_and_jacobian(x, y, &params);
-            let residual = z - model_val;
-            chi2_scalar += residual * residual;
             jac_scalar.push(jac_row);
-            res_scalar.push(residual);
+            res_scalar.push(z - model_val);
         }
-        let (hessian_scalar, gradient_scalar) = compute_hessian_gradient(&jac_scalar, &res_scalar);
+        let NormalEquations {
+            hessian: hessian_scalar,
+            gradient: gradient_scalar,
+            chi2: chi2_scalar,
+        } = reference_normal_equations(&jac_scalar, &res_scalar);
 
         // Batch
         let NormalEquations {
