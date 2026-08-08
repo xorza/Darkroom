@@ -264,7 +264,7 @@ fn test_extract_stamp_fractional_position() {
 
 #[test]
 fn test_local_annulus_background_uniform() {
-    use crate::stacking::star_detection::config::LocalBackgroundMethod;
+    use crate::stacking::star_detection::config::measurement_config::LocalBackgroundMethod;
 
     let width = 128;
     let height = 128;
@@ -321,7 +321,7 @@ fn test_local_annulus_background_uniform() {
 
 #[test]
 fn test_local_annulus_vs_global_map() {
-    use crate::stacking::star_detection::config::LocalBackgroundMethod;
+    use crate::stacking::star_detection::config::measurement_config::LocalBackgroundMethod;
 
     let width = 128;
     let height = 128;
@@ -394,7 +394,7 @@ fn test_local_annulus_vs_global_map() {
 
 #[test]
 fn test_local_annulus_near_edge_fallback() {
-    use crate::stacking::star_detection::config::LocalBackgroundMethod;
+    use crate::stacking::star_detection::config::measurement_config::LocalBackgroundMethod;
 
     let width = 64;
     let height = 64;

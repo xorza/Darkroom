@@ -19,7 +19,8 @@ use crate::stacking::registration::distortion::sip::{SipConfig, SipPolynomial};
 use crate::stacking::registration::register;
 use crate::stacking::registration::resample::warp;
 use crate::stacking::registration::transform::TransformType;
-use crate::stacking::star_detection::config::{CentroidMethod, Config, NoiseModel};
+use crate::stacking::star_detection::config::Config;
+use crate::stacking::star_detection::config::measurement_config::{CentroidMethod, NoiseModel};
 use crate::stacking::star_detection::detector::StarDetector;
 use crate::testing::calibration_dir;
 

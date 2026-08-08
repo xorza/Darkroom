@@ -11,7 +11,7 @@ use crate::math::vec2us::Vec2us;
 use imaginarium::Buffer2;
 
 use crate::stacking::star_detection::background::estimate::BackgroundEstimate;
-use crate::stacking::star_detection::config::DetectionConfig;
+use crate::stacking::star_detection::config::detection_config::DetectionConfig;
 use crate::stacking::star_detection::convolution::{MatchedFilterBuffers, matched_filter};
 use crate::stacking::star_detection::deblend::ComponentData;
 use crate::stacking::star_detection::deblend::local_maxima::deblend_local_maxima;

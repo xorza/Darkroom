@@ -1,3 +1,10 @@
+use crate::stacking::star_detection::config::background_config::BackgroundRefinement;
+use crate::stacking::star_detection::config::detection_config::{
+    Connectivity, MAX_DEBLEND_N_THRESHOLDS,
+};
+use crate::stacking::star_detection::config::measurement_config::{
+    CentroidMethod, LocalBackgroundMethod, NoiseModel,
+};
 use crate::stacking::star_detection::config::*;
 
 fn configured(update: impl FnOnce(&mut Config)) -> Config {

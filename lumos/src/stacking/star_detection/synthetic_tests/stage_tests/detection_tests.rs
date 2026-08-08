@@ -3,7 +3,8 @@
 //! Tests the peak detection and thresholding logic.
 
 use crate::math::size2us::Size2us;
-use crate::stacking::star_detection::config::{BackgroundConfig, DetectionConfig};
+use crate::stacking::star_detection::config::background_config::BackgroundConfig;
+use crate::stacking::star_detection::config::detection_config::DetectionConfig;
 use crate::stacking::star_detection::detector::stages::detect_test_utils::detect_stars_test;
 use crate::stacking::star_detection::synthetic_tests::Scenario;
 use crate::stacking::star_detection::test_common::output::image_writer::{

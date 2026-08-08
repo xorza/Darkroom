@@ -5,7 +5,10 @@
 
 use crate::math::statistics::{mad_f32_with_scratch, mad_floored, median_f32_mut};
 use crate::stacking::star_detection::background::estimate::BackgroundEstimate;
-use crate::stacking::star_detection::config::{Config, DetectionConfig, FilterConfig, FwhmConfig};
+use crate::stacking::star_detection::config::Config;
+use crate::stacking::star_detection::config::detection_config::DetectionConfig;
+use crate::stacking::star_detection::config::filter_config::FilterConfig;
+use crate::stacking::star_detection::config::fwhm_config::FwhmConfig;
 use crate::stacking::star_detection::detector::stages::FWHM_MAD_FLOOR_FRACTION;
 use crate::stacking::star_detection::detector::stages::detect::detect;
 use crate::stacking::star_detection::detector::stages::measure;

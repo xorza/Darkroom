@@ -9,9 +9,15 @@ use std::hint::black_box;
 use crate::StarDetector;
 use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::linear::LinearImage;
-use crate::stacking::star_detection::config::{
-    BackgroundConfig, BackgroundRefinement, CentroidMethod, Config, Connectivity, DetectionConfig,
-    FilterConfig, FwhmConfig, LocalBackgroundMethod, MeasurementConfig,
+use crate::stacking::star_detection::config::Config;
+use crate::stacking::star_detection::config::background_config::{
+    BackgroundConfig, BackgroundRefinement,
+};
+use crate::stacking::star_detection::config::detection_config::{Connectivity, DetectionConfig};
+use crate::stacking::star_detection::config::filter_config::FilterConfig;
+use crate::stacking::star_detection::config::fwhm_config::FwhmConfig;
+use crate::stacking::star_detection::config::measurement_config::{
+    CentroidMethod, LocalBackgroundMethod, MeasurementConfig,
 };
 use crate::stacking::star_detection::detector::stages::detect::internals::collect_components;
 use crate::stacking::star_detection::labeling::LabelMap;

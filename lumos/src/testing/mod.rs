@@ -12,7 +12,7 @@ use crate::io::image::image_metadata::ImageMetadata;
 use crate::io::raw::RAW_EXTENSIONS;
 use crate::math::size2us::Size2us;
 use crate::stacking::star_detection::background::{self, estimate::BackgroundEstimate};
-use crate::stacking::star_detection::config::BackgroundConfig;
+use crate::stacking::star_detection::config::background_config::BackgroundConfig;
 use crate::stacking::star_detection::resources::DetectionResources;
 
 pub(crate) mod mem_probe;

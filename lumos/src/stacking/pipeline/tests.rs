@@ -451,7 +451,7 @@ fn public_input_errors() {
 
     let config = AlignStackConfig {
         detection: StarDetectionConfig {
-            detection: crate::stacking::star_detection::config::DetectionConfig {
+            detection: crate::stacking::star_detection::config::detection_config::DetectionConfig {
                 sigma_threshold: 0.0,
                 ..Default::default()
             },

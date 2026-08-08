@@ -2,8 +2,8 @@
 
 use crate::bit_buffer2::BitBuffer2;
 use crate::math::size2us::Size2us;
-use crate::stacking::star_detection::config::BackgroundConfig;
-use crate::stacking::star_detection::config::Connectivity;
+use crate::stacking::star_detection::config::background_config::BackgroundConfig;
+use crate::stacking::star_detection::config::detection_config::Connectivity;
 use crate::stacking::star_detection::mask_dilation::dilate_mask;
 use crate::stacking::star_detection::threshold_mask::create_threshold_mask;
 use crate::testing::estimate_background;
@@ -106,7 +106,7 @@ fn bench_label_map_from_buffer_4k_globular(b: ::quickbench::Bencher) {
 #[test]
 #[ignore]
 fn bench_threshold_sweep() {
-    use crate::stacking::star_detection::config::Connectivity;
+    use crate::stacking::star_detection::config::detection_config::Connectivity;
     use crate::stacking::star_detection::labeling::{label_mask_parallel, label_mask_sequential};
     use imaginarium::Buffer2;
     use std::time::Instant;

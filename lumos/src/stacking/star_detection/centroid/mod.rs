@@ -29,7 +29,7 @@ use crate::math::size2us::Size2us;
 use crate::math::statistics::{ClippedStats, sigma_clipped_median_mad_arrayvec};
 use crate::math::{FWHM_TO_SIGMA, sigma_to_fwhm};
 use crate::stacking::star_detection::background::estimate::BackgroundEstimate;
-use crate::stacking::star_detection::config::{
+use crate::stacking::star_detection::config::measurement_config::{
     CentroidMethod, LocalBackgroundMethod, MeasurementConfig, NoiseModel,
 };
 use crate::stacking::star_detection::deblend::region::Region;
@@ -697,7 +697,7 @@ fn windowed_covariance(
 ///
 /// `background_override`, when set, replaces the per-pixel tiled background/noise
 /// map with a single flat estimate for the whole stamp — used for
-/// [`LocalBackgroundMethod::LocalAnnulus`](crate::stacking::star_detection::config::LocalBackgroundMethod::LocalAnnulus),
+/// [`LocalBackgroundMethod::LocalAnnulus`](crate::stacking::star_detection::config::measurement_config::LocalBackgroundMethod::LocalAnnulus),
 /// whose locally-estimated sky level is only valid at the stamp scale, not
 /// interpolated per pixel like the tiled map. It applies to every background
 /// consumer here — flux/marginals, the windowed covariance behind FWHM/eccentricity,

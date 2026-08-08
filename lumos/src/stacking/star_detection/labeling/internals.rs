@@ -1,7 +1,7 @@
 //! Test utilities for the labeling module.
 
 use crate::bit_buffer2::BitBuffer2;
-use crate::stacking::star_detection::config::Connectivity;
+use crate::stacking::star_detection::config::detection_config::Connectivity;
 use imaginarium::Buffer2;
 
 use crate::stacking::star_detection::labeling::LabelMap;

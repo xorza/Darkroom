@@ -4,7 +4,7 @@
 
 use crate::math::fwhm_to_sigma;
 use crate::math::size2us::Size2us;
-use crate::stacking::star_detection::config::BackgroundConfig;
+use crate::stacking::star_detection::config::background_config::BackgroundConfig;
 use crate::stacking::star_detection::convolution::internals::gaussian_convolve;
 use crate::stacking::star_detection::synthetic_tests::Scenario;
 use crate::stacking::star_detection::test_common::output::image_writer::save_grayscale;

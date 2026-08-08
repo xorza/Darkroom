@@ -13,9 +13,11 @@ use crate::stacking::star_detection::centroid::internals::add_noise;
 use crate::stacking::star_detection::centroid::internals::make_elliptical_star;
 use crate::stacking::star_detection::centroid::moffat_fit::alpha_beta_to_fwhm;
 use crate::stacking::star_detection::centroid::*;
-use crate::stacking::star_detection::config::{
-    BackgroundConfig, Config, DetectionConfig, FwhmConfig, MeasurementConfig,
-};
+use crate::stacking::star_detection::config::Config;
+use crate::stacking::star_detection::config::background_config::BackgroundConfig;
+use crate::stacking::star_detection::config::detection_config::DetectionConfig;
+use crate::stacking::star_detection::config::fwhm_config::FwhmConfig;
+use crate::stacking::star_detection::config::measurement_config::MeasurementConfig;
 use crate::stacking::star_detection::deblend::region::Region;
 use crate::stacking::star_detection::detector::stages::detect_test_utils::detect_stars_test;
 use crate::testing::estimate_background;
