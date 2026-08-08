@@ -152,6 +152,74 @@ const MOFFAT_CASES: &[MoffatCase] = &[
         alpha_tol: None,
         background_tol: None,
     },
+    MoffatCase {
+        name: "very_high_amplitude",
+        stamp: 21,
+        center: Vec2::new(10.0, 10.0),
+        amplitude: 10000.0,
+        alpha: 2.5,
+        beta: 2.5,
+        fixed_beta: 2.5,
+        background: 100.0,
+        guess: Vec2::splat(10.0),
+        fit_radius: 8,
+        perturbation: Perturbation::None,
+        fit_background: None,
+        pos_tol: Some(0.1),
+        alpha_tol: None,
+        background_tol: None,
+    },
+    MoffatCase {
+        name: "very_low_amplitude",
+        stamp: 21,
+        center: Vec2::new(10.0, 10.0),
+        amplitude: 0.01,
+        alpha: 2.5,
+        beta: 2.5,
+        fixed_beta: 2.5,
+        background: 0.001,
+        guess: Vec2::splat(10.0),
+        fit_radius: 8,
+        perturbation: Perturbation::None,
+        fit_background: None,
+        pos_tol: Some(0.1),
+        alpha_tol: None,
+        background_tol: None,
+    },
+    MoffatCase {
+        name: "narrow_psf",
+        stamp: 21,
+        center: Vec2::new(10.0, 10.0),
+        amplitude: 1.0,
+        alpha: 0.8,
+        beta: 2.5,
+        fixed_beta: 2.5,
+        background: 0.1,
+        guess: Vec2::splat(10.0),
+        fit_radius: 8,
+        perturbation: Perturbation::None,
+        fit_background: None,
+        pos_tol: Some(0.1),
+        alpha_tol: None,
+        background_tol: None,
+    },
+    MoffatCase {
+        name: "wide_psf",
+        stamp: 31,
+        center: Vec2::new(15.0, 15.0),
+        amplitude: 1.0,
+        alpha: 6.0,
+        beta: 2.5,
+        fixed_beta: 2.5,
+        background: 0.1,
+        guess: Vec2::splat(15.0),
+        fit_radius: 12,
+        perturbation: Perturbation::None,
+        fit_background: None,
+        pos_tol: Some(0.1),
+        alpha_tol: Some(0.5),
+        background_tol: None,
+    },
 ];
 
 #[test]
@@ -289,148 +357,6 @@ fn test_moffat_fit_low_snr() {
     assert!(
         (result.debug.alpha - true_alpha).abs() < 1.0,
         "Low-SNR alpha error {:.3} too large",
-        (result.debug.alpha - true_alpha).abs()
-    );
-}
-
-#[test]
-fn test_moffat_fit_very_high_amplitude() {
-    let width = 21;
-    let height = 21;
-    let true_cx = 10.0;
-    let true_cy = 10.0;
-    let true_amp = 10000.0; // Very high amplitude
-    let true_alpha = 2.5;
-    let true_beta = 2.5;
-    let true_bg = 100.0;
-
-    let pixels = SyntheticStar::new(
-        Vec2::new(true_cx, true_cy),
-        true_amp,
-        StarProfile::Moffat {
-            alpha: true_alpha,
-            beta: true_beta,
-        },
-    )
-    .stamp(Size2us::new(width, height), true_bg);
-
-    let config = MoffatFitConfig {
-        fixed_beta: true_beta,
-        ..Default::default()
-    };
-    let result = fit_moffat_2d(&pixels, Vec2::splat(10.0), 8, true_bg, None, &config);
-
-    assert!(result.is_some());
-    let result = result.unwrap();
-    assert!(result.converged);
-    assert!((result.pos.x - true_cx).abs() < 0.1);
-    assert!((result.pos.y - true_cy).abs() < 0.1);
-    assert!((result.debug.amplitude - true_amp).abs() / true_amp < 0.01);
-}
-
-#[test]
-fn test_moffat_fit_very_low_amplitude() {
-    let width = 21;
-    let height = 21;
-    let true_cx = 10.0;
-    let true_cy = 10.0;
-    let true_amp = 0.01; // Very low amplitude
-    let true_alpha = 2.5;
-    let true_beta = 2.5;
-    let true_bg = 0.001;
-
-    let pixels = SyntheticStar::new(
-        Vec2::new(true_cx, true_cy),
-        true_amp,
-        StarProfile::Moffat {
-            alpha: true_alpha,
-            beta: true_beta,
-        },
-    )
-    .stamp(Size2us::new(width, height), true_bg);
-
-    let config = MoffatFitConfig {
-        fixed_beta: true_beta,
-        ..Default::default()
-    };
-    let result = fit_moffat_2d(&pixels, Vec2::splat(10.0), 8, true_bg, None, &config);
-
-    assert!(result.is_some());
-    let result = result.unwrap();
-    assert!(result.converged);
-    assert!((result.pos.x - true_cx).abs() < 0.1);
-    assert!((result.pos.y - true_cy).abs() < 0.1);
-}
-
-#[test]
-fn test_moffat_fit_narrow_psf() {
-    let width = 21;
-    let height = 21;
-    let true_cx = 10.0;
-    let true_cy = 10.0;
-    let true_amp = 1.0;
-    let true_alpha = 0.8; // Very narrow PSF
-    let true_beta = 2.5;
-    let true_bg = 0.1;
-
-    let pixels = SyntheticStar::new(
-        Vec2::new(true_cx, true_cy),
-        true_amp,
-        StarProfile::Moffat {
-            alpha: true_alpha,
-            beta: true_beta,
-        },
-    )
-    .stamp(Size2us::new(width, height), true_bg);
-
-    let config = MoffatFitConfig {
-        fixed_beta: true_beta,
-        ..Default::default()
-    };
-    let result = fit_moffat_2d(&pixels, Vec2::splat(10.0), 8, true_bg, None, &config);
-
-    assert!(result.is_some());
-    let result = result.unwrap();
-    assert!(result.converged);
-    assert!((result.pos.x - true_cx).abs() < 0.1);
-    assert!((result.pos.y - true_cy).abs() < 0.1);
-}
-
-#[test]
-fn test_moffat_fit_wide_psf() {
-    let width = 31;
-    let height = 31;
-    let true_cx = 15.0;
-    let true_cy = 15.0;
-    let true_amp = 1.0;
-    let true_alpha = 6.0; // Wide PSF
-    let true_beta = 2.5;
-    let true_bg = 0.1;
-
-    let pixels = SyntheticStar::new(
-        Vec2::new(true_cx, true_cy),
-        true_amp,
-        StarProfile::Moffat {
-            alpha: true_alpha,
-            beta: true_beta,
-        },
-    )
-    .stamp(Size2us::new(width, height), true_bg);
-
-    let config = MoffatFitConfig {
-        fixed_beta: true_beta,
-        ..Default::default()
-    };
-    let result = fit_moffat_2d(&pixels, Vec2::splat(15.0), 12, true_bg, None, &config);
-
-    assert!(result.is_some());
-    let result = result.unwrap();
-    assert!(result.converged);
-    assert!((result.pos.x - true_cx).abs() < 0.1);
-    assert!((result.pos.y - true_cy).abs() < 0.1);
-    assert!(
-        (result.debug.alpha - true_alpha).abs() < 0.5,
-        "alpha error: {}",
         (result.debug.alpha - true_alpha).abs()
     );
 }
