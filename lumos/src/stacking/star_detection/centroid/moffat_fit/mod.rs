@@ -323,14 +323,20 @@ pub(super) fn fit_moffat_2d(
     })
 }
 
+/// Centre inside the stamp, and alpha within a plausible range.
+///
+/// The alpha bound is phrased as acceptance rather than rejection so a non-finite one fails it —
+/// comparisons against NaN are all false, so `NaN > limit` reads as "not out of range".
+///
+/// The centre needs its own [`Vec2::is_finite`] check, because that trick does not extend to it:
+/// `max_element` reduces with [`f32::max`], which *ignores* NaN and returns the other lane, so a
+/// NaN x-coordinate would silently compare as the (finite) y-offset.
+///
+/// A rejected fit is not an error: `measure_star` falls back to the moment-based centroid.
 fn validate_position(result_pos: Vec2, input_pos: Vec2, alpha: f32, stamp_radius: usize) -> bool {
-    if (result_pos - input_pos).abs().max_element() > stamp_radius as f32 {
-        return false;
-    }
-    if alpha < 0.5 || alpha > stamp_radius as f32 * 2.0 {
-        return false;
-    }
-    true
+    result_pos.is_finite()
+        && (result_pos - input_pos).abs().max_element() <= stamp_radius as f32
+        && (0.5..=stamp_radius as f32 * 2.0).contains(&alpha)
 }
 
 /// Convert Moffat alpha and beta to FWHM.

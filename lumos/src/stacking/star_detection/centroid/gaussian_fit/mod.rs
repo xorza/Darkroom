@@ -225,6 +225,16 @@ pub(super) fn fit_gaussian_2d(
 }
 
 /// Centre inside the stamp, and both sigmas within a plausible range.
+///
+/// The sigma bounds are phrased as acceptance rather than rejection, which is what makes a
+/// non-finite one fail: comparisons against NaN are all false, so `NaN > limit` reads as "not out
+/// of range" and a rejection-phrased check would pass a NaN sigma through to `Star::fwhm`.
+///
+/// The centre needs its own [`Vec2::is_finite`] check, because that trick does not extend to it:
+/// `max_element` reduces with [`f32::max`], which *ignores* NaN and returns the other lane, so a
+/// NaN x-coordinate would silently compare as the (finite) y-offset.
+///
+/// A rejected fit is not an error — `measure_star` falls back to the moment-based centroid.
 fn validate_fit(
     result_pos: Vec2,
     input_pos: Vec2,
@@ -232,11 +242,11 @@ fn validate_fit(
     sigma_y: f64,
     stamp_radius: usize,
 ) -> bool {
-    if (result_pos - input_pos).abs().max_element() > stamp_radius as f32 {
-        return false;
-    }
-    let max_sigma = stamp_radius as f64 * 2.0;
-    !(sigma_x < 0.5 || sigma_y < 0.5 || sigma_x > max_sigma || sigma_y > max_sigma)
+    let plausible_sigma = 0.5..=stamp_radius as f64 * 2.0;
+    result_pos.is_finite()
+        && (result_pos - input_pos).abs().max_element() <= stamp_radius as f32
+        && plausible_sigma.contains(&sigma_x)
+        && plausible_sigma.contains(&sigma_y)
 }
 
 #[cfg(test)]

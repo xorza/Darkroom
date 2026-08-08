@@ -987,3 +987,29 @@ fn test_batch_build_normal_equations_all_pow_strategies() {
         }
     }
 }
+
+/// Validation must reject a non-finite fit rather than pass it through: every comparison against
+/// NaN is false, so a check phrased as rejections ("bail if alpha > max") accepts one.
+#[test]
+fn validate_position_rejects_non_finite_and_keeps_its_bounds() {
+    let at = Vec2::splat(8.0);
+    let radius = 8usize;
+    // Baseline: a centred, plausibly-sized fit is accepted, so the rejections below are the
+    // non-finite values and not some unrelated bound.
+    assert!(validate_position(at, at, 2.0, radius));
+
+    for bad in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+        assert!(!validate_position(at, at, bad, radius), "alpha = {bad}");
+        let moved = Vec2::new(bad, 8.0);
+        assert!(!validate_position(moved, at, 2.0, radius), "pos.x = {bad}");
+    }
+
+    // Bounds are inclusive at both ends, and one step outside each is rejected.
+    assert!(validate_position(at, at, 0.5, radius));
+    assert!(validate_position(at, at, 16.0, radius));
+    assert!(!validate_position(at, at, 0.49, radius));
+    assert!(!validate_position(at, at, 16.01, radius));
+    // Centre exactly `stamp_radius` away is still inside; beyond it is not.
+    assert!(validate_position(Vec2::new(16.0, 8.0), at, 2.0, radius));
+    assert!(!validate_position(Vec2::new(16.01, 8.0), at, 2.0, radius));
+}
