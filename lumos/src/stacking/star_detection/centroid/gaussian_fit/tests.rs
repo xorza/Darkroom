@@ -9,13 +9,43 @@ use crate::stacking::star_detection::centroid::internals::{
 use crate::testing::synthetic::star_profiles::{StarProfile, SyntheticStar};
 use glam::Vec2;
 
-/// One noiseless recovery case: render a star of known parameters, fit it, and check what the
-/// fitter got back.
+/// What gets added to the rendered stamp before fitting.
+#[derive(Debug)]
+enum Perturbation {
+    None,
+    /// Index-based sawtooth — deterministic without an RNG, and correlated with pixel order
+    /// rather than random, which is a different stress than [`Perturbation::Gaussian`].
+    Sawtooth {
+        amplitude: f32,
+    },
+    Gaussian {
+        sigma: f32,
+        seed: u64,
+    },
+}
+
+impl Perturbation {
+    fn apply(&self, pixels: &mut Buffer2<f32>) {
+        match *self {
+            Perturbation::None => {}
+            Perturbation::Sawtooth { amplitude } => {
+                for (i, p) in pixels.iter_mut().enumerate() {
+                    *p += amplitude * ((i % 7) as f32 - 3.0) / 3.0;
+                }
+            }
+            Perturbation::Gaussian { sigma, seed } => add_noise(pixels, sigma, seed),
+        }
+    }
+}
+
+/// One recovery case: render a star of known parameters, optionally spoil the stamp or lie to
+/// the fitter about something, then check what it got back.
 ///
 /// Every tolerance is per-case and every one is optional. They span 0.02 (a bright, well-sampled
-/// star) to 0.5 (a profile barely wider than the pixel grid), so a single shared bound would
-/// quietly loosen the strict cases; `None` means the case makes no claim about that quantity at
-/// all, which is not the same as a loose bound.
+/// star) to 0.5 (15% noise), so a single shared bound would quietly loosen the strict cases.
+/// `None` means the case makes no claim about that quantity at all, which is not the same as a
+/// loose bound — the runner's unconditional finiteness check is what keeps an all-`None` case
+/// from being vacuous.
 #[derive(Debug)]
 struct RecoveryCase {
     name: &'static str,
@@ -29,6 +59,12 @@ struct RecoveryCase {
     /// Starting point handed to the fitter, deliberately offset from `center` in some cases.
     guess: Vec2,
     fit_radius: usize,
+    perturbation: Perturbation,
+    /// Background handed to the fitter. `None` gives it the true one; `Some` deliberately lies
+    /// to it, since background is itself a fitted parameter.
+    fit_background: Option<f32>,
+    /// `None` uses `GaussianFitConfig::default()`.
+    max_iterations: Option<usize>,
     pos_tol: Option<f32>,
     sigma_tol: Option<f32>,
     amplitude_tol: Option<f32>,
@@ -71,6 +107,9 @@ const RECOVERY_CASES: &[RecoveryCase] = &[
         sigma_tol: Some(0.2),
         amplitude_tol: None,
         background_tol: None,
+        perturbation: Perturbation::None,
+        fit_background: None,
+        max_iterations: None,
         expect_converged: false,
     },
     RecoveryCase {
@@ -86,6 +125,9 @@ const RECOVERY_CASES: &[RecoveryCase] = &[
         sigma_tol: None,
         amplitude_tol: None,
         background_tol: None,
+        perturbation: Perturbation::None,
+        fit_background: None,
+        max_iterations: None,
         expect_converged: true,
     },
     RecoveryCase {
@@ -101,6 +143,9 @@ const RECOVERY_CASES: &[RecoveryCase] = &[
         sigma_tol: Some(0.3),
         amplitude_tol: None,
         background_tol: None,
+        perturbation: Perturbation::None,
+        fit_background: None,
+        max_iterations: None,
         expect_converged: false,
     },
     RecoveryCase {
@@ -116,6 +161,9 @@ const RECOVERY_CASES: &[RecoveryCase] = &[
         sigma_tol: None,
         amplitude_tol: Some(1.0),
         background_tol: None,
+        perturbation: Perturbation::None,
+        fit_background: None,
+        max_iterations: None,
         expect_converged: false,
     },
     RecoveryCase {
@@ -132,6 +180,9 @@ const RECOVERY_CASES: &[RecoveryCase] = &[
         sigma_tol: None,
         amplitude_tol: None,
         background_tol: None,
+        perturbation: Perturbation::None,
+        fit_background: None,
+        max_iterations: None,
         expect_converged: false,
     },
     RecoveryCase {
@@ -147,6 +198,9 @@ const RECOVERY_CASES: &[RecoveryCase] = &[
         sigma_tol: Some(0.5),
         amplitude_tol: None,
         background_tol: None,
+        perturbation: Perturbation::None,
+        fit_background: None,
+        max_iterations: None,
         expect_converged: false,
     },
     RecoveryCase {
@@ -163,6 +217,9 @@ const RECOVERY_CASES: &[RecoveryCase] = &[
         sigma_tol: None,
         amplitude_tol: None,
         background_tol: None,
+        perturbation: Perturbation::None,
+        fit_background: None,
+        max_iterations: None,
         expect_converged: false,
     },
     RecoveryCase {
@@ -178,6 +235,9 @@ const RECOVERY_CASES: &[RecoveryCase] = &[
         sigma_tol: None,
         amplitude_tol: None,
         background_tol: Some(0.05),
+        perturbation: Perturbation::None,
+        fit_background: None,
+        max_iterations: None,
         expect_converged: false,
     },
     RecoveryCase {
@@ -193,25 +253,172 @@ const RECOVERY_CASES: &[RecoveryCase] = &[
         sigma_tol: None,
         amplitude_tol: None,
         background_tol: None,
+        perturbation: Perturbation::None,
+        fit_background: None,
+        max_iterations: None,
         expect_converged: false,
+    },
+    RecoveryCase {
+        name: "sawtooth_noise",
+        stamp: 21,
+        center: Vec2::new(10.0, 10.0),
+        amplitude: 1.0,
+        sigma: Vec2::splat(2.5),
+        background: 0.1,
+        guess: Vec2::splat(10.0),
+        fit_radius: 8,
+        pos_tol: Some(0.2),
+        sigma_tol: None,
+        amplitude_tol: None,
+        background_tol: None,
+        perturbation: Perturbation::Sawtooth { amplitude: 0.02 },
+        fit_background: None,
+        max_iterations: None,
+        expect_converged: false,
+    },
+    RecoveryCase {
+        // Noise sigma is 5% of amplitude.
+        name: "gaussian_noise",
+        stamp: 21,
+        center: Vec2::new(10.0, 10.0),
+        amplitude: 1.0,
+        sigma: Vec2::splat(2.5),
+        background: 0.1,
+        guess: Vec2::splat(10.0),
+        fit_radius: 8,
+        pos_tol: Some(0.2),
+        sigma_tol: None,
+        amplitude_tol: None,
+        background_tol: None,
+        perturbation: Perturbation::Gaussian {
+            sigma: 0.05,
+            seed: 12345,
+        },
+        fit_background: None,
+        max_iterations: None,
+        expect_converged: true,
+    },
+    RecoveryCase {
+        // 15% noise: must still converge, position just gets looser.
+        name: "high_noise",
+        stamp: 21,
+        center: Vec2::new(10.0, 10.0),
+        amplitude: 1.0,
+        sigma: Vec2::splat(2.5),
+        background: 0.1,
+        guess: Vec2::splat(10.0),
+        fit_radius: 8,
+        pos_tol: Some(0.5),
+        sigma_tol: None,
+        amplitude_tol: None,
+        background_tol: None,
+        perturbation: Perturbation::Gaussian {
+            sigma: 0.15,
+            seed: 54321,
+        },
+        fit_background: None,
+        max_iterations: None,
+        expect_converged: true,
+    },
+    RecoveryCase {
+        // SNR ~0.2. Makes no accuracy claim — it pins only that the fit stays finite instead of
+        // diverging, which the runner now asserts for every case.
+        name: "low_snr",
+        stamp: 21,
+        center: Vec2::new(10.0, 10.0),
+        amplitude: 0.1,
+        sigma: Vec2::splat(2.5),
+        background: 0.5,
+        guess: Vec2::splat(10.0),
+        fit_radius: 8,
+        pos_tol: None,
+        sigma_tol: None,
+        amplitude_tol: None,
+        background_tol: None,
+        perturbation: Perturbation::None,
+        fit_background: None,
+        max_iterations: None,
+        expect_converged: false,
+    },
+    RecoveryCase {
+        // Fitter is handed a background 20% too high; it should recover the true one anyway,
+        // because background is itself a fitted parameter.
+        name: "wrong_background_estimate",
+        stamp: 21,
+        center: Vec2::new(10.0, 10.0),
+        amplitude: 1.0,
+        sigma: Vec2::splat(2.5),
+        background: 0.1,
+        guess: Vec2::splat(10.0),
+        fit_radius: 8,
+        pos_tol: Some(0.1),
+        sigma_tol: None,
+        amplitude_tol: None,
+        background_tol: Some(0.05),
+        perturbation: Perturbation::None,
+        fit_background: Some(0.12),
+        max_iterations: None,
+        expect_converged: true,
+    },
+    RecoveryCase {
+        // Guess starts 2px off in both axes and needs the longer budget to walk back.
+        name: "bad_initial_guess",
+        stamp: 21,
+        center: Vec2::new(10.0, 10.0),
+        amplitude: 1.0,
+        sigma: Vec2::splat(2.5),
+        background: 0.1,
+        guess: Vec2::new(8.0, 12.0),
+        fit_radius: 8,
+        pos_tol: Some(0.1),
+        sigma_tol: None,
+        amplitude_tol: None,
+        background_tol: None,
+        perturbation: Perturbation::None,
+        fit_background: None,
+        max_iterations: Some(100),
+        expect_converged: true,
     },
 ];
 
 #[test]
-fn gaussian_fit_recovers_known_parameters_from_noiseless_stamps() {
+fn gaussian_fit_recovers_known_parameters() {
     for case in RECOVERY_CASES {
-        let pixels = SyntheticStar::new(case.center, case.amplitude, case.profile())
+        let mut pixels = SyntheticStar::new(case.center, case.amplitude, case.profile())
             .stamp(Size2us::new(case.stamp, case.stamp), case.background);
+        case.perturbation.apply(&mut pixels);
 
+        let config = match case.max_iterations {
+            Some(max_iterations) => GaussianFitConfig {
+                max_iterations,
+                ..Default::default()
+            },
+            None => GaussianFitConfig::default(),
+        };
         let result = fit_gaussian_2d(
             &pixels,
             case.guess,
             case.fit_radius,
-            case.background,
+            case.fit_background.unwrap_or(case.background),
             None,
-            &GaussianFitConfig::default(),
+            &config,
         )
         .unwrap_or_else(|| panic!("{}: fit returned None", case.name));
+
+        // Asserted for every case, not just the ones that used to say so: a fit that diverges to
+        // NaN would otherwise slip past any case whose tolerances are all `None`.
+        assert!(
+            result.pos.x.is_finite() && result.pos.y.is_finite(),
+            "{}: non-finite position {:?}",
+            case.name,
+            result.pos
+        );
+        assert!(
+            result.sigma.x.is_finite() && result.sigma.y.is_finite(),
+            "{}: non-finite sigma {:?}",
+            case.name,
+            result.sigma
+        );
 
         if case.expect_converged {
             assert!(result.converged, "{}: did not converge", case.name);
@@ -290,39 +497,6 @@ fn test_gaussian_fit_edge_position() {
 }
 
 #[test]
-fn test_gaussian_fit_with_noise() {
-    let width = 21;
-    let height = 21;
-    let true_cx = 10.0;
-    let true_cy = 10.0;
-    let true_amp = 1.0;
-    let true_sigma = 2.5;
-    let true_bg = 0.1;
-
-    let mut pixels = SyntheticStar::new(
-        Vec2::new(true_cx, true_cy),
-        true_amp,
-        StarProfile::Gaussian { sigma: true_sigma },
-    )
-    .stamp(Size2us::new(width, height), true_bg);
-
-    // Add deterministic "noise" pattern
-    for (i, p) in pixels.iter_mut().enumerate() {
-        let noise = 0.02 * ((i % 7) as f32 - 3.0) / 3.0;
-        *p += noise;
-    }
-
-    let config = GaussianFitConfig::default();
-    let result = fit_gaussian_2d(&pixels, Vec2::splat(10.0), 8, true_bg, None, &config);
-
-    assert!(result.is_some());
-    let result = result.unwrap();
-    // With noise, accuracy is slightly reduced but should still be reasonable
-    assert!((result.pos.x - true_cx).abs() < 0.2);
-    assert!((result.pos.y - true_cy).abs() < 0.2);
-}
-
-#[test]
 fn test_gaussian_fit_stamp_too_small() {
     let width = 5;
     let height = 5;
@@ -344,159 +518,6 @@ fn test_fwhm_accuracy() {
     // FWHM = 2 * sqrt(2 * ln(2)) * sigma ≈ 2.355 * sigma
     let expected = 2.0 * (2.0 * 2.0f32.ln()).sqrt() * sigma;
     assert!((fwhm - expected).abs() < 1e-5);
-}
-
-#[test]
-fn test_gaussian_fit_with_gaussian_noise() {
-    let width = 21;
-    let height = 21;
-    let true_cx = 10.0;
-    let true_cy = 10.0;
-    let true_amp = 1.0;
-    let true_sigma = 2.5;
-    let true_bg = 0.1;
-    let noise_sigma = 0.05; // 5% of amplitude
-
-    let mut pixels = SyntheticStar::new(
-        Vec2::new(true_cx, true_cy),
-        true_amp,
-        StarProfile::Gaussian { sigma: true_sigma },
-    )
-    .stamp(Size2us::new(width, height), true_bg);
-    add_noise(&mut pixels, noise_sigma, 12345);
-
-    let config = GaussianFitConfig::default();
-    let result = fit_gaussian_2d(&pixels, Vec2::splat(10.0), 8, true_bg, None, &config);
-
-    assert!(result.is_some());
-    let result = result.unwrap();
-    assert!(result.converged);
-    // With noise, allow larger tolerance
-    assert!(
-        (result.pos.x - true_cx).abs() < 0.2,
-        "x error: {}",
-        (result.pos.x - true_cx).abs()
-    );
-    assert!(
-        (result.pos.y - true_cy).abs() < 0.2,
-        "y error: {}",
-        (result.pos.y - true_cy).abs()
-    );
-}
-
-#[test]
-fn test_gaussian_fit_high_noise_still_converges() {
-    let width = 21;
-    let height = 21;
-    let true_cx = 10.0;
-    let true_cy = 10.0;
-    let true_amp = 1.0;
-    let true_sigma = 2.5;
-    let true_bg = 0.1;
-    let noise_sigma = 0.15; // 15% noise - challenging
-
-    let mut pixels = SyntheticStar::new(
-        Vec2::new(true_cx, true_cy),
-        true_amp,
-        StarProfile::Gaussian { sigma: true_sigma },
-    )
-    .stamp(Size2us::new(width, height), true_bg);
-    add_noise(&mut pixels, noise_sigma, 54321);
-
-    let config = GaussianFitConfig::default();
-    let result = fit_gaussian_2d(&pixels, Vec2::splat(10.0), 8, true_bg, None, &config);
-
-    // Should still converge even with high noise
-    assert!(result.is_some());
-    let result = result.unwrap();
-    assert!(result.converged);
-    // Centroid should still be reasonable (within 0.5 pixel)
-    assert!(
-        (result.pos.x - true_cx).abs() < 0.5,
-        "x error too large: {}",
-        (result.pos.x - true_cx).abs()
-    );
-    assert!(
-        (result.pos.y - true_cy).abs() < 0.5,
-        "y error too large: {}",
-        (result.pos.y - true_cy).abs()
-    );
-}
-
-#[test]
-fn test_gaussian_fit_low_snr() {
-    let width = 21;
-    let height = 21;
-    let true_cx = 10.0;
-    let true_cy = 10.0;
-    let true_amp = 0.1; // Low amplitude
-    let true_sigma = 2.5;
-    let true_bg = 0.5; // High background (SNR ~ 0.2)
-
-    let pixels = SyntheticStar::new(
-        Vec2::new(true_cx, true_cy),
-        true_amp,
-        StarProfile::Gaussian { sigma: true_sigma },
-    )
-    .stamp(Size2us::new(width, height), true_bg);
-
-    let config = GaussianFitConfig::default();
-    let result = fit_gaussian_2d(&pixels, Vec2::splat(10.0), 8, true_bg, None, &config);
-
-    // Low SNR should still produce a result (may not be accurate)
-    assert!(result.is_some());
-    let result = result.unwrap();
-    // Just verify it doesn't crash and produces finite values
-    assert!(result.pos.x.is_finite());
-    assert!(result.pos.y.is_finite());
-    assert!(result.sigma.x.is_finite());
-    assert!(result.sigma.y.is_finite());
-}
-
-#[test]
-fn test_gaussian_fit_wrong_background_estimate() {
-    let width = 21;
-    let height = 21;
-    let true_cx = 10.0;
-    let true_cy = 10.0;
-    let true_amp = 1.0;
-    let true_sigma = 2.5;
-    let true_bg = 0.1;
-
-    let pixels = SyntheticStar::new(
-        Vec2::new(true_cx, true_cy),
-        true_amp,
-        StarProfile::Gaussian { sigma: true_sigma },
-    )
-    .stamp(Size2us::new(width, height), true_bg);
-
-    let config = GaussianFitConfig::default();
-
-    // Use wrong background estimate (20% error)
-    let wrong_bg = true_bg * 1.2;
-    let result = fit_gaussian_2d(&pixels, Vec2::splat(10.0), 8, wrong_bg, None, &config);
-
-    assert!(result.is_some());
-    let result = result.unwrap();
-    // Should still converge - background is a fitted parameter
-    assert!(result.converged);
-    // Centroid should still be accurate
-    assert!(
-        (result.pos.x - true_cx).abs() < 0.1,
-        "x error: {}",
-        (result.pos.x - true_cx).abs()
-    );
-    assert!(
-        (result.pos.y - true_cy).abs() < 0.1,
-        "y error: {}",
-        (result.pos.y - true_cy).abs()
-    );
-    // Fitted background should be close to true value
-    assert!(
-        (result.debug.background - true_bg).abs() < 0.05,
-        "bg error: {}",
-        (result.debug.background - true_bg).abs()
-    );
 }
 
 #[test]
@@ -582,46 +603,6 @@ fn test_gaussian_fit_converges_within_max_iterations() {
     // Should converge quickly for perfect data
     assert!(result.converged);
     assert!(result.debug.iterations <= 10);
-}
-
-#[test]
-fn test_gaussian_fit_bad_initial_guess_still_converges() {
-    let width = 21;
-    let height = 21;
-    let true_cx = 10.0;
-    let true_cy = 10.0;
-    let true_amp = 1.0;
-    let true_sigma = 2.5;
-    let true_bg = 0.1;
-
-    let pixels = SyntheticStar::new(
-        Vec2::new(true_cx, true_cy),
-        true_amp,
-        StarProfile::Gaussian { sigma: true_sigma },
-    )
-    .stamp(Size2us::new(width, height), true_bg);
-
-    let config = GaussianFitConfig {
-        max_iterations: 100,
-        ..Default::default()
-    };
-
-    // Start from a position offset by 2 pixels
-    let result = fit_gaussian_2d(&pixels, Vec2::new(8.0, 12.0), 8, true_bg, None, &config);
-
-    assert!(result.is_some());
-    let result = result.unwrap();
-    assert!(result.converged);
-    assert!(
-        (result.pos.x - true_cx).abs() < 0.1,
-        "x error: {}",
-        (result.pos.x - true_cx).abs()
-    );
-    assert!(
-        (result.pos.y - true_cy).abs() < 0.1,
-        "y error: {}",
-        (result.pos.y - true_cy).abs()
-    );
 }
 
 #[test]
