@@ -17,6 +17,7 @@ use crate::error::InvalidConfigField;
 use crate::math::statistics::median_f32_mut;
 use crate::stacking::star_detection::background::background_estimate::BackgroundEstimate;
 use crate::stacking::star_detection::config::Config;
+use crate::stacking::star_detection::detector::stages::detect::DetectResult;
 use crate::stacking::star_detection::detector::stages::filter::FilterOutcome;
 use crate::stacking::star_detection::detector::stages::fwhm::FwhmResult;
 use crate::stacking::star_detection::resources::DetectionResources;
@@ -181,11 +182,11 @@ impl StarDetector {
 
         // Step 3: Determine effective FWHM (manual > auto-estimate > disabled)
         let fwhm_result =
-            stages::fwhm::estimate_fwhm(&grayscale_image, &background, &self.config, resources);
+            FwhmResult::estimate(&grayscale_image, &background, &self.config, resources);
         let effective_fwhm = fwhm_result.fwhm.unwrap_or(0.0);
 
         // Step 4: Detect star candidate regions (with optional matched filter)
-        let detect_result = stages::detect::detect(
+        let detect_result = DetectResult::from_image(
             &grayscale_image,
             &background,
             fwhm_result.fwhm,
@@ -220,7 +221,7 @@ impl StarDetector {
         let FilterOutcome {
             stars,
             diagnostics: quality_filter,
-        } = stages::filter::filter(stars, &self.config.filter);
+        } = FilterOutcome::from_stars(stars, &self.config.filter);
         diagnostics.quality_filter = quality_filter;
 
         if diagnostics.quality_filter.fwhm_outliers > 0 {
