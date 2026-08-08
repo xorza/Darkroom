@@ -2,10 +2,14 @@ use crate::image_ops::rgb::Rgb;
 use common::internals::test_output_path;
 use imaginarium::{Buffer2, ColorFormat, Image, ImageDesc};
 
-use crate::io::image::LoadContext;
 #[cfg(feature = "real-data")]
 use crate::io::image::cfa::CfaImage;
+use crate::io::image::image_dimensions::ImageDimensions;
+use crate::io::image::image_metadata::{BitPix, ImageMetadata};
+use crate::io::image::image_provenance::{ColorProvenance, ImageProvenance};
 use crate::io::image::linear::{LinearImage, internals};
+use crate::io::image::load_context::LoadContext;
+use crate::io::image::preview_image::PreviewImage;
 use crate::io::image::*;
 use crate::io::raw;
 use crate::math::vec2us::Vec2us;

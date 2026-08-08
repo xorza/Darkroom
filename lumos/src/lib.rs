@@ -37,6 +37,7 @@ pub(crate) mod stacking;
 pub mod testing;
 
 pub use error::InvalidConfigField;
+pub use io::image::PREVIEW_IMAGE_EXTENSIONS;
 pub use io::image::cfa::{CfaImage, CfaType};
 pub use io::image::error::ImageError;
 pub use io::image::fits::options::{
@@ -45,12 +46,15 @@ pub use io::image::fits::options::{
 pub use io::image::fits::provenance::{
     FitsChecksumProvenance, FitsChecksumState, FitsHduProvenance, FitsTransferProvenance,
 };
-pub use io::image::linear::LinearImage;
-pub use io::image::{
-    BitPix, ColorProvenance, DecoderProvenance, DemosaicProvenance, ImageDimensions, ImageMetadata,
-    ImageProvenance, LoadContext, PREVIEW_IMAGE_EXTENSIONS, PreviewImage, SourceContainer,
+pub use io::image::image_dimensions::ImageDimensions;
+pub use io::image::image_metadata::{BitPix, ImageMetadata};
+pub use io::image::image_provenance::{
+    ColorProvenance, DecoderProvenance, DemosaicProvenance, ImageProvenance, SourceContainer,
     TransferProvenance,
 };
+pub use io::image::linear::LinearImage;
+pub use io::image::load_context::LoadContext;
+pub use io::image::preview_image::PreviewImage;
 pub use io::raw::RAW_EXTENSIONS;
 pub use io::raw::demosaic::bayer::CfaPattern;
 pub use math::size2us::Size2us;

@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use thiserror::Error;
 
 use crate::error::InvalidConfigField;
-use crate::io::image::ImageDimensions;
+use crate::io::image::image_dimensions::ImageDimensions;
 use crate::stacking::frame_store::FrameStoreError;
 
 /// Which of a frame's planes a validation failure is about.

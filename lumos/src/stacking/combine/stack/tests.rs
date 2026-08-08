@@ -2,8 +2,8 @@ use arrayvec::ArrayVec;
 
 use crate::stacking::combine::error::FramePlane;
 
-use crate::io::image::ImageDimensions;
 use crate::io::image::cfa::{CfaImage, CfaType};
+use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::linear::LinearImage;
 use crate::io::image::linear_pixels::LinearPixels;
 use crate::math::size2us::Size2us;

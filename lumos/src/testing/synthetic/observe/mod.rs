@@ -6,7 +6,7 @@
 //! read noise → defects → saturate. A noiseless [`Camera::ideal`] collapses this to the clean
 //! image, so the *same* code path produces both the stimulus and its truth.
 
-use crate::io::image::ImageDimensions;
+use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::linear::LinearImage;
 use crate::math::size2us::Size2us;
 use crate::stacking::registration::transform::Transform;

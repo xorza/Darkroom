@@ -1,0 +1,83 @@
+//! Observation metadata carried by every image product.
+//!
+//! [`BitPix`] lives here rather than in its own file: it is only ever reached as
+//! [`ImageMetadata::bitpix`], the pixel type the FITS header declared.
+
+use crate::io::image::cfa;
+use crate::io::image::image_provenance::ImageProvenance;
+
+/// FITS BITPIX values representing pixel data types.
+///
+/// FITS natively supports only signed integers. Unsigned integers use the
+/// BZERO convention (e.g., BITPIX=16 + BZERO=32768 for unsigned 16-bit).
+/// fits-well's `SampleType` resolves this and reports the effective type.
+/// The unsigned variants here preserve the distinction for correct normalization.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum BitPix {
+    #[default]
+    UInt8,
+    Int16,
+    UInt16,
+    Int32,
+    UInt32,
+    Int64,
+    Float32,
+    Float64,
+}
+
+/// Metadata and provenance shared by sensor, linear, and preview image products.
+#[derive(Debug, Clone, Default)]
+pub struct ImageMetadata {
+    pub object: Option<String>,
+    pub instrument: Option<String>,
+    pub telescope: Option<String>,
+    pub date_obs: Option<String>,
+    pub exposure_time: Option<f64>,
+    pub iso: Option<u32>,
+    pub bitpix: BitPix,
+    pub header_dimensions: Vec<usize>,
+    /// CFA sensor type, if the image originated from a raw sensor.
+    /// `None` for non-CFA sources (FITS, monochrome sensors).
+    pub cfa_type: Option<cfa::CfaType>,
+    /// Camera-recorded white-balance multipliers `[R, G1, B, G2]`, normalized so the smallest
+    /// multiplier is `1.0`. X-Trans and RAW metadata without a second green duplicate `G1`.
+    ///
+    /// Metadata only: RAW decoding and calibration keep unity white balance.
+    pub camera_white_balance: Option<[f32; 4]>,
+    /// Filter name (e.g. "Ha", "OIII", "L", "R"). Critical for narrowband.
+    pub filter: Option<String>,
+    /// Camera gain setting (unitless, camera-specific).
+    pub gain: Option<f64>,
+    /// Electrons per ADU (e-/ADU). Used for noise modeling.
+    pub egain: Option<f64>,
+    /// CCD/sensor temperature in degrees Celsius during exposure.
+    pub ccd_temp: Option<f64>,
+    /// Frame type: "Light", "Dark", "Flat", "Bias", etc.
+    pub image_type: Option<String>,
+    /// Horizontal binning factor.
+    pub xbinning: Option<i32>,
+    /// Vertical binning factor.
+    pub ybinning: Option<i32>,
+    /// Target sensor temperature setpoint in degrees Celsius.
+    pub set_temp: Option<f64>,
+    /// Camera offset setting (unitless, camera-specific).
+    pub offset: Option<i32>,
+    /// Focal length in mm.
+    pub focal_length: Option<f64>,
+    /// Airmass at time of observation.
+    pub airmass: Option<f64>,
+    /// Right ascension of telescope pointing in degrees.
+    pub ra_deg: Option<f64>,
+    /// Declination of telescope pointing in degrees.
+    pub dec_deg: Option<f64>,
+    /// Pixel size in microns (X axis).
+    pub pixel_size_x: Option<f64>,
+    /// Pixel size in microns (Y axis).
+    pub pixel_size_y: Option<f64>,
+    /// Maximum valid pixel value (saturation level).
+    pub data_max: Option<f64>,
+    pub provenance: Option<ImageProvenance>,
+    /// Set by `CalibrationMasters::calibrate` — guards against applying the dark/flat twice
+    /// (the FITS `CALSTAT` convention). Travels with the frame through demosaic.
+    pub calibrated: bool,
+}

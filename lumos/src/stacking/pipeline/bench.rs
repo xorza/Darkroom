@@ -5,7 +5,7 @@ use std::hint::black_box;
 use quickbench::quick_bench;
 use rayon::prelude::*;
 
-use crate::io::image::ImageDimensions;
+use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::linear::LinearImage;
 use crate::stacking::pipeline::detector_pool::DetectorPool;
 use crate::stacking::star_detection::config::Config;

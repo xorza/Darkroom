@@ -7,9 +7,10 @@ use imaginarium::Buffer2;
 use rayon::prelude::*;
 
 use crate::concurrency::JobScratchPool;
+use crate::io::image::image_dimensions::ImageDimensions;
+use crate::io::image::image_metadata::ImageMetadata;
 use crate::io::image::linear::LinearImage;
 use crate::io::image::linear_pixels::LinearPixels;
-use crate::io::image::{ImageDimensions, ImageMetadata};
 use crate::memory::{ChunkMemoryLayout, optimal_chunk_rows};
 use crate::stacking::combine::MIN_CONTRIBUTING_COVERAGE;
 use crate::stacking::combine::cache_config::CacheConfig;

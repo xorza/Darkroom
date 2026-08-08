@@ -8,10 +8,10 @@
 use crate::math::size2us::Size2us;
 use std::fs::File;
 
-use crate::io::image::LoadContext;
 use crate::io::image::error::ImageError;
 use crate::io::image::fits::decode::load_linear_fits;
 use crate::io::image::linear::LinearImage;
+use crate::io::image::load_context::LoadContext;
 use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::io::raw::demosaic::xtrans::internals::test_pattern_array;
 use crate::math::vec2us::Vec2us;

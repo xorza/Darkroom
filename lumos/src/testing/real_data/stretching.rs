@@ -3,8 +3,8 @@
 //! lives in `test_data/lumos_data/`).
 
 use crate::image_ops::intensity_plane;
-use crate::io::image::LoadContext;
 use crate::io::image::linear::LinearImage;
+use crate::io::image::load_context::LoadContext;
 use crate::math::statistics::median_f32_mut;
 use crate::testing::{calibration_dir, init_tracing, save_png};
 use crate::{ColorMode, NeutralizeBackground, Scnr, Stretch, StretchMethod};

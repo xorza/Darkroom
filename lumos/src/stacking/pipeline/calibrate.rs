@@ -5,10 +5,10 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use common::CancelToken;
 
-use crate::io::image::LoadContext;
 use crate::io::image::cfa::{CfaFrameInfo, CfaImage};
 use crate::io::image::error::ImageError;
 use crate::io::image::linear::LinearImage;
+use crate::io::image::load_context::LoadContext;
 use crate::io::raw;
 use crate::io::raw::demosaic::DemosaicError;
 use crate::memory::plan_memory;

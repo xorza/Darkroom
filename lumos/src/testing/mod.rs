@@ -7,8 +7,8 @@ use std::path::{Path, PathBuf};
 use common::file_utils;
 use imaginarium::Buffer2;
 
-use crate::io::image::ImageMetadata;
 use crate::io::image::cfa::{CfaImage, CfaType};
+use crate::io::image::image_metadata::ImageMetadata;
 use crate::io::raw::RAW_EXTENSIONS;
 use crate::math::size2us::Size2us;
 use crate::stacking::star_detection::background::{self, estimate::BackgroundEstimate};

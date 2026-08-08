@@ -1,7 +1,7 @@
 use glam::Vec2;
 
-use crate::io::image::ImageMetadata;
 use crate::io::image::cfa::CfaType;
+use crate::io::image::image_metadata::ImageMetadata;
 use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::stacking::calibration_masters::cosmic_ray::*;
 use crate::testing::TestRng;

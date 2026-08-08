@@ -3,7 +3,6 @@ use std::path::Path;
 
 use fits_well::io::{ChecksumReport, ChecksumStatus, Hdu, HduKind, StreamReader};
 
-use crate::io::image::LoadContext;
 use crate::io::image::error::ImageError;
 use crate::io::image::fits::error::{fits_err, fits_unsupported};
 use crate::io::image::fits::metadata::read_text;
@@ -11,6 +10,7 @@ use crate::io::image::fits::options::{FitsChecksumPolicy, FitsHduSelector};
 use crate::io::image::fits::provenance::{
     FitsChecksumProvenance, FitsChecksumState, FitsHduProvenance,
 };
+use crate::io::image::load_context::LoadContext;
 
 fn hdu_is_image(path: &Path, hdu: &Hdu) -> Result<bool, ImageError> {
     Ok(match hdu.kind {

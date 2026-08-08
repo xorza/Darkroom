@@ -7,7 +7,7 @@ use ::quickbench::quick_bench;
 use std::hint::black_box;
 
 use crate::StarDetector;
-use crate::io::image::ImageDimensions;
+use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::linear::LinearImage;
 use crate::stacking::star_detection::config::{
     BackgroundConfig, BackgroundRefinement, CentroidMethod, Config, Connectivity, DetectionConfig,
