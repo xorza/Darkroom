@@ -2,10 +2,9 @@
 
 use std::ops::Deref;
 use std::ops::DerefMut;
-use std::ops::Range;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use parking_lot::Mutex;
-use rayon::prelude::*;
 
 /// Wrapper to send raw pointers across thread boundaries in Rayon closures.
 ///
@@ -92,35 +91,78 @@ impl<T> Drop for JobScratchLease<'_, T> {
     }
 }
 
-/// Splice the results of `batch` over consecutive windows of at most `max_concurrent` of `len`
-/// items, in input order.
+/// Run `job` over `0..len` with one slot bound to each in-flight index, at most `slots.len()` of
+/// them at a time, and splice the results back into index order.
 ///
-/// The window boundary is a barrier: one batch finishes before the next starts, and the first to
-/// fail leaves the rest unstarted. Callers supply only the parallel iterator over a window — the
-/// ordering, the window width, and the early exit live here rather than being spelled out again
-/// in each entry point.
-pub(crate) fn try_collect_batches<R, E>(
+/// One scoped task per slot, each taking the next index the moment it frees up. That rolling
+/// window is the point: batching the indices instead would make every window wait on its slowest
+/// member, and these jobs are RAW decodes and warps whose costs differ by a lot.
+///
+/// The first failure stops workers from *taking* further indices. Ones already running still
+/// finish, and a worker that read the index counter just before the failure landed may run one
+/// more — so the bound on wasted work is a slot's worth, not zero.
+pub(crate) fn try_par_map_bounded<S, R, E>(
     len: usize,
-    max_concurrent: usize,
-    mut batch: impl FnMut(Range<usize>) -> Result<Vec<R>, E>,
-) -> Result<Vec<R>, E> {
-    assert!(max_concurrent > 0, "max_concurrent must be positive");
+    slots: &mut [S],
+    job: impl Fn(&mut S, usize) -> Result<R, E> + Sync,
+) -> Result<Vec<R>, E>
+where
+    S: Send,
+    R: Send,
+    E: Send,
+{
+    assert!(!slots.is_empty(), "max_concurrent must be positive");
 
-    let mut results = Vec::with_capacity(len);
-    let mut start = 0;
-    while start < len {
-        let end = (start + max_concurrent).min(len);
-        results.extend(batch(start..end)?);
-        start = end;
+    let next = AtomicUsize::new(0);
+    let failed = AtomicBool::new(false);
+    let mut outcomes: Vec<Result<Vec<(usize, R)>, E>> =
+        slots.iter().map(|_| Ok(Vec::new())).collect();
+
+    // `scope` + one `spawn` per slot rather than `slots.par_iter_mut()`: rayon splits a parallel
+    // iterator only while threads are idle, so on a busy pool it could hand every slot to a
+    // single task, whose worker loop would then drain the whole index range by itself.
+    rayon::scope(|scope| {
+        for (slot, outcome) in slots.iter_mut().zip(outcomes.iter_mut()) {
+            let (next, failed, job) = (&next, &failed, &job);
+            scope.spawn(move |_| {
+                let mut mine = Vec::new();
+                loop {
+                    let index = next.fetch_add(1, Ordering::Relaxed);
+                    if index >= len || failed.load(Ordering::Relaxed) {
+                        break;
+                    }
+                    match job(slot, index) {
+                        Ok(value) => mine.push((index, value)),
+                        Err(error) => {
+                            failed.store(true, Ordering::Relaxed);
+                            *outcome = Err(error);
+                            return;
+                        }
+                    }
+                }
+                *outcome = Ok(mine);
+            });
+        }
+    });
+
+    let mut ordered: Vec<Option<R>> = (0..len).map(|_| None).collect();
+    for outcome in outcomes {
+        for (index, value) in outcome? {
+            ordered[index] = Some(value);
+        }
     }
-    Ok(results)
+    Ok(ordered
+        .into_iter()
+        .map(|value| value.expect("each index below len is claimed by exactly one worker"))
+        .collect())
 }
 
-/// Maps a fallible operation over `items` in [`try_collect_batches`] windows, passing each item's
-/// index alongside it.
+/// Maps a fallible operation over `items`, at most `max_concurrent` at a time, passing each
+/// item's index alongside it.
 ///
 /// The index is supplied because callers almost always need it — to name a spill file, to report
 /// which frame failed — and would otherwise each build a `Vec<(usize, &T)>` to carry it in.
+/// See [`try_par_map_bounded`] for the scheduling and the early-exit bound.
 pub(crate) fn try_par_map_limited<T, R, E, F>(
     items: &[T],
     max_concurrent: usize,
@@ -132,12 +174,9 @@ where
     E: Send,
     F: Fn(usize, &T) -> Result<R, E> + Sync,
 {
-    try_collect_batches(items.len(), max_concurrent, |batch| {
-        items[batch.start..batch.end]
-            .par_iter()
-            .enumerate()
-            .map(|(offset, item)| operation(batch.start + offset, item))
-            .collect()
+    let mut slots = vec![(); max_concurrent];
+    try_par_map_bounded(items.len(), &mut slots, |(), index| {
+        operation(index, &items[index])
     })
 }
 
@@ -145,8 +184,8 @@ where
 ///
 /// Taking items by value is what lets a caller drop each input as soon as its output exists —
 /// the property that keeps the register/warp stage from holding the whole input and output sets
-/// simultaneously. Each window is drained off the input iterator just before it runs, so items
-/// beyond the current window stay untouched until their turn.
+/// simultaneously. The cells outlive the run but each holds `None` once claimed, so what stays
+/// resident is one lock and one `Option` discriminant per item, not the payload.
 pub(crate) fn try_par_map_limited_owned<T, R, E, F>(
     items: Vec<T>,
     max_concurrent: usize,
@@ -158,17 +197,16 @@ where
     E: Send,
     F: Fn(usize, T) -> Result<R, E> + Sync,
 {
-    let len = items.len();
-    let mut pending = items.into_iter();
-    try_collect_batches(len, max_concurrent, |batch| {
-        pending
-            .by_ref()
-            .take(batch.len())
-            .collect::<Vec<T>>()
-            .into_par_iter()
-            .enumerate()
-            .map(|(offset, item)| operation(batch.start + offset, item))
-            .collect()
+    let cells: Vec<Mutex<Option<T>>> = items
+        .into_iter()
+        .map(|item| Mutex::new(Some(item)))
+        .collect();
+    try_par_map_limited(&cells, max_concurrent, |index, cell| {
+        let item = cell
+            .lock()
+            .take()
+            .expect("each index is claimed by exactly one worker");
+        operation(index, item)
     })
 }
 

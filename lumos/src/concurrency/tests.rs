@@ -47,21 +47,25 @@ fn limited_map_preserves_order_and_reaches_the_exact_cap() {
 }
 
 #[test]
-fn limited_map_propagates_error_without_starting_later_batches() {
+fn limited_map_propagates_error_and_stops_taking_work() {
     let started = AtomicUsize::new(0);
-    let items: Vec<usize> = (0..9).collect();
+    let items: Vec<usize> = (0..1000).collect();
 
     let result = try_par_map_limited(&items, 3, |_index, value| {
-        started.fetch_or(1 << value, Ordering::SeqCst);
-        if *value == 4 {
-            Err("four")
+        started.fetch_add(1, Ordering::SeqCst);
+        if *value == 0 {
+            Err("zero")
         } else {
             Ok(value * 2)
         }
     });
 
-    assert_eq!(result, Err("four"));
-    assert_eq!(started.load(Ordering::SeqCst) & 0b111_000_000, 0);
+    assert_eq!(result, Err("zero"));
+    // Item 0 fails immediately. The other two slots finish whatever they took, and a worker that
+    // read the counter just before the failure landed may run one more — a slot's worth of waste,
+    // nowhere near the 1000 a run-to-completion would do.
+    let ran = started.load(Ordering::SeqCst);
+    assert!(ran <= 16, "ran {ran} of 1000 after an immediate failure");
 }
 
 #[test]
@@ -77,9 +81,9 @@ fn limited_map_rejects_zero_concurrency() {
 }
 
 #[test]
-fn owned_map_indexes_by_input_position_across_batches() {
-    // The index is derived per batch, so a window-relative offset would restart at 0 on the
-    // second batch and pass every order-only assertion.
+fn owned_map_indexes_by_input_position() {
+    // A cell's index is what identifies it once the payload has been taken out, so a slot- or
+    // window-relative number here would still pass every order-only assertion.
     let items: Vec<String> = (0..6).map(|i| format!("f{i}")).collect();
     let result = try_par_map_limited_owned(items, 2, |index, value| {
         Ok::<_, ()>(format!("{index}:{value}"))
@@ -92,19 +96,20 @@ fn owned_map_indexes_by_input_position_across_batches() {
 }
 
 #[test]
-fn owned_map_propagates_error_without_starting_later_batches() {
+fn owned_map_propagates_error_and_stops_taking_work() {
     let started = AtomicUsize::new(0);
-    let items: Vec<usize> = (0..9).collect();
+    let items: Vec<usize> = (0..1000).collect();
 
     let result = try_par_map_limited_owned(items, 3, |_index, value| {
-        started.fetch_or(1 << value, Ordering::SeqCst);
-        if value == 4 {
-            Err("four")
+        started.fetch_add(1, Ordering::SeqCst);
+        if value == 0 {
+            Err("zero")
         } else {
             Ok(value * 2)
         }
     });
 
-    assert_eq!(result, Err("four"));
-    assert_eq!(started.load(Ordering::SeqCst) & 0b111_000_000, 0);
+    assert_eq!(result, Err("zero"));
+    let ran = started.load(Ordering::SeqCst);
+    assert!(ran <= 16, "ran {ran} of 1000 after an immediate failure");
 }
