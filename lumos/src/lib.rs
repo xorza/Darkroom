@@ -91,7 +91,7 @@ pub use stacking::registration::triangle::TriangleConfig;
 
 pub use stacking::combine::cache_config::CacheConfig;
 pub use stacking::combine::config::{CombineMethod, Normalization, SmallN, StackConfig, Weighting};
-pub use stacking::combine::error::{Error as StackError, StackConfigError};
+pub use stacking::combine::error::{Error as StackError, FramePlane, StackConfigError};
 pub use stacking::combine::rejection::{
     GesdConfig, LinearFitClipConfig, PercentileClipConfig, Rejection, SigmaClipConfig,
     WinsorizedClipConfig,

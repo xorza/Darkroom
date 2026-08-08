@@ -9,6 +9,45 @@ use crate::error::InvalidConfigField;
 use crate::io::image::ImageDimensions;
 use crate::stacking::frame_store::FrameStoreError;
 
+/// Which of a frame's planes a validation failure is about.
+///
+/// Names the plane in the errors below, and picks the range each one must satisfy: coverage is a
+/// fraction of a pixel that had support, confidence an interpolation weight with no upper bound.
+/// Carrying the kind rather than its label is what keeps that rule out of a string comparison.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FramePlane {
+    /// One of the image's colour planes.
+    Channel,
+    /// Per-pixel warp support, in `[0, 1]`.
+    Coverage,
+    /// Per-pixel interpolation confidence, non-negative.
+    Confidence,
+}
+
+impl FramePlane {
+    /// Whether `value` is in range for this plane. Non-finite is out of range for all of them.
+    pub(crate) fn accepts(self, value: f32) -> bool {
+        value.is_finite()
+            && match self {
+                // Finiteness is the whole rule for image data, as in `validate_sample_channels`:
+                // dark subtraction takes a calibrated channel below zero legitimately.
+                Self::Channel => true,
+                Self::Coverage => (0.0..=1.0).contains(&value),
+                Self::Confidence => value >= 0.0,
+            }
+    }
+}
+
+impl std::fmt::Display for FramePlane {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::Channel => "a channel",
+            Self::Coverage => "coverage",
+            Self::Confidence => "confidence",
+        })
+    }
+}
+
 /// Invalid [`crate::StackConfig`] parameters.
 ///
 /// Plain range checks report through [`InvalidConfigField`]; the variants below are the
@@ -76,7 +115,7 @@ pub enum Error {
     #[error("stored frame {index} {plane} holds {actual} samples, expected {expected}")]
     StoredFramePlaneSamples {
         index: usize,
-        plane: &'static str,
+        plane: FramePlane,
         expected: usize,
         actual: usize,
     },
@@ -94,7 +133,7 @@ pub enum Error {
     )]
     WarpPlaneDimensionMismatch {
         index: usize,
-        plane: &'static str,
+        plane: FramePlane,
         expected_width: usize,
         expected_height: usize,
         actual_width: usize,
@@ -104,7 +143,7 @@ pub enum Error {
     #[error("{plane} for frame {index} has invalid value {value} at pixel {pixel}")]
     InvalidWarpPlaneValue {
         index: usize,
-        plane: &'static str,
+        plane: FramePlane,
         pixel: usize,
         value: f32,
     },
@@ -113,6 +152,40 @@ pub enum Error {
 #[cfg(test)]
 mod tests {
     use crate::stacking::combine::error::*;
+
+    #[test]
+    fn each_plane_carries_its_own_range_and_label() {
+        for (plane, value, accepted) in [
+            // Coverage is the fraction of the pixel that had support.
+            (FramePlane::Coverage, 0.0, true),
+            (FramePlane::Coverage, 1.0, true),
+            (FramePlane::Coverage, -0.001, false),
+            (FramePlane::Coverage, 1.001, false),
+            // Confidence is an interpolation weight — non-negative, no upper bound.
+            (FramePlane::Confidence, 0.0, true),
+            (FramePlane::Confidence, 5.0, true),
+            (FramePlane::Confidence, -0.001, false),
+            // A calibrated channel may sit below zero once the dark is subtracted.
+            (FramePlane::Channel, -1000.0, true),
+            (FramePlane::Channel, 1000.0, true),
+        ] {
+            assert_eq!(plane.accepts(value), accepted, "{plane} accepting {value}");
+        }
+
+        for plane in [
+            FramePlane::Channel,
+            FramePlane::Coverage,
+            FramePlane::Confidence,
+        ] {
+            assert!(!plane.accepts(f32::NAN), "{plane} accepted NaN");
+            assert!(!plane.accepts(f32::INFINITY), "{plane} accepted infinity");
+        }
+
+        // The labels reach users through the error messages below.
+        assert_eq!(FramePlane::Channel.to_string(), "a channel");
+        assert_eq!(FramePlane::Coverage.to_string(), "coverage");
+        assert_eq!(FramePlane::Confidence.to_string(), "confidence");
+    }
 
     #[test]
     fn test_no_frames_error_message() {

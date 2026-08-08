@@ -514,6 +514,8 @@ fn finish_unless_cancelled(
 mod tests {
     use arrayvec::ArrayVec;
 
+    use crate::stacking::combine::error::FramePlane;
+
     use crate::io::image::ImageDimensions;
     use crate::io::image::cfa::{CfaImage, CfaType};
     use crate::io::image::linear::LinearImage;
@@ -1035,7 +1037,7 @@ mod tests {
             error,
             Error::WarpPlaneDimensionMismatch {
                 index: 0,
-                plane: "coverage",
+                plane: FramePlane::Coverage,
                 expected_width: 4,
                 expected_height: 4,
                 actual_width: 2,
@@ -1059,7 +1061,7 @@ mod tests {
             error,
             Error::WarpPlaneDimensionMismatch {
                 index: 0,
-                plane: "confidence",
+                plane: FramePlane::Confidence,
                 expected_width: 4,
                 expected_height: 4,
                 actual_width: 2,
@@ -1075,13 +1077,13 @@ mod tests {
             (
                 Some(Buffer2::new(2, 1, vec![1.0, 1.1])),
                 None,
-                "coverage",
+                FramePlane::Coverage,
                 1.1,
             ),
             (
                 None,
                 Some(Buffer2::new(2, 1, vec![1.0, -0.1])),
-                "confidence",
+                FramePlane::Confidence,
                 -0.1,
             ),
         ] {
