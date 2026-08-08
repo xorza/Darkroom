@@ -6,12 +6,23 @@ use crate::error::InvalidConfigField;
 use crate::stacking::star_detection::config::Config;
 use crate::stacking::star_detection::detector::StarDetector;
 
+/// One [`StarDetector`] per concurrency slot, reused across batches so each batch inherits the
+/// previous one's warmed buffer pools.
+///
+/// Deliberately not a [`JobScratchPool`](crate::concurrency::JobScratchPool), and the type system
+/// will not stop you: `StarDetector` implements `Default`, so `JobScratchPool<StarDetector>`
+/// compiles — and then quietly hands out detectors built from `Config::default()` instead of the
+/// caller's detection config, because the pool fills gaps with `T::default()`. Building every
+/// slot from `config` up front is also what makes an invalid configuration fail here rather than
+/// from inside the parallel closure.
 #[derive(Debug)]
 pub(crate) struct DetectorPool {
     detectors: Vec<StarDetector>,
 }
 
 impl DetectorPool {
+    /// Build `max_concurrent` detectors from one configuration, rejecting an invalid one before
+    /// any frame is touched.
     pub(crate) fn from_config(
         config: &Config,
         max_concurrent: usize,
