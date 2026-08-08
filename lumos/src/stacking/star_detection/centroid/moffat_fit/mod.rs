@@ -60,16 +60,17 @@ pub(super) struct MoffatFitResult {
     pub(super) fwhm: f32,
     /// Whether the fit converged.
     pub(super) converged: bool,
-    /// Fit diagnostics (amplitude/alpha/background/iteration count) that no
-    /// production caller reads — `measure_star` only uses `pos`/`fwhm`/`converged` —
-    /// but that tests need to verify LM convergence against synthetic ground truth.
-    #[allow(dead_code)] // read only by tests
+    /// Fit diagnostics that no production caller reads — `measure_star` only uses
+    /// `pos`/`fwhm`/`converged` — but that tests need to verify LM convergence against
+    /// synthetic ground truth. Gated rather than carried and ignored, so a release build
+    /// neither stores them nor runs the arithmetic that fills them.
+    #[cfg(test)]
     debug: MoffatFitDebug,
 }
 
 /// Fit diagnostics kept for tests; see [`MoffatFitResult::debug`].
+#[cfg(test)]
 #[derive(Debug, Clone, Copy)]
-#[allow(dead_code)] // read only by tests
 struct MoffatFitDebug {
     /// Amplitude of profile.
     amplitude: f32,
@@ -304,7 +305,7 @@ pub(super) fn fit_moffat_2d(
     let data = FitData::new(&data_x, &data_y, &data_z, weights.as_deref());
     let result = optimize(&model, data, initial_params, &config.lm);
 
-    let [x0, y0, amplitude, alpha, bg] = result.params;
+    let [x0, y0, _, alpha, _] = result.params;
     let result_pos = Vec2::new(x0 as f32, y0 as f32);
 
     if !validate_position(result_pos, pos, alpha as f32, stamp_radius) {
@@ -317,12 +318,8 @@ pub(super) fn fit_moffat_2d(
         pos: result_pos,
         fwhm,
         converged: result.converged,
-        debug: MoffatFitDebug {
-            amplitude: amplitude as f32,
-            alpha: alpha as f32,
-            background: bg as f32,
-            iterations: result.iterations,
-        },
+        #[cfg(test)]
+        debug: MoffatFitDebug::of(&result),
     })
 }
 
@@ -352,13 +349,28 @@ pub(super) fn fwhm_beta_to_alpha(fwhm: f32, beta: f32) -> f32 {
 
 #[cfg(test)]
 mod internals {
+    use crate::stacking::star_detection::centroid::lm_optimizer::LMResult;
     use crate::stacking::star_detection::centroid::moffat_fit::{
-        MoffatFitResult, MoffatFixedBeta, fast_pow_neg,
+        MoffatFitDebug, MoffatFitResult, MoffatFixedBeta, fast_pow_neg,
     };
+
+    impl MoffatFitDebug {
+        /// Derive the diagnostics from the optimizer's report. Gated with the struct, so a
+        /// release build runs none of this.
+        pub(super) fn of(result: &LMResult<5>) -> Self {
+            let [_, _, amplitude, alpha, background] = result.params;
+            Self {
+                amplitude: amplitude as f32,
+                alpha: alpha as f32,
+                background: background as f32,
+                iterations: result.iterations,
+            }
+        }
+    }
 
     impl MoffatFitResult {
         /// Exposes `MoffatFitDebug::alpha` to `centroid::tests`, which sits outside
-        /// `moffat_fit` and so can't reach the private `debug` field directly.
+        /// `moffat_fit` and so can name neither the private `debug` field nor its type.
         pub(crate) fn debug_alpha(&self) -> f32 {
             self.debug.alpha
         }

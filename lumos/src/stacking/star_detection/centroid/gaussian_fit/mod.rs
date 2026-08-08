@@ -22,8 +22,8 @@ mod simd_avx2;
 mod simd_neon;
 
 use crate::stacking::star_detection::centroid::lm_optimizer::{
-    FitData, LMConfig, LMModel, LMResult, NormalEquations, accumulate_chi2,
-    build_normal_equations_scalar, optimize,
+    FitData, LMConfig, LMModel, NormalEquations, accumulate_chi2, build_normal_equations_scalar,
+    optimize,
 };
 use crate::stacking::star_detection::centroid::{
     FitNoise, MAX_STAMP_PIXELS, estimate_sigma_from_moments, extract_stamp, fit_weights,
@@ -44,16 +44,17 @@ pub(super) struct GaussianFitResult {
     pub(super) sigma: Vec2,
     /// Whether the fit converged.
     pub(super) converged: bool,
-    /// Fit diagnostics (amplitude/background/RMS residual/iteration count) that no
-    /// production caller reads — `measure_star` only uses `pos`/`sigma`/`converged` —
-    /// but that tests need to verify LM convergence against synthetic ground truth.
-    #[allow(dead_code)] // read only by tests
+    /// Fit diagnostics that no production caller reads — `measure_star` only uses
+    /// `pos`/`sigma`/`converged` — but that tests need to verify LM convergence against
+    /// synthetic ground truth. Gated rather than carried and ignored, so a release build
+    /// neither stores them nor runs the arithmetic that fills them.
+    #[cfg(test)]
     debug: GaussianFitDebug,
 }
 
 /// Fit diagnostics kept for tests; see [`GaussianFitResult::debug`].
+#[cfg(test)]
 #[derive(Debug, Clone, Copy)]
-#[allow(dead_code)] // read only by tests
 struct GaussianFitDebug {
     /// Amplitude of Gaussian.
     amplitude: f32,
@@ -207,48 +208,55 @@ pub(super) fn fit_gaussian_2d(
     let data = FitData::new(&data_x, &data_y, &data_z, weights.as_deref());
     let result = optimize(&model, data, initial_params, config);
 
-    validate_result(&result, pos, stamp_radius, n)
-}
-
-fn validate_result(
-    result: &LMResult<6>,
-    pos: Vec2,
-    stamp_radius: usize,
-    n: usize,
-) -> Option<GaussianFitResult> {
-    let [x0, y0, amplitude, sigma_x, sigma_y, bg] = result.params;
-
-    // Check if center is within stamp
+    let [x0, y0, _, sigma_x, sigma_y, _] = result.params;
     let result_pos = Vec2::new(x0 as f32, y0 as f32);
-    if (result_pos - pos).abs().max_element() > stamp_radius as f32 {
-        return None;
-    }
 
-    // Check for reasonable sigma values
-    if sigma_x < 0.5
-        || sigma_y < 0.5
-        || sigma_x > stamp_radius as f64 * 2.0
-        || sigma_y > stamp_radius as f64 * 2.0
-    {
+    if !validate_fit(result_pos, pos, sigma_x, sigma_y, stamp_radius) {
         return None;
     }
 
     Some(GaussianFitResult {
-        pos: Vec2::new(x0 as f32, y0 as f32),
+        pos: result_pos,
         sigma: Vec2::new(sigma_x as f32, sigma_y as f32),
         converged: result.converged,
-        debug: GaussianFitDebug {
-            amplitude: amplitude as f32,
-            background: bg as f32,
-            rms_residual: (result.chi2 / n as f64).sqrt() as f32,
-            iterations: result.iterations,
-        },
+        #[cfg(test)]
+        debug: GaussianFitDebug::of(&result, n),
     })
+}
+
+/// Centre inside the stamp, and both sigmas within a plausible range.
+fn validate_fit(
+    result_pos: Vec2,
+    input_pos: Vec2,
+    sigma_x: f64,
+    sigma_y: f64,
+    stamp_radius: usize,
+) -> bool {
+    if (result_pos - input_pos).abs().max_element() > stamp_radius as f32 {
+        return false;
+    }
+    let max_sigma = stamp_radius as f64 * 2.0;
+    !(sigma_x < 0.5 || sigma_y < 0.5 || sigma_x > max_sigma || sigma_y > max_sigma)
 }
 
 #[cfg(test)]
 mod internals {
-    use crate::stacking::star_detection::centroid::gaussian_fit::Gaussian2D;
+    use crate::stacking::star_detection::centroid::gaussian_fit::{Gaussian2D, GaussianFitDebug};
+    use crate::stacking::star_detection::centroid::lm_optimizer::LMResult;
+
+    impl GaussianFitDebug {
+        /// Derive the diagnostics from the optimizer's report, where `n` is the sample count the
+        /// χ² was summed over. Gated with the struct, so a release build runs none of this.
+        pub(super) fn of(result: &LMResult<6>, n: usize) -> Self {
+            let [_, _, amplitude, _, _, background] = result.params;
+            Self {
+                amplitude: amplitude as f32,
+                background: background as f32,
+                rms_residual: (result.chi2 / n as f64).sqrt() as f32,
+                iterations: result.iterations,
+            }
+        }
+    }
 
     impl Gaussian2D {
         /// The Jacobian row alone, derived independently of

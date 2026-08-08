@@ -40,7 +40,14 @@ impl Default for LMConfig {
 }
 
 /// Result of L-M optimization.
+///
+/// `chi2` and `iterations` are the run's report: the fit models read them only into their
+/// `cfg(test)` diagnostics, so a release build never looks at either. They are kept ungated
+/// anyway — the loop computes both regardless (χ² drives the accept test, the count is the loop
+/// variable), so carrying them costs two moves, while gating them would push `#[cfg]` into the
+/// optimizer's inner loop and save nothing.
 #[derive(Debug, Clone, Copy)]
+#[cfg_attr(not(test), allow(dead_code))]
 pub(super) struct LMResult<const N: usize> {
     pub(super) params: [f64; N],
     pub(super) chi2: f64,
