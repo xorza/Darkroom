@@ -37,7 +37,7 @@ impl GesdConfig {
     }
 
     /// Validate the significance level.
-    pub fn validate(&self) -> Result<(), InvalidConfigField> {
+    pub(super) fn validate(&self) -> Result<(), InvalidConfigField> {
         InvalidConfigField::finite("GESD alpha", "finite and in [0, 1)", self.alpha, |value| {
             (0.0..1.0).contains(&value)
         })

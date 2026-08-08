@@ -34,7 +34,7 @@ impl PercentileClipConfig {
     }
 
     /// Validate that each end clips a sane share and that together they leave survivors.
-    pub fn validate(&self) -> Result<(), InvalidConfigField> {
+    pub(super) fn validate(&self) -> Result<(), InvalidConfigField> {
         InvalidConfigField::finite(
             "low_percentile",
             "finite and between 0 and 50",

@@ -31,7 +31,7 @@ pub struct TriangleConfig {
 
 impl TriangleConfig {
     /// Validate the matching invariants this config owns.
-    pub fn validate(&self) -> Result<(), InvalidConfigField> {
+    pub(super) fn validate(&self) -> Result<(), InvalidConfigField> {
         InvalidConfigField::finite(
             "ratio_tolerance",
             "finite and in (0, 1)",
