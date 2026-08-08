@@ -21,7 +21,7 @@ use crate::error::InvalidConfigField;
 use crate::image_ops::op::OpError;
 use crate::io::image::linear::LinearImage;
 use crate::math::size2us::Size2us;
-use crate::math::statistics::MAD_TO_SIGMA;
+use crate::math::statistics::robust_sigma_f64;
 
 /// Sigma-clip passes for the per-tile sky estimate (matches the detector's tiled-background default).
 const SKY_CLIP_ITERATIONS: usize = 3;
@@ -285,12 +285,14 @@ fn fit_surface(
 ) -> Result<DVector<f64>, OpError> {
     let mut active: Vec<Sample> = samples.to_vec();
     let mut coeffs = solve_ls(&active, terms)?;
+    // Reused by every refit rather than reallocated per iteration.
+    let mut deviations: Vec<f64> = Vec::new();
     for _ in 0..iterations {
         let residuals: Vec<f64> = active
             .iter()
             .map(|s| s.z - eval(&coeffs, terms, s.x, s.y))
             .collect();
-        let sigma = robust_sigma(&residuals);
+        let sigma = robust_sigma_f64(&residuals, &mut deviations);
         if sigma <= 0.0 {
             break;
         }
@@ -308,28 +310,6 @@ fn fit_surface(
         coeffs = solve_ls(&active, terms)?;
     }
     Ok(coeffs)
-}
-
-/// MAD-scaled robust sigma of residuals (`1.4826 · median|r − median(r)|`).
-fn robust_sigma(residuals: &[f64]) -> f64 {
-    if residuals.is_empty() {
-        return 0.0;
-    }
-    let median = median_f64(&mut residuals.to_vec());
-    let mut dev: Vec<f64> = residuals.iter().map(|&r| (r - median).abs()).collect();
-    f64::from(MAD_TO_SIGMA) * median_f64(&mut dev)
-}
-
-fn median_f64(v: &mut [f64]) -> f64 {
-    v.sort_by(|a, b| a.total_cmp(b));
-    let n = v.len();
-    if n == 0 {
-        0.0
-    } else if n % 2 == 1 {
-        v[n / 2]
-    } else {
-        0.5 * (v[n / 2 - 1] + v[n / 2])
-    }
 }
 
 /// The fitted polynomial surface, packed for fast on-the-fly evaluation.

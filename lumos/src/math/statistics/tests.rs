@@ -965,3 +965,66 @@ fn test_mad_floored() {
     // Exactly at the floor.
     assert_eq!(mad_floored(5.0, 10.0, 0.5), 5.0);
 }
+
+#[derive(Debug)]
+struct MedianF64Case {
+    values: &'static [f64],
+    expected: f64,
+}
+
+/// Same truth table as [`median_f32_truth_table`]: the `f64` median must average the two middles
+/// on even length rather than pick a side, which is what the quickselect form has to reproduce
+/// now that it replaced a full sort.
+#[test]
+fn median_f64_truth_table() {
+    let cases = [
+        MedianF64Case {
+            values: &[1.0, 3.0, 2.0, 5.0, 4.0],
+            expected: 3.0,
+        },
+        MedianF64Case {
+            values: &[1.0, 2.0, 3.0, 4.0],
+            expected: 2.5,
+        },
+        MedianF64Case {
+            values: &[1.0, 5.0],
+            expected: 3.0,
+        },
+        MedianF64Case {
+            values: &[42.0],
+            expected: 42.0,
+        },
+        MedianF64Case {
+            values: &[-5.0, -3.0, -1.0, 2.0, 4.0],
+            expected: -1.0,
+        },
+    ];
+
+    for case in cases {
+        let mut values = case.values.to_vec();
+        assert_eq!(median_f64_mut(&mut values), case.expected, "{case:?}");
+    }
+}
+
+#[test]
+fn robust_sigma_f64_scales_the_mad_and_leaves_its_input_alone() {
+    // median([1, 2, 3, 4, 100]) = 3; |r − 3| = [2, 1, 0, 1, 97]; median of those = 1.
+    // So sigma = 1.4826022 × 1.
+    let data = [1.0f64, 2.0, 3.0, 4.0, 100.0];
+    let mut scratch = Vec::new();
+    let sigma = robust_sigma_f64(&data, &mut scratch);
+    assert!(
+        (sigma - f64::from(MAD_TO_SIGMA)).abs() < 1e-12,
+        "sigma = {sigma}"
+    );
+    assert_eq!(data, [1.0, 2.0, 3.0, 4.0, 100.0], "input must be intact");
+
+    // Doubling every deviation doubles sigma — proves the MAD is measured, not a constant.
+    let spread = [1.0f64, 3.0, 5.0, 7.0, 199.0];
+    let wide = robust_sigma_f64(&spread, &mut scratch);
+    assert!((wide - 2.0 * sigma).abs() < 1e-12, "wide = {wide}");
+
+    // A constant sample has zero spread, and an empty one has nothing to measure.
+    assert_eq!(robust_sigma_f64(&[7.0; 9], &mut scratch), 0.0);
+    assert_eq!(robust_sigma_f64(&[], &mut scratch), 0.0);
+}
