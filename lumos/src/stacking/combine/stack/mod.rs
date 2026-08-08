@@ -357,6 +357,14 @@ fn combined_median_quantization_sigma(
     Some(source_sigma * factor)
 }
 
+/// Raise the running maximum, comparing on the bit pattern — for non-negative floats that orders
+/// identically to the value, and it keeps the whole thing in one `AtomicU32`.
+///
+/// The `load` is not redundant with the `fetch_max` that follows it. This runs per *pixel*, from
+/// every worker at once, and only pixels that actually lost frames reach it; the load is a shared
+/// read of the cache line, while `fetch_max` is a read-modify-write that has to take it exclusive.
+/// Guarding means the common case — a pixel whose sigma does not beat the running maximum — costs
+/// a shared read instead of a contended RMW across all cores.
 fn record_max_sigma(max_sigma_bits: &AtomicU32, sigma: Option<f32>) {
     if let Some(sigma) = sigma {
         let bits = sigma.to_bits();
