@@ -4,39 +4,10 @@ use crate::math::size2us::Size2us;
 use crate::math::{fwhm_to_sigma, sigma_to_fwhm};
 use crate::stacking::star_detection::centroid::gaussian_fit::*;
 use crate::stacking::star_detection::centroid::internals::{
-    add_noise, approx_eq, reference_normal_equations,
+    Perturbation, add_noise, approx_eq, reference_normal_equations,
 };
 use crate::testing::synthetic::star_profiles::{StarProfile, SyntheticStar};
 use glam::Vec2;
-
-/// What gets added to the rendered stamp before fitting.
-#[derive(Debug)]
-enum Perturbation {
-    None,
-    /// Index-based sawtooth — deterministic without an RNG, and correlated with pixel order
-    /// rather than random, which is a different stress than [`Perturbation::Gaussian`].
-    Sawtooth {
-        amplitude: f32,
-    },
-    Gaussian {
-        sigma: f32,
-        seed: u64,
-    },
-}
-
-impl Perturbation {
-    fn apply(&self, pixels: &mut Buffer2<f32>) {
-        match *self {
-            Perturbation::None => {}
-            Perturbation::Sawtooth { amplitude } => {
-                for (i, p) in pixels.iter_mut().enumerate() {
-                    *p += amplitude * ((i % 7) as f32 - 3.0) / 3.0;
-                }
-            }
-            Perturbation::Gaussian { sigma, seed } => add_noise(pixels, sigma, seed),
-        }
-    }
-}
 
 /// One recovery case: render a star of known parameters, optionally spoil the stamp or lie to
 /// the fitter about something, then check what it got back.
