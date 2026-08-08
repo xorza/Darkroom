@@ -646,8 +646,8 @@ fn ram_and_streaming_tiers_produce_identical_stacks() {
         );
     }
     assert_eq!(
-        bits(ram.product.coverage.as_ref().unwrap()),
-        bits(streaming.product.coverage.as_ref().unwrap()),
+        bits(&ram.product.coverage.as_ref().unwrap().to_plane()),
+        bits(&streaming.product.coverage.as_ref().unwrap().to_plane()),
         "coverage differs between the RAM and streaming tiers"
     );
 

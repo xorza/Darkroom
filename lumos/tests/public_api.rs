@@ -4,7 +4,7 @@ use common::CancelToken;
 use imaginarium::Buffer2;
 use lumos::{
     AlignStackError, AlignStackResult, AlignmentSummary, CacheConfig, CalibrationComponent,
-    CalibrationError, CalibrationMasters, CalibrationSet, CombineMethod, DefectSummary,
+    CalibrationError, CalibrationMasters, CalibrationSet, CombineMethod, Coverage, DefectSummary,
     DrizzleConfig, DrizzleConfigError, DrizzleError, DrizzleFrame, FitsChecksumPolicy,
     FitsChecksumProvenance, FitsChecksumState, FitsCubeInterpretation, FitsHduProvenance,
     FitsHduSelector, FitsLoadOptions, FitsTransferProvenance, FrameStoreError, GesdConfig,
@@ -340,7 +340,7 @@ fn calibration_master_views_are_available_from_the_crate_root() {
 fn stacking_outputs_and_relationships_use_named_public_types() {
     let product = StackProduct {
         image: LinearImage::from_pixels(ImageDimensions::new((2, 1), 1), vec![0.25, 0.75]),
-        coverage: Some(Buffer2::new(2, 1, vec![1.0, 0.5])),
+        coverage: Some(Coverage::PerPixel(Buffer2::new(2, 1, vec![1.0, 0.5]))),
         weight: Some(QualityMap::Shared(Buffer2::new(2, 1, vec![2.0, 1.0]))),
         linear_variance: Some(QualityMap::Shared(Buffer2::new(2, 1, vec![0.5, 1.0]))),
         quantization_sigma: Some(0.001),
@@ -357,7 +357,13 @@ fn stacking_outputs_and_relationships_use_named_public_types() {
 
     assert_eq!(result.product.image.channel(0).pixels(), &[0.25, 0.75]);
     assert_eq!(
-        result.product.coverage.as_ref().unwrap().pixels(),
+        result
+            .product
+            .coverage
+            .as_ref()
+            .unwrap()
+            .to_plane()
+            .pixels(),
         &[1.0, 0.5]
     );
     assert_eq!(

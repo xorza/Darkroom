@@ -21,6 +21,7 @@ use crate::stacking::combine::stack::StackFrame;
 use crate::stacking::frame_store::{
     SpillDirectory, StackableImage, StoredFrame, StoredPlane, WarpQuality,
 };
+use crate::stacking::product::Coverage;
 use crate::stacking::product::{QualityMap, QualityPlanes, StackProduct};
 use crate::stacking::progress::{ProgressCallback, StackingStage};
 
@@ -673,14 +674,15 @@ impl FrameCache {
         let width = dimensions.width();
         let height = dimensions.height();
 
-        // No frame carries support, so every pixel is fully covered. The plane is still
-        // materialized when asked for, since `coverage` has no uniform representation.
+        // No frame carries support, so every pixel is fully covered — and saying so costs one
+        // number rather than an image-sized plane of `1.0`.
         if !planes.coverage || self.frames.iter().all(|frame| frame.coverage.is_none()) {
             return StackProduct {
                 image,
-                coverage: planes
-                    .coverage
-                    .then(|| Buffer2::new_filled(width, height, 1.0)),
+                coverage: planes.coverage.then(|| Coverage::Uniform {
+                    value: 1.0,
+                    size: dimensions.size(),
+                }),
                 weight,
                 linear_variance,
                 quantization_sigma,
@@ -736,7 +738,7 @@ impl FrameCache {
 
         StackProduct {
             image,
-            coverage: Some(coverage),
+            coverage: Some(Coverage::PerPixel(coverage)),
             weight,
             linear_variance,
             quantization_sigma,

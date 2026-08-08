@@ -259,8 +259,8 @@ fn disk_tier_output_is_bit_identical_to_memory_tier() {
         "stacked image differs between RAM and disk tiers"
     );
     assert_eq!(
-        bits(ram.coverage.as_ref().unwrap()),
-        bits(disk.coverage.as_ref().unwrap()),
+        bits(&ram.coverage.as_ref().unwrap().to_plane()),
+        bits(&disk.coverage.as_ref().unwrap().to_plane()),
         "coverage differs"
     );
     let ram_linear_variance = ram.linear_variance.as_ref().unwrap();
@@ -880,7 +880,10 @@ fn confidence_weights_contributions_independently_of_coverage() {
         product.image.channel(0)[0]
     );
     assert_eq!(product.image.channel(0)[1], 10.0);
-    assert_eq!(product.coverage.as_ref().unwrap().pixels(), &[1.0, 1.0]);
+    assert_eq!(
+        product.coverage.as_ref().unwrap().to_plane().pixels(),
+        &[1.0, 1.0]
+    );
     assert_eq!(
         product.weight.as_ref().unwrap().channel(0).pixels(),
         &[1.5, 1.0]
