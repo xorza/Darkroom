@@ -9,7 +9,6 @@
 use crate::image_ops::rgb::Rgb;
 
 use crate::error::InvalidConfigField;
-use crate::image_ops::map_rgb;
 use crate::image_ops::op::OpError;
 use crate::io::image::linear::LinearImage;
 use crate::math::statistics::sigma_clipped_median_mad;
@@ -48,7 +47,7 @@ impl NeutralizeBackground {
         let bg = channel_backgrounds(image);
         let target = bg.r.min(bg.g).min(bg.b);
         let (dr, dg, db) = (target - bg.r, target - bg.g, target - bg.b);
-        map_rgb(image, move |px| Rgb {
+        image.map_rgb(move |px| Rgb {
             r: px.r + dr,
             g: px.g + dg,
             b: px.b + db,
@@ -123,9 +122,9 @@ impl Scnr {
     pub fn apply(&self, image: &mut LinearImage) -> Result<(), OpError> {
         self.validate()?;
         match self.method {
-            ScnrMethod::AverageNeutral => map_rgb(image, scnr_average_neutral),
+            ScnrMethod::AverageNeutral => image.map_rgb(scnr_average_neutral),
             ScnrMethod::AdditiveMask { amount } => {
-                map_rgb(image, move |px| scnr_additive_mask(px, amount));
+                image.map_rgb(move |px| scnr_additive_mask(px, amount));
             }
         }
         Ok(())

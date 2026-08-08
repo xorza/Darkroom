@@ -29,7 +29,6 @@ use rayon::prelude::*;
 
 use crate::error::InvalidConfigField;
 use crate::image_ops::op::OpError;
-use crate::image_ops::{map_rgb, map_samples};
 use crate::io::image::linear::LinearImage;
 use crate::math::statistics::{median_and_mad_f32_mut, median_f32_mut};
 
@@ -612,20 +611,20 @@ fn color_preserve_pixel<C: ToneCurve>(px: Rgb, curve: &C) -> Rgb {
 /// Color-preserving stretch. Resolves the curve type once.
 ///
 /// On a grayscale image the combined intensity *is* the single channel, so "scale each channel by
-/// `f(I)/I`" reduces to evaluating the curve on that channel — [`map_samples`], not [`map_rgb`].
+/// `f(I)/I`" reduces to evaluating the curve on that channel — `map_samples`, not `map_rgb`.
 fn apply_color_preserving_image(image: &mut LinearImage, curve: Curve) {
     if !image.is_rgb() {
         match curve {
-            Curve::Stf(c) => map_samples(image, |l| c.eval(l)),
-            Curve::Asinh(c) => map_samples(image, |l| c.eval(l)),
-            Curve::Ghs(c) => map_samples(image, |l| c.eval(l)),
+            Curve::Stf(c) => image.map_samples(|l| c.eval(l)),
+            Curve::Asinh(c) => image.map_samples(|l| c.eval(l)),
+            Curve::Ghs(c) => image.map_samples(|l| c.eval(l)),
         }
         return;
     }
     match curve {
-        Curve::Stf(c) => map_rgb(image, |px| color_preserve_pixel(px, &c)),
+        Curve::Stf(c) => image.map_rgb(|px| color_preserve_pixel(px, &c)),
         Curve::Asinh(c) => apply_color_preserving_asinh(image, c),
-        Curve::Ghs(c) => map_rgb(image, |px| color_preserve_pixel(px, &c)),
+        Curve::Ghs(c) => image.map_rgb(|px| color_preserve_pixel(px, &c)),
     }
 }
 
@@ -665,5 +664,5 @@ fn apply_color_preserving_asinh(image: &mut LinearImage, c: AsinhCurve) {
             });
     }
     #[cfg(not(target_arch = "aarch64"))]
-    map_rgb(image, |px| color_preserve_pixel(px, &c));
+    image.map_rgb(|px| color_preserve_pixel(px, &c));
 }

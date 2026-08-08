@@ -2,7 +2,6 @@
 //! write viewable JPEGs for visual inspection. Gated behind the `real-data` feature (the dataset
 //! lives in `test_data/lumos_data/`).
 
-use crate::image_ops::intensity_plane;
 use crate::io::image::linear::LinearImage;
 use crate::io::image::load_context::LoadContext;
 use crate::math::statistics::median_f32_mut;
@@ -43,7 +42,7 @@ fn stretch_stacked_light() {
     // zero (a near-zero median — symmetric read noise dips some background pixels slightly negative,
     // which is correct calibration, not a defect) with a bright stellar tail whose peaks exceed 1.
     // The stretch caps the display output back into [0,1].
-    let input = stats(intensity_plane(&image).pixels());
+    let input = stats(image.intensity_plane().pixels());
     eprintln!("input {}x{}: {input:?}", image.width(), image.height());
     assert!(
         input.median.abs() < 0.05,
@@ -64,7 +63,7 @@ fn stretch_stacked_light() {
         let mut stretched = image.clone();
         config.apply(&mut stretched).unwrap();
 
-        let out = stats(intensity_plane(&stretched).pixels());
+        let out = stats(stretched.intensity_plane().pixels());
         eprintln!("{name}: {out:?}");
 
         assert!(
@@ -105,7 +104,7 @@ fn stretch_stacked_light() {
     }
     .apply(&mut staged)
     .unwrap();
-    let out = stats(intensity_plane(&staged).pixels());
+    let out = stats(staged.intensity_plane().pixels());
     eprintln!("asinh+ghs: {out:?}");
     assert!(
         out.min >= 0.0 && out.max <= 1.0 + 1e-3,

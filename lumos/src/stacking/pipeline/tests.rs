@@ -539,7 +539,7 @@ fn write_mono_cfa_light(directory: &Path, index: usize, image: &LinearImage) -> 
 /// verification chain.
 ///
 /// Both runs read the same mono-CFA FITS lights and differ only in `available_memory`, the input
-/// `plan_memory` keys its tier decision on. RANSAC is seeded, removing the pipeline's only other
+/// `MemoryPlan::plan` keys its tier decision on. RANSAC is seeded, removing the pipeline's only other
 /// source of nondeterminism, so any difference the assertions find is a real divergence.
 #[test]
 fn ram_and_streaming_tiers_produce_identical_stacks() {

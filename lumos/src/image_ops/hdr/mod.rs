@@ -11,7 +11,6 @@ use rayon::prelude::*;
 
 use crate::error::InvalidConfigField;
 use crate::image_ops::op::OpError;
-use crate::image_ops::remap_intensity;
 use crate::image_ops::wavelet::{atrous_smooth, max_scales};
 use crate::io::image::linear::LinearImage;
 use crate::math::size2us::Size2us;
@@ -66,7 +65,7 @@ impl Hdr {
         if self.amount == 0.0 {
             return Ok(());
         }
-        remap_intensity(image, |intensity| hdr_map(intensity, self));
+        image.remap_intensity(|intensity| hdr_map(intensity, self));
         Ok(())
     }
 

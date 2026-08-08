@@ -1,6 +1,4 @@
-use crate::image_ops::intensity_plane;
-use crate::image_ops::ml::backend::TiledOnnxConfig;
-use crate::image_ops::ml::denoise::ml_denoise;
+use crate::image_ops::ml::denoise::MlDenoise;
 use crate::io::image::linear::LinearImage;
 use crate::testing::real_data::ml_support::{onnx_weights, stretched_master};
 use crate::testing::{init_tracing, save_png};
@@ -8,7 +6,7 @@ use crate::testing::{init_tracing, save_png};
 /// Mean |adjacent-pixel difference| of the intensity — a high-frequency noise proxy (slow gradients
 /// cancel; pixel-scale grain is what a denoiser removes).
 fn mean_adjacent_diff(image: &LinearImage) -> f32 {
-    let plane = intensity_plane(image);
+    let plane = image.intensity_plane();
     let w = plane.width();
     let px = plane.pixels();
     let (mut sum, mut n) = (0.0f32, 0u64);
@@ -37,7 +35,11 @@ fn deepsnr_denoises() {
     let img = stretched_master();
     save_png(&img, "ml_denoise/input.png");
 
-    let denoised = ml_denoise(&img, &TiledOnnxConfig::new(weights)).expect("denoise succeeds");
+    // `apply` denoises in place; the comparison below still needs the noisy original.
+    let mut denoised = img.clone();
+    MlDenoise::new(weights)
+        .apply(&mut denoised)
+        .expect("denoise succeeds");
     save_png(&denoised, "ml_denoise/denoised.png");
 
     let in_hf = mean_adjacent_diff(&img);

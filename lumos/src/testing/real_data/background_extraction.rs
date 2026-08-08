@@ -3,7 +3,6 @@
 //! on the **stretched** master to flatten the display-domain background, saving a viewable
 //! before/after. Gated behind the `real-data` feature.
 
-use crate::image_ops::intensity_plane;
 use crate::io::image::linear::LinearImage;
 use crate::io::image::load_context::LoadContext;
 use crate::math::size2us::Size2us;
@@ -15,7 +14,7 @@ use crate::{ExtractBackground, NeutralizeBackground, Scnr, Stretch};
 /// for the corner-to-corner gradient. A light-pollution gradient makes opposite corners differ;
 /// flattening the background drives them together.
 fn corner_background_spread(image: &LinearImage) -> f32 {
-    let plane = intensity_plane(image);
+    let plane = image.intensity_plane();
     let size = Size2us::new(plane.width(), plane.height());
     let px = plane.pixels();
     let patch = 256.min(size.width / 4).min(size.height / 4);

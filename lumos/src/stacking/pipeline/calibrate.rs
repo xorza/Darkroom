@@ -11,7 +11,7 @@ use crate::io::image::linear::LinearImage;
 use crate::io::image::load_context::LoadContext;
 use crate::io::raw;
 use crate::io::raw::demosaic::DemosaicError;
-use crate::memory::plan_memory;
+use crate::memory::MemoryPlan;
 use crate::stacking::calibration_masters::CalibrationMasters;
 use crate::stacking::calibration_masters::cosmic_ray::reject_cosmic_rays;
 use crate::stacking::combine::error::Error as StackError;
@@ -64,7 +64,7 @@ pub fn calibrate_align_stack<P: AsRef<Path> + Sync>(
                 source,
             }
         })?;
-    let plan = plan_memory(
+    let plan = MemoryPlan::plan(
         frame_info.dimensions.pixel_count() * size_of::<f32>(),
         frame_info.demosaic.memory(frame_info.dimensions),
         total,
