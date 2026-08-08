@@ -662,41 +662,63 @@ fn stratified_center(part: usize, part_count: usize, length: usize) -> usize {
     ((2 * part as u128 + 1) * length as u128 / (2 * part_count as u128)) as usize
 }
 
-/// Calculate median of 8-connected neighbors from raw channel data, skipping any flagged in
-/// `defect_mask` so a defect is never repaired from another defect.
-fn median_of_neighbors_raw(
+/// Mono: 8-connected neighbours, every one of which is the same "colour".
+const MONO_OFFSETS: [(i32, i32); 8] = [
+    (-1, -1),
+    (0, -1),
+    (1, -1),
+    (-1, 0),
+    (1, 0),
+    (-1, 1),
+    (0, 1),
+    (1, 1),
+];
+
+/// Bayer: same-colour neighbours sit at stride 2 in each axis, true for every 2×2 phase.
+const BAYER_OFFSETS: [(i32, i32); 8] = [
+    (-2, 0),
+    (2, 0),
+    (0, -2),
+    (0, 2),
+    (-2, -2),
+    (-2, 2),
+    (2, -2),
+    (2, 2),
+];
+
+/// Median of the neighbours at `offsets` from `pos`, skipping those outside the frame and those
+/// flagged in `defect_mask` so a defect is never repaired from another defect. Falls back to the
+/// centre pixel when every candidate is rejected.
+///
+/// Gathers at most `N`. Mono and Bayer pass exactly `N` offsets so the cap never binds; X-Trans
+/// passes more, ordered nearest-first, which turns the cap into "the closest `N` valid
+/// neighbours". One walk for all three because they differ only in where the offsets come from.
+fn median_of_neighbors<const N: usize>(
     pixels: &Buffer2<f32>,
     pos: Vec2us,
+    offsets: impl IntoIterator<Item = (i32, i32)>,
     defect_mask: Option<&BitBuffer2>,
 ) -> f32 {
-    let width = pixels.width();
-    let height = pixels.height();
-    let mut neighbors: [f32; 8] = [0.0; 8];
+    let width = pixels.width() as i32;
+    let height = pixels.height() as i32;
+    let mut neighbors = [0.0f32; N];
     let mut count = 0;
 
-    let offsets: [(i32, i32); 8] = [
-        (-1, -1),
-        (0, -1),
-        (1, -1),
-        (-1, 0),
-        (1, 0),
-        (-1, 1),
-        (0, 1),
-        (1, 1),
-    ];
-
     for (dx, dy) in offsets {
+        if count == N {
+            break;
+        }
         let nx = pos.x as i32 + dx;
         let ny = pos.y as i32 + dy;
-
-        if nx >= 0 && nx < width as i32 && ny >= 0 && ny < height as i32 {
-            let (nx, ny) = (nx as usize, ny as usize);
-            if defect_mask.is_some_and(|m| m.get_at(Vec2us::new(nx, ny))) {
-                continue;
-            }
-            neighbors[count] = *pixels.get(nx, ny);
-            count += 1;
+        if nx < 0 || ny < 0 || nx >= width || ny >= height {
+            continue;
         }
+        let (nx, ny) = (nx as usize, ny as usize);
+        if defect_mask.is_some_and(|m| m.get_at(Vec2us::new(nx, ny))) {
+            continue;
+        }
+        neighbors[count] = *pixels.get(nx, ny);
+        count += 1;
     }
 
     if count == 0 {
@@ -734,50 +756,11 @@ impl SameColorMedian {
     /// is never repaired from another defect.
     fn at(&self, pixels: &Buffer2<f32>, pos: Vec2us, defect_mask: Option<&BitBuffer2>) -> f32 {
         match self {
-            Self::Mono => median_of_neighbors_raw(pixels, pos, defect_mask),
-            Self::Bayer => bayer_same_color_median(pixels, pos, defect_mask),
+            Self::Mono => median_of_neighbors::<8>(pixels, pos, MONO_OFFSETS, defect_mask),
+            Self::Bayer => median_of_neighbors::<8>(pixels, pos, BAYER_OFFSETS, defect_mask),
             Self::XTrans(offsets) => offsets.median(pixels, pos, defect_mask),
         }
     }
-}
-
-/// Optimized Bayer same-color neighbor median, skipping neighbors flagged in `defect_mask`.
-/// Same-color neighbors are at stride 2 in all directions.
-fn bayer_same_color_median(
-    pixels: &Buffer2<f32>,
-    pos: Vec2us,
-    defect_mask: Option<&BitBuffer2>,
-) -> f32 {
-    let width = pixels.width();
-    let height = pixels.height();
-    let offsets: [(i32, i32); 8] = [
-        (-2, 0),
-        (2, 0),
-        (0, -2),
-        (0, 2),
-        (-2, -2),
-        (-2, 2),
-        (2, -2),
-        (2, 2),
-    ];
-    let mut buf = [0.0f32; 8];
-    let mut count = 0;
-    for (dx, dy) in offsets {
-        let nx = pos.x as i32 + dx;
-        let ny = pos.y as i32 + dy;
-        if nx >= 0 && ny >= 0 && nx < width as i32 && ny < height as i32 {
-            let (nx, ny) = (nx as usize, ny as usize);
-            if defect_mask.is_some_and(|m| m.get_at(Vec2us::new(nx, ny))) {
-                continue;
-            }
-            buf[count] = *pixels.get(nx, ny);
-            count += 1;
-        }
-    }
-    if count == 0 {
-        return *pixels.get(pos.x, pos.y);
-    }
-    median_f32_mut(&mut buf[..count])
 }
 
 /// Search radius (in pixels) for X-Trans same-color neighbours — one full pattern period.
@@ -834,30 +817,8 @@ impl XTransOffsets {
     /// nearest-first offsets, skipping out-of-bounds and `defect_mask`ed positions, and stops once
     /// [`XTRANS_NEIGHBORS`] valid samples are gathered — equivalent to "closest-N valid neighbours".
     fn median(&self, pixels: &Buffer2<f32>, pos: Vec2us, defect_mask: Option<&BitBuffer2>) -> f32 {
-        let width = pixels.width() as i32;
-        let height = pixels.height() as i32;
-        let mut buf = [0.0f32; XTRANS_NEIGHBORS];
-        let mut count = 0;
-        for &(dx, dy) in &self.per_phase[(pos.y % 6) * 6 + (pos.x % 6)] {
-            if count == XTRANS_NEIGHBORS {
-                break;
-            }
-            let nx = pos.x as i32 + dx;
-            let ny = pos.y as i32 + dy;
-            if nx < 0 || ny < 0 || nx >= width || ny >= height {
-                continue;
-            }
-            let (nx, ny) = (nx as usize, ny as usize);
-            if defect_mask.is_some_and(|m| m.get_at(Vec2us::new(nx, ny))) {
-                continue;
-            }
-            buf[count] = *pixels.get(nx, ny);
-            count += 1;
-        }
-        if count == 0 {
-            return *pixels.get(pos.x, pos.y);
-        }
-        median_f32_mut(&mut buf[..count])
+        let phase = &self.per_phase[(pos.y % 6) * 6 + (pos.x % 6)];
+        median_of_neighbors::<XTRANS_NEIGHBORS>(pixels, pos, phase.iter().copied(), defect_mask)
     }
 }
 

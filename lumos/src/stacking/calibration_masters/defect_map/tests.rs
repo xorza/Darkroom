@@ -419,7 +419,7 @@ fn test_bayer_same_color_neighbors() {
     pixels[4 * 6 + 2] = 80.0; // (2,4)
 
     let pixels = imaginarium::Buffer2::new(6, 6, pixels);
-    let result = bayer_same_color_median(&pixels, Vec2us::new(2, 2), None);
+    let result = SameColorMedian::Bayer.at(&pixels, Vec2us::new(2, 2), None);
 
     // Neighbors: 50, 60, 70, 80, 100 (0,2=100), 100 (4,2=100), 100 (0,4=100), 100 (4,4=100)
     // Sorted: 50, 60, 70, 80, 100, 100, 100, 100 → median of 8 = (80+100)/2 = 90
@@ -439,7 +439,7 @@ fn test_bayer_same_color_neighbors_corner() {
         10.0,
     ];
     let pixels = imaginarium::Buffer2::new(4, 4, pixels);
-    let result = bayer_same_color_median(&pixels, Vec2us::ZERO, None);
+    let result = SameColorMedian::Bayer.at(&pixels, Vec2us::ZERO, None);
 
     // Same-color neighbors: (2,0)=50, (0,2)=60, (2,2)=70
     // Median of [50, 60, 70] = 60
@@ -875,4 +875,42 @@ fn test_correct_cfa_dimension_mismatch() {
     };
 
     defect_map.correct(&mut image);
+}
+
+/// A defect is never repaired from another defect: neighbours flagged in the mask are skipped.
+///
+/// Exercised through the Mono arm for its simple 8-connected geometry, but the walk is shared, so
+/// this pins the rule for the Bayer and X-Trans strategies too.
+#[test]
+fn same_color_median_skips_masked_neighbours() {
+    // 3x3 with the centre defective. Four neighbours read 10 and four read 1000, so including
+    // the high four moves the median from 10 to 505 — a gap no rounding could blur.
+    let size = Size2us::new(3, 3);
+    let pixels = imaginarium::Buffer2::new(
+        3,
+        3,
+        vec![
+            10.0, 10.0, 10.0, 10.0, 999.0, 1000.0, 1000.0, 1000.0, 1000.0,
+        ],
+    );
+    let centre = Vec2us::new(1, 1);
+
+    // Unmasked: median of [10, 10, 10, 10, 1000, 1000, 1000, 1000] = (10 + 1000) / 2.
+    let unmasked = SameColorMedian::Mono.at(&pixels, centre, None);
+    assert_eq!(unmasked, 505.0);
+
+    // Flag the four high neighbours; only the four 10s survive.
+    let mut mask = BitBuffer2::new_default(size);
+    for idx in [5, 6, 7, 8] {
+        mask.set(idx, true);
+    }
+    let masked = SameColorMedian::Mono.at(&pixels, centre, Some(&mask));
+    assert_eq!(masked, 10.0);
+
+    // Every neighbour flagged leaves nothing to repair from, so the centre pixel stands.
+    let mut all = BitBuffer2::new_default(size);
+    for idx in [0, 1, 2, 3, 5, 6, 7, 8] {
+        all.set(idx, true);
+    }
+    assert_eq!(SameColorMedian::Mono.at(&pixels, centre, Some(&all)), 999.0);
 }
