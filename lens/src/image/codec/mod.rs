@@ -38,8 +38,8 @@ impl CustomValueCodec for ImageCodec {
             .downcast_ref::<Image>()
             .expect("ImageCodec is only registered for the Image type");
         let vision = ctx.get(VISION_CTX_TYPE);
-        let cpu = image
-            .buffer()
+        let buffer = image.make_interleaved();
+        let cpu = buffer
             .make_cpu(&vision.processing_ctx)
             .map_err(|error| format!("image GPU readback failed: {error:?}"))?;
         let desc = cpu.desc();

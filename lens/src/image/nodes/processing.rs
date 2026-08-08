@@ -113,8 +113,8 @@ fn register_convert(library: &mut Library) {
                             match conversion_target(format, image.desc().color_format) {
                                 Some(target) => {
                                     let vision = contexts.get(VISION_CTX_TYPE);
-                                    let cpu_image = image
-                                        .buffer()
+                                    let buffer = image.make_interleaved();
+                                    let cpu_image = buffer
                                         .make_cpu(&vision.processing_ctx)
                                         .map_err(InvokeError::external)?;
                                     Some(
@@ -188,8 +188,8 @@ fn register_blend(library: &mut Library) {
                         Blend::new(mode, alpha)
                             .execute(
                                 &mut vision.processing_ctx,
-                                source.buffer(),
-                                destination.buffer(),
+                                &source.make_interleaved(),
+                                &destination.make_interleaved(),
                                 &mut output,
                             )
                             .map_err(InvokeError::external)?;
@@ -268,7 +268,11 @@ fn register_transform(library: &mut Library) {
                             .scale(Vec2::new(scalar(1), scalar(2)))
                             .rotate_around(scalar(3), center)
                             .translate(Vec2::new(scalar(4), scalar(5)))
-                            .execute(&mut vision.processing_ctx, image.buffer(), &mut output)
+                            .execute(
+                                &mut vision.processing_ctx,
+                                &image.make_interleaved(),
+                                &mut output,
+                            )
                             .map_err(InvokeError::external)?;
                         outputs[0] = DynamicValue::from_custom(Image::from(output));
                         Ok(())
@@ -295,14 +299,14 @@ fn adjust_image(
                 .expect("image input type is validated at the compile boundary");
             Image::from(
                 input
-                    .buffer()
+                    .make_interleaved()
                     .duplicate(context)
                     .map_err(InvokeError::external)?,
             )
         }
     };
 
-    op.execute(context, image.buffer_mut())
+    op.execute(context, image.make_interleaved_mut())
         .map_err(InvokeError::external)?;
     Ok(image)
 }

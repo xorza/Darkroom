@@ -41,11 +41,12 @@ where
 fn image_to_planar(value: DynamicValue) -> imaginarium::Result<LinearImage> {
     let cpu = ProcessingContext::cpu_only();
     match value.into_custom::<Image>() {
-        Ok(image) => image.into_planar(&cpu),
+        Ok(image) => image.to_planar(&cpu),
         Err(value) => value
             .as_custom::<Image>()
             .expect("image input type is validated at the compile boundary")
-            .to_planar(&cpu),
+            .make_planar(&cpu)
+            .map(|planar| planar.clone()),
     }
 }
 
