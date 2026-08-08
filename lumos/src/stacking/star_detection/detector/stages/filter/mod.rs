@@ -26,45 +26,48 @@ pub(crate) struct FilterOutcome {
     pub(crate) diagnostics: QualityFilterDiagnostics,
 }
 
-/// Filter stars by quality metrics, remove duplicates, and sort by flux.
-///
-/// Returns the filtered stars and rejection statistics. Stars are returned
-/// sorted by flux (brightest first).
-pub(crate) fn filter(mut stars: Vec<Star>, config: &FilterConfig) -> FilterOutcome {
-    let mut diagnostics = QualityFilterDiagnostics::default();
+impl FilterOutcome {
+    /// Filter stars by quality metrics, remove duplicates, and sort by flux.
+    ///
+    /// Returns the filtered stars and rejection statistics. Stars are returned
+    /// sorted by flux (brightest first).
+    pub(crate) fn from_stars(mut stars: Vec<Star>, config: &FilterConfig) -> Self {
+        let mut diagnostics = QualityFilterDiagnostics::default();
 
-    // Apply quality filters
-    stars.retain(|star| {
-        if star.is_saturated(SATURATION_PEAK) {
-            diagnostics.saturated += 1;
-            false
-        } else if star.snr < config.min_snr {
-            diagnostics.low_snr += 1;
-            false
-        } else if star.eccentricity > config.max_eccentricity {
-            diagnostics.high_eccentricity += 1;
-            false
-        } else if star.is_cosmic_ray(config.max_sharpness) {
-            diagnostics.cosmic_rays += 1;
-            false
-        } else if !star.is_round(config.max_roundness) {
-            diagnostics.roundness += 1;
-            false
-        } else {
-            true
-        }
-    });
+        // Apply quality filters
+        stars.retain(|star| {
+            if star.is_saturated(SATURATION_PEAK) {
+                diagnostics.saturated += 1;
+                false
+            } else if star.snr < config.min_snr {
+                diagnostics.low_snr += 1;
+                false
+            } else if star.eccentricity > config.max_eccentricity {
+                diagnostics.high_eccentricity += 1;
+                false
+            } else if star.is_cosmic_ray(config.max_sharpness) {
+                diagnostics.cosmic_rays += 1;
+                false
+            } else if !star.is_round(config.max_roundness) {
+                diagnostics.roundness += 1;
+                false
+            } else {
+                true
+            }
+        });
 
-    // Sort by flux (brightest first)
-    sort_by_flux(&mut stars);
+        // Sort by flux (brightest first)
+        sort_by_flux(&mut stars);
 
-    // Filter FWHM outliers
-    diagnostics.fwhm_outliers = filter_fwhm_outliers(&mut stars, config.max_fwhm_deviation);
+        // Filter FWHM outliers
+        diagnostics.fwhm_outliers = filter_fwhm_outliers(&mut stars, config.max_fwhm_deviation);
 
-    // Remove duplicates
-    diagnostics.duplicates = remove_duplicate_stars(&mut stars, config.duplicate_min_separation);
+        // Remove duplicates
+        diagnostics.duplicates =
+            remove_duplicate_stars(&mut stars, config.duplicate_min_separation);
 
-    FilterOutcome { stars, diagnostics }
+        Self { stars, diagnostics }
+    }
 }
 
 /// Sort stars by flux (brightest first).
@@ -96,7 +99,7 @@ fn filter_fwhm_outliers(stars: &mut Vec<Star>, max_deviation: f32) -> usize {
 /// For each cluster of stars within `min_separation`, keeps the *first* star
 /// encountered in `stars` and drops the rest — neither this function nor its
 /// `_simple`/spatial-hash helpers ever compare `.flux`. Callers therefore MUST
-/// pass `stars` already sorted by flux descending (as `filter()` does via
+/// pass `stars` already sorted by flux descending (as `FilterOutcome::from_stars` does via
 /// `sort_by_flux` before calling this) for "first kept" to mean "brightest
 /// kept"; otherwise an arbitrary, non-brightest star in each cluster survives.
 ///
@@ -205,7 +208,7 @@ pub(crate) mod internals {
     use crate::stacking::star_detection::star::Star;
 
     /// Exposes `remove_duplicate_stars` to the detector's benchmarks; production
-    /// code only ever reaches it through `filter()`.
+    /// code only ever reaches it through `FilterOutcome::from_stars`.
     pub(crate) fn remove_duplicate_stars(stars: &mut Vec<Star>, min_separation: f32) -> usize {
         super::remove_duplicate_stars(stars, min_separation)
     }

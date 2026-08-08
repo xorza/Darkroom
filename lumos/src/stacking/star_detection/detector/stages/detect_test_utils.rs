@@ -7,7 +7,7 @@ use crate::stacking::star_detection::deblend::region::Region;
 use crate::stacking::star_detection::resources::DetectionResources;
 use imaginarium::Buffer2;
 
-use crate::stacking::star_detection::detector::stages::detect::detect;
+use crate::stacking::star_detection::detector::stages::detect::DetectResult;
 
 /// Test utility: detect stars with automatic buffer pool management.
 ///
@@ -19,5 +19,5 @@ pub(crate) fn detect_stars_test(
     config: &DetectionConfig,
 ) -> Vec<Region> {
     let mut pool = DetectionResources::new(Size2us::new(pixels.width(), pixels.height()));
-    detect(pixels, background, None, config, &mut pool).regions
+    DetectResult::from_image(pixels, background, None, config, &mut pool).regions
 }

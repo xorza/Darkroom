@@ -35,7 +35,7 @@ fn filter_returns_the_diagnostics_stored_by_the_detector() {
             }),
     ];
 
-    let outcome = filter(stars, &FilterConfig::default());
+    let outcome = FilterOutcome::from_stars(stars, &FilterConfig::default());
 
     assert_eq!(
         outcome

@@ -31,7 +31,7 @@ use crate::io::image::image_provenance::{
     TransferProvenance,
 };
 use crate::io::image::linear::LinearImage;
-use crate::io::image::sensor::{SensorType, detect_sensor_type};
+use crate::io::image::sensor::SensorType;
 use common::CancelToken;
 use demosaic::bayer::{BayerImage, CfaPattern, rcd};
 use demosaic::xtrans;
@@ -828,7 +828,7 @@ fn open_raw(path: &Path) -> Result<UnpackedRaw, ImageError> {
     // SAFETY: inner is valid, idata struct is initialized after unpack.
     let visible_filters = unsafe { (*inner).idata.filters };
     let colors = unsafe { (*inner).idata.colors };
-    let sensor_type = detect_sensor_type(visible_filters, colors);
+    let sensor_type = SensorType::from_libraw(visible_filters, colors);
     if matches!(sensor_type, SensorType::XTrans) {
         // SAFETY: inner is valid and LibRaw populates both patterns for X-Trans sensors.
         let visible_pattern = unsafe { (*inner).idata.xtrans };
@@ -1087,7 +1087,7 @@ pub(crate) fn raw_cfa_frame_info(
     // SAFETY: opening succeeded, so the image metadata is initialized.
     let filters = unsafe { (*inner).idata.filters };
     let colors = unsafe { (*inner).idata.colors };
-    let demosaic = match detect_sensor_type(filters, colors) {
+    let demosaic = match SensorType::from_libraw(filters, colors) {
         SensorType::Monochrome => DemosaicKind::Mono,
         SensorType::Bayer(_) => DemosaicKind::BayerRcd,
         SensorType::XTrans => DemosaicKind::XTransMarkesteijn,

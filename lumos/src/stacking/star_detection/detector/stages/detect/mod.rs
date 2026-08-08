@@ -45,92 +45,99 @@ struct ExtractionResult {
     deblended_components: usize,
 }
 
-/// Detect star candidate regions in the image.
-///
-/// Applies matched filtering if FWHM is provided, then performs thresholding,
-/// connected component labeling, and deblending to extract candidate regions.
-///
-/// All buffer management is contained within this function.
-pub(crate) fn detect(
-    pixels: &Buffer2<f32>,
-    stats: &BackgroundEstimate,
-    fwhm: Option<f32>,
-    config: &DetectionConfig,
-    pool: &mut DetectionResources,
-) -> DetectResult {
-    let width = pixels.width();
-    let height = pixels.height();
+impl DetectResult {
+    /// Detect star candidate regions in the image.
+    ///
+    /// Applies matched filtering if FWHM is provided, then performs thresholding,
+    /// connected component labeling, and deblending to extract candidate regions.
+    ///
+    /// All buffer management is contained within this function.
+    pub(crate) fn from_image(
+        pixels: &Buffer2<f32>,
+        stats: &BackgroundEstimate,
+        fwhm: Option<f32>,
+        config: &DetectionConfig,
+        pool: &mut DetectionResources,
+    ) -> Self {
+        let width = pixels.width();
+        let height = pixels.height();
 
-    // Apply matched filter if FWHM is provided; its output buffer is acquired only then.
-    let filtered: Option<Buffer2<f32>> = if let Some(fwhm) = fwhm {
-        tracing::debug!(
-            "Applying matched filter with FWHM={:.1}, axis_ratio={:.2}, angle={:.1}°",
-            fwhm,
-            config.psf_axis_ratio,
-            config.psf_angle.to_degrees()
-        );
+        // Apply matched filter if FWHM is provided; its output buffer is acquired only then.
+        let filtered: Option<Buffer2<f32>> = if let Some(fwhm) = fwhm {
+            tracing::debug!(
+                "Applying matched filter with FWHM={:.1}, axis_ratio={:.2}, angle={:.1}°",
+                fwhm,
+                config.psf_axis_ratio,
+                config.psf_angle.to_degrees()
+            );
 
-        let mut output = pool.acquire_f32();
-        let mut convolution_scratch = pool.acquire_f32();
-        let mut convolution_temp = pool.acquire_f32();
-        matched_filter(
-            pixels,
-            &stats.background,
-            fwhm,
-            config.psf_axis_ratio,
-            config.psf_angle,
-            &mut MatchedFilterBuffers {
-                output: &mut output,
-                subtraction_scratch: &mut convolution_scratch,
-                temp: &mut convolution_temp,
-            },
-        );
-        pool.release_f32(convolution_temp);
-        pool.release_f32(convolution_scratch);
+            let mut output = pool.acquire_f32();
+            let mut convolution_scratch = pool.acquire_f32();
+            let mut convolution_temp = pool.acquire_f32();
+            matched_filter(
+                pixels,
+                &stats.background,
+                fwhm,
+                config.psf_axis_ratio,
+                config.psf_angle,
+                &mut MatchedFilterBuffers {
+                    output: &mut output,
+                    subtraction_scratch: &mut convolution_scratch,
+                    temp: &mut convolution_temp,
+                },
+            );
+            pool.release_f32(convolution_temp);
+            pool.release_f32(convolution_scratch);
 
-        Some(output)
-    } else {
-        None
-    };
+            Some(output)
+        } else {
+            None
+        };
 
-    // Acquire mask buffer from pool
-    let mut mask = pool.acquire_bit();
-    mask.fill(false);
+        // Acquire mask buffer from pool
+        let mut mask = pool.acquire_bit();
+        mask.fill(false);
 
-    if let Some(filtered) = &filtered {
-        debug_assert_eq!(width, filtered.width());
-        debug_assert_eq!(height, filtered.height());
-        create_threshold_mask_filtered(filtered, &stats.noise, config.sigma_threshold, &mut mask);
-    } else {
-        create_threshold_mask(
-            pixels,
-            &stats.background,
-            &stats.noise,
-            config.sigma_threshold,
-            &mut mask,
-        );
-    }
+        if let Some(filtered) = &filtered {
+            debug_assert_eq!(width, filtered.width());
+            debug_assert_eq!(height, filtered.height());
+            create_threshold_mask_filtered(
+                filtered,
+                &stats.noise,
+                config.sigma_threshold,
+                &mut mask,
+            );
+        } else {
+            create_threshold_mask(
+                pixels,
+                &stats.background,
+                &stats.noise,
+                config.sigma_threshold,
+                &mut mask,
+            );
+        }
 
-    let pixels_above_threshold = mask.count_ones();
+        let pixels_above_threshold = mask.count_ones();
 
-    let label_map = LabelMap::from_pool(&mask, config.connectivity, pool);
-    let connected_components = label_map.num_labels();
+        let label_map = LabelMap::from_pool(&mask, config.connectivity, pool);
+        let connected_components = label_map.num_labels();
 
-    pool.release_bit(mask);
+        pool.release_bit(mask);
 
-    let extraction =
-        extract_and_filter_candidates(pixels, &label_map, config, Size2us::new(width, height));
+        let extraction =
+            extract_and_filter_candidates(pixels, &label_map, config, Size2us::new(width, height));
 
-    label_map.release_to_pool(pool);
-    if let Some(scratch) = filtered {
-        pool.release_f32(scratch);
-    }
+        label_map.release_to_pool(pool);
+        if let Some(scratch) = filtered {
+            pool.release_f32(scratch);
+        }
 
-    DetectResult {
-        regions: extraction.regions,
-        pixels_above_threshold,
-        connected_components,
-        deblended_components: extraction.deblended_components,
+        Self {
+            regions: extraction.regions,
+            pixels_above_threshold,
+            connected_components,
+            deblended_components: extraction.deblended_components,
+        }
     }
 }
 
@@ -357,7 +364,7 @@ fn merge_component_data(target: &mut ComponentData, source: ComponentData) {
 }
 
 /// Reaches `collect_component_data` from the detector's benchmarks; production code and the
-/// tests both go through `detect()`.
+/// tests both go through `DetectResult::from_image`.
 #[cfg(all(test, feature = "internals"))]
 pub(crate) mod internals {
     use crate::stacking::star_detection::deblend::ComponentData;

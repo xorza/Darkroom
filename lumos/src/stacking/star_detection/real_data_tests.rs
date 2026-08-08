@@ -125,7 +125,7 @@ fn test_detect_rho_opiuchi() {
 fn test_inspect_pipeline_intermediates_rho_opiuchi() {
     use crate::stacking::star_detection::background::background_estimate::BackgroundEstimate;
     use crate::stacking::star_detection::convolution::{MatchedFilterBuffers, matched_filter};
-    use crate::stacking::star_detection::detector::stages::fwhm::estimate_fwhm;
+    use crate::stacking::star_detection::detector::stages::fwhm::FwhmResult;
     use crate::stacking::star_detection::detector::stages::prepare;
     use crate::stacking::star_detection::labeling::LabelMap;
     use crate::stacking::star_detection::mask_dilation::dilate_mask;
@@ -199,7 +199,7 @@ fn test_inspect_pipeline_intermediates_rho_opiuchi() {
     println!("Saved: 04_subtracted");
 
     // 5. FWHM estimation
-    let fwhm_result = estimate_fwhm(&grayscale, &background, &config, &mut pool);
+    let fwhm_result = FwhmResult::estimate(&grayscale, &background, &config, &mut pool);
     let fwhm = fwhm_result.fwhm;
     println!(
         "Estimated FWHM: {:?} (from {} stars)",
