@@ -1078,8 +1078,8 @@ fn test_sort_with_indices_large_n_correctness() {
     let n = 100;
     let mut values: Vec<f32> = (0..n).rev().map(|i| i as f32).collect();
     let mut scratch = scratch();
-    reset_indices(&mut scratch.indices, n);
-    sort_with_indices(&mut values, &mut scratch, n);
+    scratch.reset_indices(n);
+    scratch.sort_with_indices(&mut values, n);
 
     for (i, (&value, &index)) in values.iter().zip(&scratch.indices).enumerate() {
         assert_eq!(value, i as f32, "values[{i}] wrong");
@@ -1100,8 +1100,8 @@ fn test_sort_with_indices_large_n_shuffled() {
     }
     let original_values = values.clone();
     let mut scratch = scratch();
-    reset_indices(&mut scratch.indices, n);
-    sort_with_indices(&mut values, &mut scratch, n);
+    scratch.reset_indices(n);
+    scratch.sort_with_indices(&mut values, n);
 
     // Values must be sorted
     for i in 1..n {
@@ -1180,35 +1180,47 @@ fn test_linear_fit_large_stack() {
 
 #[test]
 fn test_reset_indices_basic() {
-    let mut indices = Vec::new();
-    reset_indices(&mut indices, 5);
-    assert_eq!(indices, vec![0, 1, 2, 3, 4]);
+    let mut scratch = ScratchBuffers::default();
+    scratch.reset_indices(5);
+    let indices = &scratch.indices;
+    assert_eq!(*indices, vec![0, 1, 2, 3, 4]);
 }
 
 #[test]
 fn test_reset_indices_reuses_allocation() {
-    let mut indices = Vec::with_capacity(100);
-    reset_indices(&mut indices, 5);
-    assert_eq!(indices, vec![0, 1, 2, 3, 4]);
+    let mut scratch = ScratchBuffers::default();
+    scratch.indices.reserve(100);
+    scratch.reset_indices(5);
+    let indices = &scratch.indices;
+    assert_eq!(*indices, vec![0, 1, 2, 3, 4]);
     assert!(indices.capacity() >= 100, "should preserve allocation");
 
     // Reset to different size — should reuse existing allocation
-    reset_indices(&mut indices, 3);
-    assert_eq!(indices, vec![0, 1, 2]);
+    scratch.reset_indices(3);
+    let indices = &scratch.indices;
+    assert_eq!(*indices, vec![0, 1, 2]);
     assert!(indices.capacity() >= 100);
 }
 
 #[test]
 fn test_reset_indices_overwrites_stale_data() {
-    let mut indices = vec![99, 88, 77, 66, 55];
-    reset_indices(&mut indices, 5);
-    assert_eq!(indices, vec![0, 1, 2, 3, 4]);
+    let mut scratch = ScratchBuffers {
+        indices: vec![99, 88, 77, 66, 55],
+        ..Default::default()
+    };
+    scratch.reset_indices(5);
+    let indices = &scratch.indices;
+    assert_eq!(*indices, vec![0, 1, 2, 3, 4]);
 }
 
 #[test]
 fn test_reset_indices_empty() {
-    let mut indices = vec![1, 2, 3];
-    reset_indices(&mut indices, 0);
+    let mut scratch = ScratchBuffers {
+        indices: vec![1, 2, 3],
+        ..Default::default()
+    };
+    scratch.reset_indices(0);
+    let indices = &scratch.indices;
     assert!(indices.is_empty());
 }
 

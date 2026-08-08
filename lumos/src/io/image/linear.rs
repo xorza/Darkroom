@@ -82,7 +82,7 @@ impl LinearImage {
             } else {
                 ColorProvenance::Unspecified
             };
-            let mut image = linear_from_image(&decoded);
+            let mut image = LinearImage::from(&decoded);
             image.metadata.provenance = Some(ImageProvenance {
                 container: standard_container(&extension),
                 decoder: DecoderProvenance::Imaginarium,
@@ -381,8 +381,19 @@ impl From<&LinearImage> for Image {
 /// The inbound half of the boundary `impl From<&LinearImage> for Image` forms the outbound half of:
 /// what a caller holding interleaved pixels goes through to reach the ops, which take planes.
 impl From<&Image> for LinearImage {
+    /// Deinterleaves into planes, converting to the matching `f32` channel format first when the
+    /// source is not already in one. The general form of [`LinearImage::from_f32_image`], which
+    /// skips the conversion and panics instead.
     fn from(image: &Image) -> Self {
-        linear_from_image(image)
+        let target = f32_target_format(image);
+        if image.desc().color_format == target {
+            Self::from_f32_image(image)
+        } else {
+            let converted = image
+                .convert_to(target)
+                .expect("image converts to its f32 channel format");
+            Self::from_f32_image(&converted)
+        }
     }
 }
 
@@ -392,30 +403,12 @@ impl From<LinearImage> for Image {
     }
 }
 
-fn linear_from_image(image: &Image) -> LinearImage {
-    let target = f32_target_format(image);
-    if image.desc().color_format == target {
-        LinearImage::from_f32_image(image)
-    } else {
-        let converted = image
-            .convert_to(target)
-            .expect("image converts to its f32 channel format");
-        LinearImage::from_f32_image(&converted)
-    }
-}
-
 #[cfg(test)]
 pub(crate) mod internals {
-    use imaginarium::Image;
-
     use crate::image_ops::rgb::Rgb;
-    use crate::io::image::linear::{self, LinearImage};
+    use crate::io::image::linear::LinearImage;
     use crate::io::image::linear_pixels;
     use crate::math::vec2us::Vec2us;
-
-    pub(crate) fn from_image(image: &Image) -> LinearImage {
-        linear::linear_from_image(image)
-    }
 
     impl LinearImage {
         pub(crate) fn get_pixel_gray(&self, pos: Vec2us) -> f32 {

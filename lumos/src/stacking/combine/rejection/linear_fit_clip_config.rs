@@ -3,10 +3,8 @@
 
 use crate::error::InvalidConfigField;
 use crate::math::statistics::{mad_f32_fast, mad_to_sigma, median_f32_fast};
-use crate::stacking::combine::cache::ScratchBuffers;
-use crate::stacking::combine::rejection::{
-    compact_within, reset_indices, sort_with_indices, validate_sigma_bounds,
-};
+use crate::stacking::combine::rejection::scratch_buffers::ScratchBuffers;
+use crate::stacking::combine::rejection::{compact_within, validate_sigma_bounds};
 
 /// Configuration for linear fit clipping.
 ///
@@ -65,7 +63,7 @@ impl LinearFitClipConfig {
     pub(super) fn reject(&self, values: &mut [f32], scratch: &mut ScratchBuffers) -> usize {
         debug_assert!(!values.is_empty());
 
-        reset_indices(&mut scratch.indices, values.len());
+        scratch.reset_indices(values.len());
 
         if values.len() <= 3 {
             return values.len();
@@ -105,7 +103,7 @@ impl LinearFitClipConfig {
                 // Subsequent passes: linear fit rejection
 
                 // Sort remaining values with index co-array
-                sort_with_indices(values, scratch, len);
+                scratch.sort_with_indices(values, len);
 
                 // Fit line y = a + b*x through sorted values, x = sorted position
                 let n = len as f32;

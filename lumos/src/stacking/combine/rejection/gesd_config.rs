@@ -2,8 +2,7 @@
 //! values, for stacks large enough to make the test's Gaussian assumption reasonable.
 
 use crate::error::InvalidConfigField;
-use crate::stacking::combine::cache::ScratchBuffers;
-use crate::stacking::combine::rejection::reset_indices;
+use crate::stacking::combine::rejection::scratch_buffers::ScratchBuffers;
 use statrs::distribution::{ContinuousCDF, StudentsT};
 
 /// Configuration for Generalized Extreme Studentized Deviate (GESD) test.
@@ -63,7 +62,7 @@ impl GesdConfig {
         debug_assert!(!values.is_empty());
 
         let original_len = values.len();
-        reset_indices(&mut scratch.indices, original_len);
+        scratch.reset_indices(original_len);
 
         if original_len <= 3 {
             return original_len;

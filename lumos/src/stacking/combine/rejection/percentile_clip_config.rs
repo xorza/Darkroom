@@ -2,8 +2,7 @@
 //! stays meaningful on stacks too small to estimate a spread from.
 
 use crate::error::InvalidConfigField;
-use crate::stacking::combine::cache::ScratchBuffers;
-use crate::stacking::combine::rejection::{reset_indices, sort_with_indices};
+use crate::stacking::combine::rejection::scratch_buffers::ScratchBuffers;
 
 /// Configuration for percentile clipping.
 ///
@@ -83,13 +82,13 @@ impl PercentileClipConfig {
         debug_assert!(!values.is_empty());
 
         let n = values.len();
-        reset_indices(&mut scratch.indices, n);
+        scratch.reset_indices(n);
 
         if n <= 2 {
             return n;
         }
 
-        sort_with_indices(values, scratch, n);
+        scratch.sort_with_indices(values, n);
 
         let range = self.surviving_range(n);
         let count = range.len();

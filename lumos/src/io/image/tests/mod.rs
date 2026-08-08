@@ -9,7 +9,7 @@ use crate::io::image::cfa::CfaImage;
 use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::image_metadata::{BitPix, ImageMetadata};
 use crate::io::image::image_provenance::{ColorProvenance, ImageProvenance};
-use crate::io::image::linear::{LinearImage, internals};
+use crate::io::image::linear::LinearImage;
 use crate::io::image::load_context::LoadContext;
 use crate::io::image::preview_image::PreviewImage;
 use crate::io::image::*;
@@ -141,7 +141,7 @@ fn test_from_image_no_stride_padding() {
     let bytes: Vec<u8> = bytemuck::cast_slice(&pixels).to_vec();
     let image = Image::new_with_data(desc, bytes).unwrap();
 
-    let linear = internals::from_image(&image);
+    let linear = LinearImage::from(&image);
 
     assert_eq!(linear.width(), 3);
     assert_eq!(linear.height(), 2);
@@ -277,7 +277,7 @@ fn test_roundtrip_linear_to_image_to_linear() {
     );
 
     let image: Image = gray.clone().into();
-    let restored = internals::from_image(&image);
+    let restored = LinearImage::from(&image);
 
     assert_eq!(restored.dimensions(), gray.dimensions());
     for (a, b) in gray.channel(0).iter().zip(restored.channel(0).iter()) {
@@ -290,7 +290,7 @@ fn test_roundtrip_linear_to_image_to_linear() {
     );
 
     let image: Image = rgb.clone().into();
-    let restored = internals::from_image(&image);
+    let restored = LinearImage::from(&image);
 
     assert_eq!(restored.dimensions(), rgb.dimensions());
     for c in 0..rgb.channels() {
@@ -307,7 +307,7 @@ fn test_image_rgba_to_linear_drops_alpha() {
     let bytes: Vec<u8> = bytemuck::cast_slice(&pixels).to_vec();
     let image = Image::new_with_data(desc, bytes).unwrap();
 
-    let linear = internals::from_image(&image);
+    let linear = LinearImage::from(&image);
 
     assert_eq!(linear.channels(), 3);
     assert!((linear.channel(0)[0] - 1.0).abs() < 1e-6);
