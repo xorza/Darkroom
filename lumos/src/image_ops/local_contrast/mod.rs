@@ -11,9 +11,9 @@ use imaginarium::Buffer2;
 use rayon::prelude::*;
 
 use crate::error::InvalidConfigField;
-use crate::image_ops::op::{OpError, require_f32_master};
+use crate::image_ops::op::OpError;
 use crate::image_ops::remap_intensity;
-use imaginarium::Image;
+use crate::io::image::linear::LinearImage;
 
 #[cfg(test)]
 mod tests;
@@ -69,11 +69,9 @@ impl LocalContrast {
     /// Enhance the local contrast of `image` in place via CLAHE.
     ///
     /// # Errors
-    /// [`OpError::UnsupportedFormat`] unless `image` is `L_F32`/`RGB_F32`; [`OpError::InvalidConfig`]
-    /// on out-of-range parameters.
-    pub fn apply(&self, image: &mut Image) -> Result<(), OpError> {
+    /// [`OpError::InvalidConfig`] on out-of-range parameters.
+    pub fn apply(&self, image: &mut LinearImage) -> Result<(), OpError> {
         self.validate()?;
-        require_f32_master(image)?;
         if self.strength == 0.0 {
             return Ok(());
         }

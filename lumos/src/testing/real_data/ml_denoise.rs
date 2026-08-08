@@ -1,13 +1,13 @@
 use crate::image_ops::intensity_plane;
 use crate::image_ops::ml::backend::TiledOnnxConfig;
 use crate::image_ops::ml::denoise::ml_denoise;
+use crate::io::image::linear::LinearImage;
 use crate::testing::real_data::ml_support::{onnx_weights, stretched_master};
 use crate::testing::{init_tracing, save_png};
-use imaginarium::Image;
 
 /// Mean |adjacent-pixel difference| of the intensity — a high-frequency noise proxy (slow gradients
 /// cancel; pixel-scale grain is what a denoiser removes).
-fn mean_adjacent_diff(image: &Image) -> f32 {
+fn mean_adjacent_diff(image: &LinearImage) -> f32 {
     let plane = intensity_plane(image);
     let w = plane.width();
     let px = plane.pixels();

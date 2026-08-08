@@ -158,6 +158,15 @@ impl LinearImage {
         self.pixels.planes_mut()
     }
 
+    /// The three channel planes' samples, borrowed at once — what a cross-channel per-pixel op
+    /// needs to walk R, G and B in step.
+    ///
+    /// # Panics
+    /// On a grayscale image; callers gate on [`Self::is_rgb`].
+    pub(crate) fn rgb_planes_mut(&mut self) -> [&mut [f32]; 3] {
+        self.pixels.rgb_planes_mut()
+    }
+
     /// Deinterleave an already-`f32` (`L_F32` / `RGB_F32`) imaginarium image into planes.
     ///
     /// # Panics
@@ -249,6 +258,16 @@ impl From<[Buffer2<f32>; 3]> for LinearImage {
 impl From<&LinearImage> for Image {
     fn from(linear: &LinearImage) -> Self {
         Image::from(&linear.pixels)
+    }
+}
+
+/// Deinterleave an imaginarium image into planes, converting to `f32` first when it is not already.
+///
+/// The inbound half of the boundary `impl From<&LinearImage> for Image` forms the outbound half of:
+/// what a caller holding interleaved pixels goes through to reach the ops, which take planes.
+impl From<&Image> for LinearImage {
+    fn from(image: &Image) -> Self {
+        linear_from_image(image)
     }
 }
 

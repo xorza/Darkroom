@@ -35,8 +35,6 @@
 use std::io::{self, Write};
 use std::time::Instant;
 
-use imaginarium::Image;
-
 use crate::io::image::ImageDimensions;
 use crate::io::image::linear::LinearImage;
 use crate::testing::mem_probe::{MB, RssSampler, env_parse, measured};
@@ -92,9 +90,7 @@ fn image_ops_memory_probe() {
         master_bytes / MB,
     );
 
-    // Build planar, convert once, and drop the planar copy before sampling opens — the probe
-    // measures the op chain's own high-water mark, not the fixture's.
-    let mut image = Image::from(&linear_master(dimensions));
+    let mut image = linear_master(dimensions);
 
     let sampler = RssSampler::start();
     let chain_gate = sampler.gate();

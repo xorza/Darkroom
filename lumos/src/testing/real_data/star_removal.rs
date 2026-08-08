@@ -38,7 +38,12 @@ fn starnet_removes_stars() {
     let result = remove_stars(img, &config).expect("star removal succeeds");
     save_png(&result.starless, "star_removal/starless.png");
     save_png(&result.stars, "star_removal/stars.png");
-    assert_eq!(starless_only.bytes(), result.starless.bytes());
+    for channel in 0..starless_only.channels() {
+        assert_eq!(
+            starless_only.channel(channel).pixels(),
+            result.starless.channel(channel).pixels()
+        );
+    }
 
     // The starless image is no brighter than the input, and a non-trivial amount of (positive) star
     // signal was removed.

@@ -33,7 +33,6 @@ mod ml_support {
     use crate::io::image::linear::LinearImage;
     use crate::testing::calibration_dir;
     use crate::{NeutralizeBackground, Scnr, Stretch};
-    use imaginarium::Image;
 
     /// Resolve caller-supplied ONNX weights: the `env_var` override, else `test_data/<default_file>`.
     /// Returns `None` (after a skip message) when absent — lumos ships no models, so the tests skip
@@ -59,14 +58,12 @@ mod ml_support {
 
     /// Load the bundled linear master, neutralize its background and apply the default STF stretch —
     /// the display-domain `[0, 1]` input the ML filters (StarNet / DeepSNR) are trained for.
-    pub(super) fn stretched_master() -> Image {
-        let mut img = Image::from(
-            &LinearImage::from_file(
-                calibration_dir().join("stacked_light.tiff"),
-                &LoadContext::default(),
-            )
-            .expect("load stacked_light.tiff"),
-        );
+    pub(super) fn stretched_master() -> LinearImage {
+        let mut img = LinearImage::from_file(
+            calibration_dir().join("stacked_light.tiff"),
+            &LoadContext::default(),
+        )
+        .expect("load stacked_light.tiff");
 
         NeutralizeBackground.apply(&mut img).unwrap();
         Stretch::auto_stf().apply(&mut img).unwrap();

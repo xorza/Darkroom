@@ -7,11 +7,11 @@
 //!   red/blue average, the residual green being noise on a color-balanced deep-sky image.
 
 use crate::image_ops::rgb::Rgb;
-use imaginarium::{ChannelCount, Image};
 
 use crate::error::InvalidConfigField;
-use crate::image_ops::op::{OpError, require_f32_master};
-use crate::image_ops::par_map_pixels;
+use crate::image_ops::map_rgb;
+use crate::image_ops::op::OpError;
+use crate::io::image::linear::LinearImage;
 use crate::math::statistics::sigma_clipped_median_mad;
 
 #[cfg(test)]
@@ -36,53 +36,43 @@ const MAX_BACKGROUND_SAMPLES: usize = 1_000_000;
 pub struct NeutralizeBackground;
 
 impl NeutralizeBackground {
-    /// Neutralize `image`'s background in place.
+    /// Neutralize `image`'s background in place. A no-op on grayscale, which has no channels to
+    /// bring to a common level.
     ///
     /// # Errors
-    /// [`OpError::UnsupportedFormat`] unless `image` is `L_F32`/`RGB_F32` (a no-op on grayscale).
-    pub fn apply(&self, image: &mut Image) -> Result<(), OpError> {
-        require_f32_master(image)?;
-        if image.desc().color_format.channel_count != ChannelCount::Rgb {
-            return Ok(()); // no-op on grayscale
+    /// Never — the signature keeps the shape the other ops have, and `lens` drives them uniformly.
+    pub fn apply(&self, image: &mut LinearImage) -> Result<(), OpError> {
+        if !image.is_rgb() {
+            return Ok(());
         }
         let bg = channel_backgrounds(image);
         let target = bg.r.min(bg.g).min(bg.b);
         let (dr, dg, db) = (target - bg.r, target - bg.g, target - bg.b);
-        par_map_pixels(
-            image,
-            |l| l,
-            move |px| Rgb {
-                r: px.r + dr,
-                g: px.g + dg,
-                b: px.b + db,
-            },
-        );
+        map_rgb(image, move |px| Rgb {
+            r: px.r + dr,
+            g: px.g + dg,
+            b: px.b + db,
+        });
         Ok(())
     }
 }
 
-/// Per-channel sigma-clipped median background of an RGB f32 image, read straight from the
-/// interleaved samples. Used by [`NeutralizeBackground::apply`] and the colour-calibration tests/fixtures.
-pub(crate) fn channel_backgrounds(image: &Image) -> Rgb {
-    let samples: &[f32] = bytemuck::cast_slice(image.bytes());
+/// Per-channel sigma-clipped median background of an RGB image. Used by
+/// [`NeutralizeBackground::apply`] and the colour-calibration tests/fixtures.
+pub(crate) fn channel_backgrounds(image: &LinearImage) -> Rgb {
     let mut scratch = Vec::new();
     Rgb {
-        r: channel_background(samples, 0, &mut scratch),
-        g: channel_background(samples, 1, &mut scratch),
-        b: channel_background(samples, 2, &mut scratch),
+        r: channel_background(image.channel(0), &mut scratch),
+        g: channel_background(image.channel(1), &mut scratch),
+        b: channel_background(image.channel(2), &mut scratch),
     }
 }
 
-/// One channel's robust (sigma-clipped median) background: subsample channel `channel` from the
-/// interleaved RGB `samples` (every third value, uniform stride capped at `MAX_BACKGROUND_SAMPLES`;
-/// exact for small images) and take its sigma-clipped median.
-fn channel_background(samples: &[f32], channel: usize, scratch: &mut Vec<f32>) -> f32 {
-    let stride = (samples.len() / 3 / MAX_BACKGROUND_SAMPLES).max(1);
-    let mut s: Vec<f32> = samples[channel..]
-        .iter()
-        .step_by(3 * stride)
-        .copied()
-        .collect();
+/// One channel's robust (sigma-clipped median) background: subsample the plane at a uniform stride
+/// capped at `MAX_BACKGROUND_SAMPLES` (exact for small images) and take its sigma-clipped median.
+fn channel_background(plane: &[f32], scratch: &mut Vec<f32>) -> f32 {
+    let stride = (plane.len() / MAX_BACKGROUND_SAMPLES).max(1);
+    let mut s: Vec<f32> = plane.iter().step_by(stride).copied().collect();
     sigma_clipped_median_mad(&mut s, scratch, BACKGROUND_KAPPA, BACKGROUND_ITERATIONS).median
 }
 
@@ -126,19 +116,16 @@ impl Scnr {
 
     /// Remove the residual green cast from `image` in place.
     ///
+    /// A no-op on grayscale, which has no green channel to subtract.
+    ///
     /// # Errors
-    /// [`OpError::UnsupportedFormat`] unless `image` is `L_F32`/`RGB_F32` (a no-op on grayscale);
     /// [`OpError::InvalidConfig`] if the additive-mask amount is outside `[0, 1]`.
-    pub fn apply(&self, image: &mut Image) -> Result<(), OpError> {
+    pub fn apply(&self, image: &mut LinearImage) -> Result<(), OpError> {
         self.validate()?;
-        require_f32_master(image)?;
-        if image.desc().color_format.channel_count != ChannelCount::Rgb {
-            return Ok(()); // no-op on grayscale
-        }
         match self.method {
-            ScnrMethod::AverageNeutral => par_map_pixels(image, |l| l, scnr_average_neutral),
+            ScnrMethod::AverageNeutral => map_rgb(image, scnr_average_neutral),
             ScnrMethod::AdditiveMask { amount } => {
-                par_map_pixels(image, |l| l, move |px| scnr_additive_mask(px, amount));
+                map_rgb(image, move |px| scnr_additive_mask(px, amount));
             }
         }
         Ok(())

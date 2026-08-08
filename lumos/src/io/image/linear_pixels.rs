@@ -144,6 +144,18 @@ impl LinearPixels {
         }
     }
 
+    /// The three channel planes' samples, borrowed at once — what a cross-channel per-pixel op
+    /// needs to walk R, G and B in step.
+    ///
+    /// # Panics
+    /// On a grayscale image, which has no three planes; callers gate on the `Rgb` variant.
+    pub(crate) fn rgb_planes_mut(&mut self) -> [&mut [f32]; 3] {
+        match self {
+            LinearPixels::L(_) => panic!("Expected Rgb variant, got L"),
+            LinearPixels::Rgb([r, g, b]) => [r.pixels_mut(), g.pixels_mut(), b.pixels_mut()],
+        }
+    }
+
     pub(crate) fn channel_count(&self) -> usize {
         match self {
             LinearPixels::L(_) => 1,

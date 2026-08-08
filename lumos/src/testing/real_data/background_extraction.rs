@@ -10,12 +10,11 @@ use crate::math::size2us::Size2us;
 use crate::math::statistics::median_f32_mut;
 use crate::testing::{calibration_dir, init_tracing, save_png};
 use crate::{ExtractBackground, NeutralizeBackground, Scnr, Stretch};
-use imaginarium::Image;
 
 /// Max−min of the robust background level across the four corners of the intensity plane — a proxy
 /// for the corner-to-corner gradient. A light-pollution gradient makes opposite corners differ;
 /// flattening the background drives them together.
-fn corner_background_spread(image: &Image) -> f32 {
+fn corner_background_spread(image: &LinearImage) -> f32 {
     let plane = intensity_plane(image);
     let size = Size2us::new(plane.width(), plane.height());
     let px = plane.pixels();
@@ -48,13 +47,11 @@ fn extract_flattens_background_on_stretched_master() {
     init_tracing();
 
     // The display-domain master, as the other real-data tests build it.
-    let mut img = Image::from(
-        &LinearImage::from_file(
-            calibration_dir().join("stacked_light.tiff"),
-            &LoadContext::default(),
-        )
-        .expect("load"),
-    );
+    let mut img = LinearImage::from_file(
+        calibration_dir().join("stacked_light.tiff"),
+        &LoadContext::default(),
+    )
+    .expect("load");
     NeutralizeBackground.apply(&mut img).unwrap();
     Stretch::auto_stf().apply(&mut img).unwrap();
     Scnr::average_neutral().apply(&mut img).unwrap();

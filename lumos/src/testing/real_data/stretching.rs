@@ -8,7 +8,6 @@ use crate::io::image::linear::LinearImage;
 use crate::math::statistics::median_f32_mut;
 use crate::testing::{calibration_dir, init_tracing, save_png};
 use crate::{ColorMode, NeutralizeBackground, Scnr, Stretch, StretchMethod};
-use imaginarium::Image;
 
 #[derive(Debug)]
 struct Stats {
@@ -34,11 +33,9 @@ fn stretch_stacked_light() {
     init_tracing();
 
     let path = calibration_dir().join("stacked_light.tiff");
-    let mut image = Image::from(
-        &LinearImage::from_file(&path, &LoadContext::default()).expect("load stacked_light.tiff"),
-    );
-    let desc = image.desc();
-    assert!(desc.width > 0 && desc.height > 0);
+    let mut image =
+        LinearImage::from_file(&path, &LoadContext::default()).expect("load stacked_light.tiff");
+    assert!(image.width() > 0 && image.height() > 0);
 
     NeutralizeBackground.apply(&mut image).unwrap();
 
@@ -47,7 +44,7 @@ fn stretch_stacked_light() {
     // which is correct calibration, not a defect) with a bright stellar tail whose peaks exceed 1.
     // The stretch caps the display output back into [0,1].
     let input = stats(intensity_plane(&image).pixels());
-    eprintln!("input {}x{}: {input:?}", desc.width, desc.height);
+    eprintln!("input {}x{}: {input:?}", image.width(), image.height());
     assert!(
         input.median.abs() < 0.05,
         "a calibrated linear background sits at zero: {input:?}"
