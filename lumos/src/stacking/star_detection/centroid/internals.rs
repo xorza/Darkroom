@@ -1,7 +1,38 @@
 //! Shared test helpers for centroid fitting tests (gaussian_fit, moffat_fit).
 
+use imaginarium::Buffer2;
+
 use crate::stacking::star_detection::centroid::lm_optimizer::NormalEquations;
 use crate::testing::synthetic::patterns::add_gaussian_noise;
+
+/// What gets added to the rendered stamp before fitting.
+#[derive(Debug)]
+pub(super) enum Perturbation {
+    None,
+    /// Index-based sawtooth — deterministic without an RNG, and correlated with pixel order
+    /// rather than random, which is a different stress than [`Perturbation::Gaussian`].
+    Sawtooth {
+        amplitude: f32,
+    },
+    Gaussian {
+        sigma: f32,
+        seed: u64,
+    },
+}
+
+impl Perturbation {
+    pub(super) fn apply(&self, pixels: &mut Buffer2<f32>) {
+        match *self {
+            Perturbation::None => {}
+            Perturbation::Sawtooth { amplitude } => {
+                for (i, p) in pixels.iter_mut().enumerate() {
+                    *p += amplitude * ((i % 7) as f32 - 3.0) / 3.0;
+                }
+            }
+            Perturbation::Gaussian { sigma, seed } => add_noise(pixels, sigma, seed),
+        }
+    }
+}
 
 /// Add Gaussian noise to pixel values using a simple LCG PRNG.
 pub(super) fn add_noise(pixels: &mut [f32], noise_sigma: f32, seed: u64) {

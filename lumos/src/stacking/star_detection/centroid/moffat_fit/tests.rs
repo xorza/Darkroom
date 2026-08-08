@@ -4,80 +4,228 @@ use crate::math::size2us::Size2us;
 use std::f64::consts::PI;
 
 use crate::stacking::star_detection::centroid::internals::{
-    add_noise, approx_eq, reference_normal_equations,
+    Perturbation, approx_eq, reference_normal_equations,
 };
 use crate::stacking::star_detection::centroid::lm_optimizer::LMConfig;
 use crate::stacking::star_detection::centroid::moffat_fit::*;
 use crate::testing::synthetic::star_profiles::{StarProfile, SyntheticStar};
 use glam::Vec2;
 
-#[test]
-fn test_moffat_fit_centered_fixed_beta() {
-    let width = 21;
-    let height = 21;
-    let true_cx = 10.0;
-    let true_cy = 10.0;
-    let true_amp = 1.0;
-    let true_alpha = 2.5;
-    let true_beta = 2.5;
-    let true_bg = 0.1;
-
-    let pixels = SyntheticStar::new(
-        Vec2::new(true_cx, true_cy),
-        true_amp,
-        StarProfile::Moffat {
-            alpha: true_alpha,
-            beta: true_beta,
-        },
-    )
-    .stamp(Size2us::new(width, height), true_bg);
-
-    let config = MoffatFitConfig {
-        fixed_beta: true_beta,
-        ..Default::default()
-    };
-    let result = fit_moffat_2d(&pixels, Vec2::splat(10.0), 8, true_bg, None, &config);
-
-    assert!(result.is_some());
-    let result = result.unwrap();
-    assert!(result.converged);
-    assert!((result.pos.x - true_cx).abs() < 0.1);
-    assert!((result.pos.y - true_cy).abs() < 0.1);
-    assert!((result.debug.alpha - true_alpha).abs() < 0.3);
+/// One Moffat recovery case, mirroring `gaussian_fit`'s `RecoveryCase`.
+///
+/// The extra axis over the Gaussian version is `fixed_beta`: the fitter is told what shape to
+/// assume, and `wrong_beta` deliberately tells it the wrong one. Tolerances stay per-case for
+/// the same reason as there — they span 0.05 to 0.5 and a shared bound would loosen the strict
+/// ones.
+#[derive(Debug)]
+struct MoffatCase {
+    name: &'static str,
+    stamp: usize,
+    center: Vec2,
+    amplitude: f32,
+    alpha: f32,
+    /// Shape the stamp is rendered with.
+    beta: f32,
+    /// Shape the fitter is told to assume; differs from `beta` only in `wrong_beta`.
+    fixed_beta: f32,
+    background: f32,
+    guess: Vec2,
+    fit_radius: usize,
+    perturbation: Perturbation,
+    /// Background handed to the fitter; `None` gives it the true one.
+    fit_background: Option<f32>,
+    pos_tol: Option<f32>,
+    alpha_tol: Option<f32>,
+    background_tol: Option<f32>,
 }
 
-#[test]
-fn test_moffat_fit_subpixel_offset() {
-    let width = 21;
-    let height = 21;
-    let true_cx = 10.3;
-    let true_cy = 10.7;
-    let true_amp = 1.0;
-    let true_alpha = 2.5;
-    let true_beta = 2.5;
-    let true_bg = 0.1;
-
-    let pixels = SyntheticStar::new(
-        Vec2::new(true_cx, true_cy),
-        true_amp,
-        StarProfile::Moffat {
-            alpha: true_alpha,
-            beta: true_beta,
+const MOFFAT_CASES: &[MoffatCase] = &[
+    MoffatCase {
+        name: "centered_fixed_beta",
+        stamp: 21,
+        center: Vec2::new(10.0, 10.0),
+        amplitude: 1.0,
+        alpha: 2.5,
+        beta: 2.5,
+        fixed_beta: 2.5,
+        background: 0.1,
+        guess: Vec2::splat(10.0),
+        fit_radius: 8,
+        perturbation: Perturbation::None,
+        fit_background: None,
+        pos_tol: Some(0.1),
+        alpha_tol: Some(0.3),
+        background_tol: None,
+    },
+    MoffatCase {
+        name: "subpixel_offset",
+        stamp: 21,
+        center: Vec2::new(10.3, 10.7),
+        amplitude: 1.0,
+        alpha: 2.5,
+        beta: 2.5,
+        fixed_beta: 2.5,
+        background: 0.1,
+        guess: Vec2::splat(10.0),
+        fit_radius: 8,
+        perturbation: Perturbation::None,
+        fit_background: None,
+        pos_tol: Some(0.05),
+        alpha_tol: None,
+        background_tol: None,
+    },
+    MoffatCase {
+        // Noise sigma is 5% of amplitude.
+        name: "gaussian_noise",
+        stamp: 21,
+        center: Vec2::new(10.0, 10.0),
+        amplitude: 1.0,
+        alpha: 2.5,
+        beta: 2.5,
+        fixed_beta: 2.5,
+        background: 0.1,
+        guess: Vec2::splat(10.0),
+        fit_radius: 8,
+        perturbation: Perturbation::Gaussian {
+            sigma: 0.05,
+            seed: 12345,
         },
-    )
-    .stamp(Size2us::new(width, height), true_bg);
+        fit_background: None,
+        pos_tol: Some(0.2),
+        alpha_tol: None,
+        background_tol: None,
+    },
+    MoffatCase {
+        name: "high_noise",
+        stamp: 21,
+        center: Vec2::new(10.0, 10.0),
+        amplitude: 1.0,
+        alpha: 2.5,
+        beta: 2.5,
+        fixed_beta: 2.5,
+        background: 0.1,
+        guess: Vec2::splat(10.0),
+        fit_radius: 8,
+        perturbation: Perturbation::Gaussian {
+            sigma: 0.15,
+            seed: 54321,
+        },
+        fit_background: None,
+        pos_tol: Some(0.5),
+        alpha_tol: None,
+        background_tol: None,
+    },
+    MoffatCase {
+        // Fitter is handed a background 20% too high and must recover the true one.
+        name: "wrong_background_estimate",
+        stamp: 21,
+        center: Vec2::new(10.0, 10.0),
+        amplitude: 1.0,
+        alpha: 2.5,
+        beta: 2.5,
+        fixed_beta: 2.5,
+        background: 0.1,
+        guess: Vec2::splat(10.0),
+        fit_radius: 8,
+        perturbation: Perturbation::None,
+        fit_background: Some(0.12),
+        pos_tol: Some(0.1),
+        alpha_tol: None,
+        background_tol: Some(0.05),
+    },
+    MoffatCase {
+        // Rendered at beta 4.0 but fitted assuming 2.5: the centroid must survive the wrong
+        // shape, so no claim is made about the recovered alpha.
+        name: "wrong_beta",
+        stamp: 21,
+        center: Vec2::new(10.3, 10.7),
+        amplitude: 1.0,
+        alpha: 2.5,
+        beta: 4.0,
+        fixed_beta: 2.5,
+        background: 0.1,
+        guess: Vec2::splat(10.0),
+        fit_radius: 8,
+        perturbation: Perturbation::None,
+        fit_background: None,
+        pos_tol: Some(0.15),
+        alpha_tol: None,
+        background_tol: None,
+    },
+];
 
-    let config = MoffatFitConfig {
-        fixed_beta: true_beta,
-        ..Default::default()
-    };
-    let result = fit_moffat_2d(&pixels, Vec2::splat(10.0), 8, true_bg, None, &config);
+#[test]
+fn moffat_fit_recovers_known_parameters() {
+    for case in MOFFAT_CASES {
+        let mut pixels = SyntheticStar::new(
+            case.center,
+            case.amplitude,
+            StarProfile::Moffat {
+                alpha: case.alpha,
+                beta: case.beta,
+            },
+        )
+        .stamp(Size2us::new(case.stamp, case.stamp), case.background);
+        case.perturbation.apply(&mut pixels);
 
-    assert!(result.is_some());
-    let result = result.unwrap();
-    assert!(result.converged);
-    assert!((result.pos.x - true_cx).abs() < 0.05);
-    assert!((result.pos.y - true_cy).abs() < 0.05);
+        let config = MoffatFitConfig {
+            fixed_beta: case.fixed_beta,
+            ..Default::default()
+        };
+        let result = fit_moffat_2d(
+            &pixels,
+            case.guess,
+            case.fit_radius,
+            case.fit_background.unwrap_or(case.background),
+            None,
+            &config,
+        )
+        .unwrap_or_else(|| panic!("{}: fit returned None", case.name));
+
+        // Every case converges; none of the originals tolerated a non-converged fit.
+        assert!(result.converged, "{}: did not converge", case.name);
+        assert!(
+            result.pos.x.is_finite() && result.pos.y.is_finite(),
+            "{}: non-finite position {:?}",
+            case.name,
+            result.pos
+        );
+
+        if let Some(tol) = case.pos_tol {
+            assert!(
+                (result.pos.x - case.center.x).abs() < tol,
+                "{}: x {} vs {} (tol {tol})",
+                case.name,
+                result.pos.x,
+                case.center.x
+            );
+            assert!(
+                (result.pos.y - case.center.y).abs() < tol,
+                "{}: y {} vs {} (tol {tol})",
+                case.name,
+                result.pos.y,
+                case.center.y
+            );
+        }
+        if let Some(tol) = case.alpha_tol {
+            assert!(
+                (result.debug.alpha - case.alpha).abs() < tol,
+                "{}: alpha {} vs {} (tol {tol})",
+                case.name,
+                result.debug.alpha,
+                case.alpha
+            );
+        }
+        if let Some(tol) = case.background_tol {
+            assert!(
+                (result.debug.background - case.background).abs() < tol,
+                "{}: background {} vs {} (tol {tol})",
+                case.name,
+                result.debug.background,
+                case.background
+            );
+        }
+    }
 }
 
 #[test]
@@ -99,97 +247,6 @@ fn test_moffat_fit_edge_position() {
     let config = MoffatFitConfig::default();
     let result = fit_moffat_2d(&pixels, Vec2::new(2.0, 10.0), 8, 0.1, None, &config);
     assert!(result.is_none());
-}
-
-#[test]
-fn test_moffat_fit_with_gaussian_noise() {
-    let width = 21;
-    let height = 21;
-    let true_cx = 10.0;
-    let true_cy = 10.0;
-    let true_amp = 1.0;
-    let true_alpha = 2.5;
-    let true_beta = 2.5;
-    let true_bg = 0.1;
-    let noise_sigma = 0.05; // 5% of amplitude
-
-    let mut pixels = SyntheticStar::new(
-        Vec2::new(true_cx, true_cy),
-        true_amp,
-        StarProfile::Moffat {
-            alpha: true_alpha,
-            beta: true_beta,
-        },
-    )
-    .stamp(Size2us::new(width, height), true_bg);
-    add_noise(&mut pixels, noise_sigma, 12345);
-
-    let config = MoffatFitConfig {
-        fixed_beta: true_beta,
-        ..Default::default()
-    };
-    let result = fit_moffat_2d(&pixels, Vec2::splat(10.0), 8, true_bg, None, &config);
-
-    assert!(result.is_some());
-    let result = result.unwrap();
-    assert!(result.converged);
-    // With noise, allow larger tolerance
-    assert!(
-        (result.pos.x - true_cx).abs() < 0.2,
-        "x error: {}",
-        (result.pos.x - true_cx).abs()
-    );
-    assert!(
-        (result.pos.y - true_cy).abs() < 0.2,
-        "y error: {}",
-        (result.pos.y - true_cy).abs()
-    );
-}
-
-#[test]
-fn test_moffat_fit_high_noise_still_converges() {
-    let width = 21;
-    let height = 21;
-    let true_cx = 10.0;
-    let true_cy = 10.0;
-    let true_amp = 1.0;
-    let true_alpha = 2.5;
-    let true_beta = 2.5;
-    let true_bg = 0.1;
-    let noise_sigma = 0.15; // 15% noise - challenging
-
-    let mut pixels = SyntheticStar::new(
-        Vec2::new(true_cx, true_cy),
-        true_amp,
-        StarProfile::Moffat {
-            alpha: true_alpha,
-            beta: true_beta,
-        },
-    )
-    .stamp(Size2us::new(width, height), true_bg);
-    add_noise(&mut pixels, noise_sigma, 54321);
-
-    let config = MoffatFitConfig {
-        fixed_beta: true_beta,
-        ..Default::default()
-    };
-    let result = fit_moffat_2d(&pixels, Vec2::splat(10.0), 8, true_bg, None, &config);
-
-    // Should still converge even with high noise
-    assert!(result.is_some());
-    let result = result.unwrap();
-    assert!(result.converged);
-    // Centroid should still be reasonable (within 0.5 pixel)
-    assert!(
-        (result.pos.x - true_cx).abs() < 0.5,
-        "x error too large: {}",
-        (result.pos.x - true_cx).abs()
-    );
-    assert!(
-        (result.pos.y - true_cy).abs() < 0.5,
-        "y error too large: {}",
-        (result.pos.y - true_cy).abs()
-    );
 }
 
 #[test]
@@ -233,102 +290,6 @@ fn test_moffat_fit_low_snr() {
         (result.debug.alpha - true_alpha).abs() < 1.0,
         "Low-SNR alpha error {:.3} too large",
         (result.debug.alpha - true_alpha).abs()
-    );
-}
-
-#[test]
-fn test_moffat_fit_wrong_background_estimate() {
-    let width = 21;
-    let height = 21;
-    let true_cx = 10.0;
-    let true_cy = 10.0;
-    let true_amp = 1.0;
-    let true_alpha = 2.5;
-    let true_beta = 2.5;
-    let true_bg = 0.1;
-
-    let pixels = SyntheticStar::new(
-        Vec2::new(true_cx, true_cy),
-        true_amp,
-        StarProfile::Moffat {
-            alpha: true_alpha,
-            beta: true_beta,
-        },
-    )
-    .stamp(Size2us::new(width, height), true_bg);
-
-    let config = MoffatFitConfig {
-        fixed_beta: true_beta,
-        ..Default::default()
-    };
-
-    // Use wrong background estimate (20% error)
-    let wrong_bg = true_bg * 1.2;
-    let result = fit_moffat_2d(&pixels, Vec2::splat(10.0), 8, wrong_bg, None, &config);
-
-    assert!(result.is_some());
-    let result = result.unwrap();
-    // Should still converge - background is a fitted parameter
-    assert!(result.converged);
-    // Centroid should still be accurate
-    assert!(
-        (result.pos.x - true_cx).abs() < 0.1,
-        "x error: {}",
-        (result.pos.x - true_cx).abs()
-    );
-    assert!(
-        (result.pos.y - true_cy).abs() < 0.1,
-        "y error: {}",
-        (result.pos.y - true_cy).abs()
-    );
-    // Fitted background should be close to true value
-    assert!(
-        (result.debug.background - true_bg).abs() < 0.05,
-        "bg error: {}",
-        (result.debug.background - true_bg).abs()
-    );
-}
-
-#[test]
-fn test_moffat_fit_wrong_beta_still_finds_centroid() {
-    let width = 21;
-    let height = 21;
-    let true_cx = 10.3;
-    let true_cy = 10.7;
-    let true_amp = 1.0;
-    let true_alpha = 2.5;
-    let true_beta = 4.0; // True beta
-    let true_bg = 0.1;
-
-    let pixels = SyntheticStar::new(
-        Vec2::new(true_cx, true_cy),
-        true_amp,
-        StarProfile::Moffat {
-            alpha: true_alpha,
-            beta: true_beta,
-        },
-    )
-    .stamp(Size2us::new(width, height), true_bg);
-
-    let config = MoffatFitConfig {
-        fixed_beta: 2.5, // Wrong beta (2.5 instead of 4.0)
-        ..Default::default()
-    };
-    let result = fit_moffat_2d(&pixels, Vec2::splat(10.0), 8, true_bg, None, &config);
-
-    assert!(result.is_some());
-    let result = result.unwrap();
-    assert!(result.converged);
-    // Centroid should still be reasonably accurate even with wrong beta
-    assert!(
-        (result.pos.x - true_cx).abs() < 0.15,
-        "x error: {}",
-        (result.pos.x - true_cx).abs()
-    );
-    assert!(
-        (result.pos.y - true_cy).abs() < 0.15,
-        "y error: {}",
-        (result.pos.y - true_cy).abs()
     );
 }
 
