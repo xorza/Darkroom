@@ -3,8 +3,8 @@
 //! small stacks.
 
 use crate::error::InvalidConfigField;
-use crate::stacking::combine::cache::ScratchBuffers;
-use crate::stacking::combine::rejection::{compact_within, reset_indices, validate_sigma_bounds};
+use crate::stacking::combine::rejection::scratch_buffers::ScratchBuffers;
+use crate::stacking::combine::rejection::{compact_within, validate_sigma_bounds};
 
 /// Configuration for winsorized sigma clipping.
 ///
@@ -127,7 +127,7 @@ impl WinsorizedClipConfig {
     pub(super) fn reject(&self, values: &mut [f32], scratch: &mut ScratchBuffers) -> usize {
         debug_assert!(!values.is_empty());
 
-        reset_indices(&mut scratch.indices, values.len());
+        scratch.reset_indices(values.len());
 
         if values.len() <= 2 {
             return values.len();

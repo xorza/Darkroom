@@ -2,10 +2,8 @@
 
 use crate::error::InvalidConfigField;
 use crate::math::statistics::mad_to_sigma;
-use crate::stacking::combine::cache::ScratchBuffers;
-use crate::stacking::combine::rejection::{
-    reset_indices, sort_with_indices, sorted_mad, validate_sigma_bounds,
-};
+use crate::stacking::combine::rejection::scratch_buffers::ScratchBuffers;
+use crate::stacking::combine::rejection::{sorted_mad, validate_sigma_bounds};
 
 /// Configuration for sigma clipping.
 ///
@@ -83,7 +81,7 @@ impl SigmaClipConfig {
     pub(super) fn reject(&self, values: &mut [f32], scratch: &mut ScratchBuffers) -> usize {
         debug_assert!(!values.is_empty());
 
-        reset_indices(&mut scratch.indices, values.len());
+        scratch.reset_indices(values.len());
 
         let n0 = values.len();
         if n0 <= 2 {
@@ -98,7 +96,7 @@ impl SigmaClipConfig {
             return n0;
         }
 
-        sort_with_indices(values, scratch, n0);
+        scratch.sort_with_indices(values, n0);
 
         // Active survivors are the sorted, contiguous window `values[lo..hi]`.
         let mut lo = 0usize;

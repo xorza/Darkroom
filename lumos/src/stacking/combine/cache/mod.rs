@@ -11,12 +11,13 @@ use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::image_metadata::ImageMetadata;
 use crate::io::image::linear::LinearImage;
 use crate::io::image::linear_pixels::LinearPixels;
-use crate::memory::{ChunkMemoryLayout, optimal_chunk_rows};
+use crate::memory::ChunkMemoryLayout;
 use crate::stacking::combine::MIN_CONTRIBUTING_COVERAGE;
 use crate::stacking::combine::cache_config::CacheConfig;
 use crate::stacking::combine::config::Normalization;
 use crate::stacking::combine::error::{Error, FramePlane};
 use crate::stacking::combine::normalization::{FrameNorm, compute_frame_norms};
+use crate::stacking::combine::rejection::scratch_buffers::ScratchBuffers;
 use crate::stacking::combine::stack::StackFrame;
 use crate::stacking::frame_store::{
     SpillDirectory, StackableImage, StoredFrame, StoredPlane, WarpQuality,
@@ -24,42 +25,6 @@ use crate::stacking::frame_store::{
 use crate::stacking::product::Coverage;
 use crate::stacking::product::{QualityMap, QualityPlanes, StackProduct};
 use crate::stacking::progress::{ProgressCallback, StackingStage};
-
-/// Per-thread scratch buffers for stacking combine closures.
-///
-/// Allocated once per rayon thread via `for_each_init` and reused across all pixels.
-#[derive(Debug, Default)]
-pub(crate) struct ScratchBuffers {
-    /// Tracks original frame indices after rejection reordering.
-    pub(crate) indices: Vec<usize>,
-    /// Values copied out for a robust centre/spread estimate, leaving the originals untouched.
-    pub(crate) estimate_values: Vec<f32>,
-    /// Large-N `sort_with_indices`: the value copy it permutes from.
-    pub(crate) sort_values: Vec<f32>,
-    /// Large-N `sort_with_indices`: the position permutation it sorts.
-    pub(crate) sort_permutation: Vec<usize>,
-    /// Large-N `sort_with_indices`: the frame-index copy it permutes from.
-    pub(crate) sort_indices: Vec<usize>,
-    pub(crate) gesd_statistics: Vec<f64>,
-    pub(crate) gesd_critical_values: Vec<f64>,
-    pub(crate) gesd_sample_count: usize,
-    pub(crate) gesd_alpha_bits: u32,
-}
-
-impl ScratchBuffers {
-    /// Reserve room for `frame_count` samples. The rejection methods clear and refill these per
-    /// pixel, so only capacity carries over — a lease reused from the pool is already big enough
-    /// and every call after the first is a no-op.
-    fn reserve(&mut self, frame_count: usize) {
-        self.indices.reserve(frame_count);
-        self.estimate_values.reserve(frame_count);
-        self.sort_values.reserve(frame_count);
-        self.sort_permutation.reserve(frame_count);
-        self.sort_indices.reserve(frame_count);
-        self.gesd_statistics.reserve(frame_count / 4);
-        self.gesd_critical_values.reserve(frame_count / 4);
-    }
-}
 
 /// Everything one combine job needs beyond the pixels themselves: the covering frames' values
 /// packed to the front, their effective weights in the same order, and the rejection methods'
@@ -436,7 +401,7 @@ impl CacheCore {
         let height = dims.height();
 
         let chunk_rows = available_memory.map_or(height, |available_memory| {
-            optimal_chunk_rows(dims.size(), memory, available_memory)
+            memory.optimal_chunk_rows(dims.size(), available_memory)
         });
 
         let mut output = LinearPixels::new_zeroed(dims);
@@ -695,11 +660,8 @@ impl FrameCache {
         // Coverage planes share their frame's tier, so they may be mmap-backed: read them in the
         // same row-aligned chunks the combine uses.
         let chunk_rows = chunk_available_memory.map_or(height, |available_memory| {
-            optimal_chunk_rows(
-                dimensions.size(),
-                coverage_chunk_memory_layout(&self.frames, dimensions.channels(), planes),
-                available_memory,
-            )
+            coverage_chunk_memory_layout(&self.frames, dimensions.channels(), planes)
+                .optimal_chunk_rows(dimensions.size(), available_memory)
         });
 
         let mut start_row = 0;

@@ -4,6 +4,7 @@ use crate::math::size2us::Size2us;
 use crate::stacking::combine::cache::*;
 use crate::stacking::combine::config::Normalization;
 use crate::stacking::combine::rejection::Rejection;
+use crate::stacking::combine::rejection::scratch_buffers::ScratchBuffers;
 use crate::stacking::frame_store::{FrameStats, StoredFrame};
 use crate::stacking::product::Coverage;
 use crate::stacking::product::QualityPlanes;

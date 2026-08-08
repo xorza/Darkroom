@@ -14,15 +14,17 @@
 pub(crate) mod gesd_config;
 pub(crate) mod linear_fit_clip_config;
 pub(crate) mod percentile_clip_config;
+pub(crate) mod scratch_buffers;
 pub(crate) mod sigma_clip_config;
 pub(crate) mod winsorized_clip_config;
 
 use crate::error::InvalidConfigField;
 use crate::math::sum::weighted_mean_f32;
-use crate::stacking::combine::cache::{CombinedSample, ScratchBuffers};
+use crate::stacking::combine::cache::CombinedSample;
 use crate::stacking::combine::rejection::gesd_config::GesdConfig;
 use crate::stacking::combine::rejection::linear_fit_clip_config::LinearFitClipConfig;
 use crate::stacking::combine::rejection::percentile_clip_config::PercentileClipConfig;
+use crate::stacking::combine::rejection::scratch_buffers::ScratchBuffers;
 use crate::stacking::combine::rejection::sigma_clip_config::SigmaClipConfig;
 use crate::stacking::combine::rejection::winsorized_clip_config::WinsorizedClipConfig;
 
@@ -38,11 +40,6 @@ fn validate_sigma_bounds(sigma_low: f32, sigma_high: f32) -> Result<(), InvalidC
 }
 
 /// Reset an indices buffer to [0, 1, 2, ...n), reusing the allocation.
-fn reset_indices(indices: &mut Vec<usize>, n: usize) {
-    indices.clear();
-    indices.extend(0..n);
-}
-
 /// Keep predicate for asymmetric sigma rejection: `diff = value − reference`, kept when it lies
 /// within `[−low, high]` (the low- and high-side thresholds are applied separately).
 #[inline]
@@ -76,49 +73,6 @@ fn compact_within(
         }
     }
     write
-}
-
-/// Sort `values[..n]` and `indices[..n]` together by value.
-/// Uses insertion sort for small N (optimal for typical 10–50 frame stacks)
-/// and introsort via `sort_unstable_by` for large N to avoid O(N^2).
-fn sort_with_indices(values: &mut [f32], scratch: &mut ScratchBuffers, n: usize) {
-    // These three buffers exist for this function alone; they are caller-owned only so the
-    // allocation survives from one pixel to the next.
-    let ScratchBuffers {
-        indices,
-        sort_values,
-        sort_permutation,
-        sort_indices,
-        ..
-    } = scratch;
-
-    const INSERTION_SORT_THRESHOLD: usize = 64;
-
-    if n <= INSERTION_SORT_THRESHOLD {
-        for i in 1..n {
-            let mut j = i;
-            while j > 0 && values[j - 1] > values[j] {
-                values.swap(j - 1, j);
-                indices.swap(j - 1, j);
-                j -= 1;
-            }
-        }
-    } else {
-        // Build position permutation, sort by values, apply to both arrays. All scratch
-        // (value copy, permutation, index copy) is caller-owned and reused — no per-pixel alloc.
-        sort_permutation.clear();
-        sort_permutation.extend(0..n);
-        sort_permutation.sort_unstable_by(|&a, &b| values[a].total_cmp(&values[b]));
-
-        sort_values.clear();
-        sort_values.extend_from_slice(&values[..n]);
-        sort_indices.clear();
-        sort_indices.extend_from_slice(&indices[..n]);
-        for (dst, &src) in sort_permutation.iter().enumerate() {
-            values[dst] = sort_values[src];
-            indices[dst] = sort_indices[src];
-        }
-    }
 }
 
 /// MAD (median absolute deviation from `center`) of an **ascending-sorted** slice, without a

@@ -47,7 +47,8 @@ pub(crate) fn decode_transient_bytes(dimensions: ImageDimensions) -> usize {
 
 const MIN_CHUNK_ROWS: usize = 64;
 
-/// What one combine pass holds in memory, in planes, so [`optimal_chunk_rows`] can price a row.
+/// What one combine pass holds in memory, in planes, so [`ChunkMemoryLayout::optimal_chunk_rows`]
+/// can price a row.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct ChunkMemoryLayout {
     /// Planes read concurrently for the active row chunk.
@@ -56,31 +57,29 @@ pub(crate) struct ChunkMemoryLayout {
     pub(crate) resident_planes: usize,
 }
 
-/// Rows a combine may hold at once: the budget left after the resident planes, divided by the
-/// cost of a row, floored at [`MIN_CHUNK_ROWS`] so a tight budget still makes progress.
-pub(crate) fn optimal_chunk_rows(
-    size: Size2us,
-    layout: ChunkMemoryLayout,
-    available_memory: u64,
-) -> usize {
-    let bytes_per_row = size
-        .width
-        .checked_mul(layout.input_planes)
-        .and_then(|value| value.checked_mul(size_of::<f32>()))
-        .map(|value| value as u64)
-        .unwrap_or(u64::MAX);
-    if bytes_per_row == 0 {
-        return MIN_CHUNK_ROWS;
+impl ChunkMemoryLayout {
+    /// Rows a combine may hold at once: the budget left after the resident planes, divided by the
+    /// cost of a row, floored at [`MIN_CHUNK_ROWS`] so a tight budget still makes progress.
+    pub(crate) fn optimal_chunk_rows(self, size: Size2us, available_memory: u64) -> usize {
+        let bytes_per_row = size
+            .width
+            .checked_mul(self.input_planes)
+            .and_then(|value| value.checked_mul(size_of::<f32>()))
+            .map(|value| value as u64)
+            .unwrap_or(u64::MAX);
+        if bytes_per_row == 0 {
+            return MIN_CHUNK_ROWS;
+        }
+        let resident_bytes = size
+            .width
+            .checked_mul(size.height)
+            .and_then(|value| value.checked_mul(self.resident_planes))
+            .and_then(|value| value.checked_mul(size_of::<f32>()))
+            .map(|value| value as u64)
+            .unwrap_or(u64::MAX);
+        (memory_budget(available_memory).saturating_sub(resident_bytes) / bytes_per_row)
+            .max(MIN_CHUNK_ROWS as u64) as usize
     }
-    let resident_bytes = size
-        .width
-        .checked_mul(size.height)
-        .and_then(|value| value.checked_mul(layout.resident_planes))
-        .and_then(|value| value.checked_mul(size_of::<f32>()))
-        .map(|value| value as u64)
-        .unwrap_or(u64::MAX);
-    (memory_budget(available_memory).saturating_sub(resident_bytes) / bytes_per_row)
-        .max(MIN_CHUNK_ROWS as u64) as usize
 }
 
 /// Frames that may be in flight at once: budget minus what stays resident, divided by the peak
@@ -293,14 +292,11 @@ mod tests {
             let usable = (available as u128 * 75 / 100) as u64;
             let expected = (usable / bytes_per_row).max(MIN_CHUNK_ROWS as u64) as usize;
             assert_eq!(
-                optimal_chunk_rows(
-                    Size2us::new(width, 100),
-                    ChunkMemoryLayout {
-                        input_planes,
-                        resident_planes: 0,
-                    },
-                    available,
-                ),
+                ChunkMemoryLayout {
+                    input_planes,
+                    resident_planes: 0,
+                }
+                .optimal_chunk_rows(Size2us::new(width, 100), available),
                 expected
             );
         }
@@ -308,36 +304,27 @@ mod tests {
         // 1 MiB available → 786,432 usable bytes. Six resident 100×200 f32 planes consume 480,000
         // bytes; nine active input planes consume 3,600 bytes/row, leaving exactly 85 whole rows.
         assert_eq!(
-            optimal_chunk_rows(
-                Size2us::new(100, 200),
-                ChunkMemoryLayout {
-                    input_planes: 9,
-                    resident_planes: 6,
-                },
-                1024 * 1024,
-            ),
+            ChunkMemoryLayout {
+                input_planes: 9,
+                resident_planes: 6,
+            }
+            .optimal_chunk_rows(Size2us::new(100, 200), 1024 * 1024),
             85
         );
         assert_eq!(
-            optimal_chunk_rows(
-                Size2us::new(0, 100),
-                ChunkMemoryLayout {
-                    input_planes: 60,
-                    resident_planes: 3,
-                },
-                8 * GB,
-            ),
+            ChunkMemoryLayout {
+                input_planes: 60,
+                resident_planes: 3,
+            }
+            .optimal_chunk_rows(Size2us::new(0, 100), 8 * GB),
             MIN_CHUNK_ROWS
         );
         assert_eq!(
-            optimal_chunk_rows(
-                Size2us::new(100, 200),
-                ChunkMemoryLayout {
-                    input_planes: 9,
-                    resident_planes: 10,
-                },
-                1024 * 1024,
-            ),
+            ChunkMemoryLayout {
+                input_planes: 9,
+                resident_planes: 10,
+            }
+            .optimal_chunk_rows(Size2us::new(100, 200), 1024 * 1024),
             MIN_CHUNK_ROWS
         );
         assert_eq!(memory_budget(8 * GB), 6 * GB);
