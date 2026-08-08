@@ -17,8 +17,6 @@
 use quickbench::quick_bench;
 use std::hint::black_box;
 
-use imaginarium::Image;
-
 use crate::io::image::LoadContext;
 use crate::io::image::linear::LinearImage;
 use crate::testing::calibration_dir;
@@ -32,21 +30,20 @@ use crate::{
 const WARMUP_ITERS: usize = 1;
 const ITERS: usize = 5;
 
-/// The bundled stacked light master as a linear f32 `Image` — the input the linear-domain ops
-/// receive (a real stack, so its bright star cores exceed 1.0).
-fn linear_master() -> Image {
-    Image::from(
-        &LinearImage::from_file(
-            calibration_dir().join("stacked_light.tiff"),
-            &LoadContext::default(),
-        )
-        .expect("load stacked_light.tiff"),
+/// The bundled stacked light master — the input the linear-domain ops receive (a real stack, so its
+/// bright star cores exceed 1.0). Loaded straight into the planar form the ops take, so nothing here
+/// converts layout even at setup.
+fn linear_master() -> LinearImage {
+    LinearImage::from_file(
+        calibration_dir().join("stacked_light.tiff"),
+        &LoadContext::default(),
     )
+    .expect("load stacked_light.tiff")
 }
 
 /// A display-domain `[0, 1]` master: the standard prep (neutralize → STF stretch → SCNR) that the
 /// display enhancers run on.
-fn display_master() -> Image {
+fn display_master() -> LinearImage {
     let mut img = linear_master();
     NeutralizeBackground.apply(&mut img).unwrap();
     Stretch::auto_stf().apply(&mut img).unwrap();
@@ -57,8 +54,8 @@ fn display_master() -> Image {
 /// Time `op` on a fresh copy of `master` each iteration, with the copies cloned *before* the timed
 /// region so the ~260 ms clone of this 288 MB master stays out of the measurement. The pool is sized
 /// to quickbench's exact call count; the `pop` fallback clones if that ever drifts.
-fn bench_op(b: ::quickbench::Bencher, master: &Image, op: impl Fn(&mut Image)) {
-    let mut pool: Vec<Image> = (0..WARMUP_ITERS + ITERS).map(|_| master.clone()).collect();
+fn bench_op(b: ::quickbench::Bencher, master: &LinearImage, op: impl Fn(&mut LinearImage)) {
+    let mut pool: Vec<LinearImage> = (0..WARMUP_ITERS + ITERS).map(|_| master.clone()).collect();
     b.bench(move || {
         let mut img = pool.pop().unwrap_or_else(|| master.clone());
         op(&mut img);
