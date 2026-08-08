@@ -14,7 +14,7 @@ use imaginarium::Buffer2;
 /// Steps:
 ///   1. Reduce to one plane: copy for grayscale, or an inverse-variance
 ///      (noise-weighted) channel combination for RGB (see `detection_channel_weights`).
-///   2. 3×3 median filter to suppress Bayer/X-Trans artifacts (if CFA).
+///   2. 3×3 median filter to suppress demosaic interpolation artifacts (if interpolated).
 ///
 /// The returned buffer is acquired from `pool`; the caller owns it.
 pub(crate) fn prepare(image: &LinearImage, pool: &mut DetectionResources) -> Buffer2<f32> {
@@ -33,8 +33,9 @@ pub(crate) fn prepare(image: &LinearImage, pool: &mut DetectionResources) -> Buf
         }
     }
 
-    // CFA median filter
-    if image.metadata.cfa_type.is_some() {
+    // Only interpolated frames have the artifacts to suppress; a monochrome sensor's plane is
+    // measured, and filtering it would blur the PSF that FWHM and flux are read off.
+    if image.metadata.is_demosaiced() {
         let mut scratch = pool.acquire_f32();
         median_filter_3x3(&pixels, &mut scratch);
         std::mem::swap(&mut pixels, &mut scratch);

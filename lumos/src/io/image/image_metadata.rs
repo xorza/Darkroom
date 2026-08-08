@@ -4,7 +4,7 @@
 //! [`ImageMetadata::bitpix`], the pixel type the FITS header declared.
 
 use crate::io::image::cfa;
-use crate::io::image::image_provenance::ImageProvenance;
+use crate::io::image::image_provenance::{DemosaicProvenance, ImageProvenance};
 
 /// FITS BITPIX values representing pixel data types.
 ///
@@ -80,4 +80,16 @@ pub struct ImageMetadata {
     /// Set by `CalibrationMasters::calibrate` — guards against applying the dark/flat twice
     /// (the FITS `CALSTAT` convention). Travels with the frame through demosaic.
     pub calibrated: bool,
+}
+
+impl ImageMetadata {
+    /// Whether these samples came out of a demosaic, and so carry its interpolation artifacts.
+    ///
+    /// Not `cfa_type.is_some()`: that records which sensor pattern the frame came from and stays
+    /// set on a monochrome frame, which is copied straight through with nothing interpolated.
+    pub(crate) fn is_demosaiced(&self) -> bool {
+        self.provenance
+            .as_ref()
+            .is_some_and(|provenance| provenance.demosaic != DemosaicProvenance::None)
+    }
 }
