@@ -1,7 +1,5 @@
 //! Bounded detector reuse for frame-parallel pipeline stages.
 
-use rayon::prelude::*;
-
 use crate::concurrency;
 use crate::error::InvalidConfigField;
 use crate::stacking::star_detection::config::Config;
@@ -37,10 +35,10 @@ impl DetectorPool {
 
     /// Map `f` over `items` with one detector per concurrent slot, passing each item's index.
     ///
-    /// The batch width is the slot count, so the window that
-    /// [`concurrency::try_collect_batches`] hands back indexes the detectors directly: slot *k*
-    /// always takes the *k*-th item of every window, and carries its warmed buffers into the
-    /// next one.
+    /// The detectors *are* the slots of [`concurrency::try_par_map_bounded`], so concurrency is
+    /// capped at the pool size and each detector carries its warmed buffers from one frame to
+    /// the next it happens to pick up. Which frames a given detector sees is not fixed: a
+    /// detector takes whatever is next when it frees up.
     pub(crate) fn try_map<T, R, E, F>(&mut self, items: &[T], f: F) -> Result<Vec<R>, E>
     where
         T: Sync,
@@ -48,21 +46,16 @@ impl DetectorPool {
         E: Send,
         F: Fn(&mut StarDetector, usize, &T) -> Result<R, E> + Sync,
     {
-        let detectors = &mut self.detectors;
-        let slots = detectors.len();
-        concurrency::try_collect_batches(items.len(), slots, |batch| {
-            detectors[..batch.len()]
-                .par_iter_mut()
-                .zip(items[batch.start..batch.end].par_iter())
-                .enumerate()
-                .map(|(offset, (detector, item))| f(detector, batch.start + offset, item))
-                .collect()
+        concurrency::try_par_map_bounded(items.len(), &mut self.detectors, |detector, index| {
+            f(detector, index, &items[index])
         })
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
+
     use parking_lot::Mutex;
 
     use crate::stacking::pipeline::detector_pool::DetectorPool;
@@ -76,7 +69,7 @@ mod tests {
     }
 
     #[test]
-    fn slots_are_reused_across_ordered_batches() {
+    fn results_stay_ordered_and_never_use_more_detectors_than_slots() {
         let mut pool = DetectorPool::from_config(&Config::default(), 2).unwrap();
         let uses = pool
             .try_map(&[0, 1, 2, 3, 4], |detector, _index, &item| {
@@ -91,22 +84,31 @@ mod tests {
             uses.iter().map(|usage| usage.item).collect::<Vec<_>>(),
             [0, 1, 2, 3, 4]
         );
-        assert_ne!(uses[0].detector_address, uses[1].detector_address);
-        assert_eq!(uses[0].detector_address, uses[2].detector_address);
-        assert_eq!(uses[1].detector_address, uses[3].detector_address);
-        assert_eq!(uses[0].detector_address, uses[4].detector_address);
+        // Which detector sees which frame is up to whichever frees up first; what the pool
+        // guarantees is that five frames never conjure more than two detectors.
+        let distinct: HashSet<usize> = uses.iter().map(|usage| usage.detector_address).collect();
+        assert!(
+            distinct.len() <= 2,
+            "five items used {} detectors from a 2-slot pool",
+            distinct.len()
+        );
+    }
+
+    #[test]
+    fn an_error_stops_the_pool_taking_further_items() {
+        let mut pool = DetectorPool::from_config(&Config::default(), 2).unwrap();
+        let items: Vec<usize> = (0..1000).collect();
 
         let attempted = Mutex::new(Vec::new());
         let error = pool
-            .try_map(&[0, 1, 2, 3, 4], |_, _index, &item| {
+            .try_map(&items, |_, _index, &item| {
                 attempted.lock().push(item);
-                if item == 2 { Err(item) } else { Ok(item) }
+                if item == 0 { Err(item) } else { Ok(item) }
             })
             .unwrap_err();
-        assert_eq!(error, 2);
-        assert!(
-            !attempted.into_inner().contains(&4),
-            "an error in the second batch must prevent the third batch from starting"
-        );
+
+        assert_eq!(error, 0);
+        let ran = attempted.into_inner().len();
+        assert!(ran <= 16, "ran {ran} of 1000 after an immediate failure");
     }
 }
