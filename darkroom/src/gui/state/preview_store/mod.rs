@@ -14,7 +14,7 @@ use std::collections::HashMap;
 use std::num::NonZeroU32;
 
 use glam::UVec2;
-use imaginarium::{ColorFormat, Image as CpuImage, Preview, ProcessingContext};
+use imaginarium::{ColorFormat, Image as CpuImage, Preview};
 use lens::Image as LensImage;
 use palantir::{Image as Raster, ImageHandle, Ui};
 use scenarium::{DynamicValue, NodeId};
@@ -226,10 +226,7 @@ fn prepare_drawable(
     image: &LensImage,
     max_dim: Option<NonZeroU32>,
 ) -> Result<DrawableImage, PreviewImageError> {
-    let buffer = image.make_interleaved();
-    let cpu = buffer
-        .make_cpu(&ProcessingContext::cpu_only())
-        .map_err(|e| PreviewImageError::Pixels(e.to_string()))?;
+    let cpu = image.interleaved();
     let native_size = UVec2::new(cpu.desc().width as u32, cpu.desc().height as u32);
     if native_size.x == 0 || native_size.y == 0 {
         return Err(PreviewImageError::Empty);
@@ -275,7 +272,7 @@ fn capped_target(native: UVec2, max_dim: Option<NonZeroU32>) -> UVec2 {
 
 #[cfg(test)]
 pub(crate) mod internals {
-    use imaginarium::{Image as RawImage, ImageBuffer, ImageDesc};
+    use imaginarium::{Image as RawImage, ImageDesc};
 
     use super::*;
 
@@ -297,7 +294,7 @@ pub(crate) mod internals {
     pub(crate) fn opaque_image_value() -> DynamicValue {
         let desc = ImageDesc::new(2, 1, ColorFormat::RGBA_U8);
         let raw = RawImage::new_with_data(desc, vec![255; desc.row_bytes()]).unwrap();
-        DynamicValue::from_custom(LensImage::from(ImageBuffer::from_cpu(raw)))
+        DynamicValue::from_custom(LensImage::from(raw))
     }
 }
 

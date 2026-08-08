@@ -1,7 +1,7 @@
 use super::*;
 use palantir::internals::UiHarness;
 
-use imaginarium::{Image as RawImage, ImageBuffer, ImageDesc};
+use imaginarium::{Image as RawImage, ImageDesc};
 use scenarium::{ConstValue, Node, NodeKind, SpecialNode};
 
 use crate::core::document::harness::DocFixture;
@@ -11,7 +11,7 @@ fn image_value(width: usize, height: usize, format: ColorFormat) -> DynamicValue
     let desc = ImageDesc::new(width, height, format);
     let bytes = vec![128; desc.row_bytes() * height];
     let raw = RawImage::new_with_data(desc, bytes).unwrap();
-    DynamicValue::from_custom(LensImage::from(ImageBuffer::from_cpu(raw)))
+    DynamicValue::from_custom(LensImage::from(raw))
 }
 
 /// A document holding one preview node at `node`. The id is the caller's, so a

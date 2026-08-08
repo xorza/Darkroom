@@ -23,7 +23,6 @@ fn func<'a>(library: &'a scenarium::Library, name: &str) -> &'a Func {
 fn adjust_image_runs_in_place_only_for_unique_cpu_inputs() {
     let desc = imaginarium::ImageDesc::new(9, 4, ColorFormat::RGBA_U8);
     let op = ContrastBrightness::new(1.5, 0.1);
-    let mut context = imaginarium::ProcessingContext::cpu_only();
     let pattern: Vec<u8> = (0..desc.size_in_bytes())
         .map(|index| (index % 251) as u8)
         .collect();
@@ -36,9 +35,8 @@ fn adjust_image_runs_in_place_only_for_unique_cpu_inputs() {
     let image = patterned_image();
     let unique_ptr = image.bytes().as_ptr();
     let unique = DynamicValue::from_custom(Image::from(image));
-    let adjusted = adjust_image(op, &mut context, unique).unwrap();
-    let adjusted_buffer = adjusted.make_interleaved();
-    let adjusted_cpu = adjusted_buffer.make_cpu(&context).unwrap();
+    let adjusted = adjust_image(op, unique).unwrap();
+    let adjusted_cpu = adjusted.interleaved();
     assert_eq!(adjusted_cpu.bytes().as_ptr(), unique_ptr);
     assert_ne!(adjusted_cpu.bytes(), pattern.as_slice());
 
@@ -46,13 +44,11 @@ fn adjust_image_runs_in_place_only_for_unique_cpu_inputs() {
     let shared_ptr = image.bytes().as_ptr();
     let shared = DynamicValue::from_custom(Image::from(image));
     let holder = shared.clone();
-    let adjusted_shared = adjust_image(op, &mut context, shared).unwrap();
-    let shared_buffer = adjusted_shared.make_interleaved();
-    let shared_cpu = shared_buffer.make_cpu(&context).unwrap();
+    let adjusted_shared = adjust_image(op, shared).unwrap();
+    let shared_cpu = adjusted_shared.interleaved();
     assert_ne!(shared_cpu.bytes().as_ptr(), shared_ptr);
     let original = holder.as_custom::<Image>().unwrap();
-    let original_buffer = original.make_interleaved();
-    let original_cpu = original_buffer.make_cpu(&context).unwrap();
+    let original_cpu = original.interleaved();
     assert_eq!(original_cpu.bytes().as_ptr(), shared_ptr);
     assert_eq!(original_cpu.bytes(), pattern.as_slice());
     assert_eq!(adjusted_cpu.bytes(), shared_cpu.bytes());
@@ -141,10 +137,7 @@ async fn load_and_save_round_trip_exact_pixels() {
         .await
         .unwrap();
     let loaded = outputs[0].as_custom::<Image>().unwrap();
-    let buffer = loaded.make_interleaved();
-    let cpu = buffer
-        .make_cpu(&imaginarium::ProcessingContext::cpu_only())
-        .unwrap();
+    let cpu = loaded.interleaved();
     assert_eq!(cpu.desc(), desc);
     assert_eq!(cpu.bytes(), pixels);
     fs::remove_dir_all(dir).unwrap();

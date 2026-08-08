@@ -16,14 +16,6 @@ pub(crate) enum PreviewImageError {
     NotAnImage,
     #[error("image is empty")]
     Empty,
-    /// The pixels could not be read back to the CPU.
-    ///
-    /// Rendered at construction rather than held as the `imaginarium::Error`
-    /// it came from: that type is not `Clone`, and this one has to be — a
-    /// viewer reads it out from behind the store's cell rather than borrowing
-    /// it.
-    #[error("could not read image pixels: {0}")]
-    Pixels(String),
     /// The renderer refused the texture — larger than the device's maximum
     /// 2D dimension.
     #[error("{0}")]
