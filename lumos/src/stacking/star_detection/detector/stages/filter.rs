@@ -207,6 +207,7 @@ pub(crate) mod internals {
 #[cfg(test)]
 mod tests {
     use crate::stacking::star_detection::detector::stages::filter::*;
+    use crate::stacking::star_detection::roundness::Roundness;
     use crate::testing::TestRng;
     use glam::DVec2;
 
@@ -219,8 +220,10 @@ mod tests {
             snr: 50.0,
             peak: 0.5,
             sharpness: 0.3,
-            roundness1: 0.0,
-            roundness2: 0.0,
+            roundness: Roundness {
+                ground: 0.0,
+                sround: 0.0,
+            },
         }
     }
 
@@ -233,8 +236,10 @@ mod tests {
             snr: 50.0,
             peak: 0.5,
             sharpness: 0.3,
-            roundness1: 0.0,
-            roundness2: 0.0,
+            roundness: Roundness {
+                ground: 0.0,
+                sround: 0.0,
+            },
         }
     }
 
@@ -268,7 +273,10 @@ mod tests {
                 ..make_star_at(370.0, 10.0, 100.0)
             },
             Star {
-                roundness1: 0.6,
+                roundness: Roundness {
+                    ground: 0.6,
+                    sround: 0.0,
+                },
                 ..make_star_at(410.0, 10.0, 90.0)
             },
         ];

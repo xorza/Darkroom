@@ -500,6 +500,7 @@ fn recover_matches(
 #[cfg(test)]
 mod input_tests {
     use crate::stacking::registration::*;
+    use crate::stacking::star_detection::roundness::Roundness;
 
     fn make_star(fwhm: f32) -> Star {
         Star {
@@ -510,8 +511,10 @@ mod input_tests {
             snr: 100.0,
             peak: 1.0,
             sharpness: 0.5,
-            roundness1: 0.0,
-            roundness2: 0.0,
+            roundness: Roundness {
+                ground: 0.0,
+                sround: 0.0,
+            },
         }
     }
 

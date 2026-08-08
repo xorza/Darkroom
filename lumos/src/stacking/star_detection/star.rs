@@ -3,6 +3,8 @@
 use glam::DVec2;
 use serde::{Deserialize, Serialize};
 
+use crate::stacking::star_detection::roundness::Roundness;
+
 /// A detected star with sub-pixel position and quality metrics.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct Star {
@@ -21,13 +23,8 @@ pub struct Star {
     /// Sharpness metric (peak / flux_in_core). Cosmic rays have high sharpness (>0.8),
     /// real stars have lower sharpness (typically 0.2-0.6 depending on seeing).
     pub sharpness: f32,
-    /// Roundness based on marginal Gaussian fits (DAOFIND GROUND).
-    /// (Hx - Hy) / (Hx + Hy) where Hx, Hy are heights of marginal x and y fits.
-    /// Circular sources → 0, x-extended → negative, y-extended → positive.
-    pub roundness1: f32,
-    /// Roundness based on symmetry (DAOFIND SROUND).
-    /// Measures bilateral vs four-fold symmetry. Circular → 0, asymmetric → non-zero.
-    pub roundness2: f32,
+    /// The DAOFIND roundness metrics.
+    pub roundness: Roundness,
 }
 
 /// Default peak threshold (normalized) above which a star is treated as saturated.
@@ -54,7 +51,7 @@ impl Star {
     ///
     /// Both roundness metrics should be close to zero for circular sources.
     pub fn is_round(&self, max_roundness: f32) -> bool {
-        self.roundness1.abs() <= max_roundness && self.roundness2.abs() <= max_roundness
+        self.roundness.ground.abs() <= max_roundness && self.roundness.sround.abs() <= max_roundness
     }
 }
 
@@ -71,8 +68,10 @@ mod tests {
             snr: 50.0,
             peak: 0.5,
             sharpness: 0.3,
-            roundness1: 0.0,
-            roundness2: 0.0,
+            roundness: Roundness {
+                ground: 0.0,
+                sround: 0.0,
+            },
         }
     }
 
@@ -146,36 +145,44 @@ mod tests {
         // Both roundness values within threshold
         assert!(
             Star {
-                roundness1: 0.0,
-                roundness2: 0.0,
+                roundness: Roundness {
+                    ground: 0.0,
+                    sround: 0.0
+                },
                 ..make_test_star()
             }
             .is_round(0.3)
         );
         assert!(
             Star {
-                roundness1: 0.3,
-                roundness2: -0.3,
+                roundness: Roundness {
+                    ground: 0.3,
+                    sround: -0.3
+                },
                 ..make_test_star()
             }
             .is_round(0.3)
         );
 
-        // roundness1 exceeds threshold
+        // GROUND exceeds threshold
         assert!(
             !Star {
-                roundness1: 0.5,
-                roundness2: 0.0,
+                roundness: Roundness {
+                    ground: 0.5,
+                    sround: 0.0
+                },
                 ..make_test_star()
             }
             .is_round(0.3)
         );
 
-        // roundness2 exceeds threshold
+        // SROUND exceeds threshold
         assert!(
             !Star {
-                roundness1: 0.0,
-                roundness2: -0.5,
+                roundness: Roundness {
+                    ground: 0.0,
+                    sround: -0.5
+                },
                 ..make_test_star()
             }
             .is_round(0.3)

@@ -118,6 +118,7 @@ fn bench_detect_1k_sparse(b: ::quickbench::Bencher) {
 #[quick_bench(warmup_iters = 5, iters = 20)]
 fn bench_remove_duplicate_stars_5000(b: ::quickbench::Bencher) {
     use crate::stacking::star_detection::detector::stages::filter::internals::remove_duplicate_stars;
+    use crate::stacking::star_detection::roundness::Roundness;
     use crate::stacking::star_detection::star::Star;
     use rand::prelude::*;
 
@@ -132,8 +133,10 @@ fn bench_remove_duplicate_stars_5000(b: ::quickbench::Bencher) {
             snr: rng.random_range(10.0..100.0),
             peak: rng.random_range(0.1..0.9),
             sharpness: rng.random_range(0.2..0.5),
-            roundness1: rng.random_range(-0.1..0.1),
-            roundness2: rng.random_range(-0.1..0.1),
+            roundness: Roundness {
+                ground: rng.random_range(-0.1..0.1),
+                sround: rng.random_range(-0.1..0.1),
+            },
         })
         .collect();
 
@@ -148,6 +151,7 @@ fn bench_remove_duplicate_stars_5000(b: ::quickbench::Bencher) {
 #[quick_bench(warmup_iters = 5, iters = 20)]
 fn bench_remove_duplicate_stars_10000(b: ::quickbench::Bencher) {
     use crate::stacking::star_detection::detector::stages::filter::internals::remove_duplicate_stars;
+    use crate::stacking::star_detection::roundness::Roundness;
     use crate::stacking::star_detection::star::Star;
     use rand::prelude::*;
 
@@ -162,8 +166,10 @@ fn bench_remove_duplicate_stars_10000(b: ::quickbench::Bencher) {
             snr: rng.random_range(10.0..100.0),
             peak: rng.random_range(0.1..0.9),
             sharpness: rng.random_range(0.2..0.5),
-            roundness1: rng.random_range(-0.1..0.1),
-            roundness2: rng.random_range(-0.1..0.1),
+            roundness: Roundness {
+                ground: rng.random_range(-0.1..0.1),
+                sround: rng.random_range(-0.1..0.1),
+            },
         })
         .collect();
 

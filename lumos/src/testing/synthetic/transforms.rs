@@ -6,7 +6,10 @@
 
 use std::f64::consts::FRAC_PI_2;
 
-use crate::{stacking::star_detection::star::Star, testing::TestRng};
+use crate::{
+    stacking::star_detection::{roundness::Roundness, star::Star},
+    testing::TestRng,
+};
 use glam::DVec2;
 
 /// Generate random star positions within a bounded area (default 50-px margin).
@@ -47,8 +50,10 @@ pub(crate) fn positions_to_stars(positions: &[DVec2], fwhm: f32) -> Vec<Star> {
             snr: 100.0,
             peak: 1.0,
             sharpness: 0.5,
-            roundness1: 0.0,
-            roundness2: 0.0,
+            roundness: Roundness {
+                ground: 0.0,
+                sround: 0.0,
+            },
         })
         .collect()
 }
@@ -165,8 +170,10 @@ pub(crate) fn add_spurious_star_list(
             snr: 10.0,
             peak: 0.1,
             sharpness: 0.5,
-            roundness1: 0.0,
-            roundness2: 0.0,
+            roundness: Roundness {
+                ground: 0.0,
+                sround: 0.0,
+            },
         });
     }
 

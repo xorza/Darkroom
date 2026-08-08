@@ -9,7 +9,6 @@ use crate::math::FWHM_TO_SIGMA;
 use crate::math::rect::URect;
 use crate::math::vec2us::Vec2us;
 use crate::stacking::star_detection::background::estimate::BackgroundEstimate;
-use crate::stacking::star_detection::centroid::compute_roundness;
 use crate::stacking::star_detection::centroid::internals::add_noise;
 use crate::stacking::star_detection::centroid::internals::make_elliptical_star;
 use crate::stacking::star_detection::centroid::moffat_fit::alpha_beta_to_fwhm;
