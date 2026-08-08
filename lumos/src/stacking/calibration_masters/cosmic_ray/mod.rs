@@ -340,9 +340,16 @@ fn detect_and_grow(
     flags
 }
 
-/// Replace masked pixels with the median of their unmasked 5×5 neighbors (edge-clamped). Reads a
-/// snapshot so replacements within one pass use pre-replacement values; fully-masked neighborhoods
-/// (huge CRs) are left for the next iteration to shrink.
+/// Replace masked pixels with the median of their unmasked 5×5 neighbors (edge-clamped);
+/// fully-masked neighborhoods (huge CRs) are left for the next iteration to shrink.
+///
+/// The frame copy is not what makes replacements independent of each other — writes land only on
+/// masked pixels and reads only on unmasked ones, so no replacement can consult a replaced
+/// neighbour whatever order the rows run in. It is here because `pixels_mut()` is held across the
+/// reads, and it pays for itself besides: reading a separate, read-only array keeps one row's
+/// writes off the cache lines the rows above and below are reading. Aliasing the two through a raw
+/// pointer is sound (the sets are disjoint) and was measured *slower* on every run of
+/// `bench_cosmic_ray_reject_mono` — the false sharing costs more than the copy.
 fn replace_flagged(data: &mut Buffer2<f32>, size: Size2us, mask: &[bool]) {
     let src = data.pixels().to_vec();
     let (wi, hi) = (size.width as isize, size.height as isize);
