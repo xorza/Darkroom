@@ -20,10 +20,14 @@ use crate::stacking::star_detection::config::measurement_config::{
     CentroidMethod, LocalBackgroundMethod, MeasurementConfig,
 };
 use crate::stacking::star_detection::detector::stages::detect::internals::collect_components;
+use crate::stacking::star_detection::detector::stages::filter::internals::remove_duplicate_stars;
 use crate::stacking::star_detection::labeling::LabelMap;
 use crate::stacking::star_detection::labeling::internals::label_map_from_raw;
+use crate::stacking::star_detection::roundness::Roundness;
+use crate::stacking::star_detection::star::Star;
 use crate::testing::init_tracing;
 use crate::testing::synthetic::fixtures::{cluster_field, star_field};
+use glam::DVec2;
 use imaginarium::Buffer2;
 
 #[quick_bench(warmup_iters = 3, iters = 10)]
@@ -119,71 +123,51 @@ fn bench_detect_1k_sparse(b: ::quickbench::Bencher) {
     b.bench(|| black_box(detector.detect(black_box(&image))));
 }
 
-/// Benchmark remove_duplicate_stars with varying star counts.
-/// Simulates dense star field scenario similar to rho-opiuchi detection.
-#[quick_bench(warmup_iters = 5, iters = 20)]
-fn bench_remove_duplicate_stars_5000(b: ::quickbench::Bencher) {
-    use crate::stacking::star_detection::detector::stages::filter::internals::remove_duplicate_stars;
-    use crate::stacking::star_detection::roundness::Roundness;
-    use crate::stacking::star_detection::star::Star;
+/// `count` stars scattered over a `width` × `height` frame, every property randomized across the
+/// range a real detection would produce.
+fn random_stars(count: usize, width: f64, height: f64) -> Vec<Star> {
     use rand::prelude::*;
 
-    // Generate 5000 stars in a 4K image area (similar to dense field)
     let mut rng = StdRng::seed_from_u64(42);
-    let base_stars: Vec<Star> = (0..5000)
-        .map(|_| Star {
-            pos: glam::DVec2::new(rng.random_range(0.0..4096.0), rng.random_range(0.0..4096.0)),
-            flux: rng.random_range(100.0..10000.0),
-            fwhm: rng.random_range(2.0..6.0),
-            eccentricity: rng.random_range(0.0..0.3),
-            snr: rng.random_range(10.0..100.0),
-            peak: rng.random_range(0.1..0.9),
-            sharpness: rng.random_range(0.2..0.5),
-            roundness: Roundness {
+    (0..count)
+        .map(|_| {
+            Star::at(DVec2::new(
+                rng.random_range(0.0..width),
+                rng.random_range(0.0..height),
+            ))
+            .with_flux(rng.random_range(100.0..10000.0))
+            .with_fwhm(rng.random_range(2.0..6.0))
+            .with_eccentricity(rng.random_range(0.0..0.3))
+            .with_snr(rng.random_range(10.0..100.0))
+            .with_peak(rng.random_range(0.1..0.9))
+            .with_sharpness(rng.random_range(0.2..0.5))
+            .with_roundness(Roundness {
                 ground: rng.random_range(-0.1..0.1),
                 sround: rng.random_range(-0.1..0.1),
-            },
+            })
         })
-        .collect();
+        .collect()
+}
 
+fn bench_deduplication(b: ::quickbench::Bencher, base_stars: Vec<Star>) {
     b.bench(|| {
         let mut stars = base_stars.clone();
-        // Sort by flux (required by the algorithm)
+        // Sort by flux — the algorithm's documented precondition.
         stars.sort_by(|a, b| b.flux.partial_cmp(&a.flux).unwrap());
         black_box(remove_duplicate_stars(&mut stars, 5.0))
     });
 }
 
+/// Benchmark remove_duplicate_stars with varying star counts.
+/// Simulates dense star field scenario similar to rho-opiuchi detection.
+#[quick_bench(warmup_iters = 5, iters = 20)]
+fn bench_remove_duplicate_stars_5000(b: ::quickbench::Bencher) {
+    bench_deduplication(b, random_stars(5000, 4096.0, 4096.0));
+}
+
 #[quick_bench(warmup_iters = 5, iters = 20)]
 fn bench_remove_duplicate_stars_10000(b: ::quickbench::Bencher) {
-    use crate::stacking::star_detection::detector::stages::filter::internals::remove_duplicate_stars;
-    use crate::stacking::star_detection::roundness::Roundness;
-    use crate::stacking::star_detection::star::Star;
-    use rand::prelude::*;
-
-    // Generate 10000 stars - extreme case
-    let mut rng = StdRng::seed_from_u64(42);
-    let base_stars: Vec<Star> = (0..10000)
-        .map(|_| Star {
-            pos: glam::DVec2::new(rng.random_range(0.0..8000.0), rng.random_range(0.0..6000.0)),
-            flux: rng.random_range(100.0..10000.0),
-            fwhm: rng.random_range(2.0..6.0),
-            eccentricity: rng.random_range(0.0..0.3),
-            snr: rng.random_range(10.0..100.0),
-            peak: rng.random_range(0.1..0.9),
-            sharpness: rng.random_range(0.2..0.5),
-            roundness: Roundness {
-                ground: rng.random_range(-0.1..0.1),
-                sround: rng.random_range(-0.1..0.1),
-            },
-        })
-        .collect();
-
-    b.bench(|| {
-        let mut stars = base_stars.clone();
-        stars.sort_by(|a, b| b.flux.partial_cmp(&a.flux).unwrap());
-        black_box(remove_duplicate_stars(&mut stars, 5.0))
-    });
+    bench_deduplication(b, random_stars(10000, 8000.0, 6000.0));
 }
 
 fn component_label_map(size: Size2us, components: usize) -> LabelMap {

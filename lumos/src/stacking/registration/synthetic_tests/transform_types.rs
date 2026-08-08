@@ -180,10 +180,7 @@ fn test_registration_with_noise() {
         .map(|s| {
             let noise_x = (rng.next_f64() * 2.0 - 1.0) * 0.5; // +/- 0.5 pixel noise
             let noise_y = (rng.next_f64() * 2.0 - 1.0) * 0.5;
-            Star {
-                pos: DVec2::new(s.pos.x + dx + noise_x, s.pos.y + dy + noise_y),
-                ..*s
-            }
+            s.with_pos(DVec2::new(s.pos.x + dx + noise_x, s.pos.y + dy + noise_y))
         })
         .collect();
 

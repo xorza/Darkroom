@@ -56,136 +56,112 @@ impl Star {
 }
 
 #[cfg(test)]
+pub(crate) mod internals {
+    use glam::DVec2;
+
+    use crate::stacking::star_detection::roundness::Roundness;
+    use crate::stacking::star_detection::star::Star;
+
+    impl Star {
+        /// A clean star at `pos` — the base every test fixture builds on, overriding only the
+        /// fields its assertion is about.
+        ///
+        /// The defaults clear every [`FilterConfig`](crate::stacking::star_detection::config::filter_config::FilterConfig)
+        /// default with room to spare, so any rejection a test observes is the one it asked for.
+        pub(crate) fn at(pos: DVec2) -> Self {
+            Self {
+                pos,
+                flux: 100.0,
+                fwhm: 3.0,
+                eccentricity: 0.1,
+                snr: 50.0,
+                peak: 0.5,
+                sharpness: 0.3,
+                roundness: Roundness {
+                    ground: 0.0,
+                    sround: 0.0,
+                },
+            }
+        }
+
+        pub(crate) fn with_pos(mut self, pos: DVec2) -> Self {
+            self.pos = pos;
+            self
+        }
+
+        pub(crate) fn with_flux(mut self, flux: f32) -> Self {
+            self.flux = flux;
+            self
+        }
+
+        pub(crate) fn with_fwhm(mut self, fwhm: f32) -> Self {
+            self.fwhm = fwhm;
+            self
+        }
+
+        pub(crate) fn with_eccentricity(mut self, eccentricity: f32) -> Self {
+            self.eccentricity = eccentricity;
+            self
+        }
+
+        pub(crate) fn with_snr(mut self, snr: f32) -> Self {
+            self.snr = snr;
+            self
+        }
+
+        pub(crate) fn with_peak(mut self, peak: f32) -> Self {
+            self.peak = peak;
+            self
+        }
+
+        pub(crate) fn with_sharpness(mut self, sharpness: f32) -> Self {
+            self.sharpness = sharpness;
+            self
+        }
+
+        pub(crate) fn with_roundness(mut self, roundness: Roundness) -> Self {
+            self.roundness = roundness;
+            self
+        }
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use crate::stacking::star_detection::star::*;
 
-    fn make_test_star() -> Star {
-        Star {
-            pos: DVec2::new(10.0, 10.0),
-            flux: 100.0,
-            fwhm: 3.0,
-            eccentricity: 0.1,
-            snr: 50.0,
-            peak: 0.5,
-            sharpness: 0.3,
-            roundness: Roundness {
-                ground: 0.0,
-                sround: 0.0,
-            },
-        }
+    /// Position is irrelevant to the three predicates below; each test sets only its own field.
+    fn star() -> Star {
+        Star::at(DVec2::ZERO)
     }
 
     #[test]
-    fn test_is_saturated() {
-        assert!(
-            Star {
-                peak: 0.96,
-                ..make_test_star()
-            }
-            .is_saturated(0.95)
-        );
-        assert!(
-            !Star {
-                peak: 0.95,
-                ..make_test_star()
-            }
-            .is_saturated(0.95)
-        );
-        assert!(
-            !Star {
-                peak: 0.5,
-                ..make_test_star()
-            }
-            .is_saturated(0.95)
-        );
-        // Different threshold changes behavior
-        assert!(
-            Star {
-                peak: 0.85,
-                ..make_test_star()
-            }
-            .is_saturated(0.80)
-        );
-        assert!(
-            !Star {
-                peak: 0.85,
-                ..make_test_star()
-            }
-            .is_saturated(0.90)
-        );
+    fn saturation_compares_peak_against_the_given_threshold() {
+        assert!(star().with_peak(0.96).is_saturated(0.95));
+        // Strictly greater, so a peak sitting exactly on the threshold is not saturated.
+        assert!(!star().with_peak(0.95).is_saturated(0.95));
+        assert!(!star().with_peak(0.5).is_saturated(0.95));
+        // The threshold decides, not the peak: one peak, both verdicts.
+        assert!(star().with_peak(0.85).is_saturated(0.80));
+        assert!(!star().with_peak(0.85).is_saturated(0.90));
     }
 
     #[test]
-    fn test_is_cosmic_ray() {
-        assert!(
-            Star {
-                sharpness: 0.8,
-                ..make_test_star()
-            }
-            .is_cosmic_ray(0.7)
-        );
-        assert!(
-            !Star {
-                sharpness: 0.7,
-                ..make_test_star()
-            }
-            .is_cosmic_ray(0.7)
-        );
-        assert!(
-            !Star {
-                sharpness: 0.3,
-                ..make_test_star()
-            }
-            .is_cosmic_ray(0.7)
-        );
+    fn cosmic_ray_compares_sharpness_against_the_given_threshold() {
+        assert!(star().with_sharpness(0.8).is_cosmic_ray(0.7));
+        assert!(!star().with_sharpness(0.7).is_cosmic_ray(0.7));
+        assert!(!star().with_sharpness(0.3).is_cosmic_ray(0.7));
     }
 
     #[test]
-    fn test_is_round() {
-        // Both roundness values within threshold
-        assert!(
-            Star {
-                roundness: Roundness {
-                    ground: 0.0,
-                    sround: 0.0
-                },
-                ..make_test_star()
-            }
-            .is_round(0.3)
-        );
-        assert!(
-            Star {
-                roundness: Roundness {
-                    ground: 0.3,
-                    sround: -0.3
-                },
-                ..make_test_star()
-            }
-            .is_round(0.3)
-        );
+    fn roundness_requires_both_metrics_within_the_threshold() {
+        let round = |ground, sround| star().with_roundness(Roundness { ground, sround });
 
-        // GROUND exceeds threshold
-        assert!(
-            !Star {
-                roundness: Roundness {
-                    ground: 0.5,
-                    sround: 0.0
-                },
-                ..make_test_star()
-            }
-            .is_round(0.3)
-        );
-
-        // SROUND exceeds threshold
-        assert!(
-            !Star {
-                roundness: Roundness {
-                    ground: 0.0,
-                    sround: -0.5
-                },
-                ..make_test_star()
-            }
-            .is_round(0.3)
-        );
+        assert!(round(0.0, 0.0).is_round(0.3));
+        // Compared by magnitude, so both metrics sitting on the bound with opposite signs pass.
+        assert!(round(0.3, -0.3).is_round(0.3));
+        // Either one over the bound fails the whole check.
+        assert!(!round(0.5, 0.0).is_round(0.3));
+        assert!(!round(0.0, -0.5).is_round(0.3));
     }
 }

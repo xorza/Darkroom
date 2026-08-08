@@ -3,7 +3,6 @@
 //! Creates annotated images showing ground truth vs detected stars.
 
 use crate::math::size2us::Size2us;
-use crate::stacking::star_detection::roundness::Roundness;
 use crate::stacking::star_detection::star::Star;
 use crate::stacking::star_detection::test_common::output::image_writer::gray_to_rgb_image;
 use crate::testing::synthetic::observe::ObservedSource;
@@ -167,33 +166,10 @@ mod tests {
             },
         ];
 
+        // `match_stars` reads only `pos`; everything else stays at the fixture default.
         let detected = vec![
-            Star {
-                pos: glam::DVec2::new(10.1, 10.1),
-                flux: 1.0,
-                fwhm: 3.0,
-                eccentricity: 0.0,
-                snr: 50.0,
-                peak: 0.5,
-                sharpness: 0.3,
-                roundness: Roundness {
-                    ground: 0.0,
-                    sround: 0.0,
-                },
-            },
-            Star {
-                pos: glam::DVec2::new(50.2, 49.8),
-                flux: 1.0,
-                fwhm: 3.0,
-                eccentricity: 0.0,
-                snr: 50.0,
-                peak: 0.5,
-                sharpness: 0.3,
-                roundness: Roundness {
-                    ground: 0.0,
-                    sround: 0.0,
-                },
-            },
+            Star::at(glam::DVec2::new(10.1, 10.1)),
+            Star::at(glam::DVec2::new(50.2, 49.8)),
         ];
 
         let result = match_stars(&truth, &detected, 5.0);
@@ -211,32 +187,8 @@ mod tests {
         }];
 
         let detected = vec![
-            Star {
-                pos: glam::DVec2::new(10.1, 10.1),
-                flux: 1.0,
-                fwhm: 3.0,
-                eccentricity: 0.0,
-                snr: 50.0,
-                peak: 0.5,
-                sharpness: 0.3,
-                roundness: Roundness {
-                    ground: 0.0,
-                    sround: 0.0,
-                },
-            },
-            Star {
-                pos: glam::DVec2::new(100.0, 100.0),
-                flux: 1.0,
-                fwhm: 3.0,
-                eccentricity: 0.0,
-                snr: 50.0,
-                peak: 0.5,
-                sharpness: 0.3,
-                roundness: Roundness {
-                    ground: 0.0,
-                    sround: 0.0,
-                },
-            }, // False positive
+            Star::at(glam::DVec2::new(10.1, 10.1)),
+            Star::at(glam::DVec2::new(100.0, 100.0)), // False positive
         ];
 
         let result = match_stars(&truth, &detected, 5.0);

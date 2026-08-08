@@ -589,10 +589,7 @@ fn test_stress_partial_overlap_with_noise() {
             let r = s.pos - center;
             let new_x = cos_a * r.x - sin_a * r.y + center.x + offset.x;
             let new_y = sin_a * r.x + cos_a * r.y + center.y + offset.y;
-            Star {
-                pos: DVec2::new(new_x, new_y),
-                ..*s
-            }
+            s.with_pos(DVec2::new(new_x, new_y))
         })
         .filter(|s| s.pos.x >= 50.0 && s.pos.x <= 1950.0 && s.pos.y >= 50.0 && s.pos.y <= 1950.0)
         .collect();

@@ -1275,27 +1275,15 @@ fn test_asymmetric_star_sround() {
 fn test_star_is_round() {
     use crate::stacking::star_detection::star::Star;
 
-    let round_star = Star {
-        pos: glam::DVec2::new(10.0, 10.0),
-        flux: 100.0,
-        fwhm: 3.0,
-        eccentricity: 0.1,
-        snr: 50.0,
-        peak: 0.5,
-        sharpness: 0.3,
-        roundness: Roundness {
-            ground: 0.05,
-            sround: 0.03,
-        },
-    };
+    let round_star = Star::at(glam::DVec2::new(10.0, 10.0)).with_roundness(Roundness {
+        ground: 0.05,
+        sround: 0.03,
+    });
 
-    let non_round_star = Star {
-        roundness: Roundness {
-            ground: 0.5,
-            sround: 0.4,
-        },
-        ..round_star
-    };
+    let non_round_star = round_star.with_roundness(Roundness {
+        ground: 0.5,
+        sround: 0.4,
+    });
 
     assert!(
         round_star.is_round(0.2),
