@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Barrier};
 
 use rayon::ThreadPoolBuilder;
@@ -46,26 +46,46 @@ fn limited_map_preserves_order_and_reaches_the_exact_cap() {
     assert_eq!(in_flight.load(Ordering::SeqCst), 0);
 }
 
+/// Hold a job until `failed` is set, so the workers already in flight cannot race ahead through
+/// the cheap remainder before the failure is visible.
+///
+/// The wait always ends: indices are handed out by one `fetch_add`, so index 0 — the one that
+/// fails — is claimed before any other, and whichever worker holds it is running. The iteration
+/// cap only stops a regression from hanging the suite instead of failing it.
+fn wait_for_failure(failed: &AtomicBool) {
+    for _ in 0..1_000_000_000u64 {
+        if failed.load(Ordering::SeqCst) {
+            return;
+        }
+        std::hint::spin_loop();
+    }
+}
+
 #[test]
 fn limited_map_propagates_error_and_stops_taking_work() {
+    const SLOTS: usize = 3;
     let started = AtomicUsize::new(0);
+    let failed = AtomicBool::new(false);
     let items: Vec<usize> = (0..1000).collect();
 
-    let result = try_par_map_limited(&items, 3, |_index, value| {
+    let result = try_par_map_limited(&items, SLOTS, |_index, value| {
         started.fetch_add(1, Ordering::SeqCst);
         if *value == 0 {
-            Err("zero")
-        } else {
-            Ok(value * 2)
+            failed.store(true, Ordering::SeqCst);
+            return Err("zero");
         }
+        wait_for_failure(&failed);
+        Ok(value * 2)
     });
 
     assert_eq!(result, Err("zero"));
-    // Item 0 fails immediately. The other two slots finish whatever they took, and a worker that
-    // read the counter just before the failure landed may run one more — a slot's worth of waste,
-    // nowhere near the 1000 a run-to-completion would do.
+    // Every worker is holding its first item when the failure lands, so each can only finish that
+    // one and then find the flag set. At most one item per slot ran; the 997 after them did not.
     let ran = started.load(Ordering::SeqCst);
-    assert!(ran <= 16, "ran {ran} of 1000 after an immediate failure");
+    assert!(
+        ran <= SLOTS,
+        "ran {ran} of 1000 with {SLOTS} slots after an immediate failure"
+    );
 }
 
 #[test]
@@ -97,19 +117,26 @@ fn owned_map_indexes_by_input_position() {
 
 #[test]
 fn owned_map_propagates_error_and_stops_taking_work() {
+    const SLOTS: usize = 3;
     let started = AtomicUsize::new(0);
+    let failed = AtomicBool::new(false);
     let items: Vec<usize> = (0..1000).collect();
 
-    let result = try_par_map_limited_owned(items, 3, |_index, value| {
+    let result = try_par_map_limited_owned(items, SLOTS, |_index, value| {
         started.fetch_add(1, Ordering::SeqCst);
         if value == 0 {
-            Err("zero")
-        } else {
-            Ok(value * 2)
+            failed.store(true, Ordering::SeqCst);
+            return Err("zero");
         }
+        wait_for_failure(&failed);
+        Ok(value * 2)
     });
 
     assert_eq!(result, Err("zero"));
+    // Held the same way as the borrowed variant above, so the bound is the slot count.
     let ran = started.load(Ordering::SeqCst);
-    assert!(ran <= 16, "ran {ran} of 1000 after an immediate failure");
+    assert!(
+        ran <= SLOTS,
+        "ran {ran} of 1000 with {SLOTS} slots after an immediate failure"
+    );
 }

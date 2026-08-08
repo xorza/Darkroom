@@ -55,6 +55,7 @@ impl DetectorPool {
 #[cfg(test)]
 mod tests {
     use std::collections::HashSet;
+    use std::sync::atomic::{AtomicBool, Ordering};
 
     use parking_lot::Mutex;
 
@@ -96,19 +97,37 @@ mod tests {
 
     #[test]
     fn an_error_stops_the_pool_taking_further_items() {
-        let mut pool = DetectorPool::from_config(&Config::default(), 2).unwrap();
+        const SLOTS: usize = 2;
+        let mut pool = DetectorPool::from_config(&Config::default(), SLOTS).unwrap();
         let items: Vec<usize> = (0..1000).collect();
 
+        // Each slot is held on its first item until the failure is recorded, so this measures
+        // "no further items are taken once the failure is visible" rather than how fast the flag
+        // propagates. Item 0 is always claimed first, so the wait always ends.
         let attempted = Mutex::new(Vec::new());
+        let failed = AtomicBool::new(false);
         let error = pool
             .try_map(&items, |_, _index, &item| {
                 attempted.lock().push(item);
-                if item == 0 { Err(item) } else { Ok(item) }
+                if item == 0 {
+                    failed.store(true, Ordering::SeqCst);
+                    return Err(item);
+                }
+                for _ in 0..1_000_000_000u64 {
+                    if failed.load(Ordering::SeqCst) {
+                        break;
+                    }
+                    std::hint::spin_loop();
+                }
+                Ok(item)
             })
             .unwrap_err();
 
         assert_eq!(error, 0);
         let ran = attempted.into_inner().len();
-        assert!(ran <= 16, "ran {ran} of 1000 after an immediate failure");
+        assert!(
+            ran <= SLOTS,
+            "ran {ran} of 1000 with {SLOTS} slots after an immediate failure"
+        );
     }
 }
