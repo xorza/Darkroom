@@ -18,6 +18,7 @@ use glam::DVec2;
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 use crate::stacking::registration::distortion::SINGULAR_THRESHOLD;
+use crate::stacking::registration::distortion::point_normalization::PointNormalization;
 
 /// Configuration for thin-plate spline fitting.
 #[derive(Debug, Clone)]
@@ -52,10 +53,8 @@ struct ThinPlateSpline {
     affine_x: [f64; 3],
     /// Affine coefficients for y: b0 + b1*x + b2*y (in normalized space)
     affine_y: [f64; 3],
-    /// Center of the coordinate normalization box
-    norm_center: DVec2,
-    /// Scale factor for coordinate normalization
-    norm_scale: f64,
+    /// Coordinate normalization the control points and coefficients are expressed in
+    norm: PointNormalization,
 }
 
 impl ThinPlateSpline {
@@ -82,16 +81,10 @@ impl ThinPlateSpline {
         // This dramatically improves conditioning of the TPS system matrix because
         // the kernel r^2*ln(r) amplifies scale differences (e.g. r=7200 gives ~4.6e8
         // while affine terms are O(6000)).
-        let (norm_center, norm_scale) = compute_normalization(source_points);
+        let norm = compute_normalization(source_points);
 
-        let src_norm: Vec<DVec2> = source_points
-            .iter()
-            .map(|&p| (p - norm_center) / norm_scale)
-            .collect();
-        let tgt_norm: Vec<DVec2> = target_points
-            .iter()
-            .map(|&p| (p - norm_center) / norm_scale)
-            .collect();
+        let src_norm: Vec<DVec2> = source_points.iter().map(|&p| norm.normalize(p)).collect();
+        let tgt_norm: Vec<DVec2> = target_points.iter().map(|&p| norm.normalize(p)).collect();
 
         // Build the TPS system matrix in normalized coordinates.
         // The system has the form:
@@ -158,8 +151,7 @@ impl ThinPlateSpline {
             weights_y,
             affine_x,
             affine_y,
-            norm_center,
-            norm_scale,
+            norm,
         })
     }
 
@@ -172,7 +164,7 @@ impl ThinPlateSpline {
     /// Transformed coordinates
     fn transform(&self, p: DVec2) -> DVec2 {
         // Normalize input to the same space used during fitting
-        let pn = (p - self.norm_center) / self.norm_scale;
+        let pn = self.norm.normalize(p);
 
         // Affine component using dot product for linear terms
         let affine_coeffs_x = DVec2::new(self.affine_x[1], self.affine_x[2]);
@@ -189,7 +181,7 @@ impl ThinPlateSpline {
         }
 
         // Denormalize output back to pixel coordinates
-        DVec2::new(tx, ty) * self.norm_scale + self.norm_center
+        self.norm.denormalize(DVec2::new(tx, ty))
     }
 
     /// Transform multiple points efficiently.
@@ -256,17 +248,16 @@ impl ThinPlateSpline {
                     tx += self.weights_x[i] * u;
                     ty += self.weights_y[i] * u;
                 }
-                let result = DVec2::new(tx, ty) * self.norm_scale + self.norm_center;
+                let result = self.norm.denormalize(DVec2::new(tx, ty));
                 result.distance(tgt)
             })
             .collect()
     }
 }
 
-/// Compute normalization center and scale from a set of points.
-/// Returns `(center, scale)` where center is the midpoint of the bounding box
-/// and scale is half the larger dimension (so normalized coords are in ~[-1, 1]).
-fn compute_normalization(points: &[DVec2]) -> (DVec2, f64) {
+/// Fit the coordinate normalization to a set of points: the bounding-box midpoint as center,
+/// half the larger box dimension as scale (so normalized coords are in ~[-1, 1]).
+fn compute_normalization(points: &[DVec2]) -> PointNormalization {
     let mut min = DVec2::new(f64::MAX, f64::MAX);
     let mut max = DVec2::new(f64::MIN, f64::MIN);
     for &p in points {
@@ -278,7 +269,7 @@ fn compute_normalization(points: &[DVec2]) -> (DVec2, f64) {
     let scale = range.x.max(range.y) * 0.5;
     // Guard against degenerate case (all points coincident)
     let scale = if scale < 1e-12 { 1.0 } else { scale };
-    (center, scale)
+    PointNormalization::new(center, scale)
 }
 
 /// TPS radial basis function: U(r) = r² log(r)

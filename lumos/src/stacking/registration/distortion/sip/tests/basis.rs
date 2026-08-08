@@ -76,43 +76,43 @@ fn test_term_exponents_all_satisfy_constraints() {
 fn test_monomial_hand_computed() {
     // u^2 * v^0 = u^2
     // u=3.0, v=5.0: 3^2 * 5^0 = 9.0 * 1.0 = 9.0
-    assert_eq!(monomial(3.0, 5.0, 2, 0), 9.0);
+    assert_eq!(monomial(DVec2::new(3.0, 5.0), 2, 0), 9.0);
 
     // u^0 * v^3 = v^3
     // u=3.0, v=2.0: 3^0 * 2^3 = 1.0 * 8.0 = 8.0
-    assert_eq!(monomial(3.0, 2.0, 0, 3), 8.0);
+    assert_eq!(monomial(DVec2::new(3.0, 2.0), 0, 3), 8.0);
 
     // u^1 * v^1 = u*v
     // u=4.0, v=7.0: 4 * 7 = 28.0
-    assert_eq!(monomial(4.0, 7.0, 1, 1), 28.0);
+    assert_eq!(monomial(DVec2::new(4.0, 7.0), 1, 1), 28.0);
 
     // u^3 * v^2
     // u=2.0, v=3.0: 8.0 * 9.0 = 72.0
-    assert_eq!(monomial(2.0, 3.0, 3, 2), 72.0);
+    assert_eq!(monomial(DVec2::new(2.0, 3.0), 3, 2), 72.0);
 
     // u^0 * v^0 = 1.0 for any (u, v)
-    assert_eq!(monomial(42.0, 99.0, 0, 0), 1.0);
+    assert_eq!(monomial(DVec2::new(42.0, 99.0), 0, 0), 1.0);
 }
 
 #[test]
 fn test_monomial_zero_input() {
     // u=0, v=0: u^p * v^q = 0 for any p>0 or q>0
-    assert_eq!(monomial(0.0, 0.0, 2, 0), 0.0);
-    assert_eq!(monomial(0.0, 0.0, 0, 2), 0.0);
-    assert_eq!(monomial(0.0, 0.0, 1, 1), 0.0);
+    assert_eq!(monomial(DVec2::ZERO, 2, 0), 0.0);
+    assert_eq!(monomial(DVec2::ZERO, 0, 2), 0.0);
+    assert_eq!(monomial(DVec2::ZERO, 1, 1), 0.0);
     // u^0 * v^0 = 1.0 even at origin
-    assert_eq!(monomial(0.0, 0.0, 0, 0), 1.0);
+    assert_eq!(monomial(DVec2::ZERO, 0, 0), 1.0);
 }
 
 #[test]
 fn test_monomial_negative_input() {
     // u=-2.0, v=3.0, p=3, q=1
     // (-2)^3 * 3^1 = -8 * 3 = -24.0
-    assert_eq!(monomial(-2.0, 3.0, 3, 1), -24.0);
+    assert_eq!(monomial(DVec2::new(-2.0, 3.0), 3, 1), -24.0);
 
     // u=-2.0, v=-3.0, p=2, q=2
     // (-2)^2 * (-3)^2 = 4 * 9 = 36.0
-    assert_eq!(monomial(-2.0, -3.0, 2, 2), 36.0);
+    assert_eq!(monomial(DVec2::new(-2.0, -3.0), 2, 2), 36.0);
 }
 
 #[test]
