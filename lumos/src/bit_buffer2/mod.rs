@@ -6,6 +6,7 @@
 
 use std::ops::Index;
 
+use crate::buffer_pool::PooledBuffer;
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 
@@ -64,6 +65,16 @@ pub(crate) struct BitBuffer2 {
     pub(crate) len: usize,
     /// Number of bits per row including padding (aligned to 128 bits).
     pub(crate) stride: usize,
+}
+
+impl PooledBuffer for BitBuffer2 {
+    fn allocate(dimensions: Size2us) -> Self {
+        Self::new_filled(dimensions, false)
+    }
+
+    fn dimensions(&self) -> Size2us {
+        self.size
+    }
 }
 
 impl BitBuffer2 {
