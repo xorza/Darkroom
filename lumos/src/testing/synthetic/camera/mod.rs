@@ -8,9 +8,8 @@
 use crate::math::fwhm_to_sigma;
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
-use crate::testing::synthetic::star_profiles::{
-    fwhm_to_moffat_alpha, render_elliptical_star, render_gaussian_star, render_moffat_star,
-};
+use crate::testing::synthetic::star_profiles::{StarProfile, SyntheticStar, fwhm_to_moffat_alpha};
+use glam::Vec2;
 use std::f32::consts::PI;
 
 /// Point-spread function the camera convolves every point source with.
@@ -51,16 +50,20 @@ impl PsfModel {
         flux: f32,
         seeing_scale: f32,
     ) {
-        match *self {
+        let (profile, amplitude) = match *self {
             PsfModel::Gaussian { fwhm } => {
                 let sigma = fwhm_to_sigma(fwhm * seeing_scale);
-                let amplitude = flux / (2.0 * PI * sigma * sigma);
-                render_gaussian_star(pixels, width, x, y, sigma, amplitude);
+                (
+                    StarProfile::Gaussian { sigma },
+                    flux / (2.0 * PI * sigma * sigma),
+                )
             }
             PsfModel::Moffat { fwhm, beta } => {
                 let alpha = fwhm_to_moffat_alpha(fwhm * seeing_scale, beta);
-                let amplitude = flux * (beta - 1.0) / (PI * alpha * alpha);
-                render_moffat_star(pixels, width, x, y, alpha, beta, amplitude);
+                (
+                    StarProfile::Moffat { alpha, beta },
+                    flux * (beta - 1.0) / (PI * alpha * alpha),
+                )
             }
             PsfModel::Elliptical {
                 fwhm,
@@ -72,19 +75,17 @@ impl PsfModel {
                 let one_minus_e2 = 1.0 - eccentricity * eccentricity;
                 let sigma_major = sigma / one_minus_e2.sqrt().sqrt();
                 let sigma_minor = sigma_major * one_minus_e2.sqrt();
-                let amplitude = flux / (2.0 * PI * sigma_major * sigma_minor);
-                render_elliptical_star(
-                    pixels,
-                    width,
-                    x,
-                    y,
-                    sigma_major,
-                    sigma_minor,
-                    angle,
-                    amplitude,
-                );
+                (
+                    StarProfile::Elliptical {
+                        sigma_x: sigma_major,
+                        sigma_y: sigma_minor,
+                        angle,
+                    },
+                    flux / (2.0 * PI * sigma_major * sigma_minor),
+                )
             }
-        }
+        };
+        SyntheticStar::new(Vec2::new(x, y), amplitude, profile).add_to(pixels, width);
     }
 }
 

@@ -17,7 +17,7 @@ use crate::stacking::star_detection::config::measurement_config::{
 use crate::stacking::star_detection::deblend::region::Region;
 use crate::stacking::star_detection::synthetic_tests::stage_tests::background_estimate;
 use crate::testing::TestRng;
-use crate::testing::synthetic::star_profiles::render_gaussian_star;
+use crate::testing::synthetic::star_profiles::{StarProfile, SyntheticStar};
 use imaginarium::Buffer2;
 
 /// Render `stars` as `(x, y, brightness)` Gaussians of width `sigma` on a 0.1 sky + Gaussian
@@ -32,7 +32,12 @@ fn field(
     let mut pixels = vec![0.1f32; size.pixel_count()];
     for &(x, y, brightness) in stars {
         let amplitude = brightness / (2.0 * PI * sigma * sigma);
-        render_gaussian_star(&mut pixels, size.width, x, y, sigma, amplitude);
+        SyntheticStar::new(
+            glam::Vec2::new(x, y),
+            amplitude,
+            StarProfile::Gaussian { sigma },
+        )
+        .add_to(&mut pixels, size.width);
     }
     let mut rng = TestRng::new(seed);
     for p in &mut pixels {

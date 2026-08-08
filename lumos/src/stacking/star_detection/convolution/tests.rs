@@ -4,6 +4,7 @@ use std::f32::consts::FRAC_PI_2;
 
 use crate::stacking::star_detection::convolution::*;
 use crate::testing::TestRng;
+use crate::testing::synthetic::star_profiles::{StarProfile, SyntheticStar};
 use crate::{
     math::FWHM_TO_SIGMA, stacking::star_detection::convolution::elliptical_gaussian_kernel_2d,
 };
@@ -389,18 +390,13 @@ fn test_matched_filter_boosts_snr() {
     let mut pixels = vec![0.1f32; width * height];
     let cx = 32;
     let cy = 32;
-
-    // Add Gaussian-like star
     let sigma = 2.0;
-    for dy in -6..=6 {
-        for dx in -6..=6 {
-            let r2 = (dx * dx + dy * dy) as f32;
-            let value = 0.3 * (-r2 / (2.0 * sigma * sigma)).exp();
-            let x = (cx as i32 + dx) as usize;
-            let y = (cy as i32 + dy) as usize;
-            pixels[y * width + x] += value;
-        }
-    }
+    SyntheticStar::new(
+        glam::Vec2::new(cx as f32, cy as f32),
+        0.3,
+        StarProfile::Gaussian { sigma },
+    )
+    .add_to(&mut pixels, width);
 
     // Add some noise
     for (i, p) in pixels.iter_mut().enumerate() {

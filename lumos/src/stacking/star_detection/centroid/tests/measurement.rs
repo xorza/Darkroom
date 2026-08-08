@@ -6,7 +6,8 @@ fn test_refine_centroid_centered_star() {
     let width = 64;
     let height = 64;
     let pos = Vec2::splat(32.0);
-    let pixels = make_gaussian_star(Size2us::new(width, height), pos, 2.5, 0.8, 0.1);
+    let pixels = SyntheticStar::new(pos, 0.8, StarProfile::Gaussian { sigma: 2.5 })
+        .stamp(Size2us::new(width, height), 0.1);
     let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
 
     let result = refine_centroid(
@@ -30,7 +31,8 @@ fn test_refine_centroid_offset_converges() {
     let width = 64;
     let height = 64;
     let true_pos = Vec2::new(32.3, 32.7);
-    let pixels = make_gaussian_star(Size2us::new(width, height), true_pos, 2.5, 0.8, 0.1);
+    let pixels = SyntheticStar::new(true_pos, 0.8, StarProfile::Gaussian { sigma: 2.5 })
+        .stamp(Size2us::new(width, height), 0.1);
     let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
 
     // Start with integer guess (peak pixel position)
@@ -102,13 +104,8 @@ fn test_refine_centroid_rejects_large_movement() {
     let width = 64;
     let height = 64;
     // Create a star very far from initial position (outside the stamp entirely)
-    let pixels = make_gaussian_star(
-        Size2us::new(width, height),
-        Vec2::splat(50.0),
-        2.5,
-        0.8,
-        0.1,
-    );
+    let pixels = SyntheticStar::new(Vec2::splat(50.0), 0.8, StarProfile::Gaussian { sigma: 2.5 })
+        .stamp(Size2us::new(width, height), 0.1);
     let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
 
     // Start far from the actual star - the stamp won't contain the star,
@@ -132,7 +129,8 @@ fn test_refine_centroid_iterative_convergence() {
     let width = 64;
     let height = 64;
     let true_pos = Vec2::new(32.25, 32.75);
-    let pixels = make_gaussian_star(Size2us::new(width, height), true_pos, 2.5, 0.8, 0.1);
+    let pixels = SyntheticStar::new(true_pos, 0.8, StarProfile::Gaussian { sigma: 2.5 })
+        .stamp(Size2us::new(width, height), 0.1);
     let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
 
     // Simulate multiple iterations like measure_star does
@@ -167,13 +165,8 @@ fn test_refine_centroid_iterative_convergence() {
 fn test_compute_star_valid_star() {
     let width = 64;
     let height = 64;
-    let pixels = make_gaussian_star(
-        Size2us::new(width, height),
-        Vec2::splat(32.0),
-        2.5,
-        0.8,
-        0.1,
-    );
+    let pixels = SyntheticStar::new(Vec2::splat(32.0), 0.8, StarProfile::Gaussian { sigma: 2.5 })
+        .stamp(Size2us::new(width, height), 0.1);
     let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
 
     let peak = 0.73;
@@ -213,7 +206,8 @@ fn test_compute_star_background_override_replaces_global_map() {
     let width = 64;
     let height = 64;
     let pos = Vec2::splat(32.0);
-    let pixels = make_gaussian_star(Size2us::new(width, height), pos, 2.5, 0.8, 0.1);
+    let pixels = SyntheticStar::new(pos, 0.8, StarProfile::Gaussian { sigma: 2.5 })
+        .stamp(Size2us::new(width, height), 0.1);
     let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
     let local_bg = LocalBackground {
         bg: 0.05,
@@ -305,20 +299,18 @@ fn test_compute_star_fwhm_scales_with_sigma() {
     let sigma_small = 2.0f32;
     let sigma_large = 4.0f32;
 
-    let pixels_small = make_gaussian_star(
-        Size2us::new(width, height),
+    let pixels_small = SyntheticStar::new(
         Vec2::splat(64.0),
-        sigma_small,
         0.8,
-        0.1,
-    );
-    let pixels_large = make_gaussian_star(
-        Size2us::new(width, height),
+        StarProfile::Gaussian { sigma: sigma_small },
+    )
+    .stamp(Size2us::new(width, height), 0.1);
+    let pixels_large = SyntheticStar::new(
         Vec2::splat(64.0),
-        sigma_large,
         0.8,
-        0.1,
-    );
+        StarProfile::Gaussian { sigma: sigma_large },
+    )
+    .stamp(Size2us::new(width, height), 0.1);
     let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
 
     let metrics_small = compute_star(
@@ -356,20 +348,12 @@ fn test_compute_star_snr_scales_with_amplitude() {
     let width = 64;
     let height = 64;
 
-    let pixels_dim = make_gaussian_star(
-        Size2us::new(width, height),
-        Vec2::splat(32.0),
-        2.5,
-        0.2,
-        0.1,
-    );
-    let pixels_bright = make_gaussian_star(
-        Size2us::new(width, height),
-        Vec2::splat(32.0),
-        2.5,
-        0.8,
-        0.1,
-    );
+    let pixels_dim =
+        SyntheticStar::new(Vec2::splat(32.0), 0.2, StarProfile::Gaussian { sigma: 2.5 })
+            .stamp(Size2us::new(width, height), 0.1);
+    let pixels_bright =
+        SyntheticStar::new(Vec2::splat(32.0), 0.8, StarProfile::Gaussian { sigma: 2.5 })
+            .stamp(Size2us::new(width, height), 0.1);
     let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
 
     let metrics_dim = compute_star(
@@ -407,14 +391,16 @@ fn test_elongated_star_high_eccentricity() {
     let width = 64;
     let height = 64;
     // Elongated star: sigma_x = 4, sigma_y = 1 (4:1 aspect ratio)
-    let pixels = make_elliptical_star(
-        Size2us::new(width, height),
+    let pixels = SyntheticStar::new(
         Vec2::splat(32.0),
-        4.0,
-        1.5,
         0.8,
-        0.1,
-    );
+        StarProfile::Elliptical {
+            sigma_x: 4.0,
+            sigma_y: 1.5,
+            angle: 0.0,
+        },
+    )
+    .stamp(Size2us::new(width, height), 0.1);
     let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
 
     let metrics = compute_star(
@@ -441,21 +427,18 @@ fn test_circular_vs_elongated_eccentricity() {
     let width = 64;
     let height = 64;
 
-    let circular = make_gaussian_star(
-        Size2us::new(width, height),
+    let circular = SyntheticStar::new(Vec2::splat(32.0), 0.8, StarProfile::Gaussian { sigma: 2.5 })
+        .stamp(Size2us::new(width, height), 0.1);
+    let elongated = SyntheticStar::new(
         Vec2::splat(32.0),
-        2.5,
         0.8,
-        0.1,
-    );
-    let elongated = make_elliptical_star(
-        Size2us::new(width, height),
-        Vec2::splat(32.0),
-        4.0,
-        2.0,
-        0.8,
-        0.1,
-    );
+        StarProfile::Elliptical {
+            sigma_x: 4.0,
+            sigma_y: 2.0,
+            angle: 0.0,
+        },
+    )
+    .stamp(Size2us::new(width, height), 0.1);
     let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
 
     let metrics_circular = compute_star(
@@ -494,7 +477,8 @@ fn test_centroid_with_noisy_background() {
     let true_pos = Vec2::splat(32.0);
 
     // Create star with added noise
-    let mut pixels = make_gaussian_star(Size2us::new(width, height), true_pos, 2.5, 0.8, 0.1);
+    let mut pixels = SyntheticStar::new(true_pos, 0.8, StarProfile::Gaussian { sigma: 2.5 })
+        .stamp(Size2us::new(width, height), 0.1);
 
     // Add random-ish noise pattern (deterministic for reproducibility)
     for (i, pixel) in pixels.iter_mut().enumerate() {
@@ -530,13 +514,8 @@ fn test_centroid_with_noisy_background() {
 fn test_snr_decreases_with_higher_noise() {
     let width = 64;
     let height = 64;
-    let pixels = make_gaussian_star(
-        Size2us::new(width, height),
-        Vec2::splat(32.0),
-        2.5,
-        0.8,
-        0.1,
-    );
+    let pixels = SyntheticStar::new(Vec2::splat(32.0), 0.8, StarProfile::Gaussian { sigma: 2.5 })
+        .stamp(Size2us::new(width, height), 0.1);
 
     let bg_low_noise = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
     let bg_high_noise = make_uniform_background(Size2us::new(width, height), 0.1, 0.1);
@@ -578,13 +557,8 @@ fn test_fwhm_formula_for_known_gaussian() {
     let sigma = 3.0f32;
     let expected_fwhm = FWHM_TO_SIGMA * sigma;
 
-    let pixels = make_gaussian_star(
-        Size2us::new(width, height),
-        Vec2::splat(64.0),
-        sigma,
-        0.8,
-        0.1,
-    );
+    let pixels = SyntheticStar::new(Vec2::splat(64.0), 0.8, StarProfile::Gaussian { sigma })
+        .stamp(Size2us::new(width, height), 0.1);
     let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.001); // Very low noise
 
     let metrics = compute_star(
@@ -614,20 +588,12 @@ fn test_flux_proportional_to_amplitude() {
     let width = 64;
     let height = 64;
 
-    let pixels_amp1 = make_gaussian_star(
-        Size2us::new(width, height),
-        Vec2::splat(32.0),
-        2.5,
-        0.4,
-        0.1,
-    );
-    let pixels_amp2 = make_gaussian_star(
-        Size2us::new(width, height),
-        Vec2::splat(32.0),
-        2.5,
-        0.8,
-        0.1,
-    );
+    let pixels_amp1 =
+        SyntheticStar::new(Vec2::splat(32.0), 0.4, StarProfile::Gaussian { sigma: 2.5 })
+            .stamp(Size2us::new(width, height), 0.1);
+    let pixels_amp2 =
+        SyntheticStar::new(Vec2::splat(32.0), 0.8, StarProfile::Gaussian { sigma: 2.5 })
+            .stamp(Size2us::new(width, height), 0.1);
     let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
 
     let metrics1 = compute_star(
@@ -671,29 +637,28 @@ fn test_eccentricity_bounds() {
     let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
 
     // Test various star shapes
-    let circular = make_gaussian_star(
-        Size2us::new(width, height),
+    let circular = SyntheticStar::new(Vec2::splat(32.0), 0.8, StarProfile::Gaussian { sigma: 2.5 })
+        .stamp(Size2us::new(width, height), 0.1);
+    let elongated_x = SyntheticStar::new(
         Vec2::splat(32.0),
-        2.5,
         0.8,
-        0.1,
-    );
-    let elongated_x = make_elliptical_star(
-        Size2us::new(width, height),
+        StarProfile::Elliptical {
+            sigma_x: 5.0,
+            sigma_y: 2.0,
+            angle: 0.0,
+        },
+    )
+    .stamp(Size2us::new(width, height), 0.1);
+    let elongated_y = SyntheticStar::new(
         Vec2::splat(32.0),
-        5.0,
-        2.0,
         0.8,
-        0.1,
-    );
-    let elongated_y = make_elliptical_star(
-        Size2us::new(width, height),
-        Vec2::splat(32.0),
-        2.0,
-        5.0,
-        0.8,
-        0.1,
-    );
+        StarProfile::Elliptical {
+            sigma_x: 2.0,
+            sigma_y: 5.0,
+            angle: 0.0,
+        },
+    )
+    .stamp(Size2us::new(width, height), 0.1);
 
     for (name, pixels) in [
         ("circular", circular),
@@ -726,22 +691,26 @@ fn test_eccentricity_orientation_invariant() {
     let height = 64;
     let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
 
-    let elongated_x = make_elliptical_star(
-        Size2us::new(width, height),
+    let elongated_x = SyntheticStar::new(
         Vec2::splat(32.0),
-        4.0,
-        2.0,
         0.8,
-        0.1,
-    );
-    let elongated_y = make_elliptical_star(
-        Size2us::new(width, height),
+        StarProfile::Elliptical {
+            sigma_x: 4.0,
+            sigma_y: 2.0,
+            angle: 0.0,
+        },
+    )
+    .stamp(Size2us::new(width, height), 0.1);
+    let elongated_y = SyntheticStar::new(
         Vec2::splat(32.0),
-        2.0,
-        4.0,
         0.8,
-        0.1,
-    );
+        StarProfile::Elliptical {
+            sigma_x: 2.0,
+            sigma_y: 4.0,
+            angle: 0.0,
+        },
+    )
+    .stamp(Size2us::new(width, height), 0.1);
 
     let metrics_x = compute_star(
         &elongated_x,
@@ -781,13 +750,8 @@ fn test_snr_formula_consistency() {
     // Verify the formula behaves as expected
     let width = 64;
     let height = 64;
-    let pixels = make_gaussian_star(
-        Size2us::new(width, height),
-        Vec2::splat(32.0),
-        2.5,
-        0.8,
-        0.1,
-    );
+    let pixels = SyntheticStar::new(Vec2::splat(32.0), 0.8, StarProfile::Gaussian { sigma: 2.5 })
+        .stamp(Size2us::new(width, height), 0.1);
 
     let noise1 = 0.02f32;
     let noise2 = 0.04f32; // 2x noise
@@ -874,20 +838,10 @@ fn test_fwhm_independent_of_amplitude() {
     let height = 64;
     let sigma = 2.5f32;
 
-    let pixels_dim = make_gaussian_star(
-        Size2us::new(width, height),
-        Vec2::splat(32.0),
-        sigma,
-        0.3,
-        0.1,
-    );
-    let pixels_bright = make_gaussian_star(
-        Size2us::new(width, height),
-        Vec2::splat(32.0),
-        sigma,
-        0.9,
-        0.1,
-    );
+    let pixels_dim = SyntheticStar::new(Vec2::splat(32.0), 0.3, StarProfile::Gaussian { sigma })
+        .stamp(Size2us::new(width, height), 0.1);
+    let pixels_bright = SyntheticStar::new(Vec2::splat(32.0), 0.9, StarProfile::Gaussian { sigma })
+        .stamp(Size2us::new(width, height), 0.1);
     let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
 
     let metrics_dim = compute_star(
@@ -929,30 +883,36 @@ fn test_eccentricity_increases_with_elongation() {
     let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
 
     // Create stars with increasing elongation ratios
-    let ratio_1_1 = make_elliptical_star(
-        Size2us::new(width, height),
+    let ratio_1_1 = SyntheticStar::new(
         Vec2::splat(32.0),
-        2.5,
-        2.5,
         0.8,
-        0.1,
-    ); // circular
-    let ratio_2_1 = make_elliptical_star(
-        Size2us::new(width, height),
+        StarProfile::Elliptical {
+            sigma_x: 2.5,
+            sigma_y: 2.5,
+            angle: 0.0,
+        },
+    )
+    .stamp(Size2us::new(width, height), 0.1); // circular
+    let ratio_2_1 = SyntheticStar::new(
         Vec2::splat(32.0),
-        4.0,
-        2.0,
         0.8,
-        0.1,
-    );
-    let ratio_3_1 = make_elliptical_star(
-        Size2us::new(width, height),
+        StarProfile::Elliptical {
+            sigma_x: 4.0,
+            sigma_y: 2.0,
+            angle: 0.0,
+        },
+    )
+    .stamp(Size2us::new(width, height), 0.1);
+    let ratio_3_1 = SyntheticStar::new(
         Vec2::splat(32.0),
-        6.0,
-        2.0,
         0.8,
-        0.1,
-    );
+        StarProfile::Elliptical {
+            sigma_x: 6.0,
+            sigma_y: 2.0,
+            angle: 0.0,
+        },
+    )
+    .stamp(Size2us::new(width, height), 0.1);
 
     let ecc_1 = compute_star(
         &ratio_1_1,
@@ -1113,13 +1073,8 @@ fn test_circular_star_roundness() {
     // A circular Gaussian star should have roundness near zero
     let width = 64;
     let height = 64;
-    let pixels = make_gaussian_star(
-        Size2us::new(width, height),
-        Vec2::splat(32.0),
-        2.5,
-        0.8,
-        0.1,
-    );
+    let pixels = SyntheticStar::new(Vec2::splat(32.0), 0.8, StarProfile::Gaussian { sigma: 2.5 })
+        .stamp(Size2us::new(width, height), 0.1);
 
     let bg = estimate_background(
         &pixels,

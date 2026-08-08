@@ -1,12 +1,6 @@
 //! Shared test helpers for centroid fitting tests (gaussian_fit, moffat_fit).
 
-use glam::Vec2;
-
-use imaginarium::Buffer2;
-
-use crate::math::size2us::Size2us;
 use crate::stacking::star_detection::centroid::lm_optimizer::NormalEquations;
-
 use crate::testing::synthetic::patterns::add_gaussian_noise;
 
 /// Add Gaussian noise to pixel values using a simple LCG PRNG.
@@ -58,69 +52,4 @@ pub(super) fn reference_normal_equations<const N: usize>(
         }
     }
     equations
-}
-
-/// Generate a circular Gaussian star stamp.
-pub(super) fn make_gaussian_star(
-    size: Size2us,
-    pos: Vec2,
-    sigma: f32,
-    amplitude: f32,
-    background: f32,
-) -> Buffer2<f32> {
-    let inv_2sigma2 = 0.5 / (sigma * sigma);
-    let mut pixels = vec![background; size.pixel_count()];
-    for y in 0..size.height {
-        for x in 0..size.width {
-            let dx = x as f32 - pos.x;
-            let dy = y as f32 - pos.y;
-            pixels[y * size.width + x] += amplitude * (-(dx * dx + dy * dy) * inv_2sigma2).exp();
-        }
-    }
-    Buffer2::new(size.width, size.height, pixels)
-}
-
-/// Generate an elliptical Gaussian star stamp.
-pub(super) fn make_elliptical_star(
-    size: Size2us,
-    pos: Vec2,
-    sigma_x: f32,
-    sigma_y: f32,
-    amplitude: f32,
-    background: f32,
-) -> Buffer2<f32> {
-    let inv_sx2 = 1.0 / (sigma_x * sigma_x);
-    let inv_sy2 = 1.0 / (sigma_y * sigma_y);
-    let mut pixels = vec![background; size.pixel_count()];
-    for y in 0..size.height {
-        for x in 0..size.width {
-            let dx = x as f32 - pos.x;
-            let dy = y as f32 - pos.y;
-            let exponent = -0.5 * (dx * dx * inv_sx2 + dy * dy * inv_sy2);
-            pixels[y * size.width + x] += amplitude * exponent.exp();
-        }
-    }
-    Buffer2::new(size.width, size.height, pixels)
-}
-
-/// Generate a Moffat profile star stamp.
-pub(super) fn make_moffat_star(
-    size: Size2us,
-    pos: Vec2,
-    alpha: f32,
-    beta: f32,
-    amplitude: f32,
-    background: f32,
-) -> Buffer2<f32> {
-    let inv_alpha2 = 1.0 / (alpha * alpha);
-    let mut pixels = vec![background; size.pixel_count()];
-    for y in 0..size.height {
-        for x in 0..size.width {
-            let dx = x as f32 - pos.x;
-            let dy = y as f32 - pos.y;
-            let r2 = dx * dx + dy * dy;
-            pixels[y * size.width + x] += amplitude * (1.0 + r2 * inv_alpha2).powf(-beta);
-        }
-    }
-    Buffer2::new(size.width, size.height, pixels)
 }

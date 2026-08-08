@@ -92,7 +92,8 @@ fn test_refine_centroid_adaptive_sigma_small_fwhm() {
     let sigma = 1.5f32; // Small sigma
     let expected_fwhm = FWHM_TO_SIGMA * sigma;
 
-    let pixels = make_gaussian_star(Size2us::new(width, height), true_pos, sigma, 0.8, 0.1);
+    let pixels = SyntheticStar::new(true_pos, 0.8, StarProfile::Gaussian { sigma })
+        .stamp(Size2us::new(width, height), 0.1);
     let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
 
     // Use small expected FWHM
@@ -125,7 +126,8 @@ fn test_refine_centroid_adaptive_sigma_large_fwhm() {
     let sigma = 4.0f32; // Large sigma
     let expected_fwhm = FWHM_TO_SIGMA * sigma;
 
-    let pixels = make_gaussian_star(Size2us::new(width, height), true_pos, sigma, 0.8, 0.1);
+    let pixels = SyntheticStar::new(true_pos, 0.8, StarProfile::Gaussian { sigma })
+        .stamp(Size2us::new(width, height), 0.1);
     let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
 
     // Use large expected FWHM
@@ -327,13 +329,8 @@ fn test_local_annulus_vs_global_map() {
     let height = 128;
 
     // Create star on uniform background
-    let pixels = make_gaussian_star(
-        Size2us::new(width, height),
-        Vec2::splat(64.0),
-        2.5,
-        0.8,
-        0.1,
-    );
+    let pixels = SyntheticStar::new(Vec2::splat(64.0), 0.8, StarProfile::Gaussian { sigma: 2.5 })
+        .stamp(Size2us::new(width, height), 0.1);
     let bg = estimate_background(
         &pixels,
         &BackgroundConfig {
@@ -401,7 +398,8 @@ fn test_local_annulus_near_edge_fallback() {
 
     // Create star near edge where annulus might be partially outside
     let pos = Vec2::new(20.0, 32.0);
-    let pixels = make_gaussian_star(Size2us::new(width, height), pos, 2.0, 0.8, 0.1);
+    let pixels = SyntheticStar::new(pos, 0.8, StarProfile::Gaussian { sigma: 2.0 })
+        .stamp(Size2us::new(width, height), 0.1);
     let bg = estimate_background(
         &pixels,
         &BackgroundConfig {

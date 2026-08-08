@@ -5,23 +5,11 @@ use crate::io::image::image_metadata::ImageMetadata;
 use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::stacking::calibration_masters::cosmic_ray::*;
 use crate::testing::TestRng;
+use crate::testing::synthetic::star_profiles::{StarProfile, SyntheticStar};
 
 /// Add a round Gaussian source (peak above the existing background) at `center`.
 fn add_gaussian(data: &mut [f32], size: Size2us, center: Vec2, peak: f32, sigma: f32) {
-    let r = (sigma * 4.0).ceil() as isize;
-    let two_s2 = 2.0 * sigma * sigma;
-    for dy in -r..=r {
-        for dx in -r..=r {
-            let x = center.x as isize + dx;
-            let y = center.y as isize + dy;
-            if x < 0 || y < 0 || x >= size.width as isize || y >= size.height as isize {
-                continue;
-            }
-            let (xf, yf) = (x as f32 - center.x, y as f32 - center.y);
-            let i = size.index_of(Vec2us::new(x as usize, y as usize));
-            data[i] += peak * (-(xf * xf + yf * yf) / two_s2).exp();
-        }
-    }
+    SyntheticStar::new(center, peak, StarProfile::Gaussian { sigma }).add_to(data, size.width);
 }
 
 fn mono(data: Vec<f32>, size: Size2us) -> CfaImage {

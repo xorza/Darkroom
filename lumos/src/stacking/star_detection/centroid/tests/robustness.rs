@@ -10,7 +10,8 @@ fn test_centroid_undersampled_psf() {
     let sigma = 0.7f32; // FWHM ≈ 1.65 pixels (undersampled)
     let true_pos = Vec2::new(32.3, 32.7);
 
-    let pixels = make_gaussian_star(Size2us::new(width, height), true_pos, sigma, 0.9, 0.1);
+    let pixels = SyntheticStar::new(true_pos, 0.9, StarProfile::Gaussian { sigma })
+        .stamp(Size2us::new(width, height), 0.1);
     let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
 
     let expected_fwhm = FWHM_TO_SIGMA * sigma;
@@ -49,7 +50,8 @@ fn test_centroid_large_psf() {
     let sigma = 8.0f32; // FWHM ≈ 18.8 pixels (large PSF)
     let true_pos = Vec2::new(64.3, 64.7);
 
-    let pixels = make_gaussian_star(Size2us::new(width, height), true_pos, sigma, 0.8, 0.1);
+    let pixels = SyntheticStar::new(true_pos, 0.8, StarProfile::Gaussian { sigma })
+        .stamp(Size2us::new(width, height), 0.1);
     let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
 
     let expected_fwhm = FWHM_TO_SIGMA * sigma;
@@ -93,19 +95,15 @@ fn test_gaussian_fit_undersampled_psf() {
     let true_cy = 10.7f32;
     let background = 0.1f32;
 
-    let mut pixels = vec![background; width * height];
-    for y in 0..height {
-        for x in 0..width {
-            let dx = x as f32 - true_cx;
-            let dy = y as f32 - true_cy;
-            pixels[y * width + x] +=
-                1.0 * (-0.5 * (dx * dx + dy * dy) / (true_sigma * true_sigma)).exp();
-        }
-    }
-    let pixels_buf = Buffer2::new(width, height, pixels);
+    let pixels = SyntheticStar::new(
+        Vec2::new(true_cx, true_cy),
+        1.0,
+        StarProfile::Gaussian { sigma: true_sigma },
+    )
+    .stamp(Size2us::new(width, height), background);
 
     let config = GaussianFitConfig::default();
-    let result = fit_gaussian_2d(&pixels_buf, Vec2::splat(10.0), 6, background, None, &config);
+    let result = fit_gaussian_2d(&pixels, Vec2::splat(10.0), 6, background, None, &config);
 
     assert!(result.is_some(), "Should fit undersampled Gaussian");
     let result = result.unwrap();
@@ -125,13 +123,8 @@ fn test_metrics_small_fwhm() {
     let width = 64;
     let height = 64;
     let sigma = 0.8f32; // Very small
-    let pixels = make_gaussian_star(
-        Size2us::new(width, height),
-        Vec2::splat(32.0),
-        sigma,
-        0.9,
-        0.1,
-    );
+    let pixels = SyntheticStar::new(Vec2::splat(32.0), 0.9, StarProfile::Gaussian { sigma })
+        .stamp(Size2us::new(width, height), 0.1);
     let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
 
     let metrics = compute_star(&pixels, &bg, Vec2::splat(32.0), 0.0, 5, None, None);
@@ -148,13 +141,8 @@ fn test_metrics_large_fwhm() {
     let width = 128;
     let height = 128;
     let sigma = 7.0f32; // Large
-    let pixels = make_gaussian_star(
-        Size2us::new(width, height),
-        Vec2::splat(64.0),
-        sigma,
-        0.8,
-        0.1,
-    );
+    let pixels = SyntheticStar::new(Vec2::splat(64.0), 0.8, StarProfile::Gaussian { sigma })
+        .stamp(Size2us::new(width, height), 0.1);
     let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
 
     let metrics = compute_star(
@@ -172,7 +160,7 @@ fn test_metrics_large_fwhm() {
     assert!(m.fwhm > 10.0, "FWHM should be large: {}", m.fwhm);
 }
 
-/// Create two overlapping stars.
+/// Create two overlapping stars on a 0.1 sky.
 fn make_blended_stars(
     size: Size2us,
     pos1: Vec2,
@@ -181,27 +169,11 @@ fn make_blended_stars(
     amp1: f32,
     amp2: f32,
 ) -> Buffer2<f32> {
-    let mut pixels = vec![0.1f32; size.pixel_count()];
-
-    for y in 0..size.height {
-        for x in 0..size.width {
-            let dx1 = x as f32 - pos1.x;
-            let dy1 = y as f32 - pos1.y;
-            let r2_1 = dx1 * dx1 + dy1 * dy1;
-            let v1 = amp1 * (-r2_1 / (2.0 * sigma * sigma)).exp();
-
-            let dx2 = x as f32 - pos2.x;
-            let dy2 = y as f32 - pos2.y;
-            let r2_2 = dx2 * dx2 + dy2 * dy2;
-            let v2 = amp2 * (-r2_2 / (2.0 * sigma * sigma)).exp();
-
-            if v1 > 0.001 || v2 > 0.001 {
-                pixels[size.index_of(Vec2us::new(x, y))] += v1 + v2;
-            }
-        }
-    }
-
-    Buffer2::new(size.width, size.height, pixels)
+    let mut pixels =
+        SyntheticStar::new(pos1, amp1, StarProfile::Gaussian { sigma }).stamp(size, 0.1);
+    SyntheticStar::new(pos2, amp2, StarProfile::Gaussian { sigma })
+        .add_exact(pixels.pixels_mut(), size.width);
+    pixels
 }
 
 /// Test centroiding with a nearby contaminating star.
@@ -306,35 +278,21 @@ fn test_gaussian_fit_with_contamination() {
     let true_cx = 15.0f32;
     let true_cy = 15.0f32;
 
-    let mut pixels = vec![background; width * height];
+    let size = Size2us::new(width, height);
+    let mut pixels = SyntheticStar::new(
+        Vec2::new(true_cx, true_cy),
+        0.8,
+        StarProfile::Gaussian { sigma },
+    )
+    .stamp(size, background);
 
-    // Add primary star
-    for y in 0..height {
-        for x in 0..width {
-            let dx = x as f32 - true_cx;
-            let dy = y as f32 - true_cy;
-            let r2 = dx * dx + dy * dy;
-            pixels[y * width + x] += 0.8 * (-r2 / (2.0 * sigma * sigma)).exp();
-        }
-    }
-
-    // Add faint contaminating star at edge of stamp
-    let contam_cx = 22.0f32;
-    let contam_cy = 15.0f32;
-    for y in 0..height {
-        for x in 0..width {
-            let dx = x as f32 - contam_cx;
-            let dy = y as f32 - contam_cy;
-            let r2 = dx * dx + dy * dy;
-            pixels[y * width + x] += 0.2 * (-r2 / (2.0 * sigma * sigma)).exp();
-        }
-    }
-
-    let pixels_buf = Buffer2::new(width, height, pixels);
+    // Faint contaminating star at edge of stamp
+    SyntheticStar::new(Vec2::new(22.0, 15.0), 0.2, StarProfile::Gaussian { sigma })
+        .add_exact(pixels.pixels_mut(), width);
 
     let config = GaussianFitConfig::default();
     let result = fit_gaussian_2d(
-        &pixels_buf,
+        &pixels,
         Vec2::new(true_cx, true_cy),
         8,
         background,
@@ -362,13 +320,8 @@ fn test_eccentricity_with_contamination() {
     let sigma = 2.5f32;
 
     // Single circular star
-    let single_star = make_gaussian_star(
-        Size2us::new(width, height),
-        Vec2::splat(32.0),
-        sigma,
-        0.8,
-        0.1,
-    );
+    let single_star = SyntheticStar::new(Vec2::splat(32.0), 0.8, StarProfile::Gaussian { sigma })
+        .stamp(Size2us::new(width, height), 0.1);
 
     // Star with nearby companion (will appear elongated)
     let contaminated = make_blended_stars(
@@ -633,7 +586,8 @@ fn test_recovery_from_2pixel_offset() {
     let true_pos = Vec2::new(32.0, 32.0);
     let sigma = 2.5f32;
 
-    let pixels = make_gaussian_star(Size2us::new(width, height), true_pos, sigma, 0.8, 0.1);
+    let pixels = SyntheticStar::new(true_pos, 0.8, StarProfile::Gaussian { sigma })
+        .stamp(Size2us::new(width, height), 0.1);
     let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
     let expected_fwhm = FWHM_TO_SIGMA * sigma;
 
@@ -676,7 +630,8 @@ fn test_recovery_from_3pixel_offset() {
     let true_pos = Vec2::new(32.0, 32.0);
     let sigma = 2.5f32;
 
-    let pixels = make_gaussian_star(Size2us::new(width, height), true_pos, sigma, 0.8, 0.1);
+    let pixels = SyntheticStar::new(true_pos, 0.8, StarProfile::Gaussian { sigma })
+        .stamp(Size2us::new(width, height), 0.1);
     let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
     let expected_fwhm = FWHM_TO_SIGMA * sigma;
 
@@ -725,21 +680,18 @@ fn test_gaussian_fit_bad_initial_guess() {
     let sigma = 2.5f32;
     let background = 0.1f32;
 
-    let mut pixels = vec![background; width * height];
-    for y in 0..height {
-        for x in 0..width {
-            let dx = x as f32 - true_cx;
-            let dy = y as f32 - true_cy;
-            pixels[y * width + x] += 1.0 * (-0.5 * (dx * dx + dy * dy) / (sigma * sigma)).exp();
-        }
-    }
-    let pixels_buf = Buffer2::new(width, height, pixels);
+    let pixels = SyntheticStar::new(
+        Vec2::new(true_cx, true_cy),
+        1.0,
+        StarProfile::Gaussian { sigma },
+    )
+    .stamp(Size2us::new(width, height), background);
 
     // Initial guess 2.5 pixels away
     let initial_guess = Vec2::new(13.0, 17.0);
 
     let config = GaussianFitConfig::default();
-    let result = fit_gaussian_2d(&pixels_buf, initial_guess, 8, background, None, &config);
+    let result = fit_gaussian_2d(&pixels, initial_guess, 8, background, None, &config);
 
     assert!(result.is_some(), "Should converge from bad initial guess");
     let result = result.unwrap();

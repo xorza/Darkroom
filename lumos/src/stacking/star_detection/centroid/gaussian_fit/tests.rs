@@ -1,56 +1,13 @@
 //! Tests for 2D Gaussian fitting.
 
 use crate::math::size2us::Size2us;
-use crate::math::vec2us::Vec2us;
 use crate::math::{fwhm_to_sigma, sigma_to_fwhm};
 use crate::stacking::star_detection::centroid::gaussian_fit::*;
 use crate::stacking::star_detection::centroid::internals::{
     add_noise, approx_eq, reference_normal_equations,
 };
+use crate::testing::synthetic::star_profiles::{StarProfile, SyntheticStar};
 use glam::Vec2;
-
-fn make_gaussian_stamp(
-    size: Size2us,
-    cx: f32,
-    cy: f32,
-    amplitude: f32,
-    sigma: f32,
-    background: f32,
-) -> Vec<f32> {
-    let mut pixels = vec![background; size.pixel_count()];
-    for y in 0..size.height {
-        for x in 0..size.width {
-            let dx = x as f32 - cx;
-            let dy = y as f32 - cy;
-            let value = amplitude * (-0.5 * (dx * dx + dy * dy) / (sigma * sigma)).exp();
-            pixels[size.index_of(Vec2us::new(x, y))] += value;
-        }
-    }
-    pixels
-}
-
-#[allow(clippy::too_many_arguments)]
-fn make_gaussian_stamp_asymmetric(
-    size: Size2us,
-    cx: f32,
-    cy: f32,
-    amplitude: f32,
-    sigma_x: f32,
-    sigma_y: f32,
-    background: f32,
-) -> Vec<f32> {
-    let mut pixels = vec![background; size.pixel_count()];
-    for y in 0..size.height {
-        for x in 0..size.width {
-            let dx = x as f32 - cx;
-            let dy = y as f32 - cy;
-            let value = amplitude
-                * (-0.5 * (dx * dx / (sigma_x * sigma_x) + dy * dy / (sigma_y * sigma_y))).exp();
-            pixels[size.index_of(Vec2us::new(x, y))] += value;
-        }
-    }
-    pixels
-}
 
 #[test]
 fn test_gaussian_fit_centered() {
@@ -62,18 +19,15 @@ fn test_gaussian_fit_centered() {
     let true_sigma = 2.5;
     let true_bg = 0.1;
 
-    let pixels = make_gaussian_stamp(
-        Size2us::new(width, height),
-        true_cx,
-        true_cy,
+    let pixels = SyntheticStar::new(
+        Vec2::new(true_cx, true_cy),
         true_amp,
-        true_sigma,
-        true_bg,
-    );
-    let pixels_buf = Buffer2::new(width, height, pixels);
+        StarProfile::Gaussian { sigma: true_sigma },
+    )
+    .stamp(Size2us::new(width, height), true_bg);
 
     let config = GaussianFitConfig::default();
-    let result = fit_gaussian_2d(&pixels_buf, Vec2::splat(10.0), 8, true_bg, None, &config);
+    let result = fit_gaussian_2d(&pixels, Vec2::splat(10.0), 8, true_bg, None, &config);
 
     assert!(result.is_some());
     let result = result.unwrap();
@@ -95,25 +49,15 @@ fn test_gaussian_fit_subpixel_offset() {
     let true_sigma = 2.5;
     let true_bg = 0.1;
 
-    let pixels = make_gaussian_stamp(
-        Size2us::new(width, height),
-        true_cx,
-        true_cy,
+    let pixels = SyntheticStar::new(
+        Vec2::new(true_cx, true_cy),
         true_amp,
-        true_sigma,
-        true_bg,
-    );
-    let pixels_buf = Buffer2::new(width, height, pixels);
+        StarProfile::Gaussian { sigma: true_sigma },
+    )
+    .stamp(Size2us::new(width, height), true_bg);
 
     let config = GaussianFitConfig::default();
-    let result = fit_gaussian_2d(
-        &pixels_buf,
-        Vec2::new(10.0, 11.0),
-        8,
-        true_bg,
-        None,
-        &config,
-    );
+    let result = fit_gaussian_2d(&pixels, Vec2::new(10.0, 11.0), 8, true_bg, None, &config);
 
     assert!(result.is_some());
     let result = result.unwrap();
@@ -133,19 +77,19 @@ fn test_gaussian_fit_asymmetric() {
     let sigma_y = 3.0;
     let bg = 0.1;
 
-    let pixels = make_gaussian_stamp_asymmetric(
-        Size2us::new(width, height),
-        cx,
-        cy,
+    let pixels = SyntheticStar::new(
+        Vec2::new(cx, cy),
         amp,
-        sigma_x,
-        sigma_y,
-        bg,
-    );
-    let pixels_buf = Buffer2::new(width, height, pixels);
+        StarProfile::Elliptical {
+            sigma_x,
+            sigma_y,
+            angle: 0.0,
+        },
+    )
+    .stamp(Size2us::new(width, height), bg);
 
     let config = GaussianFitConfig::default();
-    let result = fit_gaussian_2d(&pixels_buf, Vec2::splat(10.0), 8, bg, None, &config);
+    let result = fit_gaussian_2d(&pixels, Vec2::splat(10.0), 8, bg, None, &config);
 
     assert!(result.is_some());
     let result = result.unwrap();
@@ -167,11 +111,10 @@ fn test_sigma_fwhm_conversion() {
 fn test_gaussian_fit_edge_position() {
     let width = 21;
     let height = 21;
-    let pixels = vec![0.1f32; width * height];
-    let pixels_buf = Buffer2::new(width, height, pixels);
+    let pixels = Buffer2::new_filled(width, height, 0.1f32);
 
     let config = GaussianFitConfig::default();
-    let result = fit_gaussian_2d(&pixels_buf, Vec2::new(2.0, 10.0), 8, 0.1, None, &config);
+    let result = fit_gaussian_2d(&pixels, Vec2::new(2.0, 10.0), 8, 0.1, None, &config);
     assert!(result.is_none());
 }
 
@@ -186,18 +129,15 @@ fn test_gaussian_fit_high_snr() {
     let true_sigma = 2.0;
     let true_bg = 1.0;
 
-    let pixels = make_gaussian_stamp(
-        Size2us::new(width, height),
-        true_cx,
-        true_cy,
+    let pixels = SyntheticStar::new(
+        Vec2::new(true_cx, true_cy),
         true_amp,
-        true_sigma,
-        true_bg,
-    );
-    let pixels_buf = Buffer2::new(width, height, pixels);
+        StarProfile::Gaussian { sigma: true_sigma },
+    )
+    .stamp(Size2us::new(width, height), true_bg);
 
     let config = GaussianFitConfig::default();
-    let result = fit_gaussian_2d(&pixels_buf, Vec2::splat(10.0), 8, true_bg, None, &config);
+    let result = fit_gaussian_2d(&pixels, Vec2::splat(10.0), 8, true_bg, None, &config);
 
     assert!(result.is_some());
     let result = result.unwrap();
@@ -216,18 +156,15 @@ fn test_gaussian_fit_low_amplitude() {
     let true_sigma = 2.5;
     let true_bg = 0.1;
 
-    let pixels = make_gaussian_stamp(
-        Size2us::new(width, height),
-        true_cx,
-        true_cy,
+    let pixels = SyntheticStar::new(
+        Vec2::new(true_cx, true_cy),
         true_amp,
-        true_sigma,
-        true_bg,
-    );
-    let pixels_buf = Buffer2::new(width, height, pixels);
+        StarProfile::Gaussian { sigma: true_sigma },
+    )
+    .stamp(Size2us::new(width, height), true_bg);
 
     let config = GaussianFitConfig::default();
-    let result = fit_gaussian_2d(&pixels_buf, Vec2::splat(10.0), 8, true_bg, None, &config);
+    let result = fit_gaussian_2d(&pixels, Vec2::splat(10.0), 8, true_bg, None, &config);
 
     // Should still find something (amplitude is constrained to min 0.01)
     assert!(result.is_some());
@@ -243,18 +180,15 @@ fn test_gaussian_fit_large_sigma() {
     let true_sigma = 5.0; // Large sigma
     let true_bg = 0.1;
 
-    let pixels = make_gaussian_stamp(
-        Size2us::new(width, height),
-        true_cx,
-        true_cy,
+    let pixels = SyntheticStar::new(
+        Vec2::new(true_cx, true_cy),
         true_amp,
-        true_sigma,
-        true_bg,
-    );
-    let pixels_buf = Buffer2::new(width, height, pixels);
+        StarProfile::Gaussian { sigma: true_sigma },
+    )
+    .stamp(Size2us::new(width, height), true_bg);
 
     let config = GaussianFitConfig::default();
-    let result = fit_gaussian_2d(&pixels_buf, Vec2::splat(15.0), 12, true_bg, None, &config);
+    let result = fit_gaussian_2d(&pixels, Vec2::splat(15.0), 12, true_bg, None, &config);
 
     assert!(result.is_some());
     let result = result.unwrap();
@@ -273,18 +207,15 @@ fn test_gaussian_fit_small_sigma() {
     let true_sigma = 1.0; // Small sigma (close to Nyquist)
     let true_bg = 0.1;
 
-    let pixels = make_gaussian_stamp(
-        Size2us::new(width, height),
-        true_cx,
-        true_cy,
+    let pixels = SyntheticStar::new(
+        Vec2::new(true_cx, true_cy),
         true_amp,
-        true_sigma,
-        true_bg,
-    );
-    let pixels_buf = Buffer2::new(width, height, pixels);
+        StarProfile::Gaussian { sigma: true_sigma },
+    )
+    .stamp(Size2us::new(width, height), true_bg);
 
     let config = GaussianFitConfig::default();
-    let result = fit_gaussian_2d(&pixels_buf, Vec2::splat(7.0), 5, true_bg, None, &config);
+    let result = fit_gaussian_2d(&pixels, Vec2::splat(7.0), 5, true_bg, None, &config);
 
     assert!(result.is_some());
     let result = result.unwrap();
@@ -303,14 +234,12 @@ fn test_gaussian_fit_with_noise() {
     let true_sigma = 2.5;
     let true_bg = 0.1;
 
-    let mut pixels = make_gaussian_stamp(
-        Size2us::new(width, height),
-        true_cx,
-        true_cy,
+    let mut pixels = SyntheticStar::new(
+        Vec2::new(true_cx, true_cy),
         true_amp,
-        true_sigma,
-        true_bg,
-    );
+        StarProfile::Gaussian { sigma: true_sigma },
+    )
+    .stamp(Size2us::new(width, height), true_bg);
 
     // Add deterministic "noise" pattern
     for (i, p) in pixels.iter_mut().enumerate() {
@@ -318,10 +247,8 @@ fn test_gaussian_fit_with_noise() {
         *p += noise;
     }
 
-    let pixels_buf = Buffer2::new(width, height, pixels);
-
     let config = GaussianFitConfig::default();
-    let result = fit_gaussian_2d(&pixels_buf, Vec2::splat(10.0), 8, true_bg, None, &config);
+    let result = fit_gaussian_2d(&pixels, Vec2::splat(10.0), 8, true_bg, None, &config);
 
     assert!(result.is_some());
     let result = result.unwrap();
@@ -334,13 +261,12 @@ fn test_gaussian_fit_with_noise() {
 fn test_gaussian_fit_stamp_too_small() {
     let width = 5;
     let height = 5;
-    let pixels = vec![0.5f32; width * height];
-    let pixels_buf = Buffer2::new(width, height, pixels);
+    let pixels = Buffer2::new_filled(width, height, 0.5f32);
 
     let config = GaussianFitConfig::default();
     // Center at 2,2 with radius 3 would go outside the 5x5 image
     // extract_stamp returns None when stamp doesn't fit
-    let result = fit_gaussian_2d(&pixels_buf, Vec2::splat(2.0), 3, 0.5, None, &config);
+    let result = fit_gaussian_2d(&pixels, Vec2::splat(2.0), 3, 0.5, None, &config);
     assert!(result.is_none());
 }
 
@@ -354,18 +280,15 @@ fn test_gaussian_fit_zero_background() {
     let true_sigma = 2.5;
     let true_bg = 0.0;
 
-    let pixels = make_gaussian_stamp(
-        Size2us::new(width, height),
-        true_cx,
-        true_cy,
+    let pixels = SyntheticStar::new(
+        Vec2::new(true_cx, true_cy),
         true_amp,
-        true_sigma,
-        true_bg,
-    );
-    let pixels_buf = Buffer2::new(width, height, pixels);
+        StarProfile::Gaussian { sigma: true_sigma },
+    )
+    .stamp(Size2us::new(width, height), true_bg);
 
     let config = GaussianFitConfig::default();
-    let result = fit_gaussian_2d(&pixels_buf, Vec2::splat(10.0), 8, true_bg, None, &config);
+    let result = fit_gaussian_2d(&pixels, Vec2::splat(10.0), 8, true_bg, None, &config);
 
     assert!(result.is_some());
     let result = result.unwrap();
@@ -384,18 +307,15 @@ fn test_gaussian_fit_high_background() {
     let true_sigma = 2.5;
     let true_bg = 10.0; // High background
 
-    let pixels = make_gaussian_stamp(
-        Size2us::new(width, height),
-        true_cx,
-        true_cy,
+    let pixels = SyntheticStar::new(
+        Vec2::new(true_cx, true_cy),
         true_amp,
-        true_sigma,
-        true_bg,
-    );
-    let pixels_buf = Buffer2::new(width, height, pixels);
+        StarProfile::Gaussian { sigma: true_sigma },
+    )
+    .stamp(Size2us::new(width, height), true_bg);
 
     let config = GaussianFitConfig::default();
-    let result = fit_gaussian_2d(&pixels_buf, Vec2::splat(10.0), 8, true_bg, None, &config);
+    let result = fit_gaussian_2d(&pixels, Vec2::splat(10.0), 8, true_bg, None, &config);
 
     assert!(result.is_some());
     let result = result.unwrap();
@@ -425,20 +345,16 @@ fn test_gaussian_fit_with_gaussian_noise() {
     let true_bg = 0.1;
     let noise_sigma = 0.05; // 5% of amplitude
 
-    let mut pixels = make_gaussian_stamp(
-        Size2us::new(width, height),
-        true_cx,
-        true_cy,
+    let mut pixels = SyntheticStar::new(
+        Vec2::new(true_cx, true_cy),
         true_amp,
-        true_sigma,
-        true_bg,
-    );
+        StarProfile::Gaussian { sigma: true_sigma },
+    )
+    .stamp(Size2us::new(width, height), true_bg);
     add_noise(&mut pixels, noise_sigma, 12345);
 
-    let pixels_buf = Buffer2::new(width, height, pixels);
-
     let config = GaussianFitConfig::default();
-    let result = fit_gaussian_2d(&pixels_buf, Vec2::splat(10.0), 8, true_bg, None, &config);
+    let result = fit_gaussian_2d(&pixels, Vec2::splat(10.0), 8, true_bg, None, &config);
 
     assert!(result.is_some());
     let result = result.unwrap();
@@ -467,20 +383,16 @@ fn test_gaussian_fit_high_noise_still_converges() {
     let true_bg = 0.1;
     let noise_sigma = 0.15; // 15% noise - challenging
 
-    let mut pixels = make_gaussian_stamp(
-        Size2us::new(width, height),
-        true_cx,
-        true_cy,
+    let mut pixels = SyntheticStar::new(
+        Vec2::new(true_cx, true_cy),
         true_amp,
-        true_sigma,
-        true_bg,
-    );
+        StarProfile::Gaussian { sigma: true_sigma },
+    )
+    .stamp(Size2us::new(width, height), true_bg);
     add_noise(&mut pixels, noise_sigma, 54321);
 
-    let pixels_buf = Buffer2::new(width, height, pixels);
-
     let config = GaussianFitConfig::default();
-    let result = fit_gaussian_2d(&pixels_buf, Vec2::splat(10.0), 8, true_bg, None, &config);
+    let result = fit_gaussian_2d(&pixels, Vec2::splat(10.0), 8, true_bg, None, &config);
 
     // Should still converge even with high noise
     assert!(result.is_some());
@@ -509,18 +421,15 @@ fn test_gaussian_fit_low_snr() {
     let true_sigma = 2.5;
     let true_bg = 0.5; // High background (SNR ~ 0.2)
 
-    let pixels = make_gaussian_stamp(
-        Size2us::new(width, height),
-        true_cx,
-        true_cy,
+    let pixels = SyntheticStar::new(
+        Vec2::new(true_cx, true_cy),
         true_amp,
-        true_sigma,
-        true_bg,
-    );
-    let pixels_buf = Buffer2::new(width, height, pixels);
+        StarProfile::Gaussian { sigma: true_sigma },
+    )
+    .stamp(Size2us::new(width, height), true_bg);
 
     let config = GaussianFitConfig::default();
-    let result = fit_gaussian_2d(&pixels_buf, Vec2::splat(10.0), 8, true_bg, None, &config);
+    let result = fit_gaussian_2d(&pixels, Vec2::splat(10.0), 8, true_bg, None, &config);
 
     // Low SNR should still produce a result (may not be accurate)
     assert!(result.is_some());
@@ -542,21 +451,18 @@ fn test_gaussian_fit_wrong_background_estimate() {
     let true_sigma = 2.5;
     let true_bg = 0.1;
 
-    let pixels = make_gaussian_stamp(
-        Size2us::new(width, height),
-        true_cx,
-        true_cy,
+    let pixels = SyntheticStar::new(
+        Vec2::new(true_cx, true_cy),
         true_amp,
-        true_sigma,
-        true_bg,
-    );
-    let pixels_buf = Buffer2::new(width, height, pixels);
+        StarProfile::Gaussian { sigma: true_sigma },
+    )
+    .stamp(Size2us::new(width, height), true_bg);
 
     let config = GaussianFitConfig::default();
 
     // Use wrong background estimate (20% error)
     let wrong_bg = true_bg * 1.2;
-    let result = fit_gaussian_2d(&pixels_buf, Vec2::splat(10.0), 8, wrong_bg, None, &config);
+    let result = fit_gaussian_2d(&pixels, Vec2::splat(10.0), 8, wrong_bg, None, &config);
 
     assert!(result.is_some());
     let result = result.unwrap();
@@ -591,18 +497,15 @@ fn test_gaussian_fit_very_high_amplitude() {
     let true_sigma = 2.5;
     let true_bg = 100.0;
 
-    let pixels = make_gaussian_stamp(
-        Size2us::new(width, height),
-        true_cx,
-        true_cy,
+    let pixels = SyntheticStar::new(
+        Vec2::new(true_cx, true_cy),
         true_amp,
-        true_sigma,
-        true_bg,
-    );
-    let pixels_buf = Buffer2::new(width, height, pixels);
+        StarProfile::Gaussian { sigma: true_sigma },
+    )
+    .stamp(Size2us::new(width, height), true_bg);
 
     let config = GaussianFitConfig::default();
-    let result = fit_gaussian_2d(&pixels_buf, Vec2::splat(10.0), 8, true_bg, None, &config);
+    let result = fit_gaussian_2d(&pixels, Vec2::splat(10.0), 8, true_bg, None, &config);
 
     assert!(result.is_some());
     let result = result.unwrap();
@@ -622,18 +525,15 @@ fn test_gaussian_fit_narrow_psf() {
     let true_sigma = 0.8; // Very narrow PSF (close to Nyquist limit)
     let true_bg = 0.1;
 
-    let pixels = make_gaussian_stamp(
-        Size2us::new(width, height),
-        true_cx,
-        true_cy,
+    let pixels = SyntheticStar::new(
+        Vec2::new(true_cx, true_cy),
         true_amp,
-        true_sigma,
-        true_bg,
-    );
-    let pixels_buf = Buffer2::new(width, height, pixels);
+        StarProfile::Gaussian { sigma: true_sigma },
+    )
+    .stamp(Size2us::new(width, height), true_bg);
 
     let config = GaussianFitConfig::default();
-    let result = fit_gaussian_2d(&pixels_buf, Vec2::splat(10.0), 8, true_bg, None, &config);
+    let result = fit_gaussian_2d(&pixels, Vec2::splat(10.0), 8, true_bg, None, &config);
 
     assert!(result.is_some());
     let result = result.unwrap();
@@ -652,21 +552,18 @@ fn test_gaussian_fit_converges_within_max_iterations() {
     let true_sigma = 2.5;
     let true_bg = 0.1;
 
-    let pixels = make_gaussian_stamp(
-        Size2us::new(width, height),
-        true_cx,
-        true_cy,
+    let pixels = SyntheticStar::new(
+        Vec2::new(true_cx, true_cy),
         true_amp,
-        true_sigma,
-        true_bg,
-    );
-    let pixels_buf = Buffer2::new(width, height, pixels);
+        StarProfile::Gaussian { sigma: true_sigma },
+    )
+    .stamp(Size2us::new(width, height), true_bg);
 
     let config = GaussianFitConfig {
         max_iterations: 10, // Low iteration limit
         ..Default::default()
     };
-    let result = fit_gaussian_2d(&pixels_buf, Vec2::splat(10.0), 8, true_bg, None, &config);
+    let result = fit_gaussian_2d(&pixels, Vec2::splat(10.0), 8, true_bg, None, &config);
 
     assert!(result.is_some());
     let result = result.unwrap();
@@ -685,15 +582,12 @@ fn test_gaussian_fit_bad_initial_guess_still_converges() {
     let true_sigma = 2.5;
     let true_bg = 0.1;
 
-    let pixels = make_gaussian_stamp(
-        Size2us::new(width, height),
-        true_cx,
-        true_cy,
+    let pixels = SyntheticStar::new(
+        Vec2::new(true_cx, true_cy),
         true_amp,
-        true_sigma,
-        true_bg,
-    );
-    let pixels_buf = Buffer2::new(width, height, pixels);
+        StarProfile::Gaussian { sigma: true_sigma },
+    )
+    .stamp(Size2us::new(width, height), true_bg);
 
     let config = GaussianFitConfig {
         max_iterations: 100,
@@ -701,7 +595,7 @@ fn test_gaussian_fit_bad_initial_guess_still_converges() {
     };
 
     // Start from a position offset by 2 pixels
-    let result = fit_gaussian_2d(&pixels_buf, Vec2::new(8.0, 12.0), 8, true_bg, None, &config);
+    let result = fit_gaussian_2d(&pixels, Vec2::new(8.0, 12.0), 8, true_bg, None, &config);
 
     assert!(result.is_some());
     let result = result.unwrap();
@@ -724,25 +618,17 @@ fn test_gaussian_fit_uniform_data_returns_result() {
     let width = 21;
     let height = 21;
     let uniform_value = 0.5f32;
-    let pixels = vec![uniform_value; width * height];
-    let pixels_buf = Buffer2::new(width, height, pixels);
+    let pixels = Buffer2::new_filled(width, height, uniform_value);
 
     let config = GaussianFitConfig::default();
-    let result = fit_gaussian_2d(
-        &pixels_buf,
-        Vec2::splat(10.0),
-        8,
-        uniform_value,
-        None,
-        &config,
-    );
+    let result = fit_gaussian_2d(&pixels, Vec2::splat(10.0), 8, uniform_value, None, &config);
 
     // Should produce some result (may not converge well)
     assert!(result.is_some());
     let result = result.unwrap();
     // Values should be finite
-    assert!((result.pos.x as f32).is_finite());
-    assert!((result.pos.y as f32).is_finite());
+    assert!(result.pos.x.is_finite());
+    assert!(result.pos.y.is_finite());
     assert!(result.debug.amplitude.is_finite());
     assert!(result.sigma.x.is_finite());
     assert!(result.sigma.y.is_finite());
@@ -759,19 +645,16 @@ fn test_gaussian_fit_center_outside_stamp_rejected() {
     let true_bg = 0.1;
 
     // Create a stamp with peak at edge so fitting might push center outside
-    let pixels = make_gaussian_stamp(
-        Size2us::new(width, height),
-        true_cx,
-        true_cy,
+    let pixels = SyntheticStar::new(
+        Vec2::new(true_cx, true_cy),
         true_amp,
-        true_sigma,
-        true_bg,
-    );
-    let pixels_buf = Buffer2::new(width, height, pixels);
+        StarProfile::Gaussian { sigma: true_sigma },
+    )
+    .stamp(Size2us::new(width, height), true_bg);
 
     let config = GaussianFitConfig::default();
     // Give initial guess very far from true center - should still find it
-    let result = fit_gaussian_2d(&pixels_buf, Vec2::splat(10.0), 3, true_bg, None, &config);
+    let result = fit_gaussian_2d(&pixels, Vec2::splat(10.0), 3, true_bg, None, &config);
 
     // Small stamp radius = 3, if result.pos.x as f32 moves more than 3 pixels from cx, it's rejected
     // With true center at 10, the fit should succeed
@@ -788,19 +671,15 @@ fn test_gaussian_fit_rms_residual_computed() {
     let true_sigma = 2.5;
     let true_bg = 0.1;
 
-    let pixels = make_gaussian_stamp(
-        Size2us::new(width, height),
-        true_cx,
-        true_cy,
+    let pixels = SyntheticStar::new(
+        Vec2::new(true_cx, true_cy),
         true_amp,
-        true_sigma,
-        true_bg,
-    );
-    let pixels_buf = Buffer2::new(width, height, pixels);
+        StarProfile::Gaussian { sigma: true_sigma },
+    )
+    .stamp(Size2us::new(width, height), true_bg);
 
     let config = GaussianFitConfig::default();
-    let result =
-        fit_gaussian_2d(&pixels_buf, Vec2::splat(10.0), 8, true_bg, None, &config).unwrap();
+    let result = fit_gaussian_2d(&pixels, Vec2::splat(10.0), 8, true_bg, None, &config).unwrap();
 
     // For perfect data, RMS residual should be very small
     assert!(
@@ -830,18 +709,15 @@ fn test_gaussian_fit_multiple_positions() {
         let true_cx = 10.0 + offset_x;
         let true_cy = 10.0 + offset_y;
 
-        let pixels = make_gaussian_stamp(
-            Size2us::new(width, height),
-            true_cx,
-            true_cy,
+        let pixels = SyntheticStar::new(
+            Vec2::new(true_cx, true_cy),
             true_amp,
-            true_sigma,
-            true_bg,
-        );
-        let pixels_buf = Buffer2::new(width, height, pixels);
+            StarProfile::Gaussian { sigma: true_sigma },
+        )
+        .stamp(Size2us::new(width, height), true_bg);
 
         let config = GaussianFitConfig::default();
-        let result = fit_gaussian_2d(&pixels_buf, Vec2::splat(10.0), 8, true_bg, None, &config);
+        let result = fit_gaussian_2d(&pixels, Vec2::splat(10.0), 8, true_bg, None, &config);
 
         assert!(
             result.is_some(),
@@ -1208,18 +1084,15 @@ fn test_gaussian_fit_sigma_at_lower_bound() {
     let true_sigma = 0.6; // Just above min constraint of 0.5
     let true_bg = 0.1;
 
-    let pixels = make_gaussian_stamp(
-        Size2us::new(width, height),
-        true_cx,
-        true_cy,
+    let pixels = SyntheticStar::new(
+        Vec2::new(true_cx, true_cy),
         true_amp,
-        true_sigma,
-        true_bg,
-    );
-    let pixels_buf = Buffer2::new(width, height, pixels);
+        StarProfile::Gaussian { sigma: true_sigma },
+    )
+    .stamp(Size2us::new(width, height), true_bg);
 
     let config = GaussianFitConfig::default();
-    let result = fit_gaussian_2d(&pixels_buf, Vec2::splat(7.0), 5, true_bg, None, &config);
+    let result = fit_gaussian_2d(&pixels, Vec2::splat(7.0), 5, true_bg, None, &config);
 
     assert!(result.is_some());
     let result = result.unwrap();
@@ -1243,19 +1116,16 @@ fn test_gaussian_fit_sigma_at_upper_bound() {
     let true_sigma = 9.0; // Close to stamp_radius
     let true_bg = 0.1;
 
-    let pixels = make_gaussian_stamp(
-        Size2us::new(width, height),
-        true_cx,
-        true_cy,
+    let pixels = SyntheticStar::new(
+        Vec2::new(true_cx, true_cy),
         true_amp,
-        true_sigma,
-        true_bg,
-    );
-    let pixels_buf = Buffer2::new(width, height, pixels);
+        StarProfile::Gaussian { sigma: true_sigma },
+    )
+    .stamp(Size2us::new(width, height), true_bg);
 
     let config = GaussianFitConfig::default();
     let result = fit_gaussian_2d(
-        &pixels_buf,
+        &pixels,
         Vec2::splat(15.0),
         stamp_radius,
         true_bg,
@@ -1285,18 +1155,15 @@ fn test_gaussian_fit_extreme_amplitude_range() {
     // Test across wide amplitude range
     for amp_exp in [-3, -2, -1, 0, 1, 2, 3, 4] {
         let true_amp = 10.0f32.powi(amp_exp);
-        let pixels = make_gaussian_stamp(
-            Size2us::new(width, height),
-            true_cx,
-            true_cy,
+        let pixels = SyntheticStar::new(
+            Vec2::new(true_cx, true_cy),
             true_amp,
-            true_sigma,
-            true_bg,
-        );
-        let pixels_buf = Buffer2::new(width, height, pixels);
+            StarProfile::Gaussian { sigma: true_sigma },
+        )
+        .stamp(Size2us::new(width, height), true_bg);
 
         let config = GaussianFitConfig::default();
-        let result = fit_gaussian_2d(&pixels_buf, Vec2::splat(10.0), 8, true_bg, None, &config);
+        let result = fit_gaussian_2d(&pixels, Vec2::splat(10.0), 8, true_bg, None, &config);
 
         assert!(result.is_some(), "Failed for amplitude=10^{}", amp_exp);
         let result = result.unwrap();
@@ -1329,18 +1196,15 @@ fn test_gaussian_fit_high_sigma_low_amplitude() {
     let true_sigma = 8.0; // Wide PSF
     let true_bg = 0.05;
 
-    let pixels = make_gaussian_stamp(
-        Size2us::new(width, height),
-        true_cx,
-        true_cy,
+    let pixels = SyntheticStar::new(
+        Vec2::new(true_cx, true_cy),
         true_amp,
-        true_sigma,
-        true_bg,
-    );
-    let pixels_buf = Buffer2::new(width, height, pixels);
+        StarProfile::Gaussian { sigma: true_sigma },
+    )
+    .stamp(Size2us::new(width, height), true_bg);
 
     let config = GaussianFitConfig::default();
-    let result = fit_gaussian_2d(&pixels_buf, Vec2::splat(20.0), 15, true_bg, None, &config);
+    let result = fit_gaussian_2d(&pixels, Vec2::splat(20.0), 15, true_bg, None, &config);
 
     assert!(result.is_some());
     let result = result.unwrap();
@@ -1363,19 +1227,16 @@ fn test_gaussian_fit_residual_distribution() {
     let true_bg = 0.1;
     let noise_sigma = 0.05;
 
-    let mut pixels = make_gaussian_stamp(
-        Size2us::new(width, height),
-        true_cx,
-        true_cy,
+    let mut pixels = SyntheticStar::new(
+        Vec2::new(true_cx, true_cy),
         true_amp,
-        true_sigma,
-        true_bg,
-    );
+        StarProfile::Gaussian { sigma: true_sigma },
+    )
+    .stamp(Size2us::new(width, height), true_bg);
     add_noise(&mut pixels, noise_sigma, 11111);
 
-    let pixels_buf = Buffer2::new(width, height, pixels);
     let config = GaussianFitConfig::default();
-    let result = fit_gaussian_2d(&pixels_buf, Vec2::splat(10.0), 8, true_bg, None, &config);
+    let result = fit_gaussian_2d(&pixels, Vec2::splat(10.0), 8, true_bg, None, &config);
 
     assert!(result.is_some());
     let result = result.unwrap();
