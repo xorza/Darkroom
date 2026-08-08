@@ -17,8 +17,6 @@ use crate::error::InvalidConfigField;
 use crate::math::statistics::median_f32_mut;
 use crate::stacking::star_detection::background::{estimate_background, refine_background};
 use crate::stacking::star_detection::config::Config;
-#[cfg(test)]
-use crate::stacking::star_detection::config::DetectionConfig;
 use crate::stacking::star_detection::detector::stages::filter::FilterOutcome;
 use crate::stacking::star_detection::resources::DetectionResources;
 use crate::stacking::star_detection::star::Star;
@@ -228,6 +226,7 @@ pub(super) mod internals {
 
 #[cfg(test)]
 mod tests {
+    use crate::stacking::star_detection::config::DetectionConfig;
     use crate::stacking::star_detection::detector::*;
     use crate::stacking::star_detection::synthetic_tests::Scenario;
 
