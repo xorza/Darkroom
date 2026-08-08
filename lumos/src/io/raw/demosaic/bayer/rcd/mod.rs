@@ -13,11 +13,8 @@ use common::CancelToken;
 use rayon::prelude::*;
 
 use crate::concurrency::UnsafeSendPtr;
+use crate::io::raw::demosaic::bayer::{BayerImage, CfaPattern};
 use crate::io::raw::demosaic::{Cancelled, DemosaicMemory};
-use crate::io::raw::{
-    alloc_uninit_vec,
-    demosaic::bayer::{BayerImage, CfaPattern},
-};
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 
@@ -417,9 +414,9 @@ pub(crate) fn demosaic(
 
     let active = width * height;
     // SAFETY: the per-row copy_from_slice below writes every element of each buffer.
-    let mut out_r = unsafe { alloc_uninit_vec::<f32>(active) };
-    let mut out_g = unsafe { alloc_uninit_vec::<f32>(active) };
-    let mut out_b = unsafe { alloc_uninit_vec::<f32>(active) };
+    let mut out_r = vec![0.0f32; active];
+    let mut out_g = vec![0.0f32; active];
+    let mut out_b = vec![0.0f32; active];
 
     out_r
         .par_chunks_mut(width)

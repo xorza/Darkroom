@@ -43,17 +43,6 @@ use normalize::{normalize_u16_to_f32_into, normalize_u16_to_f32_parallel};
 /// Camera-RAW extensions accepted by this decoder.
 pub const RAW_EXTENSIONS: &[&str] = &["raf", "cr2", "cr3", "nef", "arw", "dng"];
 
-/// Allocate a Vec of given length without zeroing.
-///
-/// SAFETY: Caller must ensure every element is written before it's read.
-/// This avoids expensive kernel page zeroing (clear_page_erms) for large buffers.
-#[allow(clippy::uninit_vec)]
-pub(crate) unsafe fn alloc_uninit_vec<T>(len: usize) -> Vec<T> {
-    let mut v = Vec::with_capacity(len);
-    unsafe { v.set_len(len) };
-    v
-}
-
 /// RAII guard for libraw_data_t to ensure proper cleanup.
 #[derive(Debug)]
 struct LibrawGuard(*mut sys::libraw_data_t);
@@ -418,7 +407,7 @@ fn normalize_active_area<const CLAMP: bool>(
 ) -> Vec<f32> {
     let output_size = area.active.pixel_count();
     // SAFETY: Every element is written by the parallel row pass below.
-    let mut pixels = unsafe { alloc_uninit_vec::<f32>(output_size) };
+    let mut pixels = vec![0.0f32; output_size];
     pixels
         .par_chunks_mut(area.active.width)
         .enumerate()

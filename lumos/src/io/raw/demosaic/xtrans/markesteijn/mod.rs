@@ -32,7 +32,6 @@
 
 use common::CancelToken;
 
-use crate::io::raw::alloc_uninit_vec;
 use crate::io::raw::demosaic::xtrans::XTransImage;
 use crate::io::raw::demosaic::xtrans::hex_lookup::HexLookup;
 use crate::io::raw::demosaic::xtrans::markesteijn_steps;
@@ -77,7 +76,7 @@ impl DemosaicArena {
 
         // SAFETY: Every element in every region is fully written by parallel passes
         // before being read. See per-step comments in demosaic().
-        let storage = unsafe { alloc_uninit_vec::<f32>(total) };
+        let storage = vec![0.0f32; total];
 
         tracing::debug!(
             "Demosaic arena: {:.1} MB ({} × {} × {} × 4 bytes)",
@@ -236,9 +235,9 @@ pub(crate) fn demosaic(
     if cancel.is_cancelled() {
         return Err(Cancelled);
     }
-    let mut r = unsafe { alloc_uninit_vec::<f32>(pixels) };
-    let mut g = unsafe { alloc_uninit_vec::<f32>(pixels) };
-    let mut b = unsafe { alloc_uninit_vec::<f32>(pixels) };
+    let mut r = vec![0.0f32; pixels];
+    let mut g = vec![0.0f32; pixels];
+    let mut b = vec![0.0f32; pixels];
     let t = Instant::now();
     {
         let buffers = arena.final_blend_buffers();
