@@ -549,9 +549,9 @@ fn test_gaussian_fit_with_noise() {
     );
 }
 
-/// Verify roundness1 (GROUND) is close to 0 for circular sources.
+/// Verify GROUND is close to 0 for circular sources.
 #[test]
-fn test_roundness1_circular_source() {
+fn test_ground_circular_source() {
     let width = 64;
     let height = 64;
     let pixels = make_gaussian_star(
@@ -575,15 +575,15 @@ fn test_roundness1_circular_source() {
     .unwrap();
 
     assert!(
-        metrics.roundness1.abs() < 0.1,
-        "Circular source should have roundness1 near 0, got {}",
-        metrics.roundness1
+        metrics.roundness.ground.abs() < 0.1,
+        "Circular source should have GROUND near 0, got {}",
+        metrics.roundness.ground
     );
 }
 
-/// Verify roundness1 detects x-elongated sources.
+/// Verify GROUND detects x-elongated sources.
 #[test]
-fn test_roundness1_x_elongated() {
+fn test_ground_x_elongated() {
     let width = 64;
     let height = 64;
     // sigma_x > sigma_y means more spread in x direction
@@ -609,17 +609,17 @@ fn test_roundness1_x_elongated() {
     .unwrap();
 
     // For x-elongated: marginal in x has lower peak (more spread)
-    // Roundness1 = (Hx - Hy) / (Hx + Hy)
+    // GROUND = (Hx - Hy) / (Hx + Hy)
     // This should be negative because Hx (peak of x marginal) < Hy
     assert!(
-        metrics.roundness1 != 0.0,
-        "Elongated source should have non-zero roundness1"
+        metrics.roundness.ground != 0.0,
+        "Elongated source should have non-zero GROUND"
     );
 }
 
-/// Verify roundness2 (SROUND) is close to 0 for symmetric sources.
+/// Verify SROUND is close to 0 for symmetric sources.
 #[test]
-fn test_roundness2_symmetric_source() {
+fn test_sround_symmetric_source() {
     let width = 64;
     let height = 64;
     let pixels = make_gaussian_star(
@@ -643,8 +643,8 @@ fn test_roundness2_symmetric_source() {
     .unwrap();
 
     assert!(
-        metrics.roundness2 < 0.1,
-        "Symmetric source should have roundness2 near 0, got {}",
-        metrics.roundness2
+        metrics.roundness.sround < 0.1,
+        "Symmetric source should have SROUND near 0, got {}",
+        metrics.roundness.sround
     );
 }

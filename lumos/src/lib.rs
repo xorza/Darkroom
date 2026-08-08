@@ -72,6 +72,7 @@ pub use stacking::star_detection::detector::{
     DetectionResult as StarDetectionResult, Diagnostics as StarDetectionDiagnostics,
     QualityFilterDiagnostics as StarDetectionQualityFilterDiagnostics, StarDetector,
 };
+pub use stacking::star_detection::roundness::Roundness;
 pub use stacking::star_detection::star::Star;
 
 pub use stacking::registration::config::{

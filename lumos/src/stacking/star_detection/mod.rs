@@ -58,6 +58,7 @@ mod labeling;
 mod mask_dilation;
 mod median_filter;
 pub(crate) mod resources;
+pub(crate) mod roundness;
 pub(crate) mod star;
 mod threshold_mask;
 

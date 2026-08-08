@@ -197,6 +197,7 @@ fn estimate_fwhm_from_stars(
 #[cfg(test)]
 mod tests {
     use crate::stacking::star_detection::detector::stages::fwhm::*;
+    use crate::stacking::star_detection::roundness::Roundness;
     use glam::DVec2;
 
     fn make_star(fwhm: f32, eccentricity: f32, sharpness: f32, peak: f32) -> Star {
@@ -208,8 +209,10 @@ mod tests {
             snr: 50.0,
             peak,
             sharpness,
-            roundness1: 0.0,
-            roundness2: 0.0,
+            roundness: Roundness {
+                ground: 0.0,
+                sround: 0.0,
+            },
         }
     }
 

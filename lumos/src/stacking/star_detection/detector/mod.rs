@@ -300,8 +300,14 @@ mod tests {
                 assert_eq!(auto.snr.to_bits(), manual.snr.to_bits());
                 assert_eq!(auto.peak.to_bits(), manual.peak.to_bits());
                 assert_eq!(auto.sharpness.to_bits(), manual.sharpness.to_bits());
-                assert_eq!(auto.roundness1.to_bits(), manual.roundness1.to_bits());
-                assert_eq!(auto.roundness2.to_bits(), manual.roundness2.to_bits());
+                assert_eq!(
+                    auto.roundness.ground.to_bits(),
+                    manual.roundness.ground.to_bits()
+                );
+                assert_eq!(
+                    auto.roundness.sround.to_bits(),
+                    manual.roundness.sround.to_bits()
+                );
             }
         }
     }

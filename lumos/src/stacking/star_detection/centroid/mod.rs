@@ -33,6 +33,7 @@ use crate::stacking::star_detection::config::{
     CentroidMethod, LocalBackgroundMethod, MeasurementConfig, NoiseModel,
 };
 use crate::stacking::star_detection::deblend::region::Region;
+use crate::stacking::star_detection::roundness::Roundness;
 use crate::stacking::star_detection::star::Star;
 use gaussian_fit::{GaussianFitConfig, fit_gaussian_2d};
 use imaginarium::Buffer2;
@@ -844,10 +845,6 @@ fn compute_star(
         1.0
     };
 
-    // Compute roundness metrics (DAOFIND style)
-    let (roundness1, roundness2) =
-        compute_roundness(&marginal_x[..stamp_size], &marginal_y[..stamp_size]);
-
     Some(Star {
         pos: pos.as_dvec2(),
         flux: flux_f32,
@@ -856,57 +853,8 @@ fn compute_star(
         snr,
         peak,
         sharpness,
-        roundness1,
-        roundness2,
+        roundness: Roundness::from_marginals(&marginal_x[..stamp_size], &marginal_y[..stamp_size]),
     })
-}
-
-/// Compute DAOFIND-style roundness metrics.
-///
-/// Returns (GROUND, SROUND):
-/// - GROUND: (Hx - Hy) / (Hx + Hy) where Hx, Hy are heights of marginal distributions
-/// - SROUND: Symmetry-based roundness measuring bilateral asymmetry
-fn compute_roundness(marginal_x: &[f64], marginal_y: &[f64]) -> (f32, f32) {
-    // GROUND: Compare peak heights of marginal distributions
-    let hx = marginal_x.iter().copied().fold(0.0f64, f64::max);
-    let hy = marginal_y.iter().copied().fold(0.0f64, f64::max);
-    let roundness1 = safe_ratio(hx - hy, hx + hy);
-
-    // SROUND: Symmetry-based roundness using marginal distributions
-    let center = marginal_x.len() / 2;
-
-    // Compute asymmetry in x and y directions
-    let (sum_left, sum_right) = split_sums(marginal_x, center);
-    let (sum_top, sum_bottom) = split_sums(marginal_y, center);
-
-    let asym_x = safe_ratio(sum_right - sum_left, sum_left + sum_right);
-    let asym_y = safe_ratio(sum_bottom - sum_top, sum_top + sum_bottom);
-
-    // SROUND is the RMS asymmetry
-    let roundness2 = asym_x.hypot(asym_y);
-
-    (
-        (roundness1 as f32).clamp(-1.0, 1.0),
-        (roundness2 as f32).clamp(0.0, 1.0),
-    )
-}
-
-/// Compute sums of left and right halves of a slice (excluding center).
-#[inline]
-fn split_sums(slice: &[f64], center: usize) -> (f64, f64) {
-    let left: f64 = slice[..center].iter().sum();
-    let right: f64 = slice[center + 1..].iter().sum();
-    (left, right)
-}
-
-/// Safe division returning 0.0 when denominator is near zero.
-#[inline]
-fn safe_ratio(numerator: f64, denominator: f64) -> f64 {
-    if denominator > f64::EPSILON {
-        numerator / denominator
-    } else {
-        0.0
-    }
 }
 
 /// Compute SNR using the configured sensor noise model when available.

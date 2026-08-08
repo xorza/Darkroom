@@ -1,5 +1,6 @@
 //! Detection metrics computation for visual tests.
 
+use crate::stacking::star_detection::roundness::Roundness;
 use crate::stacking::star_detection::star::Star;
 use crate::stacking::star_detection::test_common::output::comparison::match_stars;
 use crate::testing::synthetic::observe::ObservedSource;
@@ -377,8 +378,10 @@ mod tests {
             snr: 50.0,
             peak: 0.5,
             sharpness: 0.3,
-            roundness1: 0.0,
-            roundness2: 0.0,
+            roundness: Roundness {
+                ground: 0.0,
+                sround: 0.0,
+            },
         }
     }
 

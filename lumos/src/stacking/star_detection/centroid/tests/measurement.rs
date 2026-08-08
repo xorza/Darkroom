@@ -1144,20 +1144,20 @@ fn test_circular_star_roundness() {
 
     // Circular star should have roundness close to 0
     assert!(
-        star.roundness1.abs() < 0.1,
-        "Circular star should have roundness1 near 0, got {}",
-        star.roundness1
+        star.roundness.ground.abs() < 0.1,
+        "Circular star should have GROUND near 0, got {}",
+        star.roundness.ground
     );
     assert!(
-        star.roundness2 < 0.1,
-        "Circular star should have roundness2 near 0, got {}",
-        star.roundness2
+        star.roundness.sround < 0.1,
+        "Circular star should have SROUND near 0, got {}",
+        star.roundness.sround
     );
 }
 
 #[test]
 fn test_elongated_x_star_roundness() {
-    // An elongated star in x direction should have negative roundness1
+    // An elongated star in x direction should have negative GROUND
     let width = 64;
     let height = 64;
     let mut pixels = vec![0.1f32; width * height];
@@ -1202,19 +1202,19 @@ fn test_elongated_x_star_roundness() {
     )
     .expect("Should compute centroid");
 
-    // X-elongated star: more flux in x marginal -> higher Hx -> negative roundness1
-    // (roundness1 = (Hx - Hy) / (Hx + Hy), but Hx is sum in y direction)
+    // X-elongated star: more flux in x marginal -> higher Hx -> negative GROUND
+    // (GROUND = (Hx - Hy) / (Hx + Hy), but Hx is sum in y direction)
     // Actually, marginal_x sums along y for each x position, so x-elongated means
     // the x marginal has lower peak (more spread). Let's just check it's non-zero.
     assert!(
-        star.roundness1.abs() > 0.05 || star.eccentricity > 0.3,
+        star.roundness.ground.abs() > 0.05 || star.eccentricity > 0.3,
         "Elongated star should have noticeable shape metrics"
     );
 }
 
 #[test]
-fn test_asymmetric_star_roundness2() {
-    // An asymmetric source should have non-zero roundness2
+fn test_asymmetric_star_sround() {
+    // An asymmetric source should have non-zero SROUND
     let width = 64;
     let height = 64;
     let mut pixels = vec![0.1f32; width * height];
@@ -1262,12 +1262,12 @@ fn test_asymmetric_star_roundness2() {
     )
     .expect("Should compute centroid");
 
-    // Asymmetric source should have higher roundness2 (symmetry metric)
+    // Asymmetric source should have higher SROUND (symmetry metric)
     // The tail adds more flux to the right side
     assert!(
-        star.roundness2 > 0.01,
-        "Asymmetric star should have roundness2 > 0, got {}",
-        star.roundness2
+        star.roundness.sround > 0.01,
+        "Asymmetric star should have SROUND > 0, got {}",
+        star.roundness.sround
     );
 }
 
@@ -1283,13 +1283,17 @@ fn test_star_is_round() {
         snr: 50.0,
         peak: 0.5,
         sharpness: 0.3,
-        roundness1: 0.05,
-        roundness2: 0.03,
+        roundness: Roundness {
+            ground: 0.05,
+            sround: 0.03,
+        },
     };
 
     let non_round_star = Star {
-        roundness1: 0.5,
-        roundness2: 0.4,
+        roundness: Roundness {
+            ground: 0.5,
+            sround: 0.4,
+        },
         ..round_star
     };
 
