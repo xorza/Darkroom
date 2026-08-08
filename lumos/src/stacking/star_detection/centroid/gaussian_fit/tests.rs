@@ -1444,3 +1444,31 @@ fn test_gaussian_evaluate_and_jacobian_consistency() {
         }
     }
 }
+
+/// Validation must reject a non-finite fit rather than pass it through: every comparison against
+/// NaN is false, so a check phrased as rejections ("bail if sigma > max") accepts one.
+#[test]
+fn validate_fit_rejects_non_finite_and_keeps_its_bounds() {
+    let at = Vec2::splat(8.0);
+    let radius = 8usize;
+    // Baseline: a centred, plausibly-sized fit is accepted, so the rejections below are the
+    // non-finite values and not some unrelated bound.
+    assert!(validate_fit(at, at, 2.0, 2.0, radius));
+
+    for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        assert!(!validate_fit(at, at, bad, 2.0, radius), "sigma_x = {bad}");
+        assert!(!validate_fit(at, at, 2.0, bad, radius), "sigma_y = {bad}");
+    }
+    for bad in [f32::NAN, f32::INFINITY] {
+        let moved = Vec2::new(bad, 8.0);
+        assert!(!validate_fit(moved, at, 2.0, 2.0, radius), "pos.x = {bad}");
+    }
+
+    // Bounds are inclusive at both ends, and one step outside each is rejected.
+    assert!(validate_fit(at, at, 0.5, 16.0, radius));
+    assert!(!validate_fit(at, at, 0.49, 2.0, radius));
+    assert!(!validate_fit(at, at, 2.0, 16.01, radius));
+    // Centre exactly `stamp_radius` away is still inside; beyond it is not.
+    assert!(validate_fit(Vec2::new(16.0, 8.0), at, 2.0, 2.0, radius));
+    assert!(!validate_fit(Vec2::new(16.01, 8.0), at, 2.0, 2.0, radius));
+}
