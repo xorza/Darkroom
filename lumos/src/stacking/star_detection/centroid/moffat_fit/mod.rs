@@ -230,61 +230,50 @@ impl LMModel<5> for MoffatFixedBeta {
         params[3] = params[3].clamp(0.5, self.stamp_radius); // Alpha
     }
 
-    // Scalar fallback is dead code on aarch64, where the NEON path returns unconditionally.
-    #[allow(unreachable_code)]
-    fn batch_build_normal_equations(
-        &self,
-        data_x: &[f64],
-        data_y: &[f64],
-        data_z: &[f64],
-        params: &[f64; 5],
-    ) -> NormalEquations<5> {
-        #[cfg(target_arch = "x86_64")]
-        if imaginarium::cpu_features::has_avx2_fma() {
-            // SAFETY: AVX2+FMA availability checked above
-            return unsafe {
-                simd_avx2::batch_build_normal_equations_avx2(self, data_x, data_y, data_z, params)
-            };
+    fn batch_build_normal_equations(&self, data: FitData, params: &[f64; 5]) -> NormalEquations<5> {
+        // Both kernels are unweighted-only, so a weighted fit falls through to the scalar loop.
+        if data.weights.is_none() {
+            #[cfg(target_arch = "x86_64")]
+            if imaginarium::cpu_features::has_avx2_fma() {
+                // SAFETY: AVX2+FMA availability checked above.
+                return unsafe {
+                    simd_avx2::batch_build_normal_equations_avx2(
+                        self, data.x, data.y, data.z, params,
+                    )
+                };
+            }
+            #[cfg(target_arch = "aarch64")]
+            {
+                // SAFETY: NEON is unconditionally available on aarch64.
+                return unsafe {
+                    simd_neon::batch_build_normal_equations_neon(
+                        self, data.x, data.y, data.z, params,
+                    )
+                };
+            }
         }
-        #[cfg(target_arch = "aarch64")]
-        {
-            return unsafe {
-                simd_neon::batch_build_normal_equations_neon(self, data_x, data_y, data_z, params)
-            };
-        }
-        // Scalar fallback
-        build_normal_equations_scalar(self, FitData::unweighted(data_x, data_y, data_z), params)
+        build_normal_equations_scalar(self, data, params)
     }
 
-    // Scalar fallback is dead code on aarch64, where the NEON path returns unconditionally.
-    #[allow(unreachable_code)]
-    fn batch_compute_chi2(
-        &self,
-        data_x: &[f64],
-        data_y: &[f64],
-        data_z: &[f64],
-        params: &[f64; 5],
-    ) -> f64 {
-        #[cfg(target_arch = "x86_64")]
-        if imaginarium::cpu_features::has_avx2_fma() {
-            // SAFETY: AVX2+FMA availability checked above
-            return unsafe {
-                simd_avx2::batch_compute_chi2_avx2(self, data_x, data_y, data_z, params)
-            };
+    fn batch_compute_chi2(&self, data: FitData, params: &[f64; 5]) -> f64 {
+        // Both kernels are unweighted-only, so a weighted fit falls through to the scalar loop.
+        if data.weights.is_none() {
+            #[cfg(target_arch = "x86_64")]
+            if imaginarium::cpu_features::has_avx2_fma() {
+                // SAFETY: AVX2+FMA availability checked above.
+                return unsafe {
+                    simd_avx2::batch_compute_chi2_avx2(self, data.x, data.y, data.z, params)
+                };
+            }
+            #[cfg(target_arch = "aarch64")]
+            {
+                // SAFETY: NEON is unconditionally available on aarch64.
+                return unsafe {
+                    simd_neon::batch_compute_chi2_neon(self, data.x, data.y, data.z, params)
+                };
+            }
         }
-        #[cfg(target_arch = "aarch64")]
-        {
-            return unsafe {
-                simd_neon::batch_compute_chi2_neon(self, data_x, data_y, data_z, params)
-            };
-        }
-        // Scalar fallback
-        accumulate_chi2(
-            self,
-            FitData::unweighted(data_x, data_y, data_z),
-            params,
-            0..data_x.len(),
-        )
+        accumulate_chi2(self, data, params, 0..data.len())
     }
 }
 
@@ -333,15 +322,8 @@ pub(super) fn fit_moffat_2d(
 
     let model = MoffatFixedBeta::new(stamp_radius as f64, config.fixed_beta as f64);
 
-    let result = optimize(
-        &model,
-        &data_x,
-        &data_y,
-        &data_z,
-        weights.as_deref(),
-        initial_params,
-        &config.lm,
-    );
+    let data = FitData::new(&data_x, &data_y, &data_z, weights.as_deref());
+    let result = optimize(&model, data, initial_params, &config.lm);
 
     let [x0, y0, amplitude, alpha, bg] = result.params;
     let result_pos = Vec2::new(x0 as f32, y0 as f32);

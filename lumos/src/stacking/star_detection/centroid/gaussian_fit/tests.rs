@@ -1238,7 +1238,7 @@ fn test_batch_build_normal_equations_matches_scalar() {
         hessian: hessian_batch,
         gradient: gradient_batch,
         chi2: chi2_batch,
-    } = model.batch_build_normal_equations(&data_x, &data_y, &data_z, &params);
+    } = model.batch_build_normal_equations(FitData::unweighted(&data_x, &data_y, &data_z), &params);
 
     // Chi² should match
     assert!(
@@ -1291,13 +1291,64 @@ fn test_batch_compute_chi2_matches_scalar() {
         .sum();
 
     // Batch chi² (uses SIMD on x86_64 with AVX2)
-    let chi2_batch = model.batch_compute_chi2(&data_x, &data_y, &data_z, &test_params);
+    let chi2_batch =
+        model.batch_compute_chi2(FitData::unweighted(&data_x, &data_y, &data_z), &test_params);
 
     assert!(
         approx_eq(chi2_scalar, chi2_batch),
         "chi2 mismatch: scalar={chi2_scalar}, batch={chi2_batch}, diff={}",
         (chi2_scalar - chi2_batch).abs()
     );
+}
+
+/// Weighted data must bypass the SIMD kernels (which are unweighted-only) and still apply the
+/// weights, so uniform weights reproduce the unweighted result and a uniform `w` scales it by `w`.
+#[test]
+fn test_batch_weighted_bypasses_simd_and_applies_weights() {
+    use crate::stacking::star_detection::centroid::lm_optimizer::LMModel;
+
+    let true_params = [6.3, 6.7, 1000.0, 2.5, 3.0, 100.0];
+    let params = [6.5, 6.5, 980.0, 2.6, 2.9, 102.0];
+    let model = Gaussian2D { stamp_radius: 8.0 };
+    let (data_x, data_y, data_z) = make_gaussian_stamp_data(13, &true_params);
+
+    let unweighted =
+        model.batch_build_normal_equations(FitData::unweighted(&data_x, &data_y, &data_z), &params);
+
+    for scale in [1.0f64, 2.0] {
+        let weights = vec![scale; data_x.len()];
+        let weighted = model.batch_build_normal_equations(
+            FitData::new(&data_x, &data_y, &data_z, Some(&weights)),
+            &params,
+        );
+
+        // Every term of the normal equations is linear in the per-pixel weight.
+        assert!(
+            approx_eq(weighted.chi2, scale * unweighted.chi2),
+            "chi2 at w={scale}: {} != {} * {}",
+            weighted.chi2,
+            scale,
+            unweighted.chi2
+        );
+        for i in 0..6 {
+            assert!(
+                approx_eq(weighted.gradient[i], scale * unweighted.gradient[i]),
+                "gradient[{i}] at w={scale}: {} != {} * {}",
+                weighted.gradient[i],
+                scale,
+                unweighted.gradient[i]
+            );
+            for j in 0..6 {
+                assert!(
+                    approx_eq(weighted.hessian[i][j], scale * unweighted.hessian[i][j]),
+                    "hessian[{i}][{j}] at w={scale}: {} != {} * {}",
+                    weighted.hessian[i][j],
+                    scale,
+                    unweighted.hessian[i][j]
+                );
+            }
+        }
+    }
 }
 
 #[test]
@@ -1332,7 +1383,8 @@ fn test_batch_build_normal_equations_various_stamp_sizes() {
             hessian: hessian_batch,
             gradient: gradient_batch,
             chi2: chi2_batch,
-        } = model.batch_build_normal_equations(&data_x, &data_y, &data_z, &params);
+        } = model
+            .batch_build_normal_equations(FitData::unweighted(&data_x, &data_y, &data_z), &params);
 
         assert!(
             approx_eq(chi2_scalar, chi2_batch),
