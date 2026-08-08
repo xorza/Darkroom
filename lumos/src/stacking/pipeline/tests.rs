@@ -636,10 +636,9 @@ fn streaming_disk_tier_matches_ram_on_real_lights() {
     let ram = calibrate_align_stack(lights, &masters, &ram_cfg, CancelToken::never())
         .expect("RAM-tier stack");
 
-    // Disk tier: a 1-byte budget forces the streaming disk path; clean its cache on drop.
+    // Disk tier: a 1-byte budget forces the streaming disk path.
     let mut disk_cfg = config;
     disk_cfg.stack.cache.available_memory = Some(1);
-    disk_cfg.stack.cache.keep_cache = false;
     let disk = calibrate_align_stack(lights, &masters, &disk_cfg, CancelToken::never())
         .expect("disk-tier (streaming) stack");
 

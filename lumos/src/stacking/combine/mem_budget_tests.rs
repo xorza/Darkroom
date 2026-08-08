@@ -104,7 +104,6 @@ fn disk_and_memory_tiers_produce_identical_masters() {
         let mut config = StackConfig::mean(); // Mean, no rejection → exact average.
         config.cache.available_memory = Some(available_memory);
         config.cache.cache_dir = dir.join(format!("cache_{tag}"));
-        config.cache.keep_cache = false;
         stack(
             &paths,
             config,

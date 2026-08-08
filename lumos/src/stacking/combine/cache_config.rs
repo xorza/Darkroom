@@ -10,7 +10,11 @@ use crate::memory;
 pub struct CacheConfig {
     /// Directory for decoded image cache.
     pub cache_dir: PathBuf,
-    /// Keep cache after stacking (useful for re-processing).
+    /// Keep the spill cache after stacking, for re-processing or for inspecting what spilled.
+    ///
+    /// Off by default: a spilled run writes every frame's planes to `cache_dir`, so leaving them
+    /// behind costs the whole stack's worth of disk per run. Opt in when you mean to reuse or
+    /// examine them, and delete the directory yourself.
     pub keep_cache: bool,
     /// Available memory override in bytes. If None, queries system for available memory.
     pub available_memory: Option<u64>,
@@ -20,7 +24,7 @@ impl Default for CacheConfig {
     fn default() -> Self {
         Self {
             cache_dir: unique_cache_dir(),
-            keep_cache: cfg!(debug_assertions) || cfg!(test),
+            keep_cache: false,
             available_memory: None,
         }
     }
@@ -62,7 +66,8 @@ mod tests {
         assert!(first.cache_dir.parent().unwrap().ends_with("lumos_cache"));
         assert_eq!(first.cache_dir.parent(), second.cache_dir.parent());
         assert_ne!(first.cache_dir, second.cache_dir);
-        assert!(first.keep_cache);
+        // The spill cache is cleaned up unless a caller asks otherwise, in every build profile.
+        assert!(!first.keep_cache);
         assert_eq!(first.available_memory, None);
     }
 
@@ -72,7 +77,7 @@ mod tests {
         let config = CacheConfig::with_cache_dir(directory.clone());
 
         assert_eq!(config.cache_dir, directory);
-        assert!(config.keep_cache);
+        assert!(!config.keep_cache);
         assert_eq!(config.available_memory, None);
     }
 

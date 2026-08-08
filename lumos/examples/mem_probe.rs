@@ -61,7 +61,6 @@ fn main() {
 
     let mut config = AlignStackConfig::default();
     config.registration.ransac.seed = Some(1);
-    config.stack.cache.keep_cache = false;
     config.stack.cache.available_memory = Some(match tier.as_str() {
         "ram" => u64::MAX,
         "disk" => 1,
