@@ -1,6 +1,4 @@
-use crate::image_ops::intensity_plane;
-use crate::image_ops::ml::backend::TiledOnnxConfig;
-use crate::image_ops::ml::star_removal::{remove_stars, remove_stars_starless_only};
+use crate::image_ops::ml::star_removal::RemoveStars;
 use crate::testing::real_data::ml_support::{onnx_weights, stretched_master};
 use crate::testing::{init_tracing, save_png};
 
@@ -24,18 +22,20 @@ fn starnet_removes_stars() {
     // StarNet wants stretched display data in [0,1].
     let img = stretched_master();
     save_png(&img, "star_removal/input.png");
-    // Captured before `remove_stars` below consumes `img` (it repurposes the input's own
+    // Captured before `split` below consumes `img` (it repurposes the input's own
     // buffer for its `stars` output rather than allocating a fresh one).
-    let input = intensity_plane(&img);
+    let input = img.intensity_plane();
 
-    let config = TiledOnnxConfig::new(weights);
+    let remove = RemoveStars::new(weights);
     // The starless-only path (used when a caller doesn't need the `stars` layer) must
-    // reproduce `remove_stars`'s `starless` output exactly — it's the same underlying
-    // `run_tiled` inference either way. Run it first since it only needs a borrow.
-    let starless_only =
-        remove_stars_starless_only(&img, &config).expect("starless-only star removal succeeds");
+    // reproduce `split`'s `starless` output exactly — it's the same underlying `run_tiled`
+    // inference either way. `apply` overwrites in place, so it gets its own copy.
+    let mut starless_only = img.clone();
+    remove
+        .apply(&mut starless_only)
+        .expect("starless-only star removal succeeds");
 
-    let result = remove_stars(img, &config).expect("star removal succeeds");
+    let result = remove.split(img).expect("star removal succeeds");
     save_png(&result.starless, "star_removal/starless.png");
     save_png(&result.stars, "star_removal/stars.png");
     for channel in 0..starless_only.channels() {
@@ -47,7 +47,7 @@ fn starnet_removes_stars() {
 
     // The starless image is no brighter than the input, and a non-trivial amount of (positive) star
     // signal was removed.
-    let starless = intensity_plane(&result.starless);
+    let starless = result.starless.intensity_plane();
     let in_max = max_of(input.pixels());
     let sl_max = max_of(starless.pixels());
     let removed: f32 = input

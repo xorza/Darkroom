@@ -12,7 +12,6 @@ use rayon::prelude::*;
 
 use crate::error::InvalidConfigField;
 use crate::image_ops::op::OpError;
-use crate::image_ops::remap_intensity;
 use crate::io::image::linear::LinearImage;
 
 #[cfg(test)]
@@ -75,7 +74,7 @@ impl LocalContrast {
         if self.strength == 0.0 {
             return Ok(());
         }
-        remap_intensity(image, |intensity| clahe_map(intensity, self));
+        image.remap_intensity(|intensity| clahe_map(intensity, self));
         Ok(())
     }
 

@@ -4,7 +4,6 @@
 //! Milky Way. Writes the stretched base and the enhanced result for side-by-side visual comparison.
 //! Gated behind the `real-data` feature.
 
-use crate::image_ops::intensity_plane;
 use crate::io::image::linear::LinearImage;
 use crate::io::image::load_context::LoadContext;
 use crate::math::statistics::median_f32_mut;
@@ -14,11 +13,11 @@ use crate::{
 };
 
 fn median(image: &LinearImage) -> f32 {
-    median_f32_mut(&mut intensity_plane(image).into_vec())
+    median_f32_mut(&mut image.intensity_plane().into_vec())
 }
 
 fn assert_displayable(image: &LinearImage, label: &str) {
-    let plane = intensity_plane(image);
+    let plane = image.intensity_plane();
     let (min, max) = plane
         .pixels()
         .iter()

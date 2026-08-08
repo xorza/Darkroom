@@ -8,11 +8,15 @@
 //! every `apply` opened by rejecting what it could not handle; making the storage the crate's own
 //! planar type turns that from a runtime check into a type.
 //!
-//! A convention rather than a trait, deliberately. A trait would turn seven inherent `apply`
+//! A convention rather than a trait, deliberately. A trait would turn nine inherent `apply`
 //! methods into trait methods, so every downstream call site would need it in scope, to save the
 //! one-line prologue and express a composability nothing uses — `lens` drives each op from its own
 //! node with its own deserialized config type, and would keep doing so. `NeutralizeBackground`
 //! takes no parameters and so has no `validate` to call; that is the contract met, not skipped.
+//!
+//! The two `ml`-gated ops (`MlDenoise`, `RemoveStars`) take the same `apply(&mut LinearImage)`
+//! shape but report [`crate::MlError`]: their failures are a missing model or an image smaller
+//! than one tile, neither of which is a config range that `InvalidConfigField` describes.
 
 use crate::error::InvalidConfigField;
 

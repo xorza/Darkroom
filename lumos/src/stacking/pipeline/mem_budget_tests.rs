@@ -1,7 +1,7 @@
 //! Deterministic tests for the raw-light pipeline's memory tier and concurrency arithmetic.
 
 use crate::io::raw::demosaic::DemosaicMemory;
-use crate::memory::{MemoryPlan, PerFrameBytes, fits_in_memory, memory_budget, plan_memory};
+use crate::memory::{MemoryPlan, PerFrameBytes, fits_in_memory, memory_budget};
 
 const MIB: u64 = 1024 * 1024;
 const GIB: u64 = 1024 * MIB;
@@ -45,7 +45,7 @@ fn scratch_reserve_streams_a_set_whose_frames_alone_would_fit() {
         frames,
         available
     ));
-    assert!(!plan_memory(plane_bytes, demosaic, frames, threads, available).fits_in_ram);
+    assert!(!MemoryPlan::plan(plane_bytes, demosaic, frames, threads, available).fits_in_ram);
 }
 
 #[test]
@@ -79,7 +79,10 @@ fn streaming_concurrency_uses_the_selected_demosaic_peak() {
     ];
 
     for (demosaic, expected) in expected {
-        assert_eq!(plan_memory(plane_bytes, demosaic, 10, 8, 8 * GIB), expected);
+        assert_eq!(
+            MemoryPlan::plan(plane_bytes, demosaic, 10, 8, 8 * GIB),
+            expected
+        );
     }
 }
 
@@ -87,7 +90,7 @@ fn streaming_concurrency_uses_the_selected_demosaic_peak() {
 fn small_set_uses_all_workers_in_ram() {
     let plane_bytes = plane(10);
     assert_eq!(
-        plan_memory(plane_bytes, xtrans(plane_bytes), 5, 8, 8 * GIB),
+        MemoryPlan::plan(plane_bytes, xtrans(plane_bytes), 5, 8, 8 * GIB),
         MemoryPlan {
             fits_in_ram: true,
             decode_concurrency: 5,
@@ -109,7 +112,7 @@ fn ram_tier_respects_algorithm_specific_concurrency_boundaries() {
     // 420 MiB left beyond the 3P×5 resident outputs: X-Trans's 19P admits two workers where
     // Bayer's 4P and mono's nothing admit all four.
     assert_eq!(
-        plan_memory(plane_bytes, xtrans(plane_bytes), frames, threads, boundary),
+        MemoryPlan::plan(plane_bytes, xtrans(plane_bytes), frames, threads, boundary),
         MemoryPlan {
             fits_in_ram: true,
             decode_concurrency: 2,
@@ -117,7 +120,7 @@ fn ram_tier_respects_algorithm_specific_concurrency_boundaries() {
         }
     );
     for demosaic in [mono(plane_bytes), bayer(plane_bytes)] {
-        let plan = plan_memory(plane_bytes, demosaic, frames, threads, boundary);
+        let plan = MemoryPlan::plan(plane_bytes, demosaic, frames, threads, boundary);
         assert_eq!(plan.decode_concurrency, 4);
         assert!(plan.fits_in_ram);
     }
@@ -125,14 +128,14 @@ fn ram_tier_respects_algorithm_specific_concurrency_boundaries() {
     // A MiB under the boundary and the three-channel pair spills; mono's 47 planes still fit.
     let under = available_for_usable(569 * MIB);
     for demosaic in [bayer(plane_bytes), xtrans(plane_bytes)] {
-        assert!(!plan_memory(plane_bytes, demosaic, frames, threads, under).fits_in_ram);
+        assert!(!MemoryPlan::plan(plane_bytes, demosaic, frames, threads, under).fits_in_ram);
     }
-    assert!(plan_memory(plane_bytes, mono(plane_bytes), frames, threads, under).fits_in_ram);
+    assert!(MemoryPlan::plan(plane_bytes, mono(plane_bytes), frames, threads, under).fits_in_ram);
 
     // Headroom scales the X-Trans fan-out: 760 usable less 150 resident is 610 MiB, three 19P
     // transients' worth.
     assert_eq!(
-        plan_memory(
+        MemoryPlan::plan(
             plane_bytes,
             xtrans(plane_bytes),
             frames,
@@ -154,7 +157,8 @@ fn planned_concurrency_never_overshoots_its_tier_budget() {
                 for &threads in &[1usize, 8, 32] {
                     for &budget_gib in &[1u64, 2, 4, 8, 16] {
                         let available = budget_gib * GIB;
-                        let plan = plan_memory(plane_bytes, demosaic, frames, threads, available);
+                        let plan =
+                            MemoryPlan::plan(plane_bytes, demosaic, frames, threads, available);
                         let per_frame = PerFrameBytes::new(plane_bytes, demosaic);
                         let usable = memory_budget(available);
                         let worker_cap = frames.min(threads.max(1));
@@ -202,9 +206,9 @@ fn budget_flips_the_tier_and_scales_streaming_fanout() {
     let demosaic = xtrans(plane_bytes);
     let (frames, threads) = (20, 16);
 
-    let tight = plan_memory(plane_bytes, demosaic, frames, threads, 2 * GIB);
-    let roomy_streaming = plan_memory(plane_bytes, demosaic, frames, threads, 16 * GIB);
-    let ample = plan_memory(plane_bytes, demosaic, frames, threads, 1 << 50);
+    let tight = MemoryPlan::plan(plane_bytes, demosaic, frames, threads, 2 * GIB);
+    let roomy_streaming = MemoryPlan::plan(plane_bytes, demosaic, frames, threads, 16 * GIB);
+    let ample = MemoryPlan::plan(plane_bytes, demosaic, frames, threads, 1 << 50);
 
     assert!(!tight.fits_in_ram);
     assert!(!roomy_streaming.fits_in_ram);

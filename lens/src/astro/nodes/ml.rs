@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use lumos::{TiledOnnxConfig, ml_denoise, remove_stars, remove_stars_starless_only};
+use lumos::{MlDenoise, RemoveStars};
 use scenarium::{ConstValue, DataType, DynamicValue, FsPathConfig, FsPathMode};
 use scenarium::{Func, FuncId, FuncInput, FuncLambda, FuncOutput, Library};
 
@@ -54,8 +54,9 @@ fn register_denoise(library: &mut Library, model_path: &std::path::Path) {
                                 .expect("model input type is validated at the compile boundary"),
                         );
                         let output =
-                            runtime::run_ml(std::mem::take(&mut inputs[0]), move |image| {
-                                ml_denoise(&image, &TiledOnnxConfig::new(model))
+                            runtime::run_ml(std::mem::take(&mut inputs[0]), move |mut image| {
+                                MlDenoise::new(model).apply(&mut image)?;
+                                Ok(image)
                             })
                             .await?;
                         outputs[0] = DynamicValue::from_custom(Image::from(output));
@@ -101,17 +102,20 @@ fn register_star_removal(library: &mut Library, model_path: &std::path::Path) {
                         if need_stars {
                             let result =
                                 runtime::run_ml(std::mem::take(&mut inputs[0]), move |image| {
-                                    remove_stars(image, &TiledOnnxConfig::new(model))
+                                    RemoveStars::new(model).split(image)
                                 })
                                 .await?;
                             outputs[0] = DynamicValue::from_custom(Image::from(result.starless));
                             outputs[1] = DynamicValue::from_custom(Image::from(result.stars));
                         } else {
-                            let starless =
-                                runtime::run_ml(std::mem::take(&mut inputs[0]), move |image| {
-                                    remove_stars_starless_only(&image, &TiledOnnxConfig::new(model))
-                                })
-                                .await?;
+                            let starless = runtime::run_ml(
+                                std::mem::take(&mut inputs[0]),
+                                move |mut image| {
+                                    RemoveStars::new(model).apply(&mut image)?;
+                                    Ok(image)
+                                },
+                            )
+                            .await?;
                             outputs[0] = DynamicValue::from_custom(Image::from(starless));
                         }
                         Ok(())

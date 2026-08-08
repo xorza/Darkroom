@@ -159,57 +159,59 @@ pub(crate) struct MemoryPlan {
     pub(crate) warp_concurrency: usize,
 }
 
-/// Decide whether a run stays resident or spills, and how wide decode and warp may fan out.
-///
-/// The run fits in RAM only when both peaks do: decoding every frame (plus the demosaic's own
-/// transient) and holding every warped frame while `workers` of them are being worked on.
-pub(crate) fn plan_memory(
-    plane_bytes: usize,
-    demosaic: DemosaicMemory,
-    frame_count: usize,
-    threads: usize,
-    available: u64,
-) -> MemoryPlan {
-    assert!(
-        frame_count > 0,
-        "memory planning requires at least one frame"
-    );
-    let workers = frame_count.min(threads.max(1));
-    let per_frame = PerFrameBytes::new(plane_bytes, demosaic);
-    let decode_extra = demosaic.peak_bytes.saturating_sub(demosaic.output_bytes);
-    let usable = memory_budget(available);
+impl MemoryPlan {
+    /// Decide whether a run stays resident or spills, and how wide decode and warp may fan out.
+    ///
+    /// The run fits in RAM only when both peaks do: decoding every frame (plus the demosaic's own
+    /// transient) and holding every warped frame while `workers` of them are being worked on.
+    pub(crate) fn plan(
+        plane_bytes: usize,
+        demosaic: DemosaicMemory,
+        frame_count: usize,
+        threads: usize,
+        available: u64,
+    ) -> Self {
+        assert!(
+            frame_count > 0,
+            "memory planning requires at least one frame"
+        );
+        let workers = frame_count.min(threads.max(1));
+        let per_frame = PerFrameBytes::new(plane_bytes, demosaic);
+        let decode_extra = demosaic.peak_bytes.saturating_sub(demosaic.output_bytes);
+        let usable = memory_budget(available);
 
-    let decoded_resident = (demosaic.output_bytes as u64).saturating_mul(frame_count as u64);
-    let decode_minimum = decoded_resident.saturating_add(decode_extra as u64);
-    let warped_resident = (per_frame.warped as u64).saturating_mul(frame_count as u64);
-    let working_peak =
-        warped_resident.saturating_add((per_frame.working as u64).saturating_mul(workers as u64));
-    let fits_in_ram = decode_minimum.max(working_peak) <= usable;
+        let decoded_resident = (demosaic.output_bytes as u64).saturating_mul(frame_count as u64);
+        let decode_minimum = decoded_resident.saturating_add(decode_extra as u64);
+        let warped_resident = (per_frame.warped as u64).saturating_mul(frame_count as u64);
+        let working_peak = warped_resident
+            .saturating_add((per_frame.working as u64).saturating_mul(workers as u64));
+        let fits_in_ram = decode_minimum.max(working_peak) <= usable;
 
-    let (decode_resident_frames, decode_bytes) = if fits_in_ram {
-        (frame_count, decode_extra)
-    } else {
-        (0, demosaic.peak_bytes.max(per_frame.working))
-    };
-    let warp_resident_frames = usize::from(fits_in_ram) * frame_count;
-    let decode_concurrency = load_concurrency(
-        demosaic.output_bytes,
-        decode_bytes,
-        decode_resident_frames,
-        available,
-        workers,
-    );
-    let warp_concurrency = load_concurrency(
-        per_frame.warped,
-        per_frame.working,
-        warp_resident_frames,
-        available,
-        workers,
-    );
-    MemoryPlan {
-        fits_in_ram,
-        decode_concurrency,
-        warp_concurrency,
+        let (decode_resident_frames, decode_bytes) = if fits_in_ram {
+            (frame_count, decode_extra)
+        } else {
+            (0, demosaic.peak_bytes.max(per_frame.working))
+        };
+        let warp_resident_frames = usize::from(fits_in_ram) * frame_count;
+        let decode_concurrency = load_concurrency(
+            demosaic.output_bytes,
+            decode_bytes,
+            decode_resident_frames,
+            available,
+            workers,
+        );
+        let warp_concurrency = load_concurrency(
+            per_frame.warped,
+            per_frame.working,
+            warp_resident_frames,
+            available,
+            workers,
+        );
+        Self {
+            fits_in_ram,
+            decode_concurrency,
+            warp_concurrency,
+        }
     }
 }
 
