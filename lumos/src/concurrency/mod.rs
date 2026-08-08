@@ -128,13 +128,13 @@ where
                 let mut mine = Vec::new();
                 loop {
                     let index = next.fetch_add(1, Ordering::Relaxed);
-                    if index >= len || failed.load(Ordering::Relaxed) {
+                    if index >= len || failed.load(Ordering::Acquire) {
                         break;
                     }
                     match job(slot, index) {
                         Ok(value) => mine.push((index, value)),
                         Err(error) => {
-                            failed.store(true, Ordering::Relaxed);
+                            failed.store(true, Ordering::Release);
                             *outcome = Err(error);
                             return;
                         }
