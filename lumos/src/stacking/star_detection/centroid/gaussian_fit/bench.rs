@@ -8,7 +8,7 @@ use std::hint::black_box;
 
 use crate::math::size2us::Size2us;
 use crate::stacking::star_detection::centroid::gaussian_fit::GaussianFitConfig;
-use crate::stacking::star_detection::centroid::gaussian_fit::fit_gaussian_2d;
+use crate::stacking::star_detection::centroid::gaussian_fit::GaussianFitResult;
 use crate::testing::synthetic::star_profiles::{StarProfile, SyntheticStar};
 use glam::{DVec2, Vec2};
 
@@ -24,7 +24,7 @@ fn bench_gaussian_fit_small(b: quickbench::Bencher) {
     let config = GaussianFitConfig::default();
 
     b.bench(|| {
-        black_box(fit_gaussian_2d(
+        black_box(GaussianFitResult::fit(
             black_box(&pixels),
             black_box(DVec2::splat(8.0)),
             black_box(&StampGrid::new(8)),
@@ -47,7 +47,7 @@ fn bench_gaussian_fit_medium(b: quickbench::Bencher) {
     let config = GaussianFitConfig::default();
 
     b.bench(|| {
-        black_box(fit_gaussian_2d(
+        black_box(GaussianFitResult::fit(
             black_box(&pixels),
             black_box(DVec2::splat(12.0)),
             black_box(&StampGrid::new(12)),
@@ -70,7 +70,7 @@ fn bench_gaussian_fit_large(b: quickbench::Bencher) {
     let config = GaussianFitConfig::default();
 
     b.bench(|| {
-        black_box(fit_gaussian_2d(
+        black_box(GaussianFitResult::fit(
             black_box(&pixels),
             black_box(DVec2::splat(15.0)),
             black_box(&StampGrid::new(15)),
