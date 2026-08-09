@@ -7,7 +7,7 @@
 use std::f64::consts::LOG2_E;
 
 use crate::stacking::star_detection::centroid::gaussian_fit::Gaussian2D;
-use crate::stacking::star_detection::centroid::gaussian_fit::exp_poly::{
+use crate::stacking::star_detection::centroid::gaussian_fit::simd::exp_poly::{
     EXP_P0, EXP_P1, EXP_P2, EXP_Q0, EXP_Q1, EXP_Q2, EXP_Q3, LN2_HI, LN2_LO,
 };
 use crate::stacking::star_detection::centroid::lm_optimizer::{
@@ -351,7 +351,7 @@ pub(super) unsafe fn batch_compute_chi2_avx2(
 mod tests {
     use std::f64::consts::PI;
 
-    use crate::stacking::star_detection::centroid::gaussian_fit::simd_avx2::*;
+    use crate::stacking::star_detection::centroid::gaussian_fit::simd::avx2::*;
 
     /// Test that simd_exp_fast produces results close to std exp().
     #[test]

@@ -32,14 +32,10 @@ use crate::image_ops::SAMPLES_PER_BLOCK;
 use crate::image_ops::op::OpError;
 use crate::io::image::linear::LinearImage;
 use crate::math::statistics::{MedianMad, median_f32_mut};
-use crate::simd::dispatch;
 
 #[cfg(all(test, feature = "internals"))]
 mod bench;
-#[cfg(target_arch = "x86_64")]
-mod simd_avx2;
-#[cfg(target_arch = "aarch64")]
-mod simd_neon;
+mod simd;
 #[cfg(test)]
 mod tests;
 
@@ -47,24 +43,6 @@ mod tests;
 /// collapses every interior value onto a single output.
 const MIDTONES_MIN: f32 = 1e-4;
 const MIDTONES_MAX: f32 = 1.0 - 1e-4;
-
-/// Cephes single-precision `logf` polynomial coefficients (`cephes/logf.c`), accurate to ~1 ULP on
-/// the reduced mantissa. Shared verbatim by the AVX2 and NEON `asinh` backends (`asinh(x) =
-/// logf(x + √(x²+1))`) so the two arches stay bit-for-bit identical — one source of truth, no
-/// "keep in sync" drift. `Q1`/`Q2` are the two-part ln(2) that reassembles log from mantissa +
-/// exponent.
-const LOG_P0: f32 = 7.037_683_6e-2;
-const LOG_P1: f32 = -1.151_461e-1;
-const LOG_P2: f32 = 1.167_699_9e-1;
-const LOG_P3: f32 = -1.242_014_1e-1;
-const LOG_P4: f32 = 1.424_932_3e-1;
-const LOG_P5: f32 = -1.666_805_8e-1;
-const LOG_P6: f32 = 2.000_071_5e-1;
-const LOG_P7: f32 = -2.499_999_4e-1;
-const LOG_P8: f32 = 3.333_333e-1;
-const SQRTHF: f32 = 0.707_106_77;
-const LOG_Q1: f32 = -2.121_944_4e-4;
-const LOG_Q2: f32 = 0.693_359_4;
 
 /// Which stretch curve to apply, and how its parameters are chosen.
 #[derive(Debug, Clone, Copy)]
@@ -627,14 +605,8 @@ fn apply_color_preserving_image(image: &mut LinearImage, curve: Curve) {
     }
 }
 
-/// Color-preserving arcsinh on an **RGB** image. The per-pixel `asinh` is the curve's hot spot, so
-/// there is a vectorized path (AVX2+FMA on x86_64, NEON on aarch64) computing it ≈ f32-exact
-/// (~1 ULP vs libm); anything else falls back to the scalar per-pixel map.
-///
-/// Planar storage is what lets the kernels take three plain `loadu`/`storeu` per 8 lanes. On
-/// interleaved data AVX2 needed three stride-3 gathers and a 24-store scalar write-back per 8
-/// pixels; NEON's `vld3q_f32`/`vst3q_f32` did it in one instruction each, so this is a large win on
-/// x86 and roughly neutral on aarch64.
+/// Color-preserving arcsinh on an **RGB** image, band-parallel across the three planes. The curve
+/// itself, and the choice of backend that evaluates it, live in [`simd`].
 fn apply_color_preserving_asinh(image: &mut LinearImage, c: AsinhCurve) {
     debug_assert!(image.is_rgb(), "caller dispatches grayscale to map_samples");
     let [r, g, b] = image.rgb_planes_mut();
@@ -642,37 +614,5 @@ fn apply_color_preserving_asinh(image: &mut LinearImage, c: AsinhCurve) {
     r.par_chunks_mut(SAMPLES_PER_BLOCK)
         .zip(g.par_chunks_mut(SAMPLES_PER_BLOCK))
         .zip(b.par_chunks_mut(SAMPLES_PER_BLOCK))
-        .for_each(|((r, g), b)| {
-            dispatch! {
-                x86: avx2_fma
-                    => simd_avx2::asinh_color_preserve_avx2(r, g, b, c.inv_beta, c.inv_norm),
-                aarch64
-                    => simd_neon::asinh_color_preserve_neon(r, g, b, c.inv_beta, c.inv_norm),
-                scalar => asinh_color_preserve_scalar(r, g, b, c),
-            }
-        });
-}
-
-/// Scalar counterpart of the vectorized `asinh_color_preserve_*` kernels, over one band of three
-/// RGB planes. Same per-pixel curve as [`color_preserve_pixel`], reached through the same
-/// per-band split so every backend sees the identical work division.
-fn asinh_color_preserve_scalar(
-    red: &mut [f32],
-    green: &mut [f32],
-    blue: &mut [f32],
-    c: AsinhCurve,
-) {
-    for ((r, g), b) in red.iter_mut().zip(green.iter_mut()).zip(blue.iter_mut()) {
-        let out = color_preserve_pixel(
-            Rgb {
-                r: *r,
-                g: *g,
-                b: *b,
-            },
-            &c,
-        );
-        *r = out.r;
-        *g = out.g;
-        *b = out.b;
-    }
+        .for_each(|((r, g), b)| simd::asinh_color_preserve(r, g, b, c));
 }

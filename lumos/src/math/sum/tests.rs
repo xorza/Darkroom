@@ -1,5 +1,6 @@
 //! Tests for sum operations.
 
+use crate::math::sum::simd::{sum_f32, weighted_mean_f32};
 use crate::math::sum::*;
 
 #[test]
