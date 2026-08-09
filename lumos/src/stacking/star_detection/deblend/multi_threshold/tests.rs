@@ -1676,7 +1676,7 @@ fn test_connected_regions_grid_into_basic() {
     let mut regions: ArrayVec<Vec<Pixel>, 4> = ArrayVec::new();
 
     let mut scratch = RegionScratch::new();
-    find_connected_regions_grid_into(&pixels, &mut regions, &mut scratch);
+    find_connected_regions_grid(&pixels, &mut regions, &mut scratch);
 
     assert_eq!(regions.len(), 3, "Should find all 3 separate regions");
     for region in &regions {
@@ -1713,7 +1713,7 @@ fn test_connected_regions_grid_into_capacity_limit() {
     let mut regions: ArrayVec<Vec<Pixel>, 2> = ArrayVec::new();
 
     let mut scratch = RegionScratch::new();
-    find_connected_regions_grid_into(&pixels, &mut regions, &mut scratch);
+    find_connected_regions_grid(&pixels, &mut regions, &mut scratch);
 
     assert_eq!(regions.len(), 2, "Should stop at capacity limit");
 }
@@ -1736,12 +1736,12 @@ fn test_connected_regions_grid_into_recycles_previous() {
 
     // First call
     let mut scratch = RegionScratch::new();
-    find_connected_regions_grid_into(&pixels, &mut regions, &mut scratch);
+    find_connected_regions_grid(&pixels, &mut regions, &mut scratch);
     assert_eq!(regions.len(), 2);
     assert!(scratch.pool.is_empty());
 
     // Second call — previous regions should be recycled to pool then reused
-    find_connected_regions_grid_into(&pixels, &mut regions, &mut scratch);
+    find_connected_regions_grid(&pixels, &mut regions, &mut scratch);
     assert_eq!(regions.len(), 2);
     // Pool should be empty because the 2 recycled vecs were reused for the 2 new regions
     assert!(scratch.pool.is_empty());

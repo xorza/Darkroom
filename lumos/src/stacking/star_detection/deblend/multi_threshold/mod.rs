@@ -296,7 +296,6 @@ struct DeblendNode {
     children: SmallVec<[usize; MAX_CHILDREN]>,
 }
 
-/// All reusable buffers for deblending. Create once per thread and pass to
 /// The pooled state a connected-region search reuses: the grid it labels, the queue it walks, and
 /// the `Vec`s it hands out and takes back so no BFS allocates. Every entry point that finds
 /// regions needs all three, so they travel together.
@@ -648,7 +647,7 @@ fn process_higher_level(
         if region.len() < parent_pixels_above.len() {
             // Find child regions using grid-based lookup. The call drains the previous split's
             // regions back into the pool before refilling.
-            find_connected_regions_grid_into(parent_pixels_above, child_regions, region_scratch);
+            find_connected_regions_grid(parent_pixels_above, child_regions, region_scratch);
 
             if child_regions.len() > 1 {
                 create_child_nodes(
@@ -866,38 +865,61 @@ fn assign_pixels_to_objects(
         .collect()
 }
 
-/// Find connected regions using grid-based BFS.
+/// Where [`find_connected_regions_grid`] puts what it finds.
 ///
-/// Uses PixelGrid for O(1) neighbor lookup with flat-index BFS queue.
-fn find_connected_regions_grid(
-    pixels: &[Pixel],
-    regions: &mut Vec<Vec<Pixel>>,
-    scratch: &mut RegionScratch,
-) {
-    for region in regions.drain(..) {
-        scratch.pool.push(region);
-    }
-    if pixels.is_empty() {
-        return;
-    }
-    scratch.grid.reset_with_pixels(pixels);
+/// The two callers want different containers — the level loop takes every region a component
+/// splits into, the split check takes at most `MAX_CHILDREN` of them — and that difference used to
+/// be a second copy of the BFS driver. Recycling belongs to the sink because the sink is what
+/// still owns the `Vec`s handed out last call, and they have to reach the pool before it refills.
+trait RegionSink {
+    /// Give every region back to the pool, leaving the sink empty.
+    fn recycle_into(&mut self, pool: &mut Vec<Vec<Pixel>>);
 
-    for p in pixels {
-        if let Some(region) = scratch.bfs_region(p) {
-            regions.push(region);
-        }
+    /// Whether the sink can take no more, which ends the search early.
+    fn is_full(&self) -> bool;
+
+    fn push_region(&mut self, region: Vec<Pixel>);
+}
+
+impl RegionSink for Vec<Vec<Pixel>> {
+    fn recycle_into(&mut self, pool: &mut Vec<Vec<Pixel>>) {
+        pool.append(self);
+    }
+
+    /// Unbounded: the level loop wants every region, however many a component breaks into.
+    fn is_full(&self) -> bool {
+        false
+    }
+
+    fn push_region(&mut self, region: Vec<Pixel>) {
+        self.push(region);
     }
 }
 
-/// Find connected regions into an ArrayVec (limited capacity).
-fn find_connected_regions_grid_into<const N: usize>(
+impl<const N: usize> RegionSink for ArrayVec<Vec<Pixel>, N> {
+    fn recycle_into(&mut self, pool: &mut Vec<Vec<Pixel>>) {
+        pool.extend(self.drain(..));
+    }
+
+    fn is_full(&self) -> bool {
+        ArrayVec::is_full(self)
+    }
+
+    fn push_region(&mut self, region: Vec<Pixel>) {
+        self.push(region);
+    }
+}
+
+/// Find connected regions using grid-based BFS, recycling whatever `regions` held into the pool
+/// first.
+///
+/// Uses PixelGrid for O(1) neighbor lookup with flat-index BFS queue.
+fn find_connected_regions_grid<R: RegionSink>(
     pixels: &[Pixel],
-    regions: &mut ArrayVec<Vec<Pixel>, N>,
+    regions: &mut R,
     scratch: &mut RegionScratch,
 ) {
-    for region in regions.drain(..) {
-        scratch.pool.push(region);
-    }
+    regions.recycle_into(&mut scratch.pool);
     if pixels.is_empty() {
         return;
     }
@@ -908,7 +930,7 @@ fn find_connected_regions_grid_into<const N: usize>(
             break;
         }
         if let Some(region) = scratch.bfs_region(p) {
-            regions.push(region);
+            regions.push_region(region);
         }
     }
 }
