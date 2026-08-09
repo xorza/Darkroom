@@ -1,5 +1,6 @@
 //! Tests for background estimation.
 
+use crate::testing::prelude::*;
 use crate::{
     math::size2us::Size2us,
     stacking::star_detection::background::background_estimate::BackgroundEstimate,
@@ -7,7 +8,6 @@ use crate::{
     stacking::star_detection::resources::DetectionResources,
     testing::synthetic::background_map,
 };
-use imaginarium::Buffer2;
 
 #[test]
 fn test_uniform_background() {

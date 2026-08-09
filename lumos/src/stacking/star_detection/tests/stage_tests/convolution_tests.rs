@@ -3,15 +3,13 @@
 //! Tests the Gaussian filtering for star enhancement.
 
 use crate::math::fwhm::fwhm_to_sigma;
-use crate::math::size2us::Size2us;
 use crate::stacking::star_detection::config::background_config::BackgroundConfig;
 use crate::stacking::star_detection::convolution::internals::gaussian_convolve;
 use crate::stacking::star_detection::tests::Scenario;
 use crate::testing::init_tracing;
-use crate::testing::synthetic::background_map;
+use crate::testing::prelude::*;
 use crate::testing::visual::save_grayscale;
 use common::internals::test_output_path;
-use imaginarium::Buffer2;
 
 use crate::stacking::star_detection::tests::stage_tests::TILE_SIZE;
 

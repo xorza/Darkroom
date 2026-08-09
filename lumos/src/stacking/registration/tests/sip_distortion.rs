@@ -8,8 +8,8 @@ use crate::stacking::registration::distortion::sip::SipConfig;
 use crate::stacking::registration::tests::helpers;
 use crate::stacking::registration::transform::Transform;
 use crate::stacking::registration::{Config, register};
+use crate::testing::prelude::*;
 use crate::testing::synthetic::transforms::{generate_random_positions, positions_to_stars};
-use glam::DVec2;
 
 /// Apply a radial barrel distortion `p' = p + k·r²·(p − center)` about `center`.
 fn barrel(p: DVec2, center: DVec2, k: f64) -> DVec2 {

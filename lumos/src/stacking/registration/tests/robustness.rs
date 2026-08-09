@@ -10,12 +10,12 @@
 use crate::stacking::registration::ransac::RansacConfig;
 use crate::stacking::registration::{Config, RegistrationError, TransformType, register};
 use crate::stacking::star_detection::star::Star;
+use crate::testing::prelude::*;
 use crate::testing::synthetic::transforms::{
     add_spurious_star_list, add_star_noise, filter_stars_to_bounds, generate_random_stars,
     remove_random_star_list, transform_star_list, translate_star_list,
     translate_stars_with_overlap,
 };
-use glam::DVec2;
 
 use crate::stacking::registration::tests::helpers::{
     self, FWHM_NORMAL, FWHM_TIGHT, apply_affine, apply_homography,

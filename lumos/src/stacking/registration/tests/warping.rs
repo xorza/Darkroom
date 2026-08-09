@@ -8,17 +8,13 @@
 //! - All InterpolationMethod variants (Nearest, Bilinear, Bicubic, Lanczos2/3/4)
 
 use crate::ImageDimensions;
-use crate::io::image::linear::LinearImage;
-use crate::math::size2us::Size2us;
-use crate::math::vec2us::Vec2us;
 use crate::stacking::registration::config::{self, InterpolationMethod, WarpParams};
 use crate::stacking::registration::resample::{self, internals};
 use crate::stacking::registration::tests::helpers;
 use crate::stacking::registration::transform::{Transform, TransformType, WarpTransform};
 use crate::stacking::star_detection::detector::StarDetector;
+use crate::testing::prelude::*;
 use crate::testing::synthetic::fixtures::star_field;
-use glam::DVec2;
-use imaginarium::Buffer2;
 
 /// Helper to warp and return a new buffer (for test convenience).
 /// Visually applies the transform to the image content (stars move by T).
@@ -278,8 +274,6 @@ fn test_warp_homography_roundtrip() {
 
 #[test]
 fn test_warp_with_detected_transform() {
-    use crate::io::image::linear::LinearImage;
-
     use crate::stacking::registration::{Config as RegConfig, register};
     use crate::stacking::star_detection::config::Config as StarConfig;
 

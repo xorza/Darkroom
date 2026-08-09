@@ -4,9 +4,8 @@
 #![allow(clippy::identity_op, clippy::erasing_op)]
 
 use crate::bit_buffer2::BitBuffer2;
-use crate::math::size2us::Size2us;
-use crate::math::vec2us::Vec2us;
 use crate::stacking::star_detection::mask_dilation::dilate_mask;
+use crate::testing::prelude::*;
 
 /// Verify dilation result against naive O(n²×r²) box dilation.
 fn assert_naive_dilation(mask: &BitBuffer2, dilated: &BitBuffer2, radius: usize, ctx: &str) {

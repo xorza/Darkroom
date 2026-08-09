@@ -1,12 +1,10 @@
+use crate::testing::prelude::*;
 use arrayvec::ArrayVec;
 
 use crate::stacking::frame_store::FramePlane;
 
 use crate::io::image::cfa::{CfaImage, CfaType};
-use crate::io::image::image_dimensions::ImageDimensions;
-use crate::io::image::linear::LinearImage;
 use crate::io::image::linear_pixels::LinearPixels;
-use crate::math::size2us::Size2us;
 use crate::math::statistics::MedianMad;
 use crate::stacking::combine::cache::tests::make_test_cache;
 use crate::stacking::combine::cache_config::CacheConfig;

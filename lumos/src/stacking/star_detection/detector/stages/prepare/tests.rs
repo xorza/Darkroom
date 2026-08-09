@@ -1,13 +1,11 @@
 use crate::io::image::cfa::CfaType;
-use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::image_provenance::{
     ColorProvenance, DecoderProvenance, DemosaicProvenance, ImageProvenance, SourceContainer,
     TransferProvenance,
 };
-use crate::io::image::linear::LinearImage;
 use crate::io::raw::demosaic::bayer::CfaPattern;
-use crate::math::size2us::Size2us;
 use crate::stacking::star_detection::detector::stages::prepare::*;
+use crate::testing::prelude::*;
 
 /// Build a 16-pixel channel whose median is `center` and MAD is exactly `mad`
 /// (8 pixels at `center - mad`, 8 at `center + mad`).

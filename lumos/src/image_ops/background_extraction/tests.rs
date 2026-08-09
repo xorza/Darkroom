@@ -1,9 +1,8 @@
 use crate::image_ops::background_extraction::*;
 use crate::image_ops::error::OpError;
-use crate::image_ops::internals::{channel_plane as channel, gray_image, rgb_image as rgb};
-use crate::io::image::linear::LinearImage;
-use crate::math::size2us::Size2us;
-use crate::math::vec2us::Vec2us;
+use crate::image_ops::internals::channel_plane as channel;
+use crate::testing::images::{gray_image, rgb_image as rgb};
+use crate::testing::prelude::*;
 
 fn fill(size: Size2us, f: impl Fn(usize, usize) -> f32) -> Vec<f32> {
     let mut v = vec![0.0f32; size.pixel_count()];

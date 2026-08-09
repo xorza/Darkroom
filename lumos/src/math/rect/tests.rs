@@ -1,7 +1,5 @@
-use crate::math::vec2us::Vec2us;
-use glam::Vec2;
-
 use crate::math::rect::{Rect, URect};
+use crate::testing::prelude::*;
 
 #[test]
 fn rect_construction_and_overlap_are_half_open_and_const() {

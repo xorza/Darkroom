@@ -1,10 +1,9 @@
-use crate::math::size2us::Size2us;
+use crate::testing::prelude::*;
 use rayon::prelude::*;
 
 use crate::CfaType;
 use crate::io::image::cfa::CfaImage;
 use crate::io::raw::demosaic::bayer::CfaPattern;
-use crate::math::vec2us::Vec2us;
 use crate::stacking::calibration_masters::prepared_flat::{
     MIN_NORMALIZED_FLAT, apply, normalize, subtract,
 };

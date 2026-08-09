@@ -47,9 +47,7 @@ pub(crate) const SAMPLES_PER_BLOCK: usize = 8192;
 
 #[cfg(test)]
 pub(crate) mod internals {
-    use crate::io::image::image_dimensions::ImageDimensions;
     use crate::io::image::linear::LinearImage;
-    use crate::math::size2us::Size2us;
     use imaginarium::Buffer2;
 
     pub(crate) fn channel_plane(image: &LinearImage, channel: usize) -> Buffer2<f32> {
@@ -58,22 +56,6 @@ pub(crate) mod internals {
 
     pub(crate) fn channel_samples(image: &LinearImage, channel: usize) -> Vec<f32> {
         image.channel(channel).pixels().to_vec()
-    }
-
-    pub(crate) fn gray_image(size: Size2us, pixels: Vec<f32>) -> LinearImage {
-        LinearImage::from(Buffer2::new(size.width, size.height, pixels))
-    }
-
-    pub(crate) fn rgb_image(
-        size: Size2us,
-        red: Vec<f32>,
-        green: Vec<f32>,
-        blue: Vec<f32>,
-    ) -> LinearImage {
-        LinearImage::from_planar_channels(
-            ImageDimensions::new((size.width, size.height), 3),
-            [red, green, blue],
-        )
     }
 
     pub(crate) fn mean(samples: &[f32]) -> f32 {

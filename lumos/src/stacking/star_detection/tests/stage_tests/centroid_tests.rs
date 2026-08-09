@@ -4,12 +4,11 @@
 //! stated sub-pixel tolerance, accuracy tracks SNR, and the three centroid methods
 //! (weighted-moments / Gaussian-fit / Moffat-fit) agree and the profile fits beat moments.
 
-use crate::math::size2us::Size2us;
+use crate::testing::prelude::*;
 use std::f32::consts::PI;
 
 use crate::math::fwhm::fwhm_to_sigma;
 use crate::math::rect::URect;
-use crate::math::vec2us::Vec2us;
 use crate::stacking::star_detection::centroid::measure_star;
 use crate::stacking::star_detection::centroid::{StampGrid, compute_stamp_radius};
 use crate::stacking::star_detection::config::measurement_config::{
@@ -17,9 +16,7 @@ use crate::stacking::star_detection::config::measurement_config::{
 };
 use crate::stacking::star_detection::deblend::region::Region;
 use crate::stacking::star_detection::tests::stage_tests::background_estimate;
-use crate::testing::TestRng;
 use crate::testing::synthetic::star_profiles::{StarProfile, SyntheticStar};
-use imaginarium::Buffer2;
 
 /// Render `stars` as `(x, y, brightness)` Gaussians of width `sigma` on a 0.1 sky + Gaussian
 /// noise σ `noise`.

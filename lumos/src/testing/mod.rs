@@ -13,7 +13,9 @@ use crate::io::raw::RAW_EXTENSIONS;
 use crate::math::size2us::Size2us;
 
 pub(crate) mod assertions;
+pub(crate) mod images;
 pub(crate) mod mem_probe;
+pub(crate) mod prelude;
 #[cfg(feature = "real-data")]
 mod real_data;
 pub(crate) mod synthetic;

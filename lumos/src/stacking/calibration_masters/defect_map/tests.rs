@@ -1,6 +1,4 @@
 use crate::io::image::cfa::QUANTIZATION_SIGMA_PER_STEP;
-use crate::math::size2us::Size2us;
-use crate::math::vec2us::Vec2us;
 use crate::stacking::calibration_masters::defect_map::*;
 use crate::stacking::combine::cache::FrameCache;
 use crate::stacking::combine::config::{Normalization, StackConfig};

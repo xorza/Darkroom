@@ -1,10 +1,10 @@
 //! Tests for SIMD convolution implementations.
 
-use crate::math::size2us::Size2us;
 use crate::stacking::star_detection::convolution::simd::{
     Kernel2d, convolve_2d_row, convolve_2d_row_scalar, convolve_cols_direct,
     convolve_cols_row_scalar, convolve_row, convolve_row_scalar, mirror_index,
 };
+use crate::testing::prelude::*;
 
 /// Whole-image scalar column convolution — a parity oracle for [`convolve_cols_direct`] (production
 /// uses the parallel path; this serial loop over `convolve_cols_row_scalar` is the reference).

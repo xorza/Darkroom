@@ -1,4 +1,4 @@
-use crate::stacking::registration::triangle::tests::*;
+use super::*;
 
 #[test]
 fn test_invariant_tree_empty() {

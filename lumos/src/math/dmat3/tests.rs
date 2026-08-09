@@ -1,5 +1,5 @@
 use crate::math::dmat3::*;
-use crate::testing::assertions::{assert_close, is_close};
+use crate::testing::prelude::*;
 
 const EPS: f64 = 1e-10;
 

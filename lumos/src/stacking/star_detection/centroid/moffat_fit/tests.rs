@@ -1,7 +1,7 @@
 //! Tests for Moffat profile fitting.
 use crate::stacking::star_detection::centroid::StampGrid;
+use crate::testing::prelude::*;
 
-use crate::math::size2us::Size2us;
 use std::f64::consts::PI;
 
 use crate::stacking::star_detection::centroid::internals::{
@@ -10,7 +10,6 @@ use crate::stacking::star_detection::centroid::internals::{
 use crate::stacking::star_detection::centroid::lm_optimizer::LMConfig;
 use crate::stacking::star_detection::centroid::moffat_fit::*;
 use crate::testing::synthetic::star_profiles::{StarProfile, SyntheticStar};
-use glam::{DVec2, Vec2};
 
 /// One Moffat recovery case, mirroring `gaussian_fit`'s `RecoveryCase`.
 ///
@@ -222,8 +221,6 @@ const MOFFAT_CASES: &[MoffatCase] = &[
         background_tol: None,
     },
 ];
-
-use crate::testing::assertions::{assert_close, assert_close_slice};
 
 /// SIMD and scalar accumulate the same ~225 f64 terms in a different order, so they differ by
 /// FMA and reassociation rounding — a few ulp relative, never a structural disagreement.

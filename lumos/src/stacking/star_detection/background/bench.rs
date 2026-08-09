@@ -1,17 +1,16 @@
 //! Benchmark module for background estimation.
 //! Run with: cargo test -p lumos --release bench_background -- --ignored --nocapture
 
+use crate::testing::prelude::*;
 use quickbench::quick_bench;
 use std::hint::black_box;
 
 use crate::background_mesh::workspace::MeshWorkspace;
 use crate::bit_buffer2::BitBuffer2;
-use crate::math::size2us::Size2us;
 use crate::stacking::star_detection::background::background_estimate::BackgroundEstimate;
 use crate::stacking::star_detection::config::background_config::BackgroundConfig;
 use crate::stacking::star_detection::resources::DetectionResources;
 use crate::testing::synthetic::fixtures::{cluster_field, star_field};
-use imaginarium::Buffer2;
 
 /// Estimate background with automatic buffer pool management (bench helper).
 fn estimate_background_test(

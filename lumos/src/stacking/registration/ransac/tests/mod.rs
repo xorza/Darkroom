@@ -3,7 +3,7 @@
 use crate::stacking::registration::ransac::transforms::{centroid, point_normalization};
 use crate::stacking::registration::ransac::*;
 use crate::stacking::registration::triangle::voting::PointMatch;
-use glam::DVec2;
+use crate::testing::prelude::*;
 use std::f64::consts::{PI, SQRT_2};
 
 use rand::rngs::SmallRng;

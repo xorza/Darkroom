@@ -4,13 +4,10 @@
 //!
 //! Run: `cargo test -p lumos --release drizzle::bench -- --ignored --nocapture`
 
-use crate::math::size2us::Size2us;
-use common::CancelToken;
-use glam::DVec2;
+use crate::testing::prelude::*;
 use quickbench::quick_bench;
 use std::hint::black_box;
 
-use crate::io::image::linear::LinearImage;
 use crate::stacking::drizzle::accumulator::DrizzleFrame;
 use crate::stacking::drizzle::config::{DrizzleConfig, DrizzleKernel};
 use crate::stacking::drizzle::stack::drizzle_images;

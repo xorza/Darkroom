@@ -453,10 +453,7 @@ pub(crate) mod internals {
 
 #[cfg(test)]
 mod tests {
-    use imaginarium::Buffer2;
-
-    use crate::image_ops::internals::{gray_image, rgb_image};
-    use crate::math::size2us::Size2us;
+    use crate::testing::prelude::*;
 
     #[test]
     fn map_rgb_maps_every_channel_of_a_pixel_and_skips_grayscale() {

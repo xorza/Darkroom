@@ -2,12 +2,11 @@
 //!
 //! Run with: `cargo test -p lumos --release bench_centroid -- --ignored --nocapture`
 use crate::stacking::star_detection::centroid::{StampGrid, compute_stamp_radius};
+use crate::testing::prelude::*;
 
 use ::quickbench::quick_bench;
-use glam::{DVec2, Vec2};
 use std::hint::black_box;
 
-use crate::math::size2us::Size2us;
 use crate::stacking::star_detection::centroid::gaussian_fit::{GaussianFit, GaussianFitConfig};
 use crate::stacking::star_detection::centroid::measure_star;
 use crate::stacking::star_detection::centroid::moffat_fit::{MoffatFit, MoffatFitConfig};
@@ -18,10 +17,8 @@ use crate::stacking::star_detection::config::measurement_config::{
     CentroidMethod, LocalBackgroundMethod, MeasurementConfig,
 };
 use crate::stacking::star_detection::detector::stages::detect::internals::detect_stars_test;
-use crate::testing::synthetic::background_map;
 use crate::testing::synthetic::fixtures::star_field;
 use crate::testing::synthetic::star_profiles::{StarProfile, SyntheticStar};
-use imaginarium::Buffer2;
 
 #[quick_bench(warmup_iters = 100, iters = 10000)]
 fn bench_measure_star_single(b: ::quickbench::Bencher) {

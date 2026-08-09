@@ -1,15 +1,13 @@
 //! Benchmarks for connected component labeling.
 
 use crate::bit_buffer2::BitBuffer2;
-use crate::math::size2us::Size2us;
 use crate::stacking::star_detection::config::background_config::BackgroundConfig;
 use crate::stacking::star_detection::config::detection_config::Connectivity;
 use crate::stacking::star_detection::mask_dilation::dilate_mask;
 use crate::stacking::star_detection::threshold_mask::create_threshold_mask;
-use crate::testing::synthetic::background_map;
+use crate::testing::prelude::*;
 use crate::testing::synthetic::fixtures::star_field;
 use ::quickbench::quick_bench;
-use imaginarium::Buffer2;
 use std::hint::black_box;
 
 /// Create a threshold mask using the real detection pipeline.
@@ -108,7 +106,6 @@ fn bench_label_map_from_buffer_4k_globular(b: ::quickbench::Bencher) {
 fn bench_threshold_sweep() {
     use crate::stacking::star_detection::config::detection_config::Connectivity;
     use crate::stacking::star_detection::labeling::{label_mask_parallel, label_mask_sequential};
-    use imaginarium::Buffer2;
     use std::time::Instant;
 
     println!("\n=== Sequential vs Parallel Threshold Benchmark ===\n");

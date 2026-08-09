@@ -1,6 +1,5 @@
-use crate::math::size2us::Size2us;
+use super::*;
 use crate::stacking::star_detection::labeling::Run;
-use crate::stacking::star_detection::labeling::tests::*;
 
 #[test]
 fn search_window_widens_by_one_each_way_for_eight_connectivity() {

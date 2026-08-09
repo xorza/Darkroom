@@ -3,8 +3,7 @@
 //! Tests the cosmic ray detection via sharpness filtering.
 
 use crate::ImageDimensions;
-use crate::io::image::linear::LinearImage;
-use crate::math::size2us::Size2us;
+use crate::testing::prelude::*;
 
 use crate::stacking::star_detection::config::Config;
 use crate::stacking::star_detection::detector::StarDetector;
@@ -13,7 +12,6 @@ use crate::testing::init_tracing;
 use crate::testing::synthetic::artifacts::add_cosmic_rays;
 use crate::testing::visual::{gray_to_rgb_image_stretched, save_grayscale, save_image};
 use common::internals::test_output_path;
-use glam::Vec2;
 use imaginarium::Color;
 use imaginarium::drawing::{draw_circle, draw_cross};
 

@@ -6,10 +6,8 @@
 //! a vignette + dark + bias, recovers a star field through a single noisy light, and the
 //! `DefectMap` detects injected hot/cold pixels exactly and repairs them.
 
-use crate::math::size2us::Size2us;
-use crate::math::vec2us::Vec2us;
 use crate::stacking::calibration_masters::defect_map::DefectMap;
-use crate::testing::TestRng;
+use crate::testing::prelude::*;
 use crate::testing::synthetic::camera::Camera;
 use crate::testing::synthetic::metrics::{rms_diff, score_rejection};
 use crate::testing::synthetic::noise::{add_read_noise, apply_shot_noise};
@@ -17,7 +15,6 @@ use crate::testing::synthetic::observe::{Observation, render};
 use crate::testing::synthetic::scene::{BackgroundField, Scene};
 use crate::testing::{constant_cfa, make_cfa};
 use crate::{CalibrationMasters, CalibrationSet, CfaType};
-use common::CancelToken;
 
 /// A multiplicative radial vignette (sensor flat-field response).
 fn vignette_map(size: Size2us, center: f32, edge: f32, falloff: f32) -> Vec<f32> {

@@ -1,4 +1,4 @@
-use crate::stacking::registration::triangle::tests::*;
+use super::*;
 
 #[test]
 fn test_triangle_from_positions_3_4_5() {

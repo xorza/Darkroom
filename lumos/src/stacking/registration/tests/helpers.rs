@@ -2,7 +2,7 @@
 
 use crate::stacking::registration::config::RegistrationMatchingConfig;
 use crate::stacking::star_detection::star::Star;
-use glam::DVec2;
+use crate::testing::prelude::*;
 
 /// FWHM for tight/compact stars (~max_sigma 0.67).
 pub(super) const FWHM_TIGHT: f32 = 1.34;

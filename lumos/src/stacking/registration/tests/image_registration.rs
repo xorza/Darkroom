@@ -5,9 +5,7 @@
 //! correctly recovers the applied transformation.
 
 use crate::ImageDimensions;
-use crate::io::image::linear::LinearImage;
-use crate::math::size2us::Size2us;
-use glam::DVec2;
+use crate::testing::prelude::*;
 
 use crate::stacking::registration::config::{self, InterpolationMethod};
 use crate::stacking::registration::resample::internals;
@@ -20,7 +18,6 @@ use crate::testing::synthetic::camera::Camera;
 use crate::testing::synthetic::fixtures::star_field;
 use crate::testing::synthetic::observe::{Observation, render};
 use crate::testing::synthetic::scene::{BackgroundField, Scene};
-use imaginarium::Buffer2;
 
 /// Default star detector for synthetic images.
 fn detector() -> StarDetector {

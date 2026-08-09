@@ -1,6 +1,6 @@
 use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::io::raw::demosaic::bayer::rcd::{EPS, MIN_SIGNED_DENOMINATOR_RATIO, estimate_green};
-use crate::math::vec2us::Vec2us;
+use crate::testing::prelude::*;
 
 fn canonical_green(neighbor_green: f32, center_lpf: f32, same_color_lpf: f32) -> f32 {
     neighbor_green * (center_lpf + center_lpf) / (EPS + center_lpf + same_color_lpf)

@@ -2,13 +2,12 @@
 //! two automatic color-preserving curves. Run:
 //! `cargo test -p lumos --release stretching::bench -- --ignored --nocapture`
 
+use crate::testing::prelude::*;
 use quickbench::quick_bench;
 use std::hint::black_box;
 
 use crate::Stretch;
 use crate::image_ops::stretching::{self, AsinhCurve};
-use crate::io::image::image_dimensions::ImageDimensions;
-use crate::io::image::linear::LinearImage;
 
 const W: usize = 3000;
 const H: usize = 2000;

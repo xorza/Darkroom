@@ -1,4 +1,4 @@
-use crate::stacking::registration::distortion::sip::tests::*;
+use super::*;
 
 #[test]
 fn test_solve_cholesky_2x2_hand_computed() {

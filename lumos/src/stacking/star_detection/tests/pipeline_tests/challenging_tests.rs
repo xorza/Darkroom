@@ -11,6 +11,7 @@ use crate::stacking::star_detection::config::Config;
 use crate::stacking::star_detection::tests::pipeline_tests::run_test;
 use crate::stacking::star_detection::tests::{Placement, Scenario};
 use crate::testing::init_tracing;
+use crate::testing::prelude::*;
 use crate::testing::synthetic::backgrounds::NebulaConfig;
 use crate::testing::synthetic::camera::PsfModel;
 use crate::testing::synthetic::observe::SimFrame;
@@ -18,7 +19,6 @@ use crate::testing::synthetic::scene::BackgroundField;
 use crate::testing::visual::report::{
     PassCriteria, check_pass, crowded_criteria, faint_star_criteria,
 };
-use glam::Vec2;
 
 /// Run the pipeline on `frame`, print the aspirational per-scenario criteria (informational),
 /// and enforce two universal regression guards: the false-positive rate stays within the

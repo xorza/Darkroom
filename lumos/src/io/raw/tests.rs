@@ -1,14 +1,10 @@
 use std::fs;
 
-use common::CancelToken;
-
 use crate::io::image::cfa::CfaType;
 use crate::io::image::error::ImageError;
 use crate::testing::ScratchDirectory;
 
 use crate::io::raw::*;
-use crate::math::size2us::Size2us;
-use crate::math::vec2us::Vec2us;
 
 #[test]
 fn test_load_raw_invalid_path() {

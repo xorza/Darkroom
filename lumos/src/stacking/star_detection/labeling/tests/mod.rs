@@ -4,9 +4,9 @@
 #![allow(clippy::identity_op, clippy::erasing_op)]
 
 use crate::bit_buffer2::BitBuffer2;
-use crate::math::size2us::Size2us;
 use crate::stacking::star_detection::config::detection_config::Connectivity;
 use crate::stacking::star_detection::labeling::LabelMap;
+use crate::testing::prelude::*;
 
 /// Simple flood-fill reference implementation for ground truth comparison.
 /// This is intentionally naive and slow but obviously correct.

@@ -1,10 +1,8 @@
-use crate::math::size2us::Size2us;
 use crate::stacking::registration::config::{self, InterpolationMethod, WarpParams};
 use crate::stacking::registration::resample::kernel::internals as kernel_test_support;
 use crate::stacking::registration::resample::{plane, quality};
 use crate::stacking::registration::transform::{Transform, WarpTransform};
-use glam::{DVec2, Vec2};
-use imaginarium::Buffer2;
+use crate::testing::prelude::*;
 
 #[test]
 fn test_warp_identity_preserves_image() {

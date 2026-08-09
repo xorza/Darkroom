@@ -1,5 +1,4 @@
-use crate::math::size2us::Size2us;
-use crate::stacking::star_detection::labeling::tests::*;
+use super::*;
 
 #[test]
 fn empty_mask() {

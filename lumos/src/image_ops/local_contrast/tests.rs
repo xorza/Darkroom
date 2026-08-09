@@ -1,11 +1,8 @@
 use crate::image_ops::error::OpError;
-use crate::image_ops::internals::{
-    channel_plane as channel, gray_image as gray, mean, rgb_image as rgb,
-    standard_deviation as std_dev,
-};
+use crate::image_ops::internals::{channel_plane as channel, mean, standard_deviation as std_dev};
 use crate::image_ops::local_contrast::{LocalContrast, build_tile_luts};
-use crate::math::size2us::Size2us;
-use imaginarium::Buffer2;
+use crate::testing::images::{gray_image as gray, rgb_image as rgb};
+use crate::testing::prelude::*;
 
 /// A low-contrast horizontal gradient (intensity in `[0.45, 0.55]`).
 fn low_contrast(size: Size2us) -> Vec<f32> {

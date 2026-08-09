@@ -4,8 +4,7 @@
 //!
 //! Run: `cargo test -p lumos --release registration::bench -- --ignored --nocapture`
 
-use crate::math::size2us::Size2us;
-use glam::DVec2;
+use crate::testing::prelude::*;
 use quickbench::quick_bench;
 use std::hint::black_box;
 

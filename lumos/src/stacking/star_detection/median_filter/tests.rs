@@ -1,8 +1,6 @@
 //! Tests for 3x3 median filter.
 
-use crate::math::size2us::Size2us;
 use crate::stacking::star_detection::median_filter::*;
-use imaginarium::Buffer2;
 
 #[test]
 fn test_uniform_image() {

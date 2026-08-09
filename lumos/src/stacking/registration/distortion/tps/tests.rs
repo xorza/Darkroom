@@ -1,10 +1,8 @@
 //! Tests for thin-plate spline distortion modeling.
 
-use crate::math::size2us::Size2us;
 use std::f64::consts::E;
 
 use crate::stacking::registration::distortion::tps::*;
-use glam::DVec2;
 
 /// Standard 4-corner + center source grid on [0,100]x[0,100].
 fn square_source_5() -> Vec<DVec2> {

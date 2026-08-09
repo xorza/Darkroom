@@ -6,13 +6,11 @@
 //! sweep pins that the contrast threshold actually controls the split.
 
 use crate::math::fwhm::fwhm_to_sigma;
-use crate::math::size2us::Size2us;
 use crate::stacking::star_detection::config::detection_config::DetectionConfig;
 use crate::stacking::star_detection::detector::stages::detect::internals::detect_stars_test;
 use crate::stacking::star_detection::tests::stage_tests::{background_estimate, matched_truths};
-use crate::testing::TestRng;
+use crate::testing::prelude::*;
 use crate::testing::synthetic::star_profiles::{StarProfile, SyntheticStar};
-use imaginarium::Buffer2;
 
 /// Render `stars` as `(x, y, amplitude)` on a 0.1 sky with light Gaussian noise (σ 0.01).
 fn field(size: Size2us, sigma: f32, stars: &[(f32, f32, f32)], seed: u64) -> Buffer2<f32> {

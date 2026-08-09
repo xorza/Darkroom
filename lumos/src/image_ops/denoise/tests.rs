@@ -1,11 +1,8 @@
 use crate::image_ops::denoise::{Denoise, Threshold};
 use crate::image_ops::error::OpError;
-use crate::image_ops::internals::{
-    channel_plane as channel, gray_image as gray, mean, rgb_image as rgb,
-    standard_deviation as std_dev,
-};
-use crate::math::size2us::Size2us;
-use crate::testing::TestRng;
+use crate::image_ops::internals::{channel_plane as channel, mean, standard_deviation as std_dev};
+use crate::testing::images::{gray_image as gray, rgb_image as rgb};
+use crate::testing::prelude::*;
 
 fn noisy(size: Size2us, bg: f32, sigma: f32, seed: u64) -> Vec<f32> {
     let mut rng = TestRng::new(seed);

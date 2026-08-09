@@ -1,4 +1,4 @@
-use crate::stacking::registration::triangle::tests::*;
+use super::*;
 
 #[test]
 fn test_vote_matrix_dense_mode() {

@@ -1,11 +1,8 @@
 use std::path::Path;
 use std::time::Instant;
 
-use common::CancelToken;
 use quickbench::quick_bench;
 
-use crate::math::size2us::Size2us;
-use crate::math::vec2us::Vec2us;
 use crate::testing::init_tracing;
 
 use crate::io::raw::*;

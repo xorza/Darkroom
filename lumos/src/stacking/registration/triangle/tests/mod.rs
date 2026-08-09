@@ -1,7 +1,5 @@
 //! Tests for triangle matching module.
 
-use glam::DVec2;
-
 use crate::stacking::registration::spatial::KdTree;
 use crate::stacking::registration::triangle::TriangleConfig;
 use crate::stacking::registration::triangle::geometry::{Orientation, Triangle};
@@ -11,6 +9,7 @@ use crate::stacking::registration::triangle::matching::{
 use crate::stacking::registration::triangle::voting::{
     VoteMatrix, build_invariant_tree, resolve_matches, vote_for_correspondences,
 };
+use crate::testing::prelude::*;
 
 /// Build a dense VoteMatrix from (ref_idx, target_idx, votes) entries.
 fn vote_matrix_from_entries(
