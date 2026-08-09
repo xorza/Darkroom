@@ -126,9 +126,7 @@ pub(crate) fn compute_frame_norms(
     check_cancel(cancel)?;
 
     let reference = select_reference_frame(frames.iter().map(|frame| &frame.source_stats));
-    let registered = frames
-        .iter()
-        .any(|frame| frame.coverage.is_some() || frame.confidence.is_some());
+    let registered = frames.iter().any(|frame| !frame.quality.is_none());
     if !registered {
         let norms = compute_frame_norms_with_reference(
             frames.iter().map(|frame| &frame.source_stats),
@@ -290,7 +288,7 @@ fn build_common_domain(
     let mut common_domain = vec![true; pixel_count];
     for frame in frames {
         check_cancel(cancel)?;
-        if let Some(coverage) = &frame.coverage {
+        if let Some(coverage) = &frame.quality.coverage {
             intersect_domain(
                 &mut common_domain,
                 coverage,
@@ -299,7 +297,7 @@ fn build_common_domain(
                 cancel,
             )?;
         }
-        if let Some(confidence) = &frame.confidence {
+        if let Some(confidence) = &frame.quality.confidence {
             intersect_domain(
                 &mut common_domain,
                 confidence,
@@ -525,7 +523,7 @@ fn source_noise_variance(
     cancel: &CancelToken,
 ) -> Result<f64, Error> {
     let sigma = f64::from(mad_to_sigma(frame.source_stats.channels[channel].mad));
-    let Some(confidence) = &frame.confidence else {
+    let Some(confidence) = &frame.quality.confidence else {
         return Ok(sigma * sigma);
     };
     let values = confidence.chunk(0, pixel_count);

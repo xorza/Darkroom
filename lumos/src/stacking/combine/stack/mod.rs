@@ -204,7 +204,7 @@ fn combine_cached(
         warp_quality = cache
             .frames
             .iter()
-            .any(|frame| frame.coverage.is_some() || frame.confidence.is_some()),
+            .any(|frame| !frame.quality.is_none()),
         "Combining frames"
     );
 
@@ -428,10 +428,7 @@ pub(crate) fn run_stacking(
     // the reducer sees a compacted subset whose indices no longer name frames, so the tracking
     // is limited to frame sets that carry no coverage — every calibration master, and every
     // light stack loaded straight from disk.
-    let frame_indices_are_stable = cache
-        .frames
-        .iter()
-        .all(|frame| frame.coverage.is_none() && frame.confidence.is_none());
+    let frame_indices_are_stable = cache.frames.iter().all(|frame| frame.quality.is_none());
     let sigmas = source_sigmas
         .as_deref()
         .filter(|_| frame_indices_are_stable);

@@ -1,6 +1,6 @@
 use arrayvec::ArrayVec;
 
-use crate::stacking::combine::error::FramePlane;
+use crate::stacking::frame_store::FramePlane;
 
 use crate::io::image::cfa::{CfaImage, CfaType};
 use crate::io::image::image_dimensions::ImageDimensions;
@@ -1017,11 +1017,13 @@ fn registered_noise_weight_applies_half_pixel_confidence_once() {
 
     let pixel = 12 * dims.width() + 12;
     let identity_confidence = cache.frames[0]
+        .quality
         .confidence
         .as_ref()
         .unwrap()
         .chunk(pixel, pixel + 1)[0];
     let half_pixel_confidence = cache.frames[1]
+        .quality
         .confidence
         .as_ref()
         .unwrap()

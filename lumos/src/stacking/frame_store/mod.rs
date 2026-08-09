@@ -192,6 +192,45 @@ impl StoredPlane {
     }
 }
 
+/// Which of a frame's planes a validation failure is about.
+///
+/// Names the plane in the errors below, and picks the range each one must satisfy: coverage is a
+/// fraction of a pixel that had support, confidence an interpolation weight with no upper bound.
+/// Carrying the kind rather than its label is what keeps that rule out of a string comparison.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FramePlane {
+    /// One of the image's colour planes.
+    Channel,
+    /// Per-pixel warp support, in `[0, 1]`.
+    Coverage,
+    /// Per-pixel interpolation confidence, non-negative.
+    Confidence,
+}
+
+impl FramePlane {
+    /// Whether `value` is in range for this plane. Non-finite is out of range for all of them.
+    pub(crate) fn accepts(self, value: f32) -> bool {
+        value.is_finite()
+            && match self {
+                // Finiteness is the whole rule for image data, as in `validate_sample_channels`:
+                // dark subtraction takes a calibrated channel below zero legitimately.
+                Self::Channel => true,
+                Self::Coverage => (0.0..=1.0).contains(&value),
+                Self::Confidence => value >= 0.0,
+            }
+    }
+}
+
+impl std::fmt::Display for FramePlane {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::Channel => "a channel",
+            Self::Coverage => "coverage",
+            Self::Confidence => "confidence",
+        })
+    }
+}
+
 /// The per-pixel warp quality a registered light carries: how much of each output pixel had
 /// support, and how confident the interpolation was.
 ///
@@ -227,6 +266,34 @@ impl<P> WarpQuality<P> {
         }
     }
 
+    /// The plane `kind` names, when the frame carries it. [`FramePlane::Channel`] is not a warp
+    /// quality plane and is always absent.
+    pub(crate) fn plane(&self, kind: FramePlane) -> Option<&P> {
+        match kind {
+            FramePlane::Coverage => self.coverage.as_ref(),
+            FramePlane::Confidence => self.confidence.as_ref(),
+            FramePlane::Channel => None,
+        }
+    }
+
+    /// Every plane the frame actually carries, each with the kind that names it. The one place
+    /// that decides what "all the quality planes" means, so a caller cannot enumerate a subset.
+    pub(crate) fn present(&self) -> impl Iterator<Item = (FramePlane, &P)> {
+        [FramePlane::Coverage, FramePlane::Confidence]
+            .into_iter()
+            .filter_map(|kind| self.plane(kind).map(|plane| (kind, plane)))
+    }
+
+    /// How many planes are present, 0 to 2.
+    pub(crate) fn count(&self) -> usize {
+        self.present().count()
+    }
+
+    /// Whether the frame carries no warp quality at all.
+    pub(crate) fn is_none(&self) -> bool {
+        self.coverage.is_none() && self.confidence.is_none()
+    }
+
     /// Convert each present plane, tagging it with the name its spill file carries. Which plane
     /// answers to which name is stated here alone, so a writer and a later reader cannot disagree.
     fn try_map<Q, E>(
@@ -249,8 +316,7 @@ impl<P> WarpQuality<P> {
 #[derive(Debug)]
 pub(crate) struct StoredFrame {
     pub(crate) channels: ArrayVec<StoredPlane, 3>,
-    pub(crate) coverage: Option<StoredPlane>,
-    pub(crate) confidence: Option<StoredPlane>,
+    pub(crate) quality: WarpQuality<StoredPlane>,
     pub(crate) source_stats: FrameStats,
 }
 
@@ -265,11 +331,9 @@ impl StoredFrame {
             .into_iter()
             .map(StoredPlane::Memory)
             .collect();
-        let quality = quality.map(StoredPlane::Memory);
         Self {
             channels,
-            coverage: quality.coverage,
-            confidence: quality.confidence,
+            quality: quality.map(StoredPlane::Memory),
             source_stats,
         }
     }
@@ -291,8 +355,7 @@ impl StoredFrame {
         })?;
         Ok(Self {
             channels,
-            coverage: quality.coverage,
-            confidence: quality.confidence,
+            quality,
             source_stats,
         })
     }
