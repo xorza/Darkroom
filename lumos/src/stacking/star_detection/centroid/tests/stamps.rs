@@ -17,15 +17,17 @@ fn estimate_sigma_from_moments_gaussian() {
     let mut data_y = Vec::new();
     let mut data_z = Vec::new();
 
+    let rendered = SyntheticStar::new(
+        Vec2::new(cx as f32, cy as f32),
+        1.0,
+        StarProfile::Gaussian { sigma: true_sigma },
+    )
+    .stamp(Size2us::new(width, height), background);
     for y in 0..height {
         for x in 0..width {
-            let dx = x as f32 - cx as f32;
-            let dy = y as f32 - cy as f32;
-            let value =
-                background + 1.0 * (-0.5 * (dx * dx + dy * dy) / (true_sigma * true_sigma)).exp();
             data_x.push(x as f64);
             data_y.push(y as f64);
-            data_z.push(value as f64);
+            data_z.push(f64::from(rendered.row(y)[x]));
         }
     }
 
@@ -267,17 +269,8 @@ fn local_annulus_background_uniform() {
     // Create uniform background with a star
     let mut pixels = vec![background_value; width * height];
     // Add star at center
-    for y in 0..height {
-        for x in 0..width {
-            let dx = x as f32 - 64.0;
-            let dy = y as f32 - 64.0;
-            let r2 = dx * dx + dy * dy;
-            let value = 0.8 * (-r2 / (2.0 * 2.5 * 2.5)).exp();
-            if value > 0.001 {
-                pixels[y * width + x] += value;
-            }
-        }
-    }
+    SyntheticStar::new(Vec2::splat(64.0), 0.8, StarProfile::Gaussian { sigma: 2.5 })
+        .add_to(&mut pixels, width);
     let pixels = Buffer2::new(width, height, pixels);
 
     let bg = background_map::estimate(

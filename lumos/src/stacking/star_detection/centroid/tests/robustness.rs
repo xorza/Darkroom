@@ -367,24 +367,16 @@ fn make_rotated_elliptical_star(
     let cos_a = angle_rad.cos();
     let sin_a = angle_rad.sin();
 
-    for y in 0..size.height {
-        for x in 0..size.width {
-            let dx = x as f32 - pos.x;
-            let dy = y as f32 - pos.y;
-
-            // Rotate coordinates
-            let dx_rot = dx * cos_a + dy * sin_a;
-            let dy_rot = -dx * sin_a + dy * cos_a;
-
-            // Compute elliptical distance
-            let r2 = (dx_rot / sigma_major).powi(2) + (dy_rot / sigma_minor).powi(2);
-            let value = amplitude * (-r2 / 2.0).exp();
-
-            if value > 0.001 {
-                pixels[size.index_of(Vec2us::new(x, y))] += value;
-            }
-        }
-    }
+    SyntheticStar::new(
+        pos,
+        amplitude,
+        StarProfile::Elliptical {
+            sigma_x: sigma_major,
+            sigma_y: sigma_minor,
+            angle: angle_rad,
+        },
+    )
+    .add_to(&mut pixels, size.width);
 
     Buffer2::new(size.width, size.height, pixels)
 }

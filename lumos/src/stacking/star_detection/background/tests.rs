@@ -1,6 +1,7 @@
 //! Tests for background estimation.
 
 use crate::testing::prelude::*;
+use crate::testing::synthetic::star_profiles::{StarProfile, SyntheticStar};
 use crate::{
     math::size2us::Size2us,
     stacking::star_detection::background::background_estimate::BackgroundEstimate,
@@ -467,17 +468,14 @@ fn iterative_background_with_bright_stars() {
     // Add multiple bright Gaussian stars
     let stars: [(i32, i32); 5] = [(32, 32), (64, 64), (96, 96), (32, 96), (96, 32)];
     for (sx, sy) in stars {
-        for dy in -5i32..=5 {
-            for dx in -5i32..=5 {
-                let x = sx + dx;
-                let y = sy + dy;
-                if x >= 0 && x < width as i32 && y >= 0 && y < height as i32 {
-                    let dist_sq = (dx * dx + dy * dy) as f32;
-                    let value = 0.8 * (-dist_sq / 4.0).exp();
-                    data[y as usize * width + x as usize] += value;
-                }
-            }
-        }
+        SyntheticStar::new(
+            Vec2::new(sx as f32, sy as f32),
+            0.8,
+            StarProfile::Gaussian {
+                sigma: std::f32::consts::SQRT_2,
+            },
+        )
+        .add_to(&mut data, width);
     }
 
     let pixels = Buffer2::new(width, height, data);
@@ -530,16 +528,8 @@ fn iterative_background_preserves_gradient() {
         .collect();
 
     // Add a bright star
-    for dy in -3i32..=3 {
-        for dx in -3i32..=3 {
-            let x = 32 + dx;
-            let y = 32 + dy;
-            if x >= 0 && x < width as i32 && y >= 0 && y < height as i32 {
-                let dist_sq = (dx * dx + dy * dy) as f32;
-                data[y as usize * width + x as usize] += 0.5 * (-dist_sq / 2.0).exp();
-            }
-        }
-    }
+    SyntheticStar::new(Vec2::splat(32.0), 0.5, StarProfile::Gaussian { sigma: 1.0 })
+        .add_to(&mut data, width);
 
     let pixels = Buffer2::new(width, height, data);
     let config = BackgroundConfig {
@@ -567,16 +557,8 @@ fn iterative_background_no_dilation() {
     let mut data = vec![0.2; width * height];
 
     // Add a bright star
-    for dy in -3i32..=3 {
-        for dx in -3i32..=3 {
-            let x = 64 + dx;
-            let y = 64 + dy;
-            if x >= 0 && x < width as i32 && y >= 0 && y < height as i32 {
-                let dist_sq = (dx * dx + dy * dy) as f32;
-                data[y as usize * width + x as usize] += 0.7 * (-dist_sq / 2.0).exp();
-            }
-        }
-    }
+    SyntheticStar::new(Vec2::splat(64.0), 0.7, StarProfile::Gaussian { sigma: 1.0 })
+        .add_to(&mut data, width);
 
     let pixels = Buffer2::new(width, height, data);
     let config = BackgroundConfig {
