@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn test_form_triangles_from_neighbors_single_triangle() {
+fn form_triangles_from_neighbors_single_triangle() {
     // 3 points → exactly 1 triangle: [0, 1, 2]
     let points = vec![
         DVec2::new(0.0, 0.0),
@@ -16,7 +16,7 @@ fn test_form_triangles_from_neighbors_single_triangle() {
 }
 
 #[test]
-fn test_form_triangles_from_neighbors_square() {
+fn form_triangles_from_neighbors_square() {
     // 4 points forming a square → C(4,3) = 4 triangles with k=3 (all neighbors)
     let points = vec![
         DVec2::new(0.0, 0.0),
@@ -39,7 +39,7 @@ fn test_form_triangles_from_neighbors_square() {
 }
 
 #[test]
-fn test_form_triangles_from_neighbors_too_few_points() {
+fn form_triangles_from_neighbors_too_few_points() {
     let points = vec![DVec2::new(0.0, 0.0), DVec2::new(1.0, 0.0)];
     let tree = KdTree::build(&points).unwrap();
     let triangles = form_triangles_from_neighbors(&tree, 3);
@@ -47,7 +47,7 @@ fn test_form_triangles_from_neighbors_too_few_points() {
 }
 
 #[test]
-fn test_form_triangles_from_neighbors_k1_insufficient() {
+fn form_triangles_from_neighbors_k1_insufficient() {
     // With k=1, each point only has 1 neighbor. Need 2 neighbors to form a triangle.
     // So no triangles should be formed (you need at least 2 neighbors of point i
     // to pair them into a triangle).
@@ -74,7 +74,7 @@ fn test_form_triangles_from_neighbors_k1_insufficient() {
 }
 
 #[test]
-fn test_form_triangles_from_neighbors_no_duplicates() {
+fn form_triangles_from_neighbors_no_duplicates() {
     let points = vec![
         DVec2::new(0.0, 0.0),
         DVec2::new(1.0, 0.0),
@@ -94,7 +94,7 @@ fn test_form_triangles_from_neighbors_no_duplicates() {
 }
 
 #[test]
-fn test_form_triangles_full_k_equals_brute_force() {
+fn form_triangles_full_k_equals_brute_force() {
     // With k = n-1 (all neighbors), should produce C(n,3) = n*(n-1)*(n-2)/6 triangles
     let points = vec![
         DVec2::new(0.0, 0.0),
@@ -116,21 +116,21 @@ fn test_form_triangles_full_k_equals_brute_force() {
 }
 
 #[test]
-fn test_form_triangles_kdtree_empty() {
+fn form_triangles_kdtree_empty() {
     let positions: Vec<DVec2> = vec![];
     let triangles = form_triangles_kdtree(&positions, 5);
     assert!(triangles.is_empty());
 }
 
 #[test]
-fn test_form_triangles_kdtree_too_few() {
+fn form_triangles_kdtree_too_few() {
     let positions = vec![DVec2::new(0.0, 0.0), DVec2::new(1.0, 1.0)];
     let triangles = form_triangles_kdtree(&positions, 5);
     assert!(triangles.is_empty());
 }
 
 #[test]
-fn test_form_triangles_kdtree_single_triangle() {
+fn form_triangles_kdtree_single_triangle() {
     // 3 points forming a 3-4-5 triangle
     let positions = vec![
         DVec2::new(0.0, 0.0),
@@ -148,7 +148,7 @@ fn test_form_triangles_kdtree_single_triangle() {
 }
 
 #[test]
-fn test_form_triangles_kdtree_all_collinear() {
+fn form_triangles_kdtree_all_collinear() {
     // All collinear points produce no valid triangles
     let positions = vec![
         DVec2::new(0.0, 0.0),
@@ -161,7 +161,7 @@ fn test_form_triangles_kdtree_all_collinear() {
 }
 
 #[test]
-fn test_form_triangles_kdtree_ratios_in_valid_range() {
+fn form_triangles_kdtree_ratios_in_valid_range() {
     // 5 points forming a non-degenerate pattern
     let positions = vec![
         DVec2::new(0.0, 0.0),

@@ -3,7 +3,7 @@
 use crate::stacking::star_detection::median_filter::*;
 
 #[test]
-fn test_uniform_image() {
+fn uniform_image() {
     let pixels = Buffer2::new_filled(100, 100, 0.5f32);
     let mut output = Buffer2::new_default(100, 100);
     median_filter_3x3(&pixels, &mut output);
@@ -19,7 +19,7 @@ fn test_uniform_image() {
 }
 
 #[test]
-fn test_single_hot_pixel() {
+fn single_hot_pixel() {
     // 5x5 image with a hot pixel in center
     let mut pixels = Buffer2::new_filled(5, 5, 0.1f32);
     pixels[(2, 2)] = 1.0; // Center pixel
@@ -36,7 +36,7 @@ fn test_single_hot_pixel() {
 }
 
 #[test]
-fn test_gradient_image() {
+fn gradient_image() {
     // 10x10 gradient: pixel(x,y) = (x+y)/20.0
     let width = 10;
     let height = 10;
@@ -75,7 +75,7 @@ fn test_gradient_image() {
 }
 
 #[test]
-fn test_small_image_2x2() {
+fn small_image_2x2() {
     let pixels = Buffer2::new(2, 2, vec![0.1, 0.2, 0.3, 0.4]);
     let mut output = Buffer2::new_default(2, 2);
     median_filter_3x3(&pixels, &mut output);
@@ -88,7 +88,7 @@ fn test_small_image_2x2() {
 }
 
 #[test]
-fn test_small_image_1x1() {
+fn small_image_1x1() {
     let pixels = Buffer2::new(1, 1, vec![0.5]);
     let mut output = Buffer2::new_default(1, 1);
     median_filter_3x3(&pixels, &mut output);
@@ -98,7 +98,7 @@ fn test_small_image_1x1() {
 }
 
 #[test]
-fn test_3x3_image() {
+fn filters_a_3x3_image() {
     // Exactly 3x3 - each pixel has different neighborhood size
     #[rustfmt::skip]
     let pixels = Buffer2::new(3, 3, vec![
@@ -120,7 +120,7 @@ fn test_3x3_image() {
 }
 
 #[test]
-fn test_corner_pixels() {
+fn corner_pixels() {
     // 4x4 image
     #[rustfmt::skip]
     let pixels = Buffer2::new(4, 4, vec![
@@ -143,7 +143,7 @@ fn test_corner_pixels() {
 }
 
 #[test]
-fn test_edge_pixels() {
+fn edge_pixels() {
     // 4x4 image
     #[rustfmt::skip]
     let pixels = Buffer2::new(4, 4, vec![
@@ -167,7 +167,7 @@ fn test_edge_pixels() {
 }
 
 #[test]
-fn test_salt_and_pepper_noise() {
+fn salt_and_pepper_noise() {
     // Image with salt and pepper noise
     let mut pixels = Buffer2::new_filled(10, 10, 0.5f32);
     // Add noise
@@ -199,7 +199,7 @@ fn test_salt_and_pepper_noise() {
 }
 
 #[test]
-fn test_large_image_parallel() {
+fn large_image_parallel() {
     // 256x256 sawtooth: pixel[i] = (i % 256) / 255.0
     // Each row repeats [0/255, 1/255, ..., 255/255].
     let width = 256;
@@ -261,7 +261,7 @@ fn test_median6() {
 }
 
 #[test]
-fn test_non_square_image() {
+fn non_square_image() {
     // 20x10 uniform image: median of all 0.5 values = 0.5 everywhere
     let width = 20;
     let height = 10;
@@ -283,14 +283,14 @@ fn test_non_square_image() {
 
 #[test]
 #[should_panic(expected = "pixels length must equal width * height")]
-fn test_wrong_pixel_count() {
+fn wrong_pixel_count() {
     let pixels = Buffer2::new(20, 10, vec![0.5f32; 100]); // Expects 200 pixels
     let mut output = Buffer2::new_default(20, 10);
     median_filter_3x3(&pixels, &mut output);
 }
 
 #[test]
-fn test_bayer_pattern_removal() {
+fn bayer_pattern_removal() {
     // Alternating row brightness: even rows = 0.4, odd rows = 0.6
     let width = 10;
     let height = 10;
@@ -423,7 +423,7 @@ fn test_filter_interior_row() {
 }
 
 #[test]
-fn test_filter_edge_row_top() {
+fn filter_edge_row_top() {
     // 5x5 image
     #[rustfmt::skip]
     let pixels = vec![
@@ -447,7 +447,7 @@ fn test_filter_edge_row_top() {
 }
 
 #[test]
-fn test_filter_edge_row_bottom() {
+fn filter_edge_row_bottom() {
     // 5x5 image
     #[rustfmt::skip]
     let pixels = vec![
@@ -471,7 +471,7 @@ fn test_filter_edge_row_bottom() {
 }
 
 #[test]
-fn test_4x4_interior_pixels() {
+fn filters_the_interior_of_a_4x4_image() {
     // 4x4 image: pixel(x,y) = y*4 + x + 1
     #[rustfmt::skip]
     let pixels = Buffer2::new(4, 4, vec![
@@ -511,7 +511,7 @@ fn test_4x4_interior_pixels() {
 }
 
 #[test]
-fn test_wide_image() {
+fn wide_image() {
     // Very wide, short image
     let width = 100;
     let height = 4;
@@ -527,7 +527,7 @@ fn test_wide_image() {
 }
 
 #[test]
-fn test_tall_image() {
+fn tall_image() {
     // Very tall, narrow image
     let width = 4;
     let height = 100;
@@ -543,7 +543,7 @@ fn test_tall_image() {
 }
 
 #[test]
-fn test_median_with_duplicates() {
+fn median_with_duplicates() {
     // Test median functions with duplicate values
     let mut v4 = [0.3, 0.3, 0.7, 0.7];
     assert!((median4(&mut v4) - 0.5).abs() < 1e-6);
@@ -553,7 +553,7 @@ fn test_median_with_duplicates() {
 }
 
 #[test]
-fn test_chunk_boundary() {
+fn chunk_boundary() {
     // Test image height that's not a multiple of the chunk size (8)
     // This ensures chunk boundary handling is correct
     for height in [7, 9, 15, 17, 23, 25] {

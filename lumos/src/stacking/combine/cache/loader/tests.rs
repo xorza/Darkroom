@@ -49,7 +49,7 @@ fn from_paths_reports_empty_and_missing_sources() {
 }
 
 #[test]
-fn test_load_and_cache_frame_fresh() {
+fn load_and_cache_frame_fresh() {
     let temp_dir = ScratchDirectory::new("lumos_load_cache_fresh_test");
 
     let dims = ImageDimensions::new((4, 3), 1);
@@ -76,7 +76,7 @@ fn test_load_and_cache_frame_fresh() {
 }
 
 #[test]
-fn test_load_and_cache_frame_reuse() {
+fn load_and_cache_frame_reuse() {
     let temp_dir = ScratchDirectory::new("lumos_load_cache_reuse_test");
 
     let dims = ImageDimensions::new((4, 3), 1);
@@ -173,7 +173,7 @@ fn test_load_and_cache_frame_reuse() {
 }
 
 #[test]
-fn test_load_and_cache_frame_dimension_mismatch() {
+fn load_and_cache_frame_dimension_mismatch() {
     let temp_dir = ScratchDirectory::new("lumos_load_cache_mismatch_test");
 
     // Create image with different dimensions than expected
@@ -264,7 +264,7 @@ fn source_meta_detects_size_and_precise_mtime_changes() {
 }
 
 #[test]
-fn test_frame_stats_sidecar_roundtrip() {
+fn frame_stats_sidecar_roundtrip() {
     let temp_dir = ScratchDirectory::new("lumos_stats_roundtrip_test");
 
     let base = "test_frame.bin";
@@ -370,7 +370,7 @@ fn test_frame_stats_sidecar_roundtrip() {
 }
 
 #[test]
-fn test_load_and_cache_frame_reuse_preserves_stats() {
+fn load_and_cache_frame_reuse_preserves_stats() {
     // Verify that stats computed on first load match stats read from sidecar on reuse.
     let temp_dir = ScratchDirectory::new("lumos_cache_reuse_stats_test");
 
@@ -410,7 +410,7 @@ fn test_load_and_cache_frame_reuse_preserves_stats() {
 }
 
 #[test]
-fn test_missing_stats_sidecar_forces_reload() {
+fn missing_stats_sidecar_forces_reload() {
     // If the .stats file is deleted but .meta and .bin remain,
     // load_and_cache_frame should NOT reuse cache (can_reuse = false).
     let temp_dir = ScratchDirectory::new("lumos_missing_stats_test");

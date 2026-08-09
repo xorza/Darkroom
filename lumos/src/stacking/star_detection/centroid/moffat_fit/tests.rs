@@ -301,7 +301,7 @@ fn moffat_fit_recovers_known_parameters() {
 }
 
 #[test]
-fn test_alpha_beta_fwhm_conversion() {
+fn alpha_beta_fwhm_conversion() {
     let alpha = 2.0;
     let beta = 2.5;
     let fwhm = alpha_beta_to_fwhm(alpha, beta);
@@ -311,7 +311,7 @@ fn test_alpha_beta_fwhm_conversion() {
 }
 
 #[test]
-fn test_moffat_fit_edge_position() {
+fn moffat_fit_edge_position() {
     let width = 21;
     let height = 21;
     let pixels = Buffer2::new_filled(width, height, 0.1f32);
@@ -329,7 +329,7 @@ fn test_moffat_fit_edge_position() {
 }
 
 #[test]
-fn test_moffat_fit_low_snr() {
+fn moffat_fit_low_snr() {
     // Low SNR (amp=0.1, bg=0.5, SNR~0.2) - L-M should still converge
     // but with reduced accuracy compared to high-SNR case
     let width = 21;
@@ -380,7 +380,7 @@ fn test_moffat_fit_low_snr() {
 }
 
 #[test]
-fn test_moffat_fit_various_beta_values() {
+fn moffat_fit_various_beta_values() {
     let width = 21;
     let height = 21;
     let true_cx = 10.0;
@@ -431,7 +431,7 @@ fn test_moffat_fit_various_beta_values() {
 }
 
 #[test]
-fn test_moffat_fit_converges_within_max_iterations() {
+fn moffat_fit_converges_within_max_iterations() {
     let width = 21;
     let height = 21;
     let true_cx = 10.0;
@@ -475,7 +475,7 @@ fn test_moffat_fit_converges_within_max_iterations() {
 }
 
 #[test]
-fn test_moffat_fit_bad_initial_guess_still_converges() {
+fn moffat_fit_bad_initial_guess_still_converges() {
     let width = 21;
     let height = 21;
     let true_cx = 10.0;
@@ -529,7 +529,7 @@ fn test_moffat_fit_bad_initial_guess_still_converges() {
 }
 
 #[test]
-fn test_moffat_fit_uniform_data_returns_result() {
+fn moffat_fit_uniform_data_returns_result() {
     // Uniform data (no star) - should still return a result, though meaningless
     let width = 21;
     let height = 21;
@@ -556,7 +556,7 @@ fn test_moffat_fit_uniform_data_returns_result() {
 }
 
 #[test]
-fn test_moffat_fwhm_computed_correctly() {
+fn moffat_fwhm_computed_correctly() {
     let width = 21;
     let height = 21;
     let true_cx = 10.0;
@@ -601,7 +601,7 @@ fn test_moffat_fwhm_computed_correctly() {
 }
 
 #[test]
-fn test_fwhm_increases_with_alpha() {
+fn fwhm_increases_with_alpha() {
     let beta = 2.5;
     let fwhm1 = alpha_beta_to_fwhm(1.0, beta);
     let fwhm2 = alpha_beta_to_fwhm(2.0, beta);
@@ -615,7 +615,7 @@ fn test_fwhm_increases_with_alpha() {
 }
 
 #[test]
-fn test_fwhm_decreases_with_beta() {
+fn fwhm_decreases_with_beta() {
     let alpha = 2.0;
     let fwhm_low_beta = alpha_beta_to_fwhm(alpha, 1.5);
     let fwhm_mid_beta = alpha_beta_to_fwhm(alpha, 2.5);
@@ -627,7 +627,7 @@ fn test_fwhm_decreases_with_beta() {
 }
 
 #[test]
-fn test_select_pow_strategy_integers() {
+fn select_pow_strategy_integers() {
     for beta in [1.0, 2.0, 3.0, 4.0, 5.0] {
         let strategy = select_pow_strategy(beta);
         assert!(
@@ -638,7 +638,7 @@ fn test_select_pow_strategy_integers() {
 }
 
 #[test]
-fn test_select_pow_strategy_half_integers() {
+fn select_pow_strategy_half_integers() {
     for beta in [1.5, 2.5, 3.5, 4.5, 5.5] {
         let strategy = select_pow_strategy(beta);
         assert!(
@@ -649,7 +649,7 @@ fn test_select_pow_strategy_half_integers() {
 }
 
 #[test]
-fn test_select_pow_strategy_general() {
+fn select_pow_strategy_general() {
     for beta in [2.3, 3.7, 1.1, PI] {
         let strategy = select_pow_strategy(beta);
         assert!(
@@ -660,7 +660,7 @@ fn test_select_pow_strategy_general() {
 }
 
 #[test]
-fn test_fast_pow_neg_accuracy_half_integers() {
+fn fast_pow_neg_accuracy_half_integers() {
     let u_values = [1.01, 1.1, 1.5, 2.0, 5.0, 10.0, 100.0];
     let betas = [1.5, 2.5, 3.5, 4.5, 5.5];
 
@@ -679,7 +679,7 @@ fn test_fast_pow_neg_accuracy_half_integers() {
 }
 
 #[test]
-fn test_fast_pow_neg_accuracy_integers() {
+fn fast_pow_neg_accuracy_integers() {
     let u_values = [1.01, 1.1, 2.0, 5.0, 10.0];
     let betas = [1.0, 2.0, 3.0, 4.0, 5.0];
 
@@ -698,7 +698,7 @@ fn test_fast_pow_neg_accuracy_integers() {
 }
 
 #[test]
-fn test_fast_pow_neg_general_fallback() {
+fn fast_pow_neg_general_fallback() {
     let beta = 2.3;
     let strategy = select_pow_strategy(beta);
     let u = 3.0;
@@ -711,7 +711,7 @@ fn test_fast_pow_neg_general_fallback() {
 }
 
 #[test]
-fn test_int_pow_correctness() {
+fn int_pow_correctness() {
     let u = 2.5;
     assert!((int_pow(u, 0) - 1.0).abs() < 1e-15);
     assert!((int_pow(u, 1) - u).abs() < 1e-15);
@@ -724,7 +724,7 @@ fn test_int_pow_correctness() {
 }
 
 #[test]
-fn test_moffat_fixed_beta_evaluate_and_jacobian_consistency() {
+fn moffat_fixed_beta_evaluate_and_jacobian_consistency() {
     let params_list: &[[f64; 5]] = &[
         [10.0, 10.0, 1000.0, 2.0, 100.0],
         [5.5, 7.3, 500.0, 3.0, 50.0],
@@ -779,7 +779,7 @@ fn make_stamp_data(size: usize, params: &[f64; 5], beta: f64) -> (Vec<f64>, Vec<
 }
 
 #[test]
-fn test_batch_build_normal_equations_matches_scalar() {
+fn batch_build_normal_equations_matches_scalar() {
     use crate::stacking::star_detection::centroid::lm_optimizer::LMModel;
 
     let beta = 2.5;
@@ -837,7 +837,7 @@ fn test_batch_build_normal_equations_matches_scalar() {
 }
 
 #[test]
-fn test_batch_compute_chi2_matches_scalar() {
+fn batch_compute_chi2_matches_scalar() {
     use crate::stacking::star_detection::centroid::lm_optimizer::LMModel;
 
     let beta = 2.5;
@@ -874,7 +874,7 @@ fn test_batch_compute_chi2_matches_scalar() {
 /// Weighted data must bypass the SIMD kernels (which are unweighted-only) and still apply the
 /// weights, so uniform weights reproduce the unweighted result and a uniform `w` scales it by `w`.
 #[test]
-fn test_batch_weighted_bypasses_simd_and_applies_weights() {
+fn batch_weighted_bypasses_simd_and_applies_weights() {
     use crate::stacking::star_detection::centroid::lm_optimizer::LMModel;
 
     let beta = 2.5;
@@ -929,7 +929,7 @@ fn test_batch_weighted_bypasses_simd_and_applies_weights() {
 }
 
 #[test]
-fn test_batch_build_normal_equations_various_stamp_sizes() {
+fn batch_build_normal_equations_various_stamp_sizes() {
     use crate::stacking::star_detection::centroid::lm_optimizer::LMModel;
 
     let beta = 2.5;
@@ -995,7 +995,7 @@ fn test_batch_build_normal_equations_various_stamp_sizes() {
 }
 
 #[test]
-fn test_batch_build_normal_equations_all_pow_strategies() {
+fn batch_build_normal_equations_all_pow_strategies() {
     use crate::stacking::star_detection::centroid::lm_optimizer::LMModel;
 
     let true_params = [6.5, 6.5, 800.0, 2.0, 80.0];

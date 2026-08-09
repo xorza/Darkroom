@@ -168,7 +168,7 @@ mod tests {
     }
 
     #[test]
-    fn test_hex_lookup_construction() {
+    fn hex_lookup_construction() {
         let pattern = test_pattern();
         let hex = HexLookup::new(&pattern);
 
@@ -187,7 +187,7 @@ mod tests {
     }
 
     #[test]
-    fn test_hex_lookup_offsets_in_range() {
+    fn hex_lookup_offsets_in_range() {
         let pattern = test_pattern();
         let hex = HexLookup::new(&pattern);
 
@@ -208,7 +208,7 @@ mod tests {
     }
 
     #[test]
-    fn test_hex_lookup_solitary_green_phase() {
+    fn hex_lookup_solitary_green_phase() {
         let pattern = test_pattern();
         let hex = HexLookup::new(&pattern);
 
@@ -225,7 +225,7 @@ mod tests {
     }
 
     #[test]
-    fn test_hex_lookup_has_green_neighbors() {
+    fn hex_lookup_has_green_neighbors() {
         let pattern = test_pattern();
         let hex = HexLookup::new(&pattern);
 
@@ -260,7 +260,7 @@ mod tests {
     }
 
     #[test]
-    fn test_hex_lookup_mod3_wrapping() {
+    fn hex_lookup_mod3_wrapping() {
         let pattern = test_pattern();
         let hex = HexLookup::new(&pattern);
 

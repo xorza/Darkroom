@@ -23,7 +23,7 @@ mod tests {
     use crate::math::fwhm::*;
 
     #[test]
-    fn test_fwhm_sigma_conversion_roundtrip() {
+    fn fwhm_sigma_conversion_roundtrip() {
         let fwhm = 4.5;
         let sigma = fwhm_to_sigma(fwhm);
         let fwhm_back = sigma_to_fwhm(sigma);
@@ -31,7 +31,7 @@ mod tests {
     }
 
     #[test]
-    fn test_fwhm_to_sigma_known_value() {
+    fn fwhm_to_sigma_known_value() {
         let sigma = fwhm_to_sigma(FWHM_TO_SIGMA);
         assert!((sigma - 1.0).abs() < 1e-6);
     }

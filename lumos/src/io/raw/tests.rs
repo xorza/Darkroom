@@ -7,7 +7,7 @@ use crate::testing::ScratchDirectory;
 use crate::io::raw::*;
 
 #[test]
-fn test_load_raw_invalid_path() {
+fn load_raw_invalid_path() {
     let path = Path::new("/nonexistent/path/to/file.raf");
     let result = load_raw(path, &CancelToken::never());
     assert!(result.is_err());
@@ -32,7 +32,7 @@ fn test_load_raw_invalid_path() {
 
 #[cfg(unix)]
 #[test]
-fn test_load_raw_rejects_interior_nul_path() {
+fn load_raw_rejects_interior_nul_path() {
     use std::ffi::OsStr;
     use std::os::unix::ffi::OsStrExt;
 
@@ -42,7 +42,7 @@ fn test_load_raw_rejects_interior_nul_path() {
 }
 
 #[test]
-fn test_load_raw_rejects_invalid_files() {
+fn load_raw_rejects_invalid_files() {
     #[derive(Debug)]
     struct InvalidRawCase {
         name: &'static str,
@@ -145,7 +145,7 @@ fn demosaic_overshoots_the_light_frame_range_it_is_clamped_back_into() {
 #[cfg(feature = "real-data")]
 #[test]
 #[ignore = "real-data integration test; run explicitly with --ignored"]
-fn test_load_raw_valid_file() {
+fn load_raw_valid_file() {
     use crate::testing::{first_raw_file, init_tracing};
 
     let Some(path) = first_raw_file() else {
@@ -185,7 +185,7 @@ fn test_load_raw_valid_file() {
 #[cfg(feature = "real-data")]
 #[test]
 #[ignore = "real-data integration test; run explicitly with --ignored"]
-fn test_load_raw_dimensions_match() {
+fn load_raw_dimensions_match() {
     use crate::testing::first_raw_file;
 
     let Some(path) = first_raw_file() else {
@@ -256,7 +256,7 @@ fn test_normalize_u16_to_f32_parallel() {
 }
 
 #[test]
-fn test_normalize_u16_large_array() {
+fn normalize_u16_large_array() {
     // Test with a large array to exercise parallel processing
     let size = 100_000;
     let input: Vec<u16> = (0..size).map(|i| (i % 65536) as u16).collect();
@@ -280,7 +280,7 @@ fn test_normalize_u16_large_array() {
 }
 
 #[test]
-fn test_normalize_active_area_crops_and_applies_bayer_deltas() {
+fn normalize_active_area_crops_and_applies_bayer_deltas() {
     let area = RawActiveArea {
         raw: Size2us::new(6, 4),
         active: Size2us::new(3, 2),
@@ -661,7 +661,7 @@ fn invalid_camera_white_balance_is_absent() {
 /// Test that margin pixels (outside active area) are zero after normalization
 /// when raw values are below black level.
 #[test]
-fn test_normalize_below_black_clamped() {
+fn normalize_below_black_clamped() {
     let black = 500.0;
     let inv_range = 1.0 / 1000.0;
 
@@ -683,7 +683,7 @@ fn test_normalize_below_black_clamped() {
 /// sub-pedestal tail at 0 (the light-frame clamp) would bias stacked master
 /// dark/bias means upward.
 #[test]
-fn test_normalize_unclamped_preserves_out_of_range() {
+fn normalize_unclamped_preserves_out_of_range() {
     let black = 500.0;
     let inv_range = 1.0 / 1000.0; // white level = 1500
 
@@ -718,7 +718,7 @@ fn test_normalize_unclamped_preserves_out_of_range() {
 /// We can't call the function directly (needs libraw instance), but we can
 /// verify the normalization math it uses: (v as f32) / 65535.0
 #[test]
-fn test_fallback_16bit_normalization() {
+fn fallback_16bit_normalization() {
     let test_cases: &[(u16, f32)] = &[
         (0, 0.0),
         (1, 1.0 / 65535.0),
@@ -740,7 +740,7 @@ fn test_fallback_16bit_normalization() {
 
 /// Test process_unknown_libraw_fallback 8-bit normalization formula.
 #[test]
-fn test_fallback_8bit_normalization() {
+fn fallback_8bit_normalization() {
     let test_cases: &[(u8, f32)] = &[(0, 0.0), (1, 1.0 / 255.0), (127, 127.0 / 255.0), (255, 1.0)];
 
     for &(input, expected) in test_cases {
@@ -757,7 +757,7 @@ fn test_fallback_8bit_normalization() {
 
 /// Uniform black: all cblack zero, scalar black only.
 #[test]
-fn test_consolidate_black_levels_uniform() {
+fn consolidate_black_levels_uniform() {
     let cblack = [0u32; 4104];
     // No per-channel, no spatial pattern
     let bl = consolidate_black_levels(&cblack, 512, 16383, 0x94949494).unwrap();
@@ -771,7 +771,7 @@ fn test_consolidate_black_levels_uniform() {
 
 /// Per-channel cblack[0..3] nonzero, no spatial pattern.
 #[test]
-fn test_consolidate_black_levels_per_channel() {
+fn consolidate_black_levels_per_channel() {
     let mut cblack = [0u32; 4104];
     cblack[0] = 10; // R
     cblack[1] = 5; // G1
@@ -800,7 +800,7 @@ fn test_consolidate_black_levels_per_channel() {
 
 /// Bayer 2x2 spatial pattern folded into per-channel values.
 #[test]
-fn test_consolidate_black_levels_bayer_2x2_fold() {
+fn consolidate_black_levels_bayer_2x2_fold() {
     let mut cblack = [0u32; 4104];
     // 2x2 spatial pattern
     cblack[4] = 2;
@@ -835,7 +835,7 @@ fn test_consolidate_black_levels_bayer_2x2_fold() {
 
 /// X-Trans 1x1 spatial pattern folded into all channels.
 #[test]
-fn test_consolidate_black_levels_xtrans_1x1_fold() {
+fn consolidate_black_levels_xtrans_1x1_fold() {
     let mut cblack = [0u32; 4104];
     cblack[4] = 1;
     cblack[5] = 1;
@@ -878,7 +878,7 @@ fn consolidate_black_levels_rejects_invalid_metadata() {
 }
 
 #[test]
-fn test_libraw_filter_color_rggb() {
+fn libraw_filter_color_rggb() {
     // RGGB Bayer pattern: 0x94949494
     let filters = 0x94949494u32;
 
@@ -896,7 +896,7 @@ fn test_libraw_filter_color_rggb() {
 }
 
 #[test]
-fn test_apply_bayer_black_corrections_identity() {
+fn apply_bayer_black_corrections_identity() {
     let mut data = vec![0.5f32; 4];
     let delta = [0.0; 4];
 
@@ -931,7 +931,7 @@ fn test_apply_bayer_black_corrections() {
 }
 
 #[test]
-fn test_apply_bayer_black_corrections_clamp_negative() {
+fn apply_bayer_black_corrections_clamp_negative() {
     let mut data = vec![0.05f32; 4];
     let delta = [0.1, 0.0, 0.0, 0.0]; // R delta bigger than value
 

@@ -46,7 +46,7 @@ fn mean_f32_matches_a_rounded_f64_reference_at_every_length() {
 }
 
 #[test]
-fn test_simd_vs_scalar_sum() {
+fn simd_vs_scalar_sum() {
     let values: Vec<f32> = (0..1000).map(|x| x as f32 * 0.1).collect();
     let scalar_result = scalar::sum_f32(&values);
     let simd_result = sum_f32(&values);
@@ -94,7 +94,7 @@ fn mean_rounds_once_and_agrees_with_the_unit_weighted_mean() {
 }
 
 #[test]
-fn test_weighted_mean_uniform_weights() {
+fn weighted_mean_uniform_weights() {
     let values = [1.0f32, 2.0, 3.0, 4.0, 5.0];
     let weights = [1.0f32; 5];
     let result = weighted_mean_f32(&values, &weights);
@@ -102,7 +102,7 @@ fn test_weighted_mean_uniform_weights() {
 }
 
 #[test]
-fn test_weighted_mean_varying_weights() {
+fn weighted_mean_varying_weights() {
     // Weighted mean of [10, 20] with weights [3, 1] = (30 + 20) / 4 = 12.5
     let values = [10.0f32, 20.0];
     let weights = [3.0f32, 1.0];
@@ -111,25 +111,25 @@ fn test_weighted_mean_varying_weights() {
 }
 
 #[test]
-fn test_weighted_mean_single_value() {
+fn weighted_mean_single_value() {
     let result = weighted_mean_f32(&[42.0], &[5.0]);
     assert!((result - 42.0).abs() < 1e-6);
 }
 
 #[test]
-fn test_weighted_mean_empty() {
+fn weighted_mean_empty() {
     let result = weighted_mean_f32(&[], &[]);
     assert_eq!(result, 0.0);
 }
 
 #[test]
-fn test_weighted_mean_zero_weights_returns_zero() {
+fn weighted_mean_zero_weights_returns_zero() {
     let result = weighted_mean_f32(&[1.0, 2.0, 3.0], &[0.0, 0.0, 0.0]);
     assert_eq!(result, 0.0);
 }
 
 #[test]
-fn test_weighted_mean_one_nonzero_weight() {
+fn weighted_mean_one_nonzero_weight() {
     // Only the value with nonzero weight should matter
     let values = [10.0f32, 20.0, 30.0];
     let weights = [0.0f32, 5.0, 0.0];
@@ -138,7 +138,7 @@ fn test_weighted_mean_one_nonzero_weight() {
 }
 
 #[test]
-fn test_weighted_mean_negative_values() {
+fn weighted_mean_negative_values() {
     let values = [-10.0f32, 10.0];
     let weights = [1.0f32, 1.0];
     let result = weighted_mean_f32(&values, &weights);
@@ -146,7 +146,7 @@ fn test_weighted_mean_negative_values() {
 }
 
 #[test]
-fn test_sum_f32_precision_large_constant() {
+fn sum_f32_precision_large_constant() {
     // Sum 100k values of 1.0: exact answer is 100000.0
     // Naive f32 summation would accumulate rounding errors; Neumaier should be exact.
     let n = 100_000;
@@ -156,7 +156,7 @@ fn test_sum_f32_precision_large_constant() {
 }
 
 #[test]
-fn test_sum_f32_precision_catastrophic_cancellation() {
+fn sum_f32_precision_catastrophic_cancellation() {
     // Big positive + big negative + small values: naive summation loses the small values.
     // Neumaier should preserve them.
     let big = 1e7f32;
@@ -174,7 +174,7 @@ fn test_sum_f32_precision_catastrophic_cancellation() {
 }
 
 #[test]
-fn test_sum_f32_precision_scalar_vs_f64() {
+fn sum_f32_precision_scalar_vs_f64() {
     // Compare scalar wide accumulation against an f64 reference for typical astronomy data.
     let values: Vec<f32> = (0..4096).map(|i| 100.0 + (i as f32) * 0.01).collect();
     let f64_sum: f64 = values.iter().map(|&v| v as f64).sum();
@@ -184,7 +184,7 @@ fn test_sum_f32_precision_scalar_vs_f64() {
 }
 
 #[test]
-fn test_sum_f32_precision_simd_vs_f64() {
+fn sum_f32_precision_simd_vs_f64() {
     // Compare SIMD Neumaier result against f64 reference.
     let values: Vec<f32> = (0..4096).map(|i| 100.0 + (i as f32) * 0.01).collect();
     let f64_sum: f64 = values.iter().map(|&v| v as f64).sum();
@@ -198,7 +198,7 @@ fn test_sum_f32_precision_simd_vs_f64() {
 }
 
 #[test]
-fn test_weighted_mean_precision_large_array() {
+fn weighted_mean_precision_large_array() {
     // Weighted mean of uniform values with uniform weights should equal the value.
     let n = 10_000;
     let values = vec![42.5f32; n];
@@ -211,7 +211,7 @@ fn test_weighted_mean_precision_large_array() {
 }
 
 #[test]
-fn test_sum_f32_compensation_actually_helps() {
+fn sum_f32_compensation_actually_helps() {
     // Construct data where naive summation provably loses precision.
     // Sum of 1e6 + (1e-1 repeated 10000 times) + (-1e6).
     // Naive: 1e6 + 0.1 = 1e6 (lost!), repeated. Final: 1e6 - 1e6 = 0.
@@ -236,7 +236,7 @@ fn test_sum_f32_compensation_actually_helps() {
 }
 
 #[test]
-fn test_sum_f32_simd_vs_scalar_catastrophic() {
+fn sum_f32_simd_vs_scalar_catastrophic() {
     // Both paths should handle catastrophic cancellation similarly.
     let big = 1e7f32;
     let small = 1e-3f32;
@@ -259,7 +259,7 @@ fn test_sum_f32_simd_vs_scalar_catastrophic() {
 }
 
 #[test]
-fn test_sum_f32_simd_vs_scalar_large_f64_ref() {
+fn sum_f32_simd_vs_scalar_large_f64_ref() {
     // Both paths should agree closely on large realistic data.
     let values: Vec<f32> = (0..10_000).map(|i| (i as f32 + 1.0) * 0.7).collect();
     let f64_ref: f64 = values.iter().map(|&v| v as f64).sum();
@@ -287,7 +287,7 @@ fn test_sum_f32_simd_vs_scalar_large_f64_ref() {
 }
 
 #[test]
-fn test_sum_f32_all_negative() {
+fn sum_f32_all_negative() {
     let values: Vec<f32> = (1..=4096).map(|i| -(i as f32) * 0.1).collect();
     let f64_ref: f64 = values.iter().map(|&v| v as f64).sum();
 
@@ -300,7 +300,7 @@ fn test_sum_f32_all_negative() {
 }
 
 #[test]
-fn test_weighted_mean_compensation_helps() {
+fn weighted_mean_compensation_helps() {
     // Large number of values near a mean — naive summation of v*w accumulates error.
     let n = 50_000;
     let values: Vec<f32> = (0..n).map(|i| 1000.0 + (i as f32) * 0.001).collect();
@@ -328,7 +328,7 @@ fn weighted_mean_f64_ref(values: &[f32], weights: &[f32]) -> f64 {
 }
 
 #[test]
-fn test_weighted_mean_simd_vs_scalar() {
+fn weighted_mean_simd_vs_scalar() {
     let values: Vec<f32> = (0..1000).map(|i| (i as f32) * 0.7 + 10.0).collect();
     let weights: Vec<f32> = (0..1000).map(|i| 1.0 + (i as f32) * 0.01).collect();
 
@@ -341,7 +341,7 @@ fn test_weighted_mean_simd_vs_scalar() {
 }
 
 #[test]
-fn test_weighted_mean_simd_vs_scalar_large() {
+fn weighted_mean_simd_vs_scalar_large() {
     // 10k elements — exercises full SIMD loop + remainder
     let values: Vec<f32> = (0..10_000).map(|i| 500.0 + (i as f32) * 0.03).collect();
     let weights: Vec<f32> = (0..10_000).map(|i| 2.0 - (i as f32) * 0.0001).collect();
@@ -367,7 +367,7 @@ fn test_weighted_mean_simd_vs_scalar_large() {
 }
 
 #[test]
-fn test_weighted_mean_dispatch_boundary() {
+fn weighted_mean_dispatch_boundary() {
     for size in [127, 128, 129] {
         let values: Vec<f32> = (0..size).map(|i| 10.0 + i as f32).collect();
         let weights: Vec<f32> = (0..size).map(|i| 1.0 + i as f32 * 0.1).collect();
@@ -392,7 +392,7 @@ fn test_weighted_mean_dispatch_boundary() {
 }
 
 #[test]
-fn test_weighted_mean_simd_catastrophic_cancellation() {
+fn weighted_mean_simd_catastrophic_cancellation() {
     // Large + small values with varying weights — stresses compensation
     let mut values = vec![1e6f32, -1e6f32];
     let mut weights = vec![1.0f32, 1.0f32];
@@ -418,7 +418,7 @@ fn test_weighted_mean_simd_catastrophic_cancellation() {
 
 #[test]
 #[should_panic(expected = "must have the same length")]
-fn test_weighted_mean_length_mismatch_panics() {
+fn weighted_mean_length_mismatch_panics() {
     // The SIMD kernels walk `weights` by raw pointer, so a shorter `weights` is UB in release —
     // the length precondition is a release assert, not debug. Verify it fires.
     let values = [1.0f32, 2.0, 3.0, 4.0, 5.0];

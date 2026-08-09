@@ -354,7 +354,7 @@ mod tests {
 
     /// Test that simd_exp_fast produces results close to std exp().
     #[test]
-    fn test_simd_exp_fast_accuracy() {
+    fn simd_exp_fast_accuracy() {
         if !imaginarium::cpu_features::has_avx2_fma() {
             return;
         }
@@ -389,7 +389,7 @@ mod tests {
 
     /// Test simd_exp_fast with the typical Gaussian exponent range.
     #[test]
-    fn test_simd_exp_fast_gaussian_range() {
+    fn simd_exp_fast_gaussian_range() {
         if !imaginarium::cpu_features::has_avx2_fma() {
             return;
         }

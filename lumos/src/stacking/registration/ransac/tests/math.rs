@@ -1,12 +1,12 @@
 use super::*;
 
 #[test]
-fn test_centroid_empty() {
+fn centroid_empty() {
     assert_eq!(centroid(&[]), DVec2::ZERO);
 }
 
 #[test]
-fn test_centroid_single_point() {
+fn centroid_single_point() {
     let c = centroid(&[DVec2::new(7.0, -3.0)]);
     // centroid of a single point is the point itself
     assert!((c.x - 7.0).abs() < TOL);
@@ -14,7 +14,7 @@ fn test_centroid_single_point() {
 }
 
 #[test]
-fn test_centroid_square() {
+fn centroid_square() {
     // centroid of (0,0), (10,0), (10,10), (0,10) = (5, 5)
     let points = [
         DVec2::new(0.0, 0.0),
@@ -29,7 +29,7 @@ fn test_centroid_square() {
 }
 
 #[test]
-fn test_centroid_asymmetric() {
+fn centroid_asymmetric() {
     // Three points: (1,2), (3,4), (5,6)
     // centroid = ((1+3+5)/3, (2+4+6)/3) = (3.0, 4.0)
     let points = [
@@ -43,7 +43,7 @@ fn test_centroid_asymmetric() {
 }
 
 #[test]
-fn test_normalize_points_empty() {
+fn normalize_points_empty() {
     let normalization = point_normalization(&[]);
     // Transform should be identity
     let p = normalization.transform.apply(DVec2::new(1.0, 2.0));
@@ -52,7 +52,7 @@ fn test_normalize_points_empty() {
 }
 
 #[test]
-fn test_normalize_points_coincident() {
+fn normalize_points_coincident() {
     // All points at same location: avg_dist=0 → returns identity transform
     let points = vec![DVec2::new(5.0, 5.0); 4];
     let normalization = point_normalization(&points);
@@ -65,7 +65,7 @@ fn test_normalize_points_coincident() {
 }
 
 #[test]
-fn test_normalize_points_centroid_and_avg_distance() {
+fn normalize_points_centroid_and_avg_distance() {
     // Points: (0,0), (10,0), (10,10), (0,10)
     // Centroid: (5, 5)
     // Centered: (-5,-5), (5,-5), (5,5), (-5,5)
@@ -111,7 +111,7 @@ fn test_normalize_points_centroid_and_avg_distance() {
 }
 
 #[test]
-fn test_normalize_points_extreme_values() {
+fn normalize_points_extreme_values() {
     // Points with large coordinates
     let points = vec![
         DVec2::new(1e10, 1e10),
@@ -141,44 +141,44 @@ fn test_normalize_points_extreme_values() {
 }
 
 #[test]
-fn test_degenerate_empty() {
+fn degenerate_empty() {
     assert!(!is_sample_degenerate(&[]));
 }
 
 #[test]
-fn test_degenerate_single_point() {
+fn degenerate_single_point() {
     assert!(!is_sample_degenerate(&[DVec2::new(1.0, 2.0)]));
 }
 
 #[test]
-fn test_degenerate_coincident_pair() {
+fn degenerate_coincident_pair() {
     // Distance = sqrt((0.5)^2 + (0)^2) = 0.5 < 1.0 (MIN_DIST_SQ threshold)
     let pts = [DVec2::new(5.0, 5.0), DVec2::new(5.0, 5.5)];
     assert!(is_sample_degenerate(&pts));
 }
 
 #[test]
-fn test_degenerate_pair_exactly_at_threshold() {
+fn degenerate_pair_exactly_at_threshold() {
     // Distance = 1.0, dist_sq = 1.0 → NOT less than MIN_DIST_SQ (1.0), so non-degenerate
     let pts = [DVec2::new(0.0, 0.0), DVec2::new(1.0, 0.0)];
     assert!(!is_sample_degenerate(&pts));
 }
 
 #[test]
-fn test_degenerate_pair_just_below_threshold() {
+fn degenerate_pair_just_below_threshold() {
     // Distance = 0.99, dist_sq = 0.9801 < 1.0 → degenerate
     let pts = [DVec2::new(0.0, 0.0), DVec2::new(0.99, 0.0)];
     assert!(is_sample_degenerate(&pts));
 }
 
 #[test]
-fn test_non_degenerate_pair() {
+fn non_degenerate_pair() {
     let pts = [DVec2::new(0.0, 0.0), DVec2::new(10.0, 0.0)];
     assert!(!is_sample_degenerate(&pts));
 }
 
 #[test]
-fn test_degenerate_collinear_triple() {
+fn degenerate_collinear_triple() {
     // Three points on x-axis: cross product = 0 for all
     let pts = [
         DVec2::new(0.0, 0.0),
@@ -189,7 +189,7 @@ fn test_degenerate_collinear_triple() {
 }
 
 #[test]
-fn test_degenerate_collinear_diagonal() {
+fn degenerate_collinear_diagonal() {
     // Three points on y=x line
     // v0 = (10,10), v = (20,20), cross = 10*20 - 10*20 = 0
     let pts = [
@@ -201,7 +201,7 @@ fn test_degenerate_collinear_diagonal() {
 }
 
 #[test]
-fn test_non_degenerate_triangle() {
+fn non_degenerate_triangle() {
     // (0,0), (10,0), (5,10) → v0=(10,0), v=(5,10), cross = 10*10 - 0*5 = 100 > 1
     let pts = [
         DVec2::new(0.0, 0.0),
@@ -212,7 +212,7 @@ fn test_non_degenerate_triangle() {
 }
 
 #[test]
-fn test_degenerate_coincident_in_quad() {
+fn degenerate_coincident_in_quad() {
     // Fourth point too close to first: dist = sqrt(0.1^2+0.1^2) = 0.1414 < 1
     let pts = [
         DVec2::new(0.0, 0.0),
@@ -224,7 +224,7 @@ fn test_degenerate_coincident_in_quad() {
 }
 
 #[test]
-fn test_degenerate_collinear_quad() {
+fn degenerate_collinear_quad() {
     let pts = [
         DVec2::new(0.0, 0.0),
         DVec2::new(5.0, 0.0),
@@ -235,7 +235,7 @@ fn test_degenerate_collinear_quad() {
 }
 
 #[test]
-fn test_non_degenerate_quad() {
+fn non_degenerate_quad() {
     let pts = [
         DVec2::new(0.0, 0.0),
         DVec2::new(100.0, 0.0),
@@ -246,14 +246,14 @@ fn test_non_degenerate_quad() {
 }
 
 #[test]
-fn test_adaptive_iterations_edge_cases() {
+fn adaptive_iterations_edge_cases() {
     // w=0 or w=1 → returns 1
     assert_eq!(adaptive_iterations(0.0, 2, 0.99), 1);
     assert_eq!(adaptive_iterations(1.0, 2, 0.99), 1);
 }
 
 #[test]
-fn test_adaptive_iterations_hand_computed() {
+fn adaptive_iterations_hand_computed() {
     // Formula: N = ceil(log(1-conf) / log(1 - w^n))
 
     // w=0.9, n=2, conf=0.99: w^n = 0.81
@@ -278,7 +278,7 @@ fn test_adaptive_iterations_hand_computed() {
 }
 
 #[test]
-fn test_adaptive_iterations_larger_sample_size() {
+fn adaptive_iterations_larger_sample_size() {
     // Larger sample size → more iterations at same inlier ratio
 
     // w=0.5, n=4, conf=0.999: w^n = 0.0625
@@ -295,7 +295,7 @@ fn test_adaptive_iterations_larger_sample_size() {
 }
 
 #[test]
-fn test_adaptive_iterations_monotonic_in_inlier_ratio() {
+fn adaptive_iterations_monotonic_in_inlier_ratio() {
     // Higher inlier ratio → fewer iterations needed
     let low = adaptive_iterations(0.3, 2, 0.99); // 49
     let mid = adaptive_iterations(0.5, 2, 0.99); // lower

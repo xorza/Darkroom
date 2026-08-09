@@ -509,7 +509,7 @@ fn gaussian_fit_recovers_known_parameters() {
 }
 
 #[test]
-fn test_sigma_fwhm_conversion() {
+fn sigma_fwhm_conversion() {
     let sigma = 2.0;
     let fwhm = sigma_to_fwhm(sigma);
     let sigma_back = fwhm_to_sigma(fwhm);
@@ -518,7 +518,7 @@ fn test_sigma_fwhm_conversion() {
 }
 
 #[test]
-fn test_gaussian_fit_edge_position() {
+fn gaussian_fit_edge_position() {
     let width = 21;
     let height = 21;
     let pixels = Buffer2::new_filled(width, height, 0.1f32);
@@ -536,7 +536,7 @@ fn test_gaussian_fit_edge_position() {
 }
 
 #[test]
-fn test_gaussian_fit_stamp_too_small() {
+fn gaussian_fit_stamp_too_small() {
     let width = 5;
     let height = 5;
     let pixels = Buffer2::new_filled(width, height, 0.5f32);
@@ -556,7 +556,7 @@ fn test_gaussian_fit_stamp_too_small() {
 }
 
 #[test]
-fn test_fwhm_accuracy() {
+fn fwhm_accuracy() {
     // Test that FWHM is correctly computed from sigma
     let sigma = 2.0;
     let fwhm = sigma_to_fwhm(sigma);
@@ -567,7 +567,7 @@ fn test_fwhm_accuracy() {
 }
 
 #[test]
-fn test_gaussian_fit_converges_within_max_iterations() {
+fn gaussian_fit_converges_within_max_iterations() {
     let width = 21;
     let height = 21;
     let true_cx = 10.0f64;
@@ -604,7 +604,7 @@ fn test_gaussian_fit_converges_within_max_iterations() {
 }
 
 #[test]
-fn test_gaussian_fit_uniform_data_returns_result() {
+fn gaussian_fit_uniform_data_returns_result() {
     // Uniform data (no star) - should still return a result, though meaningless
     let width = 21;
     let height = 21;
@@ -633,7 +633,7 @@ fn test_gaussian_fit_uniform_data_returns_result() {
 }
 
 #[test]
-fn test_gaussian_fit_center_outside_stamp_rejected() {
+fn gaussian_fit_center_outside_stamp_rejected() {
     let width = 21;
     let height = 21;
     let true_cx = 10.0f64;
@@ -667,7 +667,7 @@ fn test_gaussian_fit_center_outside_stamp_rejected() {
 }
 
 #[test]
-fn test_gaussian_fit_rms_residual_computed() {
+fn gaussian_fit_rms_residual_computed() {
     let width = 21;
     let height = 21;
     let true_cx = 10.0f64;
@@ -704,7 +704,7 @@ fn test_gaussian_fit_rms_residual_computed() {
 }
 
 #[test]
-fn test_gaussian_fit_multiple_positions() {
+fn gaussian_fit_multiple_positions() {
     // Test fitting at various subpixel positions
     let width = 21;
     let height = 21;
@@ -764,7 +764,7 @@ fn test_gaussian_fit_multiple_positions() {
 }
 
 #[test]
-fn test_reference_normal_equations_symmetry() {
+fn reference_normal_equations_symmetry() {
     // Create test jacobian and residuals
     let jacobian = vec![
         [1.0f64, 0.5, 0.3, 0.2, 0.1, 0.05],
@@ -802,7 +802,7 @@ fn test_reference_normal_equations_symmetry() {
 }
 
 #[test]
-fn test_reference_normal_equations_values() {
+fn reference_normal_equations_values() {
     // Simple case: single jacobian row
     let jacobian = vec![[1.0f64, 2.0, 3.0, 4.0, 5.0, 6.0]];
     let residuals = vec![1.0f64];
@@ -845,7 +845,7 @@ fn test_reference_normal_equations_values() {
 }
 
 #[test]
-fn test_reference_normal_equations_empty() {
+fn reference_normal_equations_empty() {
     let jacobian: Vec<[f64; 6]> = vec![];
     let residuals: Vec<f64> = vec![];
 
@@ -868,7 +868,7 @@ fn test_reference_normal_equations_empty() {
 }
 
 #[test]
-fn test_reference_normal_equations_positive_semidefinite() {
+fn reference_normal_equations_positive_semidefinite() {
     // For any Jacobian, J^T * J should be positive semi-definite
     // This means x^T * H * x >= 0 for all x
     let jacobian = vec![
@@ -905,7 +905,7 @@ fn test_reference_normal_equations_positive_semidefinite() {
 
 /// Test that reference_normal_equations produces correct results with many rows.
 #[test]
-fn test_reference_normal_equations_many_rows() {
+fn reference_normal_equations_many_rows() {
     let n = 17;
     let mut jacobian = Vec::with_capacity(n);
     let mut residuals = Vec::with_capacity(n);
@@ -973,7 +973,7 @@ fn test_reference_normal_equations_many_rows() {
 
 /// Test with exactly 8 rows.
 #[test]
-fn test_reference_normal_equations_exactly_8_rows() {
+fn reference_normal_equations_exactly_8_rows() {
     let jacobian: Vec<[f64; 6]> = (0..8)
         .map(|i| {
             let v = (i + 1) as f64;
@@ -1021,7 +1021,7 @@ fn test_reference_normal_equations_exactly_8_rows() {
 
 /// Test with a realistic stamp size (289 pixels = 17x17) to verify accumulated precision.
 #[test]
-fn test_reference_normal_equations_large_stamp() {
+fn reference_normal_equations_large_stamp() {
     let n = 289;
     let mut jacobian = Vec::with_capacity(n);
     let mut residuals = Vec::with_capacity(n);
@@ -1094,7 +1094,7 @@ fn test_reference_normal_equations_large_stamp() {
 }
 
 #[test]
-fn test_gaussian_fit_sigma_at_lower_bound() {
+fn gaussian_fit_sigma_at_lower_bound() {
     // Test with sigma very close to constraint minimum (0.5 px)
     let width = 15;
     let height = 15;
@@ -1132,7 +1132,7 @@ fn test_gaussian_fit_sigma_at_lower_bound() {
 }
 
 #[test]
-fn test_gaussian_fit_sigma_at_upper_bound() {
+fn gaussian_fit_sigma_at_upper_bound() {
     // Test with sigma close to stamp_radius constraint
     let width = 31;
     let height = 31;
@@ -1171,7 +1171,7 @@ fn test_gaussian_fit_sigma_at_upper_bound() {
 }
 
 #[test]
-fn test_gaussian_fit_extreme_amplitude_range() {
+fn gaussian_fit_extreme_amplitude_range() {
     let width = 21;
     let height = 21;
     let true_cx = 10.0f64;
@@ -1220,7 +1220,7 @@ fn test_gaussian_fit_extreme_amplitude_range() {
 }
 
 #[test]
-fn test_gaussian_fit_residual_distribution() {
+fn gaussian_fit_residual_distribution() {
     // On noisy data, check that residuals are reasonable
     let width = 21;
     let height = 21;
@@ -1286,7 +1286,7 @@ fn make_gaussian_stamp_data(size: usize, params: &[f64; 6]) -> (Vec<f64>, Vec<f6
 }
 
 #[test]
-fn test_batch_build_normal_equations_matches_scalar() {
+fn batch_build_normal_equations_matches_scalar() {
     use crate::stacking::star_detection::centroid::lm_optimizer::LMModel;
 
     let true_params = [6.3, 6.7, 1000.0, 2.5, 3.0, 100.0];
@@ -1343,7 +1343,7 @@ fn test_batch_build_normal_equations_matches_scalar() {
 }
 
 #[test]
-fn test_batch_compute_chi2_matches_scalar() {
+fn batch_compute_chi2_matches_scalar() {
     use crate::stacking::star_detection::centroid::lm_optimizer::LMModel;
 
     let model = Gaussian2D { stamp_radius: 8.0 };
@@ -1379,7 +1379,7 @@ fn test_batch_compute_chi2_matches_scalar() {
 /// Weighted data must bypass the SIMD kernels (which are unweighted-only) and still apply the
 /// weights, so uniform weights reproduce the unweighted result and a uniform `w` scales it by `w`.
 #[test]
-fn test_batch_weighted_bypasses_simd_and_applies_weights() {
+fn batch_weighted_bypasses_simd_and_applies_weights() {
     use crate::stacking::star_detection::centroid::lm_optimizer::LMModel;
 
     let true_params = [6.3, 6.7, 1000.0, 2.5, 3.0, 100.0];
@@ -1433,7 +1433,7 @@ fn test_batch_weighted_bypasses_simd_and_applies_weights() {
 }
 
 #[test]
-fn test_batch_build_normal_equations_various_stamp_sizes() {
+fn batch_build_normal_equations_various_stamp_sizes() {
     use crate::stacking::star_detection::centroid::lm_optimizer::LMModel;
 
     let model = Gaussian2D { stamp_radius: 10.0 };
@@ -1498,7 +1498,7 @@ fn test_batch_build_normal_equations_various_stamp_sizes() {
 }
 
 #[test]
-fn test_gaussian_evaluate_and_jacobian_consistency() {
+fn gaussian_evaluate_and_jacobian_consistency() {
     use crate::stacking::star_detection::centroid::gaussian_fit::Gaussian2D;
     use crate::stacking::star_detection::centroid::lm_optimizer::LMModel;
 

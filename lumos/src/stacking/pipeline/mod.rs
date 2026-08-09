@@ -16,8 +16,4 @@ pub(crate) mod tier;
 #[cfg(all(test, feature = "internals"))]
 mod bench;
 #[cfg(test)]
-mod mem_budget_probe;
-#[cfg(test)]
-mod mem_budget_tests;
-#[cfg(test)]
 mod tests;

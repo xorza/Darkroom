@@ -4,7 +4,7 @@ use crate::stacking::star_detection::centroid::{StampGrid, compute_stamp_radius}
 /// Test that weighted centroid achieves claimed ~0.05 pixel accuracy
 /// by testing many random sub-pixel offsets.
 #[test]
-fn test_weighted_centroid_precision_statistical() {
+fn weighted_centroid_precision_statistical() {
     let width = 128;
     let height = 128;
     let sigma = 2.5f32;
@@ -76,7 +76,7 @@ fn test_weighted_centroid_precision_statistical() {
 
 /// Test that Gaussian fitting achieves claimed ~0.01 pixel accuracy.
 #[test]
-fn test_gaussian_fit_precision_statistical() {
+fn gaussian_fit_precision_statistical() {
     use crate::stacking::star_detection::centroid::gaussian_fit::{GaussianFit, GaussianFitConfig};
 
     let width = 21;
@@ -143,7 +143,7 @@ fn test_gaussian_fit_precision_statistical() {
 
 /// Test that Moffat fitting achieves claimed ~0.01 pixel accuracy.
 #[test]
-fn test_moffat_fit_precision_statistical() {
+fn moffat_fit_precision_statistical() {
     use crate::stacking::star_detection::centroid::moffat_fit::{MoffatFit, MoffatFitConfig};
 
     let width = 21;
@@ -213,7 +213,7 @@ fn test_moffat_fit_precision_statistical() {
 
 /// Verify FWHM estimation accuracy from second moments.
 #[test]
-fn test_fwhm_estimation_accuracy() {
+fn fwhm_estimation_accuracy() {
     let width = 128;
     let height = 128;
     let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.001);
@@ -249,7 +249,7 @@ fn test_fwhm_estimation_accuracy() {
 
 /// Verify eccentricity calculation for known elliptical sources.
 #[test]
-fn test_eccentricity_calculation_accuracy() {
+fn eccentricity_calculation_accuracy() {
     let width = 64;
     let height = 64;
     let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
@@ -338,7 +338,7 @@ fn snr_stays_continuous_as_sky_noise_vanishes() {
 
 /// Verify sharpness distinguishes point sources from extended sources.
 #[test]
-fn test_sharpness_point_vs_extended() {
+fn sharpness_point_vs_extended() {
     let width = 64;
     let height = 64;
     let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
@@ -388,7 +388,7 @@ fn test_sharpness_point_vs_extended() {
 
 /// Verify Moffat FWHM formula is correct.
 #[test]
-fn test_moffat_fwhm_formula() {
+fn moffat_fwhm_formula() {
     use crate::stacking::star_detection::centroid::moffat_fit::{
         alpha_beta_to_fwhm, fwhm_beta_to_alpha,
     };
@@ -430,7 +430,7 @@ fn test_moffat_fwhm_formula() {
 
 /// Test Gaussian fitting recovers correct sigma values.
 #[test]
-fn test_gaussian_fit_sigma_recovery() {
+fn gaussian_fit_sigma_recovery() {
     use crate::stacking::star_detection::centroid::gaussian_fit::{GaussianFit, GaussianFitConfig};
 
     let width = 21;
@@ -490,7 +490,7 @@ fn test_gaussian_fit_sigma_recovery() {
 
 /// Test Moffat fitting recovers correct alpha values.
 #[test]
-fn test_moffat_fit_alpha_recovery() {
+fn moffat_fit_alpha_recovery() {
     use crate::stacking::star_detection::centroid::moffat_fit::{MoffatFit, MoffatFitConfig};
 
     let width = 21;
@@ -542,7 +542,7 @@ fn test_moffat_fit_alpha_recovery() {
 
 /// Test that fitting works with noisy data.
 #[test]
-fn test_gaussian_fit_with_noise() {
+fn gaussian_fit_with_noise() {
     use crate::stacking::star_detection::centroid::gaussian_fit::{GaussianFit, GaussianFitConfig};
 
     let width = 21;
@@ -590,7 +590,7 @@ fn test_gaussian_fit_with_noise() {
 
 /// Verify GROUND is close to 0 for circular sources.
 #[test]
-fn test_ground_circular_source() {
+fn ground_circular_source() {
     let width = 64;
     let height = 64;
     let pixels = SyntheticStar::new(Vec2::splat(32.0), 0.8, StarProfile::Gaussian { sigma: 2.5 })
@@ -617,7 +617,7 @@ fn test_ground_circular_source() {
 
 /// Verify GROUND detects x-elongated sources.
 #[test]
-fn test_ground_x_elongated() {
+fn ground_x_elongated() {
     let width = 64;
     let height = 64;
     // sigma_x > sigma_y means more spread in x direction
@@ -655,7 +655,7 @@ fn test_ground_x_elongated() {
 
 /// Verify SROUND is close to 0 for symmetric sources.
 #[test]
-fn test_sround_symmetric_source() {
+fn sround_symmetric_source() {
     let width = 64;
     let height = 64;
     let pixels = SyntheticStar::new(Vec2::splat(32.0), 0.8, StarProfile::Gaussian { sigma: 2.5 })

@@ -1,7 +1,7 @@
 use crate::stacking::star_detection::centroid::linear_solver::*;
 
 #[test]
-fn test_solve_5x5_identity() {
+fn solve_5x5_identity() {
     let a = [
         [1.0, 0.0, 0.0, 0.0, 0.0],
         [0.0, 1.0, 0.0, 0.0, 0.0],
@@ -18,7 +18,7 @@ fn test_solve_5x5_identity() {
 }
 
 #[test]
-fn test_solve_5x5_diagonal() {
+fn solve_5x5_diagonal() {
     let a = [
         [2.0, 0.0, 0.0, 0.0, 0.0],
         [0.0, 3.0, 0.0, 0.0, 0.0],
@@ -37,14 +37,14 @@ fn test_solve_5x5_diagonal() {
 }
 
 #[test]
-fn test_solve_5x5_singular_returns_none() {
+fn solve_5x5_singular_returns_none() {
     let a = [[0.0; 5]; 5];
     let b = [1.0, 2.0, 3.0, 4.0, 5.0];
     assert!(solve(&a, &b).is_none());
 }
 
 #[test]
-fn test_solve_6x6_identity() {
+fn solve_6x6_identity() {
     let a = [
         [1.0, 0.0, 0.0, 0.0, 0.0, 0.0],
         [0.0, 1.0, 0.0, 0.0, 0.0, 0.0],
@@ -62,7 +62,7 @@ fn test_solve_6x6_identity() {
 }
 
 #[test]
-fn test_solve_6x6_diagonal() {
+fn solve_6x6_diagonal() {
     let a = [
         [2.0, 0.0, 0.0, 0.0, 0.0, 0.0],
         [0.0, 3.0, 0.0, 0.0, 0.0, 0.0],
@@ -83,14 +83,14 @@ fn test_solve_6x6_diagonal() {
 }
 
 #[test]
-fn test_solve_6x6_singular_returns_none() {
+fn solve_6x6_singular_returns_none() {
     let a = [[0.0; 6]; 6];
     let b = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
     assert!(solve(&a, &b).is_none());
 }
 
 #[test]
-fn test_solve_nan_pivot_returns_none() {
+fn solve_nan_pivot_returns_none() {
     // A NaN diagonal entry must not slip past the singularity check: every
     // ordered comparison against NaN is false, so a naive `max_val < eps`
     // check would leave `max_row` unmoved and later divide by NaN, returning
@@ -105,7 +105,7 @@ fn test_solve_nan_pivot_returns_none() {
 }
 
 #[test]
-fn test_solve_6x6_needs_pivoting() {
+fn solve_6x6_needs_pivoting() {
     let a = [
         [0.0, 1.0, 0.0, 0.0, 0.0, 0.0],
         [1.0, 0.0, 0.0, 0.0, 0.0, 0.0],
@@ -122,7 +122,7 @@ fn test_solve_6x6_needs_pivoting() {
 }
 
 #[test]
-fn test_solve_6x6_dense_matrix() {
+fn solve_6x6_dense_matrix() {
     // Dense symmetric positive definite matrix (typical for L-M Hessian)
     let a = [
         [10.0, 2.0, 1.0, 0.5, 0.3, 0.1],
@@ -153,7 +153,7 @@ fn test_solve_6x6_dense_matrix() {
 }
 
 #[test]
-fn test_solve_6x6_verify_solution() {
+fn solve_6x6_verify_solution() {
     // Verify Ax = b holds for the solution
     let a = [
         [4.0, 1.0, 0.0, 0.0, 0.0, 0.0],
@@ -185,7 +185,7 @@ fn test_solve_6x6_verify_solution() {
 }
 
 #[test]
-fn test_solve_5x5_dense_matrix() {
+fn solve_5x5_dense_matrix() {
     // Dense matrix for Moffat fitting
     let a = [
         [8.0, 1.5, 1.0, 0.5, 0.2],

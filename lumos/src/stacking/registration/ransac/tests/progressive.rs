@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn test_progressive_ransac_basic() {
+fn progressive_ransac_basic() {
     let ref_points = make_grid(5, 4, 20.0);
     let offset = DVec2::new(15.0, -8.0);
     let target_points: Vec<DVec2> = ref_points.iter().map(|p| *p + offset).collect();
@@ -28,7 +28,7 @@ fn test_progressive_ransac_basic() {
 }
 
 #[test]
-fn test_progressive_ransac_outlier_rejection() {
+fn progressive_ransac_outlier_rejection() {
     // 15 inliers (high confidence) + 5 outliers (low confidence)
     let mut ref_points = make_grid(5, 3, 20.0);
     let offset = DVec2::new(10.0, 5.0);
@@ -67,7 +67,7 @@ fn test_progressive_ransac_outlier_rejection() {
 }
 
 #[test]
-fn test_progressive_ransac_uses_weights() {
+fn progressive_ransac_uses_weights() {
     // First 5 points are outliers with low confidence,
     // remaining 15 are inliers with high confidence
     let ref_points = make_grid(5, 4, 10.0);
@@ -114,7 +114,7 @@ fn test_progressive_ransac_uses_weights() {
 }
 
 #[test]
-fn test_progressive_ransac_finds_solution_faster() {
+fn progressive_ransac_finds_solution_faster() {
     // Progressive RANSAC should converge faster than max_iterations
     let ref_points = make_grid(10, 5, 10.0);
     let angle = PI / 12.0;
@@ -154,7 +154,7 @@ fn test_progressive_ransac_finds_solution_faster() {
 }
 
 #[test]
-fn test_estimate_with_varying_confidence() {
+fn estimate_with_varying_confidence() {
     let ref_stars = vec![
         DVec2::new(100.0, 100.0),
         DVec2::new(200.0, 100.0),
@@ -194,7 +194,7 @@ fn test_estimate_with_varying_confidence() {
 }
 
 #[test]
-fn test_estimate_rejects_outlier_with_low_confidence() {
+fn estimate_rejects_outlier_with_low_confidence() {
     let ref_stars = vec![
         DVec2::new(100.0, 100.0),
         DVec2::new(200.0, 100.0),

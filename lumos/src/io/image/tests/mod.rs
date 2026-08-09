@@ -30,7 +30,7 @@ fn loadable_extensions_match_decoder_policies() {
 }
 
 #[test]
-fn test_metadata_default() {
+fn metadata_default() {
     let meta = ImageMetadata::default();
     assert!(meta.object.is_none());
     assert!(meta.header_dimensions.is_empty());
@@ -39,7 +39,7 @@ fn test_metadata_default() {
 }
 
 #[test]
-fn test_convert_to_imaginarium_image_grayscale() {
+fn convert_to_imaginarium_image_grayscale() {
     let astro = LinearImage::from_pixels(
         ImageDimensions::new((3, 2), 1),
         vec![0.0, 0.25, 0.5, 0.75, 1.0, 0.5],
@@ -60,7 +60,7 @@ fn test_convert_to_imaginarium_image_grayscale() {
 }
 
 #[test]
-fn test_convert_to_imaginarium_image_rgb() {
+fn convert_to_imaginarium_image_rgb() {
     let astro = LinearImage::from_pixels(
         ImageDimensions::new((2, 2), 3),
         vec![
@@ -89,7 +89,7 @@ fn test_convert_to_imaginarium_image_rgb() {
 }
 
 #[test]
-fn test_convert_fits_to_imaginarium_image() {
+fn convert_fits_to_imaginarium_image() {
     let path = concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../test_resources/full_example.fits"
@@ -104,7 +104,7 @@ fn test_convert_fits_to_imaginarium_image() {
 }
 
 #[test]
-fn test_load_full_example_fits() {
+fn load_full_example_fits() {
     let path = concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../test_resources/full_example.fits"
@@ -133,7 +133,7 @@ fn test_load_full_example_fits() {
 }
 
 #[test]
-fn test_from_image_no_stride_padding() {
+fn from_image_no_stride_padding() {
     let desc = ImageDesc::new(3, 2, ColorFormat::L_F32);
     let pixels: Vec<f32> = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
     let bytes: Vec<u8> = bytemuck::cast_slice(&pixels).to_vec();
@@ -154,7 +154,7 @@ fn test_mean() {
 }
 
 #[test]
-fn test_save_grayscale_tiff() {
+fn save_grayscale_tiff() {
     let image = LinearImage::from_pixels(ImageDimensions::new((2, 2), 1), vec![0.1, 0.2, 0.3, 0.4]);
     let output_path = test_output_path("astro_save_gray.tiff");
 
@@ -168,7 +168,7 @@ fn test_save_grayscale_tiff() {
 }
 
 #[test]
-fn test_save_rgb_tiff() {
+fn save_rgb_tiff() {
     let image = LinearImage::from_pixels(
         ImageDimensions::new((2, 2), 3),
         vec![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
@@ -259,7 +259,7 @@ fn product_constructors_separate_linear_science_from_preview_rasters() {
 }
 
 #[test]
-fn test_save_invalid_extension() {
+fn save_invalid_extension() {
     let image = LinearImage::from_pixels(ImageDimensions::new((2, 2), 1), vec![0.1, 0.2, 0.3, 0.4]);
     let output_path = test_output_path("astro_save_invalid.xyz");
 
@@ -268,7 +268,7 @@ fn test_save_invalid_extension() {
 }
 
 #[test]
-fn test_roundtrip_linear_to_image_to_linear() {
+fn roundtrip_linear_to_image_to_linear() {
     let gray = LinearImage::from_pixels(
         ImageDimensions::new((3, 2), 1),
         vec![0.1, 0.2, 0.3, 0.4, 0.5, 0.6],
@@ -299,7 +299,7 @@ fn test_roundtrip_linear_to_image_to_linear() {
 }
 
 #[test]
-fn test_image_rgba_to_linear_drops_alpha() {
+fn image_rgba_to_linear_drops_alpha() {
     let desc = ImageDesc::new(2, 1, ColorFormat::RGBA_F32);
     let pixels: Vec<f32> = vec![1.0, 0.0, 0.0, 0.5, 0.0, 1.0, 0.0, 1.0];
     let bytes: Vec<u8> = bytemuck::cast_slice(&pixels).to_vec();
@@ -319,7 +319,7 @@ fn test_image_rgba_to_linear_drops_alpha() {
 #[cfg(feature = "real-data")]
 #[test]
 #[ignore = "real-data integration test; run explicitly with --ignored"]
-fn test_load_single_raw_from_env() {
+fn load_single_raw_from_env() {
     use crate::testing::{calibration_dir, init_tracing};
 
     init_tracing();
@@ -365,7 +365,7 @@ fn test_load_single_raw_from_env() {
 }
 
 #[test]
-fn test_rgb_image_creation_and_operations() {
+fn rgb_image_creation_and_operations() {
     let image = LinearImage::from_pixels(
         ImageDimensions::new((2, 2), 3),
         vec![
@@ -402,7 +402,7 @@ fn test_get_pixel_gray() {
 }
 
 #[test]
-fn test_get_pixel_channel_rgb() {
+fn get_pixel_channel_rgb() {
     let image = LinearImage::from_pixels(
         ImageDimensions::new((2, 2), 3),
         vec![
@@ -425,7 +425,7 @@ fn test_get_pixel_channel_rgb() {
 }
 
 #[test]
-fn test_from_planar_channels_grayscale() {
+fn from_planar_channels_grayscale() {
     let channels = vec![vec![1.0, 2.0, 3.0, 4.0]];
     let image = LinearImage::from_planar_channels(ImageDimensions::new((2, 2), 1), channels);
 
@@ -441,7 +441,7 @@ fn test_from_planar_channels_grayscale() {
 }
 
 #[test]
-fn test_from_planar_channels_rgb() {
+fn from_planar_channels_rgb() {
     let image = LinearImage::from_planar_channels(
         ImageDimensions::new((2, 1), 3),
         vec![vec![1.0, 2.0], vec![3.0, 4.0], vec![5.0, 6.0]],
@@ -567,7 +567,7 @@ fn test_get_pixel_gray_mut() {
 }
 
 #[test]
-fn test_into_interleaved_pixels_grayscale() {
+fn into_interleaved_pixels_grayscale() {
     let image = LinearImage::from_pixels(ImageDimensions::new((2, 2), 1), vec![1.0, 2.0, 3.0, 4.0]);
 
     let interleaved = image.into_interleaved_pixels();
@@ -575,7 +575,7 @@ fn test_into_interleaved_pixels_grayscale() {
 }
 
 #[test]
-fn test_into_interleaved_pixels_rgb() {
+fn into_interleaved_pixels_rgb() {
     let image = LinearImage::from_planar_channels(
         ImageDimensions::new((2, 1), 3),
         vec![vec![1.0, 4.0], vec![2.0, 5.0], vec![3.0, 6.0]],
@@ -586,7 +586,7 @@ fn test_into_interleaved_pixels_rgb() {
 }
 
 #[test]
-fn test_sub_assign() {
+fn sub_assign() {
     let mut image = LinearImage::from_pixels(
         ImageDimensions::new((2, 1), 3),
         vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
@@ -604,7 +604,7 @@ fn test_sub_assign() {
 }
 
 #[test]
-fn test_image_dimensions_validation() {
+fn image_dimensions_validation() {
     let dims = ImageDimensions::new((100, 200), 3);
     assert_eq!(dims.size(), (100, 200).into());
     assert_eq!(dims.width(), 100);
@@ -618,19 +618,19 @@ fn test_image_dimensions_validation() {
 
 #[test]
 #[should_panic(expected = "Width must be positive")]
-fn test_image_dimensions_zero_width() {
+fn image_dimensions_zero_width() {
     ImageDimensions::new((0, 100), 1);
 }
 
 #[test]
 #[should_panic(expected = "Height must be positive")]
-fn test_image_dimensions_zero_height() {
+fn image_dimensions_zero_height() {
     ImageDimensions::new((100, 0), 1);
 }
 
 #[test]
 #[should_panic(expected = "Only 1 (grayscale) or 3 (RGB) channels supported")]
-fn test_image_dimensions_invalid_channels() {
+fn image_dimensions_invalid_channels() {
     ImageDimensions::new((100, 100), 2);
 }
 
@@ -643,6 +643,6 @@ fn test_image_dimensions_reject_pixel_count_overflow() {
 
 #[test]
 #[should_panic(expected = "Image sample count must fit in usize")]
-fn test_image_dimensions_reject_sample_count_overflow() {
+fn image_dimensions_reject_sample_count_overflow() {
     ImageDimensions::new((usize::MAX, 1), 3);
 }

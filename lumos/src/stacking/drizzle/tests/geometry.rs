@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn test_drizzle_accumulator_rejects_invalid_frame_inputs() {
+fn drizzle_accumulator_rejects_invalid_frame_inputs() {
     let config = DrizzleConfig::x2();
     let mut acc = accumulator(ImageDimensions::new((4, 4), 1), config);
 
@@ -56,7 +56,7 @@ fn test_drizzle_accumulator_rejects_invalid_frame_inputs() {
 /// This is a left-to-right segment at y=0.5 across the full unit square.
 /// Case A (both y in [0,1]): trapezoid = 0.5 * (1-0) * (0.5+0.5) = 0.5
 #[test]
-fn test_sgarea_horizontal_midpoint() {
+fn sgarea_horizontal_midpoint() {
     let area = sgarea(0.0, 0.5, 1.0, 0.5);
     assert!((area - 0.5).abs() < 1e-12, "Expected 0.5, got {}", area);
 }
@@ -66,14 +66,14 @@ fn test_sgarea_horizontal_midpoint() {
 /// Same segment but right-to-left → negative sign.
 /// sgn_dx = -1, trapezoid = -0.5 * (1-0) * (0.5+0.5) = -0.5
 #[test]
-fn test_sgarea_horizontal_reversed() {
+fn sgarea_horizontal_reversed() {
     let area = sgarea(1.0, 0.5, 0.0, 0.5);
     assert!((area - (-0.5)).abs() < 1e-12, "Expected -0.5, got {}", area);
 }
 
 /// Test sgarea with a vertical segment (dx=0) → area = 0.
 #[test]
-fn test_sgarea_vertical() {
+fn sgarea_vertical() {
     let area = sgarea(0.5, 0.0, 0.5, 1.0);
     assert!(
         area.abs() < 1e-12,
@@ -87,7 +87,7 @@ fn test_sgarea_vertical() {
 /// should be vertical. Without the tolerance check, this would divide by
 /// near-zero dx and produce a huge slope, yielding a wrong area.
 #[test]
-fn test_sgarea_near_vertical() {
+fn sgarea_near_vertical() {
     // Simulate floating-point jitter: x2 = x1 + tiny epsilon
     let area = sgarea(0.5, 0.0, 0.5 + 1e-16, 1.0);
     assert!(
@@ -107,7 +107,7 @@ fn test_sgarea_near_vertical() {
 
 /// Test sgarea with segment entirely outside (x > 1).
 #[test]
-fn test_sgarea_outside_right() {
+fn sgarea_outside_right() {
     let area = sgarea(1.5, 0.0, 2.5, 1.0);
     assert!(
         area.abs() < 1e-12,
@@ -118,7 +118,7 @@ fn test_sgarea_outside_right() {
 
 /// Test sgarea with segment entirely below y=0.
 #[test]
-fn test_sgarea_below_axis() {
+fn sgarea_below_axis() {
     let area = sgarea(0.0, -1.0, 1.0, -0.5);
     assert!(
         area.abs() < 1e-12,
@@ -131,7 +131,7 @@ fn test_sgarea_below_axis() {
 ///
 /// Both y >= 1 → full rectangle: sgn_dx * (xhi - xlo) = 1.0 * (1-0) = 1.0
 #[test]
-fn test_sgarea_above_top() {
+fn sgarea_above_top() {
     let area = sgarea(0.0, 1.5, 1.0, 2.0);
     assert!(
         (area - 1.0).abs() < 1e-12,
@@ -145,7 +145,7 @@ fn test_sgarea_above_top() {
 /// Segment entirely within [0,1]×[0,1]. Case A trapezoid:
 /// 0.5 * (1-0) * (1+0) = 0.5
 #[test]
-fn test_sgarea_case_a_diagonal() {
+fn sgarea_case_a_diagonal() {
     let area = sgarea(0.0, 0.0, 1.0, 1.0);
     assert!((area - 0.5).abs() < 1e-12, "Expected 0.5, got {}", area);
 }
@@ -162,7 +162,7 @@ fn test_sgarea_case_a_diagonal() {
 ///       = 0.5*0.5*1.5 + 0.5
 ///       = 0.375 + 0.5 = 0.875
 #[test]
-fn test_sgarea_case_b() {
+fn sgarea_case_b() {
     let area = sgarea(0.0, 0.5, 1.0, 1.5);
     assert!((area - 0.875).abs() < 1e-12, "Expected 0.875, got {}", area);
 }
@@ -179,7 +179,7 @@ fn test_sgarea_case_b() {
 ///       = 0.5*0.5*1.5 + 0.5
 ///       = 0.375 + 0.5 = 0.875
 #[test]
-fn test_sgarea_case_c() {
+fn sgarea_case_c() {
     let area = sgarea(0.0, 1.5, 1.0, 0.5);
     assert!((area - 0.875).abs() < 1e-12, "Expected 0.875, got {}", area);
 }
@@ -192,7 +192,7 @@ fn test_sgarea_case_c() {
 /// Now xlo=0.5, ylo=0, xhi=1, yhi=0.5. Case A:
 /// 0.5*(1-0.5)*(0.5+0) = 0.5*0.5*0.5 = 0.125
 #[test]
-fn test_sgarea_crosses_y_zero() {
+fn sgarea_crosses_y_zero() {
     let area = sgarea(0.0, -0.5, 1.0, 0.5);
     assert!((area - 0.125).abs() < 1e-12, "Expected 0.125, got {}", area);
 }
@@ -202,7 +202,7 @@ fn test_sgarea_crosses_y_zero() {
 /// Quad corners at (0,0), (1,0), (1,1), (0,1). Output pixel (0,0) = [0,1]×[0,1].
 /// Perfect overlap → area = 1.0.
 #[test]
-fn test_boxer_exact_overlap() {
+fn boxer_exact_overlap() {
     let x = [0.0, 1.0, 1.0, 0.0];
     let y = [0.0, 0.0, 1.0, 1.0];
     let area = boxer(0.0, 0.0, &x, &y);
@@ -218,7 +218,7 @@ fn test_boxer_exact_overlap() {
 /// Quad at (0.5,0)→(1.5,0)→(1.5,1)→(0.5,1). Output pixel (0,0) = [0,1]×[0,1].
 /// x overlap: [0.5, 1.0] = 0.5, y overlap: [0, 1] = 1.0. Total = 0.5.
 #[test]
-fn test_boxer_half_overlap_x() {
+fn boxer_half_overlap_x() {
     let x = [0.5, 1.5, 1.5, 0.5];
     let y = [0.0, 0.0, 1.0, 1.0];
     let area = boxer(0.0, 0.0, &x, &y);
@@ -234,7 +234,7 @@ fn test_boxer_half_overlap_x() {
 /// Quad at (0.5,0.5)→(1.5,0.5)→(1.5,1.5)→(0.5,1.5). Output pixel (0,0).
 /// x overlap: 0.5, y overlap: 0.5. Total = 0.25.
 #[test]
-fn test_boxer_quarter_overlap() {
+fn boxer_quarter_overlap() {
     let x = [0.5, 1.5, 1.5, 0.5];
     let y = [0.5, 0.5, 1.5, 1.5];
     let area = boxer(0.0, 0.0, &x, &y);
@@ -250,7 +250,7 @@ fn test_boxer_quarter_overlap() {
 /// Quad at (3,5)→(4,5)→(4,6)→(3,6). Output pixel (3,5) = [3,4]×[5,6].
 /// After shifting: [0,1]×[0,1] exactly. Area = 1.0.
 #[test]
-fn test_boxer_nonzero_pixel() {
+fn boxer_nonzero_pixel() {
     let x = [3.0, 4.0, 4.0, 3.0];
     let y = [5.0, 5.0, 6.0, 6.0];
     let area = boxer(3.0, 5.0, &x, &y);
@@ -263,7 +263,7 @@ fn test_boxer_nonzero_pixel() {
 
 /// Test boxer with no overlap → area = 0.
 #[test]
-fn test_boxer_no_overlap() {
+fn boxer_no_overlap() {
     let x = [5.0, 6.0, 6.0, 5.0];
     let y = [5.0, 5.0, 6.0, 6.0];
     let area = boxer(0.0, 0.0, &x, &y);
@@ -280,7 +280,7 @@ fn test_boxer_no_overlap() {
 /// (0.5, 0), (1, 0.5), (0.5, 1), (0, 0.5).
 /// This diamond is inscribed in the unit square, with area = 0.5.
 #[test]
-fn test_boxer_rotated_diamond() {
+fn boxer_rotated_diamond() {
     let x = [0.5, 1.0, 0.5, 0.0];
     let y = [0.0, 0.5, 1.0, 0.5];
     let area = boxer(0.0, 0.0, &x, &y);

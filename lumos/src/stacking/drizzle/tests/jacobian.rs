@@ -20,7 +20,7 @@ fn make_scale2x_transform() -> Transform {
 }
 
 #[test]
-fn test_point_jacobian_two_frame_weighted_mean() {
+fn point_jacobian_two_frame_weighted_mean() {
     // Frame A: identity, val=10. Pixel(5,5) → output(5,5), jaco=1, w=1.
     // Frame B: scale-2x, val=0. Pixel(2,2) → (5,5) → output(5,5), jaco=4, w=0.25.
     // Expected output(5,5) = (10 * 1 + 0 * 0.25) / (1 + 0.25) = 8.0
@@ -56,7 +56,7 @@ fn test_point_jacobian_two_frame_weighted_mean() {
 }
 
 #[test]
-fn test_point_jacobian_two_frame_both_nonzero() {
+fn point_jacobian_two_frame_both_nonzero() {
     // Frame A: identity, val=10. Pixel(5,5) → output(5,5), jaco=1, w=1.
     // Frame B: scale-2x, val=2. Pixel(2,2) → output(5,5), jaco=4, w=0.25.
     // Expected = (10*1 + 2*0.25) / (1+0.25) = 10.5/1.25 = 8.4
@@ -92,7 +92,7 @@ fn test_point_jacobian_two_frame_both_nonzero() {
 }
 
 #[test]
-fn test_turbo_jacobian_two_frame_weighted_mean() {
+fn turbo_jacobian_two_frame_weighted_mean() {
     // Turbo kernel, pixfrac=1, scale=1. Drop size = 1×1.
     // Frame A: identity, val=10. Pixel(5,5) center→(5.5,5.5). Drop covers output(5,5) fully.
     //   overlap=1.0, inv_area=1.0, jaco=1. Weight = 1*1*1/1 = 1.0
@@ -135,7 +135,7 @@ fn test_turbo_jacobian_two_frame_weighted_mean() {
 }
 
 #[test]
-fn test_turbo_matches_square_affine_with_jacobian() {
+fn turbo_matches_square_affine_with_jacobian() {
     // For affine transforms (constant Jacobian), Turbo with Jacobian and Square
     // should produce identical output on a gradient image (non-trivial content).
     // Using a translation of (0.3, 0.7) — axis-aligned, so Turbo drop = true quad.
@@ -205,7 +205,7 @@ fn test_turbo_matches_square_affine_with_jacobian() {
 }
 
 #[test]
-fn test_gaussian_jacobian_two_frame_weighted_mean() {
+fn gaussian_jacobian_two_frame_weighted_mean() {
     // Two uniform frames combined at output (4,4): A=10 (identity), B=2. Frame B's transform
     // sets its local Jacobian, which must down-weight a magnified frame. Isolate that effect
     // by combining B two ways — scale-2x (jaco=4, magnified → down-weighted) vs identity
@@ -249,7 +249,7 @@ fn test_gaussian_jacobian_two_frame_weighted_mean() {
 }
 
 #[test]
-fn test_lanczos_jacobian_two_frame_weighted_mean() {
+fn lanczos_jacobian_two_frame_weighted_mean() {
     // Same setup as the Gaussian test, Lanczos-3 kernel: combine uniform B=2 two ways and
     // confirm the Jacobian down-weights the magnified (scale-2x) frame relative to identity.
     let w = 12;
@@ -289,7 +289,7 @@ fn test_lanczos_jacobian_two_frame_weighted_mean() {
 }
 
 #[test]
-fn test_all_kernels_jacobian_matches_square_affine() {
+fn all_kernels_jacobian_matches_square_affine() {
     // For a pure translation (affine, constant Jacobian=1), all kernels with
     // pixfrac=1, scale=1 should produce similar output to Square on a gradient
     // image. This tests that Jacobian correction doesn't break normal operation.

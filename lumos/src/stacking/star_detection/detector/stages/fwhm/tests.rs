@@ -25,7 +25,7 @@ fn filter_config() -> FilterConfig {
 }
 
 #[test]
-fn test_fwhm_estimation_insufficient_stars() {
+fn fwhm_estimation_insufficient_stars() {
     // Fewer than min_stars returns default FWHM
     let stars: Vec<Star> = (0..4)
         .map(|_| Star::at(DVec2::ZERO).with_fwhm(3.0))
@@ -41,7 +41,7 @@ fn test_fwhm_estimation_insufficient_stars() {
 }
 
 #[test]
-fn test_fwhm_estimation_pre_rejection_median_reports_pre_rejection_count() {
+fn fwhm_estimation_pre_rejection_median_reports_pre_rejection_count() {
     // 6 stars at FWHM=3.0 (tight cluster) + 4 outliers at FWHM=18.0. MAD-based
     // rejection drops all 4 outliers, leaving 6 < min_stars(7), so the function
     // falls back to the pre-rejection median (still 3.0, computed over all 10
@@ -64,7 +64,7 @@ fn test_fwhm_estimation_pre_rejection_median_reports_pre_rejection_count() {
 }
 
 #[test]
-fn test_fwhm_estimation_filters_saturated() {
+fn fwhm_estimation_filters_saturated() {
     // Saturated stars (peak > 0.95) are excluded
     // 9 good stars at FWHM=3.0 + 1 saturated at FWHM=10.0
     let mut stars: Vec<Star> = (0..10)
@@ -84,7 +84,7 @@ fn test_fwhm_estimation_filters_saturated() {
 }
 
 #[test]
-fn test_fwhm_estimation_filters_high_eccentricity() {
+fn fwhm_estimation_filters_high_eccentricity() {
     // High eccentricity stars (> max_eccentricity=0.8) are excluded
     let mut stars: Vec<Star> = (0..10)
         .map(|_| Star::at(DVec2::ZERO).with_fwhm(3.0))
@@ -102,7 +102,7 @@ fn test_fwhm_estimation_filters_high_eccentricity() {
 }
 
 #[test]
-fn test_fwhm_estimation_filters_cosmic_rays() {
+fn fwhm_estimation_filters_cosmic_rays() {
     // High sharpness (cosmic rays, sharpness >= 0.7) are excluded
     let mut stars: Vec<Star> = (0..10)
         .map(|_| Star::at(DVec2::ZERO).with_fwhm(3.0))
@@ -120,7 +120,7 @@ fn test_fwhm_estimation_filters_cosmic_rays() {
 }
 
 #[test]
-fn test_fwhm_estimation_filters_invalid_fwhm() {
+fn fwhm_estimation_filters_invalid_fwhm() {
     // FWHM outside valid range (0.5..20.0) are excluded
     let mut stars: Vec<Star> = (0..10)
         .map(|_| Star::at(DVec2::ZERO).with_fwhm(3.0))
@@ -140,7 +140,7 @@ fn test_fwhm_estimation_filters_invalid_fwhm() {
 }
 
 #[test]
-fn test_fwhm_estimation_rejects_outliers() {
+fn fwhm_estimation_rejects_outliers() {
     // 10 stars at FWHM=3.0 + 2 outliers at 12.0 and 15.0
     let mut stars: Vec<Star> = (0..10)
         .map(|_| Star::at(DVec2::ZERO).with_fwhm(3.0))
@@ -160,7 +160,7 @@ fn test_fwhm_estimation_rejects_outliers() {
 }
 
 #[test]
-fn test_fwhm_estimation_uniform_values() {
+fn fwhm_estimation_uniform_values() {
     // All identical FWHM values
     let stars: Vec<Star> = (0..10)
         .map(|_| Star::at(DVec2::ZERO).with_fwhm(4.5))
@@ -174,7 +174,7 @@ fn test_fwhm_estimation_uniform_values() {
 }
 
 #[test]
-fn test_fwhm_estimation_varying_values() {
+fn fwhm_estimation_varying_values() {
     // FWHM values: [2.8, 2.9, 2.9, 3.0, 3.0, 3.0, 3.1, 3.1, 3.2, 3.3]
     // Sorted: median is average of values at indices 4,5 = (3.0+3.0)/2 = 3.0
     // No outliers, so all 10 stars should be used
@@ -198,7 +198,7 @@ fn test_fwhm_estimation_varying_values() {
 }
 
 #[test]
-fn test_fwhm_estimation_empty_after_filtering() {
+fn fwhm_estimation_empty_after_filtering() {
     // All stars filtered out → returns default with 0 stars
     let stars: Vec<Star> = (0..10)
         .map(|_| Star::at(DVec2::ZERO).with_fwhm(3.0).with_peak(0.98)) // All saturated
@@ -212,7 +212,7 @@ fn test_fwhm_estimation_empty_after_filtering() {
 }
 
 #[test]
-fn test_fwhm_result_debug() {
+fn fwhm_result_debug() {
     let result = FwhmResult {
         fwhm: Some(3.5),
         stars_used: 42,
@@ -223,7 +223,7 @@ fn test_fwhm_result_debug() {
 }
 
 #[test]
-fn test_fwhm_result_clone() {
+fn fwhm_result_clone() {
     let result = FwhmResult {
         fwhm: Some(3.5),
         stars_used: 42,

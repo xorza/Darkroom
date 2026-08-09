@@ -1,7 +1,7 @@
 use crate::stacking::star_detection::roundness::Roundness;
 
 #[test]
-fn test_roundness_zero_flux() {
+fn roundness_zero_flux() {
     // When all marginal values are zero, roundness should be 0
     let marginal_x = vec![0.0f64; 11];
     let marginal_y = vec![0.0f64; 11];
@@ -13,7 +13,7 @@ fn test_roundness_zero_flux() {
 }
 
 #[test]
-fn test_roundness_uniform_marginals() {
+fn roundness_uniform_marginals() {
     // Uniform marginals should give GROUND = 0 (Hx = Hy)
     let marginal_x = vec![1.0f64; 11];
     let marginal_y = vec![1.0f64; 11];
@@ -27,7 +27,7 @@ fn test_roundness_uniform_marginals() {
 }
 
 #[test]
-fn test_roundness_asymmetric_x() {
+fn roundness_asymmetric_x() {
     // Create asymmetric x marginal (more flux on right)
     let mut marginal_x = vec![0.1f64; 11];
     marginal_x[8] = 1.0; // Extra flux on right side
@@ -46,7 +46,7 @@ fn test_roundness_asymmetric_x() {
 }
 
 #[test]
-fn test_roundness_x_vs_y_elongation() {
+fn roundness_x_vs_y_elongation() {
     // X-elongated: higher peak in y marginal (more compact in y)
     let mut marginal_x = vec![0.1f64; 11];
     let mut marginal_y = vec![0.1f64; 11];
@@ -66,7 +66,7 @@ fn test_roundness_x_vs_y_elongation() {
 }
 
 #[test]
-fn test_roundness_y_vs_x_elongation() {
+fn roundness_y_vs_x_elongation() {
     // Y-elongated: higher peak in x marginal (more compact in x)
     let mut marginal_x = vec![0.1f64; 11];
     let mut marginal_y = vec![0.1f64; 11];
@@ -86,7 +86,7 @@ fn test_roundness_y_vs_x_elongation() {
 }
 
 #[test]
-fn test_roundness_bounds() {
+fn roundness_bounds() {
     // Test that roundness values are always within bounds
     let test_cases = [
         (vec![1.0f64; 11], vec![0.001f64; 11]), // Very different peaks

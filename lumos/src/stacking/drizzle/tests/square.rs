@@ -7,7 +7,7 @@ use super::*;
 /// Weight = overlap / jaco = 1.0 / 1.0 = 1.0.
 /// Output = input value.
 #[test]
-fn test_square_kernel_identity_uniform() {
+fn square_kernel_identity_uniform() {
     let pixels: Vec<f32> = (0..25).map(|i| i as f32).collect();
     let image = mono_image(Size2us::new(5, 5), pixels.clone());
 
@@ -40,7 +40,7 @@ fn test_square_kernel_identity_uniform() {
 /// the same output as the Turbo kernel since the quadrilateral is an axis-aligned
 /// rectangle in both cases.
 #[test]
-fn test_square_kernel_matches_turbo_no_rotation() {
+fn square_kernel_matches_turbo_no_rotation() {
     let pixels: Vec<f32> = (0..100).map(|i| (i as f32) * 0.01).collect();
     let image1 = mono_image(Size2us::new(10, 10), pixels.clone());
     let image2 = mono_image(Size2us::new(10, 10), pixels);
@@ -91,7 +91,7 @@ fn test_square_kernel_matches_turbo_no_rotation() {
 /// interior pixel should still be 3.0 (weighted average of identical values).
 /// Also verify that there is meaningful coverage in the output interior.
 #[test]
-fn test_square_kernel_rotation() {
+fn square_kernel_rotation() {
     let image = constant_mono_image(Size2us::new(20, 20), 3.0);
 
     // 45° rotation around center (10, 10)
@@ -141,7 +141,7 @@ fn test_square_kernel_rotation() {
 /// pixfrac=0.5 produces drops that are 0.5× the input pixel size, so they
 /// cover fewer output pixels than pixfrac=1.0.
 #[test]
-fn test_square_kernel_pixfrac() {
+fn square_kernel_pixfrac() {
     // Use translation (0.1, 0.1) to avoid perfectly centered drops
     let transform = Transform::translation(DVec2::new(0.1, 0.1));
 
@@ -191,7 +191,7 @@ fn test_square_kernel_pixfrac() {
 /// Uniform image = 5.0, pixel (1,1) excluded via weight=0.
 /// scale=1, pixfrac=1. Output (1,1) should be fill_value, others = 5.0.
 #[test]
-fn test_square_kernel_with_pixel_weights() {
+fn square_kernel_with_pixel_weights() {
     let image = constant_mono_image(Size2us::new(4, 4), 5.0);
 
     let mut pw = Buffer2::new_filled(4, 4, 1.0f32);
@@ -238,7 +238,7 @@ fn test_square_kernel_with_pixel_weights() {
 /// quad reaches it → undiluted 2.0; edge cells are shared 50/50 with a zero-valued
 /// neighbour's quad → 1.0 (same footprint as the turbo kernel).
 #[test]
-fn test_square_kernel_scale2_single_pixel() {
+fn square_kernel_scale2_single_pixel() {
     let mut pixels = vec![0.0f32; 4 * 4];
     pixels[5] = 2.0; // pixel (1,1)
     let image = mono_image(Size2us::new(4, 4), pixels);
@@ -280,7 +280,7 @@ fn test_square_kernel_scale2_single_pixel() {
 ///                            (10·0.125 + 20·0.125) / 0.25 = 15.0
 ///   cell (2,0) = [1.5,2.5): only pixel (1,0) overlaps (1.0) → 20.0
 #[test]
-fn test_square_kernel_jacobian_weighted_average() {
+fn square_kernel_jacobian_weighted_average() {
     let mut pixels = vec![0.0f32; 4 * 4];
     pixels[0] = 10.0; // pixel (0,0)
     pixels[1] = 20.0; // pixel (1,0)
@@ -345,7 +345,7 @@ fn test_square_kernel_jacobian_weighted_average() {
 /// 1) 0 < overlap < 1 (it's a partial clip)
 /// 2) overlap is close to the quad area minus the clipped triangles
 #[test]
-fn test_boxer_rotated_partial_clip() {
+fn boxer_rotated_partial_clip() {
     let cos30 = (PI / 6.0).cos();
     let sin30 = (PI / 6.0).sin();
     let cx = 0.5;
@@ -401,7 +401,7 @@ fn test_boxer_rotated_partial_clip() {
 /// approximates the drop as an axis-aligned box, while the Square kernel correctly
 /// computes the rotated quadrilateral overlap. The outputs must differ.
 #[test]
-fn test_square_differs_from_turbo_under_rotation() {
+fn square_differs_from_turbo_under_rotation() {
     // Horizontal gradient: value increases with x
     let pixels: Vec<f32> = (0..100)
         .map(|i| {
@@ -486,7 +486,7 @@ fn test_square_differs_from_turbo_under_rotation() {
 /// (the drop area in output space), and weight = overlap/jaco, so total weight = 1.0.
 /// Therefore sum(output_pixel * weight) ≈ sum(input_pixel) for interior pixels.
 #[test]
-fn test_square_kernel_flux_conservation() {
+fn square_kernel_flux_conservation() {
     let mut pixels = vec![1.0f32; 20 * 20];
     // Bright 4×4 patch at center (8..12, 8..12)
     for y in 8..12 {
@@ -557,7 +557,7 @@ fn test_square_kernel_flux_conservation() {
 ///
 /// Expected: (2.0 * 1.0 + 8.0 * 3.0) / (1.0 + 3.0) = 26.0 / 4.0 = 6.5
 #[test]
-fn test_square_kernel_two_frame_weighted_mean() {
+fn square_kernel_two_frame_weighted_mean() {
     let image1 = constant_mono_image(Size2us::new(6, 6), 2.0);
     let image2 = constant_mono_image(Size2us::new(6, 6), 8.0);
 
@@ -592,7 +592,7 @@ fn test_square_kernel_two_frame_weighted_mean() {
 }
 
 #[test]
-fn test_local_jacobian_identity_scale1() {
+fn local_jacobian_identity_scale1() {
     // Identity transform, scale=1: one input pixel maps to exactly one output pixel.
     // Jacobian = |det(I)| * 1² = 1.0
     let transform = Transform::identity();
@@ -605,7 +605,7 @@ fn test_local_jacobian_identity_scale1() {
 }
 
 #[test]
-fn test_local_jacobian_identity_scale2() {
+fn local_jacobian_identity_scale2() {
     // Identity transform, scale=2: one input pixel maps to a 2×2 area in output.
     // Jacobian = |det(I)| * 2² = 4.0
     let transform = Transform::identity();
@@ -618,7 +618,7 @@ fn test_local_jacobian_identity_scale2() {
 }
 
 #[test]
-fn test_local_jacobian_rotation_preserves_area() {
+fn local_jacobian_rotation_preserves_area() {
     // Pure rotation around origin: area is preserved, Jacobian = scale².
     // Rotation by 30° around (0, 0), scale=1.
     let angle = 30.0_f64.to_radians();
@@ -633,7 +633,7 @@ fn test_local_jacobian_rotation_preserves_area() {
 }
 
 #[test]
-fn test_local_jacobian_anisotropic_scale() {
+fn local_jacobian_anisotropic_scale() {
     // Scale by 2x in x, 3x in y: area magnification = 6.
     let transform = Transform::scale(DVec2::new(2.0, 3.0));
     let center = transform.apply(DVec2::new(5.0, 5.0));
@@ -646,7 +646,7 @@ fn test_local_jacobian_anisotropic_scale() {
 }
 
 #[test]
-fn test_local_jacobian_perspective_varies_spatially() {
+fn local_jacobian_perspective_varies_spatially() {
     // Perspective transform: Jacobian should differ at different image locations.
     // Homography with small perspective terms.
     let transform = Transform::homography([1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 1e-4, 0.0]);

@@ -97,14 +97,14 @@ fn master_cfa_fits_round_trips_mono_and_xtrans_patterns() {
 }
 
 #[test]
-fn test_cfa_type_mono_color_at() {
+fn cfa_type_mono_color_at() {
     let mono = CfaType::Mono;
     assert_eq!(mono.color_at(Vec2us::new(0, 0)), 0);
     assert_eq!(mono.color_at(Vec2us::new(5, 5)), 0);
 }
 
 #[test]
-fn test_cfa_type_bayer_rggb_color_at() {
+fn cfa_type_bayer_rggb_color_at() {
     let bayer = CfaType::Bayer(CfaPattern::Rggb);
     // RGGB: (x=0,y=0)=R, (x=1,y=0)=G, (x=0,y=1)=G, (x=1,y=1)=B
     assert_eq!(bayer.color_at(Vec2us::new(0, 0)), 0); // R
@@ -114,7 +114,7 @@ fn test_cfa_type_bayer_rggb_color_at() {
 }
 
 #[test]
-fn test_cfa_type_bayer_bggr_color_at() {
+fn cfa_type_bayer_bggr_color_at() {
     let bayer = CfaType::Bayer(CfaPattern::Bggr);
     // BGGR: (x=0,y=0)=B, (x=1,y=0)=G, (x=0,y=1)=G, (x=1,y=1)=R
     assert_eq!(bayer.color_at(Vec2us::new(0, 0)), 2); // B
@@ -124,7 +124,7 @@ fn test_cfa_type_bayer_bggr_color_at() {
 }
 
 #[test]
-fn test_cfa_type_bayer_wrapping() {
+fn cfa_type_bayer_wrapping() {
     let bayer = CfaType::Bayer(CfaPattern::Rggb);
     // Pattern repeats every 2 pixels
     assert_eq!(
@@ -142,7 +142,7 @@ fn test_cfa_type_bayer_wrapping() {
 }
 
 #[test]
-fn test_cfa_type_xtrans_color_at() {
+fn cfa_type_xtrans_color_at() {
     let pattern = [
         [1, 0, 1, 1, 2, 1],
         [2, 1, 2, 0, 1, 0],
@@ -181,14 +181,14 @@ fn test_subtract() {
 
 #[test]
 #[should_panic(expected = "dimensions mismatch")]
-fn test_subtract_dimension_mismatch() {
+fn subtract_dimension_mismatch() {
     let mut light = make_cfa(Size2us::new(2, 2), vec![0.5; 4], CfaType::Mono);
     let dark = make_cfa(Size2us::new(3, 3), vec![0.1; 9], CfaType::Mono);
     light.subtract(&dark);
 }
 
 #[test]
-fn test_data_len() {
+fn data_len() {
     let img = CfaImage::from_plane(
         Buffer2::new(10, 20, vec![0.0; 200]),
         ImageMetadata {

@@ -42,7 +42,7 @@ fn create_detection_overlay(
 /// Test detection on sparse star field.
 #[test]
 
-fn test_detection_sparse() {
+fn detection_sparse() {
     init_tracing();
 
     let size = Size2us::new(256, 256);
@@ -124,7 +124,7 @@ fn test_detection_sparse() {
 /// Test detection with different sigma thresholds.
 #[test]
 
-fn test_detection_thresholds() {
+fn detection_thresholds() {
     init_tracing();
 
     let width = 256;
@@ -209,7 +209,7 @@ fn test_detection_thresholds() {
 /// Test detection area filtering.
 #[test]
 
-fn test_detection_area_filter() {
+fn detection_area_filter() {
     init_tracing();
 
     let width = 256;

@@ -5,7 +5,7 @@ use crate::stacking::registration::transform::{Transform, WarpTransform};
 use crate::testing::prelude::*;
 
 #[test]
-fn test_warp_identity_preserves_image() {
+fn warp_identity_preserves_image() {
     let input: Vec<f32> = (0..16).map(|i| i as f32).collect();
     let input_buf = Buffer2::new(4, 4, input.clone());
 
@@ -26,7 +26,7 @@ fn test_warp_identity_preserves_image() {
 }
 
 #[test]
-fn test_warp_integer_translation() {
+fn warp_integer_translation() {
     // Translation by (1,1): output[p] = input[T(p)] = input[p + (1,1)]
     // So input(1,1)=5 appears at output(0,0)
     let mut input = vec![0.0f32; 16];
@@ -58,7 +58,7 @@ fn test_warp_integer_translation() {
 }
 
 #[test]
-fn test_plane_warp_lanczos3_identity() {
+fn plane_warp_lanczos3_identity() {
     let width = 32;
     let height = 32;
     let input: Vec<f32> = (0..width * height).map(|i| (i as f32) / 1024.0).collect();
@@ -86,7 +86,7 @@ fn test_plane_warp_lanczos3_identity() {
 }
 
 #[test]
-fn test_plane_warp_lanczos3_integer_translation() {
+fn plane_warp_lanczos3_integer_translation() {
     let width = 64;
     let height = 64;
     let input: Vec<f32> = (0..width * height).map(|i| (i as f32) / 4096.0).collect();
@@ -115,7 +115,7 @@ fn test_plane_warp_lanczos3_integer_translation() {
 }
 
 #[test]
-fn test_plane_warp_lanczos3_matches_per_pixel() {
+fn plane_warp_lanczos3_matches_per_pixel() {
     // Verify the optimized plane warp Lanczos3 path matches the per-pixel reference.
     let width = 32;
     let height = 32;
@@ -177,7 +177,7 @@ fn warp_per_pixel_reference(
 }
 
 #[test]
-fn test_generic_stepping_bicubic_matches_per_pixel() {
+fn generic_stepping_bicubic_matches_per_pixel() {
     // Bicubic with a similarity transform (translation + rotation + scale).
     // Stepped output should match per-pixel reference exactly (same f32 path).
     let width = 64;
@@ -209,7 +209,7 @@ fn test_generic_stepping_bicubic_matches_per_pixel() {
 }
 
 #[test]
-fn test_generic_stepping_lanczos2_matches_per_pixel() {
+fn generic_stepping_lanczos2_matches_per_pixel() {
     let width = 64;
     let height = 64;
     let input: Vec<f32> = (0..width * height)
@@ -239,7 +239,7 @@ fn test_generic_stepping_lanczos2_matches_per_pixel() {
 }
 
 #[test]
-fn test_generic_stepping_lanczos4_matches_per_pixel() {
+fn generic_stepping_lanczos4_matches_per_pixel() {
     let width = 64;
     let height = 64;
     let input: Vec<f32> = (0..width * height)
@@ -269,7 +269,7 @@ fn test_generic_stepping_lanczos4_matches_per_pixel() {
 }
 
 #[test]
-fn test_generic_stepping_nearest_matches_per_pixel() {
+fn generic_stepping_nearest_matches_per_pixel() {
     let width = 64;
     let height = 64;
     let input: Vec<f32> = (0..width * height)
@@ -300,7 +300,7 @@ fn test_generic_stepping_nearest_matches_per_pixel() {
 }
 
 #[test]
-fn test_generic_stepping_disabled_for_homography() {
+fn generic_stepping_disabled_for_homography() {
     // With a homography, is_linear() returns false, so stepping is disabled.
     // Output should match per-pixel reference exactly.
     let width = 32;

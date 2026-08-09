@@ -336,7 +336,7 @@ mod tests {
 
     /// Test that simd_exp_fast produces results close to std exp().
     #[test]
-    fn test_simd_exp_fast_accuracy() {
+    fn simd_exp_fast_accuracy() {
         let test_values: &[f64] = &[
             0.0, 1.0, -1.0, 0.5, -0.5, 2.0, -2.0, 5.0, -5.0, 10.0, -10.0, -50.0, -100.0, -500.0,
             -700.0, 0.001, -0.001, 0.1, -0.1, PI, -PI, 100.0, 500.0, 700.0,
@@ -364,7 +364,7 @@ mod tests {
 
     /// Test simd_exp_fast with the typical Gaussian exponent range.
     #[test]
-    fn test_simd_exp_fast_gaussian_range() {
+    fn simd_exp_fast_gaussian_range() {
         for i in 0..1000 {
             let x = -(i as f64) * 0.5;
             let result = unsafe {

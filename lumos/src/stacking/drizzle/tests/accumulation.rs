@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn test_drizzle_single_image() {
+fn drizzle_single_image() {
     // Create a simple test image
     let image = constant_mono_image(Size2us::new(100, 100), 0.5);
 
@@ -43,7 +43,7 @@ fn test_drizzle_single_image() {
 }
 
 #[test]
-fn test_drizzle_point_kernel() {
+fn drizzle_point_kernel() {
     let image = constant_mono_image(Size2us::new(10, 10), 1.0);
 
     let config = DrizzleConfig::x2().with_kernel(DrizzleKernel::Point);
@@ -75,7 +75,7 @@ fn test_drizzle_point_kernel() {
 }
 
 #[test]
-fn test_drizzle_stack_empty_paths() {
+fn drizzle_stack_empty_paths() {
     let config = DrizzleConfig::default();
 
     let result = drizzle_stack(
@@ -89,7 +89,7 @@ fn test_drizzle_stack_empty_paths() {
 }
 
 #[test]
-fn test_drizzle_images_empty() {
+fn drizzle_images_empty() {
     let result = drizzle_images(
         Vec::new(),
         &DrizzleConfig::default(),
@@ -146,7 +146,7 @@ fn drizzle_stops_between_frames_when_cancelled() {
 }
 
 #[test]
-fn test_drizzle_images_matches_accumulator() {
+fn drizzle_images_matches_accumulator() {
     // drizzle_images with one identity-transformed frame must reproduce the
     // single-image accumulator path: 200x200 output, interior pixels = 0.5.
     let image = constant_mono_image(Size2us::new(100, 100), 0.5);
@@ -169,7 +169,7 @@ fn test_drizzle_images_matches_accumulator() {
 }
 
 #[test]
-fn test_drizzle_images_dimension_mismatch() {
+fn drizzle_images_dimension_mismatch() {
     let a = constant_mono_image(Size2us::new(20, 20), 0.5);
     let b = constant_mono_image(Size2us::new(10, 10), 0.5);
     let result = drizzle_images(
@@ -227,7 +227,7 @@ fn drizzle_rgb_uses_shared_quality_planes() {
 }
 
 #[test]
-fn test_drizzle_with_translation() {
+fn drizzle_with_translation() {
     // Single bright pixel at (10,10), all others zero
     let mut pixels = vec![0.0f32; 20 * 20];
     pixels[10 * 20 + 10] = 1.0;
@@ -286,7 +286,7 @@ fn test_drizzle_with_translation() {
 }
 
 #[test]
-fn test_coverage_map() {
+fn coverage_map() {
     // Point kernel with identity: covered at even coords, uncovered at odd
     let image = constant_mono_image(Size2us::new(4, 4), 1.0);
     let config = DrizzleConfig::x2().with_kernel(DrizzleKernel::Point);
@@ -303,7 +303,7 @@ fn test_coverage_map() {
 }
 
 #[test]
-fn test_weight_and_linear_variance_maps() {
+fn weight_and_linear_variance_maps() {
     // scale=1, pixfrac=1, Turbo, identity: each input pixel maps 1:1 onto its output pixel with
     // overlap=1 and Jacobian=1, so every contribution has weight = frame_weight exactly.
     let config = DrizzleConfig {

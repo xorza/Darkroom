@@ -4,7 +4,7 @@ use crate::stacking::star_detection::centroid::StampGrid;
 /// Test centroiding with undersampled PSF (FWHM < 2 pixels).
 /// This is a challenging case where the star is barely resolved.
 #[test]
-fn test_centroid_undersampled_psf() {
+fn centroid_undersampled_psf() {
     let width = 64;
     let height = 64;
     let sigma = 0.7f32; // FWHM ≈ 1.65 pixels (undersampled)
@@ -43,7 +43,7 @@ fn test_centroid_undersampled_psf() {
 
 /// Test centroiding with very large PSF (FWHM > 15 pixels).
 #[test]
-fn test_centroid_large_psf() {
+fn centroid_large_psf() {
     let width = 128;
     let height = 128;
     let sigma = 8.0f32; // FWHM ≈ 18.8 pixels (large PSF)
@@ -81,7 +81,7 @@ fn test_centroid_large_psf() {
 
 /// Test Gaussian fitting with undersampled PSF.
 #[test]
-fn test_gaussian_fit_undersampled_psf() {
+fn gaussian_fit_undersampled_psf() {
     use crate::stacking::star_detection::centroid::gaussian_fit::{GaussianFit, GaussianFitConfig};
 
     let width = 21;
@@ -122,7 +122,7 @@ fn test_gaussian_fit_undersampled_psf() {
 
 /// Test metrics computation with very small FWHM.
 #[test]
-fn test_metrics_small_fwhm() {
+fn metrics_small_fwhm() {
     let width = 64;
     let height = 64;
     let sigma = 0.8f32; // Very small
@@ -140,7 +140,7 @@ fn test_metrics_small_fwhm() {
 
 /// Test metrics computation with very large FWHM.
 #[test]
-fn test_metrics_large_fwhm() {
+fn metrics_large_fwhm() {
     let width = 128;
     let height = 128;
     let sigma = 7.0f32; // Large
@@ -181,7 +181,7 @@ fn make_blended_stars(
 
 /// Test centroiding with a nearby contaminating star.
 #[test]
-fn test_centroid_with_nearby_star() {
+fn centroid_with_nearby_star() {
     let width = 64;
     let height = 64;
     let sigma = 2.5f32;
@@ -218,7 +218,7 @@ fn test_centroid_with_nearby_star() {
 
 /// Test centroiding with closely blended stars (partially overlapping).
 #[test]
-fn test_centroid_blended_stars() {
+fn centroid_blended_stars() {
     let width = 64;
     let height = 64;
     let sigma = 2.5f32;
@@ -253,7 +253,7 @@ fn test_centroid_blended_stars() {
 
 /// Test Gaussian fitting with contaminating star in the wing.
 #[test]
-fn test_gaussian_fit_with_contamination() {
+fn gaussian_fit_with_contamination() {
     use crate::stacking::star_detection::centroid::gaussian_fit::{GaussianFit, GaussianFitConfig};
 
     let width = 31;
@@ -301,7 +301,7 @@ fn test_gaussian_fit_with_contamination() {
 
 /// Test that eccentricity is affected by nearby star contamination.
 #[test]
-fn test_eccentricity_with_contamination() {
+fn eccentricity_with_contamination() {
     let width = 64;
     let height = 64;
     let sigma = 2.5f32;
@@ -391,7 +391,7 @@ fn make_rotated_elliptical_star(
 
 /// Test centroiding on a 45-degree rotated ellipse.
 #[test]
-fn test_centroid_rotated_ellipse_45deg() {
+fn centroid_rotated_ellipse_45deg() {
     let width = 64;
     let height = 64;
     let true_pos = DVec2::new(32.3, 32.7);
@@ -424,7 +424,7 @@ fn test_centroid_rotated_ellipse_45deg() {
 
 /// Test centroiding on various rotation angles.
 #[test]
-fn test_centroid_various_rotation_angles() {
+fn centroid_various_rotation_angles() {
     let width = 64;
     let height = 64;
     let true_pos = DVec2::new(32.0, 32.0);
@@ -463,7 +463,7 @@ fn test_centroid_various_rotation_angles() {
 
 /// Test that rotated ellipses have similar eccentricity regardless of angle.
 #[test]
-fn test_eccentricity_rotation_invariant() {
+fn eccentricity_rotation_invariant() {
     let width = 64;
     let height = 64;
     let pos = DVec2::splat(32.0);
@@ -503,7 +503,7 @@ fn test_eccentricity_rotation_invariant() {
 
 /// Test Gaussian fitting on rotated ellipse (fits axis-aligned sigma_x, sigma_y).
 #[test]
-fn test_gaussian_fit_rotated_ellipse() {
+fn gaussian_fit_rotated_ellipse() {
     use crate::stacking::star_detection::centroid::gaussian_fit::{GaussianFit, GaussianFitConfig};
 
     let width = 31;
@@ -557,7 +557,7 @@ fn test_gaussian_fit_rotated_ellipse() {
 
 /// Test recovery from initial guess 2 pixels away from true position.
 #[test]
-fn test_recovery_from_2pixel_offset() {
+fn recovery_from_2pixel_offset() {
     let width = 64;
     let height = 64;
     let true_pos = DVec2::new(32.0, 32.0);
@@ -595,7 +595,7 @@ fn test_recovery_from_2pixel_offset() {
 
 /// Test recovery from initial guess 3 pixels away.
 #[test]
-fn test_recovery_from_3pixel_offset() {
+fn recovery_from_3pixel_offset() {
     let width = 64;
     let height = 64;
     let true_pos = DVec2::new(32.0, 32.0);
@@ -633,7 +633,7 @@ fn test_recovery_from_3pixel_offset() {
 
 /// Test Gaussian fitting with bad initial position guess.
 #[test]
-fn test_gaussian_fit_bad_initial_guess() {
+fn gaussian_fit_bad_initial_guess() {
     use crate::stacking::star_detection::centroid::gaussian_fit::{GaussianFit, GaussianFitConfig};
 
     let width = 31;
@@ -676,7 +676,7 @@ fn test_gaussian_fit_bad_initial_guess() {
 
 /// Test Moffat fitting with bad initial position guess.
 #[test]
-fn test_moffat_fit_bad_initial_guess() {
+fn moffat_fit_bad_initial_guess() {
     use crate::stacking::star_detection::centroid::moffat_fit::{MoffatFit, MoffatFitConfig};
 
     let width = 31;

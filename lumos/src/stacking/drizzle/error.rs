@@ -76,7 +76,7 @@ mod tests {
     use crate::stacking::drizzle::error::*;
 
     #[test]
-    fn test_no_frames_message() {
+    fn no_frames_message() {
         assert_eq!(
             DrizzleError::NoFrames.to_string(),
             "No frames provided for drizzle"
@@ -84,7 +84,7 @@ mod tests {
     }
 
     #[test]
-    fn test_dimension_mismatch_message() {
+    fn dimension_mismatch_message() {
         let err = DrizzleError::DimensionMismatch {
             index: 2,
             expected: ImageDimensions::new((100, 100), 3),

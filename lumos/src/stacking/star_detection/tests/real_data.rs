@@ -27,7 +27,7 @@ fn linear_image_from_l_f32(image: &imaginarium::Image) -> LinearImage {
 
 #[test]
 #[ignore = "real-data integration test; run explicitly with --ignored"]
-fn test_detect_rho_opiuchi() {
+fn detect_rho_opiuchi() {
     init_tracing();
 
     let cal_dir = calibration_dir();
@@ -122,7 +122,7 @@ fn test_detect_rho_opiuchi() {
 
 #[test]
 #[ignore = "real-data inspection test; run explicitly with --ignored"]
-fn test_inspect_pipeline_intermediates_rho_opiuchi() {
+fn inspect_pipeline_intermediates_rho_opiuchi() {
     use crate::stacking::star_detection::background::background_estimate::BackgroundEstimate;
     use crate::stacking::star_detection::convolution::{MatchedFilterBuffers, matched_filter};
     use crate::stacking::star_detection::detector::stages::fwhm::FwhmResult;

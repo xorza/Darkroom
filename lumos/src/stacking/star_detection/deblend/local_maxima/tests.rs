@@ -14,7 +14,7 @@ const DEFAULT_MIN_SEPARATION: usize = 3;
 const DEFAULT_MIN_PROMINENCE: f32 = 0.3;
 
 #[test]
-fn test_find_single_peak() {
+fn find_single_peak() {
     let TestComponent {
         pixels,
         labels,
@@ -44,7 +44,7 @@ fn test_find_single_peak() {
 }
 
 #[test]
-fn test_find_two_peaks() {
+fn find_two_peaks() {
     let TestComponent {
         pixels,
         labels,
@@ -71,7 +71,7 @@ fn test_find_two_peaks() {
 }
 
 #[test]
-fn test_deblend_creates_separate_candidates() {
+fn deblend_creates_separate_candidates() {
     let TestComponent {
         pixels,
         labels,
@@ -100,7 +100,7 @@ fn test_deblend_creates_separate_candidates() {
 }
 
 #[test]
-fn test_iter_pixels_count() {
+fn iter_pixels_count() {
     let TestComponent {
         pixels,
         labels,
@@ -122,7 +122,7 @@ fn test_iter_pixels_count() {
 }
 
 #[test]
-fn test_euclidean_separation() {
+fn euclidean_separation() {
     // Two peaks at distance sqrt(18) ≈ 4.24 apart (diagonal)
     // With min_separation=5, they should be merged (5^2=25 > 18)
     // With min_separation=4, they should be separate (4^2=16 < 18)
@@ -154,7 +154,7 @@ fn test_euclidean_separation() {
 }
 
 #[test]
-fn test_prominence_filter() {
+fn prominence_filter() {
     // Bright primary peak and dim secondary that should be filtered
     let TestComponent {
         pixels,
@@ -186,7 +186,7 @@ fn test_prominence_filter() {
 }
 
 #[test]
-fn test_deblend_empty_peaks() {
+fn deblend_empty_peaks() {
     let TestComponent {
         pixels,
         labels,
@@ -209,7 +209,7 @@ fn test_deblend_empty_peaks() {
 }
 
 #[test]
-fn test_deblend_single_peak_returns_full_component() {
+fn deblend_single_peak_returns_full_component() {
     let TestComponent {
         pixels,
         labels,
@@ -238,7 +238,7 @@ fn test_deblend_single_peak_returns_full_component() {
 }
 
 #[test]
-fn test_peaks_sorted_by_brightness() {
+fn peaks_sorted_by_brightness() {
     let TestComponent {
         pixels,
         labels,
@@ -274,7 +274,7 @@ fn test_peaks_sorted_by_brightness() {
 }
 
 #[test]
-fn test_find_peak_returns_global_max() {
+fn find_peak_returns_global_max() {
     let TestComponent {
         pixels,
         labels,
@@ -309,7 +309,7 @@ fn test_find_peak_returns_global_max() {
 }
 
 #[test]
-fn test_deblend_area_conservation() {
+fn deblend_area_conservation() {
     // Total area of deblended candidates should equal original component area
     let TestComponent {
         pixels,
@@ -341,7 +341,7 @@ fn test_deblend_area_conservation() {
 }
 
 #[test]
-fn test_peak_replacement_when_brighter() {
+fn peak_replacement_when_brighter() {
     // Two very close peaks - brighter one should replace dimmer
     let TestComponent {
         pixels,
@@ -373,7 +373,7 @@ fn test_peak_replacement_when_brighter() {
 }
 
 #[test]
-fn test_is_local_maximum_edge_cases() {
+fn is_local_maximum_edge_cases() {
     // Test local maximum detection at image boundaries
     let mut pixels = Buffer2::new_filled(10, 10, 0.0f32);
 
@@ -411,7 +411,7 @@ fn test_is_local_maximum_edge_cases() {
 }
 
 #[test]
-fn test_is_local_maximum_not_max() {
+fn is_local_maximum_not_max() {
     let mut pixels = Buffer2::new_filled(10, 10, 0.0f32);
 
     // Center pixel with brighter neighbor
@@ -429,7 +429,7 @@ fn test_is_local_maximum_not_max() {
 }
 
 #[test]
-fn test_voronoi_partitioning() {
+fn voronoi_partitioning() {
     // Create component with two well-separated peaks
     let TestComponent {
         pixels,
@@ -477,7 +477,7 @@ fn test_voronoi_partitioning() {
 }
 
 #[test]
-fn test_many_peaks_limited_to_max() {
+fn many_peaks_limited_to_max() {
     // Create component with more peaks than MAX_PEAKS
     let stars: Vec<_> = (0..12)
         .map(|i| {
@@ -506,7 +506,7 @@ fn test_many_peaks_limited_to_max() {
 }
 
 #[test]
-fn test_plateau_no_local_max() {
+fn plateau_no_local_max() {
     // Flat plateau should have no local maximum (strict inequality)
     let mut pixels = Buffer2::new_filled(10, 10, 0.0f32);
     let mut labels_buf = Buffer2::new_filled(10, 10, 0u32);
@@ -533,7 +533,7 @@ fn test_plateau_no_local_max() {
 }
 
 #[test]
-fn test_single_pixel_is_local_max() {
+fn single_pixel_is_local_max() {
     // A single isolated pixel is always a local maximum
     let mut pixels = Buffer2::new_filled(10, 10, 0.0f32);
     let mut labels_buf = Buffer2::new_filled(10, 10, 0u32);
@@ -555,7 +555,7 @@ fn test_single_pixel_is_local_max() {
 }
 
 #[test]
-fn test_equal_brightness_tie_breaking() {
+fn equal_brightness_tie_breaking() {
     // Two stars with exactly equal brightness - both should be found
     let TestComponent {
         pixels,
@@ -587,7 +587,7 @@ fn test_equal_brightness_tie_breaking() {
 }
 
 #[test]
-fn test_voronoi_midpoint_assignment() {
+fn voronoi_midpoint_assignment() {
     // Pixel exactly between two peaks goes to first peak (deterministic)
     let mut pixels = Buffer2::new_filled(100, 100, 0.0f32);
     let mut labels_buf = Buffer2::new_filled(100, 100, 0u32);
@@ -631,7 +631,7 @@ fn test_voronoi_midpoint_assignment() {
 }
 
 #[test]
-fn test_diagonal_neighbors() {
+fn diagonal_neighbors() {
     // Peak with diagonal neighbors only
     let mut pixels = Buffer2::new_filled(10, 10, 0.0f32);
     let mut labels_buf = Buffer2::new_filled(10, 10, 0u32);
@@ -662,7 +662,7 @@ fn test_diagonal_neighbors() {
 }
 
 #[test]
-fn test_all_corners_local_max() {
+fn all_corners_local_max() {
     // Test all four corners can be local maxima
     let mut pixels = Buffer2::new_filled(5, 5, 0.0f32);
 
@@ -701,7 +701,7 @@ fn test_all_corners_local_max() {
 }
 
 #[test]
-fn test_zero_min_separation() {
+fn zero_min_separation() {
     // With min_separation=0, separation check always passes (dist² >= 0)
     // Create two peaks that are well-separated (distinct local maxima)
     let TestComponent {
@@ -731,7 +731,7 @@ fn test_zero_min_separation() {
 }
 
 #[test]
-fn test_bbox_contains_peak() {
+fn bbox_contains_peak() {
     // Each deblended candidate's bbox should contain its peak
     let TestComponent {
         pixels,
@@ -771,7 +771,7 @@ fn test_bbox_contains_peak() {
 }
 
 #[test]
-fn test_peak_value_matches_pixel() {
+fn peak_value_matches_pixel() {
     // Candidate's peak_value should match the actual pixel value
     let TestComponent {
         pixels,

@@ -7,7 +7,7 @@ fn median9_reference(values: &mut [f32; 9]) -> f32 {
 }
 
 #[test]
-fn test_avx2_median9() {
+fn avx2_median9() {
     if !cpu_features::has_avx2() {
         eprintln!("Skipping AVX2 test - not available");
         return;
@@ -67,7 +67,7 @@ fn test_avx2_median9() {
 }
 
 #[test]
-fn test_sse41_median9() {
+fn sse41_median9() {
     if !cpu_features::has_sse4_1() {
         eprintln!("Skipping SSE4.1 test - not available");
         return;

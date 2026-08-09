@@ -65,7 +65,7 @@ fn assert_control_points_exact(
 
 /// Test TPS kernel U(r) = r^2 * ln(r) at key values with hand-computed results.
 #[test]
-fn test_tps_kernel_known_values() {
+fn tps_kernel_known_values() {
     // U(0) = 0 by convention (limit as r -> 0)
     assert_eq!(tps_kernel(0.0), 0.0);
 
@@ -100,7 +100,7 @@ fn test_tps_kernel_known_values() {
 
 /// Verify U(r) is negative for 0 < r < 1 and positive for r > 1.
 #[test]
-fn test_tps_kernel_sign() {
+fn tps_kernel_sign() {
     // For r in (0, 1): r^2 > 0 and ln(r) < 0, so U(r) < 0
     assert!(tps_kernel(0.01) < 0.0);
     assert!(tps_kernel(0.5) < 0.0);
@@ -114,7 +114,7 @@ fn test_tps_kernel_sign() {
 
 /// Test normalization with a simple square bounding box.
 #[test]
-fn test_compute_normalization_square() {
+fn compute_normalization_square() {
     let points = vec![
         DVec2::new(0.0, 0.0),
         DVec2::new(100.0, 0.0),
@@ -149,7 +149,7 @@ fn test_compute_normalization_square() {
 
 /// Test normalization with a rectangular bounding box (wider than tall).
 #[test]
-fn test_compute_normalization_rectangle() {
+fn compute_normalization_rectangle() {
     let points = vec![
         DVec2::new(10.0, 20.0),
         DVec2::new(210.0, 20.0),
@@ -174,7 +174,7 @@ fn test_compute_normalization_rectangle() {
 
 /// Test normalization with coincident points (degenerate case).
 #[test]
-fn test_compute_normalization_coincident() {
+fn compute_normalization_coincident() {
     let points = vec![
         DVec2::new(42.0, 17.0),
         DVec2::new(42.0, 17.0),
@@ -193,7 +193,7 @@ fn test_compute_normalization_coincident() {
 
 /// Test solve_linear_system with a simple 2x2 system.
 #[test]
-fn test_solve_linear_system_2x2() {
+fn solve_linear_system_2x2() {
     // System: 2x + y = 5, x + 3y = 7
     // Solution: x = 8/5 = 1.6, y = 9/5 = 1.8
     // By Cramer's rule: det = 2*3 - 1*1 = 5
@@ -208,7 +208,7 @@ fn test_solve_linear_system_2x2() {
 
 /// Test solve_linear_system with a singular matrix returns None.
 #[test]
-fn test_solve_linear_system_singular() {
+fn solve_linear_system_singular() {
     // Rows are linearly dependent: row 1 = 2 * row 0
     let a = vec![vec![1.0, 2.0], vec![2.0, 4.0]];
     let b = vec![3.0, 6.0];
@@ -217,7 +217,7 @@ fn test_solve_linear_system_singular() {
 
 /// Test solve_linear_system with a 3x3 identity matrix.
 #[test]
-fn test_solve_linear_system_identity() {
+fn solve_linear_system_identity() {
     // I * x = b => x = b
     let a = vec![
         vec![1.0, 0.0, 0.0],
@@ -233,7 +233,7 @@ fn test_solve_linear_system_identity() {
 
 /// Test solve_linear_system with mismatched dimensions returns None.
 #[test]
-fn test_solve_linear_system_dimension_mismatch() {
+fn solve_linear_system_dimension_mismatch() {
     let a = vec![vec![1.0, 2.0], vec![3.0, 4.0]];
     let b = vec![1.0, 2.0, 3.0]; // 3 elements but matrix is 2x2
     assert!(solve_linear_system(&a, &b).is_none());
@@ -241,13 +241,13 @@ fn test_solve_linear_system_dimension_mismatch() {
 
 /// Empty input returns None.
 #[test]
-fn test_tps_fit_empty() {
+fn tps_fit_empty() {
     assert!(ThinPlateSpline::fit(&[], &[], TpsConfig::default()).is_none());
 }
 
 /// One point returns None (need >= 3).
 #[test]
-fn test_tps_fit_one_point() {
+fn tps_fit_one_point() {
     let s = vec![DVec2::new(5.0, 5.0)];
     let t = vec![DVec2::new(6.0, 6.0)];
     assert!(ThinPlateSpline::fit(&s, &t, TpsConfig::default()).is_none());
@@ -255,7 +255,7 @@ fn test_tps_fit_one_point() {
 
 /// Two points returns None (need >= 3).
 #[test]
-fn test_tps_fit_two_points() {
+fn tps_fit_two_points() {
     let s = vec![DVec2::new(0.0, 0.0), DVec2::new(100.0, 100.0)];
     let t = vec![DVec2::new(1.0, 1.0), DVec2::new(101.0, 101.0)];
     assert!(ThinPlateSpline::fit(&s, &t, TpsConfig::default()).is_none());
@@ -263,7 +263,7 @@ fn test_tps_fit_two_points() {
 
 /// Mismatched source/target lengths returns None.
 #[test]
-fn test_tps_fit_mismatched_counts() {
+fn tps_fit_mismatched_counts() {
     let source = vec![
         DVec2::new(0.0, 0.0),
         DVec2::new(100.0, 0.0),
@@ -275,7 +275,7 @@ fn test_tps_fit_mismatched_counts() {
 
 /// Collinear points produce a singular TPS matrix and return None.
 #[test]
-fn test_tps_fit_collinear_returns_none() {
+fn tps_fit_collinear_returns_none() {
     // All points on the x-axis: the P matrix has all y_i = 0,
     // making the system singular (P^T column 3 is all zeros).
     let source = vec![
@@ -299,7 +299,7 @@ fn test_tps_fit_collinear_returns_none() {
 
 /// With zero regularization, transformed source points must exactly match targets.
 #[test]
-fn test_tps_exact_interpolation() {
+fn tps_exact_interpolation() {
     let source = square_source_5();
     let target = vec![
         DVec2::new(5.0, 3.0),
@@ -315,7 +315,7 @@ fn test_tps_exact_interpolation() {
 
 /// Three points (minimum) should be interpolated exactly with a simple translation.
 #[test]
-fn test_tps_three_points_exact() {
+fn tps_three_points_exact() {
     let source = vec![
         DVec2::new(0.0, 0.0),
         DVec2::new(100.0, 0.0),
@@ -331,7 +331,7 @@ fn test_tps_three_points_exact() {
 
 /// Identity: source == target. Control points and interior points map to themselves.
 #[test]
-fn test_tps_identity() {
+fn tps_identity() {
     let points = square_source_5();
     let tps = fit_default(&points, &points);
 
@@ -351,7 +351,7 @@ fn test_tps_identity() {
 
 /// Pure translation by (10, 5). Both control points and interior must shift.
 #[test]
-fn test_tps_translation() {
+fn tps_translation() {
     let source = square_source_4();
     let shift = DVec2::new(10.0, 5.0);
     let target: Vec<DVec2> = source.iter().map(|&p| p + shift).collect();
@@ -375,7 +375,7 @@ fn test_tps_translation() {
 
 /// Uniform scaling by 1.1. Affine, so TPS reproduces exactly.
 #[test]
-fn test_tps_scaling() {
+fn tps_scaling() {
     let source = square_source_4();
     let target: Vec<DVec2> = source.iter().map(|&p| p * 1.1).collect();
 
@@ -398,7 +398,7 @@ fn test_tps_scaling() {
 
 /// Rotation by 10 degrees around origin. Affine, so TPS reproduces exactly.
 #[test]
-fn test_tps_rotation() {
+fn tps_rotation() {
     let source = square_source_4();
     let angle = 10.0_f64.to_radians();
     let cos_a = angle.cos();
@@ -423,7 +423,7 @@ fn test_tps_rotation() {
 
 /// Barrel distortion on a dense grid: control points exact, midpoints close.
 #[test]
-fn test_tps_barrel_distortion() {
+fn tps_barrel_distortion() {
     let mut source = Vec::new();
     let mut target = Vec::new();
     let center = DVec2::new(500.0, 500.0);
@@ -477,7 +477,7 @@ fn test_tps_barrel_distortion() {
 
 /// Large deformation: control points are still interpolated exactly.
 #[test]
-fn test_tps_large_deformation() {
+fn tps_large_deformation() {
     let source = square_source_5();
     let target = vec![
         DVec2::new(0.0, 0.0),
@@ -503,7 +503,7 @@ fn test_tps_large_deformation() {
 
 /// Regularized TPS has lower bending energy but higher residuals than exact.
 #[test]
-fn test_tps_regularization_energy_vs_residuals() {
+fn tps_regularization_energy_vs_residuals() {
     let source = square_source_5();
     let target = vec![
         DVec2::new(2.0, 1.0),
@@ -546,7 +546,7 @@ fn test_tps_regularization_energy_vs_residuals() {
 
 /// Increasing regularization monotonically decreases bending energy.
 #[test]
-fn test_tps_regularization_monotonic_energy() {
+fn tps_regularization_monotonic_energy() {
     let source = square_source_5();
     let target = vec![
         DVec2::new(3.0, -2.0),
@@ -592,7 +592,7 @@ fn test_tps_regularization_monotonic_energy() {
 /// Identity, translation, and rotation are all affine => zero bending energy.
 /// Non-affine deformation produces nonzero bending energy.
 #[test]
-fn test_tps_bending_energy_affine_vs_nonaffine() {
+fn tps_bending_energy_affine_vs_nonaffine() {
     let source = square_source_4();
 
     // Identity
@@ -645,7 +645,7 @@ fn test_tps_bending_energy_affine_vs_nonaffine() {
 
 /// Large coordinate offset: normalization ensures correct interpolation.
 #[test]
-fn test_tps_large_coordinates() {
+fn tps_large_coordinates() {
     let offset = 10_000.0;
     let source = vec![
         DVec2::new(offset, offset),
@@ -672,7 +672,7 @@ fn test_tps_large_coordinates() {
 
 /// Extreme coordinate offset (100k): still works thanks to normalization.
 #[test]
-fn test_tps_extreme_coordinates() {
+fn tps_extreme_coordinates() {
     let offset = 100_000.0;
     let source = vec![
         DVec2::new(offset, offset),
@@ -715,7 +715,7 @@ fn test_tps_extreme_coordinates() {
 
 /// Clustered points: two groups far apart, pure translation.
 #[test]
-fn test_tps_clustered_points() {
+fn tps_clustered_points() {
     let source = vec![
         DVec2::new(0.0, 0.0),
         DVec2::new(10.0, 0.0),
@@ -745,7 +745,7 @@ fn test_tps_clustered_points() {
 /// Batch transform must produce identical results to single transform, and
 /// both must produce correct absolute values.
 #[test]
-fn test_tps_transform_points_consistency_and_correctness() {
+fn tps_transform_points_consistency_and_correctness() {
     let source = square_source_4();
     let shift = DVec2::new(10.0, 5.0);
     let target: Vec<DVec2> = source.iter().map(|&p| p + shift).collect();
@@ -787,7 +787,7 @@ fn test_tps_transform_points_consistency_and_correctness() {
 
 /// transform_points on empty slice returns empty vec.
 #[test]
-fn test_tps_transform_points_empty() {
+fn tps_transform_points_empty() {
     let source = square_source_4();
     let target: Vec<DVec2> = source.iter().map(|&p| p + DVec2::new(1.0, 1.0)).collect();
     let tps = fit_default(&source, &target);
@@ -798,7 +798,7 @@ fn test_tps_transform_points_empty() {
 
 /// With exact interpolation (lambda=0), all residuals should be near zero.
 #[test]
-fn test_tps_compute_residuals_exact() {
+fn tps_compute_residuals_exact() {
     let source = square_source_5();
     let target = vec![
         DVec2::new(5.0, 3.0),
@@ -818,7 +818,7 @@ fn test_tps_compute_residuals_exact() {
 }
 
 #[test]
-fn test_tps_accessors() {
+fn tps_accessors() {
     let source = square_source_5();
     let target: Vec<DVec2> = source.iter().map(|&p| p + DVec2::new(1.0, 2.0)).collect();
     let tps = fit_default(&source, &target);
@@ -829,7 +829,7 @@ fn test_tps_accessors() {
 
 /// Dense grid with deterministic perturbation: verify exact interpolation.
 #[test]
-fn test_tps_many_points() {
+fn tps_many_points() {
     let mut source = Vec::new();
     let mut target = Vec::new();
 
@@ -879,7 +879,7 @@ fn test_tps_many_points() {
 
 /// DistortionMap from pure translation: grid dimensions, vectors, and statistics.
 #[test]
-fn test_distortion_map_translation() {
+fn distortion_map_translation() {
     let source = square_source_4();
     let shift = DVec2::new(5.0, 3.0);
     let target: Vec<DVec2> = source.iter().map(|&p| p + shift).collect();
@@ -919,7 +919,7 @@ fn test_distortion_map_translation() {
 
 /// DistortionMap::get returns None for out-of-bounds indices.
 #[test]
-fn test_distortion_map_get_out_of_bounds() {
+fn distortion_map_get_out_of_bounds() {
     let source = square_source_4();
     let target: Vec<DVec2> = source.iter().map(|&p| p + DVec2::new(1.0, 1.0)).collect();
     let tps = fit_default(&source, &target);
@@ -937,7 +937,7 @@ fn test_distortion_map_get_out_of_bounds() {
 
 /// DistortionMap::interpolate with bilinear on translation: exact at grid and mid-points.
 #[test]
-fn test_distortion_map_interpolation() {
+fn distortion_map_interpolation() {
     let source = square_source_4();
     let shift = DVec2::new(10.0, 5.0);
     let target: Vec<DVec2> = source.iter().map(|&p| p + shift).collect();
@@ -957,7 +957,7 @@ fn test_distortion_map_interpolation() {
 
 /// DistortionMap with non-uniform distortion: verify gradient.
 #[test]
-fn test_distortion_map_non_uniform_gradient() {
+fn distortion_map_non_uniform_gradient() {
     let mut source = Vec::new();
     let mut target = Vec::new();
 
@@ -1005,7 +1005,7 @@ fn test_distortion_map_non_uniform_gradient() {
 /// Different translations produce different transforms. Verifies that the
 /// TPS model actually uses the target points and doesn't produce a fixed output.
 #[test]
-fn test_tps_different_translations_produce_different_results() {
+fn tps_different_translations_produce_different_results() {
     let source = square_source_4();
 
     let target_a: Vec<DVec2> = source.iter().map(|&p| p + DVec2::new(10.0, 0.0)).collect();
@@ -1034,7 +1034,7 @@ fn test_tps_different_translations_produce_different_results() {
 
 /// Adding a 5th control point that breaks affinity changes interpolation at intermediate points.
 #[test]
-fn test_tps_extra_control_point_changes_behavior() {
+fn tps_extra_control_point_changes_behavior() {
     let source_4 = square_source_4();
     let target_4: Vec<DVec2> = source_4.iter().map(|&p| p + DVec2::new(5.0, 3.0)).collect();
     let tps_4 = fit_default(&source_4, &target_4);
@@ -1069,7 +1069,7 @@ fn test_tps_extra_control_point_changes_behavior() {
 
 /// Default config has zero regularization.
 #[test]
-fn test_tps_config_default() {
+fn tps_config_default() {
     let config = TpsConfig::default();
     assert_eq!(config.regularization, 0.0);
 }

@@ -103,7 +103,7 @@ fn synthetic_value(scene: SyntheticScene, channel: usize, pos: Vec2us) -> f32 {
 
 #[test]
 #[allow(clippy::excessive_precision)]
-fn test_markesteijn_matches_librtprocess_reference_scenes() {
+fn markesteijn_matches_librtprocess_reference_scenes() {
     const WIDTH: usize = 96;
     const HEIGHT: usize = 96;
     const TOLERANCE: f32 = 5e-6;
@@ -226,7 +226,7 @@ fn test_markesteijn_matches_librtprocess_reference_scenes() {
 }
 
 #[test]
-fn test_markesteijn_output_size() {
+fn markesteijn_output_size() {
     let raw_w = 24;
     let raw_h = 24;
     let w = 12;
@@ -244,7 +244,7 @@ fn test_markesteijn_output_size() {
 }
 
 #[test]
-fn test_markesteijn_uniform_input() {
+fn markesteijn_uniform_input() {
     let raw_w = 30;
     let raw_h = 30;
     let w = 18;
@@ -271,7 +271,7 @@ fn test_markesteijn_uniform_input() {
 }
 
 #[test]
-fn test_markesteijn_no_nan() {
+fn markesteijn_no_nan() {
     let raw_w = 30;
     let raw_h = 30;
     let w = 18;
@@ -294,7 +294,7 @@ fn test_markesteijn_no_nan() {
 }
 
 #[test]
-fn test_markesteijn_all_zeros() {
+fn markesteijn_all_zeros() {
     let raw_w = 24;
     let raw_h = 24;
     let w = 12;
@@ -314,7 +314,7 @@ fn test_markesteijn_all_zeros() {
 }
 
 #[test]
-fn test_markesteijn_preserves_green_at_green_pixel() {
+fn markesteijn_preserves_green_at_green_pixel() {
     let raw_w = 30;
     let raw_h = 30;
     let w = 18;

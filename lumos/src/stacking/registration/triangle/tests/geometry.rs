@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn test_triangle_from_positions_3_4_5() {
+fn triangle_from_positions_3_4_5() {
     // 3-4-5 right triangle:
     // p0=(0,0), p1=(3,0), p2=(0,4)
     // d01 = 3, d12 = sqrt(9+16) = 5, d20 = 4
@@ -22,7 +22,7 @@ fn test_triangle_from_positions_3_4_5() {
 }
 
 #[test]
-fn test_triangle_equilateral_ratios() {
+fn triangle_equilateral_ratios() {
     // Equilateral triangle: all sides equal = 10.0
     // ratios = (10/10, 10/10) = (1.0, 1.0)
     let tri = Triangle::from_positions(
@@ -49,7 +49,7 @@ fn test_triangle_equilateral_ratios() {
 }
 
 #[test]
-fn test_triangle_ratios_scale_invariant() {
+fn triangle_ratios_scale_invariant() {
     // 3-4-5 triangle at scale 1 and scale 10 should have identical ratios = (0.6, 0.8)
     let tri1 = Triangle::from_positions(
         [0, 1, 2],
@@ -79,7 +79,7 @@ fn test_triangle_ratios_scale_invariant() {
 }
 
 #[test]
-fn test_triangle_orientation_exact() {
+fn triangle_orientation_exact() {
     // 3-4-5 right triangle: p0=(0,0), p1=(3,0), p2=(0,4)
     // Sorted sides: d01=3 (opp vtx 2), d20=4 (opp vtx 1), d12=5 (opp vtx 0)
     // Reordered vertices: [2, 1, 0] → positions [p2, p1, p0] = [(0,4), (3,0), (0,0)]
@@ -117,7 +117,7 @@ fn test_triangle_orientation_exact() {
 }
 
 #[test]
-fn test_degenerate_triangle_collinear() {
+fn degenerate_triangle_collinear() {
     let tri = Triangle::from_positions(
         [0, 1, 2],
         [
@@ -130,7 +130,7 @@ fn test_degenerate_triangle_collinear() {
 }
 
 #[test]
-fn test_degenerate_triangle_duplicate_point() {
+fn degenerate_triangle_duplicate_point() {
     let tri = Triangle::from_positions(
         [0, 1, 2],
         [
@@ -143,7 +143,7 @@ fn test_degenerate_triangle_duplicate_point() {
 }
 
 #[test]
-fn test_triangle_very_flat_rejected() {
+fn triangle_very_flat_rejected() {
     // Nearly collinear: height = 1e-10 on base = 100
     // area = 0.5 * 100 * 1e-10 = 5e-9, area^2 = 2.5e-17 < MIN_TRIANGLE_AREA_SQ (1e-6)
     let tri = Triangle::from_positions(
@@ -158,7 +158,7 @@ fn test_triangle_very_flat_rejected() {
 }
 
 #[test]
-fn test_triangle_near_collinear_accepted() {
+fn triangle_near_collinear_accepted() {
     // Thin triangle with height=1 on base=100
     // Sides: d01=100, d02=sqrt(2500+1)~50.01, d12=sqrt(2500+1)~50.01
     // Sorted: [50.01, 50.01, 100] → ratio ≈ (0.5001, 0.5001)
@@ -182,7 +182,7 @@ fn test_triangle_near_collinear_accepted() {
 }
 
 #[test]
-fn test_triangle_side_ratio_filter_rejects_elongated() {
+fn triangle_side_ratio_filter_rejects_elongated() {
     // Very elongated: p0=(0,0), p1=(100,0), p2=(100,1)
     // d01=100, d12=1, d20=sqrt(10001)≈100.005
     // longest/shortest = 100.005/1 ≈ 100 >> 10 → rejected
@@ -198,7 +198,7 @@ fn test_triangle_side_ratio_filter_rejects_elongated() {
 }
 
 #[test]
-fn test_triangle_side_ratio_filter_accepts_moderate() {
+fn triangle_side_ratio_filter_accepts_moderate() {
     // Moderate: p0=(0,0), p1=(5,0), p2=(5,1)
     // d01=5, d12=1, d20=sqrt(26)≈5.099
     // longest/shortest = 5.099/1 ≈ 5.1 < 10 → accepted
@@ -214,7 +214,7 @@ fn test_triangle_side_ratio_filter_accepts_moderate() {
 }
 
 #[test]
-fn test_triangle_side_ratio_filter_boundary() {
+fn triangle_side_ratio_filter_boundary() {
     // At boundary: p0=(0,0), p1=(10,0), p2=(10,1)
     // d01=10, d12=1, d20=sqrt(101)≈10.05
     // longest/shortest = 10.05/1 ≈ 10.05 > 10 → rejected
@@ -243,7 +243,7 @@ fn test_triangle_side_ratio_filter_boundary() {
 }
 
 #[test]
-fn test_is_similar_identical_triangles() {
+fn is_similar_identical_triangles() {
     // 3-4-5 at two scales: ratios both (0.6, 0.8) → difference = (0, 0) < any tolerance
     let tri1 = Triangle::from_positions(
         [0, 1, 2],
@@ -271,7 +271,7 @@ fn test_is_similar_identical_triangles() {
 }
 
 #[test]
-fn test_is_similar_different_triangles() {
+fn is_similar_different_triangles() {
     // 1-1-sqrt(2) isoceles right triangle:
     // d01=1, d12=1, d20=sqrt(2)
     // ratios = (1/sqrt(2), 1/sqrt(2)) ≈ (0.7071, 0.7071)
@@ -307,7 +307,7 @@ fn test_is_similar_different_triangles() {
 }
 
 #[test]
-fn test_is_similar_with_exact_tolerance_boundary() {
+fn is_similar_with_exact_tolerance_boundary() {
     // 3-4-5: ratios = (0.6, 0.8)
     let tri1 = Triangle::from_positions(
         [0, 1, 2],
@@ -339,7 +339,7 @@ fn test_is_similar_with_exact_tolerance_boundary() {
 }
 
 #[test]
-fn test_vertex_ordering_by_geometric_role() {
+fn vertex_ordering_by_geometric_role() {
     // 3-4-5 right triangle with arbitrary indices [10, 20, 30]:
     // p0=(0,0), p1=(3,0), p2=(0,4)
     // d01=3 (opp vtx 2=idx30), d12=5 (opp vtx 0=idx10), d20=4 (opp vtx 1=idx20)
@@ -361,7 +361,7 @@ fn test_vertex_ordering_by_geometric_role() {
 }
 
 #[test]
-fn test_vertex_ordering_deterministic_across_input_orders() {
+fn vertex_ordering_deterministic_across_input_orders() {
     let p_a = DVec2::new(0.0, 0.0);
     let p_b = DVec2::new(5.0, 0.0);
     let p_c = DVec2::new(2.0, 7.0);

@@ -11,13 +11,13 @@ fn radius_search_indices(tree: &KdTree, query: DVec2, radius: f64) -> Vec<usize>
 }
 
 #[test]
-fn test_build_empty() {
+fn build_empty() {
     let tree = KdTree::build(&[]);
     assert!(tree.is_none());
 }
 
 #[test]
-fn test_build_single_point() {
+fn build_single_point() {
     let points = [DVec2::new(1.0, 2.0)];
     let tree = KdTree::build(&points).unwrap();
     assert_eq!(tree.len(), 1);
@@ -28,7 +28,7 @@ fn test_build_single_point() {
 }
 
 #[test]
-fn test_build_preserves_all_points() {
+fn build_preserves_all_points() {
     // Points are stored by original index regardless of internal permutation.
     let points = [
         DVec2::new(3.0, 1.0),
@@ -46,7 +46,7 @@ fn test_build_preserves_all_points() {
 }
 
 #[test]
-fn test_k_nearest_exact_distances() {
+fn k_nearest_exact_distances() {
     // Layout (all on x-axis for easy hand-computation):
     //   idx 0: (0,0)  idx 1: (3,0)  idx 2: (7,0)  idx 3: (8,0)  idx 4: (15,0)
     // Query: (6,0)
@@ -76,7 +76,7 @@ fn test_k_nearest_exact_distances() {
 }
 
 #[test]
-fn test_k_nearest_2d_distances() {
+fn k_nearest_2d_distances() {
     // 2D layout:
     //   idx 0: (0,0)  idx 1: (3,4)  idx 2: (1,1)  idx 3: (6,8)
     // Query: (2, 2)
@@ -104,7 +104,7 @@ fn test_k_nearest_2d_distances() {
 }
 
 #[test]
-fn test_k_nearest_finds_exact_point() {
+fn k_nearest_finds_exact_point() {
     let points = [
         DVec2::new(0.0, 0.0),
         DVec2::new(10.0, 10.0),
@@ -119,7 +119,7 @@ fn test_k_nearest_finds_exact_point() {
 }
 
 #[test]
-fn test_k_nearest_sorted_order() {
+fn k_nearest_sorted_order() {
     // Points on x-axis: query at origin.
     //   idx 0: (0,0) dist_sq=0
     //   idx 1: (1,0) dist_sq=1
@@ -147,7 +147,7 @@ fn test_k_nearest_sorted_order() {
 }
 
 #[test]
-fn test_k_nearest_more_than_available() {
+fn k_nearest_more_than_available() {
     let points = [DVec2::new(0.0, 0.0), DVec2::new(1.0, 1.0)];
     let tree = KdTree::build(&points).unwrap();
 
@@ -163,7 +163,7 @@ fn test_k_nearest_more_than_available() {
 }
 
 #[test]
-fn test_k_nearest_zero_k() {
+fn k_nearest_zero_k() {
     let points = [DVec2::new(0.0, 0.0), DVec2::new(1.0, 1.0)];
     let tree = KdTree::build(&points).unwrap();
 
@@ -172,7 +172,7 @@ fn test_k_nearest_zero_k() {
 }
 
 #[test]
-fn test_k_nearest_negative_coordinates() {
+fn k_nearest_negative_coordinates() {
     // idx 0: (-10,-10), idx 1: (-5,-5), idx 2: (0,0), idx 3: (5,5), idx 4: (10,10)
     // Query: (-7, -7)
     //   dist_sq to idx0: (-7+10)^2 + (-7+10)^2 = 9+9 = 18
@@ -201,7 +201,7 @@ fn test_k_nearest_negative_coordinates() {
 }
 
 #[test]
-fn test_k_nearest_query_far_from_points() {
+fn k_nearest_query_far_from_points() {
     // idx 0: (0,0), idx 1: (1,0), idx 2: (0,1), idx 3: (1,1)
     // Query: (1000, 1000)
     //   dist_sq to idx0: 1000^2 + 1000^2 = 2_000_000
@@ -229,7 +229,7 @@ fn test_k_nearest_query_far_from_points() {
 }
 
 #[test]
-fn test_k_nearest_duplicate_points() {
+fn k_nearest_duplicate_points() {
     // 3 duplicates at (5,5), 1 at (10,10)
     // Query: (5, 5)
     //   dist_sq to idx0,1,2: 0
@@ -256,7 +256,7 @@ fn test_k_nearest_duplicate_points() {
 }
 
 #[test]
-fn test_k_nearest_all_identical_points() {
+fn k_nearest_all_identical_points() {
     let points: Vec<DVec2> = (0..5).map(|_| DVec2::new(7.0, 7.0)).collect();
     let tree = KdTree::build(&points).unwrap();
 
@@ -273,7 +273,7 @@ fn test_k_nearest_all_identical_points() {
 }
 
 #[test]
-fn test_k_nearest_collinear_points_exact_distances() {
+fn k_nearest_collinear_points_exact_distances() {
     // Collinear along y=x: idx0=(0,0), idx1=(1,1), idx2=(2,2), idx3=(3,3), idx4=(4,4)
     // Query: (2, 2)
     //   dist_sq to idx0: 4+4=8
@@ -306,7 +306,7 @@ fn test_k_nearest_collinear_points_exact_distances() {
 }
 
 #[test]
-fn test_k_nearest_clustered_points() {
+fn k_nearest_clustered_points() {
     // Cluster 1 near origin: idx 0..5 at (0, 0), (0.1, 0.1), (0.2, 0.2), (0.3, 0.3), (0.4, 0.4)
     // Cluster 2 near (100,100): idx 5..10 at (100, 100), (100.1, 100.1), ...
     // Query at (0,0), k=5: all from cluster 1
@@ -355,7 +355,7 @@ fn test_k_nearest_clustered_points() {
 }
 
 #[test]
-fn test_k_nearest_with_large_k_uses_large_heap() {
+fn k_nearest_with_large_k_uses_large_heap() {
     // 50 points on x-axis: idx i at (i, 0)
     // Query: (0, 0), k = SMALL_HEAP_CAPACITY + 5 (=37)
     // The i-th nearest has dist_sq = i^2. Results should be idx 0..37 in order.
@@ -375,7 +375,7 @@ fn test_k_nearest_with_large_k_uses_large_heap() {
 }
 
 #[test]
-fn test_nearest_one_exact_match() {
+fn nearest_one_exact_match() {
     let points = [
         DVec2::new(0.0, 0.0),
         DVec2::new(10.0, 10.0),
@@ -389,7 +389,7 @@ fn test_nearest_one_exact_match() {
 }
 
 #[test]
-fn test_nearest_one_single_point() {
+fn nearest_one_single_point() {
     // Single point at (3, 7). Query at origin.
     // dist_sq = 3^2 + 7^2 = 9 + 49 = 58
     let points = [DVec2::new(3.0, 7.0)];
@@ -400,7 +400,7 @@ fn test_nearest_one_single_point() {
 }
 
 #[test]
-fn test_nearest_one_equidistant() {
+fn nearest_one_equidistant() {
     // idx 0: (3,4), idx 1: (5,5)
     // Query: (4, 4.5)
     //   dist_sq to idx0: (4-3)^2 + (4.5-4)^2 = 1 + 0.25 = 1.25
@@ -415,7 +415,7 @@ fn test_nearest_one_equidistant() {
 }
 
 #[test]
-fn test_nearest_one_agrees_with_k_nearest_1() {
+fn nearest_one_agrees_with_k_nearest_1() {
     // Verify nearest_one returns the same result as k_nearest(q, 1)
     let points = [
         DVec2::new(0.0, 0.0),
@@ -436,7 +436,7 @@ fn test_nearest_one_agrees_with_k_nearest_1() {
 }
 
 #[test]
-fn test_nearest_one_empty_tree_not_possible() {
+fn nearest_one_empty_tree_not_possible() {
     // KdTree::build returns None for empty input, so nearest_one on an empty
     // tree can't happen through the public API. This test documents that
     // build(&[]) returns None.
@@ -444,7 +444,7 @@ fn test_nearest_one_empty_tree_not_possible() {
 }
 
 #[test]
-fn test_radius_finds_correct_points() {
+fn radius_finds_correct_points() {
     // idx 0: (0,0), idx 1: (1,0), idx 2: (0,1), idx 3: (5,5), idx 4: (10,10)
     // Query: (0,0), radius: 2.0, radius_sq = 4.0
     //   dist_sq to idx0: 0 <= 4 => included
@@ -466,7 +466,7 @@ fn test_radius_finds_correct_points() {
 }
 
 #[test]
-fn test_radius_empty_result() {
+fn radius_empty_result() {
     // All points far from query
     // idx 0: (0,0), idx 1: (10,10)
     // Query: (5, 5), radius: 1.0, radius_sq = 1.0
@@ -480,7 +480,7 @@ fn test_radius_empty_result() {
 }
 
 #[test]
-fn test_radius_all_points_included() {
+fn radius_all_points_included() {
     // idx 0: (0,0), idx 1: (1,0), idx 2: (0,1), idx 3: (1,1)
     // Query: (0.5, 0.5), radius: 10.0
     // All within radius
@@ -497,7 +497,7 @@ fn test_radius_all_points_included() {
 }
 
 #[test]
-fn test_radius_boundary_inclusion() {
+fn radius_boundary_inclusion() {
     // idx 0: (0,0), idx 1: (1,0), idx 2: (2,0)
     // Query: (0, 0), radius: 1.0, radius_sq = 1.0
     //   dist_sq to idx0: 0 <= 1 => included
@@ -515,7 +515,7 @@ fn test_radius_boundary_inclusion() {
 }
 
 #[test]
-fn test_radius_zero() {
+fn radius_zero() {
     // radius=0 means only exact matches (dist_sq=0 <= 0)
     let points = [DVec2::new(0.0, 0.0), DVec2::new(1.0, 1.0)];
     let tree = KdTree::build(&points).unwrap();
@@ -525,7 +525,7 @@ fn test_radius_zero() {
 }
 
 #[test]
-fn test_radius_negative_coordinates() {
+fn radius_negative_coordinates() {
     // idx 0: (-3, -4), idx 1: (0, 0), idx 2: (3, 4)
     // Query: (-2, -3), radius: 2.0, radius_sq = 4.0
     //   dist_sq to idx0: (-2+3)^2 + (-3+4)^2 = 1+1 = 2 <= 4 => included
@@ -543,7 +543,7 @@ fn test_radius_negative_coordinates() {
 }
 
 #[test]
-fn test_radius_buffer_reuse_clears() {
+fn radius_buffer_reuse_clears() {
     let points = [
         DVec2::new(0.0, 0.0),
         DVec2::new(1.0, 0.0),
@@ -564,7 +564,7 @@ fn test_radius_buffer_reuse_clears() {
 }
 
 #[test]
-fn test_radius_different_radii_different_results() {
+fn radius_different_radii_different_results() {
     // idx 0: (0,0), idx 1: (2,0), idx 2: (5,0)
     // Query: (0,0)
     //   radius=1.5: radius_sq=2.25 → only idx0 (dist_sq=0)
@@ -587,7 +587,7 @@ fn test_radius_different_radii_different_results() {
 }
 
 #[test]
-fn test_get_point_returns_original_coordinates() {
+fn get_point_returns_original_coordinates() {
     let points = [
         DVec2::new(3.125, 2.71),
         DVec2::new(-1.0, 42.0),
@@ -603,7 +603,7 @@ fn test_get_point_returns_original_coordinates() {
 }
 
 #[test]
-fn test_heap_small_variant_selection() {
+fn heap_small_variant_selection() {
     let heap = BoundedMaxHeap::new(5);
     assert!(matches!(heap, BoundedMaxHeap::Small { .. }));
 
@@ -615,7 +615,7 @@ fn test_heap_small_variant_selection() {
 }
 
 #[test]
-fn test_heap_empty_state() {
+fn heap_empty_state() {
     let heap_small = BoundedMaxHeap::new(5);
     assert!(!heap_small.is_full());
     assert_eq!(heap_small.max_distance(), f64::INFINITY);
@@ -626,7 +626,7 @@ fn test_heap_empty_state() {
 }
 
 #[test]
-fn test_heap_small_push_and_eviction() {
+fn heap_small_push_and_eviction() {
     let mut heap = BoundedMaxHeap::new(3);
 
     // Push 3 items: dist_sq = 10, 5, 15
@@ -677,7 +677,7 @@ fn test_heap_small_push_and_eviction() {
 }
 
 #[test]
-fn test_heap_large_push_and_eviction() {
+fn heap_large_push_and_eviction() {
     let capacity = SMALL_HEAP_CAPACITY + 5; // 37
     let mut heap = BoundedMaxHeap::new(capacity);
     assert!(matches!(heap, BoundedMaxHeap::Large { .. }));
@@ -716,7 +716,7 @@ fn test_heap_large_push_and_eviction() {
 }
 
 #[test]
-fn test_heap_capacity_one() {
+fn heap_capacity_one() {
     // Capacity 1: only keeps the single smallest
     let mut heap = BoundedMaxHeap::new(1);
 
@@ -749,7 +749,7 @@ fn test_heap_capacity_one() {
 }
 
 #[test]
-fn test_k_nearest_and_radius_agree() {
+fn k_nearest_and_radius_agree() {
     // 5 points on x-axis. Query at origin, radius=4.5 (radius_sq=20.25).
     // idx 0: (0,0) dist_sq=0, idx 1: (2,0) dist_sq=4, idx 2: (4,0) dist_sq=16,
     // idx 3: (6,0) dist_sq=36, idx 4: (8,0) dist_sq=64
@@ -775,7 +775,7 @@ fn test_k_nearest_and_radius_agree() {
 }
 
 #[test]
-fn test_horizontal_line_exact_distances() {
+fn horizontal_line_exact_distances() {
     // 10 points on x-axis: idx i at (10*i, 0), i=0..10
     // Query: (45, 0)
     //   dist_sq to idx4 (40,0): (45-40)^2 = 25
@@ -795,7 +795,7 @@ fn test_horizontal_line_exact_distances() {
 }
 
 #[test]
-fn test_vertical_line_exact_distances() {
+fn vertical_line_exact_distances() {
     // 10 points on y-axis: idx i at (0, 10*i), i=0..10
     // Query: (0, 45)
     //   dist_sq to idx4 (0,40): (45-40)^2 = 25
@@ -814,7 +814,7 @@ fn test_vertical_line_exact_distances() {
 }
 
 #[test]
-fn test_large_coordinates() {
+fn large_coordinates() {
     // idx 0: (1024.5, 768.3), idx 1: (2048.1, 1536.7), idx 2: (512.9, 384.2), idx 3: (3072.0, 2304.5)
     // Query: (1024.5, 768.3) — exact match with idx 0
     // k=2: idx 0 (dist_sq=0), next closest:

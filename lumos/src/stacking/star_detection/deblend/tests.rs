@@ -9,7 +9,7 @@ use crate::testing::prelude::*;
 use crate::testing::synthetic::star_profiles::{StarProfile, SyntheticStar};
 
 #[test]
-fn test_local_vs_multi_threshold_single_star() {
+fn local_vs_multi_threshold_single_star() {
     // Both algorithms should produce same result for single star
     let TestComponent {
         pixels,
@@ -39,7 +39,7 @@ fn test_local_vs_multi_threshold_single_star() {
 }
 
 #[test]
-fn test_local_vs_multi_threshold_two_stars() {
+fn local_vs_multi_threshold_two_stars() {
     // Both algorithms should find two stars when well-separated
     let TestComponent {
         pixels,

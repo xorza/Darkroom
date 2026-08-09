@@ -12,10 +12,4 @@ const MIN_CONTRIBUTING_COVERAGE: f32 = 1e-3;
 #[cfg(all(test, feature = "internals"))]
 mod bench;
 #[cfg(test)]
-mod mem_budget_probe;
-#[cfg(test)]
-mod mem_budget_tests;
-#[cfg(all(test, feature = "real-data"))]
-mod real_data_tests;
-#[cfg(test)]
 mod tests;

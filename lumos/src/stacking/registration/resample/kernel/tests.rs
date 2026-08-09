@@ -48,7 +48,7 @@ const INTERPOLATION_METHODS: [InterpolationMethod; 6] = [
 ];
 
 #[test]
-fn test_lanczos_kernel_compute_at_zero() {
+fn lanczos_kernel_compute_at_zero() {
     // L(0, a) = 1.0 by definition (limit of sinc(x) * sinc(x/a) as x -> 0)
     assert!((kernel::lanczos_kernel_compute(0.0, 2.0) - 1.0).abs() < TOL);
     assert!((kernel::lanczos_kernel_compute(0.0, 3.0) - 1.0).abs() < TOL);
@@ -56,7 +56,7 @@ fn test_lanczos_kernel_compute_at_zero() {
 }
 
 #[test]
-fn test_lanczos_kernel_compute_at_integers() {
+fn lanczos_kernel_compute_at_integers() {
     // sinc(n) = sin(n*pi) / (n*pi) = 0 for all nonzero integers
     // So L(n, a) = 0 for integer n != 0
     for a in [2.0, 3.0, 4.0] {
@@ -74,7 +74,7 @@ fn test_lanczos_kernel_compute_at_integers() {
 }
 
 #[test]
-fn test_lanczos_kernel_compute_at_boundary() {
+fn lanczos_kernel_compute_at_boundary() {
     // L(a, a) = 0 by definition (outside support)
     assert_eq!(kernel::lanczos_kernel_compute(3.0, 3.0), 0.0);
     assert_eq!(kernel::lanczos_kernel_compute(-3.0, 3.0), 0.0);
@@ -83,14 +83,14 @@ fn test_lanczos_kernel_compute_at_boundary() {
 }
 
 #[test]
-fn test_lanczos_kernel_compute_outside_support() {
+fn lanczos_kernel_compute_outside_support() {
     assert_eq!(kernel::lanczos_kernel_compute(3.5, 3.0), 0.0);
     assert_eq!(kernel::lanczos_kernel_compute(-4.1, 3.0), 0.0);
     assert_eq!(kernel::lanczos_kernel_compute(100.0, 3.0), 0.0);
 }
 
 #[test]
-fn test_lanczos_kernel_compute_at_half() {
+fn lanczos_kernel_compute_at_half() {
     // L(0.5, 3) = sinc(0.5) * sinc(0.5/3) = [sin(pi/2)/(pi/2)] * [sin(pi/6)/(pi/6)]
     // sinc(0.5) = sin(pi*0.5) / (pi*0.5) = 1.0 / (pi/2) = 2/pi
     // sinc(1/6) = sin(pi/6) / (pi/6) = 0.5 / (pi/6) = 3/pi
@@ -104,7 +104,7 @@ fn test_lanczos_kernel_compute_at_half() {
 }
 
 #[test]
-fn test_lanczos_kernel_compute_symmetry() {
+fn lanczos_kernel_compute_symmetry() {
     // L(x) = L(-x) for all x
     for &x in &[0.1, 0.5, 1.0, 1.5, 2.5] {
         let pos = kernel::lanczos_kernel_compute(x, 3.0);
@@ -117,7 +117,7 @@ fn test_lanczos_kernel_compute_symmetry() {
 }
 
 #[test]
-fn test_lanczos_lut_matches_direct_computation() {
+fn lanczos_lut_matches_direct_computation() {
     // LUT should match direct computation within quantization tolerance.
     // LUT resolution is 4096 samples/unit, so max quantization error ~0.5/4096 in x,
     // which maps to at most ~0.001 in kernel value.
@@ -140,7 +140,7 @@ fn test_lanczos_lut_matches_direct_computation() {
 }
 
 #[test]
-fn test_lanczos_lut_symmetry() {
+fn lanczos_lut_symmetry() {
     for a in [2, 3, 4] {
         let lut = kernel::get_lanczos_lut(a);
         for &x in &[0.1, 0.5, 1.0, 1.5] {
@@ -155,7 +155,7 @@ fn test_lanczos_lut_symmetry() {
 }
 
 #[test]
-fn test_lanczos_lut_special_values() {
+fn lanczos_lut_special_values() {
     for a in [2, 3, 4] {
         let lut = kernel::get_lanczos_lut(a);
         let a_f32 = a as f32;
@@ -182,7 +182,7 @@ fn test_lanczos_lut_special_values() {
 }
 
 #[test]
-fn test_bicubic_kernel_exact_values() {
+fn bicubic_kernel_exact_values() {
     // Catmull-Rom with a = -0.5:
     //   K(0) = 1
     //   K(0.5): inner branch, abs_x=0.5
@@ -221,7 +221,7 @@ fn test_bicubic_kernel_exact_values() {
 }
 
 #[test]
-fn test_bicubic_kernel_continuity_at_one() {
+fn bicubic_kernel_continuity_at_one() {
     // The kernel should be continuous at |x|=1 (branch transition).
     let left = kernel::bicubic_kernel(1.0 - 1e-4);
     let right = kernel::bicubic_kernel(1.0 + 1e-4);
@@ -232,7 +232,7 @@ fn test_bicubic_kernel_continuity_at_one() {
 }
 
 #[test]
-fn test_nearest_interpolation() {
+fn nearest_interpolation() {
     // 2x2 image: [[0, 1], [2, 3]]
     let data_buf = Buffer2::new(2, 2, vec![0.0, 1.0, 2.0, 3.0]);
 
@@ -259,7 +259,7 @@ fn test_nearest_interpolation() {
 }
 
 #[test]
-fn test_nearest_at_half_rounds_away() {
+fn nearest_at_half_rounds_away() {
     // 2x2 image: [[10, 20], [30, 40]]
     let data_buf = Buffer2::new(2, 2, vec![10.0, 20.0, 30.0, 40.0]);
 
@@ -272,7 +272,7 @@ fn test_nearest_at_half_rounds_away() {
 }
 
 #[test]
-fn test_bilinear_hand_computed() {
+fn bilinear_hand_computed() {
     // 2x2 image: [[0, 2], [4, 6]]
     // Pixel layout: p(0,0)=0, p(1,0)=2, p(0,1)=4, p(1,1)=6
     let data_buf = Buffer2::new(2, 2, vec![0.0, 2.0, 4.0, 6.0]);
@@ -306,7 +306,7 @@ fn test_bilinear_hand_computed() {
 }
 
 #[test]
-fn test_bilinear_uniform_image() {
+fn bilinear_uniform_image() {
     // A uniform image should interpolate to the same constant everywhere
     let data_buf = Buffer2::new(2, 2, vec![7.0, 7.0, 7.0, 7.0]);
     assert!((interp(&data_buf, 0.3, 0.7, InterpolationMethod::Bilinear) - 7.0).abs() < TOL);
@@ -314,7 +314,7 @@ fn test_bilinear_uniform_image() {
 }
 
 #[test]
-fn test_bicubic_at_pixel_centers() {
+fn bicubic_at_pixel_centers() {
     // At integer pixel positions, bicubic should exactly reproduce pixel values.
     // Using a 4x4 grid so interior pixels (1,1) and (2,2) have full support.
     let data: Vec<f32> = (0..16).map(|i| i as f32).collect();
@@ -327,7 +327,7 @@ fn test_bicubic_at_pixel_centers() {
 }
 
 #[test]
-fn test_bicubic_monotonicity_on_gradient() {
+fn bicubic_monotonicity_on_gradient() {
     // Row 1 of a 4x4: [4, 5, 6, 7] (horizontal gradient)
     // Sampling at y=1 between x=0.5 and x=2.5 should be monotonically increasing.
     let input: Vec<f32> = (0..16).map(|i| (i % 4) as f32).collect();
@@ -341,7 +341,7 @@ fn test_bicubic_monotonicity_on_gradient() {
 }
 
 #[test]
-fn test_lanczos_at_pixel_centers() {
+fn lanczos_at_pixel_centers() {
     // At exact pixel centers, Lanczos should reproduce pixel values.
     // 8x8 grid so interior pixels have full 6x6 support window.
     let data: Vec<f32> = (0..64).map(|i| i as f32).collect();
@@ -363,7 +363,7 @@ fn test_lanczos_at_pixel_centers() {
 }
 
 #[test]
-fn test_lanczos_preserves_dc() {
+fn lanczos_preserves_dc() {
     // A uniform image should remain uniform after Lanczos interpolation.
     // This tests that weights sum to ~1 (partition of unity).
     let input_buf = Buffer2::new_filled(8, 8, 0.5f32);
@@ -382,7 +382,7 @@ fn test_lanczos_preserves_dc() {
 }
 
 #[test]
-fn test_lanczos2_vs_lanczos3_different_results() {
+fn lanczos2_vs_lanczos3_different_results() {
     // Lanczos2 (4x4 kernel) and Lanczos3 (6x6 kernel) should produce different
     // results on non-trivial data, since they use different kernel widths.
     let input: Vec<f32> = (0..64).map(|i| (i as f32).sin()).collect();
@@ -403,7 +403,7 @@ fn test_lanczos2_vs_lanczos3_different_results() {
 }
 
 #[test]
-fn test_different_methods_produce_different_results() {
+fn different_methods_produce_different_results() {
     // At a sub-pixel position on non-trivial data, all methods should give
     // slightly different results (different kernels = different weights).
     let data: Vec<f32> = (0..64).map(|i| (i as f32 * 0.1).sin() * 10.0).collect();
@@ -434,7 +434,7 @@ fn test_different_methods_produce_different_results() {
 }
 
 #[test]
-fn test_border_value_returned_out_of_bounds() {
+fn border_value_returned_out_of_bounds() {
     let data_buf = Buffer2::new_filled(2, 2, 1.0);
 
     // Inside: bilinear on uniform should give 1.0
@@ -446,7 +446,7 @@ fn test_border_value_returned_out_of_bounds() {
 }
 
 #[test]
-fn test_custom_border_value() {
+fn custom_border_value() {
     let data_buf = Buffer2::new_filled(2, 2, 1.0);
     let params = WarpParams {
         method: InterpolationMethod::Bilinear,
@@ -462,7 +462,7 @@ fn test_custom_border_value() {
 }
 
 #[test]
-fn test_all_methods_exact_at_pixel_centers() {
+fn all_methods_exact_at_pixel_centers() {
     let width = 16;
     let height = 16;
     // Use a pseudo-random-looking pattern
@@ -492,7 +492,7 @@ fn test_all_methods_exact_at_pixel_centers() {
 }
 
 #[test]
-fn test_interpolation_gradient_preservation() {
+fn interpolation_gradient_preservation() {
     // Horizontal gradient: pixel value = x / width
     let width = 64;
     let height = 64;
@@ -529,7 +529,7 @@ fn test_interpolation_gradient_preservation() {
 }
 
 #[test]
-fn test_bicubic_vs_lanczos_analytic_quality() {
+fn bicubic_vs_lanczos_analytic_quality() {
     // Create image from analytic function: f(x,y) = sin(x/10) * cos(y/10)
     // Then sample at sub-pixel offsets and compare to the analytic ground truth.
     let width = 64;

@@ -2,7 +2,7 @@ use crate::stacking::star_detection::background::simd::*;
 
 #[test]
 #[should_panic(expected = "assertion")]
-fn test_cubic_segment_simd_mismatched_lengths_panics() {
+fn cubic_segment_simd_mismatched_lengths_panics() {
     // Every SIMD backend derives its store bound solely from bg_out.len() and writes
     // into noise_out with that same bound — a mismatch must be rejected even in release
     // builds, not just debug, since it would otherwise be an out-of-bounds write.
@@ -31,7 +31,7 @@ fn test_cubic_segment_simd_mismatched_lengths_panics() {
 }
 
 #[test]
-fn test_cubic_segment_simd_matches_scalar() {
+fn cubic_segment_simd_matches_scalar() {
     // Non-trivial spline parameters: a = h²/6 * d2_left, b = h²/6 * d2_right
     let bg = SplineSegment {
         f0: 100.0,
@@ -83,7 +83,7 @@ fn test_cubic_segment_simd_matches_scalar() {
 }
 
 #[test]
-fn test_cubic_segment_simd_endpoints() {
+fn cubic_segment_simd_endpoints() {
     // At t=0 result should be f0, at t=1 result should be f1
     // (regardless of a, b coefficients, since t*(1-t) = 0 at both endpoints)
     let mut bg = vec![0.0f32; 2];
@@ -136,7 +136,7 @@ fn test_cubic_segment_simd_endpoints() {
 }
 
 #[test]
-fn test_cubic_segment_simd_midpoint() {
+fn cubic_segment_simd_midpoint() {
     // At t=0.5, using f(t) = ct*f0 + t*f1 - t*ct*((2-t)*a + (1+t)*b):
     //   = 0.5*f0 + 0.5*f1 - 0.5*0.5*(1.5*a + 1.5*b)
     //   = (f0+f1)/2 - 0.375*(a+b)
@@ -173,7 +173,7 @@ fn test_cubic_segment_simd_midpoint() {
 }
 
 #[test]
-fn test_cubic_segment_simd_linear_when_no_correction() {
+fn cubic_segment_simd_linear_when_no_correction() {
     // With a=0, b=0, cubic spline reduces to linear interpolation
     let mut bg = vec![0.0f32; 50];
     let mut noise = vec![0.0f32; 50];
@@ -217,7 +217,7 @@ fn test_cubic_segment_simd_linear_when_no_correction() {
 }
 
 #[test]
-fn test_cubic_segment_simd_clamping() {
+fn cubic_segment_simd_clamping() {
     // t values outside [0,1] should be clamped
     let mut bg = vec![0.0f32; 10];
     let mut noise = vec![0.0f32; 10];

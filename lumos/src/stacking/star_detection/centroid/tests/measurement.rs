@@ -2,7 +2,7 @@ use super::*;
 use crate::stacking::star_detection::centroid::{StampGrid, compute_stamp_radius};
 
 #[test]
-fn test_refine_centroid_centered_star() {
+fn refine_centroid_centered_star() {
     let width = 64;
     let height = 64;
     let pos = DVec2::splat(32.0);
@@ -20,7 +20,7 @@ fn test_refine_centroid_centered_star() {
 }
 
 #[test]
-fn test_refine_centroid_offset_converges() {
+fn refine_centroid_offset_converges() {
     let width = 64;
     let height = 64;
     let true_pos = DVec2::new(32.3, 32.7);
@@ -58,7 +58,7 @@ fn test_refine_centroid_offset_converges() {
 }
 
 #[test]
-fn test_refine_centroid_invalid_position_returns_none() {
+fn refine_centroid_invalid_position_returns_none() {
     let width = 64;
     let height = 64;
     let pixels = Buffer2::new_filled(width, height, 0.5f32);
@@ -76,7 +76,7 @@ fn test_refine_centroid_invalid_position_returns_none() {
 }
 
 #[test]
-fn test_refine_centroid_zero_flux_returns_none() {
+fn refine_centroid_zero_flux_returns_none() {
     let width = 64;
     let height = 64;
     // All pixels equal to background - no signal
@@ -94,7 +94,7 @@ fn test_refine_centroid_zero_flux_returns_none() {
 }
 
 #[test]
-fn test_refine_centroid_rejects_large_movement() {
+fn refine_centroid_rejects_large_movement() {
     let width = 64;
     let height = 64;
     // Create a star very far from initial position (outside the stamp entirely)
@@ -118,7 +118,7 @@ fn test_refine_centroid_rejects_large_movement() {
 }
 
 #[test]
-fn test_refine_centroid_iterative_convergence() {
+fn refine_centroid_iterative_convergence() {
     let width = 64;
     let height = 64;
     let true_pos = DVec2::new(32.25, 32.75);
@@ -152,7 +152,7 @@ fn test_refine_centroid_iterative_convergence() {
 }
 
 #[test]
-fn test_compute_star_valid_star() {
+fn compute_star_valid_star() {
     let width = 64;
     let height = 64;
     let pixels = SyntheticStar::new(Vec2::splat(32.0), 0.8, StarProfile::Gaussian { sigma: 2.5 })
@@ -184,7 +184,7 @@ fn test_compute_star_valid_star() {
 }
 
 #[test]
-fn test_compute_star_background_override_replaces_global_map() {
+fn compute_star_background_override_replaces_global_map() {
     // Star (sigma 2.5, amplitude 0.8) on an exact 0.1 pedestal, with a global map matching
     // the truth (bg 0.1, noise 0.01). An override of bg 0.05 under-subtracts every stamp
     // pixel by exactly 0.05 (every pixel stays above both bg values, so `.max(0)` never
@@ -241,7 +241,7 @@ fn test_compute_star_background_override_replaces_global_map() {
 }
 
 #[test]
-fn test_compute_star_invalid_position_returns_none() {
+fn compute_star_invalid_position_returns_none() {
     let width = 64;
     let height = 64;
     let pixels = Buffer2::new_filled(width, height, 0.5f32);
@@ -261,7 +261,7 @@ fn test_compute_star_invalid_position_returns_none() {
 }
 
 #[test]
-fn test_compute_star_zero_flux_returns_none() {
+fn compute_star_zero_flux_returns_none() {
     let width = 64;
     let height = 64;
     // All pixels equal to or below background
@@ -281,7 +281,7 @@ fn test_compute_star_zero_flux_returns_none() {
 }
 
 #[test]
-fn test_compute_star_fwhm_scales_with_sigma() {
+fn compute_star_fwhm_scales_with_sigma() {
     let width = 128;
     let height = 128;
 
@@ -334,7 +334,7 @@ fn test_compute_star_fwhm_scales_with_sigma() {
 }
 
 #[test]
-fn test_compute_star_snr_scales_with_amplitude() {
+fn compute_star_snr_scales_with_amplitude() {
     let width = 64;
     let height = 64;
 
@@ -377,7 +377,7 @@ fn test_compute_star_snr_scales_with_amplitude() {
 }
 
 #[test]
-fn test_elongated_star_high_eccentricity() {
+fn elongated_star_high_eccentricity() {
     let width = 64;
     let height = 64;
     // Elongated star: sigma_x = 4, sigma_y = 1 (4:1 aspect ratio)
@@ -413,7 +413,7 @@ fn test_elongated_star_high_eccentricity() {
 }
 
 #[test]
-fn test_circular_vs_elongated_eccentricity() {
+fn circular_vs_elongated_eccentricity() {
     let width = 64;
     let height = 64;
 
@@ -461,7 +461,7 @@ fn test_circular_vs_elongated_eccentricity() {
 }
 
 #[test]
-fn test_centroid_with_noisy_background() {
+fn centroid_with_noisy_background() {
     let width = 64;
     let height = 64;
     let true_pos = DVec2::splat(32.0);
@@ -504,7 +504,7 @@ fn test_centroid_with_noisy_background() {
 }
 
 #[test]
-fn test_snr_decreases_with_higher_noise() {
+fn snr_decreases_with_higher_noise() {
     let width = 64;
     let height = 64;
     let pixels = SyntheticStar::new(Vec2::splat(32.0), 0.8, StarProfile::Gaussian { sigma: 2.5 })
@@ -543,7 +543,7 @@ fn test_snr_decreases_with_higher_noise() {
 }
 
 #[test]
-fn test_fwhm_formula_for_known_gaussian() {
+fn fwhm_formula_for_known_gaussian() {
     // For a Gaussian with known sigma, verify FWHM ≈ FWHM_TO_SIGMA * sigma
     let width = 128;
     let height = 128;
@@ -577,7 +577,7 @@ fn test_fwhm_formula_for_known_gaussian() {
 }
 
 #[test]
-fn test_flux_proportional_to_amplitude() {
+fn flux_proportional_to_amplitude() {
     let width = 64;
     let height = 64;
 
@@ -623,7 +623,7 @@ fn test_flux_proportional_to_amplitude() {
 }
 
 #[test]
-fn test_eccentricity_bounds() {
+fn eccentricity_bounds() {
     // Eccentricity should always be in [0, 1]
     let width = 64;
     let height = 64;
@@ -678,7 +678,7 @@ fn test_eccentricity_bounds() {
 }
 
 #[test]
-fn test_eccentricity_orientation_invariant() {
+fn eccentricity_orientation_invariant() {
     // Eccentricity should be similar regardless of orientation (x vs y elongation)
     let width = 64;
     let height = 64;
@@ -738,7 +738,7 @@ fn test_eccentricity_orientation_invariant() {
 }
 
 #[test]
-fn test_snr_formula_consistency() {
+fn snr_formula_consistency() {
     // SNR = flux / (noise * sqrt(aperture_area))
     // Verify the formula behaves as expected
     let width = 64;
@@ -783,7 +783,7 @@ fn test_snr_formula_consistency() {
 }
 
 #[test]
-fn test_metrics_with_high_background() {
+fn metrics_with_high_background() {
     // Stars should still be measurable with high but uniform background
     let width = 64;
     let height = 64;
@@ -825,7 +825,7 @@ fn test_metrics_with_high_background() {
 }
 
 #[test]
-fn test_fwhm_independent_of_amplitude() {
+fn fwhm_independent_of_amplitude() {
     // FWHM should be the same regardless of star brightness (same sigma)
     let width = 64;
     let height = 64;
@@ -870,7 +870,7 @@ fn test_fwhm_independent_of_amplitude() {
 }
 
 #[test]
-fn test_eccentricity_increases_with_elongation() {
+fn eccentricity_increases_with_elongation() {
     let width = 64;
     let height = 64;
     let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
@@ -951,7 +951,7 @@ fn test_eccentricity_increases_with_elongation() {
 }
 
 #[test]
-fn test_measure_star_returns_none_for_edge_candidate() {
+fn measure_star_returns_none_for_edge_candidate() {
     let width = 64;
     let height = 64;
     let pixels = Buffer2::new_filled(width, height, 0.5f32);
@@ -981,7 +981,7 @@ fn test_measure_star_returns_none_for_edge_candidate() {
 }
 
 #[test]
-fn test_measure_star_multiple_stars_independent() {
+fn measure_star_multiple_stars_independent() {
     let width = 128;
     let height = 128;
 
@@ -1072,7 +1072,7 @@ fn test_measure_star_multiple_stars_independent() {
 }
 
 #[test]
-fn test_circular_star_roundness() {
+fn circular_star_roundness() {
     // A circular Gaussian star should have roundness near zero
     let width = 64;
     let height = 64;
@@ -1115,7 +1115,7 @@ fn test_circular_star_roundness() {
 }
 
 #[test]
-fn test_elongated_x_star_roundness() {
+fn elongated_x_star_roundness() {
     // An elongated star in x direction should have negative GROUND
     let width = 64;
     let height = 64;
@@ -1173,7 +1173,7 @@ fn test_elongated_x_star_roundness() {
 }
 
 #[test]
-fn test_asymmetric_star_sround() {
+fn asymmetric_star_sround() {
     // An asymmetric source should have non-zero SROUND
     let width = 64;
     let height = 64;
@@ -1233,7 +1233,7 @@ fn test_asymmetric_star_sround() {
 }
 
 #[test]
-fn test_star_is_round() {
+fn star_is_round() {
     use crate::stacking::star_detection::star::Star;
 
     let round_star = Star::at(glam::DVec2::new(10.0, 10.0)).with_roundness(Roundness {

@@ -47,7 +47,7 @@ mod tests {
     use crate::io::image::sensor::*;
 
     #[test]
-    fn test_from_libraw_monochrome() {
+    fn from_libraw_monochrome() {
         // filters == 0 indicates monochrome
         assert_eq!(SensorType::from_libraw(0, 3), SensorType::Monochrome);
         // colors == 1 also indicates monochrome
@@ -58,7 +58,7 @@ mod tests {
     }
 
     #[test]
-    fn test_from_libraw_bayer() {
+    fn from_libraw_bayer() {
         assert_eq!(
             SensorType::from_libraw(0x94949494, 3),
             SensorType::Bayer(CfaPattern::Rggb)
@@ -70,13 +70,13 @@ mod tests {
     }
 
     #[test]
-    fn test_from_libraw_xtrans() {
+    fn from_libraw_xtrans() {
         // X-Trans (filters=9)
         assert_eq!(SensorType::from_libraw(9, 3), SensorType::XTrans);
     }
 
     #[test]
-    fn test_from_libraw_unknown() {
+    fn from_libraw_unknown() {
         // Other exotic patterns
         assert_eq!(SensorType::from_libraw(0x12345678, 3), SensorType::Unknown);
     }

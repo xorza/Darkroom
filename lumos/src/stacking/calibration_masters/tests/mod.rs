@@ -54,7 +54,7 @@ fn weighted_budget_never_overcommits() {
 
 #[test]
 #[should_panic(expected = "already-calibrated frame")]
-fn test_calibrate_twice_panics() {
+fn calibrate_twice_panics() {
     // A second calibrate() would subtract the dark / divide the flat twice — must crash, not
     // silently corrupt.
     let masters =
@@ -168,7 +168,7 @@ fn calibrate_rejects_missing_and_mismatched_cfa_before_mutation() {
 }
 
 #[test]
-fn test_from_files_all_empty_yields_no_masters() {
+fn from_files_all_empty_yields_no_masters() {
     // Empty frame sets must produce a `None` for every master (no file I/O path).
     let empty: Vec<std::path::PathBuf> = Vec::new();
     let masters = CalibrationMasters::from_files(
@@ -204,7 +204,7 @@ fn test_from_files_all_empty_yields_no_masters() {
 }
 
 #[test]
-fn test_new_constructor() {
+fn new_constructor() {
     let dark = constant_cfa(Size2us::new(4, 4), 0.1, CfaType::Mono);
     let flat = constant_cfa(Size2us::new(4, 4), 0.8, CfaType::Mono);
     let bias = constant_cfa(Size2us::new(4, 4), 0.02, CfaType::Mono);
@@ -292,7 +292,7 @@ fn cold_detection_uses_subtracted_unfloored_flat_response() {
 }
 
 #[test]
-fn test_from_images_rejects_cancelled_operation() {
+fn from_images_rejects_cancelled_operation() {
     let cancel = CancelToken::new();
     cancel.cancel();
 
@@ -309,7 +309,7 @@ fn test_from_images_rejects_cancelled_operation() {
 }
 
 #[test]
-fn test_new_no_dark_no_hot_pixels() {
+fn new_no_dark_no_hot_pixels() {
     let flat = constant_cfa(Size2us::new(4, 4), 0.8, CfaType::Mono);
 
     let masters = CalibrationMasters::from_images(
@@ -337,7 +337,7 @@ fn test_new_no_dark_no_hot_pixels() {
 }
 
 #[test]
-fn test_calibrate_dark_subtraction() {
+fn calibrate_dark_subtraction() {
     let dark = constant_cfa(Size2us::new(4, 4), 0.1, CfaType::Mono);
     let masters = CalibrationMasters::from_images(
         CalibrationSet {
@@ -359,7 +359,7 @@ fn test_calibrate_dark_subtraction() {
 }
 
 #[test]
-fn test_calibrate_bias_only() {
+fn calibrate_bias_only() {
     // No dark → bias is subtracted instead
     let bias = constant_cfa(Size2us::new(4, 4), 0.05, CfaType::Mono);
     let masters = CalibrationMasters::from_images(
@@ -382,7 +382,7 @@ fn test_calibrate_bias_only() {
 }
 
 #[test]
-fn test_calibrate_dark_takes_priority_over_bias() {
+fn calibrate_dark_takes_priority_over_bias() {
     // When both dark and bias exist, only dark is subtracted
     let dark = constant_cfa(Size2us::new(4, 4), 0.1, CfaType::Mono);
     let bias = constant_cfa(Size2us::new(4, 4), 0.05, CfaType::Mono);
@@ -407,7 +407,7 @@ fn test_calibrate_dark_takes_priority_over_bias() {
 }
 
 #[test]
-fn test_calibrate_flat_correction() {
+fn calibrate_flat_correction() {
     // Flat with vignetting: [0.4, 0.8, 0.8, 0.4], mean = 0.6
     // normalized = [0.667, 1.333, 1.333, 0.667]
     // light = [0.3, 0.3, 0.3, 0.3]
@@ -445,7 +445,7 @@ fn test_calibrate_flat_correction() {
 }
 
 #[test]
-fn test_calibrate_full_pipeline() {
+fn calibrate_full_pipeline() {
     // Full CFA calibration: dark subtraction + flat division
     // signal = [0.3, 0.6], vignetting = [0.8, 1.0]
     // bias = 0.05, thermal = 0.02, dark = 0.07
@@ -521,7 +521,7 @@ fn test_calibrate_full_pipeline() {
 }
 
 #[test]
-fn test_sigma_threshold_affects_detection() {
+fn sigma_threshold_affects_detection() {
     // 6×6 mono dark with *real* noise so σ genuinely scales the threshold: 18 px at 90, 18 at 110
     // (one of the 110s replaced by a warm 400). Per-color stats (mono): median ≈ 100, MAD ≈ 10 →
     // sigma ≈ 10·1.4826 ≈ 14.8.
@@ -575,7 +575,7 @@ fn test_sigma_threshold_affects_detection() {
 }
 
 #[test]
-fn test_defect_detection_zero_median_no_false_positives() {
+fn defect_detection_zero_median_no_false_positives() {
     // A quantized bias can have MAD=0 even though a few samples occupy adjacent ADC levels.
     let mut data = vec![0.0f32; 100];
     // Add a few pixels with tiny values (normal bias noise)
@@ -612,7 +612,7 @@ fn test_defect_detection_zero_median_no_false_positives() {
 }
 
 #[test]
-fn test_calibrate_hot_pixel_correction() {
+fn calibrate_hot_pixel_correction() {
     // 6x6 Bayer dark with one hot pixel at (2,2)
     use crate::io::raw::demosaic::bayer::CfaPattern;
 
@@ -675,7 +675,7 @@ fn test_calibrate_hot_pixel_correction() {
 }
 
 #[test]
-fn test_calibrate_flat_dark() {
+fn calibrate_flat_dark() {
     // Flat dark is subtracted from flat instead of bias during normalization.
     // Simulates narrowband scenario: flat exposure accumulates dark current.
     //
@@ -752,7 +752,7 @@ fn test_calibrate_flat_dark() {
 }
 
 #[test]
-fn test_flat_dark_takes_priority_over_bias() {
+fn flat_dark_takes_priority_over_bias() {
     // When both flat dark and bias exist, flat dark is used for flat normalization
     let flat_pixels = vec![0.8_f32, 0.6, 0.6, 0.8];
     let flat = CfaImage {

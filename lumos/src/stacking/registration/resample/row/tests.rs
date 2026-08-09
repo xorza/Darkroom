@@ -71,7 +71,7 @@ fn lanczos_scalar(
 }
 
 #[test]
-fn test_bilinear_identity() {
+fn bilinear_identity() {
     let width = 100;
     let height = 100;
     let input = patterns::diagonal_gradient(Size2us::new(width, height));
@@ -96,7 +96,7 @@ fn test_bilinear_identity() {
 }
 
 #[test]
-fn test_bilinear_translation() {
+fn bilinear_translation() {
     let width = 100;
     let height = 100;
     let input = patterns::diagonal_gradient(Size2us::new(width, height));
@@ -129,7 +129,7 @@ fn test_bilinear_translation() {
 }
 
 #[test]
-fn test_warp_row_simd_matches_scalar() {
+fn warp_row_simd_matches_scalar() {
     let width = 128;
     let height = 128;
     let input = patterns::diagonal_gradient(Size2us::new(width, height));
@@ -168,7 +168,7 @@ fn test_warp_row_simd_matches_scalar() {
 }
 
 #[test]
-fn test_warp_row_various_sizes() {
+fn warp_row_various_sizes() {
     let height = 64;
     let input_base = patterns::diagonal_gradient(Size2us::new(256, height));
 
@@ -209,7 +209,7 @@ fn test_warp_row_various_sizes() {
 }
 
 #[test]
-fn test_lanczos_scalar_identity() {
+fn lanczos_scalar_identity() {
     let width = 100;
     let height = 100;
     let input = patterns::diagonal_gradient(Size2us::new(width, height));
@@ -234,7 +234,7 @@ fn test_lanczos_scalar_identity() {
 }
 
 #[test]
-fn test_lanczos_scalar_various_sizes_match_optimized() {
+fn lanczos_scalar_various_sizes_match_optimized() {
     // Verify scalar and optimized Lanczos3 produce identical results across widths.
     // This replaces a weaker test that only checked is_finite().
     let height = 64;
@@ -274,7 +274,7 @@ fn test_lanczos_scalar_various_sizes_match_optimized() {
 }
 
 #[test]
-fn test_lanczos_matches_scalar() {
+fn lanczos_matches_scalar() {
     let width = 128;
     let height = 128;
     let input = patterns::diagonal_gradient(Size2us::new(width, height));
@@ -310,7 +310,7 @@ fn test_lanczos_matches_scalar() {
 }
 
 #[test]
-fn test_lanczos_preserves_signed_constants_at_interior_and_edges() {
+fn lanczos_preserves_signed_constants_at_interior_and_edges() {
     let size = Size2us::new(24, 20);
     let identity = WarpTransform::new(Transform::identity());
 
@@ -337,7 +337,7 @@ fn test_lanczos_preserves_signed_constants_at_interior_and_edges() {
 }
 
 #[test]
-fn test_lanczos_is_translation_invariant_for_signed_data() {
+fn lanczos_is_translation_invariant_for_signed_data() {
     let size = Size2us::new(24, 20);
     let input = Buffer2::new(
         size.width,
@@ -377,7 +377,7 @@ fn test_lanczos_is_translation_invariant_for_signed_data() {
 }
 
 #[test]
-fn test_lanczos_various_sizes() {
+fn lanczos_various_sizes() {
     let height = 64;
     let input_base = patterns::diagonal_gradient(Size2us::new(256, height));
     // Disable clamping to match unclamped scalar reference
@@ -416,7 +416,7 @@ fn test_lanczos_various_sizes() {
 }
 
 #[test]
-fn test_bilinear_sample_hand_computed() {
+fn bilinear_sample_hand_computed() {
     // 3x3 image:
     //   0  1  2
     //   3  4  5
@@ -468,7 +468,7 @@ fn test_bilinear_sample_hand_computed() {
 }
 
 #[test]
-fn test_bilinear_sample_border_value() {
+fn bilinear_sample_border_value() {
     // 2x2 image: [[10, 20], [30, 40]]
     let input = Buffer2::new(2, 2, vec![10.0, 20.0, 30.0, 40.0]);
 
@@ -555,7 +555,7 @@ fn lanczos_scalar_ref(
 }
 
 #[test]
-fn test_lanczos2_matches_scalar_reference() {
+fn lanczos2_matches_scalar_reference() {
     let width = 128;
     let height = 128;
     let input = patterns::diagonal_gradient(Size2us::new(width, height));
@@ -585,7 +585,7 @@ fn test_lanczos2_matches_scalar_reference() {
 }
 
 #[test]
-fn test_lanczos4_matches_scalar_reference() {
+fn lanczos4_matches_scalar_reference() {
     let width = 128;
     let height = 128;
     let input = patterns::diagonal_gradient(Size2us::new(width, height));
@@ -615,7 +615,7 @@ fn test_lanczos4_matches_scalar_reference() {
 }
 
 #[test]
-fn test_lanczos2_various_sizes() {
+fn lanczos2_various_sizes() {
     let height = 64;
     let input_base = patterns::diagonal_gradient(Size2us::new(256, height));
     let params = config::internals::warp_params(InterpolationMethod::Lanczos2);
@@ -653,7 +653,7 @@ fn test_lanczos2_various_sizes() {
 }
 
 #[test]
-fn test_lanczos4_various_sizes() {
+fn lanczos4_various_sizes() {
     let height = 64;
     let input_base = patterns::diagonal_gradient(Size2us::new(256, height));
     let params = config::internals::warp_params(InterpolationMethod::Lanczos4);

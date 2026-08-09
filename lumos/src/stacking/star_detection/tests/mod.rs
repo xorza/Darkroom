@@ -3,8 +3,12 @@
 //! These tests use generated star fields to verify detection accuracy
 //! without requiring real calibration data.
 
+mod mem_budget;
+mod mem_budget_probe;
 mod metric_curves;
 mod pipeline_tests;
+#[cfg(feature = "real-data")]
+mod real_data;
 mod stage_tests;
 mod subpixel_accuracy;
 

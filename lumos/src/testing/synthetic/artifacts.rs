@@ -109,7 +109,7 @@ mod tests {
     use crate::testing::synthetic::artifacts::*;
 
     #[test]
-    fn test_cosmic_rays_count() {
+    fn cosmic_rays_count() {
         let width = 64;
         let height = 64;
         let mut pixels = vec![0.0f32; width * height];

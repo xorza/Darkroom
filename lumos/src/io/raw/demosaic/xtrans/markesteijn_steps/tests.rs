@@ -4,7 +4,7 @@ use crate::io::raw::demosaic::xtrans::internals::{make_xtrans, test_pattern, to_
 use crate::io::raw::demosaic::xtrans::markesteijn_steps::*;
 
 #[test]
-fn test_green_minmax_uniform() {
+fn green_minmax_uniform() {
     let raw_w = 24;
     let raw_h = 24;
     let w = 12;
@@ -30,7 +30,7 @@ fn test_green_minmax_uniform() {
 }
 
 #[test]
-fn test_green_minmax_bounds() {
+fn green_minmax_bounds() {
     let raw_w = 24;
     let raw_h = 24;
     let w = 12;
@@ -64,7 +64,7 @@ fn test_green_minmax_bounds() {
 }
 
 #[test]
-fn test_interpolate_green_uniform() {
+fn interpolate_green_uniform() {
     let raw_w = 24;
     let raw_h = 24;
     let w = 12;
@@ -101,7 +101,7 @@ fn test_interpolate_green_uniform() {
 }
 
 #[test]
-fn test_homogeneity_uniform_derivatives() {
+fn homogeneity_uniform_derivatives() {
     let w = 12;
     let h = 12;
     let pixels = w * h;
@@ -152,7 +152,7 @@ fn homogeneity_uses_the_center_threshold_for_the_entire_window() {
 }
 
 #[test]
-fn test_ypbpr_conversion_white() {
+fn ypbpr_conversion_white() {
     // White (1,1,1) → Y=1, Pb=0, Pr=0
     let y: f32 = 0.2627 * 1.0 + 0.6780 * 1.0 + 0.0593 * 1.0;
     let pb: f32 = (1.0 - y) * 0.56433;
@@ -163,7 +163,7 @@ fn test_ypbpr_conversion_white() {
 }
 
 #[test]
-fn test_ypbpr_conversion_primary_colors() {
+fn ypbpr_conversion_primary_colors() {
     // Pure red (1,0,0): Y=0.2627, Pb=-0.2627*0.56433, Pr=0.7373*0.67815
     let (y, pb, pr) = rgb_to_ypbpr(1.0, 0.0, 0.0);
     assert!((y - 0.2627).abs() < 1e-6, "Red Y={y}");
@@ -190,7 +190,7 @@ fn test_ypbpr_conversion_primary_colors() {
 }
 
 #[test]
-fn test_ypbpr_conversion_black() {
+fn ypbpr_conversion_black() {
     // Black (0,0,0) → Y=0, Pb=0, Pr=0
     let y: f32 = 0.2627 * 0.0 + 0.6780 * 0.0 + 0.0593 * 0.0;
     let pb: f32 = (0.0 - y) * 0.56433;
@@ -201,7 +201,7 @@ fn test_ypbpr_conversion_black() {
 }
 
 #[test]
-fn test_derivatives_of_uniform_input_are_finite_and_expose_directional_candidates() {
+fn derivatives_of_uniform_input_are_finite_and_expose_directional_candidates() {
     let raw_w = 24;
     let raw_h = 24;
     let w = 12;
@@ -244,7 +244,7 @@ fn test_derivatives_of_uniform_input_are_finite_and_expose_directional_candidate
 }
 
 #[test]
-fn test_derivatives_checkerboard_nonzero() {
+fn derivatives_checkerboard_nonzero() {
     // Checkerboard input has sharp edges → non-zero Laplacian (derivatives).
     let raw_w = 24;
     let raw_h = 24;
@@ -306,7 +306,7 @@ fn test_derivatives_checkerboard_nonzero() {
 }
 
 #[test]
-fn test_sat_uniform_ones() {
+fn sat_uniform_ones() {
     // 4×3 grid of all 1s
     let data = vec![1u8; 4 * 3];
     let mut sat = vec![u32::MAX; data.len()];
@@ -329,7 +329,7 @@ fn test_sat_uniform_ones() {
 }
 
 #[test]
-fn test_sat_sequential_values() {
+fn sat_sequential_values() {
     // 3×3 grid: [1,2,3; 4,5,6; 7,8,9]
     let data = vec![1, 2, 3, 4, 5, 6, 7, 8, 9];
     let mut sat = vec![u32::MAX; data.len()];
@@ -347,7 +347,7 @@ fn test_sat_sequential_values() {
 }
 
 #[test]
-fn test_sat_single_pixel() {
+fn sat_single_pixel() {
     let data = vec![42u8];
     let mut sat = vec![u32::MAX; data.len()];
     build_summed_area_table(&data, Size2us::new(1, 1), &mut sat);
@@ -355,7 +355,7 @@ fn test_sat_single_pixel() {
 }
 
 #[test]
-fn test_sat_single_row() {
+fn sat_single_row() {
     let data = vec![1, 2, 3, 4, 5];
     let mut sat = vec![u32::MAX; data.len()];
     build_summed_area_table(&data, Size2us::new(5, 1), &mut sat);
@@ -366,7 +366,7 @@ fn test_sat_single_row() {
 }
 
 #[test]
-fn test_sat_single_column() {
+fn sat_single_column() {
     let data = vec![1, 2, 3, 4, 5];
     let mut sat = vec![u32::MAX; data.len()];
     build_summed_area_table(&data, Size2us::new(1, 5), &mut sat);
@@ -377,7 +377,7 @@ fn test_sat_single_column() {
 }
 
 #[test]
-fn test_sat_zeros() {
+fn sat_zeros() {
     let data = vec![0u8; 4 * 4];
     let mut sat = vec![u32::MAX; data.len()];
     build_summed_area_table(&data, Size2us::new(4, 4), &mut sat);
@@ -418,7 +418,7 @@ fn homogeneity_scores_match_direct_five_by_five_windows() {
 }
 
 #[test]
-fn test_homogeneity_border_pixels_are_zero() {
+fn homogeneity_border_pixels_are_zero() {
     let w = 12;
     let h = 12;
     let pixels = w * h;
@@ -451,7 +451,7 @@ fn test_homogeneity_border_pixels_are_zero() {
 }
 
 #[test]
-fn test_homogeneity_one_dominant_direction() {
+fn homogeneity_one_dominant_direction() {
     let w = 12;
     let h = 12;
     let pixels = w * h;
@@ -574,7 +574,7 @@ fn reconstruction_geometry_dependencies_are_completed_by_earlier_stages() {
 }
 
 #[test]
-fn test_blend_uniform_homo_produces_uniform_output() {
+fn blend_uniform_homo_produces_uniform_output() {
     // With uniform input and uniform homogeneity, output should be uniform
     let raw_w = 24;
     let raw_h = 24;
@@ -627,7 +627,7 @@ fn test_blend_uniform_homo_produces_uniform_output() {
 }
 
 #[test]
-fn test_blend_one_dominant_direction() {
+fn blend_one_dominant_direction() {
     // With one dominant direction, output should match that direction's RGB
     let raw_w = 30;
     let raw_h = 30;

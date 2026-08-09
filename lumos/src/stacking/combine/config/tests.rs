@@ -30,7 +30,7 @@ fn small_n_resolve_downgrades_below_min_frames() {
 }
 
 #[test]
-fn test_default_config() {
+fn default_config() {
     let config = StackConfig::default();
     assert!(matches!(
         config.method,
@@ -41,7 +41,7 @@ fn test_default_config() {
 }
 
 #[test]
-fn test_sigma_clipped_preset() {
+fn sigma_clipped_preset() {
     let config = StackConfig::sigma_clipped(2.0);
     assert!(matches!(
         config.method,
@@ -51,20 +51,20 @@ fn test_sigma_clipped_preset() {
 }
 
 #[test]
-fn test_median_preset() {
+fn median_preset() {
     let config = StackConfig::median();
     assert_eq!(config.method, CombineMethod::Median);
 }
 
 #[test]
-fn test_weighted_preset() {
+fn weighted_preset() {
     let config = StackConfig::weighted(vec![1.0, 2.0, 3.0]);
     assert!(matches!(config.method, CombineMethod::Mean(..)));
     assert!(matches!(config.weighting, Weighting::Manual(ref w) if w.len() == 3));
 }
 
 #[test]
-fn test_struct_update_syntax() {
+fn struct_update_syntax() {
     let config = StackConfig {
         method: CombineMethod::Mean(Rejection::SigmaClip(SigmaClipConfig::new_asymmetric(
             2.0, 3.0, 5,
@@ -80,13 +80,13 @@ fn test_struct_update_syntax() {
 }
 
 #[test]
-fn test_validate_valid_config() {
+fn validate_valid_config() {
     let config = StackConfig::sigma_clipped(2.5);
     assert_eq!(config.validate(), Ok(()));
 }
 
 #[test]
-fn test_validate_invalid_config_returns_exact_errors() {
+fn validate_invalid_config_returns_exact_errors() {
     // Each case: the config, and the field its rejection must name with the value it carries.
     let range_checks = [
         (StackConfig::sigma_clipped(-1.0), "sigma_low", -1.0),
@@ -191,7 +191,7 @@ fn test_validate_invalid_config_returns_exact_errors() {
 }
 
 #[test]
-fn test_bias_preset() {
+fn bias_preset() {
     let config = StackConfig::bias();
     assert!(matches!(
         config.method,
@@ -202,7 +202,7 @@ fn test_bias_preset() {
 }
 
 #[test]
-fn test_dark_preset() {
+fn dark_preset() {
     let config = StackConfig::dark();
     assert!(matches!(
         config.method,
@@ -213,7 +213,7 @@ fn test_dark_preset() {
 }
 
 #[test]
-fn test_flat_preset() {
+fn flat_preset() {
     let config = StackConfig::flat();
     assert!(matches!(
         config.method,
@@ -224,7 +224,7 @@ fn test_flat_preset() {
 }
 
 #[test]
-fn test_light_preset() {
+fn light_preset() {
     let config = StackConfig::light();
     assert!(matches!(
         config.method,
@@ -236,7 +236,7 @@ fn test_light_preset() {
 }
 
 #[test]
-fn test_gesd_preset_uses_supported_sample_floor() {
+fn gesd_preset_uses_supported_sample_floor() {
     let config = StackConfig::gesd();
     assert!(matches!(
         config.method,

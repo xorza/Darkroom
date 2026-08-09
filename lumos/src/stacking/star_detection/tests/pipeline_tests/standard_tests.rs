@@ -17,7 +17,7 @@ fn detection_config() -> Config {
 
 /// Test: Sparse field with well-separated stars.
 #[test]
-fn test_pipeline_sparse_field() {
+fn pipeline_sparse_field() {
     init_tracing();
 
     let frame = Scenario {
@@ -35,7 +35,7 @@ fn test_pipeline_sparse_field() {
 
 /// Test: Dense field with many stars.
 #[test]
-fn test_pipeline_dense_field() {
+fn pipeline_dense_field() {
     init_tracing();
 
     let frame = Scenario {
@@ -61,7 +61,7 @@ fn test_pipeline_dense_field() {
 
 /// Test: Moffat profile stars (more realistic PSF).
 #[test]
-fn test_pipeline_moffat_profile() {
+fn pipeline_moffat_profile() {
     init_tracing();
 
     let frame = Scenario {
@@ -95,7 +95,7 @@ fn test_pipeline_moffat_profile() {
 
 /// Test: Larger PSF (single instrument FWHM; legacy varied per-star).
 #[test]
-fn test_pipeline_fwhm_range() {
+fn pipeline_fwhm_range() {
     init_tracing();
 
     let frame = Scenario {
@@ -120,7 +120,7 @@ fn test_pipeline_fwhm_range() {
 
 /// Test: Wide dynamic range (bright to faint stars).
 #[test]
-fn test_pipeline_dynamic_range() {
+fn pipeline_dynamic_range() {
     init_tracing();
 
     let frame = Scenario {
@@ -150,7 +150,7 @@ fn test_pipeline_dynamic_range() {
 
 /// Test: Low noise (ideal conditions).
 #[test]
-fn test_pipeline_low_noise() {
+fn pipeline_low_noise() {
     init_tracing();
 
     let frame = Scenario {

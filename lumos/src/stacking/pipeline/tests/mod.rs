@@ -1,3 +1,6 @@
+mod mem_budget;
+mod mem_budget_probe;
+
 use crate::testing::prelude::*;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};

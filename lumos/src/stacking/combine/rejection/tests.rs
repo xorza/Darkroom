@@ -61,7 +61,7 @@ fn sigma_clip_constructors_place_their_arguments() {
 }
 
 #[test]
-fn test_gesd_config_default() {
+fn gesd_config_default() {
     let config = GesdConfig::default();
     assert_eq!(config.alpha, 0.05);
     assert!(config.max_outliers.is_none());
@@ -97,7 +97,7 @@ fn test_gesd_config_default() {
 }
 
 #[test]
-fn test_sigma_clip_removes_outlier() {
+fn sigma_clip_removes_outlier() {
     let mut values = vec![1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 100.0];
     let remaining = SigmaClipConfig::new(2.0, 3).reject(&mut values, &mut scratch());
     let mean = mean_f32(&values[..remaining]);
@@ -106,14 +106,14 @@ fn test_sigma_clip_removes_outlier() {
 }
 
 #[test]
-fn test_sigma_clip_no_outliers() {
+fn sigma_clip_no_outliers() {
     let mut values = vec![1.0, 1.1, 1.2, 0.9, 1.0];
     let remaining = SigmaClipConfig::new(3.0, 3).reject(&mut values, &mut scratch());
     assert_eq!(remaining, 5);
 }
 
 #[test]
-fn test_asymmetric_sigma_clip_removes_high_outlier() {
+fn asymmetric_sigma_clip_removes_high_outlier() {
     let mut values = vec![1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 100.0];
     let remaining =
         SigmaClipConfig::new_asymmetric(4.0, 2.0, 3).reject(&mut values, &mut scratch());
@@ -123,7 +123,7 @@ fn test_asymmetric_sigma_clip_removes_high_outlier() {
 }
 
 #[test]
-fn test_asymmetric_sigma_clip_keeps_low_with_high_threshold() {
+fn asymmetric_sigma_clip_keeps_low_with_high_threshold() {
     // Conservative sigma_low (10.0) + aggressive sigma_high (2.0):
     // high outlier rejected, low outlier kept.
     let mut values = vec![-5.0, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 50.0];
@@ -144,7 +144,7 @@ fn test_asymmetric_sigma_clip_keeps_low_with_high_threshold() {
 }
 
 #[test]
-fn test_sigma_clip_symmetric_equals_asymmetric_same_thresholds() {
+fn sigma_clip_symmetric_equals_asymmetric_same_thresholds() {
     let values = vec![1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 100.0];
     let sigma = 2.5;
 
@@ -159,7 +159,7 @@ fn test_sigma_clip_symmetric_equals_asymmetric_same_thresholds() {
 }
 
 #[test]
-fn test_sorted_mad_matches_mad_f32_fast() {
+fn sorted_mad_matches_mad_f32_fast() {
     // `sorted_mad` must reproduce `mad_f32_fast` (the function the sort-once reject replaced)
     // exactly — same upper-middle order statistic of the absolute deviations. Cover odd/even
     // lengths, center inside/outside the data, duplicates, and a heavy outlier.
@@ -186,7 +186,7 @@ fn test_sorted_mad_matches_mad_f32_fast() {
 }
 
 #[test]
-fn test_sigma_clip_survivor_indices_pair_with_values() {
+fn sigma_clip_survivor_indices_pair_with_values() {
     // After rejection, `indices[..remaining]` must be the original frame indices of the
     // surviving values, i.e. `values[i] == original[indices[i]]`. Regression for the prior
     // quickselect that reordered values without their co-indices, mis-pairing per-frame
@@ -219,7 +219,7 @@ fn test_sigma_clip_survivor_indices_pair_with_values() {
 }
 
 #[test]
-fn test_linear_fit_first_pass_uses_median_mad() {
+fn linear_fit_first_pass_uses_median_mad() {
     // Linear fit's first pass uses median + MAD (same as sigma clip).
     // With max_iterations=1, linear fit behaves identically to a single
     // sigma clip pass.
@@ -234,7 +234,7 @@ fn test_linear_fit_first_pass_uses_median_mad() {
 }
 
 #[test]
-fn test_winsorized_rejects_outlier() {
+fn winsorized_rejects_outlier() {
     let mut values = vec![1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 100.0];
     let remaining = WinsorizedClipConfig::new(2.0).reject(&mut values, &mut scratch());
     assert!(
@@ -246,7 +246,7 @@ fn test_winsorized_rejects_outlier() {
 }
 
 #[test]
-fn test_linear_fit_constant_data() {
+fn linear_fit_constant_data() {
     let mut values = vec![5.0, 5.0, 5.0, 5.0, 5.0];
     let remaining = LinearFitClipConfig::default().reject(&mut values, &mut scratch());
     assert_eq!(remaining, 5);
@@ -254,7 +254,7 @@ fn test_linear_fit_constant_data() {
 }
 
 #[test]
-fn test_linear_fit_rejects_outlier() {
+fn linear_fit_rejects_outlier() {
     let mut values = vec![1.0, 2.0, 3.0, 4.0, 100.0, 6.0];
     let remaining = LinearFitClipConfig::new(2.0, 2.0, 3).reject(&mut values, &mut scratch());
     assert!(remaining < 6);
@@ -262,7 +262,7 @@ fn test_linear_fit_rejects_outlier() {
 }
 
 #[test]
-fn test_linear_fit_rejects_off_line_point_when_seed_pass_is_clean() {
+fn linear_fit_rejects_off_line_point_when_seed_pass_is_clean() {
     // The fit must run even when the median+MAD seed pass rejects nothing — otherwise an
     // off-line point hidden by a steep spread survives. Ramp 10..90 + an off-line `5`:
     // seed median≈45, MAD≈25 → sigma≈37, threshold(2.0)≈74, so the `5` (|Δ|=40) is kept and
@@ -284,7 +284,7 @@ fn test_linear_fit_rejects_off_line_point_when_seed_pass_is_clean() {
 }
 
 #[test]
-fn test_sigma_clip_rejects_outlier_in_bright_high_magnitude_data() {
+fn sigma_clip_rejects_outlier_in_bright_high_magnitude_data() {
     // Guards the early-exit's numerical soundness (f64 accumulation): on high-magnitude pixels
     // (~8000) with a real outlier, `no_outliers_possible` must not spuriously fire and skip
     // rejection. 14 clean values symmetric about 8000 (mean exactly 8000) + one 9000 outlier.
@@ -309,7 +309,7 @@ fn test_sigma_clip_rejects_outlier_in_bright_high_magnitude_data() {
 }
 
 #[test]
-fn test_percentile_clip() {
+fn percentile_clip() {
     let mut values = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0];
     let remaining = PercentileClipConfig::new(20.0, 20.0).reject(&mut values, &mut scratch());
     assert_eq!(remaining, 6);
@@ -318,7 +318,7 @@ fn test_percentile_clip() {
 }
 
 #[test]
-fn test_gesd_removes_single_bright_outlier() {
+fn gesd_removes_single_bright_outlier() {
     let mut values = vec![1.0, 1.1, 0.9, 1.0, 1.2, 0.8, 1.0, 100.0];
     let mut s = scratch();
     let remaining = GesdConfig::new(0.05, None).reject(&mut values, &mut s);
@@ -334,7 +334,7 @@ fn test_gesd_removes_single_bright_outlier() {
 }
 
 #[test]
-fn test_gesd_no_outliers() {
+fn gesd_no_outliers() {
     // Constant values — sigma=0 so no outliers detected
     let mut values = vec![1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0];
     let remaining = GesdConfig::new(0.05, Some(3)).reject(&mut values, &mut scratch());
@@ -342,7 +342,7 @@ fn test_gesd_no_outliers() {
 }
 
 #[test]
-fn test_gesd_tiny_alpha_uses_finite_limiting_critical_value() {
+fn gesd_tiny_alpha_uses_finite_limiting_critical_value() {
     let mut values: Vec<f32> = (0..15).map(|value| value as f32).collect();
     let mut scratch = scratch();
 
@@ -354,14 +354,14 @@ fn test_gesd_tiny_alpha_uses_finite_limiting_critical_value() {
 }
 
 #[test]
-fn test_gesd_keeps_tight_cluster() {
+fn gesd_keeps_tight_cluster() {
     let mut values = vec![1.0, 1.1, 0.9, 1.0, 1.2, 0.8, 1.0, 1.1];
     let remaining = GesdConfig::default().reject(&mut values, &mut scratch());
     assert_eq!(remaining, 8, "Tight cluster should have no rejections");
 }
 
 #[test]
-fn test_small_sample_handling() {
+fn small_sample_handling() {
     // All algorithms should handle n=2 gracefully
     let r = SigmaClipConfig::default().reject(&mut [1.0, 2.0], &mut scratch());
     assert_eq!(r, 2);
@@ -383,7 +383,7 @@ fn test_small_sample_handling() {
 }
 
 #[test]
-fn test_sigma_clip_indices_track_survivors() {
+fn sigma_clip_indices_track_survivors() {
     let mut values = vec![1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 100.0];
     let mut s = scratch();
     let remaining = SigmaClipConfig::new(2.0, 3).reject(&mut values, &mut s);
@@ -400,7 +400,7 @@ fn test_sigma_clip_indices_track_survivors() {
 }
 
 #[test]
-fn test_linear_fit_indices_track_survivors() {
+fn linear_fit_indices_track_survivors() {
     let mut values = vec![1.0, 2.0, 3.0, 4.0, 100.0, 6.0];
     let mut s = scratch();
     let remaining = LinearFitClipConfig::new(2.0, 2.0, 3).reject(&mut values, &mut s);
@@ -417,7 +417,7 @@ fn test_linear_fit_indices_track_survivors() {
 }
 
 #[test]
-fn test_percentile_indices_track_survivors() {
+fn percentile_indices_track_survivors() {
     // Values: [5, 1, 3, 2, 4] → sorted: [1, 2, 3, 4, 5]
     // With 20% clip on each end: clips 1 low, 1 high → survivors [2, 3, 4]
     let mut values = vec![5.0, 1.0, 3.0, 2.0, 4.0];
@@ -439,7 +439,7 @@ fn test_percentile_indices_track_survivors() {
 }
 
 #[test]
-fn test_no_rejection_preserves_all_indices() {
+fn no_rejection_preserves_all_indices() {
     let mut values = vec![1.0, 1.1, 1.2, 0.9, 1.0];
     let mut s = scratch();
     let remaining = SigmaClipConfig::new(3.0, 3).reject(&mut values, &mut s);
@@ -456,7 +456,7 @@ fn test_no_rejection_preserves_all_indices() {
 }
 
 #[test]
-fn test_rejection_constructors() {
+fn rejection_constructors() {
     let r = Rejection::sigma_clip(2.0);
     assert!(
         matches!(r, Rejection::SigmaClip(c) if (c.sigma_low - 2.0).abs() < f32::EPSILON && (c.sigma_high - 2.0).abs() < f32::EPSILON)
@@ -485,7 +485,7 @@ fn scratch() -> ScratchBuffers {
 }
 
 #[test]
-fn test_combine_mean_none() {
+fn combine_mean_none() {
     let mut values = vec![1.0, 2.0, 3.0, 4.0, 5.0];
     let mean = Rejection::None
         .combine_mean(&mut values, &[1.0; 5], &mut scratch(), true)
@@ -494,7 +494,7 @@ fn test_combine_mean_none() {
 }
 
 #[test]
-fn test_combine_mean_sigma_clip() {
+fn combine_mean_sigma_clip() {
     let mut values = vec![1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 100.0];
     let mean = Rejection::sigma_clip(2.0)
         .combine_mean(&mut values, &[1.0; 8], &mut scratch(), true)
@@ -503,7 +503,7 @@ fn test_combine_mean_sigma_clip() {
 }
 
 #[test]
-fn test_weighted_percentile_uses_weights() {
+fn weighted_percentile_uses_weights() {
     let mut values = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0];
     let weights = vec![1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 10.0, 1.0, 1.0];
 
@@ -519,7 +519,7 @@ fn test_weighted_percentile_uses_weights() {
 }
 
 #[test]
-fn test_weighted_winsorized_uses_weights() {
+fn weighted_winsorized_uses_weights() {
     let mut values = vec![1.0, 2.0, 2.0, 2.0, 2.0, 100.0];
     let weights = vec![10.0, 1.0, 1.0, 1.0, 1.0, 1.0];
 
@@ -542,7 +542,7 @@ fn test_weighted_winsorized_uses_weights() {
 }
 
 #[test]
-fn test_weighted_asymmetric_sigma_clip() {
+fn weighted_asymmetric_sigma_clip() {
     let mut values = vec![1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 100.0];
     let weights = vec![10.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0];
 
@@ -554,7 +554,7 @@ fn test_weighted_asymmetric_sigma_clip() {
 }
 
 #[test]
-fn test_weighted_sigma_clip_weight_alignment() {
+fn weighted_sigma_clip_weight_alignment() {
     let mut values = vec![2.0, 100.0, 3.0, 2.5, 2.2, 1.8, 2.8, 2.3];
     let weights = vec![10.0, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1];
 
@@ -570,7 +570,7 @@ fn test_weighted_sigma_clip_weight_alignment() {
 }
 
 #[test]
-fn test_weighted_linear_fit_weight_alignment() {
+fn weighted_linear_fit_weight_alignment() {
     // Tight cluster [1.0, 1.1, 1.2, 1.3, 1.4] with outlier 100.0
     // After rejection removes 100, weighted mean dominated by frame 0 (weight=10)
     let mut values = vec![1.0, 1.1, 1.2, 1.3, 100.0, 1.4];
@@ -588,7 +588,7 @@ fn test_weighted_linear_fit_weight_alignment() {
 }
 
 #[test]
-fn test_weighted_gesd_weight_alignment() {
+fn weighted_gesd_weight_alignment() {
     let mut values = vec![1.0, 1.1, 0.9, 1.0, 1.2, 0.8, 1.0, 100.0];
     let weights = vec![10.0, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1];
 
@@ -604,7 +604,7 @@ fn test_weighted_gesd_weight_alignment() {
 }
 
 #[test]
-fn test_gesd_matches_nist_reference_example() {
+fn gesd_matches_nist_reference_example() {
     let mut values = vec![
         -0.25, 0.68, 0.94, 1.15, 1.20, 1.26, 1.26, 1.34, 1.38, 1.43, 1.49, 1.49, 1.55, 1.56, 1.58,
         1.65, 1.69, 1.70, 1.76, 1.77, 1.81, 1.91, 1.94, 1.96, 1.99, 2.06, 2.09, 2.10, 2.14, 2.15,
@@ -653,7 +653,7 @@ fn test_gesd_matches_nist_reference_example() {
 }
 
 #[test]
-fn test_gesd_is_sign_symmetric_for_asymmetric_outliers() {
+fn gesd_is_sign_symmetric_for_asymmetric_outliers() {
     let values = vec![
         -1.4, -1.2, -1.0, -0.8, -0.6, -0.4, -0.2, 0.0, 0.2, 0.4, 0.6, 0.8, 1.0, 1.2, 1.4, -8.0,
         10.0,
@@ -678,7 +678,7 @@ fn test_gesd_is_sign_symmetric_for_asymmetric_outliers() {
 }
 
 #[test]
-fn test_gesd_gaussian_false_positive_rate_matches_alpha() {
+fn gesd_gaussian_false_positive_rate_matches_alpha() {
     const ALPHA: f32 = 0.05;
     const TRIALS: usize = 4_000;
 
@@ -718,7 +718,7 @@ fn standard_normal(rng: &mut ChaCha8Rng) -> f32 {
 }
 
 #[test]
-fn test_rejection_default_is_sigma_clip() {
+fn rejection_default_is_sigma_clip() {
     let r = Rejection::default();
     assert!(
         matches!(r, Rejection::SigmaClip(c) if (c.sigma_low - 2.5).abs() < f32::EPSILON
@@ -728,7 +728,7 @@ fn test_rejection_default_is_sigma_clip() {
 }
 
 #[test]
-fn test_sigma_clip_multiple_outliers() {
+fn sigma_clip_multiple_outliers() {
     let mut values = vec![1.0, 1.5, 2.0, 2.5, 3.0, 50.0, 80.0, 100.0];
     let remaining = SigmaClipConfig::new(2.0, 3).reject(&mut values, &mut scratch());
     // All three outliers should be removed
@@ -743,14 +743,14 @@ fn test_sigma_clip_multiple_outliers() {
 }
 
 #[test]
-fn test_winsorized_no_outliers() {
+fn winsorized_no_outliers() {
     let mut values = vec![2.0, 2.1, 2.2, 1.9, 2.0];
     let remaining = WinsorizedClipConfig::new(3.0).reject(&mut values, &mut scratch());
     assert_eq!(remaining, 5, "No values should be rejected");
 }
 
 #[test]
-fn test_winsorized_asymmetric() {
+fn winsorized_asymmetric() {
     // Strong high outlier, mild low variation
     let mut values = vec![1.0, 1.1, 1.2, 0.9, 1.0, 50.0];
     let remaining =
@@ -761,7 +761,7 @@ fn test_winsorized_asymmetric() {
 }
 
 #[test]
-fn test_linear_fit_rejects_extreme_outlier() {
+fn linear_fit_rejects_extreme_outlier() {
     // Linear fit uses fit-derived sigma which is tighter than median+MAD.
     // Initial pass (median+MAD) removes the gross outlier, then the fit
     // refines sigma. With max_iterations=1, only the initial pass runs.
@@ -778,7 +778,7 @@ fn test_linear_fit_rejects_extreme_outlier() {
 }
 
 #[test]
-fn test_linear_fit_tighter_than_sigma_clip() {
+fn linear_fit_tighter_than_sigma_clip() {
     // Linear fit derives sigma from residuals of a linear fit through sorted
     // values. For well-distributed data, this sigma is tighter than median+MAD,
     // so linear fit rejects more aggressively on subsequent iterations.
@@ -798,14 +798,14 @@ fn test_linear_fit_tighter_than_sigma_clip() {
 }
 
 #[test]
-fn test_surviving_range_single_element() {
+fn surviving_range_single_element() {
     let config = PercentileClipConfig::new(10.0, 10.0);
     let range = config.surviving_range(1);
     assert_eq!(range, 0..1, "Single element must survive");
 }
 
 #[test]
-fn test_surviving_range_extreme_percentiles() {
+fn surviving_range_extreme_percentiles() {
     // 49% + 49% = 98% clipped — should still keep at least 1
     let config = PercentileClipConfig::new(49.0, 49.0);
     let range = config.surviving_range(5);
@@ -816,7 +816,7 @@ fn test_surviving_range_extreme_percentiles() {
 }
 
 #[test]
-fn test_weighted_mean_indexed_basic() {
+fn weighted_mean_indexed_basic() {
     // values [2, 4, 6] with weights [10, 1, 1] via identity indices
     // expected: (20 + 4 + 6) / 12 = 2.5
     let values = [2.0, 4.0, 6.0];
@@ -828,7 +828,7 @@ fn test_weighted_mean_indexed_basic() {
 }
 
 #[test]
-fn test_weighted_mean_indexed_reordered() {
+fn weighted_mean_indexed_reordered() {
     // Simulate rejection reordering: values were [10, 99, 20] → after rejecting idx 1,
     // survivors are values [10, 20] with indices [0, 2]
     let values = [10.0, 20.0];
@@ -846,7 +846,7 @@ fn test_weighted_mean_indexed_reordered() {
 }
 
 #[test]
-fn test_combine_mean_percentile_unweighted() {
+fn combine_mean_percentile_unweighted() {
     let mut values = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0];
     let ones = vec![1.0f32; values.len()];
     let mean = Rejection::percentile(20.0)
@@ -861,7 +861,7 @@ fn test_combine_mean_percentile_unweighted() {
 }
 
 #[test]
-fn test_combine_mean_none_with_weights() {
+fn combine_mean_none_with_weights() {
     let mut values = vec![1.0, 2.0, 3.0, 4.0, 5.0];
     let weights = vec![10.0, 1.0, 1.0, 1.0, 1.0];
     let mean = Rejection::None
@@ -906,7 +906,7 @@ fn unit_weights_reduce_to_the_plain_mean_of_the_survivors() {
 }
 
 #[test]
-fn test_winsorized_robust_estimate_uses_stddev_not_mad() {
+fn winsorized_robust_estimate_uses_stddev_not_mad() {
     // With known data, verify robust_estimate returns stddev-based sigma
     // (not MAD-based). For Gaussian data, stddev > MAD * 1.4826 is false,
     // but for uniform-like data they differ noticeably.
@@ -929,7 +929,7 @@ fn test_winsorized_robust_estimate_uses_stddev_not_mad() {
 }
 
 #[test]
-fn test_winsorized_correction_factor_applied() {
+fn winsorized_correction_factor_applied() {
     // Verify 1.134 correction is applied by comparing with raw stddev
     let config = WinsorizedClipConfig::new(3.0);
     let values = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0];
@@ -947,7 +947,7 @@ fn test_winsorized_correction_factor_applied() {
 }
 
 #[test]
-fn test_winsorized_converges() {
+fn winsorized_converges() {
     // With a clear outlier, verify convergence produces stable estimates
     let config = WinsorizedClipConfig::new(2.5);
     let values = vec![10.0, 10.1, 10.2, 9.9, 10.0, 10.1, 9.8, 10.3, 50.0];
@@ -967,7 +967,7 @@ fn test_winsorized_converges() {
 }
 
 #[test]
-fn test_winsorized_huber_constant_not_user_sigma() {
+fn winsorized_huber_constant_not_user_sigma() {
     // Verify that Winsorization boundaries use c=1.5, not user's sigma.
     // With sigma=10.0 (very permissive), phase 1 should still use c=1.5
     // for Winsorization, producing the same robust estimates.
@@ -1010,7 +1010,7 @@ fn test_winsorized_huber_constant_not_user_sigma() {
 }
 
 #[test]
-fn test_linear_fit_per_pixel_rejection() {
+fn linear_fit_per_pixel_rejection() {
     // Construct data with a clear linear trend plus one outlier.
     // Sorted values: [1, 2, 3, 4, 5, 6, 7, 100]
     // The fit through sorted positions should approximate y = 1 + x.
@@ -1034,7 +1034,7 @@ fn test_linear_fit_per_pixel_rejection() {
 }
 
 #[test]
-fn test_linear_fit_sigma_is_mean_abs_dev() {
+fn linear_fit_sigma_is_mean_abs_dev() {
     // For a perfect linear sequence, mean absolute deviation from fit should be ~0.
     // Adding a known deviation: values = [1, 2, 3, 4, 5] + noise on last.
     // After initial median+MAD pass (no rejection for clean data),
@@ -1046,7 +1046,7 @@ fn test_linear_fit_sigma_is_mean_abs_dev() {
 }
 
 #[test]
-fn test_linear_fit_preserves_trend() {
+fn linear_fit_preserves_trend() {
     // Linear fit should NOT reject values that follow a trend, even if
     // they're far from the median. This was the old bug: single-center
     // rejection would reject endpoints of a steep trend.
@@ -1059,7 +1059,7 @@ fn test_linear_fit_preserves_trend() {
 }
 
 #[test]
-fn test_linear_fit_rejects_middle_outlier() {
+fn linear_fit_rejects_middle_outlier() {
     // An outlier in the middle of the distribution should be caught by
     // per-pixel rejection. After sorting: [1, 2, 3, 4, 5, 50, 6, 7]
     // → sorted: [1, 2, 3, 4, 5, 6, 7, 50]. Fit: ~y = 0.71 + 0.71*x.
@@ -1074,7 +1074,7 @@ fn test_linear_fit_rejects_middle_outlier() {
 }
 
 #[test]
-fn test_sort_with_indices_large_n_correctness() {
+fn sort_with_indices_large_n_correctness() {
     // 100 elements in reverse order → exercises the introsort path (threshold=64).
     // After sorting: values should be [0, 1, 2, ..., 99] and indices should
     // map each sorted position back to its original position.
@@ -1095,7 +1095,7 @@ fn test_sort_with_indices_large_n_correctness() {
 }
 
 #[test]
-fn test_sort_with_indices_large_n_shuffled() {
+fn sort_with_indices_large_n_shuffled() {
     // Deterministic shuffle: positions generated by (i*37) % 200.
     // Verifies sort + index tracking for a non-trivial permutation.
     let n = 200;
@@ -1130,7 +1130,7 @@ fn test_sort_with_indices_large_n_shuffled() {
 }
 
 #[test]
-fn test_percentile_large_stack() {
+fn percentile_large_stack() {
     // 100 frames (exercises introsort path). Values 0..99.
     // 10% clip each end → remove bottom 10 and top 10 → survivors 10..90 (80 values).
     // Indices should map survivors to their original positions.
@@ -1158,7 +1158,7 @@ fn test_percentile_large_stack() {
 }
 
 #[test]
-fn test_linear_fit_large_stack() {
+fn linear_fit_large_stack() {
     // 100 frames with a linear trend (value = index) plus one outlier.
     // values[50] = 1000.0 (original position 50). Should be rejected.
     // All other values should survive.
@@ -1185,7 +1185,7 @@ fn test_linear_fit_large_stack() {
 }
 
 #[test]
-fn test_reset_indices_basic() {
+fn reset_indices_basic() {
     let mut scratch = ScratchBuffers::default();
     scratch.reset_indices(5);
     let indices = &scratch.indices;
@@ -1193,7 +1193,7 @@ fn test_reset_indices_basic() {
 }
 
 #[test]
-fn test_reset_indices_reuses_allocation() {
+fn reset_indices_reuses_allocation() {
     let mut scratch = ScratchBuffers::default();
     scratch.indices.reserve(100);
     scratch.reset_indices(5);
@@ -1209,7 +1209,7 @@ fn test_reset_indices_reuses_allocation() {
 }
 
 #[test]
-fn test_reset_indices_overwrites_stale_data() {
+fn reset_indices_overwrites_stale_data() {
     let mut scratch = ScratchBuffers {
         indices: vec![99, 88, 77, 66, 55],
         ..Default::default()
@@ -1220,7 +1220,7 @@ fn test_reset_indices_overwrites_stale_data() {
 }
 
 #[test]
-fn test_reset_indices_empty() {
+fn reset_indices_empty() {
     let mut scratch = ScratchBuffers {
         indices: vec![1, 2, 3],
         ..Default::default()
@@ -1231,14 +1231,14 @@ fn test_reset_indices_empty() {
 }
 
 #[test]
-fn test_no_outliers_possible_tight_cluster() {
+fn no_outliers_possible_tight_cluster() {
     // 20 values all equal to 10.0 → stddev=0 → returns true
     let values = vec![10.0f32; 20];
     assert!(SigmaClipConfig::no_outliers_possible(&values, 2.5));
 }
 
 #[test]
-fn test_no_outliers_possible_small_spread() {
+fn no_outliers_possible_small_spread() {
     // values = [10, 10, 10, ..., 10, 11, 9] (18×10 + 11 + 9), N=20
     // trimmed (exclude min=9, max=11): 18×10 + one of {9,11} excluded
     // Actually exclude the single min (9) and single max (11):
@@ -1252,7 +1252,7 @@ fn test_no_outliers_possible_small_spread() {
 }
 
 #[test]
-fn test_no_outliers_possible_clear_outlier() {
+fn no_outliers_possible_clear_outlier() {
     // 17×10.0 + [9.0, 11.0, 100.0], N=20
     // min=9.0, max=100.0, excluded from trimmed stats.
     // trimmed: 17×10.0 + 11.0 = 181, trimmed_n=18, trimmed_mean=181/18 ≈ 10.056
@@ -1268,7 +1268,7 @@ fn test_no_outliers_possible_clear_outlier() {
 }
 
 #[test]
-fn test_no_outliers_possible_returns_false_for_small_n() {
+fn no_outliers_possible_returns_false_for_small_n() {
     // N < 10 always returns false (trimming would distort too much)
     let values = vec![10.0f32; 5];
     assert!(!SigmaClipConfig::no_outliers_possible(&values, 2.5));
@@ -1278,7 +1278,7 @@ fn test_no_outliers_possible_returns_false_for_small_n() {
 }
 
 #[test]
-fn test_no_outliers_possible_moderate_spread() {
+fn no_outliers_possible_moderate_spread() {
     // Linearly spaced: [0, 1, 2, ..., 19], N=20
     // min=0, max=19, excluded → trimmed = [1..18], trimmed_n=18
     // trimmed_sum = 1+2+...+18 = 171, trimmed_mean = 171/18 = 9.5
@@ -1293,7 +1293,7 @@ fn test_no_outliers_possible_moderate_spread() {
 }
 
 #[test]
-fn test_no_outliers_possible_asymmetric_outliers() {
+fn no_outliers_possible_asymmetric_outliers() {
     // [1, 1.5, 2, 2.5, 3, 50, 80, 100, 1, 1] — N=10
     // min=1.0, max=100.0, excluded
     // trimmed: [1.5, 2, 2.5, 3, 50, 80, 1, 1] — n=8
@@ -1306,7 +1306,7 @@ fn test_no_outliers_possible_asymmetric_outliers() {
 }
 
 #[test]
-fn test_no_outliers_possible_does_not_break_rejection() {
+fn no_outliers_possible_does_not_break_rejection() {
     // End-to-end: early exit must not prevent correct rejection.
     // Need data with non-zero MAD so sigma clipping can define a threshold.
     // 47 values at 9.0 + 47 values at 11.0 + 6 outliers = 100 values.
@@ -1324,7 +1324,7 @@ fn test_no_outliers_possible_does_not_break_rejection() {
 }
 
 #[test]
-fn test_no_outliers_possible_clean_data_skips_quickselect() {
+fn no_outliers_possible_clean_data_skips_quickselect() {
     // 100×10.0 (perfectly uniform) — early exit should trigger,
     // meaning reject returns all values with no changes.
     let mut values = vec![10.0f32; 100];
@@ -1337,7 +1337,7 @@ fn test_no_outliers_possible_clean_data_skips_quickselect() {
 }
 
 #[test]
-fn test_weighted_mean_indexed_all_zero_weights() {
+fn weighted_mean_indexed_all_zero_weights() {
     // All weights zero → should return 0.0, not NaN/Inf
     let values = [5.0f32, 10.0, 15.0];
     let weights = [0.0f32, 0.0, 0.0];
@@ -1352,7 +1352,7 @@ fn test_weighted_mean_indexed_all_zero_weights() {
 }
 
 #[test]
-fn test_weighted_mean_indexed_partial_zero_weights() {
+fn weighted_mean_indexed_partial_zero_weights() {
     // values=[5, 10, 15], weights=[0, 2, 0], indices=[0, 1, 2]
     // Only middle value has nonzero weight → mean = 10*2 / 2 = 10.0
     let values = [5.0f32, 10.0, 15.0];

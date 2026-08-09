@@ -70,7 +70,7 @@ fn translate_image(src_pixels: &[f32], size: Size2us, dx: f64, dy: f64) -> Vec<f
 }
 
 #[test]
-fn test_image_registration_translation() {
+fn image_registration_translation() {
     // Reference star field image (forward model).
     let size = Size2us::new(256, 256);
     let ref_pixels_vec = star_field(size, 50, 42).image.channel(0).pixels().to_vec();
@@ -149,7 +149,7 @@ fn test_image_registration_translation() {
 }
 
 #[test]
-fn test_image_registration_rotation() {
+fn image_registration_rotation() {
     let size = Size2us::new(256, 256);
     let ref_pixels_vec = star_field(size, 60, 123).image.channel(0).pixels().to_vec();
 
@@ -204,7 +204,7 @@ fn test_image_registration_rotation() {
 }
 
 #[test]
-fn test_image_registration_similarity() {
+fn image_registration_similarity() {
     let size = Size2us::new(256, 256);
     let ref_pixels_vec = star_field(size, 70, 456).image.channel(0).pixels().to_vec();
 
@@ -270,7 +270,7 @@ fn test_image_registration_similarity() {
 }
 
 #[test]
-fn test_image_registration_with_noise() {
+fn image_registration_with_noise() {
     // Higher noise level: a shallow well + extra read noise stresses registration.
     let size = Size2us::new(256, 256);
     let scene = Scene::random_field(
@@ -348,7 +348,7 @@ fn test_image_registration_with_noise() {
 }
 
 #[test]
-fn test_image_registration_dense_field() {
+fn image_registration_dense_field() {
     // Dense star field.
     let size = Size2us::new(256, 256);
     let ref_pixels_vec = star_field(size, 200, 999)
@@ -407,7 +407,7 @@ fn test_image_registration_dense_field() {
 }
 
 #[test]
-fn test_image_registration_large_image() {
+fn image_registration_large_image() {
     let size = Size2us::new(1024, 1024);
     let ref_pixels_vec = star_field(size, 100, 111)
         .image

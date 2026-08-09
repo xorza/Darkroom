@@ -47,7 +47,7 @@ fn measure_single_star(
 /// Circular Gaussian with sigma=2.0. True FWHM = 2.35482 * 2.0 = 4.70964.
 /// The fit recovers sigma accurately; moments are biased by the finite stamp.
 #[test]
-fn test_gaussian_fit_fwhm_from_fit_params() {
+fn gaussian_fit_fwhm_from_fit_params() {
     let sigma = 2.0f32;
     // True FWHM = FWHM_TO_SIGMA * sigma = 2.35482 * 2.0 = 4.70964
     let true_fwhm = FWHM_TO_SIGMA * sigma;
@@ -82,7 +82,7 @@ fn test_gaussian_fit_fwhm_from_fit_params() {
 /// Elongated Gaussian with sigma_x=2.0, sigma_y=4.0.
 /// True eccentricity = sqrt(1 - (sigma_min/sigma_max)^2) = sqrt(1 - (2/4)^2) = sqrt(0.75) ≈ 0.8660.
 #[test]
-fn test_gaussian_fit_eccentricity_from_fit_params() {
+fn gaussian_fit_eccentricity_from_fit_params() {
     let sigma_x = 2.0f32;
     let sigma_y = 4.0f32;
     // e = sqrt(1 - (min/max)^2) = sqrt(1 - (2/4)^2) = sqrt(0.75) = 0.8660
@@ -120,7 +120,7 @@ fn test_gaussian_fit_eccentricity_from_fit_params() {
 ///
 /// The fit models the Gaussian directly, recovering sigma more accurately.
 #[test]
-fn test_gaussian_fit_fwhm_more_accurate_than_moments() {
+fn gaussian_fit_fwhm_more_accurate_than_moments() {
     let sigma = 2.5f32;
     let true_fwhm = FWHM_TO_SIGMA * sigma;
 
@@ -167,7 +167,7 @@ fn test_gaussian_fit_fwhm_more_accurate_than_moments() {
 /// Moments-based FWHM is severely biased for Moffat profiles because
 /// the extended wings contribute disproportionately to sum_r2.
 #[test]
-fn test_moffat_fit_fwhm_from_fit_params() {
+fn moffat_fit_fwhm_from_fit_params() {
     let alpha = 3.0f32;
     let beta = 2.5f32;
     let true_fwhm = alpha_beta_to_fwhm(alpha, beta);
@@ -199,7 +199,7 @@ fn test_moffat_fit_fwhm_from_fit_params() {
 /// For a circular Moffat profile, eccentricity should be near zero
 /// regardless of whether it comes from fit or moments.
 #[test]
-fn test_moffat_fit_eccentricity_stays_moment_based() {
+fn moffat_fit_eccentricity_stays_moment_based() {
     let alpha = 3.0f32;
     let beta = 2.5f32;
     let pos = DVec2::new(64.0, 64.0);
@@ -222,7 +222,7 @@ fn test_moffat_fit_eccentricity_stays_moment_based() {
 /// Moments-based FWHM is biased upward by finite stamp size — the pre-existing
 /// behavior should be preserved exactly.
 #[test]
-fn test_moments_only_fwhm_unchanged() {
+fn moments_only_fwhm_unchanged() {
     let sigma = 2.5f32;
     let true_fwhm = FWHM_TO_SIGMA * sigma;
 
@@ -257,7 +257,7 @@ fn test_moments_only_fwhm_unchanged() {
 /// Moffat profiles have heavy wings that heavily bias moment-based FWHM upward.
 /// The fit directly recovers alpha, giving accurate FWHM.
 #[test]
-fn test_moffat_fit_fwhm_more_accurate_than_moments() {
+fn moffat_fit_fwhm_more_accurate_than_moments() {
     let alpha = 3.0f32;
     let beta = 2.5f32;
     let true_fwhm = alpha_beta_to_fwhm(alpha, beta);

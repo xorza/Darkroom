@@ -34,7 +34,7 @@ fn assert_naive_dilation(mask: &BitBuffer2, dilated: &BitBuffer2, radius: usize,
 }
 
 #[test]
-fn test_dilate_mask_empty() {
+fn dilate_mask_empty() {
     let mask = BitBuffer2::from_slice(Size2us::new(3, 3), &[false; 9]);
     let mut dilated = BitBuffer2::new_filled(Size2us::new(3, 3), false);
     dilate_mask(&mask, 1, &mut dilated);
@@ -42,7 +42,7 @@ fn test_dilate_mask_empty() {
 }
 
 #[test]
-fn test_dilate_mask_single_pixel_radius_0() {
+fn dilate_mask_single_pixel_radius_0() {
     // Radius 0 should not expand
     let mut mask_data = vec![false; 9];
     mask_data[4] = true; // center
@@ -55,7 +55,7 @@ fn test_dilate_mask_single_pixel_radius_0() {
 }
 
 #[test]
-fn test_dilate_mask_single_pixel_radius_1() {
+fn dilate_mask_single_pixel_radius_1() {
     // 3x3 mask with center pixel, radius 1 should create 3x3 square
     let mut mask_data = vec![false; 25]; // 5x5
     mask_data[2 * 5 + 2] = true; // center at (2, 2)
@@ -82,7 +82,7 @@ fn test_dilate_mask_single_pixel_radius_1() {
 }
 
 #[test]
-fn test_dilate_mask_single_pixel_radius_2() {
+fn dilate_mask_single_pixel_radius_2() {
     // 7x7 mask with center pixel, radius 2 should create 5x5 square
     let mut mask_data = vec![false; 49];
     mask_data[3 * 7 + 3] = true; // center at (3, 3)
@@ -107,7 +107,7 @@ fn test_dilate_mask_single_pixel_radius_2() {
 }
 
 #[test]
-fn test_dilate_mask_corner_pixel() {
+fn dilate_mask_corner_pixel() {
     // Pixel at corner (0,0), dilation should be clipped to image bounds
     let mut mask_data = vec![false; 16];
     mask_data[0] = true;
@@ -126,7 +126,7 @@ fn test_dilate_mask_corner_pixel() {
 }
 
 #[test]
-fn test_dilate_mask_preserves_original_pixels() {
+fn dilate_mask_preserves_original_pixels() {
     // Original pixels should always be in dilated result
     let mut mask_data = vec![false; 25];
     mask_data[0] = true;
@@ -144,7 +144,7 @@ fn test_dilate_mask_preserves_original_pixels() {
 
 #[test]
 #[should_panic(expected = "radius must be <= 63")]
-fn test_dilate_mask_radius_above_63_panics() {
+fn dilate_mask_radius_above_63_panics() {
     // Radius > 63 is out of contract (production caps dilation at 50).
     let mask = BitBuffer2::from_slice(Size2us::new(200, 1), &[false; 200]);
     let mut dilated = BitBuffer2::new_filled(Size2us::new(200, 1), false);

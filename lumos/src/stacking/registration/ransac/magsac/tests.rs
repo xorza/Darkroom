@@ -5,7 +5,7 @@ use crate::stacking::registration::ransac::magsac::*;
 const TOL: f64 = 1e-10;
 
 #[test]
-fn test_gamma_k2_exact_values() {
+fn gamma_k2_exact_values() {
     // γ(1, x) = 1 - exp(-x) for x > 0, else 0
     assert_eq!(gamma_k2(0.0), 0.0);
     assert_eq!(gamma_k2(-1.0), 0.0);
@@ -28,7 +28,7 @@ fn test_gamma_k2_exact_values() {
 }
 
 #[test]
-fn test_scorer_construction_exact() {
+fn scorer_construction_exact() {
     // MagsacScorer::new(σ_max) stores:
     //   max_sigma_sq = σ_max²
     //   threshold_sq = χ²₀.₉₉(2) * σ_max² = 9.21 * σ_max²
@@ -52,7 +52,7 @@ fn test_scorer_construction_exact() {
 }
 
 #[test]
-fn test_scorer_loss_hand_computed() {
+fn scorer_loss_hand_computed() {
     // With σ_max = 1.0: σ²_max = 1.0, threshold_sq = 9.21
     let scorer = MagsacScorer::new(1.0);
 
@@ -95,7 +95,7 @@ fn test_scorer_loss_hand_computed() {
 }
 
 #[test]
-fn test_scorer_loss_at_threshold_boundary() {
+fn scorer_loss_at_threshold_boundary() {
     // Verify loss is continuous at the threshold boundary.
     // Just below threshold should be close to outlier_loss.
     let scorer = MagsacScorer::new(1.0);
@@ -121,7 +121,7 @@ fn test_scorer_loss_at_threshold_boundary() {
 }
 
 #[test]
-fn test_scorer_different_sigma_changes_loss() {
+fn scorer_different_sigma_changes_loss() {
     // Verify that different sigma values produce different losses for the same residual.
     // With σ=1: loss(r²=2) uses x = 2/2 = 1
     // With σ=2: loss(r²=2) uses x = 2/8 = 0.25
@@ -143,7 +143,7 @@ fn test_scorer_different_sigma_changes_loss() {
 }
 
 #[test]
-fn test_is_inlier_exact_threshold() {
+fn is_inlier_exact_threshold() {
     let scorer = MagsacScorer::new(1.0);
     // threshold_sq = 9.21
 
@@ -155,7 +155,7 @@ fn test_is_inlier_exact_threshold() {
 }
 
 #[test]
-fn test_effective_threshold_exact() {
+fn effective_threshold_exact() {
     // threshold_sq = CHI_QUANTILE_SQ * σ² = 9.21 * σ²
     // effective threshold (pixels) = sqrt(threshold_sq) = sqrt(9.21) * σ
 

@@ -97,7 +97,7 @@ mod tests {
     use crate::stacking::star_detection::median_filter::simd::neon::*;
 
     #[test]
-    fn test_neon_median_filter_row() {
+    fn neon_median_filter_row() {
         use crate::stacking::star_detection::median_filter::simd::median_filter_row_scalar;
 
         let width = 20;

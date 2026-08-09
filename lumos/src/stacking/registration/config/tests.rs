@@ -2,7 +2,7 @@ use crate::stacking::registration::config::*;
 use crate::testing::prelude::*;
 
 #[test]
-fn test_config_default_values() {
+fn config_default_values() {
     let config = Config::default();
     assert_eq!(config.transform_type, TransformType::Auto);
     assert_eq!(config.matching.max_stars, 200);
@@ -35,7 +35,7 @@ fn test_config_default_values() {
 }
 
 #[test]
-fn test_config_fast_preset() {
+fn config_fast_preset() {
     let config = Config::fast();
     assert_eq!(config.ransac.max_iterations, 500);
     assert_eq!(config.matching.max_stars, 100);
@@ -45,7 +45,7 @@ fn test_config_fast_preset() {
 }
 
 #[test]
-fn test_config_precise_preset() {
+fn config_precise_preset() {
     let config = Config::precise();
     assert_eq!(config.ransac.max_iterations, 5000);
     assert!((config.ransac.confidence - 0.999).abs() < 1e-10);
@@ -55,7 +55,7 @@ fn test_config_precise_preset() {
 }
 
 #[test]
-fn test_config_wide_field_preset() {
+fn config_wide_field_preset() {
     let config = Config::wide_field();
     assert_eq!(config.transform_type, TransformType::Homography);
     assert!(config.sip.is_some());
@@ -65,7 +65,7 @@ fn test_config_wide_field_preset() {
 }
 
 #[test]
-fn test_config_precise_wide_field_preset() {
+fn config_precise_wide_field_preset() {
     let config = Config::precise_wide_field();
     assert_eq!(config.transform_type, TransformType::Homography);
     assert_eq!(config.matching.max_stars, 500);
@@ -82,7 +82,7 @@ fn test_config_precise_wide_field_preset() {
 }
 
 #[test]
-fn test_config_mosaic_preset() {
+fn config_mosaic_preset() {
     let config = Config::mosaic();
     assert!(config.ransac.max_rotation.is_none());
     assert_eq!(config.ransac.scale_range, Some((0.5, 2.0)));
@@ -90,7 +90,7 @@ fn test_config_mosaic_preset() {
 }
 
 #[test]
-fn test_config_custom() {
+fn config_custom() {
     let config = Config {
         transform_type: TransformType::Similarity,
         ransac: RansacConfig {
@@ -105,7 +105,7 @@ fn test_config_custom() {
 }
 
 #[test]
-fn test_interpolation_method_kernel_radius() {
+fn interpolation_method_kernel_radius() {
     assert_eq!(InterpolationMethod::Nearest.kernel_radius(), 1);
     assert_eq!(InterpolationMethod::Bilinear.kernel_radius(), 1);
     assert_eq!(InterpolationMethod::Bicubic.kernel_radius(), 2);
@@ -127,20 +127,20 @@ fn test_lanczos_param() {
 }
 
 #[test]
-fn test_interpolation_method_default() {
+fn interpolation_method_default() {
     let method = InterpolationMethod::default();
     assert_eq!(method, InterpolationMethod::Lanczos3);
 }
 
 #[test]
-fn test_warp_params_defaults() {
+fn warp_params_defaults() {
     let default = WarpParams::default();
     assert_eq!(default.method, InterpolationMethod::Lanczos3);
     assert_eq!(default.border_value, 0.0);
 }
 
 #[test]
-fn test_config_validation_rejects_invalid() {
+fn config_validation_rejects_invalid() {
     // Each case: a single out-of-range field and the field name its error must name.
     let cases: &[(Config, &str)] = &[
         (
@@ -368,7 +368,7 @@ fn test_config_validation_rejects_invalid() {
 }
 
 #[test]
-fn test_config_lo_iterations_zero_ok_when_lo_disabled() {
+fn config_lo_iterations_zero_ok_when_lo_disabled() {
     // lo_iterations is only validated when local_optimization is enabled.
     let config = Config {
         ransac: RansacConfig {
@@ -382,7 +382,7 @@ fn test_config_lo_iterations_zero_ok_when_lo_disabled() {
 }
 
 #[test]
-fn test_config_presets_differ() {
+fn config_presets_differ() {
     // Verify presets produce different configs (parameter sensitivity)
     let default = Config::default();
     let fast = Config::fast();
@@ -400,7 +400,7 @@ fn test_config_presets_differ() {
 }
 
 #[test]
-fn test_config_all_presets_validate() {
+fn config_all_presets_validate() {
     Config::default().validate().unwrap();
     Config::fast().validate().unwrap();
     Config::precise().validate().unwrap();

@@ -5,7 +5,7 @@ use crate::stacking::star_detection::centroid::StampGrid;
 /// After 2 iterations the position should be within 0.1px of the final converged position.
 /// This establishes that reducing max iterations for fitting methods is safe.
 #[test]
-fn test_phase1_reaches_good_accuracy_in_few_iterations() {
+fn phase1_reaches_good_accuracy_in_few_iterations() {
     let width = 64;
     let height = 64;
     let true_pos = DVec2::new(32.3, 32.7);
@@ -60,7 +60,7 @@ fn test_phase1_reaches_good_accuracy_in_few_iterations() {
 /// Verify that even a single Phase 1 iteration provides a reasonable starting
 /// point for L-M fitting (position within ~0.5 pixels of true center).
 #[test]
-fn test_single_phase1_iteration_provides_good_seed() {
+fn single_phase1_iteration_provides_good_seed() {
     let width = 64;
     let height = 64;
 
@@ -98,7 +98,7 @@ fn test_single_phase1_iteration_provides_good_seed() {
 
 /// Verify that GaussianFit accuracy is equivalent whether Phase 1 runs 2 or 10 iterations.
 #[test]
-fn test_gaussian_fit_accuracy_independent_of_phase1_iterations() {
+fn gaussian_fit_accuracy_independent_of_phase1_iterations() {
     use crate::stacking::star_detection::centroid::gaussian_fit::{GaussianFit, GaussianFitConfig};
 
     let width = 64;
@@ -175,7 +175,7 @@ fn test_gaussian_fit_accuracy_independent_of_phase1_iterations() {
 
 /// Verify that MoffatFit accuracy is equivalent whether Phase 1 runs 2 or 10 iterations.
 #[test]
-fn test_moffat_fit_accuracy_independent_of_phase1_iterations() {
+fn moffat_fit_accuracy_independent_of_phase1_iterations() {
     use crate::stacking::star_detection::centroid::moffat_fit::{MoffatFit, MoffatFitConfig};
 
     let width = 64;
@@ -287,7 +287,7 @@ fn compute_stamp_radius_scales_and_clamps() {
 /// the L-M optimizer refines position independently and converges to the same
 /// result regardless of Phase 1 precision.
 #[test]
-fn test_prefit_moments_iterations_sufficient() {
+fn prefit_moments_iterations_sufficient() {
     use crate::stacking::star_detection::centroid::gaussian_fit::{GaussianFit, GaussianFitConfig};
     use crate::stacking::star_detection::centroid::{CONVERGENCE_THRESHOLD_SQ, refine_centroid};
 
@@ -411,7 +411,7 @@ fn test_prefit_moments_iterations_sufficient() {
 /// Same test but for Moffat fitting to ensure both PSF models benefit
 /// from the 2-iteration pre-fit optimization.
 #[test]
-fn test_prefit_moments_iterations_sufficient_moffat() {
+fn prefit_moments_iterations_sufficient_moffat() {
     use crate::stacking::star_detection::centroid::moffat_fit::{MoffatFit, MoffatFitConfig};
     use crate::stacking::star_detection::centroid::{
         CONVERGENCE_THRESHOLD_SQ, lm_optimizer, refine_centroid,
