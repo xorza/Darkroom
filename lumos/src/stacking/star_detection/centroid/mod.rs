@@ -90,7 +90,7 @@ const CONVERGENCE_THRESHOLD_SQ: f32 =
 
 /// Compute stamp radius from expected FWHM.
 #[inline]
-fn compute_stamp_radius(expected_fwhm: f32) -> usize {
+pub(super) fn compute_stamp_radius(expected_fwhm: f32) -> usize {
     let radius = (expected_fwhm * STAMP_RADIUS_FWHM_FACTOR).ceil() as usize;
     radius.clamp(MIN_STAMP_RADIUS, MAX_STAMP_RADIUS)
 }
@@ -106,24 +106,54 @@ fn is_valid_stamp_position(pos: Vec2, size: Size2us, stamp_radius: usize) -> boo
         && icy < (size.height - stamp_radius) as isize
 }
 
+/// The stamp's own pixel coordinates, `0..2r` on each axis, flattened row-major.
+///
+/// Identical for every candidate of a given radius, so it is built once per detection rather than
+/// per star: both profile models read the data only through `x - x0` and `y - y0`, so fitting in
+/// stamp-local coordinates and shifting the centre back afterwards is the same fit. The smaller
+/// magnitudes also condition the normal equations a little better than image coordinates do.
+#[derive(Debug)]
+pub(super) struct StampGrid {
+    x: ArrayVec<f64, MAX_STAMP_PIXELS>,
+    y: ArrayVec<f64, MAX_STAMP_PIXELS>,
+    radius: usize,
+}
+
+impl StampGrid {
+    pub(super) fn new(radius: usize) -> Self {
+        let side = 2 * radius + 1;
+        let mut x = ArrayVec::new();
+        let mut y = ArrayVec::new();
+        for row in 0..side {
+            for column in 0..side {
+                x.push(column as f64);
+                y.push(row as f64);
+            }
+        }
+        Self { x, y, radius }
+    }
+}
+
 /// Stack-allocated stamp data extracted around a star candidate.
 /// Uses ArrayVec to avoid heap allocations for typical stamp sizes.
 #[derive(Debug)]
 struct StampData {
-    /// X coordinates of stamp pixels (relative to image origin).
-    x: ArrayVec<f32, MAX_STAMP_PIXELS>,
-    /// Y coordinates of stamp pixels.
-    y: ArrayVec<f32, MAX_STAMP_PIXELS>,
-    /// Pixel values (background-subtracted at the caller if needed).
-    z: ArrayVec<f32, MAX_STAMP_PIXELS>,
+    /// Pixel values (background-subtracted at the caller if needed), row-major over the stamp.
+    /// The matching coordinates live in the shared [`StampGrid`].
+    z: ArrayVec<f64, MAX_STAMP_PIXELS>,
     /// Peak pixel value within the stamp.
     peak: f32,
+    /// Image position of the stamp's top-left pixel, which [`StampGrid`]'s coordinates are
+    /// relative to.
+    origin: Vec2,
 }
 
 /// Extract a square stamp of pixel data around a position.
 ///
 /// Returns [`StampData`] or None if position is outside the valid stamp region.
-/// Uses stack-allocated ArrayVec to avoid heap allocations.
+/// Uses stack-allocated ArrayVec to avoid heap allocations. Widened to f64 here rather than at
+/// each fit: both callers fit in f64 and used to re-encode all three arrays, which cost a second
+/// set of stack buffers and three conversion passes per candidate.
 fn extract_stamp(pixels: &Buffer2<f32>, pos: Vec2, stamp_radius: usize) -> Option<StampData> {
     let width = pixels.width();
     let height = pixels.height();
@@ -135,29 +165,26 @@ fn extract_stamp(pixels: &Buffer2<f32>, pos: Vec2, stamp_radius: usize) -> Optio
     let icx = pos.x.round() as isize;
     let icy = pos.y.round() as isize;
     let stamp_radius_i32 = stamp_radius as i32;
-    let mut data_x = ArrayVec::new();
-    let mut data_y = ArrayVec::new();
     let mut data_z = ArrayVec::new();
     let mut peak_value = f32::MIN;
 
     for dy in -stamp_radius_i32..=stamp_radius_i32 {
+        let y = (icy + dy as isize) as usize;
+        let row = pixels.row(y);
         for dx in -stamp_radius_i32..=stamp_radius_i32 {
-            let x = (icx + dx as isize) as usize;
-            let y = (icy + dy as isize) as usize;
-            let value = pixels.row(y)[x];
-
-            data_x.push(x as f32);
-            data_y.push(y as f32);
-            data_z.push(value);
+            let value = row[(icx + dx as isize) as usize];
+            data_z.push(value as f64);
             peak_value = peak_value.max(value);
         }
     }
 
     Some(StampData {
-        x: data_x,
-        y: data_y,
         z: data_z,
         peak: peak_value,
+        origin: Vec2::new(
+            (icx - stamp_radius as isize) as f32,
+            (icy - stamp_radius as isize) as f32,
+        ),
     })
 }
 
@@ -166,9 +193,9 @@ fn extract_stamp(pixels: &Buffer2<f32>, pos: Vec2, stamp_radius: usize) -> Optio
 /// For a Gaussian: E[r²] = 2σ², so σ = sqrt(E[r²]/2)
 /// This gives a better initial guess for L-M optimization than a fixed value.
 fn estimate_sigma_from_moments(
-    data_x: &[f32],
-    data_y: &[f32],
-    data_z: &[f32],
+    data_x: &[f64],
+    data_y: &[f64],
+    data_z: &[f64],
     pos: Vec2,
     background: f32,
 ) -> f32 {
@@ -176,9 +203,9 @@ fn estimate_sigma_from_moments(
     let mut sum_w = 0.0f64;
 
     for ((&x, &y), &z) in data_x.iter().zip(data_y.iter()).zip(data_z.iter()) {
-        let w = (z - background).max(0.0) as f64;
-        let dx = x as f64 - pos.x as f64;
-        let dy = y as f64 - pos.y as f64;
+        let w = (z - background as f64).max(0.0);
+        let dx = x - pos.x as f64;
+        let dy = y - pos.y as f64;
         let r2 = dx * dx + dy * dy;
         sum_r2 += w * r2;
         sum_w += w;
@@ -341,9 +368,11 @@ pub(super) fn measure_star(
     region: &Region,
     config: &MeasurementConfig,
     expected_fwhm: f32,
+    grid: &StampGrid,
 ) -> Option<Star> {
-    // Compute adaptive stamp radius based on expected FWHM
-    let stamp_radius = compute_stamp_radius(expected_fwhm);
+    // Built once per detection by the measure stage, from this same `expected_fwhm`.
+    let stamp_radius = grid.radius;
+    debug_assert_eq!(stamp_radius, compute_stamp_radius(expected_fwhm));
 
     // Initial position from peak
     let mut pos = Vec2::new(region.peak.x as f32, region.peak.y as f32);
@@ -415,7 +444,7 @@ pub(super) fn measure_star(
                 position_convergence_threshold: CENTROID_CONVERGENCE_THRESHOLD as f64,
                 ..GaussianFitConfig::default()
             };
-            let fit = fit_gaussian_2d(pixels, pos, stamp_radius, local_bg, fit_noise, &fit_config);
+            let fit = fit_gaussian_2d(pixels, pos, grid, local_bg, fit_noise, &fit_config);
             if let Some(result) = fit.filter(|r| r.converged) {
                 pos = result.pos;
                 // FWHM from geometric mean of sigma_x, sigma_y
@@ -441,7 +470,7 @@ pub(super) fn measure_star(
                     ..lm_optimizer::LMConfig::default()
                 },
             };
-            let fit = fit_moffat_2d(pixels, pos, stamp_radius, local_bg, fit_noise, &fit_config);
+            let fit = fit_moffat_2d(pixels, pos, grid, local_bg, fit_noise, &fit_config);
             if let Some(result) = fit.filter(|r| r.converged) {
                 pos = result.pos;
                 fit_fwhm = Some(result.fwhm);

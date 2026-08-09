@@ -1,5 +1,6 @@
 use crate::math::size2us::Size2us;
 use crate::stacking::star_detection::centroid::tests::*;
+use crate::stacking::star_detection::centroid::{StampGrid, compute_stamp_radius};
 
 #[test]
 fn test_refine_centroid_centered_star() {
@@ -960,6 +961,7 @@ fn test_measure_star_returns_none_for_edge_candidate() {
         &region,
         &config.measurement,
         config.fwhm.expected,
+        &StampGrid::new(compute_stamp_radius(config.fwhm.expected)),
     );
     assert!(
         result.is_none(),
@@ -1029,7 +1031,16 @@ fn test_measure_star_multiple_stars_independent() {
     // Compute centroids for both
     let stars: Vec<_> = candidates
         .iter()
-        .filter_map(|c| measure_star(&pixels, &bg, c, &config.measurement, config.fwhm.expected))
+        .filter_map(|c| {
+            measure_star(
+                &pixels,
+                &bg,
+                c,
+                &config.measurement,
+                config.fwhm.expected,
+                &StampGrid::new(compute_stamp_radius(config.fwhm.expected)),
+            )
+        })
         .collect();
 
     assert_eq!(stars.len(), 2, "Should compute centroids for both stars");
@@ -1075,6 +1086,7 @@ fn test_circular_star_roundness() {
         &candidates[0],
         &config.measurement,
         config.fwhm.expected,
+        &StampGrid::new(compute_stamp_radius(config.fwhm.expected)),
     )
     .expect("Should compute centroid");
 
@@ -1135,6 +1147,7 @@ fn test_elongated_x_star_roundness() {
         &candidates[0],
         &config.measurement,
         config.fwhm.expected,
+        &StampGrid::new(compute_stamp_radius(config.fwhm.expected)),
     )
     .expect("Should compute centroid");
 
@@ -1195,6 +1208,7 @@ fn test_asymmetric_star_sround() {
         &candidates[0],
         &config.measurement,
         config.fwhm.expected,
+        &StampGrid::new(compute_stamp_radius(config.fwhm.expected)),
     )
     .expect("Should compute centroid");
 

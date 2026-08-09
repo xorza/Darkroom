@@ -18,14 +18,14 @@ mod tests;
 mod simd;
 
 use crate::math::fwhm::FWHM_TO_SIGMA;
+use crate::stacking::star_detection::centroid::StampGrid;
 use crate::stacking::star_detection::centroid::lm_optimizer::{
     FitData, LMConfig, LMModel, NormalEquations, accumulate_chi2, build_normal_equations_scalar,
     optimize,
 };
 use crate::stacking::star_detection::centroid::{
-    FitNoise, MAX_STAMP_PIXELS, estimate_sigma_from_moments, extract_stamp, fit_weights,
+    FitNoise, estimate_sigma_from_moments, extract_stamp, fit_weights,
 };
-use arrayvec::ArrayVec;
 use glam::Vec2;
 use imaginarium::Buffer2;
 
@@ -223,38 +223,37 @@ impl LMModel<5> for MoffatFixedBeta {
 pub(super) fn fit_moffat_2d(
     pixels: &Buffer2<f32>,
     pos: Vec2,
-    stamp_radius: usize,
+    grid: &StampGrid,
     background: f32,
     noise: Option<FitNoise>,
     config: &MoffatFitConfig,
 ) -> Option<MoffatFitResult> {
+    let stamp_radius = grid.radius;
     let stamp = extract_stamp(pixels, pos, stamp_radius)?;
+    // Fit in the stamp's own frame: the models are translation-invariant, so this is the
+    // same fit with better-conditioned magnitudes, and the coordinate arrays become the
+    // shared grid instead of two per-candidate ramps.
+    let local_pos = pos - stamp.origin;
 
     // Fixed-β Moffat fits 5 parameters [x0, y0, amplitude, alpha, background].
-    let n = stamp.x.len();
+    let n = stamp.z.len();
     if n < 6 {
         return None;
     }
 
-    // Convert stamp data to f64 for fitting. Stack-allocated (stamp size is bounded
-    // by MAX_STAMP_PIXELS), so the parallel per-star fit loop makes no heap allocations.
-    let data_x: ArrayVec<f64, MAX_STAMP_PIXELS> = stamp.x.iter().map(|&v| v as f64).collect();
-    let data_y: ArrayVec<f64, MAX_STAMP_PIXELS> = stamp.y.iter().map(|&v| v as f64).collect();
-    let data_z: ArrayVec<f64, MAX_STAMP_PIXELS> = stamp.z.iter().map(|&v| v as f64).collect();
-
-    let weights = fit_weights(&data_z, background, noise);
+    let weights = fit_weights(&stamp.z, background, noise);
 
     let initial_amplitude = (stamp.peak - background).max(0.01);
 
     // Estimate sigma from moments, then convert to alpha (using the fixed β).
-    let sigma_est = estimate_sigma_from_moments(&stamp.x, &stamp.y, &stamp.z, pos, background);
+    let sigma_est = estimate_sigma_from_moments(&grid.x, &grid.y, &stamp.z, local_pos, background);
     let fwhm_est = sigma_est * FWHM_TO_SIGMA;
     let initial_alpha =
         fwhm_beta_to_alpha(fwhm_est, config.fixed_beta).clamp(0.5, stamp_radius as f32);
 
     let initial_params: [f64; 5] = [
-        pos.x as f64,
-        pos.y as f64,
+        local_pos.x as f64,
+        local_pos.y as f64,
         initial_amplitude as f64,
         initial_alpha as f64,
         background as f64,
@@ -262,11 +261,11 @@ pub(super) fn fit_moffat_2d(
 
     let model = MoffatFixedBeta::new(stamp_radius as f64, config.fixed_beta as f64);
 
-    let data = FitData::new(&data_x, &data_y, &data_z, weights.as_deref());
+    let data = FitData::new(&grid.x, &grid.y, &stamp.z, weights.as_deref());
     let result = optimize(&model, data, initial_params, &config.lm);
 
     let [x0, y0, _, alpha, _] = result.params;
-    let result_pos = Vec2::new(x0 as f32, y0 as f32);
+    let result_pos = Vec2::new(x0 as f32, y0 as f32) + stamp.origin;
 
     if !validate_position(result_pos, pos, alpha as f32, stamp_radius) {
         return None;

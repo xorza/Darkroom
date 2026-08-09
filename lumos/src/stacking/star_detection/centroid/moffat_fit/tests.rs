@@ -1,4 +1,5 @@
 //! Tests for Moffat profile fitting.
+use crate::stacking::star_detection::centroid::StampGrid;
 
 use crate::math::size2us::Size2us;
 use std::f64::consts::PI;
@@ -243,7 +244,7 @@ fn moffat_fit_recovers_known_parameters() {
         let result = fit_moffat_2d(
             &pixels,
             case.guess,
-            case.fit_radius,
+            &StampGrid::new(case.fit_radius),
             case.fit_background.unwrap_or(case.background),
             None,
             &config,
@@ -313,7 +314,14 @@ fn test_moffat_fit_edge_position() {
     let pixels = Buffer2::new_filled(width, height, 0.1f32);
 
     let config = MoffatFitConfig::default();
-    let result = fit_moffat_2d(&pixels, Vec2::new(2.0, 10.0), 8, 0.1, None, &config);
+    let result = fit_moffat_2d(
+        &pixels,
+        Vec2::new(2.0, 10.0),
+        &StampGrid::new(8),
+        0.1,
+        None,
+        &config,
+    );
     assert!(result.is_none());
 }
 
@@ -344,7 +352,14 @@ fn test_moffat_fit_low_snr() {
         fixed_beta: true_beta,
         ..Default::default()
     };
-    let result = fit_moffat_2d(&pixels, Vec2::splat(10.0), 8, true_bg, None, &config);
+    let result = fit_moffat_2d(
+        &pixels,
+        Vec2::splat(10.0),
+        &StampGrid::new(8),
+        true_bg,
+        None,
+        &config,
+    );
 
     // Even at low SNR, the noiseless Moffat should still be recoverable
     let result = result.expect("Low-SNR Moffat should converge");
@@ -387,7 +402,14 @@ fn test_moffat_fit_various_beta_values() {
             fixed_beta: true_beta,
             ..Default::default()
         };
-        let result = fit_moffat_2d(&pixels, Vec2::splat(10.0), 8, true_bg, None, &config);
+        let result = fit_moffat_2d(
+            &pixels,
+            Vec2::splat(10.0),
+            &StampGrid::new(8),
+            true_bg,
+            None,
+            &config,
+        );
 
         assert!(result.is_some(), "Failed for beta={}", true_beta);
         let result = result.unwrap();
@@ -433,7 +455,14 @@ fn test_moffat_fit_converges_within_max_iterations() {
             ..Default::default()
         },
     };
-    let result = fit_moffat_2d(&pixels, Vec2::splat(10.0), 8, true_bg, None, &config);
+    let result = fit_moffat_2d(
+        &pixels,
+        Vec2::splat(10.0),
+        &StampGrid::new(8),
+        true_bg,
+        None,
+        &config,
+    );
 
     assert!(result.is_some());
     let result = result.unwrap();
@@ -472,7 +501,14 @@ fn test_moffat_fit_bad_initial_guess_still_converges() {
     };
 
     // Start from a position offset by 2 pixels
-    let result = fit_moffat_2d(&pixels, Vec2::new(8.0, 12.0), 8, true_bg, None, &config);
+    let result = fit_moffat_2d(
+        &pixels,
+        Vec2::new(8.0, 12.0),
+        &StampGrid::new(8),
+        true_bg,
+        None,
+        &config,
+    );
 
     assert!(result.is_some());
     let result = result.unwrap();
@@ -498,7 +534,14 @@ fn test_moffat_fit_uniform_data_returns_result() {
     let pixels = Buffer2::new_filled(width, height, uniform_value);
 
     let config = MoffatFitConfig::default();
-    let result = fit_moffat_2d(&pixels, Vec2::splat(10.0), 8, uniform_value, None, &config);
+    let result = fit_moffat_2d(
+        &pixels,
+        Vec2::splat(10.0),
+        &StampGrid::new(8),
+        uniform_value,
+        None,
+        &config,
+    );
 
     // Should produce some result (may not converge well)
     assert!(result.is_some());
@@ -534,7 +577,15 @@ fn test_moffat_fwhm_computed_correctly() {
         fixed_beta: true_beta,
         ..Default::default()
     };
-    let result = fit_moffat_2d(&pixels, Vec2::splat(10.0), 8, true_bg, None, &config).unwrap();
+    let result = fit_moffat_2d(
+        &pixels,
+        Vec2::splat(10.0),
+        &StampGrid::new(8),
+        true_bg,
+        None,
+        &config,
+    )
+    .unwrap();
 
     // FWHM should match analytical formula
     let expected_fwhm = alpha_beta_to_fwhm(true_alpha, true_beta);

@@ -1,6 +1,7 @@
 //! Benchmarks for centroid computation.
 //!
 //! Run with: `cargo test -p lumos --release bench_centroid -- --ignored --nocapture`
+use crate::stacking::star_detection::centroid::{StampGrid, compute_stamp_radius};
 
 use ::quickbench::quick_bench;
 use glam::Vec2;
@@ -48,6 +49,7 @@ fn bench_measure_star_single(b: ::quickbench::Bencher) {
             black_box(region),
             black_box(&config),
             4.0,
+            black_box(&StampGrid::new(compute_stamp_radius(4.0))),
         ))
     });
 }
@@ -78,6 +80,7 @@ fn bench_measure_star_gaussian_fit(b: ::quickbench::Bencher) {
             black_box(region),
             black_box(&config),
             4.0,
+            black_box(&StampGrid::new(compute_stamp_radius(4.0))),
         ))
     });
 }
@@ -108,6 +111,7 @@ fn bench_measure_star_moffat_fit(b: ::quickbench::Bencher) {
             black_box(region),
             black_box(&config),
             4.0,
+            black_box(&StampGrid::new(compute_stamp_radius(4.0))),
         ))
     });
 }
@@ -135,6 +139,7 @@ fn bench_measure_star_local_annulus(b: ::quickbench::Bencher) {
             black_box(region),
             black_box(&config),
             4.0,
+            black_box(&StampGrid::new(compute_stamp_radius(4.0))),
         ))
     });
 }
@@ -154,10 +159,11 @@ fn bench_measure_star_batch_100(b: ::quickbench::Bencher) {
         ..Default::default()
     };
 
+    let grid = StampGrid::new(compute_stamp_radius(4.0));
     b.bench(|| {
         let stars: Vec<_> = regions
             .iter()
-            .filter_map(|r| measure_star(&pixels, &bg, r, &config, 4.0))
+            .filter_map(|r| measure_star(&pixels, &bg, r, &config, 4.0, &grid))
             .collect();
         black_box(stars)
     });
@@ -187,10 +193,12 @@ fn bench_measure_star_batch_6k_10000(b: ::quickbench::Bencher) {
         ..Default::default()
     };
 
+    let grid = StampGrid::new(compute_stamp_radius(4.0));
+
     b.bench_labeled("weighted_moments", || {
         let stars: Vec<_> = regions
             .iter()
-            .filter_map(|r| measure_star(&pixels, &bg, r, &config_moments, 4.0))
+            .filter_map(|r| measure_star(&pixels, &bg, r, &config_moments, 4.0, &grid))
             .collect();
         black_box(stars)
     });
@@ -198,7 +206,7 @@ fn bench_measure_star_batch_6k_10000(b: ::quickbench::Bencher) {
     b.bench_labeled("gaussian_fit", || {
         let stars: Vec<_> = regions
             .iter()
-            .filter_map(|r| measure_star(&pixels, &bg, r, &config_gaussian, 4.0))
+            .filter_map(|r| measure_star(&pixels, &bg, r, &config_gaussian, 4.0, &grid))
             .collect();
         black_box(stars)
     });
@@ -206,7 +214,7 @@ fn bench_measure_star_batch_6k_10000(b: ::quickbench::Bencher) {
     b.bench_labeled("moffat_fit", || {
         let stars: Vec<_> = regions
             .iter()
-            .filter_map(|r| measure_star(&pixels, &bg, r, &config_moffat, 4.0))
+            .filter_map(|r| measure_star(&pixels, &bg, r, &config_moffat, 4.0, &grid))
             .collect();
         black_box(stars)
     });
@@ -284,7 +292,7 @@ fn bench_gaussian_fit_single(b: ::quickbench::Bencher) {
         black_box(fit_gaussian_2d(
             black_box(&pixels),
             black_box(Vec2::splat(10.0)),
-            black_box(8),
+            black_box(&StampGrid::new(8)),
             black_box(background),
             None,
             black_box(&config),
@@ -320,7 +328,7 @@ fn bench_moffat_fit_single(b: ::quickbench::Bencher) {
         black_box(fit_moffat_2d(
             black_box(&pixels),
             black_box(Vec2::splat(10.0)),
-            black_box(8),
+            black_box(&StampGrid::new(8)),
             black_box(background),
             None,
             black_box(&config),

@@ -6,7 +6,7 @@
 use imaginarium::Buffer2;
 
 use crate::stacking::star_detection::background::background_estimate::BackgroundEstimate;
-use crate::stacking::star_detection::centroid::measure_star;
+use crate::stacking::star_detection::centroid::{StampGrid, compute_stamp_radius, measure_star};
 use crate::stacking::star_detection::config::measurement_config::MeasurementConfig;
 use crate::stacking::star_detection::deblend::region::Region;
 use crate::stacking::star_detection::star::Star;
@@ -24,8 +24,12 @@ pub(crate) fn measure(
 ) -> Vec<Star> {
     use rayon::prelude::*;
 
+    // One grid for the whole detection: `expected_fwhm` fixes the stamp radius, so every
+    // candidate below fits over the same coordinates.
+    let grid = StampGrid::new(compute_stamp_radius(expected_fwhm));
+
     regions
         .par_iter()
-        .filter_map(|region| measure_star(pixels, stats, region, config, expected_fwhm))
+        .filter_map(|region| measure_star(pixels, stats, region, config, expected_fwhm, &grid))
         .collect()
 }

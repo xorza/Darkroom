@@ -13,14 +13,14 @@ mod tests;
 
 mod simd;
 
+use crate::stacking::star_detection::centroid::StampGrid;
 use crate::stacking::star_detection::centroid::lm_optimizer::{
     FitData, LMConfig, LMModel, NormalEquations, accumulate_chi2, build_normal_equations_scalar,
     optimize,
 };
 use crate::stacking::star_detection::centroid::{
-    FitNoise, MAX_STAMP_PIXELS, estimate_sigma_from_moments, extract_stamp, fit_weights,
+    FitNoise, estimate_sigma_from_moments, extract_stamp, fit_weights,
 };
-use arrayvec::ArrayVec;
 use glam::Vec2;
 use imaginarium::Buffer2;
 
@@ -125,32 +125,31 @@ impl LMModel<6> for Gaussian2D {
 pub(super) fn fit_gaussian_2d(
     pixels: &Buffer2<f32>,
     pos: Vec2,
-    stamp_radius: usize,
+    grid: &StampGrid,
     background: f32,
     noise: Option<FitNoise>,
     config: &GaussianFitConfig,
 ) -> Option<GaussianFitResult> {
+    let stamp_radius = grid.radius;
     let stamp = extract_stamp(pixels, pos, stamp_radius)?;
+    // Fit in the stamp's own frame: the models are translation-invariant, so this is the
+    // same fit with better-conditioned magnitudes, and the coordinate arrays become the
+    // shared grid instead of two per-candidate ramps.
+    let local_pos = pos - stamp.origin;
 
-    let n = stamp.x.len();
+    let n = stamp.z.len();
     if n < 7 {
         return None;
     }
 
-    // Convert stamp data to f64 for fitting. Stack-allocated (stamp size is bounded
-    // by MAX_STAMP_PIXELS), so the parallel per-star fit loop makes no heap allocations.
-    let data_x: ArrayVec<f64, MAX_STAMP_PIXELS> = stamp.x.iter().map(|&v| v as f64).collect();
-    let data_y: ArrayVec<f64, MAX_STAMP_PIXELS> = stamp.y.iter().map(|&v| v as f64).collect();
-    let data_z: ArrayVec<f64, MAX_STAMP_PIXELS> = stamp.z.iter().map(|&v| v as f64).collect();
-
-    let weights = fit_weights(&data_z, background, noise);
+    let weights = fit_weights(&stamp.z, background, noise);
 
     // Estimate sigma from moments for better initial guess
-    let sigma_est = estimate_sigma_from_moments(&stamp.x, &stamp.y, &stamp.z, pos, background);
+    let sigma_est = estimate_sigma_from_moments(&grid.x, &grid.y, &stamp.z, local_pos, background);
 
     let initial_params: [f64; 6] = [
-        pos.x as f64,
-        pos.y as f64,
+        local_pos.x as f64,
+        local_pos.y as f64,
         (stamp.peak - background).max(0.01) as f64,
         sigma_est as f64,
         sigma_est as f64,
@@ -161,11 +160,11 @@ pub(super) fn fit_gaussian_2d(
         stamp_radius: stamp_radius as f64,
     };
 
-    let data = FitData::new(&data_x, &data_y, &data_z, weights.as_deref());
+    let data = FitData::new(&grid.x, &grid.y, &stamp.z, weights.as_deref());
     let result = optimize(&model, data, initial_params, config);
 
     let [x0, y0, _, sigma_x, sigma_y, _] = result.params;
-    let result_pos = Vec2::new(x0 as f32, y0 as f32);
+    let result_pos = Vec2::new(x0 as f32, y0 as f32) + stamp.origin;
 
     if !validate_fit(result_pos, pos, sigma_x, sigma_y, stamp_radius) {
         return None;

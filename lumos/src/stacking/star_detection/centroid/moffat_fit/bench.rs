@@ -1,6 +1,7 @@
 //! Benchmarks for Moffat fitting.
 //!
 //! Run with: `cargo test -p lumos --release bench_moffat -- --ignored --nocapture`
+use crate::stacking::star_detection::centroid::StampGrid;
 
 use quickbench::quick_bench;
 use std::hint::black_box;
@@ -31,7 +32,7 @@ fn bench_moffat_fit_fixed_beta_small(b: quickbench::Bencher) {
         black_box(fit_moffat_2d(
             black_box(&pixels),
             black_box(Vec2::splat(8.0)),
-            black_box(8),
+            black_box(&StampGrid::new(8)),
             black_box(0.1),
             None,
             black_box(&config),
@@ -60,7 +61,7 @@ fn bench_moffat_fit_fixed_beta_medium(b: quickbench::Bencher) {
         black_box(fit_moffat_2d(
             black_box(&pixels),
             black_box(Vec2::splat(12.0)),
-            black_box(12),
+            black_box(&StampGrid::new(12)),
             black_box(0.1),
             None,
             black_box(&config),

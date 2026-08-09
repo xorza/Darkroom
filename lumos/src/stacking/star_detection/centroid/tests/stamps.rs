@@ -1,5 +1,6 @@
 use crate::math::size2us::Size2us;
 use crate::stacking::star_detection::centroid::tests::*;
+use crate::stacking::star_detection::centroid::{StampGrid, compute_stamp_radius};
 
 #[test]
 fn test_estimate_sigma_from_moments_gaussian() {
@@ -23,9 +24,9 @@ fn test_estimate_sigma_from_moments_gaussian() {
             let dy = y as f32 - cy;
             let value =
                 background + 1.0 * (-0.5 * (dx * dx + dy * dy) / (true_sigma * true_sigma)).exp();
-            data_x.push(x as f32);
-            data_y.push(y as f32);
-            data_z.push(value);
+            data_x.push(x as f64);
+            data_y.push(y as f64);
+            data_z.push(value as f64);
         }
     }
 
@@ -64,9 +65,9 @@ fn test_estimate_sigma_from_moments_various_sigmas() {
                 let dy = y as f32 - cy;
                 let value = background
                     + 1.0 * (-0.5 * (dx * dx + dy * dy) / (true_sigma * true_sigma)).exp();
-                data_x.push(x as f32);
-                data_y.push(y as f32);
-                data_z.push(value);
+                data_x.push(x as f64);
+                data_y.push(y as f64);
+                data_z.push(value as f64);
             }
         }
 
@@ -163,9 +164,10 @@ fn test_extract_stamp_valid_center() {
 
     let stamp = result.unwrap();
     let expected_size = (2 * 5 + 1) * (2 * 5 + 1); // 11x11 = 121
-    assert_eq!(stamp.x.len(), expected_size);
-    assert_eq!(stamp.y.len(), expected_size);
     assert_eq!(stamp.z.len(), expected_size);
+    // Coordinates live in the shared `StampGrid`; what the stamp itself pins is where its
+    // top-left pixel sits, which is what the grid's `0..2r` is relative to.
+    assert_eq!(stamp.origin, Vec2::new(27.0, 27.0));
     assert!(
         (stamp.peak - 0.5).abs() < f32::EPSILON,
         "Peak should be 0.5"
@@ -220,21 +222,10 @@ fn test_extract_stamp_coordinates() {
     assert!(result.is_some());
 
     let stamp = result.unwrap();
-    // For radius=2, stamp is 5x5, centered at (32,32)
-    // x coords should be 30,31,32,33,34 (repeated for each row)
-    // y coords should be 30,30,30,30,30, 31,31,31,31,31, etc.
-    assert_eq!(stamp.x.len(), 25);
-
-    // Check that coordinates are correct
-    let min_x = stamp.x.iter().fold(f32::MAX, |a, &b| a.min(b));
-    let max_x = stamp.x.iter().fold(f32::MIN, |a, &b| a.max(b));
-    let min_y = stamp.y.iter().fold(f32::MAX, |a, &b| a.min(b));
-    let max_y = stamp.y.iter().fold(f32::MIN, |a, &b| a.max(b));
-
-    assert_eq!(min_x, 30.0);
-    assert_eq!(max_x, 34.0);
-    assert_eq!(min_y, 30.0);
-    assert_eq!(max_y, 34.0);
+    // For radius=2, stamp is 5x5 centred at (32,32), so it spans image x,y 30..=34 — expressed
+    // now as an origin at (30,30) plus the grid's own 0..4.
+    assert_eq!(stamp.z.len(), 25);
+    assert_eq!(stamp.origin, Vec2::new(30.0, 30.0));
 }
 
 #[test]
@@ -250,16 +241,8 @@ fn test_extract_stamp_fractional_position() {
     assert!(result.is_some());
 
     let stamp = result.unwrap();
-    // Center should be at rounded position (32, 33)
-    let min_x = stamp.x.iter().fold(f32::MAX, |a, &b| a.min(b));
-    let max_x = stamp.x.iter().fold(f32::MIN, |a, &b| a.max(b));
-    let min_y = stamp.y.iter().fold(f32::MAX, |a, &b| a.min(b));
-    let max_y = stamp.y.iter().fold(f32::MIN, |a, &b| a.max(b));
-
-    assert_eq!(min_x, 30.0); // 32 - 2 = 30
-    assert_eq!(max_x, 34.0); // 32 + 2 = 34
-    assert_eq!(min_y, 31.0); // 33 - 2 = 31
-    assert_eq!(max_y, 35.0); // 33 + 2 = 35
+    // Centre rounds to (32, 33), so the stamp's top-left pixel is (30, 31).
+    assert_eq!(stamp.origin, Vec2::new(30.0, 31.0));
 }
 
 #[test]
@@ -310,6 +293,7 @@ fn test_local_annulus_background_uniform() {
         &candidates[0],
         &config.measurement,
         config.fwhm.expected,
+        &StampGrid::new(compute_stamp_radius(config.fwhm.expected)),
     );
     assert!(star.is_some(), "Should compute centroid with LocalAnnulus");
 
@@ -352,6 +336,7 @@ fn test_local_annulus_vs_global_map() {
         &candidates[0],
         &config_global.measurement,
         config_global.fwhm.expected,
+        &StampGrid::new(compute_stamp_radius(config_global.fwhm.expected)),
     )
     .expect("global centroid");
 
@@ -369,6 +354,7 @@ fn test_local_annulus_vs_global_map() {
         &candidates[0],
         &config_annulus.measurement,
         config_annulus.fwhm.expected,
+        &StampGrid::new(compute_stamp_radius(config_annulus.fwhm.expected)),
     )
     .expect("annulus centroid");
 
@@ -427,6 +413,7 @@ fn test_local_annulus_near_edge_fallback() {
             &candidates[0],
             &config.measurement,
             config.fwhm.expected,
+            &StampGrid::new(compute_stamp_radius(config.fwhm.expected)),
         );
         if let Some(s) = star {
             assert!(s.flux > 0.0, "Flux should be positive");
