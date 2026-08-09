@@ -21,6 +21,7 @@ mod simd_avx2;
 #[cfg(target_arch = "aarch64")]
 mod simd_neon;
 
+use crate::simd::dispatch;
 use crate::stacking::star_detection::centroid::lm_optimizer::{
     FitData, LMConfig, LMModel, NormalEquations, accumulate_chi2, build_normal_equations_scalar,
     optimize,
@@ -117,48 +118,26 @@ impl LMModel<6> for Gaussian2D {
 
     fn batch_build_normal_equations(&self, data: FitData, params: &[f64; 6]) -> NormalEquations<6> {
         // The SIMD kernels are unweighted-only, so a weighted fit takes the scalar path.
-        if data.weights.is_none() {
-            #[cfg(target_arch = "x86_64")]
-            if imaginarium::cpu_features::has_avx2_fma() {
-                // SAFETY: AVX2+FMA availability checked above.
-                return unsafe {
-                    simd_avx2::batch_build_normal_equations_avx2(
-                        self, data.x, data.y, data.z, params,
-                    )
-                };
-            }
-            #[cfg(target_arch = "aarch64")]
-            {
-                // SAFETY: NEON is unconditionally available on aarch64.
-                return unsafe {
-                    simd_neon::batch_build_normal_equations_neon(
-                        self, data.x, data.y, data.z, params,
-                    )
-                };
-            }
+        dispatch! {
+            x86: avx2_fma if data.weights.is_none() => simd_avx2::batch_build_normal_equations_avx2(
+                self, data.x, data.y, data.z, params,
+            ),
+            aarch64 if data.weights.is_none() => simd_neon::batch_build_normal_equations_neon(
+                self, data.x, data.y, data.z, params,
+            ),
+            scalar => build_normal_equations_scalar(self, data, params),
         }
-        build_normal_equations_scalar(self, data, params)
     }
 
     fn batch_compute_chi2(&self, data: FitData, params: &[f64; 6]) -> f64 {
         // The SIMD kernels are unweighted-only, so a weighted fit takes the scalar path.
-        if data.weights.is_none() {
-            #[cfg(target_arch = "x86_64")]
-            if imaginarium::cpu_features::has_avx2_fma() {
-                // SAFETY: AVX2+FMA availability checked above.
-                return unsafe {
-                    simd_avx2::batch_compute_chi2_avx2(self, data.x, data.y, data.z, params)
-                };
-            }
-            #[cfg(target_arch = "aarch64")]
-            {
-                // SAFETY: NEON is unconditionally available on aarch64.
-                return unsafe {
-                    simd_neon::batch_compute_chi2_neon(self, data.x, data.y, data.z, params)
-                };
-            }
+        dispatch! {
+            x86: avx2_fma if data.weights.is_none()
+                => simd_avx2::batch_compute_chi2_avx2(self, data.x, data.y, data.z, params),
+            aarch64 if data.weights.is_none()
+                => simd_neon::batch_compute_chi2_neon(self, data.x, data.y, data.z, params),
+            scalar => accumulate_chi2(self, data, params, 0..data.len()),
         }
-        accumulate_chi2(self, data, params, 0..data.len())
     }
 }
 

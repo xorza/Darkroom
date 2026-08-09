@@ -13,8 +13,7 @@
 //! The main benefit comes from processing multiple rows in parallel and
 //! using SIMD for the min/max operations in the sorting network.
 
-#[cfg(target_arch = "x86_64")]
-use imaginarium::cpu_features;
+use crate::simd::dispatch;
 
 /// 25-comparator sort network for 9 elements, parameterized by the lane type's `min`/`max` so the
 /// AVX2/SSE4.1/NEON kernels share one definition. After it runs, `$v4` holds the per-lane median.
@@ -138,34 +137,15 @@ pub(super) fn median_filter_row_simd(
     output_row: &mut [f32],
     width: usize,
 ) {
-    #[cfg(target_arch = "x86_64")]
-    {
-        if width >= AVX2_MIN_ROW_WIDTH && cpu_features::has_avx2() {
-            unsafe {
-                x86::median_filter_row_avx2(row_above, row_curr, row_below, output_row, width);
-            }
-            return;
-        }
-        if width >= SSE41_MIN_ROW_WIDTH && cpu_features::has_sse4_1() {
-            unsafe {
-                x86::median_filter_row_sse41(row_above, row_curr, row_below, output_row, width);
-            }
-            return;
-        }
+    dispatch! {
+        x86: avx2 if width >= AVX2_MIN_ROW_WIDTH
+            => x86::median_filter_row_avx2(row_above, row_curr, row_below, output_row, width),
+        x86: sse4_1 if width >= SSE41_MIN_ROW_WIDTH
+            => x86::median_filter_row_sse41(row_above, row_curr, row_below, output_row, width),
+        aarch64 if width >= NEON_MIN_ROW_WIDTH
+            => neon::median_filter_row_neon(row_above, row_curr, row_below, output_row, width),
+        scalar => median_filter_row_scalar(row_above, row_curr, row_below, output_row, width),
     }
-
-    #[cfg(target_arch = "aarch64")]
-    {
-        if width >= NEON_MIN_ROW_WIDTH {
-            unsafe {
-                neon::median_filter_row_neon(row_above, row_curr, row_below, output_row, width);
-            }
-            return;
-        }
-    }
-
-    // Scalar fallback
-    median_filter_row_scalar(row_above, row_curr, row_below, output_row, width);
 }
 
 /// Scalar implementation of median filter row processing.

@@ -378,11 +378,43 @@ unsafe fn hsum256_ps(v: __m256) -> f32 {
     hsum_ps(_mm_add_ps(lo, hi))
 }
 
+/// The per-tap distance affine `dist[i] = base[i] + sign[i]·frac` that [`lanczos_weights_gather`]
+/// loads. Determined by `A` and `SIZE` alone, so it is built in a `const` block rather than at
+/// run time; lanes `SIZE..8` stay zero, gathering index 0 as an in-bounds dummy.
+#[cfg(target_arch = "x86_64")]
+#[derive(Debug)]
+struct GatherTables {
+    base: [f32; 8],
+    sign: [f32; 8],
+}
+
+#[cfg(target_arch = "x86_64")]
+impl GatherTables {
+    /// For `i < A` the tap sits left of centre and its distance grows with `frac`; for `i ≥ A` it
+    /// sits right of centre and shrinks with it, hence the sign flip.
+    const fn new<const A: usize, const SIZE: usize>() -> Self {
+        let mut base = [0.0f32; 8];
+        let mut sign = [0.0f32; 8];
+        let a_minus_1 = A as i32 - 1;
+        let mut i = 0;
+        while i < SIZE {
+            if i < A {
+                base[i] = (a_minus_1 - i as i32) as f32;
+                sign[i] = 1.0;
+            } else {
+                base[i] = (i as i32 - a_minus_1) as f32;
+                sign[i] = -1.0;
+            }
+            i += 1;
+        }
+        Self { base, sign }
+    }
+}
+
 /// Compute the `SIZE` separable Lanczos tap weights for fractional offset `frac` via one SIMD
 /// distance/index calc + a single `i32gather` from the LUT, replacing `SIZE` scalar `lookup_positive`
-/// calls. `base`/`sign` encode the per-tap distance affine `dist[i] = base[i] + sign[i]·frac` (lanes
-/// `SIZE..8` are zeroed → index 0, an in-bounds dummy gather). Bit-exact with `lookup_positive`:
-/// `cvtt(dist·RES + 0.5)` truncates exactly as `(x·RES + 0.5) as usize`.
+/// calls. Bit-exact with `lookup_positive`: `cvtt(dist·RES + 0.5)` truncates exactly as
+/// `(x·RES + 0.5) as usize`.
 ///
 /// # Safety
 /// AVX2 must be available. `lut_values` must point to a LUT with `≥ A·RES + 1` entries (so every
@@ -391,15 +423,18 @@ unsafe fn hsum256_ps(v: __m256) -> f32 {
 #[target_feature(enable = "avx2,fma")]
 #[inline]
 #[allow(unsafe_op_in_unsafe_fn)]
-pub(super) unsafe fn lanczos_weights_gather<const SIZE: usize>(
+pub(super) unsafe fn lanczos_weights_gather<const A: usize, const SIZE: usize>(
     lut_values: *const f32,
-    base: &[f32; 8],
-    sign: &[f32; 8],
     resolution: f32,
     frac: f32,
 ) -> [f32; SIZE] {
-    let base_v = _mm256_loadu_ps(base.as_ptr());
-    let sign_v = _mm256_loadu_ps(sign.as_ptr());
+    // A `const` block, not a `let`: `#[target_feature]` bars this function from inlining into its
+    // feature-less caller, so anything built here is built per call — twice per output pixel —
+    // where a plain loop-invariant `let` would have been hoisted out of the row loop.
+    let tables = const { GatherTables::new::<A, SIZE>() };
+
+    let base_v = _mm256_loadu_ps(tables.base.as_ptr());
+    let sign_v = _mm256_loadu_ps(tables.sign.as_ptr());
     let dist = _mm256_fmadd_ps(sign_v, _mm256_set1_ps(frac), base_v);
     let scaled = _mm256_fmadd_ps(dist, _mm256_set1_ps(resolution), _mm256_set1_ps(0.5));
     let idx = _mm256_cvttps_epi32(scaled);

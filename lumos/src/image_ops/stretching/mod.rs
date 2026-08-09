@@ -28,9 +28,11 @@ use crate::image_ops::rgb::Rgb;
 use rayon::prelude::*;
 
 use crate::error::InvalidConfigField;
+use crate::image_ops::SAMPLES_PER_BLOCK;
 use crate::image_ops::op::OpError;
 use crate::io::image::linear::LinearImage;
 use crate::math::statistics::{MedianMad, median_f32_mut};
+use crate::simd::dispatch;
 
 #[cfg(all(test, feature = "internals"))]
 mod bench;
@@ -40,9 +42,6 @@ mod simd_avx2;
 mod simd_neon;
 #[cfg(test)]
 mod tests;
-
-#[cfg(target_arch = "x86_64")]
-use imaginarium::cpu_features;
 
 /// Midtones balance is clamped away from the degenerate endpoints `0`/`1`, where the MTF
 /// collapses every interior value onto a single output.
@@ -638,31 +637,42 @@ fn apply_color_preserving_image(image: &mut LinearImage, curve: Curve) {
 /// x86 and roughly neutral on aarch64.
 fn apply_color_preserving_asinh(image: &mut LinearImage, c: AsinhCurve) {
     debug_assert!(image.is_rgb(), "caller dispatches grayscale to map_samples");
-    #[cfg(target_arch = "x86_64")]
-    if cpu_features::has_avx2_fma() {
-        let [r, g, b] = image.rgb_planes_mut();
-        // ~8K pixels per task, the three planes split in lockstep so each task sees one band's
-        // worth of every channel.
-        r.par_chunks_mut(8192)
-            .zip(g.par_chunks_mut(8192))
-            .zip(b.par_chunks_mut(8192))
-            .for_each(|((r, g), b)| {
-                // SAFETY: AVX2 and FMA availability checked above.
-                unsafe { simd_avx2::asinh_color_preserve_avx2(r, g, b, c.inv_beta, c.inv_norm) };
-            });
-        return;
+    let [r, g, b] = image.rgb_planes_mut();
+    // The three planes split in lockstep so each task sees one band's worth of every channel.
+    r.par_chunks_mut(SAMPLES_PER_BLOCK)
+        .zip(g.par_chunks_mut(SAMPLES_PER_BLOCK))
+        .zip(b.par_chunks_mut(SAMPLES_PER_BLOCK))
+        .for_each(|((r, g), b)| {
+            dispatch! {
+                x86: avx2_fma
+                    => simd_avx2::asinh_color_preserve_avx2(r, g, b, c.inv_beta, c.inv_norm),
+                aarch64
+                    => simd_neon::asinh_color_preserve_neon(r, g, b, c.inv_beta, c.inv_norm),
+                scalar => asinh_color_preserve_scalar(r, g, b, c),
+            }
+        });
+}
+
+/// Scalar counterpart of the vectorized `asinh_color_preserve_*` kernels, over one band of three
+/// RGB planes. Same per-pixel curve as [`color_preserve_pixel`], reached through the same
+/// per-band split so every backend sees the identical work division.
+fn asinh_color_preserve_scalar(
+    red: &mut [f32],
+    green: &mut [f32],
+    blue: &mut [f32],
+    c: AsinhCurve,
+) {
+    for ((r, g), b) in red.iter_mut().zip(green.iter_mut()).zip(blue.iter_mut()) {
+        let out = color_preserve_pixel(
+            Rgb {
+                r: *r,
+                g: *g,
+                b: *b,
+            },
+            &c,
+        );
+        *r = out.r;
+        *g = out.g;
+        *b = out.b;
     }
-    #[cfg(target_arch = "aarch64")]
-    {
-        let [r, g, b] = image.rgb_planes_mut();
-        r.par_chunks_mut(8192)
-            .zip(g.par_chunks_mut(8192))
-            .zip(b.par_chunks_mut(8192))
-            .for_each(|((r, g), b)| {
-                // SAFETY: NEON is always available on aarch64.
-                unsafe { simd_neon::asinh_color_preserve_neon(r, g, b, c.inv_beta, c.inv_norm) };
-            });
-    }
-    #[cfg(not(target_arch = "aarch64"))]
-    image.map_rgb(|px| color_preserve_pixel(px, &c));
 }

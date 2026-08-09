@@ -23,10 +23,8 @@ mod bench;
 mod tests;
 
 use crate::bit_buffer2::BitBuffer2;
+use crate::simd::dispatch;
 use imaginarium::Buffer2;
-
-#[cfg(target_arch = "x86_64")]
-use imaginarium::cpu_features;
 
 /// Per-pixel noise floor: the noise estimate is clamped to this before forming the threshold so a
 /// zero or negative σ can't collapse it. Every backend reads this same constant so the SIMD and
@@ -73,8 +71,6 @@ fn process_words_scalar<const WITH_BG: bool>(
 
 /// Dispatch the packed threshold kernel to the best available backend. See `process_words_scalar`
 /// for the `WITH_BG` meaning; pass an empty `bg` when `WITH_BG` is false.
-// Scalar fallback is dead code on aarch64, where the NEON path returns unconditionally.
-#[allow(unreachable_code)]
 #[cfg_attr(not(test), inline)]
 fn process_words<const WITH_BG: bool>(
     pixels: &[f32],
@@ -85,67 +81,20 @@ fn process_words<const WITH_BG: bool>(
     pixel_offset: usize,
     pixel_end: usize,
 ) {
-    #[cfg(target_arch = "aarch64")]
-    {
-        // SAFETY: NEON is always available on aarch64.
-        unsafe {
-            neon::process_words_neon::<WITH_BG>(
-                pixels,
-                bg,
-                noise,
-                sigma_threshold,
-                words,
-                pixel_offset,
-                pixel_end,
-            );
-        }
-        return;
+    dispatch! {
+        x86: avx2 => avx2::process_words_avx2::<WITH_BG>(
+            pixels, bg, noise, sigma_threshold, words, pixel_offset, pixel_end,
+        ),
+        x86: sse4_1 => sse::process_words_sse::<WITH_BG>(
+            pixels, bg, noise, sigma_threshold, words, pixel_offset, pixel_end,
+        ),
+        aarch64 => neon::process_words_neon::<WITH_BG>(
+            pixels, bg, noise, sigma_threshold, words, pixel_offset, pixel_end,
+        ),
+        scalar => process_words_scalar::<WITH_BG>(
+            pixels, bg, noise, sigma_threshold, words, pixel_offset, pixel_end,
+        ),
     }
-
-    #[cfg(target_arch = "x86_64")]
-    {
-        if cpu_features::has_avx2() {
-            // SAFETY: AVX2 availability checked above.
-            unsafe {
-                avx2::process_words_avx2::<WITH_BG>(
-                    pixels,
-                    bg,
-                    noise,
-                    sigma_threshold,
-                    words,
-                    pixel_offset,
-                    pixel_end,
-                );
-            }
-            return;
-        }
-
-        if cpu_features::has_sse4_1() {
-            // SAFETY: SSE4.1 availability checked above.
-            unsafe {
-                sse::process_words_sse::<WITH_BG>(
-                    pixels,
-                    bg,
-                    noise,
-                    sigma_threshold,
-                    words,
-                    pixel_offset,
-                    pixel_end,
-                );
-            }
-            return;
-        }
-    }
-
-    process_words_scalar::<WITH_BG>(
-        pixels,
-        bg,
-        noise,
-        sigma_threshold,
-        words,
-        pixel_offset,
-        pixel_end,
-    );
 }
 
 /// Create binary mask of pixels above threshold into a BitBuffer2.

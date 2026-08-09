@@ -5,8 +5,7 @@
 //! - NEON on aarch64
 //! - Scalar fallback on other platforms
 
-#[cfg(target_arch = "x86_64")]
-use imaginarium::cpu_features;
+use crate::simd::dispatch;
 
 /// Natural cubic spline coefficients for one channel over a segment between two tile centers.
 #[derive(Debug, Clone, Copy)]
@@ -66,33 +65,12 @@ pub(super) fn interpolate_segment_cubic_simd(
     // an out-of-bounds write into noise_out, not just a wrong value. O(1) check, not expensive.
     assert_eq!(bg_out.len(), noise_out.len());
 
-    #[cfg(target_arch = "x86_64")]
-    {
-        if cpu_features::has_avx2_fma() {
-            unsafe {
-                interpolate_segment_cubic_avx2(bg_out, noise_out, bg, noise, ramp);
-            }
-            return;
-        }
-        if cpu_features::has_sse4_1() {
-            unsafe {
-                interpolate_segment_cubic_sse(bg_out, noise_out, bg, noise, ramp);
-            }
-            return;
-        }
+    dispatch! {
+        x86: avx2_fma => interpolate_segment_cubic_avx2(bg_out, noise_out, bg, noise, ramp),
+        x86: sse4_1 => interpolate_segment_cubic_sse(bg_out, noise_out, bg, noise, ramp),
+        aarch64 => interpolate_segment_cubic_neon(bg_out, noise_out, bg, noise, ramp),
+        scalar => interpolate_segment_cubic_scalar(bg_out, noise_out, bg, noise, ramp),
     }
-
-    #[cfg(target_arch = "aarch64")]
-    {
-        unsafe {
-            interpolate_segment_cubic_neon(bg_out, noise_out, bg, noise, ramp);
-        }
-        return;
-    }
-
-    // Scalar fallback is dead code on aarch64, where the NEON path returns unconditionally.
-    #[allow(unreachable_code)]
-    interpolate_segment_cubic_scalar(bg_out, noise_out, bg, noise, ramp);
 }
 
 /// Scalar implementation of cubic spline segment interpolation.
