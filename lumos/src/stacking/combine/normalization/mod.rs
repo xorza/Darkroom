@@ -1,5 +1,7 @@
 //! Frame normalization measurement and parameter fitting.
 
+use crate::bit_buffer2::BitBuffer2;
+use crate::math::size2us::Size2us;
 use arrayvec::ArrayVec;
 use common::CancelToken;
 use rayon::prelude::*;
@@ -39,7 +41,8 @@ enum RegisteredMeasurements {
 
 #[derive(Debug)]
 struct CommonDomain {
-    valid: Vec<bool>,
+    /// One bit per pixel — a `Vec<bool>` here costs 37.7 MB on a 6K frame against 4.7 MB packed.
+    valid: BitBuffer2,
     sample_count: usize,
 }
 
@@ -285,7 +288,7 @@ fn build_common_domain(
     pixel_count: usize,
     cancel: &CancelToken,
 ) -> Result<CommonDomain, Error> {
-    let mut common_domain = vec![true; pixel_count];
+    let mut common_domain = BitBuffer2::new_filled(Size2us::new(pixel_count, 1), true);
     for frame in frames {
         check_cancel(cancel)?;
         if let Some(coverage) = &frame.quality.coverage {
@@ -307,11 +310,8 @@ fn build_common_domain(
             )?;
         }
     }
-    let mut sample_count = 0;
-    for chunk in common_domain.chunks(NORMALIZATION_CHUNK_SIZE) {
-        check_cancel(cancel)?;
-        sample_count += chunk.iter().filter(|&&valid| valid).count();
-    }
+    check_cancel(cancel)?;
+    let sample_count = common_domain.count_ones();
     if sample_count == 0 {
         return Err(Error::NoCommonCoverage);
     }
@@ -321,21 +321,36 @@ fn build_common_domain(
     })
 }
 
+/// Intersect `common_domain` with the pixels of `plane` that satisfy `is_valid`.
+///
+/// Accumulates 64 predicate results into a word before touching the mask, so this is one
+/// read-modify-write per 64 pixels rather than per pixel.
 fn intersect_domain(
-    common_domain: &mut [bool],
+    common_domain: &mut BitBuffer2,
     plane: &StoredPlane,
     pixel_count: usize,
     is_valid: impl Fn(f32) -> bool,
     cancel: &CancelToken,
 ) -> Result<(), Error> {
-    for (domain_chunk, value_chunk) in common_domain
-        .chunks_mut(NORMALIZATION_CHUNK_SIZE)
-        .zip(plane.chunk(0, pixel_count).chunks(NORMALIZATION_CHUNK_SIZE))
-    {
-        check_cancel(cancel)?;
-        for (valid, &value) in domain_chunk.iter_mut().zip(value_chunk) {
-            *valid &= is_valid(value);
+    const BITS: usize = 64;
+    let values = plane.chunk(0, pixel_count);
+    // The mask is one row, so word `w` covers pixels `64w..64w+64`.
+    let words_per_check = NORMALIZATION_CHUNK_SIZE.div_ceil(BITS);
+    for (w, word) in common_domain.words.iter_mut().enumerate() {
+        let base = w * BITS;
+        if base >= pixel_count {
+            break;
         }
+        if w % words_per_check == 0 {
+            check_cancel(cancel)?;
+        }
+        let mut incoming = 0u64;
+        for bit in 0..BITS.min(pixel_count - base) {
+            if is_valid(values[base + bit]) {
+                incoming |= 1u64 << bit;
+            }
+        }
+        *word &= incoming;
     }
     Ok(())
 }
@@ -455,36 +470,34 @@ fn measure_global_norms_to_first(
 fn gather_valid_samples(
     samples: &mut Vec<f32>,
     plane: &StoredPlane,
-    common_domain: &[bool],
+    common_domain: &BitBuffer2,
     pixel_count: usize,
     cancel: &CancelToken,
 ) -> Result<(), Error> {
     samples.clear();
-    for (value_chunk, valid_chunk) in plane
-        .chunk(0, pixel_count)
-        .chunks(NORMALIZATION_CHUNK_SIZE)
-        .zip(common_domain.chunks(NORMALIZATION_CHUNK_SIZE))
-    {
+    let values = plane.chunk(0, pixel_count);
+    for (start, value_chunk) in values.chunks(NORMALIZATION_CHUNK_SIZE).enumerate() {
         check_cancel(cancel)?;
+        let base = start * NORMALIZATION_CHUNK_SIZE;
         samples.extend(
             value_chunk
                 .iter()
-                .zip(valid_chunk)
-                .filter_map(|(&value, &valid)| valid.then_some(value)),
+                .enumerate()
+                .filter_map(|(offset, &value)| common_domain.get(base + offset).then_some(value)),
         );
     }
     Ok(())
 }
 
 fn stratified_valid_indices(
-    common_domain: &[bool],
+    common_domain: &BitBuffer2,
     sample_count: usize,
     cancel: &CancelToken,
 ) -> Result<Vec<usize>, Error> {
     let retained = sample_count.min(PHOTOMETRIC_SAMPLE_LIMIT);
     let mut indices = Vec::with_capacity(retained);
     let mut valid_rank = 0;
-    for (pixel, &valid) in common_domain.iter().enumerate() {
+    for (pixel, valid) in common_domain.iter().enumerate() {
         if pixel % NORMALIZATION_CHUNK_SIZE == 0 {
             check_cancel(cancel)?;
         }

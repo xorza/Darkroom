@@ -1,3 +1,4 @@
+use crate::bit_buffer2::BitBuffer2;
 use crate::io::image::cfa::CfaType;
 use crate::io::image::image_metadata::ImageMetadata;
 use crate::io::raw::demosaic::bayer::CfaPattern;
@@ -320,14 +321,14 @@ fn xtrans_removes_cosmic_ray_preserves_flat_field() {
 /// the pass order-independent: it writes only masked pixels and reads only unmasked ones, so no
 /// replacement can observe another. Any future attempt to drop the frame copy depends on exactly
 /// that, and this is what would catch a change that broke it.
-fn replace_flagged_via_snapshot(pixels: &[f32], size: Size2us, mask: &[bool]) -> Vec<f32> {
+fn replace_flagged_via_snapshot(pixels: &[f32], size: Size2us, mask: &BitBuffer2) -> Vec<f32> {
     let src = pixels.to_vec();
     let mut out = pixels.to_vec();
     let (wi, hi) = (size.width as isize, size.height as isize);
     for y in 0..size.height {
         for x in 0..size.width {
             let target = size.index_of(Vec2us::new(x, y));
-            if !mask[target] {
+            if !mask.get(target) {
                 continue;
             }
             let mut buf = Vec::new();
@@ -336,7 +337,7 @@ fn replace_flagged_via_snapshot(pixels: &[f32], size: Size2us, mask: &[bool]) ->
                 for dx in -2..=2 {
                     let xx = (x as isize + dx).clamp(0, wi - 1) as usize;
                     let j = size.index_of(Vec2us::new(xx, yy));
-                    if !mask[j] {
+                    if !mask.get(j) {
                         buf.push(src[j]);
                     }
                 }
@@ -355,21 +356,21 @@ fn replace_flagged_matches_a_snapshot_reference() {
     // Distinct values so a median that picked up a replaced neighbour would shift visibly.
     let pixels: Vec<f32> = (0..size.pixel_count()).map(|i| i as f32).collect();
 
-    let mut mask = vec![false; size.pixel_count()];
+    let mut mask = BitBuffer2::new_default(size);
     let at = |x, y| size.index_of(Vec2us::new(x, y));
     // Isolated hit.
-    mask[at(6, 6)] = true;
+    mask.set(at(6, 6), true);
     // Adjacent 2x2 block: the case that would expose an order-dependent read, since each of the
     // four sits inside the others' 5x5 windows.
     for (x, y) in [(2, 9), (3, 9), (2, 10), (3, 10)] {
-        mask[at(x, y)] = true;
+        mask.set(at(x, y), true);
     }
     // Corner, to exercise the clamped window.
-    mask[at(0, 0)] = true;
+    mask.set(at(0, 0), true);
     // A hit whose entire 5x5 is masked — nothing to repair from, so it must be left alone.
     for y in 0..5 {
         for x in 7..12 {
-            mask[at(x, y)] = true;
+            mask.set(at(x, y), true);
         }
     }
 

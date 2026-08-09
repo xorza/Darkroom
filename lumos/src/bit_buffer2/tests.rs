@@ -147,3 +147,56 @@ fn debug_access_rejects_out_of_bounds_indices_and_coordinates() {
     assert!(catch_unwind(AssertUnwindSafe(|| buffer.set(6, true))).is_err());
     assert!(catch_unwind(AssertUnwindSafe(|| buffer.set_at(Vec2us::new(0, 2), true))).is_err());
 }
+
+/// A width that is neither a whole word nor a whole 128-bit row: 100 real bits per row, stored in
+/// two words, with 28 bits of padding after them. Readers must ignore those — `new_filled(_, true)`
+/// sets them, so counting whole words would over-report.
+const RAGGED: Size2us = Size2us {
+    width: 100,
+    height: 3,
+};
+
+#[test]
+fn from_predicate_matches_bit_by_bit_setting() {
+    // A pattern that crosses both the 64-bit word edge and the 100-bit row edge.
+    let pattern = |i: usize| i % 7 == 0 || i % 64 == 63;
+    let built = BitBuffer2::from_predicate(RAGGED, pattern);
+
+    let mut by_hand = BitBuffer2::new_default(RAGGED);
+    for i in 0..by_hand.len {
+        by_hand.set(i, pattern(i));
+    }
+    assert_eq!(built.words, by_hand.words, "packing differs");
+    assert_eq!(built.count_ones(), by_hand.count_ones());
+}
+
+#[test]
+fn from_predicate_handles_exact_word_and_empty_sizes() {
+    let exact = BitBuffer2::from_predicate(Size2us::new(64, 2), |i| i < 64);
+    assert_eq!(exact.count_ones(), 64);
+    assert!(exact.get(63) && !exact.get(64));
+
+    let empty = BitBuffer2::from_predicate(Size2us::new(0, 0), |_| true);
+    assert_eq!(empty.count_ones(), 0);
+    assert_eq!(empty.len, 0);
+}
+
+#[test]
+fn padding_bits_never_reach_the_count() {
+    // `new_filled(_, true)` sets whole words, so 3 rows of 100 bits are stored as 384 set bits.
+    let mut mask = BitBuffer2::new_filled(RAGGED, true);
+    assert_eq!(mask.count_ones(), 300, "300 real bits, not the 384 stored");
+    assert!(
+        mask.words.iter().map(|w| w.count_ones()).sum::<u32>() > 300,
+        "the padding really is set"
+    );
+
+    for i in 0..mask.len {
+        mask.set(i, false);
+    }
+    assert_eq!(mask.count_ones(), 0);
+    assert!(
+        mask.words.iter().any(|&w| w != 0),
+        "padding survives untouched"
+    );
+}

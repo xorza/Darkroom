@@ -193,6 +193,30 @@ impl BitBuffer2 {
         count
     }
 
+    /// Build a mask by testing every pixel, accumulating a whole word before storing it.
+    ///
+    /// `predicate` takes the linear pixel index, the same one [`Self::get`] takes. This exists so
+    /// callers converting a `Vec<bool>` do not fall into `set()` per pixel, which is a
+    /// read-modify-write on a word and slower than the byte store it replaces.
+    pub(crate) fn from_predicate(size: Size2us, predicate: impl Fn(usize) -> bool) -> Self {
+        let mut buffer = Self::new_default(size);
+        let words_per_row = buffer.words_per_row();
+        for y in 0..size.height {
+            let row_start = y * words_per_row;
+            let row_base = y * size.width;
+            for x0 in (0..size.width).step_by(BITS_PER_WORD) {
+                let mut word = 0u64;
+                for bit in 0..BITS_PER_WORD.min(size.width - x0) {
+                    if predicate(row_base + x0 + bit) {
+                        word |= 1u64 << bit;
+                    }
+                }
+                buffer.words[row_start + x0 / BITS_PER_WORD] = word;
+            }
+        }
+        buffer
+    }
+
     /// Iterate over all bit values (row-major order, skipping padding).
     #[inline]
     pub(crate) fn iter(&self) -> BitIter<'_> {
