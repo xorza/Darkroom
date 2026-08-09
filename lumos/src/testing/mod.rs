@@ -104,8 +104,14 @@ impl TestRng {
 
 /// Create a CfaImage from raw pixel data and CFA type.
 pub(crate) fn make_cfa(size: Size2us, pixels: Vec<f32>, cfa_type: CfaType) -> CfaImage {
+    cfa_from_plane(Buffer2::new(size.width, size.height, pixels), cfa_type)
+}
+
+/// Wrap an already-built plane. The plane carries its own dimensions, so unlike [`make_cfa`] this
+/// needs no `size` and copies nothing.
+pub(crate) fn cfa_from_plane(data: Buffer2<f32>, cfa_type: CfaType) -> CfaImage {
     CfaImage {
-        data: Buffer2::new(size.width, size.height, pixels),
+        data,
         metadata: ImageMetadata {
             cfa_type: Some(cfa_type),
             ..Default::default()

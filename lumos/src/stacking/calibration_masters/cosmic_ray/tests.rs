@@ -2,69 +2,34 @@ use crate::io::image::cfa::CfaType;
 use crate::io::image::image_metadata::ImageMetadata;
 use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::stacking::calibration_masters::cosmic_ray::*;
+use crate::testing::cfa_from_plane;
 use crate::testing::prelude::*;
+use crate::testing::synthetic::sky_field::{Sky, SkyField};
 use crate::testing::synthetic::star_profiles::{StarProfile, SyntheticStar};
 
-/// Add a round Gaussian source (peak above the existing background) at `center`.
-fn add_gaussian(data: &mut Buffer2<f32>, center: Vec2, peak: f32, sigma: f32) {
-    SyntheticStar::new(center, peak, StarProfile::Gaussian { sigma }).add_to(data);
-}
-
-fn mono(data: Vec<f32>, size: Size2us) -> CfaImage {
-    CfaImage {
-        data: Buffer2::new(size.width, size.height, data),
-        metadata: ImageMetadata {
-            cfa_type: Some(CfaType::Mono),
-            ..Default::default()
-        },
-        quantization_sigma: None,
-    }
-}
-
-/// The 64×64 synthetic field [`synthetic_field`] builds.
-#[derive(Debug)]
-struct SyntheticField {
-    data: Vec<f32>,
-    size: Size2us,
-    /// Rounded star centers, so a test can assert the cores survive.
-    centers: Vec<Vec2us>,
-}
-
 /// 64×64: flat sky + deterministic Gaussian noise (σ≈0.003) + three well-sampled stars
-/// (FWHM≈3 px).
-fn synthetic_field() -> SyntheticField {
-    let size = Size2us::new(64, 64);
-    let mut data = Buffer2::new_filled(size.width, size.height, 0.05f32);
-    let mut rng = TestRng::new(7);
-    for v in data.iter_mut() {
-        *v += rng.next_gaussian_f32() * 0.003;
-    }
+/// (FWHM≈3 px). Unclamped, because the tests inject cosmic rays above the ceiling afterwards.
+fn synthetic_field() -> SkyField {
+    let sky = Sky {
+        level: 0.05,
+        noise: 0.003,
+        clamp: false,
+    };
     let stars = [
         (Vec2::new(20.0, 20.0), 0.6),
         (Vec2::new(44.0, 30.0), 0.45),
         (Vec2::new(32.0, 50.0), 0.7),
     ];
-    for &(center, peak) in &stars {
-        add_gaussian(&mut data, center, peak, 1.3);
-    }
-    let centers = stars
-        .iter()
-        .map(|&(c, _)| Vec2us::new(c.x as usize, c.y as usize))
-        .collect();
-    SyntheticField {
-        data: data.pixels().to_vec(),
-        size,
-        centers,
-    }
+    SkyField::render(Size2us::new(64, 64), sky, 1.3, &stars, 7)
 }
 
 #[test]
 fn removes_cosmic_rays_preserves_stars() {
-    let SyntheticField {
-        mut data,
-        size,
+    let SkyField {
+        pixels: mut data,
         centers: star_cores,
     } = synthetic_field();
+    let size = Size2us::new(data.width(), data.height());
     // Single-pixel CRs at empty positions + a short horizontal streak.
     let crs = [
         Vec2us::new(10, 10),
@@ -78,7 +43,7 @@ fn removes_cosmic_rays_preserves_stars() {
     }
     let star_vals: Vec<f32> = star_cores.iter().map(|&p| data[size.index_of(p)]).collect();
 
-    let mut img = mono(data, size);
+    let mut img = cfa_from_plane(data, CfaType::Mono);
     let count = reject_cosmic_rays(&mut img, &CosmicRayConfig::default());
     let out = img.data.pixels();
 
@@ -110,7 +75,7 @@ fn removes_cosmic_rays_preserves_stars() {
 fn clean_field_few_false_positives() {
     let field = synthetic_field();
     let count = reject_cosmic_rays(
-        &mut mono(field.data, field.size),
+        &mut cfa_from_plane(field.pixels, CfaType::Mono),
         &CosmicRayConfig::default(),
     );
     assert!(count <= 2, "clean field should flag ~0 CRs, got {count}");
@@ -119,17 +84,20 @@ fn clean_field_few_false_positives() {
 #[test]
 fn sigclip_controls_sensitivity() {
     // A modest spike (~15σ): a sensitive sigclip flags it, a strict one doesn't (A→X, B→Y, X≠Y).
-    let SyntheticField { mut data, size, .. } = synthetic_field();
+    let SkyField {
+        pixels: mut data, ..
+    } = synthetic_field();
+    let size = Size2us::new(data.width(), data.height());
     data[size.index_of(Vec2us::new(40, 40))] = 0.05 + 0.045;
     let sensitive = reject_cosmic_rays(
-        &mut mono(data.clone(), size),
+        &mut cfa_from_plane(data.clone(), CfaType::Mono),
         &CosmicRayConfig {
             sigclip: 3.0,
             ..Default::default()
         },
     );
     let strict = reject_cosmic_rays(
-        &mut mono(data, size),
+        &mut cfa_from_plane(data, CfaType::Mono),
         &CosmicRayConfig {
             sigclip: 60.0,
             ..Default::default()
@@ -144,7 +112,10 @@ fn sigclip_controls_sensitivity() {
 #[test]
 fn empirical_and_parametric_both_catch_a_bright_cr() {
     // Both noise models must flag an obvious bright CR among the stars.
-    let SyntheticField { mut data, size, .. } = synthetic_field();
+    let SkyField {
+        pixels: mut data, ..
+    } = synthetic_field();
+    let size = Size2us::new(data.width(), data.height());
     let cr = Vec2us::new(15, 33);
     data[size.index_of(cr)] = 0.99;
     for noise in [
@@ -155,7 +126,7 @@ fn empirical_and_parametric_both_catch_a_bright_cr() {
             full_scale: 4095.0,
         },
     ] {
-        let mut img = mono(data.clone(), size);
+        let mut img = cfa_from_plane(data.clone(), CfaType::Mono);
         let count = reject_cosmic_rays(
             &mut img,
             &CosmicRayConfig {
@@ -181,7 +152,12 @@ fn bayer_removes_cosmic_rays_preserves_star() {
     for v in data.iter_mut() {
         *v += rng.next_gaussian_f32() * 0.003;
     }
-    add_gaussian(&mut data, Vec2::new(24.0, 24.0), 0.6, 2.5);
+    SyntheticStar::new(
+        Vec2::new(24.0, 24.0),
+        0.6,
+        StarProfile::Gaussian { sigma: 2.5 },
+    )
+    .add_to(&mut data);
     let core = Vec2us::new(24, 24);
     let star = data[size.index_of(core)];
     // Each CR sits in a different (x%2, y%2) phase, exercising all four planes.
@@ -238,7 +214,12 @@ fn bayer_tight_star_eaten_is_a_known_limitation() {
         *v += rng.next_gaussian_f32() * 0.003;
     }
     // σ=1.0 → FWHM≈2.35 px in the mosaic
-    add_gaussian(&mut data, Vec2::new(24.0, 24.0), 0.6, 1.0);
+    SyntheticStar::new(
+        Vec2::new(24.0, 24.0),
+        0.6,
+        StarProfile::Gaussian { sigma: 1.0 },
+    )
+    .add_to(&mut data);
     let core = Vec2us::new(24, 24);
     let crs = [Vec2us::new(8, 8), Vec2us::new(37, 37)];
     for &p in &crs {

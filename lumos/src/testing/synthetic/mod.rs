@@ -49,5 +49,6 @@ pub(crate) mod noise;
 pub(crate) mod observe;
 pub(crate) mod patterns;
 pub(crate) mod scene;
+pub(crate) mod sky_field;
 pub(crate) mod star_profiles;
 pub(crate) mod transforms;
