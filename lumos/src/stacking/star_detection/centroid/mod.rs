@@ -800,7 +800,10 @@ fn compute_star(
             marginal_x[mx_idx] += value;
             marginal_y[my_idx] += value;
 
-            // Weighted second moments for FWHM and eccentricity
+            // Weighted second moments for FWHM and eccentricity. Kept in this loop rather than
+            // recomputed on the rare `windowed_covariance` failure below: a second traversal there
+            // measured no better than these three multiply-adds, which are a small share of an
+            // already branchy loop body.
             let fx = x as f64 - pos.x as f64;
             let fy = y as f64 - pos.y as f64;
             sum_x2 += value * fx * fx;
@@ -824,7 +827,7 @@ fn compute_star(
     // window to suppress wing noise, then deconvolve the window so FWHM/eccentricity
     // stay unbiased. Seed the window from the plain moment; fall back to the plain
     // moments if it can't converge to a valid (positive-definite) covariance.
-    // `sum_x2 + sum_y2` is the same Σ value·r² the loop used to accumulate separately.
+    // `sum_x2 + sum_y2` is Σ value·r², the radial moment the window is seeded from.
     let seed_sigma_sq = ((sum_x2 + sum_y2) / flux / 2.0).max(MIN_SIGMA_SQ);
     let cov = windowed_covariance(
         pixels,
