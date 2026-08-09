@@ -395,15 +395,14 @@ fn reject_bayer(data: &mut Buffer2<f32>, config: &CosmicRayConfig) -> usize {
             if pw < 3 || ph < 3 {
                 continue;
             }
-            let mut plane = vec![0.0f32; pw * ph];
+            let mut plane = Buffer2::new_filled(pw, ph, 0.0f32);
             for j in 0..ph {
                 for i in 0..pw {
-                    plane[j * pw + i] = data[(j * 2 + b) * w + (i * 2 + a)];
+                    plane[(i, j)] = data[(j * 2 + b) * w + (i * 2 + a)];
                 }
             }
-            let mut buf = Buffer2::new(pw, ph, plane);
-            total += reject_mono_buffer(&mut buf, config);
-            let cleaned = buf.pixels();
+            total += reject_mono_buffer(&mut plane, config);
+            let cleaned = plane.pixels();
             for j in 0..ph {
                 for i in 0..pw {
                     data[(j * 2 + b) * w + (i * 2 + a)] = cleaned[j * pw + i];

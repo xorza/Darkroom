@@ -188,15 +188,13 @@ fn find_lower_tile_y_single_tile() {
 fn tile_grid_with_mask_excludes_masked() {
     let width = 64;
     let height = 64;
-    let mut data = vec![0.2; width * height];
+    let mut pixels = Buffer2::new_filled(width, height, 0.2);
 
     for y in 0..32 {
         for x in 0..32 {
-            data[y * width + x] = 0.8;
+            pixels[(x, y)] = 0.8;
         }
     }
-
-    let pixels = Buffer2::new(width, height, data);
 
     let mut mask = BitBuffer2::new_filled(Size2us::new(width, height), false);
     for y in 0..32 {
@@ -220,7 +218,7 @@ fn tile_uses_few_unmasked_pixels_over_all_pixels() {
     let height = 64;
 
     // Start with all pixels at "star" value
-    let mut data = vec![0.9f32; width * height];
+    let mut pixels = Buffer2::new_filled(width, height, 0.9f32);
 
     // Set ~5% of the top-left tile (32×32 = 1024 pixels) to background value
     // 5% of 1024 = ~51 pixels. Use a stripe: first 2 rows unmasked.
@@ -230,7 +228,7 @@ fn tile_uses_few_unmasked_pixels_over_all_pixels() {
         for x in 0..32 {
             if y < 2 {
                 // Background pixels: unmasked, value 0.2
-                data[y * width + x] = 0.2;
+                pixels[(x, y)] = 0.2;
                 // mask stays false (unmasked)
             } else {
                 // Star pixels: masked, value 0.9
@@ -239,7 +237,6 @@ fn tile_uses_few_unmasked_pixels_over_all_pixels() {
         }
     }
 
-    let pixels = Buffer2::new(width, height, data);
     let grid = make_grid_with_mask(&pixels, 32, &mask);
 
     let stats = grid.stats[(0, 0)];
@@ -282,15 +279,14 @@ fn median_filter_uniform_unchanged() {
 fn median_filter_rejects_outlier_tile() {
     let width = 128;
     let height = 128;
-    let mut data = vec![0.3; width * height];
+    let mut pixels = Buffer2::new_filled(width, height, 0.3);
 
     for y in 32..64 {
         for x in 32..64 {
-            data[y * width + x] = 0.9;
+            pixels[(x, y)] = 0.9;
         }
     }
 
-    let pixels = Buffer2::new(width, height, data);
     let grid = make_grid(&pixels, 32);
 
     let center_stats = grid.stats[(1, 1)];
@@ -411,14 +407,13 @@ fn tile_grid_very_tall_image() {
 fn tile_with_outliers_sigma_clipped() {
     let width = 64;
     let height = 64;
-    let mut data = vec![0.5; width * height];
+    let mut pixels = Buffer2::new_filled(width, height, 0.5);
 
     // Add some outliers
-    for val in data.iter_mut().take(10) {
+    for val in pixels.iter_mut().take(10) {
         *val = 10.0; // Bright outliers
     }
 
-    let pixels = Buffer2::new(width, height, data);
     let grid = make_grid(&pixels, 64);
 
     let stats = grid.stats[(0, 0)];
@@ -554,14 +549,13 @@ fn sigma_sigma_clipping_rejects_outliers() {
     // 3-sigma clipping should reject values > median + 3*sigma
     let width = 100;
     let height = 100;
-    let mut data = vec![100.0; width * height];
+    let mut pixels = Buffer2::new_filled(width, height, 100.0);
 
     // Add 1% extreme outliers (100 pixels with value 10000)
     for i in 0..100 {
-        data[i * 100] = 10000.0;
+        pixels[i * 100] = 10000.0;
     }
 
-    let pixels = Buffer2::new(width, height, data);
     let grid = make_grid(&pixels, 100);
 
     let stats = grid.stats[(0, 0)];
@@ -580,16 +574,15 @@ fn median_filter_3x3_correctness() {
     // After 3x3 median filter, center should match neighbors
     let width = 160; // 5 tiles of 32 pixels
     let height = 160;
-    let mut data = vec![50.0; width * height];
+    let mut pixels = Buffer2::new_filled(width, height, 50.0);
 
     // Make center tile (tile 2,2) have value 200
     for y in 64..96 {
         for x in 64..96 {
-            data[y * width + x] = 200.0;
+            pixels[(x, y)] = 200.0;
         }
     }
 
-    let pixels = Buffer2::new(width, height, data);
     let grid = make_grid(&pixels, 32);
 
     // Center tile should be filtered to ~50 (median of 8x50 + 1x200 = 50)
@@ -641,7 +634,7 @@ fn sparse_stars_rejected() {
     // Simulate astronomical image: mostly background (100) with sparse bright stars
     let width = 128;
     let height = 128;
-    let mut data = vec![100.0; width * height];
+    let mut pixels = Buffer2::new_filled(width, height, 100.0);
 
     // Add 20 "stars" with brightness 500-1000 (random positions)
     let star_positions = [
@@ -673,12 +666,11 @@ fn sparse_stars_rejected() {
             for dx in -1i32..=1 {
                 let nx = (x + dx).clamp(0, 127) as usize;
                 let ny = (y + dy).clamp(0, 127) as usize;
-                data[ny * width + nx] = 500.0 + (dx.abs() + dy.abs()) as f32 * -100.0;
+                pixels[(nx, ny)] = 500.0 + (dx.abs() + dy.abs()) as f32 * -100.0;
             }
         }
     }
 
-    let pixels = Buffer2::new(width, height, data);
     let grid = make_grid(&pixels, 64);
 
     // All tiles should have median close to background (100)
@@ -701,16 +693,14 @@ fn mask_excludes_sources_correctly() {
     // Background 50, sources at 200
     let width = 64;
     let height = 64;
-    let mut data = vec![50.0; width * height];
+    let mut pixels = Buffer2::new_filled(width, height, 50.0);
 
     // Add bright source in top-left quadrant
     for y in 0..32 {
         for x in 0..32 {
-            data[y * width + x] = 200.0;
+            pixels[(x, y)] = 200.0;
         }
     }
-
-    let pixels = Buffer2::new(width, height, data);
 
     // Mask the bright source
     let mut mask = BitBuffer2::new_filled(Size2us::new(width, height), false);

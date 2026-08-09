@@ -208,10 +208,9 @@ fn extract_stamp_peak_value() {
 
     let width = 64;
     let height = 64;
-    let mut pixels = vec![0.1f32; width * height];
+    let mut pixels = Buffer2::new_filled(width, height, 0.1f32);
     // Add bright pixel at center
-    pixels[32 * width + 32] = 0.9;
-    let pixels = Buffer2::new(width, height, pixels);
+    pixels[(32, 32)] = 0.9;
 
     let result = extract_stamp(&pixels, DVec2::splat(32.0), 5);
     assert!(result.is_some());

@@ -675,14 +675,13 @@ fn moffat_fit_bad_initial_guess() {
     let beta = 2.5f32;
     let background = 0.1f32;
 
-    let mut pixels = vec![background; width * height];
+    let mut pixels = Buffer2::new_filled(width, height, background);
     for y in 0..height {
         for x in 0..width {
             let r2 = (x as f32 - true_cx as f32).powi(2) + (y as f32 - true_cy as f32).powi(2);
-            pixels[y * width + x] += 1.0 * (1.0 + r2 / (alpha * alpha)).powf(-beta);
+            pixels[(x, y)] += 1.0 * (1.0 + r2 / (alpha * alpha)).powf(-beta);
         }
     }
-    let pixels_buf = Buffer2::new(width, height, pixels);
 
     // Initial guess 2 pixels away
     let initial_guess = DVec2::new(13.0, 17.0);
@@ -692,7 +691,7 @@ fn moffat_fit_bad_initial_guess() {
         ..Default::default()
     };
     let result = MoffatFit::new(
-        &pixels_buf,
+        &pixels,
         initial_guess,
         &StampGrid::new(8),
         background,

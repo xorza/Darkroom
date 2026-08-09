@@ -100,12 +100,11 @@ fn gaussian_convolve_preserves_total_flux() {
     // Total flux should be approximately preserved (with some edge effects)
     let width = 64;
     let height = 64;
-    let mut pixels = vec![0.0f32; width * height];
+    let mut pixels = Buffer2::new_filled(width, height, 0.0f32);
 
     // Add a point source in the center
-    pixels[32 * width + 32] = 1.0;
+    pixels[(32, 32)] = 1.0;
 
-    let pixels = Buffer2::new(width, height, pixels);
     let mut result = Buffer2::new_default(width, height);
     let mut temp = Buffer2::new_default(width, height);
     gaussian_convolve(&pixels, 2.0, &mut result, &mut temp);
@@ -131,11 +130,11 @@ fn gaussian_convolve_spreads_point_source() {
     // the product of 1D kernel center values.
     let width = 32;
     let height = 32;
-    let mut pixels = vec![0.0f32; width * height];
-    pixels[16 * width + 16] = 1.0;
+    let mut pixels = Buffer2::new_filled(width, height, 0.0f32);
+    pixels[(16, 16)] = 1.0;
 
     let sigma = 2.0;
-    let pixels = Buffer2::new(width, height, pixels);
+
     let mut result = Buffer2::new_default(width, height);
     let mut temp = Buffer2::new_default(width, height);
     gaussian_convolve(&pixels, sigma, &mut result, &mut temp);
@@ -168,12 +167,11 @@ fn gaussian_convolve_spreads_point_source() {
 fn gaussian_convolve_symmetry() {
     let width = 33;
     let height = 33;
-    let mut pixels = vec![0.0f32; width * height];
+    let mut pixels = Buffer2::new_filled(width, height, 0.0f32);
 
     // Point source at center
-    pixels[16 * width + 16] = 1.0;
+    pixels[(16, 16)] = 1.0;
 
-    let pixels = Buffer2::new(width, height, pixels);
     let mut result = Buffer2::new_default(width, height);
     let mut temp = Buffer2::new_default(width, height);
     gaussian_convolve(&pixels, 2.0, &mut result, &mut temp);
@@ -198,10 +196,9 @@ fn gaussian_convolve_peak_matches_kernel_product() {
     // Verify that different sigmas produce peaks matching kernel center^2
     let width = 64;
     let height = 64;
-    let mut pixels = vec![0.0f32; width * height];
-    pixels[32 * width + 32] = 1.0;
+    let mut pixels = Buffer2::new_filled(width, height, 0.0f32);
+    pixels[(32, 32)] = 1.0;
 
-    let pixels = Buffer2::new(width, height, pixels);
     let mut temp = Buffer2::new_default(width, height);
 
     for sigma in [1.0f32, 2.0, 3.0] {
@@ -229,10 +226,9 @@ fn gaussian_convolve_edge_handling() {
     // preserve total flux and maintain symmetry where possible
     let width = 16;
     let height = 16;
-    let mut pixels = vec![0.0f32; width * height];
-    pixels[2 * width + 2] = 1.0;
+    let mut pixels = Buffer2::new_filled(width, height, 0.0f32);
+    pixels[(2, 2)] = 1.0;
 
-    let pixels = Buffer2::new(width, height, pixels);
     let mut result = Buffer2::new_default(width, height);
     let mut temp = Buffer2::new_default(width, height);
     gaussian_convolve(&pixels, 1.5, &mut result, &mut temp);
@@ -262,10 +258,9 @@ fn gaussian_convolve_non_square_image() {
     // 64×32 non-square image with point source at (32,16)
     let width = 64;
     let height = 32;
-    let mut pixels = vec![0.0f32; width * height];
-    pixels[16 * width + 32] = 1.0;
+    let mut pixels = Buffer2::new_filled(width, height, 0.0f32);
+    pixels[(32, 16)] = 1.0;
 
-    let pixels = Buffer2::new(width, height, pixels);
     let mut result = Buffer2::new_default(width, height);
     let mut temp = Buffer2::new_default(width, height);
     gaussian_convolve(&pixels, 2.0, &mut result, &mut temp);
@@ -341,14 +336,13 @@ fn matched_filter_detects_star() {
     let width = 32;
     let height = 32;
     let background = Buffer2::new_filled(width, height, 0.1f32);
-    let mut pixels = vec![0.1f32; width * height];
+    let mut pixels = Buffer2::new_filled(width, height, 0.1f32);
 
     // Add a star
     let cx = 16;
     let cy = 16;
-    pixels[cy * width + cx] = 0.5;
+    pixels[(cx, cy)] = 0.5;
 
-    let pixels = Buffer2::new(width, height, pixels);
     let mut result = Buffer2::new_default(width, height);
     let mut scratch = Buffer2::new_default(width, height);
     let mut temp = Buffer2::new_default(width, height);
@@ -482,13 +476,13 @@ fn matched_filter_noise_normalization() {
     let noise_sigma = 10.0f32;
 
     let mut rng = TestRng::new(42);
-    let mut pixels = vec![bg_level; width * height];
+    let mut pixels = Buffer2::new_filled(width, height, bg_level);
     for pixel in &mut pixels {
         *pixel += rng.next_gaussian_f32() * noise_sigma;
     }
 
     let background = Buffer2::new_filled(width, height, bg_level);
-    let pixels = Buffer2::new(width, height, pixels);
+
     let mut result = Buffer2::new_default(width, height);
     let mut scratch = Buffer2::new_default(width, height);
     let mut temp = Buffer2::new_default(width, height);
@@ -539,7 +533,7 @@ fn separable_vs_direct_equivalence() {
     // For small images, compare separable to direct implementation
     let width = 16;
     let height = 16;
-    let mut pixels = vec![0.0f32; width * height];
+    let mut pixels = Buffer2::new_filled(width, height, 0.0f32);
 
     // Random-ish pattern
     for (i, p) in pixels.iter_mut().enumerate() {
@@ -547,7 +541,7 @@ fn separable_vs_direct_equivalence() {
     }
 
     let sigma = 1.5;
-    let pixels = Buffer2::new(width, height, pixels);
+
     let mut result_sep = Buffer2::new_default(width, height);
     let mut result_direct = Buffer2::new_default(width, height);
     let mut temp = Buffer2::new_default(width, height);
@@ -662,10 +656,9 @@ fn elliptical_convolve_uniform_image() {
 fn elliptical_convolve_preserves_flux() {
     let width = 64;
     let height = 64;
-    let mut pixels = vec![0.0f32; width * height];
-    pixels[32 * width + 32] = 1.0;
+    let mut pixels = Buffer2::new_filled(width, height, 0.0f32);
+    pixels[(32, 32)] = 1.0;
 
-    let pixels = Buffer2::new(width, height, pixels);
     let mut result = Buffer2::new_default(width, height);
     let mut temp = Buffer2::new_default(width, height);
     elliptical_gaussian_convolve(&pixels, 2.0, 0.5, 0.3, &mut result, &mut temp);
@@ -685,12 +678,11 @@ fn elliptical_convolve_preserves_flux() {
 fn elliptical_convolve_spreads_point_source() {
     let width = 32;
     let height = 32;
-    let mut pixels = vec![0.0f32; width * height];
+    let mut pixels = Buffer2::new_filled(width, height, 0.0f32);
     let cx = 16;
     let cy = 16;
-    pixels[cy * width + cx] = 1.0;
+    pixels[(cx, cy)] = 1.0;
 
-    let pixels = Buffer2::new(width, height, pixels);
     let mut result = Buffer2::new_default(width, height);
     let mut temp = Buffer2::new_default(width, height);
     elliptical_gaussian_convolve(&pixels, 2.0, 0.5, 0.0, &mut result, &mut temp);
@@ -709,13 +701,13 @@ fn elliptical_convolve_spreads_point_source() {
 fn elliptical_convolve_axis_ratio_1_matches_circular() {
     let width = 32;
     let height = 32;
-    let mut pixels = vec![0.0f32; width * height];
+    let mut pixels = Buffer2::new_filled(width, height, 0.0f32);
     for (i, p) in pixels.iter_mut().enumerate() {
         *p = ((i * 7 + 3) % 100) as f32 / 100.0;
     }
 
     let sigma = 2.0;
-    let pixels = Buffer2::new(width, height, pixels);
+
     let mut result_circular = Buffer2::new_default(width, height);
     let mut result_elliptical = Buffer2::new_default(width, height);
     let mut temp = Buffer2::new_default(width, height);
@@ -744,10 +736,9 @@ fn elliptical_convolve_rotation_invariance() {
     // should produce different orientations but same total flux
     let width = 64;
     let height = 64;
-    let mut pixels = vec![0.0f32; width * height];
-    pixels[32 * width + 32] = 1.0;
+    let mut pixels = Buffer2::new_filled(width, height, 0.0f32);
+    pixels[(32, 32)] = 1.0;
 
-    let pixels = Buffer2::new(width, height, pixels);
     let mut result_0 = Buffer2::new_default(width, height);
     let mut result_90 = Buffer2::new_default(width, height);
     let mut temp = Buffer2::new_default(width, height);
@@ -789,9 +780,8 @@ fn elliptical_convolve_various_axis_ratios() {
     // For a point source at (16,16), elliptical convolution should preserve flux
     let width = 32;
     let height = 32;
-    let mut pixels = vec![0.0f32; width * height];
-    pixels[16 * width + 16] = 1.0;
-    let pixels = Buffer2::new(width, height, pixels);
+    let mut pixels = Buffer2::new_filled(width, height, 0.0f32);
+    pixels[(16, 16)] = 1.0;
 
     let mut peaks = Vec::new();
     for axis_ratio in [1.0, 0.8, 0.6, 0.4, 0.2] {
@@ -856,19 +846,15 @@ fn convolution_linearity() {
     let height = 32;
     let sigma = 2.0;
 
-    let mut pixels_a = vec![0.0f32; width * height];
-    let mut pixels_b = vec![0.0f32; width * height];
-    pixels_a[16 * width + 12] = 1.0;
-    pixels_b[16 * width + 20] = 1.0;
+    let mut pixels_a = Buffer2::new_filled(width, height, 0.0f32);
+    let mut pixels_b = Buffer2::new_filled(width, height, 0.0f32);
+    pixels_a[(12, 16)] = 1.0;
+    pixels_b[(20, 16)] = 1.0;
 
-    let mut pixels_sum = vec![0.0f32; width * height];
+    let mut pixels_sum = Buffer2::new_filled(width, height, 0.0f32);
     for i in 0..pixels_sum.len() {
         pixels_sum[i] = pixels_a[i] + pixels_b[i];
     }
-
-    let pixels_a = Buffer2::new(width, height, pixels_a);
-    let pixels_b = Buffer2::new(width, height, pixels_b);
-    let pixels_sum = Buffer2::new(width, height, pixels_sum);
 
     let mut result_a = Buffer2::new_default(width, height);
     let mut result_b = Buffer2::new_default(width, height);
@@ -899,16 +885,13 @@ fn convolution_scaling() {
     let sigma = 2.0;
     let scale = 3.5;
 
-    let mut pixels = vec![0.0f32; width * height];
-    pixels[16 * width + 16] = 1.0;
+    let mut pixels = Buffer2::new_filled(width, height, 0.0f32);
+    pixels[(16, 16)] = 1.0;
 
-    let mut pixels_scaled = vec![0.0f32; width * height];
+    let mut pixels_scaled = Buffer2::new_filled(width, height, 0.0f32);
     for i in 0..pixels.len() {
         pixels_scaled[i] = pixels[i] * scale;
     }
-
-    let pixels = Buffer2::new(width, height, pixels);
-    let pixels_scaled = Buffer2::new(width, height, pixels_scaled);
 
     let mut result = Buffer2::new_default(width, height);
     let mut result_scaled = Buffer2::new_default(width, height);

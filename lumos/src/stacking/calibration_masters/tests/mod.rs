@@ -620,11 +620,11 @@ fn calibrate_hot_pixel_correction() {
     let h = 6;
     let pattern = CfaType::Bayer(CfaPattern::Rggb);
 
-    let mut dark_pixels = vec![0.01_f32; w * h];
-    dark_pixels[2 * w + 2] = 0.9; // hot pixel at (2,2)
+    let mut dark_pixels = Buffer2::new_filled(w, h, 0.01_f32);
+    dark_pixels[(2, 2)] = 0.9; // hot pixel at (2,2)
 
     let dark = CfaImage {
-        data: Buffer2::new(w, h, dark_pixels),
+        data: dark_pixels,
         metadata: ImageMetadata {
             cfa_type: Some(pattern.clone()),
             ..Default::default()
@@ -652,11 +652,11 @@ fn calibrate_hot_pixel_correction() {
     );
 
     // Create light with corrupted hot pixel
-    let mut light_pixels = vec![0.5_f32; w * h];
-    light_pixels[2 * w + 2] = 0.99; // corrupted value at hot pixel location
+    let mut light_pixels = Buffer2::new_filled(w, h, 0.5_f32);
+    light_pixels[(2, 2)] = 0.99; // corrupted value at hot pixel location
 
     let mut light = CfaImage {
-        data: Buffer2::new(w, h, light_pixels),
+        data: light_pixels,
         metadata: ImageMetadata {
             cfa_type: Some(pattern),
             ..Default::default()

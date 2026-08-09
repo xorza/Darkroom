@@ -89,14 +89,13 @@ fn gradient_background() {
 fn background_with_stars() {
     let width = 128;
     let height = 128;
-    let mut data = vec![0.1; width * height];
+    let mut pixels = Buffer2::new_filled(width, height, 0.1);
 
     // Add bright spots (stars)
-    data[64 * width + 64] = 1.0;
-    data[32 * width + 32] = 0.9;
-    data[96 * width + 96] = 0.95;
+    pixels[(64, 64)] = 1.0;
+    pixels[(32, 32)] = 0.9;
+    pixels[(96, 96)] = 0.95;
 
-    let pixels = Buffer2::new(width, height, data);
     let bg = background_map::estimate(
         &pixels,
         &BackgroundConfig {
@@ -161,14 +160,13 @@ fn non_square_image() {
 fn sigma_clipping_rejects_outliers() {
     let width = 64;
     let height = 64;
-    let mut data = vec![0.2; width * height];
+    let mut pixels = Buffer2::new_filled(width, height, 0.2);
 
     // 10% bright outliers
     for i in 0..(width * height / 10) {
-        data[i * 10] = 0.95;
+        pixels[i * 10] = 0.95;
     }
 
-    let pixels = Buffer2::new(width, height, data);
     let bg = background_map::estimate(
         &pixels,
         &BackgroundConfig {
@@ -352,15 +350,14 @@ fn noise_estimation_with_actual_noise() {
     // Image with real noise should have non-zero sigma estimation
     let width = 128;
     let height = 128;
-    let mut data = vec![0.5; width * height];
+    let mut pixels = Buffer2::new_filled(width, height, 0.5);
 
     // Add Gaussian-like noise pattern (deterministic for reproducibility)
-    for (i, val) in data.iter_mut().enumerate() {
+    for (i, val) in pixels.iter_mut().enumerate() {
         let noise = ((i * 7919) % 1000) as f32 / 10000.0 - 0.05; // [-0.05, 0.05]
         *val += noise;
     }
 
-    let pixels = Buffer2::new(width, height, data);
     let bg = background_map::estimate(
         &pixels,
         &BackgroundConfig {
@@ -463,7 +460,7 @@ fn iterative_background_with_bright_stars() {
     // Background with bright stars should be better estimated with iterative refinement
     let width = 128;
     let height = 128;
-    let mut data = Buffer2::new_filled(width, height, 0.1f32);
+    let mut pixels = Buffer2::new_filled(width, height, 0.1f32);
 
     // Add multiple bright Gaussian stars
     let stars: [(i32, i32); 5] = [(32, 32), (64, 64), (96, 96), (32, 96), (96, 32)];
@@ -475,10 +472,8 @@ fn iterative_background_with_bright_stars() {
                 sigma: std::f32::consts::SQRT_2,
             },
         )
-        .add_to(&mut data);
+        .add_to(&mut pixels);
     }
-
-    let pixels = data;
 
     // Non-iterative estimate
     let bg_simple = background_map::estimate(
@@ -523,7 +518,7 @@ fn iterative_background_preserves_gradient() {
     // Background gradient should be preserved with iterative estimation
     let width = 64;
     let height = 64;
-    let mut data = Buffer2::new(
+    let mut pixels = Buffer2::new(
         width,
         height,
         (0..height)
@@ -533,9 +528,8 @@ fn iterative_background_preserves_gradient() {
 
     // Add a bright star
     SyntheticStar::new(Vec2::splat(32.0), 0.5, StarProfile::Gaussian { sigma: 1.0 })
-        .add_to(&mut data);
+        .add_to(&mut pixels);
 
-    let pixels = data;
     let config = BackgroundConfig {
         tile_size: 16,
         ..Default::default()
@@ -558,13 +552,12 @@ fn iterative_background_no_dilation() {
     // Test iterative refinement with mask_dilation = 0
     let width = 128;
     let height = 128;
-    let mut data = Buffer2::new_filled(width, height, 0.2f32);
+    let mut pixels = Buffer2::new_filled(width, height, 0.2f32);
 
     // Add a bright star
     SyntheticStar::new(Vec2::splat(64.0), 0.7, StarProfile::Gaussian { sigma: 1.0 })
-        .add_to(&mut data);
+        .add_to(&mut pixels);
 
-    let pixels = data;
     let config = BackgroundConfig {
         refinement: BackgroundRefinement::Iterative { iterations: 1 },
         mask_dilation: 0, // No dilation
