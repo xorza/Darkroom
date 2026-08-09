@@ -58,8 +58,11 @@ const MIN_STAMP_RADIUS: usize = 4;
 /// for very large PSFs.
 const MAX_STAMP_RADIUS: usize = 15;
 
+/// Maximum stamp side length in pixels (31 for stamp_radius=15).
+const MAX_STAMP_SIZE: usize = 2 * MAX_STAMP_RADIUS + 1;
+
 /// Maximum stamp pixels (31×31 for stamp_radius=15).
-const MAX_STAMP_PIXELS: usize = (2 * MAX_STAMP_RADIUS + 1).pow(2);
+const MAX_STAMP_PIXELS: usize = MAX_STAMP_SIZE.pow(2);
 
 /// Maximum annulus outer radius (1.5 × MAX_STAMP_RADIUS, rounded up).
 const MAX_ANNULUS_OUTER_RADIUS: usize = (MAX_STAMP_RADIUS * 3).div_ceil(2); // = 23
@@ -504,6 +507,20 @@ fn refine_centroid(
     let pos_y = pos.y as f64;
 
     let stamp_radius_i32 = stamp_radius as i32;
+    let stamp_size = 2 * stamp_radius + 1;
+
+    // The weight is a circular Gaussian, so it factors per axis:
+    // `exp(-(dx² + dy²)/2σ²) = exp(-dx²/2σ²) · exp(-dy²/2σ²)`. Filling one column vector here and
+    // one row scalar below turns `(2r+1)²` `exp` calls into `2(2r+1)` — 961 into 62 at the largest
+    // stamp — and this loop is what `measure_star` spends most of its time in. Costs one extra
+    // multiply per pixel and a ulp or two of weight precision against the unfactored form.
+    let mut column_weights = [0.0f64; MAX_STAMP_SIZE];
+    for (column, weight) in column_weights[..stamp_size].iter_mut().enumerate() {
+        let px = (icx + column as isize - stamp_radius as isize) as f64;
+        let ddx = px - pos_x;
+        *weight = (-ddx * ddx / two_sigma_sq).exp();
+    }
+
     for dy in -stamp_radius_i32..=stamp_radius_i32 {
         let y = (icy + dy as isize) as usize;
         // One bounds check per row rather than per pixel — `is_valid_stamp_position` above has
@@ -511,19 +528,18 @@ fn refine_centroid(
         let px_row = pixels.row(y);
         let bg_row = background.background.row(y);
 
-        for dx in -stamp_radius_i32..=stamp_radius_i32 {
-            let x = (icx + dx as isize) as usize;
+        let py = y as f64;
+        let ddy = py - pos_y;
+        let row_weight = (-ddy * ddy / two_sigma_sq).exp();
+
+        for (column, &column_weight) in column_weights[..stamp_size].iter().enumerate() {
+            let x = icx as usize + column - stamp_radius;
 
             // Background-subtracted value
             let value = (px_row[x] - bg_row[x]).max(0.0) as f64;
+            let weight = value * column_weight * row_weight;
 
-            // Gaussian weight based on distance from current centroid
-            let px = x as f64;
-            let py = y as f64;
-            let dist_sq = (px - pos_x) * (px - pos_x) + (py - pos_y) * (py - pos_y);
-            let weight = value * (-dist_sq / two_sigma_sq).exp();
-
-            sum_x += px * weight;
+            sum_x += x as f64 * weight;
             sum_y += py * weight;
             sum_w += weight;
         }
@@ -617,6 +633,14 @@ fn windowed_covariance(
     let mut sigma_w_sq = seed_sigma_sq.clamp(MIN_SIGMA_SQ, MAX_SIGMA_SQ);
     let mut best: Option<Cov2> = None;
 
+    let stamp_size = 2 * stamp_radius + 1;
+    // Column offsets survive every iteration; their exponentials do not, because `inv_two_sw`
+    // is re-derived from the matched window each pass.
+    let mut column_offsets = [0.0f64; MAX_STAMP_SIZE];
+    for (column, offset) in column_offsets[..stamp_size].iter_mut().enumerate() {
+        *offset = (icx + column as isize - stamp_radius as isize) as f64 - pos_x;
+    }
+
     for _ in 0..MAX_ITERS {
         let inv_two_sw = 1.0 / (2.0 * sigma_w_sq);
         let mut w_sum = 0.0f64;
@@ -624,20 +648,35 @@ fn windowed_covariance(
         let mut myy = 0.0f64;
         let mut mxy = 0.0f64;
 
+        // The window is circular, so `exp(-(fx² + fy²)·k)` factors per axis exactly as in
+        // `refine_centroid` — `2(2r+1)` exponentials per iteration instead of `(2r+1)²`.
+        let mut column_weights = [0.0f64; MAX_STAMP_SIZE];
+        for (weight, &fx) in column_weights[..stamp_size]
+            .iter_mut()
+            .zip(&column_offsets[..stamp_size])
+        {
+            *weight = (-fx * fx * inv_two_sw).exp();
+        }
+
         for dy in -sr..=sr {
             let y = (icy + dy as isize) as usize;
             let px_row = pixels.row(y);
             let bg_row = background.background.row(y);
-            for dx in -sr..=sr {
-                let x = (icx + dx as isize) as usize;
-                let fx = x as f64 - pos_x;
-                let fy = y as f64 - pos_y;
-                let r2 = fx * fx + fy * fy;
+
+            let fy = y as f64 - pos_y;
+            let row_weight = (-fy * fy * inv_two_sw).exp();
+
+            for (column, (&fx, &column_weight)) in column_offsets[..stamp_size]
+                .iter()
+                .zip(&column_weights[..stamp_size])
+                .enumerate()
+            {
+                let x = icx as usize + column - stamp_radius;
                 let bg = match background_override {
                     Some(local) => local.bg,
                     None => bg_row[x],
                 };
-                let wv = (-r2 * inv_two_sw).exp() * (px_row[x] - bg) as f64;
+                let wv = column_weight * row_weight * (px_row[x] - bg) as f64;
                 w_sum += wv;
                 mxx += wv * fx * fx;
                 myy += wv * fy * fy;
@@ -728,7 +767,6 @@ fn compute_star(
 
     // For roundness calculation: marginal sums
     let stamp_size = 2 * stamp_radius + 1;
-    const MAX_STAMP_SIZE: usize = 2 * MAX_STAMP_RADIUS + 1; // 31
     let mut marginal_x = [0.0f64; MAX_STAMP_SIZE];
     let mut marginal_y = [0.0f64; MAX_STAMP_SIZE];
 
