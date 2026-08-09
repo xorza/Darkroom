@@ -100,9 +100,7 @@ fn test_single_phase1_iteration_provides_good_seed() {
 /// Verify that GaussianFit accuracy is equivalent whether Phase 1 runs 2 or 10 iterations.
 #[test]
 fn test_gaussian_fit_accuracy_independent_of_phase1_iterations() {
-    use crate::stacking::star_detection::centroid::gaussian_fit::{
-        GaussianFitConfig, GaussianFitResult,
-    };
+    use crate::stacking::star_detection::centroid::gaussian_fit::{GaussianFit, GaussianFitConfig};
 
     let width = 64;
     let height = 64;
@@ -135,7 +133,7 @@ fn test_gaussian_fit_accuracy_independent_of_phase1_iterations() {
 
     // Now apply Gaussian fit from both starting points
     let config = GaussianFitConfig::default();
-    let result_2iter = GaussianFitResult::fit(
+    let result_2iter = GaussianFit::new(
         &pixels,
         pos_2iter,
         &StampGrid::new(stamp_radius),
@@ -144,7 +142,7 @@ fn test_gaussian_fit_accuracy_independent_of_phase1_iterations() {
         &config,
     )
     .expect("fit should succeed from 2-iter seed");
-    let result_full = GaussianFitResult::fit(
+    let result_full = GaussianFit::new(
         &pixels,
         pos_full,
         &StampGrid::new(stamp_radius),
@@ -179,7 +177,7 @@ fn test_gaussian_fit_accuracy_independent_of_phase1_iterations() {
 /// Verify that MoffatFit accuracy is equivalent whether Phase 1 runs 2 or 10 iterations.
 #[test]
 fn test_moffat_fit_accuracy_independent_of_phase1_iterations() {
-    use crate::stacking::star_detection::centroid::moffat_fit::{MoffatFitConfig, MoffatFitResult};
+    use crate::stacking::star_detection::centroid::moffat_fit::{MoffatFit, MoffatFitConfig};
 
     let width = 64;
     let height = 64;
@@ -218,7 +216,7 @@ fn test_moffat_fit_accuracy_independent_of_phase1_iterations() {
         fixed_beta: 2.5,
         ..MoffatFitConfig::default()
     };
-    let result_2iter = MoffatFitResult::fit(
+    let result_2iter = MoffatFit::new(
         &pixels,
         pos_2iter,
         &StampGrid::new(stamp_radius),
@@ -227,7 +225,7 @@ fn test_moffat_fit_accuracy_independent_of_phase1_iterations() {
         &config,
     )
     .expect("fit should succeed from 2-iter seed");
-    let result_full = MoffatFitResult::fit(
+    let result_full = MoffatFit::new(
         &pixels,
         pos_full,
         &StampGrid::new(stamp_radius),
@@ -291,9 +289,7 @@ fn compute_stamp_radius_scales_and_clamps() {
 /// result regardless of Phase 1 precision.
 #[test]
 fn test_prefit_moments_iterations_sufficient() {
-    use crate::stacking::star_detection::centroid::gaussian_fit::{
-        GaussianFitConfig, GaussianFitResult,
-    };
+    use crate::stacking::star_detection::centroid::gaussian_fit::{GaussianFit, GaussianFitConfig};
     use crate::stacking::star_detection::centroid::{CONVERGENCE_THRESHOLD_SQ, refine_centroid};
 
     let width = 64;
@@ -351,7 +347,7 @@ fn test_prefit_moments_iterations_sufficient() {
             ..GaussianFitConfig::default()
         };
 
-        let result_from_2iter = GaussianFitResult::fit(
+        let result_from_2iter = GaussianFit::new(
             &pixels,
             pos_2iter,
             &StampGrid::new(stamp_radius),
@@ -359,7 +355,7 @@ fn test_prefit_moments_iterations_sufficient() {
             None,
             &fit_config,
         );
-        let result_from_10iter = GaussianFitResult::fit(
+        let result_from_10iter = GaussianFit::new(
             &pixels,
             pos_10iter,
             &StampGrid::new(stamp_radius),
@@ -417,7 +413,7 @@ fn test_prefit_moments_iterations_sufficient() {
 /// from the 2-iteration pre-fit optimization.
 #[test]
 fn test_prefit_moments_iterations_sufficient_moffat() {
-    use crate::stacking::star_detection::centroid::moffat_fit::{MoffatFitConfig, MoffatFitResult};
+    use crate::stacking::star_detection::centroid::moffat_fit::{MoffatFit, MoffatFitConfig};
     use crate::stacking::star_detection::centroid::{
         CONVERGENCE_THRESHOLD_SQ, lm_optimizer, refine_centroid,
     };
@@ -472,7 +468,7 @@ fn test_prefit_moments_iterations_sufficient_moffat() {
         },
     };
 
-    let result_from_2iter = MoffatFitResult::fit(
+    let result_from_2iter = MoffatFit::new(
         &pixels,
         pos_2iter,
         &StampGrid::new(stamp_radius),
@@ -480,7 +476,7 @@ fn test_prefit_moments_iterations_sufficient_moffat() {
         None,
         &fit_config,
     );
-    let result_from_10iter = MoffatFitResult::fit(
+    let result_from_10iter = MoffatFit::new(
         &pixels,
         pos_10iter,
         &StampGrid::new(stamp_radius),

@@ -83,9 +83,7 @@ fn test_centroid_large_psf() {
 /// Test Gaussian fitting with undersampled PSF.
 #[test]
 fn test_gaussian_fit_undersampled_psf() {
-    use crate::stacking::star_detection::centroid::gaussian_fit::{
-        GaussianFitConfig, GaussianFitResult,
-    };
+    use crate::stacking::star_detection::centroid::gaussian_fit::{GaussianFit, GaussianFitConfig};
 
     let width = 21;
     let height = 21;
@@ -102,7 +100,7 @@ fn test_gaussian_fit_undersampled_psf() {
     .stamp(Size2us::new(width, height), background);
 
     let config = GaussianFitConfig::default();
-    let result = GaussianFitResult::fit(
+    let result = GaussianFit::new(
         &pixels,
         DVec2::splat(10.0),
         &StampGrid::new(6),
@@ -257,9 +255,7 @@ fn test_centroid_blended_stars() {
 /// Test Gaussian fitting with contaminating star in the wing.
 #[test]
 fn test_gaussian_fit_with_contamination() {
-    use crate::stacking::star_detection::centroid::gaussian_fit::{
-        GaussianFitConfig, GaussianFitResult,
-    };
+    use crate::stacking::star_detection::centroid::gaussian_fit::{GaussianFit, GaussianFitConfig};
 
     let width = 31;
     let height = 31;
@@ -283,7 +279,7 @@ fn test_gaussian_fit_with_contamination() {
         .add_exact(pixels.pixels_mut(), width);
 
     let config = GaussianFitConfig::default();
-    let result = GaussianFitResult::fit(
+    let result = GaussianFit::new(
         &pixels,
         DVec2::new(true_cx, true_cy),
         &StampGrid::new(8),
@@ -509,9 +505,7 @@ fn test_eccentricity_rotation_invariant() {
 /// Test Gaussian fitting on rotated ellipse (fits axis-aligned sigma_x, sigma_y).
 #[test]
 fn test_gaussian_fit_rotated_ellipse() {
-    use crate::stacking::star_detection::centroid::gaussian_fit::{
-        GaussianFitConfig, GaussianFitResult,
-    };
+    use crate::stacking::star_detection::centroid::gaussian_fit::{GaussianFit, GaussianFitConfig};
 
     let width = 31;
     let height = 31;
@@ -530,7 +524,7 @@ fn test_gaussian_fit_rotated_ellipse() {
     );
 
     let config = GaussianFitConfig::default();
-    let result = GaussianFitResult::fit(
+    let result = GaussianFit::new(
         &pixels,
         DVec2::new(true_cx, true_cy),
         &StampGrid::new(8),
@@ -641,9 +635,7 @@ fn test_recovery_from_3pixel_offset() {
 /// Test Gaussian fitting with bad initial position guess.
 #[test]
 fn test_gaussian_fit_bad_initial_guess() {
-    use crate::stacking::star_detection::centroid::gaussian_fit::{
-        GaussianFitConfig, GaussianFitResult,
-    };
+    use crate::stacking::star_detection::centroid::gaussian_fit::{GaussianFit, GaussianFitConfig};
 
     let width = 31;
     let height = 31;
@@ -663,7 +655,7 @@ fn test_gaussian_fit_bad_initial_guess() {
     let initial_guess = DVec2::new(13.0, 17.0);
 
     let config = GaussianFitConfig::default();
-    let result = GaussianFitResult::fit(
+    let result = GaussianFit::new(
         &pixels,
         initial_guess,
         &StampGrid::new(8),
@@ -686,7 +678,7 @@ fn test_gaussian_fit_bad_initial_guess() {
 /// Test Moffat fitting with bad initial position guess.
 #[test]
 fn test_moffat_fit_bad_initial_guess() {
-    use crate::stacking::star_detection::centroid::moffat_fit::{MoffatFitConfig, MoffatFitResult};
+    use crate::stacking::star_detection::centroid::moffat_fit::{MoffatFit, MoffatFitConfig};
 
     let width = 31;
     let height = 31;
@@ -712,7 +704,7 @@ fn test_moffat_fit_bad_initial_guess() {
         fixed_beta: beta,
         ..Default::default()
     };
-    let result = MoffatFitResult::fit(
+    let result = MoffatFit::new(
         &pixels_buf,
         initial_guess,
         &StampGrid::new(8),
