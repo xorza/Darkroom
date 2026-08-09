@@ -586,7 +586,6 @@ fn refine_centroid(
     let new_pos = DVec2::new(sum_x / sum_w, sum_y / sum_w);
 
     // Reject if centroid moved too far (likely bad detection)
-    let stamp_size = 2 * stamp_radius + 1;
     let max_move = stamp_size as f64 / 4.0;
     if (new_pos - pos).abs().max_element() > max_move {
         return None;
@@ -646,6 +645,9 @@ const MAX_SIGMA_SQ: f64 = 100.0;
 /// `background_override` replaces the per-pixel map with a flat stamp-level sky,
 /// exactly as in [`compute_star`] — both must subtract the same background or
 /// FWHM/eccentricity and flux/SNR would come from different sky conventions.
+///
+/// The whole stamp must lie inside the frame; this indexes rows and columns unchecked, so a
+/// position nearer the edge than `stamp_radius` underflows the column arithmetic.
 fn windowed_covariance(
     pixels: &Buffer2<f32>,
     background: &BackgroundEstimate,
@@ -655,6 +657,16 @@ fn windowed_covariance(
     seed_sigma_sq: f64,
 ) -> Option<Cov2> {
     const MAX_ITERS: usize = 4;
+
+    // Caller's contract, not data validation: `compute_star` has already rejected edge positions.
+    debug_assert!(
+        is_valid_stamp_position(
+            pos,
+            Size2us::new(pixels.width(), pixels.height()),
+            stamp_radius
+        ),
+        "windowed_covariance needs the whole stamp in frame: pos {pos}, radius {stamp_radius}"
+    );
 
     let icx = pos.x.round() as isize;
     let icy = pos.y.round() as isize;
@@ -940,9 +952,8 @@ fn compute_snr(flux: f32, sky_noise: f32, npix: usize, noise_model: Option<&Nois
         None => npix as f32 * sky_var,
     };
 
-    if total_var > f32::EPSILON {
-        flux / total_var.sqrt()
-    } else {
-        flux / f32::EPSILON
-    }
+    // Floor the variance rather than branching on it: dividing by `total_var` in one arm and by
+    // its square root in the other put a 2896× step at the boundary. `max` also swallows a
+    // non-finite variance, since it returns the other operand for NaN.
+    flux / total_var.max(f32::EPSILON).sqrt()
 }
