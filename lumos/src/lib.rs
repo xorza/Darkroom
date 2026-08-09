@@ -31,6 +31,7 @@ pub(crate) mod image_ops;
 pub(crate) mod io;
 pub(crate) mod math;
 pub(crate) mod memory;
+pub(crate) mod simd;
 pub(crate) mod stacking;
 
 #[cfg(test)]

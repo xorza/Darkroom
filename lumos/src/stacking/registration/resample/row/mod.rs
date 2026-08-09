@@ -13,8 +13,7 @@
 //! (SIP is nonlinear) and SIMD paths fall back to scalar.
 
 use crate::math::size2us::Size2us;
-#[cfg(target_arch = "x86_64")]
-use imaginarium::cpu_features;
+use crate::simd::dispatch;
 
 #[cfg(target_arch = "x86_64")]
 mod x86;
@@ -121,35 +120,21 @@ pub(super) fn bilinear(
     wt: &WarpTransform,
     border_value: f32,
 ) {
-    // SIMD paths use hardcoded 0.0 border — only use them when border_value is 0.0
-    #[cfg(target_arch = "x86_64")]
-    if !wt.has_sip() && border_value == 0.0 {
-        let output_width = output_row.len();
-        if output_width >= AVX2_LANES && cpu_features::has_avx2() {
-            unsafe {
-                x86::bilinear_avx2(input, output_row, output_y, &wt.transform);
-            }
-            return;
-        }
-        if output_width >= SSE41_LANES && cpu_features::has_sse4_1() {
-            unsafe {
-                x86::bilinear_sse(input, output_row, output_y, &wt.transform);
-            }
-            return;
-        }
+    // Every kernel hardcodes a 0.0 border and none of them models SIP's nonlinearity, so either
+    // condition sends the row to the scalar path however wide it is.
+    if wt.has_sip() || border_value != 0.0 {
+        return bilinear_scalar(input, output_row, output_y, wt, border_value);
     }
 
-    #[cfg(target_arch = "aarch64")]
-    if !wt.has_sip() && border_value == 0.0 && output_row.len() >= NEON_LANES {
-        // SAFETY: NEON is always available on aarch64.
-        unsafe {
-            neon::bilinear_neon(input, output_row, output_y, &wt.transform);
-        }
-        return;
+    dispatch! {
+        x86: avx2 if output_row.len() >= AVX2_LANES
+            => x86::bilinear_avx2(input, output_row, output_y, &wt.transform),
+        x86: sse4_1 if output_row.len() >= SSE41_LANES
+            => x86::bilinear_sse(input, output_row, output_y, &wt.transform),
+        aarch64 if output_row.len() >= NEON_LANES
+            => neon::bilinear_neon(input, output_row, output_y, &wt.transform),
+        scalar => bilinear_scalar(input, output_row, output_y, wt, border_value),
     }
-
-    // Scalar fallback (also used when SIP is active or the row is too short for SIMD)
-    bilinear_scalar(input, output_row, output_y, wt, border_value);
 }
 
 /// Scalar implementation of row warping with bilinear interpolation.
@@ -195,14 +180,33 @@ pub(super) fn lanczos(
     }
 }
 
+/// The `SIZE` separable Lanczos tap weights for fractional offset `frac`.
+///
+/// The gather kernel only pays off once ≥ 6 taps amortize its 8-wide gather, so Lanczos2 stays
+/// scalar — the gather measured ~6% slower there. `SIZE > 4` is const, so the guard folds away.
+#[inline]
+fn lanczos_weights<const A: usize, const SIZE: usize>(lut: &LanczosLut, frac: f32) -> [f32; SIZE] {
+    dispatch! {
+        x86: avx2_fma if SIZE > 4 => x86::lanczos_weights_gather::<A, SIZE>(
+            lut.values.as_ptr(),
+            LANCZOS_LUT_RESOLUTION as f32,
+            frac,
+        ),
+        scalar => lanczos_weights_scalar::<A, SIZE>(lut, frac),
+    }
+}
+
 /// Scalar Lanczos tap weights for fractional offset `frac` (non-x86 / no-AVX2 fallback for
 /// [`x86::lanczos_weights_gather`]). Same distance convention as the gather helper.
+///
+/// For `i < A` the distance is `(A-1-i) + frac ∈ [0, A)`; for `i ≥ A` it is `(i-A+1) - frac ∈
+/// (0, A]` — both non-negative, hence `lookup_positive`.
 #[inline]
 fn lanczos_weights_scalar<const A: usize, const SIZE: usize>(
     lut: &LanczosLut,
-    a_minus_1: i32,
     frac: f32,
 ) -> [f32; SIZE] {
+    let a_minus_1 = A as i32 - 1;
     let mut w = [0.0f32; SIZE];
     for (i, wi) in w.iter_mut().enumerate() {
         *wi = if i < A {
@@ -212,6 +216,42 @@ fn lanczos_weights_scalar<const A: usize, const SIZE: usize>(
         };
     }
     w
+}
+
+/// Vector accumulation of the `SIZE`×`SIZE` weighted window whose top-left tap is `(kx0, ky0)`.
+///
+/// `None` when the target has no vector backend, or when the window's loads would leave the
+/// image — the SIMD bounds are wider than the scalar loop's, so the caller has to re-test before
+/// taking its own fast path. x86 loads 8 floats per row for Lanczos3/4 (SIZE=6 zero-pads two) and
+/// NEON walks that same 8-wide window as a 128-bit lo+hi pair, so both need `kx0 + 8 ≤ width`
+/// where the scalar loop needs only `kx0 + SIZE ≤ width`.
+#[inline]
+fn lanczos_accumulate<const SIZE: usize>(
+    input: &Buffer2<f32>,
+    kx0: i32,
+    ky0: i32,
+    wx: &[f32; SIZE],
+    wy: &[f32; SIZE],
+) -> Option<f32> {
+    let simd_cols: i32 = if SIZE > 4 { 8 } else { SIZE as i32 };
+    if kx0 < 0
+        || ky0 < 0
+        || kx0 + simd_cols > input.width() as i32
+        || ky0 + SIZE as i32 > input.height() as i32
+    {
+        return None;
+    }
+
+    let pixels = input.pixels();
+    let width = input.width();
+    let kx = kx0 as usize;
+    let ky = ky0 as usize;
+
+    dispatch! {
+        x86: avx2_fma => Some(x86::lanczos_kernel_fma::<SIZE>(pixels, width, kx, ky, wx, wy)),
+        aarch64 => Some(neon::lanczos_kernel_neon::<SIZE>(pixels, width, kx, ky, wx, wy)),
+        scalar => None,
+    }
 }
 
 fn lanczos_inner<const A: usize, const SIZE: usize>(
@@ -230,27 +270,6 @@ fn lanczos_inner<const A: usize, const SIZE: usize>(
     let iw = input_width as i32;
     let ih = input_height as i32;
     let a_minus_1 = A as i32 - 1;
-
-    #[cfg(target_arch = "x86_64")]
-    let use_fma = cpu_features::has_avx2_fma();
-
-    // Per-tap distance affine `dist[i] = base[i] + sign[i]·frac` for the SIMD weight gather (x86).
-    // Lanes `SIZE..8` stay zero → index 0 (in-bounds dummy). Loop-invariant in A/SIZE — built once.
-    #[cfg(target_arch = "x86_64")]
-    let (lut_base, lut_sign) = {
-        let mut base = [0.0f32; 8];
-        let mut sign = [0.0f32; 8];
-        for i in 0..SIZE {
-            if i < A {
-                base[i] = (a_minus_1 - i as i32) as f32;
-                sign[i] = 1.0;
-            } else {
-                base[i] = (i as i32 - a_minus_1) as f32;
-                sign[i] = -1.0;
-            }
-        }
-        (base, sign)
-    };
 
     let m = wt.transform.matrix();
     let can_step = wt.is_linear();
@@ -288,31 +307,8 @@ fn lanczos_inner<const A: usize, const SIZE: usize>(
         let kx0 = x0 - a_minus_1;
         let ky0 = y0 - a_minus_1;
 
-        // Kernel weights. For i < A: distance = (A-1-i) + frac ∈ [0, A); for i ≥ A:
-        // distance = (i - A+1) - frac ∈ (0, A] — both non-negative, so `lookup_positive`.
-        // Gather pays off only when ≥ 6 taps amortize the 8-wide gather; SIZE=4 (Lanczos2) stays
-        // scalar (the gather measured ~6% slower there). `SIZE > 4` is const.
-        #[cfg(target_arch = "x86_64")]
-        let (wx, wy): ([f32; SIZE], [f32; SIZE]) = if use_fma && SIZE > 4 {
-            let res = LANCZOS_LUT_RESOLUTION as f32;
-            let ptr = lut.values.as_ptr();
-            unsafe {
-                (
-                    x86::lanczos_weights_gather::<SIZE>(ptr, &lut_base, &lut_sign, res, fx),
-                    x86::lanczos_weights_gather::<SIZE>(ptr, &lut_base, &lut_sign, res, fy),
-                )
-            }
-        } else {
-            (
-                lanczos_weights_scalar::<A, SIZE>(lut, a_minus_1, fx),
-                lanczos_weights_scalar::<A, SIZE>(lut, a_minus_1, fy),
-            )
-        };
-        #[cfg(not(target_arch = "x86_64"))]
-        let (wx, wy): ([f32; SIZE], [f32; SIZE]) = (
-            lanczos_weights_scalar::<A, SIZE>(lut, a_minus_1, fx),
-            lanczos_weights_scalar::<A, SIZE>(lut, a_minus_1, fy),
-        );
+        let wx = lanczos_weights::<A, SIZE>(lut, fx);
+        let wy = lanczos_weights::<A, SIZE>(lut, fy);
 
         let total_sum = wx.iter().sum::<f32>() * wy.iter().sum::<f32>();
         let inv_total = if total_sum.abs() > 1e-10 {
@@ -321,57 +317,9 @@ fn lanczos_inner<const A: usize, const SIZE: usize>(
             1.0
         };
 
-        // SIMD fast path (x86_64 AVX2+FMA / aarch64 NEON): needs all SIZE rows and enough columns for
-        // the loads. x86 Lanczos3/4 uses one 256-bit (8-wide) load/row; SIZE=4 and NEON use 128-bit.
-        // SIZE=4: reads 4 floats/row, needs kx0 + 3 < iw
-        // SIZE=6/8: reads 8 floats/row (SIZE=6 zero-pads 2), needs kx0 + 7 < iw
-        #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
-        {
-            let simd_cols: i32 = if SIZE > 4 { 8 } else { SIZE as i32 };
-            let in_bounds =
-                kx0 >= 0 && ky0 >= 0 && kx0 + simd_cols - 1 < iw && ky0 + SIZE as i32 - 1 < ih;
-            // x86 AVX2/FMA is runtime-detected; NEON is mandatory on aarch64.
-            #[cfg(target_arch = "x86_64")]
-            let try_simd = use_fma && in_bounds;
-            #[cfg(target_arch = "aarch64")]
-            let try_simd = in_bounds;
-
-            if try_simd {
-                let acc = unsafe {
-                    #[cfg(target_arch = "x86_64")]
-                    {
-                        x86::lanczos_kernel_fma::<SIZE>(
-                            pixels,
-                            input_width,
-                            kx0 as usize,
-                            ky0 as usize,
-                            &wx,
-                            &wy,
-                        )
-                    }
-                    #[cfg(target_arch = "aarch64")]
-                    {
-                        neon::lanczos_kernel_neon::<SIZE>(
-                            pixels,
-                            input_width,
-                            kx0 as usize,
-                            ky0 as usize,
-                            &wx,
-                            &wy,
-                        )
-                    }
-                };
-                *out_pixel = acc * inv_total;
-
-                if can_step {
-                    src_x += dx_step;
-                    src_y += dy_step;
-                }
-                continue;
-            }
-        }
-
-        if kx0 >= 0 && ky0 >= 0 && kx0 + SIZE as i32 - 1 < iw && ky0 + SIZE as i32 - 1 < ih {
+        if let Some(acc) = lanczos_accumulate::<SIZE>(input, kx0, ky0, &wx, &wy) {
+            *out_pixel = acc * inv_total;
+        } else if kx0 >= 0 && ky0 >= 0 && kx0 + SIZE as i32 - 1 < iw && ky0 + SIZE as i32 - 1 < ih {
             // Scalar fast path: all SIZE×SIZE pixels in bounds, direct indexing
             let kx = kx0 as usize;
             let ky = ky0 as usize;

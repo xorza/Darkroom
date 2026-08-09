@@ -8,9 +8,7 @@
 use rayon::prelude::*;
 
 use crate::math::size2us::Size2us;
-
-#[cfg(target_arch = "x86_64")]
-use imaginarium::cpu_features;
+use crate::simd::dispatch;
 
 #[cfg(target_arch = "x86_64")]
 mod x86;
@@ -111,33 +109,12 @@ fn convolve_pixel_scalar(
 /// Falls back to scalar implementation on unsupported platforms.
 #[inline]
 pub(super) fn convolve_row(input: &[f32], output: &mut [f32], kernel: &[f32], radius: usize) {
-    #[cfg(target_arch = "x86_64")]
-    {
-        if cpu_features::has_avx2_fma() {
-            unsafe {
-                x86::convolve_row_avx2(input, output, kernel, radius);
-            }
-            return;
-        }
-        if cpu_features::has_sse4_1() {
-            unsafe {
-                x86::convolve_row_sse41(input, output, kernel, radius);
-            }
-            return;
-        }
+    dispatch! {
+        x86: avx2_fma => x86::convolve_row_avx2(input, output, kernel, radius),
+        x86: sse4_1 => x86::convolve_row_sse41(input, output, kernel, radius),
+        aarch64 => neon::convolve_row_neon(input, output, kernel, radius),
+        scalar => convolve_row_scalar(input, output, kernel, radius),
     }
-
-    #[cfg(target_arch = "aarch64")]
-    {
-        unsafe {
-            neon::convolve_row_neon(input, output, kernel, radius);
-        }
-        return;
-    }
-
-    // Scalar fallback is dead code on aarch64, where the NEON path returns unconditionally.
-    #[allow(unreachable_code)]
-    convolve_row_scalar(input, output, kernel, radius);
 }
 
 /// Scalar implementation of row convolution.
@@ -183,33 +160,12 @@ fn convolve_cols_row(
     kernel: &[f32],
     radius: usize,
 ) {
-    #[cfg(target_arch = "x86_64")]
-    {
-        if cpu_features::has_avx2_fma() {
-            unsafe {
-                x86::convolve_cols_row_avx2(input, out_row, size, y, kernel, radius);
-            }
-            return;
-        }
-        if cpu_features::has_sse4_1() {
-            unsafe {
-                x86::convolve_cols_row_sse41(input, out_row, size, y, kernel, radius);
-            }
-            return;
-        }
+    dispatch! {
+        x86: avx2_fma => x86::convolve_cols_row_avx2(input, out_row, size, y, kernel, radius),
+        x86: sse4_1 => x86::convolve_cols_row_sse41(input, out_row, size, y, kernel, radius),
+        aarch64 => neon::convolve_cols_row_neon(input, out_row, size, y, kernel, radius),
+        scalar => convolve_cols_row_scalar(input, out_row, size, y, kernel, radius),
     }
-
-    #[cfg(target_arch = "aarch64")]
-    {
-        unsafe {
-            neon::convolve_cols_row_neon(input, out_row, size, y, kernel, radius);
-        }
-        return;
-    }
-
-    // Scalar fallback is dead code on aarch64, where the NEON path returns unconditionally.
-    #[allow(unreachable_code)]
-    convolve_cols_row_scalar(input, out_row, size, y, kernel, radius);
 }
 
 /// Scalar single column-row convolution.
@@ -243,33 +199,12 @@ pub(super) fn convolve_2d_row(
     y: usize,
     kernel: Kernel2d,
 ) {
-    #[cfg(target_arch = "x86_64")]
-    {
-        if cpu_features::has_avx2_fma() {
-            unsafe {
-                x86::convolve_2d_row_avx2(input, output_row, size, y, kernel);
-            }
-            return;
-        }
-        if cpu_features::has_sse4_1() {
-            unsafe {
-                x86::convolve_2d_row_sse41(input, output_row, size, y, kernel);
-            }
-            return;
-        }
+    dispatch! {
+        x86: avx2_fma => x86::convolve_2d_row_avx2(input, output_row, size, y, kernel),
+        x86: sse4_1 => x86::convolve_2d_row_sse41(input, output_row, size, y, kernel),
+        aarch64 => neon::convolve_2d_row_neon(input, output_row, size, y, kernel),
+        scalar => convolve_2d_row_scalar(input, output_row, size, y, kernel),
     }
-
-    #[cfg(target_arch = "aarch64")]
-    {
-        unsafe {
-            neon::convolve_2d_row_neon(input, output_row, size, y, kernel);
-        }
-        return;
-    }
-
-    // Scalar fallback is dead code on aarch64, where the NEON path returns unconditionally.
-    #[allow(unreachable_code)]
-    convolve_2d_row_scalar(input, output_row, size, y, kernel);
 }
 
 /// Scalar implementation of single-row 2D convolution.

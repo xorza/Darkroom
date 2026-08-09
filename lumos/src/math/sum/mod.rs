@@ -1,5 +1,7 @@
 //! Sum and accumulation operations with SIMD acceleration.
 
+use crate::simd::dispatch;
+
 pub(crate) mod scalar;
 
 #[cfg(target_arch = "aarch64")]
@@ -24,19 +26,11 @@ const X86_WEIGHTED_MEAN_MIN_LEN: usize = 128;
 
 /// Sum f32 values using SIMD when available.
 pub(crate) fn sum_f32(values: &[f32]) -> f32 {
-    #[cfg(target_arch = "aarch64")]
-    {
-        if values.len() >= NEON_MIN_LEN {
-            return unsafe { neon::sum_f32(values) };
-        }
+    dispatch! {
+        x86: avx2 if values.len() >= AVX2_SUM_MIN_LEN => avx2::sum_f32(values),
+        aarch64 if values.len() >= NEON_MIN_LEN => neon::sum_f32(values),
+        scalar => scalar::sum_f32(values),
     }
-    #[cfg(target_arch = "x86_64")]
-    {
-        if values.len() >= AVX2_SUM_MIN_LEN && imaginarium::cpu_features::has_avx2() {
-            return unsafe { avx2::sum_f32(values) };
-        }
-    }
-    scalar::sum_f32(values)
 }
 
 /// Mean of f32 values, rounded to f32 exactly once.
@@ -74,22 +68,14 @@ pub(crate) fn weighted_mean_f32(values: &[f32], weights: &[f32]) -> f32 {
         return 0.0;
     }
 
-    #[cfg(target_arch = "aarch64")]
-    {
-        if values.len() >= NEON_MIN_LEN {
-            return unsafe { neon::weighted_mean_f32(values, weights) };
-        }
+    dispatch! {
+        x86: avx2 if values.len() >= X86_WEIGHTED_MEAN_MIN_LEN
+            => avx2::weighted_mean_f32(values, weights),
+        x86: sse4_1 if values.len() >= X86_WEIGHTED_MEAN_MIN_LEN
+            => sse::weighted_mean_f32(values, weights),
+        aarch64 if values.len() >= NEON_MIN_LEN => neon::weighted_mean_f32(values, weights),
+        scalar => scalar::weighted_mean_f32(values, weights),
     }
-    #[cfg(target_arch = "x86_64")]
-    {
-        if values.len() >= X86_WEIGHTED_MEAN_MIN_LEN && imaginarium::cpu_features::has_avx2() {
-            return unsafe { avx2::weighted_mean_f32(values, weights) };
-        }
-        if values.len() >= X86_WEIGHTED_MEAN_MIN_LEN && imaginarium::cpu_features::has_sse4_1() {
-            return unsafe { sse::weighted_mean_f32(values, weights) };
-        }
-    }
-    scalar::weighted_mean_f32(values, weights)
 }
 
 #[cfg(test)]

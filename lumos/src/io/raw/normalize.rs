@@ -1,3 +1,4 @@
+use crate::simd::dispatch;
 use rayon::prelude::*;
 
 /// Light-frame normalization: `clamp((value - black).max(0) * inv_range, 0, 1)`.
@@ -45,40 +46,25 @@ pub(crate) fn normalize_u16_to_f32_into<const CLAMP: bool>(
     inv_range: f32,
 ) {
     debug_assert_eq!(input.len(), output.len());
-    #[cfg(target_arch = "x86_64")]
-    {
-        // Prefer SSE4.1 for faster u16->i32 conversion (pmovzxwd)
-        if imaginarium::cpu_features::has_sse4_1() {
-            // SAFETY: We've verified SSE4.1 is available
-            unsafe {
-                normalize_chunk_sse41::<CLAMP>(input, output, black, inv_range);
-            }
-        } else if imaginarium::cpu_features::has_sse2() {
-            // SAFETY: We've verified SSE2 is available
-            unsafe {
-                normalize_chunk_sse2::<CLAMP>(input, output, black, inv_range);
-            }
-        } else {
-            for (out, &val) in output.iter_mut().zip(input.iter()) {
-                *out = normalize_one::<CLAMP>(val, black, inv_range);
-            }
-        }
+    // SSE4.1 leads SSE2 for its faster u16->i32 conversion (pmovzxwd).
+    dispatch! {
+        x86: sse4_1 => normalize_chunk_sse41::<CLAMP>(input, output, black, inv_range),
+        x86: sse2 => normalize_chunk_sse2::<CLAMP>(input, output, black, inv_range),
+        aarch64 => normalize_chunk_neon::<CLAMP>(input, output, black, inv_range),
+        scalar => normalize_chunk_scalar::<CLAMP>(input, output, black, inv_range),
     }
+}
 
-    #[cfg(target_arch = "aarch64")]
-    {
-        // SAFETY: NEON is always available on aarch64
-        unsafe {
-            normalize_chunk_neon::<CLAMP>(input, output, black, inv_range);
-        }
-    }
-
-    #[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
-    {
-        // Scalar fallback for other architectures
-        for (out, &val) in output.iter_mut().zip(input.iter()) {
-            *out = normalize_one::<CLAMP>(val, black, inv_range);
-        }
+/// Scalar form of the whole chunk, for architectures with no backend of their own.
+#[inline]
+fn normalize_chunk_scalar<const CLAMP: bool>(
+    input: &[u16],
+    output: &mut [f32],
+    black: f32,
+    inv_range: f32,
+) {
+    for (out, &val) in output.iter_mut().zip(input.iter()) {
+        *out = normalize_one::<CLAMP>(val, black, inv_range);
     }
 }
 
