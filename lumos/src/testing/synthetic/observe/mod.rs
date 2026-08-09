@@ -72,14 +72,13 @@ pub(crate) fn render(scene: &Scene, camera: &Camera, obs: &Observation) -> SimFr
     let height = scene.size.height;
 
     // 1 + 2. Geometry + PSF + background → the clean (pre-flat) signal, and the truth catalog.
-    let mut clean = scene.background.render(scene.size);
+    let mut clean = Buffer2::new(width, height, scene.background.render(scene.size));
     let mut observed = Vec::with_capacity(scene.sources.len());
     let recovered_fwhm = camera.psf.fwhm() * obs.seeing_scale;
     for src in &scene.sources {
         let p = obs.transform.apply(src.pos);
         camera.psf.render(
             &mut clean,
-            width,
             p.x as f32,
             p.y as f32,
             src.flux,
@@ -99,7 +98,7 @@ pub(crate) fn render(scene: &Scene, camera: &Camera, obs: &Observation) -> SimFr
     }
 
     // The raw frame starts from the clean signal; sensor effects pile on from here.
-    let mut raw = clean.clone();
+    let mut raw = clean.pixels().to_vec();
     let mut rng = TestRng::new(obs.seed);
 
     // 5 + 6 + 8. Shot noise, dark current, read noise — skipped for a noiseless sensor.
@@ -154,7 +153,7 @@ pub(crate) fn render(scene: &Scene, camera: &Camera, obs: &Observation) -> SimFr
     SimFrame {
         image,
         truth: FrameTruth {
-            clean: Buffer2::new(width, height, clean),
+            clean,
             sources: observed,
         },
     }

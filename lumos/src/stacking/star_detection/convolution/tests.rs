@@ -386,7 +386,7 @@ fn matched_filter_boosts_snr() {
     let background = Buffer2::new_filled(width, height, 0.1f32);
 
     // Create star with noise
-    let mut pixels = vec![0.1f32; width * height];
+    let mut pixels = Buffer2::new_filled(width, height, 0.1f32);
     let cx = 32;
     let cy = 32;
     let sigma = 2.0;
@@ -395,7 +395,7 @@ fn matched_filter_boosts_snr() {
         0.3,
         StarProfile::Gaussian { sigma },
     )
-    .add_to(&mut pixels, width);
+    .add_to(&mut pixels);
 
     // Add some noise
     for (i, p) in pixels.iter_mut().enumerate() {
@@ -403,7 +403,6 @@ fn matched_filter_boosts_snr() {
     }
 
     let fwhm = sigma * FWHM_TO_SIGMA;
-    let pixels = Buffer2::new(width, height, pixels);
     let mut result = Buffer2::new_default(width, height);
     let mut scratch = Buffer2::new_default(width, height);
     let mut temp = Buffer2::new_default(width, height);

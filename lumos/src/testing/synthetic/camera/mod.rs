@@ -10,6 +10,7 @@ use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 use crate::testing::synthetic::star_profiles::{StarProfile, SyntheticStar, fwhm_to_moffat_alpha};
 use glam::Vec2;
+use imaginarium::Buffer2;
 use std::f32::consts::PI;
 
 /// Point-spread function the camera convolves every point source with.
@@ -43,8 +44,7 @@ impl PsfModel {
     /// profile integrates to `flux` (flux is conserved up to the kernel's radius truncation).
     pub(crate) fn render(
         &self,
-        pixels: &mut [f32],
-        width: usize,
+        pixels: &mut Buffer2<f32>,
         x: f32,
         y: f32,
         flux: f32,
@@ -85,7 +85,7 @@ impl PsfModel {
                 )
             }
         };
-        SyntheticStar::new(Vec2::new(x, y), amplitude, profile).add_to(pixels, width);
+        SyntheticStar::new(Vec2::new(x, y), amplitude, profile).add_to(pixels);
     }
 }
 

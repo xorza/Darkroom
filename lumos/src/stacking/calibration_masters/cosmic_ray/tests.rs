@@ -6,8 +6,8 @@ use crate::testing::prelude::*;
 use crate::testing::synthetic::star_profiles::{StarProfile, SyntheticStar};
 
 /// Add a round Gaussian source (peak above the existing background) at `center`.
-fn add_gaussian(data: &mut [f32], size: Size2us, center: Vec2, peak: f32, sigma: f32) {
-    SyntheticStar::new(center, peak, StarProfile::Gaussian { sigma }).add_to(data, size.width);
+fn add_gaussian(data: &mut Buffer2<f32>, center: Vec2, peak: f32, sigma: f32) {
+    SyntheticStar::new(center, peak, StarProfile::Gaussian { sigma }).add_to(data);
 }
 
 fn mono(data: Vec<f32>, size: Size2us) -> CfaImage {
@@ -34,7 +34,7 @@ struct SyntheticField {
 /// (FWHM≈3 px).
 fn synthetic_field() -> SyntheticField {
     let size = Size2us::new(64, 64);
-    let mut data = vec![0.05f32; size.pixel_count()];
+    let mut data = Buffer2::new_filled(size.width, size.height, 0.05f32);
     let mut rng = TestRng::new(7);
     for v in data.iter_mut() {
         *v += rng.next_gaussian_f32() * 0.003;
@@ -45,14 +45,14 @@ fn synthetic_field() -> SyntheticField {
         (Vec2::new(32.0, 50.0), 0.7),
     ];
     for &(center, peak) in &stars {
-        add_gaussian(&mut data, size, center, peak, 1.3);
+        add_gaussian(&mut data, center, peak, 1.3);
     }
     let centers = stars
         .iter()
         .map(|&(c, _)| Vec2us::new(c.x as usize, c.y as usize))
         .collect();
     SyntheticField {
-        data,
+        data: data.pixels().to_vec(),
         size,
         centers,
     }
@@ -176,12 +176,12 @@ fn bayer_removes_cosmic_rays_preserves_star() {
     // Bayer deinterleave path: a well-sampled star + CRs spread across all four 2×2 phases. The
     // CRs go; the star core survives (each phase plane's mono detector protects it).
     let size = Size2us::new(48, 48);
-    let mut data = vec![0.05f32; size.pixel_count()];
+    let mut data = Buffer2::new_filled(size.width, size.height, 0.05f32);
     let mut rng = TestRng::new(11);
     for v in data.iter_mut() {
         *v += rng.next_gaussian_f32() * 0.003;
     }
-    add_gaussian(&mut data, size, Vec2::new(24.0, 24.0), 0.6, 2.5);
+    add_gaussian(&mut data, Vec2::new(24.0, 24.0), 0.6, 2.5);
     let core = Vec2us::new(24, 24);
     let star = data[size.index_of(core)];
     // Each CR sits in a different (x%2, y%2) phase, exercising all four planes.
@@ -195,7 +195,7 @@ fn bayer_removes_cosmic_rays_preserves_star() {
         data[size.index_of(p)] = 0.95;
     }
     let mut img = CfaImage {
-        data: Buffer2::new(size.width, size.height, data),
+        data,
         metadata: ImageMetadata {
             cfa_type: Some(CfaType::Bayer(CfaPattern::Rggb)),
             ..Default::default()
@@ -232,20 +232,20 @@ fn bayer_tight_star_eaten_is_a_known_limitation() {
     // (e.g. mosaic-level detection) flips it loudly. Contrast `bayer_removes_cosmic_rays_...`,
     // which uses a *well-sampled* FWHM≈5.9 px star that survives.
     let size = Size2us::new(48, 48);
-    let mut data = vec![0.05f32; size.pixel_count()];
+    let mut data = Buffer2::new_filled(size.width, size.height, 0.05f32);
     let mut rng = TestRng::new(13);
     for v in data.iter_mut() {
         *v += rng.next_gaussian_f32() * 0.003;
     }
     // σ=1.0 → FWHM≈2.35 px in the mosaic
-    add_gaussian(&mut data, size, Vec2::new(24.0, 24.0), 0.6, 1.0);
+    add_gaussian(&mut data, Vec2::new(24.0, 24.0), 0.6, 1.0);
     let core = Vec2us::new(24, 24);
     let crs = [Vec2us::new(8, 8), Vec2us::new(37, 37)];
     for &p in &crs {
         data[size.index_of(p)] = 0.95;
     }
     let mut img = CfaImage {
-        data: Buffer2::new(size.width, size.height, data),
+        data,
         metadata: ImageMetadata {
             cfa_type: Some(CfaType::Bayer(CfaPattern::Rggb)),
             ..Default::default()

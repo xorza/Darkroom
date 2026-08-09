@@ -116,8 +116,8 @@ impl SyntheticStar {
     }
 
     /// Add into `pixels`, visiting only the pixels within [`Self::radius`].
-    pub(crate) fn add_to(self, pixels: &mut [f32], width: usize) {
-        let height = pixels.len() / width;
+    pub(crate) fn add_to(self, pixels: &mut Buffer2<f32>) {
+        let (width, height) = (pixels.width(), pixels.height());
         let radius = self.radius();
         let cx = self.center.x.round() as i32;
         let cy = self.center.y.round() as i32;
@@ -128,27 +128,29 @@ impl SyntheticStar {
         let y_max = ((cy + radius).max(0) as usize).min(height - 1);
 
         for py in y_min..=y_max {
-            for px in x_min..=x_max {
-                pixels[py * width + px] += self.value_at(px as f32, py as f32);
+            let row = &mut pixels.row_mut(py)[x_min..=x_max];
+            for (offset, sample) in row.iter_mut().enumerate() {
+                let px = x_min + offset;
+                *sample += self.value_at(px as f32, py as f32);
             }
         }
     }
 
     /// Add into `pixels`, visiting every pixel — no truncation edge.
-    pub(crate) fn add_exact(self, pixels: &mut [f32], width: usize) {
-        let height = pixels.len() / width;
+    pub(crate) fn add_exact(self, pixels: &mut Buffer2<f32>) {
+        let height = pixels.height();
         for py in 0..height {
-            for px in 0..width {
-                pixels[py * width + px] += self.value_at(px as f32, py as f32);
+            for (px, sample) in pixels.row_mut(py).iter_mut().enumerate() {
+                *sample += self.value_at(px as f32, py as f32);
             }
         }
     }
 
     /// A `size` buffer on a flat `background` holding exactly this star, rendered untruncated.
     pub(crate) fn stamp(self, size: Size2us, background: f32) -> Buffer2<f32> {
-        let mut pixels = vec![background; size.pixel_count()];
-        self.add_exact(&mut pixels, size.width);
-        Buffer2::new(size.width, size.height, pixels)
+        let mut pixels = Buffer2::new_filled(size.width, size.height, background);
+        self.add_exact(&mut pixels);
+        pixels
     }
 }
 
@@ -171,11 +173,11 @@ mod tests {
 
     #[test]
     fn gaussian_peaks_at_its_centre_and_vanishes_at_the_corner() {
-        let mut pixels = vec![0.0f32; 64 * 64];
-        SyntheticStar::new(Vec2::splat(32.0), 1.0, GAUSSIAN_2).add_to(&mut pixels, 64);
+        let mut pixels = Buffer2::new_filled(64, 64, 0.0f32);
+        SyntheticStar::new(Vec2::splat(32.0), 1.0, GAUSSIAN_2).add_to(&mut pixels);
 
-        assert!(pixels[32 * 64 + 32] > 0.9, "peak should be near 1.0");
-        assert!(pixels[0] < 0.001, "corner should be near 0");
+        assert!(pixels[(32, 32)] > 0.9, "peak should be near 1.0");
+        assert!(pixels[(0, 0)] < 0.001, "corner should be near 0");
     }
 
     #[test]
@@ -195,12 +197,12 @@ mod tests {
         let size = Size2us::new(64, 64);
         let star = SyntheticStar::new(Vec2::splat(32.0), 1.0, GAUSSIAN_2);
 
-        let mut truncated = vec![0.0f32; size.pixel_count()];
-        star.add_to(&mut truncated, size.width);
+        let mut truncated = Buffer2::new_filled(size.width, size.height, 0.0f32);
+        star.add_to(&mut truncated);
         let exact = star.stamp(size, 0.0);
 
         // Inside the 4σ = 8px box the two modes are bit-identical.
-        assert_eq!(truncated[32 * 64 + 32], exact[(32, 32)]);
+        assert_eq!(truncated[(32, 32)], exact[(32, 32)]);
         assert_eq!(truncated[32 * 64 + 39], exact[(32, 39)]);
         // Outside it, truncation drops a small but non-zero wing that `add_exact` keeps.
         assert_eq!(truncated[32 * 64 + 45], 0.0);
