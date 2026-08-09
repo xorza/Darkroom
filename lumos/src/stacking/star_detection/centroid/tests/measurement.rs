@@ -788,20 +788,12 @@ fn metrics_with_high_background() {
     let width = 64;
     let height = 64;
 
-    // High background value
+    // One star on a bright sky. `add_to` truncates at the profile's own radius, which is what the
+    // hand-rolled `if value > 0.001` guard did — and it matters, because the untruncated tail
+    // lifts the tiled background median enough to change what the detector sees.
     let mut pixels = vec![0.5f32; width * height];
-    // Add star on top of high background
-    for y in 0..height {
-        for x in 0..width {
-            let dx = x as f32 - 32.0;
-            let dy = y as f32 - 32.0;
-            let r2 = dx * dx + dy * dy;
-            let value = 0.4 * (-r2 / (2.0 * 2.5 * 2.5)).exp();
-            if value > 0.001 {
-                pixels[y * width + x] += value;
-            }
-        }
-    }
+    SyntheticStar::new(Vec2::splat(32.0), 0.4, StarProfile::Gaussian { sigma: 2.5 })
+        .add_to(&mut pixels, width);
     let pixels = Buffer2::new(width, height, pixels);
 
     let bg = background_map::uniform(Size2us::new(width, height), 0.5, 0.02);
@@ -994,30 +986,12 @@ fn measure_star_multiple_stars_independent() {
     // Start with uniform background
     let mut pixels = vec![0.1f32; width * height];
 
-    // Add first star (sigma=2.5 gives good detection)
-    for y in 0..height {
-        for x in 0..width {
-            let dx = x as f32 - star1_cx;
-            let dy = y as f32 - star1_cy;
-            let r2 = dx * dx + dy * dy;
-            let value = 0.8 * (-r2 / (2.0 * 2.5 * 2.5)).exp();
-            if value > 0.001 {
-                pixels[y * width + x] += value;
-            }
-        }
-    }
-
-    // Add second star
-    for y in 0..height {
-        for x in 0..width {
-            let dx = x as f32 - star2_cx;
-            let dy = y as f32 - star2_cy;
-            let r2 = dx * dx + dy * dy;
-            let value = 0.6 * (-r2 / (2.0 * 2.5 * 2.5)).exp();
-            if value > 0.001 {
-                pixels[y * width + x] += value;
-            }
-        }
+    for (centre, amplitude) in [
+        (Vec2::new(star1_cx, star1_cy), 0.8),
+        (Vec2::new(star2_cx, star2_cy), 0.6),
+    ] {
+        SyntheticStar::new(centre, amplitude, StarProfile::Gaussian { sigma: 2.5 })
+            .add_to(&mut pixels, width);
     }
 
     let pixels = Buffer2::new(width, height, pixels);
@@ -1116,28 +1090,31 @@ fn circular_star_roundness() {
 
 #[test]
 fn elongated_x_star_roundness() {
-    // An elongated star in x direction should have negative GROUND
-    let width = 64;
-    let height = 64;
+    // An elongated star in x direction should have negative GROUND.
+    //
+    // 128x128 and a noise floor: without noise the tiled MAD is exactly zero and the detection
+    // threshold degenerates, which left this fixture flipping on a sub-0.001 change in the
+    // profile's far tail rather than on anything to do with roundness.
+    let width = 128;
+    let height = 128;
     let mut pixels = vec![0.1f32; width * height];
 
     // Create elongated Gaussian (sigma_x > sigma_y)
-    let cx = 32.0;
-    let cy = 32.0;
+    let cx = 64.0;
+    let cy = 64.0;
     let sigma_x = 4.0;
     let sigma_y = 2.0;
-    for y in 0..height {
-        for x in 0..width {
-            let dx = x as f32 - cx;
-            let dy = y as f32 - cy;
-            let value = 0.8
-                * (-dx * dx / (2.0 * sigma_x * sigma_x) - dy * dy / (2.0 * sigma_y * sigma_y))
-                    .exp();
-            if value > 0.001 {
-                pixels[y * width + x] += value;
-            }
-        }
-    }
+    SyntheticStar::new(
+        Vec2::new(cx, cy),
+        0.8,
+        StarProfile::Elliptical {
+            sigma_x,
+            sigma_y,
+            angle: 0.0,
+        },
+    )
+    .add_to(&mut pixels, width);
+    patterns::add_gaussian_noise(&mut pixels, 0.002, 4242);
 
     let pixels = Buffer2::new(width, height, pixels);
     let bg = background_map::estimate(

@@ -94,17 +94,15 @@ fn gaussian_fit_precision_statistical() {
             let true_cx = f64::from(10.0 + dx as f32 * 0.1);
             let true_cy = f64::from(10.0 + dy as f32 * 0.1);
 
-            // Create perfect Gaussian
-            let mut pixels = vec![background; width * height];
-            for y in 0..height {
-                for x in 0..width {
-                    let ddx = x as f32 - true_cx as f32;
-                    let ddy = y as f32 - true_cy as f32;
-                    pixels[y * width + x] +=
-                        1.0 * (-0.5 * (ddx * ddx + ddy * ddy) / (sigma * sigma)).exp();
-                }
-            }
-            let pixels_buf = Buffer2::new(width, height, pixels);
+            // `SyntheticStar` renders the same untruncated Gaussian this used to spell out:
+            // `shape_at` is `exp(-(dx²+dy²)/2σ²)` over the whole buffer, so the fixture is
+            // unchanged and the ~0.01 px ground truth stays analytic.
+            let pixels_buf = SyntheticStar::new(
+                Vec2::new(true_cx as f32, true_cy as f32),
+                1.0,
+                StarProfile::Gaussian { sigma },
+            )
+            .stamp(Size2us::new(width, height), background);
 
             let config = GaussianFitConfig::default();
             if let Some(result) = GaussianFit::new(
@@ -162,16 +160,13 @@ fn moffat_fit_precision_statistical() {
             let true_cx = f64::from(10.0 + dx as f32 * 0.1);
             let true_cy = f64::from(10.0 + dy as f32 * 0.1);
 
-            // Create perfect Moffat profile
-            let mut pixels = vec![background; width * height];
-            for y in 0..height {
-                for x in 0..width {
-                    let r2 =
-                        (x as f32 - true_cx as f32).powi(2) + (y as f32 - true_cy as f32).powi(2);
-                    pixels[y * width + x] += 1.0 * (1.0 + r2 / (alpha * alpha)).powf(-beta);
-                }
-            }
-            let pixels_buf = Buffer2::new(width, height, pixels);
+            // Same profile as `StarProfile::Moffat`: `(1 + r²/α²)^-β`, untruncated.
+            let pixels_buf = SyntheticStar::new(
+                Vec2::new(true_cx as f32, true_cy as f32),
+                1.0,
+                StarProfile::Moffat { alpha, beta },
+            )
+            .stamp(Size2us::new(width, height), background);
 
             let config = MoffatFitConfig {
                 fixed_beta: beta,
