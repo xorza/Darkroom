@@ -283,12 +283,20 @@ fn measure_registered_frames(
     })
 }
 
+/// The all-valid mask a domain intersection starts from: one bit per pixel, one row.
+///
+/// Its own function so `mem_budget` can weigh exactly what this allocates rather than a copy of
+/// the expression that could drift from it.
+fn new_domain_mask(pixel_count: usize) -> BitBuffer2 {
+    BitBuffer2::new_filled(Size2us::new(pixel_count, 1), true)
+}
+
 fn build_common_domain(
     frames: &[StoredFrame],
     pixel_count: usize,
     cancel: &CancelToken,
 ) -> Result<CommonDomain, Error> {
-    let mut common_domain = BitBuffer2::new_filled(Size2us::new(pixel_count, 1), true);
+    let mut common_domain = new_domain_mask(pixel_count);
     for frame in frames {
         check_cancel(cancel)?;
         if let Some(coverage) = &frame.quality.coverage {
@@ -651,3 +659,13 @@ fn deming_gain(
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+pub(crate) mod internals {
+    use crate::bit_buffer2::BitBuffer2;
+
+    /// The domain mask as `build_common_domain` allocates it, for `mem_budget` to weigh.
+    pub(crate) fn new_domain_mask(pixel_count: usize) -> BitBuffer2 {
+        super::new_domain_mask(pixel_count)
+    }
+}

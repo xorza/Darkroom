@@ -1,3 +1,4 @@
+mod mem_budget;
 mod synthetic;
 
 use crate::io::image::cfa::{CfaImage, CfaType, QUANTIZATION_SIGMA_PER_STEP};
