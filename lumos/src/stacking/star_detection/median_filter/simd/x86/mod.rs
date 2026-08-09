@@ -28,6 +28,7 @@ pub(super) unsafe fn median_filter_row_avx2(
 ) {
     unsafe {
         let ptr_above = row_above.as_ptr();
+
         let ptr_curr = row_curr.as_ptr();
         let ptr_below = row_below.as_ptr();
         let out_ptr = output_row.as_mut_ptr();

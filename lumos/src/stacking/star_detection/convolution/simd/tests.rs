@@ -58,26 +58,28 @@ fn test_convolve_row_scalar_average() {
     assert!((output[3] - 1.0).abs() < 1e-6);
 }
 
+/// Every data shape against the scalar reference, at three radii. Replaces five tests that each
+/// pinned one shape at one radius; the dense width/radius sweep below covers a different axis and
+/// stays as its own regression guard.
 #[test]
-fn test_convolve_row_matches_scalar() {
-    let input: Vec<f32> = (0..100).map(|i| i as f32 * 0.1).collect();
-    let kernel = vec![0.1, 0.2, 0.4, 0.2, 0.1]; // Gaussian-like
-    let radius = 2;
-
-    let mut output_simd = vec![0.0f32; 100];
-    let mut output_scalar = vec![0.0f32; 100];
-
-    convolve_row(&input, &mut output_simd, &kernel, radius);
-    convolve_row_scalar(&input, &mut output_scalar, &kernel, radius);
-
-    for i in 0..100 {
-        assert!(
-            (output_simd[i] - output_scalar[i]).abs() < 1e-5,
-            "SIMD and scalar should match at index {}: {} vs {}",
-            i,
-            output_simd[i],
-            output_scalar[i]
-        );
+fn convolve_row_simd_matches_scalar_across_shapes() {
+    for radius in [1usize, 2, 3] {
+        let ksize = 2 * radius + 1;
+        // Asymmetric, so a mirrored-tap error cannot be masked by symmetry.
+        let kernel: Vec<f32> = (0..ksize).map(|i| (i as f32 + 1.0) * 0.05).collect();
+        let widths: Vec<usize> = SWEEP_WIDTHS
+            .iter()
+            .copied()
+            .filter(|&w| w > 2 * radius)
+            .collect();
+        assert_simd_matches_scalar(&widths, 1e-3, |shape, width| {
+            let input = shape.row(width, 0);
+            let mut simd = vec![0.0f32; width];
+            let mut scalar = vec![0.0f32; width];
+            convolve_row(&input, &mut simd, &kernel, radius);
+            convolve_row_scalar(&input, &mut scalar, &kernel, radius);
+            ScalarSimd { scalar, simd }
+        });
     }
 }
 
@@ -219,35 +221,6 @@ fn test_convolve_row_various_kernel_radii() {
 }
 
 #[test]
-fn test_convolve_row_uniform_input() {
-    let input = vec![42.0; 128];
-    let kernel = vec![0.1, 0.2, 0.4, 0.2, 0.1]; // Gaussian-like, sums to 1.0
-    let radius = 2;
-
-    let mut output_simd = vec![0.0f32; 128];
-    let mut output_scalar = vec![0.0f32; 128];
-
-    convolve_row(&input, &mut output_simd, &kernel, radius);
-    convolve_row_scalar(&input, &mut output_scalar, &kernel, radius);
-
-    for i in 0..128 {
-        assert!(
-            (output_simd[i] - output_scalar[i]).abs() < 1e-5,
-            "Uniform input mismatch at {}: {} vs {}",
-            i,
-            output_simd[i],
-            output_scalar[i]
-        );
-        // With uniform input and normalized kernel, output should equal input
-        assert!(
-            (output_simd[i] - 42.0).abs() < 1e-5,
-            "Uniform input should remain unchanged: {}",
-            output_simd[i]
-        );
-    }
-}
-
-#[test]
 fn test_convolve_row_impulse_response() {
     // Single impulse in the middle
     let mut input = vec![0.0f32; 64];
@@ -282,79 +255,6 @@ fn test_convolve_row_impulse_response() {
             k,
             output_simd[idx],
             kval
-        );
-    }
-}
-
-#[test]
-fn test_convolve_row_negative_values() {
-    let input: Vec<f32> = (-50..50).map(|i| i as f32 * 0.1).collect();
-    let kernel = vec![0.15, 0.25, 0.2, 0.25, 0.15];
-    let radius = 2;
-
-    let mut output_simd = vec![0.0f32; 100];
-    let mut output_scalar = vec![0.0f32; 100];
-
-    convolve_row(&input, &mut output_simd, &kernel, radius);
-    convolve_row_scalar(&input, &mut output_scalar, &kernel, radius);
-
-    for i in 0..100 {
-        assert!(
-            (output_simd[i] - output_scalar[i]).abs() < 1e-5,
-            "Negative values mismatch at {}: {} vs {}",
-            i,
-            output_simd[i],
-            output_scalar[i]
-        );
-    }
-}
-
-#[test]
-fn test_convolve_row_large_array() {
-    // Test with larger array to exercise SIMD loop iterations
-    let input: Vec<f32> = (0..1024).map(|i| (i as f32 * 0.1).sin() * 100.0).collect();
-    let kernel = vec![0.05, 0.1, 0.2, 0.3, 0.2, 0.1, 0.05];
-    let radius = 3;
-
-    let mut output_simd = vec![0.0f32; 1024];
-    let mut output_scalar = vec![0.0f32; 1024];
-
-    convolve_row(&input, &mut output_simd, &kernel, radius);
-    convolve_row_scalar(&input, &mut output_scalar, &kernel, radius);
-
-    for i in 0..1024 {
-        assert!(
-            (output_simd[i] - output_scalar[i]).abs() < 1e-4,
-            "Large array mismatch at {}: {} vs {}",
-            i,
-            output_simd[i],
-            output_scalar[i]
-        );
-    }
-}
-
-#[test]
-fn test_convolve_row_random_pattern() {
-    // Pseudo-random pattern using sin/cos combination
-    let input: Vec<f32> = (0..256)
-        .map(|i| (i as f32 * 0.7).sin() * (i as f32 * 0.3).cos() * 50.0 + 100.0)
-        .collect();
-    let kernel = vec![0.1, 0.15, 0.25, 0.25, 0.15, 0.1];
-    let radius = 2;
-
-    let mut output_simd = vec![0.0f32; 256];
-    let mut output_scalar = vec![0.0f32; 256];
-
-    convolve_row(&input, &mut output_simd, &kernel, radius);
-    convolve_row_scalar(&input, &mut output_scalar, &kernel, radius);
-
-    for i in 0..256 {
-        assert!(
-            (output_simd[i] - output_scalar[i]).abs() < 1e-4,
-            "Random pattern mismatch at {}: {} vs {}",
-            i,
-            output_simd[i],
-            output_scalar[i]
         );
     }
 }

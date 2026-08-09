@@ -17,6 +17,7 @@ pub(crate) use crate::math::vec2us::Vec2us;
 pub(crate) use crate::testing::TestRng;
 pub(crate) use crate::testing::assertions::{assert_close, assert_close_slice, is_close};
 pub(crate) use crate::testing::images::{gray_image, rgb_image};
+pub(crate) use crate::testing::simd_check::{SWEEP_WIDTHS, ScalarSimd, assert_simd_matches_scalar};
 pub(crate) use crate::testing::synthetic::background_map;
 pub(crate) use common::CancelToken;
 pub(crate) use glam::{DVec2, Vec2};
