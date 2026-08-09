@@ -72,7 +72,7 @@ unsafe fn simd_exp_fast(x: float64x2_t) -> float64x2_t {
 /// For N=6 (Gaussian2D), accumulates 21 upper-triangle hessian elements,
 /// 6 gradient elements, and chi² directly in NEON registers (28 total).
 pub(super) unsafe fn batch_build_normal_equations_neon(
-    _model: &Gaussian2D,
+    model: &Gaussian2D,
     data_x: &[f64],
     data_y: &[f64],
     data_z: &[f64],
@@ -255,7 +255,7 @@ pub(super) unsafe fn batch_build_normal_equations_neon(
         // Scalar tail (0 or 1 element)
         let tail_start = chunks * 2;
         equations.accumulate(
-            _model,
+            model,
             FitData::unweighted(data_x, data_y, data_z),
             params,
             tail_start..n,
@@ -268,7 +268,7 @@ pub(super) unsafe fn batch_build_normal_equations_neon(
 
 /// Batch compute chi² using NEON.
 pub(super) unsafe fn batch_compute_chi2_neon(
-    _model: &Gaussian2D,
+    model: &Gaussian2D,
     data_x: &[f64],
     data_y: &[f64],
     data_z: &[f64],
@@ -314,7 +314,7 @@ pub(super) unsafe fn batch_compute_chi2_neon(
 
         // Scalar tail
         let tail_start = chunks * 2;
-        chi2 += _model.accumulate_chi2(
+        chi2 += model.accumulate_chi2(
             FitData::unweighted(data_x, data_y, data_z),
             params,
             tail_start..n,
