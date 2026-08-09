@@ -1,11 +1,96 @@
 //! Tests for statistical functions.
 
 use crate::math::statistics::*;
+use crate::testing::prelude::*;
 
 #[derive(Debug)]
 struct MedianCase {
     values: &'static [f32],
     expected: f32,
+}
+
+/// The inputs too small or too flat for clipping to do anything, with the result hand-derived in
+/// each case. These were eight tests — the `_stats_` prefixed half called the same function as
+/// the other half with different constants.
+#[test]
+fn sigma_clipped_degenerate_inputs() {
+    struct Case {
+        values: &'static [f32],
+        median: f32,
+        /// `None` where the case is about the median only.
+        sigma: Option<f32>,
+        why: &'static str,
+    }
+
+    let cases = [
+        Case {
+            values: &[],
+            median: 0.0,
+            sigma: Some(0.0),
+            why: "nothing to summarise",
+        },
+        Case {
+            values: &[5.0],
+            median: 5.0,
+            sigma: Some(0.0),
+            why: "one value is its own median, no spread",
+        },
+        Case {
+            values: &[0.5],
+            median: 0.5,
+            sigma: Some(0.0),
+            why: "same, at a different level",
+        },
+        // Even length averages the two middle elements, and iteration stops below three values.
+        Case {
+            values: &[2.0, 4.0],
+            median: 3.0,
+            sigma: None,
+            why: "(2+4)/2",
+        },
+        Case {
+            values: &[0.3, 0.7],
+            median: 0.5,
+            sigma: None,
+            why: "(0.3+0.7)/2",
+        },
+        Case {
+            values: &[5.0; 100],
+            median: 5.0,
+            sigma: Some(0.0),
+            why: "identical values have zero MAD",
+        },
+        Case {
+            values: &[0.3; 100],
+            median: 0.3,
+            sigma: Some(0.0),
+            why: "same, at a different level",
+        },
+    ];
+
+    for case in &cases {
+        let mut values = case.values.to_vec();
+        let mut deviations = Vec::new();
+        let stats = ClippedStats::sigma_clipped(&mut values, &mut deviations, 3.0, 3);
+        assert_close!(
+            stats.median,
+            case.median,
+            1e-6,
+            "{:?}: {}",
+            case.values,
+            case.why
+        );
+        if let Some(sigma) = case.sigma {
+            assert_close!(
+                stats.sigma,
+                sigma,
+                1e-6,
+                "{:?} sigma: {}",
+                case.values,
+                case.why
+            );
+        }
+    }
 }
 
 #[test]
@@ -73,48 +158,6 @@ fn test_mad_with_scratch_empty() {
     let mut scratch = Vec::new();
     let mad = mad_f32_with_scratch(&values, 0.0, &mut scratch);
     assert!(mad.abs() < f32::EPSILON);
-}
-
-#[test]
-fn test_sigma_clipped_empty_input() {
-    let mut values: Vec<f32> = vec![];
-    let mut deviations = Vec::new();
-    let ClippedStats { median, sigma, .. } =
-        ClippedStats::sigma_clipped(&mut values, &mut deviations, 3.0, 3);
-    assert_eq!(median, 0.0);
-    assert_eq!(sigma, 0.0);
-}
-
-#[test]
-fn test_sigma_clipped_single_value() {
-    let mut values = vec![5.0];
-    let mut deviations = Vec::new();
-    let ClippedStats { median, sigma, .. } =
-        ClippedStats::sigma_clipped(&mut values, &mut deviations, 3.0, 3);
-    assert_eq!(median, 5.0);
-    assert_eq!(sigma, 0.0);
-}
-
-#[test]
-fn test_sigma_clipped_two_values() {
-    let mut values = vec![2.0, 4.0];
-    let mut deviations = Vec::new();
-    let ClippedStats {
-        median,
-        sigma: _sigma,
-        ..
-    } = ClippedStats::sigma_clipped(&mut values, &mut deviations, 3.0, 3);
-    assert!((median - 3.0).abs() < 0.01);
-}
-
-#[test]
-fn test_sigma_clipped_uniform_values() {
-    let mut values = vec![5.0; 100];
-    let mut deviations = Vec::new();
-    let ClippedStats { median, sigma, .. } =
-        ClippedStats::sigma_clipped(&mut values, &mut deviations, 3.0, 3);
-    assert_eq!(median, 5.0);
-    assert_eq!(sigma, 0.0);
 }
 
 #[test]
@@ -578,42 +621,6 @@ fn test_mad_f32_fast_matches_regular_on_odd() {
 }
 
 #[test]
-fn test_sigma_clipped_stats_empty_values() {
-    let mut values: Vec<f32> = vec![];
-    let mut deviations: Vec<f32> = vec![];
-
-    let ClippedStats { median, sigma, .. } =
-        ClippedStats::sigma_clipped(&mut values, &mut deviations, 3.0, 3);
-
-    assert!((median - 0.0).abs() < 1e-6);
-    assert!((sigma - 0.0).abs() < 1e-6);
-}
-
-#[test]
-fn test_sigma_clipped_stats_single_value() {
-    let mut values = vec![0.5];
-    let mut deviations: Vec<f32> = vec![];
-
-    let ClippedStats { median, sigma, .. } =
-        ClippedStats::sigma_clipped(&mut values, &mut deviations, 3.0, 3);
-
-    assert!((median - 0.5).abs() < 1e-6);
-    assert!((sigma - 0.0).abs() < 1e-6);
-}
-
-#[test]
-fn test_sigma_clipped_stats_uniform_values() {
-    let mut values = vec![0.3; 100];
-    let mut deviations: Vec<f32> = vec![];
-
-    let ClippedStats { median, sigma, .. } =
-        ClippedStats::sigma_clipped(&mut values, &mut deviations, 3.0, 3);
-
-    assert!((median - 0.3).abs() < 1e-6);
-    assert!((sigma - 0.0).abs() < 1e-6);
-}
-
-#[test]
 fn test_sigma_clipped_stats_no_outliers() {
     // Normal-ish distribution without outliers
     let mut values: Vec<f32> = (0..100).map(|i| 0.5 + (i as f32 - 50.0) * 0.001).collect();
@@ -850,27 +857,6 @@ fn test_sigma_clipped_stats_preserves_deviations_buffer() {
     assert!(
         deviations.capacity() >= 5,
         "Deviations buffer should have been used"
-    );
-}
-
-#[test]
-fn test_sigma_clipped_stats_handles_two_values() {
-    let mut values = vec![0.3, 0.7];
-    let mut deviations: Vec<f32> = vec![];
-
-    let ClippedStats {
-        median,
-        sigma: _sigma,
-        ..
-    } = ClippedStats::sigma_clipped(&mut values, &mut deviations, 3.0, 3);
-
-    // With only 2 values, iteration stops (len < 3) and final stats are computed.
-    // median_f32_mut on 2 values (even length): averages two middle elements
-    // = (0.3 + 0.7) / 2 = 0.5
-    assert!(
-        (median - 0.5).abs() < 1e-6,
-        "Median of [0.3, 0.7] should be 0.5 (average of two), got {}",
-        median
     );
 }
 

@@ -11,74 +11,52 @@ fn mat_approx_eq(a: &DMat3, b: &DMat3) -> bool {
         .all(|(x, y)| is_close(*x, *y, EPS))
 }
 
+/// Every way in and every way out of a `DMat3`, against one asymmetric array — asymmetric so a
+/// transposed or mis-strided accessor cannot round-trip by accident. These were ten tests of
+/// three lines each.
 #[test]
-fn test_from_array() {
-    let data = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0];
-    let m = DMat3::from_array(data);
-    assert_eq!(*m.as_array(), data);
+fn every_constructor_and_accessor_round_trips() {
+    const DATA: [f64; 9] = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0];
+
+    for m in [
+        DMat3::from_array(DATA),
+        DMat3::from_rows([1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0]),
+        DATA.into(),
+    ] {
+        assert_eq!(*m.as_array(), DATA);
+        assert_eq!(m.to_array(), DATA);
+        let out: [f64; 9] = m.into();
+        assert_eq!(out, DATA);
+        // Indexing is row-major over the same flat storage.
+        for (i, expected) in DATA.iter().enumerate() {
+            assert_eq!(m[i], *expected, "index {i}");
+        }
+    }
 }
 
+/// The two mutable paths reach the same storage the read paths do.
 #[test]
-fn test_identity() {
-    let m = DMat3::identity();
-    assert_eq!(*m.as_array(), [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]);
-}
-
-#[test]
-fn test_from_rows() {
-    let m = DMat3::from_rows([1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0]);
-    assert_eq!(*m.as_array(), [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0]);
-}
-
-#[test]
-fn test_default_is_identity() {
-    assert_eq!(DMat3::default(), DMat3::identity());
-}
-
-#[test]
-fn test_index() {
-    let m = DMat3::from_array([10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0]);
-    assert_close!(m[0], 10.0, EPS);
-    assert_close!(m[4], 50.0, EPS);
-    assert_close!(m[8], 90.0, EPS);
-}
-
-#[test]
-fn test_index_mut() {
+fn mutable_accessors_write_through() {
     let mut m = DMat3::identity();
     m[2] = 5.0;
-    m[5] = -3.0;
-    assert_close!(m[2], 5.0, EPS);
-    assert_close!(m[5], -3.0, EPS);
+    m.as_array_mut()[5] = -3.0;
+    assert_eq!(m.to_array(), [1.0, 0.0, 5.0, 0.0, 1.0, -3.0, 0.0, 0.0, 1.0]);
 }
 
+/// `identity` is the multiplicative identity, and `default` is `identity` — not merely a matrix
+/// with ones on the diagonal, which is what comparing arrays would have shown.
 #[test]
-fn test_as_array_mut() {
-    let mut m = DMat3::identity();
-    let arr = m.as_array_mut();
-    arr[2] = 7.0;
-    assert_close!(m[2], 7.0, EPS);
-}
+fn identity_is_the_multiplicative_identity_and_the_default() {
+    let identity = DMat3::identity();
+    assert_eq!(
+        *identity.as_array(),
+        [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
+    );
+    assert_eq!(DMat3::default(), identity);
 
-#[test]
-fn test_to_array() {
-    let data = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0];
-    let m = DMat3::from_array(data);
-    assert_eq!(m.to_array(), data);
-}
-
-#[test]
-fn test_from_array_trait() {
-    let data = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0];
-    let m: DMat3 = data.into();
-    assert_eq!(m, DMat3::identity());
-}
-
-#[test]
-fn test_into_array() {
-    let m = DMat3::identity();
-    let arr: [f64; 9] = m.into();
-    assert_eq!(arr, [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]);
+    let m = DMat3::from_array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0]);
+    assert!(mat_approx_eq(&(m * identity), &m));
+    assert!(mat_approx_eq(&(identity * m), &m));
 }
 
 #[test]
