@@ -114,7 +114,7 @@ fn reject_mono_buffer(data: &mut Buffer2<f32>, config: &CosmicRayConfig) -> usiz
     if size.width < 3 || size.height < 3 {
         return 0;
     }
-    let mut mask = BitBuffer2::new_default(size);
+    let mut mask = new_cr_mask(size);
     // Median scratch, reused across iterations. Each is written in full before it is read, so the
     // carried-over contents never matter — only the capacity does.
     let (mut m3, mut m37, mut m5, mut s_med5) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
@@ -164,6 +164,15 @@ fn reject_mono_buffer(data: &mut Buffer2<f32>, config: &CosmicRayConfig) -> usiz
     }
 
     mask.count_ones()
+}
+
+/// The accumulated cosmic-ray mask: one bit per pixel.
+///
+/// Its own function so `mem_budget` can weigh exactly what the detector allocates. Three of these
+/// are live at the peak — the accumulated `mask`, and `primary` plus `flags` inside
+/// [`detect_and_grow`] — so the packing is worth three times its face value.
+fn new_cr_mask(size: Size2us) -> BitBuffer2 {
+    BitBuffer2::new_default(size)
 }
 
 /// Block-replicate `data` to twice `size` on each axis (each pixel → a 2×2 block).
@@ -444,7 +453,7 @@ fn reject_xtrans(data: &mut Buffer2<f32>, cfa: &CfaType, config: &CosmicRayConfi
     if size.width < 7 || size.height < 7 {
         return 0;
     }
-    let mut mask = BitBuffer2::new_default(size);
+    let mut mask = new_cr_mask(size);
 
     for _ in 0..config.niter {
         let pix = data.pixels();
@@ -658,3 +667,17 @@ fn xtrans_replace(data: &mut Buffer2<f32>, cfa: &CfaType, mask: &BitBuffer2) {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+pub(crate) mod internals {
+    use crate::bit_buffer2::BitBuffer2;
+    use crate::math::size2us::Size2us;
+
+    /// Masks live at the detector's peak: the accumulated one, plus `primary` and `flags`.
+    pub(crate) const CONCURRENT_MASKS: usize = 3;
+
+    /// The mask as the detector allocates it, for `mem_budget` to weigh.
+    pub(crate) fn new_cr_mask(size: Size2us) -> BitBuffer2 {
+        super::new_cr_mask(size)
+    }
+}
