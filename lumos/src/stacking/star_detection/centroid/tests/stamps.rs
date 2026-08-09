@@ -30,8 +30,14 @@ fn test_estimate_sigma_from_moments_gaussian() {
         }
     }
 
-    let estimated_sigma =
-        estimate_sigma_from_moments(&data_x, &data_y, &data_z, DVec2::new(cx, cy), background);
+    let estimated_sigma = estimate_sigma_from_moments(
+        &data_x,
+        &data_y,
+        &data_z,
+        DVec2::new(cx, cy),
+        background,
+        10.0,
+    );
 
     // Should be within 20% of true sigma
     let error = (estimated_sigma - true_sigma).abs() / true_sigma;
@@ -71,8 +77,14 @@ fn test_estimate_sigma_from_moments_various_sigmas() {
             }
         }
 
-        let estimated_sigma =
-            estimate_sigma_from_moments(&data_x, &data_y, &data_z, DVec2::new(cx, cy), background);
+        let estimated_sigma = estimate_sigma_from_moments(
+            &data_x,
+            &data_y,
+            &data_z,
+            DVec2::new(cx, cy),
+            background,
+            10.0,
+        );
 
         let error = (estimated_sigma - true_sigma).abs() / true_sigma;
         assert!(
@@ -419,4 +431,38 @@ fn test_local_annulus_near_edge_fallback() {
             assert!(s.flux > 0.0, "Flux should be positive");
         }
     }
+}
+
+/// The seed must respect the ceiling it is handed, because the optimizer clamps to that same
+/// bound on its first iteration — seeding above it just spends an iteration being pulled back.
+#[test]
+fn sigma_seed_honours_its_ceiling() {
+    // A flat 21x21 patch one unit above the sky, so the second moment is the grid's own:
+    // E[dx²] = E[dy²] = 2·(1²+..+10²)/21 = 770/21 = 36.667, giving
+    // sigma = sqrt((36.667 + 36.667)/2) = 6.0553.
+    let side = 21;
+    let background = 0.1f32;
+    let mut data_x = Vec::new();
+    let mut data_y = Vec::new();
+    let mut data_z = Vec::new();
+    for y in 0..side {
+        for x in 0..side {
+            data_x.push(x as f64);
+            data_y.push(y as f64);
+            data_z.push(background as f64 + 1.0);
+        }
+    }
+    let centre = DVec2::new(10.0, 10.0);
+
+    let wide = estimate_sigma_from_moments(&data_x, &data_y, &data_z, centre, background, 15.0);
+    assert!(
+        (wide - 6.0553).abs() < 1e-3,
+        "grid's own moment is 6.0553, got {wide}"
+    );
+
+    // The tightest ceiling the detector ever uses is MIN_STAMP_RADIUS; the same data has to seed
+    // inside it rather than at the old fixed 10.0.
+    let narrow = estimate_sigma_from_moments(&data_x, &data_y, &data_z, centre, background, 4.0);
+    assert_eq!(narrow, 4.0);
+    assert_ne!(narrow, wide, "the ceiling has to change the answer");
 }

@@ -198,12 +198,17 @@ fn extract_stamp(pixels: &Buffer2<f32>, pos: DVec2, stamp_radius: usize) -> Opti
 ///
 /// For a Gaussian: E[r²] = 2σ², so σ = sqrt(E[r²]/2)
 /// This gives a better initial guess for L-M optimization than a fixed value.
+///
+/// `max_sigma` is the widest profile the optimizer will accept, so the seed lands inside the
+/// range its own `constrain` enforces — starting outside it just spends the first iteration
+/// being clamped back. Always at least [`MIN_STAMP_RADIUS`], so the 0.5 floor cannot cross it.
 fn estimate_sigma_from_moments(
     data_x: &[f64],
     data_y: &[f64],
     data_z: &[f64],
     pos: DVec2,
     background: f32,
+    max_sigma: f64,
 ) -> f32 {
     let mut sum_r2 = 0.0f64;
     let mut sum_w = 0.0f64;
@@ -219,7 +224,7 @@ fn estimate_sigma_from_moments(
 
     if sum_w > f64::EPSILON {
         // For Gaussian: E[r²] = 2σ², so σ = sqrt(E[r²]/2)
-        ((sum_r2 / sum_w / 2.0).sqrt()).clamp(0.5, 10.0) as f32
+        ((sum_r2 / sum_w / 2.0).sqrt()).clamp(0.5, max_sigma) as f32
     } else {
         2.0 // fallback
     }
@@ -305,7 +310,12 @@ impl StampFit {
         Some(Self {
             weights: fit_weights(&stamp.z, background, noise),
             sigma_est: estimate_sigma_from_moments(
-                &grid.x, &grid.y, &stamp.z, local_pos, background,
+                &grid.x,
+                &grid.y,
+                &stamp.z,
+                local_pos,
+                background,
+                grid.radius as f64,
             ),
             stamp,
             local_pos,
