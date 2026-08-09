@@ -17,14 +17,7 @@ fn test_centroid_undersampled_psf() {
     let expected_fwhm = FWHM_TO_SIGMA * sigma;
     let stamp_radius = 5; // Smaller stamp for undersampled
 
-    let result = refine_centroid(
-        &pixels,
-        Size2us::new(width, height),
-        &bg,
-        Vec2::splat(32.0),
-        stamp_radius,
-        expected_fwhm,
-    );
+    let result = refine_centroid(&pixels, &bg, Vec2::splat(32.0), stamp_radius, expected_fwhm);
 
     assert!(
         result.is_some(),
@@ -57,14 +50,7 @@ fn test_centroid_large_psf() {
     let expected_fwhm = FWHM_TO_SIGMA * sigma;
     let stamp_radius = MAX_STAMP_RADIUS; // Use maximum allowed
 
-    let result = refine_centroid(
-        &pixels,
-        Size2us::new(width, height),
-        &bg,
-        Vec2::splat(64.0),
-        stamp_radius,
-        expected_fwhm,
-    );
+    let result = refine_centroid(&pixels, &bg, Vec2::splat(64.0), stamp_radius, expected_fwhm);
 
     assert!(result.is_some(), "Should find centroid for large PSF");
     let new_pos = result.unwrap();
@@ -198,14 +184,7 @@ fn test_centroid_with_nearby_star() {
     let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
     let expected_fwhm = FWHM_TO_SIGMA * sigma;
 
-    let result = refine_centroid(
-        &pixels,
-        Size2us::new(width, height),
-        &bg,
-        primary_pos,
-        TEST_STAMP_RADIUS,
-        expected_fwhm,
-    );
+    let result = refine_centroid(&pixels, &bg, primary_pos, TEST_STAMP_RADIUS, expected_fwhm);
 
     assert!(result.is_some(), "Should find centroid despite nearby star");
     let new_pos = result.unwrap();
@@ -242,14 +221,7 @@ fn test_centroid_blended_stars() {
     let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
     let expected_fwhm = FWHM_TO_SIGMA * sigma;
 
-    let result = refine_centroid(
-        &pixels,
-        Size2us::new(width, height),
-        &bg,
-        primary_pos,
-        TEST_STAMP_RADIUS,
-        expected_fwhm,
-    );
+    let result = refine_centroid(&pixels, &bg, primary_pos, TEST_STAMP_RADIUS, expected_fwhm);
 
     assert!(result.is_some(), "Should attempt centroid on blended stars");
     let new_pos = result.unwrap();
@@ -414,14 +386,7 @@ fn test_centroid_rotated_ellipse_45deg() {
         make_rotated_elliptical_star(Size2us::new(width, height), true_pos, 4.0, 2.0, angle, 0.8);
     let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
 
-    let result = refine_centroid(
-        &pixels,
-        Size2us::new(width, height),
-        &bg,
-        Vec2::splat(32.0),
-        TEST_STAMP_RADIUS,
-        6.0,
-    );
+    let result = refine_centroid(&pixels, &bg, Vec2::splat(32.0), TEST_STAMP_RADIUS, 6.0);
 
     assert!(result.is_some(), "Should find centroid for rotated ellipse");
     let new_pos = result.unwrap();
@@ -456,14 +421,7 @@ fn test_centroid_various_rotation_angles() {
             0.8,
         );
 
-        let result = refine_centroid(
-            &pixels,
-            Size2us::new(width, height),
-            &bg,
-            true_pos,
-            TEST_STAMP_RADIUS,
-            6.0,
-        );
+        let result = refine_centroid(&pixels, &bg, true_pos, TEST_STAMP_RADIUS, 6.0);
 
         assert!(
             result.is_some(),
@@ -596,14 +554,8 @@ fn test_recovery_from_2pixel_offset() {
 
     let mut pos = initial_guess;
     for _ in 0..MAX_MOMENTS_ITERATIONS {
-        if let Some(new_pos) = refine_centroid(
-            &pixels,
-            Size2us::new(width, height),
-            &bg,
-            pos,
-            TEST_STAMP_RADIUS,
-            expected_fwhm,
-        ) {
+        if let Some(new_pos) = refine_centroid(&pixels, &bg, pos, TEST_STAMP_RADIUS, expected_fwhm)
+        {
             let delta = new_pos - pos;
             pos = new_pos;
             if delta.length_squared() < CONVERGENCE_THRESHOLD_SQ {
@@ -640,14 +592,8 @@ fn test_recovery_from_3pixel_offset() {
 
     let mut pos = initial_guess;
     for _ in 0..MAX_MOMENTS_ITERATIONS {
-        if let Some(new_pos) = refine_centroid(
-            &pixels,
-            Size2us::new(width, height),
-            &bg,
-            pos,
-            TEST_STAMP_RADIUS,
-            expected_fwhm,
-        ) {
+        if let Some(new_pos) = refine_centroid(&pixels, &bg, pos, TEST_STAMP_RADIUS, expected_fwhm)
+        {
             let delta = new_pos - pos;
             pos = new_pos;
             if delta.length_squared() < CONVERGENCE_THRESHOLD_SQ {

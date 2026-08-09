@@ -229,8 +229,7 @@ fn bench_refine_centroid_single(b: ::quickbench::Bencher) {
 
     b.bench(|| {
         black_box(refine_centroid(
-            black_box(&*pixels),
-            black_box(Size2us::new(width, height)),
+            black_box(&pixels),
             black_box(&bg),
             black_box(Vec2::splat(32.0)),
             black_box(stamp_radius),
@@ -257,8 +256,7 @@ fn bench_refine_centroid_batch_1000(b: ::quickbench::Bencher) {
     b.bench(|| {
         for _ in 0..1000 {
             black_box(refine_centroid(
-                black_box(&*pixels),
-                black_box(Size2us::new(width, height)),
+                black_box(&pixels),
                 black_box(&bg),
                 black_box(Vec2::splat(32.0)),
                 black_box(stamp_radius),
