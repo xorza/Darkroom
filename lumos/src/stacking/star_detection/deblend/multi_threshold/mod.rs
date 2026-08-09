@@ -385,6 +385,11 @@ pub(crate) struct DeblendBuffers {
     parent_pixels_above: Vec<Pixel>,
     /// Temporary storage for regions.
     regions: Vec<Vec<Pixel>>,
+    /// The regions one parent split into at the current level. A field rather than a local in
+    /// `process_higher_level` so its `Vec`s survive to the next call and get drained back into
+    /// `region_scratch.pool`; as a local they were dropped per iteration and every split
+    /// allocated afresh.
+    child_regions: ArrayVec<Vec<Pixel>, MAX_CHILDREN>,
     region_scratch: RegionScratch,
 }
 
@@ -396,6 +401,7 @@ impl DeblendBuffers {
             above_threshold: Vec::new(),
             parent_pixels_above: Vec::new(),
             regions: Vec::new(),
+            child_regions: ArrayVec::new(),
             region_scratch: RegionScratch::new(),
         }
     }
@@ -403,6 +409,9 @@ impl DeblendBuffers {
     /// Drain all regions back into the pool.
     fn recycle_regions(&mut self) {
         for region in self.regions.drain(..) {
+            self.region_scratch.pool.push(region);
+        }
+        for region in self.child_regions.drain(..) {
             self.region_scratch.pool.push(region);
         }
     }
@@ -610,6 +619,7 @@ fn process_higher_level(
         above_threshold,
         regions,
         parent_pixels_above,
+        child_regions,
         region_scratch,
         ..
     } = buffers;
@@ -636,20 +646,16 @@ fn process_higher_level(
         // Fewer pixels in this region than the parent has above the threshold means they did not
         // all stay connected: something else formed alongside it, so the parent split.
         if region.len() < parent_pixels_above.len() {
-            // Find child regions using grid-based lookup
-            let mut child_regions: ArrayVec<Vec<Pixel>, MAX_CHILDREN> = ArrayVec::new();
-            find_connected_regions_grid_into(
-                parent_pixels_above,
-                &mut child_regions,
-                region_scratch,
-            );
+            // Find child regions using grid-based lookup. The call drains the previous split's
+            // regions back into the pool before refilling.
+            find_connected_regions_grid_into(parent_pixels_above, child_regions, region_scratch);
 
             if child_regions.len() > 1 {
                 create_child_nodes(
                     tree,
                     pixel_to_node,
                     parent_idx,
-                    &child_regions,
+                    child_regions,
                     min_separation,
                 );
             }
