@@ -1,8 +1,8 @@
 //! AVX2 SIMD implementations of sum operations (x86_64).
 
-#[cfg(target_arch = "x86_64")]
 use std::arch::x86_64::*;
 
+use crate::math::sum::error::KahanSum;
 use crate::math::sum::scalar::neumaier_add;
 
 /// Sum f32 values using AVX2 SIMD with Kahan compensated summation.
@@ -10,7 +10,7 @@ use crate::math::sum::scalar::neumaier_add;
 /// # Safety
 /// Caller must ensure AVX2 is available.
 #[target_feature(enable = "avx2")]
-pub(crate) unsafe fn sum_f32(values: &[f32]) -> f32 {
+pub(super) unsafe fn sum_f32(values: &[f32]) -> f32 {
     unsafe {
         let mut sum_vec = _mm256_setzero_ps();
         let mut c_vec = _mm256_setzero_ps();
@@ -26,7 +26,10 @@ pub(crate) unsafe fn sum_f32(values: &[f32]) -> f32 {
             sum_vec = t;
         }
 
-        let (mut s, mut c) = reduce_kahan_256(sum_vec, c_vec);
+        let KahanSum {
+            sum: mut s,
+            compensation: mut c,
+        } = reduce_kahan_256(sum_vec, c_vec);
 
         for &v in remainder {
             neumaier_add(&mut s, &mut c, v);
@@ -36,23 +39,23 @@ pub(crate) unsafe fn sum_f32(values: &[f32]) -> f32 {
     }
 }
 
-/// Kahan horizontal reduction of 8 sum lanes + 8 compensation lanes into (total, total_c).
+/// Kahan horizontal reduction of 8 sum lanes + 8 compensation lanes into one running total.
 #[inline]
 #[target_feature(enable = "avx2")]
 #[allow(unsafe_op_in_unsafe_fn)]
-unsafe fn reduce_kahan_256(sum_vec: __m256, c_vec: __m256) -> (f32, f32) {
+unsafe fn reduce_kahan_256(sum_vec: __m256, c_vec: __m256) -> KahanSum {
     let mut s_arr = [0.0f32; 8];
     let mut c_arr = [0.0f32; 8];
     _mm256_storeu_ps(s_arr.as_mut_ptr(), sum_vec);
     _mm256_storeu_ps(c_arr.as_mut_ptr(), c_vec);
 
-    let mut s = 0.0f32;
-    let mut c = 0.0f32;
+    let mut sum = 0.0f32;
+    let mut compensation = 0.0f32;
     for i in 0..8 {
-        neumaier_add(&mut s, &mut c, s_arr[i]);
-        neumaier_add(&mut s, &mut c, -c_arr[i]);
+        neumaier_add(&mut sum, &mut compensation, s_arr[i]);
+        neumaier_add(&mut sum, &mut compensation, -c_arr[i]);
     }
-    (s, c)
+    KahanSum { sum, compensation }
 }
 
 /// Weighted mean using AVX2 SIMD with Kahan compensated summation.
@@ -60,7 +63,7 @@ unsafe fn reduce_kahan_256(sum_vec: __m256, c_vec: __m256) -> (f32, f32) {
 /// # Safety
 /// Caller must ensure AVX2 is available.
 #[target_feature(enable = "avx2")]
-pub(crate) unsafe fn weighted_mean_f32(values: &[f32], weights: &[f32]) -> f32 {
+pub(super) unsafe fn weighted_mean_f32(values: &[f32], weights: &[f32]) -> f32 {
     unsafe {
         let mut sum_vw = _mm256_setzero_ps();
         let mut c_vw = _mm256_setzero_ps();
@@ -91,8 +94,14 @@ pub(crate) unsafe fn weighted_mean_f32(values: &[f32], weights: &[f32]) -> f32 {
             sum_w = t;
         }
 
-        let (mut s_vw, mut c_s_vw) = reduce_kahan_256(sum_vw, c_vw);
-        let (mut s_w, mut c_s_w) = reduce_kahan_256(sum_w, c_w);
+        let KahanSum {
+            sum: mut s_vw,
+            compensation: mut c_s_vw,
+        } = reduce_kahan_256(sum_vw, c_vw);
+        let KahanSum {
+            sum: mut s_w,
+            compensation: mut c_s_w,
+        } = reduce_kahan_256(sum_w, c_w);
 
         let w_rem = &weights[values.len() - v_rem.len()..];
         for (&v, &w) in v_rem.iter().zip(w_rem.iter()) {

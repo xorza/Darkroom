@@ -2,25 +2,26 @@
 
 use std::arch::x86_64::*;
 
+use crate::math::sum::error::KahanSum;
 use crate::math::sum::scalar::neumaier_add;
 
-/// Kahan horizontal reduction of 4 sum lanes + 4 compensation lanes.
+/// Kahan horizontal reduction of 4 sum lanes + 4 compensation lanes into one running total.
 #[inline]
 #[target_feature(enable = "sse4.1")]
 #[allow(unsafe_op_in_unsafe_fn)]
-unsafe fn reduce_kahan_128(sum_vec: __m128, c_vec: __m128) -> (f32, f32) {
+unsafe fn reduce_kahan_128(sum_vec: __m128, c_vec: __m128) -> KahanSum {
     let mut s_arr = [0.0f32; 4];
     let mut c_arr = [0.0f32; 4];
     _mm_storeu_ps(s_arr.as_mut_ptr(), sum_vec);
     _mm_storeu_ps(c_arr.as_mut_ptr(), c_vec);
 
-    let mut s = 0.0f32;
-    let mut c = 0.0f32;
+    let mut sum = 0.0f32;
+    let mut compensation = 0.0f32;
     for i in 0..4 {
-        neumaier_add(&mut s, &mut c, s_arr[i]);
-        neumaier_add(&mut s, &mut c, -c_arr[i]);
+        neumaier_add(&mut sum, &mut compensation, s_arr[i]);
+        neumaier_add(&mut sum, &mut compensation, -c_arr[i]);
     }
-    (s, c)
+    KahanSum { sum, compensation }
 }
 
 /// Weighted mean using SSE4.1 SIMD with Kahan compensated summation.
@@ -28,7 +29,7 @@ unsafe fn reduce_kahan_128(sum_vec: __m128, c_vec: __m128) -> (f32, f32) {
 /// # Safety
 /// Caller must ensure SSE4.1 is available.
 #[target_feature(enable = "sse4.1")]
-pub(crate) unsafe fn weighted_mean_f32(values: &[f32], weights: &[f32]) -> f32 {
+pub(super) unsafe fn weighted_mean_f32(values: &[f32], weights: &[f32]) -> f32 {
     unsafe {
         let mut sum_vw = _mm_setzero_ps();
         let mut c_vw = _mm_setzero_ps();
@@ -57,8 +58,14 @@ pub(crate) unsafe fn weighted_mean_f32(values: &[f32], weights: &[f32]) -> f32 {
             sum_w = t;
         }
 
-        let (mut s_vw, mut c_s_vw) = reduce_kahan_128(sum_vw, c_vw);
-        let (mut s_w, mut c_s_w) = reduce_kahan_128(sum_w, c_w);
+        let KahanSum {
+            sum: mut s_vw,
+            compensation: mut c_s_vw,
+        } = reduce_kahan_128(sum_vw, c_vw);
+        let KahanSum {
+            sum: mut s_w,
+            compensation: mut c_s_w,
+        } = reduce_kahan_128(sum_w, c_w);
 
         let w_rem = &weights[values.len() - v_rem.len()..];
         for (&v, &w) in v_rem.iter().zip(w_rem.iter()) {

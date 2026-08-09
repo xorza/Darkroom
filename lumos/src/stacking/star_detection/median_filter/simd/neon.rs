@@ -2,10 +2,8 @@
 
 #![allow(clippy::needless_range_loop)]
 
-#[cfg(target_arch = "aarch64")]
 use std::arch::aarch64::*;
 
-#[cfg(target_arch = "aarch64")]
 use crate::stacking::star_detection::median_filter::simd::median9_scalar;
 
 /// Process a row of interior pixels using NEON.
@@ -15,8 +13,6 @@ use crate::stacking::star_detection::median_filter::simd::median9_scalar;
 /// # Safety
 /// - Caller must ensure this is running on aarch64.
 /// - `width` must be >= 8 (4 SIMD + edges).
-#[cfg(target_arch = "aarch64")]
-#[target_feature(enable = "neon")]
 pub(super) unsafe fn median_filter_row_neon(
     row_above: &[f32],
     row_curr: &[f32],
@@ -76,8 +72,6 @@ pub(super) unsafe fn median_filter_row_neon(
 ///
 /// Uses a 25-comparator sorting network optimized for finding the median.
 /// After the network, v4 contains the median of each SIMD lane.
-#[cfg(target_arch = "aarch64")]
-#[target_feature(enable = "neon")]
 #[inline]
 #[allow(clippy::too_many_arguments)]
 unsafe fn median9_neon(
@@ -103,7 +97,6 @@ mod tests {
     use crate::stacking::star_detection::median_filter::simd::neon::*;
 
     #[test]
-    #[cfg(target_arch = "aarch64")]
     fn test_neon_median_filter_row() {
         use crate::stacking::star_detection::median_filter::simd::median_filter_row_scalar;
 

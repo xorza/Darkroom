@@ -6,11 +6,9 @@ use crate::stacking::registration::transform::{Transform, WarpTransform};
 use crate::testing::synthetic::patterns;
 use glam::DVec2;
 use imaginarium::Buffer2;
-#[cfg(target_arch = "x86_64")]
 use imaginarium::cpu_features;
 
 /// Helper: compare SIMD output against scalar reference for a given transform.
-#[cfg(target_arch = "x86_64")]
 fn assert_avx2_matches_scalar(
     input: &Buffer2<f32>,
     transform: &Transform,
@@ -42,7 +40,6 @@ fn assert_avx2_matches_scalar(
     }
 }
 
-#[cfg(target_arch = "x86_64")]
 fn assert_sse_matches_scalar(
     input: &Buffer2<f32>,
     transform: &Transform,
@@ -75,7 +72,6 @@ fn assert_sse_matches_scalar(
 }
 
 #[test]
-#[cfg(target_arch = "x86_64")]
 fn test_avx2_warp_row_translation() {
     let input = patterns::diagonal_gradient(Size2us::new(128, 64));
     let transform = Transform::translation(DVec2::new(2.5, 1.5));
@@ -83,7 +79,6 @@ fn test_avx2_warp_row_translation() {
 }
 
 #[test]
-#[cfg(target_arch = "x86_64")]
 fn test_avx2_warp_row_identity() {
     let input = patterns::diagonal_gradient(Size2us::new(128, 64));
     let transform = Transform::identity();
@@ -91,7 +86,6 @@ fn test_avx2_warp_row_identity() {
 }
 
 #[test]
-#[cfg(target_arch = "x86_64")]
 fn test_avx2_warp_row_similarity() {
     let input = patterns::diagonal_gradient(Size2us::new(128, 64));
     let transform = Transform::similarity(DVec2::new(3.0, 2.0), 0.1, 1.05);
@@ -99,7 +93,6 @@ fn test_avx2_warp_row_similarity() {
 }
 
 #[test]
-#[cfg(target_arch = "x86_64")]
 fn test_avx2_warp_row_remainder_pixels() {
     // Width not a multiple of 8: tests the scalar remainder path.
     // Width=13: 1 chunk of 8 + 5 remainder pixels.
@@ -109,7 +102,6 @@ fn test_avx2_warp_row_remainder_pixels() {
 }
 
 #[test]
-#[cfg(target_arch = "x86_64")]
 fn test_sse_warp_row_similarity() {
     let input = patterns::diagonal_gradient(Size2us::new(64, 64));
     let transform = Transform::similarity(DVec2::new(1.0, 2.0), 0.05, 1.02);
@@ -117,7 +109,6 @@ fn test_sse_warp_row_similarity() {
 }
 
 #[test]
-#[cfg(target_arch = "x86_64")]
 fn test_sse_warp_row_identity() {
     let input = patterns::diagonal_gradient(Size2us::new(64, 64));
     let transform = Transform::identity();
@@ -125,7 +116,6 @@ fn test_sse_warp_row_identity() {
 }
 
 #[test]
-#[cfg(target_arch = "x86_64")]
 fn test_sse_warp_row_remainder_pixels() {
     // Width not a multiple of 4: tests the scalar remainder path.
     // Width=11: 2 chunks of 4 + 3 remainder pixels.
@@ -135,7 +125,6 @@ fn test_sse_warp_row_remainder_pixels() {
 }
 
 /// Helper: compute scalar Lanczos weighted sum and compare against SIMD kernel.
-#[cfg(target_arch = "x86_64")]
 fn assert_lanczos_kernel_fma_matches_scalar<const A: usize, const SIZE: usize>(label: &str) {
     if !cpu_features::has_avx2_fma() {
         return;
@@ -194,19 +183,16 @@ fn assert_lanczos_kernel_fma_matches_scalar<const A: usize, const SIZE: usize>(l
 }
 
 #[test]
-#[cfg(target_arch = "x86_64")]
 fn test_lanczos2_kernel_fma_matches_scalar() {
     assert_lanczos_kernel_fma_matches_scalar::<2, 4>("Lanczos2");
 }
 
 #[test]
-#[cfg(target_arch = "x86_64")]
 fn test_lanczos3_kernel_fma_matches_scalar() {
     assert_lanczos_kernel_fma_matches_scalar::<3, 6>("Lanczos3");
 }
 
 #[test]
-#[cfg(target_arch = "x86_64")]
 fn test_lanczos4_kernel_fma_matches_scalar() {
     assert_lanczos_kernel_fma_matches_scalar::<4, 8>("Lanczos4");
 }

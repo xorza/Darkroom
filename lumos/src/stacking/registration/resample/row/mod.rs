@@ -13,7 +13,11 @@
 //! (SIP is nonlinear) and SIMD paths fall back to scalar.
 
 use crate::math::size2us::Size2us;
+#[cfg(target_arch = "aarch64")]
+use crate::simd::NEON_F32_LANES;
 use crate::simd::dispatch;
+#[cfg(target_arch = "x86_64")]
+use crate::simd::{AVX2_F32_LANES, SSE_F32_LANES};
 
 #[cfg(target_arch = "x86_64")]
 mod x86;
@@ -23,16 +27,6 @@ mod neon;
 
 #[cfg(test)]
 mod tests;
-
-/// Output pixels each bilinear kernel consumes per chunk (`output_width / LANES` chunks), so a
-/// row shorter than one vector gives the chunk loop nothing to do and every pixel falls through
-/// to the kernel's own remainder handling — cheaper to take the scalar row instead.
-#[cfg(target_arch = "x86_64")]
-const AVX2_LANES: usize = 8;
-#[cfg(target_arch = "x86_64")]
-const SSE41_LANES: usize = 4;
-#[cfg(target_arch = "aarch64")]
-const NEON_LANES: usize = 4;
 
 use crate::stacking::registration::config::WarpParams;
 #[cfg(target_arch = "x86_64")]
@@ -126,12 +120,16 @@ pub(super) fn bilinear(
         return bilinear_scalar(input, output_row, output_y, wt, border_value);
     }
 
+    // Each kernel consumes one vector of output pixels per chunk (`output_width / LANES` chunks),
+    // so a row shorter than one vector gives the chunk loop nothing to do and every pixel falls
+    // through to the kernel's own remainder handling — cheaper to take the scalar row instead.
+    // A structural minimum, not a measured crossover: these kernels win from one vector up.
     dispatch! {
-        x86: avx2 if output_row.len() >= AVX2_LANES
+        x86: avx2 if output_row.len() >= AVX2_F32_LANES
             => x86::bilinear_avx2(input, output_row, output_y, &wt.transform),
-        x86: sse4_1 if output_row.len() >= SSE41_LANES
+        x86: sse4_1 if output_row.len() >= SSE_F32_LANES
             => x86::bilinear_sse(input, output_row, output_y, &wt.transform),
-        aarch64 if output_row.len() >= NEON_LANES
+        aarch64 if output_row.len() >= NEON_F32_LANES
             => neon::bilinear_neon(input, output_row, output_y, &wt.transform),
         scalar => bilinear_scalar(input, output_row, output_y, wt, border_value),
     }

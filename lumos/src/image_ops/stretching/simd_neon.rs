@@ -75,7 +75,7 @@ unsafe fn asinh_neon(x: float32x4_t) -> float32x4_t {
 ///
 /// # Safety
 /// Caller must be on aarch64 (NEON is always available there).
-pub(crate) unsafe fn asinh_color_preserve_neon(
+pub(super) unsafe fn asinh_color_preserve_neon(
     red: &mut [f32],
     green: &mut [f32],
     blue: &mut [f32],
