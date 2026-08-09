@@ -9,7 +9,7 @@ fn test_refine_centroid_centered_star() {
     let pos = DVec2::splat(32.0);
     let pixels = SyntheticStar::new(pos.as_vec2(), 0.8, StarProfile::Gaussian { sigma: 2.5 })
         .stamp(Size2us::new(width, height), 0.1);
-    let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
+    let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
 
     let result = refine_centroid(&pixels, &bg, pos, TEST_STAMP_RADIUS, TEST_EXPECTED_FWHM);
 
@@ -31,7 +31,7 @@ fn test_refine_centroid_offset_converges() {
         StarProfile::Gaussian { sigma: 2.5 },
     )
     .stamp(Size2us::new(width, height), 0.1);
-    let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
+    let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
 
     // Start with integer guess (peak pixel position)
     let start_pos = DVec2::new(32.0, 33.0);
@@ -63,7 +63,7 @@ fn test_refine_centroid_invalid_position_returns_none() {
     let width = 64;
     let height = 64;
     let pixels = Buffer2::new_filled(width, height, 0.5f32);
-    let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
+    let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
 
     // Position too close to edge
     let result = refine_centroid(
@@ -82,7 +82,7 @@ fn test_refine_centroid_zero_flux_returns_none() {
     let height = 64;
     // All pixels equal to background - no signal
     let pixels = Buffer2::new_filled(width, height, 0.1f32);
-    let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
+    let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
 
     let result = refine_centroid(
         &pixels,
@@ -101,7 +101,7 @@ fn test_refine_centroid_rejects_large_movement() {
     // Create a star very far from initial position (outside the stamp entirely)
     let pixels = SyntheticStar::new(Vec2::splat(50.0), 0.8, StarProfile::Gaussian { sigma: 2.5 })
         .stamp(Size2us::new(width, height), 0.1);
-    let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
+    let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
 
     // Start far from the actual star - the stamp won't contain the star,
     // so there's no signal, which should cause rejection
@@ -129,7 +129,7 @@ fn test_refine_centroid_iterative_convergence() {
         StarProfile::Gaussian { sigma: 2.5 },
     )
     .stamp(Size2us::new(width, height), 0.1);
-    let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
+    let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
 
     // Simulate multiple iterations like measure_star does
     let mut pos = DVec2::splat(32.0);
@@ -158,7 +158,7 @@ fn test_compute_star_valid_star() {
     let height = 64;
     let pixels = SyntheticStar::new(Vec2::splat(32.0), 0.8, StarProfile::Gaussian { sigma: 2.5 })
         .stamp(Size2us::new(width, height), 0.1);
-    let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
+    let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
 
     let peak = 0.73;
     let star = compute_star(
@@ -199,7 +199,7 @@ fn test_compute_star_background_override_replaces_global_map() {
     let pos = DVec2::splat(32.0);
     let pixels = SyntheticStar::new(pos.as_vec2(), 0.8, StarProfile::Gaussian { sigma: 2.5 })
         .stamp(Size2us::new(width, height), 0.1);
-    let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
+    let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
     let local_bg = LocalBackground {
         bg: 0.05,
         noise: 0.05,
@@ -246,7 +246,7 @@ fn test_compute_star_invalid_position_returns_none() {
     let width = 64;
     let height = 64;
     let pixels = Buffer2::new_filled(width, height, 0.5f32);
-    let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
+    let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
 
     // Position too close to edge
     let metrics = compute_star(
@@ -267,7 +267,7 @@ fn test_compute_star_zero_flux_returns_none() {
     let height = 64;
     // All pixels equal to or below background
     let pixels = Buffer2::new_filled(width, height, 0.05f32);
-    let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
+    let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
 
     let metrics = compute_star(
         &pixels,
@@ -302,7 +302,7 @@ fn test_compute_star_fwhm_scales_with_sigma() {
         StarProfile::Gaussian { sigma: sigma_large },
     )
     .stamp(Size2us::new(width, height), 0.1);
-    let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
+    let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
 
     let metrics_small = compute_star(
         &pixels_small,
@@ -345,7 +345,7 @@ fn test_compute_star_snr_scales_with_amplitude() {
     let pixels_bright =
         SyntheticStar::new(Vec2::splat(32.0), 0.8, StarProfile::Gaussian { sigma: 2.5 })
             .stamp(Size2us::new(width, height), 0.1);
-    let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
+    let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
 
     let metrics_dim = compute_star(
         &pixels_dim,
@@ -392,7 +392,7 @@ fn test_elongated_star_high_eccentricity() {
         },
     )
     .stamp(Size2us::new(width, height), 0.1);
-    let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
+    let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
 
     let metrics = compute_star(
         &pixels,
@@ -430,7 +430,7 @@ fn test_circular_vs_elongated_eccentricity() {
         },
     )
     .stamp(Size2us::new(width, height), 0.1);
-    let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
+    let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
 
     let metrics_circular = compute_star(
         &circular,
@@ -481,7 +481,7 @@ fn test_centroid_with_noisy_background() {
         *pixel += noise;
     }
 
-    let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.05); // Higher noise estimate
+    let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.05); // Higher noise estimate
 
     let result = refine_centroid(
         &pixels,
@@ -511,8 +511,8 @@ fn test_snr_decreases_with_higher_noise() {
     let pixels = SyntheticStar::new(Vec2::splat(32.0), 0.8, StarProfile::Gaussian { sigma: 2.5 })
         .stamp(Size2us::new(width, height), 0.1);
 
-    let bg_low_noise = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
-    let bg_high_noise = make_uniform_background(Size2us::new(width, height), 0.1, 0.1);
+    let bg_low_noise = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
+    let bg_high_noise = background_map::uniform(Size2us::new(width, height), 0.1, 0.1);
 
     let metrics_low = compute_star(
         &pixels,
@@ -553,7 +553,7 @@ fn test_fwhm_formula_for_known_gaussian() {
 
     let pixels = SyntheticStar::new(Vec2::splat(64.0), 0.8, StarProfile::Gaussian { sigma })
         .stamp(Size2us::new(width, height), 0.1);
-    let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.001); // Very low noise
+    let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.001); // Very low noise
 
     let metrics = compute_star(
         &pixels,
@@ -588,7 +588,7 @@ fn test_flux_proportional_to_amplitude() {
     let pixels_amp2 =
         SyntheticStar::new(Vec2::splat(32.0), 0.8, StarProfile::Gaussian { sigma: 2.5 })
             .stamp(Size2us::new(width, height), 0.1);
-    let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
+    let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
 
     let metrics1 = compute_star(
         &pixels_amp1,
@@ -628,7 +628,7 @@ fn test_eccentricity_bounds() {
     // Eccentricity should always be in [0, 1]
     let width = 64;
     let height = 64;
-    let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
+    let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
 
     // Test various star shapes
     let circular = SyntheticStar::new(Vec2::splat(32.0), 0.8, StarProfile::Gaussian { sigma: 2.5 })
@@ -683,7 +683,7 @@ fn test_eccentricity_orientation_invariant() {
     // Eccentricity should be similar regardless of orientation (x vs y elongation)
     let width = 64;
     let height = 64;
-    let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
+    let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
 
     let elongated_x = SyntheticStar::new(
         Vec2::splat(32.0),
@@ -750,8 +750,8 @@ fn test_snr_formula_consistency() {
     let noise1 = 0.02f32;
     let noise2 = 0.04f32; // 2x noise
 
-    let bg1 = make_uniform_background(Size2us::new(width, height), 0.1, noise1);
-    let bg2 = make_uniform_background(Size2us::new(width, height), 0.1, noise2);
+    let bg1 = background_map::uniform(Size2us::new(width, height), 0.1, noise1);
+    let bg2 = background_map::uniform(Size2us::new(width, height), 0.1, noise2);
 
     let metrics1 = compute_star(
         &pixels,
@@ -805,7 +805,7 @@ fn test_metrics_with_high_background() {
     }
     let pixels = Buffer2::new(width, height, pixels);
 
-    let bg = make_uniform_background(Size2us::new(width, height), 0.5, 0.02);
+    let bg = background_map::uniform(Size2us::new(width, height), 0.5, 0.02);
     let metrics = compute_star(
         &pixels,
         &bg,
@@ -836,7 +836,7 @@ fn test_fwhm_independent_of_amplitude() {
         .stamp(Size2us::new(width, height), 0.1);
     let pixels_bright = SyntheticStar::new(Vec2::splat(32.0), 0.9, StarProfile::Gaussian { sigma })
         .stamp(Size2us::new(width, height), 0.1);
-    let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
+    let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
 
     let metrics_dim = compute_star(
         &pixels_dim,
@@ -874,7 +874,7 @@ fn test_fwhm_independent_of_amplitude() {
 fn test_eccentricity_increases_with_elongation() {
     let width = 64;
     let height = 64;
-    let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
+    let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
 
     // Create stars with increasing elongation ratios
     let ratio_1_1 = SyntheticStar::new(
@@ -956,7 +956,7 @@ fn test_measure_star_returns_none_for_edge_candidate() {
     let width = 64;
     let height = 64;
     let pixels = Buffer2::new_filled(width, height, 0.5f32);
-    let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
+    let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
     let config = Config::default();
 
     // Create region near edge
@@ -1022,7 +1022,7 @@ fn test_measure_star_multiple_stars_independent() {
     }
 
     let pixels = Buffer2::new(width, height, pixels);
-    let bg = estimate_background(
+    let bg = background_map::estimate(
         &pixels,
         &BackgroundConfig {
             tile_size: 32,
@@ -1080,7 +1080,7 @@ fn test_circular_star_roundness() {
     let pixels = SyntheticStar::new(Vec2::splat(32.0), 0.8, StarProfile::Gaussian { sigma: 2.5 })
         .stamp(Size2us::new(width, height), 0.1);
 
-    let bg = estimate_background(
+    let bg = background_map::estimate(
         &pixels,
         &BackgroundConfig {
             tile_size: 32,
@@ -1141,7 +1141,7 @@ fn test_elongated_x_star_roundness() {
     }
 
     let pixels = Buffer2::new(width, height, pixels);
-    let bg = estimate_background(
+    let bg = background_map::estimate(
         &pixels,
         &BackgroundConfig {
             tile_size: 32,
@@ -1202,7 +1202,7 @@ fn test_asymmetric_star_sround() {
     }
 
     let pixels = Buffer2::new(width, height, pixels);
-    let bg = estimate_background(
+    let bg = background_map::estimate(
         &pixels,
         &BackgroundConfig {
             tile_size: 32,

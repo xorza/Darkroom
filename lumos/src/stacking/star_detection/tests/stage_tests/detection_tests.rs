@@ -7,8 +7,9 @@ use crate::stacking::star_detection::config::background_config::BackgroundConfig
 use crate::stacking::star_detection::config::detection_config::DetectionConfig;
 use crate::stacking::star_detection::detector::stages::detect::internals::detect_stars_test;
 use crate::stacking::star_detection::tests::Scenario;
+use crate::testing::init_tracing;
+use crate::testing::synthetic::background_map;
 use crate::testing::visual::{gray_to_rgb_image_stretched, save_grayscale, save_image};
-use crate::testing::{estimate_background, init_tracing};
 use common::internals::test_output_path;
 use glam::Vec2;
 use imaginarium::Color;
@@ -63,7 +64,7 @@ fn test_detection_sparse() {
     );
 
     // Estimate background
-    let background = estimate_background(
+    let background = background_map::estimate(
         &pixels,
         &BackgroundConfig {
             tile_size: TILE_SIZE,
@@ -150,7 +151,7 @@ fn test_detection_thresholds() {
     );
 
     // Estimate background
-    let background = estimate_background(
+    let background = background_map::estimate(
         &pixels,
         &BackgroundConfig {
             tile_size: TILE_SIZE,
@@ -232,7 +233,7 @@ fn test_detection_area_filter() {
     );
 
     // Estimate background
-    let background = estimate_background(
+    let background = background_map::estimate(
         &pixels,
         &BackgroundConfig {
             tile_size: TILE_SIZE,

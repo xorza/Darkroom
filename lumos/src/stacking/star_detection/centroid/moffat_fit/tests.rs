@@ -5,7 +5,7 @@ use crate::math::size2us::Size2us;
 use std::f64::consts::PI;
 
 use crate::stacking::star_detection::centroid::internals::{
-    Perturbation, approx_eq, reference_normal_equations,
+    Perturbation, reference_normal_equations,
 };
 use crate::stacking::star_detection::centroid::lm_optimizer::LMConfig;
 use crate::stacking::star_detection::centroid::moffat_fit::*;
@@ -222,6 +222,12 @@ const MOFFAT_CASES: &[MoffatCase] = &[
         background_tol: None,
     },
 ];
+
+use crate::testing::assertions::{assert_close, assert_close_slice};
+
+/// SIMD and scalar accumulate the same ~225 f64 terms in a different order, so they differ by
+/// FMA and reassociation rounding — a few ulp relative, never a structural disagreement.
+const SIMD_TOL: f64 = 1e-10;
 
 #[test]
 fn moffat_fit_recovers_known_parameters() {
@@ -808,26 +814,23 @@ fn test_batch_build_normal_equations_matches_scalar() {
     } = model.batch_build_normal_equations(FitData::unweighted(&data_x, &data_y, &data_z), &params);
 
     // Chi² should match
-    assert!(
-        approx_eq(chi2_scalar, chi2_batch),
+    assert_close!(
+        chi2_scalar,
+        chi2_batch,
+        SIMD_TOL,
         "chi2 mismatch: scalar={chi2_scalar}, batch={chi2_batch}"
     );
 
     // Gradient should match
-    for i in 0..5 {
-        assert!(
-            approx_eq(gradient_scalar[i], gradient_batch[i]),
-            "gradient[{i}] mismatch: scalar={}, batch={}",
-            gradient_scalar[i],
-            gradient_batch[i]
-        );
-    }
+    assert_close_slice!(gradient_scalar, gradient_batch, SIMD_TOL, "gradient");
 
     // Hessian should match (full matrix including mirrored lower triangle)
     for i in 0..5 {
         for j in 0..5 {
-            assert!(
-                approx_eq(hessian_scalar[i][j], hessian_batch[i][j]),
+            assert_close!(
+                hessian_scalar[i][j],
+                hessian_batch[i][j],
+                SIMD_TOL,
                 "hessian[{i}][{j}] mismatch: scalar={}, batch={}",
                 hessian_scalar[i][j],
                 hessian_batch[i][j]
@@ -862,8 +865,10 @@ fn test_batch_compute_chi2_matches_scalar() {
     let chi2_batch =
         model.batch_compute_chi2(FitData::unweighted(&data_x, &data_y, &data_z), &test_params);
 
-    assert!(
-        approx_eq(chi2_scalar, chi2_batch),
+    assert_close!(
+        chi2_scalar,
+        chi2_batch,
+        SIMD_TOL,
         "chi2 mismatch: scalar={chi2_scalar}, batch={chi2_batch}, diff={}",
         (chi2_scalar - chi2_batch).abs()
     );
@@ -892,24 +897,30 @@ fn test_batch_weighted_bypasses_simd_and_applies_weights() {
         );
 
         // Every term of the normal equations is linear in the per-pixel weight.
-        assert!(
-            approx_eq(weighted.chi2, scale * unweighted.chi2),
+        assert_close!(
+            weighted.chi2,
+            scale * unweighted.chi2,
+            SIMD_TOL,
             "chi2 at w={scale}: {} != {} * {}",
             weighted.chi2,
             scale,
             unweighted.chi2
         );
         for i in 0..5 {
-            assert!(
-                approx_eq(weighted.gradient[i], scale * unweighted.gradient[i]),
+            assert_close!(
+                weighted.gradient[i],
+                scale * unweighted.gradient[i],
+                SIMD_TOL,
                 "gradient[{i}] at w={scale}: {} != {} * {}",
                 weighted.gradient[i],
                 scale,
                 unweighted.gradient[i]
             );
             for j in 0..5 {
-                assert!(
-                    approx_eq(weighted.hessian[i][j], scale * unweighted.hessian[i][j]),
+                assert_close!(
+                    weighted.hessian[i][j],
+                    scale * unweighted.hessian[i][j],
+                    SIMD_TOL,
                     "hessian[{i}][{j}] at w={scale}: {} != {} * {}",
                     weighted.hessian[i][j],
                     scale,
@@ -956,21 +967,27 @@ fn test_batch_build_normal_equations_various_stamp_sizes() {
         } = model
             .batch_build_normal_equations(FitData::unweighted(&data_x, &data_y, &data_z), &params);
 
-        assert!(
-            approx_eq(chi2_scalar, chi2_batch),
+        assert_close!(
+            chi2_scalar,
+            chi2_batch,
+            SIMD_TOL,
             "size={size}: chi2 mismatch: scalar={chi2_scalar}, batch={chi2_batch}"
         );
 
         for i in 0..5 {
-            assert!(
-                approx_eq(gradient_scalar[i], gradient_batch[i]),
+            assert_close!(
+                gradient_scalar[i],
+                gradient_batch[i],
+                SIMD_TOL,
                 "size={size}: gradient[{i}] mismatch: scalar={}, batch={}",
                 gradient_scalar[i],
                 gradient_batch[i]
             );
             for j in 0..5 {
-                assert!(
-                    approx_eq(hessian_scalar[i][j], hessian_batch[i][j]),
+                assert_close!(
+                    hessian_scalar[i][j],
+                    hessian_batch[i][j],
+                    SIMD_TOL,
                     "size={size}: hessian[{i}][{j}] mismatch: scalar={}, batch={}",
                     hessian_scalar[i][j],
                     hessian_batch[i][j]
@@ -1015,21 +1032,27 @@ fn test_batch_build_normal_equations_all_pow_strategies() {
         } = model
             .batch_build_normal_equations(FitData::unweighted(&data_x, &data_y, &data_z), &params);
 
-        assert!(
-            approx_eq(chi2_scalar, chi2_batch),
+        assert_close!(
+            chi2_scalar,
+            chi2_batch,
+            SIMD_TOL,
             "beta={beta}: chi2 mismatch: scalar={chi2_scalar}, batch={chi2_batch}"
         );
 
         for i in 0..5 {
-            assert!(
-                approx_eq(gradient_scalar[i], gradient_batch[i]),
+            assert_close!(
+                gradient_scalar[i],
+                gradient_batch[i],
+                SIMD_TOL,
                 "beta={beta}: gradient[{i}] mismatch: scalar={}, batch={}",
                 gradient_scalar[i],
                 gradient_batch[i]
             );
             for j in 0..5 {
-                assert!(
-                    approx_eq(hessian_scalar[i][j], hessian_batch[i][j]),
+                assert_close!(
+                    hessian_scalar[i][j],
+                    hessian_batch[i][j],
+                    SIMD_TOL,
                     "beta={beta}: hessian[{i}][{j}] mismatch: scalar={}, batch={}",
                     hessian_scalar[i][j],
                     hessian_batch[i][j]

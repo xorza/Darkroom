@@ -107,7 +107,7 @@ fn test_refine_centroid_adaptive_sigma_small_fwhm() {
 
     let pixels = SyntheticStar::new(true_pos.as_vec2(), 0.8, StarProfile::Gaussian { sigma })
         .stamp(Size2us::new(width, height), 0.1);
-    let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
+    let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
 
     // Use small expected FWHM
     let result = refine_centroid(
@@ -140,7 +140,7 @@ fn test_refine_centroid_adaptive_sigma_large_fwhm() {
 
     let pixels = SyntheticStar::new(true_pos.as_vec2(), 0.8, StarProfile::Gaussian { sigma })
         .stamp(Size2us::new(width, height), 0.1);
-    let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
+    let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
 
     // Use large expected FWHM
     let result = refine_centroid(
@@ -281,7 +281,7 @@ fn test_local_annulus_background_uniform() {
     }
     let pixels = Buffer2::new(width, height, pixels);
 
-    let bg = estimate_background(
+    let bg = background_map::estimate(
         &pixels,
         &BackgroundConfig {
             tile_size: 32,
@@ -325,7 +325,7 @@ fn test_local_annulus_vs_global_map() {
     // Create star on uniform background
     let pixels = SyntheticStar::new(Vec2::splat(64.0), 0.8, StarProfile::Gaussian { sigma: 2.5 })
         .stamp(Size2us::new(width, height), 0.1);
-    let bg = estimate_background(
+    let bg = background_map::estimate(
         &pixels,
         &BackgroundConfig {
             tile_size: 32,
@@ -396,7 +396,7 @@ fn test_local_annulus_near_edge_fallback() {
     let pos = DVec2::new(20.0, 32.0);
     let pixels = SyntheticStar::new(pos.as_vec2(), 0.8, StarProfile::Gaussian { sigma: 2.0 })
         .stamp(Size2us::new(width, height), 0.1);
-    let bg = estimate_background(
+    let bg = background_map::estimate(
         &pixels,
         &BackgroundConfig {
             tile_size: 32,

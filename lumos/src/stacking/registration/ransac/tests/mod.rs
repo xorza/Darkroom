@@ -18,10 +18,6 @@ fn estimator_with_max_sigma(max_sigma: f64, config: RansacConfig) -> RansacEstim
     RansacEstimator::new(config, max_sigma)
 }
 
-fn approx_eq(a: f64, b: f64, eps: f64) -> bool {
-    (a - b).abs() < eps
-}
-
 /// Create PointMatch objects from paired point arrays with uniform confidence.
 fn make_matches(n: usize) -> Vec<PointMatch> {
     (0..n)

@@ -7,10 +7,11 @@ use glam::Vec2;
 
 use crate::stacking::star_detection::config::background_config::BackgroundConfig;
 use crate::stacking::star_detection::tests::Scenario;
+use crate::testing::init_tracing;
+use crate::testing::synthetic::background_map;
 use crate::testing::synthetic::backgrounds::NebulaConfig;
 use crate::testing::synthetic::scene::BackgroundField;
 use crate::testing::visual::save_grayscale;
-use crate::testing::{estimate_background, init_tracing};
 use common::internals::test_output_path;
 use imaginarium::Buffer2;
 
@@ -38,7 +39,7 @@ fn test_background_uniform() {
     .clone();
 
     // Estimate background
-    let background = estimate_background(
+    let background = background_map::estimate(
         &pixels,
         &BackgroundConfig {
             tile_size: TILE_SIZE,
@@ -122,7 +123,7 @@ fn test_background_gradient() {
     .to_vec();
 
     // Estimate background
-    let background = estimate_background(
+    let background = background_map::estimate(
         &Buffer2::new(width, height, pixels.clone()),
         &BackgroundConfig {
             tile_size: TILE_SIZE,
@@ -204,7 +205,7 @@ fn test_background_vignette() {
     .to_vec();
 
     // Estimate background
-    let background = estimate_background(
+    let background = background_map::estimate(
         &Buffer2::new(width, height, pixels.clone()),
         &BackgroundConfig {
             tile_size: TILE_SIZE,
@@ -297,7 +298,7 @@ fn test_background_nebula() {
     .to_vec();
 
     // Estimate background
-    let background = estimate_background(
+    let background = background_map::estimate(
         &Buffer2::new(width, height, pixels.clone()),
         &BackgroundConfig {
             tile_size: TILE_SIZE,

@@ -3,21 +3,21 @@ use crate::stacking::drizzle::tests::*;
 #[test]
 fn test_drizzle_config_default() {
     let config = DrizzleConfig::default();
-    assert!((config.scale - 2.0).abs() < f32::EPSILON);
-    assert!((config.pixfrac - 0.8).abs() < f32::EPSILON);
+    assert_eq!(config.scale, 2.0);
+    assert_eq!(config.pixfrac, 0.8);
     assert_eq!(config.kernel, DrizzleKernel::Turbo);
 }
 
 #[test]
 fn test_drizzle_config_presets() {
     let x1_5 = DrizzleConfig::x1_5();
-    assert!((x1_5.scale - 1.5).abs() < f32::EPSILON);
+    assert_eq!(x1_5.scale, 1.5);
 
     let x2 = DrizzleConfig::x2();
-    assert!((x2.scale - 2.0).abs() < f32::EPSILON);
+    assert_eq!(x2.scale, 2.0);
 
     let x3 = DrizzleConfig::x3();
-    assert!((x3.scale - 3.0).abs() < f32::EPSILON);
+    assert_eq!(x3.scale, 3.0);
 }
 
 #[test]
@@ -27,9 +27,9 @@ fn test_drizzle_config_builder() {
         .with_kernel(DrizzleKernel::Gaussian)
         .with_min_coverage(0.2);
 
-    assert!((config.pixfrac - 0.5).abs() < f32::EPSILON);
+    assert_eq!(config.pixfrac, 0.5);
     assert_eq!(config.kernel, DrizzleKernel::Gaussian);
-    assert!((config.min_coverage - 0.2).abs() < f32::EPSILON);
+    assert_eq!(config.min_coverage, 0.2);
     assert_eq!(config.validate(), Ok(()));
 }
 

@@ -18,7 +18,7 @@ use crate::stacking::star_detection::config::measurement_config::{
     CentroidMethod, LocalBackgroundMethod, MeasurementConfig,
 };
 use crate::stacking::star_detection::detector::stages::detect::internals::detect_stars_test;
-use crate::testing::estimate_background;
+use crate::testing::synthetic::background_map;
 use crate::testing::synthetic::fixtures::star_field;
 use crate::testing::synthetic::star_profiles::{StarProfile, SyntheticStar};
 use imaginarium::Buffer2;
@@ -34,7 +34,7 @@ fn bench_measure_star_single(b: ::quickbench::Bencher) {
         StarProfile::Gaussian { sigma: 2.5 },
     )
     .stamp(Size2us::new(width, height), 0.1);
-    let bg = estimate_background(&pixels, &BackgroundConfig::default());
+    let bg = background_map::estimate(&pixels, &BackgroundConfig::default());
     let candidates = detect_stars_test(&pixels, &bg, &DetectionConfig::default());
     let region = candidates.first().expect("Should detect star");
     let config = MeasurementConfig {
@@ -65,7 +65,7 @@ fn bench_measure_star_gaussian_fit(b: ::quickbench::Bencher) {
         StarProfile::Gaussian { sigma: 2.5 },
     )
     .stamp(Size2us::new(width, height), 0.1);
-    let bg = estimate_background(&pixels, &BackgroundConfig::default());
+    let bg = background_map::estimate(&pixels, &BackgroundConfig::default());
     let candidates = detect_stars_test(&pixels, &bg, &DetectionConfig::default());
     let region = candidates.first().expect("Should detect star");
     let config = MeasurementConfig {
@@ -96,7 +96,7 @@ fn bench_measure_star_moffat_fit(b: ::quickbench::Bencher) {
         StarProfile::Gaussian { sigma: 2.5 },
     )
     .stamp(Size2us::new(width, height), 0.1);
-    let bg = estimate_background(&pixels, &BackgroundConfig::default());
+    let bg = background_map::estimate(&pixels, &BackgroundConfig::default());
     let candidates = detect_stars_test(&pixels, &bg, &DetectionConfig::default());
     let region = candidates.first().expect("Should detect star");
     let config = MeasurementConfig {
@@ -123,7 +123,7 @@ fn bench_measure_star_local_annulus(b: ::quickbench::Bencher) {
     let height = 128;
     let pixels = SyntheticStar::new(Vec2::splat(64.0), 0.8, StarProfile::Gaussian { sigma: 2.5 })
         .stamp(Size2us::new(width, height), 0.1);
-    let bg = estimate_background(&pixels, &BackgroundConfig::default());
+    let bg = background_map::estimate(&pixels, &BackgroundConfig::default());
     let candidates = detect_stars_test(&pixels, &bg, &DetectionConfig::default());
     let region = candidates.first().expect("Should detect star");
     let config = MeasurementConfig {
@@ -151,7 +151,7 @@ fn bench_measure_star_batch_100(b: ::quickbench::Bencher) {
         .image
         .channel(0)
         .clone();
-    let bg = estimate_background(&pixels, &BackgroundConfig::default());
+    let bg = background_map::estimate(&pixels, &BackgroundConfig::default());
     let candidates = detect_stars_test(&pixels, &bg, &DetectionConfig::default());
     let regions: Vec<_> = candidates.iter().collect();
     let config = MeasurementConfig {
@@ -176,7 +176,7 @@ fn bench_measure_star_batch_6k_10000(b: ::quickbench::Bencher) {
         .image
         .channel(0)
         .clone();
-    let bg = estimate_background(&pixels, &BackgroundConfig::default());
+    let bg = background_map::estimate(&pixels, &BackgroundConfig::default());
     let candidates = detect_stars_test(&pixels, &bg, &DetectionConfig::default());
     let regions: Vec<_> = candidates.iter().collect();
 
@@ -231,7 +231,7 @@ fn bench_refine_centroid_single(b: ::quickbench::Bencher) {
         StarProfile::Gaussian { sigma: 2.5 },
     )
     .stamp(Size2us::new(width, height), 0.1);
-    let bg = estimate_background(&pixels, &BackgroundConfig::default());
+    let bg = background_map::estimate(&pixels, &BackgroundConfig::default());
     let stamp_radius = 7; // typical for FWHM ~4
     let expected_fwhm = 4.0;
 
@@ -257,7 +257,7 @@ fn bench_refine_centroid_batch_1000(b: ::quickbench::Bencher) {
         StarProfile::Gaussian { sigma: 2.5 },
     )
     .stamp(Size2us::new(width, height), 0.1);
-    let bg = estimate_background(&pixels, &BackgroundConfig::default());
+    let bg = background_map::estimate(&pixels, &BackgroundConfig::default());
     let stamp_radius = 7;
     let expected_fwhm = 4.0;
 

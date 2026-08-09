@@ -15,7 +15,7 @@ fn test_centroid_accuracy() {
     )
     .stamp(Size2us::new(width, height), 0.1);
 
-    let bg = estimate_background(
+    let bg = background_map::estimate(
         &pixels,
         &BackgroundConfig {
             tile_size: 32,
@@ -89,8 +89,8 @@ fn subpixel_result_is_independent_of_distance_from_the_origin() {
     let far_pixels = Buffer2::new(far.width, far.height, far_data);
 
     let radius = compute_stamp_radius(TEST_EXPECTED_FWHM);
-    let bg_near = make_uniform_background(near, 0.1, 0.01);
-    let bg_far = make_uniform_background(far, 0.1, 0.01);
+    let bg_near = background_map::uniform(near, 0.1, 0.01);
+    let bg_far = background_map::uniform(far, 0.1, 0.01);
 
     let near_pos = refine_centroid(&near_pixels, &bg_near, true_pos, radius, TEST_EXPECTED_FWHM)
         .expect("near refine should succeed");
@@ -131,7 +131,7 @@ fn test_fwhm_estimation() {
     let pixels = SyntheticStar::new(Vec2::splat(64.0), 0.8, StarProfile::Gaussian { sigma })
         .stamp(Size2us::new(width, height), 0.1);
 
-    let bg = estimate_background(
+    let bg = background_map::estimate(
         &pixels,
         &BackgroundConfig {
             tile_size: 32,
@@ -179,7 +179,7 @@ fn test_circular_star_eccentricity() {
     let pixels = SyntheticStar::new(Vec2::splat(32.0), 0.8, StarProfile::Gaussian { sigma: 2.5 })
         .stamp(Size2us::new(width, height), 0.1);
 
-    let bg = estimate_background(
+    let bg = background_map::estimate(
         &pixels,
         &BackgroundConfig {
             tile_size: 32,
@@ -215,7 +215,7 @@ fn test_snr_and_flux_values() {
     let pixels = SyntheticStar::new(Vec2::splat(32.0), 0.8, StarProfile::Gaussian { sigma: 2.5 })
         .stamp(Size2us::new(width, height), 0.1);
 
-    let bg = estimate_background(
+    let bg = background_map::estimate(
         &pixels,
         &BackgroundConfig {
             tile_size: 32,

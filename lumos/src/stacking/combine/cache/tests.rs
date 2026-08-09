@@ -347,7 +347,7 @@ fn test_process_chunked_median() {
     assert_eq!(result.pixels.channel_count(), 1);
     assert_eq!(result.pixels.channel(0).len(), 16);
     for &pixel in result.pixels.channel(0).pixels() {
-        assert!((pixel - 2.0).abs() < f32::EPSILON);
+        assert_eq!(pixel, 2.0);
     }
 }
 
@@ -403,7 +403,7 @@ fn test_process_chunked_with_weights() {
     });
 
     for &pixel in result.pixels.channel(0).pixels() {
-        assert!((pixel - 17.5).abs() < f32::EPSILON);
+        assert_eq!(pixel, 17.5);
     }
 }
 
@@ -651,12 +651,12 @@ fn test_compute_channel_stats_grayscale() {
 
     assert_eq!(stats.len(), 3); // 3 frames
     assert_eq!(stats[0].channels.len(), 1);
-    assert!((stats[0].channels[0].median - 5.0).abs() < f32::EPSILON);
-    assert!((stats[0].channels[0].mad - 0.0).abs() < f32::EPSILON);
-    assert!((stats[1].channels[0].median - 5.0).abs() < f32::EPSILON);
-    assert!((stats[1].channels[0].mad - 2.0).abs() < f32::EPSILON);
-    assert!((stats[2].channels[0].median - 20.0).abs() < f32::EPSILON);
-    assert!((stats[2].channels[0].mad - 10.0).abs() < f32::EPSILON);
+    assert_eq!(stats[0].channels[0].median, 5.0);
+    assert_eq!(stats[0].channels[0].mad, 0.0);
+    assert_eq!(stats[1].channels[0].median, 5.0);
+    assert_eq!(stats[1].channels[0].mad, 2.0);
+    assert_eq!(stats[2].channels[0].median, 20.0);
+    assert_eq!(stats[2].channels[0].mad, 10.0);
 }
 
 #[test]

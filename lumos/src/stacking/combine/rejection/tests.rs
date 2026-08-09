@@ -16,52 +16,52 @@ use crate::stacking::combine::rejection::*;
 #[test]
 fn test_sigma_clip_config_default() {
     let config = SigmaClipConfig::default();
-    assert!((config.sigma_low - 2.5).abs() < f32::EPSILON);
-    assert!((config.sigma_high - 2.5).abs() < f32::EPSILON);
+    assert_eq!(config.sigma_low, 2.5);
+    assert_eq!(config.sigma_high, 2.5);
     assert_eq!(config.max_iterations, 3);
 }
 
 #[test]
 fn test_sigma_clip_config_new_symmetric() {
     let config = SigmaClipConfig::new(3.0, 5);
-    assert!((config.sigma_low - 3.0).abs() < f32::EPSILON);
-    assert!((config.sigma_high - 3.0).abs() < f32::EPSILON);
+    assert_eq!(config.sigma_low, 3.0);
+    assert_eq!(config.sigma_high, 3.0);
     assert_eq!(config.max_iterations, 5);
 }
 
 #[test]
 fn test_sigma_clip_config_new_asymmetric() {
     let config = SigmaClipConfig::new_asymmetric(2.0, 3.0, 5);
-    assert!((config.sigma_low - 2.0).abs() < f32::EPSILON);
-    assert!((config.sigma_high - 3.0).abs() < f32::EPSILON);
+    assert_eq!(config.sigma_low, 2.0);
+    assert_eq!(config.sigma_high, 3.0);
     assert_eq!(config.max_iterations, 5);
 }
 
 #[test]
 fn test_winsorized_config_default() {
     let config = WinsorizedClipConfig::default();
-    assert!((config.sigma_low - 2.5).abs() < f32::EPSILON);
-    assert!((config.sigma_high - 2.5).abs() < f32::EPSILON);
+    assert_eq!(config.sigma_low, 2.5);
+    assert_eq!(config.sigma_high, 2.5);
 }
 
 #[test]
 fn test_linear_fit_config_default() {
     let config = LinearFitClipConfig::default();
-    assert!((config.sigma_low - 3.0).abs() < f32::EPSILON);
-    assert!((config.sigma_high - 3.0).abs() < f32::EPSILON);
+    assert_eq!(config.sigma_low, 3.0);
+    assert_eq!(config.sigma_high, 3.0);
 }
 
 #[test]
 fn test_percentile_config_default() {
     let config = PercentileClipConfig::default();
-    assert!((config.low_percentile - 10.0).abs() < f32::EPSILON);
-    assert!((config.high_percentile - 10.0).abs() < f32::EPSILON);
+    assert_eq!(config.low_percentile, 10.0);
+    assert_eq!(config.high_percentile, 10.0);
 }
 
 #[test]
 fn test_gesd_config_default() {
     let config = GesdConfig::default();
-    assert!((config.alpha - 0.05).abs() < f32::EPSILON);
+    assert_eq!(config.alpha, 0.05);
     assert!(config.max_outliers.is_none());
 
     let automatic_cases = [
@@ -488,7 +488,7 @@ fn test_combine_mean_none() {
     let mean = Rejection::None
         .combine_mean(&mut values, &[1.0; 5], &mut scratch(), true)
         .value;
-    assert!((mean - 3.0).abs() < f32::EPSILON);
+    assert_eq!(mean, 3.0);
 }
 
 #[test]
@@ -680,6 +680,10 @@ fn test_gesd_gaussian_false_positive_rate_matches_alpha() {
     const ALPHA: f32 = 0.05;
     const TRIALS: usize = 4_000;
 
+    // Not `TestRng`: it is an LCG, and Box-Muller over consecutive LCG outputs lays the pairs
+    // on a handful of spirals rather than filling the plane. That distorts the tails, which is
+    // exactly what a GESD outlier test measures — swapping this generator in moves the observed
+    // false-positive rate from 0.050 to 0.076, past the 5-sigma bound below.
     let mut rng = ChaCha8Rng::seed_from_u64(0x947e_4d3a_7c16_b205);
     for sample_count in [15, 25, 50, 100] {
         let config = GesdConfig::new(ALPHA, Some(sample_count / 4));
@@ -1326,7 +1330,7 @@ fn test_no_outliers_possible_clean_data_skips_quickselect() {
     assert_eq!(remaining, 100);
     // All values unchanged
     for &v in &values {
-        assert!((v - 10.0).abs() < f32::EPSILON);
+        assert_eq!(v, 10.0);
     }
 }
 

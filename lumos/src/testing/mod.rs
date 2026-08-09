@@ -11,10 +11,8 @@ use crate::io::image::cfa::{CfaImage, CfaType};
 use crate::io::image::image_metadata::ImageMetadata;
 use crate::io::raw::RAW_EXTENSIONS;
 use crate::math::size2us::Size2us;
-use crate::stacking::star_detection::background::background_estimate::BackgroundEstimate;
-use crate::stacking::star_detection::config::background_config::BackgroundConfig;
-use crate::stacking::star_detection::resources::DetectionResources;
 
+pub(crate) mod assertions;
 pub(crate) mod mem_probe;
 #[cfg(feature = "real-data")]
 mod real_data;
@@ -99,18 +97,6 @@ impl TestRng {
         let u2 = self.next_f32();
         (-2.0 * u1.ln()).sqrt() * (2.0 * PI * u2).cos()
     }
-}
-
-/// Convenience function to estimate background for tests.
-///
-/// Returns a `BackgroundEstimate` with background and noise estimates.
-/// Creates a temporary buffer pool internally.
-pub(crate) fn estimate_background(
-    pixels: &Buffer2<f32>,
-    config: &BackgroundConfig,
-) -> BackgroundEstimate {
-    let mut pool = DetectionResources::new(Size2us::new(pixels.width(), pixels.height()));
-    BackgroundEstimate::estimate(pixels, config, &mut pool)
 }
 
 /// Create a CfaImage from raw pixel data and CFA type.

@@ -1,11 +1,8 @@
 use crate::stacking::registration::transform::*;
+use crate::testing::assertions::assert_close;
 use std::f64::consts::PI;
 
 const EPSILON: f64 = 1e-10;
-
-fn approx_eq(a: f64, b: f64) -> bool {
-    (a - b).abs() < EPSILON
-}
 
 #[test]
 fn test_transform_type_min_points() {
@@ -20,40 +17,40 @@ fn test_transform_type_min_points() {
 fn test_identity_transform() {
     let t = Transform::identity();
     let p = t.apply(DVec2::new(5.0, 7.0));
-    assert!(approx_eq(p.x, 5.0));
-    assert!(approx_eq(p.y, 7.0));
+    assert_close!(p.x, 5.0, EPSILON);
+    assert_close!(p.y, 7.0, EPSILON);
 }
 
 #[test]
 fn test_translation_transform() {
     let t = Transform::translation(DVec2::new(10.0, -5.0));
     let p = t.apply(DVec2::new(3.0, 4.0));
-    assert!(approx_eq(p.x, 13.0));
-    assert!(approx_eq(p.y, -1.0));
+    assert_close!(p.x, 13.0, EPSILON);
+    assert_close!(p.y, -1.0, EPSILON);
 }
 
 #[test]
 fn test_rotation_90_degrees() {
     let t = Transform::euclidean(DVec2::ZERO, PI / 2.0);
     let p = t.apply(DVec2::new(1.0, 0.0));
-    assert!(approx_eq(p.x, 0.0));
-    assert!(approx_eq(p.y, 1.0));
+    assert_close!(p.x, 0.0, EPSILON);
+    assert_close!(p.y, 1.0, EPSILON);
 }
 
 #[test]
 fn test_rotation_180_degrees() {
     let t = Transform::euclidean(DVec2::ZERO, PI);
     let p = t.apply(DVec2::new(1.0, 0.0));
-    assert!(approx_eq(p.x, -1.0));
-    assert!(approx_eq(p.y, 0.0));
+    assert_close!(p.x, -1.0, EPSILON);
+    assert_close!(p.y, 0.0, EPSILON);
 }
 
 #[test]
 fn test_scale_transform() {
     let t = Transform::similarity(DVec2::ZERO, 0.0, 2.0);
     let p = t.apply(DVec2::new(3.0, 4.0));
-    assert!(approx_eq(p.x, 6.0));
-    assert!(approx_eq(p.y, 8.0));
+    assert_close!(p.x, 6.0, EPSILON);
+    assert_close!(p.y, 8.0, EPSILON);
 }
 
 #[test]
@@ -61,8 +58,8 @@ fn test_similarity_with_rotation_and_scale() {
     let t = Transform::similarity(DVec2::new(5.0, 10.0), PI / 2.0, 2.0);
     let p = t.apply(DVec2::new(1.0, 0.0));
     // Rotate 90° then scale 2x: (1,0) -> (0,1) -> (0,2), then translate
-    assert!(approx_eq(p.x, 5.0));
-    assert!(approx_eq(p.y, 12.0));
+    assert_close!(p.x, 5.0, EPSILON);
+    assert_close!(p.y, 12.0, EPSILON);
 }
 
 #[test]
@@ -70,30 +67,30 @@ fn test_affine_transform() {
     // Shear transform
     let t = Transform::affine([1.0, 0.5, 0.0, 0.0, 1.0, 0.0]);
     let p = t.apply(DVec2::new(2.0, 2.0));
-    assert!(approx_eq(p.x, 3.0)); // 2 + 0.5*2
-    assert!(approx_eq(p.y, 2.0));
+    assert_close!(p.x, 3.0, EPSILON); // 2 + 0.5*2
+    assert_close!(p.y, 2.0, EPSILON);
 }
 
 #[test]
 fn test_translation_components() {
     let t = Transform::translation(DVec2::new(7.0, -3.0));
     let tc = t.translation_components();
-    assert!(approx_eq(tc.x, 7.0));
-    assert!(approx_eq(tc.y, -3.0));
+    assert_close!(tc.x, 7.0, EPSILON);
+    assert_close!(tc.y, -3.0, EPSILON);
 }
 
 #[test]
 fn test_rotation_angle() {
     let angle = 0.5;
     let t = Transform::euclidean(DVec2::ZERO, angle);
-    assert!(approx_eq(t.rotation_angle(), angle));
+    assert_close!(t.rotation_angle(), angle, EPSILON);
 }
 
 #[test]
 fn test_scale_factor() {
     let scale = 2.5;
     let t = Transform::similarity(DVec2::ZERO, 0.0, scale);
-    assert!(approx_eq(t.scale_factor(), scale));
+    assert_close!(t.scale_factor(), scale, EPSILON);
 }
 
 #[test]
@@ -119,8 +116,8 @@ fn test_homography_transform() {
     // Simple homography that acts like translation
     let t = Transform::homography([1.0, 0.0, 5.0, 0.0, 1.0, 3.0, 0.0, 0.0]);
     let p = t.apply(DVec2::new(2.0, 4.0));
-    assert!(approx_eq(p.x, 7.0));
-    assert!(approx_eq(p.y, 7.0));
+    assert_close!(p.x, 7.0, EPSILON);
+    assert_close!(p.y, 7.0, EPSILON);
 }
 
 #[test]
@@ -131,7 +128,7 @@ fn test_homography_perspective() {
     // w = 0.001 * 100 + 1 = 1.1
     // x' = 100 / 1.1 ≈ 90.9
     assert!((p.x - 90.909).abs() < 0.01);
-    assert!(approx_eq(p.y, 0.0));
+    assert_close!(p.y, 0.0, EPSILON);
 }
 
 #[test]
@@ -142,8 +139,8 @@ fn test_warp_transform_new() {
     assert!(wt.is_linear());
 
     let p = wt.apply(DVec2::new(1.0, 2.0));
-    assert!(approx_eq(p.x, 11.0));
-    assert!(approx_eq(p.y, 7.0));
+    assert_close!(p.x, 11.0, EPSILON);
+    assert_close!(p.y, 7.0, EPSILON);
 }
 
 #[test]
@@ -229,8 +226,8 @@ fn test_warp_transform_apply_no_sip_matches_transform() {
     ] {
         let from_wt = wt.apply(p);
         let from_t = t.apply(p);
-        assert!(approx_eq(from_wt.x, from_t.x));
-        assert!(approx_eq(from_wt.y, from_t.y));
+        assert_close!(from_wt.x, from_t.x, EPSILON);
+        assert_close!(from_wt.y, from_t.y, EPSILON);
     }
 }
 
@@ -264,8 +261,8 @@ fn test_default_is_identity() {
     let t = Transform::default();
     let p = t.apply(DVec2::new(42.0, -17.0));
     // Identity: output == input
-    assert!(approx_eq(p.x, 42.0));
-    assert!(approx_eq(p.y, -17.0));
+    assert_close!(p.x, 42.0, EPSILON);
+    assert_close!(p.y, -17.0, EPSILON);
     assert_eq!(t.transform_type(), TransformType::Translation);
 }
 
@@ -276,8 +273,8 @@ fn test_scale_constructor() {
     // (3.0, 4.0) -> (3.0*2.0, 4.0*0.5) = (6.0, 2.0)
     let t = Transform::scale(DVec2::new(2.0, 0.5));
     let p = t.apply(DVec2::new(3.0, 4.0));
-    assert!(approx_eq(p.x, 6.0));
-    assert!(approx_eq(p.y, 2.0));
+    assert_close!(p.x, 6.0, EPSILON);
+    assert_close!(p.y, 2.0, EPSILON);
     assert_eq!(t.transform_type(), TransformType::Affine);
 }
 
@@ -367,8 +364,8 @@ fn test_compose_translation_translation() {
     let composed = t1.compose(&t2);
     let p = composed.apply(DVec2::new(0.0, 0.0));
     // (0,0) -> T2 -> (5,-2) -> T1 -> (5+3, -2+4) = (8, 2)
-    assert!(approx_eq(p.x, 8.0));
-    assert!(approx_eq(p.y, 2.0));
+    assert_close!(p.x, 8.0, EPSILON);
+    assert_close!(p.y, 2.0, EPSILON);
 }
 
 #[test]
@@ -384,8 +381,8 @@ fn test_compose_takes_more_complex_type() {
     // T2: (2,2) -> (2 + 0.5*2, 2) = (3, 2)
     // T1: (3,2) -> (3+1, 2+2) = (4, 4)
     let p = composed.apply(DVec2::new(2.0, 2.0));
-    assert!(approx_eq(p.x, 4.0));
-    assert!(approx_eq(p.y, 4.0));
+    assert_close!(p.x, 4.0, EPSILON);
+    assert_close!(p.y, 4.0, EPSILON);
 }
 
 #[test]
@@ -406,7 +403,7 @@ fn test_compose_rotation_then_translation() {
 fn test_deviation_from_identity() {
     // Identity has zero deviation
     let id = Transform::identity();
-    assert!(approx_eq(id.deviation_from_identity(), 0.0));
+    assert_close!(id.deviation_from_identity(), 0.0, EPSILON);
 
     // Translation has non-zero deviation
     let t = Transform::translation(DVec2::new(3.0, 4.0));
@@ -472,8 +469,8 @@ fn test_from_matrix() {
     let t = Transform::from_matrix(m, TransformType::Affine);
     // (1, 1) -> (2*1 + 0*1 + 5, 0*1 + 3*1 + (-1)) = (7, 2)
     let p = t.apply(DVec2::new(1.0, 1.0));
-    assert!(approx_eq(p.x, 7.0));
-    assert!(approx_eq(p.y, 2.0));
+    assert_close!(p.x, 7.0, EPSILON);
+    assert_close!(p.y, 2.0, EPSILON);
     assert_eq!(t.transform_type(), TransformType::Affine);
     assert_eq!(t.matrix(), m.as_array());
 }
