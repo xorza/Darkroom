@@ -267,11 +267,10 @@ fn local_annulus_background_uniform() {
     let background_value = 0.2f32;
 
     // Create uniform background with a star
-    let mut pixels = vec![background_value; width * height];
+    let mut pixels = Buffer2::new_filled(width, height, background_value);
     // Add star at center
     SyntheticStar::new(Vec2::splat(64.0), 0.8, StarProfile::Gaussian { sigma: 2.5 })
-        .add_to(&mut pixels, width);
-    let pixels = Buffer2::new(width, height, pixels);
+        .add_to(&mut pixels);
 
     let bg = background_map::estimate(
         &pixels,

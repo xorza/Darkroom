@@ -14,17 +14,17 @@ use crate::testing::synthetic::star_profiles::{StarProfile, SyntheticStar};
 
 /// Render `stars` as `(x, y, amplitude)` on a 0.1 sky with light Gaussian noise (σ 0.01).
 fn field(size: Size2us, sigma: f32, stars: &[(f32, f32, f32)], seed: u64) -> Buffer2<f32> {
-    let mut pixels = vec![0.1f32; size.pixel_count()];
+    let mut pixels = Buffer2::new_filled(size.width, size.height, 0.1f32);
     for &(x, y, amp) in stars {
         SyntheticStar::new(glam::Vec2::new(x, y), amp, StarProfile::Gaussian { sigma })
-            .add_to(&mut pixels, size.width);
+            .add_to(&mut pixels);
     }
     let mut rng = TestRng::new(seed);
-    for p in &mut pixels {
+    for p in pixels.iter_mut() {
         *p += rng.next_gaussian_f32() * 0.01;
         *p = p.clamp(0.0, 1.0);
     }
-    Buffer2::new(size.width, size.height, pixels)
+    pixels
 }
 
 fn deblend_config(n_thresholds: usize, min_contrast: f32) -> DetectionConfig {

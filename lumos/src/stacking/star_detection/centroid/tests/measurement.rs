@@ -791,10 +791,9 @@ fn metrics_with_high_background() {
     // One star on a bright sky. `add_to` truncates at the profile's own radius, which is what the
     // hand-rolled `if value > 0.001` guard did — and it matters, because the untruncated tail
     // lifts the tiled background median enough to change what the detector sees.
-    let mut pixels = vec![0.5f32; width * height];
+    let mut pixels = Buffer2::new_filled(width, height, 0.5f32);
     SyntheticStar::new(Vec2::splat(32.0), 0.4, StarProfile::Gaussian { sigma: 2.5 })
-        .add_to(&mut pixels, width);
-    let pixels = Buffer2::new(width, height, pixels);
+        .add_to(&mut pixels);
 
     let bg = background_map::uniform(Size2us::new(width, height), 0.5, 0.02);
     let metrics = compute_star(
@@ -984,17 +983,16 @@ fn measure_star_multiple_stars_independent() {
     let star2_cy = 90.0f32;
 
     // Start with uniform background
-    let mut pixels = vec![0.1f32; width * height];
+    let mut pixels = Buffer2::new_filled(width, height, 0.1f32);
 
     for (centre, amplitude) in [
         (Vec2::new(star1_cx, star1_cy), 0.8),
         (Vec2::new(star2_cx, star2_cy), 0.6),
     ] {
         SyntheticStar::new(centre, amplitude, StarProfile::Gaussian { sigma: 2.5 })
-            .add_to(&mut pixels, width);
+            .add_to(&mut pixels);
     }
 
-    let pixels = Buffer2::new(width, height, pixels);
     let bg = background_map::estimate(
         &pixels,
         &BackgroundConfig {
@@ -1097,7 +1095,7 @@ fn elongated_x_star_roundness() {
     // profile's far tail rather than on anything to do with roundness.
     let width = 128;
     let height = 128;
-    let mut pixels = vec![0.1f32; width * height];
+    let mut pixels = Buffer2::new_filled(width, height, 0.1f32);
 
     // Create elongated Gaussian (sigma_x > sigma_y)
     let cx = 64.0;
@@ -1113,10 +1111,9 @@ fn elongated_x_star_roundness() {
             angle: 0.0,
         },
     )
-    .add_to(&mut pixels, width);
+    .add_to(&mut pixels);
     patterns::add_gaussian_noise(&mut pixels, 0.002, 4242);
 
-    let pixels = Buffer2::new(width, height, pixels);
     let bg = background_map::estimate(
         &pixels,
         &BackgroundConfig {

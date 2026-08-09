@@ -174,8 +174,7 @@ fn make_blended_stars(
 ) -> Buffer2<f32> {
     let mut pixels =
         SyntheticStar::new(pos1, amp1, StarProfile::Gaussian { sigma }).stamp(size, 0.1);
-    SyntheticStar::new(pos2, amp2, StarProfile::Gaussian { sigma })
-        .add_exact(pixels.pixels_mut(), size.width);
+    SyntheticStar::new(pos2, amp2, StarProfile::Gaussian { sigma }).add_exact(&mut pixels);
     pixels
 }
 
@@ -275,7 +274,7 @@ fn gaussian_fit_with_contamination() {
 
     // Faint contaminating star at edge of stamp
     SyntheticStar::new(Vec2::new(22.0, 15.0), 0.2, StarProfile::Gaussian { sigma })
-        .add_exact(pixels.pixels_mut(), width);
+        .add_exact(&mut pixels);
 
     let config = GaussianFitConfig::default();
     let result = GaussianFit::new(
@@ -362,10 +361,7 @@ fn make_rotated_elliptical_star(
     angle_rad: f32,
     amplitude: f32,
 ) -> Buffer2<f32> {
-    let mut pixels = vec![0.1f32; size.pixel_count()];
-
-    let cos_a = angle_rad.cos();
-    let sin_a = angle_rad.sin();
+    let mut pixels = Buffer2::new_filled(size.width, size.height, 0.1f32);
 
     SyntheticStar::new(
         pos,
@@ -376,9 +372,9 @@ fn make_rotated_elliptical_star(
             angle: angle_rad,
         },
     )
-    .add_to(&mut pixels, size.width);
+    .add_to(&mut pixels);
 
-    Buffer2::new(size.width, size.height, pixels)
+    pixels
 }
 
 /// Test centroiding on a 45-degree rotated ellipse.

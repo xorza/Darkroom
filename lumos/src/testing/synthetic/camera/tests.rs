@@ -1,10 +1,10 @@
 use crate::testing::synthetic::camera::*;
 
 fn render_one(psf: PsfModel, size: usize, flux: f32, seeing: f32) -> Vec<f32> {
-    let mut pixels = vec![0.0f32; size * size];
+    let mut pixels = Buffer2::new_filled(size, size, 0.0f32);
     let c = size as f32 / 2.0;
-    psf.render(&mut pixels, size, c, c, flux, seeing);
-    pixels
+    psf.render(&mut pixels, c, c, flux, seeing);
+    pixels.pixels().to_vec()
 }
 
 #[test]

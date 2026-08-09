@@ -27,7 +27,7 @@ fn field(
     noise: f32,
     seed: u64,
 ) -> Buffer2<f32> {
-    let mut pixels = vec![0.1f32; size.pixel_count()];
+    let mut pixels = Buffer2::new_filled(size.width, size.height, 0.1f32);
     for &(x, y, brightness) in stars {
         let amplitude = brightness / (2.0 * PI * sigma * sigma);
         SyntheticStar::new(
@@ -35,14 +35,14 @@ fn field(
             amplitude,
             StarProfile::Gaussian { sigma },
         )
-        .add_to(&mut pixels, size.width);
+        .add_to(&mut pixels);
     }
     let mut rng = TestRng::new(seed);
-    for p in &mut pixels {
+    for p in pixels.iter_mut() {
         *p += rng.next_gaussian_f32() * noise;
         *p = p.clamp(0.0, 1.0);
     }
-    Buffer2::new(size.width, size.height, pixels)
+    pixels
 }
 
 /// Build a 11×11 candidate region centred on the pixel nearest `(x, y)`.

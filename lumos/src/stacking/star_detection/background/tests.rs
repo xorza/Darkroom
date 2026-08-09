@@ -463,7 +463,7 @@ fn iterative_background_with_bright_stars() {
     // Background with bright stars should be better estimated with iterative refinement
     let width = 128;
     let height = 128;
-    let mut data = vec![0.1; width * height];
+    let mut data = Buffer2::new_filled(width, height, 0.1f32);
 
     // Add multiple bright Gaussian stars
     let stars: [(i32, i32); 5] = [(32, 32), (64, 64), (96, 96), (32, 96), (96, 32)];
@@ -475,10 +475,10 @@ fn iterative_background_with_bright_stars() {
                 sigma: std::f32::consts::SQRT_2,
             },
         )
-        .add_to(&mut data, width);
+        .add_to(&mut data);
     }
 
-    let pixels = Buffer2::new(width, height, data);
+    let pixels = data;
 
     // Non-iterative estimate
     let bg_simple = background_map::estimate(
@@ -523,15 +523,19 @@ fn iterative_background_preserves_gradient() {
     // Background gradient should be preserved with iterative estimation
     let width = 64;
     let height = 64;
-    let mut data: Vec<f32> = (0..height)
-        .flat_map(|y| (0..width).map(move |x| (x + y) as f32 / 128.0))
-        .collect();
+    let mut data = Buffer2::new(
+        width,
+        height,
+        (0..height)
+            .flat_map(|y| (0..width).map(move |x| (x + y) as f32 / 128.0))
+            .collect::<Vec<f32>>(),
+    );
 
     // Add a bright star
     SyntheticStar::new(Vec2::splat(32.0), 0.5, StarProfile::Gaussian { sigma: 1.0 })
-        .add_to(&mut data, width);
+        .add_to(&mut data);
 
-    let pixels = Buffer2::new(width, height, data);
+    let pixels = data;
     let config = BackgroundConfig {
         tile_size: 16,
         ..Default::default()
@@ -554,13 +558,13 @@ fn iterative_background_no_dilation() {
     // Test iterative refinement with mask_dilation = 0
     let width = 128;
     let height = 128;
-    let mut data = vec![0.2; width * height];
+    let mut data = Buffer2::new_filled(width, height, 0.2f32);
 
     // Add a bright star
     SyntheticStar::new(Vec2::splat(64.0), 0.7, StarProfile::Gaussian { sigma: 1.0 })
-        .add_to(&mut data, width);
+        .add_to(&mut data);
 
-    let pixels = Buffer2::new(width, height, data);
+    let pixels = data;
     let config = BackgroundConfig {
         refinement: BackgroundRefinement::Iterative { iterations: 1 },
         mask_dilation: 0, // No dilation
