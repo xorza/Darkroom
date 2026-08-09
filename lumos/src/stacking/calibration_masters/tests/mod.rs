@@ -282,7 +282,7 @@ fn cold_detection_uses_subtracted_unfloored_flat_response() {
         let defects = masters.defect_map.as_ref().unwrap();
         assert_eq!(defects.cold_indices, [dead], "{kind:?}");
 
-        let prepared = masters.flat.as_ref().unwrap();
+        let prepared = masters.masters.flat.as_ref().unwrap();
         assert_eq!(prepared.data[dead], 0.1, "{kind:?}");
         let expected_normal = 49.0 / 48.0;
         assert!(
@@ -831,8 +831,9 @@ fn prepared_master_fits_bundle_round_trips_flat_and_calibration_bit_exactly() {
         CancelToken::never(),
     )
     .unwrap();
-    masters.dark.as_mut().unwrap().quantization_sigma = Some(0.000_02);
+    masters.masters.dark.as_mut().unwrap().quantization_sigma = Some(0.000_02);
     let prepared_bits = masters
+        .masters
         .flat
         .as_ref()
         .unwrap()
@@ -920,6 +921,7 @@ fn prepared_master_fits_bundle_round_trips_flat_and_calibration_bit_exactly() {
 
     assert_eq!(
         loaded
+            .masters
             .flat
             .as_ref()
             .unwrap()
@@ -930,11 +932,17 @@ fn prepared_master_fits_bundle_round_trips_flat_and_calibration_bit_exactly() {
         prepared_bits
     );
     assert_eq!(
-        loaded.flat.as_ref().unwrap().metadata.camera_white_balance,
+        loaded
+            .masters
+            .flat
+            .as_ref()
+            .unwrap()
+            .metadata
+            .camera_white_balance,
         Some([2.0, 1.0, 1.5, 1.0])
     );
     assert_eq!(
-        loaded.dark.as_ref().unwrap().quantization_sigma,
+        loaded.masters.dark.as_ref().unwrap().quantization_sigma,
         Some(0.000_02)
     );
     assert_eq!(
@@ -991,10 +999,12 @@ fn ram_bytes_sums_present_frames_and_defects() {
 
     // The bundle sums present roles + the defect map; absent roles add nothing.
     let masters = CalibrationMasters {
-        dark: Some(dark),
-        flat: Some(constant_cfa(Size2us::new(4, 4), 1.0, CfaType::Mono)),
-        bias: None,
-        flat_dark: None,
+        masters: CalibrationSet {
+            dark: Some(dark),
+            flat: Some(constant_cfa(Size2us::new(4, 4), 1.0, CfaType::Mono)),
+            bias: None,
+            flat_dark: None,
+        },
         defect_map: Some(defects),
     };
     // 320 (dark: 80·4) + 64 (flat: 16·4) + 24 (defects: 3·8) = 408 bytes.

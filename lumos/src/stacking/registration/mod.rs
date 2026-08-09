@@ -56,6 +56,7 @@ mod real_data_tests;
 #[cfg(test)]
 mod tests;
 
+use crate::stacking::registration::triangle::voting::MatchIndices;
 use config::Config;
 use distortion::sip::SipPolynomial;
 use result::{
@@ -302,10 +303,7 @@ fn estimate_and_refine(
     let inlier_matches: Vec<_> = ransac_result
         .inliers
         .iter()
-        .map(|&i| MatchIndices {
-            reference: matches[i].ref_idx,
-            target: matches[i].target_idx,
-        })
+        .map(|&i| matches[i].indices())
         .collect();
 
     // Effective threshold for match recovery: ~3 * max_sigma (χ² quantile)
@@ -357,11 +355,7 @@ fn estimate_and_refine(
                 None => ref_pos,
             };
             let p = transform.apply(corrected_r);
-            StarMatch {
-                reference: indices.reference,
-                target: indices.target,
-                residual: (p - target_pos).length(),
-            }
+            StarMatch::measured(*indices, (p - target_pos).length())
         })
         .collect();
 
@@ -380,12 +374,6 @@ fn estimate_and_refine(
 /// Maximum iterations for iterative match recovery.
 /// Convergence is typically reached in 2-3 passes; diminishing returns after that.
 const RECOVERY_MAX_ITERATIONS: usize = 5;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct MatchIndices {
-    reference: usize,
-    target: usize,
-}
 
 #[derive(Debug)]
 struct RecoveredMatches {

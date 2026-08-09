@@ -51,6 +51,29 @@ pub struct CalibrationSet<T> {
     pub flat_dark: T,
 }
 
+impl<T> CalibrationSet<T> {
+    /// The value for `component`, or `None` for [`CalibrationComponent::Defects`], which is not
+    /// one of the four master roles this set holds.
+    pub fn get(&self, component: CalibrationComponent) -> Option<&T> {
+        match component {
+            CalibrationComponent::Dark => Some(&self.dark),
+            CalibrationComponent::Flat => Some(&self.flat),
+            CalibrationComponent::Bias => Some(&self.bias),
+            CalibrationComponent::FlatDark => Some(&self.flat_dark),
+            CalibrationComponent::Defects => None,
+        }
+    }
+
+    /// The four roles in calibration order, each with the component that names it. The single
+    /// place that decides what "all the roles" means — a caller that iterates cannot miss one,
+    /// and adding a fifth is a compile error here rather than a silent omission elsewhere.
+    pub fn iter(&self) -> impl Iterator<Item = (CalibrationComponent, &T)> {
+        CalibrationComponent::MASTER_ROLES
+            .into_iter()
+            .filter_map(|component| self.get(component).map(|value| (component, value)))
+    }
+}
+
 /// A component present in a [`CalibrationMasters`] bundle.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CalibrationComponent {
@@ -64,6 +87,12 @@ pub enum CalibrationComponent {
     FlatDark,
     /// Defect map derived from a dark, flat, or both.
     Defects,
+}
+
+impl CalibrationComponent {
+    /// The four master-frame roles, in calibration order. [`Self::Defects`] is derived rather
+    /// than loaded, so it is not one of them.
+    pub const MASTER_ROLES: [Self; 4] = [Self::Dark, Self::Flat, Self::Bias, Self::FlatDark];
 }
 
 impl std::fmt::Display for CalibrationComponent {
@@ -116,10 +145,7 @@ pub struct DefectSummary {
 /// data before demosaicing so defect correction can use same-color neighbors.
 #[derive(Debug, Default)]
 pub struct CalibrationMasters {
-    dark: Option<CfaImage>,
-    flat: Option<CfaImage>,
-    bias: Option<CfaImage>,
-    flat_dark: Option<CfaImage>,
+    masters: CalibrationSet<Option<CfaImage>>,
     defect_map: Option<DefectMap>,
 }
 
@@ -206,19 +232,15 @@ pub fn stack_cfa_master(
 impl CalibrationMasters {
     /// Components present in this bundle, in calibration order.
     pub fn components(&self) -> impl Iterator<Item = CalibrationComponent> {
-        [
-            self.dark.as_ref().map(|_| CalibrationComponent::Dark),
-            self.flat.as_ref().map(|_| CalibrationComponent::Flat),
-            self.bias.as_ref().map(|_| CalibrationComponent::Bias),
-            self.flat_dark
-                .as_ref()
-                .map(|_| CalibrationComponent::FlatDark),
-            self.defect_map
-                .as_ref()
-                .map(|_| CalibrationComponent::Defects),
-        ]
-        .into_iter()
-        .flatten()
+        self.masters
+            .iter()
+            .filter(|(_, master)| master.is_some())
+            .map(|(component, _)| component)
+            .chain(
+                self.defect_map
+                    .as_ref()
+                    .map(|_| CalibrationComponent::Defects),
+            )
     }
 
     /// Defect statistics, or `None` when no dark or flat supplied a defect map.
@@ -233,9 +255,10 @@ impl CalibrationMasters {
     /// Resident RAM held by this bundle: the present master frames' pixel bytes
     /// plus the defect map's index lists.
     pub fn ram_bytes(&self) -> usize {
-        let frame_bytes = [&self.dark, &self.flat, &self.bias, &self.flat_dark]
-            .into_iter()
-            .filter_map(|master| master.as_ref())
+        let frame_bytes = self
+            .masters
+            .iter()
+            .filter_map(|(_, master)| master.as_ref())
             .map(CfaImage::ram_bytes)
             .sum::<usize>();
         frame_bytes + self.defect_map.as_ref().map_or(0, DefectMap::ram_bytes)
@@ -304,10 +327,12 @@ impl CalibrationMasters {
         }
 
         Ok(Self {
-            dark,
-            flat,
-            bias,
-            flat_dark,
+            masters: CalibrationSet {
+                dark,
+                flat,
+                bias,
+                flat_dark,
+            },
             defect_map,
         })
     }
@@ -488,14 +513,14 @@ impl CalibrationMasters {
         image.metadata.calibrated = true;
 
         // 1. Dark subtraction
-        if let Some(ref dark) = self.dark {
+        if let Some(ref dark) = self.masters.dark {
             image.subtract(dark);
-        } else if let Some(ref bias) = self.bias {
+        } else if let Some(ref bias) = self.masters.bias {
             image.subtract(bias);
         }
 
         // 2. Flat division
-        if let Some(ref flat) = self.flat {
+        if let Some(ref flat) = self.masters.flat {
             prepared_flat::apply(flat, image);
         }
 
@@ -517,19 +542,22 @@ impl CalibrationMasters {
         for (component, metadata) in [
             (
                 CalibrationComponent::Dark,
-                self.dark.as_ref().map(|master| &master.metadata),
+                self.masters.dark.as_ref().map(|master| &master.metadata),
             ),
             (
                 CalibrationComponent::Flat,
-                self.flat.as_ref().map(|master| &master.metadata),
+                self.masters.flat.as_ref().map(|master| &master.metadata),
             ),
             (
                 CalibrationComponent::Bias,
-                self.bias.as_ref().map(|master| &master.metadata),
+                self.masters.bias.as_ref().map(|master| &master.metadata),
             ),
             (
                 CalibrationComponent::FlatDark,
-                self.flat_dark.as_ref().map(|master| &master.metadata),
+                self.masters
+                    .flat_dark
+                    .as_ref()
+                    .map(|master| &master.metadata),
             ),
         ] {
             let Some(metadata) = metadata else {

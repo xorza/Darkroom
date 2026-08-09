@@ -1,5 +1,7 @@
 //! Registration result and error types.
 
+use crate::stacking::registration::triangle::voting::MatchIndices;
+
 use glam::DVec2;
 
 use crate::error::InvalidConfigField;
@@ -193,6 +195,17 @@ pub struct StarMatch {
     pub target: usize,
     /// Distance between the transformed reference star and target star, in pixels.
     pub residual: f64,
+}
+
+impl StarMatch {
+    /// A pair with the residual measured against a fitted transform.
+    pub(crate) fn measured(indices: MatchIndices, residual: f64) -> Self {
+        Self {
+            reference: indices.reference,
+            target: indices.target,
+            residual,
+        }
+    }
 }
 
 /// Result of image registration.

@@ -5,6 +5,7 @@ use rayon::prelude::*;
 
 use crate::background_mesh::TileGrid;
 use crate::background_mesh::spline::{cubic_spline_eval, solve_natural_spline_d2};
+use crate::background_mesh::tile_stats::TileComponent;
 use crate::bit_buffer2::BitBuffer2;
 use crate::concurrency::JobScratchPool;
 use crate::stacking::star_detection::background::simd;
@@ -198,14 +199,14 @@ fn interpolate_row(
     for tx in 0..tiles_x {
         let f0_bg = grid.stats[(tx, ty0)].sky;
         let f1_bg = grid.stats[(tx, ty1)].sky;
-        let d0_bg = grid.d2y_sky(tx, ty0);
-        let d1_bg = grid.d2y_sky(tx, ty1);
+        let d0_bg = grid.d2y(TileComponent::Sky, tx, ty0);
+        let d1_bg = grid.d2y(TileComponent::Sky, tx, ty1);
         node_bg[tx] = cubic_spline_eval(f0_bg, f1_bg, d0_bg, d1_bg, hy, ty);
 
         let f0_n = grid.stats[(tx, ty0)].sigma;
         let f1_n = grid.stats[(tx, ty1)].sigma;
-        let d0_n = grid.d2y_sigma(tx, ty0);
-        let d1_n = grid.d2y_sigma(tx, ty1);
+        let d0_n = grid.d2y(TileComponent::Sigma, tx, ty0);
+        let d1_n = grid.d2y(TileComponent::Sigma, tx, ty1);
         node_noise[tx] = cubic_spline_eval(f0_n, f1_n, d0_n, d1_n, hy, ty);
     }
 

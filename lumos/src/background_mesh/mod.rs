@@ -10,11 +10,11 @@
 pub(crate) mod spline;
 #[cfg(test)]
 mod tests;
-mod tile_stats;
+pub(crate) mod tile_stats;
 pub(crate) mod workspace;
 
 use crate::background_mesh::spline::solve_natural_spline_d2;
-use crate::background_mesh::tile_stats::TileStats;
+use crate::background_mesh::tile_stats::{TileComponent, TileD2y, TileStats};
 use crate::background_mesh::workspace::TileScratch;
 use crate::bit_buffer2::BitBuffer2;
 use crate::concurrency::JobScratchPool;
@@ -25,25 +25,13 @@ use crate::math::vec2us::Vec2us;
 use imaginarium::Buffer2;
 use rayon::prelude::*;
 
-/// The `sky` of a tile, as a function so the spline solve can be run over either plane.
-fn sky(stats: &TileStats) -> f32 {
-    stats.sky
-}
-
-/// The `sigma` of a tile. Companion to [`sky`] — see [`TileGrid::compute_y_spline_derivatives`].
-fn sigma(stats: &TileStats) -> f32 {
-    stats.sigma
-}
-
 /// Tile grid with precomputed centers and spline coefficients for interpolation.
 #[derive(Debug)]
 pub(crate) struct TileGrid {
     pub(crate) stats: Buffer2<TileStats>,
-    /// Second derivatives in Y direction for natural cubic spline (sky).
+    /// Second derivatives in Y for the natural cubic spline, both planes per tile.
     /// Layout: tiles_x * tiles_y, row-major (same as stats).
-    d2y_sky: Vec<f32>,
-    /// Second derivatives in Y direction for natural cubic spline (sigma).
-    d2y_sigma: Vec<f32>,
+    d2y: Vec<TileD2y>,
     /// Precomputed X-coordinates of tile centers (one per tile column).
     pub(crate) centers_x: Vec<f32>,
     pub(crate) centers_y: Vec<f32>,
@@ -88,8 +76,7 @@ impl TileGrid {
             .collect();
         Self {
             stats: Buffer2::new_default(tiles_x, tiles_y),
-            d2y_sky: vec![0.0; n],
-            d2y_sigma: vec![0.0; n],
+            d2y: vec![TileD2y::default(); n],
             centers_x,
             centers_y,
             tile_size,
@@ -102,16 +89,10 @@ impl TileGrid {
             && self.tile_size == tile_size.min(dimensions.width).min(dimensions.height)
     }
 
-    /// Second derivative of sky in Y at tile (tx, ty) for natural cubic spline.
+    /// Second derivative in Y at tile (tx, ty) for the natural cubic spline, for one plane.
     #[inline]
-    pub(crate) fn d2y_sky(&self, tx: usize, ty: usize) -> f32 {
-        self.d2y_sky[ty * self.stats.width() + tx]
-    }
-
-    /// Second derivative of sigma in Y at tile (tx, ty) for natural cubic spline.
-    #[inline]
-    pub(crate) fn d2y_sigma(&self, tx: usize, ty: usize) -> f32 {
-        self.d2y_sigma[ty * self.stats.width() + tx]
+    pub(crate) fn d2y(&self, component: TileComponent, tx: usize, ty: usize) -> f32 {
+        self.d2y[ty * self.stats.width() + tx].get(component)
     }
 
     /// Find the tile index whose center is at or before the given Y position.
@@ -240,8 +221,7 @@ impl TileGrid {
         // `stats` read — the plane loop below needs all three at once.
         let Self {
             stats,
-            d2y_sky,
-            d2y_sigma,
+            d2y,
             centers_y,
             ..
         } = self;
@@ -249,16 +229,13 @@ impl TileGrid {
         for tx in 0..tiles_x {
             // Both planes for this column before moving on, so the strided `stats` reads for one
             // tile column happen together rather than the whole grid being walked twice.
-            for (tile_value, d2y) in [
-                (sky as fn(&TileStats) -> f32, &mut *d2y_sky),
-                (sigma as fn(&TileStats) -> f32, &mut *d2y_sigma),
-            ] {
+            for component in TileComponent::ALL {
                 for (ty, value) in spline_values.iter_mut().enumerate() {
-                    *value = tile_value(&stats[(tx, ty)]);
+                    *value = stats[(tx, ty)].get(component);
                 }
                 solve_natural_spline_d2(spline_values, centers_y, spline_d2, spline_scratch);
                 for (ty, &d) in spline_d2.iter().enumerate() {
-                    d2y[ty * tiles_x + tx] = d;
+                    *d2y[ty * tiles_x + tx].get_mut(component) = d;
                 }
             }
         }

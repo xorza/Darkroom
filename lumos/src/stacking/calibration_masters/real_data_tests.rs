@@ -106,10 +106,10 @@ fn builds_full_master_set() {
     .expect("master build failed");
 
     // Every supplied role yields a master; the un-supplied flat-dark stays `None`.
-    let dark = masters.dark.as_ref().expect("master dark");
-    let flat = masters.flat.as_ref().expect("prepared master flat");
-    let bias = masters.bias.as_ref().expect("master bias");
-    assert!(masters.flat_dark.is_none());
+    let dark = masters.masters.dark.as_ref().expect("master dark");
+    let flat = masters.masters.flat.as_ref().expect("prepared master flat");
+    let bias = masters.masters.bias.as_ref().expect("master bias");
+    assert!(masters.masters.flat_dark.is_none());
 
     // All masters share the single sensor geometry (one CFA plane each).
     let size = Size2us::new(dark.data.width(), dark.data.height());
