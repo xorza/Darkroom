@@ -564,7 +564,7 @@ fn build_deblend_tree(
         if level == 0 {
             process_root_level(&mut tree, &mut buffers.pixel_to_node, &buffers.regions);
         } else {
-            process_higher_level(&mut tree, buffers, threshold, min_separation);
+            process_higher_level(&mut tree, buffers, min_separation);
         }
     }
 
@@ -601,14 +601,13 @@ fn process_root_level(
 fn process_higher_level(
     tree: &mut DeblendTree,
     buffers: &mut DeblendBuffers,
-    threshold: f32,
     min_separation: usize,
 ) {
     // Destructured rather than reached through `buffers.` so the read of `regions` and the writes
     // to the scratch below it borrow disjointly across the loop.
     let DeblendBuffers {
         pixel_to_node,
-        component_pixels,
+        above_threshold,
         regions,
         parent_pixels_above,
         region_scratch,
@@ -623,26 +622,20 @@ fn process_higher_level(
             None => continue, // Skip if no parent or multiple parents
         };
 
-        // Count pixels belonging to this parent that are above threshold
-        // (avoid allocation by counting first)
-        let parent_above_count = component_pixels
-            .iter()
-            .filter(|p| pixel_to_node.get(p.pos) == Some(parent_idx) && p.value >= threshold)
-            .count();
+        // `above_threshold` is already every component pixel at or above this level's threshold,
+        // so the parent's share of it needs only the node test — walking `component_pixels` here
+        // would re-apply the value test over the whole component to reach the same set.
+        parent_pixels_above.clear();
+        parent_pixels_above.extend(
+            above_threshold
+                .iter()
+                .filter(|p| pixel_to_node.get(p.pos) == Some(parent_idx))
+                .copied(),
+        );
 
-        // Check if multiple distinct regions formed from same parent
-        if region.len() < parent_above_count {
-            // Collect parent pixels above threshold (reuse buffer)
-            parent_pixels_above.clear();
-            parent_pixels_above.extend(
-                component_pixels
-                    .iter()
-                    .filter(|p| {
-                        pixel_to_node.get(p.pos) == Some(parent_idx) && p.value >= threshold
-                    })
-                    .copied(),
-            );
-
+        // Fewer pixels in this region than the parent has above the threshold means they did not
+        // all stay connected: something else formed alongside it, so the parent split.
+        if region.len() < parent_pixels_above.len() {
             // Find child regions using grid-based lookup
             let mut child_regions: ArrayVec<Vec<Pixel>, MAX_CHILDREN> = ArrayVec::new();
             find_connected_regions_grid_into(
