@@ -11,10 +11,10 @@ use std::arch::x86_64::*;
 
 use crate::image_ops::rgb::Rgb;
 
-use crate::image_ops::stretching::{
-    AsinhCurve, LOG_P0, LOG_P1, LOG_P2, LOG_P3, LOG_P4, LOG_P5, LOG_P6, LOG_P7, LOG_P8, LOG_Q1,
-    LOG_Q2, SQRTHF, color_preserve_pixel,
+use crate::image_ops::stretching::simd::{
+    LOG_P0, LOG_P1, LOG_P2, LOG_P3, LOG_P4, LOG_P5, LOG_P6, LOG_P7, LOG_P8, LOG_Q1, LOG_Q2, SQRTHF,
 };
+use crate::image_ops::stretching::{AsinhCurve, color_preserve_pixel};
 
 /// Vectorized single-precision `logf` for 8 lanes (Cephes). Valid for `x > 0`; callers here only
 /// ever pass `x = arg + √(arg²+1) ≥ 1`.
@@ -138,7 +138,7 @@ pub(super) unsafe fn asinh_color_preserve_avx2(
 
 #[cfg(test)]
 mod tests {
-    use crate::image_ops::stretching::simd_avx2::*;
+    use crate::image_ops::stretching::simd::avx2::*;
 
     #[test]
     fn avx2_matches_scalar_reference() {

@@ -2,7 +2,7 @@ use imaginarium::{Buffer2, ChannelCount, Image, PlanarPixels};
 use rayon::prelude::*;
 
 use crate::io::image::image_dimensions::ImageDimensions;
-use crate::math::sum::sum_f32;
+use crate::math::sum::simd::sum_f32;
 
 /// Planar floating-point pixels for a monochrome or RGB image.
 #[derive(Debug, Clone)]

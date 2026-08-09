@@ -4,8 +4,8 @@ use ::quickbench::quick_bench;
 use std::hint::black_box;
 
 use crate::math::sum::scalar;
-use crate::math::sum::sum_f32;
-use crate::math::sum::weighted_mean_f32;
+use crate::math::sum::simd::sum_f32;
+use crate::math::sum::simd::weighted_mean_f32;
 
 const BENCH_SIZE: usize = 10_000;
 const CROSSOVER_SIZES: [usize; 15] = [
@@ -46,17 +46,17 @@ fn bench_weighted_mean_f32(b: ::quickbench::Bencher) {
 
     #[cfg(target_arch = "x86_64")]
     {
-        use crate::math::sum::sse;
+        use crate::math::sum::simd::sse41;
         if imaginarium::cpu_features::has_sse4_1() {
             b.bench_labeled("sse", || unsafe {
-                black_box(sse::weighted_mean_f32(
+                black_box(sse41::weighted_mean_f32(
                     black_box(&data),
                     black_box(&weights),
                 ))
             });
         }
 
-        use crate::math::sum::avx2;
+        use crate::math::sum::simd::avx2;
         if imaginarium::cpu_features::has_avx2() {
             b.bench_labeled("avx2", || unsafe {
                 black_box(avx2::weighted_mean_f32(
@@ -86,7 +86,7 @@ fn bench_sum_f32_crossover(b: ::quickbench::Bencher) {
 
         #[cfg(target_arch = "x86_64")]
         {
-            use crate::math::sum::avx2;
+            use crate::math::sum::simd::avx2;
 
             if imaginarium::cpu_features::has_avx2() {
                 b.bench_labeled(&format!("avx2_{len}"), || {
@@ -123,13 +123,13 @@ fn bench_weighted_mean_f32_crossover(b: ::quickbench::Bencher) {
 
         #[cfg(target_arch = "x86_64")]
         {
-            use crate::math::sum::{avx2, sse};
+            use crate::math::sum::simd::{avx2, sse41};
 
             if imaginarium::cpu_features::has_sse4_1() {
                 b.bench_labeled(&format!("sse_{len}"), || {
                     for _ in 0..calls {
                         black_box(unsafe {
-                            sse::weighted_mean_f32(black_box(&data), black_box(&weights))
+                            sse41::weighted_mean_f32(black_box(&data), black_box(&weights))
                         });
                     }
                 });

@@ -2,7 +2,7 @@
 
 use std::arch::x86_64::*;
 
-use crate::stacking::star_detection::threshold_mask::{MIN_NOISE, process_words_scalar};
+use crate::stacking::star_detection::threshold_mask::simd::{MIN_NOISE, process_words_scalar};
 
 /// SSE4.1 packed threshold kernel. `WITH_BG` selects `bg + σ·noise` vs `σ·noise` (filtered); `bg`
 /// is unused and may be empty when `WITH_BG` is false.

@@ -2,7 +2,7 @@
 
 use std::arch::x86_64::*;
 
-use crate::stacking::star_detection::threshold_mask::{MIN_NOISE, process_words_scalar};
+use crate::stacking::star_detection::threshold_mask::simd::{MIN_NOISE, process_words_scalar};
 
 /// AVX2 packed threshold kernel: 8 floats/group × 8 groups = exactly one 64-pixel word, with the
 /// 8-bit `_mm256_movemask_ps` result packed directly (half the SSE iterations, no per-lane extract).

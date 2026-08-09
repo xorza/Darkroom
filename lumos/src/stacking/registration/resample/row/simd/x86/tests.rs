@@ -1,7 +1,7 @@
 use crate::math::size2us::Size2us;
 use crate::stacking::registration::resample::kernel;
 use crate::stacking::registration::resample::row;
-use crate::stacking::registration::resample::row::x86;
+use crate::stacking::registration::resample::row::simd::x86;
 use crate::stacking::registration::transform::{Transform, WarpTransform};
 use crate::testing::synthetic::patterns;
 use glam::DVec2;

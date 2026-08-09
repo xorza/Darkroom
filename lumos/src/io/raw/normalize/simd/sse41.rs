@@ -1,0 +1,55 @@
+//! SSE4.1 u16 -> normalized f32 conversion.
+
+use std::arch::x86_64::*;
+
+use crate::io::raw::normalize::normalize_one;
+
+/// SSE4.1 SIMD normalization for x86_64 (fast path with pmovzxwd).
+#[target_feature(enable = "sse4.1")]
+pub(super) unsafe fn normalize_chunk_sse41<const CLAMP: bool>(
+    input: &[u16],
+    output: &mut [f32],
+    black: f32,
+    inv_range: f32,
+) {
+    // SAFETY: All operations require SSE4.1, guaranteed by target_feature
+    unsafe {
+        let black_vec = _mm_set1_ps(black);
+        let inv_range_vec = _mm_set1_ps(inv_range);
+
+        let chunks = input.len() / 4;
+        let remainder = input.len() % 4;
+
+        for i in 0..chunks {
+            let idx = i * 4;
+            // Load 4 u16 values (64 bits) and zero-extend to 4 i32 values using SSE4.1
+            let vals_u16 = _mm_loadl_epi64(input.as_ptr().add(idx) as *const __m128i);
+            let vals_i32 = _mm_cvtepu16_epi32(vals_u16);
+            let vals_f32 = _mm_cvtepi32_ps(vals_i32);
+
+            // Subtract black; optionally floor at 0, scale, optionally cap at 1.
+            let subtracted = _mm_sub_ps(vals_f32, black_vec);
+            let floored = if CLAMP {
+                _mm_max_ps(subtracted, _mm_setzero_ps())
+            } else {
+                subtracted
+            };
+            let normalized = _mm_mul_ps(floored, inv_range_vec);
+            let result = if CLAMP {
+                _mm_min_ps(normalized, _mm_set1_ps(1.0))
+            } else {
+                normalized
+            };
+
+            // Store result
+            _mm_storeu_ps(output.as_mut_ptr().add(idx), result);
+        }
+
+        // Handle remainder with scalar
+        let start = chunks * 4;
+        for i in 0..remainder {
+            let idx = start + i;
+            output[idx] = normalize_one::<CLAMP>(input[idx], black, inv_range);
+        }
+    }
+}

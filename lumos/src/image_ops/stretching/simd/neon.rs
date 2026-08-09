@@ -1,5 +1,5 @@
 //! NEON color-preserving arcsinh stretch (aarch64). The aarch64 counterpart of
-//! [`crate::image_ops::stretching::simd_avx2`]: the default `auto_asinh` stretch spends ~30% of its
+//! [`crate::image_ops::stretching::simd::avx2`]: the default `auto_asinh` stretch spends ~30% of its
 //! time in a per-pixel libm `asinhf` (one call per pixel on the combined intensity). This vectorizes
 //! the whole color-preserving pixel op — intensity, `asinh` curve, channel scale, highlight cap —
 //! four pixels at a time, in place, with `asinh(x) = logf(x + √(x²+1))` over a Cephes single-precision
@@ -13,10 +13,10 @@ use std::arch::aarch64::*;
 
 use crate::image_ops::rgb::Rgb;
 
-use crate::image_ops::stretching::{
-    AsinhCurve, LOG_P0, LOG_P1, LOG_P2, LOG_P3, LOG_P4, LOG_P5, LOG_P6, LOG_P7, LOG_P8, LOG_Q1,
-    LOG_Q2, SQRTHF, color_preserve_pixel,
+use crate::image_ops::stretching::simd::{
+    LOG_P0, LOG_P1, LOG_P2, LOG_P3, LOG_P4, LOG_P5, LOG_P6, LOG_P7, LOG_P8, LOG_Q1, LOG_Q2, SQRTHF,
 };
+use crate::image_ops::stretching::{AsinhCurve, color_preserve_pixel};
 
 /// Vectorized single-precision `logf` for 4 lanes (Cephes). Valid for `x > 0`; callers here only
 /// ever pass `x = arg + √(arg²+1) ≥ 1`.
@@ -138,7 +138,7 @@ pub(super) unsafe fn asinh_color_preserve_neon(
 
 #[cfg(test)]
 mod tests {
-    use crate::image_ops::stretching::simd_neon::*;
+    use crate::image_ops::stretching::simd::neon::*;
 
     #[test]
     fn neon_matches_scalar_reference() {

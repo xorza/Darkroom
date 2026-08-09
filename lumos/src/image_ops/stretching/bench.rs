@@ -6,27 +6,7 @@ use quickbench::quick_bench;
 use std::hint::black_box;
 
 use crate::Stretch;
-#[cfg(not(target_arch = "aarch64"))]
-use crate::image_ops::rgb::Rgb;
 use crate::image_ops::stretching::{self, AsinhCurve};
-
-/// Scalar reference path for targets (or x86 CPUs) without the SIMD kernel.
-#[cfg(not(target_arch = "aarch64"))]
-fn scalar_asinh(red: &mut [f32], green: &mut [f32], blue: &mut [f32], curve: &AsinhCurve) {
-    for i in 0..red.len() {
-        let out = stretching::color_preserve_pixel(
-            Rgb {
-                r: red[i],
-                g: green[i],
-                b: blue[i],
-            },
-            curve,
-        );
-        red[i] = out.r;
-        green[i] = out.g;
-        blue[i] = out.b;
-    }
-}
 use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::linear::LinearImage;
 
@@ -115,36 +95,9 @@ fn bench_stretch_asinh_kernel_single_thread(b: ::quickbench::Bencher) {
     let mut planes = planes;
     b.bench(|| {
         let [r, g, bch] = &mut planes;
-        // Mirror `apply_color_preserving_asinh`'s dispatch so the bench
-        // times the kernel production actually runs on this machine.
-        #[cfg(target_arch = "aarch64")]
-        // SAFETY: NEON is always available on aarch64.
-        unsafe {
-            stretching::simd_neon::asinh_color_preserve_neon(
-                r,
-                g,
-                bch,
-                curve.inv_beta,
-                curve.inv_norm,
-            );
-        }
-        #[cfg(target_arch = "x86_64")]
-        if imaginarium::cpu_features::has_avx2_fma() {
-            // SAFETY: AVX2+FMA availability checked above.
-            unsafe {
-                stretching::simd_avx2::asinh_color_preserve_avx2(
-                    r,
-                    g,
-                    bch,
-                    curve.inv_beta,
-                    curve.inv_norm,
-                );
-            }
-        } else {
-            scalar_asinh(r, g, bch, &curve);
-        }
-        #[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
-        scalar_asinh(r, g, bch, &curve);
+        // The same entry point `apply_color_preserving_asinh` calls, so the bench times whichever
+        // kernel production picks on this machine.
+        stretching::simd::asinh_color_preserve(r, g, bch, curve);
         black_box(&planes);
     });
 }

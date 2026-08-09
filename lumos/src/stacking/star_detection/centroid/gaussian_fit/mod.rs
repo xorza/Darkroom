@@ -11,17 +11,8 @@ mod bench;
 #[cfg(test)]
 mod tests;
 
-/// Coefficients the two SIMD backends' `exp` approximations share.
-#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
-mod exp_poly;
+mod simd;
 
-#[cfg(target_arch = "x86_64")]
-mod simd_avx2;
-
-#[cfg(target_arch = "aarch64")]
-mod simd_neon;
-
-use crate::simd::dispatch;
 use crate::stacking::star_detection::centroid::lm_optimizer::{
     FitData, LMConfig, LMModel, NormalEquations, accumulate_chi2, build_normal_equations_scalar,
     optimize,
@@ -117,27 +108,13 @@ impl LMModel<6> for Gaussian2D {
     }
 
     fn batch_build_normal_equations(&self, data: FitData, params: &[f64; 6]) -> NormalEquations<6> {
-        // The SIMD kernels are unweighted-only, so a weighted fit takes the scalar path.
-        dispatch! {
-            x86: avx2_fma if data.weights.is_none() => simd_avx2::batch_build_normal_equations_avx2(
-                self, data.x, data.y, data.z, params,
-            ),
-            aarch64 if data.weights.is_none() => simd_neon::batch_build_normal_equations_neon(
-                self, data.x, data.y, data.z, params,
-            ),
-            scalar => build_normal_equations_scalar(self, data, params),
-        }
+        simd::batch_build_normal_equations(self, data, params)
+            .unwrap_or_else(|| build_normal_equations_scalar(self, data, params))
     }
 
     fn batch_compute_chi2(&self, data: FitData, params: &[f64; 6]) -> f64 {
-        // The SIMD kernels are unweighted-only, so a weighted fit takes the scalar path.
-        dispatch! {
-            x86: avx2_fma if data.weights.is_none()
-                => simd_avx2::batch_compute_chi2_avx2(self, data.x, data.y, data.z, params),
-            aarch64 if data.weights.is_none()
-                => simd_neon::batch_compute_chi2_neon(self, data.x, data.y, data.z, params),
-            scalar => accumulate_chi2(self, data, params, 0..data.len()),
-        }
+        simd::batch_compute_chi2(self, data, params)
+            .unwrap_or_else(|| accumulate_chi2(self, data, params, 0..data.len()))
     }
 }
 
