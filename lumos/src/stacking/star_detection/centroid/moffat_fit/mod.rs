@@ -47,9 +47,10 @@ impl Default for MoffatFitConfig {
     }
 }
 
-/// Result of 2D Moffat profile fitting.
+/// A converged-or-not 2D Moffat profile fitted to one star stamp: where its centre landed and
+/// the FWHM that follows from its alpha and beta. Build one with [`MoffatFit::new`].
 #[derive(Debug, Clone, Copy)]
-pub(super) struct MoffatFitResult {
+pub(super) struct MoffatFit {
     /// Position of profile center (sub-pixel).
     pub(super) pos: DVec2,
     /// FWHM computed from alpha and beta.
@@ -64,7 +65,7 @@ pub(super) struct MoffatFitResult {
     debug: MoffatFitDebug,
 }
 
-/// Fit diagnostics kept for tests; see [`MoffatFitResult::debug`].
+/// Fit diagnostics kept for tests; see [`MoffatFit::debug`].
 #[cfg(test)]
 #[derive(Debug, Clone, Copy)]
 struct MoffatFitDebug {
@@ -217,14 +218,14 @@ impl LMModel<5> for MoffatFixedBeta {
     }
 }
 
-impl MoffatFitResult {
+impl MoffatFit {
     /// Fit a 2D Moffat profile to a star stamp via Levenberg-Marquardt (f64 throughout). When
     /// `noise` is set, each pixel is weighted by `1/σ²` from the CCD noise model so the
     /// shot-noisy bright core doesn't bias the fit (PR1); `None` is a plain unweighted fit.
     ///
     /// `None` also when the stamp falls outside the frame, holds too few pixels to constrain five
     /// parameters, or the fit lands somewhere [`validate_position`] rejects.
-    pub(super) fn fit(
+    pub(super) fn new(
         pixels: &Buffer2<f32>,
         pos: DVec2,
         grid: &StampGrid,
@@ -320,7 +321,7 @@ pub(super) fn fwhm_beta_to_alpha(fwhm: f32, beta: f32) -> f32 {
 mod internals {
     use crate::stacking::star_detection::centroid::lm_optimizer::LMResult;
     use crate::stacking::star_detection::centroid::moffat_fit::{
-        MoffatFitDebug, MoffatFitResult, MoffatFixedBeta, fast_pow_neg,
+        MoffatFit, MoffatFitDebug, MoffatFixedBeta, fast_pow_neg,
     };
 
     impl MoffatFitDebug {
@@ -337,7 +338,7 @@ mod internals {
         }
     }
 
-    impl MoffatFitResult {
+    impl MoffatFit {
         /// Exposes `MoffatFitDebug::alpha` to `centroid::tests`, which sits outside
         /// `moffat_fit` and so can name neither the private `debug` field nor its type.
         pub(crate) fn debug_alpha(&self) -> f32 {

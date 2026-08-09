@@ -27,9 +27,10 @@ use imaginarium::Buffer2;
 /// Configuration for Gaussian fitting.
 pub(super) type GaussianFitConfig = LMConfig;
 
-/// Result of 2D Gaussian fitting.
+/// A converged-or-not 2D Gaussian fitted to one star stamp: where its centre landed and
+/// how wide it came out. Build one with [`GaussianFit::new`].
 #[derive(Debug, Clone, Copy)]
-pub(super) struct GaussianFitResult {
+pub(super) struct GaussianFit {
     /// Position of Gaussian center (sub-pixel).
     pub(super) pos: DVec2,
     /// Sigma in X and Y directions.
@@ -44,7 +45,7 @@ pub(super) struct GaussianFitResult {
     debug: GaussianFitDebug,
 }
 
-/// Fit diagnostics kept for tests; see [`GaussianFitResult::debug`].
+/// Fit diagnostics kept for tests; see [`GaussianFit::debug`].
 #[cfg(test)]
 #[derive(Debug, Clone, Copy)]
 struct GaussianFitDebug {
@@ -118,7 +119,7 @@ impl LMModel<6> for Gaussian2D {
     }
 }
 
-impl GaussianFitResult {
+impl GaussianFit {
     /// Fit a 2D Gaussian to a star stamp via Levenberg-Marquardt (f64 throughout, ~0.01 px
     /// centroid accuracy). When `noise` is set, each pixel is weighted by `1/σ²` from the CCD
     /// noise model so the shot-noisy bright core doesn't bias the fit (PR1); `None` is a plain
@@ -126,7 +127,7 @@ impl GaussianFitResult {
     ///
     /// `None` also when the stamp falls outside the frame, holds too few pixels to constrain six
     /// parameters, or the fit lands somewhere [`validate_fit`] rejects.
-    pub(super) fn fit(
+    pub(super) fn new(
         pixels: &Buffer2<f32>,
         pos: DVec2,
         grid: &StampGrid,

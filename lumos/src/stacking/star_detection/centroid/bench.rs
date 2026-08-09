@@ -8,11 +8,9 @@ use glam::{DVec2, Vec2};
 use std::hint::black_box;
 
 use crate::math::size2us::Size2us;
-use crate::stacking::star_detection::centroid::gaussian_fit::{
-    GaussianFitConfig, GaussianFitResult,
-};
+use crate::stacking::star_detection::centroid::gaussian_fit::{GaussianFit, GaussianFitConfig};
 use crate::stacking::star_detection::centroid::measure_star;
-use crate::stacking::star_detection::centroid::moffat_fit::{MoffatFitConfig, MoffatFitResult};
+use crate::stacking::star_detection::centroid::moffat_fit::{MoffatFit, MoffatFitConfig};
 use crate::stacking::star_detection::centroid::refine_centroid;
 use crate::stacking::star_detection::config::background_config::BackgroundConfig;
 use crate::stacking::star_detection::config::detection_config::DetectionConfig;
@@ -291,7 +289,7 @@ fn bench_gaussian_fit_single(b: ::quickbench::Bencher) {
     let config = GaussianFitConfig::default();
 
     b.bench(|| {
-        black_box(GaussianFitResult::fit(
+        black_box(GaussianFit::new(
             black_box(&pixels),
             black_box(DVec2::splat(10.0)),
             black_box(&StampGrid::new(8)),
@@ -327,7 +325,7 @@ fn bench_moffat_fit_single(b: ::quickbench::Bencher) {
     };
 
     b.bench(|| {
-        black_box(MoffatFitResult::fit(
+        black_box(MoffatFit::new(
             black_box(&pixels),
             black_box(DVec2::splat(10.0)),
             black_box(&StampGrid::new(8)),
