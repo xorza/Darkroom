@@ -8,6 +8,7 @@
 //! Reference: Bertin & Arnouts (1996), A&AS 117, 393
 
 use std::cmp::Ordering;
+use std::ops::Index;
 
 use arrayvec::ArrayVec;
 
@@ -282,17 +283,64 @@ struct DeblendNode {
     children: SmallVec<[usize; MAX_CHILDREN]>,
 }
 
-/// The pooled state a connected-region search reuses: the grid it labels, the queue it walks, and
-/// the `Vec`s it hands out and takes back so no BFS allocates. Every entry point that finds
-/// regions needs all three, so they travel together.
+/// A set of pixel regions held in one flat buffer.
+///
+/// Every region's pixels sit end to end in `pixels`, delimited by `ends`. Regions are found and
+/// consumed inside a single threshold level and nothing ever takes ownership of one, so they can
+/// share a buffer that is simply truncated for reuse — which is what replaced a `Vec<Vec<Pixel>>`
+/// and the pool of recycled inner `Vec`s that existed to stop it allocating per region.
+#[derive(Debug, Default)]
+struct RegionSet {
+    /// Every region's pixels, concatenated.
+    pixels: Vec<Pixel>,
+    /// End offset of each region in `pixels`. Region `i` starts where region `i - 1` ended, and
+    /// the first at 0 — regions are only ever appended, never removed, so the starts stay
+    /// implicit.
+    ends: Vec<u32>,
+}
+
+impl RegionSet {
+    /// Keeps both allocations; the next search refills them.
+    fn clear(&mut self) {
+        self.pixels.clear();
+        self.ends.clear();
+    }
+
+    fn len(&self) -> usize {
+        self.ends.len()
+    }
+
+    /// Close the run of pixels appended since the last region as a region of its own.
+    fn close_region(&mut self) {
+        debug_assert!(
+            u32::try_from(self.pixels.len()).is_ok(),
+            "a component cannot exceed u32 pixels"
+        );
+        self.ends.push(self.pixels.len() as u32);
+    }
+
+    fn iter(&self) -> impl Iterator<Item = &[Pixel]> {
+        (0..self.len()).map(|i| &self[i])
+    }
+}
+
+impl Index<usize> for RegionSet {
+    type Output = [Pixel];
+
+    fn index(&self, index: usize) -> &[Pixel] {
+        let start = if index == 0 { 0 } else { self.ends[index - 1] };
+        &self.pixels[start as usize..self.ends[index] as usize]
+    }
+}
+
+/// The scratch a connected-region search reuses: the grid it labels and the queue it walks. Both
+/// are needed by every search, so they travel together.
 #[derive(Debug)]
 struct RegionScratch {
     /// Grid for fast pixel lookup (replaces HashMap).
     grid: PixelGrid,
     /// BFS queue for connected component finding (flat grid indices).
     queue: Vec<u32>,
-    /// Pool of recycled region Vecs to avoid per-BFS allocation.
-    pool: Vec<Vec<Pixel>>,
 }
 
 impl RegionScratch {
@@ -300,16 +348,15 @@ impl RegionScratch {
         Self {
             grid: PixelGrid::empty(),
             queue: Vec::new(),
-            pool: Vec::new(),
         }
     }
 
-    /// Run BFS from a seed pixel, returning the connected region or None if already visited.
+    /// Run BFS from a seed pixel, appending the connected region to `out`.
     ///
-    /// Takes a recycled Vec from the pool when available.
+    /// Returns false when the seed was already visited, leaving `out` untouched.
     #[inline]
-    fn bfs_region(&mut self, seed: &Pixel) -> Option<Vec<Pixel>> {
-        let Self { grid, queue, pool } = self;
+    fn bfs_region(&mut self, seed: &Pixel, out: &mut RegionSet) -> bool {
+        let Self { grid, queue } = self;
         // Hoisted out of the loop below: `grid` is borrowed mutably inside it, so the extent and
         // offset can't be re-read from the struct there.
         let size = grid.size;
@@ -323,16 +370,9 @@ impl RegionScratch {
 
         // SAFETY: pixel is within grid bounds (placed during reset_with_pixels)
         if unsafe { !grid.try_mark_visited_unchecked(start_idx) } {
-            return None;
+            return false;
         }
 
-        let mut region = match pool.pop() {
-            Some(mut v) => {
-                v.clear();
-                v
-            }
-            None => Vec::new(),
-        };
         queue.clear();
         queue.push(start_idx as u32);
 
@@ -341,7 +381,7 @@ impl RegionScratch {
             // SAFETY: idx was validated when pushed to queue
             let value = unsafe { grid.get_value_unchecked(idx) };
             let local = size.point_of(idx);
-            region.push(Pixel {
+            out.pixels.push(Pixel {
                 pos: Vec2us::new(
                     local.x.wrapping_add(offset.x),
                     local.y.wrapping_add(offset.y),
@@ -353,7 +393,8 @@ impl RegionScratch {
             unsafe { visit_neighbors_grid(idx, width, grid, queue) };
         }
 
-        Some(region)
+        out.close_region();
+        true
     }
 }
 
@@ -368,13 +409,11 @@ pub(crate) struct DeblendBuffers {
     above_threshold: Vec<Pixel>,
     /// Pixels belonging to a parent that are above threshold.
     parent_pixels_above: Vec<Pixel>,
-    /// Temporary storage for regions.
-    regions: Vec<Vec<Pixel>>,
-    /// The regions one parent split into at the current level. A field rather than a local in
-    /// `process_higher_level` so its `Vec`s survive to the next call and get drained back into
-    /// `region_scratch.pool`; as a local they were dropped per iteration and every split
-    /// allocated afresh.
-    child_regions: ArrayVec<Vec<Pixel>, MAX_CHILDREN>,
+    /// The regions the component broke into at the current threshold level.
+    regions: RegionSet,
+    /// The regions one parent split into. Separate from `regions` because it is filled while
+    /// `regions` is being iterated, so the two cannot share a buffer.
+    child_regions: RegionSet,
     region_scratch: RegionScratch,
 }
 
@@ -385,19 +424,9 @@ impl DeblendBuffers {
             pixel_to_node: NodeGrid::empty(),
             above_threshold: Vec::new(),
             parent_pixels_above: Vec::new(),
-            regions: Vec::new(),
-            child_regions: ArrayVec::new(),
+            regions: RegionSet::default(),
+            child_regions: RegionSet::default(),
             region_scratch: RegionScratch::new(),
-        }
-    }
-
-    /// Drain all regions back into the pool.
-    fn recycle_regions(&mut self) {
-        for region in self.regions.drain(..) {
-            self.region_scratch.pool.push(region);
-        }
-        for region in self.child_regions.drain(..) {
-            self.region_scratch.pool.push(region);
         }
     }
 }
@@ -545,14 +574,12 @@ fn build_deblend_tree(
             break;
         }
 
-        // Recycle previous regions before finding new ones
-        buffers.recycle_regions();
-
         // Find connected regions using grid-based lookup
         find_connected_regions_grid(
             &buffers.above_threshold,
             &mut buffers.regions,
             &mut buffers.region_scratch,
+            NO_REGION_LIMIT,
         );
 
         if level == 0 {
@@ -562,19 +589,12 @@ fn build_deblend_tree(
         }
     }
 
-    // Recycle any remaining regions
-    buffers.recycle_regions();
-
     tree
 }
 
 /// Process the first threshold level - create root nodes.
-fn process_root_level(
-    tree: &mut DeblendTree,
-    pixel_to_node: &mut NodeGrid,
-    regions: &[Vec<Pixel>],
-) {
-    for region in regions {
+fn process_root_level(tree: &mut DeblendTree, pixel_to_node: &mut NodeGrid, regions: &RegionSet) {
+    for region in regions.iter() {
         let node_idx = tree.len();
         let peak = find_region_peak(region);
         let flux = region.iter().map(|p| p.value).sum();
@@ -640,7 +660,12 @@ fn process_higher_level(
         if region.len() < parent_pixels_above.len() {
             // Find child regions using grid-based lookup. The call drains the previous split's
             // regions back into the pool before refilling.
-            find_connected_regions_grid(parent_pixels_above, child_regions, region_scratch);
+            find_connected_regions_grid(
+                parent_pixels_above,
+                child_regions,
+                region_scratch,
+                MAX_CHILDREN,
+            );
 
             if child_regions.len() > 1 {
                 create_child_nodes(
@@ -678,13 +703,13 @@ fn create_child_nodes(
     tree: &mut DeblendTree,
     pixel_to_node: &mut NodeGrid,
     parent_idx: usize,
-    child_regions: &[Vec<Pixel>],
+    child_regions: &RegionSet,
     min_separation: usize,
 ) {
     let min_sep_sq = min_separation * min_separation;
     let mut child_indices: ArrayVec<usize, MAX_CHILDREN> = ArrayVec::new();
 
-    for child_region in child_regions {
+    for child_region in child_regions.iter() {
         if child_indices.is_full() {
             break;
         }
@@ -858,73 +883,30 @@ fn assign_pixels_to_objects(
         .collect()
 }
 
-/// Where [`find_connected_regions_grid`] puts what it finds.
+/// Passed as `max_regions` by a caller that wants every region a component breaks into.
+const NO_REGION_LIMIT: usize = usize::MAX;
+
+/// Find connected regions using grid-based BFS, replacing whatever `regions` held.
 ///
-/// The two callers want different containers — the level loop takes every region a component
-/// splits into, the split check takes at most `MAX_CHILDREN` of them — and that difference used to
-/// be a second copy of the BFS driver. Recycling belongs to the sink because the sink is what
-/// still owns the `Vec`s handed out last call, and they have to reach the pool before it refills.
-trait RegionSink {
-    /// Give every region back to the pool, leaving the sink empty.
-    fn recycle_into(&mut self, pool: &mut Vec<Vec<Pixel>>);
-
-    /// Whether the sink can take no more, which ends the search early.
-    fn is_full(&self) -> bool;
-
-    fn push_region(&mut self, region: Vec<Pixel>);
-}
-
-impl RegionSink for Vec<Vec<Pixel>> {
-    fn recycle_into(&mut self, pool: &mut Vec<Vec<Pixel>>) {
-        pool.append(self);
-    }
-
-    /// Unbounded: the level loop wants every region, however many a component breaks into.
-    fn is_full(&self) -> bool {
-        false
-    }
-
-    fn push_region(&mut self, region: Vec<Pixel>) {
-        self.push(region);
-    }
-}
-
-impl<const N: usize> RegionSink for ArrayVec<Vec<Pixel>, N> {
-    fn recycle_into(&mut self, pool: &mut Vec<Vec<Pixel>>) {
-        pool.extend(self.drain(..));
-    }
-
-    fn is_full(&self) -> bool {
-        ArrayVec::is_full(self)
-    }
-
-    fn push_region(&mut self, region: Vec<Pixel>) {
-        self.push(region);
-    }
-}
-
-/// Find connected regions using grid-based BFS, recycling whatever `regions` held into the pool
-/// first.
-///
-/// Uses PixelGrid for O(1) neighbor lookup with flat-index BFS queue.
-fn find_connected_regions_grid<R: RegionSink>(
+/// Stops once `max_regions` have been found. Uses PixelGrid for O(1) neighbor lookup with
+/// flat-index BFS queue.
+fn find_connected_regions_grid(
     pixels: &[Pixel],
-    regions: &mut R,
+    regions: &mut RegionSet,
     scratch: &mut RegionScratch,
+    max_regions: usize,
 ) {
-    regions.recycle_into(&mut scratch.pool);
+    regions.clear();
     if pixels.is_empty() {
         return;
     }
     scratch.grid.reset_with_pixels(pixels);
 
     for p in pixels {
-        if regions.is_full() {
+        if regions.len() == max_regions {
             break;
         }
-        if let Some(region) = scratch.bfs_region(p) {
-            regions.push_region(region);
-        }
+        scratch.bfs_region(p, regions);
     }
 }
 
