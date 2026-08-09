@@ -1,7 +1,11 @@
 //! Sum and accumulation operations with SIMD acceleration.
 
+#[cfg(target_arch = "aarch64")]
+use crate::simd::NEON_F32_LANES;
 use crate::simd::dispatch;
 
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+mod error;
 pub(crate) mod scalar;
 
 #[cfg(target_arch = "aarch64")]
@@ -13,22 +17,23 @@ mod avx2;
 #[cfg(target_arch = "x86_64")]
 mod sse;
 
-/// One full NEON vector of f32 — the shortest input the kernel can do any vector work on.
-#[cfg(target_arch = "aarch64")]
-const NEON_MIN_LEN: usize = 4;
-
 /// Throughput crossovers, not structural minimums: both sit far above the 8-lane AVX2 and 4-lane
 /// SSE4.1 vector widths, so below them the scalar loop wins on a length the kernels could handle.
+/// Set from `bench_sum_f32_crossover` and `bench_weighted_mean_f32_crossover` (`bench.rs`), which
+/// sweep each backend against scalar over `CROSSOVER_SIZES`.
 #[cfg(target_arch = "x86_64")]
-const AVX2_SUM_MIN_LEN: usize = 256;
+const AVX2_SUM_CROSSOVER: usize = 256;
 #[cfg(target_arch = "x86_64")]
-const X86_WEIGHTED_MEAN_MIN_LEN: usize = 128;
+const X86_WEIGHTED_MEAN_CROSSOVER: usize = 128;
 
 /// Sum f32 values using SIMD when available.
+///
+/// The NEON arm has no crossover of its own — one full vector is enough for it to win — so it is
+/// gated on the structural minimum instead.
 pub(crate) fn sum_f32(values: &[f32]) -> f32 {
     dispatch! {
-        x86: avx2 if values.len() >= AVX2_SUM_MIN_LEN => avx2::sum_f32(values),
-        aarch64 if values.len() >= NEON_MIN_LEN => neon::sum_f32(values),
+        x86: avx2 if values.len() >= AVX2_SUM_CROSSOVER => avx2::sum_f32(values),
+        aarch64 if values.len() >= NEON_F32_LANES => neon::sum_f32(values),
         scalar => scalar::sum_f32(values),
     }
 }
@@ -69,11 +74,11 @@ pub(crate) fn weighted_mean_f32(values: &[f32], weights: &[f32]) -> f32 {
     }
 
     dispatch! {
-        x86: avx2 if values.len() >= X86_WEIGHTED_MEAN_MIN_LEN
+        x86: avx2 if values.len() >= X86_WEIGHTED_MEAN_CROSSOVER
             => avx2::weighted_mean_f32(values, weights),
-        x86: sse4_1 if values.len() >= X86_WEIGHTED_MEAN_MIN_LEN
+        x86: sse4_1 if values.len() >= X86_WEIGHTED_MEAN_CROSSOVER
             => sse::weighted_mean_f32(values, weights),
-        aarch64 if values.len() >= NEON_MIN_LEN => neon::weighted_mean_f32(values, weights),
+        aarch64 if values.len() >= NEON_F32_LANES => neon::weighted_mean_f32(values, weights),
         scalar => scalar::weighted_mean_f32(values, weights),
     }
 }

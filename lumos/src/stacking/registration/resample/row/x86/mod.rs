@@ -4,7 +4,6 @@
 
 use glam::{DVec2, Vec2};
 use imaginarium::Buffer2;
-#[cfg(target_arch = "x86_64")]
 use std::arch::x86_64::*;
 
 use crate::stacking::registration::resample::kernel;
@@ -19,7 +18,6 @@ mod tests;
 ///
 /// # Safety
 /// - Caller must ensure AVX2 is available.
-#[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
 pub(super) unsafe fn bilinear_avx2(
     input: &Buffer2<f32>,
@@ -167,7 +165,6 @@ pub(super) unsafe fn bilinear_avx2(
 ///
 /// # Safety
 /// - Caller must ensure SSE4.1 is available.
-#[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "sse4.1")]
 pub(super) unsafe fn bilinear_sse(
     input: &Buffer2<f32>,
@@ -312,7 +309,6 @@ pub(super) unsafe fn bilinear_sse(
 /// - The SIZE×SIZE pixel window at `(kx, ky)` must be fully in bounds.
 /// - For SIZE > 4: `kx + 7 < input_width` (reads 8 floats per row).
 /// - For SIZE = 4: `kx + 3 < input_width` (reads 4 floats per row).
-#[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2,fma")]
 #[inline]
 #[allow(unsafe_op_in_unsafe_fn)]
@@ -368,7 +364,6 @@ pub(super) unsafe fn lanczos_kernel_fma<const SIZE: usize>(
 }
 
 /// Horizontal sum of 8 floats in an AVX register.
-#[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2,fma")]
 #[inline]
 #[allow(unsafe_op_in_unsafe_fn)]
@@ -381,14 +376,12 @@ unsafe fn hsum256_ps(v: __m256) -> f32 {
 /// The per-tap distance affine `dist[i] = base[i] + sign[i]·frac` that [`lanczos_weights_gather`]
 /// loads. Determined by `A` and `SIZE` alone, so it is built in a `const` block rather than at
 /// run time; lanes `SIZE..8` stay zero, gathering index 0 as an in-bounds dummy.
-#[cfg(target_arch = "x86_64")]
 #[derive(Debug)]
 struct GatherTables {
     base: [f32; 8],
     sign: [f32; 8],
 }
 
-#[cfg(target_arch = "x86_64")]
 impl GatherTables {
     /// For `i < A` the tap sits left of centre and its distance grows with `frac`; for `i ≥ A` it
     /// sits right of centre and shrinks with it, hence the sign flip.
@@ -419,7 +412,6 @@ impl GatherTables {
 /// # Safety
 /// AVX2 must be available. `lut_values` must point to a LUT with `≥ A·RES + 1` entries (so every
 /// real lane's index `∈ [0, A·RES]` is in bounds).
-#[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2,fma")]
 #[inline]
 #[allow(unsafe_op_in_unsafe_fn)]
@@ -448,7 +440,6 @@ pub(super) unsafe fn lanczos_weights_gather<const A: usize, const SIZE: usize>(
 }
 
 /// Horizontal sum of 4 floats in an SSE register.
-#[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2,fma")]
 #[inline]
 #[allow(unsafe_op_in_unsafe_fn)]

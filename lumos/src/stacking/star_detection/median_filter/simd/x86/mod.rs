@@ -6,7 +6,6 @@
 #![allow(clippy::needless_range_loop)]
 #![allow(unused_assignments)] // Sorting network leaves some values unused
 
-#[cfg(target_arch = "x86_64")]
 use std::arch::x86_64::*;
 
 use crate::stacking::star_detection::median_filter::simd;
@@ -19,7 +18,6 @@ use crate::stacking::star_detection::median_filter::simd;
 /// # Safety
 /// - Caller must ensure AVX2 is available.
 /// - `width` must be >= 12 (8 SIMD + edges).
-#[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
 pub(super) unsafe fn median_filter_row_avx2(
     row_above: &[f32],
@@ -86,7 +84,6 @@ pub(super) unsafe fn median_filter_row_avx2(
 /// # Safety
 /// - Caller must ensure SSE4.1 is available.
 /// - `width` must be >= 8 (4 SIMD + edges).
-#[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "sse4.1")]
 pub(super) unsafe fn median_filter_row_sse41(
     row_above: &[f32],
@@ -147,7 +144,6 @@ pub(super) unsafe fn median_filter_row_sse41(
 ///
 /// Uses min/max operations to implement a complete sorting network
 /// that places the median in position 4. Based on Batcher's odd-even merge sort.
-#[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx2")]
 #[inline]
 #[allow(clippy::too_many_arguments)]
@@ -167,7 +163,6 @@ unsafe fn median9_avx2(
 }
 
 /// Vectorized median of 9 elements using SSE4.1.
-#[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "sse4.1")]
 #[inline]
 #[allow(clippy::too_many_arguments)]

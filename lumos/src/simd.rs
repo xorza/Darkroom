@@ -5,6 +5,24 @@
 //! family used to write its own ladder, and they disagreed on arm order, on where the `unsafe`
 //! block and its SAFETY note went, and on which of four spellings kept the compiler from calling
 //! the fallback unreachable.
+//!
+//! It also owns the f32 lane counts, which are the *structural* minimum input length for any
+//! kernel — below one full vector there is nothing to vectorize. A kernel's *measured* throughput
+//! crossover is a different thing entirely: it is specific to that kernel's arithmetic, it sits
+//! well above the lane count, and it lives next to the kernel under a `_CROSSOVER` name with the
+//! benchmark that set it.
+
+/// f32 lanes in one AVX2 vector register.
+#[cfg(target_arch = "x86_64")]
+pub(crate) const AVX2_F32_LANES: usize = 8;
+
+/// f32 lanes in one SSE vector register.
+#[cfg(target_arch = "x86_64")]
+pub(crate) const SSE_F32_LANES: usize = 4;
+
+/// f32 lanes in one NEON vector register.
+#[cfg(target_arch = "aarch64")]
+pub(crate) const NEON_F32_LANES: usize = 4;
 
 /// Selects a SIMD backend by architecture and runtime CPU features, falling back to scalar.
 ///

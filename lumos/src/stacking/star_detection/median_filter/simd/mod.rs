@@ -102,21 +102,32 @@ macro_rules! median9_simd_sort {
     }};
 }
 
+#[cfg(all(test, feature = "internals"))]
+mod bench;
+
 #[cfg(target_arch = "x86_64")]
 mod x86;
 
 #[cfg(target_arch = "aarch64")]
 mod neon;
 
-/// Row widths at or above which each kernel is entered. Every backend vectorizes the interior
-/// pixels as `(width - 2) / LANES` chunks, so a row only just wider than `2 + LANES` is nearly
-/// all scalar remainder; these sit above that break-even rather than at it.
+/// Row widths at or above which each kernel is entered.
+///
+/// **These numbers do not describe a crossover that exists.** `bench_median_filter_row_crossover`
+/// (`bench.rs`) sweeps every backend against `median_filter_row_scalar` from width 6 to 256 and
+/// the vector kernels lose at every point: at width 12, where AVX2 is entered, scalar is ~2.7x
+/// faster (20.0µs vs 54.8µs per sample), and by width 256 AVX2 has only drawn level (9.3µs vs
+/// 8.5µs). SSE4.1 never wins. The reason is that the "scalar" loop is not scalar — at width 256 it
+/// runs 0.52ns per interior pixel, about 1.8 cycles, which a 25-comparator network cannot reach
+/// one lane at a time; LLVM auto-vectorizes it to roughly the same width the intrinsics use, and
+/// does it better. Left as they are because changing them changes what runs; whether these kernels
+/// earn their place at all is the open question.
 #[cfg(target_arch = "x86_64")]
-const AVX2_MIN_ROW_WIDTH: usize = 12;
+const AVX2_ROW_WIDTH_CROSSOVER: usize = 12;
 #[cfg(target_arch = "x86_64")]
-const SSE41_MIN_ROW_WIDTH: usize = 8;
+const SSE41_ROW_WIDTH_CROSSOVER: usize = 8;
 #[cfg(target_arch = "aarch64")]
-const NEON_MIN_ROW_WIDTH: usize = 8;
+const NEON_ROW_WIDTH_CROSSOVER: usize = 8;
 
 /// Process a row of interior pixels using SIMD-accelerated median9.
 ///
@@ -138,11 +149,11 @@ pub(super) fn median_filter_row_simd(
     width: usize,
 ) {
     dispatch! {
-        x86: avx2 if width >= AVX2_MIN_ROW_WIDTH
+        x86: avx2 if width >= AVX2_ROW_WIDTH_CROSSOVER
             => x86::median_filter_row_avx2(row_above, row_curr, row_below, output_row, width),
-        x86: sse4_1 if width >= SSE41_MIN_ROW_WIDTH
+        x86: sse4_1 if width >= SSE41_ROW_WIDTH_CROSSOVER
             => x86::median_filter_row_sse41(row_above, row_curr, row_below, output_row, width),
-        aarch64 if width >= NEON_MIN_ROW_WIDTH
+        aarch64 if width >= NEON_ROW_WIDTH_CROSSOVER
             => neon::median_filter_row_neon(row_above, row_curr, row_below, output_row, width),
         scalar => median_filter_row_scalar(row_above, row_curr, row_below, output_row, width),
     }

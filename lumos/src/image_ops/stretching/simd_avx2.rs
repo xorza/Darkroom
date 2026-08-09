@@ -74,7 +74,7 @@ unsafe fn asinh_avx2(x: __m256) -> __m256 {
 /// The caller must ensure AVX2+FMA are available (checked once at dispatch).
 #[target_feature(enable = "avx2,fma")]
 #[allow(unsafe_op_in_unsafe_fn)]
-pub(crate) unsafe fn asinh_color_preserve_avx2(
+pub(super) unsafe fn asinh_color_preserve_avx2(
     red: &mut [f32],
     green: &mut [f32],
     blue: &mut [f32],

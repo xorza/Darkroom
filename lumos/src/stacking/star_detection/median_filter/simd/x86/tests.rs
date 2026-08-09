@@ -1,5 +1,4 @@
 use crate::stacking::star_detection::median_filter::simd::x86::*;
-#[cfg(target_arch = "x86_64")]
 use imaginarium::cpu_features;
 
 fn median9_reference(values: &mut [f32; 9]) -> f32 {
@@ -8,7 +7,6 @@ fn median9_reference(values: &mut [f32; 9]) -> f32 {
 }
 
 #[test]
-#[cfg(target_arch = "x86_64")]
 fn test_avx2_median9() {
     if !cpu_features::has_avx2() {
         eprintln!("Skipping AVX2 test - not available");
@@ -69,7 +67,6 @@ fn test_avx2_median9() {
 }
 
 #[test]
-#[cfg(target_arch = "x86_64")]
 fn test_sse41_median9() {
     if !cpu_features::has_sse4_1() {
         eprintln!("Skipping SSE4.1 test - not available");
@@ -124,7 +121,6 @@ fn test_sse41_median9() {
 }
 
 #[test]
-#[cfg(target_arch = "x86_64")]
 fn test_median_filter_row_avx2() {
     if !cpu_features::has_avx2() {
         eprintln!("Skipping AVX2 row test - not available");
@@ -157,7 +153,6 @@ fn test_median_filter_row_avx2() {
 }
 
 #[test]
-#[cfg(target_arch = "x86_64")]
 fn test_median_filter_row_sse41() {
     if !cpu_features::has_sse4_1() {
         eprintln!("Skipping SSE4.1 row test - not available");
