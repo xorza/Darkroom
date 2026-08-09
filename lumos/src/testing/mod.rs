@@ -17,7 +17,7 @@ pub(crate) mod images;
 pub(crate) mod mem_probe;
 pub(crate) mod prelude;
 #[cfg(feature = "real-data")]
-mod real_data;
+pub(crate) mod real_data;
 pub(crate) mod simd_check;
 pub(crate) mod synthetic;
 pub(crate) mod visual;
