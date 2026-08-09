@@ -5,6 +5,7 @@
 //! (weighted-moments / Gaussian-fit / Moffat-fit) agree and the profile fits beat moments.
 
 use crate::testing::prelude::*;
+use crate::testing::synthetic::sky_field::{Sky, SkyField};
 use std::f32::consts::PI;
 
 use crate::math::fwhm::fwhm_to_sigma;
@@ -16,7 +17,6 @@ use crate::stacking::star_detection::config::measurement_config::{
 };
 use crate::stacking::star_detection::deblend::region::Region;
 use crate::stacking::star_detection::tests::stage_tests::background_estimate;
-use crate::testing::synthetic::star_profiles::{StarProfile, SyntheticStar};
 
 /// Render `stars` as `(x, y, brightness)` Gaussians of width `sigma` on a 0.1 sky + Gaussian
 /// noise σ `noise`.
@@ -27,22 +27,17 @@ fn field(
     noise: f32,
     seed: u64,
 ) -> Buffer2<f32> {
-    let mut pixels = Buffer2::new_filled(size.width, size.height, 0.1f32);
-    for &(x, y, brightness) in stars {
-        let amplitude = brightness / (2.0 * PI * sigma * sigma);
-        SyntheticStar::new(
-            glam::Vec2::new(x, y),
-            amplitude,
-            StarProfile::Gaussian { sigma },
-        )
-        .add_to(&mut pixels);
-    }
-    let mut rng = TestRng::new(seed);
-    for p in pixels.iter_mut() {
-        *p += rng.next_gaussian_f32() * noise;
-        *p = p.clamp(0.0, 1.0);
-    }
-    pixels
+    // Callers give total brightness; a Gaussian of this width spreads it over 2πσ².
+    let stars: Vec<(Vec2, f32)> = stars
+        .iter()
+        .map(|&(x, y, brightness)| (Vec2::new(x, y), brightness / (2.0 * PI * sigma * sigma)))
+        .collect();
+    let sky = Sky {
+        level: 0.1,
+        noise,
+        clamp: true,
+    };
+    SkyField::render(size, sky, sigma, &stars, seed).pixels
 }
 
 /// Build a 11×11 candidate region centred on the pixel nearest `(x, y)`.
