@@ -257,8 +257,7 @@ struct LocalBackground {
 /// # Returns
 /// The local background/noise, or None if not enough valid pixels
 fn compute_annulus_background(
-    pixels: &[f32],
-    size: Size2us,
+    pixels: &Buffer2<f32>,
     pos: Vec2,
     inner_radius: usize,
     outer_radius: usize,
@@ -271,8 +270,18 @@ fn compute_annulus_background(
     // Use stack-allocated ArrayVec to avoid heap allocation
     let mut values: ArrayVec<f32, MAX_ANNULUS_PIXELS> = ArrayVec::new();
 
+    let width = pixels.width() as isize;
+    let height = pixels.height() as isize;
     let outer_r_i32 = outer_radius as i32;
     for dy in -outer_r_i32..=outer_r_i32 {
+        // Row bound first so the row slice — and its bounds check — is taken once, not per
+        // column. The annulus can hang off the frame, so the row may not exist at all.
+        let y = icy + dy as isize;
+        if y < 0 || y >= height {
+            continue;
+        }
+        let row = pixels.row(y as usize);
+
         for dx in -outer_r_i32..=outer_r_i32 {
             let r2 = (dx * dx + dy * dy) as f32;
             if r2 < inner_r2 || r2 > outer_r2 {
@@ -280,10 +289,8 @@ fn compute_annulus_background(
             }
 
             let x = icx + dx as isize;
-            let y = icy + dy as isize;
-
-            if x >= 0 && x < size.width as isize && y >= 0 && y < size.height as isize {
-                values.push(pixels[y as usize * size.width + x as usize]);
+            if x >= 0 && x < width {
+                values.push(row[x as usize]);
             }
         }
     }
@@ -332,8 +339,6 @@ pub(super) fn measure_star(
     config: &MeasurementConfig,
     expected_fwhm: f32,
 ) -> Option<Star> {
-    let width = pixels.width();
-    let height = pixels.height();
     // Compute adaptive stamp radius based on expected FWHM
     let stamp_radius = compute_stamp_radius(expected_fwhm);
 
@@ -351,14 +356,7 @@ pub(super) fn measure_star(
         }
     };
     for _ in 0..phase1_iters {
-        let new_pos = refine_centroid(
-            pixels,
-            Size2us::new(width, height),
-            background,
-            pos,
-            stamp_radius,
-            expected_fwhm,
-        )?;
+        let new_pos = refine_centroid(pixels, background, pos, stamp_radius, expected_fwhm)?;
 
         let delta = new_pos - pos;
         pos = new_pos;
@@ -388,13 +386,7 @@ pub(super) fn measure_star(
         LocalBackgroundMethod::LocalAnnulus => {
             let inner_radius = stamp_radius;
             let outer_radius = (stamp_radius as f32 * 1.5).ceil() as usize;
-            compute_annulus_background(
-                pixels,
-                Size2us::new(width, height),
-                pos,
-                inner_radius,
-                outer_radius,
-            )
+            compute_annulus_background(pixels, pos, inner_radius, outer_radius)
         }
     };
     let LocalBackground {
@@ -485,13 +477,13 @@ pub(super) fn measure_star(
 /// Returns the new position or None if position is invalid.
 /// Uses f64 accumulators for numerical stability.
 fn refine_centroid(
-    pixels: &[f32],
-    size: Size2us,
+    pixels: &Buffer2<f32>,
     background: &BackgroundEstimate,
     pos: Vec2,
     stamp_radius: usize,
     expected_fwhm: f32,
 ) -> Option<Vec2> {
+    let size = Size2us::new(pixels.width(), pixels.height());
     if !is_valid_stamp_position(pos, size, stamp_radius) {
         return None;
     }
@@ -513,13 +505,17 @@ fn refine_centroid(
 
     let stamp_radius_i32 = stamp_radius as i32;
     for dy in -stamp_radius_i32..=stamp_radius_i32 {
+        let y = (icy + dy as isize) as usize;
+        // One bounds check per row rather than per pixel — `is_valid_stamp_position` above has
+        // already established the whole stamp is inside the frame.
+        let px_row = pixels.row(y);
+        let bg_row = background.background.row(y);
+
         for dx in -stamp_radius_i32..=stamp_radius_i32 {
             let x = (icx + dx as isize) as usize;
-            let y = (icy + dy as isize) as usize;
-            let idx = y * size.width + x;
 
             // Background-subtracted value
-            let value = (pixels[idx] - background.background[idx]).max(0.0) as f64;
+            let value = (px_row[x] - bg_row[x]).max(0.0) as f64;
 
             // Gaussian weight based on distance from current centroid
             let px = x as f64;
@@ -723,7 +719,6 @@ fn compute_star(
     // Collect background-subtracted values and positions (f64 accumulators)
     let mut flux = 0.0f64;
     let mut core_flux = 0.0f64;
-    let mut sum_r2 = 0.0f64;
     let mut sum_x2 = 0.0f64;
     let mut sum_y2 = 0.0f64;
     let mut sum_xy = 0.0f64;
@@ -770,7 +765,6 @@ fn compute_star(
             // Weighted second moments for FWHM and eccentricity
             let fx = x as f64 - pos.x as f64;
             let fy = y as f64 - pos.y as f64;
-            sum_r2 += value * (fx * fx + fy * fy);
             sum_x2 += value * fx * fx;
             sum_y2 += value * fy * fy;
             sum_xy += value * fx * fy;
@@ -792,7 +786,8 @@ fn compute_star(
     // window to suppress wing noise, then deconvolve the window so FWHM/eccentricity
     // stay unbiased. Seed the window from the plain moment; fall back to the plain
     // moments if it can't converge to a valid (positive-definite) covariance.
-    let seed_sigma_sq = (sum_r2 / flux / 2.0).max(MIN_SIGMA_SQ);
+    // `sum_x2 + sum_y2` is the same Σ value·r² the loop used to accumulate separately.
+    let seed_sigma_sq = ((sum_x2 + sum_y2) / flux / 2.0).max(MIN_SIGMA_SQ);
     let cov = windowed_covariance(
         pixels,
         background,

@@ -18,15 +18,8 @@ fn test_phase1_reaches_good_accuracy_in_few_iterations() {
     // Run full convergence to get the final position
     let mut pos_full = Vec2::new(32.0, 33.0);
     for _ in 0..MAX_MOMENTS_ITERATIONS {
-        let new_pos = refine_centroid(
-            &pixels,
-            Size2us::new(width, height),
-            &bg,
-            pos_full,
-            stamp_radius,
-            expected_fwhm,
-        )
-        .expect("refine should succeed");
+        let new_pos = refine_centroid(&pixels, &bg, pos_full, stamp_radius, expected_fwhm)
+            .expect("refine should succeed");
         let delta = new_pos - pos_full;
         pos_full = new_pos;
         if delta.length_squared() < CONVERGENCE_THRESHOLD_SQ {
@@ -37,15 +30,8 @@ fn test_phase1_reaches_good_accuracy_in_few_iterations() {
     // Run only 2 iterations
     let mut pos_2iter = Vec2::new(32.0, 33.0);
     for _ in 0..2 {
-        pos_2iter = refine_centroid(
-            &pixels,
-            Size2us::new(width, height),
-            &bg,
-            pos_2iter,
-            stamp_radius,
-            expected_fwhm,
-        )
-        .expect("refine should succeed");
+        pos_2iter = refine_centroid(&pixels, &bg, pos_2iter, stamp_radius, expected_fwhm)
+            .expect("refine should succeed");
     }
 
     // After 2 iterations, should be within 0.2px of the fully converged position
@@ -86,8 +72,7 @@ fn test_single_phase1_iteration_provides_good_seed() {
             let start = Vec2::new(true_pos.x.round(), true_pos.y.round());
 
             let after_one =
-                refine_centroid(&pixels, Size2us::new(width, height), &bg, start, 7, 5.9)
-                    .expect("refine should succeed");
+                refine_centroid(&pixels, &bg, start, 7, 5.9).expect("refine should succeed");
 
             let error =
                 ((after_one.x - true_pos.x).powi(2) + (after_one.y - true_pos.y).powi(2)).sqrt();
@@ -123,29 +108,15 @@ fn test_gaussian_fit_accuracy_independent_of_phase1_iterations() {
     // Phase 1 with only 2 iterations
     let mut pos_2iter = Vec2::new(32.0, 33.0);
     for _ in 0..2 {
-        pos_2iter = refine_centroid(
-            &pixels,
-            Size2us::new(width, height),
-            &bg,
-            pos_2iter,
-            stamp_radius,
-            expected_fwhm,
-        )
-        .expect("refine should succeed");
+        pos_2iter = refine_centroid(&pixels, &bg, pos_2iter, stamp_radius, expected_fwhm)
+            .expect("refine should succeed");
     }
 
     // Phase 1 with full 10 iterations
     let mut pos_full = Vec2::new(32.0, 33.0);
     for _ in 0..MAX_MOMENTS_ITERATIONS {
-        let new_pos = refine_centroid(
-            &pixels,
-            Size2us::new(width, height),
-            &bg,
-            pos_full,
-            stamp_radius,
-            expected_fwhm,
-        )
-        .expect("refine should succeed");
+        let new_pos = refine_centroid(&pixels, &bg, pos_full, stamp_radius, expected_fwhm)
+            .expect("refine should succeed");
         let delta = new_pos - pos_full;
         pos_full = new_pos;
         if delta.length_squared() < CONVERGENCE_THRESHOLD_SQ {
@@ -199,29 +170,15 @@ fn test_moffat_fit_accuracy_independent_of_phase1_iterations() {
     // Phase 1 with only 2 iterations
     let mut pos_2iter = Vec2::new(32.0, 33.0);
     for _ in 0..2 {
-        pos_2iter = refine_centroid(
-            &pixels,
-            Size2us::new(width, height),
-            &bg,
-            pos_2iter,
-            stamp_radius,
-            expected_fwhm,
-        )
-        .expect("refine should succeed");
+        pos_2iter = refine_centroid(&pixels, &bg, pos_2iter, stamp_radius, expected_fwhm)
+            .expect("refine should succeed");
     }
 
     // Phase 1 with full 10 iterations
     let mut pos_full = Vec2::new(32.0, 33.0);
     for _ in 0..MAX_MOMENTS_ITERATIONS {
-        let new_pos = refine_centroid(
-            &pixels,
-            Size2us::new(width, height),
-            &bg,
-            pos_full,
-            stamp_radius,
-            expected_fwhm,
-        )
-        .expect("refine should succeed");
+        let new_pos = refine_centroid(&pixels, &bg, pos_full, stamp_radius, expected_fwhm)
+            .expect("refine should succeed");
         let delta = new_pos - pos_full;
         pos_full = new_pos;
         if delta.length_squared() < CONVERGENCE_THRESHOLD_SQ {
@@ -321,14 +278,9 @@ fn test_prefit_moments_iterations_sufficient() {
         // Run with 2 iterations (current MOMENTS_ITERATIONS_BEFORE_FIT)
         let mut pos_2iter = peak_pos;
         for _ in 0..2 {
-            if let Some(new_pos) = refine_centroid(
-                &pixels,
-                Size2us::new(width, height),
-                &bg,
-                pos_2iter,
-                stamp_radius,
-                expected_fwhm,
-            ) {
+            if let Some(new_pos) =
+                refine_centroid(&pixels, &bg, pos_2iter, stamp_radius, expected_fwhm)
+            {
                 let delta = new_pos - pos_2iter;
                 pos_2iter = new_pos;
                 if delta.length_squared() < CONVERGENCE_THRESHOLD_SQ {
@@ -340,14 +292,9 @@ fn test_prefit_moments_iterations_sufficient() {
         // Run with 10 iterations (fully converged moments)
         let mut pos_10iter = peak_pos;
         for _ in 0..10 {
-            if let Some(new_pos) = refine_centroid(
-                &pixels,
-                Size2us::new(width, height),
-                &bg,
-                pos_10iter,
-                stamp_radius,
-                expected_fwhm,
-            ) {
+            if let Some(new_pos) =
+                refine_centroid(&pixels, &bg, pos_10iter, stamp_radius, expected_fwhm)
+            {
                 let delta = new_pos - pos_10iter;
                 pos_10iter = new_pos;
                 if delta.length_squared() < CONVERGENCE_THRESHOLD_SQ {
@@ -450,14 +397,8 @@ fn test_prefit_moments_iterations_sufficient_moffat() {
     // Run with 2 iterations
     let mut pos_2iter = peak_pos;
     for _ in 0..2 {
-        if let Some(new_pos) = refine_centroid(
-            &pixels,
-            Size2us::new(width, height),
-            &bg,
-            pos_2iter,
-            stamp_radius,
-            expected_fwhm,
-        ) {
+        if let Some(new_pos) = refine_centroid(&pixels, &bg, pos_2iter, stamp_radius, expected_fwhm)
+        {
             let delta = new_pos - pos_2iter;
             pos_2iter = new_pos;
             if delta.length_squared() < CONVERGENCE_THRESHOLD_SQ {
@@ -469,14 +410,9 @@ fn test_prefit_moments_iterations_sufficient_moffat() {
     // Run with 10 iterations
     let mut pos_10iter = peak_pos;
     for _ in 0..10 {
-        if let Some(new_pos) = refine_centroid(
-            &pixels,
-            Size2us::new(width, height),
-            &bg,
-            pos_10iter,
-            stamp_radius,
-            expected_fwhm,
-        ) {
+        if let Some(new_pos) =
+            refine_centroid(&pixels, &bg, pos_10iter, stamp_radius, expected_fwhm)
+        {
             let delta = new_pos - pos_10iter;
             pos_10iter = new_pos;
             if delta.length_squared() < CONVERGENCE_THRESHOLD_SQ {

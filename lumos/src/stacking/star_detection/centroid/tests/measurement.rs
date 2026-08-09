@@ -10,14 +10,7 @@ fn test_refine_centroid_centered_star() {
         .stamp(Size2us::new(width, height), 0.1);
     let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
 
-    let result = refine_centroid(
-        &pixels,
-        Size2us::new(width, height),
-        &bg,
-        pos,
-        TEST_STAMP_RADIUS,
-        TEST_EXPECTED_FWHM,
-    );
+    let result = refine_centroid(&pixels, &bg, pos, TEST_STAMP_RADIUS, TEST_EXPECTED_FWHM);
 
     assert!(result.is_some());
     let new_pos = result.unwrap();
@@ -40,7 +33,6 @@ fn test_refine_centroid_offset_converges() {
 
     let result = refine_centroid(
         &pixels,
-        Size2us::new(width, height),
         &bg,
         start_pos,
         TEST_STAMP_RADIUS,
@@ -65,13 +57,12 @@ fn test_refine_centroid_offset_converges() {
 fn test_refine_centroid_invalid_position_returns_none() {
     let width = 64;
     let height = 64;
-    let pixels = vec![0.5f32; width * height];
+    let pixels = Buffer2::new_filled(width, height, 0.5f32);
     let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
 
     // Position too close to edge
     let result = refine_centroid(
         &pixels,
-        Size2us::new(width, height),
         &bg,
         Vec2::new(3.0, 32.0),
         TEST_STAMP_RADIUS,
@@ -85,12 +76,11 @@ fn test_refine_centroid_zero_flux_returns_none() {
     let width = 64;
     let height = 64;
     // All pixels equal to background - no signal
-    let pixels = vec![0.1f32; width * height];
+    let pixels = Buffer2::new_filled(width, height, 0.1f32);
     let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
 
     let result = refine_centroid(
         &pixels,
-        Size2us::new(width, height),
         &bg,
         Vec2::splat(32.0),
         TEST_STAMP_RADIUS,
@@ -112,7 +102,6 @@ fn test_refine_centroid_rejects_large_movement() {
     // so there's no signal, which should cause rejection
     let result = refine_centroid(
         &pixels,
-        Size2us::new(width, height),
         &bg,
         Vec2::splat(32.0),
         TEST_STAMP_RADIUS,
@@ -137,14 +126,7 @@ fn test_refine_centroid_iterative_convergence() {
     let mut pos = Vec2::splat(32.0);
 
     for iteration in 0..MAX_MOMENTS_ITERATIONS {
-        let result = refine_centroid(
-            &pixels,
-            Size2us::new(width, height),
-            &bg,
-            pos,
-            TEST_STAMP_RADIUS,
-            TEST_EXPECTED_FWHM,
-        );
+        let result = refine_centroid(&pixels, &bg, pos, TEST_STAMP_RADIUS, TEST_EXPECTED_FWHM);
         assert!(result.is_some(), "Iteration {} failed", iteration);
 
         let new_pos = result.unwrap();
@@ -490,7 +472,6 @@ fn test_centroid_with_noisy_background() {
 
     let result = refine_centroid(
         &pixels,
-        Size2us::new(width, height),
         &bg,
         true_pos,
         TEST_STAMP_RADIUS,

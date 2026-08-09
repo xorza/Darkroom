@@ -99,7 +99,6 @@ fn test_refine_centroid_adaptive_sigma_small_fwhm() {
     // Use small expected FWHM
     let result = refine_centroid(
         &pixels,
-        Size2us::new(width, height),
         &bg,
         Vec2::splat(32.0),
         TEST_STAMP_RADIUS,
@@ -133,7 +132,6 @@ fn test_refine_centroid_adaptive_sigma_large_fwhm() {
     // Use large expected FWHM
     let result = refine_centroid(
         &pixels,
-        Size2us::new(width, height),
         &bg,
         Vec2::splat(32.0),
         TEST_STAMP_RADIUS,
