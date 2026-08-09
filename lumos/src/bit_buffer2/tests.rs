@@ -159,7 +159,7 @@ const RAGGED: Size2us = Size2us {
 #[test]
 fn from_predicate_matches_bit_by_bit_setting() {
     // A pattern that crosses both the 64-bit word edge and the 100-bit row edge.
-    let pattern = |i: usize| i % 7 == 0 || i % 64 == 63;
+    let pattern = |i: usize| i.is_multiple_of(7) || i % 64 == 63;
     let built = BitBuffer2::from_predicate(RAGGED, pattern);
 
     let mut by_hand = BitBuffer2::new_default(RAGGED);
@@ -191,6 +191,11 @@ fn padding_bits_never_reach_the_count() {
         "the padding really is set"
     );
 
+    assert!(
+        !mask.padding_is_clear(),
+        "a filled buffer has dirty padding"
+    );
+
     for i in 0..mask.len {
         mask.set(i, false);
     }
@@ -199,4 +204,53 @@ fn padding_bits_never_reach_the_count() {
         mask.words.iter().any(|&w| w != 0),
         "padding survives untouched"
     );
+    assert!(
+        !mask.padding_is_clear(),
+        "clearing every real bit does not clear padding"
+    );
+}
+
+/// Every row shape `padding_is_clear` branches on. All three strides are 128 bits:
+/// 128 wide has no padding at all; 100 wide pads 28 bits inside the second word; 60 wide pads
+/// 4 bits of the first word *and* the whole second one, the only case that reaches the tail scan.
+#[test]
+fn padding_is_clear_separates_word_wise_from_position_wise_writes() {
+    for width in [128, 100, 60] {
+        let size = Size2us::new(width, 3);
+        let has_padding = width != 128;
+
+        assert!(BitBuffer2::new_default(size).padding_is_clear(), "{width}");
+
+        // The two ways of setting every real bit both have to leave padding alone.
+        let built = BitBuffer2::from_predicate(size, |_| true);
+        assert_eq!(built.count_ones(), width * 3, "{width}");
+        assert!(built.padding_is_clear(), "from_predicate dirtied {width}");
+
+        let mut poked = BitBuffer2::new_default(size);
+        for i in 0..poked.len {
+            poked.set(i, true);
+        }
+        assert_eq!(poked.words, built.words, "{width}");
+        assert!(poked.padding_is_clear(), "set() dirtied {width}");
+
+        // Word-wise fills cannot: they have no notion of where a row ends.
+        let mut filled = BitBuffer2::new_default(size);
+        filled.fill(true);
+        assert_eq!(filled.padding_is_clear(), !has_padding, "fill at {width}");
+        assert_eq!(
+            BitBuffer2::new_filled(size, true).padding_is_clear(),
+            !has_padding,
+            "new_filled at {width}"
+        );
+    }
+
+    // The one input that separates the two clauses: at 60 wide the trailing word is pure padding,
+    // so dirtying it leaves the partial word's own 4 padding bits clean. Only the tail scan sees it.
+    let mut tail_only = BitBuffer2::new_default(Size2us::new(60, 3));
+    tail_only.words[1] = !0;
+    assert!(
+        !tail_only.padding_is_clear(),
+        "a dirty trailing word counts"
+    );
+    assert_eq!(tail_only.count_ones(), 0, "and still never reaches a count");
 }

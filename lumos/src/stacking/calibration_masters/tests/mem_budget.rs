@@ -31,6 +31,10 @@ fn cosmic_ray_masks_stay_one_bit_per_pixel() {
         );
     }
 
-    // The figure that makes the packing worth three times its face value.
-    assert_eq!(CONCURRENT_MASKS, 3);
+    // The peak is what actually decides whether a stack fits, so pin that rather than the count on
+    // its own: 6144² = 37 748 736 px, 4 718 592 B per packed mask, three of them = 14 155 776 B.
+    // A fourth concurrent mask, or a revert to `Vec<bool>`, both land here.
+    let size = Size2us::new(6144, 6144);
+    let peak = CONCURRENT_MASKS * new_cr_mask(size).words.len() * size_of::<u64>();
+    assert_eq!(peak, 14_155_776, "peak cosmic-ray mask footprint");
 }

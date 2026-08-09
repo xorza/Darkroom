@@ -3,6 +3,13 @@
 //! Uses 1 bit per element instead of 1 byte, reducing memory by 8x.
 //! Rows are padded to 128-bit boundaries for efficient word-based operations.
 //! `(x, y)` and linear indexing like a dense `Vec<bool>` 2D grid, but bit-packed.
+//!
+//! **Reach for this on per-pixel masks, not per-item ones.** The 8x pays when the mask is
+//! frame-sized and the saving is memory traffic — cosmic-ray holds three at once, 14 MB packed
+//! against 113 MB. It is a straight loss on the masks that count stars or point matches: at 10⁴
+//! elements the packed and unpacked forms both fit L1, so packing recovers no traffic and only adds
+//! a shift and a mask to every read. Measured at +49% on star-detection's O(n²) deduplication and
+//! +82% on registration's fill-scatter-scan, which is why those stay `Vec<bool>`.
 
 use std::ops::Index;
 
@@ -52,14 +59,18 @@ fn bit_layout(size: Size2us) -> BitLayout {
     }
 }
 
-/// A 2D buffer storing boolean values packed as bits.
+/// A 2D buffer storing boolean values packed as bits: `u64` words, rows padded to 128 bits.
 ///
-/// Uses `u64` words internally, with 64 bits per word.
-/// Rows are padded to 128 bits (2 words) for efficient word access.
-/// This reduces memory usage by 8x compared to `Vec<bool>`.
+/// **Padding invariant — readers mask, writers need not.** The bits between `width` and `stride`
+/// in each row carry no data and are held at no particular value: [`Self::new_filled`] and
+/// [`Self::fill`] set them along with everything else. Position-based access is therefore always
+/// safe, and [`Self::count_ones`] masks them off per row. Code that reaches into [`Self::words`]
+/// directly owns that masking itself — or must establish that its buffers have padding clear,
+/// which [`Self::padding_is_clear`] states as a checkable precondition.
 #[derive(Debug, Clone)]
 pub(crate) struct BitBuffer2 {
-    /// Packed bit storage. Each u64 holds 64 boolean values.
+    /// Packed bit storage, 64 values per word. Padding bits past each row's `width` are
+    /// unspecified — see the type's invariant before reading these word-wise.
     pub(crate) words: Vec<u64>,
     pub(crate) size: Size2us,
     pub(crate) len: usize,
@@ -191,6 +202,28 @@ impl BitBuffer2 {
         }
 
         count
+    }
+
+    /// Whether every row's padding bits are zero.
+    ///
+    /// Word-wise code that counts bits without masking — `(a & !b).count_ones()` — is correct only
+    /// on buffers where this holds. `new_default` and `from_predicate` produce them, and
+    /// position-based writes preserve them; `fill(true)` and `new_filled(_, true)` do not. This
+    /// scans the whole buffer, so it belongs in a `debug_assert!` and never on a release path.
+    pub(crate) fn padding_is_clear(&self) -> bool {
+        if self.size.width == 0 || self.size.height == 0 {
+            return true;
+        }
+        let words_per_row = self.words_per_row();
+        let full_words_per_row = self.size.width / BITS_PER_WORD;
+        let bits_in_last_word = self.size.width % BITS_PER_WORD;
+        (0..self.size.height).all(|y| {
+            let row = &self.words[y * words_per_row..(y + 1) * words_per_row];
+            let partial_is_clear =
+                bits_in_last_word == 0 || row[full_words_per_row] >> bits_in_last_word == 0;
+            let whole_padding_words = full_words_per_row + usize::from(bits_in_last_word != 0);
+            partial_is_clear && row[whole_padding_words..].iter().all(|&word| word == 0)
+        })
     }
 
     /// Build a mask by testing every pixel, accumulating a whole word before storing it.
