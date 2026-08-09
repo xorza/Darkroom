@@ -164,7 +164,7 @@ pub(crate) fn fwhm_to_moffat_alpha(fwhm: f32, beta: f32) -> f32 {
 
 #[cfg(test)]
 mod tests {
-    use crate::math::{fwhm_to_sigma, sigma_to_fwhm};
+    use crate::math::fwhm::{fwhm_to_sigma, sigma_to_fwhm};
     use crate::testing::synthetic::star_profiles::*;
 
     const GAUSSIAN_2: StarProfile = StarProfile::Gaussian { sigma: 2.0 };

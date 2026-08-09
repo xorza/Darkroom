@@ -16,9 +16,10 @@ use crate::stacking::drizzle::config::{DrizzleConfig, DrizzleKernel};
 use crate::stacking::drizzle::error::{DrizzleConfigError, DrizzleError};
 use crate::stacking::drizzle::geometry::{boxer, lanczos_kernel, local_jacobian, sgarea};
 use crate::stacking::drizzle::stack::{drizzle_images, drizzle_stack};
-use crate::stacking::product::{QualityMap, StackProduct};
 use crate::stacking::progress::ProgressCallback;
 use crate::stacking::registration::transform::Transform;
+use crate::stacking::stack_product::StackProduct;
+use crate::stacking::stack_product::quality_map::QualityMap;
 
 trait DrizzleAccumulatorTestExt {
     fn add_image(

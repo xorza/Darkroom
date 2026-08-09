@@ -11,7 +11,7 @@ use imaginarium::Buffer2;
 use rayon::prelude::*;
 
 use crate::error::InvalidConfigField;
-use crate::image_ops::op::OpError;
+use crate::image_ops::error::OpError;
 use crate::io::image::linear::LinearImage;
 
 #[cfg(test)]

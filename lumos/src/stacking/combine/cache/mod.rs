@@ -22,9 +22,11 @@ use crate::stacking::combine::stack::StackFrame;
 use crate::stacking::frame_store::{
     SpillDirectory, StackableImage, StoredFrame, StoredPlane, WarpQuality,
 };
-use crate::stacking::product::Coverage;
-use crate::stacking::product::{QualityMap, QualityPlanes, StackProduct};
 use crate::stacking::progress::{ProgressCallback, StackingStage};
+use crate::stacking::stack_product::StackProduct;
+use crate::stacking::stack_product::coverage::Coverage;
+use crate::stacking::stack_product::quality_map::QualityMap;
+use crate::stacking::stack_product::quality_planes::QualityPlanes;
 
 /// Everything one combine job needs beyond the pixels themselves: the covering frames' values
 /// packed to the front, their effective weights in the same order, and the rejection methods'

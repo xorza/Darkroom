@@ -11,9 +11,10 @@ use crate::math::rect::Rect;
 use crate::stacking::drizzle::config::{DrizzleConfig, DrizzleKernel};
 use crate::stacking::drizzle::error::DrizzleError;
 use crate::stacking::drizzle::geometry::{boxer, lanczos_kernel, local_jacobian};
-use crate::stacking::product::Coverage;
-use crate::stacking::product::{QualityMap, StackProduct};
 use crate::stacking::registration::transform::Transform;
+use crate::stacking::stack_product::StackProduct;
+use crate::stacking::stack_product::coverage::Coverage;
+use crate::stacking::stack_product::quality_map::QualityMap;
 
 const MAX_CHANNELS: usize = 3;
 const JACOBIAN_MIN: f64 = 1e-30;

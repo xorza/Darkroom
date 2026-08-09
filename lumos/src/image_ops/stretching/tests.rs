@@ -1,5 +1,5 @@
+use crate::image_ops::error::OpError;
 use crate::image_ops::internals::{channel_plane as channel, gray_image as gray, rgb_image as rgb};
-use crate::image_ops::op::OpError;
 use crate::image_ops::stretching::*;
 use crate::math::size2us::Size2us;
 use crate::math::statistics::median_f32_mut;

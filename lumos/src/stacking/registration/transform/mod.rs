@@ -388,10 +388,14 @@ impl WarpTransform {
 }
 
 #[cfg(test)]
-impl Transform {
-    /// Frobenius norm of the difference from the identity matrix. Test-only diagnostic.
-    pub(crate) fn deviation_from_identity(&self) -> f64 {
-        self.matrix.deviation_from_identity()
+mod internals {
+    use super::*;
+
+    impl Transform {
+        /// Frobenius norm of the difference from the identity matrix. Test-only diagnostic.
+        pub(crate) fn deviation_from_identity(&self) -> f64 {
+            self.matrix.deviation_from_identity()
+        }
     }
 }
 

@@ -9,7 +9,7 @@
 use crate::image_ops::rgb::Rgb;
 
 use crate::error::InvalidConfigField;
-use crate::image_ops::op::OpError;
+use crate::image_ops::error::OpError;
 use crate::io::image::linear::LinearImage;
 use crate::math::statistics::ClippedStats;
 

@@ -7,7 +7,7 @@
 use crate::math::size2us::Size2us;
 use std::f32::consts::PI;
 
-use crate::math::fwhm_to_sigma;
+use crate::math::fwhm::fwhm_to_sigma;
 use crate::math::rect::URect;
 use crate::math::vec2us::Vec2us;
 use crate::stacking::star_detection::centroid::measure_star;

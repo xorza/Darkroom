@@ -4,7 +4,7 @@
 //! What it watches: an op family entered once as an interleaved [`Image`] and driven through the
 //! three ops that allocate image-sized scratch — `ExtractBackground`, `Denoise` (a three-plane
 //! wavelet workspace) and `Stretch` (a capped subsample). Each op runs through
-//! [`crate::image_ops::op::on_planes`], which holds the master's planes and releases the
+//! [`crate::image_ops::error::on_planes`], which holds the master's planes and releases the
 //! interleaved buffer, so the expected peak is *planes + the widest of (op working set, the
 //! interleaved master being rebuilt)* — 2× the master, and flat in the op count, since every op
 //! releases its working set before the next one starts.

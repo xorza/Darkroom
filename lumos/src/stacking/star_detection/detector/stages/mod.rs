@@ -3,9 +3,7 @@
 //! Each stage is a pure function that transforms data, with all buffer
 //! management contained within.
 
-pub(super) mod detect;
-#[cfg(test)]
-pub(crate) mod detect_test_utils;
+pub(crate) mod detect;
 pub(super) mod filter;
 pub(crate) mod fwhm;
 pub(super) mod measure;

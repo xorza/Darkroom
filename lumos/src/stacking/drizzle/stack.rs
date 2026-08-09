@@ -9,8 +9,8 @@ use crate::io::image::load_context::LoadContext;
 use crate::stacking::drizzle::accumulator::{DrizzleAccumulator, DrizzleFrame};
 use crate::stacking::drizzle::config::DrizzleConfig;
 use crate::stacking::drizzle::error::DrizzleError;
-use crate::stacking::product::StackProduct;
 use crate::stacking::progress::{ProgressCallback, StackingStage};
+use crate::stacking::stack_product::StackProduct;
 
 fn load_drizzle_frame<P: AsRef<Path>>(
     frame: DrizzleFrame<P>,

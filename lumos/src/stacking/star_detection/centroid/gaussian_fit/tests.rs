@@ -1,7 +1,7 @@
 //! Tests for 2D Gaussian fitting.
 
+use crate::math::fwhm::{fwhm_to_sigma, sigma_to_fwhm};
 use crate::math::size2us::Size2us;
-use crate::math::{fwhm_to_sigma, sigma_to_fwhm};
 use crate::stacking::star_detection::centroid::gaussian_fit::*;
 use crate::stacking::star_detection::centroid::internals::{
     Perturbation, add_noise, approx_eq, reference_normal_equations,

@@ -21,9 +21,10 @@ use crate::stacking::combine::error::{Error, StackConfigError};
 use crate::stacking::combine::normalization::FrameNorm;
 use crate::stacking::combine::rejection::Rejection;
 use crate::stacking::frame_store::{FrameStats, SpillDirectory, StoredFrame};
-use crate::stacking::product::{QualityPlanes, StackProduct};
 use crate::stacking::progress::ProgressCallback;
 use crate::stacking::registration::resample::WarpResult;
+use crate::stacking::stack_product::StackProduct;
+use crate::stacking::stack_product::quality_planes::QualityPlanes;
 
 /// One input frame for [`stack_images`] with optional per-pixel support and confidence.
 ///

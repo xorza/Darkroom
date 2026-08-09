@@ -6,7 +6,7 @@ use crate::error::InvalidConfigField;
 use crate::io::image::error::ImageError;
 use crate::stacking::calibration_masters::CalibrationError;
 use crate::stacking::combine::error::Error as StackError;
-use crate::stacking::product::StackProduct;
+use crate::stacking::stack_product::StackProduct;
 use crate::stacking::star_detection::detector::Diagnostics;
 
 /// Registration bookkeeping for an aligned stack.

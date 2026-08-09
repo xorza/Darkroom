@@ -6,8 +6,8 @@ use crate::stacking::combine::config::Normalization;
 use crate::stacking::combine::rejection::Rejection;
 use crate::stacking::combine::rejection::scratch_buffers::ScratchBuffers;
 use crate::stacking::frame_store::{FrameStats, StoredFrame};
-use crate::stacking::product::Coverage;
-use crate::stacking::product::QualityPlanes;
+use crate::stacking::stack_product::coverage::Coverage;
+use crate::stacking::stack_product::quality_planes::QualityPlanes;
 use crate::testing::ScratchDirectory;
 
 /// Create an in-memory [`FrameCache`] from loaded images, with no coverage (test helper).

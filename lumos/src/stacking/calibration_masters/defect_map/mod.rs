@@ -824,15 +824,19 @@ impl XTransOffsets {
 
 /// Per-class defect counts, used only by tests to assert detection behavior.
 #[cfg(test)]
-impl DefectMap {
-    /// Number of hot pixels detected.
-    pub(super) fn hot_count(&self) -> usize {
-        self.hot_indices.len()
-    }
+mod internals {
+    use super::*;
 
-    /// Number of cold/dead pixels detected.
-    pub(super) fn cold_count(&self) -> usize {
-        self.cold_indices.len()
+    impl DefectMap {
+        /// Number of hot pixels detected.
+        pub(crate) fn hot_count(&self) -> usize {
+            self.hot_indices.len()
+        }
+
+        /// Number of cold/dead pixels detected.
+        pub(crate) fn cold_count(&self) -> usize {
+            self.cold_indices.len()
+        }
     }
 }
 

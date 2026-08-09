@@ -5,7 +5,7 @@
 //! electron count at that level and sets the Poisson shot-noise scale (see
 //! [`noise`](crate::testing::synthetic::noise)).
 
-use crate::math::fwhm_to_sigma;
+use crate::math::fwhm::fwhm_to_sigma;
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 use crate::testing::synthetic::star_profiles::{StarProfile, SyntheticStar, fwhm_to_moffat_alpha};

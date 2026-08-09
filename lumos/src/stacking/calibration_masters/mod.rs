@@ -24,8 +24,8 @@ use crate::stacking::combine::cache::FrameCache;
 use crate::stacking::combine::config::StackConfig;
 use crate::stacking::combine::error::Error;
 use crate::stacking::combine::stack::run_stacking;
-use crate::stacking::product::QualityPlanes;
 use crate::stacking::progress::ProgressCallback;
+use crate::stacking::stack_product::quality_planes::QualityPlanes;
 use defect_map::DefectMap;
 
 /// Default sigma threshold for defect detection.

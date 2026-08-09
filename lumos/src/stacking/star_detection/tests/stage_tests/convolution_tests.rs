@@ -2,7 +2,7 @@
 //!
 //! Tests the Gaussian filtering for star enhancement.
 
-use crate::math::fwhm_to_sigma;
+use crate::math::fwhm::fwhm_to_sigma;
 use crate::math::size2us::Size2us;
 use crate::stacking::star_detection::config::background_config::BackgroundConfig;
 use crate::stacking::star_detection::convolution::internals::gaussian_convolve;
