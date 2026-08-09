@@ -1,4 +1,26 @@
 use crate::stacking::star_detection::median_filter::simd::*;
+use crate::testing::prelude::*;
+
+/// Every shape and width against the scalar reference, replacing eleven near-identical tests
+/// that each covered one shape. The borders carry no 3x3 window, so only the interior is
+/// comparable; width 3 leaves exactly one interior column, which is the minimum-width case.
+#[test]
+fn median_filter_row_simd_matches_scalar() {
+    assert_simd_matches_scalar(SWEEP_WIDTHS, 1e-5, |shape, width| {
+        let above = shape.row(width, 0);
+        let curr = shape.row(width, 1);
+        let below = shape.row(width, 2);
+        let mut scalar = vec![0.0f32; width];
+        let mut simd = vec![0.0f32; width];
+        median_filter_row_scalar(&above, &curr, &below, &mut scalar, width);
+        median_filter_row_simd(&above, &curr, &below, &mut simd, width);
+        let interior = 1..width - 1;
+        ScalarSimd {
+            scalar: scalar[interior.clone()].to_vec(),
+            simd: simd[interior].to_vec(),
+        }
+    });
+}
 
 #[test]
 fn test_median_filter_row_scalar() {
@@ -36,30 +58,6 @@ fn test_median_filter_row_scalar() {
 }
 
 #[test]
-fn test_median_filter_row_simd_matches_scalar() {
-    let width = 64;
-    let row_above: Vec<f32> = (0..width).map(|i| ((i * 3) % 100) as f32 * 0.01).collect();
-    let row_curr: Vec<f32> = (0..width).map(|i| ((i * 7) % 100) as f32 * 0.01).collect();
-    let row_below: Vec<f32> = (0..width).map(|i| ((i * 11) % 100) as f32 * 0.01).collect();
-
-    let mut output_scalar = vec![0.0f32; width];
-    let mut output_simd = vec![0.0f32; width];
-
-    median_filter_row_scalar(&row_above, &row_curr, &row_below, &mut output_scalar, width);
-    median_filter_row_simd(&row_above, &row_curr, &row_below, &mut output_simd, width);
-
-    for x in 1..width - 1 {
-        assert!(
-            (output_simd[x] - output_scalar[x]).abs() < 1e-5,
-            "SIMD vs scalar mismatch at x={}: {} vs {}",
-            x,
-            output_simd[x],
-            output_scalar[x]
-        );
-    }
-}
-
-#[test]
 fn test_median9_scalar_known_values() {
     // Sorted: 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9
     // Median should be 0.5 (index 4)
@@ -71,270 +69,6 @@ fn test_median9_scalar_known_values() {
 fn test_median9_scalar_all_same() {
     let result = median9_scalar(0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5);
     assert!((result - 0.5).abs() < 1e-6, "Expected 0.5, got {}", result);
-}
-
-#[test]
-fn test_median_filter_row_simd_various_widths() {
-    // Test widths around SIMD thresholds (8 for SSE, 12 for AVX)
-    for width in [
-        4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 20, 31, 32, 33, 64, 100,
-    ] {
-        let row_above: Vec<f32> = (0..width)
-            .map(|i| (i as f32 * 0.13).sin() * 0.5 + 0.5)
-            .collect();
-        let row_curr: Vec<f32> = (0..width)
-            .map(|i| (i as f32 * 0.17).cos() * 0.5 + 0.5)
-            .collect();
-        let row_below: Vec<f32> = (0..width)
-            .map(|i| (i as f32 * 0.23).sin() * 0.5 + 0.5)
-            .collect();
-
-        let mut output_scalar = vec![0.0f32; width];
-        let mut output_simd = vec![0.0f32; width];
-
-        median_filter_row_scalar(&row_above, &row_curr, &row_below, &mut output_scalar, width);
-        median_filter_row_simd(&row_above, &row_curr, &row_below, &mut output_simd, width);
-
-        for x in 1..width - 1 {
-            assert!(
-                (output_simd[x] - output_scalar[x]).abs() < 1e-5,
-                "Width {}, x={}: {} vs {}",
-                width,
-                x,
-                output_simd[x],
-                output_scalar[x]
-            );
-        }
-    }
-}
-
-#[test]
-fn test_median_filter_row_simd_uniform_rows() {
-    let width = 64;
-    let row_above = vec![0.5f32; width];
-    let row_curr = vec![0.5f32; width];
-    let row_below = vec![0.5f32; width];
-
-    let mut output_scalar = vec![0.0f32; width];
-    let mut output_simd = vec![0.0f32; width];
-
-    median_filter_row_scalar(&row_above, &row_curr, &row_below, &mut output_scalar, width);
-    median_filter_row_simd(&row_above, &row_curr, &row_below, &mut output_simd, width);
-
-    for x in 1..width - 1 {
-        assert!(
-            (output_simd[x] - output_scalar[x]).abs() < 1e-6,
-            "Uniform rows mismatch at x={}: {} vs {}",
-            x,
-            output_simd[x],
-            output_scalar[x]
-        );
-        // All same values, median should be the same value
-        assert!(
-            (output_simd[x] - 0.5).abs() < 1e-6,
-            "Uniform median should be 0.5, got {}",
-            output_simd[x]
-        );
-    }
-}
-
-#[test]
-fn test_median_filter_row_simd_with_outlier() {
-    // Test that median filter removes outliers
-    let width = 32;
-    let row_above = vec![0.5f32; width];
-    let mut row_curr = vec![0.5f32; width];
-    let row_below = vec![0.5f32; width];
-
-    // Add outlier at center pixel of a 3x3 window
-    row_curr[16] = 100.0; // Extreme outlier
-
-    let mut output_scalar = vec![0.0f32; width];
-    let mut output_simd = vec![0.0f32; width];
-
-    median_filter_row_scalar(&row_above, &row_curr, &row_below, &mut output_scalar, width);
-    median_filter_row_simd(&row_above, &row_curr, &row_below, &mut output_simd, width);
-
-    for x in 1..width - 1 {
-        assert!(
-            (output_simd[x] - output_scalar[x]).abs() < 1e-5,
-            "Outlier test mismatch at x={}: {} vs {}",
-            x,
-            output_simd[x],
-            output_scalar[x]
-        );
-    }
-
-    // The outlier should be filtered out
-    assert!(
-        (output_simd[16] - 0.5).abs() < 1e-6,
-        "Outlier at 16 should be filtered to 0.5, got {}",
-        output_simd[16]
-    );
-}
-
-#[test]
-fn test_median_filter_row_simd_negative_values() {
-    let width = 64;
-    let row_above: Vec<f32> = (0..width).map(|i| (i as f32 * 0.1).sin() * 2.0).collect();
-    let row_curr: Vec<f32> = (0..width).map(|i| (i as f32 * 0.15).cos() * 2.0).collect();
-    let row_below: Vec<f32> = (0..width)
-        .map(|i| (i as f32 * 0.2).sin() * 2.0 - 1.0)
-        .collect();
-
-    let mut output_scalar = vec![0.0f32; width];
-    let mut output_simd = vec![0.0f32; width];
-
-    median_filter_row_scalar(&row_above, &row_curr, &row_below, &mut output_scalar, width);
-    median_filter_row_simd(&row_above, &row_curr, &row_below, &mut output_simd, width);
-
-    for x in 1..width - 1 {
-        assert!(
-            (output_simd[x] - output_scalar[x]).abs() < 1e-5,
-            "Negative values mismatch at x={}: {} vs {}",
-            x,
-            output_simd[x],
-            output_scalar[x]
-        );
-    }
-}
-
-#[test]
-fn test_median_filter_row_simd_large_values() {
-    let width = 64;
-    let row_above: Vec<f32> = (0..width).map(|i| (i as f32) * 1000.0).collect();
-    let row_curr: Vec<f32> = (0..width).map(|i| (i as f32) * 1000.0 + 500.0).collect();
-    let row_below: Vec<f32> = (0..width).map(|i| (i as f32) * 1000.0 + 250.0).collect();
-
-    let mut output_scalar = vec![0.0f32; width];
-    let mut output_simd = vec![0.0f32; width];
-
-    median_filter_row_scalar(&row_above, &row_curr, &row_below, &mut output_scalar, width);
-    median_filter_row_simd(&row_above, &row_curr, &row_below, &mut output_simd, width);
-
-    for x in 1..width - 1 {
-        let rel_diff = if output_scalar[x].abs() > 1e-6 {
-            (output_simd[x] - output_scalar[x]).abs() / output_scalar[x].abs()
-        } else {
-            (output_simd[x] - output_scalar[x]).abs()
-        };
-        assert!(
-            rel_diff < 1e-5,
-            "Large values mismatch at x={}: {} vs {} (rel_diff={})",
-            x,
-            output_simd[x],
-            output_scalar[x],
-            rel_diff
-        );
-    }
-}
-
-#[test]
-fn test_median_filter_row_simd_ascending_pattern() {
-    let width = 64;
-    let row_above: Vec<f32> = (0..width).map(|i| i as f32).collect();
-    let row_curr: Vec<f32> = (0..width).map(|i| i as f32 + 0.5).collect();
-    let row_below: Vec<f32> = (0..width).map(|i| i as f32 + 1.0).collect();
-
-    let mut output_scalar = vec![0.0f32; width];
-    let mut output_simd = vec![0.0f32; width];
-
-    median_filter_row_scalar(&row_above, &row_curr, &row_below, &mut output_scalar, width);
-    median_filter_row_simd(&row_above, &row_curr, &row_below, &mut output_simd, width);
-
-    for x in 1..width - 1 {
-        assert!(
-            (output_simd[x] - output_scalar[x]).abs() < 1e-5,
-            "Ascending pattern mismatch at x={}: {} vs {}",
-            x,
-            output_simd[x],
-            output_scalar[x]
-        );
-    }
-}
-
-#[test]
-fn test_median_filter_row_simd_descending_pattern() {
-    let width = 64;
-    let row_above: Vec<f32> = (0..width).map(|i| (width - i) as f32).collect();
-    let row_curr: Vec<f32> = (0..width).map(|i| (width - i) as f32 - 0.5).collect();
-    let row_below: Vec<f32> = (0..width).map(|i| (width - i) as f32 - 1.0).collect();
-
-    let mut output_scalar = vec![0.0f32; width];
-    let mut output_simd = vec![0.0f32; width];
-
-    median_filter_row_scalar(&row_above, &row_curr, &row_below, &mut output_scalar, width);
-    median_filter_row_simd(&row_above, &row_curr, &row_below, &mut output_simd, width);
-
-    for x in 1..width - 1 {
-        assert!(
-            (output_simd[x] - output_scalar[x]).abs() < 1e-5,
-            "Descending pattern mismatch at x={}: {} vs {}",
-            x,
-            output_simd[x],
-            output_scalar[x]
-        );
-    }
-}
-
-#[test]
-fn test_median_filter_row_simd_alternating_rows() {
-    let width = 64;
-    let row_above: Vec<f32> = (0..width)
-        .map(|i| if i % 2 == 0 { 1.0 } else { 0.0 })
-        .collect();
-    let row_curr: Vec<f32> = (0..width)
-        .map(|i| if i % 2 == 1 { 1.0 } else { 0.0 })
-        .collect();
-    let row_below: Vec<f32> = (0..width)
-        .map(|i| if i % 2 == 0 { 1.0 } else { 0.0 })
-        .collect();
-
-    let mut output_scalar = vec![0.0f32; width];
-    let mut output_simd = vec![0.0f32; width];
-
-    median_filter_row_scalar(&row_above, &row_curr, &row_below, &mut output_scalar, width);
-    median_filter_row_simd(&row_above, &row_curr, &row_below, &mut output_simd, width);
-
-    for x in 1..width - 1 {
-        assert!(
-            (output_simd[x] - output_scalar[x]).abs() < 1e-5,
-            "Alternating rows mismatch at x={}: {} vs {}",
-            x,
-            output_simd[x],
-            output_scalar[x]
-        );
-    }
-}
-
-#[test]
-fn test_median_filter_row_simd_random_pattern() {
-    let width = 128;
-    let row_above: Vec<f32> = (0..width)
-        .map(|i| (i as f32 * 0.7 + 1.3).sin() * (i as f32 * 0.3).cos() * 50.0 + 50.0)
-        .collect();
-    let row_curr: Vec<f32> = (0..width)
-        .map(|i| (i as f32 * 0.5 + 2.1).cos() * (i as f32 * 0.4).sin() * 50.0 + 50.0)
-        .collect();
-    let row_below: Vec<f32> = (0..width)
-        .map(|i| (i as f32 * 0.9 + 0.7).sin() * (i as f32 * 0.2).cos() * 50.0 + 50.0)
-        .collect();
-
-    let mut output_scalar = vec![0.0f32; width];
-    let mut output_simd = vec![0.0f32; width];
-
-    median_filter_row_scalar(&row_above, &row_curr, &row_below, &mut output_scalar, width);
-    median_filter_row_simd(&row_above, &row_curr, &row_below, &mut output_simd, width);
-
-    for x in 1..width - 1 {
-        assert!(
-            (output_simd[x] - output_scalar[x]).abs() < 1e-4,
-            "Random pattern mismatch at x={}: {} vs {}",
-            x,
-            output_simd[x],
-            output_scalar[x]
-        );
-    }
 }
 
 #[test]
@@ -387,28 +121,5 @@ fn test_median9_scalar_extreme_values() {
         (result - 3.0).abs() < 1e-6,
         "Extreme values test: expected 3.0, got {}",
         result
-    );
-}
-
-#[test]
-fn test_median_filter_row_simd_minimum_width() {
-    // Test with minimum meaningful width (3 pixels = 1 interior pixel)
-    let width = 3;
-    let row_above = vec![0.1, 0.5, 0.9];
-    let row_curr = vec![0.2, 0.6, 0.8];
-    let row_below = vec![0.3, 0.4, 0.7];
-
-    let mut output_scalar = vec![0.0f32; width];
-    let mut output_simd = vec![0.0f32; width];
-
-    median_filter_row_scalar(&row_above, &row_curr, &row_below, &mut output_scalar, width);
-    median_filter_row_simd(&row_above, &row_curr, &row_below, &mut output_simd, width);
-
-    // Only check interior pixel (x=1)
-    assert!(
-        (output_simd[1] - output_scalar[1]).abs() < 1e-5,
-        "Minimum width mismatch: {} vs {}",
-        output_simd[1],
-        output_scalar[1]
     );
 }
