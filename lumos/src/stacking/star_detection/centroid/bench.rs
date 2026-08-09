@@ -4,7 +4,7 @@
 use crate::stacking::star_detection::centroid::{StampGrid, compute_stamp_radius};
 
 use ::quickbench::quick_bench;
-use glam::Vec2;
+use glam::{DVec2, Vec2};
 use std::hint::black_box;
 
 use crate::math::size2us::Size2us;
@@ -239,7 +239,7 @@ fn bench_refine_centroid_single(b: ::quickbench::Bencher) {
         black_box(refine_centroid(
             black_box(&pixels),
             black_box(&bg),
-            black_box(Vec2::splat(32.0)),
+            black_box(DVec2::splat(32.0)),
             black_box(stamp_radius),
             black_box(expected_fwhm),
         ))
@@ -266,7 +266,7 @@ fn bench_refine_centroid_batch_1000(b: ::quickbench::Bencher) {
             black_box(refine_centroid(
                 black_box(&pixels),
                 black_box(&bg),
-                black_box(Vec2::splat(32.0)),
+                black_box(DVec2::splat(32.0)),
                 black_box(stamp_radius),
                 black_box(expected_fwhm),
             ));
@@ -291,7 +291,7 @@ fn bench_gaussian_fit_single(b: ::quickbench::Bencher) {
     b.bench(|| {
         black_box(fit_gaussian_2d(
             black_box(&pixels),
-            black_box(Vec2::splat(10.0)),
+            black_box(DVec2::splat(10.0)),
             black_box(&StampGrid::new(8)),
             black_box(background),
             None,
@@ -327,7 +327,7 @@ fn bench_moffat_fit_single(b: ::quickbench::Bencher) {
     b.bench(|| {
         black_box(fit_moffat_2d(
             black_box(&pixels),
-            black_box(Vec2::splat(10.0)),
+            black_box(DVec2::splat(10.0)),
             black_box(&StampGrid::new(8)),
             black_box(background),
             None,

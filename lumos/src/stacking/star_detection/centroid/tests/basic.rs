@@ -7,9 +7,13 @@ fn test_centroid_accuracy() {
     // Use larger image to minimize background estimation effects
     let width = 128;
     let height = 128;
-    let true_pos = Vec2::new(64.3, 64.7);
-    let pixels = SyntheticStar::new(true_pos, 0.8, StarProfile::Gaussian { sigma: 2.5 })
-        .stamp(Size2us::new(width, height), 0.1);
+    let true_pos = DVec2::new(64.3, 64.7);
+    let pixels = SyntheticStar::new(
+        true_pos.as_vec2(),
+        0.8,
+        StarProfile::Gaussian { sigma: 2.5 },
+    )
+    .stamp(Size2us::new(width, height), 0.1);
 
     let bg = estimate_background(
         &pixels,
@@ -33,8 +37,8 @@ fn test_centroid_accuracy() {
     )
     .expect("Should compute centroid");
 
-    let error_x = (star.pos.x - true_pos.x as f64).abs();
-    let error_y = (star.pos.y - true_pos.y as f64).abs();
+    let error_x = (star.pos.x - true_pos.x).abs();
+    let error_y = (star.pos.y - true_pos.y).abs();
 
     // Sub-pixel accuracy within 0.2 pixels is good for weighted centroid
     assert!(
@@ -50,6 +54,70 @@ fn test_centroid_accuracy() {
         error_y,
         true_pos.y,
         star.pos.y
+    );
+}
+
+/// The same pixels measured near the origin and far out along x must give the same sub-pixel
+/// result, because the position carrier is f64.
+///
+/// The two stamps are byte-identical — one buffer is the other blitted `SHIFT` columns to the
+/// right — so the only thing that differs is the magnitude of the coordinates the centroid
+/// arithmetic runs on. An f32 carrier quantizes to 4.88e-4 px at x ≈ 6000, which is both coarser
+/// than the agreement asserted here and coarser than `CENTROID_CONVERGENCE_THRESHOLD`, so the
+/// moments loop's own stopping test would degrade to "the value stopped changing at all".
+#[test]
+fn subpixel_result_is_independent_of_distance_from_the_origin() {
+    const SHIFT: usize = 5968;
+    let near = Size2us::new(64, 64);
+    let true_pos = DVec2::new(32.3, 32.7);
+
+    let near_pixels = SyntheticStar::new(
+        true_pos.as_vec2(),
+        0.8,
+        StarProfile::Gaussian { sigma: 2.5 },
+    )
+    .stamp(near, 0.1);
+
+    // Blit, don't re-render: re-rendering at x = 6000.3 would round the centre in the fixture
+    // itself and measure that instead of the coordinate arithmetic.
+    let far = Size2us::new(SHIFT + 64, 64);
+    let mut far_data = vec![0.1f32; far.pixel_count()];
+    for y in 0..near.height {
+        let dst = far.width * y + SHIFT;
+        far_data[dst..dst + near.width].copy_from_slice(near_pixels.row(y));
+    }
+    let far_pixels = Buffer2::new(far.width, far.height, far_data);
+
+    let radius = compute_stamp_radius(TEST_EXPECTED_FWHM);
+    let bg_near = make_uniform_background(near, 0.1, 0.01);
+    let bg_far = make_uniform_background(far, 0.1, 0.01);
+
+    let near_pos = refine_centroid(&near_pixels, &bg_near, true_pos, radius, TEST_EXPECTED_FWHM)
+        .expect("near refine should succeed");
+    let far_pos = refine_centroid(
+        &far_pixels,
+        &bg_far,
+        true_pos + DVec2::new(SHIFT as f64, 0.0),
+        radius,
+        TEST_EXPECTED_FWHM,
+    )
+    .expect("far refine should succeed");
+
+    let drift = (far_pos.x - SHIFT as f64 - near_pos.x).abs();
+    assert!(
+        drift < 1e-9,
+        "same pixels drifted {drift} px between x≈32 and x≈{}: near={}, far={}",
+        SHIFT + 32,
+        near_pos.x,
+        far_pos.x - SHIFT as f64
+    );
+    // Not bit-identical: the per-column Gaussian weights are computed from `px - pos_x`, whose
+    // rounding differs between x ≈ 32 and x ≈ 6000, and those weights feed the y accumulator too.
+    // A few f64 ulp, six orders of magnitude below the f32 quantization this replaces.
+    let y_drift = (far_pos.y - near_pos.y).abs();
+    assert!(
+        y_drift < 1e-9,
+        "y drifted {y_drift} px under an x-only shift"
     );
 }
 
@@ -192,7 +260,7 @@ fn valid_stamp_position_covers_boundaries_and_rounding() {
     #[derive(Debug)]
     struct Case {
         name: &'static str,
-        position: Vec2,
+        position: DVec2,
         size: Size2us,
         expected: bool,
     }
@@ -202,79 +270,79 @@ fn valid_stamp_position_covers_boundaries_and_rounding() {
     let cases = [
         Case {
             name: "center",
-            position: Vec2::splat(32.0),
+            position: DVec2::splat(32.0),
             size: Size2us::new(64, 64),
             expected: true,
         },
         Case {
             name: "minimum valid",
-            position: Vec2::splat(radius as f32),
+            position: DVec2::splat(radius as f64),
             size: Size2us::new(64, 64),
             expected: true,
         },
         Case {
             name: "maximum valid",
-            position: Vec2::splat((64 - radius - 1) as f32),
+            position: DVec2::splat((64 - radius - 1) as f64),
             size: Size2us::new(64, 64),
             expected: true,
         },
         Case {
             name: "left edge",
-            position: Vec2::new((radius - 1) as f32, 32.0),
+            position: DVec2::new((radius - 1) as f64, 32.0),
             size: Size2us::new(64, 64),
             expected: false,
         },
         Case {
             name: "top edge",
-            position: Vec2::new(32.0, (radius - 1) as f32),
+            position: DVec2::new(32.0, (radius - 1) as f64),
             size: Size2us::new(64, 64),
             expected: false,
         },
         Case {
             name: "right edge",
-            position: Vec2::new((64 - radius) as f32, 32.0),
+            position: DVec2::new((64 - radius) as f64, 32.0),
             size: Size2us::new(64, 64),
             expected: false,
         },
         Case {
             name: "bottom edge",
-            position: Vec2::new(32.0, (64 - radius) as f32),
+            position: DVec2::new(32.0, (64 - radius) as f64),
             size: Size2us::new(64, 64),
             expected: false,
         },
         Case {
             name: "negative x",
-            position: Vec2::new(-1.0, 32.0),
+            position: DVec2::new(-1.0, 32.0),
             size: Size2us::new(64, 64),
             expected: false,
         },
         Case {
             name: "negative y",
-            position: Vec2::new(32.0, -1.0),
+            position: DVec2::new(32.0, -1.0),
             size: Size2us::new(64, 64),
             expected: false,
         },
         Case {
             name: "fraction rounds in",
-            position: Vec2::new(7.4, 32.0),
+            position: DVec2::new(7.4, 32.0),
             size: Size2us::new(64, 64),
             expected: true,
         },
         Case {
             name: "fraction rounds out",
-            position: Vec2::new(6.4, 32.0),
+            position: DVec2::new(6.4, 32.0),
             size: Size2us::new(64, 64),
             expected: false,
         },
         Case {
             name: "minimum image size",
-            position: Vec2::splat(radius as f32),
+            position: DVec2::splat(radius as f64),
             size: Size2us::new(min_size, min_size),
             expected: true,
         },
         Case {
             name: "image too small",
-            position: Vec2::splat(radius as f32),
+            position: DVec2::splat(radius as f64),
             size: Size2us::new(min_size - 1, min_size - 1),
             expected: false,
         },

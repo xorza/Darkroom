@@ -9,16 +9,22 @@ fn test_centroid_undersampled_psf() {
     let width = 64;
     let height = 64;
     let sigma = 0.7f32; // FWHM ≈ 1.65 pixels (undersampled)
-    let true_pos = Vec2::new(32.3, 32.7);
+    let true_pos = DVec2::new(32.3, 32.7);
 
-    let pixels = SyntheticStar::new(true_pos, 0.9, StarProfile::Gaussian { sigma })
+    let pixels = SyntheticStar::new(true_pos.as_vec2(), 0.9, StarProfile::Gaussian { sigma })
         .stamp(Size2us::new(width, height), 0.1);
     let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
 
     let expected_fwhm = FWHM_TO_SIGMA * sigma;
     let stamp_radius = 5; // Smaller stamp for undersampled
 
-    let result = refine_centroid(&pixels, &bg, Vec2::splat(32.0), stamp_radius, expected_fwhm);
+    let result = refine_centroid(
+        &pixels,
+        &bg,
+        DVec2::splat(32.0),
+        stamp_radius,
+        expected_fwhm,
+    );
 
     assert!(
         result.is_some(),
@@ -42,16 +48,22 @@ fn test_centroid_large_psf() {
     let width = 128;
     let height = 128;
     let sigma = 8.0f32; // FWHM ≈ 18.8 pixels (large PSF)
-    let true_pos = Vec2::new(64.3, 64.7);
+    let true_pos = DVec2::new(64.3, 64.7);
 
-    let pixels = SyntheticStar::new(true_pos, 0.8, StarProfile::Gaussian { sigma })
+    let pixels = SyntheticStar::new(true_pos.as_vec2(), 0.8, StarProfile::Gaussian { sigma })
         .stamp(Size2us::new(width, height), 0.1);
     let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
 
     let expected_fwhm = FWHM_TO_SIGMA * sigma;
     let stamp_radius = MAX_STAMP_RADIUS; // Use maximum allowed
 
-    let result = refine_centroid(&pixels, &bg, Vec2::splat(64.0), stamp_radius, expected_fwhm);
+    let result = refine_centroid(
+        &pixels,
+        &bg,
+        DVec2::splat(64.0),
+        stamp_radius,
+        expected_fwhm,
+    );
 
     assert!(result.is_some(), "Should find centroid for large PSF");
     let new_pos = result.unwrap();
@@ -78,12 +90,12 @@ fn test_gaussian_fit_undersampled_psf() {
     let width = 21;
     let height = 21;
     let true_sigma = 0.8f32; // FWHM ≈ 1.88 pixels
-    let true_cx = 10.3f32;
-    let true_cy = 10.7f32;
+    let true_cx = 10.3f64;
+    let true_cy = 10.7f64;
     let background = 0.1f32;
 
     let pixels = SyntheticStar::new(
-        Vec2::new(true_cx, true_cy),
+        Vec2::new(true_cx as f32, true_cy as f32),
         1.0,
         StarProfile::Gaussian { sigma: true_sigma },
     )
@@ -92,7 +104,7 @@ fn test_gaussian_fit_undersampled_psf() {
     let config = GaussianFitConfig::default();
     let result = fit_gaussian_2d(
         &pixels,
-        Vec2::splat(10.0),
+        DVec2::splat(10.0),
         &StampGrid::new(6),
         background,
         None,
@@ -121,7 +133,7 @@ fn test_metrics_small_fwhm() {
         .stamp(Size2us::new(width, height), 0.1);
     let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
 
-    let metrics = compute_star(&pixels, &bg, Vec2::splat(32.0), 0.0, 5, None, None);
+    let metrics = compute_star(&pixels, &bg, DVec2::splat(32.0), 0.0, 5, None, None);
 
     assert!(metrics.is_some(), "Should compute metrics for small FWHM");
     let m = metrics.unwrap();
@@ -142,7 +154,7 @@ fn test_metrics_large_fwhm() {
     let metrics = compute_star(
         &pixels,
         &bg,
-        Vec2::splat(64.0),
+        DVec2::splat(64.0),
         0.0,
         MAX_STAMP_RADIUS,
         None,
@@ -178,12 +190,12 @@ fn test_centroid_with_nearby_star() {
     let sigma = 2.5f32;
 
     // Primary star at center, fainter companion 8 pixels away
-    let primary_pos = Vec2::new(32.0, 32.0);
-    let secondary_pos = Vec2::new(40.0, 32.0); // 8 pixels separation
+    let primary_pos = DVec2::new(32.0, 32.0);
+    let secondary_pos = DVec2::new(40.0, 32.0); // 8 pixels separation
     let pixels = make_blended_stars(
         Size2us::new(width, height),
-        primary_pos,
-        secondary_pos,
+        primary_pos.as_vec2(),
+        secondary_pos.as_vec2(),
         sigma,
         0.8,
         0.3,
@@ -215,12 +227,12 @@ fn test_centroid_blended_stars() {
     let sigma = 2.5f32;
 
     // Two stars only 5 pixels apart (significant overlap)
-    let primary_pos = Vec2::new(32.0, 32.0);
-    let secondary_pos = Vec2::new(37.0, 32.0);
+    let primary_pos = DVec2::new(32.0, 32.0);
+    let secondary_pos = DVec2::new(37.0, 32.0);
     let pixels = make_blended_stars(
         Size2us::new(width, height),
-        primary_pos,
-        secondary_pos,
+        primary_pos.as_vec2(),
+        secondary_pos.as_vec2(),
         sigma,
         0.8,
         0.5,
@@ -255,12 +267,12 @@ fn test_gaussian_fit_with_contamination() {
     let background = 0.1f32;
 
     // Primary star at center
-    let true_cx = 15.0f32;
-    let true_cy = 15.0f32;
+    let true_cx = 15.0f64;
+    let true_cy = 15.0f64;
 
     let size = Size2us::new(width, height);
     let mut pixels = SyntheticStar::new(
-        Vec2::new(true_cx, true_cy),
+        Vec2::new(true_cx as f32, true_cy as f32),
         0.8,
         StarProfile::Gaussian { sigma },
     )
@@ -273,7 +285,7 @@ fn test_gaussian_fit_with_contamination() {
     let config = GaussianFitConfig::default();
     let result = fit_gaussian_2d(
         &pixels,
-        Vec2::new(true_cx, true_cy),
+        DVec2::new(true_cx, true_cy),
         &StampGrid::new(8),
         background,
         None,
@@ -318,7 +330,7 @@ fn test_eccentricity_with_contamination() {
     let metrics_single = compute_star(
         &single_star,
         &bg,
-        Vec2::splat(32.0),
+        DVec2::splat(32.0),
         0.0,
         TEST_STAMP_RADIUS,
         None,
@@ -329,7 +341,7 @@ fn test_eccentricity_with_contamination() {
     let metrics_contaminated = compute_star(
         &contaminated,
         &bg,
-        Vec2::splat(32.0),
+        DVec2::splat(32.0),
         0.0,
         TEST_STAMP_RADIUS,
         None,
@@ -387,14 +399,20 @@ fn make_rotated_elliptical_star(
 fn test_centroid_rotated_ellipse_45deg() {
     let width = 64;
     let height = 64;
-    let true_pos = Vec2::new(32.3, 32.7);
+    let true_pos = DVec2::new(32.3, 32.7);
     let angle = FRAC_PI_4; // 45 degrees
 
-    let pixels =
-        make_rotated_elliptical_star(Size2us::new(width, height), true_pos, 4.0, 2.0, angle, 0.8);
+    let pixels = make_rotated_elliptical_star(
+        Size2us::new(width, height),
+        true_pos.as_vec2(),
+        4.0,
+        2.0,
+        angle,
+        0.8,
+    );
     let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
 
-    let result = refine_centroid(&pixels, &bg, Vec2::splat(32.0), TEST_STAMP_RADIUS, 6.0);
+    let result = refine_centroid(&pixels, &bg, DVec2::splat(32.0), TEST_STAMP_RADIUS, 6.0);
 
     assert!(result.is_some(), "Should find centroid for rotated ellipse");
     let new_pos = result.unwrap();
@@ -414,7 +432,7 @@ fn test_centroid_rotated_ellipse_45deg() {
 fn test_centroid_various_rotation_angles() {
     let width = 64;
     let height = 64;
-    let true_pos = Vec2::new(32.0, 32.0);
+    let true_pos = DVec2::new(32.0, 32.0);
     let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
 
     // Test multiple rotation angles
@@ -422,7 +440,7 @@ fn test_centroid_various_rotation_angles() {
         let angle_rad = (angle_deg as f32).to_radians();
         let pixels = make_rotated_elliptical_star(
             Size2us::new(width, height),
-            true_pos,
+            true_pos.as_vec2(),
             4.0,
             2.0,
             angle_rad,
@@ -453,7 +471,7 @@ fn test_centroid_various_rotation_angles() {
 fn test_eccentricity_rotation_invariant() {
     let width = 64;
     let height = 64;
-    let pos = Vec2::splat(32.0);
+    let pos = DVec2::splat(32.0);
     let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
 
     let mut eccentricities = Vec::new();
@@ -462,7 +480,7 @@ fn test_eccentricity_rotation_invariant() {
         let angle_rad = (angle_deg as f32).to_radians();
         let pixels = make_rotated_elliptical_star(
             Size2us::new(width, height),
-            pos,
+            pos.as_vec2(),
             4.0,
             2.0,
             angle_rad,
@@ -497,14 +515,14 @@ fn test_gaussian_fit_rotated_ellipse() {
 
     let width = 31;
     let height = 31;
-    let true_cx = 15.0f32;
-    let true_cy = 15.0f32;
+    let true_cx = 15.0f64;
+    let true_cy = 15.0f64;
     let background = 0.1f32;
 
     // Create 45° rotated ellipse
     let pixels = make_rotated_elliptical_star(
         Size2us::new(width, height),
-        Vec2::new(true_cx, true_cy),
+        Vec2::new(true_cx as f32, true_cy as f32),
         3.5,
         2.0,
         FRAC_PI_4,
@@ -514,7 +532,7 @@ fn test_gaussian_fit_rotated_ellipse() {
     let config = GaussianFitConfig::default();
     let result = fit_gaussian_2d(
         &pixels,
-        Vec2::new(true_cx, true_cy),
+        DVec2::new(true_cx, true_cy),
         &StampGrid::new(8),
         background,
         None,
@@ -549,16 +567,16 @@ fn test_gaussian_fit_rotated_ellipse() {
 fn test_recovery_from_2pixel_offset() {
     let width = 64;
     let height = 64;
-    let true_pos = Vec2::new(32.0, 32.0);
+    let true_pos = DVec2::new(32.0, 32.0);
     let sigma = 2.5f32;
 
-    let pixels = SyntheticStar::new(true_pos, 0.8, StarProfile::Gaussian { sigma })
+    let pixels = SyntheticStar::new(true_pos.as_vec2(), 0.8, StarProfile::Gaussian { sigma })
         .stamp(Size2us::new(width, height), 0.1);
     let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
     let expected_fwhm = FWHM_TO_SIGMA * sigma;
 
     // Start 2 pixels away
-    let initial_guess = Vec2::new(34.0, 30.0);
+    let initial_guess = DVec2::new(34.0, 30.0);
 
     let mut pos = initial_guess;
     for _ in 0..MAX_MOMENTS_ITERATIONS {
@@ -587,16 +605,16 @@ fn test_recovery_from_2pixel_offset() {
 fn test_recovery_from_3pixel_offset() {
     let width = 64;
     let height = 64;
-    let true_pos = Vec2::new(32.0, 32.0);
+    let true_pos = DVec2::new(32.0, 32.0);
     let sigma = 2.5f32;
 
-    let pixels = SyntheticStar::new(true_pos, 0.8, StarProfile::Gaussian { sigma })
+    let pixels = SyntheticStar::new(true_pos.as_vec2(), 0.8, StarProfile::Gaussian { sigma })
         .stamp(Size2us::new(width, height), 0.1);
     let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
     let expected_fwhm = FWHM_TO_SIGMA * sigma;
 
     // Start 3 pixels away diagonally
-    let initial_guess = Vec2::new(34.1, 34.1); // ~3 pixel offset
+    let initial_guess = DVec2::new(34.1, 34.1); // ~3 pixel offset
 
     let mut pos = initial_guess;
     for _ in 0..MAX_MOMENTS_ITERATIONS {
@@ -629,20 +647,20 @@ fn test_gaussian_fit_bad_initial_guess() {
 
     let width = 31;
     let height = 31;
-    let true_cx = 15.0f32;
-    let true_cy = 15.0f32;
+    let true_cx = 15.0f64;
+    let true_cy = 15.0f64;
     let sigma = 2.5f32;
     let background = 0.1f32;
 
     let pixels = SyntheticStar::new(
-        Vec2::new(true_cx, true_cy),
+        Vec2::new(true_cx as f32, true_cy as f32),
         1.0,
         StarProfile::Gaussian { sigma },
     )
     .stamp(Size2us::new(width, height), background);
 
     // Initial guess 2.5 pixels away
-    let initial_guess = Vec2::new(13.0, 17.0);
+    let initial_guess = DVec2::new(13.0, 17.0);
 
     let config = GaussianFitConfig::default();
     let result = fit_gaussian_2d(
@@ -672,8 +690,8 @@ fn test_moffat_fit_bad_initial_guess() {
 
     let width = 31;
     let height = 31;
-    let true_cx = 15.0f32;
-    let true_cy = 15.0f32;
+    let true_cx = 15.0f64;
+    let true_cy = 15.0f64;
     let alpha = 2.5f32;
     let beta = 2.5f32;
     let background = 0.1f32;
@@ -681,14 +699,14 @@ fn test_moffat_fit_bad_initial_guess() {
     let mut pixels = vec![background; width * height];
     for y in 0..height {
         for x in 0..width {
-            let r2 = (x as f32 - true_cx).powi(2) + (y as f32 - true_cy).powi(2);
+            let r2 = (x as f32 - true_cx as f32).powi(2) + (y as f32 - true_cy as f32).powi(2);
             pixels[y * width + x] += 1.0 * (1.0 + r2 / (alpha * alpha)).powf(-beta);
         }
     }
     let pixels_buf = Buffer2::new(width, height, pixels);
 
     // Initial guess 2 pixels away
-    let initial_guess = Vec2::new(13.0, 17.0);
+    let initial_guess = DVec2::new(13.0, 17.0);
 
     let config = MoffatFitConfig {
         fixed_beta: beta,
