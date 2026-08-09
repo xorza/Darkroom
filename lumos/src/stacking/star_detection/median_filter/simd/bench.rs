@@ -1,121 +1,65 @@
-//! Row-width crossover sweep for the 3x3 median filter backends.
+//! Does the vectorized 3x3 median row kernel beat the plain scalar loop?
 //!
-//! Sets the `*_ROW_WIDTH_CROSSOVER` constants the dispatcher gates on. Each backend vectorizes
-//! only the interior `width - 2` pixels as `(width - 2) / LANES` chunks and finishes the rest
-//! scalar, so a narrow row is nearly all remainder and the vector setup does not pay for itself.
-//! The sweep runs one interior row at a time — the unit the dispatcher actually chooses for.
+//! This is what sets — or retires — the `*_ROW_WIDTH_CROSSOVER` constants the dispatcher gates on.
+//! It filters a whole image rather than timing one row: a single row of a realistic width runs in
+//! a few microseconds, short enough that timer overhead and machine state swamped the difference
+//! (an earlier per-row sweep put AVX2 anywhere from 8x faster to 3x slower than scalar at the same
+//! width, depending on which other widths were in the sweep). A megapixel of rows takes
+//! milliseconds and is stable.
+//!
+//! Rows run sequentially, not through rayon: production parallelizes across rows either way, so
+//! the scheduler is common to both arms and only adds variance to the thing being compared.
 
 use ::quickbench::quick_bench;
 use std::hint::black_box;
 
-use crate::stacking::star_detection::median_filter::simd::median_filter_row_scalar;
+use crate::stacking::star_detection::median_filter::simd::{
+    median_filter_row_scalar, median_filter_row_simd,
+};
 
-/// Straddles the 8-lane AVX2 and 4-lane SSE/NEON widths from "one chunk plus remainder" up to
-/// "remainder is noise", which is where the crossover has to be.
-const ROW_WIDTHS: [usize; 10] = [6, 8, 10, 12, 14, 16, 24, 32, 64, 256];
+/// Frame widths from "narrow enough that the dispatcher's threshold is in play" up to a 6k sensor.
+const IMAGE_WIDTHS: [usize; 5] = [16, 64, 256, 1024, 4096];
 
-/// Rows per timed sample, so a 6-wide row and a 256-wide row do comparable work per sample.
-fn rows_per_sample(width: usize) -> usize {
-    (16_384 / width).clamp(1, 4_096)
+/// Rows per image, chosen with the widths above to keep each sample near a megapixel of work.
+fn rows_for(width: usize) -> usize {
+    (1 << 20) / width
 }
 
-struct Rows {
-    above: Vec<f32>,
-    curr: Vec<f32>,
-    below: Vec<f32>,
-    out: Vec<f32>,
-}
-
-impl Rows {
-    /// Three rows of unsorted, non-monotonic values — a sorting network is data-independent, but
-    /// the surrounding branchy scalar remainder is not.
-    fn new(width: usize) -> Self {
-        Self {
-            above: (0..width).map(|i| ((i * 37) % 101) as f32 * 0.01).collect(),
-            curr: (0..width).map(|i| ((i * 53) % 101) as f32 * 0.01).collect(),
-            below: (0..width).map(|i| ((i * 71) % 101) as f32 * 0.01).collect(),
-            out: vec![0.0; width],
+/// `SIMD` picks the dispatched kernel or the scalar reference. A const generic rather than a
+/// function pointer so both arms inline exactly as they do in production — a `fn` pointer would
+/// block inlining of the scalar row loop and quietly hand the comparison to the vector arm.
+fn filter_interior<const SIMD: bool>(input: &[f32], output: &mut [f32], width: usize, rows: usize) {
+    for y in 1..rows - 1 {
+        let above = &input[(y - 1) * width..y * width];
+        let curr = &input[y * width..(y + 1) * width];
+        let below = &input[(y + 1) * width..(y + 2) * width];
+        let out = &mut output[y * width..(y + 1) * width];
+        if SIMD {
+            median_filter_row_simd(above, curr, below, out, width);
+        } else {
+            median_filter_row_scalar(above, curr, below, out, width);
         }
     }
 }
 
-#[quick_bench(warmup_iters = 10, iters = 100)]
-fn bench_median_filter_row_crossover(b: ::quickbench::Bencher) {
-    for width in ROW_WIDTHS {
-        let mut rows = Rows::new(width);
-        let calls = rows_per_sample(width);
-        // `ROW_WIDTHS` is a const array, so without this the sweep loop unrolls and each backend
-        // gets a compile-time width — fully unrolled scalar code that production never runs.
-        let width = black_box(width);
+#[quick_bench(warmup_iters = 2, iters = 20)]
+fn bench_median_filter_dispatch_vs_scalar(b: ::quickbench::Bencher) {
+    for width in IMAGE_WIDTHS {
+        let rows = rows_for(width);
+        // Unsorted, non-monotonic values: the sorting network is data-independent but the scalar
+        // remainder around it is not.
+        let input: Vec<f32> = (0..width * rows)
+            .map(|i| ((i * 2654435761usize) % 65521) as f32 * 1.5e-5)
+            .collect();
+        let mut output = vec![0.0f32; width * rows];
 
         b.bench_labeled(&format!("scalar_{width}"), || {
-            for _ in 0..calls {
-                median_filter_row_scalar(
-                    black_box(&rows.above),
-                    black_box(&rows.curr),
-                    black_box(&rows.below),
-                    black_box(&mut rows.out),
-                    width,
-                );
-            }
+            filter_interior::<false>(black_box(&input), black_box(&mut output), width, rows);
+            black_box(&output);
         });
-
-        #[cfg(target_arch = "x86_64")]
-        {
-            use crate::stacking::star_detection::median_filter::simd::x86;
-
-            if imaginarium::cpu_features::has_avx2() {
-                b.bench_labeled(&format!("avx2_{width}"), || {
-                    for _ in 0..calls {
-                        // SAFETY: AVX2 availability checked above.
-                        unsafe {
-                            x86::median_filter_row_avx2(
-                                black_box(&rows.above),
-                                black_box(&rows.curr),
-                                black_box(&rows.below),
-                                black_box(&mut rows.out),
-                                width,
-                            );
-                        }
-                    }
-                });
-            }
-            if imaginarium::cpu_features::has_sse4_1() {
-                b.bench_labeled(&format!("sse41_{width}"), || {
-                    for _ in 0..calls {
-                        // SAFETY: SSE4.1 availability checked above.
-                        unsafe {
-                            x86::median_filter_row_sse41(
-                                black_box(&rows.above),
-                                black_box(&rows.curr),
-                                black_box(&rows.below),
-                                black_box(&mut rows.out),
-                                width,
-                            );
-                        }
-                    }
-                });
-            }
-        }
-
-        #[cfg(target_arch = "aarch64")]
-        {
-            use crate::stacking::star_detection::median_filter::simd::neon;
-
-            b.bench_labeled(&format!("neon_{width}"), || {
-                for _ in 0..calls {
-                    // SAFETY: NEON is unconditionally available on aarch64.
-                    unsafe {
-                        neon::median_filter_row_neon(
-                            black_box(&rows.above),
-                            black_box(&rows.curr),
-                            black_box(&rows.below),
-                            black_box(&mut rows.out),
-                            width,
-                        );
-                    }
-                }
-            });
-        }
+        b.bench_labeled(&format!("dispatch_{width}"), || {
+            filter_interior::<true>(black_box(&input), black_box(&mut output), width, rows);
+            black_box(&output);
+        });
     }
 }

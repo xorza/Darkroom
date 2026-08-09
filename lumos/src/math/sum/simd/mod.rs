@@ -21,6 +21,13 @@ mod sse41;
 /// SSE4.1 vector widths, so below them the scalar loop wins on a length the kernels could handle.
 /// Set from `bench_sum_f32_crossover` and `bench_weighted_mean_f32_crossover` (`bench.rs`), which
 /// sweep each backend against scalar over `CROSSOVER_SIZES`.
+///
+/// `X86_WEIGHTED_MEAN_CROSSOVER` gates the AVX2 and the SSE4.1 rung on one number even though they
+/// are 8- and 4-lane kernels, which looks like an 8-lane measurement borrowed by a 4-lane path.
+/// Measured, it is right for both: at n=64 both lose to scalar (7.79µs and 7.65µs against 6.79µs),
+/// at n=128 both win (5.12µs and 6.22µs against 6.91µs). Above it AVX2 runs ~2x scalar and SSE4.1
+/// ~1.35x, so the SSE rung is worth having on the pre-AVX2 machines that are the only ones to
+/// reach it.
 #[cfg(target_arch = "x86_64")]
 const AVX2_SUM_CROSSOVER: usize = 256;
 #[cfg(target_arch = "x86_64")]
@@ -30,6 +37,12 @@ const X86_WEIGHTED_MEAN_CROSSOVER: usize = 128;
 ///
 /// The NEON arm has no crossover of its own — one full vector is enough for it to win — so it is
 /// gated on the structural minimum instead.
+///
+/// There is deliberately no SSE4.1 rung here, unlike [`weighted_mean_f32`]. It would only ever run
+/// on pre-AVX2 x86_64, where the fallback is already LLVM's SSE2 auto-vectorization of
+/// `scalar::sum_f32` rather than a true scalar loop — the same situation that leaves the weighted
+/// mean's hand-written SSE kernel only ~1.35x ahead. A second unsafe kernel and its cross-checks,
+/// carried forever, to win about that much on hardware from 2013 and earlier is not worth it.
 pub(crate) fn sum_f32(values: &[f32]) -> f32 {
     dispatch! {
         x86: avx2 if values.len() >= AVX2_SUM_CROSSOVER => avx2::sum_f32(values),

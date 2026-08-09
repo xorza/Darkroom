@@ -111,17 +111,17 @@ mod x86;
 #[cfg(target_arch = "aarch64")]
 mod neon;
 
-/// Row widths at or above which each kernel is entered.
+/// Row widths at or above which each kernel is entered. Every backend vectorizes the interior
+/// pixels as `(width - 2) / LANES` chunks, so a row only just wider than `2 + LANES` is nearly all
+/// scalar remainder; these sit above that break-even rather than at it.
 ///
-/// **These numbers do not describe a crossover that exists.** `bench_median_filter_row_crossover`
-/// (`bench.rs`) sweeps every backend against `median_filter_row_scalar` from width 6 to 256 and
-/// the vector kernels lose at every point: at width 12, where AVX2 is entered, scalar is ~2.7x
-/// faster (20.0µs vs 54.8µs per sample), and by width 256 AVX2 has only drawn level (9.3µs vs
-/// 8.5µs). SSE4.1 never wins. The reason is that the "scalar" loop is not scalar — at width 256 it
-/// runs 0.52ns per interior pixel, about 1.8 cycles, which a 25-comparator network cannot reach
-/// one lane at a time; LLVM auto-vectorizes it to roughly the same width the intrinsics use, and
-/// does it better. Left as they are because changing them changes what runs; whether these kernels
-/// earn their place at all is the open question.
+/// The gap they are guarding is small either way. `bench_median_filter_dispatch_vs_scalar`
+/// (`bench.rs`) filters a megapixel at widths 16 to 4096 and puts the dispatched kernel within
+/// ±3% of `median_filter_row_scalar` everywhere except width 16, where it is ~10% ahead. That is
+/// because the scalar loop is not really scalar: at width 4096 it runs ~0.7ns per interior pixel,
+/// roughly 2.4 cycles, which a 25-comparator min/max network cannot reach one lane at a time —
+/// LLVM auto-vectorizes it to about the width the intrinsics use. So these thresholds are cheap
+/// insurance at the narrow end rather than the boundary of a large win.
 #[cfg(target_arch = "x86_64")]
 const AVX2_ROW_WIDTH_CROSSOVER: usize = 12;
 #[cfg(target_arch = "x86_64")]
