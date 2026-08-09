@@ -23,7 +23,7 @@ use crate::memory::fits_in_memory;
 use crate::stacking::combine::cache::FrameCache;
 use crate::stacking::combine::config::StackConfig;
 use crate::stacking::combine::error::Error;
-use crate::stacking::combine::stack::run_stacking;
+use crate::stacking::combine::stack::combine_cached;
 use crate::stacking::progress::ProgressCallback;
 use crate::stacking::stack_product::quality_planes::QualityPlanes;
 use defect_map::DefectMap;
@@ -207,13 +207,11 @@ pub fn stack_cfa_master(
     progress: ProgressCallback,
     cancel: CancelToken,
 ) -> Result<Option<CfaImage>, Error> {
+    // `None` rather than `Error::NoFrames`: an absent calibration role is normal, and this is
+    // the one thing `combine_cached` cannot decide for us.
     if paths.is_empty() {
         return Ok(None);
     }
-    // The only combine entry point that does not go through `combine_cached`, so it is also the
-    // only one that has to validate for itself. Without this an out-of-range rejection reaches
-    // the reducer, where a NaN sigma rejects every sample and yields a silently black master.
-    config.validate()?;
 
     // A master is mosaic data for the calibration stage to consume, not a science product: the
     // ancillary planes would be allocated and written per pixel for nothing.
@@ -223,10 +221,11 @@ pub fn stack_cfa_master(
     };
     // `cancel` rides on the cache from construction, so the RAW-decode load loop
     // polls it too (not just the combine).
-    let cache =
-        FrameCache::from_cfa_paths(paths, &config.cache, config.normalization, progress, cancel)?;
+    let product = combine_cached(&config, paths.len(), "cfa paths", || {
+        FrameCache::from_cfa_paths(paths, &config.cache, config.normalization, progress, cancel)
+    })?;
 
-    Ok(Some(run_stacking(&cache, &config)?.into_cfa_master()))
+    Ok(Some(product.into_cfa_master()))
 }
 
 impl CalibrationMasters {
