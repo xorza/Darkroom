@@ -1,4 +1,5 @@
 use crate::math::size2us::Size2us;
+use crate::stacking::star_detection::centroid::StampGrid;
 use crate::stacking::star_detection::centroid::tests::*;
 
 /// Test centroiding with undersampled PSF (FWHM < 2 pixels).
@@ -89,7 +90,14 @@ fn test_gaussian_fit_undersampled_psf() {
     .stamp(Size2us::new(width, height), background);
 
     let config = GaussianFitConfig::default();
-    let result = fit_gaussian_2d(&pixels, Vec2::splat(10.0), 6, background, None, &config);
+    let result = fit_gaussian_2d(
+        &pixels,
+        Vec2::splat(10.0),
+        &StampGrid::new(6),
+        background,
+        None,
+        &config,
+    );
 
     assert!(result.is_some(), "Should fit undersampled Gaussian");
     let result = result.unwrap();
@@ -266,7 +274,7 @@ fn test_gaussian_fit_with_contamination() {
     let result = fit_gaussian_2d(
         &pixels,
         Vec2::new(true_cx, true_cy),
-        8,
+        &StampGrid::new(8),
         background,
         None,
         &config,
@@ -507,7 +515,7 @@ fn test_gaussian_fit_rotated_ellipse() {
     let result = fit_gaussian_2d(
         &pixels,
         Vec2::new(true_cx, true_cy),
-        8,
+        &StampGrid::new(8),
         background,
         None,
         &config,
@@ -637,7 +645,14 @@ fn test_gaussian_fit_bad_initial_guess() {
     let initial_guess = Vec2::new(13.0, 17.0);
 
     let config = GaussianFitConfig::default();
-    let result = fit_gaussian_2d(&pixels, initial_guess, 8, background, None, &config);
+    let result = fit_gaussian_2d(
+        &pixels,
+        initial_guess,
+        &StampGrid::new(8),
+        background,
+        None,
+        &config,
+    );
 
     assert!(result.is_some(), "Should converge from bad initial guess");
     let result = result.unwrap();
@@ -679,7 +694,14 @@ fn test_moffat_fit_bad_initial_guess() {
         fixed_beta: beta,
         ..Default::default()
     };
-    let result = fit_moffat_2d(&pixels_buf, initial_guess, 8, background, None, &config);
+    let result = fit_moffat_2d(
+        &pixels_buf,
+        initial_guess,
+        &StampGrid::new(8),
+        background,
+        None,
+        &config,
+    );
 
     assert!(
         result.is_some(),

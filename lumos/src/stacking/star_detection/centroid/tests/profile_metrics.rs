@@ -1,6 +1,7 @@
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 use crate::stacking::star_detection::centroid::tests::*;
+use crate::stacking::star_detection::centroid::{StampGrid, compute_stamp_radius};
 
 /// Helper: run measure_star on a single-star image with given centroid method.
 fn measure_single_star(
@@ -38,6 +39,7 @@ fn measure_single_star(
         &region,
         &config,
         FwhmConfig::default().expected,
+        &StampGrid::new(compute_stamp_radius(FwhmConfig::default().expected)),
     )
     .expect("measure_star should succeed")
 }

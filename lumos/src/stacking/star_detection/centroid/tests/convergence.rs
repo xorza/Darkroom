@@ -1,4 +1,5 @@
 use crate::math::size2us::Size2us;
+use crate::stacking::star_detection::centroid::StampGrid;
 use crate::stacking::star_detection::centroid::tests::*;
 
 /// Verify that Phase 1 (weighted moments) reaches sub-pixel accuracy quickly.
@@ -126,10 +127,24 @@ fn test_gaussian_fit_accuracy_independent_of_phase1_iterations() {
 
     // Now apply Gaussian fit from both starting points
     let config = GaussianFitConfig::default();
-    let result_2iter = fit_gaussian_2d(&pixels, pos_2iter, stamp_radius, 0.1, None, &config)
-        .expect("fit should succeed from 2-iter seed");
-    let result_full = fit_gaussian_2d(&pixels, pos_full, stamp_radius, 0.1, None, &config)
-        .expect("fit should succeed from full seed");
+    let result_2iter = fit_gaussian_2d(
+        &pixels,
+        pos_2iter,
+        &StampGrid::new(stamp_radius),
+        0.1,
+        None,
+        &config,
+    )
+    .expect("fit should succeed from 2-iter seed");
+    let result_full = fit_gaussian_2d(
+        &pixels,
+        pos_full,
+        &StampGrid::new(stamp_radius),
+        0.1,
+        None,
+        &config,
+    )
+    .expect("fit should succeed from full seed");
 
     // Both should converge to essentially the same position
     let diff = ((result_2iter.pos.x - result_full.pos.x).powi(2)
@@ -191,10 +206,24 @@ fn test_moffat_fit_accuracy_independent_of_phase1_iterations() {
         fixed_beta: 2.5,
         ..MoffatFitConfig::default()
     };
-    let result_2iter = fit_moffat_2d(&pixels, pos_2iter, stamp_radius, 0.1, None, &config)
-        .expect("fit should succeed from 2-iter seed");
-    let result_full = fit_moffat_2d(&pixels, pos_full, stamp_radius, 0.1, None, &config)
-        .expect("fit should succeed from full seed");
+    let result_2iter = fit_moffat_2d(
+        &pixels,
+        pos_2iter,
+        &StampGrid::new(stamp_radius),
+        0.1,
+        None,
+        &config,
+    )
+    .expect("fit should succeed from 2-iter seed");
+    let result_full = fit_moffat_2d(
+        &pixels,
+        pos_full,
+        &StampGrid::new(stamp_radius),
+        0.1,
+        None,
+        &config,
+    )
+    .expect("fit should succeed from full seed");
 
     // Both should converge to essentially the same position
     let diff = ((result_2iter.pos.x - result_full.pos.x).powi(2)
@@ -313,7 +342,7 @@ fn test_prefit_moments_iterations_sufficient() {
         let result_from_2iter = fit_gaussian_2d(
             &pixels,
             pos_2iter,
-            stamp_radius,
+            &StampGrid::new(stamp_radius),
             local_bg,
             None,
             &fit_config,
@@ -321,7 +350,7 @@ fn test_prefit_moments_iterations_sufficient() {
         let result_from_10iter = fit_gaussian_2d(
             &pixels,
             pos_10iter,
-            stamp_radius,
+            &StampGrid::new(stamp_radius),
             local_bg,
             None,
             &fit_config,
@@ -434,7 +463,7 @@ fn test_prefit_moments_iterations_sufficient_moffat() {
     let result_from_2iter = fit_moffat_2d(
         &pixels,
         pos_2iter,
-        stamp_radius,
+        &StampGrid::new(stamp_radius),
         local_bg,
         None,
         &fit_config,
@@ -442,7 +471,7 @@ fn test_prefit_moments_iterations_sufficient_moffat() {
     let result_from_10iter = fit_moffat_2d(
         &pixels,
         pos_10iter,
-        stamp_radius,
+        &StampGrid::new(stamp_radius),
         local_bg,
         None,
         &fit_config,

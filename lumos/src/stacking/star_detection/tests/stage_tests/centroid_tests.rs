@@ -11,6 +11,7 @@ use crate::math::fwhm::fwhm_to_sigma;
 use crate::math::rect::URect;
 use crate::math::vec2us::Vec2us;
 use crate::stacking::star_detection::centroid::measure_star;
+use crate::stacking::star_detection::centroid::{StampGrid, compute_stamp_radius};
 use crate::stacking::star_detection::config::measurement_config::{
     CentroidMethod, MeasurementConfig,
 };
@@ -88,6 +89,7 @@ fn centroid_recovers_known_subpixel_positions() {
             &candidate_at(&pixels, true_x, true_y),
             &config,
             fwhm,
+            &StampGrid::new(compute_stamp_radius(fwhm)),
         )
         .unwrap_or_else(|| panic!("no centroid at ({true_x}, {true_y})"));
         let error =
@@ -131,6 +133,7 @@ fn centroid_accuracy_improves_with_snr() {
             &candidate_at(&pixels, tx, ty),
             &config,
             fwhm,
+            &StampGrid::new(compute_stamp_radius(fwhm)),
         )
         .expect("centroid");
         let error = ((star.pos.x - tx as f64).powi(2) + (star.pos.y - ty as f64).powi(2)).sqrt();
@@ -183,6 +186,7 @@ fn centroid_methods_agree_and_fits_beat_moments() {
             &candidate_at(&pixels, tx, ty),
             &config,
             fwhm,
+            &StampGrid::new(compute_stamp_radius(fwhm)),
         )
         .expect("centroid");
         let err = ((star.pos.x - tx as f64).powi(2) + (star.pos.y - ty as f64).powi(2)).sqrt();

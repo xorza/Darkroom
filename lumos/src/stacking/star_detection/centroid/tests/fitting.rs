@@ -1,5 +1,6 @@
 use crate::math::size2us::Size2us;
 use crate::stacking::star_detection::centroid::tests::*;
+use crate::stacking::star_detection::centroid::{StampGrid, compute_stamp_radius};
 
 /// Test that weighted centroid achieves claimed ~0.05 pixel accuracy
 /// by testing many random sub-pixel offsets.
@@ -46,6 +47,7 @@ fn test_weighted_centroid_precision_statistical() {
                 &candidates[0],
                 &config.measurement,
                 config.fwhm.expected,
+                &StampGrid::new(compute_stamp_radius(config.fwhm.expected)),
             ) {
                 let error = ((star.pos.x - true_pos.x as f64).powi(2)
                     + (star.pos.y - true_pos.y as f64).powi(2))
@@ -108,9 +110,14 @@ fn test_gaussian_fit_precision_statistical() {
             let pixels_buf = Buffer2::new(width, height, pixels);
 
             let config = GaussianFitConfig::default();
-            if let Some(result) =
-                fit_gaussian_2d(&pixels_buf, Vec2::splat(10.0), 8, background, None, &config)
-                && result.converged
+            if let Some(result) = fit_gaussian_2d(
+                &pixels_buf,
+                Vec2::splat(10.0),
+                &StampGrid::new(8),
+                background,
+                None,
+                &config,
+            ) && result.converged
             {
                 let error =
                     ((result.pos.x - true_cx).powi(2) + (result.pos.y - true_cy).powi(2)).sqrt();
@@ -172,9 +179,14 @@ fn test_moffat_fit_precision_statistical() {
                 fixed_beta: beta,
                 ..Default::default()
             };
-            if let Some(result) =
-                fit_moffat_2d(&pixels_buf, Vec2::splat(10.0), 8, background, None, &config)
-                && result.converged
+            if let Some(result) = fit_moffat_2d(
+                &pixels_buf,
+                Vec2::splat(10.0),
+                &StampGrid::new(8),
+                background,
+                None,
+                &config,
+            ) && result.converged
             {
                 let error =
                     ((result.pos.x - true_cx).powi(2) + (result.pos.y - true_cy).powi(2)).sqrt();
@@ -422,7 +434,14 @@ fn test_gaussian_fit_sigma_recovery() {
         let pixels_buf = Buffer2::new(width, height, pixels);
 
         let config = GaussianFitConfig::default();
-        let result = fit_gaussian_2d(&pixels_buf, Vec2::new(cx, cy), 8, background, None, &config);
+        let result = fit_gaussian_2d(
+            &pixels_buf,
+            Vec2::new(cx, cy),
+            &StampGrid::new(8),
+            background,
+            None,
+            &config,
+        );
 
         let result =
             result.unwrap_or_else(|| panic!("Fit should return Some for sigma={}", true_sigma));
@@ -477,8 +496,15 @@ fn test_moffat_fit_alpha_recovery() {
             fixed_beta: beta,
             ..Default::default()
         };
-        let result = fit_moffat_2d(&pixels_buf, Vec2::new(cx, cy), 8, background, None, &config)
-            .unwrap_or_else(|| panic!("Fit should return Some for alpha={}", true_alpha));
+        let result = fit_moffat_2d(
+            &pixels_buf,
+            Vec2::new(cx, cy),
+            &StampGrid::new(8),
+            background,
+            None,
+            &config,
+        )
+        .unwrap_or_else(|| panic!("Fit should return Some for alpha={}", true_alpha));
 
         // Check that alpha is accurate (convergence flag may be false if
         // initial guess was already close)
@@ -523,7 +549,14 @@ fn test_gaussian_fit_with_noise() {
     let pixels_buf = Buffer2::new(width, height, pixels);
 
     let config = GaussianFitConfig::default();
-    let result = fit_gaussian_2d(&pixels_buf, Vec2::splat(10.0), 8, background, None, &config);
+    let result = fit_gaussian_2d(
+        &pixels_buf,
+        Vec2::splat(10.0),
+        &StampGrid::new(8),
+        background,
+        None,
+        &config,
+    );
 
     assert!(result.is_some(), "Fit should succeed with noise");
     let result = result.unwrap();

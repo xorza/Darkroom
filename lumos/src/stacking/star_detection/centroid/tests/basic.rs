@@ -1,5 +1,6 @@
 use crate::math::size2us::Size2us;
 use crate::stacking::star_detection::centroid::tests::*;
+use crate::stacking::star_detection::centroid::{StampGrid, compute_stamp_radius};
 
 #[test]
 fn test_centroid_accuracy() {
@@ -28,6 +29,7 @@ fn test_centroid_accuracy() {
         &candidates[0],
         &config.measurement,
         config.fwhm.expected,
+        &StampGrid::new(compute_stamp_radius(config.fwhm.expected)),
     )
     .expect("Should compute centroid");
 
@@ -86,6 +88,7 @@ fn test_fwhm_estimation() {
         &candidates[0],
         &config.measurement,
         config.fwhm.expected,
+        &StampGrid::new(compute_stamp_radius(config.fwhm.expected)),
     )
     .expect("Should compute centroid");
 
@@ -124,6 +127,7 @@ fn test_circular_star_eccentricity() {
         &candidates[0],
         &config.measurement,
         config.fwhm.expected,
+        &StampGrid::new(compute_stamp_radius(config.fwhm.expected)),
     )
     .expect("Should compute centroid");
 
@@ -159,6 +163,7 @@ fn test_snr_and_flux_values() {
         &candidates[0],
         &config.measurement,
         config.fwhm.expected,
+        &StampGrid::new(compute_stamp_radius(config.fwhm.expected)),
     )
     .expect("Should compute centroid");
 
