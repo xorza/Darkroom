@@ -241,7 +241,7 @@ fn moffat_fit_recovers_known_parameters() {
             fixed_beta: case.fixed_beta,
             ..Default::default()
         };
-        let result = fit_moffat_2d(
+        let result = MoffatFitResult::fit(
             &pixels,
             case.guess,
             &StampGrid::new(case.fit_radius),
@@ -314,7 +314,7 @@ fn test_moffat_fit_edge_position() {
     let pixels = Buffer2::new_filled(width, height, 0.1f32);
 
     let config = MoffatFitConfig::default();
-    let result = fit_moffat_2d(
+    let result = MoffatFitResult::fit(
         &pixels,
         DVec2::new(2.0, 10.0),
         &StampGrid::new(8),
@@ -352,7 +352,7 @@ fn test_moffat_fit_low_snr() {
         fixed_beta: true_beta,
         ..Default::default()
     };
-    let result = fit_moffat_2d(
+    let result = MoffatFitResult::fit(
         &pixels,
         DVec2::splat(10.0),
         &StampGrid::new(8),
@@ -402,7 +402,7 @@ fn test_moffat_fit_various_beta_values() {
             fixed_beta: true_beta,
             ..Default::default()
         };
-        let result = fit_moffat_2d(
+        let result = MoffatFitResult::fit(
             &pixels,
             DVec2::splat(10.0),
             &StampGrid::new(8),
@@ -455,7 +455,7 @@ fn test_moffat_fit_converges_within_max_iterations() {
             ..Default::default()
         },
     };
-    let result = fit_moffat_2d(
+    let result = MoffatFitResult::fit(
         &pixels,
         DVec2::splat(10.0),
         &StampGrid::new(8),
@@ -501,7 +501,7 @@ fn test_moffat_fit_bad_initial_guess_still_converges() {
     };
 
     // Start from a position offset by 2 pixels
-    let result = fit_moffat_2d(
+    let result = MoffatFitResult::fit(
         &pixels,
         DVec2::new(8.0, 12.0),
         &StampGrid::new(8),
@@ -534,7 +534,7 @@ fn test_moffat_fit_uniform_data_returns_result() {
     let pixels = Buffer2::new_filled(width, height, uniform_value);
 
     let config = MoffatFitConfig::default();
-    let result = fit_moffat_2d(
+    let result = MoffatFitResult::fit(
         &pixels,
         DVec2::splat(10.0),
         &StampGrid::new(8),
@@ -577,7 +577,7 @@ fn test_moffat_fwhm_computed_correctly() {
         fixed_beta: true_beta,
         ..Default::default()
     };
-    let result = fit_moffat_2d(
+    let result = MoffatFitResult::fit(
         &pixels,
         DVec2::splat(10.0),
         &StampGrid::new(8),

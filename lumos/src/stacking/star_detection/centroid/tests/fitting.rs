@@ -79,7 +79,7 @@ fn test_weighted_centroid_precision_statistical() {
 #[test]
 fn test_gaussian_fit_precision_statistical() {
     use crate::stacking::star_detection::centroid::gaussian_fit::{
-        GaussianFitConfig, fit_gaussian_2d,
+        GaussianFitConfig, GaussianFitResult,
     };
 
     let width = 21;
@@ -110,7 +110,7 @@ fn test_gaussian_fit_precision_statistical() {
             let pixels_buf = Buffer2::new(width, height, pixels);
 
             let config = GaussianFitConfig::default();
-            if let Some(result) = fit_gaussian_2d(
+            if let Some(result) = GaussianFitResult::fit(
                 &pixels_buf,
                 DVec2::splat(10.0),
                 &StampGrid::new(8),
@@ -147,7 +147,7 @@ fn test_gaussian_fit_precision_statistical() {
 /// Test that Moffat fitting achieves claimed ~0.01 pixel accuracy.
 #[test]
 fn test_moffat_fit_precision_statistical() {
-    use crate::stacking::star_detection::centroid::moffat_fit::{MoffatFitConfig, fit_moffat_2d};
+    use crate::stacking::star_detection::centroid::moffat_fit::{MoffatFitConfig, MoffatFitResult};
 
     let width = 21;
     let height = 21;
@@ -180,7 +180,7 @@ fn test_moffat_fit_precision_statistical() {
                 fixed_beta: beta,
                 ..Default::default()
             };
-            if let Some(result) = fit_moffat_2d(
+            if let Some(result) = MoffatFitResult::fit(
                 &pixels_buf,
                 DVec2::splat(10.0),
                 &StampGrid::new(8),
@@ -411,7 +411,7 @@ fn test_moffat_fwhm_formula() {
 #[test]
 fn test_gaussian_fit_sigma_recovery() {
     use crate::stacking::star_detection::centroid::gaussian_fit::{
-        GaussianFitConfig, fit_gaussian_2d,
+        GaussianFitConfig, GaussianFitResult,
     };
 
     let width = 21;
@@ -435,7 +435,7 @@ fn test_gaussian_fit_sigma_recovery() {
         let pixels_buf = Buffer2::new(width, height, pixels);
 
         let config = GaussianFitConfig::default();
-        let result = fit_gaussian_2d(
+        let result = GaussianFitResult::fit(
             &pixels_buf,
             DVec2::new(cx, cy),
             &StampGrid::new(8),
@@ -472,7 +472,7 @@ fn test_gaussian_fit_sigma_recovery() {
 /// Test Moffat fitting recovers correct alpha values.
 #[test]
 fn test_moffat_fit_alpha_recovery() {
-    use crate::stacking::star_detection::centroid::moffat_fit::{MoffatFitConfig, fit_moffat_2d};
+    use crate::stacking::star_detection::centroid::moffat_fit::{MoffatFitConfig, MoffatFitResult};
 
     let width = 21;
     let height = 21;
@@ -497,7 +497,7 @@ fn test_moffat_fit_alpha_recovery() {
             fixed_beta: beta,
             ..Default::default()
         };
-        let result = fit_moffat_2d(
+        let result = MoffatFitResult::fit(
             &pixels_buf,
             DVec2::new(cx, cy),
             &StampGrid::new(8),
@@ -525,7 +525,7 @@ fn test_moffat_fit_alpha_recovery() {
 #[test]
 fn test_gaussian_fit_with_noise() {
     use crate::stacking::star_detection::centroid::gaussian_fit::{
-        GaussianFitConfig, fit_gaussian_2d,
+        GaussianFitConfig, GaussianFitResult,
     };
 
     let width = 21;
@@ -550,7 +550,7 @@ fn test_gaussian_fit_with_noise() {
     let pixels_buf = Buffer2::new(width, height, pixels);
 
     let config = GaussianFitConfig::default();
-    let result = fit_gaussian_2d(
+    let result = GaussianFitResult::fit(
         &pixels_buf,
         DVec2::splat(10.0),
         &StampGrid::new(8),

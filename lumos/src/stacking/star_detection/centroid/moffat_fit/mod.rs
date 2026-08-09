@@ -217,69 +217,73 @@ impl LMModel<5> for MoffatFixedBeta {
     }
 }
 
-/// Fit a 2D Moffat profile to a star stamp via Levenberg-Marquardt (f64 throughout). When
-/// `noise` is set, each pixel is weighted by `1/σ²` from the CCD noise model so the
-/// shot-noisy bright core doesn't bias the fit (PR1); `None` is a plain unweighted fit.
-pub(super) fn fit_moffat_2d(
-    pixels: &Buffer2<f32>,
-    pos: DVec2,
-    grid: &StampGrid,
-    background: f32,
-    noise: Option<FitNoise>,
-    config: &MoffatFitConfig,
-) -> Option<MoffatFitResult> {
-    let stamp_radius = grid.radius;
-    let stamp = extract_stamp(pixels, pos, stamp_radius)?;
-    // Fit in the stamp's own frame: the models are translation-invariant, so this is the
-    // same fit with better-conditioned magnitudes, and the coordinate arrays become the
-    // shared grid instead of two per-candidate ramps.
-    let local_pos = pos - stamp.origin;
+impl MoffatFitResult {
+    /// Fit a 2D Moffat profile to a star stamp via Levenberg-Marquardt (f64 throughout). When
+    /// `noise` is set, each pixel is weighted by `1/σ²` from the CCD noise model so the
+    /// shot-noisy bright core doesn't bias the fit (PR1); `None` is a plain unweighted fit.
+    ///
+    /// `None` also when the stamp falls outside the frame, holds too few pixels to constrain five
+    /// parameters, or the fit lands somewhere [`validate_position`] rejects.
+    pub(super) fn fit(
+        pixels: &Buffer2<f32>,
+        pos: DVec2,
+        grid: &StampGrid,
+        background: f32,
+        noise: Option<FitNoise>,
+        config: &MoffatFitConfig,
+    ) -> Option<Self> {
+        let stamp_radius = grid.radius;
+        let stamp = extract_stamp(pixels, pos, stamp_radius)?;
+        // Fit in the stamp's own frame: the models are translation-invariant, so this is the
+        // same fit with better-conditioned magnitudes, and the coordinate arrays become the
+        // shared grid instead of two per-candidate ramps.
+        let local_pos = pos - stamp.origin;
 
-    // Fixed-β Moffat fits 5 parameters [x0, y0, amplitude, alpha, background].
-    let n = stamp.z.len();
-    if n < 6 {
-        return None;
+        // Fixed-β Moffat fits 5 parameters [x0, y0, amplitude, alpha, background].
+        let n = stamp.z.len();
+        if n < 6 {
+            return None;
+        }
+
+        let weights = fit_weights(&stamp.z, background, noise);
+
+        let initial_amplitude = (stamp.peak - background).max(0.01);
+
+        // Estimate sigma from moments, then convert to alpha (using the fixed β).
+        let sigma_est =
+            estimate_sigma_from_moments(&grid.x, &grid.y, &stamp.z, local_pos, background);
+        let fwhm_est = sigma_est * FWHM_TO_SIGMA;
+        let initial_alpha =
+            fwhm_beta_to_alpha(fwhm_est, config.fixed_beta).clamp(0.5, stamp_radius as f32);
+
+        let initial_params: [f64; 5] = [
+            local_pos.x,
+            local_pos.y,
+            initial_amplitude as f64,
+            initial_alpha as f64,
+            background as f64,
+        ];
+
+        let model = MoffatFixedBeta::new(stamp_radius as f64, config.fixed_beta as f64);
+
+        let data = FitData::new(&grid.x, &grid.y, &stamp.z, weights.as_deref());
+        let result = optimize(&model, data, initial_params, &config.lm);
+
+        let [x0, y0, _, alpha, _] = result.params;
+        let result_pos = DVec2::new(x0, y0) + stamp.origin;
+
+        if !validate_position(result_pos, pos, alpha as f32, stamp_radius) {
+            return None;
+        }
+
+        Some(Self {
+            pos: result_pos,
+            fwhm: alpha_beta_to_fwhm(alpha as f32, config.fixed_beta),
+            converged: result.converged,
+            #[cfg(test)]
+            debug: MoffatFitDebug::of(&result),
+        })
     }
-
-    let weights = fit_weights(&stamp.z, background, noise);
-
-    let initial_amplitude = (stamp.peak - background).max(0.01);
-
-    // Estimate sigma from moments, then convert to alpha (using the fixed β).
-    let sigma_est = estimate_sigma_from_moments(&grid.x, &grid.y, &stamp.z, local_pos, background);
-    let fwhm_est = sigma_est * FWHM_TO_SIGMA;
-    let initial_alpha =
-        fwhm_beta_to_alpha(fwhm_est, config.fixed_beta).clamp(0.5, stamp_radius as f32);
-
-    let initial_params: [f64; 5] = [
-        local_pos.x,
-        local_pos.y,
-        initial_amplitude as f64,
-        initial_alpha as f64,
-        background as f64,
-    ];
-
-    let model = MoffatFixedBeta::new(stamp_radius as f64, config.fixed_beta as f64);
-
-    let data = FitData::new(&grid.x, &grid.y, &stamp.z, weights.as_deref());
-    let result = optimize(&model, data, initial_params, &config.lm);
-
-    let [x0, y0, _, alpha, _] = result.params;
-    let result_pos = DVec2::new(x0, y0) + stamp.origin;
-
-    if !validate_position(result_pos, pos, alpha as f32, stamp_radius) {
-        return None;
-    }
-
-    let fwhm = alpha_beta_to_fwhm(alpha as f32, config.fixed_beta);
-
-    Some(MoffatFitResult {
-        pos: result_pos,
-        fwhm,
-        converged: result.converged,
-        #[cfg(test)]
-        debug: MoffatFitDebug::of(&result),
-    })
 }
 
 /// Centre inside the stamp, and alpha within a plausible range.

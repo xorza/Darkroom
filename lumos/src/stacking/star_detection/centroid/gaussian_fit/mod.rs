@@ -118,65 +118,71 @@ impl LMModel<6> for Gaussian2D {
     }
 }
 
-/// Fit a 2D Gaussian to a star stamp via Levenberg-Marquardt (f64 throughout, ~0.01 px
-/// centroid accuracy). When `noise` is set, each pixel is weighted by `1/σ²` from the CCD
-/// noise model so the shot-noisy bright core doesn't bias the fit (PR1); `None` is a plain
-/// unweighted fit.
-pub(super) fn fit_gaussian_2d(
-    pixels: &Buffer2<f32>,
-    pos: DVec2,
-    grid: &StampGrid,
-    background: f32,
-    noise: Option<FitNoise>,
-    config: &GaussianFitConfig,
-) -> Option<GaussianFitResult> {
-    let stamp_radius = grid.radius;
-    let stamp = extract_stamp(pixels, pos, stamp_radius)?;
-    // Fit in the stamp's own frame: the models are translation-invariant, so this is the
-    // same fit with better-conditioned magnitudes, and the coordinate arrays become the
-    // shared grid instead of two per-candidate ramps.
-    let local_pos = pos - stamp.origin;
+impl GaussianFitResult {
+    /// Fit a 2D Gaussian to a star stamp via Levenberg-Marquardt (f64 throughout, ~0.01 px
+    /// centroid accuracy). When `noise` is set, each pixel is weighted by `1/σ²` from the CCD
+    /// noise model so the shot-noisy bright core doesn't bias the fit (PR1); `None` is a plain
+    /// unweighted fit.
+    ///
+    /// `None` also when the stamp falls outside the frame, holds too few pixels to constrain six
+    /// parameters, or the fit lands somewhere [`validate_fit`] rejects.
+    pub(super) fn fit(
+        pixels: &Buffer2<f32>,
+        pos: DVec2,
+        grid: &StampGrid,
+        background: f32,
+        noise: Option<FitNoise>,
+        config: &GaussianFitConfig,
+    ) -> Option<Self> {
+        let stamp_radius = grid.radius;
+        let stamp = extract_stamp(pixels, pos, stamp_radius)?;
+        // Fit in the stamp's own frame: the models are translation-invariant, so this is the
+        // same fit with better-conditioned magnitudes, and the coordinate arrays become the
+        // shared grid instead of two per-candidate ramps.
+        let local_pos = pos - stamp.origin;
 
-    let n = stamp.z.len();
-    if n < 7 {
-        return None;
+        let n = stamp.z.len();
+        if n < 7 {
+            return None;
+        }
+
+        let weights = fit_weights(&stamp.z, background, noise);
+
+        // Estimate sigma from moments for better initial guess
+        let sigma_est =
+            estimate_sigma_from_moments(&grid.x, &grid.y, &stamp.z, local_pos, background);
+
+        let initial_params: [f64; 6] = [
+            local_pos.x,
+            local_pos.y,
+            (stamp.peak - background).max(0.01) as f64,
+            sigma_est as f64,
+            sigma_est as f64,
+            background as f64,
+        ];
+
+        let model = Gaussian2D {
+            stamp_radius: stamp_radius as f64,
+        };
+
+        let data = FitData::new(&grid.x, &grid.y, &stamp.z, weights.as_deref());
+        let result = optimize(&model, data, initial_params, config);
+
+        let [x0, y0, _, sigma_x, sigma_y, _] = result.params;
+        let result_pos = DVec2::new(x0, y0) + stamp.origin;
+
+        if !validate_fit(result_pos, pos, sigma_x, sigma_y, stamp_radius) {
+            return None;
+        }
+
+        Some(Self {
+            pos: result_pos,
+            sigma: Vec2::new(sigma_x as f32, sigma_y as f32),
+            converged: result.converged,
+            #[cfg(test)]
+            debug: GaussianFitDebug::of(&result, n),
+        })
     }
-
-    let weights = fit_weights(&stamp.z, background, noise);
-
-    // Estimate sigma from moments for better initial guess
-    let sigma_est = estimate_sigma_from_moments(&grid.x, &grid.y, &stamp.z, local_pos, background);
-
-    let initial_params: [f64; 6] = [
-        local_pos.x,
-        local_pos.y,
-        (stamp.peak - background).max(0.01) as f64,
-        sigma_est as f64,
-        sigma_est as f64,
-        background as f64,
-    ];
-
-    let model = Gaussian2D {
-        stamp_radius: stamp_radius as f64,
-    };
-
-    let data = FitData::new(&grid.x, &grid.y, &stamp.z, weights.as_deref());
-    let result = optimize(&model, data, initial_params, config);
-
-    let [x0, y0, _, sigma_x, sigma_y, _] = result.params;
-    let result_pos = DVec2::new(x0, y0) + stamp.origin;
-
-    if !validate_fit(result_pos, pos, sigma_x, sigma_y, stamp_radius) {
-        return None;
-    }
-
-    Some(GaussianFitResult {
-        pos: result_pos,
-        sigma: Vec2::new(sigma_x as f32, sigma_y as f32),
-        converged: result.converged,
-        #[cfg(test)]
-        debug: GaussianFitDebug::of(&result, n),
-    })
 }
 
 /// Centre inside the stamp, and both sigmas within a plausible range.

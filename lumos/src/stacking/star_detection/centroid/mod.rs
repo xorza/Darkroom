@@ -39,9 +39,9 @@ use crate::stacking::star_detection::config::measurement_config::{
 use crate::stacking::star_detection::deblend::region::Region;
 use crate::stacking::star_detection::roundness::Roundness;
 use crate::stacking::star_detection::star::Star;
-use gaussian_fit::{GaussianFitConfig, fit_gaussian_2d};
+use gaussian_fit::{GaussianFitConfig, GaussianFitResult};
 use imaginarium::Buffer2;
-use moffat_fit::{MoffatFitConfig, fit_moffat_2d};
+use moffat_fit::{MoffatFitConfig, MoffatFitResult};
 
 /// Stamp radius as a multiple of FWHM.
 ///
@@ -449,7 +449,7 @@ pub(super) fn measure_star(
                 position_convergence_threshold: CENTROID_CONVERGENCE_THRESHOLD,
                 ..GaussianFitConfig::default()
             };
-            let fit = fit_gaussian_2d(pixels, pos, grid, local_bg, fit_noise, &fit_config);
+            let fit = GaussianFitResult::fit(pixels, pos, grid, local_bg, fit_noise, &fit_config);
             if let Some(result) = fit.filter(|r| r.converged) {
                 pos = result.pos;
                 // FWHM from geometric mean of sigma_x, sigma_y
@@ -475,7 +475,7 @@ pub(super) fn measure_star(
                     ..lm_optimizer::LMConfig::default()
                 },
             };
-            let fit = fit_moffat_2d(pixels, pos, grid, local_bg, fit_noise, &fit_config);
+            let fit = MoffatFitResult::fit(pixels, pos, grid, local_bg, fit_noise, &fit_config);
             if let Some(result) = fit.filter(|r| r.converged) {
                 pos = result.pos;
                 fit_fwhm = Some(result.fwhm);
