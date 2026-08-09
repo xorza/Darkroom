@@ -582,8 +582,10 @@ impl DrizzleAccumulator {
             0.0
         };
 
-        // Build per-channel output (row-parallel normalization by the shared weight).
-        let output_channels: Vec<Vec<f32>> = (0..n_channels)
+        // Build per-channel output (row-parallel normalization by the shared weight). Bounded by
+        // `MAX_CHANNELS` like `self.data`, which `n_channels` is the length of, so the collect
+        // cannot overflow the capacity.
+        let output_channels: ArrayVec<Vec<f32>, MAX_CHANNELS> = (0..n_channels)
             .map(|c| {
                 let data_pixels = self.data[c].pixels();
                 let mut out = vec![fill_value; width * height];
