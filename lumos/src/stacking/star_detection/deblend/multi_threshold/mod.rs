@@ -13,6 +13,7 @@ use arrayvec::ArrayVec;
 
 use smallvec::SmallVec;
 
+use crate::math::rect::URect;
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 use crate::stacking::star_detection::deblend::region::Region;
@@ -33,6 +34,18 @@ const MAX_CHILDREN: usize = MAX_PEAKS;
 
 /// Sentinel value indicating no pixel value at grid position.
 const NO_PIXEL: f32 = f32::NEG_INFINITY;
+
+/// Half-open bounding box of a pixel set. Both grids size themselves from this, then differ only
+/// in whether they pad it — `PixelGrid` does, for unchecked neighbour reads; `NodeGrid` does not.
+///
+/// Returns `URect::empty()` for an empty slice; both callers return before that can matter.
+fn bounding_box(pixels: &[Pixel]) -> URect {
+    let mut bbox = URect::empty();
+    for p in pixels {
+        bbox.include(p.pos);
+    }
+    bbox
+}
 
 /// Grid-based pixel lookup for fast neighbor access during connected component finding.
 ///
@@ -99,32 +112,15 @@ impl PixelGrid {
         }
         self.visited_generation_counter = self.current_generation;
 
-        // Find bounding box
-        let mut min_x = usize::MAX;
-        let mut min_y = usize::MAX;
-        let mut max_x = 0usize;
-        let mut max_y = 0usize;
+        let bbox = bounding_box(pixels);
 
-        for p in pixels {
-            min_x = min_x.min(p.pos.x);
-            min_y = min_y.min(p.pos.y);
-            max_x = max_x.max(p.pos.x);
-            max_y = max_y.max(p.pos.y);
-        }
-
-        // Guaranteed 1-pixel border on all sides for safe unchecked neighbor access.
-        // We always subtract 1 from min coords (using wrapping to handle 0 case).
-        // The grid is indexed by (pos - offset) so the border cells are at local
-        // coordinate 0 on each axis. These cells have no pixel value (generation
-        // check returns NO_PIXEL), so BFS never propagates into them.
-        let offset = Vec2us::new(min_x.wrapping_sub(1), min_y.wrapping_sub(1));
-        // width = (max_x - offset.x) + 1 (inclusive) + 1 (right border)
-        // For the wrapping case (min_x=0), offset.x wraps to usize::MAX, and
-        // (max_x - usize::MAX) wraps to (max_x + 1), giving correct total with borders.
-        let size = Size2us::new(
-            max_x.wrapping_sub(offset.x) + 2,
-            max_y.wrapping_sub(offset.y) + 2,
-        );
+        // Guaranteed 1-pixel border on all sides for safe unchecked neighbor access. The grid is
+        // indexed by (pos - offset), so the border cells sit at local coordinate 0 on each axis;
+        // they hold no pixel value (the generation check returns NO_PIXEL), so BFS never
+        // propagates into them. `wrapping_sub` is for a component touching row or column 0: the
+        // offset wraps to usize::MAX and the index arithmetic wraps back with it.
+        let offset = Vec2us::new(bbox.min.x.wrapping_sub(1), bbox.min.y.wrapping_sub(1));
+        let size = Size2us::new(bbox.width() + 2, bbox.height() + 2);
 
         let cells = size.pixel_count();
 
@@ -225,21 +221,11 @@ impl NodeGrid {
             self.current_generation = 1;
         }
 
-        // Find bounding box
-        let mut min_x = usize::MAX;
-        let mut min_y = usize::MAX;
-        let mut max_x = 0usize;
-        let mut max_y = 0usize;
-
-        for p in pixels {
-            min_x = min_x.min(p.pos.x);
-            min_y = min_y.min(p.pos.y);
-            max_x = max_x.max(p.pos.x);
-            max_y = max_y.max(p.pos.y);
-        }
-
-        self.offset = Vec2us::new(min_x, min_y);
-        self.size = Size2us::new(max_x - min_x + 1, max_y - min_y + 1);
+        // No border here, unlike `PixelGrid`: this grid is only ever indexed through
+        // `cell_index`, which bounds-checks.
+        let bbox = bounding_box(pixels);
+        self.offset = bbox.min;
+        self.size = Size2us::new(bbox.width(), bbox.height());
 
         let cells = self.size.pixel_count();
         if self.nodes.len() < cells {
@@ -631,6 +617,13 @@ fn process_higher_level(
             None => continue, // Skip if no parent or multiple parents
         };
 
+        // Rescanning per region rather than bucketing every parent's count in one pass before the
+        // loop, which would be O(P + R) instead of O(R*P) and would also be wrong:
+        // `create_child_nodes` reassigns `pixel_to_node` *inside* this loop and does it partially,
+        // leaving pixels on the parent when a child peak is too close to an existing one or when
+        // there are more than MAX_CHILDREN of them. A count taken up front would be stale by
+        // exactly those pixels and would report splits that never happened.
+        //
         // `above_threshold` is already every component pixel at or above this level's threshold,
         // so the parent's share of it needs only the node test — walking `component_pixels` here
         // would re-apply the value test over the whole component to reach the same set.
