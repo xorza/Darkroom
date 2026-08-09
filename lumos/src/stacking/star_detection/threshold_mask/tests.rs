@@ -80,7 +80,7 @@ struct ThresholdMaskCase {
 }
 
 #[test]
-fn test_threshold_mask_truth_table() {
+fn threshold_mask_truth_table() {
     let cases = [
         ThresholdMaskCase {
             name: "standard_above",
@@ -259,7 +259,7 @@ struct FilteredThresholdMaskCase {
 }
 
 #[test]
-fn test_filtered_threshold_mask_truth_table() {
+fn filtered_threshold_mask_truth_table() {
     let cases = [
         FilteredThresholdMaskCase {
             name: "constant_above",
@@ -319,7 +319,7 @@ fn test_filtered_threshold_mask_truth_table() {
 }
 
 #[test]
-fn test_various_lengths() {
+fn various_lengths() {
     // Test edge cases for SIMD remainder handling
     for len in [1, 3, 4, 5, 15, 16, 17, 31, 32, 33, 63, 64, 65, 100] {
         let width = len;
@@ -334,7 +334,7 @@ fn test_various_lengths() {
 }
 
 #[test]
-fn test_remainder_handling() {
+fn remainder_handling() {
     // Test that remainder handling works correctly for all possible remainder sizes
     for remainder in 0..64 {
         let size = 128 + remainder; // 128 is cleanly divisible by 64
@@ -362,7 +362,7 @@ fn test_remainder_handling() {
 }
 
 #[test]
-fn test_large_image() {
+fn large_image() {
     // Test a realistic image size
     let width = 1024;
     let height = 1024;
@@ -387,7 +387,7 @@ fn test_large_image() {
 }
 
 #[test]
-fn test_tiny_image_1xn() {
+fn tiny_image_1xn() {
     // Single row images
     for width in 1..=10 {
         let pixels = vec![2.0f32; width];
@@ -400,7 +400,7 @@ fn test_tiny_image_1xn() {
 }
 
 #[test]
-fn test_tiny_image_nx1() {
+fn tiny_image_nx1() {
     // Single column images
     for height in 1..=10 {
         let pixels = vec![2.0f32; height];
@@ -413,7 +413,7 @@ fn test_tiny_image_nx1() {
 }
 
 #[test]
-fn test_packed_matches_scalar() {
+fn packed_matches_scalar() {
     let width = 100;
     let height = 100;
     let size = width * height;
@@ -455,7 +455,7 @@ fn test_packed_matches_scalar() {
 }
 
 #[test]
-fn test_packed_non_aligned_size() {
+fn packed_non_aligned_size() {
     // Test with size that doesn't align to 64 bits
     let width = 100;
     let height = 73; // 7300 pixels, not divisible by 64
@@ -473,7 +473,7 @@ fn test_packed_non_aligned_size() {
 }
 
 #[test]
-fn test_filtered_matches_scalar() {
+fn filtered_matches_scalar() {
     let width = 100;
     let height = 100;
     let size = width * height;
@@ -513,7 +513,7 @@ fn test_filtered_matches_scalar() {
 }
 
 #[test]
-fn test_multirow_checkerboard_pattern() {
+fn multirow_checkerboard_pattern() {
     // Test 2D checkerboard pattern to verify row handling
     let width = 10;
     let height = 10;
@@ -549,7 +549,7 @@ fn test_multirow_checkerboard_pattern() {
 }
 
 #[test]
-fn test_multirow_horizontal_stripes() {
+fn multirow_horizontal_stripes() {
     // Test horizontal stripe pattern
     let width = 100;
     let height = 10;
@@ -585,7 +585,7 @@ fn test_multirow_horizontal_stripes() {
 }
 
 #[test]
-fn test_multirow_vertical_stripes() {
+fn multirow_vertical_stripes() {
     // Test vertical stripe pattern
     let width = 100;
     let height = 10;
@@ -621,7 +621,7 @@ fn test_multirow_vertical_stripes() {
 }
 
 #[test]
-fn test_row_boundary_at_word_edge() {
+fn row_boundary_at_word_edge() {
     // Test where row width aligns exactly with 64-bit word boundary
     let width = 64;
     let height = 4;
@@ -652,7 +652,7 @@ fn test_row_boundary_at_word_edge() {
 }
 
 #[test]
-fn test_row_boundary_non_aligned() {
+fn row_boundary_non_aligned() {
     // Test where row width doesn't align with word boundary
     let width = 70; // Not divisible by 64
     let height = 4;
@@ -681,7 +681,7 @@ fn test_row_boundary_non_aligned() {
 }
 
 #[test]
-fn test_filtered_remainder_handling() {
+fn filtered_remainder_handling() {
     // Test remainder handling for filtered variant
     for remainder in 0..64 {
         let size = 128 + remainder;
@@ -711,7 +711,7 @@ fn test_filtered_remainder_handling() {
 }
 
 #[test]
-fn test_filtered_large_image() {
+fn filtered_large_image() {
     let width = 512;
     let height = 512;
     let size = width * height;

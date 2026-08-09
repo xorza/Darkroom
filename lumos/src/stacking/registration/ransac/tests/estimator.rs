@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn test_ransac_perfect_translation() {
+fn ransac_perfect_translation() {
     // 8 points with exact translation (5, -3) → all should be inliers
     let ref_points = [
         DVec2::new(0.0, 0.0),
@@ -38,7 +38,7 @@ fn test_ransac_perfect_translation() {
 }
 
 #[test]
-fn test_ransac_perfect_similarity() {
+fn ransac_perfect_similarity() {
     let ref_points = make_grid(4, 2, 10.0); // 8 points
     let known = Transform::similarity(DVec2::new(5.0, -3.0), PI / 4.0, 1.2);
     let target_points = apply_all(&known, &ref_points);
@@ -63,7 +63,7 @@ fn test_ransac_perfect_similarity() {
 }
 
 #[test]
-fn test_ransac_with_outliers() {
+fn ransac_with_outliers() {
     // 8 inliers + 2 outliers
     let mut ref_points: Vec<DVec2> = make_grid(4, 2, 10.0);
     ref_points.push(DVec2::new(100.0, 100.0));
@@ -101,7 +101,7 @@ fn test_ransac_with_outliers() {
 }
 
 #[test]
-fn test_ransac_30_percent_outliers() {
+fn ransac_30_percent_outliers() {
     // 10 inliers + 4 outliers
     let ref_points: Vec<DVec2> = make_grid(5, 2, 10.0)
         .into_iter()
@@ -149,7 +149,7 @@ fn test_ransac_30_percent_outliers() {
 }
 
 #[test]
-fn test_ransac_insufficient_points() {
+fn ransac_insufficient_points() {
     // Similarity needs min 2 points
     let ref_points = [DVec2::new(0.0, 0.0)];
     let target_points = [DVec2::new(1.0, 1.0)];
@@ -166,7 +166,7 @@ fn test_ransac_insufficient_points() {
 }
 
 #[test]
-fn test_ransac_empty_matches() {
+fn ransac_empty_matches() {
     let matches: Vec<PointMatch> = vec![];
     let ransac = make_estimator(RansacConfig::default());
     let result = ransac.estimate(&matches, &[], &[], TransformType::Translation);
@@ -174,7 +174,7 @@ fn test_ransac_empty_matches() {
 }
 
 #[test]
-fn test_ransac_minimum_points_for_translation() {
+fn ransac_minimum_points_for_translation() {
     // Translation needs 1 point minimum (min_points), but RANSAC samples 1 point.
     // With 2 points, sampling is guaranteed to succeed.
     let ref_points = [DVec2::new(0.0, 0.0), DVec2::new(100.0, 0.0)];
@@ -203,7 +203,7 @@ fn test_ransac_minimum_points_for_translation() {
 }
 
 #[test]
-fn test_ransac_deterministic_with_seed() {
+fn ransac_deterministic_with_seed() {
     let ref_points = make_grid(3, 2, 10.0); // 6 points
     let target_points: Vec<DVec2> = ref_points
         .iter()
@@ -243,7 +243,7 @@ fn test_ransac_deterministic_with_seed() {
 }
 
 #[test]
-fn test_ransac_early_termination() {
+fn ransac_early_termination() {
     // All 50 perfect inliers. With 100% inlier ratio and conf=0.999,
     // adaptive_iterations(1.0, 1, 0.999) = 1, so it should terminate very early.
     let ref_points = make_grid(10, 5, 10.0);
@@ -282,7 +282,7 @@ fn test_ransac_early_termination() {
 }
 
 #[test]
-fn test_ransac_100_percent_inliers() {
+fn ransac_100_percent_inliers() {
     let ref_points = make_grid(4, 2, 50.0); // 8 points
     let transform = Transform::similarity(DVec2::new(10.0, -5.0), 0.2, 1.1);
     let target_points = apply_all(&transform, &ref_points);
@@ -309,7 +309,7 @@ fn test_ransac_100_percent_inliers() {
 }
 
 #[test]
-fn test_ransac_affine() {
+fn ransac_affine() {
     let ref_points = make_grid(4, 2, 25.0);
     let known = Transform::affine([1.1, 0.2, 10.0, -0.1, 0.95, 5.0]);
     let target_points = apply_all(&known, &ref_points);
@@ -342,7 +342,7 @@ fn test_ransac_affine() {
 }
 
 #[test]
-fn test_ransac_affine_with_shear() {
+fn ransac_affine_with_shear() {
     // Shear: x' = x + 0.3*y + 10, y' = 0.1*x + y - 5
     let ref_points = make_grid(5, 4, 50.0);
     let known = Transform::affine([1.0, 0.3, 10.0, 0.1, 1.0, -5.0]);
@@ -372,7 +372,7 @@ fn test_ransac_affine_with_shear() {
 }
 
 #[test]
-fn test_ransac_homography() {
+fn ransac_homography() {
     let ref_points = make_grid(4, 2, 25.0);
     let known = Transform::homography([1.0, 0.1, 5.0, -0.05, 1.0, 3.0, 0.0001, 0.00005]);
     let target_points = apply_all(&known, &ref_points);
@@ -396,7 +396,7 @@ fn test_ransac_homography() {
 }
 
 #[test]
-fn test_ransac_homography_near_affine() {
+fn ransac_homography_near_affine() {
     // Homography with tiny perspective components
     let ref_points = make_grid(4, 2, 25.0);
     let known = Transform::homography([1.0, 0.1, 5.0, -0.05, 1.0, 3.0, 1e-8, 1e-8]);
@@ -426,7 +426,7 @@ fn test_ransac_homography_near_affine() {
 }
 
 #[test]
-fn test_ransac_large_coordinates() {
+fn ransac_large_coordinates() {
     // Points at ~2000 range (typical high-res images)
     let ref_points: Vec<DVec2> = (0..10)
         .map(|i| {
@@ -462,7 +462,7 @@ fn test_ransac_large_coordinates() {
 }
 
 #[test]
-fn test_ransac_extreme_scale_coordinates() {
+fn ransac_extreme_scale_coordinates() {
     // Points at 1e6 scale
     let ref_points: Vec<DVec2> = (0..20)
         .map(|i| DVec2::new((i % 5) as f64 * 1e6, (i / 5) as f64 * 1e6))
@@ -493,7 +493,7 @@ fn test_ransac_extreme_scale_coordinates() {
 }
 
 #[test]
-fn test_ransac_small_translation() {
+fn ransac_small_translation() {
     // Small sub-pixel translation
     let ref_points = make_grid(5, 4, 10.0);
     let known = Transform::translation(DVec2::new(0.5, -0.3));
@@ -521,7 +521,7 @@ fn test_ransac_small_translation() {
 }
 
 #[test]
-fn test_ransac_mixed_scale_coordinates() {
+fn ransac_mixed_scale_coordinates() {
     // Points spanning very different scales
     let ref_points = vec![
         DVec2::new(0.0, 0.0),
@@ -561,7 +561,7 @@ fn test_ransac_mixed_scale_coordinates() {
 }
 
 #[test]
-fn test_similarity_very_small_rotation() {
+fn similarity_very_small_rotation() {
     let ref_points = make_grid(5, 4, 100.0);
     let tiny_angle = 0.001; // ~0.057 degrees
     let known = Transform::similarity(DVec2::new(5.0, 3.0), tiny_angle, 1.0);
@@ -592,7 +592,7 @@ fn test_similarity_very_small_rotation() {
 }
 
 #[test]
-fn test_similarity_near_unity_scale() {
+fn similarity_near_unity_scale() {
     let ref_points: Vec<DVec2> = (0..20)
         .map(|i| {
             DVec2::new(

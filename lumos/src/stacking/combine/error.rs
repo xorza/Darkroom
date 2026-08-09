@@ -149,7 +149,7 @@ mod tests {
     }
 
     #[test]
-    fn test_no_frames_error_message() {
+    fn no_frames_error_message() {
         let err = Error::NoFrames;
         assert_eq!(err.to_string(), "No frames provided for stacking");
         assert_eq!(
@@ -159,7 +159,7 @@ mod tests {
     }
 
     #[test]
-    fn test_image_load_error_message() {
+    fn image_load_error_message() {
         let err = Error::ImageLoad {
             path: PathBuf::from("/path/to/image.fits"),
             source: io::Error::new(io::ErrorKind::NotFound, "file not found"),
@@ -169,7 +169,7 @@ mod tests {
     }
 
     #[test]
-    fn test_dimension_mismatch_error_message() {
+    fn dimension_mismatch_error_message() {
         let err = Error::DimensionMismatch {
             index: 5,
             expected: ImageDimensions::new((100, 100), 3),
@@ -194,14 +194,14 @@ mod tests {
     }
 
     #[test]
-    fn test_error_is_debug() {
+    fn error_is_debug() {
         let err = Error::NoFrames;
         let debug_str = format!("{:?}", err);
         assert!(debug_str.contains("NoFrames"));
     }
 
     #[test]
-    fn test_error_source_chain() {
+    fn error_source_chain() {
         use std::error::Error as StdError;
 
         let io_err = io::Error::new(io::ErrorKind::NotFound, "underlying error");

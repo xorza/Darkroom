@@ -1,13 +1,13 @@
 use super::*;
 
 #[test]
-fn test_invariant_tree_empty() {
+fn invariant_tree_empty() {
     let tree = build_invariant_tree(&[]);
     assert!(tree.is_none());
 }
 
 #[test]
-fn test_invariant_tree_build_and_size() {
+fn invariant_tree_build_and_size() {
     // Build from known triangles, verify tree size matches triangle count
     let positions = vec![
         DVec2::new(0.0, 0.0),
@@ -22,7 +22,7 @@ fn test_invariant_tree_build_and_size() {
 }
 
 #[test]
-fn test_invariant_tree_lookup_finds_self() {
+fn invariant_tree_lookup_finds_self() {
     // A triangle's own ratios should always find itself
     let positions = vec![
         DVec2::new(0.0, 0.0),
@@ -40,7 +40,7 @@ fn test_invariant_tree_lookup_finds_self() {
 }
 
 #[test]
-fn test_invariant_tree_finds_similar_triangles() {
+fn invariant_tree_finds_similar_triangles() {
     // Two 3-4-5 triangles at different scales have identical ratios (0.6, 0.8)
     let tri1 = Triangle::from_positions(
         [0, 1, 2],
@@ -74,7 +74,7 @@ fn test_invariant_tree_finds_similar_triangles() {
 }
 
 #[test]
-fn test_invariant_search_zero_tolerance() {
+fn invariant_search_zero_tolerance() {
     let positions = vec![
         DVec2::new(0.0, 0.0),
         DVec2::new(3.0, 0.0),
@@ -91,7 +91,7 @@ fn test_invariant_search_zero_tolerance() {
 }
 
 #[test]
-fn test_invariant_search_large_tolerance_finds_all() {
+fn invariant_search_large_tolerance_finds_all() {
     let positions = vec![
         DVec2::new(0.0, 0.0),
         DVec2::new(10.0, 0.0),
@@ -113,7 +113,7 @@ fn test_invariant_search_large_tolerance_finds_all() {
 }
 
 #[test]
-fn test_invariant_search_clears_buffer() {
+fn invariant_search_clears_buffer() {
     let positions = vec![
         DVec2::new(0.0, 0.0),
         DVec2::new(10.0, 0.0),

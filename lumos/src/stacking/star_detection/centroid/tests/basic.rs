@@ -2,7 +2,7 @@ use super::*;
 use crate::stacking::star_detection::centroid::{StampGrid, compute_stamp_radius};
 
 #[test]
-fn test_centroid_accuracy() {
+fn centroid_accuracy() {
     // Use larger image to minimize background estimation effects
     let width = 128;
     let height = 128;
@@ -121,7 +121,7 @@ fn subpixel_result_is_independent_of_distance_from_the_origin() {
 }
 
 #[test]
-fn test_fwhm_estimation() {
+fn fwhm_estimation() {
     // Use larger image for better background estimation
     let width = 128;
     let height = 128;
@@ -172,7 +172,7 @@ fn test_fwhm_estimation() {
 }
 
 #[test]
-fn test_circular_star_eccentricity() {
+fn circular_star_eccentricity() {
     let width = 64;
     let height = 64;
     let pixels = SyntheticStar::new(Vec2::splat(32.0), 0.8, StarProfile::Gaussian { sigma: 2.5 })
@@ -206,7 +206,7 @@ fn test_circular_star_eccentricity() {
 }
 
 #[test]
-fn test_snr_and_flux_values() {
+fn snr_and_flux_values() {
     // A bright star (amplitude 0.8, sigma 2.5) on background 0.0 should have
     // substantial SNR (>> 10) and measurable flux
     let width = 64;

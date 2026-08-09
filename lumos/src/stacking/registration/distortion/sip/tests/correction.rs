@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn test_correct_at_reference_point_is_identity() {
+fn correct_at_reference_point_is_identity() {
     // At the reference point, u=0, v=0, so all monomials with p+q >= 2 are zero.
     // correction_at(ref) = (0, 0), so correct(ref) = ref.
     let center = DVec2::new(500.0, 500.0);
@@ -27,7 +27,7 @@ fn test_correct_at_reference_point_is_identity() {
 }
 
 #[test]
-fn test_correct_barrel_at_specific_point() {
+fn correct_barrel_at_specific_point() {
     // Barrel distortion: target = p + (p-center)*k*|p-center|^2
     // After SIP fit, correct(p) should produce a point that maps close to target.
     let center = DVec2::new(500.0, 500.0);
@@ -76,7 +76,7 @@ fn test_correct_barrel_at_specific_point() {
 }
 
 #[test]
-fn test_fit_barrel_distortion_with_translation() {
+fn fit_barrel_distortion_with_translation() {
     // Tests that SIP fitting works when the transform includes a translation.
     // target = p + translation + (p-center)*k*|p-center|^2
     let center = DVec2::new(500.0, 500.0);
@@ -115,7 +115,7 @@ fn test_fit_barrel_distortion_with_translation() {
 }
 
 #[test]
-fn test_fit_pincushion_distortion() {
+fn fit_pincushion_distortion() {
     // Pincushion (k < 0): points are pulled inward toward center.
     let center = DVec2::new(512.0, 384.0);
     let k = -5e-8;
@@ -156,7 +156,7 @@ fn test_fit_pincushion_distortion() {
 }
 
 #[test]
-fn test_barrel_vs_pincushion_opposite_corrections() {
+fn barrel_vs_pincushion_opposite_corrections() {
     // Barrel (k>0) and pincushion (k<0) should produce corrections in opposite directions.
     let center = DVec2::new(500.0, 500.0);
     let transform = Transform::identity();

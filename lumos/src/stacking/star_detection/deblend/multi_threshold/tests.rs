@@ -20,7 +20,7 @@ fn region_set(regions: &[&[Pixel]]) -> RegionSet {
 }
 
 #[test]
-fn test_single_star_no_deblending() {
+fn single_star_no_deblending() {
     let TestComponent {
         pixels,
         labels,
@@ -41,7 +41,7 @@ fn test_single_star_no_deblending() {
 }
 
 #[test]
-fn test_two_separated_stars_deblend() {
+fn two_separated_stars_deblend() {
     let TestComponent {
         pixels,
         labels,
@@ -84,7 +84,7 @@ fn test_two_separated_stars_deblend() {
 }
 
 #[test]
-fn test_late_gaussian_split_uses_full_threshold_ladder() {
+fn late_gaussian_split_uses_full_threshold_ladder() {
     let TestComponent {
         pixels,
         labels,
@@ -138,7 +138,7 @@ fn test_late_gaussian_split_uses_full_threshold_ladder() {
 }
 
 #[test]
-fn test_faint_secondary_below_contrast() {
+fn faint_secondary_below_contrast() {
     let TestComponent {
         pixels,
         labels,
@@ -169,7 +169,7 @@ fn test_faint_secondary_below_contrast() {
 }
 
 #[test]
-fn test_threshold_levels_exponential() {
+fn threshold_levels_exponential() {
     let low = 0.1f32;
     let high = 1.0f32;
     let n = 10usize;
@@ -196,7 +196,7 @@ fn test_threshold_levels_exponential() {
 }
 
 #[test]
-fn test_close_peaks_merge() {
+fn close_peaks_merge() {
     let TestComponent {
         pixels,
         labels,
@@ -223,7 +223,7 @@ fn test_close_peaks_merge() {
 }
 
 #[test]
-fn test_empty_component() {
+fn empty_component() {
     let pixels = Buffer2::new_filled(10, 10, 0.0f32);
     let labels_buf = Buffer2::new_filled(10, 10, 0u32);
     let labels = LabelMap::from_raw(labels_buf, 0);
@@ -238,7 +238,7 @@ fn test_empty_component() {
 }
 
 #[test]
-fn test_deblend_disabled_with_high_contrast() {
+fn deblend_disabled_with_high_contrast() {
     let TestComponent {
         pixels,
         labels,
@@ -269,7 +269,7 @@ fn test_deblend_disabled_with_high_contrast() {
 }
 
 #[test]
-fn test_three_stars_deblend() {
+fn three_stars_deblend() {
     let TestComponent {
         pixels,
         labels,
@@ -311,7 +311,7 @@ fn test_three_stars_deblend() {
 }
 
 #[test]
-fn test_hierarchical_deblend() {
+fn hierarchical_deblend() {
     let TestComponent {
         pixels,
         labels,
@@ -387,7 +387,7 @@ fn deblend_contrast_bar_is_root_flux_not_parent() {
 }
 
 #[test]
-fn test_equal_brightness_stars() {
+fn equal_brightness_stars() {
     let TestComponent {
         pixels,
         labels,
@@ -425,7 +425,7 @@ fn test_equal_brightness_stars() {
 }
 
 #[test]
-fn test_contrast_at_boundary() {
+fn contrast_at_boundary() {
     let TestComponent {
         pixels,
         labels,
@@ -457,7 +457,7 @@ fn test_contrast_at_boundary() {
 }
 
 #[test]
-fn test_pixel_assignment_conservation() {
+fn pixel_assignment_conservation() {
     let TestComponent {
         pixels,
         labels,
@@ -488,7 +488,7 @@ fn test_pixel_assignment_conservation() {
 }
 
 #[test]
-fn test_vertical_star_pair() {
+fn vertical_star_pair() {
     let TestComponent {
         pixels,
         labels,
@@ -520,7 +520,7 @@ fn test_vertical_star_pair() {
 }
 
 #[test]
-fn test_diagonal_star_pair() {
+fn diagonal_star_pair() {
     let TestComponent {
         pixels,
         labels,
@@ -547,7 +547,7 @@ fn test_diagonal_star_pair() {
 }
 
 #[test]
-fn test_create_child_nodes_diagonal_uses_euclidean_not_chebyshev() {
+fn create_child_nodes_diagonal_uses_euclidean_not_chebyshev() {
     // dx=dy=3, min_separation=4: Chebyshev distance is max(3,3)=3 (< 4, "too
     // close"), but squared Euclidean is 3²+3²=18 (>= 4²=16, "well separated").
     // create_child_nodes must agree with the squared-Euclidean metric that
@@ -588,7 +588,7 @@ fn test_create_child_nodes_diagonal_uses_euclidean_not_chebyshev() {
 }
 
 #[test]
-fn test_n_thresholds_effect() {
+fn n_thresholds_effect() {
     let TestComponent {
         pixels,
         labels,
@@ -618,7 +618,7 @@ fn test_n_thresholds_effect() {
 }
 
 #[test]
-fn test_single_pixel_component() {
+fn single_pixel_component() {
     let mut pixels = Buffer2::new_filled(10, 10, 0.0f32);
     let mut labels_buf = Buffer2::new_filled(10, 10, 0u32);
 
@@ -639,7 +639,7 @@ fn test_single_pixel_component() {
 }
 
 #[test]
-fn test_flat_profile_no_deblend() {
+fn flat_profile_no_deblend() {
     let mut pixels = Buffer2::new_filled(50, 50, 0.0f32);
     let mut labels_buf = Buffer2::new_filled(50, 50, 0u32);
 
@@ -676,7 +676,7 @@ fn test_flat_profile_no_deblend() {
 }
 
 #[test]
-fn test_zero_floor_pixel_does_not_prevent_deblending() {
+fn zero_floor_pixel_does_not_prevent_deblending() {
     // A component whose minimum pixel value is exactly 0.0 (e.g. a bounding box
     // padded well past both stars' Gaussian falloff) used to send the exponential
     // threshold ladder's `ratio = high/low` to infinity, producing NaN thresholds
@@ -752,7 +752,7 @@ fn test_zero_floor_pixel_does_not_prevent_deblending() {
 }
 
 #[test]
-fn test_many_stars_max_peaks_limit() {
+fn many_stars_max_peaks_limit() {
     // Create more stars than MAX_PEAKS to test limiting behavior
     let stars: Vec<_> = (0..12)
         .map(|i| {
@@ -786,7 +786,7 @@ fn test_many_stars_max_peaks_limit() {
 }
 
 #[test]
-fn test_large_tree_over_64_nodes() {
+fn large_tree_over_64_nodes() {
     // Create a scenario that might produce > 64 nodes to test HashSet fallback
     // Use many small stars that will create many tree nodes
     let mut stars = Vec::new();
@@ -820,7 +820,7 @@ fn test_large_tree_over_64_nodes() {
 }
 
 #[test]
-fn test_very_large_tree_heap_fallback() {
+fn very_large_tree_heap_fallback() {
     // Create a scenario that produces > 128 nodes to test heap fallback path
     // Use many stars in a grid pattern with high threshold count
     let mut stars = Vec::new();
@@ -854,7 +854,7 @@ fn test_very_large_tree_heap_fallback() {
 }
 
 #[test]
-fn test_buffer_reuse_consistency() {
+fn buffer_reuse_consistency() {
     // Run the same deblending multiple times to ensure buffer reuse doesn't cause issues
     let TestComponent {
         pixels,
@@ -893,7 +893,7 @@ fn test_buffer_reuse_consistency() {
 }
 
 #[test]
-fn test_connected_regions_complex_shape() {
+fn connected_regions_complex_shape() {
     // Test with a dumbbell-shaped component (two blobs connected by thin bridge)
     // The two blobs have distinct peaks that should be deblended
     let TestComponent {
@@ -933,7 +933,7 @@ fn test_connected_regions_complex_shape() {
 }
 
 #[test]
-fn test_bbox_contains_all_peaks() {
+fn bbox_contains_all_peaks() {
     // Verify that each deblended object's bbox contains its peak
     let TestComponent {
         pixels,
@@ -973,7 +973,7 @@ fn test_bbox_contains_all_peaks() {
 }
 
 #[test]
-fn test_peak_values_match_image() {
+fn peak_values_match_image() {
     // Verify that peak_value matches the actual pixel value
     let TestComponent {
         pixels,
@@ -1009,7 +1009,7 @@ fn test_peak_values_match_image() {
 }
 
 #[test]
-fn test_single_threshold_level() {
+fn single_threshold_level() {
     // Test with n_thresholds = 1 (edge case)
     let TestComponent {
         pixels,
@@ -1042,7 +1042,7 @@ fn test_single_threshold_level() {
 }
 
 #[test]
-fn test_zero_threshold_level() {
+fn zero_threshold_level() {
     // Test with n_thresholds = 0 (edge case - should still work)
     let TestComponent {
         pixels,
@@ -1065,7 +1065,7 @@ fn test_zero_threshold_level() {
 }
 
 #[test]
-fn test_pixel_grid_connected_regions() {
+fn pixel_grid_connected_regions() {
     // Test that pixel values are stored correctly by using find_connected_regions_grid
     // which exercises the actual code path including value lookups
     let pixels = vec![
@@ -1100,7 +1100,7 @@ fn test_pixel_grid_connected_regions() {
 }
 
 #[test]
-fn test_pixel_grid_reuse() {
+fn pixel_grid_reuse() {
     let mut regions = RegionSet::default();
 
     // First use
@@ -1136,7 +1136,7 @@ fn test_pixel_grid_reuse() {
 }
 
 #[test]
-fn test_pixel_grid_single_pixel() {
+fn pixel_grid_single_pixel() {
     let pixels = vec![Pixel {
         pos: Vec2us::new(50, 50),
         value: 42.0,
@@ -1153,14 +1153,14 @@ fn test_pixel_grid_single_pixel() {
 }
 
 #[test]
-fn test_node_grid_empty() {
+fn node_grid_empty() {
     let grid = NodeGrid::empty();
     assert_eq!(grid.size, Size2us::default());
     assert!(grid.get(Vec2us::new(0, 0)).is_none());
 }
 
 #[test]
-fn test_node_grid_basic_operations() {
+fn node_grid_basic_operations() {
     let pixels = vec![
         Pixel {
             pos: Vec2us::new(10, 10),
@@ -1198,7 +1198,7 @@ fn test_node_grid_basic_operations() {
 }
 
 #[test]
-fn test_node_grid_overwrite() {
+fn node_grid_overwrite() {
     let pixels = vec![Pixel {
         pos: Vec2us::new(5, 5),
         value: 1.0,
@@ -1216,7 +1216,7 @@ fn test_node_grid_overwrite() {
 }
 
 #[test]
-fn test_node_grid_reuse() {
+fn node_grid_reuse() {
     let mut grid = NodeGrid::empty();
 
     // First use
@@ -1243,7 +1243,7 @@ fn test_node_grid_reuse() {
 }
 
 #[test]
-fn test_node_grid_large_indices() {
+fn node_grid_large_indices() {
     let pixels = vec![Pixel {
         pos: Vec2us::new(100, 100),
         value: 1.0,
@@ -1259,7 +1259,7 @@ fn test_node_grid_large_indices() {
 }
 
 #[test]
-fn test_node_grid_boundary() {
+fn node_grid_boundary() {
     let pixels = vec![
         Pixel {
             pos: Vec2us::new(0, 0),
@@ -1285,7 +1285,7 @@ fn test_node_grid_boundary() {
 }
 
 #[test]
-fn test_find_connected_regions_grid_single_region() {
+fn find_connected_regions_grid_single_region() {
     // Create a small connected region
     let pixels = vec![
         Pixel {
@@ -1316,7 +1316,7 @@ fn test_find_connected_regions_grid_single_region() {
 }
 
 #[test]
-fn test_find_connected_regions_grid_two_regions() {
+fn find_connected_regions_grid_two_regions() {
     // Create two separate regions
     let pixels = vec![
         // Region 1
@@ -1353,7 +1353,7 @@ fn test_find_connected_regions_grid_two_regions() {
 }
 
 #[test]
-fn test_find_connected_regions_grid_diagonal_connectivity() {
+fn find_connected_regions_grid_diagonal_connectivity() {
     // Test 8-connectivity (diagonals should connect)
     let pixels = vec![
         Pixel {
@@ -1380,7 +1380,7 @@ fn test_find_connected_regions_grid_diagonal_connectivity() {
 }
 
 #[test]
-fn test_find_significant_branches_small_tree() {
+fn find_significant_branches_small_tree() {
     // Test find_significant_branches with a small tree (stack allocation path)
     use smallvec::SmallVec as SV;
 
@@ -1425,7 +1425,7 @@ fn test_find_significant_branches_small_tree() {
 }
 
 #[test]
-fn test_find_significant_branches_heap_fallback() {
+fn find_significant_branches_heap_fallback() {
     // Test find_significant_branches with a tree > MAX_TREE_SIZE (heap allocation path)
     use smallvec::SmallVec as SV;
 
@@ -1470,7 +1470,7 @@ fn test_find_significant_branches_heap_fallback() {
 }
 
 #[test]
-fn test_visit_neighbors_grid_all_directions() {
+fn visit_neighbors_grid_all_directions() {
     // Create a cross pattern and verify all neighbors are visited
     let pixels = vec![
         Pixel {
@@ -1521,7 +1521,7 @@ fn test_visit_neighbors_grid_all_directions() {
 }
 
 #[test]
-fn test_pixel_grid_values_generation_isolation() {
+fn pixel_grid_values_generation_isolation() {
     // Verify that generation-counter-based value storage correctly isolates
     // values between successive reset_with_pixels calls. Stale values from
     // a previous population must not be visible after reset.
@@ -1563,7 +1563,7 @@ fn test_pixel_grid_values_generation_isolation() {
 }
 
 #[test]
-fn test_pixel_grid_repeated_resets_same_positions() {
+fn pixel_grid_repeated_resets_same_positions() {
     // Verify correctness when the same positions are repopulated with
     // different values across multiple resets.
     let mut regions = RegionSet::default();
@@ -1605,7 +1605,7 @@ fn test_pixel_grid_repeated_resets_same_positions() {
 }
 
 #[test]
-fn test_connected_regions_pixels_at_coordinate_zero() {
+fn connected_regions_pixels_at_coordinate_zero() {
     // Regression test: pixels at coordinate (0, 0) caused segfault when
     // the grid border was computed with saturating_sub instead of wrapping_sub.
     // The border must always be guaranteed even at the image edge.
@@ -1640,7 +1640,7 @@ fn test_connected_regions_pixels_at_coordinate_zero() {
 }
 
 #[test]
-fn test_connected_regions_two_groups_near_zero() {
+fn connected_regions_two_groups_near_zero() {
     // Two disconnected groups near coordinate 0
     let pixels = vec![
         Pixel {
@@ -1664,7 +1664,7 @@ fn test_connected_regions_two_groups_near_zero() {
 }
 
 #[test]
-fn test_connected_regions_grid_basic() {
+fn connected_regions_grid_basic() {
     // Three separate regions, no limit — all should be found
     let pixels = vec![
         Pixel {
@@ -1693,7 +1693,7 @@ fn test_connected_regions_grid_basic() {
 }
 
 #[test]
-fn test_connected_regions_grid_capacity_limit() {
+fn connected_regions_grid_capacity_limit() {
     // Five separate pixels but a limit of 2 — should stop at 2
     let pixels = vec![
         Pixel {
@@ -1727,7 +1727,7 @@ fn test_connected_regions_grid_capacity_limit() {
 }
 
 #[test]
-fn test_connected_regions_grid_replaces_previous_contents() {
+fn connected_regions_grid_replaces_previous_contents() {
     // Verify that a second search replaces the first's regions rather than appending to them
     let pixels = vec![
         Pixel {
@@ -1759,7 +1759,7 @@ fn test_connected_regions_grid_replaces_previous_contents() {
 }
 
 #[test]
-fn test_pixel_grid_generation_wrap_to_zero_guard() {
+fn pixel_grid_generation_wrap_to_zero_guard() {
     // Verify that wrapping generation counter from u32::MAX to 0 is handled
     // correctly — generation 0 is skipped because generation arrays are
     // initialized to 0, so wrapping to 0 would make all cells appear valid.

@@ -48,7 +48,7 @@ fn unconstrained_config(transform_type: TransformType) -> Config {
 }
 
 #[test]
-fn test_outlier_rejection_spurious_stars() {
+fn outlier_rejection_spurious_stars() {
     // 10% spurious stars in target (false detections)
     let ref_stars = generate_random_stars(100, 2000.0, 2000.0, 11111, FWHM_NORMAL);
 
@@ -87,7 +87,7 @@ fn test_outlier_rejection_spurious_stars() {
 }
 
 #[test]
-fn test_outlier_rejection_missing_stars() {
+fn outlier_rejection_missing_stars() {
     // 10% missing stars in target (undetected real stars)
     let ref_stars = generate_random_stars(100, 2000.0, 2000.0, 33333, FWHM_NORMAL);
 
@@ -120,7 +120,7 @@ fn test_outlier_rejection_missing_stars() {
 }
 
 #[test]
-fn test_outlier_rejection_combined() {
+fn outlier_rejection_combined() {
     // 10% spurious + 10% missing in target
     let ref_stars = generate_random_stars(100, 2000.0, 2000.0, 55555, FWHM_NORMAL);
 
@@ -155,7 +155,7 @@ fn test_outlier_rejection_combined() {
 }
 
 #[test]
-fn test_outlier_rejection_20_percent_spurious() {
+fn outlier_rejection_20_percent_spurious() {
     // 20% spurious stars - more aggressive test
     let ref_stars = generate_random_stars(80, 2000.0, 2000.0, 88888, FWHM_NORMAL);
 
@@ -189,7 +189,7 @@ fn test_outlier_rejection_20_percent_spurious() {
 }
 
 #[test]
-fn test_partial_overlap_75_percent() {
+fn partial_overlap_75_percent() {
     // 75% overlap - 25% of stars at edges won't match
     let ref_stars = generate_random_stars(100, 2000.0, 2000.0, 11112, FWHM_NORMAL);
 
@@ -231,7 +231,7 @@ fn test_partial_overlap_75_percent() {
 }
 
 #[test]
-fn test_partial_overlap_50_percent() {
+fn partial_overlap_50_percent() {
     // 50% overlap - half the field doesn't match
     let ref_stars = generate_random_stars(120, 2000.0, 2000.0, 22223, FWHM_NORMAL);
 
@@ -273,7 +273,7 @@ fn test_partial_overlap_50_percent() {
 }
 
 #[test]
-fn test_partial_overlap_diagonal() {
+fn partial_overlap_diagonal() {
     // Diagonal shift causing corner overlap
     let ref_stars = generate_random_stars(150, 2000.0, 2000.0, 33334, FWHM_NORMAL);
 
@@ -314,7 +314,7 @@ fn test_partial_overlap_diagonal() {
 }
 
 #[test]
-fn test_subpixel_translation_quarter_pixel() {
+fn subpixel_translation_quarter_pixel() {
     // Test 0.25 pixel translation recovery
     let ref_stars = generate_random_stars(100, 2000.0, 2000.0, 44445, FWHM_SUBPIXEL);
 
@@ -348,7 +348,7 @@ fn test_subpixel_translation_quarter_pixel() {
 }
 
 #[test]
-fn test_subpixel_translation_half_pixel() {
+fn subpixel_translation_half_pixel() {
     let ref_stars = generate_random_stars(100, 2000.0, 2000.0, 55556, FWHM_SUBPIXEL);
 
     let dx = 20.5;
@@ -378,7 +378,7 @@ fn test_subpixel_translation_half_pixel() {
 }
 
 #[test]
-fn test_subpixel_rotation() {
+fn subpixel_rotation() {
     // Test 0.1 degree rotation recovery
     let ref_stars = generate_random_stars(100, 2000.0, 2000.0, 66667, FWHM_SUBPIXEL);
 
@@ -404,7 +404,7 @@ fn test_subpixel_rotation() {
 }
 
 #[test]
-fn test_subpixel_scale() {
+fn subpixel_scale() {
     // Test 0.1% scale change recovery
     let ref_stars = generate_random_stars(100, 2000.0, 2000.0, 77778, FWHM_SUBPIXEL);
 
@@ -429,7 +429,7 @@ fn test_subpixel_scale() {
 }
 
 #[test]
-fn test_minimum_stars_translation() {
+fn minimum_stars_translation() {
     // Translation needs minimum 1 point, but for RANSAC we need more
     // Test with 6 stars (practical minimum)
     let ref_stars = generate_random_stars(6, 1000.0, 1000.0, 88889, FWHM_TIGHT);
@@ -466,7 +466,7 @@ fn test_minimum_stars_translation() {
 }
 
 #[test]
-fn test_minimum_stars_similarity() {
+fn minimum_stars_similarity() {
     // Similarity needs minimum 2 points
     // Test with 8 stars
     let ref_stars = generate_random_stars(8, 1000.0, 1000.0, 99990, FWHM_TIGHT);
@@ -502,7 +502,7 @@ fn test_minimum_stars_similarity() {
 }
 
 #[test]
-fn test_insufficient_stars_fails() {
+fn insufficient_stars_fails() {
     // Should fail with too few stars
     let ref_stars = generate_random_stars(3, 1000.0, 1000.0, 11110, FWHM_NORMAL);
     let target_stars = translate_star_list(&ref_stars, 10.0, 5.0);
@@ -527,7 +527,7 @@ fn test_insufficient_stars_fails() {
 }
 
 #[test]
-fn test_stress_transform_noise_outliers() {
+fn stress_transform_noise_outliers() {
     // Transform + noise + 10% missing + 5% spurious
     let ref_stars = generate_random_stars(100, 2000.0, 2000.0, 22221, FWHM_NORMAL);
 
@@ -568,7 +568,7 @@ fn test_stress_transform_noise_outliers() {
 }
 
 #[test]
-fn test_stress_partial_overlap_with_noise() {
+fn stress_partial_overlap_with_noise() {
     // 60% overlap + noise + rotation
     let ref_stars = generate_random_stars(150, 2000.0, 2000.0, 66665, FWHM_NORMAL);
 
@@ -626,7 +626,7 @@ fn test_stress_partial_overlap_with_noise() {
 }
 
 #[test]
-fn test_stress_dense_field_large_transform() {
+fn stress_dense_field_large_transform() {
     // Dense field (200 stars) + large translation + scale change
     let ref_stars = generate_random_stars(200, 3000.0, 3000.0, 88887, FWHM_NORMAL);
 
@@ -663,7 +663,7 @@ fn test_stress_dense_field_large_transform() {
 }
 
 #[test]
-fn test_large_rotation_45_degrees() {
+fn large_rotation_45_degrees() {
     // 45 degree rotation - tests trig at non-trivial angles
     let ref_stars = generate_random_stars(100, 2000.0, 2000.0, 10001, FWHM_NORMAL);
 
@@ -708,7 +708,7 @@ fn test_large_rotation_45_degrees() {
 }
 
 #[test]
-fn test_large_rotation_90_degrees() {
+fn large_rotation_90_degrees() {
     // 90 degree rotation - edge case for atan2
     let ref_stars = generate_random_stars(100, 2000.0, 2000.0, 10002, FWHM_NORMAL);
 
@@ -752,7 +752,7 @@ fn test_large_rotation_90_degrees() {
 }
 
 #[test]
-fn test_large_rotation_negative_45_degrees() {
+fn large_rotation_negative_45_degrees() {
     // Negative rotation to test both directions
     let ref_stars = generate_random_stars(100, 2000.0, 2000.0, 10003, FWHM_NORMAL);
 
@@ -782,7 +782,7 @@ fn test_large_rotation_negative_45_degrees() {
 }
 
 #[test]
-fn test_extreme_scale_2x() {
+fn extreme_scale_2x() {
     // 2x scale factor (zoom in)
     let ref_stars = generate_random_stars(100, 2000.0, 2000.0, 20001, FWHM_LOOSE);
 
@@ -825,7 +825,7 @@ fn test_extreme_scale_2x() {
 }
 
 #[test]
-fn test_extreme_scale_half() {
+fn extreme_scale_half() {
     // 0.5x scale factor (zoom out)
     let ref_stars = generate_random_stars(100, 2000.0, 2000.0, 20002, FWHM_LOOSE);
 
@@ -866,7 +866,7 @@ fn test_extreme_scale_half() {
 }
 
 #[test]
-fn test_extreme_scale_with_rotation() {
+fn extreme_scale_with_rotation() {
     // Combined extreme scale (1.5x) with rotation (30°)
     let ref_stars = generate_random_stars(100, 2000.0, 2000.0, 20003, FWHM_LOOSE);
 
@@ -908,7 +908,7 @@ fn test_extreme_scale_with_rotation() {
 }
 
 #[test]
-fn test_affine_with_outliers() {
+fn affine_with_outliers() {
     // Affine transform with differential scale + shear, plus 15% spurious stars
     let ref_stars = generate_random_stars(100, 2000.0, 2000.0, 30001, FWHM_LOOSE);
 
@@ -948,7 +948,7 @@ fn test_affine_with_outliers() {
 }
 
 #[test]
-fn test_affine_with_noise_and_missing() {
+fn affine_with_noise_and_missing() {
     // Affine with noise + 10% missing stars
     let ref_stars = generate_random_stars(100, 2000.0, 2000.0, 30003, FWHM_LOOSE);
 
@@ -980,7 +980,7 @@ fn test_affine_with_noise_and_missing() {
 }
 
 #[test]
-fn test_homography_with_outliers() {
+fn homography_with_outliers() {
     // Homography with perspective + 10% spurious stars
     let ref_stars = generate_random_stars(120, 2000.0, 2000.0, 40001, FWHM_LOOSE);
 
@@ -1029,7 +1029,7 @@ fn test_homography_with_outliers() {
 }
 
 #[test]
-fn test_homography_with_noise_and_partial_overlap() {
+fn homography_with_noise_and_partial_overlap() {
     // Homography with noise + 70% overlap
     let ref_stars = generate_random_stars(150, 2000.0, 2000.0, 40003, FWHM_LOOSE);
 

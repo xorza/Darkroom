@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn test_lo_ransac_converges_to_exact_solution() {
+fn lo_ransac_converges_to_exact_solution() {
     let ref_points = make_grid(4, 2, 10.0);
     let known = Transform::translation(DVec2::new(5.0, 3.0));
     let target_points = apply_all(&known, &ref_points);
@@ -27,7 +27,7 @@ fn test_lo_ransac_converges_to_exact_solution() {
 }
 
 #[test]
-fn test_lo_ransac_vs_standard_with_noisy_data() {
+fn lo_ransac_vs_standard_with_noisy_data() {
     // With noisy data, LO should find at least as many inliers
     let ref_points = make_grid(5, 4, 20.0);
     let known = Transform::similarity(DVec2::new(10.0, -5.0), PI / 8.0, 1.1);
@@ -85,7 +85,7 @@ fn test_lo_ransac_vs_standard_with_noisy_data() {
 }
 
 #[test]
-fn test_final_refit_does_not_degrade_robust_score() {
+fn final_refit_does_not_degrade_robust_score() {
     let ref_points: Vec<DVec2> = (0..10)
         .map(|index| DVec2::new(index as f64 * 10.0, 0.0))
         .collect();

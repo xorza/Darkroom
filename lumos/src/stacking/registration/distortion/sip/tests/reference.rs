@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn test_reference_point_none_uses_centroid() {
+fn reference_point_none_uses_centroid() {
     // When reference_point is None, centroid of ref_points is used.
     // For a symmetric grid (200..=800 step 100), centroid = (500, 500).
     let center = DVec2::new(500.0, 500.0);
@@ -48,7 +48,7 @@ fn test_reference_point_none_uses_centroid() {
 }
 
 #[test]
-fn test_crpix_vs_centroid_when_points_are_off_center() {
+fn crpix_vs_centroid_when_points_are_off_center() {
     // When points are clustered in one quadrant, the centroid differs from
     // image center. Radial distortion from image center fits better with CRPIX.
     let image_center = DVec2::new(512.0, 384.0);
@@ -104,7 +104,7 @@ fn test_crpix_vs_centroid_when_points_are_off_center() {
 }
 
 #[test]
-fn test_sigma_clipping_rejects_outliers() {
+fn sigma_clipping_rejects_outliers() {
     let center = DVec2::new(500.0, 500.0);
     let k = 1e-7;
     let (mut ref_points, mut target_points) = make_radial_distortion_points(center, k, 100, 1000);
@@ -164,7 +164,7 @@ fn test_sigma_clipping_rejects_outliers() {
 }
 
 #[test]
-fn test_sigma_clipping_no_effect_on_clean_data() {
+fn sigma_clipping_no_effect_on_clean_data() {
     // With clean data, clipping should not reject anything, so results should
     // be identical with and without clipping.
     let center = DVec2::new(500.0, 500.0);
@@ -219,7 +219,7 @@ fn test_sigma_clipping_no_effect_on_clean_data() {
 }
 
 #[test]
-fn test_ill_conditioned_falls_back_to_lu() {
+fn ill_conditioned_falls_back_to_lu() {
     // Narrow strip: y spans only 100px (450..550), x spans 1000px.
     // The 10:1 aspect ratio makes v-dependent monomials tiny relative to
     // u-dependent ones, creating near-singular A^T*A.

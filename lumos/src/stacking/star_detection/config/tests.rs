@@ -26,7 +26,7 @@ fn noise_model_uses_normalized_signal_units() {
 }
 
 #[test]
-fn test_noise_model_invalid_parameters_return_exact_errors() {
+fn noise_model_invalid_parameters_return_exact_errors() {
     let cases = [
         (
             NoiseModel::from_normalized(0.0, 5.0),
@@ -56,14 +56,14 @@ fn test_noise_model_invalid_parameters_return_exact_errors() {
 }
 
 #[test]
-fn test_centroid_method_validate() {
+fn centroid_method_validate() {
     assert_eq!(CentroidMethod::WeightedMoments.validate(), Ok(()));
     assert_eq!(CentroidMethod::GaussianFit.validate(), Ok(()));
     assert_eq!(CentroidMethod::MoffatFit { beta: 2.5 }.validate(), Ok(()));
 }
 
 #[test]
-fn test_centroid_method_invalid_beta_returns_exact_error() {
+fn centroid_method_invalid_beta_returns_exact_error() {
     for beta in [0.0, 15.0, f32::INFINITY] {
         let invalid = CentroidMethod::MoffatFit { beta }.validate().unwrap_err();
         assert_eq!((invalid.field, invalid.value), ("Moffat beta", beta as f64));
@@ -71,14 +71,14 @@ fn test_centroid_method_invalid_beta_returns_exact_error() {
 }
 
 #[test]
-fn test_config_default() {
+fn config_default() {
     let config = Config::default();
     assert!(config.measurement.noise_model.is_none());
     assert_eq!(config.validate(), Ok(()));
 }
 
 #[test]
-fn test_config_presets() {
+fn config_presets() {
     assert_eq!(Config::wide_field().validate(), Ok(()));
     assert_eq!(Config::high_resolution().validate(), Ok(()));
     assert_eq!(Config::crowded_field().validate(), Ok(()));
@@ -86,7 +86,7 @@ fn test_config_presets() {
 }
 
 #[test]
-fn test_config_custom() {
+fn config_custom() {
     let config = configured(|config| {
         config.fwhm.expected = 5.0;
         config.filter.min_snr = 15.0;
@@ -102,7 +102,7 @@ fn test_config_custom() {
 }
 
 #[test]
-fn test_config_with_auto_fwhm() {
+fn config_with_auto_fwhm() {
     let config = configured(|config| {
         config.fwhm.auto_estimate = true;
         config.fwhm.expected = 0.0;
@@ -113,7 +113,7 @@ fn test_config_with_auto_fwhm() {
 }
 
 #[test]
-fn test_config_validates_centroid() {
+fn config_validates_centroid() {
     let config = configured(|config| {
         config.measurement.centroid_method = CentroidMethod::MoffatFit { beta: 2.5 };
     });
@@ -160,7 +160,7 @@ fn inclusive_bounds_accept_their_edges() {
 }
 
 #[test]
-fn test_config_invalid_parameters_return_exact_errors() {
+fn config_invalid_parameters_return_exact_errors() {
     let cases = [
         (
             configured(|config| config.background.tile_size = 10),
@@ -346,7 +346,7 @@ fn a_bound_that_is_another_config_value_is_reported_with_it() {
 }
 
 #[test]
-fn test_config_deblend_n_thresholds_at_max_accepted() {
+fn config_deblend_n_thresholds_at_max_accepted() {
     assert_eq!(
         configured(|config| {
             config.detection.deblend_n_thresholds = MAX_DEBLEND_N_THRESHOLDS;
@@ -357,14 +357,14 @@ fn test_config_deblend_n_thresholds_at_max_accepted() {
 }
 
 #[test]
-fn test_config_deblend_multi_threshold() {
+fn config_deblend_multi_threshold() {
     let config = configured(|config| config.detection.deblend_n_thresholds = 32);
     assert!(config.detection.is_multi_threshold());
     assert_eq!(config.validate(), Ok(()));
 }
 
 #[test]
-fn test_config_wide_field_values() {
+fn config_wide_field_values() {
     let config = Config::wide_field();
     assert!((config.fwhm.expected - 6.0).abs() < 1e-6);
     assert!(config.fwhm.auto_estimate);
@@ -376,7 +376,7 @@ fn test_config_wide_field_values() {
 }
 
 #[test]
-fn test_config_precise_ground_values() {
+fn config_precise_ground_values() {
     let config = Config::precise_ground();
     assert!(matches!(
         config.measurement.centroid_method,
@@ -395,7 +395,7 @@ fn test_config_precise_ground_values() {
 }
 
 #[test]
-fn test_config_high_resolution_values() {
+fn config_high_resolution_values() {
     let config = Config::high_resolution();
     assert!((config.fwhm.expected - 2.5).abs() < 1e-6);
     assert!(config.fwhm.auto_estimate);
@@ -411,7 +411,7 @@ fn test_config_high_resolution_values() {
 }
 
 #[test]
-fn test_config_crowded_field_values() {
+fn config_crowded_field_values() {
     let config = Config::crowded_field();
     assert_eq!(config.detection.deblend_n_thresholds, 32);
     assert_eq!(config.detection.deblend_min_separation, 2);
@@ -426,7 +426,7 @@ fn test_config_crowded_field_values() {
 }
 
 #[test]
-fn test_config_rejects_non_finite_float_parameters() {
+fn config_rejects_non_finite_float_parameters() {
     let cases = [
         (
             configured(|config| config.detection.sigma_threshold = f32::INFINITY),
@@ -499,7 +499,7 @@ fn test_config_rejects_non_finite_float_parameters() {
 }
 
 #[test]
-fn test_background_refinement_iterations() {
+fn background_refinement_iterations() {
     assert_eq!(BackgroundRefinement::None.iterations(), 0);
     assert_eq!(
         BackgroundRefinement::Iterative { iterations: 3 }.iterations(),
@@ -513,7 +513,7 @@ fn test_background_refinement_iterations() {
 }
 
 #[test]
-fn test_background_refinement_invalid_iterations_return_exact_errors() {
+fn background_refinement_invalid_iterations_return_exact_errors() {
     for iterations in [0, 11] {
         let invalid = BackgroundRefinement::Iterative { iterations }
             .validate()

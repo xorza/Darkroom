@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn test_score_hypothesis_perfect_match() {
+fn score_hypothesis_perfect_match() {
     // All points map exactly → all residuals = 0 → loss per point = 0
     // score = -total_loss = 0
     let ref_pts = [DVec2::new(0.0, 0.0), DVec2::new(10.0, 0.0)];
@@ -26,7 +26,7 @@ fn test_score_hypothesis_perfect_match() {
 }
 
 #[test]
-fn test_score_hypothesis_with_one_outlier() {
+fn score_hypothesis_with_one_outlier() {
     // 3 points: first 2 match perfectly, third is an outlier
     let ref_pts = [
         DVec2::new(0.0, 0.0),
@@ -61,7 +61,7 @@ fn test_score_hypothesis_with_one_outlier() {
 }
 
 #[test]
-fn test_score_hypothesis_early_exit() {
+fn score_hypothesis_early_exit() {
     // With a tight best_score, the function should exit early
     let n = 100;
     let ref_pts: Vec<DVec2> = (0..n).map(|i| DVec2::new(i as f64, 0.0)).collect();
@@ -89,7 +89,7 @@ fn test_score_hypothesis_early_exit() {
 }
 
 #[test]
-fn test_random_sample_into_produces_unique_indices() {
+fn random_sample_into_produces_unique_indices() {
     use rand::SeedableRng;
     let mut rng = SmallRng::seed_from_u64(42);
     let n = 50;
@@ -119,7 +119,7 @@ fn test_random_sample_into_produces_unique_indices() {
 }
 
 #[test]
-fn test_random_sample_into_k_equals_n() {
+fn random_sample_into_k_equals_n() {
     // When k == n, should return all indices (in some order)
     use rand::SeedableRng;
     let mut rng = SmallRng::seed_from_u64(99);
@@ -137,7 +137,7 @@ fn test_random_sample_into_k_equals_n() {
 }
 
 #[test]
-fn test_weighted_sample_into_pool_smaller_than_k() {
+fn weighted_sample_into_pool_smaller_than_k() {
     // When pool.len() <= k, should return all pool elements
     use rand::SeedableRng;
     let mut rng = SmallRng::seed_from_u64(42);
@@ -153,7 +153,7 @@ fn test_weighted_sample_into_pool_smaller_than_k() {
 }
 
 #[test]
-fn test_weighted_sample_into_returns_k_unique() {
+fn weighted_sample_into_returns_k_unique() {
     use rand::SeedableRng;
     let mut rng = SmallRng::seed_from_u64(42);
     let pool: Vec<usize> = (0..20).collect();

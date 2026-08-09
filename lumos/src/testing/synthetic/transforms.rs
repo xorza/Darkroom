@@ -222,7 +222,7 @@ mod tests {
     }
 
     #[test]
-    fn test_transform_identity() {
+    fn transform_identity() {
         let stars = positions_to_stars(&[DVec2::new(100.0, 200.0)], 3.0);
         let transformed = transform_star_list(&stars, 0.0, 0.0, 0.0, 1.0, 500.0, 500.0);
 
@@ -231,7 +231,7 @@ mod tests {
     }
 
     #[test]
-    fn test_transform_rotate_90_degrees() {
+    fn transform_rotate_90_degrees() {
         // 100 px right of center → 100 px above center after a 90° rotation.
         let stars = positions_to_stars(&[DVec2::new(600.0, 500.0)], 3.0);
         let rotated = transform_star_list(&stars, 0.0, 0.0, FRAC_PI_2, 1.0, 500.0, 500.0);
@@ -241,7 +241,7 @@ mod tests {
     }
 
     #[test]
-    fn test_transform_scale() {
+    fn transform_scale() {
         // 100 px right of center → 200 px right of center at 2× scale.
         let stars = positions_to_stars(&[DVec2::new(600.0, 500.0)], 3.0);
         let scaled = transform_star_list(&stars, 0.0, 0.0, 0.0, 2.0, 500.0, 500.0);

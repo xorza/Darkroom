@@ -7,7 +7,7 @@ use crate::stacking::registration::*;
 // leave everything else — position included — at its `Star::at` default.
 
 #[test]
-fn test_median_fwhm_basic() {
+fn median_fwhm_basic() {
     let ref_stars = vec![
         Star::at(DVec2::ZERO).with_fwhm(2.0),
         Star::at(DVec2::ZERO).with_fwhm(3.0),
@@ -23,7 +23,7 @@ fn test_median_fwhm_basic() {
 }
 
 #[test]
-fn test_median_fwhm_even_count_averages_the_middle_pair() {
+fn median_fwhm_even_count_averages_the_middle_pair() {
     // Four stars: [2.0, 3.0, 4.0, 5.0] -> (3.0 + 4.0) / 2 = 3.5. The old full sort read the
     // upper middle (4.0); quickselect averages, matching how the detector's own median FWHM
     // is computed.
@@ -40,7 +40,7 @@ fn test_median_fwhm_even_count_averages_the_middle_pair() {
 }
 
 #[test]
-fn test_median_fwhm_single_set() {
+fn median_fwhm_single_set() {
     let ref_stars = vec![
         Star::at(DVec2::ZERO).with_fwhm(1.5),
         Star::at(DVec2::ZERO).with_fwhm(2.5),
@@ -53,7 +53,7 @@ fn test_median_fwhm_single_set() {
 }
 
 #[test]
-fn test_max_sigma_from_fwhm() {
+fn max_sigma_from_fwhm() {
     // FWHM = 3.0 -> max_sigma = 3.0 * 0.5 = 1.5
     let fwhm: f64 = 3.0;
     let max_sigma = (fwhm * 0.5).max(0.5);
@@ -66,7 +66,7 @@ fn test_max_sigma_from_fwhm() {
 }
 
 #[test]
-fn test_max_sigma_typical_seeing() {
+fn max_sigma_typical_seeing() {
     // Typical ground seeing: FWHM = 2.0-4.0 pixels
     // FWHM = 2.0 -> max_sigma = 1.0 (~3px effective threshold)
     // FWHM = 4.0 -> max_sigma = 2.0 (~6px effective threshold)
@@ -90,7 +90,7 @@ fn test_max_sigma_typical_seeing() {
 }
 
 #[test]
-fn test_register_rejects_non_finite_positions_in_both_catalogs() {
+fn register_rejects_non_finite_positions_in_both_catalogs() {
     for catalog in [RegistrationCatalog::Reference, RegistrationCatalog::Target] {
         let mut ref_stars = vec![Star::at(DVec2::ZERO).with_fwhm(2.0); 8];
         let mut target_stars = ref_stars.clone();
@@ -118,7 +118,7 @@ fn test_register_rejects_non_finite_positions_in_both_catalogs() {
 }
 
 #[test]
-fn test_register_rejects_non_finite_fwhm_in_both_catalogs() {
+fn register_rejects_non_finite_fwhm_in_both_catalogs() {
     for catalog in [RegistrationCatalog::Reference, RegistrationCatalog::Target] {
         let mut ref_stars = vec![Star::at(DVec2::ZERO).with_fwhm(2.0); 8];
         let mut target_stars = ref_stars.clone();

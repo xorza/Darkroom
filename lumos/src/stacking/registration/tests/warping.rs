@@ -141,7 +141,7 @@ fn assert_roundtrip(
 
 /// Test that warping with identity transform preserves the image.
 #[test]
-fn test_warp_identity_all_methods() {
+fn warp_identity_all_methods() {
     let ref_buf = star_field(Size2us::new(256, 256), 30, 12345)
         .image
         .channel(0)
@@ -181,7 +181,7 @@ fn test_warp_identity_all_methods() {
 }
 
 #[test]
-fn test_warp_translation_roundtrip() {
+fn warp_translation_roundtrip() {
     assert_roundtrip(
         11111,
         Transform::translation(DVec2::new(10.5, -7.3)),
@@ -196,7 +196,7 @@ fn test_warp_translation_roundtrip() {
 }
 
 #[test]
-fn test_warp_euclidean_roundtrip() {
+fn warp_euclidean_roundtrip() {
     assert_roundtrip(
         22222,
         Transform::euclidean(DVec2::new(5.0, -3.0), 2.0_f64.to_radians()),
@@ -211,7 +211,7 @@ fn test_warp_euclidean_roundtrip() {
 }
 
 #[test]
-fn test_warp_similarity_roundtrip() {
+fn warp_similarity_roundtrip() {
     assert_roundtrip(
         33333,
         Transform::similarity(DVec2::new(8.0, -5.0), 1.5_f64.to_radians(), 1.02),
@@ -226,7 +226,7 @@ fn test_warp_similarity_roundtrip() {
 }
 
 #[test]
-fn test_warp_affine_roundtrip() {
+fn warp_affine_roundtrip() {
     // Affine with slight differential scaling
     let angle_rad = 0.5_f64.to_radians();
     let (cos_a, sin_a) = (angle_rad.cos(), angle_rad.sin());
@@ -254,7 +254,7 @@ fn test_warp_affine_roundtrip() {
 }
 
 #[test]
-fn test_warp_homography_roundtrip() {
+fn warp_homography_roundtrip() {
     // Mild perspective distortion
     let forward = Transform::homography([1.0, 0.0, 5.0, 0.0, 1.0, -3.0, 0.00005, 0.00003]);
     assert_eq!(forward.transform_type(), TransformType::Homography);
@@ -273,7 +273,7 @@ fn test_warp_homography_roundtrip() {
 }
 
 #[test]
-fn test_warp_with_detected_transform() {
+fn warp_with_detected_transform() {
     use crate::stacking::registration::{Config as RegConfig, register};
     use crate::stacking::star_detection::config::Config as StarConfig;
 
@@ -351,7 +351,7 @@ fn test_warp_with_detected_transform() {
 }
 
 #[test]
-fn test_interpolation_quality_ordering() {
+fn interpolation_quality_ordering() {
     let ref_buf = star_field(Size2us::new(256, 256), 30, 77777)
         .image
         .channel(0)
@@ -424,7 +424,7 @@ fn test_interpolation_quality_ordering() {
 }
 
 #[test]
-fn test_warp_grayscale_translation() {
+fn warp_grayscale_translation() {
     let ref_buf = star_field(Size2us::new(256, 256), 30, 88888)
         .image
         .channel(0)
@@ -475,7 +475,7 @@ fn test_warp_grayscale_translation() {
 }
 
 #[test]
-fn test_warp_rgb() {
+fn warp_rgb() {
     let gray_buf = star_field(Size2us::new(256, 256), 30, 99999)
         .image
         .channel(0)
@@ -538,7 +538,7 @@ fn test_warp_rgb() {
 }
 
 #[test]
-fn test_warp_preserves_output_metadata() {
+fn warp_preserves_output_metadata() {
     use crate::io::image::image_metadata::ImageMetadata;
 
     let pixels = star_field(Size2us::new(256, 256), 30, 11111)
@@ -595,7 +595,7 @@ fn extract_central_region(
 /// Test that warp with SIP correction produces different (corrected) output
 /// compared to warp without SIP.
 #[test]
-fn test_warp_with_sip_correction() {
+fn warp_with_sip_correction() {
     use crate::stacking::registration::distortion::sip::{SipConfig, SipPolynomial};
 
     let width = 256;
@@ -703,7 +703,7 @@ fn test_warp_with_sip_correction() {
 
 /// Test that warp with SIP correction through the public `warp()` API works.
 #[test]
-fn test_warp_api_with_sip() {
+fn warp_api_with_sip() {
     use crate::stacking::registration::distortion::sip::{SipConfig, SipPolynomial};
 
     let width = 128;

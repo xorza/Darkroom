@@ -16,7 +16,7 @@ fn channel_with_mad(center: f32, mad: f32) -> Vec<f32> {
 }
 
 #[test]
-fn test_prepare_uniform() {
+fn prepare_uniform() {
     let dim = ImageDimensions::new((64, 64), 1);
     let data = vec![0.5f32; 64 * 64];
     let image = LinearImage::from_pixels(dim, data);
@@ -32,7 +32,7 @@ fn test_prepare_uniform() {
 }
 
 #[test]
-fn test_prepare_with_star() {
+fn prepare_with_star() {
     let width = 64;
     let height = 64;
     let mut data = vec![0.1f32; width * height];
@@ -116,7 +116,7 @@ fn the_median_filter_follows_interpolation_not_the_sensor_pattern() {
 }
 
 #[test]
-fn test_detection_weights_equal_noise() {
+fn detection_weights_equal_noise() {
     // Identical per-channel MAD → equal inverse-variance weights (≈ 1/3 each).
     let dims = ImageDimensions::new((4, 4), 3);
     let ch = channel_with_mad(0.5, 0.02);
@@ -136,7 +136,7 @@ fn test_detection_weights_equal_noise() {
 }
 
 #[test]
-fn test_detection_weights_downweight_noisy_channel() {
+fn detection_weights_downweight_noisy_channel() {
     // R,G clean (MAD 0.02), B noisy (MAD 0.08). σ ∝ MAD, so w ∝ 1/MAD².
     // w_R / w_B = (0.08 / 0.02)² = 16.
     let dims = ImageDimensions::new((4, 4), 3);
@@ -161,7 +161,7 @@ fn test_detection_weights_downweight_noisy_channel() {
 }
 
 #[test]
-fn test_detection_weights_all_flat_falls_back_to_mean() {
+fn detection_weights_all_flat_falls_back_to_mean() {
     // Uniform channels have MAD 0 → degenerate; weights fall back to 1/3 each.
     let dims = ImageDimensions::new((4, 4), 3);
     let flat = vec![0.5f32; 16];
@@ -178,7 +178,7 @@ fn test_detection_weights_all_flat_falls_back_to_mean() {
 }
 
 #[test]
-fn test_prepare_rgb_equal_noise_is_mean() {
+fn prepare_rgb_equal_noise_is_mean() {
     // Distinct per-channel levels but identical spread → equal weights, so the
     // detection plane is the plain mean of the three channels.
     let dims = ImageDimensions::new((4, 4), 3);
@@ -200,7 +200,7 @@ fn test_prepare_rgb_equal_noise_is_mean() {
 }
 
 #[test]
-fn test_prepare_rgb_red_star_survives() {
+fn prepare_rgb_red_star_survives() {
     // A star bright only in R must remain prominent in the detection plane.
     // With equal-noise channels the weights are ~1/3, so the star peak lands at
     // ~1/3 of its R amplitude — far above Rec.709's 0.21× crush of red.

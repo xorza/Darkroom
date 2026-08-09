@@ -2,7 +2,7 @@ use super::*;
 use crate::stacking::star_detection::centroid::{StampGrid, compute_stamp_radius};
 
 #[test]
-fn test_estimate_sigma_from_moments_gaussian() {
+fn estimate_sigma_from_moments_gaussian() {
     use crate::stacking::star_detection::centroid::estimate_sigma_from_moments;
 
     let width = 21;
@@ -50,7 +50,7 @@ fn test_estimate_sigma_from_moments_gaussian() {
 }
 
 #[test]
-fn test_estimate_sigma_from_moments_various_sigmas() {
+fn estimate_sigma_from_moments_various_sigmas() {
     use crate::stacking::star_detection::centroid::estimate_sigma_from_moments;
 
     let width = 21;
@@ -97,7 +97,7 @@ fn test_estimate_sigma_from_moments_various_sigmas() {
 }
 
 #[test]
-fn test_refine_centroid_adaptive_sigma_small_fwhm() {
+fn refine_centroid_adaptive_sigma_small_fwhm() {
     let width = 64;
     let height = 64;
     let true_pos = DVec2::new(32.3, 32.7);
@@ -130,7 +130,7 @@ fn test_refine_centroid_adaptive_sigma_small_fwhm() {
 }
 
 #[test]
-fn test_refine_centroid_adaptive_sigma_large_fwhm() {
+fn refine_centroid_adaptive_sigma_large_fwhm() {
     let width = 64;
     let height = 64;
     let true_pos = DVec2::new(32.3, 32.7);
@@ -163,7 +163,7 @@ fn test_refine_centroid_adaptive_sigma_large_fwhm() {
 }
 
 #[test]
-fn test_extract_stamp_valid_center() {
+fn extract_stamp_valid_center() {
     use crate::stacking::star_detection::centroid::extract_stamp;
 
     let width = 64;
@@ -186,7 +186,7 @@ fn test_extract_stamp_valid_center() {
 }
 
 #[test]
-fn test_extract_stamp_edge_invalid() {
+fn extract_stamp_edge_invalid() {
     use crate::stacking::star_detection::centroid::extract_stamp;
 
     let width = 64;
@@ -201,7 +201,7 @@ fn test_extract_stamp_edge_invalid() {
 }
 
 #[test]
-fn test_extract_stamp_peak_value() {
+fn extract_stamp_peak_value() {
     use crate::stacking::star_detection::centroid::extract_stamp;
 
     let width = 64;
@@ -222,7 +222,7 @@ fn test_extract_stamp_peak_value() {
 }
 
 #[test]
-fn test_extract_stamp_coordinates() {
+fn extract_stamp_coordinates() {
     use crate::stacking::star_detection::centroid::extract_stamp;
 
     let width = 64;
@@ -240,7 +240,7 @@ fn test_extract_stamp_coordinates() {
 }
 
 #[test]
-fn test_extract_stamp_fractional_position() {
+fn extract_stamp_fractional_position() {
     use crate::stacking::star_detection::centroid::extract_stamp;
 
     let width = 64;
@@ -257,7 +257,7 @@ fn test_extract_stamp_fractional_position() {
 }
 
 #[test]
-fn test_local_annulus_background_uniform() {
+fn local_annulus_background_uniform() {
     use crate::stacking::star_detection::config::measurement_config::LocalBackgroundMethod;
 
     let width = 128;
@@ -315,7 +315,7 @@ fn test_local_annulus_background_uniform() {
 }
 
 #[test]
-fn test_local_annulus_vs_global_map() {
+fn local_annulus_vs_global_map() {
     use crate::stacking::star_detection::config::measurement_config::LocalBackgroundMethod;
 
     let width = 128;
@@ -385,7 +385,7 @@ fn test_local_annulus_vs_global_map() {
 }
 
 #[test]
-fn test_local_annulus_near_edge_fallback() {
+fn local_annulus_near_edge_fallback() {
     use crate::stacking::star_detection::config::measurement_config::LocalBackgroundMethod;
 
     let width = 64;

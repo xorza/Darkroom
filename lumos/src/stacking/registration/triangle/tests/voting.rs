@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn test_vote_matrix_dense_mode() {
+fn vote_matrix_dense_mode() {
     // 10*10 = 100 < 250,000 → dense
     let mut vm = VoteMatrix::new(10, 10);
     assert!(matches!(vm, VoteMatrix::Dense { .. }));
@@ -18,7 +18,7 @@ fn test_vote_matrix_dense_mode() {
 }
 
 #[test]
-fn test_vote_matrix_sparse_mode() {
+fn vote_matrix_sparse_mode() {
     // 600*600 = 360,000 >= 250,000 → sparse
     let mut vm = VoteMatrix::new(600, 600);
     assert!(matches!(vm, VoteMatrix::Sparse(_)));
@@ -35,7 +35,7 @@ fn test_vote_matrix_sparse_mode() {
 }
 
 #[test]
-fn test_vote_matrix_empty() {
+fn vote_matrix_empty() {
     let vm_dense = VoteMatrix::new(5, 5);
     assert_eq!(vm_dense.iter_nonzero().count(), 0);
 
@@ -44,7 +44,7 @@ fn test_vote_matrix_empty() {
 }
 
 #[test]
-fn test_vote_matrix_threshold_boundary() {
+fn vote_matrix_threshold_boundary() {
     // size < 250,000 → dense, size >= 250,000 → sparse
 
     // 499*500 = 249,500 < 250,000 → dense
@@ -57,7 +57,7 @@ fn test_vote_matrix_threshold_boundary() {
 }
 
 #[test]
-fn test_vote_matrix_dense_index_mapping() {
+fn vote_matrix_dense_index_mapping() {
     // Verify that dense mode correctly maps (ref_idx, target_idx) → flat index
     // Formula: flat_idx = ref_idx * n_target + target_idx
     let n_ref = 3;
@@ -90,7 +90,7 @@ fn test_vote_matrix_dense_index_mapping() {
 }
 
 #[test]
-fn test_vote_matrix_dense_boundary_indices() {
+fn vote_matrix_dense_boundary_indices() {
     // Test accessing corners: (0,0), (0,n-1), (n-1,0), (n-1,n-1)
     let n = 10;
     let mut vm = VoteMatrix::new(n, n);
@@ -109,7 +109,7 @@ fn test_vote_matrix_dense_boundary_indices() {
 }
 
 #[test]
-fn test_vote_matrix_dense_saturating_add() {
+fn vote_matrix_dense_saturating_add() {
     // Dense mode uses u16. Verify exact count for reasonable values.
     let mut vm = VoteMatrix::new(2, 2);
     for _ in 0..1000 {
@@ -121,7 +121,7 @@ fn test_vote_matrix_dense_saturating_add() {
 }
 
 #[test]
-fn test_resolve_matches_one_to_one() {
+fn resolve_matches_one_to_one() {
     // 3 non-conflicting matches sorted by descending votes
     let vm = vote_matrix_from_entries(3, 3, &[(0, 0, 10), (1, 1, 8), (2, 2, 6)]);
 
@@ -143,7 +143,7 @@ fn test_resolve_matches_one_to_one() {
 }
 
 #[test]
-fn test_resolve_matches_target_conflict() {
+fn resolve_matches_target_conflict() {
     // Two ref points compete for the same target:
     // ref 0 → target 0 (10 votes), ref 1 → target 0 (5 votes), ref 1 → target 1 (3 votes)
     // Greedy: ref 0 wins target 0, ref 1 falls back to target 1
@@ -162,7 +162,7 @@ fn test_resolve_matches_target_conflict() {
 }
 
 #[test]
-fn test_resolve_matches_ref_conflict() {
+fn resolve_matches_ref_conflict() {
     // Two target points compete for the same ref:
     // ref 0 → target 0 (10 votes), ref 0 → target 1 (5 votes), ref 1 → target 1 (3 votes)
     // Greedy: ref 0 gets target 0 (highest), ref 0 → target 1 blocked (ref 0 used), ref 1 gets target 1
@@ -181,7 +181,7 @@ fn test_resolve_matches_ref_conflict() {
 }
 
 #[test]
-fn test_resolve_matches_min_votes_filter() {
+fn resolve_matches_min_votes_filter() {
     // Only ref 0 → target 0 (10 votes) survives min_votes = 3
     let vm = vote_matrix_from_entries(3, 3, &[(0, 0, 10), (1, 1, 2), (2, 2, 1)]);
 
@@ -193,14 +193,14 @@ fn test_resolve_matches_min_votes_filter() {
 }
 
 #[test]
-fn test_resolve_matches_empty() {
+fn resolve_matches_empty() {
     let vm = VoteMatrix::new(5, 5);
     let matches = resolve_matches(vm, 5, 5, 1);
     assert!(matches.is_empty());
 }
 
 #[test]
-fn test_resolve_matches_confidence_relative() {
+fn resolve_matches_confidence_relative() {
     // Confidence = votes / max_votes in resolved set
     // Three matches: 20, 10, 5 votes → confidence = 1.0, 0.5, 0.25
     let vm = vote_matrix_from_entries(5, 5, &[(0, 0, 20), (1, 1, 10), (2, 2, 5)]);
@@ -222,7 +222,7 @@ fn test_resolve_matches_confidence_relative() {
 }
 
 #[test]
-fn test_resolve_matches_single_entry_confidence_is_1() {
+fn resolve_matches_single_entry_confidence_is_1() {
     // Single match: confidence = votes/max_votes = 10/10 = 1.0
     let vm = vote_matrix_from_entries(5, 5, &[(0, 0, 10)]);
 
@@ -233,7 +233,7 @@ fn test_resolve_matches_single_entry_confidence_is_1() {
 }
 
 #[test]
-fn test_vote_for_correspondences_identical_triangles() {
+fn vote_for_correspondences_identical_triangles() {
     // Identical point sets → every triangle matches itself → diagonal dominates
     let positions = vec![
         DVec2::new(0.0, 0.0),
@@ -277,7 +277,7 @@ fn test_vote_for_correspondences_identical_triangles() {
 }
 
 #[test]
-fn test_vote_for_correspondences_no_matching_triangles() {
+fn vote_for_correspondences_no_matching_triangles() {
     // Equilateral-ish triangle vs very thin triangle → no matches at tight tolerance
     let positions_a = vec![
         DVec2::new(0.0, 0.0),
@@ -316,7 +316,7 @@ fn test_vote_for_correspondences_no_matching_triangles() {
 }
 
 #[test]
-fn test_vote_for_correspondences_orientation_filtering() {
+fn vote_for_correspondences_orientation_filtering() {
     let positions = vec![
         DVec2::new(0.0, 0.0),
         DVec2::new(10.0, 0.0),

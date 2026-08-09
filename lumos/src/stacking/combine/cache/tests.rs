@@ -324,7 +324,7 @@ fn make_cfa_cache(frames_pixels: Vec<Vec<f32>>, dims: ImageDimensions) -> FrameC
 }
 
 #[test]
-fn test_process_chunked_median() {
+fn process_chunked_median() {
     // Create in-memory cache with 3 grayscale frames
     let dims = ImageDimensions::new((4, 4), 1);
     let images = vec![
@@ -351,7 +351,7 @@ fn test_process_chunked_median() {
 }
 
 #[test]
-fn test_process_chunked_rgb() {
+fn process_chunked_rgb() {
     // Create in-memory cache with 2 RGB frames
     let dims = ImageDimensions::new((2, 2), 3);
     // Frame 1: R=1, G=2, B=3 for all pixels
@@ -384,7 +384,7 @@ fn test_process_chunked_rgb() {
 }
 
 #[test]
-fn test_process_chunked_with_weights() {
+fn process_chunked_with_weights() {
     let dims = ImageDimensions::new((2, 2), 1);
     let images = vec![
         LinearImage::from_pixels(dims, vec![10.0; 4]),
@@ -443,7 +443,7 @@ fn calibration_frames_combine_through_the_same_engine_as_lights() {
 }
 
 #[test]
-fn test_frame_count() {
+fn frame_count() {
     let dims = ImageDimensions::new((2, 2), 1);
     let images = vec![
         LinearImage::from_pixels(dims, vec![1.0; 4]),
@@ -457,7 +457,7 @@ fn test_frame_count() {
 }
 
 #[test]
-fn test_cleanup_removes_files() {
+fn cleanup_removes_files() {
     let temp_dir = ScratchDirectory::new("lumos_cleanup_test");
 
     let dims = ImageDimensions::new((2, 2), 3);
@@ -504,7 +504,7 @@ fn test_cleanup_removes_files() {
 }
 
 #[test]
-fn test_read_channel_chunk_in_memory() {
+fn read_channel_chunk_in_memory() {
     let dims = ImageDimensions::new((4, 3), 1);
     // Pixels 0-11 in row-major order
     let pixels: Vec<f32> = (0..12).map(|i| i as f32).collect();
@@ -527,7 +527,7 @@ fn test_read_channel_chunk_in_memory() {
 }
 
 #[test]
-fn test_read_channel_chunk_disk_backed() {
+fn read_channel_chunk_disk_backed() {
     let temp_dir = ScratchDirectory::new("lumos_read_chunk_disk_test");
 
     let dims = ImageDimensions::new((4, 3), 1);
@@ -583,7 +583,7 @@ fn test_read_channel_chunk_disk_backed() {
 }
 
 #[test]
-fn test_frame_count_disk_backed() {
+fn frame_count_disk_backed() {
     let temp_dir = ScratchDirectory::new("lumos_frame_count_disk_test");
 
     let dims = ImageDimensions::new((2, 2), 1);
@@ -625,7 +625,7 @@ fn test_frame_count_disk_backed() {
 }
 
 #[test]
-fn test_compute_channel_stats_grayscale() {
+fn compute_channel_stats_grayscale() {
     // 3 grayscale frames, 3x3 pixels each
     let dims = ImageDimensions::new((3, 3), 1);
 
@@ -659,7 +659,7 @@ fn test_compute_channel_stats_grayscale() {
 }
 
 #[test]
-fn test_compute_channel_stats_rgb() {
+fn compute_channel_stats_rgb() {
     // 2 RGB frames, 2x2 pixels each
     let dims = ImageDimensions::new((2, 2), 3);
 

@@ -4,7 +4,7 @@ use crate::stacking::star_detection::convolution::simd::x86::*;
 use imaginarium::cpu_features;
 
 #[test]
-fn test_avx2_matches_scalar() {
+fn avx2_matches_scalar() {
     if !cpu_features::has_avx2_fma() {
         eprintln!("Skipping AVX2 test: CPU does not support AVX2+FMA");
         return;
@@ -37,7 +37,7 @@ fn test_avx2_matches_scalar() {
 }
 
 #[test]
-fn test_sse41_matches_scalar() {
+fn sse41_matches_scalar() {
     if !cpu_features::has_sse4_1() {
         eprintln!("Skipping SSE4.1 test: CPU does not support SSE4.1");
         return;
@@ -70,7 +70,7 @@ fn test_sse41_matches_scalar() {
 }
 
 #[test]
-fn test_avx2_cols_matches_scalar() {
+fn avx2_cols_matches_scalar() {
     if !cpu_features::has_avx2_fma() {
         eprintln!("Skipping AVX2 cols test: CPU does not support AVX2+FMA");
         return;
@@ -125,7 +125,7 @@ fn test_avx2_cols_matches_scalar() {
 }
 
 #[test]
-fn test_sse41_cols_matches_scalar() {
+fn sse41_cols_matches_scalar() {
     if !cpu_features::has_sse4_1() {
         eprintln!("Skipping SSE4.1 cols test: CPU does not support SSE4.1");
         return;

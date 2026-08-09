@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn test_estimate_translation_hand_computed() {
+fn estimate_translation_hand_computed() {
     // Translation is the average displacement.
     // ref: (0,0), (10,0), (0,10), (10,10)
     // target: (5,-3), (15,-3), (5,7), (15,7)  (offset +5, -3)
@@ -25,13 +25,13 @@ fn test_estimate_translation_hand_computed() {
 }
 
 #[test]
-fn test_estimate_translation_insufficient_points() {
+fn estimate_translation_insufficient_points() {
     let result = estimate_transform(&[], &[], TransformType::Translation);
     assert!(result.is_none());
 }
 
 #[test]
-fn test_estimate_euclidean_hand_computed() {
+fn estimate_euclidean_hand_computed() {
     // Euclidean: rotation + translation, scale = 1
     let angle = PI / 12.0; // 15 degrees
     let t = DVec2::new(5.0, -3.0);
@@ -67,7 +67,7 @@ fn test_estimate_euclidean_hand_computed() {
 }
 
 #[test]
-fn test_estimate_euclidean_insufficient_points() {
+fn estimate_euclidean_insufficient_points() {
     let result = estimate_transform(
         &[DVec2::new(0.0, 0.0)],
         &[DVec2::new(1.0, 1.0)],
@@ -77,7 +77,7 @@ fn test_estimate_euclidean_insufficient_points() {
 }
 
 #[test]
-fn test_estimate_euclidean_ignores_scale() {
+fn estimate_euclidean_ignores_scale() {
     // When data has inherent scale != 1, Euclidean estimator should still produce scale=1.
     let ref_points = [
         DVec2::new(0.0, 0.0),
@@ -110,7 +110,7 @@ fn test_estimate_euclidean_ignores_scale() {
 }
 
 #[test]
-fn test_estimate_similarity_hand_computed() {
+fn estimate_similarity_hand_computed() {
     let angle = PI / 6.0; // 30 degrees
     let scale = 1.5;
     let t = DVec2::new(20.0, -10.0);
@@ -147,7 +147,7 @@ fn test_estimate_similarity_hand_computed() {
 }
 
 #[test]
-fn test_estimate_similarity_insufficient_points() {
+fn estimate_similarity_insufficient_points() {
     let result = estimate_transform(
         &[DVec2::new(0.0, 0.0)],
         &[DVec2::new(1.0, 1.0)],
@@ -157,7 +157,7 @@ fn test_estimate_similarity_insufficient_points() {
 }
 
 #[test]
-fn test_estimate_affine_hand_computed() {
+fn estimate_affine_hand_computed() {
     // Affine: [a,b,tx,c,d,ty] → x' = a*x + b*y + tx, y' = c*x + d*y + ty
     // [1.2, 0.3, 5.0, -0.1, 0.9, -3.0]
     let params = [1.2, 0.3, 5.0, -0.1, 0.9, -3.0];
@@ -194,7 +194,7 @@ fn test_estimate_affine_hand_computed() {
 }
 
 #[test]
-fn test_estimate_affine_insufficient_points() {
+fn estimate_affine_insufficient_points() {
     let ref_pts = [DVec2::new(0.0, 0.0), DVec2::new(1.0, 0.0)];
     let tar_pts = [DVec2::new(1.0, 1.0), DVec2::new(2.0, 1.0)];
     let result = estimate_transform(&ref_pts, &tar_pts, TransformType::Affine);
@@ -202,7 +202,7 @@ fn test_estimate_affine_insufficient_points() {
 }
 
 #[test]
-fn test_estimate_affine_ill_conditioned() {
+fn estimate_affine_ill_conditioned() {
     // Points spanning a large range -- stresses numerical stability.
     // Without Hartley normalization, normal equations A^T A become ill-conditioned
     // (condition number κ(A^T A) ≈ κ(A)²) and precision degrades.
@@ -239,7 +239,7 @@ fn test_estimate_affine_ill_conditioned() {
 }
 
 #[test]
-fn test_estimate_homography_hand_computed() {
+fn estimate_homography_hand_computed() {
     let ref_points = [
         DVec2::new(0.0, 0.0),
         DVec2::new(100.0, 0.0),
@@ -277,7 +277,7 @@ fn test_estimate_homography_hand_computed() {
 }
 
 #[test]
-fn test_estimate_homography_insufficient_points() {
+fn estimate_homography_insufficient_points() {
     let ref_pts = [
         DVec2::new(0.0, 0.0),
         DVec2::new(1.0, 0.0),
@@ -293,7 +293,7 @@ fn test_estimate_homography_insufficient_points() {
 }
 
 #[test]
-fn test_estimate_homography_ill_conditioned() {
+fn estimate_homography_ill_conditioned() {
     // Points spanning a large range -- stresses numerical stability
     let ref_points = [
         DVec2::new(0.01, 0.02),

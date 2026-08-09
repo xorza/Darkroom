@@ -24,7 +24,7 @@ fn apply_similarity(pos: DVec2, dx: f64, dy: f64, angle: f64, center: DVec2) -> 
 }
 
 #[test]
-fn test_iterative_recovery_improves_on_biased_seed() {
+fn iterative_recovery_improves_on_biased_seed() {
     // Setup: 50 stars with a rotation transform. Give recover_matches
     // a slightly wrong initial transform (estimated from only 3 seed points).
     // The initial transform is close enough for some matches, but iterative
@@ -84,7 +84,7 @@ fn test_iterative_recovery_improves_on_biased_seed() {
 }
 
 #[test]
-fn test_iterative_recovery_converges() {
+fn iterative_recovery_converges() {
     // With a perfect initial transform, recovery should converge in 1 pass
     // (no improvement possible after first pass finds all matches).
     let ref_stars = generate_random_positions(30, 1000.0, 1000.0, 99);
@@ -120,7 +120,7 @@ fn test_iterative_recovery_converges() {
 }
 
 #[test]
-fn test_iterative_recovery_never_loses_matches() {
+fn iterative_recovery_never_loses_matches() {
     // Ensure the safety fallback works: we never return fewer matches
     // than we started with.
     let ref_stars = generate_random_positions(20, 1000.0, 1000.0, 77);
@@ -154,7 +154,7 @@ fn test_iterative_recovery_never_loses_matches() {
 }
 
 #[test]
-fn test_iterative_recovery_removes_outliers() {
+fn iterative_recovery_removes_outliers() {
     // Start with some incorrect seed matches. The re-validation step
     // should remove them during iteration.
     let ref_stars = generate_random_positions(30, 1000.0, 1000.0, 55);

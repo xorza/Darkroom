@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn test_sip_config_default_values() {
+fn sip_config_default_values() {
     let config = SipConfig::default();
     assert_eq!(config.order, 3);
     assert!(config.reference_point.is_none());
@@ -10,7 +10,7 @@ fn test_sip_config_default_values() {
 }
 
 #[test]
-fn test_sip_config_validate_accepts_all_valid_orders() {
+fn sip_config_validate_accepts_all_valid_orders() {
     for order in 2..=5 {
         let config = SipConfig {
             order,
@@ -21,7 +21,7 @@ fn test_sip_config_validate_accepts_all_valid_orders() {
 }
 
 #[test]
-fn test_norm_scale_stored_correctly() {
+fn norm_scale_stored_correctly() {
     // The norm_scale should be the average distance from ref_points to reference_point.
     let center = DVec2::new(0.0, 0.0);
     let (ref_points, target_points) = make_radial_distortion_points(center, 1e-7, 100, 1000);
@@ -45,7 +45,7 @@ fn test_norm_scale_stored_correctly() {
 }
 
 #[test]
-fn test_fit_result_zero_distortion_metrics() {
+fn fit_result_zero_distortion_metrics() {
     // Zero distortion: target == ref. All residuals and corrections should be ~0.
     // points_rejected = 0 (no outliers to clip).
     let mut ref_points = Vec::new();
@@ -90,7 +90,7 @@ fn test_fit_result_zero_distortion_metrics() {
 }
 
 #[test]
-fn test_fit_result_barrel_metrics() {
+fn fit_result_barrel_metrics() {
     // Barrel distortion k=1e-7 on 1000×1000 grid.
     // Expected: rms_residual small, max_correction ~ 25*sqrt(2) ≈ 35.36 px at corners.
     //
@@ -144,7 +144,7 @@ fn test_fit_result_barrel_metrics() {
 }
 
 #[test]
-fn test_fit_result_with_outliers_metrics() {
+fn fit_result_with_outliers_metrics() {
     // Inject 3 outliers into clean barrel data. Sigma-clipping should reject exactly 3.
     let center = DVec2::new(500.0, 500.0);
     let k = 1e-7;
@@ -190,7 +190,7 @@ fn test_fit_result_with_outliers_metrics() {
 }
 
 #[test]
-fn test_fit_result_points_used_plus_rejected_equals_total() {
+fn fit_result_points_used_plus_rejected_equals_total() {
     // Invariant: points_used + points_rejected == n for any fit.
     let center = DVec2::new(500.0, 500.0);
     let transform = Transform::identity();
@@ -252,7 +252,7 @@ fn test_fit_result_points_used_plus_rejected_equals_total() {
 }
 
 #[test]
-fn test_fit_result_max_residual_geq_rms() {
+fn fit_result_max_residual_geq_rms() {
     // Mathematical invariant: max_residual >= rms_residual always.
     // max(x_i) >= sqrt(mean(x_i^2)) because the max contributes to the sum.
     let center = DVec2::new(500.0, 500.0);
@@ -301,7 +301,7 @@ fn test_fit_result_max_residual_geq_rms() {
 }
 
 #[test]
-fn test_fit_result_higher_order_reduces_residuals() {
+fn fit_result_higher_order_reduces_residuals() {
     // For distortion with a 4th-order component, order-4 fit should produce
     // strictly lower residuals than order-3 fit.
     //
@@ -384,7 +384,7 @@ fn test_fit_result_higher_order_reduces_residuals() {
 }
 
 #[test]
-fn test_fit_result_max_correction_hand_computed() {
+fn fit_result_max_correction_hand_computed() {
     // Barrel distortion k=1e-7 centered at (500,500), grid points at multiples of 100.
     //
     // The farthest grid point from center is a corner, e.g. (0, 0):
@@ -421,7 +421,7 @@ fn test_fit_result_max_correction_hand_computed() {
 }
 
 #[test]
-fn test_fit_result_clipping_disabled_vs_enabled_metrics() {
+fn fit_result_clipping_disabled_vs_enabled_metrics() {
     // With 3 outliers, clipping=off should have:
     //   - points_rejected = 0 (no clipping)
     //   - higher rms_residual than clipping=on (outliers pull the fit)

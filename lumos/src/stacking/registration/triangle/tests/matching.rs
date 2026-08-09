@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn test_match_triangles_too_few_points() {
+fn match_triangles_too_few_points() {
     let two = vec![DVec2::new(0.0, 0.0), DVec2::new(1.0, 0.0)];
     let three = vec![
         DVec2::new(0.0, 0.0),
@@ -16,7 +16,7 @@ fn test_match_triangles_too_few_points() {
 }
 
 #[test]
-fn test_match_triangles_empty_inputs() {
+fn match_triangles_empty_inputs() {
     let empty: Vec<DVec2> = vec![];
     let three = vec![
         DVec2::new(0.0, 0.0),
@@ -28,7 +28,7 @@ fn test_match_triangles_empty_inputs() {
 }
 
 #[test]
-fn test_match_identical_star_lists() {
+fn match_identical_star_lists() {
     // 5 points with asymmetric pattern → each matches itself
     let positions = vec![
         DVec2::new(0.0, 0.0),
@@ -47,7 +47,7 @@ fn test_match_identical_star_lists() {
 }
 
 #[test]
-fn test_match_translated_stars() {
+fn match_translated_stars() {
     // Translation preserves triangle ratios → all 5 match
     let ref_positions = vec![
         DVec2::new(0.0, 0.0),
@@ -73,7 +73,7 @@ fn test_match_translated_stars() {
 }
 
 #[test]
-fn test_match_scaled_stars() {
+fn match_scaled_stars() {
     // Uniform scaling preserves triangle ratios → all 5 match
     let ref_positions = vec![
         DVec2::new(0.0, 0.0),
@@ -98,7 +98,7 @@ fn test_match_scaled_stars() {
 }
 
 #[test]
-fn test_match_rotated_stars() {
+fn match_rotated_stars() {
     // 90-degree rotation: (x,y) → (-y,x). Preserves ratios. Orientation check off
     // for symmetric pattern to avoid ambiguous correspondence.
     let ref_positions = vec![
@@ -124,7 +124,7 @@ fn test_match_rotated_stars() {
 }
 
 #[test]
-fn test_match_with_missing_stars() {
+fn match_with_missing_stars() {
     // Target has 4 of 5 reference stars → should match exactly 4
     let ref_positions = vec![
         DVec2::new(0.0, 0.0),
@@ -154,7 +154,7 @@ fn test_match_with_missing_stars() {
 }
 
 #[test]
-fn test_match_with_extra_stars() {
+fn match_with_extra_stars() {
     // Target has all 4 ref stars plus 2 extras → should match all 4 ref stars
     let ref_positions = vec![
         DVec2::new(0.0, 0.0),
@@ -185,7 +185,7 @@ fn test_match_with_extra_stars() {
 }
 
 #[test]
-fn test_match_mirrored_image_orientation_effect() {
+fn match_mirrored_image_orientation_effect() {
     // Mirror flips orientation. With orientation check on, mirrored should get
     // fewer matches than with it off.
     let ref_positions = vec![
@@ -224,7 +224,7 @@ fn test_match_mirrored_image_orientation_effect() {
 }
 
 #[test]
-fn test_match_with_outliers() {
+fn match_with_outliers() {
     // 6 real stars + 4 far-away outliers. Matches among real stars should be correct.
     let ref_positions = vec![
         DVec2::new(0.0, 0.0),
@@ -264,7 +264,7 @@ fn test_match_with_outliers() {
 }
 
 #[test]
-fn test_match_permuted_indices() {
+fn match_permuted_indices() {
     // Same 5 geometric points, target in reversed order.
     // ref[i] corresponds to target[4-i]
     let points = vec![
@@ -301,7 +301,7 @@ fn test_match_permuted_indices() {
 }
 
 #[test]
-fn test_match_ratio_tolerance_sensitivity() {
+fn match_ratio_tolerance_sensitivity() {
     // Different ratio_tolerance values should produce different match counts.
     // Tighter tolerance → fewer matches (or same), looser → more (or same).
     let ref_positions: Vec<DVec2> = (0..25)
@@ -350,7 +350,7 @@ fn test_match_ratio_tolerance_sensitivity() {
 }
 
 #[test]
-fn test_match_min_votes_sensitivity() {
+fn match_min_votes_sensitivity() {
     // Higher min_votes should produce fewer (or equal) matches
     let ref_positions: Vec<DVec2> = (0..20)
         .map(|i| {
@@ -383,7 +383,7 @@ fn test_match_min_votes_sensitivity() {
 }
 
 #[test]
-fn test_match_sparse_field_10_stars() {
+fn match_sparse_field_10_stars() {
     // 10 stars in a grid-like pattern with one off-grid point for asymmetry
     let ref_positions = vec![
         DVec2::new(0.0, 0.0),
@@ -416,7 +416,7 @@ fn test_match_sparse_field_10_stars() {
 }
 
 #[test]
-fn test_match_with_subpixel_noise() {
+fn match_with_subpixel_noise() {
     // 25 irregular positions with +-0.3 pixel noise
     let ref_positions: Vec<DVec2> = (0..25)
         .map(|i| {
@@ -460,7 +460,7 @@ fn test_match_with_subpixel_noise() {
 }
 
 #[test]
-fn test_triangle_similarity_threshold_boundary() {
+fn triangle_similarity_threshold_boundary() {
     // Equilateral: all sides equal → ratios = (1.0, 1.0)
     let tri1 = Triangle::from_positions(
         [0, 1, 2],

@@ -70,28 +70,28 @@ fn assert_sse_matches_scalar(
 }
 
 #[test]
-fn test_avx2_warp_row_translation() {
+fn avx2_warp_row_translation() {
     let input = patterns::diagonal_gradient(Size2us::new(128, 64));
     let transform = Transform::translation(DVec2::new(2.5, 1.5));
     assert_avx2_matches_scalar(&input, &transform, 30, 1e-5, "AVX2 translation");
 }
 
 #[test]
-fn test_avx2_warp_row_identity() {
+fn avx2_warp_row_identity() {
     let input = patterns::diagonal_gradient(Size2us::new(128, 64));
     let transform = Transform::identity();
     assert_avx2_matches_scalar(&input, &transform, 30, 1e-5, "AVX2 identity");
 }
 
 #[test]
-fn test_avx2_warp_row_similarity() {
+fn avx2_warp_row_similarity() {
     let input = patterns::diagonal_gradient(Size2us::new(128, 64));
     let transform = Transform::similarity(DVec2::new(3.0, 2.0), 0.1, 1.05);
     assert_avx2_matches_scalar(&input, &transform, 30, 1e-4, "AVX2 similarity");
 }
 
 #[test]
-fn test_avx2_warp_row_remainder_pixels() {
+fn avx2_warp_row_remainder_pixels() {
     // Width not a multiple of 8: tests the scalar remainder path.
     // Width=13: 1 chunk of 8 + 5 remainder pixels.
     let input = patterns::diagonal_gradient(Size2us::new(13, 32));
@@ -100,21 +100,21 @@ fn test_avx2_warp_row_remainder_pixels() {
 }
 
 #[test]
-fn test_sse_warp_row_similarity() {
+fn sse_warp_row_similarity() {
     let input = patterns::diagonal_gradient(Size2us::new(64, 64));
     let transform = Transform::similarity(DVec2::new(1.0, 2.0), 0.05, 1.02);
     assert_sse_matches_scalar(&input, &transform, 25, 1e-5, "SSE similarity");
 }
 
 #[test]
-fn test_sse_warp_row_identity() {
+fn sse_warp_row_identity() {
     let input = patterns::diagonal_gradient(Size2us::new(64, 64));
     let transform = Transform::identity();
     assert_sse_matches_scalar(&input, &transform, 25, 1e-5, "SSE identity");
 }
 
 #[test]
-fn test_sse_warp_row_remainder_pixels() {
+fn sse_warp_row_remainder_pixels() {
     // Width not a multiple of 4: tests the scalar remainder path.
     // Width=11: 2 chunks of 4 + 3 remainder pixels.
     let input = patterns::diagonal_gradient(Size2us::new(11, 32));
@@ -181,16 +181,16 @@ fn assert_lanczos_kernel_fma_matches_scalar<const A: usize, const SIZE: usize>(l
 }
 
 #[test]
-fn test_lanczos2_kernel_fma_matches_scalar() {
+fn lanczos2_kernel_fma_matches_scalar() {
     assert_lanczos_kernel_fma_matches_scalar::<2, 4>("Lanczos2");
 }
 
 #[test]
-fn test_lanczos3_kernel_fma_matches_scalar() {
+fn lanczos3_kernel_fma_matches_scalar() {
     assert_lanczos_kernel_fma_matches_scalar::<3, 6>("Lanczos3");
 }
 
 #[test]
-fn test_lanczos4_kernel_fma_matches_scalar() {
+fn lanczos4_kernel_fma_matches_scalar() {
     assert_lanczos_kernel_fma_matches_scalar::<4, 8>("Lanczos4");
 }

@@ -63,10 +63,4 @@ pub(crate) mod star;
 mod threshold_mask;
 
 #[cfg(test)]
-mod mem_budget_probe;
-#[cfg(test)]
-mod mem_budget_tests;
-#[cfg(all(test, feature = "real-data"))]
-mod real_data_tests;
-#[cfg(test)]
 mod tests;

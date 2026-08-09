@@ -7,7 +7,7 @@ use crate::testing::{calibration_dir, init_tracing};
 
 #[test]
 #[ignore = "real-data integration test; run explicitly with --ignored"]
-fn test_stack_registered_lights() {
+fn stack_registered_lights() {
     init_tracing();
 
     let cal_dir = calibration_dir();

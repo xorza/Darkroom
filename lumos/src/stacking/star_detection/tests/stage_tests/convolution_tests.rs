@@ -25,7 +25,7 @@ fn normalize_for_display(pixels: &[f32]) -> Vec<f32> {
 /// Test Gaussian filter response on sparse star field.
 #[test]
 
-fn test_gaussian_filter_sparse() {
+fn gaussian_filter_sparse() {
     init_tracing();
 
     let width = 256;
@@ -136,7 +136,7 @@ fn robust_floor(pixels: &[f32]) -> (f32, f32) {
 /// Test Gaussian filter with different FWHM values.
 #[test]
 
-fn test_gaussian_filter_fwhm_range() {
+fn gaussian_filter_fwhm_range() {
     init_tracing();
 
     let width = 256;
@@ -210,7 +210,7 @@ fn test_gaussian_filter_fwhm_range() {
 /// Test Gaussian filter noise rejection.
 #[test]
 
-fn test_gaussian_filter_noise() {
+fn gaussian_filter_noise() {
     init_tracing();
 
     let width = 256;

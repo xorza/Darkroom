@@ -54,7 +54,7 @@ fn run_challenging_test(
 }
 
 #[test]
-fn test_crowded_cluster() {
+fn crowded_cluster() {
     init_tracing();
     let frame = Scenario {
         num_stars: 150,
@@ -71,7 +71,7 @@ fn test_crowded_cluster() {
 }
 
 #[test]
-fn test_very_dense() {
+fn very_dense() {
     init_tracing();
     let frame = Scenario {
         num_stars: 200,
@@ -88,7 +88,7 @@ fn test_very_dense() {
 }
 
 #[test]
-fn test_gradient_density() {
+fn gradient_density() {
     init_tracing();
     // Cluster placement stands in for the legacy left-heavy density gradient (non-uniform).
     let frame = Scenario {
@@ -106,7 +106,7 @@ fn test_gradient_density() {
 }
 
 #[test]
-fn test_uniform_tracking_error() {
+fn uniform_tracking_error() {
     init_tracing();
     let frame = Scenario {
         num_stars: 30,
@@ -128,7 +128,7 @@ fn test_uniform_tracking_error() {
 }
 
 #[test]
-fn test_varying_tracking_error() {
+fn varying_tracking_error() {
     init_tracing();
     // Legacy per-star varying elongation collapses to one elliptical instrument PSF.
     let frame = Scenario {
@@ -151,7 +151,7 @@ fn test_varying_tracking_error() {
 }
 
 #[test]
-fn test_field_rotation() {
+fn field_rotation() {
     init_tracing();
     // Legacy field-rotation elongation collapses to one elliptical instrument PSF.
     let frame = Scenario {
@@ -174,7 +174,7 @@ fn test_field_rotation() {
 }
 
 #[test]
-fn test_cosmic_rays() {
+fn cosmic_rays() {
     init_tracing();
     let frame = Scenario {
         num_stars: 25,
@@ -192,7 +192,7 @@ fn test_cosmic_rays() {
 }
 
 #[test]
-fn test_bayer_pattern() {
+fn bayer_pattern() {
     init_tracing();
     let frame = Scenario {
         num_stars: 25,
@@ -210,7 +210,7 @@ fn test_bayer_pattern() {
 }
 
 #[test]
-fn test_saturated_stars() {
+fn saturated_stars() {
     init_tracing();
     // Bright sources clip at the well — flux-driven saturation.
     let frame = Scenario {
@@ -229,7 +229,7 @@ fn test_saturated_stars() {
 }
 
 #[test]
-fn test_gradient_background() {
+fn gradient_background() {
     init_tracing();
     let frame = Scenario {
         num_stars: 25,
@@ -251,7 +251,7 @@ fn test_gradient_background() {
 }
 
 #[test]
-fn test_vignette_background() {
+fn vignette_background() {
     init_tracing();
     let frame = Scenario {
         num_stars: 25,
@@ -273,7 +273,7 @@ fn test_vignette_background() {
 }
 
 #[test]
-fn test_nebula_background() {
+fn nebula_background() {
     init_tracing();
     let frame = Scenario {
         num_stars: 30,
@@ -298,7 +298,7 @@ fn test_nebula_background() {
 }
 
 #[test]
-fn test_edge_stars() {
+fn edge_stars() {
     init_tracing();
     let frame = Scenario {
         num_stars: 30,
@@ -316,7 +316,7 @@ fn test_edge_stars() {
 }
 
 #[test]
-fn test_faint_in_noise() {
+fn faint_in_noise() {
     init_tracing();
     // Faint stars over a shallow, noisy sensor.
     let frame = Scenario {
@@ -339,7 +339,7 @@ fn test_faint_in_noise() {
 }
 
 #[test]
-fn test_very_low_snr() {
+fn very_low_snr() {
     init_tracing();
     let frame = Scenario {
         num_stars: 20,
@@ -364,7 +364,7 @@ fn test_very_low_snr() {
 }
 
 #[test]
-fn test_combined_challenges() {
+fn combined_challenges() {
     init_tracing();
     // Cluster + elliptical PSF + cosmic rays + bright/saturated + gradient sky.
     let frame = Scenario {

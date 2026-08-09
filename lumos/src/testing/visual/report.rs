@@ -377,7 +377,7 @@ mod tests {
     }
 
     #[test]
-    fn test_perfect_detection() {
+    fn perfect_detection() {
         let truth = vec![make_truth(10.0, 10.0), make_truth(50.0, 50.0)];
         let detected = vec![make_det(10.0, 10.0), make_det(50.0, 50.0)];
 
@@ -391,7 +391,7 @@ mod tests {
     }
 
     #[test]
-    fn test_with_false_positive() {
+    fn with_false_positive() {
         let truth = vec![make_truth(10.0, 10.0)];
         let detected = vec![make_det(10.0, 10.0), make_det(100.0, 100.0)];
 
@@ -405,7 +405,7 @@ mod tests {
     }
 
     #[test]
-    fn test_with_missed_star() {
+    fn with_missed_star() {
         let truth = vec![make_truth(10.0, 10.0), make_truth(100.0, 100.0)];
         let detected = vec![make_det(10.0, 10.0)];
 
@@ -419,7 +419,7 @@ mod tests {
     }
 
     #[test]
-    fn test_centroid_error() {
+    fn centroid_error() {
         let truth = vec![make_truth(10.0, 10.0)];
         let detected = vec![make_det(10.1, 10.2)]; // 0.224 pixel error
 
@@ -429,7 +429,7 @@ mod tests {
     }
 
     #[test]
-    fn test_pass_criteria() {
+    fn pass_criteria() {
         let metrics = DetectionMetrics {
             detection_rate: 0.99,
             false_positive_rate: 0.01,
@@ -442,7 +442,7 @@ mod tests {
     }
 
     #[test]
-    fn test_fail_criteria() {
+    fn fail_criteria() {
         let metrics = DetectionMetrics {
             detection_rate: 0.80, // Below standard
             false_positive_rate: 0.01,

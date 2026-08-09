@@ -147,7 +147,7 @@ mod tests {
     use crate::testing::synthetic::backgrounds::*;
 
     #[test]
-    fn test_uniform_background() {
+    fn uniform_background() {
         let mut pixels = vec![0.0f32; 64 * 64];
         add_uniform_background(&mut pixels, 0.1);
 
@@ -157,7 +157,7 @@ mod tests {
     }
 
     #[test]
-    fn test_gradient_horizontal() {
+    fn gradient_horizontal() {
         let width = 64;
         let height = 64;
         let mut pixels = vec![0.0f32; width * height];
@@ -170,7 +170,7 @@ mod tests {
     }
 
     #[test]
-    fn test_vignette_center_brighter() {
+    fn vignette_center_brighter() {
         let width = 64;
         let height = 64;
         let mut pixels = vec![0.0f32; width * height];

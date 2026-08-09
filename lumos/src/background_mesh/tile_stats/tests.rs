@@ -21,7 +21,7 @@ fn sextractor_sky_hand_computed() {
 }
 
 #[test]
-fn test_collect_sampled_pixels_small_tile() {
+fn collect_sampled_pixels_small_tile() {
     let pixels = Buffer2::new_filled(32, 32, 0.5);
     let mut values = Vec::new();
     collect_sampled_pixels(
@@ -35,7 +35,7 @@ fn test_collect_sampled_pixels_small_tile() {
 }
 
 #[test]
-fn test_collect_sampled_pixels_large_tile() {
+fn collect_sampled_pixels_large_tile() {
     let pixels = Buffer2::new_filled(256, 256, 0.5);
     let mut values = Vec::new();
     collect_sampled_pixels(
@@ -48,7 +48,7 @@ fn test_collect_sampled_pixels_large_tile() {
 }
 
 #[test]
-fn test_collect_unmasked_pixels_none_masked() {
+fn collect_unmasked_pixels_none_masked() {
     let pixels = Buffer2::new_filled(64, 64, 0.5);
     let mask = BitBuffer2::new_filled(Size2us::new(64, 64), false);
     let mut values = Vec::new();
@@ -62,7 +62,7 @@ fn test_collect_unmasked_pixels_none_masked() {
 }
 
 #[test]
-fn test_collect_unmasked_pixels_all_masked() {
+fn collect_unmasked_pixels_all_masked() {
     let pixels = Buffer2::new_filled(64, 64, 0.5);
     let mask = BitBuffer2::new_filled(Size2us::new(64, 64), true);
     let mut values = Vec::new();
@@ -76,7 +76,7 @@ fn test_collect_unmasked_pixels_all_masked() {
 }
 
 #[test]
-fn test_collect_unmasked_pixels_partial_mask() {
+fn collect_unmasked_pixels_partial_mask() {
     let width = 64;
     let height = 64;
     let pixels = Buffer2::new_filled(width, height, 0.5);
@@ -102,7 +102,7 @@ fn test_collect_unmasked_pixels_partial_mask() {
 }
 
 #[test]
-fn test_collect_unmasked_pixels_partial_tile() {
+fn collect_unmasked_pixels_partial_tile() {
     let pixels = Buffer2::new_filled(100, 100, 0.5);
     let mask = BitBuffer2::new_filled(Size2us::new(100, 100), false);
     let mut values = Vec::new();

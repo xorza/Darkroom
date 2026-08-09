@@ -28,7 +28,7 @@ fn convolve_cols_scalar_ref(
 }
 
 #[test]
-fn test_convolve_row_scalar_identity() {
+fn convolve_row_scalar_identity() {
     let input = vec![1.0, 2.0, 3.0, 4.0, 5.0];
     let kernel = vec![0.0, 1.0, 0.0]; // Identity kernel
     let mut output = vec![0.0; 5];
@@ -44,7 +44,7 @@ fn test_convolve_row_scalar_identity() {
 }
 
 #[test]
-fn test_convolve_row_scalar_average() {
+fn convolve_row_scalar_average() {
     let input = vec![0.0, 0.0, 3.0, 0.0, 0.0];
     let kernel = vec![1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0]; // Average kernel
     let mut output = vec![0.0; 5];
@@ -113,7 +113,7 @@ fn convolve_row_simd_matches_scalar_width_radius_sweep() {
 }
 
 #[test]
-fn test_convolve_row_small_input_less_than_simd_width() {
+fn convolve_row_small_input_less_than_simd_width() {
     // Test inputs smaller than SIMD register width
     // Start at width=3 because mirror boundary requires at least 3 pixels for radius=1
     for width in 3..16 {
@@ -141,7 +141,7 @@ fn test_convolve_row_small_input_less_than_simd_width() {
 }
 
 #[test]
-fn test_convolve_row_edge_boundary_handling() {
+fn convolve_row_edge_boundary_handling() {
     // Test that boundary mirror handling works correctly
     let input = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
     let kernel = vec![0.2, 0.3, 0.3, 0.2]; // radius 1, asymmetric kernel
@@ -166,7 +166,7 @@ fn test_convolve_row_edge_boundary_handling() {
 }
 
 #[test]
-fn test_convolve_row_large_kernel() {
+fn convolve_row_large_kernel() {
     // Test with a larger kernel (radius 5, kernel size 11)
     let input: Vec<f32> = (0..100).map(|i| (i as f32).sin() * 10.0 + 50.0).collect();
     let kernel: Vec<f32> = (0..11)
@@ -194,7 +194,7 @@ fn test_convolve_row_large_kernel() {
 }
 
 #[test]
-fn test_convolve_row_various_kernel_radii() {
+fn convolve_row_various_kernel_radii() {
     let input: Vec<f32> = (0..64).map(|i| i as f32 * 0.5).collect();
 
     for radius in 1..=8 {
@@ -221,7 +221,7 @@ fn test_convolve_row_various_kernel_radii() {
 }
 
 #[test]
-fn test_convolve_row_impulse_response() {
+fn convolve_row_impulse_response() {
     // Single impulse in the middle
     let mut input = vec![0.0f32; 64];
     input[32] = 1.0;
@@ -260,7 +260,7 @@ fn test_convolve_row_impulse_response() {
 }
 
 #[test]
-fn test_convolve_row_edge_only() {
+fn convolve_row_edge_only() {
     // Test very small arrays where only edges exist
     let input = vec![1.0, 2.0, 3.0];
     let kernel = vec![0.25, 0.5, 0.25];
@@ -284,7 +284,7 @@ fn test_convolve_row_edge_only() {
 }
 
 #[test]
-fn test_mirror_index_in_bounds() {
+fn mirror_index_in_bounds() {
     // In-bounds indices should pass through unchanged
     for len in [5, 10, 100] {
         for i in 0..len {
@@ -294,7 +294,7 @@ fn test_mirror_index_in_bounds() {
 }
 
 #[test]
-fn test_mirror_index_negative() {
+fn mirror_index_negative() {
     // Negative indices should reflect: -1 -> 1, -2 -> 2, etc.
     let len = 10;
     assert_eq!(mirror_index(-1, len), 1);
@@ -303,7 +303,7 @@ fn test_mirror_index_negative() {
 }
 
 #[test]
-fn test_mirror_index_overflow() {
+fn mirror_index_overflow() {
     // Indices >= len should reflect: len -> len-2, len+1 -> len-3, etc.
     let len = 10;
     assert_eq!(mirror_index(10, len), 8); // 2*10-2-10 = 8
@@ -312,7 +312,7 @@ fn test_mirror_index_overflow() {
 }
 
 #[test]
-fn test_mirror_index_far_out_of_bounds() {
+fn mirror_index_far_out_of_bounds() {
     // Indices far out of bounds should clamp to valid range
     let len = 5;
 
@@ -339,7 +339,7 @@ fn test_mirror_index_far_out_of_bounds() {
 }
 
 #[test]
-fn test_convolve_cols_matches_scalar() {
+fn convolve_cols_matches_scalar() {
     let width = 16;
     let height = 32;
     let input: Vec<f32> = (0..width * height)
@@ -378,7 +378,7 @@ fn test_convolve_cols_matches_scalar() {
 }
 
 #[test]
-fn test_convolve_cols_uniform_input() {
+fn convolve_cols_uniform_input() {
     let width = 32;
     let height = 32;
     let input = vec![42.0f32; width * height];
@@ -405,7 +405,7 @@ fn test_convolve_cols_uniform_input() {
 }
 
 #[test]
-fn test_convolve_cols_impulse_response() {
+fn convolve_cols_impulse_response() {
     let width = 8;
     let height = 16;
     let mut input = vec![0.0f32; width * height];
@@ -454,7 +454,7 @@ fn test_convolve_cols_impulse_response() {
 }
 
 #[test]
-fn test_convolve_cols_various_sizes() {
+fn convolve_cols_various_sizes() {
     for (width, height) in [(8, 8), (16, 32), (64, 16), (100, 100)] {
         let input: Vec<f32> = (0..width * height).map(|i| i as f32 * 0.01).collect();
         let kernel = vec![0.25, 0.5, 0.25];
@@ -493,7 +493,7 @@ fn test_convolve_cols_various_sizes() {
 }
 
 #[test]
-fn test_convolve_2d_row_matches_scalar() {
+fn convolve_2d_row_matches_scalar() {
     let width = 32;
     let height = 32;
     let input: Vec<f32> = (0..width * height)
@@ -539,7 +539,7 @@ fn test_convolve_2d_row_matches_scalar() {
 }
 
 #[test]
-fn test_convolve_2d_row_uniform() {
+fn convolve_2d_row_uniform() {
     let width = 16;
     let height = 16;
     let input = vec![42.0f32; width * height];
@@ -565,7 +565,7 @@ fn test_convolve_2d_row_uniform() {
 }
 
 #[test]
-fn test_convolve_2d_row_impulse() {
+fn convolve_2d_row_impulse() {
     let width = 16;
     let height = 16;
     let mut input = vec![0.0f32; width * height];
@@ -592,7 +592,7 @@ fn test_convolve_2d_row_impulse() {
 }
 
 #[test]
-fn test_convolve_2d_row_various_kernel_sizes() {
+fn convolve_2d_row_various_kernel_sizes() {
     let width = 32;
     let height = 32;
     let input: Vec<f32> = (0..width * height).map(|i| i as f32 * 0.01).collect();
@@ -636,7 +636,7 @@ fn test_convolve_2d_row_various_kernel_sizes() {
 }
 
 #[test]
-fn test_convolve_2d_row_boundary_handling() {
+fn convolve_2d_row_boundary_handling() {
     let width = 8;
     let height = 8;
     let input: Vec<f32> = (0..width * height).map(|i| (i + 1) as f32).collect();

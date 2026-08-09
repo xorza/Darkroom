@@ -5,7 +5,7 @@ use std::f64::consts::PI;
 const EPSILON: f64 = 1e-10;
 
 #[test]
-fn test_transform_type_min_points() {
+fn transform_type_min_points() {
     assert_eq!(TransformType::Translation.min_points(), 1);
     assert_eq!(TransformType::Euclidean.min_points(), 2);
     assert_eq!(TransformType::Similarity.min_points(), 2);
@@ -14,7 +14,7 @@ fn test_transform_type_min_points() {
 }
 
 #[test]
-fn test_identity_transform() {
+fn identity_transform() {
     let t = Transform::identity();
     let p = t.apply(DVec2::new(5.0, 7.0));
     assert_close!(p.x, 5.0, EPSILON);
@@ -22,7 +22,7 @@ fn test_identity_transform() {
 }
 
 #[test]
-fn test_translation_transform() {
+fn translation_transform() {
     let t = Transform::translation(DVec2::new(10.0, -5.0));
     let p = t.apply(DVec2::new(3.0, 4.0));
     assert_close!(p.x, 13.0, EPSILON);
@@ -30,7 +30,7 @@ fn test_translation_transform() {
 }
 
 #[test]
-fn test_rotation_90_degrees() {
+fn rotation_90_degrees() {
     let t = Transform::euclidean(DVec2::ZERO, PI / 2.0);
     let p = t.apply(DVec2::new(1.0, 0.0));
     assert_close!(p.x, 0.0, EPSILON);
@@ -38,7 +38,7 @@ fn test_rotation_90_degrees() {
 }
 
 #[test]
-fn test_rotation_180_degrees() {
+fn rotation_180_degrees() {
     let t = Transform::euclidean(DVec2::ZERO, PI);
     let p = t.apply(DVec2::new(1.0, 0.0));
     assert_close!(p.x, -1.0, EPSILON);
@@ -46,7 +46,7 @@ fn test_rotation_180_degrees() {
 }
 
 #[test]
-fn test_scale_transform() {
+fn scale_transform() {
     let t = Transform::similarity(DVec2::ZERO, 0.0, 2.0);
     let p = t.apply(DVec2::new(3.0, 4.0));
     assert_close!(p.x, 6.0, EPSILON);
@@ -54,7 +54,7 @@ fn test_scale_transform() {
 }
 
 #[test]
-fn test_similarity_with_rotation_and_scale() {
+fn similarity_with_rotation_and_scale() {
     let t = Transform::similarity(DVec2::new(5.0, 10.0), PI / 2.0, 2.0);
     let p = t.apply(DVec2::new(1.0, 0.0));
     // Rotate 90° then scale 2x: (1,0) -> (0,1) -> (0,2), then translate
@@ -63,7 +63,7 @@ fn test_similarity_with_rotation_and_scale() {
 }
 
 #[test]
-fn test_affine_transform() {
+fn affine_transform() {
     // Shear transform
     let t = Transform::affine([1.0, 0.5, 0.0, 0.0, 1.0, 0.0]);
     let p = t.apply(DVec2::new(2.0, 2.0));
@@ -112,7 +112,7 @@ fn test_is_valid() {
 }
 
 #[test]
-fn test_homography_transform() {
+fn homography_transform() {
     // Simple homography that acts like translation
     let t = Transform::homography([1.0, 0.0, 5.0, 0.0, 1.0, 3.0, 0.0, 0.0]);
     let p = t.apply(DVec2::new(2.0, 4.0));
@@ -121,7 +121,7 @@ fn test_homography_transform() {
 }
 
 #[test]
-fn test_homography_perspective() {
+fn homography_perspective() {
     // Homography with perspective component
     let t = Transform::homography([1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.001, 0.0]);
     let p = t.apply(DVec2::new(100.0, 0.0));
@@ -132,7 +132,7 @@ fn test_homography_perspective() {
 }
 
 #[test]
-fn test_warp_transform_new() {
+fn warp_transform_new() {
     let t = Transform::translation(DVec2::new(10.0, 5.0));
     let wt = WarpTransform::new(t);
     assert!(!wt.has_sip());
@@ -144,7 +144,7 @@ fn test_warp_transform_new() {
 }
 
 #[test]
-fn test_warp_transform_with_sip() {
+fn warp_transform_with_sip() {
     use crate::stacking::registration::distortion::sip::{SipConfig, SipPolynomial};
 
     let transform = Transform::identity();
@@ -190,7 +190,7 @@ fn test_warp_transform_with_sip() {
 }
 
 #[test]
-fn test_warp_transform_is_linear() {
+fn warp_transform_is_linear() {
     // Translation: linear
     let wt = WarpTransform::new(Transform::translation(DVec2::new(1.0, 2.0)));
     assert!(wt.is_linear());
@@ -215,7 +215,7 @@ fn test_warp_transform_is_linear() {
 }
 
 #[test]
-fn test_warp_transform_apply_no_sip_matches_transform() {
+fn warp_transform_apply_no_sip_matches_transform() {
     let t = Transform::similarity(DVec2::new(3.0, -2.0), 0.5, 1.1);
     let wt = WarpTransform::new(t);
 
@@ -232,7 +232,7 @@ fn test_warp_transform_apply_no_sip_matches_transform() {
 }
 
 #[test]
-fn test_transform_type_degrees_of_freedom() {
+fn transform_type_degrees_of_freedom() {
     assert_eq!(TransformType::Translation.degrees_of_freedom(), 2);
     assert_eq!(TransformType::Euclidean.degrees_of_freedom(), 3);
     assert_eq!(TransformType::Similarity.degrees_of_freedom(), 4);
@@ -241,7 +241,7 @@ fn test_transform_type_degrees_of_freedom() {
 }
 
 #[test]
-fn test_auto_min_points_delegates_to_similarity() {
+fn auto_min_points_delegates_to_similarity() {
     // Auto delegates to Similarity for min_points
     assert_eq!(
         TransformType::Auto.min_points(),
@@ -252,12 +252,12 @@ fn test_auto_min_points_delegates_to_similarity() {
 
 #[test]
 #[should_panic(expected = "Auto must be resolved")]
-fn test_auto_degrees_of_freedom_panics() {
+fn auto_degrees_of_freedom_panics() {
     TransformType::Auto.degrees_of_freedom();
 }
 
 #[test]
-fn test_default_is_identity() {
+fn default_is_identity() {
     let t = Transform::default();
     let p = t.apply(DVec2::new(42.0, -17.0));
     // Identity: output == input
@@ -267,7 +267,7 @@ fn test_default_is_identity() {
 }
 
 #[test]
-fn test_scale_constructor() {
+fn scale_constructor() {
     // Transform::scale(DVec2::new(sx, sy)) creates a diagonal scaling matrix
     // Matrix: [sx, 0, 0, 0, sy, 0, 0, 0, 1]
     // (3.0, 4.0) -> (3.0*2.0, 4.0*0.5) = (6.0, 2.0)
@@ -279,7 +279,7 @@ fn test_scale_constructor() {
 }
 
 #[test]
-fn test_rotation_around_center() {
+fn rotation_around_center() {
     // Rotate 90 degrees around center (100, 100)
     // Point (150, 100) is 50 units right of center
     // After 90° CCW rotation: should be 50 units above center -> (100, 150)
@@ -310,7 +310,7 @@ fn test_rotation_around_center() {
 }
 
 #[test]
-fn test_inverse_roundtrip_translation() {
+fn inverse_roundtrip_translation() {
     // T(10, -5) then T^{-1} should give back the original point
     let t = Transform::translation(DVec2::new(10.0, -5.0));
     let p = DVec2::new(3.0, 7.0);
@@ -333,7 +333,7 @@ fn test_inverse_roundtrip_translation() {
 }
 
 #[test]
-fn test_inverse_roundtrip_similarity() {
+fn inverse_roundtrip_similarity() {
     // Similarity with rotation and scale: roundtrip should recover original
     let t = Transform::similarity(DVec2::new(7.0, -3.0), 0.7, 1.3);
     let p = DVec2::new(100.0, 200.0);
@@ -355,7 +355,7 @@ fn test_inverse_roundtrip_similarity() {
 }
 
 #[test]
-fn test_compose_translation_translation() {
+fn compose_translation_translation() {
     // Composing T(3,4) * T(5,-2) should give T(8,2)
     // compose(other) = self * other, apply other first then self
     let t1 = Transform::translation(DVec2::new(3.0, 4.0));
@@ -369,7 +369,7 @@ fn test_compose_translation_translation() {
 }
 
 #[test]
-fn test_compose_takes_more_complex_type() {
+fn compose_takes_more_complex_type() {
     // When composing Translation * Affine, result should be Affine
     let t1 = Transform::translation(DVec2::new(1.0, 2.0));
     let t2 = Transform::affine([1.0, 0.5, 0.0, 0.0, 1.0, 0.0]);
@@ -386,7 +386,7 @@ fn test_compose_takes_more_complex_type() {
 }
 
 #[test]
-fn test_compose_rotation_then_translation() {
+fn compose_rotation_then_translation() {
     // Rotate 90° then translate by (10, 0)
     let rot = Transform::euclidean(DVec2::ZERO, PI / 2.0);
     let trans = Transform::translation(DVec2::new(10.0, 0.0));
@@ -419,7 +419,7 @@ fn test_deviation_from_identity() {
 }
 
 #[test]
-fn test_homography_perspective_hand_computed() {
+fn homography_perspective_hand_computed() {
     // Homography: h = [1, 0, 10, 0, 1, 20, 0.002, 0.001]
     // For point (200, 100):
     // w = 0.002*200 + 0.001*100 + 1 = 0.4 + 0.1 + 1 = 1.5
@@ -432,14 +432,14 @@ fn test_homography_perspective_hand_computed() {
 }
 
 #[test]
-fn test_display_translation() {
+fn display_translation() {
     let t = Transform::translation(DVec2::new(10.5, -3.2));
     let s = format!("{}", t);
     assert_eq!(s, "Translation(dx=10.50, dy=-3.20)");
 }
 
 #[test]
-fn test_display_euclidean() {
+fn display_euclidean() {
     let t = Transform::euclidean(DVec2::new(5.0, -2.0), 0.0);
     let s = format!("{}", t);
     // rotation_angle() = atan2(sin_a, cos_a) = atan2(0, 1) = 0
@@ -447,7 +447,7 @@ fn test_display_euclidean() {
 }
 
 #[test]
-fn test_display_similarity() {
+fn display_similarity() {
     let t = Transform::similarity(DVec2::new(1.0, 2.0), 0.0, 1.5);
     let s = format!("{}", t);
     assert_eq!(
@@ -458,7 +458,7 @@ fn test_display_similarity() {
 
 #[test]
 #[should_panic(expected = "Cannot invert singular transform matrix")]
-fn test_inverse_singular_panics() {
+fn inverse_singular_panics() {
     let degenerate = Transform::affine([0.0; 6]);
     let _ = degenerate.inverse();
 }
@@ -483,7 +483,7 @@ fn test_from_matrix_rejects_projective_affine() {
 }
 
 #[test]
-fn test_from_matrix_canonicalizes_affine_roundoff() {
+fn from_matrix_canonicalizes_affine_roundoff() {
     let rounded = DMat3::from_array([
         1.0,
         0.0,
@@ -501,6 +501,6 @@ fn test_from_matrix_canonicalizes_affine_roundoff() {
 
 #[test]
 #[should_panic(expected = "Auto must be resolved before constructing a transform")]
-fn test_from_matrix_rejects_auto() {
+fn from_matrix_rejects_auto() {
     Transform::from_matrix(DMat3::identity(), TransformType::Auto);
 }

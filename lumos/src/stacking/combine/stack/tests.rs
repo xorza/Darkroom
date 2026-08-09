@@ -389,7 +389,7 @@ fn mean_sample(values: &[f32], weights: &[f32]) -> CombinedSample {
 }
 
 #[test]
-fn test_stack_empty_paths() {
+fn stack_empty_paths() {
     let paths: Vec<PathBuf> = vec![];
     let result = stack(
         &paths,
@@ -401,7 +401,7 @@ fn test_stack_empty_paths() {
 }
 
 #[test]
-fn test_stack_images_empty() {
+fn stack_images_empty() {
     let result = stack_images(
         Vec::new(),
         StackConfig::default(),
@@ -412,7 +412,7 @@ fn test_stack_images_empty() {
 }
 
 #[test]
-fn test_stack_nonexistent_file() {
+fn stack_nonexistent_file() {
     let paths = vec![PathBuf::from("/nonexistent/image.fits")];
     let result = stack(
         &paths,
@@ -424,7 +424,7 @@ fn test_stack_nonexistent_file() {
 }
 
 #[test]
-fn test_stack_rejects_invalid_config_before_loading() {
+fn stack_rejects_invalid_config_before_loading() {
     let paths = vec![
         PathBuf::from("/a.fits"),
         PathBuf::from("/b.fits"),
@@ -460,7 +460,7 @@ fn test_stack_rejects_invalid_config_before_loading() {
 }
 
 #[test]
-fn test_stack_images_in_memory_mean() {
+fn stack_images_in_memory_mean() {
     // In-memory stacking must match the documented mean: (10 + 20 + 30)/3 = 20.
     let dims = ImageDimensions::new((4, 4), 1);
     let images = vec![
@@ -488,7 +488,7 @@ fn test_stack_images_in_memory_mean() {
 }
 
 #[test]
-fn test_stack_images_dimension_errors() {
+fn stack_images_dimension_errors() {
     let a = LinearImage::from_pixels(ImageDimensions::new((4, 4), 1), vec![1.0; 16]);
     let b = LinearImage::from_pixels(ImageDimensions::new((2, 2), 1), vec![1.0; 4]);
     let result = stack_images(
@@ -1436,7 +1436,7 @@ fn median_quality_uses_equal_weights_and_has_no_linear_variance() {
 }
 
 #[test]
-fn test_norm_identity_for_identical_frames() {
+fn norm_identity_for_identical_frames() {
     // Both Global and Multiplicative should produce identity for identical frames
     let cache = make_uniform_frames(16, &[5.0, 5.0, 5.0]);
 
@@ -1448,7 +1448,7 @@ fn test_norm_identity_for_identical_frames() {
 }
 
 #[test]
-fn test_global_norm_offset_correction() {
+fn global_norm_offset_correction() {
     // Same scale, different median -> gain ~1.0, offset ~-100
     let dims = ImageDimensions::new((4, 4), 1);
     let frame0: Vec<f32> = (0..16).map(|i| 100.0 + i as f32).collect();
@@ -1473,7 +1473,7 @@ fn test_global_norm_offset_correction() {
 }
 
 #[test]
-fn test_global_norm_scale_correction() {
+fn global_norm_scale_correction() {
     // Frame 1 has ~2x the spread -> gain ~0.5
     let dims = ImageDimensions::new((10, 10), 1);
     let frame0: Vec<f32> = (0..100).map(|i| 90.0 + (i as f32) * 20.0 / 99.0).collect();
@@ -1492,7 +1492,7 @@ fn test_global_norm_scale_correction() {
 }
 
 #[test]
-fn test_global_norm_stacking_corrects_offset() {
+fn global_norm_stacking_corrects_offset() {
     // After normalization, both frames should be brought to reference level
     let cache = make_uniform_frames(16, &[100.0, 150.0]);
     let norm_params = norm_params_for(&cache, Normalization::Global).unwrap();
@@ -1507,7 +1507,7 @@ fn test_global_norm_stacking_corrects_offset() {
 }
 
 #[test]
-fn test_multiplicative_norm_scales_by_median_ratio() {
+fn multiplicative_norm_scales_by_median_ratio() {
     let cache = make_uniform_frames(16, &[100.0, 200.0]);
     let params = norm_params_for(&cache, Normalization::Multiplicative).unwrap();
 
@@ -1525,7 +1525,7 @@ fn test_multiplicative_norm_scales_by_median_ratio() {
 }
 
 #[test]
-fn test_multiplicative_norm_no_offset() {
+fn multiplicative_norm_no_offset() {
     // Multiplicative should only scale, never shift
     let dims = ImageDimensions::new((10, 10), 1);
     let frame0: Vec<f32> = (0..100).map(|i| 90.0 + (i as f32) * 0.2).collect();
@@ -1548,7 +1548,7 @@ fn test_multiplicative_norm_no_offset() {
 }
 
 #[test]
-fn test_multiplicative_stacking_normalizes_flat_levels() {
+fn multiplicative_stacking_normalizes_flat_levels() {
     let cache = make_uniform_frames(16, &[100.0, 200.0]);
     let norm_params = norm_params_for(&cache, Normalization::Multiplicative).unwrap();
 
@@ -1562,7 +1562,7 @@ fn test_multiplicative_stacking_normalizes_flat_levels() {
 }
 
 #[test]
-fn test_normalized_stacking_rgb() {
+fn normalized_stacking_rgb() {
     // Both modes should normalize RGB frames to frame 0's reference levels
     let ref_rgb = [100.0, 200.0, 300.0];
 
@@ -1589,7 +1589,7 @@ fn test_normalized_stacking_rgb() {
 }
 
 #[test]
-fn test_dispatch_normalized_vs_unnormalized() {
+fn dispatch_normalized_vs_unnormalized() {
     let cache = make_uniform_frames(16, &[100.0, 200.0]);
     let norm_params = norm_params_for(&cache, Normalization::Global).unwrap();
 
@@ -1659,7 +1659,7 @@ fn disk_backed_stack_combines_via_mmap() {
 }
 
 #[test]
-fn test_norm_uses_lowest_noise_reference() {
+fn norm_uses_lowest_noise_reference() {
     // Frame 0: median=100, high spread (noisy)
     // Frame 1: median=200, low spread (clean) ← should be reference
     // Frame 2: median=150, medium spread
@@ -1712,7 +1712,7 @@ fn test_norm_uses_lowest_noise_reference() {
 }
 
 #[test]
-fn test_norm_result_matches_lowest_noise_frame() {
+fn norm_result_matches_lowest_noise_frame() {
     // After global normalization + mean stacking, the result should be
     // at the reference frame's level (the lowest-noise frame).
     let dims = ImageDimensions::new((16, 1), 1);
@@ -1738,7 +1738,7 @@ fn test_norm_result_matches_lowest_noise_frame() {
 }
 
 #[test]
-fn test_noise_weighting_downweights_noisy_frame() {
+fn noise_weighting_downweights_noisy_frame() {
     // Frame 0: clean, values ~100 (spread 0.5)
     // Frame 1: noisy, values ~200 (spread 20.0)
     // With equal weight: mean ≈ 150
@@ -1772,7 +1772,7 @@ fn test_noise_weighting_downweights_noisy_frame() {
 }
 
 #[test]
-fn test_noise_weighting_equal_noise_gives_equal_weights() {
+fn noise_weighting_equal_noise_gives_equal_weights() {
     // 3 identical frames → equal noise → equal weights
     let cache = make_uniform_frames(100, &[50.0, 50.0, 50.0]);
     // All MADs are 0 for uniform frames → all weights are 0 → returns None
@@ -1784,7 +1784,7 @@ fn test_noise_weighting_equal_noise_gives_equal_weights() {
 }
 
 #[test]
-fn test_noise_weighting_with_spread_equal_noise() {
+fn noise_weighting_with_spread_equal_noise() {
     // 3 frames with identical spread → equal weights
     let dims = ImageDimensions::new((100, 1), 1);
     let make_frame =
@@ -1805,7 +1805,7 @@ fn test_noise_weighting_with_spread_equal_noise() {
 }
 
 #[test]
-fn test_noise_weighting_with_rejection() {
+fn noise_weighting_with_rejection() {
     // Verify noise weights survive through rejection pipeline.
     // Frame 0: clean (narrow spread ~100)
     // Frame 1: noisy (wide spread ~100)
@@ -1838,7 +1838,7 @@ fn test_noise_weighting_with_rejection() {
 }
 
 #[test]
-fn test_noise_weighting_folds_normalization_gain() {
+fn noise_weighting_folds_normalization_gain() {
     // Two frames with identical MAD (σ_A = σ_B). Frame B's normalization gain is 2, so its
     // combined noise is 2σ: w_A ∝ 1/σ², w_B ∝ 1/(2σ)² = w_A/4 → normalized 0.8 / 0.2.
     // Without the pscale² term both weights would come out 0.5.
@@ -1877,7 +1877,7 @@ fn test_noise_weighting_folds_normalization_gain() {
 }
 
 #[test]
-fn test_manual_weighting_is_scale_invariant() {
+fn manual_weighting_is_scale_invariant() {
     let weights = resolve_weights(&Weighting::Manual(vec![1.0, 2.0, 3.0]), &[], None).unwrap();
     assert_eq!(weights, [1.0_f32 / 6.0, 2.0 / 6.0, 3.0 / 6.0]);
 
@@ -1892,13 +1892,13 @@ fn test_manual_weighting_is_scale_invariant() {
 }
 
 #[test]
-fn test_equal_weighting_returns_none() {
+fn equal_weighting_returns_none() {
     let weights = resolve_weights(&Weighting::Equal, &[], None);
     assert!(weights.is_none());
 }
 
 #[test]
-fn test_light_preset_uses_noise_weighting() {
+fn light_preset_uses_noise_weighting() {
     let config = StackConfig::light();
     assert_eq!(config.weighting, Weighting::Noise);
 }

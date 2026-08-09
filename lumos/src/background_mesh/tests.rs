@@ -65,7 +65,7 @@ fn skewed_tile_sky_sits_below_median() {
 }
 
 #[test]
-fn test_tile_grid_dimensions() {
+fn tile_grid_dimensions() {
     let pixels = Buffer2::new_filled(128, 64, 0.5);
     let grid = make_grid(&pixels, 32);
 
@@ -74,7 +74,7 @@ fn test_tile_grid_dimensions() {
 }
 
 #[test]
-fn test_tile_grid_dimensions_non_divisible() {
+fn tile_grid_dimensions_non_divisible() {
     let pixels = Buffer2::new_filled(100, 70, 0.5);
     let grid = make_grid(&pixels, 32);
 
@@ -83,7 +83,7 @@ fn test_tile_grid_dimensions_non_divisible() {
 }
 
 #[test]
-fn test_tile_grid_uniform_image() {
+fn tile_grid_uniform_image() {
     let pixels = Buffer2::new_filled(64, 64, 0.3);
     let grid = make_grid(&pixels, 32);
 
@@ -97,7 +97,7 @@ fn test_tile_grid_uniform_image() {
 }
 
 #[test]
-fn test_center_x_full_tiles() {
+fn center_x_full_tiles() {
     let pixels = Buffer2::new_filled(128, 64, 0.5);
     let grid = make_grid(&pixels, 32);
 
@@ -108,7 +108,7 @@ fn test_center_x_full_tiles() {
 }
 
 #[test]
-fn test_center_x_partial_tile() {
+fn center_x_partial_tile() {
     let pixels = Buffer2::new_filled(100, 64, 0.5);
     let grid = make_grid(&pixels, 32);
 
@@ -116,7 +116,7 @@ fn test_center_x_partial_tile() {
 }
 
 #[test]
-fn test_center_y_full_tiles() {
+fn center_y_full_tiles() {
     let pixels = Buffer2::new_filled(64, 128, 0.5);
     let grid = make_grid(&pixels, 32);
 
@@ -127,7 +127,7 @@ fn test_center_y_full_tiles() {
 }
 
 #[test]
-fn test_center_y_partial_tile() {
+fn center_y_partial_tile() {
     let pixels = Buffer2::new_filled(64, 100, 0.5);
     let grid = make_grid(&pixels, 32);
 
@@ -135,7 +135,7 @@ fn test_center_y_partial_tile() {
 }
 
 #[test]
-fn test_find_lower_tile_y_exact_center() {
+fn find_lower_tile_y_exact_center() {
     let pixels = Buffer2::new_filled(64, 128, 0.5);
     let grid = make_grid(&pixels, 32);
 
@@ -146,7 +146,7 @@ fn test_find_lower_tile_y_exact_center() {
 }
 
 #[test]
-fn test_find_lower_tile_y_between_centers() {
+fn find_lower_tile_y_between_centers() {
     let pixels = Buffer2::new_filled(64, 128, 0.5);
     let grid = make_grid(&pixels, 32);
 
@@ -156,7 +156,7 @@ fn test_find_lower_tile_y_between_centers() {
 }
 
 #[test]
-fn test_find_lower_tile_y_before_first_center() {
+fn find_lower_tile_y_before_first_center() {
     let pixels = Buffer2::new_filled(64, 128, 0.5);
     let grid = make_grid(&pixels, 32);
 
@@ -165,7 +165,7 @@ fn test_find_lower_tile_y_before_first_center() {
 }
 
 #[test]
-fn test_find_lower_tile_y_after_last_center() {
+fn find_lower_tile_y_after_last_center() {
     let pixels = Buffer2::new_filled(64, 128, 0.5);
     let grid = make_grid(&pixels, 32);
 
@@ -174,7 +174,7 @@ fn test_find_lower_tile_y_after_last_center() {
 }
 
 #[test]
-fn test_find_lower_tile_y_single_tile() {
+fn find_lower_tile_y_single_tile() {
     let pixels = Buffer2::new_filled(32, 32, 0.5);
     let grid = make_grid(&pixels, 32);
 
@@ -185,7 +185,7 @@ fn test_find_lower_tile_y_single_tile() {
 }
 
 #[test]
-fn test_tile_grid_with_mask_excludes_masked() {
+fn tile_grid_with_mask_excludes_masked() {
     let width = 64;
     let height = 64;
     let mut data = vec![0.2; width * height];
@@ -212,7 +212,7 @@ fn test_tile_grid_with_mask_excludes_masked() {
 }
 
 #[test]
-fn test_tile_uses_few_unmasked_pixels_over_all_pixels() {
+fn tile_uses_few_unmasked_pixels_over_all_pixels() {
     // Tile (0,0) has 95% masked "star" pixels at 0.9, 5% unmasked background at 0.2.
     // The unmasked pixels should be used for background estimation (median ≈ 0.2),
     // NOT falling back to all pixels which would give a biased median toward 0.9.
@@ -253,7 +253,7 @@ fn test_tile_uses_few_unmasked_pixels_over_all_pixels() {
 }
 
 #[test]
-fn test_all_pixels_masked_fallback() {
+fn all_pixels_masked_fallback() {
     let width = 64;
     let height = 64;
     let pixels = Buffer2::new_filled(width, height, 0.4);
@@ -266,7 +266,7 @@ fn test_all_pixels_masked_fallback() {
 }
 
 #[test]
-fn test_median_filter_uniform_unchanged() {
+fn median_filter_uniform_unchanged() {
     let pixels = Buffer2::new_filled(128, 128, 0.4);
     let grid = make_grid(&pixels, 32);
 
@@ -279,7 +279,7 @@ fn test_median_filter_uniform_unchanged() {
 }
 
 #[test]
-fn test_median_filter_rejects_outlier_tile() {
+fn median_filter_rejects_outlier_tile() {
     let width = 128;
     let height = 128;
     let mut data = vec![0.3; width * height];
@@ -298,7 +298,7 @@ fn test_median_filter_rejects_outlier_tile() {
 }
 
 #[test]
-fn test_median_filter_skipped_for_small_grid() {
+fn median_filter_skipped_for_small_grid() {
     let pixels = Buffer2::new_filled(64, 64, 0.5);
     let grid = make_grid(&pixels, 32);
 
@@ -310,7 +310,7 @@ fn test_median_filter_skipped_for_small_grid() {
 }
 
 #[test]
-fn test_single_tile_image() {
+fn single_tile_image() {
     let pixels = Buffer2::new_filled(32, 32, 0.6);
     let grid = make_grid(&pixels, 32);
 
@@ -324,7 +324,7 @@ fn test_single_tile_image() {
 }
 
 #[test]
-fn test_tile_stats_with_gradient() {
+fn tile_stats_with_gradient() {
     let width = 64;
     let height = 64;
     let data: Vec<f32> = (0..height)
@@ -340,7 +340,7 @@ fn test_tile_stats_with_gradient() {
 }
 
 #[test]
-fn test_debug_impl() {
+fn debug_impl() {
     let pixels = Buffer2::new_filled(64, 64, 0.5);
     let grid = make_grid(&pixels, 32);
 
@@ -349,7 +349,7 @@ fn test_debug_impl() {
 }
 
 #[test]
-fn test_image_smaller_than_tile() {
+fn image_smaller_than_tile() {
     let pixels = Buffer2::new_filled(20, 20, 0.7);
     let grid = make_grid(&pixels, 64);
 
@@ -363,7 +363,7 @@ fn test_image_smaller_than_tile() {
 }
 
 #[test]
-fn test_large_tile_size() {
+fn large_tile_size() {
     // A tile size beyond the image clamps to min(w, h) = 50 → 100.div_ceil(50) = 2 x 1 tiles.
     let pixels = Buffer2::new_filled(100, 50, 0.3);
     let grid = make_grid(&pixels, 200);
@@ -378,7 +378,7 @@ fn test_large_tile_size() {
 }
 
 #[test]
-fn test_tile_grid_very_wide_image() {
+fn tile_grid_very_wide_image() {
     // tile_size clamps to min(w, h) = 10 → 100 x 1 tiles of 10x10.
     let pixels = Buffer2::new_filled(1000, 10, 0.5);
     let grid = make_grid(&pixels, 64);
@@ -393,7 +393,7 @@ fn test_tile_grid_very_wide_image() {
 }
 
 #[test]
-fn test_tile_grid_very_tall_image() {
+fn tile_grid_very_tall_image() {
     // tile_size clamps to min(w, h) = 10 → 1 x 100 tiles of 10x10.
     let pixels = Buffer2::new_filled(10, 1000, 0.5);
     let grid = make_grid(&pixels, 64);
@@ -408,7 +408,7 @@ fn test_tile_grid_very_tall_image() {
 }
 
 #[test]
-fn test_tile_with_outliers_sigma_clipped() {
+fn tile_with_outliers_sigma_clipped() {
     let width = 64;
     let height = 64;
     let mut data = vec![0.5; width * height];
@@ -427,7 +427,7 @@ fn test_tile_with_outliers_sigma_clipped() {
 }
 
 #[test]
-fn test_tile_stats_sigma_nonzero_for_varied_data() {
+fn tile_stats_sigma_nonzero_for_varied_data() {
     let width = 64;
     let height = 64;
     // Create data with variation
@@ -443,7 +443,7 @@ fn test_tile_stats_sigma_nonzero_for_varied_data() {
 }
 
 #[test]
-fn test_median_filter_corner_tiles() {
+fn median_filter_corner_tiles() {
     // Test that corner tiles (with fewer neighbors) are handled correctly
     let pixels = Buffer2::new_filled(128, 128, 0.5);
     let grid = make_grid(&pixels, 32);
@@ -457,7 +457,7 @@ fn test_median_filter_corner_tiles() {
 }
 
 #[test]
-fn test_negative_pixel_values() {
+fn negative_pixel_values() {
     let width = 64;
     let height = 64;
     let data = vec![-0.5; width * height];
@@ -470,7 +470,7 @@ fn test_negative_pixel_values() {
 }
 
 #[test]
-fn test_find_lower_tile_y_negative_pos() {
+fn find_lower_tile_y_negative_pos() {
     let pixels = Buffer2::new_filled(64, 128, 0.5);
     let grid = make_grid(&pixels, 32);
 
@@ -479,7 +479,7 @@ fn test_find_lower_tile_y_negative_pos() {
 }
 
 #[test]
-fn test_median_computation_correctness() {
+fn median_computation_correctness() {
     // Create image where we know exact median
     // Tile with values 1,2,3,4,5,6,7,8,9 should have median=5
     let width = 3;
@@ -498,7 +498,7 @@ fn test_median_computation_correctness() {
 }
 
 #[test]
-fn test_sigma_computation_correctness() {
+fn sigma_computation_correctness() {
     // For uniform data, sigma should be 0
     let pixels = Buffer2::new_filled(64, 64, 100.0);
     let grid = make_grid(&pixels, 64);
@@ -512,7 +512,7 @@ fn test_sigma_computation_correctness() {
 }
 
 #[test]
-fn test_mad_sigma_known_value() {
+fn mad_sigma_known_value() {
     // MAD-based sigma for a known distribution. A 10x10 image where each row is
     // [0,1,...,9] (pixel value = its x coordinate) keeps the whole image in one 10x10
     // tile and gives 10 copies of each value, so the order statistics match the plain
@@ -549,7 +549,7 @@ fn test_mad_sigma_known_value() {
 }
 
 #[test]
-fn test_3sigma_clipping_rejects_outliers() {
+fn sigma_sigma_clipping_rejects_outliers() {
     // Background of 100 with a few extreme outliers
     // 3-sigma clipping should reject values > median + 3*sigma
     let width = 100;
@@ -575,7 +575,7 @@ fn test_3sigma_clipping_rejects_outliers() {
 }
 
 #[test]
-fn test_median_filter_3x3_correctness() {
+fn median_filter_3x3_correctness() {
     // Create 5x5 grid of tiles where center tile has outlier value
     // After 3x3 median filter, center should match neighbors
     let width = 160; // 5 tiles of 32 pixels
@@ -602,7 +602,7 @@ fn test_median_filter_3x3_correctness() {
 }
 
 #[test]
-fn test_background_gradient_preserved() {
+fn background_gradient_preserved() {
     // Linear gradient from 0 to 100 across image
     // Tile statistics should reflect local background level
     let width = 256;
@@ -637,7 +637,7 @@ fn test_background_gradient_preserved() {
 }
 
 #[test]
-fn test_sparse_stars_rejected() {
+fn sparse_stars_rejected() {
     // Simulate astronomical image: mostly background (100) with sparse bright stars
     let width = 128;
     let height = 128;
@@ -697,7 +697,7 @@ fn test_sparse_stars_rejected() {
 }
 
 #[test]
-fn test_mask_excludes_sources_correctly() {
+fn mask_excludes_sources_correctly() {
     // Background 50, sources at 200
     let width = 64;
     let height = 64;
@@ -733,7 +733,7 @@ fn test_mask_excludes_sources_correctly() {
 }
 
 #[test]
-fn test_y_spline_derivatives_uniform_data() {
+fn y_spline_derivatives_uniform_data() {
     // Uniform image → all medians equal → d2y = 0 everywhere
     let pixels = Buffer2::new_filled(128, 128, 0.5);
     let grid = make_grid(&pixels, 32);
@@ -759,7 +759,7 @@ fn test_y_spline_derivatives_uniform_data() {
 }
 
 #[test]
-fn test_y_spline_derivatives_single_row() {
+fn y_spline_derivatives_single_row() {
     // Single row of tiles → d2y = 0 (no Y interpolation)
     let pixels = Buffer2::new_filled(128, 32, 0.5);
     let grid = make_grid(&pixels, 32);
@@ -772,7 +772,7 @@ fn test_y_spline_derivatives_single_row() {
 }
 
 #[test]
-fn test_y_spline_derivatives_two_rows() {
+fn y_spline_derivatives_two_rows() {
     // Two rows of tiles → natural spline gives d2 = 0 at both endpoints
     let width = 64;
     let height = 64;
@@ -790,7 +790,7 @@ fn test_y_spline_derivatives_two_rows() {
 }
 
 #[test]
-fn test_y_spline_derivatives_natural_bc() {
+fn y_spline_derivatives_natural_bc() {
     // With >= 3 rows, boundary d2 values should be 0 (natural BC)
     let width = 64;
     let height = 128;
@@ -818,7 +818,7 @@ fn test_y_spline_derivatives_natural_bc() {
 }
 
 #[test]
-fn test_y_spline_derivatives_quadratic_gradient() {
+fn y_spline_derivatives_quadratic_gradient() {
     // Create image where each row of tiles has quadratic Y values:
     // f(y) = y² → tile medians should approximate y_center²
     // With 4 tile rows (uniform h=32), same as test_solve_d2_quadratic_data
@@ -889,7 +889,7 @@ fn test_y_spline_derivatives_quadratic_gradient() {
 }
 
 #[test]
-fn test_photutils_sextractor_comparison() {
+fn photutils_sextractor_comparison() {
     // Test case similar to photutils/SExtractor documentation examples
     // Background level 1000 with noise sigma ~10
     let width = 256;

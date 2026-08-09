@@ -125,7 +125,7 @@ mod tests {
     use imaginarium::Buffer2;
 
     #[test]
-    fn test_pool_creation() {
+    fn pool_creation() {
         let pool = DetectionResources::new(Size2us::new(100, 50));
         assert_eq!(pool.dimensions, Size2us::new(100, 50));
         // Nothing is pooled up front, so the first acquire of each kind allocates.
@@ -140,7 +140,7 @@ mod tests {
     }
 
     #[test]
-    fn test_f32_buffer_acquire_release() {
+    fn f32_buffer_acquire_release() {
         let mut pool = DetectionResources::new(Size2us::new(64, 64));
 
         // First acquire allocates
@@ -164,7 +164,7 @@ mod tests {
     }
 
     #[test]
-    fn test_bit_buffer_acquire_release() {
+    fn bit_buffer_acquire_release() {
         let mut pool = DetectionResources::new(Size2us::new(128, 64));
 
         let buf1 = pool.acquire_bit();
@@ -179,7 +179,7 @@ mod tests {
     }
 
     #[test]
-    fn test_u32_buffer_acquire_release() {
+    fn u32_buffer_acquire_release() {
         let mut pool = DetectionResources::new(Size2us::new(32, 32));
 
         let buf1 = pool.acquire_u32();
@@ -196,7 +196,7 @@ mod tests {
     }
 
     #[test]
-    fn test_pool_clear() {
+    fn pool_clear() {
         let mut pool = DetectionResources::new(Size2us::new(64, 64));
 
         let buf1 = pool.acquire_f32();
@@ -228,7 +228,7 @@ mod tests {
 
     #[test]
     #[should_panic(expected = "assertion")]
-    fn test_release_f32_wrong_dimensions_panics() {
+    fn release_f32_wrong_dimensions_panics() {
         // A mismatched buffer must be rejected even in release builds: downstream SIMD kernels
         // do unchecked-length loads/stores off the pool's declared dimensions, so a silently
         // accepted mismatch would be out-of-bounds UB, not just a wrong pixel.
@@ -238,7 +238,7 @@ mod tests {
     }
 
     #[test]
-    fn test_pool_reset() {
+    fn pool_reset() {
         let mut pool = DetectionResources::new(Size2us::new(64, 64));
 
         let buf = pool.acquire_f32();

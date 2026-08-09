@@ -10,7 +10,7 @@ use crate::{
 };
 
 #[test]
-fn test_uniform_background() {
+fn uniform_background() {
     let width = 128;
     let height = 128;
     let pixels = Buffer2::new_filled(width, height, 0.5);
@@ -38,7 +38,7 @@ fn test_uniform_background() {
 }
 
 #[test]
-fn test_small_image_below_tile_size_does_not_panic() {
+fn small_image_below_tile_size_does_not_panic() {
     // A tile_size larger than the image must clamp to the image (a single tile) rather than panic;
     // a uniform image then yields a uniform background at the pixel value.
     let pixels = Buffer2::new_filled(20, 20, 0.7);
@@ -60,7 +60,7 @@ fn test_small_image_below_tile_size_does_not_panic() {
 }
 
 #[test]
-fn test_gradient_background() {
+fn gradient_background() {
     let width = 128;
     let height = 128;
     let pixels = Buffer2::new(
@@ -85,7 +85,7 @@ fn test_gradient_background() {
 }
 
 #[test]
-fn test_background_with_stars() {
+fn background_with_stars() {
     let width = 128;
     let height = 128;
     let mut data = vec![0.1; width * height];
@@ -114,7 +114,7 @@ fn test_background_with_stars() {
 }
 
 #[test]
-fn test_noise_estimation() {
+fn noise_estimation() {
     let width = 128;
     let height = 128;
     let pixels = Buffer2::new_filled(width, height, 0.5);
@@ -137,7 +137,7 @@ fn test_noise_estimation() {
 }
 
 #[test]
-fn test_non_square_image() {
+fn non_square_image() {
     let width = 256;
     let height = 64;
     let pixels = Buffer2::new_filled(width, height, 0.4);
@@ -157,7 +157,7 @@ fn test_non_square_image() {
 }
 
 #[test]
-fn test_sigma_clipping_rejects_outliers() {
+fn sigma_clipping_rejects_outliers() {
     let width = 64;
     let height = 64;
     let mut data = vec![0.2; width * height];
@@ -185,7 +185,7 @@ fn test_sigma_clipping_rejects_outliers() {
 }
 
 #[test]
-fn test_interpolation_produces_valid_values() {
+fn interpolation_produces_valid_values() {
     // Verify interpolation produces continuous (no NaN/Inf) values
     let width = 64;
     let height = 64;
@@ -223,7 +223,7 @@ fn test_interpolation_produces_valid_values() {
 }
 
 #[test]
-fn test_large_image() {
+fn large_image() {
     let width = 256;
     let height = 256;
     let pixels = Buffer2::new_filled(width, height, 0.33);
@@ -242,7 +242,7 @@ fn test_large_image() {
 }
 
 #[test]
-fn test_different_tile_sizes() {
+fn different_tile_sizes() {
     let width = 128;
     let height = 128;
     let data = vec![0.5; width * height];
@@ -306,7 +306,7 @@ fn repeated_estimation_and_dimension_reset_preserve_exact_results() {
 }
 
 #[test]
-fn test_invalid_tile_sizes_return_exact_errors() {
+fn invalid_tile_sizes_return_exact_errors() {
     for value in [8, 512] {
         let config = BackgroundConfig {
             tile_size: value,
@@ -318,7 +318,7 @@ fn test_invalid_tile_sizes_return_exact_errors() {
 }
 
 #[test]
-fn test_single_tile_image() {
+fn single_tile_image() {
     // Image size equals tile size - exercises tx1 == tx0 branch in interpolation
     let size = 32;
     let pixels = Buffer2::new_filled(size, size, 0.42);
@@ -347,7 +347,7 @@ fn test_single_tile_image() {
 }
 
 #[test]
-fn test_noise_estimation_with_actual_noise() {
+fn noise_estimation_with_actual_noise() {
     // Image with real noise should have non-zero sigma estimation
     let width = 128;
     let height = 128;
@@ -382,7 +382,7 @@ fn test_noise_estimation_with_actual_noise() {
 }
 
 #[test]
-fn test_interpolation_smooth_at_tile_boundaries() {
+fn interpolation_smooth_at_tile_boundaries() {
     // Verify interpolation is continuous at tile boundaries
     let width = 128;
     let height = 128;
@@ -430,7 +430,7 @@ fn test_interpolation_smooth_at_tile_boundaries() {
 }
 
 #[test]
-fn test_iterative_background_uniform() {
+fn iterative_background_uniform() {
     // Uniform image should produce same result as non-iterative
     let width = 128;
     let height = 128;
@@ -458,7 +458,7 @@ fn test_iterative_background_uniform() {
 }
 
 #[test]
-fn test_iterative_background_with_bright_stars() {
+fn iterative_background_with_bright_stars() {
     // Background with bright stars should be better estimated with iterative refinement
     let width = 128;
     let height = 128;
@@ -521,7 +521,7 @@ fn test_iterative_background_with_bright_stars() {
 }
 
 #[test]
-fn test_iterative_background_preserves_gradient() {
+fn iterative_background_preserves_gradient() {
     // Background gradient should be preserved with iterative estimation
     let width = 64;
     let height = 64;
@@ -560,7 +560,7 @@ fn test_iterative_background_preserves_gradient() {
 }
 
 #[test]
-fn test_iterative_background_no_dilation() {
+fn iterative_background_no_dilation() {
     // Test iterative refinement with mask_dilation = 0
     let width = 128;
     let height = 128;
@@ -597,7 +597,7 @@ fn test_iterative_background_no_dilation() {
 }
 
 #[test]
-fn test_iterative_background_config_default() {
+fn iterative_background_config_default() {
     let config = BackgroundConfig::default();
 
     assert!(matches!(config.refinement, BackgroundRefinement::None));
@@ -605,7 +605,7 @@ fn test_iterative_background_config_default() {
 }
 
 #[test]
-fn test_iterative_background_no_refinement() {
+fn iterative_background_no_refinement() {
     // No refinement should work fine
     let width = 64;
     let height = 64;
@@ -627,7 +627,7 @@ fn test_iterative_background_no_refinement() {
 }
 
 #[test]
-fn test_bicubic_reproduces_linear_gradient() {
+fn bicubic_reproduces_linear_gradient() {
     // A linear gradient f(x,y) = ax + by + c should be reproduced exactly by
     // natural cubic spline (cubic of a linear = linear, d2 = 0 everywhere)
     let width = 128;
@@ -693,7 +693,7 @@ fn test_bicubic_reproduces_linear_gradient() {
 }
 
 #[test]
-fn test_bicubic_c1_continuity_at_tile_boundaries() {
+fn bicubic_c1_continuity_at_tile_boundaries() {
     // Verify first derivatives are continuous at tile boundaries.
     // Numerical derivative across boundary should be smooth — the jump
     // in the derivative should be small compared to the derivative itself.
@@ -744,7 +744,7 @@ fn test_bicubic_c1_continuity_at_tile_boundaries() {
 }
 
 #[test]
-fn test_bicubic_smoother_than_bilinear_would_be() {
+fn bicubic_smoother_than_bilinear_would_be() {
     // Bicubic spline should produce smoother results (smaller max second derivative)
     // than bilinear would. We verify this indirectly by checking that the second
     // derivative is bounded, as bilinear would have discontinuous first derivatives.
@@ -784,8 +784,8 @@ fn test_bicubic_smoother_than_bilinear_would_be() {
 }
 
 #[test]
-fn test_bicubic_c2_continuity_y_direction() {
-    // Same as test_bicubic_c1_continuity_at_tile_boundaries but for Y direction.
+fn bicubic_c2_continuity_y_direction() {
+    // Same as bicubic_c1_continuity_at_tile_boundaries but for Y direction.
     // With natural bicubic spline, second derivative should be continuous at Y tile boundaries.
     let width = 256;
     let height = 256;
@@ -833,7 +833,7 @@ fn test_bicubic_c2_continuity_y_direction() {
 }
 
 #[test]
-fn test_noise_map_bicubic_interpolation() {
+fn noise_map_bicubic_interpolation() {
     // Verify that the noise map is also interpolated with bicubic spline,
     // not just constant or linear. Create an image with spatially varying noise.
     let width = 128;
@@ -899,7 +899,7 @@ fn test_noise_map_bicubic_interpolation() {
 }
 
 #[test]
-fn test_bicubic_single_tile_column() {
+fn bicubic_single_tile_column() {
     // With tiles_x=1, the X-direction solve gets n=1. Should produce constant fill.
     let width = 32; // 1 tile column
     let height = 128;
@@ -929,7 +929,7 @@ fn test_bicubic_single_tile_column() {
 }
 
 #[test]
-fn test_bicubic_two_tile_columns() {
+fn bicubic_two_tile_columns() {
     // With tiles_x=2, natural spline has d2=0 at both endpoints (no interior points).
     // Interpolation degenerates to linear between the two tile centers.
     let width = 64; // 2 tile columns
@@ -983,7 +983,7 @@ fn test_bicubic_two_tile_columns() {
 }
 
 #[test]
-fn test_bicubic_single_tile_row() {
+fn bicubic_single_tile_row() {
     // With tiles_y=1, Y direction should be constant (no Y interpolation needed)
     let width = 128;
     let height = 32; // 1 tile row
@@ -1012,7 +1012,7 @@ fn test_bicubic_single_tile_row() {
 }
 
 #[test]
-fn test_bicubic_two_tile_rows() {
+fn bicubic_two_tile_rows() {
     // With tiles_y=2, natural spline has d2=0 at both endpoints.
     // Y interpolation degenerates to linear.
     let width = 64;

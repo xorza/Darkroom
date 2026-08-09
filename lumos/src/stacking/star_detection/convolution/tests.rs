@@ -10,7 +10,7 @@ use crate::{
 };
 
 #[test]
-fn test_gaussian_kernel_1d_normalization() {
+fn gaussian_kernel_1d_normalization() {
     for sigma in [0.5, 1.0, 2.0, 3.0, 5.0] {
         let kernel = gaussian_kernel_1d(sigma);
         let sum: f32 = kernel.iter().sum();
@@ -24,7 +24,7 @@ fn test_gaussian_kernel_1d_normalization() {
 }
 
 #[test]
-fn test_gaussian_kernel_1d_symmetry() {
+fn gaussian_kernel_1d_symmetry() {
     let kernel = gaussian_kernel_1d(2.0);
     let n = kernel.len();
     for i in 0..n / 2 {
@@ -36,7 +36,7 @@ fn test_gaussian_kernel_1d_symmetry() {
 }
 
 #[test]
-fn test_gaussian_kernel_1d_peak_at_center() {
+fn gaussian_kernel_1d_peak_at_center() {
     let kernel = gaussian_kernel_1d(2.0);
     let center = kernel.len() / 2;
     for (i, &v) in kernel.iter().enumerate() {
@@ -47,7 +47,7 @@ fn test_gaussian_kernel_1d_peak_at_center() {
 }
 
 #[test]
-fn test_gaussian_kernel_1d_size() {
+fn gaussian_kernel_1d_size() {
     // Kernel radius should be ceil(3 * sigma)
     let sigma = 2.0;
     let kernel = gaussian_kernel_1d(sigma);
@@ -57,7 +57,7 @@ fn test_gaussian_kernel_1d_size() {
 }
 
 #[test]
-fn test_gaussian_kernel_1d_small_sigma() {
+fn gaussian_kernel_1d_small_sigma() {
     let kernel = gaussian_kernel_1d(0.5);
     // For sigma=0.5, radius=2, size=5
     assert_eq!(kernel.len(), 5);
@@ -66,18 +66,18 @@ fn test_gaussian_kernel_1d_small_sigma() {
 
 #[test]
 #[should_panic(expected = "Sigma must be positive")]
-fn test_gaussian_kernel_1d_zero_sigma_panics() {
+fn gaussian_kernel_1d_zero_sigma_panics() {
     gaussian_kernel_1d(0.0);
 }
 
 #[test]
 #[should_panic(expected = "Sigma must be positive")]
-fn test_gaussian_kernel_1d_negative_sigma_panics() {
+fn gaussian_kernel_1d_negative_sigma_panics() {
     gaussian_kernel_1d(-1.0);
 }
 
 #[test]
-fn test_gaussian_convolve_uniform_image() {
+fn gaussian_convolve_uniform_image() {
     // Convolving a uniform image should return the same uniform value
     let width = 32;
     let height = 32;
@@ -96,7 +96,7 @@ fn test_gaussian_convolve_uniform_image() {
 }
 
 #[test]
-fn test_gaussian_convolve_preserves_total_flux() {
+fn gaussian_convolve_preserves_total_flux() {
     // Total flux should be approximately preserved (with some edge effects)
     let width = 64;
     let height = 64;
@@ -122,7 +122,7 @@ fn test_gaussian_convolve_preserves_total_flux() {
 }
 
 #[test]
-fn test_gaussian_convolve_spreads_point_source() {
+fn gaussian_convolve_spreads_point_source() {
     // Convolving a delta at (16,16) with Gaussian of sigma=2 should produce
     // the Gaussian kernel itself centered at (16,16).
     // For a 1D Gaussian: G(0) = 1/(sigma*sqrt(2pi)) ≈ 1/(2*2.5066) ≈ 0.19947
@@ -165,7 +165,7 @@ fn test_gaussian_convolve_spreads_point_source() {
 }
 
 #[test]
-fn test_gaussian_convolve_symmetry() {
+fn gaussian_convolve_symmetry() {
     let width = 33;
     let height = 33;
     let mut pixels = vec![0.0f32; width * height];
@@ -194,7 +194,7 @@ fn test_gaussian_convolve_symmetry() {
 }
 
 #[test]
-fn test_gaussian_convolve_peak_matches_kernel_product() {
+fn gaussian_convolve_peak_matches_kernel_product() {
     // Verify that different sigmas produce peaks matching kernel center^2
     let width = 64;
     let height = 64;
@@ -224,7 +224,7 @@ fn test_gaussian_convolve_peak_matches_kernel_product() {
 }
 
 #[test]
-fn test_gaussian_convolve_edge_handling() {
+fn gaussian_convolve_edge_handling() {
     // Point source near edge (2,2) in 16×16 image — mirror boundary should
     // preserve total flux and maintain symmetry where possible
     let width = 16;
@@ -258,7 +258,7 @@ fn test_gaussian_convolve_edge_handling() {
 }
 
 #[test]
-fn test_gaussian_convolve_non_square_image() {
+fn gaussian_convolve_non_square_image() {
     // 64×32 non-square image with point source at (32,16)
     let width = 64;
     let height = 32;
@@ -285,7 +285,7 @@ fn test_gaussian_convolve_non_square_image() {
 }
 
 #[test]
-fn test_gaussian_convolve_small_image() {
+fn gaussian_convolve_small_image() {
     // Uniform image smaller than kernel radius (sigma=2, radius=6, size=13)
     // Should trigger direct 2D fallback and preserve uniform values exactly
     let width = 8;
@@ -308,7 +308,7 @@ fn test_gaussian_convolve_small_image() {
 }
 
 #[test]
-fn test_matched_filter_subtracts_background() {
+fn matched_filter_subtracts_background() {
     let width = 32;
     let height = 32;
     let background = Buffer2::new_filled(width, height, 0.3f32);
@@ -337,7 +337,7 @@ fn test_matched_filter_subtracts_background() {
 }
 
 #[test]
-fn test_matched_filter_detects_star() {
+fn matched_filter_detects_star() {
     let width = 32;
     let height = 32;
     let background = Buffer2::new_filled(width, height, 0.1f32);
@@ -380,7 +380,7 @@ fn test_matched_filter_detects_star() {
 }
 
 #[test]
-fn test_matched_filter_boosts_snr() {
+fn matched_filter_boosts_snr() {
     let width = 64;
     let height = 64;
     let background = Buffer2::new_filled(width, height, 0.1f32);
@@ -440,7 +440,7 @@ fn test_matched_filter_boosts_snr() {
 }
 
 #[test]
-fn test_matched_filter_preserves_negative_residuals() {
+fn matched_filter_preserves_negative_residuals() {
     let width = 16;
     let height = 16;
     let background = Buffer2::new_filled(width, height, 0.5f32);
@@ -473,7 +473,7 @@ fn test_matched_filter_preserves_negative_residuals() {
 }
 
 #[test]
-fn test_matched_filter_noise_normalization() {
+fn matched_filter_noise_normalization() {
     // After noise normalization, the standard deviation of the output on a
     // pure-noise image should approximately match the input noise level.
     // This verifies the sqrt(sum(K^2)) normalization is correct.
@@ -536,7 +536,7 @@ fn test_matched_filter_noise_normalization() {
 }
 
 #[test]
-fn test_separable_vs_direct_equivalence() {
+fn separable_vs_direct_equivalence() {
     // For small images, compare separable to direct implementation
     let width = 16;
     let height = 16;
@@ -568,7 +568,7 @@ fn test_separable_vs_direct_equivalence() {
 }
 
 #[test]
-fn test_large_image_convolution() {
+fn large_image_convolution() {
     // Just verify it completes without error
     let width = 512;
     let height = 512;
@@ -583,7 +583,7 @@ fn test_large_image_convolution() {
 }
 
 #[test]
-fn test_elliptical_kernel_normalization() {
+fn elliptical_kernel_normalization() {
     for sigma in [1.0, 2.0, 3.0] {
         for axis_ratio in [0.3, 0.5, 0.7, 1.0] {
             for angle in [0.0, 0.5, 1.0, 1.57] {
@@ -603,7 +603,7 @@ fn test_elliptical_kernel_normalization() {
 }
 
 #[test]
-fn test_elliptical_kernel_symmetry_at_zero_angle() {
+fn elliptical_kernel_symmetry_at_zero_angle() {
     let kernel = elliptical_gaussian_kernel_2d(2.0, 0.5, 0.0);
 
     // At angle=0, kernel should be symmetric about both axes
@@ -624,7 +624,7 @@ fn test_elliptical_kernel_symmetry_at_zero_angle() {
 }
 
 #[test]
-fn test_elliptical_kernel_elongation() {
+fn elliptical_kernel_elongation() {
     // With axis_ratio < 1, kernel should be elongated along major axis
     let kernel = elliptical_gaussian_kernel_2d(2.0, 0.3, 0.0);
     let center = kernel.size / 2;
@@ -642,7 +642,7 @@ fn test_elliptical_kernel_elongation() {
 }
 
 #[test]
-fn test_elliptical_convolve_uniform_image() {
+fn elliptical_convolve_uniform_image() {
     let width = 32;
     let height = 32;
     let pixels = Buffer2::new_filled(width, height, 0.5f32);
@@ -660,7 +660,7 @@ fn test_elliptical_convolve_uniform_image() {
 }
 
 #[test]
-fn test_elliptical_convolve_preserves_flux() {
+fn elliptical_convolve_preserves_flux() {
     let width = 64;
     let height = 64;
     let mut pixels = vec![0.0f32; width * height];
@@ -683,7 +683,7 @@ fn test_elliptical_convolve_preserves_flux() {
 }
 
 #[test]
-fn test_elliptical_convolve_spreads_point_source() {
+fn elliptical_convolve_spreads_point_source() {
     let width = 32;
     let height = 32;
     let mut pixels = vec![0.0f32; width * height];
@@ -707,7 +707,7 @@ fn test_elliptical_convolve_spreads_point_source() {
 }
 
 #[test]
-fn test_elliptical_convolve_axis_ratio_1_matches_circular() {
+fn elliptical_convolve_axis_ratio_1_matches_circular() {
     let width = 32;
     let height = 32;
     let mut pixels = vec![0.0f32; width * height];
@@ -740,7 +740,7 @@ fn test_elliptical_convolve_axis_ratio_1_matches_circular() {
 }
 
 #[test]
-fn test_elliptical_convolve_rotation_invariance() {
+fn elliptical_convolve_rotation_invariance() {
     // A point source convolved with elliptical kernel at different angles
     // should produce different orientations but same total flux
     let width = 64;
@@ -786,7 +786,7 @@ fn test_elliptical_convolve_rotation_invariance() {
 }
 
 #[test]
-fn test_elliptical_convolve_various_axis_ratios() {
+fn elliptical_convolve_various_axis_ratios() {
     // For a point source at (16,16), elliptical convolution should preserve flux
     let width = 32;
     let height = 32;
@@ -831,7 +831,7 @@ fn test_elliptical_convolve_various_axis_ratios() {
 }
 
 #[test]
-fn test_gaussian_kernel_known_values() {
+fn gaussian_kernel_known_values() {
     // For sigma=1.0, the 1D Gaussian at x=0 is 1/(sqrt(2*pi)*sigma) ≈ 0.3989
     // After normalization, center should be the largest
     let kernel = gaussian_kernel_1d(1.0);
@@ -851,7 +851,7 @@ fn test_gaussian_kernel_known_values() {
 }
 
 #[test]
-fn test_convolution_linearity() {
+fn convolution_linearity() {
     // Convolution should be linear: conv(a + b) = conv(a) + conv(b)
     let width = 32;
     let height = 32;
@@ -893,7 +893,7 @@ fn test_convolution_linearity() {
 }
 
 #[test]
-fn test_convolution_scaling() {
+fn convolution_scaling() {
     // conv(k * f) = k * conv(f)
     let width = 32;
     let height = 32;

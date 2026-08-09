@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn test_plausibility_rejects_large_rotation() {
+fn plausibility_rejects_large_rotation() {
     let ref_points = make_grid(5, 4, 50.0);
     let known = Transform::similarity(DVec2::new(5.0, -3.0), 30.0_f64.to_radians(), 1.0);
     let target_points = apply_all(&known, &ref_points);
@@ -26,7 +26,7 @@ fn test_plausibility_rejects_large_rotation() {
 }
 
 #[test]
-fn test_plausibility_rejects_negative_rotation() {
+fn plausibility_rejects_negative_rotation() {
     let ref_points = make_grid(5, 4, 50.0);
     let known = Transform::similarity(DVec2::new(5.0, -3.0), -30.0_f64.to_radians(), 1.0);
     let target_points = apply_all(&known, &ref_points);
@@ -51,7 +51,7 @@ fn test_plausibility_rejects_negative_rotation() {
 }
 
 #[test]
-fn test_plausibility_rejects_large_scale() {
+fn plausibility_rejects_large_scale() {
     let ref_points = make_grid(5, 4, 50.0);
     let known = Transform::similarity(DVec2::new(5.0, -3.0), 0.0, 2.0);
     let target_points = apply_all(&known, &ref_points);
@@ -76,7 +76,7 @@ fn test_plausibility_rejects_large_scale() {
 }
 
 #[test]
-fn test_plausibility_rejects_small_scale() {
+fn plausibility_rejects_small_scale() {
     let ref_points = make_grid(5, 4, 50.0);
     let known = Transform::similarity(DVec2::new(0.0, 0.0), 0.0, 0.5);
     let target_points = apply_all(&known, &ref_points);
@@ -101,7 +101,7 @@ fn test_plausibility_rejects_small_scale() {
 }
 
 #[test]
-fn test_plausibility_accepts_within_bounds() {
+fn plausibility_accepts_within_bounds() {
     let ref_points = make_grid(5, 4, 50.0);
     let angle = 5.0_f64.to_radians();
     let scale = 1.1;
@@ -127,7 +127,7 @@ fn test_plausibility_accepts_within_bounds() {
 }
 
 #[test]
-fn test_plausibility_disabled_accepts_everything() {
+fn plausibility_disabled_accepts_everything() {
     let ref_points = make_grid(5, 4, 50.0);
     let known = Transform::similarity(DVec2::new(5.0, -3.0), PI / 4.0, 2.0);
     let target_points = apply_all(&known, &ref_points);
@@ -150,7 +150,7 @@ fn test_plausibility_disabled_accepts_everything() {
 }
 
 #[test]
-fn test_plausibility_rotation_boundary() {
+fn plausibility_rotation_boundary() {
     let ref_points = make_grid(5, 4, 50.0);
     let max_rotation = 10.0_f64.to_radians();
 
@@ -200,7 +200,7 @@ fn test_plausibility_rotation_boundary() {
 }
 
 #[test]
-fn test_plausibility_scale_boundary() {
+fn plausibility_scale_boundary() {
     let ref_points = make_grid(5, 4, 50.0);
 
     // 1.15 scale -- should pass (0.8, 1.2)
@@ -247,7 +247,7 @@ fn test_plausibility_scale_boundary() {
 }
 
 #[test]
-fn test_plausibility_combined_rotation_and_scale() {
+fn plausibility_combined_rotation_and_scale() {
     let ref_points = make_grid(5, 4, 50.0);
     let config_base = RansacConfig {
         seed: Some(42),
@@ -303,7 +303,7 @@ fn test_plausibility_combined_rotation_and_scale() {
 }
 
 #[test]
-fn test_plausibility_translation_unaffected() {
+fn plausibility_translation_unaffected() {
     // Pure translation should always pass tight plausibility checks
     let ref_points = make_grid(5, 4, 50.0);
     let target_points: Vec<DVec2> = ref_points
@@ -329,7 +329,7 @@ fn test_plausibility_translation_unaffected() {
 }
 
 #[test]
-fn test_plausibility_progressive_ransac_respects_checks() {
+fn plausibility_progressive_ransac_respects_checks() {
     // Progressive RANSAC should also reject implausible transforms
     let ref_points = make_grid(5, 4, 50.0);
     let known = Transform::similarity(DVec2::new(5.0, -3.0), 30.0_f64.to_radians(), 1.0);
@@ -376,7 +376,7 @@ fn test_plausibility_progressive_ransac_respects_checks() {
 }
 
 #[test]
-fn test_plausibility_with_outliers_filters_bad_hypotheses() {
+fn plausibility_with_outliers_filters_bad_hypotheses() {
     // 15 inliers + 2 outliers that would produce wild transforms if sampled
     let ref_points: Vec<DVec2> = make_grid(5, 3, 50.0);
     let offset = DVec2::new(10.0, -5.0);

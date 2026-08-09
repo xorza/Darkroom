@@ -18,7 +18,7 @@ use imaginarium::drawing::{draw_circle, draw_cross};
 /// Test cosmic ray rejection on star field.
 #[test]
 
-fn test_cosmic_ray_rejection() {
+fn cosmic_ray_rejection() {
     init_tracing();
 
     let width = 256;

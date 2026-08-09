@@ -10,7 +10,7 @@ use super::*;
 /// pixel's drop reaches it, so it reads the undiluted bright value. Edge cells (e.g. (1,2))
 /// are shared 50/50 with a zero-valued neighbour's drop, so a lone bright pixel reads half.
 #[test]
-fn test_turbo_kernel_overlap_exact() {
+fn turbo_kernel_overlap_exact() {
     // Single bright pixel at (1,1) with value 2.0
     let mut pixels = vec![0.0f32; 4 * 4];
     pixels[5] = 2.0; // pixel (1,1) = index 1*4+1 = 5
@@ -52,7 +52,7 @@ fn test_turbo_kernel_overlap_exact() {
 /// For uniform image, all covered pixels should be 1.0 (weighted mean of same value).
 /// Coverage varies: (0,0) has weight 0.125, (1,0) has weight 0.50.
 #[test]
-fn test_turbo_kernel_fractional_shift() {
+fn turbo_kernel_fractional_shift() {
     // Uniform image so weighted mean is always 1.0 regardless of overlap pattern
     let image = constant_mono_image(Size2us::new(4, 4), 1.0);
 
@@ -87,7 +87,7 @@ fn test_turbo_kernel_fractional_shift() {
 /// x-overlaps 0.8 and 0.2. max_weight = 0.8; threshold = min_coverage(0.6) * 0.8 = 0.48.
 /// cell (0,0): weight 0.8 ≥ 0.48 → kept (1.0). cell (1,0): weight 0.2 < 0.48 → fill_value.
 #[test]
-fn test_min_coverage_normalized() {
+fn min_coverage_normalized() {
     let mut pixels = vec![0.0f32; 4 * 4];
     pixels[0] = 1.0;
     let image = mono_image(Size2us::new(4, 4), pixels);
@@ -112,7 +112,7 @@ fn test_min_coverage_normalized() {
 /// A uniform 10×10 image with value 3.0 through Gaussian kernel should produce
 /// approximately 3.0 everywhere in the interior (edges may differ due to truncation).
 #[test]
-fn test_gaussian_kernel_uniform_preserves_value() {
+fn gaussian_kernel_uniform_preserves_value() {
     let image = constant_mono_image(Size2us::new(10, 10), 3.0);
 
     let config = DrizzleConfig::x2().with_kernel(DrizzleKernel::Gaussian);
@@ -137,7 +137,7 @@ fn test_gaussian_kernel_uniform_preserves_value() {
 /// For a uniform image at scale=1 pixfrac=1, Lanczos should also produce the same
 /// uniform value, since the normalized Lanczos weights sum to 1.
 #[test]
-fn test_lanczos_kernel_uniform_preserves_value() {
+fn lanczos_kernel_uniform_preserves_value() {
     let image = constant_mono_image(Size2us::new(20, 20), 5.0);
 
     let config = DrizzleConfig {
@@ -166,7 +166,7 @@ fn test_lanczos_kernel_uniform_preserves_value() {
 /// A single bright pixel surrounded by zeros will produce negative lobes
 /// in the Lanczos output. After clamping, all output should be >= 0.
 #[test]
-fn test_lanczos_clamping_no_negative_output() {
+fn lanczos_clamping_no_negative_output() {
     let mut pixels = vec![0.0f32; 20 * 20];
     pixels[10 * 20 + 10] = 100.0; // bright point source
     let image = mono_image(Size2us::new(20, 20), pixels);
@@ -200,7 +200,7 @@ fn test_lanczos_clamping_no_negative_output() {
 /// have the same overlap geometry, the weighted mean simplifies to:
 /// (2.0 * 1.0 + 6.0 * 3.0) / (1.0 + 3.0) = (2 + 18) / 4 = 5.0
 #[test]
-fn test_two_frame_weighted_mean() {
+fn two_frame_weighted_mean() {
     let image1 = constant_mono_image(Size2us::new(10, 10), 2.0);
     let image2 = constant_mono_image(Size2us::new(10, 10), 6.0);
 
@@ -226,7 +226,7 @@ fn test_two_frame_weighted_mean() {
 /// pixfrac=1.0 → drop_size=2.0: large drop hits many output pixels
 /// pixfrac=0.3 → drop_size=0.6: small drop hits fewer output pixels
 #[test]
-fn test_pixfrac_changes_weight_distribution() {
+fn pixfrac_changes_weight_distribution() {
     // Use translation (0.1, 0.1) to avoid integer-centered drops
     let transform = Transform::translation(DVec2::new(0.1, 0.1));
 
@@ -268,7 +268,7 @@ fn test_pixfrac_changes_weight_distribution() {
 
 /// Test RGB channels are handled independently.
 #[test]
-fn test_rgb_channels_independent() {
+fn rgb_channels_independent() {
     let mut pixels = vec![0.0f32; 4 * 4 * 3];
     // Set pixel (1,1) to (1.0, 2.0, 3.0). Index = (1*4+1)*3 = 15.
     let idx = 15;
@@ -309,7 +309,7 @@ fn test_rgb_channels_independent() {
 /// At scale=1, pixfrac=1: drop_size=1.0, covering exactly one output pixel per input pixel.
 /// With identity transform, output should exactly equal input.
 #[test]
-fn test_scale1_pixfrac1_identity() {
+fn scale1_pixfrac1_identity() {
     let pixels: Vec<f32> = (0..25).map(|i| i as f32).collect();
     let image = mono_image(Size2us::new(5, 5), pixels.clone());
 
@@ -345,7 +345,7 @@ fn test_scale1_pixfrac1_identity() {
 /// Point kernel at scale=2 leaves gaps (even-coordinate pixels uncovered).
 /// With fill_value = -999.0, those gaps should contain -999.0 instead of 0.0.
 #[test]
-fn test_fill_value_in_uncovered_pixels() {
+fn fill_value_in_uncovered_pixels() {
     let image = constant_mono_image(Size2us::new(4, 4), 1.0);
 
     let config = DrizzleConfig {
@@ -389,7 +389,7 @@ fn test_fill_value_in_uncovered_pixels() {
 /// Frame 2: uniform 100.0, weight 0.0
 /// Result should be 3.0 everywhere (zero-weight frame contributes nothing).
 #[test]
-fn test_zero_weight_frame_ignored() {
+fn zero_weight_frame_ignored() {
     let image1 = constant_mono_image(Size2us::new(8, 8), 3.0);
     let image2 = constant_mono_image(Size2us::new(8, 8), 100.0);
 
@@ -416,7 +416,7 @@ fn test_zero_weight_frame_ignored() {
 /// is 4.0 (weighted average of identical values).
 /// This tests that Gaussian + translation still preserves uniform values.
 #[test]
-fn test_gaussian_kernel_with_translation() {
+fn gaussian_kernel_with_translation() {
     let image = constant_mono_image(Size2us::new(12, 12), 4.0);
 
     let config = DrizzleConfig::x2().with_kernel(DrizzleKernel::Gaussian);
@@ -458,7 +458,7 @@ fn test_gaussian_kernel_with_translation() {
 /// Uniform image value 7.0, translation (0.3, -0.2), scale=1, pixfrac=1.
 /// Interior pixels should still be ~7.0 since the weighted mean of uniform values is invariant.
 #[test]
-fn test_lanczos_kernel_with_translation() {
+fn lanczos_kernel_with_translation() {
     let image = constant_mono_image(Size2us::new(20, 20), 7.0);
 
     let config = DrizzleConfig {
@@ -503,7 +503,7 @@ fn test_lanczos_kernel_with_translation() {
 /// each input pixel maps to exactly one output pixel, so (1,1) gets no
 /// contribution at all → fill_value = 0.0.
 #[test]
-fn test_pixel_weight_zero_excludes_pixel() {
+fn pixel_weight_zero_excludes_pixel() {
     let mut pixels = vec![1.0f32; 4 * 4];
     pixels[5] = 100.0; // (1,1) = row 1 * 4 + col 1 = 5 (bad pixel)
     let image = mono_image(Size2us::new(4, 4), pixels);
@@ -552,7 +552,7 @@ fn test_pixel_weight_zero_excludes_pixel() {
 /// At (1,1): weighted mean = (2.0 * 0.5 + 6.0 * 1.0) / (0.5 + 1.0) = 7.0 / 1.5 = 4.667
 /// At other pixels: weighted mean = (2.0 * 1.0 + 6.0 * 1.0) / (1.0 + 1.0) = 4.0
 #[test]
-fn test_pixel_weight_scales_contribution() {
+fn pixel_weight_scales_contribution() {
     let image1 = constant_mono_image(Size2us::new(4, 4), 2.0);
     let image2 = constant_mono_image(Size2us::new(4, 4), 6.0);
 
@@ -594,7 +594,7 @@ fn test_pixel_weight_scales_contribution() {
 /// 8×8 uniform image = 5.0. Weight map has 3 bad pixels at (2,3), (5,1), (7,7).
 /// scale=1, pixfrac=1. Bad pixels produce fill_value; all others = 5.0.
 #[test]
-fn test_pixel_weight_bad_pixel_mask() {
+fn pixel_weight_bad_pixel_mask() {
     let image = constant_mono_image(Size2us::new(8, 8), 5.0);
 
     let mut pw = Buffer2::new_filled(8, 8, 1.0f32);
@@ -656,7 +656,7 @@ fn test_pixel_weight_bad_pixel_mask() {
 /// Pixel (1,1) = 10.0, weight = 0.0. Should not appear at output (2,2).
 /// Pixel (0,0) = 3.0, weight = 1.0. Should appear at output (0,0) = 3.0.
 #[test]
-fn test_pixel_weight_with_point_kernel() {
+fn pixel_weight_with_point_kernel() {
     let mut pixels = vec![1.0f32; 4 * 4];
     pixels[5] = 10.0; // (1,1) bad pixel
     pixels[0] = 3.0;
@@ -693,7 +693,7 @@ fn test_pixel_weight_with_point_kernel() {
 /// reduces coverage near its position but doesn't contaminate values.
 /// Interior pixels far from the bad pixel should still be ~4.0.
 #[test]
-fn test_pixel_weight_with_gaussian_kernel() {
+fn pixel_weight_with_gaussian_kernel() {
     let image = constant_mono_image(Size2us::new(12, 12), 4.0);
 
     let mut pw = Buffer2::new_filled(12, 12, 1.0f32);

@@ -16,7 +16,7 @@ use crate::stacking::star_detection::tests::stage_tests::TILE_SIZE;
 /// Test background estimation on uniform background.
 #[test]
 
-fn test_background_uniform() {
+fn background_uniform() {
     init_tracing();
 
     let width = 256;
@@ -99,7 +99,7 @@ fn test_background_uniform() {
 /// Test background estimation on gradient background.
 #[test]
 
-fn test_background_gradient() {
+fn background_gradient() {
     init_tracing();
 
     let width = 256;
@@ -184,7 +184,7 @@ fn test_background_gradient() {
 /// Test background estimation on vignette pattern.
 #[test]
 
-fn test_background_vignette() {
+fn background_vignette() {
     init_tracing();
 
     let width = 256;
@@ -277,7 +277,7 @@ fn test_background_vignette() {
 /// Test background estimation with nebula structure.
 #[test]
 
-fn test_background_nebula() {
+fn background_nebula() {
     init_tracing();
 
     let width = 256;

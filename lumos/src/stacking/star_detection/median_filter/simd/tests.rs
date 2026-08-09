@@ -58,7 +58,7 @@ fn test_median_filter_row_scalar() {
 }
 
 #[test]
-fn test_median9_scalar_known_values() {
+fn median9_scalar_known_values() {
     // Sorted: 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9
     // Median should be 0.5 (index 4)
     let result = median9_scalar(0.5, 0.1, 0.9, 0.2, 0.8, 0.3, 0.7, 0.4, 0.6);
@@ -66,13 +66,13 @@ fn test_median9_scalar_known_values() {
 }
 
 #[test]
-fn test_median9_scalar_all_same() {
+fn median9_scalar_all_same() {
     let result = median9_scalar(0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5);
     assert!((result - 0.5).abs() < 1e-6, "Expected 0.5, got {}", result);
 }
 
 #[test]
-fn test_median9_scalar_various_orderings() {
+fn median9_scalar_various_orderings() {
     // Test the median9 function with various orderings of the same set of values
     let expected_median = 0.5;
 
@@ -101,7 +101,7 @@ fn test_median9_scalar_various_orderings() {
 }
 
 #[test]
-fn test_median9_scalar_with_duplicates() {
+fn median9_scalar_with_duplicates() {
     // Test median with duplicate values
     let result = median9_scalar(0.5, 0.5, 0.5, 0.1, 0.1, 0.9, 0.9, 0.3, 0.7);
     // Sorted: 0.1, 0.1, 0.3, 0.5, 0.5, 0.5, 0.7, 0.9, 0.9 -> median is 0.5
@@ -113,7 +113,7 @@ fn test_median9_scalar_with_duplicates() {
 }
 
 #[test]
-fn test_median9_scalar_extreme_values() {
+fn median9_scalar_extreme_values() {
     // Test with extreme values
     let result = median9_scalar(f32::MIN, f32::MAX, 0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0);
     // Sorted: MIN, 0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, MAX -> median is 3.0

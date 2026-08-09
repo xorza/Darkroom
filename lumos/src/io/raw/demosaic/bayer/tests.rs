@@ -6,7 +6,7 @@ use crate::testing::prelude::*;
 use rayon::ThreadPoolBuilder;
 
 #[test]
-fn test_cfa_rggb_pattern() {
+fn cfa_rggb_pattern() {
     let cfa = CfaPattern::Rggb;
     assert_eq!(cfa.color_at(Vec2us::new(0, 0)), 0); // R
     assert_eq!(cfa.color_at(Vec2us::new(1, 0)), 1); // G
@@ -19,7 +19,7 @@ fn test_cfa_rggb_pattern() {
 }
 
 #[test]
-fn test_cfa_bggr_pattern() {
+fn cfa_bggr_pattern() {
     let cfa = CfaPattern::Bggr;
     assert_eq!(cfa.color_at(Vec2us::new(0, 0)), 2); // B
     assert_eq!(cfa.color_at(Vec2us::new(1, 0)), 1); // G
@@ -28,7 +28,7 @@ fn test_cfa_bggr_pattern() {
 }
 
 #[test]
-fn test_cfa_grbg_pattern() {
+fn cfa_grbg_pattern() {
     let cfa = CfaPattern::Grbg;
     assert_eq!(cfa.color_at(Vec2us::new(0, 0)), 1); // G
     assert_eq!(cfa.color_at(Vec2us::new(1, 0)), 0); // R
@@ -37,7 +37,7 @@ fn test_cfa_grbg_pattern() {
 }
 
 #[test]
-fn test_cfa_gbrg_pattern() {
+fn cfa_gbrg_pattern() {
     let cfa = CfaPattern::Gbrg;
     assert_eq!(cfa.color_at(Vec2us::new(0, 0)), 1); // G
     assert_eq!(cfa.color_at(Vec2us::new(1, 0)), 2); // B
@@ -103,7 +103,7 @@ fn test_flip_horizontal() {
 }
 
 #[test]
-fn test_flip_both_axes() {
+fn flip_both_axes() {
     // Flipping both axes is equivalent to 180° rotation
     // RGGB → flip_v → GBRG → flip_h → BGGR
     assert_eq!(
@@ -145,7 +145,7 @@ fn raw_origin_pattern_preserves_visible_color_for_every_margin_phase() {
 
 #[test]
 #[should_panic(expected = "Output dimensions must be non-zero")]
-fn test_bayer_image_zero_width() {
+fn bayer_image_zero_width() {
     let data = vec![0.0f32; 4];
     let raw = Size2us::new(2, 2);
     BayerImage::with_margins(
@@ -159,7 +159,7 @@ fn test_bayer_image_zero_width() {
 
 #[test]
 #[should_panic(expected = "Output dimensions must be non-zero")]
-fn test_bayer_image_zero_height() {
+fn bayer_image_zero_height() {
     let data = vec![0.0f32; 4];
     let raw = Size2us::new(2, 2);
     BayerImage::with_margins(
@@ -173,7 +173,7 @@ fn test_bayer_image_zero_height() {
 
 #[test]
 #[should_panic(expected = "Data length")]
-fn test_bayer_image_wrong_data_length() {
+fn bayer_image_wrong_data_length() {
     let data = vec![0.0f32; 3];
     let size = Size2us::new(2, 2);
     BayerImage::with_margins(&data, size, size, Vec2us::ZERO, CfaPattern::Rggb);
@@ -181,7 +181,7 @@ fn test_bayer_image_wrong_data_length() {
 
 #[test]
 #[should_panic(expected = "Top margin")]
-fn test_bayer_image_margin_exceeds_height() {
+fn bayer_image_margin_exceeds_height() {
     let data = vec![0.0f32; 4];
     let size = Size2us::new(2, 2);
     BayerImage::with_margins(&data, size, size, Vec2us::new(0, 1), CfaPattern::Rggb);
@@ -189,14 +189,14 @@ fn test_bayer_image_margin_exceeds_height() {
 
 #[test]
 #[should_panic(expected = "Left margin")]
-fn test_bayer_image_margin_exceeds_width() {
+fn bayer_image_margin_exceeds_width() {
     let data = vec![0.0f32; 4];
     let size = Size2us::new(2, 2);
     BayerImage::with_margins(&data, size, size, Vec2us::new(1, 0), CfaPattern::Rggb);
 }
 
 #[test]
-fn test_bayer_image_valid() {
+fn bayer_image_valid() {
     let data = vec![0.0f32; 16];
     let bayer = BayerImage::with_margins(
         &data,
@@ -216,7 +216,7 @@ fn make_bayer(data: &[f32], size: Size2us, cfa: CfaPattern) -> BayerImage<'_> {
 }
 
 #[test]
-fn test_rcd_output_dimensions() {
+fn rcd_output_dimensions() {
     // 20x20 image, no margins → output should be 20*20*3 = 1200 floats
     let w = 20;
     let h = 20;
@@ -270,7 +270,7 @@ fn parallel_rcd_matches_single_thread_bit_for_bit() {
 }
 
 #[test]
-fn test_rcd_uniform_input() {
+fn rcd_uniform_input() {
     // A uniform CFA (all pixels = 0.5) should produce approximately uniform RGB.
     // The ratio correction formula with uniform LPF reduces to:
     //   N_Est = 0.5 * (2*lpf) / (eps + 2*lpf) ≈ 0.5 for large lpf
@@ -317,7 +317,7 @@ fn test_rcd_uniform_input() {
 }
 
 #[test]
-fn test_rcd_preserves_cfa_channel() {
+fn rcd_preserves_cfa_channel() {
     // For a synthetic image, the interpolated value at a known CFA site
     // should preserve the original CFA value for that channel.
     // At an R pixel (0,0) in RGGB, the red channel should equal the CFA value.
@@ -349,7 +349,7 @@ fn test_rcd_preserves_cfa_channel() {
 }
 
 #[test]
-fn test_rcd_green_at_red_position_hand_computed() {
+fn rcd_green_at_red_position_hand_computed() {
     // Build a small 16x16 image where we can hand-compute the green interpolation
     // at a known R position.
     //
@@ -404,7 +404,7 @@ fn test_rcd_green_at_red_position_hand_computed() {
 }
 
 #[test]
-fn test_rcd_all_patterns_preserve_native_samples_and_stay_finite() {
+fn rcd_all_patterns_preserve_native_samples_and_stay_finite() {
     let w = 20;
     let h = 20;
     let data: Vec<f32> = (0..w * h).map(|i| i as f32 / (w * h) as f32).collect();
@@ -470,7 +470,7 @@ fn signed_linear_gradient_crossing_zero_is_reconstructed_without_spikes() {
 }
 
 #[test]
-fn test_rcd_with_margins() {
+fn rcd_with_margins() {
     let raw_w = 26;
     let raw_h = 26;
     let act_w = 16;
@@ -524,7 +524,7 @@ fn test_rcd_with_margins() {
 }
 
 #[test]
-fn test_rcd_gradient_image_green_smoothness() {
+fn rcd_gradient_image_green_smoothness() {
     // A horizontal gradient should produce a smooth green channel.
     // No abrupt jumps between adjacent green values in the interior.
     let w = 32;
@@ -562,7 +562,7 @@ fn test_rcd_gradient_image_green_smoothness() {
 }
 
 #[test]
-fn test_rcd_red_blue_at_green_positions() {
+fn rcd_red_blue_at_green_positions() {
     // Verify R and B interpolation at green CFA positions.
     // Use a pattern where R=0.8 everywhere and B=0.2 everywhere, G=0.5.
     // At green positions, the interpolated R should be ~0.8 and B should be ~0.2.
@@ -616,7 +616,7 @@ fn test_rcd_red_blue_at_green_positions() {
 }
 
 #[test]
-fn test_rcd_blue_at_red_position() {
+fn rcd_blue_at_red_position() {
     // Verify B interpolation at R CFA positions (Step 4.2).
     // Use a pattern where R=0.9, G=0.5, B=0.1.
     // At R positions, blue should be interpolated from diagonal B neighbors.
@@ -663,9 +663,9 @@ fn test_rcd_blue_at_red_position() {
 }
 
 #[test]
-fn test_rcd_red_at_blue_position() {
+fn rcd_red_at_blue_position() {
     // Step 4.2 reverse: verify R interpolation at B CFA positions.
-    // Symmetric to test_rcd_blue_at_red_position but tests the B-row → write-R path.
+    // Symmetric to rcd_blue_at_red_position but tests the B-row → write-R path.
     // R=0.9, G=0.5, B=0.1. At B positions, R should be interpolated from diagonal R neighbors.
     let w = 20;
     let h = 20;
@@ -710,7 +710,7 @@ fn test_rcd_red_at_blue_position() {
 }
 
 #[test]
-fn test_rcd_bggr_correctness() {
+fn rcd_bggr_correctness() {
     // Verify BGGR pattern produces correct interpolation values, not just valid range.
     // BGGR: (0,0)=B, (0,1)=G, (1,0)=G, (1,1)=R
     // Use distinct per-channel values: R=0.8, G=0.5, B=0.2
@@ -758,7 +758,7 @@ fn test_rcd_bggr_correctness() {
 }
 
 #[test]
-fn test_rcd_grbg_gbrg_correctness() {
+fn rcd_grbg_gbrg_correctness() {
     // Verify GRBG and GBRG patterns produce correct interpolation.
     // Use R=0.7, G=0.4, B=0.1.
     for cfa in [CfaPattern::Grbg, CfaPattern::Gbrg] {
@@ -805,7 +805,7 @@ fn test_rcd_grbg_gbrg_correctness() {
 }
 
 #[test]
-fn test_rcd_vh_direction_sensitivity() {
+fn rcd_vh_direction_sensitivity() {
     // A horizontal edge (intensity change between rows) should produce
     // predominantly vertical interpolation (VH_Dir < 0.5 → favors vertical).
     // A vertical edge (intensity change between columns) should produce
@@ -868,7 +868,7 @@ fn test_rcd_vh_direction_sensitivity() {
 }
 
 #[test]
-fn test_rcd_border_interpolation() {
+fn rcd_border_interpolation() {
     // Verify that border pixels get reasonable bilinear values, not zeros.
     // Use a uniform image so expected values are known.
     let w = 20;
@@ -916,7 +916,7 @@ fn test_rcd_border_interpolation() {
 }
 
 #[test]
-fn test_rcd_sharp_edge_no_excessive_artifacts() {
+fn rcd_sharp_edge_no_excessive_artifacts() {
     // A sharp vertical edge at column 16: left half = 0.9, right half = 0.1.
     // Verify that the transition zone is bounded (no extreme overshoots from
     // the ratio correction or direction interpolation).

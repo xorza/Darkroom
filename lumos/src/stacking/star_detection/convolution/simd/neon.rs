@@ -196,7 +196,7 @@ mod tests {
     use crate::stacking::star_detection::convolution::simd::neon::*;
 
     #[test]
-    fn test_neon_matches_scalar() {
+    fn neon_matches_scalar() {
         let input: Vec<f32> = (0..256).map(|i| (i as f32).sin()).collect();
         let kernel = vec![0.05, 0.1, 0.2, 0.3, 0.2, 0.1, 0.05];
         let radius = 3;

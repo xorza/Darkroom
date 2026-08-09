@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn test_drizzle_config_default() {
+fn drizzle_config_default() {
     let config = DrizzleConfig::default();
     assert_eq!(config.scale, 2.0);
     assert_eq!(config.pixfrac, 0.8);
@@ -9,7 +9,7 @@ fn test_drizzle_config_default() {
 }
 
 #[test]
-fn test_drizzle_config_presets() {
+fn drizzle_config_presets() {
     let x1_5 = DrizzleConfig::x1_5();
     assert_eq!(x1_5.scale, 1.5);
 
@@ -21,7 +21,7 @@ fn test_drizzle_config_presets() {
 }
 
 #[test]
-fn test_drizzle_config_builder() {
+fn drizzle_config_builder() {
     let config = DrizzleConfig::default()
         .with_pixfrac(0.5)
         .with_kernel(DrizzleKernel::Gaussian)
@@ -34,7 +34,7 @@ fn test_drizzle_config_builder() {
 }
 
 #[test]
-fn test_drizzle_config_invalid_parameters_return_exact_errors() {
+fn drizzle_config_invalid_parameters_return_exact_errors() {
     // Each case: the config, and the field its rejection must name with the value it carries.
     let range_checks = [
         (
@@ -115,7 +115,7 @@ fn test_drizzle_config_invalid_parameters_return_exact_errors() {
 }
 
 #[test]
-fn test_drizzle_accumulator_dimensions() {
+fn drizzle_accumulator_dimensions() {
     let config = DrizzleConfig::x2();
     let acc = accumulator(ImageDimensions::new((100, 80), 3), config);
     let dims = acc.dimensions();

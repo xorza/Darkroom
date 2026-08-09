@@ -1,7 +1,7 @@
 use crate::background_mesh::spline::*;
 
 #[test]
-fn test_solve_d2_two_points_gives_zero() {
+fn solve_d2_two_points_gives_zero() {
     // Natural spline with 2 points: d2 = 0 everywhere (linear)
     let values = [10.0, 20.0];
     let centers = [0.0, 1.0];
@@ -14,7 +14,7 @@ fn test_solve_d2_two_points_gives_zero() {
 }
 
 #[test]
-fn test_solve_d2_linear_data_gives_zero() {
+fn solve_d2_linear_data_gives_zero() {
     // Linear function f(x) = 2x + 1 at x = 0, 1, 2, 3
     // Second derivative of a linear function is 0 everywhere
     let values = [1.0, 3.0, 5.0, 7.0];
@@ -35,7 +35,7 @@ fn test_solve_d2_linear_data_gives_zero() {
 }
 
 #[test]
-fn test_solve_d2_quadratic_data() {
+fn solve_d2_quadratic_data() {
     // f(x) = x² at x = 0, 1, 2, 3 → f = [0, 1, 4, 9]
     // True second derivative = 2 everywhere
     // Natural spline with n=4 points, uniform h=1:
@@ -73,7 +73,7 @@ fn test_solve_d2_quadratic_data() {
 }
 
 #[test]
-fn test_solve_d2_non_uniform_spacing() {
+fn solve_d2_non_uniform_spacing() {
     // f(x) = x² at x = 0, 1, 3 → f = [0, 1, 9]
     // h0 = 1, h1 = 2
     // One interior equation (i=1):
@@ -97,7 +97,7 @@ fn test_solve_d2_non_uniform_spacing() {
 }
 
 #[test]
-fn test_cubic_spline_eval_endpoints() {
+fn cubic_spline_eval_endpoints() {
     // At t=0: should return f0; at t=1: should return f1
     let f0 = 10.0;
     let f1 = 20.0;
@@ -123,7 +123,7 @@ fn test_cubic_spline_eval_endpoints() {
 }
 
 #[test]
-fn test_cubic_spline_eval_midpoint() {
+fn cubic_spline_eval_midpoint() {
     // At t=0.5, using f(t) = ct*f0 + t*f1 - t*ct*((2-t)*a + (1+t)*b):
     //   = (f0+f1)/2 - 0.375*(a+b)
     // where a = h²/6*d0, b = h²/6*d1
@@ -142,7 +142,7 @@ fn test_cubic_spline_eval_midpoint() {
 }
 
 #[test]
-fn test_cubic_spline_eval_zero_d2_is_linear() {
+fn cubic_spline_eval_zero_d2_is_linear() {
     // With d0=d1=0, the spline should be exactly linear
     let f0 = 10.0;
     let f1 = 50.0;
@@ -163,7 +163,7 @@ fn test_cubic_spline_eval_zero_d2_is_linear() {
 }
 
 #[test]
-fn test_solve_d2_single_point() {
+fn solve_d2_single_point() {
     let values = [42.0];
     let centers = [5.0];
     let mut d2 = [999.0; 1];
@@ -174,7 +174,7 @@ fn test_solve_d2_single_point() {
 }
 
 #[test]
-fn test_solve_d2_empty() {
+fn solve_d2_empty() {
     let values: [f32; 0] = [];
     let centers: [f32; 0] = [];
     let mut d2: [f32; 0] = [];
@@ -185,7 +185,7 @@ fn test_solve_d2_empty() {
 }
 
 #[test]
-fn test_solve_d2_five_points_cubic() {
+fn solve_d2_five_points_cubic() {
     // f(x) = x³ at x = 0, 1, 2, 3, 4 → f = [0, 1, 8, 27, 64]
     // True f''(x) = 6x, so f''(0)=0, f''(1)=6, f''(2)=12, f''(3)=18, f''(4)=24
     // Natural BC forces d2[0]=0, d2[4]=0, so the spline won't match true f''
@@ -243,7 +243,7 @@ fn test_solve_d2_five_points_cubic() {
 }
 
 #[test]
-fn test_solve_d2_symmetric_data() {
+fn solve_d2_symmetric_data() {
     // f = [1, 4, 9, 4, 1] at x = [0, 1, 2, 3, 4] (symmetric around x=2)
     // Symmetry requires d2[1] == d2[3] and d2[2] is the center value.
     //
@@ -297,20 +297,20 @@ fn test_solve_d2_symmetric_data() {
 }
 
 #[test]
-fn test_cubic_spline_eval_h_zero_returns_f0() {
+fn cubic_spline_eval_h_zero_returns_f0() {
     // When h=0 (degenerate interval), should return f0
     let val = cubic_spline_eval(42.0, 99.0, 5.0, -3.0, 0.0, 0.5);
     assert_eq!(val, 42.0);
 }
 
 #[test]
-fn test_cubic_spline_eval_h_negative_returns_f0() {
+fn cubic_spline_eval_h_negative_returns_f0() {
     let val = cubic_spline_eval(42.0, 99.0, 5.0, -3.0, -1.0, 0.5);
     assert_eq!(val, 42.0);
 }
 
 #[test]
-fn test_spline_roundtrip_reproduces_nodes() {
+fn spline_roundtrip_reproduces_nodes() {
     // Solve d2 for f = [0, 1, 8, 27, 64] (x³), then verify that evaluating
     // the spline at each node point exactly reproduces the function value.
     let values = [0.0f32, 1.0, 8.0, 27.0, 64.0];
@@ -351,7 +351,7 @@ fn test_spline_roundtrip_reproduces_nodes() {
 }
 
 #[test]
-fn test_spline_roundtrip_interior_continuity() {
+fn spline_roundtrip_interior_continuity() {
     // At each interior node, the value from the left interval (t=1) should
     // match the value from the right interval (t=0). This tests C0 continuity.
     // Also test that the first derivative is continuous (C1).

@@ -248,7 +248,7 @@ fn cfa_stack_propagates_raw_quantization_into_hot_detection() {
 }
 
 #[test]
-fn test_correct_clustered_defect_uses_only_good_neighbors() {
+fn correct_clustered_defect_uses_only_good_neighbors() {
     // A defect whose same-color neighbours are MOSTLY other defects must still be repaired from
     // the few good ones — the defect mask excludes the bad neighbours. Pre-mask, the neighbour
     // median was dominated by the cluster and left the pixel ~uncorrected (≈0.95 here).
@@ -282,7 +282,7 @@ fn test_correct_clustered_defect_uses_only_good_neighbors() {
 }
 
 #[test]
-fn test_xtrans_hot_pixel_correction_uses_same_color() {
+fn xtrans_hot_pixel_correction_uses_same_color() {
     // X-Trans hot pixels must be repaired from SAME-COLOR neighbours, not the global mean.
     let pattern = [
         [1, 0, 1, 1, 2, 1],
@@ -340,7 +340,7 @@ fn test_xtrans_hot_pixel_correction_uses_same_color() {
 }
 
 #[test]
-fn test_cfa_hot_pixel_detection() {
+fn cfa_hot_pixel_detection() {
     // 6x6 CFA image with known hot pixels
     let mut pixels = vec![100.0; 36];
     pixels[0] = 10000.0; // hot at (0,0)
@@ -360,7 +360,7 @@ fn test_cfa_hot_pixel_detection() {
 }
 
 #[test]
-fn test_cfa_hot_pixel_correction_bayer() {
+fn cfa_hot_pixel_correction_bayer() {
     // 6x6 Bayer RGGB pattern
     // Hot pixel at (2,2) = R. Same-color (R) neighbors at stride 2.
     let mut pixels = vec![100.0; 36];
@@ -385,7 +385,7 @@ fn test_cfa_hot_pixel_correction_bayer() {
 }
 
 #[test]
-fn test_cfa_hot_pixel_correction_mono() {
+fn cfa_hot_pixel_correction_mono() {
     // Mono: uses standard 8-connected neighbors
     let pixels = vec![10.0, 20.0, 30.0, 40.0, 1000.0, 50.0, 60.0, 70.0, 80.0];
     let mut image = make_cfa(Size2us::new(3, 3), pixels, CfaType::Mono);
@@ -407,7 +407,7 @@ fn test_cfa_hot_pixel_correction_mono() {
 }
 
 #[test]
-fn test_bayer_same_color_neighbors() {
+fn bayer_same_color_neighbors() {
     // 6x6 image, all 100.0, hot pixel at center (2,2)
     let mut pixels = vec![100.0; 36];
     // Set some same-color neighbors to distinct values to verify median
@@ -429,7 +429,7 @@ fn test_bayer_same_color_neighbors() {
 }
 
 #[test]
-fn test_bayer_same_color_neighbors_corner() {
+fn bayer_same_color_neighbors_corner() {
     // Hot pixel at corner (0,0) in 4x4 Bayer RGGB
     // Same-color (R) neighbors at stride 2: (2,0), (0,2), (2,2)
     let pixels = vec![
@@ -449,7 +449,7 @@ fn test_bayer_same_color_neighbors_corner() {
 }
 
 #[test]
-fn test_cfa_hot_pixel_detection_large() {
+fn cfa_hot_pixel_detection_large() {
     // Large enough to trigger sampling
     let size = 500;
     let pixel_count = size * size;
@@ -480,7 +480,7 @@ fn test_cfa_hot_pixel_detection_large() {
 }
 
 #[test]
-fn test_per_channel_detection_bayer() {
+fn per_channel_detection_bayer() {
     // 8x8 Bayer RGGB image.
     // Red pixels (at even x, even y) have value 100.0
     // Green pixels have value 200.0
@@ -597,7 +597,7 @@ fn hot_detection_rejects_column_noise_gradient_and_amp_glow_but_keeps_clusters()
 }
 
 #[test]
-fn test_cfa_no_defective_pixels() {
+fn cfa_no_defective_pixels() {
     let pixels = vec![100.0; 36];
     let dark = make_cfa(Size2us::new(6, 6), pixels, CfaType::Mono);
     let defect_map = DefectMap::default()
@@ -862,7 +862,7 @@ fn xtrans_cold_pixel_detected() {
 
 #[test]
 #[should_panic(expected = "don't match")]
-fn test_correct_cfa_dimension_mismatch() {
+fn correct_cfa_dimension_mismatch() {
     let pixels = vec![10.0; 9];
     let mut image = make_cfa(Size2us::new(3, 3), pixels, CfaType::Mono);
 

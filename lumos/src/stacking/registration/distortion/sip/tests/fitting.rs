@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn test_insufficient_point_count_scales_with_order() {
+fn insufficient_point_count_scales_with_order() {
     // Verify the 3x multiplier: each order needs 3 * term_count points minimum.
     // Order 2: 3 terms -> 9 min
     // Order 3: 7 terms -> 21 min
@@ -39,7 +39,7 @@ fn test_insufficient_point_count_scales_with_order() {
 }
 
 #[test]
-fn test_zero_distortion_produces_zero_correction() {
+fn zero_distortion_produces_zero_correction() {
     // When target = ref (no distortion), all SIP coefficients should be ~0.
     let mut ref_points = Vec::new();
     let mut target_points = Vec::new();
@@ -92,7 +92,7 @@ fn test_zero_distortion_produces_zero_correction() {
 }
 
 #[test]
-fn test_invalid_config_returns_error() {
+fn invalid_config_returns_error() {
     let ref_points = vec![DVec2::ZERO; 10];
     let target_points = vec![DVec2::ZERO; 10];
     let transform = Transform::identity();
@@ -134,7 +134,7 @@ fn test_invalid_config_returns_error() {
 }
 
 #[test]
-fn test_mismatched_and_singular_fits_return_exact_errors() {
+fn mismatched_and_singular_fits_return_exact_errors() {
     let config = SipConfig::default();
     let ref_points = vec![DVec2::ZERO; 30];
     let target_points = vec![DVec2::ZERO; 20];
@@ -167,7 +167,7 @@ fn test_mismatched_and_singular_fits_return_exact_errors() {
 }
 
 #[test]
-fn test_max_correction_at_corners() {
+fn max_correction_at_corners() {
     // For radial distortion from center, max correction is at the corners
     // (farthest from center).
     let center = DVec2::new(500.0, 500.0);
@@ -212,7 +212,7 @@ fn test_max_correction_at_corners() {
 }
 
 #[test]
-fn test_max_correction_zero_distortion() {
+fn max_correction_zero_distortion() {
     // With zero distortion, max_correction should be ~0.
     let mut ref_points = Vec::new();
     let mut target_points = Vec::new();
@@ -242,7 +242,7 @@ fn test_max_correction_zero_distortion() {
 }
 
 #[test]
-fn test_compute_corrected_residuals_length() {
+fn compute_corrected_residuals_length() {
     let center = DVec2::new(500.0, 500.0);
     let (ref_points, target_points) = make_radial_distortion_points(center, 1e-7, 100, 1000);
     let transform = Transform::identity();
@@ -259,7 +259,7 @@ fn test_compute_corrected_residuals_length() {
 }
 
 #[test]
-fn test_compute_corrected_residuals_all_small_for_fitted_data() {
+fn compute_corrected_residuals_all_small_for_fitted_data() {
     // After fitting, every individual residual should be small (not just the mean).
     let center = DVec2::new(500.0, 500.0);
     let (ref_points, target_points) = make_radial_distortion_points(center, 1e-7, 100, 1000);
@@ -282,7 +282,7 @@ fn test_compute_corrected_residuals_all_small_for_fitted_data() {
 }
 
 #[test]
-fn test_higher_order_fits_higher_order_distortion_better() {
+fn higher_order_fits_higher_order_distortion_better() {
     // Create a distortion with a 4th-order component that order-2 cannot model.
     // distortion = d * k2 * r^2 + d * k4 * r^4
     let center = DVec2::new(500.0, 500.0);
@@ -335,7 +335,7 @@ fn test_higher_order_fits_higher_order_distortion_better() {
 }
 
 #[test]
-fn test_different_k_values_produce_different_corrections() {
+fn different_k_values_produce_different_corrections() {
     // Parameter sensitivity: different distortion strengths should produce
     // proportionally different corrections.
     let center = DVec2::new(500.0, 500.0);

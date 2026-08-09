@@ -6,6 +6,11 @@
 //! rejected (the master recovers the clean truth where a plain mean is contaminated), and
 //! inverse-noise weighting lowers the output variance on a mixed-quality set.
 
+mod mem_budget;
+mod mem_budget_probe;
+#[cfg(feature = "real-data")]
+mod real_data;
+
 use crate::ImageDimensions;
 use crate::stacking::combine::config::{StackConfig, Weighting};
 use crate::stacking::combine::stack::{StackFrame, stack_images};

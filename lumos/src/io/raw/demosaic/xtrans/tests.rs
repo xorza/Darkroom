@@ -3,7 +3,7 @@ use crate::io::raw::demosaic::xtrans::internals::{test_pattern, test_pattern_arr
 use crate::io::raw::demosaic::xtrans::*;
 
 #[test]
-fn test_xtrans_pattern_color_at() {
+fn xtrans_pattern_color_at() {
     let pattern = test_pattern();
     // Check corners
     assert_eq!(pattern.color_at(Vec2us::new(0, 0)), 1); // G
@@ -26,7 +26,7 @@ fn test_xtrans_pattern_color_at() {
 }
 
 #[test]
-fn test_xtrans_pattern_invalid_metadata() {
+fn xtrans_pattern_invalid_metadata() {
     let invalid_value_pattern = [
         [1, 0, 1, 1, 2, 1],
         [2, 1, 3, 0, 1, 0], // 3 is invalid
@@ -112,7 +112,7 @@ fn test_xtrans_pattern_invalid_metadata() {
 }
 
 #[test]
-fn test_xtrans_image_valid() {
+fn xtrans_image_valid() {
     let data = vec![32768u16; 36];
     let pattern = test_pattern();
     let img = XTransImage::with_margins(
@@ -132,7 +132,7 @@ fn test_xtrans_image_valid() {
 
 #[test]
 #[should_panic(expected = "Output dimensions must be non-zero")]
-fn test_xtrans_image_zero_width() {
+fn xtrans_image_zero_width() {
     let data = vec![32768u16; 36];
     let pattern = test_pattern();
     XTransImage::with_margins(
@@ -149,7 +149,7 @@ fn test_xtrans_image_zero_width() {
 
 #[test]
 #[should_panic(expected = "Data length")]
-fn test_xtrans_image_wrong_data_length() {
+fn xtrans_image_wrong_data_length() {
     let data = vec![32768u16; 30]; // Should be 36
     let pattern = test_pattern();
     let size = Size2us::new(6, 6);
@@ -166,7 +166,7 @@ fn test_xtrans_image_wrong_data_length() {
 }
 
 #[test]
-fn test_process_xtrans_output_size() {
+fn process_xtrans_output_size() {
     let raw_data: Vec<u16> = vec![1000; 12 * 12];
     let rgb = process_xtrans(
         &raw_data,
@@ -185,7 +185,7 @@ fn test_process_xtrans_output_size() {
 }
 
 #[test]
-fn test_process_xtrans_normalization() {
+fn process_xtrans_normalization() {
     let black = 256.0;
     let maximum = 4096.0;
     let range = maximum - black;
@@ -214,7 +214,7 @@ fn test_process_xtrans_normalization() {
 }
 
 #[test]
-fn test_process_xtrans_clamps_below_black() {
+fn process_xtrans_clamps_below_black() {
     let black = 256.0;
     let range = 4096.0 - black;
     let inv_range = 1.0 / range;
@@ -241,7 +241,7 @@ fn test_process_xtrans_clamps_below_black() {
 }
 
 #[test]
-fn test_process_xtrans_full_range() {
+fn process_xtrans_full_range() {
     let black = 0.0;
     let inv_range = 1.0 / 65535.0;
 
@@ -266,7 +266,7 @@ fn test_process_xtrans_full_range() {
 }
 
 #[test]
-fn test_xtrans_normalization_is_per_channel_and_raw_linear() {
+fn xtrans_normalization_is_per_channel_and_raw_linear() {
     let common_black = 200.0;
     let maximum = 4096.0;
     let inv_range = 1.0 / (maximum - common_black);
@@ -293,7 +293,7 @@ fn test_xtrans_normalization_is_per_channel_and_raw_linear() {
 }
 
 #[test]
-fn test_process_xtrans_f32_output_size() {
+fn process_xtrans_f32_output_size() {
     let data: Vec<f32> = vec![0.5; 12 * 12];
     let rgb = process_xtrans_f32(
         &data,
@@ -308,7 +308,7 @@ fn test_process_xtrans_f32_output_size() {
 }
 
 #[test]
-fn test_process_xtrans_f32_uniform() {
+fn process_xtrans_f32_uniform() {
     let data: Vec<f32> = vec![0.5; 12 * 12];
     let rgb = process_xtrans_f32(
         &data,
@@ -405,7 +405,7 @@ fn f32_demosaic_is_equivariant_to_a_uniform_pedestal() {
 }
 
 #[test]
-fn test_process_xtrans_f32_matches_u16_path() {
+fn process_xtrans_f32_matches_u16_path() {
     let black = 0.0_f32;
     let inv_range = 1.0 / 65535.0_f32;
     let raw_width = 30;

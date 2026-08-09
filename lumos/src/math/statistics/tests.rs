@@ -126,7 +126,7 @@ fn median_f32_truth_table() {
 }
 
 #[test]
-fn test_median_and_mad_odd() {
+fn median_and_mad_odd() {
     let mut values = [2.0f32, 4.0, 3.0];
     let stats = MedianMad::of_mut(&mut values);
     assert!((stats.median - 3.0).abs() < 1e-6);
@@ -136,7 +136,7 @@ fn test_median_and_mad_odd() {
 }
 
 #[test]
-fn test_median_and_mad_uniform() {
+fn median_and_mad_uniform() {
     let mut values = [3.5f32, 3.5, 3.5, 3.5, 3.5];
     let stats = MedianMad::of_mut(&mut values);
     assert!((stats.median - 3.5).abs() < 1e-6);
@@ -145,7 +145,7 @@ fn test_median_and_mad_uniform() {
 }
 
 #[test]
-fn test_mad_with_scratch() {
+fn mad_with_scratch() {
     let values = [2.0f32, 4.0, 3.0];
     let mut scratch = Vec::new();
     let mad = mad_f32_with_scratch(&values, 3.0, &mut scratch);
@@ -153,7 +153,7 @@ fn test_mad_with_scratch() {
 }
 
 #[test]
-fn test_mad_with_scratch_empty() {
+fn mad_with_scratch_empty() {
     let values: [f32; 0] = [];
     let mut scratch = Vec::new();
     let mad = mad_f32_with_scratch(&values, 0.0, &mut scratch);
@@ -161,7 +161,7 @@ fn test_mad_with_scratch_empty() {
 }
 
 #[test]
-fn test_sigma_clipped_no_outliers() {
+fn sigma_clipped_no_outliers() {
     let mut values: Vec<f32> = (0..100).map(|i| 50.0 + (i as f32 - 50.0) * 0.1).collect();
     let mut deviations = Vec::new();
     let ClippedStats { median, sigma, .. } =
@@ -171,7 +171,7 @@ fn test_sigma_clipped_no_outliers() {
 }
 
 #[test]
-fn test_sigma_clipped_rejects_outliers() {
+fn sigma_clipped_rejects_outliers() {
     let mut values: Vec<f32> = vec![10.0; 97];
     values.extend([1000.0, 2000.0, 3000.0]);
     let original_len = values.len();
@@ -194,7 +194,7 @@ fn test_sigma_clipped_rejects_outliers() {
 }
 
 #[test]
-fn test_sigma_clipped_mean_of_asymmetric_survivors() {
+fn sigma_clipped_mean_of_asymmetric_survivors() {
     // [1, 2, 4, 100]: 100 is clipped in iteration 1 under any fast-median convention
     // (threshold ≤ 13.3 while |100 − median| ≥ 96). Survivors [1, 2, 4]:
     //   median = 2, mean = 7/3, MAD = median(|1−2|,|2−2|,|4−2|) = 1 → σ = 1.4826.
@@ -214,7 +214,7 @@ fn test_sigma_clipped_mean_of_asymmetric_survivors() {
 }
 
 #[test]
-fn test_sigma_clipped_negative_values() {
+fn sigma_clipped_negative_values() {
     let mut values = vec![-10.0, -5.0, 0.0, 5.0, 10.0];
     let mut deviations = Vec::new();
     let ClippedStats { median, sigma, .. } =
@@ -224,7 +224,7 @@ fn test_sigma_clipped_negative_values() {
 }
 
 #[test]
-fn test_sigma_clipped_mixed_outliers() {
+fn sigma_clipped_mixed_outliers() {
     let mut values: Vec<f32> = vec![100.0; 90];
     values.extend([0.0, 1.0, 2.0, 198.0, 199.0, 200.0]);
     values.extend([99.0, 100.0, 101.0, 102.0]);
@@ -239,7 +239,7 @@ fn test_sigma_clipped_mixed_outliers() {
 }
 
 #[test]
-fn test_sigma_clipped_zero_iterations() {
+fn sigma_clipped_zero_iterations() {
     let mut values = vec![1.0, 2.0, 3.0, 1000.0];
     let mut deviations = Vec::new();
     let ClippedStats {
@@ -251,7 +251,7 @@ fn test_sigma_clipped_zero_iterations() {
 }
 
 #[test]
-fn test_sigma_clipped_one_iteration() {
+fn sigma_clipped_one_iteration() {
     let mut values: Vec<f32> = vec![10.0; 10];
     values.push(10000.0);
     let mut deviations = Vec::new();
@@ -264,7 +264,7 @@ fn test_sigma_clipped_one_iteration() {
 }
 
 #[test]
-fn test_sigma_clipped_kappa_affects_clipping() {
+fn sigma_clipped_kappa_affects_clipping() {
     let base_values: Vec<f32> = {
         let mut v = vec![50.0; 90];
         v.extend([20.0, 25.0, 75.0, 80.0]);
@@ -293,7 +293,7 @@ fn test_sigma_clipped_kappa_affects_clipping() {
 }
 
 #[test]
-fn test_sigma_clipped_deviations_buffer_reused() {
+fn sigma_clipped_deviations_buffer_reused() {
     let mut values1 = vec![1.0, 2.0, 3.0, 4.0, 5.0];
     let mut values2 = vec![10.0, 20.0, 30.0];
     let mut deviations = Vec::new();
@@ -307,7 +307,7 @@ fn test_sigma_clipped_deviations_buffer_reused() {
 }
 
 #[test]
-fn test_sigma_clipped_large_dataset() {
+fn sigma_clipped_large_dataset() {
     let mut values: Vec<f32> = (0..10000).map(|i| 100.0 + (i % 10) as f32).collect();
     for i in 0..100 {
         values[i * 100] = 1000.0;
@@ -322,7 +322,7 @@ fn test_sigma_clipped_large_dataset() {
 }
 
 #[test]
-fn test_sigma_clipped_all_same_then_one_different() {
+fn sigma_clipped_all_same_then_one_different() {
     let mut values: Vec<f32> = vec![42.0; 999];
     values.push(9999.0);
     let mut deviations = Vec::new();
@@ -335,7 +335,7 @@ fn test_sigma_clipped_all_same_then_one_different() {
 }
 
 #[test]
-fn test_median_with_nan_does_not_panic() {
+fn median_with_nan_does_not_panic() {
     let mut values = [1.0f32, f32::NAN, 3.0, 2.0, 5.0];
     // Should not panic — NaN sorts to end via total_cmp
     let median = median_f32_mut(&mut values);
@@ -358,7 +358,7 @@ fn sigma_clip_rejects_nan_input() {
 }
 
 #[test]
-fn test_sigma_clip_asymmetric_outliers() {
+fn sigma_clip_asymmetric_outliers() {
     // Regression test for the index mismatch bug where select_nth_unstable_by
     // on the deviations buffer broke the correspondence with the values buffer.
     // With asymmetric outliers, the bug would clip wrong values.
@@ -422,13 +422,13 @@ fn absolute_deviation_truth_table() {
 }
 
 #[test]
-fn test_mad_to_sigma_known_value() {
+fn mad_to_sigma_known_value() {
     let sigma = mad_to_sigma(1.0);
     assert!((sigma - MAD_TO_SIGMA).abs() < 1e-6);
 }
 
 #[test]
-fn test_mad_with_scratch_single() {
+fn mad_with_scratch_single() {
     let values = [5.0f32];
     let mut scratch = Vec::new();
     let mad = mad_f32_with_scratch(&values, 5.0, &mut scratch);
@@ -436,7 +436,7 @@ fn test_mad_with_scratch_single() {
 }
 
 #[test]
-fn test_mad_with_scratch_two_elements() {
+fn mad_with_scratch_two_elements() {
     let values = [2.0f32, 8.0];
     let mut scratch = Vec::new();
     // median of [2, 8] = 5, deviations = [3, 3], MAD = 3
@@ -447,7 +447,7 @@ fn test_mad_with_scratch_two_elements() {
 /// Stack scratch must give the same answer as heap scratch — the property the separate `ArrayVec`
 /// entry point used to exist to provide, now carried by the two `DeviationScratch` impls.
 #[test]
-fn test_sigma_clipped_is_agnostic_to_where_the_scratch_lives() {
+fn sigma_clipped_is_agnostic_to_where_the_scratch_lives() {
     let base: Vec<f32> = vec![1.0, 2.0, 3.0, 100.0, 4.0, 5.0, 6.0, 200.0];
 
     let mut heap_values = base.clone();
@@ -467,7 +467,7 @@ fn test_sigma_clipped_is_agnostic_to_where_the_scratch_lives() {
 /// misbehaving deeper in the clip.
 #[test]
 #[should_panic(expected = "capacity")]
-fn test_sigma_clipped_stack_scratch_too_small_panics() {
+fn sigma_clipped_stack_scratch_too_small_panics() {
     let mut values = vec![1.0f32, 2.0, 3.0, 4.0, 5.0];
     let mut deviations: arrayvec::ArrayVec<f32, 4> = arrayvec::ArrayVec::new();
     let _ = ClippedStats::sigma_clipped(&mut values, &mut deviations, 3.0, 2);
@@ -510,7 +510,7 @@ fn median_f32_fast_truth_table() {
 }
 
 #[test]
-fn test_median_f32_fast_differs_from_exact_on_even() {
+fn median_f32_fast_differs_from_exact_on_even() {
     // Sorted: [1, 3, 7, 9], mid=2
     // Exact: (3+7)/2 = 5.0
     // Fast: values[2] = 7.0
@@ -527,7 +527,7 @@ fn test_median_f32_fast_differs_from_exact_on_even() {
 }
 
 #[test]
-fn test_median_f32_fast_agrees_with_exact_on_odd() {
+fn median_f32_fast_agrees_with_exact_on_odd() {
     // For odd N, both return the same middle element
     // Sorted: [2, 4, 6, 8, 10], mid=2, median=6
     let mut values_fast = [10.0f32, 4.0, 6.0, 2.0, 8.0];
@@ -539,7 +539,7 @@ fn test_median_f32_fast_agrees_with_exact_on_odd() {
 }
 
 #[test]
-fn test_mad_f32_fast_hand_computed() {
+fn mad_f32_fast_hand_computed() {
     // values = [2, 3, 4], median = 3
     // deviations = |2-3|, |3-3|, |4-3| = [1, 0, 1]
     // sorted deviations: [0, 1, 1], mid=1, MAD = 1
@@ -550,7 +550,7 @@ fn test_mad_f32_fast_hand_computed() {
 }
 
 #[test]
-fn test_mad_f32_fast_five_values() {
+fn mad_f32_fast_five_values() {
     // values = [1, 2, 3, 4, 5], median = 3
     // deviations = [2, 1, 0, 1, 2]
     // sorted deviations: [0, 1, 1, 2, 2], mid=2, MAD = 1
@@ -561,7 +561,7 @@ fn test_mad_f32_fast_five_values() {
 }
 
 #[test]
-fn test_mad_f32_fast_uniform() {
+fn mad_f32_fast_uniform() {
     // All same → all deviations = 0 → MAD = 0
     let values = [7.0f32; 10];
     let mut scratch = Vec::new();
@@ -570,7 +570,7 @@ fn test_mad_f32_fast_uniform() {
 }
 
 #[test]
-fn test_mad_f32_fast_empty() {
+fn mad_f32_fast_empty() {
     let values: [f32; 0] = [];
     let mut scratch = Vec::new();
     let mad = mad_f32_fast(&values, 0.0, &mut scratch);
@@ -578,7 +578,7 @@ fn test_mad_f32_fast_empty() {
 }
 
 #[test]
-fn test_mad_f32_fast_single() {
+fn mad_f32_fast_single() {
     // Single value: deviation = 0, MAD = 0
     let values = [5.0f32];
     let mut scratch = Vec::new();
@@ -587,7 +587,7 @@ fn test_mad_f32_fast_single() {
 }
 
 #[test]
-fn test_mad_f32_fast_scratch_reused() {
+fn mad_f32_fast_scratch_reused() {
     // Verify scratch buffer is reused (capacity preserved across calls)
     let mut scratch = Vec::new();
 
@@ -602,7 +602,7 @@ fn test_mad_f32_fast_scratch_reused() {
 }
 
 #[test]
-fn test_mad_f32_fast_matches_regular_on_odd() {
+fn mad_f32_fast_matches_regular_on_odd() {
     // For odd N, median_f32_fast and median_f32_mut agree,
     // so mad_f32_fast should match mad_f32_with_scratch exactly.
     let values = [10.0f32, 2.0, 7.0, 15.0, 3.0];
@@ -621,7 +621,7 @@ fn test_mad_f32_fast_matches_regular_on_odd() {
 }
 
 #[test]
-fn test_sigma_clipped_stats_no_outliers() {
+fn sigma_clipped_stats_no_outliers() {
     // Normal-ish distribution without outliers
     let mut values: Vec<f32> = (0..100).map(|i| 0.5 + (i as f32 - 50.0) * 0.001).collect();
     let mut deviations: Vec<f32> = vec![];
@@ -641,7 +641,7 @@ fn test_sigma_clipped_stats_no_outliers() {
 }
 
 #[test]
-fn test_sigma_clipped_stats_rejects_high_outliers() {
+fn sigma_clipped_stats_rejects_high_outliers() {
     // 90 values at 0.2, 10 high outliers at 0.9
     let mut values: Vec<f32> = vec![0.2; 90];
     values.extend(vec![0.9; 10]);
@@ -662,7 +662,7 @@ fn test_sigma_clipped_stats_rejects_high_outliers() {
 }
 
 #[test]
-fn test_sigma_clipped_stats_rejects_low_outliers() {
+fn sigma_clipped_stats_rejects_low_outliers() {
     // 90 values at 0.8, 10 low outliers at 0.1
     let mut values: Vec<f32> = vec![0.8; 90];
     values.extend(vec![0.1; 10]);
@@ -683,7 +683,7 @@ fn test_sigma_clipped_stats_rejects_low_outliers() {
 }
 
 #[test]
-fn test_sigma_clipped_stats_rejects_both_tails() {
+fn sigma_clipped_stats_rejects_both_tails() {
     // 80 values at 0.5, 10 low outliers, 10 high outliers
     let mut values: Vec<f32> = vec![0.5; 80];
     values.extend(vec![0.05; 10]); // Low outliers
@@ -705,7 +705,7 @@ fn test_sigma_clipped_stats_rejects_both_tails() {
 }
 
 #[test]
-fn test_sigma_clipped_stats_kappa_affects_rejection() {
+fn sigma_clipped_stats_kappa_affects_rejection() {
     // Good values: 50 at 0.50, 30 at 0.54 (true center = 0.50)
     // Outliers: 20 at 0.80
     //
@@ -756,7 +756,7 @@ fn test_sigma_clipped_stats_kappa_affects_rejection() {
 }
 
 #[test]
-fn test_sigma_clipped_stats_iterations_improve_result() {
+fn sigma_clipped_stats_iterations_improve_result() {
     // Good values: 41 at 0.30, 40 at 0.32 (true median = 0.30, odd count = 81)
     // Outliers: 10 at 0.60, 9 at 1.50
     //
@@ -815,7 +815,7 @@ fn test_sigma_clipped_stats_iterations_improve_result() {
 }
 
 #[test]
-fn test_sigma_clipped_stats_mad_to_sigma_conversion() {
+fn sigma_clipped_stats_mad_to_sigma_conversion() {
     // MAD * 1.4826 ≈ sigma for Gaussian distribution
     // Create data with known spread
     let mut values: Vec<f32> = (-50..=50).map(|i| 0.5 + i as f32 * 0.002).collect();
@@ -847,7 +847,7 @@ fn test_sigma_clipped_stats_mad_to_sigma_conversion() {
 }
 
 #[test]
-fn test_sigma_clipped_stats_preserves_deviations_buffer() {
+fn sigma_clipped_stats_preserves_deviations_buffer() {
     let mut values = vec![0.1, 0.2, 0.3, 0.4, 0.5];
     let mut deviations: Vec<f32> = Vec::with_capacity(100);
 
@@ -861,7 +861,7 @@ fn test_sigma_clipped_stats_preserves_deviations_buffer() {
 }
 
 #[test]
-fn test_sigma_clipped_stats_zero_iterations() {
+fn sigma_clipped_stats_zero_iterations() {
     let mut values = vec![0.2, 0.2, 0.2, 0.9, 0.9];
     let mut deviations: Vec<f32> = vec![];
 
@@ -881,7 +881,7 @@ fn test_sigma_clipped_stats_zero_iterations() {
 }
 
 #[test]
-fn test_sigma_clipped_stats_extreme_outlier() {
+fn sigma_clipped_stats_extreme_outlier() {
     // Single extreme outlier among many normal values
     let mut values: Vec<f32> = vec![0.5; 99];
     values.push(100.0); // Extreme outlier
@@ -902,7 +902,7 @@ fn test_sigma_clipped_stats_extreme_outlier() {
 }
 
 #[test]
-fn test_sigma_clipped_stats_negative_values() {
+fn sigma_clipped_stats_negative_values() {
     let mut values: Vec<f32> = vec![-0.5; 90];
     values.extend(vec![0.5; 10]); // Outliers on positive side
     let mut deviations: Vec<f32> = vec![];
@@ -922,7 +922,7 @@ fn test_sigma_clipped_stats_negative_values() {
 }
 
 #[test]
-fn test_sigma_clipped_stats_all_same_except_one() {
+fn sigma_clipped_stats_all_same_except_one() {
     // Edge case: all values same except one outlier
     let mut values: Vec<f32> = vec![0.4; 99];
     values.push(0.9);

@@ -22,7 +22,7 @@ use crate::stacking::registration::tests::helpers::{
 };
 
 #[test]
-fn test_registration_translation_only() {
+fn registration_translation_only() {
     // Generate reference star field
     let ref_stars = generate_random_stars(50, 1000.0, 1000.0, 12345, FWHM_TIGHT);
 
@@ -93,7 +93,7 @@ fn test_registration_translation_only() {
 }
 
 #[test]
-fn test_registration_similarity_transform() {
+fn registration_similarity_transform() {
     // Generate reference star field
     let ref_stars = generate_random_stars(80, 2000.0, 2000.0, 54321, FWHM_NORMAL);
 
@@ -164,7 +164,7 @@ fn test_registration_similarity_transform() {
 }
 
 #[test]
-fn test_registration_with_noise() {
+fn registration_with_noise() {
     // Generate reference star field
     let ref_stars = generate_random_stars(100, 1500.0, 1500.0, 99999, FWHM_NORMAL);
 
@@ -224,7 +224,7 @@ fn test_registration_with_noise() {
 }
 
 #[test]
-fn test_registration_large_translation() {
+fn registration_large_translation() {
     // Generate reference star field
     let ref_stars = generate_random_stars(60, 2000.0, 2000.0, 77777, FWHM_TIGHT);
 
@@ -260,7 +260,7 @@ fn test_registration_large_translation() {
 }
 
 #[test]
-fn test_registration_euclidean_rotation_only() {
+fn registration_euclidean_rotation_only() {
     // Generate reference star field
     let ref_stars = generate_random_stars(80, 2000.0, 2000.0, 11111, FWHM_TIGHT);
 
@@ -314,7 +314,7 @@ fn test_registration_euclidean_rotation_only() {
 }
 
 #[test]
-fn test_registration_euclidean_translation_and_rotation() {
+fn registration_euclidean_translation_and_rotation() {
     let ref_stars = generate_random_stars(70, 1500.0, 1500.0, 22222, FWHM_TIGHT);
 
     let dx = 45.0;
@@ -364,7 +364,7 @@ fn test_registration_euclidean_translation_and_rotation() {
 }
 
 #[test]
-fn test_registration_affine_differential_scale() {
+fn registration_affine_differential_scale() {
     // Test affine with different X and Y scales (anisotropic scaling)
     let ref_stars = generate_random_stars(100, 2000.0, 2000.0, 33333, FWHM_NORMAL);
 
@@ -409,7 +409,7 @@ fn test_registration_affine_differential_scale() {
 }
 
 #[test]
-fn test_registration_affine_with_shear() {
+fn registration_affine_with_shear() {
     // Test affine with shear component
     let ref_stars = generate_random_stars(100, 2000.0, 2000.0, 44444, FWHM_NORMAL);
 
@@ -448,7 +448,7 @@ fn test_registration_affine_with_shear() {
 }
 
 #[test]
-fn test_registration_affine_rotation_and_differential_scale() {
+fn registration_affine_rotation_and_differential_scale() {
     // Combined rotation with differential scaling
     let ref_stars = generate_random_stars(100, 2000.0, 2000.0, 55555, FWHM_NORMAL);
 
@@ -503,7 +503,7 @@ fn test_registration_affine_rotation_and_differential_scale() {
 }
 
 #[test]
-fn test_registration_homography_mild_perspective() {
+fn registration_homography_mild_perspective() {
     // Test homography with mild perspective distortion
     let ref_stars = generate_random_stars(120, 2000.0, 2000.0, 66666, FWHM_NORMAL);
 
@@ -552,7 +552,7 @@ fn test_registration_homography_mild_perspective() {
 }
 
 #[test]
-fn test_registration_homography_with_rotation() {
+fn registration_homography_with_rotation() {
     // Homography combining rotation and perspective
     let ref_stars = generate_random_stars(120, 2000.0, 2000.0, 77778, FWHM_NORMAL);
 
@@ -595,7 +595,7 @@ fn test_registration_homography_with_rotation() {
 }
 
 #[test]
-fn test_similarity_recovers_from_euclidean_data() {
+fn similarity_recovers_from_euclidean_data() {
     // When data only has rotation (no scale), Similarity should still work
     // and recover scale ≈ 1.0
     let ref_stars = generate_random_stars(60, 1500.0, 1500.0, 88888, FWHM_TIGHT);
@@ -638,7 +638,7 @@ fn test_similarity_recovers_from_euclidean_data() {
 }
 
 #[test]
-fn test_affine_recovers_from_similarity_data() {
+fn affine_recovers_from_similarity_data() {
     // When data only has similarity transform, Affine should recover it correctly
     let ref_stars = generate_random_stars(80, 2000.0, 2000.0, 99999, FWHM_TIGHT);
 
@@ -676,7 +676,7 @@ fn test_affine_recovers_from_similarity_data() {
 }
 
 #[test]
-fn test_auto_ladder_selects_simplest_adequate_model() {
+fn auto_ladder_selects_simplest_adequate_model() {
     // `Auto` must accept the fewest-DOF transform within 0.5 px RMS, not overfit. Each ground
     // truth is built so every simpler model genuinely exceeds the threshold.
     let ref_stars = generate_random_stars(90, 2000.0, 2000.0, 101010, FWHM_TIGHT);
