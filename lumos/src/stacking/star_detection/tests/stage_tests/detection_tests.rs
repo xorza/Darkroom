@@ -5,7 +5,7 @@
 use crate::math::size2us::Size2us;
 use crate::stacking::star_detection::config::background_config::BackgroundConfig;
 use crate::stacking::star_detection::config::detection_config::DetectionConfig;
-use crate::stacking::star_detection::detector::stages::detect_test_utils::detect_stars_test;
+use crate::stacking::star_detection::detector::stages::detect::internals::detect_stars_test;
 use crate::stacking::star_detection::tests::Scenario;
 use crate::testing::visual::{gray_to_rgb_image_stretched, save_grayscale, save_image};
 use crate::testing::{estimate_background, init_tracing};

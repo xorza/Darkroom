@@ -17,7 +17,7 @@ mod tests;
 
 mod simd;
 
-use crate::math::FWHM_TO_SIGMA;
+use crate::math::fwhm::FWHM_TO_SIGMA;
 use crate::stacking::star_detection::centroid::lm_optimizer::{
     FitData, LMConfig, LMModel, NormalEquations, accumulate_chi2, build_normal_equations_scalar,
     optimize,

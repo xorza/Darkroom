@@ -6,7 +6,7 @@
 use crate::stacking::combine::cache_config::CacheConfig;
 use crate::stacking::combine::error::StackConfigError;
 use crate::stacking::combine::rejection::Rejection;
-use crate::stacking::product::QualityPlanes;
+use crate::stacking::stack_product::quality_planes::QualityPlanes;
 
 /// Method for combining pixel values across frames.
 ///

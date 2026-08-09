@@ -14,7 +14,7 @@ pub(crate) mod combine;
 pub(crate) mod drizzle;
 pub(crate) mod frame_store;
 pub(crate) mod pipeline;
-pub(crate) mod product;
 pub(crate) mod progress;
 pub(crate) mod registration;
+pub(crate) mod stack_product;
 pub(crate) mod star_detection;

@@ -444,11 +444,15 @@ impl BoundedMaxHeap {
 /// the buffer-reusing [`KdTree::k_nearest_into`]; this allocating form exists only for test
 /// readability, so it's gated out of the library build.
 #[cfg(test)]
-impl KdTree {
-    fn k_nearest(&self, query: DVec2, k: usize) -> Vec<Neighbor> {
-        let mut out = Vec::new();
-        self.k_nearest_into(query, k, &mut out);
-        out
+mod internals {
+    use super::*;
+
+    impl KdTree {
+        pub(super) fn k_nearest(&self, query: DVec2, k: usize) -> Vec<Neighbor> {
+            let mut out = Vec::new();
+            self.k_nearest_into(query, k, &mut out);
+            out
+        }
     }
 }
 

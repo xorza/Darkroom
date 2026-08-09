@@ -16,7 +16,7 @@ use crate::stacking::star_detection::config::detection_config::DetectionConfig;
 use crate::stacking::star_detection::config::measurement_config::{
     CentroidMethod, LocalBackgroundMethod, MeasurementConfig,
 };
-use crate::stacking::star_detection::detector::stages::detect_test_utils::detect_stars_test;
+use crate::stacking::star_detection::detector::stages::detect::internals::detect_stars_test;
 use crate::testing::estimate_background;
 use crate::testing::synthetic::fixtures::star_field;
 use crate::testing::synthetic::star_profiles::{StarProfile, SyntheticStar};

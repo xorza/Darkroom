@@ -17,10 +17,11 @@ use crate::stacking::combine::rejection::Rejection;
 use crate::stacking::combine::rejection::percentile_clip_config::PercentileClipConfig;
 use crate::stacking::combine::stack::*;
 use crate::stacking::frame_store::{FrameStats, WarpQuality};
-use crate::stacking::product::{QualityMap, QualityPlanes};
 use crate::stacking::registration::config::{self, InterpolationMethod};
 use crate::stacking::registration::resample;
 use crate::stacking::registration::transform::{Transform, WarpTransform};
+use crate::stacking::stack_product::quality_map::QualityMap;
+use crate::stacking::stack_product::quality_planes::QualityPlanes;
 use crate::testing::ScratchDirectory;
 use std::path::PathBuf;
 

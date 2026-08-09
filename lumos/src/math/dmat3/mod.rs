@@ -207,42 +207,46 @@ impl Mul<DMat3> for f64 {
 
 /// Construction and element access used only by tests.
 #[cfg(test)]
-impl DMat3 {
-    /// Create from three row arrays.
-    pub(crate) const fn from_rows(row0: [f64; 3], row1: [f64; 3], row2: [f64; 3]) -> Self {
-        Self {
-            data: [
-                row0[0], row0[1], row0[2], row1[0], row1[1], row1[2], row2[0], row2[1], row2[2],
-            ],
+mod internals {
+    use super::*;
+
+    impl DMat3 {
+        /// Create from three row arrays.
+        pub(crate) const fn from_rows(row0: [f64; 3], row1: [f64; 3], row2: [f64; 3]) -> Self {
+            Self {
+                data: [
+                    row0[0], row0[1], row0[2], row1[0], row1[1], row1[2], row2[0], row2[1], row2[2],
+                ],
+            }
         }
-    }
 
-    /// Consume and return the underlying array.
-    pub(crate) const fn to_array(self) -> [f64; 9] {
-        self.data
-    }
+        /// Consume and return the underlying array.
+        pub(crate) const fn to_array(self) -> [f64; 9] {
+            self.data
+        }
 
-    /// Mutable element access, to perturb individual entries.
-    pub(crate) fn as_array_mut(&mut self) -> &mut [f64; 9] {
-        &mut self.data
-    }
+        /// Mutable element access, to perturb individual entries.
+        pub(crate) fn as_array_mut(&mut self) -> &mut [f64; 9] {
+            &mut self.data
+        }
 
-    /// Frobenius norm of the difference from the identity matrix. Test-only diagnostic.
-    pub(crate) fn deviation_from_identity(&self) -> f64 {
-        let d = &self.data;
-        let d0 = d[0] - 1.0;
-        let d4 = d[4] - 1.0;
-        let d8 = d[8] - 1.0;
-        (d0 * d0
-            + d[1] * d[1]
-            + d[2] * d[2]
-            + d[3] * d[3]
-            + d4 * d4
-            + d[5] * d[5]
-            + d[6] * d[6]
-            + d[7] * d[7]
-            + d8 * d8)
-            .sqrt()
+        /// Frobenius norm of the difference from the identity matrix. Test-only diagnostic.
+        pub(crate) fn deviation_from_identity(&self) -> f64 {
+            let d = &self.data;
+            let d0 = d[0] - 1.0;
+            let d4 = d[4] - 1.0;
+            let d8 = d[8] - 1.0;
+            (d0 * d0
+                + d[1] * d[1]
+                + d[2] * d[2]
+                + d[3] * d[3]
+                + d4 * d4
+                + d[5] * d[5]
+                + d[6] * d[6]
+                + d[7] * d[7]
+                + d8 * d8)
+                .sqrt()
+        }
     }
 }
 

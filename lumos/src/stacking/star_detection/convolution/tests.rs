@@ -6,7 +6,7 @@ use crate::stacking::star_detection::convolution::*;
 use crate::testing::TestRng;
 use crate::testing::synthetic::star_profiles::{StarProfile, SyntheticStar};
 use crate::{
-    math::FWHM_TO_SIGMA, stacking::star_detection::convolution::elliptical_gaussian_kernel_2d,
+    math::fwhm::FWHM_TO_SIGMA, stacking::star_detection::convolution::elliptical_gaussian_kernel_2d,
 };
 use imaginarium::Buffer2;
 

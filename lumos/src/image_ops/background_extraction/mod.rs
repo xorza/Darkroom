@@ -18,7 +18,7 @@ use rayon::prelude::*;
 
 use crate::background_mesh::workspace::MeshWorkspace;
 use crate::error::InvalidConfigField;
-use crate::image_ops::op::OpError;
+use crate::image_ops::error::OpError;
 use crate::io::image::linear::LinearImage;
 use crate::math::size2us::Size2us;
 use crate::math::statistics::robust_sigma_f64;

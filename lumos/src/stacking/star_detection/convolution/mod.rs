@@ -17,7 +17,7 @@ mod tests;
 
 use rayon::prelude::*;
 
-use crate::math::fwhm_to_sigma;
+use crate::math::fwhm::fwhm_to_sigma;
 use crate::math::size2us::Size2us;
 use imaginarium::Buffer2;
 

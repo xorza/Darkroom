@@ -1,6 +1,6 @@
 use crate::image_ops::background_extraction::*;
+use crate::image_ops::error::OpError;
 use crate::image_ops::internals::{channel_plane as channel, gray_image, rgb_image as rgb};
-use crate::image_ops::op::OpError;
 use crate::io::image::linear::LinearImage;
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;

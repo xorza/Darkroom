@@ -11,6 +11,16 @@
 //! The submodules below are the image operations themselves (each an op-named config struct with an
 //! in-place `apply`), plus their shared support: [`op`] (the `OpError` contract) and [`wavelet`]
 //! (the multiscale primitive `denoise`/`hdr` build on).
+//!
+//! A convention rather than a trait, deliberately. A trait would turn nine inherent `apply`
+//! methods into trait methods, so every downstream call site would need it in scope, to save the
+//! one-line prologue and express a composability nothing uses — `lens` drives each op from its own
+//! node with its own deserialized config type, and would keep doing so. `NeutralizeBackground`
+//! takes no parameters and so has no `validate` to call; that is the contract met, not skipped.
+//!
+//! The two `ml`-gated ops (`MlDenoise`, `RemoveStars`) take the same `apply(&mut LinearImage)`
+//! shape but report [`crate::MlError`]: their failures are a missing model or an image smaller
+//! than one tile, neither of which is a config range that `InvalidConfigField` describes.
 
 #[cfg(all(test, feature = "internals", feature = "real-data"))]
 mod bench;
@@ -21,11 +31,11 @@ mod mem_budget_probe;
 pub(crate) mod background_extraction;
 pub(crate) mod color_calibration;
 pub(crate) mod denoise;
+pub(crate) mod error;
 pub(crate) mod hdr;
 pub(crate) mod local_contrast;
 #[cfg(feature = "ml")]
 pub(crate) mod ml;
-pub(crate) mod op;
 pub(crate) mod rgb;
 pub(crate) mod stretching;
 pub(crate) mod wavelet;

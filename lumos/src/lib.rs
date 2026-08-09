@@ -35,7 +35,7 @@ pub(crate) mod simd;
 pub(crate) mod stacking;
 
 #[cfg(test)]
-pub mod testing;
+pub(crate) mod testing;
 
 pub use error::InvalidConfigField;
 pub use io::image::PREVIEW_IMAGE_EXTENSIONS;
@@ -112,8 +112,11 @@ pub use stacking::combine::rejection::sigma_clip_config::SigmaClipConfig;
 pub use stacking::combine::rejection::winsorized_clip_config::WinsorizedClipConfig;
 pub use stacking::combine::stack::{StackFrame, stack, stack_images};
 pub use stacking::frame_store::FrameStoreError;
-pub use stacking::product::{Coverage, QualityMap, QualityPlanes, StackProduct};
 pub use stacking::progress::{ProgressCallback, StackingProgress, StackingStage};
+pub use stacking::stack_product::StackProduct;
+pub use stacking::stack_product::coverage::Coverage;
+pub use stacking::stack_product::quality_map::QualityMap;
+pub use stacking::stack_product::quality_planes::QualityPlanes;
 
 pub use stacking::pipeline::align::align_and_stack;
 pub use stacking::pipeline::calibrate::calibrate_align_stack;
@@ -139,7 +142,7 @@ pub use image_ops::local_contrast::LocalContrast;
 
 pub use image_ops::hdr::Hdr;
 
-pub use image_ops::op::OpError;
+pub use image_ops::error::OpError;
 
 #[cfg(feature = "ml")]
 pub use image_ops::ml::backend::{MlError, TiledOnnxConfig};

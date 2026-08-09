@@ -13,7 +13,7 @@ use imaginarium::Buffer2;
 use rayon::prelude::*;
 
 use crate::error::InvalidConfigField;
-use crate::image_ops::op::OpError;
+use crate::image_ops::error::OpError;
 use crate::image_ops::wavelet::{atrous_smooth, max_scales};
 use crate::io::image::linear::LinearImage;
 use crate::math::size2us::Size2us;

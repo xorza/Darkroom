@@ -363,16 +363,37 @@ fn merge_component_data(target: &mut ComponentData, source: ComponentData) {
     target.area += source.area;
 }
 
-/// Reaches `collect_component_data` from the detector's benchmarks; production code and the
-/// tests both go through `DetectResult::from_image`.
-#[cfg(all(test, feature = "internals"))]
+/// Test and bench helpers that reach into this stage.
+#[cfg(test)]
 pub(crate) mod internals {
-    use crate::stacking::star_detection::deblend::ComponentData;
-    use crate::stacking::star_detection::detector::stages::detect::collect_component_data;
-    use crate::stacking::star_detection::labeling::LabelMap;
+    use crate::math::size2us::Size2us;
+    use crate::stacking::star_detection::background::background_estimate::BackgroundEstimate;
+    use crate::stacking::star_detection::config::detection_config::DetectionConfig;
+    use crate::stacking::star_detection::deblend::region::Region;
+    use crate::stacking::star_detection::detector::stages::detect::DetectResult;
+    use crate::stacking::star_detection::resources::DetectionResources;
+    use imaginarium::Buffer2;
 
-    pub(crate) fn collect_components(label_map: &LabelMap) -> Vec<ComponentData> {
-        collect_component_data(label_map)
+    /// Detect stars with automatic buffer pool management, allocating a throwaway
+    /// [`DetectionResources`] per call. Benchmarks that care about that cost drive
+    /// [`DetectResult::from_image`] directly with a pre-allocated pool instead.
+    pub(crate) fn detect_stars_test(
+        pixels: &Buffer2<f32>,
+        background: &BackgroundEstimate,
+        config: &DetectionConfig,
+    ) -> Vec<Region> {
+        let mut pool = DetectionResources::new(Size2us::new(pixels.width(), pixels.height()));
+        DetectResult::from_image(pixels, background, None, config, &mut pool).regions
+    }
+
+    /// Reaches `collect_component_data` from the detector's benchmarks; production code and the
+    /// tests both go through `DetectResult::from_image`. Narrower gate than the module because
+    /// only the benches want it.
+    #[cfg(feature = "internals")]
+    pub(crate) fn collect_components(
+        label_map: &crate::stacking::star_detection::labeling::LabelMap,
+    ) -> Vec<crate::stacking::star_detection::deblend::ComponentData> {
+        crate::stacking::star_detection::detector::stages::detect::collect_component_data(label_map)
     }
 }
 

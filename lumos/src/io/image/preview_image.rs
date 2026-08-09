@@ -12,7 +12,7 @@ use crate::io::image::image_provenance::{
 };
 use crate::io::image::linear::LinearImage;
 use crate::io::image::load_context::LoadContext;
-use crate::io::image::{
+use crate::io::image::standard::{
     FITS_EXTENSIONS, STANDARD_IMAGE_EXTENSIONS, f32_target_format, file_extension,
     read_standard_image, standard_container,
 };

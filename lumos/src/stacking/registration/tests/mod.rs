@@ -8,6 +8,8 @@
 
 mod helpers;
 mod image_registration;
+mod input;
+mod recovery;
 mod robustness;
 mod sip_distortion;
 mod transform_types;

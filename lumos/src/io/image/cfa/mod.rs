@@ -15,7 +15,7 @@ use crate::io::image::image_metadata::ImageMetadata;
 use crate::io::image::image_provenance::{ColorProvenance, DemosaicProvenance};
 use crate::io::image::linear::LinearImage;
 use crate::io::image::load_context::LoadContext;
-use crate::io::image::{
+use crate::io::image::standard::{
     FITS_EXTENSIONS, STANDARD_IMAGE_EXTENSIONS, file_extension, scientific_rejection,
 };
 use crate::io::raw;
