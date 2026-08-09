@@ -85,7 +85,7 @@ unsafe fn simd_exp_fast(x: __m256d) -> __m256d {
 /// Caller must ensure AVX2 and FMA are available on the current CPU.
 #[target_feature(enable = "avx2,fma")]
 pub(super) unsafe fn batch_build_normal_equations_avx2(
-    _model: &Gaussian2D,
+    model: &Gaussian2D,
     data_x: &[f64],
     data_y: &[f64],
     data_z: &[f64],
@@ -269,7 +269,7 @@ pub(super) unsafe fn batch_build_normal_equations_avx2(
         // Scalar tail (pixels past the last full 4-wide chunk)
         let tail_start = chunks * 4;
         equations.accumulate(
-            _model,
+            model,
             FitData::unweighted(data_x, data_y, data_z),
             params,
             tail_start..n,
@@ -286,7 +286,7 @@ pub(super) unsafe fn batch_build_normal_equations_avx2(
 /// Caller must ensure AVX2 and FMA are available on the current CPU.
 #[target_feature(enable = "avx2,fma")]
 pub(super) unsafe fn batch_compute_chi2_avx2(
-    _model: &Gaussian2D,
+    model: &Gaussian2D,
     data_x: &[f64],
     data_y: &[f64],
     data_z: &[f64],
@@ -332,7 +332,7 @@ pub(super) unsafe fn batch_compute_chi2_avx2(
 
         // Scalar tail (pixels past the last full 4-wide chunk)
         let tail_start = chunks * 4;
-        chi2 += _model.accumulate_chi2(
+        chi2 += model.accumulate_chi2(
             FitData::unweighted(data_x, data_y, data_z),
             params,
             tail_start..n,
