@@ -196,9 +196,9 @@ fn disk_tier_output_is_bit_identical_to_memory_tier() {
         let image = LinearImage::from_planar_channels(dims, [px]);
         // Every other frame gets a partial coverage map (warped-border emulation).
         let coverage = f.is_multiple_of(2).then(|| {
-            let mut c = vec![1.0f32; w * h];
+            let mut c = Buffer2::new_filled(w, h, 1.0f32);
             c[0] = 0.0;
-            Buffer2::new(w, h, c)
+            c
         });
         let confidence = coverage.clone();
         stack_frame(image, coverage, confidence)

@@ -308,14 +308,14 @@ fn bench_moffat_fit_single(b: ::quickbench::Bencher) {
     let cx = 10.3f32;
     let cy = 10.7f32;
 
-    let mut pixels = vec![background; width * height];
+    let mut pixels = Buffer2::new_filled(width, height, background);
     for y in 0..height {
         for x in 0..width {
             let r2 = (x as f32 - cx).powi(2) + (y as f32 - cy).powi(2);
-            pixels[y * width + x] += 1.0 * (1.0 + r2 / (alpha * alpha)).powf(-beta);
+            pixels[(x, y)] += 1.0 * (1.0 + r2 / (alpha * alpha)).powf(-beta);
         }
     }
-    let pixels = Buffer2::new(width, height, pixels);
+
     let config = MoffatFitConfig {
         fixed_beta: beta,
         ..Default::default()

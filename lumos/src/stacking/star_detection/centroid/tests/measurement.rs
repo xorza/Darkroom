@@ -1151,7 +1151,7 @@ fn asymmetric_star_sround() {
     // An asymmetric source should have non-zero SROUND
     let width = 64;
     let height = 64;
-    let mut pixels = vec![0.1f32; width * height];
+    let mut pixels = Buffer2::new_filled(width, height, 0.1f32);
 
     // Create a star with extra flux on one side (like a cosmic ray tail)
     let cx = 32.0;
@@ -1169,12 +1169,11 @@ fn asymmetric_star_sround() {
             }
 
             if value > 0.001 {
-                pixels[y * width + x] += value;
+                pixels[(x, y)] += value;
             }
         }
     }
 
-    let pixels = Buffer2::new(width, height, pixels);
     let bg = background_map::estimate(
         &pixels,
         &BackgroundConfig {

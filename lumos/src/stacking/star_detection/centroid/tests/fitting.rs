@@ -437,20 +437,19 @@ fn gaussian_fit_sigma_recovery() {
         let cx = 10.0f64;
         let cy = 10.0f64;
 
-        let mut pixels = vec![background; width * height];
+        let mut pixels = Buffer2::new_filled(width, height, background);
         for y in 0..height {
             for x in 0..width {
                 let dx = x as f32 - cx as f32;
                 let dy = y as f32 - cy as f32;
-                pixels[y * width + x] +=
+                pixels[(x, y)] +=
                     1.0 * (-0.5 * (dx * dx + dy * dy) / (true_sigma * true_sigma)).exp();
             }
         }
-        let pixels_buf = Buffer2::new(width, height, pixels);
 
         let config = GaussianFitConfig::default();
         let result = GaussianFit::new(
-            &pixels_buf,
+            &pixels,
             DVec2::new(cx, cy),
             &StampGrid::new(8),
             background,
@@ -498,21 +497,20 @@ fn moffat_fit_alpha_recovery() {
         let cx = 10.0f64;
         let cy = 10.0f64;
 
-        let mut pixels = vec![background; width * height];
+        let mut pixels = Buffer2::new_filled(width, height, background);
         for y in 0..height {
             for x in 0..width {
                 let r2 = (x as f32 - cx as f32).powi(2) + (y as f32 - cy as f32).powi(2);
-                pixels[y * width + x] += 1.0 * (1.0 + r2 / (true_alpha * true_alpha)).powf(-beta);
+                pixels[(x, y)] += 1.0 * (1.0 + r2 / (true_alpha * true_alpha)).powf(-beta);
             }
         }
-        let pixels_buf = Buffer2::new(width, height, pixels);
 
         let config = MoffatFitConfig {
             fixed_beta: beta,
             ..Default::default()
         };
         let result = MoffatFit::new(
-            &pixels_buf,
+            &pixels,
             DVec2::new(cx, cy),
             &StampGrid::new(8),
             background,
@@ -548,7 +546,7 @@ fn gaussian_fit_with_noise() {
     let background = 0.1f32;
 
     // Create Gaussian with deterministic "noise" pattern
-    let mut pixels = vec![background; width * height];
+    let mut pixels = Buffer2::new_filled(width, height, background);
     for y in 0..height {
         for x in 0..width {
             let dx = x as f32 - true_cx as f32;
@@ -556,14 +554,13 @@ fn gaussian_fit_with_noise() {
             let signal = 1.0 * (-0.5 * (dx * dx + dy * dy) / (true_sigma * true_sigma)).exp();
             // Add small deterministic noise
             let noise = ((x * 7 + y * 13) % 100) as f32 * 0.001 - 0.05;
-            pixels[y * width + x] += signal + noise * 0.1;
+            pixels[(x, y)] += signal + noise * 0.1;
         }
     }
-    let pixels_buf = Buffer2::new(width, height, pixels);
 
     let config = GaussianFitConfig::default();
     let result = GaussianFit::new(
-        &pixels_buf,
+        &pixels,
         DVec2::splat(10.0),
         &StampGrid::new(8),
         background,
