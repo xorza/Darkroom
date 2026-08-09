@@ -1,7 +1,8 @@
 use crate::image_ops::ml::denoise::MlDenoise;
 use crate::io::image::linear::LinearImage;
+use crate::testing::init_tracing;
 use crate::testing::real_data::ml_support::{onnx_weights, stretched_master};
-use crate::testing::{init_tracing, save_png};
+use crate::testing::visual;
 
 /// Mean |adjacent-pixel difference| of the intensity — a high-frequency noise proxy (slow gradients
 /// cancel; pixel-scale grain is what a denoiser removes).
@@ -33,14 +34,14 @@ fn deepsnr_denoises() {
 
     // CNN denoisers want stretched display data in [0,1].
     let img = stretched_master();
-    save_png(&img, "ml_denoise/input.png");
+    visual::save_linear(&img, "ml_denoise/input.png");
 
     // `apply` denoises in place; the comparison below still needs the noisy original.
     let mut denoised = img.clone();
     MlDenoise::new(weights)
         .apply(&mut denoised)
         .expect("denoise succeeds");
-    save_png(&denoised, "ml_denoise/denoised.png");
+    visual::save_linear(&denoised, "ml_denoise/denoised.png");
 
     let in_hf = mean_adjacent_diff(&img);
     let out_hf = mean_adjacent_diff(&denoised);

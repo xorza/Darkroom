@@ -20,42 +20,70 @@ use crate::{
 /// Extension every debug image is written with.
 const TEST_OUTPUT_IMAGE_EXT: &str = "png";
 
+/// How an f32 plane is mapped into `[0, 1]` before being written as 8-bit.
+///
+/// Named `ToneMap` rather than `Stretch` because [`crate::Stretch`] is a published pipeline type
+/// — this is display-only, and nothing here feeds the pipeline. It replaces plain/stretched
+/// function pairs that were duplicated at three levels (`GrayImage`, imaginarium `Image`, and the
+/// gallery's own byte writer), where adding a mapping meant editing three places.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum ToneMap {
+    /// Clamp `[0,1]`; shows true pixel levels.
+    Clamp,
+    /// Rescale min..max onto `[0,1]`; reveals structure inside a narrow range.
+    AutoRange,
+    /// asinh over min..max; reveals faint structure without flattening the highlights.
+    Asinh,
+}
+
+impl ToneMap {
+    /// Map `pixels` into `[0, 1]`.
+    fn apply(self, pixels: &[f32]) -> Vec<f32> {
+        match self {
+            ToneMap::Clamp => pixels.iter().map(|&p| p.clamp(0.0, 1.0)).collect(),
+            ToneMap::AutoRange => {
+                let (lo, span) = Self::range(pixels);
+                pixels.iter().map(|&p| (p - lo) / span).collect()
+            }
+            ToneMap::Asinh => {
+                let (lo, span) = Self::range(pixels);
+                // astropy-style AsinhStretch: y = asinh(x/a) / asinh(1/a), a = soft knee.
+                let a = 0.1f32;
+                let denom = (1.0 / a).asinh();
+                pixels
+                    .iter()
+                    .map(|&p| {
+                        let x = ((p - lo) / span).clamp(0.0, 1.0);
+                        ((x / a).asinh() / denom).clamp(0.0, 1.0)
+                    })
+                    .collect()
+            }
+        }
+    }
+
+    /// Minimum and a non-zero span, for the two mappings that normalise against the data.
+    fn range(pixels: &[f32]) -> (f32, f32) {
+        let lo = pixels.iter().copied().fold(f32::INFINITY, f32::min);
+        let hi = pixels.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+        (lo, (hi - lo).max(1e-10))
+    }
+}
+
 /// Build an output path with the configured test image extension.
 /// Takes a base path and replaces or adds the extension from `TEST_OUTPUT_IMAGE_EXT`.
-fn output_path(base: &Path) -> std::path::PathBuf {
+pub(crate) fn output_path(base: &Path) -> std::path::PathBuf {
     base.with_extension(TEST_OUTPUT_IMAGE_EXT)
 }
 
-/// Convert f32 grayscale pixels to an imaginarium RGB_F32 image, clamped to `[0, 1]` (no stretch).
-/// Matches [`to_gray_image`]'s mapping so a comparison overlay reads at the same brightness as the
-/// `_input` image it sits beside.
-pub(super) fn gray_to_rgb_image(pixels: &[f32], size: Size2us) -> Image {
+/// Convert an f32 grayscale plane to an imaginarium RGB_F32 image under `tone`.
+pub(crate) fn gray_to_rgb(pixels: &[f32], size: Size2us, tone: ToneMap) -> Image {
     let desc = ImageDesc::new(size.width, size.height, ColorFormat::RGB_F32);
-    let rgb_pixels: Vec<f32> = pixels
-        .iter()
-        .flat_map(|&p| {
-            let v = p.clamp(0.0, 1.0);
-            [v, v, v]
-        })
+    let rgb: Vec<f32> = tone
+        .apply(pixels)
+        .into_iter()
+        .flat_map(|v| [v, v, v])
         .collect();
-    Image::new_with_data(desc, bytemuck::cast_slice(&rgb_pixels).to_vec()).unwrap()
-}
-
-/// Convert f32 grayscale pixels to imaginarium RGB_F32 image with auto-stretching.
-pub(crate) fn gray_to_rgb_image_stretched(pixels: &[f32], size: Size2us) -> Image {
-    let min = pixels.iter().cloned().fold(f32::INFINITY, f32::min);
-    let max = pixels.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
-    let range = (max - min).max(1e-10);
-
-    let desc = ImageDesc::new(size.width, size.height, ColorFormat::RGB_F32);
-    let rgb_pixels: Vec<f32> = pixels
-        .iter()
-        .flat_map(|&p| {
-            let v = (p - min) / range;
-            [v, v, v]
-        })
-        .collect();
-    Image::new_with_data(desc, bytemuck::cast_slice(&rgb_pixels).to_vec()).unwrap()
+    Image::new_with_data(desc, bytemuck::cast_slice(&rgb).to_vec()).unwrap()
 }
 
 /// Save imaginarium Image to file using the configured test output format.
@@ -70,26 +98,13 @@ pub(crate) fn save_image(image: Image, path: &Path) {
     image_u8.save_file(&out).expect("Failed to save image");
 }
 
-/// Convert f32 pixels to grayscale image (clamped to 0-1).
-fn to_gray_image(pixels: &[f32], size: Size2us) -> GrayImage {
-    let bytes: Vec<u8> = pixels
-        .iter()
-        .map(|&p| (p.clamp(0.0, 1.0) * 255.0) as u8)
+/// Convert an f32 plane to an 8-bit grayscale image under `tone`.
+fn to_gray(pixels: &[f32], size: Size2us, tone: ToneMap) -> GrayImage {
+    let bytes: Vec<u8> = tone
+        .apply(pixels)
+        .into_iter()
+        .map(|v| (v * 255.0) as u8)
         .collect();
-    GrayImage::from_raw(size.width as u32, size.height as u32, bytes).unwrap()
-}
-
-/// Convert f32 pixels to grayscale image with auto-stretching.
-fn to_gray_stretched(pixels: &[f32], size: Size2us) -> GrayImage {
-    let min = pixels.iter().cloned().fold(f32::INFINITY, f32::min);
-    let max = pixels.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
-    let range = (max - min).max(1e-10);
-
-    let bytes: Vec<u8> = pixels
-        .iter()
-        .map(|&p| (((p - min) / range) * 255.0) as u8)
-        .collect();
-
     GrayImage::from_raw(size.width as u32, size.height as u32, bytes).unwrap()
 }
 
@@ -152,20 +167,27 @@ fn hsv_to_rgb(h: f32, s: f32, v: f32) -> image::Rgb<u8> {
     ])
 }
 
-/// Save grayscale image to file using the configured test output format.
-pub(crate) fn save_grayscale(pixels: &[f32], size: Size2us, path: &Path) {
-    let out = output_path(path);
-    let img = to_gray_image(pixels, size);
-    img.save(&out).expect("Failed to save grayscale image");
+/// Write a whole `LinearImage` under `test_output/<name>`, letting imaginarium do the channel
+/// conversion. The multi-channel counterpart to [`save`], which takes one f32 plane and tone-maps
+/// it here; this one has colour to preserve and no single plane to map.
+pub(crate) fn save_linear(image: &crate::io::image::linear::LinearImage, name: &str) {
+    use common::internals::test_output_path;
+
+    let path = test_output_path(name);
+    std::fs::create_dir_all(path.parent().unwrap()).expect("create test_output dir");
+    imaginarium::Image::from(image)
+        .convert(ColorFormat::RGB_U8)
+        .expect("convert to RGB_U8")
+        .save_file(&path)
+        .expect("save png");
+    eprintln!("wrote {}", path.display());
 }
 
-/// Save grayscale image with auto-stretch to file using the configured test output format.
-#[cfg(feature = "real-data")]
-pub(crate) fn save_grayscale_stretched(pixels: &[f32], size: Size2us, path: &Path) {
-    let out = output_path(path);
-    let img = to_gray_stretched(pixels, size);
-    img.save(&out)
-        .expect("Failed to save stretched grayscale image");
+/// Write an f32 plane as an 8-bit image under `tone`, with the configured extension.
+pub(crate) fn save(pixels: &[f32], size: Size2us, path: &Path, tone: ToneMap) {
+    to_gray(pixels, size, tone)
+        .save(output_path(path))
+        .expect("write debug image");
 }
 
 /// Save RGB image to file using the configured test output format.
@@ -201,24 +223,41 @@ mod tests {
     use crate::math::size2us::Size2us;
     use crate::testing::visual::*;
 
+    /// Each mapping over the same plane, so the three rules are pinned against one another.
     #[test]
-    fn test_gray_image_conversion() {
-        let pixels = vec![0.0, 0.5, 1.0, 0.25];
-        let img = to_gray_image(&pixels, Size2us::new(2, 2));
+    fn tone_maps_differ_on_the_same_plane() {
+        let size = Size2us::new(2, 2);
 
+        // Clamp: value x 255, truncated. 0.5 -> 127, 0.25 -> 63.
+        let img = to_gray(&[0.0, 0.5, 1.0, 0.25], size, ToneMap::Clamp);
         assert_eq!(img.get_pixel(0, 0).0[0], 0);
         assert_eq!(img.get_pixel(1, 0).0[0], 127);
         assert_eq!(img.get_pixel(0, 1).0[0], 255);
         assert_eq!(img.get_pixel(1, 1).0[0], 63);
+
+        // AutoRange: 0.2..0.8 rescaled onto 0..255, so the ends pin exactly and 0.4 lands a
+        // third of the way up. That is 255/3 = 85 in exact arithmetic, but f32 puts the ratio a
+        // hair under 1/3 and the cast truncates, so 84.
+        let img = to_gray(&[0.2, 0.4, 0.6, 0.8], size, ToneMap::AutoRange);
+        assert_eq!(img.get_pixel(0, 0).0[0], 0);
+        assert_eq!(img.get_pixel(1, 0).0[0], 84);
+        assert_eq!(img.get_pixel(1, 1).0[0], 255);
+
+        // Asinh: same endpoints, but the knee lifts the midtones well above AutoRange.
+        let img = to_gray(&[0.2, 0.4, 0.6, 0.8], size, ToneMap::Asinh);
+        assert_eq!(img.get_pixel(0, 0).0[0], 0);
+        assert_eq!(img.get_pixel(1, 1).0[0], 255);
+        assert!(
+            img.get_pixel(1, 0).0[0] > 84,
+            "asinh must lift 0.4 above AutoRange's 84, got {}",
+            img.get_pixel(1, 0).0[0]
+        );
     }
 
+    /// A flat plane has no range to stretch; the guarded span must not divide by zero.
     #[test]
-    fn test_stretched_conversion() {
-        let pixels = vec![0.2, 0.4, 0.6, 0.8];
-        let img = to_gray_stretched(&pixels, Size2us::new(2, 2));
-
-        // Should stretch 0.2-0.8 to 0-255
-        assert_eq!(img.get_pixel(0, 0).0[0], 0); // 0.2 -> 0
-        assert_eq!(img.get_pixel(1, 1).0[0], 255); // 0.8 -> 255
+    fn auto_range_survives_a_flat_plane() {
+        let img = to_gray(&[0.5; 4], Size2us::new(2, 2), ToneMap::AutoRange);
+        assert_eq!(img.get_pixel(0, 0).0[0], 0);
     }
 }

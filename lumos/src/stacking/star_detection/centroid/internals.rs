@@ -3,7 +3,7 @@
 use imaginarium::Buffer2;
 
 use crate::stacking::star_detection::centroid::lm_optimizer::NormalEquations;
-use crate::testing::synthetic::patterns::add_gaussian_noise;
+use crate::testing::synthetic::patterns;
 
 /// What gets added to the rendered stamp before fitting.
 #[derive(Debug)]
@@ -29,14 +29,11 @@ impl Perturbation {
                     *p += amplitude * ((i % 7) as f32 - 3.0) / 3.0;
                 }
             }
-            Perturbation::Gaussian { sigma, seed } => add_noise(pixels, sigma, seed),
+            Perturbation::Gaussian { sigma, seed } => {
+                patterns::add_gaussian_noise(pixels, sigma, seed)
+            }
         }
     }
-}
-
-/// Add Gaussian noise to pixel values using a simple LCG PRNG.
-pub(super) fn add_noise(pixels: &mut [f32], noise_sigma: f32, seed: u64) {
-    add_gaussian_noise(pixels, noise_sigma, seed);
 }
 
 /// Scalar reference for the normal equations: `J^T·J`, `J^T·r`, and `Σr²`, from a jacobian and

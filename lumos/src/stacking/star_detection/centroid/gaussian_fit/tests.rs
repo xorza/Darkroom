@@ -1,11 +1,12 @@
 //! Tests for 2D Gaussian fitting.
 use crate::stacking::star_detection::centroid::StampGrid;
 use crate::testing::prelude::*;
+use crate::testing::synthetic::patterns;
 
 use crate::math::fwhm::{fwhm_to_sigma, sigma_to_fwhm};
 use crate::stacking::star_detection::centroid::gaussian_fit::*;
 use crate::stacking::star_detection::centroid::internals::{
-    Perturbation, add_noise, reference_normal_equations,
+    Perturbation, reference_normal_equations,
 };
 use crate::testing::synthetic::star_profiles::{StarProfile, SyntheticStar};
 
@@ -1236,7 +1237,7 @@ fn test_gaussian_fit_residual_distribution() {
         StarProfile::Gaussian { sigma: true_sigma },
     )
     .stamp(Size2us::new(width, height), true_bg);
-    add_noise(&mut pixels, noise_sigma, 11111);
+    patterns::add_gaussian_noise(&mut pixels, noise_sigma, 11111);
 
     let config = GaussianFitConfig::default();
     let result = GaussianFit::new(

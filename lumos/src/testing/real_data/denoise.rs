@@ -6,7 +6,8 @@ use crate::image_ops::internals::channel_plane;
 use crate::io::image::linear::LinearImage;
 use crate::io::image::load_context::LoadContext;
 use crate::math::statistics::{mad_f32_with_scratch, mad_to_sigma, median_f32_mut};
-use crate::testing::{calibration_dir, init_tracing, save_png};
+use crate::testing::visual;
+use crate::testing::{calibration_dir, init_tracing};
 use crate::{Denoise, NeutralizeBackground, Scnr, Stretch};
 
 /// Robust high-frequency noise of a channel: the MAD-sigma of adjacent-pixel differences. Slow
@@ -67,5 +68,5 @@ fn denoise_reduces_linear_noise() {
     // Finish the display chain — stretch then clean any residual green — and save the final image.
     Stretch::auto_stf().apply(&mut img).unwrap();
     Scnr::average_neutral().apply(&mut img).unwrap();
-    save_png(&img, "denoise/stacked_light_denoised.png");
+    visual::save_linear(&img, "denoise/stacked_light_denoised.png");
 }

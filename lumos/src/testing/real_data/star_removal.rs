@@ -1,6 +1,7 @@
 use crate::image_ops::ml::star_removal::RemoveStars;
+use crate::testing::init_tracing;
 use crate::testing::real_data::ml_support::{onnx_weights, stretched_master};
-use crate::testing::{init_tracing, save_png};
+use crate::testing::visual;
 
 fn max_of(p: &[f32]) -> f32 {
     p.iter().copied().fold(0.0f32, f32::max)
@@ -21,7 +22,7 @@ fn starnet_removes_stars() {
 
     // StarNet wants stretched display data in [0,1].
     let img = stretched_master();
-    save_png(&img, "star_removal/input.png");
+    visual::save_linear(&img, "star_removal/input.png");
     // Captured before `split` below consumes `img` (it repurposes the input's own
     // buffer for its `stars` output rather than allocating a fresh one).
     let input = img.intensity_plane();
@@ -37,8 +38,8 @@ fn starnet_removes_stars() {
         .expect("starless-only star removal succeeds");
 
     let result = remove.split(img).expect("star removal succeeds");
-    save_png(&result.starless, "star_removal/starless.png");
-    save_png(&result.stars, "star_removal/stars.png");
+    visual::save_linear(&result.starless, "star_removal/starless.png");
+    visual::save_linear(&result.stars, "star_removal/stars.png");
     for channel in 0..starless_only.channels() {
         assert_eq!(
             starless_only.channel(channel).pixels(),

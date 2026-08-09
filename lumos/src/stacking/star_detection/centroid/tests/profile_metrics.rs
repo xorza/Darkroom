@@ -372,7 +372,7 @@ fn windowed_covariance_resists_wing_noise() {
     let sigma = 2.5f32;
     let mut pixels =
         SyntheticStar::new(pos.as_vec2(), 1.0, StarProfile::Gaussian { sigma }).stamp(size, 0.1);
-    add_noise(pixels.pixels_mut(), 0.03, 12345);
+    patterns::add_gaussian_noise(pixels.pixels_mut(), 0.03, 12345);
     let bg = background_map::uniform(size, 0.1, 1.0);
 
     let cov = windowed_covariance(&pixels, &bg, None, pos, 12, (sigma * sigma) as f64)

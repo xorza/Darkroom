@@ -7,7 +7,8 @@
 use crate::io::image::linear::LinearImage;
 use crate::io::image::load_context::LoadContext;
 use crate::math::statistics::median_f32_mut;
-use crate::testing::{calibration_dir, init_tracing, save_png};
+use crate::testing::visual;
+use crate::testing::{calibration_dir, init_tracing};
 use crate::{
     ColorMode, Denoise, Hdr, LocalContrast, NeutralizeBackground, Scnr, Stretch, StretchMethod,
 };
@@ -57,7 +58,7 @@ fn milky_way_best_pipeline() {
     NeutralizeBackground.apply(&mut img).unwrap(); // re-neutralize the now-display-domain background
     eprintln!("stretched base: median {:.3}", median(&img));
     assert_displayable(&img, "stretched base");
-    save_png(&img, "milky_way/stretched.png");
+    visual::save_linear(&img, "milky_way/stretched.png");
 
     // HDR: gently compress the bright star-cloud cores to reveal detail (small amount; too much
     // flattens the large-scale brightness).
@@ -80,5 +81,5 @@ fn milky_way_best_pipeline() {
 
     eprintln!("enhanced: median {:.3}", median(&img));
     assert_displayable(&img, "enhanced");
-    save_png(&img, "milky_way/enhanced.png");
+    visual::save_linear(&img, "milky_way/enhanced.png");
 }

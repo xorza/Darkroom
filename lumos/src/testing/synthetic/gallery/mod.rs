@@ -7,8 +7,8 @@
 //! ```
 //!
 //! Output lands under `test_output/synthetic_gallery/` (gitignored). Astronomical frames are
-//! mostly dark, so most images use an asinh stretch (`Stretch::Asinh`) to reveal faint stars,
-//! background gradients, and noise texture; flat/level images use `Stretch::Linear` to show
+//! mostly dark, so most images use an asinh tone (`ToneMap::Asinh`) to reveal faint stars,
+//! background gradients, and noise texture; flat/level images use `ToneMap::Clamp` to show
 //! true values.
 
 use std::f32::consts::FRAC_PI_4;
@@ -18,7 +18,6 @@ use common::internals::test_output_path;
 use glam::{DVec2, Vec2};
 
 use crate::math::size2us::Size2us;
-use image::GrayImage;
 use imaginarium::Buffer2;
 
 use crate::testing::synthetic::artifacts::add_cosmic_rays;
@@ -28,68 +27,28 @@ use crate::testing::synthetic::fixtures::{cluster_field, star_field};
 use crate::testing::synthetic::observe::{Observation, observe_dithered, render};
 use crate::testing::synthetic::patterns::{checkerboard, diagonal_gradient, horizontal_gradient};
 use crate::testing::synthetic::scene::{BackgroundField, Scene};
-
-/// Tone mapping applied before writing 8-bit PNG.
-#[derive(Debug, Clone, Copy)]
-enum Stretch {
-    /// Clamp `[0,1]` → `[0,255]`; shows true pixel levels.
-    Linear,
-    /// asinh auto-stretch between min and max; reveals faint structure.
-    Asinh,
-}
-
-fn to_bytes(pixels: &[f32], stretch: Stretch) -> Vec<u8> {
-    match stretch {
-        Stretch::Linear => pixels
-            .iter()
-            .map(|&p| (p.clamp(0.0, 1.0) * 255.0) as u8)
-            .collect(),
-        Stretch::Asinh => {
-            let lo = pixels.iter().copied().fold(f32::INFINITY, f32::min);
-            let hi = pixels.iter().copied().fold(f32::NEG_INFINITY, f32::max);
-            let span = (hi - lo).max(1e-10);
-            // astropy-style AsinhStretch: y = asinh(x/a) / asinh(1/a), a = soft knee.
-            let a = 0.1f32;
-            let denom = (1.0 / a).asinh();
-            pixels
-                .iter()
-                .map(|&p| {
-                    let x = ((p - lo) / span).clamp(0.0, 1.0);
-                    let y = (x / a).asinh() / denom;
-                    (y.clamp(0.0, 1.0) * 255.0) as u8
-                })
-                .collect()
-        }
-    }
-}
+use crate::testing::visual::{self, ToneMap};
 
 /// Save a grayscale frame to `synthetic_gallery/<name>.png`, returning the path.
-fn save(pixels: &[f32], size: Size2us, name: &str, stretch: Stretch) -> PathBuf {
+fn save(pixels: &[f32], size: Size2us, name: &str, tone: ToneMap) -> PathBuf {
     assert_eq!(
         pixels.len(),
         size.pixel_count(),
         "pixel/dimension mismatch for {name}"
     );
-    let path = test_output_path(&format!("synthetic_gallery/{name}.png"));
-    GrayImage::from_raw(
-        size.width as u32,
-        size.height as u32,
-        to_bytes(pixels, stretch),
-    )
-    .expect("buffer fits image dimensions")
-    .save(&path)
-    .expect("write png");
-    path
+    let path = test_output_path(&format!("synthetic_gallery/{name}"));
+    visual::save(pixels, size, &path, tone);
+    visual::output_path(&path)
 }
 
 /// Render a forward-model frame and save its sensor image.
-fn save_frame(scene: &Scene, camera: &Camera, obs: &Observation, name: &str, stretch: Stretch) {
+fn save_frame(scene: &Scene, camera: &Camera, obs: &Observation, name: &str, tone: ToneMap) {
     let frame = render(scene, camera, obs);
     save(
         frame.image.channel(0).pixels(),
         Size2us::new(scene.size.width, scene.size.height),
         name,
-        stretch,
+        tone,
     );
 }
 
@@ -102,11 +61,11 @@ fn demo_field(size: Size2us, background: BackgroundField, seed: u64) -> Scene {
 #[ignore = "visual gallery; run with --ignored"]
 fn gallery_backgrounds() {
     let size = Size2us::new(256, 256);
-    let cases: [(&str, BackgroundField, Stretch); 6] = [
+    let cases: [(&str, BackgroundField, ToneMap); 6] = [
         (
             "backgrounds/uniform",
             BackgroundField::Uniform { level: 0.1 },
-            Stretch::Linear,
+            ToneMap::Clamp,
         ),
         (
             "backgrounds/gradient_0deg",
@@ -115,7 +74,7 @@ fn gallery_backgrounds() {
                 end: 0.4,
                 angle: 0.0,
             },
-            Stretch::Linear,
+            ToneMap::Clamp,
         ),
         (
             "backgrounds/gradient_45deg",
@@ -124,7 +83,7 @@ fn gallery_backgrounds() {
                 end: 0.4,
                 angle: FRAC_PI_4,
             },
-            Stretch::Linear,
+            ToneMap::Clamp,
         ),
         (
             "backgrounds/vignette",
@@ -133,12 +92,12 @@ fn gallery_backgrounds() {
                 edge: 0.05,
                 falloff: 2.0,
             },
-            Stretch::Linear,
+            ToneMap::Clamp,
         ),
         (
             "backgrounds/nebula",
             BackgroundField::Nebula(NebulaConfig::default()),
-            Stretch::Asinh,
+            ToneMap::Asinh,
         ),
         (
             "backgrounds/nebula_elongated",
@@ -150,11 +109,11 @@ fn gallery_backgrounds() {
                 aspect_ratio: 0.45,
                 angle: 0.6,
             }),
-            Stretch::Asinh,
+            ToneMap::Asinh,
         ),
     ];
-    for (name, bg, stretch) in cases {
-        save(&bg.render(size), size, name, stretch);
+    for (name, bg, tone) in cases {
+        save(&bg.render(size), size, name, tone);
     }
 }
 
@@ -209,7 +168,7 @@ fn gallery_psf_models() {
             &camera,
             &Observation::reference(1),
             name,
-            Stretch::Asinh,
+            ToneMap::Asinh,
         );
     }
 }
@@ -223,20 +182,20 @@ fn gallery_noise() {
         sources: vec![],
         background: BackgroundField::Uniform { level: 0.2 },
     };
-    // A uniform field: linear stretch makes the noise grain (or its absence) visible.
+    // A uniform field: linear tone makes the noise grain (or its absence) visible.
     save_frame(
         &flat,
         &Camera::ideal(3.0),
         &Observation::reference(1),
         "noise/flat_ideal",
-        Stretch::Linear,
+        ToneMap::Clamp,
     );
     save_frame(
         &flat,
         &Camera::realistic(3.0),
         &Observation::reference(1),
         "noise/flat_realistic",
-        Stretch::Linear,
+        ToneMap::Clamp,
     );
 
     // A populated field across shot-noise (well depth) and read-noise levels.
@@ -251,28 +210,28 @@ fn gallery_noise() {
         &Camera::ideal(3.0),
         &Observation::reference(2),
         "noise/field_ideal",
-        Stretch::Asinh,
+        ToneMap::Asinh,
     );
     save_frame(
         &field,
         &well(50_000.0, 3.0),
         &Observation::reference(2),
         "noise/field_well50k",
-        Stretch::Asinh,
+        ToneMap::Asinh,
     );
     save_frame(
         &field,
         &well(5_000.0, 3.0),
         &Observation::reference(2),
         "noise/field_well5k_more_shot",
-        Stretch::Asinh,
+        ToneMap::Asinh,
     );
     save_frame(
         &field,
         &well(50_000.0, 30.0),
         &Observation::reference(2),
         "noise/field_read30_more_read",
-        Stretch::Asinh,
+        ToneMap::Asinh,
     );
 }
 
@@ -289,7 +248,7 @@ fn gallery_sensor() {
         &vignette_flat.render(size, 0),
         size,
         "sensor/flat_vignette_map",
-        Stretch::Linear,
+        ToneMap::Clamp,
     );
 
     // A uniform sky seen through that vignette.
@@ -307,7 +266,7 @@ fn gallery_sensor() {
         &vignetted,
         &Observation::reference(1),
         "sensor/sky_through_vignette",
-        Stretch::Linear,
+        ToneMap::Clamp,
     );
 
     // Defects + bias on a star field: hot pixels, a dead pixel block, a bad column.
@@ -334,7 +293,7 @@ fn gallery_sensor() {
         &camera,
         &Observation::reference(3),
         "sensor/defects_and_bias",
-        Stretch::Asinh,
+        ToneMap::Asinh,
     );
 }
 
@@ -356,7 +315,7 @@ fn gallery_scenes() {
         &Camera::ideal(3.5),
         &Observation::reference(1),
         "scenes/sparse_ideal",
-        Stretch::Asinh,
+        ToneMap::Asinh,
     );
 
     let dense = demo_field(size, BackgroundField::Uniform { level: 0.06 }, 2);
@@ -365,7 +324,7 @@ fn gallery_scenes() {
         &Camera::realistic(3.5),
         &Observation::reference(2),
         "scenes/dense_realistic",
-        Stretch::Asinh,
+        ToneMap::Asinh,
     );
 
     let over_nebula = demo_field(size, BackgroundField::Nebula(NebulaConfig::default()), 3);
@@ -374,7 +333,7 @@ fn gallery_scenes() {
         &Camera::realistic(3.5),
         &Observation::reference(3),
         "scenes/over_nebula",
-        Stretch::Asinh,
+        ToneMap::Asinh,
     );
 
     // Tracking error: an elliptical PSF across the whole field.
@@ -391,7 +350,7 @@ fn gallery_scenes() {
         &elliptical,
         &Observation::reference(4),
         "scenes/elliptical_tracking_error",
-        Stretch::Asinh,
+        ToneMap::Asinh,
     );
 
     // Saturation: very bright sources clip flat at the well.
@@ -408,14 +367,14 @@ fn gallery_scenes() {
         &Camera::realistic(3.5),
         &Observation::reference(6),
         "scenes/saturated_stars",
-        Stretch::Asinh,
+        ToneMap::Asinh,
     );
 
     // Cosmic rays peppered onto a realistic field.
     let frame = render(&dense, &Camera::realistic(3.5), &Observation::reference(7));
     let mut pixels = frame.image.channel(0).pixels().to_vec();
     add_cosmic_rays(&mut pixels, size.width, 60, (0.5, 1.0), 1234);
-    save(&pixels, size, "scenes/cosmic_rays", Stretch::Asinh);
+    save(&pixels, size, "scenes/cosmic_rays", ToneMap::Asinh);
 }
 
 #[test]
@@ -429,7 +388,7 @@ fn gallery_seeing() {
             ..Observation::reference(1)
         };
         let name = format!("seeing/scale_{}", (scale * 10.0) as u32);
-        save_frame(&field, &Camera::realistic(3.0), &obs, &name, Stretch::Asinh);
+        save_frame(&field, &Camera::realistic(3.0), &obs, &name, ToneMap::Asinh);
     }
 }
 
@@ -449,7 +408,7 @@ fn gallery_dither() {
             frame.image.channel(0).pixels(),
             size,
             &format!("dither/frame_{i}"),
-            Stretch::Asinh,
+            ToneMap::Asinh,
         );
     }
 }
@@ -462,19 +421,19 @@ fn gallery_patterns() {
         checkerboard(size, 16, 0.1, 0.9).pixels(),
         size,
         "patterns/checkerboard",
-        Stretch::Linear,
+        ToneMap::Clamp,
     );
     save(
         horizontal_gradient(size, 0.0, 1.0).pixels(),
         size,
         "patterns/horizontal_gradient",
-        Stretch::Linear,
+        ToneMap::Clamp,
     );
     save(
         diagonal_gradient(size).pixels(),
         size,
         "patterns/diagonal_gradient",
-        Stretch::Linear,
+        ToneMap::Clamp,
     );
 }
 
@@ -491,7 +450,7 @@ fn gallery_fixtures() {
             .pixels(),
         Size2us::new(size, size),
         "fixtures/star_field_sparse",
-        Stretch::Asinh,
+        ToneMap::Asinh,
     );
     save(
         star_field(Size2us::new(size, size), 1000, 42)
@@ -500,7 +459,7 @@ fn gallery_fixtures() {
             .pixels(),
         Size2us::new(size, size),
         "fixtures/star_field_dense",
-        Stretch::Asinh,
+        ToneMap::Asinh,
     );
     save(
         cluster_field(Size2us::new(size, size), 4000, 42)
@@ -509,7 +468,7 @@ fn gallery_fixtures() {
             .pixels(),
         Size2us::new(size, size),
         "fixtures/cluster_field",
-        Stretch::Asinh,
+        ToneMap::Asinh,
     );
     save(
         cluster_field(Size2us::new(size, size), 15000, 42)
@@ -518,7 +477,7 @@ fn gallery_fixtures() {
             .pixels(),
         Size2us::new(size, size),
         "fixtures/cluster_field_dense",
-        Stretch::Asinh,
+        ToneMap::Asinh,
     );
 }
 

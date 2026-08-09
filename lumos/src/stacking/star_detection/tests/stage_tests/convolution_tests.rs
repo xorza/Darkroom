@@ -8,7 +8,7 @@ use crate::stacking::star_detection::convolution::internals::gaussian_convolve;
 use crate::stacking::star_detection::tests::Scenario;
 use crate::testing::init_tracing;
 use crate::testing::prelude::*;
-use crate::testing::visual::save_grayscale;
+use crate::testing::visual::{ToneMap, save};
 use common::internals::test_output_path;
 
 use crate::stacking::star_detection::tests::stage_tests::TILE_SIZE;
@@ -43,10 +43,11 @@ fn test_gaussian_filter_sparse() {
     let ground_truth = frame.truth.sources.clone();
 
     // Save input
-    save_grayscale(
+    save(
         pixels.pixels(),
         Size2us::new(width, height),
         &test_output_path("synthetic_starfield/stage_conv_sparse_input.png"),
+        ToneMap::Clamp,
     );
 
     // Estimate and subtract background
@@ -64,10 +65,11 @@ fn test_gaussian_filter_sparse() {
         .map(|(&p, &bg)| (p - bg).max(0.0))
         .collect();
 
-    save_grayscale(
+    save(
         &bg_subtracted,
         Size2us::new(width, height),
         &test_output_path("synthetic_starfield/stage_conv_sparse_bg_subtracted.png"),
+        ToneMap::Clamp,
     );
 
     // Apply Gaussian filter (matched filter for star detection)
@@ -80,10 +82,11 @@ fn test_gaussian_filter_sparse() {
     // Normalize for display
     let filtered_display = normalize_for_display(filtered.pixels());
 
-    save_grayscale(
+    save(
         &filtered_display,
         Size2us::new(width, height),
         &test_output_path("synthetic_starfield/stage_conv_sparse_filtered.png"),
+        ToneMap::Clamp,
     );
 
     // Verify stars are enhanced
@@ -149,10 +152,11 @@ fn test_gaussian_filter_fwhm_range() {
     let ground_truth = frame.truth.sources.clone();
 
     // Save input
-    save_grayscale(
+    save(
         pixels.pixels(),
         Size2us::new(width, height),
         &test_output_path("synthetic_starfield/stage_conv_fwhm_range_input.png"),
+        ToneMap::Clamp,
     );
 
     // Background subtraction
@@ -226,10 +230,11 @@ fn test_gaussian_filter_noise() {
     let ground_truth = frame.truth.sources.clone();
 
     // Save input
-    save_grayscale(
+    save(
         pixels.pixels(),
         Size2us::new(width, height),
         &test_output_path("synthetic_starfield/stage_conv_noise_input.png"),
+        ToneMap::Clamp,
     );
 
     // Background subtraction
@@ -247,10 +252,11 @@ fn test_gaussian_filter_noise() {
         .map(|(&p, &bg)| (p - bg).max(0.0))
         .collect();
 
-    save_grayscale(
+    save(
         &bg_subtracted,
         Size2us::new(width, height),
         &test_output_path("synthetic_starfield/stage_conv_noise_bg_subtracted.png"),
+        ToneMap::Clamp,
     );
 
     // Apply Gaussian filter
@@ -261,10 +267,11 @@ fn test_gaussian_filter_noise() {
     gaussian_convolve(&bg_subtracted_buf, sigma, &mut filtered, &mut temp);
     let filtered_display = normalize_for_display(filtered.pixels());
 
-    save_grayscale(
+    save(
         &filtered_display,
         Size2us::new(width, height),
         &test_output_path("synthetic_starfield/stage_conv_noise_filtered.png"),
+        ToneMap::Clamp,
     );
 
     // Check star detectability even with noise

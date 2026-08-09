@@ -6,7 +6,7 @@ use crate::math::size2us::Size2us;
 use crate::stacking::star_detection::star::Star;
 use crate::testing::synthetic::metrics::match_catalogs;
 use crate::testing::synthetic::observe::ObservedSource;
-use crate::testing::visual::gray_to_rgb_image;
+use crate::testing::visual::{ToneMap, gray_to_rgb};
 use glam::Vec2;
 use imaginarium::Image;
 use imaginarium::drawing::{draw_circle, draw_cross};
@@ -45,7 +45,7 @@ pub(super) fn create_comparison_image(
     detected: &[Star],
     match_radius: f32,
 ) -> Image {
-    let mut image = gray_to_rgb_image(pixels, size);
+    let mut image = gray_to_rgb(pixels, size, ToneMap::Clamp);
 
     // Match detected stars to ground truth
     let truth_positions: Vec<glam::DVec2> = ground_truth.iter().map(|s| s.pos).collect();

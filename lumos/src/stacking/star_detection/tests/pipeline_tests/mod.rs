@@ -5,7 +5,7 @@ use crate::stacking::star_detection::detector::StarDetector;
 use crate::testing::prelude::*;
 use crate::testing::synthetic::observe::SimFrame;
 use crate::testing::visual::report::{DetectionMetrics, compute_detection_metrics, save_metrics};
-use crate::testing::visual::{save_comparison, save_grayscale};
+use crate::testing::visual::{ToneMap, save, save_comparison};
 use common::internals::test_output_path;
 
 mod challenging_tests;
@@ -26,13 +26,14 @@ fn run_test(
     let pixels = frame.image.channel(0).pixels();
     let truth = &frame.truth.sources;
 
-    save_grayscale(
+    save(
         pixels,
         Size2us::new(width, height),
         &test_output_path(&format!(
             "synthetic_starfield/{}_{}_input.png",
             prefix, name
         )),
+        ToneMap::Clamp,
     );
 
     let mut detector = StarDetector::from_config(detection_config.clone()).unwrap();

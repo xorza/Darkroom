@@ -3,11 +3,12 @@
 //! green cast can be seen disappearing. Gated behind the `real-data` feature.
 
 use crate::image_ops::rgb::Rgb;
+use crate::testing::visual;
 
 use crate::image_ops::color_calibration::channel_backgrounds;
 use crate::io::image::linear::LinearImage;
 use crate::io::image::load_context::LoadContext;
-use crate::testing::{calibration_dir, init_tracing, save_png};
+use crate::testing::{calibration_dir, init_tracing};
 use crate::{NeutralizeBackground, Scnr, Stretch};
 
 fn spread(bg: Rgb) -> f32 {
@@ -58,12 +59,12 @@ fn neutralize_then_stretch_removes_green() {
     // Neutralized → stretch → save (compare against the un-neutralized green stretch from
     // `stretching::real_data_tests`).
     Stretch::auto_stf().apply(&mut img).unwrap();
-    save_png(&img, "color/stacked_light_neutralized_stf.png");
+    visual::save_linear(&img, "color/stacked_light_neutralized_stf.png");
 
     // Post-stretch Average-Neutral SCNR cleans any residual green left after neutralization.
     Scnr::average_neutral().apply(&mut img).unwrap();
-    save_png(&img, "color/stacked_light_neutralized_scnr.png");
+    visual::save_linear(&img, "color/stacked_light_neutralized_scnr.png");
 
     NeutralizeBackground.apply(&mut img).unwrap();
-    save_png(&img, "color/stacked_light_neutralized_scnr_renorm.png");
+    visual::save_linear(&img, "color/stacked_light_neutralized_scnr_renorm.png");
 }
