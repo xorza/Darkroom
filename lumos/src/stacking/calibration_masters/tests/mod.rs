@@ -8,7 +8,7 @@ use crate::stacking::calibration_masters::defect_map::DefectMap;
 use crate::stacking::calibration_masters::stack_cfa_master;
 use crate::stacking::calibration_masters::weighted_budget;
 use crate::stacking::calibration_masters::{CalibrationError, DEFAULT_SIGMA_THRESHOLD};
-use crate::stacking::combine::config::{CombineMethod, StackConfig};
+use crate::stacking::combine::config::{CombineMethod, StackConfig, Weighting};
 use crate::stacking::combine::error::{Error, StackConfigError};
 use crate::stacking::combine::rejection::Rejection;
 use crate::stacking::progress::ProgressCallback;
@@ -1024,10 +1024,11 @@ fn ram_bytes_sums_present_frames_and_defects() {
 
 #[test]
 fn stack_cfa_master_rejects_an_invalid_config_before_reading_anything() {
-    // The only combine entry point outside `combine_cached`, so the only one that could reach
-    // the reducer unvalidated. A NaN sigma rejects every sample at every pixel and yields a
-    // silently black master; a negative one inverts the clip band and faults on the survivor
-    // range. Both are configuration errors and must be reported as such.
+    // `stack_cfa_master` builds its own CFA cache, so it is the entry point most likely to drift
+    // out of the shared `combine_cached` gate and reach the reducer unvalidated. A NaN sigma
+    // rejects every sample at every pixel and yields a silently black master; a negative one
+    // inverts the clip band and faults on the survivor range. Both are configuration errors and
+    // must be reported as such.
     let missing = [std::path::PathBuf::from(".tmp/does-not-exist.fits")];
 
     for rejection in [Rejection::sigma_clip(f32::NAN), Rejection::sigma_clip(-1.0)] {
@@ -1050,6 +1051,29 @@ fn stack_cfa_master_rejects_an_invalid_config_before_reading_anything() {
             "expected the config to be rejected, got {error:?}"
         );
     }
+
+    // The frame-count half of the gate, which only reaches this entry point because it routes
+    // through `combine_cached`: a manual weight per frame, against one path.
+    let error = stack_cfa_master(
+        &missing,
+        StackConfig {
+            weighting: Weighting::Manual(vec![1.0, 1.0]),
+            ..StackConfig::dark()
+        },
+        ProgressCallback::default(),
+        CancelToken::never(),
+    )
+    .unwrap_err();
+    assert!(
+        matches!(
+            error,
+            Error::Config(StackConfigError::ManualWeightCountMismatch {
+                expected: 1,
+                actual: 2
+            })
+        ),
+        "expected the weight count to be checked against the frame count, got {error:?}"
+    );
 
     // Reported from the config alone: the paths are never opened, so a valid config on the same
     // missing files fails differently.
