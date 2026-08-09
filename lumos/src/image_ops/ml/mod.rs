@@ -13,3 +13,6 @@
 pub(crate) mod backend;
 pub(crate) mod denoise;
 pub(crate) mod star_removal;
+
+#[cfg(test)]
+mod tests;

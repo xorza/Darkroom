@@ -1,3 +1,6 @@
+#[cfg(feature = "real-data")]
+mod real_data;
+
 use crate::image_ops::denoise::{Denoise, Threshold};
 use crate::image_ops::error::OpError;
 use crate::image_ops::internals::{channel_plane as channel, mean, standard_deviation as std_dev};
