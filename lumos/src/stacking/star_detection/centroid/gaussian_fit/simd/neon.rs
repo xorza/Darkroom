@@ -20,7 +20,6 @@ const LOG2E: f64 = LOG2_E;
 
 /// Fast vectorized exp() for 2 f64 lanes using Cephes polynomial approximation.
 #[inline]
-#[allow(unsafe_op_in_unsafe_fn)]
 unsafe fn simd_exp_fast(x: float64x2_t) -> float64x2_t {
     // Clamp to avoid overflow/underflow in IEEE 754
     let v_min = vdupq_n_f64(-708.0);

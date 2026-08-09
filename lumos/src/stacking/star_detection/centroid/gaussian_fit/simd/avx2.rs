@@ -24,7 +24,6 @@ const LOG2E: f64 = LOG2_E;
 /// Levenberg-Marquardt fitting where the solver converges to ~1e-8.
 #[target_feature(enable = "avx2,fma")]
 #[inline]
-#[allow(unsafe_op_in_unsafe_fn)]
 unsafe fn simd_exp_fast(x: __m256d) -> __m256d {
     // Clamp to avoid overflow/underflow in IEEE 754
     let v_min = _mm256_set1_pd(-708.0);
