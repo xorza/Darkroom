@@ -23,9 +23,7 @@ use crate::stacking::star_detection::centroid::lm_optimizer::{
     FitData, LMConfig, LMModel, NormalEquations, accumulate_chi2, build_normal_equations_scalar,
     optimize,
 };
-use crate::stacking::star_detection::centroid::{
-    FitNoise, estimate_sigma_from_moments, extract_stamp, fit_weights,
-};
+use crate::stacking::star_detection::centroid::{FitNoise, StampFit};
 use glam::DVec2;
 use imaginarium::Buffer2;
 
@@ -233,47 +231,29 @@ impl MoffatFit {
         noise: Option<FitNoise>,
         config: &MoffatFitConfig,
     ) -> Option<Self> {
-        let stamp_radius = grid.radius;
-        let stamp = extract_stamp(pixels, pos, stamp_radius)?;
-        // Fit in the stamp's own frame: the models are translation-invariant, so this is the
-        // same fit with better-conditioned magnitudes, and the coordinate arrays become the
-        // shared grid instead of two per-candidate ramps.
-        let local_pos = pos - stamp.origin;
-
         // Fixed-β Moffat fits 5 parameters [x0, y0, amplitude, alpha, background].
-        let n = stamp.z.len();
-        if n < 6 {
-            return None;
-        }
+        let fit = StampFit::prepare::<5>(pixels, pos, grid, background, noise)?;
 
-        let weights = fit_weights(&stamp.z, background, noise);
-
-        let initial_amplitude = (stamp.peak - background).max(0.01);
-
-        // Estimate sigma from moments, then convert to alpha (using the fixed β).
-        let sigma_est =
-            estimate_sigma_from_moments(&grid.x, &grid.y, &stamp.z, local_pos, background);
-        let fwhm_est = sigma_est * FWHM_TO_SIGMA;
+        // The seed is a Gaussian width; convert it to the equivalent alpha at the fixed β.
+        let fwhm_est = fit.sigma_est * FWHM_TO_SIGMA;
         let initial_alpha =
-            fwhm_beta_to_alpha(fwhm_est, config.fixed_beta).clamp(0.5, stamp_radius as f32);
+            fwhm_beta_to_alpha(fwhm_est, config.fixed_beta).clamp(0.5, grid.radius as f32);
 
         let initial_params: [f64; 5] = [
-            local_pos.x,
-            local_pos.y,
-            initial_amplitude as f64,
+            fit.local_pos.x,
+            fit.local_pos.y,
+            fit.amplitude_seed(background),
             initial_alpha as f64,
             background as f64,
         ];
 
-        let model = MoffatFixedBeta::new(stamp_radius as f64, config.fixed_beta as f64);
-
-        let data = FitData::new(&grid.x, &grid.y, &stamp.z, weights.as_deref());
-        let result = optimize(&model, data, initial_params, &config.lm);
+        let model = MoffatFixedBeta::new(grid.radius as f64, config.fixed_beta as f64);
+        let result = optimize(&model, fit.data(grid), initial_params, &config.lm);
 
         let [x0, y0, _, alpha, _] = result.params;
-        let result_pos = DVec2::new(x0, y0) + stamp.origin;
+        let result_pos = fit.to_image(x0, y0);
 
-        if !validate_position(result_pos, pos, alpha as f32, stamp_radius) {
+        if !validate_position(result_pos, pos, alpha as f32, grid.radius) {
             return None;
         }
 

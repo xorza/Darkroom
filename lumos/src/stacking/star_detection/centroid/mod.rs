@@ -41,6 +41,7 @@ use crate::stacking::star_detection::roundness::Roundness;
 use crate::stacking::star_detection::star::Star;
 use gaussian_fit::{GaussianFit, GaussianFitConfig};
 use imaginarium::Buffer2;
+use lm_optimizer::FitData;
 use moffat_fit::{MoffatFit, MoffatFitConfig};
 
 /// Stamp radius as a multiple of FWHM.
@@ -266,6 +267,66 @@ fn fit_weights(
     noise.map(|n| {
         inverse_variance_weights(data_z, background as f64, n.sky_noise as f64, n.noise_model)
     })
+}
+
+/// The per-candidate inputs both profile fits need before the optimizer runs: the stamp, the
+/// centre expressed in the stamp's own frame, the inverse-variance weights, and a width seed.
+///
+/// The two fits differ only in the model they hand to the optimizer and the parameters they read
+/// back out; everything up to that point is this.
+#[derive(Debug)]
+struct StampFit {
+    stamp: StampData,
+    /// `pos` relative to [`StampData::origin`] — the frame the fit runs in.
+    local_pos: DVec2,
+    weights: Option<ArrayVec<f64, MAX_STAMP_PIXELS>>,
+    /// Gaussian-equivalent width from the stamp's second moments, seeding the optimizer.
+    sigma_est: f32,
+}
+
+impl StampFit {
+    /// `None` when the stamp falls outside the frame, or holds too few pixels to constrain `N`
+    /// free parameters — a least-squares fit needs strictly more samples than parameters.
+    fn prepare<const N: usize>(
+        pixels: &Buffer2<f32>,
+        pos: DVec2,
+        grid: &StampGrid,
+        background: f32,
+        noise: Option<FitNoise>,
+    ) -> Option<Self> {
+        let stamp = extract_stamp(pixels, pos, grid.radius)?;
+        if stamp.z.len() <= N {
+            return None;
+        }
+        // Fit in the stamp's own frame: the models are translation-invariant, so this is the same
+        // fit with better-conditioned magnitudes, and the coordinate arrays become the shared grid
+        // instead of two per-candidate ramps.
+        let local_pos = pos - stamp.origin;
+        Some(Self {
+            weights: fit_weights(&stamp.z, background, noise),
+            sigma_est: estimate_sigma_from_moments(
+                &grid.x, &grid.y, &stamp.z, local_pos, background,
+            ),
+            stamp,
+            local_pos,
+        })
+    }
+
+    /// The optimizer's view of the stamp: coordinate ramps shared across the whole detection,
+    /// pixel values and weights owned per candidate.
+    fn data<'a>(&'a self, grid: &'a StampGrid) -> FitData<'a> {
+        FitData::new(&grid.x, &grid.y, &self.stamp.z, self.weights.as_deref())
+    }
+
+    /// Amplitude seed: the stamp's peak above the sky, floored so the optimizer starts positive.
+    fn amplitude_seed(&self, background: f32) -> f64 {
+        (self.stamp.peak - background).max(0.01) as f64
+    }
+
+    /// Lift a fitted centre out of the stamp frame back into image coordinates.
+    fn to_image(&self, x0: f64, y0: f64) -> DVec2 {
+        DVec2::new(x0, y0) + self.stamp.origin
+    }
 }
 
 /// Flat per-stamp sky estimate: one (background, noise) pair valid at the stamp
