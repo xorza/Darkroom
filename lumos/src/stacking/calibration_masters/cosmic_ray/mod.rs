@@ -21,6 +21,7 @@
 //! without a per-frame discriminator. (`xtrans_removes_cosmic_ray...` / `bayer_tight_star...` tests
 //! pin the tight-star behavior.)
 
+use crate::bit_buffer2::BitBuffer2;
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 use imaginarium::Buffer2;
@@ -113,7 +114,7 @@ fn reject_mono_buffer(data: &mut Buffer2<f32>, config: &CosmicRayConfig) -> usiz
     if size.width < 3 || size.height < 3 {
         return 0;
     }
-    let mut mask = vec![false; size.pixel_count()];
+    let mut mask = BitBuffer2::new_default(size);
     // Median scratch, reused across iterations. Each is written in full before it is read, so the
     // carried-over contents never matter — only the capacity does.
     let (mut m3, mut m37, mut m5, mut s_med5) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
@@ -148,12 +149,13 @@ fn reject_mono_buffer(data: &mut Buffer2<f32>, config: &CosmicRayConfig) -> usiz
 
         let flags = detect_and_grow(&sprime, &f, &noise, &mask, size, config);
 
+        // Word-wise: `flags & !mask` is what is newly set, then `mask |= flags`. Both buffers
+        // keep their padding bits clear (`new_default` and `from_predicate` leave them zero, and
+        // neither operation sets them), so counting whole words needs no masking here.
         let mut newly = 0usize;
-        for (m, &flag) in mask.iter_mut().zip(&flags) {
-            if flag && !*m {
-                *m = true;
-                newly += 1;
-            }
+        for (m, &f) in mask.words.iter_mut().zip(&flags.words) {
+            newly += (f & !*m).count_ones() as usize;
+            *m |= f;
         }
         if newly == 0 {
             break;
@@ -161,7 +163,7 @@ fn reject_mono_buffer(data: &mut Buffer2<f32>, config: &CosmicRayConfig) -> usiz
         replace_flagged(data, size, &mask);
     }
 
-    mask.iter().filter(|&&m| m).count()
+    mask.count_ones()
 }
 
 /// Block-replicate `data` to twice `size` on each axis (each pixel → a 2×2 block).
@@ -304,23 +306,22 @@ fn detect_and_grow(
     significance: &[f32],
     f: &[f32],
     noise: &[f32],
-    mask: &[bool],
+    mask: &BitBuffer2,
     size: Size2us,
     cfg: &CosmicRayConfig,
-) -> Vec<bool> {
+) -> BitBuffer2 {
     let passes_contrast = |i: usize, sig_thresh: f32| {
         let f_norm = (f[i] / noise[i]).max(FINE_STRUCTURE_SIGMA_FLOOR);
         significance[i] > sig_thresh && significance[i] > cfg.objlim * f_norm
     };
-    let primary: Vec<bool> = (0..size.pixel_count())
-        .map(|i| !mask[i] && passes_contrast(i, cfg.sigclip))
-        .collect();
+    let primary =
+        BitBuffer2::from_predicate(size, |i| !mask.get(i) && passes_contrast(i, cfg.sigclip));
 
     let lowered = cfg.sigclip * cfg.sigfrac;
     let mut flags = primary.clone();
     for y in 0..size.height {
         for x in 0..size.width {
-            if !primary[size.index_of(Vec2us::new(x, y))] {
+            if !primary.get_at(Vec2us::new(x, y)) {
                 continue;
             }
             let y0 = y.saturating_sub(1);
@@ -330,8 +331,8 @@ fn detect_and_grow(
             for ny in y0..=y1 {
                 for nx in x0..=x1 {
                     let j = size.index_of(Vec2us::new(nx, ny));
-                    if !flags[j] && !mask[j] && passes_contrast(j, lowered) {
-                        flags[j] = true;
+                    if !flags.get(j) && !mask.get(j) && passes_contrast(j, lowered) {
+                        flags.set(j, true);
                     }
                 }
             }
@@ -350,7 +351,7 @@ fn detect_and_grow(
 /// writes off the cache lines the rows above and below are reading. Aliasing the two through a raw
 /// pointer is sound (the sets are disjoint) and was measured *slower* on every run of
 /// `bench_cosmic_ray_reject_mono` — the false sharing costs more than the copy.
-fn replace_flagged(data: &mut Buffer2<f32>, size: Size2us, mask: &[bool]) {
+fn replace_flagged(data: &mut Buffer2<f32>, size: Size2us, mask: &BitBuffer2) {
     let src = data.pixels().to_vec();
     let (wi, hi) = (size.width as isize, size.height as isize);
     data.pixels_mut()
@@ -359,7 +360,7 @@ fn replace_flagged(data: &mut Buffer2<f32>, size: Size2us, mask: &[bool]) {
         .for_each(|(y, row)| {
             let mut buf: Vec<f32> = Vec::with_capacity(25);
             for (x, o) in row.iter_mut().enumerate() {
-                if !mask[size.index_of(Vec2us::new(x, y))] {
+                if !mask.get_at(Vec2us::new(x, y)) {
                     continue;
                 }
                 buf.clear();
@@ -368,7 +369,7 @@ fn replace_flagged(data: &mut Buffer2<f32>, size: Size2us, mask: &[bool]) {
                     for dx in -2..=2 {
                         let xx = (x as isize + dx).clamp(0, wi - 1) as usize;
                         let j = size.index_of(Vec2us::new(xx, yy));
-                        if !mask[j] {
+                        if !mask.get(j) {
                             buf.push(src[j]);
                         }
                     }
@@ -443,7 +444,7 @@ fn reject_xtrans(data: &mut Buffer2<f32>, cfa: &CfaType, config: &CosmicRayConfi
     if size.width < 7 || size.height < 7 {
         return 0;
     }
-    let mut mask = vec![false; size.pixel_count()];
+    let mut mask = BitBuffer2::new_default(size);
 
     for _ in 0..config.niter {
         let pix = data.pixels();
@@ -453,12 +454,13 @@ fn reject_xtrans(data: &mut Buffer2<f32>, cfa: &CfaType, config: &CosmicRayConfi
 
         let flags = detect_and_grow(&s, &f, &noise, &mask, size, config);
 
+        // Word-wise: `flags & !mask` is what is newly set, then `mask |= flags`. Both buffers
+        // keep their padding bits clear (`new_default` and `from_predicate` leave them zero, and
+        // neither operation sets them), so counting whole words needs no masking here.
         let mut newly = 0usize;
-        for (m, &flag) in mask.iter_mut().zip(&flags) {
-            if flag && !*m {
-                *m = true;
-                newly += 1;
-            }
+        for (m, &f) in mask.words.iter_mut().zip(&flags.words) {
+            newly += (f & !*m).count_ones() as usize;
+            *m |= f;
         }
         if newly == 0 {
             break;
@@ -466,7 +468,7 @@ fn reject_xtrans(data: &mut Buffer2<f32>, cfa: &CfaType, config: &CosmicRayConfi
         xtrans_replace(data, cfa, &mask);
     }
 
-    mask.iter().filter(|&&m| m).count()
+    mask.count_ones()
 }
 
 /// Read-only context for same-color gathering: the plane data, its size, the CFA pattern, and the
@@ -476,7 +478,7 @@ struct CfaScene<'a> {
     pix: &'a [f32],
     size: Size2us,
     cfa: &'a CfaType,
-    mask: &'a [bool],
+    mask: &'a BitBuffer2,
 }
 
 /// Gather same-color (`color_at`) neighbor `(manhattan_dist, value)` around `pos` within Chebyshev
@@ -517,7 +519,12 @@ fn same_color_values(
 
 /// Compute `L⁺`, `F`, and the signal estimate per pixel from same-color medians at two scales (one
 /// gather per pixel: nearest-`XTRANS_LARGE`, with the nearest-`XTRANS_SMALL` subset).
-fn xtrans_structure(pix: &[f32], size: Size2us, cfa: &CfaType, mask: &[bool]) -> XtransStructure {
+fn xtrans_structure(
+    pix: &[f32],
+    size: Size2us,
+    cfa: &CfaType,
+    mask: &BitBuffer2,
+) -> XtransStructure {
     let (w, n) = (size.width, size.pixel_count());
     let mut lplus = vec![0.0f32; n];
     let mut f = vec![0.0f32; n];
@@ -612,7 +619,7 @@ fn xtrans_noise(
 }
 
 /// Replace masked pixels with the median of their nearest unmasked same-color neighbors.
-fn xtrans_replace(data: &mut Buffer2<f32>, cfa: &CfaType, mask: &[bool]) {
+fn xtrans_replace(data: &mut Buffer2<f32>, cfa: &CfaType, mask: &BitBuffer2) {
     let size = Size2us::new(data.width(), data.height());
     let w = size.width;
     let src = data.pixels().to_vec();
