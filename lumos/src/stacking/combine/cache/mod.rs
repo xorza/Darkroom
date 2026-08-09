@@ -15,10 +15,11 @@ use crate::memory::ChunkMemoryLayout;
 use crate::stacking::combine::MIN_CONTRIBUTING_COVERAGE;
 use crate::stacking::combine::cache_config::CacheConfig;
 use crate::stacking::combine::config::Normalization;
-use crate::stacking::combine::error::{Error, FramePlane};
+use crate::stacking::combine::error::Error;
 use crate::stacking::combine::normalization::{FrameNorm, compute_frame_norms};
 use crate::stacking::combine::rejection::scratch_buffers::ScratchBuffers;
 use crate::stacking::combine::stack::StackFrame;
+use crate::stacking::frame_store::FramePlane;
 use crate::stacking::frame_store::{
     SpillDirectory, StackableImage, StoredFrame, StoredPlane, WarpQuality,
 };
@@ -253,18 +254,7 @@ fn validate_stored_geometry(
         .channels
         .iter()
         .map(|plane| (FramePlane::Channel, plane))
-        .chain(
-            frame
-                .coverage
-                .as_ref()
-                .map(|plane| (FramePlane::Coverage, plane)),
-        )
-        .chain(
-            frame
-                .confidence
-                .as_ref()
-                .map(|plane| (FramePlane::Confidence, plane)),
-        );
+        .chain(frame.quality.present());
     for (kind, plane) in planes {
         if plane.samples() != expected {
             return Err(Error::StoredFramePlaneSamples {
@@ -347,12 +337,7 @@ fn weighted_chunk_memory_layout(
     planes: QualityPlanes,
 ) -> ChunkMemoryLayout {
     ChunkMemoryLayout {
-        input_planes: frames
-            .iter()
-            .map(|frame| {
-                1 + usize::from(frame.coverage.is_some()) + usize::from(frame.confidence.is_some())
-            })
-            .sum(),
+        input_planes: frames.iter().map(|frame| 1 + frame.quality.count()).sum(),
         resident_planes: output_channels * resident_planes_per_channel(planes),
     }
 }
@@ -368,7 +353,7 @@ fn coverage_chunk_memory_layout(
     ChunkMemoryLayout {
         input_planes: frames
             .iter()
-            .filter(|frame| frame.coverage.is_some())
+            .filter(|frame| frame.quality.coverage.is_some())
             .count(),
         resident_planes: output_channels * resident_planes_per_channel(planes) + 1,
     }
@@ -511,11 +496,8 @@ impl FrameCache {
             // Same guarantee `from_stack_frames` gives caller-supplied planes: coverage in
             // `[0, 1]` and confidence non-negative, so the gate and the weight multiplier below
             // can't be handed a value that silently corrupts the combine.
-            for (kind, plane) in [
-                (FramePlane::Coverage, frame.coverage.as_ref()),
-                (FramePlane::Confidence, frame.confidence.as_ref()),
-            ] {
-                if let Some(plane) = plane {
+            for (kind, plane) in frame.quality.present() {
+                {
                     validate_warp_plane_values(
                         index,
                         kind,
@@ -643,7 +625,12 @@ impl FrameCache {
 
         // No frame carries support, so every pixel is fully covered — and saying so costs one
         // number rather than an image-sized plane of `1.0`.
-        if !planes.coverage || self.frames.iter().all(|frame| frame.coverage.is_none()) {
+        if !planes.coverage
+            || self
+                .frames
+                .iter()
+                .all(|frame| frame.quality.coverage.is_none())
+        {
             return StackProduct {
                 image,
                 coverage: planes.coverage.then(|| Coverage::Uniform {
@@ -674,7 +661,7 @@ impl FrameCache {
 
             let cov_chunks = quality_plane_chunks(
                 &self.frames,
-                |frame| frame.coverage.as_ref(),
+                |frame| frame.quality.coverage.as_ref(),
                 base,
                 base + span,
             );
@@ -765,13 +752,13 @@ impl FrameCache {
                 let chunk_end = pixel_offset + chunk_pixels;
                 let coverage = quality_plane_chunks(
                     &self.frames,
-                    |frame| frame.coverage.as_ref(),
+                    |frame| frame.quality.coverage.as_ref(),
                     pixel_offset,
                     chunk_end,
                 );
                 let confidence = quality_plane_chunks(
                     &self.frames,
-                    |frame| frame.confidence.as_ref(),
+                    |frame| frame.quality.confidence.as_ref(),
                     pixel_offset,
                     chunk_end,
                 );

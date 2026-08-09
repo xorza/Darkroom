@@ -7,46 +7,7 @@ use thiserror::Error;
 
 use crate::error::InvalidConfigField;
 use crate::io::image::image_dimensions::ImageDimensions;
-use crate::stacking::frame_store::FrameStoreError;
-
-/// Which of a frame's planes a validation failure is about.
-///
-/// Names the plane in the errors below, and picks the range each one must satisfy: coverage is a
-/// fraction of a pixel that had support, confidence an interpolation weight with no upper bound.
-/// Carrying the kind rather than its label is what keeps that rule out of a string comparison.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FramePlane {
-    /// One of the image's colour planes.
-    Channel,
-    /// Per-pixel warp support, in `[0, 1]`.
-    Coverage,
-    /// Per-pixel interpolation confidence, non-negative.
-    Confidence,
-}
-
-impl FramePlane {
-    /// Whether `value` is in range for this plane. Non-finite is out of range for all of them.
-    pub(crate) fn accepts(self, value: f32) -> bool {
-        value.is_finite()
-            && match self {
-                // Finiteness is the whole rule for image data, as in `validate_sample_channels`:
-                // dark subtraction takes a calibrated channel below zero legitimately.
-                Self::Channel => true,
-                Self::Coverage => (0.0..=1.0).contains(&value),
-                Self::Confidence => value >= 0.0,
-            }
-    }
-}
-
-impl std::fmt::Display for FramePlane {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(match self {
-            Self::Channel => "a channel",
-            Self::Coverage => "coverage",
-            Self::Confidence => "confidence",
-        })
-    }
-}
+use crate::stacking::frame_store::{FramePlane, FrameStoreError};
 
 /// Invalid [`crate::StackConfig`] parameters.
 ///

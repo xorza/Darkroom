@@ -464,8 +464,7 @@ fn load_and_cache_frame<I: StackableImage>(
         );
         let frame = StoredFrame {
             channels: planes,
-            coverage: None,
-            confidence: None,
+            quality: WarpQuality::none(),
             source_stats: cached_stats.expect("valid cache has readable frame statistics"),
         };
         validate_stored_samples(
