@@ -290,238 +290,169 @@ fn filter_fwhm_outliers_negative_deviation_disabled() {
     assert_eq!(stars.len(), 10);
 }
 
+/// Deduplication over every geometry that mattered, as one table.
+///
+/// Each case pins the *surviving fluxes in order*, which is stronger than what most of the
+/// fifteen tests this replaces asserted — they checked a count, and sometimes one coordinate.
+/// Fluxes are distinct within every case, so the expected sequence identifies exactly which
+/// stars survived and in what order.
 #[test]
-fn remove_duplicate_stars_empty() {
-    let mut stars: Vec<Star> = vec![];
-    let removed = remove_duplicate_stars(&mut stars, 8.0);
+fn remove_duplicate_stars_over_every_geometry() {
+    struct Case {
+        /// `(x, y, flux)` in input order — the order the function actually honours.
+        stars: &'static [(f64, f64, f32)],
+        separation: f32,
+        /// Fluxes of the survivors, in order.
+        survivors: &'static [f32],
+        why: &'static str,
+    }
 
-    assert_eq!(removed, 0);
-    assert!(stars.is_empty());
-}
-
-#[test]
-fn remove_duplicate_stars_single() {
-    let mut stars = vec![Star::at(DVec2::new(10.0, 10.0)).with_flux(100.0)];
-    let removed = remove_duplicate_stars(&mut stars, 8.0);
-
-    assert_eq!(removed, 0);
-    assert_eq!(stars.len(), 1);
-}
-
-#[test]
-fn remove_duplicate_stars_no_duplicates() {
-    // Stars far apart - no removal
-    let mut stars = vec![
-        Star::at(DVec2::new(10.0, 10.0)).with_flux(100.0),
-        Star::at(DVec2::new(50.0, 50.0)).with_flux(90.0),
-        Star::at(DVec2::new(100.0, 100.0)).with_flux(80.0),
+    let cases = [
+        Case {
+            stars: &[],
+            separation: 8.0,
+            survivors: &[],
+            why: "nothing to dedupe",
+        },
+        Case {
+            stars: &[(10.0, 10.0, 100.0)],
+            separation: 8.0,
+            survivors: &[100.0],
+            why: "one star is never its own duplicate",
+        },
+        Case {
+            stars: &[
+                (10.0, 10.0, 100.0),
+                (50.0, 50.0, 90.0),
+                (100.0, 100.0, 80.0),
+            ],
+            separation: 8.0,
+            survivors: &[100.0, 90.0, 80.0],
+            why: "all far apart",
+        },
+        Case {
+            stars: &[(10.0, 10.0, 100.0), (12.0, 12.0, 90.0), (50.0, 50.0, 80.0)],
+            separation: 8.0,
+            survivors: &[100.0, 80.0],
+            why: "one pair at 2.83, one star far off",
+        },
+        Case {
+            stars: &[(10.0, 10.0, 100.0), (11.0, 11.0, 50.0)],
+            separation: 8.0,
+            survivors: &[100.0],
+            why: "brightest-first input keeps the bright one",
+        },
+        Case {
+            // The documented precondition: it keeps the FIRST of a cluster and never reads
+            // `.flux`. Callers sort by flux beforehand; this is what skipping that gets you.
+            stars: &[(11.0, 11.0, 50.0), (10.0, 10.0, 100.0)],
+            separation: 8.0,
+            survivors: &[50.0],
+            why: "unsorted input keeps first, not brightest",
+        },
+        Case {
+            stars: &[(10.0, 10.0, 100.0), (16.0, 16.0, 90.0)],
+            separation: 8.0,
+            survivors: &[100.0, 90.0],
+            why: "sqrt(6^2+6^2) = 8.485, outside 8.0",
+        },
+        Case {
+            // The boundary itself. The comparison is strictly less than, so a pair exactly
+            // `separation` apart survives; a hair inside it does not.
+            stars: &[(10.0, 10.0, 100.0), (18.0, 10.0, 90.0)],
+            separation: 8.0,
+            survivors: &[100.0, 90.0],
+            why: "distance == separation is kept",
+        },
+        Case {
+            stars: &[(10.0, 10.0, 100.0), (17.999, 10.0, 90.0)],
+            separation: 8.0,
+            survivors: &[100.0],
+            why: "a hair inside the boundary is removed",
+        },
+        Case {
+            stars: &[(10.0, 10.0, 100.0), (15.0, 15.0, 90.0)],
+            separation: 8.0,
+            survivors: &[100.0],
+            why: "sqrt(5^2+5^2) = 7.07, inside 8.0",
+        },
+        Case {
+            stars: &[(10.0, 10.0, 100.0), (12.0, 10.0, 90.0), (14.0, 10.0, 80.0)],
+            separation: 8.0,
+            survivors: &[100.0],
+            why: "cluster of three collapses to the first",
+        },
+        Case {
+            stars: &[
+                (10.0, 10.0, 100.0),
+                (12.0, 10.0, 90.0),
+                (100.0, 100.0, 80.0),
+                (102.0, 100.0, 70.0),
+            ],
+            separation: 8.0,
+            survivors: &[100.0, 80.0],
+            why: "two pairs, far apart from each other",
+        },
+        Case {
+            // Chained: 5 is inside 8 of the first, 10 is not, and 20 is clear of 10.
+            stars: &[
+                (0.0, 0.0, 100.0),
+                (5.0, 0.0, 90.0),
+                (10.0, 0.0, 80.0),
+                (20.0, 0.0, 70.0),
+            ],
+            separation: 8.0,
+            survivors: &[100.0, 80.0, 70.0],
+            why: "a removed star cannot shadow the next",
+        },
+        Case {
+            stars: &[(10.0, 10.0, 100.0), (10.0, 15.0, 90.0), (10.0, 25.0, 80.0)],
+            separation: 8.0,
+            survivors: &[100.0, 80.0],
+            why: "separation is euclidean, not per-axis",
+        },
+        Case {
+            stars: &[(10.0, 10.0, 100.0), (10.0, 10.0, 90.0), (10.0, 10.0, 80.0)],
+            separation: 8.0,
+            survivors: &[100.0],
+            why: "coincident stars collapse to one",
+        },
+        Case {
+            stars: &[(10.0, 10.0, 100.0), (30.0, 10.0, 90.0), (50.0, 10.0, 80.0)],
+            separation: 25.0,
+            survivors: &[100.0, 80.0],
+            why: "20 < 25 removed, 40 >= 25 kept",
+        },
+        Case {
+            stars: &[
+                (10.0, 10.0, 100.0),
+                (12.0, 10.0, 95.0),
+                (50.0, 50.0, 90.0),
+                (100.0, 100.0, 85.0),
+            ],
+            separation: 8.0,
+            survivors: &[100.0, 90.0, 85.0],
+            why: "survivors keep their input order",
+        },
     ];
 
-    let removed = remove_duplicate_stars(&mut stars, 8.0);
+    for case in &cases {
+        let mut stars: Vec<Star> = case
+            .stars
+            .iter()
+            .map(|&(x, y, flux)| Star::at(DVec2::new(x, y)).with_flux(flux))
+            .collect();
+        let removed = remove_duplicate_stars(&mut stars, case.separation);
 
-    assert_eq!(removed, 0);
-    assert_eq!(stars.len(), 3);
-}
-
-#[test]
-fn remove_duplicate_stars_one_pair() {
-    // Two stars within separation - keep brighter one
-    let mut stars = vec![
-        Star::at(DVec2::new(10.0, 10.0)).with_flux(100.0), // Brighter - keep
-        Star::at(DVec2::new(12.0, 12.0)).with_flux(90.0),  // Within 8 pixels - remove
-        Star::at(DVec2::new(50.0, 50.0)).with_flux(80.0),  // Far away - keep
-    ];
-
-    let removed = remove_duplicate_stars(&mut stars, 8.0);
-
-    assert_eq!(removed, 1);
-    assert_eq!(stars.len(), 2);
-    assert!((stars[0].pos.x - 10.0).abs() < 0.01);
-    assert!((stars[1].pos.x - 50.0).abs() < 0.01);
-}
-
-#[test]
-fn remove_duplicate_stars_keeps_brightest() {
-    // Stars sorted by flux (brightest first) - keep first one
-    let mut stars = vec![
-        Star::at(DVec2::new(10.0, 10.0)).with_flux(100.0), // Brightest
-        Star::at(DVec2::new(11.0, 11.0)).with_flux(50.0),  // Dimmer duplicate
-    ];
-
-    let removed = remove_duplicate_stars(&mut stars, 8.0);
-
-    assert_eq!(removed, 1);
-    assert_eq!(stars.len(), 1);
-    assert!((stars[0].flux - 100.0).abs() < 0.01);
-}
-
-#[test]
-fn remove_duplicate_stars_unsorted_input_keeps_first_not_brightest() {
-    // Pins the documented precondition: remove_duplicate_stars keeps the FIRST
-    // star in a cluster, never the brightest — it never reads `.flux`. Callers
-    // (i.e. filter(), via sort_by_flux) are responsible for sorting first; this
-    // test feeds dimmer-first input to show what a caller that skips sorting
-    // actually gets, so a future refactor can't silently assume flux-awareness.
-    let mut stars = vec![
-        Star::at(DVec2::new(11.0, 11.0)).with_flux(50.0), // Dimmer, but first in the Vec
-        Star::at(DVec2::new(10.0, 10.0)).with_flux(100.0), // Brighter, but second
-    ];
-
-    let removed = remove_duplicate_stars(&mut stars, 8.0);
-
-    assert_eq!(removed, 1);
-    assert_eq!(stars.len(), 1);
-    assert!(
-        (stars[0].flux - 50.0).abs() < 0.01,
-        "unsorted input keeps the first-encountered star (flux 50), not the brightest (100)"
-    );
-}
-
-#[test]
-fn remove_duplicate_stars_exact_separation() {
-    // Stars exactly at separation distance - should NOT be removed
-    // Distance = sqrt(6^2 + 6^2) = 8.485 > 8.0
-    let mut stars = vec![
-        Star::at(DVec2::new(10.0, 10.0)).with_flux(100.0),
-        Star::at(DVec2::new(16.0, 16.0)).with_flux(90.0),
-    ];
-
-    let removed = remove_duplicate_stars(&mut stars, 8.0);
-
-    assert_eq!(removed, 0);
-    assert_eq!(stars.len(), 2);
-}
-
-#[test]
-fn remove_duplicate_stars_just_under_separation() {
-    // Stars just under separation - should be removed
-    // Distance = sqrt(5^2 + 5^2) = 7.07 < 8.0
-    let mut stars = vec![
-        Star::at(DVec2::new(10.0, 10.0)).with_flux(100.0),
-        Star::at(DVec2::new(15.0, 15.0)).with_flux(90.0),
-    ];
-
-    let removed = remove_duplicate_stars(&mut stars, 8.0);
-
-    assert_eq!(removed, 1);
-    assert_eq!(stars.len(), 1);
-}
-
-#[test]
-fn remove_duplicate_stars_cluster_of_three() {
-    // Three stars in a cluster - keep only brightest
-    let mut stars = vec![
-        Star::at(DVec2::new(10.0, 10.0)).with_flux(100.0), // Keep
-        Star::at(DVec2::new(12.0, 10.0)).with_flux(90.0),  // Remove (close to first)
-        Star::at(DVec2::new(14.0, 10.0)).with_flux(80.0),  // Remove (close to first)
-    ];
-
-    let removed = remove_duplicate_stars(&mut stars, 8.0);
-
-    assert_eq!(removed, 2);
-    assert_eq!(stars.len(), 1);
-    assert!((stars[0].flux - 100.0).abs() < 0.01);
-}
-
-#[test]
-fn remove_duplicate_stars_two_separate_pairs() {
-    // Two pairs of duplicates, far apart from each other
-    let mut stars = vec![
-        Star::at(DVec2::new(10.0, 10.0)).with_flux(100.0), // Pair 1 - keep
-        Star::at(DVec2::new(12.0, 10.0)).with_flux(90.0),  // Pair 1 - remove
-        Star::at(DVec2::new(100.0, 100.0)).with_flux(80.0), // Pair 2 - keep
-        Star::at(DVec2::new(102.0, 100.0)).with_flux(70.0), // Pair 2 - remove
-    ];
-
-    let removed = remove_duplicate_stars(&mut stars, 8.0);
-
-    assert_eq!(removed, 2);
-    assert_eq!(stars.len(), 2);
-    assert!((stars[0].pos.x - 10.0).abs() < 0.01);
-    assert!((stars[1].pos.x - 100.0).abs() < 0.01);
-}
-
-#[test]
-fn remove_duplicate_stars_horizontal_line() {
-    // Stars in a horizontal line with spacing
-    let mut stars = vec![
-        Star::at(DVec2::new(0.0, 0.0)).with_flux(100.0),
-        Star::at(DVec2::new(5.0, 0.0)).with_flux(90.0), // Within 8 of first
-        Star::at(DVec2::new(10.0, 0.0)).with_flux(80.0), // Within 8 of second (but second removed)
-        Star::at(DVec2::new(20.0, 0.0)).with_flux(70.0), // Far from all remaining
-    ];
-
-    let removed = remove_duplicate_stars(&mut stars, 8.0);
-
-    // First removes second (5 < 8)
-    // First doesn't remove third (10 >= 8)
-    // Third is kept, then compared with fourth (distance 10 >= 8)
-    assert_eq!(removed, 1);
-    assert_eq!(stars.len(), 3);
-}
-
-#[test]
-fn remove_duplicate_stars_vertical_separation() {
-    // Stars separated only vertically
-    let mut stars = vec![
-        Star::at(DVec2::new(10.0, 10.0)).with_flux(100.0),
-        Star::at(DVec2::new(10.0, 15.0)).with_flux(90.0), // 5 pixels vertical - remove
-        Star::at(DVec2::new(10.0, 25.0)).with_flux(80.0), // 15 pixels from first - keep
-    ];
-
-    let removed = remove_duplicate_stars(&mut stars, 8.0);
-
-    assert_eq!(removed, 1);
-    assert_eq!(stars.len(), 2);
-}
-
-#[test]
-fn remove_duplicate_stars_zero_separation() {
-    // Zero separation - removes all but one
-    let mut stars = vec![
-        Star::at(DVec2::new(10.0, 10.0)).with_flux(100.0),
-        Star::at(DVec2::new(10.0, 10.0)).with_flux(90.0), // Exact same position
-        Star::at(DVec2::new(10.0, 10.0)).with_flux(80.0), // Exact same position
-    ];
-
-    let removed = remove_duplicate_stars(&mut stars, 8.0);
-
-    assert_eq!(removed, 2);
-    assert_eq!(stars.len(), 1);
-}
-
-#[test]
-fn remove_duplicate_stars_large_separation_threshold() {
-    // Large separation threshold removes more
-    let mut stars = vec![
-        Star::at(DVec2::new(10.0, 10.0)).with_flux(100.0),
-        Star::at(DVec2::new(30.0, 10.0)).with_flux(90.0), // 20 pixels away
-        Star::at(DVec2::new(50.0, 10.0)).with_flux(80.0), // 40 pixels from first
-    ];
-
-    let removed = remove_duplicate_stars(&mut stars, 25.0);
-
-    // 20 < 25, so second is removed
-    // 40 >= 25, so third is kept
-    assert_eq!(removed, 1);
-    assert_eq!(stars.len(), 2);
-}
-
-#[test]
-fn remove_duplicate_stars_preserves_order() {
-    // Remaining stars should maintain their relative order
-    let mut stars = vec![
-        Star::at(DVec2::new(10.0, 10.0)).with_flux(100.0),
-        Star::at(DVec2::new(12.0, 10.0)).with_flux(95.0), // Remove
-        Star::at(DVec2::new(50.0, 50.0)).with_flux(90.0),
-        Star::at(DVec2::new(100.0, 100.0)).with_flux(85.0),
-    ];
-
-    remove_duplicate_stars(&mut stars, 8.0);
-
-    // Check order is preserved
-    assert!(stars[0].flux > stars[1].flux);
-    assert!(stars[1].flux > stars[2].flux);
+        let survivors: Vec<f32> = stars.iter().map(|s| s.flux).collect();
+        assert_eq!(survivors, case.survivors, "{}", case.why);
+        assert_eq!(
+            removed,
+            case.stars.len() - case.survivors.len(),
+            "{}: removed count disagrees with the survivors",
+            case.why
+        );
+    }
 }
 
 #[test]
