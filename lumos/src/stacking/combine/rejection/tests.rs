@@ -13,49 +13,51 @@ use crate::stacking::combine::rejection::winsorized_clip_config::{
 };
 use crate::stacking::combine::rejection::*;
 
+/// Every rejection config's documented defaults in one place. These were six one-assertion tests
+/// whose only difference was which type they named.
 #[test]
-fn test_sigma_clip_config_default() {
-    let config = SigmaClipConfig::default();
-    assert_eq!(config.sigma_low, 2.5);
-    assert_eq!(config.sigma_high, 2.5);
-    assert_eq!(config.max_iterations, 3);
+fn rejection_config_defaults() {
+    let sigma = SigmaClipConfig::default();
+    assert_eq!(
+        (sigma.sigma_low, sigma.sigma_high, sigma.max_iterations),
+        (2.5, 2.5, 3)
+    );
+
+    let winsorized = WinsorizedClipConfig::default();
+    assert_eq!((winsorized.sigma_low, winsorized.sigma_high), (2.5, 2.5));
+
+    let linear_fit = LinearFitClipConfig::default();
+    assert_eq!((linear_fit.sigma_low, linear_fit.sigma_high), (3.0, 3.0));
+
+    let percentile = PercentileClipConfig::default();
+    assert_eq!(
+        (percentile.low_percentile, percentile.high_percentile),
+        (10.0, 10.0)
+    );
 }
 
+/// The symmetric constructor mirrors its one sigma; the asymmetric one keeps both apart.
 #[test]
-fn test_sigma_clip_config_new_symmetric() {
-    let config = SigmaClipConfig::new(3.0, 5);
-    assert_eq!(config.sigma_low, 3.0);
-    assert_eq!(config.sigma_high, 3.0);
-    assert_eq!(config.max_iterations, 5);
-}
+fn sigma_clip_constructors_place_their_arguments() {
+    let symmetric = SigmaClipConfig::new(3.0, 5);
+    assert_eq!(
+        (
+            symmetric.sigma_low,
+            symmetric.sigma_high,
+            symmetric.max_iterations
+        ),
+        (3.0, 3.0, 5)
+    );
 
-#[test]
-fn test_sigma_clip_config_new_asymmetric() {
-    let config = SigmaClipConfig::new_asymmetric(2.0, 3.0, 5);
-    assert_eq!(config.sigma_low, 2.0);
-    assert_eq!(config.sigma_high, 3.0);
-    assert_eq!(config.max_iterations, 5);
-}
-
-#[test]
-fn test_winsorized_config_default() {
-    let config = WinsorizedClipConfig::default();
-    assert_eq!(config.sigma_low, 2.5);
-    assert_eq!(config.sigma_high, 2.5);
-}
-
-#[test]
-fn test_linear_fit_config_default() {
-    let config = LinearFitClipConfig::default();
-    assert_eq!(config.sigma_low, 3.0);
-    assert_eq!(config.sigma_high, 3.0);
-}
-
-#[test]
-fn test_percentile_config_default() {
-    let config = PercentileClipConfig::default();
-    assert_eq!(config.low_percentile, 10.0);
-    assert_eq!(config.high_percentile, 10.0);
+    let asymmetric = SigmaClipConfig::new_asymmetric(2.0, 3.0, 5);
+    assert_eq!(
+        (
+            asymmetric.sigma_low,
+            asymmetric.sigma_high,
+            asymmetric.max_iterations
+        ),
+        (2.0, 3.0, 5)
+    );
 }
 
 #[test]

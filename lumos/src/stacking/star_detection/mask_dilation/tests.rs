@@ -126,140 +126,6 @@ fn test_dilate_mask_corner_pixel() {
 }
 
 #[test]
-fn test_dilate_mask_edge_pixel() {
-    // Pixel at edge (0, 2) in 5x5
-    let mut mask_data = vec![false; 25];
-    mask_data[2 * 5 + 0] = true;
-    let mask = BitBuffer2::from_slice(Size2us::new(5, 5), &mask_data);
-    let mut dilated = BitBuffer2::new_filled(Size2us::new(5, 5), false);
-    dilate_mask(&mask, 1, &mut dilated);
-
-    // Should expand but clip at left edge
-    assert!(dilated.get(1 * 5 + 0));
-    assert!(dilated.get(1 * 5 + 1));
-    assert!(dilated.get(2 * 5 + 0));
-    assert!(dilated.get(2 * 5 + 1));
-    assert!(dilated.get(3 * 5 + 0));
-    assert!(dilated.get(3 * 5 + 1));
-}
-
-#[test]
-fn test_dilate_mask_merges_nearby_pixels() {
-    // Two pixels separated by gap, dilation should merge them
-    // 7x1: #..#...
-    let mut mask_data = vec![false; 7];
-    mask_data[0] = true;
-    mask_data[3] = true;
-    let mask = BitBuffer2::from_slice(Size2us::new(7, 1), &mask_data);
-    let mut dilated = BitBuffer2::new_filled(Size2us::new(7, 1), false);
-    dilate_mask(&mask, 2, &mut dilated);
-
-    // Both should expand and merge
-    // Pixel 0 expands to 0,1,2
-    // Pixel 3 expands to 1,2,3,4,5
-    // Merged: 0,1,2,3,4,5
-    for i in 0..6 {
-        assert!(dilated.get(i), "Pixel {} should be true after dilation", i);
-    }
-    assert!(!dilated.get(6));
-}
-
-#[test]
-fn test_dilate_mask_large_radius() {
-    // 11x11 image with center pixel, radius 5 should fill most of image
-    let mut mask_data = vec![false; 121];
-    mask_data[5 * 11 + 5] = true; // center
-    let mask = BitBuffer2::from_slice(Size2us::new(11, 11), &mask_data);
-    let mut dilated = BitBuffer2::new_filled(Size2us::new(11, 11), false);
-    dilate_mask(&mask, 5, &mut dilated);
-
-    // Should create 11x11 square (capped at image bounds)
-    assert!(dilated.iter().all(|x| x), "All pixels should be dilated");
-}
-
-#[test]
-fn test_dilate_mask_radius_larger_than_image() {
-    // Radius larger than image dimensions
-    let mut mask_data = vec![false; 9];
-    mask_data[4] = true; // center of 3x3
-    let mask = BitBuffer2::from_slice(Size2us::new(3, 3), &mask_data);
-    let mut dilated = BitBuffer2::new_filled(Size2us::new(3, 3), false);
-    dilate_mask(&mask, 5, &mut dilated);
-
-    // Should fill entire image
-    assert!(dilated.iter().all(|x| x));
-}
-
-#[test]
-fn test_dilate_mask_all_corners() {
-    // All four corners set
-    let mut mask_data = vec![false; 25]; // 5x5
-    mask_data[0 * 5 + 0] = true; // top-left
-    mask_data[0 * 5 + 4] = true; // top-right
-    mask_data[4 * 5 + 0] = true; // bottom-left
-    mask_data[4 * 5 + 4] = true; // bottom-right
-    let mask = BitBuffer2::from_slice(Size2us::new(5, 5), &mask_data);
-    let mut dilated = BitBuffer2::new_filled(Size2us::new(5, 5), false);
-    dilate_mask(&mask, 1, &mut dilated);
-
-    // Check corner expansions
-    // Top-left expands to (0,0), (0,1), (1,0), (1,1)
-    assert!(dilated.get(0 * 5 + 0));
-    assert!(dilated.get(0 * 5 + 1));
-    assert!(dilated.get(1 * 5 + 0));
-    assert!(dilated.get(1 * 5 + 1));
-
-    // Center should still be false (corners don't reach it with radius 1)
-    assert!(!dilated.get(2 * 5 + 2));
-}
-
-#[test]
-fn test_dilate_mask_full_coverage_radius_2() {
-    // Two pixels that should merge with radius 2
-    // 9x1: #...#....
-    let mut mask_data = vec![false; 9];
-    mask_data[0] = true;
-    mask_data[4] = true;
-    let mask = BitBuffer2::from_slice(Size2us::new(9, 1), &mask_data);
-    let mut dilated = BitBuffer2::new_filled(Size2us::new(9, 1), false);
-    dilate_mask(&mask, 2, &mut dilated);
-
-    // Pixel 0 expands to 0,1,2
-    // Pixel 4 expands to 2,3,4,5,6
-    // Together: 0,1,2,3,4,5,6 (overlap at 2)
-    for i in 0..7 {
-        assert!(dilated.get(i), "Pixel {} should be true", i);
-    }
-    assert!(!dilated.get(7));
-    assert!(!dilated.get(8));
-}
-
-#[test]
-fn test_dilate_mask_non_square_image() {
-    // 7x3 image with pixel at (3, 1)
-    let mut mask_data = vec![false; 21];
-    mask_data[1 * 7 + 3] = true;
-    let mask = BitBuffer2::from_slice(Size2us::new(7, 3), &mask_data);
-    let mut dilated = BitBuffer2::new_filled(Size2us::new(7, 3), false);
-    dilate_mask(&mask, 1, &mut dilated);
-
-    // Should create 3x3 square centered at (3, 1)
-    for y in 0..3 {
-        for x in 2..=4 {
-            assert!(
-                dilated.get(y * 7 + x),
-                "Pixel ({}, {}) should be true",
-                x,
-                y
-            );
-        }
-    }
-    // Outside should be false
-    assert!(!dilated.get(0 * 7 + 0));
-    assert!(!dilated.get(0 * 7 + 6));
-}
-
-#[test]
 fn test_dilate_mask_preserves_original_pixels() {
     // Original pixels should always be in dilated result
     let mut mask_data = vec![false; 25];
@@ -277,126 +143,6 @@ fn test_dilate_mask_preserves_original_pixels() {
 }
 
 #[test]
-fn test_dilate_mask_width_64_exact_word() {
-    // Exact single word width - pixel at bit 63
-    let mut mask_data = vec![false; 64];
-    mask_data[63] = true; // last bit in word
-    let mask = BitBuffer2::from_slice(Size2us::new(64, 1), &mask_data);
-    let mut dilated = BitBuffer2::new_filled(Size2us::new(64, 1), false);
-    dilate_mask(&mask, 2, &mut dilated);
-
-    // Should expand left but not past edge
-    assert!(dilated.get(61));
-    assert!(dilated.get(62));
-    assert!(dilated.get(63));
-    assert!(!dilated.get(60)); // radius 2, so 61-63 only
-}
-
-#[test]
-fn test_dilate_mask_width_65_crosses_word_boundary() {
-    // Width 65 - crosses into second word
-    // Pixel at position 63 should dilate into word 1
-    let mut mask_data = vec![false; 65];
-    mask_data[63] = true; // last bit in first word
-    let mask = BitBuffer2::from_slice(Size2us::new(65, 1), &mask_data);
-    let mut dilated = BitBuffer2::new_filled(Size2us::new(65, 1), false);
-    dilate_mask(&mask, 2, &mut dilated);
-
-    // Should expand: 61, 62, 63, 64
-    assert!(dilated.get(61));
-    assert!(dilated.get(62));
-    assert!(dilated.get(63));
-    assert!(dilated.get(64)); // crosses into second word
-    assert!(!dilated.get(60));
-}
-
-#[test]
-fn test_dilate_mask_width_65_pixel_at_boundary() {
-    // Pixel at position 64 (first bit of second word)
-    let mut mask_data = vec![false; 65];
-    mask_data[64] = true; // first bit in second word
-    let mask = BitBuffer2::from_slice(Size2us::new(65, 1), &mask_data);
-    let mut dilated = BitBuffer2::new_filled(Size2us::new(65, 1), false);
-    dilate_mask(&mask, 2, &mut dilated);
-
-    // Should expand: 62, 63, 64
-    assert!(dilated.get(62)); // crosses back into first word
-    assert!(dilated.get(63));
-    assert!(dilated.get(64));
-    assert!(!dilated.get(61));
-}
-
-#[test]
-fn test_dilate_mask_width_128_two_full_words() {
-    // Two full words
-    let mut mask_data = vec![false; 128];
-    mask_data[64] = true; // first bit of second word
-    let mask = BitBuffer2::from_slice(Size2us::new(128, 1), &mask_data);
-    let mut dilated = BitBuffer2::new_filled(Size2us::new(128, 1), false);
-    dilate_mask(&mask, 3, &mut dilated);
-
-    // Should expand: 61, 62, 63, 64, 65, 66, 67
-    for i in 61..=67 {
-        assert!(dilated.get(i), "Pixel {} should be set", i);
-    }
-    assert!(!dilated.get(60));
-    assert!(!dilated.get(68));
-}
-
-#[test]
-fn test_dilate_mask_width_128_pixel_at_word_end() {
-    // Pixel at last bit of first word
-    let mut mask_data = vec![false; 128];
-    mask_data[63] = true;
-    let mask = BitBuffer2::from_slice(Size2us::new(128, 1), &mask_data);
-    let mut dilated = BitBuffer2::new_filled(Size2us::new(128, 1), false);
-    dilate_mask(&mask, 3, &mut dilated);
-
-    // Should expand: 60, 61, 62, 63, 64, 65, 66
-    for i in 60..=66 {
-        assert!(dilated.get(i), "Pixel {} should be set", i);
-    }
-    assert!(!dilated.get(59));
-    assert!(!dilated.get(67));
-}
-
-#[test]
-fn test_dilate_mask_wide_image_200_pixels() {
-    // Wide image spanning multiple words (200 pixels = 4 words)
-    let width = 200;
-    let mut mask_data = vec![false; width];
-    mask_data[100] = true; // middle
-    let mask = BitBuffer2::from_slice(Size2us::new(width, 1), &mask_data);
-    let mut dilated = BitBuffer2::new_filled(Size2us::new(width, 1), false);
-    dilate_mask(&mask, 5, &mut dilated);
-
-    // Should expand: 95-105
-    for i in 95..=105 {
-        assert!(dilated.get(i), "Pixel {} should be set", i);
-    }
-    assert!(!dilated.get(94));
-    assert!(!dilated.get(106));
-}
-
-#[test]
-fn test_dilate_mask_max_radius_63() {
-    // Radius 63 is the maximum the fast word kernel supports; it reaches into adjacent words.
-    let width = 200;
-    let mut mask_data = vec![false; width];
-    mask_data[100] = true;
-    let mask = BitBuffer2::from_slice(Size2us::new(width, 1), &mask_data);
-    let mut dilated = BitBuffer2::new_filled(Size2us::new(width, 1), false);
-    dilate_mask(&mask, 63, &mut dilated);
-
-    // Should expand: 37-163 (100 ± 63)
-    for i in 37..=163 {
-        assert!(dilated.get(i), "Pixel {} should be set", i);
-    }
-    assert!(!dilated.get(36));
-    assert!(!dilated.get(164));
-}
-
-#[test]
 #[should_panic(expected = "radius must be <= 63")]
 fn test_dilate_mask_radius_above_63_panics() {
     // Radius > 63 is out of contract (production caps dilation at 50).
@@ -405,383 +151,168 @@ fn test_dilate_mask_radius_above_63_panics() {
     dilate_mask(&mask, 64, &mut dilated);
 }
 
+/// Every dilation shape against the brute-force reference, at every pixel.
+///
+/// The reference rescans a `(2r+1)^2` window per pixel, so it shares no structure with the
+/// word-parallel bit implementation under test — an independent oracle, not a second copy of the
+/// same logic. It also checks the whole buffer, where the hand-written cases this replaces
+/// spot-checked a few pixels each. The explicit-footprint tests above stay as the arithmetic
+/// anchor that validates the reference itself.
 #[test]
-fn test_dilate_mask_vertical_word_boundary() {
-    // 2D: 70 wide, 10 tall - pixel in middle
-    let width = 70;
-    let height = 10;
-    let mut mask_data = vec![false; width * height];
-    mask_data[5 * width + 35] = true; // center at (35, 5)
-    let mask = BitBuffer2::from_slice(Size2us::new(width, height), &mask_data);
-    let mut dilated = BitBuffer2::new_filled(Size2us::new(width, height), false);
-    dilate_mask(&mask, 3, &mut dilated);
-
-    // Check horizontal expansion
-    for x in 32..=38 {
-        assert!(
-            dilated.get_at(Vec2us::new(x, 5)),
-            "Pixel ({}, 5) should be set",
-            x
-        );
+fn dilation_matches_the_brute_force_reference() {
+    /// How a case seeds its mask before dilating.
+    enum Seed {
+        /// Individual `(x, y)` pixels.
+        Pixels(&'static [(usize, usize)]),
+        /// Every pixel where `(x + y) % n == 0`; `n = 1` sets all of them.
+        Every(usize),
     }
-    // Check vertical expansion
-    for y in 2..=8 {
-        assert!(
-            dilated.get_at(Vec2us::new(35, y)),
-            "Pixel (35, {}) should be set",
-            y
-        );
+
+    struct Case {
+        name: &'static str,
+        size: Size2us,
+        seed: Seed,
+        radii: &'static [usize],
     }
-    // Check corners of dilated square are set
-    assert!(dilated.get_at(Vec2us::new(32, 2)));
-    assert!(dilated.get_at(Vec2us::new(38, 8)));
-}
 
-#[test]
-fn test_dilate_mask_multiple_pixels_across_words() {
-    // Multiple pixels spanning word boundaries
-    let width = 130;
-    let mut mask_data = vec![false; width];
-    mask_data[62] = true; // near end of word 0
-    mask_data[66] = true; // near start of word 1
-    let mask = BitBuffer2::from_slice(Size2us::new(width, 1), &mask_data);
-    let mut dilated = BitBuffer2::new_filled(Size2us::new(width, 1), false);
-    dilate_mask(&mask, 2, &mut dilated);
+    // Widths straddle the 64-bit word boundary, because the implementation dilates word-wise.
+    let cases = [
+        Case {
+            name: "single centre",
+            size: Size2us::new(9, 9),
+            seed: Seed::Pixels(&[(4, 4)]),
+            radii: &[0, 1, 2, 3, 8, 20],
+        },
+        Case {
+            name: "corner",
+            size: Size2us::new(8, 8),
+            seed: Seed::Pixels(&[(0, 0)]),
+            radii: &[1, 2, 7],
+        },
+        Case {
+            name: "all corners",
+            size: Size2us::new(8, 8),
+            seed: Seed::Pixels(&[(0, 0), (7, 0), (0, 7), (7, 7)]),
+            radii: &[1, 2, 4],
+        },
+        Case {
+            name: "edge midpoints",
+            size: Size2us::new(9, 9),
+            seed: Seed::Pixels(&[(4, 0), (0, 4), (8, 4), (4, 8)]),
+            radii: &[1, 3],
+        },
+        Case {
+            name: "nearby pair merges",
+            size: Size2us::new(10, 4),
+            seed: Seed::Pixels(&[(2, 2), (5, 2)]),
+            radii: &[1, 2, 3],
+        },
+        Case {
+            name: "width 64 exact word",
+            size: Size2us::new(64, 4),
+            seed: Seed::Pixels(&[(0, 1), (63, 1), (31, 2)]),
+            radii: &[0, 1, 2],
+        },
+        Case {
+            name: "width 65 crosses word",
+            size: Size2us::new(65, 4),
+            seed: Seed::Pixels(&[(63, 1), (64, 2)]),
+            radii: &[0, 1, 2],
+        },
+        Case {
+            name: "width 128 two words",
+            size: Size2us::new(128, 3),
+            seed: Seed::Pixels(&[(63, 1), (64, 1), (127, 0)]),
+            radii: &[1, 2],
+        },
+        Case {
+            name: "wide sparse",
+            size: Size2us::new(200, 5),
+            seed: Seed::Pixels(&[(0, 0), (99, 2), (199, 4)]),
+            radii: &[1, 3, 5],
+        },
+        Case {
+            name: "max radius 63",
+            size: Size2us::new(70, 3),
+            seed: Seed::Pixels(&[(35, 1)]),
+            radii: &[63],
+        },
+        Case {
+            name: "single column",
+            size: Size2us::new(1, 10),
+            seed: Seed::Pixels(&[(0, 5)]),
+            radii: &[0, 1, 3],
+        },
+        Case {
+            name: "single row",
+            size: Size2us::new(10, 1),
+            seed: Seed::Pixels(&[(5, 0)]),
+            radii: &[0, 1, 3],
+        },
+        Case {
+            name: "first and last row",
+            size: Size2us::new(12, 6),
+            seed: Seed::Pixels(&[(3, 0), (8, 5)]),
+            radii: &[1, 2],
+        },
+        Case {
+            name: "vertical word boundary",
+            size: Size2us::new(70, 8),
+            seed: Seed::Pixels(&[(64, 0), (64, 7)]),
+            radii: &[1, 2],
+        },
+        Case {
+            name: "empty",
+            size: Size2us::new(16, 16),
+            seed: Seed::Pixels(&[]),
+            radii: &[0, 1, 5],
+        },
+        Case {
+            name: "all set",
+            size: Size2us::new(20, 6),
+            seed: Seed::Every(1),
+            radii: &[0, 1, 4],
+        },
+        Case {
+            name: "checkerboard",
+            size: Size2us::new(16, 16),
+            seed: Seed::Every(2),
+            radii: &[0, 1, 2],
+        },
+        Case {
+            name: "sparse across words",
+            size: Size2us::new(130, 4),
+            seed: Seed::Every(7),
+            radii: &[1, 3],
+        },
+    ];
 
-    // 62 expands to 60-64, 66 expands to 64-68, merged: 60-68
-    for i in 60..=68 {
-        assert!(dilated.get(i), "Pixel {} should be set", i);
-    }
-    assert!(!dilated.get(59));
-    assert!(!dilated.get(69));
-}
-
-#[test]
-fn test_dilate_mask_width_1_single_column() {
-    // Edge case: single column
-    let mut mask_data = vec![false; 5];
-    mask_data[2] = true;
-    let mask = BitBuffer2::from_slice(Size2us::new(1, 5), &mask_data);
-    let mut dilated = BitBuffer2::new_filled(Size2us::new(1, 5), false);
-    dilate_mask(&mask, 1, &mut dilated);
-
-    // Should expand vertically: rows 1, 2, 3
-    assert!(!dilated.get(0));
-    assert!(dilated.get(1));
-    assert!(dilated.get(2));
-    assert!(dilated.get(3));
-    assert!(!dilated.get(4));
-}
-
-#[test]
-fn test_dilate_mask_height_1_single_row() {
-    // Edge case: single row, 100 pixels wide
-    let width = 100;
-    let mut mask_data = vec![false; width];
-    mask_data[50] = true;
-    let mask = BitBuffer2::from_slice(Size2us::new(width, 1), &mask_data);
-    let mut dilated = BitBuffer2::new_filled(Size2us::new(width, 1), false);
-    dilate_mask(&mask, 5, &mut dilated);
-
-    // Should only expand horizontally
-    for i in 45..=55 {
-        assert!(dilated.get(i), "Pixel {} should be set", i);
-    }
-    assert!(!dilated.get(44));
-    assert!(!dilated.get(56));
-}
-
-#[test]
-fn test_dilate_mask_all_pixels_set() {
-    // All pixels already set - should remain all set
-    let mask_data = vec![true; 100];
-    let mask = BitBuffer2::from_slice(Size2us::new(100, 1), &mask_data);
-    let mut dilated = BitBuffer2::new_filled(Size2us::new(100, 1), false);
-    dilate_mask(&mask, 5, &mut dilated);
-
-    assert!(dilated.iter().all(|x| x));
-}
-
-#[test]
-fn test_dilate_mask_alternating_bits() {
-    // Alternating pattern - stress test for bit operations
-    let width = 128;
-    let mut mask_data = vec![false; width];
-    for i in (0..width).step_by(2) {
-        mask_data[i] = true;
-    }
-    let mask = BitBuffer2::from_slice(Size2us::new(width, 1), &mask_data);
-    let mut dilated = BitBuffer2::new_filled(Size2us::new(width, 1), false);
-    dilate_mask(&mask, 1, &mut dilated);
-
-    // With radius 1, alternating should fill everything
-    assert!(
-        dilated.iter().all(|x| x),
-        "All pixels should be set after dilation"
-    );
-}
-
-#[test]
-fn test_dilate_mask_sparse_pattern_across_words() {
-    // Sparse pattern with pixels in different words
-    let width = 256;
-    let mut mask_data = vec![false; width];
-    mask_data[10] = true; // word 0
-    mask_data[70] = true; // word 1
-    mask_data[130] = true; // word 2
-    mask_data[200] = true; // word 3
-    let mask = BitBuffer2::from_slice(Size2us::new(width, 1), &mask_data);
-    let mut dilated = BitBuffer2::new_filled(Size2us::new(width, 1), false);
-    dilate_mask(&mask, 3, &mut dilated);
-
-    // Check each pixel's expansion
-    for center in [10i32, 70, 130, 200] {
-        for offset in -3i32..=3 {
-            let pos = (center + offset) as usize;
-            if pos < width {
-                assert!(
-                    dilated.get(pos),
-                    "Pixel {} should be set (center {})",
-                    pos,
-                    center
-                );
+    for case in &cases {
+        let mut data = vec![false; case.size.pixel_count()];
+        match case.seed {
+            Seed::Pixels(pixels) => {
+                for &(x, y) in pixels {
+                    data[y * case.size.width + x] = true;
+                }
+            }
+            Seed::Every(n) => {
+                for y in 0..case.size.height {
+                    for x in 0..case.size.width {
+                        data[y * case.size.width + x] = (x + y) % n == 0;
+                    }
+                }
             }
         }
-    }
-    // Check gaps
-    assert!(!dilated.get(14)); // between 10 and 70
-    assert!(!dilated.get(66));
-}
-
-#[test]
-fn test_dilate_mask_2d_crosses_word_boundary() {
-    // 2D image where dilation crosses word boundary in each row
-    let width = 70; // 64 + 6
-    let height = 5;
-    let mut mask_data = vec![false; width * height];
-    // Pixel at (63, 2) - last bit of first word in row 2
-    mask_data[2 * width + 63] = true;
-    let mask = BitBuffer2::from_slice(Size2us::new(width, height), &mask_data);
-    let mut dilated = BitBuffer2::new_filled(Size2us::new(width, height), false);
-    dilate_mask(&mask, 2, &mut dilated);
-
-    // Check horizontal expansion crosses word boundary
-    for x in 61..=65 {
-        assert!(
-            dilated.get_at(Vec2us::new(x, 2)),
-            "Pixel ({}, 2) should be set",
-            x
-        );
-    }
-    // Check vertical expansion
-    for y in 0..=4 {
-        assert!(
-            dilated.get_at(Vec2us::new(63, y)),
-            "Pixel (63, {}) should be set",
-            y
-        );
-    }
-}
-
-#[test]
-fn test_dilate_mask_sliding_window_dense_column() {
-    // Dense column where every row has different bits set - stresses sliding window recomputation
-    let width = 64;
-    let height = 20;
-    let radius = 3;
-    let mut mask_data = vec![false; width * height];
-
-    // Set different columns for each row to force unique bits per row
-    for y in 0..height {
-        mask_data[y * width + (y % 60)] = true; // Different x for each row
-    }
-
-    let mask = BitBuffer2::from_slice(Size2us::new(width, height), &mask_data);
-    let mut dilated = BitBuffer2::new_filled(Size2us::new(width, height), false);
-    dilate_mask(&mask, radius, &mut dilated);
-
-    assert_naive_dilation(&mask, &dilated, radius, "Dense column");
-}
-
-#[test]
-fn test_dilate_mask_sliding_window_all_same_word() {
-    // All rows have same word value - should never need recomputation
-    let width = 64;
-    let height = 10;
-    let radius = 2;
-    let mut mask_data = vec![false; width * height];
-
-    // Set same pixel in every row
-    for y in 0..height {
-        mask_data[y * width + 32] = true;
-    }
-
-    let mask = BitBuffer2::from_slice(Size2us::new(width, height), &mask_data);
-    let mut dilated = BitBuffer2::new_filled(Size2us::new(width, height), false);
-    dilate_mask(&mask, radius, &mut dilated);
-
-    // All rows should have same horizontal dilation (30-34)
-    for y in 0..height {
-        for x in 30..=34 {
-            assert!(
-                dilated.get_at(Vec2us::new(x, y)),
-                "Pixel ({}, {}) should be set",
-                x,
-                y
+        let mask = BitBuffer2::from_slice(case.size, &data);
+        for &radius in case.radii {
+            let mut dilated = BitBuffer2::new_filled(case.size, false);
+            dilate_mask(&mask, radius, &mut dilated);
+            assert_naive_dilation(
+                &mask,
+                &dilated,
+                radius,
+                &format!("{} r={radius}", case.name),
             );
         }
     }
-}
-
-#[test]
-fn test_dilate_mask_sliding_window_sparse_then_dense() {
-    // Pattern: sparse rows, then dense rows, then sparse
-    // Tests transition between sliding and recompute modes
-    let width = 64;
-    let height = 30;
-    let radius = 2;
-    let mut mask_data = vec![false; width * height];
-
-    // Sparse section (rows 0-9): one pixel every 3 rows
-    for y in (0..10).step_by(3) {
-        mask_data[y * width + 10] = true;
-    }
-
-    // Dense section (rows 10-19): every row has different pixel
-    for y in 10..20 {
-        mask_data[y * width + (y - 10)] = true;
-    }
-
-    // Sparse section (rows 20-29): one pixel every 3 rows
-    for y in (20..30).step_by(3) {
-        mask_data[y * width + 50] = true;
-    }
-
-    let mask = BitBuffer2::from_slice(Size2us::new(width, height), &mask_data);
-    let mut dilated = BitBuffer2::new_filled(Size2us::new(width, height), false);
-    dilate_mask(&mask, radius, &mut dilated);
-
-    assert_naive_dilation(&mask, &dilated, radius, "Sparse/dense transition");
-}
-
-#[test]
-fn test_dilate_mask_last_row_only() {
-    // Only last row has pixels - tests vertical dilation upward
-    let width = 64;
-    let height = 10;
-    let radius = 3;
-    let mut mask_data = vec![false; width * height];
-
-    mask_data[(height - 1) * width + 32] = true;
-
-    let mask = BitBuffer2::from_slice(Size2us::new(width, height), &mask_data);
-    let mut dilated = BitBuffer2::new_filled(Size2us::new(width, height), false);
-    dilate_mask(&mask, radius, &mut dilated);
-
-    // Rows 6-9 should have dilation, rows 0-5 should not
-    for y in 0..height {
-        let expected_row = y >= height - 1 - radius; // rows 6-9
-        assert_eq!(
-            dilated.get_at(Vec2us::new(32, y)),
-            expected_row,
-            "Row {} center pixel mismatch",
-            y
-        );
-    }
-}
-
-#[test]
-fn test_dilate_mask_first_row_only() {
-    // Only first row has pixels - tests vertical dilation downward
-    let width = 64;
-    let height = 10;
-    let radius = 3;
-    let mut mask_data = vec![false; width * height];
-
-    mask_data[32] = true; // row 0
-
-    let mask = BitBuffer2::from_slice(Size2us::new(width, height), &mask_data);
-    let mut dilated = BitBuffer2::new_filled(Size2us::new(width, height), false);
-    dilate_mask(&mask, radius, &mut dilated);
-
-    // Rows 0-3 should have dilation, rows 4-9 should not
-    for y in 0..height {
-        let expected_row = y <= radius; // rows 0-3
-        assert_eq!(
-            dilated.get_at(Vec2us::new(32, y)),
-            expected_row,
-            "Row {} center pixel mismatch",
-            y
-        );
-    }
-}
-
-#[test]
-fn test_dilate_mask_radius_equals_height() {
-    // Radius equals height - single pixel should fill entire column
-    let width = 64;
-    let height = 5;
-    let radius = 5;
-    let mut mask_data = vec![false; width * height];
-
-    mask_data[2 * width + 32] = true; // middle row
-
-    let mask = BitBuffer2::from_slice(Size2us::new(width, height), &mask_data);
-    let mut dilated = BitBuffer2::new_filled(Size2us::new(width, height), false);
-    dilate_mask(&mask, radius, &mut dilated);
-
-    // All rows should be dilated at x=32
-    for y in 0..height {
-        assert!(
-            dilated.get_at(Vec2us::new(32, y)),
-            "Row {} should be set",
-            y
-        );
-    }
-}
-
-#[test]
-fn test_dilate_mask_checkerboard_pattern() {
-    // Checkerboard pattern - alternating pixels in 2D
-    let width = 64;
-    let height = 64;
-    let radius = 1;
-    let mut mask_data = vec![false; width * height];
-
-    for y in 0..height {
-        for x in 0..width {
-            if (x + y) % 2 == 0 {
-                mask_data[y * width + x] = true;
-            }
-        }
-    }
-
-    let mask = BitBuffer2::from_slice(Size2us::new(width, height), &mask_data);
-    let mut dilated = BitBuffer2::new_filled(Size2us::new(width, height), false);
-    dilate_mask(&mask, radius, &mut dilated);
-
-    // Radius 1 on checkerboard should fill everything
-    assert!(
-        dilated.iter().all(|x| x),
-        "Checkerboard with radius 1 should fill all"
-    );
-}
-
-#[test]
-fn test_dilate_mask_compare_with_naive() {
-    // Compare optimized version with naive implementation
-    let width = 100;
-    let height = 50;
-    let radius = 4;
-
-    // Create random-ish pattern
-    let mask_data: Vec<bool> = (0..width * height)
-        .map(|i| (i * 7 + i / 13) % 11 == 0)
-        .collect();
-
-    let mask = BitBuffer2::from_slice(Size2us::new(width, height), &mask_data);
-    let mut dilated = BitBuffer2::new_filled(Size2us::new(width, height), false);
-    dilate_mask(&mask, radius, &mut dilated);
-
-    assert_naive_dilation(&mask, &dilated, radius, "Random pattern");
 }

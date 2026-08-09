@@ -3,53 +3,46 @@
 use crate::math::sum::simd::{sum_f32, weighted_mean_f32};
 use crate::math::sum::*;
 
+/// `sum_f32` compensates, so it must land on the f64 sum rounded once — not merely near the naive
+/// f32 sum, which is the *worse* algorithm and was the old oracle. Exact equality is the whole
+/// point of the compensation; a tolerance here would pass an implementation that had none.
+///
+/// The value cycle alternates 1e6 against -1e6 so the running total cancels catastrophically,
+/// and the lengths straddle the scalar/SSE/AVX2 dispatch thresholds and their remainders.
 #[test]
-fn test_sum_f32() {
-    let values: Vec<f32> = (1..=16).map(|x| x as f32).collect();
-    let expected: f32 = values.iter().sum();
-    assert!((sum_f32(&values) - expected).abs() < 1e-4);
+fn sum_f32_matches_a_rounded_f64_reference_at_every_length() {
+    for len in [
+        0usize, 1, 2, 3, 8, 13, 16, 17, 63, 64, 65, 255, 256, 257, 1000,
+    ] {
+        let values: Vec<f32> = (0..len)
+            .map(|index| match index % 4 {
+                0 => 1e6,
+                1 => 0.25,
+                2 => -1e6,
+                _ => 0.5,
+            })
+            .collect();
+        let expected = values.iter().map(|&v| f64::from(v)).sum::<f64>() as f32;
+        assert_eq!(sum_f32(&values), expected, "len={len}");
+    }
 }
 
+/// `mean_f32` divides an f64 accumulation once and rounds once, so the same exactness applies.
+/// Empty input is excluded: it is a `debug_assert!` violation, not a supported case.
 #[test]
-fn test_sum_f32_remainder() {
-    let values: Vec<f32> = (1..=13).map(|x| x as f32).collect();
-    let expected: f32 = values.iter().sum();
-    assert!((sum_f32(&values) - expected).abs() < 1e-4);
-}
-
-#[test]
-fn test_sum_f32_small() {
-    let values = vec![1.0f32, 2.0, 3.0];
-    let expected: f32 = values.iter().sum();
-    assert!((sum_f32(&values) - expected).abs() < 1e-4);
-}
-
-#[test]
-fn test_sum_f32_single() {
-    assert!((sum_f32(&[42.0]) - 42.0).abs() < f32::EPSILON);
-}
-
-#[test]
-fn test_sum_f32_empty() {
-    assert!((sum_f32(&[]) - 0.0).abs() < f32::EPSILON);
-}
-
-#[test]
-fn test_sum_f32_negative() {
-    let values: Vec<f32> = vec![-1.0, -2.0, -3.0, -4.0, 5.0, 6.0, 7.0, 8.0];
-    let expected: f32 = values.iter().sum();
-    assert!((sum_f32(&values) - expected).abs() < 1e-4);
-}
-
-#[test]
-fn test_mean_f32() {
-    let values: Vec<f32> = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
-    assert!((mean_f32(&values) - 4.5).abs() < 1e-4);
-}
-
-#[test]
-fn test_mean_f32_single() {
-    assert!((mean_f32(&[42.0]) - 42.0).abs() < f32::EPSILON);
+fn mean_f32_matches_a_rounded_f64_reference_at_every_length() {
+    for len in [1usize, 2, 3, 8, 13, 16, 17, 63, 64, 65, 255, 256, 257, 1000] {
+        let values: Vec<f32> = (0..len)
+            .map(|index| match index % 4 {
+                0 => 1e6,
+                1 => 0.25,
+                2 => -1e6,
+                _ => 0.5,
+            })
+            .collect();
+        let expected = (values.iter().map(|&v| f64::from(v)).sum::<f64>() / len as f64) as f32;
+        assert_eq!(mean_f32(&values), expected, "len={len}");
+    }
 }
 
 #[test]
@@ -63,28 +56,6 @@ fn test_simd_vs_scalar_sum() {
         scalar_result,
         simd_result
     );
-}
-
-#[test]
-fn test_sum_f32_dispatch_boundary() {
-    for size in [255, 256, 257] {
-        let values: Vec<f32> = (0..size)
-            .map(|index| match index % 4 {
-                0 => 1e6,
-                1 => 0.25,
-                2 => -1e6,
-                _ => 0.5,
-            })
-            .collect();
-        let expected = values.iter().map(|&value| f64::from(value)).sum::<f64>() as f32;
-        assert_eq!(sum_f32(&values), expected, "size={size}");
-    }
-}
-
-#[test]
-fn test_mean_f32_two_elements() {
-    let values = [3.0f32, 7.0];
-    assert!((mean_f32(&values) - 5.0).abs() < f32::EPSILON);
 }
 
 #[test]
