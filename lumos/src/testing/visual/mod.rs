@@ -11,6 +11,7 @@ use image::GrayImage;
 use imaginarium::{ColorFormat, Image, ImageDesc};
 use std::path::Path;
 
+use crate::bit_buffer2::BitBuffer2;
 use crate::{
     math::size2us::Size2us, stacking::star_detection::star::Star,
     testing::synthetic::observe::ObservedSource,
@@ -110,9 +111,9 @@ fn to_gray(pixels: &[f32], size: Size2us, tone: ToneMap) -> GrayImage {
 
 /// Convert boolean mask to grayscale image.
 #[cfg(feature = "real-data")]
-fn mask_to_gray(mask: &[bool], size: Size2us) -> GrayImage {
-    let bytes: Vec<u8> = mask.iter().map(|&b| if b { 255 } else { 0 }).collect();
-    GrayImage::from_raw(size.width as u32, size.height as u32, bytes).unwrap()
+fn mask_to_gray(mask: &BitBuffer2) -> GrayImage {
+    let bytes: Vec<u8> = mask.iter().map(|b| if b { 255 } else { 0 }).collect();
+    GrayImage::from_raw(mask.size.width as u32, mask.size.height as u32, bytes).unwrap()
 }
 
 /// Convert labeled image to colored visualization.
@@ -213,9 +214,9 @@ pub(crate) fn save_comparison(
 
 /// Save mask to file using the configured test output format.
 #[cfg(feature = "real-data")]
-pub(crate) fn save_mask(mask: &[bool], size: Size2us, path: &Path) {
+pub(crate) fn save_mask(mask: &BitBuffer2, path: &Path) {
     let out = output_path(path);
-    let img = mask_to_gray(mask, size);
+    let img = mask_to_gray(mask);
     img.save(&out).expect("Failed to save mask image");
 }
 

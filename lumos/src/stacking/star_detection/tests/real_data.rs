@@ -266,26 +266,16 @@ fn inspect_pipeline_intermediates_rho_opiuchi() {
             &mut mask,
         );
     }
-    let mask_bools: Vec<bool> = mask.iter().collect();
-    let pixels_above = mask_bools.iter().filter(|&&b| b).count();
-    visual::save_mask(
-        &mask_bools,
-        Size2us::new(width, height),
-        &out("06_threshold_mask.tiff"),
-    );
+    let pixels_above = mask.count_ones();
+    visual::save_mask(&mask, &out("06_threshold_mask.tiff"));
     println!("Saved: 06_threshold_mask ({pixels_above} pixels above threshold)");
 
     // 8. Dilated mask
     let mut dilated = pool.acquire_bit();
     dilated.fill(false);
     dilate_mask(&mask, 1, &mut dilated);
-    let dilated_bools: Vec<bool> = dilated.iter().collect();
-    let dilated_count = dilated_bools.iter().filter(|&&b| b).count();
-    visual::save_mask(
-        &dilated_bools,
-        Size2us::new(width, height),
-        &out("07_dilated_mask.tiff"),
-    );
+    let dilated_count = dilated.count_ones();
+    visual::save_mask(&dilated, &out("07_dilated_mask.tiff"));
     println!("Saved: 07_dilated_mask ({dilated_count} pixels)");
 
     // 9. Label map
