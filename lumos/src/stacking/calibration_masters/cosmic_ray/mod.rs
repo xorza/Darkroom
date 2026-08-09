@@ -149,9 +149,12 @@ fn reject_mono_buffer(data: &mut Buffer2<f32>, config: &CosmicRayConfig) -> usiz
 
         let flags = detect_and_grow(&sprime, &f, &noise, &mask, size, config);
 
-        // Word-wise: `flags & !mask` is what is newly set, then `mask |= flags`. Both buffers
-        // keep their padding bits clear (`new_default` and `from_predicate` leave them zero, and
-        // neither operation sets them), so counting whole words needs no masking here.
+        // Word-wise: `flags & !mask` is what is newly set, then `mask |= flags`. Counting whole
+        // words needs no per-row masking only because both buffers have their padding clear.
+        debug_assert!(
+            mask.padding_is_clear() && flags.padding_is_clear(),
+            "padding bits would be counted as newly-flagged pixels"
+        );
         let mut newly = 0usize;
         for (m, &f) in mask.words.iter_mut().zip(&flags.words) {
             newly += (f & !*m).count_ones() as usize;
@@ -463,9 +466,12 @@ fn reject_xtrans(data: &mut Buffer2<f32>, cfa: &CfaType, config: &CosmicRayConfi
 
         let flags = detect_and_grow(&s, &f, &noise, &mask, size, config);
 
-        // Word-wise: `flags & !mask` is what is newly set, then `mask |= flags`. Both buffers
-        // keep their padding bits clear (`new_default` and `from_predicate` leave them zero, and
-        // neither operation sets them), so counting whole words needs no masking here.
+        // Word-wise: `flags & !mask` is what is newly set, then `mask |= flags`. Counting whole
+        // words needs no per-row masking only because both buffers have their padding clear.
+        debug_assert!(
+            mask.padding_is_clear() && flags.padding_is_clear(),
+            "padding bits would be counted as newly-flagged pixels"
+        );
         let mut newly = 0usize;
         for (m, &f) in mask.words.iter_mut().zip(&flags.words) {
             newly += (f & !*m).count_ones() as usize;
