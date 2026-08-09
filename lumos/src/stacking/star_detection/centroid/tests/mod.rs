@@ -1,6 +1,5 @@
 //! Tests for centroid computation.
 
-use crate::math::size2us::Size2us;
 use std::f32::consts::FRAC_PI_4;
 
 use glam::{DVec2, Vec2};
@@ -19,7 +18,6 @@ use crate::stacking::star_detection::config::fwhm_config::FwhmConfig;
 use crate::stacking::star_detection::config::measurement_config::MeasurementConfig;
 use crate::stacking::star_detection::deblend::region::Region;
 use crate::stacking::star_detection::detector::stages::detect::internals::detect_stars_test;
-use crate::testing::estimate_background;
 use crate::testing::synthetic::background_map;
 use imaginarium::Buffer2;
 
@@ -30,17 +28,6 @@ const TEST_STAMP_RADIUS: usize = 7;
 const TEST_EXPECTED_FWHM: f32 = 5.9;
 
 use crate::testing::synthetic::star_profiles::{StarProfile, SyntheticStar};
-
-fn make_uniform_background(size: Size2us, bg_value: f32, noise: f32) -> BackgroundEstimate {
-    let mut bg_buf = Buffer2::new_default(size.width, size.height);
-    let mut noise_buf = Buffer2::new_default(size.width, size.height);
-    bg_buf.fill(bg_value);
-    noise_buf.fill(noise);
-    BackgroundEstimate {
-        background: bg_buf,
-        noise: noise_buf,
-    }
-}
 
 mod basic;
 mod convergence;

@@ -4,6 +4,8 @@
 
 use crate::math::size2us::Size2us;
 use crate::stacking::star_detection::background::background_estimate::BackgroundEstimate;
+use crate::stacking::star_detection::config::background_config::BackgroundConfig;
+use crate::stacking::star_detection::resources::DetectionResources;
 use imaginarium::Buffer2;
 
 /// Create a uniform BackgroundEstimate with constant background and noise values.
@@ -16,6 +18,14 @@ pub(crate) fn uniform(size: Size2us, background: f32, noise: f32) -> BackgroundE
         background: bg_buf,
         noise: noise_buf,
     }
+}
+
+/// Run the real background estimator over `pixels`, managing the buffer pool for the caller.
+///
+/// The counterpart to [`uniform`]: that one hands back a flat map, this one measures the image.
+pub(crate) fn estimate(pixels: &Buffer2<f32>, config: &BackgroundConfig) -> BackgroundEstimate {
+    let mut pool = DetectionResources::new(Size2us::new(pixels.width(), pixels.height()));
+    BackgroundEstimate::estimate(pixels, config, &mut pool)
 }
 
 #[cfg(test)]

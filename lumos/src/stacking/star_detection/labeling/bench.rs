@@ -6,7 +6,7 @@ use crate::stacking::star_detection::config::background_config::BackgroundConfig
 use crate::stacking::star_detection::config::detection_config::Connectivity;
 use crate::stacking::star_detection::mask_dilation::dilate_mask;
 use crate::stacking::star_detection::threshold_mask::create_threshold_mask;
-use crate::testing::estimate_background;
+use crate::testing::synthetic::background_map;
 use crate::testing::synthetic::fixtures::star_field;
 use ::quickbench::quick_bench;
 use imaginarium::Buffer2;
@@ -19,7 +19,7 @@ fn create_detection_mask(pixels: &Buffer2<f32>, sigma_threshold: f32) -> BitBuff
     let height = pixels.height();
 
     // Create background map (same as real pipeline)
-    let background = estimate_background(pixels, &BackgroundConfig::default());
+    let background = background_map::estimate(pixels, &BackgroundConfig::default());
 
     // Create threshold mask
     let mut mask = BitBuffer2::new_filled(Size2us::new(width, height), false);

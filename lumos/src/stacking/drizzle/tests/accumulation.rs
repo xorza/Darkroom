@@ -64,9 +64,9 @@ fn test_drizzle_point_kernel() {
     let pixels = result.image.channel(0);
     let w = 20;
     // (0,0) ← input (0,0): value = 1.0
-    assert!((pixels[0] - 1.0).abs() < f32::EPSILON);
+    assert_eq!(pixels[0], 1.0);
     // (2,0) ← input (1,0): value = 1.0
-    assert!((pixels[2] - 1.0).abs() < f32::EPSILON);
+    assert_eq!(pixels[2], 1.0);
     // (1,1): odd coords, no coverage → 0.0
     assert!((pixels[w + 1]).abs() < f32::EPSILON);
     // (3,3): odd coords, no coverage → 0.0

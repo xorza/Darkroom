@@ -1,16 +1,14 @@
 use crate::math::dmat3::*;
+use crate::testing::assertions::{assert_close, is_close};
 
 const EPS: f64 = 1e-10;
 
-fn approx_eq(a: f64, b: f64) -> bool {
-    (a - b).abs() < EPS
-}
-
+/// Bool rather than an assertion because two tests assert matrices are *not* equal.
 fn mat_approx_eq(a: &DMat3, b: &DMat3) -> bool {
     a.as_array()
         .iter()
         .zip(b.as_array().iter())
-        .all(|(x, y)| approx_eq(*x, *y))
+        .all(|(x, y)| is_close(*x, *y, EPS))
 }
 
 #[test]
@@ -40,9 +38,9 @@ fn test_default_is_identity() {
 #[test]
 fn test_index() {
     let m = DMat3::from_array([10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0]);
-    assert!(approx_eq(m[0], 10.0));
-    assert!(approx_eq(m[4], 50.0));
-    assert!(approx_eq(m[8], 90.0));
+    assert_close!(m[0], 10.0, EPS);
+    assert_close!(m[4], 50.0, EPS);
+    assert_close!(m[8], 90.0, EPS);
 }
 
 #[test]
@@ -50,8 +48,8 @@ fn test_index_mut() {
     let mut m = DMat3::identity();
     m[2] = 5.0;
     m[5] = -3.0;
-    assert!(approx_eq(m[2], 5.0));
-    assert!(approx_eq(m[5], -3.0));
+    assert_close!(m[2], 5.0, EPS);
+    assert_close!(m[5], -3.0, EPS);
 }
 
 #[test]
@@ -59,7 +57,7 @@ fn test_as_array_mut() {
     let mut m = DMat3::identity();
     let arr = m.as_array_mut();
     arr[2] = 7.0;
-    assert!(approx_eq(m[2], 7.0));
+    assert_close!(m[2], 7.0, EPS);
 }
 
 #[test]
@@ -85,27 +83,27 @@ fn test_into_array() {
 
 #[test]
 fn test_determinant_identity() {
-    assert!(approx_eq(DMat3::identity().determinant(), 1.0));
+    assert_close!(DMat3::identity().determinant(), 1.0, EPS);
 }
 
 #[test]
 fn test_determinant_singular() {
     // Two identical rows → det = 0
     let m = DMat3::from_rows([1.0, 2.0, 3.0], [1.0, 2.0, 3.0], [4.0, 5.0, 6.0]);
-    assert!(approx_eq(m.determinant(), 0.0));
+    assert_close!(m.determinant(), 0.0, EPS);
 }
 
 #[test]
 fn test_determinant_known() {
     let m = DMat3::from_rows([2.0, 0.0, 0.0], [0.0, 3.0, 0.0], [0.0, 0.0, 4.0]);
-    assert!(approx_eq(m.determinant(), 24.0));
+    assert_close!(m.determinant(), 24.0, EPS);
 }
 
 #[test]
 fn test_determinant_negative() {
     // Swapping two rows negates the determinant
     let m = DMat3::from_rows([0.0, 1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]);
-    assert!(approx_eq(m.determinant(), -1.0));
+    assert_close!(m.determinant(), -1.0, EPS);
 }
 
 #[test]
@@ -203,16 +201,16 @@ fn test_mul_non_commutative() {
 fn test_transform_point_identity() {
     let m = DMat3::identity();
     let p = m.transform_point(DVec2::new(5.0, 7.0));
-    assert!(approx_eq(p.x, 5.0));
-    assert!(approx_eq(p.y, 7.0));
+    assert_close!(p.x, 5.0, EPS);
+    assert_close!(p.y, 7.0, EPS);
 }
 
 #[test]
 fn test_transform_point_translation() {
     let m = DMat3::from_array([1.0, 0.0, 10.0, 0.0, 1.0, -5.0, 0.0, 0.0, 1.0]);
     let p = m.transform_point(DVec2::new(3.0, 4.0));
-    assert!(approx_eq(p.x, 13.0));
-    assert!(approx_eq(p.y, -1.0));
+    assert_close!(p.x, 13.0, EPS);
+    assert_close!(p.y, -1.0, EPS);
 }
 
 #[test]
@@ -221,7 +219,7 @@ fn test_transform_point_perspective() {
     let p = m.transform_point(DVec2::new(100.0, 0.0));
     // w = 0.001 * 100 + 1 = 1.1
     assert!((p.x - 90.909).abs() < 0.01);
-    assert!(approx_eq(p.y, 0.0));
+    assert_close!(p.y, 0.0, EPS);
 }
 
 #[test]
@@ -241,27 +239,27 @@ fn test_transform_point_roundtrip() {
     let inv = m.inverse().unwrap();
     let p = DVec2::new(10.0, -5.0);
     let p2 = inv.transform_point(m.transform_point(p));
-    assert!(approx_eq(p2.x, p.x));
-    assert!(approx_eq(p2.y, p.y));
+    assert_close!(p2.x, p.x, EPS);
+    assert_close!(p2.y, p.y, EPS);
 }
 
 #[test]
 fn test_deviation_from_identity_zero() {
-    assert!(approx_eq(DMat3::identity().deviation_from_identity(), 0.0));
+    assert_close!(DMat3::identity().deviation_from_identity(), 0.0, EPS);
 }
 
 #[test]
 fn test_deviation_from_identity_nonzero() {
     let m = DMat3::from_array([1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]);
     // Only m[2] differs by 1.0
-    assert!(approx_eq(m.deviation_from_identity(), 1.0));
+    assert_close!(m.deviation_from_identity(), 1.0, EPS);
 }
 
 #[test]
 fn test_deviation_from_identity_multiple_elements() {
     // Diagonal elements differ by 1.0 each: (2-1)^2 + (2-1)^2 + (2-1)^2 = 3
     let m = DMat3::from_rows([2.0, 0.0, 0.0], [0.0, 2.0, 0.0], [0.0, 0.0, 2.0]);
-    assert!(approx_eq(m.deviation_from_identity(), 3.0_f64.sqrt()));
+    assert_close!(m.deviation_from_identity(), 3.0_f64.sqrt(), EPS);
 }
 
 #[test]

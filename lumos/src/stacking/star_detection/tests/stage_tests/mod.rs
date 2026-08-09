@@ -3,7 +3,7 @@
 use crate::stacking::star_detection::background::background_estimate::BackgroundEstimate;
 use crate::stacking::star_detection::config::background_config::BackgroundConfig;
 use crate::stacking::star_detection::deblend::region::Region;
-use crate::testing::estimate_background;
+use crate::testing::synthetic::background_map;
 use imaginarium::Buffer2;
 
 /// Default tile size for background estimation.
@@ -18,7 +18,7 @@ mod detection_tests;
 
 /// Estimate the background of `pixels` with the stage tests' default tile size.
 fn background_estimate(pixels: &Buffer2<f32>) -> BackgroundEstimate {
-    estimate_background(
+    background_map::estimate(
         pixels,
         &BackgroundConfig {
             tile_size: TILE_SIZE,

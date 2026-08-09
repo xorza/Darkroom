@@ -475,8 +475,8 @@ fn test_median_f32_fast_differs_from_exact_on_even() {
     let mut values_exact = values_fast;
     let fast = median_f32_fast(&mut values_fast);
     let exact = median_f32_mut(&mut values_exact);
-    assert!((exact - 5.0).abs() < f32::EPSILON);
-    assert!((fast - 7.0).abs() < f32::EPSILON);
+    assert_eq!(exact, 5.0);
+    assert_eq!(fast, 7.0);
     assert!(
         (fast - exact).abs() > 1.0,
         "fast and exact should differ for even N"
@@ -492,7 +492,7 @@ fn test_median_f32_fast_agrees_with_exact_on_odd() {
     let fast = median_f32_fast(&mut values_fast);
     let exact = median_f32_mut(&mut values_exact);
     assert!((fast - exact).abs() < f32::EPSILON);
-    assert!((fast - 6.0).abs() < f32::EPSILON);
+    assert_eq!(fast, 6.0);
 }
 
 #[test]
@@ -503,7 +503,7 @@ fn test_mad_f32_fast_hand_computed() {
     let values = [2.0f32, 3.0, 4.0];
     let mut scratch = Vec::new();
     let mad = mad_f32_fast(&values, 3.0, &mut scratch);
-    assert!((mad - 1.0).abs() < f32::EPSILON);
+    assert_eq!(mad, 1.0);
 }
 
 #[test]
@@ -514,7 +514,7 @@ fn test_mad_f32_fast_five_values() {
     let values = [1.0f32, 2.0, 3.0, 4.0, 5.0];
     let mut scratch = Vec::new();
     let mad = mad_f32_fast(&values, 3.0, &mut scratch);
-    assert!((mad - 1.0).abs() < f32::EPSILON);
+    assert_eq!(mad, 1.0);
 }
 
 #[test]
@@ -574,7 +574,7 @@ fn test_mad_f32_fast_matches_regular_on_odd() {
         (mad_fast - mad_regular).abs() < f32::EPSILON,
         "fast={mad_fast}, regular={mad_regular}"
     );
-    assert!((mad_fast - 4.0).abs() < f32::EPSILON);
+    assert_eq!(mad_fast, 4.0);
 }
 
 #[test]

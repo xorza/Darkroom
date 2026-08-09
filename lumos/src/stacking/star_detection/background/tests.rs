@@ -5,7 +5,7 @@ use crate::{
     stacking::star_detection::background::background_estimate::BackgroundEstimate,
     stacking::star_detection::config::background_config::{BackgroundConfig, BackgroundRefinement},
     stacking::star_detection::resources::DetectionResources,
-    testing::estimate_background,
+    testing::synthetic::background_map,
 };
 use imaginarium::Buffer2;
 
@@ -15,7 +15,7 @@ fn test_uniform_background() {
     let height = 128;
     let pixels = Buffer2::new_filled(width, height, 0.5);
 
-    let bg = estimate_background(
+    let bg = background_map::estimate(
         &pixels,
         &BackgroundConfig {
             tile_size: 32,
@@ -43,7 +43,7 @@ fn test_small_image_below_tile_size_does_not_panic() {
     // a uniform image then yields a uniform background at the pixel value.
     let pixels = Buffer2::new_filled(20, 20, 0.7);
 
-    let bg = estimate_background(
+    let bg = background_map::estimate(
         &pixels,
         &BackgroundConfig {
             tile_size: 64, // larger than the 20x20 image → clamped to the image
@@ -71,7 +71,7 @@ fn test_gradient_background() {
             .collect(),
     );
 
-    let bg = estimate_background(
+    let bg = background_map::estimate(
         &pixels,
         &BackgroundConfig {
             tile_size: 32,
@@ -96,7 +96,7 @@ fn test_background_with_stars() {
     data[96 * width + 96] = 0.95;
 
     let pixels = Buffer2::new(width, height, data);
-    let bg = estimate_background(
+    let bg = background_map::estimate(
         &pixels,
         &BackgroundConfig {
             tile_size: 32,
@@ -119,7 +119,7 @@ fn test_noise_estimation() {
     let height = 128;
     let pixels = Buffer2::new_filled(width, height, 0.5);
 
-    let bg = estimate_background(
+    let bg = background_map::estimate(
         &pixels,
         &BackgroundConfig {
             tile_size: 32,
@@ -142,7 +142,7 @@ fn test_non_square_image() {
     let height = 64;
     let pixels = Buffer2::new_filled(width, height, 0.4);
 
-    let bg = estimate_background(
+    let bg = background_map::estimate(
         &pixels,
         &BackgroundConfig {
             tile_size: 32,
@@ -168,7 +168,7 @@ fn test_sigma_clipping_rejects_outliers() {
     }
 
     let pixels = Buffer2::new(width, height, data);
-    let bg = estimate_background(
+    let bg = background_map::estimate(
         &pixels,
         &BackgroundConfig {
             tile_size: 32,
@@ -198,7 +198,7 @@ fn test_interpolation_produces_valid_values() {
             .collect(),
     );
 
-    let bg = estimate_background(
+    let bg = background_map::estimate(
         &pixels,
         &BackgroundConfig {
             tile_size: 16,
@@ -228,7 +228,7 @@ fn test_large_image() {
     let height = 256;
     let pixels = Buffer2::new_filled(width, height, 0.33);
 
-    let bg = estimate_background(
+    let bg = background_map::estimate(
         &pixels,
         &BackgroundConfig {
             tile_size: 64,
@@ -250,7 +250,7 @@ fn test_different_tile_sizes() {
     // Test representative tile sizes (min, mid, max)
     for tile_size in [16, 64, 128] {
         let pixels = Buffer2::new(width, height, data.clone());
-        let bg = estimate_background(
+        let bg = background_map::estimate(
             &pixels,
             &BackgroundConfig {
                 tile_size,
@@ -323,7 +323,7 @@ fn test_single_tile_image() {
     let size = 32;
     let pixels = Buffer2::new_filled(size, size, 0.42);
 
-    let bg = estimate_background(
+    let bg = background_map::estimate(
         &pixels,
         &BackgroundConfig {
             tile_size: 32,
@@ -360,7 +360,7 @@ fn test_noise_estimation_with_actual_noise() {
     }
 
     let pixels = Buffer2::new(width, height, data);
-    let bg = estimate_background(
+    let bg = background_map::estimate(
         &pixels,
         &BackgroundConfig {
             tile_size: 32,
@@ -393,7 +393,7 @@ fn test_interpolation_smooth_at_tile_boundaries() {
         .collect();
 
     let pixels = Buffer2::new(width, height, data);
-    let bg = estimate_background(
+    let bg = background_map::estimate(
         &pixels,
         &BackgroundConfig {
             tile_size: 32,
@@ -440,7 +440,7 @@ fn test_iterative_background_uniform() {
         tile_size: 32,
         ..Default::default()
     };
-    let bg = estimate_background(&pixels, &config);
+    let bg = background_map::estimate(&pixels, &config);
 
     // All background values should be close to 0.5
     for y in (0..height).step_by(10) {
@@ -483,7 +483,7 @@ fn test_iterative_background_with_bright_stars() {
     let pixels = Buffer2::new(width, height, data);
 
     // Non-iterative estimate
-    let bg_simple = estimate_background(
+    let bg_simple = background_map::estimate(
         &pixels,
         &BackgroundConfig {
             tile_size: 32,
@@ -498,7 +498,7 @@ fn test_iterative_background_with_bright_stars() {
         tile_size: 32,
         sigma_clip_iterations: 2,
     };
-    let bg_iterative = estimate_background(&pixels, &config);
+    let bg_iterative = background_map::estimate(&pixels, &config);
 
     // Check background at a point away from stars
     let test_x = 16;
@@ -546,7 +546,7 @@ fn test_iterative_background_preserves_gradient() {
         tile_size: 16,
         ..Default::default()
     };
-    let bg = estimate_background(&pixels, &config);
+    let bg = background_map::estimate(&pixels, &config);
 
     // Gradient should be preserved
     let corner_00 = bg.background[(0, 0)];
@@ -585,7 +585,7 @@ fn test_iterative_background_no_dilation() {
         tile_size: 32,
         sigma_clip_iterations: 2,
     };
-    let bg = estimate_background(&pixels, &config);
+    let bg = background_map::estimate(&pixels, &config);
 
     // Background away from star should be close to 0.2
     let val = bg.background[(16, 16)];
@@ -616,7 +616,7 @@ fn test_iterative_background_no_refinement() {
         tile_size: 32,
         ..Default::default()
     };
-    let bg = estimate_background(&pixels, &config);
+    let bg = background_map::estimate(&pixels, &config);
 
     let val = bg.background[(32, 32)];
     assert!(
@@ -639,7 +639,7 @@ fn test_bicubic_reproduces_linear_gradient() {
         .collect();
 
     let pixels = Buffer2::new(width, height, data.clone());
-    let bg = estimate_background(
+    let bg = background_map::estimate(
         &pixels,
         &BackgroundConfig {
             tile_size: 32,
@@ -706,7 +706,7 @@ fn test_bicubic_c1_continuity_at_tile_boundaries() {
         .collect();
 
     let pixels = Buffer2::new(width, height, data);
-    let bg = estimate_background(
+    let bg = background_map::estimate(
         &pixels,
         &BackgroundConfig {
             tile_size: 64,
@@ -756,7 +756,7 @@ fn test_bicubic_smoother_than_bilinear_would_be() {
         .collect();
 
     let pixels = Buffer2::new(width, height, data);
-    let bg = estimate_background(
+    let bg = background_map::estimate(
         &pixels,
         &BackgroundConfig {
             tile_size: 32,
@@ -796,7 +796,7 @@ fn test_bicubic_c2_continuity_y_direction() {
         .collect();
 
     let pixels = Buffer2::new(width, height, data);
-    let bg = estimate_background(
+    let bg = background_map::estimate(
         &pixels,
         &BackgroundConfig {
             tile_size: 64,
@@ -854,7 +854,7 @@ fn test_noise_map_bicubic_interpolation() {
         .collect();
 
     let pixels = Buffer2::new(width, height, data);
-    let bg = estimate_background(
+    let bg = background_map::estimate(
         &pixels,
         &BackgroundConfig {
             tile_size: 32,
@@ -905,7 +905,7 @@ fn test_bicubic_single_tile_column() {
     let height = 128;
     let pixels = Buffer2::new_filled(width, height, 0.42);
 
-    let bg = estimate_background(
+    let bg = background_map::estimate(
         &pixels,
         &BackgroundConfig {
             tile_size: 32,
@@ -941,7 +941,7 @@ fn test_bicubic_two_tile_columns() {
         .collect();
 
     let pixels = Buffer2::new(width, height, data);
-    let bg = estimate_background(
+    let bg = background_map::estimate(
         &pixels,
         &BackgroundConfig {
             tile_size: 32,
@@ -989,7 +989,7 @@ fn test_bicubic_single_tile_row() {
     let height = 32; // 1 tile row
     let pixels = Buffer2::new_filled(width, height, 0.77);
 
-    let bg = estimate_background(
+    let bg = background_map::estimate(
         &pixels,
         &BackgroundConfig {
             tile_size: 32,
@@ -1027,7 +1027,7 @@ fn test_bicubic_two_tile_rows() {
         .collect();
 
     let pixels = Buffer2::new(width, height, data);
-    let bg = estimate_background(
+    let bg = background_map::estimate(
         &pixels,
         &BackgroundConfig {
             tile_size: 32,

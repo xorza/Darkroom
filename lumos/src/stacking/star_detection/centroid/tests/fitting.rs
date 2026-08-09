@@ -22,7 +22,7 @@ fn test_weighted_centroid_precision_statistical() {
             let pixels =
                 SyntheticStar::new(true_pos.as_vec2(), 1.0, StarProfile::Gaussian { sigma })
                     .stamp(Size2us::new(width, height), 0.1);
-            let bg = estimate_background(
+            let bg = background_map::estimate(
                 &pixels,
                 &BackgroundConfig {
                     tile_size: 32,
@@ -217,7 +217,7 @@ fn test_moffat_fit_precision_statistical() {
 fn test_fwhm_estimation_accuracy() {
     let width = 128;
     let height = 128;
-    let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.001);
+    let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.001);
 
     // Test various sigma values
     for sigma in [1.5f32, 2.0, 2.5, 3.0, 3.5, 4.0] {
@@ -253,7 +253,7 @@ fn test_fwhm_estimation_accuracy() {
 fn test_eccentricity_calculation_accuracy() {
     let width = 64;
     let height = 64;
-    let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
+    let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
 
     // Test various axis ratios
     // eccentricity = sqrt(1 - (b/a)^2) where a >= b
@@ -342,7 +342,7 @@ fn snr_stays_continuous_as_sky_noise_vanishes() {
 fn test_sharpness_point_vs_extended() {
     let width = 64;
     let height = 64;
-    let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
+    let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
 
     // Compact star (small sigma) - high sharpness
     let compact = SyntheticStar::new(Vec2::splat(32.0), 0.8, StarProfile::Gaussian { sigma: 1.5 })
@@ -596,7 +596,7 @@ fn test_ground_circular_source() {
     let height = 64;
     let pixels = SyntheticStar::new(Vec2::splat(32.0), 0.8, StarProfile::Gaussian { sigma: 2.5 })
         .stamp(Size2us::new(width, height), 0.1);
-    let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
+    let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
 
     let metrics = compute_star(
         &pixels,
@@ -632,7 +632,7 @@ fn test_ground_x_elongated() {
         },
     )
     .stamp(Size2us::new(width, height), 0.1);
-    let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
+    let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
 
     let metrics = compute_star(
         &pixels,
@@ -661,7 +661,7 @@ fn test_sround_symmetric_source() {
     let height = 64;
     let pixels = SyntheticStar::new(Vec2::splat(32.0), 0.8, StarProfile::Gaussian { sigma: 2.5 })
         .stamp(Size2us::new(width, height), 0.1);
-    let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
+    let bg = background_map::uniform(Size2us::new(width, height), 0.1, 0.01);
 
     let metrics = compute_star(
         &pixels,

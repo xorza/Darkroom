@@ -13,7 +13,7 @@ fn measure_single_star(
 ) -> Star {
     let width = pixels.width();
     let height = pixels.height();
-    let bg = make_uniform_background(Size2us::new(width, height), bg_value, noise);
+    let bg = background_map::uniform(Size2us::new(width, height), bg_value, noise);
     let config = MeasurementConfig {
         centroid_method,
         ..Default::default()

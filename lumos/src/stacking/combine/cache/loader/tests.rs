@@ -391,8 +391,8 @@ fn test_load_and_cache_frame_reuse_preserves_stats() {
     let first_stats = first.source_stats;
 
     assert_eq!(first_stats.channels.len(), 1);
-    assert!((first_stats.channels[0].median - 5.5).abs() < f32::EPSILON);
-    assert!((first_stats.channels[0].mad - 3.0).abs() < f32::EPSILON);
+    assert_eq!(first_stats.channels[0].median, 5.5);
+    assert_eq!(first_stats.channels[0].mad, 3.0);
 
     // Second call — reuses cache, reads stats from sidecar
     let reused_stats = load_test_frame(&temp_dir, base_filename, &source_path, dims, 0)

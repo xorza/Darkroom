@@ -1,4 +1,5 @@
 use crate::stacking::registration::ransac::tests::*;
+use crate::testing::assertions::assert_close;
 
 #[test]
 fn test_plausibility_rejects_large_rotation() {
@@ -122,8 +123,8 @@ fn test_plausibility_accepts_within_bounds() {
     )
     .unwrap();
 
-    assert!(approx_eq(result.transform.rotation_angle(), angle, 0.02));
-    assert!(approx_eq(result.transform.scale_factor(), scale, 0.02));
+    assert_close!(result.transform.rotation_angle(), angle, 0.02);
+    assert_close!(result.transform.scale_factor(), scale, 0.02);
 }
 
 #[test]

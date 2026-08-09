@@ -497,7 +497,7 @@ fn test_square_kernel_flux_conservation() {
     }
     let total_input_flux: f32 = pixels.iter().sum();
     // = 16 * 10 + 384 * 1 = 544.0
-    assert!((total_input_flux - 544.0).abs() < f32::EPSILON);
+    assert_eq!(total_input_flux, 544.0);
 
     let image = mono_image(Size2us::new(20, 20), pixels);
 

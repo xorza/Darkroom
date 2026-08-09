@@ -7,8 +7,9 @@ use crate::math::size2us::Size2us;
 use crate::stacking::star_detection::config::background_config::BackgroundConfig;
 use crate::stacking::star_detection::convolution::internals::gaussian_convolve;
 use crate::stacking::star_detection::tests::Scenario;
+use crate::testing::init_tracing;
+use crate::testing::synthetic::background_map;
 use crate::testing::visual::save_grayscale;
-use crate::testing::{estimate_background, init_tracing};
 use common::internals::test_output_path;
 use imaginarium::Buffer2;
 
@@ -51,7 +52,7 @@ fn test_gaussian_filter_sparse() {
     );
 
     // Estimate and subtract background
-    let background = estimate_background(
+    let background = background_map::estimate(
         &pixels,
         &BackgroundConfig {
             tile_size: TILE_SIZE,
@@ -157,7 +158,7 @@ fn test_gaussian_filter_fwhm_range() {
     );
 
     // Background subtraction
-    let background = estimate_background(
+    let background = background_map::estimate(
         &pixels,
         &BackgroundConfig {
             tile_size: TILE_SIZE,
@@ -234,7 +235,7 @@ fn test_gaussian_filter_noise() {
     );
 
     // Background subtraction
-    let background = estimate_background(
+    let background = background_map::estimate(
         &pixels,
         &BackgroundConfig {
             tile_size: TILE_SIZE,
