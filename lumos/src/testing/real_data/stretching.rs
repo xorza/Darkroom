@@ -5,7 +5,8 @@
 use crate::io::image::linear::LinearImage;
 use crate::io::image::load_context::LoadContext;
 use crate::math::statistics::median_f32_mut;
-use crate::testing::{calibration_dir, init_tracing, save_png};
+use crate::testing::visual;
+use crate::testing::{calibration_dir, init_tracing};
 use crate::{ColorMode, NeutralizeBackground, Scnr, Stretch, StretchMethod};
 
 #[derive(Debug)]
@@ -82,7 +83,7 @@ fn stretch_stacked_light() {
         );
 
         Scnr::average_neutral().apply(&mut stretched).unwrap();
-        save_png(&stretched, &format!("stretch/stacked_light_{name}.png"));
+        visual::save_linear(&stretched, &format!("stretch/stacked_light_{name}.png"));
     }
 
     // Two-stage Milky-Way contrast — the realistic GHS workflow. A gentle auto-asinh first lifts the
@@ -111,5 +112,5 @@ fn stretch_stacked_light() {
         "asinh+ghs output stays in [0,1]: {out:?}"
     );
     Scnr::average_neutral().apply(&mut staged).unwrap();
-    save_png(&staged, "stretch/stacked_light_asinh_ghs.png");
+    visual::save_linear(&staged, "stretch/stacked_light_asinh_ghs.png");
 }

@@ -160,27 +160,30 @@ fn test_inspect_pipeline_intermediates_rho_opiuchi() {
 
     // 1. Grayscale
     let grayscale = prepare::prepare(&linear_image, &mut pool);
-    visual::save_grayscale_stretched(
+    visual::save(
         grayscale.pixels(),
         Size2us::new(width, height),
         &out("01_grayscale.tiff"),
+        visual::ToneMap::AutoRange,
     );
     println!("Saved: 01_grayscale");
 
     // 2. Background
     let background = BackgroundEstimate::estimate(&grayscale, &config.background, &mut pool);
-    visual::save_grayscale_stretched(
+    visual::save(
         background.background.pixels(),
         Size2us::new(width, height),
         &out("02_background.tiff"),
+        visual::ToneMap::AutoRange,
     );
     println!("Saved: 02_background");
 
     // 3. Noise
-    visual::save_grayscale_stretched(
+    visual::save(
         background.noise.pixels(),
         Size2us::new(width, height),
         &out("03_noise.tiff"),
+        visual::ToneMap::AutoRange,
     );
     println!("Saved: 03_noise");
 
@@ -191,10 +194,11 @@ fn test_inspect_pipeline_intermediates_rho_opiuchi() {
         .zip(background.background.pixels().iter())
         .map(|(&p, &bg)| (p - bg).max(0.0))
         .collect();
-    visual::save_grayscale_stretched(
+    visual::save(
         &subtracted,
         Size2us::new(width, height),
         &out("04_subtracted.tiff"),
+        visual::ToneMap::AutoRange,
     );
     println!("Saved: 04_subtracted");
 
@@ -227,10 +231,11 @@ fn test_inspect_pipeline_intermediates_rho_opiuchi() {
         pool.release_f32(conv_scratch);
 
         let pixels = scratch.pixels().to_vec();
-        visual::save_grayscale_stretched(
+        visual::save(
             &pixels,
             Size2us::new(width, height),
             &out("05_matched_filter.tiff"),
+            visual::ToneMap::AutoRange,
         );
         println!("Saved: 05_matched_filter");
 

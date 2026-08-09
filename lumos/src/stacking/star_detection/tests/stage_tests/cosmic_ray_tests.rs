@@ -10,7 +10,7 @@ use crate::stacking::star_detection::detector::StarDetector;
 use crate::stacking::star_detection::tests::Scenario;
 use crate::testing::init_tracing;
 use crate::testing::synthetic::artifacts::add_cosmic_rays;
-use crate::testing::visual::{gray_to_rgb_image_stretched, save_grayscale, save_image};
+use crate::testing::visual::{ToneMap, gray_to_rgb, save, save_image};
 use common::internals::test_output_path;
 use imaginarium::Color;
 use imaginarium::drawing::{draw_circle, draw_cross};
@@ -36,10 +36,11 @@ fn test_cosmic_ray_rejection() {
     // Add cosmic rays manually so we know their positions
     let cr_positions = add_cosmic_rays(&mut pixels_vec, width, 15, (0.5, 1.0), 123);
 
-    save_grayscale(
+    save(
         &pixels_vec,
         Size2us::new(width, height),
         &test_output_path("synthetic_starfield/stage_cr_rejection_input.png"),
+        ToneMap::Clamp,
     );
 
     // Run detection - disable CFA filter and matched filter for synthetic images
@@ -53,7 +54,7 @@ fn test_cosmic_ray_rejection() {
     let stars = result.stars;
 
     // Create overlay
-    let mut img = gray_to_rgb_image_stretched(&pixels_vec, Size2us::new(width, height));
+    let mut img = gray_to_rgb(&pixels_vec, Size2us::new(width, height), ToneMap::AutoRange);
 
     // Draw cosmic ray positions in red
     let red = Color::rgb(1.0, 0.2, 0.2);

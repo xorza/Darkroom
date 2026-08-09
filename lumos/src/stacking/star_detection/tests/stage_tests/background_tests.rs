@@ -8,7 +8,7 @@ use crate::testing::init_tracing;
 use crate::testing::prelude::*;
 use crate::testing::synthetic::backgrounds::NebulaConfig;
 use crate::testing::synthetic::scene::BackgroundField;
-use crate::testing::visual::save_grayscale;
+use crate::testing::visual::{ToneMap, save};
 use common::internals::test_output_path;
 
 use crate::stacking::star_detection::tests::stage_tests::TILE_SIZE;
@@ -44,17 +44,19 @@ fn test_background_uniform() {
     );
 
     // Save input image
-    save_grayscale(
+    save(
         pixels.pixels(),
         Size2us::new(width, height),
         &test_output_path("synthetic_starfield/stage_bg_uniform_input.png"),
+        ToneMap::Clamp,
     );
 
     // Save background map
-    save_grayscale(
+    save(
         background.background.pixels(),
         Size2us::new(width, height),
         &test_output_path("synthetic_starfield/stage_bg_uniform_background.png"),
+        ToneMap::Clamp,
     );
 
     // Save background-subtracted image
@@ -63,10 +65,11 @@ fn test_background_uniform() {
         .zip(background.background.iter())
         .map(|(&p, &bg)| (p - bg).max(0.0))
         .collect();
-    save_grayscale(
+    save(
         &subtracted,
         Size2us::new(width, height),
         &test_output_path("synthetic_starfield/stage_bg_uniform_subtracted.png"),
+        ToneMap::Clamp,
     );
 
     // Verify background level is approximately correct
@@ -128,16 +131,18 @@ fn test_background_gradient() {
     );
 
     // Save images
-    save_grayscale(
+    save(
         &pixels,
         Size2us::new(width, height),
         &test_output_path("synthetic_starfield/stage_bg_gradient_input.png"),
+        ToneMap::Clamp,
     );
 
-    save_grayscale(
+    save(
         background.background.pixels(),
         Size2us::new(width, height),
         &test_output_path("synthetic_starfield/stage_bg_gradient_background.png"),
+        ToneMap::Clamp,
     );
 
     let subtracted: Vec<f32> = pixels
@@ -145,10 +150,11 @@ fn test_background_gradient() {
         .zip(background.background.iter())
         .map(|(&p, &bg)| (p - bg).max(0.0))
         .collect();
-    save_grayscale(
+    save(
         &subtracted,
         Size2us::new(width, height),
         &test_output_path("synthetic_starfield/stage_bg_gradient_subtracted.png"),
+        ToneMap::Clamp,
     );
 
     // Verify gradient is captured
@@ -210,16 +216,18 @@ fn test_background_vignette() {
     );
 
     // Save images
-    save_grayscale(
+    save(
         &pixels,
         Size2us::new(width, height),
         &test_output_path("synthetic_starfield/stage_bg_vignette_input.png"),
+        ToneMap::Clamp,
     );
 
-    save_grayscale(
+    save(
         background.background.pixels(),
         Size2us::new(width, height),
         &test_output_path("synthetic_starfield/stage_bg_vignette_background.png"),
+        ToneMap::Clamp,
     );
 
     let subtracted: Vec<f32> = pixels
@@ -227,10 +235,11 @@ fn test_background_vignette() {
         .zip(background.background.iter())
         .map(|(&p, &bg)| (p - bg).max(0.0))
         .collect();
-    save_grayscale(
+    save(
         &subtracted,
         Size2us::new(width, height),
         &test_output_path("synthetic_starfield/stage_bg_vignette_subtracted.png"),
+        ToneMap::Clamp,
     );
 
     // Verify center is brighter than corners (sample a genuinely dark corner — the estimator
@@ -303,16 +312,18 @@ fn test_background_nebula() {
     );
 
     // Save images
-    save_grayscale(
+    save(
         &pixels,
         Size2us::new(width, height),
         &test_output_path("synthetic_starfield/stage_bg_nebula_input.png"),
+        ToneMap::Clamp,
     );
 
-    save_grayscale(
+    save(
         background.background.pixels(),
         Size2us::new(width, height),
         &test_output_path("synthetic_starfield/stage_bg_nebula_background.png"),
+        ToneMap::Clamp,
     );
 
     let subtracted: Vec<f32> = pixels
@@ -320,10 +331,11 @@ fn test_background_nebula() {
         .zip(background.background.iter())
         .map(|(&p, &bg)| (p - bg).max(0.0))
         .collect();
-    save_grayscale(
+    save(
         &subtracted,
         Size2us::new(width, height),
         &test_output_path("synthetic_starfield/stage_bg_nebula_subtracted.png"),
+        ToneMap::Clamp,
     );
 
     // The nebula is a central blob: its centre must read clearly brighter than a corner.

@@ -8,7 +8,7 @@ use crate::stacking::star_detection::detector::stages::detect::internals::detect
 use crate::stacking::star_detection::tests::Scenario;
 use crate::testing::init_tracing;
 use crate::testing::prelude::*;
-use crate::testing::visual::{gray_to_rgb_image_stretched, save_grayscale, save_image};
+use crate::testing::visual::{ToneMap, gray_to_rgb, save, save_image};
 use common::internals::test_output_path;
 use imaginarium::Color;
 use imaginarium::drawing::{draw_circle, draw_cross};
@@ -22,7 +22,7 @@ fn create_detection_overlay(
     candidates: &[(usize, usize)],
     ground_truth: &[(f32, f32)],
 ) -> imaginarium::Image {
-    let mut img = gray_to_rgb_image_stretched(pixels, size);
+    let mut img = gray_to_rgb(pixels, size, ToneMap::AutoRange);
 
     // Draw ground truth in blue
     let blue = Color::rgb(0.3, 0.3, 1.0);
@@ -55,10 +55,11 @@ fn test_detection_sparse() {
     let ground_truth = frame.truth.sources.clone();
 
     // Save input
-    save_grayscale(
+    save(
         pixels.pixels(),
         size,
         &test_output_path("synthetic_starfield/stage_det_sparse_input.png"),
+        ToneMap::Clamp,
     );
 
     // Estimate background
@@ -142,10 +143,11 @@ fn test_detection_thresholds() {
     let ground_truth = frame.truth.sources.clone();
 
     // Save input
-    save_grayscale(
+    save(
         pixels.pixels(),
         Size2us::new(width, height),
         &test_output_path("synthetic_starfield/stage_det_thresholds_input.png"),
+        ToneMap::Clamp,
     );
 
     // Estimate background
@@ -224,10 +226,11 @@ fn test_detection_area_filter() {
     let ground_truth = frame.truth.sources.clone();
 
     // Save input
-    save_grayscale(
+    save(
         pixels.pixels(),
         Size2us::new(width, height),
         &test_output_path("synthetic_starfield/stage_det_area_filter_input.png"),
+        ToneMap::Clamp,
     );
 
     // Estimate background

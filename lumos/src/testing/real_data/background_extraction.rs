@@ -7,7 +7,8 @@ use crate::io::image::linear::LinearImage;
 use crate::io::image::load_context::LoadContext;
 use crate::math::size2us::Size2us;
 use crate::math::statistics::median_f32_mut;
-use crate::testing::{calibration_dir, init_tracing, save_png};
+use crate::testing::visual;
+use crate::testing::{calibration_dir, init_tracing};
 use crate::{ExtractBackground, NeutralizeBackground, Scnr, Stretch};
 
 /// Max−min of the robust background level across the four corners of the intensity plane — a proxy
@@ -54,7 +55,7 @@ fn extract_flattens_background_on_stretched_master() {
     NeutralizeBackground.apply(&mut img).unwrap();
     Stretch::auto_stf().apply(&mut img).unwrap();
     Scnr::average_neutral().apply(&mut img).unwrap();
-    save_png(&img, "bg_extraction/stretched.png");
+    visual::save_linear(&img, "bg_extraction/stretched.png");
 
     let before = corner_background_spread(&img);
 
@@ -63,7 +64,7 @@ fn extract_flattens_background_on_stretched_master() {
     let mut extracted = img.clone();
     ExtractBackground::default().apply(&mut extracted).unwrap();
     NeutralizeBackground.apply(&mut extracted).unwrap();
-    save_png(&extracted, "bg_extraction/extracted.png");
+    visual::save_linear(&extracted, "bg_extraction/extracted.png");
 
     let after = corner_background_spread(&extracted);
     eprintln!(

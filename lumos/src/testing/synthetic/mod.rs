@@ -40,6 +40,9 @@ pub(crate) mod background_map;
 pub(crate) mod backgrounds;
 pub(crate) mod camera;
 pub(crate) mod fixtures;
+/// Eyeball-verification tool, not dead code: `#[ignore]`d generators that render every synthetic
+/// combination to PNG. Nothing calls into it — that is the point, it is run by hand. See its
+/// module docs for the invocation.
 mod gallery;
 pub(crate) mod metrics;
 pub(crate) mod noise;
