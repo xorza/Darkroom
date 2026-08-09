@@ -23,6 +23,16 @@ use crate::stacking::registration::triangle::geometry::Triangle;
 /// For 500x500 points (250K entries), dense is still preferred. Beyond that, sparse wins.
 const DENSE_VOTE_THRESHOLD: usize = 250_000;
 
+/// A reference star paired with a target star, by index into their respective slices.
+///
+/// The bare pair, shared by everything that carries one: [`PointMatch`] adds the vote evidence
+/// that produced it, and `StarMatch` adds the residual only measurable once a transform exists.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct MatchIndices {
+    pub(crate) reference: usize,
+    pub(crate) target: usize,
+}
+
 /// A matched point pair between reference and target.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct PointMatch {
@@ -30,6 +40,16 @@ pub(crate) struct PointMatch {
     pub(crate) target_idx: usize,
     pub(crate) votes: usize,
     pub(crate) confidence: f64,
+}
+
+impl PointMatch {
+    /// The pair alone, without the vote evidence behind it.
+    pub(crate) fn indices(self) -> MatchIndices {
+        MatchIndices {
+            reference: self.ref_idx,
+            target: self.target_idx,
+        }
+    }
 }
 
 /// Vote matrix storage - either dense (Vec) or sparse (HashMap).

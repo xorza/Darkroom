@@ -18,7 +18,54 @@ pub(crate) struct TileStats {
     pub(crate) sigma: f32,
 }
 
+/// Which of a tile's two statistics a spline pass is working on.
+///
+/// The sky and sigma planes are interpolated by identical code over identical grids; naming the
+/// plane rather than passing a `fn(&TileStats) -> f32` is what keeps that one loop instead of two.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TileComponent {
+    Sky,
+    Sigma,
+}
+
+impl TileComponent {
+    /// Both components, in the order the spline solver visits them.
+    pub(crate) const ALL: [Self; 2] = [Self::Sky, Self::Sigma];
+}
+
+/// The second derivative in Y of each tile statistic, for the natural cubic spline. Paired so a
+/// pass cannot compute one plane's derivative and forget the other's.
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct TileD2y {
+    pub(crate) sky: f32,
+    pub(crate) sigma: f32,
+}
+
+impl TileD2y {
+    pub(crate) fn get(self, component: TileComponent) -> f32 {
+        match component {
+            TileComponent::Sky => self.sky,
+            TileComponent::Sigma => self.sigma,
+        }
+    }
+
+    pub(crate) fn get_mut(&mut self, component: TileComponent) -> &mut f32 {
+        match component {
+            TileComponent::Sky => &mut self.sky,
+            TileComponent::Sigma => &mut self.sigma,
+        }
+    }
+}
+
 impl TileStats {
+    /// The statistic `component` names.
+    pub(crate) fn get(self, component: TileComponent) -> f32 {
+        match component {
+            TileComponent::Sky => self.sky,
+            TileComponent::Sigma => self.sigma,
+        }
+    }
+
     /// Compute sigma-clipped statistics for the pixels of `tile`.
     ///
     /// When a mask is provided, only unmasked pixels are used. If all pixels

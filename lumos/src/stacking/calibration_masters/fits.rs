@@ -16,6 +16,7 @@ use crate::io::image::fits::decode::read_cfa_hdu;
 use crate::io::image::fits::error::fits_to_io;
 use crate::math::size2us::Size2us;
 use crate::stacking::calibration_masters::CalibrationMasters;
+use crate::stacking::calibration_masters::CalibrationSet;
 use crate::stacking::calibration_masters::defect_map::DefectMap;
 
 const BUNDLE_FORMAT: &str = "CALMASTR";
@@ -79,19 +80,19 @@ pub(super) fn save(path: &Path, masters: &CalibrationMasters) -> std::io::Result
         for master in [
             MasterToWrite {
                 role: MasterRole::Dark,
-                image: masters.dark.as_ref(),
+                image: masters.masters.dark.as_ref(),
             },
             MasterToWrite {
                 role: MasterRole::Flat,
-                image: masters.flat.as_ref(),
+                image: masters.masters.flat.as_ref(),
             },
             MasterToWrite {
                 role: MasterRole::Bias,
-                image: masters.bias.as_ref(),
+                image: masters.masters.bias.as_ref(),
             },
             MasterToWrite {
                 role: MasterRole::FlatDark,
-                image: masters.flat_dark.as_ref(),
+                image: masters.masters.flat_dark.as_ref(),
             },
         ] {
             let Some(image) = master.image else {
@@ -128,10 +129,12 @@ pub(super) fn load(path: &Path) -> std::io::Result<CalibrationMasters> {
     let indices = bundle_indices(&reader)?;
 
     let masters = CalibrationMasters {
-        dark: read_master(&mut reader, indices.dark, MasterRole::Dark, path)?,
-        flat: read_master(&mut reader, indices.flat, MasterRole::Flat, path)?,
-        bias: read_master(&mut reader, indices.bias, MasterRole::Bias, path)?,
-        flat_dark: read_master(&mut reader, indices.flat_dark, MasterRole::FlatDark, path)?,
+        masters: CalibrationSet {
+            dark: read_master(&mut reader, indices.dark, MasterRole::Dark, path)?,
+            flat: read_master(&mut reader, indices.flat, MasterRole::Flat, path)?,
+            bias: read_master(&mut reader, indices.bias, MasterRole::Bias, path)?,
+            flat_dark: read_master(&mut reader, indices.flat_dark, MasterRole::FlatDark, path)?,
+        },
         defect_map: read_defect_map(&mut reader, indices.defects)?,
     };
     validate_dimensions(&masters)?;
@@ -420,10 +423,10 @@ fn validate_sorted(indices: &[usize], kind: &str) -> std::io::Result<()> {
 fn validate_dimensions(masters: &CalibrationMasters) -> std::io::Result<()> {
     let mut dimensions = None;
     for master in [
-        masters.dark.as_ref(),
-        masters.flat.as_ref(),
-        masters.bias.as_ref(),
-        masters.flat_dark.as_ref(),
+        masters.masters.dark.as_ref(),
+        masters.masters.flat.as_ref(),
+        masters.masters.bias.as_ref(),
+        masters.masters.flat_dark.as_ref(),
     ]
     .into_iter()
     .flatten()
