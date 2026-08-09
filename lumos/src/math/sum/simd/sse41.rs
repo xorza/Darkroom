@@ -8,20 +8,23 @@ use crate::math::sum::scalar::neumaier_add;
 /// Kahan horizontal reduction of 4 sum lanes + 4 compensation lanes into one running total.
 #[inline]
 #[target_feature(enable = "sse4.1")]
-#[allow(unsafe_op_in_unsafe_fn)]
 unsafe fn reduce_kahan_128(sum_vec: __m128, c_vec: __m128) -> KahanSum {
-    let mut s_arr = [0.0f32; 4];
-    let mut c_arr = [0.0f32; 4];
-    _mm_storeu_ps(s_arr.as_mut_ptr(), sum_vec);
-    _mm_storeu_ps(c_arr.as_mut_ptr(), c_vec);
+    // SAFETY: every operation below needs the ISA this function's
+    // `target_feature` establishes, and nothing else.
+    unsafe {
+        let mut s_arr = [0.0f32; 4];
+        let mut c_arr = [0.0f32; 4];
+        _mm_storeu_ps(s_arr.as_mut_ptr(), sum_vec);
+        _mm_storeu_ps(c_arr.as_mut_ptr(), c_vec);
 
-    let mut sum = 0.0f32;
-    let mut compensation = 0.0f32;
-    for i in 0..4 {
-        neumaier_add(&mut sum, &mut compensation, s_arr[i]);
-        neumaier_add(&mut sum, &mut compensation, -c_arr[i]);
+        let mut sum = 0.0f32;
+        let mut compensation = 0.0f32;
+        for i in 0..4 {
+            neumaier_add(&mut sum, &mut compensation, s_arr[i]);
+            neumaier_add(&mut sum, &mut compensation, -c_arr[i]);
+        }
+        KahanSum { sum, compensation }
     }
-    KahanSum { sum, compensation }
 }
 
 /// Weighted mean using SSE4.1 SIMD with Kahan compensated summation.

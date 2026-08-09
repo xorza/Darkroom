@@ -13,7 +13,6 @@ use std::arch::x86_64::*;
 /// SIMD `int_pow`: compute u^n for each lane using repeated squaring.
 #[target_feature(enable = "avx2,fma")]
 #[inline]
-#[allow(unsafe_op_in_unsafe_fn)]
 unsafe fn simd_int_pow(u: __m256d, n: u32) -> __m256d {
     match n {
         0 => _mm256_set1_pd(1.0),
@@ -47,27 +46,30 @@ unsafe fn simd_int_pow(u: __m256d, n: u32) -> __m256d {
 /// SIMD `fast_pow_neg`: compute u^(-beta) for 4 lanes at once.
 #[target_feature(enable = "avx2,fma")]
 #[inline]
-#[allow(unsafe_op_in_unsafe_fn)]
 unsafe fn simd_fast_pow_neg(u: __m256d, strategy: PowStrategy) -> __m256d {
-    match strategy {
-        PowStrategy::HalfInt { int_part } => {
-            // u^(-(n+0.5)) = 1 / (u^n * sqrt(u))
-            let u_n = simd_int_pow(u, int_part);
-            let sqrt_u = _mm256_sqrt_pd(u);
-            let denom = _mm256_mul_pd(u_n, sqrt_u);
-            _mm256_div_pd(_mm256_set1_pd(1.0), denom)
-        }
-        PowStrategy::Int { n } => _mm256_div_pd(_mm256_set1_pd(1.0), simd_int_pow(u, n)),
-        PowStrategy::General { neg_beta } => {
-            let mut u_arr = [0.0f64; 4];
-            _mm256_storeu_pd(u_arr.as_mut_ptr(), u);
-            let result = [
-                u_arr[0].powf(neg_beta),
-                u_arr[1].powf(neg_beta),
-                u_arr[2].powf(neg_beta),
-                u_arr[3].powf(neg_beta),
-            ];
-            _mm256_loadu_pd(result.as_ptr())
+    // SAFETY: every operation below needs the ISA this function's
+    // `target_feature` establishes, and nothing else.
+    unsafe {
+        match strategy {
+            PowStrategy::HalfInt { int_part } => {
+                // u^(-(n+0.5)) = 1 / (u^n * sqrt(u))
+                let u_n = simd_int_pow(u, int_part);
+                let sqrt_u = _mm256_sqrt_pd(u);
+                let denom = _mm256_mul_pd(u_n, sqrt_u);
+                _mm256_div_pd(_mm256_set1_pd(1.0), denom)
+            }
+            PowStrategy::Int { n } => _mm256_div_pd(_mm256_set1_pd(1.0), simd_int_pow(u, n)),
+            PowStrategy::General { neg_beta } => {
+                let mut u_arr = [0.0f64; 4];
+                _mm256_storeu_pd(u_arr.as_mut_ptr(), u);
+                let result = [
+                    u_arr[0].powf(neg_beta),
+                    u_arr[1].powf(neg_beta),
+                    u_arr[2].powf(neg_beta),
+                    u_arr[3].powf(neg_beta),
+                ];
+                _mm256_loadu_pd(result.as_ptr())
+            }
         }
     }
 }

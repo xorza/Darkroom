@@ -12,7 +12,6 @@ use std::arch::aarch64::*;
 
 /// SIMD `int_pow`: compute u^n for each lane using repeated squaring.
 #[inline]
-#[allow(unsafe_op_in_unsafe_fn)]
 unsafe fn simd_int_pow(u: float64x2_t, n: u32) -> float64x2_t {
     match n {
         0 => vdupq_n_f64(1.0),
@@ -45,7 +44,6 @@ unsafe fn simd_int_pow(u: float64x2_t, n: u32) -> float64x2_t {
 
 /// SIMD `fast_pow_neg`: compute u^(-beta) for 2 lanes at once.
 #[inline]
-#[allow(unsafe_op_in_unsafe_fn)]
 unsafe fn simd_fast_pow_neg(u: float64x2_t, strategy: PowStrategy) -> float64x2_t {
     match strategy {
         PowStrategy::HalfInt { int_part } => {

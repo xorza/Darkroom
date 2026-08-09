@@ -156,25 +156,31 @@ impl PixelGrid {
 
     /// Get pixel value at local index, or NO_PIXEL if not present in current generation.
     #[inline]
-    #[allow(unsafe_op_in_unsafe_fn)]
     unsafe fn get_value_unchecked(&self, idx: usize) -> f32 {
-        if *self.values_generation.get_unchecked(idx) == self.current_generation {
-            *self.values.get_unchecked(idx)
-        } else {
-            NO_PIXEL
+        // SAFETY: every operation below relies only on the precondition this function's own
+        // safety contract already states.
+        unsafe {
+            if *self.values_generation.get_unchecked(idx) == self.current_generation {
+                *self.values.get_unchecked(idx)
+            } else {
+                NO_PIXEL
+            }
         }
     }
 
     /// Check visited and mark at local index. Returns true if newly visited.
     #[inline]
-    #[allow(unsafe_op_in_unsafe_fn)]
     unsafe fn try_mark_visited_unchecked(&mut self, idx: usize) -> bool {
-        let gen_ptr = self.visited_generation.get_unchecked_mut(idx);
-        if *gen_ptr == self.visited_generation_counter {
-            false
-        } else {
-            *gen_ptr = self.visited_generation_counter;
-            true
+        // SAFETY: every operation below relies only on the precondition this function's own
+        // safety contract already states.
+        unsafe {
+            let gen_ptr = self.visited_generation.get_unchecked_mut(idx);
+            if *gen_ptr == self.visited_generation_counter {
+                false
+            } else {
+                *gen_ptr = self.visited_generation_counter;
+                true
+            }
         }
     }
 }
@@ -920,25 +926,28 @@ fn find_connected_regions_grid(
 /// `idx` must be a valid local index within the grid with at least 1 cell of
 /// padding on all sides.
 #[inline]
-#[allow(unsafe_op_in_unsafe_fn)]
 unsafe fn visit_neighbors_grid(
     idx: usize,
     width: usize,
     grid: &mut PixelGrid,
     queue: &mut Vec<u32>,
 ) {
-    // Pre-compute all 8 neighbor indices (guaranteed in-bounds by border)
-    let up = idx - width;
-    let down = idx + width;
+    // SAFETY: every operation below relies only on the precondition this function's own
+    // safety contract already states.
+    unsafe {
+        // Pre-compute all 8 neighbor indices (guaranteed in-bounds by border)
+        let up = idx - width;
+        let down = idx + width;
 
-    try_visit_idx(up - 1, grid, queue); // top-left
-    try_visit_idx(up, grid, queue); // top
-    try_visit_idx(up + 1, grid, queue); // top-right
-    try_visit_idx(idx - 1, grid, queue); // left
-    try_visit_idx(idx + 1, grid, queue); // right
-    try_visit_idx(down - 1, grid, queue); // bottom-left
-    try_visit_idx(down, grid, queue); // bottom
-    try_visit_idx(down + 1, grid, queue); // bottom-right
+        try_visit_idx(up - 1, grid, queue); // top-left
+        try_visit_idx(up, grid, queue); // top
+        try_visit_idx(up + 1, grid, queue); // top-right
+        try_visit_idx(idx - 1, grid, queue); // left
+        try_visit_idx(idx + 1, grid, queue); // right
+        try_visit_idx(down - 1, grid, queue); // bottom-left
+        try_visit_idx(down, grid, queue); // bottom
+        try_visit_idx(down + 1, grid, queue); // bottom-right
+    }
 }
 
 /// Try to visit a neighbor at a flat grid index. Fully unchecked.
@@ -946,16 +955,19 @@ unsafe fn visit_neighbors_grid(
 /// # Safety
 /// `idx` must be a valid index within the grid arrays.
 #[inline]
-#[allow(unsafe_op_in_unsafe_fn)]
 unsafe fn try_visit_idx(idx: usize, grid: &mut PixelGrid, queue: &mut Vec<u32>) {
-    // Check if cell has a pixel in current generation
-    let value = grid.get_value_unchecked(idx);
-    if value == NO_PIXEL {
-        return;
-    }
-    // Check and mark visited
-    if grid.try_mark_visited_unchecked(idx) {
-        queue.push(idx as u32);
+    // SAFETY: every operation below relies only on the precondition this function's own
+    // safety contract already states.
+    unsafe {
+        // Check if cell has a pixel in current generation
+        let value = grid.get_value_unchecked(idx);
+        if value == NO_PIXEL {
+            return;
+        }
+        // Check and mark visited
+        if grid.try_mark_visited_unchecked(idx) {
+            queue.push(idx as u32);
+        }
     }
 }
 

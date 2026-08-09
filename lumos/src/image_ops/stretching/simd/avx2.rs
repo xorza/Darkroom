@@ -20,7 +20,6 @@ use crate::image_ops::stretching::{AsinhCurve, color_preserve_pixel};
 /// ever pass `x = arg + √(arg²+1) ≥ 1`.
 #[target_feature(enable = "avx2,fma")]
 #[inline]
-#[allow(unsafe_op_in_unsafe_fn)]
 unsafe fn logf_avx2(x: __m256) -> __m256 {
     // frexp: split x = m · 2^e with the mantissa m in [0.5, 1).
     let xi = _mm256_castps_si256(x);
@@ -60,10 +59,10 @@ unsafe fn logf_avx2(x: __m256) -> __m256 {
 /// positive).
 #[target_feature(enable = "avx2,fma")]
 #[inline]
-#[allow(unsafe_op_in_unsafe_fn)]
 unsafe fn asinh_avx2(x: __m256) -> __m256 {
     let root = _mm256_sqrt_ps(_mm256_fmadd_ps(x, x, _mm256_set1_ps(1.0)));
-    logf_avx2(_mm256_add_ps(x, root))
+    // SAFETY: `logf_avx2` needs AVX2+FMA, which this function's own `target_feature` establishes.
+    unsafe { logf_avx2(_mm256_add_ps(x, root)) }
 }
 
 /// Color-preserving arcsinh stretch of one band of three RGB-f32 **planes**, in place. The three
@@ -73,7 +72,6 @@ unsafe fn asinh_avx2(x: __m256) -> __m256 {
 /// # Safety
 /// The caller must ensure AVX2+FMA are available (checked once at dispatch).
 #[target_feature(enable = "avx2,fma")]
-#[allow(unsafe_op_in_unsafe_fn)]
 pub(super) unsafe fn asinh_color_preserve_avx2(
     red: &mut [f32],
     green: &mut [f32],
@@ -81,58 +79,62 @@ pub(super) unsafe fn asinh_color_preserve_avx2(
     inv_beta: f32,
     inv_norm: f32,
 ) {
-    debug_assert_eq!(red.len(), green.len());
-    debug_assert_eq!(green.len(), blue.len());
-    let n_px = red.len();
-    let third = _mm256_set1_ps(1.0 / 3.0);
-    let vib = _mm256_set1_ps(inv_beta);
-    let vin = _mm256_set1_ps(inv_norm);
-    let zero = _mm256_setzero_ps();
-    let one = _mm256_set1_ps(1.0);
+    // SAFETY: every operation below needs the ISA this function's
+    // `target_feature` establishes, and nothing else.
+    unsafe {
+        debug_assert_eq!(red.len(), green.len());
+        debug_assert_eq!(green.len(), blue.len());
+        let n_px = red.len();
+        let third = _mm256_set1_ps(1.0 / 3.0);
+        let vib = _mm256_set1_ps(inv_beta);
+        let vin = _mm256_set1_ps(inv_norm);
+        let zero = _mm256_setzero_ps();
+        let one = _mm256_set1_ps(1.0);
 
-    let mut p = 0;
-    while p + 8 <= n_px {
-        let r = _mm256_loadu_ps(red.as_ptr().add(p));
-        let g = _mm256_loadu_ps(green.as_ptr().add(p));
-        let b = _mm256_loadu_ps(blue.as_ptr().add(p));
+        let mut p = 0;
+        while p + 8 <= n_px {
+            let r = _mm256_loadu_ps(red.as_ptr().add(p));
+            let g = _mm256_loadu_ps(green.as_ptr().add(p));
+            let b = _mm256_loadu_ps(blue.as_ptr().add(p));
 
-        let intensity = _mm256_mul_ps(_mm256_add_ps(_mm256_add_ps(r, g), b), third);
-        let curved = asinh_avx2(_mm256_mul_ps(intensity, vib));
-        let e = _mm256_min_ps(_mm256_max_ps(_mm256_mul_ps(curved, vin), zero), one);
-        // scale = eval/intensity where intensity > 0, else 0 (sub-background pixels → black).
-        let pos = _mm256_cmp_ps::<_CMP_GT_OQ>(intensity, zero);
-        let scale = _mm256_and_ps(pos, _mm256_div_ps(e, intensity));
+            let intensity = _mm256_mul_ps(_mm256_add_ps(_mm256_add_ps(r, g), b), third);
+            let curved = asinh_avx2(_mm256_mul_ps(intensity, vib));
+            let e = _mm256_min_ps(_mm256_max_ps(_mm256_mul_ps(curved, vin), zero), one);
+            // scale = eval/intensity where intensity > 0, else 0 (sub-background pixels → black).
+            let pos = _mm256_cmp_ps::<_CMP_GT_OQ>(intensity, zero);
+            let scale = _mm256_and_ps(pos, _mm256_div_ps(e, intensity));
 
-        let nr = _mm256_mul_ps(r, scale);
-        let ng = _mm256_mul_ps(g, scale);
-        let nb = _mm256_mul_ps(b, scale);
-        // Hue-preserving highlight cap: divide by the max channel when it exceeds 1.
-        let maxc = _mm256_max_ps(_mm256_max_ps(nr, ng), nb);
-        let cap = _mm256_blendv_ps(
-            one,
-            _mm256_div_ps(one, maxc),
-            _mm256_cmp_ps::<_CMP_GT_OQ>(maxc, one),
-        );
-        _mm256_storeu_ps(red.as_mut_ptr().add(p), _mm256_mul_ps(nr, cap));
-        _mm256_storeu_ps(green.as_mut_ptr().add(p), _mm256_mul_ps(ng, cap));
-        _mm256_storeu_ps(blue.as_mut_ptr().add(p), _mm256_mul_ps(nb, cap));
-        p += 8;
-    }
+            let nr = _mm256_mul_ps(r, scale);
+            let ng = _mm256_mul_ps(g, scale);
+            let nb = _mm256_mul_ps(b, scale);
+            // Hue-preserving highlight cap: divide by the max channel when it exceeds 1.
+            let maxc = _mm256_max_ps(_mm256_max_ps(nr, ng), nb);
+            let cap = _mm256_blendv_ps(
+                one,
+                _mm256_div_ps(one, maxc),
+                _mm256_cmp_ps::<_CMP_GT_OQ>(maxc, one),
+            );
+            _mm256_storeu_ps(red.as_mut_ptr().add(p), _mm256_mul_ps(nr, cap));
+            _mm256_storeu_ps(green.as_mut_ptr().add(p), _mm256_mul_ps(ng, cap));
+            _mm256_storeu_ps(blue.as_mut_ptr().add(p), _mm256_mul_ps(nb, cap));
+            p += 8;
+        }
 
-    let curve = AsinhCurve { inv_beta, inv_norm };
-    while p < n_px {
-        let out = color_preserve_pixel(
-            Rgb {
-                r: red[p],
-                g: green[p],
-                b: blue[p],
-            },
-            &curve,
-        );
-        red[p] = out.r;
-        green[p] = out.g;
-        blue[p] = out.b;
-        p += 1;
+        let curve = AsinhCurve { inv_beta, inv_norm };
+        while p < n_px {
+            let out = color_preserve_pixel(
+                Rgb {
+                    r: red[p],
+                    g: green[p],
+                    b: blue[p],
+                },
+                &curve,
+            );
+            red[p] = out.r;
+            green[p] = out.g;
+            blue[p] = out.b;
+            p += 1;
+        }
     }
 }
 
