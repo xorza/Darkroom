@@ -1,5 +1,5 @@
 use crate::stacking::star_detection::detector::stages::fwhm::*;
-use glam::DVec2;
+use crate::testing::prelude::*;
 
 // FWHM estimation never reads position, so every fixture below sits at the origin, and the
 // remaining `Star::at` defaults already clear `filter_config()` — so each test spoils exactly

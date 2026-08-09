@@ -1,6 +1,4 @@
-use crate::math::size2us::Size2us;
-use crate::stacking::drizzle::tests::*;
-use common::CancelToken;
+use super::*;
 
 #[test]
 fn test_drizzle_single_image() {

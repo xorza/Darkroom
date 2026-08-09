@@ -1,4 +1,4 @@
-use crate::stacking::registration::distortion::sip::tests::*;
+use super::*;
 
 #[test]
 fn test_term_exponents_order_2() {

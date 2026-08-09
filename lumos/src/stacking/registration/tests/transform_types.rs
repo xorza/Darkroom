@@ -12,11 +12,10 @@
 
 use crate::stacking::registration::{Config, TransformType, register};
 use crate::stacking::star_detection::star::Star;
-use crate::testing::TestRng;
+use crate::testing::prelude::*;
 use crate::testing::synthetic::transforms::{
     generate_random_stars, transform_star_list, translate_star_list,
 };
-use glam::DVec2;
 
 use crate::stacking::registration::tests::helpers::{
     self, FWHM_NORMAL, FWHM_TIGHT, apply_affine, apply_homography,

@@ -1,5 +1,4 @@
-use crate::math::size2us::Size2us;
-use crate::math::vec2us::Vec2us;
+use crate::testing::prelude::*;
 use std::any::Any;
 use std::panic::catch_unwind;
 

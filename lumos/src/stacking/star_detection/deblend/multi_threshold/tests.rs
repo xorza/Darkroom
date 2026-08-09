@@ -1,15 +1,13 @@
 //! Tests for multi-threshold deblending.
 
 use crate::math::rect::URect;
-use crate::math::size2us::Size2us;
-use crate::math::vec2us::Vec2us;
 use crate::stacking::star_detection::deblend::internals::{
     TestComponent, deblend_multi_threshold_test, make_test_component,
 };
 use crate::stacking::star_detection::deblend::multi_threshold::*;
 use crate::stacking::star_detection::labeling::LabelMap;
+use crate::testing::prelude::*;
 use crate::testing::synthetic::star_profiles::{StarProfile, SyntheticStar};
-use glam::Vec2;
 
 /// Build a `RegionSet` from separate regions, as a BFS would have appended them.
 fn region_set(regions: &[&[Pixel]]) -> RegionSet {

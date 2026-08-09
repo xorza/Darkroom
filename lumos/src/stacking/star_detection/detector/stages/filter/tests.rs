@@ -1,7 +1,6 @@
 use crate::stacking::star_detection::detector::stages::filter::*;
 use crate::stacking::star_detection::roundness::Roundness;
-use crate::testing::TestRng;
-use glam::DVec2;
+use crate::testing::prelude::*;
 
 #[test]
 fn filter_returns_the_diagnostics_stored_by_the_detector() {

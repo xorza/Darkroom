@@ -1,4 +1,4 @@
-use crate::stacking::registration::ransac::tests::*;
+use super::*;
 
 #[test]
 fn test_centroid_empty() {

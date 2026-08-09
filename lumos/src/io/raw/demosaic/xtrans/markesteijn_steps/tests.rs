@@ -2,8 +2,6 @@ use crate::io::raw::demosaic::interleave_planes;
 use crate::io::raw::demosaic::xtrans::hex_lookup::HexLookup;
 use crate::io::raw::demosaic::xtrans::internals::{make_xtrans, test_pattern, to_u16};
 use crate::io::raw::demosaic::xtrans::markesteijn_steps::*;
-use crate::math::size2us::Size2us;
-use crate::math::vec2us::Vec2us;
 
 #[test]
 fn test_green_minmax_uniform() {

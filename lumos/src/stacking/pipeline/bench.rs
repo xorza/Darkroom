@@ -1,12 +1,10 @@
-use crate::math::size2us::Size2us;
+use crate::testing::prelude::*;
 use std::convert::Infallible;
 use std::hint::black_box;
 
 use quickbench::quick_bench;
 use rayon::prelude::*;
 
-use crate::io::image::image_dimensions::ImageDimensions;
-use crate::io::image::linear::LinearImage;
 use crate::stacking::pipeline::detector_pool::DetectorPool;
 use crate::stacking::star_detection::config::Config;
 use crate::stacking::star_detection::detector::StarDetector;

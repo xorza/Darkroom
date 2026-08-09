@@ -1,10 +1,8 @@
-use glam::Vec2;
-
 use crate::io::image::cfa::CfaType;
 use crate::io::image::image_metadata::ImageMetadata;
 use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::stacking::calibration_masters::cosmic_ray::*;
-use crate::testing::TestRng;
+use crate::testing::prelude::*;
 use crate::testing::synthetic::star_profiles::{StarProfile, SyntheticStar};
 
 /// Add a round Gaussian source (peak above the existing background) at `center`.

@@ -1,8 +1,8 @@
 //! Full pipeline tests - tests complete star detection on various scenarios.
 
-use crate::math::size2us::Size2us;
 use crate::stacking::star_detection::config::Config;
 use crate::stacking::star_detection::detector::StarDetector;
+use crate::testing::prelude::*;
 use crate::testing::synthetic::observe::SimFrame;
 use crate::testing::visual::report::{DetectionMetrics, compute_detection_metrics, save_metrics};
 use crate::testing::visual::{save_comparison, save_grayscale};

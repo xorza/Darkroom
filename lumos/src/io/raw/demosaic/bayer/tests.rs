@@ -2,9 +2,7 @@
 
 use crate::io::raw::demosaic::bayer::{BayerImage, CfaPattern, rcd};
 use crate::io::raw::demosaic::interleave_planes;
-use crate::math::size2us::Size2us;
-use crate::math::vec2us::Vec2us;
-use common::CancelToken;
+use crate::testing::prelude::*;
 use rayon::ThreadPoolBuilder;
 
 #[test]

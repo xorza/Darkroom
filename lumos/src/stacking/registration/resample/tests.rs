@@ -1,9 +1,7 @@
-use crate::io::image::image_dimensions::ImageDimensions;
-use crate::io::image::linear::LinearImage;
 use crate::stacking::registration::config::{InterpolationMethod, WarpParams};
 use crate::stacking::registration::resample;
 use crate::stacking::registration::transform::{Transform, WarpTransform};
-use glam::DVec2;
+use crate::testing::prelude::*;
 
 const TOL: f32 = 1e-5;
 const INTERPOLATION_METHODS: [InterpolationMethod; 6] = [

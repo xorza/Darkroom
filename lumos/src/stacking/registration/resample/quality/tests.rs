@@ -1,9 +1,8 @@
-use crate::math::size2us::Size2us;
 use crate::stacking::registration::config::InterpolationMethod;
 use crate::stacking::registration::resample::kernel;
 use crate::stacking::registration::resample::quality;
 use crate::stacking::registration::transform::{Transform, WarpTransform};
-use glam::{DVec2, Vec2};
+use crate::testing::prelude::*;
 
 const TOL: f32 = 1e-5;
 const INTERPOLATION_METHODS: [InterpolationMethod; 6] = [

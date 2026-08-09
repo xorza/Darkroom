@@ -1,6 +1,5 @@
-use crate::math::size2us::Size2us;
+use super::*;
 use crate::stacking::star_detection::centroid::StampGrid;
-use crate::stacking::star_detection::centroid::tests::*;
 
 /// Verify that Phase 1 (weighted moments) reaches sub-pixel accuracy quickly.
 /// After 2 iterations the position should be within 0.1px of the final converged position.

@@ -1,4 +1,4 @@
-use crate::stacking::registration::triangle::tests::*;
+use super::*;
 
 #[test]
 fn test_form_triangles_from_neighbors_single_triangle() {

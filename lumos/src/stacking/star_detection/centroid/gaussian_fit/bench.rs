@@ -2,15 +2,14 @@
 //!
 //! Run with: `cargo test -p lumos --release bench_gaussian -- --ignored --nocapture`
 use crate::stacking::star_detection::centroid::StampGrid;
+use crate::testing::prelude::*;
 
 use quickbench::quick_bench;
 use std::hint::black_box;
 
-use crate::math::size2us::Size2us;
 use crate::stacking::star_detection::centroid::gaussian_fit::GaussianFit;
 use crate::stacking::star_detection::centroid::gaussian_fit::GaussianFitConfig;
 use crate::testing::synthetic::star_profiles::{StarProfile, SyntheticStar};
-use glam::{DVec2, Vec2};
 
 #[quick_bench(warmup_iters = 100, iters = 10000)]
 fn bench_gaussian_fit_small(b: quickbench::Bencher) {

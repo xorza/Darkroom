@@ -1,5 +1,4 @@
-use crate::math::size2us::Size2us;
-use crate::stacking::drizzle::tests::*;
+use super::*;
 
 // Strategy: Two frames contribute to the same output pixel with different
 // local Jacobians. Frame A uses identity (jaco=1), Frame B uses scale-2x

@@ -1,10 +1,9 @@
 //! Benchmarks for threshold mask creation.
 
 use crate::bit_buffer2::BitBuffer2;
-use crate::math::size2us::Size2us;
 use crate::stacking::star_detection::threshold_mask::simd::{process_words, process_words_scalar};
+use crate::testing::prelude::*;
 use ::quickbench::quick_bench;
-use imaginarium::Buffer2;
 use std::hint::black_box;
 
 fn create_bench_data(size: usize) -> (Buffer2<f32>, Buffer2<f32>, Buffer2<f32>) {

@@ -1,4 +1,4 @@
-use crate::stacking::registration::distortion::sip::tests::*;
+use super::*;
 
 #[test]
 fn test_correct_at_reference_point_is_identity() {

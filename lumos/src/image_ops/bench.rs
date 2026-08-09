@@ -14,10 +14,10 @@
 //! Gated behind the `real-data` feature (the dataset is). Run:
 //! `cargo test -p lumos --release --features real-data image_ops::bench -- --ignored --nocapture`
 
+use crate::testing::prelude::*;
 use quickbench::quick_bench;
 use std::hint::black_box;
 
-use crate::io::image::linear::LinearImage;
 use crate::io::image::load_context::LoadContext;
 use crate::testing::calibration_dir;
 use crate::{

@@ -1,5 +1,5 @@
 use crate::stacking::registration::transform::*;
-use crate::testing::assertions::assert_close;
+use crate::testing::prelude::*;
 use std::f64::consts::PI;
 
 const EPSILON: f64 = 1e-10;

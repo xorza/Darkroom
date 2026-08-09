@@ -1,10 +1,9 @@
 use crate::image_ops::error::OpError;
 use crate::image_ops::hdr::Hdr;
-use crate::image_ops::internals::{channel_plane as channel, gray_image as gray};
+use crate::image_ops::internals::channel_plane as channel;
 use crate::image_ops::wavelet::atrous_smooth;
-use crate::math::size2us::Size2us;
-use crate::math::vec2us::Vec2us;
-use imaginarium::Buffer2;
+use crate::testing::images::gray_image as gray;
+use crate::testing::prelude::*;
 
 /// A smooth radial brightness dome — bright center (~1.0), dark corners (~0.1). The large-scale
 /// brightness HDR is meant to compress.

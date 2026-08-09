@@ -1,6 +1,5 @@
-use crate::math::size2us::Size2us;
+use super::*;
 use crate::stacking::star_detection::centroid::StampGrid;
-use crate::stacking::star_detection::centroid::tests::*;
 
 /// Test centroiding with undersampled PSF (FWHM < 2 pixels).
 /// This is a challenging case where the star is barely resolved.

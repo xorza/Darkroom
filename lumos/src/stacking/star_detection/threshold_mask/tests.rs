@@ -8,11 +8,10 @@
 //! - Multi-row tests: 2D image patterns and row boundary handling
 
 use crate::bit_buffer2::BitBuffer2;
-use crate::math::size2us::Size2us;
 use crate::stacking::star_detection::threshold_mask::{
     create_threshold_mask, create_threshold_mask_filtered,
 };
-use imaginarium::Buffer2;
+use crate::testing::prelude::*;
 
 /// Helper to create threshold mask for tests using packed version
 fn create_threshold_mask_test(

@@ -3,7 +3,7 @@ use crate::io::raw::demosaic::xtrans::internals::{
     TEST_INV_RANGE, make_xtrans, test_pattern, test_pattern_array, to_u16,
 };
 use crate::io::raw::demosaic::xtrans::markesteijn::*;
-use crate::math::vec2us::Vec2us;
+use crate::testing::prelude::*;
 
 #[derive(Clone, Copy, Debug)]
 enum SyntheticScene {

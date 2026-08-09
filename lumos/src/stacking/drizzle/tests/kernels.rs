@@ -1,5 +1,4 @@
-use crate::math::size2us::Size2us;
-use crate::stacking::drizzle::tests::*;
+use super::*;
 
 /// Test turbo kernel drop size and overlap with hand-computed values.
 ///

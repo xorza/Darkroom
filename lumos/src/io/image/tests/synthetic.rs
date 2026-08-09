@@ -5,20 +5,17 @@
 //! physical integer/float preservation and null rejection. The demosaic path is
 //! exercised by building mosaics from known colours and demosaicing them back.
 
-use crate::math::size2us::Size2us;
+use crate::testing::prelude::*;
 use std::fs::File;
 
 use crate::io::image::error::ImageError;
 use crate::io::image::fits::decode::load_linear_fits;
-use crate::io::image::linear::LinearImage;
 use crate::io::image::load_context::LoadContext;
 use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::io::raw::demosaic::xtrans::internals::test_pattern_array;
-use crate::math::vec2us::Vec2us;
 use crate::stacking::frame_store::StackableImage;
 use crate::testing::make_cfa;
 use crate::{CalibrationMasters, CalibrationSet, CfaImage, CfaType, PreviewImage};
-use common::CancelToken;
 use fits_well::header::Header;
 use fits_well::image::{Image, Scaling};
 use fits_well::{FitsError, FitsWriter};

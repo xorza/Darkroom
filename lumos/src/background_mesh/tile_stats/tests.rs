@@ -1,6 +1,5 @@
 use crate::background_mesh::tile_stats::*;
-use crate::math::size2us::Size2us;
-use crate::math::vec2us::Vec2us;
+use crate::testing::prelude::*;
 
 #[test]
 fn sextractor_sky_hand_computed() {

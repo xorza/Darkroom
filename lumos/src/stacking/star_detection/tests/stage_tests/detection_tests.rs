@@ -2,16 +2,14 @@
 //!
 //! Tests the peak detection and thresholding logic.
 
-use crate::math::size2us::Size2us;
 use crate::stacking::star_detection::config::background_config::BackgroundConfig;
 use crate::stacking::star_detection::config::detection_config::DetectionConfig;
 use crate::stacking::star_detection::detector::stages::detect::internals::detect_stars_test;
 use crate::stacking::star_detection::tests::Scenario;
 use crate::testing::init_tracing;
-use crate::testing::synthetic::background_map;
+use crate::testing::prelude::*;
 use crate::testing::visual::{gray_to_rgb_image_stretched, save_grayscale, save_image};
 use common::internals::test_output_path;
-use glam::Vec2;
 use imaginarium::Color;
 use imaginarium::drawing::{draw_circle, draw_cross};
 

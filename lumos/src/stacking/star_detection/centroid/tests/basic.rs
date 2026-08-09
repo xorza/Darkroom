@@ -1,5 +1,4 @@
-use crate::math::size2us::Size2us;
-use crate::stacking::star_detection::centroid::tests::*;
+use super::*;
 use crate::stacking::star_detection::centroid::{StampGrid, compute_stamp_radius};
 
 #[test]

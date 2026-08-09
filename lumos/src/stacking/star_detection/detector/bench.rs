@@ -2,13 +2,11 @@
 //!
 //! Run with: `cargo test -p lumos --release bench_star_detection -- --ignored --nocapture`
 
-use crate::math::size2us::Size2us;
+use crate::testing::prelude::*;
 use ::quickbench::quick_bench;
 use std::hint::black_box;
 
 use crate::StarDetector;
-use crate::io::image::image_dimensions::ImageDimensions;
-use crate::io::image::linear::LinearImage;
 use crate::stacking::star_detection::config::Config;
 use crate::stacking::star_detection::config::background_config::{
     BackgroundConfig, BackgroundRefinement,
@@ -26,8 +24,6 @@ use crate::stacking::star_detection::roundness::Roundness;
 use crate::stacking::star_detection::star::Star;
 use crate::testing::init_tracing;
 use crate::testing::synthetic::fixtures::{cluster_field, star_field};
-use glam::DVec2;
-use imaginarium::Buffer2;
 
 #[quick_bench(warmup_iters = 3, iters = 10)]
 fn bench_detect_6k_globular_cluster(b: ::quickbench::Bencher) {

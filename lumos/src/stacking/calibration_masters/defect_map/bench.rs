@@ -1,5 +1,4 @@
 use crate::io::raw::demosaic::bayer::CfaPattern;
-use crate::math::size2us::Size2us;
 use crate::stacking::calibration_masters::defect_map::*;
 use ::quickbench::quick_bench;
 

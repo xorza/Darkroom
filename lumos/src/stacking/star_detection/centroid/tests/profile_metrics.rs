@@ -1,6 +1,4 @@
-use crate::math::size2us::Size2us;
-use crate::math::vec2us::Vec2us;
-use crate::stacking::star_detection::centroid::tests::*;
+use super::*;
 use crate::stacking::star_detection::centroid::{StampGrid, compute_stamp_radius};
 
 /// Helper: run measure_star on a single-star image with given centroid method.

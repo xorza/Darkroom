@@ -1,14 +1,13 @@
 //! Tests for 2D Gaussian fitting.
 use crate::stacking::star_detection::centroid::StampGrid;
+use crate::testing::prelude::*;
 
 use crate::math::fwhm::{fwhm_to_sigma, sigma_to_fwhm};
-use crate::math::size2us::Size2us;
 use crate::stacking::star_detection::centroid::gaussian_fit::*;
 use crate::stacking::star_detection::centroid::internals::{
     Perturbation, add_noise, reference_normal_equations,
 };
 use crate::testing::synthetic::star_profiles::{StarProfile, SyntheticStar};
-use glam::{DVec2, Vec2};
 
 /// One recovery case: render a star of known parameters, optionally spoil the stamp or lie to
 /// the fitter about something, then check what it got back.
@@ -408,8 +407,6 @@ const RECOVERY_CASES: &[RecoveryCase] = &[
         expect_converged: false,
     },
 ];
-
-use crate::testing::assertions::{assert_close, assert_close_slice};
 
 /// SIMD and scalar accumulate the same ~225 f64 terms in a different order, so they differ by
 /// FMA and reassociation rounding — a few ulp relative, never a structural disagreement.

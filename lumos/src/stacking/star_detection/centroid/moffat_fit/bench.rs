@@ -2,14 +2,13 @@
 //!
 //! Run with: `cargo test -p lumos --release bench_moffat -- --ignored --nocapture`
 use crate::stacking::star_detection::centroid::StampGrid;
+use crate::testing::prelude::*;
 
 use quickbench::quick_bench;
 use std::hint::black_box;
 
-use crate::math::size2us::Size2us;
 use crate::stacking::star_detection::centroid::moffat_fit::{MoffatFit, MoffatFitConfig};
 use crate::testing::synthetic::star_profiles::{StarProfile, SyntheticStar};
-use glam::{DVec2, Vec2};
 
 #[quick_bench(warmup_iters = 100, iters = 10000)]
 fn bench_moffat_fit_fixed_beta_small(b: quickbench::Bencher) {

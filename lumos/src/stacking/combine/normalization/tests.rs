@@ -1,13 +1,9 @@
-use common::CancelToken;
-use imaginarium::Buffer2;
-
-use crate::io::image::image_dimensions::ImageDimensions;
-use crate::io::image::linear::LinearImage;
 use crate::math::statistics::MedianMad;
 use crate::stacking::combine::config::Normalization;
 use crate::stacking::combine::error::Error;
 use crate::stacking::combine::normalization::*;
 use crate::stacking::frame_store::{FrameStats, StoredFrame, WarpQuality};
+use crate::testing::prelude::*;
 
 fn channel_stats(median: f32, mad: f32) -> MedianMad {
     MedianMad { median, mad }

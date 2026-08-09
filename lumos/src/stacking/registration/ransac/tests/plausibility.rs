@@ -1,5 +1,4 @@
-use crate::stacking::registration::ransac::tests::*;
-use crate::testing::assertions::assert_close;
+use super::*;
 
 #[test]
 fn test_plausibility_rejects_large_rotation() {

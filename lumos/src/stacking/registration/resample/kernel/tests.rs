@@ -1,9 +1,8 @@
+use crate::testing::prelude::*;
 use std::f32::consts::PI;
 
 use crate::stacking::registration::config::{self, InterpolationMethod, WarpParams};
 use crate::stacking::registration::resample::kernel::{self, internals};
-use glam::Vec2;
-use imaginarium::Buffer2;
 
 /// Shorthand for tests: interpolate with a method and default border/clamp settings.
 fn interp(data: &Buffer2<f32>, x: f32, y: f32, method: InterpolationMethod) -> f32 {

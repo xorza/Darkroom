@@ -1,4 +1,4 @@
-use crate::stacking::drizzle::tests::*;
+use super::*;
 
 #[test]
 fn test_drizzle_config_default() {

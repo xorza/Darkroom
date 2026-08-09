@@ -1,5 +1,4 @@
-use crate::math::size2us::Size2us;
-use crate::stacking::drizzle::tests::*;
+use super::*;
 
 /// Test square kernel with identity transform, uniform image, scale=1, pixfrac=1.
 ///

@@ -1,5 +1,4 @@
-use crate::math::size2us::Size2us;
-use crate::stacking::drizzle::tests::*;
+use super::*;
 
 #[test]
 fn test_drizzle_accumulator_rejects_invalid_frame_inputs() {

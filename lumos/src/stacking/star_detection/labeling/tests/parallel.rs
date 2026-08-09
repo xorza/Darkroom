@@ -1,6 +1,4 @@
-use crate::math::size2us::Size2us;
-use crate::math::vec2us::Vec2us;
-use crate::stacking::star_detection::labeling::tests::*;
+use super::*;
 
 #[test]
 fn large_image_parallel_path() {

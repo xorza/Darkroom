@@ -7,8 +7,7 @@
 //!
 //! Run: `cargo test -p lumos --release calibration_masters::bench -- --ignored --nocapture`
 
-use crate::math::size2us::Size2us;
-use common::CancelToken;
+use crate::testing::prelude::*;
 use quickbench::quick_bench;
 use std::hint::black_box;
 

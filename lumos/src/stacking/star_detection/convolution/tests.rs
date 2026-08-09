@@ -1,14 +1,13 @@
 //! Tests for Gaussian convolution.
 
+use crate::testing::prelude::*;
 use std::f32::consts::FRAC_PI_2;
 
 use crate::stacking::star_detection::convolution::*;
-use crate::testing::TestRng;
 use crate::testing::synthetic::star_profiles::{StarProfile, SyntheticStar};
 use crate::{
     math::fwhm::FWHM_TO_SIGMA, stacking::star_detection::convolution::elliptical_gaussian_kernel_2d,
 };
-use imaginarium::Buffer2;
 
 #[test]
 fn test_gaussian_kernel_1d_normalization() {

@@ -1,9 +1,8 @@
-use glam::DVec2;
-
 use crate::stacking::registration::result::{
     RansacFailureReason, RegistrationError, RegistrationResult, StarMatch,
 };
 use crate::stacking::registration::transform::Transform;
+use crate::testing::prelude::*;
 
 fn identity_matches(residuals: &[f64]) -> Vec<StarMatch> {
     residuals

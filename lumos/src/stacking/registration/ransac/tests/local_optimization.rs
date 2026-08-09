@@ -1,4 +1,4 @@
-use crate::stacking::registration::ransac::tests::*;
+use super::*;
 
 #[test]
 fn test_lo_ransac_converges_to_exact_solution() {

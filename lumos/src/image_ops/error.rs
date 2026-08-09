@@ -24,11 +24,11 @@ mod tests {
     use crate::image_ops::color_calibration::Scnr;
     use crate::image_ops::denoise::Denoise;
     use crate::image_ops::hdr::Hdr;
-    use crate::image_ops::internals::gray_image;
     use crate::image_ops::local_contrast::LocalContrast;
     use crate::image_ops::stretching::{ColorMode, Stretch, StretchMethod};
     use crate::io::image::linear::LinearImage;
     use crate::math::size2us::Size2us;
+    use crate::testing::images::gray_image;
 
     /// One case per op that owns a `validate`, so an op added without the `self.validate()?`
     /// prologue this module describes fails here rather than panicking somewhere in its kernel.

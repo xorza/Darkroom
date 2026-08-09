@@ -2,13 +2,12 @@
 //!
 //! Run with: `cargo test -p lumos --release bench_multi_threshold -- --ignored --nocapture`
 
-use crate::math::size2us::Size2us;
+use crate::testing::prelude::*;
 use ::quickbench::quick_bench;
 use std::hint::black_box;
 
 use crate::bit_buffer2::BitBuffer2;
 use crate::math::rect::URect;
-use crate::math::vec2us::Vec2us;
 use crate::stacking::star_detection::config::detection_config::Connectivity;
 use crate::stacking::star_detection::deblend::ComponentData;
 use crate::stacking::star_detection::deblend::multi_threshold::{
@@ -16,7 +15,6 @@ use crate::stacking::star_detection::deblend::multi_threshold::{
 };
 use crate::stacking::star_detection::labeling::LabelMap;
 use crate::testing::synthetic::fixtures::cluster_field;
-use imaginarium::Buffer2;
 
 /// Create components from a pixel buffer for benchmarking.
 fn create_components_from_pixels(

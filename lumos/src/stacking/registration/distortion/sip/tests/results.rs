@@ -1,4 +1,4 @@
-use crate::stacking::registration::distortion::sip::tests::*;
+use super::*;
 
 #[test]
 fn test_sip_config_default_values() {

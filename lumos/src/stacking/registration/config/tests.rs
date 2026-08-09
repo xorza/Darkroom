@@ -1,5 +1,5 @@
 use crate::stacking::registration::config::*;
-use glam::DVec2;
+use crate::testing::prelude::*;
 
 #[test]
 fn test_config_default_values() {

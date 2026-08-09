@@ -1,5 +1,3 @@
-use common::CancelToken;
-
 use crate::io::raw::demosaic::DemosaicError;
 use crate::io::raw::demosaic::xtrans::internals::{test_pattern, test_pattern_array};
 use crate::io::raw::demosaic::xtrans::*;

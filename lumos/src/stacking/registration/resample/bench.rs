@@ -1,17 +1,14 @@
 //! Interpolation benchmarks for optimization tracking.
 
+use crate::testing::prelude::*;
 use std::hint::black_box;
 
 use ::quickbench::quick_bench;
 
-use crate::math::size2us::Size2us;
-use crate::math::vec2us::Vec2us;
 use crate::stacking::registration::config::{self, InterpolationMethod};
 use crate::stacking::registration::resample::kernel::internals as kernel_test_support;
 use crate::stacking::registration::resample::{kernel, plane, row};
 use crate::stacking::registration::transform::{Transform, WarpTransform};
-use glam::{DVec2, Vec2};
-use imaginarium::Buffer2;
 
 /// Create a test image of specified size filled with gradient pattern.
 fn create_test_image(size: Size2us) -> Buffer2<f32> {

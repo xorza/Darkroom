@@ -1,7 +1,7 @@
+use crate::testing::prelude::*;
 use std::fs::File;
 use std::path::Path;
 
-use common::CancelToken;
 use fits_well::FitsWriter;
 use fits_well::header::Header;
 use fits_well::image::{Compression, CompressionOptions, Image};
@@ -14,7 +14,6 @@ use crate::io::image::fits::options::{
     FitsChecksumPolicy, FitsCubeInterpretation, FitsHduSelector, FitsLoadOptions,
 };
 use crate::io::image::fits::provenance::{FitsChecksumState, FitsTransferProvenance};
-use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::image_provenance::TransferProvenance;
 use crate::io::image::load_context::LoadContext;
 use crate::testing::ScratchDirectory;

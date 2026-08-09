@@ -1,15 +1,14 @@
 //! Benchmarks for convolution operations.
 
-use crate::math::size2us::Size2us;
 use crate::stacking::star_detection::convolution::simd::convolve_row;
 use crate::stacking::star_detection::convolution::simd::convolve_row_scalar;
 use crate::stacking::star_detection::convolution::{
     MatchedFilterBuffers, convolve_cols, convolve_rows_parallel, elliptical_gaussian_convolve,
     gaussian_convolve, gaussian_kernel_1d, matched_filter,
 };
+use crate::testing::prelude::*;
 use crate::testing::synthetic::fixtures::star_field;
 use ::quickbench::quick_bench;
-use imaginarium::Buffer2;
 use std::hint::black_box;
 
 #[quick_bench(warmup_iters = 3, iters = 10)]

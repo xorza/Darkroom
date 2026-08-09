@@ -1,10 +1,8 @@
-use crate::math::size2us::Size2us;
 use crate::stacking::registration::config::{self, InterpolationMethod};
 use crate::stacking::registration::resample::{kernel, row};
 use crate::stacking::registration::transform::{Transform, WarpTransform};
+use crate::testing::prelude::*;
 use crate::testing::synthetic::patterns;
-use glam::{DVec2, Vec2};
-use imaginarium::Buffer2;
 
 /// Naive scalar Lanczos3 row warp used as reference for testing the optimized version.
 fn lanczos_scalar(

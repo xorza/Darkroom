@@ -1,6 +1,4 @@
 use crate::io::image::cfa::{CfaImage, CfaType};
-use crate::io::image::linear::LinearImage;
-use crate::math::size2us::Size2us;
 use crate::stacking::combine::cache::*;
 use crate::stacking::combine::config::Normalization;
 use crate::stacking::combine::rejection::Rejection;
@@ -9,6 +7,7 @@ use crate::stacking::frame_store::{FrameStats, StoredFrame};
 use crate::stacking::stack_product::coverage::Coverage;
 use crate::stacking::stack_product::quality_planes::QualityPlanes;
 use crate::testing::ScratchDirectory;
+use crate::testing::prelude::*;
 
 /// Create an in-memory [`FrameCache`] from loaded images, with no coverage (test helper).
 pub(crate) fn make_test_cache(images: Vec<LinearImage>) -> FrameCache {

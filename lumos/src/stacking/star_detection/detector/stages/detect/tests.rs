@@ -1,8 +1,8 @@
 use crate::math::rect::URect;
 use crate::stacking::star_detection::detector::stages::detect::*;
 use crate::stacking::star_detection::labeling::LabelMap;
+use crate::testing::prelude::*;
 use crate::testing::synthetic::star_profiles::{StarProfile, SyntheticStar};
-use glam::Vec2;
 
 /// Render Gaussian `stars` into a single connected component: every lit pixel gets label 1.
 fn one_component(size: Size2us, stars: &[SyntheticStar]) -> (Buffer2<f32>, LabelMap) {

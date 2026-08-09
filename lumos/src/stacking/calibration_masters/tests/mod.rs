@@ -3,7 +3,6 @@ mod synthetic;
 use crate::io::image::cfa::{CfaImage, CfaType, QUANTIZATION_SIGMA_PER_STEP};
 use crate::io::image::load_context::LoadContext;
 use crate::io::raw::demosaic::bayer::CfaPattern;
-use crate::math::size2us::Size2us;
 use crate::stacking::calibration_masters::defect_map::DefectMap;
 use crate::stacking::calibration_masters::stack_cfa_master;
 use crate::stacking::calibration_masters::weighted_budget;
@@ -12,16 +11,15 @@ use crate::stacking::combine::config::{CombineMethod, StackConfig, Weighting};
 use crate::stacking::combine::error::{Error, StackConfigError};
 use crate::stacking::combine::rejection::Rejection;
 use crate::stacking::progress::ProgressCallback;
+use crate::testing::prelude::*;
 use crate::testing::{constant_cfa, make_cfa};
 use crate::{
     CalibrationComponent, CalibrationMasters, CalibrationSet, DefectSummary, ImageError,
     ImageMetadata,
 };
-use common::CancelToken;
 use fits_well::FitsReader;
 use fits_well::image::Bitpix;
 use fits_well::io::ChecksumStatus;
-use imaginarium::Buffer2;
 
 #[test]
 fn weighted_budget_never_overcommits() {

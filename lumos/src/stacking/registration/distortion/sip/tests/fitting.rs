@@ -1,5 +1,4 @@
-use crate::math::size2us::Size2us;
-use crate::stacking::registration::distortion::sip::tests::*;
+use super::*;
 
 #[test]
 fn test_insufficient_point_count_scales_with_order() {
