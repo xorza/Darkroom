@@ -15,8 +15,7 @@ mod simd;
 
 use crate::stacking::star_detection::centroid::StampGrid;
 use crate::stacking::star_detection::centroid::lm_optimizer::{
-    FitData, LMConfig, LMModel, NormalEquations, accumulate_chi2, build_normal_equations_scalar,
-    optimize,
+    FitData, LMConfig, LMModel, NormalEquations,
 };
 use crate::stacking::star_detection::centroid::{FitNoise, StampFit};
 use glam::{DVec2, Vec2};
@@ -108,12 +107,12 @@ impl LMModel<6> for Gaussian2D {
 
     fn batch_build_normal_equations(&self, data: FitData, params: &[f64; 6]) -> NormalEquations<6> {
         simd::batch_build_normal_equations(self, data, params)
-            .unwrap_or_else(|| build_normal_equations_scalar(self, data, params))
+            .unwrap_or_else(|| NormalEquations::from_scalar_pass(self, data, params))
     }
 
     fn batch_compute_chi2(&self, data: FitData, params: &[f64; 6]) -> f64 {
         simd::batch_compute_chi2(self, data, params)
-            .unwrap_or_else(|| accumulate_chi2(self, data, params, 0..data.len()))
+            .unwrap_or_else(|| self.accumulate_chi2(data, params, 0..data.len()))
     }
 }
 
@@ -149,7 +148,7 @@ impl GaussianFit {
         let model = Gaussian2D {
             stamp_radius: grid.radius as f64,
         };
-        let result = optimize(&model, fit.data(grid), initial_params, config);
+        let result = model.fit(fit.data(grid), initial_params, config);
 
         let [x0, y0, _, sigma_x, sigma_y, _] = result.params;
         let result_pos = fit.to_image(x0, y0);

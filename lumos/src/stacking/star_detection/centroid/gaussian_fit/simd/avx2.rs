@@ -10,9 +10,7 @@ use crate::stacking::star_detection::centroid::gaussian_fit::Gaussian2D;
 use crate::stacking::star_detection::centroid::gaussian_fit::simd::exp_poly::{
     EXP_P0, EXP_P1, EXP_P2, EXP_Q0, EXP_Q1, EXP_Q2, EXP_Q3, LN2_HI, LN2_LO,
 };
-use crate::stacking::star_detection::centroid::lm_optimizer::{
-    FitData, NormalEquations, accumulate_chi2, accumulate_normal_equations,
-};
+use crate::stacking::star_detection::centroid::lm_optimizer::{FitData, LMModel, NormalEquations};
 use crate::stacking::star_detection::centroid::simd::hsum;
 use std::arch::x86_64::*;
 
@@ -270,12 +268,11 @@ pub(super) unsafe fn batch_build_normal_equations_avx2(
 
         // Scalar tail (pixels past the last full 4-wide chunk)
         let tail_start = chunks * 4;
-        accumulate_normal_equations(
+        equations.accumulate(
             _model,
             FitData::unweighted(data_x, data_y, data_z),
             params,
             tail_start..n,
-            &mut equations,
         );
 
         equations.mirror_lower_triangle();
@@ -335,8 +332,7 @@ pub(super) unsafe fn batch_compute_chi2_avx2(
 
         // Scalar tail (pixels past the last full 4-wide chunk)
         let tail_start = chunks * 4;
-        chi2 += accumulate_chi2(
-            _model,
+        chi2 += _model.accumulate_chi2(
             FitData::unweighted(data_x, data_y, data_z),
             params,
             tail_start..n,

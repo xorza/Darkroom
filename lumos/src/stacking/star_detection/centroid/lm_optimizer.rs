@@ -3,6 +3,8 @@
 //! Generic implementation that can be used for both Gaussian and Moffat fitting.
 //! Uses f64 throughout for numerical stability.
 
+use std::ops::Range;
+
 use crate::stacking::star_detection::centroid::linear_solver::solve;
 
 /// Configuration for Levenberg-Marquardt optimization.
@@ -119,70 +121,51 @@ impl<const N: usize> NormalEquations<N> {
             }
         }
     }
-}
 
-/// Accumulate the normal equations and chi² over `range` into `out` via
-/// `model.evaluate_and_jacobian`.
-///
-/// This is the one scalar per-pixel accumulation loop shared by [`LMModel`]'s
-/// default `batch_build_normal_equations` (and its weighted variant), every model's
-/// scalar-fallback override (no SIMD available for this target), and every SIMD
-/// backend's tail loop over the pixels left after the last full SIMD chunk — so a
-/// numerical-stability fix only has to land once instead of in every copy. Leaves the
-/// Hessian's lower triangle untouched; callers mirror it once after accumulating.
-pub(super) fn accumulate_normal_equations<const N: usize>(
-    model: &(impl LMModel<N> + ?Sized),
-    data: FitData,
-    params: &[f64; N],
-    range: std::ops::Range<usize>,
-    out: &mut NormalEquations<N>,
-) {
-    for i in range {
-        let w = data.weight(i);
-        let (model_val, row) = model.evaluate_and_jacobian(data.x[i], data.y[i], params);
-        let r = data.z[i] - model_val;
-        out.chi2 += w * r * r;
-        for k in 0..N {
-            out.gradient[k] += w * row[k] * r;
-            for j in k..N {
-                out.hessian[k][j] += w * row[k] * row[j];
+    /// Add `model`'s contribution over `range` — Hessian, gradient and χ² — to what is here.
+    ///
+    /// This is the one scalar per-pixel accumulation loop, shared by [`Self::from_scalar_pass`],
+    /// every model's scalar-fallback override (no SIMD available for this target), and every SIMD
+    /// backend's tail loop over the pixels left after the last full chunk — so a
+    /// numerical-stability fix only has to land once instead of in every copy. Inherent rather
+    /// than a defaulted trait method precisely so no model can substitute its own. Leaves the
+    /// Hessian's lower triangle untouched; callers mirror it once after accumulating.
+    pub(super) fn accumulate(
+        &mut self,
+        model: &(impl LMModel<N> + ?Sized),
+        data: FitData,
+        params: &[f64; N],
+        range: Range<usize>,
+    ) {
+        for i in range {
+            let w = data.weight(i);
+            let (model_val, row) = model.evaluate_and_jacobian(data.x[i], data.y[i], params);
+            let r = data.z[i] - model_val;
+            self.chi2 += w * r * r;
+            for k in 0..N {
+                self.gradient[k] += w * row[k] * r;
+                for j in k..N {
+                    self.hessian[k][j] += w * row[k] * row[j];
+                }
             }
         }
     }
-}
 
-/// Sum chi² ((weighted) squared residuals) over `range` via `model.evaluate`.
-/// Companion to [`accumulate_normal_equations`] for the gradient-free chi²-only
-/// batch path — see that function's doc for why this is shared rather than
-/// duplicated per model/backend.
-pub(super) fn accumulate_chi2<const N: usize>(
-    model: &(impl LMModel<N> + ?Sized),
-    data: FitData,
-    params: &[f64; N],
-    range: std::ops::Range<usize>,
-) -> f64 {
-    let mut chi2 = 0.0f64;
-    for i in range {
-        let w = data.weight(i);
-        let residual = data.z[i] - model.evaluate(data.x[i], data.y[i], params);
-        chi2 += w * residual * residual;
+    /// The full normal equations — mirrored Hessian, gradient, χ² — over the whole data set,
+    /// built with the scalar accumulation loop.
+    ///
+    /// The default body of [`LMModel::batch_build_normal_equations`], and what the fit models'
+    /// SIMD overrides fall back to when no backend applies or the fit is weighted.
+    pub(super) fn from_scalar_pass(
+        model: &(impl LMModel<N> + ?Sized),
+        data: FitData,
+        params: &[f64; N],
+    ) -> Self {
+        let mut equations = Self::zeroed();
+        equations.accumulate(model, data, params, 0..data.len());
+        equations.mirror_lower_triangle();
+        equations
     }
-    chi2
-}
-
-/// Build the full normal equations (mirrored Hessian, gradient, chi²) over the whole
-/// data set with the scalar accumulation loop — the default body of
-/// [`LMModel::batch_build_normal_equations`], also called directly by the fit models'
-/// scalar fallbacks when no SIMD backend applies.
-pub(super) fn build_normal_equations_scalar<const N: usize>(
-    model: &(impl LMModel<N> + ?Sized),
-    data: FitData,
-    params: &[f64; N],
-) -> NormalEquations<N> {
-    let mut equations = NormalEquations::zeroed();
-    accumulate_normal_equations(model, data, params, 0..data.len(), &mut equations);
-    equations.mirror_lower_triangle();
-    equations
 }
 
 /// Trait for models that can be fit with L-M optimization.
@@ -200,6 +183,20 @@ pub(super) trait LMModel<const N: usize> {
     /// Apply parameter constraints after an update.
     fn constrain(&self, params: &mut [f64; N]);
 
+    /// Sum chi² ((weighted) squared residuals) over `range` via [`Self::evaluate`].
+    /// Companion to [`NormalEquations::accumulate`] for the gradient-free chi²-only
+    /// batch path — see that method's doc for why this is shared rather than
+    /// duplicated per model/backend.
+    fn accumulate_chi2(&self, data: FitData, params: &[f64; N], range: Range<usize>) -> f64 {
+        let mut chi2 = 0.0f64;
+        for i in range {
+            let w = data.weight(i);
+            let residual = data.z[i] - self.evaluate(data.x[i], data.y[i], params);
+            chi2 += w * residual * residual;
+        }
+        chi2
+    }
+
     /// Build normal equations (J^T·W·J, J^T·W·r) and chi² in a single pass.
     /// Fuses model evaluation, Jacobian computation, and Hessian/gradient
     /// accumulation to avoid storing intermediate jacobian/residuals arrays.
@@ -208,7 +205,7 @@ pub(super) trait LMModel<const N: usize> {
     ///
     /// Override with SIMD to process multiple pixels at once. The weighted fit is opt-in
     /// (set a `NoiseModel`), so an override whose kernel is unweighted-only must test
-    /// `data.weights` and delegate to [`build_normal_equations_scalar`] when it is set.
+    /// `data.weights` and delegate to [`NormalEquations::from_scalar_pass`] when it is set.
     ///
     /// Both models' overrides spell that dispatch out identically, differing only in `N`. It is
     /// left duplicated: the backend is chosen by `cfg`, so the arms name functions that exist
@@ -216,102 +213,98 @@ pub(super) trait LMModel<const N: usize> {
     /// buys ~15 lines at the cost of making an `unsafe` call site expand from something a reader
     /// cannot see.
     fn batch_build_normal_equations(&self, data: FitData, params: &[f64; N]) -> NormalEquations<N> {
-        build_normal_equations_scalar(self, data, params)
+        NormalEquations::from_scalar_pass(self, data, params)
     }
 
     /// Batch compute chi² — the (weighted) sum of squared residuals.
     /// Default implementation calls `evaluate` per pixel. Override with SIMD under the same
     /// weighted-delegation rule as [`Self::batch_build_normal_equations`].
     fn batch_compute_chi2(&self, data: FitData, params: &[f64; N]) -> f64 {
-        accumulate_chi2(self, data, params, 0..data.len())
+        self.accumulate_chi2(data, params, 0..data.len())
     }
-}
 
-/// Run L-M optimization for N-parameter model (generic implementation).
-pub(super) fn optimize<const N: usize, M: LMModel<N>>(
-    model: &M,
-    data: FitData,
-    initial_params: [f64; N],
-    config: &LMConfig,
-) -> LMResult<N> {
-    let mut params = initial_params;
-    let mut lambda = config.initial_lambda;
-    let mut converged = false;
-    let mut iterations = 0;
+    /// Fit this model to `data` by Levenberg-Marquardt, starting from `initial_params`.
+    fn fit(&self, data: FitData, initial_params: [f64; N], config: &LMConfig) -> LMResult<N> {
+        let mut params = initial_params;
+        let mut lambda = config.initial_lambda;
+        let mut converged = false;
+        let mut iterations = 0;
 
-    // Normal equations at the current `params`. Rebuilt only when `params` actually moves — a
-    // rejected step changes only `lambda`, so the cached (SIMD-accelerated) Jacobian pass is reused
-    // across damping retries instead of being recomputed identically every iteration.
-    let mut equations = model.batch_build_normal_equations(data, &params);
-    // Tracked apart from `equations.chi2`: an accepted step keeps the χ² `batch_compute_chi2`
-    // already computed for the new params rather than the rebuild's, so the accept test and the
-    // recorded χ² can never disagree by a rounding difference between those two code paths.
-    let mut prev_chi2 = equations.chi2;
+        // Normal equations at the current `params`. Rebuilt only when `params` actually moves — a
+        // rejected step changes only `lambda`, so the cached (SIMD-accelerated) Jacobian pass is
+        // reused across damping retries instead of being recomputed identically every iteration.
+        let mut equations = self.batch_build_normal_equations(data, &params);
+        // Tracked apart from `equations.chi2`: an accepted step keeps the χ² `batch_compute_chi2`
+        // already computed for the new params rather than the rebuild's, so the accept test and the
+        // recorded χ² can never disagree by a rounding difference between those two code paths.
+        let mut prev_chi2 = equations.chi2;
 
-    for iter in 0..config.max_iterations {
-        iterations = iter + 1;
+        for iter in 0..config.max_iterations {
+            iterations = iter + 1;
 
-        let mut damped_hessian = equations.hessian;
-        for (i, row) in damped_hessian.iter_mut().enumerate() {
-            row[i] *= 1.0 + lambda;
-        }
-
-        let Some(delta) = solve(&damped_hessian, &equations.gradient) else {
-            break;
-        };
-
-        let mut new_params = params;
-        for (p, d) in new_params.iter_mut().zip(delta.iter()) {
-            *p += d;
-        }
-        model.constrain(&mut new_params);
-
-        let new_chi2 = model.batch_compute_chi2(data, &new_params);
-
-        if new_chi2.is_finite() && new_chi2 < prev_chi2 {
-            let chi2_rel_change = (prev_chi2 - new_chi2) / prev_chi2.max(1e-30);
-            params = new_params;
-            lambda *= config.lambda_down;
-            prev_chi2 = new_chi2;
-
-            let max_delta = delta.iter().copied().fold(0.0f64, |a, d| a.max(d.abs()));
-            if max_delta < config.convergence_threshold || chi2_rel_change < 1e-10 {
-                converged = true;
-                break;
-            }
-            // Early exit when only position accuracy matters
-            if delta[0].abs() < config.position_convergence_threshold
-                && delta[1].abs() < config.position_convergence_threshold
-            {
-                converged = true;
-                break;
+            let mut damped_hessian = equations.hessian;
+            for (i, row) in damped_hessian.iter_mut().enumerate() {
+                row[i] *= 1.0 + lambda;
             }
 
-            // `params` moved → refresh the normal equations for the next iteration.
-            equations = model.batch_build_normal_equations(data, &params);
-        } else {
-            // Rejected step (worse fit, or a non-finite χ² from a bad trial point): keep `params`
-            // and the cached normal equations, just increase damping. A non-finite χ² skips the
-            // relative-change test (it would be NaN) and falls straight through to the lambda ramp.
-            if new_chi2.is_finite() {
-                let chi2_rel_diff = (new_chi2 - prev_chi2) / prev_chi2.max(1e-30);
-                if chi2_rel_diff < 1e-10 {
+            let Some(delta) = solve(&damped_hessian, &equations.gradient) else {
+                break;
+            };
+
+            let mut new_params = params;
+            for (p, d) in new_params.iter_mut().zip(delta.iter()) {
+                *p += d;
+            }
+            self.constrain(&mut new_params);
+
+            let new_chi2 = self.batch_compute_chi2(data, &new_params);
+
+            if new_chi2.is_finite() && new_chi2 < prev_chi2 {
+                let chi2_rel_change = (prev_chi2 - new_chi2) / prev_chi2.max(1e-30);
+                params = new_params;
+                lambda *= config.lambda_down;
+                prev_chi2 = new_chi2;
+
+                let max_delta = delta.iter().copied().fold(0.0f64, |a, d| a.max(d.abs()));
+                if max_delta < config.convergence_threshold || chi2_rel_change < 1e-10 {
                     converged = true;
                     break;
                 }
-            }
+                // Early exit when only position accuracy matters
+                if delta[0].abs() < config.position_convergence_threshold
+                    && delta[1].abs() < config.position_convergence_threshold
+                {
+                    converged = true;
+                    break;
+                }
 
-            lambda *= config.lambda_up;
-            if lambda > 1e10 {
-                break;
+                // `params` moved → refresh the normal equations for the next iteration.
+                equations = self.batch_build_normal_equations(data, &params);
+            } else {
+                // Rejected step (worse fit, or a non-finite χ² from a bad trial point): keep
+                // `params` and the cached normal equations, just increase damping. A non-finite χ²
+                // skips the relative-change test (it would be NaN) and falls straight through to
+                // the lambda ramp.
+                if new_chi2.is_finite() {
+                    let chi2_rel_diff = (new_chi2 - prev_chi2) / prev_chi2.max(1e-30);
+                    if chi2_rel_diff < 1e-10 {
+                        converged = true;
+                        break;
+                    }
+                }
+
+                lambda *= config.lambda_up;
+                if lambda > 1e10 {
+                    break;
+                }
             }
         }
-    }
 
-    LMResult {
-        params,
-        chi2: prev_chi2,
-        converged,
-        iterations,
+        LMResult {
+            params,
+            chi2: prev_chi2,
+            converged,
+            iterations,
+        }
     }
 }

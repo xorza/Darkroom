@@ -3,9 +3,7 @@
 //! Processes 2 f64 pixels per NEON iteration for `batch_build_normal_equations`
 //! and `batch_compute_chi2`. Supports HalfInt, Int, and General PowStrategy variants.
 
-use crate::stacking::star_detection::centroid::lm_optimizer::{
-    FitData, NormalEquations, accumulate_chi2, accumulate_normal_equations,
-};
+use crate::stacking::star_detection::centroid::lm_optimizer::{FitData, LMModel, NormalEquations};
 use crate::stacking::star_detection::centroid::moffat_fit::{MoffatFixedBeta, PowStrategy};
 use crate::stacking::star_detection::centroid::simd::hsum;
 use std::arch::aarch64::*;
@@ -206,12 +204,11 @@ pub(super) unsafe fn batch_build_normal_equations_neon(
 
         // Scalar tail
         let tail_start = chunks * 2;
-        accumulate_normal_equations(
+        equations.accumulate(
             model,
             FitData::unweighted(data_x, data_y, data_z),
             params,
             tail_start..n,
-            &mut equations,
         );
 
         equations.mirror_lower_triangle();
@@ -262,8 +259,7 @@ pub(super) unsafe fn batch_compute_chi2_neon(
 
         // Scalar tail
         let tail_start = chunks * 2;
-        chi2 += accumulate_chi2(
-            model,
+        chi2 += model.accumulate_chi2(
             FitData::unweighted(data_x, data_y, data_z),
             params,
             tail_start..n,
