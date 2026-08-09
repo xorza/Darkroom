@@ -1260,3 +1260,74 @@ fn test_star_is_round() {
         "All stars should pass with max_roundness=1.0"
     );
 }
+
+/// Metrics must be measured against a sky annulus centred on the position the fit actually
+/// reported. The annulus samples by rounded centre, so when the fit crosses a pixel boundary the
+/// estimate taken back at the moments position describes a different ring — on a sky gradient
+/// that lands straight in flux and SNR.
+#[test]
+fn annulus_sky_is_centred_on_the_fitted_position() {
+    use crate::stacking::star_detection::config::measurement_config::LocalBackgroundMethod;
+
+    let size = Size2us::new(64, 64);
+    // 0.02 of sky per column, so shifting the annulus one pixel moves its sigma-clipped median by
+    // ~0.02 — several percent of this star's flux once summed over the stamp.
+    let sky = |x: usize| 0.1 + 0.02 * x as f32;
+
+    let mut data = vec![0.0f32; size.pixel_count()];
+    let mut bg_data = vec![0.0f32; size.pixel_count()];
+    for y in 0..size.height {
+        for x in 0..size.width {
+            let dx = x as f32 - 32.0;
+            let dy = y as f32 - 32.0;
+            data[y * size.width + x] = sky(x) + (-0.5 * (dx * dx + dy * dy) / (2.5 * 2.5)).exp();
+            bg_data[y * size.width + x] = sky(x);
+        }
+    }
+    let pixels = Buffer2::new(size.width, size.height, data);
+    let mut noise = Buffer2::new_default(size.width, size.height);
+    noise.fill(0.01);
+    let bg = BackgroundEstimate {
+        background: Buffer2::new(size.width, size.height, bg_data),
+        noise,
+    };
+
+    let config = MeasurementConfig {
+        centroid_method: CentroidMethod::GaussianFit,
+        local_background: LocalBackgroundMethod::LocalAnnulus,
+        ..Default::default()
+    };
+    let radius = compute_stamp_radius(4.0);
+
+    // Seeded two pixels off the star, so the fit has to cross a pixel boundary to reach it.
+    let region = Region {
+        bbox: URect::new(Vec2us::new(28, 26), Vec2us::new(40, 38)),
+        peak: Vec2us::new(34, 32),
+        peak_value: 1.0 + sky(34),
+        area: 40,
+    };
+    let star = measure_star(&pixels, &bg, &region, &config, 4.0, &StampGrid::new(radius))
+        .expect("star should measure");
+
+    // Same metrics pass, but with the sky annulus explicitly centred where the fit ended up.
+    // `outer_radius` mirrors `measure_star`: ceil(1.5 x radius).
+    let outer = (radius as f32 * 1.5).ceil() as usize;
+    let sky_at_fit =
+        compute_annulus_background(&pixels, star.pos, radius, outer).expect("annulus has samples");
+    let expected = compute_star(
+        &pixels,
+        &bg,
+        star.pos,
+        region.peak_value,
+        radius,
+        Some(sky_at_fit),
+        config.noise_model.as_ref(),
+    )
+    .expect("reference measurement");
+
+    assert_eq!(
+        star.flux, expected.flux,
+        "flux came from a sky annulus centred somewhere other than the reported position"
+    );
+    assert_eq!(star.snr, expected.snr, "snr disagrees for the same reason");
+}

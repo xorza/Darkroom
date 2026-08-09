@@ -479,14 +479,16 @@ pub(super) fn measure_star(
     // center pixel of the global map for the fit seed below, but must NOT become a
     // metrics override: flattening one map pixel across the whole stamp would be
     // strictly worse than the per-pixel map itself.
-    let annulus_background = match config.local_background {
+    let annulus_at = |at: DVec2| match config.local_background {
         LocalBackgroundMethod::GlobalMap => None,
         LocalBackgroundMethod::LocalAnnulus => {
             let inner_radius = stamp_radius;
             let outer_radius = (stamp_radius as f32 * 1.5).ceil() as usize;
-            compute_annulus_background(pixels, pos, inner_radius, outer_radius)
+            compute_annulus_background(pixels, at, inner_radius, outer_radius)
         }
     };
+    let moments_pos = pos;
+    let annulus_background = annulus_at(pos);
     let LocalBackground {
         bg: local_bg,
         noise: local_noise,
@@ -546,6 +548,17 @@ pub(super) fn measure_star(
         CentroidMethod::WeightedMoments => {
             // Already computed above
         }
+    };
+
+    // The estimate above was centred on the moments position, and the fit has since moved the
+    // star. `compute_annulus_background` samples by rounded centre, so re-running it only changes
+    // anything once the fit crosses a pixel boundary — the normal sub-pixel move would resample
+    // exactly the same ring. Rare, so this costs almost nothing; skipping it would measure flux
+    // and SNR against a sky annulus centred on the wrong pixel.
+    let annulus_background = if pos.round() == moments_pos.round() {
+        annulus_background
+    } else {
+        annulus_at(pos)
     };
 
     // Compute quality metrics (flux, SNR, sharpness, roundness always from moments)
