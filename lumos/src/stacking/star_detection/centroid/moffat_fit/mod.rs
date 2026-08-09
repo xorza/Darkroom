@@ -26,7 +26,7 @@ use crate::stacking::star_detection::centroid::lm_optimizer::{
 use crate::stacking::star_detection::centroid::{
     FitNoise, estimate_sigma_from_moments, extract_stamp, fit_weights,
 };
-use glam::Vec2;
+use glam::DVec2;
 use imaginarium::Buffer2;
 
 /// Configuration for Moffat profile fitting.
@@ -51,7 +51,7 @@ impl Default for MoffatFitConfig {
 #[derive(Debug, Clone, Copy)]
 pub(super) struct MoffatFitResult {
     /// Position of profile center (sub-pixel).
-    pub(super) pos: Vec2,
+    pub(super) pos: DVec2,
     /// FWHM computed from alpha and beta.
     pub(super) fwhm: f32,
     /// Whether the fit converged.
@@ -222,7 +222,7 @@ impl LMModel<5> for MoffatFixedBeta {
 /// shot-noisy bright core doesn't bias the fit (PR1); `None` is a plain unweighted fit.
 pub(super) fn fit_moffat_2d(
     pixels: &Buffer2<f32>,
-    pos: Vec2,
+    pos: DVec2,
     grid: &StampGrid,
     background: f32,
     noise: Option<FitNoise>,
@@ -252,8 +252,8 @@ pub(super) fn fit_moffat_2d(
         fwhm_beta_to_alpha(fwhm_est, config.fixed_beta).clamp(0.5, stamp_radius as f32);
 
     let initial_params: [f64; 5] = [
-        local_pos.x as f64,
-        local_pos.y as f64,
+        local_pos.x,
+        local_pos.y,
         initial_amplitude as f64,
         initial_alpha as f64,
         background as f64,
@@ -265,7 +265,7 @@ pub(super) fn fit_moffat_2d(
     let result = optimize(&model, data, initial_params, &config.lm);
 
     let [x0, y0, _, alpha, _] = result.params;
-    let result_pos = Vec2::new(x0 as f32, y0 as f32) + stamp.origin;
+    let result_pos = DVec2::new(x0, y0) + stamp.origin;
 
     if !validate_position(result_pos, pos, alpha as f32, stamp_radius) {
         return None;
@@ -287,14 +287,14 @@ pub(super) fn fit_moffat_2d(
 /// The alpha bound is phrased as acceptance rather than rejection so a non-finite one fails it —
 /// comparisons against NaN are all false, so `NaN > limit` reads as "not out of range".
 ///
-/// The centre needs its own [`Vec2::is_finite`] check, because that trick does not extend to it:
-/// `max_element` reduces with [`f32::max`], which *ignores* NaN and returns the other lane, so a
+/// The centre needs its own [`DVec2::is_finite`] check, because that trick does not extend to it:
+/// `max_element` reduces with [`f64::max`], which *ignores* NaN and returns the other lane, so a
 /// NaN x-coordinate would silently compare as the (finite) y-offset.
 ///
 /// A rejected fit is not an error: `measure_star` falls back to the moment-based centroid.
-fn validate_position(result_pos: Vec2, input_pos: Vec2, alpha: f32, stamp_radius: usize) -> bool {
+fn validate_position(result_pos: DVec2, input_pos: DVec2, alpha: f32, stamp_radius: usize) -> bool {
     result_pos.is_finite()
-        && (result_pos - input_pos).abs().max_element() <= stamp_radius as f32
+        && (result_pos - input_pos).abs().max_element() <= stamp_radius as f64
         && (0.5..=stamp_radius as f32 * 2.0).contains(&alpha)
 }
 

@@ -9,7 +9,7 @@ use std::hint::black_box;
 use crate::math::size2us::Size2us;
 use crate::stacking::star_detection::centroid::moffat_fit::{MoffatFitConfig, fit_moffat_2d};
 use crate::testing::synthetic::star_profiles::{StarProfile, SyntheticStar};
-use glam::Vec2;
+use glam::{DVec2, Vec2};
 
 #[quick_bench(warmup_iters = 100, iters = 10000)]
 fn bench_moffat_fit_fixed_beta_small(b: quickbench::Bencher) {
@@ -31,7 +31,7 @@ fn bench_moffat_fit_fixed_beta_small(b: quickbench::Bencher) {
     b.bench(|| {
         black_box(fit_moffat_2d(
             black_box(&pixels),
-            black_box(Vec2::splat(8.0)),
+            black_box(DVec2::splat(8.0)),
             black_box(&StampGrid::new(8)),
             black_box(0.1),
             None,
@@ -60,7 +60,7 @@ fn bench_moffat_fit_fixed_beta_medium(b: quickbench::Bencher) {
     b.bench(|| {
         black_box(fit_moffat_2d(
             black_box(&pixels),
-            black_box(Vec2::splat(12.0)),
+            black_box(DVec2::splat(12.0)),
             black_box(&StampGrid::new(12)),
             black_box(0.1),
             None,

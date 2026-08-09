@@ -9,15 +9,19 @@ use crate::stacking::star_detection::centroid::tests::*;
 fn test_phase1_reaches_good_accuracy_in_few_iterations() {
     let width = 64;
     let height = 64;
-    let true_pos = Vec2::new(32.3, 32.7);
-    let pixels = SyntheticStar::new(true_pos, 0.8, StarProfile::Gaussian { sigma: 2.5 })
-        .stamp(Size2us::new(width, height), 0.1);
+    let true_pos = DVec2::new(32.3, 32.7);
+    let pixels = SyntheticStar::new(
+        true_pos.as_vec2(),
+        0.8,
+        StarProfile::Gaussian { sigma: 2.5 },
+    )
+    .stamp(Size2us::new(width, height), 0.1);
     let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
     let stamp_radius = 7;
     let expected_fwhm = 5.9;
 
     // Run full convergence to get the final position
-    let mut pos_full = Vec2::new(32.0, 33.0);
+    let mut pos_full = DVec2::new(32.0, 33.0);
     for _ in 0..MAX_MOMENTS_ITERATIONS {
         let new_pos = refine_centroid(&pixels, &bg, pos_full, stamp_radius, expected_fwhm)
             .expect("refine should succeed");
@@ -29,7 +33,7 @@ fn test_phase1_reaches_good_accuracy_in_few_iterations() {
     }
 
     // Run only 2 iterations
-    let mut pos_2iter = Vec2::new(32.0, 33.0);
+    let mut pos_2iter = DVec2::new(32.0, 33.0);
     for _ in 0..2 {
         pos_2iter = refine_centroid(&pixels, &bg, pos_2iter, stamp_radius, expected_fwhm)
             .expect("refine should succeed");
@@ -64,13 +68,17 @@ fn test_single_phase1_iteration_provides_good_seed() {
     // Test multiple sub-pixel offsets
     for dx in 0..5 {
         for dy in 0..5 {
-            let true_pos = Vec2::new(32.0 + dx as f32 * 0.2, 32.0 + dy as f32 * 0.2);
-            let pixels = SyntheticStar::new(true_pos, 0.8, StarProfile::Gaussian { sigma: 2.5 })
-                .stamp(Size2us::new(width, height), 0.1);
+            let true_pos = DVec2::new(32.0 + dx as f64 * 0.2, 32.0 + dy as f64 * 0.2);
+            let pixels = SyntheticStar::new(
+                true_pos.as_vec2(),
+                0.8,
+                StarProfile::Gaussian { sigma: 2.5 },
+            )
+            .stamp(Size2us::new(width, height), 0.1);
             let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
 
             // Start from integer peak position
-            let start = Vec2::new(true_pos.x.round(), true_pos.y.round());
+            let start = DVec2::new(true_pos.x.round(), true_pos.y.round());
 
             let after_one =
                 refine_centroid(&pixels, &bg, start, 7, 5.9).expect("refine should succeed");
@@ -98,23 +106,23 @@ fn test_gaussian_fit_accuracy_independent_of_phase1_iterations() {
 
     let width = 64;
     let height = 64;
-    let true_pos = Vec2::new(32.3, 32.7);
+    let true_pos = DVec2::new(32.3, 32.7);
     let sigma = 2.5;
-    let pixels = SyntheticStar::new(true_pos, 0.8, StarProfile::Gaussian { sigma })
+    let pixels = SyntheticStar::new(true_pos.as_vec2(), 0.8, StarProfile::Gaussian { sigma })
         .stamp(Size2us::new(width, height), 0.1);
     let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
     let stamp_radius = 7;
     let expected_fwhm = 5.9;
 
     // Phase 1 with only 2 iterations
-    let mut pos_2iter = Vec2::new(32.0, 33.0);
+    let mut pos_2iter = DVec2::new(32.0, 33.0);
     for _ in 0..2 {
         pos_2iter = refine_centroid(&pixels, &bg, pos_2iter, stamp_radius, expected_fwhm)
             .expect("refine should succeed");
     }
 
     // Phase 1 with full 10 iterations
-    let mut pos_full = Vec2::new(32.0, 33.0);
+    let mut pos_full = DVec2::new(32.0, 33.0);
     for _ in 0..MAX_MOMENTS_ITERATIONS {
         let new_pos = refine_centroid(&pixels, &bg, pos_full, stamp_radius, expected_fwhm)
             .expect("refine should succeed");
@@ -175,22 +183,26 @@ fn test_moffat_fit_accuracy_independent_of_phase1_iterations() {
 
     let width = 64;
     let height = 64;
-    let true_pos = Vec2::new(32.3, 32.7);
-    let pixels = SyntheticStar::new(true_pos, 0.8, StarProfile::Gaussian { sigma: 2.5 })
-        .stamp(Size2us::new(width, height), 0.1);
+    let true_pos = DVec2::new(32.3, 32.7);
+    let pixels = SyntheticStar::new(
+        true_pos.as_vec2(),
+        0.8,
+        StarProfile::Gaussian { sigma: 2.5 },
+    )
+    .stamp(Size2us::new(width, height), 0.1);
     let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
     let stamp_radius = 7;
     let expected_fwhm = 5.9;
 
     // Phase 1 with only 2 iterations
-    let mut pos_2iter = Vec2::new(32.0, 33.0);
+    let mut pos_2iter = DVec2::new(32.0, 33.0);
     for _ in 0..2 {
         pos_2iter = refine_centroid(&pixels, &bg, pos_2iter, stamp_radius, expected_fwhm)
             .expect("refine should succeed");
     }
 
     // Phase 1 with full 10 iterations
-    let mut pos_full = Vec2::new(32.0, 33.0);
+    let mut pos_full = DVec2::new(32.0, 33.0);
     for _ in 0..MAX_MOMENTS_ITERATIONS {
         let new_pos = refine_centroid(&pixels, &bg, pos_full, stamp_radius, expected_fwhm)
             .expect("refine should succeed");
@@ -289,20 +301,20 @@ fn test_prefit_moments_iterations_sufficient() {
 
     // Test with various sub-pixel positions and FWHM values
     let test_cases = [
-        (Vec2::new(32.3, 32.7), 2.5f32), // Typical star, FWHM ~5.9
-        (Vec2::new(32.8, 32.2), 3.5f32), // Larger PSF, FWHM ~8.2
-        (Vec2::new(32.1, 32.9), 1.8f32), // Smaller PSF, FWHM ~4.2
+        (DVec2::new(32.3, 32.7), 2.5f32), // Typical star, FWHM ~5.9
+        (DVec2::new(32.8, 32.2), 3.5f32), // Larger PSF, FWHM ~8.2
+        (DVec2::new(32.1, 32.9), 1.8f32), // Smaller PSF, FWHM ~4.2
     ];
 
     for (true_pos, sigma) in test_cases {
-        let pixels = SyntheticStar::new(true_pos, 0.8, StarProfile::Gaussian { sigma })
+        let pixels = SyntheticStar::new(true_pos.as_vec2(), 0.8, StarProfile::Gaussian { sigma })
             .stamp(Size2us::new(width, height), 0.1);
         let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
         let expected_fwhm = sigma / FWHM_TO_SIGMA;
         let stamp_radius = 7;
 
         // Start from peak position (slightly off from true position)
-        let peak_pos = Vec2::new(true_pos.x.round(), true_pos.y.round());
+        let peak_pos = DVec2::new(true_pos.x.round(), true_pos.y.round());
 
         // Run with 2 iterations (current MOMENTS_ITERATIONS_BEFORE_FIT)
         let mut pos_2iter = peak_pos;
@@ -412,16 +424,16 @@ fn test_prefit_moments_iterations_sufficient_moffat() {
 
     let width = 64;
     let height = 64;
-    let true_pos = Vec2::new(32.4, 32.6);
+    let true_pos = DVec2::new(32.4, 32.6);
     let sigma = 2.5f32;
 
-    let pixels = SyntheticStar::new(true_pos, 0.8, StarProfile::Gaussian { sigma })
+    let pixels = SyntheticStar::new(true_pos.as_vec2(), 0.8, StarProfile::Gaussian { sigma })
         .stamp(Size2us::new(width, height), 0.1);
     let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
     let expected_fwhm = sigma / FWHM_TO_SIGMA;
     let stamp_radius = 7;
 
-    let peak_pos = Vec2::new(true_pos.x.round(), true_pos.y.round());
+    let peak_pos = DVec2::new(true_pos.x.round(), true_pos.y.round());
 
     // Run with 2 iterations
     let mut pos_2iter = peak_pos;

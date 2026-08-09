@@ -10,7 +10,7 @@ use crate::stacking::star_detection::centroid::internals::{
 use crate::stacking::star_detection::centroid::lm_optimizer::LMConfig;
 use crate::stacking::star_detection::centroid::moffat_fit::*;
 use crate::testing::synthetic::star_profiles::{StarProfile, SyntheticStar};
-use glam::Vec2;
+use glam::{DVec2, Vec2};
 
 /// One Moffat recovery case, mirroring `gaussian_fit`'s `RecoveryCase`.
 ///
@@ -22,7 +22,7 @@ use glam::Vec2;
 struct MoffatCase {
     name: &'static str,
     stamp: usize,
-    center: Vec2,
+    center: DVec2,
     amplitude: f32,
     alpha: f32,
     /// Shape the stamp is rendered with.
@@ -30,12 +30,12 @@ struct MoffatCase {
     /// Shape the fitter is told to assume; differs from `beta` only in `wrong_beta`.
     fixed_beta: f32,
     background: f32,
-    guess: Vec2,
+    guess: DVec2,
     fit_radius: usize,
     perturbation: Perturbation,
     /// Background handed to the fitter; `None` gives it the true one.
     fit_background: Option<f32>,
-    pos_tol: Option<f32>,
+    pos_tol: Option<f64>,
     alpha_tol: Option<f32>,
     background_tol: Option<f32>,
 }
@@ -44,13 +44,13 @@ const MOFFAT_CASES: &[MoffatCase] = &[
     MoffatCase {
         name: "centered_fixed_beta",
         stamp: 21,
-        center: Vec2::new(10.0, 10.0),
+        center: DVec2::new(10.0, 10.0),
         amplitude: 1.0,
         alpha: 2.5,
         beta: 2.5,
         fixed_beta: 2.5,
         background: 0.1,
-        guess: Vec2::splat(10.0),
+        guess: DVec2::splat(10.0),
         fit_radius: 8,
         perturbation: Perturbation::None,
         fit_background: None,
@@ -61,13 +61,13 @@ const MOFFAT_CASES: &[MoffatCase] = &[
     MoffatCase {
         name: "subpixel_offset",
         stamp: 21,
-        center: Vec2::new(10.3, 10.7),
+        center: DVec2::new(10.3, 10.7),
         amplitude: 1.0,
         alpha: 2.5,
         beta: 2.5,
         fixed_beta: 2.5,
         background: 0.1,
-        guess: Vec2::splat(10.0),
+        guess: DVec2::splat(10.0),
         fit_radius: 8,
         perturbation: Perturbation::None,
         fit_background: None,
@@ -79,13 +79,13 @@ const MOFFAT_CASES: &[MoffatCase] = &[
         // Noise sigma is 5% of amplitude.
         name: "gaussian_noise",
         stamp: 21,
-        center: Vec2::new(10.0, 10.0),
+        center: DVec2::new(10.0, 10.0),
         amplitude: 1.0,
         alpha: 2.5,
         beta: 2.5,
         fixed_beta: 2.5,
         background: 0.1,
-        guess: Vec2::splat(10.0),
+        guess: DVec2::splat(10.0),
         fit_radius: 8,
         perturbation: Perturbation::Gaussian {
             sigma: 0.05,
@@ -99,13 +99,13 @@ const MOFFAT_CASES: &[MoffatCase] = &[
     MoffatCase {
         name: "high_noise",
         stamp: 21,
-        center: Vec2::new(10.0, 10.0),
+        center: DVec2::new(10.0, 10.0),
         amplitude: 1.0,
         alpha: 2.5,
         beta: 2.5,
         fixed_beta: 2.5,
         background: 0.1,
-        guess: Vec2::splat(10.0),
+        guess: DVec2::splat(10.0),
         fit_radius: 8,
         perturbation: Perturbation::Gaussian {
             sigma: 0.15,
@@ -120,13 +120,13 @@ const MOFFAT_CASES: &[MoffatCase] = &[
         // Fitter is handed a background 20% too high and must recover the true one.
         name: "wrong_background_estimate",
         stamp: 21,
-        center: Vec2::new(10.0, 10.0),
+        center: DVec2::new(10.0, 10.0),
         amplitude: 1.0,
         alpha: 2.5,
         beta: 2.5,
         fixed_beta: 2.5,
         background: 0.1,
-        guess: Vec2::splat(10.0),
+        guess: DVec2::splat(10.0),
         fit_radius: 8,
         perturbation: Perturbation::None,
         fit_background: Some(0.12),
@@ -139,13 +139,13 @@ const MOFFAT_CASES: &[MoffatCase] = &[
         // shape, so no claim is made about the recovered alpha.
         name: "wrong_beta",
         stamp: 21,
-        center: Vec2::new(10.3, 10.7),
+        center: DVec2::new(10.3, 10.7),
         amplitude: 1.0,
         alpha: 2.5,
         beta: 4.0,
         fixed_beta: 2.5,
         background: 0.1,
-        guess: Vec2::splat(10.0),
+        guess: DVec2::splat(10.0),
         fit_radius: 8,
         perturbation: Perturbation::None,
         fit_background: None,
@@ -156,13 +156,13 @@ const MOFFAT_CASES: &[MoffatCase] = &[
     MoffatCase {
         name: "very_high_amplitude",
         stamp: 21,
-        center: Vec2::new(10.0, 10.0),
+        center: DVec2::new(10.0, 10.0),
         amplitude: 10000.0,
         alpha: 2.5,
         beta: 2.5,
         fixed_beta: 2.5,
         background: 100.0,
-        guess: Vec2::splat(10.0),
+        guess: DVec2::splat(10.0),
         fit_radius: 8,
         perturbation: Perturbation::None,
         fit_background: None,
@@ -173,13 +173,13 @@ const MOFFAT_CASES: &[MoffatCase] = &[
     MoffatCase {
         name: "very_low_amplitude",
         stamp: 21,
-        center: Vec2::new(10.0, 10.0),
+        center: DVec2::new(10.0, 10.0),
         amplitude: 0.01,
         alpha: 2.5,
         beta: 2.5,
         fixed_beta: 2.5,
         background: 0.001,
-        guess: Vec2::splat(10.0),
+        guess: DVec2::splat(10.0),
         fit_radius: 8,
         perturbation: Perturbation::None,
         fit_background: None,
@@ -190,13 +190,13 @@ const MOFFAT_CASES: &[MoffatCase] = &[
     MoffatCase {
         name: "narrow_psf",
         stamp: 21,
-        center: Vec2::new(10.0, 10.0),
+        center: DVec2::new(10.0, 10.0),
         amplitude: 1.0,
         alpha: 0.8,
         beta: 2.5,
         fixed_beta: 2.5,
         background: 0.1,
-        guess: Vec2::splat(10.0),
+        guess: DVec2::splat(10.0),
         fit_radius: 8,
         perturbation: Perturbation::None,
         fit_background: None,
@@ -207,13 +207,13 @@ const MOFFAT_CASES: &[MoffatCase] = &[
     MoffatCase {
         name: "wide_psf",
         stamp: 31,
-        center: Vec2::new(15.0, 15.0),
+        center: DVec2::new(15.0, 15.0),
         amplitude: 1.0,
         alpha: 6.0,
         beta: 2.5,
         fixed_beta: 2.5,
         background: 0.1,
-        guess: Vec2::splat(15.0),
+        guess: DVec2::splat(15.0),
         fit_radius: 12,
         perturbation: Perturbation::None,
         fit_background: None,
@@ -227,7 +227,7 @@ const MOFFAT_CASES: &[MoffatCase] = &[
 fn moffat_fit_recovers_known_parameters() {
     for case in MOFFAT_CASES {
         let mut pixels = SyntheticStar::new(
-            case.center,
+            case.center.as_vec2(),
             case.amplitude,
             StarProfile::Moffat {
                 alpha: case.alpha,
@@ -316,7 +316,7 @@ fn test_moffat_fit_edge_position() {
     let config = MoffatFitConfig::default();
     let result = fit_moffat_2d(
         &pixels,
-        Vec2::new(2.0, 10.0),
+        DVec2::new(2.0, 10.0),
         &StampGrid::new(8),
         0.1,
         None,
@@ -339,7 +339,7 @@ fn test_moffat_fit_low_snr() {
     let true_bg = 0.5;
 
     let pixels = SyntheticStar::new(
-        Vec2::new(true_cx, true_cy),
+        Vec2::new(true_cx as f32, true_cy as f32),
         true_amp,
         StarProfile::Moffat {
             alpha: true_alpha,
@@ -354,7 +354,7 @@ fn test_moffat_fit_low_snr() {
     };
     let result = fit_moffat_2d(
         &pixels,
-        Vec2::splat(10.0),
+        DVec2::splat(10.0),
         &StampGrid::new(8),
         true_bg,
         None,
@@ -389,7 +389,7 @@ fn test_moffat_fit_various_beta_values() {
     // Test various beta values from Lorentzian-like (1.5) to Gaussian-like (6.0)
     for &true_beta in &[1.5f32, 2.0, 2.5, 3.0, 4.0, 5.0, 6.0] {
         let pixels = SyntheticStar::new(
-            Vec2::new(true_cx, true_cy),
+            Vec2::new(true_cx as f32, true_cy as f32),
             true_amp,
             StarProfile::Moffat {
                 alpha: true_alpha,
@@ -404,7 +404,7 @@ fn test_moffat_fit_various_beta_values() {
         };
         let result = fit_moffat_2d(
             &pixels,
-            Vec2::splat(10.0),
+            DVec2::splat(10.0),
             &StampGrid::new(8),
             true_bg,
             None,
@@ -439,7 +439,7 @@ fn test_moffat_fit_converges_within_max_iterations() {
     let true_bg = 0.1;
 
     let pixels = SyntheticStar::new(
-        Vec2::new(true_cx, true_cy),
+        Vec2::new(true_cx as f32, true_cy as f32),
         true_amp,
         StarProfile::Moffat {
             alpha: true_alpha,
@@ -457,7 +457,7 @@ fn test_moffat_fit_converges_within_max_iterations() {
     };
     let result = fit_moffat_2d(
         &pixels,
-        Vec2::splat(10.0),
+        DVec2::splat(10.0),
         &StampGrid::new(8),
         true_bg,
         None,
@@ -483,7 +483,7 @@ fn test_moffat_fit_bad_initial_guess_still_converges() {
     let true_bg = 0.1;
 
     let pixels = SyntheticStar::new(
-        Vec2::new(true_cx, true_cy),
+        Vec2::new(true_cx as f32, true_cy as f32),
         true_amp,
         StarProfile::Moffat {
             alpha: true_alpha,
@@ -503,7 +503,7 @@ fn test_moffat_fit_bad_initial_guess_still_converges() {
     // Start from a position offset by 2 pixels
     let result = fit_moffat_2d(
         &pixels,
-        Vec2::new(8.0, 12.0),
+        DVec2::new(8.0, 12.0),
         &StampGrid::new(8),
         true_bg,
         None,
@@ -536,7 +536,7 @@ fn test_moffat_fit_uniform_data_returns_result() {
     let config = MoffatFitConfig::default();
     let result = fit_moffat_2d(
         &pixels,
-        Vec2::splat(10.0),
+        DVec2::splat(10.0),
         &StampGrid::new(8),
         uniform_value,
         None,
@@ -564,7 +564,7 @@ fn test_moffat_fwhm_computed_correctly() {
     let true_bg = 0.1;
 
     let pixels = SyntheticStar::new(
-        Vec2::new(true_cx, true_cy),
+        Vec2::new(true_cx as f32, true_cy as f32),
         true_amp,
         StarProfile::Moffat {
             alpha: true_alpha,
@@ -579,7 +579,7 @@ fn test_moffat_fwhm_computed_correctly() {
     };
     let result = fit_moffat_2d(
         &pixels,
-        Vec2::splat(10.0),
+        DVec2::splat(10.0),
         &StampGrid::new(8),
         true_bg,
         None,
@@ -1043,7 +1043,7 @@ fn test_batch_build_normal_equations_all_pow_strategies() {
 /// NaN is false, so a check phrased as rejections ("bail if alpha > max") accepts one.
 #[test]
 fn validate_position_rejects_non_finite_and_keeps_its_bounds() {
-    let at = Vec2::splat(8.0);
+    let at = DVec2::splat(8.0);
     let radius = 8usize;
     // Baseline: a centred, plausibly-sized fit is accepted, so the rejections below are the
     // non-finite values and not some unrelated bound.
@@ -1051,7 +1051,7 @@ fn validate_position_rejects_non_finite_and_keeps_its_bounds() {
 
     for bad in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
         assert!(!validate_position(at, at, bad, radius), "alpha = {bad}");
-        let moved = Vec2::new(bad, 8.0);
+        let moved = DVec2::new(bad as f64, 8.0);
         assert!(!validate_position(moved, at, 2.0, radius), "pos.x = {bad}");
     }
 
@@ -1061,6 +1061,6 @@ fn validate_position_rejects_non_finite_and_keeps_its_bounds() {
     assert!(!validate_position(at, at, 0.49, radius));
     assert!(!validate_position(at, at, 16.01, radius));
     // Centre exactly `stamp_radius` away is still inside; beyond it is not.
-    assert!(validate_position(Vec2::new(16.0, 8.0), at, 2.0, radius));
-    assert!(!validate_position(Vec2::new(16.01, 8.0), at, 2.0, radius));
+    assert!(validate_position(DVec2::new(16.0, 8.0), at, 2.0, radius));
+    assert!(!validate_position(DVec2::new(16.01, 8.0), at, 2.0, radius));
 }

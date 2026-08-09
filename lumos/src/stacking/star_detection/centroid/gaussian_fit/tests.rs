@@ -8,7 +8,7 @@ use crate::stacking::star_detection::centroid::internals::{
     Perturbation, add_noise, approx_eq, reference_normal_equations,
 };
 use crate::testing::synthetic::star_profiles::{StarProfile, SyntheticStar};
-use glam::Vec2;
+use glam::{DVec2, Vec2};
 
 /// One recovery case: render a star of known parameters, optionally spoil the stamp or lie to
 /// the fitter about something, then check what it got back.
@@ -23,13 +23,13 @@ struct RecoveryCase {
     name: &'static str,
     /// Square stamp side, in pixels.
     stamp: usize,
-    center: Vec2,
+    center: DVec2,
     amplitude: f32,
     /// Per-axis sigma; equal components render through the circular Gaussian path.
     sigma: Vec2,
     background: f32,
     /// Starting point handed to the fitter, deliberately offset from `center` in some cases.
-    guess: Vec2,
+    guess: DVec2,
     fit_radius: usize,
     perturbation: Perturbation,
     /// Background handed to the fitter. `None` gives it the true one; `Some` deliberately lies
@@ -37,7 +37,7 @@ struct RecoveryCase {
     fit_background: Option<f32>,
     /// `None` uses `GaussianFitConfig::default()`.
     max_iterations: Option<usize>,
-    pos_tol: Option<f32>,
+    pos_tol: Option<f64>,
     sigma_tol: Option<f32>,
     amplitude_tol: Option<f32>,
     background_tol: Option<f32>,
@@ -69,11 +69,11 @@ const RECOVERY_CASES: &[RecoveryCase] = &[
     RecoveryCase {
         name: "centered",
         stamp: 21,
-        center: Vec2::new(10.0, 10.0),
+        center: DVec2::new(10.0, 10.0),
         amplitude: 1.0,
         sigma: Vec2::splat(2.5),
         background: 0.1,
-        guess: Vec2::splat(10.0),
+        guess: DVec2::splat(10.0),
         fit_radius: 8,
         pos_tol: Some(0.1),
         sigma_tol: Some(0.2),
@@ -87,11 +87,11 @@ const RECOVERY_CASES: &[RecoveryCase] = &[
     RecoveryCase {
         name: "subpixel_offset",
         stamp: 21,
-        center: Vec2::new(10.3, 10.7),
+        center: DVec2::new(10.3, 10.7),
         amplitude: 1.0,
         sigma: Vec2::splat(2.5),
         background: 0.1,
-        guess: Vec2::new(10.0, 11.0),
+        guess: DVec2::new(10.0, 11.0),
         fit_radius: 8,
         pos_tol: Some(0.05),
         sigma_tol: None,
@@ -105,11 +105,11 @@ const RECOVERY_CASES: &[RecoveryCase] = &[
     RecoveryCase {
         name: "asymmetric",
         stamp: 21,
-        center: Vec2::new(10.0, 10.0),
+        center: DVec2::new(10.0, 10.0),
         amplitude: 1.0,
         sigma: Vec2::new(2.0, 3.0),
         background: 0.1,
-        guess: Vec2::splat(10.0),
+        guess: DVec2::splat(10.0),
         fit_radius: 8,
         pos_tol: None,
         sigma_tol: Some(0.3),
@@ -123,11 +123,11 @@ const RECOVERY_CASES: &[RecoveryCase] = &[
     RecoveryCase {
         name: "high_snr",
         stamp: 21,
-        center: Vec2::new(10.25, 10.35),
+        center: DVec2::new(10.25, 10.35),
         amplitude: 100.0,
         sigma: Vec2::splat(2.0),
         background: 1.0,
-        guess: Vec2::splat(10.0),
+        guess: DVec2::splat(10.0),
         fit_radius: 8,
         pos_tol: Some(0.02),
         sigma_tol: None,
@@ -142,11 +142,11 @@ const RECOVERY_CASES: &[RecoveryCase] = &[
         // Amplitude is clamped to a 0.01 floor, so this only pins that a fit comes back at all.
         name: "low_amplitude",
         stamp: 21,
-        center: Vec2::new(10.0, 10.0),
+        center: DVec2::new(10.0, 10.0),
         amplitude: 0.05,
         sigma: Vec2::splat(2.5),
         background: 0.1,
-        guess: Vec2::splat(10.0),
+        guess: DVec2::splat(10.0),
         fit_radius: 8,
         pos_tol: None,
         sigma_tol: None,
@@ -160,11 +160,11 @@ const RECOVERY_CASES: &[RecoveryCase] = &[
     RecoveryCase {
         name: "large_sigma",
         stamp: 31,
-        center: Vec2::new(15.0, 15.0),
+        center: DVec2::new(15.0, 15.0),
         amplitude: 1.0,
         sigma: Vec2::splat(5.0),
         background: 0.1,
-        guess: Vec2::splat(15.0),
+        guess: DVec2::splat(15.0),
         fit_radius: 12,
         pos_tol: Some(0.2),
         sigma_tol: Some(0.5),
@@ -179,11 +179,11 @@ const RECOVERY_CASES: &[RecoveryCase] = &[
         // Sigma 1.0 is close to Nyquist: fewer lit pixels, so position is looser.
         name: "small_sigma",
         stamp: 15,
-        center: Vec2::new(7.0, 7.0),
+        center: DVec2::new(7.0, 7.0),
         amplitude: 1.0,
         sigma: Vec2::splat(1.0),
         background: 0.1,
-        guess: Vec2::splat(7.0),
+        guess: DVec2::splat(7.0),
         fit_radius: 5,
         pos_tol: Some(0.15),
         sigma_tol: None,
@@ -197,11 +197,11 @@ const RECOVERY_CASES: &[RecoveryCase] = &[
     RecoveryCase {
         name: "zero_background",
         stamp: 21,
-        center: Vec2::new(10.0, 10.0),
+        center: DVec2::new(10.0, 10.0),
         amplitude: 1.0,
         sigma: Vec2::splat(2.5),
         background: 0.0,
-        guess: Vec2::splat(10.0),
+        guess: DVec2::splat(10.0),
         fit_radius: 8,
         pos_tol: Some(0.1),
         sigma_tol: None,
@@ -215,11 +215,11 @@ const RECOVERY_CASES: &[RecoveryCase] = &[
     RecoveryCase {
         name: "high_background",
         stamp: 21,
-        center: Vec2::new(10.0, 10.0),
+        center: DVec2::new(10.0, 10.0),
         amplitude: 1.0,
         sigma: Vec2::splat(2.5),
         background: 10.0,
-        guess: Vec2::splat(10.0),
+        guess: DVec2::splat(10.0),
         fit_radius: 8,
         pos_tol: Some(0.1),
         sigma_tol: None,
@@ -233,11 +233,11 @@ const RECOVERY_CASES: &[RecoveryCase] = &[
     RecoveryCase {
         name: "sawtooth_noise",
         stamp: 21,
-        center: Vec2::new(10.0, 10.0),
+        center: DVec2::new(10.0, 10.0),
         amplitude: 1.0,
         sigma: Vec2::splat(2.5),
         background: 0.1,
-        guess: Vec2::splat(10.0),
+        guess: DVec2::splat(10.0),
         fit_radius: 8,
         pos_tol: Some(0.2),
         sigma_tol: None,
@@ -252,11 +252,11 @@ const RECOVERY_CASES: &[RecoveryCase] = &[
         // Noise sigma is 5% of amplitude.
         name: "gaussian_noise",
         stamp: 21,
-        center: Vec2::new(10.0, 10.0),
+        center: DVec2::new(10.0, 10.0),
         amplitude: 1.0,
         sigma: Vec2::splat(2.5),
         background: 0.1,
-        guess: Vec2::splat(10.0),
+        guess: DVec2::splat(10.0),
         fit_radius: 8,
         pos_tol: Some(0.2),
         sigma_tol: None,
@@ -274,11 +274,11 @@ const RECOVERY_CASES: &[RecoveryCase] = &[
         // 15% noise: must still converge, position just gets looser.
         name: "high_noise",
         stamp: 21,
-        center: Vec2::new(10.0, 10.0),
+        center: DVec2::new(10.0, 10.0),
         amplitude: 1.0,
         sigma: Vec2::splat(2.5),
         background: 0.1,
-        guess: Vec2::splat(10.0),
+        guess: DVec2::splat(10.0),
         fit_radius: 8,
         pos_tol: Some(0.5),
         sigma_tol: None,
@@ -297,11 +297,11 @@ const RECOVERY_CASES: &[RecoveryCase] = &[
         // diverging, which the runner now asserts for every case.
         name: "low_snr",
         stamp: 21,
-        center: Vec2::new(10.0, 10.0),
+        center: DVec2::new(10.0, 10.0),
         amplitude: 0.1,
         sigma: Vec2::splat(2.5),
         background: 0.5,
-        guess: Vec2::splat(10.0),
+        guess: DVec2::splat(10.0),
         fit_radius: 8,
         pos_tol: None,
         sigma_tol: None,
@@ -317,11 +317,11 @@ const RECOVERY_CASES: &[RecoveryCase] = &[
         // because background is itself a fitted parameter.
         name: "wrong_background_estimate",
         stamp: 21,
-        center: Vec2::new(10.0, 10.0),
+        center: DVec2::new(10.0, 10.0),
         amplitude: 1.0,
         sigma: Vec2::splat(2.5),
         background: 0.1,
-        guess: Vec2::splat(10.0),
+        guess: DVec2::splat(10.0),
         fit_radius: 8,
         pos_tol: Some(0.1),
         sigma_tol: None,
@@ -336,11 +336,11 @@ const RECOVERY_CASES: &[RecoveryCase] = &[
         // Guess starts 2px off in both axes and needs the longer budget to walk back.
         name: "bad_initial_guess",
         stamp: 21,
-        center: Vec2::new(10.0, 10.0),
+        center: DVec2::new(10.0, 10.0),
         amplitude: 1.0,
         sigma: Vec2::splat(2.5),
         background: 0.1,
-        guess: Vec2::new(8.0, 12.0),
+        guess: DVec2::new(8.0, 12.0),
         fit_radius: 8,
         pos_tol: Some(0.1),
         sigma_tol: None,
@@ -354,11 +354,11 @@ const RECOVERY_CASES: &[RecoveryCase] = &[
     RecoveryCase {
         name: "very_high_amplitude",
         stamp: 21,
-        center: Vec2::new(10.0, 10.0),
+        center: DVec2::new(10.0, 10.0),
         amplitude: 10000.0,
         sigma: Vec2::splat(2.5),
         background: 100.0,
-        guess: Vec2::splat(10.0),
+        guess: DVec2::splat(10.0),
         fit_radius: 8,
         pos_tol: Some(0.1),
         sigma_tol: None,
@@ -373,11 +373,11 @@ const RECOVERY_CASES: &[RecoveryCase] = &[
         // Sigma 0.8 is below the pixel scale — barely resolved.
         name: "narrow_psf",
         stamp: 21,
-        center: Vec2::new(10.0, 10.0),
+        center: DVec2::new(10.0, 10.0),
         amplitude: 1.0,
         sigma: Vec2::splat(0.8),
         background: 0.1,
-        guess: Vec2::splat(10.0),
+        guess: DVec2::splat(10.0),
         fit_radius: 8,
         pos_tol: Some(0.15),
         sigma_tol: None,
@@ -392,11 +392,11 @@ const RECOVERY_CASES: &[RecoveryCase] = &[
         // Wide and faint at once: the loosest position bound in the table.
         name: "high_sigma_low_amplitude",
         stamp: 41,
-        center: Vec2::new(20.0, 20.0),
+        center: DVec2::new(20.0, 20.0),
         amplitude: 0.1,
         sigma: Vec2::splat(8.0),
         background: 0.05,
-        guess: Vec2::splat(20.0),
+        guess: DVec2::splat(20.0),
         fit_radius: 15,
         pos_tol: Some(1.0),
         sigma_tol: None,
@@ -412,7 +412,7 @@ const RECOVERY_CASES: &[RecoveryCase] = &[
 #[test]
 fn gaussian_fit_recovers_known_parameters() {
     for case in RECOVERY_CASES {
-        let mut pixels = SyntheticStar::new(case.center, case.amplitude, case.profile())
+        let mut pixels = SyntheticStar::new(case.center.as_vec2(), case.amplitude, case.profile())
             .stamp(Size2us::new(case.stamp, case.stamp), case.background);
         case.perturbation.apply(&mut pixels);
 
@@ -522,7 +522,7 @@ fn test_gaussian_fit_edge_position() {
     let config = GaussianFitConfig::default();
     let result = fit_gaussian_2d(
         &pixels,
-        Vec2::new(2.0, 10.0),
+        DVec2::new(2.0, 10.0),
         &StampGrid::new(8),
         0.1,
         None,
@@ -542,7 +542,7 @@ fn test_gaussian_fit_stamp_too_small() {
     // extract_stamp returns None when stamp doesn't fit
     let result = fit_gaussian_2d(
         &pixels,
-        Vec2::splat(2.0),
+        DVec2::splat(2.0),
         &StampGrid::new(3),
         0.5,
         None,
@@ -566,14 +566,14 @@ fn test_fwhm_accuracy() {
 fn test_gaussian_fit_converges_within_max_iterations() {
     let width = 21;
     let height = 21;
-    let true_cx = 10.0;
-    let true_cy = 10.0;
+    let true_cx = 10.0f64;
+    let true_cy = 10.0f64;
     let true_amp = 1.0;
     let true_sigma = 2.5;
     let true_bg = 0.1;
 
     let pixels = SyntheticStar::new(
-        Vec2::new(true_cx, true_cy),
+        Vec2::new(true_cx as f32, true_cy as f32),
         true_amp,
         StarProfile::Gaussian { sigma: true_sigma },
     )
@@ -585,7 +585,7 @@ fn test_gaussian_fit_converges_within_max_iterations() {
     };
     let result = fit_gaussian_2d(
         &pixels,
-        Vec2::splat(10.0),
+        DVec2::splat(10.0),
         &StampGrid::new(8),
         true_bg,
         None,
@@ -610,7 +610,7 @@ fn test_gaussian_fit_uniform_data_returns_result() {
     let config = GaussianFitConfig::default();
     let result = fit_gaussian_2d(
         &pixels,
-        Vec2::splat(10.0),
+        DVec2::splat(10.0),
         &StampGrid::new(8),
         uniform_value,
         None,
@@ -632,15 +632,15 @@ fn test_gaussian_fit_uniform_data_returns_result() {
 fn test_gaussian_fit_center_outside_stamp_rejected() {
     let width = 21;
     let height = 21;
-    let true_cx = 10.0;
-    let true_cy = 10.0;
+    let true_cx = 10.0f64;
+    let true_cy = 10.0f64;
     let true_amp = 1.0;
     let true_sigma = 2.5;
     let true_bg = 0.1;
 
     // Create a stamp with peak at edge so fitting might push center outside
     let pixels = SyntheticStar::new(
-        Vec2::new(true_cx, true_cy),
+        Vec2::new(true_cx as f32, true_cy as f32),
         true_amp,
         StarProfile::Gaussian { sigma: true_sigma },
     )
@@ -650,7 +650,7 @@ fn test_gaussian_fit_center_outside_stamp_rejected() {
     // Give initial guess very far from true center - should still find it
     let result = fit_gaussian_2d(
         &pixels,
-        Vec2::splat(10.0),
+        DVec2::splat(10.0),
         &StampGrid::new(3),
         true_bg,
         None,
@@ -666,14 +666,14 @@ fn test_gaussian_fit_center_outside_stamp_rejected() {
 fn test_gaussian_fit_rms_residual_computed() {
     let width = 21;
     let height = 21;
-    let true_cx = 10.0;
-    let true_cy = 10.0;
+    let true_cx = 10.0f64;
+    let true_cy = 10.0f64;
     let true_amp = 1.0;
     let true_sigma = 2.5;
     let true_bg = 0.1;
 
     let pixels = SyntheticStar::new(
-        Vec2::new(true_cx, true_cy),
+        Vec2::new(true_cx as f32, true_cy as f32),
         true_amp,
         StarProfile::Gaussian { sigma: true_sigma },
     )
@@ -682,7 +682,7 @@ fn test_gaussian_fit_rms_residual_computed() {
     let config = GaussianFitConfig::default();
     let result = fit_gaussian_2d(
         &pixels,
-        Vec2::splat(10.0),
+        DVec2::splat(10.0),
         &StampGrid::new(8),
         true_bg,
         None,
@@ -715,11 +715,11 @@ fn test_gaussian_fit_multiple_positions() {
         (0.75, 0.75),
         (-0.3, 0.4),
     ] {
-        let true_cx = 10.0 + offset_x;
-        let true_cy = 10.0 + offset_y;
+        let true_cx: f64 = 10.0 + offset_x;
+        let true_cy: f64 = 10.0 + offset_y;
 
         let pixels = SyntheticStar::new(
-            Vec2::new(true_cx, true_cy),
+            Vec2::new(true_cx as f32, true_cy as f32),
             true_amp,
             StarProfile::Gaussian { sigma: true_sigma },
         )
@@ -728,7 +728,7 @@ fn test_gaussian_fit_multiple_positions() {
         let config = GaussianFitConfig::default();
         let result = fit_gaussian_2d(
             &pixels,
-            Vec2::splat(10.0),
+            DVec2::splat(10.0),
             &StampGrid::new(8),
             true_bg,
             None,
@@ -1094,14 +1094,14 @@ fn test_gaussian_fit_sigma_at_lower_bound() {
     // Test with sigma very close to constraint minimum (0.5 px)
     let width = 15;
     let height = 15;
-    let true_cx = 7.0;
-    let true_cy = 7.0;
+    let true_cx = 7.0f64;
+    let true_cy = 7.0f64;
     let true_amp = 1.0;
     let true_sigma = 0.6; // Just above min constraint of 0.5
     let true_bg = 0.1;
 
     let pixels = SyntheticStar::new(
-        Vec2::new(true_cx, true_cy),
+        Vec2::new(true_cx as f32, true_cy as f32),
         true_amp,
         StarProfile::Gaussian { sigma: true_sigma },
     )
@@ -1110,7 +1110,7 @@ fn test_gaussian_fit_sigma_at_lower_bound() {
     let config = GaussianFitConfig::default();
     let result = fit_gaussian_2d(
         &pixels,
-        Vec2::splat(7.0),
+        DVec2::splat(7.0),
         &StampGrid::new(5),
         true_bg,
         None,
@@ -1132,15 +1132,15 @@ fn test_gaussian_fit_sigma_at_upper_bound() {
     // Test with sigma close to stamp_radius constraint
     let width = 31;
     let height = 31;
-    let true_cx = 15.0;
-    let true_cy = 15.0;
+    let true_cx = 15.0f64;
+    let true_cy = 15.0f64;
     let true_amp = 1.0;
     let stamp_radius = 10;
     let true_sigma = 9.0; // Close to stamp_radius
     let true_bg = 0.1;
 
     let pixels = SyntheticStar::new(
-        Vec2::new(true_cx, true_cy),
+        Vec2::new(true_cx as f32, true_cy as f32),
         true_amp,
         StarProfile::Gaussian { sigma: true_sigma },
     )
@@ -1149,7 +1149,7 @@ fn test_gaussian_fit_sigma_at_upper_bound() {
     let config = GaussianFitConfig::default();
     let result = fit_gaussian_2d(
         &pixels,
-        Vec2::splat(15.0),
+        DVec2::splat(15.0),
         &StampGrid::new(stamp_radius),
         true_bg,
         None,
@@ -1170,8 +1170,8 @@ fn test_gaussian_fit_sigma_at_upper_bound() {
 fn test_gaussian_fit_extreme_amplitude_range() {
     let width = 21;
     let height = 21;
-    let true_cx = 10.0;
-    let true_cy = 10.0;
+    let true_cx = 10.0f64;
+    let true_cy = 10.0f64;
     let true_sigma = 2.5;
     let true_bg = 0.1;
 
@@ -1179,7 +1179,7 @@ fn test_gaussian_fit_extreme_amplitude_range() {
     for amp_exp in [-3, -2, -1, 0, 1, 2, 3, 4] {
         let true_amp = 10.0f32.powi(amp_exp);
         let pixels = SyntheticStar::new(
-            Vec2::new(true_cx, true_cy),
+            Vec2::new(true_cx as f32, true_cy as f32),
             true_amp,
             StarProfile::Gaussian { sigma: true_sigma },
         )
@@ -1188,7 +1188,7 @@ fn test_gaussian_fit_extreme_amplitude_range() {
         let config = GaussianFitConfig::default();
         let result = fit_gaussian_2d(
             &pixels,
-            Vec2::splat(10.0),
+            DVec2::splat(10.0),
             &StampGrid::new(8),
             true_bg,
             None,
@@ -1220,15 +1220,15 @@ fn test_gaussian_fit_residual_distribution() {
     // On noisy data, check that residuals are reasonable
     let width = 21;
     let height = 21;
-    let true_cx = 10.0;
-    let true_cy = 10.0;
+    let true_cx = 10.0f64;
+    let true_cy = 10.0f64;
     let true_amp = 1.0;
     let true_sigma = 2.5;
     let true_bg = 0.1;
     let noise_sigma = 0.05;
 
     let mut pixels = SyntheticStar::new(
-        Vec2::new(true_cx, true_cy),
+        Vec2::new(true_cx as f32, true_cy as f32),
         true_amp,
         StarProfile::Gaussian { sigma: true_sigma },
     )
@@ -1238,7 +1238,7 @@ fn test_gaussian_fit_residual_distribution() {
     let config = GaussianFitConfig::default();
     let result = fit_gaussian_2d(
         &pixels,
-        Vec2::splat(10.0),
+        DVec2::splat(10.0),
         &StampGrid::new(8),
         true_bg,
         None,
@@ -1521,7 +1521,7 @@ fn test_gaussian_evaluate_and_jacobian_consistency() {
 /// NaN is false, so a check phrased as rejections ("bail if sigma > max") accepts one.
 #[test]
 fn validate_fit_rejects_non_finite_and_keeps_its_bounds() {
-    let at = Vec2::splat(8.0);
+    let at = DVec2::splat(8.0);
     let radius = 8usize;
     // Baseline: a centred, plausibly-sized fit is accepted, so the rejections below are the
     // non-finite values and not some unrelated bound.
@@ -1532,7 +1532,7 @@ fn validate_fit_rejects_non_finite_and_keeps_its_bounds() {
         assert!(!validate_fit(at, at, 2.0, bad, radius), "sigma_y = {bad}");
     }
     for bad in [f32::NAN, f32::INFINITY] {
-        let moved = Vec2::new(bad, 8.0);
+        let moved = DVec2::new(bad as f64, 8.0);
         assert!(!validate_fit(moved, at, 2.0, 2.0, radius), "pos.x = {bad}");
     }
 
@@ -1541,6 +1541,6 @@ fn validate_fit_rejects_non_finite_and_keeps_its_bounds() {
     assert!(!validate_fit(at, at, 0.49, 2.0, radius));
     assert!(!validate_fit(at, at, 2.0, 16.01, radius));
     // Centre exactly `stamp_radius` away is still inside; beyond it is not.
-    assert!(validate_fit(Vec2::new(16.0, 8.0), at, 2.0, 2.0, radius));
-    assert!(!validate_fit(Vec2::new(16.01, 8.0), at, 2.0, 2.0, radius));
+    assert!(validate_fit(DVec2::new(16.0, 8.0), at, 2.0, 2.0, radius));
+    assert!(!validate_fit(DVec2::new(16.01, 8.0), at, 2.0, 2.0, radius));
 }

@@ -11,16 +11,17 @@ fn test_weighted_centroid_precision_statistical() {
     let sigma = 2.5f32;
 
     // Test a grid of sub-pixel positions
-    let mut total_error = 0.0f32;
-    let mut max_error = 0.0f32;
+    let mut total_error = 0.0f64;
+    let mut max_error = 0.0f64;
     let mut count = 0;
 
     for dx in 0..10 {
         for dy in 0..10 {
-            let true_pos = Vec2::new(64.0 + dx as f32 * 0.1, 64.0 + dy as f32 * 0.1);
+            let true_pos = DVec2::new(64.0 + dx as f64 * 0.1, 64.0 + dy as f64 * 0.1);
 
-            let pixels = SyntheticStar::new(true_pos, 1.0, StarProfile::Gaussian { sigma })
-                .stamp(Size2us::new(width, height), 0.1);
+            let pixels =
+                SyntheticStar::new(true_pos.as_vec2(), 1.0, StarProfile::Gaussian { sigma })
+                    .stamp(Size2us::new(width, height), 0.1);
             let bg = estimate_background(
                 &pixels,
                 &BackgroundConfig {
@@ -49,9 +50,8 @@ fn test_weighted_centroid_precision_statistical() {
                 config.fwhm.expected,
                 &StampGrid::new(compute_stamp_radius(config.fwhm.expected)),
             ) {
-                let error = ((star.pos.x - true_pos.x as f64).powi(2)
-                    + (star.pos.y - true_pos.y as f64).powi(2))
-                .sqrt() as f32;
+                let error =
+                    ((star.pos.x - true_pos.x).powi(2) + (star.pos.y - true_pos.y).powi(2)).sqrt();
                 total_error += error;
                 max_error = max_error.max(error);
                 count += 1;
@@ -59,7 +59,7 @@ fn test_weighted_centroid_precision_statistical() {
         }
     }
 
-    let avg_error = total_error / count as f32;
+    let avg_error = total_error / count as f64;
 
     // Weighted centroid should achieve ~0.05 pixel accuracy on average
     assert!(
@@ -87,22 +87,22 @@ fn test_gaussian_fit_precision_statistical() {
     let sigma = 2.5f32;
     let background = 0.1f32;
 
-    let mut total_error = 0.0f32;
-    let mut max_error = 0.0f32;
+    let mut total_error = 0.0f64;
+    let mut max_error = 0.0f64;
     let mut count = 0;
 
     // Test a grid of sub-pixel positions
     for dx in 0..10 {
         for dy in 0..10 {
-            let true_cx = 10.0 + dx as f32 * 0.1;
-            let true_cy = 10.0 + dy as f32 * 0.1;
+            let true_cx = f64::from(10.0 + dx as f32 * 0.1);
+            let true_cy = f64::from(10.0 + dy as f32 * 0.1);
 
             // Create perfect Gaussian
             let mut pixels = vec![background; width * height];
             for y in 0..height {
                 for x in 0..width {
-                    let ddx = x as f32 - true_cx;
-                    let ddy = y as f32 - true_cy;
+                    let ddx = x as f32 - true_cx as f32;
+                    let ddy = y as f32 - true_cy as f32;
                     pixels[y * width + x] +=
                         1.0 * (-0.5 * (ddx * ddx + ddy * ddy) / (sigma * sigma)).exp();
                 }
@@ -112,7 +112,7 @@ fn test_gaussian_fit_precision_statistical() {
             let config = GaussianFitConfig::default();
             if let Some(result) = fit_gaussian_2d(
                 &pixels_buf,
-                Vec2::splat(10.0),
+                DVec2::splat(10.0),
                 &StampGrid::new(8),
                 background,
                 None,
@@ -128,7 +128,7 @@ fn test_gaussian_fit_precision_statistical() {
         }
     }
 
-    let avg_error = total_error / count as f32;
+    let avg_error = total_error / count as f64;
 
     // Gaussian fitting should achieve ~0.01 pixel accuracy
     assert!(
@@ -155,21 +155,22 @@ fn test_moffat_fit_precision_statistical() {
     let beta = 2.5f32;
     let background = 0.1f32;
 
-    let mut total_error = 0.0f32;
-    let mut max_error = 0.0f32;
+    let mut total_error = 0.0f64;
+    let mut max_error = 0.0f64;
     let mut count = 0;
 
     // Test a grid of sub-pixel positions
     for dx in 0..10 {
         for dy in 0..10 {
-            let true_cx = 10.0 + dx as f32 * 0.1;
-            let true_cy = 10.0 + dy as f32 * 0.1;
+            let true_cx = f64::from(10.0 + dx as f32 * 0.1);
+            let true_cy = f64::from(10.0 + dy as f32 * 0.1);
 
             // Create perfect Moffat profile
             let mut pixels = vec![background; width * height];
             for y in 0..height {
                 for x in 0..width {
-                    let r2 = (x as f32 - true_cx).powi(2) + (y as f32 - true_cy).powi(2);
+                    let r2 =
+                        (x as f32 - true_cx as f32).powi(2) + (y as f32 - true_cy as f32).powi(2);
                     pixels[y * width + x] += 1.0 * (1.0 + r2 / (alpha * alpha)).powf(-beta);
                 }
             }
@@ -181,7 +182,7 @@ fn test_moffat_fit_precision_statistical() {
             };
             if let Some(result) = fit_moffat_2d(
                 &pixels_buf,
-                Vec2::splat(10.0),
+                DVec2::splat(10.0),
                 &StampGrid::new(8),
                 background,
                 None,
@@ -197,7 +198,7 @@ fn test_moffat_fit_precision_statistical() {
         }
     }
 
-    let avg_error = total_error / count as f32;
+    let avg_error = total_error / count as f64;
 
     // Moffat fitting should achieve ~0.01 pixel accuracy
     assert!(
@@ -229,7 +230,7 @@ fn test_fwhm_estimation_accuracy() {
         let metrics = compute_star(
             &pixels,
             &bg,
-            Vec2::splat(64.0),
+            DVec2::splat(64.0),
             0.0,
             TEST_STAMP_RADIUS,
             None,
@@ -278,7 +279,7 @@ fn test_eccentricity_calculation_accuracy() {
         let metrics = compute_star(
             &pixels,
             &bg,
-            Vec2::splat(32.0),
+            DVec2::splat(32.0),
             0.0,
             TEST_STAMP_RADIUS,
             None,
@@ -327,7 +328,7 @@ fn test_sharpness_point_vs_extended() {
     let metrics_compact = compute_star(
         &compact,
         &bg,
-        Vec2::splat(32.0),
+        DVec2::splat(32.0),
         0.0,
         TEST_STAMP_RADIUS,
         None,
@@ -341,7 +342,7 @@ fn test_sharpness_point_vs_extended() {
     let metrics_extended = compute_star(
         &extended,
         &bg,
-        Vec2::splat(32.0),
+        DVec2::splat(32.0),
         0.0,
         TEST_STAMP_RADIUS,
         None,
@@ -419,14 +420,14 @@ fn test_gaussian_fit_sigma_recovery() {
 
     // Test sigma values that fit well within stamp_radius=8
     for true_sigma in [2.0f32, 2.5, 3.0, 3.5] {
-        let cx = 10.0f32;
-        let cy = 10.0f32;
+        let cx = 10.0f64;
+        let cy = 10.0f64;
 
         let mut pixels = vec![background; width * height];
         for y in 0..height {
             for x in 0..width {
-                let dx = x as f32 - cx;
-                let dy = y as f32 - cy;
+                let dx = x as f32 - cx as f32;
+                let dy = y as f32 - cy as f32;
                 pixels[y * width + x] +=
                     1.0 * (-0.5 * (dx * dx + dy * dy) / (true_sigma * true_sigma)).exp();
             }
@@ -436,7 +437,7 @@ fn test_gaussian_fit_sigma_recovery() {
         let config = GaussianFitConfig::default();
         let result = fit_gaussian_2d(
             &pixels_buf,
-            Vec2::new(cx, cy),
+            DVec2::new(cx, cy),
             &StampGrid::new(8),
             background,
             None,
@@ -480,13 +481,13 @@ fn test_moffat_fit_alpha_recovery() {
 
     // Test alpha values that fit well within stamp_radius=8
     for true_alpha in [2.0f32, 2.5, 3.0, 3.5] {
-        let cx = 10.0f32;
-        let cy = 10.0f32;
+        let cx = 10.0f64;
+        let cy = 10.0f64;
 
         let mut pixels = vec![background; width * height];
         for y in 0..height {
             for x in 0..width {
-                let r2 = (x as f32 - cx).powi(2) + (y as f32 - cy).powi(2);
+                let r2 = (x as f32 - cx as f32).powi(2) + (y as f32 - cy as f32).powi(2);
                 pixels[y * width + x] += 1.0 * (1.0 + r2 / (true_alpha * true_alpha)).powf(-beta);
             }
         }
@@ -498,7 +499,7 @@ fn test_moffat_fit_alpha_recovery() {
         };
         let result = fit_moffat_2d(
             &pixels_buf,
-            Vec2::new(cx, cy),
+            DVec2::new(cx, cy),
             &StampGrid::new(8),
             background,
             None,
@@ -529,8 +530,8 @@ fn test_gaussian_fit_with_noise() {
 
     let width = 21;
     let height = 21;
-    let true_cx = 10.3f32;
-    let true_cy = 10.7f32;
+    let true_cx = 10.3f64;
+    let true_cy = 10.7f64;
     let true_sigma = 2.5f32;
     let background = 0.1f32;
 
@@ -538,8 +539,8 @@ fn test_gaussian_fit_with_noise() {
     let mut pixels = vec![background; width * height];
     for y in 0..height {
         for x in 0..width {
-            let dx = x as f32 - true_cx;
-            let dy = y as f32 - true_cy;
+            let dx = x as f32 - true_cx as f32;
+            let dy = y as f32 - true_cy as f32;
             let signal = 1.0 * (-0.5 * (dx * dx + dy * dy) / (true_sigma * true_sigma)).exp();
             // Add small deterministic noise
             let noise = ((x * 7 + y * 13) % 100) as f32 * 0.001 - 0.05;
@@ -551,7 +552,7 @@ fn test_gaussian_fit_with_noise() {
     let config = GaussianFitConfig::default();
     let result = fit_gaussian_2d(
         &pixels_buf,
-        Vec2::splat(10.0),
+        DVec2::splat(10.0),
         &StampGrid::new(8),
         background,
         None,
@@ -582,7 +583,7 @@ fn test_ground_circular_source() {
     let metrics = compute_star(
         &pixels,
         &bg,
-        Vec2::splat(32.0),
+        DVec2::splat(32.0),
         0.0,
         TEST_STAMP_RADIUS,
         None,
@@ -618,7 +619,7 @@ fn test_ground_x_elongated() {
     let metrics = compute_star(
         &pixels,
         &bg,
-        Vec2::splat(32.0),
+        DVec2::splat(32.0),
         0.0,
         TEST_STAMP_RADIUS,
         None,
@@ -647,7 +648,7 @@ fn test_sround_symmetric_source() {
     let metrics = compute_star(
         &pixels,
         &bg,
-        Vec2::splat(32.0),
+        DVec2::splat(32.0),
         0.0,
         TEST_STAMP_RADIUS,
         None,

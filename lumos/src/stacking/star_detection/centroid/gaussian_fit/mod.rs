@@ -21,7 +21,7 @@ use crate::stacking::star_detection::centroid::lm_optimizer::{
 use crate::stacking::star_detection::centroid::{
     FitNoise, estimate_sigma_from_moments, extract_stamp, fit_weights,
 };
-use glam::Vec2;
+use glam::{DVec2, Vec2};
 use imaginarium::Buffer2;
 
 /// Configuration for Gaussian fitting.
@@ -31,7 +31,7 @@ pub(super) type GaussianFitConfig = LMConfig;
 #[derive(Debug, Clone, Copy)]
 pub(super) struct GaussianFitResult {
     /// Position of Gaussian center (sub-pixel).
-    pub(super) pos: Vec2,
+    pub(super) pos: DVec2,
     /// Sigma in X and Y directions.
     pub(super) sigma: Vec2,
     /// Whether the fit converged.
@@ -124,7 +124,7 @@ impl LMModel<6> for Gaussian2D {
 /// unweighted fit.
 pub(super) fn fit_gaussian_2d(
     pixels: &Buffer2<f32>,
-    pos: Vec2,
+    pos: DVec2,
     grid: &StampGrid,
     background: f32,
     noise: Option<FitNoise>,
@@ -148,8 +148,8 @@ pub(super) fn fit_gaussian_2d(
     let sigma_est = estimate_sigma_from_moments(&grid.x, &grid.y, &stamp.z, local_pos, background);
 
     let initial_params: [f64; 6] = [
-        local_pos.x as f64,
-        local_pos.y as f64,
+        local_pos.x,
+        local_pos.y,
         (stamp.peak - background).max(0.01) as f64,
         sigma_est as f64,
         sigma_est as f64,
@@ -164,7 +164,7 @@ pub(super) fn fit_gaussian_2d(
     let result = optimize(&model, data, initial_params, config);
 
     let [x0, y0, _, sigma_x, sigma_y, _] = result.params;
-    let result_pos = Vec2::new(x0 as f32, y0 as f32) + stamp.origin;
+    let result_pos = DVec2::new(x0, y0) + stamp.origin;
 
     if !validate_fit(result_pos, pos, sigma_x, sigma_y, stamp_radius) {
         return None;
@@ -185,21 +185,21 @@ pub(super) fn fit_gaussian_2d(
 /// non-finite one fail: comparisons against NaN are all false, so `NaN > limit` reads as "not out
 /// of range" and a rejection-phrased check would pass a NaN sigma through to `Star::fwhm`.
 ///
-/// The centre needs its own [`Vec2::is_finite`] check, because that trick does not extend to it:
-/// `max_element` reduces with [`f32::max`], which *ignores* NaN and returns the other lane, so a
+/// The centre needs its own [`DVec2::is_finite`] check, because that trick does not extend to it:
+/// `max_element` reduces with [`f64::max`], which *ignores* NaN and returns the other lane, so a
 /// NaN x-coordinate would silently compare as the (finite) y-offset.
 ///
 /// A rejected fit is not an error — `measure_star` falls back to the moment-based centroid.
 fn validate_fit(
-    result_pos: Vec2,
-    input_pos: Vec2,
+    result_pos: DVec2,
+    input_pos: DVec2,
     sigma_x: f64,
     sigma_y: f64,
     stamp_radius: usize,
 ) -> bool {
     let plausible_sigma = 0.5..=stamp_radius as f64 * 2.0;
     result_pos.is_finite()
-        && (result_pos - input_pos).abs().max_element() <= stamp_radius as f32
+        && (result_pos - input_pos).abs().max_element() <= stamp_radius as f64
         && plausible_sigma.contains(&sigma_x)
         && plausible_sigma.contains(&sigma_y)
 }

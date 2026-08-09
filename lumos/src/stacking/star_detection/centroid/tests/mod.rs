@@ -3,7 +3,7 @@
 use crate::math::size2us::Size2us;
 use std::f32::consts::FRAC_PI_4;
 
-use glam::Vec2;
+use glam::{DVec2, Vec2};
 
 use crate::math::fwhm::FWHM_TO_SIGMA;
 use crate::math::rect::URect;

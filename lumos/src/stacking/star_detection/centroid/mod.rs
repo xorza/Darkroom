@@ -6,7 +6,11 @@
 //! Also provides 2D Gaussian and Moffat profile fitting for higher precision
 //! centroid computation (~0.01 pixel accuracy).
 //!
-//! All fitting and accumulation operations use f64 for numerical stability.
+//! Positions are f64 end to end. Every accumulator here is already f64, [`Star::pos`] is a
+//! [`DVec2`], and registration solves its transforms in f64 — an f32 carrier would only add a
+//! narrowing in the middle. It would also quantize coarser than
+//! [`CENTROID_CONVERGENCE_THRESHOLD`] beyond x ≈ 1024, which silently turns the moments loop's
+//! convergence test into an exact-equality check on the outer parts of a large frame.
 
 mod gaussian_fit;
 mod linear_solver;
@@ -23,7 +27,7 @@ mod internals;
 mod tests;
 
 use arrayvec::ArrayVec;
-use glam::Vec2;
+use glam::DVec2;
 
 use crate::math::fwhm::{FWHM_TO_SIGMA, sigma_to_fwhm};
 use crate::math::size2us::Size2us;
@@ -75,7 +79,7 @@ const MAX_ANNULUS_PIXELS: usize = (2 * MAX_ANNULUS_OUTER_RADIUS + 1).pow(2); // 
 ///
 /// Iteration stops when the distance moved is less than this value.
 /// Set to 0.0001 (0.1 millipixel) for sub-pixel astrometric precision.
-const CENTROID_CONVERGENCE_THRESHOLD: f32 = 0.0001;
+const CENTROID_CONVERGENCE_THRESHOLD: f64 = 0.0001;
 
 /// Maximum weighted-moments iterations for standalone centroid (no fitting follows).
 const MAX_MOMENTS_ITERATIONS: usize = 10;
@@ -85,7 +89,7 @@ const MAX_MOMENTS_ITERATIONS: usize = 10;
 const MOMENTS_ITERATIONS_BEFORE_FIT: usize = 2;
 
 /// Convergence threshold in pixels squared.
-const CONVERGENCE_THRESHOLD_SQ: f32 =
+const CONVERGENCE_THRESHOLD_SQ: f64 =
     CENTROID_CONVERGENCE_THRESHOLD * CENTROID_CONVERGENCE_THRESHOLD;
 
 /// Compute stamp radius from expected FWHM.
@@ -97,7 +101,7 @@ pub(super) fn compute_stamp_radius(expected_fwhm: f32) -> usize {
 
 /// Check if position is within valid bounds for stamp extraction.
 #[inline]
-fn is_valid_stamp_position(pos: Vec2, size: Size2us, stamp_radius: usize) -> bool {
+fn is_valid_stamp_position(pos: DVec2, size: Size2us, stamp_radius: usize) -> bool {
     let icx = pos.x.round() as isize;
     let icy = pos.y.round() as isize;
     icx >= stamp_radius as isize
@@ -144,8 +148,9 @@ struct StampData {
     /// Peak pixel value within the stamp.
     peak: f32,
     /// Image position of the stamp's top-left pixel, which [`StampGrid`]'s coordinates are
-    /// relative to.
-    origin: Vec2,
+    /// relative to. Integer-valued, but f64 so shifting a fitted centre back into image
+    /// coordinates costs no rounding.
+    origin: DVec2,
 }
 
 /// Extract a square stamp of pixel data around a position.
@@ -154,7 +159,7 @@ struct StampData {
 /// Uses stack-allocated ArrayVec to avoid heap allocations. Widened to f64 here rather than at
 /// each fit: both callers fit in f64 and used to re-encode all three arrays, which cost a second
 /// set of stack buffers and three conversion passes per candidate.
-fn extract_stamp(pixels: &Buffer2<f32>, pos: Vec2, stamp_radius: usize) -> Option<StampData> {
+fn extract_stamp(pixels: &Buffer2<f32>, pos: DVec2, stamp_radius: usize) -> Option<StampData> {
     let width = pixels.width();
     let height = pixels.height();
 
@@ -181,9 +186,9 @@ fn extract_stamp(pixels: &Buffer2<f32>, pos: Vec2, stamp_radius: usize) -> Optio
     Some(StampData {
         z: data_z,
         peak: peak_value,
-        origin: Vec2::new(
-            (icx - stamp_radius as isize) as f32,
-            (icy - stamp_radius as isize) as f32,
+        origin: DVec2::new(
+            (icx - stamp_radius as isize) as f64,
+            (icy - stamp_radius as isize) as f64,
         ),
     })
 }
@@ -196,7 +201,7 @@ fn estimate_sigma_from_moments(
     data_x: &[f64],
     data_y: &[f64],
     data_z: &[f64],
-    pos: Vec2,
+    pos: DVec2,
     background: f32,
 ) -> f32 {
     let mut sum_r2 = 0.0f64;
@@ -204,8 +209,8 @@ fn estimate_sigma_from_moments(
 
     for ((&x, &y), &z) in data_x.iter().zip(data_y.iter()).zip(data_z.iter()) {
         let w = (z - background as f64).max(0.0);
-        let dx = x - pos.x as f64;
-        let dy = y - pos.y as f64;
+        let dx = x - pos.x;
+        let dy = y - pos.y;
         let r2 = dx * dx + dy * dy;
         sum_r2 += w * r2;
         sum_w += w;
@@ -288,7 +293,7 @@ struct LocalBackground {
 /// The local background/noise, or None if not enough valid pixels
 fn compute_annulus_background(
     pixels: &Buffer2<f32>,
-    pos: Vec2,
+    pos: DVec2,
     inner_radius: usize,
     outer_radius: usize,
 ) -> Option<LocalBackground> {
@@ -375,7 +380,7 @@ pub(super) fn measure_star(
     debug_assert_eq!(stamp_radius, compute_stamp_radius(expected_fwhm));
 
     // Initial position from peak
-    let mut pos = Vec2::new(region.peak.x as f32, region.peak.y as f32);
+    let mut pos = DVec2::new(region.peak.x as f64, region.peak.y as f64);
 
     // First pass: weighted moments for initial refinement.
     // When a fitting method follows, only 2 iterations are needed — the L-M
@@ -441,7 +446,7 @@ pub(super) fn measure_star(
     match config.centroid_method {
         CentroidMethod::GaussianFit => {
             let fit_config = GaussianFitConfig {
-                position_convergence_threshold: CENTROID_CONVERGENCE_THRESHOLD as f64,
+                position_convergence_threshold: CENTROID_CONVERGENCE_THRESHOLD,
                 ..GaussianFitConfig::default()
             };
             let fit = fit_gaussian_2d(pixels, pos, grid, local_bg, fit_noise, &fit_config);
@@ -466,7 +471,7 @@ pub(super) fn measure_star(
             let fit_config = MoffatFitConfig {
                 fixed_beta: beta,
                 lm: lm_optimizer::LMConfig {
-                    position_convergence_threshold: CENTROID_CONVERGENCE_THRESHOLD as f64,
+                    position_convergence_threshold: CENTROID_CONVERGENCE_THRESHOLD,
                     ..lm_optimizer::LMConfig::default()
                 },
             };
@@ -511,10 +516,10 @@ pub(super) fn measure_star(
 fn refine_centroid(
     pixels: &Buffer2<f32>,
     background: &BackgroundEstimate,
-    pos: Vec2,
+    pos: DVec2,
     stamp_radius: usize,
     expected_fwhm: f32,
-) -> Option<Vec2> {
+) -> Option<DVec2> {
     let size = Size2us::new(pixels.width(), pixels.height());
     if !is_valid_stamp_position(pos, size, stamp_radius) {
         return None;
@@ -532,8 +537,8 @@ fn refine_centroid(
     let mut sum_y = 0.0f64;
     let mut sum_w = 0.0f64;
 
-    let pos_x = pos.x as f64;
-    let pos_y = pos.y as f64;
+    let pos_x = pos.x;
+    let pos_y = pos.y;
 
     let stamp_radius_i32 = stamp_radius as i32;
     let stamp_size = 2 * stamp_radius + 1;
@@ -578,13 +583,11 @@ fn refine_centroid(
         return None;
     }
 
-    let new_x = (sum_x / sum_w) as f32;
-    let new_y = (sum_y / sum_w) as f32;
-    let new_pos = Vec2::new(new_x, new_y);
+    let new_pos = DVec2::new(sum_x / sum_w, sum_y / sum_w);
 
     // Reject if centroid moved too far (likely bad detection)
     let stamp_size = 2 * stamp_radius + 1;
-    let max_move = stamp_size as f32 / 4.0;
+    let max_move = stamp_size as f64 / 4.0;
     if (new_pos - pos).abs().max_element() > max_move {
         return None;
     }
@@ -647,7 +650,7 @@ fn windowed_covariance(
     pixels: &Buffer2<f32>,
     background: &BackgroundEstimate,
     background_override: Option<LocalBackground>,
-    pos: Vec2,
+    pos: DVec2,
     stamp_radius: usize,
     seed_sigma_sq: f64,
 ) -> Option<Cov2> {
@@ -655,8 +658,8 @@ fn windowed_covariance(
 
     let icx = pos.x.round() as isize;
     let icy = pos.y.round() as isize;
-    let pos_x = pos.x as f64;
-    let pos_y = pos.y as f64;
+    let pos_x = pos.x;
+    let pos_y = pos.y;
     let sr = stamp_radius as i32;
 
     let mut sigma_w_sq = seed_sigma_sq.clamp(MIN_SIGMA_SQ, MAX_SIGMA_SQ);
@@ -768,7 +771,7 @@ fn windowed_covariance(
 fn compute_star(
     pixels: &Buffer2<f32>,
     background: &BackgroundEstimate,
-    pos: Vec2,
+    pos: DVec2,
     peak: f32,
     stamp_radius: usize,
     background_override: Option<LocalBackground>,
@@ -833,8 +836,8 @@ fn compute_star(
             // recomputed on the rare `windowed_covariance` failure below: a second traversal there
             // measured no better than these three multiply-adds, which are a small share of an
             // already branchy loop body.
-            let fx = x as f64 - pos.x as f64;
-            let fy = y as f64 - pos.y as f64;
+            let fx = x as f64 - pos.x;
+            let fy = y as f64 - pos.y;
             sum_x2 += value * fx * fx;
             sum_y2 += value * fy * fy;
             sum_xy += value * fx * fy;
@@ -910,7 +913,7 @@ fn compute_star(
     };
 
     Some(Star {
-        pos: pos.as_dvec2(),
+        pos,
         flux: flux_f32,
         fwhm,
         eccentricity,

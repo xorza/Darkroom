@@ -8,7 +8,7 @@ fn measure_single_star(
     pixels: &Buffer2<f32>,
     bg_value: f32,
     noise: f32,
-    peak_pos: Vec2,
+    peak_pos: DVec2,
     centroid_method: CentroidMethod,
 ) -> Star {
     let width = pixels.width();
@@ -54,9 +54,9 @@ fn test_gaussian_fit_fwhm_from_fit_params() {
     // True FWHM = FWHM_TO_SIGMA * sigma = 2.35482 * 2.0 = 4.70964
     let true_fwhm = FWHM_TO_SIGMA * sigma;
 
-    let pos = Vec2::new(64.0, 64.0);
+    let pos = DVec2::new(64.0, 64.0);
     let pixels = SyntheticStar::new(
-        pos,
+        pos.as_vec2(),
         0.8,
         StarProfile::Elliptical {
             sigma_x: sigma,
@@ -90,9 +90,9 @@ fn test_gaussian_fit_eccentricity_from_fit_params() {
     // e = sqrt(1 - (min/max)^2) = sqrt(1 - (2/4)^2) = sqrt(0.75) = 0.8660
     let true_ecc = (1.0 - (sigma_x / sigma_y).powi(2)).sqrt();
 
-    let pos = Vec2::new(64.0, 64.0);
+    let pos = DVec2::new(64.0, 64.0);
     let pixels = SyntheticStar::new(
-        pos,
+        pos.as_vec2(),
         0.8,
         StarProfile::Elliptical {
             sigma_x,
@@ -126,9 +126,9 @@ fn test_gaussian_fit_fwhm_more_accurate_than_moments() {
     let sigma = 2.5f32;
     let true_fwhm = FWHM_TO_SIGMA * sigma;
 
-    let pos = Vec2::new(64.0, 64.0);
+    let pos = DVec2::new(64.0, 64.0);
     let pixels = SyntheticStar::new(
-        pos,
+        pos.as_vec2(),
         0.8,
         StarProfile::Elliptical {
             sigma_x: sigma,
@@ -180,8 +180,8 @@ fn test_moffat_fit_fwhm_from_fit_params() {
         true_fwhm
     );
 
-    let pos = Vec2::new(64.0, 64.0);
-    let pixels = SyntheticStar::new(pos, 0.8, StarProfile::Moffat { alpha, beta })
+    let pos = DVec2::new(64.0, 64.0);
+    let pixels = SyntheticStar::new(pos.as_vec2(), 0.8, StarProfile::Moffat { alpha, beta })
         .stamp(Size2us::new(128, 128), 0.1);
 
     let star = measure_single_star(&pixels, 0.1, 0.01, pos, CentroidMethod::MoffatFit { beta });
@@ -204,8 +204,8 @@ fn test_moffat_fit_fwhm_from_fit_params() {
 fn test_moffat_fit_eccentricity_stays_moment_based() {
     let alpha = 3.0f32;
     let beta = 2.5f32;
-    let pos = Vec2::new(64.0, 64.0);
-    let pixels = SyntheticStar::new(pos, 0.8, StarProfile::Moffat { alpha, beta })
+    let pos = DVec2::new(64.0, 64.0);
+    let pixels = SyntheticStar::new(pos.as_vec2(), 0.8, StarProfile::Moffat { alpha, beta })
         .stamp(Size2us::new(128, 128), 0.1);
 
     let star = measure_single_star(&pixels, 0.1, 0.01, pos, CentroidMethod::MoffatFit { beta });
@@ -228,9 +228,9 @@ fn test_moments_only_fwhm_unchanged() {
     let sigma = 2.5f32;
     let true_fwhm = FWHM_TO_SIGMA * sigma;
 
-    let pos = Vec2::new(64.0, 64.0);
+    let pos = DVec2::new(64.0, 64.0);
     let pixels = SyntheticStar::new(
-        pos,
+        pos.as_vec2(),
         0.8,
         StarProfile::Elliptical {
             sigma_x: sigma,
@@ -264,8 +264,8 @@ fn test_moffat_fit_fwhm_more_accurate_than_moments() {
     let beta = 2.5f32;
     let true_fwhm = alpha_beta_to_fwhm(alpha, beta);
 
-    let pos = Vec2::new(64.0, 64.0);
-    let pixels = SyntheticStar::new(pos, 0.8, StarProfile::Moffat { alpha, beta })
+    let pos = DVec2::new(64.0, 64.0);
+    let pixels = SyntheticStar::new(pos.as_vec2(), 0.8, StarProfile::Moffat { alpha, beta })
         .stamp(Size2us::new(128, 128), 0.1);
 
     let fit_star = measure_single_star(&pixels, 0.1, 0.01, pos, CentroidMethod::MoffatFit { beta });
@@ -292,9 +292,10 @@ fn windowed_covariance_recovers_gaussian_sigma() {
     // A clean round Gaussian of σ=2.5: the window deconvolution must recover σ²
     // on both axes (unbiased FWHM) with a ~zero cross term (round → ecc ≈ 0).
     let size = Size2us::new(64, 64);
-    let pos = Vec2::new(32.0, 32.0);
+    let pos = DVec2::new(32.0, 32.0);
     let sigma = 2.5f32;
-    let pixels = SyntheticStar::new(pos, 1.0, StarProfile::Gaussian { sigma }).stamp(size, 0.0);
+    let pixels =
+        SyntheticStar::new(pos.as_vec2(), 1.0, StarProfile::Gaussian { sigma }).stamp(size, 0.0);
     let bg = background_map::uniform(size, 0.0, 1.0);
 
     let cov = windowed_covariance(&pixels, &bg, None, pos, 12, (sigma * sigma) as f64)
@@ -324,10 +325,10 @@ fn windowed_covariance_recovers_elliptical_axes() {
     // deconvolution recovers both axis variances exactly — the measurement must
     // not circularize the source (otherwise eccentricity would be lost).
     let size = Size2us::new(64, 64);
-    let pos = Vec2::new(32.0, 32.0);
+    let pos = DVec2::new(32.0, 32.0);
     let (sx, sy) = (3.0f32, 2.0f32);
     let pixels = SyntheticStar::new(
-        pos,
+        pos.as_vec2(),
         1.0,
         StarProfile::Elliptical {
             sigma_x: sx,
@@ -369,9 +370,10 @@ fn windowed_covariance_resists_wing_noise() {
     // noise, which inflates eccentricity for round stars. The window must suppress
     // it — a round noisy star stays ~circular.
     let size = Size2us::new(64, 64);
-    let pos = Vec2::new(32.0, 32.0);
+    let pos = DVec2::new(32.0, 32.0);
     let sigma = 2.5f32;
-    let mut pixels = SyntheticStar::new(pos, 1.0, StarProfile::Gaussian { sigma }).stamp(size, 0.1);
+    let mut pixels =
+        SyntheticStar::new(pos.as_vec2(), 1.0, StarProfile::Gaussian { sigma }).stamp(size, 0.1);
     add_noise(pixels.pixels_mut(), 0.03, 12345);
     let bg = background_map::uniform(size, 0.1, 1.0);
 

@@ -8,8 +8,8 @@ fn test_estimate_sigma_from_moments_gaussian() {
 
     let width = 21;
     let height = 21;
-    let cx = 10.0f32;
-    let cy = 10.0f32;
+    let cx = 10.0f64;
+    let cy = 10.0f64;
     let true_sigma = 2.5f32;
     let background = 0.1f32;
 
@@ -20,8 +20,8 @@ fn test_estimate_sigma_from_moments_gaussian() {
 
     for y in 0..height {
         for x in 0..width {
-            let dx = x as f32 - cx;
-            let dy = y as f32 - cy;
+            let dx = x as f32 - cx as f32;
+            let dy = y as f32 - cy as f32;
             let value =
                 background + 1.0 * (-0.5 * (dx * dx + dy * dy) / (true_sigma * true_sigma)).exp();
             data_x.push(x as f64);
@@ -31,7 +31,7 @@ fn test_estimate_sigma_from_moments_gaussian() {
     }
 
     let estimated_sigma =
-        estimate_sigma_from_moments(&data_x, &data_y, &data_z, Vec2::new(cx, cy), background);
+        estimate_sigma_from_moments(&data_x, &data_y, &data_z, DVec2::new(cx, cy), background);
 
     // Should be within 20% of true sigma
     let error = (estimated_sigma - true_sigma).abs() / true_sigma;
@@ -50,8 +50,8 @@ fn test_estimate_sigma_from_moments_various_sigmas() {
 
     let width = 21;
     let height = 21;
-    let cx = 10.0f32;
-    let cy = 10.0f32;
+    let cx = 10.0f64;
+    let cy = 10.0f64;
     let background = 0.1f32;
 
     for true_sigma in [1.5f32, 2.0, 2.5, 3.0, 4.0] {
@@ -61,8 +61,8 @@ fn test_estimate_sigma_from_moments_various_sigmas() {
 
         for y in 0..height {
             for x in 0..width {
-                let dx = x as f32 - cx;
-                let dy = y as f32 - cy;
+                let dx = x as f32 - cx as f32;
+                let dy = y as f32 - cy as f32;
                 let value = background
                     + 1.0 * (-0.5 * (dx * dx + dy * dy) / (true_sigma * true_sigma)).exp();
                 data_x.push(x as f64);
@@ -72,7 +72,7 @@ fn test_estimate_sigma_from_moments_various_sigmas() {
         }
 
         let estimated_sigma =
-            estimate_sigma_from_moments(&data_x, &data_y, &data_z, Vec2::new(cx, cy), background);
+            estimate_sigma_from_moments(&data_x, &data_y, &data_z, DVec2::new(cx, cy), background);
 
         let error = (estimated_sigma - true_sigma).abs() / true_sigma;
         assert!(
@@ -89,11 +89,11 @@ fn test_estimate_sigma_from_moments_various_sigmas() {
 fn test_refine_centroid_adaptive_sigma_small_fwhm() {
     let width = 64;
     let height = 64;
-    let true_pos = Vec2::new(32.3, 32.7);
+    let true_pos = DVec2::new(32.3, 32.7);
     let sigma = 1.5f32; // Small sigma
     let expected_fwhm = FWHM_TO_SIGMA * sigma;
 
-    let pixels = SyntheticStar::new(true_pos, 0.8, StarProfile::Gaussian { sigma })
+    let pixels = SyntheticStar::new(true_pos.as_vec2(), 0.8, StarProfile::Gaussian { sigma })
         .stamp(Size2us::new(width, height), 0.1);
     let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
 
@@ -101,7 +101,7 @@ fn test_refine_centroid_adaptive_sigma_small_fwhm() {
     let result = refine_centroid(
         &pixels,
         &bg,
-        Vec2::splat(32.0),
+        DVec2::splat(32.0),
         TEST_STAMP_RADIUS,
         expected_fwhm,
     );
@@ -122,11 +122,11 @@ fn test_refine_centroid_adaptive_sigma_small_fwhm() {
 fn test_refine_centroid_adaptive_sigma_large_fwhm() {
     let width = 64;
     let height = 64;
-    let true_pos = Vec2::new(32.3, 32.7);
+    let true_pos = DVec2::new(32.3, 32.7);
     let sigma = 4.0f32; // Large sigma
     let expected_fwhm = FWHM_TO_SIGMA * sigma;
 
-    let pixels = SyntheticStar::new(true_pos, 0.8, StarProfile::Gaussian { sigma })
+    let pixels = SyntheticStar::new(true_pos.as_vec2(), 0.8, StarProfile::Gaussian { sigma })
         .stamp(Size2us::new(width, height), 0.1);
     let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
 
@@ -134,7 +134,7 @@ fn test_refine_centroid_adaptive_sigma_large_fwhm() {
     let result = refine_centroid(
         &pixels,
         &bg,
-        Vec2::splat(32.0),
+        DVec2::splat(32.0),
         TEST_STAMP_RADIUS,
         expected_fwhm,
     );
@@ -159,7 +159,7 @@ fn test_extract_stamp_valid_center() {
     let height = 64;
     let pixels = Buffer2::new_filled(width, height, 0.5f32);
 
-    let result = extract_stamp(&pixels, Vec2::splat(32.0), 5);
+    let result = extract_stamp(&pixels, DVec2::splat(32.0), 5);
     assert!(result.is_some(), "Should extract stamp at center");
 
     let stamp = result.unwrap();
@@ -167,7 +167,7 @@ fn test_extract_stamp_valid_center() {
     assert_eq!(stamp.z.len(), expected_size);
     // Coordinates live in the shared `StampGrid`; what the stamp itself pins is where its
     // top-left pixel sits, which is what the grid's `0..2r` is relative to.
-    assert_eq!(stamp.origin, Vec2::new(27.0, 27.0));
+    assert_eq!(stamp.origin, DVec2::new(27.0, 27.0));
     assert!(
         (stamp.peak - 0.5).abs() < f32::EPSILON,
         "Peak should be 0.5"
@@ -183,10 +183,10 @@ fn test_extract_stamp_edge_invalid() {
     let pixels = Buffer2::new_filled(width, height, 0.5f32);
 
     // Too close to edges
-    assert!(extract_stamp(&pixels, Vec2::new(3.0, 32.0), 5).is_none());
-    assert!(extract_stamp(&pixels, Vec2::new(32.0, 3.0), 5).is_none());
-    assert!(extract_stamp(&pixels, Vec2::new(61.0, 32.0), 5).is_none());
-    assert!(extract_stamp(&pixels, Vec2::new(32.0, 61.0), 5).is_none());
+    assert!(extract_stamp(&pixels, DVec2::new(3.0, 32.0), 5).is_none());
+    assert!(extract_stamp(&pixels, DVec2::new(32.0, 3.0), 5).is_none());
+    assert!(extract_stamp(&pixels, DVec2::new(61.0, 32.0), 5).is_none());
+    assert!(extract_stamp(&pixels, DVec2::new(32.0, 61.0), 5).is_none());
 }
 
 #[test]
@@ -200,7 +200,7 @@ fn test_extract_stamp_peak_value() {
     pixels[32 * width + 32] = 0.9;
     let pixels = Buffer2::new(width, height, pixels);
 
-    let result = extract_stamp(&pixels, Vec2::splat(32.0), 5);
+    let result = extract_stamp(&pixels, DVec2::splat(32.0), 5);
     assert!(result.is_some());
 
     let stamp = result.unwrap();
@@ -218,14 +218,14 @@ fn test_extract_stamp_coordinates() {
     let height = 64;
     let pixels = Buffer2::new_filled(width, height, 0.5f32);
 
-    let result = extract_stamp(&pixels, Vec2::splat(32.0), 2);
+    let result = extract_stamp(&pixels, DVec2::splat(32.0), 2);
     assert!(result.is_some());
 
     let stamp = result.unwrap();
     // For radius=2, stamp is 5x5 centred at (32,32), so it spans image x,y 30..=34 — expressed
     // now as an origin at (30,30) plus the grid's own 0..4.
     assert_eq!(stamp.z.len(), 25);
-    assert_eq!(stamp.origin, Vec2::new(30.0, 30.0));
+    assert_eq!(stamp.origin, DVec2::new(30.0, 30.0));
 }
 
 #[test]
@@ -237,12 +237,12 @@ fn test_extract_stamp_fractional_position() {
     let pixels = Buffer2::new_filled(width, height, 0.5f32);
 
     // Fractional position 32.3, 32.7 rounds to 32, 33
-    let result = extract_stamp(&pixels, Vec2::new(32.3, 32.7), 2);
+    let result = extract_stamp(&pixels, DVec2::new(32.3, 32.7), 2);
     assert!(result.is_some());
 
     let stamp = result.unwrap();
     // Centre rounds to (32, 33), so the stamp's top-left pixel is (30, 31).
-    assert_eq!(stamp.origin, Vec2::new(30.0, 31.0));
+    assert_eq!(stamp.origin, DVec2::new(30.0, 31.0));
 }
 
 #[test]
@@ -381,8 +381,8 @@ fn test_local_annulus_near_edge_fallback() {
     let height = 64;
 
     // Create star near edge where annulus might be partially outside
-    let pos = Vec2::new(20.0, 32.0);
-    let pixels = SyntheticStar::new(pos, 0.8, StarProfile::Gaussian { sigma: 2.0 })
+    let pos = DVec2::new(20.0, 32.0);
+    let pixels = SyntheticStar::new(pos.as_vec2(), 0.8, StarProfile::Gaussian { sigma: 2.0 })
         .stamp(Size2us::new(width, height), 0.1);
     let bg = estimate_background(
         &pixels,

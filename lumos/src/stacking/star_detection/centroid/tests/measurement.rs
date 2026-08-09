@@ -6,8 +6,8 @@ use crate::stacking::star_detection::centroid::{StampGrid, compute_stamp_radius}
 fn test_refine_centroid_centered_star() {
     let width = 64;
     let height = 64;
-    let pos = Vec2::splat(32.0);
-    let pixels = SyntheticStar::new(pos, 0.8, StarProfile::Gaussian { sigma: 2.5 })
+    let pos = DVec2::splat(32.0);
+    let pixels = SyntheticStar::new(pos.as_vec2(), 0.8, StarProfile::Gaussian { sigma: 2.5 })
         .stamp(Size2us::new(width, height), 0.1);
     let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
 
@@ -24,13 +24,17 @@ fn test_refine_centroid_centered_star() {
 fn test_refine_centroid_offset_converges() {
     let width = 64;
     let height = 64;
-    let true_pos = Vec2::new(32.3, 32.7);
-    let pixels = SyntheticStar::new(true_pos, 0.8, StarProfile::Gaussian { sigma: 2.5 })
-        .stamp(Size2us::new(width, height), 0.1);
+    let true_pos = DVec2::new(32.3, 32.7);
+    let pixels = SyntheticStar::new(
+        true_pos.as_vec2(),
+        0.8,
+        StarProfile::Gaussian { sigma: 2.5 },
+    )
+    .stamp(Size2us::new(width, height), 0.1);
     let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
 
     // Start with integer guess (peak pixel position)
-    let start_pos = Vec2::new(32.0, 33.0);
+    let start_pos = DVec2::new(32.0, 33.0);
 
     let result = refine_centroid(
         &pixels,
@@ -65,7 +69,7 @@ fn test_refine_centroid_invalid_position_returns_none() {
     let result = refine_centroid(
         &pixels,
         &bg,
-        Vec2::new(3.0, 32.0),
+        DVec2::new(3.0, 32.0),
         TEST_STAMP_RADIUS,
         TEST_EXPECTED_FWHM,
     );
@@ -83,7 +87,7 @@ fn test_refine_centroid_zero_flux_returns_none() {
     let result = refine_centroid(
         &pixels,
         &bg,
-        Vec2::splat(32.0),
+        DVec2::splat(32.0),
         TEST_STAMP_RADIUS,
         TEST_EXPECTED_FWHM,
     );
@@ -104,7 +108,7 @@ fn test_refine_centroid_rejects_large_movement() {
     let result = refine_centroid(
         &pixels,
         &bg,
-        Vec2::splat(32.0),
+        DVec2::splat(32.0),
         TEST_STAMP_RADIUS,
         TEST_EXPECTED_FWHM,
     );
@@ -118,13 +122,17 @@ fn test_refine_centroid_rejects_large_movement() {
 fn test_refine_centroid_iterative_convergence() {
     let width = 64;
     let height = 64;
-    let true_pos = Vec2::new(32.25, 32.75);
-    let pixels = SyntheticStar::new(true_pos, 0.8, StarProfile::Gaussian { sigma: 2.5 })
-        .stamp(Size2us::new(width, height), 0.1);
+    let true_pos = DVec2::new(32.25, 32.75);
+    let pixels = SyntheticStar::new(
+        true_pos.as_vec2(),
+        0.8,
+        StarProfile::Gaussian { sigma: 2.5 },
+    )
+    .stamp(Size2us::new(width, height), 0.1);
     let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
 
     // Simulate multiple iterations like measure_star does
-    let mut pos = Vec2::splat(32.0);
+    let mut pos = DVec2::splat(32.0);
 
     for iteration in 0..MAX_MOMENTS_ITERATIONS {
         let result = refine_centroid(&pixels, &bg, pos, TEST_STAMP_RADIUS, TEST_EXPECTED_FWHM);
@@ -156,7 +164,7 @@ fn test_compute_star_valid_star() {
     let star = compute_star(
         &pixels,
         &bg,
-        Vec2::splat(32.0),
+        DVec2::splat(32.0),
         peak,
         TEST_STAMP_RADIUS,
         None,
@@ -188,8 +196,8 @@ fn test_compute_star_background_override_replaces_global_map() {
     // therefore the FWHM relative to the correctly-subtracted global-map run.
     let width = 64;
     let height = 64;
-    let pos = Vec2::splat(32.0);
-    let pixels = SyntheticStar::new(pos, 0.8, StarProfile::Gaussian { sigma: 2.5 })
+    let pos = DVec2::splat(32.0);
+    let pixels = SyntheticStar::new(pos.as_vec2(), 0.8, StarProfile::Gaussian { sigma: 2.5 })
         .stamp(Size2us::new(width, height), 0.1);
     let bg = make_uniform_background(Size2us::new(width, height), 0.1, 0.01);
     let local_bg = LocalBackground {
@@ -244,7 +252,7 @@ fn test_compute_star_invalid_position_returns_none() {
     let metrics = compute_star(
         &pixels,
         &bg,
-        Vec2::new(3.0, 32.0),
+        DVec2::new(3.0, 32.0),
         0.0,
         TEST_STAMP_RADIUS,
         None,
@@ -264,7 +272,7 @@ fn test_compute_star_zero_flux_returns_none() {
     let metrics = compute_star(
         &pixels,
         &bg,
-        Vec2::splat(32.0),
+        DVec2::splat(32.0),
         0.0,
         TEST_STAMP_RADIUS,
         None,
@@ -299,7 +307,7 @@ fn test_compute_star_fwhm_scales_with_sigma() {
     let metrics_small = compute_star(
         &pixels_small,
         &bg,
-        Vec2::splat(64.0),
+        DVec2::splat(64.0),
         0.0,
         TEST_STAMP_RADIUS,
         None,
@@ -309,7 +317,7 @@ fn test_compute_star_fwhm_scales_with_sigma() {
     let metrics_large = compute_star(
         &pixels_large,
         &bg,
-        Vec2::splat(64.0),
+        DVec2::splat(64.0),
         0.0,
         TEST_STAMP_RADIUS,
         None,
@@ -342,7 +350,7 @@ fn test_compute_star_snr_scales_with_amplitude() {
     let metrics_dim = compute_star(
         &pixels_dim,
         &bg,
-        Vec2::splat(32.0),
+        DVec2::splat(32.0),
         0.0,
         TEST_STAMP_RADIUS,
         None,
@@ -352,7 +360,7 @@ fn test_compute_star_snr_scales_with_amplitude() {
     let metrics_bright = compute_star(
         &pixels_bright,
         &bg,
-        Vec2::splat(32.0),
+        DVec2::splat(32.0),
         0.0,
         TEST_STAMP_RADIUS,
         None,
@@ -389,7 +397,7 @@ fn test_elongated_star_high_eccentricity() {
     let metrics = compute_star(
         &pixels,
         &bg,
-        Vec2::splat(32.0),
+        DVec2::splat(32.0),
         0.0,
         TEST_STAMP_RADIUS,
         None,
@@ -427,7 +435,7 @@ fn test_circular_vs_elongated_eccentricity() {
     let metrics_circular = compute_star(
         &circular,
         &bg,
-        Vec2::splat(32.0),
+        DVec2::splat(32.0),
         0.0,
         TEST_STAMP_RADIUS,
         None,
@@ -437,7 +445,7 @@ fn test_circular_vs_elongated_eccentricity() {
     let metrics_elongated = compute_star(
         &elongated,
         &bg,
-        Vec2::splat(32.0),
+        DVec2::splat(32.0),
         0.0,
         TEST_STAMP_RADIUS,
         None,
@@ -457,11 +465,15 @@ fn test_circular_vs_elongated_eccentricity() {
 fn test_centroid_with_noisy_background() {
     let width = 64;
     let height = 64;
-    let true_pos = Vec2::splat(32.0);
+    let true_pos = DVec2::splat(32.0);
 
     // Create star with added noise
-    let mut pixels = SyntheticStar::new(true_pos, 0.8, StarProfile::Gaussian { sigma: 2.5 })
-        .stamp(Size2us::new(width, height), 0.1);
+    let mut pixels = SyntheticStar::new(
+        true_pos.as_vec2(),
+        0.8,
+        StarProfile::Gaussian { sigma: 2.5 },
+    )
+    .stamp(Size2us::new(width, height), 0.1);
 
     // Add random-ish noise pattern (deterministic for reproducibility)
     for (i, pixel) in pixels.iter_mut().enumerate() {
@@ -505,7 +517,7 @@ fn test_snr_decreases_with_higher_noise() {
     let metrics_low = compute_star(
         &pixels,
         &bg_low_noise,
-        Vec2::splat(32.0),
+        DVec2::splat(32.0),
         0.0,
         TEST_STAMP_RADIUS,
         None,
@@ -515,7 +527,7 @@ fn test_snr_decreases_with_higher_noise() {
     let metrics_high = compute_star(
         &pixels,
         &bg_high_noise,
-        Vec2::splat(32.0),
+        DVec2::splat(32.0),
         0.0,
         TEST_STAMP_RADIUS,
         None,
@@ -546,7 +558,7 @@ fn test_fwhm_formula_for_known_gaussian() {
     let metrics = compute_star(
         &pixels,
         &bg,
-        Vec2::splat(64.0),
+        DVec2::splat(64.0),
         0.0,
         TEST_STAMP_RADIUS,
         None,
@@ -581,7 +593,7 @@ fn test_flux_proportional_to_amplitude() {
     let metrics1 = compute_star(
         &pixels_amp1,
         &bg,
-        Vec2::splat(32.0),
+        DVec2::splat(32.0),
         0.0,
         TEST_STAMP_RADIUS,
         None,
@@ -591,7 +603,7 @@ fn test_flux_proportional_to_amplitude() {
     let metrics2 = compute_star(
         &pixels_amp2,
         &bg,
-        Vec2::splat(32.0),
+        DVec2::splat(32.0),
         0.0,
         TEST_STAMP_RADIUS,
         None,
@@ -650,7 +662,7 @@ fn test_eccentricity_bounds() {
         let metrics = compute_star(
             &pixels,
             &bg,
-            Vec2::splat(32.0),
+            DVec2::splat(32.0),
             0.0,
             TEST_STAMP_RADIUS,
             None,
@@ -697,7 +709,7 @@ fn test_eccentricity_orientation_invariant() {
     let metrics_x = compute_star(
         &elongated_x,
         &bg,
-        Vec2::splat(32.0),
+        DVec2::splat(32.0),
         0.0,
         TEST_STAMP_RADIUS,
         None,
@@ -707,7 +719,7 @@ fn test_eccentricity_orientation_invariant() {
     let metrics_y = compute_star(
         &elongated_y,
         &bg,
-        Vec2::splat(32.0),
+        DVec2::splat(32.0),
         0.0,
         TEST_STAMP_RADIUS,
         None,
@@ -744,7 +756,7 @@ fn test_snr_formula_consistency() {
     let metrics1 = compute_star(
         &pixels,
         &bg1,
-        Vec2::splat(32.0),
+        DVec2::splat(32.0),
         0.0,
         TEST_STAMP_RADIUS,
         None,
@@ -754,7 +766,7 @@ fn test_snr_formula_consistency() {
     let metrics2 = compute_star(
         &pixels,
         &bg2,
-        Vec2::splat(32.0),
+        DVec2::splat(32.0),
         0.0,
         TEST_STAMP_RADIUS,
         None,
@@ -797,7 +809,7 @@ fn test_metrics_with_high_background() {
     let metrics = compute_star(
         &pixels,
         &bg,
-        Vec2::splat(32.0),
+        DVec2::splat(32.0),
         0.0,
         TEST_STAMP_RADIUS,
         None,
@@ -829,7 +841,7 @@ fn test_fwhm_independent_of_amplitude() {
     let metrics_dim = compute_star(
         &pixels_dim,
         &bg,
-        Vec2::splat(32.0),
+        DVec2::splat(32.0),
         0.0,
         TEST_STAMP_RADIUS,
         None,
@@ -839,7 +851,7 @@ fn test_fwhm_independent_of_amplitude() {
     let metrics_bright = compute_star(
         &pixels_bright,
         &bg,
-        Vec2::splat(32.0),
+        DVec2::splat(32.0),
         0.0,
         TEST_STAMP_RADIUS,
         None,
@@ -899,7 +911,7 @@ fn test_eccentricity_increases_with_elongation() {
     let ecc_1 = compute_star(
         &ratio_1_1,
         &bg,
-        Vec2::splat(32.0),
+        DVec2::splat(32.0),
         0.0,
         TEST_STAMP_RADIUS,
         None,
@@ -910,7 +922,7 @@ fn test_eccentricity_increases_with_elongation() {
     let ecc_2 = compute_star(
         &ratio_2_1,
         &bg,
-        Vec2::splat(32.0),
+        DVec2::splat(32.0),
         0.0,
         TEST_STAMP_RADIUS,
         None,
@@ -921,7 +933,7 @@ fn test_eccentricity_increases_with_elongation() {
     let ecc_3 = compute_star(
         &ratio_3_1,
         &bg,
-        Vec2::splat(32.0),
+        DVec2::splat(32.0),
         0.0,
         TEST_STAMP_RADIUS,
         None,
