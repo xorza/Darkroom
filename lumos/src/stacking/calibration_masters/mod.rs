@@ -19,7 +19,7 @@ use common::CancelToken;
 use crate::io::image::cfa::{CfaFrameInfo, CfaImage, CfaType};
 use crate::io::image::error::ImageError;
 use crate::io::image::load_context::LoadContext;
-use crate::memory::fits_in_memory;
+use crate::memory;
 use crate::stacking::combine::cache::FrameCache;
 use crate::stacking::combine::config::StackConfig;
 use crate::stacking::combine::error::Error;
@@ -181,7 +181,7 @@ fn frames_fit_in_memory<P: AsRef<Path> + Sync>(
         return Ok(true);
     };
     match CfaFrameInfo::from_file(first.as_ref(), context) {
-        Ok(info) => Ok(fits_in_memory(
+        Ok(info) => Ok(memory::fits_in_memory(
             info.dimensions.pixel_count() * std::mem::size_of::<f32>(),
             total_frames,
             available,
@@ -372,7 +372,10 @@ impl CalibrationMasters {
             frames.flat_dark.len(),
         ];
         let total_frames: usize = counts.iter().sum();
-        let available = StackConfig::dark().cache.get_available_memory();
+        // Straight from the source rather than through a throwaway `StackConfig::dark()`: no
+        // override is set on a fresh config, so that path was this call with a minted cache
+        // directory and a bumped counter on the way.
+        let available = memory::available_memory();
         let context = LoadContext {
             cancel: cancel.clone(),
             ..LoadContext::default()

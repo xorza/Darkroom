@@ -14,9 +14,21 @@ use crate::math::size2us::Size2us;
 const MEMORY_PERCENT: u64 = 75;
 
 pub(crate) fn available_memory() -> u64 {
+    use std::sync::{LazyLock, Mutex};
     use sysinfo::System;
 
-    let mut system = System::new();
+    // Reused rather than built per call. Constructing a `System` costs ~20 µs against ~5 µs to
+    // refresh one that already exists, and asking for memory alone
+    // (`new_with_specifics(RefreshKind::nothing().with_memory(..))`) measured no cheaper — the cost
+    // is the construction itself, so reuse is the only thing that helps. Every planning decision
+    // in the pipeline goes through here.
+    static SYSTEM: LazyLock<Mutex<System>> = LazyLock::new(|| Mutex::new(System::new()));
+
+    // Recover rather than propagate: a poisoned lock means some earlier caller panicked, but the
+    // `System` behind it is a cache of OS counters with no invariant to corrupt.
+    let mut system = SYSTEM
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     system.refresh_memory();
     let available = system.available_memory();
 
@@ -220,6 +232,27 @@ mod tests {
 
     const GB: u64 = 1024 * 1024 * 1024;
     const FRAME_96MB: usize = 6240 * 4160 * size_of::<f32>();
+
+    /// The `System` behind this is a process-wide singleton reused across calls, so the second
+    /// call must be as good as the first — a stale or half-refreshed instance would show up as a
+    /// zero or as a value that stops tracking.
+    #[test]
+    fn available_memory_reports_a_plausible_figure_on_every_call() {
+        let first = available_memory();
+        let second = available_memory();
+
+        assert!(first > 0, "no available memory reported");
+        assert!(second > 0, "second call reported none");
+        // Both are sampled within microseconds of each other on an otherwise-idle test process, so
+        // they cannot differ by more than a small fraction without the refresh being broken.
+        let (low, high) = (first.min(second), first.max(second));
+        assert!(
+            high - low < high / 4,
+            "consecutive samples disagree wildly: {first} then {second}"
+        );
+        // A budget derived from it stays inside the machine, which a garbage reading would not.
+        assert!(memory_budget(first) < first);
+    }
 
     #[test]
     fn memory_budget_keeps_one_quarter_as_headroom_without_overflow() {
