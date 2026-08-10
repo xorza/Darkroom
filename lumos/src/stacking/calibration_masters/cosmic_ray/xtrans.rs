@@ -30,7 +30,7 @@ const XTRANS_LARGE: usize = 24;
 const XTRANS_REPLACE: usize = 12;
 
 /// The CFA detector's per-pixel inputs and the scratch that builds them, allocated on the first
-/// iteration and reused by every one after it — [`MonoScratch`](super::mono::MonoScratch)'s rule on the X-Trans path.
+/// iteration and reused by every one after it — [`MonoDetector`](super::mono::MonoDetector)'s rule on the X-Trans path.
 #[derive(Debug, Default)]
 struct XtransScratch {
     /// `max(0, v − median(nearest same-color))` — sharpness vs the same-color surroundings — then

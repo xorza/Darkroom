@@ -28,7 +28,7 @@ use crate::stacking::calibration_masters::cosmic_ray::masks::CrMasks;
 /// stage to the next. On a 6144² mono frame that is 720 MB of working set instead of 1.1 GB —
 /// and, the point of the struct, no allocation at all after the first iteration.
 #[derive(Debug, Default)]
-pub(super) struct MonoScratch {
+struct MonoScratch {
     /// `L⁺`, then the significance `S = L⁺/(2N)`, then `S' = S − median₅(S)`, each in place.
     significance: Vec<f32>,
     /// `median₃(I)`, then the object fine structure `F = median₃ − median₇(median₃)` in place.
@@ -46,60 +46,79 @@ pub(super) struct MonoScratch {
 /// Monochrome L.A.Cosmic on one plane (also each deinterleaved Bayer plane). Subsample ×2 → clipped
 /// Laplacian → resample → significance `S = L⁺/(2N)` → `S' = S − median₅(S)` → fine structure `F`
 /// → flag → grow → in-paint → iterate. Returns the CR pixel count.
-pub(super) fn reject_mono_buffer(
-    data: &mut [f32],
-    size: Size2us,
-    config: &CosmicRayConfig,
-    scratch: &mut MonoScratch,
-) -> usize {
-    debug_assert_eq!(data.len(), size.pixel_count());
-    if size.width < 3 || size.height < 3 {
-        return 0;
-    }
-    let mut masks = CrMasks::new(size);
+/// The mono cosmic-ray detector: its configuration, and the working set it reuses.
+///
+/// Owning both is what lets one detector clean every Bayer phase plane with a single allocation —
+/// `(0, 0)` is the largest phase and runs first, so no later one grows the buffers — without the
+/// caller having to thread a scratch through by hand and know that rule.
+#[derive(Debug)]
+pub(super) struct MonoDetector<'a> {
+    config: &'a CosmicRayConfig,
+    scratch: MonoScratch,
+}
 
-    for _ in 0..config.niter {
-        let MonoScratch {
-            significance,
-            fine,
-            noise,
-            median,
-            frame,
-        } = &mut *scratch;
-        let pix = &*data;
-
-        // L⁺: clipped Laplacian of the ×2-subsampled frame, averaged back to native resolution.
-        laplacian_plus_into(pix, size, significance);
-
-        // Object fine structure F = median₃(I) − median₇(median₃(I)); large for real sources, ~0 at
-        // a CR (median₃ already erased the spike). The difference is elementwise, so it lands back
-        // over median₃ in `fine` rather than in a buffer of its own.
-        median_window_into(pix, size, 1, fine);
-        median_window_into(fine, size, 3, median);
-        for (a, &b) in fine.iter_mut().zip(&*median) {
-            *a = (*a - b).max(FINE_STRUCTURE_FLOOR);
+impl<'a> MonoDetector<'a> {
+    pub(super) fn new(config: &'a CosmicRayConfig) -> Self {
+        Self {
+            config,
+            scratch: MonoScratch::default(),
         }
-
-        // Significance S = L⁺/(2N), then S' = S − median₅(S) to strip smooth large-scale structure.
-        // Both steps are elementwise over the same extent, so they run in place down the Laplacian
-        // buffer instead of allocating a frame each.
-        median_window_into(pix, size, 2, median);
-        noise_map_into(pix, median, &config.noise, noise, frame);
-        for (l, &nz) in significance.iter_mut().zip(&*noise) {
-            *l /= 2.0 * nz;
-        }
-        median_window_into(significance, size, 2, median);
-        for (v, &m) in significance.iter_mut().zip(&*median) {
-            *v -= m;
-        }
-
-        if masks.detect_and_grow(significance, fine, noise, config) == 0 {
-            break;
-        }
-        replace_flagged(data, size, &masks.accumulated, frame);
     }
 
-    masks.accumulated.count_ones()
+    /// Detect and in-paint cosmic rays in one dense plane, in place, returning the CR pixel count.
+    ///
+    /// Subsample ×2 → clipped Laplacian → resample → significance `S = L⁺/(2N)` →
+    /// `S' = S − median₅(S)` → fine structure `F` → flag → grow → in-paint → iterate.
+    pub(super) fn reject(&mut self, data: &mut [f32], size: Size2us) -> usize {
+        debug_assert_eq!(data.len(), size.pixel_count());
+        if size.width < 3 || size.height < 3 {
+            return 0;
+        }
+        let mut masks = CrMasks::new(size);
+
+        for _ in 0..self.config.niter {
+            let MonoScratch {
+                significance,
+                fine,
+                noise,
+                median,
+                frame,
+            } = &mut self.scratch;
+            let pix = &*data;
+
+            // L⁺: clipped Laplacian of the ×2-subsampled frame, averaged back to native resolution.
+            laplacian_plus_into(pix, size, significance);
+
+            // Object fine structure F = median₃(I) − median₇(median₃(I)); large for real sources, ~0 at
+            // a CR (median₃ already erased the spike). The difference is elementwise, so it lands back
+            // over median₃ in `fine` rather than in a buffer of its own.
+            median_window_into(pix, size, 1, fine);
+            median_window_into(fine, size, 3, median);
+            for (a, &b) in fine.iter_mut().zip(&*median) {
+                *a = (*a - b).max(FINE_STRUCTURE_FLOOR);
+            }
+
+            // Significance S = L⁺/(2N), then S' = S − median₅(S) to strip smooth large-scale structure.
+            // Both steps are elementwise over the same extent, so they run in place down the Laplacian
+            // buffer instead of allocating a frame each.
+            median_window_into(pix, size, 2, median);
+            noise_map_into(pix, median, &self.config.noise, noise, frame);
+            for (l, &nz) in significance.iter_mut().zip(&*noise) {
+                *l /= 2.0 * nz;
+            }
+            median_window_into(significance, size, 2, median);
+            for (v, &m) in significance.iter_mut().zip(&*median) {
+                *v -= m;
+            }
+
+            if masks.detect_and_grow(significance, fine, noise, self.config) == 0 {
+                break;
+            }
+            replace_flagged(data, size, &masks.accumulated, frame);
+        }
+
+        masks.accumulated.count_ones()
+    }
 }
 
 /// Clipped Laplacian of the ×2-subsampled frame, block-averaged back down to `size`.
@@ -288,7 +307,7 @@ pub(super) fn replace_flagged(
 pub(crate) mod internals {
     use crate::math::size2us::Size2us;
     use crate::stacking::calibration_masters::cosmic_ray::config::CosmicRayConfig;
-    use crate::stacking::calibration_masters::cosmic_ray::mono::{MonoScratch, reject_mono_buffer};
+    use crate::stacking::calibration_masters::cosmic_ray::mono::{MonoDetector, MonoScratch};
 
     /// Frame-sized `f32` planes the mono detector holds, however many iterations it runs.
     pub(crate) const MONO_SCRATCH_PLANES: usize = 5;
@@ -303,15 +322,15 @@ pub(crate) mod internals {
         size: Size2us,
         config: &CosmicRayConfig,
     ) -> usize {
-        let mut scratch = MonoScratch::default();
-        reject_mono_buffer(data, size, config, &mut scratch);
+        let mut detector = MonoDetector::new(config);
+        detector.reject(data, size);
         let MonoScratch {
             significance,
             fine,
             noise,
             median,
             frame,
-        } = &scratch;
+        } = &detector.scratch;
         significance.capacity()
             + fine.capacity()
             + noise.capacity()
