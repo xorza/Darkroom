@@ -49,45 +49,63 @@ struct XtransScratch {
     frame: Vec<f32>,
 }
 
-/// X-Trans (and any non-Bayer CFA): no dense same-color sub-lattice, so detect on the mosaic with
-/// same-color stencils gathered via [`CfaType::color_at`]. Median-based (robust to a CR inside the
-/// stencil) and **without** the ×2 subsample — same-color sampling is already coarse and the
-/// iteration handles multi-pixel hits. Significance is `S = L⁺/N`; no `S'` median-subtraction is
-/// needed because `L⁺` (excess over the same-color median) is already a local high-pass.
-pub(super) fn reject_xtrans(
-    data: &mut [f32],
-    size: Size2us,
-    cfa: &CfaType,
-    config: &CosmicRayConfig,
-) -> usize {
-    debug_assert_eq!(data.len(), size.pixel_count());
-    if size.width < 7 || size.height < 7 {
-        return 0;
-    }
-    let mut masks = CrMasks::new(size);
-    let mut scratch = XtransScratch::default();
+/// The X-Trans detector: the pattern it reads colours from, its configuration, and the working
+/// set it reuses across iterations.
+///
+/// Owning all three is what makes a run one object rather than three locals — the same shape the
+/// mono and Bayer detectors take, so the dispatch reads alike for every pattern.
+#[derive(Debug)]
+pub(super) struct XtransDetector<'a> {
+    cfa: &'a CfaType,
+    config: &'a CosmicRayConfig,
+    scratch: XtransScratch,
+}
 
-    for _ in 0..config.niter {
-        let scene = CfaScene {
-            pix: data,
-            size,
+impl<'a> XtransDetector<'a> {
+    pub(super) fn new(config: &'a CosmicRayConfig, cfa: &'a CfaType) -> Self {
+        Self {
             cfa,
-            mask: &masks.accumulated,
-        };
-        scratch.fill_structure(&scene);
-        scratch.fill_noise(&scene, &config.noise);
-        // S = L⁺/N, elementwise over the same extent, so it runs down the L⁺ buffer.
-        for (l, &nz) in scratch.lplus.iter_mut().zip(&scratch.noise) {
-            *l /= nz;
+            config,
+            scratch: XtransScratch::default(),
         }
-
-        if masks.detect_and_grow(&scratch.lplus, &scratch.f, &scratch.noise, config) == 0 {
-            break;
-        }
-        xtrans_replace(data, size, cfa, &masks.accumulated, &mut scratch.frame);
     }
 
-    masks.accumulated.count_ones()
+    /// Detect and in-paint cosmic rays on the mosaic, in place, returning the CR pixel count.
+    ///
+    /// Median-based, so a ray inside a stencil cannot drag its own reference, and **without** the
+    /// mono path's ×2 subsample — same-colour sampling is already coarse and the iteration handles
+    /// multi-pixel hits. Significance is `S = L⁺/N` with no `S'` median subtraction, since `L⁺`
+    /// (excess over the same-colour median) is already a local high-pass.
+    pub(super) fn reject(&mut self, data: &mut [f32], size: Size2us) -> usize {
+        debug_assert_eq!(data.len(), size.pixel_count());
+        if size.width < 7 || size.height < 7 {
+            return 0;
+        }
+        let mut masks = CrMasks::new(size);
+        let scratch = &mut self.scratch;
+
+        for _ in 0..self.config.niter {
+            let scene = CfaScene {
+                pix: data,
+                size,
+                cfa: self.cfa,
+                mask: &masks.accumulated,
+            };
+            scratch.fill_structure(&scene);
+            scratch.fill_noise(&scene, &self.config.noise);
+            // S = L⁺/N, elementwise over the same extent, so it runs down the L⁺ buffer.
+            for (l, &nz) in scratch.lplus.iter_mut().zip(&scratch.noise) {
+                *l /= nz;
+            }
+
+            if masks.detect_and_grow(&scratch.lplus, &scratch.f, &scratch.noise, self.config) == 0 {
+                break;
+            }
+            xtrans_replace(data, size, self.cfa, &masks.accumulated, &mut scratch.frame);
+        }
+
+        masks.accumulated.count_ones()
+    }
 }
 
 /// Read-only context for same-color gathering: the plane data, its size, the CFA pattern, and the
