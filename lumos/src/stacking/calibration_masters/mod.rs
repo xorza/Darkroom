@@ -15,10 +15,12 @@ mod tests;
 use std::path::Path;
 
 use common::CancelToken;
+use rayon::prelude::*;
 
 use crate::io::image::cfa::{CfaFrameInfo, CfaImage, CfaType};
 use crate::io::image::error::ImageError;
 use crate::io::image::load_context::LoadContext;
+use crate::math::size2us::Size2us;
 use crate::memory;
 use crate::stacking::combine::cache::FrameCache;
 use crate::stacking::combine::config::StackConfig;
@@ -64,6 +66,17 @@ impl<T> CalibrationSet<T> {
         }
     }
 
+    /// [`Self::get`] by unique reference, for filling a set one role at a time.
+    pub(crate) fn get_mut(&mut self, component: CalibrationComponent) -> Option<&mut T> {
+        match component {
+            CalibrationComponent::Dark => Some(&mut self.dark),
+            CalibrationComponent::Flat => Some(&mut self.flat),
+            CalibrationComponent::Bias => Some(&mut self.bias),
+            CalibrationComponent::FlatDark => Some(&mut self.flat_dark),
+            CalibrationComponent::Defects => None,
+        }
+    }
+
     /// The four roles in calibration order, each with the component that names it. The single
     /// place that decides what "all the roles" means — a caller that iterates cannot miss one,
     /// and adding a fifth is a compile error here rather than a silent omission elsewhere.
@@ -71,6 +84,77 @@ impl<T> CalibrationSet<T> {
         CalibrationComponent::MASTER_ROLES
             .into_iter()
             .filter_map(|component| self.get(component).map(|value| (component, value)))
+    }
+
+    /// The four roles by value, in [`CalibrationComponent::MASTER_ROLES`] order.
+    ///
+    /// An array rather than an iterator because the concurrent half of
+    /// [`CalibrationMasters::from_files`] hands it straight to rayon, which parallelizes `[T; N]`
+    /// but not an array iterator. [`Self::from_roles`] is its inverse; the two are the only place
+    /// the field-to-role correspondence is written, and `roles_round_trip_in_master_order` pins it.
+    pub(crate) fn into_roles(self) -> [(CalibrationComponent, T); 4] {
+        [
+            (CalibrationComponent::Dark, self.dark),
+            (CalibrationComponent::Flat, self.flat),
+            (CalibrationComponent::Bias, self.bias),
+            (CalibrationComponent::FlatDark, self.flat_dark),
+        ]
+    }
+
+    /// Rebuild a set from values in [`CalibrationComponent::MASTER_ROLES`] order.
+    pub(crate) fn from_roles(roles: [T; 4]) -> Self {
+        let [dark, flat, bias, flat_dark] = roles;
+        Self {
+            dark,
+            flat,
+            bias,
+            flat_dark,
+        }
+    }
+
+    /// Convert every role, in calibration order, stopping at the first failure.
+    pub(crate) fn try_map<U, E>(
+        self,
+        mut convert: impl FnMut(CalibrationComponent, T) -> Result<U, E>,
+    ) -> Result<CalibrationSet<U>, E> {
+        let [dark, flat, bias, flat_dark] = self.into_roles();
+        Ok(CalibrationSet {
+            dark: convert(dark.0, dark.1)?,
+            flat: convert(flat.0, flat.1)?,
+            bias: convert(bias.0, bias.1)?,
+            flat_dark: convert(flat_dark.0, flat_dark.1)?,
+        })
+    }
+}
+
+impl CalibrationSet<Option<CfaImage>> {
+    /// The sensor extent every present master shares, or `None` when the set is empty.
+    ///
+    /// The masters are combined pixel-for-pixel by flat index — dark subtracted from flat,
+    /// defects detected on one and corrected on another — so a set that spans two sensors has no
+    /// coherent interpretation. Reported as an error rather than left to the individual
+    /// operations, which each assert on only the pair they touch and cover the set unevenly: a
+    /// bias in a set with no flat is never anyone's operand.
+    fn common_dimensions(&self) -> Result<Option<Size2us>, CalibrationError> {
+        let mut expected = None;
+        for (component, master) in self
+            .iter()
+            .filter_map(|(component, master)| master.as_ref().map(|master| (component, master)))
+        {
+            let size = Size2us::new(master.data.width(), master.data.height());
+            match expected {
+                None => expected = Some(size),
+                Some(expected) if expected == size => {}
+                Some(expected) => {
+                    return Err(CalibrationError::DimensionMismatch {
+                        component,
+                        expected,
+                        master: size,
+                    });
+                }
+            }
+        }
+        Ok(expected)
     }
 }
 
@@ -93,6 +177,32 @@ impl CalibrationComponent {
     /// The four master-frame roles, in calibration order. [`Self::Defects`] is derived rather
     /// than loaded, so it is not one of them.
     pub const MASTER_ROLES: [Self; 4] = [Self::Dark, Self::Flat, Self::Bias, Self::FlatDark];
+
+    /// The component's `EXTNAME` in a saved bundle — the name a writer stamps on its HDU and a
+    /// reader recognizes it by, so the two cannot disagree about where a role lives.
+    pub(crate) fn extname(self) -> &'static str {
+        match self {
+            Self::Dark => "MASTER_DARK",
+            Self::Flat => "MASTER_FLAT",
+            Self::Bias => "MASTER_BIAS",
+            Self::FlatDark => "MASTER_FLAT_DARK",
+            Self::Defects => "DEFECT_MAP",
+        }
+    }
+
+    /// The component an `EXTNAME` names, or `None` for an extension this format does not define.
+    pub(crate) fn from_extname(extname: &str) -> Option<Self> {
+        [Self::MASTER_ROLES.as_slice(), &[Self::Defects]]
+            .concat()
+            .into_iter()
+            .find(|component| component.extname() == extname)
+    }
+
+    /// Whether this role is stored already prepared — bias/flat-dark subtracted, per-colour
+    /// normalized and clamped. Only the flat is; the others are stored as stacked.
+    pub(crate) fn prepared(self) -> bool {
+        matches!(self, Self::Flat)
+    }
 }
 
 impl std::fmt::Display for CalibrationComponent {
@@ -124,6 +234,14 @@ pub enum CalibrationError {
         component: CalibrationComponent,
         light: CfaType,
         master: CfaType,
+    },
+    /// A calibration master covers a different sensor area than the frame it has to line up with:
+    /// the rest of the bundle when the set is assembled, or the light when one is calibrated.
+    #[error("{component} master is {master}, expected {expected}")]
+    DimensionMismatch {
+        component: CalibrationComponent,
+        expected: Size2us,
+        master: Size2us,
     },
 }
 
@@ -173,8 +291,9 @@ fn frames_fit_in_memory<P: AsRef<Path> + Sync>(
     available: u64,
     context: &LoadContext,
 ) -> Result<bool, Error> {
-    let Some(first) = [frames.dark, frames.flat, frames.bias, frames.flat_dark]
-        .into_iter()
+    let Some(first) = frames
+        .iter()
+        .map(|(_, paths)| *paths)
         .find(|paths| !paths.is_empty())
         .map(|paths| &paths[0])
     else {
@@ -188,6 +307,33 @@ fn frames_fit_in_memory<P: AsRef<Path> + Sync>(
         )),
         Err(ImageError::Cancelled { .. }) => Err(Error::Cancelled),
         Err(_) => Ok(true),
+    }
+}
+
+/// One role's stack waiting to run: the frames, and the preset they combine under.
+///
+/// The unit [`CalibrationMasters::from_files`] schedules, so the concurrent and sequential paths
+/// differ only in which iterator drives them rather than in what each role does.
+#[derive(Debug)]
+struct RoleStack<'a, P> {
+    paths: &'a [P],
+    config: StackConfig,
+}
+
+impl<'a, P: AsRef<Path> + Sync> RoleStack<'a, P> {
+    fn new(paths: &'a [P], config: StackConfig) -> Self {
+        Self { paths, config }
+    }
+
+    /// Charge this role its frame-weighted share of `available`, for roles that load concurrently.
+    fn with_shared_budget(mut self, available: u64, total_frames: usize) -> Self {
+        self.config.cache.available_memory =
+            Some(weighted_budget(available, self.paths.len(), total_frames));
+        self
+    }
+
+    fn run(self, cancel: CancelToken) -> Result<Option<CfaImage>, Error> {
+        stack_cfa_master(self.paths, self.config, ProgressCallback::default(), cancel)
     }
 }
 
@@ -295,6 +441,9 @@ impl CalibrationMasters {
         if cancel.is_cancelled() {
             return Err(Error::Cancelled);
         }
+        // Before any of the work below, all of which combines the masters by flat pixel index and
+        // asserts on only the pair it touches.
+        images.common_dimensions()?;
 
         let CalibrationSet {
             dark,
@@ -336,6 +485,30 @@ impl CalibrationMasters {
         })
     }
 
+    /// Every present master, and the defect map, describes one sensor.
+    ///
+    /// `from_images` checks its inputs before it touches them, so this only has to re-check a
+    /// bundle assembled some other way — which is `fits::load`, where the masters and the map are
+    /// read as independent HDUs. Between the two, no `CalibrationMasters` can exist spanning two
+    /// sensors, so `save` cannot write a bundle `load` would reject.
+    pub(super) fn validate_dimensions(&self) -> Result<(), CalibrationError> {
+        let expected = self.masters.common_dimensions()?;
+        // The map's dimensions come from whichever master it was detected on, so within a bundle
+        // built here it always agrees; a file can disagree.
+        if let (Some(expected), Some(defects)) = (
+            expected,
+            self.defect_map.as_ref().and_then(|map| map.dimensions),
+        ) && expected != defects
+        {
+            return Err(CalibrationError::DimensionMismatch {
+                component: CalibrationComponent::Defects,
+                expected,
+                master: defects,
+            });
+        }
+        Ok(())
+    }
+
     /// Create CalibrationMasters by stacking raw CFA files.
     ///
     /// Uses sigma-clipped mean (>= 8 frames) or median (< 8 frames)
@@ -365,129 +538,54 @@ impl CalibrationMasters {
         if cancel.is_cancelled() {
             return Err(Error::Cancelled);
         }
-        let counts = [
-            frames.dark.len(),
-            frames.flat.len(),
-            frames.bias.len(),
-            frames.flat_dark.len(),
-        ];
-        let total_frames: usize = counts.iter().sum();
-        // Straight from the source rather than through a throwaway `StackConfig::dark()`: no
-        // override is set on a fresh config, so that path was this call with a minted cache
-        // directory and a bumped counter on the way.
+        let total_frames: usize = frames.iter().map(|(_, paths)| paths.len()).sum();
         // One reading for the whole calibration run: the fit check below and the decode ceiling
-        // the context carries both size against it. Previously this went through a throwaway
-        // `StackConfig::dark()` and `LoadContext::default()` sampled again on the next line.
+        // the context carries are both sized against it, so no role can be tiered against one
+        // figure and decoded against another.
         let available = memory::available_memory();
         let context = LoadContext::new(cancel.clone(), memory::memory_budget(available));
+        let concurrent = frames_fit_in_memory(&frames, total_frames, available, &context)?;
 
-        let (dark, flat, bias, flat_dark) =
-            if frames_fit_in_memory(&frames, total_frames, available, &context)? {
-                // Concurrent: frame-weighted budget per role keeps each in RAM (the whole set fits)
-                // while bounding the combined in-flight decode footprint.
-                let mut dark_cfg = StackConfig::dark();
-                let mut flat_cfg = StackConfig::flat();
-                let mut bias_cfg = StackConfig::bias();
-                let mut flat_dark_cfg = StackConfig::dark();
-                dark_cfg.cache.available_memory =
-                    Some(weighted_budget(available, counts[0], total_frames));
-                flat_cfg.cache.available_memory =
-                    Some(weighted_budget(available, counts[1], total_frames));
-                bias_cfg.cache.available_memory =
-                    Some(weighted_budget(available, counts[2], total_frames));
-                flat_dark_cfg.cache.available_memory =
-                    Some(weighted_budget(available, counts[3], total_frames));
-                let dark_cancel = cancel.clone();
-                let flat_cancel = cancel.clone();
-                let bias_cancel = cancel.clone();
-                let flat_dark_cancel = cancel.clone();
-
-                // Independent stacks on the shared rayon pool — work-stealing interleaves their
-                // parallel sections, filling the gaps a single sequential role would leave idle.
-                // Four concurrent stacks cannot share one callback: each reports its own
-                // (current, total) against a different frame count, so the streams would
-                // interleave into nonsense. Watch a role by stacking it with `stack_cfa_master`.
-                let ((dark, flat), (bias, flat_dark)) = rayon::join(
-                    move || {
-                        rayon::join(
-                            move || {
-                                stack_cfa_master(
-                                    frames.dark,
-                                    dark_cfg,
-                                    ProgressCallback::default(),
-                                    dark_cancel,
-                                )
-                            },
-                            move || {
-                                stack_cfa_master(
-                                    frames.flat,
-                                    flat_cfg,
-                                    ProgressCallback::default(),
-                                    flat_cancel,
-                                )
-                            },
-                        )
-                    },
-                    move || {
-                        rayon::join(
-                            move || {
-                                stack_cfa_master(
-                                    frames.bias,
-                                    bias_cfg,
-                                    ProgressCallback::default(),
-                                    bias_cancel,
-                                )
-                            },
-                            move || {
-                                stack_cfa_master(
-                                    frames.flat_dark,
-                                    flat_dark_cfg,
-                                    ProgressCallback::default(),
-                                    flat_dark_cancel,
-                                )
-                            },
-                        )
-                    },
-                );
-                (dark?, flat?, bias?, flat_dark?)
+        // The one role → preset table. Each preset carries its own small-frame fallback
+        // (`StackConfig::small_n`), so no frame-count special-casing is needed here.
+        let jobs = CalibrationSet {
+            dark: RoleStack::new(frames.dark, StackConfig::dark()),
+            flat: RoleStack::new(frames.flat, StackConfig::flat()),
+            bias: RoleStack::new(frames.bias, StackConfig::bias()),
+            // A flat-dark is a dark taken at the flat's exposure time, so it stacks as one.
+            flat_dark: RoleStack::new(frames.flat_dark, StackConfig::dark()),
+        };
+        // Concurrent roles split the budget by frame count, so their combined in-flight decodes
+        // provably cannot overcommit. Run sequentially, each role gets the whole budget instead:
+        // its cache frees before the next one loads, so a share would push a role that fits in RAM
+        // onto disk for nothing.
+        let jobs = jobs.into_roles().map(|(_, job)| {
+            if concurrent {
+                job.with_shared_budget(available, total_frames)
             } else {
-                // Sequential, full budget each (each role's cache frees before the next loads), so a
-                // role that fits the whole budget stays in RAM instead of being forced to disk.
-                (
-                    stack_cfa_master(
-                        frames.dark,
-                        StackConfig::dark(),
-                        ProgressCallback::default(),
-                        cancel.clone(),
-                    )?,
-                    stack_cfa_master(
-                        frames.flat,
-                        StackConfig::flat(),
-                        ProgressCallback::default(),
-                        cancel.clone(),
-                    )?,
-                    stack_cfa_master(
-                        frames.bias,
-                        StackConfig::bias(),
-                        ProgressCallback::default(),
-                        cancel.clone(),
-                    )?,
-                    stack_cfa_master(
-                        frames.flat_dark,
-                        StackConfig::dark(),
-                        ProgressCallback::default(),
-                        cancel.clone(),
-                    )?,
-                )
-            };
+                job
+            }
+        });
+
+        // Independent stacks on the shared rayon pool — work-stealing interleaves their parallel
+        // sections, filling the gaps a single sequential role would leave idle. Four concurrent
+        // stacks cannot share one progress callback: each reports its own (current, total) against
+        // a different frame count, so the streams would interleave into nonsense. Watch a single
+        // role by stacking it with `stack_cfa_master`.
+        let masters: Vec<Option<CfaImage>> = if concurrent {
+            jobs.into_par_iter()
+                .map(|job| job.run(cancel.clone()))
+                .collect::<Result<_, Error>>()?
+        } else {
+            jobs.into_iter()
+                .map(|job| job.run(cancel.clone()))
+                .collect::<Result<_, Error>>()?
+        };
 
         Self::from_images(
-            CalibrationSet {
-                dark,
-                flat,
-                bias,
-                flat_dark,
-            },
+            CalibrationSet::from_roles(
+                masters.try_into().expect("four roles in, four masters out"),
+            ),
             sigma_threshold,
             cancel,
         )
@@ -511,7 +609,7 @@ impl CalibrationMasters {
             !image.metadata.calibrated,
             "calibrate() called on an already-calibrated frame"
         );
-        self.validate_cfa_patterns(image)?;
+        self.validate_against_light(image)?;
         image.metadata.calibrated = true;
 
         // 1. Dark subtraction
@@ -534,38 +632,27 @@ impl CalibrationMasters {
         Ok(())
     }
 
-    fn validate_cfa_patterns(&self, image: &CfaImage) -> Result<(), CalibrationError> {
+    /// Every master must describe the same sensor as `image`, in both pattern and extent.
+    ///
+    /// Extent as well as pattern because the operations below index a master by the light's flat
+    /// index: a mismatch is caught here, as an error naming the offending role, rather than as
+    /// `CfaImage::subtract`'s assert. Masters are read from user-chosen files, so a set that does
+    /// not fit the light is bad input, not a broken invariant.
+    fn validate_against_light(&self, image: &CfaImage) -> Result<(), CalibrationError> {
         let light = image
             .metadata
             .cfa_type
             .as_ref()
             .ok_or(CalibrationError::MissingLightCfaPattern)?;
+        let light_size = Size2us::new(image.data.width(), image.data.height());
 
-        for (component, metadata) in [
-            (
-                CalibrationComponent::Dark,
-                self.masters.dark.as_ref().map(|master| &master.metadata),
-            ),
-            (
-                CalibrationComponent::Flat,
-                self.masters.flat.as_ref().map(|master| &master.metadata),
-            ),
-            (
-                CalibrationComponent::Bias,
-                self.masters.bias.as_ref().map(|master| &master.metadata),
-            ),
-            (
-                CalibrationComponent::FlatDark,
-                self.masters
-                    .flat_dark
-                    .as_ref()
-                    .map(|master| &master.metadata),
-            ),
-        ] {
-            let Some(metadata) = metadata else {
-                continue;
-            };
-            let master_pattern = metadata
+        for (component, master) in self
+            .masters
+            .iter()
+            .filter_map(|(component, master)| master.as_ref().map(|master| (component, master)))
+        {
+            let master_pattern = master
+                .metadata
                 .cfa_type
                 .as_ref()
                 .ok_or(CalibrationError::MissingMasterCfaPattern { component })?;
@@ -576,6 +663,26 @@ impl CalibrationMasters {
                     master: master_pattern.clone(),
                 });
             }
+            let master_size = Size2us::new(master.data.width(), master.data.height());
+            if master_size != light_size {
+                return Err(CalibrationError::DimensionMismatch {
+                    component,
+                    expected: light_size,
+                    master: master_size,
+                });
+            }
+        }
+
+        // The defect map indexes the light by flat index too, and it is the one component that
+        // can be present without a master of its own to have been checked above.
+        if let Some(defects) = self.defect_map.as_ref().and_then(|map| map.dimensions)
+            && defects != light_size
+        {
+            return Err(CalibrationError::DimensionMismatch {
+                component: CalibrationComponent::Defects,
+                expected: light_size,
+                master: defects,
+            });
         }
 
         Ok(())
