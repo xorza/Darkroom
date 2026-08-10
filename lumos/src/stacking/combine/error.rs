@@ -5,10 +5,13 @@ use std::path::PathBuf;
 
 use thiserror::Error;
 
+use common::CancelToken;
+
 use crate::error::InvalidConfigField;
 use crate::io::image::image_dimensions::ImageDimensions;
 use crate::stacking::calibration_masters::CalibrationError;
-use crate::stacking::frame_store::{FramePlane, FrameStoreError};
+use crate::stacking::frame_store::FramePlane;
+use crate::stacking::frame_store::error::FrameStoreError;
 
 /// Invalid [`crate::StackConfig`] parameters.
 ///
@@ -113,6 +116,15 @@ pub enum Error {
         pixel: usize,
         value: f32,
     },
+}
+
+/// `Err(Error::Cancelled)` once the token is set, so a long walk can `?` its way out between
+/// chunks. Free rather than a method because `CancelToken` is another crate's type.
+pub(crate) fn check_cancel(cancel: &CancelToken) -> Result<(), Error> {
+    if cancel.is_cancelled() {
+        return Err(Error::Cancelled);
+    }
+    Ok(())
 }
 
 #[cfg(test)]

@@ -1,3 +1,9 @@
+//! Drizzle entry points: from paths, or from frames already in memory.
+//!
+//! Both feed one accumulation body. The path form keeps exactly one decoded frame resident by
+//! handing that body a lazy fallible iterator, so a frame is loaded, distributed into the grid,
+//! and dropped before the next one is read.
+
 use std::io::Error;
 use std::path::Path;
 

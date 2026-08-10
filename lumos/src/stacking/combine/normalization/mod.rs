@@ -1,16 +1,33 @@
-//! Frame normalization measurement and parameter fitting.
+//! Putting every frame on one photometric scale before they are combined.
+//!
+//! Frames of the same field differ in sky level and transparency, so combining them raw would let
+//! the brightest dominate and turn rejection into a vote about exposure rather than about
+//! outliers. Each frame gets an affine `gain`/`offset` per channel measured against a reference —
+//! the least noisy of the set — and the combine applies it as it gathers.
+//!
+//! How that is measured depends on the frames. Unregistered frames already share a pixel grid, so
+//! their whole-image median and MAD are directly comparable. Registered ones do not: each covers a
+//! slightly different patch of sky, so the measurement is confined to [`common_domain`], the
+//! pixels every frame actually reached, and the gain comes from [`photometric_gain`]'s
+//! errors-in-variables fit rather than a ratio of spreads.
 
-use crate::bit_buffer2::BitBuffer2;
-use crate::math::size2us::Size2us;
+pub(crate) mod common_domain;
+pub(crate) mod photometric_gain;
+
 use arrayvec::ArrayVec;
 use common::CancelToken;
 use rayon::prelude::*;
 
+use crate::bit_buffer2::BitBuffer2;
 use crate::io::image::image_dimensions::ImageDimensions;
 use crate::math::statistics::{MedianMad, mad_to_sigma, median_f32_mut};
-use crate::stacking::combine::MIN_CONTRIBUTING_COVERAGE;
 use crate::stacking::combine::config::Normalization;
 use crate::stacking::combine::error::Error;
+use crate::stacking::combine::error::check_cancel;
+use crate::stacking::combine::normalization::common_domain::CommonDomain;
+use crate::stacking::combine::normalization::photometric_gain::{
+    paired_photometric_gain, sample_stats,
+};
 use crate::stacking::frame_store::{FrameStats, StoredFrame, StoredPlane};
 
 /// Per-channel affine normalization applied as `normalized = raw * gain + offset`.
@@ -40,82 +57,14 @@ enum RegisteredMeasurements {
 }
 
 #[derive(Debug)]
-struct CommonDomain {
-    /// One bit per pixel — a `Vec<bool>` here costs 37.7 MB on a 6K frame against 4.7 MB packed.
-    valid: BitBuffer2,
-    sample_count: usize,
-}
-
-#[derive(Debug)]
 struct ReferenceFit {
     samples: Vec<f32>,
     stats: MedianMad,
     noise_variance: f64,
 }
 
-#[derive(Debug, Clone, Copy)]
-struct PairedMoments {
-    count: usize,
-    mean_frame: f64,
-    mean_reference: f64,
-    frame_variance: f64,
-    reference_variance: f64,
-    covariance: f64,
-}
-
-impl PairedMoments {
-    fn from_inliers(
-        frame: &[f32],
-        reference: &[f32],
-        window: ResidualWindow,
-        cancel: &CancelToken,
-    ) -> Result<Self, Error> {
-        let mut moments = Self {
-            count: 0,
-            mean_frame: 0.0,
-            mean_reference: 0.0,
-            frame_variance: 0.0,
-            reference_variance: 0.0,
-            covariance: 0.0,
-        };
-        for (frame_chunk, reference_chunk) in frame
-            .chunks(NORMALIZATION_CHUNK_SIZE)
-            .zip(reference.chunks(NORMALIZATION_CHUNK_SIZE))
-        {
-            check_cancel(cancel)?;
-            for (&frame_value, &reference_value) in frame_chunk.iter().zip(reference_chunk) {
-                let residual = reference_value - (frame_value * window.gain + window.offset);
-                if (residual - window.center).abs() > window.radius {
-                    continue;
-                }
-                moments.count += 1;
-                let count = moments.count as f64;
-                let frame_value = f64::from(frame_value);
-                let reference_value = f64::from(reference_value);
-                let frame_delta = frame_value - moments.mean_frame;
-                moments.mean_frame += frame_delta / count;
-                let reference_delta = reference_value - moments.mean_reference;
-                moments.mean_reference += reference_delta / count;
-                moments.frame_variance += frame_delta * (frame_value - moments.mean_frame);
-                moments.reference_variance +=
-                    reference_delta * (reference_value - moments.mean_reference);
-                moments.covariance += frame_delta * (reference_value - moments.mean_reference);
-            }
-        }
-        Ok(moments)
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-struct ResidualWindow {
-    gain: f32,
-    offset: f32,
-    center: f32,
-    radius: f32,
-}
-
 const PHOTOMETRIC_SAMPLE_LIMIT: usize = 65_536;
-const NORMALIZATION_CHUNK_SIZE: usize = 16_384;
+pub(super) const NORMALIZATION_CHUNK_SIZE: usize = 16_384;
 
 pub(crate) fn compute_frame_norms(
     frames: &[StoredFrame],
@@ -265,7 +214,7 @@ fn measure_registered_frames(
     cancel: &CancelToken,
 ) -> Result<RegisteredMeasurements, Error> {
     let pixel_count = dimensions.pixel_count();
-    let common_domain = build_common_domain(frames, pixel_count, cancel)?;
+    let common_domain = CommonDomain::build(frames, pixel_count, cancel)?;
     let common_stats = measure_common_stats(frames, pixel_count, &common_domain, cancel)?;
 
     Ok(match normalization {
@@ -281,86 +230,6 @@ fn measure_registered_frames(
         Normalization::Multiplicative => RegisteredMeasurements::CommonStats(common_stats),
         Normalization::None => unreachable!(),
     })
-}
-
-/// The all-valid mask a domain intersection starts from: one bit per pixel, one row.
-///
-/// Its own function so `mem_budget` can weigh exactly what this allocates rather than a copy of
-/// the expression that could drift from it.
-fn new_domain_mask(pixel_count: usize) -> BitBuffer2 {
-    BitBuffer2::new_filled(Size2us::new(pixel_count, 1), true)
-}
-
-fn build_common_domain(
-    frames: &[StoredFrame],
-    pixel_count: usize,
-    cancel: &CancelToken,
-) -> Result<CommonDomain, Error> {
-    let mut common_domain = new_domain_mask(pixel_count);
-    for frame in frames {
-        check_cancel(cancel)?;
-        if let Some(coverage) = &frame.quality.coverage {
-            intersect_domain(
-                &mut common_domain,
-                coverage,
-                pixel_count,
-                |value| value > MIN_CONTRIBUTING_COVERAGE,
-                cancel,
-            )?;
-        }
-        if let Some(confidence) = &frame.quality.confidence {
-            intersect_domain(
-                &mut common_domain,
-                confidence,
-                pixel_count,
-                |value| value > 0.0,
-                cancel,
-            )?;
-        }
-    }
-    check_cancel(cancel)?;
-    let sample_count = common_domain.count_ones();
-    if sample_count == 0 {
-        return Err(Error::NoCommonCoverage);
-    }
-    Ok(CommonDomain {
-        valid: common_domain,
-        sample_count,
-    })
-}
-
-/// Intersect `common_domain` with the pixels of `plane` that satisfy `is_valid`.
-///
-/// Accumulates 64 predicate results into a word before touching the mask, so this is one
-/// read-modify-write per 64 pixels rather than per pixel.
-fn intersect_domain(
-    common_domain: &mut BitBuffer2,
-    plane: &StoredPlane,
-    pixel_count: usize,
-    is_valid: impl Fn(f32) -> bool,
-    cancel: &CancelToken,
-) -> Result<(), Error> {
-    const BITS: usize = 64;
-    let values = plane.chunk(0, pixel_count);
-    // The mask is one row, so word `w` covers pixels `64w..64w+64`.
-    let words_per_check = NORMALIZATION_CHUNK_SIZE.div_ceil(BITS);
-    for (w, word) in common_domain.words.iter_mut().enumerate() {
-        let base = w * BITS;
-        if base >= pixel_count {
-            break;
-        }
-        if w % words_per_check == 0 {
-            check_cancel(cancel)?;
-        }
-        let mut incoming = 0u64;
-        for bit in 0..BITS.min(pixel_count - base) {
-            if is_valid(values[base + bit]) {
-                incoming |= 1u64 << bit;
-            }
-        }
-        *word &= incoming;
-    }
-    Ok(())
 }
 
 fn measure_common_stats(
@@ -558,14 +427,10 @@ fn source_noise_variance(
     Ok(sigma * sigma * inverse_confidence / indices.len() as f64)
 }
 
-fn check_cancel(cancel: &CancelToken) -> Result<(), Error> {
-    if cancel.is_cancelled() {
-        return Err(Error::Cancelled);
-    }
-    Ok(())
-}
-
-fn cancellable_median_mad(samples: &mut [f32], cancel: &CancelToken) -> Result<MedianMad, Error> {
+pub(super) fn cancellable_median_mad(
+    samples: &mut [f32],
+    cancel: &CancelToken,
+) -> Result<MedianMad, Error> {
     check_cancel(cancel)?;
     let median = median_f32_mut(samples);
     check_cancel(cancel)?;
@@ -581,91 +446,5 @@ fn cancellable_median_mad(samples: &mut [f32], cancel: &CancelToken) -> Result<M
     Ok(MedianMad { median, mad })
 }
 
-fn paired_photometric_gain(
-    frame: &[f32],
-    reference: &[f32],
-    reference_stats: MedianMad,
-    frame_noise_variance: f64,
-    reference_noise_variance: f64,
-    cancel: &CancelToken,
-) -> Result<f32, Error> {
-    let mut scratch = frame.to_vec();
-    let frame_stats = cancellable_median_mad(&mut scratch, cancel)?;
-    let gain = if frame_stats.mad > f32::EPSILON {
-        reference_stats.mad / frame_stats.mad
-    } else {
-        1.0
-    };
-    let offset = reference_stats.median - frame_stats.median * gain;
-    scratch.clear();
-    for (frame_chunk, reference_chunk) in frame
-        .chunks(NORMALIZATION_CHUNK_SIZE)
-        .zip(reference.chunks(NORMALIZATION_CHUNK_SIZE))
-    {
-        check_cancel(cancel)?;
-        scratch.extend(frame_chunk.iter().zip(reference_chunk).map(
-            |(&frame_value, &reference_value)| reference_value - (frame_value * gain + offset),
-        ));
-    }
-    let residual_stats = cancellable_median_mad(&mut scratch, cancel)?;
-    if residual_stats.mad <= f32::EPSILON {
-        return Ok(gain);
-    }
-    let window = ResidualWindow {
-        gain,
-        offset,
-        center: residual_stats.median,
-        radius: 4.0 * mad_to_sigma(residual_stats.mad),
-    };
-    Ok(deming_gain(
-        PairedMoments::from_inliers(frame, reference, window, cancel)?,
-        frame_noise_variance,
-        reference_noise_variance,
-    ))
-}
-
-fn sample_stats(samples: &[f32], cancel: &CancelToken) -> Result<MedianMad, Error> {
-    let mut scratch = samples.to_vec();
-    cancellable_median_mad(&mut scratch, cancel)
-}
-
-fn deming_gain(
-    moments: PairedMoments,
-    frame_noise_variance: f64,
-    reference_noise_variance: f64,
-) -> f32 {
-    if moments.count < 2 || moments.covariance <= f64::EPSILON {
-        return 1.0;
-    }
-    let noise_ratio =
-        if frame_noise_variance > f64::EPSILON && reference_noise_variance > f64::EPSILON {
-            reference_noise_variance / frame_noise_variance
-        } else {
-            1.0
-        };
-    let delta = moments.reference_variance - noise_ratio * moments.frame_variance;
-    let root = (delta * delta + 4.0 * noise_ratio * moments.covariance * moments.covariance).sqrt();
-    let gain = if delta >= 0.0 {
-        (delta + root) / (2.0 * moments.covariance)
-    } else {
-        2.0 * noise_ratio * moments.covariance / (root - delta)
-    };
-    if gain.is_finite() && gain > f64::EPSILON {
-        gain as f32
-    } else {
-        1.0
-    }
-}
-
 #[cfg(test)]
 mod tests;
-
-#[cfg(test)]
-pub(crate) mod internals {
-    use crate::bit_buffer2::BitBuffer2;
-
-    /// The domain mask as `build_common_domain` allocates it, for `mem_budget` to weigh.
-    pub(crate) fn new_domain_mask(pixel_count: usize) -> BitBuffer2 {
-        super::new_domain_mask(pixel_count)
-    }
-}

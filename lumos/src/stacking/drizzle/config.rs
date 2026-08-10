@@ -1,3 +1,5 @@
+//! What a drizzle run reconstructs onto, and with which kernel.
+
 use crate::error::InvalidConfigField;
 use crate::stacking::drizzle::error::DrizzleConfigError;
 

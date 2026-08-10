@@ -1,3 +1,10 @@
+//! Turning a stacked flat into the divisor calibration applies.
+//!
+//! Three steps in order, each its own function because the defect detector has to see the middle
+//! one: subtract the flat's own bias or flat-dark, normalize per CFA colour to a mean of one, and
+//! divide a light by the result. Cold-pixel detection runs on the *subtracted* flat, before
+//! normalization clamps near-zero photosites away.
+
 use imaginarium::Buffer2;
 use rayon::prelude::*;
 
