@@ -53,19 +53,6 @@ fn median_fwhm_single_set() {
 }
 
 #[test]
-fn max_sigma_from_fwhm() {
-    // FWHM = 3.0 -> max_sigma = 3.0 * 0.5 = 1.5
-    let fwhm: f64 = 3.0;
-    let max_sigma = (fwhm * 0.5).max(0.5);
-    assert!((max_sigma - 1.5).abs() < 0.01);
-
-    // FWHM = 0.8 -> max_sigma = max(0.4, 0.5) = 0.5 (floor)
-    let fwhm: f64 = 0.8;
-    let max_sigma = (fwhm * 0.5).max(0.5);
-    assert!((max_sigma - 0.5).abs() < 0.01);
-}
-
-#[test]
 fn max_sigma_typical_seeing() {
     // Typical ground seeing: FWHM = 2.0-4.0 pixels
     // FWHM = 2.0 -> max_sigma = 1.0 (~3px effective threshold)
@@ -80,13 +67,12 @@ fn max_sigma_typical_seeing() {
         Star::at(DVec2::ZERO).with_fwhm(2.8),
     ];
 
+    // Median of [2.0, 2.2, 2.5, 2.8, 3.0] = 2.5, so max_sigma = 2.5 * 0.5 = 1.25. The formula
+    // itself is pinned in `tuning`; what matters here is that `register` feeds it the median of
+    // *both* catalogs.
     let median = median_fwhm(&ref_stars, &target_stars);
-    let max_sigma = (median * 0.5).max(0.5);
-
-    // Median of [2.0, 2.2, 2.5, 2.8, 3.0] = 2.5
-    // max_sigma = 2.5 * 0.5 = 1.25
     assert!((median - 2.5).abs() < 0.01);
-    assert!((max_sigma - 1.25).abs() < 0.01);
+    assert!((tuning::max_sigma_from_fwhm(median) - 1.25).abs() < 0.01);
 }
 
 #[test]

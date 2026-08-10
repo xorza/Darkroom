@@ -31,22 +31,18 @@ fn gamma_k2_exact_values() {
 fn scorer_construction_exact() {
     // MagsacScorer::new(σ_max) stores:
     //   max_sigma_sq = σ_max²
-    //   threshold_sq = χ²₀.₉₉(2) * σ_max² = 9.21 * σ_max²
+    //   threshold_sq = χ²₀.₉₉(2) * σ_max²
     //   outlier_loss = σ_max² / 2
 
     let scorer = MagsacScorer::new(2.0);
-    // σ_max = 2.0 → σ²_max = 4.0
-    // threshold_sq = 9.21 * 4.0 = 36.84
-    assert!((scorer.threshold_sq - 36.84).abs() < TOL);
+    // σ_max = 2.0 → σ²_max = 4.0 → threshold_sq = 9.2103… * 4.0
+    assert!((scorer.threshold_sq - CHI2_99_2DOF * 4.0).abs() < TOL);
     // outlier_loss = 4.0 / 2.0 = 2.0
     assert!((scorer.outlier_loss - 2.0).abs() < TOL);
 
     let scorer = MagsacScorer::new(0.5);
-    // σ_max = 0.5 → σ²_max = 0.25
-    // threshold_sq = 9.21 * 0.25 = 2.3025
-    #[allow(clippy::approx_constant)]
-    let expected_threshold = 2.3025;
-    assert!((scorer.threshold_sq - expected_threshold).abs() < TOL);
+    // σ_max = 0.5 → σ²_max = 0.25 → threshold_sq = 9.2103… * 0.25
+    assert!((scorer.threshold_sq - CHI2_99_2DOF * 0.25).abs() < TOL);
     // outlier_loss = 0.25 / 2.0 = 0.125
     assert!((scorer.outlier_loss - 0.125).abs() < TOL);
 }
@@ -145,34 +141,32 @@ fn scorer_different_sigma_changes_loss() {
 #[test]
 fn is_inlier_exact_threshold() {
     let scorer = MagsacScorer::new(1.0);
-    // threshold_sq = 9.21
+    // σ_max = 1 puts threshold_sq on the quantile itself.
 
     assert!(scorer.is_inlier(0.0));
     assert!(scorer.is_inlier(5.0));
-    assert!(scorer.is_inlier(9.21)); // exactly at threshold
-    assert!(!scorer.is_inlier(9.22)); // just above
+    assert!(scorer.is_inlier(CHI2_99_2DOF)); // exactly at the boundary, which is inclusive
+    assert!(!scorer.is_inlier(CHI2_99_2DOF + 1e-9)); // just above
     assert!(!scorer.is_inlier(100.0));
 }
 
 #[test]
 fn effective_threshold_exact() {
-    // threshold_sq = CHI_QUANTILE_SQ * σ² = 9.21 * σ²
-    // effective threshold (pixels) = sqrt(threshold_sq) = sqrt(9.21) * σ
-
-    // sqrt(9.21) = 3.03480...
-    let sqrt_chi = 9.21_f64.sqrt(); // 3.03480...
+    // threshold_sq = χ²₀.₉₉(2) · σ², so the boundary in pixels is √χ²₀.₉₉(2) · σ ≈ 3.0349 σ — the
+    // figure `tuning::recovery_radius` has to reproduce for the two gates to agree.
+    let sqrt_chi = CHI2_99_2DOF.sqrt();
+    assert!((sqrt_chi - 3.034_854_3).abs() < 1e-6, "√χ² = {sqrt_chi}");
 
     let scorer_1 = MagsacScorer::new(1.0);
     assert!(
-        (scorer_1.threshold_sq.sqrt() - sqrt_chi * 1.0).abs() < 1e-6,
+        (scorer_1.threshold_sq.sqrt() - sqrt_chi).abs() < TOL,
         "σ=1: threshold={}",
         scorer_1.threshold_sq.sqrt()
     );
 
     let scorer_3 = MagsacScorer::new(3.0);
-    // threshold = sqrt(9.21 * 9) = sqrt(82.89) = 9.104...
     assert!(
-        (scorer_3.threshold_sq.sqrt() - sqrt_chi * 3.0).abs() < 1e-6,
+        (scorer_3.threshold_sq.sqrt() - sqrt_chi * 3.0).abs() < TOL,
         "σ=3: threshold={}",
         scorer_3.threshold_sq.sqrt()
     );

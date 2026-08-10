@@ -48,6 +48,7 @@ pub(crate) mod result;
 mod spatial;
 pub(crate) mod transform;
 pub(crate) mod triangle;
+mod tuning;
 
 #[cfg(all(test, feature = "internals"))]
 mod bench;
@@ -137,8 +138,7 @@ pub fn register(
     }
 
     // Derive max_sigma from median FWHM for optimal noise tolerance
-    let median_fwhm = median_fwhm(ref_stars, target_stars);
-    let max_sigma = (median_fwhm * 0.5).max(0.5);
+    let max_sigma = tuning::max_sigma_from_fwhm(median_fwhm(ref_stars, target_stars));
 
     // Select stars for matching (take brightest N)
     let ref_positions: Vec<DVec2> = ref_stars
@@ -230,19 +230,25 @@ fn median_fwhm(ref_stars: &[Star], target_stars: &[Star]) -> f64 {
     median_f32_mut(&mut fwhms) as f64
 }
 
-/// Maximum RMS (px) at which an `Auto` rung is accepted before escalating to a more general model.
-const AUTO_UPGRADE_THRESHOLD: f64 = 0.5;
-
 /// `Auto` model selection: estimate transforms from fewest to most degrees of freedom and accept
-/// the first whose RMS clears [`AUTO_UPGRADE_THRESHOLD`] — the *simplest model that fits*, so the
-/// alignment isn't overfit to star-centroid noise (every extra DOF soaks up noise and generalizes
-/// worse). Falls through to the most general model (Homography) when no simpler rung clears the bar;
-/// the caller's `max_rms_error` gate then has the final say on that result.
+/// the first whose RMS clears [`tuning::AUTO_UPGRADE_THRESHOLD`] — the *simplest model that fits*,
+/// so the alignment isn't overfit to star-centroid noise (every extra DOF soaks up noise and
+/// generalizes worse). Falls through to the most general model (Homography) when no simpler rung
+/// clears the bar; the caller's `max_rms_error` gate then has the final say on that result.
+///
+/// The bar is the *stricter* of the ladder's own threshold and the caller's `max_rms_error`. Taking
+/// only the ladder's would let a tight `max_rms_error` fail the whole registration on a rung this
+/// function accepted, while a later rung would have satisfied it.
 ///
 /// The ladder is Euclidean → Similarity → Affine → Homography (rigid → +scale → +shear →
 /// projective); earlier this only tried Similarity then jumped straight to Homography, so same-scale
 /// rigid sets were fit with a needless scale DOF and mild differential distortion overshot to the
 /// full projective model.
+///
+/// A rung that fails outright is logged and the ladder continues, but only Homography's error can
+/// reach the caller: it is the most general model, so its failure is the one that describes the
+/// data rather than the model. The earlier rungs' errors would otherwise be lost entirely, and the
+/// answer to "why did `Auto` land on Homography?" is in that log.
 fn auto_ladder(
     ref_positions: &[DVec2],
     target_positions: &[DVec2],
@@ -250,21 +256,28 @@ fn auto_ladder(
     max_sigma: f64,
     config: &Config,
 ) -> Result<RegistrationResult, RegistrationError> {
+    let bar = tuning::AUTO_UPGRADE_THRESHOLD.min(config.max_rms_error);
     for model in [
         TransformType::Euclidean,
         TransformType::Similarity,
         TransformType::Affine,
     ] {
-        if let Ok(result) = estimate_and_refine(
+        match estimate_and_refine(
             ref_positions,
             target_positions,
             matches,
             model,
             max_sigma,
             config,
-        ) && result.rms_error() <= AUTO_UPGRADE_THRESHOLD
-        {
-            return Ok(result);
+        ) {
+            Ok(result) if result.rms_error() <= bar => return Ok(result),
+            Ok(result) => tracing::debug!(
+                ?model,
+                rms_error = result.rms_error(),
+                bar,
+                "Auto rung fit but missed the bar"
+            ),
+            Err(error) => tracing::debug!(?model, %error, "Auto rung failed"),
         }
     }
     estimate_and_refine(
@@ -306,8 +319,6 @@ fn estimate_and_refine(
         .map(|&i| matches[i].indices())
         .collect();
 
-    // Effective threshold for match recovery: ~3 * max_sigma (χ² quantile)
-    let effective_threshold = max_sigma * 3.03;
     let t0 = Instant::now();
     let RecoveredMatches {
         transform,
@@ -317,21 +328,26 @@ fn estimate_and_refine(
         target_stars,
         &ransac_result.transform,
         &inlier_matches,
-        effective_threshold,
+        tuning::recovery_radius(max_sigma),
         transform_type,
     );
     let recovery_ms = t0.elapsed().as_secs_f64() * 1000.0;
 
     let t0 = Instant::now();
     let sip_fit = if let Some(sip_config) = &config.sip {
-        let inlier_ref: Vec<DVec2> = inlier_matches
+        // Materialized rather than indexed through `inlier_matches`: the fitter takes paired
+        // position slices and knows nothing about match indices, which is the layering that keeps
+        // `distortion` independent of how the matches were found. Only the SIP path pays for it,
+        // and it pays once — `unzip` fills both from a single walk.
+        let (inlier_ref, inlier_target): (Vec<DVec2>, Vec<DVec2>) = inlier_matches
             .iter()
-            .map(|star_match| ref_stars[star_match.reference])
-            .collect();
-        let inlier_target: Vec<DVec2> = inlier_matches
-            .iter()
-            .map(|star_match| target_stars[star_match.target])
-            .collect();
+            .map(|star_match| {
+                (
+                    ref_stars[star_match.reference],
+                    target_stars[star_match.target],
+                )
+            })
+            .unzip();
 
         Some(SipPolynomial::fit_from_transform(
             &inlier_ref,
@@ -407,22 +423,18 @@ fn recover_matches(
     // no allocation per pass, and order-independent (deterministic).
     let mut matched_target = vec![false; target_stars.len()];
     let mut matched_ref = vec![false; ref_stars.len()];
-    let mut newly_matched_targets = vec![false; target_stars.len()];
+    // Refit inputs, rebuilt per pass from the pass's own matches; only the capacity carries over.
+    let (mut all_ref, mut all_target) = (Vec::new(), Vec::new());
 
     for _ in 0..RECOVERY_MAX_ITERATIONS {
         let prev_count = current_matches.len();
 
         matched_target.fill(false);
-        for star_match in &current_matches {
-            matched_target[star_match.target] = true;
-        }
-
         matched_ref.fill(false);
         for star_match in &current_matches {
+            matched_target[star_match.target] = true;
             matched_ref[star_match.reference] = true;
         }
-
-        newly_matched_targets.fill(false);
 
         for (ref_idx, &ref_pos) in ref_stars.iter().enumerate() {
             if matched_ref[ref_idx] {
@@ -431,16 +443,17 @@ fn recover_matches(
 
             let predicted = current_transform.apply(ref_pos);
 
+            // Claiming the target in `matched_target` is what stops a second reference star from
+            // taking it later in this same pass — no separate "newly matched" bitmap needed.
             if let Some(nn) = target_tree.nearest_one(predicted)
                 && nn.dist_sq <= threshold_sq
                 && !matched_target[nn.index]
-                && !newly_matched_targets[nn.index]
             {
                 current_matches.push(MatchIndices {
                     reference: ref_idx,
                     target: nn.index,
                 });
-                newly_matched_targets[nn.index] = true;
+                matched_target[nn.index] = true;
             }
         }
 
@@ -456,14 +469,14 @@ fn recover_matches(
         }
 
         // Refit transform with updated matches
-        let all_ref: Vec<DVec2> = current_matches
-            .iter()
-            .map(|star_match| ref_stars[star_match.reference])
-            .collect();
-        let all_target: Vec<DVec2> = current_matches
-            .iter()
-            .map(|star_match| target_stars[star_match.target])
-            .collect();
+        all_ref.clear();
+        all_target.clear();
+        all_ref.reserve_exact(current_matches.len());
+        all_target.reserve_exact(current_matches.len());
+        for star_match in &current_matches {
+            all_ref.push(ref_stars[star_match.reference]);
+            all_target.push(target_stars[star_match.target]);
+        }
 
         match estimate_transform(&all_ref, &all_target, transform_type) {
             Some(new_transform) => current_transform = new_transform,

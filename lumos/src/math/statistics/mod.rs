@@ -59,6 +59,18 @@ fn abs_deviation_inplace(values: &mut [f32], median: f32) {
 /// This is the exact value: 1 / Φ⁻¹(3/4) where Φ⁻¹ is the inverse CDF.
 pub(crate) const MAD_TO_SIGMA: f32 = 1.4826022;
 
+/// χ²(0.99) for k = 2 degrees of freedom: the squared Mahalanobis radius enclosing 99% of an
+/// isotropic 2-D Gaussian, so `r² > CHI2_99_2DOF · σ²` is the 1%-tail outlier test for a position
+/// residual.
+///
+/// Exact in closed form — the k = 2 CDF is `1 − exp(−x/2)`, so the p-quantile is `−2·ln(1 − p)`,
+/// here `−2·ln(0.01)`.
+///
+/// Lives here rather than beside either caller because registration gates 2-D residuals twice, at
+/// the same confidence: MAGSAC's outlier boundary uses it squared, match recovery uses its square
+/// root as a radius. Two literals drifted apart once already (9.21 against a rounded 3.03).
+pub(crate) const CHI2_99_2DOF: f64 = 9.210_340_371_976_182;
+
 /// Convert MAD to standard deviation (assuming normal distribution).
 #[inline]
 pub(crate) fn mad_to_sigma(mad: f32) -> f32 {

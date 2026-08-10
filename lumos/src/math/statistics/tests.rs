@@ -1022,3 +1022,19 @@ fn robust_sigma_f64_scales_the_mad_and_leaves_its_input_alone() {
     assert_eq!(robust_sigma_f64(&[7.0; 9], &mut scratch), 0.0);
     assert_eq!(robust_sigma_f64(&[], &mut scratch), 0.0);
 }
+
+/// The χ² quantile is a distribution fact, not a tuning knob, so it is checked against the closed
+/// form rather than against a copy of itself: for k = 2 the CDF is `1 − exp(−x/2)`, which makes the
+/// p-quantile `−2·ln(1 − p)`.
+#[test]
+fn chi2_99_2dof_is_the_one_percent_tail_of_the_two_dof_distribution() {
+    assert!((CHI2_99_2DOF - (-2.0 * 0.01_f64.ln())).abs() < 1e-12);
+
+    // Round trip through the CDF: exactly 1% of the distribution lies beyond it.
+    let tail = (-CHI2_99_2DOF / 2.0).exp();
+    assert!((tail - 0.01).abs() < 1e-12, "tail mass {tail} is not 1%");
+
+    // The rounded 9.21 this replaced is inside a ten-thousandth, which is why the two copies of it
+    // could disagree for so long without any test noticing.
+    assert!((CHI2_99_2DOF - 9.21).abs() < 1e-3);
+}

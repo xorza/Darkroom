@@ -742,3 +742,50 @@ fn auto_ladder_selects_simplest_adequate_model() {
         result.transform().transform_type()
     );
 }
+
+/// The ladder's own bar and the caller's accuracy gate are separate constants judging the same
+/// number, so the stricter has to win. A rung landing between them would otherwise be accepted by
+/// `auto_ladder` and then rejected by `register`, failing a registration that a later rung
+/// satisfies outright.
+#[test]
+fn a_tight_accuracy_gate_climbs_the_ladder_instead_of_failing_on_a_rung() {
+    // Anisotropy of 1.2e-3 across a 2000 px field puts Euclidean at ~0.47 px RMS — under the
+    // ladder's 0.5 px bar, over a 0.4 px gate — while Affine fits the same set exactly.
+    let ref_stars = generate_random_stars(90, 2000.0, 2000.0, 101010, FWHM_TIGHT);
+    let target = apply_affine(&ref_stars, [1.0006, 0.0, 20.0, 0.0, 0.9994, -15.0]);
+    let config = Config {
+        transform_type: TransformType::Auto,
+        matching: helpers::matching_config(8, 6),
+        ..Default::default()
+    };
+
+    // The default gate (2.0 px) is looser than the bar, so the ladder stops at the simplest model.
+    let relaxed = register(&ref_stars, &target, &config).expect("relaxed gate");
+    assert_eq!(
+        relaxed.transform().transform_type(),
+        TransformType::Euclidean
+    );
+    let euclidean_rms = relaxed.rms_error();
+    assert!(
+        (0.4..=0.5).contains(&euclidean_rms),
+        "fixture must land between the two thresholds to test anything, got {euclidean_rms}"
+    );
+
+    // A gate tighter than the bar tightens the bar with it: that rung is now rejected and the
+    // ladder climbs to a model the caller will actually accept.
+    let strict = register(
+        &ref_stars,
+        &target,
+        &Config {
+            max_rms_error: 0.4,
+            ..config.clone()
+        },
+    )
+    .expect("a tight gate must climb the ladder, not fail on a rung the gate rejects");
+    assert_eq!(strict.transform().transform_type(), TransformType::Affine);
+    assert!(
+        strict.rms_error() <= 0.4,
+        "climbed rung must satisfy the gate, got {}",
+        strict.rms_error()
+    );
+}
