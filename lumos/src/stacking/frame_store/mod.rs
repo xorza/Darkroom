@@ -253,22 +253,18 @@ impl<P> WarpQuality<P> {
         }
     }
 
-    /// The plane `kind` names, when the frame carries it. [`FramePlane::Channel`] is not a warp
-    /// quality plane and is always absent.
-    pub(crate) fn plane(&self, kind: FramePlane) -> Option<&P> {
-        match kind {
-            FramePlane::Coverage => self.coverage.as_ref(),
-            FramePlane::Confidence => self.confidence.as_ref(),
-            FramePlane::Channel => None,
-        }
-    }
-
     /// Every plane the frame actually carries, each with the kind that names it. The one place
     /// that decides what "all the quality planes" means, so a caller cannot enumerate a subset.
+    ///
+    /// Reads the two fields rather than going through [`FramePlane`], which also names the image
+    /// channels and so has a variant this type could only ever answer `None` for.
     pub(crate) fn present(&self) -> impl Iterator<Item = (FramePlane, &P)> {
-        [FramePlane::Coverage, FramePlane::Confidence]
-            .into_iter()
-            .filter_map(|kind| self.plane(kind).map(|plane| (kind, plane)))
+        [
+            (FramePlane::Coverage, self.coverage.as_ref()),
+            (FramePlane::Confidence, self.confidence.as_ref()),
+        ]
+        .into_iter()
+        .filter_map(|(kind, plane)| plane.map(|plane| (kind, plane)))
     }
 
     /// How many planes are present, 0 to 2.

@@ -3,7 +3,7 @@
 use crate::error::InvalidConfigField;
 use crate::stacking::registration::distortion::sip::SipConfig;
 use crate::stacking::registration::ransac::RansacConfig;
-use crate::stacking::registration::transform::TransformType;
+use crate::stacking::registration::transform::{TransformModel, TransformType};
 use crate::stacking::registration::triangle::TriangleConfig;
 
 /// Interpolation method for image resampling.
@@ -104,21 +104,17 @@ impl Default for RegistrationMatchingConfig {
 
 impl RegistrationMatchingConfig {
     /// The star-count gate applied to each input set: the explicit `min_stars` override when set,
-    /// otherwise twice the transform's minimal sample, floored at three for triangle matching.
-    /// `Auto` can climb to homography, so it uses homography's eight-star gate.
-    pub fn required_stars(&self, transform_type: TransformType) -> usize {
+    /// otherwise twice the model's minimal sample, floored at three for triangle matching.
+    /// Sized against [`TransformModel::most_general`], since `Auto` can climb to homography and
+    /// must arrive with enough stars to fit one.
+    pub fn required_stars(&self, model: TransformModel) -> usize {
         if let Some(n) = self.min_stars {
             return n;
         }
-        let model = if transform_type == TransformType::Auto {
-            TransformType::Homography
-        } else {
-            transform_type
-        };
-        (2 * model.min_points()).max(3)
+        (2 * model.most_general().min_points()).max(3)
     }
 
-    fn validate(&self, transform_type: TransformType) -> Result<(), InvalidConfigField> {
+    fn validate(&self, model: TransformModel) -> Result<(), InvalidConfigField> {
         InvalidConfigField::check(
             self.max_stars >= 3,
             "max_stars",
@@ -133,7 +129,7 @@ impl RegistrationMatchingConfig {
                 min_stars as f64,
             )?;
         }
-        let required_stars = self.required_stars(transform_type);
+        let required_stars = self.required_stars(model);
         InvalidConfigField::check_against(
             self.max_stars >= required_stars,
             "max_stars",
@@ -141,11 +137,7 @@ impl RegistrationMatchingConfig {
             self.max_stars as f64,
             required_stars as f64,
         )?;
-        let required_points = if transform_type == TransformType::Auto {
-            TransformType::Homography.min_points()
-        } else {
-            transform_type.min_points()
-        };
+        let required_points = model.most_general().min_points();
         InvalidConfigField::check_against(
             self.min_matches >= required_points,
             "min_matches",
@@ -180,9 +172,9 @@ impl RegistrationMatchingConfig {
 /// ```
 #[derive(Debug, Clone)]
 pub struct Config {
-    /// Transformation model: Translation, Euclidean, Similarity, Affine, Homography, Auto.
-    /// Default: Auto (starts with Euclidean and upgrades through Homography if needed).
-    pub transform_type: TransformType,
+    /// Which model to fit, or `Auto` to ladder Euclidean → Similarity → Affine → Homography and
+    /// take the first that fits. Default: `Auto`.
+    pub transform_type: TransformModel,
 
     /// Star selection, acceptance gates, and triangle matching.
     pub matching: RegistrationMatchingConfig,
@@ -203,7 +195,7 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            transform_type: TransformType::Auto,
+            transform_type: TransformModel::Auto,
 
             matching: RegistrationMatchingConfig::default(),
 
@@ -256,7 +248,7 @@ impl Config {
     /// Wide-field configuration: handles lens distortion.
     pub fn wide_field() -> Self {
         Self {
-            transform_type: TransformType::Homography,
+            transform_type: TransformModel::Fixed(TransformType::Homography),
             sip: Some(SipConfig::default()),
             ransac: RansacConfig {
                 max_rotation: None,

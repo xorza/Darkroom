@@ -18,7 +18,7 @@ use crate::stacking::registration::config::Config as RegistrationConfig;
 use crate::stacking::registration::distortion::sip::{SipConfig, SipPolynomial};
 use crate::stacking::registration::register;
 use crate::stacking::registration::resample::warp;
-use crate::stacking::registration::transform::TransformType;
+use crate::stacking::registration::transform::TransformModel;
 use crate::stacking::star_detection::config::Config;
 use crate::stacking::star_detection::config::measurement_config::{CentroidMethod, NoiseModel};
 use crate::stacking::star_detection::detector::StarDetector;
@@ -99,7 +99,7 @@ fn register_two_calibrated_lights() {
 
     // Register image 2 to image 1 WITHOUT SIP first (baseline).
     let reg_config = RegistrationConfig {
-        transform_type: TransformType::Auto,
+        transform_type: TransformModel::Auto,
         sip: None,
         ..RegistrationConfig::default()
     };
@@ -363,7 +363,7 @@ fn weighted_fit_registration_rms() {
         let s1 = detector.detect(&img1).stars;
         let s2 = detector.detect(&img2).stars;
         let reg_config = RegistrationConfig {
-            transform_type: TransformType::Auto,
+            transform_type: TransformModel::Auto,
             sip: None,
             ..RegistrationConfig::default()
         };

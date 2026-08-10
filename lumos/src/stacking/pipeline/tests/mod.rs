@@ -20,7 +20,9 @@ use crate::stacking::pipeline::tier::FrameTier;
 use crate::stacking::progress::{ProgressCallback, StackingProgress, StackingStage};
 use crate::stacking::registration::config::Config as RegistrationConfig;
 use crate::stacking::registration::resample::warp;
-use crate::stacking::registration::transform::{Transform, TransformType, WarpTransform};
+use crate::stacking::registration::transform::{
+    Transform, TransformModel, TransformType, WarpTransform,
+};
 use crate::stacking::star_detection::config::Config as StarDetectionConfig;
 use crate::stacking::star_detection::detector::StarDetector;
 use crate::testing::synthetic::fixtures::star_field;
@@ -294,7 +296,7 @@ fn an_invalid_registration_config_is_reported_as_one() {
         ..Default::default()
     };
     // Homography needs four points, so a three-match floor can never be satisfied.
-    config.registration.transform_type = TransformType::Homography;
+    config.registration.transform_type = TransformModel::Fixed(TransformType::Homography);
     config.registration.matching.min_matches = 3;
     assert!(
         config.registration.validate().is_err(),
@@ -335,7 +337,7 @@ fn a_bad_registration_config_is_never_mistaken_for_frames_that_would_not_match()
         ..Default::default()
     };
     // Homography needs four points, so a three-match floor can never be satisfied.
-    config.registration.transform_type = TransformType::Homography;
+    config.registration.transform_type = TransformModel::Fixed(TransformType::Homography);
     config.registration.matching.min_matches = 3;
     assert!(
         config.registration.validate().is_err(),

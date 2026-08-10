@@ -8,6 +8,7 @@
 //! - Combined disturbances (stress tests)
 
 use crate::stacking::registration::ransac::RansacConfig;
+use crate::stacking::registration::transform::TransformModel;
 use crate::stacking::registration::{Config, RegistrationError, TransformType, register};
 use crate::stacking::star_detection::star::Star;
 use crate::testing::prelude::*;
@@ -27,7 +28,7 @@ const FWHM_SUBPIXEL: f32 = 0.66; // max_sigma ~0.33
 /// Standard config for robustness tests: min_stars=6, min_matches=4.
 fn robustness_config(transform_type: TransformType) -> Config {
     Config {
-        transform_type,
+        transform_type: TransformModel::Fixed(transform_type),
         matching: helpers::matching_config(6, 4),
         ..Default::default()
     }
@@ -36,7 +37,7 @@ fn robustness_config(transform_type: TransformType) -> Config {
 /// Config with no rotation/scale constraints (for large-angle tests).
 fn unconstrained_config(transform_type: TransformType) -> Config {
     Config {
-        transform_type,
+        transform_type: TransformModel::Fixed(transform_type),
         matching: helpers::matching_config(6, 4),
         ransac: RansacConfig {
             max_rotation: None,
@@ -439,7 +440,7 @@ fn minimum_stars_translation() {
     let target_stars = translate_star_list(&ref_stars, dx, dy);
 
     let config = Config {
-        transform_type: TransformType::Translation,
+        transform_type: TransformModel::Fixed(TransformType::Translation),
         matching: helpers::matching_config(4, 3),
         ..Default::default()
     };
@@ -478,7 +479,7 @@ fn minimum_stars_similarity() {
     let target_stars = transform_star_list(&ref_stars, dx, dy, angle_rad, scale, 500.0, 500.0);
 
     let config = Config {
-        transform_type: TransformType::Similarity,
+        transform_type: TransformModel::Fixed(TransformType::Similarity),
         matching: helpers::matching_config(4, 3),
         ..Default::default()
     };
@@ -508,7 +509,7 @@ fn insufficient_stars_fails() {
     let target_stars = translate_star_list(&ref_stars, 10.0, 5.0);
 
     let config = Config {
-        transform_type: TransformType::Translation,
+        transform_type: TransformModel::Fixed(TransformType::Translation),
         matching: helpers::matching_config(4, 3),
         ..Default::default()
     };
@@ -636,7 +637,7 @@ fn stress_dense_field_large_transform() {
     let target_stars = transform_star_list(&ref_stars, dx, dy, 0.0, scale, 1500.0, 1500.0);
 
     let config = Config {
-        transform_type: TransformType::Similarity,
+        transform_type: TransformModel::Fixed(TransformType::Similarity),
         matching: helpers::matching_config(10, 8),
         ..Default::default()
     };
@@ -1000,7 +1001,7 @@ fn homography_with_outliers() {
         add_spurious_star_list(&target_stars, 12, 2000.0, 2000.0, 40002, FWHM_LOOSE);
 
     let config = Config {
-        transform_type: TransformType::Homography,
+        transform_type: TransformModel::Fixed(TransformType::Homography),
         matching: helpers::matching_config(8, 6),
         ..Default::default()
     };
@@ -1059,7 +1060,7 @@ fn homography_with_noise_and_partial_overlap() {
         .collect();
 
     let config = Config {
-        transform_type: TransformType::Homography,
+        transform_type: TransformModel::Fixed(TransformType::Homography),
         matching: helpers::matching_config(8, 6),
         ..Default::default()
     };

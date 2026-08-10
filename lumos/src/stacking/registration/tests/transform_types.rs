@@ -10,6 +10,7 @@
 //! - Affine (6 DOF: handles differential scaling and shear)
 //! - Homography (8 DOF: handles perspective)
 
+use crate::stacking::registration::transform::TransformModel;
 use crate::stacking::registration::{Config, TransformType, register};
 use crate::stacking::star_detection::star::Star;
 use crate::testing::prelude::*;
@@ -33,7 +34,7 @@ fn registration_translation_only() {
 
     // Configure registration for translation only
     let config = Config {
-        transform_type: TransformType::Translation,
+        transform_type: TransformModel::Fixed(TransformType::Translation),
         matching: helpers::matching_config(6, 4),
         ..Default::default()
     };
@@ -111,7 +112,7 @@ fn registration_similarity_transform() {
 
     // Configure registration with scale
     let config = Config {
-        transform_type: TransformType::Similarity,
+        transform_type: TransformModel::Fixed(TransformType::Similarity),
         matching: helpers::matching_config(6, 4),
         ..Default::default()
     };
@@ -185,7 +186,7 @@ fn registration_with_noise() {
 
     // Configure registration
     let config = Config {
-        transform_type: TransformType::Translation,
+        transform_type: TransformModel::Fixed(TransformType::Translation),
         matching: helpers::matching_config(6, 4),
         ..Default::default()
     };
@@ -235,7 +236,7 @@ fn registration_large_translation() {
 
     // Configure registration
     let config = Config {
-        transform_type: TransformType::Translation,
+        transform_type: TransformModel::Fixed(TransformType::Translation),
         matching: helpers::matching_config(6, 4),
         ..Default::default()
     };
@@ -275,7 +276,7 @@ fn registration_euclidean_rotation_only() {
         transform_star_list(&ref_stars, 0.0, 0.0, angle_rad, 1.0, center_x, center_y);
 
     let config = Config {
-        transform_type: TransformType::Euclidean,
+        transform_type: TransformModel::Fixed(TransformType::Euclidean),
         matching: helpers::matching_config(6, 4),
         ..Default::default()
     };
@@ -327,7 +328,7 @@ fn registration_euclidean_translation_and_rotation() {
     let target_stars = transform_star_list(&ref_stars, dx, dy, angle_rad, 1.0, center_x, center_y);
 
     let config = Config {
-        transform_type: TransformType::Euclidean,
+        transform_type: TransformModel::Fixed(TransformType::Euclidean),
         matching: helpers::matching_config(6, 4),
         ..Default::default()
     };
@@ -378,7 +379,7 @@ fn registration_affine_differential_scale() {
     let target_stars = apply_affine(&ref_stars, affine_params);
 
     let config = Config {
-        transform_type: TransformType::Affine,
+        transform_type: TransformModel::Fixed(TransformType::Affine),
         matching: helpers::matching_config(6, 4),
         ..Default::default()
     };
@@ -423,7 +424,7 @@ fn registration_affine_with_shear() {
     let target_stars = apply_affine(&ref_stars, affine_params);
 
     let config = Config {
-        transform_type: TransformType::Affine,
+        transform_type: TransformModel::Fixed(TransformType::Affine),
         matching: helpers::matching_config(6, 4),
         ..Default::default()
     };
@@ -473,7 +474,7 @@ fn registration_affine_rotation_and_differential_scale() {
     let target_stars = apply_affine(&ref_stars, affine_params);
 
     let config = Config {
-        transform_type: TransformType::Affine,
+        transform_type: TransformModel::Fixed(TransformType::Affine),
         matching: helpers::matching_config(6, 4),
         ..Default::default()
     };
@@ -518,7 +519,7 @@ fn registration_homography_mild_perspective() {
     let target_stars = apply_homography(&ref_stars, homography_params);
 
     let config = Config {
-        transform_type: TransformType::Homography,
+        transform_type: TransformModel::Fixed(TransformType::Homography),
         matching: helpers::matching_config(8, 6),
         ..Default::default()
     };
@@ -568,7 +569,7 @@ fn registration_homography_with_rotation() {
     let target_stars = apply_homography(&ref_stars, homography_params);
 
     let config = Config {
-        transform_type: TransformType::Homography,
+        transform_type: TransformModel::Fixed(TransformType::Homography),
         matching: helpers::matching_config(8, 6),
         ..Default::default()
     };
@@ -611,7 +612,7 @@ fn similarity_recovers_from_euclidean_data() {
 
     // Use Similarity estimator
     let config = Config {
-        transform_type: TransformType::Similarity,
+        transform_type: TransformModel::Fixed(TransformType::Similarity),
         matching: helpers::matching_config(6, 4),
         ..Default::default()
     };
@@ -653,7 +654,7 @@ fn affine_recovers_from_similarity_data() {
         transform_star_list(&ref_stars, dx, dy, angle_rad, scale, center_x, center_y);
 
     let config = Config {
-        transform_type: TransformType::Affine,
+        transform_type: TransformModel::Fixed(TransformType::Affine),
         matching: helpers::matching_config(6, 4),
         ..Default::default()
     };
@@ -681,7 +682,7 @@ fn auto_ladder_selects_simplest_adequate_model() {
     // truth is built so every simpler model genuinely exceeds the threshold.
     let ref_stars = generate_random_stars(90, 2000.0, 2000.0, 101010, FWHM_TIGHT);
     let config = Config {
-        transform_type: TransformType::Auto,
+        transform_type: TransformModel::Auto,
         matching: helpers::matching_config(8, 6),
         ..Default::default()
     };
@@ -754,7 +755,7 @@ fn a_tight_accuracy_gate_climbs_the_ladder_instead_of_failing_on_a_rung() {
     let ref_stars = generate_random_stars(90, 2000.0, 2000.0, 101010, FWHM_TIGHT);
     let target = apply_affine(&ref_stars, [1.0006, 0.0, 20.0, 0.0, 0.9994, -15.0]);
     let config = Config {
-        transform_type: TransformType::Auto,
+        transform_type: TransformModel::Auto,
         matching: helpers::matching_config(8, 6),
         ..Default::default()
     };
