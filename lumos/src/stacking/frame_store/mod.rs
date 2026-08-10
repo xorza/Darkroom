@@ -93,19 +93,6 @@ impl FrameStats {
     pub(crate) fn measure(image: &impl StackableImage) -> Self {
         let dimensions = image.dimensions();
         let quantization_sigma = image.quantization_sigma();
-        if dimensions.channels() == 1 {
-            let data = image.channel(0);
-            let mut scratch = data.to_vec();
-            let median = median_f32_mut(&mut scratch);
-            let mad = mad_f32_with_scratch(data, median, &mut scratch);
-            let mut channels = ArrayVec::new();
-            channels.push(MedianMad { median, mad });
-            return Self {
-                channels,
-                quantization_sigma,
-            };
-        }
-
         let channels = (0..dimensions.channels())
             .into_par_iter()
             .map(|channel| {
@@ -347,7 +334,7 @@ impl StoredFrame {
         source_stats: FrameStats,
     ) -> Result<Self, FrameStoreError> {
         let spill = FrameSpill::new(directory, name);
-        let channels = spill_channels(spill, image)?.planes;
+        let channels = spill_channels(spill, image)?;
         let quality = quality.try_map(|kind, plane| {
             let path = spill.quality_path(kind);
             write_plane(&path, &plane)?;
@@ -361,32 +348,12 @@ impl StoredFrame {
     }
 }
 
-#[derive(Debug)]
-struct SpillFiles {
-    paths: ArrayVec<PathBuf, 3>,
-}
-
-#[derive(Debug)]
-struct SpilledChannels {
-    planes: ArrayVec<StoredPlane, 3>,
-    paths: ArrayVec<PathBuf, 3>,
-}
-
-impl Drop for SpillFiles {
-    fn drop(&mut self) {
-        for path in &self.paths {
-            let _ = std::fs::remove_file(path);
-        }
-    }
-}
-
 /// A calibrated image stored on disk between detection and registration.
 #[derive(Debug)]
 pub(crate) struct StoredImage {
     pub(super) metadata: ImageMetadata,
     pub(super) dimensions: ImageDimensions,
     channels: ArrayVec<StoredPlane, 3>,
-    _spill_files: SpillFiles,
 }
 
 impl StoredImage {
@@ -397,14 +364,10 @@ impl StoredImage {
         image: &LinearImage,
     ) -> Result<Self, FrameStoreError> {
         let dimensions = image.dimensions();
-        let spilled = spill_channels(FrameSpill::new(directory, name), image)?;
         Ok(Self {
             metadata: image.metadata.clone(),
             dimensions,
-            channels: spilled.planes,
-            _spill_files: SpillFiles {
-                paths: spilled.paths,
-            },
+            channels: spill_channels(FrameSpill::new(directory, name), image)?,
         })
     }
 
@@ -420,20 +383,23 @@ impl StoredImage {
     }
 }
 
+/// Write each channel under `spill` and memory-map it back.
+///
+/// The files are not tracked for removal here. Everything the frame store spills lives inside a
+/// [`SpillDirectory`], which removes the directory wholesale on drop unless `keep_cache` asked for
+/// it to survive — so a per-file drop guard would either duplicate that or, if it ignored the flag,
+/// quietly delete what the user asked to keep.
 fn spill_channels(
     spill: FrameSpill<'_>,
     image: &impl StackableImage,
-) -> Result<SpilledChannels, FrameStoreError> {
-    let dimensions = image.dimensions();
+) -> Result<ArrayVec<StoredPlane, 3>, FrameStoreError> {
     let mut planes = ArrayVec::new();
-    let mut paths = ArrayVec::new();
-    for channel in 0..dimensions.channels() {
+    for channel in 0..image.dimensions().channels() {
         let path = spill.channel_path(channel);
         write_plane(&path, image.channel(channel))?;
-        planes.push(StoredPlane::map(path.clone())?);
-        paths.push(path);
+        planes.push(StoredPlane::map(path)?);
     }
-    Ok(SpilledChannels { planes, paths })
+    Ok(planes)
 }
 
 /// The files one frame occupies inside a spill directory: one plane per channel, plus the

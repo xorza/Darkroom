@@ -2,7 +2,7 @@ use crate::stacking::frame_store::*;
 use crate::testing::ScratchDirectory;
 
 #[test]
-fn stored_image_roundtrip_overwrites_stale_pixels_and_cleans_spill_files() {
+fn stored_image_roundtrip_overwrites_stale_pixels() {
     let directory = ScratchDirectory::new("frame_store_image");
     let dimensions = ImageDimensions::new((2, 2), 1);
     let mut image = LinearImage::from_pixels(dimensions, vec![0.1, 0.2, 0.3, 0.4]);
@@ -15,8 +15,45 @@ fn stored_image_roundtrip_overwrites_stale_pixels_and_cleans_spill_files() {
     assert_eq!(loaded.channel(0).pixels(), &[0.1, 0.2, 0.3, 0.4]);
     assert_eq!(loaded.metadata.exposure_time, Some(30.0));
 
+    // Dropping the image does not remove its planes: the spill directory owns that decision, so
+    // that `keep_cache` can hold them. See `spill_directory_removes_planes_unless_asked_to_keep`.
     drop(stored);
-    assert!(!path.exists());
+    assert!(path.exists());
+}
+
+/// The one owner of spilled-file cleanup, and the only thing `keep_cache` acts through.
+///
+/// Both `StoredImage::spill` and `StoredFrame::spill` write into a directory owned here and keep no
+/// per-file guard of their own. A guard on either would delete planes the user asked to keep, and
+/// would do it the moment that frame dropped rather than at the end of the run.
+#[test]
+fn spill_directory_removes_planes_unless_asked_to_keep() {
+    let scratch = ScratchDirectory::new("frame_store_keep");
+    let dimensions = ImageDimensions::new((2, 2), 1);
+    let image = LinearImage::from_pixels(dimensions, vec![0.1, 0.2, 0.3, 0.4]);
+
+    for (keep, should_survive) in [(false, false), (true, true)] {
+        let root = scratch.join(format!("keep_{keep}"));
+        let directory = SpillDirectory::create(root.clone(), keep).unwrap();
+
+        let stored = StoredImage::spill(&directory.path, "calibrated", &image).unwrap();
+        let plane = root.join("calibrated_c0.bin");
+        assert!(plane.exists(), "keep={keep}: plane was not written");
+
+        // The frame going away must not take the file with it — only the directory decides.
+        drop(stored);
+        assert!(
+            plane.exists(),
+            "keep={keep}: dropping the frame removed its plane"
+        );
+
+        drop(directory);
+        assert_eq!(
+            plane.exists(),
+            should_survive,
+            "keep={keep}: plane survival is wrong after the directory dropped"
+        );
+    }
 }
 
 #[test]
