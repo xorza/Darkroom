@@ -1,5 +1,7 @@
 //! Tests for Gaussian convolution.
 
+mod matched_filter;
+
 use crate::testing::prelude::*;
 use std::f32::consts::FRAC_PI_2;
 

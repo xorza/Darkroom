@@ -1,5 +1,7 @@
 //! Tests for background estimation.
 
+mod synthetic_skies;
+
 use crate::testing::prelude::*;
 use crate::testing::synthetic::star_profiles::{StarProfile, SyntheticStar};
 use crate::{

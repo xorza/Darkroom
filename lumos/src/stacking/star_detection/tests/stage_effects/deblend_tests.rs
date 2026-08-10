@@ -8,7 +8,7 @@
 use crate::math::fwhm::fwhm_to_sigma;
 use crate::stacking::star_detection::config::detection_config::DetectionConfig;
 use crate::stacking::star_detection::detector::stages::detect::internals::detect_stars_test;
-use crate::stacking::star_detection::tests::stage_tests::{background_estimate, matched_truths};
+use crate::stacking::star_detection::tests::stage_effects::{background_estimate, matched_truths};
 use crate::testing::prelude::*;
 use crate::testing::synthetic::sky_field::{Sky, SkyField};
 
