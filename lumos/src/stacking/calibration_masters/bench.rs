@@ -149,7 +149,11 @@ fn cosmic_ray_frame(cfa: CfaType) -> CfaImage {
     make_cfa(Size2us::new(CR_W, CR_H), px, cfa)
 }
 
-#[quick_bench(warmup_iters = 1, iters = 3)]
+/// Twelve iterations, not the three most benches here use: a pass over this fixture is ~850 ms and
+/// its run-to-run spread is wide enough that a median of three moves by more than any change worth
+/// making. The extra samples cost ~7 s against the ~27 s release rebuild that any A/B already pays,
+/// so they are close to free.
+#[quick_bench(warmup_iters = 1, iters = 12)]
 fn bench_cosmic_ray_reject_mono(b: ::quickbench::Bencher) {
     let frame = cosmic_ray_frame(CfaType::Mono);
     let config = CosmicRayConfig::default();
@@ -159,7 +163,7 @@ fn bench_cosmic_ray_reject_mono(b: ::quickbench::Bencher) {
     });
 }
 
-#[quick_bench(warmup_iters = 1, iters = 3)]
+#[quick_bench(warmup_iters = 1, iters = 12)]
 fn bench_cosmic_ray_reject_bayer(b: ::quickbench::Bencher) {
     let frame = cosmic_ray_frame(bayer());
     let config = CosmicRayConfig::default();
