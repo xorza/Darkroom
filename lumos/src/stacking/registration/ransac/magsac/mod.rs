@@ -8,9 +8,7 @@
 //! table): quadratic (≈ r²/4) near zero, saturating at `σ²_max/2`. It is monotone non-decreasing
 //! in the residual — the property a robust loss must have.
 
-/// Chi-square 99% quantile for k=2 degrees of freedom.
-/// Points beyond this are considered outliers.
-const CHI_QUANTILE_SQ: f64 = 9.21; // χ²₀.₉₉(2)
+use crate::math::statistics::CHI2_99_2DOF;
 
 /// Lower incomplete gamma function for k=2: γ(1, x) = 1 - exp(-x).
 #[inline]
@@ -40,7 +38,7 @@ impl MagsacScorer {
     ///   greater than ~3·max_sigma are treated as outliers.
     pub(super) fn new(max_sigma: f64) -> Self {
         let max_sigma_sq = max_sigma * max_sigma;
-        let threshold_sq = CHI_QUANTILE_SQ * max_sigma_sq;
+        let threshold_sq = CHI2_99_2DOF * max_sigma_sq;
 
         // Outlier loss = loss at the boundary, ensuring continuity
         // For k=2: loss(threshold) = σ²_max/2 · γ(1, χ²/2) + threshold/4 · (1 - γ(1, χ²/2))
