@@ -595,48 +595,64 @@ fn refine_centroid(
 
     let stamp_radius_i32 = stamp_radius as i32;
     let stamp_size = 2 * stamp_radius + 1;
+    let x0 = icx as usize - stamp_radius;
 
     // The weight is a circular Gaussian, so it factors per axis:
     // `exp(-(dx² + dy²)/2σ²) = exp(-dx²/2σ²) · exp(-dy²/2σ²)`. Filling one column vector here and
     // one row scalar below turns `(2r+1)²` `exp` calls into `2(2r+1)` — 961 into 62 at the largest
     // stamp — and this loop is what `measure_star` spends most of its time in. Costs one extra
     // multiply per pixel and a ulp or two of weight precision against the unfactored form.
+    //
+    // `column_moments[c]` is `c · column_weights[c]`, prebuilt so the inner loop is two dot
+    // products over the row and never converts a pixel index to f64.
     let mut column_weights = [0.0f64; MAX_STAMP_SIZE];
-    for (column, weight) in column_weights[..stamp_size].iter_mut().enumerate() {
-        let px = (icx + column as isize - stamp_radius as isize) as f64;
-        let ddx = px - pos_x;
-        *weight = (-ddx * ddx / two_sigma_sq).exp();
+    let mut column_moments = [0.0f64; MAX_STAMP_SIZE];
+    for column in 0..stamp_size {
+        let ddx = (x0 + column) as f64 - pos_x;
+        let weight = (-ddx * ddx / two_sigma_sq).exp();
+        column_weights[column] = weight;
+        column_moments[column] = column as f64 * weight;
     }
 
     for dy in -stamp_radius_i32..=stamp_radius_i32 {
         let y = (icy + dy as isize) as usize;
         // One bounds check per row rather than per pixel — `is_valid_stamp_position` above has
         // already established the whole stamp is inside the frame.
-        let px_row = pixels.row(y);
-        let bg_row = background.background.row(y);
+        let px_row = &pixels.row(y)[x0..x0 + stamp_size];
+        let bg_row = &background.background.row(y)[x0..x0 + stamp_size];
 
         let py = y as f64;
         let ddy = py - pos_y;
         let row_weight = (-ddy * ddy / two_sigma_sq).exp();
 
-        for (column, &column_weight) in column_weights[..stamp_size].iter().enumerate() {
-            let x = icx as usize + column - stamp_radius;
-
-            // Background-subtracted value
-            let value = (px_row[x] - bg_row[x]).max(0.0) as f64;
-            let weight = value * column_weight * row_weight;
-
-            sum_x += x as f64 * weight;
-            sum_y += py * weight;
-            sum_w += weight;
+        // The row's total weight, and its first moment about the stamp's left edge. `row_weight`
+        // and `py` are constant across the row, so they scale these two totals once at the bottom
+        // instead of multiplying into every pixel.
+        let mut row_w = 0.0f64;
+        let mut row_x = 0.0f64;
+        for (((&value, &sky), &column_weight), &column_moment) in px_row
+            .iter()
+            .zip(bg_row)
+            .zip(&column_weights[..stamp_size])
+            .zip(&column_moments[..stamp_size])
+        {
+            let signal = f64::from((value - sky).max(0.0));
+            row_w += signal * column_weight;
+            row_x += signal * column_moment;
         }
+
+        let weighted_row = row_weight * row_w;
+        sum_w += weighted_row;
+        sum_y += weighted_row * py;
+        sum_x += row_weight * row_x;
     }
 
     if sum_w < f64::EPSILON {
         return None;
     }
 
-    let new_pos = DVec2::new(sum_x / sum_w, sum_y / sum_w);
+    // `sum_x` is the first moment about the stamp's left edge, so lift it back into image x.
+    let new_pos = DVec2::new(x0 as f64 + sum_x / sum_w, sum_y / sum_w);
 
     // Reject if centroid moved too far (likely bad detection)
     let max_move = stamp_size as f64 / 4.0;

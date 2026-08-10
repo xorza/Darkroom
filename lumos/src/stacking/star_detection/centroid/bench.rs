@@ -7,10 +7,12 @@ use crate::testing::prelude::*;
 use ::quickbench::quick_bench;
 use std::hint::black_box;
 
+use crate::stacking::star_detection::background::background_estimate::BackgroundEstimate;
 use crate::stacking::star_detection::centroid::gaussian_fit::{GaussianFit, GaussianFitConfig};
 use crate::stacking::star_detection::centroid::measure_star;
 use crate::stacking::star_detection::centroid::moffat_fit::{MoffatFit, MoffatFitConfig};
 use crate::stacking::star_detection::centroid::refine_centroid;
+use crate::stacking::star_detection::centroid::{compute_star, windowed_covariance};
 use crate::stacking::star_detection::config::background_config::BackgroundConfig;
 use crate::stacking::star_detection::config::detection_config::DetectionConfig;
 use crate::stacking::star_detection::config::measurement_config::{
@@ -330,5 +332,99 @@ fn bench_moffat_fit_single(b: ::quickbench::Bencher) {
             None,
             black_box(&config),
         ))
+    });
+}
+
+/// A 64x64 field with one Gaussian star at (32.3, 32.7), plus its background estimate — the
+/// fixture the metrics benches below share. `refine_centroid`'s benches build the same thing.
+fn metrics_fixture() -> (Buffer2<f32>, BackgroundEstimate) {
+    let pixels = SyntheticStar::new(
+        Vec2::new(32.3, 32.7),
+        0.8,
+        StarProfile::Gaussian { sigma: 2.5 },
+    )
+    .stamp(Size2us::new(64, 64), 0.1);
+    let bg = background_map::estimate(&pixels, &BackgroundConfig::default());
+    (pixels, bg)
+}
+
+#[quick_bench(warmup_iters = 100, iters = 10000)]
+fn bench_compute_star_single(b: ::quickbench::Bencher) {
+    // Flux, SNR, sharpness, roundness and the windowed covariance for one candidate — everything
+    // `measure_star` does after the centroid is settled.
+    let (pixels, bg) = metrics_fixture();
+    let pos = DVec2::new(32.3, 32.7);
+    let peak = pixels[(32, 33)];
+
+    b.bench(|| {
+        black_box(compute_star(
+            black_box(&pixels),
+            black_box(&bg),
+            black_box(pos),
+            black_box(peak),
+            black_box(7),
+            None,
+            None,
+        ))
+    });
+}
+
+#[quick_bench(warmup_iters = 10, iters = 1000)]
+fn bench_compute_star_batch_1000(b: ::quickbench::Bencher) {
+    let (pixels, bg) = metrics_fixture();
+    let pos = DVec2::new(32.3, 32.7);
+    let peak = pixels[(32, 33)];
+
+    b.bench(|| {
+        for _ in 0..1000 {
+            black_box(compute_star(
+                black_box(&pixels),
+                black_box(&bg),
+                black_box(pos),
+                black_box(peak),
+                black_box(7),
+                None,
+                None,
+            ));
+        }
+    });
+}
+
+#[quick_bench(warmup_iters = 100, iters = 10000)]
+fn bench_windowed_covariance_single(b: ::quickbench::Bencher) {
+    // The adaptive-window moment loop nested inside `compute_star`: up to four re-reads of the
+    // stamp's image and background rows, one per window iteration.
+    let (pixels, bg) = metrics_fixture();
+    // Seeded as `compute_star` seeds it — sigma 2.5 gives sigma^2 = 6.25.
+    let seed_sigma_sq = 6.25;
+
+    b.bench(|| {
+        black_box(windowed_covariance(
+            black_box(&pixels),
+            black_box(&bg),
+            None,
+            black_box(DVec2::new(32.3, 32.7)),
+            black_box(7),
+            black_box(seed_sigma_sq),
+        ))
+    });
+}
+
+#[quick_bench(warmup_iters = 10, iters = 1000)]
+fn bench_windowed_covariance_batch_1000(b: ::quickbench::Bencher) {
+    let (pixels, bg) = metrics_fixture();
+    let seed_sigma_sq = 6.25;
+
+    b.bench(|| {
+        for _ in 0..1000 {
+            black_box(windowed_covariance(
+                black_box(&pixels),
+                black_box(&bg),
+                None,
+                black_box(DVec2::new(32.3, 32.7)),
+                black_box(7),
+                black_box(seed_sigma_sq),
+            ));
+        }
     });
 }
