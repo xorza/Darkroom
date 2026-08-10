@@ -10,8 +10,8 @@ use common::CancelToken;
 use crate::error::InvalidConfigField;
 use crate::io::image::image_dimensions::ImageDimensions;
 use crate::stacking::calibration_masters::CalibrationError;
-use crate::stacking::frame_store::FramePlane;
 use crate::stacking::frame_store::error::FrameStoreError;
+use crate::stacking::frame_store::warp_quality::FramePlane;
 
 /// Invalid [`crate::StackConfig`] parameters.
 ///

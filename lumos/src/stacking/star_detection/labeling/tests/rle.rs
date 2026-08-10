@@ -1,5 +1,5 @@
 use super::*;
-use crate::stacking::star_detection::labeling::Run;
+use crate::stacking::star_detection::labeling::run::Run;
 
 #[test]
 fn search_window_widens_by_one_each_way_for_eight_connectivity() {

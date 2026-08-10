@@ -14,7 +14,8 @@ use crate::stacking::combine::MIN_CONTRIBUTING_COVERAGE;
 use crate::stacking::combine::error::Error;
 use crate::stacking::combine::error::check_cancel;
 use crate::stacking::combine::normalization::NORMALIZATION_CHUNK_SIZE;
-use crate::stacking::frame_store::{StoredFrame, StoredPlane};
+use crate::stacking::frame_store::StoredFrame;
+use crate::stacking::frame_store::stored_plane::StoredPlane;
 
 #[derive(Debug)]
 pub(crate) struct CommonDomain {

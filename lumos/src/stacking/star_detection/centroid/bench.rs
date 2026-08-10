@@ -1,18 +1,20 @@
 //! Benchmarks for centroid computation.
 //!
 //! Run with: `cargo test -p lumos --release bench_centroid -- --ignored --nocapture`
-use crate::stacking::star_detection::centroid::{StampGrid, compute_stamp_radius};
+use crate::stacking::star_detection::centroid::compute_stamp_radius;
+use crate::stacking::star_detection::centroid::stamp::StampGrid;
 use crate::testing::prelude::*;
 
 use ::quickbench::quick_bench;
 use std::hint::black_box;
 
 use crate::stacking::star_detection::background::background_estimate::BackgroundEstimate;
+use crate::stacking::star_detection::centroid::compute_star;
+use crate::stacking::star_detection::centroid::covariance::windowed_covariance;
 use crate::stacking::star_detection::centroid::gaussian_fit::{GaussianFit, GaussianFitConfig};
 use crate::stacking::star_detection::centroid::measure_star;
 use crate::stacking::star_detection::centroid::moffat_fit::{MoffatFit, MoffatFitConfig};
 use crate::stacking::star_detection::centroid::refine_centroid;
-use crate::stacking::star_detection::centroid::{compute_star, windowed_covariance};
 use crate::stacking::star_detection::config::background_config::BackgroundConfig;
 use crate::stacking::star_detection::config::detection_config::DetectionConfig;
 use crate::stacking::star_detection::config::measurement_config::{

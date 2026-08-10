@@ -1,5 +1,5 @@
 //! Tests for Moffat profile fitting.
-use crate::stacking::star_detection::centroid::StampGrid;
+use crate::stacking::star_detection::centroid::stamp::StampGrid;
 use crate::testing::prelude::*;
 
 use std::f64::consts::PI;

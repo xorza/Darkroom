@@ -1,4 +1,5 @@
 use crate::io::raw::demosaic::bayer::CfaPattern;
+use crate::stacking::calibration_masters::defect_map::sampling::collect_color_samples;
 use crate::stacking::calibration_masters::defect_map::*;
 use ::quickbench::quick_bench;
 

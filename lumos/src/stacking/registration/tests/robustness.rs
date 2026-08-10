@@ -7,7 +7,7 @@
 //! - Minimum star counts
 //! - Combined disturbances (stress tests)
 
-use crate::stacking::registration::ransac::RansacConfig;
+use crate::stacking::registration::ransac::config::RansacConfig;
 use crate::stacking::registration::transform::TransformModel;
 use crate::stacking::registration::{Config, RegistrationError, TransformType, register};
 use crate::stacking::star_detection::star::Star;

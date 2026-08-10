@@ -47,11 +47,18 @@
 //! local neighbours* — a reference that tracks vignetting (smooth, locally flat) and ignores dust
 //! shadows (which dim by far less than half), so only genuinely near-zero pixels are caught.
 
+pub(crate) mod dark_background;
+mod same_color;
+mod sampling;
+
 use crate::bit_buffer2::BitBuffer2;
 use crate::io::image::cfa::{CfaImage, CfaType};
 use crate::math::size2us::Size2us;
 use crate::math::statistics::{MAD_TO_SIGMA, median_f32_mut};
 use crate::math::vec2us::Vec2us;
+use crate::stacking::calibration_masters::defect_map::dark_background::DarkBackground;
+use crate::stacking::calibration_masters::defect_map::same_color::SameColorMedian;
+use crate::stacking::calibration_masters::defect_map::sampling::collect_color_residual_samples;
 use crate::stacking::combine::error::Error;
 use common::CancelToken;
 use imaginarium::Buffer2;
@@ -184,11 +191,11 @@ impl DefectMap {
 }
 
 /// Maximum number of samples per color channel for median estimation.
-const MAX_MEDIAN_SAMPLES: usize = 100_000;
+pub(super) const MAX_MEDIAN_SAMPLES: usize = 100_000;
 
 /// Broad dark-current model tile size. Each tile has enough Bayer red/blue samples for a robust
 /// median while remaining much smaller than normal sensor-scale gradients and amp glow.
-const DARK_BACKGROUND_TILE_SIZE: usize = 64;
+pub(super) const DARK_BACKGROUND_TILE_SIZE: usize = 64;
 
 /// Convert the 99th percentile of `|N(0, σ)|` back to σ.
 const ABSOLUTE_RESIDUAL_P99_TO_SIGMA: f32 = 0.388_224_48;
@@ -196,7 +203,7 @@ const ABSOLUTE_RESIDUAL_P99_TO_SIGMA: f32 = 0.388_224_48;
 const MIN_TAIL_SCALE_SAMPLES: usize = 500;
 
 /// Get CFA color index at (x, y). Returns 0 for Mono (None CFA type).
-fn cfa_color_at(cfa_type: Option<&CfaType>, pos: Vec2us) -> u8 {
+pub(super) fn cfa_color_at(cfa_type: Option<&CfaType>, pos: Vec2us) -> u8 {
     match cfa_type {
         Some(cfa) => cfa.color_at(pos),
         // Mono images have no CFA pattern — treat all pixels as the same color channel.
@@ -255,163 +262,6 @@ fn detect_hot_pixels(
         return Err(Error::Cancelled);
     }
     Ok(indices)
-}
-
-#[derive(Debug, Clone, Copy)]
-struct InterpolationSpan {
-    lower: usize,
-    upper: usize,
-    fraction: f32,
-}
-
-#[derive(Debug, Clone, Copy)]
-struct DarkTile {
-    values: [f32; 3],
-}
-
-/// Smooth per-CFA-color dark-current model sampled from robust tile medians.
-#[derive(Debug)]
-struct DarkBackground {
-    tiles: Buffer2<DarkTile>,
-    x_spans: Vec<InterpolationSpan>,
-    y_spans: Vec<InterpolationSpan>,
-}
-
-impl DarkBackground {
-    fn fit(
-        data: &Buffer2<f32>,
-        cfa_type: Option<&CfaType>,
-        cancel: &CancelToken,
-    ) -> Result<Self, Error> {
-        let width = data.width();
-        let height = data.height();
-        assert!(
-            width > 0 && height > 0,
-            "dark background needs non-zero dimensions"
-        );
-        let tiles_x = width.div_ceil(DARK_BACKGROUND_TILE_SIZE);
-        let tiles_y = height.div_ceil(DARK_BACKGROUND_TILE_SIZE);
-        let num_colors = cfa_type.map_or(1, CfaType::num_colors);
-
-        let mut tiles: Vec<DarkTile> = (0..tiles_x * tiles_y)
-            .into_par_iter()
-            .map(|index| {
-                if cancel.is_cancelled() {
-                    return Err(Error::Cancelled);
-                }
-
-                let tx = index % tiles_x;
-                let ty = index / tiles_x;
-                let x_start = tx * width / tiles_x;
-                let x_end = (tx + 1) * width / tiles_x;
-                let y_start = ty * height / tiles_y;
-                let y_end = (ty + 1) * height / tiles_y;
-                let mut samples: [Vec<f32>; 3] = std::array::from_fn(|_| Vec::new());
-
-                for y in y_start..y_end {
-                    for x in x_start..x_end {
-                        let color = cfa_color_at(cfa_type, Vec2us::new(x, y)) as usize;
-                        samples[color].push(data[y * width + x]);
-                    }
-                }
-
-                let mut values = [f32::NAN; 3];
-                for color in 0..num_colors {
-                    if !samples[color].is_empty() {
-                        values[color] = median_f32_mut(&mut samples[color]);
-                    }
-                }
-                Ok(DarkTile { values })
-            })
-            .collect::<Result<_, Error>>()?;
-
-        let missing: [bool; 3] = std::array::from_fn(|color| {
-            color < num_colors && tiles.iter().any(|tile| tile.values[color].is_nan())
-        });
-        for (color, &is_missing) in missing.iter().enumerate().take(num_colors) {
-            if !is_missing {
-                continue;
-            }
-            let mut samples = collect_color_samples(data, cfa_type, color as u8);
-            if samples.is_empty() {
-                continue;
-            }
-            let fallback = median_f32_mut(&mut samples);
-            for tile in &mut tiles {
-                if tile.values[color].is_nan() {
-                    tile.values[color] = fallback;
-                }
-            }
-        }
-
-        let centers_x = tile_centers(width, tiles_x);
-        let centers_y = tile_centers(height, tiles_y);
-        Ok(Self {
-            tiles: Buffer2::new(tiles_x, tiles_y, tiles),
-            x_spans: interpolation_spans(width, &centers_x),
-            y_spans: interpolation_spans(height, &centers_y),
-        })
-    }
-
-    #[inline]
-    fn at(&self, pos: Vec2us, color: usize) -> f32 {
-        let xs = self.x_spans[pos.x];
-        let ys = self.y_spans[pos.y];
-        let top = lerp(
-            self.tiles[(xs.lower, ys.lower)].values[color],
-            self.tiles[(xs.upper, ys.lower)].values[color],
-            xs.fraction,
-        );
-        let bottom = lerp(
-            self.tiles[(xs.lower, ys.upper)].values[color],
-            self.tiles[(xs.upper, ys.upper)].values[color],
-            xs.fraction,
-        );
-        lerp(top, bottom, ys.fraction)
-    }
-}
-
-fn tile_centers(length: usize, tile_count: usize) -> Vec<f32> {
-    (0..tile_count)
-        .map(|tile| {
-            let start = tile * length / tile_count;
-            let end = (tile + 1) * length / tile_count;
-            (start + end - 1) as f32 * 0.5
-        })
-        .collect()
-}
-
-fn interpolation_spans(length: usize, centers: &[f32]) -> Vec<InterpolationSpan> {
-    if centers.len() == 1 {
-        return vec![
-            InterpolationSpan {
-                lower: 0,
-                upper: 0,
-                fraction: 0.0,
-            };
-            length
-        ];
-    }
-
-    (0..length)
-        .map(|position| {
-            let position = position as f32;
-            let upper = centers
-                .partition_point(|&center| center <= position)
-                .clamp(1, centers.len() - 1);
-            let lower = upper - 1;
-            InterpolationSpan {
-                lower,
-                upper,
-                fraction: (position - centers[lower]) / (centers[upper] - centers[lower]),
-            }
-        })
-        .collect()
-}
-
-#[inline]
-fn lerp(start: f32, end: f32, fraction: f32) -> f32 {
-    start + fraction * (end - start)
 }
 
 fn residual_sigma_floor(image: &CfaImage) -> f32 {
@@ -473,16 +323,6 @@ struct ColorStats {
     sigma: f32,
 }
 
-#[derive(Debug, Clone, Copy)]
-struct CfaSamplePhase {
-    x_offset: usize,
-    y_offset: usize,
-    columns: usize,
-    rows: usize,
-    population: usize,
-    sample_count: usize,
-}
-
 /// Per-CFA-color robust background-subtracted stats, indexed by color (0=R/mono, 1=G, 2=B).
 ///
 /// `sigma` takes the larger of MAD and the Gaussian-calibrated 99th absolute residual percentile.
@@ -532,294 +372,6 @@ fn compute_per_color_residual_stats(
     }
 
     stats
-}
-
-fn collect_color_residual_samples(
-    data: &Buffer2<f32>,
-    cfa_type: Option<&CfaType>,
-    target_color: u8,
-    background: &DarkBackground,
-) -> Vec<f32> {
-    let size = Size2us::new(data.width(), data.height());
-    collect_color_sample_indices(size, cfa_type, target_color)
-        .into_iter()
-        .map(|index| data[index] - background.at(size.point_of(index), target_color as usize))
-        .collect()
-}
-
-/// Collect pixel samples for a specific CFA color channel.
-///
-/// Large channels are stratified across CFA phases, rows, and columns.
-fn collect_color_samples(
-    data: &Buffer2<f32>,
-    cfa_type: Option<&CfaType>,
-    target_color: u8,
-) -> Vec<f32> {
-    collect_color_sample_indices(
-        Size2us::new(data.width(), data.height()),
-        cfa_type,
-        target_color,
-    )
-    .into_iter()
-    .map(|index| data[index])
-    .collect()
-}
-
-fn collect_color_sample_indices(
-    size: Size2us,
-    cfa_type: Option<&CfaType>,
-    target_color: u8,
-) -> Vec<usize> {
-    assert!(
-        size.width > 0 && size.height > 0,
-        "color sampling needs non-zero dimensions"
-    );
-
-    let period = match cfa_type {
-        None | Some(CfaType::Mono) => 1,
-        Some(CfaType::Bayer(_)) => 2,
-        Some(CfaType::XTrans(_)) => 6,
-    };
-
-    let mut phases = ArrayVec::<CfaSamplePhase, 36>::new();
-    for y_offset in 0..period.min(size.height) {
-        for x_offset in 0..period.min(size.width) {
-            if cfa_color_at(cfa_type, Vec2us::new(x_offset, y_offset)) != target_color {
-                continue;
-            }
-            let columns = (size.width - 1 - x_offset) / period + 1;
-            let rows = (size.height - 1 - y_offset) / period + 1;
-            phases.push(CfaSamplePhase {
-                x_offset,
-                y_offset,
-                columns,
-                rows,
-                population: columns * rows,
-                sample_count: 0,
-            });
-        }
-    }
-
-    let population: usize = phases.iter().map(|phase| phase.population).sum();
-    if population == 0 {
-        return Vec::new();
-    }
-    let target_sample_count = population.min(MAX_MEDIAN_SAMPLES);
-    let mut cumulative_population = 0;
-    let mut allocated = 0;
-    for phase in &mut phases {
-        cumulative_population += phase.population;
-        let next_allocated =
-            scaled_partition(cumulative_population, population, target_sample_count);
-        phase.sample_count = next_allocated - allocated;
-        allocated = next_allocated;
-    }
-
-    let mut indices = Vec::with_capacity(target_sample_count);
-    for phase in phases {
-        if phase.sample_count == phase.population {
-            for row in 0..phase.rows {
-                let y = phase.y_offset + row * period;
-                for column in 0..phase.columns {
-                    let x = phase.x_offset + column * period;
-                    indices.push(size.index_of(Vec2us::new(x, y)));
-                }
-            }
-            continue;
-        }
-
-        let sampled_rows = phase.rows.min(phase.sample_count);
-        let phase_rotation = phase.y_offset * period + phase.x_offset;
-        for sample_row in 0..sampled_rows {
-            let row = stratified_center(sample_row, sampled_rows, phase.rows);
-            let y = phase.y_offset + row * period;
-            let row_sample_start = scaled_partition(sample_row, sampled_rows, phase.sample_count);
-            let row_sample_end = scaled_partition(sample_row + 1, sampled_rows, phase.sample_count);
-            let row_sample_count = row_sample_end - row_sample_start;
-            let rotation = (sample_row + phase_rotation) % phase.columns;
-
-            for sample_column in 0..row_sample_count {
-                let column = (stratified_center(sample_column, row_sample_count, phase.columns)
-                    + rotation)
-                    % phase.columns;
-                let x = phase.x_offset + column * period;
-                indices.push(size.index_of(Vec2us::new(x, y)));
-            }
-        }
-    }
-
-    indices.sort_unstable();
-    debug_assert_eq!(indices.len(), target_sample_count);
-    debug_assert!(indices.windows(2).all(|pair| pair[0] < pair[1]));
-    indices
-}
-
-fn scaled_partition(part: usize, part_count: usize, length: usize) -> usize {
-    (part as u128 * length as u128 / part_count as u128) as usize
-}
-
-fn stratified_center(part: usize, part_count: usize, length: usize) -> usize {
-    ((2 * part as u128 + 1) * length as u128 / (2 * part_count as u128)) as usize
-}
-
-/// Mono: 8-connected neighbours, every one of which is the same "colour".
-const MONO_OFFSETS: [(i32, i32); 8] = [
-    (-1, -1),
-    (0, -1),
-    (1, -1),
-    (-1, 0),
-    (1, 0),
-    (-1, 1),
-    (0, 1),
-    (1, 1),
-];
-
-/// Bayer: same-colour neighbours sit at stride 2 in each axis, true for every 2×2 phase.
-const BAYER_OFFSETS: [(i32, i32); 8] = [
-    (-2, 0),
-    (2, 0),
-    (0, -2),
-    (0, 2),
-    (-2, -2),
-    (-2, 2),
-    (2, -2),
-    (2, 2),
-];
-
-/// Median of the neighbours at `offsets` from `pos`, skipping those outside the frame and those
-/// flagged in `defect_mask` so a defect is never repaired from another defect. Falls back to the
-/// centre pixel when every candidate is rejected.
-///
-/// Gathers at most `N`. Mono and Bayer pass exactly `N` offsets so the cap never binds; X-Trans
-/// passes more, ordered nearest-first, which turns the cap into "the closest `N` valid
-/// neighbours". One walk for all three because they differ only in where the offsets come from.
-fn median_of_neighbors<const N: usize>(
-    pixels: &Buffer2<f32>,
-    pos: Vec2us,
-    offsets: impl IntoIterator<Item = (i32, i32)>,
-    defect_mask: Option<&BitBuffer2>,
-) -> f32 {
-    let width = pixels.width() as i32;
-    let height = pixels.height() as i32;
-    let mut neighbors = [0.0f32; N];
-    let mut count = 0;
-
-    for (dx, dy) in offsets {
-        if count == N {
-            break;
-        }
-        let nx = pos.x as i32 + dx;
-        let ny = pos.y as i32 + dy;
-        if nx < 0 || ny < 0 || nx >= width || ny >= height {
-            continue;
-        }
-        let (nx, ny) = (nx as usize, ny as usize);
-        if defect_mask.is_some_and(|m| m.get_at(Vec2us::new(nx, ny))) {
-            continue;
-        }
-        neighbors[count] = *pixels.get(nx, ny);
-        count += 1;
-    }
-
-    if count == 0 {
-        return *pixels.get(pos.x, pos.y);
-    }
-
-    median_f32_mut(&mut neighbors[..count])
-}
-
-/// Same-color CFA neighbour median strategy, built once per master so the per-pixel scan stays
-/// cheap. The X-Trans variant precomputes its neighbour geometry up front (see [`XTransOffsets`]);
-/// Mono and Bayer carry no state because their offsets are fixed.
-#[derive(Debug)]
-enum SameColorMedian {
-    /// Mono: 8-connected neighbours.
-    Mono,
-    /// Bayer: same-color neighbours at stride 2 (true for every 2×2 Bayer phase).
-    Bayer,
-    /// X-Trans: same-color offsets precomputed per 6×6 phase. Boxed — the 36-phase table dwarfs the
-    /// other (zero-size) variants, and the strategy is built once per master, not per pixel.
-    XTrans(Box<XTransOffsets>),
-}
-
-impl SameColorMedian {
-    /// `None` (no CFA metadata) is treated as Mono, matching [`cfa_color_at`].
-    fn new(cfa: Option<&CfaType>) -> Self {
-        match cfa {
-            None | Some(CfaType::Mono) => Self::Mono,
-            Some(CfaType::Bayer(_)) => Self::Bayer,
-            Some(CfaType::XTrans(pattern)) => Self::XTrans(Box::new(XTransOffsets::new(pattern))),
-        }
-    }
-
-    /// Median of `(x, y)`'s same-color neighbours, skipping any flagged in `defect_mask` so a defect
-    /// is never repaired from another defect.
-    fn at(&self, pixels: &Buffer2<f32>, pos: Vec2us, defect_mask: Option<&BitBuffer2>) -> f32 {
-        match self {
-            Self::Mono => median_of_neighbors::<8>(pixels, pos, MONO_OFFSETS, defect_mask),
-            Self::Bayer => median_of_neighbors::<8>(pixels, pos, BAYER_OFFSETS, defect_mask),
-            Self::XTrans(offsets) => offsets.median(pixels, pos, defect_mask),
-        }
-    }
-}
-
-/// Search radius (in pixels) for X-Trans same-color neighbours — one full pattern period.
-const XTRANS_RADIUS: i32 = 6;
-
-/// Same-color neighbours used for the X-Trans median: ≈4 per cardinal/diagonal direction in the
-/// 6×6 pattern — enough for a robust median without directional bias.
-const XTRANS_NEIGHBORS: usize = 24;
-
-/// Precomputed X-Trans same-color neighbour offsets, indexed by the pixel's 6×6 phase.
-///
-/// The X-Trans pattern is periodic with period 6, so for a given phase `(x % 6, y % 6)` the set of
-/// same-color neighbours within the search window — and their Manhattan distances — is fixed. The
-/// old path recomputed this on every pixel: a 13×13 `color_at` sweep plus a per-pixel distance
-/// sort, which dominated the cold-pixel scan of a full X-Trans master. Precomputing it once turns
-/// the per-pixel work into a bounded gather + median over the nearest valid neighbours.
-#[derive(Debug)]
-struct XTransOffsets {
-    /// `per_phase[(y % 6) * 6 + (x % 6)]` = same-color `(dx, dy)` offsets, nearest-first by
-    /// Manhattan distance (ties broken by scan order: `dy` then `dx`).
-    per_phase: [Vec<(i32, i32)>; 36],
-}
-
-impl XTransOffsets {
-    fn new(pattern: &[[u8; 6]; 6]) -> Self {
-        let per_phase = std::array::from_fn(|phase| {
-            let px = (phase % 6) as i32;
-            let py = (phase / 6) as i32;
-            let my_color = pattern[py as usize][px as usize];
-
-            let mut candidates: Vec<(i32, (i32, i32))> = Vec::new();
-            for dy in -XTRANS_RADIUS..=XTRANS_RADIUS {
-                for dx in -XTRANS_RADIUS..=XTRANS_RADIUS {
-                    if dx == 0 && dy == 0 {
-                        continue;
-                    }
-                    // The pattern is globally periodic, so a neighbour's color depends only on its
-                    // phase; `rem_euclid` keeps that correct for negative offsets.
-                    let cy = (py + dy).rem_euclid(6) as usize;
-                    let cx = (px + dx).rem_euclid(6) as usize;
-                    if pattern[cy][cx] == my_color {
-                        candidates.push((dx.abs() + dy.abs(), (dx, dy)));
-                    }
-                }
-            }
-            // Stable sort: equal-distance neighbours keep scan order.
-            candidates.sort_by_key(|&(dist, _)| dist);
-            candidates.into_iter().map(|(_, off)| off).collect()
-        });
-        Self { per_phase }
-    }
-
-    /// Median of the nearest valid same-color neighbours of `(x, y)`. Walks the precomputed
-    /// nearest-first offsets, skipping out-of-bounds and `defect_mask`ed positions, and stops once
-    /// [`XTRANS_NEIGHBORS`] valid samples are gathered — equivalent to "closest-N valid neighbours".
-    fn median(&self, pixels: &Buffer2<f32>, pos: Vec2us, defect_mask: Option<&BitBuffer2>) -> f32 {
-        let phase = &self.per_phase[(pos.y % 6) * 6 + (pos.x % 6)];
-        median_of_neighbors::<XTRANS_NEIGHBORS>(pixels, pos, phase.iter().copied(), defect_mask)
-    }
 }
 
 /// Per-class defect counts, used only by tests to assert detection behavior.

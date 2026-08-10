@@ -2,7 +2,7 @@
 
 use crate::error::InvalidConfigField;
 use crate::stacking::registration::distortion::sip::SipConfig;
-use crate::stacking::registration::ransac::RansacConfig;
+use crate::stacking::registration::ransac::config::RansacConfig;
 use crate::stacking::registration::transform::{TransformModel, TransformType};
 use crate::stacking::registration::triangle::TriangleConfig;
 

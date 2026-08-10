@@ -28,7 +28,9 @@ use crate::stacking::combine::normalization::common_domain::CommonDomain;
 use crate::stacking::combine::normalization::photometric_gain::{
     paired_photometric_gain, sample_stats,
 };
-use crate::stacking::frame_store::{FrameStats, StoredFrame, StoredPlane};
+use crate::stacking::frame_store::StoredFrame;
+use crate::stacking::frame_store::frame_stats::FrameStats;
+use crate::stacking::frame_store::stored_plane::StoredPlane;
 
 /// Per-channel affine normalization applied as `normalized = raw * gain + offset`.
 #[derive(Debug, Clone, Copy)]

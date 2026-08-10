@@ -1,3 +1,4 @@
+use crate::stacking::frame_store::spill::SpillDirectory;
 use crate::stacking::frame_store::*;
 use crate::testing::ScratchDirectory;
 

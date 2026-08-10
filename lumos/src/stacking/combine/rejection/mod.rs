@@ -20,7 +20,7 @@ pub(crate) mod winsorized_clip_config;
 
 use crate::error::InvalidConfigField;
 use crate::math::sum::simd::weighted_mean_f32;
-use crate::stacking::combine::cache::CombinedSample;
+use crate::stacking::combine::cache::sample::CombinedSample;
 use crate::stacking::combine::rejection::gesd_config::GesdConfig;
 use crate::stacking::combine::rejection::linear_fit_clip_config::LinearFitClipConfig;
 use crate::stacking::combine::rejection::percentile_clip_config::PercentileClipConfig;

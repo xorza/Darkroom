@@ -5,7 +5,9 @@ use crate::stacking::combine::normalization::photometric_gain::{
     paired_photometric_gain, sample_stats,
 };
 use crate::stacking::combine::normalization::*;
-use crate::stacking::frame_store::{FrameStats, StoredFrame, WarpQuality};
+use crate::stacking::frame_store::StoredFrame;
+use crate::stacking::frame_store::frame_stats::FrameStats;
+use crate::stacking::frame_store::warp_quality::WarpQuality;
 use crate::testing::prelude::*;
 
 fn channel_stats(median: f32, mad: f32) -> MedianMad {

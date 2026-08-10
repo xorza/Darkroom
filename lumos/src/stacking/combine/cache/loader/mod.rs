@@ -24,9 +24,12 @@ use crate::stacking::combine::config::Normalization;
 use crate::stacking::combine::error::Error;
 use crate::stacking::combine::normalization::compute_frame_norms;
 use crate::stacking::frame_store::error::FrameStoreError;
-use crate::stacking::frame_store::{
-    FrameSpill, FrameStats, SpillDirectory, StackableImage, StoredFrame, StoredPlane, WarpQuality,
-};
+use crate::stacking::frame_store::frame_stats::FrameStats;
+use crate::stacking::frame_store::spill::FrameSpill;
+use crate::stacking::frame_store::spill::SpillDirectory;
+use crate::stacking::frame_store::stored_plane::StoredPlane;
+use crate::stacking::frame_store::warp_quality::WarpQuality;
+use crate::stacking::frame_store::{StackableImage, StoredFrame};
 use crate::stacking::progress::{ProgressCallback, StackingStage};
 
 use crate::stacking::combine::cache::validation::{
