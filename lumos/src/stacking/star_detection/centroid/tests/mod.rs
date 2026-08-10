@@ -32,3 +32,4 @@ mod measurement;
 mod profile_metrics;
 mod robustness;
 mod stamps;
+mod subpixel_recovery;

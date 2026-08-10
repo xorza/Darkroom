@@ -13,7 +13,7 @@ use common::internals::test_output_path;
 use imaginarium::Color;
 use imaginarium::drawing::{draw_circle, draw_cross};
 
-use crate::stacking::star_detection::tests::stage_tests::{TILE_SIZE, matched_truths};
+use crate::stacking::star_detection::tests::stage_effects::{TILE_SIZE, matched_truths};
 
 /// Create a detection overlay image showing candidates.
 fn create_detection_overlay(

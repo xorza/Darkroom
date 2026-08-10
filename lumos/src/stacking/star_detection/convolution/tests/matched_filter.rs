@@ -11,7 +11,11 @@ use crate::testing::prelude::*;
 use crate::testing::visual::{ToneMap, save};
 use common::internals::test_output_path;
 
-use crate::stacking::star_detection::tests::stage_tests::TILE_SIZE;
+/// Tile size these fixtures are built around.
+///
+/// Carried here rather than borrowed from the star-detection stage tests: this file exercises one
+/// stage's API, so it should not depend on that module's scaffolding.
+const TILE_SIZE: usize = 64;
 
 /// Normalize filtered output for visualization (handle negative values).
 fn normalize_for_display(pixels: &[f32]) -> Vec<f32> {

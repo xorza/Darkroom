@@ -2,6 +2,20 @@
 //!
 //! These tests use generated star fields to verify detection accuracy
 //! without requiring real calibration data.
+//!
+//! # Where a star-detection test goes
+//!
+//! One question decides it: **does the test call the detector, or one stage's function?**
+//!
+//! - One stage's function — `background_map::estimate`, `gaussian_convolve`, `measure_star` — goes
+//!   in that module's own `tests/`, beside the unit tests for the same code. It does not belong
+//!   here however realistic its fixture is.
+//! - The detector — `detect_stars_test` or `StarDetector::detect` — goes here, in
+//!   [`stage_effects`] when the field is built to stress one stage's contribution, or in
+//!   [`pipeline_tests`] when it grades overall detection quality on a kind of field.
+//!
+//! [`metric_curves`] and [`subpixel_accuracy`] are the graded forward-model tests: they assert the
+//! *shape* of the detector's response through `metrics` rather than a pass/fail threshold.
 
 mod mem_budget;
 mod mem_budget_probe;
@@ -9,7 +23,7 @@ mod metric_curves;
 mod pipeline_tests;
 #[cfg(feature = "real-data")]
 mod real_data;
-mod stage_tests;
+mod stage_effects;
 mod subpixel_accuracy;
 
 use crate::ImageDimensions;

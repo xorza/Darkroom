@@ -10,13 +10,28 @@ use std::f32::consts::PI;
 
 use crate::math::fwhm::fwhm_to_sigma;
 use crate::math::rect::URect;
+use crate::stacking::star_detection::background::background_estimate::BackgroundEstimate;
 use crate::stacking::star_detection::centroid::measure_star;
 use crate::stacking::star_detection::centroid::{StampGrid, compute_stamp_radius};
+use crate::stacking::star_detection::config::background_config::BackgroundConfig;
 use crate::stacking::star_detection::config::measurement_config::{
     CentroidMethod, MeasurementConfig,
 };
 use crate::stacking::star_detection::deblend::region::Region;
-use crate::stacking::star_detection::tests::stage_tests::background_estimate;
+
+/// Background estimate at the tile size these fixtures are built for.
+///
+/// Carried here rather than borrowed from the star-detection stage tests: this file exercises
+/// `measure_star` against positions it chose, so it should not depend on that module's scaffolding.
+fn background_estimate(pixels: &Buffer2<f32>) -> BackgroundEstimate {
+    background_map::estimate(
+        pixels,
+        &BackgroundConfig {
+            tile_size: 64,
+            ..Default::default()
+        },
+    )
+}
 
 /// Render `stars` as `(x, y, brightness)` Gaussians of width `sigma` on a 0.1 sky + Gaussian
 /// noise σ `noise`.

@@ -1,4 +1,12 @@
-//! Algorithm stage tests - tests individual components of the star detection pipeline.
+//! Detector runs that isolate one stage's contribution.
+//!
+//! Every test here runs the detector — `detect_stars_test` or `StarDetector::detect` — on a field
+//! built to stress one stage, and grades the detections. Cosmic-ray rejection, deblending and
+//! thresholding are visible only in what the detector finally reports, so they cannot be tested
+//! against a stage's own API.
+//!
+//! A test that calls a *single* stage's function directly belongs in that module's own `tests/`,
+//! beside the unit tests for the same code — see the placement rule in the parent module.
 
 use crate::stacking::star_detection::background::background_estimate::BackgroundEstimate;
 use crate::stacking::star_detection::config::background_config::BackgroundConfig;
@@ -8,9 +16,6 @@ use crate::testing::prelude::*;
 /// Default tile size for background estimation.
 const TILE_SIZE: usize = 64;
 
-mod background_tests;
-mod centroid_tests;
-mod convolution_tests;
 mod cosmic_ray_tests;
 mod deblend_tests;
 mod detection_tests;
