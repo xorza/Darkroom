@@ -32,7 +32,7 @@ use crate::io::image::cfa::{CfaImage, CfaType};
 use crate::math::size2us::Size2us;
 
 use crate::stacking::calibration_masters::cosmic_ray::config::CosmicRayConfig;
-use crate::stacking::calibration_masters::cosmic_ray::mono::{MonoScratch, reject_mono_buffer};
+use crate::stacking::calibration_masters::cosmic_ray::mono::MonoDetector;
 use crate::stacking::calibration_masters::cosmic_ray::xtrans::reject_xtrans;
 
 /// `F` is floored to this (in normalized pixel units) so it stays non-negative where the object fine
@@ -56,24 +56,23 @@ pub(crate) fn reject_cosmic_rays(image: &mut CfaImage, config: &CosmicRayConfig)
         // X-Trans has no dense same-color sub-lattice → same-color stencils on the mosaic.
         Some(c @ CfaType::XTrans(_)) => reject_xtrans(pixels, size, c, config),
         // Mono (or an unlabeled frame): the dense Laplacian path.
-        _ => reject_mono_buffer(pixels, size, config, &mut MonoScratch::default()),
+        _ => MonoDetector::new(config).reject(pixels, size),
     }
 }
 
 /// Bayer: the mosaic is 2×2-periodic, so pixels sharing a `(x%2, y%2)` phase are the same color and
-/// form a dense plane. Deinterleave the four phases, run [`reject_mono_buffer`] on each (its dense
+/// form a dense plane. Deinterleave the four phases, run [`MonoDetector::reject`] on each (its dense
 /// neighbors are same-color in the mosaic), and write the cleaned planes back. Pattern-independent —
 /// phase alone determines color, so no `CfaPattern` is needed.
 ///
-/// One [`MonoScratch`] and one `plane` serve all four phases: `(0, 0)` is the largest, and it runs
-/// first, so no later phase grows either allocation.
+/// One [`MonoDetector`] and one `plane` serve all four phases.
 ///
 /// Deinterleave and re-interleave are row-parallel like the detector between them. They are only a
 /// few percent of a frame today, but they are the whole of its *serial* fraction — the one part
 /// that would not shrink as thread count rises.
 fn reject_bayer(data: &mut [f32], size: Size2us, config: &CosmicRayConfig) -> usize {
     let (w, h) = (size.width, size.height);
-    let mut scratch = MonoScratch::default();
+    let mut detector = MonoDetector::new(config);
     let mut plane: Vec<f32> = Vec::new();
     let mut total = 0;
     for b in 0..2 {
@@ -95,7 +94,7 @@ fn reject_bayer(data: &mut [f32], size: Size2us, config: &CosmicRayConfig) -> us
                 }
             });
 
-            total += reject_mono_buffer(&mut plane, Size2us::new(pw, ph), config, &mut scratch);
+            total += detector.reject(&mut plane, Size2us::new(pw, ph));
 
             // Re-interleave the cleaned plane. Chunking the mosaic by row keeps each thread's
             // writes to one row, so the phase's rows can be picked out of the full sweep.
