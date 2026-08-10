@@ -24,11 +24,6 @@ const BUNDLE_FORMAT: &str = "CALMASTR";
 const DEFECT_FORMAT: &str = "DEFMAP";
 const BUNDLE_VERSION: i64 = 1;
 
-/// The `IMAGETYP` a role's HDU carries: its `EXTNAME` in words, so the two cannot drift.
-fn image_type(component: CalibrationComponent) -> String {
-    component.extname().replace('_', " ")
-}
-
 /// Where each component's HDU sits in a bundle being read.
 #[derive(Debug, Default)]
 struct BundleIndices {
@@ -47,7 +42,8 @@ pub(super) fn save(path: &Path, masters: &CalibrationMasters) -> std::io::Result
             let Some(image) = master.as_ref() else {
                 continue;
             };
-            let image_type = image_type(component);
+            // The `IMAGETYP` a role's HDU carries is its `EXTNAME` in words, so the two cannot drift.
+            let image_type = component.extname().replace('_', " ");
             let encoded = CfaFitsHdu::encode(
                 image,
                 CfaFitsHduMetadata {

@@ -17,7 +17,7 @@ use crate::stacking::star_detection::centroid::StampGrid;
 use crate::stacking::star_detection::centroid::lm_optimizer::{
     FitData, LMConfig, LMModel, NormalEquations,
 };
-use crate::stacking::star_detection::centroid::{FitNoise, StampFit};
+use crate::stacking::star_detection::centroid::{FitNoise, StampFit, fit_is_plausible};
 use glam::{DVec2, Vec2};
 use imaginarium::Buffer2;
 
@@ -123,7 +123,7 @@ impl GaussianFit {
     /// unweighted fit.
     ///
     /// `None` also when the stamp falls outside the frame, holds too few pixels to constrain six
-    /// parameters, or the fit lands somewhere [`validate_fit`] rejects.
+    /// parameters, or the fit lands somewhere [`fit_is_plausible`] rejects.
     pub(super) fn new(
         pixels: &Buffer2<f32>,
         pos: DVec2,
@@ -153,7 +153,7 @@ impl GaussianFit {
         let [x0, y0, _, sigma_x, sigma_y, _] = result.params;
         let result_pos = fit.to_image(x0, y0);
 
-        if !validate_fit(result_pos, pos, sigma_x, sigma_y, grid.radius) {
+        if !fit_is_plausible(result_pos, pos, grid.radius, [sigma_x, sigma_y]) {
             return None;
         }
 
@@ -165,31 +165,6 @@ impl GaussianFit {
             debug: GaussianFitDebug::of(&result, fit.stamp.z.len()),
         })
     }
-}
-
-/// Centre inside the stamp, and both sigmas within a plausible range.
-///
-/// The sigma bounds are phrased as acceptance rather than rejection, which is what makes a
-/// non-finite one fail: comparisons against NaN are all false, so `NaN > limit` reads as "not out
-/// of range" and a rejection-phrased check would pass a NaN sigma through to `Star::fwhm`.
-///
-/// The centre needs its own [`DVec2::is_finite`] check, because that trick does not extend to it:
-/// `max_element` reduces with [`f64::max`], which *ignores* NaN and returns the other lane, so a
-/// NaN x-coordinate would silently compare as the (finite) y-offset.
-///
-/// A rejected fit is not an error — `measure_star` falls back to the moment-based centroid.
-fn validate_fit(
-    result_pos: DVec2,
-    input_pos: DVec2,
-    sigma_x: f64,
-    sigma_y: f64,
-    stamp_radius: usize,
-) -> bool {
-    let plausible_sigma = 0.5..=stamp_radius as f64 * 2.0;
-    result_pos.is_finite()
-        && (result_pos - input_pos).abs().max_element() <= stamp_radius as f64
-        && plausible_sigma.contains(&sigma_x)
-        && plausible_sigma.contains(&sigma_y)
 }
 
 #[cfg(test)]

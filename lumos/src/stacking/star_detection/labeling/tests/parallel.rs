@@ -59,7 +59,7 @@ fn dense_mask_does_not_overflow_atomic_uf() {
     // pixels here — which previously overflowed the atomic union-find (cap = pixels/20) and
     // panicked. With cap = count_ones() it labels cleanly.
     let width = 400;
-    let height = 300; // 120_000 px > PARALLEL_CCL_THRESHOLD → parallel path
+    let height = 300; // Tall enough to strip into several bands.
     let mut mask_data = vec![false; width * height];
     let mut expected = 0;
     for y in (0..height).step_by(2) {
@@ -258,9 +258,9 @@ fn all_pixels_set_large() {
 }
 
 #[test]
-fn compare_sequential_parallel() {
-    // Compare results between sequential and parallel paths
-    // by testing same pattern at different sizes
+fn one_pattern_labels_the_same_at_any_size() {
+    // The same pattern at a size that resolves to one strip and at one that resolves to several,
+    // so the boundary stitch is proved not to change the answer.
     let pattern_test = |size: Size2us| {
         let mut mask_data = vec![false; size.pixel_count()];
 
@@ -280,9 +280,9 @@ fn compare_sequential_parallel() {
         (label_map.num_labels(), expected_lines)
     };
 
-    // Small (sequential path)
+    // Under `MIN_ROWS_PER_STRIP`, so a single band with nothing to stitch.
     let (small_labels, small_expected) = pattern_test(Size2us::new(100, 100));
-    // Large (parallel path)
+    // Several bands, so every line crosses at least one boundary.
     let (large_labels, large_expected) = pattern_test(Size2us::new(400, 300));
 
     assert_eq!(small_labels, small_expected);

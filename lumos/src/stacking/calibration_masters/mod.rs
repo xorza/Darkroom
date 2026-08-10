@@ -320,11 +320,7 @@ struct RoleStack<'a, P> {
     config: StackConfig,
 }
 
-impl<'a, P: AsRef<Path> + Sync> RoleStack<'a, P> {
-    fn new(paths: &'a [P], config: StackConfig) -> Self {
-        Self { paths, config }
-    }
-
+impl<P: AsRef<Path> + Sync> RoleStack<'_, P> {
     /// Charge this role its frame-weighted share of `available`, for roles that load concurrently.
     fn with_shared_budget(mut self, available: u64, total_frames: usize) -> Self {
         self.config.cache.available_memory =
@@ -491,7 +487,7 @@ impl CalibrationMasters {
     /// bundle assembled some other way — which is `fits::load`, where the masters and the map are
     /// read as independent HDUs. Between the two, no `CalibrationMasters` can exist spanning two
     /// sensors, so `save` cannot write a bundle `load` would reject.
-    pub(super) fn validate_dimensions(&self) -> Result<(), CalibrationError> {
+    fn validate_dimensions(&self) -> Result<(), CalibrationError> {
         let expected = self.masters.common_dimensions()?;
         // The map's dimensions come from whichever master it was detected on, so within a bundle
         // built here it always agrees; a file can disagree.
@@ -549,11 +545,23 @@ impl CalibrationMasters {
         // The one role → preset table. Each preset carries its own small-frame fallback
         // (`StackConfig::small_n`), so no frame-count special-casing is needed here.
         let jobs = CalibrationSet {
-            dark: RoleStack::new(frames.dark, StackConfig::dark()),
-            flat: RoleStack::new(frames.flat, StackConfig::flat()),
-            bias: RoleStack::new(frames.bias, StackConfig::bias()),
+            dark: RoleStack {
+                paths: frames.dark,
+                config: StackConfig::dark(),
+            },
+            flat: RoleStack {
+                paths: frames.flat,
+                config: StackConfig::flat(),
+            },
+            bias: RoleStack {
+                paths: frames.bias,
+                config: StackConfig::bias(),
+            },
             // A flat-dark is a dark taken at the flat's exposure time, so it stacks as one.
-            flat_dark: RoleStack::new(frames.flat_dark, StackConfig::dark()),
+            flat_dark: RoleStack {
+                paths: frames.flat_dark,
+                config: StackConfig::dark(),
+            },
         };
         // Concurrent roles split the budget by frame count, so their combined in-flight decodes
         // provably cannot overcommit. Run sequentially, each role gets the whole budget instead:

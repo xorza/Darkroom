@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::collections::hash_map::Iter;
 use std::f64::consts::SQRT_2;
 
 use glam::DVec2;
@@ -94,52 +93,34 @@ impl VoteMatrix {
         }
     }
 
-    /// Iterate over all non-zero entries as `(ref_idx, target_idx, votes)`.
-    pub(super) fn iter_nonzero(&self) -> VoteIter<'_> {
+    /// Hand every pair that drew votes to `visit`, with how many it drew.
+    ///
+    /// The pair travels as a [`MatchIndices`] rather than two `usize`s, which are the same type
+    /// and so could be handed over transposed without the compiler noticing.
+    ///
+    /// A callback rather than an iterator: the two storages have unrelated iterator types, so
+    /// handing one back means either a second `Iterator` impl per storage plus an either-enum to
+    /// join them, or a boxed iterator paying a virtual call per entry — and a dense matrix sized
+    /// just under the sparse threshold holds 250k of them. The only caller fills a `Vec`, which a
+    /// callback does just as well.
+    pub(super) fn for_each_nonzero(&self, mut visit: impl FnMut(MatchIndices, usize)) {
         match self {
-            VoteMatrix::Dense { votes, n_target } => VoteIter::Dense(DenseVoteIter {
-                iter: votes.iter().enumerate(),
-                n_target: *n_target,
-            }),
-            VoteMatrix::Sparse(map) => VoteIter::Sparse(map.iter()),
-        }
-    }
-}
-
-/// Iterator over non-zero entries in a dense vote matrix.
-#[derive(Debug)]
-pub(super) struct DenseVoteIter<'a> {
-    iter: std::iter::Enumerate<std::slice::Iter<'a, u16>>,
-    n_target: usize,
-}
-
-impl Iterator for DenseVoteIter<'_> {
-    type Item = (usize, usize, usize);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        for (idx, &count) in self.iter.by_ref() {
-            if count > 0 {
-                return Some((idx / self.n_target, idx % self.n_target, count as usize));
+            VoteMatrix::Dense { votes, n_target } => {
+                for (index, &count) in votes.iter().enumerate() {
+                    if count > 0 {
+                        let pair = MatchIndices {
+                            reference: index / n_target,
+                            target: index % n_target,
+                        };
+                        visit(pair, count as usize);
+                    }
+                }
             }
-        }
-        None
-    }
-}
-
-/// Either-style iterator for [`VoteMatrix::iter_nonzero`].
-#[derive(Debug)]
-pub(super) enum VoteIter<'a> {
-    Dense(DenseVoteIter<'a>),
-    Sparse(Iter<'a, (usize, usize), u32>),
-}
-
-impl Iterator for VoteIter<'_> {
-    type Item = (usize, usize, usize);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        match self {
-            VoteIter::Dense(it) => it.next(),
-            VoteIter::Sparse(it) => it.next().map(|(&(r, t), &count)| (r, t, count as usize)),
+            VoteMatrix::Sparse(map) => {
+                for (&(reference, target), &count) in map {
+                    visit(MatchIndices { reference, target }, count as usize);
+                }
+            }
         }
     }
 }
@@ -222,16 +203,17 @@ pub(super) fn resolve_matches(
     min_votes: usize,
 ) -> Vec<PointMatch> {
     // Filter by minimum votes and collect matches
-    let mut matches: Vec<PointMatch> = vote_matrix
-        .iter_nonzero()
-        .filter(|&(_, _, votes)| votes >= min_votes)
-        .map(|(ref_idx, target_idx, votes)| PointMatch {
-            ref_idx,
-            target_idx,
-            votes,
-            confidence: 0.0, // Will be computed below
-        })
-        .collect();
+    let mut matches: Vec<PointMatch> = Vec::new();
+    vote_matrix.for_each_nonzero(|pair, votes| {
+        if votes >= min_votes {
+            matches.push(PointMatch {
+                ref_idx: pair.reference,
+                target_idx: pair.target,
+                votes,
+                confidence: 0.0, // Will be computed below
+            });
+        }
+    });
 
     // Sort by votes (descending), with a total-order tiebreak on (ref_idx, target_idx) so the
     // greedy resolution below is deterministic regardless of vote-matrix storage — the sparse
@@ -269,4 +251,19 @@ pub(super) fn resolve_matches(
     }
 
     resolved
+}
+
+#[cfg(test)]
+pub(super) mod internals {
+    use crate::stacking::registration::triangle::voting::VoteMatrix;
+
+    impl VoteMatrix {
+        /// Every non-zero entry as an owned `(ref_idx, target_idx, votes)` list — the shape the
+        /// tests assert against, which production has no use for.
+        pub(crate) fn nonzero_entries(&self) -> Vec<(usize, usize, usize)> {
+            let mut entries = Vec::new();
+            self.for_each_nonzero(|pair, votes| entries.push((pair.reference, pair.target, votes)));
+            entries
+        }
+    }
 }
