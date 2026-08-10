@@ -10,7 +10,7 @@ fn vote_matrix_dense_mode() {
     vm.increment(0, 0);
     vm.increment(5, 7);
 
-    let entries: Vec<_> = vm.iter_nonzero().collect();
+    let entries: Vec<_> = vm.nonzero_entries();
     let get = |r, t| entries.iter().find(|e| e.0 == r && e.1 == t).map(|e| e.2);
     assert_eq!(get(0, 0), Some(2));
     assert_eq!(get(5, 7), Some(1));
@@ -27,7 +27,7 @@ fn vote_matrix_sparse_mode() {
     vm.increment(0, 0);
     vm.increment(100, 200);
 
-    let entries: Vec<_> = vm.iter_nonzero().collect();
+    let entries: Vec<_> = vm.nonzero_entries();
     let get = |r, t| entries.iter().find(|e| e.0 == r && e.1 == t).map(|e| e.2);
     assert_eq!(get(0, 0), Some(2));
     assert_eq!(get(100, 200), Some(1));
@@ -37,10 +37,10 @@ fn vote_matrix_sparse_mode() {
 #[test]
 fn vote_matrix_empty() {
     let vm_dense = VoteMatrix::new(5, 5);
-    assert_eq!(vm_dense.iter_nonzero().count(), 0);
+    assert_eq!(vm_dense.nonzero_entries().len(), 0);
 
     let vm_sparse = VoteMatrix::new(600, 600);
-    assert_eq!(vm_sparse.iter_nonzero().count(), 0);
+    assert_eq!(vm_sparse.nonzero_entries().len(), 0);
 }
 
 #[test]
@@ -78,7 +78,7 @@ fn vote_matrix_dense_index_mapping() {
     vm.increment(2, 3);
     vm.increment(2, 3); // 4 votes at (2,3)
 
-    let entries: Vec<_> = vm.iter_nonzero().collect();
+    let entries: Vec<_> = vm.nonzero_entries();
     let get = |r, t| entries.iter().find(|e| e.0 == r && e.1 == t).map(|e| e.2);
 
     assert_eq!(get(0, 0), Some(1));
@@ -99,7 +99,7 @@ fn vote_matrix_dense_boundary_indices() {
     vm.increment(n - 1, 0);
     vm.increment(n - 1, n - 1);
 
-    let entries: Vec<_> = vm.iter_nonzero().collect();
+    let entries: Vec<_> = vm.nonzero_entries();
     let get = |r, t| entries.iter().find(|e| e.0 == r && e.1 == t).map(|e| e.2);
     assert_eq!(get(0, 0), Some(1));
     assert_eq!(get(0, n - 1), Some(1));
@@ -115,7 +115,7 @@ fn vote_matrix_dense_saturating_add() {
     for _ in 0..1000 {
         vm.increment(0, 0);
     }
-    let entries: Vec<_> = vm.iter_nonzero().collect();
+    let entries: Vec<_> = vm.nonzero_entries();
     let votes = entries.iter().find(|e| e.0 == 0 && e.1 == 0).unwrap().2;
     assert_eq!(votes, 1000);
 }
@@ -257,8 +257,11 @@ fn vote_for_correspondences_identical_triangles() {
         positions.len(),
     );
 
-    let votes: std::collections::HashMap<(usize, usize), usize> =
-        vm.iter_nonzero().map(|(r, t, v)| ((r, t), v)).collect();
+    let votes: std::collections::HashMap<(usize, usize), usize> = vm
+        .nonzero_entries()
+        .into_iter()
+        .map(|(r, t, v)| ((r, t), v))
+        .collect();
 
     // Diagonal should dominate: self-votes >= any cross-vote for each point
     for i in 0..positions.len() {
@@ -312,7 +315,7 @@ fn vote_for_correspondences_no_matching_triangles() {
         positions_b.len(),
     );
 
-    assert_eq!(vm.iter_nonzero().count(), 0);
+    assert_eq!(vm.nonzero_entries().len(), 0);
 }
 
 #[test]
@@ -360,8 +363,16 @@ fn vote_for_correspondences_orientation_filtering() {
         mirrored.len(),
     );
 
-    let total_with: usize = vm_with.iter_nonzero().map(|(_, _, v)| v).sum();
-    let total_without: usize = vm_without.iter_nonzero().map(|(_, _, v)| v).sum();
+    let total_with: usize = vm_with
+        .nonzero_entries()
+        .into_iter()
+        .map(|(_, _, v)| v)
+        .sum();
+    let total_without: usize = vm_without
+        .nonzero_entries()
+        .into_iter()
+        .map(|(_, _, v)| v)
+        .sum();
 
     // With mirroring, orientation check should block matches
     assert!(

@@ -671,3 +671,48 @@ fn sround_symmetric_source() {
         metrics.roundness.sround
     );
 }
+
+/// Both profile fits accept or reject a result through one predicate, so its bounds are pinned
+/// once here rather than per model.
+///
+/// Validation must reject a non-finite fit rather than pass it through: every comparison against
+/// NaN is false, so a check phrased as rejections ("bail if a width exceeds max") accepts one.
+#[test]
+fn fit_plausibility_rejects_non_finite_and_keeps_its_bounds() {
+    use crate::stacking::star_detection::centroid::fit_is_plausible;
+
+    let at = DVec2::splat(8.0);
+    let radius = 8usize;
+    // Baseline: a centred, plausibly-sized fit is accepted, so the rejections below are the
+    // non-finite values and not some unrelated bound.
+    assert!(fit_is_plausible(at, at, radius, [2.0]));
+    assert!(fit_is_plausible(at, at, radius, [2.0, 2.0]));
+
+    for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        // A single bad width fails whichever slot it occupies — the Moffat's lone alpha, or
+        // either of the Gaussian's two sigmas.
+        assert!(!fit_is_plausible(at, at, radius, [bad]), "alpha = {bad}");
+        assert!(
+            !fit_is_plausible(at, at, radius, [bad, 2.0]),
+            "sigma_x = {bad}"
+        );
+        assert!(
+            !fit_is_plausible(at, at, radius, [2.0, bad]),
+            "sigma_y = {bad}"
+        );
+        let moved = DVec2::new(bad, 8.0);
+        assert!(!fit_is_plausible(moved, at, radius, [2.0]), "pos.x = {bad}");
+    }
+
+    // Bounds are inclusive at both ends, and one step outside each is rejected.
+    assert!(fit_is_plausible(at, at, radius, [0.5, 16.0]));
+    assert!(!fit_is_plausible(at, at, radius, [0.49, 2.0]));
+    assert!(!fit_is_plausible(at, at, radius, [2.0, 16.01]));
+    // Centre exactly `stamp_radius` away is still inside; beyond it is not.
+    assert!(fit_is_plausible(DVec2::new(16.0, 8.0), at, radius, [2.0]));
+    assert!(!fit_is_plausible(DVec2::new(16.01, 8.0), at, radius, [2.0]));
+    // An empty width list is all-centre, all-accepted — no model produces one, but the `all`
+    // must not be what carries the position check.
+    assert!(fit_is_plausible(at, at, radius, []));
+    assert!(!fit_is_plausible(DVec2::new(16.01, 8.0), at, radius, []));
+}

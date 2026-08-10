@@ -4,6 +4,7 @@
 //! enabling efficient nearest-neighbor queries for triangle formation.
 
 use glam::DVec2;
+use smallvec::SmallVec;
 
 /// Extract the coordinate for the given split dimension (0 = x, 1 = y).
 #[inline(always)]
@@ -18,12 +19,58 @@ pub(super) struct Neighbor {
     pub(super) dist_sq: f64,
 }
 
-/// A work item for iterative k-d tree construction: the range [start, end) and current depth.
+/// One subtree of the implicit layout: the `indices` range `[start, end)` it occupies, and the
+/// depth it hangs at — which is what fixes its split dimension.
+///
+/// Carried as a unit by both walks over the tree, the iterative build and the recursive descent,
+/// so neither passes three bare `usize`s that nothing but their order distinguishes.
 #[derive(Debug, Clone, Copy)]
-struct BuildRange {
+struct Subtree {
     start: usize,
     end: usize,
     depth: usize,
+}
+
+impl Subtree {
+    /// The whole tree, at depth zero.
+    fn root(len: usize) -> Self {
+        Self {
+            start: 0,
+            end: len,
+            depth: 0,
+        }
+    }
+
+    fn len(self) -> usize {
+        self.end - self.start
+    }
+
+    /// The node index this subtree splits on: the median of its range.
+    fn mid(self) -> usize {
+        self.start + self.len() / 2
+    }
+
+    /// Levels alternate x and y.
+    fn split_dim(self) -> usize {
+        self.depth % 2
+    }
+
+    /// The two halves either side of [`Self::mid`], one level down.
+    fn children(self) -> [Self; 2] {
+        let (mid, depth) = (self.mid(), self.depth + 1);
+        [
+            Self {
+                start: self.start,
+                end: mid,
+                depth,
+            },
+            Self {
+                start: mid + 1,
+                end: self.end,
+                depth,
+            },
+        ]
+    }
 }
 
 /// A 2D k-d tree for efficient spatial queries on star positions.
@@ -64,42 +111,30 @@ impl KdTree {
         let mut indices: Vec<usize> = (0..points.len()).collect();
 
         // Iterative construction using an explicit work stack.
-        let mut stack: Vec<BuildRange> = Vec::new();
-        stack.push(BuildRange {
-            start: 0,
-            end: indices.len(),
-            depth: 0,
-        });
+        let mut stack: Vec<Subtree> = vec![Subtree::root(indices.len())];
 
-        while let Some(range) = stack.pop() {
-            let len = range.end - range.start;
-            if len <= 1 {
+        while let Some(subtree) = stack.pop() {
+            if subtree.len() <= 1 {
                 continue;
             }
 
-            let split_dim = range.depth % 2;
-            let median = len / 2;
-
+            let split_dim = subtree.split_dim();
             // Partition around the median — O(n) per level instead of O(n log n) sort.
-            indices[range.start..range.end].select_nth_unstable_by(median, |&a, &b| {
-                dim_value(points_vec[a], split_dim).total_cmp(&dim_value(points_vec[b], split_dim))
-            });
+            indices[subtree.start..subtree.end].select_nth_unstable_by(
+                subtree.len() / 2,
+                |&a, &b| {
+                    dim_value(points_vec[a], split_dim)
+                        .total_cmp(&dim_value(points_vec[b], split_dim))
+                },
+            );
 
-            let mid = range.start + median;
-            // Push right first so left is processed first (stack is LIFO)
-            if mid + 1 < range.end {
-                stack.push(BuildRange {
-                    start: mid + 1,
-                    end: range.end,
-                    depth: range.depth + 1,
-                });
+            // Push right first so left is processed first (stack is LIFO).
+            let [left, right] = subtree.children();
+            if right.len() > 0 {
+                stack.push(right);
             }
-            if range.start < mid {
-                stack.push(BuildRange {
-                    start: range.start,
-                    end: mid,
-                    depth: range.depth + 1,
-                });
+            if left.len() > 0 {
+                stack.push(left);
             }
         }
 
@@ -109,14 +144,6 @@ impl KdTree {
         })
     }
 
-    /// Find the k nearest neighbors to a query point.
-    ///
-    /// # Arguments
-    /// * `query` - The query point
-    /// * `k` - Number of neighbors to find
-    ///
-    /// # Returns
-    /// Vector of `Neighbor` results sorted by distance
     /// Find the `k` nearest neighbors to `query`, filling `out` (cleared first) instead of
     /// allocating — for hot loops that query repeatedly (e.g. the per-star k-NN graph).
     /// Results are sorted by ascending distance.
@@ -127,52 +154,10 @@ impl KdTree {
         }
 
         let mut heap = BoundedMaxHeap::new(k);
-        self.k_nearest_range(0, self.indices.len(), 0, query, &mut heap);
+        self.descend(Subtree::root(self.indices.len()), query, &mut heap);
 
         heap.write_into(out);
         out.sort_by(|a, b| a.dist_sq.total_cmp(&b.dist_sq));
-    }
-
-    /// K-nearest neighbor search over a range of the implicit tree.
-    fn k_nearest_range(
-        &self,
-        start: usize,
-        end: usize,
-        depth: usize,
-        query: DVec2,
-        heap: &mut BoundedMaxHeap,
-    ) {
-        if start >= end {
-            return;
-        }
-
-        let mid = start + (end - start) / 2;
-        let point_idx = self.indices[mid];
-        let point = self.points[point_idx];
-
-        let dist_sq = (query - point).length_squared();
-        heap.push(Neighbor {
-            index: point_idx,
-            dist_sq,
-        });
-
-        let split_dim = depth % 2;
-        let diff = dim_value(query, split_dim) - dim_value(point, split_dim);
-
-        // Search the nearer subtree first
-        let (first_start, first_end, second_start, second_end) = if diff < 0.0 {
-            (start, mid, mid + 1, end)
-        } else {
-            (mid + 1, end, start, mid)
-        };
-
-        self.k_nearest_range(first_start, first_end, depth + 1, query, heap);
-
-        // Only search the other subtree if it could contain closer points
-        let diff_sq = diff * diff;
-        if !heap.is_full() || diff_sq < heap.max_distance() {
-            self.k_nearest_range(second_start, second_end, depth + 1, query, heap);
-        }
     }
 
     /// Find the single nearest neighbor to a query point.
@@ -183,103 +168,65 @@ impl KdTree {
         if self.indices.is_empty() {
             return None;
         }
-        let mut best = Neighbor {
+        let mut best = NearestOne(Neighbor {
             index: 0,
             dist_sq: f64::INFINITY,
-        };
-        self.nearest_one_range(0, self.indices.len(), 0, query, &mut best);
-        if best.dist_sq.is_finite() {
-            Some(best)
-        } else {
-            None
-        }
-    }
-
-    /// Nearest-one search over a range of the implicit tree.
-    fn nearest_one_range(
-        &self,
-        start: usize,
-        end: usize,
-        depth: usize,
-        query: DVec2,
-        best: &mut Neighbor,
-    ) {
-        if start >= end {
-            return;
-        }
-
-        let mid = start + (end - start) / 2;
-        let point_idx = self.indices[mid];
-        let point = self.points[point_idx];
-
-        let dist_sq = (query - point).length_squared();
-        if dist_sq < best.dist_sq {
-            best.index = point_idx;
-            best.dist_sq = dist_sq;
-        }
-
-        let split_dim = depth % 2;
-        let diff = dim_value(query, split_dim) - dim_value(point, split_dim);
-
-        let (first_start, first_end, second_start, second_end) = if diff < 0.0 {
-            (start, mid, mid + 1, end)
-        } else {
-            (mid + 1, end, start, mid)
-        };
-
-        self.nearest_one_range(first_start, first_end, depth + 1, query, best);
-
-        if diff * diff < best.dist_sq {
-            self.nearest_one_range(second_start, second_end, depth + 1, query, best);
-        }
+        });
+        self.descend(Subtree::root(self.indices.len()), query, &mut best);
+        best.0.dist_sq.is_finite().then_some(best.0)
     }
 
     /// Find all point indices within a given radius, appending to a buffer.
     ///
     /// The buffer is cleared before use. This avoids allocations when
-    /// called repeatedly in a loop.
+    /// called repeatedly in a loop. The results are in traversal order, not sorted.
     pub(super) fn radius_indices_into(&self, query: DVec2, radius: f64, indices: &mut Vec<usize>) {
         indices.clear();
         if self.indices.is_empty() {
             return;
         }
-        let radius_sq = radius * radius;
-        self.radius_indices_range(0, self.indices.len(), 0, query, radius_sq, indices);
+        let mut within = WithinRadius {
+            radius_sq: radius * radius,
+            indices,
+        };
+        self.descend(Subtree::root(self.indices.len()), query, &mut within);
     }
 
-    /// Radius search collecting only indices over a range of the implicit tree.
-    fn radius_indices_range(
-        &self,
-        start: usize,
-        end: usize,
-        depth: usize,
-        query: DVec2,
-        radius_sq: f64,
-        results: &mut Vec<usize>,
-    ) {
-        if start >= end {
+    /// Offer `visitor` every point under `subtree` it cannot rule out: visit the median, recurse
+    /// into the side of the split `query` falls on, then skip the other side when the split plane
+    /// is already further off than anything the visitor would still accept. Start from
+    /// [`Subtree::root`].
+    ///
+    /// Which points are kept, and how far "still accept" reaches, are the visitor's business — the
+    /// descent knows neither, which is what lets one traversal serve k-nearest, nearest-one and
+    /// radius search.
+    fn descend(&self, subtree: Subtree, query: DVec2, visitor: &mut impl Descent) {
+        if subtree.len() == 0 {
             return;
         }
 
-        let mid = start + (end - start) / 2;
-        let point_idx = self.indices[mid];
+        let point_idx = self.indices[subtree.mid()];
         let point = self.points[point_idx];
+        visitor.visit(point_idx, (query - point).length_squared());
 
-        let dist_sq = (query - point).length_squared();
-        if dist_sq <= radius_sq {
-            results.push(point_idx);
-        }
-
-        let split_dim = depth % 2;
+        let split_dim = subtree.split_dim();
         let diff = dim_value(query, split_dim) - dim_value(point, split_dim);
-        let diff_sq = diff * diff;
 
-        if diff <= 0.0 || diff_sq <= radius_sq {
-            self.radius_indices_range(start, mid, depth + 1, query, radius_sq, results);
-        }
+        // Nearer side first, so the visitor's bound tightens before the far side is weighed.
+        let [left, right] = subtree.children();
+        let (near, far) = if diff < 0.0 {
+            (left, right)
+        } else {
+            (right, left)
+        };
 
-        if diff >= 0.0 || diff_sq <= radius_sq {
-            self.radius_indices_range(mid + 1, end, depth + 1, query, radius_sq, results);
+        self.descend(near, query, visitor);
+
+        // Inclusive: a radius search must keep points sitting exactly on its boundary, and for the
+        // two nearest-neighbour visitors an equal-distance far side is only ever a wasted visit —
+        // neither replaces a held neighbour on a tie.
+        if diff * diff <= visitor.prune_radius_sq() {
+            self.descend(far, query, visitor);
         }
     }
 
@@ -294,114 +241,119 @@ impl KdTree {
     }
 }
 
-/// Maximum capacity for stack-allocated neighbor collection.
-/// For k <= this value, we avoid heap allocation entirely.
+/// What a [`KdTree::descend`] is collecting, and how far it still has to look to collect it.
+///
+/// The three queries differ only in these two answers, so they are what the descent takes instead
+/// of being written into three copies of it.
+trait Descent {
+    /// Offer the point at `index`, `dist_sq` away from the query. Keeping it is the visitor's call.
+    fn visit(&mut self, index: usize, dist_sq: f64);
+
+    /// Squared distance past which no point can still be wanted, so a subtree whose split plane is
+    /// at least that far away need not be entered. `INFINITY` while nothing bounds the search yet.
+    fn prune_radius_sq(&self) -> f64;
+}
+
+impl Descent for BoundedMaxHeap {
+    fn visit(&mut self, index: usize, dist_sq: f64) {
+        self.push(Neighbor { index, dist_sq });
+    }
+
+    fn prune_radius_sq(&self) -> f64 {
+        // Until `k` neighbours are in hand every subtree can still contribute, however far off it
+        // is — the heap's root is only an upper bound once it is full.
+        if self.is_full() {
+            self.max_distance()
+        } else {
+            f64::INFINITY
+        }
+    }
+}
+
+/// The best neighbour seen so far. `dist_sq` starts at infinity, which reads as "nothing found".
+#[derive(Debug)]
+struct NearestOne(Neighbor);
+
+impl Descent for NearestOne {
+    fn visit(&mut self, index: usize, dist_sq: f64) {
+        if dist_sq < self.0.dist_sq {
+            self.0 = Neighbor { index, dist_sq };
+        }
+    }
+
+    fn prune_radius_sq(&self) -> f64 {
+        self.0.dist_sq
+    }
+}
+
+/// Every point inside a fixed radius. Unlike the two nearest-neighbour visitors its bound never
+/// tightens, so the descent prunes against the same figure the whole way down.
+#[derive(Debug)]
+struct WithinRadius<'a> {
+    radius_sq: f64,
+    indices: &'a mut Vec<usize>,
+}
+
+impl Descent for WithinRadius<'_> {
+    fn visit(&mut self, index: usize, dist_sq: f64) {
+        if dist_sq <= self.radius_sq {
+            self.indices.push(index);
+        }
+    }
+
+    fn prune_radius_sq(&self) -> f64 {
+        self.radius_sq
+    }
+}
+
+/// Neighbours a k-nearest query holds inline before it spills to the heap. `k` is the caller's,
+/// and the tree is queried per star, so the common small-k case must not allocate.
 const SMALL_HEAP_CAPACITY: usize = 32;
 
-/// A bounded max-heap for k-nearest neighbor search.
+/// A bounded max-heap for k-nearest neighbor search: the `k` smallest distances seen so far, with
+/// the largest of them at the root, so the one to evict is always in hand.
 ///
-/// Keeps track of the k smallest distances seen so far.
-/// Uses stack allocation for small k (<=32), heap allocation for larger k.
-///
-/// The large size difference between variants is intentional - the Small variant
-/// avoids heap allocation for the common case of k <= 32.
+/// [`SmallVec`] rather than a `Vec`, so `k <= SMALL_HEAP_CAPACITY` stays on the stack and a larger
+/// one spills — the storage split without a second copy of the heap operations to go with it.
 #[derive(Debug)]
-#[allow(clippy::large_enum_variant)]
-enum BoundedMaxHeap {
-    /// Stack-allocated variant for small k values
-    Small {
-        capacity: usize,
-        len: usize,
-        items: [Neighbor; SMALL_HEAP_CAPACITY],
-    },
-    /// Heap-allocated variant for larger k values
-    Large {
-        capacity: usize,
-        items: Vec<Neighbor>,
-    },
+struct BoundedMaxHeap {
+    /// The caller's `k`. Not `items.capacity()`, which is the inline size until the heap spills.
+    capacity: usize,
+    items: SmallVec<[Neighbor; SMALL_HEAP_CAPACITY]>,
 }
 
 impl BoundedMaxHeap {
     fn new(capacity: usize) -> Self {
-        let zero = Neighbor {
-            index: 0,
-            dist_sq: 0.0,
-        };
-        if capacity <= SMALL_HEAP_CAPACITY {
-            BoundedMaxHeap::Small {
-                capacity,
-                len: 0,
-                items: [zero; SMALL_HEAP_CAPACITY],
-            }
-        } else {
-            BoundedMaxHeap::Large {
-                capacity,
-                items: Vec::with_capacity(capacity),
-            }
+        Self {
+            capacity,
+            items: SmallVec::with_capacity(capacity),
         }
     }
 
     fn push(&mut self, neighbor: Neighbor) {
-        match self {
-            BoundedMaxHeap::Small {
-                capacity,
-                len,
-                items,
-            } => {
-                if *len < *capacity {
-                    items[*len] = neighbor;
-                    *len += 1;
-                    Self::sift_up_slice(&mut items[..*len], *len - 1);
-                } else if neighbor.dist_sq < items[0].dist_sq {
-                    items[0] = neighbor;
-                    Self::sift_down_slice(&mut items[..*len], 0);
-                }
-            }
-            BoundedMaxHeap::Large { capacity, items } => {
-                if items.len() < *capacity {
-                    items.push(neighbor);
-                    let last_idx = items.len() - 1;
-                    Self::sift_up_slice(items, last_idx);
-                } else if neighbor.dist_sq < items[0].dist_sq {
-                    items[0] = neighbor;
-                    Self::sift_down_slice(items, 0);
-                }
-            }
+        if self.items.len() < self.capacity {
+            self.items.push(neighbor);
+            let last = self.items.len() - 1;
+            Self::sift_up_slice(&mut self.items, last);
+        } else if neighbor.dist_sq < self.items[0].dist_sq {
+            self.items[0] = neighbor;
+            Self::sift_down_slice(&mut self.items, 0);
         }
     }
 
     fn is_full(&self) -> bool {
-        match self {
-            BoundedMaxHeap::Small { capacity, len, .. } => *len >= *capacity,
-            BoundedMaxHeap::Large { capacity, items } => items.len() >= *capacity,
-        }
+        self.items.len() >= self.capacity
     }
 
     fn max_distance(&self) -> f64 {
-        match self {
-            BoundedMaxHeap::Small { len, items, .. } => {
-                if *len == 0 {
-                    f64::INFINITY
-                } else {
-                    items[0].dist_sq
-                }
-            }
-            BoundedMaxHeap::Large { items, .. } => {
-                if items.is_empty() {
-                    f64::INFINITY
-                } else {
-                    items[0].dist_sq
-                }
-            }
-        }
+        self.items
+            .first()
+            .map_or(f64::INFINITY, |neighbor| neighbor.dist_sq)
     }
 
     /// Append the heap's contents to `out` (unsorted) without consuming the heap.
     fn write_into(&self, out: &mut Vec<Neighbor>) {
-        match self {
-            BoundedMaxHeap::Small { len, items, .. } => out.extend_from_slice(&items[..*len]),
-            BoundedMaxHeap::Large { items, .. } => out.extend_from_slice(items),
-        }
+        out.extend_from_slice(&self.items);
     }
 
     fn sift_up_slice(items: &mut [Neighbor], mut idx: usize) {

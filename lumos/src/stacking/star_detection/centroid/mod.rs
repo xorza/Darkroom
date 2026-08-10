@@ -111,6 +111,34 @@ fn is_valid_stamp_position(pos: DVec2, size: Size2us, stamp_radius: usize) -> bo
         && icy < (size.height - stamp_radius) as isize
 }
 
+/// Whether a profile fit landed somewhere its caller can use: the centre within `stamp_radius` of
+/// where the fit started, and every width parameter inside a plausible range.
+///
+/// Shared by both profile models, which differ only in how many widths they produce — two sigmas
+/// for a Gaussian, one alpha for a Moffat — and not at all in what makes a fit implausible.
+///
+/// The bounds are phrased as acceptance rather than rejection, which is what makes a non-finite
+/// width fail: comparisons against NaN are all false, so `NaN > limit` reads as "not out of range"
+/// and a rejection-phrased check would pass a NaN width through to [`Star::fwhm`]. The centre needs
+/// its own [`DVec2::is_finite`], because that trick does not extend to it: `max_element` reduces
+/// with [`f64::max`], which *ignores* NaN and returns the other lane, so a NaN x-coordinate would
+/// silently compare as the (finite) y-offset.
+///
+/// A rejected fit is not an error — [`measure_star`] falls back to the moment-based centroid.
+fn fit_is_plausible(
+    result_pos: DVec2,
+    input_pos: DVec2,
+    stamp_radius: usize,
+    widths: impl IntoIterator<Item = f64>,
+) -> bool {
+    let plausible_width = 0.5..=stamp_radius as f64 * 2.0;
+    result_pos.is_finite()
+        && (result_pos - input_pos).abs().max_element() <= stamp_radius as f64
+        && widths
+            .into_iter()
+            .all(|width| plausible_width.contains(&width))
+}
+
 /// The stamp's own pixel coordinates, `0..2r` on each axis, flattened row-major.
 ///
 /// Identical for every candidate of a given radius, so it is built once per detection rather than

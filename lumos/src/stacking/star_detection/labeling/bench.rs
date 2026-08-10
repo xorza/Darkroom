@@ -38,7 +38,7 @@ fn create_detection_mask(pixels: &Buffer2<f32>, sigma_threshold: f32) -> BitBuff
 
 #[quick_bench(warmup_iters = 2, iters = 5)]
 fn bench_label_map_from_buffer_1k(b: ::quickbench::Bencher) {
-    use crate::stacking::star_detection::labeling::label_mask_parallel;
+    use crate::stacking::star_detection::labeling::label_mask;
 
     let pixels = star_field(Size2us::new(1024, 1024), 500, 42)
         .image
@@ -49,7 +49,7 @@ fn bench_label_map_from_buffer_1k(b: ::quickbench::Bencher) {
 
     b.bench(|| {
         labels.pixels_mut().fill(0);
-        black_box(label_mask_parallel(
+        black_box(label_mask(
             black_box(&mask),
             &mut labels,
             Connectivity::Four,
@@ -59,7 +59,7 @@ fn bench_label_map_from_buffer_1k(b: ::quickbench::Bencher) {
 
 #[quick_bench(warmup_iters = 1, iters = 3)]
 fn bench_label_map_from_buffer_4k(b: ::quickbench::Bencher) {
-    use crate::stacking::star_detection::labeling::label_mask_parallel;
+    use crate::stacking::star_detection::labeling::label_mask;
 
     let pixels = star_field(Size2us::new(4096, 4096), 2000, 42)
         .image
@@ -70,7 +70,7 @@ fn bench_label_map_from_buffer_4k(b: ::quickbench::Bencher) {
 
     b.bench(|| {
         labels.pixels_mut().fill(0);
-        black_box(label_mask_parallel(
+        black_box(label_mask(
             black_box(&mask),
             &mut labels,
             Connectivity::Four,
@@ -80,7 +80,7 @@ fn bench_label_map_from_buffer_4k(b: ::quickbench::Bencher) {
 
 #[quick_bench(warmup_iters = 1, iters = 10)]
 fn bench_label_map_from_buffer_4k_globular(b: ::quickbench::Bencher) {
-    use crate::stacking::star_detection::labeling::label_mask_parallel;
+    use crate::stacking::star_detection::labeling::label_mask;
 
     let pixels = star_field(Size2us::new(4096, 4096), 50000, 42)
         .image
@@ -91,7 +91,7 @@ fn bench_label_map_from_buffer_4k_globular(b: ::quickbench::Bencher) {
 
     b.bench(|| {
         labels.pixels_mut().fill(0);
-        black_box(label_mask_parallel(
+        black_box(label_mask(
             black_box(&mask),
             &mut labels,
             Connectivity::Four,
@@ -99,99 +99,23 @@ fn bench_label_map_from_buffer_4k_globular(b: ::quickbench::Bencher) {
     });
 }
 
-/// Benchmark to find optimal sequential/parallel threshold.
-/// Tests various image sizes to find optimal sequential/parallel crossover.
-#[test]
-#[ignore]
-fn bench_threshold_sweep() {
-    use crate::stacking::star_detection::config::detection_config::Connectivity;
-    use crate::stacking::star_detection::labeling::{label_mask_parallel, label_mask_sequential};
-    use std::time::Instant;
+/// The labeler on an image small enough to resolve to a single strip, where the boundary stitch
+/// has nothing to do. Guards the path a second, sequential implementation used to serve.
+#[quick_bench(warmup_iters = 3, iters = 20)]
+fn bench_label_small(b: ::quickbench::Bencher) {
+    use crate::stacking::star_detection::labeling::label_mask;
 
-    println!("\n=== Sequential vs Parallel Threshold Benchmark ===\n");
-    println!(
-        "{:>10} {:>10} {:>12} {:>12} {:>10}",
-        "Pixels", "Size", "Sequential", "Parallel", "Winner"
-    );
-    println!("{}", "-".repeat(60));
+    let size = Size2us::new(240, 240);
+    let pixels = star_field(size, 30, 42).image.channel(0).clone();
+    let mask = create_detection_mask(&pixels, 4.0);
+    let mut labels = Buffer2::new_filled(size.width, size.height, 0u32);
 
-    // Test sizes from 10k to 500k pixels
-    let test_sizes: Vec<(usize, usize)> = vec![
-        (100, 100),   // 10k
-        (150, 150),   // 22.5k
-        (200, 200),   // 40k
-        (250, 250),   // 62.5k
-        (300, 300),   // 90k
-        (316, 316),   // ~100k
-        (350, 350),   // 122.5k
-        (400, 400),   // 160k
-        (450, 450),   // 202.5k
-        (500, 500),   // 250k
-        (600, 600),   // 360k
-        (700, 700),   // 490k
-        (800, 800),   // 640k
-        (1000, 1000), // 1M
-    ];
-
-    for (width, height) in test_sizes {
-        let pixels = star_field(Size2us::new(width, height), width * height / 200, 42)
-            .image
-            .channel(0)
-            .clone();
-        let mask = create_detection_mask(&pixels, 4.0);
-        let total_pixels = width * height;
-
-        // Warmup
-        for _ in 0..2 {
-            let mut labels = Buffer2::new_filled(width, height, 0u32);
-            label_mask_sequential(&mask, &mut labels, Connectivity::Four);
-            let mut labels = Buffer2::new_filled(width, height, 0u32);
-            label_mask_parallel(&mask, &mut labels, Connectivity::Four);
-        }
-
-        // Benchmark sequential
-        let iterations = if total_pixels < 100_000 { 20 } else { 10 };
-        let start = Instant::now();
-        for _ in 0..iterations {
-            let mut labels = Buffer2::new_filled(width, height, 0u32);
-            black_box(label_mask_sequential(
-                black_box(&mask),
-                &mut labels,
-                Connectivity::Four,
-            ));
-        }
-        let seq_time = start.elapsed() / iterations;
-
-        // Benchmark parallel
-        let start = Instant::now();
-        for _ in 0..iterations {
-            let mut labels = Buffer2::new_filled(width, height, 0u32);
-            black_box(label_mask_parallel(
-                black_box(&mask),
-                &mut labels,
-                Connectivity::Four,
-            ));
-        }
-        let par_time = start.elapsed() / iterations;
-
-        let winner = if seq_time <= par_time { "seq" } else { "par" };
-        let speedup = if seq_time <= par_time {
-            par_time.as_nanos() as f64 / seq_time.as_nanos() as f64
-        } else {
-            seq_time.as_nanos() as f64 / par_time.as_nanos() as f64
-        };
-
-        println!(
-            "{:>10} {:>4}x{:<4} {:>10.1}µs {:>10.1}µs {:>6} ({:.2}x)",
-            total_pixels,
-            width,
-            height,
-            seq_time.as_nanos() as f64 / 1000.0,
-            par_time.as_nanos() as f64 / 1000.0,
-            winner,
-            speedup
-        );
-    }
-
-    println!("\nNote: Current threshold is 65,000 pixels");
+    b.bench(|| {
+        labels.pixels_mut().fill(0);
+        black_box(label_mask(
+            black_box(&mask),
+            &mut labels,
+            Connectivity::Four,
+        ))
+    });
 }

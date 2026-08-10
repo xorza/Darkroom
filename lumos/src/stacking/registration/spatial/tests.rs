@@ -533,15 +533,11 @@ fn get_point_returns_original_coordinates() {
 }
 
 #[test]
-fn heap_small_variant_selection() {
-    let heap = BoundedMaxHeap::new(5);
-    assert!(matches!(heap, BoundedMaxHeap::Small { .. }));
-
-    let heap = BoundedMaxHeap::new(SMALL_HEAP_CAPACITY);
-    assert!(matches!(heap, BoundedMaxHeap::Small { .. }));
-
-    let heap = BoundedMaxHeap::new(SMALL_HEAP_CAPACITY + 1);
-    assert!(matches!(heap, BoundedMaxHeap::Large { .. }));
+fn heap_stays_inline_up_to_its_inline_capacity() {
+    // The heap is built per k-nearest query, so a small k must not reach the allocator.
+    assert!(!BoundedMaxHeap::new(5).items.spilled());
+    assert!(!BoundedMaxHeap::new(SMALL_HEAP_CAPACITY).items.spilled());
+    assert!(BoundedMaxHeap::new(SMALL_HEAP_CAPACITY + 1).items.spilled());
 }
 
 #[test]
@@ -610,7 +606,7 @@ fn heap_small_push_and_eviction() {
 fn heap_large_push_and_eviction() {
     let capacity = SMALL_HEAP_CAPACITY + 5; // 37
     let mut heap = BoundedMaxHeap::new(capacity);
-    assert!(matches!(heap, BoundedMaxHeap::Large { .. }));
+    assert!(heap.items.spilled());
 
     // Push capacity items with dist_sq = capacity, capacity-1, ..., 1
     for i in 0..capacity {

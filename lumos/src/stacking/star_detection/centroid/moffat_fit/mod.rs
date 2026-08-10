@@ -22,7 +22,7 @@ use crate::stacking::star_detection::centroid::StampGrid;
 use crate::stacking::star_detection::centroid::lm_optimizer::{
     FitData, LMConfig, LMModel, NormalEquations,
 };
-use crate::stacking::star_detection::centroid::{FitNoise, StampFit};
+use crate::stacking::star_detection::centroid::{FitNoise, StampFit, fit_is_plausible};
 use glam::DVec2;
 use imaginarium::Buffer2;
 
@@ -221,7 +221,7 @@ impl MoffatFit {
     /// shot-noisy bright core doesn't bias the fit (PR1); `None` is a plain unweighted fit.
     ///
     /// `None` also when the stamp falls outside the frame, holds too few pixels to constrain five
-    /// parameters, or the fit lands somewhere [`validate_position`] rejects.
+    /// parameters, or the fit lands somewhere [`fit_is_plausible`] rejects.
     pub(super) fn new(
         pixels: &Buffer2<f32>,
         pos: DVec2,
@@ -252,7 +252,7 @@ impl MoffatFit {
         let [x0, y0, _, alpha, _] = result.params;
         let result_pos = fit.to_image(x0, y0);
 
-        if !validate_position(result_pos, pos, alpha as f32, grid.radius) {
+        if !fit_is_plausible(result_pos, pos, grid.radius, [alpha]) {
             return None;
         }
 
@@ -264,22 +264,6 @@ impl MoffatFit {
             debug: MoffatFitDebug::of(&result),
         })
     }
-}
-
-/// Centre inside the stamp, and alpha within a plausible range.
-///
-/// The alpha bound is phrased as acceptance rather than rejection so a non-finite one fails it —
-/// comparisons against NaN are all false, so `NaN > limit` reads as "not out of range".
-///
-/// The centre needs its own [`DVec2::is_finite`] check, because that trick does not extend to it:
-/// `max_element` reduces with [`f64::max`], which *ignores* NaN and returns the other lane, so a
-/// NaN x-coordinate would silently compare as the (finite) y-offset.
-///
-/// A rejected fit is not an error: `measure_star` falls back to the moment-based centroid.
-fn validate_position(result_pos: DVec2, input_pos: DVec2, alpha: f32, stamp_radius: usize) -> bool {
-    result_pos.is_finite()
-        && (result_pos - input_pos).abs().max_element() <= stamp_radius as f64
-        && (0.5..=stamp_radius as f32 * 2.0).contains(&alpha)
 }
 
 /// Convert Moffat alpha and beta to FWHM.
