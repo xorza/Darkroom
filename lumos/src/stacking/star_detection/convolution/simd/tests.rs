@@ -112,174 +112,158 @@ fn convolve_row_simd_matches_scalar_width_radius_sweep() {
     }
 }
 
+/// One slice of the row-convolution parity surface: SIMD against the scalar reference.
+#[derive(Debug)]
+struct RowParityCase {
+    name: &'static str,
+    widths: Vec<usize>,
+    radii: Vec<usize>,
+    /// The signal, built for a width. The shape matters: a smooth ramp, a wave and an impulse
+    /// stress the mirrored boundary differently.
+    input: fn(usize) -> Vec<f32>,
+    tolerance: f32,
+}
+
+/// SIMD and scalar row convolution agree over every width, radius and signal shape that mattered.
+///
+/// Five separate tests each pinned one corner of this surface — widths below a register, one wide
+/// row, radii one through eight, a hand-built boundary case, and a three-element row. They are one
+/// table because they assert the same property and differ only in where they sample it.
+///
+/// Every row uses the same *asymmetric* kernel, `(i + 1)·0.05`. Three of the tests this replaces
+/// used a symmetric box, which cannot catch a kernel applied in mirrored tap order — the class of
+/// bug this parity check exists for.
 #[test]
-fn convolve_row_small_input_less_than_simd_width() {
-    // Test inputs smaller than SIMD register width
-    // Start at width=3 because mirror boundary requires at least 3 pixels for radius=1
-    for width in 3..16 {
-        let input: Vec<f32> = (0..width).map(|i| i as f32 + 1.0).collect();
-        let kernel = vec![0.25, 0.5, 0.25];
-        let radius = 1;
+fn convolve_row_simd_matches_scalar_over_every_width_and_radius() {
+    fn ramp(width: usize) -> Vec<f32> {
+        (0..width).map(|i| i as f32 + 1.0).collect()
+    }
+    fn half_ramp(width: usize) -> Vec<f32> {
+        (0..width).map(|i| i as f32 * 0.5).collect()
+    }
+    fn wave(width: usize) -> Vec<f32> {
+        (0..width).map(|i| (i as f32).sin() * 10.0 + 50.0).collect()
+    }
+    fn impulse(width: usize) -> Vec<f32> {
+        let mut input = vec![0.0f32; width];
+        input[width / 2] = 1.0;
+        input
+    }
 
-        let mut output_simd = vec![0.0f32; width];
-        let mut output_scalar = vec![0.0f32; width];
+    let cases = [
+        // Below one SIMD register the kernel never enters its vector path. Three is the narrowest
+        // a radius-1 mirror can work on, so it is the floor.
+        RowParityCase {
+            name: "rows narrower than a SIMD register",
+            widths: (3..16).collect(),
+            radii: vec![1],
+            input: ramp,
+            tolerance: 1e-5,
+        },
+        // A row long enough for many vector iterations, with a wide kernel over a signal that
+        // changes sign of slope repeatedly.
+        RowParityCase {
+            name: "a long row with a wide kernel",
+            widths: vec![100],
+            radii: vec![5],
+            input: wave,
+            tolerance: 1e-4,
+        },
+        // Radii four, six and eight are not in the dense sweep's {1,2,3,5,7}, so this is the only
+        // place they are exercised.
+        RowParityCase {
+            name: "every radius through eight",
+            widths: vec![64],
+            radii: (1..=8).collect(),
+            input: half_ramp,
+            tolerance: 1e-4,
+        },
+        // An impulse puts the whole kernel on the boundary between zero and non-zero output,
+        // where a tap misalignment shows as a shifted response rather than a small error.
+        RowParityCase {
+            name: "an impulse",
+            widths: vec![64],
+            radii: vec![2],
+            input: impulse,
+            tolerance: 1e-5,
+        },
+    ];
 
-        convolve_row(&input, &mut output_simd, &kernel, radius);
-        convolve_row_scalar(&input, &mut output_scalar, &kernel, radius);
+    for case in &cases {
+        for &radius in &case.radii {
+            let kernel: Vec<f32> = (0..2 * radius + 1)
+                .map(|i| (i as f32 + 1.0) * 0.05)
+                .collect();
+            for &width in &case.widths {
+                let input = (case.input)(width);
+                let mut simd = vec![0.0f32; width];
+                let mut scalar = vec![0.0f32; width];
+                convolve_row(&input, &mut simd, &kernel, radius);
+                convolve_row_scalar(&input, &mut scalar, &kernel, radius);
 
-        for i in 0..width {
-            assert!(
-                (output_simd[i] - output_scalar[i]).abs() < 1e-5,
-                "Width {}, index {}: {} vs {}",
-                width,
-                i,
-                output_simd[i],
-                output_scalar[i]
-            );
+                for x in 0..width {
+                    assert!(
+                        (simd[x] - scalar[x]).abs() < case.tolerance,
+                        "{}: radius {radius} width {width} column {x}: {} vs {}",
+                        case.name,
+                        simd[x],
+                        scalar[x]
+                    );
+                }
+            }
         }
     }
 }
 
+/// The impulse response is the kernel *reversed*, which is what pins the tap order.
+///
+/// `convolve_row` correlates rather than convolves — `convolve_pixel_scalar` sums
+/// `input[x + k - radius] · kernel[k]`, so an impulse at `p` puts `kernel[2r - t]` at column
+/// `p - r + t`. That is the usual image-processing convention and production only ever passes
+/// symmetric Gaussians, so it makes no difference there.
+///
+/// It makes every difference to this test. The test it replaces asserted the response equalled the
+/// kernel *forwards*, and passed only because its kernel `[0.1, 0.2, 0.4, 0.2, 0.1]` is a
+/// palindrome — it could not have distinguished either tap order. An asymmetric kernel can, which
+/// is the whole point of an impulse oracle: the parity sweep above only says the two
+/// implementations agree, so a kernel applied backwards would satisfy it.
 #[test]
-fn convolve_row_edge_boundary_handling() {
-    // Test that boundary mirror handling works correctly
-    let input = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
-    let kernel = vec![0.2, 0.3, 0.3, 0.2]; // radius 1, asymmetric kernel
-    let radius = 1;
-
-    let mut output_simd = vec![0.0f32; 8];
-    let mut output_scalar = vec![0.0f32; 8];
-
-    convolve_row(&input, &mut output_simd, &kernel, radius);
-    convolve_row_scalar(&input, &mut output_scalar, &kernel, radius);
-
-    // Check all pixels including edges
-    for i in 0..8 {
-        assert!(
-            (output_simd[i] - output_scalar[i]).abs() < 1e-5,
-            "Edge handling mismatch at {}: {} vs {}",
-            i,
-            output_simd[i],
-            output_scalar[i]
-        );
-    }
-}
-
-#[test]
-fn convolve_row_large_kernel() {
-    // Test with a larger kernel (radius 5, kernel size 11)
-    let input: Vec<f32> = (0..100).map(|i| (i as f32).sin() * 10.0 + 50.0).collect();
-    let kernel: Vec<f32> = (0..11)
-        .map(|i| 1.0 / 11.0 * (1.0 + 0.1 * i as f32))
-        .collect();
-    let kernel_sum: f32 = kernel.iter().sum();
-    let kernel: Vec<f32> = kernel.iter().map(|&k| k / kernel_sum).collect(); // Normalize
-    let radius = 5;
-
-    let mut output_simd = vec![0.0f32; 100];
-    let mut output_scalar = vec![0.0f32; 100];
-
-    convolve_row(&input, &mut output_simd, &kernel, radius);
-    convolve_row_scalar(&input, &mut output_scalar, &kernel, radius);
-
-    for i in 0..100 {
-        assert!(
-            (output_simd[i] - output_scalar[i]).abs() < 1e-4,
-            "Large kernel mismatch at {}: {} vs {}",
-            i,
-            output_simd[i],
-            output_scalar[i]
-        );
-    }
-}
-
-#[test]
-fn convolve_row_various_kernel_radii() {
-    let input: Vec<f32> = (0..64).map(|i| i as f32 * 0.5).collect();
-
-    for radius in 1..=8 {
-        let kernel_size = radius * 2 + 1;
-        let kernel: Vec<f32> = vec![1.0 / kernel_size as f32; kernel_size];
-
-        let mut output_simd = vec![0.0f32; 64];
-        let mut output_scalar = vec![0.0f32; 64];
-
-        convolve_row(&input, &mut output_simd, &kernel, radius);
-        convolve_row_scalar(&input, &mut output_scalar, &kernel, radius);
-
-        for i in 0..64 {
-            assert!(
-                (output_simd[i] - output_scalar[i]).abs() < 1e-4,
-                "Radius {}, index {}: {} vs {}",
-                radius,
-                i,
-                output_simd[i],
-                output_scalar[i]
-            );
-        }
-    }
-}
-
-#[test]
-fn convolve_row_impulse_response() {
-    // Single impulse in the middle
-    let mut input = vec![0.0f32; 64];
-    input[32] = 1.0;
-
-    let kernel = vec![0.1, 0.2, 0.4, 0.2, 0.1];
+fn convolve_row_impulse_response_is_the_reversed_kernel() {
+    let width = 64;
     let radius = 2;
+    let kernel = [0.1f32, 0.2, 0.4, 0.3, 0.05];
+    let centre = width / 2;
+    let mut input = vec![0.0f32; width];
+    input[centre] = 1.0;
 
-    let mut output_simd = vec![0.0f32; 64];
-    let mut output_scalar = vec![0.0f32; 64];
+    // Both implementations, because an interior impulse takes the SIMD path — checking only
+    // `convolve_row` would leave the scalar reference's own tap order unpinned, and the parity
+    // sweep cannot tell which of the two is right.
+    let mut simd = vec![0.0f32; width];
+    let mut scalar = vec![0.0f32; width];
+    convolve_row(&input, &mut simd, &kernel, radius);
+    convolve_row_scalar(&input, &mut scalar, &kernel, radius);
 
-    convolve_row(&input, &mut output_simd, &kernel, radius);
-    convolve_row_scalar(&input, &mut output_scalar, &kernel, radius);
-
-    for i in 0..64 {
-        assert!(
-            (output_simd[i] - output_scalar[i]).abs() < 1e-5,
-            "Impulse response mismatch at {}: {} vs {}",
-            i,
-            output_simd[i],
-            output_scalar[i]
-        );
-    }
-
-    // Verify impulse response matches kernel
-    for (k, &kval) in kernel.iter().enumerate() {
-        let idx = 32 - radius + k;
-        assert!(
-            (output_simd[idx] - kval).abs() < 1e-5,
-            "Impulse at {} should match kernel[{}]: {} vs {}",
-            idx,
-            k,
-            output_simd[idx],
-            kval
-        );
-    }
-}
-
-#[test]
-fn convolve_row_edge_only() {
-    // Test very small arrays where only edges exist
-    let input = vec![1.0, 2.0, 3.0];
-    let kernel = vec![0.25, 0.5, 0.25];
-    let radius = 1;
-
-    let mut output_simd = vec![0.0f32; 3];
-    let mut output_scalar = vec![0.0f32; 3];
-
-    convolve_row(&input, &mut output_simd, &kernel, radius);
-    convolve_row_scalar(&input, &mut output_scalar, &kernel, radius);
-
-    for i in 0..3 {
-        assert!(
-            (output_simd[i] - output_scalar[i]).abs() < 1e-5,
-            "Tiny array mismatch at {}: {} vs {}",
-            i,
-            output_simd[i],
-            output_scalar[i]
-        );
+    for (label, output) in [("simd", &simd), ("scalar", &scalar)] {
+        for tap in 0..kernel.len() {
+            let column = centre - radius + tap;
+            let expected = kernel[2 * radius - tap];
+            assert!(
+                (output[column] - expected).abs() < 1e-5,
+                "{label}: column {column} should carry kernel[{}] = {expected}, got {}",
+                2 * radius - tap,
+                output[column]
+            );
+        }
+        // Everything outside the kernel's reach stays zero.
+        for (column, &value) in output.iter().enumerate() {
+            if column < centre - radius || column > centre + radius {
+                assert!(
+                    value.abs() < 1e-6,
+                    "{label}: column {column} should be zero, got {value}"
+                );
+            }
+        }
     }
 }
 
