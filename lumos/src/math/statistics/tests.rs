@@ -943,7 +943,7 @@ fn sigma_clipped_stats_all_same_except_one() {
 }
 
 #[test]
-fn test_mad_floored() {
+fn mad_floored_raises_only_a_spread_below_the_floor() {
     // Floor active: a spread below the floor is raised to floor_fraction * center.
     assert_eq!(mad_floored(0.1, 10.0, 0.5), 5.0);
     // Floor inactive: a real spread above the floor passes through unchanged.

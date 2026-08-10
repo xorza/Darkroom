@@ -526,7 +526,7 @@ fn background_refinement_invalid_iterations_return_exact_errors() {
 }
 
 #[test]
-fn test_is_multi_threshold() {
+fn multi_threshold_is_off_at_zero_and_on_from_two() {
     // 0 = disabled → false
     let config = configured(|config| config.detection.deblend_n_thresholds = 0);
     assert!(!config.detection.is_multi_threshold());

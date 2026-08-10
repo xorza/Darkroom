@@ -79,7 +79,7 @@ mod tests {
     use crate::testing::synthetic::patterns::*;
 
     #[test]
-    fn test_uniform() {
+    fn uniform_fills_every_pixel() {
         let img = uniform(Size2us::new(10, 10), 0.5);
         assert_eq!(img.width(), 10);
         assert_eq!(img.height(), 10);
@@ -89,7 +89,7 @@ mod tests {
     }
 
     #[test]
-    fn test_horizontal_gradient() {
+    fn horizontal_gradient_spans_the_range_across_the_width() {
         let img = horizontal_gradient(Size2us::new(100, 10), 0.0, 1.0);
         assert!((img[(0, 0)] - 0.0).abs() < 1e-6);
         assert!((img[(99, 0)] - 1.0).abs() < 1e-6);
@@ -98,7 +98,7 @@ mod tests {
     }
 
     #[test]
-    fn test_checkerboard() {
+    fn checkerboard_alternates_every_cell() {
         let img = checkerboard(Size2us::new(16, 16), 4, 0.0, 1.0);
         assert!((img[(0, 0)] - 0.0).abs() < 1e-6);
         assert!((img[(4, 0)] - 1.0).abs() < 1e-6);

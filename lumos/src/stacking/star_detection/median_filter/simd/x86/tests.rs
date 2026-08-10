@@ -121,7 +121,7 @@ fn sse41_median9() {
 }
 
 #[test]
-fn test_median_filter_row_avx2() {
+fn avx2_row_matches_the_scalar_row() {
     if !cpu_features::has_avx2() {
         eprintln!("Skipping AVX2 row test - not available");
         return;
@@ -153,7 +153,7 @@ fn test_median_filter_row_avx2() {
 }
 
 #[test]
-fn test_median_filter_row_sse41() {
+fn sse41_row_matches_the_scalar_row() {
     if !cpu_features::has_sse4_1() {
         eprintln!("Skipping SSE4.1 row test - not available");
         return;

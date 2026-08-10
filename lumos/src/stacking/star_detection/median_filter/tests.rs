@@ -247,14 +247,14 @@ fn large_image_parallel() {
 }
 
 #[test]
-fn test_median4() {
+fn median4_averages_the_two_middle_values() {
     let mut v = [0.4, 0.1, 0.3, 0.2];
     // Sorted: [0.1, 0.2, 0.3, 0.4], median = (0.2 + 0.3) / 2 = 0.25
     assert!((median4(&mut v) - 0.25).abs() < 1e-6);
 }
 
 #[test]
-fn test_median6() {
+fn median6_averages_the_two_middle_values() {
     let mut v = [0.6, 0.1, 0.5, 0.2, 0.4, 0.3];
     // Sorted: [0.1, 0.2, 0.3, 0.4, 0.5, 0.6], median = (0.3 + 0.4) / 2 = 0.35
     assert!((median6(&mut v) - 0.35).abs() < 1e-6);
@@ -398,7 +398,7 @@ fn median_at_edge_truth_table() {
 }
 
 #[test]
-fn test_filter_interior_row() {
+fn interior_row_replaces_a_hot_pixel_with_its_neighbourhood_median() {
     // 5x5 image with known values
     #[rustfmt::skip]
     let pixels = vec![
