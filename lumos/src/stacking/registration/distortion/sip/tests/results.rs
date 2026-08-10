@@ -44,431 +44,306 @@ fn norm_scale_stored_correctly() {
     );
 }
 
-#[test]
-fn fit_result_zero_distortion_metrics() {
-    // Zero distortion: target == ref. All residuals and corrections should be ~0.
-    // points_rejected = 0 (no outliers to clip).
+/// One `fit_sip` run and the metrics it must produce.
+#[derive(Debug)]
+struct MetricsCase {
+    name: &'static str,
+    /// Barrel coefficient in `d·k·|d|²`. Zero is an undistorted grid.
+    k: f64,
+    /// Additional `d·k4·|d|⁴` term, which order 3 cannot model.
+    k4: f64,
+    grid_step: usize,
+    /// Append [`OUTLIERS`] after the clean grid.
+    outliers: bool,
+    order: usize,
+    clip_iterations: usize,
+    rejected: Rejected,
+    /// Bounds on the surviving fit's RMS residual. The lower bound is what proves a model too weak
+    /// for its data — an order-3 fit of an r⁴ field cannot drive the residual to zero.
+    rms_below: f64,
+    /// `None` where the fit is expected to be exact; a floor only where the model is too weak for
+    /// its data and driving the residual to zero would mean the fixture was wrong.
+    rms_above: Option<f64>,
+    /// Upper bound on `max_residual`. Not implied by `rms_below`: the invariant runs the other way,
+    /// so a single bad point can sit far above a small RMS.
+    max_residual_below: Option<f64>,
+    /// `max_correction`, where the geometry pins it.
+    correction: Option<Approx>,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum Rejected {
+    Exactly(usize),
+    /// A floor, not a count: the first iterations fit contaminated data, so clean points beside an
+    /// outlier can be clipped too before the fit converges.
+    AtLeast(usize),
+}
+
+#[derive(Debug, Clone, Copy)]
+struct Approx {
+    value: f64,
+    tolerance: f64,
+}
+
+/// Gross outliers — 20–30 px off the barrel field — for the clipping cases.
+const OUTLIERS: [([f64; 2], [f64; 2]); 3] = [
+    ([300.0, 300.0], [320.0, 280.0]),
+    ([700.0, 200.0], [685.0, 225.0]),
+    ([100.0, 800.0], [130.0, 810.0]),
+];
+
+/// The field centre every case distorts about, and the reference point every fit is given.
+const CENTRE: DVec2 = DVec2::new(500.0, 500.0);
+
+fn build_case(case: &MetricsCase) -> (Vec<DVec2>, Vec<DVec2>) {
     let mut ref_points = Vec::new();
     let mut target_points = Vec::new();
-    for y in (0..=400).step_by(100) {
-        for x in (0..=400).step_by(100) {
+    for y in (0..=1000).step_by(case.grid_step) {
+        for x in (0..=1000).step_by(case.grid_step) {
             let p = DVec2::new(x as f64, y as f64);
-            ref_points.push(p);
-            target_points.push(p);
-        }
-    }
-    // 5×5 grid = 25 points. Order 2 has 3 terms, minimum = 9. 25 >= 9.
-    let n = ref_points.len();
-    assert_eq!(n, 25);
-
-    let transform = Transform::identity();
-    let config = SipConfig {
-        order: 2,
-        reference_point: Some(DVec2::new(200.0, 200.0)),
-        ..Default::default()
-    };
-
-    let result = fit_sip(&ref_points, &target_points, &transform, &config);
-
-    assert_eq!(result.points_used, 25);
-    assert_eq!(result.points_rejected, 0);
-    assert!(
-        result.rms_residual < 1e-10,
-        "rms_residual should be ~0, got {:.e}",
-        result.rms_residual
-    );
-    assert!(
-        result.max_residual < 1e-10,
-        "max_residual should be ~0, got {:.e}",
-        result.max_residual
-    );
-    assert!(
-        result.max_correction < 1e-10,
-        "max_correction should be ~0, got {:.e}",
-        result.max_correction
-    );
-}
-
-#[test]
-fn fit_result_barrel_metrics() {
-    // Barrel distortion k=1e-7 on 1000×1000 grid.
-    // Expected: rms_residual small, max_correction ~ 25*sqrt(2) ≈ 35.36 px at corners.
-    //
-    // Corner (0,0): d = (0,0)-(500,500) = (-500,-500), |d|^2 = 500000
-    // distortion = (-500,-500) * 1e-7 * 500000 = (-25,-25)
-    // |distortion| = 25*sqrt(2) ≈ 35.355
-    let center = DVec2::new(500.0, 500.0);
-    let k = 1e-7;
-    let (ref_points, target_points) = make_radial_distortion_points(center, k, 100, 1000);
-    let n = ref_points.len(); // 11×11 = 121
-
-    let transform = Transform::identity();
-    let config = SipConfig {
-        order: 3,
-        reference_point: Some(center),
-        ..Default::default()
-    };
-
-    let result = fit_sip(&ref_points, &target_points, &transform, &config);
-
-    // Clean data → no rejections
-    assert_eq!(result.points_used, n);
-    assert_eq!(result.points_rejected, 0);
-
-    // Good fit → small residuals
-    assert!(
-        result.rms_residual < 0.01,
-        "rms_residual should be small, got {:.6}",
-        result.rms_residual
-    );
-    assert!(
-        result.max_residual < 0.05,
-        "max_residual should be small, got {:.6}",
-        result.max_residual
-    );
-
-    // max_correction should be close to 25*sqrt(2) = 35.355
-    let expected_corner = 25.0 * 2.0_f64.sqrt();
-    assert!(
-        result.max_correction > expected_corner * 0.9,
-        "max_correction {:.4} should be close to {:.4}",
-        result.max_correction,
-        expected_corner
-    );
-    assert!(
-        result.max_correction < expected_corner * 1.1,
-        "max_correction {:.4} should not overshoot {:.4}",
-        result.max_correction,
-        expected_corner
-    );
-}
-
-#[test]
-fn fit_result_with_outliers_metrics() {
-    // Inject 3 outliers into clean barrel data. Sigma-clipping should reject exactly 3.
-    let center = DVec2::new(500.0, 500.0);
-    let k = 1e-7;
-    let (mut ref_points, mut target_points) = make_radial_distortion_points(center, k, 100, 1000);
-    let n_clean = ref_points.len(); // 121
-
-    // 3 gross outliers (20-pixel shifts)
-    ref_points.push(DVec2::new(300.0, 300.0));
-    target_points.push(DVec2::new(320.0, 280.0));
-    ref_points.push(DVec2::new(700.0, 200.0));
-    target_points.push(DVec2::new(685.0, 225.0));
-    ref_points.push(DVec2::new(100.0, 800.0));
-    target_points.push(DVec2::new(130.0, 810.0));
-
-    let n_total = ref_points.len(); // 124
-    assert_eq!(n_total, n_clean + 3);
-
-    let transform = Transform::identity();
-    let config = SipConfig {
-        order: 3,
-        reference_point: Some(center),
-        ..Default::default()
-    };
-
-    let result = fit_sip(&ref_points, &target_points, &transform, &config);
-
-    // Sigma-clipping should reject at least the 3 gross outliers.
-    // The initial unclipped fit is contaminated, so early iterations may also
-    // reject a few clean points near the outliers before converging.
-    assert!(
-        result.points_rejected >= 3,
-        "Expected at least 3 rejections, got {}",
-        result.points_rejected
-    );
-    assert_eq!(result.points_used + result.points_rejected, n_total);
-
-    // After rejection, fit quality should still be good
-    assert!(
-        result.rms_residual < 0.01,
-        "rms_residual after clipping should be small, got {:.6}",
-        result.rms_residual
-    );
-}
-
-#[test]
-fn fit_result_points_used_plus_rejected_equals_total() {
-    // Invariant: points_used + points_rejected == n for any fit.
-    let center = DVec2::new(500.0, 500.0);
-    let transform = Transform::identity();
-
-    // Case 1: clean data, no rejections
-    let (ref_1, tgt_1) = make_radial_distortion_points(center, 1e-7, 100, 1000);
-    let n1 = ref_1.len();
-    let config = SipConfig {
-        order: 3,
-        reference_point: Some(center),
-        ..Default::default()
-    };
-    let r1 = fit_sip(&ref_1, &tgt_1, &transform, &config);
-    assert_eq!(
-        r1.points_used + r1.points_rejected,
-        n1,
-        "Case 1: {} + {} != {}",
-        r1.points_used,
-        r1.points_rejected,
-        n1
-    );
-
-    // Case 2: with outliers
-    let (mut ref_2, mut tgt_2) = make_radial_distortion_points(center, 1e-7, 100, 1000);
-    ref_2.push(DVec2::new(100.0, 100.0));
-    tgt_2.push(DVec2::new(150.0, 50.0));
-    ref_2.push(DVec2::new(900.0, 900.0));
-    tgt_2.push(DVec2::new(880.0, 930.0));
-    let n2 = ref_2.len();
-    let r2 = fit_sip(&ref_2, &tgt_2, &transform, &config);
-    assert_eq!(
-        r2.points_used + r2.points_rejected,
-        n2,
-        "Case 2: {} + {} != {}",
-        r2.points_used,
-        r2.points_rejected,
-        n2
-    );
-
-    // Case 3: clipping disabled
-    let config_no_clip = SipConfig {
-        order: 3,
-        reference_point: Some(center),
-        clip_iterations: 0,
-        ..Default::default()
-    };
-    let r3 = fit_sip(&ref_2, &tgt_2, &transform, &config_no_clip);
-    assert_eq!(
-        r3.points_used + r3.points_rejected,
-        n2,
-        "Case 3: {} + {} != {}",
-        r3.points_used,
-        r3.points_rejected,
-        n2
-    );
-    // No clipping → no rejections
-    assert_eq!(r3.points_rejected, 0);
-    assert_eq!(r3.points_used, n2);
-}
-
-#[test]
-fn fit_result_max_residual_geq_rms() {
-    // Mathematical invariant: max_residual >= rms_residual always.
-    // max(x_i) >= sqrt(mean(x_i^2)) because the max contributes to the sum.
-    let center = DVec2::new(500.0, 500.0);
-    let transform = Transform::identity();
-    let config = SipConfig {
-        order: 3,
-        reference_point: Some(center),
-        ..Default::default()
-    };
-
-    // Case 1: barrel distortion (non-zero residuals)
-    let (ref_pts, tgt_pts) = make_radial_distortion_points(center, 1e-7, 100, 1000);
-    let r = fit_sip(&ref_pts, &tgt_pts, &transform, &config);
-    assert!(
-        r.max_residual >= r.rms_residual,
-        "max ({:.6e}) must be >= rms ({:.6e})",
-        r.max_residual,
-        r.rms_residual
-    );
-
-    // Case 2: 4th-order distortion with order-3 fit (larger residuals)
-    let mut ref_pts2 = Vec::new();
-    let mut tgt_pts2 = Vec::new();
-    for y in (0..=1000).step_by(50) {
-        for x in (0..=1000).step_by(50) {
-            let p = DVec2::new(x as f64, y as f64);
-            let d = p - center;
-            let r2 = d.length_squared();
-            ref_pts2.push(p);
-            tgt_pts2.push(p + d * 1e-14 * r2 * r2); // r^4 distortion
-        }
-    }
-    let r2 = fit_sip(&ref_pts2, &tgt_pts2, &transform, &config);
-    assert!(
-        r2.max_residual >= r2.rms_residual,
-        "max ({:.6e}) must be >= rms ({:.6e})",
-        r2.max_residual,
-        r2.rms_residual
-    );
-    // Order 3 cannot fully model r^4 distortion, so residuals should be non-trivial
-    assert!(
-        r2.rms_residual > 1e-6,
-        "r^4 distortion with order-3 fit should have non-trivial residuals: {:.6e}",
-        r2.rms_residual
-    );
-}
-
-#[test]
-fn fit_result_higher_order_reduces_residuals() {
-    // For distortion with a 4th-order component, order-4 fit should produce
-    // strictly lower residuals than order-3 fit.
-    //
-    // Distortion: d * k2 * r^2 + d * k4 * r^4
-    // Order 3 can model r^2 (terms u^2, uv, v^2 capture it) but NOT r^4.
-    // Order 4 adds terms like u^4, u^3v, etc. that can partially model r^4.
-    let center = DVec2::new(500.0, 500.0);
-    let k2 = 1e-7;
-    let k4 = 1e-14;
-
-    let mut ref_points = Vec::new();
-    let mut target_points = Vec::new();
-    for y in (0..=1000).step_by(50) {
-        for x in (0..=1000).step_by(50) {
-            let p = DVec2::new(x as f64, y as f64);
-            let d = p - center;
+            let d = p - CENTRE;
             let r2 = d.length_squared();
             ref_points.push(p);
-            target_points.push(p + d * k2 * r2 + d * k4 * r2 * r2);
+            target_points.push(p + d * case.k * r2 + d * case.k4 * r2 * r2);
         }
     }
-
-    let transform = Transform::identity();
-
-    // Disable sigma-clipping so both orders fit all points.
-    // Otherwise order 3 rejects many points (it can't model r^4)
-    // and the comparison becomes apples-to-oranges.
-    let config_3 = SipConfig {
-        order: 3,
-        reference_point: Some(center),
-        clip_iterations: 0,
-        ..Default::default()
-    };
-    let config_4 = SipConfig {
-        order: 4,
-        reference_point: Some(center),
-        clip_iterations: 0,
-        ..Default::default()
-    };
-
-    let r3 = fit_sip(&ref_points, &target_points, &transform, &config_3);
-    let r4 = fit_sip(&ref_points, &target_points, &transform, &config_4);
-
-    // Order 4 should produce strictly lower RMS residual
-    assert!(
-        r4.rms_residual < r3.rms_residual,
-        "Order 4 rms ({:.6e}) should be < order 3 rms ({:.6e})",
-        r4.rms_residual,
-        r3.rms_residual
-    );
-    // max_residual may be equal if both orders have the same worst-case point,
-    // but order 4 should be at most as bad
-    assert!(
-        r4.max_residual <= r3.max_residual,
-        "Order 4 max ({:.6e}) should be <= order 3 max ({:.6e})",
-        r4.max_residual,
-        r3.max_residual
-    );
-
-    // Both use all points (clipping disabled)
-    let n = ref_points.len();
-    assert_eq!(r3.points_used, n);
-    assert_eq!(r4.points_used, n);
-    assert_eq!(r3.points_rejected, 0);
-    assert_eq!(r4.points_rejected, 0);
-
-    // Order 4 max_correction should also differ (more terms, tighter fit)
-    // Both should capture roughly the same distortion magnitude
-    let expected_corner = 25.0 * 2.0_f64.sqrt(); // r^2 component dominates
-    assert!(
-        r3.max_correction > expected_corner * 0.8,
-        "Order 3 max_correction {:.4} too small",
-        r3.max_correction
-    );
-    assert!(
-        r4.max_correction > expected_corner * 0.8,
-        "Order 4 max_correction {:.4} too small",
-        r4.max_correction
-    );
+    if case.outliers {
+        for (reference, target) in OUTLIERS {
+            ref_points.push(DVec2::from_array(reference));
+            target_points.push(DVec2::from_array(target));
+        }
+    }
+    (ref_points, target_points)
 }
 
+/// Every `SipFitResult` metric, across the distortion shapes and clipping settings that produce
+/// them.
+///
+/// Two invariants hold for *any* fit and are asserted on every row rather than on whichever case
+/// happens to mention them: `points_used + points_rejected` accounts for every input point, and
+/// `max_residual >= rms_residual`, because the largest residual also contributes to the mean of
+/// squares it is compared against.
+///
+/// The hand-computed figure is `max_correction` on the barrel field. Its farthest grid point from
+/// the centre is a corner at `d = (-500, -500)`, so `|d|² = 500000` and the distortion there is
+/// `d·k·|d|² = (-25, -25)`, of magnitude `25√2 = 35.3553`. SIP order 3 models a radial `r²` term
+/// exactly, so the recovered correction has to match that, not merely approach it.
 #[test]
-fn fit_result_max_correction_hand_computed() {
-    // Barrel distortion k=1e-7 centered at (500,500), grid points at multiples of 100.
-    //
-    // The farthest grid point from center is a corner, e.g. (0, 0):
-    //   d = (-500, -500), |d|^2 = 500000
-    //   distortion = d * k * |d|^2 = (-500, -500) * 1e-7 * 500000 = (-25, -25)
-    //   |distortion| = 25 * sqrt(2) = 35.3553...
-    //
-    // SIP order 3 models radial distortion exactly (r^2 terms are degree 3 in x,y
-    // when multiplied by d). So the correction at the corner should match the
-    // distortion magnitude closely.
-    let center = DVec2::new(500.0, 500.0);
-    let k = 1e-7;
-    let (ref_points, target_points) = make_radial_distortion_points(center, k, 100, 1000);
+fn fit_sip_metrics_match_every_fixture() {
+    let corner = 25.0 * 2.0_f64.sqrt();
+    let cases = [
+        MetricsCase {
+            name: "undistorted",
+            k: 0.0,
+            k4: 0.0,
+            grid_step: 100,
+            outliers: false,
+            order: 2,
+            clip_iterations: 3,
+            rejected: Rejected::Exactly(0),
+            rms_below: 1e-10,
+            rms_above: None,
+            max_residual_below: Some(1e-10),
+            correction: Some(Approx {
+                value: 0.0,
+                tolerance: 1e-10,
+            }),
+        },
+        MetricsCase {
+            name: "barrel, order 3",
+            k: 1e-7,
+            k4: 0.0,
+            grid_step: 100,
+            outliers: false,
+            order: 3,
+            clip_iterations: 3,
+            rejected: Rejected::Exactly(0),
+            rms_below: 0.01,
+            rms_above: None,
+            max_residual_below: Some(0.05),
+            correction: Some(Approx {
+                value: corner,
+                tolerance: 0.1,
+            }),
+        },
+        MetricsCase {
+            name: "barrel with outliers, clipping on",
+            k: 1e-7,
+            k4: 0.0,
+            grid_step: 100,
+            outliers: true,
+            order: 3,
+            clip_iterations: 3,
+            rejected: Rejected::AtLeast(3),
+            rms_below: 0.01,
+            rms_above: None,
+            max_residual_below: None,
+            correction: None,
+        },
+        MetricsCase {
+            name: "barrel with outliers, clipping off",
+            k: 1e-7,
+            k4: 0.0,
+            grid_step: 100,
+            outliers: true,
+            order: 3,
+            clip_iterations: 0,
+            rejected: Rejected::Exactly(0),
+            rms_below: f64::INFINITY,
+            rms_above: None,
+            max_residual_below: None,
+            correction: None,
+        },
+        MetricsCase {
+            name: "quartic field, order 3 cannot model it",
+            k: 1e-7,
+            k4: 1e-14,
+            grid_step: 50,
+            outliers: false,
+            order: 3,
+            clip_iterations: 0,
+            rejected: Rejected::Exactly(0),
+            rms_below: f64::INFINITY,
+            rms_above: Some(1e-6),
+            max_residual_below: None,
+            correction: Some(Approx {
+                value: corner,
+                tolerance: corner * 0.2,
+            }),
+        },
+    ];
 
-    let transform = Transform::identity();
-    let config = SipConfig {
-        order: 3,
-        reference_point: Some(center),
-        ..Default::default()
-    };
+    for case in &cases {
+        let (ref_points, target_points) = build_case(case);
+        let n = ref_points.len();
+        let config = SipConfig {
+            order: case.order,
+            reference_point: Some(CENTRE),
+            clip_iterations: case.clip_iterations,
+            ..Default::default()
+        };
+        let result = fit_sip(&ref_points, &target_points, &Transform::identity(), &config);
+        let name = case.name;
 
-    let result = fit_sip(&ref_points, &target_points, &transform, &config);
+        assert_eq!(
+            result.points_used + result.points_rejected,
+            n,
+            "{name}: {} used + {} rejected does not account for {n} points",
+            result.points_used,
+            result.points_rejected
+        );
+        assert!(
+            result.max_residual >= result.rms_residual,
+            "{name}: max {:.6e} must be >= rms {:.6e}",
+            result.max_residual,
+            result.rms_residual
+        );
 
-    // Expected max correction at corner:
-    // |d| * k * |d|^2 = sqrt(500000) * 1e-7 * 500000 = 707.107 * 0.05 = 35.3553
-    let expected = 25.0 * 2.0_f64.sqrt(); // = 35.35533...
-    assert!(
-        (result.max_correction - expected).abs() < 0.1,
-        "max_correction={:.4}, expected={:.4}, diff={:.6}",
-        result.max_correction,
-        expected,
-        (result.max_correction - expected).abs()
-    );
+        match case.rejected {
+            Rejected::Exactly(expected) => {
+                assert_eq!(result.points_rejected, expected, "{name}: rejection count")
+            }
+            Rejected::AtLeast(floor) => assert!(
+                result.points_rejected >= floor,
+                "{name}: expected at least {floor} rejections, got {}",
+                result.points_rejected
+            ),
+        }
+        assert!(
+            result.rms_residual < case.rms_below,
+            "{name}: rms {:.6e} should be under {:.6e}",
+            result.rms_residual,
+            case.rms_below
+        );
+        if let Some(floor) = case.rms_above {
+            assert!(
+                result.rms_residual > floor,
+                "{name}: rms {:.6e} should exceed {floor:.6e}",
+                result.rms_residual
+            );
+        }
+        if let Some(ceiling) = case.max_residual_below {
+            assert!(
+                result.max_residual < ceiling,
+                "{name}: max_residual {:.6e} should be under {ceiling:.6e}",
+                result.max_residual
+            );
+        }
+        if let Some(Approx { value, tolerance }) = case.correction {
+            assert!(
+                (result.max_correction - value).abs() <= tolerance,
+                "{name}: max_correction {:.6} should be {value:.6} +- {tolerance:.6}",
+                result.max_correction
+            );
+        }
+    }
 }
 
+/// The two comparisons the table cannot make, because each grades one fit against another rather
+/// than against a number: a richer model fits better, and clipping outliers beats keeping them.
 #[test]
-fn fit_result_clipping_disabled_vs_enabled_metrics() {
-    // With 3 outliers, clipping=off should have:
-    //   - points_rejected = 0 (no clipping)
-    //   - higher rms_residual than clipping=on (outliers pull the fit)
-    let center = DVec2::new(500.0, 500.0);
-    let k = 1e-7;
-    let (mut ref_points, mut target_points) = make_radial_distortion_points(center, k, 100, 1000);
-
-    // Inject outliers
-    ref_points.push(DVec2::new(300.0, 300.0));
-    target_points.push(DVec2::new(320.0, 280.0));
-    ref_points.push(DVec2::new(700.0, 200.0));
-    target_points.push(DVec2::new(685.0, 225.0));
-    ref_points.push(DVec2::new(100.0, 800.0));
-    target_points.push(DVec2::new(130.0, 810.0));
-    let n = ref_points.len();
-
+fn fit_sip_quality_improves_with_order_and_with_clipping() {
     let transform = Transform::identity();
-
-    let config_clip = SipConfig {
-        order: 3,
-        reference_point: Some(center),
+    let order = |order, clip_iterations| SipConfig {
+        order,
+        reference_point: Some(CENTRE),
+        clip_iterations,
         ..Default::default()
     };
-    let config_no_clip = SipConfig {
+
+    // Order 3 captures the r² term but not r⁴; order 4 adds terms that partially model it. Clipping
+    // is off so both fit the same points — otherwise order 3 rejects what it cannot model and the
+    // two fits are graded on different data.
+    let quartic = MetricsCase {
+        name: "quartic",
+        k: 1e-7,
+        k4: 1e-14,
+        grid_step: 50,
+        outliers: false,
         order: 3,
-        reference_point: Some(center),
         clip_iterations: 0,
-        ..Default::default()
+        rejected: Rejected::Exactly(0),
+        rms_below: f64::INFINITY,
+        rms_above: None,
+        max_residual_below: None,
+        correction: None,
     };
+    let (ref_points, target_points) = build_case(&quartic);
+    let low = fit_sip(&ref_points, &target_points, &transform, &order(3, 0));
+    let high = fit_sip(&ref_points, &target_points, &transform, &order(4, 0));
 
-    let r_clip = fit_sip(&ref_points, &target_points, &transform, &config_clip);
-    let r_no_clip = fit_sip(&ref_points, &target_points, &transform, &config_no_clip);
-
-    // No-clip: all points used
-    assert_eq!(r_no_clip.points_used, n);
-    assert_eq!(r_no_clip.points_rejected, 0);
-
-    // Clip: some points rejected
-    assert!(r_clip.points_rejected >= 3);
-    assert!(r_clip.points_used < n);
-
-    // Clipped fit should have strictly lower rms on its surviving points
-    // than the unclipped fit (which is polluted by outliers)
     assert!(
-        r_clip.rms_residual < r_no_clip.rms_residual,
-        "Clipped rms ({:.6e}) should be < unclipped rms ({:.6e})",
-        r_clip.rms_residual,
-        r_no_clip.rms_residual
+        high.rms_residual < low.rms_residual,
+        "order 4 rms {:.6e} should beat order 3 rms {:.6e}",
+        high.rms_residual,
+        low.rms_residual
+    );
+    assert!(
+        high.max_residual <= low.max_residual,
+        "order 4 max {:.6e} should be no worse than order 3 max {:.6e}",
+        high.max_residual,
+        low.max_residual
+    );
+
+    // Same points, clipping on versus off. The clipped fit is graded on its survivors, so its RMS
+    // is strictly lower than the unclipped fit that the outliers pull.
+    let contaminated = MetricsCase {
+        outliers: true,
+        grid_step: 100,
+        k4: 0.0,
+        ..quartic
+    };
+    let (ref_points, target_points) = build_case(&contaminated);
+    let n = ref_points.len();
+    let clipped = fit_sip(&ref_points, &target_points, &transform, &order(3, 3));
+    let unclipped = fit_sip(&ref_points, &target_points, &transform, &order(3, 0));
+
+    assert_eq!(unclipped.points_used, n);
+    assert!(clipped.points_used < n);
+    assert!(
+        clipped.rms_residual < unclipped.rms_residual,
+        "clipped rms {:.6e} should beat unclipped rms {:.6e}",
+        clipped.rms_residual,
+        unclipped.rms_residual
     );
 }

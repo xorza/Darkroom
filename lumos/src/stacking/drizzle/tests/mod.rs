@@ -42,6 +42,31 @@ fn accumulator(input_dims: ImageDimensions, config: DrizzleConfig) -> DrizzleAcc
     DrizzleAccumulator::new(input_dims, config).expect("test drizzle config must be valid")
 }
 
+/// A drizzle config for `kernel`. `min_coverage` is 0 everywhere in these tests so nothing is
+/// dropped for thin coverage, and `fill_value` is 0 unless a case overrides it by struct update.
+fn kernel_config(kernel: DrizzleKernel, scale: f32, pixfrac: f32) -> DrizzleConfig {
+    DrizzleConfig {
+        scale,
+        pixfrac,
+        kernel,
+        fill_value: 0.0,
+        min_coverage: 0.0,
+    }
+}
+
+/// Drizzle one mono frame of `side`×`side` and finalize.
+fn drizzle_one(
+    side: usize,
+    config: DrizzleConfig,
+    image: LinearImage,
+    transform: &Transform,
+    pixel_weights: Option<&Buffer2<f32>>,
+) -> StackProduct {
+    let mut acc = accumulator(ImageDimensions::new((side, side), 1), config);
+    acc.add_image(image, transform, 1.0, pixel_weights);
+    acc.finalize()
+}
+
 fn mono_image(size: Size2us, pixels: Vec<f32>) -> LinearImage {
     LinearImage::from_pixels(ImageDimensions::new(size, 1), pixels)
 }

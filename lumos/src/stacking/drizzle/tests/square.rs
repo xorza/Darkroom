@@ -34,57 +34,6 @@ fn square_kernel_identity_uniform() {
     }
 }
 
-/// Test square kernel matches turbo kernel with pure translation (no rotation).
-///
-/// For axis-aligned drops (no rotation/shear), the Square kernel should produce
-/// the same output as the Turbo kernel since the quadrilateral is an axis-aligned
-/// rectangle in both cases.
-#[test]
-fn square_kernel_matches_turbo_no_rotation() {
-    let pixels: Vec<f32> = (0..100).map(|i| (i as f32) * 0.01).collect();
-    let image1 = mono_image(Size2us::new(10, 10), pixels.clone());
-    let image2 = mono_image(Size2us::new(10, 10), pixels);
-    let transform = Transform::translation(DVec2::new(0.3, -0.2));
-
-    // Turbo
-    let config_turbo = DrizzleConfig {
-        scale: 2.0,
-        pixfrac: 0.8,
-        kernel: DrizzleKernel::Turbo,
-        fill_value: 0.0,
-        min_coverage: 0.0,
-    };
-    let mut acc_turbo = accumulator(ImageDimensions::new((10, 10), 1), config_turbo);
-    acc_turbo.add_image(image1, &transform, 1.0, None);
-    let result_turbo = acc_turbo.finalize();
-
-    // Square
-    let config_square = DrizzleConfig {
-        scale: 2.0,
-        pixfrac: 0.8,
-        kernel: DrizzleKernel::Square,
-        fill_value: 0.0,
-        min_coverage: 0.0,
-    };
-    let mut acc_square = accumulator(ImageDimensions::new((10, 10), 1), config_square);
-    acc_square.add_image(image2, &transform, 1.0, None);
-    let result_square = acc_square.finalize();
-
-    let out_turbo = result_turbo.image.channel(0);
-    let out_square = result_square.image.channel(0);
-
-    for i in 0..out_turbo.len() {
-        assert!(
-            (out_turbo[i] - out_square[i]).abs() < 1e-3,
-            "Pixel {} turbo={} square={} differ by {}",
-            i,
-            out_turbo[i],
-            out_square[i],
-            (out_turbo[i] - out_square[i]).abs()
-        );
-    }
-}
-
 /// Test square kernel with 45° rotation on uniform image.
 ///
 /// Uniform value 3.0. After 45° rotation, the weighted mean at every covered
@@ -392,81 +341,73 @@ fn boxer_rotated_partial_clip() {
     );
 }
 
-/// Test that Square kernel produces DIFFERENT output from Turbo under rotation.
+/// Square agrees with Turbo exactly while the drop stays axis-aligned, and measurably diverges
+/// once it does not — which is the whole reason the polygon-overlap kernel exists.
 ///
-/// This is the entire motivation for the Square kernel: with rotation, the
-/// quadrilateral footprint is not axis-aligned, so Turbo (axis-aligned box) is wrong.
-///
-/// Use a non-uniform image (gradient) with a small rotation. The Turbo kernel
-/// approximates the drop as an axis-aligned box, while the Square kernel correctly
-/// computes the rotated quadrilateral overlap. The outputs must differ.
+/// One axis, the transform: a translation leaves every drop an axis-aligned rectangle, the only
+/// shape Turbo can represent, so the two kernels must agree to rounding. A rotation makes it a
+/// general quadrilateral and they apportion flux differently. Both drop geometries are swept —
+/// unscaled full-size drops and scaled shrunken ones — where the two tests this replaces each
+/// checked one transform at one geometry.
 #[test]
-fn square_differs_from_turbo_under_rotation() {
-    // Horizontal gradient: value increases with x
-    let pixels: Vec<f32> = (0..100)
-        .map(|i| {
-            let x = i % 10;
-            x as f32
-        })
-        .collect();
-    let image1 = mono_image(Size2us::new(10, 10), pixels.clone());
-    let image2 = mono_image(Size2us::new(10, 10), pixels);
+fn square_matches_turbo_only_while_the_drop_stays_axis_aligned() {
+    // A horizontal gradient: uniform data would agree under any kernel and prove nothing.
+    let gradient: Vec<f32> = (0..100).map(|i| (i % 10) as f32).collect();
 
-    // 15° rotation around center — enough to produce measurable overlap differences
-    let angle = 15.0_f64.to_radians();
-    let cx = 5.0;
-    let cy = 5.0;
-    let transform = Transform::rotation_around(DVec2::new(cx, cy), angle);
+    for (transform_name, transform, axis_aligned) in [
+        (
+            "translation",
+            Transform::translation(DVec2::new(0.3, -0.2)),
+            true,
+        ),
+        (
+            "15 degree rotation",
+            Transform::rotation_around(DVec2::splat(5.0), 15.0_f64.to_radians()),
+            false,
+        ),
+    ] {
+        for (scale, pixfrac) in [(1.0, 1.0), (2.0, 0.8)] {
+            let case = format!("{transform_name} at scale {scale}, pixfrac {pixfrac}");
+            let render = |kernel| {
+                drizzle_one(
+                    10,
+                    kernel_config(kernel, scale, pixfrac),
+                    mono_image(Size2us::new(10, 10), gradient.clone()),
+                    &transform,
+                    None,
+                )
+            };
+            let turbo = render(DrizzleKernel::Turbo);
+            let square = render(DrizzleKernel::Square);
+            let turbo = turbo.image.channel(0);
+            let square = square.image.channel(0);
 
-    let config_turbo = DrizzleConfig {
-        scale: 1.0,
-        pixfrac: 1.0,
-        kernel: DrizzleKernel::Turbo,
-        fill_value: 0.0,
-        min_coverage: 0.0,
-    };
-    let mut acc_turbo = accumulator(ImageDimensions::new((10, 10), 1), config_turbo);
-    acc_turbo.add_image(image1, &transform, 1.0, None);
-    let result_turbo = acc_turbo.finalize();
-
-    let config_square = DrizzleConfig {
-        scale: 1.0,
-        pixfrac: 1.0,
-        kernel: DrizzleKernel::Square,
-        fill_value: 0.0,
-        min_coverage: 0.0,
-    };
-    let mut acc_square = accumulator(ImageDimensions::new((10, 10), 1), config_square);
-    acc_square.add_image(image2, &transform, 1.0, None);
-    let result_square = acc_square.finalize();
-
-    let out_turbo = result_turbo.image.channel(0);
-    let out_square = result_square.image.channel(0);
-
-    // Find the maximum difference between Turbo and Square on covered pixels
-    let mut max_diff = 0.0f32;
-    let mut n_covered = 0;
-    for i in 0..out_turbo.len() {
-        // Only compare covered pixels (both non-zero)
-        if out_turbo[i].abs() > 0.01 && out_square[i].abs() > 0.01 {
-            let diff = (out_turbo[i] - out_square[i]).abs();
-            if diff > max_diff {
-                max_diff = diff;
+            let mut covered = 0;
+            let mut max_diff = 0.0f32;
+            for (&t, &s) in turbo.iter().zip(square.iter()) {
+                if t.abs() > 0.01 && s.abs() > 0.01 {
+                    covered += 1;
+                    max_diff = max_diff.max((t - s).abs());
+                }
             }
-            n_covered += 1;
+            assert!(
+                covered > 20,
+                "{case}: only {covered} covered pixels to compare"
+            );
+
+            if axis_aligned {
+                assert!(
+                    max_diff < 1e-3,
+                    "{case}: kernels must agree on an axis-aligned drop, max diff {max_diff}"
+                );
+            } else {
+                assert!(
+                    max_diff > 0.01,
+                    "{case}: kernels must diverge on a rotated drop, max diff {max_diff}"
+                );
+            }
         }
     }
-
-    assert!(
-        n_covered > 20,
-        "Should have many covered pixels, got {}",
-        n_covered
-    );
-    assert!(
-        max_diff > 0.01,
-        "Square and Turbo should differ under 5° rotation with gradient image, max_diff={}",
-        max_diff
-    );
 }
 
 /// Test flux conservation under rotation with non-uniform image.
