@@ -1,101 +1,79 @@
 use super::*;
 use crate::stacking::star_detection::centroid::{StampGrid, compute_stamp_radius};
 
+/// σ seeds now come out of `StampFit::prepare`'s single pass, so they are pinned through it.
+/// The ceiling is the stamp radius, which is 10 for these 21×21 fields.
 #[test]
-fn estimate_sigma_from_moments_gaussian() {
-    use crate::stacking::star_detection::centroid::estimate_sigma_from_moments;
-
-    let width = 21;
-    let height = 21;
-    let cx = 10.0f64;
-    let cy = 10.0f64;
-    let true_sigma = 2.5f32;
+fn sigma_seed_recovers_a_known_gaussian() {
+    let side = 21;
     let background = 0.1f32;
+    let true_sigma = 2.5f32;
 
-    // Create Gaussian star
-    let mut data_x = Vec::new();
-    let mut data_y = Vec::new();
-    let mut data_z = Vec::new();
-
-    let rendered = SyntheticStar::new(
-        Vec2::new(cx as f32, cy as f32),
+    let pixels = SyntheticStar::new(
+        Vec2::splat(10.0),
         1.0,
         StarProfile::Gaussian { sigma: true_sigma },
     )
-    .stamp(Size2us::new(width, height), background);
-    for y in 0..height {
-        for x in 0..width {
-            data_x.push(x as f64);
-            data_y.push(y as f64);
-            data_z.push(f64::from(rendered.row(y)[x]));
-        }
-    }
+    .stamp(Size2us::new(side, side), background);
 
-    let estimated_sigma = estimate_sigma_from_moments(
-        &data_x,
-        &data_y,
-        &data_z,
-        DVec2::new(cx, cy),
+    let fit = StampFit::prepare::<6>(
+        &pixels,
+        DVec2::splat(10.0),
+        &StampGrid::new(10),
         background,
-        10.0,
-    );
+        None,
+    )
+    .expect("21x21 stamp at its centre");
 
-    // Should be within 20% of true sigma
-    let error = (estimated_sigma - true_sigma).abs() / true_sigma;
+    // Second moments of a truncated Gaussian under-report σ; 20% is the tolerance the seed needs.
+    let error = (fit.sigma_est - true_sigma).abs() / true_sigma;
     assert!(
         error < 0.2,
-        "Sigma estimate error {:.1}% too large (expected={}, got={})",
+        "sigma seed error {:.1}% too large (expected={true_sigma}, got={})",
         error * 100.0,
-        true_sigma,
-        estimated_sigma
+        fit.sigma_est
     );
 }
 
 #[test]
-fn estimate_sigma_from_moments_various_sigmas() {
-    use crate::stacking::star_detection::centroid::estimate_sigma_from_moments;
-
-    let width = 21;
-    let height = 21;
-    let cx = 10.0f64;
-    let cy = 10.0f64;
+fn sigma_seed_tracks_the_true_width() {
+    let side = 21;
     let background = 0.1f32;
+    let mut seeds = Vec::new();
 
     for true_sigma in [1.5f32, 2.0, 2.5, 3.0, 4.0] {
-        let mut data_x = Vec::new();
-        let mut data_y = Vec::new();
-        let mut data_z = Vec::new();
+        let pixels = SyntheticStar::new(
+            Vec2::splat(10.0),
+            1.0,
+            StarProfile::Gaussian { sigma: true_sigma },
+        )
+        .stamp(Size2us::new(side, side), background);
 
-        for y in 0..height {
-            for x in 0..width {
-                let dx = x as f32 - cx as f32;
-                let dy = y as f32 - cy as f32;
-                let value = background
-                    + 1.0 * (-0.5 * (dx * dx + dy * dy) / (true_sigma * true_sigma)).exp();
-                data_x.push(x as f64);
-                data_y.push(y as f64);
-                data_z.push(value as f64);
-            }
-        }
-
-        let estimated_sigma = estimate_sigma_from_moments(
-            &data_x,
-            &data_y,
-            &data_z,
-            DVec2::new(cx, cy),
+        let fit = StampFit::prepare::<6>(
+            &pixels,
+            DVec2::splat(10.0),
+            &StampGrid::new(10),
             background,
-            10.0,
-        );
+            None,
+        )
+        .expect("21x21 stamp at its centre");
 
-        let error = (estimated_sigma - true_sigma).abs() / true_sigma;
+        let error = (fit.sigma_est - true_sigma).abs() / true_sigma;
         assert!(
             error < 0.25,
-            "Sigma={}: estimate error {:.1}% too large (got={})",
-            true_sigma,
+            "sigma={true_sigma}: seed error {:.1}% too large (got={})",
             error * 100.0,
-            estimated_sigma
+            fit.sigma_est
         );
+        seeds.push(fit.sigma_est);
     }
+
+    // A wider star must seed wider — the estimate has to respond to the input, not just land
+    // inside a tolerance band.
+    assert!(
+        seeds.windows(2).all(|w| w[1] > w[0]),
+        "seeds must increase with true sigma, got {seeds:?}"
+    );
 }
 
 #[test]
@@ -164,97 +142,82 @@ fn refine_centroid_adaptive_sigma_large_fwhm() {
     );
 }
 
+/// Extraction is no longer its own function — `StampFit::prepare` walks the stamp once and fills
+/// everything — so its behaviour is pinned through the constructor that does it.
+fn extract(pixels: &Buffer2<f32>, pos: DVec2, radius: usize) -> Option<StampFit> {
+    StampFit::prepare::<6>(pixels, pos, &StampGrid::new(radius), 0.0, None)
+}
+
 #[test]
 fn extract_stamp_valid_center() {
-    use crate::stacking::star_detection::centroid::extract_stamp;
+    let pixels = Buffer2::new_filled(64, 64, 0.5f32);
 
-    let width = 64;
-    let height = 64;
-    let pixels = Buffer2::new_filled(width, height, 0.5f32);
-
-    let result = extract_stamp(&pixels, DVec2::splat(32.0), 5);
-    assert!(result.is_some(), "Should extract stamp at center");
-
-    let stamp = result.unwrap();
-    let expected_size = (2 * 5 + 1) * (2 * 5 + 1); // 11x11 = 121
-    assert_eq!(stamp.z.len(), expected_size);
+    let fit = extract(&pixels, DVec2::splat(32.0), 5).expect("stamp at centre");
+    assert_eq!(fit.stamp.z.len(), 11 * 11);
     // Coordinates live in the shared `StampGrid`; what the stamp itself pins is where its
     // top-left pixel sits, which is what the grid's `0..2r` is relative to.
-    assert_eq!(stamp.origin, DVec2::new(27.0, 27.0));
+    assert_eq!(fit.stamp.origin, DVec2::new(27.0, 27.0));
+    assert_eq!(fit.stamp.peak, 0.5);
+    // A flat stamp weights every pixel equally, so `local_pos` lands on the stamp's own centre.
+    assert_eq!(fit.local_pos, DVec2::splat(5.0));
     assert!(
-        (stamp.peak - 0.5).abs() < f32::EPSILON,
-        "Peak should be 0.5"
+        fit.weights.is_none(),
+        "unweighted unless a noise model is set"
     );
 }
 
 #[test]
 fn extract_stamp_edge_invalid() {
-    use crate::stacking::star_detection::centroid::extract_stamp;
-
-    let width = 64;
-    let height = 64;
-    let pixels = Buffer2::new_filled(width, height, 0.5f32);
+    let pixels = Buffer2::new_filled(64, 64, 0.5f32);
 
     // Too close to edges
-    assert!(extract_stamp(&pixels, DVec2::new(3.0, 32.0), 5).is_none());
-    assert!(extract_stamp(&pixels, DVec2::new(32.0, 3.0), 5).is_none());
-    assert!(extract_stamp(&pixels, DVec2::new(61.0, 32.0), 5).is_none());
-    assert!(extract_stamp(&pixels, DVec2::new(32.0, 61.0), 5).is_none());
+    assert!(extract(&pixels, DVec2::new(3.0, 32.0), 5).is_none());
+    assert!(extract(&pixels, DVec2::new(32.0, 3.0), 5).is_none());
+    assert!(extract(&pixels, DVec2::new(61.0, 32.0), 5).is_none());
+    assert!(extract(&pixels, DVec2::new(32.0, 61.0), 5).is_none());
 }
 
 #[test]
 fn extract_stamp_peak_value() {
-    use crate::stacking::star_detection::centroid::extract_stamp;
-
-    let width = 64;
-    let height = 64;
-    let mut pixels = Buffer2::new_filled(width, height, 0.1f32);
+    let mut pixels = Buffer2::new_filled(64, 64, 0.1f32);
     // Add bright pixel at center
     pixels[(32, 32)] = 0.9;
 
-    let result = extract_stamp(&pixels, DVec2::splat(32.0), 5);
-    assert!(result.is_some());
-
-    let stamp = result.unwrap();
-    assert!(
-        (stamp.peak - 0.9).abs() < f32::EPSILON,
-        "Peak should be 0.9"
-    );
+    let fit = extract(&pixels, DVec2::splat(32.0), 5).expect("stamp at centre");
+    assert_eq!(fit.stamp.peak, 0.9);
 }
 
 #[test]
 fn extract_stamp_coordinates() {
-    use crate::stacking::star_detection::centroid::extract_stamp;
+    let pixels = Buffer2::new_filled(64, 64, 0.5f32);
 
-    let width = 64;
-    let height = 64;
-    let pixels = Buffer2::new_filled(width, height, 0.5f32);
-
-    let result = extract_stamp(&pixels, DVec2::splat(32.0), 2);
-    assert!(result.is_some());
-
-    let stamp = result.unwrap();
     // For radius=2, stamp is 5x5 centred at (32,32), so it spans image x,y 30..=34 — expressed
     // now as an origin at (30,30) plus the grid's own 0..4.
-    assert_eq!(stamp.z.len(), 25);
-    assert_eq!(stamp.origin, DVec2::new(30.0, 30.0));
+    let fit = extract(&pixels, DVec2::splat(32.0), 2).expect("stamp at centre");
+    assert_eq!(fit.stamp.z.len(), 25);
+    assert_eq!(fit.stamp.origin, DVec2::new(30.0, 30.0));
 }
 
 #[test]
 fn extract_stamp_fractional_position() {
-    use crate::stacking::star_detection::centroid::extract_stamp;
+    let pixels = Buffer2::new_filled(64, 64, 0.5f32);
 
-    let width = 64;
-    let height = 64;
-    let pixels = Buffer2::new_filled(width, height, 0.5f32);
+    // Fractional position 32.3, 32.7 rounds to 32, 33, so the top-left pixel is (30, 31) and the
+    // centre sits at (2.3, 1.7) within the stamp.
+    let fit = extract(&pixels, DVec2::new(32.3, 32.7), 2).expect("stamp at centre");
+    assert_eq!(fit.stamp.origin, DVec2::new(30.0, 31.0));
+    assert!((fit.local_pos - DVec2::new(2.3, 1.7)).length() < 1e-12);
+}
 
-    // Fractional position 32.3, 32.7 rounds to 32, 33
-    let result = extract_stamp(&pixels, DVec2::new(32.3, 32.7), 2);
-    assert!(result.is_some());
-
-    let stamp = result.unwrap();
-    // Centre rounds to (32, 33), so the stamp's top-left pixel is (30, 31).
-    assert_eq!(stamp.origin, DVec2::new(30.0, 31.0));
+#[test]
+fn stamp_too_small_for_the_parameter_count_is_rejected() {
+    let pixels = Buffer2::new_filled(64, 64, 0.5f32);
+    let grid = StampGrid::new(1);
+    // A radius-1 stamp is 9 pixels: enough to constrain Moffat's 5, not Gaussian's 6 with the
+    // strict inequality a least-squares fit needs... but 9 > 6, so both pass. Radius 0 is 1 pixel.
+    assert!(StampFit::prepare::<6>(&pixels, DVec2::splat(32.0), &grid, 0.0, None).is_some());
+    let point = StampGrid::new(0);
+    assert!(StampFit::prepare::<6>(&pixels, DVec2::splat(32.0), &point, 0.0, None).is_none());
 }
 
 #[test]
@@ -427,24 +390,14 @@ fn local_annulus_near_edge_fallback() {
 /// bound on its first iteration — seeding above it just spends an iteration being pulled back.
 #[test]
 fn sigma_seed_honours_its_ceiling() {
-    // A flat 21x21 patch one unit above the sky, so the second moment is the grid's own:
-    // E[dx²] = E[dy²] = 2·(1²+..+10²)/21 = 770/21 = 36.667, giving
-    // sigma = sqrt((36.667 + 36.667)/2) = 6.0553.
-    let side = 21;
-    let background = 0.1f32;
-    let mut data_x = Vec::new();
-    let mut data_y = Vec::new();
-    let mut data_z = Vec::new();
-    for y in 0..side {
-        for x in 0..side {
-            data_x.push(x as f64);
-            data_y.push(y as f64);
-            data_z.push(background as f64 + 1.0);
-        }
-    }
-    let centre = DVec2::new(10.0, 10.0);
+    // The sums a flat 21x21 patch one unit above the sky produces about its centre: every pixel
+    // weighs 1, so sum_w = 441, and E[dx²] = E[dy²] = 2·(1²+..+10²)/21 = 770/21, so
+    // sum_r2 = 441 · 2 · 770/21 = 32340. That gives sigma = sqrt(32340/441/2) = sqrt(36.667)
+    // = 6.0553.
+    let sum_w = 441.0;
+    let sum_r2 = 32340.0;
 
-    let wide = estimate_sigma_from_moments(&data_x, &data_y, &data_z, centre, background, 15.0);
+    let wide = sigma_from_moments(sum_r2, sum_w, 15.0);
     assert!(
         (wide - 6.0553).abs() < 1e-3,
         "grid's own moment is 6.0553, got {wide}"
@@ -452,7 +405,11 @@ fn sigma_seed_honours_its_ceiling() {
 
     // The tightest ceiling the detector ever uses is MIN_STAMP_RADIUS; the same data has to seed
     // inside it rather than at the old fixed 10.0.
-    let narrow = estimate_sigma_from_moments(&data_x, &data_y, &data_z, centre, background, 4.0);
+    let narrow = sigma_from_moments(sum_r2, sum_w, 4.0);
     assert_eq!(narrow, 4.0);
     assert_ne!(narrow, wide, "the ceiling has to change the answer");
+
+    // No signal above the sky leaves the moment undefined, so the seed falls back rather than
+    // dividing by zero.
+    assert_eq!(sigma_from_moments(0.0, 0.0, 15.0), 2.0);
 }

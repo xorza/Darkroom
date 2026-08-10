@@ -154,106 +154,6 @@ struct StampData {
     origin: DVec2,
 }
 
-/// Extract a square stamp of pixel data around a position.
-///
-/// Returns [`StampData`] or None if position is outside the valid stamp region.
-/// Uses stack-allocated ArrayVec to avoid heap allocations. Widened to f64 here rather than at
-/// each fit: both callers fit in f64 and used to re-encode all three arrays, which cost a second
-/// set of stack buffers and three conversion passes per candidate.
-fn extract_stamp(pixels: &Buffer2<f32>, pos: DVec2, stamp_radius: usize) -> Option<StampData> {
-    let width = pixels.width();
-    let height = pixels.height();
-
-    if !is_valid_stamp_position(pos, Size2us::new(width, height), stamp_radius) {
-        return None;
-    }
-
-    let icx = pos.x.round() as isize;
-    let icy = pos.y.round() as isize;
-    let stamp_radius_i32 = stamp_radius as i32;
-    let mut data_z = ArrayVec::new();
-    let mut peak_value = f32::MIN;
-
-    for dy in -stamp_radius_i32..=stamp_radius_i32 {
-        let y = (icy + dy as isize) as usize;
-        let row = pixels.row(y);
-        for dx in -stamp_radius_i32..=stamp_radius_i32 {
-            let value = row[(icx + dx as isize) as usize];
-            data_z.push(value as f64);
-            peak_value = peak_value.max(value);
-        }
-    }
-
-    Some(StampData {
-        z: data_z,
-        peak: peak_value,
-        origin: DVec2::new(
-            (icx - stamp_radius as isize) as f64,
-            (icy - stamp_radius as isize) as f64,
-        ),
-    })
-}
-
-/// Estimate sigma from weighted second moments of the stamp data.
-///
-/// For a Gaussian: E[r²] = 2σ², so σ = sqrt(E[r²]/2)
-/// This gives a better initial guess for L-M optimization than a fixed value.
-///
-/// `max_sigma` is the widest profile the optimizer will accept, so the seed lands inside the
-/// range its own `constrain` enforces — starting outside it just spends the first iteration
-/// being clamped back. Always at least [`MIN_STAMP_RADIUS`], so the 0.5 floor cannot cross it.
-fn estimate_sigma_from_moments(
-    data_x: &[f64],
-    data_y: &[f64],
-    data_z: &[f64],
-    pos: DVec2,
-    background: f32,
-    max_sigma: f64,
-) -> f32 {
-    let mut sum_r2 = 0.0f64;
-    let mut sum_w = 0.0f64;
-
-    for ((&x, &y), &z) in data_x.iter().zip(data_y.iter()).zip(data_z.iter()) {
-        let w = (z - background as f64).max(0.0);
-        let dx = x - pos.x;
-        let dy = y - pos.y;
-        let r2 = dx * dx + dy * dy;
-        sum_r2 += w * r2;
-        sum_w += w;
-    }
-
-    if sum_w > f64::EPSILON {
-        // For Gaussian: E[r²] = 2σ², so σ = sqrt(E[r²]/2)
-        ((sum_r2 / sum_w / 2.0).sqrt()).clamp(0.5, max_sigma) as f32
-    } else {
-        2.0 // fallback
-    }
-}
-
-/// Per-pixel inverse-variance weights for the LM fit, using the CCD noise model
-/// (same per-pixel decomposition as `compute_snr`):
-/// `w_i = 1 / (signal/G + sky_noise² + (read_noise_electrons/G)²)`, where `G` is
-/// electrons per normalized unit.
-///
-/// Down-weights the shot-noisy bright core so the fit is the ML estimator instead of
-/// over-weighting high-signal pixels (which biases the sub-pixel centroid/FWHM/flux).
-fn inverse_variance_weights(
-    data_z: &[f64],
-    background: f64,
-    sky_noise: f64,
-    noise_model: NoiseModel,
-) -> ArrayVec<f64, MAX_STAMP_PIXELS> {
-    data_z
-        .iter()
-        .map(|&z| {
-            let signal = (z - background).max(0.0);
-            1.0 / noise_model
-                .variance_normalized(signal, sky_noise, 1)
-                .max(1e-12)
-        })
-        .collect()
-}
-
 /// Noise inputs for an inverse-variance-weighted fit: the local sky σ plus the
 /// normalized-domain sensor model. `None` (absent) means an unweighted fit.
 #[derive(Debug, Clone, Copy)]
@@ -262,16 +162,37 @@ struct FitNoise {
     noise_model: NoiseModel,
 }
 
-/// Per-pixel fit weights for a stamp, or `None` for an unweighted fit;
-/// see [`inverse_variance_weights`].
-fn fit_weights(
-    data_z: &[f64],
-    background: f32,
-    noise: Option<FitNoise>,
-) -> Option<ArrayVec<f64, MAX_STAMP_PIXELS>> {
-    noise.map(|n| {
-        inverse_variance_weights(data_z, background as f64, n.sky_noise as f64, n.noise_model)
-    })
+impl FitNoise {
+    /// Inverse-variance weight for one pixel, using the CCD noise model (the same per-pixel
+    /// decomposition as `compute_snr`):
+    /// `w = 1 / (signal/G + sky_noise² + (read_noise_electrons/G)²)`, where `G` is electrons per
+    /// normalized unit.
+    ///
+    /// Down-weights the shot-noisy bright core so the fit is the ML estimator instead of
+    /// over-weighting high-signal pixels (which biases the sub-pixel centroid/FWHM/flux). The
+    /// variance is floored so a zero-variance pixel cannot produce an infinite weight.
+    #[inline]
+    fn weight(&self, z: f64, background: f64) -> f64 {
+        let signal = (z - background).max(0.0);
+        1.0 / self
+            .noise_model
+            .variance_normalized(signal, self.sky_noise as f64, 1)
+            .max(1e-12)
+    }
+}
+
+/// Gaussian-equivalent width from a stamp's weighted second moments: for a Gaussian
+/// `E[r²] = 2σ²`, so `σ = sqrt(E[r²]/2)`. A better seed for L-M than a fixed value.
+///
+/// `max_sigma` is the widest profile the optimizer will accept, so the seed lands inside the
+/// range its own `constrain` enforces — starting outside it just spends the first iteration
+/// being clamped back. Always at least [`MIN_STAMP_RADIUS`], so the 0.5 floor cannot cross it.
+fn sigma_from_moments(sum_r2: f64, sum_w: f64, max_sigma: f64) -> f32 {
+    if sum_w > f64::EPSILON {
+        (sum_r2 / sum_w / 2.0).sqrt().clamp(0.5, max_sigma) as f32
+    } else {
+        2.0
+    }
 }
 
 /// The per-candidate inputs both profile fits need before the optimizer runs: the stamp, the
@@ -292,6 +213,11 @@ struct StampFit {
 impl StampFit {
     /// `None` when the stamp falls outside the frame, or holds too few pixels to constrain `N`
     /// free parameters — a least-squares fit needs strictly more samples than parameters.
+    ///
+    /// One pass produces all four outputs. Pixel values, the peak, the second moments behind
+    /// `sigma_est` and the inverse-variance weights used to be an extraction walk plus one walk per
+    /// consumer — three traversals of the same 225 f64 per candidate, on the hottest path in
+    /// `measure_star`.
     fn prepare<const N: usize>(
         pixels: &Buffer2<f32>,
         pos: DVec2,
@@ -299,26 +225,69 @@ impl StampFit {
         background: f32,
         noise: Option<FitNoise>,
     ) -> Option<Self> {
-        let stamp = extract_stamp(pixels, pos, grid.radius)?;
-        if stamp.z.len() <= N {
+        let radius = grid.radius;
+        if !is_valid_stamp_position(pos, Size2us::new(pixels.width(), pixels.height()), radius) {
             return None;
         }
-        // Fit in the stamp's own frame: the models are translation-invariant, so this is the same
-        // fit with better-conditioned magnitudes, and the coordinate arrays become the shared grid
-        // instead of two per-candidate ramps.
-        let local_pos = pos - stamp.origin;
+        let stamp_size = 2 * radius + 1;
+        if stamp_size * stamp_size <= N {
+            return None;
+        }
+
+        let icx = pos.x.round() as isize;
+        let icy = pos.y.round() as isize;
+        // Moment arms measured from the rounded centre: at column `dx` the offset from the true
+        // centre is `dx - frac_x`, which is the shared grid's coordinate minus `local_pos` without
+        // going through either array.
+        let frac_x = pos.x - icx as f64;
+        let frac_y = pos.y - icy as f64;
+        let sky = background as f64;
+
+        let mut z = ArrayVec::new();
+        // Filled only for a weighted fit, but an empty `ArrayVec` costs nothing to carry: its
+        // backing storage is uninitialized until pushed to.
+        let mut weights = ArrayVec::new();
+        let mut peak = f32::MIN;
+        let mut sum_r2 = 0.0f64;
+        let mut sum_w = 0.0f64;
+
+        let radius_i32 = radius as i32;
+        for dy in -radius_i32..=radius_i32 {
+            let y = (icy + dy as isize) as usize;
+            // One bounds check per row rather than per pixel — the guard above has already
+            // established the whole stamp is inside the frame.
+            let row = pixels.row(y);
+            let ddy = dy as f64 - frac_y;
+
+            for dx in -radius_i32..=radius_i32 {
+                let value = row[(icx + dx as isize) as usize];
+                let value64 = f64::from(value);
+                z.push(value64);
+                peak = peak.max(value);
+
+                let signal = (value64 - sky).max(0.0);
+                let ddx = dx as f64 - frac_x;
+                sum_r2 += signal * (ddx * ddx + ddy * ddy);
+                sum_w += signal;
+
+                if let Some(n) = noise {
+                    weights.push(n.weight(value64, sky));
+                }
+            }
+        }
+
+        let origin = DVec2::new(
+            (icx - radius as isize) as f64,
+            (icy - radius as isize) as f64,
+        );
         Some(Self {
-            weights: fit_weights(&stamp.z, background, noise),
-            sigma_est: estimate_sigma_from_moments(
-                &grid.x,
-                &grid.y,
-                &stamp.z,
-                local_pos,
-                background,
-                grid.radius as f64,
-            ),
-            stamp,
-            local_pos,
+            stamp: StampData { z, peak, origin },
+            // Fit in the stamp's own frame: the models are translation-invariant, so this is the
+            // same fit with better-conditioned magnitudes, and the coordinate arrays become the
+            // shared grid instead of two per-candidate ramps.
+            local_pos: pos - origin,
+            weights: noise.map(|_| weights),
+            sigma_est: sigma_from_moments(sum_r2, sum_w, radius as f64),
         })
     }
 
