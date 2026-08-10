@@ -94,6 +94,8 @@ impl std::fmt::Display for Transform {
         let rotation_deg = self.rotation_angle().to_degrees();
         let scale = self.scale_factor();
 
+        // Each model shows only the components it actually constrains: translation has no angle,
+        // Euclidean no scale. The three above it print the same four, differing only in the name.
         match self.transform_type {
             TransformType::Translation => {
                 write!(f, "Translation(dx={:.2}, dy={:.2})", t.x, t.y)
@@ -105,27 +107,11 @@ impl std::fmt::Display for Transform {
                     t.x, t.y, rotation_deg
                 )
             }
-            TransformType::Similarity => {
-                write!(
-                    f,
-                    "Similarity(dx={:.2}, dy={:.2}, rot={:.3}°, scale={:.4})",
-                    t.x, t.y, rotation_deg, scale
-                )
-            }
-            TransformType::Affine => {
-                write!(
-                    f,
-                    "Affine(dx={:.2}, dy={:.2}, rot={:.3}°, scale={:.4})",
-                    t.x, t.y, rotation_deg, scale
-                )
-            }
-            TransformType::Homography => {
-                write!(
-                    f,
-                    "Homography(dx={:.2}, dy={:.2}, rot={:.3}°, scale={:.4})",
-                    t.x, t.y, rotation_deg, scale
-                )
-            }
+            model => write!(
+                f,
+                "{model:?}(dx={:.2}, dy={:.2}, rot={:.3}°, scale={:.4})",
+                t.x, t.y, rotation_deg, scale
+            ),
         }
     }
 }

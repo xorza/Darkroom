@@ -58,25 +58,36 @@ impl std::fmt::Display for RansacFailureReason {
 }
 
 /// Registration error types.
-#[derive(Debug, Clone)]
+///
+/// `position` and `catalog` reach the messages below through [`RegistrationCatalog`]'s and
+/// [`DVec2`]'s own formatting, which is why those two keep hand-written `Display` impls rather
+/// than deriving one they would only use here.
+#[derive(Debug, Clone, thiserror::Error)]
 pub enum RegistrationError {
     /// Not enough stars detected.
+    #[error("Insufficient stars detected: found {found}, need {required}")]
     InsufficientStars { found: usize, required: usize },
     /// A star has a non-finite position.
+    #[error("{catalog} star {index} position must be finite, got ({}, {})", position.x, position.y)]
     InvalidStarPosition {
         catalog: RegistrationCatalog,
         index: usize,
         position: DVec2,
     },
     /// A star has a non-finite FWHM.
+    #[error("{catalog} star {index} FWHM must be finite, got {value}")]
     InvalidStarFwhm {
         catalog: RegistrationCatalog,
         index: usize,
         value: f32,
     },
     /// No matching star patterns found.
+    #[error("No matching star patterns found between images")]
     NoMatchingPatterns,
     /// RANSAC failed to find valid transformation.
+    #[error(
+        "RANSAC failed: {reason} (iterations: {iterations}, best inlier count: {best_inlier_count})"
+    )]
     RansacFailed {
         /// The reason for failure.
         reason: RansacFailureReason,
@@ -86,105 +97,24 @@ pub enum RegistrationError {
         best_inlier_count: usize,
     },
     /// Registration accuracy too low.
+    #[error("Registration accuracy too low: {rms_error:.3} pixels (max: {max_allowed:.3})")]
     AccuracyTooLow { rms_error: f64, max_allowed: f64 },
     /// Star detection failed.
+    #[error("Star detection failed: {0}")]
     StarDetection(String),
     /// A configuration parameter is outside its valid range.
-    InvalidConfig(InvalidConfigField),
+    #[error("Invalid configuration: {0}")]
+    InvalidConfig(#[from] InvalidConfigField),
     /// Reference and target point counts differ for SIP fitting.
+    #[error("SIP point count mismatch: {reference} reference points, {target} target points")]
     SipPointCountMismatch { reference: usize, target: usize },
     /// Not enough matched points are available for a stable SIP fit.
+    #[error("Insufficient points for SIP fit: found {found}, need {required}")]
     InsufficientSipPoints { found: usize, required: usize },
     /// The SIP polynomial system is singular.
+    #[error("SIP fit failed: singular polynomial system")]
     SingularSipSystem,
 }
-
-impl std::fmt::Display for RegistrationError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            RegistrationError::InsufficientStars { found, required } => {
-                write!(
-                    f,
-                    "Insufficient stars detected: found {}, need {}",
-                    found, required
-                )
-            }
-            RegistrationError::InvalidStarPosition {
-                catalog,
-                index,
-                position,
-            } => {
-                write!(
-                    f,
-                    "{catalog} star {index} position must be finite, got ({}, {})",
-                    position.x, position.y
-                )
-            }
-            RegistrationError::InvalidStarFwhm {
-                catalog,
-                index,
-                value,
-            } => {
-                write!(f, "{catalog} star {index} FWHM must be finite, got {value}")
-            }
-            RegistrationError::NoMatchingPatterns => {
-                write!(f, "No matching star patterns found between images")
-            }
-            RegistrationError::RansacFailed {
-                reason,
-                iterations,
-                best_inlier_count,
-            } => {
-                write!(
-                    f,
-                    "RANSAC failed: {} (iterations: {}, best inlier count: {})",
-                    reason, iterations, best_inlier_count
-                )
-            }
-            RegistrationError::AccuracyTooLow {
-                rms_error,
-                max_allowed,
-            } => {
-                write!(
-                    f,
-                    "Registration accuracy too low: {:.3} pixels (max: {:.3})",
-                    rms_error, max_allowed
-                )
-            }
-            RegistrationError::StarDetection(msg) => {
-                write!(f, "Star detection failed: {}", msg)
-            }
-            RegistrationError::InvalidConfig(invalid) => {
-                write!(f, "Invalid configuration: {invalid}")
-            }
-            RegistrationError::SipPointCountMismatch { reference, target } => {
-                write!(
-                    f,
-                    "SIP point count mismatch: {} reference points, {} target points",
-                    reference, target
-                )
-            }
-            RegistrationError::InsufficientSipPoints { found, required } => {
-                write!(
-                    f,
-                    "Insufficient points for SIP fit: found {}, need {}",
-                    found, required
-                )
-            }
-            RegistrationError::SingularSipSystem => {
-                write!(f, "SIP fit failed: singular polynomial system")
-            }
-        }
-    }
-}
-
-impl From<InvalidConfigField> for RegistrationError {
-    fn from(invalid: InvalidConfigField) -> Self {
-        Self::InvalidConfig(invalid)
-    }
-}
-
-impl std::error::Error for RegistrationError {}
 
 /// Corresponding stars in the reference and target inputs with their final fit residual.
 #[derive(Debug, Clone, Copy, PartialEq)]
