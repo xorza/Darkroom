@@ -625,26 +625,22 @@ impl DrizzleAccumulator {
         let output_channels: ArrayVec<Vec<f32>, MAX_CHANNELS> = (0..n_channels)
             .map(|c| {
                 let data_pixels = self.data[c].pixels();
-                let mut out = vec![fill_value; width * height];
-
-                out.par_chunks_mut(width)
-                    .enumerate()
-                    .for_each(|(y, out_row)| {
-                        let row_start = y * width;
-                        for (x, out_val) in out_row.iter_mut().enumerate() {
-                            let idx = row_start + x;
-                            let w = weight_pixels[idx];
-                            if w > 0.0 && w >= weight_threshold {
-                                let mut val = data_pixels[idx] / w;
-                                if needs_clamping {
-                                    val = val.max(0.0);
-                                }
-                                *out_val = val;
-                            }
+                // Collected from the parallel iterator rather than pre-filled and overwritten: a
+                // `vec![fill_value; width * height]` wrote every pixel once before this pass wrote
+                // nearly all of them again, which at 6144x6144 is ~150 MB of dead stores per
+                // channel. `fill_value` is now the uncovered branch rather than a survivor.
+                (0..width * height)
+                    .into_par_iter()
+                    .map(|idx| {
+                        let w = weight_pixels[idx];
+                        if w > 0.0 && w >= weight_threshold {
+                            let val = data_pixels[idx] / w;
+                            if needs_clamping { val.max(0.0) } else { val }
+                        } else {
+                            fill_value
                         }
-                    });
-
-                out
+                    })
+                    .collect()
             })
             .collect();
 
