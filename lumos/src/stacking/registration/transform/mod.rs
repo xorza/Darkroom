@@ -5,13 +5,15 @@ use glam::DVec2;
 use crate::math::dmat3::DMat3;
 use crate::stacking::registration::distortion::sip::SipPolynomial;
 
-/// Supported transformation models with increasing degrees of freedom.
+/// A concrete transformation model, in increasing degrees of freedom.
 ///
-/// Variants are ordered by complexity (used for `compose()` to pick the
-/// more complex type). `Auto` is a pipeline-level directive that resolves
-/// to a concrete type at runtime — it must not reach RANSAC or transform
-/// estimation directly.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
+/// Ordered by complexity, which [`Transform::compose`] uses to pick the more general of two.
+/// Every variant here is something RANSAC can estimate and a [`Transform`] can hold; asking for a
+/// model to be *chosen* is [`TransformModel::Auto`], which is a different question and a
+/// different type.
+/// No `Default`: nothing asks for "the" model, and picking one here would be an answer invented
+/// to satisfy the derive. A caller with nothing to go on wants [`TransformModel::Auto`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum TransformType {
     /// Translation only (2 DOF: dx, dy)
     Translation = 0,
@@ -23,11 +25,6 @@ pub enum TransformType {
     Affine = 3,
     /// Projective/Homography (8 DOF: handles perspective)
     Homography = 4,
-    /// Automatic model selection: starts with Similarity, upgrades to
-    /// Homography if residuals exceed the threshold. Resolved by the
-    /// pipeline before RANSAC estimation.
-    #[default]
-    Auto = 5,
 }
 
 impl TransformType {
@@ -39,21 +36,34 @@ impl TransformType {
             TransformType::Similarity => 2,
             TransformType::Affine => 3,
             TransformType::Homography => 4,
-            TransformType::Auto => TransformType::Similarity.min_points(),
         }
     }
+}
 
-    /// Degrees of freedom for this transformation.
-    pub fn degrees_of_freedom(&self) -> usize {
+/// Which model a registration should fit: a specific one, or a request to choose.
+///
+/// Kept apart from [`TransformType`] so that "pick a model for me" cannot reach the places that
+/// can only act on a chosen one — RANSAC, transform estimation, and [`Transform`] itself, each of
+/// which used to carry its own arm rejecting it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TransformModel {
+    /// Fit exactly this model.
+    Fixed(TransformType),
+    /// Ladder Euclidean → Similarity → Affine → Homography, accepting the first fit within
+    /// [`AUTO_UPGRADE_THRESHOLD`](crate::stacking::registration::tuning::AUTO_UPGRADE_THRESHOLD).
+    #[default]
+    Auto,
+}
+
+impl TransformModel {
+    /// The most general model this could resolve to — `Auto`'s ceiling, or the fixed choice.
+    ///
+    /// What the star-count and match-count gates size against, since a run that may climb to
+    /// homography has to arrive with enough points to fit one.
+    pub fn most_general(self) -> TransformType {
         match self {
-            TransformType::Translation => 2,
-            TransformType::Euclidean => 3,
-            TransformType::Similarity => 4,
-            TransformType::Affine => 6,
-            TransformType::Homography => 8,
-            TransformType::Auto => {
-                unreachable!("Auto must be resolved to a concrete type before querying DOF")
-            }
+            Self::Fixed(transform_type) => transform_type,
+            Self::Auto => TransformType::Homography,
         }
     }
 }
@@ -115,9 +125,6 @@ impl std::fmt::Display for Transform {
                     "Homography(dx={:.2}, dy={:.2}, rot={:.3}°, scale={:.4})",
                     t.x, t.y, rotation_deg, scale
                 )
-            }
-            TransformType::Auto => {
-                unreachable!("Auto should be resolved before creating a Transform")
             }
         }
     }
@@ -203,11 +210,6 @@ impl Transform {
     }
 
     fn from_matrix(mut matrix: DMat3, transform_type: TransformType) -> Self {
-        assert_ne!(
-            transform_type,
-            TransformType::Auto,
-            "Auto must be resolved before constructing a transform"
-        );
         if transform_type != TransformType::Homography {
             assert!(
                 matrix[6].abs() <= 1e-12

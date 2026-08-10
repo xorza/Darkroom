@@ -54,54 +54,51 @@ pub struct CalibrationSet<T> {
 }
 
 impl<T> CalibrationSet<T> {
-    /// The value for `component`, or `None` for [`CalibrationComponent::Defects`], which is not
-    /// one of the four master roles this set holds.
-    pub fn get(&self, component: CalibrationComponent) -> Option<&T> {
-        match component {
-            CalibrationComponent::Dark => Some(&self.dark),
-            CalibrationComponent::Flat => Some(&self.flat),
-            CalibrationComponent::Bias => Some(&self.bias),
-            CalibrationComponent::FlatDark => Some(&self.flat_dark),
-            CalibrationComponent::Defects => None,
+    /// The value for `role`. Total, because a set holds one of everything [`MasterRole`] names.
+    pub fn get(&self, role: MasterRole) -> &T {
+        match role {
+            MasterRole::Dark => &self.dark,
+            MasterRole::Flat => &self.flat,
+            MasterRole::Bias => &self.bias,
+            MasterRole::FlatDark => &self.flat_dark,
         }
     }
 
     /// [`Self::get`] by unique reference, for filling a set one role at a time.
-    pub(crate) fn get_mut(&mut self, component: CalibrationComponent) -> Option<&mut T> {
-        match component {
-            CalibrationComponent::Dark => Some(&mut self.dark),
-            CalibrationComponent::Flat => Some(&mut self.flat),
-            CalibrationComponent::Bias => Some(&mut self.bias),
-            CalibrationComponent::FlatDark => Some(&mut self.flat_dark),
-            CalibrationComponent::Defects => None,
+    pub(crate) fn get_mut(&mut self, role: MasterRole) -> &mut T {
+        match role {
+            MasterRole::Dark => &mut self.dark,
+            MasterRole::Flat => &mut self.flat,
+            MasterRole::Bias => &mut self.bias,
+            MasterRole::FlatDark => &mut self.flat_dark,
         }
     }
 
     /// The four roles in calibration order, each with the component that names it. The single
     /// place that decides what "all the roles" means — a caller that iterates cannot miss one,
     /// and adding a fifth is a compile error here rather than a silent omission elsewhere.
-    pub fn iter(&self) -> impl Iterator<Item = (CalibrationComponent, &T)> {
-        CalibrationComponent::MASTER_ROLES
+    pub fn iter(&self) -> impl Iterator<Item = (MasterRole, &T)> {
+        MasterRole::ALL
             .into_iter()
-            .filter_map(|component| self.get(component).map(|value| (component, value)))
+            .map(|role| (role, self.get(role)))
     }
 
-    /// The four roles by value, in [`CalibrationComponent::MASTER_ROLES`] order.
+    /// The four roles by value, in [`MasterRole::ALL`] order.
     ///
     /// An array rather than an iterator because the concurrent half of
     /// [`CalibrationMasters::from_files`] hands it straight to rayon, which parallelizes `[T; N]`
     /// but not an array iterator. [`Self::from_roles`] is its inverse; the two are the only place
     /// the field-to-role correspondence is written, and `roles_round_trip_in_master_order` pins it.
-    pub(crate) fn into_roles(self) -> [(CalibrationComponent, T); 4] {
+    pub(crate) fn into_roles(self) -> [(MasterRole, T); 4] {
         [
-            (CalibrationComponent::Dark, self.dark),
-            (CalibrationComponent::Flat, self.flat),
-            (CalibrationComponent::Bias, self.bias),
-            (CalibrationComponent::FlatDark, self.flat_dark),
+            (MasterRole::Dark, self.dark),
+            (MasterRole::Flat, self.flat),
+            (MasterRole::Bias, self.bias),
+            (MasterRole::FlatDark, self.flat_dark),
         ]
     }
 
-    /// Rebuild a set from values in [`CalibrationComponent::MASTER_ROLES`] order.
+    /// Rebuild a set from values in [`MasterRole::ALL`] order.
     pub(crate) fn from_roles(roles: [T; 4]) -> Self {
         let [dark, flat, bias, flat_dark] = roles;
         Self {
@@ -115,7 +112,7 @@ impl<T> CalibrationSet<T> {
     /// Convert every role, in calibration order, stopping at the first failure.
     pub(crate) fn try_map<U, E>(
         self,
-        mut convert: impl FnMut(CalibrationComponent, T) -> Result<U, E>,
+        mut convert: impl FnMut(MasterRole, T) -> Result<U, E>,
     ) -> Result<CalibrationSet<U>, E> {
         let [dark, flat, bias, flat_dark] = self.into_roles();
         Ok(CalibrationSet {
@@ -137,9 +134,9 @@ impl CalibrationSet<Option<CfaImage>> {
     /// bias in a set with no flat is never anyone's operand.
     fn common_dimensions(&self) -> Result<Option<Size2us>, CalibrationError> {
         let mut expected = None;
-        for (component, master) in self
+        for (role, master) in self
             .iter()
-            .filter_map(|(component, master)| master.as_ref().map(|master| (component, master)))
+            .filter_map(|(role, master)| master.as_ref().map(|master| (role, master)))
         {
             let size = Size2us::new(master.data.width(), master.data.height());
             match expected {
@@ -147,7 +144,7 @@ impl CalibrationSet<Option<CfaImage>> {
                 Some(expected) if expected == size => {}
                 Some(expected) => {
                     return Err(CalibrationError::DimensionMismatch {
-                        component,
+                        component: role.into(),
                         expected,
                         master: size,
                     });
@@ -158,9 +155,14 @@ impl CalibrationSet<Option<CfaImage>> {
     }
 }
 
-/// A component present in a [`CalibrationMasters`] bundle.
+/// One of the four master frames a bundle can carry.
+///
+/// Split from [`CalibrationComponent`] so that everything indexed by role — every
+/// [`CalibrationSet`] accessor — is total. The defect map is a component of a bundle but not a
+/// master, and folding it in here made each of those return an `Option` for a case that could
+/// never arise.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CalibrationComponent {
+pub enum MasterRole {
     /// Master dark frame.
     Dark,
     /// Master flat frame.
@@ -169,33 +171,22 @@ pub enum CalibrationComponent {
     Bias,
     /// Master dark frame taken at the flat exposure time.
     FlatDark,
-    /// Defect map derived from a dark, flat, or both.
-    Defects,
 }
 
-impl CalibrationComponent {
-    /// The four master-frame roles, in calibration order. [`Self::Defects`] is derived rather
-    /// than loaded, so it is not one of them.
-    pub const MASTER_ROLES: [Self; 4] = [Self::Dark, Self::Flat, Self::Bias, Self::FlatDark];
+impl MasterRole {
+    /// The four roles, in calibration order. Adding a fifth is a compile error in
+    /// [`CalibrationSet`] rather than a silent omission wherever roles are walked.
+    pub const ALL: [Self; 4] = [Self::Dark, Self::Flat, Self::Bias, Self::FlatDark];
 
-    /// The component's `EXTNAME` in a saved bundle — the name a writer stamps on its HDU and a
-    /// reader recognizes it by, so the two cannot disagree about where a role lives.
+    /// The role's `EXTNAME` in a saved bundle — the name a writer stamps on its HDU and a reader
+    /// recognizes it by, so the two cannot disagree about where a role lives.
     pub(crate) fn extname(self) -> &'static str {
         match self {
             Self::Dark => "MASTER_DARK",
             Self::Flat => "MASTER_FLAT",
             Self::Bias => "MASTER_BIAS",
             Self::FlatDark => "MASTER_FLAT_DARK",
-            Self::Defects => "DEFECT_MAP",
         }
-    }
-
-    /// The component an `EXTNAME` names, or `None` for an extension this format does not define.
-    pub(crate) fn from_extname(extname: &str) -> Option<Self> {
-        [Self::MASTER_ROLES.as_slice(), &[Self::Defects]]
-            .concat()
-            .into_iter()
-            .find(|component| component.extname() == extname)
     }
 
     /// Whether this role is stored already prepared — bias/flat-dark subtracted, per-colour
@@ -205,13 +196,56 @@ impl CalibrationComponent {
     }
 }
 
+impl std::fmt::Display for MasterRole {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Dark => "dark",
+            Self::Flat => "flat",
+            Self::Bias => "bias",
+            Self::FlatDark => "flat-dark",
+        })
+    }
+}
+
+/// Anything a [`CalibrationMasters`] bundle can carry: one of the master frames, or the defect
+/// map derived from them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CalibrationComponent {
+    /// One of the four stacked master frames.
+    Master(MasterRole),
+    /// Defect map derived from a dark, flat, or both.
+    Defects,
+}
+
+impl CalibrationComponent {
+    /// The component's `EXTNAME` in a saved bundle.
+    pub(crate) fn extname(self) -> &'static str {
+        match self {
+            Self::Master(role) => role.extname(),
+            Self::Defects => "DEFECT_MAP",
+        }
+    }
+
+    /// The component an `EXTNAME` names, or `None` for an extension this format does not define.
+    pub(crate) fn from_extname(extname: &str) -> Option<Self> {
+        MasterRole::ALL
+            .into_iter()
+            .map(Self::Master)
+            .chain([Self::Defects])
+            .find(|component| component.extname() == extname)
+    }
+}
+
+impl From<MasterRole> for CalibrationComponent {
+    fn from(role: MasterRole) -> Self {
+        Self::Master(role)
+    }
+}
+
 impl std::fmt::Display for CalibrationComponent {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Dark => f.write_str("dark"),
-            Self::Flat => f.write_str("flat"),
-            Self::Bias => f.write_str("bias"),
-            Self::FlatDark => f.write_str("flat-dark"),
+            Self::Master(role) => role.fmt(f),
             Self::Defects => f.write_str("defects"),
         }
     }
@@ -225,13 +259,13 @@ pub enum CalibrationError {
     MissingLightCfaPattern,
     /// A calibration master does not identify its sensor pattern.
     #[error("{component} master is missing CFA pattern metadata")]
-    MissingMasterCfaPattern { component: CalibrationComponent },
+    MissingMasterCfaPattern { component: MasterRole },
     /// A calibration master was captured with a different sensor pattern.
     #[error(
         "{component} master CFA pattern {master:?} does not match light frame pattern {light:?}"
     )]
     CfaPatternMismatch {
-        component: CalibrationComponent,
+        component: MasterRole,
         light: CfaType,
         master: CfaType,
     },
@@ -376,7 +410,7 @@ impl CalibrationMasters {
         self.masters
             .iter()
             .filter(|(_, master)| master.is_some())
-            .map(|(component, _)| component)
+            .map(|(role, _)| CalibrationComponent::Master(role))
             .chain(
                 self.defect_map
                     .as_ref()
@@ -654,19 +688,19 @@ impl CalibrationMasters {
             .ok_or(CalibrationError::MissingLightCfaPattern)?;
         let light_size = Size2us::new(image.data.width(), image.data.height());
 
-        for (component, master) in self
+        for (role, master) in self
             .masters
             .iter()
-            .filter_map(|(component, master)| master.as_ref().map(|master| (component, master)))
+            .filter_map(|(role, master)| master.as_ref().map(|master| (role, master)))
         {
             let master_pattern = master
                 .metadata
                 .cfa_type
                 .as_ref()
-                .ok_or(CalibrationError::MissingMasterCfaPattern { component })?;
+                .ok_or(CalibrationError::MissingMasterCfaPattern { component: role })?;
             if master_pattern != light {
                 return Err(CalibrationError::CfaPatternMismatch {
-                    component,
+                    component: role,
                     light: light.clone(),
                     master: master_pattern.clone(),
                 });
@@ -674,7 +708,7 @@ impl CalibrationMasters {
             let master_size = Size2us::new(master.data.width(), master.data.height());
             if master_size != light_size {
                 return Err(CalibrationError::DimensionMismatch {
-                    component,
+                    component: role.into(),
                     expected: light_size,
                     master: master_size,
                 });

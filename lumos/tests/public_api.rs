@@ -9,14 +9,14 @@ use lumos::{
     FitsChecksumProvenance, FitsChecksumState, FitsCubeInterpretation, FitsHduProvenance,
     FitsHduSelector, FitsLoadOptions, FitsTransferProvenance, FrameStoreError, GesdConfig,
     ImageDimensions, ImageMetadata, InterpolationMethod, InvalidConfigField, LinearFitClipConfig,
-    LinearImage, LoadContext, NoiseModel, Normalization, PercentileClipConfig, QualityMap,
-    QualityPlanes, RansacConfig, RegistrationCatalog, RegistrationConfig, RegistrationError,
-    RegistrationMatchingConfig, Rejection, SigmaClipConfig, SipConfig, SmallN, StackConfig,
-    StackConfigError, StackError, StackProduct, StarDetectionBackgroundConfig,
+    LinearImage, LoadContext, MasterRole, NoiseModel, Normalization, PercentileClipConfig,
+    QualityMap, QualityPlanes, RansacConfig, RegistrationCatalog, RegistrationConfig,
+    RegistrationError, RegistrationMatchingConfig, Rejection, SigmaClipConfig, SipConfig, SmallN,
+    StackConfig, StackConfigError, StackError, StackProduct, StarDetectionBackgroundConfig,
     StarDetectionCandidateConfig, StarDetectionConfig, StarDetectionDiagnostics,
     StarDetectionFilterConfig, StarDetectionFwhmConfig, StarDetectionMeasurementConfig,
     StarDetectionQualityFilterDiagnostics, StarDetector, StarMatch, TransferProvenance, Transform,
-    TransformType, TriangleConfig, WarpParams, Weighting, WinsorizedClipConfig,
+    TransformModel, TransformType, TriangleConfig, WarpParams, Weighting, WinsorizedClipConfig,
 };
 
 #[test]
@@ -119,7 +119,7 @@ fn stacking_configuration_types_are_available_from_the_crate_root() {
     assert_eq!(QualityPlanes::default(), QualityPlanes::ALL);
 
     let registration = RegistrationConfig {
-        transform_type: TransformType::Similarity,
+        transform_type: TransformModel::Fixed(TransformType::Similarity),
         matching: RegistrationMatchingConfig {
             max_stars: 50,
             min_stars: Some(10),
@@ -333,7 +333,10 @@ fn calibration_master_views_are_available_from_the_crate_root() {
     assert_eq!(masters.components().collect::<Vec<_>>(), Vec::new());
     let summary: Option<DefectSummary> = masters.defect_summary();
     assert_eq!(summary, None);
-    assert_eq!(CalibrationComponent::FlatDark.to_string(), "flat-dark");
+    assert_eq!(
+        CalibrationComponent::Master(MasterRole::FlatDark).to_string(),
+        "flat-dark"
+    );
 }
 
 #[test]

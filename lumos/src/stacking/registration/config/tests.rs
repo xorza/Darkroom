@@ -4,18 +4,23 @@ use crate::testing::prelude::*;
 #[test]
 fn config_default_values() {
     let config = Config::default();
-    assert_eq!(config.transform_type, TransformType::Auto);
+    assert_eq!(config.transform_type, TransformModel::Auto);
     assert_eq!(config.matching.max_stars, 200);
     assert_eq!(config.matching.min_stars, None);
     // Auto gates like Homography: 2 × 4 minimal points = 8.
     assert_eq!(config.matching.required_stars(config.transform_type), 8);
-    assert_eq!(config.matching.required_stars(TransformType::Similarity), 4);
+    assert_eq!(
+        config
+            .matching
+            .required_stars(TransformModel::Fixed(TransformType::Similarity)),
+        4
+    );
     assert_eq!(
         RegistrationMatchingConfig {
             min_stars: Some(20),
             ..Default::default()
         }
-        .required_stars(TransformType::Auto),
+        .required_stars(TransformModel::Auto),
         20
     );
     assert_eq!(config.matching.min_matches, 8);
@@ -57,7 +62,10 @@ fn config_precise_preset() {
 #[test]
 fn config_wide_field_preset() {
     let config = Config::wide_field();
-    assert_eq!(config.transform_type, TransformType::Homography);
+    assert_eq!(
+        config.transform_type,
+        TransformModel::Fixed(TransformType::Homography)
+    );
     assert!(config.sip.is_some());
     assert!(config.ransac.max_rotation.is_none());
     assert!(config.ransac.scale_range.is_none());
@@ -67,7 +75,10 @@ fn config_wide_field_preset() {
 #[test]
 fn config_precise_wide_field_preset() {
     let config = Config::precise_wide_field();
-    assert_eq!(config.transform_type, TransformType::Homography);
+    assert_eq!(
+        config.transform_type,
+        TransformModel::Fixed(TransformType::Homography)
+    );
     assert_eq!(config.matching.max_stars, 500);
     assert_eq!(config.matching.min_matches, 20);
     assert!((config.matching.triangle.ratio_tolerance - 0.02).abs() < 1e-10);
@@ -92,14 +103,17 @@ fn config_mosaic_preset() {
 #[test]
 fn config_custom() {
     let config = Config {
-        transform_type: TransformType::Similarity,
+        transform_type: TransformModel::Fixed(TransformType::Similarity),
         ransac: RansacConfig {
             max_iterations: 1000,
             ..Default::default()
         },
         ..Config::default()
     };
-    assert_eq!(config.transform_type, TransformType::Similarity);
+    assert_eq!(
+        config.transform_type,
+        TransformModel::Fixed(TransformType::Similarity)
+    );
     assert_eq!(config.ransac.max_iterations, 1000);
     config.validate().unwrap();
 }
@@ -341,7 +355,7 @@ fn config_validation_rejects_invalid() {
         (
             // Homography needs 4 points, so min_matches = 3 is too few.
             Config {
-                transform_type: TransformType::Homography,
+                transform_type: TransformModel::Fixed(TransformType::Homography),
                 matching: RegistrationMatchingConfig {
                     min_matches: 3,
                     ..Default::default()

@@ -10,6 +10,7 @@ use crate::testing::prelude::*;
 use crate::stacking::registration::config::{self, InterpolationMethod};
 use crate::stacking::registration::resample::internals;
 use crate::stacking::registration::tests::helpers;
+use crate::stacking::registration::transform::TransformModel;
 use crate::stacking::registration::transform::{Transform, WarpTransform};
 use crate::stacking::registration::{Config, TransformType, register};
 use crate::stacking::star_detection::config::Config as DetConfig;
@@ -108,7 +109,7 @@ fn image_registration_translation() {
 
     // Register the images using detected stars directly
     let reg_config = Config {
-        transform_type: TransformType::Translation,
+        transform_type: TransformModel::Fixed(TransformType::Translation),
         matching: helpers::matching_config(6, 4),
         max_rms_error: 3.0,
         ..Default::default()
@@ -175,7 +176,7 @@ fn image_registration_rotation() {
     let target_result = det.detect(&target_image);
 
     let reg_config = Config {
-        transform_type: TransformType::Euclidean,
+        transform_type: TransformModel::Fixed(TransformType::Euclidean),
         matching: helpers::matching_config(6, 4),
         max_rms_error: 3.0,
         ..Default::default()
@@ -231,7 +232,7 @@ fn image_registration_similarity() {
     let target_result = det.detect(&target_image);
 
     let reg_config = Config {
-        transform_type: TransformType::Similarity,
+        transform_type: TransformModel::Fixed(TransformType::Similarity),
         matching: helpers::matching_config(6, 4),
         max_rms_error: 3.0,
         ..Default::default()
@@ -316,7 +317,7 @@ fn image_registration_with_noise() {
     let target_result = det.detect(&target_image);
 
     let reg_config = Config {
-        transform_type: TransformType::Translation,
+        transform_type: TransformModel::Fixed(TransformType::Translation),
         matching: helpers::matching_config(6, 4),
         max_rms_error: 5.0, // Allow more error due to noise
         ..Default::default()
@@ -383,7 +384,7 @@ fn image_registration_dense_field() {
     );
 
     let reg_config = Config {
-        transform_type: TransformType::Euclidean,
+        transform_type: TransformModel::Fixed(TransformType::Euclidean),
         matching: helpers::matching_config(10, 8),
         max_rms_error: 3.0,
         ..Default::default()
@@ -434,7 +435,7 @@ fn image_registration_large_image() {
     let target_result = det.detect(&target_image);
 
     let reg_config = Config {
-        transform_type: TransformType::Translation,
+        transform_type: TransformModel::Fixed(TransformType::Translation),
         matching: helpers::matching_config(6, 4),
         max_rms_error: 3.0,
         ..Default::default()

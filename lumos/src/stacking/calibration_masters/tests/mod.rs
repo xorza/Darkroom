@@ -16,7 +16,7 @@ use crate::testing::prelude::*;
 use crate::testing::{constant_cfa, make_cfa};
 use crate::{
     CalibrationComponent, CalibrationMasters, CalibrationSet, DefectSummary, ImageError,
-    ImageMetadata,
+    ImageMetadata, MasterRole,
 };
 use fits_well::FitsReader;
 use fits_well::image::Bitpix;
@@ -67,24 +67,19 @@ fn calibrate_twice_panics() {
     masters.calibrate(&mut light).unwrap();
 }
 
-fn masters_with_component(
-    component: CalibrationComponent,
-    cfa_type: Option<CfaType>,
-) -> CalibrationMasters {
-    masters_with_sized_component(component, cfa_type, Size2us::new(2, 2))
+fn masters_with_component(role: MasterRole, cfa_type: Option<CfaType>) -> CalibrationMasters {
+    masters_with_sized_component(role, cfa_type, Size2us::new(2, 2))
 }
 
 fn masters_with_sized_component(
-    component: CalibrationComponent,
+    role: MasterRole,
     cfa_type: Option<CfaType>,
     size: Size2us,
 ) -> CalibrationMasters {
     let mut master = constant_cfa(size, 1.0, CfaType::Mono);
     master.metadata.cfa_type = cfa_type;
     let mut images = CalibrationSet::default();
-    *images
-        .get_mut(component)
-        .expect("defect maps do not carry CFA metadata") = Some(master);
+    *images.get_mut(role) = Some(master);
     CalibrationMasters::from_images(images, DEFAULT_SIGMA_THRESHOLD, CancelToken::never()).unwrap()
 }
 
@@ -92,7 +87,7 @@ fn masters_with_sized_component(
 fn calibrate_rejects_missing_and_mismatched_cfa_before_mutation() {
     #[derive(Debug)]
     struct Case {
-        component: CalibrationComponent,
+        role: MasterRole,
         light: Option<CfaType>,
         master: Option<CfaType>,
         expected: CalibrationError,
@@ -104,55 +99,55 @@ fn calibrate_rejects_missing_and_mismatched_cfa_before_mutation() {
     let xtrans_b = CfaType::XTrans(xtrans_b_pattern);
     let cases = [
         Case {
-            component: CalibrationComponent::Flat,
+            role: MasterRole::Flat,
             light: None,
             master: Some(CfaType::Mono),
             expected: CalibrationError::MissingLightCfaPattern,
         },
         Case {
-            component: CalibrationComponent::Flat,
+            role: MasterRole::Flat,
             light: Some(CfaType::Mono),
             master: None,
             expected: CalibrationError::MissingMasterCfaPattern {
-                component: CalibrationComponent::Flat,
+                component: MasterRole::Flat,
             },
         },
         Case {
-            component: CalibrationComponent::Dark,
+            role: MasterRole::Dark,
             light: Some(CfaType::Mono),
             master: Some(CfaType::Bayer(CfaPattern::Rggb)),
             expected: CalibrationError::CfaPatternMismatch {
-                component: CalibrationComponent::Dark,
+                component: MasterRole::Dark,
                 light: CfaType::Mono,
                 master: CfaType::Bayer(CfaPattern::Rggb),
             },
         },
         Case {
-            component: CalibrationComponent::Flat,
+            role: MasterRole::Flat,
             light: Some(CfaType::Bayer(CfaPattern::Rggb)),
             master: Some(CfaType::Bayer(CfaPattern::Bggr)),
             expected: CalibrationError::CfaPatternMismatch {
-                component: CalibrationComponent::Flat,
+                component: MasterRole::Flat,
                 light: CfaType::Bayer(CfaPattern::Rggb),
                 master: CfaType::Bayer(CfaPattern::Bggr),
             },
         },
         Case {
-            component: CalibrationComponent::Bias,
+            role: MasterRole::Bias,
             light: Some(CfaType::Bayer(CfaPattern::Rggb)),
             master: Some(xtrans_a.clone()),
             expected: CalibrationError::CfaPatternMismatch {
-                component: CalibrationComponent::Bias,
+                component: MasterRole::Bias,
                 light: CfaType::Bayer(CfaPattern::Rggb),
                 master: xtrans_a.clone(),
             },
         },
         Case {
-            component: CalibrationComponent::FlatDark,
+            role: MasterRole::FlatDark,
             light: Some(xtrans_a.clone()),
             master: Some(xtrans_b.clone()),
             expected: CalibrationError::CfaPatternMismatch {
-                component: CalibrationComponent::FlatDark,
+                component: MasterRole::FlatDark,
                 light: xtrans_a,
                 master: xtrans_b,
             },
@@ -160,7 +155,7 @@ fn calibrate_rejects_missing_and_mismatched_cfa_before_mutation() {
     ];
 
     for case in cases {
-        let masters = masters_with_component(case.component, case.master);
+        let masters = masters_with_component(case.role, case.master);
         let mut light = constant_cfa(Size2us::new(2, 2), 0.5, CfaType::Mono);
         light.metadata.cfa_type = case.light.clone();
         let original_data = light.data.to_vec();
@@ -174,7 +169,7 @@ fn calibrate_rejects_missing_and_mismatched_cfa_before_mutation() {
     // A master whose pattern matches but whose extent does not is bad input too — it used to
     // reach `CfaImage::subtract`'s assert, which is not a report a caller can act on. Every role
     // is covered because each is applied by a different operation.
-    for component in CalibrationComponent::MASTER_ROLES {
+    for component in MasterRole::ALL {
         let masters =
             masters_with_sized_component(component, Some(CfaType::Mono), Size2us::new(4, 4));
         let mut light = constant_cfa(Size2us::new(2, 2), 0.5, CfaType::Mono);
@@ -183,7 +178,7 @@ fn calibrate_rejects_missing_and_mismatched_cfa_before_mutation() {
         assert_eq!(
             masters.calibrate(&mut light),
             Err(CalibrationError::DimensionMismatch {
-                component,
+                component: component.into(),
                 expected: Size2us::new(2, 2),
                 master: Size2us::new(4, 4),
             })
@@ -195,11 +190,8 @@ fn calibrate_rejects_missing_and_mismatched_cfa_before_mutation() {
     // ...and a set that does match still calibrates, so the extent check is not rejecting on
     // sheer presence. The dark also carries a defect map detected at its own size, which the
     // same pass checks against the light.
-    let masters = masters_with_sized_component(
-        CalibrationComponent::Dark,
-        Some(CfaType::Mono),
-        Size2us::new(4, 4),
-    );
+    let masters =
+        masters_with_sized_component(MasterRole::Dark, Some(CfaType::Mono), Size2us::new(4, 4));
     let mut light = constant_cfa(Size2us::new(4, 4), 0.5, CfaType::Mono);
     assert_eq!(masters.calibrate(&mut light), Ok(()));
 }
@@ -254,8 +246,8 @@ fn a_set_that_cannot_be_loaded_cannot_be_built() {
     assert_eq!(
         masters.components().collect::<Vec<_>>(),
         [
-            CalibrationComponent::Dark,
-            CalibrationComponent::Bias,
+            CalibrationComponent::Master(MasterRole::Dark),
+            CalibrationComponent::Master(MasterRole::Bias),
             CalibrationComponent::Defects
         ]
     );
@@ -264,7 +256,7 @@ fn a_set_that_cannot_be_loaded_cannot_be_built() {
 #[test]
 fn roles_round_trip_in_master_order() {
     // `into_roles`/`from_roles` are the pivot every per-role walk goes through, so their order
-    // has to be the one `MASTER_ROLES` and `iter` publish — otherwise a set rebuilt after a
+    // has to be the one `MasterRole::ALL` and `iter` publish — otherwise a set rebuilt after a
     // parallel map comes back with each master under the wrong role.
     let set = CalibrationSet {
         dark: "dark",
@@ -277,13 +269,10 @@ fn roles_round_trip_in_master_order() {
         set.iter()
             .map(|(component, _)| component)
             .collect::<Vec<_>>(),
-        CalibrationComponent::MASTER_ROLES
+        MasterRole::ALL
     );
     let roles = set.into_roles();
-    assert_eq!(
-        roles.map(|(component, _)| component),
-        CalibrationComponent::MASTER_ROLES
-    );
+    assert_eq!(roles.map(|(component, _)| component), MasterRole::ALL);
     // ...and rebuilding from that order restores each value to the role it came from.
     assert_eq!(
         CalibrationSet::from_roles(roles.map(|(_, value)| value)).into_roles(),
@@ -296,8 +285,9 @@ fn every_component_round_trips_through_its_extname() {
     // One name table: the writer stamps `extname()` and `bundle_indices` recognizes the HDU by
     // feeding it back through `from_extname`, so a role that fails to round-trip is a role that
     // silently vanishes from a saved bundle.
-    for component in CalibrationComponent::MASTER_ROLES
+    for component in MasterRole::ALL
         .into_iter()
+        .map(CalibrationComponent::Master)
         .chain([CalibrationComponent::Defects])
     {
         assert_eq!(
@@ -307,13 +297,9 @@ fn every_component_round_trips_through_its_extname() {
     }
     assert_eq!(CalibrationComponent::from_extname("MASTER_LIGHT"), None);
     // Only the flat is stored prepared; `read_master` rejects a bundle that says otherwise.
-    assert!(CalibrationComponent::Flat.prepared());
-    for component in [
-        CalibrationComponent::Dark,
-        CalibrationComponent::Bias,
-        CalibrationComponent::FlatDark,
-    ] {
-        assert!(!component.prepared(), "{component} must not be prepared");
+    assert!(MasterRole::Flat.prepared());
+    for role in [MasterRole::Dark, MasterRole::Bias, MasterRole::FlatDark] {
+        assert!(!role.prepared(), "{role} must not be prepared");
     }
 }
 
@@ -374,10 +360,10 @@ fn new_constructor() {
     assert_eq!(
         masters.components().collect::<Vec<_>>(),
         vec![
-            CalibrationComponent::Dark,
-            CalibrationComponent::Flat,
-            CalibrationComponent::Bias,
-            CalibrationComponent::FlatDark,
+            CalibrationComponent::Master(MasterRole::Dark),
+            CalibrationComponent::Master(MasterRole::Flat),
+            CalibrationComponent::Master(MasterRole::Bias),
+            CalibrationComponent::Master(MasterRole::FlatDark),
             CalibrationComponent::Defects,
         ]
     );
@@ -474,7 +460,10 @@ fn new_no_dark_no_hot_pixels() {
 
     assert_eq!(
         masters.components().collect::<Vec<_>>(),
-        vec![CalibrationComponent::Flat, CalibrationComponent::Defects]
+        vec![
+            CalibrationComponent::Master(MasterRole::Flat),
+            CalibrationComponent::Defects
+        ]
     );
     assert_eq!(
         masters.defect_summary(),

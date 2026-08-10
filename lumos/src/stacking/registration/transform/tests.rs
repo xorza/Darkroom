@@ -232,28 +232,29 @@ fn warp_transform_apply_no_sip_matches_transform() {
 }
 
 #[test]
-fn transform_type_degrees_of_freedom() {
-    assert_eq!(TransformType::Translation.degrees_of_freedom(), 2);
-    assert_eq!(TransformType::Euclidean.degrees_of_freedom(), 3);
-    assert_eq!(TransformType::Similarity.degrees_of_freedom(), 4);
-    assert_eq!(TransformType::Affine.degrees_of_freedom(), 6);
-    assert_eq!(TransformType::Homography.degrees_of_freedom(), 8);
-}
-
-#[test]
-fn auto_min_points_delegates_to_similarity() {
-    // Auto delegates to Similarity for min_points
+fn auto_sizes_its_gates_against_the_model_it_can_climb_to() {
+    // The ladder ends at Homography, so every count `Auto` is measured by has to be Homography's
+    // — anything smaller would let a pair through that the last rung cannot fit. Previously
+    // `TransformType::Auto` answered Similarity's 2 here while every caller substituted
+    // Homography's 4, and only the fact that nothing called it kept the two from disagreeing.
     assert_eq!(
-        TransformType::Auto.min_points(),
-        TransformType::Similarity.min_points()
+        TransformModel::Auto.most_general(),
+        TransformType::Homography
     );
-    assert_eq!(TransformType::Auto.min_points(), 2);
-}
-
-#[test]
-#[should_panic(expected = "Auto must be resolved")]
-fn auto_degrees_of_freedom_panics() {
-    TransformType::Auto.degrees_of_freedom();
+    assert_eq!(TransformModel::Auto.most_general().min_points(), 4);
+    // A fixed choice is its own ceiling.
+    for transform_type in [
+        TransformType::Translation,
+        TransformType::Euclidean,
+        TransformType::Similarity,
+        TransformType::Affine,
+        TransformType::Homography,
+    ] {
+        assert_eq!(
+            TransformModel::Fixed(transform_type).most_general(),
+            transform_type
+        );
+    }
 }
 
 #[test]
@@ -497,10 +498,4 @@ fn from_matrix_canonicalizes_affine_roundoff() {
     ]);
     let transform = Transform::from_matrix(rounded, TransformType::Affine);
     assert_eq!(&transform.matrix()[6..], &[0.0, 0.0, 1.0]);
-}
-
-#[test]
-#[should_panic(expected = "Auto must be resolved before constructing a transform")]
-fn from_matrix_rejects_auto() {
-    Transform::from_matrix(DMat3::identity(), TransformType::Auto);
 }

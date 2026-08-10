@@ -65,7 +65,7 @@ pub use stacking::calibration_masters::defect_map::DefectMap;
 
 pub use stacking::calibration_masters::{
     CalibrationComponent, CalibrationError, CalibrationMasters, CalibrationSet,
-    DEFAULT_SIGMA_THRESHOLD, DefectSummary, stack_cfa_master,
+    DEFAULT_SIGMA_THRESHOLD, DefectSummary, MasterRole, stack_cfa_master,
 };
 
 pub use stacking::star_detection::config::Config as StarDetectionConfig;
@@ -98,7 +98,9 @@ pub use stacking::registration::resample::{WarpResult, warp};
 pub use stacking::registration::result::{
     RansacFailureReason, RegistrationCatalog, RegistrationError, RegistrationResult, StarMatch,
 };
-pub use stacking::registration::transform::{Transform, TransformType, WarpTransform};
+pub use stacking::registration::transform::{
+    Transform, TransformModel, TransformType, WarpTransform,
+};
 pub use stacking::registration::triangle::TriangleConfig;
 
 pub use stacking::combine::cache_config::CacheConfig;

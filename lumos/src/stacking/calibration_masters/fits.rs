@@ -15,10 +15,10 @@ use crate::io::image::fits::cfa::{
 use crate::io::image::fits::decode::read_cfa_hdu;
 use crate::io::image::fits::error::fits_to_io;
 use crate::math::size2us::Size2us;
-use crate::stacking::calibration_masters::CalibrationComponent;
 use crate::stacking::calibration_masters::CalibrationMasters;
 use crate::stacking::calibration_masters::CalibrationSet;
 use crate::stacking::calibration_masters::defect_map::DefectMap;
+use crate::stacking::calibration_masters::{CalibrationComponent, MasterRole};
 
 const BUNDLE_FORMAT: &str = "CALMASTR";
 const DEFECT_FORMAT: &str = "DEFMAP";
@@ -38,18 +38,18 @@ pub(super) fn save(path: &Path, masters: &CalibrationMasters) -> std::io::Result
             .write_raw_hdu(&bundle_primary_header()?, &[])
             .map_err(fits_to_io)?;
 
-        for (component, master) in masters.masters.iter() {
+        for (role, master) in masters.masters.iter() {
             let Some(image) = master.as_ref() else {
                 continue;
             };
             // The `IMAGETYP` a role's HDU carries is its `EXTNAME` in words, so the two cannot drift.
-            let image_type = component.extname().replace('_', " ");
+            let image_type = role.extname().replace('_', " ");
             let encoded = CfaFitsHdu::encode(
                 image,
                 CfaFitsHduMetadata {
-                    extname: Some(component.extname()),
+                    extname: Some(role.extname()),
                     image_type: Some(&image_type),
-                    prepared: component.prepared(),
+                    prepared: role.prepared(),
                 },
             )?;
             writer
@@ -77,7 +77,7 @@ pub(super) fn load(path: &Path) -> std::io::Result<CalibrationMasters> {
     let masters = CalibrationMasters {
         masters: indices
             .masters
-            .try_map(|component, index| read_master(&mut reader, index, component, path))?,
+            .try_map(|role, index| read_master(&mut reader, index, role, path))?,
         defect_map: read_defect_map(&mut reader, indices.defects)?,
     };
     // The same coherence check `from_images` runs, so a bundle read back from disk is exactly as
@@ -152,11 +152,10 @@ fn bundle_indices(reader: &SliceReader<'_>) -> std::io::Result<BundleIndices> {
                     "unknown calibration-master FITS extension {extname:?}"
                 ))
             })?;
-        // `Defects` is the one component with no slot in the master set; everything else has one.
-        let slot = indices
-            .masters
-            .get_mut(component)
-            .unwrap_or(&mut indices.defects);
+        let slot = match component {
+            CalibrationComponent::Master(role) => indices.masters.get_mut(role),
+            CalibrationComponent::Defects => &mut indices.defects,
+        };
         record_index(slot, index, extname)?;
     }
     Ok(indices)
@@ -174,13 +173,13 @@ fn record_index(slot: &mut Option<usize>, index: usize, extname: &str) -> std::i
 fn read_master(
     reader: &mut SliceReader<'_>,
     index: Option<usize>,
-    component: CalibrationComponent,
+    role: MasterRole,
     path: &Path,
 ) -> std::io::Result<Option<CfaImage>> {
     let Some(index) = index else {
         return Ok(None);
     };
-    let extname = component.extname();
+    let extname = role.extname();
     let hdu = &reader.hdus()[index];
     if hdu.kind != HduKind::Image || hdu.header.bitpix().map_err(fits_to_io)? != Bitpix::F32 {
         return Err(invalid_data(format!(
@@ -200,7 +199,7 @@ fn read_master(
         .get_logical("LUMPREP")
         .map_err(fits_to_io)?
         .unwrap_or(false);
-    if prepared != component.prepared() {
+    if prepared != role.prepared() {
         return Err(invalid_data(format!(
             "{extname} has an invalid prepared-master state"
         )));

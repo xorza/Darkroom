@@ -11,6 +11,7 @@ use crate::ImageDimensions;
 use crate::stacking::registration::config::{self, InterpolationMethod, WarpParams};
 use crate::stacking::registration::resample::{self, internals};
 use crate::stacking::registration::tests::helpers;
+use crate::stacking::registration::transform::TransformModel;
 use crate::stacking::registration::transform::{Transform, TransformType, WarpTransform};
 use crate::stacking::star_detection::detector::StarDetector;
 use crate::testing::prelude::*;
@@ -315,7 +316,7 @@ fn warp_with_detected_transform() {
 
     // Register to find transform using detected stars directly
     let reg_config = RegConfig {
-        transform_type: TransformType::Euclidean,
+        transform_type: TransformModel::Fixed(TransformType::Euclidean),
         matching: helpers::matching_config(6, 4),
         ..Default::default()
     };

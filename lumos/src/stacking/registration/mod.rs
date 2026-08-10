@@ -63,7 +63,7 @@ use distortion::sip::SipPolynomial;
 use result::{
     RansacFailureReason, RegistrationCatalog, RegistrationError, RegistrationResult, StarMatch,
 };
-use transform::{Transform, TransformType};
+use transform::{Transform, TransformModel, TransformType};
 
 use std::time::Instant;
 
@@ -104,7 +104,7 @@ use triangle::voting::PointMatch;
 ///
 /// // With custom config
 /// let config = Config {
-///     transform_type: TransformType::Similarity,
+///     transform_type: TransformModel::Fixed(TransformType::Similarity),
 ///     ..Config::default()
 /// };
 /// let result = register(&ref_stars, &target_stars, &config)?;
@@ -167,23 +167,22 @@ pub fn register(
     }
 
     // RANSAC estimation
-    let result = if config.transform_type == TransformType::Auto {
-        auto_ladder(
+    let result = match config.transform_type {
+        TransformModel::Auto => auto_ladder(
             &ref_positions,
             &target_positions,
             &matches,
             max_sigma,
             config,
-        )
-    } else {
-        estimate_and_refine(
+        ),
+        TransformModel::Fixed(transform_type) => estimate_and_refine(
             &ref_positions,
             &target_positions,
             &matches,
-            config.transform_type,
+            transform_type,
             max_sigma,
             config,
-        )
+        ),
     }?;
 
     let result = result.with_elapsed(start.elapsed().as_secs_f64() * 1000.0);

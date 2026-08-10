@@ -12,7 +12,7 @@ use crate::stacking::combine::cache::FrameCache;
 use crate::stacking::combine::stack::run_stacking;
 use crate::testing::{calibration_dir, calibration_image_paths, init_tracing};
 use crate::{
-    CalibrationComponent, CalibrationMasters, CalibrationSet, DEFAULT_SIGMA_THRESHOLD,
+    CalibrationComponent, CalibrationMasters, CalibrationSet, DEFAULT_SIGMA_THRESHOLD, MasterRole,
     Normalization, ProgressCallback, RegistrationConfig, StackConfig, Star, StarDetectionConfig,
     StarDetector, register, stack, warp,
 };
@@ -97,13 +97,13 @@ fn bench_full_pipeline() {
         "  Masters: dark={}, flat={}, bias={}",
         masters
             .components()
-            .any(|component| component == CalibrationComponent::Dark),
+            .any(|component| component == CalibrationComponent::Master(MasterRole::Dark)),
         masters
             .components()
-            .any(|component| component == CalibrationComponent::Flat),
+            .any(|component| component == CalibrationComponent::Master(MasterRole::Flat)),
         masters
             .components()
-            .any(|component| component == CalibrationComponent::Bias),
+            .any(|component| component == CalibrationComponent::Master(MasterRole::Bias)),
     );
 
     if let Some(defects) = masters.defect_summary() {
