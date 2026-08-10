@@ -102,78 +102,191 @@ pub(crate) fn reject_cosmic_rays(image: &mut CfaImage, config: &CosmicRayConfig)
         // X-Trans has no dense same-color sub-lattice → same-color stencils on the mosaic.
         Some(c @ CfaType::XTrans(_)) => reject_xtrans(&mut image.data, c, config),
         // Mono (or an unlabeled frame): the dense Laplacian path.
-        _ => reject_mono_buffer(&mut image.data, config),
+        _ => reject_mono_buffer(&mut image.data, config, &mut MonoScratch::default()),
     }
+}
+
+/// The mono detector's frame-sized `f32` working set, allocated on the first iteration and reused
+/// by every one after it.
+///
+/// Each buffer is written in full before it is read, so what the previous iteration — or the
+/// previous Bayer plane — left in it never matters; only the capacity does. The four Bayer phase
+/// planes differ by at most a row and a column, so one scratch serves all four: the `resize` in
+/// each producer keeps the largest allocation.
+///
+/// Five planes, not the eight the stages name: `significance` and `fine` are rewritten in place by
+/// the elementwise step that consumes them, and `median` and `frame` are each handed from one
+/// stage to the next. On a 6144² mono frame that is 720 MB of working set instead of 1.1 GB —
+/// and, the point of the struct, no allocation at all after the first iteration.
+#[derive(Debug, Default)]
+struct MonoScratch {
+    /// `L⁺`, then the significance `S = L⁺/(2N)`, then `S' = S − median₅(S)`, each in place.
+    significance: Vec<f32>,
+    /// `median₃(I)`, then the object fine structure `F = median₃ − median₇(median₃)` in place.
+    fine: Vec<f32>,
+    /// Per-pixel noise `N`.
+    noise: Vec<f32>,
+    /// The window medians, one at a time: `median₇(median₃(I))`, then `median₅(I)`, then
+    /// `median₅(S)`. Each is consumed by the step immediately after it, so the three never overlap.
+    median: Vec<f32>,
+    /// Whole-frame scratch: the copy the empirical background median and MAD consume, then the
+    /// read-only snapshot [`replace_flagged`] gathers from — again never both at once.
+    frame: Vec<f32>,
 }
 
 /// Monochrome L.A.Cosmic on one plane (also each deinterleaved Bayer plane). Subsample ×2 → clipped
 /// Laplacian → resample → significance `S = L⁺/(2N)` → `S' = S − median₅(S)` → fine structure `F`
 /// → flag → grow → in-paint → iterate. Returns the CR pixel count.
-fn reject_mono_buffer(data: &mut Buffer2<f32>, config: &CosmicRayConfig) -> usize {
+fn reject_mono_buffer(
+    data: &mut Buffer2<f32>,
+    config: &CosmicRayConfig,
+    scratch: &mut MonoScratch,
+) -> usize {
     let size = Size2us::new(data.width(), data.height());
     if size.width < 3 || size.height < 3 {
         return 0;
     }
-    let mut mask = new_cr_mask(size);
-    // Median scratch, reused across iterations. Each is written in full before it is read, so the
-    // carried-over contents never matter — only the capacity does.
-    let (mut m3, mut m37, mut m5, mut s_med5) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    let mut masks = CrMasks::new(size);
 
     for _ in 0..config.niter {
+        let MonoScratch {
+            significance,
+            fine,
+            noise,
+            median,
+            frame,
+        } = &mut *scratch;
         let pix = data.pixels();
 
         // L⁺: clipped Laplacian of the ×2-subsampled frame, averaged back to native resolution.
-        let mut significance = laplacian_plus(pix, size);
+        laplacian_plus_into(pix, size, significance);
 
         // Object fine structure F = median₃(I) − median₇(median₃(I)); large for real sources, ~0 at
-        // a CR (median₃ already erased the spike). Written back over `m3`, which the next iteration
-        // rewrites in full — the difference is elementwise, so it needs no buffer of its own.
-        median_window_into(pix, size, 1, &mut m3);
-        median_window_into(&m3, size, 3, &mut m37);
-        for (a, &b) in m3.iter_mut().zip(&m37) {
+        // a CR (median₃ already erased the spike). The difference is elementwise, so it lands back
+        // over median₃ in `fine` rather than in a buffer of its own.
+        median_window_into(pix, size, 1, fine);
+        median_window_into(fine, size, 3, median);
+        for (a, &b) in fine.iter_mut().zip(&*median) {
             *a = (*a - b).max(FINE_STRUCTURE_FLOOR);
         }
 
         // Significance S = L⁺/(2N), then S' = S − median₅(S) to strip smooth large-scale structure.
         // Both steps are elementwise over the same extent, so they run in place down the Laplacian
         // buffer instead of allocating a frame each.
-        median_window_into(pix, size, 2, &mut m5);
-        let noise = noise_map(pix, &m5, &config.noise);
-        for (l, &nz) in significance.iter_mut().zip(&noise) {
+        median_window_into(pix, size, 2, median);
+        noise_map_into(pix, median, &config.noise, noise, frame);
+        for (l, &nz) in significance.iter_mut().zip(&*noise) {
             *l /= 2.0 * nz;
         }
-        median_window_into(&significance, size, 2, &mut s_med5);
-        for (v, &m) in significance.iter_mut().zip(&s_med5) {
+        median_window_into(significance, size, 2, median);
+        for (v, &m) in significance.iter_mut().zip(&*median) {
             *v -= m;
         }
 
-        let flags = detect_and_grow(&significance, &m3, &noise, &mask, size, config);
+        if masks.detect_and_grow(significance, fine, noise, config) == 0 {
+            break;
+        }
+        replace_flagged(data, size, &masks.accumulated, frame);
+    }
 
-        // Word-wise: `flags & !mask` is what is newly set, then `mask |= flags`. Counting whole
-        // words needs no per-row masking only because both buffers have their padding clear.
+    masks.accumulated.count_ones()
+}
+
+/// The three cosmic-ray masks a detection holds, one bit per pixel each.
+///
+/// All three live for the whole detection rather than being rebuilt per iteration, which costs
+/// nothing at the peak — [`detect_and_grow`](Self::detect_and_grow) needed all three live at once
+/// anyway — and saves two frame-sized allocations per pass.
+#[derive(Debug)]
+struct CrMasks {
+    /// Every CR pixel found so far: the in-painting mask, and the count the detector returns.
+    accumulated: BitBuffer2,
+    /// Pixels clearing the full `sigclip` this iteration, before growth.
+    primary: BitBuffer2,
+    /// `primary` plus the wings grown onto it — what merges into `accumulated`.
+    flags: BitBuffer2,
+}
+
+impl CrMasks {
+    fn new(size: Size2us) -> Self {
+        Self {
+            accumulated: new_cr_mask(size),
+            primary: new_cr_mask(size),
+            flags: new_cr_mask(size),
+        }
+    }
+
+    /// Flag CRs: `S' > sigclip` **and** the fine-structure contrast `S' > objlim·(F/noise)`, then
+    /// grow onto neighbors clearing the lowered threshold `sigclip·sigfrac` and the same contrast
+    /// test (a flagged CR's fainter wings). Merges the result into `accumulated` and returns how
+    /// many pixels that added — zero ends the detect→replace loop.
+    ///
+    /// The contrast is van Dokkum's `L⁺/F > objlim` written in astroscrappy's noise-normalized
+    /// form: comparing the significance image `S'` against `objlim·(F/noise)` (rather than raw `L⁺`
+    /// against `objlim·F`) puts `F` in the same units as `S'`, so the `objlim` default carries the
+    /// same star-core protection as astroscrappy/ccdproc. (Raw `L⁺ > objlim·F` is ~2× more
+    /// aggressive.)
+    fn detect_and_grow(
+        &mut self,
+        significance: &[f32],
+        f: &[f32],
+        noise: &[f32],
+        cfg: &CosmicRayConfig,
+    ) -> usize {
+        let Self {
+            accumulated,
+            primary,
+            flags,
+        } = self;
+        let size = accumulated.size;
+        let passes_contrast = |i: usize, sig_thresh: f32| {
+            let f_norm = (f[i] / noise[i]).max(FINE_STRUCTURE_SIGMA_FLOOR);
+            significance[i] > sig_thresh && significance[i] > cfg.objlim * f_norm
+        };
+        primary.fill_from_predicate(|i| !accumulated.get(i) && passes_contrast(i, cfg.sigclip));
+
+        let lowered = cfg.sigclip * cfg.sigfrac;
+        flags.copy_from(primary);
+        for y in 0..size.height {
+            for x in 0..size.width {
+                if !primary.get_at(Vec2us::new(x, y)) {
+                    continue;
+                }
+                let y0 = y.saturating_sub(1);
+                let y1 = (y + 1).min(size.height - 1);
+                let x0 = x.saturating_sub(1);
+                let x1 = (x + 1).min(size.width - 1);
+                for ny in y0..=y1 {
+                    for nx in x0..=x1 {
+                        let j = size.index_of(Vec2us::new(nx, ny));
+                        if !flags.get(j) && !accumulated.get(j) && passes_contrast(j, lowered) {
+                            flags.set(j, true);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Word-wise: `flags & !accumulated` is what is newly set, then `accumulated |= flags`.
+        // Counting whole words needs no per-row masking only because both buffers have their
+        // padding clear.
         debug_assert!(
-            mask.padding_is_clear() && flags.padding_is_clear(),
+            accumulated.padding_is_clear() && flags.padding_is_clear(),
             "padding bits would be counted as newly-flagged pixels"
         );
         let mut newly = 0usize;
-        for (m, &f) in mask.words.iter_mut().zip(&flags.words) {
-            newly += (f & !*m).count_ones() as usize;
-            *m |= f;
+        for (acc, &new) in accumulated.words.iter_mut().zip(&flags.words) {
+            newly += (new & !*acc).count_ones() as usize;
+            *acc |= new;
         }
-        if newly == 0 {
-            break;
-        }
-        replace_flagged(data, size, &mask);
+        newly
     }
-
-    mask.count_ones()
 }
 
-/// The accumulated cosmic-ray mask: one bit per pixel.
+/// One cosmic-ray mask: one bit per pixel.
 ///
-/// Its own function so `mem_budget` can weigh exactly what the detector allocates. Three of these
-/// are live at the peak — the accumulated `mask`, and `primary` plus `flags` inside
-/// [`detect_and_grow`] — so the packing is worth three times its face value.
+/// Its own function so `mem_budget` can weigh exactly what the detector allocates. A detection
+/// holds three ([`CrMasks`]), so the packing is worth three times its face value.
 fn new_cr_mask(size: Size2us) -> BitBuffer2 {
     BitBuffer2::new_default(size)
 }
@@ -187,15 +300,16 @@ fn new_cr_mask(size: Size2us) -> BitBuffer2 {
 /// sample is `data[y2 / 2][x2 / 2]` — so it is read through that index instead of being written to
 /// a buffer four times pixel count, and the clipped Laplacian is averaged as it is produced rather
 /// than stored in a second buffer of the same size. That is 8n floats of allocation and traffic
-/// removed from every iteration; what remains is the `n`-length result.
-fn laplacian_plus(data: &[f32], size: Size2us) -> Vec<f32> {
+/// removed from every iteration; what remains is the `n`-length result, written into the caller's
+/// buffer.
+fn laplacian_plus_into(data: &[f32], size: Size2us, out: &mut Vec<f32>) {
     let (w2, h2) = (size.width * 2, size.height * 2);
     // The ×2 sample at (x2, y2), which is the native pixel under it.
     let at = |y2: usize, x2: usize| data[(y2 / 2) * size.width + (x2 / 2)];
 
-    let mut lplus = vec![0.0f32; size.pixel_count()];
-    lplus
-        .par_chunks_mut(size.width)
+    // Every element is written below, so only the length matters.
+    out.resize(size.pixel_count(), 0.0);
+    out.par_chunks_mut(size.width)
         .enumerate()
         .for_each(|(y, row)| {
             for (x, o) in row.iter_mut().enumerate() {
@@ -216,7 +330,6 @@ fn laplacian_plus(data: &[f32], size: Size2us) -> Vec<f32> {
                 *o = 0.25 * sum;
             }
         });
-    lplus
 }
 
 /// Median over a `(2r+1)²` window, replicating the border pixel for out-of-bounds coordinates so
@@ -240,10 +353,9 @@ fn median_window_into(data: &[f32], size: Size2us, r: usize, out: &mut Vec<f32>)
     let (wi, hi) = (size.width as isize, size.height as isize);
     // Every element is written below, so only the length matters.
     out.resize(size.pixel_count(), 0.0);
-    out.par_chunks_mut(size.width)
-        .enumerate()
-        .for_each(|(y, row)| {
-            let mut buf: Vec<f32> = Vec::with_capacity((2 * r + 1) * (2 * r + 1));
+    out.par_chunks_mut(size.width).enumerate().for_each_init(
+        || Vec::<f32>::with_capacity((2 * r + 1) * (2 * r + 1)),
+        |buf, (y, row)| {
             for (x, o) in row.iter_mut().enumerate() {
                 buf.clear();
                 for dy in -ri..=ri {
@@ -253,28 +365,37 @@ fn median_window_into(data: &[f32], size: Size2us, r: usize, out: &mut Vec<f32>)
                         buf.push(data[size.index_of(Vec2us::new(xx, yy))]);
                     }
                 }
-                *o = median_f32_mut(&mut buf);
+                *o = median_f32_mut(buf);
             }
-        });
+        },
+    );
 }
 
-/// Per-pixel noise `N` from the median-filtered (CR-free) signal estimate `m5`.
-fn noise_map(data: &[f32], m5: &[f32], noise: &NoiseEstimation) -> Vec<f32> {
+/// Per-pixel noise `N` from the median-filtered (CR-free) signal estimate `m5`, into `out`.
+///
+/// `scratch` is a frame-sized buffer the empirical background statistics consume; what it holds on
+/// entry means nothing, and what it holds on return means nothing either.
+fn noise_map_into(
+    data: &[f32],
+    m5: &[f32],
+    noise: &NoiseEstimation,
+    out: &mut Vec<f32>,
+    scratch: &mut Vec<f32>,
+) {
     match *noise {
         NoiseEstimation::Empirical => {
-            let mut tmp = data.to_vec();
-            let bg = median_f32_mut(&mut tmp);
-            let mut scratch = Vec::new();
-            let sigma_bg = mad_to_sigma(mad_f32_fast(data, bg, &mut scratch)).max(1e-9);
-            m5.iter()
-                .map(|&s| empirical_noise(s, bg, sigma_bg))
-                .collect()
+            scratch.clear();
+            scratch.extend_from_slice(data);
+            let bg = median_f32_mut(scratch);
+            let sigma_bg = mad_to_sigma(mad_f32_fast(data, bg, scratch)).max(1e-9);
+            out.clear();
+            out.extend(m5.iter().map(|&s| empirical_noise(s, bg, sigma_bg)));
         }
         NoiseEstimation::Parametric {
             gain,
             read_noise,
             full_scale,
-        } => parametric_noise(m5, gain, read_noise, full_scale),
+        } => parametric_noise_into(m5, gain, read_noise, full_scale, out),
     }
 }
 
@@ -290,62 +411,19 @@ fn empirical_noise(signal: f32, bg: f32, sigma: f32) -> f32 {
 
 /// Poisson + read noise per pixel from a CR-free signal estimate, in normalized units:
 /// `N_e = √(gain·I_ADU + read_noise²)` mapped back through `full_scale`.
-fn parametric_noise(signal: &[f32], gain: f32, read_noise: f32, full_scale: f32) -> Vec<f32> {
+fn parametric_noise_into(
+    signal: &[f32],
+    gain: f32,
+    read_noise: f32,
+    full_scale: f32,
+    out: &mut Vec<f32>,
+) {
     let denom = gain * full_scale;
-    signal
-        .iter()
-        .map(|&s| {
-            let adu = s.max(0.0) * full_scale;
-            ((gain * adu + read_noise * read_noise).sqrt() / denom).max(1e-9)
-        })
-        .collect()
-}
-
-/// Flag CRs: `S' > sigclip` **and** the fine-structure contrast `S' > objlim·(F/noise)`, then grow
-/// onto neighbors clearing the lowered threshold `sigclip·sigfrac` and the same contrast test (a
-/// flagged CR's fainter wings).
-///
-/// The contrast is van Dokkum's `L⁺/F > objlim` written in astroscrappy's noise-normalized form:
-/// comparing the significance image `S'` against `objlim·(F/noise)` (rather than raw `L⁺` against
-/// `objlim·F`) puts `F` in the same units as `S'`, so the `objlim` default carries the same
-/// star-core protection as astroscrappy/ccdproc. (Raw `L⁺ > objlim·F` is ~2× more aggressive.)
-fn detect_and_grow(
-    significance: &[f32],
-    f: &[f32],
-    noise: &[f32],
-    mask: &BitBuffer2,
-    size: Size2us,
-    cfg: &CosmicRayConfig,
-) -> BitBuffer2 {
-    let passes_contrast = |i: usize, sig_thresh: f32| {
-        let f_norm = (f[i] / noise[i]).max(FINE_STRUCTURE_SIGMA_FLOOR);
-        significance[i] > sig_thresh && significance[i] > cfg.objlim * f_norm
-    };
-    let primary =
-        BitBuffer2::from_predicate(size, |i| !mask.get(i) && passes_contrast(i, cfg.sigclip));
-
-    let lowered = cfg.sigclip * cfg.sigfrac;
-    let mut flags = primary.clone();
-    for y in 0..size.height {
-        for x in 0..size.width {
-            if !primary.get_at(Vec2us::new(x, y)) {
-                continue;
-            }
-            let y0 = y.saturating_sub(1);
-            let y1 = (y + 1).min(size.height - 1);
-            let x0 = x.saturating_sub(1);
-            let x1 = (x + 1).min(size.width - 1);
-            for ny in y0..=y1 {
-                for nx in x0..=x1 {
-                    let j = size.index_of(Vec2us::new(nx, ny));
-                    if !flags.get(j) && !mask.get(j) && passes_contrast(j, lowered) {
-                        flags.set(j, true);
-                    }
-                }
-            }
-        }
-    }
-    flags
+    out.clear();
+    out.extend(signal.iter().map(|&s| {
+        let adu = s.max(0.0) * full_scale;
+        ((gain * adu + read_noise * read_noise).sqrt() / denom).max(1e-9)
+    }));
 }
 
 /// Replace masked pixels with the median of their unmasked 5×5 neighbors (edge-clamped);
@@ -357,44 +435,58 @@ fn detect_and_grow(
 /// reads, and it pays for itself besides: reading a separate, read-only array keeps one row's
 /// writes off the cache lines the rows above and below are reading. Aliasing the two through a raw
 /// pointer is sound (the sets are disjoint) and was measured *slower* on every run of
-/// `bench_cosmic_ray_reject_mono` — the false sharing costs more than the copy.
-fn replace_flagged(data: &mut Buffer2<f32>, size: Size2us, mask: &BitBuffer2) {
-    let src = data.pixels().to_vec();
+/// `bench_cosmic_ray_reject_mono` — the false sharing costs more than the copy. The copy lands in
+/// the caller's `snapshot` buffer, so it is a memcpy per iteration and not an allocation.
+fn replace_flagged(
+    data: &mut Buffer2<f32>,
+    size: Size2us,
+    mask: &BitBuffer2,
+    snapshot: &mut Vec<f32>,
+) {
+    snapshot.clear();
+    snapshot.extend_from_slice(data.pixels());
+    let src: &[f32] = snapshot;
     let (wi, hi) = (size.width as isize, size.height as isize);
     data.pixels_mut()
         .par_chunks_mut(size.width)
         .enumerate()
-        .for_each(|(y, row)| {
-            let mut buf: Vec<f32> = Vec::with_capacity(25);
-            for (x, o) in row.iter_mut().enumerate() {
-                if !mask.get_at(Vec2us::new(x, y)) {
-                    continue;
-                }
-                buf.clear();
-                for dy in -2..=2 {
-                    let yy = (y as isize + dy).clamp(0, hi - 1) as usize;
-                    for dx in -2..=2 {
-                        let xx = (x as isize + dx).clamp(0, wi - 1) as usize;
-                        let j = size.index_of(Vec2us::new(xx, yy));
-                        if !mask.get(j) {
-                            buf.push(src[j]);
+        .for_each_init(
+            || Vec::<f32>::with_capacity(25),
+            |buf, (y, row)| {
+                for (x, o) in row.iter_mut().enumerate() {
+                    if !mask.get_at(Vec2us::new(x, y)) {
+                        continue;
+                    }
+                    buf.clear();
+                    for dy in -2..=2 {
+                        let yy = (y as isize + dy).clamp(0, hi - 1) as usize;
+                        for dx in -2..=2 {
+                            let xx = (x as isize + dx).clamp(0, wi - 1) as usize;
+                            let j = size.index_of(Vec2us::new(xx, yy));
+                            if !mask.get(j) {
+                                buf.push(src[j]);
+                            }
                         }
                     }
+                    if !buf.is_empty() {
+                        *o = median_f32_mut(buf);
+                    }
                 }
-                if !buf.is_empty() {
-                    *o = median_f32_mut(&mut buf);
-                }
-            }
-        });
+            },
+        );
 }
 
 /// Bayer: the mosaic is 2×2-periodic, so pixels sharing a `(x%2, y%2)` phase are the same color and
 /// form a dense plane. Deinterleave the four phases, run [`reject_mono_buffer`] on each (its dense
 /// neighbors are same-color in the mosaic), and write the cleaned planes back. Pattern-independent —
 /// phase alone determines color, so no `CfaPattern` is needed.
+///
+/// One [`MonoScratch`] serves all four planes: they differ by at most a row and a column, so after
+/// the first the rest reuse its allocation.
 fn reject_bayer(data: &mut Buffer2<f32>, config: &CosmicRayConfig) -> usize {
     let w = data.width();
     let h = data.height();
+    let mut scratch = MonoScratch::default();
     let mut total = 0;
     for b in 0..2 {
         for a in 0..2 {
@@ -409,7 +501,7 @@ fn reject_bayer(data: &mut Buffer2<f32>, config: &CosmicRayConfig) -> usize {
                     plane[(i, j)] = data[(j * 2 + b) * w + (i * 2 + a)];
                 }
             }
-            total += reject_mono_buffer(&mut plane, config);
+            total += reject_mono_buffer(&mut plane, config, &mut scratch);
             let cleaned = plane.pixels();
             for j in 0..ph {
                 for i in 0..pw {
@@ -430,15 +522,24 @@ const XTRANS_LARGE: usize = 24;
 /// Nearest unmasked same-color neighbors used to in-paint a flagged pixel.
 const XTRANS_REPLACE: usize = 12;
 
-/// Per-pixel detector inputs for the CFA path.
-#[derive(Debug)]
-struct XtransStructure {
-    /// `max(0, v − median(nearest same-color))` — sharpness vs the same-color surroundings.
+/// The CFA detector's per-pixel inputs and the scratch that builds them, allocated on the first
+/// iteration and reused by every one after it — [`MonoScratch`]'s rule on the X-Trans path.
+#[derive(Debug, Default)]
+struct XtransScratch {
+    /// `max(0, v − median(nearest same-color))` — sharpness vs the same-color surroundings — then
+    /// the significance `S = L⁺/N` in place.
     lplus: Vec<f32>,
     /// Same-color fine structure `median_small − median_large` (large for sources, ~0 at a CR).
     f: Vec<f32>,
     /// CR-free signal estimate (the fine same-color median), for the noise model.
     signal: Vec<f32>,
+    /// Per-pixel noise `N`.
+    noise: Vec<f32>,
+    /// The frame's pixels bucketed by color, for the per-color empirical background statistics.
+    by_color: [Vec<f32>; 3],
+    /// Frame-sized scratch: the deviations a per-color MAD consumes, then the read-only snapshot
+    /// [`xtrans_replace`] gathers from — never both at once.
+    frame: Vec<f32>,
 }
 
 /// X-Trans (and any non-Bayer CFA): no dense same-color sub-lattice, so detect on the mosaic with
@@ -451,34 +552,30 @@ fn reject_xtrans(data: &mut Buffer2<f32>, cfa: &CfaType, config: &CosmicRayConfi
     if size.width < 7 || size.height < 7 {
         return 0;
     }
-    let mut mask = new_cr_mask(size);
+    let mut masks = CrMasks::new(size);
+    let mut scratch = XtransScratch::default();
 
     for _ in 0..config.niter {
-        let pix = data.pixels();
-        let XtransStructure { lplus, f, signal } = xtrans_structure(pix, size, cfa, &mask);
-        let noise = xtrans_noise(pix, size, cfa, &signal, &config.noise);
-        let s: Vec<f32> = lplus.iter().zip(&noise).map(|(&l, &nz)| l / nz).collect();
-
-        let flags = detect_and_grow(&s, &f, &noise, &mask, size, config);
-
-        // Word-wise: `flags & !mask` is what is newly set, then `mask |= flags`. Counting whole
-        // words needs no per-row masking only because both buffers have their padding clear.
-        debug_assert!(
-            mask.padding_is_clear() && flags.padding_is_clear(),
-            "padding bits would be counted as newly-flagged pixels"
-        );
-        let mut newly = 0usize;
-        for (m, &f) in mask.words.iter_mut().zip(&flags.words) {
-            newly += (f & !*m).count_ones() as usize;
-            *m |= f;
+        let scene = CfaScene {
+            pix: data.pixels(),
+            size,
+            cfa,
+            mask: &masks.accumulated,
+        };
+        scratch.fill_structure(&scene);
+        scratch.fill_noise(&scene, &config.noise);
+        // S = L⁺/N, elementwise over the same extent, so it runs down the L⁺ buffer.
+        for (l, &nz) in scratch.lplus.iter_mut().zip(&scratch.noise) {
+            *l /= nz;
         }
-        if newly == 0 {
+
+        if masks.detect_and_grow(&scratch.lplus, &scratch.f, &scratch.noise, config) == 0 {
             break;
         }
-        xtrans_replace(data, cfa, &mask);
+        xtrans_replace(data, cfa, &masks.accumulated, &mut scratch.frame);
     }
 
-    mask.count_ones()
+    masks.accumulated.count_ones()
 }
 
 /// Read-only context for same-color gathering: the plane data, its size, the CFA pattern, and the
@@ -527,114 +624,121 @@ fn same_color_values(
     out.truncate(max);
 }
 
-/// Compute `L⁺`, `F`, and the signal estimate per pixel from same-color medians at two scales (one
-/// gather per pixel: nearest-`XTRANS_LARGE`, with the nearest-`XTRANS_SMALL` subset).
-fn xtrans_structure(
-    pix: &[f32],
-    size: Size2us,
-    cfa: &CfaType,
-    mask: &BitBuffer2,
-) -> XtransStructure {
-    let (w, n) = (size.width, size.pixel_count());
-    let mut lplus = vec![0.0f32; n];
-    let mut f = vec![0.0f32; n];
-    let mut signal = vec![0.0f32; n];
-    let scene = CfaScene {
-        pix,
-        size,
-        cfa,
-        mask,
-    };
-    lplus
-        .par_chunks_mut(w)
-        .zip(f.par_chunks_mut(w))
-        .zip(signal.par_chunks_mut(w))
-        .enumerate()
-        .for_each(|(y, ((lrow, frow), srow))| {
-            let mut gathered: Vec<(i32, f32)> = Vec::with_capacity(64);
-            let mut vals: Vec<f32> = Vec::with_capacity(XTRANS_LARGE);
-            for x in 0..w {
-                let v = pix[y * w + x];
-                same_color_values(
-                    &scene,
-                    Vec2us::new(x, y),
-                    XTRANS_RADIUS,
-                    XTRANS_LARGE,
-                    &mut gathered,
-                );
-                if gathered.is_empty() {
-                    frow[x] = FINE_STRUCTURE_FLOOR;
-                    srow[x] = v;
-                    continue;
-                }
-                let small = gathered.len().min(XTRANS_SMALL);
-                vals.clear();
-                vals.extend(gathered[..small].iter().map(|&(_, val)| val));
-                let med_small = median_f32_mut(&mut vals);
-                vals.clear();
-                vals.extend(gathered.iter().map(|&(_, val)| val));
-                let med_large = median_f32_mut(&mut vals);
-                lrow[x] = (v - med_small).max(0.0);
-                frow[x] = (med_small - med_large).max(FINE_STRUCTURE_FLOOR);
-                srow[x] = med_small;
-            }
-        });
-    XtransStructure { lplus, f, signal }
-}
+impl XtransScratch {
+    /// Compute `L⁺`, `F`, and the signal estimate per pixel from same-color medians at two scales
+    /// (one gather per pixel: nearest-`XTRANS_LARGE`, with the nearest-`XTRANS_SMALL` subset).
+    fn fill_structure(&mut self, scene: &CfaScene) {
+        let (w, n) = (scene.size.width, scene.size.pixel_count());
+        // Every element is written below, so only the length matters.
+        self.lplus.resize(n, 0.0);
+        self.f.resize(n, 0.0);
+        self.signal.resize(n, 0.0);
+        self.lplus
+            .par_chunks_mut(w)
+            .zip(self.f.par_chunks_mut(w))
+            .zip(self.signal.par_chunks_mut(w))
+            .enumerate()
+            .for_each_init(
+                || {
+                    (
+                        Vec::<(i32, f32)>::with_capacity(64),
+                        Vec::<f32>::with_capacity(XTRANS_LARGE),
+                    )
+                },
+                |(gathered, vals), (y, ((lrow, frow), srow))| {
+                    for x in 0..w {
+                        let v = scene.pix[y * w + x];
+                        same_color_values(
+                            scene,
+                            Vec2us::new(x, y),
+                            XTRANS_RADIUS,
+                            XTRANS_LARGE,
+                            gathered,
+                        );
+                        if gathered.is_empty() {
+                            frow[x] = FINE_STRUCTURE_FLOOR;
+                            srow[x] = v;
+                            continue;
+                        }
+                        let small = gathered.len().min(XTRANS_SMALL);
+                        vals.clear();
+                        vals.extend(gathered[..small].iter().map(|&(_, val)| val));
+                        let med_small = median_f32_mut(vals);
+                        vals.clear();
+                        vals.extend(gathered.iter().map(|&(_, val)| val));
+                        let med_large = median_f32_mut(vals);
+                        lrow[x] = (v - med_small).max(0.0);
+                        frow[x] = (med_small - med_large).max(FINE_STRUCTURE_FLOOR);
+                        srow[x] = med_small;
+                    }
+                },
+            );
+    }
 
-/// Per-pixel noise for the CFA path. Empirical uses **per-color** background+σ (R/G/B sit at
-/// different sky levels after flat-fielding, so a whole-mosaic MAD would be inflated); parametric is
-/// color-independent (sensor gain), reusing the Poisson+read model on the same-color signal.
-fn xtrans_noise(
-    pix: &[f32],
-    size: Size2us,
-    cfa: &CfaType,
-    signal: &[f32],
-    noise: &NoiseEstimation,
-) -> Vec<f32> {
-    match *noise {
-        NoiseEstimation::Empirical => {
-            let mut by_color: [Vec<f32>; 3] = [Vec::new(), Vec::new(), Vec::new()];
-            for y in 0..size.height {
-                for x in 0..size.width {
-                    let c = (cfa.color_at(Vec2us::new(x, y)) as usize).min(2);
-                    by_color[c].push(pix[y * size.width + x]);
+    /// Per-pixel noise for the CFA path, from the signal estimate [`Self::fill_structure`] left.
+    /// Empirical uses **per-color** background+σ (R/G/B sit at different sky levels after
+    /// flat-fielding, so a whole-mosaic MAD would be inflated); parametric is color-independent
+    /// (sensor gain), reusing the Poisson+read model on the same-color signal.
+    fn fill_noise(&mut self, scene: &CfaScene, noise: &NoiseEstimation) {
+        let Self {
+            signal,
+            noise: out,
+            by_color,
+            frame,
+            ..
+        } = self;
+        let size = scene.size;
+        match *noise {
+            NoiseEstimation::Empirical => {
+                for vals in by_color.iter_mut() {
+                    vals.clear();
                 }
-            }
-            let mut scratch = Vec::new();
-            let mut stats = [(0.0f32, 1e-9f32); 3];
-            for (c, vals) in by_color.iter_mut().enumerate() {
-                if vals.is_empty() {
-                    continue;
+                for y in 0..size.height {
+                    for x in 0..size.width {
+                        let c = (scene.cfa.color_at(Vec2us::new(x, y)) as usize).min(2);
+                        by_color[c].push(scene.pix[y * size.width + x]);
+                    }
                 }
-                let bg = median_f32_mut(vals);
-                let sigma = mad_to_sigma(mad_f32_fast(vals, bg, &mut scratch)).max(1e-9);
-                stats[c] = (bg, sigma);
-            }
-            (0..size.pixel_count())
-                .map(|i| {
+                let mut stats = [(0.0f32, 1e-9f32); 3];
+                for (c, vals) in by_color.iter_mut().enumerate() {
+                    if vals.is_empty() {
+                        continue;
+                    }
+                    let bg = median_f32_mut(vals);
+                    let sigma = mad_to_sigma(mad_f32_fast(vals, bg, frame)).max(1e-9);
+                    stats[c] = (bg, sigma);
+                }
+                out.clear();
+                out.extend((0..size.pixel_count()).map(|i| {
                     let p = size.point_of(i);
-                    let c = (cfa.color_at(p) as usize).min(2);
+                    let c = (scene.cfa.color_at(p) as usize).min(2);
                     let (bg, sigma) = stats[c];
                     empirical_noise(signal[i], bg, sigma)
-                })
-                .collect()
+                }));
+            }
+            NoiseEstimation::Parametric {
+                gain,
+                read_noise,
+                full_scale,
+            } => parametric_noise_into(signal, gain, read_noise, full_scale, out),
         }
-        NoiseEstimation::Parametric {
-            gain,
-            read_noise,
-            full_scale,
-        } => parametric_noise(signal, gain, read_noise, full_scale),
     }
 }
 
-/// Replace masked pixels with the median of their nearest unmasked same-color neighbors.
-fn xtrans_replace(data: &mut Buffer2<f32>, cfa: &CfaType, mask: &BitBuffer2) {
+/// Replace masked pixels with the median of their nearest unmasked same-color neighbors. Gathers
+/// from a snapshot in the caller's `snapshot` buffer, for the reason [`replace_flagged`] gives.
+fn xtrans_replace(
+    data: &mut Buffer2<f32>,
+    cfa: &CfaType,
+    mask: &BitBuffer2,
+    snapshot: &mut Vec<f32>,
+) {
     let size = Size2us::new(data.width(), data.height());
     let w = size.width;
-    let src = data.pixels().to_vec();
+    snapshot.clear();
+    snapshot.extend_from_slice(data.pixels());
     let scene = CfaScene {
-        pix: &src,
+        pix: snapshot,
         size,
         cfa,
         mask,
@@ -642,28 +746,34 @@ fn xtrans_replace(data: &mut Buffer2<f32>, cfa: &CfaType, mask: &BitBuffer2) {
     data.pixels_mut()
         .par_chunks_mut(w)
         .enumerate()
-        .for_each(|(y, row)| {
-            let mut gathered: Vec<(i32, f32)> = Vec::with_capacity(32);
-            let mut vals: Vec<f32> = Vec::new();
-            for (x, o) in row.iter_mut().enumerate() {
-                if !mask[y * w + x] {
-                    continue;
+        .for_each_init(
+            || {
+                (
+                    Vec::<(i32, f32)>::with_capacity(32),
+                    Vec::<f32>::with_capacity(XTRANS_REPLACE),
+                )
+            },
+            |(gathered, vals), (y, row)| {
+                for (x, o) in row.iter_mut().enumerate() {
+                    if !mask[y * w + x] {
+                        continue;
+                    }
+                    same_color_values(
+                        &scene,
+                        Vec2us::new(x, y),
+                        XTRANS_RADIUS,
+                        XTRANS_REPLACE,
+                        gathered,
+                    );
+                    if gathered.is_empty() {
+                        continue;
+                    }
+                    vals.clear();
+                    vals.extend(gathered.iter().map(|&(_, val)| val));
+                    *o = median_f32_mut(vals);
                 }
-                same_color_values(
-                    &scene,
-                    Vec2us::new(x, y),
-                    XTRANS_RADIUS,
-                    XTRANS_REPLACE,
-                    &mut gathered,
-                );
-                if gathered.is_empty() {
-                    continue;
-                }
-                vals.clear();
-                vals.extend(gathered.iter().map(|&(_, val)| val));
-                *o = median_f32_mut(&mut vals);
-            }
-        });
+            },
+        );
 }
 
 #[cfg(test)]
@@ -671,14 +781,42 @@ mod tests;
 
 #[cfg(test)]
 pub(crate) mod internals {
+    use imaginarium::Buffer2;
+
     use crate::bit_buffer2::BitBuffer2;
     use crate::math::size2us::Size2us;
+    use crate::stacking::calibration_masters::cosmic_ray::{CosmicRayConfig, MonoScratch};
 
-    /// Masks live at the detector's peak: the accumulated one, plus `primary` and `flags`.
+    /// Masks a detection holds: the accumulated one, plus `primary` and `flags`.
     pub(crate) const CONCURRENT_MASKS: usize = 3;
+
+    /// Frame-sized `f32` planes the mono detector holds, however many iterations it runs.
+    pub(crate) const MONO_SCRATCH_PLANES: usize = 5;
 
     /// The mask as the detector allocates it, for `mem_budget` to weigh.
     pub(crate) fn new_cr_mask(size: Size2us) -> BitBuffer2 {
         super::new_cr_mask(size)
+    }
+
+    /// Total capacity, in floats, of the mono detector's working set after a run on `data` — what
+    /// `mem_budget` weighs against [`MONO_SCRATCH_PLANES`].
+    ///
+    /// Destructured rather than summed through a helper, so a plane added to or dropped from
+    /// [`MonoScratch`] fails to compile here instead of silently drifting from the constant.
+    pub(crate) fn mono_scratch_floats(data: &mut Buffer2<f32>, config: &CosmicRayConfig) -> usize {
+        let mut scratch = MonoScratch::default();
+        super::reject_mono_buffer(data, config, &mut scratch);
+        let MonoScratch {
+            significance,
+            fine,
+            noise,
+            median,
+            frame,
+        } = &scratch;
+        significance.capacity()
+            + fine.capacity()
+            + noise.capacity()
+            + median.capacity()
+            + frame.capacity()
     }
 }

@@ -207,7 +207,7 @@ impl BitBuffer2 {
     /// Whether every row's padding bits are zero.
     ///
     /// Word-wise code that counts bits without masking — `(a & !b).count_ones()` — is correct only
-    /// on buffers where this holds. `new_default` and `from_predicate` produce them, and
+    /// on buffers where this holds. `new_default` and `fill_from_predicate` produce them, and
     /// position-based writes preserve them; `fill(true)` and `new_filled(_, true)` do not. This
     /// scans the whole buffer, so it belongs in a `debug_assert!` and never on a release path.
     pub(crate) fn padding_is_clear(&self) -> bool {
@@ -226,28 +226,31 @@ impl BitBuffer2 {
         })
     }
 
-    /// Build a mask by testing every pixel, accumulating a whole word before storing it.
+    /// Fill the mask by testing every pixel, accumulating a whole word before storing it.
     ///
     /// `predicate` takes the linear pixel index, the same one [`Self::get`] takes. This exists so
     /// callers converting a `Vec<bool>` do not fall into `set()` per pixel, which is a
-    /// read-modify-write on a word and slower than the byte store it replaces.
-    pub(crate) fn from_predicate(size: Size2us, predicate: impl Fn(usize) -> bool) -> Self {
-        let mut buffer = Self::new_default(size);
-        let words_per_row = buffer.words_per_row();
-        for y in 0..size.height {
+    /// read-modify-write on a word and slower than the byte store it replaces — and so a caller
+    /// rebuilding the same mask every iteration can hand back the buffer it already has.
+    ///
+    /// Every word is stored, padding included, so whatever the previous holder left — including a
+    /// [`Self::fill`]'s dirty padding — is gone and the padding-clear invariant holds afterwards.
+    pub(crate) fn fill_from_predicate(&mut self, predicate: impl Fn(usize) -> bool) {
+        let words_per_row = self.words_per_row();
+        for y in 0..self.size.height {
             let row_start = y * words_per_row;
-            let row_base = y * size.width;
-            for x0 in (0..size.width).step_by(BITS_PER_WORD) {
+            let row_base = y * self.size.width;
+            for w in 0..words_per_row {
+                let x0 = w * BITS_PER_WORD;
                 let mut word = 0u64;
-                for bit in 0..BITS_PER_WORD.min(size.width - x0) {
+                for bit in 0..BITS_PER_WORD.min(self.size.width.saturating_sub(x0)) {
                     if predicate(row_base + x0 + bit) {
                         word |= 1u64 << bit;
                     }
                 }
-                buffer.words[row_start + x0 / BITS_PER_WORD] = word;
+                self.words[row_start + w] = word;
             }
         }
-        buffer
     }
 
     /// Iterate over all bit values (row-major order, skipping padding).

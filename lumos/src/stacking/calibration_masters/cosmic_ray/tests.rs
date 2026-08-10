@@ -377,7 +377,7 @@ fn replace_flagged_matches_a_snapshot_reference() {
     let want = replace_flagged_via_snapshot(&pixels, size, &mask);
 
     let mut got = Buffer2::new(size.width, size.height, pixels.clone());
-    replace_flagged(&mut got, size, &mask);
+    replace_flagged(&mut got, size, &mask, &mut Vec::new());
 
     assert_eq!(got.pixels(), &want[..]);
     // The fully-masked interior keeps its original value rather than picking up a neighbour.
