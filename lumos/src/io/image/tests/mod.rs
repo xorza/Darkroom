@@ -476,6 +476,25 @@ fn rgb_planes_reject_mismatched_dimensions() {
     ]);
 }
 
+/// Both `From` impls run `ImageDimensions::validate` for its panics alone — an empty plane cannot
+/// become a `LinearPixels`. Pinned because the check has no return value, so nothing else would
+/// notice it being dropped as dead code.
+#[test]
+#[should_panic(expected = "Width must be positive")]
+fn single_plane_rejects_an_empty_image() {
+    let _ = LinearImage::from(Buffer2::<f32>::new(0, 4, vec![]));
+}
+
+#[test]
+#[should_panic(expected = "Height must be positive")]
+fn rgb_planes_reject_an_empty_image() {
+    let _ = LinearImage::from([
+        Buffer2::<f32>::new(4, 0, vec![]),
+        Buffer2::<f32>::new(4, 0, vec![]),
+        Buffer2::<f32>::new(4, 0, vec![]),
+    ]);
+}
+
 #[test]
 fn test_channel_mut() {
     let mut image =

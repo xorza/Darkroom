@@ -202,7 +202,7 @@ impl LinearPixels {
 
 impl From<Buffer2<f32>> for LinearPixels {
     fn from(plane: Buffer2<f32>) -> Self {
-        ImageDimensions::new((plane.width(), plane.height()), 1);
+        ImageDimensions::validate((plane.width(), plane.height()), 1);
         LinearPixels::L(plane)
     }
 }
@@ -211,7 +211,7 @@ impl From<[Buffer2<f32>; 3]> for LinearPixels {
     fn from(planes: [Buffer2<f32>; 3]) -> Self {
         let width = planes[0].width();
         let height = planes[0].height();
-        ImageDimensions::new((width, height), 3);
+        ImageDimensions::validate((width, height), 3);
         for plane in &planes[1..] {
             assert_eq!(plane.width(), width, "all RGB planes must share width");
             assert_eq!(plane.height(), height, "all RGB planes must share height");
