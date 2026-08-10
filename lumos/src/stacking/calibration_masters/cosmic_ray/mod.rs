@@ -123,31 +123,31 @@ fn reject_mono_buffer(data: &mut Buffer2<f32>, config: &CosmicRayConfig) -> usiz
         let pix = data.pixels();
 
         // L⁺: clipped Laplacian of the ×2-subsampled frame, averaged back to native resolution.
-        let sub = subsample2(pix, size);
-        let lplus = laplacian_plus(&sub, size);
+        let mut significance = laplacian_plus(pix, size);
 
         // Object fine structure F = median₃(I) − median₇(median₃(I)); large for real sources, ~0 at
-        // a CR (median₃ already erased the spike).
+        // a CR (median₃ already erased the spike). Written back over `m3`, which the next iteration
+        // rewrites in full — the difference is elementwise, so it needs no buffer of its own.
         median_window_into(pix, size, 1, &mut m3);
         median_window_into(&m3, size, 3, &mut m37);
-        let f: Vec<f32> = m3
-            .iter()
-            .zip(&m37)
-            .map(|(&a, &b)| (a - b).max(FINE_STRUCTURE_FLOOR))
-            .collect();
+        for (a, &b) in m3.iter_mut().zip(&m37) {
+            *a = (*a - b).max(FINE_STRUCTURE_FLOOR);
+        }
 
         // Significance S = L⁺/(2N), then S' = S − median₅(S) to strip smooth large-scale structure.
+        // Both steps are elementwise over the same extent, so they run in place down the Laplacian
+        // buffer instead of allocating a frame each.
         median_window_into(pix, size, 2, &mut m5);
         let noise = noise_map(pix, &m5, &config.noise);
-        let s: Vec<f32> = lplus
-            .iter()
-            .zip(&noise)
-            .map(|(&l, &nz)| l / (2.0 * nz))
-            .collect();
-        median_window_into(&s, size, 2, &mut s_med5);
-        let sprime: Vec<f32> = s.iter().zip(&s_med5).map(|(&a, &b)| a - b).collect();
+        for (l, &nz) in significance.iter_mut().zip(&noise) {
+            *l /= 2.0 * nz;
+        }
+        median_window_into(&significance, size, 2, &mut s_med5);
+        for (v, &m) in significance.iter_mut().zip(&s_med5) {
+            *v -= m;
+        }
 
-        let flags = detect_and_grow(&sprime, &f, &noise, &mask, size, config);
+        let flags = detect_and_grow(&significance, &m3, &noise, &mask, size, config);
 
         // Word-wise: `flags & !mask` is what is newly set, then `mask |= flags`. Counting whole
         // words needs no per-row masking only because both buffers have their padding clear.
@@ -178,47 +178,42 @@ fn new_cr_mask(size: Size2us) -> BitBuffer2 {
     BitBuffer2::new_default(size)
 }
 
-/// Block-replicate `data` to twice `size` on each axis (each pixel → a 2×2 block).
-fn subsample2(data: &[f32], size: Size2us) -> Vec<f32> {
-    let w2 = size.width * 2;
-    let mut out = vec![0.0f32; w2 * size.height * 2];
-    out.par_chunks_mut(w2).enumerate().for_each(|(y2, row)| {
-        let y = y2 / 2;
-        for (x2, o) in row.iter_mut().enumerate() {
-            *o = data[size.index_of(Vec2us::new(x2 / 2, y))];
-        }
-    });
-    out
-}
-
-/// Convolve `sub` (the ×2 image, i.e. twice `size` on each axis) with the Laplacian
-/// `[[0,−1,0],[−1,4,−1],[0,−1,0]]`, clip negatives to 0 (keep only sharp positive peaks), then 2×2
-/// block-average back down to `size`. Edge-clamped.
-fn laplacian_plus(sub: &[f32], size: Size2us) -> Vec<f32> {
+/// Clipped Laplacian of the ×2-subsampled frame, block-averaged back down to `size`.
+///
+/// Convolves the ×2 image with `[[0,−1,0],[−1,4,−1],[0,−1,0]]`, clips negatives to 0 (keeping only
+/// sharp positive peaks), then averages each 2×2 block. Edge-clamped on the ×2 grid.
+///
+/// The ×2 image is never materialized. Subsampling here is a block replication — every `sub`
+/// sample is `data[y2 / 2][x2 / 2]` — so it is read through that index instead of being written to
+/// a buffer four times pixel count, and the clipped Laplacian is averaged as it is produced rather
+/// than stored in a second buffer of the same size. That is 8n floats of allocation and traffic
+/// removed from every iteration; what remains is the `n`-length result.
+fn laplacian_plus(data: &[f32], size: Size2us) -> Vec<f32> {
     let (w2, h2) = (size.width * 2, size.height * 2);
-    let mut lap = vec![0.0f32; w2 * h2];
-    lap.par_chunks_mut(w2).enumerate().for_each(|(y, row)| {
-        let yu = y.saturating_sub(1);
-        let yd = (y + 1).min(h2 - 1);
-        for (x, o) in row.iter_mut().enumerate() {
-            let xl = x.saturating_sub(1);
-            let xr = (x + 1).min(w2 - 1);
-            let c = sub[y * w2 + x];
-            let v =
-                4.0 * c - sub[yu * w2 + x] - sub[yd * w2 + x] - sub[y * w2 + xl] - sub[y * w2 + xr];
-            *o = v.max(0.0);
-        }
-    });
+    // The ×2 sample at (x2, y2), which is the native pixel under it.
+    let at = |y2: usize, x2: usize| data[(y2 / 2) * size.width + (x2 / 2)];
 
     let mut lplus = vec![0.0f32; size.pixel_count()];
     lplus
         .par_chunks_mut(size.width)
         .enumerate()
         .for_each(|(y, row)| {
-            let (r0, r1) = (2 * y * w2, (2 * y + 1) * w2);
             for (x, o) in row.iter_mut().enumerate() {
-                let (c0, c1) = (2 * x, 2 * x + 1);
-                *o = 0.25 * (lap[r0 + c0] + lap[r0 + c1] + lap[r1 + c0] + lap[r1 + c1]);
+                let mut sum = 0.0f32;
+                for dy in 0..2 {
+                    let y2 = 2 * y + dy;
+                    let yu = y2.saturating_sub(1);
+                    let yd = (y2 + 1).min(h2 - 1);
+                    for dx in 0..2 {
+                        let x2 = 2 * x + dx;
+                        let xl = x2.saturating_sub(1);
+                        let xr = (x2 + 1).min(w2 - 1);
+                        let v =
+                            4.0 * at(y2, x2) - at(yu, x2) - at(yd, x2) - at(y2, xl) - at(y2, xr);
+                        sum += v.max(0.0);
+                    }
+                }
+                *o = 0.25 * sum;
             }
         });
     lplus
