@@ -1,5 +1,8 @@
 //! Match recovery after an initial transform estimate.
 
+use crate::stacking::registration::ransac::transforms::estimate_transform;
+use crate::stacking::registration::recovery::recover_matches;
+use crate::stacking::registration::triangle::voting::MatchIndices;
 use crate::stacking::registration::*;
 use crate::testing::synthetic::transforms::generate_random_positions;
 

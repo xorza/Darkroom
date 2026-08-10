@@ -13,6 +13,7 @@ use crate::stacking::combine::normalization;
 use crate::stacking::combine::normalization::{ChannelNorm, FrameNorm};
 use crate::stacking::combine::rejection::Rejection;
 use crate::stacking::combine::rejection::percentile_clip_config::PercentileClipConfig;
+use crate::stacking::combine::stack::quantization::SourceSigmas;
 use crate::stacking::combine::stack::*;
 use crate::stacking::frame_store::{FrameStats, WarpQuality};
 use crate::stacking::registration::config::{self, InterpolationMethod};
@@ -61,23 +62,30 @@ fn make_cfa_stack_cache(
 fn quantization_helpers_follow_per_frame_coefficients_and_median_order_statistics() {
     let source_sigma = 0.01;
     let equal_sigmas = [source_sigma; 4];
-    let equal_mean = combined_mean_quantization_sigma(&equal_sigmas, None, None, 0..4).unwrap();
+    let equal_mean = SourceSigmas::from_values(equal_sigmas)
+        .combined_mean(None, None, 0..4)
+        .unwrap();
     assert!(
         (equal_mean - 0.005).abs() < f32::EPSILON,
         "four-frame equal mean: σ/√4 = 0.005, got {equal_mean}"
     );
 
     let source_sigmas = [0.01, 0.02];
-    let weighted =
-        combined_mean_quantization_sigma(&source_sigmas, Some(&[0.75, 0.25]), None, 0..2).unwrap();
+    let weighted = SourceSigmas::from_values(source_sigmas)
+        .combined_mean(Some(&[0.75, 0.25]), None, 0..2)
+        .unwrap();
     let expected_weighted = ((0.75f32 * 0.01).powi(2) + (0.25f32 * 0.02).powi(2)).sqrt();
     assert!(
         (weighted - expected_weighted).abs() < f32::EPSILON,
         "weighted unequal-source mean: expected {expected_weighted}, got {weighted}"
     );
 
-    let median_two = combined_median_quantization_sigma(&[source_sigma; 2], None).unwrap();
-    let median_three = combined_median_quantization_sigma(&[source_sigma; 3], None).unwrap();
+    let median_two = SourceSigmas::from_values([source_sigma; 2])
+        .combined_median(None)
+        .unwrap();
+    let median_three = SourceSigmas::from_values([source_sigma; 3])
+        .combined_median(None)
+        .unwrap();
     assert!(
         (median_two - source_sigma / 2.0f32.sqrt()).abs() < f32::EPSILON,
         "two-sample uniform median averages both samples: σ/√2, got {median_two}"
@@ -87,7 +95,11 @@ fn quantization_helpers_follow_per_frame_coefficients_and_median_order_statistic
         "three-sample uniform median order statistic: σ·√(3/5), got {median_three}"
     );
     assert!(
-        (combined_median_quantization_sigma(&source_sigmas, None).unwrap() - 0.02).abs()
+        (SourceSigmas::from_values(source_sigmas)
+            .combined_median(None)
+            .unwrap()
+            - 0.02)
+            .abs()
             < f32::EPSILON,
         "unequal uniform source widths must retain the conservative largest σ"
     );

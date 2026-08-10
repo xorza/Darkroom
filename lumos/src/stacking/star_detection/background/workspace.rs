@@ -1,3 +1,5 @@
+//! Working memory the background estimator keeps between detections.
+
 use crate::background_mesh::workspace::MeshWorkspace;
 use crate::concurrency::JobScratchPool;
 

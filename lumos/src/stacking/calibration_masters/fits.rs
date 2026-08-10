@@ -1,3 +1,10 @@
+//! The multi-extension FITS bundle a [`CalibrationMasters`] saves to and loads from.
+//!
+//! A dataless primary HDU tagged with the format and version, one image extension per present
+//! master, and a binary table for the defect map. Every extension is named by
+//! [`CalibrationComponent::extname`], which is also what the reader recognizes it by, and every
+//! HDU carries a checksum the loader verifies before trusting a byte of it.
+
 use std::io::{Error as IoError, ErrorKind};
 use std::path::Path;
 

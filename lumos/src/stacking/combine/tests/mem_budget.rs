@@ -159,7 +159,7 @@ fn disk_and_memory_tiers_produce_identical_masters() {
 #[test]
 fn common_domain_mask_stays_one_bit_per_pixel() {
     for pixels in [1024 * 1024usize, 6144 * 6144] {
-        let mask = normalization::internals::new_domain_mask(pixels);
+        let mask = normalization::common_domain::CommonDomain::full_mask(pixels);
         let packed = mask.words.len() * size_of::<u64>();
         let unpacked = pixels * size_of::<bool>();
 

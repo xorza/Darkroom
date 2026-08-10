@@ -1,3 +1,9 @@
+//! Star-pattern matching: from two point sets to corresponding pairs.
+//!
+//! Forms triangles over each set's k-nearest neighbours, indexes the reference triangles by their
+//! invariants, and hands similar pairs to the voting stage, which turns shared vertices into point
+//! correspondences.
+
 use glam::DVec2;
 
 use crate::stacking::registration::spatial::{KdTree, Neighbor};

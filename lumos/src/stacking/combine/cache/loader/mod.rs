@@ -23,15 +23,16 @@ use crate::stacking::combine::cache_config::CacheConfig;
 use crate::stacking::combine::config::Normalization;
 use crate::stacking::combine::error::Error;
 use crate::stacking::combine::normalization::compute_frame_norms;
+use crate::stacking::frame_store::error::FrameStoreError;
 use crate::stacking::frame_store::{
-    FrameSpill, FrameStats, FrameStoreError, SpillDirectory, StackableImage, StoredFrame,
-    StoredPlane, WarpQuality,
+    FrameSpill, FrameStats, SpillDirectory, StackableImage, StoredFrame, StoredPlane, WarpQuality,
 };
 use crate::stacking::progress::{ProgressCallback, StackingStage};
 
-use crate::stacking::combine::cache::{
-    CacheCore, FrameCache, validate_image_samples, validate_stored_samples,
+use crate::stacking::combine::cache::validation::{
+    validate_image_samples, validate_stored_samples,
 };
+use crate::stacking::combine::cache::{CacheCore, FrameCache};
 
 #[derive(Debug)]
 struct LoadedTier {

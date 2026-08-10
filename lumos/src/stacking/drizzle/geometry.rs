@@ -1,3 +1,10 @@
+//! The geometric primitives drizzle distributes flux with.
+//!
+//! Two kinds: the area magnification a transform applies locally ([`local_jacobian`]), which
+//! rescales a drop's contribution, and the exact polygon-to-pixel overlap the square kernel needs
+//! ([`sgarea`] / [`boxer`], ported from STScI's `cdrizzlebox.c`). [`lanczos_kernel`] serves the
+//! interpolating kernel.
+
 use std::f32::consts::PI;
 
 use glam::DVec2;

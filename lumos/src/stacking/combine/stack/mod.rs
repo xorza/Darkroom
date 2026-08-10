@@ -3,8 +3,9 @@
 //! Provides `stack()` (from paths) and `stack_images()` (in-memory) as the main API
 //! for image stacking operations; both take a [`ProgressCallback`].
 
+mod quantization;
+
 use std::path::Path;
-use std::sync::atomic::{AtomicU32, Ordering};
 
 use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::image_metadata::ImageMetadata;
@@ -20,6 +21,7 @@ use crate::stacking::combine::config::{CombineMethod, StackConfig, Weighting};
 use crate::stacking::combine::error::{Error, StackConfigError};
 use crate::stacking::combine::normalization::FrameNorm;
 use crate::stacking::combine::rejection::Rejection;
+use crate::stacking::combine::stack::quantization::{MaxSigma, SourceSigmas};
 use crate::stacking::frame_store::{FrameStats, SpillDirectory, StoredFrame};
 use crate::stacking::progress::ProgressCallback;
 use crate::stacking::registration::resample::WarpResult;
@@ -297,95 +299,6 @@ fn warn_if_weights_ignored(method: CombineMethod, weighting: &Weighting) {
     }
 }
 
-fn source_quantization_sigmas<'a>(
-    stats: impl IntoIterator<Item = &'a FrameStats>,
-) -> Option<Vec<f32>> {
-    stats
-        .into_iter()
-        .map(|stats| {
-            stats
-                .quantization_sigma
-                .filter(|sigma| sigma.is_finite() && *sigma > 0.0)
-        })
-        .collect()
-}
-
-fn combined_mean_quantization_sigma(
-    source_sigmas: &[f32],
-    weights: Option<&[f32]>,
-    frame_norms: Option<&[FrameNorm]>,
-    survivor_indices: impl IntoIterator<Item = usize>,
-) -> Option<f32> {
-    let mut total_weight = 0.0f32;
-    let mut variance = 0.0f32;
-    for index in survivor_indices {
-        let weight = weights.map_or(1.0, |values| values[index]);
-        let gain = frame_norms.map_or(1.0, |norms| norms[index].channels[0].gain);
-        total_weight += weight;
-        variance += (weight * gain * source_sigmas[index]).powi(2);
-    }
-    (total_weight > 0.0).then(|| variance.sqrt() / total_weight)
-}
-
-fn conservative_quantization_sigma(
-    source_sigmas: &[f32],
-    frame_norms: Option<&[FrameNorm]>,
-) -> Option<f32> {
-    source_sigmas
-        .iter()
-        .enumerate()
-        .map(|(index, sigma)| {
-            frame_norms.map_or(*sigma, |norms| norms[index].channels[0].gain.abs() * sigma)
-        })
-        .reduce(f32::max)
-}
-
-fn combined_median_quantization_sigma(
-    source_sigmas: &[f32],
-    frame_norms: Option<&[FrameNorm]>,
-) -> Option<f32> {
-    let conservative = conservative_quantization_sigma(source_sigmas, frame_norms)?;
-    if frame_norms.is_some() {
-        return Some(conservative);
-    }
-    let (&source_sigma, rest) = source_sigmas.split_first()?;
-    if rest
-        .iter()
-        .any(|sigma| sigma.to_bits() != source_sigma.to_bits())
-    {
-        return Some(conservative);
-    }
-    let n = source_sigmas.len() as f32;
-    let factor = if source_sigmas.len().is_multiple_of(2) {
-        (3.0 * n / ((n + 1.0) * (n + 2.0))).sqrt()
-    } else {
-        (3.0 / (n + 2.0)).sqrt()
-    };
-    Some(source_sigma * factor)
-}
-
-/// Raise the running maximum, comparing on the bit pattern — for non-negative floats that orders
-/// identically to the value, and it keeps the whole thing in one `AtomicU32`.
-///
-/// The `load` is not redundant with the `fetch_max` that follows it. This runs per *pixel*, from
-/// every worker at once, and only pixels that actually lost frames reach it; the load is a shared
-/// read of the cache line, while `fetch_max` is a read-modify-write that has to take it exclusive.
-/// Guarding means the common case — a pixel whose sigma does not beat the running maximum — costs
-/// a shared read instead of a contended RMW across all cores.
-fn record_max_sigma(max_sigma_bits: &AtomicU32, sigma: Option<f32>) {
-    if let Some(sigma) = sigma {
-        let bits = sigma.to_bits();
-        if bits > max_sigma_bits.load(Ordering::Relaxed) {
-            max_sigma_bits.fetch_max(bits, Ordering::Relaxed);
-        }
-    }
-}
-
-fn tracked_sigma(max_sigma_bits: &AtomicU32) -> Option<f32> {
-    let bits = max_sigma_bits.load(Ordering::Relaxed);
-    (bits != 0).then(|| f32::from_bits(bits))
-}
-
 /// Combine the cached frames into one stacked product.
 ///
 /// Coverage gates a frame's contribution at a pixel while confidence scales its statistical
@@ -428,20 +341,18 @@ pub(crate) fn run_stacking(
     let planes = config.quality.resolve(weighted_combine);
     let measure_quality = planes.weight || planes.variance;
 
-    let source_sigmas = source_quantization_sigmas(stats());
+    let source_sigmas = SourceSigmas::measure(stats());
     // Propagating quantization noise through rejection needs each surviving sample's *frame*
     // index, to reach that frame's source sigma and normalization gain. Under partial coverage
     // the reducer sees a compacted subset whose indices no longer name frames, so the tracking
     // is limited to frame sets that carry no coverage — every calibration master, and every
     // light stack loaded straight from disk.
     let frame_indices_are_stable = cache.frames.iter().all(|frame| frame.quality.is_none());
-    let sigmas = source_sigmas
-        .as_deref()
-        .filter(|_| frame_indices_are_stable);
+    let sigmas = source_sigmas.filter(|_| frame_indices_are_stable);
 
     let (combined, quantization_sigma) = match method {
         CombineMethod::Median => {
-            let sigma = sigmas.and_then(|sigmas| combined_median_quantization_sigma(sigmas, norms));
+            let sigma = sigmas.and_then(|sigmas| sigmas.combined_median(norms));
             let combined = cache.process_chunked(None, norms, planes, |values, w, _| {
                 let value = math::statistics::median_f32_mut(values);
                 if measure_quality {
@@ -455,7 +366,7 @@ pub(crate) fn run_stacking(
         // Winsorization replaces samples with order statistics, so it has no fixed linear
         // coefficient set from which to propagate quantization variance.
         CombineMethod::Mean(rejection @ Rejection::Winsorized(_)) => {
-            let sigma = sigmas.and_then(|sigmas| conservative_quantization_sigma(sigmas, norms));
+            let sigma = sigmas.and_then(|sigmas| sigmas.conservative(norms));
             let combined = cache.process_chunked(
                 weights.as_deref(),
                 norms,
@@ -481,28 +392,24 @@ pub(crate) fn run_stacking(
             // Rejection keeps a different survivor set at every pixel, so the master's floor is
             // the least-reduced pixel: seed with "nothing rejected" and raise it wherever a
             // pixel lost frames.
-            let all_survivors =
-                combined_mean_quantization_sigma(sigmas, weights.as_deref(), norms, 0..frame_count)
-                    .expect("a validated stack has positive total weight");
-            let max_sigma_bits = AtomicU32::new(all_survivors.to_bits());
+            let all_survivors = sigmas
+                .combined_mean(weights.as_deref(), norms, 0..frame_count)
+                .expect("a validated stack has positive total weight");
+            let max_sigma = MaxSigma::seeded(all_survivors);
             let frame_weights = weights.as_deref();
             let combined =
                 cache.process_chunked(weights.as_deref(), norms, planes, |values, w, scratch| {
                     let sample = rejection.combine_mean(values, w, scratch, measure_quality);
                     if sample.survivor_count != frame_count {
-                        record_max_sigma(
-                            &max_sigma_bits,
-                            combined_mean_quantization_sigma(
-                                sigmas,
-                                frame_weights,
-                                norms,
-                                scratch.indices[..sample.survivor_count].iter().copied(),
-                            ),
-                        );
+                        max_sigma.record(sigmas.combined_mean(
+                            frame_weights,
+                            norms,
+                            scratch.indices[..sample.survivor_count].iter().copied(),
+                        ));
                     }
                     sample
                 });
-            (combined, tracked_sigma(&max_sigma_bits))
+            (combined, max_sigma.get())
         }
     };
 

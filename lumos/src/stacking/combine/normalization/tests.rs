@@ -1,6 +1,9 @@
 use crate::math::statistics::MedianMad;
 use crate::stacking::combine::config::Normalization;
 use crate::stacking::combine::error::Error;
+use crate::stacking::combine::normalization::photometric_gain::{
+    paired_photometric_gain, sample_stats,
+};
 use crate::stacking::combine::normalization::*;
 use crate::stacking::frame_store::{FrameStats, StoredFrame, WarpQuality};
 use crate::testing::prelude::*;

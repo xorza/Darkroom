@@ -1,3 +1,9 @@
+//! One triangle and the scale-invariant descriptor it is matched by.
+//!
+//! A triangle is characterized by its two side ratios, which survive translation, rotation and
+//! scale, plus the orientation that distinguishes it from its mirror image. Degenerate shapes —
+//! too small, too flat, too elongated to give stable ratios — are rejected at construction.
+
 use glam::DVec2;
 
 /// Minimum side length for valid triangles.

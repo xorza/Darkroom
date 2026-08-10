@@ -1,3 +1,8 @@
+//! Turning similar triangles into point correspondences.
+//!
+//! Every pair of matching triangles votes for the three vertex correspondences it implies;
+//! the accumulated votes are then resolved greedily so each point is claimed at most once.
+
 use std::collections::HashMap;
 use std::f64::consts::SQRT_2;
 
