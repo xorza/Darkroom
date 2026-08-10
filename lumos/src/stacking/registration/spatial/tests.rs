@@ -45,332 +45,262 @@ fn build_preserves_all_points() {
     }
 }
 
-#[test]
-fn k_nearest_exact_distances() {
-    // Layout (all on x-axis for easy hand-computation):
-    //   idx 0: (0,0)  idx 1: (3,0)  idx 2: (7,0)  idx 3: (8,0)  idx 4: (15,0)
-    // Query: (6,0)
-    //   dist_sq to idx0: 36, idx1: 9, idx2: 1, idx3: 4, idx4: 81
-    // k=3 nearest: idx2 (1), idx3 (4), idx1 (9)
-    let points = [
-        DVec2::new(0.0, 0.0),
-        DVec2::new(3.0, 0.0),
-        DVec2::new(7.0, 0.0),
-        DVec2::new(8.0, 0.0),
-        DVec2::new(15.0, 0.0),
-    ];
-    let tree = KdTree::build(&points).unwrap();
-
-    let neighbors = tree.k_nearest(DVec2::new(6.0, 0.0), 3);
-    assert_eq!(neighbors.len(), 3);
-
-    // Sorted by dist_sq: idx2=1.0, idx3=4.0, idx1=9.0
-    assert_eq!(neighbors[0].index, 2);
-    assert!((neighbors[0].dist_sq - 1.0).abs() < 1e-10);
-
-    assert_eq!(neighbors[1].index, 3);
-    assert!((neighbors[1].dist_sq - 4.0).abs() < 1e-10);
-
-    assert_eq!(neighbors[2].index, 1);
-    assert!((neighbors[2].dist_sq - 9.0).abs() < 1e-10);
+/// One rank, or a run of ranks the tree may fill in any order.
+#[derive(Debug)]
+struct Group {
+    dist_sq: f64,
+    /// Consecutive ranks sitting at this distance.
+    ranks: usize,
+    /// The indices those ranks draw from, each used at most once. One index for a distinct
+    /// distance; several when the fixture ties, because a k-d tree promises an ordering by
+    /// distance and nothing about points that share one. More entries than `ranks` where the
+    /// fixture has more tied points than the query asked for.
+    allowed: Vec<usize>,
 }
 
-#[test]
-fn k_nearest_2d_distances() {
-    // 2D layout:
-    //   idx 0: (0,0)  idx 1: (3,4)  idx 2: (1,1)  idx 3: (6,8)
-    // Query: (2, 2)
-    //   dist_sq to idx0: (2-0)^2 + (2-0)^2 = 4+4 = 8
-    //   dist_sq to idx1: (2-3)^2 + (2-4)^2 = 1+4 = 5
-    //   dist_sq to idx2: (2-1)^2 + (2-1)^2 = 1+1 = 2
-    //   dist_sq to idx3: (2-6)^2 + (2-8)^2 = 16+36 = 52
-    // k=2 nearest: idx2 (2), idx1 (5)
-    let points = [
-        DVec2::new(0.0, 0.0),
-        DVec2::new(3.0, 4.0),
-        DVec2::new(1.0, 1.0),
-        DVec2::new(6.0, 8.0),
-    ];
-    let tree = KdTree::build(&points).unwrap();
-
-    let neighbors = tree.k_nearest(DVec2::new(2.0, 2.0), 2);
-    assert_eq!(neighbors.len(), 2);
-
-    assert_eq!(neighbors[0].index, 2);
-    assert!((neighbors[0].dist_sq - 2.0).abs() < 1e-10);
-
-    assert_eq!(neighbors[1].index, 1);
-    assert!((neighbors[1].dist_sq - 5.0).abs() < 1e-10);
+#[derive(Debug)]
+struct KNearestCase {
+    name: &'static str,
+    points: Vec<DVec2>,
+    query: DVec2,
+    k: usize,
+    expected: Vec<Group>,
 }
 
+/// `k_nearest` over every layout that mattered, as one table.
+///
+/// Each row pins the whole result — every rank's index and squared distance, in order — where
+/// several of the thirteen tests this replaces spot-checked a few ranks and left the rest
+/// unasserted. `clustered_points` in particular checked ranks 0, 1 and 4 of its second query.
+///
+/// Distances are squared and hand-computed in each row's comment. They are compared to a relative
+/// 1e-9, which is far above the few ulps these arithmetic sums carry and far below the gap any
+/// real error would open — a wrong neighbour shows up in the index, not the distance.
 #[test]
-fn k_nearest_finds_exact_point() {
-    let points = [
-        DVec2::new(0.0, 0.0),
-        DVec2::new(10.0, 10.0),
-        DVec2::new(5.0, 5.0),
-    ];
-    let tree = KdTree::build(&points).unwrap();
-
-    let neighbors = tree.k_nearest(DVec2::new(5.0, 5.0), 1);
-    assert_eq!(neighbors.len(), 1);
-    assert_eq!(neighbors[0].index, 2);
-    assert_eq!(neighbors[0].dist_sq, 0.0);
-}
-
-#[test]
-fn k_nearest_sorted_order() {
-    // Points on x-axis: query at origin.
-    //   idx 0: (0,0) dist_sq=0
-    //   idx 1: (1,0) dist_sq=1
-    //   idx 2: (2,0) dist_sq=4
-    //   idx 3: (3,0) dist_sq=9
-    //   idx 4: (10,0) dist_sq=100
-    let points = [
-        DVec2::new(0.0, 0.0),
-        DVec2::new(1.0, 0.0),
-        DVec2::new(2.0, 0.0),
-        DVec2::new(3.0, 0.0),
-        DVec2::new(10.0, 0.0),
-    ];
-    let tree = KdTree::build(&points).unwrap();
-
-    let neighbors = tree.k_nearest(DVec2::new(0.0, 0.0), 3);
-    assert_eq!(neighbors.len(), 3);
-
-    assert_eq!(neighbors[0].index, 0);
-    assert_eq!(neighbors[0].dist_sq, 0.0);
-    assert_eq!(neighbors[1].index, 1);
-    assert!((neighbors[1].dist_sq - 1.0).abs() < 1e-10);
-    assert_eq!(neighbors[2].index, 2);
-    assert!((neighbors[2].dist_sq - 4.0).abs() < 1e-10);
-}
-
-#[test]
-fn k_nearest_more_than_available() {
-    let points = [DVec2::new(0.0, 0.0), DVec2::new(1.0, 1.0)];
-    let tree = KdTree::build(&points).unwrap();
-
-    // Request 10 but only 2 exist
-    let neighbors = tree.k_nearest(DVec2::new(0.0, 0.0), 10);
-    assert_eq!(neighbors.len(), 2);
-    // Verify actual distances: idx0 at origin, idx1 at (1,1)
-    // dist_sq to idx0: 0, dist_sq to idx1: 1+1=2
-    assert_eq!(neighbors[0].index, 0);
-    assert_eq!(neighbors[0].dist_sq, 0.0);
-    assert_eq!(neighbors[1].index, 1);
-    assert!((neighbors[1].dist_sq - 2.0).abs() < 1e-10);
-}
-
-#[test]
-fn k_nearest_zero_k() {
-    let points = [DVec2::new(0.0, 0.0), DVec2::new(1.0, 1.0)];
-    let tree = KdTree::build(&points).unwrap();
-
-    let neighbors = tree.k_nearest(DVec2::new(0.0, 0.0), 0);
-    assert!(neighbors.is_empty());
-}
-
-#[test]
-fn k_nearest_negative_coordinates() {
-    // idx 0: (-10,-10), idx 1: (-5,-5), idx 2: (0,0), idx 3: (5,5), idx 4: (10,10)
-    // Query: (-7, -7)
-    //   dist_sq to idx0: (-7+10)^2 + (-7+10)^2 = 9+9 = 18
-    //   dist_sq to idx1: (-7+5)^2 + (-7+5)^2 = 4+4 = 8
-    //   dist_sq to idx2: 49+49 = 98
-    //   dist_sq to idx3: 144+144 = 288
-    //   dist_sq to idx4: 289+289 = 578
-    // k=2: idx1 (8), idx0 (18)
-    let points = [
-        DVec2::new(-10.0, -10.0),
-        DVec2::new(-5.0, -5.0),
-        DVec2::new(0.0, 0.0),
-        DVec2::new(5.0, 5.0),
-        DVec2::new(10.0, 10.0),
-    ];
-    let tree = KdTree::build(&points).unwrap();
-
-    let neighbors = tree.k_nearest(DVec2::new(-7.0, -7.0), 2);
-    assert_eq!(neighbors.len(), 2);
-
-    assert_eq!(neighbors[0].index, 1);
-    assert!((neighbors[0].dist_sq - 8.0).abs() < 1e-10);
-
-    assert_eq!(neighbors[1].index, 0);
-    assert!((neighbors[1].dist_sq - 18.0).abs() < 1e-10);
-}
-
-#[test]
-fn k_nearest_query_far_from_points() {
-    // idx 0: (0,0), idx 1: (1,0), idx 2: (0,1), idx 3: (1,1)
-    // Query: (1000, 1000)
-    //   dist_sq to idx0: 1000^2 + 1000^2 = 2_000_000
-    //   dist_sq to idx1: 999^2 + 1000^2 = 998001 + 1000000 = 1_998_001
-    //   dist_sq to idx2: 1000^2 + 999^2 = 1000000 + 998001 = 1_998_001
-    //   dist_sq to idx3: 999^2 + 999^2 = 998001 + 998001 = 1_996_002
-    // k=2: idx3 (1_996_002), then idx1 or idx2 (1_998_001)
-    let points = [
-        DVec2::new(0.0, 0.0),
-        DVec2::new(1.0, 0.0),
-        DVec2::new(0.0, 1.0),
-        DVec2::new(1.0, 1.0),
-    ];
-    let tree = KdTree::build(&points).unwrap();
-
-    let neighbors = tree.k_nearest(DVec2::new(1000.0, 1000.0), 2);
-    assert_eq!(neighbors.len(), 2);
-
-    assert_eq!(neighbors[0].index, 3);
-    assert!((neighbors[0].dist_sq - 1_996_002.0).abs() < 1e-6);
-
-    // idx1 and idx2 are equidistant; either is valid for [1]
-    assert!((neighbors[1].dist_sq - 1_998_001.0).abs() < 1e-6);
-    assert!(neighbors[1].index == 1 || neighbors[1].index == 2);
-}
-
-#[test]
-fn k_nearest_duplicate_points() {
-    // 3 duplicates at (5,5), 1 at (10,10)
-    // Query: (5, 5)
-    //   dist_sq to idx0,1,2: 0
-    //   dist_sq to idx3: (5-10)^2 + (5-10)^2 = 50
-    // k=3: all three duplicates at dist_sq=0
-    let points = [
-        DVec2::new(5.0, 5.0),
-        DVec2::new(5.0, 5.0),
-        DVec2::new(5.0, 5.0),
-        DVec2::new(10.0, 10.0),
-    ];
-    let tree = KdTree::build(&points).unwrap();
-
-    let neighbors = tree.k_nearest(DVec2::new(5.0, 5.0), 3);
-    assert_eq!(neighbors.len(), 3);
-
-    // All three must be duplicates (indices 0, 1, or 2) with dist_sq=0
-    let mut indices: Vec<usize> = neighbors.iter().map(|n| n.index).collect();
-    indices.sort();
-    assert_eq!(indices, vec![0, 1, 2]);
-    for n in &neighbors {
-        assert_eq!(n.dist_sq, 0.0);
+fn k_nearest_over_every_layout() {
+    /// Ranks at distinct distances, in order.
+    fn ranked(pairs: &[(usize, f64)]) -> Vec<Group> {
+        pairs
+            .iter()
+            .map(|&(index, dist_sq)| Group {
+                dist_sq,
+                ranks: 1,
+                allowed: vec![index],
+            })
+            .collect()
     }
-}
-
-#[test]
-fn k_nearest_all_identical_points() {
-    let points: Vec<DVec2> = (0..5).map(|_| DVec2::new(7.0, 7.0)).collect();
-    let tree = KdTree::build(&points).unwrap();
-
-    let neighbors = tree.k_nearest(DVec2::new(7.0, 7.0), 5);
-    assert_eq!(neighbors.len(), 5);
-    for n in &neighbors {
-        assert_eq!(n.dist_sq, 0.0);
+    fn points(pairs: &[(f64, f64)]) -> Vec<DVec2> {
+        pairs.iter().map(|&(x, y)| DVec2::new(x, y)).collect()
+    }
+    /// `count` points along the x-axis at integer coordinates.
+    fn on_x_axis(count: usize) -> Vec<DVec2> {
+        (0..count).map(|i| DVec2::new(i as f64, 0.0)).collect()
+    }
+    /// Two tight diagonal clusters of five, the second offset by `separation`.
+    fn two_clusters(separation: f64) -> Vec<DVec2> {
+        (0..10)
+            .map(|i| {
+                let base = if i < 5 { 0.0 } else { separation };
+                let step = (i % 5) as f64 * 0.1;
+                DVec2::new(base + step, base + step)
+            })
+            .collect()
     }
 
-    // All 5 indices should appear exactly once
-    let mut indices: Vec<usize> = neighbors.iter().map(|n| n.index).collect();
-    indices.sort();
-    assert_eq!(indices, vec![0, 1, 2, 3, 4]);
-}
-
-#[test]
-fn k_nearest_collinear_points_exact_distances() {
-    // Collinear along y=x: idx0=(0,0), idx1=(1,1), idx2=(2,2), idx3=(3,3), idx4=(4,4)
-    // Query: (2, 2)
-    //   dist_sq to idx0: 4+4=8
-    //   dist_sq to idx1: 1+1=2
-    //   dist_sq to idx2: 0
-    //   dist_sq to idx3: 1+1=2
-    //   dist_sq to idx4: 4+4=8
-    // k=3: idx2 (0), then idx1 and idx3 (both 2)
-    let points = [
-        DVec2::new(0.0, 0.0),
-        DVec2::new(1.0, 1.0),
-        DVec2::new(2.0, 2.0),
-        DVec2::new(3.0, 3.0),
-        DVec2::new(4.0, 4.0),
+    let cases = vec![
+        // On the x-axis at 0, 3, 7, 8, 15; query (6,0) → 36, 9, 1, 4, 81.
+        KNearestCase {
+            name: "distinct distances on a line",
+            points: points(&[(0.0, 0.0), (3.0, 0.0), (7.0, 0.0), (8.0, 0.0), (15.0, 0.0)]),
+            query: DVec2::new(6.0, 0.0),
+            k: 3,
+            expected: ranked(&[(2, 1.0), (3, 4.0), (1, 9.0)]),
+        },
+        // Query (2,2) → idx0 4+4=8, idx1 1+4=5, idx2 1+1=2, idx3 16+36=52.
+        KNearestCase {
+            name: "two dimensions",
+            points: points(&[(0.0, 0.0), (3.0, 4.0), (1.0, 1.0), (6.0, 8.0)]),
+            query: DVec2::new(2.0, 2.0),
+            k: 2,
+            expected: ranked(&[(2, 2.0), (1, 5.0)]),
+        },
+        // The query sits exactly on a point, which must come back at distance zero.
+        KNearestCase {
+            name: "query lands on a point",
+            points: points(&[(0.0, 0.0), (10.0, 10.0), (5.0, 5.0)]),
+            query: DVec2::new(5.0, 5.0),
+            k: 1,
+            expected: ranked(&[(2, 0.0)]),
+        },
+        KNearestCase {
+            name: "results come back sorted",
+            points: on_x_axis(4)
+                .into_iter()
+                .chain([DVec2::new(10.0, 0.0)])
+                .collect(),
+            query: DVec2::new(0.0, 0.0),
+            k: 3,
+            expected: ranked(&[(0, 0.0), (1, 1.0), (2, 4.0)]),
+        },
+        // k above the point count returns everything, not an error or a padded list.
+        KNearestCase {
+            name: "k exceeds the point count",
+            points: points(&[(0.0, 0.0), (1.0, 1.0)]),
+            query: DVec2::new(0.0, 0.0),
+            k: 10,
+            expected: ranked(&[(0, 0.0), (1, 2.0)]),
+        },
+        KNearestCase {
+            name: "k is zero",
+            points: points(&[(0.0, 0.0), (1.0, 1.0)]),
+            query: DVec2::new(0.0, 0.0),
+            k: 0,
+            expected: Vec::new(),
+        },
+        // Query (-7,-7) → idx0 9+9=18, idx1 4+4=8, idx2 49+49=98.
+        KNearestCase {
+            name: "negative coordinates",
+            points: points(&[
+                (-10.0, -10.0),
+                (-5.0, -5.0),
+                (0.0, 0.0),
+                (5.0, 5.0),
+                (10.0, 10.0),
+            ]),
+            query: DVec2::new(-7.0, -7.0),
+            k: 2,
+            expected: ranked(&[(1, 8.0), (0, 18.0)]),
+        },
+        // Far query on the unit square: idx3 999²+999² = 1_996_002, then idx1 and idx2 tie at
+        // 999²+1000² = 1_998_001.
+        KNearestCase {
+            name: "query far outside the points",
+            points: points(&[(0.0, 0.0), (1.0, 0.0), (0.0, 1.0), (1.0, 1.0)]),
+            query: DVec2::new(1000.0, 1000.0),
+            k: 2,
+            expected: vec![
+                Group {
+                    dist_sq: 1_996_002.0,
+                    ranks: 1,
+                    allowed: vec![3],
+                },
+                Group {
+                    dist_sq: 1_998_001.0,
+                    ranks: 1,
+                    allowed: vec![1, 2],
+                },
+            ],
+        },
+        // Three coincident points: all three ranks are at distance zero and must be distinct.
+        KNearestCase {
+            name: "coincident points",
+            points: points(&[(5.0, 5.0), (5.0, 5.0), (5.0, 5.0), (10.0, 10.0)]),
+            query: DVec2::new(5.0, 5.0),
+            k: 3,
+            expected: vec![Group {
+                dist_sq: 0.0,
+                ranks: 3,
+                allowed: vec![0, 1, 2],
+            }],
+        },
+        KNearestCase {
+            name: "every point identical",
+            points: vec![DVec2::new(7.0, 7.0); 5],
+            query: DVec2::new(7.0, 7.0),
+            k: 5,
+            expected: vec![Group {
+                dist_sq: 0.0,
+                ranks: 5,
+                allowed: vec![0, 1, 2, 3, 4],
+            }],
+        },
+        // Collinear on y=x, query on the middle point: idx1 and idx3 both sit at 1+1=2.
+        KNearestCase {
+            name: "collinear with a symmetric tie",
+            points: points(&[(0.0, 0.0), (1.0, 1.0), (2.0, 2.0), (3.0, 3.0), (4.0, 4.0)]),
+            query: DVec2::new(2.0, 2.0),
+            k: 3,
+            expected: vec![
+                Group {
+                    dist_sq: 0.0,
+                    ranks: 1,
+                    allowed: vec![2],
+                },
+                Group {
+                    dist_sq: 2.0,
+                    ranks: 2,
+                    allowed: vec![1, 3],
+                },
+            ],
+        },
+        // Two clusters 100 apart. Querying either one must return that cluster entire and never
+        // reach across: steps of 0.1 on both axes give 0, 0.02, 0.08, 0.18, 0.32.
+        KNearestCase {
+            name: "clustered, query near cluster one",
+            points: two_clusters(100.0),
+            query: DVec2::new(0.0, 0.0),
+            k: 5,
+            expected: ranked(&[(0, 0.0), (1, 0.02), (2, 0.08), (3, 0.18), (4, 0.32)]),
+        },
+        KNearestCase {
+            name: "clustered, query near cluster two",
+            points: two_clusters(100.0),
+            query: DVec2::new(100.0, 100.0),
+            k: 5,
+            expected: ranked(&[(5, 0.0), (6, 0.02), (7, 0.08), (8, 0.18), (9, 0.32)]),
+        },
+        // Past `SMALL_HEAP_CAPACITY` the search swaps to the large heap; the i-th nearest on the
+        // x-axis is idx i at i².
+        KNearestCase {
+            name: "k past the small-heap capacity",
+            points: on_x_axis(50),
+            query: DVec2::new(0.0, 0.0),
+            k: SMALL_HEAP_CAPACITY + 5,
+            expected: ranked(
+                &(0..SMALL_HEAP_CAPACITY + 5)
+                    .map(|rank| (rank, (rank * rank) as f64))
+                    .collect::<Vec<_>>(),
+            ),
+        },
     ];
-    let tree = KdTree::build(&points).unwrap();
 
-    let neighbors = tree.k_nearest(DVec2::new(2.0, 2.0), 3);
-    assert_eq!(neighbors.len(), 3);
+    for case in cases {
+        let tree = KdTree::build(&case.points).expect("every fixture has points");
+        let neighbours = tree.k_nearest(case.query, case.k);
+        let name = case.name;
 
-    assert_eq!(neighbors[0].index, 2);
-    assert_eq!(neighbors[0].dist_sq, 0.0);
+        let total: usize = case.expected.iter().map(|group| group.ranks).sum();
+        assert_eq!(neighbours.len(), total, "{name}: neighbour count");
 
-    // idx1 and idx3 are equidistant at dist_sq=2.0; order between them doesn't matter
-    assert!((neighbors[1].dist_sq - 2.0).abs() < 1e-10);
-    assert!((neighbors[2].dist_sq - 2.0).abs() < 1e-10);
-    let mut tied_indices: Vec<usize> = vec![neighbors[1].index, neighbors[2].index];
-    tied_indices.sort();
-    assert_eq!(tied_indices, vec![1, 3]);
-}
-
-#[test]
-fn k_nearest_clustered_points() {
-    // Cluster 1 near origin: idx 0..5 at (0, 0), (0.1, 0.1), (0.2, 0.2), (0.3, 0.3), (0.4, 0.4)
-    // Cluster 2 near (100,100): idx 5..10 at (100, 100), (100.1, 100.1), ...
-    // Query at (0,0), k=5: all from cluster 1
-    //   dist_sq to idx0: 0
-    //   dist_sq to idx1: 0.01+0.01 = 0.02
-    //   dist_sq to idx2: 0.04+0.04 = 0.08
-    //   dist_sq to idx3: 0.09+0.09 = 0.18
-    //   dist_sq to idx4: 0.16+0.16 = 0.32
-    let mut points = Vec::new();
-    for i in 0..5 {
-        points.push(DVec2::new(i as f64 * 0.1, i as f64 * 0.1));
-    }
-    for i in 0..5 {
-        points.push(DVec2::new(100.0 + i as f64 * 0.1, 100.0 + i as f64 * 0.1));
-    }
-
-    let tree = KdTree::build(&points).unwrap();
-
-    let neighbors = tree.k_nearest(DVec2::new(0.0, 0.0), 5);
-    assert_eq!(neighbors.len(), 5);
-    assert_eq!(neighbors[0].index, 0);
-    assert_eq!(neighbors[0].dist_sq, 0.0);
-    assert_eq!(neighbors[1].index, 1);
-    assert!((neighbors[1].dist_sq - 0.02).abs() < 1e-10);
-    assert_eq!(neighbors[2].index, 2);
-    assert!((neighbors[2].dist_sq - 0.08).abs() < 1e-10);
-    assert_eq!(neighbors[3].index, 3);
-    assert!((neighbors[3].dist_sq - 0.18).abs() < 1e-10);
-    assert_eq!(neighbors[4].index, 4);
-    assert!((neighbors[4].dist_sq - 0.32).abs() < 1e-10);
-
-    // Query at (100, 100), k=5: all from cluster 2
-    //   dist_sq to idx5: 0
-    //   dist_sq to idx6: 0.02
-    //   dist_sq to idx7: 0.08
-    //   dist_sq to idx8: 0.18
-    //   dist_sq to idx9: 0.32
-    let neighbors = tree.k_nearest(DVec2::new(100.0, 100.0), 5);
-    assert_eq!(neighbors.len(), 5);
-    assert_eq!(neighbors[0].index, 5);
-    assert_eq!(neighbors[0].dist_sq, 0.0);
-    assert_eq!(neighbors[1].index, 6);
-    assert!((neighbors[1].dist_sq - 0.02).abs() < 1e-10);
-    assert_eq!(neighbors[4].index, 9);
-    assert!((neighbors[4].dist_sq - 0.32).abs() < 1e-10);
-}
-
-#[test]
-fn k_nearest_with_large_k_uses_large_heap() {
-    // 50 points on x-axis: idx i at (i, 0)
-    // Query: (0, 0), k = SMALL_HEAP_CAPACITY + 5 (=37)
-    // The i-th nearest has dist_sq = i^2. Results should be idx 0..37 in order.
-    let points: Vec<DVec2> = (0..50).map(|i| DVec2::new(i as f64, 0.0)).collect();
-    let tree = KdTree::build(&points).unwrap();
-
-    let k = SMALL_HEAP_CAPACITY + 5; // 37
-    let neighbors = tree.k_nearest(DVec2::new(0.0, 0.0), k);
-    assert_eq!(neighbors.len(), k);
-
-    for (rank, n) in neighbors.iter().enumerate() {
-        // rank-th nearest should be idx=rank at dist_sq=rank^2
-        assert_eq!(n.index, rank);
-        let expected_dist_sq = (rank as f64) * (rank as f64);
-        assert!((n.dist_sq - expected_dist_sq).abs() < 1e-10);
+        let mut rank = 0;
+        for group in &case.expected {
+            let run = &neighbours[rank..rank + group.ranks];
+            for neighbour in run {
+                let tolerance = 1e-9 * group.dist_sq.abs().max(1.0);
+                assert!(
+                    (neighbour.dist_sq - group.dist_sq).abs() <= tolerance,
+                    "{name}: rank {rank} distance {} should be {}",
+                    neighbour.dist_sq,
+                    group.dist_sq
+                );
+                assert!(
+                    group.allowed.contains(&neighbour.index),
+                    "{name}: rank {rank} index {} not among {:?}",
+                    neighbour.index,
+                    group.allowed
+                );
+            }
+            let mut used: Vec<usize> = run.iter().map(|neighbour| neighbour.index).collect();
+            used.sort_unstable();
+            used.dedup();
+            assert_eq!(
+                used.len(),
+                group.ranks,
+                "{name}: tied ranks at {} must be distinct points",
+                group.dist_sq
+            );
+            rank += group.ranks;
+        }
     }
 }
 
