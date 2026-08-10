@@ -156,11 +156,18 @@ const RAGGED: Size2us = Size2us {
     height: 3,
 };
 
+/// A mask filled from `predicate`, the way a caller with nothing to recycle builds one.
+fn from_predicate(size: Size2us, predicate: impl Fn(usize) -> bool) -> BitBuffer2 {
+    let mut buffer = BitBuffer2::new_default(size);
+    buffer.fill_from_predicate(predicate);
+    buffer
+}
+
 #[test]
-fn from_predicate_matches_bit_by_bit_setting() {
+fn fill_from_predicate_matches_bit_by_bit_setting() {
     // A pattern that crosses both the 64-bit word edge and the 100-bit row edge.
     let pattern = |i: usize| i.is_multiple_of(7) || i % 64 == 63;
-    let built = BitBuffer2::from_predicate(RAGGED, pattern);
+    let built = from_predicate(RAGGED, pattern);
 
     let mut by_hand = BitBuffer2::new_default(RAGGED);
     for i in 0..by_hand.len {
@@ -171,12 +178,12 @@ fn from_predicate_matches_bit_by_bit_setting() {
 }
 
 #[test]
-fn from_predicate_handles_exact_word_and_empty_sizes() {
-    let exact = BitBuffer2::from_predicate(Size2us::new(64, 2), |i| i < 64);
+fn fill_from_predicate_handles_exact_word_and_empty_sizes() {
+    let exact = from_predicate(Size2us::new(64, 2), |i| i < 64);
     assert_eq!(exact.count_ones(), 64);
     assert!(exact.get(63) && !exact.get(64));
 
-    let empty = BitBuffer2::from_predicate(Size2us::new(0, 0), |_| true);
+    let empty = from_predicate(Size2us::new(0, 0), |_| true);
     assert_eq!(empty.count_ones(), 0);
     assert_eq!(empty.len, 0);
 }
@@ -222,9 +229,12 @@ fn padding_is_clear_separates_word_wise_from_position_wise_writes() {
         assert!(BitBuffer2::new_default(size).padding_is_clear(), "{width}");
 
         // The two ways of setting every real bit both have to leave padding alone.
-        let built = BitBuffer2::from_predicate(size, |_| true);
+        let built = from_predicate(size, |_| true);
         assert_eq!(built.count_ones(), width * 3, "{width}");
-        assert!(built.padding_is_clear(), "from_predicate dirtied {width}");
+        assert!(
+            built.padding_is_clear(),
+            "fill_from_predicate dirtied {width}"
+        );
 
         let mut poked = BitBuffer2::new_default(size);
         for i in 0..poked.len {
@@ -242,6 +252,14 @@ fn padding_is_clear_separates_word_wise_from_position_wise_writes() {
             !has_padding,
             "new_filled at {width}"
         );
+
+        // Reuse has to reach the padding a `fill` dirtied, or a mask rebuilt into a recycled
+        // buffer would count padding bits as pixels. At 60 wide that means the whole trailing
+        // word, which the row loop never reaches through `width` alone.
+        filled.fill_from_predicate(|i| i.is_multiple_of(3));
+        let fresh = from_predicate(size, |i| i.is_multiple_of(3));
+        assert_eq!(filled.words, fresh.words, "reuse differs at {width}");
+        assert!(filled.padding_is_clear(), "reuse dirtied {width}");
     }
 
     // The one input that separates the two clauses: at 60 wide the trailing word is pure padding,
