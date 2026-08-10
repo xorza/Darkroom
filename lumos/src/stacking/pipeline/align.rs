@@ -48,6 +48,8 @@ pub fn align_and_stack(
     }
     config.validate()?;
 
+    // One reading for the run; see `AlignStackConfig::with_resolved_memory`.
+    let config = &config.with_resolved_memory(crate::memory::available_memory());
     let total = lights.len();
     // The inputs are already decoded and resident, so only the warped outputs and the per-frame
     // scratch are still in question; charge the decode as done by giving it no transient arena.

@@ -1,24 +1,44 @@
 //! Per-thread working buffers the rejection methods refill for every pixel.
 
+/// Working buffers for [`ScratchBuffers::sort_with_indices`]' large-N path, which sorts a
+/// permutation rather than moving values and so needs a copy of each input beside it.
+#[derive(Debug, Default)]
+pub(crate) struct SortScratch {
+    /// The value copy it permutes from.
+    pub(crate) values: Vec<f32>,
+    /// The position permutation it sorts.
+    pub(crate) permutation: Vec<usize>,
+    /// The frame-index copy it permutes from.
+    pub(crate) indices: Vec<usize>,
+}
+
+/// Working state for the GESD test: the per-iteration statistics, the critical values they are
+/// compared against, and the shape those critical values were computed for — a pixel with the
+/// same sample count and alpha reuses them instead of recomputing the whole ladder.
+#[derive(Debug, Default)]
+pub(crate) struct GesdScratch {
+    pub(crate) statistics: Vec<f64>,
+    pub(crate) critical_values: Vec<f64>,
+    pub(crate) sample_count: usize,
+    pub(crate) alpha_bits: u32,
+}
+
 /// Per-thread scratch buffers for stacking combine closures.
 ///
 /// Allocated once per rayon thread via `for_each_init` and reused across all pixels.
+///
+/// One lease carries every rejection method's working set, because the pool hands out one object
+/// and the method is chosen per pixel. Grouping each method's buffers into its own field keeps
+/// that visible: only `indices` and `estimate_values` are shared, and a reader can see at a glance
+/// which fields a given method touches.
 #[derive(Debug, Default)]
 pub(crate) struct ScratchBuffers {
     /// Tracks original frame indices after rejection reordering.
     pub(crate) indices: Vec<usize>,
     /// Values copied out for a robust centre/spread estimate, leaving the originals untouched.
     pub(crate) estimate_values: Vec<f32>,
-    /// Large-N `sort_with_indices`: the value copy it permutes from.
-    pub(crate) sort_values: Vec<f32>,
-    /// Large-N `sort_with_indices`: the position permutation it sorts.
-    pub(crate) sort_permutation: Vec<usize>,
-    /// Large-N `sort_with_indices`: the frame-index copy it permutes from.
-    pub(crate) sort_indices: Vec<usize>,
-    pub(crate) gesd_statistics: Vec<f64>,
-    pub(crate) gesd_critical_values: Vec<f64>,
-    pub(crate) gesd_sample_count: usize,
-    pub(crate) gesd_alpha_bits: u32,
+    pub(crate) sort: SortScratch,
+    pub(crate) gesd: GesdScratch,
 }
 
 impl ScratchBuffers {
@@ -28,11 +48,15 @@ impl ScratchBuffers {
     pub(crate) fn reserve(&mut self, frame_count: usize) {
         self.indices.reserve(frame_count);
         self.estimate_values.reserve(frame_count);
-        self.sort_values.reserve(frame_count);
-        self.sort_permutation.reserve(frame_count);
-        self.sort_indices.reserve(frame_count);
-        self.gesd_statistics.reserve(frame_count / 4);
-        self.gesd_critical_values.reserve(frame_count / 4);
+        self.sort.values.reserve(frame_count);
+        self.sort.permutation.reserve(frame_count);
+        self.sort.indices.reserve(frame_count);
+        // A quarter because that is GESD's automatic outlier ceiling before its cap:
+        // `GesdConfig::max_outliers_for_size` is `(n / 4).min(2 or 10)`, so one entry per tested
+        // candidate never exceeds this. An explicit `max_outliers` above it simply grows these on
+        // first use — `reserve` is a hint, and these buffers are refilled per pixel regardless.
+        self.gesd.statistics.reserve(frame_count / 4);
+        self.gesd.critical_values.reserve(frame_count / 4);
     }
 
     /// Restart `indices` as the identity permutation over `n` frames, which is what every
@@ -45,15 +69,18 @@ impl ScratchBuffers {
     /// Sort `values[..n]` and `self.indices[..n]` together by value.
     ///
     /// Insertion sort for small N (optimal for typical 10–50 frame stacks) and introsort via
-    /// `sort_unstable_by` for large N to avoid O(N^2). The `sort_*` fields exist for the large-N
-    /// branch alone; they live here rather than in the function so the allocation survives from
-    /// one pixel to the next.
+    /// `sort_unstable_by` for large N to avoid O(N^2). [`SortScratch`] exists for the large-N
+    /// branch alone; it lives on the struct rather than in the function so the allocation survives
+    /// from one pixel to the next.
     pub(crate) fn sort_with_indices(&mut self, values: &mut [f32], n: usize) {
         let Self {
             indices,
-            sort_values,
-            sort_permutation,
-            sort_indices,
+            sort:
+                SortScratch {
+                    values: sort_values,
+                    permutation: sort_permutation,
+                    indices: sort_indices,
+                },
             ..
         } = self;
 

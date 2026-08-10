@@ -18,7 +18,7 @@ use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::image_metadata::ImageMetadata;
 use crate::io::image::linear::LinearImage;
 use crate::io::image::load_context::LoadContext;
-use crate::memory::{decode_transient_bytes, fits_in_memory, frame_bytes, load_concurrency};
+use crate::memory;
 use crate::stacking::combine::cache_config::CacheConfig;
 use crate::stacking::combine::config::Normalization;
 use crate::stacking::combine::error::Error;
@@ -60,11 +60,14 @@ fn load_tiered<I: StackableImage, P: AsRef<Path> + Sync>(
     progress.report(0, paths.len(), StackingStage::Loading);
 
     let first_path = paths[0].as_ref();
-    let available_memory = config.get_available_memory();
-    let context = LoadContext {
-        cancel: cancel.clone(),
-        ..LoadContext::default()
-    };
+    // One reading, shared by the tier decision below and the decode ceiling the context carries;
+    // `LoadContext::default()` would sample the machine a second time and could disagree.
+    // One system reading: it is the decode ceiling the context carries, and the fallback for the
+    // tier figure when the config has no planning override. The override deliberately does not
+    // reach the context — it says how to tier, not how much one file may allocate.
+    let system_available = memory::available_memory();
+    let available_memory = config.available_memory_or(system_available);
+    let context = LoadContext::new(cancel.clone(), memory::memory_budget(system_available));
 
     // Dimensions drive the in-memory-vs-disk tier decision. Peek the header without a decode when
     // the format allows it (RAW), so the in-memory path can decode every frame in parallel rather
@@ -76,7 +79,11 @@ fn load_tiered<I: StackableImage, P: AsRef<Path> + Sync>(
             (img.dimensions(), Some(img))
         }
     };
-    let use_in_memory = fits_in_memory(frame_bytes(dimensions), paths.len(), available_memory);
+    let use_in_memory = memory::fits_in_memory(
+        memory::frame_bytes(dimensions),
+        paths.len(),
+        available_memory,
+    );
 
     tracing::info!(
         frame_count = paths.len(),
@@ -210,9 +217,9 @@ fn load_in_memory<I: StackableImage, P: AsRef<Path> + Sync>(
     // Decode is CPU-bound, so fan out to the worker count, bounded by RAM headroom — every frame
     // stays resident in this tier, so only the budget left over feeds in-flight decode transients,
     // each charged its true ~2× footprint (`decode_transient_bytes`) so the load doesn't overshoot.
-    let concurrency = load_concurrency(
-        frame_bytes(dimensions),
-        decode_transient_bytes(dimensions),
+    let concurrency = memory::load_concurrency(
+        memory::frame_bytes(dimensions),
+        memory::decode_transient_bytes(dimensions),
         paths.len(),
         available_memory,
         rayon::current_num_threads(),
@@ -310,9 +317,9 @@ fn load_to_disk<I: StackableImage, P: AsRef<Path> + Sync>(
     // each decoded frame to its own file and drops it, so nothing stays resident (`0`) — only the
     // in-flight decodes occupy memory, each its true ~2× transient. Each frame writes unique files,
     // so there's no contention.
-    let concurrency = load_concurrency(
-        frame_bytes(dimensions),
-        decode_transient_bytes(dimensions),
+    let concurrency = memory::load_concurrency(
+        memory::frame_bytes(dimensions),
+        memory::decode_transient_bytes(dimensions),
         0,
         available_memory,
         rayon::current_num_threads(),

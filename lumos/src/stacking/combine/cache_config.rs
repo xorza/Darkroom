@@ -52,6 +52,30 @@ impl CacheConfig {
         self.available_memory
             .unwrap_or_else(memory::available_memory)
     }
+
+    /// The planning figure, given a system reading the caller has already taken.
+    ///
+    /// [`Self::available_memory`] is a *planning* override — "size the tiers as if the machine had
+    /// this much" — and deliberately does not govern what a decoder may allocate for one file.
+    /// Callers that need both take one system reading and pass it here for the planning half.
+    pub(crate) fn available_memory_or(&self, system_available: u64) -> u64 {
+        self.available_memory.unwrap_or(system_available)
+    }
+
+    /// This config with its planning figure pinned to `system_available`.
+    ///
+    /// [`Self::get_available_memory`] falls back to sampling the system, so an unresolved config
+    /// answers a slightly different number every time it is asked. A run resolves once at its
+    /// entry and hands the resolved config downstream, so the tier decision and every chunk sizing
+    /// size against the same figure — otherwise a plan built from one reading can disagree with
+    /// the chunking built from another, and each reading costs a syscall. A config that already
+    /// carries an override keeps it.
+    pub(crate) fn resolved_with(&self, system_available: u64) -> Self {
+        Self {
+            available_memory: Some(self.available_memory_or(system_available)),
+            ..self.clone()
+        }
+    }
 }
 
 #[cfg(test)]
