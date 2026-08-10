@@ -56,18 +56,21 @@ fn cosmic_ray_masks_stay_one_bit_per_pixel() {
 #[test]
 fn cosmic_ray_float_scratch_is_five_frame_planes() {
     let size = Size2us::new(64, 64);
-    let mut data = Buffer2::new_filled(size.width, size.height, 0.05f32);
-    data.pixels_mut()[size.index_of(Vec2us::new(32, 32))] = 0.95;
+    let mut data = vec![0.05f32; size.pixel_count()];
+    data[size.index_of(Vec2us::new(32, 32))] = 0.95;
 
     // The spike has to be flagged, or the measurement below would come from a detect-only first
     // pass that never reaches `replace_flagged`'s snapshot buffer.
     let repaired = reject_cosmic_rays(
-        &mut cfa_from_plane(data.clone(), CfaType::Mono),
+        &mut cfa_from_plane(
+            Buffer2::new(size.width, size.height, data.clone()),
+            CfaType::Mono,
+        ),
         &CosmicRayConfig::default(),
     );
     assert_eq!(repaired, 1, "the fixture must in-paint something");
 
-    let floats = mono_scratch_floats(&mut data, &CosmicRayConfig::default());
+    let floats = mono_scratch_floats(&mut data, size, &CosmicRayConfig::default());
     assert_eq!(
         floats,
         MONO_SCRATCH_PLANES * size.pixel_count(),
