@@ -58,236 +58,181 @@ fn filter_returns_the_diagnostics_stored_by_the_detector() {
     );
 }
 
+/// FWHM outlier rejection over every case that mattered, as one table.
+///
+/// Each row pins the *surviving fluxes in order*, which is stronger than the removed-count the
+/// eleven tests this replaces asserted. Fluxes are distinct and exactly representable, so the
+/// sequence identifies precisely which stars survived — and because it is a sequence, it also
+/// subsumes the separate order-preservation test.
+///
+/// The reference set is the first `max(len / 2, 5)` stars *in the order given*, which is why every
+/// fixture is built brightest-first: production sorts by flux before calling this. `max_fwhm` is
+/// `median + deviation · max(mad, median · 0.1)`, and the floor is what stops an all-identical
+/// reference from rejecting everything.
 #[test]
-fn filter_fwhm_outliers_disabled_when_zero_deviation() {
-    // `filter_fwhm_outliers` never reads position, so every fixture below sits at the origin.
-    let mut stars: Vec<Star> = (0..10)
-        .map(|i| {
-            Star::at(DVec2::ZERO)
-                .with_fwhm(3.0 + i as f32)
-                .with_flux(100.0 - i as f32)
-        })
-        .collect();
+fn filter_fwhm_outliers_over_every_case() {
+    /// `(fwhm, flux)` pairs, brightest first.
+    fn stars(pairs: &[(f32, f32)]) -> Vec<Star> {
+        pairs
+            .iter()
+            .map(|&(fwhm, flux)| Star::at(DVec2::ZERO).with_fwhm(fwhm).with_flux(flux))
+            .collect()
+    }
+    /// `count` stars starting at `fwhm`, stepping by `step`, fluxes descending from 100.
+    fn ramp(count: usize, fwhm: f32, step: f32) -> Vec<(f32, f32)> {
+        (0..count)
+            .map(|i| (fwhm + i as f32 * step, 100.0 - i as f32))
+            .collect()
+    }
+    fn fluxes(from: f32, count: usize) -> Vec<f32> {
+        (0..count).map(|i| from - i as f32).collect()
+    }
 
-    let removed = filter_fwhm_outliers(&mut stars, 0.0);
+    let mixed_flux_order = [
+        (3.0, 100.0),
+        (3.1, 95.0),
+        (2.9, 90.0),
+        (3.2, 85.0),
+        (3.0, 80.0),
+        (3.5, 50.0),
+        (4.0, 40.0),
+        (8.0, 30.0),
+        (3.1, 20.0),
+        (15.0, 10.0),
+    ];
+    let mut with_two_outliers = ramp(8, 3.0, 0.2);
+    with_two_outliers.extend([(6.0, 10.0), (7.0, 5.0)]);
 
-    assert_eq!(removed, 0);
-    assert_eq!(stars.len(), 10);
-}
+    /// One `filter_fwhm_outliers` call and the stars it must leave behind.
+    struct Case {
+        name: &'static str,
+        /// `(fwhm, flux)` pairs, brightest first.
+        stars: Vec<(f32, f32)>,
+        deviation: f32,
+        /// Surviving fluxes, in order.
+        survivors: Vec<f32>,
+    }
 
-#[test]
-fn filter_fwhm_outliers_disabled_when_too_few_stars() {
-    let mut stars: Vec<Star> = (0..4)
-        .map(|i| {
-            Star::at(DVec2::ZERO)
-                .with_fwhm(3.0 + i as f32 * 10.0)
-                .with_flux(100.0 - i as f32)
-        })
-        .collect();
-
-    let removed = filter_fwhm_outliers(&mut stars, 3.0);
-
-    assert_eq!(removed, 0);
-    assert_eq!(stars.len(), 4);
-}
-
-#[test]
-fn filter_fwhm_outliers_removes_single_outlier() {
-    // 9 stars with FWHM ~3.0, 1 star with FWHM 20.0
-    let mut stars: Vec<Star> = (0..9)
-        .map(|i| {
-            Star::at(DVec2::ZERO)
-                .with_fwhm(3.0 + (i as f32 * 0.1))
-                .with_flux(100.0 - i as f32)
-        })
-        .collect();
-    // Outlier with low flux
-    stars.push(Star::at(DVec2::ZERO).with_fwhm(20.0).with_flux(10.0));
-
-    let removed = filter_fwhm_outliers(&mut stars, 3.0);
-
-    assert_eq!(removed, 1);
-    assert_eq!(stars.len(), 9);
-    assert!(stars.iter().all(|s| s.fwhm < 10.0));
-}
-
-#[test]
-fn filter_fwhm_outliers_removes_multiple_outliers() {
-    // 7 stars with FWHM ~3.0, 3 stars with FWHM > 15.0
-    let mut stars: Vec<Star> = (0..7)
-        .map(|i| {
-            Star::at(DVec2::ZERO)
-                .with_fwhm(3.0 + (i as f32 * 0.1))
-                .with_flux(100.0 - i as f32)
-        })
-        .collect();
-    stars.push(Star::at(DVec2::ZERO).with_fwhm(15.0).with_flux(5.0));
-    stars.push(Star::at(DVec2::ZERO).with_fwhm(18.0).with_flux(4.0));
-    stars.push(Star::at(DVec2::ZERO).with_fwhm(25.0).with_flux(3.0));
-
-    let removed = filter_fwhm_outliers(&mut stars, 3.0);
-
-    assert_eq!(removed, 3);
-    assert_eq!(stars.len(), 7);
-}
-
-#[test]
-fn filter_fwhm_outliers_keeps_all_when_uniform() {
-    // All stars have similar FWHM
-    let mut stars: Vec<Star> = (0..10)
-        .map(|i| {
-            Star::at(DVec2::ZERO)
-                .with_fwhm(3.0 + (i as f32 * 0.05))
-                .with_flux(100.0 - i as f32)
-        })
-        .collect();
-
-    let removed = filter_fwhm_outliers(&mut stars, 3.0);
-
-    assert_eq!(removed, 0);
-    assert_eq!(stars.len(), 10);
-}
-
-#[test]
-fn filter_fwhm_outliers_uses_effective_mad_floor() {
-    // All identical FWHM values -> MAD = 0, but effective_mad = median * 0.1
-    // With median = 3.0, effective_mad = 0.3
-    // max_fwhm = 3.0 + 3.0 * 0.3 = 3.9
-    let mut stars: Vec<Star> = (0..9)
-        .map(|i| {
-            Star::at(DVec2::ZERO)
-                .with_fwhm(3.0)
-                .with_flux(100.0 - i as f32)
-        })
-        .collect();
-    // Should be removed (5.0 > 3.9)
-    stars.push(Star::at(DVec2::ZERO).with_fwhm(5.0).with_flux(10.0));
-
-    let removed = filter_fwhm_outliers(&mut stars, 3.0);
-
-    assert_eq!(removed, 1);
-    assert_eq!(stars.len(), 9);
-}
-
-#[test]
-fn filter_fwhm_outliers_uses_top_half_for_reference() {
-    // First 5 stars (top half by flux) have FWHM ~3.0
-    // Last 5 stars have varying FWHM including outliers
-    let mut stars: Vec<Star> = vec![
-        Star::at(DVec2::ZERO).with_fwhm(3.0).with_flux(100.0),
-        Star::at(DVec2::ZERO).with_fwhm(3.1).with_flux(95.0),
-        Star::at(DVec2::ZERO).with_fwhm(2.9).with_flux(90.0),
-        Star::at(DVec2::ZERO).with_fwhm(3.2).with_flux(85.0),
-        Star::at(DVec2::ZERO).with_fwhm(3.0).with_flux(80.0),
-        // Lower flux stars - some outliers
-        Star::at(DVec2::ZERO).with_fwhm(3.5).with_flux(50.0), // Keep
-        Star::at(DVec2::ZERO).with_fwhm(4.0).with_flux(40.0), // Keep (borderline)
-        Star::at(DVec2::ZERO).with_fwhm(8.0).with_flux(30.0), // Remove
-        Star::at(DVec2::ZERO).with_fwhm(3.1).with_flux(20.0), // Keep
-        Star::at(DVec2::ZERO).with_fwhm(15.0).with_flux(10.0), // Remove
+    let cases = vec![
+        // Both disabling conditions: a non-positive deviation short-circuits before any statistic
+        // is computed, so even a wildly spread set survives intact.
+        Case {
+            name: "zero deviation",
+            stars: ramp(10, 3.0, 1.0),
+            deviation: 0.0,
+            survivors: fluxes(100.0, 10),
+        },
+        Case {
+            name: "negative deviation",
+            stars: ramp(10, 3.0, 5.0),
+            deviation: -1.0,
+            survivors: fluxes(100.0, 10),
+        },
+        // Under five stars there is no reference to speak of, so nothing is filtered.
+        Case {
+            name: "four stars",
+            stars: ramp(4, 3.0, 10.0),
+            deviation: 3.0,
+            survivors: fluxes(100.0, 4),
+        },
+        // Exactly five is the smallest set that filters. Reference is all five: median 3.1,
+        // mad 0.1, floor 0.31, so max_fwhm = 3.1 + 3·0.31 = 4.03 and only the 20.0 goes.
+        Case {
+            name: "exactly five stars",
+            stars: vec![
+                (3.0, 100.0),
+                (3.1, 90.0),
+                (3.0, 80.0),
+                (3.2, 70.0),
+                (20.0, 60.0),
+            ],
+            deviation: 3.0,
+            survivors: vec![100.0, 90.0, 80.0, 70.0],
+        },
+        // Reference 3.0..3.4: median 3.2, mad 0.1, floor 0.32 → max_fwhm 4.16.
+        Case {
+            name: "one gross outlier",
+            stars: {
+                let mut s = ramp(9, 3.0, 0.1);
+                s.push((20.0, 10.0));
+                s
+            },
+            deviation: 3.0,
+            survivors: fluxes(100.0, 9),
+        },
+        Case {
+            name: "three gross outliers",
+            stars: {
+                let mut s = ramp(7, 3.0, 0.1);
+                s.extend([(15.0, 5.0), (18.0, 4.0), (25.0, 3.0)]);
+                s
+            },
+            deviation: 3.0,
+            survivors: fluxes(100.0, 7),
+        },
+        // Nothing stands out: reference median 3.1, floor 0.31 → max_fwhm 4.03, and the widest
+        // star is 3.45.
+        Case {
+            name: "uniform",
+            stars: ramp(10, 3.0, 0.05),
+            deviation: 3.0,
+            survivors: fluxes(100.0, 10),
+        },
+        // An identical reference gives mad = 0, so only the floor keeps the threshold finite:
+        // median 3.0, floor 0.3 → max_fwhm 3.9, which the 5.0 exceeds.
+        Case {
+            name: "mad floor carries a zero-spread reference",
+            stars: {
+                let mut s: Vec<(f32, f32)> = (0..9).map(|i| (3.0, 100.0 - i as f32)).collect();
+                s.push((5.0, 10.0));
+                s
+            },
+            deviation: 3.0,
+            survivors: fluxes(100.0, 9),
+        },
+        // The reference is the bright half only, so the faint half is judged against it: median
+        // 3.0, mad 0.1, floor 0.3 → max_fwhm 3.9. The 4.0 goes with the 8.0 and the 15.0.
+        Case {
+            name: "reference is the bright half",
+            stars: mixed_flux_order.to_vec(),
+            deviation: 3.0,
+            survivors: vec![100.0, 95.0, 90.0, 85.0, 80.0, 50.0, 20.0],
+        },
+        // One fixture, two deviations. Reference 3.0..3.8: median 3.4, mad 0.2, floor 0.34.
+        // Strict 1.5 → max_fwhm 3.91, keeping five; loose 5.0 → 5.10, keeping all but 6.0 and 7.0.
+        Case {
+            name: "strict deviation",
+            stars: with_two_outliers.clone(),
+            deviation: 1.5,
+            survivors: fluxes(100.0, 5),
+        },
+        Case {
+            name: "loose deviation",
+            stars: with_two_outliers,
+            deviation: 5.0,
+            survivors: fluxes(100.0, 8),
+        },
     ];
 
-    let removed = filter_fwhm_outliers(&mut stars, 3.0);
+    for case in cases {
+        let Case {
+            name,
+            stars: pairs,
+            deviation,
+            survivors: expected,
+        } = case;
+        let mut subjects = stars(&pairs);
+        let before = subjects.len();
+        let removed = filter_fwhm_outliers(&mut subjects, deviation);
 
-    assert!(removed >= 2, "Should remove at least 2 outliers");
-    assert!(
-        stars.iter().all(|s| s.fwhm < 8.0),
-        "All remaining should have FWHM < 8.0"
-    );
-}
-
-#[test]
-fn filter_fwhm_outliers_preserves_order() {
-    // Stars should remain sorted by flux after filtering
-    let mut stars: Vec<Star> = vec![
-        Star::at(DVec2::ZERO).with_fwhm(3.0).with_flux(100.0),
-        Star::at(DVec2::ZERO).with_fwhm(3.1).with_flux(90.0),
-        Star::at(DVec2::ZERO).with_fwhm(20.0).with_flux(80.0), // Outlier
-        Star::at(DVec2::ZERO).with_fwhm(3.2).with_flux(70.0),
-        Star::at(DVec2::ZERO).with_fwhm(3.0).with_flux(60.0),
-    ];
-
-    filter_fwhm_outliers(&mut stars, 3.0);
-
-    // Check order is preserved
-    for i in 1..stars.len() {
-        assert!(
-            stars[i - 1].flux >= stars[i].flux,
-            "Stars should remain sorted by flux"
+        let survivors: Vec<f32> = subjects.iter().map(|s| s.flux).collect();
+        assert_eq!(survivors, expected, "{name}: surviving fluxes");
+        assert_eq!(
+            removed,
+            before - expected.len(),
+            "{name}: reported removal count must match what is gone"
         );
     }
-}
-
-#[test]
-fn filter_fwhm_outliers_stricter_deviation() {
-    // Stars: FWHM 3.0, 3.2, 3.4, ..., 4.4 (8 stars) + outliers 6.0, 7.0
-    // Strict (1.5) should remove more than loose (5.0)
-    let mut stars1: Vec<Star> = (0..8)
-        .map(|i| {
-            Star::at(DVec2::ZERO)
-                .with_fwhm(3.0 + (i as f32 * 0.2))
-                .with_flux(100.0 - i as f32)
-        })
-        .collect();
-    stars1.push(Star::at(DVec2::ZERO).with_fwhm(6.0).with_flux(10.0));
-    stars1.push(Star::at(DVec2::ZERO).with_fwhm(7.0).with_flux(5.0));
-
-    let mut stars2 = stars1.clone();
-
-    let removed_strict = filter_fwhm_outliers(&mut stars1, 1.5);
-    let removed_loose = filter_fwhm_outliers(&mut stars2, 5.0);
-
-    // Reference: first 5 stars (FWHM 3.0, 3.2, 3.4, 3.6, 3.8).
-    // median = 3.4, MAD = 0.2, effective_mad = max(0.2, 0.34) = 0.34.
-    // Strict: max_fwhm = 3.4 + 1.5 * 0.34 = 3.91 → removes 4.0, 4.2, 4.4, 6.0, 7.0 = 5
-    // Loose:  max_fwhm = 3.4 + 5.0 * 0.34 = 5.10 → removes 6.0, 7.0 = 2
-    assert!(
-        removed_strict > removed_loose,
-        "Strict ({}) should remove more than loose ({})",
-        removed_strict,
-        removed_loose
-    );
-    assert_eq!(
-        removed_loose, 2,
-        "Loose should remove 2 outliers (6.0, 7.0)"
-    );
-    assert_eq!(
-        removed_strict, 5,
-        "Strict should remove 5 stars (FWHM > 3.91)"
-    );
-}
-
-#[test]
-fn filter_fwhm_outliers_exactly_five_stars() {
-    // Minimum number of stars for filtering to work
-    let mut stars: Vec<Star> = vec![
-        Star::at(DVec2::ZERO).with_fwhm(3.0).with_flux(100.0),
-        Star::at(DVec2::ZERO).with_fwhm(3.1).with_flux(90.0),
-        Star::at(DVec2::ZERO).with_fwhm(3.0).with_flux(80.0),
-        Star::at(DVec2::ZERO).with_fwhm(3.2).with_flux(70.0),
-        Star::at(DVec2::ZERO).with_fwhm(20.0).with_flux(60.0), // Outlier
-    ];
-
-    let removed = filter_fwhm_outliers(&mut stars, 3.0);
-
-    assert_eq!(removed, 1);
-    assert_eq!(stars.len(), 4);
-}
-
-#[test]
-fn filter_fwhm_outliers_negative_deviation_disabled() {
-    let mut stars: Vec<Star> = (0..10)
-        .map(|i| {
-            Star::at(DVec2::ZERO)
-                .with_fwhm(3.0 + i as f32 * 5.0)
-                .with_flux(100.0 - i as f32)
-        })
-        .collect();
-
-    let removed = filter_fwhm_outliers(&mut stars, -1.0);
-
-    assert_eq!(removed, 0);
-    assert_eq!(stars.len(), 10);
 }
 
 /// Deduplication over every geometry that mattered, as one table.
