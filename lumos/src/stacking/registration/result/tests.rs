@@ -1,5 +1,6 @@
+use crate::error::InvalidConfigField;
 use crate::stacking::registration::result::{
-    RansacFailureReason, RegistrationError, RegistrationResult, StarMatch,
+    RansacFailureReason, RegistrationCatalog, RegistrationError, RegistrationResult, StarMatch,
 };
 use crate::stacking::registration::transform::Transform;
 use crate::testing::prelude::*;
@@ -153,6 +154,33 @@ fn registration_error_messages_include_context() {
         (
             RegistrationError::SingularSipSystem,
             "SIP fit failed: singular polynomial system",
+        ),
+        // The two that interpolate a field's *fields* rather than the field itself, and so are
+        // the ones a reformatting of this enum is most likely to get wrong.
+        (
+            RegistrationError::InvalidStarPosition {
+                catalog: RegistrationCatalog::Reference,
+                index: 3,
+                position: DVec2::new(f64::NAN, 4.5),
+            },
+            "reference star 3 position must be finite, got (NaN, 4.5)",
+        ),
+        (
+            RegistrationError::InvalidStarFwhm {
+                catalog: RegistrationCatalog::Target,
+                index: 7,
+                value: f32::INFINITY,
+            },
+            "target star 7 FWHM must be finite, got inf",
+        ),
+        (
+            RegistrationError::InvalidConfig(InvalidConfigField {
+                field: "max_stars",
+                expected: "at least 3 for triangle matching",
+                value: 2.0,
+                bound: None,
+            }),
+            "Invalid configuration: max_stars must be at least 3 for triangle matching, got 2",
         ),
     ];
 

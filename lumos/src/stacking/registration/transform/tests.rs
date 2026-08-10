@@ -457,6 +457,22 @@ fn display_similarity() {
     );
 }
 
+/// Similarity, Affine and Homography print the same four components, so they share one arm that
+/// names the model from its own `Debug`. Each has to come back under its own name.
+#[test]
+fn display_names_every_model_that_shares_the_four_component_form() {
+    let affine = Transform::affine([1.5, 0.0, 1.0, 0.0, 1.5, 2.0]);
+    assert_eq!(
+        format!("{affine}"),
+        "Affine(dx=1.00, dy=2.00, rot=0.000\u{b0}, scale=1.5000)"
+    );
+    let homography = Transform::homography([1.5, 0.0, 1.0, 0.0, 1.5, 2.0, 0.0, 0.0]);
+    assert_eq!(
+        format!("{homography}"),
+        "Homography(dx=1.00, dy=2.00, rot=0.000\u{b0}, scale=1.5000)"
+    );
+}
+
 #[test]
 #[should_panic(expected = "Cannot invert singular transform matrix")]
 fn inverse_singular_panics() {
