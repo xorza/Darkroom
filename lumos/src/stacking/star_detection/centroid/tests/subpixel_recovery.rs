@@ -11,8 +11,9 @@ use std::f32::consts::PI;
 use crate::math::fwhm::fwhm_to_sigma;
 use crate::math::rect::URect;
 use crate::stacking::star_detection::background::background_estimate::BackgroundEstimate;
+use crate::stacking::star_detection::centroid::compute_stamp_radius;
 use crate::stacking::star_detection::centroid::measure_star;
-use crate::stacking::star_detection::centroid::{StampGrid, compute_stamp_radius};
+use crate::stacking::star_detection::centroid::stamp::StampGrid;
 use crate::stacking::star_detection::config::background_config::BackgroundConfig;
 use crate::stacking::star_detection::config::measurement_config::{
     CentroidMethod, MeasurementConfig,

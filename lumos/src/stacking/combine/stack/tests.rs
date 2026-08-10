@@ -1,7 +1,7 @@
 use crate::testing::prelude::*;
 use arrayvec::ArrayVec;
 
-use crate::stacking::frame_store::FramePlane;
+use crate::stacking::frame_store::warp_quality::FramePlane;
 
 use crate::io::image::cfa::{CfaImage, CfaType};
 use crate::io::image::linear_pixels::LinearPixels;
@@ -15,7 +15,8 @@ use crate::stacking::combine::rejection::Rejection;
 use crate::stacking::combine::rejection::percentile_clip_config::PercentileClipConfig;
 use crate::stacking::combine::stack::quantization::SourceSigmas;
 use crate::stacking::combine::stack::*;
-use crate::stacking::frame_store::{FrameStats, WarpQuality};
+use crate::stacking::frame_store::frame_stats::FrameStats;
+use crate::stacking::frame_store::warp_quality::WarpQuality;
 use crate::stacking::registration::config::{self, InterpolationMethod};
 use crate::stacking::registration::resample;
 use crate::stacking::registration::transform::{Transform, WarpTransform};

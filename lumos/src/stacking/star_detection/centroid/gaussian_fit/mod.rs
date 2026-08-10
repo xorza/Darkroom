@@ -13,11 +13,13 @@ mod tests;
 
 mod simd;
 
-use crate::stacking::star_detection::centroid::StampGrid;
+use crate::stacking::star_detection::centroid::fit_is_plausible;
 use crate::stacking::star_detection::centroid::lm_optimizer::{
     FitData, LMConfig, LMModel, NormalEquations,
 };
-use crate::stacking::star_detection::centroid::{FitNoise, StampFit, fit_is_plausible};
+use crate::stacking::star_detection::centroid::stamp::FitNoise;
+use crate::stacking::star_detection::centroid::stamp::StampFit;
+use crate::stacking::star_detection::centroid::stamp::StampGrid;
 use glam::{DVec2, Vec2};
 use imaginarium::Buffer2;
 

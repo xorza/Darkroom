@@ -10,7 +10,9 @@ use common::CancelToken;
 use crate::io::image::image_dimensions::ImageDimensions;
 use crate::stacking::combine::error::Error;
 use crate::stacking::combine::error::check_cancel;
-use crate::stacking::frame_store::{FramePlane, StackableImage, StoredFrame, StoredPlane};
+use crate::stacking::frame_store::stored_plane::StoredPlane;
+use crate::stacking::frame_store::warp_quality::FramePlane;
+use crate::stacking::frame_store::{StackableImage, StoredFrame};
 
 const VALIDATION_CHUNK_SIZE: usize = 16_384;
 
@@ -54,7 +56,7 @@ pub(crate) fn validate_image_samples(
 
 /// Check a stored frame's shape against the geometry the cache was built for.
 ///
-/// The counterpart to the dimension checks [`FrameCache::from_stack_frames`] makes on
+/// The counterpart to the dimension checks [`FrameCache::from_stack_frames`](super::FrameCache::from_stack_frames) makes on
 /// caller-supplied images. A stored plane carries no width or height, so this compares plane
 /// counts and sample counts instead — enough to guarantee every `chunk(..)` below is in range.
 pub(crate) fn validate_stored_geometry(

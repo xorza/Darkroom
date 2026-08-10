@@ -1,6 +1,6 @@
 //! Configuration for registered stacking pipelines.
 
-use crate::stacking::calibration_masters::cosmic_ray::CosmicRayConfig;
+use crate::stacking::calibration_masters::cosmic_ray::config::CosmicRayConfig;
 use crate::stacking::combine::config::StackConfig;
 use crate::stacking::pipeline::result::Error;
 use crate::stacking::registration::config::Config as RegistrationConfig;

@@ -60,7 +60,7 @@ pub use io::raw::RAW_EXTENSIONS;
 pub use io::raw::demosaic::bayer::CfaPattern;
 pub use math::size2us::Size2us;
 pub use math::vec2us::Vec2us;
-pub use stacking::calibration_masters::cosmic_ray::{CosmicRayConfig, NoiseEstimation};
+pub use stacking::calibration_masters::cosmic_ray::config::{CosmicRayConfig, NoiseEstimation};
 pub use stacking::calibration_masters::defect_map::DefectMap;
 
 pub use stacking::calibration_masters::{
@@ -92,7 +92,7 @@ pub use stacking::registration::config::{
     Config as RegistrationConfig, InterpolationMethod, RegistrationMatchingConfig, WarpParams,
 };
 pub use stacking::registration::distortion::sip::{SipConfig, SipPolynomial};
-pub use stacking::registration::ransac::RansacConfig;
+pub use stacking::registration::ransac::config::RansacConfig;
 pub use stacking::registration::register;
 pub use stacking::registration::resample::{WarpResult, warp};
 pub use stacking::registration::result::{
@@ -113,8 +113,8 @@ pub use stacking::combine::rejection::percentile_clip_config::PercentileClipConf
 pub use stacking::combine::rejection::sigma_clip_config::SigmaClipConfig;
 pub use stacking::combine::rejection::winsorized_clip_config::WinsorizedClipConfig;
 pub use stacking::combine::stack::{StackFrame, stack, stack_images};
-pub use stacking::frame_store::FramePlane;
 pub use stacking::frame_store::error::FrameStoreError;
+pub use stacking::frame_store::warp_quality::FramePlane;
 pub use stacking::progress::{ProgressCallback, StackingProgress, StackingStage};
 pub use stacking::stack_product::StackProduct;
 pub use stacking::stack_product::coverage::Coverage;

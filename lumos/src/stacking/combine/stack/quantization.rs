@@ -14,7 +14,7 @@
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use crate::stacking::combine::normalization::FrameNorm;
-use crate::stacking::frame_store::FrameStats;
+use crate::stacking::frame_store::frame_stats::FrameStats;
 
 /// Every input frame's declared quantization σ, in frame order.
 ///

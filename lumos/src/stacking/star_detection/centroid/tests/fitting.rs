@@ -1,5 +1,6 @@
 use super::*;
-use crate::stacking::star_detection::centroid::{StampGrid, compute_stamp_radius};
+use crate::stacking::star_detection::centroid::compute_stamp_radius;
+use crate::stacking::star_detection::centroid::stamp::StampGrid;
 
 /// Test that weighted centroid achieves claimed ~0.05 pixel accuracy
 /// by testing many random sub-pixel offsets.

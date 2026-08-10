@@ -15,28 +15,25 @@
 #[cfg(test)]
 mod tests;
 
+pub(crate) mod config;
 mod magsac;
+mod sampling;
 pub(super) mod transforms;
-
-use std::cmp::Ordering;
 
 use magsac::MagsacScorer;
 use transforms::{adaptive_iterations, estimate_transform};
 
-use glam::DVec2;
-use rand::prelude::*;
+use std::cmp::Ordering;
 
-use crate::error::InvalidConfigField;
+use glam::DVec2;
+
+use crate::stacking::registration::ransac::config::RansacConfig;
+use crate::stacking::registration::ransac::sampling::{
+    PHASE_POOL_FRACTIONS, PHASE_WEIGHTED, SAMPLING_PHASES, make_rng, random_sample_into,
+    weighted_sample_into,
+};
 use crate::stacking::registration::transform::{Transform, TransformType};
 use crate::stacking::registration::triangle::voting::PointMatch;
-
-/// Progressive sampling: 3 phases from high-confidence pool to full pool.
-/// This front-loads good candidates, improving early convergence.
-const SAMPLING_PHASES: usize = 3;
-/// Pool fraction per phase: top 25% → top 50% → full pool.
-const PHASE_POOL_FRACTIONS: [f64; 3] = [0.25, 0.50, 1.0];
-/// Whether each phase uses weighted sampling (vs uniform random).
-const PHASE_WEIGHTED: [bool; 3] = [true, true, false];
 
 /// Pre-allocated buffers for local optimization (LO-RANSAC) to avoid per-iteration allocations.
 #[derive(Debug)]
@@ -89,107 +86,6 @@ impl ScoredHypothesis {
 /// to ~1 pixel perpendicular offset — below this, the sample is too
 /// close to a line for reliable transform estimation.
 const COLLINEARITY_THRESHOLD: f64 = 1.0;
-
-/// Configuration for robust transform estimation.
-#[derive(Debug, Clone)]
-pub struct RansacConfig {
-    /// Maximum hypotheses to evaluate. Default: 2000.
-    pub max_iterations: usize,
-    /// Target confidence for adaptive early termination. Default: 0.995.
-    pub confidence: f64,
-    /// Minimum inlier ratio before adaptive early termination. Default: 0.3.
-    pub min_inlier_ratio: f64,
-    /// Random seed for reproducible sampling. Default: random.
-    pub seed: Option<u64>,
-    /// Whether to refine promising hypotheses with LO-RANSAC. Default: true.
-    pub local_optimization: bool,
-    /// Maximum LO-RANSAC refinement iterations. Default: 10.
-    pub lo_iterations: usize,
-    /// Maximum absolute rotation in radians. Default: 10 degrees.
-    pub max_rotation: Option<f64>,
-    /// Accepted uniform-scale range. Default: 0.8 to 1.2.
-    pub scale_range: Option<(f64, f64)>,
-}
-
-impl Default for RansacConfig {
-    fn default() -> Self {
-        Self {
-            max_iterations: 2000,
-            confidence: 0.995,
-            min_inlier_ratio: 0.3,
-            seed: None,
-            local_optimization: true,
-            lo_iterations: 10,
-            max_rotation: Some(10.0_f64.to_radians()),
-            scale_range: Some((0.8, 1.2)),
-        }
-    }
-}
-
-impl RansacConfig {
-    pub(super) fn validate(&self) -> Result<(), InvalidConfigField> {
-        InvalidConfigField::check(
-            self.max_iterations >= 1,
-            "ransac max_iterations",
-            "at least 1",
-            self.max_iterations as f64,
-        )?;
-        InvalidConfigField::check(
-            !self.local_optimization || self.lo_iterations >= 1,
-            "ransac lo_iterations",
-            "at least 1 when local_optimization is enabled",
-            self.lo_iterations as f64,
-        )?;
-        InvalidConfigField::finite(
-            "ransac confidence",
-            "finite and in [0, 1]",
-            self.confidence,
-            |value| (0.0..=1.0).contains(&value),
-        )?;
-        InvalidConfigField::finite(
-            "ransac min_inlier_ratio",
-            "finite and in (0, 1]",
-            self.min_inlier_ratio,
-            |value| value > 0.0 && value <= 1.0,
-        )?;
-        if let Some(max_rotation) = self.max_rotation {
-            InvalidConfigField::finite(
-                "ransac max_rotation",
-                "finite and positive",
-                max_rotation,
-                |value| value > 0.0,
-            )?;
-        }
-        if let Some((min_scale, max_scale)) = self.scale_range {
-            InvalidConfigField::finite(
-                "ransac scale_range minimum",
-                "finite and positive",
-                min_scale,
-                |value| value > 0.0,
-            )?;
-            InvalidConfigField::check_against(
-                max_scale.is_finite() && max_scale > min_scale,
-                "ransac scale_range maximum",
-                "finite and above the minimum",
-                max_scale,
-                min_scale,
-            )?;
-        }
-        Ok(())
-    }
-}
-
-/// Create a ChaCha8Rng from an optional seed.
-///
-/// When `seed` is `None`, seeds from `thread_rng()` for non-deterministic behavior.
-/// Always using ChaCha8Rng avoids enum dispatch overhead on every RNG call.
-fn make_rng(seed: Option<u64>) -> rand_chacha::ChaCha8Rng {
-    use rand_chacha::rand_core::SeedableRng;
-    match seed {
-        Some(s) => rand_chacha::ChaCha8Rng::seed_from_u64(s),
-        None => rand_chacha::ChaCha8Rng::seed_from_u64(rand::rng().next_u64()),
-    }
-}
 
 /// Result of RANSAC estimation.
 #[derive(Debug, Clone)]
@@ -568,89 +464,6 @@ impl RansacEstimator {
                 }
             },
         )
-    }
-}
-
-/// Weighted sampling of k unique indices from a pool.
-///
-/// Samples indices with probability proportional to their weights using
-/// Algorithm A-Res (reservoir sampling with weights). Uses `select_nth_unstable`
-/// for O(n) average-case partitioning instead of a full O(n log n) sort.
-fn weighted_sample_into<R: Rng>(
-    rng: &mut R,
-    pool: &[usize],
-    weights: &[f64],
-    k: usize,
-    buffer: &mut Vec<usize>,
-    scratch: &mut Vec<(usize, f64)>,
-) {
-    buffer.clear();
-
-    if pool.len() <= k {
-        buffer.extend_from_slice(pool);
-        return;
-    }
-
-    // Use reservoir sampling with weights (Algorithm A-Res)
-    // For each item, compute key = random^(1/weight), keep top k keys.
-    // `scratch` is reused across iterations to avoid a per-iteration allocation.
-    scratch.clear();
-    scratch.extend(pool.iter().map(|&idx| {
-        // `weights` has one entry per point and `idx` indexes the same `0..n` pool, so it can't miss.
-        let w = weights[idx].max(0.001);
-        let u: f64 = rng.random();
-        let key = u.powf(1.0 / w); // Higher weight = higher expected key
-        (idx, key)
-    }));
-
-    // Partition so the top k elements (by descending key) are in [0..k]
-    scratch.select_nth_unstable_by(k - 1, |a, b| {
-        b.1.partial_cmp(&a.1).unwrap_or(Ordering::Equal)
-    });
-
-    for &(idx, _) in &scratch[..k] {
-        buffer.push(idx);
-    }
-}
-
-/// Randomly sample k unique indices from 0..n into pre-allocated buffer.
-///
-/// Uses partial Fisher-Yates shuffle: O(k) time. The `indices` scratch buffer
-/// persists across calls to avoid re-creating the `[0..n]` array each iteration.
-/// After sampling, the swaps are undone to restore `indices` to `[0..n]`.
-fn random_sample_into<R: Rng>(
-    rng: &mut R,
-    n: usize,
-    k: usize,
-    buffer: &mut Vec<usize>,
-    indices: &mut Vec<usize>,
-) {
-    debug_assert!(k <= n, "Cannot sample {} indices from {}", k, n);
-
-    // Initialize or resize the persistent index array
-    if indices.len() != n {
-        indices.clear();
-        indices.extend(0..n);
-    }
-
-    // Partial Fisher-Yates: shuffle first k elements, recording swap targets
-    buffer.clear();
-    // k is always small (2-4 for RANSAC min_samples), stack array suffices
-    let mut swap_targets = [0usize; 8];
-    assert!(
-        k <= swap_targets.len(),
-        "k={k} exceeds swap tracking capacity"
-    );
-    for i in 0..k {
-        let j = rng.random_range(i..n);
-        indices.swap(i, j);
-        swap_targets[i] = j;
-        buffer.push(indices[i]);
-    }
-
-    // Undo swaps in reverse order to restore indices to [0, 1, 2, ..., n-1]
-    for i in (0..k).rev() {
-        indices.swap(i, swap_targets[i]);
     }
 }
 

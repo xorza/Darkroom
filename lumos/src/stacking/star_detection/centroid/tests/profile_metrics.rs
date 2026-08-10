@@ -1,5 +1,7 @@
 use super::*;
-use crate::stacking::star_detection::centroid::{StampGrid, compute_stamp_radius};
+use crate::stacking::star_detection::centroid::compute_stamp_radius;
+use crate::stacking::star_detection::centroid::stamp::StampFit;
+use crate::stacking::star_detection::centroid::stamp::StampGrid;
 
 /// Helper: run measure_star on a single-star image with given centroid method.
 fn measure_single_star(

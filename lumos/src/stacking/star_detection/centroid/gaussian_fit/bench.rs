@@ -1,7 +1,7 @@
 //! Benchmarks for Gaussian fitting.
 //!
 //! Run with: `cargo test -p lumos --release bench_gaussian -- --ignored --nocapture`
-use crate::stacking::star_detection::centroid::StampGrid;
+use crate::stacking::star_detection::centroid::stamp::StampGrid;
 use crate::testing::prelude::*;
 
 use quickbench::quick_bench;
