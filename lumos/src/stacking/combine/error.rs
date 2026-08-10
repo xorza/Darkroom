@@ -7,6 +7,7 @@ use thiserror::Error;
 
 use crate::error::InvalidConfigField;
 use crate::io::image::image_dimensions::ImageDimensions;
+use crate::stacking::calibration_masters::CalibrationError;
 use crate::stacking::frame_store::{FramePlane, FrameStoreError};
 
 /// Invalid [`crate::StackConfig`] parameters.
@@ -39,6 +40,10 @@ pub enum Error {
 
     #[error(transparent)]
     FrameStore(#[from] FrameStoreError),
+
+    /// A calibration bundle built alongside a stack does not describe one coherent sensor.
+    #[error(transparent)]
+    Calibration(#[from] CalibrationError),
 
     #[error("No frames provided for stacking")]
     NoFrames,

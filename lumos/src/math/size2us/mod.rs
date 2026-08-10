@@ -61,6 +61,12 @@ impl Size2us {
     }
 }
 
+impl std::fmt::Display for Size2us {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "{}x{}", self.width, self.height)
+    }
+}
+
 impl From<(usize, usize)> for Size2us {
     #[inline]
     fn from((width, height): (usize, usize)) -> Self {

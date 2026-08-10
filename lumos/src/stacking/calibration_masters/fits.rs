@@ -15,6 +15,7 @@ use crate::io::image::fits::cfa::{
 use crate::io::image::fits::decode::read_cfa_hdu;
 use crate::io::image::fits::error::fits_to_io;
 use crate::math::size2us::Size2us;
+use crate::stacking::calibration_masters::CalibrationComponent;
 use crate::stacking::calibration_masters::CalibrationMasters;
 use crate::stacking::calibration_masters::CalibrationSet;
 use crate::stacking::calibration_masters::defect_map::DefectMap;
@@ -23,50 +24,15 @@ const BUNDLE_FORMAT: &str = "CALMASTR";
 const DEFECT_FORMAT: &str = "DEFMAP";
 const BUNDLE_VERSION: i64 = 1;
 
-#[derive(Debug, Clone, Copy)]
-enum MasterRole {
-    Dark,
-    Flat,
-    Bias,
-    FlatDark,
+/// The `IMAGETYP` a role's HDU carries: its `EXTNAME` in words, so the two cannot drift.
+fn image_type(component: CalibrationComponent) -> String {
+    component.extname().replace('_', " ")
 }
 
-impl MasterRole {
-    fn extname(self) -> &'static str {
-        match self {
-            Self::Dark => "MASTER_DARK",
-            Self::Flat => "MASTER_FLAT",
-            Self::Bias => "MASTER_BIAS",
-            Self::FlatDark => "MASTER_FLAT_DARK",
-        }
-    }
-
-    fn image_type(self) -> &'static str {
-        match self {
-            Self::Dark => "MASTER DARK",
-            Self::Flat => "MASTER FLAT",
-            Self::Bias => "MASTER BIAS",
-            Self::FlatDark => "MASTER FLAT DARK",
-        }
-    }
-
-    fn prepared(self) -> bool {
-        matches!(self, Self::Flat)
-    }
-}
-
-#[derive(Debug)]
-struct MasterToWrite<'a> {
-    role: MasterRole,
-    image: Option<&'a CfaImage>,
-}
-
+/// Where each component's HDU sits in a bundle being read.
 #[derive(Debug, Default)]
 struct BundleIndices {
-    dark: Option<usize>,
-    flat: Option<usize>,
-    bias: Option<usize>,
-    flat_dark: Option<usize>,
+    masters: CalibrationSet<Option<usize>>,
     defects: Option<usize>,
 }
 
@@ -77,33 +43,17 @@ pub(super) fn save(path: &Path, masters: &CalibrationMasters) -> std::io::Result
             .write_raw_hdu(&bundle_primary_header()?, &[])
             .map_err(fits_to_io)?;
 
-        for master in [
-            MasterToWrite {
-                role: MasterRole::Dark,
-                image: masters.masters.dark.as_ref(),
-            },
-            MasterToWrite {
-                role: MasterRole::Flat,
-                image: masters.masters.flat.as_ref(),
-            },
-            MasterToWrite {
-                role: MasterRole::Bias,
-                image: masters.masters.bias.as_ref(),
-            },
-            MasterToWrite {
-                role: MasterRole::FlatDark,
-                image: masters.masters.flat_dark.as_ref(),
-            },
-        ] {
-            let Some(image) = master.image else {
+        for (component, master) in masters.masters.iter() {
+            let Some(image) = master.as_ref() else {
                 continue;
             };
+            let image_type = image_type(component);
             let encoded = CfaFitsHdu::encode(
                 image,
                 CfaFitsHduMetadata {
-                    extname: Some(master.role.extname()),
-                    image_type: Some(master.role.image_type()),
-                    prepared: master.role.prepared(),
+                    extname: Some(component.extname()),
+                    image_type: Some(&image_type),
+                    prepared: component.prepared(),
                 },
             )?;
             writer
@@ -129,15 +79,16 @@ pub(super) fn load(path: &Path) -> std::io::Result<CalibrationMasters> {
     let indices = bundle_indices(&reader)?;
 
     let masters = CalibrationMasters {
-        masters: CalibrationSet {
-            dark: read_master(&mut reader, indices.dark, MasterRole::Dark, path)?,
-            flat: read_master(&mut reader, indices.flat, MasterRole::Flat, path)?,
-            bias: read_master(&mut reader, indices.bias, MasterRole::Bias, path)?,
-            flat_dark: read_master(&mut reader, indices.flat_dark, MasterRole::FlatDark, path)?,
-        },
+        masters: indices
+            .masters
+            .try_map(|component, index| read_master(&mut reader, index, component, path))?,
         defect_map: read_defect_map(&mut reader, indices.defects)?,
     };
-    validate_dimensions(&masters)?;
+    // The same coherence check `from_images` runs, so a bundle read back from disk is exactly as
+    // trustworthy as one just built — and neither can exist in a state the other would reject.
+    masters
+        .validate_dimensions()
+        .map_err(|source| invalid_data(source.to_string()))?;
     Ok(masters)
 }
 
@@ -199,18 +150,18 @@ fn bundle_indices(reader: &SliceReader<'_>) -> std::io::Result<BundleIndices> {
             .get_text("EXTNAME")
             .map_err(fits_to_io)?
             .ok_or_else(|| invalid_data(format!("HDU {index} is missing EXTNAME")))?;
-        match extname.to_ascii_uppercase().as_str() {
-            "MASTER_DARK" => record_index(&mut indices.dark, index, extname)?,
-            "MASTER_FLAT" => record_index(&mut indices.flat, index, extname)?,
-            "MASTER_BIAS" => record_index(&mut indices.bias, index, extname)?,
-            "MASTER_FLAT_DARK" => record_index(&mut indices.flat_dark, index, extname)?,
-            "DEFECT_MAP" => record_index(&mut indices.defects, index, extname)?,
-            _ => {
-                return Err(invalid_data(format!(
+        let component = CalibrationComponent::from_extname(&extname.to_ascii_uppercase())
+            .ok_or_else(|| {
+                invalid_data(format!(
                     "unknown calibration-master FITS extension {extname:?}"
-                )));
-            }
-        }
+                ))
+            })?;
+        // `Defects` is the one component with no slot in the master set; everything else has one.
+        let slot = indices
+            .masters
+            .get_mut(component)
+            .unwrap_or(&mut indices.defects);
+        record_index(slot, index, extname)?;
     }
     Ok(indices)
 }
@@ -227,26 +178,25 @@ fn record_index(slot: &mut Option<usize>, index: usize, extname: &str) -> std::i
 fn read_master(
     reader: &mut SliceReader<'_>,
     index: Option<usize>,
-    role: MasterRole,
+    component: CalibrationComponent,
     path: &Path,
 ) -> std::io::Result<Option<CfaImage>> {
     let Some(index) = index else {
         return Ok(None);
     };
+    let extname = component.extname();
     let hdu = &reader.hdus()[index];
     if hdu.kind != HduKind::Image || hdu.header.bitpix().map_err(fits_to_io)? != Bitpix::F32 {
         return Err(invalid_data(format!(
-            "{} must be an uncompressed BITPIX=-32 image extension",
-            role.extname()
+            "{extname} must be an uncompressed BITPIX=-32 image extension"
         )));
     }
     if hdu.header.get_text("LUMOSFMT").map_err(fits_to_io)? != Some(CFA_FITS_FORMAT)
         || hdu.header.get_integer("LUMOSVER").map_err(fits_to_io)? != Some(CFA_FITS_VERSION)
-        || hdu.header.get_text("LUMROLE").map_err(fits_to_io)? != Some(role.extname())
+        || hdu.header.get_text("LUMROLE").map_err(fits_to_io)? != Some(extname)
     {
         return Err(invalid_data(format!(
-            "{} has invalid Lumos CFA metadata",
-            role.extname()
+            "{extname} has invalid Lumos CFA metadata"
         )));
     }
     let prepared = hdu
@@ -254,10 +204,9 @@ fn read_master(
         .get_logical("LUMPREP")
         .map_err(fits_to_io)?
         .unwrap_or(false);
-    if prepared != role.prepared() {
+    if prepared != component.prepared() {
         return Err(invalid_data(format!(
-            "{} has an invalid prepared-master state",
-            role.extname()
+            "{extname} has an invalid prepared-master state"
         )));
     }
     read_cfa_hdu(reader, index, path)
@@ -294,7 +243,7 @@ fn encode_defect_map(map: &DefectMap) -> std::io::Result<EncodedDefectMap> {
     .map_err(fits_to_io)?;
     let mut header = Header::new();
     header
-        .set("EXTNAME", "DEFECT_MAP")
+        .set("EXTNAME", CalibrationComponent::Defects.extname())
         .and_then(|header| header.set("LUMOSFMT", DEFECT_FORMAT))
         .and_then(|header| header.set("LUMOSVER", BUNDLE_VERSION))
         .map_err(fits_to_io)?;
@@ -416,38 +365,6 @@ fn validate_sorted(indices: &[usize], kind: &str) -> std::io::Result<()> {
         return Err(invalid_data(format!(
             "DEFECT_MAP {kind} indices must be strictly ascending"
         )));
-    }
-    Ok(())
-}
-
-fn validate_dimensions(masters: &CalibrationMasters) -> std::io::Result<()> {
-    let mut dimensions = None;
-    for master in [
-        masters.masters.dark.as_ref(),
-        masters.masters.flat.as_ref(),
-        masters.masters.bias.as_ref(),
-        masters.masters.flat_dark.as_ref(),
-    ]
-    .into_iter()
-    .flatten()
-    {
-        let current = Size2us::new(master.data.width(), master.data.height());
-        match dimensions {
-            None => dimensions = Some(current),
-            Some(expected) if expected == current => {}
-            Some(_) => {
-                return Err(invalid_data(
-                    "calibration-master FITS images have inconsistent dimensions",
-                ));
-            }
-        }
-    }
-    if let Some(defect_dimensions) = masters.defect_map.as_ref().and_then(|map| map.dimensions)
-        && dimensions.is_some_and(|image_dimensions| image_dimensions != defect_dimensions)
-    {
-        return Err(invalid_data(
-            "DEFECT_MAP dimensions do not match the calibration masters",
-        ));
     }
     Ok(())
 }
