@@ -46,7 +46,7 @@ fn cfa_gbrg_pattern() {
 }
 
 #[test]
-fn test_from_bayerpat() {
+fn from_bayerpat_accepts_case_whitespace_and_the_true_alias() {
     assert_eq!(CfaPattern::from_bayerpat("RGGB"), Some(CfaPattern::Rggb));
     assert_eq!(CfaPattern::from_bayerpat("BGGR"), Some(CfaPattern::Bggr));
     assert_eq!(CfaPattern::from_bayerpat("GRBG"), Some(CfaPattern::Grbg));
@@ -63,7 +63,7 @@ fn test_from_bayerpat() {
 }
 
 #[test]
-fn test_from_filters() {
+fn from_filters_decodes_the_libraw_word_and_rejects_the_rest() {
     // Standard LibRaw encodings: two bits per position, the 2x2 block repeated across the word.
     assert_eq!(CfaPattern::from_filters(0x94949494), Some(CfaPattern::Rggb));
     assert_eq!(CfaPattern::from_filters(0x16161616), Some(CfaPattern::Bggr));
@@ -75,7 +75,7 @@ fn test_from_filters() {
 }
 
 #[test]
-fn test_flip_vertical() {
+fn flip_vertical_swaps_rows_and_is_its_own_inverse() {
     // Flip swaps rows: RGGB row0=[R,G] row1=[G,B] → row0=[G,B] row1=[R,G] = GBRG
     assert_eq!(CfaPattern::Rggb.flip_vertical(), CfaPattern::Gbrg);
     assert_eq!(CfaPattern::Gbrg.flip_vertical(), CfaPattern::Rggb);
@@ -89,7 +89,7 @@ fn test_flip_vertical() {
 }
 
 #[test]
-fn test_flip_horizontal() {
+fn flip_horizontal_swaps_columns_and_is_its_own_inverse() {
     // Flip swaps columns: RGGB row0=[R,G] row1=[G,B] → row0=[G,R] row1=[B,G] = GRBG
     assert_eq!(CfaPattern::Rggb.flip_horizontal(), CfaPattern::Grbg);
     assert_eq!(CfaPattern::Grbg.flip_horizontal(), CfaPattern::Rggb);

@@ -148,7 +148,7 @@ fn from_image_no_stride_padding() {
 }
 
 #[test]
-fn test_mean() {
+fn mean_averages_every_sample() {
     let image = LinearImage::from_pixels(ImageDimensions::new((2, 2), 1), vec![1.0, 2.0, 3.0, 4.0]);
     assert!((image.mean() - 2.5).abs() < f32::EPSILON);
 }
@@ -387,7 +387,7 @@ fn rgb_image_creation_and_operations() {
 }
 
 #[test]
-fn test_get_pixel_gray() {
+fn get_pixel_gray_indexes_row_major() {
     let image = LinearImage::from_pixels(
         ImageDimensions::new((3, 2), 1),
         vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
@@ -496,7 +496,7 @@ fn rgb_planes_reject_an_empty_image() {
 }
 
 #[test]
-fn test_channel_mut() {
+fn channel_mut_writes_through_to_the_plane() {
     let mut image =
         LinearImage::from_pixels(ImageDimensions::new((2, 2), 1), vec![1.0, 2.0, 3.0, 4.0]);
 
@@ -507,7 +507,7 @@ fn test_channel_mut() {
 }
 
 #[test]
-fn test_get_pixel_rgb() {
+fn get_pixel_rgb_gathers_the_three_planes() {
     let image = LinearImage::from_pixels(
         ImageDimensions::new((2, 1), 3),
         vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
@@ -532,7 +532,7 @@ fn test_get_pixel_rgb() {
 }
 
 #[test]
-fn test_set_pixel_rgb() {
+fn set_pixel_rgb_scatters_across_the_three_planes() {
     let mut image = LinearImage::from_pixels(
         ImageDimensions::new((2, 1), 3),
         vec![0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
@@ -574,7 +574,7 @@ fn test_set_pixel_rgb() {
 }
 
 #[test]
-fn test_get_pixel_gray_mut() {
+fn get_pixel_gray_mut_writes_where_it_reads() {
     let mut image =
         LinearImage::from_pixels(ImageDimensions::new((2, 2), 1), vec![1.0, 2.0, 3.0, 4.0]);
 
@@ -656,7 +656,7 @@ fn image_dimensions_invalid_channels() {
 #[test]
 // The pixel-count overflow is caught by `Size2us::pixel_count`, which owns the multiply.
 #[should_panic(expected = "grid pixel count must fit in usize")]
-fn test_image_dimensions_reject_pixel_count_overflow() {
+fn image_dimensions_reject_pixel_count_overflow() {
     ImageDimensions::new((usize::MAX, 2), 1);
 }
 

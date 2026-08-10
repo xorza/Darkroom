@@ -23,7 +23,7 @@ fn median_filter_row_simd_matches_scalar() {
 }
 
 #[test]
-fn test_median_filter_row_scalar() {
+fn scalar_row_matches_a_hand_taken_neighbourhood_median() {
     let width = 16;
     let row_above: Vec<f32> = (0..width).map(|i| (i % 10) as f32 * 0.1).collect();
     let row_curr: Vec<f32> = (0..width).map(|i| ((i + 3) % 10) as f32 * 0.1).collect();

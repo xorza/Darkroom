@@ -125,7 +125,7 @@ fn drizzle_accumulator_dimensions() {
 }
 
 #[test]
-fn test_lanczos_kernel() {
+fn lanczos_kernel_is_symmetric_and_vanishes_outside_its_support() {
     // Center value
     assert!((lanczos_kernel(0.0, 3.0) - 1.0).abs() < f32::EPSILON);
 

@@ -115,7 +115,7 @@ fn interpolation_method_kernel_radius() {
 }
 
 #[test]
-fn test_lanczos_param() {
+fn lanczos_param_is_some_only_for_the_lanczos_methods() {
     // Non-Lanczos methods return None
     assert_eq!(InterpolationMethod::Nearest.lanczos_param(), None);
     assert_eq!(InterpolationMethod::Bilinear.lanczos_param(), None);

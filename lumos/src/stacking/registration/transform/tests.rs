@@ -72,7 +72,7 @@ fn affine_transform() {
 }
 
 #[test]
-fn test_translation_components() {
+fn translation_components_return_the_offset_built_in() {
     let t = Transform::translation(DVec2::new(7.0, -3.0));
     let tc = t.translation_components();
     assert_close!(tc.x, 7.0, EPSILON);
@@ -80,21 +80,21 @@ fn test_translation_components() {
 }
 
 #[test]
-fn test_rotation_angle() {
+fn rotation_angle_recovers_the_euclidean_angle() {
     let angle = 0.5;
     let t = Transform::euclidean(DVec2::ZERO, angle);
     assert_close!(t.rotation_angle(), angle, EPSILON);
 }
 
 #[test]
-fn test_scale_factor() {
+fn scale_factor_recovers_the_similarity_scale() {
     let scale = 2.5;
     let t = Transform::similarity(DVec2::ZERO, 0.0, scale);
     assert_close!(t.scale_factor(), scale, EPSILON);
 }
 
 #[test]
-fn test_is_valid() {
+fn is_valid_rejects_degenerate_and_singular_matrices() {
     let valid = Transform::similarity(DVec2::new(1.0, 2.0), 0.5, 1.5);
     assert!(valid.is_valid());
 
@@ -400,7 +400,7 @@ fn compose_rotation_then_translation() {
 }
 
 #[test]
-fn test_deviation_from_identity() {
+fn deviation_from_identity_is_the_frobenius_norm_of_the_difference() {
     // Identity has zero deviation
     let id = Transform::identity();
     assert_close!(id.deviation_from_identity(), 0.0, EPSILON);
@@ -464,7 +464,7 @@ fn inverse_singular_panics() {
 }
 
 #[test]
-fn test_from_matrix() {
+fn from_matrix_keeps_the_matrix_its_type_and_its_mapping() {
     let m = DMat3::from_array([2.0, 0.0, 5.0, 0.0, 3.0, -1.0, 0.0, 0.0, 1.0]);
     let t = Transform::from_matrix(m, TransformType::Affine);
     // (1, 1) -> (2*1 + 0*1 + 5, 0*1 + 3*1 + (-1)) = (7, 2)
@@ -477,7 +477,7 @@ fn test_from_matrix() {
 
 #[test]
 #[should_panic(expected = "affine-or-simpler transforms require homogeneous bottom row [0, 0, 1]")]
-fn test_from_matrix_rejects_projective_affine() {
+fn from_matrix_rejects_a_projective_bottom_row() {
     let projective = DMat3::from_array([1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.01, 0.0, 1.0]);
     Transform::from_matrix(projective, TransformType::Affine);
 }

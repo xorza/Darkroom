@@ -212,7 +212,7 @@ fn load_raw_dimensions_match() {
 }
 
 #[test]
-fn test_normalize_u16_to_f32_parallel() {
+fn normalize_maps_the_black_to_maximum_range_onto_zero_to_one() {
     // Test the SIMD normalization function
     let black = 512.0;
     let maximum = 16383.0;
@@ -909,7 +909,7 @@ fn apply_bayer_black_corrections_identity() {
 }
 
 #[test]
-fn test_apply_bayer_black_corrections() {
+fn bayer_black_corrections_apply_a_delta_per_colour() {
     // 2x2 RGGB: positions (0,0)=R, (0,1)=G, (1,0)=G, (1,1)=B
     let mut data = vec![0.5f32; 4];
     let delta = [0.1, 0.0, 0.05, 0.0]; // R has delta=0.1, B has delta=0.05

@@ -167,7 +167,7 @@ fn cfa_type_xtrans_color_at() {
 }
 
 #[test]
-fn test_subtract() {
+fn subtract_takes_the_dark_off_every_sample() {
     let mut light = make_cfa(Size2us::new(2, 2), vec![0.5, 0.6, 0.7, 0.8], CfaType::Mono);
     let dark = make_cfa(Size2us::new(2, 2), vec![0.1, 0.1, 0.1, 0.1], CfaType::Mono);
 

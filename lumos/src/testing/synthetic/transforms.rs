@@ -195,7 +195,7 @@ mod tests {
     use crate::testing::synthetic::transforms::*;
 
     #[test]
-    fn test_generate_random_positions() {
+    fn random_positions_stay_inside_the_margin_and_repeat_for_a_seed() {
         let stars = generate_random_positions(100, 1000.0, 1000.0, 12345);
         assert_eq!(stars.len(), 100);
 
@@ -211,7 +211,7 @@ mod tests {
     }
 
     #[test]
-    fn test_translate_star_list() {
+    fn translating_moves_positions_and_preserves_other_fields() {
         let stars = positions_to_stars(&[DVec2::new(100.0, 200.0), DVec2::new(300.0, 400.0)], 3.0);
         let translated = translate_star_list(&stars, 10.0, -20.0);
 
@@ -251,7 +251,7 @@ mod tests {
     }
 
     #[test]
-    fn test_add_star_noise() {
+    fn star_noise_moves_positions_within_its_amplitude() {
         let stars = positions_to_stars(&vec![DVec2::new(500.0, 500.0); 100], 3.0);
         let noisy = add_star_noise(&stars, 1.0, 12345);
 
@@ -269,7 +269,7 @@ mod tests {
     }
 
     #[test]
-    fn test_remove_random_star_list() {
+    fn removing_stars_is_seed_stable_and_drops_part_of_the_list() {
         let stars = positions_to_stars(&vec![DVec2::splat(1.0); 100], 3.0);
         // Same seed → same survivors; ~30% removed.
         let a = remove_random_star_list(&stars, 0.3, 99);

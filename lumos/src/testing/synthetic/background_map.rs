@@ -33,7 +33,7 @@ mod tests {
     use crate::testing::synthetic::background_map::*;
 
     #[test]
-    fn test_uniform() {
+    fn uniform_fills_both_the_background_and_noise_planes() {
         let bg = uniform(Size2us::new(100, 100), 0.1, 0.01);
         assert_eq!(bg.background.width(), 100);
         assert_eq!(bg.background.height(), 100);
