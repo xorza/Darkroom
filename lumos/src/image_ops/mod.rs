@@ -9,7 +9,7 @@
 //!   (SCNR, the colour-preserving stretch), and `remap_intensity` for the display enhancers.
 //!
 //! The submodules below are the image operations themselves (each an op-named config struct with an
-//! in-place `apply`), plus their shared support: [`op`] (the `OpError` contract) and [`wavelet`]
+//! in-place `apply`), plus their shared support: [`error`] (the `OpError` contract) and [`wavelet`]
 //! (the multiscale primitive `denoise`/`hdr` build on).
 //!
 //! A convention rather than a trait, deliberately. A trait would turn nine inherent `apply`
@@ -22,12 +22,6 @@
 //! shape but report [`crate::MlError`]: their failures are a missing model or an image smaller
 //! than one tile, neither of which is a config range that `InvalidConfigField` describes.
 
-#[cfg(all(test, feature = "internals", feature = "real-data"))]
-mod bench;
-
-#[cfg(test)]
-mod mem_budget_probe;
-
 pub(crate) mod background_extraction;
 pub(crate) mod color_calibration;
 pub(crate) mod denoise;
@@ -39,6 +33,11 @@ pub(crate) mod ml;
 pub(crate) mod rgb;
 pub(crate) mod stretching;
 pub(crate) mod wavelet;
+
+#[cfg(all(test, feature = "internals", feature = "real-data"))]
+mod bench;
+#[cfg(test)]
+mod mem_budget_probe;
 
 /// Samples per rayon work item. Parallelizing per sample drowns a cheap per-pixel op in rayon's
 /// recursive split/join overhead (it dominated SCNR); a coarse block amortizes that while staying
