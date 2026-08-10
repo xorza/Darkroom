@@ -376,12 +376,12 @@ fn replace_flagged_matches_a_snapshot_reference() {
 
     let want = replace_flagged_via_snapshot(&pixels, size, &mask);
 
-    let mut got = Buffer2::new(size.width, size.height, pixels.clone());
+    let mut got = pixels.clone();
     replace_flagged(&mut got, size, &mask, &mut Vec::new());
 
-    assert_eq!(got.pixels(), &want[..]);
+    assert_eq!(got, want);
     // The fully-masked interior keeps its original value rather than picking up a neighbour.
-    assert_eq!(got.pixels()[at(9, 2)], pixels[at(9, 2)]);
+    assert_eq!(got[at(9, 2)], pixels[at(9, 2)]);
     // ...while a repairable hit actually moved.
-    assert_ne!(got.pixels()[at(6, 6)], pixels[at(6, 6)]);
+    assert_ne!(got[at(6, 6)], pixels[at(6, 6)]);
 }

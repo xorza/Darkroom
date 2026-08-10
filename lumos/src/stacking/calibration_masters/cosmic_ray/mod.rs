@@ -24,7 +24,6 @@
 use crate::bit_buffer2::BitBuffer2;
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
-use imaginarium::Buffer2;
 use rayon::prelude::*;
 
 use crate::io::image::cfa::{CfaImage, CfaType};
@@ -96,13 +95,16 @@ pub enum NoiseEstimation {
 /// Detect and in-paint cosmic rays in a single calibrated frame, in place, dispatching on its CFA
 /// type (mono / Bayer / X-Trans). Returns the number of CR pixels corrected.
 pub(crate) fn reject_cosmic_rays(image: &mut CfaImage, config: &CosmicRayConfig) -> usize {
+    let size = Size2us::new(image.data.width(), image.data.height());
+    // Disjoint fields: the pixels go in by `&mut`, the CFA type is read from the metadata beside it.
+    let pixels = image.data.pixels_mut();
     match &image.metadata.cfa_type {
         // Bayer is 2×2-periodic → four dense same-color planes; reuse the mono detector per plane.
-        Some(CfaType::Bayer(_)) => reject_bayer(&mut image.data, config),
+        Some(CfaType::Bayer(_)) => reject_bayer(pixels, size, config),
         // X-Trans has no dense same-color sub-lattice → same-color stencils on the mosaic.
-        Some(c @ CfaType::XTrans(_)) => reject_xtrans(&mut image.data, c, config),
+        Some(c @ CfaType::XTrans(_)) => reject_xtrans(pixels, size, c, config),
         // Mono (or an unlabeled frame): the dense Laplacian path.
-        _ => reject_mono_buffer(&mut image.data, config, &mut MonoScratch::default()),
+        _ => reject_mono_buffer(pixels, size, config, &mut MonoScratch::default()),
     }
 }
 
@@ -138,11 +140,12 @@ struct MonoScratch {
 /// Laplacian → resample → significance `S = L⁺/(2N)` → `S' = S − median₅(S)` → fine structure `F`
 /// → flag → grow → in-paint → iterate. Returns the CR pixel count.
 fn reject_mono_buffer(
-    data: &mut Buffer2<f32>,
+    data: &mut [f32],
+    size: Size2us,
     config: &CosmicRayConfig,
     scratch: &mut MonoScratch,
 ) -> usize {
-    let size = Size2us::new(data.width(), data.height());
+    debug_assert_eq!(data.len(), size.pixel_count());
     if size.width < 3 || size.height < 3 {
         return 0;
     }
@@ -156,7 +159,7 @@ fn reject_mono_buffer(
             median,
             frame,
         } = &mut *scratch;
-        let pix = data.pixels();
+        let pix = &*data;
 
         // L⁺: clipped Laplacian of the ×2-subsampled frame, averaged back to native resolution.
         laplacian_plus_into(pix, size, significance);
@@ -437,43 +440,35 @@ fn parametric_noise_into(
 /// pointer is sound (the sets are disjoint) and was measured *slower* on every run of
 /// `bench_cosmic_ray_reject_mono` — the false sharing costs more than the copy. The copy lands in
 /// the caller's `snapshot` buffer, so it is a memcpy per iteration and not an allocation.
-fn replace_flagged(
-    data: &mut Buffer2<f32>,
-    size: Size2us,
-    mask: &BitBuffer2,
-    snapshot: &mut Vec<f32>,
-) {
+fn replace_flagged(data: &mut [f32], size: Size2us, mask: &BitBuffer2, snapshot: &mut Vec<f32>) {
     snapshot.clear();
-    snapshot.extend_from_slice(data.pixels());
+    snapshot.extend_from_slice(data);
     let src: &[f32] = snapshot;
     let (wi, hi) = (size.width as isize, size.height as isize);
-    data.pixels_mut()
-        .par_chunks_mut(size.width)
-        .enumerate()
-        .for_each_init(
-            || Vec::<f32>::with_capacity(25),
-            |buf, (y, row)| {
-                for (x, o) in row.iter_mut().enumerate() {
-                    if !mask.get_at(Vec2us::new(x, y)) {
-                        continue;
-                    }
-                    buf.clear();
-                    for dy in -2..=2 {
-                        let yy = (y as isize + dy).clamp(0, hi - 1) as usize;
-                        for dx in -2..=2 {
-                            let xx = (x as isize + dx).clamp(0, wi - 1) as usize;
-                            let j = size.index_of(Vec2us::new(xx, yy));
-                            if !mask.get(j) {
-                                buf.push(src[j]);
-                            }
+    data.par_chunks_mut(size.width).enumerate().for_each_init(
+        || Vec::<f32>::with_capacity(25),
+        |buf, (y, row)| {
+            for (x, o) in row.iter_mut().enumerate() {
+                if !mask.get_at(Vec2us::new(x, y)) {
+                    continue;
+                }
+                buf.clear();
+                for dy in -2..=2 {
+                    let yy = (y as isize + dy).clamp(0, hi - 1) as usize;
+                    for dx in -2..=2 {
+                        let xx = (x as isize + dx).clamp(0, wi - 1) as usize;
+                        let j = size.index_of(Vec2us::new(xx, yy));
+                        if !mask.get(j) {
+                            buf.push(src[j]);
                         }
                     }
-                    if !buf.is_empty() {
-                        *o = median_f32_mut(buf);
-                    }
                 }
-            },
-        );
+                if !buf.is_empty() {
+                    *o = median_f32_mut(buf);
+                }
+            }
+        },
+    );
 }
 
 /// Bayer: the mosaic is 2×2-periodic, so pixels sharing a `(x%2, y%2)` phase are the same color and
@@ -481,12 +476,16 @@ fn replace_flagged(
 /// neighbors are same-color in the mosaic), and write the cleaned planes back. Pattern-independent —
 /// phase alone determines color, so no `CfaPattern` is needed.
 ///
-/// One [`MonoScratch`] serves all four planes: they differ by at most a row and a column, so after
-/// the first the rest reuse its allocation.
-fn reject_bayer(data: &mut Buffer2<f32>, config: &CosmicRayConfig) -> usize {
-    let w = data.width();
-    let h = data.height();
+/// One [`MonoScratch`] and one `plane` serve all four phases: `(0, 0)` is the largest, and it runs
+/// first, so no later phase grows either allocation.
+///
+/// Deinterleave and re-interleave are row-parallel like the detector between them. They are only a
+/// few percent of a frame today, but they are the whole of its *serial* fraction — the one part
+/// that would not shrink as thread count rises.
+fn reject_bayer(data: &mut [f32], size: Size2us, config: &CosmicRayConfig) -> usize {
+    let (w, h) = (size.width, size.height);
     let mut scratch = MonoScratch::default();
+    let mut plane: Vec<f32> = Vec::new();
     let mut total = 0;
     for b in 0..2 {
         for a in 0..2 {
@@ -495,19 +494,31 @@ fn reject_bayer(data: &mut Buffer2<f32>, config: &CosmicRayConfig) -> usize {
             if pw < 3 || ph < 3 {
                 continue;
             }
-            let mut plane = Buffer2::new_filled(pw, ph, 0.0f32);
-            for j in 0..ph {
-                for i in 0..pw {
-                    plane[(i, j)] = data[(j * 2 + b) * w + (i * 2 + a)];
+
+            // Deinterleave: plane row j is mosaic row 2j+b, every second pixel from column a. Every
+            // element is written, so `resize` only has to get the length right.
+            plane.resize(pw * ph, 0.0);
+            let mosaic = &*data;
+            plane.par_chunks_mut(pw).enumerate().for_each(|(j, row)| {
+                let src = &mosaic[(j * 2 + b) * w..][..w];
+                for (i, o) in row.iter_mut().enumerate() {
+                    *o = src[i * 2 + a];
                 }
-            }
-            total += reject_mono_buffer(&mut plane, config, &mut scratch);
-            let cleaned = plane.pixels();
-            for j in 0..ph {
-                for i in 0..pw {
-                    data[(j * 2 + b) * w + (i * 2 + a)] = cleaned[j * pw + i];
-                }
-            }
+            });
+
+            total += reject_mono_buffer(&mut plane, Size2us::new(pw, ph), config, &mut scratch);
+
+            // Re-interleave the cleaned plane. Chunking the mosaic by row keeps each thread's
+            // writes to one row, so the phase's rows can be picked out of the full sweep.
+            let cleaned = &plane[..];
+            data.par_chunks_mut(w)
+                .enumerate()
+                .filter(|(y, _)| y % 2 == b)
+                .for_each(|(y, row)| {
+                    for (i, &v) in cleaned[(y / 2) * pw..][..pw].iter().enumerate() {
+                        row[i * 2 + a] = v;
+                    }
+                });
         }
     }
     total
@@ -547,8 +558,13 @@ struct XtransScratch {
 /// stencil) and **without** the ×2 subsample — same-color sampling is already coarse and the
 /// iteration handles multi-pixel hits. Significance is `S = L⁺/N`; no `S'` median-subtraction is
 /// needed because `L⁺` (excess over the same-color median) is already a local high-pass.
-fn reject_xtrans(data: &mut Buffer2<f32>, cfa: &CfaType, config: &CosmicRayConfig) -> usize {
-    let size = Size2us::new(data.width(), data.height());
+fn reject_xtrans(
+    data: &mut [f32],
+    size: Size2us,
+    cfa: &CfaType,
+    config: &CosmicRayConfig,
+) -> usize {
+    debug_assert_eq!(data.len(), size.pixel_count());
     if size.width < 7 || size.height < 7 {
         return 0;
     }
@@ -557,7 +573,7 @@ fn reject_xtrans(data: &mut Buffer2<f32>, cfa: &CfaType, config: &CosmicRayConfi
 
     for _ in 0..config.niter {
         let scene = CfaScene {
-            pix: data.pixels(),
+            pix: data,
             size,
             cfa,
             mask: &masks.accumulated,
@@ -572,7 +588,7 @@ fn reject_xtrans(data: &mut Buffer2<f32>, cfa: &CfaType, config: &CosmicRayConfi
         if masks.detect_and_grow(&scratch.lplus, &scratch.f, &scratch.noise, config) == 0 {
             break;
         }
-        xtrans_replace(data, cfa, &masks.accumulated, &mut scratch.frame);
+        xtrans_replace(data, size, cfa, &masks.accumulated, &mut scratch.frame);
     }
 
     masks.accumulated.count_ones()
@@ -728,52 +744,49 @@ impl XtransScratch {
 /// Replace masked pixels with the median of their nearest unmasked same-color neighbors. Gathers
 /// from a snapshot in the caller's `snapshot` buffer, for the reason [`replace_flagged`] gives.
 fn xtrans_replace(
-    data: &mut Buffer2<f32>,
+    data: &mut [f32],
+    size: Size2us,
     cfa: &CfaType,
     mask: &BitBuffer2,
     snapshot: &mut Vec<f32>,
 ) {
-    let size = Size2us::new(data.width(), data.height());
     let w = size.width;
     snapshot.clear();
-    snapshot.extend_from_slice(data.pixels());
+    snapshot.extend_from_slice(data);
     let scene = CfaScene {
         pix: snapshot,
         size,
         cfa,
         mask,
     };
-    data.pixels_mut()
-        .par_chunks_mut(w)
-        .enumerate()
-        .for_each_init(
-            || {
-                (
-                    Vec::<(i32, f32)>::with_capacity(32),
-                    Vec::<f32>::with_capacity(XTRANS_REPLACE),
-                )
-            },
-            |(gathered, vals), (y, row)| {
-                for (x, o) in row.iter_mut().enumerate() {
-                    if !mask[y * w + x] {
-                        continue;
-                    }
-                    same_color_values(
-                        &scene,
-                        Vec2us::new(x, y),
-                        XTRANS_RADIUS,
-                        XTRANS_REPLACE,
-                        gathered,
-                    );
-                    if gathered.is_empty() {
-                        continue;
-                    }
-                    vals.clear();
-                    vals.extend(gathered.iter().map(|&(_, val)| val));
-                    *o = median_f32_mut(vals);
+    data.par_chunks_mut(w).enumerate().for_each_init(
+        || {
+            (
+                Vec::<(i32, f32)>::with_capacity(32),
+                Vec::<f32>::with_capacity(XTRANS_REPLACE),
+            )
+        },
+        |(gathered, vals), (y, row)| {
+            for (x, o) in row.iter_mut().enumerate() {
+                if !mask[y * w + x] {
+                    continue;
                 }
-            },
-        );
+                same_color_values(
+                    &scene,
+                    Vec2us::new(x, y),
+                    XTRANS_RADIUS,
+                    XTRANS_REPLACE,
+                    gathered,
+                );
+                if gathered.is_empty() {
+                    continue;
+                }
+                vals.clear();
+                vals.extend(gathered.iter().map(|&(_, val)| val));
+                *o = median_f32_mut(vals);
+            }
+        },
+    );
 }
 
 #[cfg(test)]
@@ -781,8 +794,6 @@ mod tests;
 
 #[cfg(test)]
 pub(crate) mod internals {
-    use imaginarium::Buffer2;
-
     use crate::bit_buffer2::BitBuffer2;
     use crate::math::size2us::Size2us;
     use crate::stacking::calibration_masters::cosmic_ray::{CosmicRayConfig, MonoScratch};
@@ -803,9 +814,13 @@ pub(crate) mod internals {
     ///
     /// Destructured rather than summed through a helper, so a plane added to or dropped from
     /// [`MonoScratch`] fails to compile here instead of silently drifting from the constant.
-    pub(crate) fn mono_scratch_floats(data: &mut Buffer2<f32>, config: &CosmicRayConfig) -> usize {
+    pub(crate) fn mono_scratch_floats(
+        data: &mut [f32],
+        size: Size2us,
+        config: &CosmicRayConfig,
+    ) -> usize {
         let mut scratch = MonoScratch::default();
-        super::reject_mono_buffer(data, config, &mut scratch);
+        super::reject_mono_buffer(data, size, config, &mut scratch);
         let MonoScratch {
             significance,
             fine,
