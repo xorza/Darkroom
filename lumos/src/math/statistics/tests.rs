@@ -161,180 +161,6 @@ fn mad_with_scratch_empty() {
 }
 
 #[test]
-fn sigma_clipped_no_outliers() {
-    let mut values: Vec<f32> = (0..100).map(|i| 50.0 + (i as f32 - 50.0) * 0.1).collect();
-    let mut deviations = Vec::new();
-    let ClippedStats { median, sigma, .. } =
-        ClippedStats::sigma_clipped(&mut values, &mut deviations, 3.0, 3);
-    assert!((median - 50.0).abs() < 1.0);
-    assert!(sigma > 0.0 && sigma < 10.0);
-}
-
-#[test]
-fn sigma_clipped_rejects_outliers() {
-    let mut values: Vec<f32> = vec![10.0; 97];
-    values.extend([1000.0, 2000.0, 3000.0]);
-    let original_len = values.len();
-    let mut deviations = Vec::new();
-
-    let ClippedStats {
-        median,
-        sigma,
-        mean,
-    } = ClippedStats::sigma_clipped(&mut values, &mut deviations, 3.0, 3);
-
-    assert!((median - 10.0).abs() < 0.1);
-    assert!(sigma < 1.0);
-    // 97 identical values → MAD = 0 → the clip exits early (σ ≈ 0) *without* removing the
-    // outliers, so the mean covers the full contaminated sample: (97·10 + 6000)/100 = 69.7.
-    // Consumers must treat `mean` as meaningful only alongside σ > 0 (the SExtractor sky
-    // estimator's σ-gated crowding test does exactly that).
-    assert!((mean - 69.7).abs() < 0.01, "mean = {mean}");
-    assert_eq!(values.len(), original_len);
-}
-
-#[test]
-fn sigma_clipped_mean_of_asymmetric_survivors() {
-    // [1, 2, 4, 100]: 100 is clipped in iteration 1 under any fast-median convention
-    // (threshold ≤ 13.3 while |100 − median| ≥ 96). Survivors [1, 2, 4]:
-    //   median = 2, mean = 7/3, MAD = median(|1−2|,|2−2|,|4−2|) = 1 → σ = 1.4826.
-    let mut values = vec![1.0, 2.0, 4.0, 100.0];
-    let mut deviations = Vec::new();
-    let ClippedStats {
-        median,
-        sigma,
-        mean,
-    } = ClippedStats::sigma_clipped(&mut values, &mut deviations, 3.0, 3);
-    assert_eq!(median, 2.0);
-    assert!(
-        (mean - 7.0 / 3.0).abs() < 1e-6,
-        "mean of survivors [1,2,4] = 7/3, got {mean}"
-    );
-    assert!((sigma - 1.4826022).abs() < 1e-3);
-}
-
-#[test]
-fn sigma_clipped_negative_values() {
-    let mut values = vec![-10.0, -5.0, 0.0, 5.0, 10.0];
-    let mut deviations = Vec::new();
-    let ClippedStats { median, sigma, .. } =
-        ClippedStats::sigma_clipped(&mut values, &mut deviations, 3.0, 3);
-    assert!((median - 0.0).abs() < 0.1);
-    assert!(sigma > 0.0);
-}
-
-#[test]
-fn sigma_clipped_mixed_outliers() {
-    let mut values: Vec<f32> = vec![100.0; 90];
-    values.extend([0.0, 1.0, 2.0, 198.0, 199.0, 200.0]);
-    values.extend([99.0, 100.0, 101.0, 102.0]);
-    let mut deviations = Vec::new();
-
-    let ClippedStats {
-        median,
-        sigma: _sigma,
-        ..
-    } = ClippedStats::sigma_clipped(&mut values, &mut deviations, 3.0, 3);
-    assert!((median - 100.0).abs() < 2.0);
-}
-
-#[test]
-fn sigma_clipped_zero_iterations() {
-    let mut values = vec![1.0, 2.0, 3.0, 1000.0];
-    let mut deviations = Vec::new();
-    let ClippedStats {
-        median,
-        sigma: _sigma,
-        ..
-    } = ClippedStats::sigma_clipped(&mut values, &mut deviations, 3.0, 0);
-    assert!((median - 2.5).abs() < 0.1);
-}
-
-#[test]
-fn sigma_clipped_one_iteration() {
-    let mut values: Vec<f32> = vec![10.0; 10];
-    values.push(10000.0);
-    let mut deviations = Vec::new();
-
-    let ClippedStats { median, sigma, .. } =
-        ClippedStats::sigma_clipped(&mut values, &mut deviations, 3.0, 1);
-
-    assert!((median - 10.0).abs() < 0.1);
-    assert!(sigma < 1.0);
-}
-
-#[test]
-fn sigma_clipped_kappa_affects_clipping() {
-    let base_values: Vec<f32> = {
-        let mut v = vec![50.0; 90];
-        v.extend([20.0, 25.0, 75.0, 80.0]);
-        v.extend([0.0, 100.0]);
-        v
-    };
-
-    let mut values_strict = base_values.clone();
-    let mut values_loose = base_values.clone();
-    let mut deviations = Vec::new();
-
-    let ClippedStats {
-        median: median_strict,
-        sigma: sigma_strict,
-        ..
-    } = ClippedStats::sigma_clipped(&mut values_strict, &mut deviations, 1.5, 3);
-    let ClippedStats {
-        median: median_loose,
-        sigma: sigma_loose,
-        ..
-    } = ClippedStats::sigma_clipped(&mut values_loose, &mut deviations, 5.0, 3);
-
-    assert!((median_strict - 50.0).abs() < 5.0);
-    assert!((median_loose - 50.0).abs() < 5.0);
-    assert!(sigma_strict <= sigma_loose);
-}
-
-#[test]
-fn sigma_clipped_deviations_buffer_reused() {
-    let mut values1 = vec![1.0, 2.0, 3.0, 4.0, 5.0];
-    let mut values2 = vec![10.0, 20.0, 30.0];
-    let mut deviations = Vec::new();
-
-    ClippedStats::sigma_clipped(&mut values1, &mut deviations, 3.0, 2);
-    let cap_after_first = deviations.capacity();
-
-    ClippedStats::sigma_clipped(&mut values2, &mut deviations, 3.0, 2);
-
-    assert!(deviations.capacity() >= cap_after_first.min(values2.len()));
-}
-
-#[test]
-fn sigma_clipped_large_dataset() {
-    let mut values: Vec<f32> = (0..10000).map(|i| 100.0 + (i % 10) as f32).collect();
-    for i in 0..100 {
-        values[i * 100] = 1000.0;
-    }
-    let mut deviations = Vec::new();
-
-    let ClippedStats { median, sigma, .. } =
-        ClippedStats::sigma_clipped(&mut values, &mut deviations, 3.0, 3);
-
-    assert!((100.0..=110.0).contains(&median));
-    assert!(sigma > 0.0 && sigma < 20.0);
-}
-
-#[test]
-fn sigma_clipped_all_same_then_one_different() {
-    let mut values: Vec<f32> = vec![42.0; 999];
-    values.push(9999.0);
-    let mut deviations = Vec::new();
-
-    let ClippedStats { median, sigma, .. } =
-        ClippedStats::sigma_clipped(&mut values, &mut deviations, 3.0, 3);
-
-    assert!((median - 42.0).abs() < 0.01);
-    assert!(sigma < 0.01);
-}
-
-#[test]
 fn median_with_nan_does_not_panic() {
     let mut values = [1.0f32, f32::NAN, 3.0, 2.0, 5.0];
     // Should not panic — NaN sorts to end via total_cmp
@@ -357,28 +183,473 @@ fn sigma_clip_rejects_nan_input() {
     ClippedStats::sigma_clipped(&mut values, &mut deviations, 3.0, 3);
 }
 
+/// How close a statistic has to land.
+#[derive(Debug, Clone, Copy)]
+struct Approx {
+    value: f32,
+    within: f32,
+}
+
+/// Bounds a case pins on sigma. Both `None` where the case says nothing about spread.
+#[derive(Debug, Clone, Copy, Default)]
+struct SigmaBounds {
+    above: Option<f32>,
+    below: Option<f32>,
+}
+
+/// One `ClippedStats::sigma_clipped` run and the statistics it must produce.
+#[derive(Debug)]
+struct ClipCase {
+    name: &'static str,
+    values: Vec<f32>,
+    kappa: f32,
+    iterations: usize,
+    median: Approx,
+    sigma: SigmaBounds,
+    /// Where the case has a mean worth pinning. Most do not: `mean` is only meaningful alongside
+    /// a positive sigma, for the reason the "three huge outliers" row records.
+    mean: Option<Approx>,
+}
+
+/// `sigma_clipped` over every sample shape that mattered, as one table.
+///
+/// Nineteen tests fed this one function different constants under two naming families —
+/// `sigma_clipped_*` and `sigma_clipped_stats_*` — that turned out to call the same thing. The
+/// rows keep each fixture and its hand-derived expectations; what they gain is the length
+/// invariant, asserted on every row where exactly one test checked it before.
 #[test]
-fn sigma_clip_asymmetric_outliers() {
-    // Regression test for the index mismatch bug where select_nth_unstable_by
-    // on the deviations buffer broke the correspondence with the values buffer.
-    // With asymmetric outliers, the bug would clip wrong values.
-    let mut values: Vec<f32> = vec![100.0; 50];
-    // Add outliers only on the high side
-    values.extend([500.0, 600.0, 700.0, 800.0, 900.0]);
+fn sigma_clipped_over_every_sample_shape() {
+    fn flat(count: usize, value: f32) -> Vec<f32> {
+        vec![value; count]
+    }
+    /// `count` values centred on `centre`, spaced `step` apart.
+    fn spread(count: usize, centre: f32, step: f32) -> Vec<f32> {
+        (0..count)
+            .map(|i| centre + (i as f32 - count as f32 / 2.0) * step)
+            .collect()
+    }
+    fn with(mut base: Vec<f32>, extra: &[f32]) -> Vec<f32> {
+        base.extend_from_slice(extra);
+        base
+    }
+    const NO_SIGMA: SigmaBounds = SigmaBounds {
+        above: None,
+        below: None,
+    };
+
+    let cases = vec![
+        ClipCase {
+            name: "smooth spread with nothing to clip",
+            values: spread(100, 50.0, 0.1),
+            kappa: 3.0,
+            iterations: 3,
+            median: Approx {
+                value: 50.0,
+                within: 1.0,
+            },
+            sigma: SigmaBounds {
+                above: Some(0.0),
+                below: Some(10.0),
+            },
+            mean: None,
+        },
+        // 97 identical values give MAD = 0, so the clip exits early (σ ≈ 0) *without* removing the
+        // outliers and the mean covers the full contaminated sample: (97·10 + 6000)/100 = 69.7.
+        // Consumers must treat `mean` as meaningful only alongside σ > 0 — the SExtractor sky
+        // estimator's σ-gated crowding test does exactly that.
+        ClipCase {
+            name: "three huge outliers against a flat sample",
+            values: with(flat(97, 10.0), &[1000.0, 2000.0, 3000.0]),
+            kappa: 3.0,
+            iterations: 3,
+            median: Approx {
+                value: 10.0,
+                within: 0.1,
+            },
+            sigma: SigmaBounds {
+                above: None,
+                below: Some(1.0),
+            },
+            mean: Some(Approx {
+                value: 69.7,
+                within: 0.01,
+            }),
+        },
+        // 100 is clipped in iteration 1 under any fast-median convention (threshold <= 13.3 while
+        // |100 - median| >= 96). Survivors [1, 2, 4]: median 2, mean 7/3, MAD 1 so sigma = 1.4826.
+        ClipCase {
+            name: "asymmetric survivors",
+            values: vec![1.0, 2.0, 4.0, 100.0],
+            kappa: 3.0,
+            iterations: 3,
+            median: Approx {
+                value: 2.0,
+                within: 1e-6,
+            },
+            sigma: SigmaBounds {
+                above: Some(1.4816),
+                below: Some(1.4836),
+            },
+            mean: Some(Approx {
+                value: 7.0 / 3.0,
+                within: 1e-6,
+            }),
+        },
+        ClipCase {
+            name: "values straddling zero",
+            values: vec![-10.0, -5.0, 0.0, 5.0, 10.0],
+            kappa: 3.0,
+            iterations: 3,
+            median: Approx {
+                value: 0.0,
+                within: 0.1,
+            },
+            sigma: SigmaBounds {
+                above: Some(0.0),
+                below: None,
+            },
+            mean: None,
+        },
+        ClipCase {
+            name: "outliers on both sides of a flat core",
+            values: with(
+                with(flat(90, 100.0), &[0.0, 1.0, 2.0, 198.0, 199.0, 200.0]),
+                &[99.0, 100.0, 101.0, 102.0],
+            ),
+            kappa: 3.0,
+            iterations: 3,
+            median: Approx {
+                value: 100.0,
+                within: 2.0,
+            },
+            sigma: NO_SIGMA,
+            mean: None,
+        },
+        // Zero iterations computes the statistics without clipping, so the outlier still counts.
+        ClipCase {
+            name: "zero iterations does not clip",
+            values: vec![1.0, 2.0, 3.0, 1000.0],
+            kappa: 3.0,
+            iterations: 0,
+            median: Approx {
+                value: 2.5,
+                within: 0.1,
+            },
+            sigma: NO_SIGMA,
+            mean: None,
+        },
+        ClipCase {
+            name: "zero iterations on a bimodal sample",
+            values: vec![0.2, 0.2, 0.2, 0.9, 0.9],
+            kappa: 3.0,
+            iterations: 0,
+            median: Approx {
+                value: 0.2,
+                within: 1e-6,
+            },
+            sigma: NO_SIGMA,
+            mean: None,
+        },
+        ClipCase {
+            name: "one iteration is enough for a single outlier",
+            values: with(flat(10, 10.0), &[10000.0]),
+            kappa: 3.0,
+            iterations: 1,
+            median: Approx {
+                value: 10.0,
+                within: 0.1,
+            },
+            sigma: SigmaBounds {
+                above: None,
+                below: Some(1.0),
+            },
+            mean: None,
+        },
+        ClipCase {
+            name: "ten thousand values with one percent contaminated",
+            values: {
+                let mut values: Vec<f32> = (0..10000).map(|i| 100.0 + (i % 10) as f32).collect();
+                for i in 0..100 {
+                    values[i * 100] = 1000.0;
+                }
+                values
+            },
+            kappa: 3.0,
+            iterations: 3,
+            median: Approx {
+                value: 105.0,
+                within: 5.0,
+            },
+            sigma: SigmaBounds {
+                above: Some(0.0),
+                below: Some(20.0),
+            },
+            mean: None,
+        },
+        ClipCase {
+            name: "one different among a thousand",
+            values: with(flat(999, 42.0), &[9999.0]),
+            kappa: 3.0,
+            iterations: 3,
+            median: Approx {
+                value: 42.0,
+                within: 0.01,
+            },
+            sigma: SigmaBounds {
+                above: None,
+                below: Some(0.01),
+            },
+            mean: None,
+        },
+        // Regression guard for the index mismatch where `select_nth_unstable_by` on the deviations
+        // buffer broke its correspondence with the values buffer: with outliers on one side only,
+        // that bug clipped the wrong values.
+        ClipCase {
+            name: "outliers on the high side only",
+            values: with(flat(50, 100.0), &[500.0, 600.0, 700.0, 800.0, 900.0]),
+            kappa: 2.5,
+            iterations: 5,
+            median: Approx {
+                value: 100.0,
+                within: 1.0,
+            },
+            sigma: SigmaBounds {
+                above: None,
+                below: Some(5.0),
+            },
+            mean: None,
+        },
+        ClipCase {
+            name: "narrow spread near a half",
+            values: spread(100, 0.5, 0.001),
+            kappa: 3.0,
+            iterations: 3,
+            median: Approx {
+                value: 0.5,
+                within: 0.01,
+            },
+            sigma: SigmaBounds {
+                above: Some(0.0),
+                below: Some(0.1),
+            },
+            mean: None,
+        },
+        ClipCase {
+            name: "high outliers",
+            values: with(flat(90, 0.2), &[0.9; 10]),
+            kappa: 3.0,
+            iterations: 3,
+            median: Approx {
+                value: 0.2,
+                within: 0.05,
+            },
+            sigma: NO_SIGMA,
+            mean: None,
+        },
+        ClipCase {
+            name: "low outliers",
+            values: with(flat(90, 0.8), &[0.1; 10]),
+            kappa: 3.0,
+            iterations: 3,
+            median: Approx {
+                value: 0.8,
+                within: 0.05,
+            },
+            sigma: NO_SIGMA,
+            mean: None,
+        },
+        ClipCase {
+            name: "both tails",
+            values: with(with(flat(80, 0.5), &[0.05; 10]), &[0.95; 10]),
+            kappa: 3.0,
+            iterations: 3,
+            median: Approx {
+                value: 0.5,
+                within: 0.05,
+            },
+            sigma: NO_SIGMA,
+            mean: None,
+        },
+        // 101 values evenly spaced 0.4..0.6 in steps of 0.002 about a median of 0.5. Each absolute
+        // deviation from 0.000 to 0.100 appears twice except 0.000, so the middle one is 0.050 and
+        // sigma = 0.050 · 1.4826 = 0.0741. A high kappa keeps every value, isolating the
+        // MAD-to-sigma conversion from any clipping.
+        ClipCase {
+            name: "mad to sigma conversion",
+            values: (-50..=50).map(|i| 0.5 + i as f32 * 0.002).collect(),
+            kappa: 10.0,
+            iterations: 1,
+            median: Approx {
+                value: 0.5,
+                within: 0.01,
+            },
+            sigma: SigmaBounds {
+                above: Some(0.05 * 1.4826 - 0.002),
+                below: Some(0.05 * 1.4826 + 0.002),
+            },
+            mean: None,
+        },
+        ClipCase {
+            name: "one extreme outlier",
+            values: with(flat(99, 0.5), &[100.0]),
+            kappa: 3.0,
+            iterations: 3,
+            median: Approx {
+                value: 0.5,
+                within: 0.01,
+            },
+            sigma: NO_SIGMA,
+            mean: None,
+        },
+        ClipCase {
+            name: "negative core with positive outliers",
+            values: with(flat(90, -0.5), &[0.5; 10]),
+            kappa: 3.0,
+            iterations: 3,
+            median: Approx {
+                value: -0.5,
+                within: 0.05,
+            },
+            sigma: NO_SIGMA,
+            mean: None,
+        },
+        ClipCase {
+            name: "all same except one",
+            values: with(flat(99, 0.4), &[0.9]),
+            kappa: 3.0,
+            iterations: 3,
+            median: Approx {
+                value: 0.4,
+                within: 1e-6,
+            },
+            sigma: NO_SIGMA,
+            mean: None,
+        },
+    ];
+
     let mut deviations = Vec::new();
+    for case in cases {
+        let ClipCase {
+            name,
+            mut values,
+            kappa,
+            iterations,
+            median,
+            sigma,
+            mean,
+        } = case;
+        let count = values.len();
+        deviations.clear();
+        let stats = ClippedStats::sigma_clipped(&mut values, &mut deviations, kappa, iterations);
 
-    let ClippedStats { median, sigma, .. } =
-        ClippedStats::sigma_clipped(&mut values, &mut deviations, 2.5, 5);
+        // The caller keeps its sample: clipping selects, it does not truncate.
+        assert_eq!(
+            values.len(),
+            count,
+            "{name}: the input slice must keep its length"
+        );
+        assert!(
+            (stats.median - median.value).abs() <= median.within,
+            "{name}: median {} should be {} +- {}",
+            stats.median,
+            median.value,
+            median.within
+        );
+        if let Some(floor) = sigma.above {
+            assert!(
+                stats.sigma > floor,
+                "{name}: sigma {} should exceed {floor}",
+                stats.sigma
+            );
+        }
+        if let Some(ceiling) = sigma.below {
+            assert!(
+                stats.sigma < ceiling,
+                "{name}: sigma {} should be under {ceiling}",
+                stats.sigma
+            );
+        }
+        if let Some(expected) = mean {
+            assert!(
+                (stats.mean - expected.value).abs() <= expected.within,
+                "{name}: mean {} should be {} +- {}",
+                stats.mean,
+                expected.value,
+                expected.within
+            );
+        }
+    }
+}
 
+/// A stricter kappa clips more, and lands closer to the true centre.
+///
+/// Two fixtures, because the two tests this replaces each built their own and asserted the same
+/// property. The second pins exact medians: with 50 at 0.50, 30 at 0.54 and 20 at 0.80, the
+/// approximate median is 0.54 and MAD 0.04, so sigma is 0.059. kappa 1.5 gives a threshold of
+/// 0.089 and rejects the 0.80 group, converging on 0.50; kappa 5.0 gives 0.297, keeps them, and
+/// stays at the biased 0.54.
+#[test]
+fn sigma_clipped_stricter_kappa_clips_harder() {
+    let mut deviations = Vec::new();
+    let clip = |values: &[f32], kappa: f32, deviations: &mut Vec<f32>| {
+        let mut values = values.to_vec();
+        deviations.clear();
+        ClippedStats::sigma_clipped(&mut values, deviations, kappa, 3)
+    };
+
+    let wide = {
+        let mut v = vec![50.0f32; 90];
+        v.extend([20.0, 25.0, 75.0, 80.0, 0.0, 100.0]);
+        v
+    };
+    let strict = clip(&wide, 1.5, &mut deviations);
+    let loose = clip(&wide, 5.0, &mut deviations);
+    assert!((strict.median - 50.0).abs() < 5.0);
+    assert!((loose.median - 50.0).abs() < 5.0);
     assert!(
-        (median - 100.0).abs() < 1.0,
-        "median should be ~100, got {}",
-        median
+        strict.sigma <= loose.sigma,
+        "strict sigma {} should not exceed loose {}",
+        strict.sigma,
+        loose.sigma
+    );
+
+    let biased = {
+        let mut v = vec![0.50f32; 50];
+        v.extend(vec![0.54; 30]);
+        v.extend(vec![0.80; 20]);
+        v
+    };
+    let strict = clip(&biased, 1.5, &mut deviations);
+    let loose = clip(&biased, 5.0, &mut deviations);
+    assert!(
+        (strict.median - 0.5).abs() < 1e-6,
+        "strict kappa should recover the true median 0.5, got {}",
+        strict.median
     );
     assert!(
-        sigma < 5.0,
-        "sigma should be small after clipping outliers, got {}",
-        sigma
+        (strict.median - 0.5).abs() < (loose.median - 0.5).abs(),
+        "strict median {} should beat loose {}",
+        strict.median,
+        loose.median
+    );
+}
+
+/// The deviations buffer is scratch the caller owns and reuses across calls of different sizes.
+#[test]
+fn sigma_clipped_reuses_the_deviations_buffer() {
+    let mut deviations = Vec::with_capacity(100);
+    let mut first = vec![1.0, 2.0, 3.0, 4.0, 5.0];
+    ClippedStats::sigma_clipped(&mut first, &mut deviations, 3.0, 2);
+    let after_first = deviations.capacity();
+    assert!(after_first >= first.len(), "the buffer was not used");
+
+    // A shorter sample must not shrink the allocation the longer one earned.
+    let mut second = vec![10.0, 20.0, 30.0];
+    ClippedStats::sigma_clipped(&mut second, &mut deviations, 3.0, 2);
+    assert!(
+        deviations.capacity() >= after_first,
+        "capacity dropped from {after_first} to {}",
+        deviations.capacity()
     );
 }
 
@@ -621,141 +892,6 @@ fn mad_f32_fast_matches_regular_on_odd() {
 }
 
 #[test]
-fn sigma_clipped_stats_no_outliers() {
-    // Normal-ish distribution without outliers
-    let mut values: Vec<f32> = (0..100).map(|i| 0.5 + (i as f32 - 50.0) * 0.001).collect();
-    let mut deviations: Vec<f32> = vec![];
-
-    let ClippedStats { median, sigma, .. } =
-        ClippedStats::sigma_clipped(&mut values, &mut deviations, 3.0, 3);
-
-    // Median should be ~0.5
-    assert!(
-        (median - 0.5).abs() < 0.01,
-        "Median {} should be ~0.5",
-        median
-    );
-    // Sigma should be small but non-zero
-    assert!(sigma > 0.0, "Sigma should be positive");
-    assert!(sigma < 0.1, "Sigma {} should be small", sigma);
-}
-
-#[test]
-fn sigma_clipped_stats_rejects_high_outliers() {
-    // 90 values at 0.2, 10 high outliers at 0.9
-    let mut values: Vec<f32> = vec![0.2; 90];
-    values.extend(vec![0.9; 10]);
-    let mut deviations: Vec<f32> = vec![];
-
-    let ClippedStats {
-        median,
-        sigma: _sigma,
-        ..
-    } = ClippedStats::sigma_clipped(&mut values, &mut deviations, 3.0, 3);
-
-    // Median should be ~0.2 (outliers rejected)
-    assert!(
-        (median - 0.2).abs() < 0.05,
-        "Median {} should be ~0.2 after rejecting outliers",
-        median
-    );
-}
-
-#[test]
-fn sigma_clipped_stats_rejects_low_outliers() {
-    // 90 values at 0.8, 10 low outliers at 0.1
-    let mut values: Vec<f32> = vec![0.8; 90];
-    values.extend(vec![0.1; 10]);
-    let mut deviations: Vec<f32> = vec![];
-
-    let ClippedStats {
-        median,
-        sigma: _sigma,
-        ..
-    } = ClippedStats::sigma_clipped(&mut values, &mut deviations, 3.0, 3);
-
-    // Median should be ~0.8 (outliers rejected)
-    assert!(
-        (median - 0.8).abs() < 0.05,
-        "Median {} should be ~0.8 after rejecting outliers",
-        median
-    );
-}
-
-#[test]
-fn sigma_clipped_stats_rejects_both_tails() {
-    // 80 values at 0.5, 10 low outliers, 10 high outliers
-    let mut values: Vec<f32> = vec![0.5; 80];
-    values.extend(vec![0.05; 10]); // Low outliers
-    values.extend(vec![0.95; 10]); // High outliers
-    let mut deviations: Vec<f32> = vec![];
-
-    let ClippedStats {
-        median,
-        sigma: _sigma,
-        ..
-    } = ClippedStats::sigma_clipped(&mut values, &mut deviations, 3.0, 3);
-
-    // Median should be ~0.5 (both tails rejected)
-    assert!(
-        (median - 0.5).abs() < 0.05,
-        "Median {} should be ~0.5 after rejecting outliers",
-        median
-    );
-}
-
-#[test]
-fn sigma_clipped_stats_kappa_affects_rejection() {
-    // Good values: 50 at 0.50, 30 at 0.54 (true center = 0.50)
-    // Outliers: 20 at 0.80
-    //
-    // Approx median of all 100 = 0.54 (upper-middle, value[50]).
-    // MAD = 0.04 (deviations: 50×0.04, 30×0.00, 20×0.26).
-    // sigma = 0.04 * 1.4826 = 0.059.
-    //
-    // kappa=1.5: threshold = 0.089. Rejects 0.80 (dev 0.26 > 0.089).
-    //   After clipping: 80 values [0.50(50), 0.54(30)].
-    //   Iter 2: approx median = 0.50, MAD = 0 → converge at 0.50.
-    //
-    // kappa=5.0: threshold = 0.297. Keeps 0.80 (dev 0.26 < 0.297).
-    //   Converge at approx median = 0.54.
-    let base_values: Vec<f32> = {
-        let mut v = vec![0.50; 50];
-        v.extend(vec![0.54; 30]);
-        v.extend(vec![0.80; 20]);
-        v
-    };
-
-    let mut values_strict = base_values.clone();
-    let mut values_loose = base_values.clone();
-    let mut deviations: Vec<f32> = vec![];
-
-    let ClippedStats {
-        median: median_strict,
-        ..
-    } = ClippedStats::sigma_clipped(&mut values_strict, &mut deviations, 1.5, 3);
-    deviations.clear();
-    let ClippedStats {
-        median: median_loose,
-        ..
-    } = ClippedStats::sigma_clipped(&mut values_loose, &mut deviations, 5.0, 3);
-
-    // Strict rejects outliers → converges at 0.50 (true center)
-    // Loose keeps outliers → converges at 0.54 (biased)
-    assert!(
-        (median_strict - 0.5).abs() < (median_loose - 0.5).abs(),
-        "Strict kappa median {} should be closer to 0.5 than loose {}",
-        median_strict,
-        median_loose
-    );
-    assert!(
-        (median_strict - 0.5).abs() < 1e-6,
-        "Strict kappa should recover true median 0.5, got {}",
-        median_strict
-    );
-}
-
-#[test]
 fn sigma_clipped_stats_iterations_improve_result() {
     // Good values: 41 at 0.30, 40 at 0.32 (true median = 0.30, odd count = 81)
     // Outliers: 10 at 0.60, 9 at 1.50
@@ -811,134 +947,6 @@ fn sigma_clipped_stats_iterations_improve_result() {
         "3 iterations median {} should be closer to 0.30 than 0 iterations {}",
         median_3iter,
         median_0iter
-    );
-}
-
-#[test]
-fn sigma_clipped_stats_mad_to_sigma_conversion() {
-    // MAD * 1.4826 ≈ sigma for Gaussian distribution
-    // Create data with known spread
-    let mut values: Vec<f32> = (-50..=50).map(|i| 0.5 + i as f32 * 0.002).collect();
-    let mut deviations: Vec<f32> = vec![];
-
-    let ClippedStats {
-        median: _median,
-        sigma,
-        ..
-    } = ClippedStats::sigma_clipped(&mut values, &mut deviations, 10.0, 1); // High kappa = no clipping
-
-    // Data: 101 evenly spaced values from 0.4 to 0.6 (step = 0.002)
-    // Median = 0.5 (center value)
-    // |x - 0.5| values: 0.000, 0.002, ..., 0.100 (101 values, each appearing once)
-    // Sorted abs deviations: [0.000, 0.002, 0.002, 0.004, 0.004, ..., 0.100]
-    // MAD = median of abs devs = value at index 50 of 101 sorted abs devs
-    // Abs devs sorted: each deviation d=0.000..0.100 in steps of 0.002 appears twice
-    // (positive and negative), except 0.000 which appears once.
-    // So sorted: [0.000, 0.002, 0.002, 0.004, 0.004, ..., 0.100, 0.100]
-    // Index 50 → 0.050
-    // sigma = MAD * 1.4826 = 0.050 * 1.4826 = 0.07413
-    let expected_sigma = 0.05 * 1.4826;
-    assert!(
-        (sigma - expected_sigma).abs() < 0.002,
-        "Sigma {} should be ~{:.4} (MAD=0.05 × 1.4826)",
-        sigma,
-        expected_sigma
-    );
-}
-
-#[test]
-fn sigma_clipped_stats_preserves_deviations_buffer() {
-    let mut values = vec![0.1, 0.2, 0.3, 0.4, 0.5];
-    let mut deviations: Vec<f32> = Vec::with_capacity(100);
-
-    ClippedStats::sigma_clipped(&mut values, &mut deviations, 3.0, 3);
-
-    // Buffer should be reused (capacity preserved)
-    assert!(
-        deviations.capacity() >= 5,
-        "Deviations buffer should have been used"
-    );
-}
-
-#[test]
-fn sigma_clipped_stats_zero_iterations() {
-    let mut values = vec![0.2, 0.2, 0.2, 0.9, 0.9];
-    let mut deviations: Vec<f32> = vec![];
-
-    // Zero iterations = just compute stats without clipping
-    let ClippedStats {
-        median,
-        sigma: _sigma,
-        ..
-    } = ClippedStats::sigma_clipped(&mut values, &mut deviations, 3.0, 0);
-
-    // Median of [0.2, 0.2, 0.2, 0.9, 0.9] sorted = [0.2, 0.2, 0.2, 0.9, 0.9] -> median = 0.2
-    assert!(
-        (median - 0.2).abs() < 1e-6,
-        "Median {} should be 0.2",
-        median
-    );
-}
-
-#[test]
-fn sigma_clipped_stats_extreme_outlier() {
-    // Single extreme outlier among many normal values
-    let mut values: Vec<f32> = vec![0.5; 99];
-    values.push(100.0); // Extreme outlier
-    let mut deviations: Vec<f32> = vec![];
-
-    let ClippedStats {
-        median,
-        sigma: _sigma,
-        ..
-    } = ClippedStats::sigma_clipped(&mut values, &mut deviations, 3.0, 3);
-
-    // Outlier should be rejected, median should be 0.5
-    assert!(
-        (median - 0.5).abs() < 0.01,
-        "Median {} should be ~0.5",
-        median
-    );
-}
-
-#[test]
-fn sigma_clipped_stats_negative_values() {
-    let mut values: Vec<f32> = vec![-0.5; 90];
-    values.extend(vec![0.5; 10]); // Outliers on positive side
-    let mut deviations: Vec<f32> = vec![];
-
-    let ClippedStats {
-        median,
-        sigma: _sigma,
-        ..
-    } = ClippedStats::sigma_clipped(&mut values, &mut deviations, 3.0, 3);
-
-    // Median should be ~-0.5
-    assert!(
-        (median - (-0.5)).abs() < 0.05,
-        "Median {} should be ~-0.5",
-        median
-    );
-}
-
-#[test]
-fn sigma_clipped_stats_all_same_except_one() {
-    // Edge case: all values same except one outlier
-    let mut values: Vec<f32> = vec![0.4; 99];
-    values.push(0.9);
-    let mut deviations: Vec<f32> = vec![];
-
-    let ClippedStats {
-        median,
-        sigma: _sigma,
-        ..
-    } = ClippedStats::sigma_clipped(&mut values, &mut deviations, 3.0, 3);
-
-    // Median should be 0.4, sigma should be 0 or near-zero after clipping
-    assert!(
-        (median - 0.4).abs() < 1e-6,
-        "Median {} should be 0.4",
-        median
     );
 }
 
