@@ -350,7 +350,7 @@ fn gesd_tiny_alpha_uses_finite_limiting_critical_value() {
 
     assert_eq!(remaining, 15);
     let expected = 14.0 / 15.0f64.sqrt();
-    assert!((scratch.gesd_critical_values[0] - expected).abs() < f64::EPSILON);
+    assert!((scratch.gesd.critical_values[0] - expected).abs() < f64::EPSILON);
 }
 
 #[test]
@@ -636,9 +636,10 @@ fn gesd_matches_nist_reference_example() {
         0
     );
     for ((statistic, critical), (expected_statistic, expected_critical)) in scratch
-        .gesd_statistics
+        .gesd
+        .statistics
         .iter()
-        .zip(&scratch.gesd_critical_values)
+        .zip(&scratch.gesd.critical_values)
         .zip(expected)
     {
         assert!(

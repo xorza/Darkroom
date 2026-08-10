@@ -203,17 +203,20 @@ fn validate_sample_channels<'a>(
     cancel: &CancelToken,
 ) -> Result<(), Error> {
     for (channel, samples) in channels.into_iter().enumerate() {
-        for (pixel, value) in samples.iter().copied().enumerate() {
-            if pixel.is_multiple_of(VALIDATION_CHUNK_SIZE) {
-                check_cancel(cancel)?;
-            }
-            if !value.is_finite() {
-                return Err(Error::NonFiniteImageSample {
-                    index,
-                    channel,
-                    pixel,
-                    value,
-                });
+        // Cancellation is polled per chunk by chunking the iteration, not by testing the pixel
+        // index inside it — the divisor was a modulo on every sample of every plane of every
+        // frame, and the index is only wanted on the error path, where recomputing it is free.
+        for (chunk, values) in samples.chunks(VALIDATION_CHUNK_SIZE).enumerate() {
+            check_cancel(cancel)?;
+            for (offset, value) in values.iter().copied().enumerate() {
+                if !value.is_finite() {
+                    return Err(Error::NonFiniteImageSample {
+                        index,
+                        channel,
+                        pixel: chunk * VALIDATION_CHUNK_SIZE + offset,
+                        value,
+                    });
+                }
             }
         }
     }
@@ -287,17 +290,19 @@ fn validate_warp_plane_values(
     samples: &[f32],
     cancel: &CancelToken,
 ) -> Result<(), Error> {
-    for (pixel, value) in samples.iter().copied().enumerate() {
-        if pixel.is_multiple_of(VALIDATION_CHUNK_SIZE) {
-            check_cancel(cancel)?;
-        }
-        if !kind.accepts(value) {
-            return Err(Error::InvalidWarpPlaneValue {
-                index,
-                plane: kind,
-                pixel,
-                value,
-            });
+    // Chunked for the same reason as `validate_sample_channels`: one cancel poll per chunk
+    // instead of a modulo per sample.
+    for (chunk, values) in samples.chunks(VALIDATION_CHUNK_SIZE).enumerate() {
+        check_cancel(cancel)?;
+        for (offset, value) in values.iter().copied().enumerate() {
+            if !kind.accepts(value) {
+                return Err(Error::InvalidWarpPlaneValue {
+                    index,
+                    plane: kind,
+                    pixel: chunk * VALIDATION_CHUNK_SIZE + offset,
+                    value,
+                });
+            }
         }
     }
     Ok(())

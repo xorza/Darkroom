@@ -14,8 +14,8 @@ use crate::math::sum::mean_f32;
 /// where the caller needs Gaussian units.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub(crate) struct MedianMad {
-    pub median: f32,
-    pub mad: f32,
+    pub(crate) median: f32,
+    pub(crate) mad: f32,
 }
 
 impl MedianMad {
@@ -236,12 +236,12 @@ impl<const N: usize> DeviationScratch for arrayvec::ArrayVec<f32, N> {
 /// Statistics of the sigma-clip survivors, from [`ClippedStats::sigma_clipped`].
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct ClippedStats {
-    pub median: f32,
+    pub(crate) median: f32,
     /// MAD-based sigma of the survivors.
-    pub sigma: f32,
+    pub(crate) sigma: f32,
     /// Mean of the survivors. With the median it exposes the residual skew of the clipped
     /// distribution — what SExtractor's Pearson mode estimator corrects for.
-    pub mean: f32,
+    pub(crate) mean: f32,
 }
 
 impl ClippedStats {

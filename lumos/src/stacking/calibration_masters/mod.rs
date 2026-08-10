@@ -375,11 +375,11 @@ impl CalibrationMasters {
         // Straight from the source rather than through a throwaway `StackConfig::dark()`: no
         // override is set on a fresh config, so that path was this call with a minted cache
         // directory and a bumped counter on the way.
+        // One reading for the whole calibration run: the fit check below and the decode ceiling
+        // the context carries both size against it. Previously this went through a throwaway
+        // `StackConfig::dark()` and `LoadContext::default()` sampled again on the next line.
         let available = memory::available_memory();
-        let context = LoadContext {
-            cancel: cancel.clone(),
-            ..LoadContext::default()
-        };
+        let context = LoadContext::new(cancel.clone(), memory::memory_budget(available));
 
         let (dark, flat, bias, flat_dark) =
             if frames_fit_in_memory(&frames, total_frames, available, &context)? {

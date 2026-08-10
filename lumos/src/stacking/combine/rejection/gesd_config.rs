@@ -82,7 +82,7 @@ impl GesdConfig {
             squared_deviations += delta * (value - mean);
         }
 
-        scratch.gesd_statistics.clear();
+        scratch.gesd.statistics.clear();
 
         for _ in 0..max_outliers {
             let sample_deviation = (squared_deviations / (len - 1) as f64).sqrt();
@@ -101,7 +101,8 @@ impl GesdConfig {
             }
 
             scratch
-                .gesd_statistics
+                .gesd
+                .statistics
                 .push(max_deviation / sample_deviation);
 
             let removed = f64::from(values[max_idx]);
@@ -117,9 +118,10 @@ impl GesdConfig {
         }
 
         let num_outliers = scratch
-            .gesd_statistics
+            .gesd
+            .statistics
             .iter()
-            .zip(&scratch.gesd_critical_values)
+            .zip(&scratch.gesd.critical_values)
             .rposition(|(statistic, critical)| statistic > critical)
             .map_or(0, |index| index + 1);
         original_len - num_outliers
@@ -132,14 +134,14 @@ fn prepare_gesd_critical_values(
     max_outliers: usize,
     scratch: &mut ScratchBuffers,
 ) {
-    if scratch.gesd_sample_count == sample_count
-        && scratch.gesd_critical_values.len() == max_outliers
-        && scratch.gesd_alpha_bits == config.alpha.to_bits()
+    if scratch.gesd.sample_count == sample_count
+        && scratch.gesd.critical_values.len() == max_outliers
+        && scratch.gesd.alpha_bits == config.alpha.to_bits()
     {
         return;
     }
 
-    scratch.gesd_critical_values.clear();
+    scratch.gesd.critical_values.clear();
     for removed in 0..max_outliers {
         let live_count = sample_count - removed;
         let live = live_count as f64;
@@ -149,9 +151,9 @@ fn prepare_gesd_critical_values(
         let critical_t = distribution.inverse_cdf(probability);
         let critical =
             (live - 1.0) / (live * (1.0 + (live - 2.0) / (critical_t * critical_t))).sqrt();
-        scratch.gesd_critical_values.push(critical);
+        scratch.gesd.critical_values.push(critical);
     }
 
-    scratch.gesd_sample_count = sample_count;
-    scratch.gesd_alpha_bits = config.alpha.to_bits();
+    scratch.gesd.sample_count = sample_count;
+    scratch.gesd.alpha_bits = config.alpha.to_bits();
 }

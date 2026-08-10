@@ -28,6 +28,18 @@ pub struct AlignStackConfig {
 }
 
 impl AlignStackConfig {
+    /// This config with the stack's planning figure pinned to `system_available`, for a run to
+    /// take at its entry and pass to every stage. See `CacheConfig::resolved_with`.
+    pub(super) fn with_resolved_memory(&self, system_available: u64) -> Self {
+        Self {
+            stack: StackConfig {
+                cache: self.stack.cache.resolved_with(system_available),
+                ..self.stack.clone()
+            },
+            ..self.clone()
+        }
+    }
+
     /// Validate every stage's configuration.
     ///
     /// Each stage validates its own config where it runs, but by then the run has paid for
