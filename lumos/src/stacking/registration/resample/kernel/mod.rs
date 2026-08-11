@@ -51,21 +51,11 @@ impl LanczosLut {
         Self { values, a }
     }
 
-    #[inline]
-    pub(super) fn lookup(&self, x: f32) -> f32 {
-        let abs_x = x.abs();
-        if abs_x >= self.a as f32 {
-            return 0.0;
-        }
-        let idx = (abs_x * LANCZOS_LUT_RESOLUTION as f32 + 0.5) as usize;
-        unsafe { *self.values.get_unchecked(idx) }
-    }
-
-    /// Fast lookup for known non-negative distance within [0, a].
+    /// Lookup for a known non-negative distance within [0, a].
     ///
-    /// Skips the `abs()` and `>= a` branch. The caller must guarantee that
-    /// `abs_x` is in `[0, a]`. Used in the Lanczos3 inner loop where fractional
-    /// parts are computed such that all distances are known-positive.
+    /// The only form the warp paths need: they derive tap distances that are non-negative by
+    /// construction, so the `abs()` and `>= a` branch a signed distance would need are the caller's
+    /// guarantee instead. `internals::lookup` is the signed form, for oracles.
     #[inline(always)]
     pub(super) fn lookup_positive(&self, abs_x: f32) -> f32 {
         debug_assert!(abs_x >= 0.0 && abs_x <= self.a as f32);

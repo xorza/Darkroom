@@ -105,6 +105,75 @@ fn source_footprint_boundary_is_inclusive() {
     }
 }
 
+/// The interior fast path is a shortcut, not an approximation: where every tap has data behind it,
+/// skipping the per-tap bounds test and the coverage ratio has to give bit-identical results to
+/// clipping against the source bounds. Asserted exactly — a fast path that merely rounds the same
+/// way most of the time would put a second, quietly different confidence into the weight plane.
+#[test]
+fn the_interior_fast_path_matches_clipping_bit_for_bit() {
+    let size = Size2us::new(20, 16);
+    let mut interior_positions = 0;
+    for method in INTERPOLATION_METHODS {
+        // Well inside the border band on both axes, stepped off the pixel grid so the sub-pixel
+        // phase varies rather than repeating one set of weights.
+        let mut x = 6.0;
+        while x < 13.0 {
+            let mut y = 5.0;
+            while y < 11.0 {
+                let taps = match method {
+                    InterpolationMethod::Nearest => {
+                        y += 0.13;
+                        continue;
+                    }
+                    InterpolationMethod::Bilinear => {
+                        quality::SeparableTaps::bilinear(Vec2::new(x, y))
+                    }
+                    InterpolationMethod::Bicubic => {
+                        quality::SeparableTaps::bicubic(Vec2::new(x, y))
+                    }
+                    _ => quality::SeparableTaps::lanczos(
+                        Vec2::new(x, y),
+                        method.lanczos_param().unwrap(),
+                    ),
+                };
+                assert!(
+                    taps.is_interior(size),
+                    "{method:?} at ({x}, {y}) is not interior, so it proves nothing"
+                );
+                interior_positions += 1;
+
+                let fast = taps.interior_quality();
+                let clipped_x = taps.clipped_x(size);
+                let clipped_y = taps.clipped_y(size);
+                let clipped = quality::SampleQuality {
+                    coverage: quality::separable_coverage(clipped_x, clipped_y),
+                    confidence: quality::separable_confidence(clipped_x.in_sums, clipped_y.in_sums),
+                };
+                assert_eq!(
+                    fast.coverage.to_bits(),
+                    clipped.coverage.to_bits(),
+                    "{method:?} at ({x}, {y}): coverage {} against {}",
+                    fast.coverage,
+                    clipped.coverage
+                );
+                assert_eq!(
+                    fast.confidence.to_bits(),
+                    clipped.confidence.to_bits(),
+                    "{method:?} at ({x}, {y}): confidence {} against {}",
+                    fast.confidence,
+                    clipped.confidence
+                );
+                y += 0.13;
+            }
+            x += 0.17;
+        }
+    }
+    assert!(
+        interior_positions > 800,
+        "only {interior_positions} interior positions were compared"
+    );
+}
+
 /// The pairing `combine` gates on, checked at the end that produces it: a warped pixel has support
 /// and interpolation confidence together or neither, for every method, everywhere a kernel can
 /// straddle a border. `PixelCoverage::contributes` is the consumer's rule, so the survivors it
