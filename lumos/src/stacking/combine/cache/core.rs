@@ -5,6 +5,8 @@
 //! one call that hides whether a plane is resident or memory-mapped — and hand the pair to the
 //! reducer. An in-memory stack is a single chunk; a spilled one is as many as the budget dictates.
 
+use std::sync::OnceLock;
+
 use common::CancelToken;
 
 use crate::io::image::image_dimensions::ImageDimensions;
@@ -35,6 +37,15 @@ pub(crate) struct CacheCore {
     /// Cooperative cancel flag, present during validation and normalization and polled by
     /// [`Self::process_chunks`] during the combine.
     pub(crate) cancel: CancelToken,
+    /// The memory reading every chunk sizing in this combine shares, taken on the first ask.
+    ///
+    /// [`CacheConfig::get_available_memory`] samples the system whenever the config carries no
+    /// override, so asking twice answers two different numbers — and the coverage pass has to size
+    /// against the figure the combine already sized against, or the output planes the combine has
+    /// since allocated are charged against a reading taken before they existed. Holding it here is
+    /// what lets the two passes ask independently; it used to travel between them as a field on the
+    /// combine's result.
+    pub(crate) chunk_memory: OnceLock<Option<u64>>,
 }
 
 /// Per-chunk context handed to the [`CacheCore::process_chunks`] closure: the input frame
@@ -109,10 +120,13 @@ pub(crate) fn coverage_chunk_memory_layout(
 }
 
 impl CacheCore {
+    /// `None` for a resident combine, which walks whole planes and needs no budget at all.
     pub(super) fn chunk_available_memory(&self) -> Option<u64> {
-        self.spill_directory
-            .as_ref()
-            .map(|_| self.config.get_available_memory())
+        *self.chunk_memory.get_or_init(|| {
+            self.spill_directory
+                .as_ref()
+                .map(|_| self.config.get_available_memory())
+        })
     }
 
     /// Combine engine: walk the output in memory-bounded row chunks (whole planes for in-memory

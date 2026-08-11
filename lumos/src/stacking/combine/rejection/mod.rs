@@ -15,6 +15,7 @@ pub(crate) mod gesd_config;
 pub(crate) mod linear_fit_clip_config;
 pub(crate) mod percentile_clip_config;
 pub(crate) mod scratch_buffers;
+pub(crate) mod sigma_bounds;
 pub(crate) mod sigma_clip_config;
 pub(crate) mod winsorized_clip_config;
 
@@ -25,29 +26,44 @@ use crate::stacking::combine::rejection::gesd_config::GesdConfig;
 use crate::stacking::combine::rejection::linear_fit_clip_config::LinearFitClipConfig;
 use crate::stacking::combine::rejection::percentile_clip_config::PercentileClipConfig;
 use crate::stacking::combine::rejection::scratch_buffers::ScratchBuffers;
+use crate::stacking::combine::rejection::sigma_bounds::SigmaBounds;
 use crate::stacking::combine::rejection::sigma_clip_config::SigmaClipConfig;
 use crate::stacking::combine::rejection::winsorized_clip_config::WinsorizedClipConfig;
 
-/// Both clip thresholds must be finite and positive: they scale a spread estimate, so a
-/// non-positive one inverts the keep-band and a non-finite one empties it.
-fn validate_sigma_bounds(sigma_low: f32, sigma_high: f32) -> Result<(), InvalidConfigField> {
-    InvalidConfigField::finite("sigma_low", "finite and positive", sigma_low, |value| {
-        value > 0.0
-    })?;
-    InvalidConfigField::finite("sigma_high", "finite and positive", sigma_high, |value| {
-        value > 0.0
-    })
+/// An iteration cap must leave at least one pass to run. Shared by the two methods that iterate.
+fn validate_max_iterations(max_iterations: u32) -> Result<(), InvalidConfigField> {
+    InvalidConfigField::check(
+        max_iterations >= 1,
+        "max_iterations",
+        "at least 1",
+        f64::from(max_iterations),
+    )
 }
 
-/// Reset an indices buffer to [0, 1, 2, ...n), reusing the allocation.
+/// Open a rejection: pair every value with its frame index, and report the survivor count straight
+/// back when there are too few values to reject from.
+///
+/// `min_samples` is the smallest count the method can act on at all, not a tuning knob or a fast
+/// path — a sigma clip has no spread to measure below three values, a linear fit no line to fit
+/// below four. `Some` means the caller is done and everything survives, indices already paired.
+fn begin_rejection(
+    values: &[f32],
+    scratch: &mut ScratchBuffers,
+    min_samples: usize,
+) -> Option<usize> {
+    debug_assert!(!values.is_empty());
+    scratch.reset_indices(values.len());
+    (values.len() < min_samples).then_some(values.len())
+}
+
 /// Keep predicate for asymmetric sigma rejection: `diff = value − reference`, kept when it lies
 /// within `[−low, high]` (the low- and high-side thresholds are applied separately).
 #[inline]
-fn within_threshold(diff: f32, low: f32, high: f32) -> bool {
+fn within_threshold(diff: f32, bounds: SigmaBounds) -> bool {
     if diff < 0.0 {
-        -diff <= low
+        -diff <= bounds.low
     } else {
-        diff <= high
+        diff <= bounds.high
     }
 }
 
@@ -60,13 +76,12 @@ fn compact_within(
     values: &mut [f32],
     indices: &mut [usize],
     count: usize,
-    low: f32,
-    high: f32,
+    bounds: SigmaBounds,
     reference: impl Fn(usize) -> f32,
 ) -> usize {
     let mut write = 0;
     for read in 0..count {
-        if within_threshold(values[read] - reference(read), low, high) {
+        if within_threshold(values[read] - reference(read), bounds) {
             values[write] = values[read];
             indices[write] = indices[read];
             write += 1;

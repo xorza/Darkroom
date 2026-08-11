@@ -8,6 +8,7 @@
 
 use glam::DVec2;
 
+use crate::stacking::registration::point_pairs::PointPairs;
 use crate::stacking::registration::ransac::transforms::estimate_transform;
 use crate::stacking::registration::spatial::KdTree;
 use crate::stacking::registration::transform::{Transform, TransformType};
@@ -50,7 +51,7 @@ pub(crate) fn recover_matches(
     let mut matched_target = vec![false; target_stars.len()];
     let mut matched_ref = vec![false; ref_stars.len()];
     // Refit inputs, rebuilt per pass from the pass's own matches; only the capacity carries over.
-    let (mut all_ref, mut all_target) = (Vec::new(), Vec::new());
+    let mut all = PointPairs::default();
 
     for _ in 0..RECOVERY_MAX_ITERATIONS {
         let prev_count = current_matches.len();
@@ -95,16 +96,15 @@ pub(crate) fn recover_matches(
         }
 
         // Refit transform with updated matches
-        all_ref.clear();
-        all_target.clear();
-        all_ref.reserve_exact(current_matches.len());
-        all_target.reserve_exact(current_matches.len());
-        for star_match in &current_matches {
-            all_ref.push(ref_stars[star_match.reference]);
-            all_target.push(target_stars[star_match.target]);
-        }
+        all.gather_matched(
+            current_matches
+                .iter()
+                .map(|star_match| (star_match.reference, star_match.target)),
+            ref_stars,
+            target_stars,
+        );
 
-        match estimate_transform(&all_ref, &all_target, transform_type) {
+        match estimate_transform(&all.reference, &all.target, transform_type) {
             Some(new_transform) => current_transform = new_transform,
             None => break,
         }

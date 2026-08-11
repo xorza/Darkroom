@@ -19,7 +19,7 @@ use crate::stacking::star_detection::background::background_estimate::Background
 use crate::stacking::star_detection::config::Config;
 use crate::stacking::star_detection::detector::stages::detect::DetectResult;
 use crate::stacking::star_detection::detector::stages::filter::FilterOutcome;
-use crate::stacking::star_detection::detector::stages::fwhm::FwhmResult;
+use crate::stacking::star_detection::detector::stages::fwhm;
 use crate::stacking::star_detection::resources::DetectionResources;
 use crate::stacking::star_detection::star::Star;
 
@@ -110,16 +110,6 @@ impl FwhmSource {
     }
 }
 
-impl From<&FwhmResult> for FwhmSource {
-    fn from(result: &FwhmResult) -> Self {
-        match (result.fwhm, result.stars_used) {
-            (None, _) => FwhmSource::Disabled,
-            (Some(fwhm), 0) => FwhmSource::Configured(fwhm),
-            (Some(fwhm), stars_used) => FwhmSource::Estimated { fwhm, stars_used },
-        }
-    }
-}
-
 /// Star detector with reusable processing resources.
 #[derive(Debug)]
 pub struct StarDetector {
@@ -181,15 +171,14 @@ impl StarDetector {
         }
 
         // Step 3: Determine effective FWHM (manual > auto-estimate > disabled)
-        let fwhm_result =
-            FwhmResult::estimate(&grayscale_image, &background, &self.config, resources);
-        let effective_fwhm = fwhm_result.fwhm.unwrap_or(0.0);
+        let fwhm = fwhm::estimate(&grayscale_image, &background, &self.config, resources);
+        let effective_fwhm = fwhm.value().unwrap_or(0.0);
 
         // Step 4: Detect star candidate regions (with optional matched filter)
         let detect_result = DetectResult::from_image(
             &grayscale_image,
             &background,
-            fwhm_result.fwhm,
+            fwhm.value(),
             &self.config.detection,
             resources,
         );
@@ -199,7 +188,7 @@ impl StarDetector {
             connected_components: detect_result.connected_components,
             candidates_after_filtering: detect_result.regions.len(),
             deblended_components: detect_result.deblended_components,
-            fwhm: FwhmSource::from(&fwhm_result),
+            fwhm,
             ..Default::default()
         };
         tracing::debug!("Detected {} star candidates", detect_result.regions.len());
@@ -271,35 +260,6 @@ mod tests {
 
     #[test]
     fn fwhm_source_distinguishes_measured_from_supplied() {
-        // The stage reports `stars_used == 0` for anything it did not measure — a configured
-        // `expected` FWHM and the too-few-stars fallback both land there — so that zero is what
-        // separates `Configured` from `Estimated`.
-        assert_eq!(
-            FwhmSource::from(&FwhmResult {
-                fwhm: Some(3.5),
-                stars_used: 0
-            }),
-            FwhmSource::Configured(3.5)
-        );
-        assert_eq!(
-            FwhmSource::from(&FwhmResult {
-                fwhm: Some(3.5),
-                stars_used: 12
-            }),
-            FwhmSource::Estimated {
-                fwhm: 3.5,
-                stars_used: 12
-            }
-        );
-        // Matched filtering off: no FWHM at all, whatever the count says.
-        assert_eq!(
-            FwhmSource::from(&FwhmResult {
-                fwhm: None,
-                stars_used: 0
-            }),
-            FwhmSource::Disabled
-        );
-
         // `value` reports what the detector ran with; only a measured one is `was_estimated`.
         assert_eq!(FwhmSource::Configured(3.5).value(), Some(3.5));
         assert_eq!(

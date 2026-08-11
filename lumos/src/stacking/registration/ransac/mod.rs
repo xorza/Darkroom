@@ -27,6 +27,7 @@ use std::cmp::Ordering;
 
 use glam::DVec2;
 
+use crate::stacking::registration::point_pairs::PointPairs;
 use crate::stacking::registration::ransac::config::RansacConfig;
 use crate::stacking::registration::ransac::sampling::{
     PHASE_POOL_FRACTIONS, PHASE_WEIGHTED, SAMPLING_PHASES, make_rng, random_sample_into,
@@ -39,16 +40,14 @@ use crate::stacking::registration::triangle::voting::PointMatch;
 #[derive(Debug)]
 struct LocalOptBuffers {
     inlier_buf: Vec<usize>,
-    point_buf_ref: Vec<DVec2>,
-    point_buf_target: Vec<DVec2>,
+    points: PointPairs,
 }
 
 impl LocalOptBuffers {
     fn with_capacity(n: usize) -> Self {
         Self {
             inlier_buf: Vec::with_capacity(n),
-            point_buf_ref: Vec::with_capacity(n),
-            point_buf_target: Vec::with_capacity(n),
+            points: PointPairs::with_capacity(n),
         }
     }
 }
@@ -177,16 +176,13 @@ impl RansacEstimator {
             }
 
             // Re-estimate transform using all current inliers
-            buffers.point_buf_ref.clear();
-            buffers.point_buf_target.clear();
-            for &i in buffers.inlier_buf.iter() {
-                buffers.point_buf_ref.push(ref_points[i]);
-                buffers.point_buf_target.push(target_points[i]);
-            }
+            buffers
+                .points
+                .gather(&buffers.inlier_buf, ref_points, target_points);
 
             let refined = match estimate_transform(
-                &buffers.point_buf_ref,
-                &buffers.point_buf_target,
+                &buffers.points.reference,
+                &buffers.points.target,
                 transform_type,
             ) {
                 Some(t) => t,
@@ -246,8 +242,7 @@ impl RansacEstimator {
 
         // Pre-allocate buffers to avoid per-iteration allocations
         let mut sample_indices: Vec<usize> = Vec::with_capacity(min_samples);
-        let mut sample_ref: Vec<DVec2> = Vec::with_capacity(min_samples);
-        let mut sample_target: Vec<DVec2> = Vec::with_capacity(min_samples);
+        let mut sample = PointPairs::with_capacity(min_samples);
         let mut current = ScoredHypothesis::empty(n);
         let mut lo_buffers = LocalOptBuffers::with_capacity(n);
 
@@ -261,23 +256,19 @@ impl RansacEstimator {
             sample_fn(iterations, max_iter, &mut sample_indices);
 
             // Extract sample points (reusing buffers)
-            sample_ref.clear();
-            sample_target.clear();
-            for &i in &sample_indices {
-                sample_ref.push(ref_points[i]);
-                sample_target.push(target_points[i]);
-            }
+            sample.gather(&sample_indices, ref_points, target_points);
 
             // Skip degenerate samples (coincident/collinear points in either image)
-            if is_sample_degenerate(&sample_ref) || is_sample_degenerate(&sample_target) {
+            if is_sample_degenerate(&sample.reference) || is_sample_degenerate(&sample.target) {
                 continue;
             }
 
             // Estimate transformation from sample
-            let transform = match estimate_transform(&sample_ref, &sample_target, transform_type) {
-                Some(t) => t,
-                None => continue,
-            };
+            let transform =
+                match estimate_transform(&sample.reference, &sample.target, transform_type) {
+                    Some(t) => t,
+                    None => continue,
+                };
 
             // Reject physically implausible hypotheses early (before expensive scoring)
             if !self.is_plausible(&transform) {
@@ -329,16 +320,13 @@ impl RansacEstimator {
         // Final refinement with least squares on all inliers. Too few inliers to re-estimate
         // from is also how "no hypothesis was ever accepted" reads — `best` starts empty.
         if best.inliers.len() >= min_samples {
-            lo_buffers.point_buf_ref.clear();
-            lo_buffers.point_buf_target.clear();
-            for &i in &best.inliers {
-                lo_buffers.point_buf_ref.push(ref_points[i]);
-                lo_buffers.point_buf_target.push(target_points[i]);
-            }
+            lo_buffers
+                .points
+                .gather(&best.inliers, ref_points, target_points);
 
             let refined = estimate_transform(
-                &lo_buffers.point_buf_ref,
-                &lo_buffers.point_buf_target,
+                &lo_buffers.points.reference,
+                &lo_buffers.points.target,
                 transform_type,
             );
 

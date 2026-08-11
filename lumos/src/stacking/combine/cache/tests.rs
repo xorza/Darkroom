@@ -1,3 +1,5 @@
+use std::sync::OnceLock;
+
 use crate::io::image::cfa::{CfaImage, CfaType};
 use crate::memory::ChunkMemoryLayout;
 use crate::stacking::combine::cache::core::{
@@ -419,7 +421,6 @@ fn process_chunked_median() {
         CombinedSample::from_all(values[values.len() / 2], weights)
     });
 
-    assert_eq!(result.chunk_available_memory, None);
     assert_eq!(result.pixels.channel_count(), 1);
     assert_eq!(result.pixels.channel(0).len(), 16);
     for &pixel in result.pixels.channel(0).pixels() {
@@ -567,6 +568,7 @@ fn cleanup_removes_files() {
             config,
             progress: ProgressCallback::default(),
             cancel: CancelToken::never(),
+            chunk_memory: OnceLock::new(),
         },
     };
 
@@ -636,6 +638,7 @@ fn read_channel_chunk_disk_backed() {
             },
             progress: ProgressCallback::default(),
             cancel: CancelToken::never(),
+            chunk_memory: OnceLock::new(),
         },
     };
 
@@ -693,6 +696,7 @@ fn frame_count_disk_backed() {
             config: CacheConfig::default(),
             progress: ProgressCallback::default(),
             cancel: CancelToken::never(),
+            chunk_memory: OnceLock::new(),
         },
     };
 

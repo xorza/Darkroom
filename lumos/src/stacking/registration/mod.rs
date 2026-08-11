@@ -42,6 +42,7 @@
 
 pub(crate) mod config;
 pub(crate) mod distortion;
+mod point_pairs;
 pub(crate) mod ransac;
 pub(crate) mod recovery;
 pub(crate) mod resample;
@@ -58,6 +59,7 @@ mod real_data_tests;
 #[cfg(test)]
 mod tests;
 
+use crate::stacking::registration::point_pairs::PointPairs;
 use crate::stacking::registration::recovery::{RecoveredMatches, recover_matches};
 use config::Config;
 use distortion::sip::SipPolynomial;
@@ -337,19 +339,18 @@ fn estimate_and_refine(
         // position slices and knows nothing about match indices, which is the layering that keeps
         // `distortion` independent of how the matches were found. Only the SIP path pays for it,
         // and it pays once — `unzip` fills both from a single walk.
-        let (inlier_ref, inlier_target): (Vec<DVec2>, Vec<DVec2>) = inlier_matches
-            .iter()
-            .map(|star_match| {
-                (
-                    ref_stars[star_match.reference],
-                    target_stars[star_match.target],
-                )
-            })
-            .unzip();
+        let mut inliers = PointPairs::default();
+        inliers.gather_matched(
+            inlier_matches
+                .iter()
+                .map(|star_match| (star_match.reference, star_match.target)),
+            ref_stars,
+            target_stars,
+        );
 
         Some(SipPolynomial::fit_from_transform(
-            &inlier_ref,
-            &inlier_target,
+            &inliers.reference,
+            &inliers.target,
             &transform,
             sip_config,
         )?)

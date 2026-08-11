@@ -125,7 +125,7 @@ fn detect_rho_opiuchi() {
 fn inspect_pipeline_intermediates_rho_opiuchi() {
     use crate::stacking::star_detection::background::background_estimate::BackgroundEstimate;
     use crate::stacking::star_detection::convolution::{MatchedFilterBuffers, matched_filter};
-    use crate::stacking::star_detection::detector::stages::fwhm::FwhmResult;
+    use crate::stacking::star_detection::detector::stages::fwhm;
     use crate::stacking::star_detection::detector::stages::prepare;
     use crate::stacking::star_detection::labeling::LabelMap;
     use crate::stacking::star_detection::mask_dilation::dilate_mask;
@@ -203,12 +203,9 @@ fn inspect_pipeline_intermediates_rho_opiuchi() {
     println!("Saved: 04_subtracted");
 
     // 5. FWHM estimation
-    let fwhm_result = FwhmResult::estimate(&grayscale, &background, &config, &mut pool);
-    let fwhm = fwhm_result.fwhm;
-    println!(
-        "Estimated FWHM: {:?} (from {} stars)",
-        fwhm, fwhm_result.stars_used
-    );
+    let fwhm_source = fwhm::estimate(&grayscale, &background, &config, &mut pool);
+    let fwhm = fwhm_source.value();
+    println!("Estimated FWHM: {fwhm:?} ({fwhm_source:?})");
 
     // 6. Matched filter (if FWHM available)
     let filtered_pixels: Option<Vec<f32>> = if let Some(fwhm_val) = fwhm {

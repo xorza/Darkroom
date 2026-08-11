@@ -2,6 +2,7 @@
 //! stays meaningful on stacks too small to estimate a spread from.
 
 use crate::error::InvalidConfigField;
+use crate::stacking::combine::rejection::begin_rejection;
 use crate::stacking::combine::rejection::scratch_buffers::ScratchBuffers;
 
 /// Configuration for percentile clipping.
@@ -79,14 +80,11 @@ impl PercentileClipConfig {
     /// Sorts values (with index co-array) and moves the surviving middle range
     /// to `values[..remaining]` and `indices[..remaining]`.
     pub(super) fn reject(&self, values: &mut [f32], scratch: &mut ScratchBuffers) -> usize {
-        debug_assert!(!values.is_empty());
+        if let Some(survivors) = begin_rejection(values, scratch, 3) {
+            return survivors;
+        }
 
         let n = values.len();
-        scratch.reset_indices(n);
-
-        if n <= 2 {
-            return n;
-        }
 
         scratch.sort_with_indices(values, n);
 

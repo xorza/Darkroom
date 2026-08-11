@@ -46,7 +46,7 @@ fn sigma_clipped_preset() {
     assert!(matches!(
         config.method,
         CombineMethod::Mean(Rejection::SigmaClip(c))
-            if (c.sigma_low - 2.0).abs() < f32::EPSILON && (c.sigma_high - 2.0).abs() < f32::EPSILON
+            if (c.sigma.low - 2.0).abs() < f32::EPSILON && (c.sigma.high - 2.0).abs() < f32::EPSILON
     ));
 }
 
@@ -196,7 +196,7 @@ fn bias_preset() {
     assert!(matches!(
         config.method,
         CombineMethod::Mean(Rejection::Winsorized(c))
-            if (c.sigma_low - 3.0).abs() < f32::EPSILON
+            if (c.sigma.low - 3.0).abs() < f32::EPSILON
     ));
     assert_eq!(config.normalization, Normalization::None);
 }
@@ -207,7 +207,7 @@ fn dark_preset() {
     assert!(matches!(
         config.method,
         CombineMethod::Mean(Rejection::Winsorized(c))
-            if (c.sigma_low - 3.0).abs() < f32::EPSILON
+            if (c.sigma.low - 3.0).abs() < f32::EPSILON
     ));
     assert_eq!(config.normalization, Normalization::None);
 }
@@ -218,7 +218,7 @@ fn flat_preset() {
     assert!(matches!(
         config.method,
         CombineMethod::Mean(Rejection::SigmaClip(c))
-            if (c.sigma_low - 3.0).abs() < f32::EPSILON
+            if (c.sigma.low - 3.0).abs() < f32::EPSILON
     ));
     assert_eq!(config.normalization, Normalization::Multiplicative);
 }
@@ -229,7 +229,7 @@ fn light_preset() {
     assert!(matches!(
         config.method,
         CombineMethod::Mean(Rejection::SigmaClip(c))
-            if (c.sigma_low - 2.5).abs() < f32::EPSILON
+            if (c.sigma.low - 2.5).abs() < f32::EPSILON
     ));
     assert_eq!(config.weighting, Weighting::Noise);
     assert_eq!(config.normalization, Normalization::Global);
