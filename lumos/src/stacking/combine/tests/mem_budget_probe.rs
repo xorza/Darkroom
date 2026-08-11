@@ -188,10 +188,7 @@ fn master_stack_memory_probe() -> io::Result<()> {
                     .ok();
             }
             // This probe drives `stack`, which loads and combines and nothing else.
-            StackingStage::Calibrating
-            | StackingStage::Detecting
-            | StackingStage::Registering
-            | StackingStage::Drizzling => {}
+            StackingStage::Preparing | StackingStage::Registering | StackingStage::Drizzling => {}
         })
     };
 

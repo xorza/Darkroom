@@ -76,7 +76,7 @@ pub fn align_and_stack(
             let result = detector.detect(image);
             let n = detected_count.fetch_add(1, Ordering::Relaxed) + 1;
             log_detection(n, total, &result);
-            progress.report(n, total, StackingStage::Detecting);
+            progress.report(n, total, StackingStage::Preparing);
             Ok(result)
         })
     }?;

@@ -30,10 +30,23 @@ pub struct StackProduct {
     /// pixel every frame reached through a sliver of a drop reads 1.0 — which is what `weight`
     /// answers, and what drizzle's `min_weight_fraction` gates on.
     pub coverage: Option<Coverage>,
-    /// WHT map. Statistical combines store per-channel sums of surviving frame weights multiplied
-    /// by per-pixel confidence; Equal becomes survivor count at unit confidence, while
-    /// Noise/Manual normalize frame weights before that multiplier. Drizzle stores one shared
-    /// plane of summed geometric drop weights.
+    /// WHT map: `Σwᵢ` over whatever formed the pixel.
+    ///
+    /// Unlike [`Self::coverage`], this is *not* one quantity across producers, and cannot be — the
+    /// two weight different things:
+    ///
+    /// - A statistical combine sums, per channel, each surviving frame's weight times its
+    ///   confidence at that pixel. `Equal` weighting leaves unit frame weights, so the sum is the
+    ///   survivor count scaled by confidence; `Noise` and `Manual` normalize the frame weights to
+    ///   1 across the set first. Per channel because rejection can retain different samples in
+    ///   each.
+    /// - Drizzle sums one shared plane of geometric drop weights: how much of each input pixel's
+    ///   flux landed here, times the frame weight.
+    ///
+    /// So the values are comparable *within* a product but not between producers, and a reader
+    /// should treat this as relative rather than absolute. What does hold either way: it is the
+    /// denominator the image was divided by, and [`Self::linear_variance`] is `Σwᵢ²/(Σwᵢ)²` over
+    /// these same weights, so the two planes are always mutually consistent.
     pub weight: Option<QualityMap>,
     /// Conditional linear-combine variance factor `Σwᵢ² / (Σwᵢ)²`.
     ///

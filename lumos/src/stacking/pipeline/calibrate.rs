@@ -107,7 +107,7 @@ pub fn calibrate_align_stack<P: AsRef<Path> + Sync>(
             let image = tier.hold(&format!("calib_{index}"), image)?;
             let n = done.fetch_add(1, Ordering::Relaxed) + 1;
             log_detection(n, total, &result);
-            progress.report(n, total, StackingStage::Calibrating);
+            progress.report(n, total, StackingStage::Preparing);
             Ok(DetectedFrame {
                 image,
                 stars: result.stars,

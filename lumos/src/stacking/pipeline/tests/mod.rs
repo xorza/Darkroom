@@ -131,8 +131,8 @@ fn aligns_shifted_frames_into_a_sharp_stack() {
             .collect::<Vec<_>>()
     };
 
-    assert_eq!(currents(StackingStage::Detecting), [1, 2, 3]);
-    assert_eq!(totals(StackingStage::Detecting), [3, 3, 3]);
+    assert_eq!(currents(StackingStage::Preparing), [1, 2, 3]);
+    assert_eq!(totals(StackingStage::Preparing), [3, 3, 3]);
     // Registration counts every frame but the reference, which needs none.
     assert_eq!(currents(StackingStage::Registering), [1, 2]);
     assert_eq!(totals(StackingStage::Registering), [2, 2]);
@@ -142,8 +142,11 @@ fn aligns_shifted_frames_into_a_sharp_stack() {
             .any(|(stage, ..)| *stage == StackingStage::Combining),
         "the combine stage never reported"
     );
-    // Already-decoded frames never enter the raw path, so its stage stays silent.
-    assert_eq!(currents(StackingStage::Calibrating), Vec::<usize>::new());
+    assert_eq!(
+        currents(StackingStage::Drizzling),
+        Vec::<usize>::new(),
+        "a statistical combine must not report the drizzle stage"
+    );
 
     // Alignment check: every frame was warped back to the reference, so the reference's
     // brightest star must reappear at the same place in the combined image.
@@ -523,6 +526,90 @@ fn write_mono_cfa_light(directory: &Path, index: usize, image: &LinearImage) -> 
     cfa.metadata.exposure_time = Some(10.0 + index as f64);
     save_cfa_fits(&path, &cfa).expect("write synthetic CFA FITS light");
     path
+}
+
+/// Both front ends report the same stages for the same work, so a progress consumer can read the
+/// stream without knowing which entry point was called.
+///
+/// This is what `StackingStage::Preparing` is for: the raw path decodes and detects in one pass
+/// over the frames, the already-decoded path only detects, and both report that pass once per
+/// frame under the same name. Before it, the two emitted different variants for the same position
+/// in the run and a consumer had to know the route to line them up.
+#[test]
+fn both_front_ends_report_the_same_stages() {
+    let scratch = ScratchDirectory::new("lumos_stage_parity");
+    let BaseField {
+        image: base,
+        registration: reg,
+    } = base_field();
+    let frames = [
+        base.clone(),
+        shifted(&base, &reg, 4.0, -3.0),
+        shifted(&base, &reg, -2.0, 5.0),
+    ];
+
+    let stages = |reports: &Mutex<Vec<(StackingStage, usize, usize)>>| {
+        let mut seen: Vec<StackingStage> = reports
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(stage, ..)| *stage)
+            .collect();
+        seen.dedup();
+        seen.sort_by_key(|stage| format!("{stage:?}"));
+        seen.dedup();
+        seen
+    };
+    let recorder = || {
+        let reports = Arc::new(Mutex::new(Vec::new()));
+        let callback = ProgressCallback::new({
+            let reports = Arc::clone(&reports);
+            move |progress| {
+                reports
+                    .lock()
+                    .unwrap()
+                    .push((progress.stage, progress.current, progress.total))
+            }
+        });
+        (reports, callback)
+    };
+
+    let mut config = AlignStackConfig::default();
+    config.registration.ransac.seed = Some(0x5EED_0F5E);
+
+    let (raw_reports, raw_progress) = recorder();
+    let paths: Vec<PathBuf> = frames
+        .iter()
+        .enumerate()
+        .map(|(index, frame)| write_mono_cfa_light(&scratch, index, frame))
+        .collect();
+    calibrate_align_stack(
+        &paths,
+        &CalibrationMasters::default(),
+        &config,
+        raw_progress,
+        CancelToken::never(),
+    )
+    .expect("raw-path stack");
+
+    let (decoded_reports, decoded_progress) = recorder();
+    align_and_stack(
+        frames.to_vec(),
+        &config,
+        decoded_progress,
+        CancelToken::never(),
+    )
+    .expect("decoded-path stack");
+
+    assert_eq!(
+        stages(&raw_reports),
+        stages(&decoded_reports),
+        "the two front ends emitted different stage sets for the same work"
+    );
+    assert!(
+        stages(&raw_reports).contains(&StackingStage::Preparing),
+        "neither front end reported the preparing pass"
+    );
 }
 
 /// The all-RAM and memory-bounded runs must produce the same stack.
