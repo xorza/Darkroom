@@ -31,6 +31,7 @@ use glam::DVec2;
 
 use crate::error::InvalidConfigField;
 use crate::math::size2us::Size2us;
+use crate::math::statistics::{MAD_TO_SIGMA, mad_f64_fast, median_f64_fast};
 use crate::stacking::registration::distortion::SINGULAR_THRESHOLD;
 use crate::stacking::registration::distortion::point_normalization::PointNormalization;
 use crate::stacking::registration::result::RegistrationError;
@@ -196,10 +197,14 @@ impl SipPolynomial {
             return Err(RegistrationError::SingularSipSystem);
         };
 
-        // Iterative sigma-clipping
+        // Iterative sigma-clipping. The three buffers live outside the loop and are refilled from
+        // empty each pass, so the iteration allocates nothing.
+        let mut residuals: Vec<f64> = Vec::with_capacity(n);
+        let mut active: Vec<f64> = Vec::with_capacity(n);
+        let mut deviations: Vec<f64> = Vec::with_capacity(n);
         for _ in 0..config.clip_iterations {
             // Compute per-point residual magnitudes in normalized space
-            let mut residuals: Vec<f64> = Vec::with_capacity(n);
+            residuals.clear();
             for i in 0..n {
                 if !mask[i] {
                     residuals.push(f64::INFINITY);
@@ -222,26 +227,21 @@ impl SipPolynomial {
                 residuals.push((du * du + dv * dv).sqrt());
             }
 
-            // Compute median and MAD of active residuals
-            let mut active: Vec<f64> = residuals
-                .iter()
-                .zip(mask.iter())
-                .filter(|(_, m)| **m)
-                .map(|(r, _)| *r)
-                .collect();
+            active.clear();
+            active.extend(
+                residuals
+                    .iter()
+                    .zip(mask.iter())
+                    .filter(|(_, m)| **m)
+                    .map(|(r, _)| *r),
+            );
 
             if active.len() < terms.len() {
                 break; // Not enough points to re-fit
             }
 
-            active.sort_unstable_by(|a, b| a.total_cmp(b));
-            let median = active[active.len() / 2];
-
-            let mut deviations: Vec<f64> = active.iter().map(|&r| (r - median).abs()).collect();
-            deviations.sort_unstable_by(|a, b| a.total_cmp(b));
-            let mad = deviations[deviations.len() / 2];
-
-            const MAD_TO_SIGMA: f64 = 1.4826022;
+            let median = median_f64_fast(&mut active);
+            let mad = mad_f64_fast(&active, median, &mut deviations);
             let threshold = config.clip_sigma * mad * MAD_TO_SIGMA;
 
             if threshold < 1e-15 {

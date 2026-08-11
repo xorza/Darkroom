@@ -53,7 +53,7 @@ mod sampling;
 use crate::bit_buffer2::BitBuffer2;
 use crate::io::image::cfa::{CfaImage, CfaType};
 use crate::math::size2us::Size2us;
-use crate::math::statistics::{MAD_TO_SIGMA, median_f32_mut};
+use crate::math::statistics::{mad_to_sigma, median_f32_mut};
 use crate::stacking::calibration_masters::defect_map::dark_background::DarkBackground;
 use crate::stacking::calibration_masters::defect_map::sampling::collect_color_residual_samples;
 use crate::stacking::calibration_masters::pattern_or_mono;
@@ -352,7 +352,7 @@ fn compute_per_color_residual_stats(
         } else {
             0.0
         };
-        let sigma = (mad * MAD_TO_SIGMA).max(tail_sigma).max(sigma_floor);
+        let sigma = mad_to_sigma(mad).max(tail_sigma).max(sigma_floor);
 
         tracing::debug!(
             "Defect residual stats color={color}: median={median:.6}, MAD={mad:.6}, \

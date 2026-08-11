@@ -55,9 +55,21 @@ fn abs_deviation_inplace(values: &mut [f32], median: f32) {
 
 /// MAD (Median Absolute Deviation) to standard deviation conversion factor.
 ///
-/// For a normal distribution, σ ≈ 1.4826 × MAD.
-/// This is the exact value: 1 / Φ⁻¹(3/4) where Φ⁻¹ is the inverse CDF.
-pub(crate) const MAD_TO_SIGMA: f32 = 1.4826022;
+/// For a normal distribution σ ≈ 1.4826 × MAD; the factor is `1 / Φ⁻¹(3/4)`, where Φ⁻¹ is the
+/// inverse normal CDF. Carried to the eight significant digits it has always had rather than the
+/// full double-precision 1.482602218505602 — the two agree to within an `f32` ulp, so extending it
+/// would move nothing single-precision, only the SIP clip threshold.
+///
+/// `f64` is the canonical form, with [`MAD_TO_SIGMA_F32`] cast from it so the two precisions cannot
+/// round apart. The double-precision users used to reach the constant through `f64::from` on an
+/// `f32`, spending an `f32` round-trip inside an `f64` computation for nothing.
+pub(crate) const MAD_TO_SIGMA: f64 = 1.4826022;
+
+/// [`MAD_TO_SIGMA`] in the precision the `f32` paths multiply in.
+///
+/// The nearest `f32` to the `f64` constant is the value those paths always used, so making the
+/// `f64` one canonical left every single-precision result bit-identical.
+const MAD_TO_SIGMA_F32: f32 = MAD_TO_SIGMA as f32;
 
 /// χ²(0.99) for k = 2 degrees of freedom: the squared Mahalanobis radius enclosing 99% of an
 /// isotropic 2-D Gaussian, so `r² > CHI2_99_2DOF · σ²` is the 1%-tail outlier test for a position
@@ -74,7 +86,7 @@ pub(crate) const CHI2_99_2DOF: f64 = 9.210_340_371_976_182;
 /// Convert MAD to standard deviation (assuming normal distribution).
 #[inline]
 pub(crate) fn mad_to_sigma(mad: f32) -> f32 {
-    mad * MAD_TO_SIGMA
+    mad * MAD_TO_SIGMA_F32
 }
 
 /// Calculate the median of f32 values in-place.
@@ -137,7 +149,7 @@ pub(crate) fn robust_sigma_f64(data: &[f64], scratch: &mut Vec<f64>) -> f64 {
     for value in scratch.iter_mut() {
         *value = (*value - median).abs();
     }
-    f64::from(MAD_TO_SIGMA) * median_f64_mut(scratch)
+    MAD_TO_SIGMA * median_f64_mut(scratch)
 }
 
 /// Fast approximate median using `partial_cmp` (single partition, no NaN handling).
@@ -162,6 +174,41 @@ pub(crate) fn median_f32_fast(data: &mut [f32]) -> f32 {
     let (_, median, _) =
         data.select_nth_unstable_by(mid, |a, b| a.partial_cmp(b).unwrap_or(Ordering::Equal));
     *median
+}
+
+/// Fast approximate median of `f64` values — the `f64` twin of [`median_f32_fast`], with the same
+/// upper-middle convention for even lengths and the same NaN contract.
+///
+/// The convention is what lets a caller that sorted and indexed `[len / 2]` switch to this and get
+/// the same value out: a full sort's element at that rank is exactly what one selection returns.
+#[inline]
+pub(crate) fn median_f64_fast(data: &mut [f64]) -> f64 {
+    debug_assert!(!data.is_empty());
+    debug_assert!(
+        !data.iter().any(|value| value.is_nan()),
+        "median_f64_fast requires NaN-free data; use median_f64_mut for data that may hold NaN"
+    );
+
+    let mid = data.len() / 2;
+    let (_, median, _) =
+        data.select_nth_unstable_by(mid, |a, b| a.partial_cmp(b).unwrap_or(Ordering::Equal));
+    *median
+}
+
+/// MAD of `values` about `median` through [`median_f64_fast`] — the `f64` twin of [`mad_f32_fast`],
+/// NaN contract included.
+#[inline]
+pub(crate) fn mad_f64_fast(values: &[f64], median: f64, scratch: &mut Vec<f64>) -> f64 {
+    debug_assert!(
+        !median.is_nan() && !values.iter().any(|value| value.is_nan()),
+        "mad_f64_fast requires a NaN-free median and values; use robust_sigma_f64 otherwise"
+    );
+    if values.is_empty() {
+        return 0.0;
+    }
+    scratch.clear();
+    scratch.extend(values.iter().map(|&value| (value - median).abs()));
+    median_f64_fast(scratch)
 }
 
 /// Replace `scratch` with `|value - median|` for each of `values`, leaving it exactly as long.
