@@ -23,7 +23,7 @@ use crate::stacking::star_detection::labeling::LabelMap;
 use crate::stacking::star_detection::resources::DetectionResources;
 
 use crate::stacking::star_detection::threshold_mask::{
-    create_threshold_mask, create_threshold_mask_filtered,
+    ThresholdParams, create_threshold_mask, create_threshold_mask_filtered,
 };
 
 /// Result of detection stage with diagnostic statistics.
@@ -98,23 +98,21 @@ impl DetectResult {
         let mut mask = pool.acquire_bit();
         mask.fill(false);
 
+        let threshold = ThresholdParams {
+            sigma: config.sigma_threshold,
+            min_noise: stats.noise_floor,
+        };
+
         if let Some(filtered) = &filtered {
             debug_assert_eq!(width, filtered.width());
             debug_assert_eq!(height, filtered.height());
-            create_threshold_mask_filtered(
-                filtered,
-                &stats.noise,
-                config.sigma_threshold,
-                stats.noise_floor,
-                &mut mask,
-            );
+            create_threshold_mask_filtered(filtered, &stats.noise, threshold, &mut mask);
         } else {
             create_threshold_mask(
                 pixels,
                 &stats.background,
                 &stats.noise,
-                config.sigma_threshold,
-                stats.noise_floor,
+                threshold,
                 &mut mask,
             );
         }

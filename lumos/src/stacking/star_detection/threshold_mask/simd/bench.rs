@@ -1,6 +1,7 @@
 //! Benchmarks for threshold mask creation.
 
 use crate::bit_buffer2::BitBuffer2;
+use crate::stacking::star_detection::threshold_mask::ThresholdParams;
 use crate::stacking::star_detection::threshold_mask::simd::{process_words, process_words_scalar};
 use crate::testing::prelude::*;
 use ::quickbench::quick_bench;
@@ -40,11 +41,12 @@ fn bench_threshold_mask_4k(b: ::quickbench::Bencher) {
             black_box(pixels.pixels()),
             black_box(bg.pixels()),
             black_box(noise.pixels()),
-            black_box(3.0),
-            black_box(1e-6),
+            black_box(ThresholdParams {
+                sigma: 3.0,
+                min_noise: 1e-6,
+            }),
             words,
-            0,
-            pixel_end,
+            0..pixel_end,
         );
     });
 
@@ -54,11 +56,12 @@ fn bench_threshold_mask_4k(b: ::quickbench::Bencher) {
             black_box(pixels.pixels()),
             black_box(bg.pixels()),
             black_box(noise.pixels()),
-            black_box(3.0),
-            black_box(1e-6),
+            black_box(ThresholdParams {
+                sigma: 3.0,
+                min_noise: 1e-6,
+            }),
             words,
-            0,
-            pixel_end,
+            0..pixel_end,
         );
     });
 
@@ -68,11 +71,12 @@ fn bench_threshold_mask_4k(b: ::quickbench::Bencher) {
             black_box(pixels.pixels()),
             &[],
             black_box(noise.pixels()),
-            black_box(3.0),
-            black_box(1e-6),
+            black_box(ThresholdParams {
+                sigma: 3.0,
+                min_noise: 1e-6,
+            }),
             words,
-            0,
-            pixel_end,
+            0..pixel_end,
         );
     });
 
@@ -82,11 +86,12 @@ fn bench_threshold_mask_4k(b: ::quickbench::Bencher) {
             black_box(pixels.pixels()),
             &[],
             black_box(noise.pixels()),
-            black_box(3.0),
-            black_box(1e-6),
+            black_box(ThresholdParams {
+                sigma: 3.0,
+                min_noise: 1e-6,
+            }),
             words,
-            0,
-            pixel_end,
+            0..pixel_end,
         );
     });
 }

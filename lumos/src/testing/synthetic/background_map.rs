@@ -3,7 +3,9 @@
 //! Provides utilities to create BackgroundEstimate instances for benchmarks and tests.
 
 use crate::math::size2us::Size2us;
-use crate::stacking::star_detection::background::background_estimate::BackgroundEstimate;
+use crate::stacking::star_detection::background::background_estimate::{
+    BackgroundEstimate, noise_floor_for,
+};
 use crate::stacking::star_detection::config::background_config::BackgroundConfig;
 use crate::stacking::star_detection::resources::DetectionResources;
 use imaginarium::Buffer2;
@@ -17,9 +19,9 @@ pub(crate) fn uniform(size: Size2us, background: f32, noise: f32) -> BackgroundE
     BackgroundEstimate {
         background: bg_buf,
         noise: noise_buf,
-        // The map is uniform, so the frame's typical σ is `noise` itself; the real estimator's
-        // fraction of the median tile σ reduces to exactly this.
-        noise_floor: (noise * 1e-4).max(f32::MIN_POSITIVE),
+        // The map is uniform, so the frame's typical σ is `noise` itself and the estimator's
+        // median-tile-σ derivation reduces to exactly this.
+        noise_floor: noise_floor_for(noise),
     }
 }
 

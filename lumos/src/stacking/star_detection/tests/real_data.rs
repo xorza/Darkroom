@@ -8,7 +8,7 @@ use crate::io::image::linear::LinearImage;
 use crate::math::size2us::Size2us;
 use crate::stacking::star_detection::config::Config;
 use crate::stacking::star_detection::detector::StarDetector;
-use crate::stacking::star_detection::threshold_mask::create_threshold_mask;
+use crate::stacking::star_detection::threshold_mask::{ThresholdParams, create_threshold_mask};
 use crate::testing::{calibration_dir, init_tracing};
 use crate::{CentroidMethod, ImageDimensions};
 use common::internals::test_output_path;
@@ -246,22 +246,19 @@ fn inspect_pipeline_intermediates_rho_opiuchi() {
     // 7. Threshold mask
     let mut mask = pool.acquire_bit();
     mask.fill(false);
+    let threshold = ThresholdParams {
+        sigma: config.detection.sigma_threshold,
+        min_noise: background.noise_floor,
+    };
     if let Some(ref filtered) = filtered_pixels {
         let filtered_buf = Buffer2::new(width, height, filtered.clone());
-        create_threshold_mask_filtered(
-            &filtered_buf,
-            &background.noise,
-            config.detection.sigma_threshold,
-            background.noise_floor,
-            &mut mask,
-        );
+        create_threshold_mask_filtered(&filtered_buf, &background.noise, threshold, &mut mask);
     } else {
         create_threshold_mask(
             &grayscale,
             &background.background,
             &background.noise,
-            config.detection.sigma_threshold,
-            background.noise_floor,
+            threshold,
             &mut mask,
         );
     }

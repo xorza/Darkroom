@@ -12,10 +12,43 @@ use rayon::prelude::*;
 mod simd;
 
 #[cfg(test)]
+pub(crate) mod internals {
+    use crate::stacking::star_detection::threshold_mask::ThresholdParams;
+
+    /// The σ floor this module's tests threshold with, shared by the kernel cross-checks in
+    /// [`super::simd`]. Frame-derived in production; fixed here so every case is graded on the
+    /// noise it declares, and low enough never to bind on it.
+    pub(crate) const TEST_MIN_NOISE: f32 = 1e-6;
+
+    /// [`ThresholdParams`] at `sigma` with the shared test floor.
+    pub(crate) fn test_params(sigma: f32) -> ThresholdParams {
+        ThresholdParams {
+            sigma,
+            min_noise: TEST_MIN_NOISE,
+        }
+    }
+}
+
+#[cfg(test)]
 mod tests;
 
 use crate::bit_buffer2::BitBuffer2;
 use imaginarium::Buffer2;
+
+/// What a threshold comparison needs beyond the buffers: how many σ above the noise a pixel must
+/// sit, and the floor its σ is held to first.
+///
+/// Bundled rather than passed loose because they travel together through the entry points and every
+/// SIMD backend, the same way the background interpolator hands its kernels a `SplineSegment`.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct ThresholdParams {
+    /// Detection threshold in units of the local noise σ.
+    pub(crate) sigma: f32,
+    /// Floor applied to each per-pixel σ, in the samples' own units — see
+    /// [`crate::stacking::star_detection::background::BackgroundEstimate::noise_floor`], which is
+    /// what every caller in the pipeline passes.
+    pub(crate) min_noise: f32,
+}
 
 /// Create binary mask of pixels above threshold into a BitBuffer2.
 ///
@@ -24,18 +57,13 @@ use imaginarium::Buffer2;
 /// Uses SIMD acceleration when available (AVX2/SSE4.1 on x86_64, NEON on aarch64).
 /// Writes directly to packed u64 words for better memory efficiency.
 ///
-/// `min_noise` floors each per-pixel σ before the threshold is formed, in the samples' own units —
-/// see [`crate::stacking::star_detection::background::BackgroundEstimate::noise_floor`], which is
-/// what every caller in the pipeline passes.
-///
 /// Note: All input buffers must have the same dimensions as the mask.
 /// The output mask has row-aligned storage (stride may differ from width).
 pub(crate) fn create_threshold_mask(
     pixels: &Buffer2<f32>,
     bg: &Buffer2<f32>,
     noise: &Buffer2<f32>,
-    sigma_threshold: f32,
-    min_noise: f32,
+    threshold: ThresholdParams,
     mask: &mut BitBuffer2,
 ) {
     let width = mask.size.width;
@@ -63,11 +91,9 @@ pub(crate) fn create_threshold_mask(
                 pixels,
                 bg,
                 noise,
-                sigma_threshold,
-                min_noise,
+                threshold,
                 row_words,
-                row_pixel_start,
-                row_pixel_start + width,
+                row_pixel_start..row_pixel_start + width,
             );
         });
 }
@@ -82,8 +108,7 @@ pub(crate) fn create_threshold_mask(
 pub(crate) fn create_threshold_mask_filtered(
     filtered: &Buffer2<f32>,
     noise: &Buffer2<f32>,
-    sigma_threshold: f32,
-    min_noise: f32,
+    threshold: ThresholdParams,
     mask: &mut BitBuffer2,
 ) {
     let width = mask.size.width;
@@ -107,11 +132,9 @@ pub(crate) fn create_threshold_mask_filtered(
                 filtered,
                 &[],
                 noise,
-                sigma_threshold,
-                min_noise,
+                threshold,
                 row_words,
-                row_pixel_start,
-                row_pixel_start + width,
+                row_pixel_start..row_pixel_start + width,
             );
         });
 }

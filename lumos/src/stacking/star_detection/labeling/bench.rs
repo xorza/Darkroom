@@ -4,7 +4,7 @@ use crate::bit_buffer2::BitBuffer2;
 use crate::stacking::star_detection::config::background_config::BackgroundConfig;
 use crate::stacking::star_detection::config::detection_config::Connectivity;
 use crate::stacking::star_detection::mask_dilation::dilate_mask;
-use crate::stacking::star_detection::threshold_mask::create_threshold_mask;
+use crate::stacking::star_detection::threshold_mask::{ThresholdParams, create_threshold_mask};
 use crate::testing::prelude::*;
 use crate::testing::synthetic::fixtures::star_field;
 use ::quickbench::quick_bench;
@@ -25,8 +25,10 @@ fn create_detection_mask(pixels: &Buffer2<f32>, sigma_threshold: f32) -> BitBuff
         pixels,
         &background.background,
         &background.noise,
-        sigma_threshold,
-        background.noise_floor,
+        ThresholdParams {
+            sigma: sigma_threshold,
+            min_noise: background.noise_floor,
+        },
         &mut mask,
     );
 

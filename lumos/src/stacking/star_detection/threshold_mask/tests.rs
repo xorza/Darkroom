@@ -8,15 +8,11 @@
 //! - Multi-row tests: 2D image patterns and row boundary handling
 
 use crate::bit_buffer2::BitBuffer2;
+use crate::stacking::star_detection::threshold_mask::internals::{TEST_MIN_NOISE, test_params};
 use crate::stacking::star_detection::threshold_mask::{
     create_threshold_mask, create_threshold_mask_filtered,
 };
 use crate::testing::prelude::*;
-
-/// The per-pixel σ floor the helpers below pass. Frame-derived in production; fixed here so every
-/// case in this file is thresholded on the noise it declares, with the floor low enough never to
-/// bind on it.
-const TEST_MIN_NOISE: f32 = 1e-6;
 
 /// Helper to create threshold mask for tests using packed version
 fn create_threshold_mask_test(
@@ -30,7 +26,7 @@ fn create_threshold_mask_test(
     let bg = Buffer2::new(size.width, size.height, bg.to_vec());
     let noise = Buffer2::new(size.width, size.height, noise.to_vec());
     let mut mask = BitBuffer2::new_filled(size, false);
-    create_threshold_mask(&pixels, &bg, &noise, sigma, TEST_MIN_NOISE, &mut mask);
+    create_threshold_mask(&pixels, &bg, &noise, test_params(sigma), &mut mask);
     mask
 }
 
@@ -44,7 +40,7 @@ fn create_threshold_mask_filtered_test(
     let filtered = Buffer2::new(size.width, size.height, filtered.to_vec());
     let noise = Buffer2::new(size.width, size.height, noise.to_vec());
     let mut mask = BitBuffer2::new_filled(size, false);
-    create_threshold_mask_filtered(&filtered, &noise, sigma, TEST_MIN_NOISE, &mut mask);
+    create_threshold_mask_filtered(&filtered, &noise, test_params(sigma), &mut mask);
     mask
 }
 
@@ -444,14 +440,7 @@ fn packed_matches_scalar() {
     let bg = Buffer2::new(width, height, bg_data.clone());
     let noise = Buffer2::new(width, height, noise_data.clone());
     let mut packed_mask = BitBuffer2::new_filled(Size2us::new(width, height), false);
-    create_threshold_mask(
-        &pixels,
-        &bg,
-        &noise,
-        sigma,
-        TEST_MIN_NOISE,
-        &mut packed_mask,
-    );
+    create_threshold_mask(&pixels, &bg, &noise, test_params(sigma), &mut packed_mask);
 
     // Compare results
     for (i, &scalar_val) in scalar_mask.iter().enumerate() {
@@ -478,7 +467,7 @@ fn packed_non_aligned_size() {
     let noise = Buffer2::new_filled(width, height, 0.1f32);
 
     let mut mask = BitBuffer2::new_filled(Size2us::new(width, height), false);
-    create_threshold_mask(&pixels, &bg, &noise, 3.0, TEST_MIN_NOISE, &mut mask);
+    create_threshold_mask(&pixels, &bg, &noise, test_params(3.0), &mut mask);
 
     // All should be set
     assert_eq!(mask.count_ones(), size);

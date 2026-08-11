@@ -2,7 +2,6 @@
 
 use std::cmp::Ordering;
 
-use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::math::sum::mean_f32;
@@ -262,24 +261,6 @@ pub(crate) fn mad_f32_with_scratch(values: &[f32], median: f32, scratch: &mut Ve
 #[inline]
 pub(crate) fn mad_floored(mad: f32, center: f32, floor_fraction: f32) -> f32 {
     mad.max(center * floor_fraction)
-}
-
-/// The smallest positive spread that still means anything for `data`, derived from `data` itself.
-///
-/// The last-resort floor for a scale estimate that came out at zero — an entirely flat frame, or a
-/// tile whose samples are identical. A fixed constant cannot serve here: the pipeline's linear
-/// domain is `[0, 1]` but the span a decoder divided by sets the magnitude, so a frame's whole
-/// signal range can sit below a constant chosen for some other frame, and every threshold scaled by
-/// it then rejects everything. One `f32` step at the data's own magnitude is the smallest
-/// difference the samples can even represent, so nothing below it is measurable in any domain.
-///
-/// Returns a strictly positive value, so it is safe as a divisor.
-pub(crate) fn representational_floor(data: &[f32]) -> f32 {
-    let magnitude = data
-        .par_iter()
-        .map(|value| value.abs())
-        .reduce(|| 0.0, f32::max);
-    (magnitude * f32::EPSILON).max(f32::MIN_POSITIVE)
 }
 
 /// Scratch space a sigma-clip pass borrows for its per-value deviations.

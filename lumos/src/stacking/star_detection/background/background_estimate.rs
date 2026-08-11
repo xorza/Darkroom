@@ -16,7 +16,7 @@ use crate::stacking::star_detection::background::workspace::InterpolateScratch;
 use crate::stacking::star_detection::config::background_config::BackgroundConfig;
 use crate::stacking::star_detection::mask_dilation::dilate_mask;
 use crate::stacking::star_detection::resources::DetectionResources;
-use crate::stacking::star_detection::threshold_mask::create_threshold_mask;
+use crate::stacking::star_detection::threshold_mask::{ThresholdParams, create_threshold_mask};
 
 /// Per-pixel background and noise estimates for an image.
 ///
@@ -37,6 +37,14 @@ pub(crate) struct BackgroundEstimate {
 /// real noise never to bind on a healthy estimate, far enough above zero to keep a degenerate tile
 /// from collapsing the threshold onto the sky.
 const NOISE_FLOOR_FRACTION: f32 = 1e-4;
+
+/// The per-pixel σ floor for a frame whose typical noise is `scale`.
+///
+/// Shared so the estimator and the synthetic uniform maps the tests build cannot state the fraction
+/// differently.
+pub(crate) fn noise_floor_for(scale: f32) -> f32 {
+    (scale * NOISE_FLOOR_FRACTION).max(f32::MIN_POSITIVE)
+}
 
 /// The frame's own floor for a per-pixel noise estimate.
 ///
@@ -72,7 +80,7 @@ fn noise_floor_from(grid: &TileGrid) -> f32 {
     } else {
         median_f32_mut(&mut sigmas)
     };
-    (scale * NOISE_FLOOR_FRACTION).max(f32::MIN_POSITIVE)
+    noise_floor_for(scale)
 }
 
 impl BackgroundEstimate {
@@ -134,8 +142,10 @@ impl BackgroundEstimate {
                 pixels,
                 &self.background,
                 &self.noise,
-                detection_sigma,
-                self.noise_floor,
+                ThresholdParams {
+                    sigma: detection_sigma,
+                    min_noise: self.noise_floor,
+                },
                 config.mask_dilation,
                 &mut mask,
                 &mut scratch,
@@ -198,26 +208,17 @@ fn interpolate_from_grid(
 /// Create a mask of pixels that are likely objects (above threshold).
 ///
 /// `output` is used as the mask buffer. `scratch` is used for dilation if needed.
-#[allow(clippy::too_many_arguments)]
 fn create_object_mask(
     pixels: &Buffer2<f32>,
     background: &Buffer2<f32>,
     noise: &Buffer2<f32>,
-    detection_sigma: f32,
-    min_noise: f32,
+    threshold: ThresholdParams,
     dilation_radius: usize,
     output: &mut BitBuffer2,
     scratch: &mut BitBuffer2,
 ) {
     // Create threshold mask using packed SIMD-optimized implementation
-    create_threshold_mask(
-        pixels,
-        background,
-        noise,
-        detection_sigma,
-        min_noise,
-        output,
-    );
+    create_threshold_mask(pixels, background, noise, threshold, output);
 
     // Dilate mask to cover object wings
     if dilation_radius > 0 {

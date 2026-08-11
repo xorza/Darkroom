@@ -9,7 +9,7 @@ use rayon::prelude::*;
 use crate::bit_buffer2::BitBuffer2;
 use crate::io::image::cfa::QUANTIZATION_SIGMA_PER_STEP;
 use crate::math::size2us::Size2us;
-use crate::math::statistics::{mad_f32_fast, mad_to_sigma, median_f32_mut, representational_floor};
+use crate::math::statistics::{mad_f32_fast, mad_to_sigma, median_f32_mut};
 use crate::math::vec2us::Vec2us;
 
 use crate::stacking::calibration_masters::cosmic_ray::config::{CosmicRayConfig, NoiseEstimation};
@@ -222,15 +222,7 @@ fn noise_map_into(
             scratch.clear();
             scratch.extend_from_slice(data);
             let bg = median_f32_mut(scratch);
-            // A flat frame has MAD 0, which would make every per-pixel noise 0 and the
-            // significance `L⁺/(2N)` infinite. The fallback comes from the data's own magnitude
-            // rather than a constant, so it holds whatever span the decoder divided by.
-            let mad_sigma = mad_to_sigma(mad_f32_fast(data, bg, scratch));
-            let sigma_bg = if mad_sigma > 0.0 {
-                mad_sigma
-            } else {
-                representational_floor(data)
-            };
+            let sigma_bg = mad_to_sigma(mad_f32_fast(data, bg, scratch)).max(degenerate_sigma(bg));
             out.clear();
             out.extend(m5.iter().map(|&s| empirical_noise(s, bg, sigma_bg)));
         }
@@ -240,6 +232,21 @@ fn noise_map_into(
             full_scale,
         } => parametric_noise_into(m5, gain, read_noise, full_scale, out),
     }
+}
+
+/// The σ to fall back on when a frame's MAD comes out zero: one `f32` step at the background's own
+/// magnitude.
+///
+/// `empirical_noise` would otherwise return 0 there and the significance `L⁺/(2N)` would divide by
+/// it. Derived from `bg` rather than fixed, so it holds at whatever magnitude the decoder's span
+/// left the samples — and on a frame flat enough for the MAD to vanish, `bg` *is* the frame's
+/// magnitude. Strictly positive, so it is safe as a divisor even on an all-zero frame.
+///
+/// Shared by the mono (whole-image `bg`) and X-Trans (per-colour `bg`) paths, like the noise model
+/// below it.
+#[inline]
+pub(super) fn degenerate_sigma(bg: f32) -> f32 {
+    (bg.abs() * f32::EPSILON).max(f32::MIN_POSITIVE)
 }
 
 /// Empirical per-pixel noise: a read-noise floor `σ` plus a sky-anchored Poisson term that rises as
