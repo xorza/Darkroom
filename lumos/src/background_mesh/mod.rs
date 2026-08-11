@@ -89,10 +89,10 @@ impl TileGrid {
             && self.tile_size == tile_size.min(dimensions.width).min(dimensions.height)
     }
 
-    /// Second derivative in Y at tile (tx, ty) for the natural cubic spline, for one plane.
+    /// Second derivative in Y at `tile` for the natural cubic spline, for one plane.
     #[inline]
-    pub(crate) fn d2y(&self, component: TileComponent, tx: usize, ty: usize) -> f32 {
-        self.d2y[ty * self.stats.width() + tx].get(component)
+    pub(crate) fn d2y(&self, component: TileComponent, tile: Vec2us) -> f32 {
+        self.d2y[tile.to_index(self.stats.width())].get(component)
     }
 
     /// Find the tile index whose center is at or before the given Y position.

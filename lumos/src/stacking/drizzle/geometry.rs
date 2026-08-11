@@ -7,6 +7,7 @@
 
 use glam::DVec2;
 
+use crate::math::vec2us::Vec2us;
 use crate::stacking::registration::transform::Transform;
 
 const SGAREA_DX_MIN: f64 = 1e-14;
@@ -22,12 +23,11 @@ const SGAREA_DX_MIN: f64 = 1e-14;
 pub(crate) fn local_jacobian(
     transform: &Transform,
     center: DVec2,
-    ix: usize,
-    iy: usize,
+    pixel: Vec2us,
     scale: f64,
 ) -> f64 {
-    let right = transform.apply(DVec2::new(ix as f64 + 1.0, iy as f64));
-    let down = transform.apply(DVec2::new(ix as f64, iy as f64 + 1.0));
+    let right = transform.apply(DVec2::new(pixel.x as f64 + 1.0, pixel.y as f64));
+    let down = transform.apply(DVec2::new(pixel.x as f64, pixel.y as f64 + 1.0));
     let dx = right - center;
     let dy = down - center;
     (dx.x * dy.y - dx.y * dy.x).abs() * scale * scale

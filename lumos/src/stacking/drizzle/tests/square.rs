@@ -547,7 +547,7 @@ fn local_jacobian_identity_scale1() {
     // Jacobian = |det(I)| * 1² = 1.0
     let transform = Transform::identity();
     let center = transform.apply(DVec2::new(5.0, 5.0));
-    let jaco = local_jacobian(&transform, center, 5, 5, 1.0);
+    let jaco = local_jacobian(&transform, center, Vec2us::new(5, 5), 1.0);
     assert!(
         (jaco - 1.0).abs() < 1e-10,
         "Identity scale=1: expected 1.0, got {jaco}"
@@ -560,7 +560,7 @@ fn local_jacobian_identity_scale2() {
     // Jacobian = |det(I)| * 2² = 4.0
     let transform = Transform::identity();
     let center = transform.apply(DVec2::new(5.0, 5.0));
-    let jaco = local_jacobian(&transform, center, 5, 5, 2.0);
+    let jaco = local_jacobian(&transform, center, Vec2us::new(5, 5), 2.0);
     assert!(
         (jaco - 4.0).abs() < 1e-10,
         "Identity scale=2: expected 4.0, got {jaco}"
@@ -574,7 +574,7 @@ fn local_jacobian_rotation_preserves_area() {
     let angle = 30.0_f64.to_radians();
     let transform = Transform::euclidean(DVec2::ZERO, angle);
     let center = transform.apply(DVec2::new(50.0, 50.0));
-    let jaco = local_jacobian(&transform, center, 50, 50, 1.0);
+    let jaco = local_jacobian(&transform, center, Vec2us::new(50, 50), 1.0);
     // Rotation preserves area: Jacobian = 1.0
     assert!(
         (jaco - 1.0).abs() < 1e-10,
@@ -588,7 +588,7 @@ fn local_jacobian_anisotropic_scale() {
     let transform = Transform::scale(DVec2::new(2.0, 3.0));
     let center = transform.apply(DVec2::new(5.0, 5.0));
     // Jacobian = |det([2,0;0,3])| * scale² = 6 * 1 = 6.0
-    let jaco = local_jacobian(&transform, center, 5, 5, 1.0);
+    let jaco = local_jacobian(&transform, center, Vec2us::new(5, 5), 1.0);
     assert!(
         (jaco - 6.0).abs() < 1e-10,
         "2x×3x scale: expected 6.0, got {jaco}"
@@ -603,11 +603,11 @@ fn local_jacobian_perspective_varies_spatially() {
 
     // At x=0: w ≈ 1, minimal distortion
     let c0 = transform.apply(DVec2::new(0.0, 0.0));
-    let jaco_left = local_jacobian(&transform, c0, 0, 0, 1.0);
+    let jaco_left = local_jacobian(&transform, c0, Vec2us::ZERO, 1.0);
 
     // At x=1000: w ≈ 1.1, noticeable distortion
     let c1000 = transform.apply(DVec2::new(1000.0, 0.0));
-    let jaco_right = local_jacobian(&transform, c1000, 1000, 0, 1.0);
+    let jaco_right = local_jacobian(&transform, c1000, Vec2us::new(1000, 0), 1.0);
 
     // Jacobians must differ for perspective transform
     assert!(

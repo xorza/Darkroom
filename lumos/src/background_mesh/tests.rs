@@ -731,18 +731,18 @@ fn y_spline_derivatives_uniform_data() {
     for ty in 0..grid.stats.height() {
         for tx in 0..grid.stats.width() {
             assert!(
-                grid.d2y(TileComponent::Sky, tx, ty).abs() < 1e-6,
+                grid.d2y(TileComponent::Sky, Vec2us::new(tx, ty)).abs() < 1e-6,
                 "d2y_sky({},{}) = {}, expected 0",
                 tx,
                 ty,
-                grid.d2y(TileComponent::Sky, tx, ty)
+                grid.d2y(TileComponent::Sky, Vec2us::new(tx, ty))
             );
             assert!(
-                grid.d2y(TileComponent::Sigma, tx, ty).abs() < 1e-6,
+                grid.d2y(TileComponent::Sigma, Vec2us::new(tx, ty)).abs() < 1e-6,
                 "d2y_sigma({},{}) = {}, expected 0",
                 tx,
                 ty,
-                grid.d2y(TileComponent::Sigma, tx, ty)
+                grid.d2y(TileComponent::Sigma, Vec2us::new(tx, ty))
             );
         }
     }
@@ -756,8 +756,8 @@ fn y_spline_derivatives_single_row() {
 
     assert_eq!(grid.stats.height(), 1);
     for tx in 0..grid.stats.width() {
-        assert_eq!(grid.d2y(TileComponent::Sky, tx, 0), 0.0);
-        assert_eq!(grid.d2y(TileComponent::Sigma, tx, 0), 0.0);
+        assert_eq!(grid.d2y(TileComponent::Sky, Vec2us::new(tx, 0)), 0.0);
+        assert_eq!(grid.d2y(TileComponent::Sigma, Vec2us::new(tx, 0)), 0.0);
     }
 }
 
@@ -774,8 +774,8 @@ fn y_spline_derivatives_two_rows() {
 
     assert_eq!(grid.stats.height(), 2);
     for tx in 0..grid.stats.width() {
-        assert_eq!(grid.d2y(TileComponent::Sky, tx, 0), 0.0);
-        assert_eq!(grid.d2y(TileComponent::Sky, tx, 1), 0.0);
+        assert_eq!(grid.d2y(TileComponent::Sky, Vec2us::new(tx, 0)), 0.0);
+        assert_eq!(grid.d2y(TileComponent::Sky, Vec2us::new(tx, 1)), 0.0);
     }
 }
 
@@ -793,16 +793,16 @@ fn y_spline_derivatives_natural_bc() {
     assert_eq!(grid.stats.height(), 4);
     for tx in 0..grid.stats.width() {
         assert!(
-            grid.d2y(TileComponent::Sky, tx, 0).abs() < 1e-6,
+            grid.d2y(TileComponent::Sky, Vec2us::new(tx, 0)).abs() < 1e-6,
             "Natural BC: d2y[{},0] = {}",
             tx,
-            grid.d2y(TileComponent::Sky, tx, 0)
+            grid.d2y(TileComponent::Sky, Vec2us::new(tx, 0))
         );
         assert!(
-            grid.d2y(TileComponent::Sky, tx, 3).abs() < 1e-6,
+            grid.d2y(TileComponent::Sky, Vec2us::new(tx, 3)).abs() < 1e-6,
             "Natural BC: d2y[{},3] = {}",
             tx,
-            grid.d2y(TileComponent::Sky, tx, 3)
+            grid.d2y(TileComponent::Sky, Vec2us::new(tx, 3))
         );
     }
 }
@@ -830,46 +830,46 @@ fn y_spline_derivatives_quadratic_gradient() {
     // Natural BC: endpoints should be 0
     for tx in 0..grid.stats.width() {
         assert!(
-            grid.d2y(TileComponent::Sky, tx, 0).abs() < 1e-5,
+            grid.d2y(TileComponent::Sky, Vec2us::new(tx, 0)).abs() < 1e-5,
             "d2y[{},0] = {}, expected 0",
             tx,
-            grid.d2y(TileComponent::Sky, tx, 0)
+            grid.d2y(TileComponent::Sky, Vec2us::new(tx, 0))
         );
         assert!(
-            grid.d2y(TileComponent::Sky, tx, 3).abs() < 1e-5,
+            grid.d2y(TileComponent::Sky, Vec2us::new(tx, 3)).abs() < 1e-5,
             "d2y[{},3] = {}, expected 0",
             tx,
-            grid.d2y(TileComponent::Sky, tx, 3)
+            grid.d2y(TileComponent::Sky, Vec2us::new(tx, 3))
         );
     }
 
     // Interior d2 should be nonzero (positive, since f''(y²) > 0)
     for tx in 0..grid.stats.width() {
         assert!(
-            grid.d2y(TileComponent::Sky, tx, 1) > 1e-4,
+            grid.d2y(TileComponent::Sky, Vec2us::new(tx, 1)) > 1e-4,
             "d2y[{},1] = {}, expected positive",
             tx,
-            grid.d2y(TileComponent::Sky, tx, 1)
+            grid.d2y(TileComponent::Sky, Vec2us::new(tx, 1))
         );
         assert!(
-            grid.d2y(TileComponent::Sky, tx, 2) > 1e-4,
+            grid.d2y(TileComponent::Sky, Vec2us::new(tx, 2)) > 1e-4,
             "d2y[{},2] = {}, expected positive",
             tx,
-            grid.d2y(TileComponent::Sky, tx, 2)
+            grid.d2y(TileComponent::Sky, Vec2us::new(tx, 2))
         );
     }
 
     // All columns should have the same d2 values (uniform X data)
     if grid.stats.width() >= 2 {
         for ty in 0..grid.stats.height() {
-            let d0 = grid.d2y(TileComponent::Sky, 0, ty);
+            let d0 = grid.d2y(TileComponent::Sky, Vec2us::new(0, ty));
             for tx in 1..grid.stats.width() {
                 assert!(
-                    (grid.d2y(TileComponent::Sky, tx, ty) - d0).abs() < 1e-5,
+                    (grid.d2y(TileComponent::Sky, Vec2us::new(tx, ty)) - d0).abs() < 1e-5,
                     "d2y[{},{}] = {} != d2y[0,{}] = {}",
                     tx,
                     ty,
-                    grid.d2y(TileComponent::Sky, tx, ty),
+                    grid.d2y(TileComponent::Sky, Vec2us::new(tx, ty)),
                     ty,
                     d0
                 );

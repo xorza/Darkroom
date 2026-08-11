@@ -20,7 +20,8 @@ fn lanczos_scalar(
 
     for (x, out_pixel) in output_row.iter_mut().enumerate() {
         let src = wt.apply(DVec2::new(x as f64, y));
-        let Some(pos) = row::source_position_in_footprint(src.x, src.y, input_width, input_height)
+        let Some(pos) =
+            row::source_position_in_footprint(src, Size2us::new(input_width, input_height))
         else {
             *out_pixel = 0.0;
             continue;
@@ -508,7 +509,8 @@ fn lanczos_scalar_ref(
 
     for (x, out_pixel) in output_row.iter_mut().enumerate() {
         let src = wt.apply(DVec2::new(x as f64, y));
-        let Some(pos) = row::source_position_in_footprint(src.x, src.y, input_width, input_height)
+        let Some(pos) =
+            row::source_position_in_footprint(src, Size2us::new(input_width, input_height))
         else {
             *out_pixel = 0.0;
             continue;

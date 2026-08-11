@@ -32,14 +32,9 @@ fn finite_source_position(src_x: f64, src_y: f64) -> Option<Vec2> {
 }
 
 #[inline]
-fn source_position_in_footprint(
-    src_x: f64,
-    src_y: f64,
-    input_width: usize,
-    input_height: usize,
-) -> Option<Vec2> {
-    let pos = finite_source_position(src_x, src_y)?;
-    kernel::source_footprint_contains(pos, Size2us::new(input_width, input_height)).then_some(pos)
+fn source_position_in_footprint(source: DVec2, input: Size2us) -> Option<Vec2> {
+    let pos = finite_source_position(source.x, source.y)?;
+    kernel::source_footprint_contains(pos, input).then_some(pos)
 }
 
 #[inline]
@@ -166,6 +161,7 @@ fn lanczos_inner<const A: usize, const SIZE: usize>(
     let pixels = input.pixels();
     let input_width = input.width();
     let input_height = input.height();
+    let input_dimensions = Size2us::new(input_width, input_height);
     let border_value = params.border_value;
 
     let lut = kernel::get_lanczos_lut(A);
@@ -189,7 +185,7 @@ fn lanczos_inner<const A: usize, const SIZE: usize>(
             src_y = src.y;
         }
 
-        let Some(pos) = source_position_in_footprint(src_x, src_y, input_width, input_height)
+        let Some(pos) = source_position_in_footprint(DVec2::new(src_x, src_y), input_dimensions)
         else {
             *out_pixel = border_value;
             if can_step {
