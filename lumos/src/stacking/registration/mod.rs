@@ -5,20 +5,25 @@
 //!
 //! # Quick Start
 //!
-//! ```ignore
-//! use lumos::{RegistrationConfig, register, warp};
+//! ```no_run
+//! use lumos::{LinearImage, RegistrationConfig, Star, register, warp};
+//!
+//! # fn example(ref_stars: &[Star], target_stars: &[Star], target_image: &LinearImage)
+//! # -> Result<(), lumos::RegistrationError> {
+//! let config = RegistrationConfig::default();
 //!
 //! // Register stars from two images
-//! let result = register(&ref_stars, &target_stars, &RegistrationConfig::default())?;
+//! let result = register(ref_stars, target_stars, &config)?;
 //! println!(
 //!     "Matched {} stars, RMS = {:.2}px",
 //!     result.num_inliers(),
 //!     result.rms_error()
 //! );
 //!
-//! // Warp target image in place to align with reference
-//! let config = RegistrationConfig::default();
+//! // Reproject the target onto the reference's grid, into a new image
 //! let aligned = warp(target_image, &result.warp_transform(), &config.warp);
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! # Transformation Models
@@ -241,8 +246,9 @@ fn median_fwhm(ref_stars: &[Star], target_stars: &[Star]) -> f64 {
 /// function accepted, while a later rung would have satisfied it.
 ///
 /// The ladder is Euclidean → Similarity → Affine → Homography (rigid → +scale → +shear →
-/// projective); earlier this only tried Similarity then jumped straight to Homography, so same-scale
-/// rigid sets were fit with a needless scale DOF and mild differential distortion overshot to the
+/// projective) — every rung, rather than a couple of representative ones, because each omission
+/// costs accuracy in both directions: without Euclidean a same-scale rigid set is fit with a
+/// needless scale DOF, and without Affine mild differential distortion escalates all the way to the
 /// full projective model.
 ///
 /// A rung that fails outright is logged and the ladder continues, but only Homography's error can

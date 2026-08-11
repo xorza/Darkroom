@@ -61,10 +61,11 @@ impl SigmaClipConfig {
     /// Each iteration rejects a `[center − kσ, center + kσ]` band, which on sorted data is a
     /// *contiguous* slice — so the active window shrinks from both ends (binary-searched bounds)
     /// and stays sorted. The median is then the middle element (O(1)) and the MAD a single bitonic
-    /// scan ([`sorted_mad`]), replacing the two per-iteration quickselects. Survivors are compacted
-    /// to the front only at the end. Sorting keeps `values[i]` paired with `indices[i]` throughout
-    /// (the previous quickselect reordered values without their indices, mis-pairing weights in the
-    /// weighted combine); the survivor *set* — hence count and unweighted mean — is unchanged.
+    /// scan ([`sorted_mad`]), so no iteration needs a quickselect. Survivors are compacted to the
+    /// front only at the end. Sorting the two together is what keeps `values[i]` paired with
+    /// `indices[i]` throughout — a reorder that moved values without their indices would mis-pair
+    /// the weights in the weighted combine, while leaving the survivor *set*, and so the count and
+    /// unweighted mean, looking correct.
     ///
     /// The cheap `no_outliers_possible` screen runs **before** sorting: clean pixels (the majority
     /// in a smooth flat/light) can't reject anything, so they skip the sort entirely.

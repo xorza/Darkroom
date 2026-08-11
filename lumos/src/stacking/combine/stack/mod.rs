@@ -177,19 +177,17 @@ pub(crate) fn stack_stored_frames(
     })
 }
 
-/// The shell all three combine entry points share: reject an empty set, validate the
-/// configuration against the frame count, build the cache, combine, and decide whether the
-/// result is real.
-///
-/// `build` is deferred rather than taken as a built cache so the validation above runs before a
-/// potentially long load, and so the cache — which owns the spill directory — drops at the end
-/// of this scope on every path.
-/// The single gate every combine passes through: reject an empty frame set, validate the config
-/// once, build the cache, log what the run turned out to be, and reduce.
+/// The single gate every combine passes through: reject an empty frame set, validate the
+/// configuration against the frame count, build the cache, log what the run turned out to be,
+/// reduce, and decide whether the result is real.
 ///
 /// Every entry point routes here — including `stack_cfa_master`, which builds a CFA cache of its
 /// own — so config validation happens in exactly one place rather than being a convention each
 /// entry point has to remember.
+///
+/// `build` is deferred rather than taken as a built cache so that validation runs before a
+/// potentially long load, and so the cache — which owns the spill directory — drops at the end of
+/// this scope on every path.
 pub(crate) fn combine_cached(
     config: &StackConfig,
     frame_count: usize,

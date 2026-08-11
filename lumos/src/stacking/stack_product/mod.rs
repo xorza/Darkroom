@@ -12,7 +12,7 @@ use crate::stacking::stack_product::quality_map::QualityMap;
 
 /// A stacked science product shared by statistical combine and drizzle.
 ///
-/// Each plane is `Some` only when it was requested (see [`QualityPlanes`]) and the combine could
+/// Each plane is `Some` only when it was requested (see [`QualityPlanes`](crate::QualityPlanes)) and the combine could
 /// produce it. `coverage` means the same thing whichever produced it — the share of frames that
 /// reached a pixel — so a reader can interpret it without knowing the entry point. `weight` cannot
 /// be shared that way: it is `Σwᵢ` over whatever the producer weighted by, and those weights are

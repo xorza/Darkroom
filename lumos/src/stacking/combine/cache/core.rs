@@ -39,12 +39,11 @@ pub(crate) struct CacheCore {
     pub(crate) cancel: CancelToken,
     /// The memory reading every chunk sizing in this combine shares, taken on the first ask.
     ///
-    /// [`CacheConfig::get_available_memory`] samples the system whenever the config carries no
-    /// override, so asking twice answers two different numbers — and the coverage pass has to size
-    /// against the figure the combine already sized against, or the output planes the combine has
-    /// since allocated are charged against a reading taken before they existed. Holding it here is
-    /// what lets the two passes ask independently; it used to travel between them as a field on the
-    /// combine's result.
+    /// [`CacheConfig::planning_memory`] samples the system when the config carries no pinned
+    /// figure, so an unresolved one answers two different numbers when asked twice — and the
+    /// coverage pass has to size against the figure the combine already sized against, or the output
+    /// planes the combine has since allocated are charged against a reading taken before they
+    /// existed. Holding it here is what lets the two passes ask independently.
     pub(crate) chunk_memory: OnceLock<Option<u64>>,
 }
 
@@ -125,7 +124,7 @@ impl CacheCore {
         *self.chunk_memory.get_or_init(|| {
             self.spill_directory
                 .as_ref()
-                .map(|_| self.config.get_available_memory())
+                .map(|_| self.config.planning_memory())
         })
     }
 

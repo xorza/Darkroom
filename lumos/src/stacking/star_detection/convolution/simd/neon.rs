@@ -35,9 +35,9 @@ pub(super) unsafe fn convolve_row_neon(
             *out = convolve_pixel_scalar(input, kernel, radius, x, width);
         }
 
-        // SIMD middle section. `safe_end` is the last fully-in-bounds block start, so stop at
-        // `x <= safe_end`. (The previous `x + 4 <= safe_end + radius` overshot for radius > 4 — the
-        // common case — over-reading one element and skipping mirroring at the boundary column.)
+        // SIMD middle section. `safe_end` is the last fully-in-bounds block start, so the bound is
+        // `x <= safe_end` and not an `x + 4 <= safe_end + radius` variant: for radius > 4 — the
+        // common case — that over-reads one element and skips the mirroring at the boundary column.
         let mut x = safe_start;
         if safe_start < safe_end {
             while x <= safe_end {

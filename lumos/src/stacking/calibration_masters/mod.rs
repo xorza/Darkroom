@@ -553,9 +553,10 @@ impl CalibrationMasters {
 
     /// Create CalibrationMasters by stacking raw CFA files.
     ///
-    /// Uses sigma-clipped mean (>= 8 frames) or median (< 8 frames)
-    /// with the full stacking pipeline (rejection, normalization, chunked processing).
-    /// Empty slices produce `None` for that master.
+    /// Each role stacks under its own preset, through the full pipeline (rejection, normalization,
+    /// chunked processing): darks, biases and flat-darks are a Winsorized mean at any frame count,
+    /// flats a σ-clipped mean that falls back to the median below 8 frames. Empty slices produce
+    /// `None` for that master.
     ///
     /// `sigma_threshold` controls defect detection sensitivity (see
     /// [`DEFAULT_SIGMA_THRESHOLD`]).

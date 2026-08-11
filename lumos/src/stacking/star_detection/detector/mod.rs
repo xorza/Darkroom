@@ -77,7 +77,8 @@ pub struct Diagnostics {
 }
 
 /// Where the FWHM the detector ran with came from — the three states the matched-filter stage can
-/// end in, which were previously spread over an `f32`, a count, and a `bool` derived from the count.
+/// end in, as one value rather than an `f32` plus a count plus a flag derived from the count, which
+/// admits combinations none of the three states describes.
 #[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
 pub enum FwhmSource {
     /// Matched filtering was off: auto-estimation disabled and no configured FWHM.

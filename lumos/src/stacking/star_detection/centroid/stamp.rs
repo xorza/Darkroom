@@ -118,10 +118,10 @@ impl StampFit {
     /// `None` when the stamp falls outside the frame, or holds too few pixels to constrain `N`
     /// free parameters — a least-squares fit needs strictly more samples than parameters.
     ///
-    /// One pass produces all four outputs. Pixel values, the peak, the second moments behind
-    /// `sigma_est` and the inverse-variance weights used to be an extraction walk plus one walk per
-    /// consumer — three traversals of the same 225 f64 per candidate, on the hottest path in
-    /// `measure_star`.
+    /// One pass produces all four outputs — pixel values, the peak, the second moments behind
+    /// `sigma_est`, and the inverse-variance weights. Computing them per consumer instead costs an
+    /// extraction walk plus one walk each: three traversals of the same 225 f64 per candidate, on
+    /// the hottest path in `measure_star`.
     pub(super) fn prepare<const N: usize>(
         pixels: &Buffer2<f32>,
         pos: DVec2,

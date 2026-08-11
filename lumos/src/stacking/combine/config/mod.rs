@@ -108,15 +108,22 @@ pub enum Normalization {
 ///
 /// # Examples
 ///
-/// ```ignore
-/// use lumos::{CombineMethod, Normalization, Rejection, StackConfig, stack};
+/// ```no_run
+/// use common::CancelToken;
+/// use lumos::{CombineMethod, Normalization, ProgressCallback, Rejection, StackConfig, stack};
+///
+/// let paths = ["frame1.fits", "frame2.fits", "frame3.fits"];
 ///
 /// // Simple sigma-clipped stacking (default)
-/// let result = stack(&paths, StackConfig::default())?;
+/// let result = stack(
+///     &paths,
+///     StackConfig::default(),
+///     ProgressCallback::default(),
+///     CancelToken::never(),
+/// )?;
 ///
 /// // Using presets
-/// let result = stack(&paths, StackConfig::sigma_clipped(2.0))?;
-/// let result = stack(&paths, StackConfig::median())?;
+/// let median = StackConfig::median();
 ///
 /// // Custom configuration
 /// let config = StackConfig {
@@ -124,7 +131,13 @@ pub enum Normalization {
 ///     normalization: Normalization::Global,
 ///     ..Default::default()
 /// };
-/// let result = stack(&paths, config)?;
+/// let result = stack(
+///     &paths,
+///     config,
+///     ProgressCallback::default(),
+///     CancelToken::never(),
+/// )?;
+/// # Ok::<(), lumos::StackError>(())
 /// ```
 #[derive(Debug, Clone, PartialEq)]
 pub struct StackConfig {
@@ -259,8 +272,9 @@ impl StackConfig {
         Self {
             method: CombineMethod::Mean(Rejection::sigma_clip(3.0)),
             normalization: Normalization::Multiplicative,
-            // Stricter quality floor than the library graphault: a master flat from < 8 frames uses the
-            // median, since σ-clip statistics on so few smooth flats aren't worth the noise.
+            // Stricter than the other presets, which keep σ-clip at any frame count: a master flat
+            // from < 8 frames uses the median, since σ-clip statistics on so few smooth flats
+            // aren't worth the noise.
             small_n: SmallN::median_below(8),
             ..Default::default()
         }

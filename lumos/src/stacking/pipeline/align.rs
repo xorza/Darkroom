@@ -58,7 +58,7 @@ pub fn align_and_stack(
         lights[0].dimensions(),
         total,
         rayon::current_num_threads(),
-        config.stack.cache.get_available_memory(),
+        config.stack.cache.planning_memory(),
     );
     let tier = FrameTier::for_plan(&plan, &config.stack.cache)?;
 
