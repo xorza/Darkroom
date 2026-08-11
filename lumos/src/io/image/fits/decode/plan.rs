@@ -16,7 +16,7 @@ const FITS_DECODE_CHUNK_BYTES: usize = 4 * 1024 * 1024;
 /// Above this, a floating-point HDU's `DATAMAX` is read as declaring an ADU saturation level rather
 /// than a normalized one. Siril's threshold, and well clear of both the `[0, 1]` convention and the
 /// slight overshoot an interpolated or stacked frame can carry past unity.
-const FLOAT_ADU_DATAMAX: f64 = 10.0;
+const FLOAT_ADU_DATAMAX_MIN: f64 = 10.0;
 
 /// What such a frame is divided by: the 16-bit full scale, which is the depth essentially every
 /// camera that writes ADU into a float FITS digitizes at. Siril and PixInsight both use it.
@@ -68,7 +68,7 @@ pub(super) struct FitsDecodePlan {
 ///
 /// A floating-point `BITPIX` declares no full scale, so the only evidence available is `DATAMAX`.
 /// Siril's rule (`read_fits_with_convert`, the `FLOAT_IMG`/`DOUBLE_IMG` cases) is followed here: a
-/// declared saturation level above [`FLOAT_ADU_DATAMAX`] means the samples are ADU rather than
+/// declared saturation level above [`FLOAT_ADU_DATAMAX_MIN`] means the samples are ADU rather than
 /// `[0, 1]`, and they are divided by [`FLOAT_ADU_DIVISOR`]. Anything else — a `DATAMAX` of about 1,
 /// or none at all — is taken as already normalized.
 ///
@@ -92,7 +92,7 @@ fn sample_divisor(
                 .get_real("DATAMAX")
                 .map_err(|source| fits_err(path, source))?;
             return Ok(match data_max {
-                Some(max) if max > FLOAT_ADU_DATAMAX => FLOAT_ADU_DIVISOR,
+                Some(max) if max > FLOAT_ADU_DATAMAX_MIN => FLOAT_ADU_DIVISOR,
                 _ => 1.0,
             });
         }

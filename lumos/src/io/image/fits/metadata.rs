@@ -1,9 +1,7 @@
 use fits_well::header::Header;
 
 use crate::io::image::cfa::{CfaImage, CfaType};
-use crate::io::image::fits::provenance::FitsTransferProvenance;
 use crate::io::image::image_metadata::{BitPix, ImageMetadata};
-use crate::io::image::image_provenance::{ImageProvenance, TransferProvenance};
 use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::io::raw::demosaic::xtrans::XTransPattern;
 
@@ -78,15 +76,13 @@ pub(super) fn write_image_metadata(
     if metadata.calibrated {
         header.set("LUMCAL", true)?;
     }
-    if let Some(ImageProvenance {
-        transfer:
-            TransferProvenance::FitsNormalized(FitsTransferProvenance {
-                unit: Some(unit), ..
-            }),
-        ..
-    }) = &metadata.provenance
+    if let Some(unit) = metadata
+        .provenance
+        .as_ref()
+        .and_then(|provenance| provenance.transfer.fits())
+        .and_then(|transfer| transfer.unit.as_deref())
     {
-        header.set("BUNIT", unit.as_str())?;
+        header.set("BUNIT", unit)?;
     }
     Ok(())
 }

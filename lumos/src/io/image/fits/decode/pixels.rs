@@ -122,7 +122,7 @@ fn read_fits_plane(
         context.check_cancelled(path)?;
         let row_end = row_start.saturating_add(plan.rows_per_chunk).min(height);
         let expected_chunk = (row_end - row_start) * width;
-        let pixels = read_pixels(channel_ranges(plan, channel, row_start..row_end))
+        let mut pixels = read_pixels(channel_ranges(plan, channel, row_start..row_end))
             .map_err(|source| fits_err(path, source))?;
         context.check_cancelled(path)?;
         if pixels.len() != expected_chunk {
@@ -134,8 +134,7 @@ fn read_fits_plane(
                 ),
             ));
         }
-        let mut pixels = pixels;
-        validate_and_normalize(&mut pixels, plan.sample_divisor, &context.cancel).map_err(
+        normalize_and_validate(&mut pixels, plan.sample_divisor, &context.cancel).map_err(
             |error| match error {
                 PixelValidationError::Cancelled => ImageError::Cancelled {
                     path: path.to_path_buf(),
@@ -156,6 +155,9 @@ fn read_fits_plane(
     Ok(output)
 }
 
+/// Samples per parallel work item in the per-chunk passes below.
+const CHUNK_SAMPLES: usize = 64 * 1024;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct NullSummary {
     count: usize,
@@ -168,56 +170,55 @@ enum PixelValidationError {
     Nulls(NullSummary),
 }
 
-/// Reject a chunk's FITS nulls, then divide it into the pipeline's `[0, 1]` domain.
+/// Divide a decode chunk into the pipeline's `[0, 1]` domain and reject the FITS nulls it carries,
+/// in one pass over the samples.
 ///
-/// One pass rather than two: this already walks every sample of every plane of every frame, and
-/// the scale is a multiply on a value the validation just loaded. Validation runs first per
-/// element, so `divisor` never turns a rejected null into a finite-looking sample.
+/// The body is deliberately branch-free: the divide is unconditional and the finite test folds into
+/// a boolean `|=`, so the loop vectorizes to `vdivps` plus a compare-and-or reduction. A
+/// `if !finite { continue }` between the load and the divide costs far more than the second pass it
+/// saves — it makes the divide scalar, and a scalar `f32` divide is several times the throughput of
+/// the vector one.
 ///
-/// A `divisor` of 1 — every floating-point FITS, see [`super::plan`] — skips the scaling entirely
-/// rather than multiplying by one.
-fn validate_and_normalize(
+/// Scaling before testing is both safe and slightly stronger: NaN and ±inf survive a division, so a
+/// null is still a null afterwards, and a span that overflows a finite sample is caught here rather
+/// than reaching the image.
+///
+/// Divides rather than multiplying by a precomputed reciprocal: the reciprocal of a span like 65535
+/// is inexact in `f32`, and precision outranks throughput here. The `divisor == 1.0` test is hoisted
+/// out of the loop rather than left in it — dividing by one is exact but not free, and it is the
+/// common case for a floating-point HDU.
+///
+/// Locating the offending samples is a second scan that only a failing chunk pays for, by which
+/// point the load is being abandoned anyway.
+fn normalize_and_validate(
     pixels: &mut [f32],
     divisor: f32,
     cancel: &CancelToken,
 ) -> Result<(), PixelValidationError> {
-    const VALIDATION_CHUNK_SAMPLES: usize = 64 * 1024;
     if cancel.is_cancelled() {
         return Err(PixelValidationError::Cancelled);
     }
     let scale = divisor != 1.0;
     let nulls = pixels
-        .par_chunks_mut(VALIDATION_CHUNK_SAMPLES)
+        .par_chunks_mut(CHUNK_SAMPLES)
         .enumerate()
         .map(|(chunk_index, chunk)| {
             if cancel.is_cancelled() {
                 return Err(PixelValidationError::Cancelled);
             }
-            let chunk_start = chunk_index * VALIDATION_CHUNK_SAMPLES;
-            let mut nulls: Option<NullSummary> = None;
-            for (index, pixel) in chunk.iter_mut().enumerate() {
-                if !pixel.is_finite() {
-                    let found = NullSummary {
-                        count: 1,
-                        first_index: chunk_start + index,
-                    };
-                    nulls = Some(match nulls {
-                        None => found,
-                        Some(seen) => NullSummary {
-                            count: seen.count + 1,
-                            first_index: seen.first_index.min(found.first_index),
-                        },
-                    });
-                    continue;
-                }
-                if scale {
-                    // Divide rather than multiply by a reciprocal: the reciprocal of a divisor
-                    // like 65535 is inexact in f32, and the pipeline's contract is precision
-                    // ahead of throughput. The cost hides behind this pass's memory traffic.
+            let chunk_start = chunk_index * CHUNK_SAMPLES;
+            let mut nonfinite = false;
+            if scale {
+                for pixel in chunk.iter_mut() {
                     *pixel /= divisor;
+                    nonfinite |= !pixel.is_finite();
+                }
+            } else {
+                for pixel in chunk.iter() {
+                    nonfinite |= !pixel.is_finite();
                 }
             }
-            Ok(nulls)
+            Ok(nonfinite.then(|| summarize_nulls(chunk, chunk_start)))
         })
         .try_reduce(
             || None,
@@ -238,12 +239,32 @@ fn validate_and_normalize(
     Ok(())
 }
 
+/// Count a failing chunk's nulls and locate the first, in the whole-plane index space `chunk_start`
+/// anchors it to.
+///
+/// Off the hot path by construction: [`normalize_and_validate`] only reaches this once a chunk is
+/// known to hold at least one null, which is a load that is about to fail.
+fn summarize_nulls(chunk: &[f32], chunk_start: usize) -> NullSummary {
+    let mut count = 0;
+    let mut first_index = None;
+    for (index, pixel) in chunk.iter().enumerate() {
+        if !pixel.is_finite() {
+            count += 1;
+            first_index.get_or_insert(chunk_start + index);
+        }
+    }
+    NullSummary {
+        count,
+        first_index: first_index.expect("only called for a chunk already known to hold a null"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use common::CancelToken;
 
     use crate::io::image::fits::decode::pixels::{
-        NullSummary, PixelValidationError, validate_and_normalize,
+        NullSummary, PixelValidationError, normalize_and_validate,
     };
 
     #[test]
@@ -251,26 +272,27 @@ mod tests {
         let cancel = CancelToken::new();
         cancel.cancel();
         assert_eq!(
-            validate_and_normalize(&mut [1.0, 2.0], 1.0, &cancel).unwrap_err(),
+            normalize_and_validate(&mut [1.0, 2.0], 1.0, &cancel).unwrap_err(),
             PixelValidationError::Cancelled
         );
     }
 
     #[test]
-    fn a_unit_divisor_preserves_every_physical_value() {
-        // The float-FITS path: no declared full scale, so nothing is divided.
+    fn a_unit_divisor_accepts_every_finite_value_and_changes_none() {
+        // The float-FITS path. Nothing is out of range to this pass — a negative calibration
+        // residual and an undivided ADU value are both legitimate; only a null is not.
         let mut pixels = [-5.0, 0.0, 0.5, 2.0, 255.0, 65_535.0];
         let expected = pixels;
-        validate_and_normalize(&mut pixels, 1.0, &CancelToken::never()).unwrap();
+        normalize_and_validate(&mut pixels, 1.0, &CancelToken::never()).unwrap();
         assert_eq!(pixels, expected);
     }
 
     #[test]
-    fn an_integer_divisor_maps_the_declared_span_onto_the_unit_interval() {
+    fn normalizing_maps_the_declared_span_onto_the_unit_interval() {
         // BITPIX = 16 with BZERO = 2¹⁵, BSCALE = 1: divisor |1| × (2¹⁶ − 1) = 65535, so the
         // unsigned span 0..=65535 lands exactly on [0, 1].
-        let mut unsigned = [0.0, 16_384.0, 32_768.0, 65_535.0];
-        validate_and_normalize(&mut unsigned, 65_535.0, &CancelToken::never()).unwrap();
+        let mut unsigned = [0.0f32, 16_384.0, 32_768.0, 65_535.0];
+        normalize_and_validate(&mut unsigned, 65_535.0, &CancelToken::never()).unwrap();
         // The endpoints are exact; 16384/65535 = 0.2500038147, 32768/65535 = 0.5000076294.
         assert_eq!(unsigned[0], 0.0);
         assert!((unsigned[1] - 0.250_003_8).abs() < 1e-7, "{unsigned:?}");
@@ -279,19 +301,35 @@ mod tests {
 
         // The same divisor puts a signed frame on [-0.5, 0.5] around its own zero: the scale is
         // applied without an offset, so a negative sample stays negative.
-        let mut signed = [-32_768.0, 0.0, 32_767.0];
-        validate_and_normalize(&mut signed, 65_535.0, &CancelToken::never()).unwrap();
+        let mut signed = [-32_768.0f32, 0.0, 32_767.0];
+        normalize_and_validate(&mut signed, 65_535.0, &CancelToken::never()).unwrap();
         assert!((signed[0] - -0.500_007_6).abs() < 1e-7, "{signed:?}");
         assert_eq!(signed[1], 0.0);
         assert!((signed[2] - 0.499_992_37).abs() < 1e-7, "{signed:?}");
     }
 
     #[test]
+    fn a_span_that_overflows_a_finite_sample_is_reported_as_a_null() {
+        // Scaling runs before the finite test, so a divisor small enough to push a finite sample
+        // past f32::MAX is caught by the same pass instead of reaching the image.
+        let mut pixels = [1.0e30f32, 0.0];
+        assert_eq!(
+            normalize_and_validate(&mut pixels, 1.0e-30, &CancelToken::never()).unwrap_err(),
+            PixelValidationError::Nulls(NullSummary {
+                count: 1,
+                first_index: 0,
+            })
+        );
+    }
+
+    #[test]
     fn non_finite_pixels_return_exact_summary_for_every_sample_type() {
+        // Nulls survive the divide, which is what lets the test run after it rather than before:
+        // a NaN or ±inf divided by any span is still one, and is still counted here.
         let mut pixels = [0.0, f32::NAN, 5.0, f32::INFINITY, f32::NEG_INFINITY];
 
         assert_eq!(
-            validate_and_normalize(&mut pixels, 65_535.0, &CancelToken::never()).unwrap_err(),
+            normalize_and_validate(&mut pixels, 65_535.0, &CancelToken::never()).unwrap_err(),
             PixelValidationError::Nulls(NullSummary {
                 count: 3,
                 first_index: 1,
