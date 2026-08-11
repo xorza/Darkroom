@@ -69,7 +69,8 @@ use crate::stacking::registration::recovery::{RecoveredMatches, recover_matches}
 use config::Config;
 use distortion::sip::SipPolynomial;
 use result::{
-    RansacFailureReason, RegistrationCatalog, RegistrationError, RegistrationResult, StarMatch,
+    FailedRung, RansacFailureReason, RegistrationCatalog, RegistrationError, RegistrationResult,
+    StarMatch,
 };
 use transform::{TransformModel, TransformType};
 
@@ -251,10 +252,17 @@ fn median_fwhm(ref_stars: &[Star], target_stars: &[Star]) -> f64 {
 /// needless scale DOF, and without Affine mild differential distortion escalates all the way to the
 /// full projective model.
 ///
-/// A rung that fails outright is logged and the ladder continues, but only Homography's error can
-/// reach the caller: it is the most general model, so its failure is the one that describes the
-/// data rather than the model. The earlier rungs' errors would otherwise be lost entirely, and the
-/// answer to "why did `Auto` land on Homography?" is in that log.
+/// A rung that fits without clearing the bar is kept as the fallback, so a later rung's failure
+/// cannot cost the run a usable fit: the ladder's bar is at most the caller's `max_rms_error`, so a
+/// fit between the two is one `register` would accept. The fallback is the *most general* rung that
+/// fit, matching what the fall-through would have returned had it succeeded — and not the
+/// lowest-RMS rung, because each rung's RMS is measured over its own inlier set, so the numbers do
+/// not compare directly.
+///
+/// Every rung's failure reaches the caller, as
+/// [`AutoLadderExhausted`](RegistrationError::AutoLadderExhausted), when none of them fit at all.
+/// The rungs fail independently — RANSAC estimates the model it was given, and SIP is fit on that
+/// model's inlier set — so no single rung's error stands in for the others.
 fn auto_ladder(
     ref_positions: &[DVec2],
     target_positions: &[DVec2],
@@ -263,10 +271,13 @@ fn auto_ladder(
     config: &Config,
 ) -> Result<RegistrationResult, RegistrationError> {
     let bar = tuning::AUTO_UPGRADE_THRESHOLD.min(config.max_rms_error);
+    let mut fallback: Option<RegistrationResult> = None;
+    let mut failures: Vec<FailedRung> = Vec::new();
     for model in [
         TransformType::Euclidean,
         TransformType::Similarity,
         TransformType::Affine,
+        TransformType::Homography,
     ] {
         match estimate_and_refine(
             ref_positions,
@@ -276,24 +287,47 @@ fn auto_ladder(
             max_sigma,
             config,
         ) {
-            Ok(result) if result.rms_error() <= bar => return Ok(result),
-            Ok(result) => tracing::debug!(
-                ?model,
-                rms_error = result.rms_error(),
-                bar,
-                "Auto rung fit but missed the bar"
-            ),
-            Err(error) => tracing::debug!(?model, %error, "Auto rung failed"),
+            // The most general rung reached is the fall-through result, accepted whatever its RMS —
+            // the caller's gate has the final say on it.
+            Ok(result) if result.rms_error() <= bar || model == TransformType::Homography => {
+                return Ok(result);
+            }
+            Ok(result) => {
+                tracing::debug!(
+                    ?model,
+                    rms_error = result.rms_error(),
+                    bar,
+                    "Auto rung fit but missed the bar"
+                );
+                fallback = Some(result);
+            }
+            // An invalid config fails identically on every rung and is the run's own fault rather
+            // than the pair's — `align_and_stack` keys a whole-run abort on that distinction, so it
+            // must not be buried in a ladder report. `register` validates before the ladder, so this
+            // guards the ordering rather than a reachable path.
+            Err(error @ RegistrationError::InvalidConfig(_)) => return Err(error),
+            Err(error) => {
+                tracing::debug!(?model, %error, "Auto rung failed");
+                failures.push(FailedRung {
+                    model,
+                    error: Box::new(error),
+                });
+            }
         }
     }
-    estimate_and_refine(
-        ref_positions,
-        target_positions,
-        matches,
-        TransformType::Homography,
-        max_sigma,
-        config,
-    )
+
+    match fallback {
+        Some(result) => {
+            tracing::debug!(
+                model = ?result.transform().transform_type(),
+                rms_error = result.rms_error(),
+                failed_rungs = failures.len(),
+                "Auto fell back to the most general rung that fit"
+            );
+            Ok(result)
+        }
+        None => Err(RegistrationError::AutoLadderExhausted { failures }),
+    }
 }
 
 /// Run RANSAC estimation followed by match recovery and optional SIP fitting.

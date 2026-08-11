@@ -10,12 +10,15 @@
 //! - Affine (6 DOF: handles differential scaling and shear)
 //! - Homography (8 DOF: handles perspective)
 
+use crate::stacking::registration::distortion::sip::SipConfig;
+use crate::stacking::registration::ransac::config::RansacConfig;
+use crate::stacking::registration::result::RegistrationError;
 use crate::stacking::registration::transform::TransformModel;
 use crate::stacking::registration::{Config, TransformType, register};
 use crate::stacking::star_detection::star::Star;
 use crate::testing::prelude::*;
 use crate::testing::synthetic::transforms::{
-    generate_random_stars, transform_star_list, translate_star_list,
+    add_star_noise, generate_random_stars, transform_star_list, translate_star_list,
 };
 
 use crate::stacking::registration::tests::helpers::{
@@ -789,4 +792,130 @@ fn a_tight_accuracy_gate_climbs_the_ladder_instead_of_failing_on_a_rung() {
         "climbed rung must satisfy the gate, got {}",
         strict.rms_error()
     );
+}
+
+/// A rung that fit is the run's, even when a later rung fails.
+///
+/// The ladder's bar is at most the caller's `max_rms_error`, so a fit between the two is one
+/// `register` would accept — discarding it and reporting the last rung's error instead loses a
+/// usable alignment and, in the pipeline, drops the frame.
+#[test]
+fn a_rung_that_fit_survives_a_later_rung_failing() {
+    // A tight cluster of stars is poorly conditioned for an 8-DOF model: homography finds an order
+    // of magnitude fewer inliers than the simpler rungs, too few for SIP's `3 × terms`, so that rung
+    // fails outright while every simpler one fits.
+    let ref_stars = generate_random_stars(60, 60.0, 60.0, 999, FWHM_TIGHT);
+    let target = add_star_noise(&translate_star_list(&ref_stars, 5.0, -3.0), 1.4, 31);
+    let config = Config {
+        matching: helpers::matching_config(8, 6),
+        sip: Some(SipConfig::default()),
+        // Sampling is seeded from the system otherwise, and this fixture is deliberately marginal.
+        ransac: RansacConfig {
+            seed: Some(2),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+
+    // The fixture's premise: asked for a homography specifically, this pair cannot register.
+    let fixed = register(
+        &ref_stars,
+        &target,
+        &Config {
+            transform_type: TransformModel::Fixed(TransformType::Homography),
+            ..config.clone()
+        },
+    );
+    assert!(
+        fixed.is_err(),
+        "fixture must fail on Homography to test anything, got {:?}",
+        fixed.map(|r| r.rms_error())
+    );
+
+    // `Auto` reaches the same failing rung last, and returns the fit it already had.
+    let auto = register(
+        &ref_stars,
+        &target,
+        &Config {
+            transform_type: TransformModel::Auto,
+            ..config
+        },
+    )
+    .expect("a failing top rung must not discard a rung that fit");
+    assert_ne!(
+        auto.transform().transform_type(),
+        TransformType::Homography,
+        "the rung that failed cannot be the one returned"
+    );
+    let rms = auto.rms_error();
+    assert!(
+        rms > 0.5,
+        "a retained rung is one that missed the 0.5 px bar, got {rms}"
+    );
+    assert!(rms <= 2.0, "and one the default gate accepts, got {rms}");
+}
+
+/// When no rung fits, every rung's reason reaches the caller.
+///
+/// The rungs fail independently — RANSAC estimates the model it is given, and SIP is fit on that
+/// model's inlier set — so the last rung's error is not a summary of the rest.
+#[test]
+fn every_rung_failing_reports_every_reason() {
+    // Order 5 needs 3 × 18 = 54 points; 40 stars cannot supply that at any rung.
+    let ref_stars = generate_random_stars(40, 2000.0, 2000.0, 5150, FWHM_TIGHT);
+    let target = add_star_noise(
+        &apply_affine(&ref_stars, [1.0006, 0.0, 20.0, 0.0, 0.9994, -15.0]),
+        1.2,
+        12,
+    );
+    let config = Config {
+        transform_type: TransformModel::Auto,
+        matching: helpers::matching_config(8, 6),
+        sip: Some(SipConfig {
+            order: 5,
+            ..Default::default()
+        }),
+        ransac: RansacConfig {
+            seed: Some(2),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+
+    let error = register(&ref_stars, &target, &config).unwrap_err();
+    let RegistrationError::AutoLadderExhausted { failures } = &error else {
+        panic!("expected the ladder to report every rung, got {error}");
+    };
+
+    assert_eq!(
+        failures.iter().map(|rung| rung.model).collect::<Vec<_>>(),
+        vec![
+            TransformType::Euclidean,
+            TransformType::Similarity,
+            TransformType::Affine,
+            TransformType::Homography,
+        ],
+        "every rung, in ladder order"
+    );
+
+    // Each rung reports its own inlier count, not the last one's: the counts differ because each
+    // model admits a different consensus set.
+    let found: Vec<usize> = failures
+        .iter()
+        .map(|rung| match rung.error.as_ref() {
+            RegistrationError::InsufficientSipPoints { found, .. } => *found,
+            other => panic!("expected a SIP point-count failure, got {other}"),
+        })
+        .collect();
+    assert!(
+        found.iter().any(|count| *count != found[0]),
+        "rungs that reached SIP with different inlier counts must report their own: {found:?}"
+    );
+
+    // And the message carries all four, on one line.
+    let message = error.to_string();
+    for model in ["Euclidean", "Similarity", "Affine", "Homography"] {
+        assert!(message.contains(model), "{model} missing from {message}");
+    }
+    assert!(!message.contains('\n'), "must stay one line: {message}");
 }
