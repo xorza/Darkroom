@@ -1,36 +1,71 @@
 //! The geometric primitives drizzle distributes flux with.
 //!
-//! Two kinds: the area magnification a transform applies locally ([`local_jacobian`]), which
-//! rescales a drop's contribution, and the exact polygon-to-pixel overlap the square kernel needs
-//! ([`sgarea`] / [`boxer`], ported from STScI's `cdrizzlebox.c`). The interpolating kernel itself is
+//! Two kinds: the area magnification a transform applies ([`AreaMagnification`]), which rescales a
+//! drop's contribution, and the exact polygon-to-pixel overlap the square kernel needs ([`sgarea`] /
+//! [`boxer`], ported from STScI's `cdrizzlebox.c`). The interpolating kernel itself is
 //! `math::lanczos`, shared with `registration::resample`.
 
 use glam::DVec2;
 
 use crate::math::vec2us::Vec2us;
-use crate::stacking::registration::transform::Transform;
+use crate::stacking::registration::transform::{Transform, TransformType};
 
 const SGAREA_DX_MIN: f64 = 1e-14;
 
-/// Compute local Jacobian determinant (area magnification) at pixel `(ix, iy)`.
+/// How much a transform magnifies area — one factor for the frame where the model allows it.
 ///
-/// Uses finite differences: transforms center, center+dx, center+dy through the
-/// transform and computes |det([∂out/∂x, ∂out/∂y])| * scale².
+/// Only a projective transform magnifies by different amounts in different places. Every other model
+/// is linear, so its factor holds everywhere, and measuring it per pixel costs two extra
+/// `Transform::apply` calls each — three matrix products where one is needed, in the loop that walks
+/// every input pixel of every frame.
 ///
-/// For affine transforms this is constant (= det(M) * scale²).
-/// For homographies it varies spatially.
+/// Built from a transform that already carries the drizzle output scale, so there is no separate
+/// factor to apply afterwards: `scale` composed into the matrix *is* `scale²` in the determinant.
+#[derive(Debug)]
+pub(crate) enum AreaMagnification {
+    /// `|det(A)|`, the factor a linear model applies at every pixel.
+    Uniform(f64),
+    /// A projective transform, measured where it is asked for.
+    PerPixel(Transform),
+}
+
+impl AreaMagnification {
+    pub(crate) fn new(to_output: &Transform) -> Self {
+        if to_output.transform_type() == TransformType::Homography {
+            return Self::PerPixel(*to_output);
+        }
+        // From the matrix rather than by differencing two transformed points: for a linear model the
+        // two are the same quantity, but `a·d − b·c` is the exact expression where the difference of
+        // two large coordinates rounds — and it costs one product instead of two transforms.
+        let m = to_output.matrix();
+        Self::Uniform((m[0] * m[4] - m[1] * m[3]).abs())
+    }
+
+    /// The factor at `pixel`, whose transformed position is `center`.
+    #[inline]
+    pub(crate) fn at(&self, center: DVec2, pixel: Vec2us) -> f64 {
+        match self {
+            Self::Uniform(factor) => *factor,
+            Self::PerPixel(to_output) => local_jacobian(to_output, center, pixel),
+        }
+    }
+}
+
+/// Local Jacobian determinant (area magnification) at `pixel`, by finite differences: transform
+/// `center`, `center + dx` and `center + dy`, then `|det([∂out/∂x, ∂out/∂y])|`.
+///
+/// `to_output` maps input pixels to the output grid, drizzle scale included, so the area it spans is
+/// already in output pixels and there is no scale factor to apply here.
+///
+/// The projective case, where the factor genuinely varies from pixel to pixel.
+/// [`AreaMagnification`] is what callers want — it takes this path only when the transform needs it.
 #[inline]
-pub(crate) fn local_jacobian(
-    transform: &Transform,
-    center: DVec2,
-    pixel: Vec2us,
-    scale: f64,
-) -> f64 {
-    let right = transform.apply(DVec2::new(pixel.x as f64 + 1.0, pixel.y as f64));
-    let down = transform.apply(DVec2::new(pixel.x as f64, pixel.y as f64 + 1.0));
+pub(crate) fn local_jacobian(to_output: &Transform, center: DVec2, pixel: Vec2us) -> f64 {
+    let right = to_output.apply(DVec2::new(pixel.x as f64 + 1.0, pixel.y as f64));
+    let down = to_output.apply(DVec2::new(pixel.x as f64, pixel.y as f64 + 1.0));
     let dx = right - center;
     let dy = down - center;
-    (dx.x * dy.y - dx.y * dy.x).abs() * scale * scale
+    (dx.x * dy.y - dx.y * dy.x).abs()
 }
 
 /// Compute signed area between a line segment and the x-axis, clipped to the unit square

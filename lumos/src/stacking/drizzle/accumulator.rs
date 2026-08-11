@@ -15,7 +15,7 @@ use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 use crate::stacking::drizzle::config::{DrizzleConfig, DrizzleKernel};
 use crate::stacking::drizzle::error::DrizzleError;
-use crate::stacking::drizzle::geometry::{boxer, local_jacobian};
+use crate::stacking::drizzle::geometry::{AreaMagnification, boxer};
 use crate::stacking::registration::transform::Transform;
 use crate::stacking::stack_product::StackProduct;
 use crate::stacking::stack_product::coverage::Coverage;
@@ -252,6 +252,10 @@ impl DrizzleAccumulator {
 
         let scale = self.config.scale;
         let pixfrac = self.config.pixfrac;
+        // The output grid's scale composed into the transform, so the kernels map an input pixel
+        // straight to output coordinates instead of transforming and then scaling both components,
+        // and the area magnification is the composed determinant with no `scale²` left to apply.
+        let to_output = Transform::scale(DVec2::splat(scale as f64)).compose(transform);
         // Drop size in output pixels: pixfrac is the fraction of input pixel size,
         // and each input pixel maps to `scale` output pixels, so drop = pixfrac * scale.
         // (STScI: pfo = pixel_fraction / pscale_ratio / 2, where pscale_ratio = 1/scale)
@@ -271,13 +275,13 @@ impl DrizzleAccumulator {
 
         match self.config.kernel {
             DrizzleKernel::Square => {
-                self.add_image_square(&image, transform, weight, pixel_weights, scale);
+                self.add_image_square(&image, &to_output, weight, pixel_weights);
             }
             DrizzleKernel::Turbo => {
-                self.add_image_turbo(&image, transform, weight, pixel_weights, scale, drop_size);
+                self.add_image_turbo(&image, &to_output, weight, pixel_weights, drop_size);
             }
             DrizzleKernel::Point => {
-                self.add_image_point(&image, transform, weight, pixel_weights, scale);
+                self.add_image_point(&image, &to_output, weight, pixel_weights);
             }
             DrizzleKernel::Gaussian => {
                 // Per STScI: Gaussian FWHM = drop_size in output pixels.
@@ -287,10 +291,9 @@ impl DrizzleAccumulator {
                 let inv_2sigma_sq = 1.0 / (2.0 * sigma * sigma);
                 self.add_image_radial(
                     &image,
-                    transform,
+                    &to_output,
                     weight,
                     pixel_weights,
-                    scale,
                     radius,
                     |dx, dy| {
                         let dist_sq = dx * dx + dy * dy;
@@ -303,10 +306,9 @@ impl DrizzleAccumulator {
                 let a = 3.0f32;
                 self.add_image_radial(
                     &image,
-                    transform,
+                    &to_output,
                     weight,
                     pixel_weights,
-                    scale,
                     a as isize,
                     |dx, dy| lanczos::kernel(dx, a) * lanczos::kernel(dy, a),
                 );
@@ -318,10 +320,9 @@ impl DrizzleAccumulator {
     fn add_image_turbo(
         &mut self,
         image: &LinearImage,
-        transform: &Transform,
+        to_output: &Transform,
         weight: f32,
         pixel_weights: Option<&Buffer2<f32>>,
-        scale: f32,
         drop_size: f32,
     ) {
         let half_drop = drop_size / 2.0;
@@ -330,6 +331,7 @@ impl DrizzleAccumulator {
         let output_height = self.height();
         let input_width = image.width();
         let input_height = image.height();
+        let magnification = AreaMagnification::new(to_output);
 
         for iy in 0..input_height {
             for ix in 0..input_width {
@@ -342,11 +344,11 @@ impl DrizzleAccumulator {
                 // Integer-center throughout: input pixel `i` is at coordinate `i` (matching
                 // star centroids / `register` / `warp`), and output pixel `o` is the cell
                 // `[o - 0.5, o + 0.5)`. The drop center needs no coordinate adjustment.
-                let t = transform.apply(DVec2::new(ix as f64, iy as f64));
-                let ox_center = t.x as f32 * scale;
-                let oy_center = t.y as f32 * scale;
+                let t = to_output.apply(DVec2::new(ix as f64, iy as f64));
+                let ox_center = t.x as f32;
+                let oy_center = t.y as f32;
 
-                let jaco = local_jacobian(transform, t, input, scale as f64) as f32;
+                let jaco = magnification.at(t, input) as f32;
                 if jaco < JACOBIAN_MIN as f32 {
                     continue;
                 }
@@ -391,14 +393,12 @@ impl DrizzleAccumulator {
     fn add_image_square(
         &mut self,
         image: &LinearImage,
-        transform: &Transform,
+        to_output: &Transform,
         weight: f32,
         pixel_weights: Option<&Buffer2<f32>>,
-        scale: f32,
     ) {
         let pixfrac = self.config.pixfrac;
         let dh = 0.5 * pixfrac as f64;
-        let scale_f64 = scale as f64;
         let output_width = self.width();
         let output_height = self.height();
         let input_width = image.width();
@@ -429,9 +429,9 @@ impl DrizzleAccumulator {
                 let mut xout = [0.0f64; 4];
                 let mut yout = [0.0f64; 4];
                 for (k, corner) in corners_in.iter().enumerate() {
-                    let t = transform.apply(*corner);
-                    xout[k] = t.x * scale_f64;
-                    yout[k] = t.y * scale_f64;
+                    let t = to_output.apply(*corner);
+                    xout[k] = t.x;
+                    yout[k] = t.y;
                 }
 
                 // Jacobian: signed area of the output quadrilateral via diagonal cross product
@@ -476,15 +476,15 @@ impl DrizzleAccumulator {
     fn add_image_point(
         &mut self,
         image: &LinearImage,
-        transform: &Transform,
+        to_output: &Transform,
         weight: f32,
         pixel_weights: Option<&Buffer2<f32>>,
-        scale: f32,
     ) {
         let output_width = self.width();
         let output_height = self.height();
         let input_width = image.width();
         let input_height = image.height();
+        let magnification = AreaMagnification::new(to_output);
 
         for iy in 0..input_height {
             for ix in 0..input_width {
@@ -495,12 +495,12 @@ impl DrizzleAccumulator {
                 }
 
                 // Integer-center input; flux lands in the nearest output pixel.
-                let t = transform.apply(DVec2::new(ix as f64, iy as f64));
-                let ox = (t.x as f32 * scale).round() as isize;
-                let oy = (t.y as f32 * scale).round() as isize;
+                let t = to_output.apply(DVec2::new(ix as f64, iy as f64));
+                let ox = t.x.round() as isize;
+                let oy = t.y.round() as isize;
 
                 if ox >= 0 && ox < output_width as isize && oy >= 0 && oy < output_height as isize {
-                    let jaco = local_jacobian(transform, t, input, scale as f64) as f32;
+                    let jaco = magnification.at(t, input) as f32;
                     if jaco < JACOBIAN_MIN as f32 {
                         continue;
                     }
@@ -520,10 +520,9 @@ impl DrizzleAccumulator {
     fn add_image_radial(
         &mut self,
         image: &LinearImage,
-        transform: &Transform,
+        to_output: &Transform,
         weight: f32,
         pixel_weights: Option<&Buffer2<f32>>,
-        scale: f32,
         radius: isize,
         kernel_fn: impl Fn(f32, f32) -> f32,
     ) {
@@ -531,6 +530,7 @@ impl DrizzleAccumulator {
         let output_height = self.height() as isize;
         let input_width = image.width();
         let input_height = image.height();
+        let magnification = AreaMagnification::new(to_output);
         // `scale` is unbounded by config, so the neighbourhood is sized at run time rather than on
         // the stack. One allocation for the whole frame.
         let side = (2 * radius + 1) as usize;
@@ -546,11 +546,11 @@ impl DrizzleAccumulator {
 
                 // Integer-center: output pixel `o` is centred at `o`, so the kernel distance
                 // is `o - ox_center` with no offset.
-                let t = transform.apply(DVec2::new(ix as f64, iy as f64));
-                let ox_center = t.x as f32 * scale;
-                let oy_center = t.y as f32 * scale;
+                let t = to_output.apply(DVec2::new(ix as f64, iy as f64));
+                let ox_center = t.x as f32;
+                let oy_center = t.y as f32;
 
-                let jaco = local_jacobian(transform, t, input, scale as f64) as f32;
+                let jaco = magnification.at(t, input) as f32;
                 if jaco < JACOBIAN_MIN as f32 {
                     continue;
                 }

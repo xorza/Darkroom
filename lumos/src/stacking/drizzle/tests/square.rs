@@ -547,7 +547,7 @@ fn local_jacobian_identity_scale1() {
     // Jacobian = |det(I)| * 1² = 1.0
     let transform = Transform::identity();
     let center = transform.apply(DVec2::new(5.0, 5.0));
-    let jaco = local_jacobian(&transform, center, Vec2us::new(5, 5), 1.0);
+    let jaco = local_jacobian(&transform, center, Vec2us::new(5, 5));
     assert!(
         (jaco - 1.0).abs() < 1e-10,
         "Identity scale=1: expected 1.0, got {jaco}"
@@ -558,9 +558,9 @@ fn local_jacobian_identity_scale1() {
 fn local_jacobian_identity_scale2() {
     // Identity transform, scale=2: one input pixel maps to a 2×2 area in output.
     // Jacobian = |det(I)| * 2² = 4.0
-    let transform = Transform::identity();
+    let transform = output_transform(Transform::identity(), 2.0);
     let center = transform.apply(DVec2::new(5.0, 5.0));
-    let jaco = local_jacobian(&transform, center, Vec2us::new(5, 5), 2.0);
+    let jaco = local_jacobian(&transform, center, Vec2us::new(5, 5));
     assert!(
         (jaco - 4.0).abs() < 1e-10,
         "Identity scale=2: expected 4.0, got {jaco}"
@@ -574,7 +574,7 @@ fn local_jacobian_rotation_preserves_area() {
     let angle = 30.0_f64.to_radians();
     let transform = Transform::euclidean(DVec2::ZERO, angle);
     let center = transform.apply(DVec2::new(50.0, 50.0));
-    let jaco = local_jacobian(&transform, center, Vec2us::new(50, 50), 1.0);
+    let jaco = local_jacobian(&transform, center, Vec2us::new(50, 50));
     // Rotation preserves area: Jacobian = 1.0
     assert!(
         (jaco - 1.0).abs() < 1e-10,
@@ -588,7 +588,7 @@ fn local_jacobian_anisotropic_scale() {
     let transform = Transform::scale(DVec2::new(2.0, 3.0));
     let center = transform.apply(DVec2::new(5.0, 5.0));
     // Jacobian = |det([2,0;0,3])| * scale² = 6 * 1 = 6.0
-    let jaco = local_jacobian(&transform, center, Vec2us::new(5, 5), 1.0);
+    let jaco = local_jacobian(&transform, center, Vec2us::new(5, 5));
     assert!(
         (jaco - 6.0).abs() < 1e-10,
         "2x×3x scale: expected 6.0, got {jaco}"
@@ -603,11 +603,11 @@ fn local_jacobian_perspective_varies_spatially() {
 
     // At x=0: w ≈ 1, minimal distortion
     let c0 = transform.apply(DVec2::new(0.0, 0.0));
-    let jaco_left = local_jacobian(&transform, c0, Vec2us::ZERO, 1.0);
+    let jaco_left = local_jacobian(&transform, c0, Vec2us::ZERO);
 
     // At x=1000: w ≈ 1.1, noticeable distortion
     let c1000 = transform.apply(DVec2::new(1000.0, 0.0));
-    let jaco_right = local_jacobian(&transform, c1000, Vec2us::new(1000, 0), 1.0);
+    let jaco_right = local_jacobian(&transform, c1000, Vec2us::new(1000, 0));
 
     // Jacobians must differ for perspective transform
     assert!(
@@ -622,3 +622,78 @@ fn local_jacobian_perspective_varies_spatially() {
 }
 
 //
+
+/// The per-frame factor and the per-pixel finite difference measure the same quantity for every
+/// linear model — that agreement is what lets the kernels resolve it once instead of at every input
+/// pixel. Checked far from the origin, where the finite difference subtracts two large coordinates
+/// and the matrix form does not.
+#[test]
+fn area_magnification_agrees_with_the_per_pixel_jacobian_for_linear_models() {
+    let cases = [
+        (
+            "translation",
+            Transform::translation(DVec2::new(17.0, -9.0)),
+        ),
+        (
+            "euclidean",
+            Transform::euclidean(DVec2::new(3.0, 4.0), 0.21),
+        ),
+        (
+            "similarity",
+            Transform::similarity(DVec2::new(3.0, 4.0), 0.21, 1.37),
+        ),
+        (
+            "affine",
+            Transform::affine([1.02, 0.03, 12.0, -0.04, 0.98, -7.0]),
+        ),
+    ];
+
+    for (name, transform) in cases {
+        let to_output = output_transform(transform, 2.0);
+        let magnification = AreaMagnification::new(&to_output);
+        for pixel in [Vec2us::ZERO, Vec2us::new(7, 3), Vec2us::new(6000, 4000)] {
+            let center = to_output.apply(DVec2::new(pixel.x as f64, pixel.y as f64));
+            let uniform = magnification.at(center, pixel);
+            let per_pixel = local_jacobian(&to_output, center, pixel);
+            assert!(
+                (uniform - per_pixel).abs() < 1e-9 * per_pixel,
+                "{name} at {pixel:?}: uniform {uniform}, per-pixel {per_pixel}"
+            );
+        }
+    }
+
+    // Hand-computed: det([1.02, 0.03; -0.04, 0.98]) = 1.02·0.98 − 0.03·(−0.04) = 1.0008, and the
+    // factor is that times scale².
+    let affine = Transform::affine([1.02, 0.03, 12.0, -0.04, 0.98, -7.0]);
+    let at_origin = |scale: f32| {
+        let to_output = output_transform(affine, scale);
+        AreaMagnification::new(&to_output).at(to_output.apply(DVec2::ZERO), Vec2us::ZERO)
+    };
+    assert!((at_origin(2.0) - 1.0008 * 4.0).abs() < 1e-12);
+    // Scale is not ignored: composed into the matrix, it is quadratic in the determinant.
+    assert!((at_origin(1.0) - 1.0008).abs() < 1e-12);
+}
+
+/// A projective transform keeps the per-pixel path, because its factor genuinely varies.
+#[test]
+fn area_magnification_stays_per_pixel_for_a_homography() {
+    let transform = output_transform(
+        Transform::homography([1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 1e-4, 0.0]),
+        1.0,
+    );
+    let magnification = AreaMagnification::new(&transform);
+
+    let near = Vec2us::ZERO;
+    let far = Vec2us::new(1000, 0);
+    let at = |pixel: Vec2us| {
+        let center = transform.apply(DVec2::new(pixel.x as f64, pixel.y as f64));
+        magnification.at(center, pixel)
+    };
+
+    assert!(
+        (at(near) - at(far)).abs() > 0.01,
+        "a homography's magnification must vary: {} vs {}",
+        at(near),
+        at(far)
+    );
+}

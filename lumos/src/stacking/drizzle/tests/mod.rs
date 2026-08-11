@@ -11,7 +11,7 @@ use crate::stacking::drizzle::accumulator::internals::{
 use crate::stacking::drizzle::accumulator::{DrizzleAccumulator, DrizzleFrame};
 use crate::stacking::drizzle::config::{DrizzleConfig, DrizzleKernel};
 use crate::stacking::drizzle::error::{DrizzleConfigError, DrizzleError};
-use crate::stacking::drizzle::geometry::{boxer, local_jacobian, sgarea};
+use crate::stacking::drizzle::geometry::{AreaMagnification, boxer, local_jacobian, sgarea};
 use crate::stacking::drizzle::stack::{drizzle_images, drizzle_stack};
 use crate::stacking::progress::ProgressCallback;
 use crate::stacking::registration::transform::Transform;
@@ -141,3 +141,9 @@ mod geometry;
 mod jacobian;
 mod kernels;
 mod square;
+
+/// A registration transform with the drizzle output scale composed in, the way `accumulate_image`
+/// builds it before handing it to a kernel.
+fn output_transform(transform: Transform, scale: f32) -> Transform {
+    Transform::scale(DVec2::splat(scale as f64)).compose(&transform)
+}
