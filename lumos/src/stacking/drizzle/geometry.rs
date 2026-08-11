@@ -74,21 +74,26 @@ pub(crate) fn local_jacobian(to_output: &Transform, center: DVec2, pixel: Vec2us
 /// The sign depends on the direction of traversal (left-to-right = positive).
 /// When summed over all 4 edges of a convex quadrilateral (counterclockwise winding),
 /// the total gives the overlap area between the quadrilateral and the unit square.
+///
+/// The body works in components rather than vectors, and deliberately: Green's theorem integrates
+/// along x with y as the integrand, so the axes have different jobs — `xlo`/`xhi` clip the segment
+/// and `ylo`/`yhi` evaluate it at those clips, and the trapezoid area multiplies an x-difference by a
+/// y-sum. Packing those into points would hide which axis each term comes from. Only the two
+/// genuinely vectorial steps are vectors: the endpoint difference, and `det` as the cross product of
+/// the endpoints.
 #[inline]
 pub(crate) fn sgarea(from: DVec2, to: DVec2) -> f64 {
-    let (x1, y1) = (from.x, from.y);
-    let (x2, y2) = (to.x, to.y);
-    let dx = x2 - x1;
-    let dy = y2 - y1;
+    let delta = to - from;
+    let (dx, dy) = (delta.x, delta.y);
 
     if dx.abs() < SGAREA_DX_MIN {
         return 0.0;
     }
 
     let (sgn_dx, xlo, xhi) = if dx < 0.0 {
-        (-1.0, x2, x1)
+        (-1.0, to.x, from.x)
     } else {
-        (1.0, x1, x2)
+        (1.0, from.x, to.x)
     };
 
     if xlo >= 1.0 || xhi <= 0.0 {
@@ -99,8 +104,8 @@ pub(crate) fn sgarea(from: DVec2, to: DVec2) -> f64 {
     let xhi = xhi.min(1.0);
 
     let slope = dy / dx;
-    let ylo = y1 + slope * (xlo - x1);
-    let yhi = y1 + slope * (xhi - x1);
+    let ylo = from.y + slope * (xlo - from.x);
+    let yhi = from.y + slope * (xhi - from.x);
 
     if ylo <= 0.0 && yhi <= 0.0 {
         return 0.0;
@@ -110,7 +115,7 @@ pub(crate) fn sgarea(from: DVec2, to: DVec2) -> f64 {
         return sgn_dx * (xhi - xlo);
     }
 
-    let det = x1 * y2 - y1 * x2;
+    let det = from.perp_dot(to);
 
     let (xlo, ylo) = if ylo < 0.0 {
         (det / dy, 0.0)
