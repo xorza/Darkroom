@@ -415,7 +415,7 @@ fn source_noise_variance(
     cancel: &CancelToken,
 ) -> Result<f64, Error> {
     let sigma = f64::from(mad_to_sigma(frame.source_stats.channels[channel].mad));
-    let Some(confidence) = &frame.quality.confidence else {
+    let Some(confidence) = frame.quality.confidence() else {
         return Ok(sigma * sigma);
     };
     let values = confidence.chunk(0, pixel_count);

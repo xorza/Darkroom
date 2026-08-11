@@ -91,7 +91,7 @@ pub(crate) fn weighted_chunk_memory_layout(
     }
 }
 
-/// What the coverage pass holds: one input plane per frame that carries coverage, against the
+/// What the coverage pass holds: one input plane per frame that carries warp quality, against the
 /// combine's residents — which are all still alive at that point — plus the single coverage plane
 /// being accumulated.
 pub(crate) fn coverage_chunk_memory_layout(
@@ -102,7 +102,7 @@ pub(crate) fn coverage_chunk_memory_layout(
     ChunkMemoryLayout {
         input_planes: frames
             .iter()
-            .filter(|frame| frame.quality.coverage.is_some())
+            .filter(|frame| !frame.quality.is_none())
             .count(),
         resident_planes: output_channels * resident_planes_per_channel(planes) + 1,
     }

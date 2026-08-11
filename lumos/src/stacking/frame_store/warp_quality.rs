@@ -46,74 +46,127 @@ impl std::fmt::Display for FramePlane {
 /// The per-pixel warp quality a registered light carries: how much of each output pixel had
 /// support, and how confident the interpolation was.
 ///
-/// Both are absent for a calibration frame and for a light loaded straight from disk, and they
-/// travel together everywhere a frame does — so the two planes are converted, written and named
-/// in one step rather than one apiece.
-#[derive(Debug, Default)]
-pub(crate) struct WarpQuality<P> {
-    pub(crate) coverage: Option<P>,
-    pub(crate) confidence: Option<P>,
+/// Both planes or neither. A warp produces the pair, every consumer's rule for "does this frame
+/// contribute at this pixel?" is about the pair, and a calibration frame or a light loaded straight
+/// from disk carries no warp quality at all — so a lone plane is not a shape any producer means,
+/// and this type cannot hold one.
+///
+/// The two planes agree pixel by pixel as well: `coverage == 0` exactly where `confidence == 0`.
+/// `registration::resample::quality::quality_at` establishes that — outside the source footprint
+/// both are zero, and inside it every branch gives a positive confidence wherever there is support
+/// — and [`validate_warp_quality`] holds caller-supplied planes to it, because the combine leans on
+/// it: a sample that clears the coverage floor is guaranteed a positive confidence to weight it by,
+/// and `source_noise_variance` a non-zero one to divide by.
+///
+/// [`validate_warp_quality`]: crate::stacking::combine::cache::validation::validate_warp_quality
+#[derive(Debug)]
+pub(crate) enum WarpQuality<P> {
+    /// No warp quality at all — a calibration frame, or a light read straight from disk.
+    None,
+    /// The pair a warped light carries.
+    Planes { coverage: P, confidence: P },
 }
 
 impl<P> WarpQuality<P> {
-    pub(crate) fn new(coverage: Option<P>, confidence: Option<P>) -> Self {
-        Self {
-            coverage,
-            confidence,
+    /// The frame's per-pixel warp support, or `None` for a frame that carries no warp quality.
+    pub(crate) fn coverage(&self) -> Option<&P> {
+        match self {
+            Self::None => None,
+            Self::Planes { coverage, .. } => Some(coverage),
         }
     }
 
-    /// No warp quality at all — a calibration frame, or a light read straight from disk.
-    pub(crate) fn none() -> Self {
-        Self {
-            coverage: None,
-            confidence: None,
+    /// The frame's per-pixel interpolation confidence, or `None` as in [`Self::coverage`].
+    pub(crate) fn confidence(&self) -> Option<&P> {
+        match self {
+            Self::None => None,
+            Self::Planes { confidence, .. } => Some(confidence),
         }
     }
 
     pub(crate) fn map<Q>(self, mut convert: impl FnMut(P) -> Q) -> WarpQuality<Q> {
-        WarpQuality {
-            coverage: self.coverage.map(&mut convert),
-            confidence: self.confidence.map(&mut convert),
+        match self {
+            Self::None => WarpQuality::None,
+            Self::Planes {
+                coverage,
+                confidence,
+            } => WarpQuality::Planes {
+                coverage: convert(coverage),
+                confidence: convert(confidence),
+            },
         }
     }
 
-    /// Every plane the frame actually carries, each with the kind that names it. The one place
-    /// that decides what "all the quality planes" means, so a caller cannot enumerate a subset.
+    /// Every plane the frame carries, each with the kind that names it — both or neither. The one
+    /// place that decides what "all the quality planes" means, so a caller cannot enumerate a
+    /// subset.
     ///
-    /// Reads the two fields rather than going through [`FramePlane`], which also names the image
+    /// Reads the variant rather than going through [`FramePlane`], which also names the image
     /// channels and so has a variant this type could only ever answer `None` for.
     pub(crate) fn present(&self) -> impl Iterator<Item = (FramePlane, &P)> {
         [
-            (FramePlane::Coverage, self.coverage.as_ref()),
-            (FramePlane::Confidence, self.confidence.as_ref()),
+            self.coverage().map(|plane| (FramePlane::Coverage, plane)),
+            self.confidence()
+                .map(|plane| (FramePlane::Confidence, plane)),
         ]
         .into_iter()
-        .filter_map(|(kind, plane)| plane.map(|plane| (kind, plane)))
+        .flatten()
     }
 
-    /// How many planes are present, 0 to 2.
+    /// How many planes are present: 0 or 2.
     pub(crate) fn count(&self) -> usize {
         self.present().count()
     }
 
     /// Whether the frame carries no warp quality at all.
     pub(crate) fn is_none(&self) -> bool {
-        self.coverage.is_none() && self.confidence.is_none()
+        matches!(self, Self::None)
     }
 
-    /// Convert each present plane, tagging it with the name its spill file carries. Which plane
-    /// answers to which name is stated here alone, so a writer and a later reader cannot disagree.
+    /// Convert each plane, tagging it with the name its spill file carries. Which plane answers to
+    /// which name is stated here alone, so a writer and a later reader cannot disagree.
     pub(crate) fn try_map<Q, E>(
         self,
         mut convert: impl FnMut(&'static str, P) -> Result<Q, E>,
     ) -> Result<WarpQuality<Q>, E> {
-        Ok(WarpQuality {
-            coverage: self.coverage.map(|p| convert("coverage", p)).transpose()?,
-            confidence: self
-                .confidence
-                .map(|p| convert("confidence", p))
-                .transpose()?,
-        })
+        match self {
+            Self::None => Ok(WarpQuality::None),
+            Self::Planes {
+                coverage,
+                confidence,
+            } => Ok(WarpQuality::Planes {
+                coverage: convert("coverage", coverage)?,
+                confidence: convert("confidence", confidence)?,
+            }),
+        }
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod internals {
+    use imaginarium::Buffer2;
+
+    use crate::stacking::frame_store::warp_quality::WarpQuality;
+
+    impl WarpQuality<Buffer2<f32>> {
+        /// A coverage plane with the confidence plane a warp would have produced beside it: unit
+        /// confidence where there is support and zero where there is none, which is the pairing
+        /// every consumer relies on. Lets a test about coverage gating state the one plane it
+        /// cares about.
+        pub(crate) fn from_coverage(coverage: Buffer2<f32>) -> Self {
+            let confidence = Buffer2::new(
+                coverage.width(),
+                coverage.height(),
+                coverage
+                    .pixels()
+                    .iter()
+                    .map(|&value| if value > 0.0 { 1.0 } else { 0.0 })
+                    .collect(),
+            );
+            Self::Planes {
+                coverage,
+                confidence,
+            }
+        }
     }
 }

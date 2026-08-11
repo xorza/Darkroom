@@ -61,22 +61,27 @@ fn spill_directory_removes_planes_unless_asked_to_keep() {
 fn light_frame_keeps_quality_with_its_planes() {
     let dimensions = ImageDimensions::new((2, 2), 1);
     let image = LinearImage::from_pixels(dimensions, vec![1.0, 2.0, 3.0, 4.0]);
+    // The last pixel has no support, so its confidence is zero too — the pairing every consumer of
+    // a warp-quality pair relies on.
     let coverage = Buffer2::new(2, 2, vec![1.0, 0.5, 0.25, 0.0]);
-    let confidence = Buffer2::new(2, 2, vec![4.0, 3.0, 2.0, 1.0]);
+    let confidence = Buffer2::new(2, 2, vec![4.0, 3.0, 2.0, 0.0]);
     let source_stats = FrameStats::measure(&image);
     let frame = StoredFrame::from_memory(
         image,
-        WarpQuality::new(Some(coverage), Some(confidence)),
+        WarpQuality::Planes {
+            coverage,
+            confidence,
+        },
         source_stats,
     );
     assert_eq!(frame.channels[0].chunk(0, 4), &[1.0, 2.0, 3.0, 4.0]);
     assert_eq!(
-        frame.quality.coverage.as_ref().unwrap().chunk(0, 4),
+        frame.quality.coverage().unwrap().chunk(0, 4),
         &[1.0, 0.5, 0.25, 0.0]
     );
     assert_eq!(
-        frame.quality.confidence.as_ref().unwrap().chunk(0, 4),
-        &[4.0, 3.0, 2.0, 1.0]
+        frame.quality.confidence().unwrap().chunk(0, 4),
+        &[4.0, 3.0, 2.0, 0.0]
     );
     assert_eq!(frame.source_stats.channels[0].median, 2.5);
     assert_eq!(frame.source_stats.channels[0].mad, 1.0);
