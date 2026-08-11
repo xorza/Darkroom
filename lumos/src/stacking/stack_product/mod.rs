@@ -13,16 +13,22 @@ use crate::stacking::stack_product::quality_map::QualityMap;
 /// A stacked science product shared by statistical combine and drizzle.
 ///
 /// Each plane is `Some` only when it was requested (see [`QualityPlanes`]) and the combine could
-/// produce it. Each producer documents how it normalizes `coverage`: statistical combine reports
-/// the fraction of frames with geometric support at a pixel, while drizzle reports accumulated
-/// coverage relative to its maximum. Statistical quality is channel-specific because rejection
+/// produce it. `coverage` means the same thing whichever produced it — the share of frames that
+/// reached a pixel — so a reader can interpret it without knowing the entry point. `weight` cannot
+/// be shared that way: it is `Σwᵢ` over whatever the producer weighted by, and those weights are
+/// the algorithms' own (see the field). Statistical quality is channel-specific because rejection
 /// can retain different samples in each RGB channel; monochrome and drizzle quality use shared
 /// planes.
 #[derive(Debug)]
 pub struct StackProduct {
     /// The combined linear image.
     pub image: LinearImage,
-    /// Normalized coverage in `[0, 1]`, for masking and fill gating.
+    /// The share of frames that reached each pixel, in `[0, 1]`, for masking and fill gating.
+    ///
+    /// A statistical combine counts the frames whose sample cleared the coverage floor; drizzle
+    /// counts the frames that deposited any flux. Neither says how much signal landed there — a
+    /// pixel every frame reached through a sliver of a drop reads 1.0 — which is what `weight`
+    /// answers, and what drizzle's `min_weight_fraction` gates on.
     pub coverage: Option<Coverage>,
     /// WHT map. Statistical combines store per-channel sums of surviving frame weights multiplied
     /// by per-pixel confidence; Equal becomes survivor count at unit confidence, while

@@ -43,7 +43,7 @@ fn accumulator(input_dims: ImageDimensions, config: DrizzleConfig) -> DrizzleAcc
     DrizzleAccumulator::new(input_dims, config).expect("test drizzle config must be valid")
 }
 
-/// A drizzle config for `kernel`. `min_coverage` is 0 everywhere in these tests so nothing is
+/// A drizzle config for `kernel`. `min_weight_fraction` is 0 everywhere in these tests so nothing is
 /// dropped for thin coverage, and `fill_value` is 0 unless a case overrides it by struct update.
 fn kernel_config(kernel: DrizzleKernel, scale: f32, pixfrac: f32) -> DrizzleConfig {
     DrizzleConfig {
@@ -51,7 +51,7 @@ fn kernel_config(kernel: DrizzleKernel, scale: f32, pixfrac: f32) -> DrizzleConf
         pixfrac,
         kernel,
         fill_value: 0.0,
-        min_coverage: 0.0,
+        min_weight_fraction: 0.0,
         ..Default::default()
     }
 }

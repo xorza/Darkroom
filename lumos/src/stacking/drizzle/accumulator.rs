@@ -5,9 +5,11 @@ use glam::{DVec2, Vec2};
 use imaginarium::Buffer2;
 use rayon::prelude::*;
 
+use crate::bit_buffer2::BitBuffer2;
 use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::linear::LinearImage;
 use crate::math::rect::Rect;
+use crate::math::size2us::Size2us;
 use crate::stacking::drizzle::config::{DrizzleConfig, DrizzleKernel};
 use crate::stacking::drizzle::error::DrizzleError;
 use crate::stacking::drizzle::geometry::{boxer, lanczos_kernel, local_jacobian};
@@ -71,8 +73,44 @@ pub struct DrizzleAccumulator {
     /// cost beyond its own allocation: this is an output-grid plane resident for the whole run, and
     /// two more arithmetic operations at every deposit.
     weight_sq: Option<Buffer2<f32>>,
+    /// How many frames reached each output pixel, when the config asks for coverage.
+    frame_coverage: Option<FrameCoverage>,
     /// Configuration.
     config: DrizzleConfig,
+}
+
+/// Per-output-pixel tally of how many frames deposited any flux there.
+///
+/// A frame touches an output pixel through however many of its input pixels land on it, so the
+/// tally cannot simply count deposits. `touched` marks what the frame in progress has already been
+/// counted for and is cleared between frames — one bit per output pixel against the f32 plane's
+/// thirty-two, which is what keeps a second full-size accumulator off the drizzle grid.
+#[derive(Debug)]
+struct FrameCoverage {
+    touched: BitBuffer2,
+    frames: Buffer2<f32>,
+}
+
+impl FrameCoverage {
+    fn new(width: usize, height: usize) -> Self {
+        Self {
+            touched: BitBuffer2::new_filled(Size2us::new(width, height), false),
+            frames: Buffer2::new_default(width, height),
+        }
+    }
+
+    /// Count this frame at `index`, if it has not been counted there already.
+    #[inline]
+    fn touch(&mut self, index: usize) {
+        if !self.touched.get(index) {
+            self.touched.set(index, true);
+            self.frames.pixels_mut()[index] += 1.0;
+        }
+    }
+
+    fn begin_frame(&mut self) {
+        self.touched.fill(false);
+    }
 }
 
 impl DrizzleAccumulator {
@@ -100,6 +138,10 @@ impl DrizzleAccumulator {
                 .quality
                 .variance
                 .then(|| Buffer2::new_default(output_width, output_height)),
+            frame_coverage: config
+                .quality
+                .coverage
+                .then(|| FrameCoverage::new(output_width, output_height)),
             config,
         })
     }
@@ -175,7 +217,6 @@ impl DrizzleAccumulator {
             frame.weight,
             frame.pixel_weight_map.as_ref(),
         );
-        self.frames_added += 1;
         Ok(())
     }
 
@@ -194,6 +235,13 @@ impl DrizzleAccumulator {
             n_channels,
             image.channels()
         );
+        // Both counters belong here rather than in `add_frame`: this is the one place a frame is
+        // accumulated, and the coverage tally would otherwise miss any caller that reaches it
+        // directly.
+        if let Some(coverage) = &mut self.frame_coverage {
+            coverage.begin_frame();
+        }
+        self.frames_added += 1;
 
         if let Some(pw) = pixel_weights {
             assert_eq!(
@@ -578,6 +626,7 @@ impl DrizzleAccumulator {
         oy: usize,
         pixel_weight: f32,
     ) {
+        let output_width = self.weight.width();
         for (c, d) in self.data.iter_mut().enumerate() {
             let flux = image.channel(c)[(ix, iy)];
             *d.get_mut(ox, oy) += flux * pixel_weight;
@@ -586,6 +635,9 @@ impl DrizzleAccumulator {
         *self.weight.get_mut(ox, oy) += pixel_weight;
         if let Some(weight_sq) = &mut self.weight_sq {
             *weight_sq.get_mut(ox, oy) += pixel_weight * pixel_weight;
+        }
+        if let Some(coverage) = &mut self.frame_coverage {
+            coverage.touch(oy * output_width + ox);
         }
     }
 
@@ -596,12 +648,16 @@ impl DrizzleAccumulator {
     /// is this function.
     #[inline]
     fn accumulate_samples(&mut self, fluxes: &[f32], ox: usize, oy: usize, pixel_weight: f32) {
+        let output_width = self.weight.width();
         for (d, &flux) in self.data.iter_mut().zip(fluxes) {
             *d.get_mut(ox, oy) += flux * pixel_weight;
         }
         *self.weight.get_mut(ox, oy) += pixel_weight;
         if let Some(weight_sq) = &mut self.weight_sq {
             *weight_sq.get_mut(ox, oy) += pixel_weight * pixel_weight;
+        }
+        if let Some(coverage) = &mut self.frame_coverage {
+            coverage.touch(oy * output_width + ox);
         }
     }
 
@@ -610,26 +666,27 @@ impl DrizzleAccumulator {
     /// normalizes every channel and seeds the quality outputs.
     ///
     /// The weight map is built whatever the request — the image is `Σfluxᵢwᵢ / Σwᵢ`, and
-    /// `min_coverage` gates fill against its maximum — so declining `weight` only declines handing
-    /// it out, while declining `coverage` or `variance` skips an output-grid allocation each.
+    /// `min_weight_fraction` gates fill against its maximum — so declining `weight` only declines
+    /// handing it out, while declining `coverage` or `variance` skips an output-grid allocation
+    /// each.
     pub fn finalize(self) -> StackProduct {
         let width = self.width();
         let height = self.height();
         let n_channels = self.channels();
         let needs_clamping = self.config.kernel == DrizzleKernel::Lanczos;
-        let min_coverage = self.config.min_coverage;
+        let min_weight_fraction = self.config.min_weight_fraction;
         let fill_value = self.config.fill_value;
 
         let planes = self.config.quality;
         let weight_pixels = self.weight.pixels();
 
-        // Find max weight for normalizing the coverage / min_coverage threshold.
+        // The fill gate is a share of the deepest pixel's weight, so it needs that maximum.
         let max_weight = weight_pixels
             .par_iter()
             .copied()
             .reduce(|| 0.0f32, f32::max);
         let weight_threshold = if max_weight > 0.0 {
-            min_coverage * max_weight
+            min_weight_fraction * max_weight
         } else {
             0.0
         };
@@ -678,18 +735,22 @@ impl DrizzleAccumulator {
             QualityMap::Shared(linear_variance)
         });
 
-        // Normalized coverage [0, 1] for masking.
-        let coverage = planes.coverage.then(|| {
-            let mut coverage = Buffer2::new_default(width, height);
-            if max_weight > 0.0 {
-                let inv_max = 1.0 / max_weight;
+        // Coverage is the share of frames that reached each pixel — the same quantity the
+        // statistical combine reports, so a reader need not know which producer built the product.
+        // It is deliberately *not* `weight / max_weight`: that answers how deep a pixel is relative
+        // to the best-covered one in this particular run, which is a different question and remains
+        // available as `weight` divided by its own maximum.
+        let frames_added = self.frames_added;
+        let coverage = self.frame_coverage.map(|mut coverage| {
+            if frames_added > 0 {
+                let inv_frames = 1.0 / frames_added as f32;
                 coverage
+                    .frames
                     .pixels_mut()
                     .par_iter_mut()
-                    .zip(weight_pixels.par_iter())
-                    .for_each(|(c, &w)| *c = w * inv_max);
+                    .for_each(|count| *count *= inv_frames);
             }
-            Coverage::PerPixel(coverage)
+            Coverage::PerPixel(coverage.frames)
         });
 
         let image = LinearImage::from_planar_channels(

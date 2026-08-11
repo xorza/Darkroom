@@ -80,19 +80,21 @@ fn turbo_kernel_fractional_shift() {
     );
 }
 
-/// Test that min_coverage works with normalized weights.
+/// Test that min_weight_fraction works with normalized weights.
 ///
 /// Single bright pixel (0,0), pixfrac=0.5 (drop width 1.0), scale=2, sub-pixel shift (0.1, 0).
 /// The drop centers at output (0.2, 0) and splits unevenly between cells (0,0) and (1,0):
-/// x-overlaps 0.8 and 0.2. max_weight = 0.8; threshold = min_coverage(0.6) * 0.8 = 0.48.
+/// x-overlaps 0.8 and 0.2. max_weight = 0.8; threshold = min_weight_fraction(0.6) * 0.8 = 0.48.
 /// cell (0,0): weight 0.8 ≥ 0.48 → kept (1.0). cell (1,0): weight 0.2 < 0.48 → fill_value.
 #[test]
-fn min_coverage_normalized() {
+fn min_weight_fraction_normalized() {
     let mut pixels = vec![0.0f32; 4 * 4];
     pixels[0] = 1.0;
     let image = mono_image(Size2us::new(4, 4), pixels);
 
-    let config = DrizzleConfig::x2().with_pixfrac(0.5).with_min_coverage(0.6);
+    let config = DrizzleConfig::x2()
+        .with_pixfrac(0.5)
+        .with_min_weight_fraction(0.6);
     let mut acc = accumulator(ImageDimensions::new((4, 4), 1), config);
     let transform = Transform::translation(DVec2::new(0.1, 0.0));
     acc.add_image(image, &transform, 1.0, None);
@@ -102,7 +104,7 @@ fn min_coverage_normalized() {
     assert!((out[0] - 1.0).abs() < 1e-5, "cell (0,0) kept: {}", out[0]);
     assert!(
         out[1].abs() < 1e-5,
-        "cell (1,0) rejected (below min_coverage): {}",
+        "cell (1,0) rejected (below min_weight_fraction): {}",
         out[1]
     );
 }
@@ -145,7 +147,7 @@ fn lanczos_kernel_uniform_preserves_value() {
         pixfrac: 1.0,
         kernel: DrizzleKernel::Lanczos,
         fill_value: 0.0,
-        min_coverage: 0.0,
+        min_weight_fraction: 0.0,
         ..Default::default()
     };
     let mut acc = accumulator(ImageDimensions::new((20, 20), 1), config);
@@ -177,7 +179,7 @@ fn lanczos_clamping_no_negative_output() {
         pixfrac: 1.0,
         kernel: DrizzleKernel::Lanczos,
         fill_value: 0.0,
-        min_coverage: 0.0,
+        min_weight_fraction: 0.0,
         ..Default::default()
     };
     let mut acc = accumulator(ImageDimensions::new((20, 20), 1), config);
@@ -320,7 +322,7 @@ fn scale1_pixfrac1_identity() {
         pixfrac: 1.0,
         kernel: DrizzleKernel::Turbo,
         fill_value: 0.0,
-        min_coverage: 0.0,
+        min_weight_fraction: 0.0,
         ..Default::default()
     };
     let mut acc = accumulator(ImageDimensions::new((5, 5), 1), config);
@@ -356,7 +358,7 @@ fn fill_value_in_uncovered_pixels() {
         pixfrac: 0.8,
         kernel: DrizzleKernel::Point,
         fill_value: -999.0,
-        min_coverage: 0.0,
+        min_weight_fraction: 0.0,
         ..Default::default()
     };
     let mut acc = accumulator(ImageDimensions::new((4, 4), 1), config);
@@ -470,7 +472,7 @@ fn lanczos_kernel_with_translation() {
         pixfrac: 1.0,
         kernel: DrizzleKernel::Lanczos,
         fill_value: 0.0,
-        min_coverage: 0.0,
+        min_weight_fraction: 0.0,
         ..Default::default()
     };
     let mut acc = accumulator(ImageDimensions::new((20, 20), 1), config);
@@ -521,7 +523,7 @@ fn pixel_weight_zero_excludes_pixel() {
         pixfrac: 1.0,
         kernel: DrizzleKernel::Turbo,
         fill_value: 0.0,
-        min_coverage: 0.0,
+        min_weight_fraction: 0.0,
         ..Default::default()
     };
     let mut acc = accumulator(ImageDimensions::new((4, 4), 1), config);
@@ -571,7 +573,7 @@ fn pixel_weight_scales_contribution() {
         pixfrac: 1.0,
         kernel: DrizzleKernel::Turbo,
         fill_value: 0.0,
-        min_coverage: 0.0,
+        min_weight_fraction: 0.0,
         ..Default::default()
     };
     let mut acc = accumulator(ImageDimensions::new((4, 4), 1), config);
@@ -614,7 +616,7 @@ fn pixel_weight_bad_pixel_mask() {
         pixfrac: 1.0,
         kernel: DrizzleKernel::Turbo,
         fill_value: -1.0,
-        min_coverage: 0.0,
+        min_weight_fraction: 0.0,
         ..Default::default()
     };
     let mut acc = accumulator(ImageDimensions::new((8, 8), 1), config);

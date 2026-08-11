@@ -20,7 +20,7 @@ fn drizzle_single_image() {
     // With scale=2, pixfrac=0.8: drop_size = 0.8*2 = 1.6 output pixels.
     // Integer-center: input pixel (ix,iy) center at (ix,iy), scaled to (2*ix, 2*iy).
     // A single flat image is reproduced wherever there is coverage: value = val·w / w = val.
-    // Only the thin high-edge band (coverage < min_coverage) falls back to fill_value.
+    // Only the thin high-edge band (coverage < min_weight_fraction) falls back to fill_value.
     let pixels = result.image.channel(0);
     assert!(
         pixels
@@ -377,9 +377,9 @@ fn weight_and_linear_variance_maps() {
 
 /// A declined plane is not produced, and declining it changes nothing about the image.
 ///
-/// The weight map is not optional internally — the image is `Σfluxᵢwᵢ / Σwᵢ` and `min_coverage`
+/// The weight map is not optional internally — the image is `Σfluxᵢwᵢ / Σwᵢ` and `min_weight_fraction`
 /// gates fill against its maximum — so the risk this pins is that gating the *outputs* disturbs the
-/// combine. Run with a non-zero `min_coverage` and a transform that leaves the frame's edge thinly
+/// combine. Run with a non-zero `min_weight_fraction` and a transform that leaves the frame's edge thinly
 /// covered, so the fill gate is actually exercised while coverage is declined.
 #[test]
 fn declined_quality_planes_are_absent_and_do_not_disturb_the_image() {
@@ -388,7 +388,7 @@ fn declined_quality_planes_are_absent_and_do_not_disturb_the_image() {
     let transform = Transform::translation(DVec2::new(1.7, -2.3));
     let product = |quality| {
         let config = DrizzleConfig {
-            min_coverage: 0.5,
+            min_weight_fraction: 0.5,
             quality,
             ..DrizzleConfig::x2()
         };
@@ -410,7 +410,7 @@ fn declined_quality_planes_are_absent_and_do_not_disturb_the_image() {
     assert!(coverage_only.coverage.is_some());
     assert!(coverage_only.weight.is_none() && coverage_only.linear_variance.is_none());
 
-    // The fill gate has to have fired, or the min_coverage path is untested here.
+    // The fill gate has to have fired, or the min_weight_fraction path is untested here.
     let filled = all
         .image
         .channel(0)
@@ -419,7 +419,7 @@ fn declined_quality_planes_are_absent_and_do_not_disturb_the_image() {
         .count();
     assert!(
         filled > 0,
-        "min_coverage dropped no pixels, so nothing was gated"
+        "min_weight_fraction dropped no pixels, so nothing was gated"
     );
 
     for (label, other) in [("image only", &bare), ("coverage only", &coverage_only)] {
@@ -440,4 +440,69 @@ fn declined_quality_planes_are_absent_and_do_not_disturb_the_image() {
             .pixels(),
         "coverage differed when the other planes were declined"
     );
+}
+
+/// Drizzle reports coverage as the share of *frames* that reached a pixel — the same quantity the
+/// statistical combine reports, so a `StackProduct` means one thing whichever produced it.
+///
+/// The fixture separates that from the accumulated weight it used to be normalized against: two
+/// frames overlapping on part of the grid, the second carrying three times the frame weight of the
+/// first. In the band only the first frame reaches, one of two frames contributed — coverage 0.5 —
+/// while the weight there is a quarter of the deepest pixel's. The old `weight / max_weight` read
+/// 0.25 for that band.
+#[test]
+fn coverage_counts_frames_rather_than_accumulated_weight() {
+    let side = 12;
+    let overlap_from = 4;
+    let config = DrizzleConfig {
+        scale: 1.0,
+        pixfrac: 1.0,
+        kernel: DrizzleKernel::Turbo,
+        min_weight_fraction: 0.0,
+        ..Default::default()
+    };
+    let mut acc = accumulator(ImageDimensions::new((side, side), 1), config);
+    acc.add_image(
+        constant_mono_image(Size2us::new(side, side), 1.0),
+        &Transform::identity(),
+        1.0,
+        None,
+    );
+    acc.add_image(
+        constant_mono_image(Size2us::new(side, side), 1.0),
+        &Transform::translation(DVec2::new(overlap_from as f64, 0.0)),
+        3.0,
+        None,
+    );
+    let product = acc.finalize();
+    let coverage = product.coverage.as_ref().expect("coverage was requested");
+    let weight = product
+        .weight
+        .as_ref()
+        .expect("weight was requested")
+        .channel(0);
+
+    let max_weight = weight.pixels().iter().copied().fold(0.0f32, f32::max);
+    assert_eq!(max_weight, 4.0, "frame weights 1 + 3 over the overlap");
+
+    for y in 0..side {
+        for x in 0..side {
+            let (frames, expected_weight) = if x < overlap_from {
+                (1.0, 1.0)
+            } else {
+                (2.0, 4.0)
+            };
+            assert_eq!(weight[(x, y)], expected_weight, "weight at ({x}, {y})");
+            assert_eq!(
+                coverage[(x, y)],
+                frames / 2.0,
+                "coverage at ({x}, {y}) must be the share of frames"
+            );
+        }
+    }
+
+    // The two measures genuinely disagree here, which is what makes the assertions above a test of
+    // the normalization rather than of a fixture where both answer alike.
+    assert_eq!(coverage[(0, 0)], 0.5);
+    assert_eq!(weight[(0, 0)] / max_weight, 0.25);
 }

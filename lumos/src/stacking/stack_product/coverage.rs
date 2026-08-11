@@ -5,7 +5,10 @@ use imaginarium::Buffer2;
 use crate::io::image::linear::LinearImage;
 use crate::math::size2us::Size2us;
 
-/// Normalized coverage in `[0, 1]`: the share of frames that reached each pixel.
+/// The share of frames that reached each pixel, in `[0, 1]`.
+///
+/// One meaning for both producers: a statistical combine counts the frames whose sample cleared
+/// the coverage floor, drizzle the frames that deposited any flux.
 ///
 /// A sum type because the usual answer is a single number. When no frame carries a coverage map
 /// every pixel saw every frame, and spelling that out as a plane of `1.0` costs a full image-sized
