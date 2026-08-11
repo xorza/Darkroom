@@ -2,6 +2,7 @@
 
 pub(crate) mod error;
 mod format;
+pub(crate) mod store_outcome;
 
 use std::io;
 use std::path::PathBuf;
@@ -13,9 +14,8 @@ use crate::DynamicValue;
 use crate::data::codec::Codecs;
 use crate::data::codec::error::CodecFormatError;
 use crate::execution::cache::digest::Digest;
-use crate::execution::cache::disk_store::error::{
-    RemovalError, StoreError, StoreOutcome, StoreResult,
-};
+use crate::execution::cache::disk_store::error::{RemovalError, StoreError, StoreResult};
+use crate::execution::cache::disk_store::store_outcome::StoreOutcome;
 use crate::execution::cache::slot::OutputSnapshot;
 use crate::execution::compile::compiled_graph::ExecutionNode;
 use crate::graph::func::lambda::OutputDemand;

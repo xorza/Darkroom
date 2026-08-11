@@ -1,4 +1,4 @@
-//! The named results [`OpenDocument`](super::OpenDocument)'s methods hand back.
+//! What one undo/redo replay did.
 
 use crate::gui::relayout::Relayout;
 

@@ -1,6 +1,7 @@
 use crate::DynamicValue;
 use crate::execution::cache::digest::Digest;
-use crate::execution::cache::disk_store::error::{StoreOutcome, StoreResult};
+use crate::execution::cache::disk_store::error::StoreResult;
+use crate::execution::cache::disk_store::store_outcome::StoreOutcome;
 use crate::graph::func::lambda::OutputDemand;
 use crate::graph::identity::FuncId;
 use crate::runtime::any_state::AnyState;

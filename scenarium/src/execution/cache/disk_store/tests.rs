@@ -8,7 +8,8 @@ use ::common::TempFile;
 use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _};
 
 use crate::execution::cache::digest::Digest;
-use crate::execution::cache::disk_store::error::{StoreError, StoreOutcome};
+use crate::execution::cache::disk_store::error::StoreError;
+use crate::execution::cache::disk_store::store_outcome::StoreOutcome;
 use crate::execution::cache::disk_store::{BlobTarget, DiskStore, StorePolicy};
 use crate::execution::cache::slot::OutputSnapshot;
 use crate::graph::func::lambda::OutputDemand;

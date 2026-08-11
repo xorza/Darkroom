@@ -6,7 +6,7 @@ use tokio_util::sync::CancellationToken;
 
 use ::common::CancelToken;
 
-use crate::execution::cache::runtime::error::CacheFlushReport;
+use crate::execution::cache::runtime::cache_flush_report::CacheFlushReport;
 use crate::execution::engine::ExecutionEngine;
 use crate::execution::error::Error;
 use crate::execution::report::ExecutionOutcome;
