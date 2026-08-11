@@ -11,10 +11,9 @@ use crate::stacking::combine::error::Error as StackError;
 use crate::stacking::combine::stack::stack_stored_frames;
 use crate::stacking::frame_store::StoredFrame;
 use crate::stacking::frame_store::frame_stats::FrameStats;
-use crate::stacking::frame_store::warp_quality::WarpQuality;
 use crate::stacking::progress::{ProgressCallback, StackingStage};
 use crate::stacking::registration::register;
-use crate::stacking::registration::resample::warp;
+use crate::stacking::registration::resample::WarpBuffers;
 use crate::stacking::registration::result::RegistrationError;
 use crate::stacking::star_detection::detector::DetectionResult;
 use crate::stacking::star_detection::detector::Diagnostics;
@@ -194,12 +193,17 @@ pub(crate) fn register_warp_and_stack(
             StackingStage::Registering,
         );
     };
+    // One reusable set of warp output planes per in-flight worker. The spill tier hands its
+    // buffers back once the frame is on disk, so a worker warps into pages it has already faulted
+    // in; the RAM tier keeps them, and the slot simply refills from a fresh allocation it would
+    // have made anyway.
+    let mut warp_buffers: Vec<Option<WarpBuffers>> = (0..warp_concurrency).map(|_| None).collect();
     // Taking each detected record by value frees its input image as soon as the warped output
     // exists, so this stage never holds the complete input and warped sets simultaneously.
-    let outcomes = concurrency::try_par_map_limited_owned(
+    let outcomes = concurrency::try_par_map_bounded_owned(
         detected,
-        warp_concurrency,
-        |index, detected| -> Result<Option<StoredFrame>, Error> {
+        &mut warp_buffers,
+        |buffers, index, detected| -> Result<Option<StoredFrame>, Error> {
             // Cancelled: drop this frame (skips the heavy register + warp); the post-loop check
             // below turns the run into `Cancelled`.
             if cancel.is_cancelled() {
@@ -210,9 +214,7 @@ pub(crate) fn register_warp_and_stack(
                 // The unwarped reference has full support and unit interpolation confidence.
                 let image = detected.image.into_image();
                 let source_stats = FrameStats::measure(&image);
-                return tier
-                    .store(&name, image, WarpQuality::None, source_stats)
-                    .map(Some);
+                return tier.store_reference(&name, image, source_stats).map(Some);
             }
 
             let n = registered_so_far.fetch_add(1, Ordering::Relaxed) + 1;
@@ -243,23 +245,20 @@ pub(crate) fn register_warp_and_stack(
                 transform = %registration.transform(),
                 "registered"
             );
-            let warped = warp(
+            let mut warped = buffers
+                .take()
+                .unwrap_or_else(|| WarpBuffers::new(source.dimensions()));
+            warped.warp_into(
                 &source,
                 &registration.warp_transform(),
                 &config.registration.warp,
             );
+            let metadata = source.metadata.clone();
             drop(source);
             report_resolved();
-            tier.store(
-                &name,
-                warped.image,
-                WarpQuality::Planes {
-                    coverage: warped.coverage,
-                    confidence: warped.confidence,
-                },
-                source_stats,
-            )
-            .map(Some)
+            let stored = tier.store(&name, metadata, warped, source_stats)?;
+            *buffers = stored.reusable;
+            Ok(Some(stored.frame))
         },
     )?;
     if cancel.is_cancelled() {

@@ -69,18 +69,22 @@ impl StoredFrame {
     }
 
     /// Write the frame's channels and quality planes under `directory` and memory-map them back.
+    ///
+    /// Borrows everything it writes: the caller keeps its buffers, which is what lets the warp
+    /// stage hand the same ones to the next frame rather than allocating a set that has to be
+    /// faulted in from scratch.
     pub(crate) fn spill(
         directory: &Path,
         name: &str,
         image: &impl StackableImage,
-        quality: WarpQuality<Buffer2<f32>>,
+        quality: &WarpQuality<Buffer2<f32>>,
         source_stats: FrameStats,
     ) -> Result<Self, FrameStoreError> {
         let spill = FrameSpill::new(directory, name);
         let channels = spill_channels(spill, image)?;
         let quality = quality.try_map(|kind, plane| {
             let path = spill.quality_path(kind);
-            write_plane(&path, &plane)?;
+            write_plane(&path, plane.pixels())?;
             StoredPlane::map(path)
         })?;
         Ok(Self {

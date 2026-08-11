@@ -172,7 +172,7 @@ fn bench_quality_maps_lanczos3_1k(b: quickbench::Bencher) {
     let transform = create_test_transform();
 
     b.bench(|| {
-        quality::maps(
+        quality::internals::maps(
             black_box(Size2us::new(1024, 1024)),
             &black_box(WarpTransform::new(transform)),
             InterpolationMethod::Lanczos3,
@@ -185,7 +185,7 @@ fn bench_quality_maps_bilinear_1k(b: quickbench::Bencher) {
     let transform = create_test_transform();
 
     b.bench(|| {
-        quality::maps(
+        quality::internals::maps(
             black_box(Size2us::new(1024, 1024)),
             &black_box(WarpTransform::new(transform)),
             InterpolationMethod::Bilinear,
@@ -246,5 +246,49 @@ fn bench_interpolate_lanczos3_single(b: quickbench::Bencher) {
             sum += kernel_test_support::interpolate_lanczos(&input, Vec2::new(x, y), 3, 0.0);
         }
         black_box(sum)
+    });
+}
+
+#[quick_bench(warmup_iters = 1, iters = 6)]
+/// One frame's warp into freshly allocated planes against the same warp into planes a previous
+/// frame left behind — the spill tier's per-frame cost with and without the reuse
+/// `try_par_map_bounded_owned`'s slot gives it.
+///
+/// The gap is first-touch page faults: `WarpBuffers::new` hands back lazily-mapped zero pages and
+/// every one of them faults as the warp writes it. Sized at 16 MP because that is where the effect
+/// is legible — at 1 MP the three planes are 12 MiB and the difference sits inside the noise.
+fn bench_warp_into_fresh_4k(b: quickbench::Bencher) {
+    let size = Size2us::new(4096, 4096);
+    let pixels = create_test_image(size).pixels().to_vec();
+    let image =
+        LinearImage::from_pixels(ImageDimensions::new((size.width, size.height), 1), pixels);
+    let transform = create_test_transform();
+    let params = config::internals::warp_params(InterpolationMethod::Lanczos3);
+    b.bench(|| {
+        let mut buffers = resample::WarpBuffers::new(image.dimensions());
+        buffers.warp_into(
+            black_box(&image),
+            &black_box(WarpTransform::new(transform)),
+            &params,
+        );
+        black_box(buffers)
+    });
+}
+
+#[quick_bench(warmup_iters = 1, iters = 6)]
+fn bench_warp_into_reused_4k(b: quickbench::Bencher) {
+    let size = Size2us::new(4096, 4096);
+    let pixels = create_test_image(size).pixels().to_vec();
+    let image =
+        LinearImage::from_pixels(ImageDimensions::new((size.width, size.height), 1), pixels);
+    let transform = create_test_transform();
+    let params = config::internals::warp_params(InterpolationMethod::Lanczos3);
+    let mut buffers = resample::WarpBuffers::new(image.dimensions());
+    b.bench(|| {
+        buffers.warp_into(
+            black_box(&image),
+            &black_box(WarpTransform::new(transform)),
+            &params,
+        );
     });
 }
