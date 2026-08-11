@@ -6,7 +6,7 @@ use common::CancelToken;
 
 use crate::error::{FrameDimensionMismatch, InvalidConfigField};
 use crate::io::image::error::ImageError;
-use crate::stacking::calibration_masters::CalibrationError;
+use crate::stacking::calibration_masters::error::CalibrationError;
 use crate::stacking::frame_store::error::FrameStoreError;
 use crate::stacking::frame_store::warp_quality::FramePlane;
 

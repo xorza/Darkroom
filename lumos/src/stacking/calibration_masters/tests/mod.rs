@@ -9,10 +9,11 @@ use crate::io::image::image_provenance::{
 use crate::io::image::load_context::LoadContext;
 use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::io::raw::provenance::RawTransferProvenance;
+use crate::stacking::calibration_masters::DEFAULT_SIGMA_THRESHOLD;
 use crate::stacking::calibration_masters::defect_map::DefectMap;
+use crate::stacking::calibration_masters::error::CalibrationError;
 use crate::stacking::calibration_masters::stack_cfa_master;
 use crate::stacking::calibration_masters::weighted_budget;
-use crate::stacking::calibration_masters::{CalibrationError, DEFAULT_SIGMA_THRESHOLD};
 use crate::stacking::combine::config::{CombineMethod, StackConfig, Weighting};
 use crate::stacking::combine::error::{Error, StackConfigError};
 use crate::stacking::combine::rejection::Rejection;

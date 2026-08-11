@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use crate::error::InvalidConfigField;
 use crate::io::image::error::ImageError;
-use crate::stacking::calibration_masters::CalibrationError;
+use crate::stacking::calibration_masters::error::CalibrationError;
 use crate::stacking::combine::error::Error as StackError;
 use crate::stacking::stack_product::StackProduct;
 use crate::stacking::star_detection::detector::Diagnostics;

@@ -2,6 +2,7 @@
 
 pub(crate) mod cosmic_ray;
 pub(crate) mod defect_map;
+pub(crate) mod error;
 mod fits;
 mod prepared_flat;
 pub(crate) mod same_color;
@@ -34,6 +35,7 @@ use crate::io::image::error::ImageError;
 use crate::io::image::load_context::LoadContext;
 use crate::math::size2us::Size2us;
 use crate::memory;
+use crate::stacking::calibration_masters::error::CalibrationError;
 use crate::stacking::combine::cache::FrameCache;
 use crate::stacking::combine::config::StackConfig;
 use crate::stacking::combine::error::Error;
@@ -261,49 +263,6 @@ impl std::fmt::Display for CalibrationComponent {
             Self::Defects => f.write_str("defects"),
         }
     }
-}
-
-/// Invalid CFA metadata supplied to raw-frame calibration.
-/// Not `Eq`: [`Self::SampleSpanMismatch`] reports the two spans, and a float has no total equality.
-#[derive(Debug, thiserror::Error, Clone, PartialEq)]
-pub enum CalibrationError {
-    /// The light frame does not identify its sensor pattern.
-    #[error("light frame is missing CFA pattern metadata")]
-    MissingLightCfaPattern,
-    /// A calibration master does not identify its sensor pattern.
-    #[error("{component} master is missing CFA pattern metadata")]
-    MissingMasterCfaPattern { component: MasterRole },
-    /// A calibration master was captured with a different sensor pattern.
-    #[error(
-        "{component} master CFA pattern {master:?} does not match light frame pattern {light:?}"
-    )]
-    CfaPatternMismatch {
-        component: MasterRole,
-        light: CfaType,
-        master: CfaType,
-    },
-    /// A calibration master was decoded into a different sample domain than the light.
-    ///
-    /// Subtracting a master divided by one span from a light divided by another is not a small
-    /// error, it is a no-op that reports success — a `[0, 1]` master against an unnormalized light
-    /// removes ~0.01 from ~3000 — and `calibrate` then marks the light calibrated.
-    #[error(
-        "{component} master was decoded with sample span {master}, but the light used {light}; \
-         a master and its light must come from the same domain"
-    )]
-    SampleSpanMismatch {
-        component: MasterRole,
-        light: f32,
-        master: f32,
-    },
-    /// A calibration master covers a different sensor area than the frame it has to line up with:
-    /// the rest of the bundle when the set is assembled, or the light when one is calibrated.
-    #[error("{component} master is {master}, expected {expected}")]
-    DimensionMismatch {
-        component: CalibrationComponent,
-        expected: Size2us,
-        master: Size2us,
-    },
 }
 
 /// Read-only defect statistics derived from a calibration bundle.
