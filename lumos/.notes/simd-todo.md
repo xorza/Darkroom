@@ -4,6 +4,42 @@ What is left to *do* after the `simd::dispatch!` conversion, the constant/hygien
 layout move. The findings themselves stay in `lumos-review.md`; this file is the action list.
 Delete an item once it is done.
 
+## Verification reach on this machine
+
+The host is aarch64-apple-darwin, so the NEON arms compile and run under the ordinary chain — no
+cross toolchain, and `target_feature="neon"` is baseline on both aarch64-apple-darwin and
+aarch64-unknown-linux-gnu, so nothing needs `#[target_feature(enable = "neon")]`.
+
+The x86 arms can be reached too, which is what caught the widened SSE kernel:
+
+    cargo test -p lumos --target x86_64-apple-darwin --lib --features internals
+
+`--all-features` does not work for that target — `ort-sys` has no prebuilt x86_64-apple-darwin
+binaries — so name the features and leave `ml` out. Rosetta reports sse4.1 but not avx2 or fma, so
+that run executes the SSE4.1 rung and only compiles the AVX2 one.
+
+- [ ] Run the AVX2 `weighted_mean_f32` on real AVX2 hardware. It is compiled and its SSE4.1 twin
+      passes the same tests, but no machine here has executed it since it was widened to f64.
+- [ ] Re-measure `X86_WEIGHTED_MEAN_CROSSOVER`. The 128 was set against the old f32-Kahan kernels;
+      the f64 accumulators halve the lanes per instruction, so the tuned value has moved. The
+      current number is safe but stale — it only ever sends more work to the scalar path. On
+      aarch64 the same widening moved the crossover *down* to the structural minimum, so expect the
+      x86 number to fall well below 128 rather than rise.
+
+The NEON half is measured and settled for both functions. Widening to f64 made them ~3x faster,
+not slower: dropping the f32 Kahan step removes four dependent ops per accumulate and its serial
+chain, which more than pays for the halved lanes. At 10k elements, release, with the untouched
+scalar label as the drift control (it moved 0.7% and 0.0% across the two builds):
+
+| bench                    | f64    | f32-Kahan | scalar |
+|--------------------------|--------|-----------|--------|
+| `bench_weighted_mean_f32`| 1.71µs | 5.17µs    | 5.67µs |
+| `bench_sum_f32`          | 1.46µs | 4.83µs    | 4.83µs |
+
+Both compensated kernels were near-worthless over the fallback — the weighted mean within 10% of
+scalar, and `sum_f32` dead level with it to three digits. The comment claiming one full vector was
+enough for the NEON sum to win had never been measured; it was wrong.
+
 ## Open decision — delete the median9 backends?
 
 Everything else stage 4 set out to decide has been measured and settled: the weighted-mean SSE rung

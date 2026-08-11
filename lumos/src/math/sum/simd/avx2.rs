@@ -2,76 +2,70 @@
 
 use std::arch::x86_64::*;
 
-use crate::math::sum::error::KahanSum;
-use crate::math::sum::scalar::neumaier_add;
-
-/// Sum f32 values using AVX2 SIMD with Kahan compensated summation.
+/// Sum f32 values using AVX2 SIMD, accumulating in f64.
+///
+/// Widening each lane costs one `cvtps_pd` per half and buys the same result
+/// [`crate::math::sum::scalar::sum_f32`] produces — the f64 sum rounded once — where compensating
+/// in f32 only approached it. See the note on [`crate::math::sum::simd::sum_f32`] for why the
+/// wider accumulator is both the accurate and the fast choice.
 ///
 /// # Safety
 /// Caller must ensure AVX2 is available.
 #[target_feature(enable = "avx2")]
 pub(super) unsafe fn sum_f32(values: &[f32]) -> f32 {
     unsafe {
-        let mut sum_vec = _mm256_setzero_ps();
-        let mut c_vec = _mm256_setzero_ps();
+        let mut sum_lo = _mm256_setzero_pd();
+        let mut sum_hi = _mm256_setzero_pd();
 
         let chunks = values.chunks_exact(8);
         let remainder = chunks.remainder();
 
         for chunk in chunks {
             let v = _mm256_loadu_ps(chunk.as_ptr());
-            let y = _mm256_sub_ps(v, c_vec);
-            let t = _mm256_add_ps(sum_vec, y);
-            c_vec = _mm256_sub_ps(_mm256_sub_ps(t, sum_vec), y);
-            sum_vec = t;
+            sum_lo = _mm256_add_pd(sum_lo, _mm256_cvtps_pd(_mm256_castps256_ps128(v)));
+            sum_hi = _mm256_add_pd(sum_hi, _mm256_cvtps_pd(_mm256_extractf128_ps::<1>(v)));
         }
 
-        let KahanSum {
-            sum: mut s,
-            compensation: mut c,
-        } = reduce_kahan_256(sum_vec, c_vec);
+        let mut total = reduce_add_pd(_mm256_add_pd(sum_lo, sum_hi));
 
         for &v in remainder {
-            neumaier_add(&mut s, &mut c, v);
+            total += f64::from(v);
         }
 
-        s + c
+        total as f32
     }
 }
 
-/// Kahan horizontal reduction of 8 sum lanes + 8 compensation lanes into one running total.
+/// Horizontal sum of four f64 lanes, pairing the lanes so the two halves stay independent.
 #[inline]
 #[target_feature(enable = "avx2")]
-unsafe fn reduce_kahan_256(sum_vec: __m256, c_vec: __m256) -> KahanSum {
+unsafe fn reduce_add_pd(v: __m256d) -> f64 {
     // SAFETY: every operation below needs the ISA this function's
     // `target_feature` establishes, and nothing else.
     unsafe {
-        let mut s_arr = [0.0f32; 8];
-        let mut c_arr = [0.0f32; 8];
-        _mm256_storeu_ps(s_arr.as_mut_ptr(), sum_vec);
-        _mm256_storeu_ps(c_arr.as_mut_ptr(), c_vec);
-
-        let mut sum = 0.0f32;
-        let mut compensation = 0.0f32;
-        for i in 0..8 {
-            neumaier_add(&mut sum, &mut compensation, s_arr[i]);
-            neumaier_add(&mut sum, &mut compensation, -c_arr[i]);
-        }
-        KahanSum { sum, compensation }
+        let mut lanes = [0.0f64; 4];
+        _mm256_storeu_pd(lanes.as_mut_ptr(), v);
+        (lanes[0] + lanes[1]) + (lanes[2] + lanes[3])
     }
 }
 
-/// Weighted mean using AVX2 SIMD with Kahan compensated summation.
+/// Weighted mean using AVX2 SIMD, accumulating both sums in f64.
+///
+/// Widening each lane to f64 rather than compensating in f32 is what keeps this agreeing with
+/// [`crate::math::sum::mean_f32`] on the same pixel — see the module note on
+/// [`crate::math::sum::simd::weighted_mean_f32`]. Both conversions are lossless and the f64
+/// product of two f32s is exact, so this accumulates the same terms as
+/// [`crate::math::sum::scalar::weighted_mean_f32`], only in a different order.
 ///
 /// # Safety
 /// Caller must ensure AVX2 is available.
 #[target_feature(enable = "avx2")]
 pub(super) unsafe fn weighted_mean_f32(values: &[f32], weights: &[f32]) -> f32 {
     unsafe {
-        let mut sum_vw = _mm256_setzero_ps();
-        let mut c_vw = _mm256_setzero_ps();
-        let mut sum_w = _mm256_setzero_ps();
-        let mut c_w = _mm256_setzero_ps();
+        let mut sum_vw_lo = _mm256_setzero_pd();
+        let mut sum_vw_hi = _mm256_setzero_pd();
+        let mut sum_w_lo = _mm256_setzero_pd();
+        let mut sum_w_hi = _mm256_setzero_pd();
 
         let v_chunks = values.chunks_exact(8);
         let v_rem = v_chunks.remainder();
@@ -82,41 +76,28 @@ pub(super) unsafe fn weighted_mean_f32(values: &[f32], weights: &[f32]) -> f32 {
             let w = _mm256_loadu_ps(w_ptr);
             w_ptr = w_ptr.add(8);
 
-            let vw = _mm256_mul_ps(v, w);
+            let v_lo = _mm256_cvtps_pd(_mm256_castps256_ps128(v));
+            let v_hi = _mm256_cvtps_pd(_mm256_extractf128_ps::<1>(v));
+            let w_lo = _mm256_cvtps_pd(_mm256_castps256_ps128(w));
+            let w_hi = _mm256_cvtps_pd(_mm256_extractf128_ps::<1>(w));
 
-            // Kahan for v*w
-            let y = _mm256_sub_ps(vw, c_vw);
-            let t = _mm256_add_ps(sum_vw, y);
-            c_vw = _mm256_sub_ps(_mm256_sub_ps(t, sum_vw), y);
-            sum_vw = t;
-
-            // Kahan for w
-            let y = _mm256_sub_ps(w, c_w);
-            let t = _mm256_add_ps(sum_w, y);
-            c_w = _mm256_sub_ps(_mm256_sub_ps(t, sum_w), y);
-            sum_w = t;
+            sum_vw_lo = _mm256_add_pd(sum_vw_lo, _mm256_mul_pd(v_lo, w_lo));
+            sum_vw_hi = _mm256_add_pd(sum_vw_hi, _mm256_mul_pd(v_hi, w_hi));
+            sum_w_lo = _mm256_add_pd(sum_w_lo, w_lo);
+            sum_w_hi = _mm256_add_pd(sum_w_hi, w_hi);
         }
 
-        let KahanSum {
-            sum: mut s_vw,
-            compensation: mut c_s_vw,
-        } = reduce_kahan_256(sum_vw, c_vw);
-        let KahanSum {
-            sum: mut s_w,
-            compensation: mut c_s_w,
-        } = reduce_kahan_256(sum_w, c_w);
+        let mut total_vw = reduce_add_pd(_mm256_add_pd(sum_vw_lo, sum_vw_hi));
+        let mut total_w = reduce_add_pd(_mm256_add_pd(sum_w_lo, sum_w_hi));
 
         let w_rem = &weights[values.len() - v_rem.len()..];
         for (&v, &w) in v_rem.iter().zip(w_rem.iter()) {
-            neumaier_add(&mut s_vw, &mut c_s_vw, v * w);
-            neumaier_add(&mut s_w, &mut c_s_w, w);
+            total_vw += f64::from(v) * f64::from(w);
+            total_w += f64::from(w);
         }
 
-        let total = s_vw + c_s_vw;
-        let total_w = s_w + c_s_w;
-
-        if total_w > f32::EPSILON {
-            total / total_w
+        if total_w > f64::from(f32::EPSILON) {
+            (total_vw / total_w) as f32
         } else {
             0.0
         }

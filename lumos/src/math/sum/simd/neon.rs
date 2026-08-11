@@ -2,71 +2,55 @@
 
 use std::arch::aarch64::*;
 
-use crate::math::sum::error::KahanSum;
-use crate::math::sum::scalar::neumaier_add;
-
-/// Sum f32 values using NEON SIMD with Kahan compensated summation.
+/// Sum f32 values using NEON SIMD, accumulating in f64.
+///
+/// Widening each lane costs one `vcvt` per half and buys the same result
+/// [`crate::math::sum::scalar::sum_f32`] produces — the f64 sum rounded once — where compensating
+/// in f32 only approached it. See the note on [`crate::math::sum::simd::sum_f32`] for why the
+/// wider accumulator is both the accurate and the fast choice.
 ///
 /// # Safety
 /// Caller must ensure NEON is available (always true on aarch64).
 pub(super) unsafe fn sum_f32(values: &[f32]) -> f32 {
     unsafe {
-        let mut sum_vec = vdupq_n_f32(0.0);
-        let mut c_vec = vdupq_n_f32(0.0);
+        let mut sum_lo = vdupq_n_f64(0.0);
+        let mut sum_hi = vdupq_n_f64(0.0);
 
         let chunks = values.chunks_exact(4);
         let remainder = chunks.remainder();
 
         for chunk in chunks {
             let v = vld1q_f32(chunk.as_ptr());
-            let y = vsubq_f32(v, c_vec);
-            let t = vaddq_f32(sum_vec, y);
-            c_vec = vsubq_f32(vsubq_f32(t, sum_vec), y);
-            sum_vec = t;
+            sum_lo = vaddq_f64(sum_lo, vcvt_f64_f32(vget_low_f32(v)));
+            sum_hi = vaddq_f64(sum_hi, vcvt_high_f64_f32(v));
         }
 
-        let KahanSum {
-            sum: mut s,
-            compensation: mut c,
-        } = reduce_kahan_neon(sum_vec, c_vec);
+        let mut total = vaddvq_f64(vaddq_f64(sum_lo, sum_hi));
 
         for &v in remainder {
-            neumaier_add(&mut s, &mut c, v);
+            total += f64::from(v);
         }
 
-        s + c
+        total as f32
     }
 }
 
-/// Kahan horizontal reduction of 4 sum lanes + 4 compensation lanes into one running total.
-#[inline]
-unsafe fn reduce_kahan_neon(sum_vec: float32x4_t, c_vec: float32x4_t) -> KahanSum {
-    unsafe {
-        let mut s_arr = [0.0f32; 4];
-        let mut c_arr = [0.0f32; 4];
-        vst1q_f32(s_arr.as_mut_ptr(), sum_vec);
-        vst1q_f32(c_arr.as_mut_ptr(), c_vec);
-
-        let mut sum = 0.0f32;
-        let mut compensation = 0.0f32;
-        for i in 0..4 {
-            neumaier_add(&mut sum, &mut compensation, s_arr[i]);
-            neumaier_add(&mut sum, &mut compensation, -c_arr[i]);
-        }
-        KahanSum { sum, compensation }
-    }
-}
-
-/// Weighted mean using NEON SIMD with Kahan compensated summation.
+/// Weighted mean using NEON SIMD, accumulating both sums in f64.
+///
+/// Widening each lane to f64 rather than compensating in f32 is what keeps this agreeing with
+/// [`crate::math::sum::mean_f32`] on the same pixel — see the module note on
+/// [`crate::math::sum::simd::weighted_mean_f32`]. Both conversions are lossless and the f64
+/// product of two f32s is exact, so this accumulates the same terms as
+/// [`crate::math::sum::scalar::weighted_mean_f32`], only in a different order.
 ///
 /// # Safety
 /// Caller must ensure NEON is available (always true on aarch64).
 pub(super) unsafe fn weighted_mean_f32(values: &[f32], weights: &[f32]) -> f32 {
     unsafe {
-        let mut sum_vw = vdupq_n_f32(0.0);
-        let mut c_vw = vdupq_n_f32(0.0);
-        let mut sum_w = vdupq_n_f32(0.0);
-        let mut c_w = vdupq_n_f32(0.0);
+        let mut sum_vw_lo = vdupq_n_f64(0.0);
+        let mut sum_vw_hi = vdupq_n_f64(0.0);
+        let mut sum_w_lo = vdupq_n_f64(0.0);
+        let mut sum_w_hi = vdupq_n_f64(0.0);
 
         let v_chunks = values.chunks_exact(4);
         let v_rem = v_chunks.remainder();
@@ -77,39 +61,28 @@ pub(super) unsafe fn weighted_mean_f32(values: &[f32], weights: &[f32]) -> f32 {
             let w = vld1q_f32(w_ptr);
             w_ptr = w_ptr.add(4);
 
-            let vw = vmulq_f32(v, w);
+            let v_lo = vcvt_f64_f32(vget_low_f32(v));
+            let v_hi = vcvt_high_f64_f32(v);
+            let w_lo = vcvt_f64_f32(vget_low_f32(w));
+            let w_hi = vcvt_high_f64_f32(w);
 
-            let y = vsubq_f32(vw, c_vw);
-            let t = vaddq_f32(sum_vw, y);
-            c_vw = vsubq_f32(vsubq_f32(t, sum_vw), y);
-            sum_vw = t;
-
-            let y = vsubq_f32(w, c_w);
-            let t = vaddq_f32(sum_w, y);
-            c_w = vsubq_f32(vsubq_f32(t, sum_w), y);
-            sum_w = t;
+            sum_vw_lo = vaddq_f64(sum_vw_lo, vmulq_f64(v_lo, w_lo));
+            sum_vw_hi = vaddq_f64(sum_vw_hi, vmulq_f64(v_hi, w_hi));
+            sum_w_lo = vaddq_f64(sum_w_lo, w_lo);
+            sum_w_hi = vaddq_f64(sum_w_hi, w_hi);
         }
 
-        let KahanSum {
-            sum: mut s_vw,
-            compensation: mut c_s_vw,
-        } = reduce_kahan_neon(sum_vw, c_vw);
-        let KahanSum {
-            sum: mut s_w,
-            compensation: mut c_s_w,
-        } = reduce_kahan_neon(sum_w, c_w);
+        let mut total_vw = vaddvq_f64(vaddq_f64(sum_vw_lo, sum_vw_hi));
+        let mut total_w = vaddvq_f64(vaddq_f64(sum_w_lo, sum_w_hi));
 
         let w_rem = &weights[values.len() - v_rem.len()..];
         for (&v, &w) in v_rem.iter().zip(w_rem.iter()) {
-            neumaier_add(&mut s_vw, &mut c_s_vw, v * w);
-            neumaier_add(&mut s_w, &mut c_s_w, w);
+            total_vw += f64::from(v) * f64::from(w);
+            total_w += f64::from(w);
         }
 
-        let total = s_vw + c_s_vw;
-        let total_w = s_w + c_s_w;
-
-        if total_w > f32::EPSILON {
-            total / total_w
+        if total_w > f64::from(f32::EPSILON) {
+            (total_vw / total_w) as f32
         } else {
             0.0
         }

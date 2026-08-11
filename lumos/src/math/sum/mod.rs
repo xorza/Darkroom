@@ -1,7 +1,5 @@
 //! Sum and accumulation operations with SIMD acceleration.
 
-#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
-mod error;
 pub(crate) mod scalar;
 pub(crate) mod simd;
 
@@ -14,8 +12,8 @@ pub(crate) mod simd;
 ///   the exact mean.
 /// - This is the unit-weight case of [`simd::weighted_mean_f32`], and the combine reaches the same
 ///   pixel through either function depending on whether frame weights are in play. Sharing the
-///   f64 accumulate-then-divide shape makes the two agree bit-for-bit below the weighted mean's
-///   SIMD threshold, so which entry point a stack takes cannot change its output.
+///   f64 accumulate-then-divide shape makes the two agree bit-for-bit at every length and on every
+///   architecture, so which entry point a stack takes cannot change its output.
 ///
 /// Every caller averages over a frame count (tens), far below where the SIMD sum would pay — which
 /// is why this one has no backend of its own and sits here rather than in [`simd`].

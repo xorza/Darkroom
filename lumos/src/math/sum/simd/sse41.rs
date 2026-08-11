@@ -2,42 +2,36 @@
 
 use std::arch::x86_64::*;
 
-use crate::math::sum::error::KahanSum;
-use crate::math::sum::scalar::neumaier_add;
-
-/// Kahan horizontal reduction of 4 sum lanes + 4 compensation lanes into one running total.
+/// Horizontal sum of two f64 lanes.
 #[inline]
 #[target_feature(enable = "sse4.1")]
-unsafe fn reduce_kahan_128(sum_vec: __m128, c_vec: __m128) -> KahanSum {
+unsafe fn reduce_add_pd(v: __m128d) -> f64 {
     // SAFETY: every operation below needs the ISA this function's
     // `target_feature` establishes, and nothing else.
     unsafe {
-        let mut s_arr = [0.0f32; 4];
-        let mut c_arr = [0.0f32; 4];
-        _mm_storeu_ps(s_arr.as_mut_ptr(), sum_vec);
-        _mm_storeu_ps(c_arr.as_mut_ptr(), c_vec);
-
-        let mut sum = 0.0f32;
-        let mut compensation = 0.0f32;
-        for i in 0..4 {
-            neumaier_add(&mut sum, &mut compensation, s_arr[i]);
-            neumaier_add(&mut sum, &mut compensation, -c_arr[i]);
-        }
-        KahanSum { sum, compensation }
+        let mut lanes = [0.0f64; 2];
+        _mm_storeu_pd(lanes.as_mut_ptr(), v);
+        lanes[0] + lanes[1]
     }
 }
 
-/// Weighted mean using SSE4.1 SIMD with Kahan compensated summation.
+/// Weighted mean using SSE4.1 SIMD, accumulating both sums in f64.
+///
+/// Widening each lane to f64 rather than compensating in f32 is what keeps this agreeing with
+/// [`crate::math::sum::mean_f32`] on the same pixel — see the module note on
+/// [`crate::math::sum::simd::weighted_mean_f32`]. Both conversions are lossless and the f64
+/// product of two f32s is exact, so this accumulates the same terms as
+/// [`crate::math::sum::scalar::weighted_mean_f32`], only in a different order.
 ///
 /// # Safety
 /// Caller must ensure SSE4.1 is available.
 #[target_feature(enable = "sse4.1")]
 pub(super) unsafe fn weighted_mean_f32(values: &[f32], weights: &[f32]) -> f32 {
     unsafe {
-        let mut sum_vw = _mm_setzero_ps();
-        let mut c_vw = _mm_setzero_ps();
-        let mut sum_w = _mm_setzero_ps();
-        let mut c_w = _mm_setzero_ps();
+        let mut sum_vw_lo = _mm_setzero_pd();
+        let mut sum_vw_hi = _mm_setzero_pd();
+        let mut sum_w_lo = _mm_setzero_pd();
+        let mut sum_w_hi = _mm_setzero_pd();
 
         let v_chunks = values.chunks_exact(4);
         let v_rem = v_chunks.remainder();
@@ -48,39 +42,28 @@ pub(super) unsafe fn weighted_mean_f32(values: &[f32], weights: &[f32]) -> f32 {
             let w = _mm_loadu_ps(w_ptr);
             w_ptr = w_ptr.add(4);
 
-            let vw = _mm_mul_ps(v, w);
+            let v_lo = _mm_cvtps_pd(v);
+            let v_hi = _mm_cvtps_pd(_mm_movehl_ps(v, v));
+            let w_lo = _mm_cvtps_pd(w);
+            let w_hi = _mm_cvtps_pd(_mm_movehl_ps(w, w));
 
-            let y = _mm_sub_ps(vw, c_vw);
-            let t = _mm_add_ps(sum_vw, y);
-            c_vw = _mm_sub_ps(_mm_sub_ps(t, sum_vw), y);
-            sum_vw = t;
-
-            let y = _mm_sub_ps(w, c_w);
-            let t = _mm_add_ps(sum_w, y);
-            c_w = _mm_sub_ps(_mm_sub_ps(t, sum_w), y);
-            sum_w = t;
+            sum_vw_lo = _mm_add_pd(sum_vw_lo, _mm_mul_pd(v_lo, w_lo));
+            sum_vw_hi = _mm_add_pd(sum_vw_hi, _mm_mul_pd(v_hi, w_hi));
+            sum_w_lo = _mm_add_pd(sum_w_lo, w_lo);
+            sum_w_hi = _mm_add_pd(sum_w_hi, w_hi);
         }
 
-        let KahanSum {
-            sum: mut s_vw,
-            compensation: mut c_s_vw,
-        } = reduce_kahan_128(sum_vw, c_vw);
-        let KahanSum {
-            sum: mut s_w,
-            compensation: mut c_s_w,
-        } = reduce_kahan_128(sum_w, c_w);
+        let mut total_vw = reduce_add_pd(_mm_add_pd(sum_vw_lo, sum_vw_hi));
+        let mut total_w = reduce_add_pd(_mm_add_pd(sum_w_lo, sum_w_hi));
 
         let w_rem = &weights[values.len() - v_rem.len()..];
         for (&v, &w) in v_rem.iter().zip(w_rem.iter()) {
-            neumaier_add(&mut s_vw, &mut c_s_vw, v * w);
-            neumaier_add(&mut s_w, &mut c_s_w, w);
+            total_vw += f64::from(v) * f64::from(w);
+            total_w += f64::from(w);
         }
 
-        let total = s_vw + c_s_vw;
-        let total_w = s_w + c_s_w;
-
-        if total_w > f32::EPSILON {
-            total / total_w
+        if total_w > f64::from(f32::EPSILON) {
+            (total_vw / total_w) as f32
         } else {
             0.0
         }
