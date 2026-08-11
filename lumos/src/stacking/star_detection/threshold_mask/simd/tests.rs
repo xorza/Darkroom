@@ -1,7 +1,12 @@
 //! Cross-checks that every backend's packed words match the scalar reference exactly.
 
-use crate::stacking::star_detection::threshold_mask::simd::{MIN_NOISE, process_words_scalar};
+use crate::stacking::star_detection::threshold_mask::simd::process_words_scalar;
 use crate::testing::simd_check::{DATA_SHAPES, SWEEP_WIDTHS};
+
+/// The per-pixel σ floor every kernel below is handed. A frame-derived figure in production; fixed
+/// here so the backends are compared against the scalar reference on identical inputs, and chosen
+/// non-trivially so the `negative` data shape actually exercises the clamp.
+const MIN_NOISE: f32 = 1e-6;
 
 /// The shared sweep plus widths spanning whole 64-pixel words. Every backend vectorizes full words
 /// and hands whatever is left to `process_words_scalar`, so a word exactly filled, a word and a
@@ -60,6 +65,7 @@ fn assert_mode_matches_scalar(
                     &bg,
                     &noise,
                     sigma,
+                    MIN_NOISE,
                     &mut scalar_words,
                     0,
                     width,
@@ -70,6 +76,7 @@ fn assert_mode_matches_scalar(
                     &[],
                     &noise,
                     sigma,
+                    MIN_NOISE,
                     &mut scalar_words,
                     0,
                     width,
@@ -94,13 +101,13 @@ fn assert_mode_matches_scalar(
 macro_rules! assert_backend_matches_scalar {
     ($name:literal, $backend:ident) => {
         assert_mode_matches_scalar($name, true, |pixels, bg, noise, sigma, words, end| unsafe {
-            $backend::<true>(pixels, bg, noise, sigma, words, 0, end)
+            $backend::<true>(pixels, bg, noise, sigma, MIN_NOISE, words, 0, end)
         });
         assert_mode_matches_scalar(
             $name,
             false,
             |pixels, _bg, noise, sigma, words, end| unsafe {
-                $backend::<false>(pixels, &[], noise, sigma, words, 0, end)
+                $backend::<false>(pixels, &[], noise, sigma, MIN_NOISE, words, 0, end)
             },
         );
     };

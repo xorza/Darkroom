@@ -2,7 +2,7 @@
 
 use std::arch::x86_64::*;
 
-use crate::stacking::star_detection::threshold_mask::simd::{MIN_NOISE, process_words_scalar};
+use crate::stacking::star_detection::threshold_mask::simd::process_words_scalar;
 
 /// AVX2 packed threshold kernel: 8 floats/group × 8 groups = exactly one 64-pixel word, with the
 /// 8-bit `_mm256_movemask_ps` result packed directly (half the SSE iterations, no per-lane extract).
@@ -10,11 +10,13 @@ use crate::stacking::star_detection::threshold_mask::simd::{MIN_NOISE, process_w
 /// `px == threshold` boundary. `WITH_BG` selects `bg + σ·noise` vs `σ·noise`; `bg` may be empty when
 /// false. See `process_words_scalar`.
 #[target_feature(enable = "avx2")]
+#[allow(clippy::too_many_arguments)]
 pub(super) unsafe fn process_words_avx2<const WITH_BG: bool>(
     pixels: &[f32],
     bg: &[f32],
     noise: &[f32],
     sigma_threshold: f32,
+    min_noise: f32,
     words: &mut [u64],
     pixel_offset: usize,
     pixel_end: usize,
@@ -23,7 +25,7 @@ pub(super) unsafe fn process_words_avx2<const WITH_BG: bool>(
     // `target_feature` establishes, and nothing else.
     unsafe {
         let sigma_vec = _mm256_set1_ps(sigma_threshold);
-        let min_noise_vec = _mm256_set1_ps(MIN_NOISE);
+        let min_noise_vec = _mm256_set1_ps(min_noise);
 
         let pixels_ptr = pixels.as_ptr();
         let bg_ptr = bg.as_ptr();
@@ -63,6 +65,7 @@ pub(super) unsafe fn process_words_avx2<const WITH_BG: bool>(
                     bg,
                     noise,
                     sigma_threshold,
+                    min_noise,
                     std::slice::from_mut(word),
                     base_pixel,
                     pixel_end,

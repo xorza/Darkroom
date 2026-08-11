@@ -2,16 +2,18 @@
 
 use std::arch::x86_64::*;
 
-use crate::stacking::star_detection::threshold_mask::simd::{MIN_NOISE, process_words_scalar};
+use crate::stacking::star_detection::threshold_mask::simd::process_words_scalar;
 
 /// SSE4.1 packed threshold kernel. `WITH_BG` selects `bg + σ·noise` vs `σ·noise` (filtered); `bg`
 /// is unused and may be empty when `WITH_BG` is false.
 #[target_feature(enable = "sse4.1")]
+#[allow(clippy::too_many_arguments)]
 pub(super) unsafe fn process_words_sse<const WITH_BG: bool>(
     pixels: &[f32],
     bg: &[f32],
     noise: &[f32],
     sigma_threshold: f32,
+    min_noise: f32,
     words: &mut [u64],
     pixel_offset: usize,
     pixel_end: usize,
@@ -20,7 +22,7 @@ pub(super) unsafe fn process_words_sse<const WITH_BG: bool>(
     // `target_feature` establishes, and nothing else.
     unsafe {
         let sigma_vec = _mm_set1_ps(sigma_threshold);
-        let min_noise_vec = _mm_set1_ps(MIN_NOISE);
+        let min_noise_vec = _mm_set1_ps(min_noise);
 
         let pixels_ptr = pixels.as_ptr();
         let bg_ptr = bg.as_ptr();
@@ -60,6 +62,7 @@ pub(super) unsafe fn process_words_sse<const WITH_BG: bool>(
                     bg,
                     noise,
                     sigma_threshold,
+                    min_noise,
                     std::slice::from_mut(word),
                     base_pixel,
                     pixel_end,

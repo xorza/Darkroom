@@ -17,6 +17,9 @@ pub(crate) fn uniform(size: Size2us, background: f32, noise: f32) -> BackgroundE
     BackgroundEstimate {
         background: bg_buf,
         noise: noise_buf,
+        // The map is uniform, so the frame's typical σ is `noise` itself; the real estimator's
+        // fraction of the median tile σ reduces to exactly this.
+        noise_floor: (noise * 1e-4).max(f32::MIN_POSITIVE),
     }
 }
 

@@ -26,6 +26,7 @@ fn create_detection_mask(pixels: &Buffer2<f32>, sigma_threshold: f32) -> BitBuff
         &background.background,
         &background.noise,
         sigma_threshold,
+        background.noise_floor,
         &mut mask,
     );
 

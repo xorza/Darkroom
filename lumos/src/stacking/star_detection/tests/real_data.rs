@@ -252,6 +252,7 @@ fn inspect_pipeline_intermediates_rho_opiuchi() {
             &filtered_buf,
             &background.noise,
             config.detection.sigma_threshold,
+            background.noise_floor,
             &mut mask,
         );
     } else {
@@ -260,6 +261,7 @@ fn inspect_pipeline_intermediates_rho_opiuchi() {
             &background.background,
             &background.noise,
             config.detection.sigma_threshold,
+            background.noise_floor,
             &mut mask,
         );
     }

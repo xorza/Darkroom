@@ -35,10 +35,6 @@ use crate::stacking::calibration_masters::cosmic_ray::config::CosmicRayConfig;
 use crate::stacking::calibration_masters::cosmic_ray::mono::MonoDetector;
 use crate::stacking::calibration_masters::cosmic_ray::xtrans::XtransDetector;
 
-/// `F` is floored to this (in normalized pixel units) so it stays non-negative where the object fine
-/// structure is ~0 (i.e. at a CR).
-const FINE_STRUCTURE_FLOOR: f32 = 1e-6;
-
 /// Floor for the **noise-normalized** fine structure `F/noise` in the contrast test (in σ units).
 /// Matches astroscrappy's `f.clip(min=0.01)` — bounds the `S'/(F/noise)` ratio where fine structure
 /// is ~0 so a CR (F→0) doesn't divide by zero.
