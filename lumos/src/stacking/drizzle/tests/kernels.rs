@@ -146,6 +146,7 @@ fn lanczos_kernel_uniform_preserves_value() {
         kernel: DrizzleKernel::Lanczos,
         fill_value: 0.0,
         min_coverage: 0.0,
+        ..Default::default()
     };
     let mut acc = accumulator(ImageDimensions::new((20, 20), 1), config);
     acc.add_image(image, &Transform::identity(), 1.0, None);
@@ -177,6 +178,7 @@ fn lanczos_clamping_no_negative_output() {
         kernel: DrizzleKernel::Lanczos,
         fill_value: 0.0,
         min_coverage: 0.0,
+        ..Default::default()
     };
     let mut acc = accumulator(ImageDimensions::new((20, 20), 1), config);
     acc.add_image(image, &Transform::identity(), 1.0, None);
@@ -319,6 +321,7 @@ fn scale1_pixfrac1_identity() {
         kernel: DrizzleKernel::Turbo,
         fill_value: 0.0,
         min_coverage: 0.0,
+        ..Default::default()
     };
     let mut acc = accumulator(ImageDimensions::new((5, 5), 1), config);
     acc.add_image(image, &Transform::identity(), 1.0, None);
@@ -354,6 +357,7 @@ fn fill_value_in_uncovered_pixels() {
         kernel: DrizzleKernel::Point,
         fill_value: -999.0,
         min_coverage: 0.0,
+        ..Default::default()
     };
     let mut acc = accumulator(ImageDimensions::new((4, 4), 1), config);
     acc.add_image(image, &Transform::identity(), 1.0, None);
@@ -467,6 +471,7 @@ fn lanczos_kernel_with_translation() {
         kernel: DrizzleKernel::Lanczos,
         fill_value: 0.0,
         min_coverage: 0.0,
+        ..Default::default()
     };
     let mut acc = accumulator(ImageDimensions::new((20, 20), 1), config);
     let transform = Transform::translation(DVec2::new(0.3, -0.2));
@@ -517,6 +522,7 @@ fn pixel_weight_zero_excludes_pixel() {
         kernel: DrizzleKernel::Turbo,
         fill_value: 0.0,
         min_coverage: 0.0,
+        ..Default::default()
     };
     let mut acc = accumulator(ImageDimensions::new((4, 4), 1), config);
     acc.add_image(image, &Transform::identity(), 1.0, Some(&pw));
@@ -566,6 +572,7 @@ fn pixel_weight_scales_contribution() {
         kernel: DrizzleKernel::Turbo,
         fill_value: 0.0,
         min_coverage: 0.0,
+        ..Default::default()
     };
     let mut acc = accumulator(ImageDimensions::new((4, 4), 1), config);
     acc.add_image(image1, &Transform::identity(), 1.0, Some(&pw1));
@@ -608,6 +615,7 @@ fn pixel_weight_bad_pixel_mask() {
         kernel: DrizzleKernel::Turbo,
         fill_value: -1.0,
         min_coverage: 0.0,
+        ..Default::default()
     };
     let mut acc = accumulator(ImageDimensions::new((8, 8), 1), config);
     acc.add_image(image, &Transform::identity(), 1.0, Some(&pw));

@@ -13,6 +13,7 @@ use crate::stacking::drizzle::config::{DrizzleConfig, DrizzleKernel};
 use crate::stacking::drizzle::stack::drizzle_images;
 use crate::stacking::progress::ProgressCallback;
 use crate::stacking::registration::transform::Transform;
+use crate::stacking::stack_product::quality_planes::QualityPlanes;
 use crate::testing::synthetic::fixtures::star_field;
 
 const N_FRAMES: usize = 8;
@@ -31,11 +32,16 @@ fn dithered_set() -> Vec<DrizzleFrame<LinearImage>> {
 }
 
 fn bench_kernel(b: ::quickbench::Bencher, kernel: DrizzleKernel) {
+    bench_kernel_with(b, kernel, QualityPlanes::ALL);
+}
+
+fn bench_kernel_with(b: ::quickbench::Bencher, kernel: DrizzleKernel, quality: QualityPlanes) {
     let frames = dithered_set();
     let config = DrizzleConfig {
         scale: 2.0,
         pixfrac: 0.8,
         kernel,
+        quality,
         ..DrizzleConfig::default()
     };
     b.bench(|| {
@@ -61,4 +67,14 @@ fn bench_drizzle_square_8(b: ::quickbench::Bencher) {
 #[quick_bench(warmup_iters = 1, iters = 3)]
 fn bench_drizzle_gaussian_8(b: ::quickbench::Bencher) {
     bench_kernel(b, DrizzleKernel::Gaussian);
+}
+
+/// The same drizzle with every quality plane declined.
+///
+/// Against `bench_drizzle_turbo_8` this is what `DrizzleConfig::quality` buys: no `Σwᵢ²`
+/// accumulator resident over the run, two fewer arithmetic operations at every deposit, and two
+/// output-grid planes never built.
+#[quick_bench(warmup_iters = 1, iters = 3)]
+fn bench_drizzle_turbo_8_image_only(b: ::quickbench::Bencher) {
+    bench_kernel_with(b, DrizzleKernel::Turbo, QualityPlanes::IMAGE_ONLY);
 }

@@ -15,6 +15,7 @@ use crate::stacking::progress::ProgressCallback;
 use crate::stacking::registration::transform::Transform;
 use crate::stacking::stack_product::StackProduct;
 use crate::stacking::stack_product::quality_map::QualityMap;
+use crate::stacking::stack_product::quality_planes::QualityPlanes;
 
 trait DrizzleAccumulatorTestExt {
     fn add_image(
@@ -51,6 +52,7 @@ fn kernel_config(kernel: DrizzleKernel, scale: f32, pixfrac: f32) -> DrizzleConf
         kernel,
         fill_value: 0.0,
         min_coverage: 0.0,
+        ..Default::default()
     }
 }
 

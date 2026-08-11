@@ -66,7 +66,11 @@ pub struct DrizzleAccumulator {
     /// Accumulated squared weight `Σwᵢ²` per output pixel — drives the linear-variance factor
     /// (`Var = Σwᵢ²/(Σwᵢ)²` per unit input variance), which the correlation-suppressed image RMS
     /// understates.
-    weight_sq: Buffer2<f32>,
+    ///
+    /// `None` when the config declines the variance plane, which is the one quality output with a
+    /// cost beyond its own allocation: this is an output-grid plane resident for the whole run, and
+    /// two more arithmetic operations at every deposit.
+    weight_sq: Option<Buffer2<f32>>,
     /// Configuration.
     config: DrizzleConfig,
 }
@@ -92,7 +96,10 @@ impl DrizzleAccumulator {
             frames_added: 0,
             data,
             weight: Buffer2::new_default(output_width, output_height),
-            weight_sq: Buffer2::new_default(output_width, output_height),
+            weight_sq: config
+                .quality
+                .variance
+                .then(|| Buffer2::new_default(output_width, output_height)),
             config,
         })
     }
@@ -577,7 +584,9 @@ impl DrizzleAccumulator {
         }
         // Weight is channel-independent, so accumulate it and its square once per output pixel.
         *self.weight.get_mut(ox, oy) += pixel_weight;
-        *self.weight_sq.get_mut(ox, oy) += pixel_weight * pixel_weight;
+        if let Some(weight_sq) = &mut self.weight_sq {
+            *weight_sq.get_mut(ox, oy) += pixel_weight * pixel_weight;
+        }
     }
 
     /// Accumulate already-read `fluxes` into output pixel (ox, oy).
@@ -591,12 +600,18 @@ impl DrizzleAccumulator {
             *d.get_mut(ox, oy) += flux * pixel_weight;
         }
         *self.weight.get_mut(ox, oy) += pixel_weight;
-        *self.weight_sq.get_mut(ox, oy) += pixel_weight * pixel_weight;
+        if let Some(weight_sq) = &mut self.weight_sq {
+            *weight_sq.get_mut(ox, oy) += pixel_weight * pixel_weight;
+        }
     }
 
-    /// Finalize the drizzle result: normalize flux by weight and emit coverage, weight, and linear
-    /// variance. The weight `Σwᵢ` is channel-independent, so one map normalizes every channel and
-    /// seeds all quality outputs.
+    /// Finalize the drizzle result: normalize flux by weight and emit whichever quality planes
+    /// [`DrizzleConfig::quality`] asked for. The weight `Σwᵢ` is channel-independent, so one map
+    /// normalizes every channel and seeds the quality outputs.
+    ///
+    /// The weight map is built whatever the request — the image is `Σfluxᵢwᵢ / Σwᵢ`, and
+    /// `min_coverage` gates fill against its maximum — so declining `weight` only declines handing
+    /// it out, while declining `coverage` or `variance` skips an output-grid allocation each.
     pub fn finalize(self) -> StackProduct {
         let width = self.width();
         let height = self.height();
@@ -605,8 +620,8 @@ impl DrizzleAccumulator {
         let min_coverage = self.config.min_coverage;
         let fill_value = self.config.fill_value;
 
+        let planes = self.config.quality;
         let weight_pixels = self.weight.pixels();
-        let weight_sq_pixels = self.weight_sq.pixels();
 
         // Find max weight for normalizing the coverage / min_coverage threshold.
         let max_weight = weight_pixels
@@ -645,30 +660,37 @@ impl DrizzleAccumulator {
             .collect();
 
         // Linear output-variance factor: Var(O) = Σ(wᵢ²)/(Σwᵢ)². `0` where uncovered.
-        let mut linear_variance = Buffer2::new_default(width, height);
-        linear_variance
-            .pixels_mut()
-            .par_iter_mut()
-            .enumerate()
-            .for_each(|(idx, v)| {
-                let w = weight_pixels[idx];
-                *v = if w > 0.0 {
-                    weight_sq_pixels[idx] / (w * w)
-                } else {
-                    0.0
-                };
-            });
-
-        // Normalized coverage [0, 1] for masking.
-        let mut coverage = Buffer2::new_default(width, height);
-        if max_weight > 0.0 {
-            let inv_max = 1.0 / max_weight;
-            coverage
+        let linear_variance = self.weight_sq.as_ref().map(|weight_sq| {
+            let weight_sq_pixels = weight_sq.pixels();
+            let mut linear_variance = Buffer2::new_default(width, height);
+            linear_variance
                 .pixels_mut()
                 .par_iter_mut()
-                .zip(weight_pixels.par_iter())
-                .for_each(|(c, &w)| *c = w * inv_max);
-        }
+                .enumerate()
+                .for_each(|(idx, v)| {
+                    let w = weight_pixels[idx];
+                    *v = if w > 0.0 {
+                        weight_sq_pixels[idx] / (w * w)
+                    } else {
+                        0.0
+                    };
+                });
+            QualityMap::Shared(linear_variance)
+        });
+
+        // Normalized coverage [0, 1] for masking.
+        let coverage = planes.coverage.then(|| {
+            let mut coverage = Buffer2::new_default(width, height);
+            if max_weight > 0.0 {
+                let inv_max = 1.0 / max_weight;
+                coverage
+                    .pixels_mut()
+                    .par_iter_mut()
+                    .zip(weight_pixels.par_iter())
+                    .for_each(|(c, &w)| *c = w * inv_max);
+            }
+            Coverage::PerPixel(coverage)
+        });
 
         let image = LinearImage::from_planar_channels(
             ImageDimensions::new((width, height), n_channels),
@@ -676,9 +698,9 @@ impl DrizzleAccumulator {
         );
         StackProduct {
             image,
-            coverage: Some(Coverage::PerPixel(coverage)),
-            weight: Some(QualityMap::Shared(self.weight)),
-            linear_variance: Some(QualityMap::Shared(linear_variance)),
+            coverage,
+            weight: planes.weight.then_some(QualityMap::Shared(self.weight)),
+            linear_variance,
             // Drizzle redistributes flux by geometry rather than combining aligned samples, so
             // there is no per-frame quantization step to propagate.
             quantization_sigma: None,
