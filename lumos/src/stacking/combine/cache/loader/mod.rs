@@ -66,13 +66,15 @@ fn load_tiered<I: StackableImage, P: AsRef<Path> + Sync>(
     progress.report(0, paths.len(), StackingStage::Loading);
 
     let first_path = paths[0].as_ref();
-    // One reading, shared by the tier decision below and the decode ceiling the context carries;
-    // `LoadContext::default()` would sample the machine a second time and could disagree.
-    // One system reading: it is the decode ceiling the context carries, and the fallback for the
-    // tier figure when the config has no planning override. The override deliberately does not
-    // reach the context — it says how to tier, not how much one file may allocate.
+    // One system reading for the whole load: the config is resolved against it here so the tier
+    // decision below, the cache the frames end up in, and the decode ceiling the context carries all
+    // size against the same figure. Sampling again downstream — as an unresolved config or
+    // `LoadContext::default()` would — could answer a different number. The planning override
+    // deliberately does not reach the context: it says how to tier, not how much one file may
+    // allocate.
     let system_available = memory::available_memory();
-    let available_memory = config.available_memory_or(system_available);
+    let config = &config.resolved_with(system_available);
+    let available_memory = config.planning_memory();
     let context = LoadContext::new(cancel.clone(), memory::memory_budget(system_available));
 
     // Dimensions drive the in-memory-vs-disk tier decision. Peek the header without a decode when

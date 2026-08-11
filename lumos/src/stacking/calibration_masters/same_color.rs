@@ -132,10 +132,10 @@ pub(crate) const XTRANS_NEIGHBORS: usize = 24;
 /// Precomputed X-Trans same-color neighbour offsets, indexed by the pixel's 6×6 phase.
 ///
 /// The X-Trans pattern is periodic with period 6, so for a given phase `(x % 6, y % 6)` the set of
-/// same-color neighbours within the search window — and their Manhattan distances — is fixed. The
-/// old path recomputed this on every pixel: a 13×13 `color_at` sweep plus a per-pixel distance
-/// sort, which dominated the cold-pixel scan of a full X-Trans master. Precomputing it once turns
-/// the per-pixel work into a bounded gather + median over the nearest valid neighbours.
+/// same-color neighbours within the search window — and their Manhattan distances — is fixed.
+/// Building the table once leaves the per-pixel work a bounded gather plus a median over the nearest
+/// valid neighbours; deriving it per pixel instead costs a 13×13 `color_at` sweep and a distance
+/// sort every time, which measured ~38% of the X-Trans cosmic-ray scan.
 #[derive(Debug)]
 pub(crate) struct XTransOffsets {
     /// `per_phase[(y % 6) * 6 + (x % 6)]` = same-color `(dx, dy)` offsets, nearest-first by

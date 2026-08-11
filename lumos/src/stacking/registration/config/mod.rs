@@ -266,19 +266,26 @@ impl Config {
 
     /// Precise wide-field configuration: high accuracy with lens distortion handling.
     ///
-    /// Builds on `wide_field()` (Homography, unlimited rotation/scale) with
-    /// tighter matching from `precise()` plus extra stars and stricter confidence.
+    /// Builds on [`Self::wide_field`] (Homography, SIP, unlimited rotation/scale) and takes its
+    /// iteration budget and RMS gate from [`Self::precise`], with extra stars, tighter matching and
+    /// stricter confidence of its own.
+    ///
+    /// Both bases are read rather than copied: a preset that re-typed `precise()`'s numbers as
+    /// literals would drift from it the first time either was tuned.
     pub fn precise_wide_field() -> Self {
+        let precise = Self::precise();
         Self {
             ransac: RansacConfig {
-                max_iterations: 5000,
+                // Stricter than precise(), which is this preset's own choice.
                 confidence: 0.9999,
+                // From wide_field(): no rotation or scale prior.
                 max_rotation: None,
                 scale_range: None,
-                ..Default::default()
+                // From precise(): the iteration budget.
+                ..precise.ransac
             },
-            max_rms_error: 1.0,
-            // Stricter than precise(): more stars, tighter matching
+            max_rms_error: precise.max_rms_error,
+            // Stricter than precise(): more stars, tighter matching.
             matching: RegistrationMatchingConfig {
                 max_stars: 500,
                 min_matches: 20,
@@ -288,7 +295,7 @@ impl Config {
                 },
                 ..Default::default()
             },
-            // From wide_field(): Homography, SIP, unlimited rotation/scale
+            // From wide_field(): Homography, SIP, unlimited rotation/scale.
             ..Self::wide_field()
         }
     }

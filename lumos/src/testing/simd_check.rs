@@ -1,8 +1,8 @@
 //! One shape table and one sweep for cross-checking a SIMD kernel against its scalar reference.
 //!
-//! Every SIMD module used to carry its own copy of these inputs — uniform rows, a ramp, a spike,
-//! negatives, alternating values — as one `#[test]` per shape with an identical body. That made a
-//! new shape an edit in every module, so in practice each module covered a different subset.
+//! The inputs live here — uniform rows, a ramp, a spike, negatives, alternating values — rather
+//! than as one `#[test]` per shape per module with an identical body: that shape makes a new case an
+//! edit in every module, which in practice leaves each module covering a different subset.
 //!
 //! The kernels themselves are too varied to share a call signature: the median filter takes three
 //! rows, convolution takes a kernel, the background interpolator writes two outputs, and resample

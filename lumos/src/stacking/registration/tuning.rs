@@ -1,9 +1,8 @@
 //! The pixel scales registration judges residuals against, and where each number comes from.
 //!
-//! Three quantities decide whether two stars are the same star and whether a model fits, and they
-//! were previously three bare literals in `mod.rs` — two of which are `0.5` and mean entirely
-//! different things. They are collected here because they are only meaningful relative to each
-//! other:
+//! Three quantities decide whether two stars are the same star and whether a model fits. They are
+//! collected here because they are only meaningful relative to each other, and because two of them
+//! are the number `0.5` and mean entirely different things:
 //!
 //! - [`max_sigma_from_fwhm`] sets σ_max, the noise scale MAGSAC scores against. **Seeing-relative.**
 //! - [`recovery_radius`] turns σ_max into the distance match recovery accepts a nearest neighbour
@@ -40,8 +39,8 @@ pub(super) fn max_sigma_from_fwhm(median_fwhm: f64) -> f64 {
 ///
 /// The same 1%-tail test MAGSAC applies, in distance rather than squared distance:
 /// `√χ²₀.₉₉(2)·σ_max`. Sharing [`CHI2_99_2DOF`] is the point — recovery admitting matches MAGSAC's
-/// scorer would call outliers (or refusing ones it accepts) is a contradiction, and the two
-/// literals had already rounded apart.
+/// scorer would call outliers, or refusing ones it accepts, is a contradiction, and two independent
+/// literals of the same constant drift apart.
 pub(super) fn recovery_radius(max_sigma: f64) -> f64 {
     CHI2_99_2DOF.sqrt() * max_sigma
 }

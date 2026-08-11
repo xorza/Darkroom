@@ -264,8 +264,8 @@ pub(super) fn parametric_noise_into(
 /// neighbour whatever order the rows run in. It is here because `pixels_mut()` is held across the
 /// reads, and it pays for itself besides: reading a separate, read-only array keeps one row's
 /// writes off the cache lines the rows above and below are reading. Aliasing the two through a raw
-/// pointer is sound (the sets are disjoint) and was measured *slower* on every run of
-/// `bench_cosmic_ray_reject_mono` — the false sharing costs more than the copy. The copy lands in
+/// pointer would be sound — the sets are disjoint — but measures *slower* on every run of
+/// `bench_cosmic_ray_reject_mono`: the false sharing costs more than the copy. The copy lands in
 /// the caller's `snapshot` buffer, so it is a memcpy per iteration and not an allocation.
 pub(super) fn replace_flagged(
     data: &mut [f32],

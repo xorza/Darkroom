@@ -44,7 +44,7 @@ impl TransformType {
 ///
 /// Kept apart from [`TransformType`] so that "pick a model for me" cannot reach the places that
 /// can only act on a chosen one — RANSAC, transform estimation, and [`Transform`] itself, each of
-/// which used to carry its own arm rejecting it.
+/// which would otherwise need its own arm rejecting it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TransformModel {
     /// Fit exactly this model.
@@ -245,15 +245,22 @@ impl Transform {
     ///
     /// # Example
     ///
-    /// ```ignore
-    /// let result = registrator.register_stars(&ref_stars, &target_stars)?;
+    /// ```no_run
+    /// use glam::DVec2;
+    /// use lumos::{RegistrationConfig, Star, register};
+    ///
+    /// # fn example(ref_stars: &[Star], target_stars: &[Star], ref_pos: DVec2)
+    /// # -> Result<(), lumos::RegistrationError> {
+    /// let result = register(ref_stars, target_stars, &RegistrationConfig::default())?;
     /// let transform = result.transform();
     ///
     /// // Map a reference point to its corresponding target location
     /// let target_pos = transform.apply(ref_pos);
     ///
-    /// // Map a target point back to reference coordinates
-    /// let ref_pos = transform.apply_inverse(target_pos);
+    /// // And back again
+    /// let round_tripped = transform.apply_inverse(target_pos);
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn apply(&self, p: DVec2) -> DVec2 {
         self.matrix.transform_point(p)

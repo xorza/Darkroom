@@ -51,13 +51,12 @@ pub fn calibrate_align_stack<P: AsRef<Path> + Sync>(
     }
     config.validate()?;
     let total = light_paths.len();
-    // Sample the machine once, here, and hand the resolved config to every stage below. Both the
-    // tier decision and the decode budget are derived from this one figure; before, the config
-    // sampled lazily and `LoadContext::default()` sampled again a line later, so the two could
-    // disagree.
+    // Sample the machine once, here, and hand the resolved config to every stage below, so the
+    // tier decision and the decode budget are derived from the same figure. An unresolved config
+    // samples lazily and `LoadContext::default()` samples again, which can disagree.
     let system_available = memory::available_memory();
     let config = &config.with_resolved_memory(system_available);
-    let available = config.stack.cache.get_available_memory();
+    let available = config.stack.cache.planning_memory();
     // From the system reading, not `available`: the config's figure is a tier-planning override
     // and must not shrink what a single FITS decode may allocate.
     let load_context = LoadContext::new(cancel.clone(), memory::memory_budget(system_available));

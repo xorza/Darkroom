@@ -47,34 +47,32 @@ impl CacheConfig {
         }
     }
 
-    /// Get available memory, using the override when configured.
-    pub(crate) fn get_available_memory(&self) -> u64 {
-        self.available_memory
-            .unwrap_or_else(memory::available_memory)
-    }
-
-    /// The planning figure, given a system reading the caller has already taken.
+    /// This config with its planning figure pinned to `system_available` — the one way to settle
+    /// what the run plans against.
     ///
-    /// [`Self::available_memory`] is a *planning* override — "size the tiers as if the machine had
-    /// this much" — and deliberately does not govern what a decoder may allocate for one file.
-    /// Callers that need both take one system reading and pass it here for the planning half.
-    pub(crate) fn available_memory_or(&self, system_available: u64) -> u64 {
-        self.available_memory.unwrap_or(system_available)
-    }
-
-    /// This config with its planning figure pinned to `system_available`.
-    ///
-    /// [`Self::get_available_memory`] falls back to sampling the system, so an unresolved config
-    /// answers a slightly different number every time it is asked. A run resolves once at its
-    /// entry and hands the resolved config downstream, so the tier decision and every chunk sizing
-    /// size against the same figure — otherwise a plan built from one reading can disagree with
-    /// the chunking built from another, and each reading costs a syscall. A config that already
-    /// carries an override keeps it.
+    /// A run takes a single system reading at its entry and hands the resolved config to every
+    /// stage, so the tier decision and every chunk sizing size against the same figure: a plan
+    /// built from one reading can disagree with chunking built from another, and each reading costs
+    /// a syscall. A config that already carries an override keeps it — [`Self::available_memory`] is
+    /// a *planning* override ("size the tiers as if the machine had this much") and resolution never
+    /// overrides an override.
     pub(crate) fn resolved_with(&self, system_available: u64) -> Self {
         Self {
-            available_memory: Some(self.available_memory_or(system_available)),
+            available_memory: Some(self.available_memory.unwrap_or(system_available)),
             ..self.clone()
         }
+    }
+
+    /// What to plan against: the pinned figure, or a fresh system reading if nobody pinned one.
+    ///
+    /// The counterpart to [`Self::resolved_with`] and the only reader — every in-tree path resolves
+    /// before the config reaches the cache, so the fallback is what keeps a hand-built config
+    /// usable rather than something a caller has to think about ordering around. It deliberately
+    /// does not govern what a decoder may allocate for one file; that budget comes from the system
+    /// reading directly.
+    pub(crate) fn planning_memory(&self) -> u64 {
+        self.available_memory
+            .unwrap_or_else(memory::available_memory)
     }
 }
 
@@ -112,6 +110,6 @@ mod tests {
             ..Default::default()
         };
 
-        assert_eq!(config.get_available_memory(), 123_456);
+        assert_eq!(config.planning_memory(), 123_456);
     }
 }
