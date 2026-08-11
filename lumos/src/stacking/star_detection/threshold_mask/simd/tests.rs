@@ -1,48 +1,134 @@
 //! Cross-checks that every backend's packed words match the scalar reference exactly.
 
-#[cfg(target_arch = "x86_64")]
-use crate::stacking::star_detection::threshold_mask::simd::avx2::process_words_avx2;
-#[cfg(target_arch = "x86_64")]
-use crate::stacking::star_detection::threshold_mask::simd::process_words_scalar;
+use crate::stacking::star_detection::threshold_mask::simd::{MIN_NOISE, process_words_scalar};
+use crate::testing::simd_check::{DATA_SHAPES, SWEEP_WIDTHS};
 
-/// The AVX2 packed kernel must produce bit-identical words to the scalar reference, including the
-/// partial-word tail and `px == threshold` boundary pixels (strict `>`, so never set).
+/// The shared sweep plus widths spanning whole 64-pixel words. Every backend vectorizes full words
+/// and hands whatever is left to `process_words_scalar`, so a word exactly filled, a word and a
+/// little, and several words with an odd tail are the boundaries that matter here — the shared list
+/// alone never reaches two full words.
+fn sweep_widths() -> Vec<usize> {
+    SWEEP_WIDTHS
+        .iter()
+        .copied()
+        .chain([65, 127, 128, 130, 193])
+        .collect()
+}
+
+/// The threshold the kernels compare against, written as they write it so a pixel set to it lands
+/// exactly on the boundary rather than near it.
+fn threshold_at(with_bg: bool, bg: f32, noise: f32, sigma: f32) -> f32 {
+    let threshold = sigma * noise.max(MIN_NOISE);
+    if with_bg { threshold + bg } else { threshold }
+}
+
+/// One backend mode against the scalar reference, over every shared data shape and width.
+///
+/// Compared exactly rather than within a tolerance: a packed word is a set of detections, so one
+/// differing bit is one pixel the two paths disagree about. That is also why the backends compute
+/// `bg + σ·noise` unfused — a contracted multiply-add would round differently from this reference.
+///
+/// The inputs lean on the shared shapes for coverage, and add what is specific to this kernel:
+/// `noise` takes the `negative` shape among others, which exercises the [`MIN_NOISE`] clamp both
+/// paths must apply identically, and pixels are forced onto the exact threshold at both word edges
+/// and in the tail, where a strict `>` must leave them unset.
+fn assert_mode_matches_scalar(
+    name: &str,
+    with_bg: bool,
+    run_backend: impl Fn(&[f32], &[f32], &[f32], f32, &mut [u64], usize),
+) {
+    let sigma = 3.0f32;
+    for shape in DATA_SHAPES {
+        for width in sweep_widths() {
+            let mut pixels = shape.row(width, 0);
+            let bg = shape.row(width, 1);
+            let noise = shape.row(width, 2);
+            for index in [0, 1, 63, 64, 65, width / 2, width - 1] {
+                if index < width {
+                    pixels[index] = threshold_at(with_bg, bg[index], noise[index], sigma);
+                }
+            }
+
+            let words_len = width.div_ceil(64);
+            let mut backend_words = vec![0u64; words_len];
+            let mut scalar_words = vec![0u64; words_len];
+
+            run_backend(&pixels, &bg, &noise, sigma, &mut backend_words, width);
+            if with_bg {
+                process_words_scalar::<true>(
+                    &pixels,
+                    &bg,
+                    &noise,
+                    sigma,
+                    &mut scalar_words,
+                    0,
+                    width,
+                );
+            } else {
+                process_words_scalar::<false>(
+                    &pixels,
+                    &[],
+                    &noise,
+                    sigma,
+                    &mut scalar_words,
+                    0,
+                    width,
+                );
+            }
+
+            assert_eq!(
+                backend_words, scalar_words,
+                "{name} vs scalar, shape {} w={width} with_bg={with_bg}",
+                shape.name
+            );
+        }
+    }
+}
+
+/// Run a backend's two threshold modes against the scalar reference. Takes the kernel by name, as
+/// brought into scope by the caller's `use`.
+///
+/// A macro because the mode is a const generic: writing the `::<true>`/`::<false>` pairing here once
+/// is what keeps a caller from handing the harness one mode's kernel while claiming the other, and
+/// from passing a `bg` slice to the kernel that ignores it.
+macro_rules! assert_backend_matches_scalar {
+    ($name:literal, $backend:ident) => {
+        assert_mode_matches_scalar($name, true, |pixels, bg, noise, sigma, words, end| unsafe {
+            $backend::<true>(pixels, bg, noise, sigma, words, 0, end)
+        });
+        assert_mode_matches_scalar(
+            $name,
+            false,
+            |pixels, _bg, noise, sigma, words, end| unsafe {
+                $backend::<false>(pixels, &[], noise, sigma, words, 0, end)
+            },
+        );
+    };
+}
+
 #[cfg(target_arch = "x86_64")]
 #[test]
 fn avx2_matches_scalar_packed() {
     if !imaginarium::cpu_features::has_avx2() {
         return; // backend not present on this host
     }
+    use crate::stacking::star_detection::threshold_mask::simd::avx2::process_words_avx2;
+    assert_backend_matches_scalar!("AVX2", process_words_avx2);
+}
 
-    // 130 px = 2 full 64-px words + a 2-bit partial word → exercises the scalar tail path.
-    let n = 130;
-    let sigma = 3.0f32;
-    let mut pixels = vec![0.0f32; n];
-    let mut bg = vec![0.0f32; n];
-    let mut noise = vec![0.0f32; n];
-    for i in 0..n {
-        let h = (i as u32).wrapping_mul(2654435761);
-        pixels[i] = (h as f32 / u32::MAX as f32) * 2.0; // [0, 2)
-        bg[i] = 0.1 + (i % 5) as f32 * 0.05;
-        noise[i] = 0.02 + (i % 7) as f32 * 0.01;
+#[cfg(target_arch = "x86_64")]
+#[test]
+fn sse41_matches_scalar_packed() {
+    if !imaginarium::cpu_features::has_sse4_1() {
+        return; // backend not present on this host
     }
-    // Force exact-boundary pixels (px == bg + σ·noise) across a word edge and the tail.
-    for &i in &[3usize, 63, 64, 70, 129] {
-        pixels[i] = bg[i] + sigma * noise[i].max(1e-6);
-    }
+    use crate::stacking::star_detection::threshold_mask::simd::sse41::process_words_sse;
+    assert_backend_matches_scalar!("SSE4.1", process_words_sse);
+}
 
-    let words_len = n.div_ceil(64);
-    let mut w_avx = vec![0u64; words_len];
-    let mut w_scalar = vec![0u64; words_len];
-
-    unsafe { process_words_avx2::<true>(&pixels, &bg, &noise, sigma, &mut w_avx, 0, n) };
-    process_words_scalar::<true>(&pixels, &bg, &noise, sigma, &mut w_scalar, 0, n);
-    assert_eq!(w_avx, w_scalar, "AVX2 vs scalar mismatch (WITH_BG=true)");
-
-    // Matched-filter case: WITH_BG=false, bg empty, threshold = σ·noise.
-    w_avx.iter_mut().for_each(|w| *w = 0);
-    w_scalar.iter_mut().for_each(|w| *w = 0);
-    unsafe { process_words_avx2::<false>(&pixels, &[], &noise, sigma, &mut w_avx, 0, n) };
-    process_words_scalar::<false>(&pixels, &[], &noise, sigma, &mut w_scalar, 0, n);
-    assert_eq!(w_avx, w_scalar, "AVX2 vs scalar mismatch (WITH_BG=false)");
+#[cfg(target_arch = "aarch64")]
+#[test]
+fn neon_matches_scalar_packed() {
+    use crate::stacking::star_detection::threshold_mask::simd::neon::process_words_neon;
+    assert_backend_matches_scalar!("NEON", process_words_neon);
 }
