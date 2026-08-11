@@ -2,7 +2,7 @@ use imaginarium::{Buffer2, ChannelCount, Image, PlanarPixels};
 use rayon::prelude::*;
 
 use crate::io::image::image_dimensions::ImageDimensions;
-use crate::math::sum::simd::sum_f32;
+use crate::math::sum;
 
 /// Planar floating-point pixels for a monochrome or RGB image.
 #[derive(Debug, Clone)]
@@ -169,18 +169,21 @@ impl LinearPixels {
     }
 
     pub(crate) fn mean(&self) -> f32 {
-        fn parallel_sum(values: &[f32]) -> f32 {
-            values.par_chunks(8192).map(sum_f32).sum()
+        // The partial sums combine in f64 and nothing rounds until the end. Rounding each chunk to
+        // f32 first would put one narrow rounding per 8192 pixels between a plane and its mean —
+        // ~2900 of them on a 24MP frame — which is the error the f64 accumulator exists to avoid.
+        fn parallel_sum(values: &[f32]) -> f64 {
+            values.par_chunks(8192).map(sum::sum_f32).sum()
         }
 
         match self {
             LinearPixels::L(plane) => {
                 debug_assert!(!plane.is_empty());
-                parallel_sum(plane) / plane.len() as f32
+                (parallel_sum(plane) / plane.len() as f64) as f32
             }
             LinearPixels::Rgb([r, g, b]) => {
                 let total = parallel_sum(r) + parallel_sum(g) + parallel_sum(b);
-                total / (r.len() + g.len() + b.len()) as f32
+                (total / (r.len() + g.len() + b.len()) as f64) as f32
             }
         }
     }

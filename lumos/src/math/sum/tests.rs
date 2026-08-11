@@ -1,77 +1,99 @@
 //! Tests for sum operations.
 
-use crate::math::sum::simd::{sum_f32, weighted_mean_f32};
-use crate::math::sum::*;
+use crate::math::sum::{mean_f32, scalar, sum_f32, weighted_mean_f32};
 
-/// `sum_f32` accumulates in f64, so it must land on the f64 sum rounded once — not merely near the
-/// naive f32 sum, which is the *worse* algorithm and was the old oracle. Exact equality is the
-/// whole point of the wider accumulator; a tolerance here would pass an implementation with none.
-///
-/// The value cycle alternates 1e6 against -1e6 so the running total cancels catastrophically,
-/// and the lengths straddle the scalar/SSE/AVX2 dispatch thresholds and their remainders.
+/// Lengths that straddle every gate and its remainder: under the 4-lane NEON minimum, under the
+/// 8-lane AVX2 one, exactly on each, and well past both.
+const LENGTHS: [usize; 15] = [1, 2, 3, 4, 5, 7, 8, 9, 16, 17, 63, 64, 65, 257, 1000];
+
+/// Cycles 1e6 against -1e6 so a running total cancels catastrophically, with small values between
+/// that a narrow accumulator would lose entirely.
+fn cancelling_values(len: usize) -> Vec<f32> {
+    (0..len)
+        .map(|index| match index % 4 {
+            0 => 1e6,
+            1 => 0.25,
+            2 => -1e6,
+            _ => 0.5,
+        })
+        .collect()
+}
+
+fn sequential_f64(values: &[f32]) -> f64 {
+    values.iter().map(|&value| f64::from(value)).sum()
+}
+
+/// The vector backends reassociate, so their f64 total is not bit-identical to a sequential one.
+/// What they owe is the *rounded* result: an f64 accumulator carries n·2⁻⁵³ against f32's 2⁻²⁴
+/// granularity, so a reassociated f64 sum has to round to the same f32 as the sequential one.
+/// A tolerance here would pass an implementation accumulating in f32.
 #[test]
-fn sum_f32_matches_a_rounded_f64_reference_at_every_length() {
-    for len in [
-        0usize, 1, 2, 3, 8, 13, 16, 17, 63, 64, 65, 255, 256, 257, 1000,
-    ] {
-        let values: Vec<f32> = (0..len)
-            .map(|index| match index % 4 {
-                0 => 1e6,
-                1 => 0.25,
-                2 => -1e6,
-                _ => 0.5,
-            })
-            .collect();
-        let expected = values.iter().map(|&v| f64::from(v)).sum::<f64>() as f32;
-        assert_eq!(sum_f32(&values), expected, "len={len}");
+fn sum_f32_rounds_to_the_same_f32_as_a_sequential_reference() {
+    for len in LENGTHS {
+        let values = cancelling_values(len);
+        assert_eq!(
+            sum_f32(&values) as f32,
+            sequential_f64(&values) as f32,
+            "len={len}"
+        );
     }
 }
 
-/// `mean_f32` divides an f64 accumulation once and rounds once, so the same exactness applies.
-/// Empty input is excluded: it is a `debug_assert!` violation, not a supported case.
+/// The f64 totals themselves may differ from sequential only by reassociation, which is bounded far
+/// below one f32 ULP of the sum's magnitude.
+#[test]
+fn sum_f32_stays_within_reassociation_error_of_a_sequential_reference() {
+    let values: Vec<f32> = (0..10_000).map(|i| 100.0 + (i as f32) * 0.01).collect();
+    let reference = sequential_f64(&values);
+    let error = (sum_f32(&values) - reference).abs();
+
+    // n·2⁻⁵³ relative, with room to spare; an f32 accumulator would be ~2⁻²⁴ relative and fail.
+    let bound = reference.abs() * (values.len() as f64) * f64::EPSILON;
+    assert!(error <= bound, "error {error:e} exceeded bound {bound:e}");
+}
+
+/// A wide accumulator recovers small values a naive f32 sum drops on the floor. Naive f32 would
+/// give 1e6 + 0.1 == 1e6 ten thousand times over, then 1e6 - 1e6 == 0.
+#[test]
+fn sum_f32_recovers_values_a_narrow_accumulator_would_lose() {
+    let mut values = vec![1e6f32];
+    values.extend(std::iter::repeat_n(0.1f32, 10_000));
+    values.push(-1e6f32);
+
+    // 10_000 × the f32 nearest 0.1, summed exactly in f64.
+    let expected = f64::from(0.1f32) * 10_000.0;
+    assert!((sum_f32(&values) - expected).abs() < 1e-9);
+}
+
+/// 100k ones is exactly representable at every partial sum, so any correct accumulator is exact.
+#[test]
+fn sum_f32_is_exact_on_exactly_representable_input() {
+    let n = 100_000;
+    assert_eq!(sum_f32(&vec![1.0f32; n]), n as f64);
+    assert_eq!(sum_f32(&[]), 0.0);
+}
+
+/// `mean_f32` divides an f64 accumulation once and rounds once.
 #[test]
 fn mean_f32_matches_a_rounded_f64_reference_at_every_length() {
-    for len in [1usize, 2, 3, 8, 13, 16, 17, 63, 64, 65, 255, 256, 257, 1000] {
-        let values: Vec<f32> = (0..len)
-            .map(|index| match index % 4 {
-                0 => 1e6,
-                1 => 0.25,
-                2 => -1e6,
-                _ => 0.5,
-            })
-            .collect();
-        let expected = (values.iter().map(|&v| f64::from(v)).sum::<f64>() / len as f64) as f32;
+    for len in LENGTHS {
+        let values = cancelling_values(len);
+        let expected = (sequential_f64(&values) / len as f64) as f32;
         assert_eq!(mean_f32(&values), expected, "len={len}");
     }
 }
 
+/// The combine reaches the same pixel through `mean_f32` (equal weights) or `weighted_mean_f32`
+/// (frame weights), so the two must not disagree on the same data.
+///
+/// This is exact by construction, not by numerical luck: `v * 1.0` is exact in f64 and each
+/// backend accumulates the weighted numerator with the same lane split, reduction order and scalar
+/// tail as its own `sum_f32`, so both walk the identical values through the identical additions.
+/// The lengths have to cross both gates — 4 on NEON, 8 on AVX2 — or the sweep never leaves the
+/// scalar path on one of the two architectures.
 #[test]
-fn simd_vs_scalar_sum() {
-    let values: Vec<f32> = (0..1000).map(|x| x as f32 * 0.1).collect();
-    let scalar_result = scalar::sum_f32(&values);
-    let simd_result = sum_f32(&values);
-    assert!(
-        (scalar_result - simd_result).abs() < 1e-5,
-        "scalar={}, simd={}",
-        scalar_result,
-        simd_result
-    );
-}
-
-#[test]
-fn mean_rounds_once_and_agrees_with_the_unit_weighted_mean() {
-    // The combine reaches the same pixel through `mean_f32` (equal weights) or
-    // `weighted_mean_f32` (frame weights), so the two must not disagree on the same data. Every
-    // weighted-mean backend accumulates in f64, so the agreement is exact rather than approximate
-    // at every length, on every architecture.
-    //
-    // The lengths have to cross both dispatch gates or the test is vacuous on one architecture:
-    // the NEON arm takes over at 4 (`NEON_F32_LANES`) and the x86 arms at 128
-    // (`X86_WEIGHTED_MEAN_CROSSOVER`). An earlier list that stopped at 127 stayed on the scalar
-    // path for the whole sweep on x86_64 while exercising NEON from len 5 up.
-    for len in [
-        1usize, 2, 3, 5, 8, 17, 33, 64, 127, 128, 129, 255, 256, 257, 1000,
-    ] {
+fn mean_agrees_bit_for_bit_with_the_unit_weighted_mean() {
+    for len in LENGTHS {
         let values: Vec<f32> = (0..len).map(|i| 0.1 + (i as f32) * 0.0137).collect();
         let ones = vec![1.0f32; len];
         assert_eq!(
@@ -80,327 +102,73 @@ fn mean_rounds_once_and_agrees_with_the_unit_weighted_mean() {
             "mean and unit-weighted mean disagree at len {len}"
         );
     }
+}
 
-    // Non-vacuous: on this set, rounding the f64 sum to f32 before dividing lands one ULP below
-    // the correctly-rounded mean. Exact mean is 0.47267352491617204; the single rounding gives
-    // 0.472673535 (bits 1056047684) and the double rounding 0.472673506 (bits 1056047683).
+/// Rounding once beats rounding twice, so `mean_f32` must not be reachable as `sum` then divide.
+/// Exact mean is 0.47267352491617204; one rounding gives 0.472673535 (bits 1056047684), two give
+/// 0.472673506 (bits 1056047683).
+#[test]
+fn mean_f32_rounds_once_not_twice() {
     let values = [0.98646706f32, 0.68272305, 0.3804413, 0.23075151, 0.08298469];
     let once = mean_f32(&values);
-    let twice = sum_f32(&values) / values.len() as f32;
+    let twice = (sum_f32(&values) as f32) / values.len() as f32;
     assert_ne!(
         once.to_bits(),
         twice.to_bits(),
         "witness no longer distinguishes one rounding from two"
     );
 
-    let exact = values.iter().map(|&v| f64::from(v)).sum::<f64>() / values.len() as f64;
+    let exact = sequential_f64(&values) / values.len() as f64;
     assert!(
         (f64::from(once) - exact).abs() < (f64::from(twice) - exact).abs(),
         "rounding once must land closer to the exact mean than rounding twice"
     );
 }
 
+/// Hand-computed weighted means, including the cases where the weights carry the answer.
 #[test]
-fn weighted_mean_uniform_weights() {
-    let values = [1.0f32, 2.0, 3.0, 4.0, 5.0];
-    let weights = [1.0f32; 5];
-    let result = weighted_mean_f32(&values, &weights);
-    assert!((result - 3.0).abs() < 1e-6);
-}
-
-#[test]
-fn weighted_mean_varying_weights() {
-    // Weighted mean of [10, 20] with weights [3, 1] = (30 + 20) / 4 = 12.5
-    let values = [10.0f32, 20.0];
-    let weights = [3.0f32, 1.0];
-    let result = weighted_mean_f32(&values, &weights);
-    assert!((result - 12.5).abs() < 1e-6);
-}
-
-#[test]
-fn weighted_mean_single_value() {
-    let result = weighted_mean_f32(&[42.0], &[5.0]);
-    assert!((result - 42.0).abs() < 1e-6);
-}
-
-#[test]
-fn weighted_mean_empty() {
-    let result = weighted_mean_f32(&[], &[]);
-    assert_eq!(result, 0.0);
-}
-
-#[test]
-fn weighted_mean_zero_weights_returns_zero() {
-    let result = weighted_mean_f32(&[1.0, 2.0, 3.0], &[0.0, 0.0, 0.0]);
-    assert_eq!(result, 0.0);
-}
-
-#[test]
-fn weighted_mean_one_nonzero_weight() {
-    // Only the value with nonzero weight should matter
-    let values = [10.0f32, 20.0, 30.0];
-    let weights = [0.0f32, 5.0, 0.0];
-    let result = weighted_mean_f32(&values, &weights);
-    assert!((result - 20.0).abs() < 1e-6);
-}
-
-#[test]
-fn weighted_mean_negative_values() {
-    let values = [-10.0f32, 10.0];
-    let weights = [1.0f32, 1.0];
-    let result = weighted_mean_f32(&values, &weights);
-    assert!(result.abs() < 1e-6);
-}
-
-#[test]
-fn sum_f32_precision_large_constant() {
-    // Sum 100k values of 1.0: exact answer is 100000.0
-    // Naive f32 summation would accumulate rounding errors; the f64 accumulator is exact.
-    let n = 100_000;
-    let values = vec![1.0f32; n];
-    let result = sum_f32(&values);
-    assert_eq!(result, n as f32, "sum of {} ones should be exact", n);
-}
-
-#[test]
-fn sum_f32_precision_catastrophic_cancellation() {
-    // Big positive + big negative + small values: naive f32 summation loses the small values.
-    // The f64 accumulator preserves them.
-    let big = 1e7f32;
-    let small = 1e-3f32;
-    let n_small = 1000;
-    let mut values = vec![big, -big];
-    values.extend(std::iter::repeat_n(small, n_small));
-
-    let expected = n_small as f32 * small; // 1.0 exactly
-    let result = sum_f32(&values);
-    assert!(
-        (result - expected).abs() < 1e-4,
-        "expected {expected}, got {result} — wide accumulation failed"
+fn weighted_mean_matches_hand_computed_values() {
+    // (10·3 + 20·1) / 4 = 12.5
+    assert_eq!(weighted_mean_f32(&[10.0, 20.0], &[3.0, 1.0]), 12.5);
+    // Uniform weights collapse to the plain mean of 1..=5.
+    assert_eq!(
+        weighted_mean_f32(&[1.0, 2.0, 3.0, 4.0, 5.0], &[1.0; 5]),
+        3.0
     );
+    // Only the nonzero weight contributes.
+    assert_eq!(
+        weighted_mean_f32(&[10.0, 20.0, 30.0], &[0.0, 5.0, 0.0]),
+        20.0
+    );
+    // A single sample is its own mean whatever its weight.
+    assert_eq!(weighted_mean_f32(&[42.0], &[5.0]), 42.0);
+    // Symmetric values with equal weights cancel exactly.
+    assert_eq!(weighted_mean_f32(&[-10.0, 10.0], &[1.0, 1.0]), 0.0);
 }
 
+/// Every frame distrusted is data, not a fault: the pixel has no information, which is 0.0.
 #[test]
-fn sum_f32_precision_scalar_vs_f64() {
-    // Compare scalar wide accumulation against an f64 reference for typical astronomy data.
-    let values: Vec<f32> = (0..4096).map(|i| 100.0 + (i as f32) * 0.01).collect();
-    let f64_sum: f64 = values.iter().map(|&v| v as f64).sum();
-
-    let result = scalar::sum_f32(&values);
-    assert_eq!(result, f64_sum as f32);
+fn weighted_mean_of_zero_total_weight_is_zero() {
+    assert_eq!(weighted_mean_f32(&[1.0, 2.0, 3.0], &[0.0, 0.0, 0.0]), 0.0);
 }
 
+/// Crossing each backend's gate must not change the answer, so scalar and dispatched results have
+/// to agree either side of it. Lengths 3/4/5 straddle NEON's, 7/8/9 AVX2's.
 #[test]
-fn sum_f32_precision_simd_vs_f64() {
-    // Compare the SIMD result against an f64 reference.
-    let values: Vec<f32> = (0..4096).map(|i| 100.0 + (i as f32) * 0.01).collect();
-    let f64_sum: f64 = values.iter().map(|&v| v as f64).sum();
+fn weighted_mean_agrees_with_scalar_across_every_gate() {
+    for len in LENGTHS {
+        let values: Vec<f32> = (0..len).map(|i| 500.0 + (i as f32) * 0.03).collect();
+        let weights: Vec<f32> = (0..len).map(|i| 2.0 - (i as f32) * 0.0001).collect();
 
-    let result = sum_f32(&values);
-    let error = (result as f64 - f64_sum).abs();
-    assert!(
-        error < 0.1,
-        "SIMD error {error:.6} too large (f64 ref: {f64_sum:.6}, got: {result:.6})"
-    );
-}
-
-#[test]
-fn weighted_mean_precision_large_array() {
-    // Weighted mean of uniform values with uniform weights should equal the value.
-    let n = 10_000;
-    let values = vec![42.5f32; n];
-    let weights = vec![1.0f32; n];
-    let result = weighted_mean_f32(&values, &weights);
-    assert!(
-        (result - 42.5).abs() < 1e-5,
-        "weighted mean of {n} × 42.5 should be 42.5, got {result}"
-    );
-}
-
-#[test]
-fn sum_f32_wide_accumulation_actually_helps() {
-    // Construct data where naive f32 summation provably loses precision.
-    // Sum of 1e6 + (1e-1 repeated 10000 times) + (-1e6).
-    // Naive f32: 1e6 + 0.1 = 1e6 (lost!), repeated. Final: 1e6 - 1e6 = 0.
-    // Accumulated in f64: should recover ~1000.0.
-    let mut values = vec![1e6f32];
-    values.extend(std::iter::repeat_n(0.1f32, 10_000));
-    values.push(-1e6f32);
-
-    let expected = 10_000.0 * 0.1; // 1000.0
-    let result = sum_f32(&values);
-    assert!(
-        (result - expected as f32).abs() < 1.0,
-        "wide accumulation should recover small values: expected ~{expected}, got {result}"
-    );
-
-    // Verify scalar path independently
-    let scalar_result = scalar::sum_f32(&values);
-    assert!(
-        (scalar_result - expected as f32).abs() < 1.0,
-        "scalar wide accumulation should recover small values: expected ~{expected}, got {scalar_result}"
-    );
-}
-
-#[test]
-fn sum_f32_simd_vs_scalar_catastrophic() {
-    // Both paths should handle catastrophic cancellation similarly.
-    let big = 1e7f32;
-    let small = 1e-3f32;
-    let n_small = 1000;
-    let mut values = vec![big, -big];
-    values.extend(std::iter::repeat_n(small, n_small));
-
-    let scalar_result = scalar::sum_f32(&values);
-    let simd_result = sum_f32(&values);
-    let expected = 1.0f32;
-
-    assert!(
-        (scalar_result - expected).abs() < 1e-3,
-        "scalar: expected ~{expected}, got {scalar_result}"
-    );
-    assert!(
-        (simd_result - expected).abs() < 1e-3,
-        "simd: expected ~{expected}, got {simd_result}"
-    );
-}
-
-#[test]
-fn sum_f32_simd_vs_scalar_large_f64_ref() {
-    // Both paths should agree closely on large realistic data.
-    let values: Vec<f32> = (0..10_000).map(|i| (i as f32 + 1.0) * 0.7).collect();
-    let f64_ref: f64 = values.iter().map(|&v| v as f64).sum();
-
-    let scalar_result = scalar::sum_f32(&values);
-    let simd_result = sum_f32(&values);
-
-    let scalar_err = (scalar_result as f64 - f64_ref).abs();
-    let simd_err = (simd_result as f64 - f64_ref).abs();
-    assert_eq!(scalar_result, f64_ref as f32);
-
-    assert!(
-        scalar_err < 1.0,
-        "scalar error {scalar_err:.6} vs f64 ref {f64_ref:.2}"
-    );
-    assert!(
-        simd_err < 1.0,
-        "simd error {simd_err:.6} vs f64 ref {f64_ref:.2}"
-    );
-    // Both should be close to each other
-    assert!(
-        (scalar_result - simd_result).abs() < 1.0,
-        "scalar={scalar_result}, simd={simd_result}"
-    );
-}
-
-#[test]
-fn sum_f32_all_negative() {
-    let values: Vec<f32> = (1..=4096).map(|i| -(i as f32) * 0.1).collect();
-    let f64_ref: f64 = values.iter().map(|&v| v as f64).sum();
-
-    let result = sum_f32(&values);
-    let error = (result as f64 - f64_ref).abs();
-    assert!(
-        error < 0.5,
-        "all-negative sum error {error:.6} (f64 ref: {f64_ref:.2}, got: {result})"
-    );
-}
-
-#[test]
-fn weighted_mean_wide_accumulation_helps() {
-    // Large number of values near a mean — naive f32 summation of v*w accumulates error.
-    let n = 50_000;
-    let values: Vec<f32> = (0..n).map(|i| 1000.0 + (i as f32) * 0.001).collect();
-    let weights = vec![1.0f32; n];
-
-    let f64_mean: f64 = values.iter().map(|&v| v as f64).sum::<f64>() / n as f64;
-
-    let result = weighted_mean_f32(&values, &weights);
-    let error = (result as f64 - f64_mean).abs();
-    assert!(
-        error < 0.01,
-        "weighted mean error {error:.6} (f64 ref: {f64_mean:.6}, got: {result})"
-    );
-}
-
-/// Compute f64 reference weighted mean.
-fn weighted_mean_f64_ref(values: &[f32], weights: &[f32]) -> f64 {
-    let num: f64 = values
-        .iter()
-        .zip(weights.iter())
-        .map(|(&v, &w)| v as f64 * w as f64)
-        .sum();
-    let den: f64 = weights.iter().map(|&w| w as f64).sum();
-    if den > 0.0 { num / den } else { 0.0 }
-}
-
-#[test]
-fn weighted_mean_simd_vs_scalar() {
-    let values: Vec<f32> = (0..1000).map(|i| (i as f32) * 0.7 + 10.0).collect();
-    let weights: Vec<f32> = (0..1000).map(|i| 1.0 + (i as f32) * 0.01).collect();
-
-    let scalar_result = scalar::weighted_mean_f32(&values, &weights);
-    let simd_result = weighted_mean_f32(&values, &weights);
-    assert!(
-        (scalar_result - simd_result).abs() < 1e-4,
-        "scalar={scalar_result}, simd={simd_result}"
-    );
-}
-
-#[test]
-fn weighted_mean_simd_vs_scalar_large() {
-    // 10k elements — exercises full SIMD loop + remainder
-    let values: Vec<f32> = (0..10_000).map(|i| 500.0 + (i as f32) * 0.03).collect();
-    let weights: Vec<f32> = (0..10_000).map(|i| 2.0 - (i as f32) * 0.0001).collect();
-
-    let f64_ref = weighted_mean_f64_ref(&values, &weights);
-    let scalar_result = scalar::weighted_mean_f32(&values, &weights);
-    let simd_result = weighted_mean_f32(&values, &weights);
-
-    let scalar_err = (scalar_result as f64 - f64_ref).abs();
-    let simd_err = (simd_result as f64 - f64_ref).abs();
-    assert!(
-        scalar_err < 0.1,
-        "scalar error {scalar_err:.6} vs f64 ref {f64_ref:.4}"
-    );
-    assert!(
-        simd_err < 0.1,
-        "simd error {simd_err:.6} vs f64 ref {f64_ref:.4}"
-    );
-    assert!(
-        (scalar_result - simd_result).abs() < 0.1,
-        "scalar={scalar_result}, simd={simd_result}"
-    );
-}
-
-#[test]
-fn weighted_mean_dispatch_boundary() {
-    for size in [127, 128, 129] {
-        let values: Vec<f32> = (0..size).map(|i| 10.0 + i as f32).collect();
-        let weights: Vec<f32> = (0..size).map(|i| 1.0 + i as f32 * 0.1).collect();
-
-        let f64_ref = weighted_mean_f64_ref(&values, &weights);
-        let scalar_result = scalar::weighted_mean_f32(&values, &weights);
-        let simd_result = weighted_mean_f32(&values, &weights);
-
-        assert!(
-            (scalar_result as f64 - f64_ref).abs() < 0.01,
-            "size={size}: scalar={scalar_result}, f64_ref={f64_ref:.6}"
-        );
-        assert!(
-            (simd_result as f64 - f64_ref).abs() < 0.01,
-            "size={size}: simd={simd_result}, f64_ref={f64_ref:.6}"
-        );
-        assert!(
-            (scalar_result - simd_result).abs() < 1e-4,
-            "size={size}: scalar={scalar_result}, simd={simd_result}"
-        );
+        let sums = scalar::weighted_sums(&values, &weights);
+        let expected = (sums.weighted_values / sums.weight_total) as f32;
+        assert_eq!(weighted_mean_f32(&values, &weights), expected, "len={len}");
     }
 }
 
+/// Large values cancelling against varying weights still has to land on the f64 reference.
 #[test]
-fn weighted_mean_simd_catastrophic_cancellation() {
-    // Large + small values with varying weights — stresses the accumulator
+fn weighted_mean_survives_catastrophic_cancellation() {
     let mut values = vec![1e6f32, -1e6f32];
     let mut weights = vec![1.0f32, 1.0f32];
     for i in 0..1000 {
@@ -408,27 +176,38 @@ fn weighted_mean_simd_catastrophic_cancellation() {
         weights.push(1.0 + (i as f32) * 0.001);
     }
 
-    let f64_ref = weighted_mean_f64_ref(&values, &weights);
-    let scalar_result = scalar::weighted_mean_f32(&values, &weights);
-    let simd_result = weighted_mean_f32(&values, &weights);
+    let numerator: f64 = values
+        .iter()
+        .zip(&weights)
+        .map(|(&v, &w)| f64::from(v) * f64::from(w))
+        .sum();
+    let denominator: f64 = weights.iter().map(|&w| f64::from(w)).sum();
+    let expected = (numerator / denominator) as f32;
 
-    // Both should be close to the f64 reference
-    assert!(
-        (scalar_result as f64 - f64_ref).abs() < 0.01,
-        "scalar={scalar_result}, f64_ref={f64_ref:.6}"
-    );
-    assert!(
-        (simd_result as f64 - f64_ref).abs() < 0.01,
-        "simd={simd_result}, f64_ref={f64_ref:.6}"
-    );
+    assert!((weighted_mean_f32(&values, &weights) - expected).abs() < 1e-4);
 }
 
 #[test]
 #[should_panic(expected = "must have the same length")]
-fn weighted_mean_length_mismatch_panics() {
-    // The SIMD kernels walk `weights` by raw pointer, so a shorter `weights` is UB in release —
-    // the length precondition is a release assert, not debug. Verify it fires.
-    let values = [1.0f32, 2.0, 3.0, 4.0, 5.0];
-    let weights = [1.0f32, 1.0, 1.0];
-    let _ = weighted_mean_f32(&values, &weights);
+fn weighted_mean_rejects_mismatched_lengths() {
+    // `zip` would silently truncate to the shorter slice and return a mean over a subset.
+    let _ = weighted_mean_f32(&[1.0, 2.0, 3.0, 4.0, 5.0], &[1.0, 1.0, 1.0]);
+}
+
+#[test]
+#[should_panic(expected = "cannot sum negative")]
+fn weighted_mean_rejects_negative_weights() {
+    let _ = weighted_mean_f32(&[1.0, 2.0], &[1.0, -2.0]);
+}
+
+#[test]
+#[should_panic(expected = "empty slice")]
+fn weighted_mean_rejects_an_empty_slice() {
+    let _ = weighted_mean_f32(&[], &[]);
+}
+
+#[test]
+#[should_panic(expected = "empty slice")]
+fn mean_rejects_an_empty_slice() {
+    let _ = mean_f32(&[]);
 }

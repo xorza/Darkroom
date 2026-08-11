@@ -20,7 +20,7 @@ pub(crate) mod sigma_clip_config;
 pub(crate) mod winsorized_clip_config;
 
 use crate::error::InvalidConfigField;
-use crate::math::sum::simd::weighted_mean_f32;
+use crate::math::sum;
 use crate::stacking::combine::cache::sample::CombinedSample;
 use crate::stacking::combine::rejection::gesd_config::GesdConfig;
 use crate::stacking::combine::rejection::linear_fit_clip_config::LinearFitClipConfig;
@@ -236,7 +236,7 @@ impl Rejection {
     ) -> CombinedSample {
         debug_assert_eq!(values.len(), weights.len());
         if let Rejection::None = self {
-            let value = weighted_mean_f32(values, weights);
+            let value = sum::weighted_mean_f32(values, weights);
             return if measure_quality {
                 CombinedSample::from_all(value, weights)
             } else {
@@ -266,7 +266,7 @@ impl Rejection {
 
 /// Weighted mean of rejection-reordered `values`: gathers each survivor's weight
 /// via `indices[i] → weights[indices[i]]` into `scratch` so values and weights
-/// align, then delegates to the precision-preserving [`weighted_mean_f32`],
+/// align, then delegates to the precision-preserving [`sum::weighted_mean_f32`],
 /// matching the unrejected branch. Returns `0.0` when the total weight is ~0.
 ///
 /// `scratch` is a reused buffer (its prior contents are overwritten) so the
@@ -283,7 +283,7 @@ fn weighted_mean_indexed(
 
     scratch.clear();
     scratch.extend(indices.iter().map(|&idx| weights[idx]));
-    weighted_mean_f32(values, scratch.as_slice())
+    sum::weighted_mean_f32(values, scratch.as_slice())
 }
 
 #[cfg(test)]
