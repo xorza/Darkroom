@@ -24,7 +24,9 @@ pub enum DecoderProvenance {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum TransferProvenance {
-    FitsPhysical(FitsTransferProvenance),
+    /// FITS samples divided into the pipeline's `[0, 1]` domain. The physical values the file
+    /// declared are recoverable through [`FitsTransferProvenance::physical_scale`].
+    FitsNormalized(FitsTransferProvenance),
     RawNormalized,
     DeclaredLinearRaster,
     UnspecifiedRaster,

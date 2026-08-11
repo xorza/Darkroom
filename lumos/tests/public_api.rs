@@ -36,9 +36,10 @@ fn file_loading_policy_is_available_from_the_crate_root() {
     assert_eq!(context.memory_limit_bytes, 64 * 1024 * 1024);
     assert_eq!(context.fits.cube, FitsCubeInterpretation::Rgb);
 
-    let provenance = TransferProvenance::FitsPhysical(FitsTransferProvenance {
+    let provenance = TransferProvenance::FitsNormalized(FitsTransferProvenance {
         bscale: 1.0,
         bzero: 0.0,
+        physical_scale: 65_535.0,
         unit: Some("adu".to_owned()),
         hdu: FitsHduProvenance {
             index: 3,
@@ -52,7 +53,7 @@ fn file_loading_policy_is_available_from_the_crate_root() {
     });
     assert!(matches!(
         provenance,
-        TransferProvenance::FitsPhysical(FitsTransferProvenance {
+        TransferProvenance::FitsNormalized(FitsTransferProvenance {
             hdu: FitsHduProvenance { index: 3, .. },
             checksum: FitsChecksumProvenance {
                 datasum: FitsChecksumState::Valid,

@@ -8,8 +8,9 @@ use common::internals::test_output_path;
 use imaginarium::{Buffer2, ColorFormat, Image, ImageDesc};
 
 use crate::io::image::error::ImageError;
+use crate::io::image::fits::provenance::FitsTransferProvenance;
 use crate::io::image::image_metadata::{BitPix, ImageMetadata};
-use crate::io::image::image_provenance::{ColorProvenance, ImageProvenance};
+use crate::io::image::image_provenance::{ColorProvenance, ImageProvenance, TransferProvenance};
 use crate::io::image::load_context::LoadContext;
 use crate::io::image::preview_image::PreviewImage;
 use crate::stacking::frame_store::StackableImage;
@@ -104,8 +105,18 @@ fn load_full_example_fits() {
     assert_eq!(image.metadata.bitpix, BitPix::Int32);
     assert_eq!(image.metadata.header_dimensions, vec![100, 100]);
 
+    // BITPIX = 32 with BSCALE = 1, so the samples were divided by the declared span 2³² − 1 and
+    // the provenance carries that span back: the physical ADU value stays recoverable.
+    let TransferProvenance::FitsNormalized(FitsTransferProvenance { physical_scale, .. }) =
+        &image.metadata.provenance.as_ref().unwrap().transfer
+    else {
+        panic!("expected FITS provenance");
+    };
+    assert_eq!(*physical_scale, 4_294_967_295.0);
     let pixel = image.get_pixel_gray(Vec2us::new(5, 20));
-    assert_eq!(pixel, 152.0);
+    // 152 / (2³² − 1) = 3.5390258e-8.
+    assert!((pixel - 3.539_025_8e-8).abs() < 1e-15, "{pixel}");
+    assert!((pixel * physical_scale - 152.0).abs() < 1e-3, "{pixel}");
 
     // No BAYERPAT header → cfa_type is None
     assert!(image.metadata.cfa_type.is_none());

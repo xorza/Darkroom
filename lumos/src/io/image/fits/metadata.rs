@@ -80,7 +80,7 @@ pub(super) fn write_image_metadata(
     }
     if let Some(ImageProvenance {
         transfer:
-            TransferProvenance::FitsPhysical(FitsTransferProvenance {
+            TransferProvenance::FitsNormalized(FitsTransferProvenance {
                 unit: Some(unit), ..
             }),
         ..

@@ -1,3 +1,16 @@
+//! Decoding a FITS image HDU into the pipeline's linear `[0, 1]` domain.
+//!
+//! FITS stores physical values, not normalized ones, so an integer HDU is divided by the span its
+//! own header declares — see [`plan::FitsDecodePlan::sample_divisor`]. That is what puts a FITS
+//! frame in the same numeric domain as a RAW one, which every stage after `load` assumes without
+//! being able to check. A floating-point HDU declares no span, so its `DATAMAX` decides: a
+//! saturation level well above unity means ADU and is divided by the 16-bit full scale, and
+//! anything else is taken as already normalized — which is what round-trips a Lumos-written master.
+//!
+//! Everything expressed in the file's sample units follows the samples through that division:
+//! `DATAMAX`, a declared `QNTZSIG`, and the `BSCALE`-derived ADC step. The divisor is recorded as
+//! [`crate::FitsTransferProvenance::physical_scale`] so the physical value stays recoverable.
+
 use std::fs::File;
 use std::path::Path;
 
@@ -11,9 +24,7 @@ use crate::io::image::fits::decode::plan::FitsHduDescription;
 use crate::io::image::fits::error::{fits_err, fits_unsupported};
 use crate::io::image::fits::metadata::{read_cfa_from_headers, read_quantization_sigma};
 use crate::io::image::fits::options::{FitsChecksumPolicy, FitsCubeInterpretation};
-use crate::io::image::fits::provenance::{
-    FitsChecksumProvenance, FitsChecksumState, FitsTransferProvenance,
-};
+use crate::io::image::fits::provenance::{FitsChecksumProvenance, FitsChecksumState};
 use crate::io::image::image_metadata::{BitPix, ImageMetadata};
 use crate::io::image::image_provenance::{ColorProvenance, ImageProvenance, TransferProvenance};
 use crate::io::image::linear::LinearImage;
@@ -65,24 +76,33 @@ impl DecodedFitsImage {
             ));
         }
 
-        let quantization_sigma = declared_quantization_sigma.or_else(|| {
-            match (&self.metadata.bitpix, &self.metadata.provenance) {
-                (
+        // A declared QNTZSIG and a BSCALE-derived ADC step are both in the file's sample units, so
+        // both follow the samples through the division the decoder already applied.
+        let fits_transfer = match &self.metadata.provenance {
+            Some(ImageProvenance {
+                transfer: TransferProvenance::FitsNormalized(transfer),
+                ..
+            }) => Some(transfer),
+            _ => None,
+        };
+        let physical_scale = fits_transfer.map_or(1.0, |transfer| transfer.physical_scale);
+        let quantization_sigma = declared_quantization_sigma
+            .map(|sigma| sigma / physical_scale)
+            .or_else(|| {
+                let transfer = fits_transfer?;
+                matches!(
+                    self.metadata.bitpix,
                     BitPix::UInt8
-                    | BitPix::Int16
-                    | BitPix::UInt16
-                    | BitPix::Int32
-                    | BitPix::UInt32
-                    | BitPix::Int64,
-                    Some(ImageProvenance {
-                        transfer:
-                            TransferProvenance::FitsPhysical(FitsTransferProvenance { bscale, .. }),
-                        ..
-                    }),
-                ) => Some(bscale.abs() as f32 * QUANTIZATION_SIGMA_PER_STEP),
-                _ => None,
-            }
-        });
+                        | BitPix::Int16
+                        | BitPix::UInt16
+                        | BitPix::Int32
+                        | BitPix::UInt32
+                        | BitPix::Int64
+                )
+                .then(|| {
+                    transfer.bscale.abs() as f32 / physical_scale * QUANTIZATION_SIGMA_PER_STEP
+                })
+            });
         let Self {
             mut metadata,
             pixels,
