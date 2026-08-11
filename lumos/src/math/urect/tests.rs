@@ -1,27 +1,5 @@
-use crate::math::rect::{Rect, URect};
+use crate::math::urect::URect;
 use crate::testing::prelude::*;
-
-#[test]
-fn rect_construction_and_overlap_are_half_open_and_const() {
-    const UNIT: Rect = Rect::new(Vec2::ZERO, Vec2::ONE);
-    const CENTERED: Rect = Rect::from_center_half_extent(Vec2::splat(0.5), 0.5);
-    const CASES: &[(Rect, f32)] = &[
-        (Rect::new(Vec2::ZERO, Vec2::ONE), 1.0),
-        (Rect::new(Vec2::new(0.5, 0.0), Vec2::new(1.5, 1.0)), 0.5),
-        (Rect::new(Vec2::new(0.5, 0.5), Vec2::new(1.5, 1.5)), 0.25),
-        (Rect::new(Vec2::new(1.0, 0.0), Vec2::new(2.0, 1.0)), 0.0),
-        (Rect::new(Vec2::splat(2.0), Vec2::splat(3.0)), 0.0),
-    ];
-
-    assert_eq!(CENTERED, UNIT);
-    for &(other, expected) in CASES {
-        assert_eq!(UNIT.overlap_area(other), expected);
-        assert_eq!(other.overlap_area(UNIT), expected);
-    }
-
-    assert!(std::panic::catch_unwind(|| Rect::new(Vec2::ONE, Vec2::ZERO)).is_err());
-    assert!(std::panic::catch_unwind(|| Rect::from_center_half_extent(Vec2::ZERO, -1.0)).is_err());
-}
 
 #[test]
 fn urect_accumulation_uses_exclusive_max_and_const_union() {

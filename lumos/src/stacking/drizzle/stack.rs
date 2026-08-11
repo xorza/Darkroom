@@ -129,9 +129,9 @@ fn accumulate(
     if frame_count == 0 {
         return Err(DrizzleError::NoFrames);
     }
-    config.validate()?;
 
-    // The accumulator is sized from the first frame, so it has to be in hand before the loop.
+    // The accumulator is sized from the first frame, so it has to be in hand before the loop. It
+    // validates the config as it is built, which is the only place that check belongs.
     let first = frames.next().expect("frame_count is non-zero")?;
     let input_dims = first.source.dimensions();
     tracing::info!(

@@ -6,6 +6,7 @@ use std::f64::consts::{FRAC_PI_4, PI};
 use crate::error::FrameDimensionMismatch;
 use crate::io::image::load_context::LoadContext;
 use crate::math::lanczos;
+use crate::stacking::drizzle::accumulator::frame_source::internals::input_rows;
 use crate::stacking::drizzle::accumulator::internals::{
     accumulated_flux_sum, add_image as add_test_image, add_image_with_band_rows,
 };

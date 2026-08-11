@@ -4,7 +4,7 @@ use crate::testing::prelude::*;
 use std::f32::consts::FRAC_PI_4;
 
 use crate::math::fwhm::FWHM_TO_SIGMA;
-use crate::math::rect::URect;
+use crate::math::urect::URect;
 use crate::stacking::star_detection::background::background_estimate::BackgroundEstimate;
 use crate::stacking::star_detection::centroid::moffat_fit::alpha_beta_to_fwhm;
 use crate::stacking::star_detection::centroid::*;

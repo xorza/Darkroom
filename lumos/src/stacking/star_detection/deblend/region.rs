@@ -1,6 +1,6 @@
 //! Connected region from segmentation and deblending.
 
-use crate::math::rect::URect;
+use crate::math::urect::URect;
 use crate::math::vec2us::Vec2us;
 
 /// A connected region of pixels identified during detection.

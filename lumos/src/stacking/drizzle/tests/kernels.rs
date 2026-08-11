@@ -389,11 +389,13 @@ fn fill_value_in_uncovered_pixels() {
     );
 }
 
-/// Test that a zero-weight frame does not affect the output.
+/// Test that a zero-weight frame does not affect the output, and is not counted as covering it.
 ///
 /// Frame 1: uniform 3.0, weight 1.0
 /// Frame 2: uniform 100.0, weight 0.0
-/// Result should be 3.0 everywhere (zero-weight frame contributes nothing).
+/// Result should be 3.0 everywhere (zero-weight frame contributes nothing), and coverage 1 frame in
+/// 2 — a frame that deposits nothing has reached nothing, which is the reading a zero *pixel* weight
+/// has always had.
 #[test]
 fn zero_weight_frame_ignored() {
     let image1 = constant_mono_image(Size2us::new(8, 8), 3.0);
@@ -413,6 +415,63 @@ fn zero_weight_frame_ignored() {
         "Zero-weight frame should not affect output, got {}",
         center
     );
+    assert_eq!(
+        result.coverage.as_ref().unwrap()[(8, 8)],
+        0.5,
+        "one of the two frames added carried any weight"
+    );
+}
+
+/// A radial drop that hangs off the output grid loses the part that missed it.
+///
+/// The alternative — normalizing by the taps that survived clipping — would keep every input pixel
+/// depositing its whole weight, so a border pixel would claim the same depth as an interior one
+/// while only a fraction of its drop landed. The compact kernels drop the overhang, and the ratio
+/// image is unaffected either way (flux and weight fall together), so the weight map is where the
+/// two conventions differ.
+#[test]
+fn radial_drops_lose_the_flux_that_misses_the_grid() {
+    const SIDE: i64 = 8;
+    let image = constant_mono_image(Size2us::new(SIDE as usize, SIDE as usize), 1.0);
+    let config = kernel_config(DrizzleKernel::Gaussian, 1.0, 1.0);
+    let product = drizzle_one(SIDE as usize, config, image, &Transform::identity(), None);
+
+    // At scale 1 / pixfrac 1 the drop size is 1 output pixel, so σ = 1/2.3548 and the kernel is
+    // truncated at ceil(3σ) = 2. Every drop centre lands on an integer output pixel, so the tap
+    // grid is separable and the deposited weight is a product of per-axis sums.
+    let sigma = 1.0 / 2.3548;
+    let tap = |d: i64| (-((d * d) as f64) / (2.0 * sigma * sigma)).exp();
+    let full: f64 = (-2..=2).map(tap).sum();
+    let on_grid: f64 = (0..SIDE)
+        .map(|i| {
+            (-2..=2)
+                .filter(|d| (0..SIDE).contains(&(i + d)))
+                .map(tap)
+                .sum::<f64>()
+                / full
+        })
+        .sum();
+    // 8 input pixels per axis, of which the two outermost lose part of their kernel: the axis sums
+    // to 7.8888 rather than 8, so the grid holds 62.23 of the 64 it would with renormalization.
+    let expected = (on_grid * on_grid) as f32;
+    assert!((expected - 62.233).abs() < 1e-2, "expected Σw {expected}");
+
+    let weight: f32 = product
+        .weight
+        .as_ref()
+        .unwrap()
+        .channel(0)
+        .pixels()
+        .iter()
+        .sum();
+    assert!(
+        (weight - expected).abs() < 1e-3 * expected,
+        "Σ weight {weight} must be the on-grid share {expected}, not the 64 renormalization would keep"
+    );
+    // The image is untouched by the shortfall: flux and weight fell together.
+    let out = product.image.channel(0);
+    assert!((out[(0, 0)] - 1.0).abs() < 1e-5, "corner {}", out[(0, 0)]);
+    assert!((out[(4, 4)] - 1.0).abs() < 1e-5, "centre {}", out[(4, 4)]);
 }
 
 /// Test Gaussian kernel with translation on a uniform image.

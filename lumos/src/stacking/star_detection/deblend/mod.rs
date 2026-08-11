@@ -14,7 +14,7 @@ use std::cmp::Ordering;
 
 use arrayvec::ArrayVec;
 
-use crate::math::rect::URect;
+use crate::math::urect::URect;
 use crate::math::vec2us::Vec2us;
 use crate::stacking::star_detection::labeling::LabelMap;
 use imaginarium::Buffer2;
@@ -170,7 +170,7 @@ mod internals {
     use imaginarium::Buffer2;
     use smallvec::SmallVec;
 
-    use crate::math::rect::URect;
+    use crate::math::urect::URect;
     use crate::stacking::star_detection::deblend::multi_threshold::{
         DeblendBuffers, deblend_multi_threshold,
     };

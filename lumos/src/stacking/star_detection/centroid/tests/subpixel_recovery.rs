@@ -9,7 +9,7 @@ use crate::testing::synthetic::sky_field::{Sky, SkyField};
 use std::f32::consts::PI;
 
 use crate::math::fwhm::fwhm_to_sigma;
-use crate::math::rect::URect;
+use crate::math::urect::URect;
 use crate::stacking::star_detection::background::background_estimate::BackgroundEstimate;
 use crate::stacking::star_detection::centroid::compute_stamp_radius;
 use crate::stacking::star_detection::centroid::measure_star;
