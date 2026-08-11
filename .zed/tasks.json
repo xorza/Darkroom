@@ -1,12 +1,12 @@
 [
   {
     "label": "run darkroom",
-    "command": "cargo",
+    "command": "RUST_BACKTRACE=1 cargo",
     "args": ["run", "-p", "darkroom"],
   },
   {
     "label": "run darkroom release",
-    "command": "cargo",
+    "command": "RUST_BACKTRACE=1 cargo",
     "args": ["run", "--release", "-p", "darkroom"],
   },
   {
@@ -38,7 +38,7 @@
   },
   {
     "label": "run palantir showcase with tracy",
-    "command": "RUST_BACKTRACE=1 cargo",
+    "command": "cargo",
     "args": [
       "run",
       "--profile",
