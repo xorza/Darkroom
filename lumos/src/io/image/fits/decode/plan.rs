@@ -13,6 +13,15 @@ use crate::io::image::image_metadata::BitPix;
 
 const FITS_DECODE_CHUNK_BYTES: usize = 4 * 1024 * 1024;
 
+/// Above this, a floating-point HDU's `DATAMAX` is read as declaring an ADU saturation level rather
+/// than a normalized one. Siril's threshold, and well clear of both the `[0, 1]` convention and the
+/// slight overshoot an interpolated or stacked frame can carry past unity.
+const FLOAT_ADU_DATAMAX: f64 = 10.0;
+
+/// What such a frame is divided by: the 16-bit full scale, which is the depth essentially every
+/// camera that writes ADU into a float FITS digitizes at. Siril and PixInsight both use it.
+const FLOAT_ADU_DIVISOR: f32 = 65_535.0;
+
 #[derive(Debug, Clone, Copy)]
 pub(super) struct FitsHduDescription<'a> {
     header: &'a Header,
@@ -37,10 +46,74 @@ pub(super) struct FitsDecodePlan {
     pub(super) dimensions: ImageDimensions,
     pub(super) bitpix: BitPix,
     pub(super) scaling: fits_well::image::Scaling,
+    /// Divide a physical sample by this to reach the pipeline's `[0, 1]` domain; multiply a
+    /// decoded sample by it to recover the physical value. See [`sample_divisor`].
+    pub(super) sample_divisor: f32,
     pub(super) source_bytes: u64,
     pub(super) decoded_bytes: u64,
     pub(super) peak_bytes: u64,
     pub(super) rows_per_chunk: usize,
+}
+
+/// What one full-scale span of the stored integer type measures, in physical units.
+///
+/// The pipeline's linear domain is `[0, 1]`, so an integer FITS is divided by the span its own
+/// `BITPIX` and `BSCALE` declare: `|BSCALE| × (2^bits − 1)`. That maps the FITS unsigned
+/// convention (`BITPIX = 16`, `BZERO = 2¹⁵`) exactly onto `[0, 1]`, and puts a signed frame on
+/// `[-0.5, 0.5]` around its own zero.
+///
+/// Only the scale is applied — never an offset, and never a clamp. Offsetting would move a signed
+/// frame's zero point, and clamping would cut the sub-pedestal noise tail that the calibration
+/// path depends on (see [`crate::io::raw`]'s unclamped normalization).
+///
+/// A floating-point `BITPIX` declares no full scale, so the only evidence available is `DATAMAX`.
+/// Siril's rule (`read_fits_with_convert`, the `FLOAT_IMG`/`DOUBLE_IMG` cases) is followed here: a
+/// declared saturation level above [`FLOAT_ADU_DATAMAX`] means the samples are ADU rather than
+/// `[0, 1]`, and they are divided by [`FLOAT_ADU_DIVISOR`]. Anything else — a `DATAMAX` of about 1,
+/// or none at all — is taken as already normalized.
+///
+/// The test is on the *header*, never on the pixels. A divisor read off each frame's own extrema
+/// would differ frame to frame and quietly break the commensurability this whole division exists to
+/// establish. It also keeps a Lumos-written master round-tripping: those carry no `DATAMAX`, or one
+/// that a previous load already divided down to about 1.
+fn sample_divisor(
+    path: &Path,
+    header: &Header,
+    stored: FitsBitpix,
+    scaling: &fits_well::image::Scaling,
+) -> Result<f32, ImageError> {
+    let steps = match stored {
+        FitsBitpix::U8 => f64::from(u8::MAX),
+        FitsBitpix::I16 => f64::from(u16::MAX),
+        FitsBitpix::I32 => f64::from(u32::MAX),
+        FitsBitpix::I64 => u64::MAX as f64,
+        FitsBitpix::F32 | FitsBitpix::F64 => {
+            let data_max = header
+                .get_real("DATAMAX")
+                .map_err(|source| fits_err(path, source))?;
+            return Ok(match data_max {
+                Some(max) if max > FLOAT_ADU_DATAMAX => FLOAT_ADU_DIVISOR,
+                _ => 1.0,
+            });
+        }
+    };
+    // File-derived metadata: a corrupt or hand-edited header can carry any BSCALE, and a zero or
+    // non-finite one leaves no span to normalize into. Reject rather than emit infinities.
+    let bscale = scaling.bscale;
+    if !bscale.is_finite() || bscale == 0.0 {
+        return Err(fits_unsupported(
+            path,
+            format!("BSCALE {bscale} leaves no scale to normalize integer samples by"),
+        ));
+    }
+    let divisor = bscale.abs() * steps;
+    if !divisor.is_finite() || divisor <= 0.0 {
+        return Err(fits_unsupported(
+            path,
+            format!("BSCALE {bscale} overflows the normalization scale for {stored:?} samples"),
+        ));
+    }
+    Ok(divisor as f32)
 }
 
 pub(super) fn preflight_fits_image(
@@ -79,6 +152,7 @@ pub(super) fn preflight_fits_image(
         .scaling()
         .map_err(|source| fits_err(path, source))?;
     let bitpix = map_bitpix(SampleType::from_scaling(stored_bitpix, &scaling));
+    let sample_divisor = sample_divisor(path, hdu.header, stored_bitpix, &scaling)?;
     let decoded_bytes = checked_size_bytes(
         path,
         dimensions.sample_count(),
@@ -139,6 +213,7 @@ pub(super) fn preflight_fits_image(
         dimensions,
         bitpix,
         scaling,
+        sample_divisor,
         source_bytes: hdu.source_bytes,
         decoded_bytes,
         peak_bytes,

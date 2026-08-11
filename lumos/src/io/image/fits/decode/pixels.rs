@@ -69,12 +69,18 @@ pub(super) fn read_decoded_hdu(
 
     let mut metadata =
         read_metadata(header, plan.shape, plan.bitpix).map_err(|source| fits_err(path, source))?;
+    // DATAMAX is a saturation level in the file's sample units, so it only stays comparable to the
+    // samples if it is divided by the same span they were.
+    if let Some(data_max) = &mut metadata.data_max {
+        *data_max /= f64::from(plan.sample_divisor);
+    }
     metadata.provenance = Some(ImageProvenance {
         container: SourceContainer::Fits,
         decoder: DecoderProvenance::FitsWell,
-        transfer: TransferProvenance::FitsPhysical(FitsTransferProvenance {
+        transfer: TransferProvenance::FitsNormalized(FitsTransferProvenance {
             bscale: plan.scaling.bscale,
             bzero: plan.scaling.bzero,
+            physical_scale: plan.sample_divisor,
             unit: read_text(header, "BUNIT").map_err(|source| fits_err(path, source))?,
             hdu,
             checksum,
@@ -128,19 +134,22 @@ fn read_fits_plane(
                 ),
             ));
         }
-        let pixels = validate_fits_pixels(pixels, &context.cancel).map_err(|error| match error {
-            PixelValidationError::Cancelled => ImageError::Cancelled {
-                path: path.to_path_buf(),
-            },
-            PixelValidationError::Nulls(summary) => fits_unsupported(
-                path,
-                format!(
-                    "image contains {} null/non-finite pixels in a decode chunk; first at linear index {}",
-                    summary.count,
-                    channel * expected_pixels + row_start * width + summary.first_index
+        let mut pixels = pixels;
+        validate_and_normalize(&mut pixels, plan.sample_divisor, &context.cancel).map_err(
+            |error| match error {
+                PixelValidationError::Cancelled => ImageError::Cancelled {
+                    path: path.to_path_buf(),
+                },
+                PixelValidationError::Nulls(summary) => fits_unsupported(
+                    path,
+                    format!(
+                        "image contains {} null/non-finite pixels in a decode chunk; first at linear index {}",
+                        summary.count,
+                        channel * expected_pixels + row_start * width + summary.first_index
+                    ),
                 ),
-            ),
-        })?;
+            },
+        )?;
         let start = row_start * width;
         output[start..start + expected_chunk].copy_from_slice(&pixels);
     }
@@ -159,35 +168,56 @@ enum PixelValidationError {
     Nulls(NullSummary),
 }
 
-fn validate_fits_pixels(
-    pixels: Vec<f32>,
+/// Reject a chunk's FITS nulls, then divide it into the pipeline's `[0, 1]` domain.
+///
+/// One pass rather than two: this already walks every sample of every plane of every frame, and
+/// the scale is a multiply on a value the validation just loaded. Validation runs first per
+/// element, so `divisor` never turns a rejected null into a finite-looking sample.
+///
+/// A `divisor` of 1 — every floating-point FITS, see [`super::plan`] — skips the scaling entirely
+/// rather than multiplying by one.
+fn validate_and_normalize(
+    pixels: &mut [f32],
+    divisor: f32,
     cancel: &CancelToken,
-) -> Result<Vec<f32>, PixelValidationError> {
+) -> Result<(), PixelValidationError> {
     const VALIDATION_CHUNK_SAMPLES: usize = 64 * 1024;
     if cancel.is_cancelled() {
         return Err(PixelValidationError::Cancelled);
     }
+    let scale = divisor != 1.0;
     let nulls = pixels
-        .par_chunks(VALIDATION_CHUNK_SAMPLES)
+        .par_chunks_mut(VALIDATION_CHUNK_SAMPLES)
         .enumerate()
         .map(|(chunk_index, chunk)| {
             if cancel.is_cancelled() {
                 return Err(PixelValidationError::Cancelled);
             }
             let chunk_start = chunk_index * VALIDATION_CHUNK_SAMPLES;
-            Ok(chunk
-                .iter()
-                .enumerate()
-                .filter_map(|(index, pixel)| {
-                    (!pixel.is_finite()).then_some(NullSummary {
+            let mut nulls: Option<NullSummary> = None;
+            for (index, pixel) in chunk.iter_mut().enumerate() {
+                if !pixel.is_finite() {
+                    let found = NullSummary {
                         count: 1,
                         first_index: chunk_start + index,
-                    })
-                })
-                .reduce(|left, right| NullSummary {
-                    count: left.count + right.count,
-                    first_index: left.first_index.min(right.first_index),
-                }))
+                    };
+                    nulls = Some(match nulls {
+                        None => found,
+                        Some(seen) => NullSummary {
+                            count: seen.count + 1,
+                            first_index: seen.first_index.min(found.first_index),
+                        },
+                    });
+                    continue;
+                }
+                if scale {
+                    // Divide rather than multiply by a reciprocal: the reciprocal of a divisor
+                    // like 65535 is inexact in f32, and the pipeline's contract is precision
+                    // ahead of throughput. The cost hides behind this pass's memory traffic.
+                    *pixel /= divisor;
+                }
+            }
+            Ok(nulls)
         })
         .try_reduce(
             || None,
@@ -205,7 +235,7 @@ fn validate_fits_pixels(
         return Err(PixelValidationError::Nulls(summary));
     }
 
-    Ok(pixels)
+    Ok(())
 }
 
 #[cfg(test)]
@@ -213,7 +243,7 @@ mod tests {
     use common::CancelToken;
 
     use crate::io::image::fits::decode::pixels::{
-        NullSummary, PixelValidationError, validate_fits_pixels,
+        NullSummary, PixelValidationError, validate_and_normalize,
     };
 
     #[test]
@@ -221,26 +251,47 @@ mod tests {
         let cancel = CancelToken::new();
         cancel.cancel();
         assert_eq!(
-            validate_fits_pixels(vec![1.0, 2.0], &cancel).unwrap_err(),
+            validate_and_normalize(&mut [1.0, 2.0], 1.0, &cancel).unwrap_err(),
             PixelValidationError::Cancelled
         );
     }
 
     #[test]
-    fn finite_validation_preserves_every_physical_value() {
-        let pixels = vec![-5.0, 0.0, 0.5, 2.0, 255.0, 65_535.0];
-        assert_eq!(
-            validate_fits_pixels(pixels.clone(), &CancelToken::never()).unwrap(),
-            pixels
-        );
+    fn a_unit_divisor_preserves_every_physical_value() {
+        // The float-FITS path: no declared full scale, so nothing is divided.
+        let mut pixels = [-5.0, 0.0, 0.5, 2.0, 255.0, 65_535.0];
+        let expected = pixels;
+        validate_and_normalize(&mut pixels, 1.0, &CancelToken::never()).unwrap();
+        assert_eq!(pixels, expected);
+    }
+
+    #[test]
+    fn an_integer_divisor_maps_the_declared_span_onto_the_unit_interval() {
+        // BITPIX = 16 with BZERO = 2¹⁵, BSCALE = 1: divisor |1| × (2¹⁶ − 1) = 65535, so the
+        // unsigned span 0..=65535 lands exactly on [0, 1].
+        let mut unsigned = [0.0, 16_384.0, 32_768.0, 65_535.0];
+        validate_and_normalize(&mut unsigned, 65_535.0, &CancelToken::never()).unwrap();
+        // The endpoints are exact; 16384/65535 = 0.2500038147, 32768/65535 = 0.5000076294.
+        assert_eq!(unsigned[0], 0.0);
+        assert!((unsigned[1] - 0.250_003_8).abs() < 1e-7, "{unsigned:?}");
+        assert!((unsigned[2] - 0.500_007_6).abs() < 1e-7, "{unsigned:?}");
+        assert_eq!(unsigned[3], 1.0);
+
+        // The same divisor puts a signed frame on [-0.5, 0.5] around its own zero: the scale is
+        // applied without an offset, so a negative sample stays negative.
+        let mut signed = [-32_768.0, 0.0, 32_767.0];
+        validate_and_normalize(&mut signed, 65_535.0, &CancelToken::never()).unwrap();
+        assert!((signed[0] - -0.500_007_6).abs() < 1e-7, "{signed:?}");
+        assert_eq!(signed[1], 0.0);
+        assert!((signed[2] - 0.499_992_37).abs() < 1e-7, "{signed:?}");
     }
 
     #[test]
     fn non_finite_pixels_return_exact_summary_for_every_sample_type() {
-        let pixels = vec![0.0, f32::NAN, 5.0, f32::INFINITY, f32::NEG_INFINITY];
+        let mut pixels = [0.0, f32::NAN, 5.0, f32::INFINITY, f32::NEG_INFINITY];
 
         assert_eq!(
-            validate_fits_pixels(pixels, &CancelToken::never()).unwrap_err(),
+            validate_and_normalize(&mut pixels, 65_535.0, &CancelToken::never()).unwrap_err(),
             PixelValidationError::Nulls(NullSummary {
                 count: 3,
                 first_index: 1,
