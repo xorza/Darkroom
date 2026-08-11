@@ -14,7 +14,6 @@
 
 mod covariance;
 mod gaussian_fit;
-mod linear_solver;
 mod lm_optimizer;
 mod local_background;
 mod moffat_fit;

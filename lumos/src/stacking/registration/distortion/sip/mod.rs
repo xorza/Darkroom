@@ -30,6 +30,7 @@ use arrayvec::ArrayVec;
 use glam::DVec2;
 
 use crate::error::InvalidConfigField;
+use crate::math::linear_system;
 use crate::math::size2us::Size2us;
 use crate::math::statistics::{MAD_TO_SIGMA, mad_f64_fast, median_f64_fast};
 use crate::stacking::registration::distortion::SINGULAR_THRESHOLD;
@@ -45,9 +46,6 @@ const MAX_TERMS: usize = 18;
 
 /// Maximum size of the A^T*A matrix (flattened).
 const MAX_ATA: usize = MAX_TERMS * MAX_TERMS;
-
-/// Maximum size of the LU augmented matrix: MAX_TERMS * (MAX_TERMS + 1).
-const MAX_AUG: usize = MAX_TERMS * (MAX_TERMS + 1);
 
 /// Configuration for SIP polynomial fitting.
 #[derive(Debug, Clone)]
@@ -489,6 +487,11 @@ fn build_normal_equations(
 
 /// Solve a symmetric positive definite system Ax = b using Cholesky decomposition.
 /// Falls back to LU decomposition if the matrix is not positive definite.
+///
+/// A second factorization rather than a duplicate of one: the normal equations `A^T·A` are
+/// symmetric positive definite by construction, and Cholesky exploits that for roughly half the
+/// arithmetic of elimination and a better-conditioned solve. [`solve_lu`] is what catches the cases
+/// that break the assumption — a non-positive diagonal, or a condition estimate past ~1e10.
 #[allow(clippy::needless_range_loop)]
 fn solve_cholesky(a: &[f64], b: &[f64], n: usize) -> Option<ArrayVec<f64, MAX_TERMS>> {
     let mut l = [0.0; MAX_ATA];
@@ -551,62 +554,18 @@ fn solve_cholesky(a: &[f64], b: &[f64], n: usize) -> Option<ArrayVec<f64, MAX_TE
     Some(ArrayVec::try_from(&x[..n]).unwrap())
 }
 
-/// LU decomposition solver with partial pivoting (fallback for non-positive-definite matrices).
-#[allow(clippy::needless_range_loop)]
+/// Gaussian elimination with partial pivoting — the fallback for normal equations that aren't
+/// positive definite, where [`solve_cholesky`] cannot go.
+///
+/// `a` is row-major `n × n` and both operands are left intact: the caller solves twice against the
+/// same `A^T·A`, once per axis, so the working copies are made here.
 fn solve_lu(a: &[f64], b: &[f64], n: usize) -> Option<ArrayVec<f64, MAX_TERMS>> {
-    // Build augmented matrix [A | b]
-    let mut aug = [0.0; MAX_AUG];
-    for i in 0..n {
-        for j in 0..n {
-            aug[i * (n + 1) + j] = a[i * n + j];
-        }
-        aug[i * (n + 1) + n] = b[i];
-    }
-
-    // Gaussian elimination with partial pivoting
-    for col in 0..n {
-        // Find pivot
-        let mut max_row = col;
-        let mut max_val = aug[col * (n + 1) + col].abs();
-        for row in (col + 1)..n {
-            let val = aug[row * (n + 1) + col].abs();
-            if val > max_val {
-                max_val = val;
-                max_row = row;
-            }
-        }
-
-        if max_val < SINGULAR_THRESHOLD {
-            return None; // Singular matrix
-        }
-
-        // Swap rows if needed
-        if max_row != col {
-            for j in 0..=n {
-                let idx_a = col * (n + 1) + j;
-                let idx_b = max_row * (n + 1) + j;
-                aug.swap(idx_a, idx_b);
-            }
-        }
-
-        // Eliminate below
-        for row in (col + 1)..n {
-            let factor = aug[row * (n + 1) + col] / aug[col * (n + 1) + col];
-            for j in col..=n {
-                aug[row * (n + 1) + j] -= factor * aug[col * (n + 1) + j];
-            }
-        }
-    }
-
-    // Back substitution
+    let mut matrix = [0.0; MAX_ATA];
+    matrix[..n * n].copy_from_slice(&a[..n * n]);
     let mut x = [0.0; MAX_TERMS];
-    for i in (0..n).rev() {
-        x[i] = aug[i * (n + 1) + n];
-        for j in (i + 1)..n {
-            x[i] -= aug[i * (n + 1) + j] * x[j];
-        }
-        x[i] /= aug[i * (n + 1) + i];
-    }
+    x[..n].copy_from_slice(&b[..n]);
+
+    linear_system::solve_in_place(&mut matrix[..n * n], &mut x[..n], SINGULAR_THRESHOLD)?;
 
     Some(ArrayVec::try_from(&x[..n]).unwrap())
 }

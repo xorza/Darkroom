@@ -5,7 +5,14 @@
 
 use std::ops::Range;
 
-use crate::stacking::star_detection::centroid::linear_solver::solve;
+use crate::math::linear_system;
+
+/// Pivot magnitude below which the damped Hessian counts as singular and the step is abandoned.
+///
+/// Three orders tighter than the distortion fits' threshold because the two matrices are not on one
+/// scale: this one is built from pixel fluxes over a stamp, theirs from coordinates normalized to
+/// ~[-1, 1].
+const SINGULAR_PIVOT: f64 = 1e-15;
 
 /// Configuration for Levenberg-Marquardt optimization.
 #[derive(Debug, Clone)]
@@ -247,9 +254,17 @@ pub(super) trait LMModel<const N: usize> {
                 row[i] *= 1.0 + lambda;
             }
 
-            let Some(delta) = solve(&damped_hessian, &equations.gradient) else {
+            // The solve consumes both operands, so the damped copy above is the only one made —
+            // the gradient is copied into `delta`, which the solution then overwrites.
+            let mut delta = equations.gradient;
+            let solved = linear_system::solve_in_place(
+                damped_hessian.as_flattened_mut(),
+                &mut delta,
+                SINGULAR_PIVOT,
+            );
+            if solved.is_none() {
                 break;
-            };
+            }
 
             let mut new_params = params;
             for (p, d) in new_params.iter_mut().zip(delta.iter()) {
