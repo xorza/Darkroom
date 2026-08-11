@@ -63,10 +63,11 @@ pub use math::size2us::Size2us;
 pub use math::vec2us::Vec2us;
 pub use stacking::calibration_masters::cosmic_ray::config::{CosmicRayConfig, NoiseEstimation};
 pub use stacking::calibration_masters::defect_map::DefectMap;
+pub use stacking::calibration_masters::error::CalibrationError;
 
 pub use stacking::calibration_masters::{
-    CalibrationComponent, CalibrationError, CalibrationMasters, CalibrationSet,
-    DEFAULT_SIGMA_THRESHOLD, DefectSummary, MasterRole, stack_cfa_master,
+    CalibrationComponent, CalibrationMasters, CalibrationSet, DEFAULT_SIGMA_THRESHOLD,
+    DefectSummary, MasterRole, stack_cfa_master,
 };
 
 pub use stacking::star_detection::config::Config as StarDetectionConfig;
