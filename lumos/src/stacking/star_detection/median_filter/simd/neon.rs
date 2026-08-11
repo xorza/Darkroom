@@ -85,10 +85,12 @@ unsafe fn median9_neon(
     mut v7: float32x4_t,
     mut v8: float32x4_t,
 ) -> float32x4_t {
-    median9_simd_sort!(vminq_f32, vmaxq_f32; v0, v1, v2, v3, v4, v5, v6, v7, v8);
-    // Only v4 (the median) is needed; the network writes the rest but they go unused.
-    let _ = (v0, v1, v2, v3, v5, v6, v7, v8);
-    v4
+    unsafe {
+        median9_simd_sort!(vminq_f32, vmaxq_f32; v0, v1, v2, v3, v4, v5, v6, v7, v8);
+        // Only v4 (the median) is needed; the network writes the rest but they go unused.
+        let _ = (v0, v1, v2, v3, v5, v6, v7, v8);
+        v4
+    }
 }
 
 #[cfg(test)]

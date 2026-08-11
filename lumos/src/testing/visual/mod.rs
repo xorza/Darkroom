@@ -11,6 +11,7 @@ use image::GrayImage;
 use imaginarium::{ColorFormat, Image, ImageDesc};
 use std::path::Path;
 
+#[cfg(feature = "real-data")]
 use crate::bit_buffer2::BitBuffer2;
 use crate::{
     math::size2us::Size2us, stacking::star_detection::star::Star,

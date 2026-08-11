@@ -8,7 +8,6 @@
 
 #![allow(clippy::needless_range_loop)] // indices drive pointer arithmetic over the pixel window
 
-use crate::math::size2us::Size2us;
 use std::arch::aarch64::*;
 
 use glam::{DVec2, Vec2};
@@ -185,6 +184,7 @@ pub(super) unsafe fn lanczos_kernel_neon<const SIZE: usize>(
 mod tests {
     use imaginarium::Buffer2;
 
+    use crate::math::size2us::Size2us;
     use crate::stacking::registration::resample::kernel;
     use crate::stacking::registration::resample::row;
     use crate::stacking::registration::resample::row::simd::neon;
