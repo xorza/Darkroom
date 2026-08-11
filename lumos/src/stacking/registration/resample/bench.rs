@@ -7,7 +7,7 @@ use ::quickbench::quick_bench;
 
 use crate::stacking::registration::config::{self, InterpolationMethod};
 use crate::stacking::registration::resample::kernel::internals as kernel_test_support;
-use crate::stacking::registration::resample::{kernel, plane, row};
+use crate::stacking::registration::resample::{self, kernel, plane, quality, row};
 use crate::stacking::registration::transform::{Transform, WarpTransform};
 
 /// Create a test image of specified size filled with gradient pattern.
@@ -159,6 +159,58 @@ fn bench_warp_lanczos2_2k(b: quickbench::Bencher) {
             &black_box(WarpTransform::new(transform)),
             &config::internals::warp_params(InterpolationMethod::Lanczos2),
         );
+    });
+}
+
+/// The quality maps against the plane warp beside them, at the same size and method.
+///
+/// `warp` pays this once per frame and the plane warp once per channel, so the ratio between these
+/// two is what decides how much of a registered frame's warp time is spent on the quality planes —
+/// see `bench_warp_with_quality_lanczos3_1k` for the combined figure a mono frame actually pays.
+#[quick_bench(warmup_iters = 2, iters = 10)]
+fn bench_quality_maps_lanczos3_1k(b: quickbench::Bencher) {
+    let transform = create_test_transform();
+
+    b.bench(|| {
+        quality::maps(
+            black_box(Size2us::new(1024, 1024)),
+            &black_box(WarpTransform::new(transform)),
+            InterpolationMethod::Lanczos3,
+        )
+    });
+}
+
+#[quick_bench(warmup_iters = 2, iters = 10)]
+fn bench_quality_maps_bilinear_1k(b: quickbench::Bencher) {
+    let transform = create_test_transform();
+
+    b.bench(|| {
+        quality::maps(
+            black_box(Size2us::new(1024, 1024)),
+            &black_box(WarpTransform::new(transform)),
+            InterpolationMethod::Bilinear,
+        )
+    });
+}
+
+/// One whole frame through the public entry point: the plane warp plus the quality maps, which is
+/// what the pipeline pays per registered frame. Single-channel, so the maps are charged against one
+/// plane warp rather than three.
+#[quick_bench(warmup_iters = 2, iters = 10)]
+fn bench_warp_with_quality_lanczos3_1k(b: quickbench::Bencher) {
+    let size = Size2us::new(1024, 1024);
+    let pixels = create_test_image(size).pixels().to_vec();
+    let image =
+        LinearImage::from_pixels(ImageDimensions::new((size.width, size.height), 1), pixels);
+    let transform = create_test_transform();
+    let params = config::internals::warp_params(InterpolationMethod::Lanczos3);
+
+    b.bench(|| {
+        resample::warp(
+            black_box(&image),
+            &black_box(WarpTransform::new(transform)),
+            &params,
+        )
     });
 }
 
