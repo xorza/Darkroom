@@ -3,6 +3,7 @@ use arrayvec::ArrayVec;
 
 use crate::stacking::frame_store::warp_quality::FramePlane;
 
+use crate::error::FrameDimensionMismatch;
 use crate::io::image::cfa::{CfaImage, CfaType};
 use crate::io::image::linear_pixels::LinearPixels;
 use crate::math::statistics::MedianMad;
@@ -423,7 +424,7 @@ fn stack_nonexistent_file() {
         ProgressCallback::default(),
         CancelToken::never(),
     );
-    assert!(matches!(result.unwrap_err(), Error::ImageLoad { .. }));
+    assert!(matches!(result.unwrap_err(), Error::ImageLoad(_)));
 }
 
 #[test]
@@ -502,7 +503,7 @@ fn stack_images_dimension_errors() {
     );
     assert!(matches!(
         result.unwrap_err(),
-        Error::DimensionMismatch { index: 1, .. }
+        Error::DimensionMismatch(FrameDimensionMismatch { index: 1, .. })
     ));
 
     // Either plane of the pair is named for itself; the wrong-shaped one is the one reported.

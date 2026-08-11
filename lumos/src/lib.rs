@@ -37,7 +37,7 @@ pub(crate) mod stacking;
 #[cfg(test)]
 pub(crate) mod testing;
 
-pub use error::InvalidConfigField;
+pub use error::{FrameDimensionMismatch, InvalidConfigField};
 pub use io::image::PREVIEW_IMAGE_EXTENSIONS;
 pub use io::image::cfa::{CfaImage, CfaType};
 pub use io::image::error::ImageError;

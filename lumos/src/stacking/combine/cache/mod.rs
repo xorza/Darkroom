@@ -12,6 +12,7 @@ use imaginarium::Buffer2;
 use rayon::prelude::*;
 
 use crate::concurrency::JobScratchPool;
+use crate::error::FrameDimensionMismatch;
 use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::image_metadata::ImageMetadata;
 use crate::io::image::linear::LinearImage;
@@ -158,12 +159,8 @@ impl FrameCache {
 
         for (index, frame) in frames.iter().enumerate() {
             check_cancel(&cancel)?;
-            if index > 0 && frame.image.dimensions() != dimensions {
-                return Err(Error::DimensionMismatch {
-                    index,
-                    expected: dimensions,
-                    actual: frame.image.dimensions(),
-                });
+            if index > 0 {
+                FrameDimensionMismatch::check(index, dimensions, frame.image.dimensions())?;
             }
             validate_image_samples(&frame.image, index, &cancel)?;
             // Geometry before contents, as in `from_stored_frames`: `pixels()` is read to the

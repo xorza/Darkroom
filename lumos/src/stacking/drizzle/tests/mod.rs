@@ -2,6 +2,7 @@ mod synthetic;
 use crate::testing::prelude::*;
 use std::f64::consts::{FRAC_PI_4, PI};
 
+use crate::error::FrameDimensionMismatch;
 use crate::io::image::load_context::LoadContext;
 use crate::math::lanczos;
 use crate::stacking::drizzle::accumulator::internals::{

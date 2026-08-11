@@ -6,6 +6,7 @@ use imaginarium::Buffer2;
 use rayon::prelude::*;
 
 use crate::bit_buffer2::BitBuffer2;
+use crate::error::FrameDimensionMismatch;
 use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::linear::LinearImage;
 use crate::math::lanczos;
@@ -172,14 +173,7 @@ impl DrizzleAccumulator {
     /// weights are negative or non-finite. The accumulator is unchanged on error.
     pub fn add_frame(&mut self, frame: DrizzleFrame<LinearImage>) -> Result<(), DrizzleError> {
         let index = self.frames_added;
-        let dimensions = frame.source.dimensions();
-        if dimensions != self.input_dims {
-            return Err(DrizzleError::DimensionMismatch {
-                index,
-                expected: self.input_dims,
-                actual: dimensions,
-            });
-        }
+        FrameDimensionMismatch::check(index, self.input_dims, frame.source.dimensions())?;
         if !frame.weight.is_finite() || frame.weight < 0.0 {
             return Err(DrizzleError::InvalidFrameWeight {
                 index,

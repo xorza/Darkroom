@@ -1,5 +1,7 @@
 //! Pixel extent plus channel count, validated once at construction.
 
+use std::fmt;
+
 use crate::math::size2us::Size2us;
 
 /// Image dimensions: pixel size and number of channels.
@@ -72,6 +74,14 @@ impl ImageDimensions {
 
     pub fn is_rgb(&self) -> bool {
         self.channels == 3
+    }
+}
+
+/// `width×height×channels` — the form error messages quote geometry in, where the derived `Debug`
+/// would spell out two nested structs.
+impl fmt::Display for ImageDimensions {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}x{}x{}", self.width(), self.height(), self.channels)
     }
 }
 
