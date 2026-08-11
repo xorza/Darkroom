@@ -113,7 +113,10 @@ fn source_footprint_boundary_is_inclusive() {
 fn the_interior_fast_path_matches_clipping_bit_for_bit() {
     let size = Size2us::new(20, 16);
     let mut interior_positions = 0;
-    for method in INTERPOLATION_METHODS {
+    // Nearest has no separable window, and the Lanczos family takes its interior sums from
+    // `lanczos_interior_sums` instead — `tabulated_interior_sums_track_the_computed_ones` is that
+    // path's check. What is left here is the two kernels that still sum their own weights.
+    for method in [InterpolationMethod::Bilinear, InterpolationMethod::Bicubic] {
         // Well inside the border band on both axes, stepped off the pixel grid so the sub-pixel
         // phase varies rather than repeating one set of weights.
         let mut x = 6.0;
@@ -121,20 +124,10 @@ fn the_interior_fast_path_matches_clipping_bit_for_bit() {
             let mut y = 5.0;
             while y < 11.0 {
                 let taps = match method {
-                    InterpolationMethod::Nearest => {
-                        y += 0.13;
-                        continue;
-                    }
-                    InterpolationMethod::Bilinear => {
-                        quality::SeparableTaps::bilinear(Vec2::new(x, y))
-                    }
                     InterpolationMethod::Bicubic => {
                         quality::SeparableTaps::bicubic(Vec2::new(x, y))
                     }
-                    _ => quality::SeparableTaps::lanczos(
-                        Vec2::new(x, y),
-                        method.lanczos_param().unwrap(),
-                    ),
+                    _ => quality::SeparableTaps::bilinear(Vec2::new(x, y)),
                 };
                 assert!(
                     taps.is_interior(size),
@@ -172,6 +165,65 @@ fn the_interior_fast_path_matches_clipping_bit_for_bit() {
         interior_positions > 800,
         "only {interior_positions} interior positions were compared"
     );
+}
+
+/// The Lanczos interior path reads its tap-weight sums from a table indexed by the fractional
+/// offset instead of summing `2a` LUT reads per axis. The table has to answer what the summation
+/// would have.
+///
+/// Exactly, at every fraction the LUT itself distinguishes — those are the entries. Between them,
+/// `offset + f` rounds to f32 before scaling, so a fraction within an ulp of an index boundary can
+/// take the neighbouring entry; that is one table step, and the bound below is what the combine's
+/// weight plane inherits. The probes deliberately include those boundaries: a uniform sweep alone
+/// finds no disagreement at all for Lanczos2, and would leave the tolerance untested.
+#[test]
+fn tabulated_interior_sums_track_the_computed_ones() {
+    // Measured worst across all three widths is 6.5e-4 on a per-axis sum.
+    const TABULATED_TOLERANCE: f32 = 1e-3;
+    for a in [2usize, 3, 4] {
+        let table = quality::lanczos_interior_sums(a);
+
+        // On the table's own grid the two must agree bit for bit — anything else means the index
+        // does not name the entry it was built from.
+        for index in (0..=quality::LANCZOS_LUT_RESOLUTION).step_by(37) {
+            let f = index as f32 / quality::LANCZOS_LUT_RESOLUTION as f32;
+            let mut weights = [0.0; quality::MAX_TAPS];
+            quality::lanczos_weights(a, f, &mut weights);
+            let computed = quality::AxisSums::of(&weights[..2 * a]);
+            let tabulated = table[quality::fraction_index(f)];
+            assert_eq!(
+                (tabulated.signed.to_bits(), tabulated.square.to_bits()),
+                (computed.signed.to_bits(), computed.square.to_bits()),
+                "Lanczos{a} at grid fraction {f}"
+            );
+        }
+
+        // Off the grid, within one table step — including fractions an ulp either side of an index
+        // boundary, which is exactly where `offset + f` can round into the neighbouring entry.
+        let mut probes: Vec<f32> = (0..20_000).map(|step| step as f32 / 20_000.0).collect();
+        for index in 0..quality::LANCZOS_LUT_RESOLUTION {
+            let boundary = (index as f32 + 0.5) / quality::LANCZOS_LUT_RESOLUTION as f32;
+            probes.push(boundary);
+            probes.push(f32::from_bits(boundary.to_bits() + 1));
+            probes.push(f32::from_bits(boundary.to_bits() - 1));
+        }
+        for f in probes {
+            let mut weights = [0.0; quality::MAX_TAPS];
+            quality::lanczos_weights(a, f, &mut weights);
+            let computed = quality::AxisSums::of(&weights[..2 * a]);
+            let tabulated = table[quality::fraction_index(f)];
+            for (tabulated, computed) in [
+                (tabulated.signed, computed.signed),
+                (tabulated.square, computed.square),
+            ] {
+                let relative = (tabulated - computed).abs() / computed.abs();
+                assert!(
+                    relative <= TABULATED_TOLERANCE,
+                    "Lanczos{a} at {f}: tabulated {tabulated} against computed {computed}"
+                );
+            }
+        }
+    }
 }
 
 /// The pairing `combine` gates on, checked at the end that produces it: a warped pixel has support

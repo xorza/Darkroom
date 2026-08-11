@@ -15,10 +15,13 @@
 //! at the frame's edge — takes [`SeparableTaps::interior_quality`], which is where nearly all of the
 //! grid is and nearly all of the time goes. The clipping arithmetic runs only in that band.
 
+use std::sync::OnceLock;
+
 use rayon::prelude::*;
 
 use crate::math::size2us::Size2us;
 use crate::stacking::registration::config::InterpolationMethod;
+use crate::stacking::registration::resample::kernel::LANCZOS_LUT_RESOLUTION;
 use crate::stacking::registration::resample::{kernel, row};
 use crate::stacking::registration::transform::WarpTransform;
 use glam::Vec2;
@@ -74,6 +77,101 @@ struct SampleQuality {
 pub(super) struct Maps {
     pub(super) coverage: Buffer2<f32>,
     pub(super) confidence: Buffer2<f32>,
+}
+
+/// Where a Lanczos kernel's taps fall at one position, before any weight has been read.
+///
+/// Separate from [`SeparableTaps`] because the interior path never needs the weights: it takes the
+/// tap-weight sums from [`lanczos_interior_sums`], indexed by the fraction. Deciding interiority
+/// from the window alone is what lets that path skip the `2a` LUT reads per axis entirely.
+#[derive(Debug, Clone, Copy)]
+struct LanczosWindow {
+    pos: Vec2,
+    start_x: i32,
+    start_y: i32,
+    taps: usize,
+    fx: f32,
+    fy: f32,
+}
+
+impl LanczosWindow {
+    fn new(pos: Vec2, a: usize) -> Self {
+        let x0 = pos.x.floor() as i32;
+        let y0 = pos.y.floor() as i32;
+        Self {
+            pos,
+            start_x: x0 - a as i32 + 1,
+            start_y: y0 - a as i32 + 1,
+            taps: 2 * a,
+            fx: pos.x - x0 as f32,
+            fy: pos.y - y0 as f32,
+        }
+    }
+
+    fn is_interior(&self, size: Size2us) -> bool {
+        let taps = self.taps as i32;
+        self.start_x >= 0
+            && self.start_y >= 0
+            && self.start_x + taps <= size.width as i32
+            && self.start_y + taps <= size.height as i32
+    }
+}
+
+/// The `2a` Lanczos tap weights for fractional offset `f`, into the first `2a` slots of `weights`.
+///
+/// `row`'s distance convention, so the two cannot disagree about which coefficient a tap carries:
+/// `(a-1-i) + f` below the centre and `(i+1-a) - f` above it, both non-negative, which is what lets
+/// the lookup skip its sign handling.
+fn lanczos_weights(a: usize, f: f32, weights: &mut [f32; MAX_TAPS]) {
+    let lut = kernel::get_lanczos_lut(a);
+    for (i, weight) in weights.iter_mut().take(2 * a).enumerate() {
+        let distance = if i < a {
+            (a - 1 - i) as f32 + f
+        } else {
+            (i + 1 - a) as f32 - f
+        };
+        *weight = lut.lookup_positive(distance);
+    }
+}
+
+/// The tap-weight sums of an unclipped Lanczos kernel, for every fraction its LUT distinguishes.
+///
+/// An interior pixel's confidence depends on the fractional offset and nothing else, and the tap
+/// weights are *already* a step function of it: each tap reads the LUT at `(offset + f)·RES + 0.5`
+/// truncated, and the integer offset contributes exactly, so the whole window is decided by
+/// `round(f·RES)`. There are therefore only `RES + 1` distinct sums per kernel width, and computing
+/// them per pixel re-derives one of a few thousand values from `2a` table reads.
+///
+/// Reading them back is not quite free of error: `offset + f` is rounded to f32 before scaling, so
+/// a fraction within an ulp of an index boundary can take its weights from the neighbouring entry.
+/// That is bounded by one table step — measured at 6.5e-4 relative on the per-axis sums, and 7.7e-4
+/// on the confidence they form once both axes are off the same way, against the ~2.4e-4 the kernel
+/// weights are already quantized to. `tabulated_interior_sums_track_the_computed_ones` holds it
+/// there. Confidence scales a sample's weight and is never compared against a threshold, so an
+/// error three parts in ten thousand moves no decision.
+fn lanczos_interior_sums(a: usize) -> &'static [AxisSums] {
+    static SUMS: [OnceLock<Vec<AxisSums>>; 3] = [OnceLock::new(), OnceLock::new(), OnceLock::new()];
+    let slot = &SUMS[a - 2];
+    slot.get_or_init(|| {
+        (0..=LANCZOS_LUT_RESOLUTION)
+            .map(|index| {
+                let mut weights = [0.0; MAX_TAPS];
+                lanczos_weights(
+                    a,
+                    index as f32 / LANCZOS_LUT_RESOLUTION as f32,
+                    &mut weights,
+                );
+                AxisSums::of(&weights[..2 * a])
+            })
+            .collect()
+    })
+}
+
+/// The entry of [`lanczos_interior_sums`] a fractional offset selects — the same rounding the tap
+/// lookups apply, so the sums come from the weights the border path would have computed.
+fn fraction_index(f: f32) -> usize {
+    debug_assert!((0.0..=1.0).contains(&f));
+    (f * LANCZOS_LUT_RESOLUTION as f32 + 0.5) as usize
 }
 
 /// What a kernel's confidence falls back to where its window straddles the source border.
@@ -136,34 +234,16 @@ impl SeparableTaps {
     }
 
     /// The `2a`×`2a` Lanczos window, read from the same LUT the row warp samples through.
-    fn lanczos(pos: Vec2, a: usize) -> Self {
-        let x0 = pos.x.floor() as i32;
-        let y0 = pos.y.floor() as i32;
-        let fx = pos.x - x0 as f32;
-        let fy = pos.y - y0 as f32;
-        let count = 2 * a;
+    fn lanczos(window: LanczosWindow, a: usize) -> Self {
         let mut taps = Self::empty(
-            pos,
-            x0 - a as i32 + 1,
-            y0 - a as i32 + 1,
-            count,
+            window.pos,
+            window.start_x,
+            window.start_y,
+            2 * a,
             BorderConfidence::ClampedBilinear,
         );
-        let lut = kernel::get_lanczos_lut(a);
-        // `row`'s distance convention, so the two cannot disagree about which coefficient a tap
-        // carries: `(a-1-i) + frac` below the centre and `(i+1-a) - frac` above it, both
-        // non-negative, which is what lets the lookup skip its sign handling.
-        for i in 0..count {
-            let (dx, dy) = if i < a {
-                let offset = (a - 1 - i) as f32;
-                (offset + fx, offset + fy)
-            } else {
-                let offset = (i + 1 - a) as f32;
-                (offset - fx, offset - fy)
-            };
-            taps.wx[i] = lut.lookup_positive(dx);
-            taps.wy[i] = lut.lookup_positive(dy);
-        }
+        lanczos_weights(a, window.fx, &mut taps.wx);
+        lanczos_weights(a, window.fy, &mut taps.wy);
         taps
     }
 
@@ -298,7 +378,22 @@ fn quality_at(pos: Vec2, size: Size2us, method: InterpolationMethod) -> SampleQu
         InterpolationMethod::Lanczos2
         | InterpolationMethod::Lanczos3
         | InterpolationMethod::Lanczos4 => {
-            SeparableTaps::lanczos(pos, method.lanczos_param().unwrap()).quality(size)
+            let a = method.lanczos_param().unwrap();
+            let window = LanczosWindow::new(pos, a);
+            if window.is_interior(size) {
+                // Every tap has data behind it, so coverage is exactly 1 and the sums are the
+                // whole kernel's — which is a table lookup per axis rather than `2a` LUT reads
+                // and their summation. This is all but a border band of the grid.
+                let sums = lanczos_interior_sums(a);
+                return SampleQuality {
+                    coverage: 1.0,
+                    confidence: separable_confidence(
+                        sums[fraction_index(window.fx)],
+                        sums[fraction_index(window.fy)],
+                    ),
+                };
+            }
+            SeparableTaps::lanczos(window, a).quality(size)
         }
     }
 }
