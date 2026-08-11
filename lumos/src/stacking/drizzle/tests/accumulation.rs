@@ -506,3 +506,89 @@ fn coverage_counts_frames_rather_than_accumulated_weight() {
     assert_eq!(coverage[(0, 0)], 0.5);
     assert_eq!(weight[(0, 0)] / max_weight, 0.25);
 }
+
+/// One output band and many must produce the identical result, bit for bit.
+///
+/// Parallelizing a float accumulation is only sound because each output pixel belongs to exactly one
+/// band and a band walks its inputs in the order the serial loop did, so every pixel's contributions
+/// are summed in the same sequence whatever the band count. Run over transforms whose bands need
+/// *different* input rows — a rotation makes a band's input strip diagonal, so a row estimate that
+/// was even one row too tight would drop flux and show up here as a mismatch.
+#[test]
+fn band_count_does_not_change_the_result() {
+    let image = star_field(Size2us::new(64, 64), 24, 4242).image;
+    let dimensions = image.dimensions();
+
+    let transforms = [
+        ("translation", Transform::translation(DVec2::new(3.7, -2.4))),
+        (
+            "rotation",
+            Transform::euclidean(DVec2::new(5.0, -3.0), 0.05),
+        ),
+        (
+            "similarity",
+            Transform::similarity(DVec2::new(2.0, 1.0), -0.03, 1.02),
+        ),
+        (
+            "homography",
+            Transform::homography([1.0, 0.002, 4.0, -0.001, 1.0, -2.0, 2e-5, 1e-5]),
+        ),
+    ];
+    let kernels = [
+        DrizzleKernel::Square,
+        DrizzleKernel::Turbo,
+        DrizzleKernel::Point,
+        DrizzleKernel::Gaussian,
+        DrizzleKernel::Lanczos,
+    ];
+
+    for (name, transform) in transforms {
+        for kernel in kernels {
+            // Lanczos is only valid at scale 1 / pixfrac 1, which its config validation enforces.
+            let (scale, pixfrac) = match kernel {
+                DrizzleKernel::Lanczos => (1.0, 1.0),
+                _ => (2.0, 0.8),
+            };
+            let drizzle = |band_rows: usize| {
+                let config = DrizzleConfig {
+                    scale,
+                    pixfrac,
+                    kernel,
+                    quality: QualityPlanes::ALL,
+                    ..DrizzleConfig::default()
+                };
+                let mut accumulator = accumulator(dimensions, config);
+                add_image_with_band_rows(&mut accumulator, image.clone(), &transform, band_rows);
+                accumulator.finalize()
+            };
+
+            // One band is the serial walk; 5 rows over a 64- or 128-row output is a dozen or more of
+            // them, so most drops land inside a band and some straddle a boundary.
+            let single = drizzle(dimensions.height() * 2);
+            let many = drizzle(5);
+
+            let case = format!("{name}/{kernel:?}");
+            for channel in 0..dimensions.channels() {
+                assert_eq!(
+                    single.image.channel(channel),
+                    many.image.channel(channel),
+                    "{case}: image channel {channel}"
+                );
+            }
+            assert_eq!(
+                single.coverage.as_ref().map(Coverage::to_plane),
+                many.coverage.as_ref().map(Coverage::to_plane),
+                "{case}: coverage"
+            );
+            for (label, single, many) in [
+                ("weight", &single.weight, &many.weight),
+                ("variance", &single.linear_variance, &many.linear_variance),
+            ] {
+                let plane = |map: &Option<QualityMap>| {
+                    map.as_ref().map(|map| map.channel(0).pixels().to_vec())
+                };
+                assert_eq!(plane(single), plane(many), "{case}: {label}");
+            }
+        }
+    }
+}
