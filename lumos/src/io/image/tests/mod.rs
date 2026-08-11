@@ -1,3 +1,5 @@
+#[cfg(feature = "real-data")]
+mod real_data;
 mod synthetic;
 
 use crate::image_ops::rgb::Rgb;
@@ -5,29 +7,12 @@ use crate::testing::prelude::*;
 use common::internals::test_output_path;
 use imaginarium::{Buffer2, ColorFormat, Image, ImageDesc};
 
-#[cfg(feature = "real-data")]
-use crate::io::image::cfa::CfaImage;
 use crate::io::image::error::ImageError;
 use crate::io::image::image_metadata::{BitPix, ImageMetadata};
 use crate::io::image::image_provenance::{ColorProvenance, ImageProvenance};
 use crate::io::image::load_context::LoadContext;
 use crate::io::image::preview_image::PreviewImage;
-use crate::io::image::standard::{FITS_EXTENSIONS, STANDARD_IMAGE_EXTENSIONS};
-use crate::io::image::*;
-use crate::io::raw;
 use crate::stacking::frame_store::StackableImage;
-#[cfg(feature = "real-data")]
-#[test]
-fn loadable_extensions_match_decoder_policies() {
-    let expected: Vec<&str> = FITS_EXTENSIONS
-        .iter()
-        .chain(raw::RAW_EXTENSIONS)
-        .chain(STANDARD_IMAGE_EXTENSIONS)
-        .copied()
-        .collect();
-
-    assert_eq!(PREVIEW_IMAGE_EXTENSIONS, expected);
-}
 
 #[test]
 fn metadata_default() {
@@ -314,54 +299,6 @@ fn image_rgba_to_linear_drops_alpha() {
     assert!((linear.channel(0)[1] - 0.0).abs() < 1e-6);
     assert!((linear.channel(1)[1] - 1.0).abs() < 1e-6);
     assert!((linear.channel(2)[1] - 0.0).abs() < 1e-6);
-}
-
-#[cfg(feature = "real-data")]
-#[test]
-#[ignore = "real-data integration test; run explicitly with --ignored"]
-fn load_single_raw_from_env() {
-    use crate::testing::{calibration_dir, init_tracing};
-
-    init_tracing();
-
-    let cal_dir = calibration_dir();
-
-    let lights_dir = cal_dir.join("Lights");
-    if !lights_dir.exists() {
-        eprintln!("Lights directory not found, skipping test");
-        return;
-    }
-
-    let files = common::file_utils::files_with_extensions(&lights_dir, raw::RAW_EXTENSIONS)
-        .expect("scan RAW lights directory");
-    let Some(first_file) = files.first() else {
-        eprintln!("No image files in Lights, skipping test");
-        return;
-    };
-
-    println!("Loading file: {:?}", first_file);
-
-    let image = CfaImage::from_file(first_file, &LoadContext::default())
-        .expect("Failed to load CFA image")
-        .demosaic(&CancelToken::never())
-        .expect("Failed to demosaic CFA image");
-
-    println!(
-        "Loaded image: {}x{}x{}",
-        image.width(),
-        image.height(),
-        image.channels()
-    );
-    println!("Mean: {}", image.mean());
-
-    assert!(image.width() > 0);
-    assert!(image.height() > 0);
-    assert_eq!(image.channels(), 3);
-
-    let image: imaginarium::Image = image.into();
-    image
-        .save_file(test_output_path("light_from_raw.tiff"))
-        .unwrap();
 }
 
 #[test]

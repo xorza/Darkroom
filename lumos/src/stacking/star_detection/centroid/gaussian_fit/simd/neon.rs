@@ -19,52 +19,54 @@ const LOG2E: f64 = LOG2_E;
 /// Fast vectorized exp() for 2 f64 lanes using Cephes polynomial approximation.
 #[inline]
 unsafe fn simd_exp_fast(x: float64x2_t) -> float64x2_t {
-    // Clamp to avoid overflow/underflow in IEEE 754
-    let v_min = vdupq_n_f64(-708.0);
-    let v_max = vdupq_n_f64(709.0);
-    let x = vmaxq_f64(vminq_f64(x, v_max), v_min);
+    unsafe {
+        // Clamp to avoid overflow/underflow in IEEE 754
+        let v_min = vdupq_n_f64(-708.0);
+        let v_max = vdupq_n_f64(709.0);
+        let x = vmaxq_f64(vminq_f64(x, v_max), v_min);
 
-    // Range reduction: n = floor(x * log2(e) + 0.5)
-    let v_log2e = vdupq_n_f64(LOG2E);
-    let v_half = vdupq_n_f64(0.5);
-    let n_real = vfmaq_f64(v_half, x, v_log2e);
-    let n_real = vrndmq_f64(n_real); // floor
+        // Range reduction: n = floor(x * log2(e) + 0.5)
+        let v_log2e = vdupq_n_f64(LOG2E);
+        let v_half = vdupq_n_f64(0.5);
+        let n_real = vfmaq_f64(v_half, x, v_log2e);
+        let n_real = vrndmq_f64(n_real); // floor
 
-    // r = x - n * ln(2), using two-part ln(2) for precision
-    let v_ln2_hi = vdupq_n_f64(LN2_HI);
-    let v_ln2_lo = vdupq_n_f64(LN2_LO);
-    let r = vsubq_f64(x, vmulq_f64(n_real, v_ln2_hi));
-    let r = vsubq_f64(r, vmulq_f64(n_real, v_ln2_lo));
+        // r = x - n * ln(2), using two-part ln(2) for precision
+        let v_ln2_hi = vdupq_n_f64(LN2_HI);
+        let v_ln2_lo = vdupq_n_f64(LN2_LO);
+        let r = vsubq_f64(x, vmulq_f64(n_real, v_ln2_hi));
+        let r = vsubq_f64(r, vmulq_f64(n_real, v_ln2_lo));
 
-    // Polynomial evaluation: P(r²) and Q(r²)
-    let r2 = vmulq_f64(r, r);
+        // Polynomial evaluation: P(r²) and Q(r²)
+        let r2 = vmulq_f64(r, r);
 
-    // P(r) = r * ((P0 * r² + P1) * r² + P2)
-    let px = vfmaq_f64(vdupq_n_f64(EXP_P1), vdupq_n_f64(EXP_P0), r2);
-    let px = vfmaq_f64(vdupq_n_f64(EXP_P2), px, r2);
-    let px = vmulq_f64(px, r);
+        // P(r) = r * ((P0 * r² + P1) * r² + P2)
+        let px = vfmaq_f64(vdupq_n_f64(EXP_P1), vdupq_n_f64(EXP_P0), r2);
+        let px = vfmaq_f64(vdupq_n_f64(EXP_P2), px, r2);
+        let px = vmulq_f64(px, r);
 
-    // Q(r) = ((Q0 * r² + Q1) * r² + Q2) * r² + Q3
-    let qx = vfmaq_f64(vdupq_n_f64(EXP_Q1), vdupq_n_f64(EXP_Q0), r2);
-    let qx = vfmaq_f64(vdupq_n_f64(EXP_Q2), qx, r2);
-    let qx = vfmaq_f64(vdupq_n_f64(EXP_Q3), qx, r2);
+        // Q(r) = ((Q0 * r² + Q1) * r² + Q2) * r² + Q3
+        let qx = vfmaq_f64(vdupq_n_f64(EXP_Q1), vdupq_n_f64(EXP_Q0), r2);
+        let qx = vfmaq_f64(vdupq_n_f64(EXP_Q2), qx, r2);
+        let qx = vfmaq_f64(vdupq_n_f64(EXP_Q3), qx, r2);
 
-    // exp(r) = 1 + 2*px / (qx - px)
-    let v_one = vdupq_n_f64(1.0);
-    let v_two = vdupq_n_f64(2.0);
-    let denom = vsubq_f64(qx, px);
-    let frac = vdivq_f64(px, denom);
-    let exp_r = vfmaq_f64(v_one, v_two, frac);
+        // exp(r) = 1 + 2*px / (qx - px)
+        let v_one = vdupq_n_f64(1.0);
+        let v_two = vdupq_n_f64(2.0);
+        let denom = vsubq_f64(qx, px);
+        let frac = vdivq_f64(px, denom);
+        let exp_r = vfmaq_f64(v_one, v_two, frac);
 
-    // Reconstruct: exp(x) = 2^n * exp(r)
-    // Convert n to i64, add IEEE 754 exponent bias (1023), shift left by 52
-    let n_i64 = vcvtq_s64_f64(n_real);
-    let bias = vdupq_n_s64(1023);
-    let n_biased = vaddq_s64(n_i64, bias);
-    let pow2n = vshlq_n_s64::<52>(n_biased);
-    let pow2n: float64x2_t = vreinterpretq_f64_s64(pow2n);
+        // Reconstruct: exp(x) = 2^n * exp(r)
+        // Convert n to i64, add IEEE 754 exponent bias (1023), shift left by 52
+        let n_i64 = vcvtq_s64_f64(n_real);
+        let bias = vdupq_n_s64(1023);
+        let n_biased = vaddq_s64(n_i64, bias);
+        let pow2n = vshlq_n_s64::<52>(n_biased);
+        let pow2n: float64x2_t = vreinterpretq_f64_s64(pow2n);
 
-    vmulq_f64(exp_r, pow2n)
+        vmulq_f64(exp_r, pow2n)
+    }
 }
 
 /// Batch build normal equations (J^T J, J^T r, chi²) using NEON.

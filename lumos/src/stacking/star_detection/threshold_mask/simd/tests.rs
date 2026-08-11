@@ -2,6 +2,7 @@
 
 #[cfg(target_arch = "x86_64")]
 use crate::stacking::star_detection::threshold_mask::simd::avx2::process_words_avx2;
+#[cfg(target_arch = "x86_64")]
 use crate::stacking::star_detection::threshold_mask::simd::process_words_scalar;
 
 /// The AVX2 packed kernel must produce bit-identical words to the scalar reference, including the

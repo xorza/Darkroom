@@ -43,5 +43,7 @@ pub(super) unsafe fn hsum(v: __m256d) -> f64 {
 #[cfg(target_arch = "aarch64")]
 #[inline]
 pub(super) unsafe fn hsum(v: float64x2_t) -> f64 {
-    vaddvq_f64(v)
+    // SAFETY: as the x86 counterpart above — the intrinsic needs the ISA this function's caller
+    // established, and nothing else.
+    unsafe { vaddvq_f64(v) }
 }

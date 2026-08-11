@@ -11,31 +11,33 @@ use std::arch::aarch64::*;
 /// SIMD `int_pow`: compute u^n for each lane using repeated squaring.
 #[inline]
 unsafe fn simd_int_pow(u: float64x2_t, n: u32) -> float64x2_t {
-    match n {
-        0 => vdupq_n_f64(1.0),
-        1 => u,
-        2 => vmulq_f64(u, u),
-        3 => vmulq_f64(vmulq_f64(u, u), u),
-        4 => {
-            let u2 = vmulq_f64(u, u);
-            vmulq_f64(u2, u2)
-        }
-        5 => {
-            let u2 = vmulq_f64(u, u);
-            vmulq_f64(vmulq_f64(u2, u2), u)
-        }
-        _ => {
-            let mut result = vdupq_n_f64(1.0);
-            let mut base = u;
-            let mut exp = n;
-            while exp > 0 {
-                if exp & 1 == 1 {
-                    result = vmulq_f64(result, base);
-                }
-                base = vmulq_f64(base, base);
-                exp >>= 1;
+    unsafe {
+        match n {
+            0 => vdupq_n_f64(1.0),
+            1 => u,
+            2 => vmulq_f64(u, u),
+            3 => vmulq_f64(vmulq_f64(u, u), u),
+            4 => {
+                let u2 = vmulq_f64(u, u);
+                vmulq_f64(u2, u2)
             }
-            result
+            5 => {
+                let u2 = vmulq_f64(u, u);
+                vmulq_f64(vmulq_f64(u2, u2), u)
+            }
+            _ => {
+                let mut result = vdupq_n_f64(1.0);
+                let mut base = u;
+                let mut exp = n;
+                while exp > 0 {
+                    if exp & 1 == 1 {
+                        result = vmulq_f64(result, base);
+                    }
+                    base = vmulq_f64(base, base);
+                    exp >>= 1;
+                }
+                result
+            }
         }
     }
 }
@@ -43,24 +45,26 @@ unsafe fn simd_int_pow(u: float64x2_t, n: u32) -> float64x2_t {
 /// SIMD `fast_pow_neg`: compute u^(-beta) for 2 lanes at once.
 #[inline]
 unsafe fn simd_fast_pow_neg(u: float64x2_t, strategy: PowStrategy) -> float64x2_t {
-    match strategy {
-        PowStrategy::HalfInt { int_part } => {
-            // u^(-(n+0.5)) = 1 / (u^n * sqrt(u))
-            let u_n = simd_int_pow(u, int_part);
-            let sqrt_u = vsqrtq_f64(u);
-            let denom = vmulq_f64(u_n, sqrt_u);
-            vdivq_f64(vdupq_n_f64(1.0), denom)
-        }
-        PowStrategy::Int { n } => vdivq_f64(vdupq_n_f64(1.0), simd_int_pow(u, n)),
-        PowStrategy::General { neg_beta } => {
-            let u0 = vgetq_lane_f64::<0>(u);
-            let u1 = vgetq_lane_f64::<1>(u);
-            let r0 = u0.powf(neg_beta);
-            let r1 = u1.powf(neg_beta);
-            let mut result = vdupq_n_f64(0.0);
-            result = vsetq_lane_f64::<0>(r0, result);
-            result = vsetq_lane_f64::<1>(r1, result);
-            result
+    unsafe {
+        match strategy {
+            PowStrategy::HalfInt { int_part } => {
+                // u^(-(n+0.5)) = 1 / (u^n * sqrt(u))
+                let u_n = simd_int_pow(u, int_part);
+                let sqrt_u = vsqrtq_f64(u);
+                let denom = vmulq_f64(u_n, sqrt_u);
+                vdivq_f64(vdupq_n_f64(1.0), denom)
+            }
+            PowStrategy::Int { n } => vdivq_f64(vdupq_n_f64(1.0), simd_int_pow(u, n)),
+            PowStrategy::General { neg_beta } => {
+                let u0 = vgetq_lane_f64::<0>(u);
+                let u1 = vgetq_lane_f64::<1>(u);
+                let r0 = u0.powf(neg_beta);
+                let r1 = u1.powf(neg_beta);
+                let mut result = vdupq_n_f64(0.0);
+                result = vsetq_lane_f64::<0>(r0, result);
+                result = vsetq_lane_f64::<1>(r1, result);
+                result
+            }
         }
     }
 }
