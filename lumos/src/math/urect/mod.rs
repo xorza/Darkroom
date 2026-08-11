@@ -1,7 +1,6 @@
-//! Half-open axis-aligned rectangles.
+//! Half-open axis-aligned pixel rectangles.
 
 use crate::math::vec2us::Vec2us;
-use glam::Vec2;
 
 // `usize::min`/`max` are not const-stable on the pinned toolchain.
 const fn min_usize(a: usize, b: usize) -> usize {
@@ -10,40 +9,6 @@ const fn min_usize(a: usize, b: usize) -> usize {
 
 const fn max_usize(a: usize, b: usize) -> usize {
     if a > b { a } else { b }
-}
-
-/// Continuous rectangle with minimum-inclusive, maximum-exclusive bounds.
-#[derive(Debug, Clone, Copy, Default, PartialEq)]
-pub(crate) struct Rect {
-    min: Vec2,
-    max: Vec2,
-}
-
-impl Rect {
-    #[inline]
-    pub(crate) const fn new(min: Vec2, max: Vec2) -> Self {
-        assert!(min.x <= max.x && min.y <= max.y, "invalid rectangle bounds");
-        Self { min, max }
-    }
-
-    #[inline]
-    pub(crate) const fn from_center_half_extent(center: Vec2, half_extent: f32) -> Self {
-        assert!(
-            half_extent >= 0.0,
-            "rectangle half extent must be non-negative"
-        );
-        Self::new(
-            Vec2::new(center.x - half_extent, center.y - half_extent),
-            Vec2::new(center.x + half_extent, center.y + half_extent),
-        )
-    }
-
-    #[inline]
-    pub(crate) const fn overlap_area(self, other: Self) -> f32 {
-        let width = self.max.x.min(other.max.x) - self.min.x.max(other.min.x);
-        let height = self.max.y.min(other.max.y) - self.min.y.max(other.min.y);
-        width.max(0.0) * height.max(0.0)
-    }
 }
 
 /// Unsigned pixel rectangle with minimum-inclusive, maximum-exclusive bounds.

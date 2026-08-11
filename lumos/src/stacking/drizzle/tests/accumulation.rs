@@ -592,3 +592,29 @@ fn band_count_does_not_change_the_result() {
         }
     }
 }
+
+/// A band straddling the transform's vanishing line scans the whole frame.
+///
+/// `input_rows` bounds the input by inverse-mapping the band's four corners, which encloses the
+/// interior only while the homogeneous divisor keeps one sign across the band. Where it changes sign
+/// the mapped region is unbounded and four corners bound nothing, so the estimate has to widen to
+/// the frame — a tight answer there drops flux with no diagnostic.
+#[test]
+fn input_row_estimate_widens_to_the_frame_across_the_vanishing_line() {
+    let image = constant_mono_image(Size2us::new(16, 12), 1.0);
+
+    // Inverse divisor `1 − 0.01·x`, which is zero at output column 100 and so takes both signs over
+    // a 200-wide grid.
+    let straddling = Transform::homography([1.0, 0.0, 0.0, 0.0, 1.0, 0.0, -0.01, 0.0]).inverse();
+    assert_eq!(input_rows(&image, straddling, 0..4, 200, 0.5), 0..12);
+
+    // A grid narrow enough to stay on one side of it keeps the corner bound. It is not the linear
+    // answer: the divisor is 0.51 at column 49, so the far corner of output rows [-0.5, 3.5] maps
+    // back to input row 3.5/0.51 = 6.86, and the estimate runs to 8 rather than 4.
+    assert_eq!(input_rows(&image, straddling, 0..4, 50, 0.5), 0..8);
+
+    // And the linear case, whose divisor is a constant 1: output rows [-0.5, 3.5] shifted down by
+    // two are input rows [-2.5, 1.5], so rows 0, 1 and 2.
+    let shifted = Transform::translation(DVec2::new(0.0, 2.0));
+    assert_eq!(input_rows(&image, shifted, 0..4, 200, 0.5), 0..3);
+}

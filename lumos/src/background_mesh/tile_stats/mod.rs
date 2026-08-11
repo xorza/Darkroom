@@ -2,8 +2,8 @@
 //! statistics, and the crowding-aware Pearson-mode sky estimator for a single tile box.
 
 use crate::bit_buffer2::BitBuffer2;
-use crate::math::rect::URect;
 use crate::math::statistics::ClippedStats;
+use crate::math::urect::URect;
 use imaginarium::Buffer2;
 
 /// Maximum samples per tile for statistics computation.
