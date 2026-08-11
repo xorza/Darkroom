@@ -14,7 +14,6 @@ use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::image_metadata::ImageMetadata;
 use crate::io::image::linear::LinearImage;
 use crate::io::image::linear_pixels::LinearPixels;
-use crate::stacking::combine::MIN_CONTRIBUTING_COVERAGE;
 use crate::stacking::combine::cache::core::{
     CacheCore, ChunkContext, coverage_chunk_memory_layout, quality_plane_chunks,
     weighted_chunk_memory_layout,
@@ -29,6 +28,7 @@ use crate::stacking::combine::config::Normalization;
 use crate::stacking::combine::error::Error;
 use crate::stacking::combine::error::check_cancel;
 use crate::stacking::combine::normalization::{FrameNorm, compute_frame_norms};
+use crate::stacking::combine::pixel_coverage::PixelCoverage;
 use crate::stacking::combine::rejection::scratch_buffers::ScratchBuffers;
 use crate::stacking::combine::stack::StackFrame;
 use crate::stacking::frame_store::StoredFrame;
@@ -279,10 +279,15 @@ impl FrameCache {
                     let row_base = row_in_chunk * width;
                     for (px, output) in cov_row.iter_mut().enumerate() {
                         let local = row_base + px;
+                        // The combine's own gate, so the fraction reported here is exactly the
+                        // fraction of frames whose sample entered the statistics.
                         let count = cov_chunks
                             .iter()
                             .filter(|cov| {
-                                cov.map_or(1.0, |map| map[local]) > MIN_CONTRIBUTING_COVERAGE
+                                cov.map_or(PixelCoverage::FULL, |map| {
+                                    PixelCoverage::new(map[local])
+                                })
+                                .contributes()
                             })
                             .count();
                         *output = count as f32 * inv_frames;
@@ -304,10 +309,11 @@ impl FrameCache {
     /// The combine: for each output pixel, gather the frames that cover it, hand them to
     /// `combine`, and write the reduced value plus whichever [`QualityPlanes`] were requested.
     ///
-    /// Coverage gates a frame's inclusion while confidence scales its statistical weight
-    /// independently; a frame carrying neither plane contributes everywhere at unit confidence,
-    /// which is what lets calibration masters and registered light stacks share this loop. A
-    /// pixel no frame supports gets `0`.
+    /// [`PixelCoverage`] alone decides whether a frame is gathered at a pixel; its confidence then
+    /// scales the weight the sample carries into the reduction, and is guaranteed positive wherever
+    /// the frame was gathered. A frame carrying neither plane contributes everywhere at unit
+    /// confidence, which is what lets calibration masters and registered light stacks share this
+    /// loop. A pixel no frame supports gets `0`.
     pub(crate) fn process_chunked<Combine>(
         &self,
         weights: Option<&[f32]>,
@@ -416,15 +422,15 @@ impl FrameCache {
                             let pixel_idx = row_offset + pixel_in_row;
                             let mut covered = 0usize;
                             for (frame_idx, chunk) in frames.iter().enumerate() {
-                                let c = match coverage[frame_idx] {
-                                    Some(map) => map[pixel_idx],
-                                    None => 1.0,
+                                let support = match coverage[frame_idx] {
+                                    Some(map) => PixelCoverage::new(map[pixel_idx]),
+                                    None => PixelCoverage::FULL,
                                 };
                                 let q = match confidence[frame_idx] {
                                     Some(map) => map[pixel_idx],
                                     None => 1.0,
                                 };
-                                if c > MIN_CONTRIBUTING_COVERAGE && q > 0.0 {
+                                if support.contributes() {
                                     let v = match frame_norms {
                                         Some(fnm) => {
                                             let cn = fnm[frame_idx].channels[channel];

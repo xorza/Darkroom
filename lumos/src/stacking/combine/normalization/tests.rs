@@ -76,6 +76,38 @@ fn paired_gain_recovers_scale_after_residual_clipping() {
     assert_eq!(gain, 2.0);
 }
 
+/// The common domain is the coverage floor's intersection, not "coverage at all". A pixel a frame
+/// barely touched is warp border fill, and measuring the photometric scale on it would compare fill
+/// against data — even though the interpolation there was perfectly confident, which is why the
+/// separate `confidence > 0` intersection this replaced could never have excluded it.
+#[test]
+fn common_domain_excludes_pixels_covered_only_by_border_fill() {
+    let dimensions = ImageDimensions::new((4, 1), 1);
+    let coverage = Buffer2::new(4, 1, vec![1.0, 0.5, 1e-4, 0.0]);
+    let confidence = Buffer2::new(4, 1, vec![1.0, 2.0, 4.0, 0.0]);
+    let image = LinearImage::from_pixels(dimensions, vec![0.5; 4]);
+    let frames = vec![StoredFrame::from_memory(
+        image,
+        WarpQuality::Planes {
+            coverage,
+            confidence,
+        },
+        frame_stats(0.5, 0.1),
+    )];
+
+    let domain = CommonDomain::build(&frames, dimensions.pixel_count(), &CancelToken::never())
+        .expect("two pixels clear the floor");
+    // Full support and half support are data; 1e-4 is under the 1e-3 floor, and 0.0 is the border.
+    assert!(domain.valid.get(0));
+    assert!(domain.valid.get(1));
+    assert!(
+        !domain.valid.get(2),
+        "border fill entered the common domain"
+    );
+    assert!(!domain.valid.get(3));
+    assert_eq!(domain.sample_count, 2);
+}
+
 #[test]
 fn registered_rgb_measurements_preserve_pair_order_and_honor_cancellation() {
     let dimensions = ImageDimensions::new((5, 1), 3);

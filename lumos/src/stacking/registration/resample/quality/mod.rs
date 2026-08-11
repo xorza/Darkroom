@@ -1,4 +1,15 @@
 //! Geometric support and interpolation-confidence maps.
+//!
+//! The two maps are emitted together and agree pixel for pixel: `coverage == 0` exactly where
+//! `confidence == 0`. Outside the source footprint both are zero. Inside it, coverage vanishes only
+//! where some axis has no in-bounds tap magnitude, which zeroes that axis's signed sum and with it
+//! the confidence numerator — and no partial-support subset of these kernels cancels that sum on its
+//! own, since each one keeps a centre tap outweighing its negative lobes.
+//!
+//! `combine` depends on that rather than re-deriving it: it gates a sample on coverage alone and
+//! multiplies the weight by confidence, so a covered pixel at zero confidence would enter the
+//! statistics weightless. See `PixelCoverage`, and `validate_warp_quality`, which holds
+//! caller-supplied planes to the same pairing.
 
 use rayon::prelude::*;
 
@@ -132,6 +143,10 @@ fn quality_at(pos: Vec2, size: Size2us, method: InterpolationMethod) -> SampleQu
                 && start_y >= 0
                 && start_x + taps as i32 <= size.width as i32
                 && start_y + taps as i32 <= size.height as i32;
+            // Defensive, for the pairing the module doc describes: the fallback below reads a
+            // clamped position that is always in bounds, so were every in-bounds tap to land on a
+            // kernel zero it would report a confident sample at zero coverage. Inside the footprint
+            // some tap normally carries weight, so this arm does not otherwise fire.
             let confidence = if coverage == 0.0 {
                 0.0
             } else if fully_supported {

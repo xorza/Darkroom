@@ -1,3 +1,4 @@
+use crate::stacking::combine::pixel_coverage::PixelCoverage;
 use crate::stacking::registration::config::InterpolationMethod;
 use crate::stacking::registration::resample::kernel;
 use crate::stacking::registration::resample::quality;
@@ -101,6 +102,65 @@ fn source_footprint_boundary_is_inclusive() {
             assert_eq!(quality.coverage, 0.0, "{method:?} at {position:?}");
             assert_eq!(quality.confidence, 0.0, "{method:?} at {position:?}");
         }
+    }
+}
+
+/// The pairing `combine` gates on, checked at the end that produces it: a warped pixel has support
+/// and interpolation confidence together or neither, for every method, everywhere a kernel can
+/// straddle a border. `PixelCoverage::contributes` is the consumer's rule, so the survivors it
+/// admits are also the ones whose confidence has to be usable as an inverse-variance weight and as
+/// `source_noise_variance`'s divisor — hence the floor asserted on them.
+#[test]
+fn support_and_confidence_vanish_together_across_every_border() {
+    let dims = Size2us::new(24, 18);
+    // Stepping by an awkward fraction sweeps sub-pixel phase instead of landing on pixel centres,
+    // and the span reaches a full kernel radius past both borders on each axis.
+    const STEP: f32 = 0.157;
+    for method in INTERPOLATION_METHODS {
+        let radius = method.kernel_radius() as f32 + 1.0;
+        let mut lowest_survivor = f32::INFINITY;
+        let mut partial_support_seen = false;
+        let mut uncovered_seen = false;
+        let mut x = -radius;
+        while x <= dims.width as f32 + radius {
+            let mut y = -radius;
+            while y <= dims.height as f32 + radius {
+                let quality = quality::quality_at(Vec2::new(x, y), dims, method);
+                assert_eq!(
+                    quality.coverage > 0.0,
+                    quality.confidence > 0.0,
+                    "{method:?} at ({x}, {y}): coverage {} against confidence {}",
+                    quality.coverage,
+                    quality.confidence
+                );
+                uncovered_seen |= quality.coverage == 0.0;
+                if PixelCoverage::new(quality.coverage).contributes() {
+                    lowest_survivor = lowest_survivor.min(quality.confidence);
+                    partial_support_seen |= quality.coverage < 1.0;
+                }
+                y += STEP;
+            }
+            x += STEP;
+        }
+        // The pairing holds trivially away from a border, so prove the sweep crossed one.
+        assert!(
+            uncovered_seen && lowest_survivor.is_finite(),
+            "{method:?}: the sweep stayed on one side of the border"
+        );
+        // Nearest is binary by construction — a single tap, in or out — while every other kernel has
+        // taps straddling the border and so a band of partial support between the two.
+        assert_eq!(
+            partial_support_seen,
+            method != InterpolationMethod::Nearest,
+            "{method:?}: partially supported pixels seen = {partial_support_seen}"
+        );
+        // Measured worst case is 0.365 (Lanczos4 at a corner), and 1.0 for Nearest. A kernel change
+        // that drops below this makes a survivor's weight, and the reciprocal normalization takes of
+        // it, larger than anything seen so far.
+        assert!(
+            lowest_survivor >= 0.36,
+            "{method:?}: a contributing pixel had confidence {lowest_survivor}, under the 0.36 floor"
+        );
     }
 }
 

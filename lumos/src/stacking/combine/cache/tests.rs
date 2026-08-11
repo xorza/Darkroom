@@ -6,6 +6,7 @@ use crate::stacking::combine::cache::core::{
 use crate::stacking::combine::cache::sample::CombinedSample;
 use crate::stacking::combine::cache::*;
 use crate::stacking::combine::config::Normalization;
+use crate::stacking::combine::pixel_coverage::PixelCoverage;
 use crate::stacking::combine::rejection::Rejection;
 use crate::stacking::combine::rejection::scratch_buffers::ScratchBuffers;
 use crate::stacking::frame_store::StoredFrame;
@@ -330,17 +331,25 @@ fn finish_product_uniform_manual_weights() {
 
 #[test]
 fn finish_product_partial_coverage() {
-    // width-2 frames; px1 has support from f0, f1, and f3, while f2 is unsupported.
+    // width-3 frames. px1 has support from f0, f1, and f3, while f2 is unsupported. px2 excludes
+    // f1 the other way: coverage exactly at the floor, which is border fill rather than data — the
+    // two exclusions have to produce the same counts, since one rule decides both.
     // Coverage gates inclusion but does not scale statistical weight.
     //   px0: count 4, Σw = 4, Σw² = 4 → coverage 1.0,  weight 4.0, variance 0.25
     //   px1: count 3, Σw = 3, Σw² = 3 → coverage 0.75, weight 3.0, variance 1/3
-    let dims = ImageDimensions::new((2, 1), 1);
-    let cov = [[1.0_f32, 1.0], [1.0, 0.5], [1.0, 0.0], [1.0, 1.0]];
+    //   px2: count 3, as px1
+    let dims = ImageDimensions::new((3, 1), 1);
+    let cov = [
+        [1.0_f32, 1.0, 1.0],
+        [1.0, 0.5, PixelCoverage::MIN_CONTRIBUTING],
+        [1.0, 0.0, 1.0],
+        [1.0, 1.0, 1.0],
+    ];
     let frames: Vec<StackFrame> = cov
         .iter()
         .map(|c| {
-            let mut frame = StackFrame::from(LinearImage::from_pixels(dims, vec![0.5, 0.5]));
-            frame.quality = WarpQuality::from_coverage(Buffer2::new(2, 1, c.to_vec()));
+            let mut frame = StackFrame::from(LinearImage::from_pixels(dims, vec![0.5; 3]));
+            frame.quality = WarpQuality::from_coverage(Buffer2::new(3, 1, c.to_vec()));
             frame
         })
         .collect();
@@ -359,13 +368,19 @@ fn finish_product_partial_coverage() {
     assert_eq!(product.weight.as_ref().unwrap().channel(0)[0], 4.0);
     assert_eq!(linear_variance.channel(0)[0], 0.25);
 
-    assert_eq!(product.coverage.as_ref().unwrap()[1], 0.75);
-    assert_eq!(product.weight.as_ref().unwrap().channel(0)[1], 3.0);
-    assert!(
-        (linear_variance.channel(0)[1] - 1.0 / 3.0).abs() < 1e-6,
-        "variance = {}",
-        linear_variance.channel(0)[1]
-    );
+    for pixel in [1, 2] {
+        assert_eq!(product.coverage.as_ref().unwrap()[pixel], 0.75, "px{pixel}");
+        assert_eq!(
+            product.weight.as_ref().unwrap().channel(0)[pixel],
+            3.0,
+            "px{pixel}"
+        );
+        assert!(
+            (linear_variance.channel(0)[pixel] - 1.0 / 3.0).abs() < 1e-6,
+            "px{pixel} variance = {}",
+            linear_variance.channel(0)[pixel]
+        );
+    }
 }
 
 /// Build an in-memory [`FrameCache`] from single-channel CFA frame pixels: a calibration cache,
