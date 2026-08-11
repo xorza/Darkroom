@@ -25,11 +25,11 @@ fn drizzle_config_builder() {
     let config = DrizzleConfig::default()
         .with_pixfrac(0.5)
         .with_kernel(DrizzleKernel::Gaussian)
-        .with_min_coverage(0.2);
+        .with_min_weight_fraction(0.2);
 
     assert_eq!(config.pixfrac, 0.5);
     assert_eq!(config.kernel, DrizzleKernel::Gaussian);
-    assert_eq!(config.min_coverage, 0.2);
+    assert_eq!(config.min_weight_fraction, 0.2);
     assert_eq!(config.validate(), Ok(()));
 }
 
@@ -55,8 +55,8 @@ fn drizzle_config_invalid_parameters_return_exact_errors() {
             f64::INFINITY,
         ),
         (
-            DrizzleConfig::default().with_min_coverage(-0.1),
-            "min_coverage",
+            DrizzleConfig::default().with_min_weight_fraction(-0.1),
+            "min_weight_fraction",
             // -0.1 has no exact f64 twin: compare against the f32 the field actually holds.
             f64::from(-0.1f32),
         ),

@@ -45,9 +45,13 @@ pub struct DrizzleConfig {
     pub kernel: DrizzleKernel,
     /// Fill value for pixels with no coverage.
     pub fill_value: f32,
-    /// Minimum coverage threshold (0.0-1.0).
-    /// Pixels with coverage below this are set to fill_value.
-    pub min_coverage: f32,
+    /// Fill gate, as a share of the deepest pixel's accumulated weight (0.0-1.0). A pixel holding
+    /// less than this fraction of `max(Σwᵢ)` is set to `fill_value`.
+    ///
+    /// Not a threshold on [`StackProduct::coverage`](crate::StackProduct::coverage), which reports
+    /// the share of *frames* that reached a pixel. This gate asks how much signal landed there,
+    /// which dithering geometry varies independently of how many frames contributed.
+    pub min_weight_fraction: f32,
     /// Which ancillary planes the drizzle should produce, as [`StackConfig::quality`] asks of a
     /// statistical combine.
     ///
@@ -67,7 +71,7 @@ impl Default for DrizzleConfig {
             pixfrac: 0.8,
             kernel: DrizzleKernel::Turbo,
             fill_value: 0.0,
-            min_coverage: 0.1,
+            min_weight_fraction: 0.1,
             quality: QualityPlanes::ALL,
         }
     }
@@ -109,8 +113,8 @@ impl DrizzleConfig {
     }
 
     /// Set minimum coverage threshold.
-    pub fn with_min_coverage(mut self, min_coverage: f32) -> Self {
-        self.min_coverage = min_coverage;
+    pub fn with_min_weight_fraction(mut self, min_weight_fraction: f32) -> Self {
+        self.min_weight_fraction = min_weight_fraction;
         self
     }
 
@@ -124,9 +128,9 @@ impl DrizzleConfig {
         })?;
         InvalidConfigField::finite_only("fill_value", self.fill_value)?;
         InvalidConfigField::finite(
-            "min_coverage",
+            "min_weight_fraction",
             "finite and in [0, 1]",
-            self.min_coverage,
+            self.min_weight_fraction,
             |value| (0.0..=1.0).contains(&value),
         )?;
         if self.kernel == DrizzleKernel::Lanczos && (self.scale != 1.0 || self.pixfrac != 1.0) {

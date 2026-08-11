@@ -16,7 +16,7 @@ fn square_kernel_identity_uniform() {
         pixfrac: 1.0,
         kernel: DrizzleKernel::Square,
         fill_value: 0.0,
-        min_coverage: 0.0,
+        min_weight_fraction: 0.0,
         ..Default::default()
     };
     let mut acc = accumulator(ImageDimensions::new((5, 5), 1), config);
@@ -55,7 +55,7 @@ fn square_kernel_rotation() {
         pixfrac: 1.0,
         kernel: DrizzleKernel::Square,
         fill_value: 0.0,
-        min_coverage: 0.0,
+        min_weight_fraction: 0.0,
         ..Default::default()
     };
     let mut acc = accumulator(ImageDimensions::new((20, 20), 1), config);
@@ -106,7 +106,7 @@ fn square_kernel_pixfrac() {
         pixfrac: 1.0,
         kernel: DrizzleKernel::Square,
         fill_value: 0.0,
-        min_coverage: 0.0,
+        min_weight_fraction: 0.0,
         ..Default::default()
     };
     let mut acc1 = accumulator(ImageDimensions::new((6, 6), 1), config1);
@@ -123,7 +123,7 @@ fn square_kernel_pixfrac() {
         pixfrac: 0.5,
         kernel: DrizzleKernel::Square,
         fill_value: 0.0,
-        min_coverage: 0.0,
+        min_weight_fraction: 0.0,
         ..Default::default()
     };
     let mut acc2 = accumulator(ImageDimensions::new((6, 6), 1), config2);
@@ -155,7 +155,7 @@ fn square_kernel_with_pixel_weights() {
         pixfrac: 1.0,
         kernel: DrizzleKernel::Square,
         fill_value: -1.0,
-        min_coverage: 0.0,
+        min_weight_fraction: 0.0,
         ..Default::default()
     };
     let mut acc = accumulator(ImageDimensions::new((4, 4), 1), config);
@@ -202,7 +202,7 @@ fn square_kernel_scale2_single_pixel() {
         pixfrac: 0.8,
         kernel: DrizzleKernel::Square,
         fill_value: 0.0,
-        min_coverage: 0.0,
+        min_weight_fraction: 0.0,
         ..Default::default()
     };
     let mut acc = accumulator(ImageDimensions::new((4, 4), 1), config);
@@ -246,7 +246,7 @@ fn square_kernel_jacobian_weighted_average() {
         pixfrac: 1.0,
         kernel: DrizzleKernel::Square,
         fill_value: 0.0,
-        min_coverage: 0.0,
+        min_weight_fraction: 0.0,
         ..Default::default()
     };
     let mut acc = accumulator(ImageDimensions::new((4, 4), 1), config);
@@ -459,7 +459,7 @@ fn square_kernel_flux_conservation() {
         pixfrac: 1.0,
         kernel: DrizzleKernel::Square,
         fill_value: 0.0,
-        min_coverage: 0.0,
+        min_weight_fraction: 0.0,
         ..Default::default()
     };
     let mut acc = accumulator(ImageDimensions::new((20, 20), 1), config);
@@ -515,7 +515,7 @@ fn square_kernel_two_frame_weighted_mean() {
         pixfrac: 1.0,
         kernel: DrizzleKernel::Square,
         fill_value: 0.0,
-        min_coverage: 0.0,
+        min_weight_fraction: 0.0,
         ..Default::default()
     };
     let mut acc = accumulator(ImageDimensions::new((6, 6), 1), config);
