@@ -2,7 +2,6 @@
 
 use std::sync::OnceLock;
 
-use std::io::Error as IoError;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
@@ -14,6 +13,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 use crate::concurrency;
+use crate::error::FrameDimensionMismatch;
 use crate::io::image::cfa::CfaImage;
 use crate::io::image::error::ImageError;
 use crate::io::image::image_dimensions::ImageDimensions;
@@ -147,11 +147,10 @@ fn load_tiered<I: StackableImage, P: AsRef<Path> + Sync>(
 fn load_image<I: StackableImage>(path: &Path, context: &LoadContext) -> Result<I, Error> {
     match I::load(path, context) {
         Ok(image) => Ok(image),
+        // Cancellation is the run stopping, not this file failing, so it leaves the load error
+        // behind and reports as the stack's own.
         Err(ImageError::Cancelled { .. }) => Err(Error::Cancelled),
-        Err(source) => Err(Error::ImageLoad {
-            path: path.to_path_buf(),
-            source: IoError::other(source),
-        }),
+        Err(source) => Err(Error::ImageLoad(source)),
     }
 }
 
@@ -243,13 +242,7 @@ fn load_in_memory<I: StackableImage, P: AsRef<Path> + Sync>(
             return Err(Error::Cancelled);
         }
         let image = load_image::<I>(path.as_ref(), context)?;
-        if image.dimensions() != dimensions {
-            return Err(Error::DimensionMismatch {
-                index: idx,
-                expected: dimensions,
-                actual: image.dimensions(),
-            });
-        }
+        FrameDimensionMismatch::check(idx, dimensions, image.dimensions())?;
         validate_image_samples(&image, idx, cancel)?;
         let metadata = (idx == 0).then(|| image.metadata().clone());
         let stats = FrameStats::measure(&image);
@@ -492,13 +485,7 @@ fn load_and_cache_frame<I: StackableImage>(
         // Load image and write to cache
         let image = load_image::<I>(source_path, context)?;
 
-        if image.dimensions() != dimensions {
-            return Err(Error::DimensionMismatch {
-                index: frame_index,
-                expected: dimensions,
-                actual: image.dimensions(),
-            });
-        }
+        FrameDimensionMismatch::check(frame_index, dimensions, image.dimensions())?;
         validate_image_samples(&image, frame_index, cancel)?;
         let identity_after = source_identity(source_path)?;
         if identity_after != identity_before {

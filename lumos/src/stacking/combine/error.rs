@@ -1,14 +1,11 @@
 //! Error types for stacking operations.
 
-use std::io;
-use std::path::PathBuf;
-
 use thiserror::Error;
 
 use common::CancelToken;
 
-use crate::error::InvalidConfigField;
-use crate::io::image::image_dimensions::ImageDimensions;
+use crate::error::{FrameDimensionMismatch, InvalidConfigField};
+use crate::io::image::error::ImageError;
 use crate::stacking::calibration_masters::CalibrationError;
 use crate::stacking::frame_store::error::FrameStoreError;
 use crate::stacking::frame_store::warp_quality::FramePlane;
@@ -57,23 +54,20 @@ pub enum Error {
     #[error("registered frames have no pixels with common valid warp support")]
     NoCommonCoverage,
 
-    #[error("Failed to load image '{path}': {source}")]
-    ImageLoad {
-        path: PathBuf,
-        #[source]
-        source: io::Error,
-    },
+    /// A file that could not be decoded, held as the decoder's own error — which already names the
+    /// path, and stays matchable on *which* decode failed. Wrapping it in a variant of our own
+    /// printed the path twice and flattened the cause into an `io::Error`. A decode that was
+    /// cancelled arrives as [`Self::Cancelled`], never here.
+    #[error(transparent)]
+    ImageLoad(#[from] ImageError),
 
-    #[error("Dimension mismatch for frame {index}: expected {expected:?}, got {actual:?}")]
-    DimensionMismatch {
-        index: usize,
-        expected: ImageDimensions,
-        actual: ImageDimensions,
-    },
+    #[error(transparent)]
+    DimensionMismatch(#[from] FrameDimensionMismatch),
 
     /// A frame already in the frame store does not match the geometry the cache was built for.
-    /// Reported as a plane count and sample counts rather than as [`ImageDimensions`] because a
-    /// stored plane knows only its length — it has no width or height to report.
+    /// Reported as a plane count and sample counts rather than as
+    /// [`ImageDimensions`](crate::ImageDimensions) because a stored plane knows only its length —
+    /// it has no width or height to report.
     #[error("stored frame {index} has {actual} channel planes, expected {expected}")]
     StoredFrameChannels {
         index: usize,
@@ -143,6 +137,11 @@ pub(crate) fn check_cancel(cancel: &CancelToken) -> Result<(), Error> {
 
 #[cfg(test)]
 mod tests {
+    use std::error::Error as _;
+    use std::io;
+    use std::path::PathBuf;
+
+    use crate::io::image::image_dimensions::ImageDimensions;
     use crate::stacking::combine::error::*;
 
     #[test]
@@ -189,38 +188,52 @@ mod tests {
         );
     }
 
+    /// A load failure travels as the decoder's own error: the path appears once, the variant stays
+    /// matchable on which decode failed, and `source()` reaches the real cause. Wrapping it in a
+    /// `{ path, source: io::Error }` of our own printed "Failed to load image '{p}': Failed to read
+    /// file '{p}': …" and flattened the `ImageError` into a string.
     #[test]
-    fn image_load_error_message() {
-        let err = Error::ImageLoad {
-            path: PathBuf::from("/path/to/image.fits"),
+    fn a_load_failure_states_the_path_once_and_stays_typed() {
+        let path = PathBuf::from("/path/to/image.fits");
+        let error = Error::from(ImageError::Io {
+            path: path.clone(),
             source: io::Error::new(io::ErrorKind::NotFound, "file not found"),
-        };
-        assert!(err.to_string().contains("/path/to/image.fits"));
-        assert!(err.to_string().contains("file not found"));
+        });
+
+        let message = error.to_string();
+        assert_eq!(
+            message,
+            "Failed to read file '/path/to/image.fits': file not found"
+        );
+        assert_eq!(message.matches("/path/to/image.fits").count(), 1);
+        assert!(matches!(error, Error::ImageLoad(ImageError::Io { .. })));
+
+        let source = error.source().expect("the decode's own cause");
+        assert!(source.downcast_ref::<io::Error>().is_some(), "{source}");
     }
 
+    /// The variants that carry a shared payload print exactly what the payload prints — the wording
+    /// lives with the type that owns it, not copied into each subsystem's error.
     #[test]
-    fn dimension_mismatch_error_message() {
-        let err = Error::DimensionMismatch {
-            index: 5,
-            expected: ImageDimensions::new((100, 100), 3),
-            actual: ImageDimensions::new((200, 100), 3),
-        };
-        let msg = err.to_string();
-        assert!(msg.contains("5"));
-        assert!(msg.contains("100"));
-        assert!(msg.contains("200"));
-    }
-
-    #[test]
-    fn frame_store_error_is_transparent() {
-        let error = Error::from(FrameStoreError::WriteFile {
+    fn shared_payloads_are_reported_transparently() {
+        let store = Error::from(FrameStoreError::WriteFile {
             path: PathBuf::from("/tmp/cache/frame.bin"),
             source: io::Error::other("disk full"),
         });
         assert_eq!(
-            error.to_string(),
+            store.to_string(),
             "failed to write frame-store file '/tmp/cache/frame.bin': disk full"
+        );
+
+        let mismatch = FrameDimensionMismatch::check(
+            5,
+            ImageDimensions::new((100, 100), 3),
+            ImageDimensions::new((200, 100), 3),
+        )
+        .unwrap_err();
+        assert_eq!(
+            Error::from(mismatch).to_string(),
+            "frame 5 is 200x100x3, expected 100x100x3"
         );
     }
 
@@ -229,19 +242,5 @@ mod tests {
         let err = Error::NoFrames;
         let debug_str = format!("{:?}", err);
         assert!(debug_str.contains("NoFrames"));
-    }
-
-    #[test]
-    fn error_source_chain() {
-        use std::error::Error as StdError;
-
-        let io_err = io::Error::new(io::ErrorKind::NotFound, "underlying error");
-        let err = Error::ImageLoad {
-            path: PathBuf::from("/test"),
-            source: io_err,
-        };
-
-        // Verify source() returns the underlying io::Error
-        assert!(err.source().is_some());
     }
 }

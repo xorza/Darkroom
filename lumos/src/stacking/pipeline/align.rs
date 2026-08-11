@@ -5,6 +5,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use common::CancelToken;
 
 use crate::concurrency;
+use crate::error::FrameDimensionMismatch;
 use crate::io::image::linear::LinearImage;
 use crate::memory::MemoryPlan;
 use crate::stacking::combine::error::Error as StackError;
@@ -142,16 +143,9 @@ pub(crate) fn register_warp_and_stack(
     // into the *source* frame's grid, not the reference's, so mismatched inputs would otherwise
     // reach the combine as differently-sized planes rather than as an error.
     let expected = detected[0].image.dimensions();
-    if let Some((index, frame)) = detected
-        .iter()
-        .enumerate()
-        .find(|(_, frame)| frame.image.dimensions() != expected)
-    {
-        return Err(Error::Stack(StackError::DimensionMismatch {
-            index,
-            expected,
-            actual: frame.image.dimensions(),
-        }));
+    for (index, frame) in detected.iter().enumerate() {
+        FrameDimensionMismatch::check(index, expected, frame.image.dimensions())
+            .map_err(|mismatch| Error::Stack(mismatch.into()))?;
     }
 
     // Taken before the frames are consumed below, so the funnel survives into the result in input

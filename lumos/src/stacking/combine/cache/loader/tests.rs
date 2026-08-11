@@ -45,7 +45,7 @@ fn from_paths_reports_empty_and_missing_sources() {
         ProgressCallback::default(),
         CancelToken::never(),
     );
-    assert!(matches!(missing.unwrap_err(), Error::ImageLoad { .. }));
+    assert!(matches!(missing.unwrap_err(), Error::ImageLoad(_)));
 }
 
 #[test]
@@ -190,12 +190,11 @@ fn load_and_cache_frame_dimension_mismatch() {
 
     assert!(matches!(
         result.unwrap_err(),
-        Error::DimensionMismatch {
+        Error::DimensionMismatch(FrameDimensionMismatch {
             index: 5,
             expected,
             actual,
-            ..
-        } if expected == expected_dims && actual == actual_dims
+        }) if expected == expected_dims && actual == actual_dims
     ));
 
     // Cleanup

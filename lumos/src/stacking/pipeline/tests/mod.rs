@@ -5,6 +5,7 @@ use crate::testing::prelude::*;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+use crate::error::FrameDimensionMismatch;
 use crate::io::image::cfa::CfaType;
 use crate::io::image::fits::cfa::save_cfa_fits;
 use crate::stacking::calibration_masters::CalibrationMasters;
@@ -265,11 +266,11 @@ fn mismatched_frame_dimensions_are_rejected_before_registration() {
     )
     .unwrap_err();
 
-    let Error::Stack(StackError::DimensionMismatch {
+    let Error::Stack(StackError::DimensionMismatch(FrameDimensionMismatch {
         index,
         expected,
         actual,
-    }) = error
+    })) = error
     else {
         panic!("expected a dimension mismatch, got {error:?}");
     };

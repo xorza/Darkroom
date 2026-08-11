@@ -1,12 +1,9 @@
 //! Error types for drizzle stacking.
 
-use std::io;
-use std::path::PathBuf;
-
 use thiserror::Error;
 
-use crate::error::InvalidConfigField;
-use crate::io::image::image_dimensions::ImageDimensions;
+use crate::error::{FrameDimensionMismatch, InvalidConfigField};
+use crate::io::image::error::ImageError;
 
 /// Invalid [`crate::DrizzleConfig`] parameters.
 ///
@@ -33,19 +30,14 @@ pub enum DrizzleError {
     #[error("drizzle cancelled")]
     Cancelled,
 
-    #[error("Failed to load image '{path}': {source}")]
-    ImageLoad {
-        path: PathBuf,
-        #[source]
-        source: io::Error,
-    },
+    /// A file that could not be decoded — see [`StackError::ImageLoad`](crate::StackError::ImageLoad)
+    /// for why the decoder's own error travels rather than a wrapper. A cancelled decode arrives as
+    /// [`Self::Cancelled`], never here.
+    #[error(transparent)]
+    ImageLoad(#[from] ImageError),
 
-    #[error("Dimension mismatch for frame {index}: expected {expected:?}, got {actual:?}")]
-    DimensionMismatch {
-        index: usize,
-        expected: ImageDimensions,
-        actual: ImageDimensions,
-    },
+    #[error(transparent)]
+    DimensionMismatch(#[from] FrameDimensionMismatch),
 
     #[error("drizzle frame {index} weight must be finite and non-negative, got {value}")]
     InvalidFrameWeight { index: usize, value: f32 },
@@ -73,26 +65,28 @@ pub enum DrizzleError {
 
 #[cfg(test)]
 mod tests {
+    use crate::io::image::image_dimensions::ImageDimensions;
     use crate::stacking::drizzle::error::*;
 
+    /// The two messages that name drizzle rather than stacking, which is what keeps this error a
+    /// type of its own — and the shared payloads it reports through, whose wording lives with them.
     #[test]
-    fn no_frames_message() {
+    fn drizzle_names_itself_and_defers_for_the_shared_payloads() {
         assert_eq!(
             DrizzleError::NoFrames.to_string(),
             "No frames provided for drizzle"
         );
-    }
+        assert_eq!(DrizzleError::Cancelled.to_string(), "drizzle cancelled");
 
-    #[test]
-    fn dimension_mismatch_message() {
-        let err = DrizzleError::DimensionMismatch {
-            index: 2,
-            expected: ImageDimensions::new((100, 100), 3),
-            actual: ImageDimensions::new((200, 100), 3),
-        };
-        let msg = err.to_string();
-        assert!(msg.contains("frame 2"));
-        assert!(msg.contains("100"));
-        assert!(msg.contains("200"));
+        let mismatch = FrameDimensionMismatch::check(
+            2,
+            ImageDimensions::new((100, 100), 3),
+            ImageDimensions::new((200, 100), 3),
+        )
+        .unwrap_err();
+        assert_eq!(
+            DrizzleError::from(mismatch).to_string(),
+            "frame 2 is 200x100x3, expected 100x100x3"
+        );
     }
 }

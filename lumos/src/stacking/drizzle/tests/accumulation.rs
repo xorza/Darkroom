@@ -180,7 +180,7 @@ fn drizzle_images_dimension_mismatch() {
     );
     assert!(matches!(
         result.unwrap_err(),
-        DrizzleError::DimensionMismatch { index: 1, .. }
+        DrizzleError::DimensionMismatch(FrameDimensionMismatch { index: 1, .. })
     ));
 }
 

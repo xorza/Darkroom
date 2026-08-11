@@ -4,7 +4,6 @@
 //! handing that body a lazy fallible iterator, so a frame is loaded, distributed into the grid,
 //! and dropped before the next one is read.
 
-use std::io::Error;
 use std::path::Path;
 
 use common::CancelToken;
@@ -28,18 +27,12 @@ fn load_drizzle_frame<P: AsRef<Path>>(
         weight,
         pixel_weight_map,
     } = frame;
-    let path = source.as_ref();
-    let image = match LinearImage::from_file(path, context) {
+    let image = match LinearImage::from_file(source.as_ref(), context) {
         Ok(image) => image,
-        Err(ImageError::Cancelled { .. }) => {
-            return Err(DrizzleError::Cancelled);
-        }
-        Err(error) => {
-            return Err(DrizzleError::ImageLoad {
-                path: path.to_path_buf(),
-                source: Error::other(error),
-            });
-        }
+        // Cancellation is the run stopping, not this file failing, so it leaves the load error
+        // behind and reports as the drizzle's own.
+        Err(ImageError::Cancelled { .. }) => return Err(DrizzleError::Cancelled),
+        Err(error) => return Err(DrizzleError::ImageLoad(error)),
     };
     Ok(DrizzleFrame {
         source: image,
