@@ -6,7 +6,6 @@ use common::CancelToken;
 
 use crate::concurrency;
 use crate::io::image::linear::LinearImage;
-use crate::io::raw::demosaic::DemosaicMemory;
 use crate::memory::MemoryPlan;
 use crate::stacking::combine::error::Error as StackError;
 use crate::stacking::combine::stack::stack_stored_frames;
@@ -54,14 +53,9 @@ pub fn align_and_stack(
     let config = &config.with_resolved_memory(crate::memory::available_memory());
     let total = lights.len();
     // The inputs are already decoded and resident, so only the warped outputs and the per-frame
-    // scratch are still in question; charge the decode as done by giving it no transient arena.
-    let frame_bytes = lights[0].dimensions().sample_count() * size_of::<f32>();
-    let plan = MemoryPlan::plan(
-        lights[0].dimensions().pixel_count() * size_of::<f32>(),
-        DemosaicMemory {
-            output_bytes: frame_bytes,
-            peak_bytes: frame_bytes,
-        },
+    // scratch are still in question.
+    let plan = MemoryPlan::for_decoded_frames(
+        lights[0].dimensions(),
         total,
         rayon::current_num_threads(),
         config.stack.cache.get_available_memory(),

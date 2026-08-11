@@ -171,6 +171,32 @@ pub(crate) struct MemoryPlan {
 }
 
 impl MemoryPlan {
+    /// The plan for a run handed frames that are already decoded and resident.
+    ///
+    /// [`Self::plan`] models a run that decodes its own frames, and charges the decode both an
+    /// output and a transient peak. There is no decode here, so the frame's own bytes are the whole
+    /// of it and the transient arena is nothing — which is what this expresses, rather than leaving
+    /// each caller to encode "already decoded" as a [`DemosaicMemory`] whose two halves happen to
+    /// be equal. `decode_concurrency` has no meaning under that and the callers do not read it.
+    pub(crate) fn for_decoded_frames(
+        dimensions: ImageDimensions,
+        frame_count: usize,
+        threads: usize,
+        available: u64,
+    ) -> Self {
+        let decoded = frame_bytes(dimensions);
+        Self::plan(
+            dimensions.pixel_count() * size_of::<f32>(),
+            DemosaicMemory {
+                output_bytes: decoded,
+                peak_bytes: decoded,
+            },
+            frame_count,
+            threads,
+            available,
+        )
+    }
+
     /// Decide whether a run stays resident or spills, and how wide decode and warp may fan out.
     ///
     /// The run fits in RAM only when both peaks do: decoding every frame (plus the demosaic's own

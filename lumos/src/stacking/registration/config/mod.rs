@@ -8,6 +8,11 @@ use crate::stacking::registration::triangle::TriangleConfig;
 
 /// Interpolation method for image resampling.
 ///
+/// Adding one means editing four `match`es — this enum's two accessors, `plane::warp`'s dispatch,
+/// and `quality_at`'s — which is deliberate rather than an oversight waiting to be unified. The
+/// warp's dispatch selects between `lanczos_inner::<A, SIZE>` monomorphizations and per-method SIMD
+/// kernels; routing it through one shared tap-weight abstraction would erase exactly the constants
+/// those kernels are specialized on.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub enum InterpolationMethod {
     /// Nearest neighbor - fastest, lowest quality

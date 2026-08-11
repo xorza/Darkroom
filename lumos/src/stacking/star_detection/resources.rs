@@ -21,6 +21,11 @@ use imaginarium::Buffer2;
 ///
 /// `acquire_*` returns buffers with **unspecified contents**: a freshly allocated buffer is
 /// zeroed, but a reused one keeps its previous data. Callers must overwrite before reading.
+///
+/// The three accessor pairs stay written out rather than collapsing into one generic
+/// `acquire::<B>()` over [`BufferPool`]: the pools differ only in element type, so selecting one
+/// generically would need a trait mapping the type back to its field, and a turbofish at each of
+/// the ~35 call sites, to save six one-line methods.
 #[derive(Debug)]
 pub(crate) struct DetectionResources {
     pub(crate) dimensions: Size2us,

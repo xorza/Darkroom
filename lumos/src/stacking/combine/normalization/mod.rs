@@ -55,7 +55,7 @@ pub(crate) struct FrameNorm {
 #[derive(Debug)]
 enum RegisteredMeasurements {
     CommonStats(Vec<FrameStats>),
-    GlobalNormsToFirst(Vec<FrameNorm>),
+    GlobalNorms(Vec<FrameNorm>),
 }
 
 #[derive(Debug)]
@@ -91,23 +91,8 @@ pub(crate) fn compute_frame_norms(
         return Ok(Some(norms));
     }
 
-    match measure_registered_frames(frames, dimensions, normalization, cancel)? {
-        RegisteredMeasurements::GlobalNormsToFirst(mut norms) => {
-            let reference_norm = norms[reference].clone();
-            for (frame_index, frame_norm) in norms.iter_mut().enumerate() {
-                check_cancel(cancel)?;
-                if frame_index == reference {
-                    frame_norm.channels.fill(ChannelNorm::IDENTITY);
-                    continue;
-                }
-                for (channel, norm) in frame_norm.channels.iter_mut().enumerate() {
-                    let reference_channel = reference_norm.channels[channel];
-                    norm.gain /= reference_channel.gain;
-                    norm.offset = (norm.offset - reference_channel.offset) / reference_channel.gain;
-                }
-            }
-            Ok(Some(norms))
-        }
+    match measure_registered_frames(frames, dimensions, normalization, reference, cancel)? {
+        RegisteredMeasurements::GlobalNorms(norms) => Ok(Some(norms)),
         RegisteredMeasurements::CommonStats(stats) => Ok(Some(compute_frame_norms_with_reference(
             stats.iter(),
             normalization,
@@ -213,6 +198,7 @@ fn measure_registered_frames(
     frames: &[StoredFrame],
     dimensions: ImageDimensions,
     normalization: Normalization,
+    reference: usize,
     cancel: &CancelToken,
 ) -> Result<RegisteredMeasurements, Error> {
     let pixel_count = dimensions.pixel_count();
@@ -220,15 +206,14 @@ fn measure_registered_frames(
     let common_stats = measure_common_stats(frames, pixel_count, &common_domain, cancel)?;
 
     Ok(match normalization {
-        Normalization::Global => {
-            RegisteredMeasurements::GlobalNormsToFirst(measure_global_norms_to_first(
-                frames,
-                &common_stats,
-                pixel_count,
-                &common_domain,
-                cancel,
-            )?)
-        }
+        Normalization::Global => RegisteredMeasurements::GlobalNorms(measure_global_norms(
+            frames,
+            &common_stats,
+            pixel_count,
+            &common_domain,
+            reference,
+            cancel,
+        )?),
         Normalization::Multiplicative => RegisteredMeasurements::CommonStats(common_stats),
         Normalization::None => unreachable!(),
     })
@@ -270,11 +255,22 @@ fn measure_common_stats(
         .collect())
 }
 
-fn measure_global_norms_to_first(
+/// Fit every frame's gain and offset against the reference frame directly.
+///
+/// Each non-reference frame is paired with the reference through
+/// [`paired_photometric_gain`]'s errors-in-variables fit, on the stratified sample of the common
+/// domain. The reference itself is the identity by definition, so it is the one frame not fitted.
+///
+/// Fitting against the reference rather than against frame 0 and rescaling afterwards matters:
+/// the fit clips residuals and weights each side by its own noise, so `gain(a→c)` is not
+/// `gain(a→b) / gain(c→b)` — chaining through an arbitrary frame would put its noise into every
+/// other frame's scale.
+fn measure_global_norms(
     frames: &[StoredFrame],
     common_stats: &[FrameStats],
     pixel_count: usize,
     common_domain: &CommonDomain,
+    reference: usize,
     cancel: &CancelToken,
 ) -> Result<Vec<FrameNorm>, Error> {
     let channel_count = frames[0].channels.len();
@@ -284,14 +280,14 @@ fn measure_global_norms_to_first(
         .into_par_iter()
         .map(|channel| {
             let samples = gather_indexed_samples(
-                &frames[0].channels[channel],
+                &frames[reference].channels[channel],
                 &indices,
                 pixel_count,
                 cancel,
             )?;
             let stats = sample_stats(&samples, cancel)?;
             let noise_variance =
-                source_noise_variance(&frames[0], channel, &indices, pixel_count, cancel)?;
+                source_noise_variance(&frames[reference], channel, &indices, pixel_count, cancel)?;
             Ok(ReferenceFit {
                 samples,
                 stats,
@@ -300,22 +296,25 @@ fn measure_global_norms_to_first(
         })
         .collect::<Result<Vec<_>, Error>>()?;
 
-    let fitted = (0..(frames.len() - 1) * channel_count)
+    let fitted = (0..frames.len() * channel_count)
         .into_par_iter()
         .map(|pair_index| {
-            let frame_index = pair_index / channel_count + 1;
+            let frame_index = pair_index / channel_count;
             let channel = pair_index % channel_count;
+            if frame_index == reference {
+                return Ok(ChannelNorm::IDENTITY);
+            }
             let frame_samples = gather_indexed_samples(
                 &frames[frame_index].channels[channel],
                 &indices,
                 pixel_count,
                 cancel,
             )?;
-            let reference = &reference_fits[channel];
+            let reference_fit = &reference_fits[channel];
             let gain = paired_photometric_gain(
                 &frame_samples,
-                &reference.samples,
-                reference.stats,
+                &reference_fit.samples,
+                reference_fit.stats,
                 source_noise_variance(
                     &frames[frame_index],
                     channel,
@@ -323,12 +322,12 @@ fn measure_global_norms_to_first(
                     pixel_count,
                     cancel,
                 )?,
-                reference.noise_variance,
+                reference_fit.noise_variance,
                 cancel,
             )?;
             Ok(ChannelNorm {
                 gain,
-                offset: common_stats[0].channels[channel].median
+                offset: common_stats[reference].channels[channel].median
                     - common_stats[frame_index].channels[channel].median * gain,
             })
         })
@@ -340,7 +339,7 @@ fn measure_global_norms_to_first(
         .collect::<Vec<_>>();
     for (frame_index, channels) in fitted.chunks(channel_count).enumerate() {
         for (channel, &norm) in channels.iter().enumerate() {
-            norms[frame_index + 1].channels[channel] = norm;
+            norms[frame_index].channels[channel] = norm;
         }
     }
     Ok(norms)
