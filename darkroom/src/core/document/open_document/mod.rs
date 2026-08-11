@@ -7,12 +7,12 @@
 //! that true — the two are one unit, replaced together when a different file
 //! is opened.
 
-pub(crate) mod error;
+pub(crate) mod replay_outcome;
 
 use std::path::{Path, PathBuf};
 
 use crate::core::document::Document;
-use crate::core::document::open_document::error::ReplayOutcome;
+use crate::core::document::open_document::replay_outcome::ReplayOutcome;
 use crate::core::edit::action_stack::ActionStack;
 use crate::core::edit::intent::apply::commit_intent;
 use crate::core::edit::intent::error::MalformedIntent;

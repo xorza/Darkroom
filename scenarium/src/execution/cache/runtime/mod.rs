@@ -9,6 +9,7 @@
 //! back — so RAM eviction lives here, on the cache that owns both stores.
 //! Per-run results (errors, timings) are *not* here — they belong to a single run, not the cache.
 
+pub(crate) mod cache_flush_report;
 pub(crate) mod error;
 
 use std::collections::HashSet;
@@ -20,12 +21,14 @@ use hashbrown::HashMap;
 
 use crate::common::column::Column;
 use crate::execution::cache::digest::{DOMAIN, Digest, DigestHasher, InputTag};
-use crate::execution::cache::disk_store::error::{StoreOutcome, StoreResult};
+use crate::execution::cache::disk_store::error::StoreResult;
+use crate::execution::cache::disk_store::store_outcome::StoreOutcome;
 use crate::execution::cache::disk_store::{BlobTarget, DiskStore, StorePolicy};
 use crate::execution::cache::resource::error::StampError;
 use crate::execution::cache::resource::{FsPathId, StampJob};
+use crate::execution::cache::runtime::cache_flush_report::CacheFlushReport;
 use crate::execution::cache::runtime::error::{
-    CacheFlushReport, CacheFlushUnsupported, CacheNodeError, CacheNodeFailure,
+    CacheFlushUnsupported, CacheNodeError, CacheNodeFailure,
 };
 use crate::execution::cache::slot::RuntimeSlot;
 use crate::execution::compile::compiled_graph::{CompiledGraph, ExecutionBinding};
