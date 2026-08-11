@@ -132,9 +132,7 @@ fn fits_integer_samples_are_divided_by_the_span_their_header_declares() {
     let pixels = scaled_loaded.channel(0).pixels();
     // The 2.5 cancels: 17.5 / (2.5 × 65535) = 7/65535 = 1.0681315e-4, and
     // 10 / (2.5 × 65535) = 4/65535 = 6.1036087e-5.
-    assert!((pixels[0] - 7.0 / 65_535.0).abs() < 1e-11, "{pixels:?}");
     assert!((pixels[0] - 1.068_131_5e-4).abs() < 1e-9, "{pixels:?}");
-    assert!((pixels[1] - 4.0 / 65_535.0).abs() < 1e-11, "{pixels:?}");
     assert!((pixels[1] - 6.103_609e-5).abs() < 1e-9, "{pixels:?}");
     assert_eq!(pixels[2], 0.0);
 

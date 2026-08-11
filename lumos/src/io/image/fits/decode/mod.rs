@@ -26,7 +26,7 @@ use crate::io::image::fits::metadata::{read_cfa_from_headers, read_quantization_
 use crate::io::image::fits::options::{FitsChecksumPolicy, FitsCubeInterpretation};
 use crate::io::image::fits::provenance::{FitsChecksumProvenance, FitsChecksumState};
 use crate::io::image::image_metadata::{BitPix, ImageMetadata};
-use crate::io::image::image_provenance::{ColorProvenance, ImageProvenance, TransferProvenance};
+use crate::io::image::image_provenance::ColorProvenance;
 use crate::io::image::linear::LinearImage;
 use crate::io::image::linear_pixels::LinearPixels;
 use crate::io::image::load_context::LoadContext;
@@ -78,13 +78,11 @@ impl DecodedFitsImage {
 
         // A declared QNTZSIG and a BSCALE-derived ADC step are both in the file's sample units, so
         // both follow the samples through the division the decoder already applied.
-        let fits_transfer = match &self.metadata.provenance {
-            Some(ImageProvenance {
-                transfer: TransferProvenance::FitsNormalized(transfer),
-                ..
-            }) => Some(transfer),
-            _ => None,
-        };
+        let fits_transfer = self
+            .metadata
+            .provenance
+            .as_ref()
+            .and_then(|provenance| provenance.transfer.fits());
         let physical_scale = fits_transfer.map_or(1.0, |transfer| transfer.physical_scale);
         let quantization_sigma = declared_quantization_sigma
             .map(|sigma| sigma / physical_scale)
