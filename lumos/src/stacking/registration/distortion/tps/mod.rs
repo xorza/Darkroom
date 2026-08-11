@@ -347,8 +347,7 @@ impl DistortionMap {
     }
 
     /// Get the distortion vector at a grid position.
-    fn get(&self, gx: usize, gy: usize) -> Option<DVec2> {
-        let point = Vec2us::new(gx, gy);
+    fn get(&self, point: Vec2us) -> Option<DVec2> {
         self.grid
             .contains(point)
             .then(|| self.vectors[self.grid.index_of(point)])
@@ -367,10 +366,10 @@ impl DistortionMap {
         let fx = gx - gx0 as f64;
         let fy = gy - gy0 as f64;
 
-        let v00 = self.get(gx0, gy0).unwrap_or(DVec2::ZERO);
-        let v10 = self.get(gx1, gy0).unwrap_or(DVec2::ZERO);
-        let v01 = self.get(gx0, gy1).unwrap_or(DVec2::ZERO);
-        let v11 = self.get(gx1, gy1).unwrap_or(DVec2::ZERO);
+        let v00 = self.get(Vec2us::new(gx0, gy0)).unwrap_or(DVec2::ZERO);
+        let v10 = self.get(Vec2us::new(gx1, gy0)).unwrap_or(DVec2::ZERO);
+        let v01 = self.get(Vec2us::new(gx0, gy1)).unwrap_or(DVec2::ZERO);
+        let v11 = self.get(Vec2us::new(gx1, gy1)).unwrap_or(DVec2::ZERO);
 
         // Bilinear interpolation
         (1.0 - fx) * (1.0 - fy) * v00

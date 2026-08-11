@@ -846,7 +846,7 @@ fn distortion_map_translation() {
     // For pure translation, every grid point should have distortion ~(5, 3)
     for gy in 0..map.grid.height {
         for gx in 0..map.grid.width {
-            let d = map.get(gx, gy).unwrap();
+            let d = map.get(Vec2us::new(gx, gy)).unwrap();
             assert_dvec2_near(d, shift, 0.1, &format!("grid ({gx},{gy})"));
         }
     }
@@ -878,13 +878,16 @@ fn distortion_map_get_out_of_bounds() {
     let map = DistortionMap::from_tps(&tps, Size2us::new(100, 100), 50.0);
 
     // Valid: within grid
-    assert!(map.get(0, 0).is_some());
+    assert!(map.get(Vec2us::ZERO).is_some());
 
     // Invalid: beyond grid dimensions
-    assert!(map.get(map.grid.width, 0).is_none());
-    assert!(map.get(0, map.grid.height).is_none());
-    assert!(map.get(map.grid.width, map.grid.height).is_none());
-    assert!(map.get(1000, 1000).is_none());
+    assert!(map.get(Vec2us::new(map.grid.width, 0)).is_none());
+    assert!(map.get(Vec2us::new(0, map.grid.height)).is_none());
+    assert!(
+        map.get(Vec2us::new(map.grid.width, map.grid.height))
+            .is_none()
+    );
+    assert!(map.get(Vec2us::new(1000, 1000)).is_none());
 }
 
 /// DistortionMap::interpolate with bilinear on translation: exact at grid and mid-points.

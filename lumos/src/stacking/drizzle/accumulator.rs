@@ -12,6 +12,7 @@ use crate::io::image::linear::LinearImage;
 use crate::math::lanczos;
 use crate::math::rect::Rect;
 use crate::math::size2us::Size2us;
+use crate::math::vec2us::Vec2us;
 use crate::stacking::drizzle::config::{DrizzleConfig, DrizzleKernel};
 use crate::stacking::drizzle::error::DrizzleError;
 use crate::stacking::drizzle::geometry::{boxer, local_jacobian};
@@ -52,8 +53,7 @@ impl<T> DrizzleFrame<T> {
 /// One output pixel a radial drop touches, with the kernel value there.
 #[derive(Debug, Clone, Copy)]
 struct KernelTap {
-    ox: usize,
-    oy: usize,
+    output: Vec2us,
     value: f32,
 }
 
@@ -333,6 +333,7 @@ impl DrizzleAccumulator {
 
         for iy in 0..input_height {
             for ix in 0..input_width {
+                let input = Vec2us::new(ix, iy);
                 let pw = pixel_weights.map_or(1.0, |w| w[(ix, iy)]);
                 if pw == 0.0 {
                     continue;
@@ -345,7 +346,7 @@ impl DrizzleAccumulator {
                 let ox_center = t.x as f32 * scale;
                 let oy_center = t.y as f32 * scale;
 
-                let jaco = local_jacobian(transform, t, ix, iy, scale as f64) as f32;
+                let jaco = local_jacobian(transform, t, input, scale as f64) as f32;
                 if jaco < JACOBIAN_MIN as f32 {
                     continue;
                 }
@@ -365,13 +366,13 @@ impl DrizzleAccumulator {
                 let effective_weight = weight * pw / jaco;
                 for oy in oy_min..oy_max {
                     for ox in ox_min..ox_max {
-                        let pixel =
+                        let cell =
                             Rect::from_center_half_extent(Vec2::new(ox as f32, oy as f32), 0.5);
-                        let overlap = drop.overlap_area(pixel);
+                        let overlap = drop.overlap_area(cell);
 
                         if overlap > 0.0 {
                             let pixel_weight = effective_weight * overlap * inv_area;
-                            self.accumulate(image, ix, iy, ox, oy, pixel_weight);
+                            self.accumulate(image, input, Vec2us::new(ox, oy), pixel_weight);
                         }
                     }
                 }
@@ -405,6 +406,7 @@ impl DrizzleAccumulator {
 
         for iy in 0..input_height {
             for ix in 0..input_width {
+                let input = Vec2us::new(ix, iy);
                 let pw = pixel_weights.map_or(1.0, |w| w[(ix, iy)]);
                 if pw == 0.0 {
                     continue;
@@ -462,7 +464,7 @@ impl DrizzleAccumulator {
                         let overlap = boxer(ox as f64 - 0.5, oy as f64 - 0.5, &xout, &yout);
                         if overlap > 0.0 {
                             let pixel_weight = (overlap * w_over_jaco) as f32;
-                            self.accumulate(image, ix, iy, ox, oy, pixel_weight);
+                            self.accumulate(image, input, Vec2us::new(ox, oy), pixel_weight);
                         }
                     }
                 }
@@ -486,6 +488,7 @@ impl DrizzleAccumulator {
 
         for iy in 0..input_height {
             for ix in 0..input_width {
+                let input = Vec2us::new(ix, iy);
                 let pw = pixel_weights.map_or(1.0, |w| w[(ix, iy)]);
                 if pw == 0.0 {
                     continue;
@@ -497,11 +500,12 @@ impl DrizzleAccumulator {
                 let oy = (t.y as f32 * scale).round() as isize;
 
                 if ox >= 0 && ox < output_width as isize && oy >= 0 && oy < output_height as isize {
-                    let jaco = local_jacobian(transform, t, ix, iy, scale as f64) as f32;
+                    let jaco = local_jacobian(transform, t, input, scale as f64) as f32;
                     if jaco < JACOBIAN_MIN as f32 {
                         continue;
                     }
-                    self.accumulate(image, ix, iy, ox as usize, oy as usize, weight * pw / jaco);
+                    let output = Vec2us::new(ox as usize, oy as usize);
+                    self.accumulate(image, input, output, weight * pw / jaco);
                 }
             }
         }
@@ -534,6 +538,7 @@ impl DrizzleAccumulator {
 
         for iy in 0..input_height {
             for ix in 0..input_width {
+                let input = Vec2us::new(ix, iy);
                 let pw = pixel_weights.map_or(1.0, |w| w[(ix, iy)]);
                 if pw == 0.0 {
                     continue;
@@ -545,12 +550,12 @@ impl DrizzleAccumulator {
                 let ox_center = t.x as f32 * scale;
                 let oy_center = t.y as f32 * scale;
 
-                let jaco = local_jacobian(transform, t, ix, iy, scale as f64) as f32;
+                let jaco = local_jacobian(transform, t, input, scale as f64) as f32;
                 if jaco < JACOBIAN_MIN as f32 {
                     continue;
                 }
 
-                let fluxes = Self::fluxes_at(image, ix, iy);
+                let fluxes = Self::fluxes_at(image, input);
                 let ox_int = ox_center.round() as isize;
                 let oy_int = oy_center.round() as isize;
 
@@ -576,8 +581,7 @@ impl DrizzleAccumulator {
                         let tap = kernel_fn(dist_x, dist_y);
                         total_weight += tap;
                         taps.push(KernelTap {
-                            ox: ox as usize,
-                            oy: oy as usize,
+                            output: Vec2us::new(ox as usize, oy as usize),
                             value: tap,
                         });
                     }
@@ -591,7 +595,7 @@ impl DrizzleAccumulator {
                 // frame weight; the Jacobian divides out the local area magnification.
                 let inv_total = (weight * pw) / (total_weight * jaco);
                 for tap in &taps {
-                    self.accumulate_samples(&fluxes, tap.ox, tap.oy, tap.value * inv_total);
+                    self.accumulate_samples(&fluxes, tap.output, tap.value * inv_total);
                 }
             }
         }
@@ -604,35 +608,36 @@ impl DrizzleAccumulator {
     /// handful and measured *slower* when made to build this first — the loads they repeat are
     /// already hoisted.
     #[inline]
-    fn fluxes_at(image: &LinearImage, ix: usize, iy: usize) -> ArrayVec<f32, MAX_CHANNELS> {
+    fn fluxes_at(image: &LinearImage, pixel: Vec2us) -> ArrayVec<f32, MAX_CHANNELS> {
         (0..image.channels())
-            .map(|c| image.channel(c)[(ix, iy)])
+            .map(|c| image.channel(c)[(pixel.x, pixel.y)])
             .collect()
     }
 
-    /// Accumulate weighted flux from input pixel (ix, iy) into output pixel (ox, oy).
+    /// Accumulate weighted flux from `input` into the `output` pixel.
+    ///
+    /// Both coordinates travel as one value each: four bare indices in a row let an input/output
+    /// mix-up compile.
     #[inline]
     fn accumulate(
         &mut self,
         image: &LinearImage,
-        ix: usize,
-        iy: usize,
-        ox: usize,
-        oy: usize,
+        input: Vec2us,
+        output: Vec2us,
         pixel_weight: f32,
     ) {
         let output_width = self.weight.width();
         for (c, d) in self.data.iter_mut().enumerate() {
-            let flux = image.channel(c)[(ix, iy)];
-            *d.get_mut(ox, oy) += flux * pixel_weight;
+            let flux = image.channel(c)[(input.x, input.y)];
+            *d.get_mut(output.x, output.y) += flux * pixel_weight;
         }
         // Weight is channel-independent, so accumulate it and its square once per output pixel.
-        *self.weight.get_mut(ox, oy) += pixel_weight;
+        *self.weight.get_mut(output.x, output.y) += pixel_weight;
         if let Some(weight_sq) = &mut self.weight_sq {
-            *weight_sq.get_mut(ox, oy) += pixel_weight * pixel_weight;
+            *weight_sq.get_mut(output.x, output.y) += pixel_weight * pixel_weight;
         }
         if let Some(coverage) = &mut self.frame_coverage {
-            coverage.touch(oy * output_width + ox);
+            coverage.touch(output.to_index(output_width));
         }
     }
 
@@ -642,17 +647,17 @@ impl DrizzleAccumulator {
     /// third method: factoring them out measured ~4% slower on the compact kernels, whose hot loop
     /// is this function.
     #[inline]
-    fn accumulate_samples(&mut self, fluxes: &[f32], ox: usize, oy: usize, pixel_weight: f32) {
+    fn accumulate_samples(&mut self, fluxes: &[f32], output: Vec2us, pixel_weight: f32) {
         let output_width = self.weight.width();
         for (d, &flux) in self.data.iter_mut().zip(fluxes) {
-            *d.get_mut(ox, oy) += flux * pixel_weight;
+            *d.get_mut(output.x, output.y) += flux * pixel_weight;
         }
-        *self.weight.get_mut(ox, oy) += pixel_weight;
+        *self.weight.get_mut(output.x, output.y) += pixel_weight;
         if let Some(weight_sq) = &mut self.weight_sq {
-            *weight_sq.get_mut(ox, oy) += pixel_weight * pixel_weight;
+            *weight_sq.get_mut(output.x, output.y) += pixel_weight * pixel_weight;
         }
         if let Some(coverage) = &mut self.frame_coverage {
-            coverage.touch(oy * output_width + ox);
+            coverage.touch(output.to_index(output_width));
         }
     }
 
