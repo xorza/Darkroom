@@ -2,16 +2,13 @@
 //!
 //! Two kinds: the area magnification a transform applies locally ([`local_jacobian`]), which
 //! rescales a drop's contribution, and the exact polygon-to-pixel overlap the square kernel needs
-//! ([`sgarea`] / [`boxer`], ported from STScI's `cdrizzlebox.c`). [`lanczos_kernel`] serves the
-//! interpolating kernel.
-
-use std::f32::consts::PI;
+//! ([`sgarea`] / [`boxer`], ported from STScI's `cdrizzlebox.c`). The interpolating kernel itself is
+//! `math::lanczos`, shared with `registration::resample`.
 
 use glam::DVec2;
 
 use crate::stacking::registration::transform::Transform;
 
-const SINC_ZERO_THRESHOLD: f32 = 1e-6;
 const SGAREA_DX_MIN: f64 = 1e-14;
 
 /// Compute local Jacobian determinant (area magnification) at pixel `(ix, iy)`.
@@ -34,20 +31,6 @@ pub(crate) fn local_jacobian(
     let dx = right - center;
     let dy = down - center;
     (dx.x * dy.y - dx.y * dy.x).abs() * scale * scale
-}
-
-/// Lanczos kernel function.
-#[inline]
-pub(crate) fn lanczos_kernel(x: f32, a: f32) -> f32 {
-    if x.abs() < SINC_ZERO_THRESHOLD {
-        return 1.0;
-    }
-    if x.abs() >= a {
-        return 0.0;
-    }
-    let pi_x = PI * x;
-    let pi_x_a = pi_x / a;
-    (pi_x.sin() / pi_x) * (pi_x_a.sin() / pi_x_a)
 }
 
 /// Compute signed area between a line segment and the x-axis, clipped to the unit square

@@ -1,15 +1,17 @@
 use crate::io::image::cfa::QUANTIZATION_SIGMA_PER_STEP;
+use crate::math::vec2us::Vec2us;
 use crate::stacking::calibration_masters::defect_map::*;
 use crate::stacking::combine::cache::FrameCache;
 use crate::stacking::combine::config::{Normalization, StackConfig};
 use crate::stacking::combine::stack::run_stacking;
+use crate::testing::XTRANS_PATTERN;
 
 use crate::stacking::calibration_masters::defect_map::dark_background::DarkBackground;
-use crate::stacking::calibration_masters::defect_map::same_color::{
-    SameColorMedian, XTRANS_NEIGHBORS, XTRANS_RADIUS, XTransOffsets,
-};
 use crate::stacking::calibration_masters::defect_map::sampling::{
     collect_color_sample_indices, collect_color_samples,
+};
+use crate::stacking::calibration_masters::same_color::{
+    SameColorMedian, XTRANS_NEIGHBORS, XTRANS_RADIUS, XTransOffsets,
 };
 use crate::{io::raw::demosaic::bayer::CfaPattern, testing::make_cfa};
 
@@ -753,15 +755,6 @@ fn detect_hot_and_cold_combine() {
 }
 
 /// A representative non-trivial X-Trans pattern (R=0, G=1, B=2) reused by the X-Trans tests.
-const XTRANS_PATTERN: [[u8; 6]; 6] = [
-    [1, 0, 1, 1, 2, 1],
-    [2, 1, 2, 0, 1, 0],
-    [1, 2, 1, 1, 0, 1],
-    [1, 2, 1, 1, 0, 1],
-    [0, 1, 0, 2, 1, 2],
-    [1, 0, 1, 1, 2, 1],
-];
-
 /// Reference X-Trans same-color median: collect every in-bounds, unmasked same-color neighbour
 /// in the radius-6 window, take the closest `XTRANS_NEIGHBORS` by Manhattan distance (ties in
 /// scan order), median them. The precomputed [`XTransOffsets`] must reproduce this exactly.
@@ -827,7 +820,7 @@ fn xtrans_median_selects_same_color() {
         .map(|i| color_val(pattern.color_at(Vec2us::new(i % size.width, i / size.width))))
         .collect();
     let pixels = Buffer2::new(size.width, size.height, px);
-    let neighbors = SameColorMedian::new(Some(&pattern));
+    let neighbors = SameColorMedian::new(&pattern);
 
     // Interior pixels (≥6 from every border) of each color — all 24 nearest same-color in-bounds.
     for &(x, y) in &[(13usize, 12usize), (12, 12), (14, 13)] {

@@ -14,9 +14,9 @@ use common::CancelToken;
 
 use crate::bit_buffer2::BitBuffer2;
 use crate::math::size2us::Size2us;
+use crate::stacking::combine::CANCEL_POLL_CHUNK;
 use crate::stacking::combine::error::Error;
 use crate::stacking::combine::error::check_cancel;
-use crate::stacking::combine::normalization::NORMALIZATION_CHUNK_SIZE;
 use crate::stacking::combine::pixel_coverage::PixelCoverage;
 use crate::stacking::frame_store::StoredFrame;
 use crate::stacking::frame_store::stored_plane::StoredPlane;
@@ -82,7 +82,7 @@ fn intersect_domain(
     const BITS: usize = 64;
     let values = plane.chunk(0, pixel_count);
     // The mask is one row, so word `w` covers pixels `64w..64w+64`.
-    let words_per_check = NORMALIZATION_CHUNK_SIZE.div_ceil(BITS);
+    let words_per_check = CANCEL_POLL_CHUNK.div_ceil(BITS);
     for (w, word) in common_domain.words.iter_mut().enumerate() {
         let base = w * BITS;
         if base >= pixel_count {

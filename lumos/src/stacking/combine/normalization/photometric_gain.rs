@@ -9,9 +9,10 @@
 use common::CancelToken;
 
 use crate::math::statistics::{MedianMad, mad_to_sigma};
+use crate::stacking::combine::CANCEL_POLL_CHUNK;
 use crate::stacking::combine::error::Error;
 use crate::stacking::combine::error::check_cancel;
-use crate::stacking::combine::normalization::{NORMALIZATION_CHUNK_SIZE, cancellable_median_mad};
+use crate::stacking::combine::normalization::cancellable_median_mad;
 
 #[derive(Debug, Clone, Copy)]
 struct PairedMoments {
@@ -39,8 +40,8 @@ impl PairedMoments {
             covariance: 0.0,
         };
         for (frame_chunk, reference_chunk) in frame
-            .chunks(NORMALIZATION_CHUNK_SIZE)
-            .zip(reference.chunks(NORMALIZATION_CHUNK_SIZE))
+            .chunks(CANCEL_POLL_CHUNK)
+            .zip(reference.chunks(CANCEL_POLL_CHUNK))
         {
             check_cancel(cancel)?;
             for (&frame_value, &reference_value) in frame_chunk.iter().zip(reference_chunk) {
@@ -116,8 +117,8 @@ pub(super) fn paired_photometric_gain(
     let offset = reference_stats.median - frame_stats.median * gain;
     scratch.clear();
     for (frame_chunk, reference_chunk) in frame
-        .chunks(NORMALIZATION_CHUNK_SIZE)
-        .zip(reference.chunks(NORMALIZATION_CHUNK_SIZE))
+        .chunks(CANCEL_POLL_CHUNK)
+        .zip(reference.chunks(CANCEL_POLL_CHUNK))
     {
         check_cancel(cancel)?;
         scratch.extend(frame_chunk.iter().zip(reference_chunk).map(

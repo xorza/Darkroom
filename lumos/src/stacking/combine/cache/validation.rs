@@ -8,13 +8,12 @@
 use common::CancelToken;
 
 use crate::io::image::image_dimensions::ImageDimensions;
+use crate::stacking::combine::CANCEL_POLL_CHUNK;
 use crate::stacking::combine::error::Error;
 use crate::stacking::combine::error::check_cancel;
 use crate::stacking::frame_store::stored_plane::StoredPlane;
 use crate::stacking::frame_store::warp_quality::FramePlane;
 use crate::stacking::frame_store::{StackableImage, StoredFrame};
-
-const VALIDATION_CHUNK_SIZE: usize = 16_384;
 
 fn validate_sample_channels<'a>(
     index: usize,
@@ -25,14 +24,14 @@ fn validate_sample_channels<'a>(
         // Cancellation is polled per chunk by chunking the iteration, not by testing the pixel
         // index inside it — the divisor was a modulo on every sample of every plane of every
         // frame, and the index is only wanted on the error path, where recomputing it is free.
-        for (chunk, values) in samples.chunks(VALIDATION_CHUNK_SIZE).enumerate() {
+        for (chunk, values) in samples.chunks(CANCEL_POLL_CHUNK).enumerate() {
             check_cancel(cancel)?;
             for (offset, value) in values.iter().copied().enumerate() {
                 if !value.is_finite() {
                     return Err(Error::NonFiniteImageSample {
                         index,
                         channel,
-                        pixel: chunk * VALIDATION_CHUNK_SIZE + offset,
+                        pixel: chunk * CANCEL_POLL_CHUNK + offset,
                         value,
                     });
                 }
@@ -128,12 +127,12 @@ pub(crate) fn validate_warp_quality(
     // Chunked for the same reason as `validate_sample_channels`: one cancel poll per chunk
     // instead of a modulo per sample.
     for (chunk, (coverage, confidence)) in coverage
-        .chunks(VALIDATION_CHUNK_SIZE)
-        .zip(confidence.chunks(VALIDATION_CHUNK_SIZE))
+        .chunks(CANCEL_POLL_CHUNK)
+        .zip(confidence.chunks(CANCEL_POLL_CHUNK))
         .enumerate()
     {
         check_cancel(cancel)?;
-        let pixel = |offset| chunk * VALIDATION_CHUNK_SIZE + offset;
+        let pixel = |offset| chunk * CANCEL_POLL_CHUNK + offset;
         for (offset, (&coverage, &confidence)) in coverage.iter().zip(confidence).enumerate() {
             for (kind, value) in [
                 (FramePlane::Coverage, coverage),

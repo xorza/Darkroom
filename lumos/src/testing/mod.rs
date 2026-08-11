@@ -103,6 +103,19 @@ impl TestRng {
 }
 
 /// Create a CfaImage from raw pixel data and CFA type.
+/// The Fujifilm X-Trans colour pattern, as a 6×6 phase table of colour indices.
+///
+/// Shared by the defect-map tests and the cosmic-ray bench so one pattern describes X-Trans across
+/// the fixtures rather than each restating the array.
+pub(crate) const XTRANS_PATTERN: [[u8; 6]; 6] = [
+    [1, 0, 1, 1, 2, 1],
+    [2, 1, 2, 0, 1, 0],
+    [1, 2, 1, 1, 0, 1],
+    [1, 2, 1, 1, 0, 1],
+    [0, 1, 0, 2, 1, 2],
+    [1, 0, 1, 1, 2, 1],
+];
+
 pub(crate) fn make_cfa(size: Size2us, pixels: Vec<f32>, cfa_type: CfaType) -> CfaImage {
     cfa_from_plane(Buffer2::new(size.width, size.height, pixels), cfa_type)
 }

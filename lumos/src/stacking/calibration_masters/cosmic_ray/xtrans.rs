@@ -12,6 +12,7 @@ use crate::io::image::cfa::CfaType;
 use crate::math::size2us::Size2us;
 use crate::math::statistics::{mad_f32_fast, mad_to_sigma, median_f32_mut};
 use crate::math::vec2us::Vec2us;
+use crate::stacking::calibration_masters::same_color::XTransOffsets;
 
 use crate::stacking::calibration_masters::cosmic_ray::FINE_STRUCTURE_FLOOR;
 use crate::stacking::calibration_masters::cosmic_ray::config::{CosmicRayConfig, NoiseEstimation};
@@ -21,7 +22,6 @@ use crate::stacking::calibration_masters::cosmic_ray::mono::{
 };
 
 /// Radius (px) scanned for same-color neighbors — one X-Trans period (6×6) contains every color.
-const XTRANS_RADIUS: i32 = 6;
 /// Nearest same-color neighbors for the "fine" median; the coarse median uses all gathered.
 const XTRANS_SMALL: usize = 8;
 /// Cap on gathered same-color neighbors (the coarse median scale).
@@ -58,14 +58,24 @@ struct XtransScratch {
 pub(super) struct XtransDetector<'a> {
     cfa: &'a CfaType,
     config: &'a CosmicRayConfig,
+    /// Same-colour neighbour geometry, built once per detector.
+    ///
+    /// Shared with the defect scan, which added it after finding that recomputing the neighbour set
+    /// per pixel — a 13×13 `color_at` sweep plus a distance sort — dominated its own scan. This
+    /// scan does the same walk at every pixel of every iteration, so it wants the table more.
+    offsets: XTransOffsets,
     scratch: XtransScratch,
 }
 
 impl<'a> XtransDetector<'a> {
     pub(super) fn new(config: &'a CosmicRayConfig, cfa: &'a CfaType) -> Self {
+        let CfaType::XTrans(pattern) = cfa else {
+            panic!("XtransDetector requires an X-Trans pattern, got {cfa:?}");
+        };
         Self {
             cfa,
             config,
+            offsets: XTransOffsets::new(pattern),
             scratch: XtransScratch::default(),
         }
     }
@@ -91,7 +101,7 @@ impl<'a> XtransDetector<'a> {
                 cfa: self.cfa,
                 mask: &masks.accumulated,
             };
-            scratch.fill_structure(&scene);
+            scratch.fill_structure(&scene, &self.offsets);
             scratch.fill_noise(&scene, &self.config.noise);
             // S = L⁺/N, elementwise over the same extent, so it runs down the L⁺ buffer.
             for (l, &nz) in scratch.lplus.iter_mut().zip(&scratch.noise) {
@@ -101,7 +111,14 @@ impl<'a> XtransDetector<'a> {
             if masks.detect_and_grow(&scratch.lplus, &scratch.f, &scratch.noise, self.config) == 0 {
                 break;
             }
-            xtrans_replace(data, size, self.cfa, &masks.accumulated, &mut scratch.frame);
+            xtrans_replace(
+                data,
+                size,
+                self.cfa,
+                &masks.accumulated,
+                &self.offsets,
+                &mut scratch.frame,
+            );
         }
 
         masks.accumulated.count_ones()
@@ -118,46 +135,10 @@ struct CfaScene<'a> {
     mask: &'a BitBuffer2,
 }
 
-/// Gather same-color (`color_at`) neighbor `(manhattan_dist, value)` around `pos` within Chebyshev
-/// `radius`, nearest-first, capped at `max`, skipping masked pixels. `out` is cleared and reused.
-fn same_color_values(
-    scene: &CfaScene,
-    pos: Vec2us,
-    radius: i32,
-    max: usize,
-    out: &mut Vec<(i32, f32)>,
-) {
-    out.clear();
-    let my = scene.cfa.color_at(pos);
-    let w = scene.size.width;
-    let (wi, hi) = (scene.size.width as i32, scene.size.height as i32);
-    for dy in -radius..=radius {
-        for dx in -radius..=radius {
-            if dx == 0 && dy == 0 {
-                continue;
-            }
-            let nx = pos.x as i32 + dx;
-            let ny = pos.y as i32 + dy;
-            if nx < 0 || ny < 0 || nx >= wi || ny >= hi {
-                continue;
-            }
-            let (nxu, nyu) = (nx as usize, ny as usize);
-            if scene.mask[nyu * w + nxu] {
-                continue;
-            }
-            if scene.cfa.color_at(Vec2us::new(nxu, nyu)) == my {
-                out.push((dx.abs() + dy.abs(), scene.pix[nyu * w + nxu]));
-            }
-        }
-    }
-    out.sort_unstable_by_key(|&(d, _)| d);
-    out.truncate(max);
-}
-
 impl XtransScratch {
     /// Compute `L⁺`, `F`, and the signal estimate per pixel from same-color medians at two scales
     /// (one gather per pixel: nearest-`XTRANS_LARGE`, with the nearest-`XTRANS_SMALL` subset).
-    fn fill_structure(&mut self, scene: &CfaScene) {
+    fn fill_structure(&mut self, scene: &CfaScene, offsets: &XTransOffsets) {
         let (w, n) = (scene.size.width, scene.size.pixel_count());
         // Every element is written below, so only the length matters.
         self.lplus.resize(n, 0.0);
@@ -169,19 +150,15 @@ impl XtransScratch {
             .zip(self.signal.par_chunks_mut(w))
             .enumerate()
             .for_each_init(
-                || {
-                    (
-                        Vec::<(i32, f32)>::with_capacity(64),
-                        Vec::<f32>::with_capacity(XTRANS_LARGE),
-                    )
-                },
-                |(gathered, vals), (y, ((lrow, frow), srow))| {
+                || Vec::<f32>::with_capacity(XTRANS_LARGE),
+                |gathered, (y, ((lrow, frow), srow))| {
                     for x in 0..w {
                         let v = scene.pix[y * w + x];
-                        same_color_values(
-                            scene,
+                        offsets.gather(
+                            scene.pix,
+                            scene.size,
                             Vec2us::new(x, y),
-                            XTRANS_RADIUS,
+                            scene.mask,
                             XTRANS_LARGE,
                             gathered,
                         );
@@ -190,13 +167,11 @@ impl XtransScratch {
                             srow[x] = v;
                             continue;
                         }
+                        // Nearest-first, so the two scales are prefixes of one gather. The coarse
+                        // median reorders `gathered`, so the fine one is taken first.
                         let small = gathered.len().min(XTRANS_SMALL);
-                        vals.clear();
-                        vals.extend(gathered[..small].iter().map(|&(_, val)| val));
-                        let med_small = median_f32_mut(vals);
-                        vals.clear();
-                        vals.extend(gathered.iter().map(|&(_, val)| val));
-                        let med_large = median_f32_mut(vals);
+                        let med_small = median_f32_mut(&mut gathered[..small]);
+                        let med_large = median_f32_mut(gathered);
                         lrow[x] = (v - med_small).max(0.0);
                         frow[x] = (med_small - med_large).max(FINE_STRUCTURE_FLOOR);
                         srow[x] = med_small;
@@ -262,6 +237,7 @@ fn xtrans_replace(
     size: Size2us,
     cfa: &CfaType,
     mask: &BitBuffer2,
+    offsets: &XTransOffsets,
     snapshot: &mut Vec<f32>,
 ) {
     let w = size.width;
@@ -274,30 +250,24 @@ fn xtrans_replace(
         mask,
     };
     data.par_chunks_mut(w).enumerate().for_each_init(
-        || {
-            (
-                Vec::<(i32, f32)>::with_capacity(32),
-                Vec::<f32>::with_capacity(XTRANS_REPLACE),
-            )
-        },
-        |(gathered, vals), (y, row)| {
+        || Vec::<f32>::with_capacity(XTRANS_REPLACE),
+        |gathered, (y, row)| {
             for (x, o) in row.iter_mut().enumerate() {
                 if !mask[y * w + x] {
                     continue;
                 }
-                same_color_values(
-                    &scene,
+                offsets.gather(
+                    scene.pix,
+                    scene.size,
                     Vec2us::new(x, y),
-                    XTRANS_RADIUS,
+                    mask,
                     XTRANS_REPLACE,
                     gathered,
                 );
                 if gathered.is_empty() {
                     continue;
                 }
-                vals.clear();
-                vals.extend(gathered.iter().map(|&(_, val)| val));
-                *o = median_f32_mut(vals);
+                *o = median_f32_mut(gathered);
             }
         },
     );

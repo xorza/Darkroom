@@ -8,6 +8,14 @@
 //! carry warp quality planes; where they do, [`pixel_coverage`] is the single rule deciding which
 //! of them reaches a given pixel.
 
+/// How many samples a cancellable walk covers between cancel polls.
+///
+/// Both the validation sweep and the normalization gather chunk their iteration to this rather than
+/// testing the token per sample — the divisor was a modulo on every sample of every plane of every
+/// frame. The exact figure is not tuned to either: it is a granularity, small enough that a
+/// cancelled run stops promptly and large enough that the poll is lost in the work.
+pub(crate) const CANCEL_POLL_CHUNK: usize = 16_384;
+
 pub(crate) mod cache;
 pub(crate) mod cache_config;
 pub(crate) mod config;

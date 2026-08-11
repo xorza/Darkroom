@@ -12,8 +12,9 @@ use imaginarium::Buffer2;
 use crate::io::image::cfa::CfaType;
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
+use crate::stacking::calibration_masters::defect_map::MAX_MEDIAN_SAMPLES;
 use crate::stacking::calibration_masters::defect_map::dark_background::DarkBackground;
-use crate::stacking::calibration_masters::defect_map::{MAX_MEDIAN_SAMPLES, cfa_color_at};
+use crate::stacking::calibration_masters::pattern_or_mono;
 
 #[derive(Debug, Clone, Copy)]
 struct CfaSamplePhase {
@@ -66,16 +67,17 @@ pub(super) fn collect_color_sample_indices(
         "color sampling needs non-zero dimensions"
     );
 
-    let period = match cfa_type {
-        None | Some(CfaType::Mono) => 1,
-        Some(CfaType::Bayer(_)) => 2,
-        Some(CfaType::XTrans(_)) => 6,
+    let pattern = pattern_or_mono(cfa_type);
+    let period = match pattern {
+        CfaType::Mono => 1,
+        CfaType::Bayer(_) => 2,
+        CfaType::XTrans(_) => 6,
     };
 
     let mut phases = ArrayVec::<CfaSamplePhase, 36>::new();
     for y_offset in 0..period.min(size.height) {
         for x_offset in 0..period.min(size.width) {
-            if cfa_color_at(cfa_type, Vec2us::new(x_offset, y_offset)) != target_color {
+            if pattern.color_at(Vec2us::new(x_offset, y_offset)) != target_color {
                 continue;
             }
             let columns = (size.width - 1 - x_offset) / period + 1;

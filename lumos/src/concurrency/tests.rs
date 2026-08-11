@@ -104,8 +104,9 @@ fn limited_map_rejects_zero_concurrency() {
 fn owned_map_indexes_by_input_position_and_carries_a_slot_between_items() {
     // A cell's index is what identifies it once the payload has been taken out, so a slot- or
     // window-relative number here would still pass every order-only assertion.
+    const SLOTS: usize = 2;
     let items: Vec<String> = (0..6).map(|i| format!("f{i}")).collect();
-    let mut slots = vec![String::new(); 2];
+    let mut slots = vec![String::new(); SLOTS];
     let result = try_par_map_bounded_owned(items, &mut slots, |slot, index, value| {
         // The slot arrives holding whatever this worker last left in it, which is the whole point:
         // it outlives the item, unlike anything the closure could build per call.
@@ -118,11 +119,14 @@ fn owned_map_indexes_by_input_position_and_carries_a_slot_between_items() {
         result.iter().map(|r| &r[..4]).collect::<Vec<_>>(),
         ["0:f0", "1:f1", "2:f2", "3:f3", "4:f4", "5:f5"]
     );
-    // Two workers over six items: four of them must have found a predecessor's value waiting.
-    assert_eq!(
-        result.iter().filter(|r| !r.ends_with(':')).count(),
-        4,
-        "slots did not carry between items: {result:?}"
+    // Every item but each worker's first found a predecessor's value waiting, so with `SLOTS`
+    // workers over six items at least `6 - SLOTS` did. Not exactly that many: the workers take
+    // indices as they free up, so one can drain the queue before the other starts and then only
+    // its own first item comes up empty.
+    let carried = result.iter().filter(|r| !r.ends_with(':')).count();
+    assert!(
+        carried >= 6 - SLOTS,
+        "slots did not carry between items: {carried} of 6 in {result:?}"
     );
 }
 

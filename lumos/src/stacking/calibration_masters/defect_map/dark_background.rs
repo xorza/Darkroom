@@ -13,8 +13,9 @@ use rayon::prelude::*;
 use crate::io::image::cfa::CfaType;
 use crate::math::statistics::median_f32_mut;
 use crate::math::vec2us::Vec2us;
+use crate::stacking::calibration_masters::defect_map::DARK_BACKGROUND_TILE_SIZE;
 use crate::stacking::calibration_masters::defect_map::sampling::collect_color_samples;
-use crate::stacking::calibration_masters::defect_map::{DARK_BACKGROUND_TILE_SIZE, cfa_color_at};
+use crate::stacking::calibration_masters::pattern_or_mono;
 use crate::stacking::combine::error::Error;
 
 #[derive(Debug, Clone, Copy)]
@@ -51,7 +52,8 @@ impl DarkBackground {
         );
         let tiles_x = width.div_ceil(DARK_BACKGROUND_TILE_SIZE);
         let tiles_y = height.div_ceil(DARK_BACKGROUND_TILE_SIZE);
-        let num_colors = cfa_type.map_or(1, CfaType::num_colors);
+        let pattern = pattern_or_mono(cfa_type);
+        let num_colors = pattern.num_colors();
 
         let mut tiles: Vec<DarkTile> = (0..tiles_x * tiles_y)
             .into_par_iter()
@@ -70,7 +72,7 @@ impl DarkBackground {
 
                 for y in y_start..y_end {
                     for x in x_start..x_end {
-                        let color = cfa_color_at(cfa_type, Vec2us::new(x, y)) as usize;
+                        let color = pattern.color_at(Vec2us::new(x, y)) as usize;
                         samples[color].push(data[y * width + x]);
                     }
                 }
