@@ -3,7 +3,8 @@
 use crate::math::sum::{mean_f32, scalar, sum_f32, weighted_mean_f32};
 
 /// Lengths that straddle every gate and its remainder: under the 4-lane NEON minimum, under the
-/// 8-lane AVX2 one, exactly on each, and well past both.
+/// 8-lane one `weighted_sums` uses on x86, under `sum_f32`'s measured crossover at 16, exactly on
+/// each, and well past all three.
 const LENGTHS: [usize; 15] = [1, 2, 3, 4, 5, 7, 8, 9, 16, 17, 63, 64, 65, 257, 1000];
 
 /// Cycles 1e6 against -1e6 so a running total cancels catastrophically, with small values between
@@ -83,17 +84,15 @@ fn mean_f32_matches_a_rounded_f64_reference_at_every_length() {
     }
 }
 
-/// The combine reaches the same pixel through `mean_f32` (equal weights) or `weighted_mean_f32`
-/// (frame weights), so the two must not disagree on the same data.
-///
-/// This is exact by construction, not by numerical luck: `v * 1.0` is exact in f64 and each
-/// backend accumulates the weighted numerator with the same lane split, reduction order and scalar
-/// tail as its own `sum_f32`, so both walk the identical values through the identical additions.
-/// The lengths have to cross both gates — 4 on NEON, 8 on AVX2 — or the sweep never leaves the
-/// scalar path on one of the two architectures.
+/// Wherever `mean_f32` and `weighted_mean_f32` reach the same rung, the unit-weighted mean is the
+/// plain mean bit for bit — by construction, not by numerical luck: `v * 1.0` is exact in f64 and
+/// each backend accumulates the weighted numerator with the same lane split, reduction order and
+/// scalar tail as its own `sum_f32`, so both walk the identical values through the identical
+/// additions. The lengths have to cross every gate — 4 on NEON, 8 and 16 on x86 — or the sweep
+/// never leaves the scalar path on one of the architectures.
 #[test]
 fn mean_agrees_bit_for_bit_with_the_unit_weighted_mean() {
-    for len in LENGTHS {
+    for len in LENGTHS.into_iter().filter(|&len| !gates_differ(len)) {
         let values: Vec<f32> = (0..len).map(|i| 0.1 + (i as f32) * 0.0137).collect();
         let ones = vec![1.0f32; len];
         assert_eq!(
@@ -102,6 +101,54 @@ fn mean_agrees_bit_for_bit_with_the_unit_weighted_mean() {
             "mean and unit-weighted mean disagree at len {len}"
         );
     }
+}
+
+/// Lengths where the two entry points take different rungs, so their sums associate differently.
+///
+/// On x86 `weighted_sums` goes vector at the 8-lane minimum while `sum_f32` waits for its measured
+/// crossover at 16. Without the AVX2 rung — a pre-AVX2 CPU, or Rosetta, which reports sse4.1 and no
+/// avx2 — both are scalar and the window closes, as it is closed on every other architecture.
+fn gates_differ(len: usize) -> bool {
+    #[cfg(target_arch = "x86_64")]
+    {
+        imaginarium::cpu_features::has_avx2()
+            && (crate::simd::AVX2_F32_LANES..crate::math::sum::AVX2_SUM_F32_CROSSOVER)
+                .contains(&len)
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    {
+        let _ = len;
+        false
+    }
+}
+
+/// The window `gates_differ` excludes is a real divergence, not a technicality worth ignoring, and
+/// pinning it keeps that exclusion honest: unify the gates again and this stops finding its witness
+/// and fails, rather than the exclusion quietly covering nothing.
+///
+/// Eight elements is one full AVX2 chunk with no tail. The `±1e7` pairs annihilate, leaving
+/// `2·0.001 + 2·0.0003` ≈ 3.25e-4 against terms of 1e7 — a ratio of 3e10. Neither residue is a power
+/// of two, so their low mantissa bits fall below the running total's f64 ULP of 2⁻²⁹ and get rounded
+/// away — differently by each order. `mean_f32` adds left to right; `weighted_mean_f32` sums lanes
+/// 0-3 and 4-7 apart before pairing them. The two land 2 f32 ULPs apart.
+#[test]
+#[cfg(target_arch = "x86_64")]
+fn the_split_gate_window_is_where_the_two_entry_points_diverge() {
+    if !imaginarium::cpu_features::has_avx2() {
+        return;
+    }
+
+    assert_eq!(
+        (1..64).filter(|&len| gates_differ(len)).collect::<Vec<_>>(),
+        (8..16).collect::<Vec<_>>()
+    );
+
+    let values = [1e7f32, 0.001, -1e7, 0.0003, 1e7, 0.001, -1e7, 0.0003];
+    assert_eq!(mean_f32(&values).to_bits(), 967468226);
+    assert_eq!(
+        weighted_mean_f32(&values, &[1.0f32; 8]).to_bits(),
+        967468224
+    );
 }
 
 /// Rounding once beats rounding twice, so `mean_f32` must not be reachable as `sum` then divide.

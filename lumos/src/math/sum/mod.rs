@@ -6,8 +6,9 @@
 //! are required to agree on it.
 //!
 //! Backend selection is gated on each vector's structural minimum — below one full vector there is
-//! nothing to widen — rather than on a measured throughput crossover. `bench.rs` is what says that
-//! is right, and `.notes/simd-todo.md` carries the numbers and what is still unmeasured.
+//! nothing to widen — everywhere except AVX2 [`sum_f32`], whose fallback is itself vectorized and so
+//! takes a measured crossover to beat. `bench.rs` is what says which of the two shapes a gate wants,
+//! and `.notes/simd-todo.md` carries the numbers.
 
 #[cfg(target_arch = "x86_64")]
 mod avx2;
@@ -26,6 +27,20 @@ use crate::simd::AVX2_F32_LANES;
 use crate::simd::NEON_F32_LANES;
 use crate::simd::dispatch;
 
+/// Length at which AVX2 [`sum_f32`] overtakes its fallback — measured, not structural.
+///
+/// Every other gate here is the lane minimum, because below one full vector there is nothing to
+/// widen. This one cannot be, because on x86_64 the fallback is not a scalar loop: SSE2 is baseline,
+/// so LLVM auto-vectorizes [`scalar::sum_f32`] into a 4-wide f64 accumulation and the AVX2 kernel
+/// has to beat *that*. One vector's worth of work does not amortize the reduction — at the 8-lane
+/// minimum the kernel runs 0.80x its fallback, breaks even at 10, and only pulls clear at 16
+/// (1.71x). [`weighted_sums`] has no such gap and keeps the lane minimum: its fallback carries two
+/// accumulators and a multiply, which LLVM vectorizes less well, so it is ahead from 8 elements up.
+///
+/// Set from `bench_sum_f32_crossover`; `.notes/simd-todo.md` carries the sweep it came from.
+#[cfg(target_arch = "x86_64")]
+const AVX2_SUM_F32_CROSSOVER: usize = 16;
+
 /// Sum f32 values, returning the unrounded f64 total.
 ///
 /// The suffix names the element type, not the return type: this takes f32 samples and hands back
@@ -35,7 +50,7 @@ use crate::simd::dispatch;
 /// length it matters most.
 pub(crate) fn sum_f32(values: &[f32]) -> f64 {
     dispatch! {
-        x86: avx2 if values.len() >= AVX2_F32_LANES => avx2::sum_f32(values),
+        x86: avx2 if values.len() >= AVX2_SUM_F32_CROSSOVER => avx2::sum_f32(values),
         aarch64 if values.len() >= NEON_F32_LANES => neon::sum_f32(values),
         scalar => scalar::sum_f32(values),
     }
@@ -52,12 +67,18 @@ pub(crate) fn mean_f32(values: &[f32]) -> f32 {
 
 /// Weighted mean of f32 values, rounded to f32 exactly once.
 ///
-/// Agrees with [`mean_f32`] bit for bit when the weights are equal, by construction rather than by
-/// luck: `v * w` is exact in f64, and every backend accumulates the numerator with the same lane
-/// split, reduction order and scalar tail as its [`sum_f32`], so unit weights walk the identical
-/// values through the identical additions. The combine reaches the same pixel through either
-/// function depending on whether frame weights are in play, so a disagreement between them would
-/// make a stack's output depend on which entry point it took.
+/// Agrees with [`mean_f32`] bit for bit when the weights are equal *and both reach the same rung*:
+/// `v * w` is exact in f64, and each backend accumulates the numerator with the same lane split,
+/// reduction order and scalar tail as its own [`sum_f32`], so unit weights walk the identical values
+/// through the identical additions.
+///
+/// The two no longer reach the same rung everywhere. On x86 this gates at [`AVX2_F32_LANES`] while
+/// [`sum_f32`] waits for [`AVX2_SUM_F32_CROSSOVER`], so from 8 to 15 elements the weighted numerator
+/// reassociates into lanes while the plain mean is still accumulating sequentially. On values that
+/// cancel, that window puts the two up to ~500 f32 ULPs apart. Nothing in the pipeline compares them
+/// there — the combine only ever arrives through this function, and [`mean_f32`]'s one caller is
+/// sigma-clipped statistics — so the window is documented rather than closed. Closing it would mean
+/// giving up the vector arm at exactly the frame counts a stack is most often built from.
 ///
 /// A zero total weight returns 0.0 — every frame contributing to this pixel was rejected or
 /// distrusted, which is data, not a fault. An empty slice is a logic error, as it is for

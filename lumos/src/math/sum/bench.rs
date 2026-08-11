@@ -10,8 +10,10 @@ use std::hint::black_box;
 use crate::math::sum::{scalar, sum_f32, weighted_mean_f32};
 
 const BENCH_SIZE: usize = 10_000;
-const CROSSOVER_SIZES: [usize; 15] = [
-    1, 2, 3, 4, 8, 16, 32, 64, 128, 256, 512, 1_024, 2_048, 4_096, 10_000,
+/// The 6/10/12/24 rungs are what make `AVX2_SUM_F32_CROSSOVER` reproducible: stepping 4, 8, 16
+/// jumps clean over the region the gate sits in, which is how a losing 8 went unnoticed.
+const CROSSOVER_SIZES: [usize; 19] = [
+    1, 2, 3, 4, 6, 8, 10, 12, 16, 24, 32, 64, 128, 256, 512, 1_024, 2_048, 4_096, 10_000,
 ];
 
 fn make_test_data() -> Vec<f32> {
