@@ -107,6 +107,8 @@ impl KdTree {
             return None;
         }
 
+        // Owned rather than borrowed: `build_invariant_tree` builds its invariants into a local
+        // `Vec` and returns the tree over them, so there is no slice for the tree to borrow from.
         let points_vec: Vec<DVec2> = points.to_vec();
         let mut indices: Vec<usize> = (0..points.len()).collect();
 

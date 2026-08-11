@@ -108,6 +108,92 @@ fn common_domain_excludes_pixels_covered_only_by_border_fill() {
     assert_eq!(domain.sample_count, 2);
 }
 
+/// Global norms are fitted against whichever frame was selected as the reference, not against
+/// frame 0 and rescaled afterwards.
+///
+/// The same three frames as the test below, but with the source noise that picks the reference
+/// arranged so frame 2 wins it. Every gain and offset must then be the one that carries a frame
+/// onto *frame 2*, and frame 2 itself must come back exactly identity.
+///
+/// The three frames are exact affine transforms of each other, which is deliberate: on data this
+/// clean, fitting `a→c` and chaining `a→b→c` agree, so this pins the indexing rather than the
+/// numerics. What the direct fit buys shows up only where the errors-in-variables fit clips
+/// residuals and weights each side by its own noise, and that is a real-data check.
+#[test]
+fn global_norms_are_fitted_against_the_selected_reference() {
+    let dimensions = ImageDimensions::new((5, 1), 3);
+    let coverage = Buffer2::new(5, 1, vec![0.0, 1.0, 1.0, 1.0, 0.0]);
+    // Common domain is pixels 1..=3. Per channel the three frames are affine images of frame 2:
+    //   ch0: f0 = [2,3,4], f1 = [20,30,40], f2 = [8,9,10]   → f0·1 + 6, f1·0.1 + 6
+    //   ch1: f0 = [20,30,40], f1 = [2,3,4], f2 = [200,300,400] → f0·10 + 0, f1·100 + 0
+    //   ch2: f0 = [5,7,9], f1 = [50,70,90], f2 = [30,40,50] → f0·5 + 5, f1·0.5 + 5
+    let channels = [
+        [
+            vec![1.0, 2.0, 3.0, 4.0, 5.0],
+            vec![10.0, 20.0, 30.0, 40.0, 50.0],
+            vec![3.0, 5.0, 7.0, 9.0, 11.0],
+        ],
+        [
+            vec![10.0, 20.0, 30.0, 40.0, 50.0],
+            vec![1.0, 2.0, 3.0, 4.0, 5.0],
+            vec![0.0, 50.0, 70.0, 90.0, 0.0],
+        ],
+        [
+            vec![7.0, 8.0, 9.0, 10.0, 11.0],
+            vec![100.0, 200.0, 300.0, 400.0, 500.0],
+            vec![20.0, 30.0, 40.0, 50.0, 60.0],
+        ],
+    ];
+    // Frame 2 is the least noisy, so `select_reference_frame` picks it.
+    let source_mads = [3.0f32, 2.0, 1.0];
+    let frames = channels
+        .into_iter()
+        .zip(source_mads)
+        .map(|(channels, mad)| {
+            StoredFrame::from_memory(
+                LinearImage::from_planar_channels(dimensions, channels),
+                WarpQuality::from_coverage(coverage.clone()),
+                FrameStats {
+                    channels: [channel_stats(0.0, mad); 3].into_iter().collect(),
+                    quantization_sigma: None,
+                },
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        select_reference_frame(frames.iter().map(|frame| &frame.source_stats)),
+        2,
+        "the fixture must not select frame 0, or it proves nothing"
+    );
+
+    let norms = compute_frame_norms(
+        &frames,
+        dimensions,
+        Normalization::Global,
+        &CancelToken::never(),
+    )
+    .unwrap()
+    .expect("global normalization returns parameters");
+
+    let expected = [
+        [(1.0, 6.0), (10.0, 0.0), (5.0, 5.0)],
+        [(0.1, 6.0), (100.0, 0.0), (0.5, 5.0)],
+        [(1.0, 0.0), (1.0, 0.0), (1.0, 0.0)],
+    ];
+    for (frame_index, frame) in norms.iter().enumerate() {
+        for (channel, &(gain, offset)) in expected[frame_index].iter().enumerate() {
+            assert_eq!(
+                frame.channels[channel].gain, gain,
+                "frame {frame_index} channel {channel} gain"
+            );
+            assert_eq!(
+                frame.channels[channel].offset, offset,
+                "frame {frame_index} channel {channel} offset"
+            );
+        }
+    }
+}
+
 #[test]
 fn registered_rgb_measurements_preserve_pair_order_and_honor_cancellation() {
     let dimensions = ImageDimensions::new((5, 1), 3);
@@ -148,6 +234,7 @@ fn registered_rgb_measurements_preserve_pair_order_and_honor_cancellation() {
         &frames,
         dimensions,
         Normalization::Multiplicative,
+        0,
         &CancelToken::never(),
     )
     .unwrap() else {
@@ -172,10 +259,11 @@ fn registered_rgb_measurements_preserve_pair_order_and_honor_cancellation() {
         }
     }
 
-    let RegisteredMeasurements::GlobalNormsToFirst(norms) = measure_registered_frames(
+    let RegisteredMeasurements::GlobalNorms(norms) = measure_registered_frames(
         &frames,
         dimensions,
         Normalization::Global,
+        0,
         &CancelToken::never(),
     )
     .unwrap() else {
@@ -201,7 +289,7 @@ fn registered_rgb_measurements_preserve_pair_order_and_honor_cancellation() {
 
     let cancel = CancelToken::new();
     cancel.cancel();
-    let error =
-        measure_registered_frames(&frames, dimensions, Normalization::Global, &cancel).unwrap_err();
+    let error = measure_registered_frames(&frames, dimensions, Normalization::Global, 0, &cancel)
+        .unwrap_err();
     assert!(matches!(error, Error::Cancelled));
 }

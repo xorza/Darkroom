@@ -1,5 +1,6 @@
 //! Deterministic tests for the raw-light pipeline's memory tier and concurrency arithmetic.
 
+use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::raw::demosaic::DemosaicMemory;
 use crate::memory::{MemoryPlan, PerFrameBytes, fits_in_memory, memory_budget};
 
@@ -31,6 +32,45 @@ fn xtrans(plane_bytes: usize) -> DemosaicMemory {
 
 fn available_for_usable(usable: u64) -> u64 {
     (usable * 100).div_ceil(75)
+}
+
+/// A run handed decoded frames plans exactly as one that decoded them into the same bytes with no
+/// transient arena — that equivalence is the whole content of `for_decoded_frames`, which exists so
+/// `align_and_stack` need not encode "already decoded" as a `DemosaicMemory` with equal halves.
+///
+/// Checked across both tier outcomes, since the two halves feed `fits_in_ram` differently: the
+/// decode peak sets one floor and the resident warped set another.
+#[test]
+fn a_decoded_set_plans_as_a_decode_with_no_transient() {
+    let mut tiers = Vec::new();
+    for (mib, frames, available) in [(4u64, 10usize, 8 * GIB), (100, 40, 4 * GIB)] {
+        let dimensions = ImageDimensions::new(((mib * MIB) as usize / size_of::<f32>(), 1), 3);
+        let frame_bytes = dimensions.sample_count() * size_of::<f32>();
+        let threads = 8;
+
+        tiers.push(
+            MemoryPlan::for_decoded_frames(dimensions, frames, threads, available).fits_in_ram,
+        );
+        assert_eq!(
+            MemoryPlan::for_decoded_frames(dimensions, frames, threads, available),
+            MemoryPlan::plan(
+                dimensions.pixel_count() * size_of::<f32>(),
+                DemosaicMemory {
+                    output_bytes: frame_bytes,
+                    peak_bytes: frame_bytes,
+                },
+                frames,
+                threads,
+                available,
+            ),
+            "{frames} frames of {mib} MiB against {available} bytes"
+        );
+    }
+    assert_eq!(
+        tiers,
+        [true, false],
+        "the two cases must land on opposite sides of the tier decision"
+    );
 }
 
 #[test]
