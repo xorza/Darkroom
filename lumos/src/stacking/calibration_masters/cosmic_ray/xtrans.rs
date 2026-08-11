@@ -10,14 +10,14 @@ use rayon::prelude::*;
 use crate::bit_buffer2::BitBuffer2;
 use crate::io::image::cfa::CfaType;
 use crate::math::size2us::Size2us;
-use crate::math::statistics::{mad_f32_fast, mad_to_sigma, median_f32_mut, representational_floor};
+use crate::math::statistics::{mad_f32_fast, mad_to_sigma, median_f32_mut};
 use crate::math::vec2us::Vec2us;
 use crate::stacking::calibration_masters::same_color::XTransOffsets;
 
 use crate::stacking::calibration_masters::cosmic_ray::config::{CosmicRayConfig, NoiseEstimation};
 use crate::stacking::calibration_masters::cosmic_ray::masks::CrMasks;
 use crate::stacking::calibration_masters::cosmic_ray::mono::{
-    empirical_noise, parametric_noise_into,
+    degenerate_sigma, empirical_noise, parametric_noise_into,
 };
 
 /// Radius (px) scanned for same-color neighbors — one X-Trans period (6×6) contains every color.
@@ -205,17 +205,16 @@ impl XtransScratch {
                         by_color[c].push(scene.pix[y * size.width + x]);
                     }
                 }
-                // Both the seed for a colour with no samples and the fallback for a flat one come
-                // from the frame's own magnitude, so a scale below any fixed constant — which is
-                // where a 32-bit FITS lands — still yields a usable, strictly positive σ.
-                let frame_floor = representational_floor(scene.pix);
-                let mut stats = [(0.0f32, frame_floor); 3];
+                // The seed is unreachable — a colour with no samples has no pixel mapping to it
+                // either, so nothing reads `stats[c]` — and only has to be positive.
+                let mut stats = [(0.0f32, f32::MIN_POSITIVE); 3];
                 for (c, vals) in by_color.iter_mut().enumerate() {
                     if vals.is_empty() {
                         continue;
                     }
                     let bg = median_f32_mut(vals);
-                    let sigma = mad_to_sigma(mad_f32_fast(vals, bg, frame)).max(frame_floor);
+                    let sigma =
+                        mad_to_sigma(mad_f32_fast(vals, bg, frame)).max(degenerate_sigma(bg));
                     stats[c] = (bg, sigma);
                 }
                 out.clear();

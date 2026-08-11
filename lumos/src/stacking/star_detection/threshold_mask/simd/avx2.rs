@@ -1,7 +1,10 @@
 //! AVX2 SIMD implementation for packed threshold mask.
 
+use std::ops::Range;
+
 use std::arch::x86_64::*;
 
+use crate::stacking::star_detection::threshold_mask::ThresholdParams;
 use crate::stacking::star_detection::threshold_mask::simd::process_words_scalar;
 
 /// AVX2 packed threshold kernel: 8 floats/group × 8 groups = exactly one 64-pixel word, with the
@@ -10,31 +13,28 @@ use crate::stacking::star_detection::threshold_mask::simd::process_words_scalar;
 /// `px == threshold` boundary. `WITH_BG` selects `bg + σ·noise` vs `σ·noise`; `bg` may be empty when
 /// false. See `process_words_scalar`.
 #[target_feature(enable = "avx2")]
-#[allow(clippy::too_many_arguments)]
 pub(super) unsafe fn process_words_avx2<const WITH_BG: bool>(
     pixels: &[f32],
     bg: &[f32],
     noise: &[f32],
-    sigma_threshold: f32,
-    min_noise: f32,
+    threshold: ThresholdParams,
     words: &mut [u64],
-    pixel_offset: usize,
-    pixel_end: usize,
+    pixel_span: Range<usize>,
 ) {
     // SAFETY: every operation below needs the ISA this function's
     // `target_feature` establishes, and nothing else.
     unsafe {
-        let sigma_vec = _mm256_set1_ps(sigma_threshold);
-        let min_noise_vec = _mm256_set1_ps(min_noise);
+        let sigma_vec = _mm256_set1_ps(threshold.sigma);
+        let min_noise_vec = _mm256_set1_ps(threshold.min_noise);
 
         let pixels_ptr = pixels.as_ptr();
         let bg_ptr = bg.as_ptr();
         let noise_ptr = noise.as_ptr();
 
         for (word_idx, word) in words.iter_mut().enumerate() {
-            let base_pixel = pixel_offset + word_idx * 64;
+            let base_pixel = pixel_span.start + word_idx * 64;
 
-            if base_pixel + 64 <= pixel_end {
+            if base_pixel + 64 <= pixel_span.end {
                 let mut bits = 0u64;
 
                 for group in 0..8 {
@@ -64,11 +64,9 @@ pub(super) unsafe fn process_words_avx2<const WITH_BG: bool>(
                     pixels,
                     bg,
                     noise,
-                    sigma_threshold,
-                    min_noise,
+                    threshold,
                     std::slice::from_mut(word),
-                    base_pixel,
-                    pixel_end,
+                    base_pixel..pixel_span.end,
                 );
             }
         }
