@@ -4,26 +4,12 @@ What is left to *do* after the `simd::dispatch!` conversion, the constant/hygien
 layout move. The findings themselves stay in `lumos-review.md`; this file is the action list.
 Delete an item once it is done.
 
-## Blocked — the aarch64 arms have never been compiled
-
-There is no CI and no aarch64 hardware here, and `cargo check -p lumos --target
-aarch64-unknown-linux-gnu` cannot run either: it dies in `libraw-rs-sys`'s build script for want of
-an `aarch64-linux-gnu-g++`. So no NEON arm in the crate has been compiled by anything, before or
-after the `dispatch!` conversion — and the `#[target_feature(enable = "neon")]` removal from
-`math/sum/simd/neon.rs` and `median_filter/simd/neon.rs` is reasoned, not compiled. Every NEON file
-was also moved and had its module paths rewritten during the layout stage, unverified.
-
-- [ ] Install the cross toolchain (`aarch64-linux-gnu-gcc`, which brings the C++ driver
-      `cc-rs` is looking for), and record it in `~/SYSTEM-CHANGES.md`.
-- [ ] Append `cargo check -p lumos --target aarch64-unknown-linux-gnu --all-targets --all-features`
-      to the verification chain for any change that touches a SIMD backend.
-
 ## Open decision — delete the median9 backends?
 
 Everything else stage 4 set out to decide has been measured and settled: the weighted-mean SSE rung
 earns its place (~1.35x over scalar above n=128), the shared 128 threshold is right for both the 8-
 and the 4-lane kernel, and `sum_f32` deliberately has no SSE rung — the note on the function says
-why. Only median9 is open, and it needs an aarch64 machine.
+why. Only median9 is open, and the aarch64 measurement it was waiting on can now be taken here.
 
 - [ ] Decide whether `median_filter/simd/x86/` (190 lines), `simd/neon.rs` (~90), the shared
       `median9_simd_sort!` macro (85) and `x86/tests.rs` (190) are worth carrying, given
@@ -40,6 +26,10 @@ why. Only median9 is open, and it needs an aarch64 machine.
       lines, so pick a direction before spending the diff.
 
 ## Benchmarking notes for whoever picks this up
+
+These were taken on the Linux x86_64 13980HX box. The notes below about `taskset`, P/E-core
+pinning, `/sys/devices/cpu_core/cpus` and the AVX2 labels apply to that machine, not to the
+aarch64-apple-darwin host, which has no `taskset` and a different core-type story.
 
 - Interleave the A/B rounds. This machine drifts far enough between runs that a single
   before/after pair is worthless — `bench_warp_bilinear_2k` swung 1.7-4.1ms across runs of
