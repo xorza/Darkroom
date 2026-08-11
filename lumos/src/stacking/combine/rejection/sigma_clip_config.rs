@@ -3,20 +3,18 @@
 use crate::error::InvalidConfigField;
 use crate::math::statistics::mad_to_sigma;
 use crate::stacking::combine::rejection::scratch_buffers::ScratchBuffers;
-use crate::stacking::combine::rejection::{sorted_mad, validate_sigma_bounds};
+use crate::stacking::combine::rejection::sigma_bounds::SigmaBounds;
+use crate::stacking::combine::rejection::{begin_rejection, sorted_mad, validate_max_iterations};
 
 /// Configuration for sigma clipping.
 ///
 /// Supports both symmetric and asymmetric thresholds. For symmetric clipping,
-/// use `new()` which sets `sigma_low == sigma_high`. For asymmetric clipping
-/// (e.g. aggressive rejection of bright outliers like satellites/cosmic rays),
-/// use `new_asymmetric()` with separate low/high thresholds.
+/// use `new()`; for asymmetric clipping (e.g. aggressive rejection of bright outliers like
+/// satellites/cosmic rays), use `new_asymmetric()` with separate low/high thresholds.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SigmaClipConfig {
-    /// Sigma threshold for low outliers (below median).
-    pub sigma_low: f32,
-    /// Sigma threshold for high outliers (above median).
-    pub sigma_high: f32,
+    /// How far either side of the median a value may sit, in sigma.
+    pub sigma: SigmaBounds,
     /// Maximum number of iterations for iterative clipping.
     pub max_iterations: u32,
 }
@@ -24,8 +22,7 @@ pub struct SigmaClipConfig {
 impl Default for SigmaClipConfig {
     fn default() -> Self {
         Self {
-            sigma_low: 2.5,
-            sigma_high: 2.5,
+            sigma: SigmaBounds::symmetric(2.5),
             max_iterations: 3,
         }
     }
@@ -35,8 +32,7 @@ impl SigmaClipConfig {
     /// Create symmetric sigma clipping (same threshold for low and high).
     pub fn new(sigma: f32, max_iterations: u32) -> Self {
         Self {
-            sigma_low: sigma,
-            sigma_high: sigma,
+            sigma: SigmaBounds::symmetric(sigma),
             max_iterations,
         }
     }
@@ -44,28 +40,22 @@ impl SigmaClipConfig {
     /// Create asymmetric sigma clipping with separate low/high thresholds.
     pub fn new_asymmetric(sigma_low: f32, sigma_high: f32, max_iterations: u32) -> Self {
         Self {
-            sigma_low,
-            sigma_high,
+            sigma: SigmaBounds::asymmetric(sigma_low, sigma_high),
             max_iterations,
         }
     }
 
     /// Validate the clip thresholds and iteration count.
     pub(super) fn validate(&self) -> Result<(), InvalidConfigField> {
-        validate_sigma_bounds(self.sigma_low, self.sigma_high)?;
-        InvalidConfigField::check(
-            self.max_iterations >= 1,
-            "max_iterations",
-            "at least 1",
-            self.max_iterations as f64,
-        )
+        self.sigma.validate()?;
+        validate_max_iterations(self.max_iterations)
     }
 
     /// Partition values by sigma clipping, returning the number of survivors.
     ///
     /// After return, `values[..remaining]` contains surviving values and
     /// `indices[..remaining]` contains their original frame indices.
-    /// Supports both symmetric (`sigma_low == sigma_high`) and asymmetric thresholds.
+    /// Supports both symmetric and asymmetric thresholds.
     ///
     /// When rejection is actually warranted, `values` (with its co-indices) is sorted **once**.
     /// Each iteration rejects a `[center − kσ, center + kσ]` band, which on sorted data is a
@@ -79,16 +69,12 @@ impl SigmaClipConfig {
     /// The cheap `no_outliers_possible` screen runs **before** sorting: clean pixels (the majority
     /// in a smooth flat/light) can't reject anything, so they skip the sort entirely.
     pub(super) fn reject(&self, values: &mut [f32], scratch: &mut ScratchBuffers) -> usize {
-        debug_assert!(!values.is_empty());
-
-        scratch.reset_indices(values.len());
-
-        let n0 = values.len();
-        if n0 <= 2 {
-            return n0;
+        if let Some(survivors) = begin_rejection(values, scratch, 3) {
+            return survivors;
         }
 
-        let min_sigma = self.sigma_low.min(self.sigma_high);
+        let n0 = values.len();
+        let min_sigma = self.sigma.low.min(self.sigma.high);
 
         // Fast path: if no value can exceed the threshold, nothing is rejected — return without
         // paying for the sort. (Order-independent, so it's valid on the unsorted input.)
@@ -124,8 +110,8 @@ impl SigmaClipConfig {
 
             // Keep `center − sigma_low·σ <= v <= center + sigma_high·σ`. On sorted data this is a
             // contiguous run; binary-search its inclusive bounds.
-            let low_cut = center - self.sigma_low * sigma;
-            let high_cut = center + self.sigma_high * sigma;
+            let low_cut = center - self.sigma.low * sigma;
+            let high_cut = center + self.sigma.high * sigma;
             let new_lo = lo + active.partition_point(|&v| v < low_cut);
             let new_hi = lo + active.partition_point(|&v| v <= high_cut);
 

@@ -4,7 +4,8 @@
 
 use crate::error::InvalidConfigField;
 use crate::stacking::combine::rejection::scratch_buffers::ScratchBuffers;
-use crate::stacking::combine::rejection::{compact_within, validate_sigma_bounds};
+use crate::stacking::combine::rejection::sigma_bounds::SigmaBounds;
+use crate::stacking::combine::rejection::{begin_rejection, compact_within};
 
 /// Configuration for winsorized sigma clipping.
 ///
@@ -12,16 +13,14 @@ use crate::stacking::combine::rejection::{compact_within, validate_sigma_bounds}
 /// 1. **Robust estimation**: Iteratively Winsorize with Huber's c=1.5 constant
 ///    until sigma converges, then apply 1.134 bias correction to get robust
 ///    (center, sigma) estimates.
-/// 2. **Rejection**: Standard sigma clipping using the robust estimates and
-///    user-specified sigma_low/sigma_high thresholds.
+/// 2. **Rejection**: Standard sigma clipping using the robust estimates and the caller's
+///    thresholds.
 ///
 /// This is more robust for small sample sizes than standard sigma clipping.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct WinsorizedClipConfig {
-    /// Sigma threshold for low outliers (below median).
-    pub sigma_low: f32,
-    /// Sigma threshold for high outliers (above median).
-    pub sigma_high: f32,
+    /// How far either side of the robust centre a value may sit, in sigma.
+    pub sigma: SigmaBounds,
 }
 
 /// Huber's constant for Winsorization boundaries.
@@ -36,8 +35,7 @@ const WINSORIZE_MAX_ITER: u32 = 50;
 impl Default for WinsorizedClipConfig {
     fn default() -> Self {
         Self {
-            sigma_low: 2.5,
-            sigma_high: 2.5,
+            sigma: SigmaBounds::symmetric(2.5),
         }
     }
 }
@@ -45,21 +43,19 @@ impl Default for WinsorizedClipConfig {
 impl WinsorizedClipConfig {
     pub fn new(sigma: f32) -> Self {
         Self {
-            sigma_low: sigma,
-            sigma_high: sigma,
+            sigma: SigmaBounds::symmetric(sigma),
         }
     }
 
     pub fn new_asymmetric(sigma_low: f32, sigma_high: f32) -> Self {
         Self {
-            sigma_low,
-            sigma_high,
+            sigma: SigmaBounds::asymmetric(sigma_low, sigma_high),
         }
     }
 
     /// Validate the clip thresholds.
     pub(super) fn validate(&self) -> Result<(), InvalidConfigField> {
-        validate_sigma_bounds(self.sigma_low, self.sigma_high)
+        self.sigma.validate()
     }
 
     /// Phase 1: Iteratively Winsorize to get a robust [`WinsorizedEstimate`].
@@ -122,15 +118,10 @@ impl WinsorizedClipConfig {
 
     /// Phase 2: Reject outliers using the robust estimate from phase 1.
     ///
-    /// Standard sigma clipping with the [`WinsorizedEstimate`] and the user's
-    /// sigma_low/sigma_high thresholds.
+    /// Standard sigma clipping with the [`WinsorizedEstimate`] and the caller's thresholds.
     pub(super) fn reject(&self, values: &mut [f32], scratch: &mut ScratchBuffers) -> usize {
-        debug_assert!(!values.is_empty());
-
-        scratch.reset_indices(values.len());
-
-        if values.len() <= 2 {
-            return values.len();
+        if let Some(survivors) = begin_rejection(values, scratch, 3) {
+            return survivors;
         }
 
         let estimate = self.robust_estimate(values, &mut scratch.estimate_values);
@@ -144,8 +135,10 @@ impl WinsorizedClipConfig {
             values,
             &mut scratch.indices,
             n,
-            self.sigma_low * estimate.sigma,
-            self.sigma_high * estimate.sigma,
+            SigmaBounds::asymmetric(
+                self.sigma.low * estimate.sigma,
+                self.sigma.high * estimate.sigma,
+            ),
             |_| estimate.center,
         )
     }

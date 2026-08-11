@@ -2,6 +2,7 @@
 //! values, for stacks large enough to make the test's Gaussian assumption reasonable.
 
 use crate::error::InvalidConfigField;
+use crate::stacking::combine::rejection::begin_rejection;
 use crate::stacking::combine::rejection::scratch_buffers::ScratchBuffers;
 use statrs::distribution::{ContinuousCDF, StudentsT};
 
@@ -59,14 +60,11 @@ impl GesdConfig {
     /// After return, `values[..remaining]` contains surviving values and
     /// `indices[..remaining]` contains their original frame indices.
     pub(super) fn reject(&self, values: &mut [f32], scratch: &mut ScratchBuffers) -> usize {
-        debug_assert!(!values.is_empty());
+        if let Some(survivors) = begin_rejection(values, scratch, 4) {
+            return survivors;
+        }
 
         let original_len = values.len();
-        scratch.reset_indices(original_len);
-
-        if original_len <= 3 {
-            return original_len;
-        }
 
         let max_outliers = self
             .max_outliers_for_size(original_len)

@@ -1,5 +1,7 @@
 //! Tier selection, frame loading, and persistent cache sidecars.
 
+use std::sync::OnceLock;
+
 use std::io::Error as IoError;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
@@ -137,6 +139,7 @@ fn load_tiered<I: StackableImage, P: AsRef<Path> + Sync>(
             config: config.clone(),
             progress,
             cancel,
+            chunk_memory: OnceLock::new(),
         },
     })
 }

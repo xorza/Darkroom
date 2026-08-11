@@ -5,6 +5,8 @@ mod loader;
 pub(crate) mod sample;
 pub(crate) mod validation;
 
+use std::sync::OnceLock;
+
 use common::CancelToken;
 use imaginarium::Buffer2;
 use rayon::prelude::*;
@@ -40,14 +42,13 @@ use crate::stacking::stack_product::coverage::Coverage;
 use crate::stacking::stack_product::quality_map::QualityMap;
 use crate::stacking::stack_product::quality_planes::QualityPlanes;
 
-/// Channel-shaped result of one combine pass, plus the memory snapshot taken before the output
-/// planes were allocated. A plane is `None` when [`QualityPlanes`] did not ask for it.
+/// Channel-shaped result of one combine pass. A plane is `None` when [`QualityPlanes`] did not
+/// ask for it.
 #[derive(Debug)]
 pub(crate) struct CombineOutput {
     pub(super) pixels: LinearPixels,
     weight: Option<LinearPixels>,
     linear_variance: Option<LinearPixels>,
-    chunk_available_memory: Option<u64>,
 }
 
 /// The output rows one combine row-task writes: the combined value, plus whichever ancillary
@@ -135,6 +136,7 @@ impl FrameCache {
                 config,
                 progress,
                 cancel,
+                chunk_memory: OnceLock::new(),
             },
         })
     }
@@ -205,6 +207,7 @@ impl FrameCache {
                 config: config.clone(),
                 progress,
                 cancel,
+                chunk_memory: OnceLock::new(),
             },
         })
     }
@@ -220,7 +223,6 @@ impl FrameCache {
             pixels,
             weight: weight_pixels,
             linear_variance: linear_variance_pixels,
-            chunk_available_memory,
         } = combined;
         let dimensions = self.core.dimensions;
         let image = LinearImage {
@@ -252,11 +254,15 @@ impl FrameCache {
         let inv_frames = 1.0 / frame_count as f32;
 
         // Coverage planes share their frame's tier, so they may be mmap-backed: read them in the
-        // same row-aligned chunks the combine uses.
-        let chunk_rows = chunk_available_memory.map_or(height, |available_memory| {
-            coverage_chunk_memory_layout(&self.frames, dimensions.channels(), planes)
-                .optimal_chunk_rows(dimensions.size(), available_memory)
-        });
+        // same row-aligned chunks the combine uses, against the reading the combine sized against
+        // — `CacheCore::chunk_available_memory` took it there and hands back the same figure here.
+        let chunk_rows = self
+            .core
+            .chunk_available_memory()
+            .map_or(height, |available_memory| {
+                coverage_chunk_memory_layout(&self.frames, dimensions.channels(), planes)
+                    .optimal_chunk_rows(dimensions.size(), available_memory)
+            });
 
         let mut start_row = 0;
         while start_row < height {
@@ -337,7 +343,6 @@ impl FrameCache {
         let dimensions = self.core.dimensions;
         let memory = weighted_chunk_memory_layout(&self.frames, dimensions.channels(), planes);
         // Coverage sizing must reuse this pre-output snapshot or resident planes are charged twice.
-        let chunk_available_memory = self.core.chunk_available_memory();
         let mut output_weight = planes.weight.then(|| LinearPixels::new_zeroed(dimensions));
         let mut output_linear_variance = planes
             .variance
@@ -349,7 +354,7 @@ impl FrameCache {
             &self.frames,
             |frame| &frame.channels,
             memory,
-            chunk_available_memory,
+            self.core.chunk_available_memory(),
             |output_slice, ctx| {
                 let ChunkContext {
                     frames,
@@ -469,13 +474,14 @@ impl FrameCache {
             pixels,
             weight: output_weight,
             linear_variance: output_linear_variance,
-            chunk_available_memory,
         }
     }
 }
 
 #[cfg(test)]
 pub(crate) mod internals {
+    use std::sync::OnceLock;
+
     use common::CancelToken;
 
     use crate::stacking::combine::cache::FrameCache;
@@ -512,6 +518,7 @@ pub(crate) mod internals {
                 config: CacheConfig::default(),
                 progress: ProgressCallback::default(),
                 cancel: CancelToken::never(),
+                chunk_memory: OnceLock::new(),
             };
             let frame_norms = compute_frame_norms(&frames, dimensions, normalization, &core.cancel)
                 .expect("frames without coverage have no failing normalization path");

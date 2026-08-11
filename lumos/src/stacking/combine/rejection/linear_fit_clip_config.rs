@@ -4,7 +4,10 @@
 use crate::error::InvalidConfigField;
 use crate::math::statistics::{mad_f32_fast, mad_to_sigma, median_f32_fast};
 use crate::stacking::combine::rejection::scratch_buffers::ScratchBuffers;
-use crate::stacking::combine::rejection::{compact_within, validate_sigma_bounds};
+use crate::stacking::combine::rejection::sigma_bounds::SigmaBounds;
+use crate::stacking::combine::rejection::{
+    begin_rejection, compact_within, validate_max_iterations,
+};
 
 /// Configuration for linear fit clipping.
 ///
@@ -13,10 +16,8 @@ use crate::stacking::combine::rejection::{compact_within, validate_sigma_bounds}
 /// Works well with images containing sky gradients.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct LinearFitClipConfig {
-    /// Sigma threshold for low outliers (below the fit).
-    pub sigma_low: f32,
-    /// Sigma threshold for high outliers (above the fit).
-    pub sigma_high: f32,
+    /// How far either side of the fitted line a value may sit, in sigma.
+    pub sigma: SigmaBounds,
     /// Maximum number of iterations.
     pub max_iterations: u32,
 }
@@ -24,8 +25,7 @@ pub struct LinearFitClipConfig {
 impl Default for LinearFitClipConfig {
     fn default() -> Self {
         Self {
-            sigma_low: 3.0,
-            sigma_high: 3.0,
+            sigma: SigmaBounds::symmetric(3.0),
             max_iterations: 3,
         }
     }
@@ -34,21 +34,15 @@ impl Default for LinearFitClipConfig {
 impl LinearFitClipConfig {
     pub fn new(sigma_low: f32, sigma_high: f32, max_iterations: u32) -> Self {
         Self {
-            sigma_low,
-            sigma_high,
+            sigma: SigmaBounds::asymmetric(sigma_low, sigma_high),
             max_iterations,
         }
     }
 
     /// Validate the clip thresholds and iteration count.
     pub(super) fn validate(&self) -> Result<(), InvalidConfigField> {
-        validate_sigma_bounds(self.sigma_low, self.sigma_high)?;
-        InvalidConfigField::check(
-            self.max_iterations >= 1,
-            "max_iterations",
-            "at least 1",
-            self.max_iterations as f64,
-        )
+        self.sigma.validate()?;
+        validate_max_iterations(self.max_iterations)
     }
 
     /// Partition values by linear fit clipping, returning the number of survivors.
@@ -61,12 +55,8 @@ impl LinearFitClipConfig {
     /// After return, `values[..remaining]` contains surviving values and
     /// `indices[..remaining]` contains their original frame indices.
     pub(super) fn reject(&self, values: &mut [f32], scratch: &mut ScratchBuffers) -> usize {
-        debug_assert!(!values.is_empty());
-
-        scratch.reset_indices(values.len());
-
-        if values.len() <= 3 {
-            return values.len();
+        if let Some(survivors) = begin_rejection(values, scratch, 4) {
+            return survivors;
         }
 
         let mut len = values.len();
@@ -95,8 +85,7 @@ impl LinearFitClipConfig {
                     values,
                     &mut scratch.indices,
                     len,
-                    self.sigma_low * sigma,
-                    self.sigma_high * sigma,
+                    SigmaBounds::asymmetric(self.sigma.low * sigma, self.sigma.high * sigma),
                     |_| center,
                 );
             } else {
@@ -145,8 +134,7 @@ impl LinearFitClipConfig {
                     values,
                     &mut scratch.indices,
                     len,
-                    self.sigma_low * sigma,
-                    self.sigma_high * sigma,
+                    SigmaBounds::asymmetric(self.sigma.low * sigma, self.sigma.high * sigma),
                     |i| a + b * i as f32,
                 );
 

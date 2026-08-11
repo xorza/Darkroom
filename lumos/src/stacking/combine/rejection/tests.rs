@@ -19,15 +19,15 @@ use crate::stacking::combine::rejection::*;
 fn rejection_config_defaults() {
     let sigma = SigmaClipConfig::default();
     assert_eq!(
-        (sigma.sigma_low, sigma.sigma_high, sigma.max_iterations),
+        (sigma.sigma.low, sigma.sigma.high, sigma.max_iterations),
         (2.5, 2.5, 3)
     );
 
     let winsorized = WinsorizedClipConfig::default();
-    assert_eq!((winsorized.sigma_low, winsorized.sigma_high), (2.5, 2.5));
+    assert_eq!((winsorized.sigma.low, winsorized.sigma.high), (2.5, 2.5));
 
     let linear_fit = LinearFitClipConfig::default();
-    assert_eq!((linear_fit.sigma_low, linear_fit.sigma_high), (3.0, 3.0));
+    assert_eq!((linear_fit.sigma.low, linear_fit.sigma.high), (3.0, 3.0));
 
     let percentile = PercentileClipConfig::default();
     assert_eq!(
@@ -42,8 +42,8 @@ fn sigma_clip_constructors_place_their_arguments() {
     let symmetric = SigmaClipConfig::new(3.0, 5);
     assert_eq!(
         (
-            symmetric.sigma_low,
-            symmetric.sigma_high,
+            symmetric.sigma.low,
+            symmetric.sigma.high,
             symmetric.max_iterations
         ),
         (3.0, 3.0, 5)
@@ -52,8 +52,8 @@ fn sigma_clip_constructors_place_their_arguments() {
     let asymmetric = SigmaClipConfig::new_asymmetric(2.0, 3.0, 5);
     assert_eq!(
         (
-            asymmetric.sigma_low,
-            asymmetric.sigma_high,
+            asymmetric.sigma.low,
+            asymmetric.sigma.high,
             asymmetric.max_iterations
         ),
         (2.0, 3.0, 5)
@@ -459,17 +459,17 @@ fn no_rejection_preserves_all_indices() {
 fn rejection_constructors() {
     let r = Rejection::sigma_clip(2.0);
     assert!(
-        matches!(r, Rejection::SigmaClip(c) if (c.sigma_low - 2.0).abs() < f32::EPSILON && (c.sigma_high - 2.0).abs() < f32::EPSILON)
+        matches!(r, Rejection::SigmaClip(c) if (c.sigma.low - 2.0).abs() < f32::EPSILON && (c.sigma.high - 2.0).abs() < f32::EPSILON)
     );
 
     let r = Rejection::winsorized(3.0);
     assert!(
-        matches!(r, Rejection::Winsorized(c) if (c.sigma_low - 3.0).abs() < f32::EPSILON && (c.sigma_high - 3.0).abs() < f32::EPSILON)
+        matches!(r, Rejection::Winsorized(c) if (c.sigma.low - 3.0).abs() < f32::EPSILON && (c.sigma.high - 3.0).abs() < f32::EPSILON)
     );
 
     let r = Rejection::linear_fit(2.5);
     assert!(matches!(r, Rejection::LinearFit(c)
-        if (c.sigma_low - 2.5).abs() < f32::EPSILON && (c.sigma_high - 2.5).abs() < f32::EPSILON));
+        if (c.sigma.low - 2.5).abs() < f32::EPSILON && (c.sigma.high - 2.5).abs() < f32::EPSILON));
 
     let r = Rejection::percentile(15.0);
     assert!(matches!(r, Rejection::Percentile(c)
@@ -722,8 +722,8 @@ fn standard_normal(rng: &mut ChaCha8Rng) -> f32 {
 fn rejection_default_is_sigma_clip() {
     let r = Rejection::default();
     assert!(
-        matches!(r, Rejection::SigmaClip(c) if (c.sigma_low - 2.5).abs() < f32::EPSILON
-            && (c.sigma_high - 2.5).abs() < f32::EPSILON
+        matches!(r, Rejection::SigmaClip(c) if (c.sigma.low - 2.5).abs() < f32::EPSILON
+            && (c.sigma.high - 2.5).abs() < f32::EPSILON
             && c.max_iterations == 3)
     );
 }
