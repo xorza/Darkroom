@@ -692,10 +692,14 @@ fn absolute_deviation_truth_table() {
     }
 }
 
+/// The single-precision factor is a cast of the canonical `f64` one, so a unit MAD returns that
+/// cast exactly — and it must still be the value the `f32` paths have always multiplied by. The
+/// literal is the guard: extend `MAD_TO_SIGMA`'s digits far enough to shift its nearest `f32` and
+/// this fires instead of every `f32` statistic moving silently.
 #[test]
 fn mad_to_sigma_known_value() {
-    let sigma = mad_to_sigma(1.0);
-    assert!((sigma - MAD_TO_SIGMA).abs() < 1e-6);
+    assert_eq!(mad_to_sigma(1.0), MAD_TO_SIGMA as f32);
+    assert_eq!(mad_to_sigma(1.0), 1.4826022f32);
 }
 
 #[test]
@@ -1000,6 +1004,52 @@ fn median_f64_truth_table() {
     }
 }
 
+/// The upper-middle convention, and the equivalence a caller trades a full sort for.
+#[test]
+fn median_f64_fast_takes_the_upper_middle_of_a_sorted_run() {
+    // Sorted: [1, 3, 7, 9]. Index len/2 = 2 holds 7.0, where averaging gives (3 + 7)/2 = 5.0.
+    assert_eq!(median_f64_fast(&mut [9.0f64, 1.0, 7.0, 3.0]), 7.0);
+    assert_eq!(median_f64_mut(&mut [9.0f64, 1.0, 7.0, 3.0]), 5.0);
+
+    // What SIP's clip relies on: whatever a full sort leaves at `len / 2`, one selection returns
+    // bit-identically, at both parities and with duplicates present.
+    for len in 1..40usize {
+        let data: Vec<f64> = (0..len)
+            .map(|i| (i * 37 % len) as f64 * 0.1 - 1.5)
+            .collect();
+        let mut sorted = data.clone();
+        sorted.sort_unstable_by(f64::total_cmp);
+        let mut fast = data.clone();
+        assert_eq!(median_f64_fast(&mut fast), sorted[len / 2], "len = {len}");
+    }
+}
+
+#[test]
+fn mad_f64_fast_hand_computed() {
+    let mut scratch = Vec::new();
+    // |r − 3| over [1, 2, 3, 4, 100] = [2, 1, 0, 1, 97]; sorted [0, 1, 1, 2, 97], index 2 = 1.
+    let data = [1.0f64, 2.0, 3.0, 4.0, 100.0];
+    assert_eq!(mad_f64_fast(&data, 3.0, &mut scratch), 1.0);
+    // Even count: |r − 3| over [1, 2, 4, 100] = [2, 1, 1, 97]; sorted [1, 1, 2, 97], index 2 = 2.
+    assert_eq!(
+        mad_f64_fast(&[1.0, 2.0, 4.0, 100.0], 3.0, &mut scratch),
+        2.0
+    );
+    // A shorter call after a longer one measures only its own deviations: |r − 20| = [10, 0, 10],
+    // sorted [0, 10, 10], index 1 = 10. Stale scratch entries would push the rank off.
+    assert_eq!(mad_f64_fast(&[10.0, 20.0, 30.0], 20.0, &mut scratch), 10.0);
+    assert_eq!(mad_f64_fast(&[], 0.0, &mut scratch), 0.0);
+}
+
+/// The `f64` fast path carries the same contract as its `f32` twin — see
+/// [`sigma_clip_rejects_nan_input`] for why a NaN is a contract violation rather than a case.
+#[test]
+#[cfg(debug_assertions)]
+#[should_panic(expected = "NaN-free")]
+fn median_f64_fast_rejects_nan_input() {
+    median_f64_fast(&mut [1.0f64, f64::NAN, 3.0]);
+}
+
 #[test]
 fn robust_sigma_f64_scales_the_mad_and_leaves_its_input_alone() {
     // median([1, 2, 3, 4, 100]) = 3; |r − 3| = [2, 1, 0, 1, 97]; median of those = 1.
@@ -1007,10 +1057,9 @@ fn robust_sigma_f64_scales_the_mad_and_leaves_its_input_alone() {
     let data = [1.0f64, 2.0, 3.0, 4.0, 100.0];
     let mut scratch = Vec::new();
     let sigma = robust_sigma_f64(&data, &mut scratch);
-    assert!(
-        (sigma - f64::from(MAD_TO_SIGMA)).abs() < 1e-12,
-        "sigma = {sigma}"
-    );
+    // Exactly the constant, not merely near it: the MAD is 1.0, and the factor is `f64` end to end
+    // now rather than an `f32` widened back up.
+    assert_eq!(sigma, MAD_TO_SIGMA, "sigma = {sigma}");
     assert_eq!(data, [1.0, 2.0, 3.0, 4.0, 100.0], "input must be intact");
 
     // Doubling every deviation doubles sigma — proves the MAD is measured, not a constant.
