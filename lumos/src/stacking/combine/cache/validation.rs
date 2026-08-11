@@ -103,23 +103,57 @@ pub(crate) fn validate_stored_samples(
     )
 }
 
-pub(crate) fn validate_warp_plane_values(
+/// Check a frame's warp-quality pair: each plane's own range, and that the two agree on where the
+/// frame has support.
+///
+/// That agreement — `coverage == 0` exactly where `confidence == 0`, the invariant
+/// [`WarpQuality`](crate::stacking::frame_store::warp_quality::WarpQuality) documents — is what
+/// lets the combine gate a sample on coverage and be sure of a positive confidence to weight it by,
+/// and what keeps `source_noise_variance`'s reciprocal finite. The warp produces planes that
+/// satisfy it; this is where caller-supplied and spilled ones are held to it.
+///
+/// One walk over the pair rather than one per plane, so the pairing costs nothing beyond the range
+/// checks that were already reading both.
+pub(crate) fn validate_warp_quality(
     index: usize,
-    kind: FramePlane,
-    samples: &[f32],
+    coverage: &[f32],
+    confidence: &[f32],
     cancel: &CancelToken,
 ) -> Result<(), Error> {
+    debug_assert_eq!(
+        coverage.len(),
+        confidence.len(),
+        "warp quality planes are validated for geometry before their values"
+    );
     // Chunked for the same reason as `validate_sample_channels`: one cancel poll per chunk
     // instead of a modulo per sample.
-    for (chunk, values) in samples.chunks(VALIDATION_CHUNK_SIZE).enumerate() {
+    for (chunk, (coverage, confidence)) in coverage
+        .chunks(VALIDATION_CHUNK_SIZE)
+        .zip(confidence.chunks(VALIDATION_CHUNK_SIZE))
+        .enumerate()
+    {
         check_cancel(cancel)?;
-        for (offset, value) in values.iter().copied().enumerate() {
-            if !kind.accepts(value) {
-                return Err(Error::InvalidWarpPlaneValue {
+        let pixel = |offset| chunk * VALIDATION_CHUNK_SIZE + offset;
+        for (offset, (&coverage, &confidence)) in coverage.iter().zip(confidence).enumerate() {
+            for (kind, value) in [
+                (FramePlane::Coverage, coverage),
+                (FramePlane::Confidence, confidence),
+            ] {
+                if !kind.accepts(value) {
+                    return Err(Error::InvalidWarpPlaneValue {
+                        index,
+                        plane: kind,
+                        pixel: pixel(offset),
+                        value,
+                    });
+                }
+            }
+            if (coverage > 0.0) != (confidence > 0.0) {
+                return Err(Error::WarpQualityPairMismatch {
                     index,
-                    plane: kind,
-                    pixel: chunk * VALIDATION_CHUNK_SIZE + offset,
-                    value,
+                    pixel: pixel(offset),
+                    coverage,
+                    confidence,
                 });
             }
         }

@@ -10,6 +10,7 @@ use crate::stacking::combine::rejection::Rejection;
 use crate::stacking::combine::rejection::scratch_buffers::ScratchBuffers;
 use crate::stacking::frame_store::StoredFrame;
 use crate::stacking::frame_store::frame_stats::FrameStats;
+use crate::stacking::frame_store::warp_quality::FramePlane;
 use crate::stacking::stack_product::coverage::Coverage;
 use crate::stacking::stack_product::quality_planes::QualityPlanes;
 use crate::testing::ScratchDirectory;
@@ -107,7 +108,7 @@ fn stored_frames_of_the_wrong_shape_are_rejected_not_sliced() {
         let image =
             LinearImage::from_pixels(ImageDimensions::new((pixels, 1), 1), vec![1.0; pixels]);
         let stats = FrameStats::measure(&image);
-        StoredFrame::from_memory(image, WarpQuality::none(), stats)
+        StoredFrame::from_memory(image, WarpQuality::None, stats)
     };
 
     // Short channel plane: 4 samples where the cache wants 8.
@@ -130,7 +131,7 @@ fn stored_frames_of_the_wrong_shape_are_rejected_not_sliced() {
     let stats = FrameStats::measure(&image);
     let short_coverage = StoredFrame::from_memory(
         image,
-        WarpQuality::new(Some(Buffer2::new(2, 1, vec![1.0; 2])), None),
+        WarpQuality::from_coverage(Buffer2::new(2, 1, vec![1.0; 2])),
         stats,
     );
     let error = FrameCache::from_stored_frames(vec![short_coverage], params()).unwrap_err();
@@ -149,6 +150,62 @@ fn stored_frames_of_the_wrong_shape_are_rejected_not_sliced() {
 
     // A correctly shaped set still builds.
     assert!(FrameCache::from_stored_frames(vec![frame(8), frame(8)], params()).is_ok());
+}
+
+/// Frames arriving through the frame store are held to the same pairing as caller-supplied ones
+/// (`stack_images_rejects_warp_quality_planes_that_disagree_about_support`), so a spilled or
+/// pipeline-built frame cannot reach the combine with support and confidence disagreeing.
+#[test]
+fn stored_frames_with_planes_that_disagree_about_support_are_rejected() {
+    let dimensions = ImageDimensions::new((4, 1), 1);
+    let params = || FrameCacheParams {
+        spill_directory: None,
+        dimensions,
+        metadata: ImageMetadata::default(),
+        config: CacheConfig::default(),
+        normalization: Normalization::None,
+        progress: ProgressCallback::default(),
+        cancel: CancelToken::never(),
+    };
+    let frame = |coverage: Vec<f32>, confidence: Vec<f32>| {
+        let image = LinearImage::from_pixels(dimensions, vec![1.0; 4]);
+        let stats = FrameStats::measure(&image);
+        StoredFrame::from_memory(
+            image,
+            WarpQuality::Planes {
+                coverage: Buffer2::new(4, 1, coverage),
+                confidence: Buffer2::new(4, 1, confidence),
+            },
+            stats,
+        )
+    };
+
+    let error = FrameCache::from_stored_frames(
+        vec![frame(vec![1.0, 1.0, 1.0, 1.0], vec![1.0, 1.0, 0.0, 1.0])],
+        params(),
+    )
+    .unwrap_err();
+    assert!(
+        matches!(
+            error,
+            Error::WarpQualityPairMismatch {
+                index: 0,
+                pixel: 2,
+                coverage: 1.0,
+                confidence: 0.0,
+            }
+        ),
+        "expected a pair mismatch at pixel 2, got {error:?}"
+    );
+
+    // The pair the warp would have produced there builds.
+    assert!(
+        FrameCache::from_stored_frames(
+            vec![frame(vec![1.0, 1.0, 0.0, 1.0], vec![1.0, 1.0, 0.0, 1.0])],
+            params(),
+        )
+        .is_ok()
+    );
 }
 
 fn mean_product(cache: &FrameCache, weights: Option<&[f32]>) -> StackProduct {
@@ -171,9 +228,8 @@ fn weighted_chunk_memory_counts_active_inputs_and_full_outputs() {
         StackFrame::from(image()),
         StackFrame::from(image()),
     ];
-    frames[1].coverage = Some(plane());
-    frames[2].coverage = Some(plane());
-    frames[2].confidence = Some(plane());
+    frames[1].quality = WarpQuality::from_coverage(plane());
+    frames[2].quality = WarpQuality::from_coverage(plane());
 
     let cache = FrameCache::from_stack_frames(
         frames,
@@ -184,12 +240,12 @@ fn weighted_chunk_memory_counts_active_inputs_and_full_outputs() {
     )
     .expect("frames are valid");
 
-    // Inputs: 3 frames × 1 channel, plus frame 1's coverage and frame 2's coverage + confidence.
+    // Inputs: 3 frames × 1 channel, plus the coverage + confidence pair frames 1 and 2 each carry.
     // Residents: 3 channels × (pixels + weight + variance).
     assert_eq!(
         weighted_chunk_memory_layout(&cache.frames, dimensions.channels(), QualityPlanes::ALL),
         ChunkMemoryLayout {
-            input_planes: 6,
+            input_planes: 7,
             resident_planes: 9,
         }
     );
@@ -202,12 +258,12 @@ fn weighted_chunk_memory_counts_active_inputs_and_full_outputs() {
             QualityPlanes::IMAGE_ONLY
         ),
         ChunkMemoryLayout {
-            input_planes: 6,
+            input_planes: 7,
             resident_planes: 3,
         }
     );
 
-    // The coverage pass reads only the two frames carrying coverage, and adds the plane it is
+    // The coverage pass reads only the two frames carrying warp quality, and adds the plane it is
     // accumulating to the combine's residents.
     assert_eq!(
         coverage_chunk_memory_layout(&cache.frames, dimensions.channels(), QualityPlanes::ALL),
@@ -284,7 +340,7 @@ fn finish_product_partial_coverage() {
         .iter()
         .map(|c| {
             let mut frame = StackFrame::from(LinearImage::from_pixels(dims, vec![0.5, 0.5]));
-            frame.coverage = Some(Buffer2::new(2, 1, c.to_vec()));
+            frame.quality = WarpQuality::from_coverage(Buffer2::new(2, 1, c.to_vec()));
             frame
         })
         .collect();
@@ -474,7 +530,7 @@ fn cleanup_removes_files() {
         &temp_dir,
         "cleanup_test.bin",
         &image,
-        WarpQuality::none(),
+        WarpQuality::None,
         FrameStats::measure(&image),
     )
     .unwrap();
@@ -546,7 +602,7 @@ fn read_channel_chunk_disk_backed() {
         &temp_dir,
         base_filename,
         &image,
-        WarpQuality::none(),
+        WarpQuality::None,
         FrameStats::measure(&image),
     )
     .unwrap();
@@ -604,7 +660,7 @@ fn frame_count_disk_backed() {
             &temp_dir,
             &base_filename,
             &image,
-            WarpQuality::none(),
+            WarpQuality::None,
             FrameStats::measure(&image),
         )
         .unwrap();

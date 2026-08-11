@@ -22,7 +22,7 @@ use crate::stacking::combine::cache::core::{
 use crate::stacking::combine::cache::sample::{CombineScratch, CombinedSample};
 use crate::stacking::combine::cache::validation::{
     validate_image_samples, validate_stored_geometry, validate_stored_samples,
-    validate_warp_plane_values,
+    validate_warp_quality,
 };
 use crate::stacking::combine::cache_config::CacheConfig;
 use crate::stacking::combine::config::Normalization;
@@ -33,7 +33,6 @@ use crate::stacking::combine::rejection::scratch_buffers::ScratchBuffers;
 use crate::stacking::combine::stack::StackFrame;
 use crate::stacking::frame_store::StoredFrame;
 use crate::stacking::frame_store::spill::SpillDirectory;
-use crate::stacking::frame_store::warp_quality::FramePlane;
 use crate::stacking::frame_store::warp_quality::WarpQuality;
 use crate::stacking::progress::ProgressCallback;
 use crate::stacking::stack_product::StackProduct;
@@ -107,18 +106,21 @@ impl FrameCache {
             // reporting which frame was the wrong shape.
             validate_stored_geometry(frame, dimensions, index)?;
             validate_stored_samples(&frame.channels, dimensions.pixel_count(), index, &cancel)?;
-            // Same guarantee `from_stack_frames` gives caller-supplied planes: coverage in
-            // `[0, 1]` and confidence non-negative, so the gate and the weight multiplier below
-            // can't be handed a value that silently corrupts the combine.
-            for (kind, plane) in frame.quality.present() {
-                {
-                    validate_warp_plane_values(
-                        index,
-                        kind,
-                        plane.chunk(0, dimensions.pixel_count()),
-                        &cancel,
-                    )?;
-                }
+            // Same guarantee `from_stack_frames` gives caller-supplied planes: each plane in range
+            // and the two agreeing on where the frame has support, so the gate and the weight
+            // multiplier below can't be handed a value that silently corrupts the combine.
+            if let WarpQuality::Planes {
+                coverage,
+                confidence,
+            } = &frame.quality
+            {
+                let pixel_count = dimensions.pixel_count();
+                validate_warp_quality(
+                    index,
+                    coverage.chunk(0, pixel_count),
+                    confidence.chunk(0, pixel_count),
+                    &cancel,
+                )?;
             }
         }
         let frame_norms = compute_frame_norms(&frames, dimensions, normalization, &cancel)?;
@@ -162,16 +164,10 @@ impl FrameCache {
                 });
             }
             validate_image_samples(&frame.image, index, &cancel)?;
-            for (kind, plane) in [
-                (FramePlane::Coverage, frame.coverage.as_ref()),
-                (FramePlane::Confidence, frame.confidence.as_ref()),
-            ] {
-                let Some(plane) = plane else {
-                    continue;
-                };
-                // Geometry before contents, as in `from_stored_frames`: `pixels()` is read to the
-                // plane's own length, so a wrong-shaped plane has to be named here rather than
-                // reported as bad values.
+            // Geometry before contents, as in `from_stored_frames`: `pixels()` is read to the
+            // plane's own length, so a wrong-shaped plane has to be named here rather than
+            // reported as bad values.
+            for (kind, plane) in frame.quality.present() {
                 if (plane.width(), plane.height()) != (dimensions.width(), dimensions.height()) {
                     return Err(Error::WarpPlaneDimensionMismatch {
                         index,
@@ -182,19 +178,19 @@ impl FrameCache {
                         actual_height: plane.height(),
                     });
                 }
-                validate_warp_plane_values(index, kind, plane.pixels(), &cancel)?;
+            }
+            if let WarpQuality::Planes {
+                coverage,
+                confidence,
+            } = &frame.quality
+            {
+                validate_warp_quality(index, coverage.pixels(), confidence.pixels(), &cancel)?;
             }
         }
         check_cancel(&cancel)?;
         let stored = frames
             .into_iter()
-            .map(|frame| {
-                StoredFrame::from_memory(
-                    frame.image,
-                    WarpQuality::new(frame.coverage, frame.confidence),
-                    frame.source_stats,
-                )
-            })
+            .map(|frame| StoredFrame::from_memory(frame.image, frame.quality, frame.source_stats))
             .collect::<Vec<_>>();
         let frame_norms = compute_frame_norms(&stored, dimensions, normalization, &cancel)?;
 
@@ -239,12 +235,7 @@ impl FrameCache {
 
         // No frame carries support, so every pixel is fully covered — and saying so costs one
         // number rather than an image-sized plane of `1.0`.
-        if !planes.coverage
-            || self
-                .frames
-                .iter()
-                .all(|frame| frame.quality.coverage.is_none())
-        {
+        if !planes.coverage || self.frames.iter().all(|frame| frame.quality.is_none()) {
             return StackProduct {
                 image,
                 coverage: planes.coverage.then(|| Coverage::Uniform {
@@ -275,7 +266,7 @@ impl FrameCache {
 
             let cov_chunks = quality_plane_chunks(
                 &self.frames,
-                |frame| frame.quality.coverage.as_ref(),
+                |frame| frame.quality.coverage(),
                 base,
                 base + span,
             );
@@ -366,13 +357,13 @@ impl FrameCache {
                 let chunk_end = pixel_offset + chunk_pixels;
                 let coverage = quality_plane_chunks(
                     &self.frames,
-                    |frame| frame.quality.coverage.as_ref(),
+                    |frame| frame.quality.coverage(),
                     pixel_offset,
                     chunk_end,
                 );
                 let confidence = quality_plane_chunks(
                     &self.frames,
-                    |frame| frame.quality.confidence.as_ref(),
+                    |frame| frame.quality.confidence(),
                     pixel_offset,
                     chunk_end,
                 );
@@ -505,7 +496,7 @@ pub(crate) mod internals {
                 .into_iter()
                 .map(|image| {
                     let source_stats = FrameStats::measure(&image);
-                    StoredFrame::from_memory(image, WarpQuality::none(), source_stats)
+                    StoredFrame::from_memory(image, WarpQuality::None, source_stats)
                 })
                 .collect();
             let core = CacheCore {

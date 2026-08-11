@@ -217,7 +217,7 @@ pub(crate) fn register_warp_and_stack(
                 let image = detected.image.into_image();
                 let source_stats = FrameStats::measure(&image);
                 return tier
-                    .store(&name, image, WarpQuality::none(), source_stats)
+                    .store(&name, image, WarpQuality::None, source_stats)
                     .map(Some);
             }
 
@@ -259,7 +259,10 @@ pub(crate) fn register_warp_and_stack(
             tier.store(
                 &name,
                 warped.image,
-                WarpQuality::new(Some(warped.coverage), Some(warped.confidence)),
+                WarpQuality::Planes {
+                    coverage: warped.coverage,
+                    confidence: warped.confidence,
+                },
                 source_stats,
             )
             .map(Some)

@@ -116,6 +116,20 @@ pub enum Error {
         pixel: usize,
         value: f32,
     },
+
+    /// The two warp-quality planes disagree about whether the frame has support at a pixel. A warp
+    /// produces support and confidence together or neither, and the combine gates on coverage while
+    /// weighting by confidence, so a pixel covered at zero confidence would enter the statistics
+    /// weightless and one confident at zero coverage would be dropped despite having data.
+    #[error(
+        "frame {index} has coverage {coverage} with confidence {confidence} at pixel {pixel}: a warped pixel has support and confidence together or neither"
+    )]
+    WarpQualityPairMismatch {
+        index: usize,
+        pixel: usize,
+        coverage: f32,
+        confidence: f32,
+    },
 }
 
 /// `Err(Error::Cancelled)` once the token is set, so a long walk can `?` its way out between

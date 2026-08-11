@@ -251,7 +251,7 @@ fn load_in_memory<I: StackableImage, P: AsRef<Path> + Sync>(
         let metadata = (idx == 0).then(|| image.metadata().clone());
         let stats = FrameStats::measure(&image);
         Ok(LoadedMemoryFrame {
-            frame: StoredFrame::from_memory(image, WarpQuality::none(), stats),
+            frame: StoredFrame::from_memory(image, WarpQuality::None, stats),
             metadata,
         })
     })?;
@@ -264,7 +264,7 @@ fn load_in_memory<I: StackableImage, P: AsRef<Path> + Sync>(
         let stats = FrameStats::measure(&first_image);
         frames.push(StoredFrame::from_memory(
             first_image,
-            WarpQuality::none(),
+            WarpQuality::None,
             stats,
         ));
     }
@@ -311,7 +311,7 @@ fn load_to_disk<I: StackableImage, P: AsRef<Path> + Sync>(
         cache_dir,
         &base_filename,
         &first_image,
-        WarpQuality::none(),
+        WarpQuality::None,
         first_stats,
     )
     .map_err(Error::from)?;
@@ -475,7 +475,7 @@ fn load_and_cache_frame<I: StackableImage>(
         );
         let frame = StoredFrame {
             channels: planes,
-            quality: WarpQuality::none(),
+            quality: WarpQuality::None,
             source_stats: cached_stats.expect("valid cache has readable frame statistics"),
         };
         validate_stored_samples(
@@ -510,7 +510,7 @@ fn load_and_cache_frame<I: StackableImage>(
             cache_dir,
             base_filename,
             &image,
-            WarpQuality::none(),
+            WarpQuality::None,
             stats.clone(),
         )
         .map_err(Error::from)?;

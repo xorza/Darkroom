@@ -25,14 +25,9 @@ use crate::stacking::stack_product::quality_planes::QualityPlanes;
 use crate::testing::ScratchDirectory;
 use std::path::PathBuf;
 
-fn stack_frame(
-    image: LinearImage,
-    coverage: Option<Buffer2<f32>>,
-    confidence: Option<Buffer2<f32>>,
-) -> StackFrame {
+fn stack_frame(image: LinearImage, quality: WarpQuality<Buffer2<f32>>) -> StackFrame {
     let mut frame = StackFrame::from(image);
-    frame.coverage = coverage;
-    frame.confidence = confidence;
+    frame.quality = quality;
     frame
 }
 
@@ -208,32 +203,27 @@ fn disk_tier_output_is_bit_identical_to_memory_tier() {
         px[(f * 7) % (w * h)] = 0.95; // an outlier so rejection actually fires
         let image = LinearImage::from_planar_channels(dims, [px]);
         // Every other frame gets a partial coverage map (warped-border emulation).
-        let coverage = f.is_multiple_of(2).then(|| {
-            let mut c = Buffer2::new_filled(w, h, 1.0f32);
-            c[0] = 0.0;
-            c
-        });
-        let confidence = coverage.clone();
-        stack_frame(image, coverage, confidence)
+        let quality = if f.is_multiple_of(2) {
+            let mut coverage = Buffer2::new_filled(w, h, 1.0f32);
+            coverage[0] = 0.0;
+            WarpQuality::from_coverage(coverage)
+        } else {
+            WarpQuality::None
+        };
+        stack_frame(image, quality)
     };
-    let frames: Vec<StackFrame> = (0..n).map(make_frame).collect();
     let config = StackConfig::light();
 
+    // `make_frame` is deterministic, so building each tier's frames from it is what makes the two
+    // sets identical — the alternative, cloning one set, has to restate that the stats came along.
     let ram = stack_images(
-        frames
-            .iter()
-            .map(|f| {
-                let mut frame =
-                    stack_frame(f.image.clone(), f.coverage.clone(), f.confidence.clone());
-                frame.source_stats = f.source_stats.clone();
-                frame
-            })
-            .collect(),
+        (0..n).map(make_frame).collect(),
         config.clone(),
         ProgressCallback::default(),
         CancelToken::never(),
     )
     .unwrap();
+    let frames: Vec<StackFrame> = (0..n).map(make_frame).collect();
 
     let scratch = ScratchDirectory::new("lumos_tier_test");
     let spill_directory = SpillDirectory::create(scratch.join("cache"), false).unwrap();
@@ -246,7 +236,7 @@ fn disk_tier_output_is_bit_identical_to_memory_tier() {
                 &spill_directory.path,
                 &format!("f{i}"),
                 &f.image,
-                WarpQuality::new(f.coverage, f.confidence),
+                f.quality,
                 f.source_stats,
             )
             .unwrap()
@@ -306,7 +296,7 @@ fn mapped_frames_reject_nonfinite_samples_before_combining() {
         &spill_directory.path,
         "frame",
         &invalid,
-        WarpQuality::none(),
+        WarpQuality::None,
         source_stats,
     )
     .unwrap();
@@ -515,68 +505,65 @@ fn stack_images_dimension_errors() {
         Error::DimensionMismatch { index: 1, .. }
     ));
 
-    let frame = stack_frame(
-        LinearImage::from_pixels(ImageDimensions::new((4, 4), 1), vec![1.0; 16]),
-        Some(Buffer2::new_filled(2, 2, 1.0)),
-        None,
-    );
-    let error = stack_images(
-        vec![frame],
-        StackConfig::default(),
-        ProgressCallback::default(),
-        CancelToken::never(),
-    )
-    .unwrap_err();
-    assert!(matches!(
-        error,
-        Error::WarpPlaneDimensionMismatch {
-            index: 0,
-            plane: FramePlane::Coverage,
-            expected_width: 4,
-            expected_height: 4,
-            actual_width: 2,
-            actual_height: 2,
-        }
-    ));
-
-    let frame = stack_frame(
-        LinearImage::from_pixels(ImageDimensions::new((4, 4), 1), vec![1.0; 16]),
-        None,
-        Some(Buffer2::new_filled(2, 2, 1.0)),
-    );
-    let error = stack_images(
-        vec![frame],
-        StackConfig::default(),
-        ProgressCallback::default(),
-        CancelToken::never(),
-    )
-    .unwrap_err();
-    assert!(matches!(
-        error,
-        Error::WarpPlaneDimensionMismatch {
-            index: 0,
-            plane: FramePlane::Confidence,
-            expected_width: 4,
-            expected_height: 4,
-            actual_width: 2,
-            actual_height: 2,
-        }
-    ));
+    // Either plane of the pair is named for itself; the wrong-shaped one is the one reported.
+    for (expected_plane, coverage, confidence) in [
+        (
+            FramePlane::Coverage,
+            Buffer2::new_filled(2, 2, 1.0),
+            Buffer2::new_filled(4, 4, 1.0),
+        ),
+        (
+            FramePlane::Confidence,
+            Buffer2::new_filled(4, 4, 1.0),
+            Buffer2::new_filled(2, 2, 1.0),
+        ),
+    ] {
+        let frame = stack_frame(
+            LinearImage::from_pixels(ImageDimensions::new((4, 4), 1), vec![1.0; 16]),
+            WarpQuality::Planes {
+                coverage,
+                confidence,
+            },
+        );
+        let error = stack_images(
+            vec![frame],
+            StackConfig::default(),
+            ProgressCallback::default(),
+            CancelToken::never(),
+        )
+        .unwrap_err();
+        assert!(
+            matches!(
+                error,
+                Error::WarpPlaneDimensionMismatch {
+                    index: 0,
+                    plane,
+                    expected_width: 4,
+                    expected_height: 4,
+                    actual_width: 2,
+                    actual_height: 2,
+                } if plane == expected_plane
+            ),
+            "expected a {expected_plane} dimension error, got {error:?}"
+        );
+    }
 }
 
 #[test]
 fn stack_images_rejects_invalid_warp_quality_values() {
     let dims = ImageDimensions::new((2, 1), 1);
+    // Each plane carries its own range — coverage a fraction, confidence any non-negative weight —
+    // so the out-of-range value is paired with an in-range partner to isolate it.
     for (coverage, confidence, expected_plane, expected_value) in [
         (
-            Some(Buffer2::new(2, 1, vec![1.0, 1.1])),
-            None,
+            Buffer2::new(2, 1, vec![1.0, 1.1]),
+            Buffer2::new(2, 1, vec![1.0, 1.0]),
             FramePlane::Coverage,
             1.1,
         ),
         (
-            None,
-            Some(Buffer2::new(2, 1, vec![1.0, -0.1])),
+            Buffer2::new(2, 1, vec![1.0, 1.0]),
+            Buffer2::new(2, 1, vec![1.0, -0.1]),
             FramePlane::Confidence,
             -0.1,
         ),
@@ -584,24 +571,89 @@ fn stack_images_rejects_invalid_warp_quality_values() {
         let error = stack_images(
             vec![stack_frame(
                 LinearImage::from_pixels(dims, vec![1.0; 2]),
-                coverage,
-                confidence,
+                WarpQuality::Planes {
+                    coverage,
+                    confidence,
+                },
             )],
             StackConfig::default(),
             ProgressCallback::default(),
             CancelToken::never(),
         )
         .unwrap_err();
-        assert!(matches!(
-            error,
-            Error::InvalidWarpPlaneValue {
-                index: 0,
-                plane,
-                pixel: 1,
-                value,
-            } if plane == expected_plane && value == expected_value
-        ));
+        assert!(
+            matches!(
+                error,
+                Error::InvalidWarpPlaneValue {
+                    index: 0,
+                    plane,
+                    pixel: 1,
+                    value,
+                } if plane == expected_plane && value == expected_value
+            ),
+            "expected an out-of-range {expected_plane} value, got {error:?}"
+        );
     }
+}
+
+/// Both halves of the pairing the combine leans on: a covered pixel at zero confidence would enter
+/// the statistics weightless, and a confident pixel at zero coverage would be dropped despite
+/// having data. Neither is a shape a warp produces, so both are rejected rather than combined.
+#[test]
+fn stack_images_rejects_warp_quality_planes_that_disagree_about_support() {
+    let dims = ImageDimensions::new((2, 1), 1);
+    for (coverage, confidence) in [
+        (vec![1.0, 1.0], vec![1.0, 0.0]),
+        (vec![1.0, 0.0], vec![1.0, 0.5]),
+    ] {
+        let expected_coverage = coverage[1];
+        let expected_confidence = confidence[1];
+        let error = stack_images(
+            vec![stack_frame(
+                LinearImage::from_pixels(dims, vec![1.0; 2]),
+                WarpQuality::Planes {
+                    coverage: Buffer2::new(2, 1, coverage),
+                    confidence: Buffer2::new(2, 1, confidence),
+                },
+            )],
+            StackConfig::default(),
+            ProgressCallback::default(),
+            CancelToken::never(),
+        )
+        .unwrap_err();
+        assert!(
+            matches!(
+                error,
+                Error::WarpQualityPairMismatch {
+                    index: 0,
+                    pixel: 1,
+                    coverage,
+                    confidence,
+                } if coverage == expected_coverage && confidence == expected_confidence
+            ),
+            "expected a pair mismatch at pixel 1, got {error:?}"
+        );
+    }
+
+    // The matched pair the same planes describe still combines.
+    let product = stack_images(
+        vec![stack_frame(
+            LinearImage::from_pixels(dims, vec![1.0; 2]),
+            WarpQuality::Planes {
+                coverage: Buffer2::new(2, 1, vec![1.0, 0.0]),
+                confidence: Buffer2::new(2, 1, vec![1.0, 0.0]),
+            },
+        )],
+        StackConfig {
+            method: CombineMethod::Mean(Rejection::None),
+            normalization: Normalization::None,
+            ..Default::default()
+        },
+        ProgressCallback::default(),
+        CancelToken::never(),
+    )
+    .unwrap();
+    assert_eq!(product.image.channel(0).pixels(), &[1.0, 0.0]);
 }
 
 #[test]
@@ -717,8 +769,14 @@ fn coverage_excludes_uncovered_frames() {
         ..Default::default()
     };
     let frames = vec![
-        stack_frame(a, Some(Buffer2::new(2, 1, vec![1.0, 1.0])), None),
-        stack_frame(b, Some(Buffer2::new(2, 1, vec![1.0, 0.0])), None),
+        stack_frame(
+            a,
+            WarpQuality::from_coverage(Buffer2::new(2, 1, vec![1.0, 1.0])),
+        ),
+        stack_frame(
+            b,
+            WarpQuality::from_coverage(Buffer2::new(2, 1, vec![1.0, 0.0])),
+        ),
     ];
     let out = stack_images(
         frames,
@@ -756,8 +814,7 @@ fn common_coverage_makes_reference_norms_and_noise_weights_fill_invariant() {
         .map(|(pixels, (median, mad))| {
             let mut frame = stack_frame(
                 LinearImage::from_pixels(dims, pixels.to_vec()),
-                Some(coverage.clone()),
-                None,
+                WarpQuality::from_coverage(coverage.clone()),
             );
             frame.source_stats = FrameStats {
                 channels: [MedianMad { median, mad }].into_iter().collect(),
@@ -818,13 +875,11 @@ fn only_normalization_requires_common_coverage() {
         vec![
             stack_frame(
                 LinearImage::from_pixels(dims, vec![1.0, 2.0]),
-                Some(Buffer2::new(2, 1, vec![1.0, 0.0])),
-                None,
+                WarpQuality::from_coverage(Buffer2::new(2, 1, vec![1.0, 0.0])),
             ),
             stack_frame(
                 LinearImage::from_pixels(dims, vec![3.0, 4.0]),
-                Some(Buffer2::new(2, 1, vec![0.0, 1.0])),
-                None,
+                WarpQuality::from_coverage(Buffer2::new(2, 1, vec![0.0, 1.0])),
             ),
         ]
     };
@@ -854,10 +909,10 @@ fn only_normalization_requires_common_coverage() {
 }
 
 #[test]
-fn confidence_weights_contributions_independently_of_coverage() {
-    // px0: A (q 1, val 10) + B (q .5, val 20) → 40/3. At px1 B has zero
-    // confidence, so only A contributes statistically while both frames retain geometric
-    // coverage.
+fn confidence_scales_a_contribution_rather_than_gating_it() {
+    // px0: A (q 1, val 10) + B (q .5, val 20) → 40/3, so B's half confidence halves its pull
+    // without excluding it — both frames still count as covering the pixel. At px1 B has no
+    // support at all, which is what does exclude a frame: A alone, and coverage 1/2.
     let dims = ImageDimensions::new((2, 1), 1);
     let a = LinearImage::from_pixels(dims, vec![10.0, 10.0]);
     let b = LinearImage::from_pixels(dims, vec![20.0, 20.0]);
@@ -869,13 +924,17 @@ fn confidence_weights_contributions_independently_of_coverage() {
     let frames = vec![
         stack_frame(
             a,
-            Some(Buffer2::new(2, 1, vec![1.0, 1.0])),
-            Some(Buffer2::new(2, 1, vec![1.0, 1.0])),
+            WarpQuality::Planes {
+                coverage: Buffer2::new(2, 1, vec![1.0, 1.0]),
+                confidence: Buffer2::new(2, 1, vec![1.0, 1.0]),
+            },
         ),
         stack_frame(
             b,
-            Some(Buffer2::new(2, 1, vec![1.0, 1.0])),
-            Some(Buffer2::new(2, 1, vec![0.5, 0.0])),
+            WarpQuality::Planes {
+                coverage: Buffer2::new(2, 1, vec![1.0, 0.0]),
+                confidence: Buffer2::new(2, 1, vec![0.5, 0.0]),
+            },
         ),
     ];
     let product = stack_images(
@@ -893,7 +952,7 @@ fn confidence_weights_contributions_independently_of_coverage() {
     assert_eq!(product.image.channel(0)[1], 10.0);
     assert_eq!(
         product.coverage.as_ref().unwrap().to_plane().pixels(),
-        &[1.0, 1.0]
+        &[1.0, 0.5]
     );
     assert_eq!(
         product.weight.as_ref().unwrap().channel(0).pixels(),
@@ -1029,14 +1088,12 @@ fn registered_noise_weight_applies_half_pixel_confidence_once() {
     let pixel = 12 * dims.width() + 12;
     let identity_confidence = cache.frames[0]
         .quality
-        .confidence
-        .as_ref()
+        .confidence()
         .unwrap()
         .chunk(pixel, pixel + 1)[0];
     let half_pixel_confidence = cache.frames[1]
         .quality
-        .confidence
-        .as_ref()
+        .confidence()
         .unwrap()
         .chunk(pixel, pixel + 1)[0];
     let effective_ratio =
@@ -1153,8 +1210,7 @@ fn coverage_none_frame_counts_fully() {
         StackFrame::from(LinearImage::from_pixels(dims, vec![10.0])),
         stack_frame(
             LinearImage::from_pixels(dims, vec![20.0]),
-            Some(Buffer2::new(1, 1, vec![1.0])),
-            None,
+            WarpQuality::from_coverage(Buffer2::new(1, 1, vec![1.0])),
         ),
     ];
     let config = StackConfig {
@@ -1190,8 +1246,7 @@ fn coverage_zero_in_all_frames_fills_zero() {
     };
     let frames = vec![stack_frame(
         a,
-        Some(Buffer2::new(2, 1, vec![1.0, 0.0])),
-        None,
+        WarpQuality::from_coverage(Buffer2::new(2, 1, vec![1.0, 0.0])),
     )];
     let out = stack_images(
         frames,
@@ -1222,8 +1277,7 @@ fn coverage_keeps_real_values_from_sigma_rejection_at_sparse_edges() {
         .map(|(&v, c)| {
             stack_frame(
                 LinearImage::from_pixels(dims, vec![v]),
-                Some(Buffer2::new(1, 1, vec![c])),
-                None,
+                WarpQuality::from_coverage(Buffer2::new(1, 1, vec![c])),
             )
         })
         .collect();
@@ -1283,13 +1337,11 @@ fn stack_product_carries_geometry_planes() {
     let frames = vec![
         stack_frame(
             LinearImage::from_pixels(dims, vec![10.0, 10.0]),
-            Some(Buffer2::new(2, 1, vec![1.0, 1.0])),
-            None,
+            WarpQuality::from_coverage(Buffer2::new(2, 1, vec![1.0, 1.0])),
         ),
         stack_frame(
             LinearImage::from_pixels(dims, vec![20.0, 20.0]),
-            Some(Buffer2::new(2, 1, vec![1.0, 0.0])),
-            None,
+            WarpQuality::from_coverage(Buffer2::new(2, 1, vec![1.0, 0.0])),
         ),
     ];
     let config = StackConfig {

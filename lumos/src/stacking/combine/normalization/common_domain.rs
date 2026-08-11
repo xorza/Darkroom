@@ -16,6 +16,7 @@ use crate::stacking::combine::error::check_cancel;
 use crate::stacking::combine::normalization::NORMALIZATION_CHUNK_SIZE;
 use crate::stacking::frame_store::StoredFrame;
 use crate::stacking::frame_store::stored_plane::StoredPlane;
+use crate::stacking::frame_store::warp_quality::WarpQuality;
 
 #[derive(Debug)]
 pub(crate) struct CommonDomain {
@@ -42,7 +43,11 @@ impl CommonDomain {
         let mut common_domain = Self::full_mask(pixel_count);
         for frame in frames {
             check_cancel(cancel)?;
-            if let Some(coverage) = &frame.quality.coverage {
+            if let WarpQuality::Planes {
+                coverage,
+                confidence,
+            } = &frame.quality
+            {
                 intersect_domain(
                     &mut common_domain,
                     coverage,
@@ -50,8 +55,6 @@ impl CommonDomain {
                     |value| value > MIN_CONTRIBUTING_COVERAGE,
                     cancel,
                 )?;
-            }
-            if let Some(confidence) = &frame.quality.confidence {
                 intersect_domain(
                     &mut common_domain,
                     confidence,

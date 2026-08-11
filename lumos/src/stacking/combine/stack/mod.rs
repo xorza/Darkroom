@@ -24,22 +24,23 @@ use crate::stacking::combine::stack::quantization::{MaxSigma, SourceSigmas};
 use crate::stacking::frame_store::StoredFrame;
 use crate::stacking::frame_store::frame_stats::FrameStats;
 use crate::stacking::frame_store::spill::SpillDirectory;
+use crate::stacking::frame_store::warp_quality::WarpQuality;
 use crate::stacking::progress::ProgressCallback;
 use crate::stacking::registration::resample::WarpResult;
 use crate::stacking::stack_product::StackProduct;
 use crate::stacking::stack_product::quality_planes::QualityPlanes;
 
-/// One input frame for [`stack_images`] with optional per-pixel support and confidence.
+/// One input frame for [`stack_images`], with the per-pixel warp quality a registered frame carries.
 ///
-/// `coverage` gates whether a warped sample has meaningful source support. `confidence` is an
-/// independent inverse-variance multiplier. `None` means full support or unit confidence,
-/// respectively. Plain `LinearImage`s convert with `.into()`; registered frames must use
-/// [`StackFrame::registered`] so source-domain noise is captured before interpolation.
+/// Its coverage plane gates whether a warped sample has meaningful source support; its confidence
+/// plane is an independent inverse-variance multiplier. A frame with no warp quality has full
+/// support at unit confidence throughout. Plain `LinearImage`s convert with `.into()`; registered
+/// frames must use [`StackFrame::registered`] so source-domain noise is captured before
+/// interpolation.
 #[derive(Debug)]
 pub struct StackFrame {
     pub(crate) image: LinearImage,
-    pub(crate) coverage: Option<Buffer2<f32>>,
-    pub(crate) confidence: Option<Buffer2<f32>>,
+    pub(crate) quality: WarpQuality<Buffer2<f32>>,
     pub(crate) source_stats: FrameStats,
 }
 
@@ -49,8 +50,10 @@ impl StackFrame {
         Self {
             source_stats: FrameStats::measure(source),
             image: warped.image,
-            coverage: Some(warped.coverage),
-            confidence: Some(warped.confidence),
+            quality: WarpQuality::Planes {
+                coverage: warped.coverage,
+                confidence: warped.confidence,
+            },
         }
     }
 }
@@ -60,8 +63,7 @@ impl From<LinearImage> for StackFrame {
         let source_stats = FrameStats::measure(&image);
         Self {
             image,
-            coverage: None,
-            confidence: None,
+            quality: WarpQuality::None,
             source_stats,
         }
     }
