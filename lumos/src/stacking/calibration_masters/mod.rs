@@ -264,7 +264,8 @@ impl std::fmt::Display for CalibrationComponent {
 }
 
 /// Invalid CFA metadata supplied to raw-frame calibration.
-#[derive(Debug, thiserror::Error, Clone, PartialEq, Eq)]
+/// Not `Eq`: [`Self::SampleSpanMismatch`] reports the two spans, and a float has no total equality.
+#[derive(Debug, thiserror::Error, Clone, PartialEq)]
 pub enum CalibrationError {
     /// The light frame does not identify its sensor pattern.
     #[error("light frame is missing CFA pattern metadata")]
@@ -280,6 +281,20 @@ pub enum CalibrationError {
         component: MasterRole,
         light: CfaType,
         master: CfaType,
+    },
+    /// A calibration master was decoded into a different sample domain than the light.
+    ///
+    /// Subtracting a master divided by one span from a light divided by another is not a small
+    /// error, it is a no-op that reports success — a `[0, 1]` master against an unnormalized light
+    /// removes ~0.01 from ~3000 — and `calibrate` then marks the light calibrated.
+    #[error(
+        "{component} master was decoded with sample span {master}, but the light used {light}; \
+         a master and its light must come from the same domain"
+    )]
+    SampleSpanMismatch {
+        component: MasterRole,
+        light: f32,
+        master: f32,
     },
     /// A calibration master covers a different sensor area than the frame it has to line up with:
     /// the rest of the bundle when the set is assembled, or the light when one is calibrated.
@@ -700,6 +715,7 @@ impl CalibrationMasters {
             .as_ref()
             .ok_or(CalibrationError::MissingLightCfaPattern)?;
         let light_size = Size2us::new(image.data.width(), image.data.height());
+        let light_span = image.metadata.physical_scale();
 
         for (role, master) in self
             .masters
@@ -716,6 +732,18 @@ impl CalibrationMasters {
                     component: role,
                     light: light.clone(),
                     master: master_pattern.clone(),
+                });
+            }
+            // Only when both declare one: a synthesized master has no span to compare, and
+            // refusing on that would reject every in-memory fixture.
+            if let (Some(light_span), Some(master_span)) =
+                (light_span, master.metadata.physical_scale())
+                && light_span != master_span
+            {
+                return Err(CalibrationError::SampleSpanMismatch {
+                    component: role,
+                    light: light_span,
+                    master: master_span,
                 });
             }
             let master_size = Size2us::new(master.data.width(), master.data.height());

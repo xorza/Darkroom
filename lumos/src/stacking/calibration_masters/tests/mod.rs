@@ -2,8 +2,13 @@ mod mem_budget;
 mod synthetic;
 
 use crate::io::image::cfa::{CfaImage, CfaType, QUANTIZATION_SIGMA_PER_STEP};
+use crate::io::image::image_provenance::{
+    ColorProvenance, DecoderProvenance, DemosaicProvenance, ImageProvenance, SourceContainer,
+    TransferProvenance,
+};
 use crate::io::image::load_context::LoadContext;
 use crate::io::raw::demosaic::bayer::CfaPattern;
+use crate::io::raw::provenance::RawTransferProvenance;
 use crate::stacking::calibration_masters::defect_map::DefectMap;
 use crate::stacking::calibration_masters::stack_cfa_master;
 use crate::stacking::calibration_masters::weighted_budget;
@@ -187,6 +192,34 @@ fn calibrate_rejects_missing_and_mismatched_cfa_before_mutation() {
         assert!(!light.metadata.calibrated);
     }
 
+    // A master whose pattern and extent both match but which was decoded into another domain is
+    // the third axis, and the one that used to pass silently: subtracting a `[0, 1]` master from
+    // an unnormalized light removes ~0.01 from ~3000 and then marks the light calibrated.
+    for component in MasterRole::ALL {
+        let mut master = constant_cfa(Size2us::new(2, 2), 0.5, CfaType::Mono);
+        master.metadata.provenance = Some(raw_provenance(65_535.0));
+        let mut images = CalibrationSet::default();
+        *images.get_mut(component) = Some(master);
+        let masters =
+            CalibrationMasters::from_images(images, DEFAULT_SIGMA_THRESHOLD, CancelToken::never())
+                .unwrap();
+
+        let mut light = constant_cfa(Size2us::new(2, 2), 0.5, CfaType::Mono);
+        light.metadata.provenance = Some(raw_provenance(16_383.0));
+        let original_data = light.data.to_vec();
+
+        assert_eq!(
+            masters.calibrate(&mut light),
+            Err(CalibrationError::SampleSpanMismatch {
+                component,
+                light: 16_383.0,
+                master: 65_535.0,
+            })
+        );
+        assert_eq!(light.data.pixels(), original_data);
+        assert!(!light.metadata.calibrated);
+    }
+
     // ...and a set that does match still calibrates, so the extent check is not rejecting on
     // sheer presence. The dark also carries a defect map detected at its own size, which the
     // same pass checks against the light.
@@ -194,6 +227,44 @@ fn calibrate_rejects_missing_and_mismatched_cfa_before_mutation() {
         masters_with_sized_component(MasterRole::Dark, Some(CfaType::Mono), Size2us::new(4, 4));
     let mut light = constant_cfa(Size2us::new(4, 4), 0.5, CfaType::Mono);
     assert_eq!(masters.calibrate(&mut light), Ok(()));
+
+    // Matching spans pass, and so does a pair where only one side declares one: an undeclared
+    // span is "cannot tell", which must not reject the in-memory fixtures the rest of this file
+    // is built from.
+    for (light_span, master_span) in [
+        (Some(65_535.0), Some(65_535.0)),
+        (Some(65_535.0), None),
+        (None, Some(65_535.0)),
+        (None, None),
+    ] {
+        let mut master = constant_cfa(Size2us::new(2, 2), 0.5, CfaType::Mono);
+        master.metadata.provenance = master_span.map(raw_provenance);
+        let mut images = CalibrationSet::default();
+        *images.get_mut(MasterRole::Dark) = Some(master);
+        let masters =
+            CalibrationMasters::from_images(images, DEFAULT_SIGMA_THRESHOLD, CancelToken::never())
+                .unwrap();
+
+        let mut light = constant_cfa(Size2us::new(2, 2), 0.5, CfaType::Mono);
+        light.metadata.provenance = light_span.map(raw_provenance);
+        assert_eq!(
+            masters.calibrate(&mut light),
+            Ok(()),
+            "light {light_span:?} against master {master_span:?}"
+        );
+    }
+}
+
+/// A RAW decode's provenance at `physical_scale`, for pairing frames that differ only in domain.
+fn raw_provenance(physical_scale: f32) -> ImageProvenance {
+    ImageProvenance {
+        container: SourceContainer::CameraRaw,
+        decoder: DecoderProvenance::LibRaw,
+        transfer: TransferProvenance::RawNormalized(RawTransferProvenance { physical_scale }),
+        color: ColorProvenance::SensorCfa,
+        clipped: false,
+        demosaic: DemosaicProvenance::None,
+    }
 }
 
 #[test]
