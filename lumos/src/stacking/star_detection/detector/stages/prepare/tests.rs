@@ -4,6 +4,7 @@ use crate::io::image::image_provenance::{
     TransferProvenance,
 };
 use crate::io::raw::demosaic::bayer::CfaPattern;
+use crate::io::raw::provenance::RawTransferProvenance;
 use crate::stacking::star_detection::detector::stages::prepare::*;
 use crate::testing::prelude::*;
 
@@ -100,7 +101,9 @@ fn the_median_filter_follows_interpolation_not_the_sensor_pattern() {
         image.metadata.provenance = case.demosaic.map(|demosaic| ImageProvenance {
             container: SourceContainer::CameraRaw,
             decoder: DecoderProvenance::LibRaw,
-            transfer: TransferProvenance::RawNormalized,
+            transfer: TransferProvenance::RawNormalized(RawTransferProvenance {
+                physical_scale: 16_383.0,
+            }),
             color: ColorProvenance::SensorRgb,
             clipped: true,
             demosaic,

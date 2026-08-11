@@ -10,13 +10,14 @@ use lumos::{
     FitsHduSelector, FitsLoadOptions, FitsTransferProvenance, FrameStoreError, GesdConfig,
     ImageDimensions, ImageMetadata, InterpolationMethod, InvalidConfigField, LinearFitClipConfig,
     LinearImage, LoadContext, MasterRole, NoiseModel, Normalization, PercentileClipConfig,
-    QualityMap, QualityPlanes, RansacConfig, RegistrationCatalog, RegistrationConfig,
-    RegistrationError, RegistrationMatchingConfig, Rejection, SigmaClipConfig, SipConfig, SmallN,
-    StackConfig, StackConfigError, StackError, StackProduct, StarDetectionBackgroundConfig,
-    StarDetectionCandidateConfig, StarDetectionConfig, StarDetectionDiagnostics,
-    StarDetectionFilterConfig, StarDetectionFwhmConfig, StarDetectionMeasurementConfig,
-    StarDetectionQualityFilterDiagnostics, StarDetector, StarMatch, TransferProvenance, Transform,
-    TransformModel, TransformType, TriangleConfig, WarpParams, Weighting, WinsorizedClipConfig,
+    QualityMap, QualityPlanes, RansacConfig, RawTransferProvenance, RegistrationCatalog,
+    RegistrationConfig, RegistrationError, RegistrationMatchingConfig, Rejection, SigmaClipConfig,
+    SipConfig, SmallN, StackConfig, StackConfigError, StackError, StackProduct,
+    StarDetectionBackgroundConfig, StarDetectionCandidateConfig, StarDetectionConfig,
+    StarDetectionDiagnostics, StarDetectionFilterConfig, StarDetectionFwhmConfig,
+    StarDetectionMeasurementConfig, StarDetectionQualityFilterDiagnostics, StarDetector, StarMatch,
+    TransferProvenance, Transform, TransformModel, TransformType, TriangleConfig, WarpParams,
+    Weighting, WinsorizedClipConfig,
 };
 
 #[test]
@@ -62,6 +63,15 @@ fn file_loading_policy_is_available_from_the_crate_root() {
             ..
         })
     ));
+
+    // Both decoders answer the same question about their samples, so a caller can compare two
+    // frames' domains without knowing which produced them.
+    assert_eq!(provenance.physical_scale(), Some(65_535.0));
+    let raw = TransferProvenance::RawNormalized(RawTransferProvenance {
+        physical_scale: 16_383.0,
+    });
+    assert_eq!(raw.physical_scale(), Some(16_383.0));
+    assert_eq!(TransferProvenance::UnspecifiedRaster.physical_scale(), None);
 }
 
 #[test]
