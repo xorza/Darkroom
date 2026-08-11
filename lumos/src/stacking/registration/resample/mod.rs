@@ -38,6 +38,14 @@ pub struct WarpResult {
 /// is produced by inverse-mapping, so no input pixels are carried over. Returns a
 /// [`WarpResult`] carrying the aligned image and its quality maps (see that type).
 ///
+/// The maps are always produced, and by a second pass over the grid rather than alongside the
+/// plane warp. Both are deliberate. They are geometry, not pixels, so one pass serves every
+/// channel — folding them into the per-channel row loop would either compute them three times for
+/// an RGB frame or push its AVX2/NEON kernels back to scalar to carry two more outputs. And the
+/// pipeline's only caller needs both, so there is no unconditional cost to skip: `quality::maps`
+/// is about two thirds of one plane warp, having been the largest single item in a warp before its
+/// interior fast path and tabulated sums.
+///
 /// # Arguments
 /// * `image` - The source (target) image to warp
 /// * `warp_transform` - Combined transform + optional SIP correction

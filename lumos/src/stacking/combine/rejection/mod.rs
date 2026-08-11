@@ -219,6 +219,14 @@ impl Rejection {
     ///
     /// Rejection reorders `values`, so weights are re-paired through `scratch.indices` rather
     /// than by position.
+    ///
+    /// Only the mean is weighted; [`Self::reject`] decides survivors from the values alone. That
+    /// is deliberate, and matches what ImageIntegration, Siril and DSS all do: rejection asks
+    /// which samples disagree with their neighbours, which is a question about the normalized
+    /// values, not about how much each frame is trusted. It is also what keeps GESD available —
+    /// its critical values come from the t-distribution for `n` iid observations, and there is no
+    /// weighted form of those tables, so a weighted GESD would be a different test rather than the
+    /// same one with weights.
     pub(crate) fn combine_mean(
         &self,
         values: &mut [f32],
