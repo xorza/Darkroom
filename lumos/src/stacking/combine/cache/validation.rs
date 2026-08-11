@@ -53,6 +53,34 @@ pub(crate) fn validate_image_samples(
     )
 }
 
+/// Check that every frame declaring a sample span declares the same one.
+///
+/// A frame that declares none — synthesized rather than decoded, or a preview raster — is skipped
+/// rather than treated as agreeing: there is nothing to compare, and rejecting on it would refuse
+/// every in-memory fixture. The first frame that does declare one becomes the reference, so the
+/// error names a concrete pair.
+pub(crate) fn validate_sample_spans(frames: &[StoredFrame]) -> Result<(), Error> {
+    let mut reference: Option<(usize, f32)> = None;
+    for (index, frame) in frames.iter().enumerate() {
+        let Some(span) = frame.source_stats.physical_scale else {
+            continue;
+        };
+        match reference {
+            None => reference = Some((index, span)),
+            Some((reference_index, expected)) if span != expected => {
+                return Err(Error::SampleSpanMismatch {
+                    index,
+                    actual: span,
+                    reference_index,
+                    expected,
+                });
+            }
+            Some(_) => {}
+        }
+    }
+    Ok(())
+}
+
 /// Check a stored frame's shape against the geometry the cache was built for.
 ///
 /// The counterpart to the dimension checks [`FrameCache::from_stack_frames`](super::FrameCache::from_stack_frames) makes on

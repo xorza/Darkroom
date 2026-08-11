@@ -5,7 +5,12 @@ use crate::stacking::frame_store::warp_quality::FramePlane;
 
 use crate::error::FrameDimensionMismatch;
 use crate::io::image::cfa::{CfaImage, CfaType};
+use crate::io::image::image_provenance::{
+    ColorProvenance, DecoderProvenance, DemosaicProvenance, ImageProvenance, SourceContainer,
+    TransferProvenance,
+};
 use crate::io::image::linear_pixels::LinearPixels;
+use crate::io::raw::provenance::RawTransferProvenance;
 use crate::math::statistics::MedianMad;
 use crate::stacking::combine::cache::tests::make_test_cache;
 use crate::stacking::combine::cache_config::CacheConfig;
@@ -492,6 +497,64 @@ fn stack_images_in_memory_mean() {
 }
 
 #[test]
+fn stack_images_rejects_frames_decoded_into_different_sample_domains() {
+    // The case decode-time normalization introduced: a `uint16` FITS is divided by 65535, a
+    // `float32` one holding the same ADU is taken as already normalized and divided by 1. Both
+    // present as `FitsNormalized` and agree on every other axis, and `Normalization::Global` would
+    // absorb the 65535× into its fitted gain and hand back a plausible-looking stack.
+    let span = |physical_scale: f32| ImageProvenance {
+        container: SourceContainer::Fits,
+        decoder: DecoderProvenance::FitsWell,
+        transfer: TransferProvenance::RawNormalized(RawTransferProvenance { physical_scale }),
+        color: ColorProvenance::Monochrome,
+        clipped: false,
+        demosaic: DemosaicProvenance::None,
+    };
+    let frame = |physical_scale: Option<f32>| {
+        let mut image = LinearImage::from_pixels(ImageDimensions::new((2, 2), 1), vec![1.0; 4]);
+        image.metadata.provenance = physical_scale.map(span);
+        image
+    };
+
+    let result = stack_images(
+        vec![frame(Some(65_535.0)).into(), frame(Some(1.0)).into()],
+        StackConfig::default(),
+        ProgressCallback::default(),
+        CancelToken::never(),
+    );
+    assert!(
+        matches!(
+            result.unwrap_err(),
+            Error::SampleSpanMismatch {
+                index: 1,
+                reference_index: 0,
+                ..
+            }
+        ),
+        "a 65535x span difference must be named, not absorbed into the fitted gain"
+    );
+
+    // Matching spans stack, and so does a set where a frame declares none — an undeclared span is
+    // "cannot tell", which must not reject an in-memory frame.
+    for spans in [
+        [Some(65_535.0), Some(65_535.0)],
+        [Some(65_535.0), None],
+        [None, None],
+    ] {
+        assert!(
+            stack_images(
+                spans.map(|scale| frame(scale).into()).into_iter().collect(),
+                StackConfig::default(),
+                ProgressCallback::default(),
+                CancelToken::never(),
+            )
+            .is_ok(),
+            "spans {spans:?} must stack"
+        );
+    }
+}
+
+#[test]
 fn stack_images_dimension_errors() {
     let a = LinearImage::from_pixels(ImageDimensions::new((4, 4), 1), vec![1.0; 16]);
     let b = LinearImage::from_pixels(ImageDimensions::new((2, 2), 1), vec![1.0; 4]);
@@ -820,6 +883,7 @@ fn common_coverage_makes_reference_norms_and_noise_weights_fill_invariant() {
             frame.source_stats = FrameStats {
                 channels: [MedianMad { median, mad }].into_iter().collect(),
                 quantization_sigma: None,
+                physical_scale: None,
             };
             frame
         })
@@ -1914,6 +1978,7 @@ fn noise_weighting_folds_normalization_gain() {
         FrameStats {
             channels,
             quantization_sigma: None,
+            physical_scale: None,
         }
     };
     let frame_norm = |gain: f32| {

@@ -12,6 +12,9 @@ use crate::stacking::frame_store::StackableImage;
 pub(crate) struct FrameStats {
     pub(crate) channels: ArrayVec<MedianMad, 3>,
     pub(crate) quantization_sigma: Option<f32>,
+    /// The span the frame's decoder divided by — see [`ImageMetadata::physical_scale`]. Carried
+    /// beside the statistics because it is what makes two frames' statistics comparable at all.
+    pub(crate) physical_scale: Option<f32>,
 }
 
 impl FrameStats {
@@ -19,6 +22,7 @@ impl FrameStats {
     pub(crate) fn measure(image: &impl StackableImage) -> Self {
         let dimensions = image.dimensions();
         let quantization_sigma = image.quantization_sigma();
+        let physical_scale = image.metadata().physical_scale();
         let channels = (0..dimensions.channels())
             .into_par_iter()
             .map(|channel| {
@@ -34,6 +38,7 @@ impl FrameStats {
         Self {
             channels,
             quantization_sigma,
+            physical_scale,
         }
     }
 }

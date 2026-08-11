@@ -83,6 +83,17 @@ pub struct ImageMetadata {
 }
 
 impl ImageMetadata {
+    /// What one sample is worth in the source's own units — the span its decoder divided by.
+    ///
+    /// `None` for an image this crate synthesized rather than decoded, and for a preview raster that
+    /// declared no scale. Two frames are commensurate when both answer and the answers match; when
+    /// either is `None` there is nothing to compare, which is not the same as agreeing.
+    pub fn physical_scale(&self) -> Option<f32> {
+        self.provenance
+            .as_ref()
+            .and_then(|provenance| provenance.transfer.physical_scale())
+    }
+
     /// Whether these samples came out of a demosaic, and so carry its interpolation artifacts.
     ///
     /// Not `cfa_type.is_some()`: that records which sensor pattern the frame came from and stays
