@@ -96,7 +96,8 @@ pub use stacking::registration::ransac::config::RansacConfig;
 pub use stacking::registration::register;
 pub use stacking::registration::resample::{WarpResult, warp};
 pub use stacking::registration::result::{
-    RansacFailureReason, RegistrationCatalog, RegistrationError, RegistrationResult, StarMatch,
+    FailedRung, RansacFailureReason, RegistrationCatalog, RegistrationError, RegistrationResult,
+    StarMatch,
 };
 pub use stacking::registration::transform::{
     Transform, TransformModel, TransformType, WarpTransform,

@@ -6,7 +6,7 @@ use glam::DVec2;
 
 use crate::error::InvalidConfigField;
 use crate::stacking::registration::distortion::sip::SipFitResult;
-use crate::stacking::registration::transform::{Transform, WarpTransform};
+use crate::stacking::registration::transform::{Transform, TransformType, WarpTransform};
 
 /// Minimum inlier count for a meaningful quality score (below this the fit is unreliable).
 const QUALITY_MIN_INLIERS: usize = 4;
@@ -55,6 +55,34 @@ impl std::fmt::Display for RansacFailureReason {
             RansacFailureReason::InsufficientInliers => write!(f, "insufficient inliers"),
         }
     }
+}
+
+/// One model the `Auto` ladder tried and the reason it did not produce a fit.
+///
+/// Boxed because a rung's failure is itself a [`RegistrationError`] — without it the enum would be
+/// infinitely sized.
+#[derive(Debug, Clone)]
+pub struct FailedRung {
+    /// The model that was attempted.
+    pub model: TransformType,
+    /// Why it failed.
+    pub error: Box<RegistrationError>,
+}
+
+impl std::fmt::Display for FailedRung {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}: {}", self.model, self.error)
+    }
+}
+
+/// The rungs on one line: a dropped frame logs its error as a single tracing field, so a message
+/// spanning lines would be unreadable where it is actually read.
+fn joined(failures: &[FailedRung]) -> String {
+    failures
+        .iter()
+        .map(FailedRung::to_string)
+        .collect::<Vec<_>>()
+        .join("; ")
 }
 
 /// Registration error types.
@@ -114,6 +142,21 @@ pub enum RegistrationError {
     /// The SIP polynomial system is singular.
     #[error("SIP fit failed: singular polynomial system")]
     SingularSipSystem,
+    /// Every model on the `Auto` ladder failed, each with its own reason.
+    ///
+    /// Distinct from any single rung's error because the rungs fail independently: RANSAC estimates
+    /// the model it was given, and SIP is fit on that model's inlier set, so a homography that
+    /// cannot be estimated says nothing about whether Euclidean could. Reporting only the last
+    /// rung's failure made "the ladder had nothing to offer" indistinguishable from "homography
+    /// specifically failed", and hid the other three reasons.
+    ///
+    /// Only reachable when *no* rung produced a fit — a rung that fit is returned rather than
+    /// discarded, even when a later one fails.
+    #[error("no transform model fit: {}", joined(failures))]
+    AutoLadderExhausted {
+        /// Every rung tried, in ladder order.
+        failures: Vec<FailedRung>,
+    },
 }
 
 /// Corresponding stars in the reference and target inputs with their final fit residual.
