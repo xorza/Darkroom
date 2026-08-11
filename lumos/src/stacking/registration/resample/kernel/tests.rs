@@ -1,3 +1,4 @@
+use crate::math::lanczos;
 use crate::testing::prelude::*;
 use std::f32::consts::PI;
 
@@ -48,22 +49,22 @@ const INTERPOLATION_METHODS: [InterpolationMethod; 6] = [
 ];
 
 #[test]
-fn lanczos_kernel_compute_at_zero() {
+fn lanczos_kernel_at_zero() {
     // L(0, a) = 1.0 by definition (limit of sinc(x) * sinc(x/a) as x -> 0)
-    assert!((kernel::lanczos_kernel_compute(0.0, 2.0) - 1.0).abs() < TOL);
-    assert!((kernel::lanczos_kernel_compute(0.0, 3.0) - 1.0).abs() < TOL);
-    assert!((kernel::lanczos_kernel_compute(0.0, 4.0) - 1.0).abs() < TOL);
+    assert!((lanczos::kernel(0.0, 2.0) - 1.0).abs() < TOL);
+    assert!((lanczos::kernel(0.0, 3.0) - 1.0).abs() < TOL);
+    assert!((lanczos::kernel(0.0, 4.0) - 1.0).abs() < TOL);
 }
 
 #[test]
-fn lanczos_kernel_compute_at_integers() {
+fn lanczos_kernel_at_integers() {
     // sinc(n) = sin(n*pi) / (n*pi) = 0 for all nonzero integers
     // So L(n, a) = 0 for integer n != 0
     for a in [2.0, 3.0, 4.0] {
         for n in 1..=(a as i32 - 1) {
-            let val = kernel::lanczos_kernel_compute(n as f32, a);
+            let val = lanczos::kernel(n as f32, a);
             assert!(val.abs() < TOL, "L({n}, {a}) should be 0, got {val}");
-            let val_neg = kernel::lanczos_kernel_compute(-(n as f32), a);
+            let val_neg = lanczos::kernel(-(n as f32), a);
             assert!(
                 val_neg.abs() < TOL,
                 "L({}, {a}) should be 0, got {val_neg}",
@@ -74,29 +75,29 @@ fn lanczos_kernel_compute_at_integers() {
 }
 
 #[test]
-fn lanczos_kernel_compute_at_boundary() {
+fn lanczos_kernel_at_boundary() {
     // L(a, a) = 0 by definition (outside support)
-    assert_eq!(kernel::lanczos_kernel_compute(3.0, 3.0), 0.0);
-    assert_eq!(kernel::lanczos_kernel_compute(-3.0, 3.0), 0.0);
-    assert_eq!(kernel::lanczos_kernel_compute(2.0, 2.0), 0.0);
-    assert_eq!(kernel::lanczos_kernel_compute(4.0, 4.0), 0.0);
+    assert_eq!(lanczos::kernel(3.0, 3.0), 0.0);
+    assert_eq!(lanczos::kernel(-3.0, 3.0), 0.0);
+    assert_eq!(lanczos::kernel(2.0, 2.0), 0.0);
+    assert_eq!(lanczos::kernel(4.0, 4.0), 0.0);
 }
 
 #[test]
-fn lanczos_kernel_compute_outside_support() {
-    assert_eq!(kernel::lanczos_kernel_compute(3.5, 3.0), 0.0);
-    assert_eq!(kernel::lanczos_kernel_compute(-4.1, 3.0), 0.0);
-    assert_eq!(kernel::lanczos_kernel_compute(100.0, 3.0), 0.0);
+fn lanczos_kernel_outside_support() {
+    assert_eq!(lanczos::kernel(3.5, 3.0), 0.0);
+    assert_eq!(lanczos::kernel(-4.1, 3.0), 0.0);
+    assert_eq!(lanczos::kernel(100.0, 3.0), 0.0);
 }
 
 #[test]
-fn lanczos_kernel_compute_at_half() {
+fn lanczos_kernel_at_half() {
     // L(0.5, 3) = sinc(0.5) * sinc(0.5/3) = [sin(pi/2)/(pi/2)] * [sin(pi/6)/(pi/6)]
     // sinc(0.5) = sin(pi*0.5) / (pi*0.5) = 1.0 / (pi/2) = 2/pi
     // sinc(1/6) = sin(pi/6) / (pi/6) = 0.5 / (pi/6) = 3/pi
     // L(0.5, 3) = (2/pi) * (3/pi) = 6 / pi^2
     let expected = 6.0 / (PI * PI);
-    let actual = kernel::lanczos_kernel_compute(0.5, 3.0);
+    let actual = lanczos::kernel(0.5, 3.0);
     assert!(
         (actual - expected).abs() < 1e-6,
         "L(0.5, 3) = 6/pi^2 = {expected}, got {actual}"
@@ -104,11 +105,11 @@ fn lanczos_kernel_compute_at_half() {
 }
 
 #[test]
-fn lanczos_kernel_compute_symmetry() {
+fn lanczos_kernel_symmetry() {
     // L(x) = L(-x) for all x
     for &x in &[0.1, 0.5, 1.0, 1.5, 2.5] {
-        let pos = kernel::lanczos_kernel_compute(x, 3.0);
-        let neg = kernel::lanczos_kernel_compute(-x, 3.0);
+        let pos = lanczos::kernel(x, 3.0);
+        let neg = lanczos::kernel(-x, 3.0);
         assert!(
             (pos - neg).abs() < TOL,
             "Symmetry broken: L({x}) = {pos}, L(-{x}) = {neg}"
@@ -129,7 +130,7 @@ fn lanczos_lut_matches_direct_computation() {
             if x >= a_f32 {
                 continue;
             }
-            let direct = kernel::lanczos_kernel_compute(x, a_f32);
+            let direct = lanczos::kernel(x, a_f32);
             let lut_val = lut.lookup(x);
             assert!(
                 (direct - lut_val).abs() < 0.001,

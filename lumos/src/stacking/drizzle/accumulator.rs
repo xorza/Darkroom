@@ -8,11 +8,12 @@ use rayon::prelude::*;
 use crate::bit_buffer2::BitBuffer2;
 use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::linear::LinearImage;
+use crate::math::lanczos;
 use crate::math::rect::Rect;
 use crate::math::size2us::Size2us;
 use crate::stacking::drizzle::config::{DrizzleConfig, DrizzleKernel};
 use crate::stacking::drizzle::error::DrizzleError;
-use crate::stacking::drizzle::geometry::{boxer, lanczos_kernel, local_jacobian};
+use crate::stacking::drizzle::geometry::{boxer, local_jacobian};
 use crate::stacking::registration::transform::Transform;
 use crate::stacking::stack_product::StackProduct;
 use crate::stacking::stack_product::coverage::Coverage;
@@ -313,7 +314,7 @@ impl DrizzleAccumulator {
                     pixel_weights,
                     scale,
                     a as isize,
-                    |dx, dy| lanczos_kernel(dx, a) * lanczos_kernel(dy, a),
+                    |dx, dy| lanczos::kernel(dx, a) * lanczos::kernel(dy, a),
                 );
             }
         }

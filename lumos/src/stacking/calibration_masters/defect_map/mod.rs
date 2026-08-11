@@ -48,17 +48,16 @@
 //! shadows (which dim by far less than half), so only genuinely near-zero pixels are caught.
 
 pub(crate) mod dark_background;
-mod same_color;
 mod sampling;
 
 use crate::bit_buffer2::BitBuffer2;
 use crate::io::image::cfa::{CfaImage, CfaType};
 use crate::math::size2us::Size2us;
 use crate::math::statistics::{MAD_TO_SIGMA, median_f32_mut};
-use crate::math::vec2us::Vec2us;
 use crate::stacking::calibration_masters::defect_map::dark_background::DarkBackground;
-use crate::stacking::calibration_masters::defect_map::same_color::SameColorMedian;
 use crate::stacking::calibration_masters::defect_map::sampling::collect_color_residual_samples;
+use crate::stacking::calibration_masters::pattern_or_mono;
+use crate::stacking::calibration_masters::same_color::SameColorMedian;
 use crate::stacking::combine::error::Error;
 use common::CancelToken;
 use imaginarium::Buffer2;
@@ -174,7 +173,7 @@ impl DefectMap {
             .cfa_type
             .as_ref()
             .expect("image must have CFA type for defect correction");
-        let neighbors = SameColorMedian::new(Some(cfa_type));
+        let neighbors = SameColorMedian::new(cfa_type);
 
         // Mask every defect so each repair draws only on GOOD neighbours. Without it, a clustered
         // defect (hot column, adjacent same-color pixels) pulls a neighbour's bad/half-corrected
@@ -201,15 +200,6 @@ pub(super) const DARK_BACKGROUND_TILE_SIZE: usize = 64;
 const ABSOLUTE_RESIDUAL_P99_TO_SIGMA: f32 = 0.388_224_48;
 // Five expected tail samples keep one sparse defect from defining the scale on tiny images.
 const MIN_TAIL_SCALE_SAMPLES: usize = 500;
-
-/// Get CFA color index at (x, y). Returns 0 for Mono (None CFA type).
-pub(super) fn cfa_color_at(cfa_type: Option<&CfaType>, pos: Vec2us) -> u8 {
-    match cfa_type {
-        Some(cfa) => cfa.color_at(pos),
-        // Mono images have no CFA pattern — treat all pixels as the same color channel.
-        None => 0,
-    }
-}
 
 /// Lowest hot-pixel σ multiplier `detect_hot` will honor. A non-positive (or absurdly small)
 /// threshold would flag a huge fraction of the sensor; clamping here keeps a mis-set user config
@@ -252,7 +242,7 @@ fn detect_hot_pixels(
                 return false;
             }
             let point = size.point_of(i);
-            let color = cfa_color_at(cfa_type, point) as usize;
+            let color = pattern_or_mono(cfa_type).color_at(point) as usize;
             let ColorStats { median, sigma } = stats[color];
             data[i] - background.at(point, color) > median + sigma_threshold * sigma
         })
@@ -295,7 +285,7 @@ fn detect_cold_pixels(
     let data = &image.data;
     let size = Size2us::new(data.width(), data.height());
     let total = size.pixel_count();
-    let neighbors = SameColorMedian::new(image.metadata.cfa_type.as_ref());
+    let neighbors = SameColorMedian::new(pattern_or_mono(image.metadata.cfa_type.as_ref()));
 
     let indices = (0..total)
         .into_par_iter()

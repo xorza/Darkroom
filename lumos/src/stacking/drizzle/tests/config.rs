@@ -127,13 +127,13 @@ fn drizzle_accumulator_dimensions() {
 #[test]
 fn lanczos_kernel_is_symmetric_and_vanishes_outside_its_support() {
     // Center value
-    assert!((lanczos_kernel(0.0, 3.0) - 1.0).abs() < f32::EPSILON);
+    assert!((lanczos::kernel(0.0, 3.0) - 1.0).abs() < f32::EPSILON);
 
     // Outside support
-    assert!((lanczos_kernel(3.5, 3.0) - 0.0).abs() < f32::EPSILON);
+    assert!((lanczos::kernel(3.5, 3.0) - 0.0).abs() < f32::EPSILON);
 
     // Symmetry
-    let pos = lanczos_kernel(1.5, 3.0);
-    let neg = lanczos_kernel(-1.5, 3.0);
+    let pos = lanczos::kernel(1.5, 3.0);
+    let neg = lanczos::kernel(-1.5, 3.0);
     assert!((pos - neg).abs() < 1e-6);
 }

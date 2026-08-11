@@ -10,6 +10,7 @@ use imaginarium::Buffer2;
 
 use crate::bit_buffer2::BitBuffer2;
 use crate::io::image::cfa::CfaType;
+use crate::math::size2us::Size2us;
 use crate::math::statistics::median_f32_mut;
 use crate::math::vec2us::Vec2us;
 
@@ -83,7 +84,7 @@ fn median_of_neighbors<const N: usize>(
 /// cheap. The X-Trans variant precomputes its neighbour geometry up front (see [`XTransOffsets`]);
 /// Mono and Bayer carry no state because their offsets are fixed.
 #[derive(Debug)]
-pub(super) enum SameColorMedian {
+pub(crate) enum SameColorMedian {
     /// Mono: 8-connected neighbours.
     Mono,
     /// Bayer: same-color neighbours at stride 2 (true for every 2×2 Bayer phase).
@@ -94,18 +95,20 @@ pub(super) enum SameColorMedian {
 }
 
 impl SameColorMedian {
-    /// `None` (no CFA metadata) is treated as Mono, matching [`cfa_color_at`](super::cfa_color_at).
-    pub(super) fn new(cfa: Option<&CfaType>) -> Self {
+    /// Takes a resolved pattern — a frame that declares none is Mono, which
+    /// [`pattern_or_mono`](crate::stacking::calibration_masters::pattern_or_mono) decides once for
+    /// every reader of a pattern rather than here.
+    pub(crate) fn new(cfa: &CfaType) -> Self {
         match cfa {
-            None | Some(CfaType::Mono) => Self::Mono,
-            Some(CfaType::Bayer(_)) => Self::Bayer,
-            Some(CfaType::XTrans(pattern)) => Self::XTrans(Box::new(XTransOffsets::new(pattern))),
+            CfaType::Mono => Self::Mono,
+            CfaType::Bayer(_) => Self::Bayer,
+            CfaType::XTrans(pattern) => Self::XTrans(Box::new(XTransOffsets::new(pattern))),
         }
     }
 
     /// Median of `(x, y)`'s same-color neighbours, skipping any flagged in `defect_mask` so a defect
     /// is never repaired from another defect.
-    pub(super) fn at(
+    pub(crate) fn at(
         &self,
         pixels: &Buffer2<f32>,
         pos: Vec2us,
@@ -120,11 +123,11 @@ impl SameColorMedian {
 }
 
 /// Search radius (in pixels) for X-Trans same-color neighbours — one full pattern period.
-pub(super) const XTRANS_RADIUS: i32 = 6;
+pub(crate) const XTRANS_RADIUS: i32 = 6;
 
 /// Same-color neighbours used for the X-Trans median: ≈4 per cardinal/diagonal direction in the
 /// 6×6 pattern — enough for a robust median without directional bias.
-pub(super) const XTRANS_NEIGHBORS: usize = 24;
+pub(crate) const XTRANS_NEIGHBORS: usize = 24;
 
 /// Precomputed X-Trans same-color neighbour offsets, indexed by the pixel's 6×6 phase.
 ///
@@ -134,14 +137,14 @@ pub(super) const XTRANS_NEIGHBORS: usize = 24;
 /// sort, which dominated the cold-pixel scan of a full X-Trans master. Precomputing it once turns
 /// the per-pixel work into a bounded gather + median over the nearest valid neighbours.
 #[derive(Debug)]
-pub(super) struct XTransOffsets {
+pub(crate) struct XTransOffsets {
     /// `per_phase[(y % 6) * 6 + (x % 6)]` = same-color `(dx, dy)` offsets, nearest-first by
     /// Manhattan distance (ties broken by scan order: `dy` then `dx`).
     per_phase: [Vec<(i32, i32)>; 36],
 }
 
 impl XTransOffsets {
-    pub(super) fn new(pattern: &[[u8; 6]; 6]) -> Self {
+    pub(crate) fn new(pattern: &[[u8; 6]; 6]) -> Self {
         let per_phase = std::array::from_fn(|phase| {
             let px = (phase % 6) as i32;
             let py = (phase / 6) as i32;
@@ -172,7 +175,7 @@ impl XTransOffsets {
     /// Median of the nearest valid same-color neighbours of `(x, y)`. Walks the precomputed
     /// nearest-first offsets, skipping out-of-bounds and `defect_mask`ed positions, and stops once
     /// [`XTRANS_NEIGHBORS`] valid samples are gathered — equivalent to "closest-N valid neighbours".
-    pub(super) fn median(
+    pub(crate) fn median(
         &self,
         pixels: &Buffer2<f32>,
         pos: Vec2us,
@@ -180,5 +183,43 @@ impl XTransOffsets {
     ) -> f32 {
         let phase = &self.per_phase[(pos.y % 6) * 6 + (pos.x % 6)];
         median_of_neighbors::<XTRANS_NEIGHBORS>(pixels, pos, phase.iter().copied(), defect_mask)
+    }
+
+    /// The nearest `max` valid same-colour neighbour *values* at `pos`, into `out`.
+    ///
+    /// [`Self::median`]'s counterpart for a caller that wants the samples rather than their median
+    /// — the cosmic-ray scan takes two medians at different radii from one gather, so it needs the
+    /// values and a runtime cap where the defect scan takes a fixed one on the stack.
+    ///
+    /// Nearest-first, so stopping at `max` selects the closest valid neighbours; and the order is
+    /// this table's, which is stable by construction, so equidistant neighbours are taken in a
+    /// fixed order rather than whichever a per-pixel sort happened to leave them in.
+    pub(crate) fn gather(
+        &self,
+        pixels: &[f32],
+        size: Size2us,
+        pos: Vec2us,
+        defect_mask: &BitBuffer2,
+        max: usize,
+        out: &mut Vec<f32>,
+    ) {
+        out.clear();
+        let phase = &self.per_phase[(pos.y % 6) * 6 + (pos.x % 6)];
+        let (width, height) = (size.width as i32, size.height as i32);
+        for &(dx, dy) in phase {
+            if out.len() == max {
+                break;
+            }
+            let nx = pos.x as i32 + dx;
+            let ny = pos.y as i32 + dy;
+            if nx < 0 || ny < 0 || nx >= width || ny >= height {
+                continue;
+            }
+            let (nx, ny) = (nx as usize, ny as usize);
+            if defect_mask.get(ny * size.width + nx) {
+                continue;
+            }
+            out.push(pixels[ny * size.width + nx]);
+        }
     }
 }

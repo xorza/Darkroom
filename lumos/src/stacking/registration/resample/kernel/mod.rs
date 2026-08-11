@@ -4,9 +4,9 @@
 //! Bilinear and Lanczos3 have optimized row-warping paths (AVX2/SSE4.1 on x86_64,
 //! scalar with incremental stepping on aarch64).
 
-use std::f32::consts::PI;
 use std::sync::OnceLock;
 
+use crate::math::lanczos;
 use crate::math::size2us::Size2us;
 use glam::Vec2;
 use imaginarium::Buffer2;
@@ -17,20 +17,6 @@ mod tests;
 // Lanczos LUT: 4096 samples/unit gives ~0.00024 precision.
 // Lanczos3 LUT: 4096 * 3 * 4 bytes = 48KB (fits in L1 cache).
 pub(super) const LANCZOS_LUT_RESOLUTION: usize = 4096;
-
-/// Direct Lanczos kernel computation (used for LUT initialization).
-#[inline]
-fn lanczos_kernel_compute(x: f32, a: f32) -> f32 {
-    if x.abs() < 1e-6 {
-        return 1.0;
-    }
-    if x.abs() >= a {
-        return 0.0;
-    }
-    let pi_x = PI * x;
-    let pi_x_a = pi_x / a;
-    (pi_x.sin() / pi_x) * (pi_x_a.sin() / pi_x_a)
-}
 
 #[derive(Debug)]
 pub(super) struct LanczosLut {
@@ -45,7 +31,7 @@ impl LanczosLut {
         let values = (0..num_entries)
             .map(|i| {
                 let x = i as f32 / LANCZOS_LUT_RESOLUTION as f32;
-                lanczos_kernel_compute(x, a_f32)
+                lanczos::kernel(x, a_f32)
             })
             .collect();
         Self { values, a }

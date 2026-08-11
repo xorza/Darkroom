@@ -21,6 +21,7 @@ use rayon::prelude::*;
 use crate::bit_buffer2::BitBuffer2;
 use crate::io::image::image_dimensions::ImageDimensions;
 use crate::math::statistics::{MedianMad, mad_to_sigma, median_f32_mut};
+use crate::stacking::combine::CANCEL_POLL_CHUNK;
 use crate::stacking::combine::config::Normalization;
 use crate::stacking::combine::error::Error;
 use crate::stacking::combine::error::check_cancel;
@@ -66,7 +67,6 @@ struct ReferenceFit {
 }
 
 const PHOTOMETRIC_SAMPLE_LIMIT: usize = 65_536;
-pub(super) const NORMALIZATION_CHUNK_SIZE: usize = 16_384;
 
 pub(crate) fn compute_frame_norms(
     frames: &[StoredFrame],
@@ -354,9 +354,9 @@ fn gather_valid_samples(
 ) -> Result<(), Error> {
     samples.clear();
     let values = plane.chunk(0, pixel_count);
-    for (start, value_chunk) in values.chunks(NORMALIZATION_CHUNK_SIZE).enumerate() {
+    for (start, value_chunk) in values.chunks(CANCEL_POLL_CHUNK).enumerate() {
         check_cancel(cancel)?;
-        let base = start * NORMALIZATION_CHUNK_SIZE;
+        let base = start * CANCEL_POLL_CHUNK;
         samples.extend(
             value_chunk
                 .iter()
@@ -376,7 +376,7 @@ fn stratified_valid_indices(
     let mut indices = Vec::with_capacity(retained);
     let mut valid_rank = 0;
     for (pixel, valid) in common_domain.iter().enumerate() {
-        if pixel % NORMALIZATION_CHUNK_SIZE == 0 {
+        if pixel % CANCEL_POLL_CHUNK == 0 {
             check_cancel(cancel)?;
         }
         if !valid {
@@ -399,7 +399,7 @@ fn gather_indexed_samples(
 ) -> Result<Vec<f32>, Error> {
     let pixels = plane.chunk(0, pixel_count);
     let mut samples = Vec::with_capacity(indices.len());
-    for chunk in indices.chunks(NORMALIZATION_CHUNK_SIZE) {
+    for chunk in indices.chunks(CANCEL_POLL_CHUNK) {
         check_cancel(cancel)?;
         samples.extend(chunk.iter().map(|&index| pixels[index]));
     }
@@ -419,7 +419,7 @@ fn source_noise_variance(
     };
     let values = confidence.chunk(0, pixel_count);
     let mut inverse_confidence = 0.0;
-    for chunk in indices.chunks(NORMALIZATION_CHUNK_SIZE) {
+    for chunk in indices.chunks(CANCEL_POLL_CHUNK) {
         check_cancel(cancel)?;
         for &index in chunk {
             let value = f64::from(values[index]);
@@ -443,7 +443,7 @@ pub(super) fn cancellable_median_mad(
     let median = median_f32_mut(samples);
     check_cancel(cancel)?;
     // Keep the passes separate so a large MAD calculation remains cooperatively cancellable.
-    for chunk in samples.chunks_mut(NORMALIZATION_CHUNK_SIZE) {
+    for chunk in samples.chunks_mut(CANCEL_POLL_CHUNK) {
         check_cancel(cancel)?;
         for value in chunk {
             *value = (*value - median).abs();

@@ -3,13 +3,14 @@ use crate::testing::prelude::*;
 use std::f64::consts::{FRAC_PI_4, PI};
 
 use crate::io::image::load_context::LoadContext;
+use crate::math::lanczos;
 use crate::stacking::drizzle::accumulator::internals::{
     accumulated_flux_sum, add_image as add_test_image,
 };
 use crate::stacking::drizzle::accumulator::{DrizzleAccumulator, DrizzleFrame};
 use crate::stacking::drizzle::config::{DrizzleConfig, DrizzleKernel};
 use crate::stacking::drizzle::error::{DrizzleConfigError, DrizzleError};
-use crate::stacking::drizzle::geometry::{boxer, lanczos_kernel, local_jacobian, sgarea};
+use crate::stacking::drizzle::geometry::{boxer, local_jacobian, sgarea};
 use crate::stacking::drizzle::stack::{drizzle_images, drizzle_stack};
 use crate::stacking::progress::ProgressCallback;
 use crate::stacking::registration::transform::Transform;
