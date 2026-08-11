@@ -23,6 +23,31 @@ pub enum FitsCubeInterpretation {
     Rgb,
 }
 
+/// How a floating-point FITS image's sample scale is decided.
+///
+/// An integer `BITPIX` fixes what one sample is worth — the decoder divides by
+/// `|BSCALE| × (2^bits − 1)` and the frame lands in the pipeline's `[0, 1]` domain. `BITPIX = -32`
+/// and `-64` declare no such span, so a float HDU is the one input whose scale the header may not
+/// settle, and it is the caller who knows.
+///
+/// The reference readers split three ways on this: PixInsight assumes `[0, 1]` with a configurable
+/// input range, Siril scans the pixel data, and astropy does not normalize at all. Scanning is the
+/// one option ruled out here — a divisor read off each frame's own extrema differs frame to frame,
+/// which is what [`crate::StackError::SampleSpanMismatch`] exists to reject.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum FitsFloatScale {
+    /// Decide from `DATAMAX`: a declared saturation level well above unity means the samples are
+    /// ADU and they are divided by the 16-bit full scale; anything else — a `DATAMAX` of about 1,
+    /// or none at all — is taken as already normalized.
+    Auto,
+    /// Take the samples as already normalized, whatever `DATAMAX` says. For a file whose declared
+    /// saturation level describes the sensor rather than the samples.
+    Normalized,
+    /// Divide by an explicit full scale: what one normalized unit is worth in the file's own units.
+    /// The answer for an ADU frame carrying no `DATAMAX`, which no header rule can identify.
+    FullScale(f32),
+}
+
 /// Controls checksum validation for the selected FITS HDU.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FitsChecksumPolicy {
@@ -35,7 +60,9 @@ pub enum FitsChecksumPolicy {
 }
 
 /// FITS-specific selection and validation policy.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// Not `Eq`: [`FitsFloatScale::FullScale`] carries an `f32`.
+#[derive(Debug, Clone, PartialEq)]
 pub struct FitsLoadOptions {
     /// Image HDU selection policy.
     pub hdu: FitsHduSelector,
@@ -43,6 +70,8 @@ pub struct FitsLoadOptions {
     pub cube: FitsCubeInterpretation,
     /// Checksum validation policy.
     pub checksum: FitsChecksumPolicy,
+    /// How a floating-point HDU's sample scale is decided.
+    pub float_scale: FitsFloatScale,
 }
 
 impl Default for FitsLoadOptions {
@@ -51,6 +80,7 @@ impl Default for FitsLoadOptions {
             hdu: FitsHduSelector::Auto,
             cube: FitsCubeInterpretation::Reject,
             checksum: FitsChecksumPolicy::VerifyIfPresent,
+            float_scale: FitsFloatScale::Auto,
         }
     }
 }

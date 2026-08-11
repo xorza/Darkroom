@@ -42,7 +42,7 @@ pub use io::image::PREVIEW_IMAGE_EXTENSIONS;
 pub use io::image::cfa::{CfaImage, CfaType};
 pub use io::image::error::ImageError;
 pub use io::image::fits::options::{
-    FitsChecksumPolicy, FitsCubeInterpretation, FitsHduSelector, FitsLoadOptions,
+    FitsChecksumPolicy, FitsCubeInterpretation, FitsFloatScale, FitsHduSelector, FitsLoadOptions,
 };
 pub use io::image::fits::provenance::{
     FitsChecksumProvenance, FitsChecksumState, FitsHduProvenance, FitsTransferProvenance,

@@ -3,9 +3,15 @@
 //! across that range. The curve is steep near the background (expanding the thin slice of nebula
 //! signal) and shallow in the highlights (compressing star cores so they don't saturate).
 //!
-//! Input is treated as linear and non-negative; it need not be normalized (a raw stack's bright
-//! stars routinely exceed 1). Every curve clamps its output, so the result is always a valid
-//! display image in `[0, 1]`.
+//! Input is treated as linear and **already in the pipeline's `[0, 1]` domain** — the decoders
+//! establish that, and it is the one place a frame's scale is decided (see
+//! [`crate::FitsFloatScale`] for the single input whose header may not settle it). Nothing here
+//! measures the frame's own range: a per-frame range would make the stretch depend on content the
+//! decoders deliberately refuse to derive a scale from.
+//!
+//! Excursions outside the domain are still expected and handled — calibration leaves sub-background
+//! pixels negative, and a stack's bright stars exceed 1 — so every curve clamps its output, and the
+//! result is always a valid display image in `[0, 1]`.
 //!
 //! Three curve families:
 //! - **STF / MTF auto-stretch** (PixInsight/Siril): a linear black-point clip-rescale followed by

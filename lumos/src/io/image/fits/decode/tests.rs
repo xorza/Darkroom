@@ -11,7 +11,7 @@ use crate::io::image::fits::decode::plan;
 use crate::io::image::fits::decode::plan::internals::description;
 use crate::io::image::fits::decode::*;
 use crate::io::image::fits::options::{
-    FitsChecksumPolicy, FitsCubeInterpretation, FitsHduSelector, FitsLoadOptions,
+    FitsChecksumPolicy, FitsCubeInterpretation, FitsFloatScale, FitsHduSelector, FitsLoadOptions,
 };
 use crate::io::image::fits::provenance::{FitsChecksumState, FitsTransferProvenance};
 use crate::io::image::image_provenance::TransferProvenance;
@@ -143,6 +143,7 @@ fn shape_validation_rejects_zero_overflow_and_unsupported_cubes_without_panickin
             path,
             description(&huge_cube, HduKind::Primary, 0),
             FitsCubeInterpretation::Reject,
+            FitsFloatScale::Auto,
             u64::MAX,
         )
         .unwrap_err(),
@@ -158,6 +159,7 @@ fn preflight_enforces_source_output_and_peak_limits_at_exact_boundaries() {
         path,
         description(&rgb, HduKind::Primary, 241_920),
         FitsCubeInterpretation::Rgb,
+        FitsFloatScale::Auto,
         u64::MAX,
     )
     .unwrap();
@@ -169,6 +171,7 @@ fn preflight_enforces_source_output_and_peak_limits_at_exact_boundaries() {
         path,
         description(&rgb, HduKind::Primary, 241_920),
         FitsCubeInterpretation::Rgb,
+        FitsFloatScale::Auto,
         plan.peak_bytes,
     )
     .unwrap();
@@ -177,6 +180,7 @@ fn preflight_enforces_source_output_and_peak_limits_at_exact_boundaries() {
             path,
             description(&rgb, HduKind::Primary, 241_920),
             FitsCubeInterpretation::Rgb,
+            FitsFloatScale::Auto,
             plan.peak_bytes - 1,
         )
         .unwrap_err(),
@@ -189,6 +193,7 @@ fn preflight_enforces_source_output_and_peak_limits_at_exact_boundaries() {
             path,
             description(&compressed, HduKind::CompressedImage, 2_880),
             FitsCubeInterpretation::Reject,
+            FitsFloatScale::Auto,
             4 * 1024 * 1024 - 1,
         )
         .unwrap_err(),
@@ -328,6 +333,7 @@ fn hdu_selection_and_cube_interpretation_are_explicit_and_recorded() {
             },
             cube: FitsCubeInterpretation::Rgb,
             checksum: FitsChecksumPolicy::VerifyIfPresent,
+            float_scale: FitsFloatScale::Auto,
         },
         ..load_context()
     };
