@@ -18,13 +18,26 @@ The x86 arms can be reached too, which is what caught the widened SSE kernel:
 binaries — so name the features and leave `ml` out. Rosetta reports sse4.1 but not avx2 or fma, so
 that run executes the SSE4.1 rung and only compiles the AVX2 one.
 
-- [ ] Run the AVX2 `weighted_mean_f32` on real AVX2 hardware. It is compiled and its SSE4.1 twin
-      passes the same tests, but no machine here has executed it since it was widened to f64.
-- [ ] Re-measure `X86_WEIGHTED_MEAN_CROSSOVER`. The 128 was set against the old f32-Kahan kernels;
-      the f64 accumulators halve the lanes per instruction, so the tuned value has moved. The
-      current number is safe but stale — it only ever sends more work to the scalar path. On
-      aarch64 the same widening moved the crossover *down* to the structural minimum, so expect the
-      x86 number to fall well below 128 rather than rise.
+- [ ] Run `math::sum`'s AVX2 backend on real AVX2 hardware. It compiles and passes the suite as
+      x86_64, but Rosetta offers no AVX2, so nothing here has executed it since it was widened to
+      f64 — and the SSE4.1 twin that used to stand in for it has been deleted.
+- [ ] Confirm `math::sum`'s AVX2 gate on x86 hardware. Both crossover constants are gone; the gate
+      is now the structural lane minimum on every architecture. That is *measured* on aarch64 (see
+      below) and inferred on x86 from the same mechanism, not measured. `bench_sum_f32_crossover`
+      and `bench_weighted_sums_crossover` bench the backend by name on both architectures, so the
+      measurement only needs the machine.
+
+The NEON gates are measured, at the structural minimum of one full vector (4 f32). Backend against
+scalar by length, medians, release:
+
+| n              | 1     | 2     | 3     | 4     | 8     | 16    | 32    | 64    |
+|----------------|-------|-------|-------|-------|-------|-------|-------|-------|
+| `sum_f32`      | 0.69x | 1.00x | 0.88x | 1.36x | 1.20x | 1.57x | 1.35x | 1.93x |
+| `weighted_sums`| 0.88x | 0.88x | 0.88x | 1.03x | 1.34x | 1.55x | 1.65x | 1.90x |
+
+Both lose under four elements and win from four up, so the gate is where the win starts rather than
+somewhere above it. The rows below the gate are informational — dispatch never takes the vector arm
+there.
 
 The NEON half is measured and settled for both functions. Widening to f64 made them ~3x faster,
 not slower: dropping the f32 Kahan step removes four dependent ops per accumulate and its serial
@@ -42,10 +55,12 @@ enough for the NEON sum to win had never been measured; it was wrong.
 
 ## Open decision — delete the median9 backends?
 
-Everything else stage 4 set out to decide has been measured and settled: the weighted-mean SSE rung
-earns its place (~1.35x over scalar above n=128), the shared 128 threshold is right for both the 8-
-and the 4-lane kernel, and `sum_f32` deliberately has no SSE rung — the note on the function says
-why. Only median9 is open, and the aarch64 measurement it was waiting on can now be taken here.
+Everything else stage 4 set out to decide has been settled, though not the way that stage expected:
+`math::sum` now has no SSE rung and no crossover thresholds at all. Widening to f64 removed the
+compensation the old measurements were really measuring, the SSE weighted-mean kernel was deleted
+on the same argument that had already kept one out of `sum_f32`, and both gates became the
+structural lane minimum. Only median9 is open, and the aarch64 measurement it was waiting on can
+now be taken here.
 
 - [ ] Decide whether `median_filter/simd/x86/` (190 lines), `simd/neon.rs` (~90), the shared
       `median9_simd_sort!` macro (85) and `x86/tests.rs` (190) are worth carrying, given
