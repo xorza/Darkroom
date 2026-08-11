@@ -58,6 +58,7 @@ pub use io::image::load_context::LoadContext;
 pub use io::image::preview_image::PreviewImage;
 pub use io::raw::RAW_EXTENSIONS;
 pub use io::raw::demosaic::bayer::CfaPattern;
+pub use io::raw::provenance::RawTransferProvenance;
 pub use math::size2us::Size2us;
 pub use math::vec2us::Vec2us;
 pub use stacking::calibration_masters::cosmic_ray::config::{CosmicRayConfig, NoiseEstimation};

@@ -142,6 +142,8 @@ fn fits_integer_samples_are_divided_by_the_span_their_header_declares() {
     let image = Image::from_u16(vec![size.width, size.height], &raw).unwrap();
 
     let loaded = write_and_load("uint16", &image).unwrap();
+    // |BSCALE| × (2¹⁶ − 1) = 65535, recorded so a later stage can ask what one sample is worth.
+    assert_eq!(physical_scale_of(&loaded), Some(65_535.0));
     let pixels = loaded.channel(0).pixels();
     assert_eq!(pixels[0], 0.0);
     assert_eq!(pixels[4], 1.0);
@@ -225,6 +227,22 @@ fn fits_float_samples_are_normalized_only_when_datamax_declares_them_adu() {
     // DATAMAX follows the samples, so the round-trip is stable: saving and reloading this frame
     // sees DATAMAX = 1 and leaves it alone rather than dividing a second time.
     assert_eq!(adu.metadata.data_max, Some(1.0));
+
+    // The two frames hold the same ADU data and were divided by spans 65535 apart, which is exactly
+    // the mismatch a stack has to be able to detect. `physical_scale` is what makes it detectable —
+    // both frames otherwise present as `FitsNormalized` and compare equal on every other axis.
+    assert_eq!(physical_scale_of(&bare), Some(1.0));
+    assert_eq!(physical_scale_of(&adu), Some(65_535.0));
+    assert_ne!(physical_scale_of(&bare), physical_scale_of(&adu));
+}
+
+/// The span a loaded frame's decoder divided by, whichever decoder that was.
+fn physical_scale_of(image: &LinearImage) -> Option<f32> {
+    image
+        .metadata
+        .provenance
+        .as_ref()
+        .and_then(|provenance| provenance.transfer.physical_scale())
 }
 
 #[test]

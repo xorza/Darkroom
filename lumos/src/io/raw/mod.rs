@@ -1,6 +1,7 @@
 pub(crate) mod demosaic;
 mod error;
 mod normalize;
+pub(crate) mod provenance;
 
 #[cfg(all(test, feature = "internals"))]
 mod bench;
@@ -34,6 +35,7 @@ use crate::io::image::image_provenance::{
 };
 use crate::io::image::linear::LinearImage;
 use crate::io::image::sensor::SensorType;
+use crate::io::raw::provenance::RawTransferProvenance;
 use common::CancelToken;
 use demosaic::bayer::{BayerImage, CfaPattern, rcd};
 use demosaic::xtrans;
@@ -132,6 +134,16 @@ struct BlackLevel {
     inv_range: f32,
     channel_delta_norm: [f32; 4],
     repeat: Option<BlackRepeat>,
+}
+
+impl BlackLevel {
+    /// The span the samples are divided by: `maximum − black`, in ADU.
+    ///
+    /// What one normalized unit is worth for this file, and so what makes two RAW frames
+    /// commensurate — libraw reads `maximum` per camera and per ISO, so it is not a constant.
+    fn span(&self) -> f32 {
+        1.0 / self.inv_range
+    }
 }
 
 /// Replicate libraw's `adjust_bl()` black-level consolidation.
@@ -1006,6 +1018,7 @@ pub(crate) fn load_raw(path: &Path, cancel: &CancelToken) -> Result<LinearImage,
     let active = raw.area.active;
     let iso = raw.iso;
     let camera_white_balance = raw.camera_white_balance;
+    let physical_scale = raw.black_level.span();
 
     let sensor_type = raw.sensor_type.clone();
     let decoded = match sensor_type {
@@ -1081,7 +1094,7 @@ pub(crate) fn load_raw(path: &Path, cancel: &CancelToken) -> Result<LinearImage,
         provenance: Some(ImageProvenance {
             container: SourceContainer::CameraRaw,
             decoder: DecoderProvenance::LibRaw,
-            transfer: TransferProvenance::RawNormalized,
+            transfer: TransferProvenance::RawNormalized(RawTransferProvenance { physical_scale }),
             color,
             // Every arm above lands inside [0, 1]: the mono path clamps as it normalizes, libraw's
             // fallback divides by the integer maximum, and both demosaic paths clamp their output.
@@ -1173,7 +1186,9 @@ pub(crate) fn load_raw_cfa(path: &Path, cancel: &CancelToken) -> Result<CfaImage
         provenance: Some(ImageProvenance {
             container: SourceContainer::CameraRaw,
             decoder: DecoderProvenance::LibRaw,
-            transfer: TransferProvenance::RawNormalized,
+            transfer: TransferProvenance::RawNormalized(RawTransferProvenance {
+                physical_scale: raw.black_level.span(),
+            }),
             color: ColorProvenance::SensorCfa,
             clipped: false,
             demosaic: DemosaicProvenance::None,
