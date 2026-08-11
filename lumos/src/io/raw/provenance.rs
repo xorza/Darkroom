@@ -8,8 +8,8 @@
 pub struct RawTransferProvenance {
     /// Multiply a decoded sample by this to recover the sensor's ADU above black.
     ///
-    /// `maximum − black` as libraw reported them, which is the span
-    /// [`crate::io::raw`] normalized by. Read per file: libraw adjusts `color.maximum` per camera
-    /// and per ISO, so two RAWs are only commensurate when this matches.
+    /// `maximum − black` as libraw reported them, which is the span the RAW decoder normalized by.
+    /// Read per file: libraw adjusts `color.maximum` per camera and per ISO, so two RAWs are only
+    /// commensurate when this matches.
     pub physical_scale: f32,
 }

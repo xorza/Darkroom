@@ -6,14 +6,14 @@ use lumos::{
     AlignStackError, AlignStackResult, AlignmentSummary, CacheConfig, CalibrationComponent,
     CalibrationError, CalibrationMasters, CalibrationSet, CombineMethod, Coverage, DefectSummary,
     DrizzleConfig, DrizzleConfigError, DrizzleError, DrizzleFrame, FitsChecksumPolicy,
-    FitsChecksumProvenance, FitsChecksumState, FitsCubeInterpretation, FitsHduProvenance,
-    FitsHduSelector, FitsLoadOptions, FitsTransferProvenance, FrameStoreError, GesdConfig,
-    ImageDimensions, ImageMetadata, InterpolationMethod, InvalidConfigField, LinearFitClipConfig,
-    LinearImage, LoadContext, MasterRole, NoiseModel, Normalization, PercentileClipConfig,
-    QualityMap, QualityPlanes, RansacConfig, RawTransferProvenance, RegistrationCatalog,
-    RegistrationConfig, RegistrationError, RegistrationMatchingConfig, Rejection, SigmaClipConfig,
-    SipConfig, SmallN, StackConfig, StackConfigError, StackError, StackProduct,
-    StarDetectionBackgroundConfig, StarDetectionCandidateConfig, StarDetectionConfig,
+    FitsChecksumProvenance, FitsChecksumState, FitsCubeInterpretation, FitsFloatScale,
+    FitsHduProvenance, FitsHduSelector, FitsLoadOptions, FitsTransferProvenance, FrameStoreError,
+    GesdConfig, ImageDimensions, ImageMetadata, InterpolationMethod, InvalidConfigField,
+    LinearFitClipConfig, LinearImage, LoadContext, MasterRole, NoiseModel, Normalization,
+    PercentileClipConfig, QualityMap, QualityPlanes, RansacConfig, RawTransferProvenance,
+    RegistrationCatalog, RegistrationConfig, RegistrationError, RegistrationMatchingConfig,
+    Rejection, SigmaClipConfig, SipConfig, SmallN, StackConfig, StackConfigError, StackError,
+    StackProduct, StarDetectionBackgroundConfig, StarDetectionCandidateConfig, StarDetectionConfig,
     StarDetectionDiagnostics, StarDetectionFilterConfig, StarDetectionFwhmConfig,
     StarDetectionMeasurementConfig, StarDetectionQualityFilterDiagnostics, StarDetector, StarMatch,
     TransferProvenance, Transform, TransformModel, TransformType, TriangleConfig, WarpParams,
@@ -32,10 +32,15 @@ fn file_loading_policy_is_available_from_the_crate_root() {
             },
             cube: FitsCubeInterpretation::Rgb,
             checksum: FitsChecksumPolicy::RequireValid,
+            float_scale: FitsFloatScale::FullScale(65_535.0),
         },
     };
     assert_eq!(context.memory_limit_bytes, 64 * 1024 * 1024);
     assert_eq!(context.fits.cube, FitsCubeInterpretation::Rgb);
+    assert_eq!(
+        context.fits.float_scale,
+        FitsFloatScale::FullScale(65_535.0)
+    );
 
     let provenance = TransferProvenance::FitsNormalized(FitsTransferProvenance {
         bscale: 1.0,

@@ -11,6 +11,7 @@ use std::fs::File;
 
 use crate::io::image::error::ImageError;
 use crate::io::image::fits::decode::{load_cfa_fits, load_linear_fits};
+use crate::io::image::fits::options::{FitsFloatScale, FitsLoadOptions};
 use crate::io::image::load_context::LoadContext;
 use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::io::raw::demosaic::xtrans::internals::test_pattern_array;
@@ -152,6 +153,59 @@ fn fits_integer_samples_are_divided_by_the_span_their_header_declares() {
         assert!(
             (pixels[index] - expected).abs() < 1e-7,
             "sample {index}: {pixels:?}"
+        );
+    }
+}
+
+/// A caller can state the scale of a float FITS the header does not describe.
+///
+/// The one input whose domain the header may not settle. `Auto` reads `DATAMAX` and is right when
+/// the file declares one; `FullScale` is the answer for an ADU frame that does not, which no header
+/// rule can identify and which the decoder must not guess at from the pixels — a divisor read off
+/// each frame's own content differs between frames and is what the combine now rejects a set for.
+#[test]
+fn a_float_fits_scale_can_be_declared_when_the_header_does_not() {
+    let pixels = vec![0.0f32, 16_384.0, 32_768.0, 65_535.0];
+    let image = Image::new(vec![4, 1], pixels.clone()).unwrap();
+    let path = write_with_header("float32_declared_scale", &image, &Header::new());
+
+    let with_scale = |scale| LoadContext {
+        fits: FitsLoadOptions {
+            float_scale: scale,
+            ..Default::default()
+        },
+        ..LoadContext::default()
+    };
+
+    // No DATAMAX, so `Auto` takes the samples as they stand — the case the declaration exists for.
+    let auto = load_linear_fits(&path, &with_scale(FitsFloatScale::Auto)).unwrap();
+    assert_eq!(auto.channel(0).pixels(), &pixels[..]);
+
+    // Declared: divided, and the span recorded so a later stage can compare it against another
+    // frame's.
+    let declared =
+        load_linear_fits(&path, &with_scale(FitsFloatScale::FullScale(65_535.0))).unwrap();
+    assert_eq!(
+        declared.channel(0).pixels(),
+        &[0.0, 0.250_003_8, 0.500_007_6, 1.0]
+    );
+    assert_eq!(physical_scale_of(&declared), Some(65_535.0));
+
+    // `Normalized` refuses the header's evidence, for a DATAMAX that describes the sensor rather
+    // than the samples.
+    let mut declaring = Header::new();
+    declaring.set("DATAMAX", 65_535.0).unwrap();
+    let declaring_path = write_with_header("float32_datamax_overridden", &image, &declaring);
+    let forced =
+        load_linear_fits(&declaring_path, &with_scale(FitsFloatScale::Normalized)).unwrap();
+    assert_eq!(forced.channel(0).pixels(), &pixels[..]);
+
+    // A scale that would invert or erase the samples is rejected rather than applied.
+    for bad in [0.0, -1.0, f32::NAN] {
+        let error = load_linear_fits(&path, &with_scale(FitsFloatScale::FullScale(bad)));
+        assert!(
+            matches!(error, Err(ImageError::FitsUnsupported { .. })),
+            "full scale {bad} should be rejected, got {error:?}"
         );
     }
 }

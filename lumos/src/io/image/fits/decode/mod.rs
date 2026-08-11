@@ -162,6 +162,7 @@ fn read_selected_image(path: &Path, context: &LoadContext) -> Result<DecodedFits
         path,
         FitsHduDescription::from_hdu(path, hdu)?,
         context.fits.cube,
+        context.fits.float_scale,
         context.memory_limit_bytes,
     )?;
     let checksum = selection::verify_selected_checksum(
@@ -190,6 +191,7 @@ pub(crate) fn load_cfa_fits(path: &Path, context: &LoadContext) -> Result<CfaIma
         path,
         FitsHduDescription::from_hdu(path, hdu)?,
         context.fits.cube,
+        context.fits.float_scale,
         context.memory_limit_bytes,
     )?;
     let is_lumos_cfa = validate_cfa_image_header(path, &reader.hdus()[selected.index].header)?;
@@ -222,6 +224,7 @@ pub(crate) fn read_cfa_hdu(
         path,
         FitsHduDescription::from_hdu(path, hdu)?,
         FitsCubeInterpretation::Reject,
+        context.fits.float_scale,
         context.memory_limit_bytes,
     )?;
     let quantization_sigma = read_quantization_sigma(&reader.hdus()[index].header)
@@ -266,6 +269,7 @@ pub(crate) fn fits_cfa_frame_info(
         path,
         FitsHduDescription::from_hdu(path, hdu)?,
         context.fits.cube,
+        context.fits.float_scale,
         context.memory_limit_bytes,
     )?
     .dimensions;

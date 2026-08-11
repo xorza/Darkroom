@@ -7,7 +7,7 @@ use fits_well::io::{BLOCK_SIZE, Hdu, HduKind};
 
 use crate::io::image::error::ImageError;
 use crate::io::image::fits::error::{fits_err, fits_unsupported};
-use crate::io::image::fits::options::FitsCubeInterpretation;
+use crate::io::image::fits::options::{FitsCubeInterpretation, FitsFloatScale};
 use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::image_metadata::BitPix;
 
@@ -66,21 +66,25 @@ pub(super) struct FitsDecodePlan {
 /// frame's zero point, and clamping would cut the sub-pedestal noise tail that the calibration
 /// path depends on (see [`crate::io::raw`]'s unclamped normalization).
 ///
-/// A floating-point `BITPIX` declares no full scale, so the only evidence available is `DATAMAX`.
-/// Siril's rule (`read_fits_with_convert`, the `FLOAT_IMG`/`DOUBLE_IMG` cases) is followed here: a
+/// A floating-point `BITPIX` declares no full scale, so the only evidence available is `DATAMAX`: a
 /// declared saturation level above [`FLOAT_ADU_DATAMAX_MIN`] means the samples are ADU rather than
-/// `[0, 1]`, and they are divided by [`FLOAT_ADU_DIVISOR`]. Anything else — a `DATAMAX` of about 1,
-/// or none at all — is taken as already normalized.
+/// `[0, 1]` and they are divided by [`FLOAT_ADU_DIVISOR`], the threshold and divisor Siril uses.
+/// Anything else — a `DATAMAX` of about 1, or none at all — is taken as already normalized, which is
+/// PixInsight's default for a float FITS and what keeps a Lumos-written master round-tripping.
 ///
-/// The test is on the *header*, never on the pixels. A divisor read off each frame's own extrema
-/// would differ frame to frame and quietly break the commensurability this whole division exists to
-/// establish. It also keeps a Lumos-written master round-tripping: those carry no `DATAMAX`, or one
-/// that a previous load already divided down to about 1.
+/// The test is on the *header*, never on the pixels, and that is where this departs from Siril:
+/// with `DATAMAX` absent it scans the data instead (three sampled pixels on the partial-read path,
+/// which is why its full and partial reads can disagree about the same file). A divisor read off
+/// each frame's own extrema differs frame to frame, which is exactly what
+/// [`crate::stacking::combine`] now rejects a frame set for. An unnormalized float FITS carrying no
+/// `DATAMAX` therefore reaches the pipeline as it stands; the display stage measures its own range
+/// rather than the decoder guessing one.
 fn sample_divisor(
     path: &Path,
     header: &Header,
     stored: FitsBitpix,
     scaling: &fits_well::image::Scaling,
+    float_scale: FitsFloatScale,
 ) -> Result<f32, ImageError> {
     let steps = match stored {
         FitsBitpix::U8 => f64::from(u8::MAX),
@@ -88,13 +92,29 @@ fn sample_divisor(
         FitsBitpix::I32 => f64::from(u32::MAX),
         FitsBitpix::I64 => u64::MAX as f64,
         FitsBitpix::F32 | FitsBitpix::F64 => {
-            let data_max = header
-                .get_real("DATAMAX")
-                .map_err(|source| fits_err(path, source))?;
-            return Ok(match data_max {
-                Some(max) if max > FLOAT_ADU_DATAMAX_MIN => FLOAT_ADU_DIVISOR,
-                _ => 1.0,
-            });
+            return match float_scale {
+                FitsFloatScale::Normalized => Ok(1.0),
+                FitsFloatScale::FullScale(scale) => {
+                    // The caller's own figure, so it is checked here rather than trusted: a
+                    // non-positive one would invert or erase the samples.
+                    if !scale.is_finite() || scale <= 0.0 {
+                        return Err(fits_unsupported(
+                            path,
+                            format!("declared floating-point full scale {scale} must be positive"),
+                        ));
+                    }
+                    Ok(scale)
+                }
+                FitsFloatScale::Auto => {
+                    let data_max = header
+                        .get_real("DATAMAX")
+                        .map_err(|source| fits_err(path, source))?;
+                    Ok(match data_max {
+                        Some(max) if max > FLOAT_ADU_DATAMAX_MIN => FLOAT_ADU_DIVISOR,
+                        _ => 1.0,
+                    })
+                }
+            };
         }
     };
     // File-derived metadata: a corrupt or hand-edited header can carry any BSCALE, and a zero or
@@ -120,6 +140,7 @@ pub(super) fn preflight_fits_image(
     path: &Path,
     hdu: FitsHduDescription<'_>,
     cube: FitsCubeInterpretation,
+    float_scale: FitsFloatScale,
     memory_limit_bytes: u64,
 ) -> Result<FitsDecodePlan, ImageError> {
     if !matches!(
@@ -152,7 +173,7 @@ pub(super) fn preflight_fits_image(
         .scaling()
         .map_err(|source| fits_err(path, source))?;
     let bitpix = map_bitpix(SampleType::from_scaling(stored_bitpix, &scaling));
-    let sample_divisor = sample_divisor(path, hdu.header, stored_bitpix, &scaling)?;
+    let sample_divisor = sample_divisor(path, hdu.header, stored_bitpix, &scaling, float_scale)?;
     let decoded_bytes = checked_size_bytes(
         path,
         dimensions.sample_count(),
