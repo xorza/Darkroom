@@ -15,6 +15,7 @@
 
 use glam::DVec2;
 
+use crate::math::linear_system;
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 use crate::stacking::registration::distortion::SINGULAR_THRESHOLD;
@@ -96,47 +97,52 @@ impl ThinPlateSpline {
         //       w = weights for RBF
         //       a = affine coefficients
 
+        // Row-major and contiguous, because the solver takes it that way — and because a row of
+        // `Vec`s cost one allocation per row to hold `f64`s that are read in row order anyway.
         let matrix_size = n + 3;
-        let mut matrix = vec![vec![0.0; matrix_size]; matrix_size];
+        let mut matrix = vec![0.0; matrix_size * matrix_size];
+        let at = |row: usize, col: usize| row * matrix_size + col;
 
         // Fill K matrix (upper-left n×n block)
         for i in 0..n {
             for j in 0..n {
-                if i == j {
-                    matrix[i][j] = config.regularization;
+                matrix[at(i, j)] = if i == j {
+                    config.regularization
                 } else {
-                    let r = src_norm[i].distance(src_norm[j]);
-                    matrix[i][j] = tps_kernel(r);
-                }
+                    tps_kernel(src_norm[i].distance(src_norm[j]))
+                };
             }
         }
 
         // Fill P matrix (upper-right n×3 block) and P^T (lower-left 3×n block)
         for i in 0..n {
             let p = src_norm[i];
-            matrix[i][n] = 1.0;
-            matrix[i][n + 1] = p.x;
-            matrix[i][n + 2] = p.y;
+            matrix[at(i, n)] = 1.0;
+            matrix[at(i, n + 1)] = p.x;
+            matrix[at(i, n + 2)] = p.y;
 
-            matrix[n][i] = 1.0;
-            matrix[n + 1][i] = p.x;
-            matrix[n + 2][i] = p.y;
+            matrix[at(n, i)] = 1.0;
+            matrix[at(n + 1, i)] = p.x;
+            matrix[at(n + 2, i)] = p.y;
         }
 
         // Lower-right 3×3 block is zeros (already initialized)
 
         // Right-hand side vectors (normalized target coordinates)
-        let mut rhs_x = vec![0.0; matrix_size];
-        let mut rhs_y = vec![0.0; matrix_size];
+        let mut solution_x = vec![0.0; matrix_size];
+        let mut solution_y = vec![0.0; matrix_size];
 
         for i in 0..n {
-            rhs_x[i] = tgt_norm[i].x;
-            rhs_y[i] = tgt_norm[i].y;
+            solution_x[i] = tgt_norm[i].x;
+            solution_y[i] = tgt_norm[i].y;
         }
 
-        // Solve the system using LU decomposition
-        let solution_x = solve_linear_system(&matrix, &rhs_x)?;
-        let solution_y = solve_linear_system(&matrix, &rhs_y)?;
+        // Solved per axis against the same system, and the solve consumes its matrix, so each pass
+        // gets its own copy. The solution replaces the right-hand side it was solved from.
+        let mut scratch = matrix.clone();
+        linear_system::solve_in_place(&mut scratch, &mut solution_x, SINGULAR_THRESHOLD)?;
+        scratch.copy_from_slice(&matrix);
+        linear_system::solve_in_place(&mut scratch, &mut solution_y, SINGULAR_THRESHOLD)?;
 
         // Extract weights and affine coefficients
         let weights_x: Vec<f64> = solution_x[..n].to_vec();
@@ -278,69 +284,6 @@ fn compute_normalization(points: &[DVec2]) -> PointNormalization {
 #[inline]
 fn tps_kernel(r: f64) -> f64 {
     if r < 1e-10 { 0.0 } else { r * r * r.ln() }
-}
-
-/// Solve a linear system Ax = b using LU decomposition with partial pivoting.
-#[allow(clippy::needless_range_loop)]
-fn solve_linear_system(a: &[Vec<f64>], b: &[f64]) -> Option<Vec<f64>> {
-    let n = b.len();
-    if a.len() != n || a.iter().any(|row| row.len() != n) {
-        return None;
-    }
-
-    // Create augmented matrix
-    let mut aug: Vec<Vec<f64>> = a
-        .iter()
-        .zip(b.iter())
-        .map(|(row, &bi)| {
-            let mut new_row = row.clone();
-            new_row.push(bi);
-            new_row
-        })
-        .collect();
-
-    // Forward elimination with partial pivoting
-    for col in 0..n {
-        // Find pivot
-        let mut max_row = col;
-        let mut max_val = aug[col][col].abs();
-        for row in (col + 1)..n {
-            let val = aug[row][col].abs();
-            if val > max_val {
-                max_val = val;
-                max_row = row;
-            }
-        }
-
-        if max_val < SINGULAR_THRESHOLD {
-            return None; // Singular matrix
-        }
-
-        // Swap rows
-        if max_row != col {
-            aug.swap(col, max_row);
-        }
-
-        // Eliminate
-        for row in (col + 1)..n {
-            let factor = aug[row][col] / aug[col][col];
-            for j in col..=n {
-                aug[row][j] -= factor * aug[col][j];
-            }
-        }
-    }
-
-    // Back substitution
-    let mut x = vec![0.0; n];
-    for i in (0..n).rev() {
-        x[i] = aug[i][n];
-        for j in (i + 1)..n {
-            x[i] -= aug[i][j] * x[j];
-        }
-        x[i] /= aug[i][i];
-    }
-
-    Some(x)
 }
 
 /// Distortion map for visualizing local distortions.

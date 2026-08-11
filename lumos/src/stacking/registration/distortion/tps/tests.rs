@@ -191,54 +191,6 @@ fn compute_normalization_coincident() {
     assert_dvec2_near(norm.normalize(points[0]), DVec2::ZERO, 1e-12, "normalized");
 }
 
-/// Test solve_linear_system with a simple 2x2 system.
-#[test]
-fn solve_linear_system_2x2() {
-    // System: 2x + y = 5, x + 3y = 7
-    // Solution: x = 8/5 = 1.6, y = 9/5 = 1.8
-    // By Cramer's rule: det = 2*3 - 1*1 = 5
-    // x = (5*3 - 1*7) / 5 = 8/5 = 1.6
-    // y = (2*7 - 5*1) / 5 = 9/5 = 1.8
-    let a = vec![vec![2.0, 1.0], vec![1.0, 3.0]];
-    let b = vec![5.0, 7.0];
-    let x = solve_linear_system(&a, &b).unwrap();
-    assert!((x[0] - 1.6).abs() < 1e-12, "x[0] = {}", x[0]);
-    assert!((x[1] - 1.8).abs() < 1e-12, "x[1] = {}", x[1]);
-}
-
-/// Test solve_linear_system with a singular matrix returns None.
-#[test]
-fn solve_linear_system_singular() {
-    // Rows are linearly dependent: row 1 = 2 * row 0
-    let a = vec![vec![1.0, 2.0], vec![2.0, 4.0]];
-    let b = vec![3.0, 6.0];
-    assert!(solve_linear_system(&a, &b).is_none());
-}
-
-/// Test solve_linear_system with a 3x3 identity matrix.
-#[test]
-fn solve_linear_system_identity() {
-    // I * x = b => x = b
-    let a = vec![
-        vec![1.0, 0.0, 0.0],
-        vec![0.0, 1.0, 0.0],
-        vec![0.0, 0.0, 1.0],
-    ];
-    let b = vec![7.0, -3.0, 11.0];
-    let x = solve_linear_system(&a, &b).unwrap();
-    assert!((x[0] - 7.0).abs() < 1e-12);
-    assert!((x[1] - (-3.0)).abs() < 1e-12);
-    assert!((x[2] - 11.0).abs() < 1e-12);
-}
-
-/// Test solve_linear_system with mismatched dimensions returns None.
-#[test]
-fn solve_linear_system_dimension_mismatch() {
-    let a = vec![vec![1.0, 2.0], vec![3.0, 4.0]];
-    let b = vec![1.0, 2.0, 3.0]; // 3 elements but matrix is 2x2
-    assert!(solve_linear_system(&a, &b).is_none());
-}
-
 /// Empty input returns None.
 #[test]
 fn tps_fit_empty() {
