@@ -51,19 +51,19 @@ fn run(config: StackConfig) {
 }
 
 /// Science default: σ-clipped mean (2.5σ) + noise weighting + global normalization.
-#[quick_bench(warmup_iters = 1, iters = 5)]
+#[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
 fn bench_stack_light_30(b: ::quickbench::Bencher) {
     b.bench(|| run(StackConfig::light()));
 }
 
 /// Median combine — the rejection-free baseline (per-pixel quickselect, no iteration).
-#[quick_bench(warmup_iters = 1, iters = 5)]
+#[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
 fn bench_stack_median_30(b: ::quickbench::Bencher) {
     b.bench(|| run(StackConfig::median()));
 }
 
 /// Winsorized σ-clip — the small-stack-stable rejection used by dark/bias masters.
-#[quick_bench(warmup_iters = 1, iters = 5)]
+#[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
 fn bench_stack_winsorized_30(b: ::quickbench::Bencher) {
     b.bench(|| run(StackConfig::winsorized(3.0)));
 }

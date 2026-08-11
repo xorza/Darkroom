@@ -11,7 +11,7 @@ use crate::testing::synthetic::fixtures::star_field;
 use ::quickbench::quick_bench;
 use std::hint::black_box;
 
-#[quick_bench(warmup_iters = 3, iters = 10)]
+#[quick_bench(warmup_time_ms = 100, bench_time_ms = 500)]
 fn bench_convolve_row_4k(b: ::quickbench::Bencher) {
     let width = 4096 * 10;
     let input: Vec<f32> = (0..width).map(|i| (i as f32 * 0.1).sin() * 100.0).collect();
@@ -38,7 +38,7 @@ fn bench_convolve_row_4k(b: ::quickbench::Bencher) {
     });
 }
 
-#[quick_bench(warmup_iters = 3, iters = 10)]
+#[quick_bench(warmup_time_ms = 100, bench_time_ms = 500)]
 fn bench_convolve_row_large_kernel(b: ::quickbench::Bencher) {
     let width = 4096;
     let input: Vec<f32> = (0..width).map(|i| (i as f32 * 0.1).sin() * 100.0).collect();
@@ -65,7 +65,7 @@ fn bench_convolve_row_large_kernel(b: ::quickbench::Bencher) {
     });
 }
 
-#[quick_bench(warmup_iters = 2, iters = 5)]
+#[quick_bench(warmup_time_ms = 100, bench_time_ms = 500)]
 fn bench_convolve_cols_1k(b: ::quickbench::Bencher) {
     let pixels = star_field(Size2us::new(1024, 1024), 100, 42)
         .image
@@ -83,7 +83,7 @@ fn bench_convolve_cols_1k(b: ::quickbench::Bencher) {
     });
 }
 
-#[quick_bench(warmup_iters = 1, iters = 3)]
+#[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
 fn bench_convolve_cols_4k(b: ::quickbench::Bencher) {
     let pixels = star_field(Size2us::new(4096, 4096), 500, 42)
         .image
@@ -101,7 +101,7 @@ fn bench_convolve_cols_4k(b: ::quickbench::Bencher) {
     });
 }
 
-#[quick_bench(warmup_iters = 2, iters = 5)]
+#[quick_bench(warmup_time_ms = 100, bench_time_ms = 500)]
 fn bench_row_vs_col_1k(b: ::quickbench::Bencher) {
     let pixels = star_field(Size2us::new(1024, 1024), 100, 42)
         .image
@@ -127,7 +127,7 @@ fn bench_row_vs_col_1k(b: ::quickbench::Bencher) {
     });
 }
 
-#[quick_bench(warmup_iters = 2, iters = 5)]
+#[quick_bench(warmup_time_ms = 100, bench_time_ms = 500)]
 fn bench_gaussian_convolve_1k(b: ::quickbench::Bencher) {
     let pixels = star_field(Size2us::new(1024, 1024), 100, 42)
         .image
@@ -147,7 +147,7 @@ fn bench_gaussian_convolve_1k(b: ::quickbench::Bencher) {
     });
 }
 
-#[quick_bench(warmup_iters = 1, iters = 3)]
+#[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
 fn bench_gaussian_convolve_4k(b: ::quickbench::Bencher) {
     let pixels = star_field(Size2us::new(4096, 4096), 500, 42)
         .image
@@ -167,7 +167,7 @@ fn bench_gaussian_convolve_4k(b: ::quickbench::Bencher) {
     });
 }
 
-#[quick_bench(warmup_iters = 2, iters = 5)]
+#[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
 fn bench_elliptical_convolve_1k(b: ::quickbench::Bencher) {
     let pixels = star_field(Size2us::new(1024, 1024), 100, 42)
         .image
@@ -191,7 +191,7 @@ fn bench_elliptical_convolve_1k(b: ::quickbench::Bencher) {
     });
 }
 
-#[quick_bench(warmup_iters = 2, iters = 5)]
+#[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
 fn bench_elliptical_vs_circular_1k(b: ::quickbench::Bencher) {
     let pixels = star_field(Size2us::new(1024, 1024), 100, 42)
         .image
@@ -222,7 +222,7 @@ fn bench_elliptical_vs_circular_1k(b: ::quickbench::Bencher) {
     });
 }
 
-#[quick_bench(warmup_iters = 2, iters = 5)]
+#[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
 fn bench_matched_filter_1k(b: ::quickbench::Bencher) {
     let pixels = star_field(Size2us::new(1024, 1024), 100, 42)
         .image
@@ -265,7 +265,7 @@ fn bench_matched_filter_1k(b: ::quickbench::Bencher) {
     });
 }
 
-#[quick_bench(warmup_iters = 1, iters = 3)]
+#[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
 fn bench_matched_filter_4k(b: ::quickbench::Bencher) {
     let pixels = star_field(Size2us::new(4096, 4096), 500, 42)
         .image

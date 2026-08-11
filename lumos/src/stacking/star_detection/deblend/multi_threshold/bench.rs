@@ -95,7 +95,7 @@ fn bench_deblend_multi_threshold_6k_dense(b: ::quickbench::Bencher) {
     });
 }
 
-#[quick_bench(warmup_iters = 1, iters = 3)]
+#[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
 fn bench_deblend_multi_threshold_6k_dense_fewer_levels(b: ::quickbench::Bencher) {
     let pixels = cluster_field(Size2us::new(6144, 6144), 50000, 42)
         .image

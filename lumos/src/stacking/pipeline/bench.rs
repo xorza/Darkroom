@@ -10,7 +10,7 @@ use crate::stacking::star_detection::config::Config;
 use crate::stacking::star_detection::detector::StarDetector;
 use crate::testing::synthetic::fixtures::star_field;
 
-#[quick_bench(warmup_iters = 1, iters = 3)]
+#[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
 fn bench_detector_batch_reuse_1k(b: quickbench::Bencher) {
     let pixels = star_field(Size2us::new(1024, 1024), 100, 42)
         .image

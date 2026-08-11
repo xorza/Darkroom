@@ -29,7 +29,7 @@ fn create_test_transform() -> Transform {
     Transform::similarity(DVec2::new(5.0, 3.0), -angle, 1.0)
 }
 
-#[quick_bench(warmup_iters = 2, iters = 10)]
+#[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
 fn bench_warp_lanczos3_1k(b: quickbench::Bencher) {
     let input = create_test_image(Size2us::new(1024, 1024));
     let mut output = Buffer2::new_default(1024, 1024);
@@ -45,7 +45,7 @@ fn bench_warp_lanczos3_1k(b: quickbench::Bencher) {
     });
 }
 
-#[quick_bench(warmup_iters = 1, iters = 5)]
+#[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
 fn bench_warp_lanczos3_2k(b: quickbench::Bencher) {
     let input = create_test_image(Size2us::new(2048, 2048));
     let mut output = Buffer2::new_default(2048, 2048);
@@ -61,7 +61,7 @@ fn bench_warp_lanczos3_2k(b: quickbench::Bencher) {
     });
 }
 
-#[quick_bench(warmup_iters = 1, iters = 3)]
+#[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
 fn bench_warp_lanczos3_4k(b: quickbench::Bencher) {
     let input = create_test_image(Size2us::new(4096, 4096));
     let mut output = Buffer2::new_default(4096, 4096);
@@ -77,7 +77,7 @@ fn bench_warp_lanczos3_4k(b: quickbench::Bencher) {
     });
 }
 
-#[quick_bench(warmup_iters = 2, iters = 10)]
+#[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
 fn bench_warp_bilinear_2k(b: quickbench::Bencher) {
     let input = create_test_image(Size2us::new(2048, 2048));
     let mut output = Buffer2::new_default(2048, 2048);
@@ -94,7 +94,7 @@ fn bench_warp_bilinear_2k(b: quickbench::Bencher) {
 }
 
 /// Single-threaded 1k warp to measure per-thread throughput without rayon overhead.
-#[quick_bench(warmup_iters = 3, iters = 10)]
+#[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
 fn bench_warp_lanczos3_1k_single_thread(b: quickbench::Bencher) {
     let input = create_test_image(Size2us::new(1024, 1024));
     let mut output = Buffer2::new_default(1024, 1024);
@@ -114,7 +114,7 @@ fn bench_warp_lanczos3_1k_single_thread(b: quickbench::Bencher) {
     });
 }
 
-#[quick_bench(warmup_iters = 2, iters = 10)]
+#[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
 fn bench_warp_bicubic_2k(b: quickbench::Bencher) {
     let input = create_test_image(Size2us::new(2048, 2048));
     let mut output = Buffer2::new_default(2048, 2048);
@@ -130,7 +130,7 @@ fn bench_warp_bicubic_2k(b: quickbench::Bencher) {
     });
 }
 
-#[quick_bench(warmup_iters = 2, iters = 10)]
+#[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
 fn bench_warp_lanczos4_2k(b: quickbench::Bencher) {
     let input = create_test_image(Size2us::new(2048, 2048));
     let mut output = Buffer2::new_default(2048, 2048);
@@ -146,7 +146,7 @@ fn bench_warp_lanczos4_2k(b: quickbench::Bencher) {
     });
 }
 
-#[quick_bench(warmup_iters = 2, iters = 10)]
+#[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
 fn bench_warp_lanczos2_2k(b: quickbench::Bencher) {
     let input = create_test_image(Size2us::new(2048, 2048));
     let mut output = Buffer2::new_default(2048, 2048);
@@ -167,7 +167,7 @@ fn bench_warp_lanczos2_2k(b: quickbench::Bencher) {
 /// `warp` pays this once per frame and the plane warp once per channel, so the ratio between these
 /// two is what decides how much of a registered frame's warp time is spent on the quality planes —
 /// see `bench_warp_with_quality_lanczos3_1k` for the combined figure a mono frame actually pays.
-#[quick_bench(warmup_iters = 2, iters = 10)]
+#[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
 fn bench_quality_maps_lanczos3_1k(b: quickbench::Bencher) {
     let transform = create_test_transform();
 
@@ -180,7 +180,7 @@ fn bench_quality_maps_lanczos3_1k(b: quickbench::Bencher) {
     });
 }
 
-#[quick_bench(warmup_iters = 2, iters = 10)]
+#[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
 fn bench_quality_maps_bilinear_1k(b: quickbench::Bencher) {
     let transform = create_test_transform();
 
@@ -196,7 +196,7 @@ fn bench_quality_maps_bilinear_1k(b: quickbench::Bencher) {
 /// One whole frame through the public entry point: the plane warp plus the quality maps, which is
 /// what the pipeline pays per registered frame. Single-channel, so the maps are charged against one
 /// plane warp rather than three.
-#[quick_bench(warmup_iters = 2, iters = 10)]
+#[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
 fn bench_warp_with_quality_lanczos3_1k(b: quickbench::Bencher) {
     let size = Size2us::new(1024, 1024);
     let pixels = create_test_image(size).pixels().to_vec();
@@ -214,7 +214,7 @@ fn bench_warp_with_quality_lanczos3_1k(b: quickbench::Bencher) {
     });
 }
 
-#[quick_bench(warmup_iters = 3, iters = 20)]
+#[quick_bench(warmup_time_ms = 100, bench_time_ms = 500)]
 fn bench_lut_lookup(b: quickbench::Bencher) {
     let lut = kernel::get_lanczos_lut(3);
     let test_values: Vec<f32> = (0..1000).map(|i| (i as f32 / 1000.0) * 3.0 - 1.5).collect();
@@ -228,7 +228,7 @@ fn bench_lut_lookup(b: quickbench::Bencher) {
     });
 }
 
-#[quick_bench(warmup_iters = 3, iters = 20)]
+#[quick_bench(warmup_time_ms = 100, bench_time_ms = 500)]
 fn bench_interpolate_lanczos3_single(b: quickbench::Bencher) {
     let input = create_test_image(Size2us::new(256, 256));
     // Test positions near center
@@ -249,7 +249,7 @@ fn bench_interpolate_lanczos3_single(b: quickbench::Bencher) {
     });
 }
 
-#[quick_bench(warmup_iters = 1, iters = 6)]
+#[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
 /// One frame's warp into freshly allocated planes against the same warp into planes a previous
 /// frame left behind — the spill tier's per-frame cost with and without the reuse
 /// `try_par_map_bounded_owned`'s slot gives it.
@@ -275,7 +275,7 @@ fn bench_warp_into_fresh_4k(b: quickbench::Bencher) {
     });
 }
 
-#[quick_bench(warmup_iters = 1, iters = 6)]
+#[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
 fn bench_warp_into_reused_4k(b: quickbench::Bencher) {
     let size = Size2us::new(4096, 4096);
     let pixels = create_test_image(size).pixels().to_vec();

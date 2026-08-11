@@ -42,7 +42,7 @@ fn filter_interior<const SIMD: bool>(input: &[f32], output: &mut [f32], width: u
     }
 }
 
-#[quick_bench(warmup_iters = 2, iters = 20)]
+#[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
 fn bench_median_filter_dispatch_vs_scalar(b: ::quickbench::Bencher) {
     for width in IMAGE_WIDTHS {
         let rows = rows_for(width);

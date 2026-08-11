@@ -36,7 +36,7 @@ fn create_detection_mask(pixels: &Buffer2<f32>, sigma_threshold: f32) -> BitBuff
     dilated
 }
 
-#[quick_bench(warmup_iters = 2, iters = 5)]
+#[quick_bench(warmup_time_ms = 100, bench_time_ms = 500)]
 fn bench_label_map_from_buffer_1k(b: ::quickbench::Bencher) {
     use crate::stacking::star_detection::labeling::label_mask;
 
@@ -57,7 +57,7 @@ fn bench_label_map_from_buffer_1k(b: ::quickbench::Bencher) {
     });
 }
 
-#[quick_bench(warmup_iters = 1, iters = 3)]
+#[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
 fn bench_label_map_from_buffer_4k(b: ::quickbench::Bencher) {
     use crate::stacking::star_detection::labeling::label_mask;
 
@@ -78,7 +78,7 @@ fn bench_label_map_from_buffer_4k(b: ::quickbench::Bencher) {
     });
 }
 
-#[quick_bench(warmup_iters = 1, iters = 10)]
+#[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
 fn bench_label_map_from_buffer_4k_globular(b: ::quickbench::Bencher) {
     use crate::stacking::star_detection::labeling::label_mask;
 
@@ -101,7 +101,7 @@ fn bench_label_map_from_buffer_4k_globular(b: ::quickbench::Bencher) {
 
 /// The labeler on an image small enough to resolve to a single strip, where the boundary stitch
 /// has nothing to do. Guards the path a second, sequential implementation used to serve.
-#[quick_bench(warmup_iters = 3, iters = 20)]
+#[quick_bench(warmup_time_ms = 100, bench_time_ms = 500)]
 fn bench_label_small(b: ::quickbench::Bencher) {
     use crate::stacking::star_detection::labeling::label_mask;
 
