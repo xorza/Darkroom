@@ -2,6 +2,7 @@
 
 use crate::error::InvalidConfigField;
 use crate::stacking::drizzle::error::DrizzleConfigError;
+use crate::stacking::stack_product::quality_planes::QualityPlanes;
 
 /// Drizzle kernel type for distributing flux.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -47,6 +48,16 @@ pub struct DrizzleConfig {
     /// Minimum coverage threshold (0.0-1.0).
     /// Pixels with coverage below this are set to fill_value.
     pub min_coverage: f32,
+    /// Which ancillary planes the drizzle should produce, as [`StackConfig::quality`] asks of a
+    /// statistical combine.
+    ///
+    /// Each is an output-grid plane, and a drizzle's output grid is `scale²` times its input — so
+    /// declining one here saves more than it does on the statistical side. `variance` declines the
+    /// most: its `Σwᵢ²` accumulator is resident for the whole run, where coverage and weight are
+    /// shaped from the weight map that normalizing the image needs anyway.
+    ///
+    /// [`StackConfig::quality`]: crate::StackConfig::quality
+    pub quality: QualityPlanes,
 }
 
 impl Default for DrizzleConfig {
@@ -57,6 +68,7 @@ impl Default for DrizzleConfig {
             kernel: DrizzleKernel::Turbo,
             fill_value: 0.0,
             min_coverage: 0.1,
+            quality: QualityPlanes::ALL,
         }
     }
 }

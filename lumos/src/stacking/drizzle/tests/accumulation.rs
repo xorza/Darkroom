@@ -374,3 +374,70 @@ fn weight_and_linear_variance_maps() {
         "unequal weighting should raise variance above 1/2"
     );
 }
+
+/// A declined plane is not produced, and declining it changes nothing about the image.
+///
+/// The weight map is not optional internally — the image is `Σfluxᵢwᵢ / Σwᵢ` and `min_coverage`
+/// gates fill against its maximum — so the risk this pins is that gating the *outputs* disturbs the
+/// combine. Run with a non-zero `min_coverage` and a transform that leaves the frame's edge thinly
+/// covered, so the fill gate is actually exercised while coverage is declined.
+#[test]
+fn declined_quality_planes_are_absent_and_do_not_disturb_the_image() {
+    let side = 24;
+    let image = constant_mono_image(Size2us::new(side, side), 0.5);
+    let transform = Transform::translation(DVec2::new(1.7, -2.3));
+    let product = |quality| {
+        let config = DrizzleConfig {
+            min_coverage: 0.5,
+            quality,
+            ..DrizzleConfig::x2()
+        };
+        drizzle_one(side, config, image.clone(), &transform, None)
+    };
+
+    let all = product(QualityPlanes::ALL);
+    assert!(all.coverage.is_some() && all.weight.is_some() && all.linear_variance.is_some());
+
+    let bare = product(QualityPlanes::IMAGE_ONLY);
+    assert!(bare.coverage.is_none() && bare.weight.is_none() && bare.linear_variance.is_none());
+
+    // Each is independent of the others, and `variance` is the one that also drops an accumulator.
+    let coverage_only = product(QualityPlanes {
+        coverage: true,
+        weight: false,
+        variance: false,
+    });
+    assert!(coverage_only.coverage.is_some());
+    assert!(coverage_only.weight.is_none() && coverage_only.linear_variance.is_none());
+
+    // The fill gate has to have fired, or the min_coverage path is untested here.
+    let filled = all
+        .image
+        .channel(0)
+        .iter()
+        .filter(|value| **value == 0.0)
+        .count();
+    assert!(
+        filled > 0,
+        "min_coverage dropped no pixels, so nothing was gated"
+    );
+
+    for (label, other) in [("image only", &bare), ("coverage only", &coverage_only)] {
+        assert_eq!(
+            other.image.channel(0).pixels(),
+            all.image.channel(0).pixels(),
+            "{label}: declining planes changed the combined image"
+        );
+    }
+    assert_eq!(
+        all.coverage.as_ref().unwrap().per_pixel().unwrap().pixels(),
+        coverage_only
+            .coverage
+            .as_ref()
+            .unwrap()
+            .per_pixel()
+            .unwrap()
+            .pixels(),
+        "coverage differed when the other planes were declined"
+    );
+}
