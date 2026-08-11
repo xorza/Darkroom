@@ -1263,6 +1263,7 @@ fn annulus_sky_is_centred_on_the_fitted_position() {
     let bg = BackgroundEstimate {
         background: Buffer2::new(size.width, size.height, bg_data),
         noise,
+        noise_floor: 1e-6,
     };
 
     let config = MeasurementConfig {

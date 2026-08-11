@@ -13,6 +13,11 @@ use crate::stacking::star_detection::threshold_mask::{
 };
 use crate::testing::prelude::*;
 
+/// The per-pixel σ floor the helpers below pass. Frame-derived in production; fixed here so every
+/// case in this file is thresholded on the noise it declares, with the floor low enough never to
+/// bind on it.
+const TEST_MIN_NOISE: f32 = 1e-6;
+
 /// Helper to create threshold mask for tests using packed version
 fn create_threshold_mask_test(
     pixels: &[f32],
@@ -25,7 +30,7 @@ fn create_threshold_mask_test(
     let bg = Buffer2::new(size.width, size.height, bg.to_vec());
     let noise = Buffer2::new(size.width, size.height, noise.to_vec());
     let mut mask = BitBuffer2::new_filled(size, false);
-    create_threshold_mask(&pixels, &bg, &noise, sigma, &mut mask);
+    create_threshold_mask(&pixels, &bg, &noise, sigma, TEST_MIN_NOISE, &mut mask);
     mask
 }
 
@@ -39,7 +44,7 @@ fn create_threshold_mask_filtered_test(
     let filtered = Buffer2::new(size.width, size.height, filtered.to_vec());
     let noise = Buffer2::new(size.width, size.height, noise.to_vec());
     let mut mask = BitBuffer2::new_filled(size, false);
-    create_threshold_mask_filtered(&filtered, &noise, sigma, &mut mask);
+    create_threshold_mask_filtered(&filtered, &noise, sigma, TEST_MIN_NOISE, &mut mask);
     mask
 }
 
@@ -50,7 +55,7 @@ fn scalar_threshold(pixels: &[f32], bg: &[f32], noise: &[f32], sigma: f32) -> Ve
         .zip(bg.iter())
         .zip(noise.iter())
         .map(|((&px, &b), &n)| {
-            let threshold = b + sigma * n.max(1e-6);
+            let threshold = b + sigma * n.max(TEST_MIN_NOISE);
             px > threshold
         })
         .collect()
@@ -62,7 +67,7 @@ fn scalar_threshold_filtered(pixels: &[f32], noise: &[f32], sigma: f32) -> Vec<b
         .iter()
         .zip(noise.iter())
         .map(|(&px, &n)| {
-            let threshold = sigma * n.max(1e-6);
+            let threshold = sigma * n.max(TEST_MIN_NOISE);
             px > threshold
         })
         .collect()
@@ -439,7 +444,14 @@ fn packed_matches_scalar() {
     let bg = Buffer2::new(width, height, bg_data.clone());
     let noise = Buffer2::new(width, height, noise_data.clone());
     let mut packed_mask = BitBuffer2::new_filled(Size2us::new(width, height), false);
-    create_threshold_mask(&pixels, &bg, &noise, sigma, &mut packed_mask);
+    create_threshold_mask(
+        &pixels,
+        &bg,
+        &noise,
+        sigma,
+        TEST_MIN_NOISE,
+        &mut packed_mask,
+    );
 
     // Compare results
     for (i, &scalar_val) in scalar_mask.iter().enumerate() {
@@ -466,7 +478,7 @@ fn packed_non_aligned_size() {
     let noise = Buffer2::new_filled(width, height, 0.1f32);
 
     let mut mask = BitBuffer2::new_filled(Size2us::new(width, height), false);
-    create_threshold_mask(&pixels, &bg, &noise, 3.0, &mut mask);
+    create_threshold_mask(&pixels, &bg, &noise, 3.0, TEST_MIN_NOISE, &mut mask);
 
     // All should be set
     assert_eq!(mask.count_ones(), size);

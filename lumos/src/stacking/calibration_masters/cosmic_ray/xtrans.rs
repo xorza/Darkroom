@@ -10,11 +10,10 @@ use rayon::prelude::*;
 use crate::bit_buffer2::BitBuffer2;
 use crate::io::image::cfa::CfaType;
 use crate::math::size2us::Size2us;
-use crate::math::statistics::{mad_f32_fast, mad_to_sigma, median_f32_mut};
+use crate::math::statistics::{mad_f32_fast, mad_to_sigma, median_f32_mut, representational_floor};
 use crate::math::vec2us::Vec2us;
 use crate::stacking::calibration_masters::same_color::XTransOffsets;
 
-use crate::stacking::calibration_masters::cosmic_ray::FINE_STRUCTURE_FLOOR;
 use crate::stacking::calibration_masters::cosmic_ray::config::{CosmicRayConfig, NoiseEstimation};
 use crate::stacking::calibration_masters::cosmic_ray::masks::CrMasks;
 use crate::stacking::calibration_masters::cosmic_ray::mono::{
@@ -163,7 +162,7 @@ impl XtransScratch {
                             gathered,
                         );
                         if gathered.is_empty() {
-                            frow[x] = FINE_STRUCTURE_FLOOR;
+                            frow[x] = 0.0;
                             srow[x] = v;
                             continue;
                         }
@@ -173,7 +172,9 @@ impl XtransScratch {
                         let med_small = median_f32_mut(&mut gathered[..small]);
                         let med_large = median_f32_mut(gathered);
                         lrow[x] = (v - med_small).max(0.0);
-                        frow[x] = (med_small - med_large).max(FINE_STRUCTURE_FLOOR);
+                        // Non-negative only — see the mono detector: the σ-unit floor downstream
+                        // is what guards the contrast ratio, at any sample scale.
+                        frow[x] = (med_small - med_large).max(0.0);
                         srow[x] = med_small;
                     }
                 },
@@ -204,13 +205,17 @@ impl XtransScratch {
                         by_color[c].push(scene.pix[y * size.width + x]);
                     }
                 }
-                let mut stats = [(0.0f32, 1e-9f32); 3];
+                // Both the seed for a colour with no samples and the fallback for a flat one come
+                // from the frame's own magnitude, so a scale below any fixed constant — which is
+                // where a 32-bit FITS lands — still yields a usable, strictly positive σ.
+                let frame_floor = representational_floor(scene.pix);
+                let mut stats = [(0.0f32, frame_floor); 3];
                 for (c, vals) in by_color.iter_mut().enumerate() {
                     if vals.is_empty() {
                         continue;
                     }
                     let bg = median_f32_mut(vals);
-                    let sigma = mad_to_sigma(mad_f32_fast(vals, bg, frame)).max(1e-9);
+                    let sigma = mad_to_sigma(mad_f32_fast(vals, bg, frame)).max(frame_floor);
                     stats[c] = (bg, sigma);
                 }
                 out.clear();

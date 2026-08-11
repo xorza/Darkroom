@@ -53,7 +53,7 @@ mod sampling;
 use crate::bit_buffer2::BitBuffer2;
 use crate::io::image::cfa::{CfaImage, CfaType};
 use crate::math::size2us::Size2us;
-use crate::math::statistics::{mad_to_sigma, median_f32_mut};
+use crate::math::statistics::{mad_to_sigma, median_f32_mut, representational_floor};
 use crate::stacking::calibration_masters::defect_map::dark_background::DarkBackground;
 use crate::stacking::calibration_masters::defect_map::sampling::collect_color_residual_samples;
 use crate::stacking::calibration_masters::pattern_or_mono;
@@ -261,12 +261,7 @@ fn residual_sigma_floor(image: &CfaImage) -> f32 {
     {
         return sigma;
     }
-    image
-        .data
-        .par_iter()
-        .map(|value| value.abs())
-        .reduce(|| 0.0, f32::max)
-        * f32::EPSILON
+    representational_floor(&image.data)
 }
 
 /// Flag cold/dead pixels in a master flat: those reading below `dead_fraction` of the median of

@@ -7,11 +7,11 @@
 use rayon::prelude::*;
 
 use crate::bit_buffer2::BitBuffer2;
+use crate::io::image::cfa::QUANTIZATION_SIGMA_PER_STEP;
 use crate::math::size2us::Size2us;
-use crate::math::statistics::{mad_f32_fast, mad_to_sigma, median_f32_mut};
+use crate::math::statistics::{mad_f32_fast, mad_to_sigma, median_f32_mut, representational_floor};
 use crate::math::vec2us::Vec2us;
 
-use crate::stacking::calibration_masters::cosmic_ray::FINE_STRUCTURE_FLOOR;
 use crate::stacking::calibration_masters::cosmic_ray::config::{CosmicRayConfig, NoiseEstimation};
 use crate::stacking::calibration_masters::cosmic_ray::masks::CrMasks;
 
@@ -94,8 +94,13 @@ impl<'a> MonoDetector<'a> {
             // over median₃ in `fine` rather than in a buffer of its own.
             median_window_into(pix, size, 1, fine);
             median_window_into(fine, size, 3, median);
+            // Clamped non-negative and no further: the only consumer divides by the noise and
+            // floors the result at `FINE_STRUCTURE_SIGMA_FLOOR`, so the guard against a vanishing
+            // F belongs there, in σ units, where it holds whatever scale the samples are in. An
+            // absolute floor here would instead read as enormous fine structure on a frame whose
+            // noise is below it, and suppress every detection.
             for (a, &b) in fine.iter_mut().zip(&*median) {
-                *a = (*a - b).max(FINE_STRUCTURE_FLOOR);
+                *a = (*a - b).max(0.0);
             }
 
             // Significance S = L⁺/(2N), then S' = S − median₅(S) to strip smooth large-scale structure.
@@ -217,7 +222,15 @@ fn noise_map_into(
             scratch.clear();
             scratch.extend_from_slice(data);
             let bg = median_f32_mut(scratch);
-            let sigma_bg = mad_to_sigma(mad_f32_fast(data, bg, scratch)).max(1e-9);
+            // A flat frame has MAD 0, which would make every per-pixel noise 0 and the
+            // significance `L⁺/(2N)` infinite. The fallback comes from the data's own magnitude
+            // rather than a constant, so it holds whatever span the decoder divided by.
+            let mad_sigma = mad_to_sigma(mad_f32_fast(data, bg, scratch));
+            let sigma_bg = if mad_sigma > 0.0 {
+                mad_sigma
+            } else {
+                representational_floor(data)
+            };
             out.clear();
             out.extend(m5.iter().map(|&s| empirical_noise(s, bg, sigma_bg)));
         }
@@ -241,6 +254,12 @@ pub(super) fn empirical_noise(signal: f32, bg: f32, sigma: f32) -> f32 {
 
 /// Poisson + read noise per pixel from a CR-free signal estimate, in normalized units:
 /// `N_e = √(gain·I_ADU + read_noise²)` mapped back through `full_scale`.
+///
+/// Floored at one ADC step's digitization σ rather than at a constant. `full_scale` already states
+/// what one normalized unit is worth in ADU, so `(1/√12)/full_scale` is the smallest noise a
+/// digitized sample can have — the right floor in any domain, and the same figure
+/// [`crate::CfaImage`] carries as its quantization σ. Only reached where both the signal and the
+/// read noise are zero.
 pub(super) fn parametric_noise_into(
     signal: &[f32],
     gain: f32,
@@ -249,10 +268,11 @@ pub(super) fn parametric_noise_into(
     out: &mut Vec<f32>,
 ) {
     let denom = gain * full_scale;
+    let floor = QUANTIZATION_SIGMA_PER_STEP / full_scale;
     out.clear();
     out.extend(signal.iter().map(|&s| {
         let adu = s.max(0.0) * full_scale;
-        ((gain * adu + read_noise * read_noise).sqrt() / denom).max(1e-9)
+        ((gain * adu + read_noise * read_noise).sqrt() / denom).max(floor)
     }));
 }
 

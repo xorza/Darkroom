@@ -24,6 +24,10 @@ use imaginarium::Buffer2;
 /// Uses SIMD acceleration when available (AVX2/SSE4.1 on x86_64, NEON on aarch64).
 /// Writes directly to packed u64 words for better memory efficiency.
 ///
+/// `min_noise` floors each per-pixel σ before the threshold is formed, in the samples' own units —
+/// see [`crate::stacking::star_detection::background::BackgroundEstimate::noise_floor`], which is
+/// what every caller in the pipeline passes.
+///
 /// Note: All input buffers must have the same dimensions as the mask.
 /// The output mask has row-aligned storage (stride may differ from width).
 pub(crate) fn create_threshold_mask(
@@ -31,6 +35,7 @@ pub(crate) fn create_threshold_mask(
     bg: &Buffer2<f32>,
     noise: &Buffer2<f32>,
     sigma_threshold: f32,
+    min_noise: f32,
     mask: &mut BitBuffer2,
 ) {
     let width = mask.size.width;
@@ -59,6 +64,7 @@ pub(crate) fn create_threshold_mask(
                 bg,
                 noise,
                 sigma_threshold,
+                min_noise,
                 row_words,
                 row_pixel_start,
                 row_pixel_start + width,
@@ -77,6 +83,7 @@ pub(crate) fn create_threshold_mask_filtered(
     filtered: &Buffer2<f32>,
     noise: &Buffer2<f32>,
     sigma_threshold: f32,
+    min_noise: f32,
     mask: &mut BitBuffer2,
 ) {
     let width = mask.size.width;
@@ -101,6 +108,7 @@ pub(crate) fn create_threshold_mask_filtered(
                 &[],
                 noise,
                 sigma_threshold,
+                min_noise,
                 row_words,
                 row_pixel_start,
                 row_pixel_start + width,

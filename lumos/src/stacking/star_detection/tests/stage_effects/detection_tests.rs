@@ -13,7 +13,9 @@ use common::internals::test_output_path;
 use imaginarium::Color;
 use imaginarium::drawing::{draw_circle, draw_cross};
 
-use crate::stacking::star_detection::tests::stage_effects::{TILE_SIZE, matched_truths};
+use crate::stacking::star_detection::tests::stage_effects::{
+    TILE_SIZE, background_estimate, matched_truths,
+};
 
 /// Create a detection overlay image showing candidates.
 fn create_detection_overlay(
@@ -118,6 +120,66 @@ fn detection_sparse() {
         detection_rate > 0.9,
         "Detection rate {:.1}% should be > 90%",
         detection_rate * 100.0
+    );
+}
+
+/// Detection finds the same stars when every sample is scaled by a large constant factor.
+///
+/// The decoder's span sets a frame's magnitude — a 32-bit integer FITS is divided by `2³² − 1` and
+/// arrives near `1e-8`, five orders below a RAW frame. Every threshold in the detector is stated in
+/// σ, but the floors that keep a degenerate σ from collapsing them were once fixed constants, and a
+/// frame whose whole signal range sat below one of them detected nothing at all. Scaling a field
+/// that detects normally and requiring the identical result is what holds those floors to the
+/// frame.
+#[test]
+fn detection_is_invariant_to_the_frames_sample_scale() {
+    // Far enough to put a background near 1e-2 down at the 1e-7 an integer FITS reaches, and well
+    // below the 1e-6 the noise floor used to be pinned at.
+    const SCALE: f32 = 1e-5;
+
+    let frame = Scenario {
+        num_stars: 15,
+        ..Default::default()
+    }
+    .frame();
+    let pixels = frame.image.channel(0).clone();
+    let truths: Vec<(f32, f32)> = frame
+        .truth
+        .sources
+        .iter()
+        .map(|s| (s.pos.x as f32, s.pos.y as f32))
+        .collect();
+    let config = DetectionConfig::default();
+
+    let native = detect_stars_test(&pixels, &background_estimate(&pixels), &config);
+    let native_matched = matched_truths(&native, &truths, 5.0);
+    assert!(
+        native_matched > 0,
+        "fixture must detect something at its own scale"
+    );
+
+    let scaled = Buffer2::new(
+        pixels.width(),
+        pixels.height(),
+        pixels.pixels().iter().map(|&v| v * SCALE).collect(),
+    );
+    // The estimate scales with the frame rather than bottoming out: at 1e-5 the tile σ and the
+    // floor derived from it are each exactly 1e-5 of their native values.
+    let scaled_bg = background_estimate(&scaled);
+    let native_bg = background_estimate(&pixels);
+    assert!(
+        (scaled_bg.noise_floor / native_bg.noise_floor - SCALE).abs() < SCALE * 1e-3,
+        "noise floor {:e} did not track the frame from {:e}",
+        scaled_bg.noise_floor,
+        native_bg.noise_floor
+    );
+
+    let scaled_detected = detect_stars_test(&scaled, &scaled_bg, &config);
+    assert_eq!(
+        matched_truths(&scaled_detected, &truths, 5.0),
+        native_matched,
+        "scaling every sample by {SCALE} changed the detections ({} vs {native_matched})",
+        matched_truths(&scaled_detected, &truths, 5.0)
     );
 }
 

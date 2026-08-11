@@ -2,23 +2,25 @@
 
 use std::arch::aarch64::*;
 
-use crate::stacking::star_detection::threshold_mask::simd::{MIN_NOISE, process_words_scalar};
+use crate::stacking::star_detection::threshold_mask::simd::process_words_scalar;
 
 /// NEON packed threshold kernel. `WITH_BG` selects `bg + σ·noise` vs `σ·noise` (filtered); `bg` is
 /// unused and may be empty when `WITH_BG` is false. Uses unfused multiply-then-add (not `vfmaq_f32`)
 /// to stay bit-exact with the scalar / AVX2 / SSE backends at the `px == threshold` boundary.
+#[allow(clippy::too_many_arguments)]
 pub(super) unsafe fn process_words_neon<const WITH_BG: bool>(
     pixels: &[f32],
     bg: &[f32],
     noise: &[f32],
     sigma_threshold: f32,
+    min_noise: f32,
     words: &mut [u64],
     pixel_offset: usize,
     pixel_end: usize,
 ) {
     unsafe {
         let sigma_vec = vdupq_n_f32(sigma_threshold);
-        let min_noise_vec = vdupq_n_f32(MIN_NOISE);
+        let min_noise_vec = vdupq_n_f32(min_noise);
 
         let pixels_ptr = pixels.as_ptr();
         let bg_ptr = bg.as_ptr();
@@ -62,6 +64,7 @@ pub(super) unsafe fn process_words_neon<const WITH_BG: bool>(
                     bg,
                     noise,
                     sigma_threshold,
+                    min_noise,
                     std::slice::from_mut(word),
                     base_pixel,
                     pixel_end,

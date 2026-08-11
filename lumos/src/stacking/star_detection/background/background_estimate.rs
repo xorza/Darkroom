@@ -8,6 +8,7 @@ use crate::background_mesh::spline::{cubic_spline_eval, solve_natural_spline_d2}
 use crate::background_mesh::tile_stats::TileComponent;
 use crate::bit_buffer2::BitBuffer2;
 use crate::concurrency::JobScratchPool;
+use crate::math::statistics::median_f32_mut;
 use crate::math::vec2us::Vec2us;
 use crate::stacking::star_detection::background::simd;
 use crate::stacking::star_detection::background::simd::{SegmentRamp, SplineSegment};
@@ -27,6 +28,51 @@ pub(crate) struct BackgroundEstimate {
     pub(crate) background: Buffer2<f32>,
     /// Per-pixel noise (sigma) estimates.
     pub(crate) noise: Buffer2<f32>,
+    /// The floor every threshold built from [`Self::noise`] applies to it. See
+    /// [`noise_floor_from`] for why it is measured from the frame rather than fixed.
+    pub(crate) noise_floor: f32,
+}
+
+/// A per-pixel σ is floored at this fraction of the frame's typical tile σ: far enough below the
+/// real noise never to bind on a healthy estimate, far enough above zero to keep a degenerate tile
+/// from collapsing the threshold onto the sky.
+const NOISE_FLOOR_FRACTION: f32 = 1e-4;
+
+/// The frame's own floor for a per-pixel noise estimate.
+///
+/// The spline interpolates σ between tile centers and can carry it to zero wherever a tile came out
+/// flat, which would collapse `bg + σ·noise` onto `bg` and match every pixel above the sky. A fixed
+/// constant cannot be that guard: the linear domain is `[0, 1]`, but the span the decoder divided by
+/// sets the magnitude, so one frame's entire noise range can sit below a constant sized for another
+/// — a 32-bit integer FITS lands near `1e-8` — and the threshold then rejects everything instead.
+/// A fraction of this frame's own median tile σ scales with whatever it is handed.
+///
+/// When no tile has a measurable spread at all — a synthetic or wholly saturated frame — the sky
+/// level stands in for it. The floor still has work to do there: the interpolated background map
+/// does not reproduce a constant sky exactly, and without a margin above that jitter every pixel
+/// clears `bg` and the whole frame labels as one component. The sky carries the frame's magnitude,
+/// so a fraction of it stays above the jitter in any domain.
+fn noise_floor_from(grid: &TileGrid) -> f32 {
+    let stats = grid.stats.pixels();
+    let mut sigmas: Vec<f32> = stats
+        .iter()
+        .map(|tile| tile.sigma)
+        .filter(|sigma| sigma.is_finite() && *sigma > 0.0)
+        .collect();
+    let scale = if sigmas.is_empty() {
+        let mut skies: Vec<f32> = stats
+            .iter()
+            .map(|tile| tile.sky.abs())
+            .filter(|sky| sky.is_finite() && *sky > 0.0)
+            .collect();
+        if skies.is_empty() {
+            return f32::MIN_POSITIVE;
+        }
+        median_f32_mut(&mut skies)
+    } else {
+        median_f32_mut(&mut sigmas)
+    };
+    (scale * NOISE_FLOOR_FRACTION).max(f32::MIN_POSITIVE)
 }
 
 impl BackgroundEstimate {
@@ -50,6 +96,7 @@ impl BackgroundEstimate {
             config.sigma_clip_iterations,
             true,
         );
+        let noise_floor = noise_floor_from(tile_grid);
         interpolate_from_grid(
             tile_grid,
             &mut background,
@@ -57,7 +104,11 @@ impl BackgroundEstimate {
             &workspace.interpolation,
         );
 
-        Self { background, noise }
+        Self {
+            background,
+            noise,
+            noise_floor,
+        }
     }
 
     /// Refine the estimate using iterative object masking.
@@ -84,6 +135,7 @@ impl BackgroundEstimate {
                 &self.background,
                 &self.noise,
                 detection_sigma,
+                self.noise_floor,
                 config.mask_dilation,
                 &mut mask,
                 &mut scratch,
@@ -97,6 +149,9 @@ impl BackgroundEstimate {
                 config.sigma_clip_iterations,
                 true,
             );
+            // Re-measured from the refined grid: masking objects out changes the tile σ set the
+            // floor is derived from.
+            self.noise_floor = noise_floor_from(tile_grid);
             interpolate_from_grid(
                 tile_grid,
                 &mut self.background,
@@ -143,17 +198,26 @@ fn interpolate_from_grid(
 /// Create a mask of pixels that are likely objects (above threshold).
 ///
 /// `output` is used as the mask buffer. `scratch` is used for dilation if needed.
+#[allow(clippy::too_many_arguments)]
 fn create_object_mask(
     pixels: &Buffer2<f32>,
     background: &Buffer2<f32>,
     noise: &Buffer2<f32>,
     detection_sigma: f32,
+    min_noise: f32,
     dilation_radius: usize,
     output: &mut BitBuffer2,
     scratch: &mut BitBuffer2,
 ) {
     // Create threshold mask using packed SIMD-optimized implementation
-    create_threshold_mask(pixels, background, noise, detection_sigma, output);
+    create_threshold_mask(
+        pixels,
+        background,
+        noise,
+        detection_sigma,
+        min_noise,
+        output,
+    );
 
     // Dilate mask to cover object wings
     if dilation_radius > 0 {

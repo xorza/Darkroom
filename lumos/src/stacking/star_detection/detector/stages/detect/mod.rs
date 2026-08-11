@@ -105,6 +105,7 @@ impl DetectResult {
                 filtered,
                 &stats.noise,
                 config.sigma_threshold,
+                stats.noise_floor,
                 &mut mask,
             );
         } else {
@@ -113,6 +114,7 @@ impl DetectResult {
                 &stats.background,
                 &stats.noise,
                 config.sigma_threshold,
+                stats.noise_floor,
                 &mut mask,
             );
         }
