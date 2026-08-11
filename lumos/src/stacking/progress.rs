@@ -17,17 +17,19 @@ pub struct StackingProgress {
 /// The pass a [`StackingProgress`] report belongs to.
 ///
 /// One variant per pass that walks a countable set, so `current`/`total` mean one thing within a
-/// stage and a stage change is a real change of work. Which stages a run emits depends on the
-/// entry point, and no run emits all of them: the raw pipeline detects stars while the decoded
-/// frame is still in hand, so it folds that into `Calibrating` and never reports `Detecting`,
-/// which belongs to the already-decoded path. Each stage's counter restarts at its own total.
+/// stage and a stage change is a real change of work. Each stage's counter restarts at its own
+/// total, and a run emits only the stages its route uses — but which stages those are follows from
+/// the work asked for, not from which function was called: both front ends report `Preparing` and
+/// `Registering`, a statistical combine reports `Loading` and `Combining` where a drizzle reports
+/// `Drizzling`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StackingStage {
-    /// Decoding, calibrating and demosaicing raw lights, detecting each frame's stars as it
-    /// lands. Counted in frames.
-    Calibrating,
-    /// Detecting stars in frames that arrived already decoded. Counted in frames.
-    Detecting,
+    /// Turning inputs into frames with detected stars: decoding, calibrating and demosaicing where
+    /// the input is raw, and detecting each frame's stars either way. Counted in frames.
+    ///
+    /// One stage rather than one per activity because it is one pass: the raw path detects while
+    /// the decoded frame is still in hand, so a frame is reported once whichever route it took.
+    Preparing,
     /// Registering each frame against the reference and warping it into place. Counted in
     /// frames, and the reference itself is not among them.
     Registering,
