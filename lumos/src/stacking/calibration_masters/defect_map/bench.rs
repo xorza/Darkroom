@@ -3,7 +3,7 @@ use crate::stacking::calibration_masters::defect_map::sampling::collect_color_sa
 use crate::stacking::calibration_masters::defect_map::*;
 use ::quickbench::quick_bench;
 
-#[quick_bench(warmup_iters = 3, iters = 20)]
+#[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
 fn bench_collect_color_samples(b: quickbench::Bencher) {
     let size = Size2us::new(6000, 4000);
     let data = Buffer2::new(

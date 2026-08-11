@@ -43,7 +43,7 @@ fn linear_master() -> LinearImage {
     LinearImage::from_planar_channels(dims, vec![r, g, bch])
 }
 
-#[quick_bench(warmup_iters = 1, iters = 5)]
+#[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
 fn bench_stretch_auto_stf_rgb(b: ::quickbench::Bencher) {
     let master = linear_master();
     let stretch = Stretch::auto_stf();
@@ -58,7 +58,7 @@ fn bench_stretch_auto_stf_rgb(b: ::quickbench::Bencher) {
     });
 }
 
-#[quick_bench(warmup_iters = 1, iters = 5)]
+#[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
 fn bench_stretch_auto_asinh_rgb(b: ::quickbench::Bencher) {
     let master = linear_master();
     let stretch = Stretch::auto_asinh();
@@ -75,7 +75,7 @@ fn bench_stretch_auto_asinh_rgb(b: ::quickbench::Bencher) {
 /// `clone`/subsample overhead the end-to-end benches above also pay. The kernel is branchless in
 /// the pixel data, so re-running it in place over drifting values costs a constant per call — no
 /// per-iteration reset needed.
-#[quick_bench(warmup_iters = 1, iters = 10)]
+#[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
 fn bench_stretch_asinh_kernel_single_thread(b: ::quickbench::Bencher) {
     let curve = AsinhCurve::new(0.05);
     let n_px = W * H;

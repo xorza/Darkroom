@@ -28,7 +28,7 @@ fn create_bench_data(size: usize) -> (Buffer2<f32>, Buffer2<f32>, Buffer2<f32>) 
     )
 }
 
-#[quick_bench(warmup_iters = 3, iters = 200)]
+#[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
 fn bench_threshold_mask_4k(b: ::quickbench::Bencher) {
     let (pixels, bg, noise) = create_bench_data(4096 * 4096);
     let mut mask = BitBuffer2::new_filled(Size2us::new(4096, 4096), false);

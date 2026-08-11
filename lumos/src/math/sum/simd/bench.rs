@@ -24,7 +24,7 @@ fn calls_per_sample(len: usize) -> usize {
     (8_192 / len).clamp(1, 2_048)
 }
 
-#[quick_bench(warmup_iters = 3, iters = 100)]
+#[quick_bench(warmup_time_ms = 100, bench_time_ms = 500)]
 fn bench_sum_f32(b: ::quickbench::Bencher) {
     let data = make_test_data();
 
@@ -32,7 +32,7 @@ fn bench_sum_f32(b: ::quickbench::Bencher) {
     b.bench_labeled("simd", || black_box(sum_f32(black_box(&data))));
 }
 
-#[quick_bench(warmup_iters = 3, iters = 100)]
+#[quick_bench(warmup_time_ms = 100, bench_time_ms = 500)]
 fn bench_weighted_mean_f32(b: ::quickbench::Bencher) {
     let data = make_test_data();
     let weights = make_weights();
@@ -72,7 +72,7 @@ fn bench_weighted_mean_f32(b: ::quickbench::Bencher) {
     });
 }
 
-#[quick_bench(warmup_iters = 10, iters = 200)]
+#[quick_bench(warmup_time_ms = 100, bench_time_ms = 500)]
 fn bench_sum_f32_crossover(b: ::quickbench::Bencher) {
     for len in CROSSOVER_SIZES {
         let data: Vec<f32> = (0..len).map(|x| x as f32 * 0.1).collect();
@@ -105,7 +105,7 @@ fn bench_sum_f32_crossover(b: ::quickbench::Bencher) {
     }
 }
 
-#[quick_bench(warmup_iters = 10, iters = 200)]
+#[quick_bench(warmup_time_ms = 100, bench_time_ms = 500)]
 fn bench_weighted_mean_f32_crossover(b: ::quickbench::Bencher) {
     for len in CROSSOVER_SIZES {
         let data: Vec<f32> = (0..len).map(|x| x as f32 * 0.1).collect();

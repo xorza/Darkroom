@@ -25,7 +25,7 @@ use crate::stacking::star_detection::star::Star;
 use crate::testing::init_tracing;
 use crate::testing::synthetic::fixtures::{cluster_field, star_field};
 
-#[quick_bench(warmup_iters = 3, iters = 10)]
+#[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
 fn bench_detect_6k_globular_cluster(b: ::quickbench::Bencher) {
     init_tracing();
 
@@ -86,7 +86,7 @@ fn bench_detect_6k_globular_cluster(b: ::quickbench::Bencher) {
     b.bench(|| black_box(detector.detect(black_box(&image))));
 }
 
-#[quick_bench(warmup_iters = 1, iters = 3)]
+#[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
 fn bench_detect_4k_dense(b: ::quickbench::Bencher) {
     // 4K image with 2000 stars
     let pixels = star_field(Size2us::new(4096, 4096), 2000, 42)
@@ -102,7 +102,7 @@ fn bench_detect_4k_dense(b: ::quickbench::Bencher) {
     b.bench(|| black_box(detector.detect(black_box(&image))));
 }
 
-#[quick_bench(warmup_iters = 2, iters = 5)]
+#[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
 fn bench_detect_1k_sparse(b: ::quickbench::Bencher) {
     // 1K image with 100 stars (sparse field)
     let pixels = star_field(Size2us::new(1024, 1024), 100, 42)
@@ -155,12 +155,12 @@ fn bench_deduplication(b: ::quickbench::Bencher, base_stars: Vec<Star>) {
 
 /// Benchmark remove_duplicate_stars with varying star counts.
 /// Simulates dense star field scenario similar to rho-opiuchi detection.
-#[quick_bench(warmup_iters = 5, iters = 20)]
+#[quick_bench(warmup_time_ms = 100, bench_time_ms = 500)]
 fn bench_remove_duplicate_stars_5000(b: ::quickbench::Bencher) {
     bench_deduplication(b, random_stars(5000, 4096.0, 4096.0));
 }
 
-#[quick_bench(warmup_iters = 5, iters = 20)]
+#[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
 fn bench_remove_duplicate_stars_10000(b: ::quickbench::Bencher) {
     bench_deduplication(b, random_stars(10000, 8000.0, 6000.0));
 }
@@ -183,25 +183,25 @@ fn component_label_map(size: Size2us, components: usize) -> LabelMap {
     LabelMap::from_raw(labels, components)
 }
 
-#[quick_bench(warmup_iters = 2, iters = 10)]
+#[quick_bench(warmup_time_ms = 100, bench_time_ms = 500)]
 fn bench_components_4k_sparse(b: ::quickbench::Bencher) {
     let labels = component_label_map(Size2us::new(4096, 4096), 2_000);
     b.bench(|| black_box(collect_components(black_box(&labels))));
 }
 
-#[quick_bench(warmup_iters = 2, iters = 10)]
+#[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
 fn bench_components_6k_crowded(b: ::quickbench::Bencher) {
     let labels = component_label_map(Size2us::new(6144, 6144), 50_000);
     b.bench(|| black_box(collect_components(black_box(&labels))));
 }
 
-#[quick_bench(warmup_iters = 2, iters = 10)]
+#[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
 fn bench_components_2k_low_threshold(b: ::quickbench::Bencher) {
     let labels = component_label_map(Size2us::new(2048, 2048), 100_000);
     b.bench(|| black_box(collect_components(black_box(&labels))));
 }
 
-#[quick_bench(warmup_iters = 2, iters = 10)]
+#[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
 fn bench_components_4k_crossover(b: ::quickbench::Bencher) {
     for components in [100, 500, 2_000, 10_000, 25_000, 50_000, 100_000] {
         let labels = component_label_map(Size2us::new(4096, 4096), components);

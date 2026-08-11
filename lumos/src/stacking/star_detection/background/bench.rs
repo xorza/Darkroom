@@ -25,7 +25,7 @@ fn estimate_background_test(
     estimate
 }
 
-#[quick_bench(warmup_iters = 2, iters = 5)]
+#[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
 fn bench_background_estimate_6k(b: ::quickbench::Bencher) {
     let width = 6144;
     let height = 6144;
@@ -50,7 +50,7 @@ fn bench_background_estimate_6k(b: ::quickbench::Bencher) {
 
 const BENCH_SIGMA_CLIP_ITERATIONS: usize = 2;
 
-#[quick_bench(warmup_iters = 2, iters = 10)]
+#[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
 fn bench_tile_grid_6k_globular(b: ::quickbench::Bencher) {
     let pixels = cluster_field(Size2us::new(6144, 6144), 50000, 42)
         .image
@@ -64,7 +64,7 @@ fn bench_tile_grid_6k_globular(b: ::quickbench::Bencher) {
     });
 }
 
-#[quick_bench(warmup_iters = 2, iters = 50)]
+#[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
 fn bench_tile_grid_6k_with_mask(b: ::quickbench::Bencher) {
     let pixels = cluster_field(Size2us::new(6144, 6144), 50000, 42)
         .image

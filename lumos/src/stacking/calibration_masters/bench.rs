@@ -71,7 +71,7 @@ fn make_masters() -> CalibrationMasters {
     .unwrap()
 }
 
-#[quick_bench(warmup_iters = 1, iters = 5)]
+#[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
 fn bench_calibrate_apply_bayer(b: ::quickbench::Bencher) {
     let masters = make_masters();
     // A fresh, uncalibrated light per call: `calibrate` asserts the frame isn't already
@@ -89,7 +89,7 @@ fn bench_calibrate_apply_bayer(b: ::quickbench::Bencher) {
     });
 }
 
-#[quick_bench(warmup_iters = 0, iters = 3)]
+#[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
 fn bench_calibrate_30_lights_bayer(b: ::quickbench::Bencher) {
     let masters = make_masters();
     let light = make_cfa(
@@ -106,7 +106,7 @@ fn bench_calibrate_30_lights_bayer(b: ::quickbench::Bencher) {
     });
 }
 
-#[quick_bench(warmup_iters = 1, iters = 10)]
+#[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
 fn bench_defect_map_build_bayer(b: ::quickbench::Bencher) {
     let dark = make_cfa(
         Size2us::new(W, H),
@@ -154,7 +154,7 @@ fn cosmic_ray_frame(cfa: CfaType) -> CfaImage {
 /// its run-to-run spread is wide enough that a median of three moves by more than any change worth
 /// making. The extra samples cost ~7 s against the ~27 s release rebuild that any A/B already pays,
 /// so they are close to free.
-#[quick_bench(warmup_iters = 1, iters = 12)]
+#[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
 fn bench_cosmic_ray_reject_mono(b: ::quickbench::Bencher) {
     let frame = cosmic_ray_frame(CfaType::Mono);
     let config = CosmicRayConfig::default();
@@ -167,7 +167,7 @@ fn bench_cosmic_ray_reject_mono(b: ::quickbench::Bencher) {
 /// The X-Trans path, which had no bench while it was the one still recomputing its same-colour
 /// neighbour set per pixel — a 13×13 `color_at` sweep plus a distance sort at every pixel of every
 /// iteration. It now walks the precomputed per-phase table the defect scan uses.
-#[quick_bench(warmup_iters = 1, iters = 12)]
+#[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
 fn bench_cosmic_ray_reject_xtrans(b: ::quickbench::Bencher) {
     let frame = cosmic_ray_frame(CfaType::XTrans(XTRANS_PATTERN));
     let config = CosmicRayConfig::default();
@@ -177,7 +177,7 @@ fn bench_cosmic_ray_reject_xtrans(b: ::quickbench::Bencher) {
     });
 }
 
-#[quick_bench(warmup_iters = 1, iters = 12)]
+#[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
 fn bench_cosmic_ray_reject_bayer(b: ::quickbench::Bencher) {
     let frame = cosmic_ray_frame(bayer());
     let config = CosmicRayConfig::default();

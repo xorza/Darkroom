@@ -32,14 +32,14 @@ fn star_pair(num_stars: usize, seed: u64) -> (Vec<Star>, Vec<Star>) {
     (ref_stars, target)
 }
 
-#[quick_bench(warmup_iters = 3, iters = 20)]
+#[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
 fn bench_register_150_stars(b: ::quickbench::Bencher) {
     let (ref_stars, target) = star_pair(150, 7);
     let config = RegistrationConfig::default();
     b.bench(|| black_box(register(black_box(&ref_stars), black_box(&target), &config)));
 }
 
-#[quick_bench(warmup_iters = 3, iters = 10)]
+#[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
 fn bench_register_500_stars(b: ::quickbench::Bencher) {
     let (ref_stars, target) = star_pair(500, 9);
     let config = RegistrationConfig::default();

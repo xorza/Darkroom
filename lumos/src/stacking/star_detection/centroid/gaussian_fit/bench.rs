@@ -11,7 +11,7 @@ use crate::stacking::star_detection::centroid::gaussian_fit::GaussianFit;
 use crate::stacking::star_detection::centroid::gaussian_fit::GaussianFitConfig;
 use crate::testing::synthetic::star_profiles::{StarProfile, SyntheticStar};
 
-#[quick_bench(warmup_iters = 100, iters = 10000)]
+#[quick_bench(warmup_time_ms = 100, bench_time_ms = 500)]
 fn bench_gaussian_fit_small(b: quickbench::Bencher) {
     // 17x17 stamp
     let pixels = SyntheticStar::new(
@@ -34,7 +34,7 @@ fn bench_gaussian_fit_small(b: quickbench::Bencher) {
     });
 }
 
-#[quick_bench(warmup_iters = 100, iters = 10000)]
+#[quick_bench(warmup_time_ms = 100, bench_time_ms = 500)]
 fn bench_gaussian_fit_medium(b: quickbench::Bencher) {
     // 25x25 stamp
     let pixels = SyntheticStar::new(
@@ -57,7 +57,7 @@ fn bench_gaussian_fit_medium(b: quickbench::Bencher) {
     });
 }
 
-#[quick_bench(warmup_iters = 100, iters = 10000)]
+#[quick_bench(warmup_time_ms = 100, bench_time_ms = 500)]
 fn bench_gaussian_fit_large(b: quickbench::Bencher) {
     // 31x31 stamp
     let pixels = SyntheticStar::new(

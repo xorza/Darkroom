@@ -24,7 +24,7 @@ use crate::stacking::star_detection::detector::stages::detect::internals::detect
 use crate::testing::synthetic::fixtures::star_field;
 use crate::testing::synthetic::star_profiles::{StarProfile, SyntheticStar};
 
-#[quick_bench(warmup_iters = 100, iters = 10000)]
+#[quick_bench(warmup_time_ms = 100, bench_time_ms = 500)]
 fn bench_measure_star_single(b: ::quickbench::Bencher) {
     // Single star centroid computation with WeightedMoments
     let width = 64;
@@ -55,7 +55,7 @@ fn bench_measure_star_single(b: ::quickbench::Bencher) {
     });
 }
 
-#[quick_bench(warmup_iters = 100, iters = 10000)]
+#[quick_bench(warmup_time_ms = 100, bench_time_ms = 500)]
 fn bench_measure_star_gaussian_fit(b: ::quickbench::Bencher) {
     // Single star centroid with Gaussian fitting
     let width = 64;
@@ -86,7 +86,7 @@ fn bench_measure_star_gaussian_fit(b: ::quickbench::Bencher) {
     });
 }
 
-#[quick_bench(warmup_iters = 100, iters = 10000)]
+#[quick_bench(warmup_time_ms = 100, bench_time_ms = 500)]
 fn bench_measure_star_moffat_fit(b: ::quickbench::Bencher) {
     // Single star centroid with Moffat fitting
     let width = 64;
@@ -117,7 +117,7 @@ fn bench_measure_star_moffat_fit(b: ::quickbench::Bencher) {
     });
 }
 
-#[quick_bench(warmup_iters = 100, iters = 10000)]
+#[quick_bench(warmup_time_ms = 100, bench_time_ms = 500)]
 fn bench_measure_star_local_annulus(b: ::quickbench::Bencher) {
     // Single star centroid with LocalAnnulus background
     let width = 128;
@@ -145,7 +145,7 @@ fn bench_measure_star_local_annulus(b: ::quickbench::Bencher) {
     });
 }
 
-#[quick_bench(warmup_iters = 5, iters = 200)]
+#[quick_bench(warmup_time_ms = 100, bench_time_ms = 500)]
 fn bench_measure_star_batch_100(b: ::quickbench::Bencher) {
     // 100 stars batch processing with WeightedMoments
     let pixels = star_field(Size2us::new(512, 512), 100, 42)
@@ -170,7 +170,7 @@ fn bench_measure_star_batch_100(b: ::quickbench::Bencher) {
     });
 }
 
-#[quick_bench(warmup_iters = 2, iters = 10)]
+#[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
 fn bench_measure_star_batch_6k_10000(b: ::quickbench::Bencher) {
     // 2000 stars on 4K image - compare all centroid methods
     let pixels = star_field(Size2us::new(6144, 6144), 10000, 42)
@@ -221,7 +221,7 @@ fn bench_measure_star_batch_6k_10000(b: ::quickbench::Bencher) {
     });
 }
 
-#[quick_bench(warmup_iters = 10, iters = 10000)]
+#[quick_bench(warmup_time_ms = 100, bench_time_ms = 500)]
 fn bench_refine_centroid_single(b: ::quickbench::Bencher) {
     // Single refine_centroid call - isolates the exp() hot path
     let width = 64;
@@ -247,7 +247,7 @@ fn bench_refine_centroid_single(b: ::quickbench::Bencher) {
     });
 }
 
-#[quick_bench(warmup_iters = 10, iters = 1000)]
+#[quick_bench(warmup_time_ms = 100, bench_time_ms = 500)]
 fn bench_refine_centroid_batch_1000(b: ::quickbench::Bencher) {
     // 1000 refine_centroid calls to amplify exp() cost
     let width = 64;
@@ -275,7 +275,7 @@ fn bench_refine_centroid_batch_1000(b: ::quickbench::Bencher) {
     });
 }
 
-#[quick_bench(warmup_iters = 100, iters = 10000)]
+#[quick_bench(warmup_time_ms = 100, bench_time_ms = 500)]
 fn bench_gaussian_fit_single(b: ::quickbench::Bencher) {
     // Single Gaussian fit (L-M optimization only)
     let width = 21;
@@ -301,7 +301,7 @@ fn bench_gaussian_fit_single(b: ::quickbench::Bencher) {
     });
 }
 
-#[quick_bench(warmup_iters = 100, iters = 10000)]
+#[quick_bench(warmup_time_ms = 100, bench_time_ms = 500)]
 fn bench_moffat_fit_single(b: ::quickbench::Bencher) {
     // Single Moffat fit (L-M optimization only)
     let width = 21;
@@ -350,7 +350,7 @@ fn metrics_fixture() -> (Buffer2<f32>, BackgroundEstimate) {
     (pixels, bg)
 }
 
-#[quick_bench(warmup_iters = 100, iters = 10000)]
+#[quick_bench(warmup_time_ms = 100, bench_time_ms = 500)]
 fn bench_compute_star_single(b: ::quickbench::Bencher) {
     // Flux, SNR, sharpness, roundness and the windowed covariance for one candidate — everything
     // `measure_star` does after the centroid is settled.
@@ -371,7 +371,7 @@ fn bench_compute_star_single(b: ::quickbench::Bencher) {
     });
 }
 
-#[quick_bench(warmup_iters = 10, iters = 1000)]
+#[quick_bench(warmup_time_ms = 200, bench_time_ms = 1000)]
 fn bench_compute_star_batch_1000(b: ::quickbench::Bencher) {
     let (pixels, bg) = metrics_fixture();
     let pos = DVec2::new(32.3, 32.7);
@@ -392,7 +392,7 @@ fn bench_compute_star_batch_1000(b: ::quickbench::Bencher) {
     });
 }
 
-#[quick_bench(warmup_iters = 100, iters = 10000)]
+#[quick_bench(warmup_time_ms = 100, bench_time_ms = 500)]
 fn bench_windowed_covariance_single(b: ::quickbench::Bencher) {
     // The adaptive-window moment loop nested inside `compute_star`: up to four re-reads of the
     // stamp's image and background rows, one per window iteration.
@@ -412,7 +412,7 @@ fn bench_windowed_covariance_single(b: ::quickbench::Bencher) {
     });
 }
 
-#[quick_bench(warmup_iters = 10, iters = 1000)]
+#[quick_bench(warmup_time_ms = 100, bench_time_ms = 500)]
 fn bench_windowed_covariance_batch_1000(b: ::quickbench::Bencher) {
     let (pixels, bg) = metrics_fixture();
     let seed_sigma_sq = 6.25;
