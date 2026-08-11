@@ -546,7 +546,7 @@ fn cleanup_removes_files() {
         &temp_dir,
         "cleanup_test.bin",
         &image,
-        WarpQuality::None,
+        &WarpQuality::None,
         FrameStats::measure(&image),
     )
     .unwrap();
@@ -619,7 +619,7 @@ fn read_channel_chunk_disk_backed() {
         &temp_dir,
         base_filename,
         &image,
-        WarpQuality::None,
+        &WarpQuality::None,
         FrameStats::measure(&image),
     )
     .unwrap();
@@ -678,7 +678,7 @@ fn frame_count_disk_backed() {
             &temp_dir,
             &base_filename,
             &image,
-            WarpQuality::None,
+            &WarpQuality::None,
             FrameStats::measure(&image),
         )
         .unwrap();

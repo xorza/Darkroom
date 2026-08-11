@@ -314,7 +314,7 @@ fn load_to_disk<I: StackableImage, P: AsRef<Path> + Sync>(
         cache_dir,
         &base_filename,
         &first_image,
-        WarpQuality::None,
+        &WarpQuality::None,
         first_stats,
     )
     .map_err(Error::from)?;
@@ -513,7 +513,7 @@ fn load_and_cache_frame<I: StackableImage>(
             cache_dir,
             base_filename,
             &image,
-            WarpQuality::None,
+            &WarpQuality::None,
             stats.clone(),
         )
         .map_err(Error::from)?;

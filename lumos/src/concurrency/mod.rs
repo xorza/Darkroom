@@ -180,33 +180,39 @@ where
     })
 }
 
-/// Consuming counterpart to [`try_par_map_limited`]: hands each item to `operation` by value.
+/// Consuming counterpart to [`try_par_map_limited`], with a slot bound to each in-flight worker.
 ///
-/// Taking items by value is what lets a caller drop each input as soon as its output exists —
-/// the property that keeps the register/warp stage from holding the whole input and output sets
+/// Taking items by value is what lets a caller drop each input as soon as its output exists — the
+/// property that keeps the register/warp stage from holding the whole input and output sets
 /// simultaneously. The cells outlive the run but each holds `None` once claimed, so what stays
 /// resident is one lock and one `Option` discriminant per item, not the payload.
-pub(crate) fn try_par_map_limited_owned<T, R, E, F>(
+///
+/// The slot is what a worker carries *between* the items it happens to take: scratch too big to
+/// rebuild per item, and too plentiful to give one to every item. The warp stage keeps its output
+/// planes there — a frame's worth of buffers whose pages are already faulted in, worth about a
+/// fifth of a large frame's warp.
+pub(crate) fn try_par_map_bounded_owned<T, S, R, E, F>(
     items: Vec<T>,
-    max_concurrent: usize,
+    slots: &mut [S],
     operation: F,
 ) -> Result<Vec<R>, E>
 where
     T: Send,
+    S: Send,
     R: Send,
     E: Send,
-    F: Fn(usize, T) -> Result<R, E> + Sync,
+    F: Fn(&mut S, usize, T) -> Result<R, E> + Sync,
 {
     let cells: Vec<Mutex<Option<T>>> = items
         .into_iter()
         .map(|item| Mutex::new(Some(item)))
         .collect();
-    try_par_map_limited(&cells, max_concurrent, |index, cell| {
-        let item = cell
+    try_par_map_bounded(cells.len(), slots, |slot, index| {
+        let item = cells[index]
             .lock()
             .take()
             .expect("each index is claimed by exactly one worker");
-        operation(index, item)
+        operation(slot, index, item)
     })
 }
 

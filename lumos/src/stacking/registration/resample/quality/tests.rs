@@ -19,11 +19,18 @@ const INTERPOLATION_METHODS: [InterpolationMethod; 6] = [
 fn warp_coverage_nearest_identity_is_all_ones() {
     let size = Size2us::new(8, 8);
     let wt = WarpTransform::new(Transform::identity());
-    let cov = quality::maps(size, &wt, InterpolationMethod::Nearest).coverage;
-    for &c in cov.pixels() {
+    let maps = quality::internals::maps(size, &wt, InterpolationMethod::Nearest);
+    for &c in maps.coverage.pixels() {
         assert!(
             (c - 1.0).abs() < TOL,
             "nearest identity coverage should be 1.0, got {c}"
+        );
+    }
+    // Nearest takes one tap at full weight, so its interpolation adds no variance anywhere.
+    for &c in maps.confidence.pixels() {
+        assert!(
+            (c - 1.0).abs() < TOL,
+            "nearest identity confidence should be 1.0, got {c}"
         );
     }
 }
@@ -33,7 +40,7 @@ fn warp_coverage_fully_outside_is_zero() {
     let size = Size2us::new(8, 8);
     // Source translated far outside the image: every kernel tap is out of bounds.
     let wt = WarpTransform::new(Transform::translation(DVec2::new(1000.0, 1000.0)));
-    let cov = quality::maps(size, &wt, InterpolationMethod::Bilinear).coverage;
+    let cov = quality::internals::maps(size, &wt, InterpolationMethod::Bilinear).coverage;
     for &c in cov.pixels() {
         assert_eq!(c, 0.0, "fully-outside coverage must be 0, got {c}");
     }
@@ -45,7 +52,7 @@ fn warp_coverage_bilinear_edge_is_partial() {
     // Output (0,4) maps to src (-0.5, 4.0): the 2×2 bilinear footprint straddles the left
     // edge — taps at x=-1 (out, weight 0.5) and x=0 (in, weight 0.5) → coverage 0.5.
     let wt = WarpTransform::new(Transform::translation(DVec2::new(-0.5, 0.0)));
-    let cov = quality::maps(size, &wt, InterpolationMethod::Bilinear).coverage;
+    let cov = quality::internals::maps(size, &wt, InterpolationMethod::Bilinear).coverage;
     let edge = cov.pixels()[4 * size.width];
     assert!(
         (edge - 0.5).abs() < TOL,

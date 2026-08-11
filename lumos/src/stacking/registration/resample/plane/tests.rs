@@ -372,7 +372,8 @@ fn lanczos_homography_horizon_uses_border_and_zero_coverage() {
             };
             let mut output = Buffer2::new_default(WIDTH, HEIGHT);
             plane::warp(&input, &mut output, &wt, &params);
-            let coverage = quality::maps(Size2us::new(WIDTH, HEIGHT), &wt, method).coverage;
+            let coverage =
+                quality::internals::maps(Size2us::new(WIDTH, HEIGHT), &wt, method).coverage;
 
             for y in 0..HEIGHT {
                 assert_eq!(

@@ -73,12 +73,6 @@ struct SampleQuality {
     confidence: f32,
 }
 
-#[derive(Debug)]
-pub(super) struct Maps {
-    pub(super) coverage: Buffer2<f32>,
-    pub(super) confidence: Buffer2<f32>,
-}
-
 /// Where a Lanczos kernel's taps fall at one position, before any weight has been read.
 ///
 /// Separate from [`SeparableTaps`] because the interior path never needs the weights: it takes the
@@ -398,9 +392,26 @@ fn quality_at(pos: Vec2, size: Size2us, method: InterpolationMethod) -> SampleQu
     }
 }
 
-pub(super) fn maps(size: Size2us, transform: &WarpTransform, method: InterpolationMethod) -> Maps {
-    let mut coverage = Buffer2::new_default(size.width, size.height);
-    let mut confidence = Buffer2::new_default(size.width, size.height);
+/// Fill `coverage` and `confidence` for every output pixel.
+///
+/// Writes both in full, so the buffers may arrive holding anything — which is what lets the warp
+/// stage hand the same pair back for the next frame instead of allocating a set whose every page
+/// then faults on first write.
+pub(super) fn write_maps(
+    coverage: &mut Buffer2<f32>,
+    confidence: &mut Buffer2<f32>,
+    size: Size2us,
+    transform: &WarpTransform,
+    method: InterpolationMethod,
+) {
+    debug_assert_eq!(
+        (coverage.width(), coverage.height()),
+        (size.width, size.height)
+    );
+    debug_assert_eq!(
+        (confidence.width(), confidence.height()),
+        (size.width, size.height)
+    );
     coverage
         .pixels_mut()
         .par_chunks_mut(size.width)
@@ -414,9 +425,39 @@ pub(super) fn maps(size: Size2us, transform: &WarpTransform, method: Interpolati
                 confidence_row[x] = quality.confidence;
             });
         });
+}
 
-    Maps {
-        coverage,
-        confidence,
+#[cfg(test)]
+pub(crate) mod internals {
+    use imaginarium::Buffer2;
+
+    use crate::math::size2us::Size2us;
+    use crate::stacking::registration::config::InterpolationMethod;
+    use crate::stacking::registration::resample::quality::write_maps;
+    use crate::stacking::registration::transform::WarpTransform;
+
+    /// The two maps as an owned pair.
+    ///
+    /// Production fills buffers it already holds — a warp reuses one set per worker rather than
+    /// allocating per frame — so this shape exists only for tests and benches that want the result
+    /// of one call and have nothing to reuse.
+    #[derive(Debug)]
+    pub(crate) struct Maps {
+        pub(crate) coverage: Buffer2<f32>,
+        pub(crate) confidence: Buffer2<f32>,
+    }
+
+    pub(crate) fn maps(
+        size: Size2us,
+        transform: &WarpTransform,
+        method: InterpolationMethod,
+    ) -> Maps {
+        let mut coverage = Buffer2::new_default(size.width, size.height);
+        let mut confidence = Buffer2::new_default(size.width, size.height);
+        write_maps(&mut coverage, &mut confidence, size, transform, method);
+        Maps {
+            coverage,
+            confidence,
+        }
     }
 }

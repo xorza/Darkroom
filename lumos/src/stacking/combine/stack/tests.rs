@@ -236,7 +236,7 @@ fn disk_tier_output_is_bit_identical_to_memory_tier() {
                 &spill_directory.path,
                 &format!("f{i}"),
                 &f.image,
-                f.quality,
+                &f.quality,
                 f.source_stats,
             )
             .unwrap()
@@ -296,7 +296,7 @@ fn mapped_frames_reject_nonfinite_samples_before_combining() {
         &spill_directory.path,
         "frame",
         &invalid,
-        WarpQuality::None,
+        &WarpQuality::None,
         source_stats,
     )
     .unwrap();

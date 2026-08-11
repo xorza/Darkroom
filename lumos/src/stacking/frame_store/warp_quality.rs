@@ -123,11 +123,16 @@ impl<P> WarpQuality<P> {
         matches!(self, Self::None)
     }
 
-    /// Convert each plane, tagging it with the name its spill file carries. Which plane answers to
-    /// which name is stated here alone, so a writer and a later reader cannot disagree.
+    /// Convert each plane by reference, tagging it with the name its spill file carries. Which
+    /// plane answers to which name is stated here alone, so a writer and a later reader cannot
+    /// disagree.
+    ///
+    /// Borrows rather than consumes because its one caller writes the planes to disk and maps them
+    /// back — it never needed to own them, and leaving them with the caller is what lets a warped
+    /// frame's buffers be reused for the next frame instead of being freed and faulted in again.
     pub(crate) fn try_map<Q, E>(
-        self,
-        mut convert: impl FnMut(&'static str, P) -> Result<Q, E>,
+        &self,
+        mut convert: impl FnMut(&'static str, &P) -> Result<Q, E>,
     ) -> Result<WarpQuality<Q>, E> {
         match self {
             Self::None => Ok(WarpQuality::None),

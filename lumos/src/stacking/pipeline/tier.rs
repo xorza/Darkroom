@@ -1,7 +1,6 @@
 //! Where the pipeline parks a frame between stages.
 
-use imaginarium::Buffer2;
-
+use crate::io::image::image_metadata::ImageMetadata;
 use crate::io::image::linear::LinearImage;
 use crate::memory::MemoryPlan;
 use crate::stacking::combine::cache_config::CacheConfig;
@@ -12,6 +11,14 @@ use crate::stacking::frame_store::warp_quality::WarpQuality;
 use crate::stacking::frame_store::{StoredFrame, StoredImage};
 use crate::stacking::pipeline::frame::PipelineFrame;
 use crate::stacking::pipeline::result::Error;
+use crate::stacking::registration::resample::WarpBuffers;
+
+/// A frame in the store, plus the buffers the tier released — `None` when it kept them.
+#[derive(Debug)]
+pub(crate) struct StoredWarp {
+    pub(crate) frame: StoredFrame,
+    pub(crate) reusable: Option<WarpBuffers>,
+}
 
 /// The storage tier the whole run uses: everything resident, or everything through the frame
 /// store's memory maps. Chosen once from the [`MemoryPlan`] and then threaded through the
@@ -47,20 +54,77 @@ impl FrameTier {
         }
     }
 
-    /// Hand a registered frame and its warp quality to the combine's frame store.
+    /// Hand a warped frame to the combine's frame store, giving its buffers back if this tier did
+    /// not keep them.
+    ///
+    /// The RAM tier keeps them — the planes *are* the stored frame — so nothing comes back and the
+    /// next frame allocates its own, which it must anyway. The spill tier writes them to disk and
+    /// memory-maps the files, leaving the buffers free for the next frame: the caller can warp
+    /// straight into pages already faulted in rather than into a fresh set.
     pub(crate) fn store(
         &self,
         name: &str,
+        metadata: ImageMetadata,
+        buffers: WarpBuffers,
+        source_stats: FrameStats,
+    ) -> Result<StoredWarp, Error> {
+        let quality = WarpQuality::Planes {
+            coverage: buffers.coverage,
+            confidence: buffers.confidence,
+        };
+        let image = LinearImage {
+            metadata,
+            pixels: buffers.pixels,
+        };
+        match self {
+            Self::Ram => Ok(StoredWarp {
+                frame: StoredFrame::from_memory(image, quality, source_stats),
+                reusable: None,
+            }),
+            Self::Spill(directory) => {
+                let frame =
+                    StoredFrame::spill(&directory.path, name, &image, &quality, source_stats)
+                        .map_err(|source| Error::Stack(StackError::from(source)))?;
+                let WarpQuality::Planes {
+                    coverage,
+                    confidence,
+                } = quality
+                else {
+                    unreachable!("built as `Planes` above")
+                };
+                Ok(StoredWarp {
+                    frame,
+                    reusable: Some(WarpBuffers {
+                        pixels: image.pixels,
+                        coverage,
+                        confidence,
+                    }),
+                })
+            }
+        }
+    }
+
+    /// Park a reference frame, which is stored unwarped and so carries no quality planes.
+    pub(crate) fn store_reference(
+        &self,
+        name: &str,
         image: LinearImage,
-        quality: WarpQuality<Buffer2<f32>>,
         source_stats: FrameStats,
     ) -> Result<StoredFrame, Error> {
         match self {
-            Self::Ram => Ok(StoredFrame::from_memory(image, quality, source_stats)),
-            Self::Spill(directory) => {
-                StoredFrame::spill(&directory.path, name, &image, quality, source_stats)
-                    .map_err(|source| Error::Stack(StackError::from(source)))
-            }
+            Self::Ram => Ok(StoredFrame::from_memory(
+                image,
+                WarpQuality::None,
+                source_stats,
+            )),
+            Self::Spill(directory) => StoredFrame::spill(
+                &directory.path,
+                name,
+                &image,
+                &WarpQuality::None,
+                source_stats,
+            )
+            .map_err(|source| Error::Stack(StackError::from(source))),
         }
     }
 

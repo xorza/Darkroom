@@ -2,6 +2,7 @@
 
 use imaginarium::Buffer2;
 
+use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::linear::LinearImage;
 use crate::io::image::linear_pixels::LinearPixels;
 use crate::stacking::registration::config::WarpParams;
@@ -65,38 +66,85 @@ pub fn warp(
     warp_transform: &WarpTransform,
     config: &WarpParams,
 ) -> WarpResult {
-    // Release assert rather than a `Result`: a non-finite border is caller error, not a runtime
-    // failure, and it reaches every pixel outside the source footprint — seeding NaN into the
-    // combine, where only a debug assert would notice. Once per frame, so the check is free.
-    // Release assert rather than a `Result`: a non-finite border is caller error, not a runtime
-    // failure, and it reaches every pixel outside the source footprint — seeding NaN into the
-    // combine, where only a debug assert would notice. Once per frame, so the check is free.
-    assert!(
-        config.border_value.is_finite(),
-        "warp border_value must be finite, got {}",
-        config.border_value
-    );
-    let dimensions = image.dimensions();
-    let mut output = LinearImage {
-        metadata: image.metadata.clone(),
-        pixels: LinearPixels::new_zeroed(dimensions),
-    };
+    let mut buffers = WarpBuffers::new(image.dimensions());
+    buffers.warp_into(image, warp_transform, config);
+    WarpResult {
+        image: LinearImage {
+            metadata: image.metadata.clone(),
+            pixels: buffers.pixels,
+        },
+        coverage: buffers.coverage,
+        confidence: buffers.confidence,
+    }
+}
 
-    for c in 0..image.channels() {
-        plane::warp(
-            image.channel(c),
-            output.channel_mut(c),
-            warp_transform,
-            config,
-        );
+/// The three planes a warp fills: the aligned pixels and the two quality maps.
+///
+/// Every one of them is written in full by [`Self::warp_into`], so a set can be handed straight
+/// back for the next frame without clearing. That is the point of naming them: a fresh plane costs
+/// its whole area in first-touch page faults, and the spill tier discards its planes once they are
+/// on disk, so a warp stage that reuses one set per worker pays that once instead of once per
+/// frame. Worth ~22% of a 16 MP warp (`bench_warp_into_fresh_4k` against `..._reused_4k`), or
+/// ~0.1 ms per MiB of plane — the faults are spread across rayon's workers, so this is a fraction
+/// of what a single thread would pay for the same pages.
+#[derive(Debug)]
+pub(crate) struct WarpBuffers {
+    pub(crate) pixels: LinearPixels,
+    pub(crate) coverage: Buffer2<f32>,
+    pub(crate) confidence: Buffer2<f32>,
+}
+
+impl WarpBuffers {
+    pub(crate) fn new(dimensions: ImageDimensions) -> Self {
+        Self {
+            pixels: LinearPixels::new_zeroed(dimensions),
+            coverage: Buffer2::new_default(dimensions.width(), dimensions.height()),
+            confidence: Buffer2::new_default(dimensions.width(), dimensions.height()),
+        }
     }
 
-    let quality = quality::maps(dimensions.size(), warp_transform, config.method);
+    pub(crate) fn dimensions(&self) -> ImageDimensions {
+        self.pixels.dimensions()
+    }
 
-    WarpResult {
-        image: output,
-        coverage: quality.coverage,
-        confidence: quality.confidence,
+    /// Warp `image` into these buffers, overwriting all three completely.
+    pub(crate) fn warp_into(
+        &mut self,
+        image: &LinearImage,
+        warp_transform: &WarpTransform,
+        config: &WarpParams,
+    ) {
+        // Release assert rather than a `Result`: a non-finite border is caller error, not a runtime
+        // failure, and it reaches every pixel outside the source footprint — seeding NaN into the
+        // combine, where only a debug assert would notice. Once per frame, so the check is free.
+        assert!(
+            config.border_value.is_finite(),
+            "warp border_value must be finite, got {}",
+            config.border_value
+        );
+        let dimensions = image.dimensions();
+        assert_eq!(
+            self.dimensions(),
+            dimensions,
+            "warp buffers were sized for a different frame"
+        );
+
+        for channel in 0..dimensions.channels() {
+            plane::warp(
+                image.channel(channel),
+                self.pixels.channel_mut(channel),
+                warp_transform,
+                config,
+            );
+        }
+
+        quality::write_maps(
+            &mut self.coverage,
+            &mut self.confidence,
+            dimensions.size(),
+            warp_transform,
+            config.method,
+        );
     }
 }
 
