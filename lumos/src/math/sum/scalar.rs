@@ -1,18 +1,5 @@
 //! Scalar (non-SIMD) implementations of sum operations.
 
-/// Neumaier compensated addition. Single source of truth for the compensation step — the SIMD
-/// backends call this for their lane-reduction and scalar-remainder tails.
-#[inline]
-pub(crate) fn neumaier_add(sum: &mut f32, c: &mut f32, v: f32) {
-    let t = *sum + v;
-    if sum.abs() >= v.abs() {
-        *c += (*sum - t) + v;
-    } else {
-        *c += (v - t) + *sum;
-    }
-    *sum = t;
-}
-
 /// Sum f32 values into an f64 accumulator, unrounded.
 ///
 /// Naive f64 accumulation beats f32 compensated summation by orders of magnitude at any length

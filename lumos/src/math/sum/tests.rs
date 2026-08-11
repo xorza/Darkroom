@@ -3,9 +3,9 @@
 use crate::math::sum::simd::{sum_f32, weighted_mean_f32};
 use crate::math::sum::*;
 
-/// `sum_f32` compensates, so it must land on the f64 sum rounded once — not merely near the naive
-/// f32 sum, which is the *worse* algorithm and was the old oracle. Exact equality is the whole
-/// point of the compensation; a tolerance here would pass an implementation that had none.
+/// `sum_f32` accumulates in f64, so it must land on the f64 sum rounded once — not merely near the
+/// naive f32 sum, which is the *worse* algorithm and was the old oracle. Exact equality is the
+/// whole point of the wider accumulator; a tolerance here would pass an implementation with none.
 ///
 /// The value cycle alternates 1e6 against -1e6 so the running total cancels catastrophically,
 /// and the lengths straddle the scalar/SSE/AVX2 dispatch thresholds and their remainders.
@@ -61,10 +61,17 @@ fn simd_vs_scalar_sum() {
 #[test]
 fn mean_rounds_once_and_agrees_with_the_unit_weighted_mean() {
     // The combine reaches the same pixel through `mean_f32` (equal weights) or
-    // `weighted_mean_f32` (frame weights), so the two must not disagree on the same data.
-    // Below the weighted mean's SIMD threshold both accumulate and divide in f64, making the
-    // agreement exact rather than approximate.
-    for len in [1usize, 2, 3, 5, 8, 17, 33, 64, 127] {
+    // `weighted_mean_f32` (frame weights), so the two must not disagree on the same data. Every
+    // weighted-mean backend accumulates in f64, so the agreement is exact rather than approximate
+    // at every length, on every architecture.
+    //
+    // The lengths have to cross both dispatch gates or the test is vacuous on one architecture:
+    // the NEON arm takes over at 4 (`NEON_F32_LANES`) and the x86 arms at 128
+    // (`X86_WEIGHTED_MEAN_CROSSOVER`). An earlier list that stopped at 127 stayed on the scalar
+    // path for the whole sweep on x86_64 while exercising NEON from len 5 up.
+    for len in [
+        1usize, 2, 3, 5, 8, 17, 33, 64, 127, 128, 129, 255, 256, 257, 1000,
+    ] {
         let values: Vec<f32> = (0..len).map(|i| 0.1 + (i as f32) * 0.0137).collect();
         let ones = vec![1.0f32; len];
         assert_eq!(
@@ -148,7 +155,7 @@ fn weighted_mean_negative_values() {
 #[test]
 fn sum_f32_precision_large_constant() {
     // Sum 100k values of 1.0: exact answer is 100000.0
-    // Naive f32 summation would accumulate rounding errors; Neumaier should be exact.
+    // Naive f32 summation would accumulate rounding errors; the f64 accumulator is exact.
     let n = 100_000;
     let values = vec![1.0f32; n];
     let result = sum_f32(&values);
@@ -157,8 +164,8 @@ fn sum_f32_precision_large_constant() {
 
 #[test]
 fn sum_f32_precision_catastrophic_cancellation() {
-    // Big positive + big negative + small values: naive summation loses the small values.
-    // Neumaier should preserve them.
+    // Big positive + big negative + small values: naive f32 summation loses the small values.
+    // The f64 accumulator preserves them.
     let big = 1e7f32;
     let small = 1e-3f32;
     let n_small = 1000;
@@ -169,7 +176,7 @@ fn sum_f32_precision_catastrophic_cancellation() {
     let result = sum_f32(&values);
     assert!(
         (result - expected).abs() < 1e-4,
-        "expected {expected}, got {result} — compensation failed"
+        "expected {expected}, got {result} — wide accumulation failed"
     );
 }
 
@@ -185,7 +192,7 @@ fn sum_f32_precision_scalar_vs_f64() {
 
 #[test]
 fn sum_f32_precision_simd_vs_f64() {
-    // Compare SIMD Neumaier result against f64 reference.
+    // Compare the SIMD result against an f64 reference.
     let values: Vec<f32> = (0..4096).map(|i| 100.0 + (i as f32) * 0.01).collect();
     let f64_sum: f64 = values.iter().map(|&v| v as f64).sum();
 
@@ -193,7 +200,7 @@ fn sum_f32_precision_simd_vs_f64() {
     let error = (result as f64 - f64_sum).abs();
     assert!(
         error < 0.1,
-        "SIMD Neumaier error {error:.6} too large (f64 ref: {f64_sum:.6}, got: {result:.6})"
+        "SIMD error {error:.6} too large (f64 ref: {f64_sum:.6}, got: {result:.6})"
     );
 }
 
@@ -211,11 +218,11 @@ fn weighted_mean_precision_large_array() {
 }
 
 #[test]
-fn sum_f32_compensation_actually_helps() {
-    // Construct data where naive summation provably loses precision.
+fn sum_f32_wide_accumulation_actually_helps() {
+    // Construct data where naive f32 summation provably loses precision.
     // Sum of 1e6 + (1e-1 repeated 10000 times) + (-1e6).
-    // Naive: 1e6 + 0.1 = 1e6 (lost!), repeated. Final: 1e6 - 1e6 = 0.
-    // Compensated: should recover ~1000.0.
+    // Naive f32: 1e6 + 0.1 = 1e6 (lost!), repeated. Final: 1e6 - 1e6 = 0.
+    // Accumulated in f64: should recover ~1000.0.
     let mut values = vec![1e6f32];
     values.extend(std::iter::repeat_n(0.1f32, 10_000));
     values.push(-1e6f32);
@@ -224,7 +231,7 @@ fn sum_f32_compensation_actually_helps() {
     let result = sum_f32(&values);
     assert!(
         (result - expected as f32).abs() < 1.0,
-        "compensation should recover small values: expected ~{expected}, got {result}"
+        "wide accumulation should recover small values: expected ~{expected}, got {result}"
     );
 
     // Verify scalar path independently
@@ -300,8 +307,8 @@ fn sum_f32_all_negative() {
 }
 
 #[test]
-fn weighted_mean_compensation_helps() {
-    // Large number of values near a mean — naive summation of v*w accumulates error.
+fn weighted_mean_wide_accumulation_helps() {
+    // Large number of values near a mean — naive f32 summation of v*w accumulates error.
     let n = 50_000;
     let values: Vec<f32> = (0..n).map(|i| 1000.0 + (i as f32) * 0.001).collect();
     let weights = vec![1.0f32; n];
@@ -393,7 +400,7 @@ fn weighted_mean_dispatch_boundary() {
 
 #[test]
 fn weighted_mean_simd_catastrophic_cancellation() {
-    // Large + small values with varying weights — stresses compensation
+    // Large + small values with varying weights — stresses the accumulator
     let mut values = vec![1e6f32, -1e6f32];
     let mut weights = vec![1.0f32, 1.0f32];
     for i in 0..1000 {
