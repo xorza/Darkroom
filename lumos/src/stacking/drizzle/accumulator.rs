@@ -415,53 +415,50 @@ impl DrizzleAccumulator {
                 // Compute 4 corners of the shrunken drop in input space. Input pixel (ix, iy)
                 // is integer-center (center at (ix, iy), matching centroids / warp).
                 // Winding order: BL, BR, TR, TL (counterclockwise).
-                let cx = ix as f64;
-                let cy = iy as f64;
+                let center = DVec2::new(ix as f64, iy as f64);
                 let corners_in = [
-                    DVec2::new(cx - dh, cy - dh),
-                    DVec2::new(cx + dh, cy - dh),
-                    DVec2::new(cx + dh, cy + dh),
-                    DVec2::new(cx - dh, cy + dh),
+                    center + DVec2::new(-dh, -dh),
+                    center + DVec2::new(dh, -dh),
+                    center + DVec2::new(dh, dh),
+                    center + DVec2::new(-dh, dh),
                 ];
 
                 // Transform the 4 corners to integer-center output coordinates (output pixel
                 // `o` is centered at `o`); `boxer` is given each cell as `[o - 0.5, o + 0.5)`.
-                let mut xout = [0.0f64; 4];
-                let mut yout = [0.0f64; 4];
-                for (k, corner) in corners_in.iter().enumerate() {
-                    let t = to_output.apply(*corner);
-                    xout[k] = t.x;
-                    yout[k] = t.y;
-                }
+                let quad = corners_in.map(|corner| to_output.apply(corner));
 
-                // Jacobian: signed area of the output quadrilateral via diagonal cross product
-                let jaco = 0.5
-                    * ((xout[1] - xout[3]) * (yout[0] - yout[2])
-                        - (xout[0] - xout[2]) * (yout[1] - yout[3]));
+                // Jacobian: signed area of the output quadrilateral, from the cross product of its
+                // diagonals.
+                let jaco = 0.5 * (quad[1] - quad[3]).perp_dot(quad[0] - quad[2]);
                 let abs_jaco = jaco.abs();
                 if abs_jaco < JACOBIAN_MIN {
                     continue; // Degenerate quadrilateral
                 }
 
                 // Bounding box of the output quadrilateral
-                let xmin = xout.iter().copied().fold(f64::INFINITY, f64::min);
-                let xmax = xout.iter().copied().fold(f64::NEG_INFINITY, f64::max);
-                let ymin = yout.iter().copied().fold(f64::INFINITY, f64::min);
-                let ymax = yout.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+                let min = quad
+                    .iter()
+                    .copied()
+                    .fold(DVec2::splat(f64::INFINITY), DVec2::min);
+                let max = quad
+                    .iter()
+                    .copied()
+                    .fold(DVec2::splat(f64::NEG_INFINITY), DVec2::max);
 
                 // Output pixel `o` is the cell `[o - 0.5, o + 0.5)`, so the quad bbox touches
                 // pixels `round(min) ..= round(max)`.
-                let ox_min = xmin.round().max(0.0) as usize;
-                let oy_min = ymin.round().max(0.0) as usize;
-                let ox_max = (xmax.round() + 1.0).min(output_width as f64) as usize;
-                let oy_max = (ymax.round() + 1.0).min(output_height as f64) as usize;
+                let ox_min = min.x.round().max(0.0) as usize;
+                let oy_min = min.y.round().max(0.0) as usize;
+                let ox_max = (max.x.round() + 1.0).min(output_width as f64) as usize;
+                let oy_max = (max.y.round() + 1.0).min(output_height as f64) as usize;
 
                 let effective_weight = weight as f64 * pw as f64;
                 let w_over_jaco = effective_weight / abs_jaco;
 
                 for oy in oy_min..oy_max {
                     for ox in ox_min..ox_max {
-                        let overlap = boxer(ox as f64 - 0.5, oy as f64 - 0.5, &xout, &yout);
+                        let corner = DVec2::new(ox as f64 - 0.5, oy as f64 - 0.5);
+                        let overlap = boxer(corner, &quad);
                         if overlap > 0.0 {
                             let pixel_weight = (overlap * w_over_jaco) as f32;
                             self.accumulate(image, input, Vec2us::new(ox, oy), pixel_weight);

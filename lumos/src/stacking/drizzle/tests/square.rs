@@ -315,10 +315,10 @@ fn boxer_rotated_partial_clip() {
         (-0.5, 0.5),  // TL
     ];
 
-    let x: [f64; 4] = std::array::from_fn(|i| cx + corners[i].0 * cos30 - corners[i].1 * sin30);
-    let y: [f64; 4] = std::array::from_fn(|i| cy + corners[i].0 * sin30 + corners[i].1 * cos30);
+    let quad: [DVec2; 4] = corners
+        .map(|(dx, dy)| DVec2::new(cx + dx * cos30 - dy * sin30, cy + dx * sin30 + dy * cos30));
 
-    let area = boxer(0.0, 0.0, &x, &y);
+    let area = boxer(DVec2::new(0.0, 0.0), &quad);
 
     // The rotated square extends beyond [0,1]×[0,1], so overlap < 1.0
     assert!(
@@ -334,10 +334,10 @@ fn boxer_rotated_partial_clip() {
     );
 
     // Verified by Python reference implementation of sgarea/boxer:
-    //   Edge 0→1: sgarea(0.3170,-0.1830,1.1830,0.3170) = 0.038675
-    //   Edge 1→2: sgarea(1.1830,0.3170,0.6830,1.1830) = -0.278312
-    //   Edge 2→3: sgarea(0.6830,1.1830,-0.1830,0.6830) = -0.644338
-    //   Edge 3→0: sgarea(-0.1830,0.6830,0.3170,-0.1830) = 0.038675
+    //   Edge 0→1: sgarea(DVec2::new(0.3170, -0.1830), DVec2::new(1.1830, 0.3170)) = 0.038675
+    //   Edge 1→2: sgarea(DVec2::new(1.1830, 0.3170), DVec2::new(0.6830, 1.1830)) = -0.278312
+    //   Edge 2→3: sgarea(DVec2::new(0.6830, 1.1830), DVec2::new(-0.1830, 0.6830)) = -0.644338
+    //   Edge 3→0: sgarea(DVec2::new(-0.1830, 0.6830), DVec2::new(0.3170, -0.1830)) = 0.038675
     //   Sum = -0.845299, abs = 0.845299
     let expected = 0.845299;
     assert!(

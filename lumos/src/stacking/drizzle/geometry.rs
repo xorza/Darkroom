@@ -68,14 +68,16 @@ pub(crate) fn local_jacobian(to_output: &Transform, center: DVec2, pixel: Vec2us
     (dx.x * dy.y - dx.y * dy.x).abs()
 }
 
-/// Compute signed area between a line segment and the x-axis, clipped to the unit square
+/// Compute signed area between the segment `from → to` and the x-axis, clipped to the unit square
 /// [0,1]×[0,1]. Uses Green's theorem. Port of STScI `sgarea()` from cdrizzlebox.c.
 ///
 /// The sign depends on the direction of traversal (left-to-right = positive).
 /// When summed over all 4 edges of a convex quadrilateral (counterclockwise winding),
 /// the total gives the overlap area between the quadrilateral and the unit square.
 #[inline]
-pub(crate) fn sgarea(x1: f64, y1: f64, x2: f64, y2: f64) -> f64 {
+pub(crate) fn sgarea(from: DVec2, to: DVec2) -> f64 {
+    let (x1, y1) = (from.x, from.y);
+    let (x2, y2) = (to.x, to.y);
     let dx = x2 - x1;
     let dy = y2 - y1;
 
@@ -133,23 +135,21 @@ pub(crate) fn sgarea(x1: f64, y1: f64, x2: f64, y2: f64) -> f64 {
     sgn_dx * (0.5 * (xhi - xtop) * (1.0 + yhi) + xtop - xlo)
 }
 
-/// Compute overlap area between a convex quadrilateral and a pixel cell.
+/// Compute overlap area between the convex quadrilateral `quad` and a pixel cell.
 ///
-/// Shifts the quadrilateral so that the cell with lower-left corner `(ox, oy)` becomes the
-/// unit square [0,1]×[0,1], then sums signed areas from each edge via `sgarea()`.
+/// Shifts the quadrilateral so that the cell with lower-left `corner` becomes the unit square
+/// [0,1]×[0,1], then sums signed areas from each edge via `sgarea()`.
 ///
 /// Port of STScI `boxer()` from cdrizzlebox.c. Output pixels are integer-center (pixel `o`
 /// spans `[o - 0.5, o + 0.5]`, matching STScI), so callers pass the cell's lower-left
 /// corner `o - 0.5`.
 #[inline]
-pub(crate) fn boxer(ox: f64, oy: f64, x: &[f64; 4], y: &[f64; 4]) -> f64 {
-    let px = [x[0] - ox, x[1] - ox, x[2] - ox, x[3] - ox];
-    let py = [y[0] - oy, y[1] - oy, y[2] - oy, y[3] - oy];
+pub(crate) fn boxer(corner: DVec2, quad: &[DVec2; 4]) -> f64 {
+    let shifted = quad.map(|vertex| vertex - corner);
 
     let mut sum = 0.0;
     for i in 0..4 {
-        let j = (i + 1) & 3;
-        sum += sgarea(px[i], py[i], px[j], py[j]);
+        sum += sgarea(shifted[i], shifted[(i + 1) & 3]);
     }
     sum.abs()
 }
