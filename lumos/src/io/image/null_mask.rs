@@ -1,6 +1,5 @@
 use crate::bit_buffer2::BitBuffer2;
 use crate::math::size2us::Size2us;
-use crate::math::vec2us::Vec2us;
 
 /// Which of an image's pixels carry no measurement.
 ///
@@ -35,19 +34,8 @@ impl NullMask {
             "every plane must match the mask geometry"
         );
         let mut nulls = BitBuffer2::new_default(size);
-        let mut count = 0;
-        let mut index = 0;
-        for y in 0..size.height {
-            for x in 0..size.width {
-                // Walked by position rather than by linear index: `BitBuffer2::set` recovers the
-                // point with a divide per pixel, and the row loop already knows it.
-                if planes.iter().any(|plane| !plane[index].is_finite()) {
-                    nulls.set_at(Vec2us::new(x, y), true);
-                    count += 1;
-                }
-                index += 1;
-            }
-        }
+        nulls.fill_from_predicate(|index| planes.iter().any(|plane| !plane[index].is_finite()));
+        let count = nulls.count_ones();
         (count > 0).then_some(Self { nulls, count })
     }
 
@@ -67,15 +55,6 @@ impl NullMask {
     )]
     pub(crate) fn is_null(&self, index: usize) -> bool {
         self.nulls.get(index)
-    }
-
-    /// Whether every pixel is null, which makes the frame's samples entirely fill.
-    #[allow(
-        dead_code,
-        reason = "read by this file's tests until the combine gates on the mask"
-    )]
-    pub(crate) fn covers_everything(&self) -> bool {
-        self.count == self.nulls.len
     }
 }
 
@@ -106,7 +85,6 @@ mod tests {
         ] {
             assert_eq!(mask.is_null(index), expected, "index {index}");
         }
-        assert!(!mask.covers_everything());
 
         // The same planes with the nulls removed produce no mask at all, so a caller cannot mistake
         // "nothing missing" for "an empty mask".
@@ -114,14 +92,14 @@ mod tests {
     }
 
     #[test]
-    fn a_wholly_null_plane_is_reported_as_such() {
-        // Width 3 is deliberately not a multiple of the 64-bit word: `count_ones` masks padding
-        // bits, and a fully-set row would over-count if this walked words rather than positions.
+    fn a_wholly_null_plane_masks_every_pixel_and_no_padding() {
+        // Width 3 is not a multiple of the 64-bit word, so a count taken word-wise would report the
+        // padding this row shares with it. `BitBuffer2::count_ones` masks that off, and the mask's
+        // own count is the number a caller acts on.
         let size = Size2us::new(3usize, 2usize);
         let plane = [f32::NAN; 6];
         let mask = NullMask::of_non_finite(size, &[&plane]).unwrap();
-        assert_eq!(mask.count(), 6);
-        assert!(mask.covers_everything());
+        assert_eq!(mask.count(), size.pixel_count());
         assert!((0..6).all(|index| mask.is_null(index)));
     }
 }

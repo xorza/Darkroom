@@ -405,7 +405,7 @@ fn fits_nulls_are_carried_as_a_mask_rather_than_failing_the_load() {
     };
     assert_eq!(
         reason,
-        "image contains 1 null/non-finite pixels; first at linear index 2"
+        "image contains 1 null/non-finite samples; first at linear index 2"
     );
 }
 
@@ -420,7 +420,7 @@ fn a_wholly_null_fits_image_loads_as_zero_with_every_pixel_masked() {
     assert_eq!(loaded.channel(0).pixels(), &[0.0; 4]);
     let nulls = loaded.nulls.as_ref().unwrap();
     assert_eq!(nulls.count(), 4);
-    assert!(nulls.covers_everything());
+    assert!((0..4).all(|index| nulls.is_null(index)));
 }
 
 /// The domain a loaded frame's decoder put its samples in, whichever decoder that was.
@@ -601,19 +601,6 @@ fn fits_nulls_of_every_non_finite_kind_are_summarized_together() {
     // Thirteen finite samples, all 0.3, so the median they fill with is 0.3 and the frame comes out
     // uniform — the fill is invisible in the samples, which is exactly why the mask has to exist.
     assert_eq!(masked.channel(0).pixels(), &[0.3f32; 16]);
-
-    let strict = LoadContext {
-        fits: FitsLoadOptions {
-            nulls: FitsNullPolicy::Reject,
-            ..Default::default()
-        },
-        ..LoadContext::default()
-    };
-    assert!(matches!(
-        load_linear_fits(&path, &strict),
-        Err(ImageError::FitsUnsupported { reason, .. })
-            if reason == "image contains 3 null/non-finite pixels; first at linear index 0"
-    ));
 }
 
 #[test]

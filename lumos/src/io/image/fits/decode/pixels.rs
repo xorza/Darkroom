@@ -26,7 +26,6 @@ use crate::io::image::image_provenance::{
 use crate::io::image::linear_pixels::LinearPixels;
 use crate::io::image::load_context::LoadContext;
 use crate::io::image::null_mask::NullMask;
-use crate::math::size2us::Size2us;
 use crate::math::statistics::median_f32_mut;
 
 pub(super) fn read_stream_hdu(
@@ -162,10 +161,13 @@ fn resolve_nulls(
                     .map(|nulls| channel * dimensions.pixel_count() + nulls.first_index)
             })
             .expect("a nonzero count means at least one plane reported a null");
+        // Samples, not pixels: this counts each channel's nulls separately, and the index is in the
+        // channel-major sample space the count belongs to. The pixel figure needs the mask, which
+        // this branch does not build.
         return Err(fits_unsupported(
             path,
             format!(
-                "image contains {count} null/non-finite pixels; first at linear index {first_index}"
+                "image contains {count} null/non-finite samples; first at linear index {first_index}"
             ),
         ));
     }
@@ -176,11 +178,8 @@ fn resolve_nulls(
             .iter()
             .map(|plane| plane.samples.as_slice())
             .collect::<ArrayVec<&[f32], 3>>();
-        NullMask::of_non_finite(
-            Size2us::new(dimensions.width(), dimensions.height()),
-            &samples,
-        )
-        .expect("a nonzero count means at least one plane holds a non-finite sample")
+        NullMask::of_non_finite(dimensions.size(), &samples)
+            .expect("a nonzero count means at least one plane holds a non-finite sample")
     };
     for plane in planes.iter_mut() {
         if let Some(nulls) = plane.nulls {
