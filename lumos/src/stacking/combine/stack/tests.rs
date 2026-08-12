@@ -635,8 +635,8 @@ fn stack_images_rejects_frames_whose_rows_run_from_opposite_ends() {
     let frame = |row_order: Option<RowOrder>| {
         let mut image = LinearImage::from_pixels(dims, vec![1.0; 4]);
         image.metadata.provenance = row_order.map(|row_order| ImageProvenance {
-            container: SourceContainer::Fits,
-            decoder: DecoderProvenance::FitsWell,
+            container: SourceContainer::Tiff,
+            decoder: DecoderProvenance::Imaginarium,
             transfer: TransferProvenance::DeclaredLinearRaster,
             color: ColorProvenance::Monochrome,
             clipped: false,

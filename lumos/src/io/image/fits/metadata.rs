@@ -96,7 +96,7 @@ pub(super) fn write_cfa_metadata(header: &mut Header, cfa: &CfaImage) -> fits_we
     // Always `TOP-DOWN`, and truthfully: whatever order the source stored its rows in, they are in
     // this file in the order this writer emits them, and the pattern beside them was already put
     // into those terms on load.
-    header.set("ROWORDER", "TOP-DOWN")?;
+    header.set("ROWORDER", RowOrder::TopDown.keyword())?;
     match cfa.metadata.cfa_type.as_ref() {
         Some(CfaType::Mono) => {
             header.set("CFATYPE", "MONO")?;
@@ -214,11 +214,16 @@ pub(super) fn read_row_order(header: &Header) -> fits_well::Result<RowOrder> {
     let Some(roworder) = header.get_text("ROWORDER")? else {
         return Ok(RowOrder::TopDown);
     };
-    Ok(if roworder.trim().eq_ignore_ascii_case("BOTTOM-UP") {
-        RowOrder::BottomUp
-    } else {
-        RowOrder::TopDown
-    })
+    Ok(
+        if roworder
+            .trim()
+            .eq_ignore_ascii_case(RowOrder::BottomUp.keyword())
+        {
+            RowOrder::BottomUp
+        } else {
+            RowOrder::TopDown
+        },
+    )
 }
 
 fn read_bayer_cfa(header: &Header, required: bool) -> fits_well::Result<Option<CfaType>> {
@@ -241,9 +246,7 @@ fn read_bayer_cfa(header: &Header, required: bool) -> fits_well::Result<Option<C
     // already matches the rows as stored, and flipping would invert a correct one and mis-debayer
     // the entire frame. Odd visible heights are not hypothetical — LibRaw reports 4015 for the
     // EOS 1500D.
-    if let Some(roworder) = header.get_text("ROWORDER")?
-        && roworder.trim().eq_ignore_ascii_case("BOTTOM-UP")
-    {
+    if read_row_order(header)? == RowOrder::BottomUp {
         // The decision needs the height, and a Bayer image HDU that declares none is malformed.
         // Assuming either parity mis-debayers every file that has the other.
         let height = header
