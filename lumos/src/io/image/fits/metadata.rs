@@ -89,14 +89,21 @@ pub(super) fn write_image_metadata(
 }
 
 pub(super) fn write_cfa_metadata(header: &mut Header, cfa: &CfaImage) -> fits_well::Result<()> {
-    // Declared for every sensor type, not just the mosaiced ones. The phase only matters where
-    // there is a pattern, but the row order is what says whether two frames are the same way up —
-    // and a mono frame is as capable of being mirrored against its neighbours as a Bayer one.
+    // Two keywords, because they answer two questions that a bottom-up source pulls apart.
     //
-    // Always `TOP-DOWN`, and truthfully: whatever order the source stored its rows in, they are in
-    // this file in the order this writer emits them, and the pattern beside them was already put
-    // into those terms on load.
+    // `ROWORDER` says which rows the `BAYERPAT` below is expressed against, and that is always
+    // `TOP-DOWN` here: the rows go out in the order this writer holds them and the pattern was
+    // already converted into those terms on load, so declaring anything else would have a reload
+    // apply the phase correction a second time. Written for every sensor type, not just the
+    // mosaiced ones — a mono frame has no phase to correct but is as capable of being upside-down.
+    //
+    // `LUMROWO` says which way up the sky is, which is what survives from the source and what two
+    // frames have to agree on. Omitted for a frame this crate synthesized, which has no source to
+    // report and whose reader then falls back to `ROWORDER`.
     header.set("ROWORDER", RowOrder::TopDown.keyword())?;
+    if let Some(row_order) = cfa.metadata.row_order() {
+        header.set(SOURCE_ROW_ORDER, row_order.keyword())?;
+    }
     match cfa.metadata.cfa_type.as_ref() {
         Some(CfaType::Mono) => {
             header.set("CFATYPE", "MONO")?;
@@ -205,25 +212,48 @@ pub(super) fn read_cfa_from_headers(header: &Header) -> fits_well::Result<Option
     read_bayer_cfa(header, false)
 }
 
-/// The row order the header declares, defaulting to `TOP-DOWN` where it declares none.
+/// Where a Lumos-written file records the row order its *source* had.
+///
+/// `ROWORDER` cannot carry it. This writer emits the rows in the order it holds them and the Bayer
+/// pattern already converted into those terms, so its `ROWORDER` has to say `TOP-DOWN` — "the
+/// pattern as written applies to the rows as written" — or a reload would apply the phase
+/// correction a second time. That leaves nowhere to say which way up the sky actually is, which is
+/// the question two frames have to agree on, so it goes here.
+const SOURCE_ROW_ORDER: &str = "LUMROWO";
+
+/// Which way up the stored rows actually are.
+///
+/// [`SOURCE_ROW_ORDER`] where this writer left one, and `ROWORDER` otherwise — for a file from
+/// anyone else the two are the same thing, and only a Lumos round-trip separates them. This is the
+/// one the combine holds frames to agreeing on: it is about the sky, not about the pattern.
+pub(super) fn read_row_order(header: &Header) -> fits_well::Result<RowOrder> {
+    if let Some(recorded) = header.get_text(SOURCE_ROW_ORDER)? {
+        return Ok(row_order_of(recorded));
+    }
+    read_declared_row_order(header)
+}
+
+/// What `ROWORDER` itself declares, which is the frame the Bayer pattern beside it is expressed in.
 ///
 /// The FITS standard has no `ROWORDER`; it is a convention, and a file without it is read the way
-/// every writer that omits it means — first row first. Anything the keyword does not spell as
-/// `BOTTOM-UP` is taken as top-down for the same reason.
-pub(super) fn read_row_order(header: &Header) -> fits_well::Result<RowOrder> {
-    let Some(roworder) = header.get_text("ROWORDER")? else {
-        return Ok(RowOrder::TopDown);
-    };
-    Ok(
-        if roworder
-            .trim()
-            .eq_ignore_ascii_case(RowOrder::BottomUp.keyword())
-        {
-            RowOrder::BottomUp
-        } else {
-            RowOrder::TopDown
-        },
-    )
+/// every writer that omits it means — first row first.
+pub(super) fn read_declared_row_order(header: &Header) -> fits_well::Result<RowOrder> {
+    Ok(header
+        .get_text("ROWORDER")?
+        .map_or(RowOrder::TopDown, row_order_of))
+}
+
+/// Anything a keyword does not spell as `BOTTOM-UP` is top-down, the order a writer that says
+/// nothing at all means.
+fn row_order_of(value: &str) -> RowOrder {
+    if value
+        .trim()
+        .eq_ignore_ascii_case(RowOrder::BottomUp.keyword())
+    {
+        RowOrder::BottomUp
+    } else {
+        RowOrder::TopDown
+    }
 }
 
 fn read_bayer_cfa(header: &Header, required: bool) -> fits_well::Result<Option<CfaType>> {
@@ -246,7 +276,9 @@ fn read_bayer_cfa(header: &Header, required: bool) -> fits_well::Result<Option<C
     // already matches the rows as stored, and flipping would invert a correct one and mis-debayer
     // the entire frame. Odd visible heights are not hypothetical — LibRaw reports 4015 for the
     // EOS 1500D.
-    if read_row_order(header)? == RowOrder::BottomUp {
+    // `ROWORDER` rather than the resolved order: the pattern is expressed against the rows as this
+    // file stores them, and a Lumos-written file separates that from which way up the sky is.
+    if read_declared_row_order(header)? == RowOrder::BottomUp {
         // The decision needs the height, and a Bayer image HDU that declares none is malformed.
         // Assuming either parity mis-debayers every file that has the other.
         let height = header
@@ -425,7 +457,10 @@ mod tests {
     use fits_well::header::Header;
 
     use crate::io::image::cfa::CfaType;
-    use crate::io::image::fits::metadata::{parse_sexagesimal, read_bayer_cfa, read_row_order};
+    use crate::io::image::fits::metadata::{
+        SOURCE_ROW_ORDER, parse_sexagesimal, read_bayer_cfa, read_declared_row_order,
+        read_row_order,
+    };
     use crate::io::image::image_provenance::RowOrder;
     use crate::io::raw::demosaic::bayer::CfaPattern;
 
@@ -533,6 +568,37 @@ mod tests {
                 "{declared}"
             );
         }
+    }
+
+    #[test]
+    fn a_lumos_written_header_separates_the_pattern_frame_from_the_sky_orientation() {
+        // What this writer emits for a bottom-up source: the rows go out as it holds them, so
+        // `ROWORDER` says the pattern applies to them as written, and `LUMROWO` carries the fact
+        // that the sky is upside-down in them.
+        let mut header = Header::new();
+        header.set("BAYERPAT", "GBRG").unwrap();
+        header.set("NAXIS2", 4).unwrap();
+        header.set("ROWORDER", RowOrder::TopDown.keyword()).unwrap();
+        header
+            .set(SOURCE_ROW_ORDER, RowOrder::BottomUp.keyword())
+            .unwrap();
+
+        // The pattern is taken as written — flipping it again is what would mis-debayer the
+        // reloaded frame, and is what reading `LUMROWO` here instead would have done.
+        assert_eq!(read_declared_row_order(&header).unwrap(), RowOrder::TopDown);
+        assert_eq!(pattern_of(&header), CfaPattern::Gbrg);
+
+        // ...while the orientation the combine compares survives the trip, so an original and a
+        // copy of it written by this crate are not read as mirrored views of each other.
+        assert_eq!(read_row_order(&header).unwrap(), RowOrder::BottomUp);
+
+        // A file from anyone else has only `ROWORDER`, and then the two answers coincide.
+        let third_party = bayer_header("RGGB", Some(RowOrder::BottomUp.keyword()), 4);
+        assert_eq!(
+            read_declared_row_order(&third_party).unwrap(),
+            RowOrder::BottomUp
+        );
+        assert_eq!(read_row_order(&third_party).unwrap(), RowOrder::BottomUp);
     }
 
     #[test]
