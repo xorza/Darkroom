@@ -80,8 +80,16 @@ pub(crate) fn compute_frame_norms(
     check_cancel(cancel)?;
 
     let reference = select_reference_frame(frames.iter().map(|frame| &frame.source_stats));
-    let registered = frames.iter().any(|frame| !frame.quality.is_none());
-    if !registered {
+    // Whether any frame contributes at only some pixels, which decides what the fit may be measured
+    // over. When every frame covers every pixel, the statistics measured on the sources at load are
+    // already comparable. When one does not, they are not — each was measured over a different set
+    // of pixels — so the fit has to be re-measured over the pixels they share.
+    //
+    // A warp is the usual reason, but not the only one: a frame whose source declared pixels with
+    // no measurement is partially covering too, and re-measuring is what keeps the fill under its
+    // nulls out of the fit.
+    let partially_covering = frames.iter().any(|frame| !frame.quality.is_none());
+    if !partially_covering {
         let norms = compute_frame_norms_with_reference(
             frames.iter().map(|frame| &frame.source_stats),
             normalization,

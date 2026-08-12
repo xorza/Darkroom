@@ -202,8 +202,8 @@ pub(crate) fn combine_cached(
     validate_manual_weights(config, frame_count)?;
 
     let cache = build()?;
-    // Logged after the load so the tier and warp-quality facts come from the cache itself rather
-    // than being restated at each entry point.
+    // Logged after the load so the tier and quality facts come from the cache itself rather than
+    // being restated at each entry point.
     tracing::info!(
         source,
         frame_count,
@@ -211,7 +211,9 @@ pub(crate) fn combine_cached(
         weighting = ?config.weighting,
         normalization = ?config.normalization,
         disk_tier = cache.core.spill_directory.is_some(),
-        warp_quality = cache
+        // Not "warped": a frame carries these when a warp produced them *or* when its source
+        // declared pixels with no measurement.
+        frame_quality = cache
             .frames
             .iter()
             .any(|frame| !frame.quality.is_none()),
@@ -346,9 +348,12 @@ pub(crate) fn run_stacking(
     let source_sigmas = SourceSigmas::measure(stats());
     // Propagating quantization noise through rejection needs each surviving sample's *frame*
     // index, to reach that frame's source sigma and normalization gain. Under partial coverage
-    // the reducer sees a compacted subset whose indices no longer name frames, so the tracking
-    // is limited to frame sets that carry no coverage — every calibration master, and every
-    // light stack loaded straight from disk.
+    // the reducer sees a compacted subset whose indices no longer name frames, so the tracking is
+    // limited to frame sets where every frame contributes at every pixel.
+    //
+    // Coverage is not only the warp's: a frame whose source declared pixels with no measurement
+    // carries it too, so one edge-masked panel costs the whole set its sigma propagation. Blunt
+    // but not wrong — the compaction that breaks the mapping is the same either way.
     let frame_indices_are_stable = cache.frames.iter().all(|frame| frame.quality.is_none());
     let sigmas = source_sigmas.filter(|_| frame_indices_are_stable);
 

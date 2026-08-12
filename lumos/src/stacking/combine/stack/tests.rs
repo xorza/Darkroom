@@ -559,6 +559,68 @@ fn a_frames_null_pixels_are_excluded_from_the_stack_at_those_pixels_alone() {
 }
 
 #[test]
+fn normalization_fits_a_masked_set_over_the_pixels_they_all_reached() {
+    // A masked frame is partially covering, which sends normalization down the path that
+    // re-measures over the pixels every frame shares instead of trusting the statistics each frame
+    // measured on its own source. That matters because a masked frame's source statistics include
+    // the fill sitting under its nulls.
+    //
+    // 1x4 frames. Frame 0 reads 10 at pixels 0 and 1 and a wildly out-of-family 1000 at 2 and 3,
+    // which it declares null; frame 1 is 20 everywhere.
+    //
+    // Frame 1 is the reference — frame 0's source MAD is enormous, spread between 10 and 1000,
+    // while frame 1's is zero, and the lowest-noise frame wins. Multiplicative scales each other
+    // frame by `reference_median / frame_median`:
+    //
+    //   over the shared pixels 0..2, frame 0's median is 10 → gain 20/10 = 2, so it contributes
+    //   20 and the mean with frame 1 is 20;
+    //   over its own samples, frame 0's median is (10 + 1000) / 2 = 505 → gain 20/505, which would
+    //   drag pixels 0 and 1 down to about 10.2.
+    //
+    // So [20; 4] is the fit that ignored the fill and ~[10.2, 10.2, 20, 20] is the one that did
+    // not, which is what makes this test able to tell them apart.
+    let dims = ImageDimensions::new((4, 1), 1);
+    let mut masked = LinearImage::from_pixels(dims, vec![10.0, 10.0, 1000.0, 1000.0]);
+    masked.nulls = NullMask::of_non_finite(dims.size(), &[&[0.0, 0.0, f32::NAN, f32::NAN]]);
+    let plain = LinearImage::from_pixels(dims, vec![20.0; 4]);
+    let config = StackConfig {
+        method: CombineMethod::Mean(Rejection::None),
+        normalization: Normalization::Multiplicative,
+        ..Default::default()
+    };
+
+    let stacked = stack_images(
+        vec![StackFrame::from(masked), StackFrame::from(plain)],
+        config.clone(),
+        ProgressCallback::default(),
+        CancelToken::never(),
+    )
+    .unwrap();
+    let pixels = stacked.image.channel(0).pixels();
+    for (index, &value) in pixels.iter().enumerate() {
+        assert!((value - 20.0).abs() < 1e-3, "pixel {index}: {pixels:?}");
+    }
+
+    // With no pixel that every frame reached there is nothing to fit on, which is named rather
+    // than divided by: one frame null everywhere leaves the intersection empty.
+    let mut all_null = LinearImage::from_pixels(dims, vec![10.0; 4]);
+    all_null.nulls = NullMask::of_non_finite(dims.size(), &[&[f32::NAN; 4]]);
+    assert!(matches!(
+        stack_images(
+            vec![
+                StackFrame::from(all_null),
+                StackFrame::from(LinearImage::from_pixels(dims, vec![20.0; 4])),
+            ],
+            config,
+            ProgressCallback::default(),
+            CancelToken::never(),
+        )
+        .unwrap_err(),
+        Error::NoCommonCoverage
+    ));
+}
+
+#[test]
 fn stack_images_rejects_frames_decoded_into_different_sample_domains() {
     // The case decode-time normalization introduced: a `uint16` FITS is divided by 65535, a
     // `float32` one holding the same ADU is taken as already normalized and divided by 1. Both
