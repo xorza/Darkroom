@@ -31,8 +31,22 @@ use crate::stacking::registration::transform::WarpTransform;
 /// Allocated per masked frame rather than held in [`WarpBuffers`](super::WarpBuffers): a frame with
 /// no mask must not pay three planes it will never touch, and a frame with one is already the
 /// exception.
+///
+/// Borrows the mask and the transform for the run rather than taking them per channel, so every
+/// channel is guaranteed to be reconstructed against the support that was measured for it.
 #[derive(Debug)]
-pub(super) struct MaskedWarp {
+pub(super) struct MaskedWarp<'a> {
+    nulls: &'a NullMask,
+    transform: &'a WarpTransform,
+    /// The caller's parameters, and the same kernel filling outside the source footprint with
+    /// nothing rather than their border.
+    ///
+    /// Both warps here are sums that a division reconciles, so the border has to be the additive
+    /// identity in each: a border value in the numerator would be data the source never held, and
+    /// one in the denominator would claim support outside the frame. The caller's own border is
+    /// still what a pixel with no support ends up holding.
+    config: WarpParams,
+    zero_bordered: WarpParams,
     /// `Σ wᵢ·validᵢ` per output pixel — the share of each pixel's kernel weight that real source
     /// data backs, and the denominator every channel divides by.
     support: Buffer2<f32>,
@@ -40,22 +54,30 @@ pub(super) struct MaskedWarp {
     zeroed: Buffer2<f32>,
 }
 
-impl MaskedWarp {
+impl<'a> MaskedWarp<'a> {
     /// Resample `nulls` into the support this frame's output pixels have.
     pub(super) fn measure(
-        nulls: &NullMask,
+        nulls: &'a NullMask,
         dimensions: ImageDimensions,
-        transform: &WarpTransform,
+        transform: &'a WarpTransform,
         config: &WarpParams,
     ) -> Self {
+        let zero_bordered = WarpParams {
+            border_value: 0.0,
+            ..*config
+        };
         let mut support = Buffer2::new_default(dimensions.width(), dimensions.height());
         plane::warp(
             &nulls.validity_plane(),
             &mut support,
             transform,
-            &zero_bordered(config),
+            &zero_bordered,
         );
         Self {
+            nulls,
+            transform,
+            config: *config,
+            zero_bordered,
             support,
             zeroed: Buffer2::new_default(dimensions.width(), dimensions.height()),
         }
@@ -63,17 +85,16 @@ impl MaskedWarp {
 
     /// Warp one channel, reconstructing each output pixel from its surviving taps alone.
     ///
-    /// A pixel whose support is under the floor is border fill: the ratio there is two vanishing
-    /// quantities and means nothing, and [`Self::fold_into_quality`] has already told the combine
-    /// not to take a sample from it.
-    pub(super) fn warp_channel(
-        &mut self,
-        source: &[f32],
-        nulls: &NullMask,
-        output: &mut Buffer2<f32>,
-        transform: &WarpTransform,
-        config: &WarpParams,
-    ) {
+    /// A pixel that does not clear the combine's own contribution floor is border fill: the ratio
+    /// there is two vanishing quantities and means nothing, and [`Self::fold_into_quality`] has
+    /// already told the combine not to take a sample from it.
+    pub(super) fn warp_channel(&mut self, source: &[f32], output: &mut Buffer2<f32>) {
+        debug_assert_eq!(
+            source.len(),
+            self.zeroed.pixels().len(),
+            "channel and mask geometry must agree"
+        );
+        let nulls = self.nulls;
         self.zeroed
             .pixels_mut()
             .par_iter_mut()
@@ -85,15 +106,15 @@ impl MaskedWarp {
                     source[index]
                 };
             });
-        plane::warp(&self.zeroed, output, transform, &zero_bordered(config));
+        plane::warp(&self.zeroed, output, self.transform, &self.zero_bordered);
 
-        let border = config.border_value;
+        let border = self.config.border_value;
         output
             .pixels_mut()
             .par_iter_mut()
             .zip(self.support.pixels().par_iter())
             .for_each(|(value, &support)| {
-                *value = if support > PixelCoverage::MIN_CONTRIBUTING {
+                *value = if PixelCoverage::new(support).contributes() {
                     *value / support
                 } else {
                     border
@@ -135,18 +156,5 @@ impl MaskedWarp {
                 *coverage *= support;
                 *confidence *= support;
             });
-    }
-}
-
-/// The same kernel, filling outside the source footprint with nothing rather than the caller's
-/// border.
-///
-/// Both warps here are sums that a division reconciles, so the border has to be the additive
-/// identity in each: a border value in the numerator would be data the source never held, and one
-/// in the denominator would claim support outside the frame.
-fn zero_bordered(config: &WarpParams) -> WarpParams {
-    WarpParams {
-        border_value: 0.0,
-        ..*config
     }
 }

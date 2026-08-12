@@ -6,17 +6,16 @@ use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::linear::LinearImage;
 use crate::io::image::linear_pixels::LinearPixels;
 use crate::stacking::registration::config::WarpParams;
+use crate::stacking::registration::resample::masked_warp::MaskedWarp;
 use crate::stacking::registration::transform::WarpTransform;
 
 #[cfg(all(test, feature = "internals"))]
 mod bench;
 mod kernel;
-mod masked;
+mod masked_warp;
 mod plane;
 mod quality;
 mod row;
-
-use crate::stacking::registration::resample::masked::MaskedWarp;
 #[cfg(test)]
 mod tests;
 
@@ -161,13 +160,7 @@ impl WarpBuffers {
         // from its surviving taps and the maps above are reduced by how many of them there were.
         let mut masked = MaskedWarp::measure(nulls, dimensions, warp_transform, config);
         for channel in 0..dimensions.channels() {
-            masked.warp_channel(
-                image.channel(channel),
-                nulls,
-                self.pixels.channel_mut(channel),
-                warp_transform,
-                config,
-            );
+            masked.warp_channel(image.channel(channel), self.pixels.channel_mut(channel));
         }
         masked.fold_into_quality(&mut self.coverage, &mut self.confidence);
     }
