@@ -15,6 +15,7 @@ use crate::io::image::image_provenance::{
 };
 use crate::io::image::linear_pixels::LinearPixels;
 use crate::io::image::load_context::LoadContext;
+use crate::io::image::null_mask::NullMask;
 use crate::io::image::standard::{
     FITS_EXTENSIONS, STANDARD_IMAGE_EXTENSIONS, f32_target_format, file_extension,
     read_standard_image, scientific_rejection, standard_container,
@@ -27,6 +28,9 @@ use crate::stacking::frame_store::StackableImage;
 pub struct LinearImage {
     pub metadata: ImageMetadata,
     pub(crate) pixels: LinearPixels,
+    /// Which pixels carry no measurement, for a source that declared any. The samples at those
+    /// positions are a finite fill, not data — see [`NullMask`].
+    pub(crate) nulls: Option<NullMask>,
 }
 
 impl LinearImage {
@@ -102,6 +106,7 @@ impl LinearImage {
         LinearImage {
             metadata: ImageMetadata::default(),
             pixels: LinearPixels::from_interleaved(dimensions, pixels),
+            nulls: None,
         }
     }
 
@@ -113,6 +118,7 @@ impl LinearImage {
         LinearImage {
             metadata: ImageMetadata::default(),
             pixels: LinearPixels::from_planar_channels(dimensions, channels),
+            nulls: None,
         }
     }
 
@@ -181,6 +187,7 @@ impl LinearImage {
         LinearImage {
             metadata: ImageMetadata::default(),
             pixels: LinearPixels::from_f32_image(image),
+            nulls: None,
         }
     }
 
@@ -357,6 +364,7 @@ impl From<Buffer2<f32>> for LinearImage {
         Self {
             metadata: ImageMetadata::default(),
             pixels: plane.into(),
+            nulls: None,
         }
     }
 }
@@ -366,6 +374,7 @@ impl From<[Buffer2<f32>; 3]> for LinearImage {
         Self {
             metadata: ImageMetadata::default(),
             pixels: planes.into(),
+            nulls: None,
         }
     }
 }

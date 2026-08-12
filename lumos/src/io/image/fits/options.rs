@@ -48,6 +48,21 @@ pub enum FitsFloatScale {
     FullScale(f32),
 }
 
+/// What a FITS image's null pixels do to the load.
+///
+/// A null is not corruption: FITS 4.0 §6.3 and the NOST floating-point agreement make IEEE NaN the
+/// undefined-value flag for a floating-point `BITPIX`, and the `BLANK` keyword's value the flag for
+/// an integer one. A conforming file with a mosaic edge, a coverage gap, or a masked bad pixel
+/// carries them by design, and cfitsio, astropy and Siril all read it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FitsNullPolicy {
+    /// Carry them: the samples are replaced with a finite fill and their positions recorded, so the
+    /// file opens and the missing pixels stay identifiable.
+    Mask,
+    /// Fail the load, naming how many there are and where the first one is.
+    Reject,
+}
+
 /// Controls checksum validation for the selected FITS HDU.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FitsChecksumPolicy {
@@ -72,6 +87,8 @@ pub struct FitsLoadOptions {
     pub checksum: FitsChecksumPolicy,
     /// How a floating-point HDU's sample scale is decided.
     pub float_scale: FitsFloatScale,
+    /// What null pixels do to the load.
+    pub nulls: FitsNullPolicy,
 }
 
 impl Default for FitsLoadOptions {
@@ -81,6 +98,11 @@ impl Default for FitsLoadOptions {
             cube: FitsCubeInterpretation::Reject,
             checksum: FitsChecksumPolicy::VerifyIfPresent,
             float_scale: FitsFloatScale::Auto,
+            // Reading a file that conforms to the standard is not opt-in behaviour. The other
+            // defaults here refuse *ambiguity* — a cube whose colour semantics nothing establishes,
+            // a float scale no header settles; a null is unambiguous, and refusing it refuses data
+            // the standard defines.
+            nulls: FitsNullPolicy::Mask,
         }
     }
 }

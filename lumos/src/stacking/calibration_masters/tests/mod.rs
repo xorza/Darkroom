@@ -713,6 +713,7 @@ fn calibrate_flat_correction() {
             ..Default::default()
         },
         quantization_sigma: None,
+        nulls: None,
     };
 
     let masters = CalibrationMasters::from_images(
@@ -767,6 +768,7 @@ fn calibrate_full_pipeline() {
             ..Default::default()
         },
         quantization_sigma: None,
+        nulls: None,
     };
     let bias = constant_cfa(Size2us::new(2, 1), bias_val, CfaType::Mono);
 
@@ -789,6 +791,7 @@ fn calibrate_full_pipeline() {
             ..Default::default()
         },
         quantization_sigma: None,
+        nulls: None,
     };
     masters.calibrate(&mut light).unwrap();
 
@@ -886,6 +889,7 @@ fn defect_detection_zero_median_no_false_positives() {
             ..Default::default()
         },
         quantization_sigma: Some(QUANTIZATION_SIGMA_PER_STEP / 4095.0),
+        nulls: None,
     };
 
     let defect_map = DefectMap::default()
@@ -924,6 +928,7 @@ fn calibrate_hot_pixel_correction() {
             ..Default::default()
         },
         quantization_sigma: None,
+        nulls: None,
     };
 
     let masters = CalibrationMasters::from_images(
@@ -956,6 +961,7 @@ fn calibrate_hot_pixel_correction() {
             ..Default::default()
         },
         quantization_sigma: None,
+        nulls: None,
     };
     masters.calibrate(&mut light).unwrap();
 
@@ -1000,6 +1006,7 @@ fn calibrate_flat_dark() {
             ..Default::default()
         },
         quantization_sigma: None,
+        nulls: None,
     };
     let flat_dark = constant_cfa(Size2us::new(2, 1), flat_dark_val, CfaType::Mono);
 
@@ -1022,6 +1029,7 @@ fn calibrate_flat_dark() {
             ..Default::default()
         },
         quantization_sigma: None,
+        nulls: None,
     };
     masters.calibrate(&mut light).unwrap();
 
@@ -1056,6 +1064,7 @@ fn flat_dark_takes_priority_over_bias() {
             ..Default::default()
         },
         quantization_sigma: None,
+        nulls: None,
     };
     let bias = constant_cfa(Size2us::new(2, 2), 0.05, CfaType::Mono);
     let flat_dark = constant_cfa(Size2us::new(2, 2), 0.10, CfaType::Mono);
@@ -1111,6 +1120,7 @@ fn prepared_master_fits_bundle_round_trips_flat_and_calibration_bit_exactly() {
             ..Default::default()
         },
         quantization_sigma: None,
+        nulls: None,
     };
     let mut masters = CalibrationMasters::from_images(
         CalibrationSet {

@@ -72,6 +72,12 @@ pub fn warp(
         image: LinearImage {
             metadata: image.metadata.clone(),
             pixels: buffers.pixels,
+            // The source's nulls do not survive the warp: an output pixel draws on a kernel
+            // footprint of source pixels, so a null under it is neither in the same place nor the
+            // same size afterwards. Recording where they went is the resampler composing source
+            // support into `coverage`, which it does not do yet — until then the warped frame
+            // honestly declares none rather than carrying a mask that no longer lines up.
+            nulls: None,
         },
         coverage: buffers.coverage,
         confidence: buffers.confidence,

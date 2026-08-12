@@ -1200,6 +1200,9 @@ pub(crate) fn load_raw_cfa(path: &Path, cancel: &CancelToken) -> Result<CfaImage
         data: Buffer2::new(raw.area.active.width, raw.area.active.height, pixels),
         metadata,
         quantization_sigma: Some(raw.black_level.inv_range * QUANTIZATION_SIGMA_PER_STEP),
+        // A sensor reports a value for every photosite; no RAW format has an undefined-sample
+        // convention to decode.
+        nulls: None,
     })
 }
 

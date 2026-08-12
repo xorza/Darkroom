@@ -3,15 +3,15 @@
 //! `fits-well` ships a `FitsWriter`, so a synthetic FITS can be written and read back through the
 //! real `load_linear_fits` path — exercising BitPix selection, the unsigned-via-BZERO convention,
 //! the division of integer samples into the `[0, 1]` domain (and the float path's exemption from
-//! it), and null rejection. The demosaic path is exercised by building mosaics from known colours
-//! and demosaicing them back.
+//! it), and both halves of the null convention. The demosaic path is exercised by building mosaics
+//! from known colours and demosaicing them back.
 
 use crate::testing::prelude::*;
 use std::fs::File;
 
 use crate::io::image::error::ImageError;
 use crate::io::image::fits::decode::{load_cfa_fits, load_linear_fits};
-use crate::io::image::fits::options::{FitsFloatScale, FitsLoadOptions};
+use crate::io::image::fits::options::{FitsFloatScale, FitsLoadOptions, FitsNullPolicy};
 use crate::io::image::load_context::LoadContext;
 use crate::io::image::sample_domain::SampleDomain;
 use crate::io::raw::demosaic::bayer::CfaPattern;
@@ -333,6 +333,96 @@ fn fits_bunit_travels_with_the_samples_and_separates_frames_the_span_cannot() {
     assert!(!mega.commensurate_with(&milli));
 }
 
+#[test]
+fn fits_nulls_are_carried_as_a_mask_rather_than_failing_the_load() {
+    // The standard's own undefined-value flag, both halves of it. A float BITPIX declares no BLANK
+    // — IEEE NaN *is* the blank (FITS 4.0 §6.3, NOST agreement) — and an integer one names the
+    // stored value that means "no measurement". Both must open.
+    //
+    // The same logical image either way: finite samples 1, 2, 4, 8, 16 ADU with the third pixel
+    // undefined. Written once as float and once as uint16, they must produce the same mask.
+    let float_pixels = vec![1.0f32, 2.0, f32::NAN, 4.0, 8.0, 16.0];
+    let float_image = Image::new(vec![3, 2], float_pixels).unwrap();
+    let float_path = write_with_header("float32_null", &float_image, &Header::new());
+    let float = load_linear_fits(&float_path, &LoadContext::default()).unwrap();
+
+    // BITPIX = 16 with BSCALE/BZERO identity, and -32768 declared as BLANK. fits-well maps that
+    // stored value to NaN, which is the same thing the float file handed over.
+    let integer_image = Image::new_scaled(
+        vec![3, 2],
+        vec![1i16, 2, -32_768, 4, 8, 16],
+        Scaling {
+            bscale: 1.0,
+            bzero: 0.0,
+            blank: Some(-32_768),
+        },
+    )
+    .unwrap();
+    let integer_path = write_with_header("int16_blank", &integer_image, &Header::new());
+    let integer = load_linear_fits(&integer_path, &LoadContext::default()).unwrap();
+
+    for (name, image) in [("float", &float), ("integer", &integer)] {
+        let nulls = image
+            .nulls
+            .as_ref()
+            .unwrap_or_else(|| panic!("{name} frame must carry a mask"));
+        assert_eq!(nulls.count(), 1, "{name}");
+        for index in 0..6 {
+            assert_eq!(nulls.is_null(index), index == 2, "{name} index {index}");
+        }
+    }
+
+    // The null's sample is the median of the finite ones, not a hole. The float file is taken as
+    // already normalized (no DATAMAX), so its finite samples are 1, 2, 4, 8, 16 and the median is
+    // the middle one, 4.
+    let filled = float.channel(0).pixels();
+    assert_eq!(filled, &[1.0, 2.0, 4.0, 4.0, 8.0, 16.0]);
+    // Every other sample is untouched, which is what makes the fill a substitution rather than a
+    // rescale of the frame.
+    assert_eq!(filled[0], 1.0);
+    assert_eq!(filled[5], 16.0);
+
+    // The integer file divides by |1| × (2¹⁶ − 1), so its median is 4/65535 — the same fill rule
+    // applied after the same division the samples took, not before it.
+    let integer_filled = integer.channel(0).pixels();
+    let expected = 4.0 / 65_535.0;
+    assert!(
+        (integer_filled[2] - expected).abs() < 1e-9,
+        "{integer_filled:?}"
+    );
+
+    // And the policy that refuses them still does, naming how many and where the first one is.
+    let strict = LoadContext {
+        fits: FitsLoadOptions {
+            nulls: FitsNullPolicy::Reject,
+            ..Default::default()
+        },
+        ..LoadContext::default()
+    };
+    let error = load_linear_fits(&float_path, &strict).unwrap_err();
+    let ImageError::FitsUnsupported { reason, .. } = &error else {
+        panic!("expected an unsupported-FITS rejection, got {error:?}");
+    };
+    assert_eq!(
+        reason,
+        "image contains 1 null/non-finite pixels; first at linear index 2"
+    );
+}
+
+#[test]
+fn a_wholly_null_fits_image_loads_as_zero_with_every_pixel_masked() {
+    // The degenerate end of the same rule: no finite sample to take a level from. The frame still
+    // opens, and the mask — not the samples — is what says none of it is data.
+    let image = Image::new(vec![2, 2], vec![f32::NAN; 4]).unwrap();
+    let path = write_with_header("float32_all_null", &image, &Header::new());
+    let loaded = load_linear_fits(&path, &LoadContext::default()).unwrap();
+
+    assert_eq!(loaded.channel(0).pixels(), &[0.0; 4]);
+    let nulls = loaded.nulls.as_ref().unwrap();
+    assert_eq!(nulls.count(), 4);
+    assert!(nulls.covers_everything());
+}
+
 /// The domain a loaded frame's decoder put its samples in, whichever decoder that was.
 fn domain_of(image: &LinearImage) -> Option<SampleDomain> {
     image
@@ -487,18 +577,42 @@ fn mosaic_fits_uses_the_cfa_calibration_route() {
 }
 
 #[test]
-fn fits_rejects_nan_and_inf_with_summary() {
+fn fits_nulls_of_every_non_finite_kind_are_summarized_together() {
+    // NaN is the standard's flag, but ±inf reaches the same place: a sample the file declares that
+    // no arithmetic downstream can use. All three count, and all three are masked.
     let size = Size2us::new(4usize, 4usize);
     let mut pixels = vec![0.3f32; size.pixel_count()];
     pixels[0] = f32::NAN;
     pixels[5] = f32::INFINITY;
     pixels[10] = f32::NEG_INFINITY;
     let image = Image::new(vec![size.width, size.height], pixels).unwrap();
+    let path = write_with_header("nan_inf", &image, &Header::new());
 
+    let masked = load_linear_fits(&path, &LoadContext::default()).unwrap();
+    let nulls = masked.nulls.as_ref().unwrap();
+    assert_eq!(nulls.count(), 3);
+    for index in 0..size.pixel_count() {
+        assert_eq!(
+            nulls.is_null(index),
+            matches!(index, 0 | 5 | 10),
+            "index {index}"
+        );
+    }
+    // Thirteen finite samples, all 0.3, so the median they fill with is 0.3 and the frame comes out
+    // uniform — the fill is invisible in the samples, which is exactly why the mask has to exist.
+    assert_eq!(masked.channel(0).pixels(), &[0.3f32; 16]);
+
+    let strict = LoadContext {
+        fits: FitsLoadOptions {
+            nulls: FitsNullPolicy::Reject,
+            ..Default::default()
+        },
+        ..LoadContext::default()
+    };
     assert!(matches!(
-        write_and_load("nan_inf", &image),
+        load_linear_fits(&path, &strict),
         Err(ImageError::FitsUnsupported { reason, .. })
-            if reason == "image contains 3 null/non-finite pixels in a decode chunk; first at linear index 0"
+            if reason == "image contains 3 null/non-finite pixels; first at linear index 0"
     ));
 }
 

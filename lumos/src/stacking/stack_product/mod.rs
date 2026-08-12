@@ -81,6 +81,7 @@ impl StackProduct {
             data: self.image.pixels.into_l(),
             metadata: self.image.metadata,
             quantization_sigma: self.quantization_sigma,
+            nulls: self.image.nulls,
         }
     }
 }

@@ -229,6 +229,10 @@ impl FrameCache {
         let image = LinearImage {
             metadata: self.core.metadata.clone(),
             pixels,
+            // A stacked pixel is missing only where no frame reached it, which is what `coverage`
+            // below reports — a second, coarser record of the same thing would only be able to
+            // disagree with it.
+            nulls: None,
         };
         let weight = weight_pixels.map(QualityMap::from_pixels);
         let linear_variance = linear_variance_pixels.map(QualityMap::from_pixels);

@@ -7,6 +7,7 @@ pub(crate) mod image_provenance;
 pub(crate) mod linear;
 pub(crate) mod linear_pixels;
 pub(crate) mod load_context;
+pub(crate) mod null_mask;
 pub(crate) mod preview_image;
 pub(crate) mod sample_domain;
 pub(crate) mod sensor;
