@@ -32,7 +32,7 @@ use crate::stacking::frame_store::spill::CachedQuality;
 use crate::stacking::frame_store::spill::FrameSpill;
 use crate::stacking::frame_store::spill::SpillDirectory;
 use crate::stacking::frame_store::stored_plane::StoredPlane;
-use crate::stacking::frame_store::{StackableImage, StoredFrame};
+use crate::stacking::frame_store::{FramePeek, StackableImage, StoredFrame};
 use crate::stacking::progress::{ProgressCallback, StackingStage};
 
 use crate::stacking::combine::cache::validation::{
@@ -81,18 +81,19 @@ fn load_tiered<I: StackableImage, P: AsRef<Path> + Sync>(
     // Dimensions drive the in-memory-vs-disk tier decision. Peek the header without a decode when
     // the format allows it (RAW), so the in-memory path can decode every frame in parallel rather
     // than decoding frame 0 serially first; otherwise decode frame 0 and reuse it below.
-    let (dimensions, first_image) = match I::peek_dimensions(first_path, &context) {
-        Some(dims) => (dims, None),
+    let (peek, first_image) = match I::peek(first_path, &context) {
+        Some(peek) => (peek, None),
         None => {
-            let img = load_image::<I>(first_path, &context)?;
-            (img.dimensions(), Some(img))
+            let image = load_image::<I>(first_path, &context)?;
+            (FramePeek::of_decoded(&image), Some(image))
         }
     };
-    let use_in_memory = memory::fits_in_memory(
-        memory::frame_bytes(dimensions),
-        paths.len(),
-        available_memory,
-    );
+    let dimensions = peek.dimensions;
+    // Frames of a set share a source, so frame 0 stands for all of them — including whether they
+    // carry the two quality planes a masked frame does, which `FramePeek::resident_bytes` charges
+    // for.
+    let use_in_memory =
+        memory::fits_in_memory(peek.resident_bytes(), paths.len(), available_memory);
 
     tracing::info!(
         frame_count = paths.len(),

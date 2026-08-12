@@ -27,7 +27,7 @@ use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::io::raw::demosaic::{DemosaicError, DemosaicKind};
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
-use crate::stacking::frame_store::StackableImage;
+use crate::stacking::frame_store::{FramePeek, StackableImage};
 use common::CancelToken;
 use imaginarium::Buffer2;
 
@@ -89,6 +89,10 @@ impl CfaType {
 pub(crate) struct CfaFrameInfo {
     pub(crate) dimensions: ImageDimensions,
     pub(crate) demosaic: DemosaicKind,
+    /// Whether decoding could produce pixels with no measurement, which a frame pays two quality
+    /// planes for beside its own. Answered from the header alone, so it is conservative where the
+    /// header cannot settle it — see `FitsDecodePlan::may_carry_nulls`.
+    pub(crate) may_carry_nulls: bool,
 }
 
 impl CfaFrameInfo {
@@ -148,10 +152,13 @@ impl StackableImage for CfaImage {
         CfaImage::from_file(path, context)
     }
 
-    fn peek_dimensions(path: &std::path::Path, context: &LoadContext) -> Option<ImageDimensions> {
+    fn peek(path: &std::path::Path, context: &LoadContext) -> Option<FramePeek> {
         CfaFrameInfo::from_file(path, context)
             .ok()
-            .map(|info| info.dimensions)
+            .map(|info| FramePeek {
+                dimensions: info.dimensions,
+                may_carry_nulls: info.may_carry_nulls,
+            })
     }
 
     fn into_planes(self) -> arrayvec::ArrayVec<imaginarium::Buffer2<f32>, 3> {

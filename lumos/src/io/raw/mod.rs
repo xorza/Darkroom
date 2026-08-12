@@ -1154,6 +1154,9 @@ pub(crate) fn raw_cfa_frame_info(
     Ok(CfaFrameInfo {
         dimensions: ImageDimensions::new((width, height), 1),
         demosaic,
+        // A sensor reports a value for every photosite; no RAW format has an undefined-sample
+        // convention to decode, so this is settled rather than conservative.
+        may_carry_nulls: false,
     })
 }
 

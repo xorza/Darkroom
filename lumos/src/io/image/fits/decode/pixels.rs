@@ -196,18 +196,37 @@ fn resolve_nulls(
     Ok(Some(mask))
 }
 
+/// Samples the fill's median is taken over, at most.
+///
+/// The median of a hundred thousand values drawn evenly across a plane and the median of all
+/// twenty-four million agree to far more precision than a stand-in for missing data needs, and the
+/// bound is what keeps this off the memory preflight: the scratch is a fixed 400 KB rather than a
+/// second copy of the plane the preflight above did not budget for. `defect_map::sampling` bounds
+/// its own medians the same way and for the same reason.
+const FILL_MEDIAN_SAMPLES: usize = 100_000;
+
 /// Replace a plane's non-finite samples with the median of its finite ones.
 ///
-/// What sits under a null is not data and [`NullMask`] says so, but no stage consults the mask yet,
-/// so this value is what they all measure. The median is the frame's own background level, which
-/// leaves a masked region a flat patch instead of the hard-edged hole a zero fill would cut — and a
-/// hard edge is what manufactures star detections and drags a background estimate. A deliberate
-/// stopgap for the stages that have not been taught the mask, not a correction.
+/// What sits under a null is not data and [`NullMask`] says so, but the stages that measure a whole
+/// plane mostly do not consult the mask, so this value is what they see. The median is the frame's
+/// own background level, which leaves a masked region a flat patch instead of the hard-edged hole a
+/// zero fill would cut — and a hard edge is what manufactures star detections and drags a background
+/// estimate. A deliberate stand-in, not a correction.
 fn fill_nulls(samples: &mut [f32], null_count: usize) {
     debug_assert!(null_count > 0 && null_count <= samples.len());
-    // Exact: the decode pass counted the nulls, so what is left is what survives the filter.
-    let mut finite = Vec::with_capacity(samples.len() - null_count);
-    finite.extend(samples.iter().copied().filter(|value| value.is_finite()));
+    // Every `stride`-th *finite* sample rather than every `stride`-th sample: nulls arrive in
+    // regions — a mosaic edge, a coverage gap — so striding the plane itself would draw its whole
+    // quota from one side of a frame that is masked down the other.
+    let valid = samples.len() - null_count;
+    let stride = valid.div_ceil(FILL_MEDIAN_SAMPLES).max(1);
+    let mut finite = Vec::with_capacity(valid.div_ceil(stride));
+    finite.extend(
+        samples
+            .iter()
+            .copied()
+            .filter(|value| value.is_finite())
+            .step_by(stride),
+    );
     // A wholly-null plane has no level of its own to borrow, and no guess is better than any
     // other. The mask says every pixel of it is missing, which is the part that has to survive.
     let fill = if finite.is_empty() {
@@ -399,7 +418,7 @@ mod tests {
     use common::CancelToken;
 
     use crate::io::image::fits::decode::pixels::{
-        Cancelled, NullSummary, fill_nulls, normalize_and_locate_nulls,
+        Cancelled, FILL_MEDIAN_SAMPLES, NullSummary, fill_nulls, normalize_and_locate_nulls,
     };
 
     #[test]
@@ -513,5 +532,38 @@ mod tests {
         let mut empty = [f32::NAN; 3];
         fill_nulls(&mut empty, 3);
         assert_eq!(empty, [0.0; 3]);
+    }
+
+    #[test]
+    fn the_fills_median_is_sampled_rather_than_taken_over_a_whole_plane() {
+        // Twice the sample bound of valid data, so the stride is exactly 2 and the scratch holds
+        // `FILL_MEDIAN_SAMPLES` values instead of a second copy of the plane — the allocation the
+        // decode's memory preflight does not budget for.
+        //
+        // Valid samples are the ramp 0..200_000. Every second one is 0, 2, … 199_998, whose median
+        // is the mean of its two middle values (99_998 and 100_000) = 99_999. The whole ramp's
+        // median is 99_999.5, so the bound costs half a unit in two hundred thousand.
+        const VALID: usize = 2 * FILL_MEDIAN_SAMPLES;
+        let mut samples: Vec<f32> = (0..VALID).map(|index| index as f32).collect();
+        samples.push(f32::NAN);
+        fill_nulls(&mut samples, 1);
+        assert_eq!(samples[VALID], 99_999.0);
+
+        // The stride runs over the finite samples, not over plane positions: masking the whole first
+        // half would otherwise spend that half of the quota on pixels that are dropped anyway, and
+        // draw the median from the tail alone.
+        let mut lopsided: Vec<f32> = (0..VALID)
+            .map(|index| {
+                if index < VALID / 2 {
+                    f32::NAN
+                } else {
+                    index as f32
+                }
+            })
+            .collect();
+        fill_nulls(&mut lopsided, VALID / 2);
+        // The surviving ramp is 100_000..200_000, whose median is 149_999.5; sampling every one of
+        // them (stride 1, since the survivors are exactly the bound) reproduces it exactly.
+        assert_eq!(lopsided[0], 149_999.5);
     }
 }

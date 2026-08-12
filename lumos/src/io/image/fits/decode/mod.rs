@@ -278,14 +278,14 @@ pub(crate) fn fits_cfa_frame_info(
     let selected = selection::select_image_hdu(path, reader.hdus(), &context.fits.hdu)?;
     let hdu = &reader.hdus()[selected.index];
     validate_cfa_image_header(path, &hdu.header)?;
-    let dimensions = plan::preflight_fits_image(
+    let plan = plan::preflight_fits_image(
         path,
         FitsHduDescription::from_hdu(path, hdu)?,
         context.fits.cube,
         context.fits.float_scale,
         context.memory_limit_bytes,
-    )?
-    .dimensions;
+    )?;
+    let dimensions = plan.dimensions;
     if !dimensions.is_grayscale() {
         return Err(fits_unsupported(
             path,
@@ -303,6 +303,7 @@ pub(crate) fn fits_cfa_frame_info(
     Ok(CfaFrameInfo {
         dimensions,
         demosaic: cfa_type.demosaic_kind(),
+        may_carry_nulls: plan.may_carry_nulls(),
     })
 }
 

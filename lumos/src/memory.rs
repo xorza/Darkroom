@@ -121,10 +121,18 @@ pub(crate) fn fits_in_memory(
         .is_some_and(|bytes| bytes as u64 <= memory_budget(available_memory))
 }
 
-/// Quality planes a warp emits beside the image: `coverage` and `confidence`, one image-sized
-/// plane each. The register/warp stage stores both, so a warped frame costs its own pixels plus
-/// these — see `registration::resample::WarpResult` and `frame_store::FrameQuality`.
-const WARP_QUALITY_PLANES: usize = 2;
+/// Quality planes a frame carries beside its image: `coverage` and `confidence`, one image-sized
+/// plane each. A warp emits them, and so does a decoder that found pixels the source declared no
+/// measurement for — see `registration::resample::WarpResult` and `frame_store::FrameQuality`.
+const FRAME_QUALITY_PLANES: usize = 2;
+
+/// Bytes the quality planes add to a frame that carries them.
+///
+/// One plane per pixel rather than per sample: coverage and confidence are channel-independent, so
+/// an RGB frame pays for two planes here, not six.
+pub(crate) fn quality_plane_bytes(dimensions: ImageDimensions) -> usize {
+    FRAME_QUALITY_PLANES * dimensions.size().pixel_count() * size_of::<f32>()
+}
 
 /// Image-sized planes the star detector's pool holds at its high-water mark: six f32 planes, the
 /// u32 label map, and the threshold bitmask. The bitmask is a thirty-second of an f32 plane;
@@ -151,7 +159,7 @@ impl PerFrameBytes {
     pub(crate) fn new(plane_bytes: usize, demosaic: DemosaicMemory) -> Self {
         let warped = demosaic
             .output_bytes
-            .saturating_add(WARP_QUALITY_PLANES.saturating_mul(plane_bytes));
+            .saturating_add(FRAME_QUALITY_PLANES.saturating_mul(plane_bytes));
         Self {
             warped,
             working: demosaic
@@ -278,6 +286,28 @@ mod tests {
         );
         // A budget derived from it stays inside the machine, which a garbage reading would not.
         assert!(memory_budget(first) < first);
+    }
+
+    #[test]
+    fn quality_planes_are_charged_per_pixel_not_per_sample() {
+        // Coverage and confidence are channel-independent, so an RGB frame carries two of them, not
+        // six. Charging per sample would triple the figure and push a masked colour stack to disk
+        // for planes it never allocates.
+        let mono = ImageDimensions::new((100, 50), 1);
+        let rgb = ImageDimensions::new((100, 50), 3);
+        assert_eq!(quality_plane_bytes(mono), 2 * 100 * 50 * 4);
+        assert_eq!(quality_plane_bytes(rgb), quality_plane_bytes(mono));
+
+        // Against the frame's own pixels, which *are* per sample: a masked mono frame is three
+        // planes resident and a masked RGB one is five, not six.
+        assert_eq!(
+            frame_bytes(mono) + quality_plane_bytes(mono),
+            3 * 100 * 50 * 4
+        );
+        assert_eq!(
+            frame_bytes(rgb) + quality_plane_bytes(rgb),
+            5 * 100 * 50 * 4
+        );
     }
 
     #[test]

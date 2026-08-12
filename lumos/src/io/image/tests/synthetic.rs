@@ -16,7 +16,7 @@ use crate::io::image::load_context::LoadContext;
 use crate::io::image::sample_domain::SampleDomain;
 use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::io::raw::demosaic::xtrans::internals::test_pattern_array;
-use crate::stacking::frame_store::StackableImage;
+use crate::stacking::frame_store::{FramePeek, StackableImage};
 use crate::testing::make_cfa;
 use crate::{CalibrationMasters, CalibrationSet, CfaImage, CfaType, PreviewImage};
 use fits_well::header::Header;
@@ -410,6 +410,54 @@ fn fits_nulls_are_carried_as_a_mask_rather_than_failing_the_load() {
 }
 
 #[test]
+fn the_header_settles_whether_nulls_are_possible_without_reading_the_data() {
+    // What lets a memory estimate charge for the quality planes a masked frame carries. An integer
+    // BITPIX produces a null only where a sample equals BLANK, so a header without that keyword
+    // proves there are none — which is every frame a camera writes, and the case that must not be
+    // over-charged. Anything else is charged as though it has them.
+    let mut header = Header::new();
+    header.set("CFATYPE", "MONO").unwrap();
+
+    let integer = Image::from_u16(vec![2, 2], &[1u16, 2, 3, 4]).unwrap();
+    let plain = write_with_header("peek_uint16_no_blank", &integer, &header);
+    assert!(
+        !<CfaImage as StackableImage>::peek(&plain, &LoadContext::default())
+            .unwrap()
+            .may_carry_nulls,
+        "an integer BITPIX with no BLANK cannot produce a null"
+    );
+
+    // The same geometry with BLANK declared: nulls are now possible, and the peek says so without
+    // reading a sample to find out whether any are actually there.
+    let blanked = Image::new_scaled(
+        vec![2, 2],
+        vec![1i16, 2, 3, -32_768],
+        Scaling {
+            bscale: 1.0,
+            bzero: 0.0,
+            blank: Some(-32_768),
+        },
+    )
+    .unwrap();
+    let blanked_path = write_with_header("peek_int16_blank", &blanked, &header);
+    assert!(
+        <CfaImage as StackableImage>::peek(&blanked_path, &LoadContext::default())
+            .unwrap()
+            .may_carry_nulls
+    );
+
+    // And a float BITPIX carries its nulls in-band, so the header can never rule them out — this
+    // one holds none at all and is still charged for them.
+    let float = Image::new(vec![2, 2], vec![1.0f32, 2.0, 3.0, 4.0]).unwrap();
+    let float_path = write_with_header("peek_float32", &float, &header);
+    assert!(
+        <CfaImage as StackableImage>::peek(&float_path, &LoadContext::default())
+            .unwrap()
+            .may_carry_nulls
+    );
+}
+
+#[test]
 fn a_wholly_null_fits_image_loads_as_zero_with_every_pixel_masked() {
     // The degenerate end of the same rule: no finite sample to take a level from. The frame still
     // opens, and the mask — not the samples — is what says none of it is data.
@@ -494,9 +542,14 @@ fn mosaic_fits_uses_the_cfa_calibration_route() {
     let cache_loaded = <CfaImage as StackableImage>::load(&path, &LoadContext::default()).unwrap();
     assert_eq!(cache_loaded.data, loaded.data);
     assert_eq!(cache_loaded.metadata.cfa_type, loaded.metadata.cfa_type);
+    // A Lumos-written CFA master is float32, whose nulls are IEEE NaN in the data, so the header
+    // cannot rule them out and the peek reserves for them rather than guessing they are absent.
     assert_eq!(
-        <CfaImage as StackableImage>::peek_dimensions(&path, &LoadContext::default()),
-        Some(crate::ImageDimensions::new((size.width, size.height), 1))
+        <CfaImage as StackableImage>::peek(&path, &LoadContext::default()),
+        Some(FramePeek {
+            dimensions: crate::ImageDimensions::new((size.width, size.height), 1),
+            may_carry_nulls: true,
+        })
     );
 
     let preview = PreviewImage::from_file(&path, &LoadContext::default()).unwrap();
