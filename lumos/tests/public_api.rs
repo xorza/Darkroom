@@ -12,12 +12,12 @@ use lumos::{
     LinearFitClipConfig, LinearImage, LoadContext, MasterRole, NoiseModel, Normalization,
     PercentileClipConfig, QualityMap, QualityPlanes, RansacConfig, RawTransferProvenance,
     RegistrationCatalog, RegistrationConfig, RegistrationError, RegistrationMatchingConfig,
-    Rejection, SigmaClipConfig, SipConfig, SmallN, StackConfig, StackConfigError, StackError,
-    StackProduct, StarDetectionBackgroundConfig, StarDetectionCandidateConfig, StarDetectionConfig,
-    StarDetectionDiagnostics, StarDetectionFilterConfig, StarDetectionFwhmConfig,
-    StarDetectionMeasurementConfig, StarDetectionQualityFilterDiagnostics, StarDetector, StarMatch,
-    TransferProvenance, Transform, TransformModel, TransformType, TriangleConfig, WarpParams,
-    Weighting, WinsorizedClipConfig,
+    Rejection, SampleDomain, SigmaClipConfig, SipConfig, SmallN, StackConfig, StackConfigError,
+    StackError, StackProduct, StarDetectionBackgroundConfig, StarDetectionCandidateConfig,
+    StarDetectionConfig, StarDetectionDiagnostics, StarDetectionFilterConfig,
+    StarDetectionFwhmConfig, StarDetectionMeasurementConfig, StarDetectionQualityFilterDiagnostics,
+    StarDetector, StarMatch, TransferProvenance, Transform, TransformModel, TransformType,
+    TriangleConfig, WarpParams, Weighting, WinsorizedClipConfig,
 };
 
 #[test]
@@ -70,13 +70,30 @@ fn file_loading_policy_is_available_from_the_crate_root() {
     ));
 
     // Both decoders answer the same question about their samples, so a caller can compare two
-    // frames' domains without knowing which produced them.
-    assert_eq!(provenance.physical_scale(), Some(65_535.0));
+    // frames' domains without knowing which produced them. The FITS answer carries the declared
+    // BUNIT; a RAW frame states none, which is why the two are still commensurate here.
+    let fits = provenance.sample_domain().unwrap();
+    assert_eq!(
+        fits,
+        SampleDomain {
+            scale: 65_535.0,
+            unit: Some("adu".to_owned()),
+        }
+    );
     let raw = TransferProvenance::RawNormalized(RawTransferProvenance {
-        physical_scale: 16_383.0,
-    });
-    assert_eq!(raw.physical_scale(), Some(16_383.0));
-    assert_eq!(TransferProvenance::UnspecifiedRaster.physical_scale(), None);
+        physical_scale: 65_535.0,
+    })
+    .sample_domain()
+    .unwrap();
+    assert_eq!(
+        raw,
+        SampleDomain {
+            scale: 65_535.0,
+            unit: None,
+        }
+    );
+    assert!(fits.commensurate_with(&raw));
+    assert_eq!(TransferProvenance::UnspecifiedRaster.sample_domain(), None);
 }
 
 #[test]

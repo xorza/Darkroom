@@ -56,6 +56,7 @@ pub use io::image::image_provenance::{
 pub use io::image::linear::LinearImage;
 pub use io::image::load_context::LoadContext;
 pub use io::image::preview_image::PreviewImage;
+pub use io::image::sample_domain::SampleDomain;
 pub use io::raw::RAW_EXTENSIONS;
 pub use io::raw::demosaic::bayer::CfaPattern;
 pub use io::raw::provenance::RawTransferProvenance;

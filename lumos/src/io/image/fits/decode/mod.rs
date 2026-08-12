@@ -10,6 +10,12 @@
 //! Everything expressed in the file's sample units follows the samples through that division:
 //! `DATAMAX`, a declared `QNTZSIG`, and the `BSCALE`-derived ADC step. The divisor is recorded as
 //! [`crate::FitsTransferProvenance::physical_scale`] so the physical value stays recoverable.
+//!
+//! The division does not make two frames mean the same thing — `BUNIT` is what says *what* they
+//! measure, and a `Jy/beam` frame and a `count/s` one land on the same `[0, 1]` looking identical.
+//! It is carried into [`crate::SampleDomain`] alongside the divisor rather than checked here: a
+//! single frame in any unit is a legitimate load, and it is combining frames from two of them that
+//! is not.
 
 use std::fs::File;
 use std::path::Path;

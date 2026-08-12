@@ -81,7 +81,15 @@ pub(super) fn read_decoded_hdu(
             bscale: plan.scaling.bscale,
             bzero: plan.scaling.bzero,
             physical_scale: plan.sample_divisor,
-            unit: read_text(header, "BUNIT").map_err(|source| fits_err(path, source))?,
+            // An all-blank BUNIT parses to the single significant space §4.2.1.1 requires, which
+            // states no unit rather than an empty one — left alone it would disagree with every
+            // real unit. Surrounding blanks are a writer artifact rather than part of a unit name,
+            // so both ends go, and the domain comparison downstream is then plain equality — see
+            // `SampleDomain::commensurate_with` for why it stops there and does not fold case.
+            unit: read_text(header, "BUNIT")
+                .map_err(|source| fits_err(path, source))?
+                .map(|unit| unit.trim().to_owned())
+                .filter(|unit| !unit.is_empty()),
             hdu,
             checksum,
         }),

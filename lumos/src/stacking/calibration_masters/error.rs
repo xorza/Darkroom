@@ -1,6 +1,7 @@
 //! Why a calibration bundle does not fit the frame it was asked to calibrate.
 
 use crate::io::image::cfa::CfaType;
+use crate::io::image::sample_domain::SampleDomain;
 use crate::math::size2us::Size2us;
 use crate::stacking::calibration_masters::{CalibrationComponent, MasterRole};
 
@@ -10,7 +11,8 @@ use crate::stacking::calibration_masters::{CalibrationComponent, MasterRole};
 /// files, so a set that does not fit the light is reported with the offending role named, not
 /// asserted on.
 ///
-/// Not `Eq`: [`Self::SampleSpanMismatch`] reports the two spans, and a float has no total equality.
+/// Not `Eq`: [`Self::SampleDomainMismatch`] reports the two domains, and their spans are floats,
+/// which have no total equality.
 #[derive(Debug, thiserror::Error, Clone, PartialEq)]
 pub enum CalibrationError {
     /// The light frame does not identify its sensor pattern.
@@ -32,15 +34,16 @@ pub enum CalibrationError {
     ///
     /// Subtracting a master divided by one span from a light divided by another is not a small
     /// error, it is a no-op that reports success — a `[0, 1]` master against an unnormalized light
-    /// removes ~0.01 from ~3000 — and `calibrate` then marks the light calibrated.
+    /// removes ~0.01 from ~3000 — and `calibrate` then marks the light calibrated. A master whose
+    /// `BUNIT` names a different quantity is the same failure with no span to give it away.
     #[error(
-        "{component} master was decoded with sample span {master}, but the light used {light}; \
+        "{component} master was decoded into sample domain {master}, but the light used {light}; \
          a master and its light must come from the same domain"
     )]
-    SampleSpanMismatch {
+    SampleDomainMismatch {
         component: MasterRole,
-        light: f32,
-        master: f32,
+        light: SampleDomain,
+        master: SampleDomain,
     },
     /// A calibration master covers a different sensor area than the frame it has to line up with:
     /// the rest of the bundle when the set is assembled, or the light when one is calibrated.

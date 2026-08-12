@@ -23,7 +23,7 @@ use crate::stacking::combine::cache::core::{
 };
 use crate::stacking::combine::cache::sample::{CombineScratch, CombinedSample};
 use crate::stacking::combine::cache::validation::{
-    validate_image_samples, validate_sample_spans, validate_stored_geometry,
+    validate_image_samples, validate_sample_domains, validate_stored_geometry,
     validate_stored_samples, validate_warp_quality,
 };
 use crate::stacking::combine::cache_config::CacheConfig;
@@ -102,9 +102,9 @@ impl FrameCache {
             cancel,
         } = params;
         check_cancel(&cancel)?;
-        // Before any geometry or contents: two frames divided by different spans are not the same
-        // measurement, and every check below would pass on them.
-        validate_sample_spans(&frames)?;
+        // Before any geometry or contents: two frames from different sample domains are not the
+        // same measurement, and every check below would pass on them.
+        validate_sample_domains(&frames)?;
         for (index, frame) in frames.iter().enumerate() {
             // Geometry before contents: every read below and in the combine slices a plane to
             // `pixel_count`, so a short plane would panic out of a slice index rather than
@@ -194,7 +194,7 @@ impl FrameCache {
             .into_iter()
             .map(|frame| StoredFrame::from_memory(frame.image, frame.quality, frame.source_stats))
             .collect::<Vec<_>>();
-        validate_sample_spans(&stored)?;
+        validate_sample_domains(&stored)?;
         let frame_norms = compute_frame_norms(&stored, dimensions, normalization, &cancel)?;
 
         Ok(Self {

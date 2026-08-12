@@ -5,12 +5,14 @@ use crate::stacking::frame_store::warp_quality::FramePlane;
 
 use crate::error::FrameDimensionMismatch;
 use crate::io::image::cfa::{CfaImage, CfaType};
+use crate::io::image::fits::provenance::{
+    FitsChecksumProvenance, FitsChecksumState, FitsHduProvenance, FitsTransferProvenance,
+};
 use crate::io::image::image_provenance::{
     ColorProvenance, DecoderProvenance, DemosaicProvenance, ImageProvenance, SourceContainer,
     TransferProvenance,
 };
 use crate::io::image::linear_pixels::LinearPixels;
-use crate::io::raw::provenance::RawTransferProvenance;
 use crate::math::statistics::MedianMad;
 use crate::stacking::combine::cache::tests::make_test_cache;
 use crate::stacking::combine::cache_config::CacheConfig;
@@ -502,30 +504,49 @@ fn stack_images_rejects_frames_decoded_into_different_sample_domains() {
     // `float32` one holding the same ADU is taken as already normalized and divided by 1. Both
     // present as `FitsNormalized` and agree on every other axis, and `Normalization::Global` would
     // absorb the 65535× into its fitted gain and hand back a plausible-looking stack.
-    let span = |physical_scale: f32| ImageProvenance {
+    let domain = |physical_scale: f32, unit: Option<&str>| ImageProvenance {
         container: SourceContainer::Fits,
         decoder: DecoderProvenance::FitsWell,
-        transfer: TransferProvenance::RawNormalized(RawTransferProvenance { physical_scale }),
+        transfer: TransferProvenance::FitsNormalized(FitsTransferProvenance {
+            bscale: 1.0,
+            bzero: 0.0,
+            physical_scale,
+            unit: unit.map(str::to_owned),
+            hdu: FitsHduProvenance {
+                index: 0,
+                extname: None,
+                extver: None,
+            },
+            checksum: FitsChecksumProvenance {
+                datasum: FitsChecksumState::NotChecked,
+                checksum: FitsChecksumState::NotChecked,
+            },
+        }),
         color: ColorProvenance::Monochrome,
         clipped: false,
         demosaic: DemosaicProvenance::None,
     };
-    let frame = |physical_scale: Option<f32>| {
+    let frame = |declared: Option<(f32, Option<&str>)>| {
         let mut image = LinearImage::from_pixels(ImageDimensions::new((2, 2), 1), vec![1.0; 4]);
-        image.metadata.provenance = physical_scale.map(span);
+        image.metadata.provenance = declared.map(|(scale, unit)| domain(scale, unit));
         image
     };
+    let stack = |frames: [Option<(f32, Option<&str>)>; 2]| {
+        stack_images(
+            frames
+                .map(|declared| frame(declared).into())
+                .into_iter()
+                .collect(),
+            StackConfig::default(),
+            ProgressCallback::default(),
+            CancelToken::never(),
+        )
+    };
 
-    let result = stack_images(
-        vec![frame(Some(65_535.0)).into(), frame(Some(1.0)).into()],
-        StackConfig::default(),
-        ProgressCallback::default(),
-        CancelToken::never(),
-    );
     assert!(
         matches!(
-            result.unwrap_err(),
-            Error::SampleSpanMismatch {
+            stack([Some((65_535.0, None)), Some((1.0, None))]).unwrap_err(),
+            Error::SampleDomainMismatch {
                 index: 1,
                 reference_index: 0,
                 ..
@@ -534,23 +555,59 @@ fn stack_images_rejects_frames_decoded_into_different_sample_domains() {
         "a 65535x span difference must be named, not absorbed into the fitted gain"
     );
 
-    // Matching spans stack, and so does a set where a frame declares none — an undeclared span is
-    // "cannot tell", which must not reject an in-memory frame.
-    for spans in [
-        [Some(65_535.0), Some(65_535.0)],
-        [Some(65_535.0), None],
-        [None, None],
-    ] {
-        assert!(
+    // The same rejection with no span to give it away: one span, two quantities. Without BUNIT
+    // these two frames are indistinguishable, and a surface brightness would be averaged with a
+    // count rate.
+    assert!(
+        matches!(
+            stack([Some((1.0, Some("Jy/beam"))), Some((1.0, Some("count/s"))),]).unwrap_err(),
+            Error::SampleDomainMismatch {
+                index: 1,
+                reference_index: 0,
+                ..
+            }
+        ),
+        "two units on one span must be named"
+    );
+
+    // A frame that states no unit cannot vouch for the ones that do, so the unit reference is the
+    // first frame to state one — frame 1 here, which is what the error must name. Comparing every
+    // frame against frame 0 alone would let this set through on frame order.
+    assert!(
+        matches!(
             stack_images(
-                spans.map(|scale| frame(scale).into()).into_iter().collect(),
+                [
+                    Some((1.0, None)),
+                    Some((1.0, Some("Jy/beam"))),
+                    Some((1.0, Some("count/s"))),
+                ]
+                .map(|declared| frame(declared).into())
+                .into_iter()
+                .collect(),
                 StackConfig::default(),
                 ProgressCallback::default(),
                 CancelToken::never(),
             )
-            .is_ok(),
-            "spans {spans:?} must stack"
-        );
+            .unwrap_err(),
+            Error::SampleDomainMismatch {
+                index: 2,
+                reference_index: 1,
+                ..
+            }
+        ),
+        "a unitless first frame must not vouch for two frames that disagree with each other"
+    );
+
+    // Matching domains stack, and so does a set where a frame declares none — an undeclared span
+    // or unit is "cannot tell", which must not reject an in-memory frame.
+    for domains in [
+        [Some((65_535.0, None)), Some((65_535.0, None))],
+        [Some((65_535.0, None)), None],
+        [None, None],
+        [Some((1.0, Some("ADU"))), Some((1.0, Some("ADU")))],
+        [Some((1.0, Some("ADU"))), Some((1.0, None))],
+    ] {
+        assert!(stack(domains).is_ok(), "domains {domains:?} must stack");
     }
 }
 
@@ -883,7 +940,7 @@ fn common_coverage_makes_reference_norms_and_noise_weights_fill_invariant() {
             frame.source_stats = FrameStats {
                 channels: [MedianMad { median, mad }].into_iter().collect(),
                 quantization_sigma: None,
-                physical_scale: None,
+                domain: None,
             };
             frame
         })
@@ -1978,7 +2035,7 @@ fn noise_weighting_folds_normalization_gain() {
         FrameStats {
             channels,
             quantization_sigma: None,
-            physical_scale: None,
+            domain: None,
         }
     };
     let frame_norm = |gain: f32| {

@@ -251,7 +251,7 @@ fn measure_common_stats(
         .map(|(frame, channels)| FrameStats {
             channels: channels.iter().copied().collect(),
             quantization_sigma: frame.source_stats.quantization_sigma,
-            physical_scale: frame.source_stats.physical_scale,
+            domain: frame.source_stats.domain.clone(),
         })
         .collect())
 }

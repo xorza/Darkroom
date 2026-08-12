@@ -674,7 +674,7 @@ impl CalibrationMasters {
             .as_ref()
             .ok_or(CalibrationError::MissingLightCfaPattern)?;
         let light_size = Size2us::new(image.data.width(), image.data.height());
-        let light_span = image.metadata.physical_scale();
+        let light_domain = image.metadata.sample_domain();
 
         for (role, master) in self
             .masters
@@ -693,16 +693,16 @@ impl CalibrationMasters {
                     master: master_pattern.clone(),
                 });
             }
-            // Only when both declare one: a synthesized master has no span to compare, and
+            // Only when both declare one: a synthesized master has no domain to compare, and
             // refusing on that would reject every in-memory fixture.
-            if let (Some(light_span), Some(master_span)) =
-                (light_span, master.metadata.physical_scale())
-                && light_span != master_span
+            if let (Some(light_domain), Some(master_domain)) =
+                (&light_domain, master.metadata.sample_domain())
+                && !light_domain.commensurate_with(&master_domain)
             {
-                return Err(CalibrationError::SampleSpanMismatch {
+                return Err(CalibrationError::SampleDomainMismatch {
                     component: role,
-                    light: light_span,
-                    master: master_span,
+                    light: light_domain.clone(),
+                    master: master_domain,
                 });
             }
             let master_size = Size2us::new(master.data.width(), master.data.height());
