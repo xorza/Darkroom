@@ -11,9 +11,12 @@ use crate::stacking::registration::transform::WarpTransform;
 #[cfg(all(test, feature = "internals"))]
 mod bench;
 mod kernel;
+mod masked;
 mod plane;
 mod quality;
 mod row;
+
+use crate::stacking::registration::resample::masked::MaskedWarp;
 #[cfg(test)]
 mod tests;
 
@@ -72,11 +75,10 @@ pub fn warp(
         image: LinearImage {
             metadata: image.metadata.clone(),
             pixels: buffers.pixels,
-            // The source's nulls do not survive the warp: an output pixel draws on a kernel
-            // footprint of source pixels, so a null under it is neither in the same place nor the
-            // same size afterwards. Recording where they went is the resampler composing source
-            // support into `coverage`, which it does not do yet — until then the warped frame
-            // honestly declares none rather than carrying a mask that no longer lines up.
+            // The source's nulls are in `coverage` now, not here. A null spreads over the kernel
+            // footprint of every output pixel that reached it, so what comes out is a fraction per
+            // pixel rather than the yes-or-no a mask can hold — and the combine gates on that
+            // fraction. A mask here would be a second, coarser record able only to disagree with it.
             nulls: None,
         },
         coverage: buffers.coverage,
@@ -135,15 +137,6 @@ impl WarpBuffers {
             "warp buffers were sized for a different frame"
         );
 
-        for channel in 0..dimensions.channels() {
-            plane::warp(
-                image.channel(channel),
-                self.pixels.channel_mut(channel),
-                warp_transform,
-                config,
-            );
-        }
-
         quality::write_maps(
             &mut self.coverage,
             &mut self.confidence,
@@ -151,6 +144,32 @@ impl WarpBuffers {
             warp_transform,
             config.method,
         );
+
+        let Some(nulls) = image.nulls.as_ref() else {
+            for channel in 0..dimensions.channels() {
+                plane::warp(
+                    image.channel(channel),
+                    self.pixels.channel_mut(channel),
+                    warp_transform,
+                    config,
+                );
+            }
+            return;
+        };
+
+        // The source declared pixels with no measurement, so every output pixel is reconstructed
+        // from its surviving taps and the maps above are reduced by how many of them there were.
+        let mut masked = MaskedWarp::measure(nulls, dimensions, warp_transform, config);
+        for channel in 0..dimensions.channels() {
+            masked.warp_channel(
+                image.channel(channel),
+                nulls,
+                self.pixels.channel_mut(channel),
+                warp_transform,
+                config,
+            );
+        }
+        masked.fold_into_quality(&mut self.coverage, &mut self.confidence);
     }
 }
 
