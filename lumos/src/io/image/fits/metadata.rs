@@ -212,10 +212,23 @@ fn read_bayer_cfa(header: &Header, required: bool) -> fits_well::Result<Option<C
         });
     };
 
+    // `BAYERPAT` describes the top-down image and the rows are left in file order, so file row `f`
+    // of a `BOTTOM-UP` frame carries the phase of displayed row `H - 1 - f`. That is the opposite
+    // phase only when `H` is even: for odd `H`, `H - 1 - f ≡ f (mod 2)`, the declared pattern
+    // already matches the rows as stored, and flipping would invert a correct one and mis-debayer
+    // the entire frame. Odd visible heights are not hypothetical — LibRaw reports 4015 for the
+    // EOS 1500D.
     if let Some(roworder) = header.get_text("ROWORDER")?
         && roworder.trim().eq_ignore_ascii_case("BOTTOM-UP")
     {
-        pattern = pattern.flip_vertical();
+        // The decision needs the height, and a Bayer image HDU that declares none is malformed.
+        // Assuming either parity mis-debayers every file that has the other.
+        let height = header
+            .get_integer("NAXIS2")?
+            .ok_or(fits_well::FitsError::MissingKeyword { name: "NAXIS2" })?;
+        if height % 2 == 0 {
+            pattern = pattern.flip_vertical();
+        }
     }
 
     let xoff = header.get_integer("XBAYROFF")?.unwrap_or(0);
@@ -379,7 +392,108 @@ fn read_i32(header: &Header, key: &'static str) -> fits_well::Result<Option<i32>
 
 #[cfg(test)]
 mod tests {
-    use crate::io::image::fits::metadata::parse_sexagesimal;
+    use fits_well::header::Header;
+
+    use crate::io::image::cfa::CfaType;
+    use crate::io::image::fits::metadata::{parse_sexagesimal, read_bayer_cfa};
+    use crate::io::raw::demosaic::bayer::CfaPattern;
+
+    /// A minimal Bayer image header, with `ROWORDER` omitted when `roworder` is `None`.
+    fn bayer_header(bayerpat: &str, roworder: Option<&str>, height: i64) -> Header {
+        let mut header = Header::new();
+        header.set("BAYERPAT", bayerpat).unwrap();
+        header.set("NAXIS2", height).unwrap();
+        if let Some(roworder) = roworder {
+            header.set("ROWORDER", roworder).unwrap();
+        }
+        header
+    }
+
+    fn pattern_of(header: &Header) -> CfaPattern {
+        match read_bayer_cfa(header, true).unwrap() {
+            Some(CfaType::Bayer(pattern)) => pattern,
+            other => panic!("expected a Bayer pattern, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_bottom_up_frame_flips_its_bayer_phase_only_when_its_height_is_even() {
+        // `BAYERPAT` describes the top-down image and the rows arrive in file order, so file row
+        // `f` holds the phase of displayed row `H - 1 - f`.
+        //
+        // H = 4: file row 0 is displayed row 3, which is phase 1 — the G/B row of an RGGB frame —
+        // and file row 1 is displayed row 2, phase 0. Reading the file top to bottom therefore
+        // gives GB then RG, which is GBRG.
+        assert_eq!(
+            pattern_of(&bayer_header("RGGB", Some("BOTTOM-UP"), 4)),
+            CfaPattern::Gbrg
+        );
+
+        // H = 5: file row 0 is displayed row 4, which is phase 0 again, so the file reads RG then
+        // GB and the declared pattern already describes it. Flipping here is what mis-debayered the
+        // whole frame — and odd heights are real, LibRaw reporting 4015 for the EOS 1500D.
+        assert_eq!(
+            pattern_of(&bayer_header("RGGB", Some("BOTTOM-UP"), 4015)),
+            CfaPattern::Rggb
+        );
+
+        // Top-down, and a header that declares no order at all, leave the pattern alone whatever
+        // the parity — the height only matters because reversal is what moves the phases.
+        for height in [4, 5] {
+            assert_eq!(
+                pattern_of(&bayer_header("RGGB", Some("TOP-DOWN"), height)),
+                CfaPattern::Rggb,
+                "top-down, height {height}"
+            );
+            assert_eq!(
+                pattern_of(&bayer_header("RGGB", None, height)),
+                CfaPattern::Rggb,
+                "no ROWORDER, height {height}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_odd_bayer_row_offset_composes_with_the_row_order_flip() {
+        // `YBAYROFF` shifts the pattern's origin by a row, which is the same phase inversion the
+        // row-order flip applies. On an even-height bottom-up frame the two compose back to the
+        // declared pattern; on an odd-height one only the offset acts, so they no longer agree —
+        // which is exactly the composition the parity fix changes.
+        assert_eq!(
+            pattern_of(
+                bayer_header("RGGB", Some("BOTTOM-UP"), 4)
+                    .set("YBAYROFF", 1)
+                    .unwrap()
+            ),
+            CfaPattern::Rggb
+        );
+        assert_eq!(
+            pattern_of(
+                bayer_header("RGGB", Some("BOTTOM-UP"), 5)
+                    .set("YBAYROFF", 1)
+                    .unwrap()
+            ),
+            CfaPattern::Gbrg
+        );
+    }
+
+    #[test]
+    fn a_bottom_up_frame_without_a_height_is_rejected_rather_than_guessed() {
+        // The flip decision turns on the height's parity, so a header that declares none cannot be
+        // resolved — and assuming either parity mis-debayers every frame that has the other.
+        let mut header = Header::new();
+        header.set("BAYERPAT", "RGGB").unwrap();
+        header.set("ROWORDER", "BOTTOM-UP").unwrap();
+        assert!(matches!(
+            read_bayer_cfa(&header, true),
+            Err(fits_well::FitsError::MissingKeyword { name: "NAXIS2" })
+        ));
+
+        // Only the bottom-up branch needs it: nothing is reversed otherwise, so the parity never
+        // comes up.
+        header.set("ROWORDER", "TOP-DOWN").unwrap();
+        assert_eq!(pattern_of(&header), CfaPattern::Rggb);
+    }
 
     #[test]
     fn sexagesimal_hms_converts_to_ra_degrees() {
