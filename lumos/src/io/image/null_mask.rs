@@ -52,6 +52,12 @@ impl NullMask {
         self.nulls.get(index)
     }
 
+    /// The mask in the bit-buffer form a neighbour search takes, so a pixel reconstructed from its
+    /// neighbours never draws on another that has nothing to give.
+    pub(crate) fn bits(&self) -> &BitBuffer2 {
+        &self.nulls
+    }
+
     /// The mask as a plane: `1.0` where a pixel holds a measurement, `0.0` where it does not.
     ///
     /// The form every consumer wants it in — the combine gates on a coverage plane, and the warp

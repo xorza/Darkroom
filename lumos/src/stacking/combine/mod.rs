@@ -5,7 +5,7 @@
 //! samples at a pixel survive, [`normalization`] measures the per-frame gain/offset that puts them
 //! on a common scale, and [`stack`] is the entry point that ties a [`config::StackConfig`] to
 //! those three. Calibration masters and registered light stacks differ only in whether the frames
-//! carry warp quality planes; where they do, [`pixel_coverage`] is the single rule deciding which
+//! carry frame quality planes; where they do, [`pixel_coverage`] is the single rule deciding which
 //! of them reaches a given pixel.
 
 /// How many samples a cancellable walk covers between cancel polls.

@@ -432,7 +432,7 @@ fn source_noise_variance(
         check_cancel(cancel)?;
         for &index in chunk {
             let value = f64::from(values[index]);
-            // `indices` are common-domain pixels, which clear the coverage floor, and a warp-quality
+            // `indices` are common-domain pixels, which clear the coverage floor, and a frame-quality
             // pair has confidence wherever it has support — so this is never a division by zero.
             debug_assert!(
                 value > 0.0,

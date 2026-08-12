@@ -60,7 +60,7 @@ pub(crate) fn spill_channels(
 }
 
 /// The files one frame occupies inside a spill directory: one plane per channel, plus the
-/// optional warp-quality planes.
+/// optional frame-quality planes.
 ///
 /// Every name the frame store writes comes from here, so the writer that produced a plane and a
 /// later run looking for it cannot disagree about where it lives.
@@ -95,7 +95,7 @@ impl<'a> FrameSpill<'a> {
             .join(format!("{}_c{channel}.bin", self.stem()))
     }
 
-    /// Path of a warp-quality plane — `coverage` or `confidence`.
+    /// Path of a frame-quality plane — `coverage` or `confidence`.
     pub(crate) fn quality_path(self, kind: &str) -> PathBuf {
         self.directory.join(format!("{}_{kind}.bin", self.stem()))
     }
@@ -135,7 +135,7 @@ fn plane_on_disk(path: &Path, dimensions: ImageDimensions) -> bool {
 ///
 /// Three states rather than a bool because the middle one has to be actionable: a frame that wrote
 /// neither plane is reusable and carries none, one that wrote both is reusable and carries them,
-/// and one holding a lone plane is neither — [`WarpQuality`](crate::stacking::frame_store::warp_quality::WarpQuality)
+/// and one holding a lone plane is neither — [`FrameQuality`](crate::stacking::frame_store::frame_quality::FrameQuality)
 /// documents why a lone plane is not a shape any producer means, so the cache is rebuilt instead of
 /// being read as either of the other two.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

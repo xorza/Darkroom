@@ -63,13 +63,13 @@ fn light_frame_keeps_quality_with_its_planes() {
     let dimensions = ImageDimensions::new((2, 2), 1);
     let image = LinearImage::from_pixels(dimensions, vec![1.0, 2.0, 3.0, 4.0]);
     // The last pixel has no support, so its confidence is zero too — the pairing every consumer of
-    // a warp-quality pair relies on.
+    // a frame-quality pair relies on.
     let coverage = Buffer2::new(2, 2, vec![1.0, 0.5, 0.25, 0.0]);
     let confidence = Buffer2::new(2, 2, vec![4.0, 3.0, 2.0, 0.0]);
     let source_stats = FrameStats::measure(&image);
     let frame = StoredFrame::from_memory(
         image,
-        WarpQuality::Planes {
+        FrameQuality::Planes {
             coverage,
             confidence,
         },
@@ -89,19 +89,54 @@ fn light_frame_keeps_quality_with_its_planes() {
 }
 
 #[test]
+fn frame_statistics_are_measured_over_the_pixels_that_hold_a_measurement() {
+    // Eight pixels: four real samples and four the source declared null, which the decoder filled
+    // at the frame's own median. Those fills are zero-deviation samples, so counting them collapses
+    // the MAD — and MAD is what weighting divides by, so the frame would be trusted far beyond what
+    // its noise deserves.
+    //
+    // Valid 1, 3, 5, 7 → median (3 + 5) / 2 = 4, deviations 3, 1, 1, 3 → MAD (1 + 3) / 2 = 2.
+    // All eight → median still 4, deviations 3, 1, 1, 3, 0, 0, 0, 0 → MAD (0 + 1) / 2 = 0.5.
+    let dimensions = ImageDimensions::new((8, 1), 1);
+    let samples = vec![1.0f32, 3.0, 5.0, 7.0, 4.0, 4.0, 4.0, 4.0];
+    let mut masked = LinearImage::from_pixels(dimensions, samples.clone());
+    masked.nulls = NullMask::of_non_finite(
+        dimensions.size(),
+        &[&[0.0, 0.0, 0.0, 0.0, f32::NAN, f32::NAN, f32::NAN, f32::NAN]],
+    );
+
+    let stats = FrameStats::measure(&masked);
+    assert_eq!(stats.channels[0].median, 4.0);
+    assert_eq!(stats.channels[0].mad, 2.0);
+
+    // The same pixels with nothing declared null, so the fills count as data and the spread halves
+    // twice over. The two must not agree, or the exclusion is doing nothing.
+    let plain = LinearImage::from_pixels(dimensions, samples);
+    assert_eq!(FrameStats::measure(&plain).channels[0].mad, 0.5);
+
+    // Nothing measured anywhere has no statistics to report, and asking for the median of an empty
+    // set would panic rather than say so.
+    let mut all_null = LinearImage::from_pixels(dimensions, vec![4.0; 8]);
+    all_null.nulls = NullMask::of_non_finite(dimensions.size(), &[&[f32::NAN; 8]]);
+    let empty = FrameStats::measure(&all_null);
+    assert_eq!(empty.channels[0].median, 0.0);
+    assert_eq!(empty.channels[0].mad, 0.0);
+}
+
+#[test]
 fn an_unwarped_frames_nulls_become_the_pair_the_combine_gates_on() {
     let dimensions = ImageDimensions::new((2, 2), 1);
     let mut image = LinearImage::from_pixels(dimensions, vec![1.0, 2.0, 3.0, 4.0]);
 
     // A frame whose source declared nothing undefined carries no planes at all — the case that
     // keeps this free for every RAW frame and almost every camera FITS.
-    assert!(WarpQuality::for_unwarped(&image).is_none());
+    assert!(FrameQuality::for_unwarped(&image).is_none());
 
     // Declaring pixel 2 null turns it into zero coverage there and full coverage elsewhere, with
     // confidence matching bit for bit: nothing was interpolated, so every sample that exists is a
     // whole one, and `coverage == 0` exactly where `confidence == 0` as the pairing requires.
     image.nulls = NullMask::of_non_finite(dimensions.size(), &[&[1.0, 2.0, f32::NAN, 4.0]]);
-    let quality = WarpQuality::for_unwarped(&image);
+    let quality = FrameQuality::for_unwarped(&image);
     assert_eq!(quality.coverage().unwrap().pixels(), &[1.0, 1.0, 0.0, 1.0]);
     assert_eq!(
         quality.confidence().unwrap().pixels(),
@@ -117,7 +152,7 @@ fn a_spilled_frames_quality_planes_survive_the_cache_round_trip() {
     let dimensions = ImageDimensions::new((2, 2), 1);
     let mut image = LinearImage::from_pixels(dimensions, vec![1.0, 2.0, 3.0, 4.0]);
     image.nulls = NullMask::of_non_finite(dimensions.size(), &[&[1.0, 2.0, f32::NAN, 4.0]]);
-    let quality = WarpQuality::for_unwarped(&image);
+    let quality = FrameQuality::for_unwarped(&image);
     let stats = FrameStats::measure(&image);
     let frame = StoredFrame::spill(&directory, "frame.bin", &image, &quality, stats).unwrap();
     drop(frame);
@@ -125,7 +160,7 @@ fn a_spilled_frames_quality_planes_survive_the_cache_round_trip() {
     let spill = FrameSpill::new(&directory, "frame.bin");
     assert_eq!(spill.cached_quality(dimensions), CachedQuality::Present);
     let reread =
-        WarpQuality::read_spilled(|kind| StoredPlane::map(spill.quality_path(kind))).unwrap();
+        FrameQuality::read_spilled(|kind| StoredPlane::map(spill.quality_path(kind))).unwrap();
     assert_eq!(
         reread.coverage().unwrap().chunk(0, 4),
         &[1.0, 1.0, 0.0, 1.0]
@@ -144,7 +179,7 @@ fn a_spilled_frames_quality_planes_survive_the_cache_round_trip() {
         &directory,
         "plain.bin",
         &plain,
-        &WarpQuality::for_unwarped(&plain),
+        &FrameQuality::for_unwarped(&plain),
         stats,
     )
     .unwrap();

@@ -23,8 +23,8 @@ use crate::stacking::combine::cache::core::{
 };
 use crate::stacking::combine::cache::sample::{CombineScratch, CombinedSample};
 use crate::stacking::combine::cache::validation::{
-    validate_image_samples, validate_sample_domains, validate_stored_geometry,
-    validate_stored_samples, validate_warp_quality,
+    validate_frame_quality, validate_image_samples, validate_sample_domains,
+    validate_stored_geometry, validate_stored_samples,
 };
 use crate::stacking::combine::cache_config::CacheConfig;
 use crate::stacking::combine::config::Normalization;
@@ -35,8 +35,8 @@ use crate::stacking::combine::pixel_coverage::PixelCoverage;
 use crate::stacking::combine::rejection::scratch_buffers::ScratchBuffers;
 use crate::stacking::combine::stack::StackFrame;
 use crate::stacking::frame_store::StoredFrame;
+use crate::stacking::frame_store::frame_quality::FrameQuality;
 use crate::stacking::frame_store::spill::SpillDirectory;
-use crate::stacking::frame_store::warp_quality::WarpQuality;
 use crate::stacking::progress::ProgressCallback;
 use crate::stacking::stack_product::StackProduct;
 use crate::stacking::stack_product::coverage::Coverage;
@@ -62,7 +62,8 @@ struct QualityRows<'a> {
 }
 
 /// The frames feeding one combine, with their normalization parameters. Calibration masters and
-/// registered light stacks share it; a calibration frame simply carries no warp quality planes.
+/// registered light stacks share it; what separates them is only whether their frames carry quality
+/// planes, and even an unwarped one does when its source declared pixels with no measurement.
 #[derive(Debug)]
 pub(crate) struct FrameCache {
     // Stored planes drop before the spill directory owner in `core`.
@@ -114,13 +115,13 @@ impl FrameCache {
             // Same guarantee `from_stack_frames` gives caller-supplied planes: each plane in range
             // and the two agreeing on where the frame has support, so the gate and the weight
             // multiplier below can't be handed a value that silently corrupts the combine.
-            if let WarpQuality::Planes {
+            if let FrameQuality::Planes {
                 coverage,
                 confidence,
             } = &frame.quality
             {
                 let pixel_count = dimensions.pixel_count();
-                validate_warp_quality(
+                validate_frame_quality(
                     index,
                     coverage.chunk(0, pixel_count),
                     confidence.chunk(0, pixel_count),
@@ -145,7 +146,7 @@ impl FrameCache {
         })
     }
 
-    /// Build an in-memory warp-quality-aware cache from [`StackFrame`]s.
+    /// Build an in-memory frame-quality-aware cache from [`StackFrame`]s.
     pub(crate) fn from_stack_frames(
         frames: Vec<StackFrame>,
         config: &CacheConfig,
@@ -181,12 +182,12 @@ impl FrameCache {
                     });
                 }
             }
-            if let WarpQuality::Planes {
+            if let FrameQuality::Planes {
                 coverage,
                 confidence,
             } = &frame.quality
             {
-                validate_warp_quality(index, coverage.pixels(), confidence.pixels(), &cancel)?;
+                validate_frame_quality(index, coverage.pixels(), confidence.pixels(), &cancel)?;
             }
         }
         check_cancel(&cancel)?;
@@ -494,8 +495,8 @@ pub(crate) mod internals {
     use crate::stacking::combine::cache_config::CacheConfig;
     use crate::stacking::combine::config::Normalization;
     use crate::stacking::combine::normalization::compute_frame_norms;
+    use crate::stacking::frame_store::frame_quality::FrameQuality;
     use crate::stacking::frame_store::frame_stats::FrameStats;
-    use crate::stacking::frame_store::warp_quality::WarpQuality;
     use crate::stacking::frame_store::{StackableImage, StoredFrame};
     use crate::stacking::progress::ProgressCallback;
 
@@ -513,7 +514,7 @@ pub(crate) mod internals {
                 .into_iter()
                 .map(|image| {
                     let source_stats = FrameStats::measure(&image);
-                    let quality = WarpQuality::for_unwarped(&image);
+                    let quality = FrameQuality::for_unwarped(&image);
                     StoredFrame::from_memory(image, quality, source_stats)
                 })
                 .collect();

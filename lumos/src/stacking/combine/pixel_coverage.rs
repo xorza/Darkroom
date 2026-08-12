@@ -1,7 +1,7 @@
 //! The rule for whether one frame contributes at one pixel.
 
 /// How much of one output pixel had real source data behind it, for one frame — a fraction in
-/// `[0, 1]`, or [`Self::FULL`] for a frame that carries no warp quality at all.
+/// `[0, 1]`, or [`Self::FULL`] for a frame that carries no frame quality at all.
 ///
 /// The one place the "does this frame contribute here?" rule lives. Three passes ask it: the
 /// combine gathering the samples at a pixel, the coverage plane counting that pixel's
@@ -11,8 +11,8 @@
 ///
 /// Confidence is not part of the rule. A warp emits support and interpolation confidence together
 /// and agreeing on where the frame has data — the invariant
-/// [`WarpQuality`](crate::stacking::frame_store::warp_quality::WarpQuality) documents and
-/// [`validate_warp_quality`](crate::stacking::combine::cache::validation::validate_warp_quality)
+/// [`FrameQuality`](crate::stacking::frame_store::frame_quality::FrameQuality) documents and
+/// [`validate_frame_quality`](crate::stacking::combine::cache::validation::validate_frame_quality)
 /// enforces — so a pixel over the floor below is guaranteed a positive confidence to weight it by,
 /// and gating on that as well would only restate it. Confidence scales a contribution; coverage
 /// decides whether there is one.

@@ -71,7 +71,7 @@ pub(crate) fn resident_planes_per_channel(planes: QualityPlanes) -> usize {
     1 + usize::from(planes.weight) + usize::from(planes.variance)
 }
 
-/// Each frame's slice of one warp-quality plane over `[start, end)`, `None` where the frame
+/// Each frame's slice of one frame-quality plane over `[start, end)`, `None` where the frame
 /// carries no such plane.
 ///
 /// `plane` picks which of the two a frame's slot is — the combine and the coverage pass both
@@ -101,7 +101,7 @@ pub(crate) fn weighted_chunk_memory_layout(
     }
 }
 
-/// What the coverage pass holds: one input plane per frame that carries warp quality, against the
+/// What the coverage pass holds: one input plane per frame that carries frame quality, against the
 /// combine's residents — which are all still alive at that point — plus the single coverage plane
 /// being accumulated.
 pub(crate) fn coverage_chunk_memory_layout(
