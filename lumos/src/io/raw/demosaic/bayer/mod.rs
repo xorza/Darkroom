@@ -72,7 +72,11 @@ impl CfaPattern {
     }
 
     /// Flip the pattern vertically (swap rows).
-    /// Used when ROWORDER is BOTTOM-UP, since BAYERPAT assumes TOP-DOWN.
+    ///
+    /// What a `BOTTOM-UP` FITS needs when its height is **even**: `BAYERPAT` describes the top-down
+    /// image, and reversing an even number of rows lands every row on the opposite phase. An odd
+    /// height leaves the phases where they were, so the caller must not flip there — see
+    /// `read_bayer_cfa`, which is where that parity is checked.
     pub fn flip_vertical(self) -> Self {
         match self {
             CfaPattern::Rggb => CfaPattern::Gbrg,

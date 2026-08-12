@@ -16,17 +16,11 @@ Siril's FITS orientation documentation.
 
 ---
 
-## FITS orientation is corrected for the CFA phase but not for the rows, and not for height parity
+## FITS orientation is corrected for the CFA phase but not for the rows
 
 `read_bayer_cfa` flips the Bayer pattern on `ROWORDER = BOTTOM-UP`. The pixel rows are never
-reordered, and the flip is applied without consulting `NAXIS2`.
+reordered, and nothing records or checks which order they are in.
 
-- [ ] `pattern.flip_vertical()` runs unconditionally on `BOTTOM-UP`. Under the convention Siril
-      documents — "the usual **RGGB** Bayer pattern becomes **GBRG** if the image is upside-down",
-      i.e. `BAYERPAT` describes the top-down image — file row `f` corresponds to displayed row
-      `H-1-f`. That is a phase flip only when `H` is **even**; for odd `H` the phase is unchanged and
-      flipping inverts it. Odd visible heights are real (the LibRaw report for the EOS 1500D/200D
-      gives 4015), and the failure mode is a fully mis-debayered frame, not a subtle one.
 - [ ] Rows are left in file order, which matches Siril's rule that "`ROWORDER` shall not be used to
       unflip the image data for stacking", but nothing records the row order on the decoded image and
       nothing checks it is consistent across a stack. A `BOTTOM-UP` and a `TOP-DOWN` frame of the
