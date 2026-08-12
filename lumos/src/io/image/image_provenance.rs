@@ -113,12 +113,23 @@ pub enum RowOrder {
     BottomUp,
 }
 
-impl std::fmt::Display for RowOrder {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(match self {
+impl RowOrder {
+    /// The FITS `ROWORDER` value for this order.
+    ///
+    /// The one spelling: what the writer emits, what the reader compares against, and what an error
+    /// message prints. Three copies of a format string is three chances for one of them to drift
+    /// from the file format.
+    pub(crate) const fn keyword(self) -> &'static str {
+        match self {
             Self::TopDown => "TOP-DOWN",
             Self::BottomUp => "BOTTOM-UP",
-        })
+        }
+    }
+}
+
+impl std::fmt::Display for RowOrder {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.keyword())
     }
 }
 
