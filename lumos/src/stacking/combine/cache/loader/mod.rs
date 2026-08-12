@@ -27,6 +27,7 @@ use crate::stacking::combine::error::Error;
 use crate::stacking::combine::normalization::compute_frame_norms;
 use crate::stacking::frame_store::error::FrameStoreError;
 use crate::stacking::frame_store::frame_stats::FrameStats;
+use crate::stacking::frame_store::spill::CachedQuality;
 use crate::stacking::frame_store::spill::FrameSpill;
 use crate::stacking::frame_store::spill::SpillDirectory;
 use crate::stacking::frame_store::stored_plane::StoredPlane;
@@ -248,8 +249,9 @@ fn load_in_memory<I: StackableImage, P: AsRef<Path> + Sync>(
         validate_image_samples(&image, idx, cancel)?;
         let metadata = (idx == 0).then(|| image.metadata().clone());
         let stats = FrameStats::measure(&image);
+        let quality = WarpQuality::for_unwarped(&image);
         Ok(LoadedMemoryFrame {
-            frame: StoredFrame::from_memory(image, WarpQuality::None, stats),
+            frame: StoredFrame::from_memory(image, quality, stats),
             metadata,
         })
     })?;
@@ -260,11 +262,8 @@ fn load_in_memory<I: StackableImage, P: AsRef<Path> + Sync>(
         validate_image_samples(&first_image, 0, cancel)?;
         metadata = Some(first_image.metadata().clone());
         let stats = FrameStats::measure(&first_image);
-        frames.push(StoredFrame::from_memory(
-            first_image,
-            WarpQuality::None,
-            stats,
-        ));
+        let quality = WarpQuality::for_unwarped(&first_image);
+        frames.push(StoredFrame::from_memory(first_image, quality, stats));
     }
     for loaded_frame in loaded {
         if loaded_frame.metadata.is_some() {
@@ -309,7 +308,7 @@ fn load_to_disk<I: StackableImage, P: AsRef<Path> + Sync>(
         cache_dir,
         &base_filename,
         &first_image,
-        &WarpQuality::None,
+        &WarpQuality::for_unwarped(&first_image),
         first_stats,
     )
     .map_err(Error::from)?;
@@ -459,7 +458,14 @@ fn load_and_cache_frame<I: StackableImage>(
     let spill = FrameSpill::new(cache_dir, base_filename);
     let meta_valid = validate_source_meta(cache_dir, base_filename, &identity_before);
     let cached_stats = read_frame_stats(cache_dir, base_filename);
-    let can_reuse = meta_valid && cached_stats.is_some() && spill.channels_reusable(dimensions);
+    // A frame whose source declared null pixels cached quality planes beside its channels; reusing
+    // the channels without them would put the fill back into the stack as data on every run after
+    // the first.
+    let cached_quality = spill.cached_quality(dimensions);
+    let can_reuse = meta_valid
+        && cached_stats.is_some()
+        && spill.channels_reusable(dimensions)
+        && cached_quality != CachedQuality::Torn;
 
     if can_reuse {
         // Reuse existing cache files - just mmap them
@@ -471,9 +477,16 @@ fn load_and_cache_frame<I: StackableImage>(
             source = %source_path.display(),
             "Reusing existing cache files"
         );
+        let quality = match cached_quality {
+            CachedQuality::Present => {
+                WarpQuality::read_spilled(|kind| StoredPlane::map(spill.quality_path(kind)))?
+            }
+            // `Torn` is excluded above; this frame simply wrote no quality planes.
+            CachedQuality::Absent | CachedQuality::Torn => WarpQuality::None,
+        };
         let frame = StoredFrame {
             channels: planes,
-            quality: WarpQuality::None,
+            quality,
             source_stats: cached_stats.expect("valid cache has readable frame statistics"),
         };
         validate_stored_samples(
@@ -502,7 +515,7 @@ fn load_and_cache_frame<I: StackableImage>(
             cache_dir,
             base_filename,
             &image,
-            &WarpQuality::None,
+            &WarpQuality::for_unwarped(&image),
             stats.clone(),
         )
         .map_err(Error::from)?;

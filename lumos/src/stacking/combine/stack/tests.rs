@@ -13,6 +13,7 @@ use crate::io::image::image_provenance::{
     TransferProvenance,
 };
 use crate::io::image::linear_pixels::LinearPixels;
+use crate::io::image::null_mask::NullMask;
 use crate::math::statistics::MedianMad;
 use crate::stacking::combine::cache::tests::make_test_cache;
 use crate::stacking::combine::cache_config::CacheConfig;
@@ -496,6 +497,65 @@ fn stack_images_in_memory_mean() {
     for &p in result.channel(0).pixels() {
         assert!((p - 20.0).abs() < 1e-4, "expected 20.0, got {p}");
     }
+}
+
+#[test]
+fn a_frames_null_pixels_are_excluded_from_the_stack_at_those_pixels_alone() {
+    // Three 2x2 frames holding 1, 2 and 3 everywhere. Frame 0 declares pixel 1 null, so the mean
+    // there is over frames 1 and 2 alone — (2 + 3) / 2 = 2.5 — while every other pixel averages all
+    // three to (1 + 2 + 3) / 3 = 2. Normalization is off so the two figures are the plain means.
+    let dims = ImageDimensions::new((2, 2), 1);
+    let frame = |value: f32, null_at: Option<usize>| {
+        let mut image = LinearImage::from_pixels(dims, vec![value; 4]);
+        if let Some(index) = null_at {
+            let mut samples = vec![0.0f32; 4];
+            samples[index] = f32::NAN;
+            image.nulls = NullMask::of_non_finite(dims.size(), &[&samples]);
+        }
+        StackFrame::from(image)
+    };
+    let config = StackConfig {
+        method: CombineMethod::Mean(Rejection::None),
+        normalization: Normalization::None,
+        ..Default::default()
+    };
+
+    let stacked = stack_images(
+        vec![frame(1.0, Some(1)), frame(2.0, None), frame(3.0, None)],
+        config.clone(),
+        ProgressCallback::default(),
+        CancelToken::never(),
+    )
+    .unwrap();
+
+    assert_eq!(stacked.image.channel(0).pixels(), &[2.0, 2.5, 2.0, 2.0]);
+    // The reported coverage counts the same contributors the value was built from — two of three
+    // frames at the masked pixel, all three elsewhere. It has to be per-pixel now: a frame
+    // declaring nulls is a frame that carries support, which is what makes the plane exist at all.
+    let coverage = stacked.coverage.as_ref().unwrap().per_pixel().unwrap();
+    assert_eq!(coverage.pixels()[0], 1.0);
+    assert!(
+        (coverage.pixels()[1] - 2.0 / 3.0).abs() < 1e-6,
+        "{:?}",
+        coverage.pixels()
+    );
+
+    // A frame null everywhere contributes nowhere, so the stack is the other two throughout —
+    // (2 + 3) / 2 = 2.5 — rather than a division by a zero contributor count.
+    let mut all_null = LinearImage::from_pixels(dims, vec![1.0; 4]);
+    all_null.nulls = NullMask::of_non_finite(dims.size(), &[&[f32::NAN; 4]]);
+    let stacked = stack_images(
+        vec![
+            StackFrame::from(all_null),
+            frame(2.0, None),
+            frame(3.0, None),
+        ],
+        config,
+        ProgressCallback::default(),
+        CancelToken::never(),
+    )
+    .unwrap();
+    assert_eq!(stacked.image.channel(0).pixels(), &[2.5; 4]);
 }
 
 #[test]

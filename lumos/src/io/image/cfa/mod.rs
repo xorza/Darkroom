@@ -113,6 +113,10 @@ impl StackableImage for CfaImage {
         ImageDimensions::new((self.data.width(), self.data.height()), 1)
     }
 
+    fn nulls(&self) -> Option<&NullMask> {
+        self.nulls.as_ref()
+    }
+
     fn channel(&self, c: usize) -> &[f32] {
         assert!(c == 0, "CfaImage has only 1 channel, got {c}");
         &self.data

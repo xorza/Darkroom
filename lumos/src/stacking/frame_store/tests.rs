@@ -1,4 +1,5 @@
-use crate::stacking::frame_store::spill::SpillDirectory;
+use crate::io::image::null_mask::NullMask;
+use crate::stacking::frame_store::spill::{CachedQuality, SpillDirectory};
 use crate::stacking::frame_store::*;
 use crate::testing::ScratchDirectory;
 
@@ -85,6 +86,78 @@ fn light_frame_keeps_quality_with_its_planes() {
     );
     assert_eq!(frame.source_stats.channels[0].median, 2.5);
     assert_eq!(frame.source_stats.channels[0].mad, 1.0);
+}
+
+#[test]
+fn an_unwarped_frames_nulls_become_the_pair_the_combine_gates_on() {
+    let dimensions = ImageDimensions::new((2, 2), 1);
+    let mut image = LinearImage::from_pixels(dimensions, vec![1.0, 2.0, 3.0, 4.0]);
+
+    // A frame whose source declared nothing undefined carries no planes at all — the case that
+    // keeps this free for every RAW frame and almost every camera FITS.
+    assert!(WarpQuality::for_unwarped(&image).is_none());
+
+    // Declaring pixel 2 null turns it into zero coverage there and full coverage elsewhere, with
+    // confidence matching bit for bit: nothing was interpolated, so every sample that exists is a
+    // whole one, and `coverage == 0` exactly where `confidence == 0` as the pairing requires.
+    image.nulls = NullMask::of_non_finite(dimensions.size(), &[&[1.0, 2.0, f32::NAN, 4.0]]);
+    let quality = WarpQuality::for_unwarped(&image);
+    assert_eq!(quality.coverage().unwrap().pixels(), &[1.0, 1.0, 0.0, 1.0]);
+    assert_eq!(
+        quality.confidence().unwrap().pixels(),
+        quality.coverage().unwrap().pixels()
+    );
+}
+
+#[test]
+fn a_spilled_frames_quality_planes_survive_the_cache_round_trip() {
+    // The warm-cache case: reusing a frame's channels without its quality planes would put the
+    // fill under its nulls back into the stack as data on every run after the first.
+    let directory = ScratchDirectory::new("frame_store_cached_quality");
+    let dimensions = ImageDimensions::new((2, 2), 1);
+    let mut image = LinearImage::from_pixels(dimensions, vec![1.0, 2.0, 3.0, 4.0]);
+    image.nulls = NullMask::of_non_finite(dimensions.size(), &[&[1.0, 2.0, f32::NAN, 4.0]]);
+    let quality = WarpQuality::for_unwarped(&image);
+    let stats = FrameStats::measure(&image);
+    let frame = StoredFrame::spill(&directory, "frame.bin", &image, &quality, stats).unwrap();
+    drop(frame);
+
+    let spill = FrameSpill::new(&directory, "frame.bin");
+    assert_eq!(spill.cached_quality(dimensions), CachedQuality::Present);
+    let reread =
+        WarpQuality::read_spilled(|kind| StoredPlane::map(spill.quality_path(kind))).unwrap();
+    assert_eq!(
+        reread.coverage().unwrap().chunk(0, 4),
+        &[1.0, 1.0, 0.0, 1.0]
+    );
+    assert_eq!(
+        reread.confidence().unwrap().chunk(0, 4),
+        &[1.0, 1.0, 0.0, 1.0]
+    );
+    drop(reread);
+
+    // A frame that wrote no planes reads back as carrying none, so the two states stay
+    // distinguishable rather than both looking like "nothing cached".
+    let plain = LinearImage::from_pixels(dimensions, vec![1.0, 2.0, 3.0, 4.0]);
+    let stats = FrameStats::measure(&plain);
+    let frame = StoredFrame::spill(
+        &directory,
+        "plain.bin",
+        &plain,
+        &WarpQuality::for_unwarped(&plain),
+        stats,
+    )
+    .unwrap();
+    drop(frame);
+    assert_eq!(
+        FrameSpill::new(&directory, "plain.bin").cached_quality(dimensions),
+        CachedQuality::Absent
+    );
+
+    // One plane without the other is neither state, and must not be read as either: the cache is
+    // rebuilt instead.
+    std::fs::remove_file(spill.quality_path("confidence")).unwrap();
+    assert_eq!(spill.cached_quality(dimensions), CachedQuality::Torn);
 }
 
 #[test]

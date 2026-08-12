@@ -501,8 +501,8 @@ pub(crate) mod internals {
 
     impl FrameCache {
         /// An in-memory cache over already-decoded frames — the shape `from_paths` builds, without
-        /// the file round-trip. The frames carry no warp quality, so this is the plain-combine
-        /// cache the calibration path uses.
+        /// the file round-trip. Nothing here was warped, so a frame carries quality planes only
+        /// when its source declared pixels with no measurement.
         pub(crate) fn from_images<I: StackableImage>(
             images: Vec<I>,
             normalization: Normalization,
@@ -513,7 +513,8 @@ pub(crate) mod internals {
                 .into_iter()
                 .map(|image| {
                     let source_stats = FrameStats::measure(&image);
-                    StoredFrame::from_memory(image, WarpQuality::None, source_stats)
+                    let quality = WarpQuality::for_unwarped(&image);
+                    StoredFrame::from_memory(image, quality, source_stats)
                 })
                 .collect();
             let core = CacheCore {

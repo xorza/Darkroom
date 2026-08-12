@@ -109,6 +109,37 @@ impl<'a> FrameSpill<'a> {
                 .is_ok_and(|metadata| metadata.len() == expected)
         })
     }
+
+    /// What this frame's cache holds for its quality planes.
+    ///
+    /// A frame that carries them writes both before the identity sidecar that commits the cache,
+    /// so a valid one has both or neither. Checked rather than assumed: these are files, and
+    /// anything can disturb them between runs.
+    pub(crate) fn cached_quality(self, dimensions: ImageDimensions) -> CachedQuality {
+        let expected = (dimensions.pixel_count() * size_of::<f32>()) as u64;
+        let present = |kind| {
+            std::fs::metadata(self.quality_path(kind)).is_ok_and(|meta| meta.len() == expected)
+        };
+        match (present("coverage"), present("confidence")) {
+            (true, true) => CachedQuality::Present,
+            (false, false) => CachedQuality::Absent,
+            _ => CachedQuality::Torn,
+        }
+    }
+}
+
+/// What a cached frame's quality planes look like on disk.
+///
+/// Three states rather than a bool because the middle one has to be actionable: a frame that wrote
+/// neither plane is reusable and carries none, one that wrote both is reusable and carries them,
+/// and one holding a lone plane is neither — [`WarpQuality`](crate::stacking::frame_store::warp_quality::WarpQuality)
+/// documents why a lone plane is not a shape any producer means, so the cache is rebuilt instead of
+/// being read as either of the other two.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CachedQuality {
+    Absent,
+    Present,
+    Torn,
 }
 
 pub(crate) fn write_plane(path: &Path, pixels: &[f32]) -> Result<(), FrameStoreError> {

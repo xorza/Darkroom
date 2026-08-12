@@ -45,14 +45,6 @@ impl NullMask {
     }
 
     /// Whether the pixel at this row-major index carries no measurement.
-    ///
-    /// Kept rather than deferred to its first production caller — the combine's coverage gate, which
-    /// does not read the mask yet — because without it the decoder's output cannot be checked, and
-    /// the tests below assert exact null positions through it.
-    #[allow(
-        dead_code,
-        reason = "read by this file's tests until the combine gates on the mask"
-    )]
     pub(crate) fn is_null(&self, index: usize) -> bool {
         self.nulls.get(index)
     }
