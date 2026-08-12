@@ -397,6 +397,7 @@ fn make_cfa_cache(frames_pixels: Vec<Vec<f32>>, dims: ImageDimensions) -> FrameC
                 ..Default::default()
             },
             quantization_sigma: None,
+            nulls: None,
         })
         .collect();
     FrameCache::from_images(images, Normalization::None)

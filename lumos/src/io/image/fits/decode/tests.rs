@@ -12,6 +12,7 @@ use crate::io::image::fits::decode::plan::internals::description;
 use crate::io::image::fits::decode::*;
 use crate::io::image::fits::options::{
     FitsChecksumPolicy, FitsCubeInterpretation, FitsFloatScale, FitsHduSelector, FitsLoadOptions,
+    FitsNullPolicy,
 };
 use crate::io::image::fits::provenance::{FitsChecksumState, FitsTransferProvenance};
 use crate::io::image::image_provenance::TransferProvenance;
@@ -334,6 +335,7 @@ fn hdu_selection_and_cube_interpretation_are_explicit_and_recorded() {
             cube: FitsCubeInterpretation::Rgb,
             checksum: FitsChecksumPolicy::VerifyIfPresent,
             float_scale: FitsFloatScale::Auto,
+            nulls: FitsNullPolicy::Mask,
         },
         ..load_context()
     };

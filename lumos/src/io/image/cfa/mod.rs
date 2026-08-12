@@ -15,6 +15,7 @@ use crate::io::image::image_metadata::ImageMetadata;
 use crate::io::image::image_provenance::{ColorProvenance, DemosaicProvenance};
 use crate::io::image::linear::LinearImage;
 use crate::io::image::load_context::LoadContext;
+use crate::io::image::null_mask::NullMask;
 use crate::io::image::standard::{
     FITS_EXTENSIONS, STANDARD_IMAGE_EXTENSIONS, file_extension, scientific_rejection,
 };
@@ -102,6 +103,9 @@ pub struct CfaImage {
     pub metadata: ImageMetadata,
     /// Source-quantization uncertainty in the current CFA sample units.
     pub(crate) quantization_sigma: Option<f32>,
+    /// Which pixels carry no measurement, for a source that declared any. The samples at those
+    /// positions are a finite fill, not data — see [`NullMask`].
+    pub(crate) nulls: Option<NullMask>,
 }
 
 impl StackableImage for CfaImage {
@@ -150,6 +154,7 @@ impl CfaImage {
             data,
             metadata,
             quantization_sigma: None,
+            nulls: None,
         }
     }
 
@@ -209,6 +214,12 @@ impl CfaImage {
             provenance.demosaic = demosaic;
         }
         let pixels = self.data.into_vec();
+        // A mosaic demosaic reads a neighbourhood, so a null under one contributes to every output
+        // pixel whose interpolation footprint covers it: the mask that comes out is where data was
+        // missing, not everywhere it has now spread. Carried anyway rather than dropped — a lower
+        // bound is what the pipeline can act on, and widening it to the footprint belongs with the
+        // resampler's, which has the same shape. The mono path copies, so there it is exact.
+        let nulls = self.nulls;
 
         Ok(match &cfa_type {
             CfaType::Mono => {
@@ -216,6 +227,7 @@ impl CfaImage {
                 let dims = ImageDimensions::new((width, height), 1);
                 let mut image = LinearImage::from_pixels(dims, pixels);
                 image.metadata = metadata;
+                image.nulls = nulls;
                 image
             }
             CfaType::Bayer(cfa_pattern) => {
@@ -230,6 +242,7 @@ impl CfaImage {
                 let dims = ImageDimensions::new((width, height), 3);
                 let mut image = LinearImage::from_planar_channels(dims, planes);
                 image.metadata = metadata;
+                image.nulls = nulls;
                 image
             }
             CfaType::XTrans(pattern) => {
@@ -244,6 +257,7 @@ impl CfaImage {
                 let dims = ImageDimensions::new((width, height), 3);
                 let mut image = LinearImage::from_planar_channels(dims, planes);
                 image.metadata = metadata;
+                image.nulls = nulls;
                 image
             }
         })

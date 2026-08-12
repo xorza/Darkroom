@@ -75,6 +75,8 @@ impl FrameTier {
         let image = LinearImage {
             metadata,
             pixels: buffers.pixels,
+            // Warped output; see `resample::warp` for why the source's mask does not come with it.
+            nulls: None,
         };
         match self {
             Self::Ram => Ok(StoredWarp {

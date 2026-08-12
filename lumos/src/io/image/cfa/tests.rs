@@ -15,6 +15,7 @@ fn master_cfa_save_load_round_trips_data_and_pattern() {
             ..Default::default()
         },
         quantization_sigma: Some(0.000_01),
+        nulls: None,
     };
     let path = common::internals::test_output_path("cfa_master_roundtrip.fits");
     cfa.save_fits(&path).unwrap();
@@ -85,6 +86,7 @@ fn master_cfa_fits_round_trips_mono_and_xtrans_patterns() {
                 ..Default::default()
             },
             quantization_sigma: None,
+            nulls: None,
         };
         let path = common::internals::test_output_path(&format!("cfa_master_{name}.fits"));
 

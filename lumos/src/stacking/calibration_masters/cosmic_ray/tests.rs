@@ -181,6 +181,7 @@ fn bayer_removes_cosmic_rays_preserves_star() {
             ..Default::default()
         },
         quantization_sigma: None,
+        nulls: None,
     };
     let count = reject_cosmic_rays(&mut img, &CosmicRayConfig::default());
     let out = img.data.pixels();
@@ -236,6 +237,7 @@ fn bayer_tight_star_eaten_is_a_known_limitation() {
             ..Default::default()
         },
         quantization_sigma: None,
+        nulls: None,
     };
     reject_cosmic_rays(&mut img, &CosmicRayConfig::default());
     let out = img.data.pixels();
@@ -295,6 +297,7 @@ fn xtrans_removes_cosmic_ray_preserves_flat_field() {
             ..Default::default()
         },
         quantization_sigma: None,
+        nulls: None,
     };
     let count = reject_cosmic_rays(&mut img, &CosmicRayConfig::default());
     let out = img.data.pixels();

@@ -36,6 +36,7 @@ use crate::io::image::image_provenance::ColorProvenance;
 use crate::io::image::linear::LinearImage;
 use crate::io::image::linear_pixels::LinearPixels;
 use crate::io::image::load_context::LoadContext;
+use crate::io::image::null_mask::NullMask;
 use crate::io::image::standard::scientific_rejection;
 use crate::io::raw::demosaic::DemosaicError;
 
@@ -47,6 +48,10 @@ mod selection;
 struct DecodedFitsImage {
     metadata: ImageMetadata,
     pixels: LinearPixels,
+    /// Where the HDU declared no measurement, or `None` when it declared none anywhere. Absent
+    /// whenever [`FitsNullPolicy::Reject`](crate::FitsNullPolicy) is in force, which fails the load
+    /// instead of reaching here.
+    nulls: Option<NullMask>,
 }
 
 impl DecodedFitsImage {
@@ -61,6 +66,7 @@ impl DecodedFitsImage {
         Ok(LinearImage {
             metadata: self.metadata,
             pixels: self.pixels,
+            nulls: self.nulls,
         })
     }
 
@@ -110,7 +116,7 @@ impl DecodedFitsImage {
         let Self {
             mut metadata,
             pixels,
-            ..
+            nulls,
         } = self;
         if let Some(provenance) = &mut metadata.provenance {
             provenance.color = ColorProvenance::SensorCfa;
@@ -119,6 +125,7 @@ impl DecodedFitsImage {
             data: pixels.into_l(),
             metadata,
             quantization_sigma,
+            nulls,
         })
     }
 }

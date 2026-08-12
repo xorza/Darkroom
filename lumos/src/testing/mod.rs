@@ -130,6 +130,7 @@ pub(crate) fn cfa_from_plane(data: Buffer2<f32>, cfa_type: CfaType) -> CfaImage 
             ..Default::default()
         },
         quantization_sigma: None,
+        nulls: None,
     }
 }
 
@@ -142,6 +143,7 @@ pub(crate) fn constant_cfa(size: Size2us, value: f32, cfa_type: CfaType) -> CfaI
             ..Default::default()
         },
         quantization_sigma: None,
+        nulls: None,
     }
 }
 
