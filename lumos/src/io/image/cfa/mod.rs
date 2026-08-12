@@ -4,10 +4,13 @@
 //! filter pattern metadata. Used for calibration frame processing (darks,
 //! flats, bias) and hot pixel correction on raw data.
 
+pub(crate) mod same_color;
+
 use std::path::Path;
 
 use rayon::prelude::*;
 
+use crate::io::image::cfa::same_color::SameColorMedian;
 use crate::io::image::error::ImageError;
 use crate::io::image::fits::{cfa as fits_cfa, decode as fits_decode};
 use crate::io::image::image_dimensions::ImageDimensions;
@@ -24,8 +27,6 @@ use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::io::raw::demosaic::{DemosaicError, DemosaicKind};
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
-use crate::stacking::calibration_masters::pattern_or_mono;
-use crate::stacking::calibration_masters::same_color::SameColorMedian;
 use crate::stacking::frame_store::StackableImage;
 use common::CancelToken;
 use imaginarium::Buffer2;
@@ -62,6 +63,17 @@ impl CfaType {
             CfaType::Mono => 1,
             CfaType::Bayer(_) | CfaType::XTrans(_) => 3,
         }
+    }
+
+    /// The pattern to treat a frame as carrying: its own, or Mono when it declares none.
+    ///
+    /// A frame without CFA metadata is a single-colour mosaic, and [`CfaType::Mono`] describes that
+    /// exactly — `color_at` answers 0 everywhere, its period is 1, and every pixel is its own
+    /// colour's neighbour. Resolving the `Option` here once is what keeps "absent means mono" out of
+    /// the per-pixel colour lookup, the phase-period match, and the same-colour neighbour strategy,
+    /// each of which used to spell it out for itself.
+    pub(crate) fn or_mono(cfa_type: Option<&Self>) -> &Self {
+        cfa_type.unwrap_or(&CfaType::Mono)
     }
 
     pub(crate) fn demosaic_kind(&self) -> DemosaicKind {
@@ -213,7 +225,7 @@ impl CfaImage {
         let Some(nulls) = self.nulls.as_ref() else {
             return;
         };
-        let cfa_type = pattern_or_mono(self.metadata.cfa_type.as_ref());
+        let cfa_type = CfaType::or_mono(self.metadata.cfa_type.as_ref());
         let neighbors = SameColorMedian::new(cfa_type);
         let size = Size2us::new(self.data.width(), self.data.height());
         for index in 0..size.pixel_count() {

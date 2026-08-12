@@ -51,13 +51,12 @@ pub(crate) mod dark_background;
 mod sampling;
 
 use crate::bit_buffer2::BitBuffer2;
+use crate::io::image::cfa::same_color::SameColorMedian;
 use crate::io::image::cfa::{CfaImage, CfaType};
 use crate::math::size2us::Size2us;
 use crate::math::statistics::{mad_to_sigma, median_f32_mut};
 use crate::stacking::calibration_masters::defect_map::dark_background::DarkBackground;
 use crate::stacking::calibration_masters::defect_map::sampling::collect_color_residual_samples;
-use crate::stacking::calibration_masters::pattern_or_mono;
-use crate::stacking::calibration_masters::same_color::SameColorMedian;
 use crate::stacking::combine::error::Error;
 use common::CancelToken;
 use imaginarium::Buffer2;
@@ -242,7 +241,7 @@ fn detect_hot_pixels(
                 return false;
             }
             let point = size.point_of(i);
-            let color = pattern_or_mono(cfa_type).color_at(point) as usize;
+            let color = CfaType::or_mono(cfa_type).color_at(point) as usize;
             let ColorStats { median, sigma } = stats[color];
             data[i] - background.at(point, color) > median + sigma_threshold * sigma
         })
@@ -287,7 +286,7 @@ fn detect_cold_pixels(
     let data = &image.data;
     let size = Size2us::new(data.width(), data.height());
     let total = size.pixel_count();
-    let neighbors = SameColorMedian::new(pattern_or_mono(image.metadata.cfa_type.as_ref()));
+    let neighbors = SameColorMedian::new(CfaType::or_mono(image.metadata.cfa_type.as_ref()));
 
     let indices = (0..total)
         .into_par_iter()

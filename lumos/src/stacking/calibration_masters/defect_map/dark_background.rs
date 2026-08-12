@@ -15,7 +15,6 @@ use crate::math::statistics::median_f32_mut;
 use crate::math::vec2us::Vec2us;
 use crate::stacking::calibration_masters::defect_map::DARK_BACKGROUND_TILE_SIZE;
 use crate::stacking::calibration_masters::defect_map::sampling::collect_color_samples;
-use crate::stacking::calibration_masters::pattern_or_mono;
 use crate::stacking::combine::error::Error;
 
 #[derive(Debug, Clone, Copy)]
@@ -52,7 +51,7 @@ impl DarkBackground {
         );
         let tiles_x = width.div_ceil(DARK_BACKGROUND_TILE_SIZE);
         let tiles_y = height.div_ceil(DARK_BACKGROUND_TILE_SIZE);
-        let pattern = pattern_or_mono(cfa_type);
+        let pattern = CfaType::or_mono(cfa_type);
         let num_colors = pattern.num_colors();
 
         let mut tiles: Vec<DarkTile> = (0..tiles_x * tiles_y)
