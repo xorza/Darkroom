@@ -320,6 +320,10 @@ impl StackableImage for LinearImage {
         self.dimensions()
     }
 
+    fn nulls(&self) -> Option<&NullMask> {
+        self.nulls.as_ref()
+    }
+
     fn channel(&self, c: usize) -> &[f32] {
         LinearImage::channel(self, c)
     }

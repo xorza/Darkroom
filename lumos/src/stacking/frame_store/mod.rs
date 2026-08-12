@@ -16,6 +16,7 @@ use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::image_metadata::ImageMetadata;
 use crate::io::image::linear::LinearImage;
 use crate::io::image::load_context::LoadContext;
+use crate::io::image::null_mask::NullMask;
 use crate::stacking::frame_store::error::FrameStoreError;
 use crate::stacking::frame_store::frame_stats::FrameStats;
 use crate::stacking::frame_store::spill::{FrameSpill, spill_channels, write_plane};
@@ -32,6 +33,12 @@ pub(crate) trait StackableImage: Send + Sync + std::fmt::Debug + Sized {
     fn quantization_sigma(&self) -> Option<f32> {
         None
     }
+
+    /// Which of the image's pixels carry no measurement, for a source that declared any.
+    ///
+    /// No default: both implementors know the answer, and a default of "none" would let a decoder
+    /// that starts recording nulls have them silently dropped here.
+    fn nulls(&self) -> Option<&NullMask>;
 
     fn peek_dimensions(_path: &Path, _context: &LoadContext) -> Option<ImageDimensions> {
         None

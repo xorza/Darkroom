@@ -1,8 +1,15 @@
-//! What a registered light knows about how well each of its pixels survived the warp.
+//! What a frame knows about how much of a measurement each of its pixels holds.
 //!
 //! Two planes that always travel together: how much of an output pixel had real source support,
-//! and how confident the interpolation was there. Both are absent for a calibration frame and for
-//! a light read straight from disk, which is what lets one combine engine serve all three.
+//! and how confident the interpolation was there. A warp is the usual producer, but not the only
+//! one — a frame read straight from disk carries them too when its source declared pixels with no
+//! measurement. Both are absent when neither applies, which is what lets one combine engine serve
+//! every case.
+
+use imaginarium::Buffer2;
+use rayon::prelude::*;
+
+use crate::stacking::frame_store::StackableImage;
 
 /// Which of a frame's planes a validation failure is about.
 ///
@@ -43,13 +50,14 @@ impl std::fmt::Display for FramePlane {
     }
 }
 
-/// The per-pixel warp quality a registered light carries: how much of each output pixel had
-/// support, and how confident the interpolation was.
+/// The per-pixel quality a frame carries: how much of each pixel had support, and how confident
+/// the interpolation that produced it was.
 ///
-/// Both planes or neither. A warp produces the pair, every consumer's rule for "does this frame
-/// contribute at this pixel?" is about the pair, and a calibration frame or a light loaded straight
-/// from disk carries no warp quality at all — so a lone plane is not a shape any producer means,
-/// and this type cannot hold one.
+/// Both planes or neither. Two things produce the pair — a warp, and a decoder that found pixels
+/// its source declared undefined (see [`Self::for_unwarped`]) — every consumer's rule for "does
+/// this frame contribute at this pixel?" is about the pair, and a frame with neither carries
+/// nothing at all. So a lone plane is not a shape any producer means, and this type cannot hold
+/// one.
 ///
 /// The two planes agree pixel by pixel as well: `coverage == 0` exactly where `confidence == 0`.
 /// `registration::resample::quality::quality_at` establishes that — outside the source footprint
@@ -65,6 +73,38 @@ pub(crate) enum WarpQuality<P> {
     None,
     /// The pair a warped light carries.
     Planes { coverage: P, confidence: P },
+}
+
+impl WarpQuality<Buffer2<f32>> {
+    /// The quality a frame that was never warped carries.
+    ///
+    /// [`None`](Self::None) unless its source declared pixels with no measurement, in which case
+    /// the mask becomes the pair the combine already knows how to gate on: zero coverage exactly
+    /// where a pixel is null, one everywhere else. Confidence is the same plane — nothing was
+    /// interpolated, so every sample that exists is a whole one — which is what the type's
+    /// pairing invariant asks for.
+    ///
+    /// The `None` case is what keeps this free for the frames that dominate: a sensor reports a
+    /// value for every photosite, so no RAW frame and almost no camera FITS allocates anything
+    /// here.
+    pub(crate) fn for_unwarped(image: &impl StackableImage) -> Self {
+        let Some(nulls) = image.nulls() else {
+            return Self::None;
+        };
+        let dimensions = image.dimensions();
+        let coverage = Buffer2::new(
+            dimensions.width(),
+            dimensions.height(),
+            (0..dimensions.pixel_count())
+                .into_par_iter()
+                .map(|index| if nulls.is_null(index) { 0.0 } else { 1.0 })
+                .collect::<Vec<f32>>(),
+        );
+        Self::Planes {
+            confidence: coverage.clone(),
+            coverage,
+        }
+    }
 }
 
 impl<P> WarpQuality<P> {
@@ -144,6 +184,21 @@ impl<P> WarpQuality<P> {
                 confidence: convert("confidence", confidence)?,
             }),
         }
+    }
+
+    /// Read a pair back from the spill names [`Self::try_map`] wrote it under.
+    ///
+    /// Its inverse, and here for the same reason: which plane answers to which name is decided in
+    /// this file alone, so a writer and a later reader cannot disagree. The caller establishes that
+    /// both are there — see [`CachedQuality`](crate::stacking::frame_store::spill::CachedQuality) —
+    /// which is why this reads a plane rather than looking for one.
+    pub(crate) fn read_spilled<E>(
+        mut read: impl FnMut(&'static str) -> Result<P, E>,
+    ) -> Result<Self, E> {
+        Ok(Self::Planes {
+            coverage: read("coverage")?,
+            confidence: read("confidence")?,
+        })
     }
 }
 

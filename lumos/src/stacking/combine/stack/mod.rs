@@ -61,9 +61,10 @@ impl StackFrame {
 impl From<LinearImage> for StackFrame {
     fn from(image: LinearImage) -> Self {
         let source_stats = FrameStats::measure(&image);
+        let quality = WarpQuality::for_unwarped(&image);
         Self {
             image,
-            quality: WarpQuality::None,
+            quality,
             source_stats,
         }
     }

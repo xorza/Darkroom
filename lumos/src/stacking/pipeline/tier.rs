@@ -106,27 +106,21 @@ impl FrameTier {
         }
     }
 
-    /// Park a reference frame, which is stored unwarped and so carries no quality planes.
+    /// Park a reference frame, which is stored unwarped: it carries quality planes only if its
+    /// source declared pixels with no measurement.
     pub(crate) fn store_reference(
         &self,
         name: &str,
         image: LinearImage,
         source_stats: FrameStats,
     ) -> Result<StoredFrame, Error> {
+        let quality = WarpQuality::for_unwarped(&image);
         match self {
-            Self::Ram => Ok(StoredFrame::from_memory(
-                image,
-                WarpQuality::None,
-                source_stats,
-            )),
-            Self::Spill(directory) => StoredFrame::spill(
-                &directory.path,
-                name,
-                &image,
-                &WarpQuality::None,
-                source_stats,
-            )
-            .map_err(|source| Error::Stack(StackError::from(source))),
+            Self::Ram => Ok(StoredFrame::from_memory(image, quality, source_stats)),
+            Self::Spill(directory) => {
+                StoredFrame::spill(&directory.path, name, &image, &quality, source_stats)
+                    .map_err(|source| Error::Stack(StackError::from(source)))
+            }
         }
     }
 
