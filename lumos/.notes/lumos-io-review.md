@@ -16,30 +16,6 @@ Siril's FITS orientation documentation.
 
 ---
 
-## Standard FITS null pixels make the whole file unloadable
-
-`validate_fits_pixels` fails the load on the first non-finite sample. In FITS, a non-finite sample is
-not corruption — it is the standard's own undefined-value flag.
-
-- [ ] FITS Standard 4.0 §6.3 and the NOST floating-point agreement: "The `BLANK` keyword should be
-      omitted by FITS writers and ignored by FITS readers when `BITPIX = -32` or `-64` (the NaNs of
-      the IEEE format will act as the blank)". `validate_fits_pixels` rejects exactly that value, so
-      a conforming float image with masked pixels — a mosaic edge, a drizzled coverage gap, a
-      bad-pixel-masked frame — cannot be opened at all. cfitsio, astropy, and Siril all read the
-      image and carry the nulls.
-- [ ] The layer below already implements the integer half of the convention correctly and this layer
-      converts that into a hard failure: `fits_well::Scaling` carries `blank`, and `physical_f32()`
-      maps `BLANK`-valued integer samples to `NaN` (`fits-well/src/data/tests.rs`,
-      `physical_f32_is_the_single_pass_narrowing_of_physical`). Every integer FITS with a `BLANK`
-      keyword is therefore rejected by `read_fits_plane`.
-- [ ] Neither `ImageMetadata` nor `LinearPixels` has anywhere to record which pixels were null, so
-      the rejection is not a placeholder for a mask that exists elsewhere — the information has no
-      representation in the module at all. `metadata.data_max` (`DATAMAX`) is read and written and
-      likewise never consulted when deciding what a sample means.
-- [ ] The error text calls them "null/non-finite pixels" and reports a count and first index, so the
-      code knows what it is looking at; the policy of failing on them is the finding, not the
-      detection.
-
 ## FITS orientation is corrected for the CFA phase but not for the rows, and not for height parity
 
 `read_bayer_cfa` flips the Bayer pattern on `ROWORDER = BOTTOM-UP`. The pixel rows are never
