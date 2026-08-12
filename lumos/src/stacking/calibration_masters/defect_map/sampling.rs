@@ -14,7 +14,6 @@ use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 use crate::stacking::calibration_masters::defect_map::MAX_MEDIAN_SAMPLES;
 use crate::stacking::calibration_masters::defect_map::dark_background::DarkBackground;
-use crate::stacking::calibration_masters::pattern_or_mono;
 
 #[derive(Debug, Clone, Copy)]
 struct CfaSamplePhase {
@@ -67,7 +66,7 @@ pub(super) fn collect_color_sample_indices(
         "color sampling needs non-zero dimensions"
     );
 
-    let pattern = pattern_or_mono(cfa_type);
+    let pattern = CfaType::or_mono(cfa_type);
     let period = match pattern {
         CfaType::Mono => 1,
         CfaType::Bayer(_) => 2,

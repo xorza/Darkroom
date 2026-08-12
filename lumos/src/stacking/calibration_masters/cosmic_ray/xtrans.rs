@@ -9,10 +9,10 @@ use rayon::prelude::*;
 
 use crate::bit_buffer2::BitBuffer2;
 use crate::io::image::cfa::CfaType;
+use crate::io::image::cfa::same_color::XTransOffsets;
 use crate::math::size2us::Size2us;
 use crate::math::statistics::{mad_f32_fast, mad_to_sigma, median_f32_mut};
 use crate::math::vec2us::Vec2us;
-use crate::stacking::calibration_masters::same_color::XTransOffsets;
 
 use crate::stacking::calibration_masters::cosmic_ray::config::{CosmicRayConfig, NoiseEstimation};
 use crate::stacking::calibration_masters::cosmic_ray::masks::CrMasks;

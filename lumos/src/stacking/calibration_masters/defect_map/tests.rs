@@ -6,12 +6,12 @@ use crate::stacking::combine::config::{Normalization, StackConfig};
 use crate::stacking::combine::stack::run_stacking;
 use crate::testing::XTRANS_PATTERN;
 
+use crate::io::image::cfa::same_color::{
+    SameColorMedian, XTRANS_NEIGHBORS, XTRANS_RADIUS, XTransOffsets,
+};
 use crate::stacking::calibration_masters::defect_map::dark_background::DarkBackground;
 use crate::stacking::calibration_masters::defect_map::sampling::{
     collect_color_sample_indices, collect_color_samples,
-};
-use crate::stacking::calibration_masters::same_color::{
-    SameColorMedian, XTRANS_NEIGHBORS, XTRANS_RADIUS, XTransOffsets,
 };
 use crate::{io::raw::demosaic::bayer::CfaPattern, testing::make_cfa};
 

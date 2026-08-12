@@ -1,7 +1,8 @@
-//! Repairing a defective pixel from its same-colour neighbours.
+//! Reconstructing a pixel from its same-colour neighbours.
 //!
-//! Correction runs on raw CFA data, so a defect can only be replaced from pixels behind the same
-//! filter — interpolating across colours would corrupt the mosaic for the demosaic that follows.
+//! What a defective pixel and one the source declared no measurement for both need. It runs on raw
+//! CFA data, so the replacement can only be drawn from pixels behind the same filter —
+//! interpolating across colours would corrupt the mosaic for the demosaic that follows.
 //! Where those neighbours sit depends on the pattern: 8-connected for mono, stride 2 for any Bayer
 //! phase, and for X-Trans a per-phase table precomputed once, since recomputing the 13×13 colour
 //! sweep and its distance sort per pixel dominated the cold-pixel scan.
@@ -96,8 +97,7 @@ pub(crate) enum SameColorMedian {
 
 impl SameColorMedian {
     /// Takes a resolved pattern — a frame that declares none is Mono, which
-    /// [`pattern_or_mono`](crate::stacking::calibration_masters::pattern_or_mono) decides once for
-    /// every reader of a pattern rather than here.
+    /// [`CfaType::or_mono`] decides once for every reader of a pattern rather than here.
     pub(crate) fn new(cfa: &CfaType) -> Self {
         match cfa {
             CfaType::Mono => Self::Mono,

@@ -5,7 +5,6 @@ pub(crate) mod defect_map;
 pub(crate) mod error;
 mod fits;
 mod prepared_flat;
-pub(crate) mod same_color;
 
 #[cfg(all(test, feature = "internals"))]
 mod bench;
@@ -14,23 +13,12 @@ mod real_data_tests;
 #[cfg(test)]
 mod tests;
 
-/// The pattern to treat a frame as carrying: its own, or Mono when it declares none.
-///
-/// A frame without CFA metadata is a single-colour mosaic, and [`CfaType::Mono`] describes that
-/// exactly — `color_at` answers 0 everywhere, its period is 1, and every pixel is its own colour's
-/// neighbour. Resolving the `Option` here once is what keeps "absent means mono" out of the
-/// per-pixel colour lookup, the phase-period match, and the same-colour neighbour strategy, each of
-/// which used to spell it out for itself.
-pub(crate) fn pattern_or_mono(cfa_type: Option<&CfaType>) -> &CfaType {
-    cfa_type.unwrap_or(&CfaType::Mono)
-}
-
 use std::path::Path;
 
 use common::CancelToken;
 use rayon::prelude::*;
 
-use crate::io::image::cfa::{CfaFrameInfo, CfaImage, CfaType};
+use crate::io::image::cfa::{CfaFrameInfo, CfaImage};
 use crate::io::image::error::ImageError;
 use crate::io::image::load_context::LoadContext;
 use crate::math::size2us::Size2us;
