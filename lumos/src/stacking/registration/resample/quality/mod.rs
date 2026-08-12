@@ -8,7 +8,7 @@
 //!
 //! `combine` depends on that rather than re-deriving it: it gates a sample on coverage alone and
 //! multiplies the weight by confidence, so a covered pixel at zero confidence would enter the
-//! statistics weightless. See `PixelCoverage`, and `validate_warp_quality`, which holds
+//! statistics weightless. See `PixelCoverage`, and `validate_frame_quality`, which holds
 //! caller-supplied planes to the same pairing.
 //!
 //! Every pixel whose tap window lies wholly inside the source — all but a `kernel_radius`-wide band

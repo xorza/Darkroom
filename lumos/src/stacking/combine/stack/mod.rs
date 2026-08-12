@@ -22,25 +22,25 @@ use crate::stacking::combine::normalization::FrameNorm;
 use crate::stacking::combine::rejection::Rejection;
 use crate::stacking::combine::stack::quantization::{MaxSigma, SourceSigmas};
 use crate::stacking::frame_store::StoredFrame;
+use crate::stacking::frame_store::frame_quality::FrameQuality;
 use crate::stacking::frame_store::frame_stats::FrameStats;
 use crate::stacking::frame_store::spill::SpillDirectory;
-use crate::stacking::frame_store::warp_quality::WarpQuality;
 use crate::stacking::progress::ProgressCallback;
 use crate::stacking::registration::resample::WarpResult;
 use crate::stacking::stack_product::StackProduct;
 use crate::stacking::stack_product::quality_planes::QualityPlanes;
 
-/// One input frame for [`stack_images`], with the per-pixel warp quality a registered frame carries.
+/// One input frame for [`stack_images`], with the per-pixel frame quality a registered frame carries.
 ///
 /// Its coverage plane gates whether a warped sample has meaningful source support; its confidence
-/// plane is an independent inverse-variance multiplier. A frame with no warp quality has full
+/// plane is an independent inverse-variance multiplier. A frame with no frame quality has full
 /// support at unit confidence throughout. Plain `LinearImage`s convert with `.into()`; registered
 /// frames must use [`StackFrame::registered`] so source-domain noise is captured before
 /// interpolation.
 #[derive(Debug)]
 pub struct StackFrame {
     pub(crate) image: LinearImage,
-    pub(crate) quality: WarpQuality<Buffer2<f32>>,
+    pub(crate) quality: FrameQuality<Buffer2<f32>>,
     pub(crate) source_stats: FrameStats,
 }
 
@@ -50,7 +50,7 @@ impl StackFrame {
         Self {
             source_stats: FrameStats::measure(source),
             image: warped.image,
-            quality: WarpQuality::Planes {
+            quality: FrameQuality::Planes {
                 coverage: warped.coverage,
                 confidence: warped.confidence,
             },
@@ -61,7 +61,7 @@ impl StackFrame {
 impl From<LinearImage> for StackFrame {
     fn from(image: LinearImage) -> Self {
         let source_stats = FrameStats::measure(&image);
-        let quality = WarpQuality::for_unwarped(&image);
+        let quality = FrameQuality::for_unwarped(&image);
         Self {
             image,
             quality,

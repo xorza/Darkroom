@@ -61,20 +61,21 @@ impl std::fmt::Display for FramePlane {
 /// The two planes agree pixel by pixel as well: `coverage == 0` exactly where `confidence == 0`.
 /// `registration::resample::quality::quality_at` establishes that — outside the source footprint
 /// both are zero, and inside it every branch gives a positive confidence wherever there is support
-/// — and [`validate_warp_quality`] holds caller-supplied planes to it, because the combine leans on
+/// — and [`validate_frame_quality`] holds caller-supplied planes to it, because the combine leans on
 /// it: a sample that clears the coverage floor is guaranteed a positive confidence to weight it by,
 /// and `source_noise_variance` a non-zero one to divide by.
 ///
-/// [`validate_warp_quality`]: crate::stacking::combine::cache::validation::validate_warp_quality
+/// [`validate_frame_quality`]: crate::stacking::combine::cache::validation::validate_frame_quality
 #[derive(Debug)]
-pub(crate) enum WarpQuality<P> {
-    /// No warp quality at all — a calibration frame, or a light read straight from disk.
+pub(crate) enum FrameQuality<P> {
+    /// No quality planes at all — a frame that was never warped and whose source declared every
+    /// pixel measured, which is the overwhelming majority of them.
     None,
     /// The pair a warped light carries.
     Planes { coverage: P, confidence: P },
 }
 
-impl WarpQuality<Buffer2<f32>> {
+impl FrameQuality<Buffer2<f32>> {
     /// The quality a frame that was never warped carries.
     ///
     /// [`None`](Self::None) unless its source declared pixels with no measurement, in which case
@@ -98,8 +99,8 @@ impl WarpQuality<Buffer2<f32>> {
     }
 }
 
-impl<P> WarpQuality<P> {
-    /// The frame's per-pixel warp support, or `None` for a frame that carries no warp quality.
+impl<P> FrameQuality<P> {
+    /// The frame's per-pixel warp support, or `None` for a frame that carries no frame quality.
     pub(crate) fn coverage(&self) -> Option<&P> {
         match self {
             Self::None => None,
@@ -115,13 +116,13 @@ impl<P> WarpQuality<P> {
         }
     }
 
-    pub(crate) fn map<Q>(self, mut convert: impl FnMut(P) -> Q) -> WarpQuality<Q> {
+    pub(crate) fn map<Q>(self, mut convert: impl FnMut(P) -> Q) -> FrameQuality<Q> {
         match self {
-            Self::None => WarpQuality::None,
+            Self::None => FrameQuality::None,
             Self::Planes {
                 coverage,
                 confidence,
-            } => WarpQuality::Planes {
+            } => FrameQuality::Planes {
                 coverage: convert(coverage),
                 confidence: convert(confidence),
             },
@@ -149,7 +150,7 @@ impl<P> WarpQuality<P> {
         self.present().count()
     }
 
-    /// Whether the frame carries no warp quality at all.
+    /// Whether the frame carries no frame quality at all.
     pub(crate) fn is_none(&self) -> bool {
         matches!(self, Self::None)
     }
@@ -164,13 +165,13 @@ impl<P> WarpQuality<P> {
     pub(crate) fn try_map<Q, E>(
         &self,
         mut convert: impl FnMut(&'static str, &P) -> Result<Q, E>,
-    ) -> Result<WarpQuality<Q>, E> {
+    ) -> Result<FrameQuality<Q>, E> {
         match self {
-            Self::None => Ok(WarpQuality::None),
+            Self::None => Ok(FrameQuality::None),
             Self::Planes {
                 coverage,
                 confidence,
-            } => Ok(WarpQuality::Planes {
+            } => Ok(FrameQuality::Planes {
                 coverage: convert("coverage", coverage)?,
                 confidence: convert("confidence", confidence)?,
             }),
@@ -197,9 +198,9 @@ impl<P> WarpQuality<P> {
 pub(crate) mod internals {
     use imaginarium::Buffer2;
 
-    use crate::stacking::frame_store::warp_quality::WarpQuality;
+    use crate::stacking::frame_store::frame_quality::FrameQuality;
 
-    impl WarpQuality<Buffer2<f32>> {
+    impl FrameQuality<Buffer2<f32>> {
         /// A coverage plane with the confidence plane a warp would have produced beside it: unit
         /// confidence where there is support and zero where there is none, which is the pairing
         /// every consumer relies on. Lets a test about coverage gating state the one plane it

@@ -123,7 +123,7 @@ pub(crate) fn fits_in_memory(
 
 /// Quality planes a warp emits beside the image: `coverage` and `confidence`, one image-sized
 /// plane each. The register/warp stage stores both, so a warped frame costs its own pixels plus
-/// these — see `registration::resample::WarpResult` and `frame_store::WarpQuality`.
+/// these — see `registration::resample::WarpResult` and `frame_store::FrameQuality`.
 const WARP_QUALITY_PLANES: usize = 2;
 
 /// Image-sized planes the star detector's pool holds at its high-water mark: six f32 planes, the

@@ -6,8 +6,8 @@ use crate::stacking::combine::normalization::photometric_gain::{
 };
 use crate::stacking::combine::normalization::*;
 use crate::stacking::frame_store::StoredFrame;
+use crate::stacking::frame_store::frame_quality::FrameQuality;
 use crate::stacking::frame_store::frame_stats::FrameStats;
-use crate::stacking::frame_store::warp_quality::WarpQuality;
 use crate::testing::prelude::*;
 
 fn channel_stats(median: f32, mad: f32) -> MedianMad {
@@ -91,7 +91,7 @@ fn common_domain_excludes_pixels_covered_only_by_border_fill() {
     let image = LinearImage::from_pixels(dimensions, vec![0.5; 4]);
     let frames = vec![StoredFrame::from_memory(
         image,
-        WarpQuality::Planes {
+        FrameQuality::Planes {
             coverage,
             confidence,
         },
@@ -155,7 +155,7 @@ fn global_norms_are_fitted_against_the_selected_reference() {
         .map(|(channels, mad)| {
             StoredFrame::from_memory(
                 LinearImage::from_planar_channels(dimensions, channels),
-                WarpQuality::from_coverage(coverage.clone()),
+                FrameQuality::from_coverage(coverage.clone()),
                 FrameStats {
                     channels: [channel_stats(0.0, mad); 3].into_iter().collect(),
                     quantization_sigma: None,
@@ -225,7 +225,7 @@ fn registered_rgb_measurements_preserve_pair_order_and_honor_cancellation() {
         .map(|(frame_index, channels)| {
             StoredFrame::from_memory(
                 LinearImage::from_planar_channels(dimensions, channels),
-                WarpQuality::from_coverage(coverage.clone()),
+                FrameQuality::from_coverage(coverage.clone()),
                 FrameStats {
                     channels: [channel_stats(0.0, 1.0); 3].into_iter().collect(),
                     quantization_sigma: Some((frame_index + 1) as f32),

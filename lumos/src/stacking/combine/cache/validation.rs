@@ -12,8 +12,8 @@ use crate::io::image::sample_domain::SampleDomain;
 use crate::stacking::combine::CANCEL_POLL_CHUNK;
 use crate::stacking::combine::error::Error;
 use crate::stacking::combine::error::check_cancel;
+use crate::stacking::frame_store::frame_quality::FramePlane;
 use crate::stacking::frame_store::stored_plane::StoredPlane;
-use crate::stacking::frame_store::warp_quality::FramePlane;
 use crate::stacking::frame_store::{StackableImage, StoredFrame};
 
 fn validate_sample_channels<'a>(
@@ -154,18 +154,18 @@ pub(crate) fn validate_stored_samples(
     )
 }
 
-/// Check a frame's warp-quality pair: each plane's own range, and that the two agree on where the
+/// Check a frame's frame-quality pair: each plane's own range, and that the two agree on where the
 /// frame has support.
 ///
 /// That agreement — `coverage == 0` exactly where `confidence == 0`, the invariant
-/// [`WarpQuality`](crate::stacking::frame_store::warp_quality::WarpQuality) documents — is what
+/// [`FrameQuality`](crate::stacking::frame_store::frame_quality::FrameQuality) documents — is what
 /// lets the combine gate a sample on coverage and be sure of a positive confidence to weight it by,
 /// and what keeps `source_noise_variance`'s reciprocal finite. The warp produces planes that
 /// satisfy it; this is where caller-supplied and spilled ones are held to it.
 ///
 /// One walk over the pair rather than one per plane, so the pairing costs nothing beyond the range
 /// checks that were already reading both.
-pub(crate) fn validate_warp_quality(
+pub(crate) fn validate_frame_quality(
     index: usize,
     coverage: &[f32],
     confidence: &[f32],
@@ -174,7 +174,7 @@ pub(crate) fn validate_warp_quality(
     debug_assert_eq!(
         coverage.len(),
         confidence.len(),
-        "warp quality planes are validated for geometry before their values"
+        "frame quality planes are validated for geometry before their values"
     );
     // Chunked for the same reason as `validate_sample_channels`: one cancel poll per chunk
     // instead of a modulo per sample.
@@ -200,7 +200,7 @@ pub(crate) fn validate_warp_quality(
                 }
             }
             if (coverage > 0.0) != (confidence > 0.0) {
-                return Err(Error::WarpQualityPairMismatch {
+                return Err(Error::FrameQualityPairMismatch {
                     index,
                     pixel: pixel(offset),
                     coverage,

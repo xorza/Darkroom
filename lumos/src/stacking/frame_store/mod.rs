@@ -1,10 +1,10 @@
 //! Memory planning and RAM/mmap storage shared by stacking stages.
 
 pub(crate) mod error;
+pub(crate) mod frame_quality;
 pub(crate) mod frame_stats;
 pub(crate) mod spill;
 pub(crate) mod stored_plane;
-pub(crate) mod warp_quality;
 
 use std::path::Path;
 
@@ -18,10 +18,10 @@ use crate::io::image::linear::LinearImage;
 use crate::io::image::load_context::LoadContext;
 use crate::io::image::null_mask::NullMask;
 use crate::stacking::frame_store::error::FrameStoreError;
+use crate::stacking::frame_store::frame_quality::FrameQuality;
 use crate::stacking::frame_store::frame_stats::FrameStats;
 use crate::stacking::frame_store::spill::{FrameSpill, spill_channels, write_plane};
 use crate::stacking::frame_store::stored_plane::StoredPlane;
-use crate::stacking::frame_store::warp_quality::WarpQuality;
 
 /// Image operations needed by the shared frame store.
 pub(crate) trait StackableImage: Send + Sync + std::fmt::Debug + Sized {
@@ -47,20 +47,20 @@ pub(crate) trait StackableImage: Send + Sync + std::fmt::Debug + Sized {
     fn into_planes(self) -> ArrayVec<Buffer2<f32>, 3>;
 }
 
-/// One frame as the combine engine sees it: its channel planes, the per-pixel warp quality a
-/// registered light carries (absent for calibration frames and for lights loaded straight from
-/// disk), and the statistics measured on the source before any interpolation.
+/// One frame as the combine engine sees it: its channel planes, the per-pixel quality it carries
+/// if a warp produced one or its source declared pixels with no measurement, and the statistics
+/// measured on the source before any interpolation.
 #[derive(Debug)]
 pub(crate) struct StoredFrame {
     pub(crate) channels: ArrayVec<StoredPlane, 3>,
-    pub(crate) quality: WarpQuality<StoredPlane>,
+    pub(crate) quality: FrameQuality<StoredPlane>,
     pub(crate) source_stats: FrameStats,
 }
 
 impl StoredFrame {
     pub(crate) fn from_memory(
         image: impl StackableImage,
-        quality: WarpQuality<Buffer2<f32>>,
+        quality: FrameQuality<Buffer2<f32>>,
         source_stats: FrameStats,
     ) -> Self {
         let channels = image
@@ -84,7 +84,7 @@ impl StoredFrame {
         directory: &Path,
         name: &str,
         image: &impl StackableImage,
-        quality: &WarpQuality<Buffer2<f32>>,
+        quality: &FrameQuality<Buffer2<f32>>,
         source_stats: FrameStats,
     ) -> Result<Self, FrameStoreError> {
         let spill = FrameSpill::new(directory, name);

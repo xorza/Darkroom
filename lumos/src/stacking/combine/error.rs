@@ -9,7 +9,7 @@ use crate::io::image::error::ImageError;
 use crate::io::image::sample_domain::SampleDomain;
 use crate::stacking::calibration_masters::error::CalibrationError;
 use crate::stacking::frame_store::error::FrameStoreError;
-use crate::stacking::frame_store::warp_quality::FramePlane;
+use crate::stacking::frame_store::frame_quality::FramePlane;
 
 /// Invalid [`crate::StackConfig`] parameters.
 ///
@@ -131,14 +131,14 @@ pub enum Error {
         value: f32,
     },
 
-    /// The two warp-quality planes disagree about whether the frame has support at a pixel. A warp
+    /// The two frame-quality planes disagree about whether the frame has support at a pixel. A warp
     /// produces support and confidence together or neither, and the combine gates on coverage while
     /// weighting by confidence, so a pixel covered at zero confidence would enter the statistics
     /// weightless and one confident at zero coverage would be dropped despite having data.
     #[error(
         "frame {index} has coverage {coverage} with confidence {confidence} at pixel {pixel}: a warped pixel has support and confidence together or neither"
     )]
-    WarpQualityPairMismatch {
+    FrameQualityPairMismatch {
         index: usize,
         pixel: usize,
         coverage: f32,

@@ -5,9 +5,9 @@ use crate::io::image::linear::LinearImage;
 use crate::memory::MemoryPlan;
 use crate::stacking::combine::cache_config::CacheConfig;
 use crate::stacking::combine::error::Error as StackError;
+use crate::stacking::frame_store::frame_quality::FrameQuality;
 use crate::stacking::frame_store::frame_stats::FrameStats;
 use crate::stacking::frame_store::spill::SpillDirectory;
-use crate::stacking::frame_store::warp_quality::WarpQuality;
 use crate::stacking::frame_store::{StoredFrame, StoredImage};
 use crate::stacking::pipeline::frame::PipelineFrame;
 use crate::stacking::pipeline::result::Error;
@@ -68,7 +68,7 @@ impl FrameTier {
         buffers: WarpBuffers,
         source_stats: FrameStats,
     ) -> Result<StoredWarp, Error> {
-        let quality = WarpQuality::Planes {
+        let quality = FrameQuality::Planes {
             coverage: buffers.coverage,
             confidence: buffers.confidence,
         };
@@ -87,7 +87,7 @@ impl FrameTier {
                 let frame =
                     StoredFrame::spill(&directory.path, name, &image, &quality, source_stats)
                         .map_err(|source| Error::Stack(StackError::from(source)))?;
-                let WarpQuality::Planes {
+                let FrameQuality::Planes {
                     coverage,
                     confidence,
                 } = quality
@@ -114,7 +114,7 @@ impl FrameTier {
         image: LinearImage,
         source_stats: FrameStats,
     ) -> Result<StoredFrame, Error> {
-        let quality = WarpQuality::for_unwarped(&image);
+        let quality = FrameQuality::for_unwarped(&image);
         match self {
             Self::Ram => Ok(StoredFrame::from_memory(image, quality, source_stats)),
             Self::Spill(directory) => {

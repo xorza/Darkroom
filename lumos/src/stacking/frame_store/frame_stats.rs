@@ -21,14 +21,49 @@ pub(crate) struct FrameStats {
 
 impl FrameStats {
     /// Measure per-channel median and MAD on `image`, before any interpolation touches it.
+    ///
+    /// Pixels the source declared no measurement for are left out. They matter most to the MAD: the
+    /// decoder fills a null with the frame's own median, so every one of them is a zero-deviation
+    /// sample, and a frame with a large masked region would report a spread far below its real
+    /// noise — which is the figure weighting divides by.
+    ///
+    /// The other stages that measure a whole plane need no such exclusion, and the fill is why. Star
+    /// detection looks for peaks above a local background and a patch sitting *at* the background
+    /// produces none; the defect detectors look for outliers against a median the fill by
+    /// construction is; and normalization already re-measures over the pixels every frame shares
+    /// once any frame is partially covering.
     pub(crate) fn measure(image: &impl StackableImage) -> Self {
         let dimensions = image.dimensions();
         let quantization_sigma = image.quantization_sigma();
         let domain = image.metadata().sample_domain();
+        let nulls = image.nulls();
         let channels = (0..dimensions.channels())
             .into_par_iter()
             .map(|channel| {
-                let data = image.channel(channel);
+                // Gathered only for a frame that has a mask; without one the plane itself is what
+                // gets measured, and the single copy below is the scratch the median sorts in
+                // place — the same one allocation this cost before nulls existed.
+                let measured = nulls.map(|nulls| {
+                    image
+                        .channel(channel)
+                        .iter()
+                        .enumerate()
+                        .filter(|(index, _)| !nulls.is_null(*index))
+                        .map(|(_, &sample)| sample)
+                        .collect::<Vec<f32>>()
+                });
+                let data = measured
+                    .as_deref()
+                    .unwrap_or_else(|| image.channel(channel));
+                // A frame with nothing measured anywhere has no statistics to report. It also
+                // contributes at no pixel, so what goes here is never read — but it has to be
+                // something, and the median of nothing would panic.
+                if data.is_empty() {
+                    return MedianMad {
+                        median: 0.0,
+                        mad: 0.0,
+                    };
+                }
                 let mut scratch = data.to_vec();
                 let median = median_f32_mut(&mut scratch);
                 let mad = mad_f32_with_scratch(data, median, &mut scratch);

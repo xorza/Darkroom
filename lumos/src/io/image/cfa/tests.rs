@@ -6,6 +6,58 @@ use crate::io::raw::demosaic::xtrans::internals::test_pattern_array;
 use crate::testing::make_cfa;
 
 #[test]
+fn a_null_is_repaired_from_its_same_colour_neighbours_before_demosaic() {
+    // Mono, so the demosaic is a copy and what lands in the output is exactly what the repair put
+    // there. The null holds a value with no relation to the frame — the decoder's frame-median fill
+    // is what it would really be — and every one of its neighbours reads 0.5, so their median is
+    // 0.5. Left alone, a mosaic demosaic would carry that 900 into every output pixel whose
+    // interpolation reached it, which no mask covers.
+    let size = Size2us::new(4usize, 4usize);
+    let mut pixels = vec![0.5f32; size.pixel_count()];
+    pixels[5] = 900.0;
+    let mut nulls = vec![0.0f32; size.pixel_count()];
+    nulls[5] = f32::NAN;
+    let mut cfa = make_cfa(size, pixels, CfaType::Mono);
+    cfa.nulls = NullMask::of_non_finite(size, &[&nulls]);
+
+    let demosaiced = cfa.demosaic(&CancelToken::never()).unwrap();
+    assert_eq!(demosaiced.channel(0).pixels()[5], 0.5);
+    // The mask stays at its own extent: this pixel was reconstructed, not measured, and the combine
+    // still has to gate on that.
+    assert!(demosaiced.nulls.as_ref().unwrap().is_null(5));
+    assert_eq!(demosaiced.nulls.as_ref().unwrap().count(), 1);
+}
+
+#[test]
+fn a_masters_nulls_survive_the_fits_round_trip() {
+    // Written back as NaN — the blank for the float BITPIX this writes — so a reload recovers the
+    // mask. Without it the repaired sample would come back as a measurement, which is exactly the
+    // fabrication the mask exists to prevent.
+    let cfa = CfaImage {
+        data: Buffer2::new(2, 2, vec![0.1f32, 0.2, 0.3, 0.4]),
+        metadata: ImageMetadata {
+            cfa_type: Some(CfaType::Mono),
+            ..Default::default()
+        },
+        quantization_sigma: None,
+        nulls: NullMask::of_non_finite(Size2us::new(2usize, 2usize), &[&[0.0, f32::NAN, 0.0, 0.0]]),
+    };
+    let path = common::internals::test_output_path("cfa_master_nulls_roundtrip.fits");
+    cfa.save_fits(&path).unwrap();
+
+    let loaded = CfaImage::from_file(&path, &LoadContext::default()).unwrap();
+    let nulls = loaded.nulls.as_ref().expect("the mask must come back");
+    assert_eq!(nulls.count(), 1);
+    for index in 0..4 {
+        assert_eq!(nulls.is_null(index), index == 1, "index {index}");
+    }
+    // The measured samples are untouched by the trip; only the null's own value is not what was
+    // written, because what was written for it was "no measurement".
+    let data = loaded.data.to_vec();
+    assert_eq!([data[0], data[2], data[3]], [0.1f32, 0.3, 0.4]);
+}
+
+#[test]
 fn master_cfa_save_load_round_trips_data_and_pattern() {
     let cfa = CfaImage {
         data: Buffer2::new(2, 2, vec![0.1f32, 0.2, 0.3, 0.4]),

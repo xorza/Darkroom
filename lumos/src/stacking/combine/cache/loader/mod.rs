@@ -26,12 +26,12 @@ use crate::stacking::combine::config::Normalization;
 use crate::stacking::combine::error::Error;
 use crate::stacking::combine::normalization::compute_frame_norms;
 use crate::stacking::frame_store::error::FrameStoreError;
+use crate::stacking::frame_store::frame_quality::FrameQuality;
 use crate::stacking::frame_store::frame_stats::FrameStats;
 use crate::stacking::frame_store::spill::CachedQuality;
 use crate::stacking::frame_store::spill::FrameSpill;
 use crate::stacking::frame_store::spill::SpillDirectory;
 use crate::stacking::frame_store::stored_plane::StoredPlane;
-use crate::stacking::frame_store::warp_quality::WarpQuality;
 use crate::stacking::frame_store::{StackableImage, StoredFrame};
 use crate::stacking::progress::{ProgressCallback, StackingStage};
 
@@ -172,8 +172,9 @@ impl FrameCache {
         )
     }
 
-    /// Build a cache from light-frame image files (tiered per available RAM). Files on disk carry
-    /// no warp quality planes, so every pixel has full support and unit confidence.
+    /// Build a cache from light-frame image files (tiered per available RAM). Nothing here was
+    /// warped, so a frame has full support and unit confidence everywhere unless its source
+    /// declared pixels with no measurement.
     pub(crate) fn from_paths<P: AsRef<Path> + Sync>(
         paths: &[P],
         config: &CacheConfig,
@@ -249,7 +250,7 @@ fn load_in_memory<I: StackableImage, P: AsRef<Path> + Sync>(
         validate_image_samples(&image, idx, cancel)?;
         let metadata = (idx == 0).then(|| image.metadata().clone());
         let stats = FrameStats::measure(&image);
-        let quality = WarpQuality::for_unwarped(&image);
+        let quality = FrameQuality::for_unwarped(&image);
         Ok(LoadedMemoryFrame {
             frame: StoredFrame::from_memory(image, quality, stats),
             metadata,
@@ -262,7 +263,7 @@ fn load_in_memory<I: StackableImage, P: AsRef<Path> + Sync>(
         validate_image_samples(&first_image, 0, cancel)?;
         metadata = Some(first_image.metadata().clone());
         let stats = FrameStats::measure(&first_image);
-        let quality = WarpQuality::for_unwarped(&first_image);
+        let quality = FrameQuality::for_unwarped(&first_image);
         frames.push(StoredFrame::from_memory(first_image, quality, stats));
     }
     for loaded_frame in loaded {
@@ -308,7 +309,7 @@ fn load_to_disk<I: StackableImage, P: AsRef<Path> + Sync>(
         cache_dir,
         &base_filename,
         &first_image,
-        &WarpQuality::for_unwarped(&first_image),
+        &FrameQuality::for_unwarped(&first_image),
         first_stats,
     )
     .map_err(Error::from)?;
@@ -479,9 +480,9 @@ fn load_and_cache_frame<I: StackableImage>(
         );
         let quality = match cached_quality {
             CachedQuality::Present => {
-                WarpQuality::read_spilled(|kind| StoredPlane::map(spill.quality_path(kind)))?
+                FrameQuality::read_spilled(|kind| StoredPlane::map(spill.quality_path(kind)))?
             }
-            CachedQuality::Absent => WarpQuality::None,
+            CachedQuality::Absent => FrameQuality::None,
             // Reading a torn pair as either other state would silently change what the frame
             // contributes; `can_reuse` is what keeps this unreachable, and a panic here says the
             // two have drifted apart rather than letting the cache decide.
@@ -520,7 +521,7 @@ fn load_and_cache_frame<I: StackableImage>(
             cache_dir,
             base_filename,
             &image,
-            &WarpQuality::for_unwarped(&image),
+            &FrameQuality::for_unwarped(&image),
             stats.clone(),
         )
         .map_err(Error::from)?;

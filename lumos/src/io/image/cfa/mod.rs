@@ -24,6 +24,8 @@ use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::io::raw::demosaic::{DemosaicError, DemosaicKind};
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
+use crate::stacking::calibration_masters::pattern_or_mono;
+use crate::stacking::calibration_masters::same_color::SameColorMedian;
 use crate::stacking::frame_store::StackableImage;
 use common::CancelToken;
 use imaginarium::Buffer2;
@@ -195,9 +197,37 @@ impl CfaImage {
         fits_cfa::save_cfa_fits(path, self)
     }
 
+    /// Replace every null with the median of its same-colour neighbours.
+    ///
+    /// The demosaic reads a neighbourhood, so whatever sits under a null reaches output pixels the
+    /// mask does not cover. The resampler answers the same problem by dividing the warped image by
+    /// the warped validity plane — `resample::masked_warp` — but an adaptive kernel like RCD or
+    /// Markesteijn offers no such plane to divide by. Leaving the decoder's frame-median fill there
+    /// would spread a value with no local meaning; a same-colour neighbour median spreads a
+    /// plausible one, so what escapes the mask is interpolation error rather than fabrication.
+    ///
+    /// The same repair [`DefectMap`](crate::DefectMap) applies to hot and cold pixels, for the same
+    /// reason and through the same neighbour search — mask included, so a cluster of nulls is never
+    /// repaired from its own members.
+    fn repair_nulls(&mut self) {
+        let Some(nulls) = self.nulls.as_ref() else {
+            return;
+        };
+        let cfa_type = pattern_or_mono(self.metadata.cfa_type.as_ref());
+        let neighbors = SameColorMedian::new(cfa_type);
+        let size = Size2us::new(self.data.width(), self.data.height());
+        for index in 0..size.pixel_count() {
+            if nulls.is_null(index) {
+                self.data[index] =
+                    neighbors.at(&self.data, size.point_of(index), Some(nulls.bits()));
+            }
+        }
+    }
+
     /// Demosaic this CFA image into a 3-channel LinearImage.
     /// Consumes self.
-    pub(crate) fn demosaic(self, cancel: &CancelToken) -> Result<LinearImage, DemosaicError> {
+    pub(crate) fn demosaic(mut self, cancel: &CancelToken) -> Result<LinearImage, DemosaicError> {
+        self.repair_nulls();
         let width = self.data.width();
         let height = self.data.height();
         let mut metadata = self.metadata;
@@ -218,11 +248,8 @@ impl CfaImage {
             provenance.demosaic = demosaic;
         }
         let pixels = self.data.into_vec();
-        // A mosaic demosaic reads a neighbourhood, so a null under one contributes to every output
-        // pixel whose interpolation footprint covers it: the mask that comes out is where data was
-        // missing, not everywhere it has now spread. Carried anyway rather than dropped — a lower
-        // bound is what the pipeline can act on, and widening it to the footprint belongs with the
-        // resampler's, which has the same shape. The mono path copies, so there it is exact.
+        // The mask travels at its own extent, which `repair_nulls` above is what makes honest: these
+        // pixels were reconstructed rather than measured, and the combine still has to know that.
         let nulls = self.nulls;
 
         Ok(match &cfa_type {
