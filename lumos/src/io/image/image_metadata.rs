@@ -26,6 +26,23 @@ pub enum BitPix {
     Float64,
 }
 
+impl BitPix {
+    /// Whether samples are stored as integers rather than IEEE floats.
+    ///
+    /// The distinction two decode decisions turn on, which is why it is named once rather than
+    /// spelled as a six-variant match at each: an integer `BITPIX` has an exact ADC step to derive a
+    /// quantization sigma from, and it carries its undefined samples as a declared `BLANK` value
+    /// instead of in-band NaN. A variant added later cannot then be missed by one and not the other.
+    pub(crate) fn is_integer(self) -> bool {
+        match self {
+            Self::UInt8 | Self::Int16 | Self::UInt16 | Self::Int32 | Self::UInt32 | Self::Int64 => {
+                true
+            }
+            Self::Float32 | Self::Float64 => false,
+        }
+    }
+}
+
 /// Metadata and provenance shared by sensor, linear, and preview image products.
 #[derive(Debug, Clone, Default)]
 pub struct ImageMetadata {

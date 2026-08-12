@@ -155,10 +155,7 @@ impl StackableImage for CfaImage {
     fn peek(path: &std::path::Path, context: &LoadContext) -> Option<FramePeek> {
         CfaFrameInfo::from_file(path, context)
             .ok()
-            .map(|info| FramePeek {
-                dimensions: info.dimensions,
-                may_carry_nulls: info.may_carry_nulls,
-            })
+            .map(FramePeek::from)
     }
 
     fn into_planes(self) -> arrayvec::ArrayVec<imaginarium::Buffer2<f32>, 3> {

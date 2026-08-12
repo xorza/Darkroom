@@ -131,7 +131,7 @@ const FRAME_QUALITY_PLANES: usize = 2;
 /// One plane per pixel rather than per sample: coverage and confidence are channel-independent, so
 /// an RGB frame pays for two planes here, not six.
 pub(crate) fn quality_plane_bytes(dimensions: ImageDimensions) -> usize {
-    FRAME_QUALITY_PLANES * dimensions.size().pixel_count() * size_of::<f32>()
+    FRAME_QUALITY_PLANES * dimensions.pixel_count() * size_of::<f32>()
 }
 
 /// Image-sized planes the star detector's pool holds at its high-water mark: six f32 planes, the

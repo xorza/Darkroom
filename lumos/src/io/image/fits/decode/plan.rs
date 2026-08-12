@@ -67,15 +67,7 @@ impl FitsDecodePlan {
     /// announce them, so it answers `true` whether or not any are actually there. Wrong only in the
     /// direction that over-reserves.
     pub(super) fn may_carry_nulls(&self) -> bool {
-        match self.bitpix {
-            BitPix::Float32 | BitPix::Float64 => true,
-            BitPix::UInt8
-            | BitPix::Int16
-            | BitPix::UInt16
-            | BitPix::Int32
-            | BitPix::UInt32
-            | BitPix::Int64 => self.scaling.blank.is_some(),
-        }
+        !self.bitpix.is_integer() || self.scaling.blank.is_some()
     }
 }
 

@@ -11,6 +11,7 @@ use std::path::Path;
 use arrayvec::ArrayVec;
 use imaginarium::Buffer2;
 
+use crate::io::image::cfa::CfaFrameInfo;
 use crate::io::image::error::ImageError;
 use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::image_metadata::ImageMetadata;
@@ -81,6 +82,17 @@ impl FramePeek {
             0
         };
         memory::frame_bytes(self.dimensions) + quality
+    }
+}
+
+impl From<CfaFrameInfo> for FramePeek {
+    /// A CFA peek answers everything this needs and the demosaic kind besides, which no memory
+    /// estimate reads.
+    fn from(info: CfaFrameInfo) -> Self {
+        Self {
+            dimensions: info.dimensions,
+            may_carry_nulls: info.may_carry_nulls,
+        }
     }
 }
 

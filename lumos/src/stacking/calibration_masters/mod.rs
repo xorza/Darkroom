@@ -316,11 +316,7 @@ fn frames_fit_in_memory<P: AsRef<Path> + Sync>(
     };
     match CfaFrameInfo::from_file(first.as_ref(), context) {
         Ok(info) => Ok(memory::fits_in_memory(
-            FramePeek {
-                dimensions: info.dimensions,
-                may_carry_nulls: info.may_carry_nulls,
-            }
-            .resident_bytes(),
+            FramePeek::from(info).resident_bytes(),
             total_frames,
             available,
         )),
