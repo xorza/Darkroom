@@ -28,6 +28,7 @@ use crate::stacking::combine::cache::FrameCache;
 use crate::stacking::combine::config::StackConfig;
 use crate::stacking::combine::error::Error;
 use crate::stacking::combine::stack::combine_cached;
+use crate::stacking::frame_store::FramePeek;
 use crate::stacking::progress::ProgressCallback;
 use crate::stacking::stack_product::quality_planes::QualityPlanes;
 use defect_map::DefectMap;
@@ -293,6 +294,12 @@ fn weighted_budget(available: u64, role_frames: usize, total: usize) -> u64 {
 /// set. The per-frame footprint is peeked from one frame's header (all calibration frames share a
 /// sensor) without a full decode. No frames, or a peek failure, returns `true`: per-role tiering is
 /// memory-safe regardless, so this only governs whether to *optimize* for staying in RAM.
+///
+/// The footprint includes the two quality planes a frame carries when its source declared pixels
+/// with no measurement, which the same header settles well enough to charge for: an integer
+/// `BITPIX` with no `BLANK` keyword cannot produce a null at all, and anything else is charged as
+/// though it does. See `FitsDecodePlan::may_carry_nulls` for why that errs only towards reserving
+/// planes a frame turns out not to need.
 fn frames_fit_in_memory<P: AsRef<Path> + Sync>(
     frames: &CalibrationSet<&[P]>,
     total_frames: usize,
@@ -309,7 +316,11 @@ fn frames_fit_in_memory<P: AsRef<Path> + Sync>(
     };
     match CfaFrameInfo::from_file(first.as_ref(), context) {
         Ok(info) => Ok(memory::fits_in_memory(
-            info.dimensions.pixel_count() * std::mem::size_of::<f32>(),
+            FramePeek {
+                dimensions: info.dimensions,
+                may_carry_nulls: info.may_carry_nulls,
+            }
+            .resident_bytes(),
             total_frames,
             available,
         )),

@@ -17,6 +17,7 @@ use crate::io::image::image_metadata::ImageMetadata;
 use crate::io::image::linear::LinearImage;
 use crate::io::image::load_context::LoadContext;
 use crate::io::image::null_mask::NullMask;
+use crate::memory;
 use crate::stacking::frame_store::error::FrameStoreError;
 use crate::stacking::frame_store::frame_quality::FrameQuality;
 use crate::stacking::frame_store::frame_stats::FrameStats;
@@ -40,11 +41,47 @@ pub(crate) trait StackableImage: Send + Sync + std::fmt::Debug + Sized {
     /// that starts recording nulls have them silently dropped here.
     fn nulls(&self) -> Option<&NullMask>;
 
-    fn peek_dimensions(_path: &Path, _context: &LoadContext) -> Option<ImageDimensions> {
+    /// What a header alone settles about a frame, for a format that can answer without decoding.
+    /// `None` when it cannot, which leaves the caller to decode the frame and read the answer off
+    /// it — see [`FramePeek::of_decoded`].
+    fn peek(_path: &Path, _context: &LoadContext) -> Option<FramePeek> {
         None
     }
 
     fn into_planes(self) -> ArrayVec<Buffer2<f32>, 3>;
+}
+
+/// What one frame is worth to a memory estimate, before the rest of the set is read.
+///
+/// Sizing a run needs the geometry and whether the frame carries the two quality planes a masked
+/// one does. A header answers the first exactly and the second only sometimes, so the second is
+/// deliberately allowed to over-report: reserving planes a frame turns out not to carry costs a run
+/// some concurrency, while missing planes it does carry overcommits the machine.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct FramePeek {
+    pub(crate) dimensions: ImageDimensions,
+    pub(crate) may_carry_nulls: bool,
+}
+
+impl FramePeek {
+    /// What a frame already in hand settles — exactly, since its mask is right there.
+    pub(crate) fn of_decoded(image: &impl StackableImage) -> Self {
+        Self {
+            dimensions: image.dimensions(),
+            may_carry_nulls: image.nulls().is_some(),
+        }
+    }
+
+    /// Bytes one such frame occupies once resident: its own pixels, plus the quality planes if it
+    /// may carry them.
+    pub(crate) fn resident_bytes(self) -> usize {
+        let quality = if self.may_carry_nulls {
+            memory::quality_plane_bytes(self.dimensions)
+        } else {
+            0
+        };
+        memory::frame_bytes(self.dimensions) + quality
+    }
 }
 
 /// One frame as the combine engine sees it: its channel planes, the per-pixel quality it carries

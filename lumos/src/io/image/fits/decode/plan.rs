@@ -55,6 +55,30 @@ pub(super) struct FitsDecodePlan {
     pub(super) rows_per_chunk: usize,
 }
 
+impl FitsDecodePlan {
+    /// Whether decoding this HDU could produce pixels with no measurement.
+    ///
+    /// Settled from the header alone, which is what lets a memory estimate charge for the quality
+    /// planes a masked frame carries without reading a byte of data.
+    ///
+    /// An integer `BITPIX` produces a null only where a stored sample equals `BLANK`, so a header
+    /// carrying no such keyword *proves* there are none — and that is every frame a camera writes.
+    /// A floating-point one carries its nulls in-band as IEEE NaN, with nothing in the header to
+    /// announce them, so it answers `true` whether or not any are actually there. Wrong only in the
+    /// direction that over-reserves.
+    pub(super) fn may_carry_nulls(&self) -> bool {
+        match self.bitpix {
+            BitPix::Float32 | BitPix::Float64 => true,
+            BitPix::UInt8
+            | BitPix::Int16
+            | BitPix::UInt16
+            | BitPix::Int32
+            | BitPix::UInt32
+            | BitPix::Int64 => self.scaling.blank.is_some(),
+        }
+    }
+}
+
 /// What one full-scale span of the stored integer type measures, in physical units.
 ///
 /// The pipeline's linear domain is `[0, 1]`, so an integer FITS is divided by the span its own
