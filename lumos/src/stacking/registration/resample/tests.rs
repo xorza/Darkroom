@@ -73,22 +73,34 @@ fn translated_images_use_border_only_outside_source_footprint() {
     }
 }
 
-/// A constant field with one null in it, and the same pixels with the null undeclared.
+/// A constant field with one null in it, paired with the same pixels and no mask.
 ///
-/// A kernel reconstructing a constant from any subset of its taps returns the constant, so the
-/// declared frame must warp to `CONSTANT` everywhere it has support — whatever the fill under the
-/// null was. The undeclared frame is the control: nothing tells the resampler that sample is not
-/// data, so it interpolates it like any other and the fill spreads.
-fn null_fixture(dimensions: ImageDimensions, null_index: usize) -> (LinearImage, LinearImage) {
-    const FILL: f32 = 999.0;
-    let mut pixels = vec![3.25f32; dimensions.pixel_count()];
-    pixels[null_index] = FILL;
-    let mut nulls = vec![0.0f32; dimensions.pixel_count()];
-    nulls[null_index] = f32::NAN;
+/// A kernel reconstructing a constant from any subset of its taps returns the constant, so
+/// [`Self::declared`](NullFixture::declared) must warp to `CONSTANT` everywhere it has support —
+/// whatever the fill under the null was. [`Self::undeclared`](NullFixture::undeclared) is the
+/// control: nothing tells the resampler that sample is not data, so it interpolates it like any
+/// other and the fill spreads.
+#[derive(Debug)]
+struct NullFixture {
+    declared: LinearImage,
+    undeclared: LinearImage,
+}
 
-    let mut declared = LinearImage::from_pixels(dimensions, pixels.clone());
-    declared.nulls = NullMask::of_non_finite(dimensions.size(), &[&nulls]);
-    (declared, LinearImage::from_pixels(dimensions, pixels))
+impl NullFixture {
+    fn new(dimensions: ImageDimensions, null_index: usize) -> Self {
+        const FILL: f32 = 999.0;
+        let mut pixels = vec![3.25f32; dimensions.pixel_count()];
+        pixels[null_index] = FILL;
+        let mut nulls = vec![0.0f32; dimensions.pixel_count()];
+        nulls[null_index] = f32::NAN;
+
+        let mut declared = LinearImage::from_pixels(dimensions, pixels.clone());
+        declared.nulls = NullMask::of_non_finite(dimensions.size(), &[&nulls]);
+        Self {
+            declared,
+            undeclared: LinearImage::from_pixels(dimensions, pixels),
+        }
+    }
 }
 
 #[test]
@@ -99,7 +111,7 @@ fn a_null_is_reconstructed_from_its_surviving_taps_rather_than_smeared() {
     const CONSTANT: f32 = 3.25;
     const BORDER: f32 = -7.0;
     let dimensions = ImageDimensions::new((16, 16), 1);
-    let (declared, undeclared) = null_fixture(dimensions, 8 * 16 + 8);
+    let fixture = NullFixture::new(dimensions, 8 * 16 + 8);
     let transform = WarpTransform::new(Transform::translation(DVec2::new(0.5, 0.5)));
 
     for method in INTERPOLATION_METHODS {
@@ -107,8 +119,8 @@ fn a_null_is_reconstructed_from_its_surviving_taps_rather_than_smeared() {
             method,
             border_value: BORDER,
         };
-        let masked = resample::warp(&declared, &transform, &params);
-        let plain = resample::warp(&undeclared, &transform, &params);
+        let masked = resample::warp(&fixture.declared, &transform, &params);
+        let plain = resample::warp(&fixture.undeclared, &transform, &params);
 
         // Every pixel the frame still supports reads the constant back exactly: interpolating a
         // flat field over whichever taps survived is that field, so the fill never reaches the
@@ -164,7 +176,7 @@ fn the_footprint_a_null_reduces_is_the_kernels_own() {
     // axis, so the same null costs a 64-pixel block. The parameter has to change the answer, or the
     // resampler is not composing the mask through its kernel at all.
     let dimensions = ImageDimensions::new((16, 16), 1);
-    let (declared, undeclared) = null_fixture(dimensions, 8 * 16 + 8);
+    let fixture = NullFixture::new(dimensions, 8 * 16 + 8);
     let transform = WarpTransform::new(Transform::translation(DVec2::new(0.5, 0.5)));
 
     // Against the same frame without the null, so the frame's own edge band — where a half-pixel
@@ -174,8 +186,8 @@ fn the_footprint_a_null_reduces_is_the_kernels_own() {
             method,
             border_value: 0.0,
         };
-        let masked = resample::warp(&declared, &transform, &params);
-        let plain = resample::warp(&undeclared, &transform, &params);
+        let masked = resample::warp(&fixture.declared, &transform, &params);
+        let plain = resample::warp(&fixture.undeclared, &transform, &params);
         (0..dimensions.pixel_count())
             .filter(|&index| masked.coverage.pixels()[index] < plain.coverage.pixels()[index])
             .count()
