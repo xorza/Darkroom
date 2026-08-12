@@ -100,14 +100,10 @@ impl<'a> FrameSpill<'a> {
         self.directory.join(format!("{}_{kind}.bin", self.stem()))
     }
 
-    /// Whether every channel plane is already on disk at the size `dimensions` implies. A plane
-    /// of the wrong length is a stale cache from different geometry, not a reusable one.
+    /// Whether every channel plane is already on disk at the size `dimensions` implies.
     pub(crate) fn channels_reusable(self, dimensions: ImageDimensions) -> bool {
-        let expected = (dimensions.pixel_count() * size_of::<f32>()) as u64;
-        (0..dimensions.channels()).all(|channel| {
-            std::fs::metadata(self.channel_path(channel))
-                .is_ok_and(|metadata| metadata.len() == expected)
-        })
+        (0..dimensions.channels())
+            .all(|channel| plane_on_disk(&self.channel_path(channel), dimensions))
     }
 
     /// What this frame's cache holds for its quality planes.
@@ -116,16 +112,23 @@ impl<'a> FrameSpill<'a> {
     /// so a valid one has both or neither. Checked rather than assumed: these are files, and
     /// anything can disturb them between runs.
     pub(crate) fn cached_quality(self, dimensions: ImageDimensions) -> CachedQuality {
-        let expected = (dimensions.pixel_count() * size_of::<f32>()) as u64;
-        let present = |kind| {
-            std::fs::metadata(self.quality_path(kind)).is_ok_and(|meta| meta.len() == expected)
-        };
+        let present = |kind| plane_on_disk(&self.quality_path(kind), dimensions);
         match (present("coverage"), present("confidence")) {
             (true, true) => CachedQuality::Present,
             (false, false) => CachedQuality::Absent,
             _ => CachedQuality::Torn,
         }
     }
+}
+
+/// Whether a spilled plane is on disk holding exactly one image's worth of `f32`.
+///
+/// A plane of any other length is a stale cache from different geometry, not a reusable one — the
+/// same rule for a channel and for a quality plane, since both are written one image-sized plane at
+/// a time.
+fn plane_on_disk(path: &Path, dimensions: ImageDimensions) -> bool {
+    let expected = (dimensions.pixel_count() * size_of::<f32>()) as u64;
+    std::fs::metadata(path).is_ok_and(|metadata| metadata.len() == expected)
 }
 
 /// What a cached frame's quality planes look like on disk.

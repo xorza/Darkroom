@@ -481,8 +481,13 @@ fn load_and_cache_frame<I: StackableImage>(
             CachedQuality::Present => {
                 WarpQuality::read_spilled(|kind| StoredPlane::map(spill.quality_path(kind)))?
             }
-            // `Torn` is excluded above; this frame simply wrote no quality planes.
-            CachedQuality::Absent | CachedQuality::Torn => WarpQuality::None,
+            CachedQuality::Absent => WarpQuality::None,
+            // Reading a torn pair as either other state would silently change what the frame
+            // contributes; `can_reuse` is what keeps this unreachable, and a panic here says the
+            // two have drifted apart rather than letting the cache decide.
+            CachedQuality::Torn => {
+                unreachable!("a torn quality pair is excluded from reuse before this point")
+            }
         };
         let frame = StoredFrame {
             channels: planes,
