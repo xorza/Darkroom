@@ -32,9 +32,8 @@ impl SampleDomain {
     /// is "not stated" rather than "dimensionless" — treating it as a value that disagrees with
     /// every stated one would reject a RAW light against a FITS master over metadata neither frame
     /// contradicts. This makes the relation non-transitive across frames that state no unit, which
-    /// is why [`validate_sample_domains`](crate::stacking::combine::cache::validation::validate_sample_domains)
-    /// tracks the two attributes against separate references rather than folding a whole set
-    /// through this.
+    /// is why the combine's `validate_sample_domains` tracks the two attributes against separate
+    /// references rather than folding a whole set through this.
     ///
     /// When both do state a unit the comparison is exact, case included: `MJy/sr` and `mJy/sr` are
     /// a factor of 10⁹ apart and both are in use, so case-folding would conflate exactly the

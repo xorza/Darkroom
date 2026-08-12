@@ -33,7 +33,7 @@ pub enum FitsCubeInterpretation {
 /// The reference readers split three ways on this: PixInsight assumes `[0, 1]` with a configurable
 /// input range, Siril scans the pixel data, and astropy does not normalize at all. Scanning is the
 /// one option ruled out here — a divisor read off each frame's own extrema differs frame to frame,
-/// which is what [`crate::StackError::SampleSpanMismatch`] exists to reject.
+/// which is what [`crate::StackError::SampleDomainMismatch`] exists to reject.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum FitsFloatScale {
     /// Decide from `DATAMAX`: a declared saturation level well above unity means the samples are
