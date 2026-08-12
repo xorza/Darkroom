@@ -4,6 +4,8 @@
 //! decision — which container, which decoder, what transfer function, what colour interpretation,
 //! which demosaic.
 
+use serde::{Deserialize, Serialize};
+
 use crate::io::image::fits::provenance::FitsTransferProvenance;
 use crate::io::image::sample_domain::SampleDomain;
 use crate::io::raw::provenance::RawTransferProvenance;
@@ -92,6 +94,34 @@ pub enum DemosaicProvenance {
     LibRaw,
 }
 
+/// Which end of the image the first stored row belongs to.
+///
+/// FITS declares this with `ROWORDER`, and the rows are decoded in file order whatever it says —
+/// Siril's rule that "`ROWORDER` shall not be used to unflip the image data for stacking", which
+/// keeps a frame's samples where the file put them. Only the Bayer phase is corrected for it, in
+/// `read_bayer_cfa`.
+///
+/// The consequence is that two frames of one target declaring different orders load as vertically
+/// mirrored images. Registration cannot reconcile that — triangle matching rejects a mirrored field
+/// outright by default, and a similarity transform could not express the reflection anyway — so the
+/// order is recorded here and frames are held to agreeing on it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RowOrder {
+    /// The first stored row is the top of the image.
+    TopDown,
+    /// The first stored row is the bottom — the image is stored upside-down relative to display.
+    BottomUp,
+}
+
+impl std::fmt::Display for RowOrder {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::TopDown => "TOP-DOWN",
+            Self::BottomUp => "BOTTOM-UP",
+        })
+    }
+}
+
 /// Decoder decisions that affect the meaning of the returned samples.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ImageProvenance {
@@ -102,4 +132,7 @@ pub struct ImageProvenance {
     /// Whether this load path itself clipped samples.
     pub clipped: bool,
     pub demosaic: DemosaicProvenance,
+    /// Which end of the image the first stored row belongs to, as the source declared it. The rows
+    /// were not reordered to match — see [`RowOrder`].
+    pub row_order: RowOrder,
 }

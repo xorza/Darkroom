@@ -11,7 +11,8 @@ use crate::io::image::fits::decode as fits_decode;
 use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::image_metadata::ImageMetadata;
 use crate::io::image::image_provenance::{
-    ColorProvenance, DecoderProvenance, DemosaicProvenance, ImageProvenance, TransferProvenance,
+    ColorProvenance, DecoderProvenance, DemosaicProvenance, ImageProvenance, RowOrder,
+    TransferProvenance,
 };
 use crate::io::image::linear_pixels::LinearPixels;
 use crate::io::image::load_context::LoadContext;
@@ -94,6 +95,8 @@ impl LinearImage {
                 color,
                 clipped: false,
                 demosaic: DemosaicProvenance::None,
+                // Every raster format this path reads stores its first row at the top.
+                row_order: RowOrder::TopDown,
             });
             return Ok(image);
         }

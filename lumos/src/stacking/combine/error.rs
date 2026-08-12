@@ -6,6 +6,7 @@ use common::CancelToken;
 
 use crate::error::{FrameDimensionMismatch, InvalidConfigField};
 use crate::io::image::error::ImageError;
+use crate::io::image::image_provenance::RowOrder;
 use crate::io::image::sample_domain::SampleDomain;
 use crate::stacking::calibration_masters::error::CalibrationError;
 use crate::stacking::frame_store::error::FrameStoreError;
@@ -101,6 +102,22 @@ pub enum Error {
         actual: SampleDomain,
         reference_index: usize,
         expected: SampleDomain,
+    },
+
+    /// Two frames store their rows from opposite ends, so they are mirrored views of one field.
+    ///
+    /// The rows are never reordered on decode, so a `BOTTOM-UP` frame and a `TOP-DOWN` one of the
+    /// same target are upside-down relative to each other. Named here rather than left to surface
+    /// as a registration failure with no stated cause.
+    #[error(
+        "frame {index} stores its rows {actual}, but frame {reference_index} stores them \
+         {expected}; the two are mirrored views and cannot be combined"
+    )]
+    RowOrderMismatch {
+        index: usize,
+        actual: RowOrder,
+        reference_index: usize,
+        expected: RowOrder,
     },
 
     #[error("frame {index}, channel {channel}, pixel {pixel} has non-finite image value {value}")]

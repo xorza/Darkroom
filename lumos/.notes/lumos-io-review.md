@@ -16,24 +16,6 @@ Siril's FITS orientation documentation.
 
 ---
 
-## FITS orientation is corrected for the CFA phase but not for the rows
-
-`read_bayer_cfa` flips the Bayer pattern on `ROWORDER = BOTTOM-UP`. The pixel rows are never
-reordered, and nothing records or checks which order they are in.
-
-- [ ] Rows are left in file order, which matches Siril's rule that "`ROWORDER` shall not be used to
-      unflip the image data for stacking", but nothing records the row order on the decoded image and
-      nothing checks it is consistent across a stack. A `BOTTOM-UP` and a `TOP-DOWN` frame of the
-      same target load as vertically mirrored images; star-pattern registration over a similarity
-      transform cannot align a mirrored field, and the failure surfaces far from here.
-- [ ] `CfaPattern::from_bayerpat` maps the string `"TRUE"` to `Rggb`. There is no comment saying
-      which writer emits that or why RGGB is the right guess for it, and the mapping silently
-      succeeds — a wrong guess here is a mis-debayered frame with no diagnostic.
-- [ ] The `ROWORDER` flip is applied before the `XBAYROFF`/`YBAYROFF` shifts, and nothing states
-      which frame the offsets are expressed in. `write_cfa_metadata` emits `ROWORDER` only for the
-      `Bayer` and `XTrans` arms, so a `Mono` CFA FITS written by `save_cfa_fits` carries no row-order
-      declaration at all.
-
 ## RCD's interpolated region is one pixel wider than the border it overwrites
 
 `BORDER = 4` in `io/raw/demosaic/bayer/rcd`. RawTherapee's `rcd_demosaic.cc` uses

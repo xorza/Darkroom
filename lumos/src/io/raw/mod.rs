@@ -30,8 +30,8 @@ use crate::io::image::cfa::{CfaFrameInfo, CfaImage, CfaType, QUANTIZATION_SIGMA_
 use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::image_metadata::{BitPix, ImageMetadata};
 use crate::io::image::image_provenance::{
-    ColorProvenance, DecoderProvenance, DemosaicProvenance, ImageProvenance, SourceContainer,
-    TransferProvenance,
+    ColorProvenance, DecoderProvenance, DemosaicProvenance, ImageProvenance, RowOrder,
+    SourceContainer, TransferProvenance,
 };
 use crate::io::image::linear::LinearImage;
 use crate::io::image::sensor::SensorType;
@@ -1100,6 +1100,8 @@ pub(crate) fn load_raw(path: &Path, cancel: &CancelToken) -> Result<LinearImage,
             // fallback divides by the integer maximum, and both demosaic paths clamp their output.
             clipped: true,
             demosaic,
+            // libraw hands back the visible area top-down; no RAW format stores it otherwise.
+            row_order: RowOrder::TopDown,
         }),
         ..Default::default()
     };
@@ -1195,6 +1197,8 @@ pub(crate) fn load_raw_cfa(path: &Path, cancel: &CancelToken) -> Result<CfaImage
             color: ColorProvenance::SensorCfa,
             clipped: false,
             demosaic: DemosaicProvenance::None,
+            // libraw hands back the visible area top-down; no RAW format stores it otherwise.
+            row_order: RowOrder::TopDown,
         }),
         ..Default::default()
     };

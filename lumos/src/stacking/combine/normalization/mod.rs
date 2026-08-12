@@ -260,6 +260,7 @@ fn measure_common_stats(
             channels: channels.iter().copied().collect(),
             quantization_sigma: frame.source_stats.quantization_sigma,
             domain: frame.source_stats.domain.clone(),
+            row_order: frame.source_stats.row_order,
         })
         .collect())
 }

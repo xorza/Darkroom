@@ -13,7 +13,7 @@ use crate::io::image::error::ImageError;
 use crate::io::image::fits::decode::DecodedFitsImage;
 use crate::io::image::fits::decode::plan::FitsDecodePlan;
 use crate::io::image::fits::error::{fits_err, fits_unsupported};
-use crate::io::image::fits::metadata::{read_metadata, read_text};
+use crate::io::image::fits::metadata::{read_metadata, read_row_order, read_text};
 use crate::io::image::fits::options::FitsNullPolicy;
 use crate::io::image::fits::provenance::{
     FitsChecksumProvenance, FitsHduProvenance, FitsTransferProvenance,
@@ -112,6 +112,10 @@ pub(super) fn read_decoded_hdu(
         },
         clipped: false,
         demosaic: DemosaicProvenance::None,
+        // Recorded, not acted on: the rows above were copied in file order whatever this says, and
+        // only the Bayer phase was corrected for it. What it buys is that a set mixing the two
+        // orders — which loads as mutually mirrored images — can be named as such.
+        row_order: read_row_order(header).map_err(|source| fits_err(path, source))?,
     });
 
     Ok(DecodedFitsImage {

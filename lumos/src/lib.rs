@@ -51,8 +51,8 @@ pub use io::image::fits::provenance::{
 pub use io::image::image_dimensions::ImageDimensions;
 pub use io::image::image_metadata::{BitPix, ImageMetadata};
 pub use io::image::image_provenance::{
-    ColorProvenance, DecoderProvenance, DemosaicProvenance, ImageProvenance, SourceContainer,
-    TransferProvenance,
+    ColorProvenance, DecoderProvenance, DemosaicProvenance, ImageProvenance, RowOrder,
+    SourceContainer, TransferProvenance,
 };
 pub use io::image::linear::LinearImage;
 pub use io::image::load_context::LoadContext;

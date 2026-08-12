@@ -2,6 +2,7 @@ use fits_well::header::Header;
 
 use crate::io::image::cfa::{CfaImage, CfaType};
 use crate::io::image::image_metadata::{BitPix, ImageMetadata};
+use crate::io::image::image_provenance::RowOrder;
 use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::io::raw::demosaic::xtrans::XTransPattern;
 
@@ -88,6 +89,14 @@ pub(super) fn write_image_metadata(
 }
 
 pub(super) fn write_cfa_metadata(header: &mut Header, cfa: &CfaImage) -> fits_well::Result<()> {
+    // Declared for every sensor type, not just the mosaiced ones. The phase only matters where
+    // there is a pattern, but the row order is what says whether two frames are the same way up —
+    // and a mono frame is as capable of being mirrored against its neighbours as a Bayer one.
+    //
+    // Always `TOP-DOWN`, and truthfully: whatever order the source stored its rows in, they are in
+    // this file in the order this writer emits them, and the pattern beside them was already put
+    // into those terms on load.
+    header.set("ROWORDER", "TOP-DOWN")?;
     match cfa.metadata.cfa_type.as_ref() {
         Some(CfaType::Mono) => {
             header.set("CFATYPE", "MONO")?;
@@ -95,7 +104,6 @@ pub(super) fn write_cfa_metadata(header: &mut Header, cfa: &CfaImage) -> fits_we
         Some(CfaType::Bayer(pattern)) => {
             header.set("CFATYPE", "BAYER")?;
             header.set("BAYERPAT", bayerpat(*pattern))?;
-            header.set("ROWORDER", "TOP-DOWN")?;
         }
         Some(CfaType::XTrans(pattern)) => {
             XTransPattern::new(*pattern).map_err(|_| fits_well::FitsError::TypeMismatch {
@@ -103,7 +111,6 @@ pub(super) fn write_cfa_metadata(header: &mut Header, cfa: &CfaImage) -> fits_we
                 expected: "valid X-Trans pattern",
             })?;
             header.set("CFATYPE", "XTRANS")?;
-            header.set("ROWORDER", "TOP-DOWN")?;
             for (row, values) in pattern.iter().enumerate() {
                 let keyword = format!("XTRNROW{row}");
                 let value = values
@@ -198,6 +205,22 @@ pub(super) fn read_cfa_from_headers(header: &Header) -> fits_well::Result<Option
     read_bayer_cfa(header, false)
 }
 
+/// The row order the header declares, defaulting to `TOP-DOWN` where it declares none.
+///
+/// The FITS standard has no `ROWORDER`; it is a convention, and a file without it is read the way
+/// every writer that omits it means — first row first. Anything the keyword does not spell as
+/// `BOTTOM-UP` is taken as top-down for the same reason.
+pub(super) fn read_row_order(header: &Header) -> fits_well::Result<RowOrder> {
+    let Some(roworder) = header.get_text("ROWORDER")? else {
+        return Ok(RowOrder::TopDown);
+    };
+    Ok(if roworder.trim().eq_ignore_ascii_case("BOTTOM-UP") {
+        RowOrder::BottomUp
+    } else {
+        RowOrder::TopDown
+    })
+}
+
 fn read_bayer_cfa(header: &Header, required: bool) -> fits_well::Result<Option<CfaType>> {
     let Some(bayerpat) = header.get_text("BAYERPAT")? else {
         if required {
@@ -231,6 +254,10 @@ fn read_bayer_cfa(header: &Header, required: bool) -> fits_well::Result<Option<C
         }
     }
 
+    // The offsets are in the stored image's own coordinates — where the pattern starts within the
+    // data as written — so they compose onto the pattern *after* the row-order correction above has
+    // put it in file-order terms. Applying them first would express them against a display
+    // orientation the samples were never rearranged into.
     let xoff = header.get_integer("XBAYROFF")?.unwrap_or(0);
     let yoff = header.get_integer("YBAYROFF")?.unwrap_or(0);
     if yoff & 1 != 0 {
@@ -395,7 +422,8 @@ mod tests {
     use fits_well::header::Header;
 
     use crate::io::image::cfa::CfaType;
-    use crate::io::image::fits::metadata::{parse_sexagesimal, read_bayer_cfa};
+    use crate::io::image::fits::metadata::{parse_sexagesimal, read_bayer_cfa, read_row_order};
+    use crate::io::image::image_provenance::RowOrder;
     use crate::io::raw::demosaic::bayer::CfaPattern;
 
     /// A minimal Bayer image header, with `ROWORDER` omitted when `roworder` is `None`.
@@ -475,6 +503,33 @@ mod tests {
             ),
             CfaPattern::Gbrg
         );
+    }
+
+    #[test]
+    fn row_order_is_read_from_the_header_and_defaults_to_top_down() {
+        // Recorded so a set mixing the two can be named; nothing reorders rows on it.
+        let mut header = Header::new();
+        assert_eq!(read_row_order(&header).unwrap(), RowOrder::TopDown);
+
+        for declared in ["BOTTOM-UP", "bottom-up", " BOTTOM-UP "] {
+            header.set("ROWORDER", declared).unwrap();
+            assert_eq!(
+                read_row_order(&header).unwrap(),
+                RowOrder::BottomUp,
+                "{declared}"
+            );
+        }
+
+        // Anything the keyword does not spell as bottom-up is read the way a writer that omits it
+        // means — first row first.
+        for declared in ["TOP-DOWN", "top-down", "anything else"] {
+            header.set("ROWORDER", declared).unwrap();
+            assert_eq!(
+                read_row_order(&header).unwrap(),
+                RowOrder::TopDown,
+                "{declared}"
+            );
+        }
     }
 
     #[test]
