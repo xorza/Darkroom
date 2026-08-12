@@ -31,7 +31,7 @@ use crate::io::image::fits::error::{fits_err, fits_unsupported};
 use crate::io::image::fits::metadata::{read_cfa_from_headers, read_quantization_sigma};
 use crate::io::image::fits::options::{FitsChecksumPolicy, FitsCubeInterpretation};
 use crate::io::image::fits::provenance::{FitsChecksumProvenance, FitsChecksumState};
-use crate::io::image::image_metadata::{BitPix, ImageMetadata};
+use crate::io::image::image_metadata::ImageMetadata;
 use crate::io::image::image_provenance::ColorProvenance;
 use crate::io::image::linear::LinearImage;
 use crate::io::image::linear_pixels::LinearPixels;
@@ -100,16 +100,7 @@ impl DecodedFitsImage {
             .map(|sigma| sigma / physical_scale)
             .or_else(|| {
                 let transfer = fits_transfer?;
-                matches!(
-                    self.metadata.bitpix,
-                    BitPix::UInt8
-                        | BitPix::Int16
-                        | BitPix::UInt16
-                        | BitPix::Int32
-                        | BitPix::UInt32
-                        | BitPix::Int64
-                )
-                .then(|| {
+                self.metadata.bitpix.is_integer().then(|| {
                     transfer.bscale.abs() as f32 / physical_scale * QUANTIZATION_SIGMA_PER_STEP
                 })
             });
