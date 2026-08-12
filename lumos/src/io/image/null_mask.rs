@@ -1,3 +1,6 @@
+use imaginarium::Buffer2;
+use rayon::prelude::*;
+
 use crate::bit_buffer2::BitBuffer2;
 use crate::math::size2us::Size2us;
 
@@ -47,6 +50,23 @@ impl NullMask {
     /// Whether the pixel at this row-major index carries no measurement.
     pub(crate) fn is_null(&self, index: usize) -> bool {
         self.nulls.get(index)
+    }
+
+    /// The mask as a plane: `1.0` where a pixel holds a measurement, `0.0` where it does not.
+    ///
+    /// The form every consumer wants it in — the combine gates on a coverage plane, and the warp
+    /// resamples this one through the same kernel as the image to find how much real data backs
+    /// each output pixel. Bit-packed is how it is *stored*, one f32 per pixel is how it is used.
+    pub(crate) fn validity_plane(&self) -> Buffer2<f32> {
+        let size = self.nulls.size;
+        Buffer2::new(
+            size.width,
+            size.height,
+            (0..size.width * size.height)
+                .into_par_iter()
+                .map(|index| if self.is_null(index) { 0.0 } else { 1.0 })
+                .collect::<Vec<f32>>(),
+        )
     }
 }
 

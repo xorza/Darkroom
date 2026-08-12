@@ -7,7 +7,6 @@
 //! every case.
 
 use imaginarium::Buffer2;
-use rayon::prelude::*;
 
 use crate::stacking::frame_store::StackableImage;
 
@@ -91,15 +90,7 @@ impl WarpQuality<Buffer2<f32>> {
         let Some(nulls) = image.nulls() else {
             return Self::None;
         };
-        let dimensions = image.dimensions();
-        let coverage = Buffer2::new(
-            dimensions.width(),
-            dimensions.height(),
-            (0..dimensions.pixel_count())
-                .into_par_iter()
-                .map(|index| if nulls.is_null(index) { 0.0 } else { 1.0 })
-                .collect::<Vec<f32>>(),
-        );
+        let coverage = nulls.validity_plane();
         Self::Planes {
             confidence: coverage.clone(),
             coverage,
