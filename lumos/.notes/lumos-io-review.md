@@ -16,33 +16,6 @@ Siril's FITS orientation documentation.
 
 ---
 
-## The two decoders return samples in different numeric domains and nothing reconciles them
-
-`lumos/CLAUDE.md` states pixels are "normalized to `[0, 1]`". Only the RAW path does that. The FITS
-path returns BSCALE/BZERO **physical** values and says so in provenance — and that provenance is
-never read. Every consumer downstream of a `LinearImage` therefore silently assumes a domain it was
-not told.
-
-- [ ] `load_raw` / `load_raw_cfa` divide by `BlackLevel::inv_range` = `1/(maximum - black)`, landing
-      in `[0, 1]`. `read_decoded_hdu` takes `Image::physical_f32()` verbatim, so a `BITPIX = 16`,
-      `BZERO = 32768` frame arrives as `0.0 ..= 65535.0`. Both are labelled `LinearImage`, both are
-      `StackableImage`, and the type carries no scale.
-- [ ] `TransferProvenance::{RawNormalized, FitsPhysical, DeclaredLinearRaster}` is the only record of
-      which domain a frame is in, and `rg '\.transfer'` over `lumos/src` finds reads only in
-      `io/image/fits/decode/tests.rs`. Nothing in the pipeline branches on it, converts on it, or
-      rejects a mix of domains in one stack.
-- [ ] `LinearImage::apply_intensity_remap` clamps the mono path to `[0, 1]` and caps RGB at
-      `maxc > 1.0`. On a FITS frame in ADU that is the whole image crushed to white. Same assumption
-      in `LinearImage::save`, which hands the planes to imaginarium as if they were display-ranged.
-- [ ] The two `quantization_sigma` sources are each internally consistent with their own domain and
-      with nothing else: `load_raw_cfa` stores `inv_range * QUANTIZATION_SIGMA_PER_STEP` (one ADU in
-      normalized units), `DecodedFitsImage::into_cfa` stores `bscale.abs() * ...` (one ADU in
-      physical units). A consumer comparing two frames' sigmas has no way to know they are not
-      commensurate.
-- [ ] `DecodedFitsImage::into_linear` accepts any `LinearImage` shape without consulting `BUNIT`,
-      which `read_decoded_hdu` did read and store. A frame in `Jy/beam`, `electron`, or `count/s` is
-      indistinguishable to everything downstream from one in ADU.
-
 ## Standard FITS null pixels make the whole file unloadable
 
 `validate_fits_pixels` fails the load on the first non-finite sample. In FITS, a non-finite sample is
