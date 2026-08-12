@@ -1,7 +1,7 @@
 use crate::io::image::cfa::CfaType;
 use crate::io::image::image_provenance::{
-    ColorProvenance, DecoderProvenance, DemosaicProvenance, ImageProvenance, SourceContainer,
-    TransferProvenance,
+    ColorProvenance, DecoderProvenance, DemosaicProvenance, ImageProvenance, RowOrder,
+    SourceContainer, TransferProvenance,
 };
 use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::io::raw::provenance::RawTransferProvenance;
@@ -107,6 +107,7 @@ fn the_median_filter_follows_interpolation_not_the_sensor_pattern() {
             color: ColorProvenance::SensorRgb,
             clipped: true,
             demosaic,
+            row_order: RowOrder::TopDown,
         });
 
         let mut pool = DetectionResources::new(size);

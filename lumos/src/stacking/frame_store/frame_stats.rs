@@ -4,6 +4,7 @@ use arrayvec::ArrayVec;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
+use crate::io::image::image_provenance::RowOrder;
 use crate::io::image::sample_domain::SampleDomain;
 use crate::math::statistics::{MedianMad, mad_f32_with_scratch, median_f32_mut};
 use crate::stacking::frame_store::StackableImage;
@@ -17,6 +18,10 @@ pub(crate) struct FrameStats {
     /// [`ImageMetadata::sample_domain`](crate::ImageMetadata::sample_domain). Carried beside the
     /// statistics because it is what makes two frames' statistics comparable at all.
     pub(crate) domain: Option<SampleDomain>,
+    /// Which end of the image the frame's first stored row belongs to — see
+    /// [`RowOrder`](crate::RowOrder). Carried here for the same reason as the domain: the metadata
+    /// it comes from is dropped for every frame but the first, and this is what travels instead.
+    pub(crate) row_order: Option<RowOrder>,
 }
 
 impl FrameStats {
@@ -36,6 +41,7 @@ impl FrameStats {
         let dimensions = image.dimensions();
         let quantization_sigma = image.quantization_sigma();
         let domain = image.metadata().sample_domain();
+        let row_order = image.metadata().row_order();
         let nulls = image.nulls();
         let channels = (0..dimensions.channels())
             .into_par_iter()
@@ -76,6 +82,7 @@ impl FrameStats {
             channels,
             quantization_sigma,
             domain,
+            row_order,
         }
     }
 }

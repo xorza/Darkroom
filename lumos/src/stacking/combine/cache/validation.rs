@@ -8,6 +8,7 @@
 use common::CancelToken;
 
 use crate::io::image::image_dimensions::ImageDimensions;
+use crate::io::image::image_provenance::RowOrder;
 use crate::io::image::sample_domain::SampleDomain;
 use crate::stacking::combine::CANCEL_POLL_CHUNK;
 use crate::stacking::combine::error::Error;
@@ -97,6 +98,39 @@ pub(crate) fn validate_sample_domains(frames: &[StoredFrame]) -> Result<(), Erro
                     actual: domain.clone(),
                     reference_index,
                     expected: expected.clone(),
+                });
+            }
+            Some(_) => {}
+        }
+    }
+    Ok(())
+}
+
+/// Check that every frame declaring a row order declares the same one.
+///
+/// Rows are decoded in the order the file stores them — Siril's rule that `ROWORDER` "shall not be
+/// used to unflip the image data for stacking" — so two frames declaring different orders are
+/// vertically mirrored views of the same sky. Averaging them is meaningless, and registration
+/// cannot reconcile it either: triangle matching rejects a mirrored field by default, and a
+/// similarity transform has no reflection to express it with. The failure otherwise surfaces as an
+/// unexplained registration failure a long way from the frame that caused it.
+///
+/// A frame declaring none — synthesized rather than decoded — is skipped rather than treated as
+/// agreeing, as everywhere else here.
+pub(crate) fn validate_row_orders(frames: &[StoredFrame]) -> Result<(), Error> {
+    let mut reference: Option<(usize, RowOrder)> = None;
+    for (index, frame) in frames.iter().enumerate() {
+        let Some(row_order) = frame.source_stats.row_order else {
+            continue;
+        };
+        match reference {
+            None => reference = Some((index, row_order)),
+            Some((reference_index, expected)) if row_order != expected => {
+                return Err(Error::RowOrderMismatch {
+                    index,
+                    actual: row_order,
+                    reference_index,
+                    expected,
                 });
             }
             Some(_) => {}

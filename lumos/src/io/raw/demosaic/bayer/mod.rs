@@ -23,9 +23,22 @@ pub enum CfaPattern {
 
 impl CfaPattern {
     /// Parse from FITS BAYERPAT header value (e.g. "RGGB", "BGGR", "GRBG", "GBRG").
+    ///
+    /// `"TRUE"` is not a pattern. Some writers put a boolean there — "yes, this frame is mosaiced"
+    /// — and say nothing about which of the four phases it carries. Reading it as RGGB is a guess
+    /// at the most common one, right roughly a quarter of the time and a fully mis-debayered frame
+    /// otherwise, so it is warned about rather than resolved silently. Kept because rejecting it
+    /// would leave those files unloadable with no way to state the pattern by hand.
     pub fn from_bayerpat(s: &str) -> Option<Self> {
         match s.trim().to_uppercase().as_str() {
-            "RGGB" | "TRUE" => Some(CfaPattern::Rggb),
+            "RGGB" => Some(CfaPattern::Rggb),
+            "TRUE" => {
+                tracing::warn!(
+                    "BAYERPAT is 'TRUE', which states that the frame is mosaiced but not in which \
+                     phase; assuming RGGB. A wrong assumption here mis-debayers the frame."
+                );
+                Some(CfaPattern::Rggb)
+            }
             "BGGR" => Some(CfaPattern::Bggr),
             "GRBG" => Some(CfaPattern::Grbg),
             "GBRG" => Some(CfaPattern::Gbrg),

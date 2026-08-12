@@ -9,8 +9,8 @@ use crate::io::image::fits::provenance::{
     FitsChecksumProvenance, FitsChecksumState, FitsHduProvenance, FitsTransferProvenance,
 };
 use crate::io::image::image_provenance::{
-    ColorProvenance, DecoderProvenance, DemosaicProvenance, ImageProvenance, SourceContainer,
-    TransferProvenance,
+    ColorProvenance, DecoderProvenance, DemosaicProvenance, ImageProvenance, RowOrder,
+    SourceContainer, TransferProvenance,
 };
 use crate::io::image::linear_pixels::LinearPixels;
 use crate::io::image::null_mask::NullMask;
@@ -626,6 +626,59 @@ fn normalization_fits_a_masked_set_over_the_pixels_they_all_reached() {
 }
 
 #[test]
+fn stack_images_rejects_frames_whose_rows_run_from_opposite_ends() {
+    // Rows are decoded in the order the file stored them, so a BOTTOM-UP frame and a TOP-DOWN one
+    // of the same field are upside-down relative to each other. Averaging them is meaningless, and
+    // registration cannot reconcile a mirrored field either — this names the cause where it can be
+    // seen, instead of leaving it to surface as a registration failure with no stated reason.
+    let dims = ImageDimensions::new((2, 2), 1);
+    let frame = |row_order: Option<RowOrder>| {
+        let mut image = LinearImage::from_pixels(dims, vec![1.0; 4]);
+        image.metadata.provenance = row_order.map(|row_order| ImageProvenance {
+            container: SourceContainer::Fits,
+            decoder: DecoderProvenance::FitsWell,
+            transfer: TransferProvenance::DeclaredLinearRaster,
+            color: ColorProvenance::Monochrome,
+            clipped: false,
+            demosaic: DemosaicProvenance::None,
+            row_order,
+        });
+        StackFrame::from(image)
+    };
+    let stack = |orders: [Option<RowOrder>; 2]| {
+        stack_images(
+            orders.map(frame).into_iter().collect(),
+            StackConfig::default(),
+            ProgressCallback::default(),
+            CancelToken::never(),
+        )
+    };
+
+    assert!(
+        matches!(
+            stack([Some(RowOrder::TopDown), Some(RowOrder::BottomUp)]).unwrap_err(),
+            Error::RowOrderMismatch {
+                index: 1,
+                reference_index: 0,
+                ..
+            }
+        ),
+        "a mirrored frame must be named, not averaged in"
+    );
+
+    // Agreeing on either order stacks, and so does a set where a frame declares none — an
+    // undeclared order is "cannot tell", which must not reject an in-memory frame.
+    for orders in [
+        [Some(RowOrder::TopDown), Some(RowOrder::TopDown)],
+        [Some(RowOrder::BottomUp), Some(RowOrder::BottomUp)],
+        [Some(RowOrder::BottomUp), None],
+        [None, None],
+    ] {
+        assert!(stack(orders).is_ok(), "orders {orders:?} must stack");
+    }
+}
+
+#[test]
 fn stack_images_rejects_frames_decoded_into_different_sample_domains() {
     // The case decode-time normalization introduced: a `uint16` FITS is divided by 65535, a
     // `float32` one holding the same ADU is taken as already normalized and divided by 1. Both
@@ -652,6 +705,7 @@ fn stack_images_rejects_frames_decoded_into_different_sample_domains() {
         color: ColorProvenance::Monochrome,
         clipped: false,
         demosaic: DemosaicProvenance::None,
+        row_order: RowOrder::TopDown,
     };
     let frame = |declared: Option<(f32, Option<&str>)>| {
         let mut image = LinearImage::from_pixels(ImageDimensions::new((2, 2), 1), vec![1.0; 4]);
@@ -1068,6 +1122,7 @@ fn common_coverage_makes_reference_norms_and_noise_weights_fill_invariant() {
                 channels: [MedianMad { median, mad }].into_iter().collect(),
                 quantization_sigma: None,
                 domain: None,
+                row_order: None,
             };
             frame
         })
@@ -2163,6 +2218,7 @@ fn noise_weighting_folds_normalization_gain() {
             channels,
             quantization_sigma: None,
             domain: None,
+            row_order: None,
         }
     };
     let frame_norm = |gain: f32| {

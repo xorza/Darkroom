@@ -4,7 +4,7 @@
 //! [`ImageMetadata::bitpix`], the pixel type the FITS header declared.
 
 use crate::io::image::cfa;
-use crate::io::image::image_provenance::{DemosaicProvenance, ImageProvenance};
+use crate::io::image::image_provenance::{DemosaicProvenance, ImageProvenance, RowOrder};
 use crate::io::image::sample_domain::SampleDomain;
 
 /// FITS BITPIX values representing pixel data types.
@@ -112,6 +112,17 @@ impl ImageMetadata {
         self.provenance
             .as_ref()
             .and_then(|provenance| provenance.transfer.sample_domain())
+    }
+
+    /// Which end of the image the first stored row belongs to, or `None` for an image this crate
+    /// synthesized rather than decoded.
+    ///
+    /// Two frames are the same view only when both answer and the answers match; `None` is "cannot
+    /// tell", which is not the same as agreeing.
+    pub fn row_order(&self) -> Option<RowOrder> {
+        self.provenance
+            .as_ref()
+            .map(|provenance| provenance.row_order)
     }
 
     /// Whether these samples came out of a demosaic, and so carry its interpolation artifacts.

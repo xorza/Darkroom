@@ -278,6 +278,7 @@ fn frame_stats_sidecar_roundtrip() {
         .collect(),
         quantization_sigma: Some(0.000_02),
         domain: None,
+        row_order: None,
     };
     write_frame_stats(&temp_dir, base, &stats_1ch).unwrap();
     let read_1ch = read_frame_stats(&temp_dir, base).unwrap();
@@ -306,6 +307,7 @@ fn frame_stats_sidecar_roundtrip() {
         .collect(),
         quantization_sigma: None,
         domain: None,
+        row_order: None,
     };
     write_frame_stats(&temp_dir, base, &stats_3ch).unwrap();
     let read_3ch = read_frame_stats(&temp_dir, base).unwrap();
@@ -351,6 +353,7 @@ fn frame_stats_sidecar_roundtrip() {
             channels: stats_1ch.channels.clone(),
             quantization_sigma: Some(sigma),
             domain: None,
+            row_order: None,
         };
         write_frame_stats(&temp_dir, "poisoned.bin", &poisoned).unwrap();
         assert!(

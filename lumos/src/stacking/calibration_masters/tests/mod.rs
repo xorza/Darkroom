@@ -6,8 +6,8 @@ use crate::io::image::fits::provenance::{
     FitsChecksumProvenance, FitsChecksumState, FitsHduProvenance, FitsTransferProvenance,
 };
 use crate::io::image::image_provenance::{
-    ColorProvenance, DecoderProvenance, DemosaicProvenance, ImageProvenance, SourceContainer,
-    TransferProvenance,
+    ColorProvenance, DecoderProvenance, DemosaicProvenance, ImageProvenance, RowOrder,
+    SourceContainer, TransferProvenance,
 };
 use crate::io::image::load_context::LoadContext;
 use crate::io::image::sample_domain::SampleDomain;
@@ -322,6 +322,7 @@ fn raw_provenance(physical_scale: f32) -> ImageProvenance {
         color: ColorProvenance::SensorCfa,
         clipped: false,
         demosaic: DemosaicProvenance::None,
+        row_order: RowOrder::TopDown,
     }
 }
 
@@ -348,6 +349,7 @@ fn fits_provenance(physical_scale: f32, unit: Option<&str>) -> ImageProvenance {
         color: ColorProvenance::SensorCfa,
         clipped: false,
         demosaic: DemosaicProvenance::None,
+        row_order: RowOrder::TopDown,
     }
 }
 
