@@ -6,6 +6,7 @@ use common::CancelToken;
 
 use crate::error::{FrameDimensionMismatch, InvalidConfigField};
 use crate::io::image::error::ImageError;
+use crate::io::image::sample_domain::SampleDomain;
 use crate::stacking::calibration_masters::error::CalibrationError;
 use crate::stacking::frame_store::error::FrameStoreError;
 use crate::stacking::frame_store::warp_quality::FramePlane;
@@ -86,19 +87,20 @@ pub enum Error {
     /// Two frames were decoded into different sample domains, so combining them would average
     /// values that do not mean the same thing.
     ///
-    /// Reached when both frames declare a span and the spans differ — a `uint16` FITS divided by
-    /// 65535 stacked against a `float32` one taken as already normalized, or two RAWs whose
-    /// `maximum − black` differ. `Normalization::Global` would otherwise absorb the ratio into its
-    /// fitted gain and hand back a plausible-looking result.
+    /// Reached when both frames declare a domain and the domains differ — a `uint16` FITS divided
+    /// by 65535 stacked against a `float32` one taken as already normalized, two RAWs whose
+    /// `maximum − black` differ, or two frames on the same span whose `BUNIT` names different
+    /// quantities. `Normalization::Global` would otherwise absorb the ratio into its fitted gain
+    /// and hand back a plausible-looking result.
     #[error(
-        "frame {index} was decoded with sample span {actual}, but frame {reference_index} used \
-         {expected}; frames divided by different spans cannot be combined"
+        "frame {index} was decoded into sample domain {actual}, but frame {reference_index} used \
+         {expected}; frames from different domains cannot be combined"
     )]
-    SampleSpanMismatch {
+    SampleDomainMismatch {
         index: usize,
-        actual: f32,
+        actual: SampleDomain,
         reference_index: usize,
-        expected: f32,
+        expected: SampleDomain,
     },
 
     #[error("frame {index}, channel {channel}, pixel {pixel} has non-finite image value {value}")]

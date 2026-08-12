@@ -266,18 +266,15 @@ impl CfaImage {
         );
         // An invariant the caller upholds, not bad input: `CalibrationMasters` rejects a
         // domain-mismatched master before reaching here, and every other caller pairs frames it
-        // decoded itself. Only checked when both declare a span — a synthesized frame has none.
+        // decoded itself. Only checked when both declare a domain — a synthesized frame has none.
         debug_assert!(
-            match (
-                self.metadata.physical_scale(),
-                dark.metadata.physical_scale()
-            ) {
-                (Some(light), Some(dark)) => light == dark,
+            match (self.metadata.sample_domain(), dark.metadata.sample_domain()) {
+                (Some(light), Some(dark)) => light.commensurate_with(&dark),
                 _ => true,
             },
-            "CfaImage sample span mismatch: {:?} vs {:?}",
-            self.metadata.physical_scale(),
-            dark.metadata.physical_scale()
+            "CfaImage sample domain mismatch: {:?} vs {:?}",
+            self.metadata.sample_domain(),
+            dark.metadata.sample_domain()
         );
         self.data
             .par_iter_mut()

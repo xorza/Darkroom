@@ -2,11 +2,15 @@ mod mem_budget;
 mod synthetic;
 
 use crate::io::image::cfa::{CfaImage, CfaType, QUANTIZATION_SIGMA_PER_STEP};
+use crate::io::image::fits::provenance::{
+    FitsChecksumProvenance, FitsChecksumState, FitsHduProvenance, FitsTransferProvenance,
+};
 use crate::io::image::image_provenance::{
     ColorProvenance, DecoderProvenance, DemosaicProvenance, ImageProvenance, SourceContainer,
     TransferProvenance,
 };
 use crate::io::image::load_context::LoadContext;
+use crate::io::image::sample_domain::SampleDomain;
 use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::io::raw::provenance::RawTransferProvenance;
 use crate::stacking::calibration_masters::DEFAULT_SIGMA_THRESHOLD;
@@ -211,14 +215,67 @@ fn calibrate_rejects_missing_and_mismatched_cfa_before_mutation() {
 
         assert_eq!(
             masters.calibrate(&mut light),
-            Err(CalibrationError::SampleSpanMismatch {
+            Err(CalibrationError::SampleDomainMismatch {
                 component,
-                light: 16_383.0,
-                master: 65_535.0,
+                light: SampleDomain {
+                    scale: 16_383.0,
+                    unit: None,
+                },
+                master: SampleDomain {
+                    scale: 65_535.0,
+                    unit: None,
+                },
             })
         );
         assert_eq!(light.data.pixels(), original_data);
         assert!(!light.metadata.calibrated);
+    }
+
+    // The same failure with no span to give it away: a master and a light on one span whose BUNIT
+    // names different quantities. The subtraction would run and report success.
+    {
+        let mut master = constant_cfa(Size2us::new(2, 2), 0.5, CfaType::Mono);
+        master.metadata.provenance = Some(fits_provenance(1.0, Some("count/s")));
+        let mut images = CalibrationSet::default();
+        *images.get_mut(MasterRole::Dark) = Some(master);
+        let masters =
+            CalibrationMasters::from_images(images, DEFAULT_SIGMA_THRESHOLD, CancelToken::never())
+                .unwrap();
+
+        let mut light = constant_cfa(Size2us::new(2, 2), 0.5, CfaType::Mono);
+        light.metadata.provenance = Some(fits_provenance(1.0, Some("Jy/beam")));
+        let original_data = light.data.to_vec();
+
+        assert_eq!(
+            masters.calibrate(&mut light),
+            Err(CalibrationError::SampleDomainMismatch {
+                component: MasterRole::Dark,
+                light: SampleDomain {
+                    scale: 1.0,
+                    unit: Some("Jy/beam".to_owned()),
+                },
+                master: SampleDomain {
+                    scale: 1.0,
+                    unit: Some("count/s".to_owned()),
+                },
+            })
+        );
+        assert_eq!(light.data.pixels(), original_data);
+        assert!(!light.metadata.calibrated);
+
+        // A master that states no unit is "cannot tell", not a disagreement, so the same pair
+        // calibrates once the master stops naming a quantity — the unit is the axis, not its
+        // presence.
+        let mut master = constant_cfa(Size2us::new(2, 2), 0.5, CfaType::Mono);
+        master.metadata.provenance = Some(fits_provenance(1.0, None));
+        let mut images = CalibrationSet::default();
+        *images.get_mut(MasterRole::Dark) = Some(master);
+        let masters =
+            CalibrationMasters::from_images(images, DEFAULT_SIGMA_THRESHOLD, CancelToken::never())
+                .unwrap();
+        let mut light = constant_cfa(Size2us::new(2, 2), 0.5, CfaType::Mono);
+        light.metadata.provenance = Some(fits_provenance(1.0, Some("Jy/beam")));
+        assert_eq!(masters.calibrate(&mut light), Ok(()));
     }
 
     // ...and a set that does match still calibrates, so the extent check is not rejecting on
@@ -262,6 +319,32 @@ fn raw_provenance(physical_scale: f32) -> ImageProvenance {
         container: SourceContainer::CameraRaw,
         decoder: DecoderProvenance::LibRaw,
         transfer: TransferProvenance::RawNormalized(RawTransferProvenance { physical_scale }),
+        color: ColorProvenance::SensorCfa,
+        clipped: false,
+        demosaic: DemosaicProvenance::None,
+    }
+}
+
+/// The same, for the one decoder that can also declare what its samples measure.
+fn fits_provenance(physical_scale: f32, unit: Option<&str>) -> ImageProvenance {
+    ImageProvenance {
+        container: SourceContainer::Fits,
+        decoder: DecoderProvenance::FitsWell,
+        transfer: TransferProvenance::FitsNormalized(FitsTransferProvenance {
+            bscale: 1.0,
+            bzero: 0.0,
+            physical_scale,
+            unit: unit.map(str::to_owned),
+            hdu: FitsHduProvenance {
+                index: 0,
+                extname: None,
+                extver: None,
+            },
+            checksum: FitsChecksumProvenance {
+                datasum: FitsChecksumState::NotChecked,
+                checksum: FitsChecksumState::NotChecked,
+            },
+        }),
         color: ColorProvenance::SensorCfa,
         clipped: false,
         demosaic: DemosaicProvenance::None,

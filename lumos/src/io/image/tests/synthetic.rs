@@ -13,6 +13,7 @@ use crate::io::image::error::ImageError;
 use crate::io::image::fits::decode::{load_cfa_fits, load_linear_fits};
 use crate::io::image::fits::options::{FitsFloatScale, FitsLoadOptions};
 use crate::io::image::load_context::LoadContext;
+use crate::io::image::sample_domain::SampleDomain;
 use crate::io::raw::demosaic::bayer::CfaPattern;
 use crate::io::raw::demosaic::xtrans::internals::test_pattern_array;
 use crate::stacking::frame_store::StackableImage;
@@ -144,7 +145,7 @@ fn fits_integer_samples_are_divided_by_the_span_their_header_declares() {
 
     let loaded = write_and_load("uint16", &image).unwrap();
     // |BSCALE| × (2¹⁶ − 1) = 65535, recorded so a later stage can ask what one sample is worth.
-    assert_eq!(physical_scale_of(&loaded), Some(65_535.0));
+    assert_eq!(domain_of(&loaded).unwrap().scale, 65_535.0);
     let pixels = loaded.channel(0).pixels();
     assert_eq!(pixels[0], 0.0);
     assert_eq!(pixels[4], 1.0);
@@ -189,7 +190,7 @@ fn a_float_fits_scale_can_be_declared_when_the_header_does_not() {
         declared.channel(0).pixels(),
         &[0.0, 0.250_003_8, 0.500_007_6, 1.0]
     );
-    assert_eq!(physical_scale_of(&declared), Some(65_535.0));
+    assert_eq!(domain_of(&declared).unwrap().scale, 65_535.0);
 
     // `Normalized` refuses the header's evidence, for a DATAMAX that describes the sensor rather
     // than the samples.
@@ -283,20 +284,62 @@ fn fits_float_samples_are_normalized_only_when_datamax_declares_them_adu() {
     assert_eq!(adu.metadata.data_max, Some(1.0));
 
     // The two frames hold the same ADU data and were divided by spans 65535 apart, which is exactly
-    // the mismatch a stack has to be able to detect. `physical_scale` is what makes it detectable —
+    // the mismatch a stack has to be able to detect. The sample domain is what makes it detectable —
     // both frames otherwise present as `FitsNormalized` and compare equal on every other axis.
-    assert_eq!(physical_scale_of(&bare), Some(1.0));
-    assert_eq!(physical_scale_of(&adu), Some(65_535.0));
-    assert_ne!(physical_scale_of(&bare), physical_scale_of(&adu));
+    let bare_domain = domain_of(&bare).unwrap();
+    let adu_domain = domain_of(&adu).unwrap();
+    assert_eq!(bare_domain.scale, 1.0);
+    assert_eq!(adu_domain.scale, 65_535.0);
+    assert!(!bare_domain.commensurate_with(&adu_domain));
 }
 
-/// The span a loaded frame's decoder divided by, whichever decoder that was.
-fn physical_scale_of(image: &LinearImage) -> Option<f32> {
+#[test]
+fn fits_bunit_travels_with_the_samples_and_separates_frames_the_span_cannot() {
+    // Two float frames holding identical samples, divided by the same span, differing only in the
+    // quantity BUNIT says those samples measure. Nothing else in the pipeline can tell them apart:
+    // both are `FitsNormalized` at scale 1, so without the unit they would stack as if a surface
+    // brightness and a count rate were the same measurement.
+    let image = Image::new(vec![2, 1], vec![0.25f32, 0.5]).unwrap();
+    let load = |name: &str, bunit: &str| {
+        let mut header = Header::new();
+        header.set("BUNIT", bunit).unwrap();
+        let path = write_with_header(name, &image, &header);
+        domain_of(&load_linear_fits(&path, &LoadContext::default()).unwrap()).unwrap()
+    };
+
+    let jansky = load("float32_bunit_jy", "Jy/beam");
+    let counts = load("float32_bunit_counts", "count/s");
+    assert_eq!(jansky.scale, counts.scale, "the span must not be the axis");
+    assert_eq!(jansky.unit.as_deref(), Some("Jy/beam"));
+    assert_eq!(counts.unit.as_deref(), Some("count/s"));
+    assert!(!jansky.commensurate_with(&counts));
+
+    // Trailing blanks are not significant in a FITS string, so padding is not a mismatch...
+    let padded = load("float32_bunit_padded", "Jy/beam   ");
+    assert_eq!(padded.unit.as_deref(), Some("Jy/beam"));
+    assert!(padded.commensurate_with(&jansky));
+
+    // ...and an all-blank BUNIT states no unit rather than an empty one, which leaves the frame
+    // comparable to anything on the same span instead of disagreeing with all of them.
+    let blank = load("float32_bunit_blank", "   ");
+    assert_eq!(blank.unit, None);
+    assert!(blank.commensurate_with(&jansky));
+    assert!(blank.commensurate_with(&counts));
+
+    // Case is part of the unit: mega- and milli-jansky per steradian are 10^9 apart, and folding
+    // case here would hide exactly the mismatch this check exists to catch.
+    let mega = load("float32_bunit_mega", "MJy/sr");
+    let milli = load("float32_bunit_milli", "mJy/sr");
+    assert!(!mega.commensurate_with(&milli));
+}
+
+/// The domain a loaded frame's decoder put its samples in, whichever decoder that was.
+fn domain_of(image: &LinearImage) -> Option<SampleDomain> {
     image
         .metadata
         .provenance
         .as_ref()
-        .and_then(|provenance| provenance.transfer.physical_scale())
+        .and_then(|provenance| provenance.transfer.sample_domain())
 }
 
 #[test]

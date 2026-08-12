@@ -8,6 +8,7 @@
 use common::CancelToken;
 
 use crate::io::image::image_dimensions::ImageDimensions;
+use crate::io::image::sample_domain::SampleDomain;
 use crate::stacking::combine::CANCEL_POLL_CHUNK;
 use crate::stacking::combine::error::Error;
 use crate::stacking::combine::error::check_cancel;
@@ -53,26 +54,49 @@ pub(crate) fn validate_image_samples(
     )
 }
 
-/// Check that every frame declaring a sample span declares the same one.
+/// Check that every frame declaring a sample domain declares the same one.
 ///
 /// A frame that declares none — synthesized rather than decoded, or a preview raster — is skipped
 /// rather than treated as agreeing: there is nothing to compare, and rejecting on it would refuse
 /// every in-memory fixture. The first frame that does declare one becomes the reference, so the
 /// error names a concrete pair.
-pub(crate) fn validate_sample_spans(frames: &[StoredFrame]) -> Result<(), Error> {
-    let mut reference: Option<(usize, f32)> = None;
+///
+/// Scale and unit get a reference each rather than sharing one, because a frame can state a scale
+/// and no unit — and [`SampleDomain::commensurate_with`] is deliberately blind across that gap, so
+/// it is not transitive. Comparing everything against frame 0 alone would let a `Jy/beam` frame and
+/// a `count/s` frame through whenever the frame that happened to come first stated no unit; here
+/// the first frame to state a unit owns that half of the reference, and the error names whichever
+/// frame the mismatch is actually with.
+pub(crate) fn validate_sample_domains(frames: &[StoredFrame]) -> Result<(), Error> {
+    let mut scale: Option<(usize, &SampleDomain)> = None;
+    let mut unit: Option<(usize, &SampleDomain)> = None;
     for (index, frame) in frames.iter().enumerate() {
-        let Some(span) = frame.source_stats.physical_scale else {
+        let Some(domain) = frame.source_stats.domain.as_ref() else {
             continue;
         };
-        match reference {
-            None => reference = Some((index, span)),
-            Some((reference_index, expected)) if span != expected => {
-                return Err(Error::SampleSpanMismatch {
+        match scale {
+            None => scale = Some((index, domain)),
+            Some((reference_index, expected)) if domain.scale != expected.scale => {
+                return Err(Error::SampleDomainMismatch {
                     index,
-                    actual: span,
+                    actual: domain.clone(),
                     reference_index,
-                    expected,
+                    expected: expected.clone(),
+                });
+            }
+            Some(_) => {}
+        }
+        if domain.unit.is_none() {
+            continue;
+        }
+        match unit {
+            None => unit = Some((index, domain)),
+            Some((reference_index, expected)) if domain.unit != expected.unit => {
+                return Err(Error::SampleDomainMismatch {
+                    index,
+                    actual: domain.clone(),
+                    reference_index,
+                    expected: expected.clone(),
                 });
             }
             Some(_) => {}

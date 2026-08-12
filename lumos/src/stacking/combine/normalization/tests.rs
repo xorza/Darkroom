@@ -18,7 +18,7 @@ fn frame_stats(median: f32, mad: f32) -> FrameStats {
     FrameStats {
         channels: [channel_stats(median, mad)].into_iter().collect(),
         quantization_sigma: None,
-        physical_scale: None,
+        domain: None,
     }
 }
 
@@ -41,7 +41,7 @@ fn reference_selection_uses_lowest_average_channel_noise() {
             .into_iter()
             .collect(),
             quantization_sigma: None,
-            physical_scale: None,
+            domain: None,
         },
         FrameStats {
             channels: [
@@ -52,7 +52,7 @@ fn reference_selection_uses_lowest_average_channel_noise() {
             .into_iter()
             .collect(),
             quantization_sigma: None,
-            physical_scale: None,
+            domain: None,
         },
     ];
     assert_eq!(select_reference_frame(rgb.iter()), 1);
@@ -159,7 +159,7 @@ fn global_norms_are_fitted_against_the_selected_reference() {
                 FrameStats {
                     channels: [channel_stats(0.0, mad); 3].into_iter().collect(),
                     quantization_sigma: None,
-                    physical_scale: None,
+                    domain: None,
                 },
             )
         })
@@ -229,7 +229,7 @@ fn registered_rgb_measurements_preserve_pair_order_and_honor_cancellation() {
                 FrameStats {
                     channels: [channel_stats(0.0, 1.0); 3].into_iter().collect(),
                     quantization_sigma: Some((frame_index + 1) as f32),
-                    physical_scale: None,
+                    domain: None,
                 },
             )
         })

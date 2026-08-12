@@ -8,6 +8,7 @@ pub(crate) mod linear;
 pub(crate) mod linear_pixels;
 pub(crate) mod load_context;
 pub(crate) mod preview_image;
+pub(crate) mod sample_domain;
 pub(crate) mod sensor;
 pub(crate) mod standard;
 

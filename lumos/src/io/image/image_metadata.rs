@@ -5,6 +5,7 @@
 
 use crate::io::image::cfa;
 use crate::io::image::image_provenance::{DemosaicProvenance, ImageProvenance};
+use crate::io::image::sample_domain::SampleDomain;
 
 /// FITS BITPIX values representing pixel data types.
 ///
@@ -83,15 +84,17 @@ pub struct ImageMetadata {
 }
 
 impl ImageMetadata {
-    /// What one sample is worth in the source's own units — the span its decoder divided by.
+    /// What one sample is worth in the source's own terms — the span its decoder divided by, and
+    /// the unit that span was in.
     ///
     /// `None` for an image this crate synthesized rather than decoded, and for a preview raster that
-    /// declared no scale. Two frames are commensurate when both answer and the answers match; when
-    /// either is `None` there is nothing to compare, which is not the same as agreeing.
-    pub fn physical_scale(&self) -> Option<f32> {
+    /// declared no domain. Two frames are commensurate when both answer and the answers satisfy
+    /// [`SampleDomain::commensurate_with`]; when either is `None` there is nothing to compare, which
+    /// is not the same as agreeing.
+    pub fn sample_domain(&self) -> Option<SampleDomain> {
         self.provenance
             .as_ref()
-            .and_then(|provenance| provenance.transfer.physical_scale())
+            .and_then(|provenance| provenance.transfer.sample_domain())
     }
 
     /// Whether these samples came out of a demosaic, and so carry its interpolation artifacts.
