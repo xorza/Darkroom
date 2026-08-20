@@ -9,38 +9,6 @@ benefit. Test structure and test-facing APIs are out of scope.
 
 ---
 
-## The edit pipeline is two parallel enums maintained by hand
-
-`darkroom/src/core/edit/intent/` models one edit vocabulary as two enums that
-must stay aligned variant-for-variant, so every change to the vocabulary is a
-multi-file mechanical edit and nothing but discipline keeps the halves in step.
-
-- [ ] `core/edit/intent/types.rs:71` (`GraphIntent`) and `:235` (`UndoStep`)
-      declare the same 11 variants. Six of them (`AddNode`, `DuplicateNodes`,
-      `MoveSelection`, `RenameNode`, `SetInput`, `SetSubscription`) restate the
-      identical payload field list in both enums.
-- [ ] `core/edit/intent/types.rs:50` documents a six-step checklist across five
-      files for adding one variant. A checklist in a doc comment is the
-      shotgun-surgery cost written down rather than removed.
-- [ ] `core/edit/intent/apply.rs:50` (`apply_step`) and `:175` (`revert_step`)
-      are two 11-arm matches over the same enum, ~150 lines total, differing
-      only in whether the arm reads the variant's `to` field or its `from`
-      field. Three arms already had to be lifted into shared helpers
-      (`set_subscription`, `set_item_z`, `set_node_property`) to avoid writing
-      them twice; the other eight are still written twice.
-- [ ] `core/edit/intent/build.rs:37` (`build_step`) is a third 11-arm match over
-      the same vocabulary, most arms of which move fields across unchanged.
-- [ ] `UndoStep::RemoveNode` (`types.rs:258`) carries
-      `item_placements: Vec<(NodeId, ItemPlacement)>` and `selected: Vec<NodeId>`
-      for a step that removes exactly one node. `build.rs:97-109` fills both by
-      filtering for that single id, so each vector holds zero or one element and
-      the removal path pays two heap allocations to express two optional
-      scalars.
-- [ ] `build.rs:87-91`: the `RemoveNode` arm resolves the node twice —
-      `validate::live_node(graph, node_id, …)` immediately followed by
-      `graph.snapshot_node(node_id)` — and treats both misses as the same
-      `Ok(None)`.
-
 ## Doc prose has drifted from the code it describes
 
 The codebase carries very high comment density (darkroom 32% of production
@@ -51,8 +19,7 @@ form, so backticked identifiers in prose rot silently. Several already have.
 
 - [ ] Identifiers asserted by doc prose that are defined nowhere in the
       workspace:
-      - `EditScope` — `darkroom/src/core/edit/intent/types.rs:53,227`
-      - `PORT_HIT_SCALE` — `darkroom/src/gui/pane/graph/node/header.rs:65`
+      - `PORT_HIT_SCALE` — `darkroom/src/gui/pane/graph/node/header.rs:66`
         ("the `PORT_HIT_SCALE`-grown box")
       - `MULTI_CLICK_RADIUS` — `palantir/src/input/capture.rs:33`, which is the
         doc comment sitting directly above the constant it means,
@@ -63,25 +30,10 @@ form, so backticked identifiers in prose rot silently. Several already have.
         and `DoubleLayout`
       - `ElementSlots` — `palantir/src/layout/types/align.rs:104`, cited as an
         example of an existing packed field
-- [ ] `apply_graph` and `revert_graph` are referenced as live function names in
-      `core/edit/intent/apply.rs:138,153-154` and
-      `core/edit/intent/validate.rs:17`. The functions are called `apply_step`
-      and `revert_step`.
-- [ ] `core/edit/intent/types.rs:312` says one step type "backs both the
-      `Subscribe` and `Unsubscribe` intents". Neither variant exists; the intent
-      is `SetSubscription { subscribe: bool }`.
-- [ ] `core/edit/intent/types.rs:164-176`: the doc comment written for
-      `set_input` sits above `click`, so `click` carries two unrelated opening
-      paragraphs and `set_input` (`:213`) has no doc at all.
-- [ ] `core/edit/intent/apply.rs:153-158`: same defect — the `set_node_property`
-      doc sits above `set_item_z`, and `set_node_property` (`:164`) has none.
-- [ ] `core/edit/intent/apply.rs:3-4`: the module doc lists `commit_intent`
-      twice as two separate entry points.
 - [ ] 326 comments across the workspace describe superseded designs rather than
       the current one — "used to", "formerly", "the old …", "replaces the …",
       "it replaced". Concentrated in production doc comments
       (`darkroom/src/core/document/dock/mod.rs:2`,
-      `darkroom/src/core/edit/intent/types.rs:132`,
       `darkroom/src/gui/graph_ctx/mod.rs:16`,
       `darkroom/src/gui/dock/strip.rs:24`, `palantir/src/ui/mod.rs:90-97`),
       where they describe code a reader cannot see and cannot verify.
