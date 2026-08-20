@@ -154,16 +154,17 @@ impl CompiledGraph {
     /// themselves — in this artifact's id order. Seeds this artifact holds no
     /// work for contribute nothing.
     ///
-    /// This is exactly the set
-    /// [`RuntimeCache::evict`](crate::execution::cache::runtime::RuntimeCache::evict)
-    /// clears, which is what it is public for: a host that requests an eviction
-    /// learns what it reaches, rather than having to assume the whole program.
-    /// The eviction resolves its own cone against the installed artifact, so a
-    /// caller asking the artifact it installs gets the same answer.
+    /// This is exactly the set a [`WorkerMessage::EvictCache`] clears, which is
+    /// what it is public for: a host that requests an eviction learns what it
+    /// reaches, rather than having to assume the whole program. The eviction
+    /// resolves its own cone against the installed artifact, so a caller asking
+    /// the artifact it installs gets the same answer.
     ///
     /// Allocates its scratch per call — the reversed edges it walks are a pure
-    /// function of the artifact and are never kept (see [`ConsumerCone`]), and
-    /// the questions that ask this are user actions, not per-run work.
+    /// function of the artifact and are never kept, and the questions that ask
+    /// this are user actions, not per-run work.
+    ///
+    /// [`WorkerMessage::EvictCache`]: crate::WorkerMessage::EvictCache
     pub fn consumer_cone(&self, seeds: impl IntoIterator<Item = NodeId>) -> Vec<NodeId> {
         let mut cone = ConsumerCone::default();
         cone.of(self, seeds.into_iter().filter_map(|id| self.node(id)))
