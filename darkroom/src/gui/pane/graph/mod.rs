@@ -26,7 +26,7 @@ use glam::Vec2;
 use palantir::{Background, Configure, Panel, Sense, Sizing, TranslateScale, Ui};
 
 use crate::core::document::Document;
-use crate::core::edit::intent::types::GraphIntent;
+use crate::core::edit::graph_intent::GraphIntent;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::pane::graph::background::CanvasBackground;
 use crate::gui::pane::graph::canvas::{inner_canvas_widget_id, outer_canvas_widget_id};

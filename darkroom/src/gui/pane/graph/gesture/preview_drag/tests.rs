@@ -17,7 +17,7 @@ fn ctrl_drag_off_an_output_spawns_a_preview_wired_to_it() {
     use palantir::{Modifiers, PointerButton};
 
     use crate::core::document::PortRef;
-    use crate::core::edit::intent::types::GraphIntent;
+    use crate::core::edit::graph_intent::GraphIntent;
     use crate::core::preview::{PreviewSink, preview_func};
 
     // The preview func is declared but not placed — the gesture is what

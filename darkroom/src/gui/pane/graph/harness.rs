@@ -15,7 +15,7 @@ use scenarium::NodeId;
 use crate::core::document::dock::DockOp;
 use crate::core::document::harness::DocFixture;
 use crate::core::document::{Document, PortRef};
-use crate::core::edit::intent::types::GraphIntent;
+use crate::core::edit::graph_intent::GraphIntent;
 use crate::gui::app::commands::AppCommand;
 use crate::gui::graph_ctx::harness::GraphCtxFixture;
 use crate::gui::pane::graph::GraphUI;

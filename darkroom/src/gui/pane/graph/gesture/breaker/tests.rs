@@ -3,7 +3,7 @@ use scenarium::InputPort;
 
 use super::*;
 use crate::core::document::harness::DocFixture;
-use crate::core::edit::intent::types::GraphIntent;
+use crate::core::edit::graph_intent::GraphIntent;
 use crate::gui::pane::graph::harness::CanvasHarness;
 
 /// The breaker cuts a node where the *document* says it is, not where it last

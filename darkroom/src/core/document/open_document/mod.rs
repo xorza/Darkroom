@@ -14,9 +14,9 @@ use std::path::{Path, PathBuf};
 use crate::core::document::Document;
 use crate::core::document::open_document::replay_outcome::ReplayOutcome;
 use crate::core::edit::action_stack::ActionStack;
-use crate::core::edit::intent::apply::commit_intent;
-use crate::core::edit::intent::error::MalformedIntent;
-use crate::core::edit::intent::types::{GraphIntent, UndoStep};
+use crate::core::edit::error::MalformedIntent;
+use crate::core::edit::graph_intent::GraphIntent;
+use crate::core::edit::step::undo_step::UndoStep;
 use crate::core::io::document::{self, DocumentLoadError, DocumentSaveError};
 use crate::core::io::preferences::Preferences;
 use crate::core::status::StatusLog;
@@ -57,7 +57,7 @@ pub(crate) struct OpenDocument {
     /// a frontend. Set by any content-changing edit (new edits, undo/redo
     /// replay, direct graph mutations), cleared by [`Self::save_to`]. Pure
     /// navigation (camera, selection, pane arrangement) leaves it alone; see
-    /// [`UndoStep::dirties_document`](crate::core::edit::intent::types::UndoStep::dirties_document).
+    /// [`UndoStep::dirties_document`](crate::core::edit::step::undo_step::UndoStep::dirties_document).
     ///
     /// It can read "dirty" after an undo returns the document to its saved
     /// state — the safe direction (prompt rather than silently discard).
@@ -103,7 +103,7 @@ impl OpenDocument {
     ///
     /// The reconcile is *not* inside the empty-queue fast path, and not inside
     /// [`Self::commit`] either. Not the fast path, because the mutation that
-    /// most often orphans a tab — an undo replaying a `RemoveNode` — never
+    /// most often orphans a tab — an undo replaying a node removal — never
     /// touches the queue, so a frame whose only edit was Ctrl+Z would skip it.
     /// Not `commit`, because closing a tab is a frontend policy about what is
     /// on screen, and an edit applied outside a frame (a dialog result) has no
@@ -164,14 +164,13 @@ impl OpenDocument {
                     continue;
                 }
             };
-            let Some(step) = commit_intent(intent, &mut self.document)? else {
+            let Some(step) = intent.commit(&mut self.document)? else {
                 continue;
             };
             signals.fold(&step);
             batch.push(step);
         }
         self.history.push_current(&batch);
-        batch.clear();
         Ok(self.land(signals))
     }
 

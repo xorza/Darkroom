@@ -5,9 +5,7 @@ use std::collections::BTreeSet;
 use super::*;
 use crate::core::document::Document;
 use crate::core::document::harness::DocFixture;
-use crate::core::edit::intent::apply::apply_step;
-use crate::core::edit::intent::build::build_step;
-use crate::core::edit::intent::types::GraphIntent;
+use crate::core::edit::graph_intent::GraphIntent;
 
 /// A document and the history over it, edited only through the real
 /// build/apply path — the pair every test below drives, so neither has to be
@@ -59,10 +57,11 @@ impl History {
         let steps: Vec<UndoStep> = intents
             .into_iter()
             .map(|intent| {
-                let step = build_step(intent, &self.doc)
+                let step = intent
+                    .into_step(&self.doc)
                     .unwrap()
                     .expect("a test batch commits every intent");
-                apply_step(&step, &mut self.doc);
+                step.apply(&mut self.doc);
                 step
             })
             .collect();

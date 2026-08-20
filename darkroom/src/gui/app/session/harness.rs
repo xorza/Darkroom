@@ -23,7 +23,7 @@ use scenarium::Library;
 
 use crate::core::document::harness::DocFixture;
 use crate::core::document::open_document::OpenDocument;
-use crate::core::edit::intent::types::GraphIntent;
+use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::io::preferences::Preferences;
 use crate::gui::app::commands::AppCommand;
 use crate::gui::app::ctx::{AppCtx, StatusInputs};

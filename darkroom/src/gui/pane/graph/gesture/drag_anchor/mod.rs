@@ -10,7 +10,7 @@ use glam::Vec2;
 use palantir::{Ui, WidgetId};
 use scenarium::NodeId;
 
-use crate::core::edit::intent::types::GraphIntent;
+use crate::core::edit::graph_intent::GraphIntent;
 use crate::gui::requests::Requests;
 
 use crate::gui::graph_ctx::GraphCtx;
@@ -76,9 +76,9 @@ impl GroupDrag {
 
     /// Drop the gesture when the node owning the grabbed member has left the
     /// scene — a mid-drag delete (breaker swipe, undo). Left in place the
-    /// anchor would emit a `MoveSelection` against a missing node, which
-    /// panics in `build_step`, and could fire again if a fresh node reused
-    /// the id.
+    /// anchor would emit a `MoveSelection` against a missing node, which the
+    /// commit gate drops on the floor, and could fire again if a fresh node
+    /// reused the id.
     pub(crate) fn drop_if_owner_gone(&mut self, graph_ctx: GraphCtx<'_>) {
         let gone = self
             .anchor

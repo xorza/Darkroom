@@ -17,8 +17,8 @@
 //! one memmove amortizes over a whole budget of evictions. The history is
 //! still one contiguous `actions` allocation plus a single ring buffer of
 //! fixed-size metadata — no per-entry / per-field churn (the naive
-//! `VecDeque<Vec<UndoStep>>` form re-allocated a `RemoveNode`'s `Node` +
-//! captured wiring on every entry).
+//! `VecDeque<Vec<UndoStep>>` form re-allocated a removal's `Node` + captured
+//! wiring on every entry).
 
 use std::collections::VecDeque;
 use std::ops::Range;
@@ -26,8 +26,8 @@ use std::ops::Range;
 use common::SerdeFormat;
 
 use crate::core::document::Document;
-use crate::core::edit::intent::apply::{apply_step, revert_step};
-use crate::core::edit::intent::types::{GestureKey, UndoStep};
+use crate::core::edit::step::gesture_key::GestureKey;
+use crate::core::edit::step::undo_step::UndoStep;
 
 #[derive(Debug)]
 struct Entry {
@@ -59,7 +59,7 @@ pub(crate) struct ActionStack {
     /// oldest entries are dropped off the front; the just-pushed entry
     /// always survives, even when it alone exceeds the budget. Bounds
     /// history by memory rather than entry count, since one entry (e.g. a
-    /// `RemoveNode` carrying a whole `Node` + wiring) can dwarf many small
+    /// removal carrying a whole `Node` + wiring) can dwarf many small
     /// ones. Physical `actions` peaks at ~2× this between compactions.
     max_bytes: usize,
 }
@@ -118,7 +118,7 @@ impl ActionStack {
         let entry = &self.entries[self.cursor];
         let steps = Self::deserialize_steps(Self::slice_bytes(&self.actions, &entry.range));
         for step in steps.iter().rev() {
-            revert_step(step, doc);
+            step.revert(doc);
             on_step(step);
         }
         true
@@ -131,7 +131,7 @@ impl ActionStack {
         let entry = &self.entries[self.cursor];
         let steps = Self::deserialize_steps(Self::slice_bytes(&self.actions, &entry.range));
         for step in steps.iter() {
-            apply_step(step, doc);
+            step.apply(doc);
             on_step(step);
         }
         self.cursor += 1;
@@ -211,7 +211,7 @@ impl ActionStack {
         );
 
         // Fold the existing entry's "from" half with the incoming step's
-        // "to" half. `intent` owns the per-variant logic; the
+        // "to" half. The step kind owns that logic; the
         // `gesture_key == Some(key)` gate above already guarantees a
         // matching variant (and same grabbed member, for `SelectionDrag`).
         let Some(merged) = last_steps[0].coalesce(new_step) else {

@@ -4,7 +4,7 @@ use scenarium::DataType;
 use scenarium::{Binding, InputPort};
 
 use crate::core::document::{PortKind, PortRef};
-use crate::core::edit::intent::types::GraphIntent;
+use crate::core::edit::graph_intent::GraphIntent;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::pane::graph::canvas::outer_canvas_widget_id;
 use crate::gui::pane::graph::ctx::CanvasCtx;
@@ -406,7 +406,7 @@ fn accepts_wire(graph_ctx: GraphCtx<'_>, start: PortRef, port: PortRef) -> bool 
     // rejects a cyclic graph outright (`CycleDetected`) and the intent layer
     // refuses to commit one, so the wire must never latch. Asked of the
     // authoring graph rather than the scene's edge mirror, so the snap filter
-    // and `build_step` can't answer differently. `start.kind` fixes which side
+    // and `GraphIntent::into_step` can't answer differently. `start.kind` fixes which side
     // is the producer (output) and which the consumer (input).
     let (producer, consumer) = match start.kind {
         PortKind::Output => (start.node_id, port.node_id),
@@ -473,9 +473,9 @@ fn port_data_type(graph_ctx: GraphCtx<'_>, port: PortRef) -> Option<DataType> {
 /// Convert a snapped `(start, end)` PortRef pair (one `Input`, one
 /// `Output` — caller-guaranteed by [`scan_snap_target`]) into an
 /// `GraphIntent::SetInput` binding. A cycle-forming pair never reaches here —
-/// [`scan_snap_target`] refuses to snap one, and `build_step` rejects any
-/// cycle-forming bind that slips through (the planner is the final backstop,
-/// `Error::CycleDetected`). Re-typing a wildcard output (passthrough / reroute)
+/// [`scan_snap_target`] refuses to snap one, and `GraphIntent::into_step`
+/// rejects any cycle-forming bind that slips through (the planner is the final
+/// backstop, `Error::CycleDetected`). Re-typing a wildcard output (passthrough / reroute)
 /// severs nothing downstream: a now-mismatched wire is tolerated, drawn in
 /// the warning color, and lowers as unbound.
 fn commit_connection(start: PortRef, end: PortRef, out: &mut Requests) {

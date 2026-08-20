@@ -11,8 +11,7 @@
 use palantir::{Key, Shortcut, Ui};
 
 use crate::core::document::Viewport;
-use crate::core::edit::intent::duplicate::build_duplicate_intent;
-use crate::core::edit::intent::types::GraphIntent;
+use crate::core::edit::graph_intent::GraphIntent;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::requests::Requests;
 
@@ -48,8 +47,8 @@ pub(crate) fn emit(ui: &mut Ui, graph_ctx: GraphCtx<'_>, out: &mut Requests) {
     }
     // Ctrl+D drops wires from producers outside the selection; keeping them
     // is the node menu's second Duplicate pick, which has a label to say so.
-    if duplicate && let Some(intent) = build_duplicate_intent(graph_ctx.document(), false) {
-        out.push_graph(intent);
+    if duplicate {
+        out.extend_graph(GraphIntent::duplicate(graph_ctx.document(), false));
     }
     if delete {
         out.extend_graph(

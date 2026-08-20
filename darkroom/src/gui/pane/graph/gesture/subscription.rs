@@ -1,8 +1,8 @@
 use glam::Vec2;
 use palantir::{CurveBrush, Ui};
-use scenarium::NodeId;
+use scenarium::{NodeId, Subscription};
 
-use crate::core::edit::intent::types::GraphIntent;
+use crate::core::edit::graph_intent::GraphIntent;
 use crate::gui::EventRef;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::graph_ctx::node_ctx::NodeCtx;
@@ -136,9 +136,11 @@ impl SubscriptionUI {
                 from: subscriber,
                 snap: Some(emitter),
             }) => out.push_graph(GraphIntent::SetSubscription {
-                emitter: emitter.node_id,
-                event_idx: emitter.event_idx,
-                subscriber,
+                subscription: Subscription {
+                    emitter: emitter.node_id,
+                    event_idx: emitter.event_idx,
+                    subscriber,
+                },
                 subscribe: true,
             }),
             _ => {}

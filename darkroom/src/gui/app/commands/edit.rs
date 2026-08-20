@@ -6,7 +6,7 @@ use scenarium::Binding;
 use scenarium::ConstValue;
 use scenarium::FsPathMode;
 
-use crate::core::edit::intent::types::GraphIntent;
+use crate::core::edit::graph_intent::GraphIntent;
 use crate::gui::app::App;
 use crate::gui::dialogs;
 use crate::gui::pane::graph::node::port_row::PathPick;

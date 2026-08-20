@@ -23,7 +23,7 @@ use scenarium::NodeId;
 use scenarium::{ConstValue, DataType, FsPathConfig, FsPathMode, Func};
 
 use crate::core::document::{PortKind, PortRef};
-use crate::core::edit::intent::types::GraphIntent;
+use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::preview;
 use crate::gui::EventRef;
 use crate::gui::app::commands::AppCommand;
