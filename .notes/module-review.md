@@ -146,6 +146,22 @@ explaining that it is the twin of the other, and each with its own test.
       annotates each `BlendMode` variant with the formula the variant name
       already gives. This is the only crate in the workspace written that way.
 
+## `palantir` types that outlive their own invariant
+
+- [ ] `palantir/src/renderer/backend/raster_atlas/bound_sides.rs` —
+      `BoundSides` exists so the group-0 bind group and the `[color, mask]`
+      extents it describes are built in one place, per its own doc: "building
+      it two ways is how the extents and the views they describe drift apart."
+      Both construction sites
+      (`raster_atlas/mod.rs` `RasterAtlas::new` and `RasterAtlas::grow`)
+      immediately destructure it into two separate `RasterAtlas` fields, so
+      the pairing holds for one statement and nothing enforces it afterwards.
+      `RasterAtlas` could hold the `BoundSides`.
+- [ ] `palantir/src/renderer/frontend/composer/session.rs` — `struct
+      PackedQuad` is declared at `:80` and `impl PackedQuad` at `:939`, 859
+      lines apart, with four other impl blocks between them. It is the one
+      type in the file whose declaration and impl are separated.
+
 ## Repository hygiene
 
 - [ ] `.gitignore:18` ignores `/.gitmodules` under a "Claude Code sandbox
