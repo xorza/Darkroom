@@ -10,7 +10,7 @@ pub(crate) trait ChannelConvert<To>: Copy {
 
 /// Trait for computing luminance from RGB channels.
 /// Uses Rec. 709 (sRGB) weights: 0.2126*R + 0.7152*G + 0.0722*B
-trait RgbToLuminance: Copy {
+pub(super) trait RgbToLuminance: Copy {
     fn luminance(r: Self, g: Self, b: Self) -> Self;
 }
 

@@ -2,7 +2,7 @@
 
 #![allow(unsafe_op_in_unsafe_fn)]
 
-use super::sse;
+use crate::image::conversion::simd::sse;
 
 
 #[target_feature(enable = "avx2")]

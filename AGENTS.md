@@ -32,3 +32,19 @@ cargo bench -p imaginarium --bench contrast_brightness
 Name the target. An unfiltered `cargo bench` links every bench binary at once
 under a fat-LTO profile and can get OOM-killed; cap with `-j 2` if you need
 several.
+
+## Cross-arch verification
+
+Half the SIMD here is `aarch64`-only, so an x86 host's usual chain never
+compiles it and a NEON kernel can rot silently. Whenever a `neon.rs` or a
+dispatch table changes, add the cross-target leg:
+
+```
+cargo clippy -p imaginarium --target aarch64-unknown-linux-gnu --all-targets --all-features -- -D warnings
+```
+
+`clippy` and `check` need only `rustup target add aarch64-unknown-linux-gnu` —
+neither links, so no cross linker is required. **Running** the NEON tests needs
+`qemu-user` plus a runner in `.cargo/config.toml`; without it a NEON kernel is
+compile-checked on an x86 host and proven only by the scalar cross-check tests
+on real hardware. Say which of the two you did.

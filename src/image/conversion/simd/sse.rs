@@ -2,15 +2,14 @@
 
 #![allow(unsafe_op_in_unsafe_fn)]
 
-use super::LUMA_8BIT;
-use super::LUMA_B;
-use super::LUMA_G;
-use super::LUMA_R;
+use std::arch::x86_64::*;
+
+use crate::image::conversion::simd;
+use crate::image::conversion::{LUMA_B, LUMA_G, LUMA_R};
 
 
 #[target_feature(enable = "ssse3")]
 pub(super) unsafe fn convert_rgba_to_rgb_row_ssse3(src: &[u8], dst: &mut [u8], width: usize) {
-    use std::arch::x86_64::*;
 
     let src_ptr = src.as_ptr();
     let dst_ptr = dst.as_mut_ptr();
@@ -54,7 +53,6 @@ pub(super) unsafe fn convert_rgba_to_rgb_row_ssse3(src: &[u8], dst: &mut [u8], w
 
 #[target_feature(enable = "ssse3")]
 pub(super) unsafe fn convert_rgb_to_rgba_row_ssse3(src: &[u8], dst: &mut [u8], width: usize) {
-    use std::arch::x86_64::*;
 
     let src_ptr = src.as_ptr();
     let dst_ptr = dst.as_mut_ptr();
@@ -96,173 +94,153 @@ pub(super) unsafe fn convert_rgb_to_rgba_row_ssse3(src: &[u8], dst: &mut [u8], w
     }
 }
 
-#[target_feature(enable = "ssse3")]
-pub(super) unsafe fn convert_rgba_to_l_row_ssse3(src: &[u8], dst: &mut [u8], width: usize) {
-    use std::arch::x86_64::*;
+/// The Rec. 709 luma weights arranged for `madd`, together with the shuffle
+/// masks that gather one pixel layout's channels into the lanes they expect.
+///
+/// `madd` multiplies *signed* 16-bit lanes: red and blue ride one lane pair, and
+/// green — which overflows `i16` on its own — rides a second pair as two halves
+/// that sum back to it. It accumulates into `i32`, so the weighted sum is the
+/// scalar reference's exactly, not the 8-bit approximation a 16-bit accumulator
+/// would force.
+#[derive(Debug, Clone, Copy)]
+struct LumaWeights {
+    weight_rb: __m128i,
+    weight_gg: __m128i,
+    gather_rb: __m128i,
+    gather_gg: __m128i,
+}
 
-    let src_ptr = src.as_ptr();
-    let dst_ptr = dst.as_mut_ptr();
-    let simd_width = width / 8;
-    let remainder = width % 8;
+// Guards the split above: `madd` would misread a weight that does not fit.
+const _: () = assert!(LUMA_R <= i16::MAX as u32);
+const _: () = assert!(LUMA_B <= i16::MAX as u32);
+const _: () = assert!(LUMA_G - LUMA_G / 2 <= i16::MAX as u32);
 
-    for i in 0..simd_width {
-        let src_offset = i * 32;
-        let dst_offset = i * 8;
-
-        let rgba0 = _mm_loadu_si128(src_ptr.add(src_offset) as *const __m128i);
-        let rgba1 = _mm_loadu_si128(src_ptr.add(src_offset + 16) as *const __m128i);
-
-        let shuf_r = _mm_setr_epi8(0, 4, 8, 12, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1);
-        let shuf_g = _mm_setr_epi8(1, 5, 9, 13, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1);
-        let shuf_b = _mm_setr_epi8(2, 6, 10, 14, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1);
-
-        let r0 = _mm_shuffle_epi8(rgba0, shuf_r);
-        let g0 = _mm_shuffle_epi8(rgba0, shuf_g);
-        let b0 = _mm_shuffle_epi8(rgba0, shuf_b);
-        let r1 = _mm_shuffle_epi8(rgba1, shuf_r);
-        let g1 = _mm_shuffle_epi8(rgba1, shuf_g);
-        let b1 = _mm_shuffle_epi8(rgba1, shuf_b);
-
-        let r = _mm_or_si128(r0, _mm_slli_si128(r1, 4));
-        let g = _mm_or_si128(g0, _mm_slli_si128(g1, 4));
-        let b = _mm_or_si128(b0, _mm_slli_si128(b1, 4));
-
-        let zero = _mm_setzero_si128();
-        let r16 = _mm_unpacklo_epi8(r, zero);
-        let g16 = _mm_unpacklo_epi8(g, zero);
-        let b16 = _mm_unpacklo_epi8(b, zero);
-
-        let r_w = _mm_set1_epi16(LUMA_8BIT[0] as i16);
-        let g_w = _mm_set1_epi16(LUMA_8BIT[1] as i16);
-        let b_w = _mm_set1_epi16(LUMA_8BIT[2] as i16);
-
-        let sum = _mm_add_epi16(
-            _mm_add_epi16(_mm_mullo_epi16(r16, r_w), _mm_mullo_epi16(g16, g_w)),
-            _mm_mullo_epi16(b16, b_w),
-        );
-        let lum16 = _mm_srli_epi16(sum, 8);
-        let lum8 = _mm_packus_epi16(lum16, zero);
-
-        _mm_storel_epi64(dst_ptr.add(dst_offset) as *mut __m128i, lum8);
+impl LumaWeights {
+    /// For four `RGBA_U8` pixels held from byte zero.
+    #[target_feature(enable = "ssse3")]
+    fn rgba() -> Self {
+        Self::new(
+            _mm_setr_epi8(0, -1, 2, -1, 4, -1, 6, -1, 8, -1, 10, -1, 12, -1, 14, -1),
+            _mm_setr_epi8(1, -1, 1, -1, 5, -1, 5, -1, 9, -1, 9, -1, 13, -1, 13, -1),
+        )
     }
 
-    let src_rem = &src[simd_width * 32..];
-    let dst_rem = &mut dst[simd_width * 8..];
-    for i in 0..remainder {
-        let r = src_rem[i * 4] as u32;
-        let g = src_rem[i * 4 + 1] as u32;
-        let b = src_rem[i * 4 + 2] as u32;
-        dst_rem[i] = ((r * LUMA_R + g * LUMA_G + b * LUMA_B) >> 16) as u8;
+    /// For four `RGB_U8` pixels held from byte zero.
+    #[target_feature(enable = "ssse3")]
+    fn rgb() -> Self {
+        Self::new(
+            _mm_setr_epi8(0, -1, 2, -1, 3, -1, 5, -1, 6, -1, 8, -1, 9, -1, 11, -1),
+            _mm_setr_epi8(1, -1, 1, -1, 4, -1, 4, -1, 7, -1, 7, -1, 10, -1, 10, -1),
+        )
+    }
+
+    #[target_feature(enable = "ssse3")]
+    fn new(gather_rb: __m128i, gather_gg: __m128i) -> Self {
+        let (r, b) = (LUMA_R as i16, LUMA_B as i16);
+        let (g_lo, g_hi) = ((LUMA_G / 2) as i16, (LUMA_G - LUMA_G / 2) as i16);
+        Self {
+            weight_rb: _mm_setr_epi16(r, b, r, b, r, b, r, b),
+            weight_gg: _mm_setr_epi16(g_lo, g_hi, g_lo, g_hi, g_lo, g_hi, g_lo, g_hi),
+            gather_rb,
+            gather_gg,
+        }
+    }
+
+    /// The luminance of the four pixels `quad` holds from byte zero, one per
+    /// `i32` lane.
+    #[inline]
+    #[target_feature(enable = "ssse3")]
+    fn apply(self, quad: __m128i) -> __m128i {
+        let sum = _mm_add_epi32(
+            _mm_madd_epi16(_mm_shuffle_epi8(quad, self.gather_rb), self.weight_rb),
+            _mm_madd_epi16(_mm_shuffle_epi8(quad, self.gather_gg), self.weight_gg),
+        );
+        _mm_srli_epi32::<16>(sum)
     }
 }
 
+/// Sixteen luminance values, four `i32` lanes at a time, packed into 16 bytes.
+/// Every value is already in `0..=255`, so neither saturating pack can bite.
+#[inline]
+#[target_feature(enable = "ssse3")]
+fn pack_quads(lum: [__m128i; 4]) -> __m128i {
+    _mm_packus_epi16(
+        _mm_packs_epi32(lum[0], lum[1]),
+        _mm_packs_epi32(lum[2], lum[3]),
+    )
+}
+
+/// One 16-byte load.
+#[inline]
+#[target_feature(enable = "ssse3")]
+unsafe fn load(bytes: &[u8; 16]) -> __m128i {
+    // SAFETY: the argument is exactly the 16 bytes the load reads.
+    unsafe { _mm_loadu_si128(bytes.as_ptr().cast()) }
+}
+
+/// Sixteen `RGBA_U8` pixels per iteration: four 16-byte loads, each already a
+/// four-pixel quad, and one 16-byte store.
+#[target_feature(enable = "ssse3")]
+pub(super) unsafe fn convert_rgba_to_l_row_ssse3(src: &[u8], dst: &mut [u8], width: usize) {
+    let weights = LumaWeights::rgba();
+
+    // `src` runs to the end of the image; only this row's pixels are ours.
+    let src = &src[..width * 4];
+    let (groups, src_tail) = src.as_chunks::<64>();
+    let (out_groups, dst_tail) = dst.as_chunks_mut::<16>();
+
+    for (group, out) in groups.iter().zip(out_groups) {
+        let (parts, _) = group.as_chunks::<16>();
+        // SAFETY: a group is exactly 64 bytes, so it splits into four whole
+        // loads and the store fills its whole 16-byte chunk.
+        unsafe {
+            let lum = [
+                weights.apply(load(&parts[0])),
+                weights.apply(load(&parts[1])),
+                weights.apply(load(&parts[2])),
+                weights.apply(load(&parts[3])),
+            ];
+            _mm_storeu_si128(out.as_mut_ptr().cast(), pack_quads(lum));
+        }
+    }
+
+    simd::luma_tail::<4>(src_tail, dst_tail);
+}
+
+/// Sixteen `RGB_U8` pixels per iteration: three 16-byte loads spanning the
+/// group's 48 bytes exactly, realigned into four-pixel quads, one 16-byte store.
 #[target_feature(enable = "ssse3")]
 pub(super) unsafe fn convert_rgb_to_l_row_ssse3(src: &[u8], dst: &mut [u8], width: usize) {
-    use std::arch::x86_64::*;
+    let weights = LumaWeights::rgb();
 
-    let src_ptr = src.as_ptr();
-    let dst_ptr = dst.as_mut_ptr();
-    let simd_width = width / 16;
-    let remainder = width % 16;
+    // `src` runs to the end of the image; only this row's pixels are ours.
+    let src = &src[..width * 3];
+    let (groups, src_tail) = src.as_chunks::<48>();
+    let (out_groups, dst_tail) = dst.as_chunks_mut::<16>();
 
-    for i in 0..simd_width {
-        let src_offset = i * 48;
-        let dst_offset = i * 16;
-
-        let in0 = _mm_loadu_si128(src_ptr.add(src_offset) as *const __m128i);
-        let in1 = _mm_loadu_si128(src_ptr.add(src_offset + 16) as *const __m128i);
-        let in2 = _mm_loadu_si128(src_ptr.add(src_offset + 32) as *const __m128i);
-
-        // Extract R, G, B for first 8 pixels
-        let shuf_r0 = _mm_setr_epi8(0, 3, 6, 9, 12, 15, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1);
-        let shuf_g0 = _mm_setr_epi8(1, 4, 7, 10, 13, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1);
-        let shuf_b0 = _mm_setr_epi8(2, 5, 8, 11, 14, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1);
-
-        let r0_part = _mm_shuffle_epi8(in0, shuf_r0);
-        let g0_part = _mm_shuffle_epi8(in0, shuf_g0);
-        let b0_part = _mm_shuffle_epi8(in0, shuf_b0);
-
-        let shuf_r1 = _mm_setr_epi8(2, 5, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1);
-        let shuf_g1 = _mm_setr_epi8(0, 3, 6, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1);
-        let shuf_b1 = _mm_setr_epi8(1, 4, 7, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1);
-
-        let r1_part = _mm_shuffle_epi8(in1, shuf_r1);
-        let g1_part = _mm_shuffle_epi8(in1, shuf_g1);
-        let b1_part = _mm_shuffle_epi8(in1, shuf_b1);
-
-        let r_lo = _mm_or_si128(r0_part, _mm_slli_si128(r1_part, 6));
-        let g_lo = _mm_or_si128(g0_part, _mm_slli_si128(g1_part, 5));
-        let b_lo = _mm_or_si128(b0_part, _mm_slli_si128(b1_part, 5));
-
-        // Second 8 pixels
-        let shuf_r2 = _mm_setr_epi8(
-            8, 11, 14, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
-        );
-        let shuf_g2 = _mm_setr_epi8(
-            9, 12, 15, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
-        );
-        let shuf_b2 = _mm_setr_epi8(
-            10, 13, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
-        );
-
-        let r2_part = _mm_shuffle_epi8(in1, shuf_r2);
-        let g2_part = _mm_shuffle_epi8(in1, shuf_g2);
-        let b2_part = _mm_shuffle_epi8(in1, shuf_b2);
-
-        let shuf_r3 = _mm_setr_epi8(1, 4, 7, 10, 13, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1);
-        let shuf_g3 = _mm_setr_epi8(2, 5, 8, 11, 14, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1);
-        let shuf_b3 = _mm_setr_epi8(0, 3, 6, 9, 12, 15, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1);
-
-        let r3_part = _mm_shuffle_epi8(in2, shuf_r3);
-        let g3_part = _mm_shuffle_epi8(in2, shuf_g3);
-        let b3_part = _mm_shuffle_epi8(in2, shuf_b3);
-
-        let r_hi = _mm_or_si128(r2_part, _mm_slli_si128(r3_part, 3));
-        let g_hi = _mm_or_si128(g2_part, _mm_slli_si128(g3_part, 3));
-        let b_hi = _mm_or_si128(b2_part, _mm_slli_si128(b3_part, 2));
-
-        let zero = _mm_setzero_si128();
-        let r_w = _mm_set1_epi16(LUMA_8BIT[0] as i16);
-        let g_w = _mm_set1_epi16(LUMA_8BIT[1] as i16);
-        let b_w = _mm_set1_epi16(LUMA_8BIT[2] as i16);
-
-        let r16_lo = _mm_unpacklo_epi8(r_lo, zero);
-        let g16_lo = _mm_unpacklo_epi8(g_lo, zero);
-        let b16_lo = _mm_unpacklo_epi8(b_lo, zero);
-
-        let sum_lo = _mm_add_epi16(
-            _mm_add_epi16(_mm_mullo_epi16(r16_lo, r_w), _mm_mullo_epi16(g16_lo, g_w)),
-            _mm_mullo_epi16(b16_lo, b_w),
-        );
-        let lum16_lo = _mm_srli_epi16(sum_lo, 8);
-
-        let r16_hi = _mm_unpacklo_epi8(r_hi, zero);
-        let g16_hi = _mm_unpacklo_epi8(g_hi, zero);
-        let b16_hi = _mm_unpacklo_epi8(b_hi, zero);
-
-        let sum_hi = _mm_add_epi16(
-            _mm_add_epi16(_mm_mullo_epi16(r16_hi, r_w), _mm_mullo_epi16(g16_hi, g_w)),
-            _mm_mullo_epi16(b16_hi, b_w),
-        );
-        let lum16_hi = _mm_srli_epi16(sum_hi, 8);
-
-        let lum8 = _mm_packus_epi16(lum16_lo, lum16_hi);
-        _mm_storeu_si128(dst_ptr.add(dst_offset) as *mut __m128i, lum8);
+    for (group, out) in groups.iter().zip(out_groups) {
+        let (parts, _) = group.as_chunks::<16>();
+        // SAFETY: a group is exactly 48 bytes — three whole loads — and the
+        // store fills its whole 16-byte chunk.
+        unsafe {
+            let (in0, in1, in2) = (load(&parts[0]), load(&parts[1]), load(&parts[2]));
+            // A quad is 12 bytes, so only the first starts on a load boundary;
+            // `alignr` slides the next three down to byte zero.
+            let lum = [
+                weights.apply(in0),
+                weights.apply(_mm_alignr_epi8::<12>(in1, in0)),
+                weights.apply(_mm_alignr_epi8::<8>(in2, in1)),
+                weights.apply(_mm_srli_si128::<4>(in2)),
+            ];
+            _mm_storeu_si128(out.as_mut_ptr().cast(), pack_quads(lum));
+        }
     }
 
-    let src_rem = &src[simd_width * 48..];
-    let dst_rem = &mut dst[simd_width * 16..];
-    for i in 0..remainder {
-        let r = src_rem[i * 3] as u32;
-        let g = src_rem[i * 3 + 1] as u32;
-        let b = src_rem[i * 3 + 2] as u32;
-        dst_rem[i] = ((r * LUMA_R + g * LUMA_G + b * LUMA_B) >> 16) as u8;
-    }
+    simd::luma_tail::<3>(src_tail, dst_tail);
 }
 
 #[target_feature(enable = "ssse3")]
 pub(super) unsafe fn convert_l_to_rgba_row_ssse3(src: &[u8], dst: &mut [u8], width: usize) {
-    use std::arch::x86_64::*;
 
     let src_ptr = src.as_ptr();
     let dst_ptr = dst.as_mut_ptr();
@@ -307,7 +285,6 @@ pub(super) unsafe fn convert_l_to_rgba_row_ssse3(src: &[u8], dst: &mut [u8], wid
 
 #[target_feature(enable = "ssse3")]
 pub(super) unsafe fn convert_l_to_rgb_row_ssse3(src: &[u8], dst: &mut [u8], width: usize) {
-    use std::arch::x86_64::*;
 
     let src_ptr = src.as_ptr();
     let dst_ptr = dst.as_mut_ptr();
@@ -348,7 +325,6 @@ pub(super) unsafe fn convert_l_to_rgb_row_ssse3(src: &[u8], dst: &mut [u8], widt
 
 #[target_feature(enable = "sse2")]
 pub(super) unsafe fn convert_f32_to_u8_row_sse2(src: &[f32], dst: &mut [u8]) {
-    use std::arch::x86_64::*;
 
     let len = src.len();
     let simd_width = len / 16;
@@ -392,7 +368,6 @@ pub(super) unsafe fn convert_f32_to_u8_row_sse2(src: &[f32], dst: &mut [u8]) {
 
 #[target_feature(enable = "sse2")]
 pub(super) unsafe fn convert_u8_to_f32_row_sse2(src: &[u8], dst: &mut [f32]) {
-    use std::arch::x86_64::*;
 
     let len = src.len();
     let simd_width = len / 16;
@@ -437,7 +412,6 @@ pub(super) unsafe fn convert_u8_to_f32_row_sse2(src: &[u8], dst: &mut [f32]) {
 
 #[target_feature(enable = "sse2")]
 pub(super) unsafe fn convert_u8_to_u16_row_sse2(src: &[u8], dst: &mut [u16]) {
-    use std::arch::x86_64::*;
 
     let len = src.len();
     let simd_width = len / 16;
@@ -469,7 +443,6 @@ pub(super) unsafe fn convert_u8_to_u16_row_sse2(src: &[u8], dst: &mut [u16]) {
 
 #[target_feature(enable = "sse2")]
 pub(super) unsafe fn convert_u16_to_u8_row_sse2(src: &[u16], dst: &mut [u8]) {
-    use std::arch::x86_64::*;
 
     let len = src.len();
     let simd_width = len / 16;
@@ -496,7 +469,6 @@ pub(super) unsafe fn convert_u16_to_u8_row_sse2(src: &[u16], dst: &mut [u8]) {
 
 #[target_feature(enable = "sse2")]
 pub(super) unsafe fn convert_u16_to_f32_row_sse2(src: &[u16], dst: &mut [f32]) {
-    use std::arch::x86_64::*;
 
     let len = src.len();
     let simd_width = len / 8;
@@ -528,7 +500,6 @@ pub(super) unsafe fn convert_u16_to_f32_row_sse2(src: &[u16], dst: &mut [f32]) {
 
 #[target_feature(enable = "sse4.1")]
 pub(super) unsafe fn convert_f32_to_u16_row_sse41(src: &[f32], dst: &mut [u16]) {
-    use std::arch::x86_64::*;
 
     let len = src.len();
     let simd_width = len / 8;

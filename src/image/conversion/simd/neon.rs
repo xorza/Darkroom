@@ -2,14 +2,13 @@
 
 #![allow(unsafe_op_in_unsafe_fn)]
 
-use super::LUMA_8BIT;
-use super::LUMA_B;
-use super::LUMA_G;
-use super::LUMA_R;
+use std::arch::aarch64::*;
+
+use crate::image::conversion::simd;
+use crate::image::conversion::{LUMA_B, LUMA_G, LUMA_R};
 
 
 pub(super) unsafe fn convert_rgba_to_rgb_row_neon(src: &[u8], dst: &mut [u8], width: usize) {
-    use std::arch::aarch64::*;
 
     let src_ptr = src.as_ptr();
     let dst_ptr = dst.as_mut_ptr();
@@ -38,7 +37,6 @@ pub(super) unsafe fn convert_rgba_to_rgb_row_neon(src: &[u8], dst: &mut [u8], wi
 }
 
 pub(super) unsafe fn convert_rgb_to_rgba_row_neon(src: &[u8], dst: &mut [u8], width: usize) {
-    use std::arch::aarch64::*;
 
     let src_ptr = src.as_ptr();
     let dst_ptr = dst.as_mut_ptr();
@@ -69,116 +67,104 @@ pub(super) unsafe fn convert_rgb_to_rgba_row_neon(src: &[u8], dst: &mut [u8], wi
     }
 }
 
-pub(super) unsafe fn convert_rgba_to_l_row_neon(src: &[u8], dst: &mut [u8], width: usize) {
-    use std::arch::aarch64::*;
-
-    let src_ptr = src.as_ptr();
-    let dst_ptr = dst.as_mut_ptr();
-    let simd_width = width / 16;
-    let remainder = width % 16;
-
-    let r_w = vdupq_n_u16(LUMA_8BIT[0]);
-    let g_w = vdupq_n_u16(LUMA_8BIT[1]);
-    let b_w = vdupq_n_u16(LUMA_8BIT[2]);
-
-    for i in 0..simd_width {
-        let src_offset = i * 64;
-        let dst_offset = i * 16;
-
-        let rgba = vld4q_u8(src_ptr.add(src_offset));
-        let r = rgba.0;
-        let g = rgba.1;
-        let b = rgba.2;
-
-        let r_lo = vmovl_u8(vget_low_u8(r));
-        let r_hi = vmovl_u8(vget_high_u8(r));
-        let g_lo = vmovl_u8(vget_low_u8(g));
-        let g_hi = vmovl_u8(vget_high_u8(g));
-        let b_lo = vmovl_u8(vget_low_u8(b));
-        let b_hi = vmovl_u8(vget_high_u8(b));
-
-        let sum_lo = vaddq_u16(
-            vaddq_u16(vmulq_u16(r_lo, r_w), vmulq_u16(g_lo, g_w)),
-            vmulq_u16(b_lo, b_w),
-        );
-        let sum_hi = vaddq_u16(
-            vaddq_u16(vmulq_u16(r_hi, r_w), vmulq_u16(g_hi, g_w)),
-            vmulq_u16(b_hi, b_w),
-        );
-
-        let lum_lo = vshrn_n_u16(sum_lo, 8);
-        let lum_hi = vshrn_n_u16(sum_hi, 8);
-        let lum = vcombine_u8(lum_lo, lum_hi);
-
-        vst1q_u8(dst_ptr.add(dst_offset), lum);
-    }
-
-    let src_rem = &src[simd_width * 64..];
-    let dst_rem = &mut dst[simd_width * 16..];
-    for i in 0..remainder {
-        let r = src_rem[i * 4] as u32;
-        let g = src_rem[i * 4 + 1] as u32;
-        let b = src_rem[i * 4 + 2] as u32;
-        dst_rem[i] = ((r * LUMA_R + g * LUMA_G + b * LUMA_B) >> 16) as u8;
+/// One channel of sixteen pixels, split into the four `u16` quads the
+/// accumulator works on.
+#[inline]
+unsafe fn quads(channel: uint8x16_t) -> [uint16x4_t; 4] {
+    unsafe {
+        let lo = vmovl_u8(vget_low_u8(channel));
+        let hi = vmovl_u8(vget_high_u8(channel));
+        [
+            vget_low_u16(lo),
+            vget_high_u16(lo),
+            vget_low_u16(hi),
+            vget_high_u16(hi),
+        ]
     }
 }
 
+/// The Rec. 709 luminance of four pixels.
+///
+/// The widening multiply-accumulate takes *unsigned* 16-bit scalars and lands in
+/// `u32` lanes, so the full weights go in as they are and the sum is the scalar
+/// reference's exactly — not the 8-bit approximation a `u16` accumulator would
+/// force. `vshrn` folds the reference's `>> 16` into the narrowing store.
+#[inline]
+unsafe fn luminance(r: uint16x4_t, g: uint16x4_t, b: uint16x4_t) -> uint16x4_t {
+    unsafe {
+        let sum = vmull_n_u16(r, LUMA_R as u16);
+        let sum = vmlal_n_u16(sum, g, LUMA_G as u16);
+        let sum = vmlal_n_u16(sum, b, LUMA_B as u16);
+        vshrn_n_u32::<16>(sum)
+    }
+}
+
+/// Four luminance quads — sixteen values — packed back into 16 bytes.
+#[inline]
+unsafe fn pack_quads(lum: [uint16x4_t; 4]) -> uint8x16_t {
+    unsafe {
+        vcombine_u8(
+            vmovn_u16(vcombine_u16(lum[0], lum[1])),
+            vmovn_u16(vcombine_u16(lum[2], lum[3])),
+        )
+    }
+}
+
+/// Sixteen `RGBA_U8` pixels per iteration: one deinterleaving 64-byte load, one
+/// 16-byte store.
+pub(super) unsafe fn convert_rgba_to_l_row_neon(src: &[u8], dst: &mut [u8], width: usize) {
+    // `src` runs to the end of the image; only this row's pixels are ours.
+    let src = &src[..width * 4];
+    let (groups, src_tail) = src.as_chunks::<64>();
+    let (out_groups, dst_tail) = dst.as_chunks_mut::<16>();
+
+    for (group, out) in groups.iter().zip(out_groups) {
+        // SAFETY: a group is exactly 64 bytes — one `vld4q_u8` — and the store
+        // fills its whole 16-byte chunk.
+        unsafe {
+            let rgba = vld4q_u8(group.as_ptr());
+            let (r, g, b) = (quads(rgba.0), quads(rgba.1), quads(rgba.2));
+            let lum = [
+                luminance(r[0], g[0], b[0]),
+                luminance(r[1], g[1], b[1]),
+                luminance(r[2], g[2], b[2]),
+                luminance(r[3], g[3], b[3]),
+            ];
+            vst1q_u8(out.as_mut_ptr(), pack_quads(lum));
+        }
+    }
+
+    simd::luma_tail::<4>(src_tail, dst_tail);
+}
+
+/// Sixteen `RGB_U8` pixels per iteration: one deinterleaving 48-byte load, one
+/// 16-byte store.
 pub(super) unsafe fn convert_rgb_to_l_row_neon(src: &[u8], dst: &mut [u8], width: usize) {
-    use std::arch::aarch64::*;
+    // `src` runs to the end of the image; only this row's pixels are ours.
+    let src = &src[..width * 3];
+    let (groups, src_tail) = src.as_chunks::<48>();
+    let (out_groups, dst_tail) = dst.as_chunks_mut::<16>();
 
-    let src_ptr = src.as_ptr();
-    let dst_ptr = dst.as_mut_ptr();
-    let simd_width = width / 16;
-    let remainder = width % 16;
-
-    let r_w = vdupq_n_u16(LUMA_8BIT[0]);
-    let g_w = vdupq_n_u16(LUMA_8BIT[1]);
-    let b_w = vdupq_n_u16(LUMA_8BIT[2]);
-
-    for i in 0..simd_width {
-        let src_offset = i * 48;
-        let dst_offset = i * 16;
-
-        let rgb = vld3q_u8(src_ptr.add(src_offset));
-        let r = rgb.0;
-        let g = rgb.1;
-        let b = rgb.2;
-
-        let r_lo = vmovl_u8(vget_low_u8(r));
-        let r_hi = vmovl_u8(vget_high_u8(r));
-        let g_lo = vmovl_u8(vget_low_u8(g));
-        let g_hi = vmovl_u8(vget_high_u8(g));
-        let b_lo = vmovl_u8(vget_low_u8(b));
-        let b_hi = vmovl_u8(vget_high_u8(b));
-
-        let sum_lo = vaddq_u16(
-            vaddq_u16(vmulq_u16(r_lo, r_w), vmulq_u16(g_lo, g_w)),
-            vmulq_u16(b_lo, b_w),
-        );
-        let sum_hi = vaddq_u16(
-            vaddq_u16(vmulq_u16(r_hi, r_w), vmulq_u16(g_hi, g_w)),
-            vmulq_u16(b_hi, b_w),
-        );
-
-        let lum_lo = vshrn_n_u16(sum_lo, 8);
-        let lum_hi = vshrn_n_u16(sum_hi, 8);
-        let lum = vcombine_u8(lum_lo, lum_hi);
-
-        vst1q_u8(dst_ptr.add(dst_offset), lum);
+    for (group, out) in groups.iter().zip(out_groups) {
+        // SAFETY: a group is exactly 48 bytes — one `vld3q_u8` — and the store
+        // fills its whole 16-byte chunk.
+        unsafe {
+            let rgb = vld3q_u8(group.as_ptr());
+            let (r, g, b) = (quads(rgb.0), quads(rgb.1), quads(rgb.2));
+            let lum = [
+                luminance(r[0], g[0], b[0]),
+                luminance(r[1], g[1], b[1]),
+                luminance(r[2], g[2], b[2]),
+                luminance(r[3], g[3], b[3]),
+            ];
+            vst1q_u8(out.as_mut_ptr(), pack_quads(lum));
+        }
     }
 
-    let src_rem = &src[simd_width * 48..];
-    let dst_rem = &mut dst[simd_width * 16..];
-    for i in 0..remainder {
-        let r = src_rem[i * 3] as u32;
-        let g = src_rem[i * 3 + 1] as u32;
-        let b = src_rem[i * 3 + 2] as u32;
-        dst_rem[i] = ((r * LUMA_R + g * LUMA_G + b * LUMA_B) >> 16) as u8;
-    }
+    simd::luma_tail::<3>(src_tail, dst_tail);
 }
 
 pub(super) unsafe fn convert_l_to_rgba_row_neon(src: &[u8], dst: &mut [u8], width: usize) {
-    use std::arch::aarch64::*;
 
     let src_ptr = src.as_ptr();
     let dst_ptr = dst.as_mut_ptr();
@@ -208,7 +194,6 @@ pub(super) unsafe fn convert_l_to_rgba_row_neon(src: &[u8], dst: &mut [u8], widt
 }
 
 pub(super) unsafe fn convert_l_to_rgb_row_neon(src: &[u8], dst: &mut [u8], width: usize) {
-    use std::arch::aarch64::*;
 
     let src_ptr = src.as_ptr();
     let dst_ptr = dst.as_mut_ptr();
@@ -235,7 +220,6 @@ pub(super) unsafe fn convert_l_to_rgb_row_neon(src: &[u8], dst: &mut [u8], width
 }
 
 pub(super) unsafe fn convert_f32_to_u8_row_neon(src: &[f32], dst: &mut [u8]) {
-    use std::arch::aarch64::*;
 
     let len = src.len();
     let simd_width = len / 16;
@@ -279,7 +263,6 @@ pub(super) unsafe fn convert_f32_to_u8_row_neon(src: &[f32], dst: &mut [u8]) {
 }
 
 pub(super) unsafe fn convert_u8_to_f32_row_neon(src: &[u8], dst: &mut [f32]) {
-    use std::arch::aarch64::*;
 
     let len = src.len();
     let simd_width = len / 16;
@@ -321,7 +304,6 @@ pub(super) unsafe fn convert_u8_to_f32_row_neon(src: &[u8], dst: &mut [f32]) {
 }
 
 pub(super) unsafe fn convert_u8_to_u16_row_neon(src: &[u8], dst: &mut [u16]) {
-    use std::arch::aarch64::*;
 
     let len = src.len();
     let simd_width = len / 16;
@@ -349,7 +331,6 @@ pub(super) unsafe fn convert_u8_to_u16_row_neon(src: &[u8], dst: &mut [u16]) {
 }
 
 pub(super) unsafe fn convert_u16_to_u8_row_neon(src: &[u16], dst: &mut [u8]) {
-    use std::arch::aarch64::*;
 
     let len = src.len();
     let simd_width = len / 16;
@@ -376,7 +357,6 @@ pub(super) unsafe fn convert_u16_to_u8_row_neon(src: &[u16], dst: &mut [u8]) {
 }
 
 pub(super) unsafe fn convert_u16_to_f32_row_neon(src: &[u16], dst: &mut [f32]) {
-    use std::arch::aarch64::*;
 
     let len = src.len();
     let simd_width = len / 8;
@@ -407,7 +387,6 @@ pub(super) unsafe fn convert_u16_to_f32_row_neon(src: &[u16], dst: &mut [f32]) {
 }
 
 pub(super) unsafe fn convert_f32_to_u16_row_neon(src: &[f32], dst: &mut [u16]) {
-    use std::arch::aarch64::*;
 
     let len = src.len();
     let simd_width = len / 8;

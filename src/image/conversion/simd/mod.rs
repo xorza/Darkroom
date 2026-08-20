@@ -5,15 +5,20 @@
 //! Every kernel here is bit-identical to the scalar reference it stands in for,
 //! not merely close to it — [`crate::image::conversion`] picks between the two
 //! per format pair, so a pair must not change answers depending on which path a
-//! build or a CPU happens to take. The one exception is the RGB→luminance
-//! kernels, which weight with the 8-bit fixed-point `LUMA_8BIT` where the
-//! reference uses the 16-bit `LUMA_R`/`LUMA_G`/`LUMA_B`.
+//! build or a CPU happens to take.
 //!
 //! That is why the widening kernels *divide* by the source type's full-scale
 //! value rather than multiplying by a precomputed reciprocal, which would be
 //! several times cheaper: `x * (1.0 / 255.0)` is doubly rounded and disagrees
 //! with `x / 255.0` for 126 of the 256 byte values, and `x * (1.0 / 65535.0)`
 //! for 512 of the 65 536 word values.
+//!
+//! The luminance kernels face the same temptation from the other side: the Rec.
+//! 709 weights sum to 65536, so keeping the weighted sum in 16-bit lanes would
+//! mean scaling them down to 8-bit precision. Both arches accumulate into 32-bit
+//! lanes instead and carry the reference's own weights — x86 through `madd`,
+//! with green split across two lanes because it overflows a signed one, aarch64
+//! through the widening `vmlal`, which takes them unsigned and whole.
 
 #![allow(unsafe_op_in_unsafe_fn)]
 
@@ -32,7 +37,7 @@ mod tests;
 use crate::common::color_format::ColorFormat;
 #[cfg(target_arch = "x86_64")]
 use crate::cpu_features;
-use crate::image::conversion::{LUMA_8BIT, LUMA_B, LUMA_G, LUMA_R};
+use crate::image::conversion::scalar::RgbToLuminance;
 
 /// A row conversion kernel: converts one packed source row of `width` pixels
 /// into one packed destination row.
@@ -42,6 +47,17 @@ use crate::image::conversion::{LUMA_8BIT, LUMA_B, LUMA_G, LUMA_R};
 /// [`row_converter`] is what establishes that, and is the only thing that hands
 /// one of these out.
 type RowConvertFn = unsafe fn(src: &[u8], dst: &mut [u8], width: usize);
+
+/// The luminance of a row's sub-vector tail, straight through the scalar
+/// reference, so a tail can never disagree with the vector body it follows.
+/// `CHANNELS` is the source's bytes per pixel: four for `RGBA`, three for `RGB`.
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+fn luma_tail<const CHANNELS: usize>(src: &[u8], dst: &mut [u8]) {
+    let (pixels, _) = src.as_chunks::<CHANNELS>();
+    for (pixel, out) in pixels.iter().zip(dst) {
+        *out = u8::luminance(pixel[0], pixel[1], pixel[2]);
+    }
+}
 
 /// The SIMD row kernel for a format pair, or `None` when this build and CPU have
 /// no vector path for it — the caller then takes the scalar reference.
