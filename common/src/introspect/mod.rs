@@ -8,9 +8,12 @@
 //! With Common's `introspect-derive` feature, derive with
 //! `#[derive(Introspect)]`. Enum-typed fields implement [`IntrospectEnum`]
 //! (variant list + string round-trip) — derive it with
-//! `#[derive(IntrospectEnum)]` plus a stable `#[config(type_id = "…")]` UUID;
-//! the derive delegates to the enum's `Display`/`FromStr` (typically strum's
-//! `Display`/`EnumString`).
+//! `#[derive(IntrospectEnum)]` plus a stable `#[config(type_id = "…")]` UUID.
+//!
+//! Both derives are self-contained: a type describes itself with nothing but
+//! its own definition and a `Default`. That is what lets the crate that *owns*
+//! a config type make it introspectable, instead of a consumer restating every
+//! field in a mirror type it has to keep in step by hand.
 //!
 //! ```ignore
 //! #[derive(Default, Introspect)]
@@ -286,8 +289,12 @@ pub trait Introspect: Default {
 
 /// A fieldless enum usable as an introspected field — a variant list plus a
 /// string round-trip. Derive with `#[derive(IntrospectEnum)]` and a stable
-/// `#[config(type_id = "…")]` UUID (needs the enum's `Display` + `FromStr` —
-/// e.g. strum's `Display` + `EnumString`).
+/// `#[config(type_id = "…")]` UUID; the derive renders the variant names in
+/// `snake_case` itself, so the enum needs no other trait impl.
+///
+/// [`Self::TYPE_ID`] and the variant strings are the enum's identity on the
+/// wire and on disk: a consumer stores both. Neither may change once a
+/// document has been saved with them.
 pub trait IntrospectEnum: Sized {
     const TYPE_ID: &'static str;
     const DISPLAY_NAME: &'static str;

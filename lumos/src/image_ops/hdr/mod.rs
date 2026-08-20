@@ -7,6 +7,7 @@
 //! [`crate::image_ops::wavelet::atrous_smooth`] — see [`hdr_map`] for why the layer pyramid is
 //! never materialized.
 
+use common::Introspect;
 use rayon::prelude::*;
 
 use crate::error::InvalidConfigField;
@@ -23,7 +24,7 @@ mod tests;
 ///
 /// Computed on the combined intensity; color channels are rescaled hue-preservingly. Grayscale gets
 /// the compressed intensity directly.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Introspect)]
 pub struct Hdr {
     /// Number of wavelet scales. Structures coarser than ~`2^scales` px live in the residual and get
     /// compressed; finer detail is preserved. *More* scales → only the very largest structures

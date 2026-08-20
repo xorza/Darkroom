@@ -42,25 +42,6 @@ form, so backticked identifiers in prose rot silently. Several already have.
       each, plus instructions to extend the table when a fourth is added. The
       table is the only thing linking those call sites; nothing enforces it.
 
-## `lens` mirrors every `lumos` config type by hand
-
-`lens/src/astro/config/` exists to make `lumos` config structs introspectable
-for the node-graph editor. `lumos` already depends on `common`
-(`lumos/Cargo.toml:2`), the crate that owns `Introspect` and its derive.
-
-- [ ] 889 lines (`lens/src/astro/config/{mod,preset,processing,stacking}.rs`)
-      are mirror declarations: for each `lumos` config a `…Def` struct
-      restating every field, plus two hand-written `From` impls, plus a mirror
-      enum for each enum field with two more `From` impls. Adding one field to a
-      `lumos` config means three coordinated edits in `lens`, and nothing
-      detects a missed one except a wrong value at runtime.
-- [ ] `lumos` never derives `Introspect` anywhere despite depending on `common`,
-      so the mirror layer is the only reason the derive can't sit on the real
-      types.
-- [ ] `lens/src/astro/config/processing.rs:76-115` shows the shape: six fields
-      declared in `BackgroundConfigDef`, then listed again in
-      `From<ExtractBackground>`, then again in `From<BackgroundConfigDef>`.
-
 ## `common` publishes a surface almost nothing consumes
 
 The leaf crate's `lib.rs` exports 26 items. Grepping every consumer crate for

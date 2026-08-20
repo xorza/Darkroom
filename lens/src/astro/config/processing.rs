@@ -1,11 +1,26 @@
-//! Editable configuration mirrors for per-frame astronomical processing.
+//! Which per-frame processing configs the editor can build, and the projections
+//! for the ones whose shape it cannot edit directly.
+//!
+//! Most of these are simply the lumos config: it derives
+//! [`Introspect`](common::Introspect) itself, so the builder node's ports *are*
+//! its fields and adding one in lumos adds a port here with no edit on this
+//! side. All this module owes them is a [`NodeConfig`] identity for the wire
+//! they travel on: a `TYPE_ID` that ships in saved documents and so is fixed
+//! for the life of the type, and a `NAME` that is only what the editor labels
+//! that wire.
+//!
+//! A config the field model can't express — one whose enum variants carry
+//! data, which [`IntrospectEnum`](common::IntrospectEnum) does not describe —
+//! gets a projection instead: a flat struct of the knobs the editor offers,
+//! plus the one-way conversion that expands them back into the real config. A
+//! projection is deliberately narrower than the type it builds, so it does
+//! *not* track that type field-for-field.
 
 use common::{Introspect, IntrospectEnum};
 use lumos::{
     BackgroundMode, ColorMode, Denoise, ExtractBackground, Hdr, LocalContrast, Scnr, Stretch,
-    StretchMethod, Threshold,
+    StretchMethod,
 };
-use strum_macros::{Display, EnumString};
 
 use crate::astro::config::preset::preset_enum;
 use crate::config_node::NodeConfig;
@@ -45,358 +60,197 @@ preset_enum! {
     }
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, EnumString, Display, IntrospectEnum)]
-#[config(type_id = "ed416b2d-378b-4eb1-9029-bc7a80a509aa")]
-#[strum(serialize_all = "snake_case")]
-pub(crate) enum BackgroundModeDef {
-    #[default]
-    Subtract,
-    Divide,
-}
-
-impl From<BackgroundModeDef> for BackgroundMode {
-    fn from(mode: BackgroundModeDef) -> Self {
-        match mode {
-            BackgroundModeDef::Subtract => BackgroundMode::Subtract,
-            BackgroundModeDef::Divide => BackgroundMode::Divide,
-        }
-    }
-}
-
-impl From<BackgroundMode> for BackgroundModeDef {
-    fn from(mode: BackgroundMode) -> Self {
-        match mode {
-            BackgroundMode::Subtract => BackgroundModeDef::Subtract,
-            BackgroundMode::Divide => BackgroundModeDef::Divide,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Introspect)]
-pub(crate) struct BackgroundConfigDef {
-    tile_size: usize,
-    degree: usize,
-    mode: BackgroundModeDef,
-    rejection_sigma: f32,
-    iterations: usize,
-    divide_floor: f32,
-}
-
-impl Default for BackgroundConfigDef {
-    fn default() -> Self {
-        ExtractBackground::default().into()
-    }
-}
-
-impl From<ExtractBackground> for BackgroundConfigDef {
-    fn from(config: ExtractBackground) -> Self {
-        Self {
-            tile_size: config.tile_size,
-            degree: config.degree,
-            mode: config.mode.into(),
-            rejection_sigma: config.rejection_sigma,
-            iterations: config.iterations,
-            divide_floor: config.divide_floor,
-        }
-    }
-}
-
-impl From<BackgroundConfigDef> for ExtractBackground {
-    fn from(config: BackgroundConfigDef) -> Self {
-        Self {
-            tile_size: config.tile_size,
-            degree: config.degree,
-            mode: config.mode.into(),
-            rejection_sigma: config.rejection_sigma,
-            iterations: config.iterations,
-            divide_floor: config.divide_floor,
-        }
-    }
-}
-
-impl NodeConfig for BackgroundConfigDef {
+impl NodeConfig for ExtractBackground {
     const TYPE_ID: &'static str = "47a71876-5db9-45f9-a21d-cc2ce40a80f2";
     const NAME: &'static str = "ExtractBackground";
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, EnumString, Display, IntrospectEnum)]
-#[config(type_id = "542a0fa0-25ff-4839-b309-acbe65d93a84")]
-#[strum(serialize_all = "snake_case")]
-pub(crate) enum ThresholdDef {
-    Hard,
-    #[default]
-    Soft,
-}
-
-impl From<ThresholdDef> for Threshold {
-    fn from(threshold: ThresholdDef) -> Self {
-        match threshold {
-            ThresholdDef::Hard => Threshold::Hard,
-            ThresholdDef::Soft => Threshold::Soft,
-        }
-    }
-}
-
-impl From<Threshold> for ThresholdDef {
-    fn from(threshold: Threshold) -> Self {
-        match threshold {
-            Threshold::Hard => ThresholdDef::Hard,
-            Threshold::Soft => ThresholdDef::Soft,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Introspect)]
-pub(crate) struct DenoiseConfigDef {
-    scales: usize,
-    k: f32,
-    threshold: ThresholdDef,
-    strength: f32,
-}
-
-impl Default for DenoiseConfigDef {
-    fn default() -> Self {
-        Denoise::default().into()
-    }
-}
-
-impl From<Denoise> for DenoiseConfigDef {
-    fn from(config: Denoise) -> Self {
-        Self {
-            scales: config.scales,
-            k: config.k,
-            threshold: config.threshold.into(),
-            strength: config.strength,
-        }
-    }
-}
-
-impl From<DenoiseConfigDef> for Denoise {
-    fn from(mirror: DenoiseConfigDef) -> Self {
-        Self {
-            scales: mirror.scales,
-            k: mirror.k,
-            threshold: mirror.threshold.into(),
-            strength: mirror.strength,
-        }
-    }
-}
-
-impl NodeConfig for DenoiseConfigDef {
+impl NodeConfig for Denoise {
     const TYPE_ID: &'static str = "ab942729-dc49-4518-aae4-9008bd33cea1";
     const NAME: &'static str = "Denoise";
 }
 
-#[derive(Debug, Clone, Introspect)]
-pub(crate) struct HdrConfigDef {
-    scales: usize,
-    amount: f32,
-}
-
-impl Default for HdrConfigDef {
-    fn default() -> Self {
-        Hdr::default().into()
-    }
-}
-
-impl From<Hdr> for HdrConfigDef {
-    fn from(config: Hdr) -> Self {
-        Self {
-            scales: config.scales,
-            amount: config.amount,
-        }
-    }
-}
-
-impl From<HdrConfigDef> for Hdr {
-    fn from(mirror: HdrConfigDef) -> Self {
-        Self {
-            scales: mirror.scales,
-            amount: mirror.amount,
-        }
-    }
-}
-
-impl NodeConfig for HdrConfigDef {
+impl NodeConfig for Hdr {
     const TYPE_ID: &'static str = "36babf1d-0fda-4d5d-b4c6-ed4c13ebff6b";
     const NAME: &'static str = "Hdr";
 }
 
-#[derive(Debug, Clone, Introspect)]
-pub(crate) struct LocalContrastConfigDef {
-    tiles: usize,
-    clip_limit: f32,
-    strength: f32,
-}
-
-impl Default for LocalContrastConfigDef {
-    fn default() -> Self {
-        LocalContrast::default().into()
-    }
-}
-
-impl From<LocalContrast> for LocalContrastConfigDef {
-    fn from(config: LocalContrast) -> Self {
-        Self {
-            tiles: config.tiles,
-            clip_limit: config.clip_limit,
-            strength: config.strength,
-        }
-    }
-}
-
-impl From<LocalContrastConfigDef> for LocalContrast {
-    fn from(mirror: LocalContrastConfigDef) -> Self {
-        Self {
-            tiles: mirror.tiles,
-            clip_limit: mirror.clip_limit,
-            strength: mirror.strength,
-        }
-    }
-}
-
-impl NodeConfig for LocalContrastConfigDef {
+impl NodeConfig for LocalContrast {
     const TYPE_ID: &'static str = "eb0062ca-cef9-4fef-a52b-cf3e8e0fce3c";
     const NAME: &'static str = "LocalContrast";
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, EnumString, Display, IntrospectEnum)]
+/// Which green-removal protection [`ScnrKnobs`] builds. The lumos enum carries
+/// the additive mask's blend amount in its variant, so the editor picks the
+/// method here and supplies the amount as its own field.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, IntrospectEnum)]
 #[config(type_id = "662e2432-b685-4b5b-bf05-0041814dc908")]
-#[strum(serialize_all = "snake_case")]
-pub(crate) enum ScnrMethodDef {
-    #[default]
+pub(crate) enum ScnrMethodChoice {
     AverageNeutral,
     AdditiveMask,
 }
 
+/// The editable knobs behind a [`Scnr`]. `amount` is read only by
+/// [`ScnrMethodChoice::AdditiveMask`]; average-neutral is a full-strength clamp
+/// with nothing to tune.
 #[derive(Debug, Clone, Introspect)]
-pub(crate) struct ScnrConfigDef {
-    method: ScnrMethodDef,
+pub(crate) struct ScnrKnobs {
+    method: ScnrMethodChoice,
     amount: f32,
 }
 
-impl Default for ScnrConfigDef {
+impl Default for ScnrKnobs {
     fn default() -> Self {
         Self {
-            method: ScnrMethodDef::AverageNeutral,
-            amount: 0.5,
+            method: ScnrMethodChoice::AverageNeutral,
+            amount: SCNR_ADDITIVE_AMOUNT,
         }
     }
 }
 
-impl From<ScnrConfigDef> for Scnr {
-    fn from(mirror: ScnrConfigDef) -> Self {
-        match mirror.method {
-            ScnrMethodDef::AverageNeutral => Scnr::average_neutral(),
-            ScnrMethodDef::AdditiveMask => Scnr::additive_mask(mirror.amount),
+impl From<ScnrKnobs> for Scnr {
+    fn from(knobs: ScnrKnobs) -> Self {
+        match knobs.method {
+            ScnrMethodChoice::AverageNeutral => Scnr::average_neutral(),
+            ScnrMethodChoice::AdditiveMask => Scnr::additive_mask(knobs.amount),
         }
     }
 }
 
-impl NodeConfig for ScnrConfigDef {
+impl NodeConfig for ScnrKnobs {
     const TYPE_ID: &'static str = "cb80e688-a5ed-42fd-9087-6a9639a8b056";
     const NAME: &'static str = "ScnrConfig";
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, EnumString, Display, IntrospectEnum)]
-#[config(type_id = "ca1be21f-2096-410c-8bc2-33e96d9b12be")]
-#[strum(serialize_all = "snake_case")]
-pub(crate) enum ColorModeDef {
-    #[default]
-    ColorPreserving,
-    PerChannel,
-}
-
-impl From<ColorModeDef> for ColorMode {
-    fn from(mode: ColorModeDef) -> Self {
-        match mode {
-            ColorModeDef::ColorPreserving => ColorMode::ColorPreserving,
-            ColorModeDef::PerChannel => ColorMode::PerChannel,
-        }
-    }
-}
-
-impl From<ColorMode> for ColorModeDef {
-    fn from(mode: ColorMode) -> Self {
-        match mode {
-            ColorMode::ColorPreserving => ColorModeDef::ColorPreserving,
-            ColorMode::PerChannel => ColorModeDef::PerChannel,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, EnumString, Display, IntrospectEnum)]
+/// Which stretch curve [`StretchKnobs`] builds — the two automatic methods.
+/// [`StretchMethod`]'s explicit curves (`Asinh`, `Ghs`) are not offered: each
+/// carries its own parameter set, which one flat knob list cannot present
+/// without showing every other method's parameters alongside it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, IntrospectEnum)]
 #[config(type_id = "722f7047-a6fc-4538-abd7-8af5fd1ee0ff")]
-#[strum(serialize_all = "snake_case")]
-pub(crate) enum StretchMethodKindDef {
-    #[default]
+pub(crate) enum StretchMethodChoice {
     AutoAsinh,
     AutoStf,
 }
 
+/// The editable knobs behind a [`Stretch`]. Both methods take a
+/// `target_background`; `shadow_sigmas` is read only by
+/// [`StretchMethodChoice::AutoStf`].
 #[derive(Debug, Clone, Introspect)]
-pub(crate) struct StretchConfigDef {
-    method: StretchMethodKindDef,
+pub(crate) struct StretchKnobs {
+    method: StretchMethodChoice,
     target_background: f32,
     shadow_sigmas: f32,
-    color: ColorModeDef,
+    color: ColorMode,
 }
 
-impl Default for StretchConfigDef {
+impl Default for StretchKnobs {
     fn default() -> Self {
         let config = Stretch::default();
         let StretchMethod::AutoAsinh { target_background } = config.method else {
             panic!("lumos Stretch::default() must remain auto-asinh");
         };
         Self {
-            method: StretchMethodKindDef::AutoAsinh,
+            method: StretchMethodChoice::AutoAsinh,
             target_background,
             shadow_sigmas: 1.5,
-            color: config.color.into(),
+            color: config.color,
         }
     }
 }
 
-impl From<StretchConfigDef> for Stretch {
-    fn from(mirror: StretchConfigDef) -> Self {
-        let method = match mirror.method {
-            StretchMethodKindDef::AutoAsinh => StretchMethod::AutoAsinh {
-                target_background: mirror.target_background,
+impl From<StretchKnobs> for Stretch {
+    fn from(knobs: StretchKnobs) -> Self {
+        let method = match knobs.method {
+            StretchMethodChoice::AutoAsinh => StretchMethod::AutoAsinh {
+                target_background: knobs.target_background,
             },
-            StretchMethodKindDef::AutoStf => StretchMethod::AutoStf {
-                shadow_sigmas: mirror.shadow_sigmas,
-                target_background: mirror.target_background,
+            StretchMethodChoice::AutoStf => StretchMethod::AutoStf {
+                shadow_sigmas: knobs.shadow_sigmas,
+                target_background: knobs.target_background,
             },
         };
         Stretch {
             method,
-            color: mirror.color.into(),
+            color: knobs.color,
         }
     }
 }
 
-impl NodeConfig for StretchConfigDef {
+impl NodeConfig for StretchKnobs {
     const TYPE_ID: &'static str = "b08bb9a1-db12-43d4-aa57-fe3e3732e917";
     const NAME: &'static str = "Stretch";
 }
 
 #[cfg(test)]
 mod tests {
-    use lumos::{ColorMode, Stretch, StretchMethod};
+    use common::{Introspect, IntrospectEnum};
+    use lumos::{
+        BackgroundMode, ColorMode, Denoise, ExtractBackground, Hdr, LocalContrast, Stretch,
+        StretchMethod, Threshold,
+    };
 
-    use crate::astro::config::processing::{ColorModeDef, StretchConfigDef, StretchMethodKindDef};
+    use crate::astro::config::processing::{StretchKnobs, StretchMethodChoice};
+
+    fn field_names<T: Introspect>() -> Vec<String> {
+        T::fields().into_iter().map(|field| field.name).collect()
+    }
+
+    /// A builder node's ports are its config's fields, in declaration order,
+    /// and a saved graph binds them by position — so reordering or renaming a
+    /// field in lumos silently rewires every document that used the node.
+    /// Pinned here because the config types live in another crate now: this is
+    /// what makes the coupling visible from the side that depends on it.
+    #[test]
+    fn builder_ports_follow_the_lumos_field_order() {
+        assert_eq!(
+            field_names::<ExtractBackground>(),
+            [
+                "tile_size",
+                "degree",
+                "mode",
+                "rejection_sigma",
+                "iterations",
+                "divide_floor"
+            ]
+        );
+        assert_eq!(
+            field_names::<Denoise>(),
+            ["scales", "k", "threshold", "strength"]
+        );
+        assert_eq!(field_names::<Hdr>(), ["scales", "amount"]);
+        assert_eq!(
+            field_names::<LocalContrast>(),
+            ["tiles", "clip_limit", "strength"]
+        );
+        assert_eq!(
+            field_names::<StretchKnobs>(),
+            ["method", "target_background", "shadow_sigmas", "color"]
+        );
+    }
+
+    /// The variant strings are what a saved graph stores for an enum port, and
+    /// the derive renders them from the variant names — so a rename in lumos
+    /// would change what is already on disk.
+    #[test]
+    fn enum_ports_keep_their_stored_variant_names() {
+        assert_eq!(BackgroundMode::variants(), ["subtract", "divide"]);
+        assert_eq!(Threshold::variants(), ["hard", "soft"]);
+        assert_eq!(ColorMode::variants(), ["color_preserving", "per_channel"]);
+        assert_eq!(StretchMethodChoice::variants(), ["auto_asinh", "auto_stf"]);
+    }
 
     #[test]
     fn stretch_default_and_supported_methods_convert_exactly() {
-        let default = StretchConfigDef::default();
-        assert_eq!(default.method, StretchMethodKindDef::AutoAsinh);
-        assert_eq!(default.color, ColorModeDef::ColorPreserving);
+        let default = StretchKnobs::default();
+        assert_eq!(default.method, StretchMethodChoice::AutoAsinh);
+        assert_eq!(default.color, ColorMode::ColorPreserving);
 
-        let stretch: Stretch = StretchConfigDef {
-            method: StretchMethodKindDef::AutoStf,
+        let stretch: Stretch = StretchKnobs {
+            method: StretchMethodChoice::AutoStf,
             target_background: 0.25,
             shadow_sigmas: 2.0,
-            color: ColorModeDef::PerChannel,
+            color: ColorMode::PerChannel,
         }
         .into();
         let StretchMethod::AutoStf {

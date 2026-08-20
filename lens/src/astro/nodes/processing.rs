@@ -1,12 +1,11 @@
 //! Per-frame astronomical processing nodes.
 
-use lumos::{Denoise, Hdr, LocalContrast, NeutralizeBackground};
+use lumos::{Denoise, ExtractBackground, Hdr, LocalContrast, NeutralizeBackground};
 use scenarium::{DataType, Func, FuncInput, FuncLambda, FuncOutput, Library};
 
 use crate::astro::config::preset;
 use crate::astro::config::processing::{
-    BackgroundConfigDef, BackgroundModeKind, DenoiseConfigDef, HdrConfigDef,
-    LocalContrastConfigDef, ScnrConfigDef, ScnrKind, StretchConfigDef, StretchPreset,
+    BackgroundModeKind, ScnrKind, ScnrKnobs, StretchKnobs, StretchPreset,
 };
 use crate::astro::nodes::runtime;
 use crate::config_node::{ConfigValue, NodeConfig, config_data_type};
@@ -30,7 +29,7 @@ fn register_stretch(library: &mut Library) {
             .category("Astro")
             .pure()
             .input(frame_input("Image"))
-            .input(preset::input::<StretchConfigDef, StretchPreset>("Method"))
+            .input(preset::input::<StretchKnobs, StretchPreset>("Method"))
             .output(
                 FuncOutput::new("Image", IMAGE_DATA_TYPE.clone())
                     .description("Stretched, display-ready image."),
@@ -42,7 +41,7 @@ fn register_stretch(library: &mut Library) {
                     Box::pin(async move {
                         debug_assert_eq!(inputs.len(), 2);
                         debug_assert_eq!(outputs.len(), 1);
-                        let config = preset::resolve::<StretchConfigDef, StretchPreset>(&inputs[1]);
+                        let config = preset::resolve::<StretchKnobs, StretchPreset>(&inputs[1]);
                         let value = std::mem::take(&mut inputs[0]);
                         outputs[0] =
                             runtime::run_frame_op(value, move |image| config.apply(image)).await?;
@@ -60,7 +59,7 @@ fn register_background(library: &mut Library) {
         "Fits and removes a smooth sky-background gradient.",
         vec![
             frame_input("Image"),
-            preset::input::<BackgroundConfigDef, BackgroundModeKind>("Config"),
+            preset::input::<ExtractBackground, BackgroundModeKind>("Config"),
         ],
         FuncLambda::new(
             move |Invocation {
@@ -68,7 +67,7 @@ fn register_background(library: &mut Library) {
                   }| {
                 Box::pin(async move {
                     let config =
-                        preset::resolve::<BackgroundConfigDef, BackgroundModeKind>(&inputs[1]);
+                        preset::resolve::<ExtractBackground, BackgroundModeKind>(&inputs[1]);
                     let value = std::mem::take(&mut inputs[0]);
                     outputs[0] =
                         runtime::run_frame_op(value, move |image| config.apply(image)).await?;
@@ -87,7 +86,7 @@ fn register_denoise(library: &mut Library) {
         vec![
             frame_input("Image"),
             float_input("Strength", 0.85, "Denoise strength in [0, 1]."),
-            config_override_input::<DenoiseConfigDef>(),
+            config_override_input::<Denoise>(),
         ],
         FuncLambda::new(
             move |Invocation {
@@ -95,8 +94,8 @@ fn register_denoise(library: &mut Library) {
                   }| {
                 Box::pin(async move {
                     let config = inputs[2]
-                        .as_custom::<ConfigValue<DenoiseConfigDef>>()
-                        .map(|config| config.0.clone().into())
+                        .as_custom::<ConfigValue<Denoise>>()
+                        .map(|config| config.0)
                         .unwrap_or_else(|| Denoise {
                             strength: inputs[1]
                                 .as_f64()
@@ -121,14 +120,14 @@ fn register_scnr(library: &mut Library) {
         "Removes the residual green cast (SCNR).",
         vec![
             frame_input("Image"),
-            preset::input::<ScnrConfigDef, ScnrKind>("Method"),
+            preset::input::<ScnrKnobs, ScnrKind>("Method"),
         ],
         FuncLambda::new(
             move |Invocation {
                       inputs, outputs, ..
                   }| {
                 Box::pin(async move {
-                    let method = preset::resolve::<ScnrConfigDef, ScnrKind>(&inputs[1]);
+                    let method = preset::resolve::<ScnrKnobs, ScnrKind>(&inputs[1]);
                     let value = std::mem::take(&mut inputs[0]);
                     outputs[0] =
                         runtime::run_frame_op(value, move |image| method.apply(image)).await?;
@@ -169,7 +168,7 @@ fn register_hdr(library: &mut Library) {
         vec![
             frame_input("Image"),
             float_input("Amount", 0.5, "Compression amount in [0, 1]."),
-            config_override_input::<HdrConfigDef>(),
+            config_override_input::<Hdr>(),
         ],
         FuncLambda::new(
             move |Invocation {
@@ -177,8 +176,8 @@ fn register_hdr(library: &mut Library) {
                   }| {
                 Box::pin(async move {
                     let config = inputs[2]
-                        .as_custom::<ConfigValue<HdrConfigDef>>()
-                        .map(|config| config.0.clone().into())
+                        .as_custom::<ConfigValue<Hdr>>()
+                        .map(|config| config.0)
                         .unwrap_or_else(|| Hdr {
                             amount: inputs[1]
                                 .as_f64()
@@ -204,7 +203,7 @@ fn register_local_contrast(library: &mut Library) {
         vec![
             frame_input("Image"),
             float_input("Strength", 0.8, "Local-contrast strength in [0, 1]."),
-            config_override_input::<LocalContrastConfigDef>(),
+            config_override_input::<LocalContrast>(),
         ],
         FuncLambda::new(
             move |Invocation {
@@ -212,8 +211,8 @@ fn register_local_contrast(library: &mut Library) {
                   }| {
                 Box::pin(async move {
                     let config = inputs[2]
-                        .as_custom::<ConfigValue<LocalContrastConfigDef>>()
-                        .map(|config| config.0.clone().into())
+                        .as_custom::<ConfigValue<LocalContrast>>()
+                        .map(|config| config.0)
                         .unwrap_or_else(|| LocalContrast {
                             strength: inputs[1]
                                 .as_f64()

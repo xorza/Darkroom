@@ -10,8 +10,10 @@
 //! The introspection itself (field reflection, labels, typed rebuild) lives in
 //! `common` and is GUI-agnostic; this module only maps it to node ports +
 //! `DynamicValue`s. A config type is a [`NodeConfig`]: `Introspect` plus a
-//! stable wire `TYPE_ID`/`NAME`. See [`crate::astro::config`] for the mirror
-//! types.
+//! stable wire `TYPE_ID`/`NAME`. Usually that is the config type itself —
+//! `lumos` derives `Introspect` on its own — and all
+//! [`crate::astro::config`] adds is the identity; where a config's shape does
+//! not fit the field model, it declares a flat projection instead.
 
 use std::any::Any;
 use std::fmt;
@@ -147,7 +149,7 @@ fn data_type(kind: &FieldKind) -> DataType {
     }
 }
 
-/// Register the enum type(s) a `kind` references on `library`. A mirror enum can
+/// Register the enum type(s) a `kind` references on `library`. One enum can
 /// appear across several config builders, so identical registrations are
 /// idempotent while conflicting metadata is a wiring bug.
 fn register_field_enum(library: &mut Library, kind: &FieldKind) {

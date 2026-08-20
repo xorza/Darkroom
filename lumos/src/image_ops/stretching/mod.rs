@@ -31,6 +31,7 @@
 //! to its brightness and burns bright star cores toward white.
 
 use crate::image_ops::rgb::Rgb;
+use common::IntrospectEnum;
 use rayon::prelude::*;
 
 use crate::error::InvalidConfigField;
@@ -80,7 +81,11 @@ pub enum StretchMethod {
 
 /// How a stretch curve is applied across the channels of a color image. No effect on a grayscale
 /// image — with one channel, both modes stretch it identically.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+///
+/// `type_id` is this enum's identity to an introspecting consumer; that
+/// consumer stores it, so it is fixed for the life of the type.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, IntrospectEnum)]
+#[config(type_id = "ca1be21f-2096-410c-8bc2-33e96d9b12be")]
 pub enum ColorMode {
     /// Stretch the combined intensity `I = (r+g+b)/3` and scale each channel by `f(I)/I`.
     /// Preserves hue/saturation and star color; recommended for a final image.

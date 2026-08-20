@@ -141,7 +141,7 @@ mod tests {
 
     use crate::astro::config::preset::resolve;
     use crate::astro::config::processing::{
-        BackgroundModeKind, ScnrKind, StretchConfigDef, StretchPreset,
+        BackgroundModeKind, ScnrKind, StretchKnobs, StretchPreset,
     };
     use crate::astro::config::stacking::{CombinePreset, DetectionPreset, RegistrationPreset};
     use crate::config_node::ConfigValue;
@@ -205,13 +205,13 @@ mod tests {
 
     #[test]
     fn resolver_accepts_presets_and_wired_configs() {
-        let preset = resolve::<StretchConfigDef, StretchPreset>(&DynamicValue::from(
-            ConstValue::Enum("auto_stf".to_string()),
-        ));
+        let preset = resolve::<StretchKnobs, StretchPreset>(&DynamicValue::from(ConstValue::Enum(
+            "auto_stf".to_string(),
+        )));
         assert!(matches!(preset.method, StretchMethod::AutoStf { .. }));
 
-        let configured = resolve::<StretchConfigDef, StretchPreset>(&DynamicValue::from_custom(
-            ConfigValue(StretchConfigDef::default()),
+        let configured = resolve::<StretchKnobs, StretchPreset>(&DynamicValue::from_custom(
+            ConfigValue(StretchKnobs::default()),
         ));
         assert!(matches!(configured.method, StretchMethod::AutoAsinh { .. }));
     }
@@ -219,6 +219,6 @@ mod tests {
     #[test]
     #[should_panic(expected = "config input type is validated")]
     fn resolver_rejects_incompatible_values() {
-        resolve::<StretchConfigDef, StretchPreset>(&DynamicValue::from(1.0));
+        resolve::<StretchKnobs, StretchPreset>(&DynamicValue::from(1.0));
     }
 }

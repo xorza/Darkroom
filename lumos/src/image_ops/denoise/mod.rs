@@ -9,6 +9,7 @@
 //! A **linear-domain** operation: run after stacking and color calibration, before the stretch (the
 //! stretch's non-uniform gain would distort the noise statistics this relies on).
 
+use common::{Introspect, IntrospectEnum};
 use imaginarium::Buffer2;
 use rayon::prelude::*;
 
@@ -27,7 +28,11 @@ mod tests;
 const MAX_NOISE_SAMPLES: usize = 500_000;
 
 /// How to attenuate a wavelet coefficient that falls below the per-scale threshold.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+///
+/// `type_id` is this enum's identity to an introspecting consumer; that
+/// consumer stores it, so it is fixed for the life of the type.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, IntrospectEnum)]
+#[config(type_id = "542a0fa0-25ff-4839-b309-acbe65d93a84")]
 pub enum Threshold {
     /// Keep coefficients with `|w| ≥ t` unchanged, zero the rest. Preserves photometry of strong
     /// features but can ring around bright stars.
@@ -63,7 +68,7 @@ impl Threshold {
 ///
 /// Run on linear data, after color calibration and before the stretch. No-op-safe on any size (the
 /// scale count is clamped to what the dimensions support).
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Introspect)]
 pub struct Denoise {
     /// Number of wavelet scales `J`. Each scale `j` targets structure ~`2^j` px wide; more scales
     /// reach larger noise (mottle) at the cost of touching more real extended signal. Clamped to
