@@ -49,8 +49,10 @@ impl TransformType {
 pub enum TransformModel {
     /// Fit exactly this model.
     Fixed(TransformType),
-    /// Ladder Euclidean → Similarity → Affine → Homography, accepting the first fit within
-    /// [`AUTO_UPGRADE_THRESHOLD`](crate::stacking::registration::tuning::AUTO_UPGRADE_THRESHOLD).
+    /// Ladder Euclidean → Similarity → Affine → Homography, accepting the first rung whose RMS
+    /// residual clears the ladder's own bar — or
+    /// [`max_rms_error`](crate::RegistrationConfig::max_rms_error), whenever the caller sets a
+    /// tighter one.
     #[default]
     Auto,
 }
