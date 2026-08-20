@@ -6,7 +6,7 @@ mod error;
 
 use std::sync::Arc;
 
-use ::common::{CancelToken, is_debug};
+use common::{CancelToken, is_debug};
 
 use crate::RamUsage;
 use crate::execution::cache::disk_store::DiskStore;

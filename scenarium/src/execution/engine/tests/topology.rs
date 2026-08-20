@@ -1,6 +1,6 @@
 use super::*;
 
-use ::common::FloatExt;
+use common::FloatExt;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn removing_node_rebuilds_id_keyed_edges() {

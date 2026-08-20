@@ -17,7 +17,7 @@
 
 use crate::graph::identity::FuncId;
 
-use crate::common::column::{Column, Span};
+use crate::containers::column::{Column, Span};
 use crate::execution::compile::consumer_cone::ConsumerCone;
 use crate::execution::identity::{EventIdx, InputIdx, NodeIdx, OutputAddr, OutputIdx};
 use crate::graph::func::FuncBehavior;

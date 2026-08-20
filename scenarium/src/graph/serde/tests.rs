@@ -6,7 +6,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use crate::graph::identity::{FuncId, InputPort, NodeId};
 use crate::graph::node::{Node, NodeKind};
 use crate::graph::{Binding, Graph};
-use ::common::{SerdeFormat, deserialize, serialize};
+use common::{SerdeFormat, deserialize, serialize};
 
 use super::{deserialize_bindings, deserialize_nodes};
 

@@ -1,6 +1,6 @@
 //! Downstream cones over a program's data edges.
 
-use crate::common::set::IdxSet;
+use crate::containers::set::IdxSet;
 use crate::execution::compile::compiled_graph::{CompiledGraph, ExecutionBinding};
 use crate::execution::identity::NodeIdx;
 

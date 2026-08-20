@@ -1,5 +1,5 @@
 use super::*;
-use ::common::TempFile;
+use common::TempFile;
 
 use crate::ConstValue;
 use crate::execution::cache::runtime::RuntimeCache;

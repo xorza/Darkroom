@@ -7,7 +7,7 @@ pub(crate) mod store_outcome;
 use std::io;
 use std::path::PathBuf;
 
-use ::common::file_utils::{AtomicFile, PublicationMode};
+use common::file_utils::{AtomicFile, PublicationMode};
 use tokio::io::{AsyncWriteExt as _, BufWriter};
 
 use crate::DynamicValue;

@@ -10,7 +10,7 @@ use crate::execution::cache::resource::error::StampError;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use ::common::CancelToken;
+use common::CancelToken;
 use hashbrown::HashSet;
 
 use crate::execution::cache::digest::{Digest, DigestHasher};

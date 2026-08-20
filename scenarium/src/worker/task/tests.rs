@@ -4,7 +4,7 @@ use std::time::Instant;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
-use ::common::CancelToken;
+use common::CancelToken;
 
 use crate::execution::report::NodeExecutionStatus;
 use crate::execution::report::{RunPhase, RunProgress, RunReporter};

@@ -15,7 +15,7 @@ use std::path::PathBuf;
 
 use hashbrown::HashMap;
 
-use ::common::CancelToken;
+use common::CancelToken;
 
 use crate::execution::cache::disk_store::DiskStore;
 use crate::execution::cache::runtime::error::CacheNodeFailure;

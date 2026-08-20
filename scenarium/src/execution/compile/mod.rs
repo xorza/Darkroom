@@ -34,7 +34,7 @@ pub(crate) mod error;
 mod validate;
 
 use crate::DataType;
-use crate::common::column::Column;
+use crate::containers::column::Column;
 use crate::execution::compile::compiled_graph::{
     CompiledGraph, ExecutionBinding, ExecutionEvent, ExecutionInput, ExecutionNode,
 };

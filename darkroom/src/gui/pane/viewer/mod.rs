@@ -28,6 +28,7 @@ use scenarium::NodeId;
 use std::borrow::Cow;
 use std::fmt::Write as _;
 
+use common::FloatExt;
 use glam::{UVec2, Vec2};
 use palantir::{
     Align, Background, Color, Configure, HAlign, ImageDownsample, ImageFilter, ImageFit,
@@ -431,8 +432,8 @@ impl ImageViewer {
         let adjusting = resp.left.drag.started()
             || resp.middle.drag.started()
             || resp.scroll.pixels != Vec2::ZERO
-            || resp.scroll.lines.y.abs() > f32::EPSILON
-            || (resp.scroll.zoom - 1.0).abs() > f32::EPSILON;
+            || resp.scroll.lines.y != 0.0
+            || !resp.scroll.zoom.approximately_eq(1.0);
         if self.view.is_none() && !adjusting {
             return;
         }

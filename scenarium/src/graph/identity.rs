@@ -15,8 +15,8 @@
 //! list, in one order** — a set that drifted between them would leave a port
 //! type missing a bound its siblings have.
 
-use ::common::id_type;
 use ::serde::{Deserialize, Serialize};
+use common::id_type;
 
 // A `NodeId` is unique across a whole document, so a bare one is an
 // unambiguous address. `FuncId` names a declaration in the library rather than

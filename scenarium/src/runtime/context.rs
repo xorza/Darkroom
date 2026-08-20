@@ -1,7 +1,7 @@
 use std::any::{Any, TypeId};
 use std::fmt::Debug;
 
-use ::common::CancelToken;
+use common::CancelToken;
 use hashbrown::HashMap;
 
 use crate::execution::report::{LogEntry, LogLevel};

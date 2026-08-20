@@ -2,7 +2,7 @@ use super::*;
 
 use std::sync::Mutex as StdMutex;
 
-use ::common::{TempDir, TempFile};
+use common::{TempDir, TempFile};
 
 use crate::async_lambda;
 use crate::{FsPathConfig, FsPathMode};

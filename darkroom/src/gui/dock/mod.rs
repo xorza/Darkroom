@@ -221,7 +221,8 @@ fn render_node<F: FnMut(&mut Ui, TabRef, Option<Vec2>, &mut Requests)>(
             // layout itself only changes through the recorded intent
             // (drained post-record, coalescing per divider). Approximate
             // compare for the same reason `pan_zoom::emit_pan_zoom` uses
-            // one — an exact `!=` emits on sub-epsilon jitter.
+            // one — an exact `!=` emits on the last-bit noise a re-derived
+            // ratio carries.
             if !live_ratio.approximately_eq(ratio) {
                 out.push_view(DockOp::SetRatio {
                     split: path,

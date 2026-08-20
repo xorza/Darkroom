@@ -137,11 +137,13 @@ pub(crate) fn emit_pan_zoom(
     }
     fold_pan_drag(pan_anchor, resp.middle.drag.delta(), &mut v.pan);
     fold_scroll_zoom(&mut v, ui, &resp, CANVAS_MIN_ZOOM, CANVAS_MAX_ZOOM);
-    // Only emit when the gesture actually moved the viewport
-    // (approx compare — exact float `!=` would emit on sub-epsilon
-    // jitter). The `SetViewport` undo step is also `is_noop`-
-    // filtered in `drain_requests`; this just skips the build on
-    // idle frames.
+    // Only emit when the gesture actually moved the viewport (approx
+    // compare — exact float `!=` would emit on the last-bit noise the
+    // zoom-about-cursor algebra leaves behind, which `approximately_eq`
+    // reads at the pan's own magnitude rather than against a fixed
+    // epsilon a four-digit pan would swamp). The `SetViewport` undo step
+    // is also `is_noop`-filtered in `drain_requests`; this just skips the
+    // build on idle frames.
     let unchanged = v.pan.approximately_eq(viewport.pan) && v.zoom.approximately_eq(viewport.zoom);
     if !unchanged {
         out.push_graph(GraphIntent::SetViewport { to: v });
