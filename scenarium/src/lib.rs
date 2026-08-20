@@ -12,7 +12,7 @@ mod worker;
 pub use common::CancelToken;
 pub use data::codec::CustomValueCodec;
 pub use data::codec::error::{CodecError, CodecFormatError};
-pub use data::const_value::ConstValue;
+pub use data::const_value::{ConstValue, ValueText};
 pub use data::dynamic_value::{CustomValue, DynamicValue, RamUsage};
 pub use data::type_system::{DataType, EnumVariants, FsPathConfig, FsPathMode, TypeId};
 pub use elements::math_library::math_library;

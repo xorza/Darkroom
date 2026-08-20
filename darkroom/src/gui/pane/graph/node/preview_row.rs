@@ -9,6 +9,7 @@
 //! from the node machinery unchanged.
 
 use std::borrow::Cow;
+use std::fmt::Display;
 
 use imaginarium::ColorFormat;
 use palantir::{
@@ -25,7 +26,7 @@ use crate::gui::state::preview_store::{PreviewImage, StoredContent};
 use crate::gui::theme::Theme;
 use crate::gui::widgets::format::fmt_bytes;
 use crate::gui::widgets::support::{
-    CARD_FOOTER_PAD_X, CARD_FOOTER_PAD_Y, footer_background, labeled_value, mono_text, sized_text,
+    CARD_FOOTER_PAD_X, CARD_FOOTER_PAD_Y, bare_value, footer_background, labeled_value, sized_text,
 };
 
 /// Minimum body width for a preview node, canvas-world units. Wider than a
@@ -121,15 +122,9 @@ fn info_row(ui: &mut Ui, theme: &Theme, image: &PreviewImage) {
         // rounded bottom, the way the header rounds the top.
         .background(footer_background(theme, theme.card.inner_radius()))
         .show(ui, |ui| {
-            bare_value(
-                ui,
-                theme,
-                format!(
-                    "{}\u{d7}{}",
-                    image.preview.native_size.x, image.preview.native_size.y
-                ),
-            );
-            bare_value(ui, theme, format_label(image.preview.native_format));
+            let size = image.preview.native_size;
+            bare_value(ui, theme, format_args!("{}\u{d7}{}", size.x, size.y));
+            bare_value(ui, theme, FormatLabel(image.preview.native_format));
             Panel::hstack()
                 .id_salt("preview_info_size")
                 .size((Sizing::HUG, Sizing::HUG))
@@ -143,17 +138,17 @@ fn info_row(ui: &mut Ui, theme: &Theme, image: &PreviewImage) {
 
 /// `"RGBA \u{b7} 8-bit"`-style shorthand for a pixel format: channel layout,
 /// then per-channel bit depth.
-fn format_label(format: ColorFormat) -> String {
-    let bits = format.channel_size.byte_count() as u32 * 8;
-    format!("{} \u{b7} {bits}-bit", format.channel_count)
-}
+///
+/// Rendered on demand — the strip it feeds records once per preview node per
+/// frame, so there is nothing for a `String` to be worth.
+#[derive(Clone, Copy, Debug)]
+struct FormatLabel(ColorFormat);
 
-/// A bare mono-styled value with no label — used where the value's own shape
-/// (`1920×1080`, `RGBA · 8-bit`) already says what it is.
-fn bare_value(ui: &mut Ui, theme: &Theme, text: String) {
-    Text::new(text)
-        .style(&mono_text(ui, theme.text.label))
-        .show(ui);
+impl Display for FormatLabel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let bits = self.0.channel_size.byte_count() as u32 * 8;
+        write!(f, "{} \u{b7} {bits}-bit", self.0.channel_count)
+    }
 }
 
 #[cfg(test)]
@@ -161,9 +156,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn format_label_reports_channel_layout_and_bit_depth() {
-        assert_eq!(format_label(ColorFormat::RGBA_U8), "RGBA \u{b7} 8-bit");
-        assert_eq!(format_label(ColorFormat::RGB_U16), "RGB \u{b7} 16-bit");
-        assert_eq!(format_label(ColorFormat::L_F32), "L \u{b7} 32-bit");
+    fn pixel_format_shorthand_reports_channel_layout_and_bit_depth() {
+        assert_eq!(
+            FormatLabel(ColorFormat::RGBA_U8).to_string(),
+            "RGBA \u{b7} 8-bit"
+        );
+        assert_eq!(
+            FormatLabel(ColorFormat::RGB_U16).to_string(),
+            "RGB \u{b7} 16-bit"
+        );
+        assert_eq!(
+            FormatLabel(ColorFormat::L_F32).to_string(),
+            "L \u{b7} 32-bit"
+        );
     }
 }

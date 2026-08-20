@@ -7,7 +7,7 @@
 
 use scenarium::{Library, NodeId, OutputTypes};
 
-use crate::core::document::harness::DocFixture;
+use crate::core::document::harness::{self, DocFixture};
 use crate::core::document::open_document::OpenDocument;
 use crate::gui::app::ctx::{AppCtx, StatusInputs};
 use crate::gui::graph_ctx::GraphCtx;
@@ -57,13 +57,7 @@ impl GraphCtxFixture {
     /// The `i`th node in placement order — [`DocFixture::node`] over the
     /// document this fixture took ownership of.
     pub(crate) fn node(&self, i: usize) -> NodeId {
-        self.open
-            .document
-            .main_view
-            .paint_order()
-            .get(i)
-            .expect("the fixture placed that many nodes")
-            .0
+        harness::nth_in_paint_order(&self.open.document.main_view, i)
     }
 
     /// The context over this fixture, derived from an [`AppCtx`] whose

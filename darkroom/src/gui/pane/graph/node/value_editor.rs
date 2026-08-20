@@ -31,11 +31,13 @@
 //! frame, whose buffer still holds the user's text to commit — and parse
 //! only when the edit commits.
 
+use std::borrow::Cow;
+use std::fmt::{Display, Write as _};
 use std::path::Path;
 
 use palantir::{
     Button, Checkbox, ComboBox, Configure, DragValue, Sizing, TextEdit, TextEditTheme, TextWrap,
-    Ui, WidgetId,
+    Ui, WidgetId, fmt,
 };
 use scenarium::{ConstValue, DataType, FsPathMode, Library, ValueVariant};
 
@@ -110,18 +112,19 @@ pub(super) fn show(
             let Some(current) = value.as_string() else {
                 return read_only_label(ui, theme, id, value);
             };
-            let edit = buffered_text_edit(ui, editor, id, &current, |s| (*s).to_owned(), width);
-            (edit.committed && edit.text != current).then_some(ConstValue::String(edit.text))
+            let edited = buffered_text_edit(ui, editor, id, current, format_string, width)?;
+            (edited != current).then_some(ConstValue::String(edited))
         }
         DataType::FsPath(config) => {
             // Preview whichever path literal is stored — a mode/kind mismatch
             // left by library drift still previews, and the pick dialog
             // (opened per the declared config) replaces it wholesale.
-            let label = match value {
-                ConstValue::FsPath(path) => single_path_preview(path, config.mode),
-                ConstValue::FsPaths(paths) => multi_path_preview(paths),
+            let preview = match value {
+                ConstValue::FsPath(path) => PathPreview::single(path, config.mode),
+                ConstValue::FsPaths(paths) => PathPreview::multi(paths),
                 _ => return read_only_label(ui, theme, id, value),
             };
+            let label = fmt!(ui, "{preview}");
             // The blocking dialog runs after authoring, so this button only records its click.
             Button::new()
                 .id(id)
@@ -191,11 +194,8 @@ fn any_smart_edit(
     value: &ConstValue,
     width: f32,
 ) -> Option<ConstValue> {
-    let edit = buffered_text_edit(ui, editor, id, value, format_any, width);
-    if !edit.committed {
-        return None;
-    }
-    let parsed = parse_any(&edit.text);
+    let text = buffered_text_edit(ui, editor, id, value, format_any, width)?;
+    let parsed = parse_any(&text);
     (parsed != *value).then_some(parsed)
 }
 
@@ -204,11 +204,15 @@ fn any_smart_edit(
 /// `Int`) and `Null` shows blank (an unseeded `Any` starts empty). A `String`
 /// prints verbatim, so a numeric-looking string (`"42"`) is the one kind that
 /// doesn't round-trip — the accepted ambiguity of an untyped literal.
-fn format_any(value: &ConstValue) -> String {
+///
+/// Writes into the caller's cleared buffer — see [`buffered_text_edit`].
+fn format_any(value: &ConstValue, out: &mut String) {
     match value {
-        ConstValue::Null => String::new(),
-        ConstValue::Float(v) => format_float(v),
-        other => other.to_value_string(),
+        ConstValue::Null => {}
+        ConstValue::Float(v) => format_float(*v, out),
+        other => {
+            let _ = write!(out, "{}", other.value_text());
+        }
     }
 }
 
@@ -253,59 +257,87 @@ fn read_only_label(
     None
 }
 
-fn single_path_preview(path: &str, mode: FsPathMode) -> String {
-    let prompt = match mode {
-        FsPathMode::ExistingFile => "Choose file…",
-        FsPathMode::ExistingFiles => "Choose files…",
-        FsPathMode::NewFile => "Choose save path…",
-        FsPathMode::Directory => "Choose directory…",
-    };
-    if path.is_empty() {
-        return prompt.to_owned();
-    }
-    Path::new(path)
-        .file_name()
-        .map(|name| name.to_string_lossy().into_owned())
-        .unwrap_or_else(|| path.to_owned())
-}
-
-fn multi_path_preview(paths: &[String]) -> String {
-    let count = paths.iter().filter(|path| !path.is_empty()).count();
-    match count {
-        0 => "Choose files…".to_owned(),
-        1 => "1 file".to_owned(),
-        _ => format!("{count} files"),
-    }
-}
-
-/// What [`buffered_text_edit`] hands back: the buffer's current text and
-/// whether this frame committed the edit (Enter, or focus left the field).
+/// What an `FsPath` input's pick button reads: the mode's call to action
+/// while nothing is chosen, a single chosen path's own file name, or how many
+/// files a multi-pick holds.
+///
+/// Rendered on demand rather than assembled into a `String`: the button
+/// records every frame the node does, and the label goes straight into the
+/// record pass's text arena.
 #[derive(Debug)]
-struct TextEditOutcome {
-    text: String,
-    committed: bool,
+enum PathPreview<'a> {
+    /// Nothing chosen — the prompt for the mode being picked for.
+    Prompt(&'static str),
+    /// The chosen path's final component (the whole path when it has none).
+    Name(Cow<'a, str>),
+    /// How many non-empty paths a multi-pick holds. Never zero — that reads
+    /// as a [`Prompt`](Self::Prompt).
+    Count(usize),
+}
+
+impl<'a> PathPreview<'a> {
+    /// The label for a single-path literal.
+    fn single(path: &'a str, mode: FsPathMode) -> Self {
+        if path.is_empty() {
+            return Self::Prompt(match mode {
+                FsPathMode::ExistingFile => "Choose file…",
+                FsPathMode::ExistingFiles => "Choose files…",
+                FsPathMode::NewFile => "Choose save path…",
+                FsPathMode::Directory => "Choose directory…",
+            });
+        }
+        Self::Name(
+            Path::new(path)
+                .file_name()
+                .map_or(Cow::Borrowed(path), |name| name.to_string_lossy()),
+        )
+    }
+
+    /// The label for a multi-path literal: a count, since no one file name
+    /// stands for the selection.
+    fn multi(paths: &[String]) -> Self {
+        match paths.iter().filter(|path| !path.is_empty()).count() {
+            0 => Self::Prompt("Choose files…"),
+            count => Self::Count(count),
+        }
+    }
+}
+
+impl Display for PathPreview<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Prompt(prompt) => f.write_str(prompt),
+            Self::Name(name) => f.write_str(name),
+            Self::Count(1) => f.write_str("1 file"),
+            Self::Count(count) => write!(f, "{count} files"),
+        }
+    }
 }
 
 /// Render a TextEdit whose buffer survives across frames via palantir's
-/// StateMap. While the editor is unfocused, the buffer mirrors the
-/// canonical value (re-formatted via `fmt`); while focused, the user's
-/// in-progress text is left alone. The blur frame is detected *before*
-/// the mirror (via [`EditBuffer::blur_edge`]) so the user's text
-/// survives to be committed rather than being clobbered back to
-/// canonical.
-fn buffered_text_edit<T>(
+/// StateMap. Returns the buffer's text on the frame the edit commits (Enter,
+/// or focus left the field), `None` on every other.
+///
+/// While the editor is unfocused, `mirror` refills the cleared buffer from
+/// the canonical value rather than handing back a fresh `String`, so the
+/// frames that change nothing cost no allocation. While focused, the user's
+/// in-progress text is left alone. The blur frame is detected *before* the
+/// mirror runs (via [`EditBuffer::blur_edge`]) so the user's text survives to
+/// be committed rather than being clobbered back to canonical.
+fn buffered_text_edit<T: ?Sized>(
     ui: &mut Ui,
     editor: &TextEditTheme,
     id: WidgetId,
     canonical: &T,
-    fmt: fn(&T) -> String,
+    mirror: fn(&T, &mut String),
     width: f32,
-) -> TextEditOutcome {
+) -> Option<String> {
     let focused = ui.focused_id() == Some(id);
     let state = ui.state_mut::<EditBuffer>(id);
     let blurred = state.blur_edge(focused);
     if !focused && !blurred {
-        state.text = fmt(canonical);
+        state.text.clear();
+        mirror(canonical, &mut state.text);
     }
     let mut text = std::mem::take(&mut ui.state_mut::<EditBuffer>(id).text);
     let submitted = TextEdit::new(&mut text)
@@ -314,19 +346,24 @@ fn buffered_text_edit<T>(
         .size((Sizing::fixed(width), Sizing::FILL))
         .show(ui)
         .submitted;
-    let snapshot = text.clone();
+    // The buffer keeps the text — the editor goes on showing it until the
+    // mirror re-seeds from the committed document value — so a commit is the
+    // one frame that copies, at gesture rate rather than frame rate.
+    let committed = (submitted || blurred).then(|| text.clone());
     ui.state_mut::<EditBuffer>(id).text = text;
-    TextEditOutcome {
-        text: snapshot,
-        committed: submitted || blurred,
-    }
+    committed
+}
+
+/// The `String` port's mirror: its literal *is* the field's text, verbatim.
+fn format_string(value: &str, out: &mut String) {
+    out.push_str(value);
 }
 
 /// `{}` on f64 prints `1` for whole numbers, which round-trips through
 /// `f64::parse` but reads as an integer to a user. `{:?}` keeps the
 /// trailing `.0` so the field looks like a float.
-fn format_float(v: &f64) -> String {
-    format!("{v:?}")
+fn format_float(v: f64, out: &mut String) {
+    let _ = write!(out, "{v:?}");
 }
 
 /// Editor for an `Int` const: an editable `DragValue` — drag horizontally
@@ -395,6 +432,41 @@ fn int_speed(v: i64) -> f64 {
 mod tests {
     use super::*;
 
+    use glam::UVec2;
+    use palantir::internals::UiHarness;
+
+    use crate::gui::theme::Theme;
+
+    /// The unfocused mirror *refills* its retained buffer rather than
+    /// replacing it, so a literal that never changes must still read as one
+    /// copy of itself after any number of frames — an append that forgot to
+    /// clear would show `4242` on the second.
+    ///
+    /// The same frames must commit nothing: the editor speaks only on the
+    /// frame its edit lands, which is what keeps the commit's one `String`
+    /// at gesture rate instead of frame rate.
+    #[test]
+    fn the_unfocused_mirror_refills_its_buffer_instead_of_appending() {
+        let theme = Theme::default();
+        let editor = &theme.const_value_editor.drag_value.editor;
+        let id = WidgetId::from_hash("value_editor::mirror");
+        let value = ConstValue::Int(42);
+        let mut h = UiHarness::new(UVec2::new(200, 60));
+
+        let mut buffered = String::new();
+        for frame in 0..3 {
+            h.frame(|ui| {
+                let committed = buffered_text_edit(ui, editor, id, &value, format_any, 80.0);
+                assert!(
+                    committed.is_none(),
+                    "frame {frame}: an unfocused editor commits nothing"
+                );
+                buffered = ui.state_mut::<EditBuffer>(id).text.clone();
+            });
+            assert_eq!(buffered, "42", "frame {frame}");
+        }
+    }
+
     #[test]
     fn parse_any_infers_tightest_kind() {
         // Integers before floats: a bare integer is `Int`, not `Float`; the
@@ -424,6 +496,13 @@ mod tests {
         assert_eq!(parse_any("42x"), ConstValue::String("42x".into()));
     }
 
+    /// [`format_any`] into a fresh buffer — the shape the assertions read.
+    fn formatted_any(value: &ConstValue) -> String {
+        let mut out = String::new();
+        format_any(value, &mut out);
+        out
+    }
+
     #[test]
     fn format_any_round_trips_non_string_kinds() {
         // Int / Float / Bool survive a format→parse round-trip unchanged, so the
@@ -438,48 +517,46 @@ mod tests {
             ConstValue::Bool(false),
         ] {
             assert_eq!(
-                parse_any(&format_any(&value)),
+                parse_any(&formatted_any(&value)),
                 value,
                 "round-trip {value:?}"
             );
         }
-        assert_eq!(format_any(&ConstValue::Float(3.0)), "3.0");
+        assert_eq!(formatted_any(&ConstValue::Float(3.0)), "3.0");
         // `Null` (an unseeded `Any`) shows blank rather than the text "null".
-        assert_eq!(format_any(&ConstValue::Null), "");
+        assert_eq!(formatted_any(&ConstValue::Null), "");
         // A numeric-looking string is the one kind that doesn't round-trip — it
         // reparses as the number. The accepted ambiguity of an untyped literal.
         assert_eq!(
-            parse_any(&format_any(&ConstValue::String("42".into()))),
+            parse_any(&formatted_any(&ConstValue::String("42".into()))),
             ConstValue::Int(42)
         );
     }
 
     #[test]
     fn path_previews_distinguish_single_modes_and_multi_selections() {
+        let single = |path, mode| PathPreview::single(path, mode).to_string();
+        let multi = |paths: &[String]| PathPreview::multi(paths).to_string();
+
+        assert_eq!(single("", FsPathMode::ExistingFile), "Choose file…");
+        assert_eq!(single("", FsPathMode::NewFile), "Choose save path…");
+        assert_eq!(single("", FsPathMode::Directory), "Choose directory…");
         assert_eq!(
-            single_path_preview("", FsPathMode::ExistingFile),
-            "Choose file…"
-        );
-        assert_eq!(
-            single_path_preview("", FsPathMode::NewFile),
-            "Choose save path…"
-        );
-        assert_eq!(
-            single_path_preview("", FsPathMode::Directory),
-            "Choose directory…"
-        );
-        assert_eq!(
-            single_path_preview("frames/light-01.raf", FsPathMode::ExistingFile),
+            single("frames/light-01.raf", FsPathMode::ExistingFile),
             "light-01.raf"
         );
-        assert_eq!(multi_path_preview(&[]), "Choose files…");
-        assert_eq!(multi_path_preview(&[String::new()]), "Choose files…");
+        // The name is a slice of the path it came from, not a rebuild of it —
+        // which is what keeps a per-frame button label off the heap.
+        assert!(matches!(
+            PathPreview::single("frames/light-01.raf", FsPathMode::ExistingFile),
+            PathPreview::Name(Cow::Borrowed("light-01.raf"))
+        ));
+
+        assert_eq!(multi(&[]), "Choose files…");
+        assert_eq!(multi(&[String::new()]), "Choose files…");
+        assert_eq!(multi(&["frames/light-01.raf".to_string()]), "1 file");
         assert_eq!(
-            multi_path_preview(&["frames/light-01.raf".to_string()]),
-            "1 file"
-        );
-        assert_eq!(
-            multi_path_preview(&["a.raf".to_string(), "b.raf".to_string()]),
+            multi(&["a.raf".to_string(), "b.raf".to_string()]),
             "2 files"
         );
     }

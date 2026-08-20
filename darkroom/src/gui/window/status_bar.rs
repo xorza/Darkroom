@@ -10,7 +10,7 @@
 //! the dock from resizing when a run lands.
 
 use palantir::{
-    Align, Background, Configure, HAlign, Panel, Sizing, Spacing, Text, Ui, VAlign, WidgetId,
+    Align, Background, Configure, HAlign, Panel, Sizing, Spacing, Text, Ui, VAlign, WidgetId, fmt,
 };
 use scenarium::RamUsage;
 
@@ -29,7 +29,7 @@ pub(crate) fn status_bar_id() -> WidgetId {
 
 /// Draw the bottom status bar.
 pub(crate) fn show(ui: &mut Ui, ctx: AppCtx<'_>) {
-    let ram = memory_label(ctx.process_memory(), ctx.run_state().cache_ram);
+    let ram = MemoryLabel::resolve(ctx.process_memory(), ctx.run_state().cache_ram);
     let colors = &ctx.theme().colors;
     Panel::hstack()
         .id(status_bar_id())
@@ -47,7 +47,7 @@ pub(crate) fn show(ui: &mut Ui, ctx: AppCtx<'_>) {
             hspacer(ui, "status_spacer");
             if let Some(label) = ram {
                 let style = muted_text(ui, ctx.theme(), ctx.theme().text.body);
-                Text::new(label).style(&style).show(ui);
+                Text::new(fmt!(ui, "{label}")).style(&style).show(ui);
             }
         });
 }
@@ -60,55 +60,82 @@ pub(crate) fn show(ui: &mut Ui, ctx: AppCtx<'_>) {
 /// inside the process footprint. They answer different questions — `MEM` is
 /// what this process costs the machine, `Cache` is how much of that is
 /// retained node results, which is the half a cache eviction can give back.
-/// `None` when no footprint is available, which leaves nothing worth a row.
-fn memory_label(process: u64, cache: RamUsage) -> Option<String> {
-    if process == 0 {
-        return None;
+///
+/// `Display` rather than an assembled `String`: the bar records every frame
+/// and the whole line goes straight into the record pass's text arena, which
+/// is where the two byte figures were headed anyway.
+#[derive(Clone, Copy, Debug)]
+struct MemoryLabel {
+    /// This process's resident footprint. Never zero — a zero one is what
+    /// [`Self::resolve`] answers `None` to.
+    process: u64,
+    /// The runtime cache's two pools summed. Zero drops the clause.
+    cached: u64,
+}
+
+impl MemoryLabel {
+    /// The readout for one frame's figures, or `None` when no footprint is
+    /// available — which leaves nothing worth a row.
+    fn resolve(process: u64, cache: RamUsage) -> Option<Self> {
+        (process != 0).then(|| Self {
+            process,
+            cached: cache.total() as u64,
+        })
     }
-    let mut label = format!("MEM {}", fmt_bytes(process));
-    let cached = cache.total();
-    if cached > 0 {
-        label.push_str(&format!(" · Cache {}", fmt_bytes(cached as u64)));
+}
+
+impl std::fmt::Display for MemoryLabel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "MEM {}", fmt_bytes(self.process))?;
+        if self.cached > 0 {
+            write!(f, " · Cache {}", fmt_bytes(self.cached))?;
+        }
+        Ok(())
     }
-    Some(label)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    /// The rendered line, or `None` where there is no readout at all.
+    fn rendered(process: u64, cache: RamUsage) -> Option<String> {
+        MemoryLabel::resolve(process, cache).map(|label| label.to_string())
+    }
+
     #[test]
     fn memory_label_leads_with_the_process_then_sums_both_cache_pools() {
         const MEM: u64 = 3 * 1024 * 1024;
         // An empty cache leaves the process footprint standing alone.
         assert_eq!(
-            memory_label(MEM, RamUsage::default()),
-            Some("MEM 3.0 MB".to_string())
+            rendered(MEM, RamUsage::default()).as_deref(),
+            Some("MEM 3.0 MB")
         );
         // Either pool alone raises the clause on its own.
         assert_eq!(
-            memory_label(MEM, RamUsage { cpu: 1024, gpu: 0 }),
-            Some("MEM 3.0 MB · Cache 1.0 KB".to_string())
+            rendered(MEM, RamUsage { cpu: 1024, gpu: 0 }).as_deref(),
+            Some("MEM 3.0 MB · Cache 1.0 KB")
         );
         assert_eq!(
-            memory_label(MEM, RamUsage { cpu: 0, gpu: 2048 }),
-            Some("MEM 3.0 MB · Cache 2.0 KB".to_string())
+            rendered(MEM, RamUsage { cpu: 0, gpu: 2048 }).as_deref(),
+            Some("MEM 3.0 MB · Cache 2.0 KB")
         );
         // Both present → one clause carrying the sum: 1024 + 2048 = 3072 B,
         // which is exactly 3.0 KB.
         assert_eq!(
-            memory_label(
+            rendered(
                 MEM,
                 RamUsage {
                     cpu: 1024,
                     gpu: 2048
                 }
-            ),
-            Some("MEM 3.0 MB · Cache 3.0 KB".to_string())
+            )
+            .as_deref(),
+            Some("MEM 3.0 MB · Cache 3.0 KB")
         );
         // No footprint → no readout, even with a populated cache.
         assert_eq!(
-            memory_label(
+            rendered(
                 0,
                 RamUsage {
                     cpu: 1024,

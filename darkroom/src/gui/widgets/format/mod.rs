@@ -41,19 +41,35 @@ impl std::fmt::Display for Elapsed {
 /// [`fmt_elapsed`]: bare `B` under 1 KB, then `KB`/`MB`/`GB` carrying
 /// 1–2 decimals. Used by the window status bar and each node body's memory
 /// readout, so both render identical figures.
-pub(crate) fn fmt_bytes(bytes: u64) -> String {
-    const KB: f64 = 1024.0;
-    const MB: f64 = KB * KB;
-    const GB: f64 = KB * KB * KB;
-    let b = bytes as f64;
-    if b >= GB {
-        format!("{:.2} GB", b / GB)
-    } else if b >= MB {
-        format!("{:.1} MB", b / MB)
-    } else if b >= KB {
-        format!("{:.1} KB", b / KB)
-    } else {
-        format!("{bytes} B")
+pub(crate) fn fmt_bytes(bytes: u64) -> Bytes {
+    Bytes(bytes)
+}
+
+/// A byte magnitude that renders on demand rather than into a `String`.
+///
+/// `Display` for the same reason [`Elapsed`] is: every reader is a per-frame
+/// readout — the status bar's twice a frame, a node's memory footer once per
+/// pool per node — and each feeds the result into a formatter that never
+/// needed it heap-allocated.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Bytes(u64);
+
+impl std::fmt::Display for Bytes {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        const KB: f64 = 1024.0;
+        const MB: f64 = KB * KB;
+        const GB: f64 = KB * KB * KB;
+        let bytes = self.0;
+        let b = bytes as f64;
+        if b >= GB {
+            write!(f, "{:.2} GB", b / GB)
+        } else if b >= MB {
+            write!(f, "{:.1} MB", b / MB)
+        } else if b >= KB {
+            write!(f, "{:.1} KB", b / KB)
+        } else {
+            write!(f, "{bytes} B")
+        }
     }
 }
 

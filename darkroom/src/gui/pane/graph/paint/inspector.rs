@@ -19,12 +19,14 @@
 //! group) so pinned panels survive tab switches — panels only render for
 //! nodes the current `GraphCtx` holds, so off-tab ones disappear.
 
+use std::borrow::Cow;
 use std::collections::BTreeMap;
+use std::fmt::Display;
 
 use glam::Vec2;
 use palantir::{
     Background, Color, Configure, Corners, FontWeight, Panel, Sense, Shadow, Sizing, Spacing,
-    Stroke, Text, TextInput, TextStyle, TextWrap, Ui, WidgetId,
+    Stroke, Text, TextInput, TextStyle, TextWrap, Ui, WidgetId, fmt,
 };
 use scenarium::DataType;
 use scenarium::Library;
@@ -334,8 +336,9 @@ fn port_row(
     ty: &DataType,
     val: Option<TextInput<'static>>,
 ) {
-    let label = port_label(library, name, ty);
-    line(ui, label, muted_style(theme, ui));
+    let label = PortLabel::resolve(library, name, ty);
+    let text = fmt!(ui, "{label}");
+    line(ui, text, muted_style(theme, ui));
     if let Some(v) = val {
         line(ui, v, body_style(theme, ui));
     }
@@ -345,15 +348,33 @@ fn port_row(
 /// name (`Image · Image`, the dominant case; `Path · path` likewise) —
 /// otherwise `name · type`, so even a valueless port announces its type.
 ///
-/// The dominant case hands back the declaration's own `&str`, copied into
-/// the text arena only when the row is actually shown — so the common port
-/// row costs no string at all. Only the differing case builds one.
-fn port_label<'a>(library: &Library, name: &'a str, ty: &DataType) -> TextInput<'a> {
-    let ty_name = library.type_name(ty);
-    if ty_name.eq_ignore_ascii_case(name) {
-        return TextInput::Borrowed(name);
+/// Renders on demand into the record pass's text arena, which is where the
+/// name was headed anyway: an open panel builds no owned string per port per
+/// frame, in either case.
+#[derive(Debug)]
+struct PortLabel<'a> {
+    name: &'a str,
+    /// The declared type's display name, or `None` when it merely repeats
+    /// `name` and the row would read as a stutter.
+    ty_name: Option<Cow<'a, str>>,
+}
+
+impl<'a> PortLabel<'a> {
+    fn resolve(library: &'a Library, name: &'a str, ty: &DataType) -> Self {
+        let ty_name = library.type_name(ty);
+        let ty_name = (!ty_name.eq_ignore_ascii_case(name)).then_some(ty_name);
+        Self { name, ty_name }
     }
-    TextInput::Owned(format!("{name} \u{b7} {ty_name}"))
+}
+
+impl Display for PortLabel<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.name)?;
+        match &self.ty_name {
+            Some(ty_name) => write!(f, " · {ty_name}"),
+            None => Ok(()),
+        }
+    }
 }
 
 fn title_style(theme: &Theme, ui: &Ui) -> TextStyle {
@@ -383,7 +404,7 @@ fn value_str(ui: &mut Ui, binding: Option<&Binding>) -> TextInput<'static> {
         // `ConstValue::Display` — the same formatter a preview node's
         // value goes through via `DynamicValue::Display`, so a static
         // binding and a live one can't render one float two ways.
-        Some(Binding::Const(v)) => TextInput::Interned(ui.fmt(format_args!("{v}"))),
+        Some(Binding::Const(v)) => TextInput::Interned(fmt!(ui, "{v}")),
     }
 }
 
@@ -391,13 +412,12 @@ fn status_text(ui: &mut Ui, status: ExecStatus) -> TextInput<'static> {
     match status {
         ExecStatus::None => TextInput::Borrowed("not run"),
         ExecStatus::Cached => TextInput::Borrowed("cached"),
-        ExecStatus::Executed(secs) => {
-            TextInput::Interned(ui.fmt(format_args!("ran in {}", fmt_elapsed(secs))))
-        }
-        ExecStatus::Running(at) => TextInput::Interned(ui.fmt(format_args!(
+        ExecStatus::Executed(secs) => TextInput::Interned(fmt!(ui, "ran in {}", fmt_elapsed(secs))),
+        ExecStatus::Running(at) => TextInput::Interned(fmt!(
+            ui,
             "running… {}",
             fmt_elapsed(at.elapsed().as_secs_f64())
-        ))),
+        )),
         ExecStatus::MissingInputs => TextInput::Borrowed("missing inputs"),
         ExecStatus::Errored => TextInput::Borrowed("errored"),
     }
@@ -417,19 +437,6 @@ pub(super) fn inspect_panel_wid(node_id: NodeId) -> WidgetId {
 mod tests {
     use super::*;
 
-    /// The rendered text of a label, whichever form it came back in.
-    ///
-    /// An interned handle is a span into the record pass that minted it and
-    /// only that pass can resolve it, so there is nothing to read back here
-    /// — `port_label` never interns, which is what makes that arm dead.
-    fn shown(input: &TextInput<'_>) -> String {
-        match input {
-            TextInput::Borrowed(text) => (*text).to_owned(),
-            TextInput::Owned(text) => text.clone(),
-            TextInput::Interned(_) => unreachable!("port_label borrows or owns, never interns"),
-        }
-    }
-
     #[test]
     fn port_label_dedups_the_type_and_reuses_the_scenes_own_handle() {
         use scenarium::FsPathConfig;
@@ -444,23 +451,23 @@ mod tests {
         // formatter dropped it entirely for valueless path ports.
         let cases: [(&str, &DataType, &str); 4] = [
             ("Float", &DataType::Float, "Float"),
-            ("Brightness", &DataType::Float, "Brightness \u{b7} float"),
+            ("Brightness", &DataType::Float, "Brightness · float"),
             ("Path", &path_ty, "Path"),
-            ("Output", &path_ty, "Output \u{b7} path"),
+            ("Output", &path_ty, "Output · path"),
         ];
         for (name, ty, expected) in cases {
-            let label = port_label(&lib, name, ty);
-            assert_eq!(shown(&label), expected, "label for {name}");
-            // The deduped case is the dominant one, and it must hand back the
-            // declaration's own `&str` rather than build a string: that is the
-            // whole reason an open panel costs no allocation per port row per
-            // frame. Only the differing case owns anything.
+            let label = PortLabel::resolve(&lib, name, ty);
+            assert_eq!(label.to_string(), expected, "label for {name}");
+            // The deduped case is the dominant one, and it must resolve to the
+            // declaration's own `&str` with nothing appended: that is the whole
+            // reason an open panel renders a port row straight from the scene's
+            // own handles. Only the differing case carries a second piece.
             let deduped = expected == name;
             assert_eq!(
-                matches!(label, TextInput::Borrowed(_)),
+                label.ty_name.is_none(),
                 deduped,
-                "{name}: a deduped label borrows the declared name, a \
-                 combined one owns its string",
+                "{name}: a deduped label is the declared name alone, a \
+                 combined one carries the type beside it",
             );
         }
     }

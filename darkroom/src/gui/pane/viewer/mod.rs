@@ -26,13 +26,13 @@ mod glyph;
 
 use scenarium::NodeId;
 use std::borrow::Cow;
-use std::fmt::Write as _;
+use std::fmt::Display;
 
 use common::FloatExt;
 use glam::{UVec2, Vec2};
 use palantir::{
     Align, Background, Color, Configure, HAlign, ImageDownsample, ImageFilter, ImageFit,
-    ImageHandle, Panel, Sense, Shape, Sizing, Spacing, Ui, VAlign, WidgetId,
+    ImageHandle, Panel, Sense, Shape, Sizing, Spacing, Ui, VAlign, WidgetId, fmt,
 };
 
 use crate::core::document::{Document, Viewport};
@@ -324,18 +324,12 @@ impl ImageViewer {
         title: &str,
         shown: &DrawableImage,
     ) {
-        let mut text = format!(
-            "{} · {} × {} · {}",
-            title, shown.native_size.x, shown.native_size.y, shown.native_format,
-        );
-        if shown.handle.size() != shown.native_size {
-            text.push_str(" · downscaled view");
-        }
-        // `None` only while a fit-mode viewer waits for its first arranged
-        // pane — there is no fit zoom to report yet.
-        if let Some(zoom) = self.effective_view(ui, shown, pane).map(|v| v.zoom) {
-            let _ = write!(text, " · {:.0}%", zoom * 100.0);
-        }
+        let readout = HeaderReadout {
+            title,
+            shown,
+            zoom: self.effective_view(ui, shown, pane).map(|v| v.zoom),
+        };
+        let text = fmt!(ui, "{readout}");
         readout_pill(
             ui,
             theme,
@@ -459,6 +453,45 @@ impl ImageViewer {
     }
 }
 
+/// The viewer's top-left readout: source node, native dimensions and pixel
+/// format, then the two conditional clauses — whether the texture is capped
+/// below the source, and the current zoom.
+///
+/// Rendered on demand rather than assembled into a `String`: the header
+/// records every frame the pane does, and `fmt!` puts the finished line
+/// straight into the record pass's text arena.
+#[derive(Debug)]
+struct HeaderReadout<'a> {
+    /// Never empty — [`node_label`] supplies the fallback.
+    title: &'a str,
+    shown: &'a DrawableImage,
+    /// `None` only while a fit-mode viewer waits for its first arranged
+    /// pane — there is no fit zoom to report yet.
+    zoom: Option<f32>,
+}
+
+impl Display for HeaderReadout<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let DrawableImage {
+            handle,
+            native_size,
+            native_format,
+        } = self.shown;
+        write!(
+            f,
+            "{} · {} × {} · {native_format}",
+            self.title, native_size.x, native_size.y
+        )?;
+        if handle.size() != *native_size {
+            f.write_str(" · downscaled view")?;
+        }
+        if let Some(zoom) = self.zoom {
+            write!(f, " · {:.0}%", zoom * 100.0)?;
+        }
+        Ok(())
+    }
+}
+
 /// Display label for a viewer tab / pane header: the node's name (falling
 /// back to "image" for an unnamed node) plus a compact port tag, so
 /// several ports of one node stay tellable apart — e.g. "stack · out 1".
@@ -493,6 +526,7 @@ fn pane_wid(node_id: NodeId) -> WidgetId {
 mod tests {
     use super::*;
 
+    use imaginarium::ColorFormat;
     use palantir::internals::UiHarness;
 
     use crate::core::document::harness::DocFixture;
@@ -500,6 +534,53 @@ mod tests {
     use crate::gui::state::preview_store::PreviewStore;
     use crate::gui::state::preview_store::error::PreviewImageError;
     use crate::gui::state::preview_store::internals::opaque_image_value;
+
+    /// The header line: the fixed head, then the two clauses that come and go
+    /// — the capped-texture note and the zoom readout. Both are conditional,
+    /// so the only way to know they land in the right order is to render all
+    /// four combinations.
+    #[test]
+    fn header_readout_adds_its_downscale_and_zoom_clauses_only_when_they_apply() {
+        let mut h = UiHarness::arena();
+        let handle = h
+            .ui()
+            .register_image(glyph::checker_image())
+            .expect("a 2x2 checker fits every supported GPU");
+        // The texture is the 2×2 checker either way; `native_size` is what
+        // says whether the view is capped below its source.
+        let shown = |native_size| DrawableImage {
+            handle: handle.clone(),
+            native_size,
+            native_format: ColorFormat::RGBA_U8,
+        };
+        let line = |image: &DrawableImage, zoom| {
+            HeaderReadout {
+                title: "img",
+                shown: image,
+                zoom,
+            }
+            .to_string()
+        };
+
+        // Texture matches the source, and a fit-mode viewer with no arranged
+        // pane yet has no zoom to report: the head stands alone.
+        let full = shown(UVec2::new(2, 2));
+        assert_eq!(line(&full, None), "img · 2 × 2 · RGBA u8");
+        // Zoom is a percentage rounded to whole points, appended last.
+        assert_eq!(line(&full, Some(1.25)), "img · 2 × 2 · RGBA u8 · 125%");
+
+        // A source larger than its texture is a capped view, and that clause
+        // sits ahead of the zoom.
+        let capped = shown(UVec2::new(8192, 4096));
+        assert_eq!(
+            line(&capped, None),
+            "img · 8192 × 4096 · RGBA u8 · downscaled view"
+        );
+        assert_eq!(
+            line(&capped, Some(0.5)),
+            "img · 8192 × 4096 · RGBA u8 · downscaled view · 50%"
+        );
+    }
 
     fn viewer_node() -> NodeId {
         NodeId::from_u128(1)

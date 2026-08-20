@@ -117,16 +117,46 @@ impl ConstValue {
         }
     }
 
+    /// The literal's canonical text, rendered on demand: unquoted and
+    /// full-precision, the form an editor shows and parses back — as against
+    /// [`Display`], which quotes strings and rounds floats for reading.
+    ///
+    /// A renderer rather than a `String` so a per-frame reader can write it
+    /// into a buffer it already holds — `write!(buf, "{}", v.value_text())` —
+    /// instead of taking one it would only copy out of and drop.
+    pub fn value_text(&self) -> ValueText<'_> {
+        ValueText(self)
+    }
+
     pub fn to_value_string(&self) -> String {
-        match self {
-            ConstValue::Null => "null".to_string(),
-            ConstValue::Float(value) => value.to_string(),
-            ConstValue::Int(value) => value.to_string(),
-            ConstValue::Bool(value) => value.to_string(),
-            ConstValue::String(value) => value.clone(),
-            ConstValue::FsPath(path) => path.clone(),
-            ConstValue::FsPaths(paths) => paths.join("\n"),
-            ConstValue::Enum(variant) => variant.clone(),
+        self.value_text().to_string()
+    }
+}
+
+/// [`ConstValue::value_text`]'s renderer.
+#[derive(Clone, Copy, Debug)]
+pub struct ValueText<'a>(&'a ConstValue);
+
+impl Display for ValueText<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.0 {
+            ConstValue::Null => f.write_str("null"),
+            ConstValue::Float(value) => write!(f, "{value}"),
+            ConstValue::Int(value) => write!(f, "{value}"),
+            ConstValue::Bool(value) => write!(f, "{value}"),
+            ConstValue::String(value) | ConstValue::FsPath(value) | ConstValue::Enum(value) => {
+                f.write_str(value)
+            }
+            ConstValue::FsPaths(paths) => {
+                // The `join("\n")` this replaces, without its intermediate.
+                if let Some((first, rest)) = paths.split_first() {
+                    f.write_str(first)?;
+                    for path in rest {
+                        write!(f, "\n{path}")?;
+                    }
+                }
+                Ok(())
+            }
         }
     }
 }
@@ -192,6 +222,8 @@ impl From<bool> for ConstValue {
 mod tests {
     use super::*;
 
+    use std::fmt::Write as _;
+
     #[test]
     fn coercions_cover_numeric_and_named_values() {
         assert_eq!(ConstValue::Int(3).as_f64(), Some(3.0));
@@ -244,6 +276,19 @@ mod tests {
             ConstValue::FsPaths(vec!["a.fit".into(), "b.fit".into()]).to_value_string(),
             "a.fit\nb.fit"
         );
+        assert_eq!(ConstValue::Null.to_value_string(), "null");
+        assert_eq!(ConstValue::Int(-7).to_value_string(), "-7");
+        assert_eq!(ConstValue::Bool(true).to_value_string(), "true");
+        assert_eq!(
+            ConstValue::Enum("Linear".into()).to_value_string(),
+            "Linear"
+        );
+        assert_eq!(ConstValue::FsPaths(Vec::new()).to_value_string(), "");
+        // The renderer writes into a buffer that already holds something,
+        // which is the whole reason it exists beside the owned spelling.
+        let mut buf = String::from("> ");
+        write!(buf, "{}", ConstValue::Int(7).value_text()).unwrap();
+        assert_eq!(buf, "> 7");
         assert_eq!(format!("{}", ConstValue::Float(1.5)), "1.5000");
         assert_eq!(format!("{}", ConstValue::String("hi".into())), "\"hi\"");
         assert_eq!(

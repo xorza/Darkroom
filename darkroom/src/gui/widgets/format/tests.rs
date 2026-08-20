@@ -35,12 +35,12 @@ fn fmt_elapsed_steps_through_units_within_the_reserved_width() {
 #[test]
 fn fmt_bytes_steps_through_magnitudes() {
     // Sub-KB stays exact in bytes; each threshold is a power of 1024.
-    assert_eq!(fmt_bytes(0), "0 B");
-    assert_eq!(fmt_bytes(512), "512 B");
-    assert_eq!(fmt_bytes(1024), "1.0 KB");
-    assert_eq!(fmt_bytes(1536), "1.5 KB"); // 1536 / 1024 = 1.5
-    assert_eq!(fmt_bytes(1_048_576), "1.0 MB"); // 1024^2
-    assert_eq!(fmt_bytes(3_145_728), "3.0 MB"); // 3 * 1024^2
-    assert_eq!(fmt_bytes(1_073_741_824), "1.00 GB"); // 1024^3
-    assert_eq!(fmt_bytes(1_610_612_736), "1.50 GB"); // 1.5 * 1024^3
+    assert_eq!(fmt_bytes(0).to_string(), "0 B");
+    assert_eq!(fmt_bytes(512).to_string(), "512 B");
+    assert_eq!(fmt_bytes(1024).to_string(), "1.0 KB");
+    assert_eq!(fmt_bytes(1536).to_string(), "1.5 KB"); // 1536 / 1024 = 1.5
+    assert_eq!(fmt_bytes(1_048_576).to_string(), "1.0 MB"); // 1024^2
+    assert_eq!(fmt_bytes(3_145_728).to_string(), "3.0 MB"); // 3 * 1024^2
+    assert_eq!(fmt_bytes(1_073_741_824).to_string(), "1.00 GB"); // 1024^3
+    assert_eq!(fmt_bytes(1_610_612_736).to_string(), "1.50 GB"); // 1.5 * 1024^3
 }
