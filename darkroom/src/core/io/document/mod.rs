@@ -9,7 +9,7 @@ use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
 use crate::core::document::Document;
-use crate::core::document::validate::DocumentValidationError;
+use crate::core::document::error::DocumentValidationError;
 
 pub(crate) const EXTENSION: &str = "darkroom";
 const DOCUMENT_ENTRY: &str = "document.json";

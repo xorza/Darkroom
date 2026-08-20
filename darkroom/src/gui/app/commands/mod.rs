@@ -3,12 +3,13 @@
 //! exposes only to the first record pass, so handlers can run directly after
 //! authoring.
 //!
-//! [`App::handle_command`] is a thin dispatcher — each top-level command group
-//! resolves to one submodule's `impl App` block (`file`, `run`, `prefs`,
-//! `edit`); `Quit` carries no payload and resolves here. The commands are
-//! cross-subsystem coordination (they bridge the open document /
-//! `RuntimeHost` / `Editor` / `Preferences` / dialogs), which is why they live
-//! on `App` rather than any one owner; the split is by concern.
+//! [`AppCommand::apply`] is a thin dispatcher — each top-level command group
+//! resolves to its own enum's `apply` (`file`, `run`, `prefs`, `edit`); `Quit`
+//! carries no payload and resolves here. Each `apply` reads as the command's
+//! own behaviour, but the work it drives is cross-subsystem coordination (it
+//! bridges the open document / `RuntimeHost` / `Editor` / `Preferences` /
+//! dialogs), so the methods it calls belong to `App` rather than any one
+//! owner; only the dispatch splits by concern.
 
 use palantir::Ui;
 
@@ -49,7 +50,7 @@ pub(crate) enum AppCommand {
     Quit,
 }
 
-impl App {
+impl AppCommand {
     /// Dispatch a command after the editor has finished authoring its pass.
     ///
     /// Returns whether the command stranded the canvas's cached geometry.
@@ -57,23 +58,23 @@ impl App {
     /// but it is reported rather than requested here so that `App::frame`
     /// stays the one place in the app that asks for a relayout.
     #[must_use]
-    pub(super) fn handle_command(&mut self, ui: &mut Ui, command: AppCommand) -> Relayout {
-        match command {
+    pub(super) fn apply(self, app: &mut App, ui: &mut Ui) -> Relayout {
+        match self {
             AppCommand::File(c) => {
-                self.handle_file(c);
+                c.apply(app);
                 Relayout::NotNeeded
             }
             AppCommand::Run(c) => {
-                self.handle_run(c);
+                c.apply(app);
                 Relayout::NotNeeded
             }
             AppCommand::Prefs(c) => {
-                self.handle_prefs(ui, c);
+                c.apply(app, ui);
                 Relayout::NotNeeded
             }
-            AppCommand::Edit(c) => self.handle_edit(c),
+            AppCommand::Edit(c) => c.apply(app),
             AppCommand::Quit => {
-                self.guard_discard(PendingTransition::Quit);
+                app.guard_discard(PendingTransition::Quit);
                 Relayout::NotNeeded
             }
         }

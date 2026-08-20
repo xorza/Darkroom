@@ -13,6 +13,7 @@ use rayon::prelude::*;
 
 use crate::concurrency::JobScratchPool;
 use crate::error::FrameDimensionMismatch;
+use crate::io::image::cfa::CfaImage;
 use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::image_metadata::ImageMetadata;
 use crate::io::image::linear::LinearImage;
@@ -21,6 +22,7 @@ use crate::stacking::combine::cache::core::{
     CacheCore, ChunkContext, coverage_chunk_memory_layout, quality_plane_chunks,
     weighted_chunk_memory_layout,
 };
+use crate::stacking::combine::cache::loader::LoadedCache;
 use crate::stacking::combine::cache::sample::{CombineScratch, CombinedSample};
 use crate::stacking::combine::cache::validation::{
     validate_frame_quality, validate_image_samples, validate_row_orders, validate_sample_domains,
@@ -42,6 +44,7 @@ use crate::stacking::stack_product::StackProduct;
 use crate::stacking::stack_product::coverage::Coverage;
 use crate::stacking::stack_product::quality_map::QualityMap;
 use crate::stacking::stack_product::quality_planes::QualityPlanes;
+use std::path::Path;
 
 /// Channel-shaped result of one combine pass. A plane is `None` when [`QualityPlanes`] did not
 /// ask for it.
@@ -483,6 +486,48 @@ impl FrameCache {
             weight: output_weight,
             linear_variance: output_linear_variance,
         }
+    }
+
+    /// Build a cache from CFA calibration frame files (tiered in-memory/disk per available RAM).
+    pub(crate) fn from_cfa_paths<P: AsRef<Path> + Sync>(
+        paths: &[P],
+        config: &CacheConfig,
+        normalization: Normalization,
+        progress: ProgressCallback,
+        cancel: CancelToken,
+    ) -> Result<Self, Error> {
+        Self::from_tiered_paths(
+            loader::load_tiered::<CfaImage, P>(paths, config, progress, cancel)?,
+            normalization,
+        )
+    }
+
+    /// Build a cache from light-frame image files (tiered per available RAM). Nothing here was
+    /// warped, so a frame has full support and unit confidence everywhere unless its source
+    /// declared pixels with no measurement.
+    pub(crate) fn from_paths<P: AsRef<Path> + Sync>(
+        paths: &[P],
+        config: &CacheConfig,
+        normalization: Normalization,
+        progress: ProgressCallback,
+        cancel: CancelToken,
+    ) -> Result<Self, Error> {
+        Self::from_tiered_paths(
+            loader::load_tiered::<LinearImage, P>(paths, config, progress, cancel)?,
+            normalization,
+        )
+    }
+
+    fn from_tiered_paths(loaded: LoadedCache, normalization: Normalization) -> Result<Self, Error> {
+        let LoadedCache { frames, core } = loaded;
+        let frame_norms =
+            compute_frame_norms(&frames, core.dimensions, normalization, &core.cancel)?;
+        Ok(Self {
+            frames,
+            frame_norms,
+            normalization,
+            core,
+        })
     }
 }
 

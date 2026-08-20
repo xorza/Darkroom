@@ -2,15 +2,11 @@
 //! `set_confirm_unsaved` is the one preference `App` also writes
 //! from outside the tab (the exit dialog's "Don't ask again").
 
-use std::path::PathBuf;
-
 use palantir::Ui;
 
 use crate::gui::app::App;
-use crate::gui::dialogs;
-use crate::gui::theme::Theme;
 
-/// Preferences UI actions. Handled by [`App::handle_prefs`] after authoring.
+/// Preferences UI actions. Applied by [`PrefsCommand::apply`] after authoring.
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum PrefsCommand {
     /// A field of [`crate::core::io::preferences::Preferences`] was edited
@@ -28,53 +24,11 @@ pub(crate) enum MlModelKind {
     StarRemoval,
 }
 
-impl App {
-    pub(super) fn handle_prefs(&mut self, ui: &mut Ui, command: PrefsCommand) {
-        match command {
-            PrefsCommand::Changed => self.apply_preferences(ui),
-            PrefsCommand::PickMlModel(kind) => self.pick_ml_model(kind),
+impl PrefsCommand {
+    pub(super) fn apply(self, app: &mut App, ui: &mut Ui) {
+        match self {
+            PrefsCommand::Changed => app.apply_preferences(ui),
+            PrefsCommand::PickMlModel(kind) => app.pick_ml_model(kind),
         }
-    }
-
-    /// Re-derive everything that depends on [`Preferences`] and persist it.
-    ///
-    /// [`Preferences`]: crate::core::io::preferences::Preferences
-    fn apply_preferences(&mut self, ui: &mut Ui) {
-        self.theme = Theme::from_preset(self.preferences.theme.resolve());
-        ui.set_theme(self.theme.palantir_theme.clone());
-        self.runtime.configure_ml_model_defaults(&self.preferences);
-        self.save_preferences();
-    }
-
-    /// Persist the preferences, surfacing a failed write in the status
-    /// bar — the one save path every caller routes through, so a broken
-    /// preferences file can't fail silently.
-    pub(crate) fn save_preferences(&mut self) {
-        if let Err(err) = self.preferences.save() {
-            self.status.error(err);
-        }
-    }
-
-    fn pick_ml_model(&mut self, kind: MlModelKind) {
-        if let Some(path) = dialogs::pick_existing_file(&["onnx"]) {
-            self.set_ml_model_path(kind, path);
-        }
-    }
-
-    fn set_ml_model_path(&mut self, kind: MlModelKind, path: PathBuf) {
-        match kind {
-            MlModelKind::Denoise => self.preferences.ml_models.denoise = path,
-            MlModelKind::StarRemoval => self.preferences.ml_models.star_removal = path,
-        }
-        self.runtime.configure_ml_model_defaults(&self.preferences);
-        self.save_preferences();
-    }
-
-    /// Persist whether discarding unsaved changes prompts to save.
-    /// Shared by the Preferences checkbox (via `Changed`) and the prompt's
-    /// "Don't ask again", which calls this directly.
-    pub(crate) fn set_confirm_unsaved(&mut self, on: bool) {
-        self.preferences.confirm_unsaved_changes = on;
-        self.save_preferences();
     }
 }
