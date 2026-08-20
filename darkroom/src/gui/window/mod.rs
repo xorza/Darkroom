@@ -157,7 +157,7 @@ impl MainWindow {
                     .child_align(Align::v(VAlign::Bottom))
                     .background(Background::fill(chrome))
                     .show(ui, |ui| {
-                        menu_bar::show(ui, out);
+                        menu_bar::show(ui, app.theme(), out);
                     });
                 dock.render(ui, dock_cx, out, |ui, tab, pane, out| match tab {
                     TabRef::Graph => {

@@ -492,7 +492,6 @@ fn pane_wid(node_id: NodeId) -> WidgetId {
 mod tests {
     use super::*;
 
-    use palantir::FrameProcessing;
     use palantir::internals::UiHarness;
 
     use crate::core::document::harness::DocFixture;
@@ -594,7 +593,12 @@ mod tests {
         let mut viewer = ImageViewer::new(node);
         // The size the dock hands down on the pass a tab appears.
         let pane = Some(Vec2::new(800.0, 600.0));
+        // The record closure runs once per pass, so counting it is what
+        // says the frame settled in one — palantir keeps its pass structure
+        // to itself, and `FrameReport` no longer names it.
+        let mut passes = 0u32;
         let first = h.frame(|ui| {
+            passes += 1;
             viewer.show(ui, &theme, &mut prefs, "img", &store, pane);
         });
 
@@ -608,10 +612,6 @@ mod tests {
             !first.repaint_requested,
             "a viewer handed its pane owes the host nothing"
         );
-        assert_eq!(
-            first.processing,
-            FrameProcessing::SingleLayout,
-            "and needs no second pass to settle its framing"
-        );
+        assert_eq!(passes, 1, "and needs no second pass to settle its framing");
     }
 }

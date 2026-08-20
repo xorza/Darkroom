@@ -67,11 +67,13 @@ fn run_gui(document: Option<PathBuf>) -> Result<(), WinitHostError> {
     let host = WinitHost::builder(MAIN_WINDOW)
         .window(window)
         .build(move |ui, handle| {
-            ui.debug_overlay_mut().damage_rect = is_debug();
+            let mut overlay = ui.debug_overlay();
+            overlay.damage_rect = is_debug();
             // The `settle n/m` half of this readout is how a gesture's
             // record-pass cost gets read in the running editor — drag a
             // node and watch whether both halves advance together.
-            ui.debug_overlay_mut().frame_stats = is_debug();
+            overlay.frame_stats = is_debug();
+            ui.set_debug_overlay(overlay);
 
             App::new(ui, handle, preferences, document)
         })?;
