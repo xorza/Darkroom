@@ -4,7 +4,7 @@
 //! vocabulary every surface of the editor speaks. Turning one into something
 //! reversible is [`GraphIntent::into_step`]: it reads the state the intent
 //! overwrites out of a `&Document` and folds the two into an
-//! [`UndoStep`](crate::core::edit::step::undo_step::UndoStep).
+//! [`UndoStep`].
 //!
 //! The two vocabularies are deliberately *not* parallel. Intents are named
 //! for what a user did, steps for what the document can take back, and the

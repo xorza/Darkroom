@@ -13,9 +13,9 @@ pub(crate) mod sample_domain;
 pub(crate) mod sensor;
 pub(crate) mod standard;
 
-/// Every file extension accepted by [`preview_image::PreviewImage::from_file`]. Lives here rather
-/// than beside the loader tables in [`standard`] because it is this module's published surface —
-/// `lib.rs` re-exports it.
+/// Every file extension accepted by [`preview_image::PreviewImage::from_file`]. Lives at this
+/// module's root rather than beside the internal loader tables that consume it, because it is
+/// the module's published surface — `lib.rs` re-exports it.
 pub const PREVIEW_IMAGE_EXTENSIONS: &[&str] = &[
     "fits", "fit", "raf", "cr2", "cr3", "nef", "arw", "dng", "tiff", "tif", "png", "jpg", "jpeg",
 ];

@@ -398,8 +398,7 @@ impl From<&LinearImage> for Image {
 /// what a caller holding interleaved pixels goes through to reach the ops, which take planes.
 impl From<&Image> for LinearImage {
     /// Deinterleaves into planes, converting to the matching `f32` channel format first when the
-    /// source is not already in one. The general form of [`LinearImage::from_f32_image`], which
-    /// skips the conversion and panics instead.
+    /// source is not already in one, rather than asking the caller to arrive with one.
     fn from(image: &Image) -> Self {
         let target = f32_target_format(image);
         if image.desc().color_format == target {
