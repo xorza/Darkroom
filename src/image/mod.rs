@@ -163,6 +163,16 @@ impl ImageDesc {
         self.width * self.color_format.byte_count() as usize
     }
 
+    /// Panics unless `other` covers the same pixel grid in the same format —
+    /// the precondition every two-image operation shares. Because descriptors
+    /// are exactly grid plus format, equality is that whole predicate.
+    ///
+    /// `pair` names the two images in the panic message, e.g. `"src/output"`.
+    #[track_caller]
+    pub(crate) fn assert_same(self, other: Self, pair: &str) {
+        assert_eq!(self, other, "{pair} descriptor mismatch");
+    }
+
     /// Validates the descriptor: positive dimensions, valid format.
     fn validate(&self) -> Result<()> {
         self.color_format.validate()?;

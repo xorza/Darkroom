@@ -116,11 +116,13 @@ impl Params {
 
 #[cfg(test)]
 mod tests {
-    use super::super::BlendMode;
+    use strum::IntoEnumIterator;
+
     use super::*;
     use crate::common::color_format::ColorFormat;
     use crate::common::internals::{create_test_image, create_test_image_f32, gpu::test_gpu};
     use crate::image::{Image, ImageDesc};
+    use crate::ops::blend::BlendMode;
 
     #[test]
     fn test_gpu_blend_normal_alpha_zero() {
@@ -251,16 +253,7 @@ mod tests {
 
         let pipeline = GpuBlendPipeline::new(&ctx).unwrap();
 
-        let modes = [
-            BlendMode::Normal,
-            BlendMode::Add,
-            BlendMode::Subtract,
-            BlendMode::Multiply,
-            BlendMode::Screen,
-            BlendMode::Overlay,
-        ];
-
-        for mode in &modes {
+        for mode in BlendMode::iter() {
             let src_cpu = create_test_image(ColorFormat::RGBA_U8, 8, 4, 0);
             let dst_cpu = create_test_image(ColorFormat::RGBA_U8, 8, 4, 100);
 
@@ -268,7 +261,7 @@ mod tests {
             let dst = GpuImage::from_image(&ctx, &dst_cpu);
             let mut output = GpuImage::new_empty(&ctx, dst.desc);
 
-            let params = Blend::new(*mode, 0.5);
+            let params = Blend::new(mode, 0.5);
             params
                 .apply_gpu(&ctx, &pipeline, &src, &dst, &mut output)
                 .unwrap();

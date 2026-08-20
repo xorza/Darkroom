@@ -1,8 +1,8 @@
 //! Benchmarks for row conversion operations (SIMD vs Scalar).
 
-use super::scalar::{ConversionInfo, dispatch_convert_row_scalar};
-use super::simd::get_simd_row_converter;
 use crate::common::color_format::{ChannelSize, ColorFormat};
+use crate::image::conversion::scalar::{ConversionInfo, dispatch_convert_row_scalar};
+use crate::image::conversion::simd;
 use criterion::{BenchmarkId, Criterion, Throughput};
 use std::hint::black_box;
 use std::time::Duration;
@@ -82,9 +82,12 @@ pub fn bench(c: &mut Criterion) {
 
         group.throughput(Throughput::Bytes(src.len() as u64));
 
-        if let Some(simd_fn) = get_simd_row_converter(from_fmt, to_fmt) {
+        if let Some(simd_fn) = simd::row_converter(from_fmt, to_fmt) {
             group.bench_function(BenchmarkId::new("simd", &label), |b| {
-                b.iter(|| simd_fn(black_box(&src), black_box(&mut dst), black_box(WIDTH_4K)));
+                // SAFETY: `row_converter` verified this CPU has the kernel's feature.
+                b.iter(|| unsafe {
+                    simd_fn(black_box(&src), black_box(&mut dst), black_box(WIDTH_4K))
+                });
             });
         }
 

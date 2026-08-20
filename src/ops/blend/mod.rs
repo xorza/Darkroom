@@ -4,7 +4,7 @@ mod gpu;
 #[cfg(feature = "wgpu")]
 pub(crate) mod pipeline;
 
-use strum_macros::{EnumString, VariantNames};
+use strum_macros::{EnumIter, EnumString, VariantNames};
 
 #[cfg(feature = "wgpu")]
 use crate::common::error::Result;
@@ -16,23 +16,56 @@ use crate::image::Image;
 #[cfg(feature = "wgpu")]
 use crate::ops::blend::pipeline::GpuBlendPipeline;
 
-/// Blend modes for combining two images.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, EnumString, VariantNames)]
+/// How a source channel is combined with the destination channel under it.
+///
+/// The formulas are stated on the variants because the names do not fix them:
+/// `Subtract` takes `src` *from* `dst`, and `Overlay` switches formula on the
+/// destination rather than the source. [`BlendMode::blend`] is the one
+/// definition every backend — scalar, SIMD and the GPU shader — evaluates.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, EnumIter, EnumString, VariantNames)]
 #[repr(u8)]
 pub enum BlendMode {
-    /// Normal alpha blending: result = src * alpha + dst * (1 - alpha)
+    /// `src` — the destination shows through only via the alpha mix.
     #[default]
     Normal,
-    /// Additive blending: result = src + dst (clamped)
+    /// `src + dst`, clamped at one.
     Add,
-    /// Subtractive blending: result = dst - src (clamped)
+    /// `dst - src`, clamped at zero.
     Subtract,
-    /// Multiply blending: result = src * dst
+    /// `src * dst`.
     Multiply,
-    /// Screen blending: result = 1 - (1 - src) * (1 - dst)
+    /// `1 - (1 - src) * (1 - dst)` — Multiply on the inverted operands.
     Screen,
-    /// Overlay blending: combines Multiply and Screen
+    /// Multiply where `dst < 0.5`, Screen above it.
     Overlay,
+}
+
+impl BlendMode {
+    /// Combines two normalized `[0, 1]` channel values, then mixes the result
+    /// back over `dst` by `alpha`: `blended * alpha + dst * (1 - alpha)`.
+    ///
+    /// Every CPU backend routes through this: the scalar path per channel, the
+    /// SIMD kernels for their sub-vector tails, so a tail can never disagree
+    /// with the vector body it follows. The result is left unclamped — each
+    /// storage type clamps to its own range on write.
+    #[inline]
+    fn blend(self, src: f32, dst: f32, alpha: f32) -> f32 {
+        let blended = match self {
+            Self::Normal => src,
+            Self::Add => (src + dst).min(1.0),
+            Self::Subtract => (dst - src).max(0.0),
+            Self::Multiply => src * dst,
+            Self::Screen => 1.0 - (1.0 - src) * (1.0 - dst),
+            Self::Overlay => {
+                if dst < 0.5 {
+                    2.0 * src * dst
+                } else {
+                    1.0 - 2.0 * (1.0 - src) * (1.0 - dst)
+                }
+            }
+        };
+        blended * alpha + dst * (1.0 - alpha)
+    }
 }
 
 /// Parameters for image blending.
@@ -72,24 +105,21 @@ impl Blend {
         self
     }
 
-    /// Applies blending of two images using CPU.
-    ///
-    /// # Arguments
-    /// * `src` - The source (top) image
-    /// * `dst` - The destination (bottom) image
-    /// * `output` - The output image
+    /// Blends `src` (the top layer) over `dst` (the bottom one) into `output`,
+    /// on the CPU. An alpha channel, where the format has one, is always mixed
+    /// by `alpha` alone — the blend mode applies to the color channels.
     ///
     /// # Panics
-    /// Panics if images have different dimensions or color formats.
+    /// Panics unless all three images share a descriptor.
     pub fn apply_cpu(&self, src: &Image, dst: &Image, output: &mut Image) {
         cpu::apply(self, src, dst, output);
     }
 
-    /// Applies blending of two images using GPU.
-    /// Supports U8 and F32 formats for L, LA, RGB, and RGBA.
+    /// Blends `src` over `dst` into `output` on the GPU, for U8 and F32 storage
+    /// in L, LA, RGB and RGBA.
     ///
     /// # Panics
-    /// Panics if images have different dimensions or color formats.
+    /// Panics unless all three images share dimensions and color format.
     #[cfg(feature = "wgpu")]
     pub fn apply_gpu(
         &self,

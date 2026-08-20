@@ -32,14 +32,21 @@ use rayon::prelude::*;
 use crate::image::Image;
 
 use scalar::{ConversionInfo, dispatch_convert_row_scalar};
-use simd::get_simd_row_converter;
 
 /// Convert `from` into `to`'s format, using SIMD acceleration when available.
 /// `from` and `to` must share dimensions; every format pair is handled (SIMD
 /// fast paths fall back to the scalar reference), so this is infallible.
 pub(super) fn convert_image(from: &Image, to: &mut Image) {
-    assert_eq!(from.desc().width, to.desc().width);
-    assert_eq!(from.desc().height, to.desc().height);
+    assert_eq!(
+        from.desc().width,
+        to.desc().width,
+        "source/target width mismatch"
+    );
+    assert_eq!(
+        from.desc().height,
+        to.desc().height,
+        "source/target height mismatch"
+    );
 
     let from_fmt = from.desc().color_format;
     let to_fmt = to.desc().color_format;
@@ -56,18 +63,16 @@ pub(super) fn convert_image(from: &Image, to: &mut Image) {
     let from_bytes = from.bytes();
     let to_bytes = to.bytes_mut();
 
-    // Try to get SIMD row converter
-    if let Some(simd_convert_row) = get_simd_row_converter(from_fmt, to_fmt) {
-        // Use SIMD path with parallel row processing
+    if let Some(convert_row) = simd::row_converter(from_fmt, to_fmt) {
         to_bytes
             .par_chunks_mut(to_stride)
             .enumerate()
             .for_each(|(y, to_row)| {
                 let from_row = &from_bytes[y * from_stride..];
-                simd_convert_row(from_row, to_row, width);
+                // SAFETY: `row_converter` verified this CPU has the kernel's feature.
+                unsafe { convert_row(from_row, to_row, width) };
             });
     } else {
-        // Fall back to scalar path with parallel row processing
         let info = ConversionInfo::new(from_fmt, to_fmt);
 
         to_bytes

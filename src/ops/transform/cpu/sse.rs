@@ -189,7 +189,11 @@ fn read_tap<T: SsePacked, const N: usize>(
     unsafe { T::load::<N>(pixels, base) }
 }
 
-pub(super) fn apply_packed<T: SsePacked, const N: usize>(
+/// Bilinear-resamples `input` into `output` with SSE4.1, one rayon job per row.
+///
+/// # Safety
+/// The running CPU must support SSE4.1.
+pub(super) unsafe fn apply_packed<T: SsePacked, const N: usize>(
     transform: &Transform,
     input: &Image,
     output: &mut Image,
@@ -208,7 +212,7 @@ pub(super) fn apply_packed<T: SsePacked, const N: usize>(
         .enumerate()
         .for_each(|(y, out_row_bytes)| {
             let out_row: &mut [T] = bytemuck::cast_slice_mut(out_row_bytes);
-            // SAFETY: the dispatcher in `cpu.rs` confirmed SSE4.1 at runtime.
+            // SAFETY: forwarded from this function's own contract.
             unsafe { process_row::<T, N>(in_pixels, in_w, in_h, inv, out_w, y, out_row) };
         });
 }

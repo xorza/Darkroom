@@ -1,6 +1,6 @@
 #[cfg(target_arch = "aarch64")]
 use super::neon_kernel;
-use super::{ChannelAffine, RowKernel, apply_kernel, apply_typed};
+use super::{ChannelAffine, RowKernel, apply_kernel};
 #[cfg(target_arch = "x86_64")]
 use super::{avx2_kernel, sse41_kernel};
 use crate::common::color_format::{
@@ -9,7 +9,7 @@ use crate::common::color_format::{
 use crate::common::image_diff::{max_pixel_diff, pixels_equal};
 use crate::common::internals::{create_test_image, load_lena_rgba_u8_61x38};
 use crate::image::{Image, ImageDesc};
-use crate::ops::contrast_brightness::ContrastBrightness;
+use crate::ops::contrast_brightness::{ContrastBrightness, cpu};
 
 fn pixels_changed(img1: &Image, img2: &Image) -> bool {
     !pixels_equal(img1, img2)
@@ -253,17 +253,6 @@ fn channel_values(image: &Image) -> Vec<f32> {
     }
 }
 
-/// Runs the scalar reference over `image`, dispatched on its storage type.
-fn apply_reference(image: &mut Image, op: ContrastBrightness) {
-    let format = image.desc().color_format;
-    match (format.channel_size, format.channel_type) {
-        (ChannelSize::_8bit, ChannelType::UInt) => apply_typed::<u8>(image, op),
-        (ChannelSize::_16bit, ChannelType::UInt) => apply_typed::<u16>(image, op),
-        (ChannelSize::_32bit, ChannelType::Float) => apply_typed::<f32>(image, op),
-        _ => unreachable!("unsupported format in ALL_FORMATS"),
-    }
-}
-
 /// Contrast-only, brightness-only, combined, and clamp-heavy.
 const PARAM_SWEEP: [(f32, f32); 4] = [(2.0, 0.0), (1.0, 0.2), (1.5, 0.1), (0.5, -0.8)];
 
@@ -288,7 +277,7 @@ fn simd_matches_the_scalar_reference_bit_for_bit() {
                 unsafe { apply_kernel(kernel, &op, &mut actual) };
 
                 let mut expected = input.clone();
-                apply_reference(&mut expected, op);
+                cpu::apply_scalar(op, &mut expected);
 
                 let diff = max_pixel_diff(&expected, &actual);
                 assert!(

@@ -13,7 +13,8 @@ pub(crate) struct X86Features {
     #[cfg_attr(not(target_arch = "x86_64"), allow(dead_code))]
     pub(crate) ssse3: bool,
     pub(crate) sse4_1: bool,
-    avx2: bool,
+    #[cfg_attr(not(target_arch = "x86_64"), allow(dead_code))]
+    pub(crate) avx2: bool,
     fma: bool,
 }
 

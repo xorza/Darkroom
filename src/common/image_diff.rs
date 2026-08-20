@@ -1,96 +1,52 @@
 //! Image comparison utilities for testing.
 
+use bytemuck::Pod;
 use rayon::prelude::*;
 
 use crate::common::color_format::{ChannelSize, ChannelType};
 use crate::image::Image;
 
-/// Computes the maximum per-channel difference between two images.
-/// Returns the difference normalized to [0, 1] range for integer types,
-/// or absolute difference for float types.
+/// The largest per-channel difference between two images: normalized to `[0, 1]`
+/// for the integer formats, absolute for float.
 ///
-/// Only compares actual pixel data, ignoring stride padding.
+/// Both differences are taken in `f64`, so an `f32` pair never loses precision
+/// to a rounded subtraction before the comparison.
 ///
 /// # Panics
-/// Panics if images have different dimensions or formats.
+/// Panics unless the two images share a descriptor.
 pub(crate) fn max_pixel_diff(img1: &Image, img2: &Image) -> f64 {
-    assert_eq!(img1.desc().width, img2.desc().width, "width mismatch");
-    assert_eq!(img1.desc().height, img2.desc().height, "height mismatch");
-    assert_eq!(
-        img1.desc().color_format,
-        img2.desc().color_format,
-        "format mismatch"
-    );
+    img1.desc().assert_same(img2.desc(), "img1/img2");
 
-    let width = img1.desc().width;
-    let height = img1.desc().height;
+    // Pixel data is tightly packed, so the two buffers are one flat channel
+    // array each — there is no per-row padding to step over.
     let format = img1.desc().color_format;
-    let pixel_size = format.byte_count() as usize;
-    let row_bytes = width * pixel_size;
-    let stride1 = img1.desc().row_bytes();
-    let stride2 = img2.desc().row_bytes();
-
-    (0..height)
-        .into_par_iter()
-        .map(|y| {
-            let row1 = &img1.bytes()[y * stride1..y * stride1 + row_bytes];
-            let row2 = &img2.bytes()[y * stride2..y * stride2 + row_bytes];
-            row_max_diff(row1, row2, format.channel_size, format.channel_type)
-        })
-        .reduce(|| 0.0, f64::max)
-}
-
-/// Computes the maximum difference for a single row of pixel data.
-fn row_max_diff(row1: &[u8], row2: &[u8], size: ChannelSize, typ: ChannelType) -> f64 {
-    match (size, typ) {
-        (ChannelSize::_8bit, ChannelType::UInt) => row1
-            .iter()
-            .zip(row2.iter())
-            .map(|(a, b)| (*a as i32 - *b as i32).unsigned_abs() as f64 / u8::MAX as f64)
-            .fold(0.0, f64::max),
-        (ChannelSize::_16bit, ChannelType::UInt) => {
-            let v1: &[u16] = bytemuck::cast_slice(row1);
-            let v2: &[u16] = bytemuck::cast_slice(row2);
-            v1.iter()
-                .zip(v2.iter())
-                .map(|(a, b)| (*a as i32 - *b as i32).unsigned_abs() as f64 / u16::MAX as f64)
-                .fold(0.0, f64::max)
-        }
-        (ChannelSize::_32bit, ChannelType::Float) => {
-            let v1: &[f32] = bytemuck::cast_slice(row1);
-            let v2: &[f32] = bytemuck::cast_slice(row2);
-            v1.iter()
-                .zip(v2.iter())
-                .map(|(a, b)| (a - b).abs() as f64)
-                .fold(0.0, f64::max)
-        }
-        _ => unreachable!("unsupported format: {:?} {:?}", size, typ),
+    let (a, b) = (img1.bytes(), img2.bytes());
+    match (format.channel_size, format.channel_type) {
+        (ChannelSize::_8bit, ChannelType::UInt) => max_diff::<u8>(a, b, f64::from(u8::MAX)),
+        (ChannelSize::_16bit, ChannelType::UInt) => max_diff::<u16>(a, b, f64::from(u16::MAX)),
+        (ChannelSize::_32bit, ChannelType::Float) => max_diff::<f32>(a, b, 1.0),
+        _ => unreachable!("unsupported color format: {format:?}"),
     }
 }
 
-/// Checks if two images have identical pixel data (ignoring stride padding).
+/// The largest `|a - b| / scale` over two buffers read as `T` channel values.
+fn max_diff<T>(a: &[u8], b: &[u8], scale: f64) -> f64
+where
+    T: Pod + Sync + Into<f64>,
+{
+    let a: &[T] = bytemuck::cast_slice(a);
+    let b: &[T] = bytemuck::cast_slice(b);
+    a.par_iter()
+        .zip(b.par_iter())
+        .map(|(&a, &b)| (a.into() - b.into()).abs() / scale)
+        .reduce(|| 0.0, f64::max)
+}
+
+/// Whether two images hold byte-identical pixel data.
 ///
 /// # Panics
-/// Panics if images have different dimensions or formats.
+/// Panics unless the two images share a descriptor.
 pub(crate) fn pixels_equal(img1: &Image, img2: &Image) -> bool {
-    assert_eq!(img1.desc().width, img2.desc().width, "width mismatch");
-    assert_eq!(img1.desc().height, img2.desc().height, "height mismatch");
-    assert_eq!(
-        img1.desc().color_format,
-        img2.desc().color_format,
-        "format mismatch"
-    );
-
-    let width = img1.desc().width;
-    let height = img1.desc().height;
-    let pixel_size = img1.desc().color_format.byte_count() as usize;
-    let row_bytes = width * pixel_size;
-    let stride1 = img1.desc().row_bytes();
-    let stride2 = img2.desc().row_bytes();
-
-    (0..height).into_par_iter().all(|y| {
-        let row1 = &img1.bytes()[y * stride1..y * stride1 + row_bytes];
-        let row2 = &img2.bytes()[y * stride2..y * stride2 + row_bytes];
-        row1 == row2
-    })
+    img1.desc().assert_same(img2.desc(), "img1/img2");
+    img1.bytes() == img2.bytes()
 }

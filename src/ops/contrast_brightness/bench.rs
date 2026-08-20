@@ -7,11 +7,10 @@ use std::time::Duration;
 
 use criterion::{BenchmarkId, Criterion, Throughput};
 
-use super::ContrastBrightness;
-use super::cpu::apply_typed;
-use crate::common::color_format::{ALL_FORMATS, ChannelSize, ChannelType};
+use crate::common::color_format::ALL_FORMATS;
 use crate::common::internals::create_test_image;
 use crate::image::Image;
+use crate::ops::contrast_brightness::{ContrastBrightness, cpu};
 
 /// A frame size to sweep, and what it is there to expose.
 #[derive(Debug, Clone, Copy)]
@@ -48,24 +47,10 @@ const CONTRAST: f32 = 1.2;
 const BRIGHTNESS: f32 = 0.05;
 
 /// A benchmarked variant: the public entry point, or the scalar reference.
-type ApplyFn = fn(&mut Image, ContrastBrightness);
+type ApplyFn = fn(ContrastBrightness, &mut Image);
 
-fn apply_auto(image: &mut Image, params: ContrastBrightness) {
+fn apply_auto(params: ContrastBrightness, image: &mut Image) {
     params.apply_cpu(image);
-}
-
-/// The scalar reference, dispatched on storage type — the same dispatch
-/// `cpu::apply` falls back to when no SIMD kernel matches the format.
-fn apply_scalar(image: &mut Image, params: ContrastBrightness) {
-    match (
-        image.desc().color_format.channel_size,
-        image.desc().color_format.channel_type,
-    ) {
-        (ChannelSize::_8bit, ChannelType::UInt) => apply_typed::<u8>(image, params),
-        (ChannelSize::_16bit, ChannelType::UInt) => apply_typed::<u16>(image, params),
-        (ChannelSize::_32bit, ChannelType::Float) => apply_typed::<f32>(image, params),
-        _ => unreachable!("unsupported format in ALL_FORMATS"),
-    }
 }
 
 pub fn bench(c: &mut Criterion) {
@@ -81,7 +66,11 @@ pub fn bench(c: &mut Criterion) {
             // Criterion turns ids into report paths, so keep them space-free.
             let label = format!("{format}_{}", frame.label).replace(' ', "_");
 
-            for &(variant, apply) in &[("auto", apply_auto as ApplyFn), ("scalar", apply_scalar)] {
+            let variants = [
+                ("auto", apply_auto as ApplyFn),
+                ("scalar", cpu::apply_scalar as ApplyFn),
+            ];
+            for &(variant, apply) in &variants {
                 // A fresh image per variant so both start from identical pixels.
                 // The op is in place and repeated iterations drive the data
                 // toward saturation, which costs the same: the kernels are
@@ -91,7 +80,7 @@ pub fn bench(c: &mut Criterion) {
 
                 group.throughput(Throughput::Bytes(image.bytes().len() as u64));
                 group.bench_function(BenchmarkId::new(variant, &label), |b| {
-                    b.iter(|| apply(black_box(&mut image), black_box(params)));
+                    b.iter(|| apply(black_box(params), black_box(&mut image)));
                 });
             }
         }

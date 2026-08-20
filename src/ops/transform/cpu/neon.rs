@@ -163,7 +163,12 @@ fn read_tap<T: NeonPacked, const N: usize>(
     unsafe { T::load::<N>(pixels, base) }
 }
 
-pub(super) fn apply_packed<T: NeonPacked, const N: usize>(
+/// Bilinear-resamples `input` into `output` with NEON, one rayon job per row.
+///
+/// # Safety
+/// None in practice — NEON is baseline on aarch64. The marker is what lets this
+/// share one kernel type with the x86 side, where the feature is a runtime fact.
+pub(super) unsafe fn apply_packed<T: NeonPacked, const N: usize>(
     transform: &Transform,
     input: &Image,
     output: &mut Image,

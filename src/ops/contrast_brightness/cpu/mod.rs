@@ -148,19 +148,19 @@ pub(super) fn apply(params: &ContrastBrightness, image: &mut Image) {
         return;
     }
 
+    apply_scalar(*params, image);
+}
+
+/// The scalar path, picking the storage type the format stores channels in.
+/// Split out so the tests and benches can reach the reference past the SIMD
+/// dispatch.
+pub(super) fn apply_scalar(params: ContrastBrightness, image: &mut Image) {
+    let format = image.desc().color_format;
     match (format.channel_size, format.channel_type) {
-        (ChannelSize::_8bit, ChannelType::UInt) => {
-            apply_typed::<u8>(image, *params);
-        }
-        (ChannelSize::_16bit, ChannelType::UInt) => {
-            apply_typed::<u16>(image, *params);
-        }
-        (ChannelSize::_32bit, ChannelType::Float) => {
-            apply_typed::<f32>(image, *params);
-        }
-        _ => {
-            unreachable!("Unsupported color format for contrast/brightness")
-        }
+        (ChannelSize::_8bit, ChannelType::UInt) => apply_typed::<u8>(params, image),
+        (ChannelSize::_16bit, ChannelType::UInt) => apply_typed::<u16>(params, image),
+        (ChannelSize::_32bit, ChannelType::Float) => apply_typed::<f32>(params, image),
+        _ => unreachable!("unsupported color format for contrast/brightness: {format:?}"),
     }
 }
 
@@ -223,7 +223,7 @@ impl ContrastBrightnessApply for f32 {
 /// The scalar reference: per-element in-place adjustment through
 /// [`ContrastBrightnessApply`]. Taken when the CPU offers no SIMD kernel for
 /// the format, and cross-checked against the SIMD kernels by the tests.
-pub(super) fn apply_typed<T>(image: &mut Image, params: ContrastBrightness)
+pub(super) fn apply_typed<T>(params: ContrastBrightness, image: &mut Image)
 where
     T: Pod + ContrastBrightnessApply,
 {

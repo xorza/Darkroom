@@ -1,7 +1,6 @@
-//! Drawing primitives for images.
-//!
-//! Provides functions to draw shapes like circles, crosses, lines, and dots on images.
-//! Works with f32 images (L_F32 or RGB_F32).
+//! Drawing primitives — circles, dots, crosses, lines and rectangles — over
+//! `L_F32` and `RGB_F32` images. On a single-channel image a color is written
+//! as its luminance; every entry point panics on any other format.
 
 use crate::common::color_format::{ChannelSize, ChannelType};
 use crate::{Color, Image};
@@ -22,14 +21,11 @@ fn assert_f32_image(image: &Image) {
     );
 }
 
-/// Draw a hollow circle on an image.
+/// Draws a hollow circle, its outline `thickness` pixels wide and centered on
+/// the nominal radius.
 ///
-/// # Arguments
-/// * `image` - The image to draw on (must be L_F32 or RGB_F32)
-/// * `center` - Center coordinates
-/// * `radius` - Circle radius in pixels
-/// * `color` - Color (for grayscale images, uses luminance)
-/// * `thickness` - Line thickness in pixels
+/// # Panics
+/// Panics unless `image` is `L_F32` or `RGB_F32`.
 pub fn draw_circle(image: &mut Image, center: Vec2, radius: f32, color: Color, thickness: f32) {
     assert_f32_image(image);
     let cx = center.x;
@@ -68,13 +64,10 @@ pub fn draw_circle(image: &mut Image, center: Vec2, radius: f32, color: Color, t
     }
 }
 
-/// Draw a filled circle (dot) on an image.
+/// Draws a filled circle.
 ///
-/// # Arguments
-/// * `image` - The image to draw on (must be L_F32 or RGB_F32)
-/// * `center` - Center coordinates
-/// * `radius` - Circle radius in pixels
-/// * `color` - Color (for grayscale images, uses luminance)
+/// # Panics
+/// Panics unless `image` is `L_F32` or `RGB_F32`.
 pub fn draw_dot(image: &mut Image, center: Vec2, radius: f32, color: Color) {
     assert_f32_image(image);
     let cx = center.x;
@@ -109,14 +102,11 @@ pub fn draw_dot(image: &mut Image, center: Vec2, radius: f32, color: Color) {
     }
 }
 
-/// Draw a cross marker on an image.
+/// Draws an upright cross marker: two lines through `center`, each arm
+/// `arm_length` pixels long.
 ///
-/// # Arguments
-/// * `image` - The image to draw on (must be L_F32 or RGB_F32)
-/// * `center` - Center coordinates
-/// * `arm_length` - Length of each arm from center
-/// * `color` - Color (for grayscale images, uses luminance)
-/// * `thickness` - Line thickness in pixels
+/// # Panics
+/// Panics unless `image` is `L_F32` or `RGB_F32`.
 pub fn draw_cross(image: &mut Image, center: Vec2, arm_length: f32, color: Color, thickness: f32) {
     assert_f32_image(image);
     let cx = center.x;
@@ -139,14 +129,11 @@ pub fn draw_cross(image: &mut Image, center: Vec2, arm_length: f32, color: Color
     );
 }
 
-/// Draw a line on an image using Bresenham-style algorithm with thickness.
+/// Draws a straight line, `thickness` pixels wide, by walking the major axis
+/// Bresenham-style.
 ///
-/// # Arguments
-/// * `image` - The image to draw on (must be L_F32 or RGB_F32)
-/// * `start` - Start point
-/// * `end` - End point
-/// * `color` - Color (for grayscale images, uses luminance)
-/// * `thickness` - Line thickness in pixels
+/// # Panics
+/// Panics unless `image` is `L_F32` or `RGB_F32`.
 pub fn draw_line(image: &mut Image, start: Vec2, end: Vec2, color: Color, thickness: f32) {
     assert_f32_image(image);
     let x1 = start.x;
@@ -215,14 +202,10 @@ pub fn draw_line(image: &mut Image, start: Vec2, end: Vec2, color: Color, thickn
     }
 }
 
-/// Draw a rectangle outline on an image.
+/// Draws a rectangle outline as four lines, `thickness` pixels wide.
 ///
-/// # Arguments
-/// * `image` - The image to draw on (must be L_F32 or RGB_F32)
-/// * `top_left` - Top-left corner coordinates
-/// * `size` - Width and height as Vec2
-/// * `color` - Color (for grayscale images, uses luminance)
-/// * `thickness` - Line thickness in pixels
+/// # Panics
+/// Panics unless `image` is `L_F32` or `RGB_F32`.
 pub fn draw_rect(image: &mut Image, top_left: Vec2, size: Vec2, color: Color, thickness: f32) {
     assert_f32_image(image);
     let x = top_left.x;
