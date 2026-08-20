@@ -1,5 +1,3 @@
-use std::io::Read as _;
-
 use common::TempDir;
 use scenarium::{Binding, ConstValue, InputPort, NodeId};
 

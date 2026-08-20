@@ -13,9 +13,11 @@ async fn execute_emits_started_then_finished_progress_per_node() {
     // executor is sequential, so each node brackets before the next starts.
     assert_eq!(progress.len() % 2, 0, "paired events");
     let mut started: Vec<&str> = Vec::new();
-    for pair in progress.chunks_exact(2) {
-        let (started_name, started_phase) = &pair[0];
-        let (finished_name, finished_phase) = &pair[1];
+    for [
+        (started_name, started_phase),
+        (finished_name, finished_phase),
+    ] in progress.as_chunks::<2>().0
+    {
         assert!(
             matches!(started_phase, RunPhase::Started { .. }),
             "first of pair is Started",
