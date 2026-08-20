@@ -64,15 +64,21 @@ pub(super) fn show(
     // chosen variant's value. Works regardless of `data_type` (a custom config
     // port still shows its presets).
     if !value_variants.is_empty() {
-        let names: Vec<&str> = value_variants
-            .iter()
-            .map(|o| o.display_name.as_str())
-            .collect();
         let before = value_variants
             .iter()
             .position(|o| &o.value == value)
             .unwrap_or(0);
-        let picked = combo_pick(ui, theme, id, width, &names, before)?;
+        // A `ValueVariant` carries a `name` *and* a `display_name`, so which
+        // of the two the dropdown reads is this call's choice, not the
+        // type's — which is why the label is projected rather than derived.
+        let picked = combo_pick(
+            ui,
+            theme,
+            id,
+            value_variants,
+            |o| o.display_name.as_str(),
+            before,
+        )?;
         return value_variants.get(picked).map(|o| o.value.clone());
     }
     // The widget follows the *declared* port type, not the stored literal's
@@ -92,13 +98,13 @@ pub(super) fn show(
             let Some(current) = value.as_i64() else {
                 return read_only_label(ui, theme, id, value);
             };
-            int_edit(ui, theme, id, current, width)
+            int_edit(ui, theme, id, current)
         }
         DataType::Float => {
             let Some(current) = value.as_f64() else {
                 return read_only_label(ui, theme, id, value);
             };
-            float_edit(ui, theme, id, current, width)
+            float_edit(ui, theme, id, current)
         }
         DataType::Bool => {
             let Some(current) = value.as_bool() else {
@@ -147,12 +153,9 @@ pub(super) fn show(
                 return read_only_label(ui, theme, id, value);
             };
             let current = value.as_enum().unwrap_or_default();
-            let options: Vec<&str> = variants.iter().map(String::as_str).collect();
-            let before = options.iter().position(|v| *v == current).unwrap_or(0);
-            let picked = combo_pick(ui, theme, id, width, &options, before)?;
-            options
-                .get(picked)
-                .map(|v| ConstValue::Enum((*v).to_owned()))
+            let before = variants.iter().position(|v| v == current).unwrap_or(0);
+            let picked = combo_pick(ui, theme, id, variants, String::as_str, before)?;
+            variants.get(picked).cloned().map(ConstValue::Enum)
         }
         // No literal form (pick-or-wire ports carry variants, handled above).
         DataType::Custom(_) => read_only_label(ui, theme, id, value),
@@ -161,21 +164,27 @@ pub(super) fn show(
 
 /// A dropdown over `options`, returning the newly picked index — `None` when
 /// the selection is unchanged. Both pickers (the value-variant override and
-/// the `Enum` port) are this widget over different option lists.
-fn combo_pick(
+/// the `Enum` port) are this widget over different option lists, each read
+/// through its own `label`.
+///
+/// Generic over the row so each caller hands its own collection over — a
+/// port's `&[ValueVariant]`, an `Enum` type's `&[String]` — rather than
+/// projecting the labels into a fresh `Vec<&str>` on every frame the port
+/// records.
+fn combo_pick<S>(
     ui: &mut Ui,
     theme: &ConstValueEditorTheme,
     id: WidgetId,
-    width: f32,
-    options: &[&str],
+    options: &[S],
+    label: fn(&S) -> &str,
     before: usize,
 ) -> Option<usize> {
     let mut idx = before;
-    ComboBox::new(&mut idx, options)
+    ComboBox::labeled(&mut idx, options, label)
         .id(id)
         .style(&theme.drag_value.chip)
         .size((Sizing::FILL, Sizing::FILL))
-        .min_size((width, 0.0))
+        .min_size((theme.width, 0.0))
         .show(ui);
     (idx != before).then_some(idx)
 }
@@ -248,12 +257,18 @@ fn read_only_label(
     id: WidgetId,
     value: &ConstValue,
 ) -> Option<ConstValue> {
-    let mut buf = value.to_value_string();
-    TextEdit::new(&mut buf)
-        .id(id)
-        .style(&theme.drag_value.editor)
-        .size((Sizing::fixed(theme.width), Sizing::FILL))
-        .show(ui);
+    // The same retained buffer the editable fields keep under this id,
+    // refilled from the literal every frame — which is also what makes the
+    // field read-only: anything typed into it is gone by the next record.
+    EditBuffer::with_text(ui, id, |ui, text| {
+        text.clear();
+        let _ = write!(text, "{}", value.value_text());
+        TextEdit::new(text)
+            .id(id)
+            .style(&theme.drag_value.editor)
+            .size((Sizing::fixed(theme.width), Sizing::FILL))
+            .show(ui);
+    });
     None
 }
 
@@ -333,25 +348,24 @@ fn buffered_text_edit<T: ?Sized>(
     width: f32,
 ) -> Option<String> {
     let focused = ui.focused_id() == Some(id);
-    let state = ui.state_mut::<EditBuffer>(id);
-    let blurred = state.blur_edge(focused);
-    if !focused && !blurred {
-        state.text.clear();
-        mirror(canonical, &mut state.text);
-    }
-    let mut text = std::mem::take(&mut ui.state_mut::<EditBuffer>(id).text);
-    let submitted = TextEdit::new(&mut text)
-        .id(id)
-        .style(editor)
-        .size((Sizing::fixed(width), Sizing::FILL))
-        .show(ui)
-        .submitted;
-    // The buffer keeps the text — the editor goes on showing it until the
-    // mirror re-seeds from the committed document value — so a commit is the
-    // one frame that copies, at gesture rate rather than frame rate.
-    let committed = (submitted || blurred).then(|| text.clone());
-    ui.state_mut::<EditBuffer>(id).text = text;
-    committed
+    let blurred = ui.state_mut::<EditBuffer>(id).blur_edge(focused);
+    EditBuffer::with_text(ui, id, |ui, text| {
+        if !focused && !blurred {
+            text.clear();
+            mirror(canonical, text);
+        }
+        let submitted = TextEdit::new(text)
+            .id(id)
+            .style(editor)
+            .size((Sizing::fixed(width), Sizing::FILL))
+            .show(ui)
+            .submitted;
+        // The buffer keeps the text — the editor goes on showing it until
+        // the mirror re-seeds from the committed document value — so a
+        // commit is the one frame that copies, at gesture rate rather than
+        // frame rate.
+        (submitted || blurred).then(|| text.clone())
+    })
 }
 
 /// The `String` port's mirror: its literal *is* the field's text, verbatim.
@@ -377,14 +391,13 @@ fn int_edit(
     theme: &ConstValueEditorTheme,
     id: WidgetId,
     current: i64,
-    width: f32,
 ) -> Option<ConstValue> {
     let mut draft = current;
     let committed = DragValue::new(&mut draft)
         .editable(true)
         .speed(int_speed(current))
         .style(&theme.drag_value)
-        .size((Sizing::fixed(width), Sizing::FILL))
+        .size((Sizing::fixed(theme.width), Sizing::FILL))
         .id(id)
         .show(ui)
         .committed;
@@ -397,7 +410,6 @@ fn float_edit(
     theme: &ConstValueEditorTheme,
     id: WidgetId,
     current: f64,
-    width: f32,
 ) -> Option<ConstValue> {
     let mut draft = current;
     let committed = DragValue::new(&mut draft)
@@ -405,7 +417,7 @@ fn float_edit(
         .speed(float_speed(current))
         .decimals(3)
         .style(&theme.drag_value)
-        .size((Sizing::fixed(width), Sizing::FILL))
+        .size((Sizing::fixed(theme.width), Sizing::FILL))
         .id(id)
         .show(ui)
         .committed;
@@ -462,6 +474,21 @@ mod tests {
                     "frame {frame}: an unfocused editor commits nothing"
                 );
                 buffered = ui.state_mut::<EditBuffer>(id).text.clone();
+            });
+            assert_eq!(buffered, "42", "frame {frame}");
+        }
+
+        // The read-only fallback borrows the same buffer and refills it
+        // unconditionally, so it carries the same hazard — and its overwrite
+        // is what makes the field read-only in the first place.
+        let read_only = WidgetId::from_hash("value_editor::read_only");
+        for frame in 0..3 {
+            h.frame(|ui| {
+                assert!(
+                    read_only_label(ui, &theme.const_value_editor, read_only, &value).is_none(),
+                    "frame {frame}: a read-only field never commits"
+                );
+                buffered = ui.state_mut::<EditBuffer>(read_only).text.clone();
             });
             assert_eq!(buffered, "42", "frame {frame}");
         }
