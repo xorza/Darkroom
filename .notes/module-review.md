@@ -146,16 +146,6 @@ explaining that it is the twin of the other, and each with its own test.
       annotates each `BlendMode` variant with the formula the variant name
       already gives. This is the only crate in the workspace written that way.
 
-## `palantir::Ui` is the crate's shared mutable state
-
-- [ ] `palantir/src/ui/mod.rs:88` — `Ui` holds 17 fields, 11 of them
-      `pub(crate)` (`forest`, `state`, `resources`, `layout_engine`, `layout`,
-      `cascade`, `cascade_engine`, `display`, `damage_engine`, `frame_runtime`,
-      `window_requests`, `window_frame`). Every subsystem in a 92k-line crate
-      reaches the others through it, and the boundaries between layout, cascade,
-      damage, render and input are enforced only by convention. `impl Ui`
-      carries 69 methods in that one file.
-
 ## Repository hygiene
 
 - [ ] `.gitignore:18` ignores `/.gitmodules` under a "Claude Code sandbox
