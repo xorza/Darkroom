@@ -15,6 +15,8 @@
 //! `value_editor` never calls `request_focus`, so the gap never opens
 //! and the latch reduces to a last-frame focus register.
 
+use palantir::{Ui, WidgetId};
+
 /// Cross-frame state for one in-progress buffered text edit.
 #[derive(Default, Clone, Debug)]
 pub(crate) struct EditBuffer {
@@ -26,6 +28,24 @@ pub(crate) struct EditBuffer {
 }
 
 impl EditBuffer {
+    /// Hand `id`'s retained text to `body` and put it back afterwards.
+    ///
+    /// A text widget wants a `&mut String` it can rewrite in place, and the
+    /// row this buffer occupies is already holding one — lending it out for
+    /// the call is what keeps a field that records every frame from
+    /// allocating a fresh one every frame. The text is out of the state map
+    /// for the duration, so `body` gets `ui` back mutably.
+    pub(crate) fn with_text<R>(
+        ui: &mut Ui,
+        id: WidgetId,
+        body: impl FnOnce(&mut Ui, &mut String) -> R,
+    ) -> R {
+        let mut text = std::mem::take(&mut ui.state_mut::<Self>(id).text);
+        let out = body(ui, &mut text);
+        ui.state_mut::<Self>(id).text = text;
+        out
+    }
+
     /// Advance the latch by one frame; returns whether this is the
     /// exact blur edge (focus was held since the latch last armed, and
     /// is gone now).

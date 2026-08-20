@@ -233,7 +233,10 @@ impl<'a> InlineRename<'a> {
                 let st = ui.state_mut::<RenameState>(id);
                 st.active = true;
                 st.edit.reset_latch();
-                st.edit.text = name.to_owned();
+                // Refilled, not replaced — the row's buffer keeps whatever
+                // capacity the last rename grew it to.
+                st.edit.text.clear();
+                st.edit.text.push_str(name);
                 ui.request_focus(Some(id));
             }
             return RenameEvent {
@@ -262,14 +265,6 @@ impl<'a> InlineRename<'a> {
                 // gated on no press being held, which is what keeps a
                 // click *into* an open editor placing the caret instead.
                 .select_all_on_focus()
-                // Renaming replaces a name far more often than it edits
-                // one, so the draft arrives selected and the first
-                // keystroke wipes it. Safe against the double-click that
-                // opened the session: `double_clicked` fires on the
-                // second *release*, so the button is already up by the
-                // frame the editor first records — and the select-all is
-                // gated on no press being held, which is what keeps a
-                // click *into* an open editor placing the caret instead.
                 .size((Sizing::HUG, Sizing::HUG))
                 .min_size((MIN_EDIT_WIDTH, line_h))
                 .text_align(text_align)
@@ -277,14 +272,15 @@ impl<'a> InlineRename<'a> {
             (edit.submitted, edit.cancelled)
         };
         let focused = ui.focused_id() == Some(id);
-        let commit = {
-            let st = ui.state_mut::<RenameState>(id);
-            st.edit.text = draft.clone();
-            let blurred = st.edit.blur_edge(focused);
-            // Commit on Enter or on blur; Esc wins as a cancel. Escape
-            // blurs too, so `cancelled` has to be tested first.
-            !cancelled && (submitted || blurred)
-        };
+        let blurred = ui.state_mut::<RenameState>(id).edit.blur_edge(focused);
+        // Commit on Enter or on blur; Esc wins as a cancel. Escape blurs
+        // too, so `cancelled` has to be tested first.
+        let commit = !cancelled && (submitted || blurred);
+        // Only a committing frame needs the draft as a value of its own;
+        // every other one hands the buffer straight back, so an open rename
+        // copies its text once per commit rather than once per frame.
+        let committed = (commit && draft.as_str() != name).then(|| draft.clone());
+        ui.state_mut::<RenameState>(id).edit.text = draft;
         if !(commit || cancelled) {
             return RenameEvent {
                 clicked: false,
@@ -297,7 +293,7 @@ impl<'a> InlineRename<'a> {
         ui.request_focus(None);
         RenameEvent {
             clicked: false,
-            committed: (commit && draft.as_str() != name).then_some(draft),
+            committed,
         }
     }
 }
@@ -434,8 +430,15 @@ mod tests {
             render(ui, id, &theme);
         });
 
-        // One character replaces the selection outright.
+        // One character replaces the selection outright; the next appends,
+        // which only holds if the draft survived the frame between them —
+        // `show` hands its buffer back to the state row every frame rather
+        // than copying it out.
         h.key(Key::Char('X'));
+        h.frame(|ui| {
+            render(ui, id, &theme);
+        });
+        h.key(Key::Char('Y'));
         h.frame(|ui| {
             render(ui, id, &theme);
         });
@@ -444,8 +447,9 @@ mod tests {
         let committed = h.frame_value(|ui| render(ui, id, &theme).committed);
         assert_eq!(
             committed.as_deref(),
-            Some("X"),
-            "the first keystroke must replace the whole name, not splice into it",
+            Some("XY"),
+            "the first keystroke must replace the whole name, not splice into \
+             it — and the draft must carry across frames from there",
         );
     }
 }
