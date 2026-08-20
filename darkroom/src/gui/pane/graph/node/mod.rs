@@ -7,6 +7,7 @@ mod value_editor;
 pub(super) mod wid;
 pub(super) mod widget;
 
+use crate::core::document::StackedItem;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::pane::graph::ctx::DrawCtx;
 use crate::gui::pane::graph::gesture::breaker::BreakerProbe;
@@ -46,6 +47,11 @@ pub(super) struct NodeUI {
     /// every node takes the same track, so one buffer serves the whole frame
     /// and each node slices the prefix it needs.
     row_tracks: Vec<Track>,
+    /// The draw sweep's back-to-front node order, grown to the largest graph
+    /// seen. Sized to the *whole* graph — the sweep resolves stacking before
+    /// it can cull — so a fresh `Vec` per frame would scale its allocation
+    /// with the document.
+    paint_order: Vec<StackedItem>,
 }
 
 /// What one record pass's node draw saw but could not act on itself.
@@ -66,9 +72,9 @@ pub(crate) struct NodeDrawOutcome {
 }
 
 impl NodeUI {
-    /// Drop the in-flight drag and the focus hysteresis. `row_tracks` is
-    /// scratch grown to the widest node seen, not gesture state, so it keeps
-    /// its capacity across the reset.
+    /// Drop the in-flight drag and the focus hysteresis. `row_tracks` and
+    /// `paint_order` are scratch grown to the largest scene seen, not gesture
+    /// state, so they keep their capacity across the reset.
     pub(super) fn reset(&mut self) {
         self.drag.reset();
         self.focus_kept_last = None;
@@ -109,7 +115,18 @@ impl NodeUI {
         // commits.
         let mut outcome = NodeDrawOutcome::default();
         let mut focus_kept = None;
-        for n in dcx.graph_ctx().nodes_in_paint_order() {
+        // Swapped out for the sweep because each node hands the whole `NodeUI`
+        // to its widget; it goes back below with its capacity, so only a graph
+        // larger than every earlier one ever allocates here.
+        let mut order = std::mem::take(&mut self.paint_order);
+        let graph_ctx = dcx.graph_ctx();
+        graph_ctx.paint_order(&mut order);
+        for item in &order {
+            // A placement whose node is gone — deleted since the order was
+            // taken — resolves to nothing and is skipped, not faked.
+            let Some(n) = graph_ctx.node(item.id) else {
+                continue;
+            };
             let keeps_focus = ui.focus_within(wid::body(n.id));
             if keeps_focus {
                 focus_kept = Some(n.id);
@@ -130,6 +147,7 @@ impl NodeUI {
                 outcome.menu_opened.get_or_insert(n.id);
             }
         }
+        self.paint_order = order;
         self.focus_kept_last = focus_kept;
         // Belt-and-braces against a node deleted mid-drag; `prepass` makes
         // the same check before it can emit anything against it.

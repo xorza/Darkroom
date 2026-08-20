@@ -166,6 +166,21 @@ pub(crate) struct ItemPlacement {
     pub(crate) z: u32,
 }
 
+/// One entry of a [`GraphView::paint_order`] sweep, sorted by its own derived
+/// order — depth first, then id.
+///
+/// The tie-break on `id` is what makes the order *total*: several items share
+/// the seed `z` of 0 until something raises them, and a comparator that let
+/// those tie would leave their relative order at the mercy of the sort's
+/// stability. Carrying `z` alongside the id is what keeps the sort from
+/// descending [`GraphView::item_placements`] once per comparison.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) struct StackedItem {
+    /// Paint depth: higher paints later, so it sits in front.
+    pub(crate) z: u32,
+    pub(crate) id: NodeId,
+}
+
 /// Editor-side view metadata for the document's graph: per-item placements,
 /// the viewport, and the selection (`Document::main_view`). The graph *data*
 /// itself lives in the core `Graph`; this is purely how the editor presents
@@ -208,18 +223,26 @@ impl GraphView {
         }
     }
 
-    /// The items back-to-front: what a paint pass draws in order, and the only
-    /// place stacking is resolved.
+    /// The items back-to-front into `out`: what a paint pass draws in order,
+    /// and the only place stacking is resolved. `out` is cleared first, so a
+    /// caller hands the same buffer over every frame.
     ///
-    /// `(z, NodeId)` rather than `z` alone so the sort is total — several
-    /// items share the seed `z` of 0 until something raises them, and a
-    /// comparator that let those tie would leave their relative order at the
-    /// mercy of the sort's stability.
-    pub(crate) fn paint_order(&self) -> Vec<(NodeId, ItemPlacement)> {
-        let mut items: Vec<(NodeId, ItemPlacement)> =
-            self.item_placements.iter().map(|(k, v)| (*k, *v)).collect();
-        items.sort_unstable_by_key(|(id, placement)| (placement.z, *id));
-        items
+    /// Fills a caller-owned buffer rather than returning one because the
+    /// production caller is the per-frame node draw: a fresh `Vec` here would
+    /// be one allocation per graph pane per frame, sized to the whole graph
+    /// and taken before culling drops the off-screen nodes.
+    pub(crate) fn paint_order(&self, out: &mut Vec<StackedItem>) {
+        out.clear();
+        out.reserve_exact(self.item_placements.len());
+        out.extend(
+            self.item_placements
+                .iter()
+                .map(|(id, placement)| StackedItem {
+                    z: placement.z,
+                    id: *id,
+                }),
+        );
+        out.sort_unstable();
     }
 
     /// The depth that puts an item in front of every other. One past the
@@ -523,22 +546,20 @@ mod tests {
         let (low, high) = (NodeId::from_u128(1), NodeId::from_u128(2));
         view.item_placements.insert(high, ItemPlacement::default());
         view.item_placements.insert(low, ItemPlacement::default());
+        // Reused across both sweeps, the way the draw pass reuses its own.
+        let mut order = Vec::new();
+        view.paint_order(&mut order);
         assert_eq!(
-            view.paint_order()
-                .iter()
-                .map(|(id, _)| *id)
-                .collect::<Vec<_>>(),
+            order.iter().map(|item| item.id).collect::<Vec<_>>(),
             [low, high],
             "equal depths break by id, not by insertion"
         );
 
         assert_eq!(view.front_z(), 1, "one past the shared depth of zero");
         view.item_placements.get_mut(&low).unwrap().z = view.front_z();
+        view.paint_order(&mut order);
         assert_eq!(
-            view.paint_order()
-                .iter()
-                .map(|(id, _)| *id)
-                .collect::<Vec<_>>(),
+            order.iter().map(|item| item.id).collect::<Vec<_>>(),
             [high, low],
             "raising the lower id lifts it past the higher one"
         );

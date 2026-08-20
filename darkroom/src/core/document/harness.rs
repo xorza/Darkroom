@@ -17,9 +17,11 @@ use crate::core::document::{Document, GraphView, ItemPlacement, TabRef};
 /// Lay every placement out along a row so no node lands off-viewport and gets
 /// culled — [`GraphView::new`] seeds every item at the origin.
 fn spread(view: &mut GraphView) {
-    for (i, (id, _)) in view.paint_order().into_iter().enumerate() {
+    let mut order = Vec::new();
+    view.paint_order(&mut order);
+    for (i, item) in order.into_iter().enumerate() {
         view.item_placements
-            .get_mut(&id)
+            .get_mut(&item.id)
             .expect("paint order lists only placed items")
             .pos = row_pos(i);
     }
@@ -31,6 +33,18 @@ fn place(view: &mut GraphView, node_id: NodeId, pos: Vec2) {
     let z = view.front_z();
     view.item_placements
         .insert(node_id, ItemPlacement { pos, z });
+}
+
+/// The `i`th node in placement order — the order [`place`] adds in, and the
+/// canvas's paint stack.
+///
+/// A free fn rather than a [`DocFixture`] method because the context fixture
+/// one level up indexes the same order over an `OpenDocument` it owns
+/// outright, with no `DocFixture` left to ask.
+pub(crate) fn nth_in_paint_order(view: &GraphView, i: usize) -> NodeId {
+    let mut order = Vec::new();
+    view.paint_order(&mut order);
+    order.get(i).expect("the fixture placed that many nodes").id
 }
 
 /// The `i`th slot of the row [`spread`] lays out.
@@ -127,12 +141,7 @@ impl DocFixture {
     /// The `i`th node in placement order — the order the constructors add in,
     /// and the canvas's paint stack.
     pub(crate) fn node(&self, i: usize) -> NodeId {
-        self.doc
-            .main_view
-            .paint_order()
-            .get(i)
-            .expect("the fixture placed that many nodes")
-            .0
+        nth_in_paint_order(&self.doc.main_view, i)
     }
 
     /// Move `id` to exactly `at`, overriding the row — for the tests that care

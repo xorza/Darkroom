@@ -13,7 +13,7 @@ use std::f32::consts::{FRAC_PI_4, PI};
 
 use palantir::{
     Align, Color, Configure, FontFamily, Panel, Sizing, Spacing, Spinner, Text, TextStyle, Ui,
-    VAlign, WidgetId,
+    VAlign, WidgetId, fmt,
 };
 use scenarium::{CacheMode, NodeId};
 
@@ -81,7 +81,9 @@ pub(super) fn subscription_pin(ui: &mut Ui, theme: &Theme, node: NodeCtx<'_>, ho
         .turn(PI + FRAC_PI_4)
         .fill(event_color(theme, hovered))
         .centered_on(node.pos)
-        .tip("Event subscription — drag to an emitter, or drop an event wire here")
+        .tip(Some(
+            "Event subscription — drag to an emitter, or drop an event wire here",
+        ))
         .show(ui);
 }
 
@@ -206,7 +208,7 @@ pub(super) fn status_row(ui: &mut Ui, ncx: NodeCtx<'_>, out: &mut Requests) {
                         .color(color)
                         .show(ui);
                 }
-                let elapsed = ui.fmt(format_args!("{}", fmt_elapsed(secs)));
+                let elapsed = fmt!(ui, "{}", fmt_elapsed(secs));
                 Text::new(elapsed)
                     .style(&TextStyle {
                         color,

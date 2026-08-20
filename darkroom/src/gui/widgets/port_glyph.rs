@@ -1,10 +1,10 @@
 //! The small sensing glyph a wire terminates on: a filled circle or a
 //! rounded triangle in a generously grown hit box, with a hover tooltip.
 
-use std::borrow::Cow;
-
 use glam::Vec2;
-use palantir::{Color, Configure, Panel, Rect, Sense, Shape, Sizing, Spacing, Ui, WidgetId};
+use palantir::{
+    Color, Configure, Panel, Rect, Sense, Shape, Sizing, Spacing, TextInput, Ui, WidgetId,
+};
 
 use crate::gui::widgets::support::{filled_rect, stroked_rect, tooltip_after};
 
@@ -62,14 +62,14 @@ enum Placement {
 /// coordinates by passes that never record the glyph (the geometry rebuild,
 /// the snap scans), so they must not drift with the parent structure.
 #[derive(Debug)]
-pub(crate) struct PortGlyph {
+pub(crate) struct PortGlyph<'a> {
     wid: WidgetId,
     /// Side of the *painted* shape; the sensing box is [`HIT_SCALE`] of this.
     size: f32,
     shape: GlyphShape,
     fill: Color,
     placement: Placement,
-    tip: Cow<'static, str>,
+    tip: Option<TextInput<'a>>,
 }
 
 /// What a [`PortGlyph`] saw this frame.
@@ -87,7 +87,7 @@ pub(crate) struct PortGlyphResponse {
     pub(crate) secondary_clicked: bool,
 }
 
-impl PortGlyph {
+impl<'a> PortGlyph<'a> {
     /// A data port's circle, `diameter` across.
     pub(crate) fn circle(wid: WidgetId, diameter: f32) -> Self {
         Self::new(wid, diameter, GlyphShape::Circle { outline: None })
@@ -105,7 +105,7 @@ impl PortGlyph {
             shape,
             fill: Color::WHITE,
             placement: Placement::Margin(Spacing::ZERO),
-            tip: Cow::Borrowed(""),
+            tip: None,
         }
     }
 
@@ -160,10 +160,13 @@ impl PortGlyph {
         self
     }
 
-    /// Hover tooltip. Empty (the default) records none. `Cow` so a `&'static`
-    /// tip doesn't allocate per frame.
-    pub(crate) fn tip(mut self, tip: impl Into<Cow<'static, str>>) -> Self {
-        self.tip = tip.into();
+    /// Hover tooltip. `None` (the default) records none — which is what a
+    /// port off the hovered node passes, since only that node builds tips.
+    /// A `&'static str` stays borrowed until the bubble records; an
+    /// [`InternedStr`](palantir::InternedStr) from [`fmt!`](palantir::fmt) is
+    /// already in the record pass's text arena.
+    pub(crate) fn tip(mut self, tip: Option<impl Into<TextInput<'a>>>) -> Self {
+        self.tip = tip.map(Into::into);
         self
     }
 

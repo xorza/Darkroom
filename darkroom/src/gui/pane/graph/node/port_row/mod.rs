@@ -8,12 +8,13 @@
 //! terminates a wire on — circle, event triangle, hit-box growth — is the
 //! shared [`PortGlyph`] widget's.
 
+use std::fmt::Display;
 use std::sync::Arc;
 
 use glam::Vec2;
 use palantir::{
-    Align, Configure, ContextMenu, Grid, HAlign, MenuItem, Panel, PopupHandle, Sense, Sizing,
-    Spacing, Text, TextStyle, Tooltip, Track, Ui, VAlign, WidgetId,
+    Align, Configure, ContextMenu, Grid, HAlign, InternedStr, MenuItem, Panel, PopupHandle, Sense,
+    Sizing, Spacing, Text, TextStyle, Track, Ui, VAlign, WidgetId, fmt,
 };
 use scenarium::Binding;
 use scenarium::FuncEvent;
@@ -39,6 +40,7 @@ use crate::gui::requests::Requests;
 use crate::gui::state::run_state::ExecStatus;
 use crate::gui::theme::Theme;
 use crate::gui::widgets::port_glyph::{PortGlyph, PortGlyphResponse};
+use crate::gui::widgets::support::tooltip_after;
 
 /// Grid columns: inputs (hug), input values (hug, capped at `max_width` — so
 /// wide editors fit but a very long one ellipsizes; the numeric `DragValue`
@@ -114,26 +116,39 @@ pub(super) fn ports_row(
         });
 }
 
-/// A port's hover tooltip, built only for the node under the pointer —
-/// see [`ports_row`]. Empty otherwise, which
-/// [`tooltip_after`](crate::gui::widgets::support::tooltip_after) and
-/// [`port_label`] both treat as "no tooltip".
-fn tip_for(ncx: NodeCtx<'_>, description: &str, ty: &DataType) -> String {
+/// A port's hover tooltip: its `description` (when the func declares one)
+/// above a dimmer type line, else just the type. `description` is the
+/// resolved [`InputCtx::description`] text (empty = none).
+///
+/// Built only for the node under the pointer — see [`ports_row`] — and
+/// interned straight into this pass's text arena, so a hovered node's ports
+/// author their tips with no `String` between them and the widget. `None`
+/// off that node, which [`tooltip_after`] and [`port_label`] both take as
+/// "no tooltip".
+fn tip_for(ui: &mut Ui, ncx: NodeCtx<'_>, description: &str, ty: &DataType) -> Option<InternedStr> {
     if !ncx.tips() {
-        return String::new();
+        return None;
     }
-    port_tip(description, type_label(ncx.graph_ctx.library(), ty))
+    let type_label = TypeLabel {
+        library: ncx.graph_ctx.library(),
+        ty,
+    };
+    Some(if description.is_empty() {
+        fmt!(ui, "{type_label}")
+    } else {
+        fmt!(ui, "{description}\n{type_label}")
+    })
 }
 
 /// Render `name` as a port's label, with `tip` (the port's data type) as its
-/// hover tooltip; empty means no tooltip, as [`tip_for`] returns off the
+/// hover tooltip; `None` means no tooltip, as [`tip_for`] answers off the
 /// hovered node.
 ///
 /// Opts into [`Sense::HOVER`] rather than capturing clicks: the label needs a
 /// trigger anchor for the tooltip, but the node body below it owns selection
 /// and drag, so the press has to fall through. Muted ink — the value column is
 /// each row's strong element, not the label.
-fn port_label(ui: &mut Ui, theme: &Theme, name: &str, tip: &str) {
+fn port_label(ui: &mut Ui, theme: &Theme, name: &str, tip: Option<InternedStr>) {
     let snapshot = Text::new(name)
         .style(&TextStyle {
             color: theme.ports.label,
@@ -142,9 +157,7 @@ fn port_label(ui: &mut Ui, theme: &Theme, name: &str, tip: &str) {
         .sense(Sense::HOVER)
         .show(ui)
         .snapshot();
-    if !tip.is_empty() {
-        Tooltip::on(&snapshot).text(tip).show(ui);
-    }
+    tooltip_after(ui, &snapshot, tip);
 }
 
 fn input_cells(ui: &mut Ui, ncx: NodeCtx<'_>, dcx: DrawCtx<'_>, out: &mut Requests) {
@@ -225,7 +238,7 @@ fn input_label_cell(
 ) {
     let (theme, node) = (ncx.theme(), ncx);
     let port = input.port_ref();
-    let tip = tip_for(ncx, input.description(), input.ty());
+    let tip = tip_for(ui, ncx, input.description(), input.ty());
     // Flag a port only once a run actually failed on it — not on every unbound edit — so
     // the port keeps its data-type color while editing instead of flipping as you
     // bind/unbind. The run named the exact ports it could not feed, so only those light
@@ -272,15 +285,15 @@ fn input_label_cell(
                 let mut circle = PortGlyph::circle(wid, diameter)
                     .fill(fill)
                     .margin(margin)
-                    .tip(tip.clone());
+                    .tip(tip);
                 if let Some(color) = outline {
                     circle = circle.outline(color);
                 }
                 let glyph = circle.show(ui);
-                port_label(ui, theme, input.name(), &tip);
+                port_label(ui, theme, input.name(), tip);
                 glyph
             } else {
-                port_label(ui, theme, input.name(), &tip);
+                port_label(ui, theme, input.name(), tip);
                 PortGlyphResponse::default()
             }
         });
@@ -415,7 +428,7 @@ fn output_cell(
         PortKind::Output,
         dcx.geometry().ports.is_hovered(port),
     );
-    let tip = tip_for(ncx, output.description(), &ty);
+    let tip = tip_for(ui, ncx, output.description(), &ty);
     let wid = port_circle_wid(port);
     let overhang = theme.port_overhang();
     let cell = Panel::hstack()
@@ -427,7 +440,7 @@ fn output_cell(
         .gap(4.0)
         .child_align(Align::v(VAlign::Center))
         .show(ui, |ui| {
-            port_label(ui, theme, output.name(), &tip);
+            port_label(ui, theme, output.name(), tip);
             PortGlyph::circle(wid, theme.ports.size)
                 .fill(fill)
                 .margin(Spacing::new(0.0, 0.0, -overhang, 0.0))
@@ -539,11 +552,7 @@ fn event_cell(
     let wid = event_glyph_wid(node_id, event_idx);
     let ev = EventRef { node_id, event_idx };
     let fill = event_color(theme, dcx.geometry().events.is_hovered(ev));
-    let tip = if ncx.tips() {
-        format!("event: {}", event.name)
-    } else {
-        String::new()
-    };
+    let tip = ncx.tips().then(|| fmt!(ui, "event: {}", event.name));
     Panel::hstack()
         .id_salt(("event", event_idx))
         .grid_cell((row as u16, COL_OUTPUT))
@@ -573,37 +582,44 @@ pub(crate) fn event_glyph_wid(node_id: NodeId, event_idx: usize) -> WidgetId {
     WidgetId::from_hash(("graph.node", "event_glyph", node_id, event_idx))
 }
 
-/// A port's hover tooltip: its `description` (when the func declares one) above a
-/// dimmer type line, else just the type. `description` is the resolved
-/// [`InputCtx::description`] text (empty = none).
-fn port_tip(description: &str, type_label: String) -> String {
-    if description.is_empty() {
-        type_label
-    } else {
-        format!("{description}\n{type_label}")
-    }
+/// Human-readable type for a port tooltip: the picker mode (and accepted
+/// extensions) for a path, and the library's own display name for everything
+/// else — `any` for the untyped boundary placeholder, a registered
+/// `Custom`/`Enum` type's name, or the raw id when nothing is registered
+/// under it.
+///
+/// Renders on demand rather than into a `String`: a hovered node builds one
+/// of these per port per frame, and [`tip_for`] feeds it straight to `fmt!`.
+#[derive(Debug)]
+struct TypeLabel<'a> {
+    library: &'a Library,
+    ty: &'a DataType,
 }
 
-/// Human-readable type for a port tooltip: scalar names, the picker mode for
-/// paths, `Any` (the untyped boundary placeholder) as "any", and a registered
-/// `Custom`/`Enum` type's display name (the raw id if it isn't registered).
-fn type_label(library: &Library, ty: &DataType) -> String {
-    match ty {
-        DataType::Any => "any".to_owned(),
-        DataType::FsPath(cfg) => {
-            let mode = match cfg.mode {
-                FsPathMode::Directory => "directory",
-                FsPathMode::ExistingFile => "file",
-                FsPathMode::ExistingFiles => "files",
-                FsPathMode::NewFile => "save path",
-            };
-            if cfg.extensions.is_empty() {
-                format!("path · {mode}")
-            } else {
-                format!("path · {mode} ({})", cfg.extensions.join(", "))
+impl Display for TypeLabel<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let DataType::FsPath(cfg) = self.ty else {
+            // Borrowed for every type the library knows; only an id with no
+            // entry behind it builds a string, and that one is scenarium's.
+            return f.write_str(&self.library.type_name(self.ty));
+        };
+        let mode = match cfg.mode {
+            FsPathMode::Directory => "directory",
+            FsPathMode::ExistingFile => "file",
+            FsPathMode::ExistingFiles => "files",
+            FsPathMode::NewFile => "save path",
+        };
+        write!(f, "path · {mode}")?;
+        // Written through one at a time rather than `join`ed — a joined list
+        // is exactly the intermediate string this type exists to avoid.
+        if let Some((first, rest)) = cfg.extensions.split_first() {
+            write!(f, " ({first}")?;
+            for ext in rest {
+                write!(f, ", {ext}")?;
             }
+            f.write_str(")")?;
         }
-        _ => library.type_name(ty).into_owned(),
+        Ok(())
     }
 }
 
@@ -613,6 +629,48 @@ mod tests {
     use scenarium::{NodeKind, OutputPort};
 
     use crate::core::preview::preview_func;
+
+    /// The type line of a port tooltip. A path spells out its picker mode and
+    /// the extensions it accepts; everything else defers to the library's own
+    /// name for the type, so a tooltip and a palette entry can't disagree.
+    #[test]
+    fn type_label_spells_out_a_paths_mode_and_extension_list() {
+        let library = Library::default();
+        let label = |ty: &DataType| {
+            TypeLabel {
+                library: &library,
+                ty,
+            }
+            .to_string()
+        };
+        let path = |mode, exts: &[&str]| {
+            DataType::FsPath(Arc::new(FsPathConfig::with_extensions(
+                mode,
+                exts.iter().map(|e| (*e).to_owned()).collect(),
+            )))
+        };
+
+        // Scalars and the untyped boundary placeholder are the library's names.
+        assert_eq!(label(&DataType::Any), "any");
+        assert_eq!(label(&DataType::Float), "float");
+
+        // Every mode names itself, and an empty list adds no parenthetical.
+        assert_eq!(label(&path(FsPathMode::Directory, &[])), "path · directory");
+        assert_eq!(label(&path(FsPathMode::ExistingFile, &[])), "path · file");
+        assert_eq!(label(&path(FsPathMode::ExistingFiles, &[])), "path · files");
+        assert_eq!(label(&path(FsPathMode::NewFile, &[])), "path · save path");
+
+        // One extension, then several: the separator appears only *between*
+        // them — the join this replaced is what used to guarantee that.
+        assert_eq!(
+            label(&path(FsPathMode::ExistingFile, &["fit"])),
+            "path · file (fit)"
+        );
+        assert_eq!(
+            label(&path(FsPathMode::ExistingFiles, &["fit", "fits", "raf"])),
+            "path · files (fit, fits, raf)"
+        );
+    }
 
     /// "Add preview" spawns a node already reading the port it was raised
     /// from, offset clear of it, as one batch — so a single undo removes both

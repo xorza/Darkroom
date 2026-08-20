@@ -3,13 +3,13 @@
 //! and layout spacers. Chrome-level composition (pills, chips) lives in
 //! [`toolbar`](crate::gui::widgets::toolbar).
 
-use std::borrow::Cow;
+use std::fmt::Display;
 
 use glam::Vec2;
 
 use palantir::{
     Background, Color, Configure, Corners, FontFamily, Panel, Rect, ResponseSnapshot, Shape,
-    Sizing, Stroke, Text, TextStyle, Tooltip, Ui,
+    Sizing, Stroke, Text, TextInput, TextStyle, Tooltip, Ui, fmt,
 };
 
 use crate::gui::theme::Theme;
@@ -45,18 +45,27 @@ pub(crate) fn mono_text(ui: &Ui, px: f32) -> TextStyle {
     }
 }
 
-/// A muted micro-label immediately followed by its mono-styled value, as two
-/// direct `Text` widgets (no wrapping panel — draw it inside the caller's
-/// own panel so its `gap` spaces the pair like any other sibling). Shared
-/// shape behind a node body's memory footer (`gui::pane::graph::node::memory_row`) and a
-/// preview node's image-info footer (`gui::pane::graph::node::preview_row`).
-pub(crate) fn labeled_value(ui: &mut Ui, theme: &Theme, label: &str, value: String) {
+/// One mono-styled value, unlabeled — for a figure whose own shape
+/// (`1920×1080`, `RGBA · 8-bit`) already says what it is.
+///
+/// `value` renders on demand — a `Display` figure, or a `format_args!` the
+/// caller assembles at the call site — and lands in the record pass's text
+/// arena, so a per-frame fact strip builds no `String`.
+pub(crate) fn bare_value(ui: &mut Ui, theme: &Theme, value: impl Display) {
+    let style = mono_text(ui, theme.text.label);
+    Text::new(fmt!(ui, "{value}")).style(&style).show(ui);
+}
+
+/// [`bare_value`] behind a muted micro-label, as two direct `Text` widgets
+/// (no wrapping panel — draw it inside the caller's own panel so its `gap`
+/// spaces the pair like any other sibling). Shared shape behind a node body's
+/// memory footer (`gui::pane::graph::node::memory_row`) and a preview node's
+/// image-info footer (`gui::pane::graph::node::preview_row`).
+pub(crate) fn labeled_value(ui: &mut Ui, theme: &Theme, label: &str, value: impl Display) {
     Text::new(label)
         .style(&muted_text(ui, theme, theme.text.caption))
         .show(ui);
-    Text::new(value)
-        .style(&mono_text(ui, theme.text.label))
-        .show(ui);
+    bare_value(ui, theme, value);
 }
 
 /// A read-only "fact strip" footer's background: the chrome fill, rounded
@@ -159,20 +168,24 @@ pub(crate) fn hspacer(ui: &mut Ui, salt: &'static str) {
         .show(ui, |_| {});
 }
 
-/// Shows `tip` as a hover tooltip anchored to `snapshot`, unless `tip` is
-/// empty. Takes an already-snapshotted response (rather than `&Response<'_>`)
+/// Shows `tip` as a hover tooltip anchored to `snapshot`; `None` records
+/// none. Takes an already-snapshotted response (rather than `&Response<'_>`)
 /// so a caller that just finished building the widget can end its own `ui`
 /// borrow (via `.snapshot()`) before this one needs `ui` back mutably to
 /// record the tooltip. Shared by every chip/badge/port-glyph that pairs a
-/// widget with a hover tooltip. `Cow` so the common `&'static str` tips
-/// don't allocate per frame.
-pub(crate) fn tooltip_after(
+/// widget with a hover tooltip.
+///
+/// `Option` rather than an empty-string sentinel: "this widget has no
+/// tooltip" is a different fact from "its tooltip is blank", and the port
+/// glyphs — the one family that decides per frame — now say which they mean.
+/// Any text form is accepted: a `&'static str` tip stays borrowed until the
+/// bubble actually records, and a [`fmt!`] one is already in the pass's arena.
+pub(crate) fn tooltip_after<'a>(
     ui: &mut Ui,
     snapshot: &ResponseSnapshot,
-    tip: impl Into<Cow<'static, str>>,
+    tip: Option<impl Into<TextInput<'a>>>,
 ) {
-    let tip = tip.into();
-    if !tip.is_empty() {
+    if let Some(tip) = tip {
         Tooltip::on(snapshot).text(tip).show(ui);
     }
 }

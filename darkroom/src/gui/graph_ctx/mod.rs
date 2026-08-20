@@ -27,7 +27,7 @@ use std::collections::BTreeSet;
 
 use scenarium::{Graph, InputPort, Library, NodeId, OutputPort, OutputTypes, Subscription};
 
-use crate::core::document::{Document, GraphView, Viewport};
+use crate::core::document::{Document, GraphView, StackedItem, Viewport};
 use crate::gui::graph_ctx::node_ctx::NodeCtx;
 use crate::gui::state::run_state::RunState;
 use crate::gui::theme::Theme;
@@ -172,7 +172,7 @@ impl<'a> GraphCtx<'a> {
     /// Unordered because almost nothing needs the stack: scanning for
     /// emitters, resolving a drag anchor, framing the viewport and hit-testing
     /// a rubber band all want the set. The one pass that draws asks for
-    /// [`Self::nodes_in_paint_order`] and pays for the sort there.
+    /// [`Self::paint_order`] and pays for the sort there.
     pub(crate) fn nodes(self) -> impl Iterator<Item = NodeCtx<'a>> {
         self.view()
             .item_placements
@@ -180,16 +180,16 @@ impl<'a> GraphCtx<'a> {
             .filter_map(move |(id, placement)| NodeCtx::resolve(self, *id, placement.pos))
     }
 
-    /// This graph's nodes back-to-front: later entries draw in front, and
-    /// `GraphIntent::Raise` lifts one past the rest.
+    /// This graph's node ids back-to-front into `out`: later entries draw in
+    /// front, and `GraphIntent::Raise` lifts one past the rest. Resolve each
+    /// with [`Self::node`].
     ///
-    /// Allocates the sorted run once, so a paint pass walks it instead of
-    /// re-resolving stacking per node.
-    pub(crate) fn nodes_in_paint_order(self) -> impl Iterator<Item = NodeCtx<'a>> {
-        self.view()
-            .paint_order()
-            .into_iter()
-            .filter_map(move |(id, placement)| NodeCtx::resolve(self, id, placement.pos))
+    /// Ids rather than resolved nodes because the sort needs a buffer and a
+    /// [`NodeCtx`] borrows this context — see
+    /// [`GraphView::paint_order`](crate::core::document::GraphView::paint_order)
+    /// for why the buffer is the caller's.
+    pub(crate) fn paint_order(self, out: &mut Vec<StackedItem>) {
+        self.view().paint_order(out);
     }
 
     /// One node of this graph, or `None` for an id it does not hold — a node
