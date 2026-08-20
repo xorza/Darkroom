@@ -1,0 +1,355 @@
+# Workspace review
+
+> **Delete each item as you address it.** This file lists open findings only — no
+> "done" markers, no resolved section, no history.
+
+Scope: all nine workspace crates (~219k lines of production Rust, excluding
+tests and benches). Findings are grouped by root cause and sorted by severity ×
+benefit. Test structure and test-facing APIs are out of scope.
+
+---
+
+## The edit pipeline is two parallel enums maintained by hand
+
+`darkroom/src/core/edit/intent/` models one edit vocabulary as two enums that
+must stay aligned variant-for-variant, so every change to the vocabulary is a
+multi-file mechanical edit and nothing but discipline keeps the halves in step.
+
+- [ ] `core/edit/intent/types.rs:71` (`GraphIntent`) and `:235` (`UndoStep`)
+      declare the same 11 variants. Six of them (`AddNode`, `DuplicateNodes`,
+      `MoveSelection`, `RenameNode`, `SetInput`, `SetSubscription`) restate the
+      identical payload field list in both enums.
+- [ ] `core/edit/intent/types.rs:50` documents a six-step checklist across five
+      files for adding one variant. A checklist in a doc comment is the
+      shotgun-surgery cost written down rather than removed.
+- [ ] `core/edit/intent/apply.rs:50` (`apply_step`) and `:175` (`revert_step`)
+      are two 11-arm matches over the same enum, ~150 lines total, differing
+      only in whether the arm reads the variant's `to` field or its `from`
+      field. Three arms already had to be lifted into shared helpers
+      (`set_subscription`, `set_item_z`, `set_node_property`) to avoid writing
+      them twice; the other eight are still written twice.
+- [ ] `core/edit/intent/build.rs:37` (`build_step`) is a third 11-arm match over
+      the same vocabulary, most arms of which move fields across unchanged.
+- [ ] `UndoStep::RemoveNode` (`types.rs:258`) carries
+      `item_placements: Vec<(NodeId, ItemPlacement)>` and `selected: Vec<NodeId>`
+      for a step that removes exactly one node. `build.rs:97-109` fills both by
+      filtering for that single id, so each vector holds zero or one element and
+      the removal path pays two heap allocations to express two optional
+      scalars.
+- [ ] `build.rs:87-91`: the `RemoveNode` arm resolves the node twice —
+      `validate::live_node(graph, node_id, …)` immediately followed by
+      `graph.snapshot_node(node_id)` — and treats both misses as the same
+      `Ok(None)`.
+
+## Doc prose has drifted from the code it describes
+
+The codebase carries very high comment density (darkroom 32% of production
+lines, palantir 30%) and the prose is load-bearing — it is where invariants,
+sweep responsibilities and cross-module contracts are recorded. That prose is
+not compiler-checked: `broken_intra_doc_links = deny` only validates `[link]`
+form, so backticked identifiers in prose rot silently. Several already have.
+
+- [ ] Identifiers asserted by doc prose that are defined nowhere in the
+      workspace:
+      - `EditScope` — `darkroom/src/core/edit/intent/types.rs:53,227`
+      - `PORT_HIT_SCALE` — `darkroom/src/gui/pane/graph/node/header.rs:65`
+        ("the `PORT_HIT_SCALE`-grown box")
+      - `MULTI_CLICK_RADIUS` — `palantir/src/input/capture.rs:33`, which is the
+        doc comment sitting directly above the constant it means,
+        `DOUBLE_CLICK_RADIUS` (`:34`)
+      - `Full` and `AnimOnly` — `palantir/src/ui/wake_reasons.rs:5-6` names them
+        as the two `Ui::frame` processing modes; `FrameProcessing`
+        (`palantir/src/ui/frame_report.rs:21`) has `PaintOnly`, `SingleLayout`
+        and `DoubleLayout`
+      - `ElementSlots` — `palantir/src/layout/types/align.rs:104`, cited as an
+        example of an existing packed field
+- [ ] `apply_graph` and `revert_graph` are referenced as live function names in
+      `core/edit/intent/apply.rs:138,153-154` and
+      `core/edit/intent/validate.rs:17`. The functions are called `apply_step`
+      and `revert_step`.
+- [ ] `core/edit/intent/types.rs:312` says one step type "backs both the
+      `Subscribe` and `Unsubscribe` intents". Neither variant exists; the intent
+      is `SetSubscription { subscribe: bool }`.
+- [ ] `core/edit/intent/types.rs:164-176`: the doc comment written for
+      `set_input` sits above `click`, so `click` carries two unrelated opening
+      paragraphs and `set_input` (`:213`) has no doc at all.
+- [ ] `core/edit/intent/apply.rs:153-158`: same defect — the `set_node_property`
+      doc sits above `set_item_z`, and `set_node_property` (`:164`) has none.
+- [ ] `core/edit/intent/apply.rs:3-4`: the module doc lists `commit_intent`
+      twice as two separate entry points.
+- [ ] 326 comments across the workspace describe superseded designs rather than
+      the current one — "used to", "formerly", "the old …", "replaces the …",
+      "it replaced". Concentrated in production doc comments
+      (`darkroom/src/core/document/dock/mod.rs:2`,
+      `darkroom/src/core/edit/intent/types.rs:132`,
+      `darkroom/src/gui/graph_ctx/mod.rs:16`,
+      `darkroom/src/gui/dock/strip.rs:24`, `palantir/src/ui/mod.rs:90-97`),
+      where they describe code a reader cannot see and cannot verify.
+- [ ] `darkroom/src/core/document/mod.rs:262-299`: `holds_node`'s doc carries a
+      markdown table naming three caches and the three functions that sweep
+      each, plus instructions to extend the table when a fourth is added. The
+      table is the only thing linking those call sites; nothing enforces it.
+
+## `lens` mirrors every `lumos` config type by hand
+
+`lens/src/astro/config/` exists to make `lumos` config structs introspectable
+for the node-graph editor. `lumos` already depends on `common`
+(`lumos/Cargo.toml:2`), the crate that owns `Introspect` and its derive.
+
+- [ ] 889 lines (`lens/src/astro/config/{mod,preset,processing,stacking}.rs`)
+      are mirror declarations: for each `lumos` config a `…Def` struct
+      restating every field, plus two hand-written `From` impls, plus a mirror
+      enum for each enum field with two more `From` impls. Adding one field to a
+      `lumos` config means three coordinated edits in `lens`, and nothing
+      detects a missed one except a wrong value at runtime.
+- [ ] `lumos` never derives `Introspect` anywhere despite depending on `common`,
+      so the mirror layer is the only reason the derive can't sit on the real
+      types.
+- [ ] `lens/src/astro/config/processing.rs:76-115` shows the shape: six fields
+      declared in `BackgroundConfigDef`, then listed again in
+      `From<ExtractBackground>`, then again in `From<BackgroundConfigDef>`.
+
+## `common` publishes a surface almost nothing consumes
+
+The leaf crate's `lib.rs` exports 26 items. Grepping every consumer crate for
+imports of them shows most are never named outside `common` itself.
+
+- [ ] Never imported by any consumer: `Span`, `EPSILON`, `FileExtensionError`,
+      `FileFormatResult`, `IntrospectError`, `IntrospectFloat`,
+      `IntrospectInteger`, `SerializeError`, `DeserializeError`, `Lz4SizeError`.
+- [ ] `common::Span` (`common/src/span.rs:9`) has zero users anywhere in the
+      workspace, while two other `Span` types exist and are used:
+      `scenarium/src/common/column/mod.rs:70` (the same `start`/`len`/`range()`
+      shape plus a phantom index space) and `palantir/src/primitives/span.rs`.
+- [ ] `common::FloatExt` (`common/src/float_ext.rs`) has two production callers
+      (`darkroom/src/gui/dock/mod.rs:38`,
+      `darkroom/src/gui/pane/graph/gesture/pan_zoom/mod.rs:7`) and carries three
+      trait impls plus ~70 lines of tests.
+- [ ] `common::EPSILON` (`common/src/constants.rs:1`) is a bare
+      `pub const EPSILON: f32 = 1e-6` with no comment saying what it is a
+      tolerance *for*. It is reachable only through `FloatExt`.
+- [ ] `common/src/float_ext.rs:14`: the `f64` impl compares against
+      `EPSILON as f64` — an `f32`-scaled tolerance applied to `f64` values. Both
+      impls use an absolute tolerance, so `approximately_eq` is meaningless at
+      large magnitudes (`1e9` vs `1e9 + 1.0` compares unequal) and vacuous at
+      small ones (`1e-9` vs `1e-12` compares equal).
+- [ ] `common::is_debug()` (`common/src/debug.rs:1`) is a `pub const fn`
+      wrapping `cfg!(debug_assertions)` — a crate-level export for an
+      expression callers can write inline, with 13 uses.
+- [ ] `scenarium/src/common/` is a module named `common` inside a crate that
+      also depends on the `common` crate. Every reference to the crate must be
+      written `::common::…` to disambiguate — 20+ files carry the escape
+      (`scenarium/src/lib.rs:12`, `graph/identity.rs:18`,
+      `execution/executor/mod.rs:24`, …). `palantir/src/common/` has the same
+      module name without the collision, so the two crates read differently for
+      the same construct.
+
+## The workspace dependency table carries entries nothing inherits
+
+`Cargo.toml`'s `[workspace.dependencies]` is the version-pinning point, but a
+third of its entries are never inherited by any member — including members'
+path-dependency sub-crates.
+
+- [ ] Twelve entries are never inherited anywhere: `tracing-appender`,
+      `tracing-rolling-file`, `dotenv`, `indexmap`, `rhai`, `bumpalo`,
+      `ratatui`, `crossterm`, `wgpu`, `pollster`, `tiff`, `paste`. (The last
+      four have consumers, but those are the standalone submodules, which pin
+      their own by policy — so the entries pin nothing.)
+- [ ] `darkroom = { path = "darkroom" }` (`Cargo.toml:26`) is a
+      `[workspace.dependencies]` entry for the leaf application; nothing depends
+      on it.
+- [ ] `syn` is declared three times with three different feature sets
+      (`common/common-derive/Cargo.toml`, `quickbench/quickbench-macros/Cargo.toml`,
+      `palantir/anim-derive/Cargo.toml`) and is absent from
+      `[workspace.dependencies]`, so the one dependency shared by all three
+      proc-macro crates is the one with no central pin.
+- [ ] Two benchmark harnesses coexist. `quickbench` is a workspace member and an
+      in-house crate, used by `lumos` only; `fits-well`, `imaginarium` and
+      `palantir` use `criterion` under a `bench` feature. Results are not
+      comparable between the halves, and the `[profile.bench]` fat-LTO/OOM
+      hazard documented in `CLAUDE.md` applies to only one of them.
+- [ ] `imaginarium` and `palantir` gate benches behind a `bench` feature that
+      implies `internals`; `lumos` and `fits-well` gate the same construct
+      behind `internals` alone. `lens` and `darkroom` declare no `internals`
+      feature at all.
+
+## Many files hold several unrelated major types
+
+The convention is one major struct per file, named for it, with satellites
+allowed. These files hold four or more independent types, each with its own
+inherent impl, so the file name identifies none of them.
+
+- [ ] `fits-well/src/compress/decode.rs` — 1250 lines, 9 types
+      (`DecodeBuffer`, `FloatQuantization`, `ImageDecodePlan`, `ImageLayout`,
+      `ImageRegionLayout`, `NullMask`, `TileCells`, `TileScratchSet`,
+      `TileSources`).
+- [ ] `fits-well/src/table/mod.rs` — 1198 lines, 9 types (`BinTable`,
+      `BitColumn`, `CharacterField`, `ColumnData`, `ColumnReader`,
+      `TableSchema`, `Tform`, `TformKind`, `VlaColumn`).
+- [ ] `fits-well/src/wcs/axis.rs` — 942 lines, 9 types, of which six are the
+      spectral family (`SpectralKind`, `SpectralParameters`, `SpectralRest`,
+      `SpectralSampling`, `SpectralTransform`, `Grism`).
+- [ ] `darkroom/src/gui/theme/mod.rs` — 879 lines before the test module, 9
+      types (`Theme`, `CardTheme`, `PortTheme`, `ConstValueEditorTheme`,
+      `InlineRenameTheme`, `TypeScale`, `PaletteColors`, `HoverColor`,
+      `ThemePreset`) plus two free functions (`palantir_theme_for`,
+      `menu_button_for`).
+- [ ] `fits-well/src/wcs/mod.rs` — 1778 lines, 8 types including a four-type
+      table-WCS family (`TableWcs`, `TableWcsResolver`, `TableAxisKeyword`,
+      `TableMatrixKeyword`, `TablePoleKeyword`).
+- [ ] `fits-well/src/data/mod.rs` — 1026 lines, 8 types (`Image`, `ImageData`,
+      `ImageView`, `BorrowedImage`, `ReadImage`, `SampleType`, `Scaling`,
+      `UnsignedData`).
+- [ ] `fits-well/src/time/mod.rs` — 847 lines, 7 types.
+- [ ] `scenarium/src/testing/program.rs` — 678 lines, 6 types (`ProgramBuilder`,
+      `NodeBuilder`, `Placed`, `Runs`, `Sweep`, `Swept`).
+- [ ] `darkroom/src/core/document/dock/mod.rs` — 719 lines, 5 types
+      (`DockLayout`, `DockPath`, `NodeIdx`, `SplitSide`, `TabGroup`).
+- [ ] `darkroom/src/gui/pane/graph/gesture/new_node/mod.rs` — 486 lines, 5 types
+      including a `Palette` that collides by name with
+      `palantir::widgets::theme::palette::Palette`, which the same crate
+      imports.
+
+## Inherent impls are split across files
+
+A type's inherent impl belongs in the type's own file; these are spread, so the
+full method set of each type has no single place to read.
+
+- [ ] `App` — `darkroom/src/gui/app/mod.rs` plus five command files
+      (`commands/{mod,edit,file,prefs,run}.rs`). Six files, six `impl App`
+      blocks.
+- [ ] `FitsWriter` — `fits-well/src/writer/{mod,ascii,image,table}.rs`.
+- [ ] `Document` and `GraphView` — `darkroom/src/core/document/mod.rs` and
+      `.../document/validate.rs`.
+- [ ] `Blend`, `ContrastBrightness`, `Transform` — each split between
+      `imaginarium/src/ops/<op>/mod.rs` and `.../gpu.rs`.
+- [ ] `FrameCache` — `lumos/src/stacking/combine/cache/mod.rs` and
+      `.../cache/loader/mod.rs`.
+- [ ] `TestGraph` — `scenarium/src/testing/graph/mod.rs` and
+      `.../graph/compiled.rs`.
+
+## `lumos` statistics duplicates itself across `f32`/`f64`
+
+`lumos/src/math/statistics/mod.rs` carries three pairs of functions whose bodies
+are identical modulo the float type, each pair with its own doc comment
+explaining that it is the twin of the other, and each with its own test.
+
+- [ ] `median_f32_mut:96` and `median_f64_mut:119` — identical bodies
+      (`select_nth_unstable_by` with `total_cmp`, even-length averaging).
+- [ ] `median_f32_fast:166` and `median_f64_fast:185` — identical bodies
+      (single `partial_cmp` partition, upper-middle convention, same debug
+      NaN assertion).
+- [ ] `mad_f32_fast:232` and `mad_f64_fast:201` — identical bodies.
+- [ ] `mad_f32_fast:232` and `mad_f32_with_scratch:248` differ only in which
+      median they call and whether they debug-assert; two names for one
+      operation parameterised by NaN tolerance.
+- [ ] Three separate sigma-clip/MAD implementations exist alongside the above:
+      `statistics::sigma_clipped:331`,
+      `stacking/star_detection/centroid/local_background.rs:91`
+      (`sigma_clipped_median_mad`), and
+      `stacking/combine/normalization/mod.rs:448` (`cancellable_median_mad`),
+      with a fourth reduced form in `stacking/combine/rejection/mod.rs:98`
+      (`sorted_mad`).
+
+## Allocation on the editor's per-frame record path
+
+- [ ] `darkroom/src/core/document/mod.rs:216` (`GraphView::paint_order`) builds
+      and sorts a fresh `Vec<(NodeId, ItemPlacement)>` on every call. Its
+      production caller is `gui/graph_ctx/mod.rs:190`
+      (`nodes_in_paint_order`), reached from the per-frame node loop at
+      `gui/pane/graph/node/mod.rs:112` — so the vector is sized to the whole
+      graph, allocated once per graph pane per frame, and built *before*
+      culling drops the off-screen nodes.
+- [ ] `palantir` exports `fmt!` (`palantir/src/lib.rs:188`) specifically as the
+      allocation-free way to author a dynamic label, documented as landing bytes
+      directly in the arena the widget would copy them into. `darkroom` uses it
+      zero times and builds record-path labels with `format!` / `to_string()`
+      instead — `gui/window/status_bar.rs:68,71` (two `String`s per frame for
+      the memory readout), `gui/pane/graph/node/port_row/mod.rs:543,583,601,603`,
+      `gui/pane/graph/node/preview_row.rs:127,148`,
+      `gui/pane/graph/node/value_editor.rs:277,329`,
+      `gui/pane/viewer/mod.rs:326`.
+
+## `fits-well` error handling diverges from the rest of the workspace
+
+- [ ] `fits-well/src/error.rs` declares one `FitsError` with 52 variants
+      spanning reader, writer, header, ASCII/binary tables, WCS, time and
+      compression. Every `Result` in the crate carries the whole set, so no
+      call site's error type says which failures are actually reachable there.
+- [ ] `fits-well/src/error.rs:276-497` is a hand-written 220-line
+      `impl fmt::Display` — one `write!` arm per variant, restating each
+      variant's doc comment as a format string. `thiserror` is already a
+      workspace dependency used by 36 files across six crates.
+- [ ] `imaginarium/src/common/error.rs:18` hand-writes `Display` for its `Error`
+      while `imaginarium` depends on `thiserror` and uses it elsewhere in the
+      same crate.
+- [ ] `lumos/src/error.rs:48,139` hand-writes `Display` for
+      `FrameDimensionMismatch` and `InvalidConfigField` while `lumos` uses
+      `thiserror` in 12 other files.
+
+## Unintegrated code kept alive by blanket suppressions
+
+- [ ] `lumos/src/stacking/registration/distortion/tps/` is 1413 lines (383
+      production + 1030 tests) reachable from nothing. `mod.rs:4` carries a
+      module-wide `#![allow(dead_code)]`. It compiles, links, and is tested on
+      every run of the suite.
+- [ ] `lumos/src/stacking/registration/distortion/point_normalization.rs:32`
+      (`denormalize`) is `#[allow(dead_code)]` and, per its own comment, exists
+      only for the unintegrated TPS module.
+- [ ] `lumos/src/stacking/registration/ransac/mod.rs:98` — an
+      `#[allow(dead_code)]` struct field (`iterations`) that is written and
+      never read.
+- [ ] `palantir/src/common/platform.rs:9` — `#[allow(dead_code)]` on the
+      `Platform` enum.
+- [ ] `imaginarium/src/gpu/slot.rs:45` — `#[allow(dead_code)]` on `take`.
+- [ ] `darkroom/src/gui/widgets/inline_rename.rs:127` — `#[allow(dead_code)]` on
+      the `halign` builder method.
+- [ ] Eighteen `#[allow(clippy::too_many_arguments)]` sites, concentrated in
+      `lumos/src/io/raw/demosaic/xtrans/` (four),
+      `lumos/src/stacking/star_detection/median_filter/simd/` (four) and
+      `fits-well/src/compress/hcompress.rs` (three).
+
+## `imaginarium`'s op modules repeat their own preamble and dispatch
+
+- [ ] `ops/blend/cpu.rs:14-37` opens with six `assert_eq!`s pairing
+      src/dst/output width, height and format. The same shape recurs in
+      `ops/transform/cpu.rs:32` and `common/image_diff.rs:17,76`, each with its
+      own message wording.
+- [ ] `ops/blend/cpu.rs:44-93` is a three-stage dispatch — x86 SSE4.1 match, then
+      aarch64 NEON match, then a scalar `match (channel_size, channel_type)`
+      ending in `unreachable!`. `ops/contrast_brightness/cpu/mod.rs:67` and
+      `ops/transform/cpu.rs:57` each re-implement the same cascade with
+      different structure.
+- [ ] `image/conversion/simd/mod.rs` repeats `if cpu_features::has_avx2()` at
+      seven separate sites (`:137,298,324,350,376,402,428`), each selecting
+      between the same two backends.
+- [ ] `ops/blend/cpu.rs:42` — `let _ = channel_count; // Used in cfg-gated SIMD
+      dispatch below`, a warning suppression standing in for a binding that
+      belongs inside the `cfg` blocks that read it.
+- [ ] `imaginarium` doc comments restate their own signatures:
+      `ops/blend/mod.rs:69-76` spends a `# Arguments` list saying `src` is the
+      source image and `output` is the output image; `ops/blend/mod.rs:14-28`
+      annotates each `BlendMode` variant with the formula the variant name
+      already gives. This is the only crate in the workspace written that way.
+
+## `palantir::Ui` is the crate's shared mutable state
+
+- [ ] `palantir/src/ui/mod.rs:88` — `Ui` holds 17 fields, 11 of them
+      `pub(crate)` (`forest`, `state`, `resources`, `layout_engine`, `layout`,
+      `cascade`, `cascade_engine`, `display`, `damage_engine`, `frame_runtime`,
+      `window_requests`, `window_frame`). Every subsystem in a 92k-line crate
+      reaches the others through it, and the boundaries between layout, cascade,
+      damage, render and input are enforced only by convention. `impl Ui`
+      carries 69 methods in that one file.
+
+## Repository hygiene
+
+- [ ] `.gitignore:18` ignores `/.gitmodules` under a "Claude Code sandbox
+      sentinel files" heading. The file is tracked and is load-bearing — four
+      submodules depend on it — so the rule is inert today and a hazard the
+      moment the file is re-added.
+- [ ] `.tmp/` at the repo root holds build and run artifacts
+      (`after.log`, `darkroom-run.log`, `vk-validation.log`, `menu-preview.png`,
+      `lumos_pipeline_stack/`, `lumos-test/`, `wgpu/`) plus a stray
+      `fits-well/.tmp/feature-consumer/Cargo.toml`. It is excluded from the
+      workspace by `Cargo.toml:14` rather than absent.
