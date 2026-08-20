@@ -123,29 +123,6 @@ explaining that it is the twin of the other, and each with its own test.
       `lumos/src/stacking/star_detection/median_filter/simd/` (four) and
       `fits-well/src/compress/hcompress.rs` (three).
 
-## `imaginarium`'s op modules repeat their own preamble and dispatch
-
-- [ ] `ops/blend/cpu.rs:14-37` opens with six `assert_eq!`s pairing
-      src/dst/output width, height and format. The same shape recurs in
-      `ops/transform/cpu.rs:32` and `common/image_diff.rs:17,76`, each with its
-      own message wording.
-- [ ] `ops/blend/cpu.rs:44-93` is a three-stage dispatch — x86 SSE4.1 match, then
-      aarch64 NEON match, then a scalar `match (channel_size, channel_type)`
-      ending in `unreachable!`. `ops/contrast_brightness/cpu/mod.rs:67` and
-      `ops/transform/cpu.rs:57` each re-implement the same cascade with
-      different structure.
-- [ ] `image/conversion/simd/mod.rs` repeats `if cpu_features::has_avx2()` at
-      seven separate sites (`:137,298,324,350,376,402,428`), each selecting
-      between the same two backends.
-- [ ] `ops/blend/cpu.rs:42` — `let _ = channel_count; // Used in cfg-gated SIMD
-      dispatch below`, a warning suppression standing in for a binding that
-      belongs inside the `cfg` blocks that read it.
-- [ ] `imaginarium` doc comments restate their own signatures:
-      `ops/blend/mod.rs:69-76` spends a `# Arguments` list saying `src` is the
-      source image and `output` is the output image; `ops/blend/mod.rs:14-28`
-      annotates each `BlendMode` variant with the formula the variant name
-      already gives. This is the only crate in the workspace written that way.
-
 ## Repository hygiene
 
 - [ ] `.gitignore:18` ignores `/.gitmodules` under a "Claude Code sandbox
