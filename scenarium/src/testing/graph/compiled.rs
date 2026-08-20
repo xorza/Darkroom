@@ -1,5 +1,4 @@
-//! The compile bridge: [`TestGraph::compile`] and the [`Compiled`] view it
-//! hands back.
+//! The [`Compiled`] view [`TestGraph::compile`] hands back.
 //!
 //! Gated, and `pub(crate)`, because every accessor here answers with a
 //! crate-private type — an `ExecutionNode`, an `ExecutionBinding`. Nothing
@@ -8,33 +7,9 @@
 use hashbrown::HashMap;
 
 use crate::DataType;
-use crate::execution::compile::Compiler;
 use crate::execution::compile::compiled_graph::{CompiledGraph, ExecutionBinding, ExecutionNode};
-use crate::execution::compile::error::CompileError;
 use crate::execution::identity::NodeIdx;
 use crate::graph::identity::NodeId;
-use crate::testing::graph::TestGraph;
-
-impl TestGraph {
-    /// Lower this fixture, keeping the names. Panics on a compile error —
-    /// for the tests where the refusal *is* the subject, see
-    /// [`try_compile`](Self::try_compile).
-    pub(crate) fn compile(&self) -> Compiled {
-        self.try_compile().expect("the fixture graph compiles")
-    }
-
-    pub(crate) fn try_compile(&self) -> std::result::Result<Compiled, CompileError> {
-        Ok(Compiled {
-            program: Compiler::default().compile(&self.graph, &self.library)?,
-            ids: self.ids.clone(),
-            names: self
-                .ids
-                .iter()
-                .map(|(name, node_id)| (*node_id, name.clone()))
-                .collect(),
-        })
-    }
-}
 
 /// A [`TestGraph`] lowered, still answering by the names the fixture gave its
 /// nodes.
@@ -54,6 +29,20 @@ pub(crate) struct Compiled {
 }
 
 impl Compiled {
+    /// Wrap a lowered program, deriving the reverse name map so it cannot drift
+    /// from the ids it inverts.
+    pub(super) fn new(program: CompiledGraph, ids: HashMap<String, NodeId>) -> Compiled {
+        let names = ids
+            .iter()
+            .map(|(name, node_id)| (*node_id, name.clone()))
+            .collect();
+        Compiled {
+            program,
+            ids,
+            names,
+        }
+    }
+
     pub(crate) fn id(&self, name: &str) -> NodeId {
         *self
             .ids

@@ -1,18 +1,27 @@
+use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use palantir::Ui;
+use scenarium::Binding;
+use scenarium::ConstValue;
+use scenarium::FsPathMode;
+use scenarium::NodeId;
 
 use crate::core::document::open_document::OpenDocument;
+use crate::core::edit::graph_intent::GraphIntent;
 use crate::core::io::preferences::{Preferences, WindowState};
 use crate::core::runtime_host::RuntimeHost;
 use crate::core::status::StatusLog;
 use crate::core::wake::Wake;
 use crate::gui::HostHandle;
 use crate::gui::MAIN_WINDOW;
+use crate::gui::app::commands::prefs::MlModelKind;
 use crate::gui::app::ctx::{AppCtx, StatusInputs};
 use crate::gui::app::discard_dialog::{DiscardChoice, DiscardOutcome};
+use crate::gui::dialogs;
+use crate::gui::pane::graph::node::port_row::PathPick;
 use crate::gui::relayout::Relayout;
 use crate::gui::requests::Requests;
 use crate::gui::state::process_memory::ProcessMemory;
@@ -295,6 +304,248 @@ impl App {
             self.apply_discard_outcome(outcome);
         }
     }
+
+    /// Open a file dialog for a node's `FsPath` const input and, if the
+    /// user makes a selection, apply the chosen paths as a `SetInput` edit. Runs after
+    /// authoring, so it goes through `Editor::apply_edit` rather than the
+    /// frame's intent drain.
+    ///
+    /// Reports the edit's relayout need rather than acting on it — this runs
+    /// after `Editor::frame` has handed its own back, and `App::frame` spends
+    /// both together.
+    #[must_use]
+    fn pick_input_path(&mut self, pick: PathPick) -> Relayout {
+        let extensions: Vec<&str> = pick.config.extensions.iter().map(String::as_str).collect();
+        let value = match pick.config.mode {
+            FsPathMode::ExistingFile => dialogs::pick_existing_file(&extensions)
+                .map(|path| ConstValue::FsPath(path.to_string_lossy().into_owned())),
+            FsPathMode::ExistingFiles => dialogs::pick_existing_files(&extensions).map(|paths| {
+                ConstValue::FsPaths(
+                    paths
+                        .into_iter()
+                        .map(|path| path.to_string_lossy().into_owned())
+                        .collect(),
+                )
+            }),
+            FsPathMode::NewFile => dialogs::pick_new_file(&extensions)
+                .map(|path| ConstValue::FsPath(path.to_string_lossy().into_owned())),
+            FsPathMode::Directory => dialogs::pick_directory()
+                .map(|path| ConstValue::FsPath(path.to_string_lossy().into_owned())),
+        };
+        let Some(value) = value else {
+            return Relayout::NotNeeded;
+        };
+        self.session.open.apply_edit(GraphIntent::SetInput {
+            input: pick.port,
+            to: Some(Binding::Const(value)),
+        })
+    }
+
+    /// Prompt for a project file and load it. The
+    /// [`PendingTransition::OpenPicked`] body: the picker runs here, *after*
+    /// the guard cleared, so cancelling the unsaved-changes prompt never costs
+    /// the user a file choice.
+    pub(crate) fn load_picked_document(&mut self) {
+        if let Some(path) = dialogs::pick_project_open_path(self.session.open.path.as_deref()) {
+            self.load_document(&path);
+        }
+    }
+
+    /// Replace the document with an empty one.
+    pub(crate) fn new_document(&mut self) {
+        self.adopt_document(OpenDocument::default());
+    }
+
+    /// Swap in `open` and reset every piece of state derived from the
+    /// document it replaces.
+    ///
+    /// A fresh [`Session`] covers what it owns in one move: empty undo history
+    /// (restoring the old doc via Cmd-Z would replay intents that no longer
+    /// match the live tree), dropped gesture state, forced scene rebuild.
+    ///
+    /// The run projections are `App`'s, so they are cleared here rather than
+    /// falling out of that — and they have to be: node ids are *persisted*, so
+    /// reopening a document would otherwise reattach the previous session's
+    /// statuses, timings, logs and preview images to nodes that have not run.
+    /// [`RunState::clear`](crate::gui::state::run_state::RunState::clear) drops
+    /// exactly the document-derived half and leaves
+    /// the worker-stream half (`compiled`, `activity`, `cache_ram`) standing —
+    /// an in-flight run still reports against the program the worker
+    /// acknowledged. What makes that half true again is the worker itself: the
+    /// program and its whole runtime cache go with the document, and the
+    /// `Cleared` acknowledgement is what resets the projection.
+    ///
+    /// The worker's disk cache repoints too, so disk-backed nodes read the new
+    /// document's store rather than the old one's.
+    fn adopt_document(&mut self, open: OpenDocument) {
+        self.run_state.clear();
+        self.runtime.clear_program();
+        // One assignment, not two: the UI showing a document is replaced with
+        // it, so there is no window where fresh panes hold a stale graph's
+        // gesture state.
+        self.session = Session::new(open);
+        self.runtime
+            .set_document_cache(self.session.open.path.as_deref());
+        self.remember_document_path();
+    }
+
+    /// Load `path` into a fresh editor. A missing or corrupt file leaves the
+    /// open document intact and surfaces its reason in the status bar.
+    pub(crate) fn load_document(&mut self, path: &Path) {
+        let open = match OpenDocument::load(path.to_path_buf()) {
+            Ok(open) => open,
+            Err(err) => {
+                self.status.error(format!("load failed: {err:#}"));
+                return;
+            }
+        };
+        self.adopt_document(open);
+        self.status.error = None;
+    }
+
+    /// Cmd+S: overwrite the current file if there is one, else fall
+    /// back to Save As (first save of a fresh document).
+    pub(crate) fn save_current(&mut self) {
+        match self.session.open.path.clone() {
+            Some(path) => self.save_document(&path),
+            None => self.save_document_as(),
+        }
+    }
+
+    /// Cmd+Shift+S / "Save As…": always prompt for a destination.
+    fn save_document_as(&mut self) {
+        if let Some(path) = dialogs::pick_project_save_path(self.session.open.path.as_deref()) {
+            self.save_document(&path);
+        }
+    }
+
+    /// Write the document to `path` and adopt it as the save target. Save-As
+    /// moves the document, so the worker's disk cache repoints to the new
+    /// location's store — the old one stays where it is.
+    fn save_document(&mut self, path: &Path) {
+        match self.session.open.save_to(path) {
+            Ok(()) => {
+                self.runtime
+                    .set_document_cache(self.session.open.path.as_deref());
+                self.remember_document_path();
+                self.status.error = None;
+            }
+            Err(err) => self.status.error(format!("save failed: {err:#}")),
+        }
+    }
+
+    /// Mirror the open document's active path into persisted preferences
+    /// after a successful document lifecycle transition.
+    fn remember_document_path(&mut self) {
+        self.preferences.document_path = self.session.open.path.clone();
+        self.save_preferences();
+    }
+
+    /// Re-derive everything that depends on [`Preferences`] and persist it.
+    ///
+    /// [`Preferences`]: crate::core::io::preferences::Preferences
+    fn apply_preferences(&mut self, ui: &mut Ui) {
+        self.theme = Theme::from_preset(self.preferences.theme.resolve());
+        ui.set_theme(self.theme.palantir_theme.clone());
+        self.runtime.configure_ml_model_defaults(&self.preferences);
+        self.save_preferences();
+    }
+
+    /// Persist the preferences, surfacing a failed write in the status
+    /// bar — the one save path every caller routes through, so a broken
+    /// preferences file can't fail silently.
+    pub(crate) fn save_preferences(&mut self) {
+        if let Err(err) = self.preferences.save() {
+            self.status.error(err);
+        }
+    }
+
+    fn pick_ml_model(&mut self, kind: MlModelKind) {
+        if let Some(path) = dialogs::pick_existing_file(&["onnx"]) {
+            self.set_ml_model_path(kind, path);
+        }
+    }
+
+    fn set_ml_model_path(&mut self, kind: MlModelKind, path: PathBuf) {
+        match kind {
+            MlModelKind::Denoise => self.preferences.ml_models.denoise = path,
+            MlModelKind::StarRemoval => self.preferences.ml_models.star_removal = path,
+        }
+        self.runtime.configure_ml_model_defaults(&self.preferences);
+        self.save_preferences();
+    }
+
+    /// Persist whether discarding unsaved changes prompts to save.
+    /// Shared by the Preferences checkbox (via `Changed`) and the prompt's
+    /// "Don't ask again", which calls this directly.
+    pub(crate) fn set_confirm_unsaved(&mut self, on: bool) {
+        self.preferences.confirm_unsaved_changes = on;
+        self.save_preferences();
+    }
+
+    /// Compile the document graph and execute its sinks once on the
+    /// worker. A compile error is reported to the engine's status log
+    /// synchronously — no run starts, so the prior run's status stays
+    /// untouched. Worker status reports acknowledge actual execution and
+    /// event-loop transitions.
+    pub(crate) fn run_graph(&mut self) {
+        self.runtime
+            .run_once(self.session.graph(), &mut self.status);
+    }
+
+    /// Like [`Self::run_graph`], but seeds the run at one node: only its
+    /// upstream cone executes and its outputs are delivered.
+    fn run_node(&mut self, node_id: NodeId) {
+        // A node inside a local definition has no enclosing instance path,
+        // so no execution seed resolves. The UI gates the play chip and the
+        // menu action on `NodeCtx::runnable`, which is false there —
+        // reaching this is a gating bug, not user input, so refuse rather
+        // than kill the editor from a live command handler. Tested against
+        // the *node's* graph, not the focused pane's: with several graph
+        // panes open, a root node's chip stays valid while focus sits
+        // elsewhere.
+        if self.session.graph().find(node_id).is_none() {
+            debug_assert!(false, "run-node reached for a node outside the root graph");
+            return;
+        }
+        self.runtime
+            .run_node(self.session.graph(), node_id, &mut self.status);
+    }
+
+    /// Evict one node's cache cone and project the outcome onto exactly the
+    /// nodes it reaches. An empty answer means nothing was dispatched — a
+    /// failed compile, or a node the program holds no work for — so there is
+    /// nothing to project either.
+    fn evict_cache(&mut self, node_id: NodeId) {
+        let evicted = self
+            .runtime
+            .evict_cache(self.session.graph(), node_id, &mut self.status);
+        if !evicted.is_empty() {
+            self.run_state.clear_cache_projections(&evicted);
+        }
+    }
+
+    /// Publish this node's resident value to the disk store. Nothing on screen
+    /// changes — the value stays exactly where it was, and only gains a copy on
+    /// disk — so unlike the eviction beside it, no projection is reset.
+    fn flush_cache(&mut self, node_id: NodeId) {
+        self.runtime
+            .flush_cache(self.session.graph(), node_id, &mut self.status);
+    }
+
+    /// Start the worker's event loop on the current graph: emitter events
+    /// fire their subscribers until stopped. A compile error (reported to
+    /// the engine's status log) leaves the loop's running state as it was —
+    /// nothing reached the worker.
+    fn start_events(&mut self) {
+        self.runtime
+            .start_event_loop(self.session.graph(), &mut self.status);
+    }
+
+    /// Stop the worker's event loop.
+    fn stop_events(&mut self) {
+        self.runtime.stop_event_loop();
+    }
 }
 
 impl palantir::App for App {
@@ -364,10 +615,10 @@ impl palantir::App for App {
         // What the session left behind: every command the frame raised, in the
         // order it raised them — a keyboard chord and a click on the same
         // frame both land. Popped one at a time so the queue is not borrowed
-        // while a command runs, which is what lets `handle_command` take all
+        // while a command runs, which is what lets `AppCommand::apply` take all
         // of `self`.
         while let Some(command) = self.requests.pop_app() {
-            needs_relayout |= self.handle_command(ui, command);
+            needs_relayout |= command.apply(self, ui);
         }
         // The app's one relayout request, past both tiers: everything that can
         // strand `CanvasGeometry`'s cross-frame caches has reported by here,

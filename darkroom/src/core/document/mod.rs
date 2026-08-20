@@ -1,6 +1,6 @@
 pub(crate) mod dock;
+pub(crate) mod error;
 pub(crate) mod open_document;
-pub(crate) mod validate;
 
 use ::serde::{Deserialize, Serialize};
 use glam::Vec2;
@@ -8,6 +8,8 @@ use scenarium::{DetachedNode, Graph as CoreGraph, InputPort, NodeId, NodeKind, O
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::core::document::dock::DockLayout;
+use crate::core::document::error::DocumentValidationError;
+use crate::core::document::error::GraphViewValidationError;
 use crate::core::preview;
 
 /// Whether a port consumes a binding (`Input`) or produces a value
@@ -229,6 +231,36 @@ impl GraphView {
             .max()
             .map_or(0, |top| top.saturating_add(1))
     }
+
+    fn validate(&self, graph: &CoreGraph) -> Result<(), GraphViewValidationError> {
+        if !self.viewport.is_valid() {
+            return Err(GraphViewValidationError::InvalidViewport);
+        }
+
+        // A map guarantees unique keys, so counts plus reverse membership
+        // prove the graph and view contain exactly the same node set.
+        let mut node_items = 0usize;
+        for (key, placement) in &self.item_placements {
+            if !placement.pos.is_finite() {
+                return Err(GraphViewValidationError::NonFinitePosition { item: *key });
+            }
+            node_items += 1;
+        }
+        if node_items != graph.len() {
+            return Err(GraphViewValidationError::NodeCount);
+        }
+        for node in graph.iter() {
+            if !self.item_placements.contains_key(&node.id) {
+                return Err(GraphViewValidationError::MissingNode { node_id: node.id });
+            }
+        }
+        for key in &self.selected {
+            if !self.item_placements.contains_key(key) {
+                return Err(GraphViewValidationError::MissingSelectedItem { item: *key });
+            }
+        }
+        Ok(())
+    }
 }
 
 /// The thing being edited: the authoring `Graph`, the editor view metadata
@@ -353,6 +385,22 @@ impl Document {
         let mut layout = std::mem::take(&mut self.layout);
         layout.retain_tabs(|tab| self.holds_tab(tab));
         self.layout = layout;
+    }
+
+    /// Full structural validation for untrusted documents.
+    pub(crate) fn validate(&self) -> Result<(), DocumentValidationError> {
+        self.graph.validate()?;
+        self.main_view
+            .validate(&self.graph)
+            .map_err(|source| DocumentValidationError::MainView { source })?;
+
+        self.layout.validate()?;
+        for tab in self.layout.all_tabs() {
+            if !self.holds_tab(tab) {
+                return Err(DocumentValidationError::MissingTab { tab });
+            }
+        }
+        Ok(())
     }
 }
 

@@ -14,17 +14,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::concurrency;
 use crate::error::FrameDimensionMismatch;
-use crate::io::image::cfa::CfaImage;
 use crate::io::image::error::ImageError;
 use crate::io::image::image_dimensions::ImageDimensions;
 use crate::io::image::image_metadata::ImageMetadata;
-use crate::io::image::linear::LinearImage;
 use crate::io::image::load_context::LoadContext;
 use crate::memory;
 use crate::stacking::combine::cache_config::CacheConfig;
-use crate::stacking::combine::config::Normalization;
 use crate::stacking::combine::error::Error;
-use crate::stacking::combine::normalization::compute_frame_norms;
 use crate::stacking::frame_store::error::FrameStoreError;
 use crate::stacking::frame_store::frame_quality::FrameQuality;
 use crate::stacking::frame_store::frame_stats::FrameStats;
@@ -35,10 +31,10 @@ use crate::stacking::frame_store::stored_plane::StoredPlane;
 use crate::stacking::frame_store::{FramePeek, StackableImage, StoredFrame};
 use crate::stacking::progress::{ProgressCallback, StackingStage};
 
+use crate::stacking::combine::cache::CacheCore;
 use crate::stacking::combine::cache::validation::{
     validate_image_samples, validate_stored_samples,
 };
-use crate::stacking::combine::cache::{CacheCore, FrameCache};
 
 #[derive(Debug)]
 struct LoadedTier {
@@ -49,12 +45,12 @@ struct LoadedTier {
 
 /// [`load_tiered`] output: the loaded frames plus the assembled [`CacheCore`].
 #[derive(Debug)]
-struct LoadedCache {
-    frames: Vec<StoredFrame>,
-    core: CacheCore,
+pub(super) struct LoadedCache {
+    pub(super) frames: Vec<StoredFrame>,
+    pub(super) core: CacheCore,
 }
 
-fn load_tiered<I: StackableImage, P: AsRef<Path> + Sync>(
+pub(super) fn load_tiered<I: StackableImage, P: AsRef<Path> + Sync>(
     paths: &[P],
     config: &CacheConfig,
     progress: ProgressCallback,
@@ -155,50 +151,6 @@ fn load_image<I: StackableImage>(path: &Path, context: &LoadContext) -> Result<I
         // behind and reports as the stack's own.
         Err(ImageError::Cancelled { .. }) => Err(Error::Cancelled),
         Err(source) => Err(Error::ImageLoad(source)),
-    }
-}
-
-impl FrameCache {
-    /// Build a cache from CFA calibration frame files (tiered in-memory/disk per available RAM).
-    pub(crate) fn from_cfa_paths<P: AsRef<Path> + Sync>(
-        paths: &[P],
-        config: &CacheConfig,
-        normalization: Normalization,
-        progress: ProgressCallback,
-        cancel: CancelToken,
-    ) -> Result<Self, Error> {
-        Self::from_tiered_paths(
-            load_tiered::<CfaImage, P>(paths, config, progress, cancel)?,
-            normalization,
-        )
-    }
-
-    /// Build a cache from light-frame image files (tiered per available RAM). Nothing here was
-    /// warped, so a frame has full support and unit confidence everywhere unless its source
-    /// declared pixels with no measurement.
-    pub(crate) fn from_paths<P: AsRef<Path> + Sync>(
-        paths: &[P],
-        config: &CacheConfig,
-        normalization: Normalization,
-        progress: ProgressCallback,
-        cancel: CancelToken,
-    ) -> Result<Self, Error> {
-        Self::from_tiered_paths(
-            load_tiered::<LinearImage, P>(paths, config, progress, cancel)?,
-            normalization,
-        )
-    }
-
-    fn from_tiered_paths(loaded: LoadedCache, normalization: Normalization) -> Result<Self, Error> {
-        let LoadedCache { frames, core } = loaded;
-        let frame_norms =
-            compute_frame_norms(&frames, core.dimensions, normalization, &core.cancel)?;
-        Ok(Self {
-            frames,
-            frame_norms,
-            normalization,
-            core,
-        })
     }
 }
 

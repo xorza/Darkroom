@@ -1,25 +1,8 @@
 use crate::math::size2us::Size2us;
 use crate::stacking::registration::config::{InterpolationMethod, WarpParams};
 use crate::stacking::registration::resample::kernel;
-use crate::stacking::registration::resample::kernel::{LANCZOS_LUT_RESOLUTION, LanczosLut};
 use glam::Vec2;
 use imaginarium::Buffer2;
-
-impl LanczosLut {
-    /// The table read at a signed distance either side of centre, zero beyond the kernel's support.
-    ///
-    /// The warp paths all know their distances are non-negative and read the table through
-    /// [`LanczosLut::lookup_positive`]; this is the unconstrained form the oracles and the LUT bench
-    /// use, where the distance comes from the definition rather than from a construction.
-    pub(crate) fn lookup(&self, x: f32) -> f32 {
-        let abs_x = x.abs();
-        if abs_x >= self.a as f32 {
-            return 0.0;
-        }
-        let idx = (abs_x * LANCZOS_LUT_RESOLUTION as f32 + 0.5) as usize;
-        self.values[idx]
-    }
-}
 
 #[inline]
 pub(crate) fn interpolate_lanczos(

@@ -42,40 +42,6 @@ form, so backticked identifiers in prose rot silently. Several already have.
       each, plus instructions to extend the table when a fourth is added. The
       table is the only thing linking those call sites; nothing enforces it.
 
-## Files still holding several unrelated major types
-
-The convention is one major struct per file, named for it, with satellites
-allowed. These three still hold four or more independent types, each with its
-own inherent impl, so the file name identifies none of them.
-
-- [ ] `fits-well/src/wcs/mod.rs` — 1781 lines, 8 major types including a
-      four-type table-WCS family (`TableWcs`, `TableWcsResolver`,
-      `TableAxisKeyword`, `TableMatrixKeyword`, `TablePoleKeyword`).
-- [ ] `fits-well/src/compress/decode.rs` — 1250 lines, 9 types (`DecodeBuffer`,
-      `FloatQuantization`, `ImageDecodePlan`, `ImageLayout`, `ImageRegionLayout`,
-      `NullMask`, `TileCells`, `TileScratchSet`, `TileSources`).
-- [ ] `fits-well/src/table/mod.rs` — 1198 lines, 9 types (`BinTable`,
-      `BitColumn`, `CharacterField`, `ColumnData`, `ColumnReader`,
-      `TableSchema`, `Tform`, `TformKind`, `VlaColumn`).
-
-## Inherent impls are split across files
-
-A type's inherent impl belongs in the type's own file; these are spread, so the
-full method set of each type has no single place to read.
-
-- [ ] `App` — `darkroom/src/gui/app/mod.rs` plus five command files
-      (`commands/{mod,edit,file,prefs,run}.rs`). Six files, six `impl App`
-      blocks.
-- [ ] `FitsWriter` — `fits-well/src/writer/{mod,ascii,image,table}.rs`.
-- [ ] `Document` and `GraphView` — `darkroom/src/core/document/mod.rs` and
-      `.../document/validate.rs`.
-- [ ] `Blend`, `ContrastBrightness`, `Transform` — each split between
-      `imaginarium/src/ops/<op>/mod.rs` and `.../gpu.rs`.
-- [ ] `FrameCache` — `lumos/src/stacking/combine/cache/mod.rs` and
-      `.../cache/loader/mod.rs`.
-- [ ] `TestGraph` — `scenarium/src/testing/graph/mod.rs` and
-      `.../graph/compiled.rs`.
-
 ## `lumos` statistics duplicates itself across `f32`/`f64`
 
 `lumos/src/math/statistics/mod.rs` carries three pairs of functions whose bodies

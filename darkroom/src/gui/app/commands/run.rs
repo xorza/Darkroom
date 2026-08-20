@@ -5,7 +5,7 @@ use scenarium::NodeId;
 
 use crate::gui::app::App;
 
-/// Graph execution + the worker event loop. Handled by [`App::handle_run`].
+/// Graph execution + the worker event loop. Applied by [`RunCommand::apply`].
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum RunCommand {
     /// Evaluate the graph once on the worker.
@@ -25,80 +25,16 @@ pub(crate) enum RunCommand {
     StopEvents,
 }
 
-impl App {
-    pub(super) fn handle_run(&mut self, command: RunCommand) {
-        match command {
-            RunCommand::Once => self.run_graph(),
-            RunCommand::Node(node_id) => self.run_node(node_id),
-            RunCommand::EvictCache(node_id) => self.evict_cache(node_id),
-            RunCommand::FlushCache(node_id) => self.flush_cache(node_id),
-            RunCommand::Cancel => self.runtime.cancel_run(),
-            RunCommand::StartEvents => self.start_events(),
-            RunCommand::StopEvents => self.stop_events(),
+impl RunCommand {
+    pub(super) fn apply(self, app: &mut App) {
+        match self {
+            RunCommand::Once => app.run_graph(),
+            RunCommand::Node(node_id) => app.run_node(node_id),
+            RunCommand::EvictCache(node_id) => app.evict_cache(node_id),
+            RunCommand::FlushCache(node_id) => app.flush_cache(node_id),
+            RunCommand::Cancel => app.runtime.cancel_run(),
+            RunCommand::StartEvents => app.start_events(),
+            RunCommand::StopEvents => app.stop_events(),
         }
-    }
-
-    /// Compile the document graph and execute its sinks once on the
-    /// worker. A compile error is reported to the engine's status log
-    /// synchronously — no run starts, so the prior run's status stays
-    /// untouched. Worker status reports acknowledge actual execution and
-    /// event-loop transitions.
-    pub(crate) fn run_graph(&mut self) {
-        self.runtime
-            .run_once(self.session.graph(), &mut self.status);
-    }
-
-    /// Like [`Self::run_graph`], but seeds the run at one node: only its
-    /// upstream cone executes and its outputs are delivered.
-    fn run_node(&mut self, node_id: NodeId) {
-        // A node inside a local definition has no enclosing instance path,
-        // so no execution seed resolves. The UI gates the play chip and the
-        // menu action on `NodeCtx::runnable`, which is false there —
-        // reaching this is a gating bug, not user input, so refuse rather
-        // than kill the editor from a live command handler. Tested against
-        // the *node's* graph, not the focused pane's: with several graph
-        // panes open, a root node's chip stays valid while focus sits
-        // elsewhere.
-        if self.session.graph().find(node_id).is_none() {
-            debug_assert!(false, "run-node reached for a node outside the root graph");
-            return;
-        }
-        self.runtime
-            .run_node(self.session.graph(), node_id, &mut self.status);
-    }
-
-    /// Evict one node's cache cone and project the outcome onto exactly the
-    /// nodes it reaches. An empty answer means nothing was dispatched — a
-    /// failed compile, or a node the program holds no work for — so there is
-    /// nothing to project either.
-    fn evict_cache(&mut self, node_id: NodeId) {
-        let evicted = self
-            .runtime
-            .evict_cache(self.session.graph(), node_id, &mut self.status);
-        if !evicted.is_empty() {
-            self.run_state.clear_cache_projections(&evicted);
-        }
-    }
-
-    /// Publish this node's resident value to the disk store. Nothing on screen
-    /// changes — the value stays exactly where it was, and only gains a copy on
-    /// disk — so unlike the eviction beside it, no projection is reset.
-    fn flush_cache(&mut self, node_id: NodeId) {
-        self.runtime
-            .flush_cache(self.session.graph(), node_id, &mut self.status);
-    }
-
-    /// Start the worker's event loop on the current graph: emitter events
-    /// fire their subscribers until stopped. A compile error (reported to
-    /// the engine's status log) leaves the loop's running state as it was —
-    /// nothing reached the worker.
-    fn start_events(&mut self) {
-        self.runtime
-            .start_event_loop(self.session.graph(), &mut self.status);
-    }
-
-    /// Stop the worker's event loop.
-    fn stop_events(&mut self) {
-        self.runtime.stop_event_loop();
     }
 }

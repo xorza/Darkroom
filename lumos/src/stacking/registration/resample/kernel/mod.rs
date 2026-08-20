@@ -204,5 +204,24 @@ pub(super) fn interpolate_bicubic(data: &Buffer2<f32>, pos: Vec2, border_value: 
     }
 }
 
+/// The signed-distance form of the table read, which only the oracles and the LUT
+/// bench need — the warp paths all go through [`LanczosLut::lookup_positive`].
+#[cfg(test)]
+impl LanczosLut {
+    /// The table read at a signed distance either side of centre, zero beyond the kernel's support.
+    ///
+    /// The warp paths all know their distances are non-negative and read the table through
+    /// [`LanczosLut::lookup_positive`]; this is the unconstrained form the oracles and the LUT bench
+    /// use, where the distance comes from the definition rather than from a construction.
+    pub(crate) fn lookup(&self, x: f32) -> f32 {
+        let abs_x = x.abs();
+        if abs_x >= self.a as f32 {
+            return 0.0;
+        }
+        let idx = (abs_x * LANCZOS_LUT_RESOLUTION as f32 + 0.5) as usize;
+        self.values[idx]
+    }
+}
+
 #[cfg(test)]
 pub(super) mod internals;
