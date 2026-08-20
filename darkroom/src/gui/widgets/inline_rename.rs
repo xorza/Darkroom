@@ -11,7 +11,7 @@ use palantir::{
     WidgetId,
 };
 
-use crate::gui::theme::InlineRenameTheme;
+use crate::gui::theme::inline_rename_theme::InlineRenameTheme;
 use crate::gui::widgets::buffered_edit::EditBuffer;
 
 /// Cross-frame state for one inline-rename editor, held in palantir's

@@ -39,7 +39,7 @@ use palantir::{
 };
 use scenarium::{ConstValue, DataType, FsPathMode, Library, ValueVariant};
 
-use crate::gui::theme::ConstValueEditorTheme;
+use crate::gui::theme::const_value_editor_theme::ConstValueEditorTheme;
 use crate::gui::widgets::buffered_edit::EditBuffer;
 
 /// Render the editor for `value`. Returns the new value when the user

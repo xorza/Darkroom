@@ -3,7 +3,7 @@
 
 use std::collections::VecDeque;
 
-use crate::core::document::dock::DockOp;
+use crate::core::document::dock::dock_op::DockOp;
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::gui::app::commands::AppCommand;
 

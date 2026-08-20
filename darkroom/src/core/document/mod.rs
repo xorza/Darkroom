@@ -375,7 +375,7 @@ mod tests {
     use scenarium::Node;
 
     use super::*;
-    use crate::core::document::dock::DockOp;
+    use crate::core::document::dock::dock_op::DockOp;
     use crate::core::document::harness::DocFixture;
 
     /// Every `NodeId`-keyed cache sweeps against one rule, and the two
@@ -431,7 +431,8 @@ mod tests {
 
     #[test]
     fn dock_layout_round_trips_as_json() {
-        use crate::core::document::dock::{DockDrop, SplitSide};
+        use crate::core::document::dock::dock_op::DockDrop;
+        use crate::core::document::dock::split_side::SplitSide;
 
         let mut doc = DocFixture::sample().doc;
         let node_id = doc.graph.iter().next().unwrap().id;

@@ -11,7 +11,8 @@
 pub(crate) mod dark {
     use palantir::Color;
 
-    use crate::gui::theme::{HoverColor, TypeColors};
+    use crate::gui::theme::hover_color::HoverColor;
+    use crate::gui::theme::type_colors::TypeColors;
 
     /// Ground fill behind the whole graph.
     pub(crate) const CANVAS_BG: Color = Color::hex(0x161514);
@@ -147,7 +148,8 @@ pub(crate) mod dark {
 pub(crate) mod light {
     use palantir::Color;
 
-    use crate::gui::theme::{HoverColor, TypeColors};
+    use crate::gui::theme::hover_color::HoverColor;
+    use crate::gui::theme::type_colors::TypeColors;
 
     /// Ground fill behind the whole graph.
     pub(crate) const CANVAS_BG: Color = Color::hex(0xfdfbfa);

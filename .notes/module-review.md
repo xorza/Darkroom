@@ -42,42 +42,21 @@ form, so backticked identifiers in prose rot silently. Several already have.
       each, plus instructions to extend the table when a fourth is added. The
       table is the only thing linking those call sites; nothing enforces it.
 
-## Many files hold several unrelated major types
+## Files still holding several unrelated major types
 
 The convention is one major struct per file, named for it, with satellites
-allowed. These files hold four or more independent types, each with its own
-inherent impl, so the file name identifies none of them.
+allowed. These three still hold four or more independent types, each with its
+own inherent impl, so the file name identifies none of them.
 
-- [ ] `fits-well/src/compress/decode.rs` — 1250 lines, 9 types
-      (`DecodeBuffer`, `FloatQuantization`, `ImageDecodePlan`, `ImageLayout`,
-      `ImageRegionLayout`, `NullMask`, `TileCells`, `TileScratchSet`,
-      `TileSources`).
+- [ ] `fits-well/src/wcs/mod.rs` — 1781 lines, 8 major types including a
+      four-type table-WCS family (`TableWcs`, `TableWcsResolver`,
+      `TableAxisKeyword`, `TableMatrixKeyword`, `TablePoleKeyword`).
+- [ ] `fits-well/src/compress/decode.rs` — 1250 lines, 9 types (`DecodeBuffer`,
+      `FloatQuantization`, `ImageDecodePlan`, `ImageLayout`, `ImageRegionLayout`,
+      `NullMask`, `TileCells`, `TileScratchSet`, `TileSources`).
 - [ ] `fits-well/src/table/mod.rs` — 1198 lines, 9 types (`BinTable`,
       `BitColumn`, `CharacterField`, `ColumnData`, `ColumnReader`,
       `TableSchema`, `Tform`, `TformKind`, `VlaColumn`).
-- [ ] `fits-well/src/wcs/axis.rs` — 942 lines, 9 types, of which six are the
-      spectral family (`SpectralKind`, `SpectralParameters`, `SpectralRest`,
-      `SpectralSampling`, `SpectralTransform`, `Grism`).
-- [ ] `darkroom/src/gui/theme/mod.rs` — 879 lines before the test module, 9
-      types (`Theme`, `CardTheme`, `PortTheme`, `ConstValueEditorTheme`,
-      `InlineRenameTheme`, `TypeScale`, `PaletteColors`, `HoverColor`,
-      `ThemePreset`) plus two free functions (`palantir_theme_for`,
-      `menu_button_for`).
-- [ ] `fits-well/src/wcs/mod.rs` — 1778 lines, 8 types including a four-type
-      table-WCS family (`TableWcs`, `TableWcsResolver`, `TableAxisKeyword`,
-      `TableMatrixKeyword`, `TablePoleKeyword`).
-- [ ] `fits-well/src/data/mod.rs` — 1026 lines, 8 types (`Image`, `ImageData`,
-      `ImageView`, `BorrowedImage`, `ReadImage`, `SampleType`, `Scaling`,
-      `UnsignedData`).
-- [ ] `fits-well/src/time/mod.rs` — 847 lines, 7 types.
-- [ ] `scenarium/src/testing/program.rs` — 678 lines, 6 types (`ProgramBuilder`,
-      `NodeBuilder`, `Placed`, `Runs`, `Sweep`, `Swept`).
-- [ ] `darkroom/src/core/document/dock/mod.rs` — 719 lines, 5 types
-      (`DockLayout`, `DockPath`, `NodeIdx`, `SplitSide`, `TabGroup`).
-- [ ] `darkroom/src/gui/pane/graph/gesture/new_node/mod.rs` — 486 lines, 5 types
-      including a `Palette` that collides by name with
-      `palantir::widgets::theme::palette::Palette`, which the same crate
-      imports.
 
 ## Inherent impls are split across files
 

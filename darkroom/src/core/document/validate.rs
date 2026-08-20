@@ -2,7 +2,7 @@
 
 use scenarium::{Graph as CoreGraph, GraphValidationError, NodeId};
 
-use crate::core::document::dock::DockValidationError;
+use crate::core::document::dock::error::DockValidationError;
 use crate::core::document::{Document, GraphView, TabRef};
 
 #[derive(Debug, thiserror::Error)]

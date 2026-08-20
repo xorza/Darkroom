@@ -11,7 +11,9 @@ use glam::Vec2;
 use palantir::Rect;
 
 use crate::core::document::TabRef;
-use crate::core::document::dock::{DockDrop, SplitSide, TabGroupId};
+use crate::core::document::dock::TabGroupId;
+use crate::core::document::dock::dock_op::DockDrop;
+use crate::core::document::dock::split_side::SplitSide;
 
 /// A tab mid-drag: armed when the tab's chip latches, cleared on release or
 /// Esc. Nothing here is positional — `tab` is keyed by identity, never by strip

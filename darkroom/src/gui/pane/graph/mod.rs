@@ -551,7 +551,7 @@ pub(crate) mod harness;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::document::dock::DockOp;
+    use crate::core::document::dock::dock_op::DockOp;
     use crate::core::document::harness::DocFixture;
     use crate::core::document::{PortRef, TabRef};
     use crate::core::preview::preview_func;

@@ -18,8 +18,10 @@ use palantir::Color;
 use scenarium::DataType;
 
 use crate::core::document::PortKind;
+use crate::core::theme_pref::ThemePreset;
+use crate::gui::theme::Theme;
 use crate::gui::theme::color::toward;
-use crate::gui::theme::{Theme, ThemePreset, TypeColors};
+use crate::gui::theme::type_colors::TypeColors;
 
 /// Color for a port of type `ty` on the given side. `hovered` lightens
 /// (dark theme) or darkens (light theme) the typed hue for emphasis;

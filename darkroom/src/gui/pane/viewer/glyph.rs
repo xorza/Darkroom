@@ -8,7 +8,7 @@
 //! sitting on a [`TypeScale`] tier, because it is sized to a box and not to
 //! the reading hierarchy.
 //!
-//! [`TypeScale`]: crate::gui::theme::TypeScale
+//! [`TypeScale`]: crate::gui::theme::type_scale::TypeScale
 
 use palantir::{Align, Color, Configure, Rect, Text, Ui};
 

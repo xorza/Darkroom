@@ -11,7 +11,7 @@ use scenarium::{
     DataType, Func, FuncId, FuncInput, FuncOutput, Graph, Library, Node, NodeId, NodeKind, testing,
 };
 
-use crate::core::document::dock::DockOp;
+use crate::core::document::dock::dock_op::DockOp;
 use crate::core::document::{Document, GraphView, ItemPlacement, TabRef};
 
 /// Lay every placement out along a row so no node lands off-viewport and gets

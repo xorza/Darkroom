@@ -18,7 +18,7 @@ use palantir::{
 use scenarium::NodeId;
 
 use crate::core::document::TabRef;
-use crate::core::document::dock::DockOp;
+use crate::core::document::dock::dock_op::DockOp;
 use crate::gui::graph_ctx::node_ctx::NodeCtx;
 use crate::gui::requests::Requests;
 use crate::gui::state::preview_store::{PreviewImage, StoredContent};

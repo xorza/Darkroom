@@ -7,7 +7,8 @@ use crate::execution::cache::slot::OutputSnapshot;
 use crate::execution::compile::compiled_graph::ExecutionBinding;
 use crate::execution::identity::{NodeIdx, OutputAddr};
 use crate::graph::identity::FuncId;
-use crate::testing::program::{NodeBuilder, Placed, ProgramBuilder};
+use crate::testing::program::node_builder::NodeBuilder;
+use crate::testing::program::{Placed, ProgramBuilder};
 
 /// A content-cacheable node of func `func`, declaring `count` `Int` outputs.
 ///
