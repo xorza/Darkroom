@@ -1,4 +1,4 @@
-use crate::common::set::IdxSet;
+use crate::containers::set::IdxSet;
 use crate::execution::identity::NodeIdx;
 
 /// 70 nodes span two words, so this covers the low word, both sides of the

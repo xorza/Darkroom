@@ -3,7 +3,7 @@
 //! with — the coloring and the work stack — lives on the [`Planner`] and is kept
 //! across runs, so a repeated plan on an unchanged graph allocates nothing.
 
-use crate::common::column::Column;
+use crate::containers::column::Column;
 use crate::execution::compile::compiled_graph::{CompiledGraph, ExecutionBinding};
 use crate::execution::error::{Error, Result};
 use crate::execution::identity::NodeIdx;

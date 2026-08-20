@@ -5,9 +5,9 @@
 //! the installed [`CompiledGraph`] knows neither the compiler nor the library;
 //! it owns runtime data and queries only.
 
-use ::common::is_debug;
+use common::is_debug;
 
-use crate::common::column::Idx;
+use crate::containers::column::Idx;
 use crate::execution::compile::compiled_graph::CompiledGraph;
 use crate::execution::compile::compiled_graph::ExecutionBinding;
 use crate::execution::compile::error::{CompiledGraphValidationError, PortPool};

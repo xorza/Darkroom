@@ -42,41 +42,6 @@ form, so backticked identifiers in prose rot silently. Several already have.
       each, plus instructions to extend the table when a fourth is added. The
       table is the only thing linking those call sites; nothing enforces it.
 
-## `common` publishes a surface almost nothing consumes
-
-The leaf crate's `lib.rs` exports 26 items. Grepping every consumer crate for
-imports of them shows most are never named outside `common` itself.
-
-- [ ] Never imported by any consumer: `Span`, `EPSILON`, `FileExtensionError`,
-      `FileFormatResult`, `IntrospectError`, `IntrospectFloat`,
-      `IntrospectInteger`, `SerializeError`, `DeserializeError`, `Lz4SizeError`.
-- [ ] `common::Span` (`common/src/span.rs:9`) has zero users anywhere in the
-      workspace, while two other `Span` types exist and are used:
-      `scenarium/src/common/column/mod.rs:70` (the same `start`/`len`/`range()`
-      shape plus a phantom index space) and `palantir/src/primitives/span.rs`.
-- [ ] `common::FloatExt` (`common/src/float_ext.rs`) has two production callers
-      (`darkroom/src/gui/dock/mod.rs:38`,
-      `darkroom/src/gui/pane/graph/gesture/pan_zoom/mod.rs:7`) and carries three
-      trait impls plus ~70 lines of tests.
-- [ ] `common::EPSILON` (`common/src/constants.rs:1`) is a bare
-      `pub const EPSILON: f32 = 1e-6` with no comment saying what it is a
-      tolerance *for*. It is reachable only through `FloatExt`.
-- [ ] `common/src/float_ext.rs:14`: the `f64` impl compares against
-      `EPSILON as f64` — an `f32`-scaled tolerance applied to `f64` values. Both
-      impls use an absolute tolerance, so `approximately_eq` is meaningless at
-      large magnitudes (`1e9` vs `1e9 + 1.0` compares unequal) and vacuous at
-      small ones (`1e-9` vs `1e-12` compares equal).
-- [ ] `common::is_debug()` (`common/src/debug.rs:1`) is a `pub const fn`
-      wrapping `cfg!(debug_assertions)` — a crate-level export for an
-      expression callers can write inline, with 13 uses.
-- [ ] `scenarium/src/common/` is a module named `common` inside a crate that
-      also depends on the `common` crate. Every reference to the crate must be
-      written `::common::…` to disambiguate — 20+ files carry the escape
-      (`scenarium/src/lib.rs:12`, `graph/identity.rs:18`,
-      `execution/executor/mod.rs:24`, …). `palantir/src/common/` has the same
-      module name without the collision, so the two crates read differently for
-      the same construct.
-
 ## The workspace dependency table carries entries nothing inherits
 
 `Cargo.toml`'s `[workspace.dependencies]` is the version-pinning point, but a

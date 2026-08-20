@@ -17,10 +17,10 @@
 //! this is for programs a compile *wouldn't* produce — a corrupt artifact a
 //! validator must reject, or a topology that would take a library to express.
 
-use ::common::CancelToken;
+use common::CancelToken;
 
 use crate::RamUsage;
-use crate::common::column::Column;
+use crate::containers::column::Column;
 use crate::execution::cache::runtime::RuntimeCache;
 use crate::execution::cache::slot::OutputSnapshot;
 use crate::execution::compile::compiled_graph::{

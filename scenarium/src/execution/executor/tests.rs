@@ -7,7 +7,7 @@
 use std::sync::Arc;
 
 use super::*;
-use crate::common::column::{Column, Idx};
+use crate::containers::column::{Column, Idx};
 use crate::execution::identity::OutputIdx;
 use crate::execution::schedule::NodeState;
 use crate::graph::func::lambda::internals;

@@ -4,7 +4,7 @@ use std::sync::Arc;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio_util::sync::CancellationToken;
 
-use ::common::CancelToken;
+use common::CancelToken;
 
 use crate::execution::cache::runtime::cache_flush_report::CacheFlushReport;
 use crate::execution::engine::ExecutionEngine;

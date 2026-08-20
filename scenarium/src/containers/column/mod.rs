@@ -34,7 +34,7 @@ pub(crate) trait Idx: Copy {
 /// thing that differs between them. Doc comments pass through, so what a space
 /// *means* still lives at the declaration.
 ///
-/// Sibling of [`id_type!`](::common::id_type), which does this for the uuid
+/// Sibling of [`id_type!`](common::id_type), which does this for the uuid
 /// identities on the authoring side.
 macro_rules! idx_type {
     ($(#[$meta:meta])* $vis:vis struct $name:ident, $what:literal) => {
@@ -42,7 +42,7 @@ macro_rules! idx_type {
         #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
         $vis struct $name($vis u32);
 
-        impl $crate::common::column::Idx for $name {
+        impl $crate::containers::column::Idx for $name {
             fn idx(self) -> usize {
                 self.0 as usize
             }
@@ -291,7 +291,7 @@ impl<I, T> IndexMut<Span<I>> for Column<I, T> {
 
 #[cfg(test)]
 mod internals {
-    use crate::common::column::Column;
+    use crate::containers::column::Column;
 
     impl<I, T> Column<I, T> {
         /// The backing allocation, for tests asserting a per-run column is refilled

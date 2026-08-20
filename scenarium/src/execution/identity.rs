@@ -1,7 +1,7 @@
 //! The install-local **dense index space**: `NodeIdx`, `OutputIdx`,
 //! `OutputAddr`, and the `…Idx` positions in the packed port columns. The
-//! containers keyed by them are [`Column`](crate::common::column::Column) and
-//! [`IdxSet`](crate::common::set::IdxSet).
+//! containers keyed by them are [`Column`](crate::containers::column::Column) and
+//! [`IdxSet`](crate::containers::set::IdxSet).
 //!
 //! This is an *index* space, not a second identity space. A node in a
 //! compiled program is the authored node, named by the same
@@ -21,7 +21,7 @@
 //! the same for every space, so what is written out here is only what each
 //! space *is*.
 
-use crate::common::column::idx_type;
+use crate::containers::column::idx_type;
 
 idx_type!(
     /// A node's position in the installed program's dense node vector. Install-local:
@@ -41,7 +41,7 @@ idx_type!(
 
 idx_type!(
     /// A position in the program's flat input column, packed one node's ports after
-    /// another. A node owns a [`Span<InputIdx>`](crate::common::column::Span); this
+    /// another. A node owns a [`Span<InputIdx>`](crate::containers::column::Span); this
     /// names one port inside it.
     ///
     /// Positions are handed out as the walk appends, one node's run after another,

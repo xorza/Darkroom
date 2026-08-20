@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
-use ::common::TempDir;
+use common::TempDir;
 
 use tokio::sync::{Notify, mpsc, oneshot};
 use tokio::time::{Duration, timeout};

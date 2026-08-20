@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use super::*;
-use crate::common::column::Idx;
+use crate::containers::column::Idx;
 use crate::execution::compile::compiled_graph::{CompiledGraph, ExecutionBinding};
 use crate::execution::compile::error::{CompiledGraphValidationError, PortPool};
 use crate::execution::identity::NodeIdx;

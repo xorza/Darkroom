@@ -15,7 +15,7 @@ use crate::testing::calls::Calls;
 use crate::testing::engine::{ReportedRun, RunOutcome, TestEngine};
 use crate::testing::graph::{NodeSpec, TestGraph};
 use crate::{ConstValue, DataType, DynamicValue};
-use ::common::{CancelToken, FloatExt};
+use common::{CancelToken, FloatExt};
 use tokio::sync::Mutex;
 
 mod argument_values;

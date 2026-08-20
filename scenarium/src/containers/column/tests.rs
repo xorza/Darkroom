@@ -1,4 +1,4 @@
-use crate::common::column::{Column, Span};
+use crate::containers::column::{Column, Span};
 use crate::execution::identity::NodeIdx;
 
 /// `iter_indexed` is what lets a walk carry the index without reconstructing it

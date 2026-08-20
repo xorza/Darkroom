@@ -16,10 +16,10 @@ use std::collections::HashSet;
 use std::ops::{Index, IndexMut};
 use std::sync::Arc;
 
-use ::common::CancelToken;
+use common::CancelToken;
 use hashbrown::HashMap;
 
-use crate::common::column::Column;
+use crate::containers::column::Column;
 use crate::execution::cache::digest::{DOMAIN, Digest, DigestHasher, InputTag};
 use crate::execution::cache::disk_store::error::StoreResult;
 use crate::execution::cache::disk_store::store_outcome::StoreOutcome;
@@ -889,7 +889,7 @@ fn is_unset_path(path: &str) -> bool {
 
 #[cfg(test)]
 pub(crate) mod internals {
-    use ::common::CancelToken;
+    use common::CancelToken;
 
     use crate::execution::cache::digest::Digest;
     use crate::execution::cache::disk_store::DiskStore;

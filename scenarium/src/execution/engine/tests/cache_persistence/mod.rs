@@ -1,6 +1,6 @@
 use super::*;
 
-use ::common::TempDir;
+use common::TempDir;
 
 use crate::execution::cache::runtime::error::CacheNodeError;
 use crate::execution::schedule::NodeState;

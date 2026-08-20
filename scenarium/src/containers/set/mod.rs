@@ -1,15 +1,15 @@
-//! A dense bitset over an index space — [`Column`](super::column::Column)'s
+//! A dense bitset over an index space — [`Column`](crate::containers::column::Column)'s
 //! set-shaped sibling, keyed the same way and with the same guarantee that one
 //! space's index cannot reach into another's set.
 
 use std::marker::PhantomData;
 
-use crate::common::column::Idx;
+use crate::containers::column::Idx;
 
 /// A dense bitset over the space `I` indexes — a visited mark for a walk over
 /// it (the schedule validator's, the eviction cone's).
 ///
-/// `I` is carried, not stored, for the same reason [`Column`](super::column::Column)
+/// `I` is carried, not stored, for the same reason [`Column`](crate::containers::column::Column)
 /// carries it: one space's index cannot probe another's set. `len` is kept
 /// because word-granular indexing would let an out-of-range index land in the
 /// last word's padding bits instead of panicking.

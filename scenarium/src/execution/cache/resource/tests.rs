@@ -1,4 +1,4 @@
-use ::common::{CancelToken, TempDir};
+use common::{CancelToken, TempDir};
 
 use crate::execution::cache::digest::{Digest, DigestHasher};
 use crate::execution::cache::resource::error::StampError;
