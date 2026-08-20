@@ -42,35 +42,6 @@ form, so backticked identifiers in prose rot silently. Several already have.
       each, plus instructions to extend the table when a fourth is added. The
       table is the only thing linking those call sites; nothing enforces it.
 
-## The workspace dependency table carries entries nothing inherits
-
-`Cargo.toml`'s `[workspace.dependencies]` is the version-pinning point, but a
-third of its entries are never inherited by any member — including members'
-path-dependency sub-crates.
-
-- [ ] Twelve entries are never inherited anywhere: `tracing-appender`,
-      `tracing-rolling-file`, `dotenv`, `indexmap`, `rhai`, `bumpalo`,
-      `ratatui`, `crossterm`, `wgpu`, `pollster`, `tiff`, `paste`. (The last
-      four have consumers, but those are the standalone submodules, which pin
-      their own by policy — so the entries pin nothing.)
-- [ ] `darkroom = { path = "darkroom" }` (`Cargo.toml:26`) is a
-      `[workspace.dependencies]` entry for the leaf application; nothing depends
-      on it.
-- [ ] `syn` is declared three times with three different feature sets
-      (`common/common-derive/Cargo.toml`, `quickbench/quickbench-macros/Cargo.toml`,
-      `palantir/anim-derive/Cargo.toml`) and is absent from
-      `[workspace.dependencies]`, so the one dependency shared by all three
-      proc-macro crates is the one with no central pin.
-- [ ] Two benchmark harnesses coexist. `quickbench` is a workspace member and an
-      in-house crate, used by `lumos` only; `fits-well`, `imaginarium` and
-      `palantir` use `criterion` under a `bench` feature. Results are not
-      comparable between the halves, and the `[profile.bench]` fat-LTO/OOM
-      hazard documented in `CLAUDE.md` applies to only one of them.
-- [ ] `imaginarium` and `palantir` gate benches behind a `bench` feature that
-      implies `internals`; `lumos` and `fits-well` gate the same construct
-      behind `internals` alone. `lens` and `darkroom` declare no `internals`
-      feature at all.
-
 ## Many files hold several unrelated major types
 
 The convention is one major struct per file, named for it, with satellites
