@@ -9,7 +9,7 @@ use glam::Vec2;
 use palantir::{Rect, ResponseState, Size, Ui};
 
 use crate::core::document::Viewport;
-use crate::core::edit::intent::types::GraphIntent;
+use crate::core::edit::graph_intent::GraphIntent;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::pane::graph::frame::geometry::CanvasGeometry;
 use crate::gui::pane::graph::gesture::slot::GestureSlot;

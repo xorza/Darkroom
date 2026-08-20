@@ -4,7 +4,7 @@ use std::collections::BTreeSet;
 use glam::Vec2;
 use palantir::{Rect, Shape, Stroke, Ui};
 
-use crate::core::edit::intent::types::GraphIntent;
+use crate::core::edit::graph_intent::GraphIntent;
 use crate::gui::pane::graph::canvas::outer_canvas_widget_id;
 use crate::gui::pane::graph::ctx::CanvasCtx;
 use crate::gui::pane::graph::gesture::canvas_gesture::CanvasGesture;

@@ -12,7 +12,7 @@ use scenarium::{Node, NodeKind};
 use scenarium::{SPECIAL_NODES, SpecialNode};
 
 use crate::core::document::PortRef;
-use crate::core::edit::intent::types::GraphIntent;
+use crate::core::edit::graph_intent::GraphIntent;
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::pane::graph::canvas::outer_canvas_widget_id;
 use crate::gui::pane::graph::ctx::CanvasCtx;
@@ -428,7 +428,7 @@ impl PaletteEntry<'_> {
     /// The three graph-shaped rows differ only in what the document has to
     /// resolve: a library graph brings the localized copy, one of this
     /// graph's own definitions is named by id, and neither builds bindings
-    /// here — `build_step` seeds them off the definition it resolves.
+    /// here — the commit gate seeds them off the definition it resolves.
     fn show(self, ui: &mut Ui, popup: &PopupHandle, palette: &Palette<'_>) -> Option<GraphIntent> {
         let pos = palette.pos;
         match self {

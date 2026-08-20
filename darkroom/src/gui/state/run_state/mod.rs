@@ -120,7 +120,7 @@ pub(crate) struct RunState {
     ///    *what the last run said*, never *what the graph would do now*.
     ///    Sweeping on delete would make delete-then-undo the one edit that
     ///    discards results, and only for the restored node while every
-    ///    neighbour from the same run keeps theirs: `UndoStep::RemoveNode`
+    ///    neighbour from the same run keeps theirs: undoing a removal
     ///    re-attaches the node under its original id, so its entry is still
     ///    here and still reads.
     /// 2. **Nothing reads a dead entry.** Every reader below is called from a

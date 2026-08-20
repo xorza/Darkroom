@@ -235,7 +235,7 @@ mod tests {
     use crate::core::document::TabRef;
     use crate::core::document::dock::DockOp;
     use crate::core::document::harness::DocFixture;
-    use crate::core::edit::intent::types::GraphIntent;
+    use crate::core::edit::graph_intent::GraphIntent;
     use crate::core::preview::preview_func;
     use crate::gui::app::commands::AppCommand;
     use crate::gui::app::commands::file::FileCommand;

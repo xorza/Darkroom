@@ -3,7 +3,7 @@
 use glam::Vec2;
 use palantir::{Background, Color, Configure, Corners, Panel, Sense, Shadow, Sizing, Stroke, Ui};
 
-use crate::core::edit::intent::types::GraphIntent;
+use crate::core::edit::graph_intent::GraphIntent;
 use crate::gui::graph_ctx::node_ctx::NodeCtx;
 use crate::gui::pane::graph::ctx::DrawCtx;
 use crate::gui::pane::graph::gesture::breaker::BreakerProbe;

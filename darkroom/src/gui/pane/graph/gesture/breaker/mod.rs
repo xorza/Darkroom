@@ -3,7 +3,7 @@ use palantir::{LineCap, LineJoin, PointerButton, PolylineColors, Rect, Shape, Ui
 use scenarium::NodeId;
 use scenarium::{InputPort, Subscription};
 
-use crate::core::edit::intent::types::GraphIntent;
+use crate::core::edit::graph_intent::GraphIntent;
 use crate::gui::pane::graph::canvas::outer_canvas_widget_id;
 use crate::gui::pane::graph::ctx::CanvasCtx;
 use crate::gui::pane::graph::gesture::canvas_gesture::CanvasGesture;
@@ -344,18 +344,15 @@ impl BreakerUI {
                 to: None,
             });
         }
-        // A removed node already drops its subscriptions
-        // (RemoveNode's undo step captures every edge touching
-        // it), so skip any whose emitter or subscriber is doomed
-        // to avoid redundant history.
+        // A removed node already drops its subscriptions (its
+        // step captures every edge touching it), so skip any whose
+        // emitter or subscriber is doomed to avoid redundant history.
         for s in broken_subscriptions.drain(..) {
             if broken_nodes.contains(&s.emitter) || broken_nodes.contains(&s.subscriber) {
                 continue;
             }
             out.push_graph(GraphIntent::SetSubscription {
-                emitter: s.emitter,
-                event_idx: s.event_idx,
-                subscriber: s.subscriber,
+                subscription: s,
                 subscribe: false,
             });
         }

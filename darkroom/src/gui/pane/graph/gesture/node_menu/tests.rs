@@ -5,7 +5,7 @@ use palantir::WidgetId;
 use scenarium::{Binding, InputPort, NodeId};
 
 use crate::core::document::harness::DocFixture;
-use crate::core::edit::intent::types::GraphIntent;
+use crate::core::edit::graph_intent::GraphIntent;
 use crate::gui::app::commands::AppCommand;
 use crate::gui::app::commands::run::RunCommand;
 use crate::gui::pane::graph::harness::CanvasHarness;
@@ -143,7 +143,8 @@ fn remove_pick_removes_every_selected_node() {
 /// it pointed at the original `c`.
 #[test]
 fn duplicate_picks_differ_by_whether_incoming_wires_survive() {
-    // `(binding count, the one binding)` the `row`th pick's clone carries.
+    // The bindings the `row`th pick's clones are seeded with, and the `c` they
+    // may point at.
     let duplicate_via = |row: usize| {
         let mut h = CanvasHarness::shaping_text(DocFixture::probes(3), SURFACE);
         let (a, b, c) = (h.node(0), h.node(1), h.node(2));
@@ -154,17 +155,31 @@ fn duplicate_picks_differ_by_whether_incoming_wires_survive() {
             .set_input_binding(InputPort::new(b, 0), Binding::bind(c, 0));
         h.doc_mut().main_view.selected = [a, b].into_iter().collect();
 
+        // Duplicating expands into ordinary intents: one add per clone, the
+        // surviving wiring seeded onto the clone that consumes it, then the
+        // selection swap that leaves the copies selected.
         let intents = pick(&mut h, a, row);
-        let [
-            GraphIntent::DuplicateNodes {
-                nodes, bindings, ..
-            },
-        ] = &intents[..]
-        else {
-            panic!("expected exactly one DuplicateNodes intent, got {intents:?}");
-        };
-        assert_eq!(nodes.len(), 2, "the two selected nodes are cloned");
-        (bindings.len(), bindings.first().map(|(_, b)| b.clone()), c)
+        let seeded: Vec<Binding> = intents
+            .iter()
+            .filter_map(|intent| match intent {
+                GraphIntent::AddNode { bindings, .. } => Some(bindings),
+                _ => None,
+            })
+            .flat_map(|bindings| bindings.iter().map(|(_, binding)| binding.clone()))
+            .collect();
+        assert_eq!(
+            intents
+                .iter()
+                .filter(|intent| matches!(intent, GraphIntent::AddNode { .. }))
+                .count(),
+            2,
+            "the two selected nodes are cloned: {intents:?}"
+        );
+        assert!(
+            matches!(intents.last(), Some(GraphIntent::SetSelection { .. })),
+            "and the copies end up selected: {intents:?}"
+        );
+        (seeded.len(), seeded.into_iter().next(), c)
     };
 
     let (dropped, _, _) = duplicate_via(DUPLICATE);

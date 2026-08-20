@@ -4,7 +4,7 @@
 use std::collections::VecDeque;
 
 use crate::core::document::dock::DockOp;
-use crate::core::edit::intent::types::GraphIntent;
+use crate::core::edit::graph_intent::GraphIntent;
 use crate::gui::app::commands::AppCommand;
 
 /// A request the editor applies itself: the two halves of the document, the
@@ -115,7 +115,7 @@ mod tests {
     use crate::core::document::TabRef;
     use crate::gui::app::commands::run::RunCommand;
 
-    fn raise() -> GraphIntent {
+    fn remove_node() -> GraphIntent {
         GraphIntent::RemoveNode {
             node_id: NodeId::unique(),
         }
@@ -136,11 +136,11 @@ mod tests {
     #[test]
     fn each_level_drains_its_own_tier_and_leaves_the_rest_queued() {
         let mut out = Requests::default();
-        out.push_graph(raise());
+        out.push_graph(remove_node());
         out.push_app(AppCommand::Run(RunCommand::Once));
         out.push_view(close_prefs());
         out.push_app(AppCommand::Quit);
-        out.extend_graph([raise(), raise()]);
+        out.extend_graph([remove_node(), remove_node()]);
 
         let first: Vec<&str> = out
             .drain_document()

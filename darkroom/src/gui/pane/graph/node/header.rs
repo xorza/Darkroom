@@ -17,7 +17,8 @@ use palantir::{
 };
 use scenarium::{CacheMode, NodeId};
 
-use crate::core::edit::intent::types::{GraphIntent, NodeProperty};
+use crate::core::edit::graph_intent::GraphIntent;
+use crate::core::edit::step::set_node_property::NodeProperty;
 use crate::gui::app::commands::AppCommand;
 use crate::gui::app::commands::run::RunCommand;
 use crate::gui::graph_ctx::node_ctx::NodeCtx;
@@ -432,7 +433,8 @@ mod tests {
     use scenarium::{CacheMode, NodeId};
 
     use crate::core::document::harness::DocFixture;
-    use crate::core::edit::intent::types::{GraphIntent, NodeProperty};
+    use crate::core::edit::graph_intent::GraphIntent;
+    use crate::core::edit::step::set_node_property::NodeProperty;
     use crate::gui::app::commands::AppCommand;
     use crate::gui::app::commands::run::RunCommand;
     use crate::gui::pane::graph::harness::CanvasHarness;
