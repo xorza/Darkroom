@@ -285,7 +285,8 @@ pub(super) unsafe fn convert_u8_to_f32_row_neon(src: &[u8], dst: &mut [f32]) {
     let simd_width = len / 16;
     let remainder = len % 16;
 
-    let scale = vdupq_n_f32(1.0 / 255.0);
+    // Divide, never a reciprocal multiply — see the module doc on precision.
+    let divisor = vdupq_n_f32(255.0);
 
     for i in 0..simd_width {
         let src_offset = i * 16;
@@ -303,10 +304,10 @@ pub(super) unsafe fn convert_u8_to_f32_row_neon(src: &[u8], dst: &mut [f32]) {
         let dwords_2 = vmovl_u16(vget_low_u16(words_hi));
         let dwords_3 = vmovl_u16(vget_high_u16(words_hi));
 
-        let floats_0 = vmulq_f32(vcvtq_f32_u32(dwords_0), scale);
-        let floats_1 = vmulq_f32(vcvtq_f32_u32(dwords_1), scale);
-        let floats_2 = vmulq_f32(vcvtq_f32_u32(dwords_2), scale);
-        let floats_3 = vmulq_f32(vcvtq_f32_u32(dwords_3), scale);
+        let floats_0 = vdivq_f32(vcvtq_f32_u32(dwords_0), divisor);
+        let floats_1 = vdivq_f32(vcvtq_f32_u32(dwords_1), divisor);
+        let floats_2 = vdivq_f32(vcvtq_f32_u32(dwords_2), divisor);
+        let floats_3 = vdivq_f32(vcvtq_f32_u32(dwords_3), divisor);
 
         vst1q_f32(dst.as_mut_ptr().add(dst_offset), floats_0);
         vst1q_f32(dst.as_mut_ptr().add(dst_offset + 4), floats_1);
@@ -381,7 +382,8 @@ pub(super) unsafe fn convert_u16_to_f32_row_neon(src: &[u16], dst: &mut [f32]) {
     let simd_width = len / 8;
     let remainder = len % 8;
 
-    let scale = vdupq_n_f32(1.0 / 65535.0);
+    // Divide, never a reciprocal multiply — see the module doc on precision.
+    let divisor = vdupq_n_f32(65535.0);
 
     for i in 0..simd_width {
         let src_offset = i * 8;
@@ -392,8 +394,8 @@ pub(super) unsafe fn convert_u16_to_f32_row_neon(src: &[u16], dst: &mut [f32]) {
         let dwords_lo = vmovl_u16(vget_low_u16(words));
         let dwords_hi = vmovl_u16(vget_high_u16(words));
 
-        let floats_lo = vmulq_f32(vcvtq_f32_u32(dwords_lo), scale);
-        let floats_hi = vmulq_f32(vcvtq_f32_u32(dwords_hi), scale);
+        let floats_lo = vdivq_f32(vcvtq_f32_u32(dwords_lo), divisor);
+        let floats_hi = vdivq_f32(vcvtq_f32_u32(dwords_hi), divisor);
 
         vst1q_f32(dst.as_mut_ptr().add(dst_offset), floats_lo);
         vst1q_f32(dst.as_mut_ptr().add(dst_offset + 4), floats_hi);

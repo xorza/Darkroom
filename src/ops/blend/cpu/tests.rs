@@ -1,7 +1,7 @@
 use strum::IntoEnumIterator;
 
-use crate::common::color_format::{ALL_FORMATS, ChannelSize, ColorFormat};
-use crate::common::image_diff::max_pixel_diff;
+use crate::common::color_format::{ALL_FORMATS, ColorFormat};
+use crate::common::image_diff::{max_pixel_diff, pixels_equal};
 use crate::common::internals::create_test_image;
 use crate::image::Image;
 use crate::ops::blend::cpu;
@@ -63,10 +63,12 @@ fn alpha_zero_returns_dst() {
 
         let output = blend(Blend::new(BlendMode::Normal, 0.0), &src, &dst);
 
-        let diff = max_pixel_diff(&dst, &output);
+        // `blended * 0 + dst * 1` is dst exactly, and the integer formats
+        // round-trip their `/ max` and `* max` without loss.
         assert!(
-            diff < 1e-6,
-            "alpha=0 must return dst for {format}, got {diff}"
+            pixels_equal(&dst, &output),
+            "alpha=0 must return dst for {format}, off by {}",
+            max_pixel_diff(&dst, &output)
         );
     }
 }
@@ -79,12 +81,10 @@ fn alpha_one_normal_returns_src() {
 
         let output = blend(Blend::new(BlendMode::Normal, 1.0), &src, &dst);
 
-        // One unit in the last place: the integer paths round-trip through a
-        // normalized f32, so a channel can land one step off its source value.
-        let diff = max_pixel_diff(&src, &output);
         assert!(
-            diff <= lsb(format),
-            "alpha=1 Normal must return src for {format}, got {diff}"
+            pixels_equal(&src, &output),
+            "alpha=1 Normal must return src for {format}, off by {}",
+            max_pixel_diff(&src, &output)
         );
     }
 }
@@ -103,10 +103,7 @@ fn multiply_by_white_keeps_dst_color() {
 
     for (i, (&want, &got)) in dst.bytes().iter().zip(output.bytes()).enumerate() {
         if i % 4 != 3 {
-            assert!(
-                want.abs_diff(got) <= 1,
-                "channel {i}: multiply by white gave {got}, want dst {want}"
-            );
+            assert_eq!(got, want, "channel {i}: multiply by white must return dst");
         }
     }
 }
@@ -131,7 +128,9 @@ fn multiply_by_black_zeroes_color() {
     }
 }
 
-/// Every SIMD kernel must agree with the scalar reference it specializes.
+/// Every SIMD kernel must agree with the scalar reference it specializes,
+/// exactly: the vector path evaluates the same expression in the same order and
+/// the same units, down to dividing where the reference divides.
 ///
 /// The widths straddle the four-pixel vector body: 3 is tail only, 17 is four
 /// vectors plus a tail, 64 is vectors only.
@@ -149,25 +148,14 @@ fn simd_matches_scalar_reference() {
                     let mut reference = Image::new_black(dst.desc()).unwrap();
                     cpu::apply_scalar(params, &src, &dst, &mut reference);
 
-                    let diff = max_pixel_diff(&reference, &dispatched);
                     assert!(
-                        diff <= lsb(format),
+                        pixels_equal(&reference, &dispatched),
                         "{format} {mode:?} alpha={alpha} width={width}: \
-                         SIMD and scalar differ by {diff}"
+                         SIMD and scalar differ by {}",
+                        max_pixel_diff(&reference, &dispatched)
                     );
                 }
             }
         }
-    }
-}
-
-/// One unit in the last place of `format`'s storage type, as [`max_pixel_diff`]
-/// reports it — the budget a vector body may differ from the scalar reference
-/// by, since it normalizes by a reciprocal where the reference divides.
-fn lsb(format: ColorFormat) -> f64 {
-    match format.channel_size {
-        ChannelSize::_8bit => 1.0 / f64::from(u8::MAX),
-        ChannelSize::_16bit => 1.0 / f64::from(u16::MAX),
-        ChannelSize::_32bit => 1e-6,
     }
 }

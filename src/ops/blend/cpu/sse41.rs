@@ -1,186 +1,191 @@
-//! SSE4.1 blend kernels for `RGBA_U8` and `RGBA_F32`. Each blends one row pair
-//! and finishes the sub-vector tail with the scalar reference, so the vector
-//! body and the tail produce identical results.
+//! SSE4.1 blend kernels for `RGBA_U8` and `RGBA_F32`.
+//!
+//! One pixel's four channels fill one register, so the blend is a single
+//! expression both storage types share — only the load and the store differ.
+//!
+//! Every step matches the scalar reference operation for operation, so the
+//! vector results are bit-identical to it rather than within a rounding
+//! tolerance: the byte path *divides* by 255 where multiplying by the reciprocal
+//! would be faster, and the alpha mix is a separate multiply and add. Each
+//! kernel finishes its sub-vector tail with the reference itself.
 
 use std::arch::x86_64::*;
 
-use crate::ops::blend::cpu::BlendApply;
+use crate::ops::blend::cpu;
 use crate::ops::blend::{Blend, BlendMode};
 
+/// The blend's constants, splatted once per row. `max` is the storage type's
+/// full-scale value: 255 for bytes, one for floats.
+#[derive(Debug, Clone, Copy)]
+struct Splat {
+    alpha: __m128,
+    one_minus_alpha: __m128,
+    zero: __m128,
+    one: __m128,
+    half: __m128,
+    two: __m128,
+    max: __m128,
+}
+
+impl Splat {
+    #[target_feature(enable = "sse4.1")]
+    fn new(alpha: f32, max: f32) -> Self {
+        Self {
+            alpha: _mm_set1_ps(alpha),
+            one_minus_alpha: _mm_set1_ps(1.0 - alpha),
+            zero: _mm_setzero_ps(),
+            one: _mm_set1_ps(1.0),
+            half: _mm_set1_ps(0.5),
+            two: _mm_set1_ps(2.0),
+            max: _mm_set1_ps(max),
+        }
+    }
+
+    /// One pixel's four normalized channels, blended and mixed — the vector form
+    /// of [`BlendMode::blend`].
+    ///
+    /// Lane 3 is alpha, which carries no mode of its own. `Normal`'s blended
+    /// value is `src`, so restoring src in that lane is the whole difference.
+    #[inline]
+    #[target_feature(enable = "sse4.1")]
+    fn blend(self, mode: BlendMode, src: __m128, dst: __m128) -> __m128 {
+        let blended = match mode {
+            BlendMode::Normal => src,
+            BlendMode::Add => _mm_min_ps(_mm_add_ps(src, dst), self.one),
+            BlendMode::Subtract => _mm_max_ps(_mm_sub_ps(dst, src), self.zero),
+            BlendMode::Multiply => _mm_mul_ps(src, dst),
+            BlendMode::Screen => _mm_sub_ps(
+                self.one,
+                _mm_mul_ps(_mm_sub_ps(self.one, src), _mm_sub_ps(self.one, dst)),
+            ),
+            BlendMode::Overlay => {
+                let dark = _mm_mul_ps(self.two, _mm_mul_ps(src, dst));
+                let light = _mm_sub_ps(
+                    self.one,
+                    _mm_mul_ps(
+                        self.two,
+                        _mm_mul_ps(_mm_sub_ps(self.one, src), _mm_sub_ps(self.one, dst)),
+                    ),
+                );
+                _mm_blendv_ps(light, dark, _mm_cmplt_ps(dst, self.half))
+            }
+        };
+        let blended = _mm_blend_ps::<0b1000>(blended, src);
+        _mm_add_ps(
+            _mm_mul_ps(blended, self.alpha),
+            _mm_mul_ps(dst, self.one_minus_alpha),
+        )
+    }
+
+    /// Scales a blended value back into the storage type's range and clamps it
+    /// there, in the reference's order: multiply, then clamp the product. For
+    /// float storage `max` is one, so the multiply is exact and the clamp is the
+    /// whole step.
+    #[inline]
+    #[target_feature(enable = "sse4.1")]
+    fn scale_clamp(self, blended: __m128) -> __m128 {
+        _mm_min_ps(
+            _mm_max_ps(_mm_mul_ps(blended, self.max), self.zero),
+            self.max,
+        )
+    }
+
+    /// The four channels of the pixel starting at byte `BYTE` of a four-pixel
+    /// register, widened and divided into `[0, 1]`.
+    ///
+    /// The divide is what the reference does. `value * (1.0 / 255.0)` would be
+    /// several times cheaper but disagrees with it for 126 of the 256 byte
+    /// values, which is enough to shift an output byte by one once the result is
+    /// scaled back up and truncated.
+    #[inline]
+    #[target_feature(enable = "sse4.1")]
+    fn normalize<const BYTE: i32>(self, pixels: __m128i) -> __m128 {
+        // `cvtepu8_epi32` widens the low four bytes, so bring the wanted pixel
+        // down to them first.
+        let pixel = _mm_srli_si128::<BYTE>(pixels);
+        _mm_div_ps(_mm_cvtepi32_ps(_mm_cvtepu8_epi32(pixel)), self.max)
+    }
+
+    /// One `RGBA_U8` pixel of the four in `src`/`dst`, blended and returned as
+    /// four `i32` lanes ready to pack. `cvttps` truncates toward zero, which is
+    /// what the reference's `as u8` does.
+    #[inline]
+    #[target_feature(enable = "sse4.1")]
+    fn blend_u8<const BYTE: i32>(self, mode: BlendMode, src: __m128i, dst: __m128i) -> __m128i {
+        let src = self.normalize::<BYTE>(src);
+        let dst = self.normalize::<BYTE>(dst);
+        _mm_cvttps_epi32(self.scale_clamp(self.blend(mode, src, dst)))
+    }
+}
+
+/// Four `RGBA_U8` pixels per iteration: one 16-byte load from each row, four
+/// pixel registers, one 16-byte store.
 #[target_feature(enable = "sse4.1")]
 pub(super) unsafe fn rgba_u8_row(
     src_row: &[u8],
     dst_row: &[u8],
     out_row: &mut [u8],
-    width: usize,
     params: Blend,
 ) {
-    let Blend { mode, alpha } = params;
+    let splat = Splat::new(params.alpha, f32::from(u8::MAX));
+    let mode = params.mode;
 
-    unsafe {
-        let alpha_vec = _mm_set1_ps(alpha);
-        let one_minus_alpha = _mm_set1_ps(1.0 - alpha);
-        let scale = _mm_set1_ps(255.0);
-        let one = _mm_set1_ps(1.0);
-        let zero = _mm_setzero_ps();
-        let half = _mm_set1_ps(0.5);
-        let two = _mm_set1_ps(2.0);
+    let (src_quads, src_tail) = src_row.as_chunks::<16>();
+    let (dst_quads, dst_tail) = dst_row.as_chunks::<16>();
+    let (out_quads, out_tail) = out_row.as_chunks_mut::<16>();
 
-        // Process 4 RGBA pixels at a time
-        let simd_width = 4;
-        let mut x = 0;
+    for ((src, dst), out) in src_quads.iter().zip(dst_quads).zip(out_quads) {
+        // SAFETY: every chunk is exactly 16 bytes — four RGBA pixels, the width
+        // of one load and one store.
+        unsafe {
+            let src = _mm_loadu_si128(src.as_ptr().cast());
+            let dst = _mm_loadu_si128(dst.as_ptr().cast());
 
-        while x + simd_width <= width {
-            // Process each pixel separately (unpack, blend, repack)
-            // This is simpler than trying to do 4 pixels in parallel with complex blend modes
-            let mut result_bytes = [0u8; 16];
+            let p0 = splat.blend_u8::<0>(mode, src, dst);
+            let p1 = splat.blend_u8::<4>(mode, src, dst);
+            let p2 = splat.blend_u8::<8>(mode, src, dst);
+            let p3 = splat.blend_u8::<12>(mode, src, dst);
 
-            for i in 0..4 {
-                let src_offset = i * 4;
-                let src_r = _mm_set1_ps(src_row[x * 4 + src_offset] as f32 * (1.0 / 255.0));
-                let src_g = _mm_set1_ps(src_row[x * 4 + src_offset + 1] as f32 * (1.0 / 255.0));
-                let src_b = _mm_set1_ps(src_row[x * 4 + src_offset + 2] as f32 * (1.0 / 255.0));
-                let src_a = _mm_set1_ps(src_row[x * 4 + src_offset + 3] as f32 * (1.0 / 255.0));
-
-                let dst_r = _mm_set1_ps(dst_row[x * 4 + src_offset] as f32 * (1.0 / 255.0));
-                let dst_g = _mm_set1_ps(dst_row[x * 4 + src_offset + 1] as f32 * (1.0 / 255.0));
-                let dst_b = _mm_set1_ps(dst_row[x * 4 + src_offset + 2] as f32 * (1.0 / 255.0));
-                let dst_a = _mm_set1_ps(dst_row[x * 4 + src_offset + 3] as f32 * (1.0 / 255.0));
-
-                macro_rules! blend_channel {
-                    ($src:expr, $dst:expr) => {{
-                        let blended = match mode {
-                            BlendMode::Normal => $src,
-                            BlendMode::Add => _mm_min_ps(_mm_add_ps($src, $dst), one),
-                            BlendMode::Subtract => _mm_max_ps(_mm_sub_ps($dst, $src), zero),
-                            BlendMode::Multiply => _mm_mul_ps($src, $dst),
-                            BlendMode::Screen => _mm_sub_ps(
-                                one,
-                                _mm_mul_ps(_mm_sub_ps(one, $src), _mm_sub_ps(one, $dst)),
-                            ),
-                            BlendMode::Overlay => {
-                                let mask = _mm_cmplt_ps($dst, half);
-                                let dark = _mm_mul_ps(two, _mm_mul_ps($src, $dst));
-                                let light = _mm_sub_ps(
-                                    one,
-                                    _mm_mul_ps(
-                                        two,
-                                        _mm_mul_ps(_mm_sub_ps(one, $src), _mm_sub_ps(one, $dst)),
-                                    ),
-                                );
-                                _mm_blendv_ps(light, dark, mask)
-                            }
-                        };
-                        _mm_add_ps(
-                            _mm_mul_ps(blended, alpha_vec),
-                            _mm_mul_ps($dst, one_minus_alpha),
-                        )
-                    }};
-                }
-
-                let out_r = blend_channel!(src_r, dst_r);
-                let out_g = blend_channel!(src_g, dst_g);
-                let out_b = blend_channel!(src_b, dst_b);
-                // Alpha uses normal blend
-                let out_a = _mm_add_ps(
-                    _mm_mul_ps(src_a, alpha_vec),
-                    _mm_mul_ps(dst_a, one_minus_alpha),
-                );
-
-                // Convert back to u8
-                result_bytes[i * 4] =
-                    (_mm_cvtss_f32(_mm_mul_ps(out_r, scale)).clamp(0.0, 255.0)) as u8;
-                result_bytes[i * 4 + 1] =
-                    (_mm_cvtss_f32(_mm_mul_ps(out_g, scale)).clamp(0.0, 255.0)) as u8;
-                result_bytes[i * 4 + 2] =
-                    (_mm_cvtss_f32(_mm_mul_ps(out_b, scale)).clamp(0.0, 255.0)) as u8;
-                result_bytes[i * 4 + 3] =
-                    (_mm_cvtss_f32(_mm_mul_ps(out_a, scale)).clamp(0.0, 255.0)) as u8;
-            }
-
-            let result = _mm_loadu_si128(result_bytes.as_ptr() as *const __m128i);
-            _mm_storeu_si128(out_row[x * 4..].as_mut_ptr() as *mut __m128i, result);
-
-            x += simd_width;
-        }
-
-        // Sub-vector tail through the scalar reference, so it cannot disagree
-        // with the vector body it follows.
-        while x < width {
-            for c in 0..3 {
-                out_row[x * 4 + c] = src_row[x * 4 + c].blend(dst_row[x * 4 + c], mode, alpha);
-            }
-            out_row[x * 4 + 3] =
-                src_row[x * 4 + 3].blend(dst_row[x * 4 + 3], BlendMode::Normal, alpha);
-            x += 1;
+            let lo = _mm_packus_epi32(p0, p1);
+            let hi = _mm_packus_epi32(p2, p3);
+            _mm_storeu_si128(out.as_mut_ptr().cast(), _mm_packus_epi16(lo, hi));
         }
     }
+
+    cpu::rgba_tail(params, src_tail, dst_tail, out_tail);
 }
 
+/// One `RGBA_F32` pixel per iteration — four floats already fill a register, so
+/// there is nothing to widen and no tail to finish.
 #[target_feature(enable = "sse4.1")]
 pub(super) unsafe fn rgba_f32_row(
     src_row: &[u8],
     dst_row: &[u8],
     out_row: &mut [u8],
-    width: usize,
     params: Blend,
 ) {
-    let Blend { mode, alpha } = params;
+    let splat = Splat::new(params.alpha, 1.0);
+    let mode = params.mode;
 
-    unsafe {
-        let alpha_vec = _mm_set1_ps(alpha);
-        let one_minus_alpha = _mm_set1_ps(1.0 - alpha);
-        let one = _mm_set1_ps(1.0);
-        let zero = _mm_setzero_ps();
-        let half = _mm_set1_ps(0.5);
-        let two = _mm_set1_ps(2.0);
+    let src_row: &[f32] = bytemuck::cast_slice(src_row);
+    let dst_row: &[f32] = bytemuck::cast_slice(dst_row);
+    let out_row: &mut [f32] = bytemuck::cast_slice_mut(out_row);
 
-        let src_f32: &[f32] = bytemuck::cast_slice(src_row);
-        let dst_f32: &[f32] = bytemuck::cast_slice(dst_row);
-        let out_f32: &mut [f32] = bytemuck::cast_slice_mut(out_row);
+    let (src_pixels, rest) = src_row.as_chunks::<4>();
+    let (dst_pixels, _) = dst_row.as_chunks::<4>();
+    let (out_pixels, _) = out_row.as_chunks_mut::<4>();
+    debug_assert!(rest.is_empty(), "an RGBA row is a whole number of pixels");
 
-        // Process 1 RGBA pixel at a time (4 floats fit in one SSE register)
-        let mut x = 0;
-
-        while x < width {
-            let src_pixel = _mm_loadu_ps(src_f32[x * 4..].as_ptr());
-            let dst_pixel = _mm_loadu_ps(dst_f32[x * 4..].as_ptr());
-
-            let blended = match mode {
-                BlendMode::Normal => src_pixel,
-                BlendMode::Add => _mm_min_ps(_mm_add_ps(src_pixel, dst_pixel), one),
-                BlendMode::Subtract => _mm_max_ps(_mm_sub_ps(dst_pixel, src_pixel), zero),
-                BlendMode::Multiply => _mm_mul_ps(src_pixel, dst_pixel),
-                BlendMode::Screen => _mm_sub_ps(
-                    one,
-                    _mm_mul_ps(_mm_sub_ps(one, src_pixel), _mm_sub_ps(one, dst_pixel)),
-                ),
-                BlendMode::Overlay => {
-                    let mask = _mm_cmplt_ps(dst_pixel, half);
-                    let dark = _mm_mul_ps(two, _mm_mul_ps(src_pixel, dst_pixel));
-                    let light = _mm_sub_ps(
-                        one,
-                        _mm_mul_ps(
-                            two,
-                            _mm_mul_ps(_mm_sub_ps(one, src_pixel), _mm_sub_ps(one, dst_pixel)),
-                        ),
-                    );
-                    _mm_blendv_ps(light, dark, mask)
-                }
-            };
-
-            // Lane 3 is alpha, which carries no blend mode of its own: restoring
-            // src there leaves it the plain alpha mix the scalar reference does.
-            let blended = _mm_blend_ps::<0b1000>(blended, src_pixel);
-
-            let result = _mm_add_ps(
-                _mm_mul_ps(blended, alpha_vec),
-                _mm_mul_ps(dst_pixel, one_minus_alpha),
+    for ((src, dst), out) in src_pixels.iter().zip(dst_pixels).zip(out_pixels) {
+        // SAFETY: every chunk is exactly four `f32` — one RGBA pixel, the width
+        // of one load and one store.
+        unsafe {
+            let src = _mm_loadu_ps(src.as_ptr());
+            let dst = _mm_loadu_ps(dst.as_ptr());
+            _mm_storeu_ps(
+                out.as_mut_ptr(),
+                splat.scale_clamp(splat.blend(mode, src, dst)),
             );
-            let clamped = _mm_min_ps(_mm_max_ps(result, zero), one);
-
-            _mm_storeu_ps(out_f32[x * 4..].as_mut_ptr(), clamped);
-            x += 1;
         }
     }
 }

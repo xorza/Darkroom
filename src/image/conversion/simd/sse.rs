@@ -398,7 +398,8 @@ pub(super) unsafe fn convert_u8_to_f32_row_sse2(src: &[u8], dst: &mut [f32]) {
     let simd_width = len / 16;
     let remainder = len % 16;
 
-    let scale = _mm_set1_ps(1.0 / 255.0);
+    // Divide, never a reciprocal multiply — see the module doc on precision.
+    let divisor = _mm_set1_ps(255.0);
     let zero = _mm_setzero_si128();
 
     for i in 0..simd_width {
@@ -418,10 +419,10 @@ pub(super) unsafe fn convert_u8_to_f32_row_sse2(src: &[u8], dst: &mut [f32]) {
         let dwords_3 = _mm_unpackhi_epi16(words_hi, zero);
 
         // Convert to float and scale
-        let floats_0 = _mm_mul_ps(_mm_cvtepi32_ps(dwords_0), scale);
-        let floats_1 = _mm_mul_ps(_mm_cvtepi32_ps(dwords_1), scale);
-        let floats_2 = _mm_mul_ps(_mm_cvtepi32_ps(dwords_2), scale);
-        let floats_3 = _mm_mul_ps(_mm_cvtepi32_ps(dwords_3), scale);
+        let floats_0 = _mm_div_ps(_mm_cvtepi32_ps(dwords_0), divisor);
+        let floats_1 = _mm_div_ps(_mm_cvtepi32_ps(dwords_1), divisor);
+        let floats_2 = _mm_div_ps(_mm_cvtepi32_ps(dwords_2), divisor);
+        let floats_3 = _mm_div_ps(_mm_cvtepi32_ps(dwords_3), divisor);
 
         _mm_storeu_ps(dst.as_mut_ptr().add(dst_offset), floats_0);
         _mm_storeu_ps(dst.as_mut_ptr().add(dst_offset + 4), floats_1);
@@ -501,7 +502,8 @@ pub(super) unsafe fn convert_u16_to_f32_row_sse2(src: &[u16], dst: &mut [f32]) {
     let simd_width = len / 8;
     let remainder = len % 8;
 
-    let scale = _mm_set1_ps(1.0 / 65535.0);
+    // Divide, never a reciprocal multiply — see the module doc on precision.
+    let divisor = _mm_set1_ps(65535.0);
     let zero = _mm_setzero_si128();
 
     for i in 0..simd_width {
@@ -512,8 +514,8 @@ pub(super) unsafe fn convert_u16_to_f32_row_sse2(src: &[u16], dst: &mut [f32]) {
         let dwords_lo = _mm_unpacklo_epi16(words, zero);
         let dwords_hi = _mm_unpackhi_epi16(words, zero);
 
-        let floats_lo = _mm_mul_ps(_mm_cvtepi32_ps(dwords_lo), scale);
-        let floats_hi = _mm_mul_ps(_mm_cvtepi32_ps(dwords_hi), scale);
+        let floats_lo = _mm_div_ps(_mm_cvtepi32_ps(dwords_lo), divisor);
+        let floats_hi = _mm_div_ps(_mm_cvtepi32_ps(dwords_hi), divisor);
 
         _mm_storeu_ps(dst.as_mut_ptr().add(dst_offset), floats_lo);
         _mm_storeu_ps(dst.as_mut_ptr().add(dst_offset + 4), floats_hi);

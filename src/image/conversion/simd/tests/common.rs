@@ -4,8 +4,67 @@
 //! regardless of the underlying SIMD implementation (SSE/AVX/NEON).
 
 use super::{TEST_WIDTHS, create_test_image, create_test_image_f32, create_test_image_u16};
-use crate::common::color_format::ColorFormat;
+use crate::common::color_format::{
+    ALL_FORMATS, ChannelCount, ChannelSize, ChannelType, ColorFormat,
+};
+use crate::image::conversion::scalar::{ConversionInfo, dispatch_convert_row_scalar};
+use crate::image::conversion::simd;
 use crate::image::{Image, ImageDesc};
+
+/// One row of `format`, filled with the pattern its storage type spans.
+fn source_row(format: ColorFormat, width: usize) -> Vec<u8> {
+    let row = match (format.channel_size, format.channel_type) {
+        (ChannelSize::_8bit, ChannelType::UInt) => create_test_image(width, 1, format),
+        (ChannelSize::_16bit, ChannelType::UInt) => create_test_image_u16(width, 1, format),
+        (ChannelSize::_32bit, ChannelType::Float) => create_test_image_f32(width, 1, format),
+        _ => unreachable!("unsupported format in ALL_FORMATS"),
+    };
+    row.into_bytes()
+}
+
+/// Every pair the SIMD table offers must agree with the scalar reference it
+/// stands in for.
+///
+/// This is the cross-check the crate asks of any kernel, driven off the table
+/// itself rather than a hand-kept list — a pair wired up later is covered the
+/// moment it is added, with no new test to remember.
+#[test]
+fn simd_matches_scalar_reference() {
+    for &from in ALL_FORMATS {
+        for &to in ALL_FORMATS {
+            let Some(kernel) = simd::row_converter(from, to) else {
+                continue;
+            };
+            // The luminance kernels weight with the 8-bit fixed-point
+            // `LUMA_8BIT` where the reference uses the 16-bit `LUMA_*`, so they
+            // can land one unit apart; every other kernel is exact. Both
+            // luminance destinations are `L_U8`, so comparing bytes says
+            // precisely that.
+            let mixes_to_luma =
+                to.channel_count == ChannelCount::L && from.channel_count != ChannelCount::L;
+            let slack = u8::from(mixes_to_luma);
+
+            let info = ConversionInfo::new(from, to);
+            for &width in &TEST_WIDTHS {
+                let src = source_row(from, width);
+                let mut vector = vec![0u8; width * to.byte_count() as usize];
+                let mut scalar = vec![0u8; vector.len()];
+
+                // SAFETY: `row_converter` verified this CPU has the feature the
+                // kernel it handed back was compiled for.
+                unsafe { kernel(&src, &mut vector, width) };
+                dispatch_convert_row_scalar(&src, &mut scalar, width, &info);
+
+                for (i, (&want, &got)) in scalar.iter().zip(&vector).enumerate() {
+                    assert!(
+                        want.abs_diff(got) <= slack,
+                        "{from} -> {to} width={width} byte {i}: SIMD {got}, scalar {want}"
+                    );
+                }
+            }
+        }
+    }
+}
 
 #[test]
 fn test_rgba_to_rgb_u8_various_widths() {

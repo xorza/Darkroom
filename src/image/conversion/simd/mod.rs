@@ -1,4 +1,19 @@
 //! SIMD implementations for single-row conversion.
+//!
+//! # Precision
+//!
+//! Every kernel here is bit-identical to the scalar reference it stands in for,
+//! not merely close to it — [`crate::image::conversion`] picks between the two
+//! per format pair, so a pair must not change answers depending on which path a
+//! build or a CPU happens to take. The one exception is the RGB→luminance
+//! kernels, which weight with the 8-bit fixed-point `LUMA_8BIT` where the
+//! reference uses the 16-bit `LUMA_R`/`LUMA_G`/`LUMA_B`.
+//!
+//! That is why the widening kernels *divide* by the source type's full-scale
+//! value rather than multiplying by a precomputed reciprocal, which would be
+//! several times cheaper: `x * (1.0 / 255.0)` is doubly rounded and disagrees
+//! with `x / 255.0` for 126 of the 256 byte values, and `x * (1.0 / 65535.0)`
+//! for 512 of the 65 536 word values.
 
 #![allow(unsafe_op_in_unsafe_fn)]
 
@@ -137,7 +152,9 @@ fn elem_converter(from: ColorFormat, to: ColorFormat) -> Option<RowConvertFn> {
         | (ColorFormat::RGB_U16, ColorFormat::RGB_F32)
         | (ColorFormat::L_U16, ColorFormat::L_F32) => u16_to_f32(),
 
-        (ColorFormat::L_F32, ColorFormat::L_U16) => f32_to_u16(),
+        (ColorFormat::RGBA_F32, ColorFormat::RGBA_U16)
+        | (ColorFormat::RGB_F32, ColorFormat::RGB_U16)
+        | (ColorFormat::L_F32, ColorFormat::L_U16) => f32_to_u16(),
 
         _ => None,
     }
