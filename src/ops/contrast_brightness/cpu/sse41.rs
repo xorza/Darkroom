@@ -103,7 +103,7 @@ pub(super) unsafe fn u8_rgba(row: &mut [u8], pixels: usize, affine: ChannelAffin
         }
     }
 
-    for pixel in tail.chunks_exact_mut(4) {
+    for pixel in tail.as_chunks_mut::<4>().0 {
         for value in &mut pixel[..3] {
             *value = value.apply(affine);
         }
@@ -155,7 +155,7 @@ pub(super) unsafe fn u16_rgba(row: &mut [u8], pixels: usize, affine: ChannelAffi
         }
     }
 
-    for pixel in tail.chunks_exact_mut(4) {
+    for pixel in tail.as_chunks_mut::<4>().0 {
         for value in &mut pixel[..3] {
             *value = value.apply(affine);
         }
@@ -202,7 +202,7 @@ pub(super) unsafe fn f32_rgba(row: &mut [u8], pixels: usize, affine: ChannelAffi
 
     // A pixel fills the vector exactly, so this is empty — kept so the kernel
     // stays correct if the chunk ever covers more than one pixel.
-    for pixel in tail.chunks_exact_mut(4) {
+    for pixel in tail.as_chunks_mut::<4>().0 {
         for value in &mut pixel[..3] {
             *value = value.apply(affine);
         }

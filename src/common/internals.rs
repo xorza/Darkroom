@@ -123,9 +123,9 @@ pub(crate) fn create_test_image_f32(
     let desc = ImageDesc::new(width, height, format);
     let mut img = Image::new_black(desc).unwrap();
     let bytes = img.bytes_mut();
-    for chunk in bytes.chunks_exact_mut(4) {
-        let val_bytes = value.to_le_bytes();
-        chunk.copy_from_slice(&val_bytes);
+    let val_bytes = value.to_le_bytes();
+    for chunk in bytes.as_chunks_mut::<4>().0 {
+        *chunk = val_bytes;
     }
     img
 }

@@ -90,7 +90,7 @@ where
                     // The footprint's columns are contiguous in the row; slice the
                     // band once (one bounds check) and walk pixels bound-free.
                     let band = &src[(row + sx0) * N..(row + sx1) * N];
-                    for px in band.chunks_exact(N) {
+                    for px in band.as_chunks::<N>().0 {
                         for (acc, &v) in sum.iter_mut().zip(px) {
                             *acc += v.to_f32();
                         }
