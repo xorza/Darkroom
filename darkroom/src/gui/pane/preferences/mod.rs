@@ -279,9 +279,8 @@ fn model_row(ui: &mut Ui, theme: &Theme, row: ModelRow, path: &mut PathBuf, out:
                             &mut style.looks.hovered,
                             &mut style.looks.active,
                         ] {
-                            if let Some(bg) = look.background.as_mut() {
-                                bg.stroke = Stroke::solid(theme.status.error, bg.stroke.width);
-                            }
+                            let bg = &mut look.background;
+                            bg.stroke = Stroke::solid(theme.status.error, bg.stroke.width);
                         }
                         style
                     });
@@ -359,7 +358,7 @@ fn download_hint(ui: &mut Ui, theme: &Theme, link_label: &'static str, url: &'st
     // Last frame's hover drives the brighten — this frame's response isn't
     // known until after `show`.
     let link_color = if ui.response_for(id).hovered {
-        theme.colors.badge_graph.midpoint(Color::hex(0xffffff))
+        theme.colors.badge_graph.lerp(Color::hex(0xffffff), 0.5)
     } else {
         theme.colors.badge_graph
     };

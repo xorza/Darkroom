@@ -6,6 +6,7 @@ use crate::core::document::dock::DockOp;
 use crate::gui::app::commands::AppCommand;
 use crate::gui::app::commands::file::FileCommand;
 use crate::gui::requests::Requests;
+use crate::gui::theme::Theme;
 
 /// Top-of-window menu bar. Horizontal strip of "menu trigger" buttons;
 /// each opens a [`ContextMenu`] anchored at the trigger's bottom-left.
@@ -13,14 +14,14 @@ use crate::gui::requests::Requests;
 /// A pick goes onto `out` in whichever tier it belongs to: the file lifecycle
 /// and `Quit` as [`AppCommand`]s for `App` to run after the pass, Preferences
 /// as the [`DockOp`] that opens its tab.
-pub(crate) fn show(ui: &mut Ui, out: &mut Requests) {
+pub(crate) fn show(ui: &mut Ui, theme: &Theme, out: &mut Requests) {
     Panel::hstack()
         .auto_id()
         .size((Sizing::HUG, Sizing::HUG))
         .padding(Spacing::xy(4.0, 4.0))
         .gap(2.0)
         .show(ui, |ui| {
-            file_menu(ui, out);
+            file_menu(ui, theme, out);
         });
 }
 
@@ -28,13 +29,15 @@ pub(crate) fn show(ui: &mut Ui, out: &mut Requests) {
 /// `ContextMenu` of [`MenuItem`] rows. `build` populates the popup and raises
 /// whatever a pick means. Centralizes the trigger + anchor + open plumbing so
 /// each menu is just its label + rows.
-fn dropdown(ui: &mut Ui, label: &'static str, build: impl FnOnce(&mut Ui, &PopupHandle)) {
-    // Handle, not a borrow: `Button::style` holds the reference across
-    // `show`'s `&mut Ui`.
-    let ui_theme = ui.theme().clone();
+fn dropdown(
+    ui: &mut Ui,
+    theme: &Theme,
+    label: &'static str,
+    build: impl FnOnce(&mut Ui, &PopupHandle),
+) {
     let trigger = Button::new()
         .label(label)
-        .style(&ui_theme.menu_button)
+        .style(&theme.menu_button)
         .show(ui)
         .snapshot();
     if trigger.left.clicked()
@@ -47,8 +50,8 @@ fn dropdown(ui: &mut Ui, label: &'static str, build: impl FnOnce(&mut Ui, &Popup
     });
 }
 
-fn file_menu(ui: &mut Ui, out: &mut Requests) {
-    dropdown(ui, "File", |ui, popup| {
+fn file_menu(ui: &mut Ui, theme: &Theme, out: &mut Requests) {
+    dropdown(ui, theme, "File", |ui, popup| {
         if MenuItem::new("New").show(ui, popup).left.clicked() {
             out.push_app(AppCommand::File(FileCommand::New));
         }

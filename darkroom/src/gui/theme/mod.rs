@@ -1,8 +1,8 @@
 pub(crate) mod color;
 
 use palantir::{
-    Brush, ButtonTheme, Color, DragValueTheme, FontWeight, Shadow, Spacing, Stroke, TextEditTheme,
-    TextStyle, WidgetLook,
+    Background, Brush, ButtonTheme, Color, DragValueTheme, FontWeight, Shadow, Spacing,
+    TextEditTheme, TextStyle, WidgetLook,
 };
 
 use crate::core::theme_pref::ThemeChoice;
@@ -239,6 +239,12 @@ pub(crate) struct Theme {
     /// per node per frame just to carry one weight.
     pub(crate) inline_rename_title: InlineRenameTheme,
 
+    /// Look for a menu-bar trigger button (`[menu_button]`). Darkroom's
+    /// own slot: palantir ships the recipe but no theme field, because
+    /// none of its widgets resolve against a menu-bar style — the bar
+    /// passes this to [`palantir::Button::style`] itself.
+    pub(crate) menu_button: ButtonTheme,
+
     /// Palantir-side widget theme. Pushed onto `Ui::theme` once at
     /// startup so every palantir widget (Button, TextEdit, MenuItem,
     /// Scroll, Tooltip…) reads a darkroom-tuned palette without each
@@ -332,14 +338,11 @@ impl ConstValueEditorTheme {
         const REVEAL_ALPHA: f32 = 0.5;
         let mut out = Self::from_palette(p);
         let reveal = Brush::Solid(p.elem_hover.with_alpha(REVEAL_ALPHA));
-        for look in [
-            out.drag_value.chip.looks.normal.background.as_mut(),
-            out.drag_value.editor.looks.normal.background.as_mut(),
-        ]
-        .into_iter()
-        .flatten()
-        {
-            look.fill = reveal.clone();
+        for bg in [
+            &mut out.drag_value.chip.looks.normal.background,
+            &mut out.drag_value.editor.looks.normal.background,
+        ] {
+            bg.fill = reveal.clone();
         }
         out
     }
@@ -390,6 +393,11 @@ impl InlineRenameTheme {
     /// Split out so the ambient path and this theme's own slot are
     /// stripped by one function: a visual added here can't be flattened
     /// in the configured bundle and left standing in the fallback.
+    ///
+    /// [`Background::NONE`] wholesale rather than clearing fill and stroke
+    /// by hand: `text_edit` may be an app-configured bundle, and a shadow
+    /// or radius it carries would otherwise outlive the flattening and
+    /// paint around a field that is supposed to read as a plain label.
     pub(crate) fn flattened(text_edit: &TextEditTheme) -> Self {
         let mut style = TextEditTheme {
             padding: Spacing::ZERO,
@@ -402,10 +410,7 @@ impl InlineRenameTheme {
             &mut style.looks.active,
             &mut style.looks.disabled,
         ] {
-            if let Some(bg) = look.background.as_mut() {
-                bg.stroke = Stroke::ZERO;
-                bg.fill = Brush::TRANSPARENT;
-            }
+            look.background = Background::NONE;
         }
         Self { text_edit: style }
     }
@@ -465,9 +470,8 @@ const PALANTIR_LIGHT: palantir::Palette = palantir::Palette {
 
 /// Palantir sub-theme for darkroom: assemble every widget recipe from
 /// the palette via [`palantir::Theme::from_palette`], then apply the
-/// darkroom-only tweaks (smaller menu/context-menu font; menu-bar
-/// triggers muted + transparent at rest so they read as menus, not
-/// buttons).
+/// darkroom-only tweaks (smaller context-menu font, chrome-coloured dock
+/// seam).
 ///
 /// Takes `text` rather than reaching for a private menu-font const: menu rows
 /// are ordinary UI text, so they read [`TypeScale::body`] like every other
@@ -486,34 +490,48 @@ fn palantir_theme_for(
     theme.splitter.rule = chrome_fill;
     theme.splitter.rule_thickness = 4.0;
 
-    // Menu-bar triggers read as menus, not buttons: transparent at rest
-    // (the `menu_button` preset already is — no chip overlay), the label
-    // muted until hovered, and the whole thing at the smaller menu scale.
-    // hover/pressed keep the `elem_hover`/`elem_active` fills that
-    // `recolour_palantir` set.
+    // Context-menu rows at the smaller menu scale, each keeping the colour
+    // its own state resolved to.
     let base = &theme.text;
-    // Font-only shrink (keeps each look's own colour) for the context-menu
-    // rows; menu-bar triggers also recolour per state, so they use `restyle`.
     let shrink = |look: &mut WidgetLook| {
         let style = look.text.take().unwrap_or_else(|| base.clone());
         look.text = Some(style.with_font_size(text.body));
     };
-    let restyle = |look: &mut WidgetLook, color: Color| {
-        let style = look.text.take().unwrap_or_else(|| base.clone());
-        look.text = Some(style.with_color(color).with_font_size(text.body));
-    };
-    let mb = &mut theme.menu_button;
-    restyle(&mut mb.looks.normal, p.text_muted);
-    restyle(&mut mb.looks.hovered, p.text);
-    restyle(&mut mb.looks.active, p.text);
-    restyle(&mut mb.looks.disabled, p.text_disabled);
-
     let item = &mut theme.context_menu.item;
     shrink(&mut item.looks.normal);
     shrink(&mut item.looks.hovered);
     shrink(&mut item.looks.active);
     shrink(&mut item.looks.disabled);
     theme
+}
+
+/// Menu-bar trigger look: palantir's [`ButtonTheme::menu_button`] recipe
+/// (transparent at rest, `elem_hover` / `elem_active` fills, no chip
+/// overlay) with the label muted until hovered and every state at the
+/// menu scale — so a trigger reads as a menu, not as a button.
+///
+/// A darkroom slot rather than a `palantir::Theme` field because no
+/// palantir widget resolves against a menu-bar style: the bar hands this
+/// to [`palantir::Button::style`] at the call site.
+///
+/// `fallback_text` is the assembled palantir theme's ambient style — the
+/// one an unstyled label would have inherited — so the only axes this
+/// pins are the two it sets.
+fn menu_button_for(
+    p: &palantir::Palette,
+    fallback_text: &TextStyle,
+    text: &TypeScale,
+) -> ButtonTheme {
+    let mut mb = ButtonTheme::menu_button(p);
+    let restyle = |look: &mut WidgetLook, color: Color| {
+        let style = look.text.take().unwrap_or_else(|| fallback_text.clone());
+        look.text = Some(style.with_color(color).with_font_size(text.body));
+    };
+    restyle(&mut mb.looks.normal, p.text_muted);
+    restyle(&mut mb.looks.hovered, p.text);
+    restyle(&mut mb.looks.active, p.text);
+    restyle(&mut mb.looks.disabled, p.text_disabled);
+    mb
 }
 
 palette_struct! {
@@ -806,6 +824,7 @@ impl Theme {
             const_value_editor_revealed: ConstValueEditorTheme::revealed_from_palette(p),
             inline_rename,
             inline_rename_title,
+            menu_button: menu_button_for(p, &palantir_theme.text, &TypeScale::DEFAULT),
             palantir_theme,
         }
     }
@@ -939,8 +958,9 @@ mod tests {
     }
 
     /// Pin which swatch reaches which field, plus the non-trivial palantir
-    /// tweak, so a regression in `Theme::build`'s wiring or in
-    /// `default_palantir_theme` fails loudly. Against the generated consts
+    /// tweak, so a regression in `Theme::build`'s wiring, in
+    /// `palantir_theme_for`, or in `menu_button_for` fails loudly. Against
+    /// the generated consts
     /// rather than hex literals: the values are the palette's to choose, but
     /// landing `HEADER_FILL` in `canvas.bg` is still a bug.
     #[test]
@@ -960,7 +980,6 @@ mod tests {
         assert!(theme.palantir_theme.tooltip.max_size.h.is_infinite());
         // The menu-bar font was shrunk from palantir's default to ours.
         let menu_text = theme
-            .palantir_theme
             .menu_button
             .looks
             .normal
