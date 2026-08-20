@@ -8,7 +8,13 @@ pub(crate) mod pipeline;
 
 use glam::{Affine2, Vec2};
 
+#[cfg(feature = "wgpu")]
+use crate::gpu::Gpu;
+#[cfg(feature = "wgpu")]
+use crate::gpu::gpu_image::GpuImage;
 use crate::image::Image;
+#[cfg(feature = "wgpu")]
+use crate::ops::transform::pipeline::GpuTransformPipeline;
 
 /// Filter mode for image sampling during transformation.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -93,5 +99,20 @@ impl Transform {
     /// Panics if input and output have different color formats.
     pub fn apply_cpu(&self, input: &Image, output: &mut Image) {
         cpu::apply(self, input, output);
+    }
+
+    /// Applies the transform to the input image, writing to output.
+    ///
+    /// The output image dimensions determine the size of the result.
+    /// Areas outside the transformed input will be transparent (RGBA 0,0,0,0).
+    #[cfg(feature = "wgpu")]
+    pub fn apply_gpu(
+        &self,
+        ctx: &Gpu,
+        pipeline: &GpuTransformPipeline,
+        input: &GpuImage,
+        output: &mut GpuImage,
+    ) {
+        gpu::apply(self, ctx, pipeline, input, output)
     }
 }

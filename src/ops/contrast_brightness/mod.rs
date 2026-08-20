@@ -6,7 +6,15 @@ mod gpu;
 #[cfg(feature = "wgpu")]
 pub(crate) mod pipeline;
 
+#[cfg(feature = "wgpu")]
+use crate::common::error::Result;
+#[cfg(feature = "wgpu")]
+use crate::gpu::Gpu;
+#[cfg(feature = "wgpu")]
+use crate::gpu::gpu_image::GpuImage;
 use crate::image::Image;
+#[cfg(feature = "wgpu")]
+use crate::ops::contrast_brightness::pipeline::GpuContrastBrightnessPipeline;
 
 /// Parameters for contrast and brightness adjustment.
 #[derive(Debug, Clone, Copy)]
@@ -57,6 +65,21 @@ impl ContrastBrightness {
     /// Alpha channel (if present) is preserved unchanged.
     pub fn apply_cpu(&self, image: &mut Image) {
         cpu::apply(self, image);
+    }
+
+    /// Applies contrast and brightness adjustment using GPU.
+    ///
+    /// # Panics
+    /// Panics if images have different dimensions or color formats.
+    #[cfg(feature = "wgpu")]
+    pub fn apply_gpu(
+        &self,
+        ctx: &Gpu,
+        pipeline: &GpuContrastBrightnessPipeline,
+        input: &GpuImage,
+        output: &mut GpuImage,
+    ) -> Result<()> {
+        gpu::apply(self, ctx, pipeline, input, output)
     }
 }
 

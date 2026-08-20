@@ -6,7 +6,15 @@ pub(crate) mod pipeline;
 
 use strum_macros::{EnumString, VariantNames};
 
+#[cfg(feature = "wgpu")]
+use crate::common::error::Result;
+#[cfg(feature = "wgpu")]
+use crate::gpu::Gpu;
+#[cfg(feature = "wgpu")]
+use crate::gpu::gpu_image::GpuImage;
 use crate::image::Image;
+#[cfg(feature = "wgpu")]
+use crate::ops::blend::pipeline::GpuBlendPipeline;
 
 /// Blend modes for combining two images.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, EnumString, VariantNames)]
@@ -75,5 +83,22 @@ impl Blend {
     /// Panics if images have different dimensions or color formats.
     pub fn apply_cpu(&self, src: &Image, dst: &Image, output: &mut Image) {
         cpu::apply(self, src, dst, output);
+    }
+
+    /// Applies blending of two images using GPU.
+    /// Supports U8 and F32 formats for L, LA, RGB, and RGBA.
+    ///
+    /// # Panics
+    /// Panics if images have different dimensions or color formats.
+    #[cfg(feature = "wgpu")]
+    pub fn apply_gpu(
+        &self,
+        ctx: &Gpu,
+        pipeline: &GpuBlendPipeline,
+        src: &GpuImage,
+        dst: &GpuImage,
+        output: &mut GpuImage,
+    ) -> Result<()> {
+        gpu::apply(self, ctx, pipeline, src, dst, output)
     }
 }

@@ -7,108 +7,103 @@ use crate::gpu::Gpu;
 use crate::gpu::gpu_image::GpuImage;
 use crate::ops::gpu_format::*;
 
-impl Transform {
-    /// Applies the transform to the input image, writing to output.
-    ///
-    /// The output image dimensions determine the size of the result.
-    /// Areas outside the transformed input will be transparent (RGBA 0,0,0,0).
-    pub fn apply_gpu(
-        &self,
-        ctx: &Gpu,
-        pipeline: &GpuTransformPipeline,
-        input: &GpuImage,
-        output: &mut GpuImage,
-    ) {
-        let device = &ctx.device;
-        let queue = &ctx.queue;
-        let input_desc = input.desc;
-        let output_desc = output.desc;
+/// The GPU path behind [`Transform::apply_gpu`].
+pub(super) fn apply(
+    params: &Transform,
+    ctx: &Gpu,
+    pipeline: &GpuTransformPipeline,
+    input: &GpuImage,
+    output: &mut GpuImage,
+) {
+    let device = &ctx.device;
+    let queue = &ctx.queue;
+    let input_desc = input.desc;
+    let output_desc = output.desc;
 
-        assert_eq!(
-            output_desc.color_format, input_desc.color_format,
-            "Input and output must have same color format"
-        );
+    assert_eq!(
+        output_desc.color_format, input_desc.color_format,
+        "Input and output must have same color format"
+    );
 
-        let format_type =
-            get_format_type(input_desc.color_format).expect("Unsupported format for Transform");
+    let format_type =
+        get_format_type(input_desc.color_format).expect("Unsupported format for Transform");
 
-        let needs_clear = matches!(
-            format_type,
-            FORMAT_L_U8 | FORMAT_RGB_U8 | FORMAT_L_U16 | FORMAT_RGB_U16
-        );
+    let needs_clear = matches!(
+        format_type,
+        FORMAT_L_U8 | FORMAT_RGB_U8 | FORMAT_L_U16 | FORMAT_RGB_U16
+    );
 
-        let inv = self.transform.inverse();
+    let inv = params.transform.inverse();
 
-        let gpu_params = Params {
-            inv_matrix: [
-                inv.matrix2.x_axis.x,
-                inv.matrix2.x_axis.y,
-                inv.matrix2.y_axis.x,
-                inv.matrix2.y_axis.y,
-            ],
-            inv_translation: [inv.translation.x, inv.translation.y],
-            input_width: input_desc.width as u32,
-            input_height: input_desc.height as u32,
-            output_width: output_desc.width as u32,
-            output_height: output_desc.height as u32,
-            input_stride: input.desc.row_bytes() as u32,
-            output_stride: output.desc.row_bytes() as u32,
-            filter_mode: match self.filter {
-                FilterMode::Nearest => 0,
-                FilterMode::Bilinear => 1,
+    let gpu_params = Params {
+        inv_matrix: [
+            inv.matrix2.x_axis.x,
+            inv.matrix2.x_axis.y,
+            inv.matrix2.y_axis.x,
+            inv.matrix2.y_axis.y,
+        ],
+        inv_translation: [inv.translation.x, inv.translation.y],
+        input_width: input_desc.width as u32,
+        input_height: input_desc.height as u32,
+        output_width: output_desc.width as u32,
+        output_height: output_desc.height as u32,
+        input_stride: input.desc.row_bytes() as u32,
+        output_stride: output.desc.row_bytes() as u32,
+        filter_mode: match params.filter {
+            FilterMode::Nearest => 0,
+            FilterMode::Bilinear => 1,
+        },
+        format_type,
+    };
+
+    let params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("transform_params_buffer"),
+        contents: bytemuck::bytes_of(&gpu_params),
+        usage: wgpu::BufferUsages::UNIFORM,
+    });
+
+    let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("transform_bind_group"),
+        layout: &pipeline.bind_group_layout,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: params_buffer.as_entire_binding(),
             },
-            format_type,
-        };
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: input.read_buffer().as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: output.write_buffer().as_entire_binding(),
+            },
+        ],
+    });
 
-        let params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("transform_params_buffer"),
-            contents: bytemuck::bytes_of(&gpu_params),
-            usage: wgpu::BufferUsages::UNIFORM,
-        });
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("transform_encoder"),
+    });
 
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("transform_bind_group"),
-            layout: &pipeline.bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: params_buffer.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: input.read_buffer().as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: output.write_buffer().as_entire_binding(),
-                },
-            ],
-        });
-
-        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("transform_encoder"),
-        });
-
-        if needs_clear {
-            encoder.clear_buffer(output.write_buffer().buffer(), 0, None);
-        }
-
-        {
-            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("transform_pass"),
-                timestamp_writes: None,
-            });
-
-            pass.set_pipeline(&pipeline.pipeline);
-            pass.set_bind_group(0, &bind_group, &[]);
-
-            let workgroups_x = output_desc.width.div_ceil(16) as u32;
-            let workgroups_y = output_desc.height.div_ceil(16) as u32;
-            pass.dispatch_workgroups(workgroups_x, workgroups_y, 1);
-        }
-
-        queue.submit(std::iter::once(encoder.finish()));
+    if needs_clear {
+        encoder.clear_buffer(output.write_buffer().buffer(), 0, None);
     }
+
+    {
+        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: Some("transform_pass"),
+            timestamp_writes: None,
+        });
+
+        pass.set_pipeline(&pipeline.pipeline);
+        pass.set_bind_group(0, &bind_group, &[]);
+
+        let workgroups_x = output_desc.width.div_ceil(16) as u32;
+        let workgroups_y = output_desc.height.div_ceil(16) as u32;
+        pass.dispatch_workgroups(workgroups_x, workgroups_y, 1);
+    }
+
+    queue.submit(std::iter::once(encoder.finish()));
 }
 
 #[repr(C)]

@@ -8,71 +8,66 @@ use crate::gpu::Gpu;
 use crate::gpu::gpu_image::GpuImage;
 use crate::image::ImageDesc;
 
-impl ContrastBrightness {
-    /// Applies contrast and brightness adjustment using GPU.
-    ///
-    /// # Panics
-    /// Panics if images have different dimensions or color formats.
-    pub fn apply_gpu(
-        &self,
-        ctx: &Gpu,
-        pipeline: &GpuContrastBrightnessPipeline,
-        input: &GpuImage,
-        output: &mut GpuImage,
-    ) -> Result<()> {
-        let device = &ctx.device;
-        let queue = &ctx.queue;
+/// The GPU path behind [`ContrastBrightness::apply_gpu`].
+pub(super) fn apply(
+    params: &ContrastBrightness,
+    ctx: &Gpu,
+    pipeline: &GpuContrastBrightnessPipeline,
+    input: &GpuImage,
+    output: &mut GpuImage,
+) -> Result<()> {
+    let device = &ctx.device;
+    let queue = &ctx.queue;
 
-        assert_eq!(input.desc, output.desc, "input/output desc mismatch");
+    assert_eq!(input.desc, output.desc, "input/output desc mismatch");
 
-        let uniform_params = Params::new(input.desc, self.contrast, self.brightness);
+    let uniform_params = Params::new(input.desc, params.contrast, params.brightness);
 
-        let params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("contrast_brightness_params_buffer"),
-            contents: bytemuck::cast_slice(&[uniform_params]),
-            usage: wgpu::BufferUsages::UNIFORM,
+    let params_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("contrast_brightness_params_buffer"),
+        contents: bytemuck::cast_slice(&[uniform_params]),
+        usage: wgpu::BufferUsages::UNIFORM,
+    });
+
+    let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("contrast_brightness_bind_group"),
+        layout: &pipeline.bind_group_layout,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: params_buffer.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: input.read_buffer().as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: output.write_buffer().as_entire_binding(),
+            },
+        ],
+    });
+
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("contrast_brightness_encoder"),
+    });
+
+    {
+        let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: Some("contrast_brightness_pass"),
+            timestamp_writes: None,
         });
+        compute_pass.set_pipeline(&pipeline.compute_pipeline);
+        compute_pass.set_bind_group(0, &bind_group, &[]);
 
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("contrast_brightness_bind_group"),
-            layout: &pipeline.bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: params_buffer.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: input.read_buffer().as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: output.write_buffer().as_entire_binding(),
-                },
-            ],
-        });
-
-        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("contrast_brightness_encoder"),
-        });
-
-        {
-            let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("contrast_brightness_pass"),
-                timestamp_writes: None,
-            });
-            compute_pass.set_pipeline(&pipeline.compute_pipeline);
-            compute_pass.set_bind_group(0, &bind_group, &[]);
-
-            // One invocation per u32 word of the packed buffer.
-            let total_words = uniform_params.total_bytes.div_ceil(4);
-            compute_pass.dispatch_workgroups(total_words.div_ceil(256), 1, 1);
-        }
-
-        queue.submit(std::iter::once(encoder.finish()));
-
-        Ok(())
+        // One invocation per u32 word of the packed buffer.
+        let total_words = uniform_params.total_bytes.div_ceil(4);
+        compute_pass.dispatch_workgroups(total_words.div_ceil(256), 1, 1);
     }
+
+    queue.submit(std::iter::once(encoder.finish()));
+
+    Ok(())
 }
 
 /// Sentinel for "no alpha channel to preserve" (matches the WGSL constant).
