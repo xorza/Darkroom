@@ -12,7 +12,7 @@ use palantir::internals::UiHarness;
 use palantir::{Configure, Panel, Rect, Sizing, Ui};
 use scenarium::NodeId;
 
-use crate::core::document::dock::DockOp;
+use crate::core::document::dock::dock_op::DockOp;
 use crate::core::document::harness::DocFixture;
 use crate::core::document::{Document, PortRef};
 use crate::core::edit::graph_intent::GraphIntent;

@@ -394,7 +394,7 @@ impl From<&LinearImage> for Image {
 
 /// Deinterleave an imaginarium image into planes, converting to `f32` first when it is not already.
 ///
-/// The inbound half of the boundary `impl From<&LinearImage> for Image` forms the outbound half of:
+/// The inbound half of the boundary whose outbound half is `impl From<&LinearImage> for Image`:
 /// what a caller holding interleaved pixels goes through to reach the ops, which take planes.
 impl From<&Image> for LinearImage {
     /// Deinterleaves into planes, converting to the matching `f32` channel format first when the

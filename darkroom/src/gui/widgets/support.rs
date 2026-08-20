@@ -72,7 +72,7 @@ pub(crate) fn footer_background(theme: &Theme, corner_radius: f32) -> Background
 
 /// A card's title-bar background: the header fill, rounded on only its top
 /// two corners so it seats inside the card's own outer stroke — `corner_radius`
-/// should be [`CardTheme::inner_radius`](crate::gui::theme::CardTheme::inner_radius),
+/// should be [`CardTheme::inner_radius`](crate::gui::theme::card_theme::CardTheme::inner_radius),
 /// not the card's outer radius, else the band's corner leaves a wedge of the
 /// card's plain fill showing through. Used by a node body's header — the one
 /// title bar in the tree, kept here beside its footer peer.

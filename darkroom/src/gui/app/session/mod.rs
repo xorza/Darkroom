@@ -233,7 +233,7 @@ mod tests {
     use scenarium::{Func, FuncId, Node, NodeId, NodeKind, testing};
 
     use crate::core::document::TabRef;
-    use crate::core::document::dock::DockOp;
+    use crate::core::document::dock::dock_op::DockOp;
     use crate::core::document::harness::DocFixture;
     use crate::core::edit::graph_intent::GraphIntent;
     use crate::core::preview::preview_func;

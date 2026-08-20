@@ -24,9 +24,11 @@ pub(crate) mod strip;
 
 use std::borrow::Cow;
 
-use crate::core::document::dock::{
-    DockLayout, DockNode, DockOp, DockPath, DockSplit, NodeIdx, SplitDir, TabGroup, TabGroupId,
-};
+use crate::core::document::dock::dock_op::DockOp;
+use crate::core::document::dock::dock_path::DockPath;
+use crate::core::document::dock::split_side::SplitDir;
+use crate::core::document::dock::tab_group::TabGroup;
+use crate::core::document::dock::{DockLayout, DockNode, DockSplit, NodeIdx, TabGroupId};
 use crate::core::document::open_document::OpenDocument;
 use crate::core::document::{Document, TabRef};
 use crate::gui::dock::drag::{DropTarget, PaneGeometry, TabDrag, classify_drop};

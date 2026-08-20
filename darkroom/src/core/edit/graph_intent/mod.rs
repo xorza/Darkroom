@@ -14,7 +14,7 @@
 //! step is a file in [`step`](crate::core::edit::step).
 //!
 //! The same split runs the other way, by *scope*: a `GraphIntent` edits the
-//! graph, while a [`DockOp`](crate::core::document::dock::DockOp) edits the
+//! graph, while a [`DockOp`](crate::core::document::dock::dock_op::DockOp) edits the
 //! layout around it. Neither can be mistaken for the other, so no code path
 //! has to carry state it will not read.
 
@@ -49,7 +49,7 @@ const DUPLICATE_OFFSET: Vec2 = Vec2::new(32.0, 32.0);
 ///
 /// Every variant here edits the graph, and travels the frame's queue as its
 /// `Graph` tier. A mutation of the layout instead of the graph is a
-/// [`DockOp`](crate::core::document::dock::DockOp), which travels the same
+/// [`DockOp`](crate::core::document::dock::dock_op::DockOp), which travels the same
 /// queue in the `View` tier.
 #[derive(Debug)]
 pub(crate) enum GraphIntent {

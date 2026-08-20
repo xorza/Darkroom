@@ -10,7 +10,8 @@ use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::graph_ctx::input_ctx::InputCtx;
 use crate::gui::graph_ctx::output_ctx::OutputCtx;
 use crate::gui::state::run_state::ExecStatus;
-use crate::gui::theme::{ConstValueEditorTheme, Theme};
+use crate::gui::theme::Theme;
+use crate::gui::theme::const_value_editor_theme::ConstValueEditorTheme;
 
 /// The `kind_label` a node reports when the library holds no func for it —
 /// see [`NodeCtx::missing`].

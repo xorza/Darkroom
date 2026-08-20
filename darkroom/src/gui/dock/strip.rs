@@ -13,7 +13,10 @@ use palantir::{
 };
 
 use crate::core::document::TabRef;
-use crate::core::document::dock::{DockDrop, DockOp, SplitSide, TabGroup, TabGroupId};
+use crate::core::document::dock::TabGroupId;
+use crate::core::document::dock::dock_op::{DockDrop, DockOp};
+use crate::core::document::dock::split_side::SplitSide;
+use crate::core::document::dock::tab_group::TabGroup;
 use crate::gui::requests::Requests;
 use crate::gui::theme::Theme;
 use crate::gui::widgets::support::{colored_text, muted_text};

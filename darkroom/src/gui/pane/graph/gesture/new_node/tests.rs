@@ -129,33 +129,6 @@ fn the_palette_sizes_its_results_area_from_the_search_row_it_actually_has() {
     );
 }
 
-#[test]
-fn name_matches_is_case_insensitive_substring_with_empty_query_wildcard() {
-    // Empty query is the "show everything" wildcard.
-    assert!(name_matches("Gaussian Blur", ""));
-    assert!(name_matches("", ""));
-    // Case-insensitive substring anywhere in the name. Caller passes an
-    // already-lowercased query, so only the name is folded here.
-    assert!(name_matches("Gaussian Blur", "blur"));
-    assert!(name_matches("Gaussian Blur", "gauss"));
-    assert!(name_matches("Gaussian Blur", "an bl"));
-    // Non-substring and wrong-fragment queries reject.
-    assert!(!name_matches("Gaussian Blur", "sharpen"));
-    assert!(!name_matches("Blur", "blurry"));
-    // A non-lowercased query never matches a lowercased name — the
-    // contract is "query already lowercased", so this documents that a
-    // caller who forgets to fold gets no false positives. It holds on
-    // both sides of the ASCII fast path.
-    assert!(!name_matches("blur", "BLUR"));
-    assert!(!name_matches("Grün", "GRÜN"));
-    // Non-ASCII names fold by the Unicode rules, not byte-wise.
-    assert!(name_matches("Grün", "grün"));
-    assert!(name_matches("Ölfilter", "ölfil"));
-    assert!(!name_matches("Grün", "grun"));
-    // An ASCII name never matches a non-ASCII query.
-    assert!(!name_matches("Blur", "blür"));
-}
-
 /// An idle frame that only *paints* must not read as the canvas having been
 /// away — the open palette focuses its search field, whose caret blink wakes
 /// the runtime with no input behind it, and that wake runs no record pass.

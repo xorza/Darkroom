@@ -27,10 +27,21 @@
 //! `gui::pane::graph::GraphUI`). `Main` still can't be closed, which is what
 //! keeps the primary group — and so the tree — alive.
 
+pub(crate) mod dock_op;
+pub(crate) mod dock_path;
+pub(crate) mod error;
+pub(crate) mod split_side;
+pub(crate) mod tab_group;
+
 use common::id_type;
 use serde::{Deserialize, Serialize};
 
 use crate::core::document::TabRef;
+use crate::core::document::dock::dock_op::{DockDrop, DockOp};
+use crate::core::document::dock::dock_path::DockPath;
+use crate::core::document::dock::error::DockValidationError;
+use crate::core::document::dock::split_side::{SplitDir, SplitSide};
+use crate::core::document::dock::tab_group::TabGroup;
 
 id_type!(TabGroupId);
 
@@ -44,81 +55,6 @@ const RATIO_MAX: f32 = 0.9;
 /// UI sane and every split address comfortably inside a [`DockPath`].
 const MAX_SPLIT_DEPTH: u32 = 4;
 
-#[derive(Debug, thiserror::Error)]
-pub(crate) enum DockValidationError {
-    #[error("dock nodes are not in canonical pre-order")]
-    NonCanonical,
-    #[error("dock node index {index} out of range")]
-    NodeOutOfRange { index: u32 },
-    #[error("split nesting exceeds the cap")]
-    SplitNesting,
-    #[error("split ratio {ratio} out of bounds")]
-    SplitRatio { ratio: f32 },
-    #[error("dock tree has slots unreachable from the root")]
-    UnreachableSlots,
-    #[error("no group holds the Main graph tab")]
-    MissingMainTab,
-    #[error("dock group id {group_id:?} appears twice")]
-    DuplicateGroup { group_id: TabGroupId },
-    #[error("dock group {group_id:?} is empty")]
-    EmptyGroup { group_id: TabGroupId },
-    #[error("dock group {group_id:?} active tab out of range")]
-    ActiveTabOutOfRange { group_id: TabGroupId },
-    #[error("tab {tab:?} appears twice")]
-    DuplicateTab { tab: TabRef },
-    #[error("focused group {group_id:?} is missing")]
-    MissingFocusedGroup { group_id: TabGroupId },
-}
-
-/// A split's address: the turns taken from the root, packed into one
-/// byte — a leading sentinel bit, then one bit per level (`0` = first
-/// child, `1` = second). The root split is the bare sentinel. One
-/// `Copy` byte instead of a `Vec<bool>`, with capacity for 7 levels —
-/// [`MAX_SPLIT_DEPTH`] keeps real trees well inside that.
-///
-/// Like any address into the layout it's only stable between
-/// structural changes; a stale path that no longer lands on a split is
-/// ignored by the ops it feeds.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub(crate) struct DockPath(u8);
-
-impl DockPath {
-    /// The root node's address (the empty path).
-    pub(crate) const ROOT: DockPath = DockPath(1);
-
-    /// The address of `self`'s first (left/top) child.
-    pub(crate) fn first(self) -> DockPath {
-        self.child(false)
-    }
-
-    /// The address of `self`'s second (right/bottom) child.
-    pub(crate) fn second(self) -> DockPath {
-        self.child(true)
-    }
-
-    fn child(self, second: bool) -> DockPath {
-        assert!(
-            self.0 < 0x80,
-            "dock path capacity (7 levels) exceeded — MAX_SPLIT_DEPTH should stop far earlier"
-        );
-        DockPath((self.0 << 1) | second as u8)
-    }
-
-    /// Turns from the root, in root→leaf order. Saturating so the
-    /// invalid sentinel-less `0` byte (reachable only through serde)
-    /// yields no turns instead of underflowing.
-    fn directions(self) -> impl Iterator<Item = bool> {
-        let depth = 7u32.saturating_sub(self.0.leading_zeros());
-        (0..depth).rev().map(move |i| (self.0 >> i) & 1 == 1)
-    }
-}
-
-impl Default for DockPath {
-    fn default() -> Self {
-        Self::ROOT
-    }
-}
-
 /// Index of a node in [`DockLayout`]'s flat tree. Only stable between
 /// structural changes (normalize re-packs); long-lived references use
 /// [`TabGroupId`], and an op fed a stale index bounds-checks and no-ops.
@@ -128,112 +64,6 @@ pub(crate) struct NodeIdx(u32);
 impl NodeIdx {
     fn usize(self) -> usize {
         self.0 as usize
-    }
-}
-
-/// How a [`DockSplit`] arranges its children: `Row` side by side
-/// (vertical divider), `Column` stacked (horizontal divider).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) enum SplitDir {
-    Row,
-    Column,
-}
-
-/// Which edge of a pane a split lands on — the new pane takes that
-/// edge's half. `Left`/`Right` split into a [`SplitDir::Row`],
-/// `Top`/`Bottom` into a [`SplitDir::Column`].
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) enum SplitSide {
-    Left,
-    Right,
-    Top,
-    Bottom,
-}
-
-impl SplitSide {
-    fn dir(self) -> SplitDir {
-        match self {
-            SplitSide::Left | SplitSide::Right => SplitDir::Row,
-            SplitSide::Top | SplitSide::Bottom => SplitDir::Column,
-        }
-    }
-
-    /// Whether the new pane becomes the split's *first* child (left /
-    /// top).
-    fn new_pane_first(self) -> bool {
-        matches!(self, SplitSide::Left | SplitSide::Top)
-    }
-}
-
-/// Where a moved tab lands — the payload of [`DockOp::MoveTab`].
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) enum DockDrop {
-    /// Join `group`'s strip at `index` (clamped to its length).
-    Into { group: TabGroupId, index: usize },
-    /// Split `group`'s pane; the tab becomes a fresh single-tab group on
-    /// the given side.
-    Split { group: TabGroupId, side: SplitSide },
-}
-
-/// One dock-layout mutation, executed by [`DockLayout::apply`]. The
-/// single op vocabulary the whole pipeline speaks: the dock UI (or a
-/// menu item, or a preview card's chip) constructs one, the frame's
-/// queue transports it as `DocumentRequest::View`, and `apply` runs it.
-///
-/// **Every op tolerates a stale address.** One is built from a response
-/// of the frame before and applied a phase later, by which time the tab,
-/// group, or split it names may be gone — so an op that resolves to
-/// nothing leaves the layout untouched rather than failing.
-///
-/// Every tab op names its tab by identity, never by strip position: an
-/// index would by then address whatever tab slid into that slot.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
-pub(crate) enum DockOp {
-    /// Make `tab` visible in whichever group holds it, and focus that
-    /// group.
-    ActivateTab { tab: TabRef },
-    /// Open `tab` in the focused group — reusing it wherever it already
-    /// sits — then make it visible and focus its pane. The whole of "show
-    /// me X": the Preferences menu item and a preview card's viewer chip
-    /// both raise this and nothing else.
-    OpenTab { tab: TabRef },
-    /// Close `tab` wherever it sits. The `Main` tab never closes — the
-    /// op refuses it.
-    CloseTab { tab: TabRef },
-    /// Move `tab` to `to` — into another strip or splitting a pane.
-    MoveTab { tab: TabRef, to: DockDrop },
-    /// Set the ratio of the split at `split` (its packed root path).
-    /// Emitted per frame by a divider drag; coalesces per split.
-    SetRatio { split: DockPath, ratio: f32 },
-    /// Move focus onto `group`, because a press landed inside its pane.
-    /// The incidental half of navigation — focus following the pointer —
-    /// beside the deliberate ops around it.
-    FocusPane { group: TabGroupId },
-}
-
-/// One pane's tab strip: the open tabs plus which one is visible.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub(crate) struct TabGroup {
-    pub(crate) id: TabGroupId,
-    /// Non-empty; a group whose last tab closes collapses out of the tree.
-    pub(crate) tabs: Vec<TabRef>,
-    /// Index of the visible tab; always in range.
-    pub(crate) active: usize,
-}
-
-impl TabGroup {
-    pub(crate) fn active_tab(&self) -> TabRef {
-        self.tabs[self.active]
-    }
-
-    /// Remove the tab at `index`, keeping `active` on a surviving slot.
-    fn remove_tab(&mut self, index: usize) {
-        self.tabs.remove(index);
-        self.clamp_active();
-    }
-
-    fn clamp_active(&mut self) {
-        self.active = self.active.min(self.tabs.len().saturating_sub(1));
     }
 }
 
@@ -506,7 +336,7 @@ impl DockLayout {
     fn set_ratio(&mut self, path: DockPath, ratio: f32) {
         // A sentinel-less byte is a corrupt address, not the root —
         // ignore it like any other stale path.
-        if path.0 == 0 {
+        if path.is_corrupt() {
             return;
         }
         let mut idx = Self::ROOT;
