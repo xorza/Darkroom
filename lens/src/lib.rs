@@ -9,7 +9,7 @@ mod image;
 mod utility;
 
 // Published surface — only what darkroom consumes. Everything else (config
-// mirrors, presets, datatypes, the config bridge) stays crate-internal.
+// projections, presets, datatypes, the config bridge) stays crate-internal.
 pub use astro::nodes::{MlModelPaths, astro_library, configure_ml_model_defaults};
 pub use image::nodes::image_library;
 pub use image::{IMAGE_TYPE_ID, Image};

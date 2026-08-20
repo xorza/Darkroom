@@ -11,7 +11,7 @@ use scenarium::{
 
 use crate::astro::config::preset;
 use crate::astro::config::stacking::{
-    CombineConfigDef, CombinePreset, DetectionConfigDef, DetectionPreset, RegistrationConfigDef,
+    CombineKnobs, CombinePreset, DetectionKnobs, DetectionPreset, RegistrationKnobs,
     RegistrationPreset,
 };
 use crate::astro::masters::{MASTERS_DATA_TYPE, Masters};
@@ -48,13 +48,13 @@ pub(crate) fn register(library: &mut Library) {
                 FuncInput::optional("Masters", MASTERS_DATA_TYPE.clone())
                     .description("Optional calibration masters. Unwired means no calibration."),
             )
-            .input(preset::input::<DetectionConfigDef, DetectionPreset>(
+            .input(preset::input::<DetectionKnobs, DetectionPreset>(
                 "Detection",
             ))
-            .input(preset::input::<RegistrationConfigDef, RegistrationPreset>(
+            .input(preset::input::<RegistrationKnobs, RegistrationPreset>(
                 "Registration",
             ))
-            .input(preset::input::<CombineConfigDef, CombinePreset>("Combine"))
+            .input(preset::input::<CombineKnobs, CombinePreset>("Combine"))
             .input(
                 FuncInput::required("Reference", DataType::Int)
                     .description(
@@ -90,12 +90,10 @@ pub(crate) fn register(library: &mut Library) {
 
                         let masters_value = inputs[1].clone();
                         let detection =
-                            preset::resolve::<DetectionConfigDef, DetectionPreset>(&inputs[2]);
-                        let registration = preset::resolve::<
-                            RegistrationConfigDef,
-                            RegistrationPreset,
-                        >(&inputs[3]);
-                        let stack = preset::resolve::<CombineConfigDef, CombinePreset>(&inputs[4]);
+                            preset::resolve::<DetectionKnobs, DetectionPreset>(&inputs[2]);
+                        let registration =
+                            preset::resolve::<RegistrationKnobs, RegistrationPreset>(&inputs[3]);
+                        let stack = preset::resolve::<CombineKnobs, CombinePreset>(&inputs[4]);
                         let reference = match inputs[5]
                             .as_i64()
                             .expect("reference input type is validated at the compile boundary")

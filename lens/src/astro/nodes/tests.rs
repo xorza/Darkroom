@@ -5,17 +5,17 @@ use std::fs;
 use std::path::PathBuf;
 
 use imaginarium::Image as RawImage;
-use lumos::{DEFAULT_SIGMA_THRESHOLD, PREVIEW_IMAGE_EXTENSIONS, RAW_EXTENSIONS};
+use lumos::{
+    DEFAULT_SIGMA_THRESHOLD, Denoise, ExtractBackground, Hdr, LocalContrast,
+    PREVIEW_IMAGE_EXTENSIONS, RAW_EXTENSIONS,
+};
 use scenarium::{
     AnyState, ConstValue, ContextManager, DataType, DynamicValue, FsPathMode, Func, FuncBehavior,
     Library, OutputDemand, SharedAnyState,
 };
 
-use crate::astro::config::processing::{
-    BackgroundConfigDef, DenoiseConfigDef, HdrConfigDef, LocalContrastConfigDef, ScnrConfigDef,
-    StretchConfigDef,
-};
-use crate::astro::config::stacking::{CombineConfigDef, DetectionConfigDef, RegistrationConfigDef};
+use crate::astro::config::processing::{ScnrKnobs, StretchKnobs};
+use crate::astro::config::stacking::{CombineKnobs, DetectionKnobs, RegistrationKnobs};
 use crate::astro::masters::MASTERS_DATA_TYPE;
 use crate::astro::nodes::calibration::internals::frame_set_key;
 use crate::astro::nodes::io::{ASTRO_IMAGE_PATH_DATA_TYPE, ASTRO_RAW_PATHS_DATA_TYPE};
@@ -204,10 +204,7 @@ fn stack_lights_node_is_registered() {
     // It's required: the seeded preset keeps a fresh node valid, but a
     // cleared input errors the run rather than silently defaulting.
     assert!(f.inputs[2].required, "detection is required");
-    assert_eq!(
-        f.inputs[2].data_type,
-        config_data_type::<DetectionConfigDef>()
-    );
+    assert_eq!(f.inputs[2].data_type, config_data_type::<DetectionKnobs>());
     let detection_presets: Vec<&str> = f.inputs[2]
         .value_variants
         .iter()
@@ -244,12 +241,9 @@ fn stack_lights_node_is_registered() {
     );
     assert_eq!(
         f.inputs[3].data_type,
-        config_data_type::<RegistrationConfigDef>()
+        config_data_type::<RegistrationKnobs>()
     );
-    assert_eq!(
-        f.inputs[4].data_type,
-        config_data_type::<CombineConfigDef>()
-    );
+    assert_eq!(f.inputs[4].data_type, config_data_type::<CombineKnobs>());
     assert_eq!(f.inputs[5].name, "Reference");
     assert_eq!(f.inputs[5].default_value, Some(ConstValue::Int(-1)));
 
@@ -272,10 +266,7 @@ fn auto_stretch_node_is_registered() {
     // `method` is a config-typed input with the presets as value_variants
     // (seeded to the first), overridable by build_stretch_config.
     assert_eq!(f.inputs[1].name, "Method");
-    assert_eq!(
-        f.inputs[1].data_type,
-        config_data_type::<StretchConfigDef>()
-    );
+    assert_eq!(f.inputs[1].data_type, config_data_type::<StretchKnobs>());
     let methods: Vec<&str> = f.inputs[1]
         .value_variants
         .iter()
@@ -325,17 +316,17 @@ fn scalar_per_frame_nodes_take_optional_config_overrides() {
         (
             "Denoise",
             "Build Denoise Config",
-            config_data_type::<DenoiseConfigDef>(),
+            config_data_type::<Denoise>(),
         ),
         (
             "HDR Compression",
             "Build HDR Config",
-            config_data_type::<HdrConfigDef>(),
+            config_data_type::<Hdr>(),
         ),
         (
             "Local Contrast",
             "Build Local Contrast Config",
-            config_data_type::<LocalContrastConfigDef>(),
+            config_data_type::<LocalContrast>(),
         ),
     ];
     for (node, builder, ty) in cases {
@@ -367,7 +358,7 @@ fn preset_nodes_use_value_variant_picks_with_build_overrides() {
             "Auto Stretch",
             "Method",
             1,
-            config_data_type::<StretchConfigDef>(),
+            config_data_type::<StretchKnobs>(),
             "Build Stretch Config",
             "auto_asinh",
         ),
@@ -375,7 +366,7 @@ fn preset_nodes_use_value_variant_picks_with_build_overrides() {
             "SCNR",
             "Method",
             1,
-            config_data_type::<ScnrConfigDef>(),
+            config_data_type::<ScnrKnobs>(),
             "Build SCNR Config",
             "average_neutral",
         ),
@@ -427,7 +418,7 @@ async fn build_background_config_reflects_fields_and_rejects_invalid_values() {
     assert_eq!(builder.outputs[0].name, "Config");
     assert_eq!(
         builder.outputs[0].ty.declared(),
-        config_data_type::<BackgroundConfigDef>()
+        config_data_type::<ExtractBackground>()
     );
 
     // background_extract is image + one `config` input of that type: a mode
@@ -438,7 +429,7 @@ async fn build_background_config_reflects_fields_and_rejects_invalid_values() {
     assert!(bg.inputs[1].required, "config is required (preset-seeded)");
     assert_eq!(
         bg.inputs[1].data_type,
-        config_data_type::<BackgroundConfigDef>()
+        config_data_type::<ExtractBackground>()
     );
     let modes: Vec<&str> = bg.inputs[1]
         .value_variants

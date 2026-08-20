@@ -7,6 +7,7 @@
 //! combined intensity and scales channels by `f(I)/I` so hue is preserved.
 
 use crate::math::size2us::Size2us;
+use common::Introspect;
 use imaginarium::Buffer2;
 use rayon::prelude::*;
 
@@ -24,7 +25,7 @@ const N_BINS: usize = 256;
 ///
 /// Computed on the combined intensity; color channels are rescaled hue-preservingly. Grayscale gets
 /// the mapping directly.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Introspect)]
 pub struct LocalContrast {
     /// Tile grid count per axis. Fewer/larger tiles = broader structure; ~8 is typical, lower for
     /// wide-field.

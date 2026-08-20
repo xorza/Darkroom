@@ -12,6 +12,7 @@
 //! equalizes per-channel offsets): this removes a **spatial surface**, per channel (light pollution
 //! is coloured), and runs on the linear master *before* colour calibration and the stretch.
 
+use common::{Introspect, IntrospectEnum};
 use imaginarium::Buffer2;
 use nalgebra::{DMatrix, DVector};
 use rayon::prelude::*;
@@ -27,7 +28,11 @@ use crate::math::statistics::robust_sigma_f64;
 const SKY_CLIP_ITERATIONS: usize = 3;
 
 /// How the modeled background is removed from the image.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+///
+/// `type_id` is this enum's identity to an introspecting consumer; that
+/// consumer stores it, so it is fixed for the life of the type.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, IntrospectEnum)]
+#[config(type_id = "ed416b2d-378b-4eb1-9029-bc7a80a509aa")]
 pub enum BackgroundMode {
     /// `out = in − model`. For **additive** gradients (light pollution, sky/moon glow) — the usual
     /// choice. Adds no noise (a smooth surface is noiseless) and preserves real flux differences.
@@ -39,7 +44,7 @@ pub enum BackgroundMode {
 
 /// Model and remove the smooth background of an image in place, **per channel**. Operates on linear
 /// data: the output background sits at ≈0 (slightly negative on noise — kept signed, not clamped).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Introspect)]
 pub struct ExtractBackground {
     /// Sample-tile size in px. Each tile yields one robust sky sample. Larger → smoother, less able
     /// to absorb extended real signal; should be far larger than stars and smaller than the gradient.

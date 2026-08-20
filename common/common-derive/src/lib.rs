@@ -12,7 +12,9 @@
 //! required, anything else → an enum (the type must impl
 //! `common::IntrospectEnum`). Field attribute `#[config(label = "…")]` overrides
 //! the auto label (the field name title-cased). Enum derive requires a stable
-//! `#[config(type_id = "…")]` UUID.
+//! `#[config(type_id = "…")]` UUID, and owns the variant strings itself — no
+//! `Display`/`FromStr` and no derive crate beyond this one, so any crate that
+//! already depends on `common` can describe its own config types.
 
 use proc_macro::TokenStream;
 use proc_macro2::{Span, TokenStream as TokenStream2};
@@ -72,10 +74,16 @@ fn expand(input: DeriveInput) -> syn::Result<TokenStream> {
 }
 
 /// `#[derive(IntrospectEnum)]` — the variant-list + string round-trip an enum
-/// field needs to be an `Introspect` field. Delegates to `Display` / `FromStr`
-/// (typically from strum's `Display` + `EnumString`, so the strings honor
-/// `#[strum(serialize_all = "…")]`), replacing the hand-written bridge impl. The
-/// enum must be fieldless (unit variants only).
+/// field needs to be an `Introspect` field. The enum must be fieldless (unit
+/// variants only).
+///
+/// The strings are `snake_case` renderings of the variant names, generated
+/// here rather than delegated to `Display`/`FromStr`. They are the enum's
+/// **persisted** form — a consumer stores them in saved documents — so owning
+/// them keeps a `Display` impl written for humans, or a `serialize_all`
+/// attribute on some other derive, from silently changing what is on disk.
+/// Renaming a variant still changes its string; that is the one rename this
+/// derive cannot absorb.
 #[proc_macro_derive(IntrospectEnum, attributes(config))]
 pub fn derive_introspect_enum(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
@@ -92,6 +100,7 @@ fn expand_enum(input: DeriveInput) -> syn::Result<TokenStream> {
         ));
     };
     let mut variants = Vec::new();
+    let mut names = Vec::new();
     for variant in &data.variants {
         if !matches!(variant.fields, Fields::Unit) {
             return Err(syn::Error::new_spanned(
@@ -100,6 +109,10 @@ fn expand_enum(input: DeriveInput) -> syn::Result<TokenStream> {
             ));
         }
         variants.push(&variant.ident);
+        names.push(LitStr::new(
+            &snake_case(&variant.ident.to_string()),
+            variant.ident.span(),
+        ));
     }
 
     Ok(quote! {
@@ -108,19 +121,44 @@ fn expand_enum(input: DeriveInput) -> syn::Result<TokenStream> {
             const DISPLAY_NAME: &'static str = ::core::stringify!(#ident);
 
             fn variants() -> ::std::vec::Vec<::std::string::String> {
-                ::std::vec![ #( ::std::string::ToString::to_string(&#ident::#variants) ),* ]
+                ::std::vec![ #( ::std::string::ToString::to_string(#names) ),* ]
             }
 
             fn to_variant(&self) -> ::std::string::String {
-                ::std::string::ToString::to_string(self)
+                ::std::string::ToString::to_string(match self {
+                    #( Self::#variants => #names ),*
+                })
             }
 
             fn from_variant(name: &str) -> ::std::option::Option<Self> {
-                <Self as ::std::str::FromStr>::from_str(name).ok()
+                match name {
+                    #( #names => ::core::option::Option::Some(Self::#variants), )*
+                    _ => ::core::option::Option::None,
+                }
             }
         }
     }
     .into())
+}
+
+/// A variant name in the `snake_case` the persisted string uses: an underscore
+/// before each uppercase letter that starts a new word — one that follows a
+/// lowercase letter or digit, or that leads a lowercase run out of an acronym.
+fn snake_case(ident: &str) -> String {
+    let chars: Vec<char> = ident.chars().collect();
+    let mut out = String::with_capacity(chars.len() + 4);
+    for (i, &c) in chars.iter().enumerate() {
+        let starts_word = i > 0
+            && c.is_uppercase()
+            && (chars[i - 1].is_lowercase()
+                || chars[i - 1].is_ascii_digit()
+                || chars.get(i + 1).is_some_and(char::is_ascii_lowercase));
+        if starts_word {
+            out.push('_');
+        }
+        out.extend(c.to_lowercase());
+    }
+    out
 }
 
 /// Reflected field kind. `Int`/`Float` carry the concrete numeric type,

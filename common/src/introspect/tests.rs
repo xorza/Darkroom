@@ -39,36 +39,31 @@ impl IntrospectEnum for Mode {
 enum Speed {
     Fast,
     Slow,
+    VeryFast,
 }
 
-impl std::fmt::Display for Speed {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(match self {
-            Speed::Fast => "fast",
-            Speed::Slow => "slow",
-        })
-    }
-}
-
-impl std::str::FromStr for Speed {
-    type Err = ();
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "fast" => Ok(Speed::Fast),
-            "slow" => Ok(Speed::Slow),
-            _ => Err(()),
-        }
-    }
-}
-
+/// The derive owns the variant strings, so this pins the rendering a consumer
+/// persists: `snake_case`, one word break per capital that starts a word. A
+/// change here is a change to what is already on disk.
 #[test]
-fn derived_introspect_enum_delegates_to_display_and_from_str() {
+fn derived_introspect_enum_renders_and_parses_its_own_variant_names() {
     assert_ne!(Speed::TYPE_ID, Mode::TYPE_ID);
     assert_eq!(Speed::DISPLAY_NAME, "Speed");
-    assert_eq!(Speed::variants(), ["fast", "slow"]);
+    assert_eq!(Speed::variants(), ["fast", "slow", "very_fast"]);
     assert_eq!(Speed::Slow.to_variant(), "slow");
-    assert_eq!(Speed::from_variant("fast"), Some(Speed::Fast));
+    assert_eq!(Speed::VeryFast.to_variant(), "very_fast");
+    // Every rendered name parses back to the variant it came from.
+    for (name, variant) in Speed::variants()
+        .iter()
+        .zip([Speed::Fast, Speed::Slow, Speed::VeryFast])
+    {
+        assert_eq!(Speed::from_variant(name), Some(variant));
+    }
+    assert_eq!(
+        Speed::from_variant("VeryFast"),
+        None,
+        "the rendering is the only accepted spelling"
+    );
     assert_eq!(Speed::from_variant("nope"), None);
 }
 

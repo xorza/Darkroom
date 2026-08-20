@@ -14,7 +14,7 @@ ml = ["dep:ort"]
 internals = []
 
 [dependencies]
-common = { workspace = true }
+common = { workspace = true, features = ["introspect-derive"] }
 imaginarium = { workspace = true }
 
 ort = { workspace = true, optional = true }
