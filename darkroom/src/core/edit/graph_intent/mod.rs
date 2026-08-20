@@ -102,8 +102,7 @@ pub(crate) enum GraphIntent {
     /// [`ItemPlacement::z`] past every other. Emitted when either kind is
     /// clicked or grabbed, so clicking brings it forward. The depth is stored
     /// view state, so it persists across save/load and tab switches and walks
-    /// with undo/redo — unlike the transient selection-recency stack it
-    /// replaced.
+    /// with undo/redo.
     Raise {
         key: NodeId,
     },
