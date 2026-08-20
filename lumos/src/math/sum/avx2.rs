@@ -28,8 +28,7 @@ pub(super) unsafe fn sum_f32(values: &[f32]) -> f64 {
         let mut sum_lo = _mm256_setzero_pd();
         let mut sum_hi = _mm256_setzero_pd();
 
-        let chunks = values.chunks_exact(8);
-        let tail = chunks.remainder();
+        let (chunks, tail) = values.as_chunks::<8>();
 
         for chunk in chunks {
             let v = _mm256_loadu_ps(chunk.as_ptr());
@@ -58,12 +57,10 @@ pub(super) unsafe fn weighted_sums(values: &[f32], weights: &[f32]) -> WeightedS
         let mut weight_lo = _mm256_setzero_pd();
         let mut weight_hi = _mm256_setzero_pd();
 
-        let value_chunks = values.chunks_exact(8);
-        let weight_chunks = weights.chunks_exact(8);
-        let value_tail = value_chunks.remainder();
-        let weight_tail = weight_chunks.remainder();
+        let (value_chunks, value_tail) = values.as_chunks::<8>();
+        let (weight_chunks, weight_tail) = weights.as_chunks::<8>();
 
-        for (value_chunk, weight_chunk) in value_chunks.zip(weight_chunks) {
+        for (value_chunk, weight_chunk) in value_chunks.iter().zip(weight_chunks) {
             let v = _mm256_loadu_ps(value_chunk.as_ptr());
             let w = _mm256_loadu_ps(weight_chunk.as_ptr());
 
