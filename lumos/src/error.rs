@@ -1,6 +1,6 @@
 //! Errors shared across lumos' modules.
 
-use std::fmt;
+use thiserror::Error;
 
 use crate::io::image::image_dimensions::ImageDimensions;
 
@@ -12,7 +12,8 @@ use crate::io::image::image_dimensions::ImageDimensions;
 /// The mismatches that genuinely aren't this keep a typed variant on their module's error: a stored
 /// plane knows only its length, a pixel-weight map has no channels, and a calibration master is
 /// measured against the sensor rather than against frame 0.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Error)]
+#[error("frame {index} is {actual}, expected {expected}")]
 pub struct FrameDimensionMismatch {
     /// Position of the offending frame in the input set.
     pub index: usize,
@@ -45,18 +46,6 @@ impl FrameDimensionMismatch {
     }
 }
 
-impl fmt::Display for FrameDimensionMismatch {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "frame {} is {}, expected {}",
-            self.index, self.actual, self.expected
-        )
-    }
-}
-
-impl std::error::Error for FrameDimensionMismatch {}
-
 /// A configuration field whose value falls outside the range its algorithm accepts.
 ///
 /// Star detection, registration, combining, drizzle and the image ops all reject a field for the
@@ -64,7 +53,11 @@ impl std::error::Error for FrameDimensionMismatch {}
 /// with this one type instead of each growing a variant per field. Constraints that genuinely
 /// aren't a range check on a single field (two fields that must agree, a per-element check) keep a
 /// typed variant on their module's error.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Error)]
+#[error(
+    "{field} must be {expected}{}, got {value}",
+    .bound.map_or_else(String::new, |bound| format!(" ({bound})"))
+)]
 pub struct InvalidConfigField {
     /// The offending field. Its name in the config struct, prefixed with the algorithm that owns
     /// it when the bare name would not identify it — `tile_size` alone names two unrelated fields.
@@ -135,18 +128,6 @@ impl InvalidConfigField {
         })
     }
 }
-
-impl fmt::Display for InvalidConfigField {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} must be {}", self.field, self.expected)?;
-        if let Some(bound) = self.bound {
-            write!(f, " ({bound})")?;
-        }
-        write!(f, ", got {}", self.value)
-    }
-}
-
-impl std::error::Error for InvalidConfigField {}
 
 #[cfg(test)]
 mod tests {
