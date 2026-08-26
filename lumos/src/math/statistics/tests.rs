@@ -155,19 +155,23 @@ fn median_and_mad_uniform() {
     assert!(stats.sigma().abs() < 1e-6);
 }
 
-/// [`mad_with_scratch`] over the lengths that bound it: the ordinary odd case, the even case that
-/// averages two middles, both degenerate lengths, and the empty answer.
+/// [`mad_with_scratch`] over the lengths that bound it: the ordinary odd case, both degenerate
+/// lengths, the empty answer, and an even case whose two middles differ.
 #[test]
 fn mad_with_scratch_over_every_length() {
-    let cases: [(&[f32], f32, f32); 4] = [
+    let cases: [(&[f32], f32, f32); 5] = [
         // |r - 3| over [2, 4, 3] = [1, 1, 0]; median of those = 1.
         (&[2.0, 4.0, 3.0], 3.0, 1.0),
         // Nothing to deviate from.
         (&[], 0.0, 0.0),
         // |r - 5| over [5] = [0].
         (&[5.0], 5.0, 0.0),
-        // |r - 5| over [2, 8] = [3, 3]; even length averages the two middles = 3.
+        // The shortest even input: |r - 5| over [2, 8] = [3, 3].
         (&[2.0, 8.0], 5.0, 3.0),
+        // Even length averages the two middles rather than taking a side: |r - 5| over
+        // [1, 4, 6, 9] = [4, 1, 1, 4], ranked [1, 1, 4, 4], so (1 + 4) / 2 = 2.5 and the
+        // upper-middle convention would have answered 4.
+        (&[1.0, 4.0, 6.0, 9.0], 5.0, 2.5),
     ];
 
     let mut scratch = Vec::new();

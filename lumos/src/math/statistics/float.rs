@@ -1,4 +1,4 @@
-//! The float widths the order statistics in this module run at.
+//! The float widths [`crate::math::statistics`]' order statistics run at.
 
 use std::cmp::Ordering;
 use std::ops::{Add, Mul, Sub};
@@ -23,8 +23,10 @@ pub(crate) trait Float:
     /// Shaped like `std`'s own so it passes straight to `select_nth_unstable_by`.
     fn total_cmp(&self, other: &Self) -> Ordering;
 
-    /// `partial_cmp` with NaN folded to `Equal` — around 30% cheaper than
-    /// [`Self::total_cmp`], and an order at all only on NaN-free data.
+    /// `partial_cmp` with NaN folded to `Equal` — an order at all only on NaN-free data.
+    ///
+    /// Cheaper than [`Self::total_cmp`], which first maps both operands' bit patterns onto a
+    /// total order. Measured at roughly 15% off a 4096-sample median.
     fn fast_cmp(&self, other: &Self) -> Ordering;
 
     fn abs(self) -> Self;
