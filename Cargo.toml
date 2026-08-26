@@ -27,7 +27,7 @@ bench = ["internals", "dep:criterion"]
 [dependencies]
 wgpu = { version = "30.0", features = ["metal", "vulkan", "dx12"], optional = true }
 thiserror = { version = "2.0" }
-bytemuck = { version = "1.25", features = ["derive", "extern_crate_alloc"] }
+bytemuck = { version = "1.25", features = ["derive", "extern_crate_std"] }
 pollster = { version = "1.0", optional = true }
 glam = { version = "0.33", features = ["serde"] }
 strum = { version = "0.28" }

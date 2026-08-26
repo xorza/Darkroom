@@ -1,68 +1,71 @@
-use std::fmt;
 use std::io;
 
-#[derive(Debug)]
+use thiserror::Error;
+
+#[derive(Debug, Error)]
 pub enum Error {
-    Io(io::Error),
+    #[error("IO error: {0}")]
+    Io(#[from] io::Error),
+    #[error("Invalid file extension: {0}")]
     InvalidExtension(String),
+    #[error("Unsupported color type: {0}")]
     UnsupportedColorType(String),
+    #[error("Unsupported format: {0}")]
     UnsupportedFormat(String),
+    #[error("Invalid color format: {0}")]
     InvalidColorFormat(String),
+    #[error("Size mismatch: {0}")]
     SizeMismatch(String),
-    Conversion(String),
-    Encoding(String),
+    #[error("Conversion error: {0}")]
+    Conversion(#[from] bytemuck::PodCastError),
+    #[error("Image codec error: {0}")]
+    ImageCodec(#[from] image::ImageError),
+    #[error("TIFF codec error: {0}")]
+    TiffCodec(#[from] tiff::TiffError),
+    #[error("GPU error: {0}")]
     Gpu(String),
+    #[error("GPU context not available")]
     NoGpuContext,
 }
 
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Error::Io(e) => write!(f, "IO error: {e}"),
-            Error::InvalidExtension(ext) => write!(f, "Invalid file extension: {ext}"),
-            Error::UnsupportedColorType(msg) => write!(f, "Unsupported color type: {msg}"),
-            Error::UnsupportedFormat(msg) => write!(f, "Unsupported format: {msg}"),
-            Error::InvalidColorFormat(msg) => write!(f, "Invalid color format: {msg}"),
-            Error::SizeMismatch(msg) => write!(f, "Size mismatch: {msg}"),
-            Error::Conversion(msg) => write!(f, "Conversion error: {msg}"),
-            Error::Encoding(msg) => write!(f, "Encoding error: {msg}"),
-            Error::Gpu(msg) => write!(f, "GPU error: {msg}"),
-            Error::NoGpuContext => write!(f, "GPU context not available"),
-        }
-    }
-}
-
-impl std::error::Error for Error {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Error::Io(e) => Some(e),
-            _ => None,
-        }
-    }
-}
-
-impl From<io::Error> for Error {
-    fn from(e: io::Error) -> Self {
-        Error::Io(e)
-    }
-}
-
-impl From<image::ImageError> for Error {
-    fn from(e: image::ImageError) -> Self {
-        Error::Encoding(e.to_string())
-    }
-}
-
-impl From<tiff::TiffError> for Error {
-    fn from(e: tiff::TiffError) -> Self {
-        Error::Encoding(e.to_string())
-    }
-}
-
-impl From<bytemuck::PodCastError> for Error {
-    fn from(e: bytemuck::PodCastError) -> Self {
-        Error::Conversion(e.to_string())
-    }
-}
-
 pub type Result<T> = std::result::Result<T, Error>;
+
+#[cfg(test)]
+mod tests {
+    use std::error::Error as _;
+
+    use super::*;
+
+    #[test]
+    fn only_a_wrapped_cause_is_reachable_through_source() {
+        let truncated = || io::Error::new(io::ErrorKind::UnexpectedEof, "truncated");
+
+        for (error, message, cause) in [
+            (
+                Error::from(image::ImageError::IoError(truncated())),
+                "Image codec error: truncated",
+                "truncated",
+            ),
+            (
+                Error::from(tiff::TiffError::IoError(truncated())),
+                "TIFF codec error: truncated",
+                "truncated",
+            ),
+            (
+                Error::from(bytemuck::PodCastError::AlignmentMismatch),
+                "Conversion error: AlignmentMismatch",
+                "AlignmentMismatch",
+            ),
+        ] {
+            assert_eq!(error.to_string(), message);
+            assert_eq!(error.source().unwrap().to_string(), cause);
+        }
+
+        assert!(Error::NoGpuContext.source().is_none());
+        assert!(
+            Error::InvalidExtension("xyz".to_string())
+                .source()
+                .is_none()
+        );
+    }
+}

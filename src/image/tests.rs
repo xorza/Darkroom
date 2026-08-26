@@ -49,7 +49,7 @@ fn read_case_insensitive_extension() {
     // Should fail with IO error (file not found), not InvalidExtension
     assert!(matches!(
         result,
-        Err(Error::Io(_)) | Err(Error::Encoding(_))
+        Err(Error::Io(_)) | Err(Error::ImageCodec(_))
     ));
 }
 
