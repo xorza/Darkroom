@@ -40,13 +40,6 @@ impl<T> Slot<T> {
         self.notify.notify_waiters();
     }
 
-    /// Non-blocking take. Kept for API completeness with the waiting variants;
-    /// production currently only uses those.
-    #[allow(dead_code)]
-    fn take(&self) -> Option<T> {
-        self.value.swap(None).and_then(Arc::into_inner)
-    }
-
     pub(super) async fn take_async(&self) -> Result<T, TakeError> {
         loop {
             // Register for notification BEFORE checking value to avoid lost-wakeup.
@@ -70,6 +63,14 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
+
+    impl<T> Slot<T> {
+        /// Non-blocking counterpart of the waiting takes. Production only ever wants to
+        /// wait, so the tests own the variant that can observe an empty slot.
+        fn take(&self) -> Option<T> {
+            self.value.swap(None).and_then(Arc::into_inner)
+        }
+    }
 
     #[test]
     fn send_and_take() {
