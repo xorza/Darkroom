@@ -79,7 +79,6 @@ pub(super) fn compute_annulus_background(
 
     // Stack scratch: this runs per star inside the parallel measure loop, so it must not allocate.
     let mut deviations: ArrayVec<f32, MAX_ANNULUS_PIXELS> = ArrayVec::new();
-    // Sigma-clipped median (2 iterations, 3-sigma clip)
     let stats = ClippedStats::sigma_clipped(&mut values, &mut deviations, 3.0, 2);
     Some(LocalBackground {
         bg: stats.median,

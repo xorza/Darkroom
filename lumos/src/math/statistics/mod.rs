@@ -125,8 +125,7 @@ pub(crate) fn robust_sigma_f64(data: &[f64], scratch: &mut Vec<f64>) -> f64 {
     scratch.clear();
     scratch.extend_from_slice(data);
     let median = median_mut(scratch);
-    abs_deviation_inplace(scratch, median);
-    MAD_TO_SIGMA * median_mut(scratch)
+    MAD_TO_SIGMA * mad_with_scratch(data, median, scratch)
 }
 
 /// Fast approximate median: one partition under [`Float::fast_cmp`], no NaN handling.
