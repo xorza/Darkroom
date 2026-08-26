@@ -401,7 +401,7 @@ fn draw_drag_feedback(ui: &mut Ui, cx: DockContext<'_>, dragged: &TabDrag) {
     }
 }
 
-/// Project one group's tabs into the strip's per-tab labels into `out` — the
+/// Project one group's tabs into `out` as the strip's per-tab labels — the
 /// label text and the unsaved-changes flag are what the strip needs the open
 /// document for. `out` is cleared first.
 ///

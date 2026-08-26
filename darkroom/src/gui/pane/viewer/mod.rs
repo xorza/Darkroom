@@ -42,7 +42,9 @@ use crate::gui::pane::viewer::camera::{
 };
 use crate::gui::pane::viewer::controls::{BACKDROPS, control_wid, filter_toggle, readout_pill};
 use crate::gui::state::preview_store::error::PreviewImageError;
-use crate::gui::state::preview_store::{DrawableImage, PreviewStore, StoredContent};
+use crate::gui::state::preview_store::{
+    DrawableImage, PreviewMessage, PreviewStore, StoredContent,
+};
 use crate::gui::theme::Theme;
 use crate::gui::widgets::toolbar::{BUTTON_GAP, Chip, TOOLBAR_MARGIN, pill, pill_rule};
 
@@ -132,31 +134,11 @@ impl ShownSource {
 
     /// The line to draw *in place of* an image. Exactly complementary to
     /// [`Self::image`], so the pane draws one or the other and never both.
-    fn hint(&self) -> Option<ViewerHint<'_>> {
+    fn hint(&self) -> Option<PreviewMessage<'_>> {
         match self {
             Self::Image(_) => None,
-            Self::NoImage(error) => Some(ViewerHint::NoImage(error)),
-            Self::Nothing => Some(ViewerHint::Nothing),
-        }
-    }
-}
-
-/// The line a viewer draws in place of an image: the standing invitation
-/// before any value arrives, or why the value on hand is not one.
-///
-/// `Display` rather than an assembled `String`: a viewer pane records every
-/// frame, and the line goes straight into the record pass's text arena.
-#[derive(Clone, Copy, Debug)]
-enum ViewerHint<'a> {
-    Nothing,
-    NoImage(&'a PreviewImageError),
-}
-
-impl Display for ViewerHint<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Nothing => f.write_str(NOTHING_YET_HINT),
-            Self::NoImage(error) => write!(f, "{error}"),
+            Self::NoImage(error) => Some(PreviewMessage::Failure(error)),
+            Self::Nothing => Some(PreviewMessage::Text(NOTHING_YET_HINT)),
         }
     }
 }

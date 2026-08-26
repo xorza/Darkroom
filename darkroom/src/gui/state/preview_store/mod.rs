@@ -57,32 +57,35 @@ impl StoredContent {
     /// itself, or the reason it isn't renderable. `None` when [`Self::image`]
     /// answered — the two are complementary, so a caller that renders the
     /// image never also has a message to show.
-    pub(crate) fn message(&self) -> Option<StoredMessage<'_>> {
+    pub(crate) fn message(&self) -> Option<PreviewMessage<'_>> {
         match self {
-            StoredContent::Text(text) => Some(StoredMessage::Value(text.as_str())),
-            StoredContent::Error(error) => Some(StoredMessage::Failure(error)),
+            StoredContent::Text(text) => Some(PreviewMessage::Text(text.as_str())),
+            StoredContent::Error(error) => Some(PreviewMessage::Failure(error)),
             StoredContent::Image(_) => None,
         }
     }
 }
 
-/// What a preview card draws in place of an image: the formatted value
-/// itself, or why the value on hand could not be prepared as one.
+/// A line drawn where a preview image would be. Both readers show one — a
+/// node's preview card and a viewer pane — so both draw it from here.
 ///
-/// `Display` rather than an assembled `String`: the card records every frame,
-/// and the line goes straight into the record pass's text arena. A failure is
-/// a typed error rendered on the way out, so only a card sitting on a broken
-/// value pays for that rendering.
+/// `Display` rather than an assembled `String`: both record every frame, and
+/// the line goes straight into the record pass's text arena. A failure is a
+/// typed error rendered on the way out, so only a reader actually sitting on
+/// one pays for that rendering.
 #[derive(Clone, Copy, Debug)]
-pub(crate) enum StoredMessage<'a> {
-    Value(&'a str),
+pub(crate) enum PreviewMessage<'a> {
+    /// Text standing in for the picture: a formatted non-image value, or a
+    /// reader's own invitation before any value has arrived.
+    Text(&'a str),
+    /// Why the value on hand could not be prepared as an image.
     Failure(&'a PreviewImageError),
 }
 
-impl fmt::Display for StoredMessage<'_> {
+impl fmt::Display for PreviewMessage<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Value(text) => f.write_str(text),
+            Self::Text(text) => f.write_str(text),
             Self::Failure(error) => write!(f, "{error}"),
         }
     }
