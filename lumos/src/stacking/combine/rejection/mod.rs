@@ -94,7 +94,7 @@ fn compact_within(
 /// scratch buffer or quickselect. The absolute deviations split into two ascending runs — the
 /// elements below `center` read backwards, and those at/above `center` read forwards — so a
 /// two-pointer merge yields them in global ascending order. Advancing to rank `len/2` reproduces
-/// `median_f32_fast` of the deviations exactly (the same upper-middle order statistic).
+/// `median_fast` of the deviations exactly (the same upper-middle order statistic).
 fn sorted_mad(sorted: &[f32], center: f32) -> f32 {
     let m = sorted.len();
     debug_assert!(m > 0);

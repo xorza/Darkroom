@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::io::image::image_provenance::RowOrder;
 use crate::io::image::sample_domain::SampleDomain;
-use crate::math::statistics::{MedianMad, mad_f32_with_scratch, median_f32_mut};
+use crate::math::statistics::{MedianMad, mad_with_scratch, median_mut};
 use crate::stacking::frame_store::StackableImage;
 
 /// Per-frame statistics: one median/MAD pair per channel.
@@ -71,8 +71,8 @@ impl FrameStats {
                     };
                 }
                 let mut scratch = data.to_vec();
-                let median = median_f32_mut(&mut scratch);
-                let mad = mad_f32_with_scratch(data, median, &mut scratch);
+                let median = median_mut(&mut scratch);
+                let mad = mad_with_scratch(data, median, &mut scratch);
                 MedianMad { median, mad }
             })
             .collect::<Vec<_>>()

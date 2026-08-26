@@ -9,7 +9,7 @@ use rayon::prelude::*;
 use crate::bit_buffer2::BitBuffer2;
 use crate::io::image::cfa::QUANTIZATION_SIGMA_PER_STEP;
 use crate::math::size2us::Size2us;
-use crate::math::statistics::{mad_f32_fast, mad_to_sigma, median_f32_mut};
+use crate::math::statistics::{mad_fast, mad_to_sigma, median_mut};
 use crate::math::vec2us::Vec2us;
 
 use crate::stacking::calibration_masters::cosmic_ray::config::{CosmicRayConfig, NoiseEstimation};
@@ -200,7 +200,7 @@ fn median_window_into(data: &[f32], size: Size2us, r: usize, out: &mut Vec<f32>)
                         buf.push(data[size.index_of(Vec2us::new(xx, yy))]);
                     }
                 }
-                *o = median_f32_mut(buf);
+                *o = median_mut(buf);
             }
         },
     );
@@ -221,8 +221,8 @@ fn noise_map_into(
         NoiseEstimation::Empirical => {
             scratch.clear();
             scratch.extend_from_slice(data);
-            let bg = median_f32_mut(scratch);
-            let sigma_bg = mad_to_sigma(mad_f32_fast(data, bg, scratch)).max(degenerate_sigma(bg));
+            let bg = median_mut(scratch);
+            let sigma_bg = mad_to_sigma(mad_fast(data, bg, scratch)).max(degenerate_sigma(bg));
             out.clear();
             out.extend(m5.iter().map(|&s| empirical_noise(s, bg, sigma_bg)));
         }
@@ -323,7 +323,7 @@ pub(super) fn replace_flagged(
                     }
                 }
                 if !buf.is_empty() {
-                    *o = median_f32_mut(buf);
+                    *o = median_mut(buf);
                 }
             }
         },

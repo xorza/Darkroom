@@ -361,7 +361,7 @@ pub(crate) fn run_stacking(
         CombineMethod::Median => {
             let sigma = sigmas.and_then(|sigmas| sigmas.combined_median(norms));
             let combined = cache.process_chunked(None, norms, planes, |values, w, _| {
-                let value = math::statistics::median_f32_mut(values);
+                let value = math::statistics::median_mut(values);
                 if measure_quality {
                     CombinedSample::from_all(value, w)
                 } else {

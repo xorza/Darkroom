@@ -1,10 +1,11 @@
 //! Statistical functions: median, MAD, sigma-clipped statistics.
 
-use std::cmp::Ordering;
-
 use serde::{Deserialize, Serialize};
 
+use crate::math::statistics::float::Float;
 use crate::math::sum::mean_f32;
+
+pub(crate) mod float;
 
 /// A distribution's location and spread — what one pass over the values measures.
 ///
@@ -26,9 +27,9 @@ impl MedianMad {
     pub(crate) fn of_mut(data: &mut [f32]) -> Self {
         debug_assert!(!data.is_empty());
 
-        let median = median_f32_mut(data);
+        let median = median_mut(data);
         abs_deviation_inplace(data, median);
-        let mad = median_f32_mut(data);
+        let mad = median_mut(data);
 
         Self { median, mad }
     }
@@ -47,7 +48,7 @@ impl MedianMad {
 /// consumes its input, that one preserves it, and a single function doing both would need input
 /// and output to alias.
 #[inline]
-fn abs_deviation_inplace(values: &mut [f32], median: f32) {
+pub(crate) fn abs_deviation_inplace<F: Float>(values: &mut [F], median: F) {
     for v in values.iter_mut() {
         *v = (*v - median).abs();
     }
@@ -89,47 +90,25 @@ pub(crate) fn mad_to_sigma(mad: f32) -> f32 {
     mad * MAD_TO_SIGMA_F32
 }
 
-/// Calculate the median of f32 values in-place.
+/// The median of `data`, in place.
 ///
-/// Mutates the input buffer (partial sort via quickselect).
+/// Mutates the input buffer (partial sort via quickselect), and ranks NaN rather than tripping
+/// over it — see [`Float::total_cmp`].
 #[inline]
-pub(crate) fn median_f32_mut(data: &mut [f32]) -> f32 {
+pub(crate) fn median_mut<F: Float>(data: &mut [F]) -> F {
     debug_assert!(!data.is_empty());
 
     let len = data.len();
     let mid = len / 2;
 
     if len & 1 == 1 {
-        let (_, median, _) = data.select_nth_unstable_by(mid, f32::total_cmp);
+        let (_, median, _) = data.select_nth_unstable_by(mid, F::total_cmp);
         *median
     } else {
-        let (left_part, right_median, _) = data.select_nth_unstable_by(mid, f32::total_cmp);
+        let (left_part, right_median, _) = data.select_nth_unstable_by(mid, F::total_cmp);
         let right = *right_median;
-        let left = left_part.iter().copied().reduce(f32::max).unwrap();
-        (left + right) * 0.5
-    }
-}
-
-/// Calculate the median of f64 values in-place.
-///
-/// The `f64` counterpart to [`median_f32_mut`], and the crate's only one: the polynomial surface
-/// fit in `background_extraction` works in `f64` throughout, so downcasting its residuals to run
-/// the `f32` path would lose precision inside a fitting loop.
-#[inline]
-pub(crate) fn median_f64_mut(data: &mut [f64]) -> f64 {
-    debug_assert!(!data.is_empty());
-
-    let len = data.len();
-    let mid = len / 2;
-
-    if len & 1 == 1 {
-        let (_, median, _) = data.select_nth_unstable_by(mid, f64::total_cmp);
-        *median
-    } else {
-        let (left_part, right_median, _) = data.select_nth_unstable_by(mid, f64::total_cmp);
-        let right = *right_median;
-        let left = left_part.iter().copied().reduce(f64::max).unwrap();
-        (left + right) * 0.5
+        let left = left_part.iter().copied().reduce(F::max).unwrap();
+        (left + right) * F::HALF
     }
 }
 
@@ -145,17 +124,16 @@ pub(crate) fn robust_sigma_f64(data: &[f64], scratch: &mut Vec<f64>) -> f64 {
 
     scratch.clear();
     scratch.extend_from_slice(data);
-    let median = median_f64_mut(scratch);
-    for value in scratch.iter_mut() {
-        *value = (*value - median).abs();
-    }
-    MAD_TO_SIGMA * median_f64_mut(scratch)
+    let median = median_mut(scratch);
+    abs_deviation_inplace(scratch, median);
+    MAD_TO_SIGMA * median_mut(scratch)
 }
 
-/// Fast approximate median using `partial_cmp` (single partition, no NaN handling).
+/// Fast approximate median: one partition under [`Float::fast_cmp`], no NaN handling.
 ///
-/// Returns the upper-middle element for even-length arrays (no averaging).
-/// Uses `partial_cmp` instead of `total_cmp` for ~30% faster comparisons.
+/// Returns the upper-middle element for even-length arrays (no averaging). That convention is
+/// what lets a caller that sorted and indexed `[len / 2]` switch to this and get the same value
+/// out: a full sort's element at that rank is exactly what one selection returns.
 ///
 /// `data` must contain no NaN: comparing one orders it `Equal` against everything, which is not
 /// a total order, and `select_nth_unstable_by` is then free to return any element. Not unsound —
@@ -163,52 +141,16 @@ pub(crate) fn robust_sigma_f64(data: &[f64], scratch: &mut Vec<f64>) -> f64 {
 /// comment. Every decoded frame satisfies it (the FITS reader rejects non-finite pixels and RAW
 /// decodes from integers), so the check is debug-only and the hot paths pay nothing in release.
 #[inline]
-pub(crate) fn median_f32_fast(data: &mut [f32]) -> f32 {
+pub(crate) fn median_fast<F: Float>(data: &mut [F]) -> F {
     debug_assert!(!data.is_empty());
     debug_assert!(
         !data.iter().any(|value| value.is_nan()),
-        "median_f32_fast requires NaN-free data; use median_f32_mut for data that may hold NaN"
+        "median_fast requires NaN-free data; use median_mut for data that may hold NaN"
     );
 
     let mid = data.len() / 2;
-    let (_, median, _) =
-        data.select_nth_unstable_by(mid, |a, b| a.partial_cmp(b).unwrap_or(Ordering::Equal));
+    let (_, median, _) = data.select_nth_unstable_by(mid, F::fast_cmp);
     *median
-}
-
-/// Fast approximate median of `f64` values — the `f64` twin of [`median_f32_fast`], with the same
-/// upper-middle convention for even lengths and the same NaN contract.
-///
-/// The convention is what lets a caller that sorted and indexed `[len / 2]` switch to this and get
-/// the same value out: a full sort's element at that rank is exactly what one selection returns.
-#[inline]
-pub(crate) fn median_f64_fast(data: &mut [f64]) -> f64 {
-    debug_assert!(!data.is_empty());
-    debug_assert!(
-        !data.iter().any(|value| value.is_nan()),
-        "median_f64_fast requires NaN-free data; use median_f64_mut for data that may hold NaN"
-    );
-
-    let mid = data.len() / 2;
-    let (_, median, _) =
-        data.select_nth_unstable_by(mid, |a, b| a.partial_cmp(b).unwrap_or(Ordering::Equal));
-    *median
-}
-
-/// MAD of `values` about `median` through [`median_f64_fast`] — the `f64` twin of [`mad_f32_fast`],
-/// NaN contract included.
-#[inline]
-pub(crate) fn mad_f64_fast(values: &[f64], median: f64, scratch: &mut Vec<f64>) -> f64 {
-    debug_assert!(
-        !median.is_nan() && !values.iter().any(|value| value.is_nan()),
-        "mad_f64_fast requires a NaN-free median and values; use robust_sigma_f64 otherwise"
-    );
-    if values.is_empty() {
-        return 0.0;
-    }
-    scratch.clear();
-    scratch.extend(values.iter().map(|&value| (value - median).abs()));
-    median_f64_fast(scratch)
 }
 
 /// Replace `scratch` with `|value - median|` for each of `values`, leaving it exactly as long.
@@ -218,39 +160,40 @@ pub(crate) fn mad_f64_fast(values: &[f64], median: f64, scratch: &mut Vec<f64>) 
 ///
 /// Twin of [`abs_deviation_inplace`] — see there for why the pair does not collapse into one.
 #[inline]
-fn fill_abs_deviations(values: &[f32], median: f32, scratch: &mut Vec<f32>) {
+fn fill_abs_deviations<F: Float>(values: &[F], median: F, scratch: &mut Vec<F>) {
     scratch.clear();
     scratch.extend(values.iter().map(|&value| (value - median).abs()));
 }
 
-/// Compute MAD using fast median (no NaN handling, single partition).
+/// MAD of `values` about `median`, through [`median_fast`].
 ///
-/// For use in rejection hot paths where data is guaranteed NaN-free — see
-/// [`median_f32_fast`] for what a NaN would cost and why the check is debug-only. Checked here
-/// as well as there so a violation names the caller's data rather than the derived deviations.
+/// For rejection hot paths whose data is guaranteed NaN-free — see [`median_fast`] for what a NaN
+/// would cost and why the check is debug-only. Checked here as well as there so a violation names
+/// the caller's data rather than the derived deviations.
 #[inline]
-pub(crate) fn mad_f32_fast(values: &[f32], median: f32, scratch: &mut Vec<f32>) -> f32 {
+pub(crate) fn mad_fast<F: Float>(values: &[F], median: F, scratch: &mut Vec<F>) -> F {
     debug_assert!(
         !median.is_nan() && !values.iter().any(|value| value.is_nan()),
-        "mad_f32_fast requires a NaN-free median and values; use mad_f32_with_scratch otherwise"
+        "mad_fast requires a NaN-free median and values; use mad_with_scratch otherwise"
     );
     if values.is_empty() {
-        return 0.0;
+        return F::ZERO;
     }
     fill_abs_deviations(values, median, scratch);
-    median_f32_fast(scratch)
+    median_fast(scratch)
 }
 
-/// Compute MAD (Median Absolute Deviation) using a scratch buffer.
+/// MAD of `values` about `median`, through [`median_mut`].
 ///
-/// MAD = median(|x_i - median(x)|)
+/// `MAD = median(|x_i - median(x)|)`. The NaN-tolerant twin of [`mad_fast`]: same shape, but the
+/// deviations are ranked under a total order, so data that may hold NaN still measures.
 #[inline]
-pub(crate) fn mad_f32_with_scratch(values: &[f32], median: f32, scratch: &mut Vec<f32>) -> f32 {
+pub(crate) fn mad_with_scratch<F: Float>(values: &[F], median: F, scratch: &mut Vec<F>) -> F {
     if values.is_empty() {
-        return 0.0;
+        return F::ZERO;
     }
     fill_abs_deviations(values, median, scratch);
-    median_f32_mut(scratch)
+    median_mut(scratch)
 }
 
 /// MAD floored at `floor_fraction * center`.
@@ -322,7 +265,7 @@ impl ClippedStats {
     /// Sigma-clipped median, MAD-sigma and mean of `values`, rejecting outliers beyond
     /// `kappa × sigma` from the median over `iterations` passes.
     ///
-    /// `values` must be NaN-free — the clip iteration medians with [`median_f32_fast`] — and is
+    /// `values` must be NaN-free — the clip iteration medians with [`median_fast`] — and is
     /// reordered in place.
     ///
     /// `deviations` is borrowed scratch, overwritten in full; only its length matters. Sizing it
@@ -367,12 +310,12 @@ fn sigma_clip_iteration(
     let active = &mut values[..*len];
 
     // Compute approximate median (fast — partial_cmp, single partition)
-    let median = median_f32_fast(active);
+    let median = median_fast(active);
 
     deviations[..*len].copy_from_slice(active);
     abs_deviation_inplace(&mut deviations[..*len], median);
 
-    let mad = median_f32_fast(&mut deviations[..*len]);
+    let mad = median_fast(&mut deviations[..*len]);
     let sigma = mad_to_sigma(mad);
 
     // Degenerate against the data's own magnitude, not against a fixed number: one `f32` step at
@@ -386,7 +329,7 @@ fn sigma_clip_iteration(
     }
 
     // Clip values outside threshold, computing deviations on-the-fly.
-    // (The deviations buffer was scrambled by median_f32_fast above,
+    // (The deviations buffer was scrambled by median_fast above,
     // so we recompute each deviation inline instead of a separate pass.)
     let threshold = kappa * sigma;
     let mut write_idx = 0;
@@ -416,10 +359,10 @@ fn compute_final_stats(values: &mut [f32], deviations: &mut [f32]) -> MedianMad 
         };
     }
 
-    let median = median_f32_mut(values);
+    let median = median_mut(values);
     deviations[..values.len()].copy_from_slice(values);
     abs_deviation_inplace(&mut deviations[..values.len()], median);
-    let mad = median_f32_mut(&mut deviations[..values.len()]);
+    let mad = median_mut(&mut deviations[..values.len()]);
 
     MedianMad { median, mad }
 }

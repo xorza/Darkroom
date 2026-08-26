@@ -2,7 +2,7 @@ use crate::bit_buffer2::BitBuffer2;
 use crate::io::image::cfa::CfaType;
 use crate::io::image::image_metadata::ImageMetadata;
 use crate::io::raw::demosaic::bayer::CfaPattern;
-use crate::math::statistics::median_f32_mut;
+use crate::math::statistics::median_mut;
 use crate::stacking::calibration_masters::cosmic_ray::config::{CosmicRayConfig, NoiseEstimation};
 use crate::stacking::calibration_masters::cosmic_ray::mono::replace_flagged;
 use crate::stacking::calibration_masters::cosmic_ray::*;
@@ -349,7 +349,7 @@ fn replace_flagged_via_snapshot(pixels: &[f32], size: Size2us, mask: &BitBuffer2
                 }
             }
             if !buf.is_empty() {
-                out[target] = median_f32_mut(&mut buf);
+                out[target] = median_mut(&mut buf);
             }
         }
     }

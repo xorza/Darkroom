@@ -11,7 +11,7 @@ use crate::bit_buffer2::BitBuffer2;
 use crate::io::image::cfa::CfaType;
 use crate::io::image::cfa::same_color::XTransOffsets;
 use crate::math::size2us::Size2us;
-use crate::math::statistics::{mad_f32_fast, mad_to_sigma, median_f32_mut};
+use crate::math::statistics::{mad_fast, mad_to_sigma, median_mut};
 use crate::math::vec2us::Vec2us;
 
 use crate::stacking::calibration_masters::cosmic_ray::config::{CosmicRayConfig, NoiseEstimation};
@@ -169,8 +169,8 @@ impl XtransScratch {
                         // Nearest-first, so the two scales are prefixes of one gather. The coarse
                         // median reorders `gathered`, so the fine one is taken first.
                         let small = gathered.len().min(XTRANS_SMALL);
-                        let med_small = median_f32_mut(&mut gathered[..small]);
-                        let med_large = median_f32_mut(gathered);
+                        let med_small = median_mut(&mut gathered[..small]);
+                        let med_large = median_mut(gathered);
                         lrow[x] = (v - med_small).max(0.0);
                         // Non-negative only — see the mono detector: the σ-unit floor downstream
                         // is what guards the contrast ratio, at any sample scale.
@@ -212,9 +212,8 @@ impl XtransScratch {
                     if vals.is_empty() {
                         continue;
                     }
-                    let bg = median_f32_mut(vals);
-                    let sigma =
-                        mad_to_sigma(mad_f32_fast(vals, bg, frame)).max(degenerate_sigma(bg));
+                    let bg = median_mut(vals);
+                    let sigma = mad_to_sigma(mad_fast(vals, bg, frame)).max(degenerate_sigma(bg));
                     stats[c] = (bg, sigma);
                 }
                 out.clear();
@@ -271,7 +270,7 @@ fn xtrans_replace(
                 if gathered.is_empty() {
                     continue;
                 }
-                *o = median_f32_mut(gathered);
+                *o = median_mut(gathered);
             }
         },
     );

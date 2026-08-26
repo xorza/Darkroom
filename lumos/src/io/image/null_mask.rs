@@ -11,7 +11,7 @@ use crate::math::size2us::Size2us;
 /// `fits_well::Scaling::scale_integer` maps the second onto the first, so both arrive as NaN. Their
 /// positions are recorded here rather than left in the samples: nothing downstream tolerates a
 /// non-finite sample — an interpolating stage spreads one across its whole kernel footprint, and
-/// `median_f32_fast` documents a NaN-free contract — so this is the record of where the data is
+/// `median_fast` documents a NaN-free contract — so this is the record of where the data is
 /// missing and the samples themselves hold a finite fill.
 ///
 /// One mask per image rather than one per channel: a pixel is null when *any* of its channels is,

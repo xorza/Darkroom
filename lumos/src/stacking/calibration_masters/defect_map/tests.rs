@@ -23,13 +23,13 @@ struct MedianMad {
 
 fn median_mad(mut samples: Vec<f32>) -> MedianMad {
     assert!(!samples.is_empty());
-    let median = median_f32_mut(&mut samples);
+    let median = median_mut(&mut samples);
     for sample in &mut samples {
         *sample = (*sample - median).abs();
     }
     MedianMad {
         median,
-        mad: median_f32_mut(&mut samples),
+        mad: median_mut(&mut samples),
     }
 }
 
@@ -779,7 +779,7 @@ fn brute_force_xtrans_median(pixels: &Buffer2<f32>, pos: Vec2us, pattern: &CfaTy
     cands.sort_by_key(|&(dist, _)| dist);
     let n = cands.len().min(XTRANS_NEIGHBORS);
     let mut vals: Vec<f32> = cands[..n].iter().map(|&(_, v)| v).collect();
-    median_f32_mut(&mut vals)
+    median_mut(&mut vals)
 }
 
 /// The precomputed X-Trans offsets must reproduce the brute-force closest-N same-color median at

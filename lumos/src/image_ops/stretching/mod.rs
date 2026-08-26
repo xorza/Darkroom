@@ -38,7 +38,7 @@ use crate::error::InvalidConfigField;
 use crate::image_ops::SAMPLES_PER_BLOCK;
 use crate::image_ops::error::OpError;
 use crate::io::image::linear::LinearImage;
-use crate::math::statistics::{MedianMad, median_f32_mut};
+use crate::math::statistics::{MedianMad, median_mut};
 
 #[cfg(all(test, feature = "internals"))]
 mod bench;
@@ -549,7 +549,7 @@ fn build_curve(samples: &mut [f32], method: StretchMethod) -> Curve {
             ))
         }
         StretchMethod::AutoAsinh { target_background } => {
-            let median = median_f32_mut(samples);
+            let median = median_mut(samples);
             Curve::Asinh(AsinhCurve::new(solve_asinh_beta(median, target_background)))
         }
         StretchMethod::Asinh { .. } | StretchMethod::Ghs { .. } => {

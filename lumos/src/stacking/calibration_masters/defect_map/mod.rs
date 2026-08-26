@@ -54,7 +54,7 @@ use crate::bit_buffer2::BitBuffer2;
 use crate::io::image::cfa::same_color::SameColorMedian;
 use crate::io::image::cfa::{CfaImage, CfaType};
 use crate::math::size2us::Size2us;
-use crate::math::statistics::{mad_to_sigma, median_f32_mut};
+use crate::math::statistics::{mad_to_sigma, median_mut};
 use crate::stacking::calibration_masters::defect_map::dark_background::DarkBackground;
 use crate::stacking::calibration_masters::defect_map::sampling::collect_color_residual_samples;
 use crate::stacking::combine::error::Error;
@@ -341,11 +341,11 @@ fn compute_per_color_residual_stats(
             continue;
         }
 
-        let median = median_f32_mut(&mut samples);
+        let median = median_mut(&mut samples);
         for v in samples.iter_mut() {
             *v = (*v - median).abs();
         }
-        let mad = median_f32_mut(&mut samples);
+        let mad = median_mut(&mut samples);
         let tail_sigma = if samples.len() >= MIN_TAIL_SCALE_SAMPLES {
             let p99_index = (samples.len() - 1) * 99 / 100;
             let (_, p99, _) = samples.select_nth_unstable_by(p99_index, f32::total_cmp);

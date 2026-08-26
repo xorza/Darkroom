@@ -6,7 +6,7 @@
 
 use crate::io::image::linear::LinearImage;
 use crate::io::image::load_context::LoadContext;
-use crate::math::statistics::median_f32_mut;
+use crate::math::statistics::median_mut;
 use crate::testing::visual;
 use crate::testing::{calibration_dir, init_tracing};
 use crate::{
@@ -14,7 +14,7 @@ use crate::{
 };
 
 fn median(image: &LinearImage) -> f32 {
-    median_f32_mut(&mut image.intensity_plane().into_vec())
+    median_mut(&mut image.intensity_plane().into_vec())
 }
 
 fn assert_displayable(image: &LinearImage, label: &str) {

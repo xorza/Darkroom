@@ -4,7 +4,7 @@
 
 use crate::io::image::linear::LinearImage;
 use crate::io::image::load_context::LoadContext;
-use crate::math::statistics::median_f32_mut;
+use crate::math::statistics::median_mut;
 use crate::testing::visual;
 use crate::testing::{calibration_dir, init_tracing};
 use crate::{ColorMode, NeutralizeBackground, Scnr, Stretch, StretchMethod};
@@ -23,7 +23,7 @@ fn stats(pixels: &[f32]) -> Stats {
     Stats {
         min,
         max,
-        median: median_f32_mut(&mut scratch),
+        median: median_mut(&mut scratch),
     }
 }
 
