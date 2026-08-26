@@ -172,7 +172,7 @@ impl MainWindow {
                     TabRef::ImageViewer(node_id) => {
                         // Resolved here rather than for every viewer tab up
                         // front: only the pane being drawn needs a title, and
-                        // `node_label` is a graph lookup and a `String` — less
+                        // `node_label` is a graph lookup that borrows — less
                         // than the map that used to front it cost to build.
                         let title = viewer::node_label(doc, node_id);
                         let previews = &app.run_state().previews;
@@ -181,7 +181,7 @@ impl MainWindow {
                             .or_insert_with(|| ImageViewer::new(node_id));
                         // Viewer-toolbar edits ride the same in-place
                         // prefs path as the Preferences tab.
-                        if viewer.show(ui, app.theme(), &mut prefs.viewer, &title, previews, pane) {
+                        if viewer.show(ui, app.theme(), &mut prefs.viewer, title, previews, pane) {
                             out.push_app(AppCommand::Prefs(PrefsCommand::Changed));
                         }
                     }

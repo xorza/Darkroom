@@ -25,7 +25,6 @@ mod controls;
 mod glyph;
 
 use scenarium::NodeId;
-use std::borrow::Cow;
 use std::fmt::Display;
 
 use common::FloatExt;
@@ -133,15 +132,31 @@ impl ShownSource {
 
     /// The line to draw *in place of* an image. Exactly complementary to
     /// [`Self::image`], so the pane draws one or the other and never both.
-    ///
-    /// Wording a reason is this method's job rather than the enum's, which is
-    /// why the `Cow` is here: the standing invitation is `'static`, and only a
-    /// viewer actually sitting on a failure renders one.
-    fn hint(&self) -> Option<Cow<'static, str>> {
+    fn hint(&self) -> Option<ViewerHint<'_>> {
         match self {
             Self::Image(_) => None,
-            Self::NoImage(error) => Some(Cow::Owned(error.to_string())),
-            Self::Nothing => Some(Cow::Borrowed(NOTHING_YET_HINT)),
+            Self::NoImage(error) => Some(ViewerHint::NoImage(error)),
+            Self::Nothing => Some(ViewerHint::Nothing),
+        }
+    }
+}
+
+/// The line a viewer draws in place of an image: the standing invitation
+/// before any value arrives, or why the value on hand is not one.
+///
+/// `Display` rather than an assembled `String`: a viewer pane records every
+/// frame, and the line goes straight into the record pass's text arena.
+#[derive(Clone, Copy, Debug)]
+enum ViewerHint<'a> {
+    Nothing,
+    NoImage(&'a PreviewImageError),
+}
+
+impl Display for ViewerHint<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Nothing => f.write_str(NOTHING_YET_HINT),
+            Self::NoImage(error) => write!(f, "{error}"),
         }
     }
 }
@@ -278,7 +293,7 @@ impl ImageViewer {
                 // the picture. On the frosted readout pill, so the line stays
                 // legible over the checker/white backdrops too.
                 if let Some(hint) = source.hint() {
-                    let text = ui.intern(hint);
+                    let text = fmt!(ui, "{hint}");
                     readout_pill(
                         ui,
                         theme,
@@ -497,16 +512,17 @@ impl Display for HeaderReadout<'_> {
 /// several ports of one node stay tellable apart — e.g. "stack · out 1".
 /// The one formatter for both the tab strip and the viewer title.
 ///
-/// A graph lookup and a fresh `String`, so each reader resolves its own:
-/// the strip labels the tabs it is drawing, the pane header labels the one
-/// tab it is. Fronting that with a per-frame map cost more than it saved.
-pub(crate) fn node_label(doc: &Document, node_id: NodeId) -> String {
+/// Borrowed from the document rather than assembled: both readers record
+/// every frame, and both arms are text something already owns. Each reader
+/// still resolves its own — the strip labels the tabs it is drawing, the pane
+/// header labels the one tab it is — because fronting the lookup with a
+/// per-frame map cost more than it saved.
+pub(crate) fn node_label(doc: &Document, node_id: NodeId) -> &str {
     doc.graph
         .find(node_id)
         .map(|n| n.name.as_str())
         .filter(|n| !n.is_empty())
         .unwrap_or("image")
-        .to_owned()
 }
 
 /// A texture's 1:1 logical footprint on the current display — one texel per
@@ -636,19 +652,22 @@ mod tests {
             matches!(nothing, ShownSource::Nothing),
             "an absent entry is its own state, not a failure: {nothing:?}"
         );
-        assert_eq!(nothing.hint().as_deref(), Some(NOTHING_YET_HINT));
+        assert_eq!(nothing.hint().unwrap().to_string(), NOTHING_YET_HINT);
 
         let errored = StoredContent::Error(PreviewImageError::Empty);
         let resolved = ShownSource::resolve(Some(&errored), h.ui());
         assert!(resolved.image().is_none());
-        assert_eq!(resolved.hint().as_deref(), Some("image is empty"));
+        assert_eq!(resolved.hint().unwrap().to_string(), "image is empty");
 
         // A good non-image value is not a failure, and reads as one thing a
         // viewer can't show rather than as that value's own formatting.
         let text = StoredContent::Text("7".to_owned());
         let resolved = ShownSource::resolve(Some(&text), h.ui());
         assert!(resolved.image().is_none());
-        assert_eq!(resolved.hint().as_deref(), Some("value is not an image"));
+        assert_eq!(
+            resolved.hint().unwrap().to_string(),
+            "value is not an image"
+        );
     }
 
     /// One pass is the whole story: the frame that first draws a viewer

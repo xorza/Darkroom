@@ -8,13 +8,12 @@
 //! node body, so selection, dragging, the breaker, and the input wire all come
 //! from the node machinery unchanged.
 
-use std::borrow::Cow;
 use std::fmt::Display;
 
 use imaginarium::ColorFormat;
 use palantir::{
     Align, Configure, CursorIcon, ImageFit, Justify, Panel, Sense, Shape, Sizing, Spacing, Text,
-    TextWrap, Ui, VAlign, WidgetId,
+    TextWrap, Ui, VAlign, WidgetId, fmt,
 };
 use scenarium::NodeId;
 
@@ -74,10 +73,11 @@ pub(super) fn preview_row(ui: &mut Ui, ncx: NodeCtx<'_>, out: &mut Requests) {
                 // `message` is complementary to `image`, so this covers a
                 // formatted non-image value and a value that failed to prepare
                 // alike; `EMPTY_LABEL` covers having nothing at all.
-                let text = stored
-                    .and_then(StoredContent::message)
-                    .unwrap_or(Cow::Borrowed(EMPTY_LABEL));
-                Text::new(&*text)
+                let text = match stored.and_then(StoredContent::message) {
+                    Some(message) => fmt!(ui, "{message}"),
+                    None => ui.intern(EMPTY_LABEL),
+                };
+                Text::new(text)
                     .style(&sized_text(ui, theme.text.label))
                     .text_wrap(TextWrap::Wrap)
                     .show(ui);
