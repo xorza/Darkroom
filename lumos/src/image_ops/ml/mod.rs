@@ -8,7 +8,7 @@
 //!
 //! Currently: [`star_removal`] (StarNet-style) and [`denoise`] (DeepSNR-style), both on the shared
 //! ONNX-Runtime [`backend`]. Each is a config type with an `apply`, matching the in-place op
-//! contract the rest of [`crate::image_ops`] follows (see [`crate::image_ops::op`]).
+//! contract the rest of [`crate::image_ops`] follows.
 
 pub(crate) mod backend;
 pub(crate) mod denoise;

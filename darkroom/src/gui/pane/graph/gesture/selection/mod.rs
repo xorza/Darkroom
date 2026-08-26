@@ -30,8 +30,8 @@ pub(crate) struct SelectionUI {
     ///
     /// Refilled from scratch every frame of the drag, which is what makes the
     /// container choice load-bearing: a `Vec`'s `clear` keeps the allocation
-    /// for the next frame, where the `BTreeSet` this used to be dropped its
-    /// whole tree and rebuilt it every frame of every drag.
+    /// for the next frame, where a `BTreeSet` would drop its whole tree and
+    /// rebuild it every frame of every drag.
     /// [`Self::preview`] is what says whether the contents mean anything.
     swept: Vec<NodeId>,
     /// The pane whose draw reads [`Self::swept`]. Empty when no band is

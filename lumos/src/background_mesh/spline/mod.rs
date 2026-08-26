@@ -30,7 +30,7 @@ pub(crate) fn cubic_spline_eval(f0: f32, f1: f32, d0: f32, d1: f32, h: f32, t: f
 ///
 /// Given `n` function values at positions `centers`, computes the second
 /// derivatives `d2[0..n]` using a tridiagonal solver with natural boundary
-/// conditions (d2[0] = d2[n-1] = 0).
+/// conditions (`d2[0] = d2[n-1] = 0`).
 ///
 /// `scratch` must have length >= `n - 2` (used for modified upper diagonal
 /// coefficients in the Thomas algorithm). Pass a reusable buffer to avoid

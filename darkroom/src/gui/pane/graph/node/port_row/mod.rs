@@ -482,9 +482,9 @@ fn output_cell(
 /// node body and a little above, so it doesn't cover what it is watching.
 const PREVIEW_SPAWN_OFFSET: Vec2 = Vec2::new(80.0, -60.0);
 
-/// "Add preview" — spawn a preview node already wired to this output. The
-/// replacement for the old pin toggle: same affordance, but what it creates is
-/// an ordinary node the user can move, delete, and undo like any other.
+/// "Add preview" — spawn a preview node already wired to this output. What it
+/// creates is an ordinary node the user can move, delete, and undo like any
+/// other.
 ///
 /// Hidden when the library has no preview func.
 fn add_preview_item(
@@ -660,8 +660,7 @@ mod tests {
         assert_eq!(label(&path(FsPathMode::ExistingFiles, &[])), "path · files");
         assert_eq!(label(&path(FsPathMode::NewFile, &[])), "path · save path");
 
-        // One extension, then several: the separator appears only *between*
-        // them — the join this replaced is what used to guarantee that.
+        // One extension, then several: the separator appears only *between* them.
         assert_eq!(
             label(&path(FsPathMode::ExistingFile, &["fit"])),
             "path · file (fit)"

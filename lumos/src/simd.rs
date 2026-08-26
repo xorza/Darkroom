@@ -1,9 +1,9 @@
 //! The crate's one architecture-dispatch prologue.
 //!
 //! Every hand-written SIMD kernel is reached through [`dispatch!`], which expands to the x86_64
-//! feature ladder, the aarch64 NEON arm and the scalar fallback in one fixed shape. Each kernel
-//! family used to write its own ladder, and they disagreed on arm order, on where the `unsafe`
-//! block and its SAFETY note went, and on which of four spellings kept the compiler from calling
+//! feature ladder, the aarch64 NEON arm and the scalar fallback in one fixed shape. One macro
+//! rather than a ladder per kernel family, so nothing can disagree on arm order, on where the
+//! `unsafe` block and its SAFETY note go, or on which spelling keeps the compiler from calling
 //! the fallback unreachable.
 //!
 //! It also owns the f32 lane counts, which are the *structural* minimum input length for any

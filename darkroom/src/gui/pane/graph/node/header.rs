@@ -63,7 +63,7 @@ const RUN_TIME_MIN_WIDTH: f32 = 52.0;
 /// incoming wire. Recorded by `NodeUI::draw_one` immediately *before* its
 /// node's body, so it peeks out from behind the corner while keeping the
 /// node stack's paint order (above lower nodes, below raised ones) and the
-/// cull decision. The `PORT_HIT_SCALE`-grown box is centered on the corner
+/// cull decision. The `port_glyph::HIT_SCALE`-grown box is centered on the corner
 /// (world coords) while the triangle paints port-sized — the same
 /// generous-hit-box treatment the port circles get. It's both a drop
 /// target for an emitter's event wire *and* a drag source — pulling from

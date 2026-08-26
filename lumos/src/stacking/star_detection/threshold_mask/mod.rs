@@ -45,7 +45,7 @@ pub(crate) struct ThresholdParams {
     /// Detection threshold in units of the local noise σ.
     pub(crate) sigma: f32,
     /// Floor applied to each per-pixel σ, in the samples' own units — see
-    /// [`crate::stacking::star_detection::background::BackgroundEstimate::noise_floor`], which is
+    /// [`BackgroundEstimate::noise_floor`](crate::stacking::star_detection::background::background_estimate::BackgroundEstimate::noise_floor), which is
     /// what every caller in the pipeline passes.
     pub(crate) min_noise: f32,
 }

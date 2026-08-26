@@ -17,12 +17,12 @@ use crate::math::vec2us::Vec2us;
 const HEX_ENTRIES: usize = 8;
 
 /// Orthogonal direction vectors, cycled for rotation.
-/// Each pair (orth[d], orth[d+1]) and (orth[d+2], orth[d+3]) form a
+/// Each pair `(orth[d], orth[d+1])` and `(orth[d+2], orth[d+3])` form a
 /// direction basis for hex neighbor computation.
 const ORTH: [i32; 12] = [1, 0, 0, 1, -1, 0, 0, -1, 1, 0, 0, 1];
 
 /// Pattern coefficients for hex neighbor offset computation.
-/// patt[0] is for non-green pixels, patt[1] is for green pixels.
+/// `patt[0]` is for non-green pixels, `patt[1]` is for green pixels.
 const PATT: [[i32; 16]; 2] = [
     [0, 1, 0, -1, 2, 0, -1, 0, 1, 1, 1, -1, 0, 0, 0, 0],
     [0, 1, 0, -2, 1, 0, -2, 0, 1, 1, -2, -2, 1, -1, -1, 1],
@@ -34,7 +34,7 @@ const PATT: [[i32; 16]; 2] = [
 /// for the hex neighborhood used in green interpolation.
 #[derive(Debug)]
 pub(crate) struct HexLookup {
-    /// offsets[row%3][col%3] = [(dy, dx); 8]
+    /// `offsets[row%3][col%3] = [(dy, dx); 8]`
     offsets: [[[HexOffset; HEX_ENTRIES]; 3]; 3],
     /// The "solitary green" row position (mod 3)
     pub(crate) sgrow: usize,

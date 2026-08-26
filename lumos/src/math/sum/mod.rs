@@ -34,7 +34,7 @@ use crate::simd::dispatch;
 /// so LLVM auto-vectorizes [`scalar::sum_f32`] into a 4-wide f64 accumulation and the AVX2 kernel
 /// has to beat *that*. One vector's worth of work does not amortize the reduction — at the 8-lane
 /// minimum the kernel runs 0.80x its fallback, breaks even at 10, and only pulls clear at 16
-/// (1.71x). [`weighted_sums`] has no such gap and keeps the lane minimum: its fallback carries two
+/// (1.71x). [`weighted_sums()`] has no such gap and keeps the lane minimum: its fallback carries two
 /// accumulators and a multiply, which LLVM vectorizes less well, so it is ahead from 8 elements up.
 ///
 /// Set from `bench_sum_f32_crossover`; `.notes/simd-todo.md` carries the sweep it came from.
@@ -72,7 +72,7 @@ pub(crate) fn mean_f32(values: &[f32]) -> f32 {
 /// reduction order and scalar tail as its own [`sum_f32`], so unit weights walk the identical values
 /// through the identical additions.
 ///
-/// The two no longer reach the same rung everywhere. On x86 this gates at [`AVX2_F32_LANES`] while
+/// The two do not reach the same rung everywhere. On x86 this gates at [`AVX2_F32_LANES`] while
 /// [`sum_f32`] waits for [`AVX2_SUM_F32_CROSSOVER`], so from 8 to 15 elements the weighted numerator
 /// reassociates into lanes while the plain mean is still accumulating sequentially. On values that
 /// cancel, that window puts the two up to ~500 f32 ULPs apart. Nothing in the pipeline compares them

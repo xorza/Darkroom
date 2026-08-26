@@ -172,8 +172,8 @@ impl MainWindow {
                     TabRef::ImageViewer(node_id) => {
                         // Resolved here rather than for every viewer tab up
                         // front: only the pane being drawn needs a title, and
-                        // `node_label` is a graph lookup that borrows — less
-                        // than the map that used to front it cost to build.
+                        // `node_label` is a graph lookup that borrows, so the
+                        // pane pays a hash probe and no allocation.
                         let title = viewer::node_label(doc, node_id);
                         let previews = &app.run_state().previews;
                         let viewer = image_viewers

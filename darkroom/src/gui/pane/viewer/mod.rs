@@ -169,9 +169,9 @@ impl ImageViewer {
     /// **Only the fit needs `pane`.** A viewer carrying its own framing
     /// already knows its rect, so it answers even on a pass where the pane has
     /// never been arranged — which is every pass that puts a viewer tab on
-    /// screen for the first time. Gating the whole thing on a measured pane is
-    /// what used to make a zoomed viewer draw at fit for a frame and snap to
-    /// its real scale afterwards.
+    /// screen for the first time. Gating the whole thing on a measured pane
+    /// would make a zoomed viewer draw at fit for a frame and snap to its real
+    /// scale afterwards.
     ///
     /// `None` therefore means only "no framing yet": no explicit viewport and
     /// no pane to fit into. [`ImageFit::Contain`] is the right picture there —
@@ -496,9 +496,9 @@ impl Display for HeaderReadout<'_> {
 ///
 /// Borrowed from the document rather than assembled: both readers record
 /// every frame, and both arms are text something already owns. Each reader
-/// still resolves its own — the strip labels the tabs it is drawing, the pane
-/// header labels the one tab it is — because fronting the lookup with a
-/// per-frame map cost more than it saved.
+/// resolves its own — the strip labels the tabs it is drawing, the pane header
+/// labels the one tab it is — because one hash probe per label is cheaper than
+/// a table keyed by every tab.
 pub(crate) fn node_label(doc: &Document, node_id: NodeId) -> &str {
     doc.graph
         .find(node_id)

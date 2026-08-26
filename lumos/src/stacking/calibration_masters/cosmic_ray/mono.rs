@@ -170,7 +170,7 @@ fn laplacian_plus_into(data: &[f32], size: Size2us, out: &mut Vec<f32>) {
 /// Median over a `(2r+1)²` window, replicating the border pixel for out-of-bounds coordinates so
 /// every output sees a full window. Scalar, row-parallel.
 ///
-/// Deliberately not [`median_filter_3x3`](crate::stacking::star_detection::median_filter), even
+/// Deliberately not star detection's own `median_filter_3x3`, even
 /// though `r == 1` describes the same 3×3 median: that one *shrinks* its window at the border to
 /// the 4 or 6 in-bounds samples where this one replicates. L.A.Cosmic differences two of these
 /// windows against each other — the fine structure is `median₃ − median₇(median₃)` — so every

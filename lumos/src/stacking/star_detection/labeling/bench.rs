@@ -103,7 +103,7 @@ fn bench_label_map_from_buffer_4k_globular(b: ::quickbench::Bencher) {
 }
 
 /// The labeler on an image small enough to resolve to a single strip, where the boundary stitch
-/// has nothing to do. Guards the path a second, sequential implementation used to serve.
+/// has nothing to do — the single-strip path, where the parallel labeler carries no stitch cost.
 #[quick_bench(warmup_time_ms = 100, bench_time_ms = 500)]
 fn bench_label_small(b: ::quickbench::Bencher) {
     use crate::stacking::star_detection::labeling::label_mask;

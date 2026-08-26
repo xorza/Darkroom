@@ -25,7 +25,7 @@ pub(super) enum Orientation {
 pub(super) struct Triangle {
     /// Indices of the three points in the original list.
     pub(super) indices: [usize; 3],
-    /// Invariant ratios: (sides[0]/sides[2], sides[1]/sides[2]).
+    /// Invariant ratios: `(sides[0]/sides[2], sides[1]/sides[2])`.
     pub(super) ratios: (f64, f64),
     /// Orientation of the triangle.
     pub(super) orientation: Orientation,

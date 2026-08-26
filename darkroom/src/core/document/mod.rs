@@ -188,8 +188,7 @@ pub(crate) struct StackedItem {
 ///
 /// **Everything here is persisted and undoable, by design** — reopening
 /// a file restores the exact camera and selection, and Ctrl+Z walks
-/// camera/selection changes alongside structural edits (see the long
-/// note that used to live on `Document`).
+/// camera/selection changes alongside structural edits.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub(crate) struct GraphView {
     /// Every node body's placement. Exactly one entry per graph node —
@@ -332,20 +331,18 @@ impl Document {
     /// inspectors. Absence from a *scene* means only that a node is off-screen
     /// or on a closed tab; absence from here is permanent.
     ///
-    /// **The caches that ask it**, and where each is swept:
+    /// **Who asks it, and where the next one goes.** Two sweeps run from
+    /// `App::update`, once a frame, and between them their bodies name every
+    /// cache: [`MainWindow::reconcile`](crate::gui::window::MainWindow::reconcile)
+    /// for what the window owns, and `RunState::sync` for the published preview
+    /// values (through [`Self::holds_preview_node`]). A new cache derived from
+    /// the document joins one of those two bodies rather than earning a third
+    /// call site, which is what keeps the list in code that a reader can open
+    /// rather than in this comment.
     ///
-    /// | Cache | Swept by |
-    /// |---|---|
-    /// | `CanvasGeometry`'s port offsets + node sizes | `GraphUI::retain_nodes` |
-    /// | `Inspectors::modes` | `GraphUI::retain_nodes` |
-    /// | `PreviewStore::entries` (through [`Self::holds_preview_node`]) | `PreviewStore::reconcile` |
-    ///
-    /// All three run from `App::update`, once a frame,
-    /// alongside `MainWindow::image_viewers` — which is swept in the same pass
-    /// but against the *layout*, since a viewer's framing dies with its tab
-    /// rather than with its node. A new cache derived from the document
-    /// belongs in that pass and on this list; nothing else enforces it, so
-    /// this is where to look and what to extend.
+    /// `MainWindow::image_viewers` rides the same pass but is swept against the
+    /// *layout*, since a viewer's framing dies with its tab rather than with its
+    /// node.
     ///
     /// Two neighbours are deliberately outside it: [`Self::reconcile_with_graph`]
     /// is the document repairing *itself* rather than a cache being swept, and

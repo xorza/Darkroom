@@ -62,10 +62,10 @@ struct PixelGrid {
     /// Pixel values indexed by local coordinates.
     values: Vec<f32>,
     /// Generation when each cell's value was last set. Cell has a pixel if
-    /// values_generation[idx] == current_generation.
+    /// `values_generation[idx] == current_generation`.
     values_generation: Vec<u32>,
     /// Generation when each cell was last visited. Cell is visited if
-    /// visited_generation[idx] == visited_generation_counter.
+    /// `visited_generation[idx] == visited_generation_counter`.
     visited_generation: Vec<u32>,
     /// Generation counter for values (incremented on each reset_with_pixels).
     current_generation: u32,

@@ -293,7 +293,7 @@ fn normalize_weights(weights: &[f32]) -> Option<Vec<f32>> {
 
 /// Warn when frame weighting was requested but the resolved combine is a median, which has no
 /// weighted form here — the weights would be silently dropped. Fires both for an explicit `Median`
-/// and for a method downgraded to its small-N fallback (see [`SmallN::resolve`]).
+/// and for a method downgraded to its small-N fallback (see [`SmallN::resolve`](crate::stacking::combine::config::SmallN::resolve)).
 fn warn_if_weights_ignored(method: CombineMethod, weighting: &Weighting) {
     if matches!(method, CombineMethod::Median) && *weighting != Weighting::Equal {
         tracing::warn!(

@@ -62,8 +62,8 @@ pub(crate) fn abs_deviation_inplace<F: Float>(values: &mut [F], median: F) {
 /// would move nothing single-precision, only the SIP clip threshold.
 ///
 /// `f64` is the canonical form, with [`MAD_TO_SIGMA_F32`] cast from it so the two precisions cannot
-/// round apart. The double-precision users used to reach the constant through `f64::from` on an
-/// `f32`, spending an `f32` round-trip inside an `f64` computation for nothing.
+/// round apart. Reaching the `f64` users through `f64::from` on the `f32` constant instead would
+/// spend an `f32` round-trip inside an `f64` computation for nothing.
 pub(crate) const MAD_TO_SIGMA: f64 = 1.4826022;
 
 /// [`MAD_TO_SIGMA`] in the precision the `f32` paths multiply in.

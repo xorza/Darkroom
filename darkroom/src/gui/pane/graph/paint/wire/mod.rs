@@ -214,9 +214,8 @@ pub(crate) struct WirePass<'a, 'p> {
 
 impl WirePass<'_, '_> {
     /// Cull, breaker-probe, brush, and paint one committed wire, reporting
-    /// whether the breaker crossed it — the whole per-wire body both renderers
-    /// used to spell out, so they can't drift in culling, emphasis, or alarm
-    /// color.
+    /// whether the breaker crossed it — the whole per-wire body, shared by both
+    /// renderers so they can't drift in culling, emphasis, or alarm color.
     ///
     /// A wire the cull drops is not probed either: the scribble is always
     /// on-screen, so it can't have crossed an off-screen curve. `tint` is
@@ -318,8 +317,8 @@ impl WireEmphasis {
         Self { fading, canvas_bg }
     }
 
-    /// This frame's paint tier for one wire, folding the two rules each
-    /// renderer used to spell out by hand: a broken wire never *also* reads
+    /// This frame's paint tier for one wire, folding the two rules both
+    /// renderers need: a broken wire never *also* reads
     /// as hovered (the alarm hue wins outright), and either state takes the
     /// width lift.
     fn stroke(&self, base_width: f32, broken: bool, endpoint_hover: bool) -> WireStroke {

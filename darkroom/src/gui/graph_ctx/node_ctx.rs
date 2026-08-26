@@ -69,9 +69,9 @@ pub(crate) struct NodeCtx<'a> {
     ///
     /// Two things hang off it, the const editors' hover-revealed chips
     /// ([`Self::sve`]) and whether the port rows build tooltips at all
-    /// ([`Self::tips`]), and both used to be resolved in `ports_row` and
-    /// threaded down as a `&ConstValueEditorTheme` and a `bool` that no
-    /// signature said were the same fact.
+    /// ([`Self::tips`]). One field rather than a `&ConstValueEditorTheme` and a
+    /// `bool` threaded down beside each other, where no signature would say the
+    /// two are the same fact.
     ///
     /// Not resolved in [`Self::resolve`] because that takes no `Ui` — and
     /// must not, since it is what the whole frame reads nodes through. The
