@@ -232,6 +232,7 @@ mod tests {
     use palantir::{Key, Modifiers};
     use scenarium::{Func, FuncId, Node, NodeId, NodeKind, testing};
 
+    use crate::alloc_audit;
     use crate::core::document::TabRef;
     use crate::core::document::dock::dock_op::DockOp;
     use crate::core::document::harness::DocFixture;
@@ -286,7 +287,7 @@ mod tests {
         test.prime(SETTLE_FRAMES);
 
         for frame in 0..AUDITED_FRAMES {
-            let allocations = crate::alloc_audit::allocations(|| {
+            let allocations = alloc_audit::allocations(|| {
                 let _ = test.frame();
             });
             assert_eq!(

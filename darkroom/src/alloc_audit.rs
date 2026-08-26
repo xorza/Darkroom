@@ -17,8 +17,8 @@ use std::cell::Cell;
 static ALLOCATOR: CountingAllocator = CountingAllocator;
 
 thread_local! {
-    /// Both carry `const` initializers of drop-free types, so neither
-    /// registers a thread destructor and neither can be read after teardown.
+    /// `const` initializers of drop-free types: neither key registers a
+    /// thread destructor, so neither costs the allocator a lazy-init check.
     static IN_AUDIT: Cell<bool> = const { Cell::new(false) };
     static ALLOCS: Cell<u64> = const { Cell::new(0) };
 }
@@ -61,8 +61,8 @@ fn track() {
 
 /// Heap allocations this thread performs while `body` runs.
 pub(crate) fn allocations(body: impl FnOnce()) -> u64 {
-    let _window = AuditWindow::open();
     ALLOCS.with(|allocs| allocs.set(0));
+    let _window = AuditWindow::open();
     body();
     ALLOCS.with(Cell::get)
 }
