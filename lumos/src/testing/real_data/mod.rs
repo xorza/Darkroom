@@ -2,8 +2,8 @@
 //!
 //! Everything here runs against the bundled `test_data/lumos_data` dataset behind the `real-data`
 //! feature. A real-data test that exercises *one* subsystem now lives with that subsystem, in its
-//! `tests/real_data.rs` — this module previously held the `image_ops` ones, which made it look
-//! like shared infrastructure when it was really one subsystem's test directory.
+//! `tests/real_data.rs`, so this module is not one subsystem's test directory wearing the name
+//! of shared infrastructure.
 //!
 //! What is left is genuinely shared or genuinely cross-cutting:
 //!

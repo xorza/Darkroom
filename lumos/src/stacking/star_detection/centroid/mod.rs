@@ -431,7 +431,7 @@ fn refine_centroid(
 ///
 /// `background_override`, when set, replaces the per-pixel tiled background/noise
 /// map with a single flat estimate for the whole stamp — used for
-/// [`LocalBackgroundMethod::LocalAnnulus`](crate::stacking::star_detection::config::measurement_config::LocalBackgroundMethod::LocalAnnulus),
+/// [`LocalBackgroundMethod::LocalAnnulus`],
 /// whose locally-estimated sky level is only valid at the stamp scale, not
 /// interpolated per pixel like the tiled map. It applies to every background
 /// consumer here — flux/marginals, the windowed covariance behind FWHM/eccentricity,

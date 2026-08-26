@@ -287,8 +287,7 @@ mod tests {
     /// reference theme users can copy, in the Theme → Load/Export format — so
     /// it has to track [`Theme::default`]. This *reads* it: any change to the
     /// consts (or to palantir's defaults) fails here rather than silently
-    /// rewriting a tracked file mid-suite, which is what it used to do and why
-    /// it could never fail.
+    /// rewriting a tracked file mid-suite, which is a check that can never fail.
     #[test]
     fn ayu_graphite_asset_in_sync() {
         let expected = serialized_default_theme();
@@ -322,7 +321,7 @@ mod tests {
     /// The whole bundle — darkroom's own fields *and* the nested
     /// palantir palette — must survive a TOML round-trip; that's the
     /// on-disk format the Theme → Load / Export menu and the preferences
-    /// rely on. Exercises the formerly-fragile case too: the tooltip's
+    /// rely on. Exercises the awkward case too: the tooltip's
     /// infinite max-size axis (handled by `Size`'s custom serde).
     #[test]
     fn theme_roundtrips_through_toml() {

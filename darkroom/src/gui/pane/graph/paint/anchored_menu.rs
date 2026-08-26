@@ -11,7 +11,7 @@ use crate::gui::pane::graph::gesture::slot::GestureSlot;
 /// node, drop position, …) as plain fields set at open-time and read at
 /// pick-time.
 ///
-/// Centralizes what those three controllers used to each re-implement: the
+/// Carries what all three controllers need: the
 /// Esc-to-close guard, the identical `Popup` chrome (the `context_menu`
 /// theme slot's panel, padding, and width floor, hug sizing,
 /// click-outside dismiss), and the "a pick or an outside dismiss closes

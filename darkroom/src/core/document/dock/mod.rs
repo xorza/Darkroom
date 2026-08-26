@@ -1,7 +1,7 @@
 //! The dock layout: a binary split tree whose leaves are tab groups.
-//! Replaces the old flat tab strip — each [`TabGroup`] renders as one
-//! pane with its own strip, and a [`DockSplit`] divides the space
-//! between two child nodes at a draggable `ratio`. Pure data + pure
+//! Each [`TabGroup`] renders as one pane with its own strip, and a
+//! [`DockSplit`] divides the space between two child nodes at a
+//! draggable `ratio`. Pure data + pure
 //! ops: every mutation is a [`DockOp`] applied in place, reporting
 //! nothing. None of them is undoable — rearranging panes is navigation,
 //! so Ctrl+Z walks past it to the last graph edit.
@@ -16,8 +16,7 @@
 //!
 //! Invariants (checked by [`DockLayout::validate`]):
 //! - the vec is canonical pre-order, fully reachable from slot 0;
-//! - exactly one group holds the `Main` graph tab (the *primary* group,
-//!   successor of the old `tabs[0] is Main` rule);
+//! - exactly one group holds the `Main` graph tab — the *primary* group;
 //! - no group is empty, no tab appears twice, group ids are unique,
 //!   per-group `active` is in range, `focused` names a live group,
 //!   ratios stay in `RATIO_MIN..=RATIO_MAX`.

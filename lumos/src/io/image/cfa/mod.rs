@@ -71,8 +71,8 @@ impl CfaType {
     /// A frame without CFA metadata is a single-colour mosaic, and [`CfaType::Mono`] describes that
     /// exactly — `color_at` answers 0 everywhere, its period is 1, and every pixel is its own
     /// colour's neighbour. Resolving the `Option` here once is what keeps "absent means mono" out of
-    /// the per-pixel colour lookup, the phase-period match, and the same-colour neighbour strategy,
-    /// each of which used to spell it out for itself.
+    /// the per-pixel colour lookup, the phase-period match, and the same-colour neighbour
+    /// strategy, none of which has to spell it out for itself.
     pub(crate) fn or_mono(cfa_type: Option<&Self>) -> &Self {
         cfa_type.unwrap_or(&CfaType::Mono)
     }

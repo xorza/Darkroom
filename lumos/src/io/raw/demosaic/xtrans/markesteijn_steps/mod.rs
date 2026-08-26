@@ -851,9 +851,9 @@ fn build_summed_area_table(data: &[u8], size: Size2us, sat: &mut [u32]) {
 }
 
 /// Query a rectangular sum from a summed area table.
-/// Computes sum of data[y0..=y1][x0..=x1] in O(1).
+/// Computes sum of `data[y0..=y1][x0..=x1]` in O(1).
 #[inline(always)]
-/// `min` and `max` are both inclusive. Takes the corners loose rather than as a [`URect`] because
+/// `min` and `max` are both inclusive. Takes the corners loose rather than as a [`URect`](crate::math::urect::URect) because
 /// this runs once per direction per pixel and `URect::new` asserts its bounds in release.
 fn sat_query(sat: &[u32], width: usize, min: Vec2us, max: Vec2us) -> u32 {
     let bottom_right = sat[max.y * width + max.x];

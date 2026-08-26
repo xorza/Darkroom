@@ -125,7 +125,8 @@ fn remove_duplicate_stars(stars: &mut Vec<Star>, min_separation: f32) -> usize {
     // are allocated, so memory and time are O(stars). A dense grid is O(field_area / min_sep²) —
     // a 6k×6k field with a few thousand stars otherwise allocates (and zeroes) millions of empty
     // cells, which dominated the cost. A star is a duplicate of an earlier *kept* star within
-    // `min_separation`; the grid only ever holds kept stars, so this matches the old behaviour.
+    // `min_separation`, and the grid only ever holds kept stars, so a rejected star can never
+    // suppress a later one.
     let mut grid: HashMap<(i64, i64), SmallVec<[usize; 4]>> = HashMap::new();
     let mut kept = vec![true; stars.len()];
 

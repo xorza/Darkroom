@@ -41,8 +41,8 @@ pub(crate) struct RuntimeHost {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CacheRootChange {
     /// The same root: the store this would build is the one already installed.
-    /// A plain re-save, which used to cost a header read per resident
-    /// disk-backed node for nothing.
+    /// A plain re-save lands here, and rebuilding would cost a header read per
+    /// resident disk-backed node for nothing.
     Unchanged,
     /// A different root, or none at all — a document opened, closed, or saved
     /// somewhere else. The worker takes the new store and writes nothing into

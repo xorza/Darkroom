@@ -184,8 +184,8 @@ impl LinearImage {
     /// Deinterleave an already-`f32` (`L_F32` / `RGB_F32`) imaginarium image into planes.
     ///
     /// # Panics
-    /// If `image` is not one of those two formats. Callers check the format themselves; the
-    /// shared gate this used to name was removed when the ops moved to `LinearImage`.
+    /// If `image` is not one of those two formats. Callers check the format themselves — the
+    /// ops live on `LinearImage`, so there is no shared gate to name.
     pub(crate) fn from_f32_image(image: &Image) -> Self {
         LinearImage {
             metadata: ImageMetadata::default(),

@@ -12,8 +12,8 @@
 //! invalidate when the document moves.
 //!
 //! **The one rule.** No accessor may walk the graph. Everything below is a
-//! field read, a hash lookup, or a slice index, so a per-widget call costs
-//! what the projection this replaced used to charge per frame. The one answer
+//! field read, a hash lookup, or a slice index, so a per-widget call is
+//! O(1) and nothing has to be rebuilt when the document moves. The one answer
 //! that cannot come off a declaration — a wildcard output's resolved type —
 //! is read out of the [`OutputTypes`] table the context carries, resolved once
 //! by [`GraphCtx::new`] rather than per read (see

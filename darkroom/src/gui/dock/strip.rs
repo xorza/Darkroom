@@ -24,7 +24,8 @@ use crate::gui::widgets::support::{colored_text, muted_text};
 /// One chip's whole draw state, resolved from its group by
 /// [`tab_labels`](super::tab_labels): the tab, its label text and unsaved
 /// state (the projections that need the open document), and the two flags
-/// that used to travel beside the slice as `group.active` / `focused`.
+/// that say which chip is its group's visible one and whether that group
+/// holds the dock focus.
 ///
 /// `active` lives here rather than being re-derived by position because
 /// the strip walks *labels* while `TabGroup::active` indexes `tabs` — a

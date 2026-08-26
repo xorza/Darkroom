@@ -69,7 +69,7 @@ pub(crate) fn local_jacobian(to_output: &Transform, center: DVec2, pixel: Vec2us
 }
 
 /// Compute signed area between the segment `from → to` and the x-axis, clipped to the unit square
-/// [0,1]×[0,1]. Uses Green's theorem. Port of STScI `sgarea()` from cdrizzlebox.c.
+/// `[0,1]×[0,1]`. Uses Green's theorem. Port of STScI `sgarea()` from cdrizzlebox.c.
 ///
 /// The sign depends on the direction of traversal (left-to-right = positive).
 /// When summed over all 4 edges of a convex quadrilateral (counterclockwise winding),
@@ -143,7 +143,7 @@ pub(crate) fn sgarea(from: DVec2, to: DVec2) -> f64 {
 /// Compute overlap area between the convex quadrilateral `quad` and a pixel cell.
 ///
 /// Shifts the quadrilateral so that the cell with lower-left `corner` becomes the unit square
-/// [0,1]×[0,1], then sums signed areas from each edge via `sgarea()`.
+/// `[0,1]×[0,1]`, then sums signed areas from each edge via `sgarea()`.
 ///
 /// Port of STScI `boxer()` from cdrizzlebox.c. Output pixels are integer-center (pixel `o`
 /// spans `[o - 0.5, o + 0.5]`, matching STScI), so callers pass the cell's lower-left

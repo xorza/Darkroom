@@ -267,7 +267,7 @@ const MAX_STRETCH_SAMPLES: usize = 1_000_000;
 /// Uniform-stride subsample of the combined intensity `I = (r+g+b)/3` (the sample itself for mono),
 /// computed from the planes directly — never materializing the full intensity plane just to throw
 /// all but every `stride`-th value away. Identical samples to subsampling
-/// [`crate::image_ops::intensity_plane`].
+/// [`LinearImage::intensity_plane`](crate::io::image::linear::LinearImage::intensity_plane).
 fn subsample_intensity(image: &LinearImage) -> Vec<f32> {
     let plane = image.channel(0).pixels();
     let stride = (plane.len() / MAX_STRETCH_SAMPLES).max(1);
@@ -483,7 +483,7 @@ impl ToneCurve for GhsCurve {
     }
 }
 
-/// The curve chosen for a stretch. [`apply_color_preserving_image`] / [`apply_curve_channel`] match
+/// The curve chosen for a stretch. [`apply_color_preserving_image`] / [`apply_curve_plane`] match
 /// this exactly once and then run a monomorphized loop, so the `Stf`/`Asinh` choice is never
 /// re-decided per pixel.
 #[derive(Debug, Clone, Copy)]
