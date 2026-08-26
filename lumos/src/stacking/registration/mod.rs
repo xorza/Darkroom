@@ -78,7 +78,7 @@ use std::time::Instant;
 
 use glam::DVec2;
 
-use crate::math::statistics::median_f32_mut;
+use crate::math::statistics::median_mut;
 use crate::stacking::star_detection::star::Star;
 use ransac::RansacEstimator;
 use triangle::matching::match_triangles;
@@ -233,7 +233,7 @@ fn median_fwhm(ref_stars: &[Star], target_stars: &[Star]) -> f64 {
         .map(|s| s.fwhm)
         .collect();
 
-    median_f32_mut(&mut fwhms) as f64
+    median_mut(&mut fwhms) as f64
 }
 
 /// `Auto` model selection: estimate transforms from fewest to most degrees of freedom and accept

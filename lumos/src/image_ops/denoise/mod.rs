@@ -18,7 +18,7 @@ use crate::image_ops::error::OpError;
 use crate::image_ops::wavelet::{atrous_smooth, max_scales};
 use crate::io::image::linear::LinearImage;
 use crate::math::size2us::Size2us;
-use crate::math::statistics::{mad_f32_with_scratch, mad_to_sigma, median_f32_mut};
+use crate::math::statistics::{mad_to_sigma, mad_with_scratch, median_mut};
 
 #[cfg(test)]
 mod tests;
@@ -249,6 +249,6 @@ fn estimate_sigma(curr: &[f32], next: &[f32], samples: &mut Vec<f32>, dev: &mut 
     if samples.is_empty() {
         return 0.0;
     }
-    let median = median_f32_mut(samples);
-    mad_to_sigma(mad_f32_with_scratch(samples, median, dev))
+    let median = median_mut(samples);
+    mad_to_sigma(mad_with_scratch(samples, median, dev))
 }

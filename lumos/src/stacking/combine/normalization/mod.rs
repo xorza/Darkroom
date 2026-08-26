@@ -20,7 +20,7 @@ use rayon::prelude::*;
 
 use crate::bit_buffer2::BitBuffer2;
 use crate::io::image::image_dimensions::ImageDimensions;
-use crate::math::statistics::{MedianMad, mad_to_sigma, median_f32_mut};
+use crate::math::statistics::{MedianMad, abs_deviation_inplace, mad_to_sigma, median_mut};
 use crate::stacking::combine::CANCEL_POLL_CHUNK;
 use crate::stacking::combine::config::Normalization;
 use crate::stacking::combine::error::Error;
@@ -450,16 +450,14 @@ pub(super) fn cancellable_median_mad(
     cancel: &CancelToken,
 ) -> Result<MedianMad, Error> {
     check_cancel(cancel)?;
-    let median = median_f32_mut(samples);
+    let median = median_mut(samples);
     check_cancel(cancel)?;
     // Keep the passes separate so a large MAD calculation remains cooperatively cancellable.
     for chunk in samples.chunks_mut(CANCEL_POLL_CHUNK) {
         check_cancel(cancel)?;
-        for value in chunk {
-            *value = (*value - median).abs();
-        }
+        abs_deviation_inplace(chunk, median);
     }
-    let mad = median_f32_mut(samples);
+    let mad = median_mut(samples);
     check_cancel(cancel)?;
     Ok(MedianMad { median, mad })
 }

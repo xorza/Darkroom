@@ -6,7 +6,7 @@
 use crate::io::image::linear::LinearImage;
 use crate::io::image::load_context::LoadContext;
 use crate::math::size2us::Size2us;
-use crate::math::statistics::median_f32_mut;
+use crate::math::statistics::median_mut;
 use crate::testing::visual;
 use crate::testing::{calibration_dir, init_tracing};
 use crate::{ExtractBackground, NeutralizeBackground, Scnr, Stretch};
@@ -27,7 +27,7 @@ fn corner_background_spread(image: &LinearImage) -> f32 {
             let row = y * size.width + x0;
             vals.extend_from_slice(&px[row..row + patch]);
         }
-        median_f32_mut(&mut vals)
+        median_mut(&mut vals)
     };
 
     let corners = [

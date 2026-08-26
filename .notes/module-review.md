@@ -42,29 +42,6 @@ form, so backticked identifiers in prose rot silently. Several already have.
       each, plus instructions to extend the table when a fourth is added. The
       table is the only thing linking those call sites; nothing enforces it.
 
-## `lumos` statistics duplicates itself across `f32`/`f64`
-
-`lumos/src/math/statistics/mod.rs` carries three pairs of functions whose bodies
-are identical modulo the float type, each pair with its own doc comment
-explaining that it is the twin of the other, and each with its own test.
-
-- [ ] `median_f32_mut:96` and `median_f64_mut:119` — identical bodies
-      (`select_nth_unstable_by` with `total_cmp`, even-length averaging).
-- [ ] `median_f32_fast:166` and `median_f64_fast:185` — identical bodies
-      (single `partial_cmp` partition, upper-middle convention, same debug
-      NaN assertion).
-- [ ] `mad_f32_fast:232` and `mad_f64_fast:201` — identical bodies.
-- [ ] `mad_f32_fast:232` and `mad_f32_with_scratch:248` differ only in which
-      median they call and whether they debug-assert; two names for one
-      operation parameterised by NaN tolerance.
-- [ ] Three separate sigma-clip/MAD implementations exist alongside the above:
-      `statistics::sigma_clipped:331`,
-      `stacking/star_detection/centroid/local_background.rs:91`
-      (`sigma_clipped_median_mad`), and
-      `stacking/combine/normalization/mod.rs:448` (`cancellable_median_mad`),
-      with a fourth reduced form in `stacking/combine/rejection/mod.rs:98`
-      (`sorted_mad`).
-
 ## Repository hygiene
 
 - [ ] `.tmp/` at the repo root holds build and run artifacts

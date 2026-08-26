@@ -19,7 +19,7 @@ use crate::background_mesh::workspace::TileScratch;
 use crate::bit_buffer2::BitBuffer2;
 use crate::concurrency::JobScratchPool;
 use crate::math::size2us::Size2us;
-use crate::math::statistics::median_f32_mut;
+use crate::math::statistics::median_mut;
 use crate::math::urect::URect;
 use crate::math::vec2us::Vec2us;
 use imaginarium::Buffer2;
@@ -192,8 +192,8 @@ impl TileGrid {
                 }
             }
 
-            out.sky = median_f32_mut(&mut skies[..count]);
-            out.sigma = median_f32_mut(&mut sigmas[..count]);
+            out.sky = median_mut(&mut skies[..count]);
+            out.sigma = median_mut(&mut sigmas[..count]);
         });
 
         std::mem::swap(&mut self.stats, scratch);

@@ -32,7 +32,7 @@ use glam::DVec2;
 use crate::error::InvalidConfigField;
 use crate::math::linear_system;
 use crate::math::size2us::Size2us;
-use crate::math::statistics::{MAD_TO_SIGMA, mad_f64_fast, median_f64_fast};
+use crate::math::statistics::{MAD_TO_SIGMA, mad_fast, median_fast};
 use crate::stacking::registration::distortion::SINGULAR_THRESHOLD;
 use crate::stacking::registration::distortion::point_normalization::PointNormalization;
 use crate::stacking::registration::result::RegistrationError;
@@ -238,8 +238,8 @@ impl SipPolynomial {
                 break; // Not enough points to re-fit
             }
 
-            let median = median_f64_fast(&mut active);
-            let mad = mad_f64_fast(&active, median, &mut deviations);
+            let median = median_fast(&mut active);
+            let mad = mad_fast(&active, median, &mut deviations);
             let threshold = config.clip_sigma * mad * MAD_TO_SIGMA;
 
             if threshold < 1e-15 {

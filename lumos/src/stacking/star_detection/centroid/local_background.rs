@@ -77,19 +77,12 @@ pub(super) fn compute_annulus_background(
         return None;
     }
 
+    // Stack scratch: this runs per star inside the parallel measure loop, so it must not allocate.
+    let mut deviations: ArrayVec<f32, MAX_ANNULUS_PIXELS> = ArrayVec::new();
     // Sigma-clipped median (2 iterations, 3-sigma clip)
-    let stats = sigma_clipped_median_mad(&mut values, 3.0, 2);
+    let stats = ClippedStats::sigma_clipped(&mut values, &mut deviations, 3.0, 2);
     Some(LocalBackground {
         bg: stats.median,
         noise: stats.sigma,
     })
-}
-
-/// Compute sigma-clipped median and MAD using the shared implementation.
-/// Uses stack-allocated ArrayVec for deviations to avoid heap allocation.
-#[inline]
-fn sigma_clipped_median_mad(values: &mut [f32], kappa: f32, iterations: usize) -> ClippedStats {
-    // Stack scratch: this runs per star inside the parallel measure loop, so it must not allocate.
-    let mut deviations: ArrayVec<f32, MAX_ANNULUS_PIXELS> = ArrayVec::new();
-    ClippedStats::sigma_clipped(values, &mut deviations, kappa, iterations)
 }

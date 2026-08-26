@@ -38,7 +38,7 @@ fn bench_median_f32(b: ::quickbench::Bencher) {
 
     b.bench(|| {
         let mut d = data.clone();
-        black_box(median_f32_mut(black_box(&mut d)))
+        black_box(median_mut(black_box(&mut d)))
     });
 }
 

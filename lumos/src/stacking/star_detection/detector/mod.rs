@@ -14,7 +14,7 @@ use crate::io::image::linear::LinearImage;
 use crate::math::size2us::Size2us;
 
 use crate::error::InvalidConfigField;
-use crate::math::statistics::median_f32_mut;
+use crate::math::statistics::median_mut;
 use crate::stacking::star_detection::background::background_estimate::BackgroundEstimate;
 use crate::stacking::star_detection::config::Config;
 use crate::stacking::star_detection::detector::stages::detect::DetectResult;
@@ -231,11 +231,11 @@ impl StarDetector {
         diagnostics.final_star_count = stars.len();
         if !stars.is_empty() {
             let mut buf: Vec<f32> = stars.iter().map(|s| s.fwhm).collect();
-            diagnostics.median_fwhm = median_f32_mut(&mut buf);
+            diagnostics.median_fwhm = median_mut(&mut buf);
 
             buf.clear();
             buf.extend(stars.iter().map(|s| s.snr));
-            diagnostics.median_snr = median_f32_mut(&mut buf);
+            diagnostics.median_snr = median_mut(&mut buf);
         }
 
         DetectionResult { stars, diagnostics }

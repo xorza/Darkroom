@@ -12,7 +12,7 @@ use imaginarium::Buffer2;
 use crate::bit_buffer2::BitBuffer2;
 use crate::io::image::cfa::CfaType;
 use crate::math::size2us::Size2us;
-use crate::math::statistics::median_f32_mut;
+use crate::math::statistics::median_mut;
 use crate::math::vec2us::Vec2us;
 
 /// Mono: 8-connected neighbours, every one of which is the same "colour".
@@ -78,7 +78,7 @@ fn median_of_neighbors<const N: usize>(
         return *pixels.get(pos.x, pos.y);
     }
 
-    median_f32_mut(&mut neighbors[..count])
+    median_mut(&mut neighbors[..count])
 }
 
 /// Same-color CFA neighbour median strategy, built once per master so the per-pixel scan stays

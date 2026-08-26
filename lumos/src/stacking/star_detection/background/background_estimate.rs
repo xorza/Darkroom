@@ -8,7 +8,7 @@ use crate::background_mesh::spline::{cubic_spline_eval, solve_natural_spline_d2}
 use crate::background_mesh::tile_stats::TileComponent;
 use crate::bit_buffer2::BitBuffer2;
 use crate::concurrency::JobScratchPool;
-use crate::math::statistics::median_f32_mut;
+use crate::math::statistics::median_mut;
 use crate::math::vec2us::Vec2us;
 use crate::stacking::star_detection::background::simd;
 use crate::stacking::star_detection::background::simd::{SegmentRamp, SplineSegment};
@@ -76,9 +76,9 @@ fn noise_floor_from(grid: &TileGrid) -> f32 {
         if skies.is_empty() {
             return f32::MIN_POSITIVE;
         }
-        median_f32_mut(&mut skies)
+        median_mut(&mut skies)
     } else {
-        median_f32_mut(&mut sigmas)
+        median_mut(&mut sigmas)
     };
     noise_floor_for(scale)
 }

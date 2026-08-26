@@ -79,7 +79,7 @@ impl WinsorizedClipConfig {
         working.sort_unstable_by(f32::total_cmp);
 
         // `select_nth_unstable`'s median (index len/2) equals the sorted element at that index,
-        // so `working[mid]` reproduces the previous `median_f32_fast` result exactly.
+        // so `working[mid]` reproduces the previous `median_fast` result exactly.
         let mid = working.len() / 2;
         let mut center = working[mid];
         let mut sigma = winsorized_stddev(working, center) * WINSORIZED_CORRECTION;

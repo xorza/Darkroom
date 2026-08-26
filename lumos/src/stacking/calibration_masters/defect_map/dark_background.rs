@@ -11,7 +11,7 @@ use imaginarium::Buffer2;
 use rayon::prelude::*;
 
 use crate::io::image::cfa::CfaType;
-use crate::math::statistics::median_f32_mut;
+use crate::math::statistics::median_mut;
 use crate::math::vec2us::Vec2us;
 use crate::stacking::calibration_masters::defect_map::DARK_BACKGROUND_TILE_SIZE;
 use crate::stacking::calibration_masters::defect_map::sampling::collect_color_samples;
@@ -79,7 +79,7 @@ impl DarkBackground {
                 let mut values = [f32::NAN; 3];
                 for color in 0..num_colors {
                     if !samples[color].is_empty() {
-                        values[color] = median_f32_mut(&mut samples[color]);
+                        values[color] = median_mut(&mut samples[color]);
                     }
                 }
                 Ok(DarkTile { values })
@@ -97,7 +97,7 @@ impl DarkBackground {
             if samples.is_empty() {
                 continue;
             }
-            let fallback = median_f32_mut(&mut samples);
+            let fallback = median_mut(&mut samples);
             for tile in &mut tiles {
                 if tile.values[color].is_nan() {
                     tile.values[color] = fallback;

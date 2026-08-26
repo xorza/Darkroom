@@ -26,7 +26,7 @@ use crate::io::image::image_provenance::{
 use crate::io::image::linear_pixels::LinearPixels;
 use crate::io::image::load_context::LoadContext;
 use crate::io::image::null_mask::NullMask;
-use crate::math::statistics::median_f32_mut;
+use crate::math::statistics::median_mut;
 
 pub(super) fn read_stream_hdu(
     reader: &mut StreamReader<File>,
@@ -236,7 +236,7 @@ fn fill_nulls(samples: &mut [f32], null_count: usize) {
     let fill = if finite.is_empty() {
         0.0
     } else {
-        median_f32_mut(&mut finite)
+        median_mut(&mut finite)
     };
     for value in samples.iter_mut().filter(|value| !value.is_finite()) {
         *value = fill;

@@ -2,7 +2,7 @@
 //! tolerates a gradient across the stack that a median-based method reads as spread.
 
 use crate::error::InvalidConfigField;
-use crate::math::statistics::{mad_f32_fast, mad_to_sigma, median_f32_fast};
+use crate::math::statistics::{mad_fast, mad_to_sigma, median_fast};
 use crate::stacking::combine::rejection::scratch_buffers::ScratchBuffers;
 use crate::stacking::combine::rejection::sigma_bounds::SigmaBounds;
 use crate::stacking::combine::rejection::{
@@ -70,8 +70,8 @@ impl LinearFitClipConfig {
                 // Initial pass: median + MAD sigma clipping (robust starting point)
                 scratch.estimate_values.clear();
                 scratch.estimate_values.extend_from_slice(&values[..len]);
-                let center = median_f32_fast(&mut scratch.estimate_values);
-                let mad = mad_f32_fast(&values[..len], center, &mut scratch.estimate_values);
+                let center = median_fast(&mut scratch.estimate_values);
+                let mad = mad_fast(&values[..len], center, &mut scratch.estimate_values);
                 let sigma = mad_to_sigma(mad);
 
                 if sigma < f32::EPSILON {

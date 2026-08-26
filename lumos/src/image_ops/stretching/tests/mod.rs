@@ -4,13 +4,13 @@ mod real_data;
 use crate::image_ops::error::OpError;
 use crate::image_ops::internals::channel_plane as channel;
 use crate::image_ops::stretching::*;
-use crate::math::statistics::median_f32_mut;
+use crate::math::statistics::median_mut;
 use crate::testing::images::{gray_image as gray, rgb_image as rgb};
 use crate::testing::prelude::*;
 
 fn median_of(v: &[f32]) -> f32 {
     let mut c = v.to_vec();
-    median_f32_mut(&mut c)
+    median_mut(&mut c)
 }
 
 #[test]

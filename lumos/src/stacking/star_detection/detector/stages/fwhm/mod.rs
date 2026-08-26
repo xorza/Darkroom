@@ -3,7 +3,7 @@
 //! Determines the effective FWHM for matched filtering by either using
 //! a manual value, auto-estimating from bright stars, or disabling.
 
-use crate::math::statistics::{mad_f32_with_scratch, mad_floored, median_f32_mut};
+use crate::math::statistics::{mad_floored, mad_with_scratch, median_mut};
 use crate::stacking::star_detection::background::background_estimate::BackgroundEstimate;
 use crate::stacking::star_detection::config::Config;
 use crate::stacking::star_detection::config::detection_config::DetectionConfig;
@@ -135,8 +135,8 @@ fn from_stars(
     let mut scratch = Vec::with_capacity(fwhms.len());
 
     // Compute median and MAD for outlier rejection
-    let median = median_f32_mut(&mut fwhms);
-    let mad = mad_f32_with_scratch(&fwhms, median, &mut scratch);
+    let median = median_mut(&mut fwhms);
+    let mad = mad_with_scratch(&fwhms, median, &mut scratch);
 
     // Reject outliers: keep within 3×MAD of median (with floor for uniform distributions)
     let threshold = FWHM_MAD_MULTIPLIER * mad_floored(mad, median, FWHM_MAD_FLOOR_FRACTION);
@@ -158,8 +158,8 @@ fn from_stars(
     }
 
     // Final estimate from filtered stars
-    let final_median = median_f32_mut(&mut fwhms);
-    let final_mad = mad_f32_with_scratch(&fwhms, final_median, &mut scratch);
+    let final_median = median_mut(&mut fwhms);
+    let final_mad = mad_with_scratch(&fwhms, final_median, &mut scratch);
 
     tracing::info!(
         "Estimated FWHM: {final_median:.2} pixels (MAD: {final_mad:.2}, from {} stars)",

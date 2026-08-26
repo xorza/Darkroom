@@ -3,7 +3,7 @@ use rand_chacha::ChaCha8Rng;
 
 use crate::math::sum::mean_f32;
 
-use crate::math::statistics::mad_f32_fast;
+use crate::math::statistics::mad_fast;
 use crate::stacking::combine::rejection::gesd_config::GesdConfig;
 use crate::stacking::combine::rejection::linear_fit_clip_config::LinearFitClipConfig;
 use crate::stacking::combine::rejection::percentile_clip_config::PercentileClipConfig;
@@ -159,8 +159,8 @@ fn sigma_clip_symmetric_equals_asymmetric_same_thresholds() {
 }
 
 #[test]
-fn sorted_mad_matches_mad_f32_fast() {
-    // `sorted_mad` must reproduce `mad_f32_fast` (the function the sort-once reject replaced)
+fn sorted_mad_matches_mad_fast() {
+    // `sorted_mad` must reproduce `mad_fast` (the function the sort-once reject replaced)
     // exactly — same upper-middle order statistic of the absolute deviations. Cover odd/even
     // lengths, center inside/outside the data, duplicates, and a heavy outlier.
     let cases: &[&[f32]] = &[
@@ -175,7 +175,7 @@ fn sorted_mad_matches_mad_f32_fast() {
         // Reject always calls it at the median; also probe a couple of off-median centers.
         let mid = sorted[sorted.len() / 2];
         for &center in &[mid, sorted[0], mid + 0.05] {
-            let expected = mad_f32_fast(sorted, center, &mut buf);
+            let expected = mad_fast(sorted, center, &mut buf);
             let got = sorted_mad(sorted, center);
             assert_eq!(
                 got, expected,

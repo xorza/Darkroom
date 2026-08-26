@@ -93,8 +93,13 @@ fn sigma_clipped_degenerate_inputs() {
     }
 }
 
+/// The median averages the two middles on even length rather than picking a side, which is what
+/// the quickselect form has to reproduce now that it replaced a full sort.
+///
+/// One table at both widths, because [`median_mut`] is one implementation. Every literal is a
+/// small dyadic rational, so both precisions must land on the expectation exactly.
 #[test]
-fn median_f32_truth_table() {
+fn median_truth_table_holds_at_both_widths() {
     let cases = [
         MedianCase {
             values: &[1.0, 3.0, 2.0, 5.0, 4.0],
@@ -119,9 +124,15 @@ fn median_f32_truth_table() {
     ];
 
     for case in cases {
-        let mut values = case.values.to_vec();
-        let actual = median_f32_mut(&mut values);
-        assert!((actual - case.expected).abs() < f32::EPSILON, "{case:?}");
+        let mut single = case.values.to_vec();
+        assert_eq!(median_mut(&mut single), case.expected, "f32 {case:?}");
+
+        let mut double: Vec<f64> = case.values.iter().copied().map(f64::from).collect();
+        assert_eq!(
+            median_mut(&mut double),
+            f64::from(case.expected),
+            "f64 {case:?}"
+        );
     }
 }
 
@@ -144,27 +155,36 @@ fn median_and_mad_uniform() {
     assert!(stats.sigma().abs() < 1e-6);
 }
 
+/// [`mad_with_scratch`] over the lengths that bound it: the ordinary odd case, the even case that
+/// averages two middles, both degenerate lengths, and the empty answer.
 #[test]
-fn mad_with_scratch() {
-    let values = [2.0f32, 4.0, 3.0];
-    let mut scratch = Vec::new();
-    let mad = mad_f32_with_scratch(&values, 3.0, &mut scratch);
-    assert!((mad - 1.0).abs() < 1e-6);
-}
+fn mad_with_scratch_over_every_length() {
+    let cases: [(&[f32], f32, f32); 4] = [
+        // |r - 3| over [2, 4, 3] = [1, 1, 0]; median of those = 1.
+        (&[2.0, 4.0, 3.0], 3.0, 1.0),
+        // Nothing to deviate from.
+        (&[], 0.0, 0.0),
+        // |r - 5| over [5] = [0].
+        (&[5.0], 5.0, 0.0),
+        // |r - 5| over [2, 8] = [3, 3]; even length averages the two middles = 3.
+        (&[2.0, 8.0], 5.0, 3.0),
+    ];
 
-#[test]
-fn mad_with_scratch_empty() {
-    let values: [f32; 0] = [];
     let mut scratch = Vec::new();
-    let mad = mad_f32_with_scratch(&values, 0.0, &mut scratch);
-    assert!(mad.abs() < f32::EPSILON);
+    for (values, median, expected) in cases {
+        assert_eq!(
+            mad_with_scratch(values, median, &mut scratch),
+            expected,
+            "{values:?} about {median}"
+        );
+    }
 }
 
 #[test]
 fn median_with_nan_does_not_panic() {
     let mut values = [1.0f32, f32::NAN, 3.0, 2.0, 5.0];
     // Should not panic — NaN sorts to end via total_cmp
-    let median = median_f32_mut(&mut values);
+    let median = median_mut(&mut values);
     assert!(!median.is_nan());
 }
 
@@ -702,23 +722,6 @@ fn mad_to_sigma_known_value() {
     assert_eq!(mad_to_sigma(1.0), 1.4826022f32);
 }
 
-#[test]
-fn mad_with_scratch_single() {
-    let values = [5.0f32];
-    let mut scratch = Vec::new();
-    let mad = mad_f32_with_scratch(&values, 5.0, &mut scratch);
-    assert!(mad.abs() < f32::EPSILON);
-}
-
-#[test]
-fn mad_with_scratch_two_elements() {
-    let values = [2.0f32, 8.0];
-    let mut scratch = Vec::new();
-    // median of [2, 8] = 5, deviations = [3, 3], MAD = 3
-    let mad = mad_f32_with_scratch(&values, 5.0, &mut scratch);
-    assert!((mad - 3.0).abs() < 1e-6);
-}
-
 /// Stack scratch must give the same answer as heap scratch — the property the separate `ArrayVec`
 /// entry point used to exist to provide, now carried by the two `DeviationScratch` impls.
 #[test]
@@ -749,7 +752,7 @@ fn sigma_clipped_stack_scratch_too_small_panics() {
 }
 
 #[test]
-fn median_f32_fast_truth_table() {
+fn median_fast_truth_table() {
     let cases = [
         MedianCase {
             values: &[5.0, 2.0, 8.0, 1.0, 3.0],
@@ -779,20 +782,20 @@ fn median_f32_fast_truth_table() {
 
     for case in cases {
         let mut values = case.values.to_vec();
-        let actual = median_f32_fast(&mut values);
+        let actual = median_fast(&mut values);
         assert!((actual - case.expected).abs() < f32::EPSILON, "{case:?}");
     }
 }
 
 #[test]
-fn median_f32_fast_differs_from_exact_on_even() {
+fn median_fast_differs_from_exact_on_even() {
     // Sorted: [1, 3, 7, 9], mid=2
     // Exact: (3+7)/2 = 5.0
     // Fast: values[2] = 7.0
     let mut values_fast = [9.0f32, 1.0, 7.0, 3.0];
     let mut values_exact = values_fast;
-    let fast = median_f32_fast(&mut values_fast);
-    let exact = median_f32_mut(&mut values_exact);
+    let fast = median_fast(&mut values_fast);
+    let exact = median_mut(&mut values_exact);
     assert_eq!(exact, 5.0);
     assert_eq!(fast, 7.0);
     assert!(
@@ -802,90 +805,85 @@ fn median_f32_fast_differs_from_exact_on_even() {
 }
 
 #[test]
-fn median_f32_fast_agrees_with_exact_on_odd() {
+fn median_fast_agrees_with_exact_on_odd() {
     // For odd N, both return the same middle element
     // Sorted: [2, 4, 6, 8, 10], mid=2, median=6
     let mut values_fast = [10.0f32, 4.0, 6.0, 2.0, 8.0];
     let mut values_exact = values_fast;
-    let fast = median_f32_fast(&mut values_fast);
-    let exact = median_f32_mut(&mut values_exact);
+    let fast = median_fast(&mut values_fast);
+    let exact = median_mut(&mut values_exact);
     assert!((fast - exact).abs() < f32::EPSILON);
     assert_eq!(fast, 6.0);
 }
 
+/// [`mad_fast`] over odd and even lengths, a uniform run, both degenerate lengths, and data whose
+/// outlier the MAD is supposed to ignore.
+///
+/// One table at both widths, because [`mad_fast`] is one implementation. The cases run in order
+/// against one scratch buffer, so a shorter call after a longer one also proves the buffer is
+/// truncated rather than left holding the previous call's tail.
 #[test]
-fn mad_f32_fast_hand_computed() {
-    // values = [2, 3, 4], median = 3
-    // deviations = |2-3|, |3-3|, |4-3| = [1, 0, 1]
-    // sorted deviations: [0, 1, 1], mid=1, MAD = 1
-    let values = [2.0f32, 3.0, 4.0];
-    let mut scratch = Vec::new();
-    let mad = mad_f32_fast(&values, 3.0, &mut scratch);
-    assert_eq!(mad, 1.0);
+fn mad_fast_truth_table_holds_at_both_widths() {
+    let cases: [(&[f32], f32, f32); 8] = [
+        // |r - 3| over [2, 3, 4] = [1, 0, 1]; ranked [0, 1, 1], index 1 = 1.
+        (&[2.0, 3.0, 4.0], 3.0, 1.0),
+        // |r - 3| over [1, 2, 3, 4, 5] = [2, 1, 0, 1, 2]; ranked [0, 1, 1, 2, 2], index 2 = 1.
+        (&[1.0, 2.0, 3.0, 4.0, 5.0], 3.0, 1.0),
+        // |r - 3| over [1, 2, 3, 4, 100] = [2, 1, 0, 1, 97]; ranked [0, 1, 1, 2, 97], index 2 = 1.
+        (&[1.0, 2.0, 3.0, 4.0, 100.0], 3.0, 1.0),
+        // Even count takes the upper middle: [2, 1, 1, 97] ranked [1, 1, 2, 97], index 2 = 2.
+        (&[1.0, 2.0, 4.0, 100.0], 3.0, 2.0),
+        // A short call after the long ones above measures only its own deviations:
+        // |r - 20| = [10, 0, 10] ranked [0, 10, 10], index 1 = 10.
+        (&[10.0, 20.0, 30.0], 20.0, 10.0),
+        // Every deviation zero.
+        (&[7.0; 10], 7.0, 0.0),
+        (&[5.0], 5.0, 0.0),
+        (&[], 0.0, 0.0),
+    ];
+
+    let mut single_scratch = Vec::new();
+    let mut double_scratch = Vec::new();
+    for (values, median, expected) in cases {
+        assert_eq!(
+            mad_fast(values, median, &mut single_scratch),
+            expected,
+            "f32 {values:?} about {median}"
+        );
+
+        let double: Vec<f64> = values.iter().copied().map(f64::from).collect();
+        assert_eq!(
+            mad_fast(&double, f64::from(median), &mut double_scratch),
+            f64::from(expected),
+            "f64 {values:?} about {median}"
+        );
+    }
 }
 
 #[test]
-fn mad_f32_fast_five_values() {
-    // values = [1, 2, 3, 4, 5], median = 3
-    // deviations = [2, 1, 0, 1, 2]
-    // sorted deviations: [0, 1, 1, 2, 2], mid=2, MAD = 1
-    let values = [1.0f32, 2.0, 3.0, 4.0, 5.0];
-    let mut scratch = Vec::new();
-    let mad = mad_f32_fast(&values, 3.0, &mut scratch);
-    assert_eq!(mad, 1.0);
-}
-
-#[test]
-fn mad_f32_fast_uniform() {
-    // All same → all deviations = 0 → MAD = 0
-    let values = [7.0f32; 10];
-    let mut scratch = Vec::new();
-    let mad = mad_f32_fast(&values, 7.0, &mut scratch);
-    assert!(mad.abs() < f32::EPSILON);
-}
-
-#[test]
-fn mad_f32_fast_empty() {
-    let values: [f32; 0] = [];
-    let mut scratch = Vec::new();
-    let mad = mad_f32_fast(&values, 0.0, &mut scratch);
-    assert!(mad.abs() < f32::EPSILON);
-}
-
-#[test]
-fn mad_f32_fast_single() {
-    // Single value: deviation = 0, MAD = 0
-    let values = [5.0f32];
-    let mut scratch = Vec::new();
-    let mad = mad_f32_fast(&values, 5.0, &mut scratch);
-    assert!(mad.abs() < f32::EPSILON);
-}
-
-#[test]
-fn mad_f32_fast_scratch_reused() {
+fn mad_fast_scratch_reused() {
     // Verify scratch buffer is reused (capacity preserved across calls)
     let mut scratch = Vec::new();
 
     let values1 = [1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0];
-    mad_f32_fast(&values1, 5.5, &mut scratch);
+    mad_fast(&values1, 5.5, &mut scratch);
     let cap = scratch.capacity();
     assert!(cap >= 10);
 
     let values2 = [1.0f32, 2.0, 3.0];
-    mad_f32_fast(&values2, 2.0, &mut scratch);
+    mad_fast(&values2, 2.0, &mut scratch);
     assert!(scratch.capacity() >= cap, "capacity should not shrink");
 }
 
 #[test]
-fn mad_f32_fast_matches_regular_on_odd() {
-    // For odd N, median_f32_fast and median_f32_mut agree,
-    // so mad_f32_fast should match mad_f32_with_scratch exactly.
+fn mad_fast_matches_mad_with_scratch_on_odd() {
+    // For odd N, median_fast and median_mut agree, so mad_fast must match mad_with_scratch.
     let values = [10.0f32, 2.0, 7.0, 15.0, 3.0];
     let median = 7.0; // sorted: [2, 3, 7, 10, 15], mid=2
     let mut scratch1 = Vec::new();
     let mut scratch2 = Vec::new();
-    let mad_fast = mad_f32_fast(&values, median, &mut scratch1);
-    let mad_regular = mad_f32_with_scratch(&values, median, &mut scratch2);
+    let mad_fast = mad_fast(&values, median, &mut scratch1);
+    let mad_regular = mad_with_scratch(&values, median, &mut scratch2);
     // deviations = |10-7|, |2-7|, |7-7|, |15-7|, |3-7| = [3, 5, 0, 8, 4]
     // sorted = [0, 3, 4, 5, 8], mid=2 → MAD = 4
     assert!(
@@ -905,7 +903,7 @@ fn sigma_clipped_stats_iterations_improve_result() {
     // sigma = 0.02 * 1.4826 = 0.0297.
     //
     // 0 iterations (no clipping): compute_final_stats on 100 values.
-    //   median_f32_mut(100): avg(values[50], max(values[0..50])) = avg(0.32, 0.32) = 0.32.
+    //   median_mut(100): avg(values[50], max(values[0..50])) = avg(0.32, 0.32) = 0.32.
     //
     // 3 iterations (with clipping):
     //   Iter 1: kappa=2.5, threshold = 0.074. Rejects 0.60 and 1.50 → 81 remain.
@@ -964,52 +962,12 @@ fn mad_floored_raises_only_a_spread_below_the_floor() {
     assert_eq!(mad_floored(5.0, 10.0, 0.5), 5.0);
 }
 
-#[derive(Debug)]
-struct MedianF64Case {
-    values: &'static [f64],
-    expected: f64,
-}
-
-/// Same truth table as [`median_f32_truth_table`]: the `f64` median must average the two middles
-/// on even length rather than pick a side, which is what the quickselect form has to reproduce
-/// now that it replaced a full sort.
-#[test]
-fn median_f64_truth_table() {
-    let cases = [
-        MedianF64Case {
-            values: &[1.0, 3.0, 2.0, 5.0, 4.0],
-            expected: 3.0,
-        },
-        MedianF64Case {
-            values: &[1.0, 2.0, 3.0, 4.0],
-            expected: 2.5,
-        },
-        MedianF64Case {
-            values: &[1.0, 5.0],
-            expected: 3.0,
-        },
-        MedianF64Case {
-            values: &[42.0],
-            expected: 42.0,
-        },
-        MedianF64Case {
-            values: &[-5.0, -3.0, -1.0, 2.0, 4.0],
-            expected: -1.0,
-        },
-    ];
-
-    for case in cases {
-        let mut values = case.values.to_vec();
-        assert_eq!(median_f64_mut(&mut values), case.expected, "{case:?}");
-    }
-}
-
 /// The upper-middle convention, and the equivalence a caller trades a full sort for.
 #[test]
-fn median_f64_fast_takes_the_upper_middle_of_a_sorted_run() {
+fn median_fast_takes_the_upper_middle_of_a_sorted_run() {
     // Sorted: [1, 3, 7, 9]. Index len/2 = 2 holds 7.0, where averaging gives (3 + 7)/2 = 5.0.
-    assert_eq!(median_f64_fast(&mut [9.0f64, 1.0, 7.0, 3.0]), 7.0);
-    assert_eq!(median_f64_mut(&mut [9.0f64, 1.0, 7.0, 3.0]), 5.0);
+    assert_eq!(median_fast(&mut [9.0f64, 1.0, 7.0, 3.0]), 7.0);
+    assert_eq!(median_mut(&mut [9.0f64, 1.0, 7.0, 3.0]), 5.0);
 
     // What SIP's clip relies on: whatever a full sort leaves at `len / 2`, one selection returns
     // bit-identically, at both parities and with duplicates present.
@@ -1020,34 +978,17 @@ fn median_f64_fast_takes_the_upper_middle_of_a_sorted_run() {
         let mut sorted = data.clone();
         sorted.sort_unstable_by(f64::total_cmp);
         let mut fast = data.clone();
-        assert_eq!(median_f64_fast(&mut fast), sorted[len / 2], "len = {len}");
+        assert_eq!(median_fast(&mut fast), sorted[len / 2], "len = {len}");
     }
 }
 
-#[test]
-fn mad_f64_fast_hand_computed() {
-    let mut scratch = Vec::new();
-    // |r − 3| over [1, 2, 3, 4, 100] = [2, 1, 0, 1, 97]; sorted [0, 1, 1, 2, 97], index 2 = 1.
-    let data = [1.0f64, 2.0, 3.0, 4.0, 100.0];
-    assert_eq!(mad_f64_fast(&data, 3.0, &mut scratch), 1.0);
-    // Even count: |r − 3| over [1, 2, 4, 100] = [2, 1, 1, 97]; sorted [1, 1, 2, 97], index 2 = 2.
-    assert_eq!(
-        mad_f64_fast(&[1.0, 2.0, 4.0, 100.0], 3.0, &mut scratch),
-        2.0
-    );
-    // A shorter call after a longer one measures only its own deviations: |r − 20| = [10, 0, 10],
-    // sorted [0, 10, 10], index 1 = 10. Stale scratch entries would push the rank off.
-    assert_eq!(mad_f64_fast(&[10.0, 20.0, 30.0], 20.0, &mut scratch), 10.0);
-    assert_eq!(mad_f64_fast(&[], 0.0, &mut scratch), 0.0);
-}
-
-/// The `f64` fast path carries the same contract as its `f32` twin — see
-/// [`sigma_clip_rejects_nan_input`] for why a NaN is a contract violation rather than a case.
+/// The fast path's NaN contract, exercised at `f64` — see [`sigma_clip_rejects_nan_input`] for
+/// why a NaN is a contract violation rather than a case.
 #[test]
 #[cfg(debug_assertions)]
 #[should_panic(expected = "NaN-free")]
-fn median_f64_fast_rejects_nan_input() {
-    median_f64_fast(&mut [1.0f64, f64::NAN, 3.0]);
+fn median_fast_rejects_nan_input() {
+    median_fast(&mut [1.0f64, f64::NAN, 3.0]);
 }
 
 #[test]

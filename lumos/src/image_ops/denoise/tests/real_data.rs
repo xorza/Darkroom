@@ -5,7 +5,7 @@
 use crate::image_ops::internals::channel_plane;
 use crate::io::image::linear::LinearImage;
 use crate::io::image::load_context::LoadContext;
-use crate::math::statistics::{mad_f32_with_scratch, mad_to_sigma, median_f32_mut};
+use crate::math::statistics::{mad_to_sigma, mad_with_scratch, median_mut};
 use crate::testing::visual;
 use crate::testing::{calibration_dir, init_tracing};
 use crate::{Denoise, NeutralizeBackground, Scnr, Stretch};
@@ -26,9 +26,9 @@ fn highfreq_noise(image: &LinearImage, channel: usize) -> f32 {
         .filter(|&i| i % width != width - 1)
         .map(|i| px[i + 1] - px[i])
         .collect();
-    let median = median_f32_mut(&mut diffs);
+    let median = median_mut(&mut diffs);
     let mut scratch = Vec::new();
-    mad_to_sigma(mad_f32_with_scratch(&diffs, median, &mut scratch))
+    mad_to_sigma(mad_with_scratch(&diffs, median, &mut scratch))
 }
 
 #[test]
