@@ -185,6 +185,9 @@ fn median_filter_row_scalar(
 
 /// Scalar median of 9 elements using sorting network.
 #[inline]
+// Nine sibling lane values feeding a fixed comparator network, not a group with a name:
+// an array or struct would replace the network's named registers with indices and hand LLVM
+// an aggregate to promote back into exactly those registers.
 #[allow(clippy::too_many_arguments)]
 fn median9_scalar(
     mut v0: f32,

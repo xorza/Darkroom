@@ -2,6 +2,7 @@
 
 use crate::io::raw::demosaic::bayer::{BayerImage, CfaPattern, rcd};
 use crate::io::raw::demosaic::interleave_planes;
+use crate::io::raw::demosaic::sensor_layout::SensorLayout;
 use crate::testing::prelude::*;
 use rayon::ThreadPoolBuilder;
 
@@ -147,28 +148,24 @@ fn raw_origin_pattern_preserves_visible_color_for_every_margin_phase() {
 #[should_panic(expected = "Output dimensions must be non-zero")]
 fn bayer_image_zero_width() {
     let data = vec![0.0f32; 4];
-    let raw = Size2us::new(2, 2);
-    BayerImage::with_margins(
-        &data,
-        raw,
-        Size2us::new(0, 2),
-        Vec2us::ZERO,
-        CfaPattern::Rggb,
-    );
+    let layout = SensorLayout {
+        raw: Size2us::new(2, 2),
+        active: Size2us::new(0, 2),
+        margin: Vec2us::ZERO,
+    };
+    BayerImage::with_margins(&data, layout, CfaPattern::Rggb);
 }
 
 #[test]
 #[should_panic(expected = "Output dimensions must be non-zero")]
 fn bayer_image_zero_height() {
     let data = vec![0.0f32; 4];
-    let raw = Size2us::new(2, 2);
-    BayerImage::with_margins(
-        &data,
-        raw,
-        Size2us::new(2, 0),
-        Vec2us::ZERO,
-        CfaPattern::Rggb,
-    );
+    let layout = SensorLayout {
+        raw: Size2us::new(2, 2),
+        active: Size2us::new(2, 0),
+        margin: Vec2us::ZERO,
+    };
+    BayerImage::with_margins(&data, layout, CfaPattern::Rggb);
 }
 
 #[test]
@@ -176,7 +173,7 @@ fn bayer_image_zero_height() {
 fn bayer_image_wrong_data_length() {
     let data = vec![0.0f32; 3];
     let size = Size2us::new(2, 2);
-    BayerImage::with_margins(&data, size, size, Vec2us::ZERO, CfaPattern::Rggb);
+    BayerImage::with_margins(&data, SensorLayout::cropped(size), CfaPattern::Rggb);
 }
 
 #[test]
@@ -184,7 +181,12 @@ fn bayer_image_wrong_data_length() {
 fn bayer_image_margin_exceeds_height() {
     let data = vec![0.0f32; 4];
     let size = Size2us::new(2, 2);
-    BayerImage::with_margins(&data, size, size, Vec2us::new(0, 1), CfaPattern::Rggb);
+    let layout = SensorLayout {
+        raw: size,
+        active: size,
+        margin: Vec2us::new(0, 1),
+    };
+    BayerImage::with_margins(&data, layout, CfaPattern::Rggb);
 }
 
 #[test]
@@ -192,19 +194,23 @@ fn bayer_image_margin_exceeds_height() {
 fn bayer_image_margin_exceeds_width() {
     let data = vec![0.0f32; 4];
     let size = Size2us::new(2, 2);
-    BayerImage::with_margins(&data, size, size, Vec2us::new(1, 0), CfaPattern::Rggb);
+    let layout = SensorLayout {
+        raw: size,
+        active: size,
+        margin: Vec2us::new(1, 0),
+    };
+    BayerImage::with_margins(&data, layout, CfaPattern::Rggb);
 }
 
 #[test]
 fn bayer_image_valid() {
     let data = vec![0.0f32; 16];
-    let bayer = BayerImage::with_margins(
-        &data,
-        Size2us::new(4, 4),
-        Size2us::new(2, 2),
-        Vec2us::new(1, 1),
-        CfaPattern::Rggb,
-    );
+    let layout = SensorLayout {
+        raw: Size2us::new(4, 4),
+        active: Size2us::new(2, 2),
+        margin: Vec2us::new(1, 1),
+    };
+    let bayer = BayerImage::with_margins(&data, layout, CfaPattern::Rggb);
     assert_eq!(bayer.raw, Size2us::new(4, 4));
     assert_eq!(bayer.active, Size2us::new(2, 2));
     assert_eq!(bayer.margin, Vec2us::new(1, 1));
@@ -212,7 +218,7 @@ fn bayer_image_valid() {
 
 /// Helper: create a BayerImage from a flat CFA array with no margins.
 fn make_bayer(data: &[f32], size: Size2us, cfa: CfaPattern) -> BayerImage<'_> {
-    BayerImage::with_margins(data, size, size, Vec2us::ZERO, cfa)
+    BayerImage::with_margins(data, SensorLayout::cropped(size), cfa)
 }
 
 #[test]
@@ -282,13 +288,12 @@ fn rcd_uniform_input() {
     let data = vec![val; raw_w * raw_h];
     let act_w = 20;
     let act_h = 20;
-    let bayer = BayerImage::with_margins(
-        &data,
-        Size2us::new(raw_w, raw_h),
-        Size2us::new(act_w, act_h),
-        Vec2us::new(6, 6),
-        CfaPattern::Rggb,
-    );
+    let layout = SensorLayout {
+        raw: Size2us::new(raw_w, raw_h),
+        active: Size2us::new(act_w, act_h),
+        margin: Vec2us::new(6, 6),
+    };
+    let bayer = BayerImage::with_margins(&data, layout, CfaPattern::Rggb);
     let rgb = interleave_planes(rcd::demosaic(&bayer, &CancelToken::never()).unwrap());
 
     // Check all output pixels. With 6 pixels of margin on each side of the raw
@@ -487,13 +492,12 @@ fn rcd_with_margins() {
                     data[y * raw_w + x] = channel_values[raw_pattern.color_at(Vec2us::new(x, y))];
                 }
             }
-            let bayer = BayerImage::with_margins(
-                &data,
-                Size2us::new(raw_w, raw_h),
-                Size2us::new(act_w, act_h),
-                Vec2us::new(left_margin, top_margin),
-                raw_pattern,
-            );
+            let layout = SensorLayout {
+                raw: Size2us::new(raw_w, raw_h),
+                active: Size2us::new(act_w, act_h),
+                margin: Vec2us::new(left_margin, top_margin),
+            };
+            let bayer = BayerImage::with_margins(&data, layout, raw_pattern);
             let rgb = interleave_planes(rcd::demosaic(&bayer, &CancelToken::never()).unwrap());
             assert_eq!(rgb.len(), act_w * act_h * 3);
 

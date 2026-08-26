@@ -112,24 +112,6 @@ impl<'a> InlineRename<'a> {
         self
     }
 
-    /// Which edge the name hugs, in both the idle label and the active
-    /// editor. Defaults to [`HAlign::Left`].
-    ///
-    /// The idle label mirrors `TextEdit`'s caret-room reservation on
-    /// whichever side the glyphs *aren't* flush against, so the text
-    /// doesn't shift by a pixel or two on the swap into edit mode — see
-    /// the `idle_padding` derivation in [`Self::show`].
-    ///
-    /// `allow` rather than removal: `show` has always carried the
-    /// non-`Left` geometry, and the trailing-edge case is what a
-    /// right-aligned output-port rename needs. The unit test is the only
-    /// caller until one exists.
-    #[allow(dead_code)]
-    pub(crate) fn halign(mut self, halign: HAlign) -> Self {
-        self.halign = halign;
-        self
-    }
-
     pub(crate) fn show(self, ui: &mut Ui) -> RenameEvent {
         let Self {
             id,
@@ -313,6 +295,25 @@ mod tests {
     use glam::UVec2;
     use palantir::Key;
     use palantir::internals::UiHarness;
+
+    impl<'a> InlineRename<'a> {
+        /// Which edge the name hugs, in both the idle label and the active
+        /// editor. Defaults to [`HAlign::Left`].
+        ///
+        /// The idle label mirrors `TextEdit`'s caret-room reservation on
+        /// whichever side the glyphs *aren't* flush against, so the text
+        /// doesn't shift by a pixel or two on the swap into edit mode — see
+        /// the `idle_padding` derivation in [`InlineRename::show`].
+        ///
+        /// Test-only until a caller wants a non-`Left` rename: `show` has
+        /// always carried the geometry, and the trailing edge is what a
+        /// right-aligned output-port rename needs. Move it back beside the
+        /// other builders when one exists.
+        fn halign(mut self, halign: HAlign) -> Self {
+            self.halign = halign;
+            self
+        }
+    }
 
     /// `halign` puts the glyphs against the requested edge, and every
     /// setting leaves the label the same width.

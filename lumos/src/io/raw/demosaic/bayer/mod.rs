@@ -1,5 +1,6 @@
 //! Bayer CFA demosaicing module.
 
+use crate::io::raw::demosaic::sensor_layout::SensorLayout;
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 
@@ -155,56 +156,19 @@ pub(crate) struct BayerImage<'a> {
 impl<'a> BayerImage<'a> {
     /// Create a BayerImage with margins (libraw style).
     ///
-    /// `raw` is the whole buffer, `active` the visible window inside it, and `margin` that
-    /// window's top-left corner.
-    ///
     /// # Panics
-    /// Panics if:
-    /// - `data.len() != raw.pixel_count()`
-    /// - `margin.y + active.height > raw.height`
-    /// - `margin.x + active.width > raw.width`
-    /// - either `active` extent is zero
+    /// Panics under the conditions [`SensorLayout::validate`] names.
     pub(crate) fn with_margins(
         data: &'a [f32],
-        raw: Size2us,
-        active: Size2us,
-        margin: Vec2us,
+        layout: SensorLayout,
         raw_cfa_pattern: CfaPattern,
     ) -> Self {
-        assert!(
-            active.width > 0 && active.height > 0,
-            "Output dimensions must be non-zero: {}x{}",
-            active.width,
-            active.height
-        );
-        assert!(
-            raw.width > 0 && raw.height > 0,
-            "Raw dimensions must be non-zero: {}x{}",
-            raw.width,
-            raw.height
-        );
-        assert!(
-            data.len() == raw.pixel_count(),
-            "Data length {} doesn't match raw dimensions {}x{}={}",
-            data.len(),
-            raw.width,
-            raw.height,
-            raw.pixel_count()
-        );
-        assert!(
-            margin.y + active.height <= raw.height,
-            "Top margin {} + height {} exceeds raw height {}",
-            margin.y,
-            active.height,
-            raw.height
-        );
-        assert!(
-            margin.x + active.width <= raw.width,
-            "Left margin {} + width {} exceeds raw width {}",
-            margin.x,
-            active.width,
-            raw.width
-        );
+        layout.validate(data.len());
+        let SensorLayout {
+            raw,
+            active,
+            margin,
+        } = layout;
 
         debug_assert!(
             data.iter().all(|v| v.is_finite()),

@@ -5,6 +5,7 @@
 //! - X-Trans 6x6 patterns (Fujifilm sensors)
 
 pub(crate) mod bayer;
+pub(crate) mod sensor_layout;
 pub(crate) mod xtrans;
 
 use std::mem::size_of;

@@ -19,8 +19,19 @@ use common::CancelToken;
 
 use crate::io::raw::BlackRepeat;
 use crate::io::raw::demosaic::DemosaicError;
+use crate::io::raw::demosaic::sensor_layout::SensorLayout;
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
+
+/// The u16 path's on-the-fly normalization: per-channel black levels, the
+/// reciprocal of the range above black, and the repeating black pattern applied
+/// before either. The f32 path arrives calibrated and takes none of it.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct XTransNormalization<'a> {
+    pub(crate) channel_black: [f32; 3],
+    pub(crate) inv_range: f32,
+    pub(crate) black_repeat: Option<&'a BlackRepeat>,
+}
 
 /// Process X-Trans sensor data and demosaic to RGB.
 ///
@@ -28,30 +39,17 @@ use crate::math::vec2us::Vec2us;
 /// on-the-fly during demosaicing, avoiding a separate P×4 byte f32 buffer.
 ///
 /// Returns planar `[R, G, B]` channels, each `width * height`.
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn process_xtrans(
     raw_data: &[u16],
-    raw: Size2us,
-    active: Size2us,
-    margin: Vec2us,
+    layout: SensorLayout,
     raw_pattern: [[u8; 6]; 6],
-    channel_black: [f32; 3],
-    inv_range: f32,
-    black_repeat: Option<&BlackRepeat>,
+    normalization: XTransNormalization<'_>,
     cancel: &CancelToken,
 ) -> Result<[Vec<f32>; 3], DemosaicError> {
     let raw_pattern = XTransPattern::new(raw_pattern)?;
+    let active = layout.active;
 
-    let xtrans = XTransImage::with_margins(
-        raw_data,
-        raw,
-        active,
-        margin,
-        raw_pattern,
-        channel_black,
-        inv_range,
-        black_repeat,
-    );
+    let xtrans = XTransImage::with_margins(raw_data, layout, raw_pattern, normalization);
 
     let demosaic_start = Instant::now();
     let rgb_pixels = markesteijn::demosaic(&xtrans, cancel)?;
@@ -72,15 +70,14 @@ pub(crate) fn process_xtrans(
 /// Avoids the lossy f32->u16->f32 roundtrip of converting to u16 for `process_xtrans`.
 pub(crate) fn process_xtrans_f32(
     data: &[f32],
-    raw: Size2us,
-    active: Size2us,
-    margin: Vec2us,
+    layout: SensorLayout,
     raw_pattern: [[u8; 6]; 6],
     cancel: &CancelToken,
 ) -> Result<[Vec<f32>; 3], DemosaicError> {
     let raw_pattern = XTransPattern::new(raw_pattern)?;
+    let active = layout.active;
 
-    let xtrans = XTransImage::with_margins_f32(data, raw, active, margin, raw_pattern);
+    let xtrans = XTransImage::with_margins_f32(data, layout, raw_pattern);
 
     let demosaic_start = Instant::now();
     let rgb_pixels = markesteijn::demosaic(&xtrans, cancel)?;
@@ -207,60 +204,24 @@ pub(crate) struct XTransImage<'a> {
 }
 
 impl<'a> XTransImage<'a> {
-    /// Validate dimensions and margins (shared by both constructors).
-    fn validate_dimensions(data_len: usize, raw: Size2us, active: Size2us, margin: Vec2us) {
-        assert!(
-            active.width > 0 && active.height > 0,
-            "Output dimensions must be non-zero: {}x{}",
-            active.width,
-            active.height
-        );
-        assert!(
-            raw.width > 0 && raw.height > 0,
-            "Raw dimensions must be non-zero: {}x{}",
-            raw.width,
-            raw.height
-        );
-        assert!(
-            data_len == raw.pixel_count(),
-            "Data length {} doesn't match raw dimensions {}x{}={}",
-            data_len,
-            raw.width,
-            raw.height,
-            raw.pixel_count()
-        );
-        assert!(
-            margin.y + active.height <= raw.height,
-            "Top margin {} + height {} exceeds raw height {}",
-            margin.y,
-            active.height,
-            raw.height
-        );
-        assert!(
-            margin.x + active.width <= raw.width,
-            "Left margin {} + width {} exceeds raw width {}",
-            margin.x,
-            active.width,
-            raw.width
-        );
-    }
-
     /// Create from raw u16 sensor data with on-the-fly per-channel normalization.
-    ///
-    /// `raw` is the whole buffer, `active` the visible window inside it, and `margin` that
-    /// window's top-left corner.
-    #[allow(clippy::too_many_arguments)]
     pub(crate) fn with_margins(
         data: &'a [u16],
-        raw: Size2us,
-        active: Size2us,
-        margin: Vec2us,
+        layout: SensorLayout,
         raw_pattern: XTransPattern,
-        channel_black: [f32; 3],
-        inv_range: f32,
-        black_repeat: Option<&'a BlackRepeat>,
+        normalization: XTransNormalization<'a>,
     ) -> Self {
-        Self::validate_dimensions(data.len(), raw, active, margin);
+        layout.validate(data.len());
+        let SensorLayout {
+            raw,
+            active,
+            margin,
+        } = layout;
+        let XTransNormalization {
+            channel_black,
+            inv_range,
+            black_repeat,
+        } = normalization;
         let data = black_repeat.map_or(PixelSource::U16(data), |repeat| {
             PixelSource::U16WithRepeat { data, repeat }
         });
@@ -278,17 +239,17 @@ impl<'a> XTransImage<'a> {
     /// Create from calibrated f32 data, including negative and above-unity samples.
     ///
     /// Used by CfaImage after calibration to avoid lossy f32->u16->f32 roundtrip.
-    ///
-    /// `raw` is the whole buffer, `active` the visible window inside it, and `margin` that
-    /// window's top-left corner.
     pub(crate) fn with_margins_f32(
         data: &'a [f32],
-        raw: Size2us,
-        active: Size2us,
-        margin: Vec2us,
+        layout: SensorLayout,
         raw_pattern: XTransPattern,
     ) -> Self {
-        Self::validate_dimensions(data.len(), raw, active, margin);
+        layout.validate(data.len());
+        let SensorLayout {
+            raw,
+            active,
+            margin,
+        } = layout;
         Self {
             data: PixelSource::F32(data),
             raw,
@@ -326,9 +287,8 @@ impl<'a> XTransImage<'a> {
 
 #[cfg(test)]
 pub(crate) mod internals {
-    use crate::io::raw::demosaic::xtrans::{XTransImage, XTransPattern};
-    use crate::math::size2us::Size2us;
-    use crate::math::vec2us::Vec2us;
+    use crate::io::raw::demosaic::sensor_layout::SensorLayout;
+    use crate::io::raw::demosaic::xtrans::{XTransImage, XTransNormalization, XTransPattern};
 
     const TEST_PATTERN: [[u8; 6]; 6] = [
         [1, 1, 0, 1, 1, 2],
@@ -353,21 +313,16 @@ pub(crate) mod internals {
         (value * 65535.0).round() as u16
     }
 
-    pub(crate) fn make_xtrans(
-        data: &[u16],
-        raw: Size2us,
-        active: Size2us,
-        margin: Vec2us,
-    ) -> XTransImage<'_> {
+    pub(crate) fn make_xtrans(data: &[u16], layout: SensorLayout) -> XTransImage<'_> {
         XTransImage::with_margins(
             data,
-            raw,
-            active,
-            margin,
+            layout,
             test_pattern(),
-            [0.0; 3],
-            TEST_INV_RANGE,
-            None,
+            XTransNormalization {
+                channel_black: [0.0; 3],
+                inv_range: TEST_INV_RANGE,
+                black_repeat: None,
+            },
         )
     }
 }

@@ -492,9 +492,11 @@ pub(crate) fn deblend_multi_threshold(
         data,
         pixels,
         labels,
-        detection_threshold,
-        peak_value,
-        n_thresholds,
+        ThresholdLadder {
+            low: detection_threshold,
+            high: peak_value,
+            n_thresholds,
+        },
         min_separation,
         buffers,
     );
@@ -522,23 +524,36 @@ const TREE_INLINE_CAP: usize = 16;
 /// SmallVec type for deblend trees - avoids heap for typical small trees.
 type DeblendTree = SmallVec<[DeblendNode; TREE_INLINE_CAP]>;
 
+/// The exponentially spaced ladder one component is cut at: the floor to start
+/// from, the peak to reach, and how many steps in between. The three are only
+/// meaningful together — level `i` sits at `low * (high / low) ^ (i / n)`.
+#[derive(Debug, Clone, Copy)]
+struct ThresholdLadder {
+    low: f32,
+    high: f32,
+    n_thresholds: usize,
+}
+
 /// Build the deblending tree by tracking connectivity at each threshold level.
 ///
 /// Uses exponentially spaced thresholds for better resolution at faint levels.
-#[allow(clippy::too_many_arguments)]
 fn build_deblend_tree(
     data: &ComponentData,
     pixels: &Buffer2<f32>,
     labels: &LabelMap,
-    low: f32,
-    high: f32,
-    n_thresholds: usize,
+    ladder: ThresholdLadder,
     min_separation: usize,
     buffers: &mut DeblendBuffers,
 ) -> DeblendTree {
     if data.area == 0 {
         return SmallVec::new();
     }
+
+    let ThresholdLadder {
+        low,
+        high,
+        n_thresholds,
+    } = ladder;
 
     // Use exponential spacing: threshold[i] = low * (high/low)^(i/n).
     // A component whose floor pixel is exactly (or near) zero would send

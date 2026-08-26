@@ -7,7 +7,7 @@ use rayon::prelude::*;
 
 use crate::io::raw::demosaic::xtrans::XTransImage;
 use crate::io::raw::demosaic::xtrans::hex_lookup::HexLookup;
-use crate::io::raw::demosaic::xtrans::markesteijn::NDIR;
+use crate::io::raw::demosaic::xtrans::markesteijn::{FinalBlendBuffers, NDIR};
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
 
@@ -311,33 +311,54 @@ fn solitary_green_colors(
     }
 }
 
+/// The stage-wide inputs every color-reconstruction helper reads: the sensor, the
+/// hex offset table, the directional greens the previous stage left, the candidate
+/// buffer being filled, and the per-direction stride through both. They are fixed
+/// for the whole stage — only the site and direction vary from call to call.
+#[derive(Debug, Clone, Copy)]
+struct ReconstructInputs<'a, 'b> {
+    xtrans: &'a XTransImage<'b>,
+    hex: &'a HexLookup,
+    green_dir: &'a [f32],
+    colors: *mut [f32; 2],
+    /// `active.pixel_count()`, hoisted out of the per-site path.
+    pixels: usize,
+}
+
 #[inline(always)]
 fn color_before_opposite(
-    colors: *mut [f32; 2],
-    pixels: usize,
+    inputs: ReconstructInputs<'_, '_>,
     direction: usize,
-    width: usize,
     pos: Vec2us,
     target: u8,
 ) -> f32 {
+    let ReconstructInputs {
+        xtrans,
+        colors,
+        pixels,
+        ..
+    } = inputs;
+    let width = xtrans.active.width;
     // SAFETY: Initialization and the solitary-green stage are complete before this stage.
     unsafe { (*colors.add(direction * pixels + pos.y * width + pos.x))[rb_index(target)] }
 }
 
-#[allow(clippy::too_many_arguments)]
 #[inline(always)]
 fn opposite_color(
-    xtrans: &XTransImage,
-    hex: &HexLookup,
-    green_dir: &[f32],
-    colors: *mut [f32; 2],
-    pixels: usize,
-    green_base: usize,
+    inputs: ReconstructInputs<'_, '_>,
     y: usize,
     x: usize,
     direction: usize,
     target: u8,
 ) -> f32 {
+    let ReconstructInputs {
+        xtrans,
+        hex,
+        green_dir,
+        pixels,
+        ..
+    } = inputs;
+    let green_base = direction * pixels;
     let width = xtrans.active.width;
     let raw_y = y + xtrans.margin.y;
     let center_green = green_at(green_dir, green_base, width, y, x);
@@ -379,8 +400,8 @@ fn opposite_color(
     let minus_x = x.wrapping_add_signed(-dx);
     let plus = Vec2us::new(plus_x, plus_y);
     let minus = Vec2us::new(minus_x, minus_y);
-    let color_plus = color_before_opposite(colors, pixels, direction, width, plus, target);
-    let color_minus = color_before_opposite(colors, pixels, direction, width, minus, target);
+    let color_plus = color_before_opposite(inputs, direction, plus, target);
+    let color_minus = color_before_opposite(inputs, direction, minus, target);
     let green_plus = green_at(green_dir, green_base, width, plus_y, plus_x);
     let green_minus = green_at(green_dir, green_base, width, minus_y, minus_x);
 
@@ -389,14 +410,19 @@ fn opposite_color(
 
 #[inline(always)]
 fn color_before_green_block(
-    xtrans: &XTransImage,
-    hex: &HexLookup,
-    colors: *mut [f32; 2],
+    inputs: ReconstructInputs<'_, '_>,
     direction: usize,
     y: usize,
     x: usize,
     target: u8,
 ) -> f32 {
+    let ReconstructInputs {
+        xtrans,
+        hex,
+        colors,
+        pixels,
+        ..
+    } = inputs;
     let native = xtrans
         .raw_pattern
         .color_at(Vec2us::new(x + xtrans.margin.x, y + xtrans.margin.y));
@@ -404,26 +430,28 @@ fn color_before_green_block(
     if native == target {
         active_raw(xtrans, y, x)
     } else {
-        let pixels = xtrans.active.pixel_count();
         // SAFETY: The solitary-green and opposite-color stages are complete before this stage.
         unsafe { (*colors.add(direction * pixels + y * xtrans.active.width + x))[rb_index(target)] }
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 #[inline(always)]
 fn green_block_colors(
-    xtrans: &XTransImage,
-    hex: &HexLookup,
-    green_dir: &[f32],
-    colors: *mut [f32; 2],
-    green_base: usize,
+    inputs: ReconstructInputs<'_, '_>,
     y: usize,
     x: usize,
     direction: usize,
 ) -> [f32; 2] {
     debug_assert!(direction < GREEN_BLOCK_DIRECTIONS);
 
+    let ReconstructInputs {
+        xtrans,
+        hex,
+        green_dir,
+        pixels,
+        ..
+    } = inputs;
+    let green_base = direction * pixels;
     let width = xtrans.active.width;
     let offsets = hex.get(y + xtrans.margin.y, x + xtrans.margin.x);
     let first = offsets[direction * 2];
@@ -448,10 +476,8 @@ fn green_block_colors(
     let mut result = [0.0; 2];
 
     for target in [0, 2] {
-        let first_color =
-            color_before_green_block(xtrans, hex, colors, direction, first_y, first_x, target);
-        let second_color =
-            color_before_green_block(xtrans, hex, colors, direction, second_y, second_x, target);
+        let first_color = color_before_green_block(inputs, direction, first_y, first_x, target);
+        let second_color = color_before_green_block(inputs, direction, second_y, second_x, target);
         result[rb_index(target)] =
             (green_correction + first_weight * first_color + second_color) / divisor;
     }
@@ -513,18 +539,14 @@ pub(crate) fn reconstruct_colors(
             return;
         }
         let target = 2 - native;
-        let value = opposite_color(
+        let inputs = ReconstructInputs {
             xtrans,
             hex,
             green_dir,
-            color_ptr.get(),
+            colors: color_ptr.get(),
             pixels,
-            direction * pixels,
-            y,
-            x,
-            direction,
-            target,
-        );
+        };
+        let value = opposite_color(inputs, y, x, direction, target);
         // SAFETY: Each task writes one unique colored site after reading only native or
         // solitary-green sites initialized by the preceding stage.
         unsafe {
@@ -549,16 +571,14 @@ pub(crate) fn reconstruct_colors(
             {
                 return;
             }
-            let value = green_block_colors(
+            let inputs = ReconstructInputs {
                 xtrans,
                 hex,
                 green_dir,
-                color_ptr.get(),
-                direction * pixels,
-                y,
-                x,
-                direction,
-            );
+                colors: color_ptr.get(),
+                pixels,
+            };
+            let value = green_block_colors(inputs, y, x, direction);
             // SAFETY: Each task writes one unique 2×2-green site after reading only sites
             // completed by the preceding two stages.
             unsafe {
@@ -876,37 +896,47 @@ fn score_homogeneity(homo: &[u8], size: Size2us, scores: &mut [[u32; NDIR]], sat
     }
 }
 
+/// The three planar output channels the blend writes, each `active.pixel_count()`
+/// long. They are allocated and consumed as one image, so the blend and the border
+/// pass that follows it take them as one.
+#[derive(Debug)]
+pub(super) struct PlanarRgbMut<'a> {
+    pub(super) r: &'a mut [f32],
+    pub(super) g: &'a mut [f32],
+    pub(super) b: &'a mut [f32],
+}
+
 /// Final blending: sum homogeneity in 5×5 window, select best directions,
 /// and average the materialized RGB candidates.
 ///
 /// Uses a summed-area table for O(1) per-pixel window queries instead of O(25).
 ///
-/// `out_r`/`out_g`/`out_b` are preallocated planar channels (each length `pixels`) that the
+/// `out` holds preallocated planar channels, each `active.pixel_count()` long, that the
 /// final RGB is written into.
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn blend_final(
     xtrans: &XTransImage,
-    green_dir: &[f32],
-    colors: &[[f32; 2]],
-    homo: &[u8],
-    scores: &mut [[u32; NDIR]],
-    sat: &mut [u32],
-    out_r: &mut [f32],
-    out_g: &mut [f32],
-    out_b: &mut [f32],
+    buffers: FinalBlendBuffers<'_>,
+    out: PlanarRgbMut<'_>,
 ) {
+    let FinalBlendBuffers {
+        green_dir,
+        colors,
+        scores,
+        homo,
+        sat,
+    } = buffers;
     let width = xtrans.active.width;
     let pixels = xtrans.active.pixel_count();
-    assert_eq!(out_r.len(), pixels);
-    assert_eq!(out_g.len(), pixels);
-    assert_eq!(out_b.len(), pixels);
+    assert_eq!(out.r.len(), pixels);
+    assert_eq!(out.g.len(), pixels);
+    assert_eq!(out.b.len(), pixels);
 
     score_homogeneity(homo, xtrans.active, scores, sat);
 
-    out_r
+    out.r
         .par_chunks_mut(width)
-        .zip(out_g.par_chunks_mut(width))
-        .zip(out_b.par_chunks_mut(width))
+        .zip(out.g.par_chunks_mut(width))
+        .zip(out.b.par_chunks_mut(width))
         .enumerate()
         .for_each(|(y, ((r_row, g_row), b_row))| {
             for x in 0..width {
@@ -941,16 +971,15 @@ pub(crate) fn blend_final(
             }
         });
 
-    demosaic_border(xtrans, out_r, out_g, out_b, MARK_INFO_BORDER);
+    demosaic_border(xtrans, out, MARK_INFO_BORDER);
 }
 
-fn demosaic_border(
-    xtrans: &XTransImage,
-    out_r: &mut [f32],
-    out_g: &mut [f32],
-    out_b: &mut [f32],
-    border: usize,
-) {
+fn demosaic_border(xtrans: &XTransImage, out: PlanarRgbMut<'_>, border: usize) {
+    let PlanarRgbMut {
+        r: out_r,
+        g: out_g,
+        b: out_b,
+    } = out;
     let width = xtrans.active.width;
     let height = xtrans.active.height;
 

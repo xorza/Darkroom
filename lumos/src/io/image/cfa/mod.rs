@@ -24,6 +24,7 @@ use crate::io::image::standard::{
 };
 use crate::io::raw;
 use crate::io::raw::demosaic::bayer::CfaPattern;
+use crate::io::raw::demosaic::sensor_layout::SensorLayout;
 use crate::io::raw::demosaic::{DemosaicError, DemosaicKind};
 use crate::math::size2us::Size2us;
 use crate::math::vec2us::Vec2us;
@@ -280,11 +281,8 @@ impl CfaImage {
             CfaType::Bayer(cfa_pattern) => {
                 use crate::io::raw::demosaic::bayer::{BayerImage, rcd};
 
-                // Already cropped to the visible area: raw and active extents coincide and
-                // there is no margin to skip.
-                let size = Size2us::new(width, height);
-                let bayer =
-                    BayerImage::with_margins(&pixels, size, size, Vec2us::ZERO, *cfa_pattern);
+                let layout = SensorLayout::cropped(Size2us::new(width, height));
+                let bayer = BayerImage::with_margins(&pixels, layout, *cfa_pattern);
                 let planes = rcd::demosaic(&bayer, cancel)?;
                 let dims = ImageDimensions::new((width, height), 3);
                 let mut image = LinearImage::from_planar_channels(dims, planes);
@@ -295,11 +293,8 @@ impl CfaImage {
             CfaType::XTrans(pattern) => {
                 use crate::io::raw::demosaic::xtrans::process_xtrans_f32;
 
-                // Already cropped to the visible area: raw and active extents coincide and
-                // there is no margin to skip.
-                let size = Size2us::new(width, height);
-                let planes =
-                    process_xtrans_f32(&pixels, size, size, Vec2us::ZERO, *pattern, cancel)?;
+                let layout = SensorLayout::cropped(Size2us::new(width, height));
+                let planes = process_xtrans_f32(&pixels, layout, *pattern, cancel)?;
 
                 let dims = ImageDimensions::new((width, height), 3);
                 let mut image = LinearImage::from_planar_channels(dims, planes);

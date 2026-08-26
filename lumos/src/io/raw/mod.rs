@@ -35,6 +35,8 @@ use crate::io::image::image_provenance::{
 };
 use crate::io::image::linear::LinearImage;
 use crate::io::image::sensor::SensorType;
+use crate::io::raw::demosaic::sensor_layout::SensorLayout;
+use crate::io::raw::demosaic::xtrans::XTransNormalization;
 use crate::io::raw::provenance::RawTransferProvenance;
 use common::CancelToken;
 use demosaic::bayer::{BayerImage, CfaPattern, rcd};
@@ -396,18 +398,6 @@ fn validate_xtrans_pattern(path: &Path, pattern: [[u8; 6]; 6]) -> Result<(), Ima
     Ok(())
 }
 
-/// The visible window inside a raw frame: where it starts, how big it is, and the stride of the
-/// buffer it sits in.
-#[derive(Debug, Clone, Copy)]
-struct RawActiveArea {
-    /// Extent of the source buffer, which spans the masked margins as well as `active`.
-    raw: Size2us,
-    /// Extent of the visible window.
-    active: Size2us,
-    /// Top-left corner of the window within the source buffer.
-    margin: Vec2us,
-}
-
 #[derive(Debug, Clone, Copy)]
 enum ChannelBlackDelta {
     LibRawFilter {
@@ -438,22 +428,22 @@ impl ChannelBlackDelta {
 
 fn normalize_active_area<const CLAMP: bool>(
     raw_data: &[u16],
-    area: RawActiveArea,
+    layout: SensorLayout,
     black: f32,
     inv_range: f32,
     channel_delta: Option<ChannelBlackDelta>,
     repeat: Option<&BlackRepeat>,
 ) -> Vec<f32> {
-    let output_size = area.active.pixel_count();
+    let output_size = layout.active.pixel_count();
     // SAFETY: Every element is written by the parallel row pass below.
     let mut pixels = vec![0.0f32; output_size];
     pixels
-        .par_chunks_mut(area.active.width)
+        .par_chunks_mut(layout.active.width)
         .enumerate()
         .for_each(|(y, row)| {
-            let raw_y = area.margin.y + y;
-            let src_start = raw_y * area.raw.width + area.margin.x;
-            let source = &raw_data[src_start..src_start + area.active.width];
+            let raw_y = layout.margin.y + y;
+            let src_start = raw_y * layout.raw.width + layout.margin.x;
+            let source = &raw_data[src_start..src_start + layout.active.width];
             normalize_u16_to_f32_into::<CLAMP>(source, row, black, inv_range);
 
             if channel_delta.is_some() || repeat.is_some() {
@@ -479,7 +469,7 @@ fn normalize_active_area<const CLAMP: bool>(
 struct UnpackedRaw {
     libraw: LibrawState,
     path: PathBuf,
-    area: RawActiveArea,
+    layout: SensorLayout,
     black_level: BlackLevel,
     visible_filters: u32,
     sensor_type: SensorType,
@@ -497,7 +487,7 @@ impl UnpackedRaw {
             return Err(raw_err(&self.path, "libraw: raw_image is null"));
         }
 
-        let pixel_count = self.area.raw.pixel_count();
+        let pixel_count = self.layout.raw.pixel_count();
 
         // SAFETY: raw_image_ptr is valid (checked above), and dimensions were validated in open_raw.
         Ok(unsafe { slice::from_raw_parts(raw_image_ptr, pixel_count) })
@@ -541,7 +531,7 @@ impl UnpackedRaw {
         };
         Ok(normalize_active_area::<CLAMP>(
             raw_data,
-            self.area,
+            self.layout,
             self.black_level.common,
             self.black_level.inv_range,
             channel_delta,
@@ -567,22 +557,16 @@ impl UnpackedRaw {
 
         apply_bayer_black_corrections(
             &mut normalized_data,
-            self.area.raw.width,
-            self.area.margin,
+            self.layout.raw.width,
+            self.layout.margin,
             self.visible_filters,
             &self.black_level.channel_delta_norm,
             self.black_level.repeat.as_ref(),
         );
 
         let raw_cfa_pattern =
-            visible_cfa_pattern.at_raw_origin(self.area.margin.y, self.area.margin.x);
-        let bayer = BayerImage::with_margins(
-            &normalized_data,
-            self.area.raw,
-            self.area.active,
-            self.area.margin,
-            raw_cfa_pattern,
-        );
+            visible_cfa_pattern.at_raw_origin(self.layout.margin.y, self.layout.margin.x);
+        let bayer = BayerImage::with_margins(&normalized_data, self.layout, raw_cfa_pattern);
 
         let demosaic_start = Instant::now();
         let mut rgb_pixels = rcd::demosaic(&bayer, cancel)
@@ -591,8 +575,8 @@ impl UnpackedRaw {
 
         tracing::info!(
             "Fast SIMD demosaicing {}x{} took {:.2}ms",
-            self.area.active.width,
-            self.area.active.height,
+            self.layout.active.width,
+            self.layout.active.height,
             demosaic_elapsed.as_secs_f64() * 1000.0
         );
 
@@ -632,7 +616,7 @@ impl UnpackedRaw {
         let UnpackedRaw {
             libraw,
             path,
-            area,
+            layout,
             black_level,
             ..
         } = self;
@@ -647,13 +631,13 @@ impl UnpackedRaw {
 
         let mut pixels = xtrans::process_xtrans(
             &raw_u16,
-            area.raw,
-            area.active,
-            area.margin,
+            layout,
             raw_pattern,
-            channel_black,
-            black_level.inv_range,
-            black_level.repeat.as_ref(),
+            XTransNormalization {
+                channel_black,
+                inv_range: black_level.inv_range,
+                black_repeat: black_level.repeat.as_ref(),
+            },
             cancel,
         )
         .map_err(|source| demosaic_err(&path, source))?;
@@ -909,7 +893,7 @@ fn open_raw(path: &Path) -> Result<UnpackedRaw, ImageError> {
     Ok(UnpackedRaw {
         libraw,
         path: path.to_path_buf(),
-        area: RawActiveArea {
+        layout: SensorLayout {
             raw: Size2us::new(raw_width, raw_height),
             active: Size2us::new(width, height),
             margin: Vec2us::new(left_margin, top_margin),
@@ -1015,7 +999,7 @@ pub(crate) fn load_raw(path: &Path, cancel: &CancelToken) -> Result<LinearImage,
     check_cancelled(path, cancel)?;
 
     // Read before the match: the X-Trans arm consumes `raw` to free libraw ahead of its demosaic.
-    let active = raw.area.active;
+    let active = raw.layout.active;
     let iso = raw.iso;
     let camera_white_balance = raw.camera_white_balance;
     let physical_scale = raw.black_level.span();
@@ -1185,7 +1169,7 @@ pub(crate) fn load_raw_cfa(path: &Path, cancel: &CancelToken) -> Result<CfaImage
     let metadata = ImageMetadata {
         iso: raw.iso,
         bitpix: BitPix::UInt16,
-        header_dimensions: vec![raw.area.active.height, raw.area.active.width, 1],
+        header_dimensions: vec![raw.layout.active.height, raw.layout.active.width, 1],
         cfa_type: Some(cfa_type),
         camera_white_balance: raw.camera_white_balance,
         provenance: Some(ImageProvenance {
@@ -1204,7 +1188,7 @@ pub(crate) fn load_raw_cfa(path: &Path, cancel: &CancelToken) -> Result<CfaImage
     };
 
     Ok(CfaImage {
-        data: Buffer2::new(raw.area.active.width, raw.area.active.height, pixels),
+        data: Buffer2::new(raw.layout.active.width, raw.layout.active.height, pixels),
         metadata,
         quantization_sigma: Some(raw.black_level.inv_range * QUANTIZATION_SIGMA_PER_STEP),
         // A sensor reports a value for every photosite; no RAW format has an undefined-sample

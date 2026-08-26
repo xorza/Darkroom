@@ -1,4 +1,6 @@
 use crate::io::raw::demosaic::DemosaicError;
+use crate::io::raw::demosaic::sensor_layout::SensorLayout;
+use crate::io::raw::demosaic::xtrans::XTransNormalization;
 use crate::io::raw::demosaic::xtrans::internals::{test_pattern, test_pattern_array};
 use crate::io::raw::demosaic::xtrans::*;
 
@@ -74,13 +76,17 @@ fn xtrans_pattern_invalid_metadata() {
     assert_eq!(
         process_xtrans(
             &raw_data,
-            Size2us::new(12, 12),
-            Size2us::new(6, 6),
-            Vec2us::new(3, 3),
+            SensorLayout {
+                raw: Size2us::new(12, 12),
+                active: Size2us::new(6, 6),
+                margin: Vec2us::new(3, 3),
+            },
             invalid_value_pattern,
-            [0.0; 3],
-            1.0,
-            None,
+            XTransNormalization {
+                channel_black: [0.0; 3],
+                inv_range: 1.0,
+                black_repeat: None,
+            },
             &CancelToken::never(),
         )
         .unwrap_err(),
@@ -95,9 +101,11 @@ fn xtrans_pattern_invalid_metadata() {
     assert!(matches!(
         process_xtrans_f32(
             &calibrated,
-            Size2us::new(12, 12),
-            Size2us::new(6, 6),
-            Vec2us::new(3, 3),
+            SensorLayout {
+                raw: Size2us::new(12, 12),
+                active: Size2us::new(6, 6),
+                margin: Vec2us::new(3, 3),
+            },
             invalid_value_pattern,
             &CancelToken::never(),
         ),
@@ -117,13 +125,17 @@ fn xtrans_image_valid() {
     let pattern = test_pattern();
     let img = XTransImage::with_margins(
         &data,
-        Size2us::new(6, 6),
-        Size2us::new(4, 4),
-        Vec2us::new(1, 1),
+        SensorLayout {
+            raw: Size2us::new(6, 6),
+            active: Size2us::new(4, 4),
+            margin: Vec2us::new(1, 1),
+        },
         pattern,
-        [0.0; 3],
-        1.0 / 65535.0,
-        None,
+        XTransNormalization {
+            channel_black: [0.0; 3],
+            inv_range: 1.0 / 65535.0,
+            black_repeat: None,
+        },
     );
     assert_eq!(img.raw, Size2us::new(6, 6));
     assert_eq!(img.active, Size2us::new(4, 4));
@@ -137,13 +149,17 @@ fn xtrans_image_zero_width() {
     let pattern = test_pattern();
     XTransImage::with_margins(
         &data,
-        Size2us::new(6, 6),
-        Size2us::new(0, 4),
-        Vec2us::ZERO,
+        SensorLayout {
+            raw: Size2us::new(6, 6),
+            active: Size2us::new(0, 4),
+            margin: Vec2us::ZERO,
+        },
         pattern,
-        [0.0; 3],
-        1.0 / 65535.0,
-        None,
+        XTransNormalization {
+            channel_black: [0.0; 3],
+            inv_range: 1.0 / 65535.0,
+            black_repeat: None,
+        },
     );
 }
 
@@ -155,13 +171,17 @@ fn xtrans_image_wrong_data_length() {
     let size = Size2us::new(6, 6);
     XTransImage::with_margins(
         &data,
-        size,
-        size,
-        Vec2us::ZERO,
+        SensorLayout {
+            raw: size,
+            active: size,
+            margin: Vec2us::ZERO,
+        },
         pattern,
-        [0.0; 3],
-        1.0 / 65535.0,
-        None,
+        XTransNormalization {
+            channel_black: [0.0; 3],
+            inv_range: 1.0 / 65535.0,
+            black_repeat: None,
+        },
     );
 }
 
@@ -170,13 +190,17 @@ fn process_xtrans_output_size() {
     let raw_data: Vec<u16> = vec![1000; 12 * 12];
     let rgb = process_xtrans(
         &raw_data,
-        Size2us::new(12, 12),
-        Size2us::new(6, 6),
-        Vec2us::new(3, 3),
+        SensorLayout {
+            raw: Size2us::new(12, 12),
+            active: Size2us::new(6, 6),
+            margin: Vec2us::new(3, 3),
+        },
         test_pattern_array(),
-        [0.0; 3],
-        1.0 / 4096.0,
-        None,
+        XTransNormalization {
+            channel_black: [0.0; 3],
+            inv_range: 1.0 / 4096.0,
+            black_repeat: None,
+        },
         &CancelToken::never(),
     )
     .unwrap();
@@ -197,13 +221,17 @@ fn process_xtrans_normalization() {
 
     let rgb = process_xtrans(
         &raw_data,
-        Size2us::new(12, 12),
-        Size2us::new(6, 6),
-        Vec2us::new(3, 3),
+        SensorLayout {
+            raw: Size2us::new(12, 12),
+            active: Size2us::new(6, 6),
+            margin: Vec2us::new(3, 3),
+        },
         test_pattern_array(),
-        [black; 3],
-        inv_range,
-        None,
+        XTransNormalization {
+            channel_black: [black; 3],
+            inv_range,
+            black_repeat: None,
+        },
         &CancelToken::never(),
     )
     .unwrap();
@@ -224,13 +252,17 @@ fn process_xtrans_clamps_below_black() {
 
     let rgb = process_xtrans(
         &raw_data,
-        Size2us::new(12, 12),
-        Size2us::new(6, 6),
-        Vec2us::new(3, 3),
+        SensorLayout {
+            raw: Size2us::new(12, 12),
+            active: Size2us::new(6, 6),
+            margin: Vec2us::new(3, 3),
+        },
         test_pattern_array(),
-        [black; 3],
-        inv_range,
-        None,
+        XTransNormalization {
+            channel_black: [black; 3],
+            inv_range,
+            black_repeat: None,
+        },
         &CancelToken::never(),
     )
     .unwrap();
@@ -249,13 +281,17 @@ fn process_xtrans_full_range() {
 
     let rgb = process_xtrans(
         &raw_data,
-        Size2us::new(12, 12),
-        Size2us::new(6, 6),
-        Vec2us::new(3, 3),
+        SensorLayout {
+            raw: Size2us::new(12, 12),
+            active: Size2us::new(6, 6),
+            margin: Vec2us::new(3, 3),
+        },
         test_pattern_array(),
-        [black; 3],
-        inv_range,
-        None,
+        XTransNormalization {
+            channel_black: [black; 3],
+            inv_range,
+            black_repeat: None,
+        },
         &CancelToken::never(),
     )
     .unwrap();
@@ -275,13 +311,17 @@ fn xtrans_normalization_is_per_channel_and_raw_linear() {
     let size = Size2us::new(6, 6);
     let image = XTransImage::with_margins(
         &raw_data,
-        size,
-        size,
-        Vec2us::ZERO,
+        SensorLayout {
+            raw: size,
+            active: size,
+            margin: Vec2us::ZERO,
+        },
         test_pattern(),
-        [250.0, common_black, 220.0],
-        inv_range,
-        None,
+        XTransNormalization {
+            channel_black: [250.0, common_black, 220.0],
+            inv_range,
+            black_repeat: None,
+        },
     );
 
     let expected_red = (2000.0 - 250.0) / 3896.0;
@@ -297,9 +337,11 @@ fn process_xtrans_f32_output_size() {
     let data: Vec<f32> = vec![0.5; 12 * 12];
     let rgb = process_xtrans_f32(
         &data,
-        Size2us::new(12, 12),
-        Size2us::new(6, 6),
-        Vec2us::new(3, 3),
+        SensorLayout {
+            raw: Size2us::new(12, 12),
+            active: Size2us::new(6, 6),
+            margin: Vec2us::new(3, 3),
+        },
         test_pattern_array(),
         &CancelToken::never(),
     )
@@ -312,9 +354,11 @@ fn process_xtrans_f32_uniform() {
     let data: Vec<f32> = vec![0.5; 12 * 12];
     let rgb = process_xtrans_f32(
         &data,
-        Size2us::new(12, 12),
-        Size2us::new(6, 6),
-        Vec2us::new(3, 3),
+        SensorLayout {
+            raw: Size2us::new(12, 12),
+            active: Size2us::new(6, 6),
+            margin: Vec2us::new(3, 3),
+        },
         test_pattern_array(),
         &CancelToken::never(),
     )
@@ -340,9 +384,11 @@ fn f32_demosaic_preserves_signed_native_samples() {
 
     let rgb = process_xtrans_f32(
         &data,
-        Size2us::new(raw_width, raw_height),
-        Size2us::new(width, height),
-        Vec2us::new(left, top),
+        SensorLayout {
+            raw: Size2us::new(raw_width, raw_height),
+            active: Size2us::new(width, height),
+            margin: Vec2us::new(left, top),
+        },
         pattern,
         &CancelToken::never(),
     )
@@ -379,9 +425,11 @@ fn f32_demosaic_is_equivariant_to_a_uniform_pedestal() {
     let demosaic = |data: &[f32]| {
         process_xtrans_f32(
             data,
-            Size2us::new(raw_width, raw_height),
-            Size2us::new(width, height),
-            Vec2us::new(left, top),
+            SensorLayout {
+                raw: Size2us::new(raw_width, raw_height),
+                active: Size2us::new(width, height),
+                margin: Vec2us::new(left, top),
+            },
             test_pattern_array(),
             &CancelToken::never(),
         )
@@ -431,21 +479,27 @@ fn process_xtrans_f32_matches_u16_path() {
 
     let rgb_u16 = process_xtrans(
         &raw_u16,
-        Size2us::new(raw_width, raw_height),
-        Size2us::new(width, height),
-        Vec2us::new(margin, margin),
+        SensorLayout {
+            raw: Size2us::new(raw_width, raw_height),
+            active: Size2us::new(width, height),
+            margin: Vec2us::new(margin, margin),
+        },
         test_pattern_array(),
-        [black; 3],
-        inv_range,
-        None,
+        XTransNormalization {
+            channel_black: [black; 3],
+            inv_range,
+            black_repeat: None,
+        },
         &CancelToken::never(),
     )
     .unwrap();
     let rgb_f32 = process_xtrans_f32(
         &raw_f32,
-        Size2us::new(raw_width, raw_height),
-        Size2us::new(width, height),
-        Vec2us::new(margin, margin),
+        SensorLayout {
+            raw: Size2us::new(raw_width, raw_height),
+            active: Size2us::new(width, height),
+            margin: Vec2us::new(margin, margin),
+        },
         test_pattern_array(),
         &CancelToken::never(),
     )
