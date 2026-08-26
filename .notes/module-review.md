@@ -101,34 +101,8 @@ explaining that it is the twin of the other, and each with its own test.
       `FrameDimensionMismatch` and `InvalidConfigField` while `lumos` uses
       `thiserror` in 12 other files.
 
-## Unintegrated code kept alive by blanket suppressions
-
-- [ ] `lumos/src/stacking/registration/distortion/tps/` is 1413 lines (383
-      production + 1030 tests) reachable from nothing. `mod.rs:4` carries a
-      module-wide `#![allow(dead_code)]`. It compiles, links, and is tested on
-      every run of the suite.
-- [ ] `lumos/src/stacking/registration/distortion/point_normalization.rs:32`
-      (`denormalize`) is `#[allow(dead_code)]` and, per its own comment, exists
-      only for the unintegrated TPS module.
-- [ ] `lumos/src/stacking/registration/ransac/mod.rs:98` — an
-      `#[allow(dead_code)]` struct field (`iterations`) that is written and
-      never read.
-- [ ] `palantir/src/common/platform.rs:9` — `#[allow(dead_code)]` on the
-      `Platform` enum.
-- [ ] `imaginarium/src/gpu/slot.rs:45` — `#[allow(dead_code)]` on `take`.
-- [ ] `darkroom/src/gui/widgets/inline_rename.rs:127` — `#[allow(dead_code)]` on
-      the `halign` builder method.
-- [ ] Eighteen `#[allow(clippy::too_many_arguments)]` sites, concentrated in
-      `lumos/src/io/raw/demosaic/xtrans/` (four),
-      `lumos/src/stacking/star_detection/median_filter/simd/` (four) and
-      `fits-well/src/compress/hcompress.rs` (three).
-
 ## Repository hygiene
 
-- [ ] `.gitignore:18` ignores `/.gitmodules` under a "Claude Code sandbox
-      sentinel files" heading. The file is tracked and is load-bearing — four
-      submodules depend on it — so the rule is inert today and a hazard the
-      moment the file is re-added.
 - [ ] `.tmp/` at the repo root holds build and run artifacts
       (`after.log`, `darkroom-run.log`, `vk-validation.log`, `menu-preview.png`,
       `lumos_pipeline_stack/`, `lumos-test/`, `wgpu/`) plus a stray

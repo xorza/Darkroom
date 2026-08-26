@@ -73,6 +73,9 @@ pub(super) unsafe fn median_filter_row_neon(
 /// Uses a 25-comparator sorting network optimized for finding the median.
 /// After the network, v4 contains the median of each SIMD lane.
 #[inline]
+// Nine sibling lane values feeding a fixed comparator network, not a group with a name:
+// an array or struct would replace the network's named registers with indices and hand LLVM
+// an aggregate to promote back into exactly those registers.
 #[allow(clippy::too_many_arguments)]
 unsafe fn median9_neon(
     mut v0: float32x4_t,

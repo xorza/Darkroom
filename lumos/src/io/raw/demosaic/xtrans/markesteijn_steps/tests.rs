@@ -1,6 +1,8 @@
 use crate::io::raw::demosaic::interleave_planes;
+use crate::io::raw::demosaic::sensor_layout::SensorLayout;
 use crate::io::raw::demosaic::xtrans::hex_lookup::HexLookup;
 use crate::io::raw::demosaic::xtrans::internals::{make_xtrans, test_pattern, to_u16};
+use crate::io::raw::demosaic::xtrans::markesteijn::FinalBlendBuffers;
 use crate::io::raw::demosaic::xtrans::markesteijn_steps::*;
 
 #[test]
@@ -12,9 +14,11 @@ fn green_minmax_uniform() {
     let data = vec![to_u16(0.5); raw_w * raw_h];
     let xtrans = make_xtrans(
         &data,
-        Size2us::new(raw_w, raw_h),
-        Size2us::new(w, h),
-        Vec2us::new(6, 6),
+        SensorLayout {
+            raw: Size2us::new(raw_w, raw_h),
+            active: Size2us::new(w, h),
+            margin: Vec2us::new(6, 6),
+        },
     );
     let hex = HexLookup::new(&xtrans.raw_pattern);
 
@@ -41,9 +45,11 @@ fn green_minmax_bounds() {
         .collect();
     let xtrans = make_xtrans(
         &data,
-        Size2us::new(raw_w, raw_h),
-        Size2us::new(w, h),
-        Vec2us::new(6, 6),
+        SensorLayout {
+            raw: Size2us::new(raw_w, raw_h),
+            active: Size2us::new(w, h),
+            margin: Vec2us::new(6, 6),
+        },
     );
     let hex = HexLookup::new(&xtrans.raw_pattern);
 
@@ -72,9 +78,11 @@ fn interpolate_green_uniform() {
     let data = vec![to_u16(0.5); raw_w * raw_h];
     let xtrans = make_xtrans(
         &data,
-        Size2us::new(raw_w, raw_h),
-        Size2us::new(w, h),
-        Vec2us::new(6, 6),
+        SensorLayout {
+            raw: Size2us::new(raw_w, raw_h),
+            active: Size2us::new(w, h),
+            margin: Vec2us::new(6, 6),
+        },
     );
     let hex = HexLookup::new(&xtrans.raw_pattern);
 
@@ -210,9 +218,11 @@ fn derivatives_of_uniform_input_are_finite_and_expose_directional_candidates() {
     let data = vec![to_u16(0.5); raw_w * raw_h];
     let xtrans = make_xtrans(
         &data,
-        Size2us::new(raw_w, raw_h),
-        Size2us::new(w, h),
-        Vec2us::new(6, 6),
+        SensorLayout {
+            raw: Size2us::new(raw_w, raw_h),
+            active: Size2us::new(w, h),
+            margin: Vec2us::new(6, 6),
+        },
     );
     let hex = HexLookup::new(&xtrans.raw_pattern);
 
@@ -264,9 +274,11 @@ fn derivatives_checkerboard_nonzero() {
         .collect();
     let xtrans = make_xtrans(
         &data,
-        Size2us::new(raw_w, raw_h),
-        Size2us::new(w, h),
-        Vec2us::new(6, 6),
+        SensorLayout {
+            raw: Size2us::new(raw_w, raw_h),
+            active: Size2us::new(w, h),
+            margin: Vec2us::new(6, 6),
+        },
     );
     let hex = HexLookup::new(&xtrans.raw_pattern);
 
@@ -511,9 +523,11 @@ fn reconstruction_preserves_native_samples_and_canonical_empty_directions() {
     let data = vec![to_u16(0.5); raw_w * raw_h];
     let xtrans = make_xtrans(
         &data,
-        Size2us::new(raw_w, raw_h),
-        Size2us::new(w, h),
-        Vec2us::new(6, 6),
+        SensorLayout {
+            raw: Size2us::new(raw_w, raw_h),
+            active: Size2us::new(w, h),
+            margin: Vec2us::new(6, 6),
+        },
     );
     let hex = HexLookup::new(&xtrans.raw_pattern);
     let mut gmin = vec![0.0; pixels];
@@ -584,9 +598,11 @@ fn blend_uniform_homo_produces_uniform_output() {
     let data = vec![to_u16(0.5); raw_w * raw_h];
     let xtrans = make_xtrans(
         &data,
-        Size2us::new(raw_w, raw_h),
-        Size2us::new(w, h),
-        Vec2us::new(6, 6),
+        SensorLayout {
+            raw: Size2us::new(raw_w, raw_h),
+            active: Size2us::new(w, h),
+            margin: Vec2us::new(6, 6),
+        },
     );
     let hex = HexLookup::new(&xtrans.raw_pattern);
 
@@ -609,14 +625,18 @@ fn blend_uniform_homo_produces_uniform_output() {
     let mut sat = vec![0; pixels];
     blend_final(
         &xtrans,
-        &green_dir,
-        &colors,
-        &homo,
-        &mut scores,
-        &mut sat,
-        &mut r,
-        &mut g,
-        &mut b,
+        FinalBlendBuffers {
+            green_dir: &green_dir,
+            colors: &colors,
+            scores: &mut scores,
+            homo: &homo,
+            sat: &mut sat,
+        },
+        PlanarRgbMut {
+            r: &mut r,
+            g: &mut g,
+            b: &mut b,
+        },
     );
 
     // Uniform 0.5 input → output should be approximately 0.5 for all channels
@@ -637,9 +657,11 @@ fn blend_one_dominant_direction() {
     let data = vec![to_u16(0.5); raw_w * raw_h];
     let xtrans = make_xtrans(
         &data,
-        Size2us::new(raw_w, raw_h),
-        Size2us::new(w, h),
-        Vec2us::new(6, 6),
+        SensorLayout {
+            raw: Size2us::new(raw_w, raw_h),
+            active: Size2us::new(w, h),
+            margin: Vec2us::new(6, 6),
+        },
     );
     let hex = HexLookup::new(&xtrans.raw_pattern);
 
@@ -663,14 +685,18 @@ fn blend_one_dominant_direction() {
     let mut sat = vec![0; pixels];
     blend_final(
         &xtrans,
-        &green_dir,
-        &colors,
-        &homo,
-        &mut scores,
-        &mut sat,
-        &mut r_one,
-        &mut g_one,
-        &mut b_one,
+        FinalBlendBuffers {
+            green_dir: &green_dir,
+            colors: &colors,
+            scores: &mut scores,
+            homo: &homo,
+            sat: &mut sat,
+        },
+        PlanarRgbMut {
+            r: &mut r_one,
+            g: &mut g_one,
+            b: &mut b_one,
+        },
     );
     let output_one = interleave_planes([r_one, g_one, b_one]);
 
@@ -681,14 +707,18 @@ fn blend_one_dominant_direction() {
     let mut b_all = vec![0.0f32; pixels];
     blend_final(
         &xtrans,
-        &green_dir,
-        &colors,
-        &homo_all,
-        &mut scores,
-        &mut sat,
-        &mut r_all,
-        &mut g_all,
-        &mut b_all,
+        FinalBlendBuffers {
+            green_dir: &green_dir,
+            colors: &colors,
+            scores: &mut scores,
+            homo: &homo_all,
+            sat: &mut sat,
+        },
+        PlanarRgbMut {
+            r: &mut r_all,
+            g: &mut g_all,
+            b: &mut b_all,
+        },
     );
     let output_all = interleave_planes([r_all, g_all, b_all]);
 

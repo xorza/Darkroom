@@ -369,7 +369,7 @@ fn bench_rcd_demosaic_core() {
         }
 
         let size = Size2us::new(w, h);
-        let bayer = BayerImage::with_margins(&data, size, size, Vec2us::ZERO, CfaPattern::Rggb);
+        let bayer = BayerImage::with_margins(&data, SensorLayout::cropped(size), CfaPattern::Rggb);
 
         // Warmup
         let _ = rcd::demosaic(&bayer, &CancelToken::never()).unwrap();

@@ -147,6 +147,9 @@ pub(super) unsafe fn median_filter_row_sse41(
 /// that places the median in position 4. Based on Batcher's odd-even merge sort.
 #[target_feature(enable = "avx2")]
 #[inline]
+// Nine sibling lane values feeding a fixed comparator network, not a group with a name:
+// an array or struct would replace the network's named registers with indices and hand LLVM
+// an aggregate to promote back into exactly those registers.
 #[allow(clippy::too_many_arguments)]
 unsafe fn median9_avx2(
     mut v0: __m256,
@@ -166,6 +169,9 @@ unsafe fn median9_avx2(
 /// Vectorized median of 9 elements using SSE4.1.
 #[target_feature(enable = "sse4.1")]
 #[inline]
+// Nine sibling lane values feeding a fixed comparator network, not a group with a name:
+// an array or struct would replace the network's named registers with indices and hand LLVM
+// an aggregate to promote back into exactly those registers.
 #[allow(clippy::too_many_arguments)]
 unsafe fn median9_sse41(
     mut v0: __m128,

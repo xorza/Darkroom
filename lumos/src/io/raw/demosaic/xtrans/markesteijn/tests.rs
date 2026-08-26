@@ -1,4 +1,6 @@
 use crate::io::raw::demosaic::interleave_planes;
+use crate::io::raw::demosaic::sensor_layout::SensorLayout;
+use crate::io::raw::demosaic::xtrans::XTransNormalization;
 use crate::io::raw::demosaic::xtrans::internals::{
     TEST_INV_RANGE, make_xtrans, test_pattern, test_pattern_array, to_u16,
 };
@@ -205,7 +207,8 @@ fn markesteijn_matches_librtprocess_reference_scenes() {
             }
         }
         let size = Size2us::new(WIDTH, HEIGHT);
-        let xtrans = XTransImage::with_margins_f32(&data, size, size, Vec2us::ZERO, test_pattern());
+        let xtrans =
+            XTransImage::with_margins_f32(&data, SensorLayout::cropped(size), test_pattern());
         let planes = demosaic(&xtrans, &CancelToken::never()).unwrap();
         for sample in case.samples {
             let index = size.index_of(sample.pos);
@@ -234,9 +237,11 @@ fn markesteijn_output_size() {
     let data = vec![to_u16(0.5); raw_w * raw_h];
     let xtrans = make_xtrans(
         &data,
-        Size2us::new(raw_w, raw_h),
-        Size2us::new(w, h),
-        Vec2us::new(6, 6),
+        SensorLayout {
+            raw: Size2us::new(raw_w, raw_h),
+            active: Size2us::new(w, h),
+            margin: Vec2us::new(6, 6),
+        },
     );
 
     let rgb = interleave_planes(demosaic(&xtrans, &CancelToken::never()).unwrap());
@@ -252,9 +257,11 @@ fn markesteijn_uniform_input() {
     let data = vec![to_u16(0.5); raw_w * raw_h];
     let xtrans = make_xtrans(
         &data,
-        Size2us::new(raw_w, raw_h),
-        Size2us::new(w, h),
-        Vec2us::new(6, 6),
+        SensorLayout {
+            raw: Size2us::new(raw_w, raw_h),
+            active: Size2us::new(w, h),
+            margin: Vec2us::new(6, 6),
+        },
     );
 
     let rgb = interleave_planes(demosaic(&xtrans, &CancelToken::never()).unwrap());
@@ -281,9 +288,11 @@ fn markesteijn_no_nan() {
         .collect();
     let xtrans = make_xtrans(
         &data,
-        Size2us::new(raw_w, raw_h),
-        Size2us::new(w, h),
-        Vec2us::new(6, 6),
+        SensorLayout {
+            raw: Size2us::new(raw_w, raw_h),
+            active: Size2us::new(w, h),
+            margin: Vec2us::new(6, 6),
+        },
     );
 
     let rgb = interleave_planes(demosaic(&xtrans, &CancelToken::never()).unwrap());
@@ -302,9 +311,11 @@ fn markesteijn_all_zeros() {
     let data = vec![0u16; raw_w * raw_h];
     let xtrans = make_xtrans(
         &data,
-        Size2us::new(raw_w, raw_h),
-        Size2us::new(w, h),
-        Vec2us::new(6, 6),
+        SensorLayout {
+            raw: Size2us::new(raw_w, raw_h),
+            active: Size2us::new(w, h),
+            margin: Vec2us::new(6, 6),
+        },
     );
 
     let rgb = interleave_planes(demosaic(&xtrans, &CancelToken::never()).unwrap());
@@ -325,13 +336,17 @@ fn markesteijn_preserves_green_at_green_pixel() {
     let pattern = test_pattern();
     let xtrans = XTransImage::with_margins(
         &data,
-        Size2us::new(raw_w, raw_h),
-        Size2us::new(w, h),
-        Vec2us::new(left, top),
+        SensorLayout {
+            raw: Size2us::new(raw_w, raw_h),
+            active: Size2us::new(w, h),
+            margin: Vec2us::new(left, top),
+        },
         pattern.clone(),
-        [0.0; 3],
-        TEST_INV_RANGE,
-        None,
+        XTransNormalization {
+            channel_black: [0.0; 3],
+            inv_range: TEST_INV_RANGE,
+            black_repeat: None,
+        },
     );
 
     let rgb = interleave_planes(demosaic(&xtrans, &CancelToken::never()).unwrap());

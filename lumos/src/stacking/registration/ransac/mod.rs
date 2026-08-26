@@ -95,7 +95,7 @@ pub(super) struct RansacResult {
     pub(super) inliers: Vec<usize>,
     /// RANSAC iterations performed — a diagnostic; the adaptive-early-termination
     /// test asserts on it (no production reader yet).
-    #[allow(dead_code)]
+    #[cfg_attr(not(test), allow(dead_code))]
     iterations: usize,
 }
 

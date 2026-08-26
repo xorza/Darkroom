@@ -35,6 +35,7 @@ use common::CancelToken;
 use crate::io::raw::demosaic::xtrans::XTransImage;
 use crate::io::raw::demosaic::xtrans::hex_lookup::HexLookup;
 use crate::io::raw::demosaic::xtrans::markesteijn_steps;
+use crate::io::raw::demosaic::xtrans::markesteijn_steps::PlanarRgbMut;
 use crate::io::raw::demosaic::{Cancelled, DemosaicMemory};
 use crate::math::size2us::Size2us;
 
@@ -61,13 +62,16 @@ struct DemosaicArena {
     storage: Vec<f32>,
 }
 
+/// The five arena regions the final blend reads and scribbles in, handed over as a
+/// set because the arena aliases them out of one allocation and the blend is the
+/// only caller that wants them all.
 #[derive(Debug)]
-struct FinalBlendBuffers<'a> {
-    green_dir: &'a [f32],
-    colors: &'a [[f32; 2]],
-    scores: &'a mut [[u32; NDIR]],
-    homo: &'a [u8],
-    sat: &'a mut [u32],
+pub(super) struct FinalBlendBuffers<'a> {
+    pub(super) green_dir: &'a [f32],
+    pub(super) colors: &'a [[f32; 2]],
+    pub(super) scores: &'a mut [[u32; NDIR]],
+    pub(super) homo: &'a [u8],
+    pub(super) sat: &'a mut [u32],
 }
 
 impl DemosaicArena {
@@ -243,14 +247,12 @@ pub(crate) fn demosaic(
         let buffers = arena.final_blend_buffers();
         markesteijn_steps::blend_final(
             xtrans,
-            buffers.green_dir,
-            buffers.colors,
-            buffers.homo,
-            buffers.scores,
-            buffers.sat,
-            &mut r,
-            &mut g,
-            &mut b,
+            buffers,
+            PlanarRgbMut {
+                r: &mut r,
+                g: &mut g,
+                b: &mut b,
+            },
         );
     }
     tracing::debug!(

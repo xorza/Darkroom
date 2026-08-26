@@ -123,7 +123,7 @@ fn demosaic_overshoots_the_light_frame_range_it_is_clamped_back_into() {
         }
     }
 
-    let bayer = BayerImage::with_margins(&cfa, size, size, Vec2us::ZERO, CfaPattern::Rggb);
+    let bayer = BayerImage::with_margins(&cfa, SensorLayout::cropped(size), CfaPattern::Rggb);
     let mut planes = rcd::demosaic(&bayer, &CancelToken::never()).unwrap();
 
     let peak = planes
@@ -281,7 +281,7 @@ fn normalize_u16_large_array() {
 
 #[test]
 fn normalize_active_area_crops_and_applies_bayer_deltas() {
-    let area = RawActiveArea {
+    let layout = SensorLayout {
         raw: Size2us::new(6, 4),
         active: Size2us::new(3, 2),
         margin: Vec2us::new(2, 1),
@@ -290,17 +290,18 @@ fn normalize_active_area_crops_and_applies_bayer_deltas() {
     let inv_range = 0.001;
     let filters = 0x94949494;
     let channel_delta = [0.1, 0.2, 0.3, 0.4];
-    let mut raw_data = vec![65_535; area.raw.width * 4];
-    raw_data[area.raw.width + 2..area.raw.width + 5].copy_from_slice(&[50, 100, 200]);
-    raw_data[2 * area.raw.width + 2..2 * area.raw.width + 5].copy_from_slice(&[300, 1100, 1200]);
+    let mut raw_data = vec![65_535; layout.raw.width * 4];
+    raw_data[layout.raw.width + 2..layout.raw.width + 5].copy_from_slice(&[50, 100, 200]);
+    raw_data[2 * layout.raw.width + 2..2 * layout.raw.width + 5]
+        .copy_from_slice(&[300, 1100, 1200]);
 
     let without_delta =
-        normalize_active_area::<true>(&raw_data, area, black, inv_range, None, None);
+        normalize_active_area::<true>(&raw_data, layout, black, inv_range, None, None);
     assert_eq!(without_delta, [0.0, 0.0, 0.1, 0.2, 1.0, 1.0]);
 
     let clamped = normalize_active_area::<true>(
         &raw_data,
-        area,
+        layout,
         black,
         inv_range,
         Some(ChannelBlackDelta::LibRawFilter {
@@ -311,7 +312,7 @@ fn normalize_active_area_crops_and_applies_bayer_deltas() {
     );
     let unclamped = normalize_active_area::<false>(
         &raw_data,
-        area,
+        layout,
         black,
         inv_range,
         Some(ChannelBlackDelta::LibRawFilter {
@@ -376,14 +377,14 @@ fn direct_and_calibration_normalization_share_raw_linear_color_scale() {
                 &channel_delta,
                 None,
             );
-            let area = RawActiveArea {
+            let layout = SensorLayout {
                 raw: Size2us::new(raw_width, 3),
                 active: Size2us::new(2, 2),
                 margin: Vec2us::new(left_margin, top_margin),
             };
             let calibration = normalize_active_area::<false>(
                 &raw_data,
-                area,
+                layout,
                 black,
                 inv_range,
                 Some(ChannelBlackDelta::LibRawFilter {
@@ -393,13 +394,13 @@ fn direct_and_calibration_normalization_share_raw_linear_color_scale() {
                 None,
             );
 
-            for y in 0..area.active.height {
-                for x in 0..area.active.width {
+            for y in 0..layout.active.height {
+                for x in 0..layout.active.width {
                     let active_channel = active_cfa.color_at(Vec2us::new(x, y)) as usize;
                     assert_eq!(active_channel, libraw_filter_color(filters, y, x));
                     let expected = 0.5 - channel_delta[active_channel];
                     let direct_value = direct[(y + top_margin) * raw_width + x + left_margin];
-                    let calibration_value = calibration[y * area.active.width + x];
+                    let calibration_value = calibration[y * layout.active.width + x];
                     assert!(
                         (direct_value - expected).abs() < 1e-6,
                         "direct margin ({top_margin}, {left_margin}), ({y}, {x})"
@@ -439,28 +440,28 @@ fn spatial_black_repeat_uses_visible_coordinates_with_nonzero_margins() {
         assert!((actual - expected).abs() < 1e-8);
     }
 
-    let area = RawActiveArea {
+    let layout = SensorLayout {
         raw: Size2us::new(7, 4),
         active: Size2us::new(3, 2),
         margin: Vec2us::new(2, 1),
     };
-    let mut raw_data = vec![0u16; area.raw.width * 4];
-    raw_data[area.raw.width + 2..area.raw.width + 5].copy_from_slice(&[315, 327, 319]);
-    raw_data[2 * area.raw.width + 2..2 * area.raw.width + 5].copy_from_slice(&[331, 343, 335]);
+    let mut raw_data = vec![0u16; layout.raw.width * 4];
+    raw_data[layout.raw.width + 2..layout.raw.width + 5].copy_from_slice(&[315, 327, 319]);
+    raw_data[2 * layout.raw.width + 2..2 * layout.raw.width + 5].copy_from_slice(&[331, 343, 335]);
 
     let mut direct =
         normalize::normalize_u16_to_f32_parallel(&raw_data, black.common, black.inv_range);
     apply_bayer_black_corrections(
         &mut direct,
-        area.raw.width,
-        area.margin,
+        layout.raw.width,
+        layout.margin,
         0x94949494,
         &black.channel_delta_norm,
         black.repeat.as_ref(),
     );
     let calibration = normalize_active_area::<false>(
         &raw_data,
-        area,
+        layout,
         black.common,
         black.inv_range,
         Some(ChannelBlackDelta::LibRawFilter {
@@ -470,10 +471,11 @@ fn spatial_black_repeat_uses_visible_coordinates_with_nonzero_margins() {
         black.repeat.as_ref(),
     );
 
-    for y in 0..area.active.height {
-        for x in 0..area.active.width {
-            let direct_value = direct[(y + area.margin.y) * area.raw.width + x + area.margin.x];
-            let calibration_value = calibration[y * area.active.width + x];
+    for y in 0..layout.active.height {
+        for x in 0..layout.active.width {
+            let direct_value =
+                direct[(y + layout.margin.y) * layout.raw.width + x + layout.margin.x];
+            let calibration_value = calibration[y * layout.active.width + x];
             assert!((direct_value - 0.2).abs() < 1e-7, "direct ({x}, {y})");
             assert!(
                 (calibration_value - 0.2).abs() < 1e-7,
@@ -502,7 +504,7 @@ fn xtrans_direct_and_calibration_black_corrections_match() {
 
     for top_margin in 0..6 {
         for left_margin in 0..6 {
-            let area = RawActiveArea {
+            let layout = SensorLayout {
                 raw: Size2us::new(raw_width, raw_height),
                 active: Size2us::new(6, 6),
                 margin: Vec2us::new(left_margin, top_margin),
@@ -513,17 +515,17 @@ fn xtrans_direct_and_calibration_black_corrections_match() {
             let active_cfa = CfaType::XTrans(visible_pattern);
             let direct = XTransImage::with_margins(
                 &raw_data,
-                Size2us::new(raw_width, raw_height),
-                area.active,
-                area.margin,
+                layout,
                 XTransPattern::new(raw_pattern).unwrap(),
-                channel_black,
-                inv_range,
-                Some(&repeat),
+                XTransNormalization {
+                    channel_black,
+                    inv_range,
+                    black_repeat: Some(&repeat),
+                },
             );
             let calibration = normalize_active_area::<false>(
                 &raw_data,
-                area,
+                layout,
                 common_black,
                 inv_range,
                 Some(ChannelBlackDelta::XTrans {
@@ -533,10 +535,10 @@ fn xtrans_direct_and_calibration_black_corrections_match() {
                 Some(&repeat),
             );
 
-            for y in 0..area.active.height {
-                for x in 0..area.active.width {
-                    let raw_y = y + area.margin.y;
-                    let raw_x = x + area.margin.x;
+            for y in 0..layout.active.height {
+                for x in 0..layout.active.width {
+                    let raw_y = y + layout.margin.y;
+                    let raw_x = x + layout.margin.x;
                     let raw_channel = raw_pattern[raw_y % 6][raw_x % 6] as usize;
                     let visible_channel = visible_pattern[y % 6][x % 6] as usize;
                     let active_channel = active_cfa.color_at(Vec2us::new(x, y)) as usize;
@@ -545,7 +547,7 @@ fn xtrans_direct_and_calibration_black_corrections_match() {
 
                     let expected = [0.49, 0.48, 0.47][raw_channel] - repeat.at_visible(y, x);
                     let direct_value = direct.read_normalized(raw_y, raw_x);
-                    let calibration_value = calibration[y * area.active.width + x];
+                    let calibration_value = calibration[y * layout.active.width + x];
                     assert!(
                         (direct_value - expected).abs() < 1e-7,
                         "direct margin ({top_margin}, {left_margin}), ({y}, {x})"
@@ -589,26 +591,26 @@ fn real_xtrans_channel_black_matches_direct_and_calibration_paths() {
     let pattern = raw.raw_xtrans_pattern();
     let direct = XTransImage::with_margins(
         raw_data,
-        raw.area.raw,
-        raw.area.active,
-        raw.area.margin,
+        raw.layout,
         XTransPattern::new(pattern).unwrap(),
-        [
-            raw.black_level.per_channel[0],
-            raw.black_level.per_channel[1],
-            raw.black_level.per_channel[2],
-        ],
-        raw.black_level.inv_range,
-        raw.black_level.repeat.as_ref(),
+        XTransNormalization {
+            channel_black: [
+                raw.black_level.per_channel[0],
+                raw.black_level.per_channel[1],
+                raw.black_level.per_channel[2],
+            ],
+            inv_range: raw.black_level.inv_range,
+            black_repeat: raw.black_level.repeat.as_ref(),
+        },
     );
     let calibration = raw.extract_cfa_pixels::<false>().unwrap();
     let mut compared = 0usize;
 
-    for y in (0..raw.area.active.height).step_by(101) {
-        for x in (0..raw.area.active.width).step_by(113) {
-            let raw_y = y + raw.area.margin.y;
-            let raw_x = x + raw.area.margin.x;
-            let calibration_value = calibration[y * raw.area.active.width + x];
+    for y in (0..raw.layout.active.height).step_by(101) {
+        for x in (0..raw.layout.active.width).step_by(113) {
+            let raw_y = y + raw.layout.margin.y;
+            let raw_x = x + raw.layout.margin.x;
+            let calibration_value = calibration[y * raw.layout.active.width + x];
             if (0.0..=1.0).contains(&calibration_value) {
                 let direct_value = direct.read_normalized(raw_y, raw_x);
                 assert!((direct_value - calibration_value).abs() < 1e-7);
