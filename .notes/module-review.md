@@ -84,23 +84,6 @@ explaining that it is the twin of the other, and each with its own test.
       `gui/pane/graph/node/value_editor.rs:277,329`,
       `gui/pane/viewer/mod.rs:326`.
 
-## `fits-well` error handling diverges from the rest of the workspace
-
-- [ ] `fits-well/src/error.rs` declares one `FitsError` with 52 variants
-      spanning reader, writer, header, ASCII/binary tables, WCS, time and
-      compression. Every `Result` in the crate carries the whole set, so no
-      call site's error type says which failures are actually reachable there.
-- [ ] `fits-well/src/error.rs:276-497` is a hand-written 220-line
-      `impl fmt::Display` — one `write!` arm per variant, restating each
-      variant's doc comment as a format string. `thiserror` is already a
-      workspace dependency used by 36 files across six crates.
-- [ ] `imaginarium/src/common/error.rs:18` hand-writes `Display` for its `Error`
-      while `imaginarium` depends on `thiserror` and uses it elsewhere in the
-      same crate.
-- [ ] `lumos/src/error.rs:48,139` hand-writes `Display` for
-      `FrameDimensionMismatch` and `InvalidConfigField` while `lumos` uses
-      `thiserror` in 12 other files.
-
 ## Repository hygiene
 
 - [ ] `.tmp/` at the repo root holds build and run artifacts
