@@ -8,9 +8,9 @@
 
 pub(crate) mod error;
 
-use std::borrow::Cow;
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::fmt;
 use std::num::NonZeroU32;
 
 use glam::UVec2;
@@ -57,14 +57,33 @@ impl StoredContent {
     /// itself, or the reason it isn't renderable. `None` when [`Self::image`]
     /// answered — the two are complementary, so a caller that renders the
     /// image never also has a message to show.
-    /// `Cow` because the two sources differ: a formatted value is already the
-    /// string it shows, while a failure is a typed error rendered on the way
-    /// out — and only a card sitting on a broken value pays for that.
-    pub(crate) fn message(&self) -> Option<Cow<'_, str>> {
+    pub(crate) fn message(&self) -> Option<StoredMessage<'_>> {
         match self {
-            StoredContent::Text(text) => Some(Cow::Borrowed(text.as_str())),
-            StoredContent::Error(error) => Some(Cow::Owned(error.to_string())),
+            StoredContent::Text(text) => Some(StoredMessage::Value(text.as_str())),
+            StoredContent::Error(error) => Some(StoredMessage::Failure(error)),
             StoredContent::Image(_) => None,
+        }
+    }
+}
+
+/// What a preview card draws in place of an image: the formatted value
+/// itself, or why the value on hand could not be prepared as one.
+///
+/// `Display` rather than an assembled `String`: the card records every frame,
+/// and the line goes straight into the record pass's text arena. A failure is
+/// a typed error rendered on the way out, so only a card sitting on a broken
+/// value pays for that rendering.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum StoredMessage<'a> {
+    Value(&'a str),
+    Failure(&'a PreviewImageError),
+}
+
+impl fmt::Display for StoredMessage<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Value(text) => f.write_str(text),
+            Self::Failure(error) => write!(f, "{error}"),
         }
     }
 }

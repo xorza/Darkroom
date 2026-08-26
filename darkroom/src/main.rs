@@ -6,6 +6,8 @@
 // off and gets the GUI subsystem.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+#[cfg(test)]
+mod alloc_audit;
 mod core;
 mod gui;
 mod platform;

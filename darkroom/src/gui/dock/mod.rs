@@ -22,8 +22,6 @@
 mod drag;
 pub(crate) mod strip;
 
-use std::borrow::Cow;
-
 use crate::core::document::dock::dock_op::DockOp;
 use crate::core::document::dock::dock_path::DockPath;
 use crate::core::document::dock::split_side::SplitDir;
@@ -98,6 +96,9 @@ pub(crate) struct DockUi {
     /// resolved there into a [`DockOp::MoveTab`] on release (or
     /// cancelled by Esc), painted by [`Self::render`].
     tab_drag: Option<TabDrag>,
+    /// [`tab_labels`]' buffer. One serves every group, because the borrow
+    /// checker holds it for exactly as long as a group's strip reads it.
+    tab_labels: Vec<TabLabel>,
 }
 
 impl DockUi {
@@ -135,7 +136,7 @@ impl DockUi {
             {
                 self.tab_drag = Some(TabDrag {
                     tab,
-                    text: tab_text(doc, tab).into_owned(),
+                    text: tab_text(doc, tab).to_owned(),
                 });
             }
         }
@@ -170,14 +171,26 @@ impl DockUi {
     /// in-flight drag's feedback. Ratio drags and strip-borne intents
     /// (renames, split-menu picks) land in `out`.
     pub(crate) fn render(
-        &self,
+        &mut self,
         ui: &mut Ui,
         cx: DockContext<'_>,
         out: &mut Requests,
         mut content: impl FnMut(&mut Ui, TabRef, Option<Vec2>, &mut Requests),
     ) {
-        render_node(ui, cx, DockLayout::ROOT, DockPath::ROOT, out, &mut content);
-        if let Some(dragged) = &self.tab_drag {
+        let Self {
+            tab_drag,
+            tab_labels,
+        } = self;
+        render_node(
+            ui,
+            cx,
+            DockLayout::ROOT,
+            DockPath::ROOT,
+            out,
+            &mut content,
+            tab_labels,
+        );
+        if let Some(dragged) = tab_drag {
             ui.set_cursor(CursorIcon::Grabbing);
             draw_drag_feedback(ui, cx, dragged);
         }
@@ -194,9 +207,10 @@ fn render_node<F: FnMut(&mut Ui, TabRef, Option<Vec2>, &mut Requests)>(
     path: DockPath,
     out: &mut Requests,
     content: &mut F,
+    labels: &mut Vec<TabLabel>,
 ) {
     match cx.open.document.layout.node(idx) {
-        DockNode::Group(group) => render_group(ui, cx, group, out, content),
+        DockNode::Group(group) => render_group(ui, cx, group, out, content, labels),
         DockNode::Split(split) => {
             let DockSplit {
                 dir,
@@ -217,7 +231,7 @@ fn render_node<F: FnMut(&mut Ui, TabRef, Option<Vec2>, &mut Requests)>(
                         SplitHalf::First => (first, path.first()),
                         SplitHalf::Second => (second, path.second()),
                     };
-                    render_node(ui, cx, child, child_path, out, content);
+                    render_node(ui, cx, child, child_path, out, content, labels);
                 });
             // The widget wrote the divider drag into `live_ratio`; the
             // layout itself only changes through the recorded intent
@@ -242,8 +256,9 @@ fn render_group<F: FnMut(&mut Ui, TabRef, Option<Vec2>, &mut Requests)>(
     group: &TabGroup,
     out: &mut Requests,
     content: &mut F,
+    labels: &mut Vec<TabLabel>,
 ) {
-    let labels = tab_labels(ui, cx, group);
+    tab_labels(ui, cx, group, labels);
     Panel::vstack()
         .id(pane_wid(group.id))
         .size((Sizing::FILL, Sizing::FILL))
@@ -253,7 +268,7 @@ fn render_group<F: FnMut(&mut Ui, TabRef, Option<Vec2>, &mut Requests)>(
         // input scope, and a pane declares none.
         .focusable(true)
         .show(ui, |ui| {
-            strip::show(ui, cx.theme, group, &labels, out);
+            strip::show(ui, cx.theme, group, labels, out);
             // Last frame's arrangement, as every measurement during a record
             // is — but of the *group's* content area, which outlives the tab
             // in it. That is what lets a view that first records on this pass
@@ -386,32 +401,33 @@ fn draw_drag_feedback(ui: &mut Ui, cx: DockContext<'_>, dragged: &TabDrag) {
     }
 }
 
-/// Project one group's tabs into the strip's per-tab labels — the label
-/// text and the unsaved-changes flag are what the strip needs the open
-/// document for.
-fn tab_labels(ui: &mut Ui, cx: DockContext<'_>, group: &TabGroup) -> Vec<TabLabel> {
+/// Project one group's tabs into the strip's per-tab labels into `out` — the
+/// label text and the unsaved-changes flag are what the strip needs the open
+/// document for. `out` is cleared first.
+///
+/// Fills a caller-owned buffer rather than returning one because the dock
+/// records every frame: a fresh `Vec` here would be one allocation per
+/// visible group per frame, and the labels themselves hold no owned text.
+fn tab_labels(ui: &mut Ui, cx: DockContext<'_>, group: &TabGroup, out: &mut Vec<TabLabel>) {
     let doc = &cx.open.document;
     let focused = doc.layout.focused == group.id;
-    group
-        .tabs
-        .iter()
-        .enumerate()
-        .map(|(i, &tab)| TabLabel {
-            tab,
-            text: ui.intern(tab_text(doc, tab)),
-            active: i == group.active,
-            focused,
-            dirty: cx.open.dirty,
-        })
-        .collect()
+    out.clear();
+    out.reserve_exact(group.tabs.len());
+    out.extend(group.tabs.iter().enumerate().map(|(i, &tab)| TabLabel {
+        tab,
+        text: ui.intern(tab_text(doc, tab)),
+        active: i == group.active,
+        focused,
+        dirty: cx.open.dirty,
+    }));
 }
 
 /// A tab's display text — shared by the strip labels, the drag's ghost chip,
 /// and the viewer pane's own header.
-fn tab_text(doc: &Document, tab: TabRef) -> Cow<'_, str> {
+fn tab_text(doc: &Document, tab: TabRef) -> &str {
     match tab {
-        TabRef::Graph => Cow::Borrowed("main"),
-        TabRef::Preferences => Cow::Borrowed("preferences"),
-        TabRef::ImageViewer(node_id) => viewer::node_label(doc, node_id).into(),
+        TabRef::Graph => "main",
+        TabRef::Preferences => "preferences",
+        TabRef::ImageViewer(node_id) => viewer::node_label(doc, node_id),
     }
 }

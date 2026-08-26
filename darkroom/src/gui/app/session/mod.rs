@@ -247,6 +247,55 @@ mod tests {
     use crate::gui::state::preview_store::StoredContent;
     use crate::gui::state::preview_store::internals::opaque_image_value;
 
+    /// Frames to settle the scene before the window opens. The caches that
+    /// grow once — text shaping, palantir's widget tables, the record store's
+    /// arenas — do it inside these, so what the window sees is steady state.
+    const SETTLE_FRAMES: u32 = 32;
+    /// Long enough that a once-every-N-frames allocation lands inside the
+    /// window rather than after it.
+    const AUDITED_FRAMES: usize = 64;
+
+    /// The record path performs no heap operation once the editor has settled.
+    ///
+    /// Strict zero, because every allocation on this path would be the
+    /// editor's own: a `format!` for a label palantir was going to copy into
+    /// its text arena anyway, or a `collect()` for a list that could have
+    /// refilled a buffer the editor already owns. Both have appeared here
+    /// before, and neither shows up in a profile — one frame's worth is far
+    /// too small to see, and the cost is the tail it puts on the frames that
+    /// happen to trip the allocator.
+    ///
+    /// The scene is the one the record path is widest over: a graph pane of
+    /// nodes, a preview card holding an image, and the status bar's memory
+    /// readout, which recomputes its whole line every frame.
+    ///
+    /// Each frame is audited on its own rather than summed, so a
+    /// grow-on-the-Nth-frame allocation — a `Vec` doubling, a map rehash —
+    /// fails on the frame that performed it.
+    #[test]
+    fn a_settled_frame_records_without_allocating() {
+        let mut fixture = DocFixture::probes(6);
+        let node = fixture.add(&preview_func(Default::default()));
+        let mut test = SessionHarness::new(fixture);
+        test.run_state
+            .previews
+            .ingest_preview(test.ui.ui(), node, opaque_image_value());
+        // A reading, so the memory readout renders its longest form rather
+        // than the absent-figure path.
+        test.process_memory = 3 * 1024 * 1024;
+        test.prime(SETTLE_FRAMES);
+
+        for frame in 0..AUDITED_FRAMES {
+            let allocations = crate::alloc_audit::allocations(|| {
+                let _ = test.frame();
+            });
+            assert_eq!(
+                allocations, 0,
+                "settled frame {frame} performed {allocations} heap operations"
+            );
+        }
+    }
+
     /// Opening a viewer by clicking a preview card lands its tab *inside* the
     /// record that read the click. The tab is drawn by the pass after that one
     /// — a click makes the frame record twice — and a viewer uploads its

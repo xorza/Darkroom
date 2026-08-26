@@ -65,25 +65,6 @@ explaining that it is the twin of the other, and each with its own test.
       with a fourth reduced form in `stacking/combine/rejection/mod.rs:98`
       (`sorted_mad`).
 
-## Allocation on the editor's per-frame record path
-
-- [ ] `darkroom/src/core/document/mod.rs:216` (`GraphView::paint_order`) builds
-      and sorts a fresh `Vec<(NodeId, ItemPlacement)>` on every call. Its
-      production caller is `gui/graph_ctx/mod.rs:190`
-      (`nodes_in_paint_order`), reached from the per-frame node loop at
-      `gui/pane/graph/node/mod.rs:112` — so the vector is sized to the whole
-      graph, allocated once per graph pane per frame, and built *before*
-      culling drops the off-screen nodes.
-- [ ] `palantir` exports `fmt!` (`palantir/src/lib.rs:188`) specifically as the
-      allocation-free way to author a dynamic label, documented as landing bytes
-      directly in the arena the widget would copy them into. `darkroom` uses it
-      zero times and builds record-path labels with `format!` / `to_string()`
-      instead — `gui/window/status_bar.rs:68,71` (two `String`s per frame for
-      the memory readout), `gui/pane/graph/node/port_row/mod.rs:543,583,601,603`,
-      `gui/pane/graph/node/preview_row.rs:127,148`,
-      `gui/pane/graph/node/value_editor.rs:277,329`,
-      `gui/pane/viewer/mod.rs:326`.
-
 ## Repository hygiene
 
 - [ ] `.tmp/` at the repo root holds build and run artifacts
