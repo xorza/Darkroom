@@ -37,5 +37,5 @@ tmp/
 log/
 **/*.log
 **/__pycache__/
-darkroom.preferences.toml
+darkroom.preferences.ron
 patch.diff

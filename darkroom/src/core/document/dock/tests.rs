@@ -548,7 +548,7 @@ fn nested_splits_stay_canonical() {
 }
 
 #[test]
-fn serde_roundtrips_through_json() {
+fn serde_roundtrips_through_ron() {
     let mut l = seeded();
     l.move_tab(
         viewer(1),
@@ -557,8 +557,8 @@ fn serde_roundtrips_through_json() {
             side: SplitSide::Bottom,
         },
     );
-    let bytes = common::serialize(&l, common::SerdeFormat::Json).unwrap();
-    let back: DockLayout = common::deserialize(&bytes, common::SerdeFormat::Json).unwrap();
+    let bytes = common::serialize(&l, common::SerdeFormat::Ron).unwrap();
+    let back: DockLayout = common::deserialize(&bytes, common::SerdeFormat::Ron).unwrap();
     assert_eq!(back, l);
 }
 

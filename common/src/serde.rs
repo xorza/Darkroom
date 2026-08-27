@@ -1,5 +1,7 @@
+use std::fmt;
 use std::io::{Read, Write};
 
+use ron::ser::PrettyConfig;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
@@ -14,49 +16,27 @@ struct Lz4Payload<'a> {
     uncompressed_size: usize,
 }
 
-fn normalize(mut input: String) -> String {
-    if !input.as_bytes().contains(&b'\r') {
-        if !input.ends_with('\n') {
-            input.push('\n');
-        }
-        return input;
+/// [`fmt::Write`] over a byte buffer.
+///
+/// RON's serializer writes text through [`fmt::Write`], and both arms that use
+/// it already own reusable byte scratch they must not trade for a fresh
+/// `String` per call. Writing never fails, so no error is lost by the bridge.
+#[derive(Debug)]
+struct Utf8Writer<'a>(&'a mut Vec<u8>);
+
+impl fmt::Write for Utf8Writer<'_> {
+    fn write_str(&mut self, s: &str) -> fmt::Result {
+        self.0.extend_from_slice(s.as_bytes());
+        Ok(())
     }
-
-    let bytes = input.as_bytes();
-    let mut output = String::with_capacity(input.len());
-    let mut last = 0;
-    let mut index = 0;
-
-    while index < bytes.len() {
-        if bytes[index] != b'\r' {
-            index += 1;
-            continue;
-        }
-
-        output.push_str(&input[last..index]);
-        if index + 1 < bytes.len() && bytes[index + 1] == b'\n' {
-            index += 1;
-        }
-        output.push('\n');
-        index += 1;
-        last = index;
-    }
-
-    output.push_str(&input[last..]);
-    if !output.ends_with('\n') {
-        output.push('\n');
-    }
-    output
 }
 
 #[derive(Debug, thiserror::Error)]
 pub enum SerializeError {
-    #[error("JSON serialization failed: {0}")]
-    Json(#[from] serde_json::Error),
+    #[error("RON serialization failed: {0}")]
+    Ron(#[from] ron::Error),
     #[error("Bitcode serialization failed: {0}")]
     Bitcode(#[from] bitcode::Error),
-    #[error("TOML serialization failed: {0}")]
-    Toml(#[from] toml::ser::Error),
     #[error("LZ4 compression failed: {0}")]
     Lz4(#[from] lz4_flex::block::CompressError),
     #[error("writing serialized bytes failed: {0}")]
@@ -67,12 +47,10 @@ pub enum SerializeError {
 
 #[derive(Debug, thiserror::Error)]
 pub enum DeserializeError {
-    #[error("JSON deserialization failed: {0}")]
-    Json(#[from] serde_json::Error),
+    #[error("RON deserialization failed: {0}")]
+    Ron(#[from] ron::de::SpannedError),
     #[error("Bitcode deserialization failed: {0}")]
     Bitcode(#[from] bitcode::Error),
-    #[error("TOML deserialization failed: {0}")]
-    Toml(#[from] toml::de::Error),
     #[error("LZ4 decompression failed: {0}")]
     Lz4(#[from] lz4_flex::block::DecompressError),
     #[error("reading serialized bytes failed: {0}")]
@@ -139,8 +117,8 @@ pub fn serialize<T: Serialize>(value: &T, format: SerdeFormat) -> Result<Vec<u8>
 
 /// `temp_buffer` is reusable scratch the caller threads across calls to avoid
 /// per-call allocation in hot paths (e.g. undo-step coalescing). Pass a
-/// long-lived `Vec` you reuse; it's cleared on entry. (Bitcode/JSON don't touch
-/// it on serialize; the LZ4 arm uses it.)
+/// long-lived `Vec` you reuse; it's cleared on entry. (Bitcode doesn't touch
+/// it on serialize; the RON and LZ4 arms use it.)
 pub fn serialize_into<T: Serialize, W: Write>(
     value: T,
     format: SerdeFormat,
@@ -150,17 +128,17 @@ pub fn serialize_into<T: Serialize, W: Write>(
     temp_buffer.clear();
 
     match format {
-        SerdeFormat::Json => serde_json::to_writer_pretty(writer, &value)?,
+        SerdeFormat::Ron => {
+            let config = PrettyConfig::default();
+            ron::ser::to_writer_pretty(Utf8Writer(&mut *temp_buffer), &value, config)?;
+            writer.write_all(temp_buffer)?;
+        }
         SerdeFormat::Bitcode => {
             let encoded = bitcode::serialize(&value)?;
             writer.write_all(&encoded)?;
         }
-        SerdeFormat::Toml => {
-            let s = normalize(toml::to_string(&value)?);
-            writer.write_all(s.as_bytes())?;
-        }
         SerdeFormat::Lz4 => {
-            serde_json::to_writer(&mut *temp_buffer, &value)?;
+            ron::ser::to_writer(Utf8Writer(&mut *temp_buffer), &value)?;
 
             let uncompressed_size = temp_buffer.len();
             let header_size = checked_lz4_uncompressed_size(uncompressed_size)?;
@@ -183,8 +161,7 @@ pub fn deserialize<T: DeserializeOwned>(
     format: SerdeFormat,
 ) -> Result<T, DeserializeError> {
     match format {
-        SerdeFormat::Json => Ok(serde_json::from_slice(serialized)?),
-        SerdeFormat::Toml => Ok(toml::from_slice(serialized)?),
+        SerdeFormat::Ron => Ok(ron::de::from_bytes(serialized)?),
         SerdeFormat::Bitcode => Ok(bitcode::deserialize(serialized)?),
         SerdeFormat::Lz4 => {
             let payload = lz4_payload(serialized)?;
@@ -192,7 +169,7 @@ pub fn deserialize<T: DeserializeOwned>(
             let decompressed_len =
                 lz4_flex::decompress_into(payload.compressed, &mut decompressed)?;
             check_lz4_decompressed_size(decompressed_len, payload.uncompressed_size)?;
-            Ok(serde_json::from_slice(&decompressed)?)
+            Ok(ron::de::from_bytes(&decompressed)?)
         }
     }
 }
@@ -207,11 +184,7 @@ pub fn deserialize_from<T: DeserializeOwned, R: Read>(
     temp_buffer.clear();
 
     match format {
-        SerdeFormat::Json => Ok(serde_json::from_reader(reader)?),
-        SerdeFormat::Toml => {
-            reader.read_to_end(temp_buffer)?;
-            Ok(toml::from_slice(temp_buffer.as_slice())?)
-        }
+        SerdeFormat::Ron => Ok(ron::de::from_reader(reader)?),
         SerdeFormat::Bitcode => {
             reader.read_to_end(temp_buffer)?;
             Ok(bitcode::deserialize(temp_buffer.as_slice())?)
@@ -229,7 +202,7 @@ pub fn deserialize_from<T: DeserializeOwned, R: Read>(
             let decompressed_len = lz4_flex::decompress_into(compressed, decompressed_part)?;
             check_lz4_decompressed_size(decompressed_len, uncompressed_size)?;
 
-            Ok(serde_json::from_slice(decompressed_part)?)
+            Ok(ron::de::from_bytes(decompressed_part)?)
         }
     }
 }
@@ -256,12 +229,8 @@ mod tests {
     #[test]
     fn backend_failures_keep_their_typed_variant() {
         assert!(matches!(
-            deserialize::<i64>(b"{", SerdeFormat::Json).unwrap_err(),
-            DeserializeError::Json(_)
-        ));
-        assert!(matches!(
-            deserialize::<i64>(b"x =", SerdeFormat::Toml).unwrap_err(),
-            DeserializeError::Toml(_)
+            deserialize::<i64>(b"(", SerdeFormat::Ron).unwrap_err(),
+            DeserializeError::Ron(_)
         ));
         assert!(matches!(
             deserialize::<i64>(&[], SerdeFormat::Bitcode).unwrap_err(),
@@ -282,7 +251,7 @@ mod tests {
     }
 
     #[test]
-    fn lz4_round_trips_json_payload() {
+    fn lz4_round_trips_ron_payload() {
         let value: Vec<i64> = vec![1, 2, 3, 1000, -42];
         let bytes = serialize(&value, SerdeFormat::Lz4).unwrap();
         let expected_size = u32::from_le_bytes(bytes[..4].try_into().unwrap()) as usize;
@@ -305,12 +274,7 @@ mod tests {
             count: 42,
         };
 
-        for format in [
-            SerdeFormat::Json,
-            SerdeFormat::Toml,
-            SerdeFormat::Bitcode,
-            SerdeFormat::Lz4,
-        ] {
+        for format in [SerdeFormat::Ron, SerdeFormat::Bitcode, SerdeFormat::Lz4] {
             let bytes = serialize(&value, format).unwrap();
             let direct: TestValue = deserialize(&bytes, format).unwrap();
             let streamed: TestValue =
@@ -320,8 +284,7 @@ mod tests {
 
             let mut with_trailing_data = bytes;
             with_trailing_data.extend_from_slice(match format {
-                SerdeFormat::Json => b"x",
-                SerdeFormat::Toml => b"\n=",
+                SerdeFormat::Ron => b"x",
                 SerdeFormat::Bitcode | SerdeFormat::Lz4 => &[0xff],
             });
             let direct: Result<TestValue, _> = deserialize(&with_trailing_data, format);
@@ -342,37 +305,6 @@ mod tests {
                     streamed.is_ok()
                 ),
             }
-        }
-    }
-
-    #[test]
-    fn toml_line_endings_and_final_newline_are_normalized() {
-        for (input, expected) in [
-            ("", "\n"),
-            ("\n", "\n"),
-            ("hello", "hello\n"),
-            ("a\nb\n", "a\nb\n"),
-            ("a\r\nb", "a\nb\n"),
-            ("a\rb\r", "a\nb\n"),
-            ("a\nb\r\nc\rd", "a\nb\nc\nd\n"),
-            ("\r\n\r\r\n", "\n\n\n"),
-            ("héllo 🎉\r\n你好", "héllo 🎉\n你好\n"),
-        ] {
-            assert_eq!(normalize(input.to_string()), expected, "input {input:?}");
-        }
-    }
-
-    #[test]
-    fn toml_normalization_reuses_allocations_without_cr() {
-        for input in ["already normalized\n", "needs newline"] {
-            let mut value = String::with_capacity(64);
-            value.push_str(input);
-            let pointer = value.as_ptr();
-            let capacity = value.capacity();
-
-            let normalized = normalize(value);
-            assert_eq!(normalized.as_ptr(), pointer);
-            assert_eq!(normalized.capacity(), capacity);
         }
     }
 
@@ -447,17 +379,17 @@ mod tests {
         let err = deserialize::<i64>(&input, SerdeFormat::Lz4).unwrap_err();
         assert!(matches!(err, DeserializeError::Lz4(_)));
 
-        let json = b"1";
-        let expected = json.len() + 1;
+        let payload = b"1";
+        let expected = payload.len() + 1;
         let mut input = (expected as u32).to_le_bytes().to_vec();
-        input.extend_from_slice(&lz4_flex::block::compress(json));
+        input.extend_from_slice(&lz4_flex::block::compress(payload));
         let err = deserialize::<i64>(&input, SerdeFormat::Lz4).unwrap_err();
         assert!(matches!(
             err,
             DeserializeError::Lz4DecompressedSizeMismatch {
                 actual,
                 expected: error_expected,
-            } if actual == json.len() && error_expected == expected
+            } if actual == payload.len() && error_expected == expected
         ));
     }
 }

@@ -5,7 +5,7 @@ use super::*;
 use crate::core::document::harness::DocFixture;
 
 #[test]
-fn document_round_trips_as_one_json_entry() {
+fn document_round_trips_as_one_ron_entry() {
     let dir = TempDir::new("darkroom-document-roundtrip");
     let path = dir.join("roundtrip.darkroom");
     // Populated, not `Document::default()`: an empty document has an empty
@@ -23,10 +23,10 @@ fn document_round_trips_as_one_json_entry() {
     assert_eq!(archive.len(), 1, "archives contain only the document entry");
     let mut entry = archive.by_name(DOCUMENT_ENTRY).unwrap();
     assert_eq!(entry.compression(), CompressionMethod::Deflated);
-    let mut json = String::new();
-    entry.read_to_string(&mut json).unwrap();
-    let decoded: Document = serde_json::from_str(&json).unwrap();
-    assert_eq!(decoded, document, "the archive payload is plain JSON");
+    let mut encoded = String::new();
+    entry.read_to_string(&mut encoded).unwrap();
+    let decoded: Document = ron::from_str(&encoded).unwrap();
+    assert_eq!(decoded, document, "the archive payload is plain RON");
 }
 
 #[test]
@@ -113,7 +113,7 @@ fn load_rejects_invalid_archives_and_missing_or_invalid_documents() {
     );
 
     let missing = dir.join("missing.darkroom");
-    write_test_archive(&missing, "other.json", b"{}");
+    write_test_archive(&missing, "other.ron", b"()");
     assert!(
         matches!(
             load(&missing).unwrap_err(),
@@ -129,7 +129,7 @@ fn load_rejects_invalid_archives_and_missing_or_invalid_documents() {
             load(&malformed).unwrap_err(),
             DocumentLoadError::DeserializeDocument { path, .. } if path == malformed
         ),
-        "malformed JSON reports its archive"
+        "malformed RON reports its archive"
     );
 
     let invalid = dir.join("invalid.darkroom");
@@ -138,8 +138,8 @@ fn load_rejects_invalid_archives_and_missing_or_invalid_documents() {
         InputPort::new(NodeId::unique(), 0),
         Binding::Const(ConstValue::Int(1)),
     );
-    let json = serde_json::to_vec(&document).unwrap();
-    write_test_archive(&invalid, DOCUMENT_ENTRY, &json);
+    let encoded = ron::ser::to_string(&document).unwrap();
+    write_test_archive(&invalid, DOCUMENT_ENTRY, encoded.as_bytes());
     assert!(
         matches!(
             load(&invalid).unwrap_err(),

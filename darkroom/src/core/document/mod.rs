@@ -440,6 +440,7 @@ pub(crate) mod harness;
 
 #[cfg(test)]
 mod tests {
+    use common::SerdeFormat;
     use scenarium::Node;
 
     use super::*;
@@ -498,7 +499,7 @@ mod tests {
     }
 
     #[test]
-    fn dock_layout_round_trips_as_json() {
+    fn dock_layout_round_trips_as_ron() {
         use crate::core::document::dock::dock_op::DockDrop;
         use crate::core::document::dock::split_side::SplitSide;
 
@@ -517,12 +518,12 @@ mod tests {
                 side: SplitSide::Right,
             },
         });
-        let bytes = serde_json::to_vec_pretty(&doc).expect("serialize with dock layout");
-        let back: Document = serde_json::from_slice(&bytes).expect("deserialize");
+        let bytes = common::serialize(&doc, SerdeFormat::Ron).expect("serialize with dock layout");
+        let back: Document = common::deserialize(&bytes, SerdeFormat::Ron).expect("deserialize");
         back.validate().expect("round-tripped document is valid");
         assert_eq!(
             back.layout, doc.layout,
-            "the split tree (groups, focus, ratio) round-trips through JSON"
+            "the split tree (groups, focus, ratio) round-trips through RON"
         );
     }
 

@@ -1,3 +1,5 @@
+use ron::value::RawValue;
+
 use crate::EventLambda;
 use crate::execution::compile::compiled_graph::ExecutionBinding;
 use crate::graph::Graph;
@@ -76,7 +78,7 @@ fn cache_mode_round_trips() {
         g.add("src", |n| n.pure().output(DataType::Int));
         g.cache("src", mode);
 
-        for format in [SerdeFormat::Json, SerdeFormat::Bitcode] {
+        for format in [SerdeFormat::Ron, SerdeFormat::Bitcode] {
             let bytes = serialize(&g.graph, format).unwrap();
             let back: Graph = deserialize(&bytes, format).unwrap();
             assert_eq!(
@@ -549,8 +551,8 @@ fn wiring_snapshot_round_trips_through_serde_and_restore() -> TestResult {
     let mut mismatched = detached.clone();
     mismatched.node_id = NodeId::unique();
     for invalid in [nil_id, mismatched] {
-        let serialized = serialize(&invalid, SerdeFormat::Json)?;
-        let decoded_invalid: DetachedNode = deserialize(&serialized, SerdeFormat::Json)?;
+        let serialized = serialize(&invalid, SerdeFormat::Ron)?;
+        let decoded_invalid: DetachedNode = deserialize(&serialized, SerdeFormat::Ron)?;
         let detached_graph = g.graph.clone_verbatim();
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             g.graph.attach_node(decoded_invalid);
@@ -653,11 +655,22 @@ fn loading_rejects_a_corrupt_graph() {
 
     // Bindings decode from a sequence into a map, so a repeated input port is
     // caught during decode rather than by validation after it.
-    let mut duplicate_bindings = serde_json::to_value(TestGraph::sample().graph).unwrap();
-    let bindings = duplicate_bindings["bindings"].as_array_mut().unwrap();
-    bindings.push(bindings[0].clone());
-    let bytes = serde_json::to_vec(&duplicate_bindings).unwrap();
-    let error = deserialize::<Graph>(&bytes, SerdeFormat::Json)
+    // `RawValue` keeps every field's exact text, so the duplicated entry is
+    // the only thing authored here. The mirror has to name every field, so a
+    // new one on `Graph` fails this decode — which points here, not at the
+    // assertion below.
+    #[derive(serde::Serialize, serde::Deserialize)]
+    struct WireGraph {
+        nodes: Box<RawValue>,
+        bindings: Vec<Box<RawValue>>,
+        subscriptions: Box<RawValue>,
+    }
+
+    let encoded = ron::ser::to_string(&TestGraph::sample().graph).unwrap();
+    let mut wire: WireGraph = ron::from_str(&encoded).expect("the wire shape still matches");
+    wire.bindings.push(wire.bindings[0].clone());
+    let bytes = ron::ser::to_string(&wire).unwrap().into_bytes();
+    let error = deserialize::<Graph>(&bytes, SerdeFormat::Ron)
         .expect_err("a duplicate input port cannot decode into the binding map");
     assert!(
         error

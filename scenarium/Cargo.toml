@@ -26,5 +26,5 @@ internals = []
 
 [dev-dependencies]
 common = { workspace = true, features = ["internals"] }
-serde_json = { workspace = true }
+ron = { workspace = true }
 tokio = { workspace = true, features = ["test-util"] }

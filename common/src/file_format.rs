@@ -18,9 +18,8 @@ fn get_file_extension(filename: &str) -> Option<&str> {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SerdeFormat {
-    Json,
+    Ron,
     Bitcode,
-    Toml,
     Lz4,
 }
 
@@ -28,14 +27,12 @@ impl SerdeFormat {
     pub fn from_file_name(file_name: &str) -> FileFormatResult<Self> {
         let ext = get_file_extension(file_name).ok_or(FileExtensionError::MissingFileExtension)?;
 
-        if ext.eq_ignore_ascii_case("json") {
-            Ok(Self::Json)
+        if ext.eq_ignore_ascii_case("ron") {
+            Ok(Self::Ron)
         } else if ext.eq_ignore_ascii_case("bin") {
             Ok(Self::Bitcode)
         } else if ext.eq_ignore_ascii_case("lz4") {
             Ok(Self::Lz4)
-        } else if ext.eq_ignore_ascii_case("toml") {
-            Ok(Self::Toml)
         } else {
             Err(FileExtensionError::UnsupportedFileExtension(
                 file_name.to_string(),
@@ -48,11 +45,9 @@ impl SerdeFormat {
 /// crates' test targets via `common = { …, features = ["internals"] }`.
 #[cfg(any(test, feature = "internals"))]
 impl SerdeFormat {
-    /// All formats a round-trip test should sweep. Omits `Toml` deliberately:
-    /// TOML can't serialize a top-level sequence, which several round-tripped
-    /// types are.
+    /// Every format, for a round-trip sweep.
     pub fn all_formats_for_testing() -> [Self; 3] {
-        [Self::Json, Self::Bitcode, Self::Lz4]
+        [Self::Ron, Self::Bitcode, Self::Lz4]
     }
 }
 
@@ -62,8 +57,8 @@ mod tests {
 
     #[test]
     fn test_get_file_extension_normal() {
-        assert_eq!(get_file_extension("file.json"), Some("json"));
-        assert_eq!(get_file_extension("path/to/file.toml"), Some("toml"));
+        assert_eq!(get_file_extension("file.ron"), Some("ron"));
+        assert_eq!(get_file_extension("path/to/file.bin"), Some("bin"));
     }
 
     #[test]
@@ -75,8 +70,8 @@ mod tests {
     #[test]
     fn test_from_file_name_all_formats() {
         assert_eq!(
-            SerdeFormat::from_file_name("a.json").unwrap(),
-            SerdeFormat::Json
+            SerdeFormat::from_file_name("a.ron").unwrap(),
+            SerdeFormat::Ron
         );
         assert_eq!(
             SerdeFormat::from_file_name("a.bin").unwrap(),
@@ -86,17 +81,13 @@ mod tests {
             SerdeFormat::from_file_name("a.lz4").unwrap(),
             SerdeFormat::Lz4
         );
-        assert_eq!(
-            SerdeFormat::from_file_name("a.toml").unwrap(),
-            SerdeFormat::Toml
-        );
     }
 
     #[test]
     fn test_from_file_name_case_insensitive() {
         assert_eq!(
-            SerdeFormat::from_file_name("a.JSON").unwrap(),
-            SerdeFormat::Json
+            SerdeFormat::from_file_name("a.RON").unwrap(),
+            SerdeFormat::Ron
         );
         assert_eq!(
             SerdeFormat::from_file_name("a.BIN").unwrap(),
@@ -136,8 +127,8 @@ mod tests {
     #[test]
     fn test_from_file_name_with_path() {
         assert_eq!(
-            SerdeFormat::from_file_name("/some/path/config.toml").unwrap(),
-            SerdeFormat::Toml
+            SerdeFormat::from_file_name("/some/path/config.ron").unwrap(),
+            SerdeFormat::Ron
         );
     }
 }

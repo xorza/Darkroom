@@ -32,7 +32,7 @@ fn duplicate_ports_fail_in_every_binding_format() {
         (port, Binding::Const(2i64.into())),
     ]);
 
-    for format in [SerdeFormat::Json, SerdeFormat::Bitcode] {
+    for format in [SerdeFormat::Ron, SerdeFormat::Bitcode] {
         let bytes = serialize(&bindings, format).unwrap();
         let error = deserialize::<CheckedBindings>(&bytes, format)
             .unwrap_err()
@@ -57,17 +57,17 @@ impl<'de> Deserialize<'de> for CheckedNodes {
 /// A document naming one id twice is refused, rather than loading as a
 /// graph one node smaller.
 ///
-/// Written as raw JSON because that is the only way the collision can be
+/// Written as raw RON because that is the only way the collision can be
 /// *expressed*: every in-memory form of a node table has already collapsed
-/// it. `serde_json` hands both entries to the visitor rather than deduping
-/// while parsing, which is what leaves the check something to find.
+/// it. RON hands both entries to the visitor rather than deduping while
+/// parsing, which is what leaves the check something to find.
 #[test]
 fn a_repeated_node_id_is_refused_rather_than_collapsed() {
     let node_id = NodeId::unique();
-    let key = serde_json::to_string(&node_id).expect("a node id is a json string");
-    let first = serde_json::to_string(&Node::new(NodeKind::Func(FuncId::unique())))
+    let key = ron::ser::to_string(&node_id).expect("a node id is a string");
+    let first = ron::ser::to_string(&Node::new(NodeKind::Func(FuncId::unique())))
         .expect("a node serializes");
-    let second = serde_json::to_string(&Node::new(NodeKind::Func(FuncId::unique())))
+    let second = ron::ser::to_string(&Node::new(NodeKind::Func(FuncId::unique())))
         .expect("a node serializes");
 
     // The derived `HashMap` decode keeps the last entry and reports success;
@@ -75,10 +75,10 @@ fn a_repeated_node_id_is_refused_rather_than_collapsed() {
     // than a coincidence of the fixture.
     let table = format!("{{{key}:{first},{key}:{second}}}");
     let kept: HashMap<NodeId, Node> =
-        serde_json::from_str(&table).expect("the derived decode absorbs the collision");
+        ron::from_str(&table).expect("the derived decode absorbs the collision");
     assert_eq!(kept.len(), 1, "the derived decode loses one of the two");
 
-    let error = serde_json::from_str::<CheckedNodes>(&table)
+    let error = ron::from_str::<CheckedNodes>(&table)
         .expect_err("the checked decode refuses the collision");
     assert!(
         error.to_string().contains("duplicate node id"),
@@ -87,8 +87,8 @@ fn a_repeated_node_id_is_refused_rather_than_collapsed() {
 
     // And through `Graph` itself, where the field attribute has to be wired
     // up for any of this to apply.
-    let document = format!(r#"{{"nodes":{table},"bindings":[],"subscriptions":[]}}"#);
-    let error = serde_json::from_str::<Graph>(&document)
+    let document = format!("(nodes:{table},bindings:[],subscriptions:[])");
+    let error = ron::from_str::<Graph>(&document)
         .expect_err("a graph holding a repeated node id does not load");
     assert!(
         error.to_string().contains("duplicate node id"),
@@ -97,7 +97,7 @@ fn a_repeated_node_id_is_refused_rather_than_collapsed() {
 
     // One entry per id still loads, so the check refuses collisions rather
     // than maps.
-    let document = format!(r#"{{"nodes":{{{key}:{first}}},"bindings":[],"subscriptions":[]}}"#);
-    let graph: Graph = serde_json::from_str(&document).expect("a well-formed document loads");
+    let document = format!("(nodes:{{{key}:{first}}},bindings:[],subscriptions:[])");
+    let graph: Graph = ron::from_str(&document).expect("a well-formed document loads");
     assert_eq!(graph.len(), 1);
 }

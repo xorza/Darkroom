@@ -18,9 +18,8 @@ common-derive = { path = "common-derive", optional = true }
 glam = { workspace = true }
 thiserror = { workspace = true }
 serde = { workspace = true }
-serde_json = { workspace = true }
+ron = { workspace = true }
 bitcode = { workspace = true }
-toml = { workspace = true }
 lz4_flex = { workspace = true }
 tokio = { workspace = true }
 
