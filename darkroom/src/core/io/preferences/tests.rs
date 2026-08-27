@@ -7,7 +7,6 @@ use palantir::ImageFilter;
 use crate::core::io::preferences::{
     MlModelPreferences, Preferences, ViewerBackground, ViewerPreferences, WindowState,
 };
-use crate::core::theme_pref::ThemeChoice;
 
 /// The file sits in the OS's configuration directory — not beside the
 /// executable, which every packaged install puts somewhere unwritable, and not
@@ -40,7 +39,6 @@ fn roundtrip(cfg: &Preferences) -> Preferences {
 #[test]
 fn populated_preferences_roundtrips() {
     let cfg = Preferences {
-        theme: ThemeChoice::Light,
         document_path: Some(PathBuf::from("/tmp/graph.darkroom")),
         // Non-defaults (defaults are `true`) so the round-trip is meaningful.
         load_last_document: false,
@@ -64,7 +62,6 @@ fn populated_preferences_roundtrips() {
     let text = std::str::from_utf8(&bytes).expect("preferences TOML is UTF-8");
     assert!(text.contains("mag_filter = \"linear\""));
     let back = roundtrip(&cfg);
-    assert_eq!(back.theme, ThemeChoice::Light);
     assert_eq!(
         back.document_path,
         Some(PathBuf::from("/tmp/graph.darkroom"))
@@ -93,11 +90,9 @@ fn populated_preferences_roundtrips() {
 #[test]
 fn default_preferences_roundtrips() {
     // TOML omits the `None` document path, so the default preferences
-    // serializes to a minimal document; `#[serde(default)]` must
-    // restore `theme` as `System` and the path as `None` rather than
-    // erroring on the missing keys.
+    // serializes to a minimal document; `#[serde(default)]` must restore
+    // the path as `None` rather than erroring on the missing key.
     let back = roundtrip(&Preferences::default());
-    assert_eq!(back.theme, ThemeChoice::System);
     assert_eq!(back.document_path, None);
     // Defaults to reopening the last document (historical behavior).
     assert!(back.load_last_document);
@@ -121,10 +116,10 @@ fn default_preferences_roundtrips() {
 
 #[test]
 fn partial_preferences_fill_defaults() {
-    let toml = b"theme = \"dark\"\n";
+    let toml = b"confirm_unsaved_changes = false\n";
     let cfg: Preferences =
         deserialize(toml, SerdeFormat::Toml).expect("partial preferences deserializes");
-    assert_eq!(cfg.theme, ThemeChoice::Dark);
+    assert!(!cfg.confirm_unsaved_changes);
     assert_eq!(cfg.document_path, None);
     // A preferences file predating this key still defaults to reopening the document.
     assert!(cfg.load_last_document);

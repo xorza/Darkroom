@@ -1,57 +1,65 @@
 //! [`CardTheme`]: the elevated rounded surface node bodies, the inspector
 //! panel and the dock tabs all read from.
 
-use palantir::Color;
-use palantir::Shadow;
+use palantir::{Color, Shadow};
 
-use crate::core::theme_pref::ThemePreset;
-use crate::gui::theme::palette_struct::palette_struct;
-use crate::gui::theme::swatches::{dark, light};
+use crate::gui::theme::palette::Palette;
 
-palette_struct! {
-    /// An elevated rounded surface: node bodies, the inspector panel, the
-    /// dock's tabs. Named for the shape rather than the node, because all
-    /// three read from it — a header band derives its own tighter radius from
-    /// [`Self::inner_radius`] rather than carrying fields of its own.
-    #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-    pub(crate) struct CardTheme;
+/// An elevated rounded surface: node bodies, the inspector panel, the
+/// dock's tabs. Named for the shape rather than the node, because all
+/// three read from it — a header band derives its own tighter radius from
+/// [`Self::inner_radius`] rather than carrying fields of its own.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub(crate) struct CardTheme {
     /// Body fill.
-    fill: Color => NODE_FILL,
-    /// Resting outline. Transparent in the dark preset, where the ambient
-    /// shadow carries the edge and the stroke slot is reserved for the
-    /// selection / breaker / missing colours.
-    border: Color => NODE_BORDER,
+    pub(crate) fill: Color,
+    /// Resting outline. Transparent: the ambient shadow carries the edge,
+    /// and the stroke slot is reserved for the selection / breaker /
+    /// missing colours.
+    pub(crate) border: Color,
     /// Header band fill, a step brighter than `fill` so the band reads
     /// against the body. Doubles as the chrome lift behind a hovered strip
     /// glyph.
-    header_fill: Color => HEADER_FILL,
+    pub(crate) header_fill: Color,
     /// Ambient elevation shadow cast when no status glow claims the slot —
-    /// one swatch so every elevated surface casts the same kind of shadow.
-    ambient_shadow: Color => NODE_AMBIENT_SHADOW,
-    ;
+    /// one colour so every elevated surface casts the same kind of shadow.
+    pub(crate) ambient_shadow: Color,
     /// Resting outline width. The drawn stroke is always
     /// [`Self::border_width_total`] — twice this — so selecting never resizes
     /// a card.
-    border_width: f32 = 1.0,
+    pub(crate) border_width: f32,
     /// How round a card is. A header derives its own from
     /// [`Self::inner_radius`].
-    corner_radius: f32 = 6.0,
+    pub(crate) corner_radius: f32,
     /// Minimum content size for a node body. Caps how tightly a node with
     /// very short port labels can shrink horizontally so the header stays
     /// legible at any zoom.
-    min_width: f32 = 160.0,
-    min_height: f32 = 10.0,
+    pub(crate) min_width: f32,
+    pub(crate) min_height: f32,
 }
 
-/// Result of [`Theme::card_border`](crate::gui::theme::Theme::card_border): the resolved outline color. The width is
-/// [`CardTheme::border_width_total`] — constant, so selecting never resizes a
-/// card.
+/// Result of [`Theme::card_border`](crate::gui::theme::Theme::card_border): the
+/// resolved outline color. The width is [`CardTheme::border_width_total`] —
+/// constant, so selecting never resizes a card.
 #[derive(Clone, Debug)]
 pub(crate) struct CardBorder {
     pub(crate) color: Color,
 }
 
 impl CardTheme {
+    pub(super) fn from_palette(p: &Palette) -> Self {
+        Self {
+            fill: p.node_fill,
+            border: p.node_border,
+            header_fill: p.header_fill,
+            ambient_shadow: p.node_ambient_shadow,
+            border_width: 1.0,
+            corner_radius: 6.0,
+            min_width: 160.0,
+            min_height: 10.0,
+        }
+    }
+
     /// The stroke width a card actually draws — always the *selection* width
     /// (`border_width * 2`) regardless of selection state, so selecting one
     /// never resizes it (only its colour changes). Named so the doubling

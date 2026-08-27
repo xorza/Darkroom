@@ -2,23 +2,12 @@
 
 use palantir::{Brush, ButtonTheme, DragValueTheme, TextEditTheme};
 
-// Layout dimensions are palette-independent — dark and light pull the same
-// numbers. Each one's value lives on `Theme::build` (its field carries the doc
-// comment); only the few read by more than one builder earn a name here. Font
-// sizes are palette-independent too, and live on `TypeScale::DEFAULT`.
 const VALUE_EDITOR_WIDTH: f32 = 100.0;
 /// Upper bound on the value column: editors fill the column up to here, then a
 /// long value (a wide enum/preset dropdown, a long path) ellipsizes instead of
 /// stretching the node out. Read by both `Theme::build` and
 /// [`ConstValueEditorTheme::from_palette`], which sizes the editor itself.
 const VALUE_EDITOR_MAX_WIDTH: f32 = 240.0;
-
-// The two preset swatch rosters live in `swatches.rs`, generated from
-// `assets/ayu-graphite-base.toml` by `tools/build_palettes.py` alongside the
-// two semantic palette TOMLs in `assets/`. Any builder (`Theme::dark`,
-// `ConstValueEditorTheme::dark`, future per-widget helpers) reaches a swatch by
-// name instead of inlining a hex literal, and the app reads the palette rather
-// than a transcription of it: to restyle, edit the base and rerun the
 
 /// Per-widget theme bundle for the inline static-value editor on a
 /// `Binding::Const` input port. Owns the `DragValue` look (scrub chip —

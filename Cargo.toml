@@ -33,7 +33,7 @@ libraw-rs-sys = { version = "0.0.4" }
 
 serde = { version = "1.0", features = ["derive", "rc"] }
 serde_json = { version = "1.0" }
-uuid = { version = "1.25", features = ["v4", "v5", "serde"] }
+uuid = { version = "1.26", features = ["v4", "v5", "serde"] }
 thiserror = { version = "2.0" }
 bytemuck = { version = "1.25", features = ["derive", "extern_crate_alloc"] }
 glam = { version = "0.33", features = ["serde"] }
@@ -49,6 +49,7 @@ tracing = { version = "0.1" }
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 rayon = { version = "1.12" }
 toml = { version = "1.1" }
+ron = { version = "0.12" }
 notify = { version = "8" }
 hashbrown = { version = "0.17", features = ["serde"] }
 quote = { version = "1.0" }
@@ -70,7 +71,6 @@ windows-sys = { version = "0.61" }
 objc2 = { version = "0.6" }
 objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSResponder"] }
 objc2-foundation = { version = "0.3", features = ["NSArray", "NSString", "NSURL"] }
-dark-light = { version = "3.0" }
 rfd = { version = "0.17" }
 zip = { version = "8.6", default-features = false, features = ["deflate"] }
 async-trait = { version = "0.1" }

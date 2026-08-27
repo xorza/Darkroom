@@ -1,6 +1,6 @@
 //! The Preferences tab's content: a settings form for [`Preferences`]
-//! (theme preference, startup + exit toggles, the lens ML model paths),
-//! laid out as a centered width-capped column of labeled sections.
+//! (the startup and exit toggles, the lens ML model paths), laid out as a
+//! centered width-capped column of labeled sections.
 //! Rendered by `main_window` when the active tab is `TabRef::Preferences`.
 //!
 //! It edits the borrowed [`Preferences`] **in place** and reports a single
@@ -13,12 +13,11 @@
 use std::path::{Path, PathBuf};
 
 use palantir::{
-    Align, Background, Button, Checkbox, Color, Configure, FontWeight, HAlign, Panel, RadioButton,
-    Sense, Sizing, Spacing, Stroke, Text, TextEdit, TextStyle, Tooltip, Ui, VAlign, WidgetId,
+    Align, Background, Button, Checkbox, Color, Configure, FontWeight, HAlign, Panel, Sense,
+    Sizing, Spacing, Stroke, Text, TextEdit, TextStyle, Tooltip, Ui, VAlign, WidgetId,
 };
 
 use crate::core::io::preferences::Preferences;
-use crate::core::theme_pref::ThemeChoice;
 use crate::gui::app::commands::AppCommand;
 use crate::gui::app::commands::prefs::{MlModelKind, PrefsCommand};
 use crate::gui::requests::Requests;
@@ -53,30 +52,6 @@ pub(crate) fn show(ui: &mut Ui, theme: &Theme, prefs: &mut Preferences, out: &mu
                 .max_size((COLUMN_WIDTH, f32::INFINITY))
                 .gap(SECTIONS_GAP)
                 .show(ui, |ui| {
-                    // Appearance — the theme preference. The radios write
-                    // `prefs.theme` directly; a move re-resolves the palette.
-                    let before = prefs.theme;
-                    section(ui, theme, "Appearance", |ui| {
-                        Panel::hstack()
-                            .id_salt("preferences_theme_row")
-                            .size((Sizing::HUG, Sizing::HUG))
-                            .gap(16.0)
-                            .show(ui, |ui| {
-                                for (choice, label) in [
-                                    (ThemeChoice::System, "System"),
-                                    (ThemeChoice::Dark, "Dark"),
-                                    (ThemeChoice::Light, "Light"),
-                                ] {
-                                    RadioButton::new(&mut prefs.theme, choice)
-                                        .label(label)
-                                        .show(ui);
-                                }
-                            });
-                    });
-                    if prefs.theme != before {
-                        out.push_app(AppCommand::Prefs(PrefsCommand::Changed));
-                    }
-
                     // Behavior — the startup + exit toggles.
                     section(ui, theme, "Behavior", |ui| {
                         if Checkbox::new(&mut prefs.load_last_document)

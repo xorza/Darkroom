@@ -4,15 +4,14 @@ use common::{SerdeFormat, deserialize, file_utils, serialize};
 use glam::{IVec2, UVec2};
 use palantir::ImageFilter;
 
-use crate::core::theme_pref::ThemeChoice;
 use crate::platform;
 
 /// Preferences file name, resolved inside the platform's configuration
 /// directory. TOML so it's hand-editable and matches the theme on-disk format.
 const PREFERENCES_FILE: &str = "darkroom.preferences.toml";
 
-/// Persisted session state: the theme preference to restore, the
-/// document open when the app last closed, and editor behavior.
+/// Persisted session state: the document open when the app last closed,
+/// and editor behavior.
 /// Reloaded on startup so darkroom reopens where the user left off.
 /// Missing / unreadable preferences fall back to `default()`.
 /// `#[serde(default)]` so a partial preferences file (TOML omits absent keys)
@@ -20,10 +19,6 @@ const PREFERENCES_FILE: &str = "darkroom.preferences.toml";
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 pub(crate) struct Preferences {
-    /// Theme preference to restore (`system` / `dark` / `light`).
-    /// Written by the Theme menu; the default (`system`) follows the
-    /// OS light/dark setting.
-    pub(crate) theme: ThemeChoice,
     /// Document to reopen on launch. `None` starts with an empty doc.
     pub(crate) document_path: Option<PathBuf>,
     /// Reopen `document_path` on launch. When `false`, launch starts with
@@ -50,8 +45,7 @@ pub(crate) struct Preferences {
 }
 
 /// Backdrop behind (and around) a viewer's image, as offered by the
-/// viewer toolbar's swatch row. Frontend-agnostic persisted choice,
-/// like [`ThemeChoice`].
+/// viewer toolbar's swatch row. A frontend-agnostic persisted choice.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub(crate) enum ViewerBackground {
@@ -103,7 +97,6 @@ pub(crate) struct WindowState {
 impl Default for Preferences {
     fn default() -> Self {
         Self {
-            theme: ThemeChoice::default(),
             document_path: None,
             load_last_document: true,
             confirm_unsaved_changes: true,

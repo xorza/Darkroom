@@ -2,10 +2,6 @@
 
 use palantir::{Background, Spacing, TextEditTheme, TextStyle};
 
-// Layout dimensions are palette-independent — dark and light pull the same
-// numbers. Each one's value lives on `Theme::build` (its field carries the doc
-// comment); only the few read by more than one builder earn a name here. Font
-// sizes are palette-independent too, and live on `TypeScale::DEFAULT`.
 /// Per-widget theme bundle for the inline-rename label⇄field widget
 /// (node title, boundary-port name, graph tab). The `text_edit`
 /// look is stripped to the bare editor surface (no padding/margin, no

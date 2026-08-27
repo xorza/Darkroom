@@ -2,30 +2,39 @@
 
 use palantir::Color;
 
-use crate::core::theme_pref::ThemePreset;
-use crate::gui::theme::palette_struct::palette_struct;
-use crate::gui::theme::swatches::{dark, light};
+use crate::gui::theme::palette::Palette;
 
-palette_struct! {
-    /// The app's semantic feedback palette: what an outcome *means*, not
-    /// which surface reports it.
-    ///
-    /// Node execution is the largest consumer — `gui::pane::graph::node`
-    /// maps an `ExecStatus` onto these — but it is not the only one, which is
-    /// why these are not named for it: `error` is also the invalid-path
-    /// outline in preferences, the status-bar message and `LogLevel::Error`;
-    /// `warning` is `LogLevel::Warn` and an unconnected required port;
-    /// `success` is the toolbar's run glyph.
-    #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-    pub(crate) struct StatusColors;
-    /// It worked / it ran — palette `success` (green).
-    success: Color => STATUS_SUCCESS,
-    /// It was reused from cache — palette `accent` (cyan).
-    info: Color => STATUS_INFO,
-    /// It is happening right now — palette `constant` (purple).
-    busy: Color => STATUS_BUSY,
-    /// It is incomplete but not broken — palette `syn_keyword` (orange).
-    warning: Color => STATUS_WARNING,
-    /// It failed — palette `error` (red).
-    error: Color => STATUS_ERROR,
+/// The app's semantic feedback palette: what an outcome *means*, not
+/// which surface reports it.
+///
+/// Node execution is the largest consumer — `gui::pane::graph::node`
+/// maps an `ExecStatus` onto these — but it is not the only one, which is
+/// why these are not named for it. `error` is also the invalid-path
+/// outline in preferences, the status-bar message and `LogLevel::Error`.
+/// `warning` is `LogLevel::Warn` and an unconnected required port.
+/// `success` is the toolbar's run glyph.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub(crate) struct StatusColors {
+    /// It worked / it ran — green.
+    pub(crate) success: Color,
+    /// It was reused from cache — the accent cyan.
+    pub(crate) info: Color,
+    /// It is happening right now — teal.
+    pub(crate) busy: Color,
+    /// It is incomplete but not broken — orange.
+    pub(crate) warning: Color,
+    /// It failed — red.
+    pub(crate) error: Color,
+}
+
+impl StatusColors {
+    pub(super) fn from_palette(p: &Palette) -> Self {
+        Self {
+            success: p.status_success,
+            info: p.status_info,
+            busy: p.status_busy,
+            warning: p.status_warning,
+            error: p.status_error,
+        }
+    }
 }

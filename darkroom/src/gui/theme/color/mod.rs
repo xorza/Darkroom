@@ -1,6 +1,6 @@
-//! Color math shared across the GUI's *derived* swatches. The theme names the
+//! Color math shared across the GUI's *derived* colours. The theme names the
 //! resting colors; the places that blend one — a wire endpoint pulled toward
-//! the canvas at rest, a port circle pulled toward white or black on hover —
+//! the canvas at rest, a port circle pulled toward white on hover —
 //! go through here, so two emphases of the same swatch can't drift apart.
 
 use palantir::Color;
