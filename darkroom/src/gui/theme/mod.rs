@@ -1,44 +1,37 @@
 //! [`Theme`]: darkroom's visual palette and layout dimensions, plus the
 //! per-widget rosters hanging off it.
 //!
-//! Each roster owns a file and is declared through
-//! [`palette_struct!`](palette_struct::palette_struct), which mints its `DARK`
-//! and `LIGHT` presets alongside it. The palantir-side half of a preset lives
-//! in [`palantir_bridge`].
+//! Every colour comes from [`Palette`], read out of the generated
+//! `assets/ayu-graphite.ron`. Each per-widget roster owns a file and fills
+//! itself from that palette through its own `from_palette`. The palantir-side
+//! half lives in [`palantir_bridge`].
 
 pub(crate) mod canvas_theme;
 pub(crate) mod card_theme;
+pub(crate) mod chrome_colors;
 pub(crate) mod color;
 pub(crate) mod const_value_editor_theme;
-pub(crate) mod hover_color;
 pub(crate) mod inline_rename_theme;
 pub(crate) mod palantir_bridge;
-pub(crate) mod palette_colors;
-pub(crate) mod palette_struct;
+pub(crate) mod palette;
 pub(crate) mod port_theme;
 pub(crate) mod status_colors;
-mod swatches;
 pub(crate) mod type_colors;
 pub(crate) mod type_scale;
 
 use palantir::{ButtonTheme, FontWeight, TextStyle};
 
-// Layout dimensions are palette-independent — dark and light pull the same
-// numbers. Each one's value lives on `Theme::build` (its field carries the doc
-// comment); only the few read by more than one builder earn a name here. Font
-// sizes are palette-independent too, and live on `TypeScale::DEFAULT`.
-use crate::core::theme_pref::ThemePreset;
 use crate::gui::theme::canvas_theme::CanvasTheme;
 use crate::gui::theme::card_theme::{CardBorder, CardTheme};
+use crate::gui::theme::chrome_colors::ChromeColors;
 use crate::gui::theme::const_value_editor_theme::ConstValueEditorTheme;
 use crate::gui::theme::inline_rename_theme::InlineRenameTheme;
 use crate::gui::theme::palantir_bridge::{
-    PALANTIR_DARK, PALANTIR_LIGHT, menu_button_for, palantir_theme_for,
+    menu_button_for, palantir_palette_for, palantir_theme_for,
 };
-use crate::gui::theme::palette_colors::PaletteColors;
+use crate::gui::theme::palette::Palette;
 use crate::gui::theme::port_theme::PortTheme;
 use crate::gui::theme::status_colors::StatusColors;
-use crate::gui::theme::swatches::{dark, light};
 use crate::gui::theme::type_colors::TypeColors;
 use crate::gui::theme::type_scale::TypeScale;
 
@@ -57,19 +50,15 @@ use crate::gui::theme::type_scale::TypeScale;
 /// override palantir's defaults.
 ///
 /// Serializable so the whole bundle (palantir palette + darkroom
-/// layout + colors) round-trips through serde for the Theme → Load /
-/// Export menu.
+/// layout + colors) can be written and read back as one theme file. No
+/// UI reaches that yet — the app assembles [`Theme::default`] every
+/// launch — so the derives exist for the format, not for a caller.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub(crate) struct Theme {
-    // Scalar fields (`preset` + the few loose `f32`s) come first; the tables
-    // (the per-widget groups, `colors`, `palantir_theme`) follow. TOML
-    // serialization requires every scalar value to precede any table at the
-    // same level — otherwise the serializer errors with `ValueAfterTable`.
-    /// Which built-in preset assembled this theme. Round-trips
-    /// through TOML so a user-loaded file restores the same toggle
-    /// behaviour the original `Theme::dark` / `light` had.
-    pub(crate) preset: ThemePreset,
-
+    // The loose `f32`s come first; the tables (the per-widget rosters,
+    // `colors`, `palantir_theme`) follow. TOML serialization requires every
+    // scalar value to precede any table at the same level — otherwise the
+    // serializer errors with `ValueAfterTable`.
     /// Stroke width of every mark drawn on the canvas at wire scale: the
     /// wires themselves, the in-flight drag preview, the subscription pin's
     /// leader, and the breaker scribble that cuts them — one width so the
@@ -93,15 +82,15 @@ pub(crate) struct Theme {
     /// tabs (`[card]`).
     pub(crate) card: CardTheme,
 
-    /// A node's ports: swatches, label ink, column geometry (`[ports]`).
+    /// A node's ports: circles, label ink, column geometry (`[ports]`).
     pub(crate) ports: PortTheme,
 
     /// The semantic feedback palette — success / info / busy / warning /
     /// error (`[status]`).
     pub(crate) status: StatusColors,
 
-    /// The chrome colours belonging to no single widget (`[colors]`).
-    pub(crate) colors: PaletteColors,
+    /// The colours belonging to no single widget (`[colors]`).
+    pub(crate) colors: ChromeColors,
 
     /// Data-type → wire/port hue roster (see [`TypeColors`]),
     /// serialized as the `[type_colors]` sub-table.
@@ -187,77 +176,55 @@ impl Theme {
         CardBorder { color }
     }
 
-    /// Assemble the full theme for a built-in preset. One place so
-    /// startup and the Theme menu share the preset → palette mapping.
-    pub(crate) fn from_preset(preset: ThemePreset) -> Self {
-        match preset {
-            ThemePreset::Dark => Self::dark(),
-            ThemePreset::Light => Self::light(),
-        }
-    }
-
-    /// Ayu Mirage High Contrast palette — the built-in dark look.
-    pub(crate) fn dark() -> Self {
-        Self::build(ThemePreset::Dark, dark::TYPE_COLORS, &PALANTIR_DARK)
-    }
-
-    /// Ayu Light palette — the built-in light look (Zed's "Ayu Light"
-    /// variant ported into darkroom's structure).
-    pub(crate) fn light() -> Self {
-        Self::build(ThemePreset::Light, light::TYPE_COLORS, &PALANTIR_LIGHT)
-    }
-
-    /// Shared assembly path — the darkroom peer of
-    /// `palantir::Theme::from_palette`: dimensions are
-    /// palette-independent; `colors` / `type_colors` (moved in, not
-    /// copied) drive darkroom chrome, and every sub-recipe (the
-    /// palantir widget theme, the static-value editor, inline rename)
-    /// cascades from `p` here rather than being hand-assembled per
-    /// preset. `preset` tags which built-in produced this theme so the
-    /// toggle command doesn't have to guess.
-    fn build(preset: ThemePreset, type_colors: TypeColors, p: &palantir::Palette) -> Self {
-        let colors = PaletteColors::for_preset(preset);
-        let chrome_fill = colors.chrome_fill;
+    /// Assemble the full theme from `p` — the darkroom peer of
+    /// `palantir::Theme::from_palette`. Dimensions are palette-independent;
+    /// every colour and every sub-recipe (the palantir widget theme, the
+    /// static-value editor, inline rename) cascades from `p` rather than
+    /// being hand-assembled, so a palette edit reaches the whole app.
+    fn build(p: &Palette) -> Self {
+        let colors = ChromeColors::from_palette(p);
+        // The palantir half is derived here rather than stored on `Palette`:
+        // it is a projection of the same roles, and a second copy of them
+        // could drift from the one the darkroom rosters read.
+        let pal = palantir_palette_for(p);
         // Built before the struct literal because the title variant
         // derives from the palantir theme's ambient text style — the
         // same style an unstyled rename would have inherited anyway,
         // so bolding it is the only difference between the two slots.
-        let palantir_theme = palantir_theme_for(p, chrome_fill, &TypeScale::DEFAULT);
-        let inline_rename = InlineRenameTheme::from_palette(p);
+        let palantir_theme = palantir_theme_for(&pal, colors.chrome_fill, &TypeScale::DEFAULT);
+        let inline_rename = InlineRenameTheme::from_palette(&pal);
         let inline_rename_title = inline_rename.clone().with_text(TextStyle {
             weight: FontWeight::Bold,
             ..palantir_theme.text.clone()
         });
         Self {
-            preset,
             // The three measurements that belong to no widget group; the
             // rest are authored beside their colours in the groups below.
             stroke_width: 2.0,
             floating_widget_gap: 16.0,
             new_node_popup_max_height: 400.0,
             text: TypeScale::DEFAULT,
-            canvas: CanvasTheme::for_preset(preset),
-            card: CardTheme::for_preset(preset),
-            ports: PortTheme::for_preset(preset),
-            status: StatusColors::for_preset(preset),
+            canvas: CanvasTheme::from_palette(p),
+            card: CardTheme::from_palette(p),
+            ports: PortTheme::from_palette(p),
+            status: StatusColors::from_palette(p),
             colors,
-            type_colors,
-            const_value_editor: ConstValueEditorTheme::from_palette(p),
-            const_value_editor_revealed: ConstValueEditorTheme::revealed_from_palette(p),
+            type_colors: p.type_colors.clone(),
+            const_value_editor: ConstValueEditorTheme::from_palette(&pal),
+            const_value_editor_revealed: ConstValueEditorTheme::revealed_from_palette(&pal),
             inline_rename,
             inline_rename_title,
-            menu_button: menu_button_for(p, &palantir_theme.text, &TypeScale::DEFAULT),
+            menu_button: menu_button_for(&pal, &palantir_theme.text, &TypeScale::DEFAULT),
             palantir_theme,
         }
     }
 }
 
 impl Default for Theme {
-    /// Defaults to [`Theme::dark`] — the historical look. The asset
-    /// `assets/ayu-graphite.toml` is regenerated from this by
-    /// `tests::ayu_graphite_asset_in_sync`.
+    /// Ayu Graphite — the one built-in look, read from
+    /// `assets/ayu-graphite.ron`.
     fn default() -> Self {
-        Self::dark()
+        Self::build(&Palette::load())
     }
 }
 
@@ -266,63 +233,25 @@ mod tests {
     use super::*;
     use common::SerdeFormat;
 
-    use crate::core::theme_pref::ThemeChoice;
-    use crate::gui::theme::hover_color::HoverColor;
     use palantir::Color;
     use static_assertions::assert_not_impl_any;
 
     assert_not_impl_any!(Theme: Copy);
-    assert_not_impl_any!(PaletteColors: Copy);
+    assert_not_impl_any!(ChromeColors: Copy);
     assert_not_impl_any!(CanvasTheme: Copy);
     assert_not_impl_any!(CardTheme: Copy);
     assert_not_impl_any!(PortTheme: Copy);
     assert_not_impl_any!(StatusColors: Copy);
     assert_not_impl_any!(TypeColors: Copy);
-    assert_not_impl_any!(HoverColor: Copy);
     assert_not_impl_any!(CardBorder: Copy);
     assert_not_impl_any!(ConstValueEditorTheme: Copy);
     assert_not_impl_any!(InlineRenameTheme: Copy);
 
-    /// The checked-in `assets/ayu-graphite.toml` is a generated artifact — a
-    /// reference theme users can copy, in the Theme → Load/Export format — so
-    /// it has to track [`Theme::default`]. This *reads* it: any change to the
-    /// consts (or to palantir's defaults) fails here rather than silently
-    /// rewriting a tracked file mid-suite, which is a check that can never fail.
-    #[test]
-    fn ayu_graphite_asset_in_sync() {
-        let expected = serialized_default_theme();
-        let on_disk = std::fs::read(ayu_graphite_path()).expect("the asset is checked in");
-        assert!(
-            on_disk == expected,
-            "assets/ayu-graphite.toml no longer matches Theme::default — regenerate it with \
-             `cargo test -p darkroom --all-features regenerate_ayu_graphite_asset -- --ignored`",
-        );
-    }
-
-    /// Rewrite the asset from the current defaults. Ignored by default: it is
-    /// the generator behind [`ayu_graphite_asset_in_sync`], not a check, and a
-    /// suite that regenerates its own fixtures cannot detect a drift.
-    #[test]
-    #[ignore = "regenerates a tracked asset; run explicitly after changing the theme consts"]
-    fn regenerate_ayu_graphite_asset() {
-        std::fs::write(ayu_graphite_path(), serialized_default_theme()).expect("write toml asset");
-    }
-
-    fn serialized_default_theme() -> Vec<u8> {
-        common::serialize(&Theme::default(), SerdeFormat::Toml).expect("serialize theme")
-    }
-
-    /// Anchored at the manifest rather than the working directory, so the two
-    /// halves above agree regardless of where the runner was invoked.
-    fn ayu_graphite_path() -> std::path::PathBuf {
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/ayu-graphite.toml")
-    }
-
     /// The whole bundle — darkroom's own fields *and* the nested
-    /// palantir palette — must survive a TOML round-trip; that's the
-    /// on-disk format the Theme → Load / Export menu and the preferences
-    /// rely on. Exercises the awkward case too: the tooltip's
-    /// infinite max-size axis (handled by `Size`'s custom serde).
+    /// palantir palette — must survive a TOML round-trip. That is the
+    /// on-disk theme format, and this is the only thing holding it: no
+    /// UI writes or reads one. Exercises the awkward case too — the
+    /// tooltip's infinite max-size axis, handled by `Size`'s custom serde.
     #[test]
     fn theme_roundtrips_through_toml() {
         let mut theme = Theme::default();
@@ -344,25 +273,30 @@ mod tests {
         assert_eq!(back.palantir_theme.tooltip.max_size.w, 280.0);
     }
 
-    /// Pin which swatch reaches which field, plus the non-trivial palantir
-    /// tweak, so a regression in `Theme::build`'s wiring, in
+    /// Pin which palette role reaches which field, plus the non-trivial
+    /// palantir tweak, so a regression in `Theme::build`'s wiring, in
     /// `palantir_theme_for`, or in `menu_button_for` fails loudly. Against
-    /// the generated consts
-    /// rather than hex literals: the values are the palette's to choose, but
-    /// landing `HEADER_FILL` in `canvas.bg` is still a bug.
+    /// the loaded palette rather than hex literals: the values are the
+    /// palette's to choose, but landing `header_fill` in `canvas.bg` is
+    /// still a bug.
     #[test]
-    fn default_palette_and_menu_tweak() {
+    fn default_wiring_and_menu_tweak() {
+        let p = Palette::load();
         let theme = Theme::default();
-        assert_eq!(theme.canvas.bg, dark::CANVAS_BG);
-        assert_eq!(theme.ports.input.rest, dark::INPUT_PORT.rest);
-        assert_eq!(theme.ports.output.rest, dark::OUTPUT_PORT.rest);
-        assert_eq!(theme.colors.badge_cache, dark::BADGE_CACHE);
-        assert_eq!(theme.colors.badge_impure, dark::BADGE_IMPURE);
-        // Each of those is a distinct role, so a roster that collapsed them
-        // onto one swatch would pass every assertion above.
-        assert_ne!(theme.canvas.bg, theme.ports.input.rest);
-        assert_ne!(theme.ports.input.rest, theme.ports.output.rest);
+        assert_eq!(theme.canvas.bg, p.canvas_bg);
+        assert_eq!(theme.card.header_fill, p.header_fill);
+        assert_eq!(theme.ports.input, p.input_port);
+        assert_eq!(theme.ports.output, p.output_port);
+        assert_eq!(theme.colors.badge_cache, p.badge_cache);
+        assert_eq!(theme.colors.badge_impure, p.badge_impure);
+        assert_eq!(theme.status.busy, p.status_busy);
+        // Each of those is a distinct role, so a palette that collapsed them
+        // onto one colour would pass every assertion above.
+        assert_ne!(theme.canvas.bg, theme.card.header_fill);
+        assert_ne!(theme.ports.input, theme.ports.output);
         assert_ne!(theme.colors.badge_cache, theme.colors.badge_impure);
+        // The palantir half is the same palette, not palantir's own default.
+        assert_eq!(theme.palantir_theme.window_clear, p.canvas_bg);
         assert_eq!(theme.card.min_width, 160.0);
         assert!(theme.palantir_theme.tooltip.max_size.h.is_infinite());
         // The menu-bar font was shrunk from palantir's default to ours.
@@ -375,41 +309,48 @@ mod tests {
         assert_eq!(menu_text.font_size_px, theme.text.body);
     }
 
-    /// `from_preset` round-trips the tag both ways — the assembled theme
-    /// carries the preset it was asked for and swaps the full palette,
-    /// not just the tag. The builders stamp the matching preset too.
+    /// The six chrome surfaces stack in one view — a graph, the bar around
+    /// it, an inactive tab, a node, a hovered control, a pressed one — so
+    /// each must be lighter than the one under it. The palette's generator
+    /// checks this before it writes the file; this is the half that would
+    /// catch a hand-edited asset, and it is the one rule a table of colours
+    /// cannot state about itself.
     #[test]
-    fn from_preset_maps_both_presets() {
-        let dark = Theme::from_preset(ThemePreset::Dark);
-        let light = Theme::from_preset(ThemePreset::Light);
-        assert_eq!(dark.preset, ThemePreset::Dark);
-        assert_eq!(light.preset, ThemePreset::Light);
-        assert_eq!(Theme::dark().preset, ThemePreset::Dark);
-        assert_eq!(Theme::light().preset, ThemePreset::Light);
-        // Full palette swapped, not just the tag.
-        assert_eq!(dark.canvas.bg, dark::CANVAS_BG);
-        assert_eq!(light.canvas.bg, light::CANVAS_BG);
-        assert_ne!(dark.canvas.bg, light.canvas.bg);
+    fn chrome_surfaces_stack_darkest_first() {
+        let p = Palette::load();
+        let ladder = [
+            ("canvas_bg", p.canvas_bg),
+            ("chrome_fill", p.chrome_fill),
+            ("tab_inactive", p.tab_inactive),
+            ("node_fill", p.node_fill),
+            ("elem_hover", p.elem_hover),
+            ("header_fill", p.header_fill),
+        ];
+        for pair in ladder.windows(2) {
+            let [(under, lower), (over, upper)] = pair else {
+                unreachable!("windows(2) yields pairs")
+            };
+            assert!(
+                luminance(*lower) < luminance(*upper),
+                "{under} is not darker than {over} — a surface on it disappears",
+            );
+        }
     }
 
-    /// System detection must always resolve to one of the two built-in
-    /// presets (its `Unspecified`/error arms fold to `Dark`), so the
-    /// startup fallback can hand the result straight to `from_preset`.
-    #[test]
-    fn from_system_resolves_to_built_in_preset() {
-        let preset = ThemePreset::from_system();
-        assert!(matches!(preset, ThemePreset::Dark | ThemePreset::Light));
-    }
-
-    /// `ThemeChoice` resolution: the explicit choices map straight to
-    /// their preset, and `System` defers to OS detection — which itself
-    /// always lands on a concrete preset.
-    #[test]
-    fn theme_choice_resolves_to_preset() {
-        assert_eq!(ThemeChoice::Dark.resolve(), ThemePreset::Dark);
-        assert_eq!(ThemeChoice::Light.resolve(), ThemePreset::Light);
-        assert_eq!(ThemeChoice::System.resolve(), ThemePreset::from_system());
-        // System is the default preference — fresh launches follow the OS.
-        assert_eq!(ThemeChoice::default(), ThemeChoice::System);
+    /// Relative luminance, the WCAG definition. Local to the test: nothing
+    /// darkroom draws needs it, and the palette it checks is generated by a
+    /// tool that computes the same number.
+    fn luminance(c: Color) -> f32 {
+        let channel = |v: f32| {
+            if v <= 0.04045 {
+                v / 12.92
+            } else {
+                ((v + 0.055) / 1.055).powf(2.4)
+            }
+        };
+        let srgb = c.to_srgb_u8();
+        0.2126 * channel(f32::from(srgb.r) / 255.0)
+            + 0.7152 * channel(f32::from(srgb.g) / 255.0)
+            + 0.0722 * channel(f32::from(srgb.b) / 255.0)
     }
 }

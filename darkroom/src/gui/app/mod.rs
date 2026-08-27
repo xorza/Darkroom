@@ -145,7 +145,7 @@ impl App {
         let mut status = StatusLog::default();
         let open = OpenDocument::open_at_launch(document, &mut preferences, &mut status);
         runtime.set_document_cache(open.path.as_deref());
-        let mut app = Self {
+        let app = Self {
             session: Session::new(open),
             runtime,
             run_state: RunState::default(),
@@ -157,11 +157,7 @@ impl App {
             process_memory: ProcessMemory::new(),
             requests: Requests::default(),
         };
-        // Resolve the saved preference: `System` (the default) follows
-        // the OS light/dark setting, re-queried each launch.
-        app.theme = Theme::from_preset(app.preferences.theme.resolve());
-        // Resolved theme (default, or whatever the preferences restored)
-        // onto the Ui so palantir widgets paint correctly frame 1.
+        // Onto the Ui before frame 1, so palantir's own widgets paint right.
         ui.set_theme(app.theme.palantir_theme.clone());
         // ui.debug_overlay.damage_rect = true;
         app
@@ -444,9 +440,7 @@ impl App {
     /// Re-derive everything that depends on [`Preferences`] and persist it.
     ///
     /// [`Preferences`]: crate::core::io::preferences::Preferences
-    fn apply_preferences(&mut self, ui: &mut Ui) {
-        self.theme = Theme::from_preset(self.preferences.theme.resolve());
-        ui.set_theme(self.theme.palantir_theme.clone());
+    fn apply_preferences(&mut self) {
         self.runtime.configure_ml_model_defaults(&self.preferences);
         self.save_preferences();
     }
@@ -618,7 +612,7 @@ impl palantir::App for App {
         // while a command runs, which is what lets `AppCommand::apply` take all
         // of `self`.
         while let Some(command) = self.requests.pop_app() {
-            needs_relayout |= command.apply(self, ui);
+            needs_relayout |= command.apply(self);
         }
         // The app's one relayout request, past both tiers: everything that can
         // strand `CanvasGeometry`'s cross-frame caches has reported by here,

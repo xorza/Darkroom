@@ -1,11 +1,7 @@
 //! [`TypeScale`]: the theme's type sizes.
 
-// Layout dimensions are palette-independent — dark and light pull the same
-// numbers. Each one's value lives on `Theme::build` (its field carries the doc
-// comment); only the few read by more than one builder earn a name here. Font
-// sizes are palette-independent too, and live on `TypeScale::DEFAULT`.
 /// Font sizes by tier in the visual hierarchy — the typographic half of a
-/// [`Theme`](crate::gui::theme::Theme), beside the [`PaletteColors`](crate::gui::theme::palette_colors::PaletteColors) palette half and the layout
+/// [`Theme`](crate::gui::theme::Theme), beside the [`ChromeColors`](crate::gui::theme::chrome_colors::ChromeColors) palette half and the layout
 /// dimensions.
 ///
 /// Named by *prominence*, never by the surface that happens to use a tier, so
@@ -14,10 +10,9 @@
 /// app draws is here: a literal at a call site is a missing tier, not a local
 /// decision.
 ///
-/// Palette-independent like the dimensions — dark and light pull the same
-/// numbers, so unlike [`PaletteColors`](crate::gui::theme::palette_colors::PaletteColors) there is no preset pair to keep in
-/// step and no macro generating one; a single [`Self::DEFAULT`] is the whole
-/// story.
+/// Palette-independent, so unlike
+/// [`ChromeColors`](crate::gui::theme::chrome_colors::ChromeColors) there is
+/// no `from_palette` here: a single [`Self::DEFAULT`] is the whole story.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub(crate) struct TypeScale {
     /// The loudest tier: a floating panel's own heading — the inspector's node

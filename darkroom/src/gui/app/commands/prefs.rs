@@ -2,8 +2,6 @@
 //! `set_confirm_unsaved` is the one preference `App` also writes
 //! from outside the tab (the exit dialog's "Don't ask again").
 
-use palantir::Ui;
-
 use crate::gui::app::App;
 
 /// Preferences UI actions. Applied by [`PrefsCommand::apply`] after authoring.
@@ -25,9 +23,9 @@ pub(crate) enum MlModelKind {
 }
 
 impl PrefsCommand {
-    pub(super) fn apply(self, app: &mut App, ui: &mut Ui) {
+    pub(super) fn apply(self, app: &mut App) {
         match self {
-            PrefsCommand::Changed => app.apply_preferences(ui),
+            PrefsCommand::Changed => app.apply_preferences(),
             PrefsCommand::PickMlModel(kind) => app.pick_ml_model(kind),
         }
     }

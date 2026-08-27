@@ -11,8 +11,6 @@
 //! dialogs), so the methods it calls belong to `App` rather than any one
 //! owner; only the dispatch splits by concern.
 
-use palantir::Ui;
-
 use crate::gui::app::App;
 use crate::gui::relayout::Relayout;
 
@@ -58,7 +56,7 @@ impl AppCommand {
     /// but it is reported rather than requested here so that `App::frame`
     /// stays the one place in the app that asks for a relayout.
     #[must_use]
-    pub(super) fn apply(self, app: &mut App, ui: &mut Ui) -> Relayout {
+    pub(super) fn apply(self, app: &mut App) -> Relayout {
         match self {
             AppCommand::File(c) => {
                 c.apply(app);
@@ -69,7 +67,7 @@ impl AppCommand {
                 Relayout::NotNeeded
             }
             AppCommand::Prefs(c) => {
-                c.apply(app, ui);
+                c.apply(app);
                 Relayout::NotNeeded
             }
             AppCommand::Edit(c) => c.apply(app),

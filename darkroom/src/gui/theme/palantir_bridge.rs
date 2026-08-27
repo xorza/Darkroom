@@ -1,47 +1,31 @@
-//! The palantir-side half of a preset: the two [`palantir::Palette`]
-//! rosters and the [`palantir::Theme`] each one builds.
+//! The palantir-side half of the theme: darkroom's palette projected onto
+//! [`palantir::Palette`], and the [`palantir::Theme`] that builds.
 
 use palantir::{ButtonTheme, Color, TextStyle, WidgetLook};
 
-// Layout dimensions are palette-independent — dark and light pull the same
-// numbers. Each one's value lives on `Theme::build` (its field carries the doc
-// comment); only the few read by more than one builder earn a name here. Font
-// sizes are palette-independent too, and live on `TypeScale::DEFAULT`.
-use crate::gui::theme::swatches::{dark, light};
+use crate::gui::theme::palette::Palette;
 use crate::gui::theme::type_scale::TypeScale;
 
-/// The [`palantir::Palette`] each preset hands to
-/// [`palantir::Theme::from_palette`], filled from the preset's swatches
-/// so swapping dark ⇄ light recolours every widget palantir paints, not
-/// just darkroom-owned chrome. Notes on the mapping:
-/// - `terminal_bg` wants the editor / terminal surface — the same
-///   swatch as the graph canvas in both themes.
-/// - `elem` and our `NODE_FILL` are the same swatch by design: nodes
-///   and palantir surfaces sit on the same surface tier.
-pub(super) const PALANTIR_DARK: palantir::Palette = palantir::Palette {
-    text: dark::PAL_TEXT,
-    text_muted: dark::TEXT_MUTED,
-    text_disabled: dark::PAL_TEXT_DISABLED,
-    terminal_bg: dark::CANVAS_BG,
-    elem: dark::NODE_FILL,
-    elem_hover: dark::PAL_ELEM_HOVER,
-    elem_active: dark::PAL_ELEM_ACTIVE,
-    border_focused: dark::PAL_BORDER_FOCUSED,
-    accent: dark::SELECTION_RECT,
-};
-
-/// Light peer of [`PALANTIR_DARK`] — same mapping over `light::*`.
-pub(super) const PALANTIR_LIGHT: palantir::Palette = palantir::Palette {
-    text: light::PAL_TEXT,
-    text_muted: light::TEXT_MUTED,
-    text_disabled: light::PAL_TEXT_DISABLED,
-    terminal_bg: light::CANVAS_BG,
-    elem: light::NODE_FILL,
-    elem_hover: light::PAL_ELEM_HOVER,
-    elem_active: light::PAL_ELEM_ACTIVE,
-    border_focused: light::PAL_BORDER_FOCUSED,
-    accent: light::SELECTION_RECT,
-};
+/// darkroom's roles as the [`palantir::Palette`] that
+/// [`palantir::Theme::from_palette`] wants, so every widget palantir paints
+/// reads the same palette as darkroom-owned chrome. Two notes on the
+/// mapping:
+/// - `terminal_bg` wants the editor / terminal surface — the graph canvas.
+/// - `elem` and `node_fill` are one colour by design: nodes and palantir's
+///   own surfaces sit on the same tier.
+pub(super) fn palantir_palette_for(p: &Palette) -> palantir::Palette {
+    palantir::Palette {
+        text: p.text,
+        text_muted: p.text_muted,
+        text_disabled: p.text_disabled,
+        terminal_bg: p.canvas_bg,
+        elem: p.node_fill,
+        elem_hover: p.elem_hover,
+        elem_active: p.elem_active,
+        border_focused: p.border_focused,
+        accent: p.selection_rect,
+    }
+}
 
 /// Palantir sub-theme for darkroom: assemble every widget recipe from
 /// the palette via [`palantir::Theme::from_palette`], then apply the

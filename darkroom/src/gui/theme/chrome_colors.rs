@@ -1,54 +1,66 @@
-//! [`PaletteColors`]: the chrome colours belonging to no single widget —
-//! the surround, the shared inks, and the badge roster.
+//! [`ChromeColors`]: the colours belonging to no single widget — the
+//! surround, the shared inks, and the badge roster.
 
 use palantir::Color;
 
-use crate::core::theme_pref::ThemePreset;
-use crate::gui::theme::palette_struct::palette_struct;
-use crate::gui::theme::swatches::{dark, light};
+use crate::gui::theme::palette::Palette;
 
-palette_struct! {
-    /// Chrome colours that belong to no single widget — the surround, the
-    /// shared inks, and the badge roster. Serialized as the theme's
-    /// `[colors]` table.
-    #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-    pub(crate) struct PaletteColors;
+/// Chrome colours that belong to no single widget — the surround, the
+/// shared inks, and the badge roster. Serialized as the theme's
+/// `[colors]` table.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub(crate) struct ChromeColors {
     /// The selection accent: the rubber-band rectangle (translucent fill +
     /// near-opaque 1px border, both derived from this) *and* the selected-
     /// node border, so "in the selection" reads as one color from sweep to
     /// committed halo (palette accent).
-    selection_rect: Color => SELECTION_RECT,
-    connection_broken: Color => CONNECTION_BROKEN,
-    breaker_stroke: Color => BREAKER_STROKE,
-    /// Muted secondary foreground (palette `text_muted`, `#aaaaa8`). The
+    pub(crate) selection_rect: Color,
+    pub(crate) connection_broken: Color,
+    pub(crate) breaker_stroke: Color,
+    /// Muted secondary foreground (palette `text_muted`). The
     /// de-emphasized accent shared across chrome: inactive/disabled header
     /// chips, the pinned-inspector outline, and active-tab text — visible
     /// without competing with the bright accent (`badge_graph`) or
     /// full-strength text.
-    text_muted: Color => TEXT_MUTED,
+    pub(crate) text_muted: Color,
     /// Top-chrome fill behind the menu bar + tab strip. A notch darker
     /// than the card surface, sitting between the graph (`canvas.bg`)
     /// and the nodes, so the chrome recedes and the active tab (which
     /// uses `canvas.bg`) reads as continuous with the graph below it.
-    chrome_fill: Color => CHROME_FILL,
+    pub(crate) chrome_fill: Color,
     /// Inactive tab-strip chip. A notch above `chrome_fill` toward the card
     /// surface, so an unselected tab reads as a resting chip rather than a
     /// bare label; the active tab uses `canvas.bg` + a `selection_rect`
     /// accent top-line instead.
-    tab_inactive: Color => TAB_INACTIVE,
+    pub(crate) tab_inactive: Color,
     /// Accent cyan: the inspect chip, the pinned-inspector outline, and the
     /// VRAM half of a memory readout.
-    badge_graph: Color => BADGE_GRAPH,
+    pub(crate) badge_graph: Color,
     /// Sink chip — error red.
-    badge_sink: Color => BADGE_SINK,
+    pub(crate) badge_sink: Color,
     /// RuntimeCache (persist-to-disk) chip — warning yellow.
-    badge_cache: Color => BADGE_CACHE,
-    /// Impure marker — `constant` purple. A read-only descriptor (the node
-    /// recomputes every run and is never cached), not an interactive toggle.
-    badge_impure: Color => BADGE_IMPURE,
+    pub(crate) badge_cache: Color,
+    /// Impure marker. A read-only descriptor (the node recomputes every run
+    /// and is never cached), not an interactive toggle.
+    pub(crate) badge_impure: Color,
 }
 
-impl PaletteColors {
+impl ChromeColors {
+    pub(super) fn from_palette(p: &Palette) -> Self {
+        Self {
+            selection_rect: p.selection_rect,
+            connection_broken: p.connection_broken,
+            breaker_stroke: p.breaker_stroke,
+            text_muted: p.text_muted,
+            chrome_fill: p.chrome_fill,
+            tab_inactive: p.tab_inactive,
+            badge_graph: p.badge_graph,
+            badge_sink: p.badge_sink,
+            badge_cache: p.badge_cache,
+            badge_impure: p.badge_impure,
+        }
+    }
+
     /// Rubber-band interior wash — `selection_rect` at 12%, pairing
     /// with [`Self::selection_border`] (the derivation the
     /// `selection_rect` doc promises lives in one place).

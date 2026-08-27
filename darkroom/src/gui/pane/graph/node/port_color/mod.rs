@@ -1,7 +1,7 @@
 //! Maps a port's [`DataType`] to the color its circle (and the wires
 //! touching it) paint with, so a graph reads by type at a glance.
 //!
-//! Built-in scalar types get fixed hues per palette, and so does the lens
+//! Built-in scalar types get a fixed hue each, and so does the lens
 //! image type — the dominant payload on a darkroom canvas earns a deliberate
 //! color, not a hash pick. Remaining `Custom` / `Enum` types are keyed by
 //! their `type_id` onto a small ramp, so distinct custom types land on
@@ -11,48 +11,45 @@
 //!
 //! The hue rosters themselves live on the theme
 //! ([`TypeColors`], serialized like every
-//! other swatch); this module owns only the type → slot mapping and the
+//! other colour); this module owns only the type → slot mapping and the
 //! hover emphasis.
 
 use palantir::Color;
 use scenarium::DataType;
 
 use crate::core::document::PortKind;
-use crate::core::theme_pref::ThemePreset;
 use crate::gui::theme::Theme;
 use crate::gui::theme::color::toward;
 use crate::gui::theme::type_colors::TypeColors;
 
-/// Color for a port of type `ty` on the given side. `hovered` lightens
-/// (dark theme) or darkens (light theme) the typed hue for emphasis;
-/// untyped (`Any`) ports defer to the theme's positional port colors,
-/// which carry their own hover variants.
+/// Color for a port of type `ty` on the given side. Untyped (`Any`) ports
+/// defer to the theme's positional port colors; `hovered` lifts either one
+/// through [`emphasize`].
 pub(crate) fn port_color(theme: &Theme, ty: &DataType, kind: PortKind, hovered: bool) -> Color {
-    if matches!(ty, DataType::Any) {
-        return fallback(theme, kind, hovered);
-    }
-    let base = type_hue(&theme.type_colors, ty);
-    if hovered {
-        emphasize(base, theme.preset)
+    let base = if matches!(ty, DataType::Any) {
+        fallback(theme, kind)
     } else {
-        base
-    }
+        type_hue(&theme.type_colors, ty)
+    };
+    lit(base, hovered)
 }
 
 /// Color for an event emitter glyph, subscription pin, or event wire.
-/// Events carry no data type, so they use the theme's neutral event swatch
-/// (not a type hue); `hovered` lifts it like the positional port colors.
+/// Events carry no data type, so they use the theme's event colour rather
+/// than a type hue; `hovered` lifts it like every other port.
 pub(crate) fn event_color(theme: &Theme, hovered: bool) -> Color {
-    theme.ports.event.pick(hovered)
+    lit(theme.ports.event, hovered)
 }
 
-/// Positional color for an untyped port — the theme's input/output port
-/// swatch, hover variant included.
-fn fallback(theme: &Theme, kind: PortKind, hovered: bool) -> Color {
+fn fallback(theme: &Theme, kind: PortKind) -> Color {
     match kind {
-        PortKind::Input => theme.ports.input.pick(hovered),
-        PortKind::Output => theme.ports.output.pick(hovered),
+        PortKind::Input => theme.ports.input,
+        PortKind::Output => theme.ports.output,
     }
+}
+
+fn lit(c: Color, hovered: bool) -> Color {
+    if hovered { emphasize(c) } else { c }
 }
 
 /// The base hue for a non-`Any` type under the theme's roster.
@@ -78,14 +75,15 @@ fn ramp_pick(ramp: &[Color], key: u128) -> Color {
     ramp[(key % ramp.len() as u128) as usize]
 }
 
-/// Hover emphasis: blend toward white on the dark palette, toward black
-/// on the light one, so the port lifts off its canvas either way.
-fn emphasize(c: Color, preset: ThemePreset) -> Color {
+/// Hover emphasis: blend toward white, so the port lifts off the canvas.
+///
+/// Every port lifts this way, typed or not. The palette cannot carry a
+/// lifted colour beside each resting one — most port colours already sit on
+/// its brightest tint, which has nothing above it — so the lift is computed
+/// here instead.
+fn emphasize(c: Color) -> Color {
     const T: f32 = 0.28;
-    match preset {
-        ThemePreset::Dark => toward(c, Color::WHITE, T),
-        ThemePreset::Light => toward(c, Color::BLACK, T),
-    }
+    toward(c, Color::WHITE, T)
 }
 
 #[cfg(test)]

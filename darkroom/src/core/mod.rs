@@ -10,6 +10,5 @@ pub(crate) mod preview;
 pub(crate) mod runtime_host;
 mod runtime_library;
 pub(crate) mod status;
-pub(crate) mod theme_pref;
 pub(crate) mod wake;
 mod worker;
