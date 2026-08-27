@@ -11,20 +11,15 @@ fn assert_close(actual: f32, expected: f32) {
 
 /// The single color a solid brush carries, or `None` for a gradient.
 fn solid(brush: &CurveBrush) -> Option<Color> {
-    match brush {
-        CurveBrush::Solid(c) => Some(*c),
-        _ => None,
-    }
+    brush.as_brush().as_solid()
 }
 
 /// A linear brush's `(t = 0, t = 1)` stop colors, or `None` for a solid.
 /// Stops are stored quantized, so the comparisons below go through
 /// [`ColorU8`] rather than the float color.
 fn gradient(brush: &CurveBrush) -> Option<(ColorU8, ColorU8)> {
-    match brush {
-        CurveBrush::Linear(g) => Some((g.stops[0].color, g.stops[g.stops.len() - 1].color)),
-        _ => None,
-    }
+    let g = brush.as_brush().as_linear()?;
+    Some((g.stops[0].color, g.stops[g.stops.len() - 1].color))
 }
 
 #[test]

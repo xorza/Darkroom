@@ -11,3 +11,5 @@ mesh once registrations
 image buffer and lens image interleaved/planar formats
 
 quickbench - runonce cli arg
+
+palantir prelude
