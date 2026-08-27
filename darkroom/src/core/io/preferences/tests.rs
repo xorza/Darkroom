@@ -18,7 +18,7 @@ fn the_preferences_file_resolves_inside_the_platform_config_dir() {
 
     assert_eq!(
         path.file_name(),
-        Some(std::ffi::OsStr::new("darkroom.preferences.toml"))
+        Some(std::ffi::OsStr::new("darkroom.preferences.ron"))
     );
     assert_eq!(path.parent(), Some(config_dir.as_path()));
     // A real absolute location, not the empty prefix the no-home fallback
@@ -32,8 +32,8 @@ fn the_preferences_file_resolves_inside_the_platform_config_dir() {
 }
 
 fn roundtrip(cfg: &Preferences) -> Preferences {
-    let bytes = serialize(cfg, SerdeFormat::Toml).expect("preferences TOML serializes");
-    deserialize(&bytes, SerdeFormat::Toml).expect("preferences TOML round-trips")
+    let bytes = serialize(cfg, SerdeFormat::Ron).expect("preferences RON serializes");
+    deserialize(&bytes, SerdeFormat::Ron).expect("preferences RON round-trips")
 }
 
 #[test]
@@ -58,9 +58,9 @@ fn populated_preferences_roundtrips() {
             star_removal: PathBuf::from("/models/s.onnx"),
         },
     };
-    let bytes = serialize(&cfg, SerdeFormat::Toml).expect("preferences TOML serializes");
-    let text = std::str::from_utf8(&bytes).expect("preferences TOML is UTF-8");
-    assert!(text.contains("mag_filter = \"linear\""));
+    let bytes = serialize(&cfg, SerdeFormat::Ron).expect("preferences RON serializes");
+    let text = std::str::from_utf8(&bytes).expect("preferences RON is UTF-8");
+    assert!(text.contains("mag_filter: linear"));
     let back = roundtrip(&cfg);
     assert_eq!(
         back.document_path,
@@ -89,9 +89,8 @@ fn populated_preferences_roundtrips() {
 
 #[test]
 fn default_preferences_roundtrips() {
-    // TOML omits the `None` document path, so the default preferences
-    // serializes to a minimal document; `#[serde(default)]` must restore
-    // the path as `None` rather than erroring on the missing key.
+    // `#[serde(default)]` must restore every absent key rather than erroring,
+    // which is what lets a hand-trimmed preferences file still load.
     let back = roundtrip(&Preferences::default());
     assert_eq!(back.document_path, None);
     // Defaults to reopening the last document (historical behavior).
@@ -116,9 +115,9 @@ fn default_preferences_roundtrips() {
 
 #[test]
 fn partial_preferences_fill_defaults() {
-    let toml = b"confirm_unsaved_changes = false\n";
+    let partial = b"(confirm_unsaved_changes: false)";
     let cfg: Preferences =
-        deserialize(toml, SerdeFormat::Toml).expect("partial preferences deserializes");
+        deserialize(partial, SerdeFormat::Ron).expect("partial preferences deserializes");
     assert!(!cfg.confirm_unsaved_changes);
     assert_eq!(cfg.document_path, None);
     // A preferences file predating this key still defaults to reopening the document.
@@ -127,13 +126,13 @@ fn partial_preferences_fill_defaults() {
 }
 
 #[test]
-fn partial_window_table_fills_missing_fields_and_omits_position() {
-    // A hand-edited `[window]` table with only a size (glam vec → `[w, h]`
-    // array): the missing `maximized` defaults to `false` and, with no
-    // `position` key, the physical position stays `None` (the Wayland case).
-    let toml = b"[window]\nsize = [800, 600]\n";
+fn partial_window_entry_fills_missing_fields_and_omits_position() {
+    // A hand-edited `window` entry carrying only a size: the missing
+    // `maximized` defaults to `false` and, with no `position` key, the
+    // physical position stays `None` (the Wayland case).
+    let partial = b"(window: Some((size: (800, 600))))";
     let cfg: Preferences =
-        deserialize(toml, SerdeFormat::Toml).expect("partial window table deserializes");
+        deserialize(partial, SerdeFormat::Ron).expect("partial window entry deserializes");
     assert_eq!(
         cfg.window,
         Some(WindowState {

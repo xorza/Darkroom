@@ -50,15 +50,11 @@ use crate::gui::theme::type_scale::TypeScale;
 /// override palantir's defaults.
 ///
 /// Serializable so the whole bundle (palantir palette + darkroom
-/// layout + colors) can be written and read back as one theme file. No
+/// layout + colors) can be written and read back as one RON theme file. No
 /// UI reaches that yet — the app assembles [`Theme::default`] every
 /// launch — so the derives exist for the format, not for a caller.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub(crate) struct Theme {
-    // The loose `f32`s come first; the tables (the per-widget rosters,
-    // `colors`, `palantir_theme`) follow. TOML serialization requires every
-    // scalar value to precede any table at the same level — otherwise the
-    // serializer errors with `ValueAfterTable`.
     /// Stroke width of every mark drawn on the canvas at wire scale: the
     /// wires themselves, the in-flight drag preview, the subscription pin's
     /// leader, and the breaker scribble that cuts them — one width so the
@@ -127,8 +123,7 @@ pub(crate) struct Theme {
     /// Palantir-side widget theme. Pushed onto `Ui::theme` once at
     /// startup so every palantir widget (Button, TextEdit, MenuItem,
     /// Scroll, Tooltip…) reads a darkroom-tuned palette without each
-    /// call site restyling per use. Last field so its TOML table
-    /// follows all the scalar fields above (TOML `ValueAfterTable`).
+    /// call site restyling per use.
     pub(crate) palantir_theme: palantir::Theme,
 }
 
@@ -248,20 +243,20 @@ mod tests {
     assert_not_impl_any!(InlineRenameTheme: Copy);
 
     /// The whole bundle — darkroom's own fields *and* the nested
-    /// palantir palette — must survive a TOML round-trip. That is the
+    /// palantir palette — must survive a RON round-trip. That is the
     /// on-disk theme format, and this is the only thing holding it: no
     /// UI writes or reads one. Exercises the awkward case too — the
     /// tooltip's infinite max-size axis, handled by `Size`'s custom serde.
     #[test]
-    fn theme_roundtrips_through_toml() {
+    fn theme_roundtrips_through_ron() {
         let mut theme = Theme::default();
         theme.card.min_width = 137.5;
         theme.colors.text_muted = Color::hex(0x123456);
         theme.palantir_theme.window_clear = Color::hex(0xabcdef);
 
-        let bytes = common::serialize(&theme, SerdeFormat::Toml).expect("serialize theme");
-        let back: Theme = common::deserialize(&bytes, SerdeFormat::Toml)
-            .expect("theme should deserialize from its own TOML output");
+        let bytes = common::serialize(&theme, SerdeFormat::Ron).expect("serialize theme");
+        let back: Theme = common::deserialize(&bytes, SerdeFormat::Ron)
+            .expect("theme should deserialize from its own RON output");
 
         assert_eq!(back.card.min_width, 137.5);
         assert_eq!(back.colors.text_muted, Color::hex(0x123456));

@@ -21,8 +21,10 @@ use crate::graph::Binding;
 use crate::graph::identity::{InputPort, NodeId};
 use crate::graph::node::Node;
 
-/// Struct keys cannot be map keys in string-keyed formats such as JSON and TOML,
-/// so the binding table travels as a sequence of pairs.
+/// The binding table travels as a sequence of pairs. RON would take an
+/// `InputPort` as a map key — the string-keyed formats that forced the
+/// sequence are gone — but the sequence is the shape every stored document
+/// already has, and nothing here needs the map form.
 pub(super) fn serialize_bindings<S: Serializer>(
     map: &BTreeMap<InputPort, Binding>,
     serializer: S,

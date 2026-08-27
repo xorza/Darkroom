@@ -7,15 +7,15 @@ use palantir::ImageFilter;
 use crate::platform;
 
 /// Preferences file name, resolved inside the platform's configuration
-/// directory. TOML so it's hand-editable and matches the theme on-disk format.
-const PREFERENCES_FILE: &str = "darkroom.preferences.toml";
+/// directory. RON so it's hand-editable and matches every other file the app
+/// reads and writes.
+const PREFERENCES_FILE: &str = "darkroom.preferences.ron";
 
 /// Persisted session state: the document open when the app last closed,
 /// and editor behavior.
 /// Reloaded on startup so darkroom reopens where the user left off.
 /// Missing / unreadable preferences fall back to `default()`.
-/// `#[serde(default)]` so a partial preferences file (TOML omits absent keys)
-/// still deserializes.
+/// `#[serde(default)]` so a partial preferences file still deserializes.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 pub(crate) struct Preferences {
@@ -33,12 +33,11 @@ pub(crate) struct Preferences {
     pub(crate) confirm_unsaved_changes: bool,
     /// Main window geometry from the last session, restored at launch so
     /// the editor reopens at the same size / position. `None` on first run
-    /// (platform picks). A TOML `[window]` table — a table field, so it
-    /// sits with the other tables after every scalar key.
+    /// (platform picks).
     pub(crate) window: Option<WindowState>,
     /// Image-viewer toolbar choices (backdrop + magnification sampling),
     /// shared by all viewer tabs: a toolbar click in any viewer edits this
-    /// in place and persists. A TOML `[viewer]` table.
+    /// in place and persists.
     pub(crate) viewer: ViewerPreferences,
     /// Default ONNX model paths copied into newly-authored ML node inputs.
     pub(crate) ml_models: MlModelPreferences,
@@ -159,7 +158,7 @@ impl Preferences {
     /// blocking startup — a corrupt preferences file shouldn't brick the app.
     pub(crate) fn load() -> Self {
         match std::fs::read(Self::path()) {
-            Ok(bytes) => deserialize(&bytes, SerdeFormat::Toml).unwrap_or_default(),
+            Ok(bytes) => deserialize(&bytes, SerdeFormat::Ron).unwrap_or_default(),
             Err(_) => Self::default(),
         }
     }
@@ -168,7 +167,7 @@ impl Preferences {
     /// display-ready reason — the caller surfaces it (status bar); a
     /// failed persist shouldn't interrupt the user's session.
     pub(crate) fn save(&self) -> Result<(), String> {
-        let bytes = serialize(self, SerdeFormat::Toml)
+        let bytes = serialize(self, SerdeFormat::Ron)
             .map_err(|err| format!("preferences save failed: {err}"))?;
         let path = Self::path();
         // Nothing has created the configuration directory on a first run, and

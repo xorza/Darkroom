@@ -28,7 +28,6 @@ tokio = { workspace = true }
 # Referenced by `common`'s `id_type!` expansion (e.g. `TabGroupId`), not by
 # any path written here.
 uuid = { workspace = true }
-serde_json = { workspace = true }
 clap = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }

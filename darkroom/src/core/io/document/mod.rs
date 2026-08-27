@@ -1,10 +1,10 @@
-//! Darkroom document archives: one validated JSON document inside a ZIP file.
+//! Darkroom document archives: one validated RON document inside a ZIP file.
 
 use std::fs::File;
 use std::io::{self, Read as _, Write as _};
 use std::path::{Path, PathBuf};
 
-use common::file_utils;
+use common::{SerdeFormat, file_utils};
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
@@ -12,7 +12,7 @@ use crate::core::document::Document;
 use crate::core::document::error::DocumentValidationError;
 
 pub(crate) const EXTENSION: &str = "darkroom";
-const DOCUMENT_ENTRY: &str = "document.json";
+const DOCUMENT_ENTRY: &str = "document.ron";
 const MAX_DOCUMENT_BYTES: u64 = 256 * 1024 * 1024;
 
 #[derive(Debug, thiserror::Error)]
@@ -39,33 +39,35 @@ pub(crate) enum DocumentLoadError {
     },
     #[error("{path} contains overlapping ZIP entries", path = .path.display())]
     OverlappingEntries { path: PathBuf },
-    #[error("{path} must contain exactly one document.json, found {count}", path = .path.display())]
+    #[error("{path} must contain exactly one {DOCUMENT_ENTRY}, found {count}", path = .path.display())]
     DocumentEntryCount { path: PathBuf, count: usize },
-    #[error("failed to open document.json in {path}: {source}", path = .path.display())]
+    #[error("failed to open {DOCUMENT_ENTRY} in {path}: {source}", path = .path.display())]
     OpenDocumentEntry {
         path: PathBuf,
         #[source]
         source: zip::result::ZipError,
     },
-    #[error("{path} contains a non-file document.json entry", path = .path.display())]
+    #[error("{path} contains a non-file {DOCUMENT_ENTRY} entry", path = .path.display())]
     NonFileDocumentEntry { path: PathBuf },
     #[error(
-        "document.json in {path} is {size} bytes, exceeding the {max_mib} MiB size limit",
+        "{DOCUMENT_ENTRY} in {path} is {size} bytes, exceeding the {max_mib} MiB size limit",
         path = .path.display(),
         max_mib = MAX_DOCUMENT_BYTES / (1024 * 1024)
     )]
     DocumentTooLarge { path: PathBuf, size: u64 },
-    #[error("failed to read document.json from {path}: {source}", path = .path.display())]
+    #[error("failed to read {DOCUMENT_ENTRY} from {path}: {source}", path = .path.display())]
     ReadDocument {
         path: PathBuf,
         #[source]
         source: io::Error,
     },
-    #[error("invalid document.json in {path}: {source}", path = .path.display())]
+    #[error("invalid {DOCUMENT_ENTRY} in {path}: {source}", path = .path.display())]
     DeserializeDocument {
         path: PathBuf,
+        /// Boxed: a spanned RON error carries its whole span, which every
+        /// `load` on the happy path would otherwise pay for in its `Result`.
         #[source]
-        source: serde_json::Error,
+        source: Box<common::DeserializeError>,
     },
     #[error("{path}: {source}", path = .path.display())]
     InvalidDocument {
@@ -83,7 +85,7 @@ pub(crate) enum DocumentSaveError {
     Serialize {
         path: PathBuf,
         #[source]
-        source: serde_json::Error,
+        source: common::SerializeError,
     },
     #[error(
         "{DOCUMENT_ENTRY} for {path} is {size} bytes, exceeding the {max_mib} MiB size limit",
@@ -163,21 +165,22 @@ pub(crate) fn load(path: &Path) -> Result<Document, DocumentLoadError> {
     }
     ensure_load_document_size(path, entry.size())?;
 
-    let mut json = Vec::with_capacity(entry.size() as usize);
+    let mut encoded = Vec::with_capacity(entry.size() as usize);
     (&mut entry)
         .take(MAX_DOCUMENT_BYTES + 1)
-        .read_to_end(&mut json)
+        .read_to_end(&mut encoded)
         .map_err(|source| DocumentLoadError::ReadDocument {
             path: path.to_path_buf(),
             source,
         })?;
-    ensure_load_document_size(path, json.len() as u64)?;
+    ensure_load_document_size(path, encoded.len() as u64)?;
 
-    let document: Document =
-        serde_json::from_slice(&json).map_err(|source| DocumentLoadError::DeserializeDocument {
+    let document: Document = common::deserialize(&encoded, SerdeFormat::Ron).map_err(|source| {
+        DocumentLoadError::DeserializeDocument {
             path: path.to_path_buf(),
-            source,
-        })?;
+            source: Box::new(source),
+        }
+    })?;
     document
         .validate()
         .map_err(|source| DocumentLoadError::InvalidDocument {
@@ -196,15 +199,16 @@ pub(crate) fn save(document: &Document, path: &Path) -> Result<(), DocumentSaveE
             source,
         })?;
 
-    let json =
-        serde_json::to_vec_pretty(document).map_err(|source| DocumentSaveError::Serialize {
+    let encoded = common::serialize(document, SerdeFormat::Ron).map_err(|source| {
+        DocumentSaveError::Serialize {
             path: path.to_path_buf(),
             source,
-        })?;
-    ensure_save_document_size(path, json.len() as u64)?;
+        }
+    })?;
+    ensure_save_document_size(path, encoded.len() as u64)?;
 
     file_utils::publish(path, file_utils::PublicationMode::Durable, |file| {
-        write_archive(file, &json)
+        write_archive(file, &encoded)
     })
     .map_err(|source| DocumentSaveError::Publish {
         path: path.to_path_buf(),
@@ -256,13 +260,13 @@ fn ensure_load_document_size(path: &Path, size: u64) -> Result<(), DocumentLoadE
     Ok(())
 }
 
-fn write_archive(file: &mut File, json: &[u8]) -> io::Result<()> {
+fn write_archive(file: &mut File, encoded: &[u8]) -> io::Result<()> {
     let options = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
     let mut archive = ZipWriter::new(file);
     archive
         .start_file(DOCUMENT_ENTRY, options)
         .map_err(io::Error::other)?;
-    archive.write_all(json)?;
+    archive.write_all(encoded)?;
     archive.finish().map_err(io::Error::other)?;
     Ok(())
 }
