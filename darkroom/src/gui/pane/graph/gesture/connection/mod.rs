@@ -1,5 +1,5 @@
 use glam::Vec2;
-use palantir::{CurveBrush, PointerButton, PointerEvent, PointerWake, Ui};
+use palantir::{PointerButton, PointerEvent, PointerWake, Ui};
 use scenarium::DataType;
 use scenarium::{Binding, InputPort};
 
@@ -279,7 +279,7 @@ impl ConnectionUI {
         let theme = graph_ctx.theme();
         let drag_ty = port_data_type(graph_ctx, start_port).unwrap_or_default();
         let color = port_color(theme, &drag_ty, start_port.kind, false);
-        Wire::data(p0, p3).add(ui, theme.stroke_width, CurveBrush::Solid(color));
+        Wire::data(p0, p3).add(ui, theme.stroke_width, color);
     }
 }
 

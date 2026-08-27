@@ -1,5 +1,5 @@
 use glam::Vec2;
-use palantir::{CurveBrush, Ui};
+use palantir::Ui;
 use scenarium::{NodeId, Subscription};
 
 use crate::core::edit::graph_intent::GraphIntent;
@@ -202,11 +202,7 @@ impl SubscriptionUI {
             }
         };
         let theme = graph_ctx.theme();
-        Wire::event(p0, p3).add(
-            ui,
-            theme.stroke_width,
-            CurveBrush::Solid(event_color(theme, false)),
-        );
+        Wire::event(p0, p3).add(ui, theme.stroke_width, event_color(theme, false));
     }
 }
 

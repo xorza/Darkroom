@@ -119,7 +119,7 @@ impl Wire {
     /// Emit the stroked curve (round caps). The single place the wire
     /// `Shape` is built, so data and event curves can't drift in width
     /// policy, cap, or primitive.
-    pub(crate) fn add(&self, ui: &mut Ui, width: f32, brush: CurveBrush) {
+    pub(crate) fn add(&self, ui: &mut Ui, width: f32, brush: impl Into<CurveBrush>) {
         ui.add_shape(
             Shape::cubic_bezier(self.p0, self.p1, self.p2, self.p3, width)
                 .brush(brush)
@@ -242,7 +242,7 @@ impl WirePass<'_, '_> {
         // A broken wire paints flat so the alarm read isn't diluted by the
         // family's own gradient, and it outranks the hover tint outright.
         let brush = if broken {
-            CurveBrush::Solid(self.dcx.theme().colors.connection_broken)
+            CurveBrush::from(self.dcx.theme().colors.connection_broken)
         } else {
             self.emphasis.brush(tint(), stroke.hovered)
         };
@@ -336,12 +336,12 @@ impl WireEmphasis {
         let start = self.tint(tint.start, emphasized);
         let end = self.tint(tint.end, emphasized);
         if start == end {
-            return CurveBrush::Solid(start);
+            return CurveBrush::from(start);
         }
-        // Palantir's cubic-curve lowering samples `CurveBrush::Linear` along
-        // the curve parameter `t` and ignores `angle`, so we pass 0.0 and the
-        // gradient runs `p0` → `p3` whichever way the curve points.
-        CurveBrush::Linear(LinearGradient::new(
+        // Palantir's cubic-curve lowering samples a linear-gradient brush
+        // along the curve parameter `t` and ignores `angle`, so we pass 0.0
+        // and the gradient runs `p0` → `p3` whichever way the curve points.
+        CurveBrush::from(LinearGradient::new(
             0.0,
             [Stop::new(0.0, start), Stop::new(1.0, end)],
         ))
