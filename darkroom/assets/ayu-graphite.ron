@@ -13,60 +13,60 @@
 // the ground is placed one of that ramp's own steps below `bg`.
 (
     // Chrome — the surfaces the editor is built out of, and the inks on them.
-    canvas_bg:           "#131313",    // (the ramp's step)  below gray_24
-    canvas_dot:          "#444444",    // border             gray_39
-    chrome_fill:         "#1e1e1e",    // bg                 gray_24
-    tab_inactive:        "#2a2a2a",    // panel              gray_29
-    node_fill:           "#373737",    // elem               gray_34
-    node_border:         "#00000000",  // (no outline)       the shadow carries the edge
-    header_fill:         "#515151",    // elem_active        gray_44
-    node_ambient_shadow: "#00000080",  // overlay_black      black
-    text:                "#eaeaea",    // text               gray_94
-    text_muted:          "#a4a4a4",    // text_muted         gray_72
-    text_disabled:       "#a4a4a4",    // text_disabled      gray_72
-    elem_hover:          "#444444",    // elem_hover         gray_39
-    elem_active:         "#515151",    // elem_active        gray_44
-    border_focused:      "#0179b1",    // border_focused     blue_normal
+    canvas_bg:           "#131313",    // (the ramp's step)   below gray_24
+    canvas_dot:          "#444444",    // border              gray_39
+    chrome_fill:         "#1e1e1e",    // bg                  gray_24
+    tab_inactive:        "#2a2a2a",    // panel               gray_29
+    node_fill:           "#373737",    // elem                gray_34
+    node_border:         "#00000000",  // (no outline)        the shadow carries the edge
+    header_fill:         "#515151",    // elem_active         gray_44
+    node_ambient_shadow: "#00000080",  // overlay_black       black
+    text:                "#eaeaea",    // text                gray_94
+    text_muted:          "#a4a4a4",    // text_muted          gray_72
+    text_disabled:       "#a4a4a4",    // text_disabled       gray_72
+    elem_hover:          "#444444",    // elem_hover          gray_39
+    elem_active:         "#515151",    // elem_active         gray_44
+    border_focused:      "#207bae",    // border_focused      blue_normal
 
     // Graph — the wires, and the marks drawn over them.
-    selection_rect:      "#12b9df",    // accent             cyan_bright
-    connection_broken:   "#fd8974",    // error              red_bright
-    breaker_stroke:      "#fd8974",    // error              red_bright
+    selection_rect:      "#4db3f1",    // accent              blue_bright
+    connection_broken:   "#fd8974",    // error               red_bright
+    breaker_stroke:      "#fd8974",    // error               red_bright
 
     // Ports — an untyped port's circle, and the ink beside it. A typed port
     // takes its hue from the type table instead.
-    input_port:          "#b9dd0d",    // success            green_vivid
-    output_port:         "#f29407",    // syn_keyword        orange_bright
-    event_port:          "#fd8974",    // error              red_bright
-    port_label:          "#a4a4a4",    // text_muted         gray_72
+    input_port:          "#b9dd0d",    // success             green_vivid
+    output_port:         "#f29407",    // syn_keyword         orange_bright
+    event_port:          "#fd8974",    // error               red_bright
+    port_label:          "#a4a4a4",    // text_muted          gray_72
 
     // Badges — what a node's head says about itself.
-    badge_graph:         "#12b9df",    // accent             cyan_bright
-    badge_sink:          "#fd8974",    // error              red_bright
-    badge_cache:         "#fecd12",    // warning            yellow_vivid
-    badge_impure:        "#c698e2",    // syn_number         magenta_bright
+    badge_graph:         "#4db3f1",    // accent              blue_bright
+    badge_sink:          "#fd8974",    // error               red_bright
+    badge_cache:         "#fecd12",    // warning             yellow_vivid
+    badge_impure:        "#ffccc1",    // syn_number          red_vivid
 
     // Status — what a node's head says about its last run.
-    status_success:      "#b9dd0d",    // success            green_vivid
-    status_info:         "#12b9df",    // accent             cyan_bright
-    status_busy:         "#03eab7",    // syn_string_regex   teal_vivid
-    status_warning:      "#f29407",    // syn_keyword        orange_bright
-    status_error:        "#fd8974",    // error              red_bright
+    status_success:      "#b9dd0d",    // success             green_vivid
+    status_info:         "#4db3f1",    // accent              blue_bright
+    status_busy:         "#d0a70e",    // ansi_bright_yellow  yellow_bright
+    status_warning:      "#f29407",    // syn_keyword         orange_bright
+    status_error:        "#fd8974",    // error               red_bright
 
     // A wire's hue is the type flowing along it. `ramp` backs the
     // open-ended custom and enum families, keyed by type id.
     type_colors: (
-        boolean: "#fd8974",    // error              red_bright
-        int:     "#03eab7",    // syn_string_regex   teal_vivid
-        float:   "#87e2fe",    // syn_type           cyan_vivid
-        string:  "#fecfa1",    // syn_string_special orange_vivid
-        path:    "#4db3f1",    // hint               blue_bright
-        image:   "#c698e2",    // syn_number         magenta_bright
+        boolean: "#fd8974",    // error               red_bright
+        int:     "#98b614",    // syn_string_regex    green_bright
+        float:   "#aadbfe",    // syn_type            blue_vivid
+        string:  "#b9dd0d",    // syn_string          green_vivid
+        path:    "#4db3f1",    // hint                blue_bright
+        image:   "#ffccc1",    // syn_number          red_vivid
         ramp: (
-            "#f29407",    // syn_keyword        orange_bright
-            "#b9dd0d",    // success            green_vivid
-            "#d0a70e",    // ansi_bright_yellow yellow_bright
-            "#eaeaea",    // syn_punctuation    gray_94
+            "#f29407",    // syn_keyword         orange_bright
+            "#fecd12",    // warning             yellow_vivid
+            "#d0a70e",    // ansi_bright_yellow  yellow_bright
+            "#eaeaea",    // syn_punctuation     gray_94
         ),
     ),
 )
