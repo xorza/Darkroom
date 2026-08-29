@@ -1,5 +1,6 @@
 //! [`InlineRenameTheme`]: how an in-place rename field is styled.
 
+use palantir::SlotDefaults;
 use palantir::{Background, Spacing, TextEditTheme, TextStyle};
 
 /// Per-widget theme bundle for the inline-rename label⇄field widget
@@ -38,8 +39,11 @@ impl InlineRenameTheme {
     /// paint around a field that is supposed to read as a plain label.
     pub(crate) fn flattened(text_edit: &TextEditTheme) -> Self {
         let mut style = TextEditTheme {
-            padding: Spacing::ZERO,
-            margin: Spacing::ZERO,
+            defaults: SlotDefaults {
+                padding: Spacing::ZERO,
+                margin: Spacing::ZERO,
+                ..text_edit.defaults
+            },
             ..text_edit.clone()
         };
         for look in [

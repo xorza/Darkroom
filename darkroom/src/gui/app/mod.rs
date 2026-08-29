@@ -173,17 +173,17 @@ impl App {
         let geom = ui.window_geometry();
         match &mut self.preferences.window {
             Some(w) => {
-                w.maximized = geom.maximized;
-                if !geom.maximized {
+                w.maximized = geom.placement.maximized;
+                if !geom.placement.maximized {
                     w.size = geom.inner_size;
-                    w.position = geom.outer_position;
+                    w.position = geom.placement.position;
                 }
             }
             None => {
                 self.preferences.window = Some(WindowState {
                     size: geom.inner_size,
-                    maximized: geom.maximized,
-                    position: geom.outer_position,
+                    maximized: geom.placement.maximized,
+                    position: geom.placement.position,
                 });
             }
         }
