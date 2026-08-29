@@ -97,10 +97,10 @@ pub(super) fn ports_row(
         .id_salt("ports")
         .size((Sizing::FILL, Sizing::HUG))
         .cols([
-            Track::hug(),
-            Track::hug().max(theme.const_value_editor.max_width),
-            Track::fill(),
-            Track::hug(),
+            Track::HUG,
+            Track::HUG.max(theme.const_value_editor.max_width),
+            Track::FILL,
+            Track::HUG,
         ])
         .rows(&row_tracks[..n_rows])
         .gap_xy(theme.ports.gap, theme.ports.cols_gap)
