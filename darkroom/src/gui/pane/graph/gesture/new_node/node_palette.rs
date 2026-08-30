@@ -5,7 +5,7 @@ use std::cmp::Ordering;
 
 use glam::Vec2;
 use palantir::{
-    Configure, MenuItem, Panel, PopupHandle, Scroll, Sizing, Spacing, Text, TextEdit, Tooltip, Ui,
+    CloseHandle, Configure, MenuItem, Panel, Scroll, Sizing, Spacing, Text, TextEdit, Tooltip, Ui,
 };
 use scenarium::Func;
 use scenarium::NodeId;
@@ -125,7 +125,7 @@ impl<'a> PaletteColumn<'a> {
     fn show(
         self,
         ui: &mut Ui,
-        popup: &PopupHandle,
+        popup: &CloseHandle,
         palette: &NodePalette<'_>,
     ) -> Option<GraphIntent> {
         let category = self.category;
@@ -158,7 +158,7 @@ impl NodePalette<'_> {
     pub(super) fn body(
         &self,
         ui: &mut Ui,
-        popup: &PopupHandle,
+        popup: &CloseHandle,
         search: &mut Search,
         scroll_cap: f32,
         focus: bool,
@@ -251,7 +251,7 @@ impl PaletteEntry<'_> {
     fn show(
         self,
         ui: &mut Ui,
-        popup: &PopupHandle,
+        popup: &CloseHandle,
         palette: &NodePalette<'_>,
     ) -> Option<GraphIntent> {
         let pos = palette.pos;
@@ -278,7 +278,7 @@ impl PaletteEntry<'_> {
 /// for one.
 fn add_from_func(
     ui: &mut Ui,
-    popup: &PopupHandle,
+    popup: &CloseHandle,
     pos: Vec2,
     func: &Func,
     node: impl FnOnce() -> Node,
@@ -297,11 +297,11 @@ fn add_from_func(
 /// Record a row for `func`, hovering its description as a tooltip. The
 /// tooltip has to record whether or not the row was clicked, so the click is
 /// latched first.
-fn menu_row(ui: &mut Ui, popup: &PopupHandle, func: &Func) -> bool {
+fn menu_row(ui: &mut Ui, popup: &CloseHandle, func: &Func) -> bool {
     let resp = MenuItem::new(&func.name).show(ui, popup);
     let clicked = resp.left.clicked();
     if let Some(desc) = &func.description {
-        Tooltip::on(&resp.snapshot()).text(desc).show(ui);
+        Tooltip::on(&resp.snapshot()).label(desc).show(ui);
     }
     clicked
 }

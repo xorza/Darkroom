@@ -45,10 +45,10 @@ pub(crate) struct Palette {
     pub(crate) text_muted: Color,
     /// Disabled ink.
     pub(crate) text_disabled: Color,
-    /// Hovered control fill.
-    pub(crate) elem_hover: Color,
-    /// Pressed control fill.
-    pub(crate) elem_active: Color,
+    /// Control fill one step up from the chrome behind it.
+    pub(crate) elem_mid: Color,
+    /// Control fill two steps up — the emphasis tier.
+    pub(crate) elem_strong: Color,
     /// Focus ring.
     pub(crate) border_focused: Color,
     /// Rubber-band sweep and committed selection halo.

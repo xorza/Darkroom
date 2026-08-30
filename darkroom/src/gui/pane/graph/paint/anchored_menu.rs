@@ -1,5 +1,5 @@
 use glam::Vec2;
-use palantir::{ClickOutside, Configure, Popup, PopupHandle, Sizing, Ui};
+use palantir::{ClickOutside, CloseHandle, Configure, Popup, Sizing, Ui};
 use scenarium::NodeId;
 
 use crate::gui::pane::graph::gesture::slot::GestureSlot;
@@ -54,7 +54,7 @@ impl AnchoredMenu {
         ui: &mut Ui,
         id_salt: &'static str,
         max_height: Option<f32>,
-        body: impl FnOnce(&mut Ui, &PopupHandle) -> Option<T>,
+        body: impl FnOnce(&mut Ui, &CloseHandle) -> Option<T>,
     ) -> Option<T> {
         // `None` for a menu that isn't open.
         let anchor = *self.anchor.get()?;
@@ -144,7 +144,7 @@ impl NodeContextMenu {
         &mut self,
         ui: &mut Ui,
         id_salt: &'static str,
-        body: impl FnOnce(&mut Ui, &PopupHandle, NodeId) -> Option<T>,
+        body: impl FnOnce(&mut Ui, &CloseHandle, NodeId) -> Option<T>,
     ) -> Option<NodePick<T>> {
         let node_id = self.node_id?;
         let choice = self

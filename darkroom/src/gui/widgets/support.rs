@@ -182,10 +182,10 @@ pub(crate) fn hspacer(ui: &mut Ui, salt: &'static str) {
 /// bubble actually records, and a [`fmt!`] one is already in the pass's arena.
 pub(crate) fn tooltip_after<'a>(
     ui: &mut Ui,
-    snapshot: &ResponseSnapshot,
+    snapshot: &'a ResponseSnapshot,
     tip: Option<impl Into<TextInput<'a>>>,
 ) {
     if let Some(tip) = tip {
-        Tooltip::on(snapshot).text(tip).show(ui);
+        Tooltip::on(snapshot).label(tip).show(ui);
     }
 }

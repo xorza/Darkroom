@@ -1,5 +1,5 @@
 use glam::Vec2;
-use palantir::{Button, Configure, ContextMenu, MenuItem, Panel, PopupHandle, Sizing, Spacing, Ui};
+use palantir::{Button, CloseHandle, Configure, ContextMenu, MenuItem, Panel, Sizing, Spacing, Ui};
 
 use crate::core::document::TabRef;
 use crate::core::document::dock::dock_op::DockOp;
@@ -33,7 +33,7 @@ fn dropdown(
     ui: &mut Ui,
     theme: &Theme,
     label: &'static str,
-    build: impl FnOnce(&mut Ui, &PopupHandle),
+    build: impl FnOnce(&mut Ui, &CloseHandle),
 ) {
     let trigger = Button::new()
         .label(label)

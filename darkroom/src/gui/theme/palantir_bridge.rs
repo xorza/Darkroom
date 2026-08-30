@@ -20,8 +20,8 @@ pub(super) fn palantir_palette_for(p: &Palette) -> palantir::Palette {
         text_disabled: p.text_disabled,
         terminal_bg: p.canvas_bg,
         elem: p.node_fill,
-        elem_hover: p.elem_hover,
-        elem_active: p.elem_active,
+        elem_mid: p.elem_mid,
+        elem_strong: p.elem_strong,
         border_focused: p.border_focused,
         accent: p.selection_rect,
     }
@@ -44,7 +44,7 @@ pub(super) fn palantir_theme_for(
 
     // Dock splitter: the resting seam paints the chrome band that frames
     // the panes, so the gap reads as part of that surround rather than a
-    // dark line (hover/drag fill still marks the grab target); a wider
+    // dark line (hovered/active fill still marks the grab target); a wider
     // seam does the visual separation.
     theme.splitter.rule = chrome_fill;
     theme.splitter.rule_thickness = 4.0;
@@ -65,7 +65,7 @@ pub(super) fn palantir_theme_for(
 }
 
 /// Menu-bar trigger look: palantir's [`ButtonTheme::menu_button`] recipe
-/// (transparent at rest, `elem_hover` / `elem_active` fills, no chip
+/// (transparent at rest, `elem_mid` / `elem_strong` fills, no chip
 /// overlay) with the label muted until hovered and every state at the
 /// menu scale — so a trigger reads as a menu, not as a button.
 ///
