@@ -19,13 +19,13 @@
     tab_inactive:        "#2b2b2b",    // panel              gray_2
     node_fill:           "#383838",    // elem               gray_3
     node_border:         "#00000000",  // (no outline)       the shadow carries the edge
-    header_fill:         "#525252",    // elem_active        gray_5
+    header_fill:         "#525252",    // elem_strong        gray_5
     node_ambient_shadow: "#00000080",  // overlay_black      black
     text:                "#ebebeb",    // text               gray_7
     text_muted:          "#a4a4a4",    // text_muted         gray_6
     text_disabled:       "#a4a4a4",    // text_disabled      gray_6
-    elem_hover:          "#454545",    // elem_hover         gray_4
-    elem_active:         "#525252",    // elem_active        gray_5
+    elem_mid:            "#454545",    // elem_mid           gray_4
+    elem_strong:         "#525252",    // elem_strong        gray_5
     border_focused:      "#0072ad",    // border_focused     blue_normal
 
     // Graph — the wires, and the marks drawn over them.

@@ -28,7 +28,7 @@ pub(crate) struct ConstValueEditorTheme {
 
 impl ConstValueEditorTheme {
     /// The pointer-over-node variant of [`Self::from_palette`]: the
-    /// chip's hover fill (`elem_hover`), at reduced alpha, becomes the
+    /// chip's hover fill (`elem_mid`), at reduced alpha, becomes the
     /// *resting* background — const editors surface as soon as the
     /// pointer is anywhere over the node, without waiting for a direct
     /// hover. Fill only, so geometry is identical to the resting look.
@@ -42,7 +42,7 @@ impl ConstValueEditorTheme {
     pub(super) fn revealed_from_palette(p: &palantir::Palette) -> Self {
         const REVEAL_ALPHA: f32 = 0.5;
         let mut out = Self::from_palette(p);
-        let reveal = Brush::Solid(p.elem_hover.with_alpha(REVEAL_ALPHA));
+        let reveal = Brush::Solid(p.elem_mid.with_alpha(REVEAL_ALPHA));
         for bg in [
             &mut out.drag_value.chip.looks.normal.background,
             &mut out.drag_value.editor.looks.normal.background,

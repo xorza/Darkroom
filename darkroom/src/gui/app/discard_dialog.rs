@@ -81,7 +81,7 @@ pub(super) fn show(ui: &mut Ui, file_name: Option<&str>, tail: &str) -> DiscardO
     let mut choice = DiscardChoice::Stay;
     let resp = Modal::new()
         .id_salt(("discard_dialog", "modal"))
-        .show(ui, |ui| {
+        .show(ui, |ui, _| {
             Panel::vstack()
                 .id_salt(("discard_dialog", "body"))
                 .gap(16.0)

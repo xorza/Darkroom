@@ -13,7 +13,7 @@ use std::sync::Arc;
 
 use glam::Vec2;
 use palantir::{
-    Align, Configure, ContextMenu, Grid, HAlign, InternedStr, MenuItem, Panel, PopupHandle, Sense,
+    Align, CloseHandle, Configure, ContextMenu, Grid, HAlign, InternedStr, MenuItem, Panel, Sense,
     Sizing, Spacing, Text, TextStyle, Track, Ui, VAlign, WidgetId, fmt,
 };
 use scenarium::Binding;
@@ -335,7 +335,7 @@ fn input_label_cell(
             let default = input.default();
             let can_set = !matches!(input.binding(), Some(Binding::Const(_))) && default.is_some();
             if MenuItem::new("Set constant")
-                .enabled(can_set)
+                .disabled(!can_set)
                 .show(ui, popup)
                 .left
                 .clicked()
@@ -344,7 +344,7 @@ fn input_label_cell(
                 out.push_graph(GraphIntent::set_input(port, Binding::Const(value)));
             }
             if MenuItem::new("Clear binding")
-                .enabled(input.binding().is_some())
+                .disabled(input.binding().is_none())
                 .show(ui, popup)
                 .left
                 .clicked()
@@ -490,7 +490,7 @@ const PREVIEW_SPAWN_OFFSET: Vec2 = Vec2::new(80.0, -60.0);
 /// Hidden when the library has no preview func.
 fn add_preview_item(
     ui: &mut Ui,
-    popup: &PopupHandle,
+    popup: &CloseHandle,
     ncx: NodeCtx<'_>,
     dcx: DrawCtx<'_>,
     port: PortRef,

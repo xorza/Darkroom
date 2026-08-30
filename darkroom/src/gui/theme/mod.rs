@@ -318,7 +318,7 @@ mod tests {
             ("chrome_fill", p.chrome_fill),
             ("tab_inactive", p.tab_inactive),
             ("node_fill", p.node_fill),
-            ("elem_hover", p.elem_hover),
+            ("elem_mid", p.elem_mid),
             ("header_fill", p.header_fill),
         ];
         for pair in ladder.windows(2) {
