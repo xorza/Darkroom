@@ -103,7 +103,8 @@ pub(super) fn ports_row(
             Track::HUG,
         ])
         .rows(&row_tracks[..n_rows])
-        .gap_xy(theme.ports.gap, theme.ports.cols_gap)
+        .line_gap(theme.ports.gap)
+        .gap(theme.ports.cols_gap)
         .padding(Spacing::new(
             theme.ports.col_pad_x,
             theme.ports.gap,
