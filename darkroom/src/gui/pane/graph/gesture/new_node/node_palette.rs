@@ -2,7 +2,6 @@
 //! columns it records.
 
 use std::cmp::Ordering;
-use std::collections::HashMap;
 
 use glam::Vec2;
 use palantir::{
@@ -20,18 +19,17 @@ use crate::gui::pane::graph::gesture::new_node::{
 };
 
 /// One row of a category's palette list: a library `Func` or a built-in
-/// special node. Collecting them into one type lets a category's rows be
-/// sorted by name into a single alphabetical list.
-#[derive(Debug)]
+/// special node. Collecting them into one type lets every source sort
+/// into one list, which is what makes a category a run inside it.
+#[derive(Clone, Copy, Debug)]
 enum PaletteEntry<'a> {
     Func(&'a Func),
     Special(SpecialNode),
 }
 
 impl<'a> PaletteEntry<'a> {
-    /// Borrowed from the palette's sources rather than from `self`, so a row
-    /// can be grouped under its own category and moved into that group in one
-    /// step.
+    /// Borrowed from the palette's sources rather than from `self`, so a
+    /// name outlives any borrow of the row that yielded it.
     fn name(&self) -> &'a str {
         match *self {
             PaletteEntry::Func(f) => &f.name,
@@ -44,6 +42,35 @@ impl<'a> PaletteEntry<'a> {
             PaletteEntry::Func(f) => &f.category,
             PaletteEntry::Special(s) => &s.func().category,
         }
+    }
+
+    /// The rows `query_lc` matches, category-major then name — so a
+    /// category's rows are the contiguous run [`PaletteColumn::runs`] reads.
+    ///
+    /// One `Vec` rather than a map of per-category ones: the palette rebuilds
+    /// this every frame it is up, and grouping through a map spent the map's
+    /// allocation plus one per category on each of those frames. Sorting by
+    /// the category first puts the same rows in the same groups for a single
+    /// allocation, taken from `entries`' own upper bound so the fill never
+    /// grows it.
+    ///
+    /// A matching *category* name reveals that whole column; otherwise a row
+    /// is filtered by its own name. Asked per row, which is what drops the
+    /// grouping pass the map needed before it could ask per category.
+    fn matching(entries: impl Iterator<Item = Self>, query_lc: &str) -> Vec<Self> {
+        let mut rows: Vec<Self> = Vec::with_capacity(entries.size_hint().1.unwrap_or_default());
+        rows.extend(entries.filter(|entry| {
+            name_matches(entry.category(), query_lc) || name_matches(entry.name(), query_lc)
+        }));
+        // Case-insensitive by comparison, not by key: `sort_by_cached_key` with
+        // a `to_lowercase()` key allocated one `String` per row per frame to
+        // answer a question `char`-wise folding answers in place. The raw-order
+        // fallback keeps two categories that fold alike in runs of their own.
+        rows.sort_by(|a, b| {
+            lowercase_cmp(a.category(), b.category())
+                .then_with(|| lowercase_cmp(a.name(), b.name()))
+        });
+        rows
     }
 }
 
@@ -58,11 +85,12 @@ pub(super) struct NodePalette<'a> {
     pos: Vec2,
 }
 
-/// One category's rows, ready to record.
+/// One category's rows, ready to record: a run inside the buffer
+/// [`PaletteEntry::matching`] sorted, not a list of its own.
 #[derive(Debug)]
 struct PaletteColumn<'a> {
     category: &'a str,
-    entries: Vec<PaletteEntry<'a>>,
+    entries: &'a [PaletteEntry<'a>],
 }
 
 impl<'a> NodePalette<'a> {
@@ -79,44 +107,20 @@ impl<'a> NodePalette<'a> {
             .map(PaletteEntry::Func)
             .chain(SPECIAL_NODES.iter().copied().map(PaletteEntry::Special))
     }
-
-    /// The columns to record: every category holding a matching row, sorted
-    /// by name, each column's rows sorted by name too.
-    ///
-    /// One grouping pass over every source, rather than re-scanning them per
-    /// category. A matching *category* name reveals that whole column;
-    /// otherwise each row is filtered by its own name.
-    fn columns(&'a self, query_lc: &str) -> Vec<PaletteColumn<'a>> {
-        let mut by_category: HashMap<&str, Vec<PaletteEntry<'a>>> = HashMap::new();
-        for entry in self.entries() {
-            by_category.entry(entry.category()).or_default().push(entry);
-        }
-        let mut columns: Vec<PaletteColumn<'a>> = by_category
-            .into_iter()
-            .filter_map(|(category, mut entries)| {
-                if !name_matches(category, query_lc) {
-                    entries.retain(|entry| name_matches(entry.name(), query_lc));
-                }
-                if entries.is_empty() {
-                    return None;
-                }
-                // Case-insensitive by comparison, not by key: the palette
-                // re-sorts every frame it's up, and `sort_by_cached_key` with
-                // a `to_lowercase()` key allocated one `String` per library
-                // entry per frame to answer a question `char`-wise folding
-                // answers in place.
-                entries.sort_by(|a, b| lowercase_cmp(a.name(), b.name()));
-                Some(PaletteColumn { category, entries })
-            })
-            .collect();
-        // Same fold the rows above use: a category the user spelled in
-        // lowercase belongs among its peers, not after every capitalized one.
-        columns.sort_by(|a, b| lowercase_cmp(a.category, b.category));
-        columns
-    }
 }
 
-impl PaletteColumn<'_> {
+impl<'a> PaletteColumn<'a> {
+    /// The category runs of `rows`, in order. Requires the category-major
+    /// ordering [`PaletteEntry::matching`] leaves — an unsorted buffer
+    /// splits one category into as many columns as it has stretches.
+    fn runs(rows: &'a [PaletteEntry<'a>]) -> impl Iterator<Item = Self> {
+        rows.chunk_by(|a, b| a.category() == b.category())
+            .map(|entries| Self {
+                category: entries[0].category(),
+                entries,
+            })
+    }
+
     /// Record this column: its category name above its rows.
     fn show(
         self,
@@ -139,7 +143,7 @@ impl PaletteColumn<'_> {
                     .size((Sizing::HUG, Sizing::HUG))
                     .gap(2.0)
                     .show(ui, |ui| {
-                        for entry in self.entries {
+                        for &entry in self.entries {
                             if let Some(picked) = entry.show(ui, popup, palette) {
                                 chosen = Some(picked);
                             }
@@ -179,6 +183,7 @@ impl NodePalette<'_> {
         }
         // Folded after the field records, so it reflects this frame's typing.
         search.fold();
+        let rows = PaletteEntry::matching(self.entries(), &search.folded);
 
         Scroll::vertical()
             .id(results_wid())
@@ -190,7 +195,7 @@ impl NodePalette<'_> {
                     .size((Sizing::HUG, Sizing::HUG))
                     .gap(12.0)
                     .show(ui, |ui| {
-                        for column in self.columns(&search.folded) {
+                        for column in PaletteColumn::runs(&rows) {
                             if let Some(picked) = column.show(ui, popup, self) {
                                 chosen = Some(picked);
                             }
@@ -303,7 +308,79 @@ fn menu_row(ui: &mut Ui, popup: &PopupHandle, func: &Func) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use crate::gui::pane::graph::gesture::new_node::node_palette::name_matches;
+    use scenarium::{Func, FuncId};
+
+    use crate::gui::pane::graph::gesture::new_node::node_palette::{
+        PaletteColumn, PaletteEntry, name_matches,
+    };
+
+    /// Four rows over three categories, deliberately out of order and mixing
+    /// case so the fold and the raw-order fallback both have to fire.
+    fn funcs() -> Vec<Func> {
+        ["Zoom/crop", "blur/Sharpen", "Blur/gaussian", "blur/box"]
+            .into_iter()
+            .map(|spec| {
+                let (category, name) = spec.split_once('/').unwrap();
+                Func::new(FuncId::unique(), name).category(category)
+            })
+            .collect()
+    }
+
+    fn rows<'a>(funcs: &'a [Func], query_lc: &str) -> Vec<PaletteEntry<'a>> {
+        PaletteEntry::matching(funcs.iter().map(PaletteEntry::Func), query_lc)
+    }
+
+    fn shape<'a>(rows: &'a [PaletteEntry<'a>]) -> Vec<(&'a str, Vec<&'a str>)> {
+        PaletteColumn::runs(rows)
+            .map(|column| {
+                (
+                    column.category,
+                    column.entries.iter().map(PaletteEntry::name).collect(),
+                )
+            })
+            .collect()
+    }
+
+    /// The palette groups by sorting, so the buffer's order *is* the column
+    /// layout: categories folded-alphabetically, rows the same inside each,
+    /// and every category one contiguous run.
+    #[test]
+    fn rows_sort_into_one_contiguous_run_per_category() {
+        let funcs = funcs();
+
+        // "Blur" and "blur" fold alike, so they sort adjacently — and stay
+        // two runs, because the fallback orders them by the raw name.
+        assert_eq!(
+            shape(&rows(&funcs, "")),
+            [
+                ("Blur", vec!["gaussian"]),
+                ("blur", vec!["box", "Sharpen"]),
+                ("Zoom", vec!["crop"]),
+            ],
+            "no query lists every row, category-major then name",
+        );
+
+        // A query the *category* carries reveals both blur columns whole,
+        // including the row whose own name holds no "blur".
+        assert_eq!(
+            shape(&rows(&funcs, "blur")),
+            [("Blur", vec!["gaussian"]), ("blur", vec!["box", "Sharpen"])],
+            "a category match keeps its rows whatever they are named",
+        );
+
+        // A query only a row name carries takes that row and drops the rest
+        // of its category with it.
+        assert_eq!(
+            shape(&rows(&funcs, "box")),
+            [("blur", vec!["box"])],
+            "a name match keeps the row alone",
+        );
+
+        assert!(
+            shape(&rows(&funcs, "nothing")).is_empty(),
+            "a query nothing carries lists no column at all",
+        );
+    }
 
     #[test]
     fn name_matches_is_case_insensitive_substring_with_empty_query_wildcard() {
