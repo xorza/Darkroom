@@ -99,6 +99,10 @@ pub(crate) struct DockUi {
     /// [`tab_labels`]' buffer. One serves every group, because the borrow
     /// checker holds it for exactly as long as a group's strip reads it.
     tab_labels: Vec<TabLabel>,
+    /// [`drop_target`]'s chip-rect buffer. A drag asks it every frame it
+    /// is held, so the rects go into a buffer that outlives the frame
+    /// rather than a fresh `Vec` per pointer move.
+    drop_chips: Vec<Rect>,
 }
 
 impl DockUi {
@@ -155,7 +159,7 @@ impl DockUi {
             .drag
             .stopped()
         {
-            if let Some(target) = drop_target(ui, doc) {
+            if let Some(target) = drop_target(ui, doc, &mut self.drop_chips) {
                 out.push_view(DockOp::MoveTab {
                     tab,
                     to: target.drop,
@@ -180,6 +184,7 @@ impl DockUi {
         let Self {
             tab_drag,
             tab_labels,
+            drop_chips,
         } = self;
         render_node(
             ui,
@@ -192,7 +197,7 @@ impl DockUi {
         );
         if let Some(dragged) = tab_drag {
             ui.set_cursor(CursorIcon::Grabbing);
-            draw_drag_feedback(ui, cx, dragged);
+            draw_drag_feedback(ui, cx, dragged, drop_chips);
         }
     }
 }
@@ -325,7 +330,7 @@ fn scan_focus(ui: &Ui, doc: &Document, out: &mut Requests) {
 /// (the preferences form, a viewer's image) — the pointer over it
 /// hovers nothing, and the drop would go dark. `None` over a divider,
 /// the chrome rows, or off-window — a release there cancels.
-fn drop_target(ui: &mut Ui, doc: &Document) -> Option<DropTarget> {
+fn drop_target(ui: &mut Ui, doc: &Document, chips: &mut Vec<Rect>) -> Option<DropTarget> {
     let p = ui.pointer_pos()?;
     for group in doc.layout.groups() {
         let Some(pane) = ui.response_for(pane_wid(group.id)).rect else {
@@ -337,17 +342,22 @@ fn drop_target(ui: &mut Ui, doc: &Document) -> Option<DropTarget> {
         let Some(strip_rect) = ui.response_for(strip::strip_wid(group.id)).rect else {
             continue;
         };
-        let chips: Vec<Rect> = group
-            .tabs
-            .iter()
-            .filter_map(|&tab| ui.response_for(strip::tab_chip_wid(tab)).rect)
-            .collect();
+        chips.clear();
+        // An upper bound, not a count — a tab that recorded no rect drops
+        // out — so `reserve`, and a no-op from the drag's second frame on.
+        chips.reserve(group.tabs.len());
+        chips.extend(
+            group
+                .tabs
+                .iter()
+                .filter_map(|&tab| ui.response_for(strip::tab_chip_wid(tab)).rect),
+        );
         return Some(classify_drop(
             PaneGeometry {
                 group: group.id,
                 pane,
                 strip: strip_rect,
-                chips: &chips,
+                chips: chips.as_slice(),
                 can_split: doc.layout.can_split(group.id),
             },
             p,
@@ -361,10 +371,10 @@ fn drop_target(ui: &mut Ui, doc: &Document) -> Option<DropTarget> {
 /// split, a caret between chips for a strip insert) and a small ghost
 /// chip trailing the pointer. `Sense::NONE` throughout, so the overlay
 /// never intercepts the drag's own hit-testing.
-fn draw_drag_feedback(ui: &mut Ui, cx: DockContext<'_>, dragged: &TabDrag) {
+fn draw_drag_feedback(ui: &mut Ui, cx: DockContext<'_>, dragged: &TabDrag, chips: &mut Vec<Rect>) {
     let theme = cx.theme;
     let accent = theme.colors.selection_rect;
-    if let Some(target) = drop_target(ui, &cx.open.document) {
+    if let Some(target) = drop_target(ui, &cx.open.document, chips) {
         let r = target.highlight;
         ui.layer(Layer::Tooltip)
             .at(r.min)
