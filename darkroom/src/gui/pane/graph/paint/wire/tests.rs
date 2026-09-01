@@ -19,7 +19,7 @@ fn solid(brush: &CurveBrush) -> Option<Color> {
 /// [`ColorU8`] rather than the float color.
 fn gradient(brush: &CurveBrush) -> Option<(ColorU8, ColorU8)> {
     let g = brush.as_brush().as_linear()?;
-    Some((g.stops[0].color, g.stops[g.stops.len() - 1].color))
+    Some((g.stops[0].color(), g.stops[g.stops.len() - 1].color()))
 }
 
 #[test]

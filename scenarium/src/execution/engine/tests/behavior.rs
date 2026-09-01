@@ -70,9 +70,9 @@ async fn cancel_mid_invoke_drops_in_flight_node_and_reruns() {
     let cancel_first = Arc::new(AtomicBool::new(true));
     let mut g = TestGraph::new();
     g.add("self_cancel", |n| {
-        let cancel_first = cancel_first.clone();
+        let cancel_first = Arc::clone(&cancel_first);
         n.pure().sink().output(DataType::Int).lambda(async_lambda!(
-            move |Invocation { ctx, outputs, .. }| { cancel_first = cancel_first.clone() } => {
+            move |Invocation { ctx, outputs, .. }| { cancel_first = Arc::clone(&cancel_first) } => {
                 if cancel_first.swap(false, Ordering::Relaxed) {
                     // Stand in for the user hitting Cancel while this runs.
                     ctx.cancel_flag().cancel();

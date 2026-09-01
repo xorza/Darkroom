@@ -44,7 +44,7 @@ impl RuntimeLibrary {
         let previews = Arc::new(PreviewSink::default());
         let current = Arc::new(compose(model_paths, &previews));
         Self {
-            published: PublishedLibrary::new(current.clone()),
+            published: PublishedLibrary::new(Arc::clone(&current)),
             model_paths: model_paths.clone(),
             previews,
         }

@@ -76,8 +76,8 @@ fn relay(
             .optional(tracked())
             .output(tracked())
             .lambda(async_lambda!(
-                move |Invocation { outputs, .. }| { tracker = tracker.clone() } => {
-                    outputs[0] = DynamicValue::Custom(Arc::new(Tracked::new(tracker.clone())));
+                move |Invocation { outputs, .. }| { tracker = Arc::clone(&tracker) } => {
+                    outputs[0] = DynamicValue::Custom(Arc::new(Tracked::new(Arc::clone(&tracker))));
                     Ok(())
                 }
             ))
@@ -99,7 +99,10 @@ async fn chain_peak(relay_mode: CacheMode) -> usize {
     let tracker = Arc::new(StdMutex::new(LiveTracker::default()));
     let mut g = tracked_graph();
     for stage in 0..4 {
-        g.add(&format!("relay{stage}"), relay(tracker.clone(), relay_mode));
+        g.add(
+            &format!("relay{stage}"),
+            relay(Arc::clone(&tracker), relay_mode),
+        );
     }
     g.add("sink", |n| n.sink().input(tracked()));
     for stage in 1..4 {
@@ -152,12 +155,12 @@ async fn probe_run(relay_mode: CacheMode, probes: usize) -> ProbeRun {
     let reads = Arc::new(StdMutex::new(Vec::new()));
 
     let mut g = tracked_graph();
-    g.add("relay", relay(tracker.clone(), relay_mode));
+    g.add("relay", relay(Arc::clone(&tracker), relay_mode));
     for probe in 0..probes {
-        let reads = reads.clone();
+        let reads = Arc::clone(&reads);
         g.add(&format!("probe{probe}"), move |n: NodeSpec| {
             n.sink().input(tracked()).lambda(async_lambda!(
-                move |Invocation { inputs, .. }| { reads = reads.clone() } => {
+                move |Invocation { inputs, .. }| { reads = Arc::clone(&reads) } => {
                     let value = std::mem::take(&mut inputs[0]);
                     reads.lock().unwrap().push(value.into_custom::<Tracked>().is_ok());
                     Ok(())

@@ -71,7 +71,7 @@ impl InlineRenameTheme {
             &mut self.text_edit.looks.active,
             &mut self.text_edit.looks.disabled,
         ] {
-            look.text = Some(text.clone());
+            look.text = Some(text);
         }
         self
     }

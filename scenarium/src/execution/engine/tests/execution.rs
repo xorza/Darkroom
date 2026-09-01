@@ -19,7 +19,7 @@ async fn simple_compute() {
     let b = Arc::new(AtomicI64::new(5));
     let mut g = TestGraph::new();
     g.add("a", shifting_source(Arc::new(AtomicI64::new(2))));
-    g.add("b", shifting_source(b.clone()));
+    g.add("b", shifting_source(Arc::clone(&b)));
     g.add("sum", |n| n.sum().cache(CacheMode::Ram));
     g.add("mult", |n| n.mult().cache(CacheMode::Ram));
     g.add("print", |n| n.records());
@@ -81,7 +81,7 @@ async fn unwritten_output_port_is_cleared_before_reexecution() {
     let invocations = Arc::new(AtomicUsize::new(0));
     let mut g = TestGraph::new();
     g.add("partial_writer", |n| {
-        let invocations = invocations.clone();
+        let invocations = Arc::clone(&invocations);
         n.pure()
             .sink()
             // Const-bound below; changing that const is what re-keys the
@@ -92,7 +92,7 @@ async fn unwritten_output_port_is_cleared_before_reexecution() {
             // Retained so the in-place buffer reuse is observable at all.
             .cache(CacheMode::Ram)
             .lambda(async_lambda!(
-                move |Invocation { outputs, .. }| { invocations = invocations.clone() } => {
+                move |Invocation { outputs, .. }| { invocations = Arc::clone(&invocations) } => {
                     let run = invocations.fetch_add(1, Ordering::Relaxed);
                     outputs[0] = ConstValue::Int(100 + run as i64).into();
                     if run == 0 {

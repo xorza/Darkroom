@@ -51,9 +51,9 @@ pub(super) fn palantir_theme_for(
 
     // Context-menu rows at the smaller menu scale, each keeping the colour
     // its own state resolved to.
-    let base = &theme.text;
+    let base = theme.text;
     let shrink = |look: &mut WidgetLook| {
-        let style = look.text.take().unwrap_or_else(|| base.clone());
+        let style = look.text.take().unwrap_or(base);
         look.text = Some(style.with_font_size(text.body));
     };
     let item = &mut theme.context_menu.item;
@@ -78,12 +78,12 @@ pub(super) fn palantir_theme_for(
 /// pins are the two it sets.
 pub(super) fn menu_button_for(
     p: &palantir::Palette,
-    fallback_text: &TextStyle,
+    fallback_text: TextStyle,
     text: &TypeScale,
 ) -> ButtonTheme {
     let mut mb = ButtonTheme::menu_button(p);
     let restyle = |look: &mut WidgetLook, color: Color| {
-        let style = look.text.take().unwrap_or_else(|| fallback_text.clone());
+        let style = look.text.take().unwrap_or(fallback_text);
         look.text = Some(style.with_color(color).with_font_size(text.body));
     };
     restyle(&mut mb.looks.normal, p.text_muted);

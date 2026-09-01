@@ -9,11 +9,11 @@ async fn unused_output_marked_skip() {
 
     let mut g = TestGraph::new();
     g.add("split", |n| {
-        let seen = seen.clone();
+        let seen = Arc::clone(&seen);
         n.output(DataType::Int)
             .output(DataType::Int)
             .lambda(async_lambda!(
-                move |Invocation { demand, outputs, .. }| { seen = seen.clone() } => {
+                move |Invocation { demand, outputs, .. }| { seen = Arc::clone(&seen) } => {
                     seen.lock().await.extend_from_slice(demand);
                     outputs[0] = ConstValue::Int(1).into();
                     outputs[1] = ConstValue::Int(2).into();
@@ -47,13 +47,13 @@ async fn cached_node_reruns_when_a_previously_skipped_output_becomes_needed() {
 
     let mut g = TestGraph::new();
     g.add("split", |n| {
-        let calls = calls.clone();
+        let calls = Arc::clone(&calls);
         n.pure()
             .cache(CacheMode::Ram)
             .output(DataType::Int)
             .output(DataType::Int)
             .lambda(async_lambda!(
-                move |Invocation { demand, outputs, .. }| { calls = calls.clone() } => {
+                move |Invocation { demand, outputs, .. }| { calls = Arc::clone(&calls) } => {
                     *calls.lock().await += 1;
                     if !demand[0].is_skip() {
                         outputs[0] = ConstValue::Int(10).into();
@@ -68,14 +68,14 @@ async fn cached_node_reruns_when_a_previously_skipped_output_becomes_needed() {
     let sink = |received: Arc<Mutex<Vec<i64>>>| {
         move |n: NodeSpec| {
             n.sink().input(DataType::Int).lambda(async_lambda!(
-                move |Invocation { inputs, .. }| { received = received.clone() } => {
+                move |Invocation { inputs, .. }| { received = Arc::clone(&received) } => {
                     received.lock().await.push(inputs[0].as_i64().unwrap());
                     Ok(())
                 }
             ))
         }
     };
-    g.add("sink_a", sink(received.clone()));
+    g.add("sink_a", sink(Arc::clone(&received)));
     g.wire("split", 0, "sink_a", 0);
 
     let mut e = TestEngine::over(g);
@@ -84,7 +84,7 @@ async fn cached_node_reruns_when_a_previously_skipped_output_becomes_needed() {
     // A second consumer arrives on the output the first run skipped: the
     // cached value does not cover the new demand, so `split` must re-run.
     e.edit(|g| {
-        g.add("sink_b", sink(received.clone()));
+        g.add("sink_b", sink(Arc::clone(&received)));
         g.wire("split", 1, "sink_b", 0);
     });
     e.run_sinks().await;

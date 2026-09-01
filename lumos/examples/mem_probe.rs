@@ -73,7 +73,11 @@ fn main() {
     let peak_anon = Arc::new(AtomicU64::new(0));
     let peak_total = Arc::new(AtomicU64::new(0));
     let sampler = {
-        let (stop, peak_anon, peak_total) = (stop.clone(), peak_anon.clone(), peak_total.clone());
+        let (stop, peak_anon, peak_total) = (
+            Arc::clone(&stop),
+            Arc::clone(&peak_anon),
+            Arc::clone(&peak_total),
+        );
         thread::spawn(move || {
             while !stop.load(Ordering::Relaxed) {
                 peak_anon.fetch_max(status_kb("RssAnon"), Ordering::Relaxed);

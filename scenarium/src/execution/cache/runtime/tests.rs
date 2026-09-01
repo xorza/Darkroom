@@ -535,7 +535,7 @@ fn measure_resident_ram_accounts_each_owner_once_and_dedups_the_total() {
     let shared: Arc<dyn CustomValue> = Arc::new(Payload {
         cpu: 100,
         gpu: 10,
-        calls: shared_calls.clone(),
+        calls: Arc::clone(&shared_calls),
     });
 
     let mut cache = RuntimeCache::default();
@@ -548,17 +548,21 @@ fn measure_resident_ram_accounts_each_owner_once_and_dedups_the_total() {
                 Some(d),
                 Some(d),
                 vec![
-                    DynamicValue::Custom(shared.clone()),
+                    DynamicValue::Custom(Arc::clone(&shared)),
                     DynamicValue::Custom(Arc::new(Payload {
                         cpu: 5,
                         gpu: 0,
-                        calls: distinct_calls.clone(),
+                        calls: Arc::clone(&distinct_calls),
                     })),
                     DynamicValue::Static(ConstValue::Int(9)),
                 ],
             ),
             // Slot B: the *same* shared Arc again — must not be counted twice.
-            resident_slot(Some(d), Some(d), vec![DynamicValue::Custom(shared.clone())]),
+            resident_slot(
+                Some(d),
+                Some(d),
+                vec![DynamicValue::Custom(Arc::clone(&shared))],
+            ),
             // Slot C: empty — contributes zero.
             RuntimeSlot::default(),
         ],

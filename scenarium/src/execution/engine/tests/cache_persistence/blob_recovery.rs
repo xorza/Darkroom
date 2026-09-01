@@ -307,7 +307,7 @@ async fn redefined_output_type_rekeys_and_recomputes() {
     // and value are `Int` or `Float`. Its id and inputs stay unchanged,
     // isolating output-signature invalidation.
     let build = |as_float: bool, runs: &Calls, received: &Arc<StdMutex<f64>>| {
-        let received = received.clone();
+        let received = Arc::clone(received);
         let value = if as_float {
             ConstValue::Float(1.5)
         } else {
