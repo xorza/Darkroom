@@ -214,7 +214,7 @@ pub(super) fn status_row(ui: &mut Ui, ncx: NodeCtx<'_>, out: &mut Requests) {
                         color,
                         font_size_px: BADGE_FONT,
                         family: FontFamily::Mono,
-                        ..ui.theme().text.clone()
+                        ..ui.theme().text
                     })
                     .min_size((RUN_TIME_MIN_WIDTH, 0.0))
                     .show(ui);

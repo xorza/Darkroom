@@ -118,7 +118,7 @@ pub(crate) fn add_config_builder<T: NodeConfig>(
             move |Invocation {
                       inputs, outputs, ..
                   }| {
-                let kinds = kinds.clone();
+                let kinds = Arc::clone(&kinds);
                 Box::pin(async move {
                     let values: Vec<FieldValue> = kinds
                         .iter()

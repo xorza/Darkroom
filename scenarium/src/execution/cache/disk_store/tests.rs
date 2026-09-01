@@ -210,7 +210,7 @@ async fn store_read_header_check_and_digest_replacement_round_trip() {
 async fn broader_same_digest_blob_is_preserved() {
     let file = TempFile::new("coverage");
     let decode_calls = Arc::new(AtomicU64::new(0));
-    let store = versioned_store(1, decode_calls.clone());
+    let store = versioned_store(1, Arc::clone(&decode_calls));
     let target = target(file.path(), Digest([11; 32]));
     let partial = OutputSnapshot::new(vec![
         DynamicValue::Static(ConstValue::Int(7)),
@@ -273,7 +273,7 @@ async fn missing_and_changed_codecs_miss_before_decode() {
     let target = target(file.path(), Digest([12; 32]));
     let snapshot = OutputSnapshot::new(vec![DynamicValue::from_custom(Blob(vec![9]))]);
     let old_calls = Arc::new(AtomicU64::new(0));
-    let old_store = versioned_store(1, old_calls.clone());
+    let old_store = versioned_store(1, Arc::clone(&old_calls));
     store_expecting(
         &old_store,
         &target,
@@ -295,7 +295,7 @@ async fn missing_and_changed_codecs_miss_before_decode() {
     );
 
     let new_calls = Arc::new(AtomicU64::new(0));
-    let new_store = versioned_store(2, new_calls.clone());
+    let new_store = versioned_store(2, Arc::clone(&new_calls));
     assert!(!new_store.covers(&target, snapshot.values()).await);
     assert!(read_snapshot(&new_store, &target, 1).await.is_none());
     assert_eq!(new_calls.load(Ordering::SeqCst), 0);
@@ -339,7 +339,7 @@ async fn unregistered_custom_value_is_reported_unsupported_not_failed() {
 async fn failed_streaming_encode_preserves_previous_blob() {
     let file = TempFile::new("encode-failure");
     let calls = Arc::new(AtomicU64::new(0));
-    let good_store = versioned_store(1, calls.clone());
+    let good_store = versioned_store(1, Arc::clone(&calls));
     let original_target = target(file.path(), Digest([4; 32]));
     store_expecting(
         &good_store,

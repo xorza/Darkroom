@@ -107,13 +107,13 @@ impl RssSampler {
         let peak_gated = Arc::new(AtomicU64::new(0));
         let peak_ungated = Arc::new(AtomicU64::new(0));
         let handle = {
-            let stop = stop.clone();
-            let gate = gate.0.clone();
+            let stop = Arc::clone(&stop);
+            let gate = Arc::clone(&gate.0);
             let (peak_anon, peak_total, peak_gated, peak_ungated) = (
-                peak_anon.clone(),
-                peak_total.clone(),
-                peak_gated.clone(),
-                peak_ungated.clone(),
+                Arc::clone(&peak_anon),
+                Arc::clone(&peak_total),
+                Arc::clone(&peak_gated),
+                Arc::clone(&peak_ungated),
             );
             std::thread::spawn(move || {
                 while !stop.load(Ordering::Relaxed) {

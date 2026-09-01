@@ -198,7 +198,7 @@ async fn encoded(digest: Digest, outputs: &[DynamicValue], library: &Library) ->
 #[tokio::test]
 async fn indexed_header_checks_without_body_and_all_values_round_trip() {
     let calls = Arc::new(AtomicU64::new(0));
-    let library = library(7, DecodeBehavior::ReadAll, calls.clone());
+    let library = library(7, DecodeBehavior::ReadAll, Arc::clone(&calls));
     let digest = Digest([3; 32]);
     let first_blob = (0u8..=255)
         .cycle()
@@ -309,7 +309,7 @@ async fn custom_decoder_is_bounded_and_must_consume_its_payload() {
         DynamicValue::Static(ConstValue::Int(77)),
     ];
     let calls = Arc::new(AtomicU64::new(0));
-    let complete_library = library(1, DecodeBehavior::ReadAll, calls.clone());
+    let complete_library = library(1, DecodeBehavior::ReadAll, Arc::clone(&calls));
     let bytes = encoded(digest, &outputs, &complete_library).await;
     let restored = read(
         &mut Cursor::new(&bytes),
@@ -329,7 +329,7 @@ async fn custom_decoder_is_bounded_and_must_consume_its_payload() {
     assert_eq!(restored[1].as_i64(), Some(77));
 
     let underread_calls = Arc::new(AtomicU64::new(0));
-    let underread_library = library(1, DecodeBehavior::ReadNone, underread_calls.clone());
+    let underread_library = library(1, DecodeBehavior::ReadNone, Arc::clone(&underread_calls));
     let error = read(
         &mut Cursor::new(&bytes),
         bytes.len() as u64,
@@ -398,7 +398,7 @@ async fn descriptors_selectively_validate_codecs_and_coverage() {
     );
 
     let changed_calls = Arc::new(AtomicU64::new(0));
-    let changed = library(3, DecodeBehavior::ReadAll, changed_calls.clone());
+    let changed = library(3, DecodeBehavior::ReadAll, Arc::clone(&changed_calls));
     assert!(
         !covers_outputs(
             &mut Cursor::new(&bytes),

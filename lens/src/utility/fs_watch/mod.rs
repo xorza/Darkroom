@@ -70,7 +70,7 @@ impl WatchState {
         }
 
         let signal = Arc::new(Notify::new());
-        let callback_signal = signal.clone();
+        let callback_signal = Arc::clone(&signal);
         let owned_path = path.to_string();
         let callback_path = owned_path.clone();
         let mut watcher =
@@ -181,7 +181,7 @@ pub fn fs_watch_library() -> Library {
                             .lock()
                             .await
                             .get::<WatchState>()
-                            .map(|w| (w.signal.clone(), w.debounce));
+                            .map(|w| (Arc::clone(&w.signal), w.debounce));
                         match watch {
                             Some((signal, debounce)) => {
                                 // Wait for the first change of a burst...

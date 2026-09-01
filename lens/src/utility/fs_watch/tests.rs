@@ -61,7 +61,7 @@ async fn stored_signal(event_state: &SharedAnyState) -> Option<Arc<tokio::sync::
         .lock()
         .await
         .get::<WatchState>()
-        .map(|w| w.signal.clone())
+        .map(|w| Arc::clone(&w.signal))
 }
 
 #[test]
@@ -332,7 +332,7 @@ async fn invalid_replacement_drops_previous_watcher() {
 async fn watcher_signals_on_content_change() {
     let dir = unique_temp_dir();
     let ws = WatchState::new(dir.to_str().unwrap(), false, Duration::ZERO).unwrap();
-    let signal = ws.signal.clone();
+    let signal = Arc::clone(&ws.signal);
 
     // Absorb any spurious event from creating the directory itself, so the
     // assertion below measures the file write specifically.
@@ -358,7 +358,7 @@ async fn debounce_collapses_burst_into_one_fire() {
     // `changed` event lambda against a hand-pulsed signal (a "burst").
     let event_state = SharedAnyState::default();
     let ws = WatchState::new(dir.to_str().unwrap(), false, Duration::from_millis(200)).unwrap();
-    let signal = ws.signal.clone();
+    let signal = Arc::clone(&ws.signal);
     event_state.lock().await.set(ws);
 
     let lambda = func.events[0].event_lambda.clone();

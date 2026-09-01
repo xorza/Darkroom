@@ -305,7 +305,7 @@ async fn persist_node_lands_on_disk_before_its_consumer_runs() {
     let mut g = TestGraph::new();
     g.add("mult", |n| n.mult().cache(CacheMode::Disk));
     g.add("watch", |n| {
-        let (root, flag) = (root.clone(), blob_present.clone());
+        let (root, flag) = (root.clone(), Arc::clone(&blob_present));
         n.sink().input(DataType::Int).observes(move |_| {
             let non_empty = std::fs::read_dir(&root)
                 .map(|mut entries| entries.next().is_some())

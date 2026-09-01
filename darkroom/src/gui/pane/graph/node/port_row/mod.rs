@@ -153,7 +153,7 @@ fn port_label(ui: &mut Ui, theme: &Theme, name: &str, tip: Option<InternedStr>) 
     let snapshot = Text::new(name)
         .style(&TextStyle {
             color: theme.ports.label,
-            ..ui.theme().text.clone()
+            ..ui.theme().text
         })
         .sense(Sense::HOVER)
         .show(ui)
@@ -380,7 +380,7 @@ fn value_cell(ui: &mut Ui, ncx: NodeCtx<'_>, input: InputCtx<'_>, out: &mut Requ
     {
         out.push_app(AppCommand::Edit(EditCommand::PickInputPath(PathPick {
             port: input.port(),
-            config: config.clone(),
+            config: Arc::clone(config),
         })));
     }
     // Fill the value column so every editor is the same width (the column
@@ -566,7 +566,7 @@ fn event_cell(
             Text::new(event.name.as_str())
                 .style(&TextStyle {
                     color: theme.ports.label,
-                    ..ui.theme().text.clone()
+                    ..ui.theme().text
                 })
                 .show(ui);
             PortGlyph::arrow(wid, theme.ports.size)

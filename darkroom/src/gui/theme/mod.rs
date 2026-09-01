@@ -190,7 +190,7 @@ impl Theme {
         let inline_rename = InlineRenameTheme::from_palette(&pal);
         let inline_rename_title = inline_rename.clone().with_text(TextStyle {
             weight: FontWeight::Bold,
-            ..palantir_theme.text.clone()
+            ..palantir_theme.text
         });
         Self {
             // The three measurements that belong to no widget group; the
@@ -209,7 +209,7 @@ impl Theme {
             const_value_editor_revealed: ConstValueEditorTheme::revealed_from_palette(&pal),
             inline_rename,
             inline_rename_title,
-            menu_button: menu_button_for(&pal, &palantir_theme.text, &TypeScale::DEFAULT),
+            menu_button: menu_button_for(&pal, palantir_theme.text, &TypeScale::DEFAULT),
             palantir_theme,
         }
     }

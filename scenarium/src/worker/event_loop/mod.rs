@@ -53,7 +53,7 @@ impl ActiveEventLoop {
             let node_id = event.node_id;
             let task = tasks.spawn({
                 let event_tx = event_tx.clone();
-                let ready = ready.clone();
+                let ready = Arc::clone(&ready);
                 let pause_gate = pause_gate.clone();
 
                 async move {

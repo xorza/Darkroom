@@ -163,7 +163,7 @@ fn master_stack_memory_probe() -> io::Result<()> {
     let loaded = Arc::new(AtomicUsize::new(0));
     let combine_start_us = Arc::new(AtomicU64::new(0));
     let progress: ProgressCallback = {
-        let (loaded, combine_start_us) = (loaded.clone(), combine_start_us.clone());
+        let (loaded, combine_start_us) = (Arc::clone(&loaded), Arc::clone(&combine_start_us));
         let combining = combining.clone();
         ProgressCallback::new(move |p: StackingProgress| match p.stage {
             StackingStage::Loading => {

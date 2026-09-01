@@ -204,7 +204,7 @@ impl Badge {
                         color,
                         font_size_px: BADGE_FONT,
                         weight: FontWeight::Bold,
-                        ..ui.theme().text.clone()
+                        ..ui.theme().text
                     })
                     .show(ui);
             }
