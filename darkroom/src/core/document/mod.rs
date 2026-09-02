@@ -1,13 +1,12 @@
-pub(crate) mod dock;
 pub(crate) mod error;
 pub(crate) mod open_document;
 
 use ::serde::{Deserialize, Serialize};
 use glam::Vec2;
+use palantir::DockState;
 use scenarium::{DetachedNode, Graph as CoreGraph, InputPort, NodeId, NodeKind, OutputPort};
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::core::document::dock::DockLayout;
 use crate::core::document::error::DocumentValidationError;
 use crate::core::document::error::GraphViewValidationError;
 use crate::core::preview;
@@ -293,18 +292,40 @@ impl GraphView {
 /// borrowed together, and destructuring is what proves they are disjoint —
 /// a pair of accessor methods would each borrow the whole `Document` and
 /// couldn't be held at once.
-#[derive(Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub(crate) struct Document {
     pub(crate) graph: CoreGraph,
     pub(crate) main_view: GraphView,
     /// The pane arrangement: open tabs grouped into split panes, plus
-    /// the focused group. Persisted + undoable like the rest of the view
-    /// state (every layout mutation is an undoable `DockOp`).
-    #[serde(default)]
-    pub(crate) layout: DockLayout,
+    /// the focused group. Persisted like the rest of the view state, and
+    /// mutated only through a `DockOp` — none of which is undoable, so
+    /// Ctrl+Z walks past a tab switch to the last graph edit.
+    #[serde(default = "Document::new_layout")]
+    pub(crate) layout: DockState<TabRef>,
+}
+
+/// Scopes every widget id the dock derives. One string, in one place,
+/// because two docks built from different seeds would draw with
+/// different ids and share none of their state.
+const DOCK_SEED: &str = "darkroom.dock";
+
+impl Default for Document {
+    fn default() -> Self {
+        Self {
+            graph: CoreGraph::default(),
+            main_view: GraphView::default(),
+            layout: Self::new_layout(),
+        }
+    }
 }
 
 impl Document {
+    /// A fresh dock: one pane showing the graph. `Graph` is the pinned
+    /// tab, so it refuses to close and the tree is never empty.
+    fn new_layout() -> DockState<TabRef> {
+        DockState::new(DOCK_SEED, TabRef::Graph)
+    }
+
     /// Drop a node from both the graph and the view (its placement and any
     /// selection membership) — the one edit that has to touch both to leave
     /// the document consistent.
@@ -402,7 +423,7 @@ impl Document {
         // layout out for the call splits them: the predicate borrows a
         // `Document` whose layout is a placeholder, and it never asks about
         // one. Cold path only — the fast path above already returned.
-        let mut layout = std::mem::take(&mut self.layout);
+        let mut layout = std::mem::replace(&mut self.layout, Self::new_layout());
         layout.retain_tabs(|tab| self.holds_tab(tab));
         self.layout = layout;
     }
@@ -430,7 +451,7 @@ impl From<CoreGraph> for Document {
         Self {
             graph,
             main_view,
-            layout: DockLayout::default(),
+            layout: Self::new_layout(),
         }
     }
 }
@@ -444,8 +465,8 @@ mod tests {
     use scenarium::Node;
 
     use super::*;
-    use crate::core::document::dock::dock_op::DockOp;
     use crate::core::document::harness::DocFixture;
+    use palantir::DockOp;
 
     /// Every `NodeId`-keyed cache sweeps against one rule, and the two
     /// narrowings of it are strict subsets — so a node that is gone is gone by
@@ -500,8 +521,7 @@ mod tests {
 
     #[test]
     fn dock_layout_round_trips_as_ron() {
-        use crate::core::document::dock::dock_op::DockDrop;
-        use crate::core::document::dock::split_side::SplitSide;
+        use palantir::{DockDrop, SplitSide};
 
         let mut doc = DocFixture::sample().doc;
         let node_id = doc.graph.iter().next().unwrap().id;

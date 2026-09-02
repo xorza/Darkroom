@@ -9,12 +9,11 @@
 
 use glam::{UVec2, Vec2};
 use palantir::internals::UiHarness;
-use palantir::{Configure, Panel, Rect, Sizing, Ui};
+use palantir::{Configure, DockOp, Panel, Rect, Sizing, Ui};
 use scenarium::NodeId;
 
-use crate::core::document::dock::dock_op::DockOp;
 use crate::core::document::harness::DocFixture;
-use crate::core::document::{Document, PortRef};
+use crate::core::document::{Document, PortRef, TabRef};
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::gui::app::commands::AppCommand;
 use crate::gui::graph_ctx::harness::GraphCtxFixture;
@@ -44,7 +43,7 @@ pub(crate) struct CanvasHarness {
     /// The view ops the last [`Self::frame`] raised. Rare — the canvas asks
     /// for one thing the dock owns, a viewer tab for a clicked preview card —
     /// but real, so they are collected rather than treated as impossible.
-    pub(crate) view_ops: Vec<DockOp>,
+    pub(crate) view_ops: Vec<DockOp<TabRef>>,
 }
 
 impl CanvasHarness {

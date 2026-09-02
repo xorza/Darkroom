@@ -27,7 +27,7 @@ use crate::gui::theme::chrome_colors::ChromeColors;
 use crate::gui::theme::const_value_editor_theme::ConstValueEditorTheme;
 use crate::gui::theme::inline_rename_theme::InlineRenameTheme;
 use crate::gui::theme::palantir_bridge::{
-    menu_button_for, palantir_palette_for, palantir_theme_for,
+    BridgeRoles, menu_button_for, palantir_palette_for, palantir_theme_for,
 };
 use crate::gui::theme::palette::Palette;
 use crate::gui::theme::port_theme::PortTheme;
@@ -186,7 +186,19 @@ impl Theme {
         // derives from the palantir theme's ambient text style — the
         // same style an unstyled rename would have inherited anyway,
         // so bolding it is the only difference between the two slots.
-        let palantir_theme = palantir_theme_for(&pal, colors.chrome_fill, &TypeScale::DEFAULT);
+        let card = CardTheme::from_palette(p);
+        let status = StatusColors::from_palette(p);
+        let palantir_theme = palantir_theme_for(
+            &pal,
+            BridgeRoles {
+                chrome_fill: colors.chrome_fill,
+                tab_inactive: colors.tab_inactive,
+                header_fill: card.header_fill,
+                warning: status.warning,
+                corner_radius: card.corner_radius,
+                text: &TypeScale::DEFAULT,
+            },
+        );
         let inline_rename = InlineRenameTheme::from_palette(&pal);
         let inline_rename_title = inline_rename.clone().with_text(TextStyle {
             weight: FontWeight::Bold,
@@ -200,9 +212,9 @@ impl Theme {
             new_node_popup_max_height: 400.0,
             text: TypeScale::DEFAULT,
             canvas: CanvasTheme::from_palette(p),
-            card: CardTheme::from_palette(p),
+            card,
             ports: PortTheme::from_palette(p),
-            status: StatusColors::from_palette(p),
+            status,
             colors,
             type_colors: p.type_colors.clone(),
             const_value_editor: ConstValueEditorTheme::from_palette(&pal),

@@ -237,7 +237,7 @@ impl GraphUI {
     /// cases both mean *still here* and must not read as an appearance: the
     /// previous frame (the ordinary steady state) and *this* frame — a split
     /// view showing the graph in two panes runs this once per pane, since
-    /// `DockLayout::active_tabs` yields one tab per group and never dedupes.
+    /// `DockState::active_tabs` yields one tab per group and never dedupes.
     /// Only a gap wider than that is an absence.
     fn appearing(&mut self, ui: &Ui) -> bool {
         let frame = ui.frame_id();
@@ -550,8 +550,10 @@ pub(crate) mod harness;
 
 #[cfg(test)]
 mod tests {
+    use palantir::DockOp;
+    use scenarium::{Binding, InputPort};
+
     use super::*;
-    use crate::core::document::dock::dock_op::DockOp;
     use crate::core::document::harness::DocFixture;
     use crate::core::document::{PortRef, TabRef};
     use crate::core::preview::preview_func;
@@ -559,7 +561,6 @@ mod tests {
     use crate::gui::pane::graph::node::port_row::port_circle_wid;
     use crate::gui::pane::graph::node::preview_row::preview_image_wid;
     use crate::gui::state::preview_store::internals::opaque_image_value;
-    use scenarium::{Binding, InputPort};
 
     /// Clicking a preview card's image asks the dock for that node's viewer
     /// tab — the canvas's one view-tier request, raised from the prepass off
@@ -642,7 +643,7 @@ mod tests {
     /// not a visibility flag — is what tells the canvas it was away.
     ///
     /// Three cases must read as *still here*, and only a gap as an
-    /// appearance. The split-view one is the trap: `DockLayout::active_tabs`
+    /// appearance. The split-view one is the trap: `DockState::active_tabs`
     /// yields one tab per group with no dedup, so two panes on the graph run
     /// this twice in a single frame, and a second call reading as an
     /// appearance would reset a drag mid-gesture.

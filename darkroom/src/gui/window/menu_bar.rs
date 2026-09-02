@@ -1,8 +1,9 @@
 use glam::Vec2;
-use palantir::{Button, CloseHandle, Configure, ContextMenu, MenuItem, Panel, Sizing, Spacing, Ui};
+use palantir::{
+    Button, CloseHandle, Configure, ContextMenu, DockOp, MenuItem, Panel, Sizing, Spacing, Ui,
+};
 
 use crate::core::document::TabRef;
-use crate::core::document::dock::dock_op::DockOp;
 use crate::gui::app::commands::AppCommand;
 use crate::gui::app::commands::file::FileCommand;
 use crate::gui::requests::Requests;
