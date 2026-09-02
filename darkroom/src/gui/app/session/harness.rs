@@ -62,11 +62,18 @@ impl SessionHarness {
     /// Real text shaping — the dock strip and node headers size to their
     /// labels, so mono metrics would put every chip in the wrong place.
     pub(crate) fn new(fixture: DocFixture) -> Self {
+        let theme = Theme::default();
+        let mut ui = UiHarness::with_text(SURFACE);
+        // What `App::new` does before frame 1, and what every palantir
+        // widget darkroom records reads its geometry from — the dock's
+        // tab strips among them. Without it a geometry assertion here
+        // measures palantir's stock theme rather than darkroom's.
+        ui.ui().set_theme(theme.palantir_theme.clone());
         Self {
-            ui: UiHarness::with_text(SURFACE),
+            ui,
             session: Session::new(OpenDocument::over(fixture.doc)),
             library: fixture.library,
-            theme: Theme::default(),
+            theme,
             run_state: RunState::default(),
             preferences: Preferences::default(),
             process_memory: 0,
