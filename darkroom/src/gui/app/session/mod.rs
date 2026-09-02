@@ -229,12 +229,11 @@ impl Session {
 #[cfg(test)]
 mod tests {
     use glam::Vec2;
-    use palantir::{Key, Modifiers};
+    use palantir::{DockOp, Key, Modifiers};
     use scenarium::{Func, FuncId, Node, NodeId, NodeKind, testing};
 
     use crate::alloc_audit;
     use crate::core::document::TabRef;
-    use crate::core::document::dock::dock_op::DockOp;
     use crate::core::document::harness::DocFixture;
     use crate::core::edit::graph_intent::GraphIntent;
     use crate::core::preview::preview_func;

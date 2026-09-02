@@ -12,13 +12,12 @@ use std::fmt::Display;
 
 use imaginarium::ColorFormat;
 use palantir::{
-    Align, Configure, CursorIcon, ImageFit, Justify, Panel, Sense, Shape, Sizing, Spacing, Text,
-    TextWrap, Ui, VAlign, WidgetId, fmt,
+    Align, Configure, CursorIcon, DockOp, ImageFit, Justify, Panel, Sense, Shape, Sizing, Spacing,
+    Text, TextWrap, Ui, VAlign, WidgetId, fmt,
 };
 use scenarium::NodeId;
 
 use crate::core::document::TabRef;
-use crate::core::document::dock::dock_op::DockOp;
 use crate::gui::graph_ctx::node_ctx::NodeCtx;
 use crate::gui::requests::Requests;
 use crate::gui::state::preview_store::{PreviewImage, StoredContent};

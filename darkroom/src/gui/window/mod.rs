@@ -1,24 +1,25 @@
 pub(crate) mod ctx;
+pub(crate) mod dock_panes;
 pub(crate) mod menu_bar;
 pub(crate) mod status_bar;
 
 use std::collections::HashMap;
 
-use palantir::{Align, Background, Configure, KeyFilter, Panel, Sizing, Ui, VAlign, WidgetId};
+use palantir::{
+    Align, Background, Configure, DockOp, DockView, KeyFilter, Panel, Sizing, TabOverflow, Ui,
+    VAlign, WidgetId,
+};
 use scenarium::{NodeId, OutputTypes};
 
 use crate::core::document::{Document, TabRef};
 use crate::core::io::preferences::Preferences;
-use crate::gui::app::commands::AppCommand;
-use crate::gui::app::commands::prefs::PrefsCommand;
-use crate::gui::dock::{DockContext, DockUi};
 use crate::gui::graph_ctx::GraphCtx;
 use crate::gui::pane::graph::GraphUI;
-use crate::gui::pane::preferences;
-use crate::gui::pane::viewer::{self, ImageViewer};
+use crate::gui::pane::viewer::ImageViewer;
 use crate::gui::relayout::Relayout;
 use crate::gui::requests::Requests;
 use crate::gui::window::ctx::WindowCtx;
+use crate::gui::window::dock_panes::DockPanes;
 
 /// The application root's [`Configure::input_scope`] anchor. A fixed id
 /// rather than an auto one because the scope is the thing darkroom's
@@ -28,12 +29,15 @@ fn app_root_wid() -> WidgetId {
     WidgetId::from_hash("darkroom.app_root")
 }
 
+/// Smallest a dock pane can be squeezed on its split axis, in logical
+/// px.
+const MIN_PANE: f32 = 220.0;
+
 /// Top of darkroom's UI tree: the chrome (menu bar, status bar) around
 /// the dock, plus the per-view state the dock's panes render into. The
 /// pane *machinery* — strips, splits, drag-docking — is
-/// [`DockUi`]'s; this file only says what
-/// each tab kind looks like (the `content` closure in [`Self::frame`]).
-/// Adding a new pane *kind* is a new arm there.
+/// [`DockView`]'s, and what each tab kind looks like is
+/// [`DockPanes`]'s. Adding a new pane *kind* is a new arm there.
 ///
 /// **Where the graph context is composed.** Each entry point below takes a
 /// [`WindowCtx`] — the frame's world *and* the document it is showing, settled
@@ -56,7 +60,10 @@ pub(crate) struct MainWindow {
     /// ([`TabRef::ImageViewer`]), keyed by the port it shows. Textures remain
     /// centralized in the preview store.
     pub(crate) image_viewers: HashMap<NodeId, ImageViewer>,
-    dock: DockUi,
+    /// The dock's op sink for one frame. A field so the two phases that
+    /// fill it — the navigation scan and the record — reuse one buffer's
+    /// capacity rather than building a `Vec` per frame.
+    dock_ops: Vec<DockOp<TabRef>>,
     /// The allocation behind the [`GraphCtx`]s below, and nothing more: each
     /// composition refills it, so it carries no state across frames and is a
     /// field only so a refresh reuses its capacity rather than building a map
@@ -72,8 +79,18 @@ impl MainWindow {
     ///
     /// The dock is the whole of it. The panes' own input reads are the
     /// prepass's, over the arrangement this phase's drain settles.
+    ///
+    /// The scan emits into the window's own buffer and the ops are then
+    /// handed to the frame's queue, which is where every other darkroom
+    /// surface puts one: dock ops travel beside graph edits, stay out of
+    /// undo, and are validated before a save.
     pub(crate) fn scan_navigation(&mut self, ui: &mut Ui, cx: WindowCtx<'_>, out: &mut Requests) {
-        self.dock.scan(ui, cx.document(), out);
+        let ops = &mut self.dock_ops;
+        ops.clear();
+        cx.document().layout.scan(ui, ops);
+        for op in ops.drain(..) {
+            out.push_view(op);
+        }
     }
 
     /// Edit-phase prepass: input-derived graph mutations for the
@@ -125,20 +142,15 @@ impl MainWindow {
         // read one and not the other: the chrome bands take the app context,
         // the panes take the whole thing.
         let app = cx.app();
-        let doc = cx.document();
         // The menu bar rides its own chrome band; the dock fills the
         // space between it and the status bar.
         let chrome = app.theme().colors.chrome_fill;
         let MainWindow {
             graph_ui,
             image_viewers,
-            dock,
+            dock_ops,
             output_types,
         } = self;
-        let dock_cx = DockContext {
-            open: cx.open(),
-            theme: app.theme(),
-        };
         Panel::vstack()
             .id(app_root_wid())
             .size((Sizing::FILL, Sizing::FILL))
@@ -159,33 +171,24 @@ impl MainWindow {
                     .show(ui, |ui| {
                         menu_bar::show(ui, app.theme(), out);
                     });
-                dock.render(ui, dock_cx, out, |ui, tab, pane, out| match tab {
-                    TabRef::Graph => {
-                        // The context carries everything the canvas reads —
-                        // theme and run included, through the `cx` it is
-                        // composed from.
-                        graph_ui.draw(ui, GraphCtx::new(cx, output_types), out);
-                    }
-                    TabRef::Preferences => {
-                        preferences::show(ui, app.theme(), prefs, out);
-                    }
-                    TabRef::ImageViewer(node_id) => {
-                        // Resolved here rather than for every viewer tab up
-                        // front: only the pane being drawn needs a title, and
-                        // `node_label` is a graph lookup that borrows, so the
-                        // pane pays a hash probe and no allocation.
-                        let title = viewer::node_label(doc, node_id);
-                        let previews = &app.run_state().previews;
-                        let viewer = image_viewers
-                            .entry(node_id)
-                            .or_insert_with(|| ImageViewer::new(node_id));
-                        // Viewer-toolbar edits ride the same in-place
-                        // prefs path as the Preferences tab.
-                        if viewer.show(ui, app.theme(), &mut prefs.viewer, title, previews, pane) {
-                            out.push_app(AppCommand::Prefs(PrefsCommand::Changed));
-                        }
-                    }
-                });
+                let mut panes = DockPanes {
+                    cx,
+                    graph_ui,
+                    image_viewers,
+                    output_types,
+                    prefs,
+                    out,
+                };
+                dock_ops.clear();
+                DockView::new(&cx.document().layout, dock_ops)
+                    .min_pane(MIN_PANE)
+                    .overflow(TabOverflow::Menu)
+                    .show(ui, &mut panes);
+                // Ratio drags and split-menu picks, onto the frame's own
+                // queue — the same route the navigation scan's ops take.
+                for op in dock_ops.drain(..) {
+                    out.push_view(op);
+                }
                 // Bottom chrome: the cache-memory readout, below the panes.
                 status_bar::show(ui, app);
             });

@@ -63,8 +63,8 @@ pub(super) fn rename(node_id: NodeId) -> WidgetId {
 /// latch ignores `Sense`, so even a `Sense::CLICK` port circle reports one.
 /// Each of those owns its own gesture (a wire, a chip click, a text drag), so a
 /// subtree-wide "did anything in here start a drag" would wrongly move the node
-/// along with them. The dock's tab chips carry the same shape for the same
-/// reason (`gui::dock::strip::drag_handles`).
+/// along with them. Palantir's tab chips carry the same shape for the same
+/// reason.
 pub(super) fn drag_handles(node_id: NodeId) -> impl Iterator<Item = WidgetId> {
     [body(node_id), rename(node_id)].into_iter()
 }

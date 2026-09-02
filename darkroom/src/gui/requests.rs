@@ -3,7 +3,9 @@
 
 use std::collections::VecDeque;
 
-use crate::core::document::dock::dock_op::DockOp;
+use palantir::DockOp;
+
+use crate::core::document::TabRef;
 use crate::core::edit::graph_intent::GraphIntent;
 use crate::gui::app::commands::AppCommand;
 
@@ -27,7 +29,7 @@ use crate::gui::app::commands::AppCommand;
 #[derive(Debug)]
 pub(crate) enum DocumentRequest {
     Graph(GraphIntent),
-    View(DockOp),
+    View(DockOp<TabRef>),
 }
 
 /// A frame's requests, in the order they were raised.
@@ -62,7 +64,7 @@ impl Requests {
     }
 
     /// Queue a mutation of the pane arrangement.
-    pub(crate) fn push_view(&mut self, op: DockOp) {
+    pub(crate) fn push_view(&mut self, op: DockOp<TabRef>) {
         self.document.push(DocumentRequest::View(op));
     }
 
@@ -112,7 +114,6 @@ mod tests {
     use scenarium::NodeId;
 
     use super::*;
-    use crate::core::document::TabRef;
     use crate::gui::app::commands::run::RunCommand;
 
     fn remove_node() -> GraphIntent {
@@ -121,7 +122,7 @@ mod tests {
         }
     }
 
-    fn close_prefs() -> DockOp {
+    fn close_prefs() -> DockOp<TabRef> {
         DockOp::CloseTab {
             tab: TabRef::Preferences,
         }
