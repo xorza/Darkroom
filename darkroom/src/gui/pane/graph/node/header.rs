@@ -213,7 +213,7 @@ pub(super) fn status_row(ui: &mut Ui, ncx: NodeCtx<'_>, out: &mut Requests) {
                     .style(&TextStyle {
                         color,
                         font_size_px: BADGE_FONT,
-                        family: FontFamily::Mono,
+                        family: FontFamily::MONO,
                         ..ui.theme().text
                     })
                     .min_size((RUN_TIME_MIN_WIDTH, 0.0))

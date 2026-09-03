@@ -203,7 +203,7 @@ impl Badge {
                     .style(&TextStyle {
                         color,
                         font_size_px: BADGE_FONT,
-                        weight: FontWeight::Bold,
+                        weight: FontWeight::BOLD,
                         ..ui.theme().text
                     })
                     .show(ui);

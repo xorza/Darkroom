@@ -316,7 +316,7 @@ fn line<'a>(ui: &mut Ui, text: impl Into<TextInput<'a>>, style: TextStyle) {
 fn section(ui: &mut Ui, theme: &Theme, text: &'static str) {
     Text::new(text)
         .style(&TextStyle {
-            weight: FontWeight::Bold,
+            weight: FontWeight::BOLD,
             ..muted_style(theme, ui)
         })
         .margin(Spacing::new(0.0, 8.0, 0.0, 0.0))

@@ -40,7 +40,7 @@ pub(crate) fn muted_text(ui: &Ui, theme: &Theme, px: f32) -> TextStyle {
 /// dimensions) that should hold a column rather than proportionally kern.
 pub(crate) fn mono_text(ui: &Ui, px: f32) -> TextStyle {
     TextStyle {
-        family: FontFamily::Mono,
+        family: FontFamily::MONO,
         ..sized_text(ui, px)
     }
 }

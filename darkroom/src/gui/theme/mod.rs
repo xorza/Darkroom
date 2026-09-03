@@ -108,7 +108,7 @@ pub(crate) struct Theme {
     pub(crate) inline_rename: InlineRenameTheme,
 
     /// The node-title variant of `inline_rename`, with the ambient text
-    /// style pinned to [`FontWeight::Bold`] on every state. Precomputed
+    /// style pinned to [`FontWeight::BOLD`] on every state. Precomputed
     /// at construction, beside its base so the two can't drift — a node
     /// header would otherwise rebuild the whole nested text-edit bundle
     /// per node per frame just to carry one weight.
@@ -201,7 +201,7 @@ impl Theme {
         );
         let inline_rename = InlineRenameTheme::from_palette(&pal);
         let inline_rename_title = inline_rename.clone().with_text(TextStyle {
-            weight: FontWeight::Bold,
+            weight: FontWeight::BOLD,
             ..palantir_theme.text
         });
         Self {
