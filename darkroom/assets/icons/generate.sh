@@ -11,7 +11,9 @@
 #   darkroom.iconset/    macOS iconutil source (fallback: `iconutil -c icns`)
 set -euo pipefail
 cd "$(dirname "$0")"
-SRC="../logo.svg"
+# The wordmark turns to mud below 48px, so the app icon is the unlabeled
+# tile. `logo.svg` keeps the wordmark for the README lockup.
+SRC="../logo-tile.svg"
 SIZES="16 24 32 48 64 128 256 512 1024"
 
 echo "rendering PNGs from $SRC"
