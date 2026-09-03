@@ -114,7 +114,7 @@ fn section(ui: &mut Ui, theme: &Theme, title: &'static str, body: impl FnOnce(&m
         .gap(SECTION_GAP)
         .show(ui, |ui| {
             let style = TextStyle {
-                weight: FontWeight::Bold,
+                weight: FontWeight::BOLD,
                 ..muted_text(ui, theme, theme.text.body)
             };
             Text::new(title).style(&style).show(ui);
