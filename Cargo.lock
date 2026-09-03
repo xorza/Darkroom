@@ -2645,6 +2645,7 @@ dependencies = [
  "soa-rs",
  "static_assertions",
  "strum",
+ "swash",
  "tinyvec",
  "tracing",
  "tracing-subscriber",
