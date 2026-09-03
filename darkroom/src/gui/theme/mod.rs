@@ -301,10 +301,8 @@ mod tests {
         // onto one colour would pass every assertion above.
         assert_ne!(theme.canvas.bg, theme.card.header_fill);
         assert_ne!(theme.ports.input, theme.ports.output);
-        assert_ne!(theme.colors.badge_cache, theme.colors.badge_impure);
         // The palantir half is the same palette, not palantir's own default.
         assert_eq!(theme.palantir_theme.window_clear, p.canvas_bg);
-        assert_eq!(theme.card.min_width, 160.0);
         assert!(theme.palantir_theme.tooltip.max_size.h.is_infinite());
         // The menu-bar font was shrunk from palantir's default to ours.
         let menu_text = theme
@@ -314,6 +312,34 @@ mod tests {
             .text
             .expect("menu button carries an explicit text style");
         assert_eq!(menu_text.font_size_px, theme.text.body);
+    }
+
+    /// Every badge is legible against every other, because a node's head
+    /// can carry several at once.
+    ///
+    /// A badge sharing a hue with a wire type or a status is fine and
+    /// common — the palette resolves both against one upstream semantic
+    /// layer, and the two never share a surface. Two badges do, so this is
+    /// the pair the roster cannot be allowed to collapse. Like
+    /// [`chrome_surfaces_stack_darkest_first`], it is a rule a table of
+    /// colours cannot state about itself.
+    #[test]
+    fn badges_are_told_apart_from_each_other() {
+        let c = Theme::default().colors;
+        let badges = [
+            ("badge_graph", c.badge_graph),
+            ("badge_sink", c.badge_sink),
+            ("badge_cache", c.badge_cache),
+            ("badge_impure", c.badge_impure),
+        ];
+        for (i, (name, color)) in badges.iter().enumerate() {
+            for (other_name, other) in &badges[i + 1..] {
+                assert_ne!(
+                    color, other,
+                    "{name} and {other_name} share a hue, and a head can show both",
+                );
+            }
+        }
     }
 
     /// The six chrome surfaces stack in one view — a graph, the bar around

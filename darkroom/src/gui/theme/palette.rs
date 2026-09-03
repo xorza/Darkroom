@@ -20,6 +20,15 @@ const AYU_GRAPHITE: &str = include_str!("../../../assets/ayu-graphite.ron");
 /// blending toward white (see
 /// [`port_color`](crate::gui::pane::graph::node::port_color)), because the
 /// palette's brightest tint has nothing above it to lift into.
+///
+/// **Roles may share a hue; roles that share a *context* may not.** The
+/// file resolves every role against one upstream semantic layer, so a
+/// badge, a status and a wire type routinely land on the same value —
+/// harmless, because a glyph on a node's head never meets a wire. Two
+/// badges do meet, on that same head, which is why
+/// `theme::tests::badges_are_told_apart_from_each_other` pins them
+/// pairwise. State the rule, not the hex: which colour a role holds is
+/// the asset's to change.
 #[derive(Debug, serde::Deserialize)]
 pub(crate) struct Palette {
     /// Ground fill behind the whole graph.
@@ -72,8 +81,7 @@ pub(crate) struct Palette {
     pub(crate) badge_sink: Color,
     /// Persist-to-disk cache chip.
     pub(crate) badge_cache: Color,
-    /// Impure marker. Shares the palette's one bright magenta with
-    /// [`TypeColors::image`] — a glyph on a node's head never meets a wire.
+    /// Impure marker.
     pub(crate) badge_impure: Color,
     /// It worked / it ran.
     pub(crate) status_success: Color,
