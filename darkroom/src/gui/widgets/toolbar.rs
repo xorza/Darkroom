@@ -4,7 +4,7 @@
 //! own glyphs and toggle color policy.
 
 use palantir::{
-    Background, Color, Configure, Corners, Panel, Sense, Separator, Sizing, Spacing, Ui, WidgetId,
+    Background, RgbaF32, Configure, Corners, Panel, Sense, Separator, Sizing, Spacing, Ui, WidgetId,
 };
 
 use crate::gui::theme::Theme;
@@ -77,8 +77,8 @@ pub(crate) struct Chip {
     wid: WidgetId,
     tip: &'static str,
     toggled: bool,
-    idle_glyph: Option<Color>,
-    toggled_fill: Option<Color>,
+    idle_glyph: Option<RgbaF32>,
+    toggled_fill: Option<RgbaF32>,
 }
 
 impl Chip {
@@ -100,13 +100,13 @@ impl Chip {
     }
 
     /// Glyph ink while idle (untoggled). Default: `text_muted`.
-    pub(crate) fn idle_glyph(mut self, color: Color) -> Self {
+    pub(crate) fn idle_glyph(mut self, color: RgbaF32) -> Self {
         self.idle_glyph = Some(color);
         self
     }
 
     /// Chip fill while toggled. Default: the selection accent.
-    pub(crate) fn toggled_fill(mut self, color: Color) -> Self {
+    pub(crate) fn toggled_fill(mut self, color: RgbaF32) -> Self {
         self.toggled_fill = Some(color);
         self
     }
@@ -118,7 +118,7 @@ impl Chip {
         self,
         ui: &mut Ui,
         theme: &Theme,
-        draw_glyph: impl FnOnce(&mut Ui, f32, Color),
+        draw_glyph: impl FnOnce(&mut Ui, f32, RgbaF32),
     ) -> bool {
         let hovered = ui.response_for(self.wid).hovered;
         // Glyph and fill vary on different axes: the glyph only inverts

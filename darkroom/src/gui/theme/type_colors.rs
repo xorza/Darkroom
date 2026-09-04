@@ -1,6 +1,6 @@
 //! [`TypeColors`]: the per-data-type ink roster.
 
-use palantir::Color;
+use palantir::RgbaF32;
 
 /// Data-type → wire/port-circle hue roster (consumed by
 /// `gui::pane::graph::node::port_color`). Serialized as the theme's
@@ -15,11 +15,11 @@ use palantir::Color;
 /// tuple, so the palette file writes it in parentheses and not brackets.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct TypeColors {
-    pub(crate) boolean: Color,
-    pub(crate) int: Color,
-    pub(crate) float: Color,
-    pub(crate) string: Color,
-    pub(crate) path: Color,
-    pub(crate) image: Color,
-    pub(crate) ramp: [Color; 4],
+    pub(crate) boolean: RgbaF32,
+    pub(crate) int: RgbaF32,
+    pub(crate) float: RgbaF32,
+    pub(crate) string: RgbaF32,
+    pub(crate) path: RgbaF32,
+    pub(crate) image: RgbaF32,
+    pub(crate) ramp: [RgbaF32; 4],
 }

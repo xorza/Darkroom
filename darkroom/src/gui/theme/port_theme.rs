@@ -1,6 +1,6 @@
 //! [`PortTheme`]: how a node's input and output ports are drawn.
 
-use palantir::Color;
+use palantir::RgbaF32;
 
 use crate::gui::theme::palette::Palette;
 
@@ -16,17 +16,17 @@ use crate::gui::theme::palette::Palette;
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub(crate) struct PortTheme {
     /// Positional colour for untyped input ports.
-    pub(crate) input: Color,
+    pub(crate) input: RgbaF32,
     /// Positional colour for untyped output ports.
-    pub(crate) output: Color,
+    pub(crate) output: RgbaF32,
     /// Event emitter glyphs, subscription pins, and event wires — distinct
     /// from the type-coloured data ports.
-    pub(crate) event: Color,
+    pub(crate) event: RgbaF32,
     /// Port + event label ink — de-emphasized against the full-strength
     /// value/editor text so each port row has one strong element. Its own
     /// slot rather than `text_muted` at the call site: which of the row's
     /// three inks recedes is the interface's decision to change.
-    pub(crate) label: Color,
+    pub(crate) label: RgbaF32,
     /// Side of the port circle quad; the circle's radius is derived as half
     /// this (see [`Self::radius`]).
     pub(crate) size: f32,

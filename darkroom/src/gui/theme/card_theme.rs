@@ -1,7 +1,7 @@
 //! [`CardTheme`]: the elevated rounded surface node bodies, the inspector
 //! panel and the dock tabs all read from.
 
-use palantir::{Color, Shadow};
+use palantir::{RgbaF32, Shadow};
 
 use crate::gui::theme::palette::Palette;
 
@@ -12,18 +12,18 @@ use crate::gui::theme::palette::Palette;
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub(crate) struct CardTheme {
     /// Body fill.
-    pub(crate) fill: Color,
+    pub(crate) fill: RgbaF32,
     /// Resting outline. Transparent: the ambient shadow carries the edge,
     /// and the stroke slot is reserved for the selection / breaker /
     /// missing colours.
-    pub(crate) border: Color,
+    pub(crate) border: RgbaF32,
     /// Header band fill, a step brighter than `fill` so the band reads
     /// against the body. Doubles as the chrome lift behind a hovered strip
     /// glyph.
-    pub(crate) header_fill: Color,
+    pub(crate) header_fill: RgbaF32,
     /// Ambient elevation shadow cast when no status glow claims the slot —
     /// one colour so every elevated surface casts the same kind of shadow.
-    pub(crate) ambient_shadow: Color,
+    pub(crate) ambient_shadow: RgbaF32,
     /// Resting outline width. The drawn stroke is always
     /// [`Self::border_width_total`] — twice this — so selecting never resizes
     /// a card.
@@ -43,7 +43,7 @@ pub(crate) struct CardTheme {
 /// constant, so selecting never resizes a card.
 #[derive(Clone, Debug)]
 pub(crate) struct CardBorder {
-    pub(crate) color: Color,
+    pub(crate) color: RgbaF32,
 }
 
 impl CardTheme {

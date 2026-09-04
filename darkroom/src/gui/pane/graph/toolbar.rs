@@ -11,7 +11,7 @@
 
 use glam::Vec2;
 use palantir::{
-    Align, Color, Configure, HAlign, Panel, Rect, Shape, Sizing, Spacing, Ui, VAlign, WidgetId,
+    Align, RgbaF32, Configure, HAlign, Panel, Rect, Shape, Sizing, Spacing, Ui, VAlign, WidgetId,
 };
 
 use crate::gui::app::commands::AppCommand;
@@ -148,12 +148,12 @@ pub(super) fn show(ui: &mut Ui, cx: CanvasCtx<'_>, out: &mut Requests) {
 }
 
 /// A right-pointing play triangle (run once), optically centered in the box.
-fn draw_play(ui: &mut Ui, s: f32, color: Color) {
+fn draw_play(ui: &mut Ui, s: f32, color: RgbaF32) {
     play_triangle(ui, s, PLAY_FILL, color);
 }
 
 /// `|>` — a vertical bar then a play triangle (start the event loop).
-fn draw_play_bar(ui: &mut Ui, s: f32, color: Color) {
+fn draw_play_bar(ui: &mut Ui, s: f32, color: RgbaF32) {
     // The bar.
     filled_rect(
         ui,
@@ -178,7 +178,7 @@ fn draw_play_bar(ui: &mut Ui, s: f32, color: Color) {
 const PLAY_FILL: f32 = 0.4;
 
 /// Reset view: a target ring with a center dot (recenter to 1:1).
-fn draw_reset(ui: &mut Ui, s: f32, color: Color) {
+fn draw_reset(ui: &mut Ui, s: f32, color: RgbaF32) {
     let d = s * 0.52;
     let o = (s - d) * 0.5;
     stroked_rect(ui, Rect::new(o, o, d, d), d * 0.5, color, s * 0.06);
@@ -186,7 +186,7 @@ fn draw_reset(ui: &mut Ui, s: f32, color: Color) {
 }
 
 /// Show all: a frame enclosing a 2×2 field of dots (fit every node).
-fn draw_show_all(ui: &mut Ui, s: f32, color: Color) {
+fn draw_show_all(ui: &mut Ui, s: f32, color: RgbaF32) {
     frame(ui, s, color);
     let r = s * 0.055;
     let near = s * 0.5 - s * 0.11;
@@ -199,7 +199,7 @@ fn draw_show_all(ui: &mut Ui, s: f32, color: Color) {
 }
 
 /// Show selected: a frame enclosing one filled square (fit the selection).
-fn draw_show_selected(ui: &mut Ui, s: f32, color: Color) {
+fn draw_show_selected(ui: &mut Ui, s: f32, color: RgbaF32) {
     frame(ui, s, color);
     let inner = s * 0.24;
     let o = (s - inner) * 0.5;

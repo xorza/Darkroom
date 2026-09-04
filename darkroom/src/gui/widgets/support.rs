@@ -8,7 +8,7 @@ use std::fmt::Display;
 use glam::Vec2;
 
 use palantir::{
-    Background, Color, Configure, Corners, FontFamily, Panel, Rect, ResponseSnapshot, Shape,
+    Background, RgbaF32, Configure, Corners, FontFamily, Panel, Rect, ResponseSnapshot, Shape,
     Sizing, Stroke, Text, TextInput, TextStyle, Tooltip, Ui, fmt,
 };
 
@@ -23,7 +23,7 @@ pub(crate) fn sized_text(ui: &Ui, px: f32) -> TextStyle {
 }
 
 /// [`sized_text`] in an explicit ink.
-pub(crate) fn colored_text(ui: &Ui, color: Color, px: f32) -> TextStyle {
+pub(crate) fn colored_text(ui: &Ui, color: RgbaF32, px: f32) -> TextStyle {
     TextStyle {
         color,
         ..sized_text(ui, px)
@@ -104,12 +104,12 @@ pub(crate) const CARD_FOOTER_PAD_X: f32 = 10.0;
 pub(crate) const CARD_FOOTER_PAD_Y: f32 = 6.0;
 
 /// A filled rounded rect — the fill sibling of [`stroked_rect`].
-pub(crate) fn filled_rect(ui: &mut Ui, rect: Rect, radius: f32, color: Color) {
+pub(crate) fn filled_rect(ui: &mut Ui, rect: Rect, radius: f32, color: RgbaF32) {
     ui.add_shape(Shape::rect(rect).corners(radius).fill(color));
 }
 
 /// A rounded-rect outline (transparent fill, `color` stroke of `width`).
-pub(crate) fn stroked_rect(ui: &mut Ui, rect: Rect, radius: f32, color: Color, width: f32) {
+pub(crate) fn stroked_rect(ui: &mut Ui, rect: Rect, radius: f32, color: RgbaF32, width: f32) {
     ui.add_shape(
         Shape::rect(rect)
             .corners(radius)
@@ -118,7 +118,7 @@ pub(crate) fn stroked_rect(ui: &mut Ui, rect: Rect, radius: f32, color: Color, w
 }
 
 /// A small filled circle of radius `r` centered at `(cx, cy)`.
-pub(crate) fn dot(ui: &mut Ui, cx: f32, cy: f32, r: f32, color: Color) {
+pub(crate) fn dot(ui: &mut Ui, cx: f32, cy: f32, r: f32, color: RgbaF32) {
     filled_rect(ui, Rect::new(cx - r, cy - r, 2.0 * r, 2.0 * r), r, color);
 }
 
@@ -134,7 +134,7 @@ pub(crate) fn dot(ui: &mut Ui, cx: f32, cy: f32, r: f32, color: Color) {
 /// the graph toolbar's run button — cannot drift on that geometry. `fill`
 /// stays per-caller: a 30px toolbar button carries proportionally less glyph
 /// than an 18px header badge.
-pub(crate) fn play_triangle(ui: &mut Ui, s: f32, fill: f32, color: Color) {
+pub(crate) fn play_triangle(ui: &mut Ui, s: f32, fill: f32, color: RgbaF32) {
     let half_h = s * fill * 0.5;
     let half_w = half_h * (5.0 / 6.0);
     let r = s * 0.05;
@@ -153,7 +153,7 @@ pub(crate) fn play_triangle(ui: &mut Ui, s: f32, fill: f32, color: Color) {
 
 /// The shared rounded-rect outline glyphs frame their contents in,
 /// centered in an `s`-sized button box.
-pub(crate) fn frame(ui: &mut Ui, s: f32, color: Color) {
+pub(crate) fn frame(ui: &mut Ui, s: f32, color: RgbaF32) {
     let w = s * 0.62;
     let o = (s - w) * 0.5;
     stroked_rect(ui, Rect::new(o, o, w, w), s * 0.08, color, s * 0.06);
