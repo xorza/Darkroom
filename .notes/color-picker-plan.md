@@ -171,6 +171,14 @@ corner instead of in the darks, because image textures are
 Factor 4 is the default. Factor 2 costs four times the CPU for 2.4/255, which
 is below what anyone can see on a picker field.
 
+**The texture is the picture, not the value.** The pointer position maps to
+`(s, v)` analytically and the colour comes from `Okhsv::to_color` at full
+`f32`. Every figure above is paint error under the handle, never error in what
+the picker writes. Its one consequence: the colour a user aims at can differ
+from the colour they get by up to 3.9/255 at the extreme gamut corner. The
+chip, the hex field and the drag values all show the true value, so the
+disagreement is visible where it happens.
+
 ### 4.2 What each surface costs
 
 | Surface | Rebuild trigger | Texels at factor 4 |
