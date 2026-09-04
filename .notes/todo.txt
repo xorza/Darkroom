@@ -1,15 +1,9 @@
-scrolview on newnode popup
-
-stacking frames (outer, inner, reference)
-
-auto chosen reference frame for stacking and manually specified
-
-visual node groups
-
-mesh once registrations
-
-image buffer and lens image interleaved/planar formats
-
-quickbench - runonce cli arg
-
-palantir prelude
+- scrolview on newnode popup
+- stacking frames (outer, inner, reference)
+- auto chosen reference frame for stacking and manually specified
+- visual node groups
+- mesh once registrations
+- image buffer and lens image interleaved/planar formats
+- quickbench - runonce cli arg
+- palantir prelude
+- simplify cpu image updating without allocation
